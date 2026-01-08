@@ -37,6 +37,9 @@ export function GET(req: Request) {
     return NextResponse.json({ message: "Google OAuth not configured" }, { status: 500 });
   }
 
+  const isSecureRequest =
+    req.headers.get("x-forwarded-proto") === "https" || url.protocol === "https:";
+
   const state = base64Url(crypto.randomBytes(18));
   const verifier = base64Url(crypto.randomBytes(32));
   const challenge = sha256Base64Url(verifier);
@@ -55,7 +58,7 @@ export function GET(req: Request) {
   const cookieOptions = {
     httpOnly: true,
     sameSite: "lax" as const,
-    secure: process.env.NODE_ENV === "production",
+    secure: isSecureRequest,
     path: "/",
     maxAge: 60 * 10
   };

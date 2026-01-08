@@ -24,6 +24,10 @@ function isAuthResponseBody(value: unknown): value is AuthResponseBody {
 }
 
 export async function POST(req: Request) {
+  const url = new URL(req.url);
+  const isSecureRequest =
+    req.headers.get("x-forwarded-proto") === "https" || url.protocol === "https:";
+
   const json: unknown = await req.json().catch(() => null);
   const parsed = schema.safeParse(json);
   if (!parsed.success) {
@@ -57,10 +61,9 @@ export async function POST(req: Request) {
   res.cookies.set(SESSION_COOKIE_NAME, upstreamJson.token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: isSecureRequest,
     path: "/",
     maxAge: 60 * 60 * 24 * 7
   });
   return res;
 }
-

@@ -60,11 +60,14 @@ export async function GET(req: Request) {
   const json: unknown = await upstream.json().catch(() => null);
   if (!upstream.ok || !isUpstreamAuthResponse(json)) return clear;
 
+  const isSecureRequest =
+    req.headers.get("x-forwarded-proto") === "https" || url.protocol === "https:";
+
   const res = NextResponse.redirect(new URL(nextPath, url.origin));
   res.cookies.set(SESSION_COOKIE_NAME, json.token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: isSecureRequest,
     path: "/",
     maxAge: 60 * 60 * 24 * 7
   });

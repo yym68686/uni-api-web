@@ -20,11 +20,18 @@ function sanitizeNextPath(value: string | null, fallback: string) {
   return value;
 }
 
-function clearSessionCookie(res: NextResponse) {
+function isSecureRequest(req: NextRequest) {
+  return (
+    req.headers.get("x-forwarded-proto") === "https" ||
+    req.nextUrl.protocol === "https:"
+  );
+}
+
+function clearSessionCookie(req: NextRequest, res: NextResponse) {
   res.cookies.set(SESSION_COOKIE_NAME, "", {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: isSecureRequest(req),
     path: "/",
     maxAge: 0
   });
@@ -95,7 +102,7 @@ export async function proxy(req: NextRequest) {
       return NextResponse.redirect(url);
     }
     if (hasSessionCookie) {
-      return clearSessionCookie(NextResponse.next());
+      return clearSessionCookie(req, NextResponse.next());
     }
     return NextResponse.next();
   }
@@ -107,6 +114,7 @@ export async function proxy(req: NextRequest) {
 
   if (pathname.startsWith("/api/")) {
     return clearSessionCookie(
+      req,
       NextResponse.json({ message: "Unauthorized" }, { status: 401 })
     );
   }
@@ -116,7 +124,7 @@ export async function proxy(req: NextRequest) {
   if (!searchParams.get("next")) {
     loginUrl.searchParams.set("next", `${pathname}${req.nextUrl.search}`);
   }
-  return clearSessionCookie(NextResponse.redirect(loginUrl));
+  return clearSessionCookie(req, NextResponse.redirect(loginUrl));
 }
 
 export const config = {
