@@ -6,9 +6,9 @@ This repo hosts:
 
 ## Backend (FastAPI + Postgres)
 
-Start Postgres:
+Start Postgres + API (Docker):
 ```bash
-docker compose up -d
+docker compose up -d --build postgres api
 ```
 
 This also starts the FastAPI service on `http://localhost:8001`.
@@ -30,6 +30,11 @@ Health check: `GET http://localhost:8001/v1/health`
 ```bash
 npm install
 npm run dev
+```
+
+Local dev (recommended): run API via Docker, run Next.js locally:
+```bash
+docker compose up -d --build postgres api && npm install && npm run dev
 ```
 
 Set backend URL (recommended):
