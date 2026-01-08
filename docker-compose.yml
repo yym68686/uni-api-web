@@ -4,9 +4,9 @@ services:
     container_name: uni-api-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: uniapi
-      POSTGRES_PASSWORD: uniapi
-      POSTGRES_DB: uniapi
+      POSTGRES_USER: ${POSTGRES_USER:-uniapi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-uniapi}
     ports:
       - "5432:5432"
     volumes:
@@ -20,7 +20,7 @@ services:
     depends_on:
       - postgres
     environment:
-      DATABASE_URL: postgresql+asyncpg://uniapi:uniapi@postgres:5432/uniapi
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-uniapi}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-uniapi}
       APP_ENV: dev
       APP_NAME: Uni API Backend
       API_PREFIX: /v1
