@@ -22,6 +22,22 @@ function sanitizeNextPath(value: string | null) {
   return value;
 }
 
+function firstHeader(req: Request, name: string) {
+  const raw = req.headers.get(name);
+  if (!raw) return null;
+  const first = raw.split(",")[0]?.trim();
+  return first && first.length > 0 ? first : null;
+}
+
+function getPublicOrigin(req: Request, url: URL) {
+  const forwardedProto = firstHeader(req, "x-forwarded-proto");
+  const forwardedHost = firstHeader(req, "x-forwarded-host");
+  const proto = forwardedProto ?? url.protocol.replace(":", "");
+  const host = forwardedHost ?? req.headers.get("host");
+  if (!host) return url.origin;
+  return `${proto}://${host}`;
+}
+
 const OAUTH_STATE_COOKIE = "uai_oauth_state";
 const OAUTH_VERIFIER_COOKIE = "uai_oauth_verifier";
 const OAUTH_NEXT_COOKIE = "uai_oauth_next";
@@ -31,8 +47,10 @@ export function GET(req: Request) {
   const nextPath = sanitizeNextPath(url.searchParams.get("next"));
 
   const clientId = process.env.GOOGLE_CLIENT_ID ?? "";
+  const publicOrigin = getPublicOrigin(req, url);
   const redirectUri =
-    process.env.GOOGLE_REDIRECT_URI ?? "http://localhost:3000/api/auth/google/callback";
+    process.env.GOOGLE_REDIRECT_URI ??
+    new URL("/api/auth/google/callback", publicOrigin).toString();
   if (!clientId) {
     return NextResponse.json({ message: "Google OAuth not configured" }, { status: 500 });
   }
