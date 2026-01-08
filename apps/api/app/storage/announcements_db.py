@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import uuid
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,8 +10,11 @@ from app.models.announcement import Announcement
 from app.schemas.announcements import (
     AnnouncementCreateRequest,
     AnnouncementCreateResponse,
+    AnnouncementDeleteResponse,
     AnnouncementItem,
     AnnouncementsListResponse,
+    AnnouncementUpdateRequest,
+    AnnouncementUpdateResponse,
 )
 
 
@@ -60,6 +64,62 @@ async def create_announcement(
     await session.commit()
     await session.refresh(row)
     return AnnouncementCreateResponse(item=_to_item(row))
+
+
+async def update_announcement(
+    session: AsyncSession, announcement_id: str, input: AnnouncementUpdateRequest
+) -> AnnouncementUpdateResponse | None:
+    try:
+        announcement_uuid = uuid.UUID(announcement_id)
+    except ValueError:
+        raise ValueError("invalid announcement id") from None
+
+    row = (
+        await session.execute(select(Announcement).where(Announcement.id == announcement_uuid))
+    ).scalar_one_or_none()
+    if not row:
+        return None
+
+    title = input.title.strip()
+    meta = input.meta.strip()
+    level = input.level.strip() or "warning"
+
+    if len(title) < 2:
+        raise ValueError("title too small (min 2)")
+    if len(title) > 180:
+        raise ValueError("title too large (max 180)")
+    if len(meta) < 2:
+        raise ValueError("meta too small (min 2)")
+    if len(meta) > 120:
+        raise ValueError("meta too large (max 120)")
+    if level not in {"info", "warning", "success", "destructive"}:
+        raise ValueError("invalid level")
+
+    row.title = title
+    row.meta = meta
+    row.level = level
+    await session.commit()
+    await session.refresh(row)
+    return AnnouncementUpdateResponse(item=_to_item(row))
+
+
+async def delete_announcement(
+    session: AsyncSession, announcement_id: str
+) -> AnnouncementDeleteResponse | None:
+    try:
+        announcement_uuid = uuid.UUID(announcement_id)
+    except ValueError:
+        raise ValueError("invalid announcement id") from None
+
+    row = (
+        await session.execute(select(Announcement).where(Announcement.id == announcement_uuid))
+    ).scalar_one_or_none()
+    if not row:
+        return None
+
+    await session.delete(row)
+    await session.commit()
+    return AnnouncementDeleteResponse(ok=True, id=announcement_id)
 
 
 async def ensure_seed_announcements(session: AsyncSession) -> None:

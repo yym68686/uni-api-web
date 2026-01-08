@@ -1,7 +1,10 @@
 import { Megaphone } from "lucide-react";
 
 import { AnnouncementPublisher } from "@/components/admin/announcement-publisher";
+import { AnnouncementRowActions } from "@/components/admin/announcement-row-actions";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { buildBackendUrl, getBackendAuthHeaders } from "@/lib/backend";
 import type { AnnouncementsListResponse } from "@/lib/types";
 
@@ -37,6 +40,25 @@ async function getAnnouncements() {
   const json: unknown = await res.json();
   if (!isAnnouncementsListResponse(json)) return null;
   return json.items;
+}
+
+function formatCreatedAt(createdAt: string) {
+  const dt = new Date(createdAt);
+  if (Number.isNaN(dt.getTime())) return createdAt;
+  return new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(dt);
+}
+
+function levelBadgeVariant(level: string) {
+  switch (level) {
+    case "success":
+      return "success";
+    case "warning":
+      return "warning";
+    case "destructive":
+      return "destructive";
+    default:
+      return "default";
+  }
 }
 
 export default async function AdminAnnouncementsPage() {
@@ -80,14 +102,38 @@ export default async function AdminAnnouncementsPage() {
               暂无公告
             </div>
           ) : (
-            <div className="space-y-3">
-              {items.map((a) => (
-                <div key={a.id} className="rounded-xl border border-border bg-card p-4">
-                  <div className="text-sm font-medium text-foreground">{a.title}</div>
-                  <div className="mt-1 text-xs text-muted-foreground font-mono">{a.meta}</div>
-                </div>
-              ))}
-            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Title</TableHead>
+                  <TableHead>Meta</TableHead>
+                  <TableHead>Level</TableHead>
+                  <TableHead>Created</TableHead>
+                  {isAdmin ? <TableHead className="w-12 text-right">Actions</TableHead> : null}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {items.map((a) => (
+                  <TableRow key={a.id}>
+                    <TableCell className="font-medium text-foreground">{a.title}</TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">{a.meta}</TableCell>
+                    <TableCell>
+                      <Badge variant={levelBadgeVariant(a.level)} className="capitalize">
+                        {a.level}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">
+                      {formatCreatedAt(a.createdAt)}
+                    </TableCell>
+                    {isAdmin ? (
+                      <TableCell className="p-2 text-right">
+                        <AnnouncementRowActions announcement={a} />
+                      </TableCell>
+                    ) : null}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
         </CardContent>
       </Card>

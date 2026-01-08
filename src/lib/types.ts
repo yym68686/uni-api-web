@@ -63,3 +63,18 @@ export interface AnnouncementCreateRequest {
 export interface AnnouncementCreateResponse {
   item: AnnouncementItem;
 }
+
+export interface AnnouncementUpdateRequest {
+  title: string;
+  meta: string;
+  level: "info" | "warning" | "success" | "destructive";
+}
+
+export interface AnnouncementUpdateResponse {
+  item: AnnouncementItem;
+}
+
+export interface AnnouncementDeleteResponse {
+  ok: boolean;
+  id: string;
+}

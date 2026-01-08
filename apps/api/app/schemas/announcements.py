@@ -23,3 +23,18 @@ class AnnouncementCreateRequest(BaseModel):
 
 class AnnouncementCreateResponse(BaseModel):
     item: AnnouncementItem
+
+
+class AnnouncementUpdateRequest(BaseModel):
+    title: str
+    meta: str
+    level: str = "warning"
+
+
+class AnnouncementUpdateResponse(BaseModel):
+    item: AnnouncementItem
+
+
+class AnnouncementDeleteResponse(BaseModel):
+    ok: bool
+    id: str

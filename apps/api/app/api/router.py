@@ -7,13 +7,21 @@ from app.auth import get_current_user, require_admin
 from app.schemas.announcements import (
     AnnouncementCreateRequest,
     AnnouncementCreateResponse,
+    AnnouncementDeleteResponse,
     AnnouncementsListResponse,
+    AnnouncementUpdateRequest,
+    AnnouncementUpdateResponse,
 )
 from app.schemas.auth import AuthResponse, GoogleOAuthExchangeRequest, LoginRequest, RegisterRequest, UserPublic
 from app.schemas.keys import ApiKeyCreateRequest, ApiKeyCreateResponse, ApiKeysListResponse
 from app.schemas.usage import UsageResponse
 from app.db import get_db_session
-from app.storage.announcements_db import create_announcement, list_announcements
+from app.storage.announcements_db import (
+    create_announcement,
+    delete_announcement,
+    list_announcements,
+    update_announcement,
+)
 from app.storage.auth_db import grant_admin_role
 from app.storage.auth_db import login as auth_login
 from app.storage.auth_db import register_and_login, revoke_session
@@ -136,6 +144,39 @@ async def admin_create_announcement(
         return await create_announcement(session, payload)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.patch("/admin/announcements/{announcement_id}", response_model=AnnouncementUpdateResponse)
+async def admin_update_announcement(
+    announcement_id: str,
+    payload: AnnouncementUpdateRequest,
+    session: AsyncSession = Depends(get_db_session),
+    admin_user=Depends(require_admin),
+) -> AnnouncementUpdateResponse:
+    _ = admin_user
+    try:
+        updated = await update_announcement(session, announcement_id, payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if not updated:
+        raise HTTPException(status_code=404, detail="not found")
+    return updated
+
+
+@router.delete("/admin/announcements/{announcement_id}", response_model=AnnouncementDeleteResponse)
+async def admin_delete_announcement(
+    announcement_id: str,
+    session: AsyncSession = Depends(get_db_session),
+    admin_user=Depends(require_admin),
+) -> AnnouncementDeleteResponse:
+    _ = admin_user
+    try:
+        deleted = await delete_announcement(session, announcement_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if not deleted:
+        raise HTTPException(status_code=404, detail="not found")
+    return deleted
 
 
 @router.get("/usage", response_model=UsageResponse)
