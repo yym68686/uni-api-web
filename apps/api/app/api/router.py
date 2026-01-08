@@ -1,0 +1,130 @@
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.auth import get_current_user
+from app.schemas.announcements import AnnouncementsListResponse
+from app.schemas.auth import AuthResponse, LoginRequest, RegisterRequest, UserPublic
+from app.schemas.keys import ApiKeyCreateRequest, ApiKeyCreateResponse, ApiKeysListResponse
+from app.schemas.usage import UsageResponse
+from app.db import get_db_session
+from app.storage.announcements_db import list_announcements
+from app.storage.auth_db import login as auth_login
+from app.storage.auth_db import register_and_login, revoke_session
+from app.storage.keys_db import create_api_key, list_api_keys, revoke_api_key
+
+router = APIRouter()
+
+
+@router.get("/health")
+async def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@router.post("/auth/register", response_model=AuthResponse)
+async def register(
+    payload: RegisterRequest, session: AsyncSession = Depends(get_db_session)
+) -> AuthResponse:
+    try:
+        return await register_and_login(session, payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post("/auth/login", response_model=AuthResponse)
+async def login(payload: LoginRequest, session: AsyncSession = Depends(get_db_session)) -> AuthResponse:
+    res = await auth_login(session, payload)
+    if not res:
+        raise HTTPException(status_code=401, detail="invalid credentials")
+    return res
+
+
+@router.post("/auth/logout")
+async def logout(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+) -> dict:
+    # NOTE: token can be provided via Authorization Bearer or cookie; revoke when present.
+    from app.constants import SESSION_COOKIE_NAME
+
+    _ = current_user
+    auth = request.headers.get("authorization")
+    token = auth[7:].strip() if auth and auth.lower().startswith("bearer ") else None
+    if not token:
+        token = request.cookies.get(SESSION_COOKIE_NAME)
+    if token:
+        await revoke_session(session, token)
+    return {"ok": True}
+
+
+@router.get("/auth/me", response_model=UserPublic)
+async def me(current_user=Depends(get_current_user)) -> UserPublic:  # type: ignore[no-untyped-def]
+    import datetime as dt
+
+    def _dt_iso(value: dt.datetime | None) -> str | None:
+        if not value:
+            return None
+        return value.astimezone(dt.timezone.utc).isoformat()
+
+    return UserPublic(
+        id=str(current_user.id),
+        email=current_user.email,
+        createdAt=_dt_iso(current_user.created_at) or dt.datetime.now(dt.timezone.utc).isoformat(),
+        lastLoginAt=_dt_iso(current_user.last_login_at),
+    )
+
+
+@router.get("/announcements", response_model=AnnouncementsListResponse)
+async def announcements(
+    session: AsyncSession = Depends(get_db_session), current_user=Depends(get_current_user)
+) -> AnnouncementsListResponse:
+    return await list_announcements(session)
+
+
+@router.get("/usage", response_model=UsageResponse)
+async def usage(current_user=Depends(get_current_user)) -> dict:
+    # TODO: Replace with real Postgres aggregation.
+    # Keep response shape consistent with the console's current expectations.
+    return {
+        "summary": {"requests24h": 0, "tokens24h": 0, "errorRate24h": 0, "spend24hUsd": 0},
+        "daily": [],
+        "topModels": [],
+    }
+
+
+@router.get("/keys", response_model=ApiKeysListResponse)
+async def list_keys(
+    session: AsyncSession = Depends(get_db_session), current_user=Depends(get_current_user)
+) -> ApiKeysListResponse:
+    _ = current_user
+    return await list_api_keys(session)
+
+
+@router.post("/keys", response_model=ApiKeyCreateResponse)
+async def create_key(
+    payload: ApiKeyCreateRequest,
+    session: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+) -> ApiKeyCreateResponse:
+    name = payload.name.strip()
+    if len(name) < 2:
+        raise HTTPException(status_code=400, detail="name too small (min 2)")
+    if len(name) > 64:
+        raise HTTPException(status_code=400, detail="name too large (max 64)")
+    _ = current_user
+    return await create_api_key(session, ApiKeyCreateRequest(name=name))
+
+
+@router.delete("/keys/{key_id}")
+async def revoke_key(
+    key_id: str,
+    session: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+) -> dict:
+    _ = current_user
+    item = await revoke_api_key(session, key_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="not found")
+    return {"item": item}

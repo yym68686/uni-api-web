@@ -1,0 +1,159 @@
+@import "tailwindcss";
+@config "../../tailwind.config.ts";
+
+@layer base {
+  :root {
+    --font-press-start: "Press Start 2P";
+    --background: 99% 0.004 250;
+    --foreground: 22% 0.02 250;
+    --card: 100% 0.004 250;
+    --card-foreground: 22% 0.02 250;
+    --popover: 100% 0.004 250;
+    --popover-foreground: 22% 0.02 250;
+    --primary: 60% 0.18 245;
+    --primary-foreground: 12% 0.02 250;
+    --secondary: 96% 0.01 250;
+    --secondary-foreground: 22% 0.02 250;
+    --muted: 96% 0.01 250;
+    --muted-foreground: 46% 0.02 250;
+    --accent: 96% 0.01 250;
+    --accent-foreground: 22% 0.02 250;
+    --destructive: 62% 0.22 25;
+    --destructive-foreground: 98% 0.01 20;
+    --border: 90% 0.01 250;
+    --input: 90% 0.01 250;
+    --ring: 60% 0.18 245;
+    --sidebar: 98% 0.008 250;
+    --sidebar-foreground: 28% 0.02 250;
+    --sidebar-accent: 94% 0.012 250;
+    --sidebar-accent-foreground: 22% 0.02 250;
+    --success: 64% 0.16 150;
+    --warning: 72% 0.17 80;
+  }
+
+  .dark {
+    --background: 18% 0.015 250;
+    --foreground: 95% 0.01 240;
+    --card: 20% 0.018 250;
+    --card-foreground: 95% 0.01 240;
+    --popover: 20% 0.018 250;
+    --popover-foreground: 95% 0.01 240;
+    --primary: 70% 0.2 245;
+    --primary-foreground: 14% 0.02 250;
+    --secondary: 26% 0.02 250;
+    --secondary-foreground: 95% 0.01 240;
+    --muted: 26% 0.02 250;
+    --muted-foreground: 78% 0.015 245;
+    --accent: 26% 0.02 250;
+    --accent-foreground: 95% 0.01 240;
+    --destructive: 62% 0.22 25;
+    --destructive-foreground: 95% 0.01 240;
+    --border: 30% 0.02 250;
+    --input: 30% 0.02 250;
+    --ring: 70% 0.2 245;
+    --sidebar: 24% 0.02 250;
+    --sidebar-foreground: 92% 0.012 240;
+    --sidebar-accent: 28% 0.02 250;
+    --sidebar-accent-foreground: 95% 0.01 240;
+    --success: 72% 0.18 150;
+    --warning: 78% 0.18 80;
+  }
+
+  * {
+    border-color: oklch(var(--border));
+  }
+
+  html {
+    color-scheme: light;
+  }
+
+  html.dark {
+    color-scheme: dark;
+  }
+
+  body {
+    background: oklch(var(--background));
+    color: oklch(var(--foreground));
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+@layer utilities {
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  @keyframes uai-orb-float {
+    0% {
+      transform: translate(-50%, -50%) scale(0.98);
+      filter: blur(0px);
+    }
+    50% {
+      transform: translate(-50%, -52%) scale(1.02);
+      filter: blur(0.4px);
+    }
+    100% {
+      transform: translate(-50%, -50%) scale(0.98);
+      filter: blur(0px);
+    }
+  }
+
+  @keyframes uai-grid-drift {
+    0% {
+      transform: translateY(0);
+      opacity: 0.55;
+    }
+    50% {
+      transform: translateY(-10px);
+      opacity: 0.7;
+    }
+    100% {
+      transform: translateY(0);
+      opacity: 0.55;
+    }
+  }
+
+  .uai-brand-panel {
+    background-image:
+      radial-gradient(
+        1200px 600px at 50% 50%,
+        oklch(var(--primary) / 0.18),
+        transparent 55%
+      ),
+      radial-gradient(
+        900px 520px at 50% 80%,
+        oklch(var(--foreground) / 0.06),
+        transparent 60%
+      ),
+      linear-gradient(
+        to bottom,
+        oklch(var(--background) / 0.95),
+        oklch(var(--background) / 1)
+      );
+  }
+
+  .uai-brand-grid {
+    background-image:
+      linear-gradient(oklch(var(--foreground) / 0.06) 1px, transparent 1px),
+      linear-gradient(90deg, oklch(var(--foreground) / 0.06) 1px, transparent 1px);
+    background-size: 44px 44px;
+    mask-image: radial-gradient(closest-side, black 55%, transparent 100%);
+    animation: uai-grid-drift 16s ease-in-out infinite;
+  }
+
+  .uai-orb {
+    background-image:
+      radial-gradient(circle at 30% 30%, oklch(var(--foreground) / 0.18), transparent 40%),
+      radial-gradient(circle at 50% 50%, oklch(var(--primary) / 0.55), transparent 62%),
+      radial-gradient(circle at 60% 70%, oklch(var(--primary) / 0.28), transparent 58%);
+    box-shadow:
+      0 0 0 1px oklch(var(--border) / 0.4) inset,
+      0 40px 140px oklch(var(--primary) / 0.25),
+      0 0 80px oklch(var(--primary) / 0.22);
+    animation: uai-orb-float 18s ease-in-out infinite;
+  }
+}

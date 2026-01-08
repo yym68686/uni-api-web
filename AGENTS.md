@@ -3,10 +3,10 @@
 
 # Tech Stack (核心技术栈)
 在编写代码时，你必须严格遵守以下技术选型：
-1. **Framework** : Next.js 14+ (App Router, 使用 Server Components 为主)。
+1. **Framework** : Next.js v16
 2. **Language** : TypeScript (Strict Mode, 严禁使用 any)。
-3. **Styling** : Tailwind CSS v3/v4 (使用 Utility-first 理念)。
-4.  **UI Core** : shadcn/ui (基于 Radix UI 的 Headless 组件 + Tailwind 样式)。
+3. **Styling** : Tailwind CSS v4 (使用 Utility-first 理念)。
+4. **UI Core** : shadcn/ui。
 5. **Icons** : Lucide React (lucide-react)。
 6. **Colors** : OKLCH 色彩空间 (通过 CSS 变量定义，支持深色模式)。
 7. **State/Feedback** : React Hook Form + Zod (表单), Sonner (Toast 通知).

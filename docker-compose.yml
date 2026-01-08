@@ -1,0 +1,32 @@
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    container_name: uni-api-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: uniapi
+      POSTGRES_PASSWORD: uniapi
+      POSTGRES_DB: uniapi
+    ports:
+      - "5432:5432"
+    volumes:
+      - uniapi_pg_data:/var/lib/postgresql/data
+
+  api:
+    build:
+      context: ./apps/api
+    container_name: uni-api-backend
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    environment:
+      DATABASE_URL: postgresql+asyncpg://uniapi:uniapi@postgres:5432/uniapi
+      APP_ENV: dev
+      APP_NAME: Uni API Backend
+      API_PREFIX: /v1
+      SESSION_TTL_DAYS: 7
+    ports:
+      - "8001:8000"
+
+volumes:
+  uniapi_pg_data:
