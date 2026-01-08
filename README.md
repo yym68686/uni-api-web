@@ -37,6 +37,20 @@ Local dev (recommended): run API via Docker, run Next.js locally:
 docker compose up -d --build postgres api && npm install && npm run dev
 ```
 
+## CI: Build & Push Docker Images
+
+This repo includes a GitHub Actions workflow that builds and pushes two images to Docker Hub:
+- `DOCKERHUB_USERNAME/uni-api-frontend`
+- `DOCKERHUB_USERNAME/uni-api-backend`
+
+Required GitHub Secrets:
+- `DOCKERHUB_USERNAME`
+- `DOCKERHUB_TOKEN` (Docker Hub access token)
+
+Tags:
+- On `main`: pushes `main` + `sha-...`
+- On git tag `v*` (e.g. `v0.1.0`): also pushes the tag
+
 Set backend URL (recommended):
 - `cp .env.example .env` (or set `API_BASE_URL`)
 
