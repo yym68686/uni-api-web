@@ -25,6 +25,14 @@ from app.schemas.admin_users import (
 from app.schemas.auth import AuthResponse, GoogleOAuthExchangeRequest, LoginRequest, RegisterRequest, UserPublic
 from app.schemas.keys import ApiKeyCreateRequest, ApiKeyCreateResponse, ApiKeysListResponse
 from app.schemas.usage import UsageResponse
+from app.schemas.channels import (
+    LlmChannelCreateRequest,
+    LlmChannelCreateResponse,
+    LlmChannelDeleteResponse,
+    LlmChannelsListResponse,
+    LlmChannelUpdateRequest,
+    LlmChannelUpdateResponse,
+)
 from app.db import get_db_session
 from app.storage.announcements_db import (
     create_announcement,
@@ -37,6 +45,7 @@ from app.storage.orgs_db import ensure_default_org
 from app.storage.auth_db import grant_admin_role
 from app.storage.auth_db import login as auth_login
 from app.storage.auth_db import register_and_login, revoke_session
+from app.storage.channels_db import create_channel, delete_channel, list_channels, update_channel
 from app.storage.keys_db import create_api_key, list_api_keys, revoke_api_key
 from app.storage.oauth_google import login_with_google
 
@@ -278,6 +287,70 @@ async def admin_delete_user(
             raise HTTPException(status_code=400, detail="cannot delete last owner")
 
     deleted = await delete_admin_user(session, parsed)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="not found")
+    return deleted
+
+
+@router.get("/admin/channels", response_model=LlmChannelsListResponse)
+async def admin_list_channels(
+    session: AsyncSession = Depends(get_db_session),
+    admin_user=Depends(require_admin),
+    membership=Depends(get_current_membership),
+) -> LlmChannelsListResponse:
+    _ = admin_user
+    return await list_channels(session, org_id=membership.org_id)
+
+
+@router.post("/admin/channels", response_model=LlmChannelCreateResponse)
+async def admin_create_channel(
+    payload: LlmChannelCreateRequest,
+    session: AsyncSession = Depends(get_db_session),
+    admin_user=Depends(require_admin),
+    membership=Depends(get_current_membership),
+) -> LlmChannelCreateResponse:
+    _ = admin_user
+    try:
+        return await create_channel(session, org_id=membership.org_id, input=payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.patch("/admin/channels/{channel_id}", response_model=LlmChannelUpdateResponse)
+async def admin_update_channel(
+    channel_id: str,
+    payload: LlmChannelUpdateRequest,
+    session: AsyncSession = Depends(get_db_session),
+    admin_user=Depends(require_admin),
+    membership=Depends(get_current_membership),
+) -> LlmChannelUpdateResponse:
+    _ = admin_user
+    try:
+        parsed = uuid.UUID(channel_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid channel id") from None
+    try:
+        updated = await update_channel(session, org_id=membership.org_id, channel_id=parsed, input=payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if not updated:
+        raise HTTPException(status_code=404, detail="not found")
+    return updated
+
+
+@router.delete("/admin/channels/{channel_id}", response_model=LlmChannelDeleteResponse)
+async def admin_delete_channel(
+    channel_id: str,
+    session: AsyncSession = Depends(get_db_session),
+    admin_user=Depends(require_admin),
+    membership=Depends(get_current_membership),
+) -> LlmChannelDeleteResponse:
+    _ = admin_user
+    try:
+        parsed = uuid.UUID(channel_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid channel id") from None
+    deleted = await delete_channel(session, org_id=membership.org_id, channel_id=parsed)
     if not deleted:
         raise HTTPException(status_code=404, detail="not found")
     return deleted

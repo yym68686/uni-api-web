@@ -112,3 +112,44 @@ export interface AdminUserDeleteResponse {
   ok: boolean;
   id: string;
 }
+
+export interface LlmChannelItem {
+  id: string;
+  name: string;
+  baseUrl: string;
+  apiKeyMasked: string;
+  allowGroups: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LlmChannelsListResponse {
+  items: LlmChannelItem[];
+}
+
+export interface LlmChannelCreateRequest {
+  name: string;
+  baseUrl: string;
+  apiKey: string;
+  allowGroups: string[];
+}
+
+export interface LlmChannelCreateResponse {
+  item: LlmChannelItem;
+}
+
+export interface LlmChannelUpdateRequest {
+  name?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  allowGroups?: string[];
+}
+
+export interface LlmChannelUpdateResponse {
+  item: LlmChannelItem;
+}
+
+export interface LlmChannelDeleteResponse {
+  ok: boolean;
+  id: string;
+}

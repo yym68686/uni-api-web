@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import * as React from "react";
-import { KeyRound, LayoutDashboard, Megaphone, Settings, Users } from "lucide-react";
+import { KeyRound, LayoutDashboard, Megaphone, PlugZap, Settings, Users } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -14,6 +14,7 @@ const navItems = [
 ] as const;
 
 const adminItems = [
+  { href: "/admin/channels", label: "Channels", icon: PlugZap },
   { href: "/admin/users", label: "Users", icon: Users },
   { href: "/admin/announcements", label: "Announcements", icon: Megaphone }
 ] as const;
