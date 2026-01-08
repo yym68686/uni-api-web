@@ -12,5 +12,13 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://uniapi:uniapi@localhost:5432/uniapi"
     session_ttl_days: int = 7
 
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_redirect_uri: str = "http://localhost:3000/api/auth/google/callback"
+
+    seed_demo_data: bool = False
+
+    admin_bootstrap_token: str = ""
+
 
 settings = Settings()

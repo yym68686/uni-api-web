@@ -28,6 +28,8 @@ Endpoints:
 - `POST /v1/auth/login`
 - `POST /v1/auth/logout`
 - `GET /v1/auth/me`
+- `POST /v1/auth/admin/claim`
+- `POST /v1/auth/oauth/google`
 - `GET /v1/keys`
 - `POST /v1/keys`
 - `DELETE /v1/keys/{key_id}`
@@ -36,3 +38,7 @@ Notes:
 - Keys are stored in Postgres (SQLAlchemy async); only a masked `prefix` is returned in list endpoints.
 - The full key is returned only once on creation (store keeps only `sha256` hash).
 - Dev convenience: tables are auto-created on startup; for production use migrations (e.g. Alembic).
+- Demo announcements seeding is disabled by default; set `SEED_DEMO_DATA=true` if you want sample rows.
+- Admin:
+  - First registered user is automatically `admin`.
+  - To promote an existing user later, set `ADMIN_BOOTSTRAP_TOKEN` and call `POST /v1/auth/admin/claim` with `{ "token": "..." }`.

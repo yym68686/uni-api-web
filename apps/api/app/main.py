@@ -19,8 +19,14 @@ def create_app() -> FastAPI:
     async def lifespan(_app: FastAPI):
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-        async with SessionLocal() as session:
-            await ensure_seed_announcements(session)
+            # Minimal dev-time migration for early-stage schema changes.
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS users "
+                "ADD COLUMN IF NOT EXISTS role varchar(16) NOT NULL DEFAULT 'user'"
+            )
+        if settings.app_env == "dev" and settings.seed_demo_data:
+            async with SessionLocal() as session:
+                await ensure_seed_announcements(session)
         yield
 
     app = FastAPI(title=settings.app_name, lifespan=lifespan)

@@ -5,14 +5,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
 from app.schemas.announcements import AnnouncementsListResponse
-from app.schemas.auth import AuthResponse, LoginRequest, RegisterRequest, UserPublic
+from app.schemas.auth import AuthResponse, GoogleOAuthExchangeRequest, LoginRequest, RegisterRequest, UserPublic
 from app.schemas.keys import ApiKeyCreateRequest, ApiKeyCreateResponse, ApiKeysListResponse
 from app.schemas.usage import UsageResponse
 from app.db import get_db_session
 from app.storage.announcements_db import list_announcements
+from app.storage.auth_db import grant_admin_role
 from app.storage.auth_db import login as auth_login
 from app.storage.auth_db import register_and_login, revoke_session
 from app.storage.keys_db import create_api_key, list_api_keys, revoke_api_key
+from app.storage.oauth_google import login_with_google
 
 router = APIRouter()
 
@@ -71,9 +73,45 @@ async def me(current_user=Depends(get_current_user)) -> UserPublic:  # type: ign
     return UserPublic(
         id=str(current_user.id),
         email=current_user.email,
+        role=current_user.role,
         createdAt=_dt_iso(current_user.created_at) or dt.datetime.now(dt.timezone.utc).isoformat(),
         lastLoginAt=_dt_iso(current_user.last_login_at),
     )
+
+
+@router.post("/auth/admin/claim")
+async def claim_admin(
+    payload: dict,
+    session: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+) -> dict:
+    token = payload.get("token")
+    if not isinstance(token, str) or not token:
+        raise HTTPException(status_code=400, detail="missing token")
+    try:
+        user = await grant_admin_role(session, current_user, token)
+        return {"ok": True, "role": user.role}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post("/auth/oauth/google", response_model=AuthResponse)
+async def oauth_google(
+    payload: GoogleOAuthExchangeRequest, session: AsyncSession = Depends(get_db_session)
+) -> AuthResponse:
+    from app.core.config import settings
+
+    if payload.redirect_uri != settings.google_redirect_uri:
+        raise HTTPException(status_code=400, detail="invalid redirect_uri")
+    try:
+        return await login_with_google(
+            session,
+            code=payload.code,
+            code_verifier=payload.code_verifier,
+            redirect_uri=payload.redirect_uri,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.get("/announcements", response_model=AnnouncementsListResponse)

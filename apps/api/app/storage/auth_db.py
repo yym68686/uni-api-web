@@ -4,7 +4,7 @@ import datetime as dt
 import secrets
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.session import Session
@@ -24,6 +24,7 @@ def _to_user_public(row: User) -> UserPublic:
     return UserPublic(
         id=str(row.id),
         email=row.email,
+        role=row.role,
         createdAt=_dt_iso(row.created_at) or dt.datetime.now(dt.timezone.utc).isoformat(),
         lastLoginAt=_dt_iso(row.last_login_at),
     )
@@ -40,6 +41,21 @@ def _validate_password(password: str) -> None:
         raise ValueError("password too large (max 128)")
 
 
+async def _is_first_user(session: AsyncSession) -> bool:
+    count = (await session.execute(select(func.count()).select_from(User))).scalar_one()
+    return int(count) == 0
+
+
+def _should_grant_admin(requested_token: str | None) -> bool:
+    from app.core.config import settings
+
+    if not requested_token:
+        return False
+    if not settings.admin_bootstrap_token:
+        return False
+    return secrets.compare_digest(requested_token, settings.admin_bootstrap_token)
+
+
 async def create_user(session: AsyncSession, input: RegisterRequest) -> User:
     email = _normalize_email(str(input.email))
     _validate_password(input.password)
@@ -48,7 +64,9 @@ async def create_user(session: AsyncSession, input: RegisterRequest) -> User:
     if existing:
         raise ValueError("email already registered")
 
-    row = User(email=email, password_hash=hash_password(input.password))
+    is_first = await _is_first_user(session)
+    role = "admin" if is_first or _should_grant_admin(input.admin_bootstrap_token) else "user"
+    row = User(email=email, password_hash=hash_password(input.password), role=role)
     session.add(row)
     await session.commit()
     await session.refresh(row)
@@ -67,6 +85,16 @@ async def authenticate_user(session: AsyncSession, input: LoginRequest) -> User 
     await session.commit()
     await session.refresh(row)
     return row
+
+
+async def grant_admin_role(session: AsyncSession, user: User, token: str) -> User:
+    if not _should_grant_admin(token):
+        raise ValueError("invalid bootstrap token")
+    if user.role != "admin":
+        user.role = "admin"
+        await session.commit()
+        await session.refresh(user)
+    return user
 
 
 async def create_session(session: AsyncSession, user_id: uuid.UUID, ttl_days: int = 7) -> str:

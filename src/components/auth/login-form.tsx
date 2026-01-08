@@ -192,7 +192,10 @@ export function LoginForm({ nextPath, className }: LoginFormProps) {
             type="button"
             variant="outline"
             className="w-full rounded-xl bg-transparent"
-            onClick={() => toast.message("Google 登录：即将支持")}
+            onClick={() => {
+              const next = nextPath && nextPath.startsWith("/") ? nextPath : "/";
+              window.location.href = `/api/auth/google?next=${encodeURIComponent(next)}`;
+            }}
           >
             <Chrome className="h-4 w-4" />
             Continue with Google

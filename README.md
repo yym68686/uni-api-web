@@ -35,4 +35,10 @@ npm run dev
 Set backend URL (recommended):
 - `cp .env.example .env` (or set `API_BASE_URL`)
 
+Google 登录：
+- 在 Google Cloud Console 创建 OAuth Client（Web）
+- Redirect URI 配置为 `http://localhost:3000/api/auth/google/callback`
+- 在根目录 `.env` 填写 `GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET/GOOGLE_REDIRECT_URI`
+- 重启：`docker compose up -d --build`
+
 Next step (optional): move the console into `apps/console` and add npm workspaces if you want stricter monorepo boundaries.
