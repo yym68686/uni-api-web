@@ -135,7 +135,7 @@ export function RegisterForm({ nextPath, className }: RegisterFormProps) {
       }
 
       toast.success("注册成功");
-      const next = nextPath && nextPath.startsWith("/") ? nextPath : "/";
+      const next = nextPath && nextPath.startsWith("/") ? nextPath : "/dashboard";
       router.replace(next);
       router.refresh();
     } catch (err) {
@@ -350,7 +350,7 @@ export function RegisterForm({ nextPath, className }: RegisterFormProps) {
             variant="outline"
             className="w-full rounded-xl bg-transparent"
             onClick={() => {
-              const next = nextPath && nextPath.startsWith("/") ? nextPath : "/";
+              const next = nextPath && nextPath.startsWith("/") ? nextPath : "/dashboard";
               window.location.href = `/api/auth/google?next=${encodeURIComponent(next)}`;
             }}
             disabled={step === "verify"}

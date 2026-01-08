@@ -67,7 +67,7 @@ export function LoginForm({ nextPath, className }: LoginFormProps) {
       }
 
       toast.success("登录成功");
-      const next = nextPath && nextPath.startsWith("/") ? nextPath : "/";
+      const next = nextPath && nextPath.startsWith("/") ? nextPath : "/dashboard";
       router.replace(next);
       router.refresh();
     } catch (err) {
@@ -199,7 +199,7 @@ export function LoginForm({ nextPath, className }: LoginFormProps) {
             variant="outline"
             className="w-full rounded-xl bg-transparent"
             onClick={() => {
-              const next = nextPath && nextPath.startsWith("/") ? nextPath : "/";
+              const next = nextPath && nextPath.startsWith("/") ? nextPath : "/dashboard";
               window.location.href = `/api/auth/google?next=${encodeURIComponent(next)}`;
             }}
           >

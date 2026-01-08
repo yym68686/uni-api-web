@@ -16,9 +16,9 @@ function sha256Base64Url(input: string) {
 }
 
 function sanitizeNextPath(value: string | null) {
-  if (!value) return "/";
-  if (!value.startsWith("/")) return "/";
-  if (value.startsWith("//")) return "/";
+  if (!value) return "/dashboard";
+  if (!value.startsWith("/")) return "/dashboard";
+  if (value.startsWith("//")) return "/dashboard";
   return value;
 }
 
@@ -64,4 +64,3 @@ export function GET(req: Request) {
   res.cookies.set(OAUTH_NEXT_COOKIE, nextPath, cookieOptions);
   return res;
 }
-

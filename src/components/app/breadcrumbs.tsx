@@ -8,7 +8,7 @@ import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const labelMap: Record<string, string> = {
-  "/": "Dashboard",
+  "/dashboard": "Dashboard",
   "/keys": "API Keys",
   "/models": "Models",
   "/logs": "Logs",
@@ -21,15 +21,17 @@ interface BreadcrumbItem {
 }
 
 function buildCrumbs(pathname: string): BreadcrumbItem[] {
-  const rootLabel = labelMap["/"] ?? "Dashboard";
-  if (pathname === "/") return [{ href: "/", label: rootLabel }];
+  const rootHref = "/dashboard";
+  const rootLabel = labelMap[rootHref] ?? "Dashboard";
+  if (pathname === rootHref) return [{ href: rootHref, label: rootLabel }];
 
   const segments = pathname.split("/").filter(Boolean);
-  const crumbs: BreadcrumbItem[] = [{ href: "/", label: rootLabel }];
+  const crumbs: BreadcrumbItem[] = [{ href: rootHref, label: rootLabel }];
 
   let current = "";
   for (const seg of segments) {
     current += `/${seg}`;
+    if (current === rootHref) continue;
     const label = labelMap[current] ?? seg;
     crumbs.push({ href: current, label });
   }

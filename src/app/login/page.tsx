@@ -11,7 +11,7 @@ interface LoginPageProps {
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
   const token = (await cookies()).get(SESSION_COOKIE_NAME)?.value;
-  if (token) redirect("/");
+  if (token) redirect("/dashboard");
 
   const params = (await searchParams) ?? {};
   const next =

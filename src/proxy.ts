@@ -13,10 +13,10 @@ function buildBackendUrl(path: string) {
   return new URL(normalizedPath, `${base}/`).toString();
 }
 
-function sanitizeNextPath(value: string | null) {
-  if (!value) return "/";
-  if (!value.startsWith("/")) return "/";
-  if (value.startsWith("//")) return "/";
+function sanitizeNextPath(value: string | null, fallback: string) {
+  if (!value) return fallback;
+  if (!value.startsWith("/")) return fallback;
+  if (value.startsWith("//")) return fallback;
   return value;
 }
 
@@ -55,7 +55,7 @@ function isPublicPath(pathname: string) {
 }
 
 function isProtectedPath(pathname: string) {
-  if (pathname === "/") return true;
+  if (pathname === "/dashboard" || pathname.startsWith("/dashboard/")) return true;
   if (pathname.startsWith("/keys")) return true;
   if (pathname.startsWith("/models")) return true;
   if (pathname.startsWith("/logs")) return true;
@@ -78,12 +78,19 @@ export async function proxy(req: NextRequest) {
 
   const session = req.cookies.get(SESSION_COOKIE_NAME)?.value;
   const hasSessionCookie = isLoggedInCookie(session);
-  const sessionValid = hasSessionCookie && session ? await isSessionValid(session) : false;
+  const shouldValidateSession =
+    pathname === "/login" ||
+    pathname === "/register" ||
+    isProtectedPath(pathname);
+  const sessionValid =
+    shouldValidateSession && hasSessionCookie && session
+      ? await isSessionValid(session)
+      : false;
 
   if (pathname === "/login" || pathname === "/register") {
     if (sessionValid) {
       const url = req.nextUrl.clone();
-      url.pathname = sanitizeNextPath(searchParams.get("next"));
+      url.pathname = sanitizeNextPath(searchParams.get("next"), "/dashboard");
       url.search = "";
       return NextResponse.redirect(url);
     }

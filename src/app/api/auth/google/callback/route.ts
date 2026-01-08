@@ -9,9 +9,9 @@ const OAUTH_VERIFIER_COOKIE = "uai_oauth_verifier";
 const OAUTH_NEXT_COOKIE = "uai_oauth_next";
 
 function sanitizeNextPath(value: string | null) {
-  if (!value) return "/";
-  if (!value.startsWith("/")) return "/";
-  if (value.startsWith("//")) return "/";
+  if (!value) return "/dashboard";
+  if (!value.startsWith("/")) return "/dashboard";
+  if (value.startsWith("//")) return "/dashboard";
   return value;
 }
 
@@ -35,7 +35,7 @@ export async function GET(req: Request) {
   const store = await cookies();
   const savedState = store.get(OAUTH_STATE_COOKIE)?.value ?? null;
   const verifier = store.get(OAUTH_VERIFIER_COOKIE)?.value ?? null;
-  const nextPath = sanitizeNextPath(store.get(OAUTH_NEXT_COOKIE)?.value ?? "/");
+  const nextPath = sanitizeNextPath(store.get(OAUTH_NEXT_COOKIE)?.value ?? "/dashboard");
 
   const clear = NextResponse.redirect(new URL("/login", url.origin));
   clear.cookies.set(OAUTH_STATE_COOKIE, "", { path: "/", maxAge: 0 });
@@ -73,4 +73,3 @@ export async function GET(req: Request) {
   res.cookies.set(OAUTH_NEXT_COOKIE, "", { path: "/", maxAge: 0 });
   return res;
 }
-
