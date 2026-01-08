@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+import time
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func, select
@@ -69,9 +70,11 @@ from app.storage.channels_db import (
     update_channel,
 )
 from app.storage.models_db import UNSET, get_model_config, list_admin_models, list_user_models, upsert_model_config
-from app.storage.usage_db import record_usage_event
+from app.storage.usage_db import list_usage_events, record_usage_event
 from app.storage.keys_db import create_api_key, delete_api_key, list_api_keys, set_api_key_revoked
 from app.storage.oauth_google import login_with_google
+from app.schemas.logs import LogsListResponse
+from app.db import SessionLocal
 
 router = APIRouter()
 
@@ -252,6 +255,24 @@ async def list_models(request: Request, session: AsyncSession = Depends(get_db_s
 
     items = await list_user_models(session, org_id=membership.org_id, group_name=user.group_name)
     return ModelsListResponse(items=items)  # type: ignore[arg-type]
+
+
+@router.get("/logs", response_model=LogsListResponse)
+async def logs(
+    limit: int = 50,
+    offset: int = 0,
+    session: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+    membership=Depends(get_current_membership),
+) -> LogsListResponse:  # type: ignore[no-untyped-def]
+    items = await list_usage_events(
+        session,
+        org_id=membership.org_id,
+        user_id=current_user.id,
+        limit=limit,
+        offset=offset,
+    )
+    return LogsListResponse(items=items)  # type: ignore[arg-type]
 
 
 @router.get("/announcements", response_model=AnnouncementsListResponse)
@@ -507,32 +528,76 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
     stream = bool(payload.get("stream"))
     timeout = httpx.Timeout(60.0, connect=10.0)
 
-    if stream:
-        async def iterator():
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                async with client.stream("POST", upstream_url, headers=headers, content=raw) as res:
-                    async for chunk in res.aiter_raw():
-                        yield chunk
+    forwarded_for = request.headers.get("x-forwarded-for") or ""
+    source_ip = forwarded_for.split(",")[0].strip() if forwarded_for.strip() else None
+    if not source_ip and request.client:
+        source_ip = request.client.host
 
-        return StreamingResponse(
-            iterator(),
-            media_type="text/event-stream",
-            headers={"cache-control": "no-cache"},
-        )
+    started = time.perf_counter()
+    ttft_ms = 0
+    total_ms = 0
 
     async with httpx.AsyncClient(timeout=timeout) as client:
-        res = await client.post(upstream_url, headers=headers, content=raw)
-    content_type = res.headers.get("content-type") or "application/json"
+        async with client.stream("POST", upstream_url, headers=headers, content=raw) as res:
+            content_type = res.headers.get("content-type") or "application/json"
+            ok = res.status_code < 400
 
-    # Record usage/spend for dashboard. (Streaming requests currently skip accounting.)
+            if stream:
+                async def iterator():
+                    nonlocal ttft_ms, total_ms
+                    first = None
+                    try:
+                        async for chunk in res.aiter_bytes():
+                            if first is None:
+                                first = time.perf_counter()
+                                ttft_ms = int((first - started) * 1000)
+                            yield chunk
+                    finally:
+                        total_ms = int((time.perf_counter() - started) * 1000)
+                        try:
+                            async with SessionLocal() as s:
+                                await record_usage_event(
+                                    s,
+                                    org_id=membership.org_id,
+                                    user_id=user.id,
+                                    model_id=model_id.strip(),
+                                    ok=ok,
+                                    status_code=int(res.status_code),
+                                    input_tokens=0,
+                                    output_tokens=0,
+                                    total_tokens=0,
+                                    cost_usd_micros=0,
+                                    total_duration_ms=total_ms,
+                                    ttft_ms=ttft_ms,
+                                    source_ip=source_ip,
+                                )
+                        except Exception:
+                            pass
+
+                return StreamingResponse(
+                    iterator(),
+                    status_code=int(res.status_code),
+                    media_type=content_type,
+                    headers={"cache-control": "no-cache"},
+                )
+
+            body_bytes = bytearray()
+            first = None
+            async for chunk in res.aiter_bytes():
+                if first is None:
+                    first = time.perf_counter()
+                    ttft_ms = int((first - started) * 1000)
+                body_bytes.extend(chunk)
+            total_ms = int((time.perf_counter() - started) * 1000)
+
+    # Record usage/spend for dashboard and logs.
     input_tokens = 0
     output_tokens = 0
     total_tokens = 0
     cost_micros = 0
-    ok = res.status_code < 400
-    if content_type.startswith("application/json"):
+    if ok and content_type.startswith("application/json"):
         try:
-            body = res.json()
+            body = json.loads(body_bytes.decode("utf-8"))
             usage = body.get("usage") if isinstance(body, dict) else None
             if isinstance(usage, dict):
                 input_tokens = int(usage.get("prompt_tokens") or 0)
@@ -566,12 +631,15 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
             output_tokens=output_tokens,
             total_tokens=total_tokens,
             cost_usd_micros=cost_micros,
+            total_duration_ms=total_ms,
+            ttft_ms=ttft_ms,
+            source_ip=source_ip,
         )
     except Exception:
         # Accounting should not break the request path.
         pass
 
-    return Response(content=res.content, status_code=res.status_code, media_type=content_type)
+    return Response(content=bytes(body_bytes), status_code=int(res.status_code), media_type=content_type)
 
 
 @router.get("/admin/models", response_model=AdminModelsListResponse)

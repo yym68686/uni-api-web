@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,6 +30,9 @@ async def record_usage_event(
     output_tokens: int = 0,
     total_tokens: int = 0,
     cost_usd_micros: int = 0,
+    total_duration_ms: int = 0,
+    ttft_ms: int = 0,
+    source_ip: str | None = None,
 ) -> None:
     row = LlmUsageEvent(
         org_id=org_id,
@@ -40,9 +44,67 @@ async def record_usage_event(
         output_tokens=int(max(0, output_tokens)),
         total_tokens=int(max(0, total_tokens)),
         cost_usd_micros=int(max(0, cost_usd_micros)),
+        total_duration_ms=int(max(0, total_duration_ms)),
+        ttft_ms=int(max(0, ttft_ms)),
+        source_ip=(source_ip.strip()[:64] if isinstance(source_ip, str) and source_ip.strip() else None),
     )
     session.add(row)
     await session.commit()
+
+
+def _micros_to_usd(value: int) -> float:
+    return float((Decimal(int(value)) / USD_MICROS).quantize(Decimal("0.0000001")))
+
+
+def _dt_iso(value: dt.datetime) -> str:
+    return value.astimezone(dt.timezone.utc).isoformat()
+
+
+async def list_usage_events(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    safe_limit = min(max(int(limit), 1), 200)
+    safe_offset = max(int(offset), 0)
+    rows = (
+        await session.execute(
+            select(LlmUsageEvent)
+            .where(LlmUsageEvent.org_id == org_id, LlmUsageEvent.user_id == user_id)
+            .order_by(LlmUsageEvent.created_at.desc())
+            .limit(safe_limit)
+            .offset(safe_offset)
+        )
+    ).scalars().all()
+
+    items: list[dict[str, Any]] = []
+    for r in rows:
+        total_ms = int(getattr(r, "total_duration_ms", 0) or 0)
+        ttft_ms = int(getattr(r, "ttft_ms", 0) or 0)
+        denom_ms = max(total_ms - ttft_ms, 0)
+        tps = None
+        if int(r.output_tokens) > 0 and denom_ms > 0:
+            tps = float(Decimal(int(r.output_tokens)) / (Decimal(int(denom_ms)) / Decimal("1000")))
+        items.append(
+            {
+                "id": str(r.id),
+                "model": str(r.model_id),
+                "createdAt": _dt_iso(r.created_at),
+                "ok": bool(r.ok),
+                "statusCode": int(r.status_code),
+                "inputTokens": int(r.input_tokens),
+                "outputTokens": int(r.output_tokens),
+                "totalDurationMs": total_ms,
+                "ttftMs": ttft_ms,
+                "tps": tps,
+                "costUsd": _micros_to_usd(int(r.cost_usd_micros)),
+                "sourceIp": (str(r.source_ip) if r.source_ip else None),
+            }
+        )
+    return items
 
 
 async def get_usage_response(
@@ -163,4 +225,3 @@ async def get_usage_response(
         "daily": daily,
         "topModels": top_models,
     }
-

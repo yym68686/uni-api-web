@@ -39,6 +39,19 @@ def create_app() -> FastAPI:
             )
 
             await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS llm_usage_events "
+                "ADD COLUMN IF NOT EXISTS total_duration_ms integer NOT NULL DEFAULT 0"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS llm_usage_events "
+                "ADD COLUMN IF NOT EXISTS ttft_ms integer NOT NULL DEFAULT 0"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS llm_usage_events "
+                "ADD COLUMN IF NOT EXISTS source_ip varchar(64)"
+            )
+
+            await conn.exec_driver_sql(
                 "ALTER TABLE IF EXISTS api_keys "
                 "ADD COLUMN IF NOT EXISTS user_id uuid"
             )

@@ -187,3 +187,22 @@ export interface ModelCatalogItem {
 export interface ModelsListResponse {
   items: ModelCatalogItem[];
 }
+
+export interface LogItem {
+  id: string;
+  model: string;
+  createdAt: string;
+  ok: boolean;
+  statusCode: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalDurationMs: number;
+  ttftMs: number;
+  tps?: number | null;
+  costUsd: number;
+  sourceIp?: string | null;
+}
+
+export interface LogsListResponse {
+  items: LogItem[];
+}

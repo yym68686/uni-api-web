@@ -30,7 +30,10 @@ class LlmUsageEvent(Base):
     total_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     cost_usd_micros: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
+    total_duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    ttft_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    source_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
     )
-
