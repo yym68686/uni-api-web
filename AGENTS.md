@@ -27,11 +27,31 @@
 - **Border** : `border-border` (oklch(30% .02 250)) - 细腻的边框。
 
 ## 2. 布局与质感 (Layout & Texture)
-- **Glassmorphism** : 顶部导航栏必须使用 `bg-background/80 backdrop-blur-md border-b`。
-- **Micro-Interactions** : 卡片悬停时必须有反馈：`hover:scale-[1.02] hover:shadow-lg transition-all duration-300`。
-- **Border Radius** : 全局圆角统一为 `rounded-xl` 或 `rounded-lg` (radius 0.625rem)。
-- **Gradients** : 图标或强调区域使用渐变色（如 `bg-gradient-to-br from-blue-500 to-blue-600`）。
+- **Glassmorphism** : 顶部导航栏使用 `bg-background/70 backdrop-blur-xl border-b`（控制台可用 `bg-background/80 backdrop-blur-md`）。
+- **Micro-Interactions** : 交互更偏 Linear/Modern：位移≤6px、scale≤1.02、`duration-300` + expo-out easing。
+  - 推荐：`transition-all duration-300 [transition-timing-function:cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-1 hover:shadow-lg hover:border-primary/20`
+- **Shadow System** : 避免单层阴影，优先多层“边缘高光 + 扩散阴影 + 微弱主色 glow”：
+  - CTA：`shadow-[0_0_0_1px_oklch(var(--primary)/0.35),0_12px_34px_oklch(var(--primary)/0.22),inset_0_1px_0_0_oklch(var(--foreground)/0.12)]`
+  - Surface：`shadow-[0_0_0_1px_oklch(var(--border)/0.6),0_14px_40px_oklch(0% 0 0/0.35)]`
+- **Border Radius** : 全局圆角统一为 `rounded-2xl`（大容器/卡片）与 `rounded-xl` / `rounded-lg`（组件）。
+- **Gradients** : 不使用硬编码色（含 Tailwind 预设色名），优先使用语义变量：
+  - 文案强调：`bg-gradient-to-r from-primary via-primary/70 to-primary bg-clip-text text-transparent`
+  - 结构高光线：`bg-gradient-to-r from-transparent via-foreground/10 to-transparent`
 - **Scrollbar** : 默认隐藏滚动条但保留功能 (`scrollbar-hide` utility)。
+
+## 3. 落地页（Landing）专用规范：Linear / Modern 氛围层
+落地页允许少量 Client Component（仅用于氛围/spotlight），其余保持 SSR + CSS，且必须支持降级：
+- **背景分层**（只用于落地页）：使用 `src/app/globals.css` 内的 utility 类组合：
+  - `uai-landing-canvas`（base radial depth）
+  - `uai-landing-grid-64`（精细技术网格，低透明度）
+  - `uai-landing-noise`（轻噪点，防 banding）
+  - `uai-landing-blob*`（大 blur 光斑，低频漂浮；必须 `motion-reduce:animate-none`）
+- **Spotlight**（可选、推荐）：只在 `(pointer: fine)` 且非 `prefers-reduced-motion` 启用。
+  - 使用 `src/components/landing/spotlight-card.tsx`，避免在页面里散落 mousemove 逻辑。
+- **可访问性与性能**：
+  - 必须支持 `prefers-reduced-motion`（动效自动关闭）
+  - mousemove/scroll 必须 rAF 节流；避免 setState 高频刷新（优先 CSS 变量）
+  - 触屏设备默认禁用 spotlight
 
 # Coding Rules (代码规范)
 
@@ -41,6 +61,7 @@
     - 示例: `className={cn("flex items-center", className)}`
 3. **图标使用** : 导入 `lucide-react` 图标，设置大小通常为 `h-4 w-4` 或 `h-5 w-5`。
 4. **数据获取** : 优先在 Server Component 中使用 `async/await` 直接获取数据，不要在 Client Component 中滥用 `useEffect`。
+    - 例外：落地页氛围交互（Spotlight/Parallax）允许小型 Client Component，但必须可降级。
 5. **类型定义** : 使用 `interface` 定义 Props，并明确导出。
 
 # Code Example Style (代码风格示例)

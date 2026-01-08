@@ -156,4 +156,103 @@
       0 0 80px oklch(var(--primary) / 0.22);
     animation: uai-orb-float 18s ease-in-out infinite;
   }
+
+  @keyframes uai-blob-float-a {
+    0% {
+      transform: translate3d(-6%, -2%, 0) rotate(0deg);
+      opacity: 0.55;
+    }
+    50% {
+      transform: translate3d(4%, -6%, 0) rotate(1deg);
+      opacity: 0.75;
+    }
+    100% {
+      transform: translate3d(-6%, -2%, 0) rotate(0deg);
+      opacity: 0.55;
+    }
+  }
+
+  @keyframes uai-blob-float-b {
+    0% {
+      transform: translate3d(8%, 4%, 0) rotate(0deg);
+      opacity: 0.45;
+    }
+    50% {
+      transform: translate3d(0%, -5%, 0) rotate(-1deg);
+      opacity: 0.62;
+    }
+    100% {
+      transform: translate3d(8%, 4%, 0) rotate(0deg);
+      opacity: 0.45;
+    }
+  }
+
+  @keyframes uai-blob-pulse {
+    0%,
+    100% {
+      opacity: 0.22;
+      transform: translate3d(0, 0, 0) scale(1);
+    }
+    50% {
+      opacity: 0.34;
+      transform: translate3d(0, -2%, 0) scale(1.02);
+    }
+  }
+
+  .uai-landing-canvas {
+    background-image:
+      radial-gradient(
+        ellipse at top,
+        oklch(var(--card) / 0.45) 0%,
+        oklch(var(--background) / 1) 52%,
+        oklch(var(--background) / 1) 100%
+      );
+  }
+
+  .uai-landing-grid-64 {
+    background-image:
+      linear-gradient(oklch(var(--foreground) / 0.04) 1px, transparent 1px),
+      linear-gradient(90deg, oklch(var(--foreground) / 0.04) 1px, transparent 1px);
+    background-size: 64px 64px;
+    mask-image: radial-gradient(closest-side, black 58%, transparent 100%);
+  }
+
+  .uai-landing-noise {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='260'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='260' height='260' filter='url(%23n)' opacity='.20'/%3E%3C/svg%3E");
+    background-size: 260px 260px;
+    mix-blend-mode: overlay;
+    opacity: 0.14;
+  }
+
+  .uai-landing-blob {
+    filter: blur(140px);
+    will-change: transform, opacity;
+  }
+
+  .uai-landing-blob-a {
+    background-image: radial-gradient(
+      circle at 30% 30%,
+      oklch(var(--primary) / 0.30),
+      transparent 62%
+    );
+    animation: uai-blob-float-a 10s ease-in-out infinite;
+  }
+
+  .uai-landing-blob-b {
+    background-image: radial-gradient(
+      circle at 60% 45%,
+      oklch(var(--primary) / 0.22),
+      transparent 64%
+    );
+    animation: uai-blob-float-b 12s ease-in-out infinite;
+  }
+
+  .uai-landing-blob-c {
+    background-image: radial-gradient(
+      circle at 50% 50%,
+      oklch(var(--primary) / 0.18),
+      transparent 60%
+    );
+    animation: uai-blob-pulse 9s ease-in-out infinite;
+  }
 }
