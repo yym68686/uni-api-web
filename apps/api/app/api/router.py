@@ -5,6 +5,10 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.responses import Response, StreamingResponse
+
+import httpx
+import json
 
 from app.auth import get_current_membership, get_current_user, require_admin
 from app.models.membership import Membership
@@ -45,7 +49,14 @@ from app.storage.orgs_db import ensure_default_org
 from app.storage.auth_db import grant_admin_role
 from app.storage.auth_db import login as auth_login
 from app.storage.auth_db import register_and_login, revoke_session
-from app.storage.channels_db import create_channel, delete_channel, list_channels, update_channel
+from app.storage.api_key_auth import authenticate_api_key
+from app.storage.channels_db import (
+    create_channel,
+    delete_channel,
+    list_channels,
+    pick_channel_for_group,
+    update_channel,
+)
 from app.storage.keys_db import create_api_key, list_api_keys, revoke_api_key
 from app.storage.oauth_google import login_with_google
 
@@ -354,6 +365,69 @@ async def admin_delete_channel(
     if not deleted:
         raise HTTPException(status_code=404, detail="not found")
     return deleted
+
+
+@router.post("/chat/completions")
+async def chat_completions(request: Request, session: AsyncSession = Depends(get_db_session)):
+    auth = request.headers.get("authorization")
+    try:
+        _api_key, user = await authenticate_api_key(session, authorization=auth)
+    except ValueError as e:
+        detail = str(e) or "unauthorized"
+        status = 403 if detail == "banned" else 401
+        raise HTTPException(status_code=status, detail=detail) from e
+
+    raw = await request.body()
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="invalid json") from e
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="invalid json")
+
+    membership = (
+        await session.execute(
+            select(Membership).where(Membership.user_id == user.id).order_by(Membership.created_at.asc())
+        )
+    ).scalars().first()
+    if not membership:
+        raise HTTPException(status_code=403, detail="missing membership")
+
+    channel = await pick_channel_for_group(session, org_id=membership.org_id, group_name=user.group_name)
+    if not channel:
+        raise HTTPException(status_code=503, detail="no channel configured")
+
+    upstream_url = f"{channel.base_url.rstrip('/')}/chat/completions"
+    headers: dict[str, str] = {
+        "authorization": f"Bearer {channel.api_key}",
+        "content-type": "application/json",
+    }
+    # Forward optional OpenAI compatibility headers if present.
+    for name in ("openai-organization", "openai-project", "anthropic-version"):
+        value = request.headers.get(name)
+        if value:
+            headers[name] = value
+
+    stream = bool(payload.get("stream"))
+    timeout = httpx.Timeout(60.0, connect=10.0)
+
+    if stream:
+        async def iterator():
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                async with client.stream("POST", upstream_url, headers=headers, content=raw) as res:
+                    async for chunk in res.aiter_raw():
+                        yield chunk
+
+        return StreamingResponse(
+            iterator(),
+            media_type="text/event-stream",
+            headers={"cache-control": "no-cache"},
+        )
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        res = await client.post(upstream_url, headers=headers, content=raw)
+    content_type = res.headers.get("content-type") or "application/json"
+    return Response(content=res.content, status_code=res.status_code, media_type=content_type)
 
 
 @router.get("/usage", response_model=UsageResponse)

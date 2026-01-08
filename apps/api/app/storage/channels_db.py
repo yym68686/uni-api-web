@@ -20,6 +20,7 @@ from app.schemas.channels import (
 )
 
 ALLOWED_SCHEMES: set[str] = {"http", "https"}
+WILDCARD_GROUPS: set[str] = {"*", "all"}
 
 
 def _dt_iso(value: dt.datetime) -> str:
@@ -101,6 +102,43 @@ async def list_channels(session: AsyncSession, *, org_id: uuid.UUID) -> LlmChann
     return LlmChannelsListResponse(items=items)
 
 
+async def pick_channel_for_group(
+    session: AsyncSession, *, org_id: uuid.UUID, group_name: str
+) -> LlmChannel | None:
+    group = group_name.strip() or "default"
+    channels = (
+        await session.execute(
+            select(LlmChannel)
+            .where(LlmChannel.org_id == org_id)
+            .order_by(LlmChannel.created_at.asc())
+        )
+    ).scalars().all()
+    if not channels:
+        return None
+
+    ids = [c.id for c in channels]
+    group_rows = (
+        await session.execute(
+            select(LlmChannelGroup.channel_id, LlmChannelGroup.group_name).where(
+                LlmChannelGroup.channel_id.in_(ids)
+            )
+        )
+    ).all()
+    allow_map: dict[uuid.UUID, set[str]] = {}
+    for channel_id, group_name_value in group_rows:
+        allow_map.setdefault(channel_id, set()).add(str(group_name_value))
+
+    for c in channels:
+        allow = allow_map.get(c.id, set())
+        if not allow:
+            return c
+        if group in allow:
+            return c
+        if allow.intersection(WILDCARD_GROUPS):
+            return c
+    return None
+
+
 async def create_channel(
     session: AsyncSession, *, org_id: uuid.UUID, input: LlmChannelCreateRequest
 ) -> LlmChannelCreateResponse:
@@ -166,4 +204,3 @@ async def delete_channel(
     await session.delete(row)
     await session.commit()
     return LlmChannelDeleteResponse(ok=True, id=str(channel_id))
-

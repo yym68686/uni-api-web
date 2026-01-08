@@ -68,6 +68,12 @@ function isProtectedPath(pathname: string) {
 export async function proxy(req: NextRequest) {
   const { pathname, searchParams } = req.nextUrl;
 
+  if (pathname === "/v1" || pathname.startsWith("/v1/")) {
+    const upstreamPath = pathname.replace(/^\/v1/, "") || "/";
+    const upstream = buildBackendUrl(upstreamPath) + req.nextUrl.search;
+    return NextResponse.rewrite(new URL(upstream));
+  }
+
   const session = req.cookies.get(SESSION_COOKIE_NAME)?.value;
   const hasSessionCookie = isLoggedInCookie(session);
   const sessionValid = hasSessionCookie && session ? await isSessionValid(session) : false;
