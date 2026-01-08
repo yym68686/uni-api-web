@@ -1,4 +1,18 @@
 services:
+  web:
+    build:
+      context: .
+    container_name: uni-api-frontend
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      API_BASE_URL: http://api:8000/v1
+      NEXT_TELEMETRY_DISABLED: 1
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+
   postgres:
     image: postgres:17.6-alpine
     container_name: uni-api-postgres
