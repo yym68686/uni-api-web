@@ -58,8 +58,10 @@ function isProtectedPath(pathname: string) {
   if (pathname === "/") return true;
   if (pathname.startsWith("/keys")) return true;
   if (pathname.startsWith("/settings")) return true;
+  if (pathname.startsWith("/admin")) return true;
   if (pathname.startsWith("/api/keys")) return true;
   if (pathname.startsWith("/api/usage")) return true;
+  if (pathname.startsWith("/api/admin")) return true;
   return false;
 }
 

@@ -33,6 +33,7 @@ Endpoints:
 - `GET /v1/keys`
 - `POST /v1/keys`
 - `DELETE /v1/keys/{key_id}`
+- `POST /v1/admin/announcements`
 
 Notes:
 - Keys are stored in Postgres (SQLAlchemy async); only a masked `prefix` is returned in list endpoints.

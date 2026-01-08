@@ -14,3 +14,12 @@ class AnnouncementItem(BaseModel):
 class AnnouncementsListResponse(BaseModel):
     items: list[AnnouncementItem]
 
+
+class AnnouncementCreateRequest(BaseModel):
+    title: str
+    meta: str
+    level: str = "warning"
+
+
+class AnnouncementCreateResponse(BaseModel):
+    item: AnnouncementItem

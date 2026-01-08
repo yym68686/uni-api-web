@@ -53,3 +53,13 @@ export interface AnnouncementItem {
 export interface AnnouncementsListResponse {
   items: AnnouncementItem[];
 }
+
+export interface AnnouncementCreateRequest {
+  title: string;
+  meta: string;
+  level: "info" | "warning" | "success" | "destructive";
+}
+
+export interface AnnouncementCreateResponse {
+  item: AnnouncementItem;
+}

@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { KeyRound, LayoutDashboard, Settings } from "lucide-react";
+import * as React from "react";
+import { KeyRound, LayoutDashboard, Megaphone, Settings } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -12,12 +13,35 @@ const navItems = [
   { href: "/settings", label: "Settings", icon: Settings }
 ] as const;
 
+const adminItems = [{ href: "/admin/announcements", label: "Announcements", icon: Megaphone }] as const;
+
 interface AppSidebarContentProps {
   onNavigate?: () => void;
 }
 
 export function AppSidebarContent({ onNavigate }: AppSidebarContentProps) {
   const pathname = usePathname();
+  const [role, setRole] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const res = await fetch("/api/auth/me", { cache: "no-store" });
+        if (!res.ok) return;
+        const json: unknown = await res.json();
+        if (!json || typeof json !== "object") return;
+        const r = (json as { role?: unknown }).role;
+        if (!cancelled && typeof r === "string") setRole(r);
+      } catch {
+        // ignore
+      }
+    }
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <div className="flex h-full flex-col">
@@ -76,6 +100,35 @@ export function AppSidebarContent({ onNavigate }: AppSidebarContentProps) {
             );
           })}
         </div>
+
+        {role === "admin" ? (
+          <div className="mt-4 space-y-1">
+            <div className="px-3 py-2 text-xs font-semibold text-muted-foreground">
+              Admin
+            </div>
+            {adminItems.map((item) => {
+              const active = pathname.startsWith(item.href);
+              const Icon = item.icon;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={onNavigate}
+                  className={cn(
+                    "flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium",
+                    "transition-colors",
+                    active
+                      ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                      : "text-sidebar-foreground/80 hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground"
+                  )}
+                >
+                  <Icon className="h-4 w-4" />
+                  <span className="truncate">{item.label}</span>
+                </Link>
+              );
+            })}
+          </div>
+        ) : null}
       </nav>
 
       <div className="border-t border-border p-4">

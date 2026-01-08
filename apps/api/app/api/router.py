@@ -3,13 +3,17 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user
-from app.schemas.announcements import AnnouncementsListResponse
+from app.auth import get_current_user, require_admin
+from app.schemas.announcements import (
+    AnnouncementCreateRequest,
+    AnnouncementCreateResponse,
+    AnnouncementsListResponse,
+)
 from app.schemas.auth import AuthResponse, GoogleOAuthExchangeRequest, LoginRequest, RegisterRequest, UserPublic
 from app.schemas.keys import ApiKeyCreateRequest, ApiKeyCreateResponse, ApiKeysListResponse
 from app.schemas.usage import UsageResponse
 from app.db import get_db_session
-from app.storage.announcements_db import list_announcements
+from app.storage.announcements_db import create_announcement, list_announcements
 from app.storage.auth_db import grant_admin_role
 from app.storage.auth_db import login as auth_login
 from app.storage.auth_db import register_and_login, revoke_session
@@ -119,6 +123,19 @@ async def announcements(
     session: AsyncSession = Depends(get_db_session), current_user=Depends(get_current_user)
 ) -> AnnouncementsListResponse:
     return await list_announcements(session)
+
+
+@router.post("/admin/announcements", response_model=AnnouncementCreateResponse)
+async def admin_create_announcement(
+    payload: AnnouncementCreateRequest,
+    session: AsyncSession = Depends(get_db_session),
+    admin_user=Depends(require_admin),
+) -> AnnouncementCreateResponse:
+    _ = admin_user
+    try:
+        return await create_announcement(session, payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.get("/usage", response_model=UsageResponse)

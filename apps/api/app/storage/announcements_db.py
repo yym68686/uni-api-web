@@ -6,7 +6,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.announcement import Announcement
-from app.schemas.announcements import AnnouncementItem, AnnouncementsListResponse
+from app.schemas.announcements import (
+    AnnouncementCreateRequest,
+    AnnouncementCreateResponse,
+    AnnouncementItem,
+    AnnouncementsListResponse,
+)
 
 
 def _dt_iso(value: dt.datetime) -> str:
@@ -30,6 +35,31 @@ async def list_announcements(session: AsyncSession, limit: int = 6) -> Announcem
         )
     ).scalars().all()
     return AnnouncementsListResponse(items=[_to_item(r) for r in rows])
+
+
+async def create_announcement(
+    session: AsyncSession, input: AnnouncementCreateRequest
+) -> AnnouncementCreateResponse:
+    title = input.title.strip()
+    meta = input.meta.strip()
+    level = input.level.strip() or "warning"
+
+    if len(title) < 2:
+        raise ValueError("title too small (min 2)")
+    if len(title) > 180:
+        raise ValueError("title too large (max 180)")
+    if len(meta) < 2:
+        raise ValueError("meta too small (min 2)")
+    if len(meta) > 120:
+        raise ValueError("meta too large (max 120)")
+    if level not in {"info", "warning", "success", "destructive"}:
+        raise ValueError("invalid level")
+
+    row = Announcement(title=title, meta=meta, level=level)
+    session.add(row)
+    await session.commit()
+    await session.refresh(row)
+    return AnnouncementCreateResponse(item=_to_item(row))
 
 
 async def ensure_seed_announcements(session: AsyncSession) -> None:
@@ -60,4 +90,3 @@ async def ensure_seed_announcements(session: AsyncSession) -> None:
     ]
     session.add_all(seeds)
     await session.commit()
-
