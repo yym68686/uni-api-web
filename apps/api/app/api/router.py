@@ -59,6 +59,7 @@ from app.storage.channels_db import (
     update_channel,
 )
 from app.storage.models_db import UNSET, get_model_config, list_admin_models, upsert_model_config
+from app.storage.usage_db import record_usage_event
 from app.storage.keys_db import create_api_key, list_api_keys, revoke_api_key
 from app.storage.oauth_google import login_with_google
 
@@ -391,6 +392,10 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
     if not isinstance(model_id, str) or not model_id.strip():
         raise HTTPException(status_code=400, detail="missing model")
 
+    # Basic credit gate (balance is maintained by admin for now).
+    if int(getattr(user, "balance", 0)) <= 0:
+        raise HTTPException(status_code=402, detail="insufficient balance")
+
     membership = (
         await session.execute(
             select(Membership).where(Membership.user_id == user.id).order_by(Membership.created_at.asc())
@@ -437,6 +442,54 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
     async with httpx.AsyncClient(timeout=timeout) as client:
         res = await client.post(upstream_url, headers=headers, content=raw)
     content_type = res.headers.get("content-type") or "application/json"
+
+    # Record usage/spend for dashboard. (Streaming requests currently skip accounting.)
+    input_tokens = 0
+    output_tokens = 0
+    total_tokens = 0
+    cost_micros = 0
+    ok = res.status_code < 400
+    if content_type.startswith("application/json"):
+        try:
+            body = res.json()
+            usage = body.get("usage") if isinstance(body, dict) else None
+            if isinstance(usage, dict):
+                input_tokens = int(usage.get("prompt_tokens") or 0)
+                output_tokens = int(usage.get("completion_tokens") or 0)
+                total_tokens = int(usage.get("total_tokens") or (input_tokens + output_tokens))
+        except Exception:
+            pass
+
+    # Estimate cost using configured/default pricing when usage is present.
+    if ok and total_tokens > 0:
+        cfg = await get_model_config(session, org_id=membership.org_id, model_id=model_id.strip())
+        from app.storage.models_db import default_price_for_model
+
+        default_in, default_out = default_price_for_model(model_id.strip())
+        in_price = cfg.input_usd_micros_per_m if (cfg and cfg.input_usd_micros_per_m is not None) else default_in
+        out_price = cfg.output_usd_micros_per_m if (cfg and cfg.output_usd_micros_per_m is not None) else default_out
+        if in_price is not None and input_tokens > 0:
+            cost_micros += int((input_tokens * int(in_price) + 999_999) // 1_000_000)
+        if out_price is not None and output_tokens > 0:
+            cost_micros += int((output_tokens * int(out_price) + 999_999) // 1_000_000)
+
+    try:
+        await record_usage_event(
+            session,
+            org_id=membership.org_id,
+            user_id=user.id,
+            model_id=model_id.strip(),
+            ok=ok,
+            status_code=int(res.status_code),
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+            cost_usd_micros=cost_micros,
+        )
+    except Exception:
+        # Accounting should not break the request path.
+        pass
+
     return Response(content=res.content, status_code=res.status_code, media_type=content_type)
 
 
@@ -488,14 +541,14 @@ async def admin_update_model(
 
 
 @router.get("/usage", response_model=UsageResponse)
-async def usage(current_user=Depends(get_current_user)) -> dict:
-    # TODO: Replace with real Postgres aggregation.
-    # Keep response shape consistent with the console's current expectations.
-    return {
-        "summary": {"requests24h": 0, "tokens24h": 0, "errorRate24h": 0, "spend24hUsd": 0},
-        "daily": [],
-        "topModels": [],
-    }
+async def usage(
+    session: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+    membership=Depends(get_current_membership),
+) -> dict:
+    from app.storage.usage_db import get_usage_response
+
+    return await get_usage_response(session, org_id=membership.org_id, user_id=current_user.id)
 
 
 @router.get("/keys", response_model=ApiKeysListResponse)

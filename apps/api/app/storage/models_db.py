@@ -45,7 +45,7 @@ def _normalize_model_id(value: str) -> str:
     return v
 
 
-def _default_price_for_model(model_id: str) -> tuple[int | None, int | None]:
+def default_price_for_model(model_id: str) -> tuple[int | None, int | None]:
     for prefix in sorted(DEFAULT_USD_PER_M_BY_PREFIX.keys(), key=len, reverse=True):
         if model_id.startswith(prefix):
             input_usd, output_usd = DEFAULT_USD_PER_M_BY_PREFIX.get(prefix, (None, None))
@@ -186,7 +186,7 @@ async def list_admin_models(
     for mid in sorted(all_ids):
         cfg = config_map.get(mid)
         enabled = True if not cfg else bool(cfg.enabled)
-        default_in, default_out = _default_price_for_model(mid)
+        default_in, default_out = default_price_for_model(mid)
         input_micros = cfg.input_usd_micros_per_m if (cfg and cfg.input_usd_micros_per_m is not None) else default_in
         output_micros = cfg.output_usd_micros_per_m if (cfg and cfg.output_usd_micros_per_m is not None) else default_out
         items.append(
