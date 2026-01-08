@@ -6,7 +6,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.api_key import ApiKey
-from app.schemas.keys import ApiKeyCreateRequest, ApiKeyCreateResponse, ApiKeyItem, ApiKeysListResponse
+from app.schemas.keys import (
+    ApiKeyCreateRequest,
+    ApiKeyCreateResponse,
+    ApiKeyItem,
+    ApiKeysListResponse,
+)
 from app.security import generate_api_key, key_prefix, sha256_hex
 
 
@@ -47,12 +52,32 @@ async def create_api_key(
         name=input.name.strip(),
         key_hash=sha256_hex(full_key),
         prefix=key_prefix(full_key),
+        key_plaintext=full_key,
         created_at=dt.datetime.now(dt.timezone.utc),
     )
     session.add(row)
     await session.commit()
     await session.refresh(row)
     return ApiKeyCreateResponse(item=_to_item(row), key=full_key)
+
+
+async def reveal_api_key(
+    session: AsyncSession, key_id: str, *, user_id: uuid.UUID
+) -> str | None:
+    try:
+        parsed = uuid.UUID(key_id)
+    except ValueError:
+        return None
+
+    row = await session.get(ApiKey, parsed)
+    if not row:
+        return None
+    if row.user_id != user_id:
+        return None
+    secret = getattr(row, "key_plaintext", None)
+    if not isinstance(secret, str) or secret.strip() == "":
+        return None
+    return secret.strip()
 
 
 async def revoke_api_key(

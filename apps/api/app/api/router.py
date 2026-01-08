@@ -12,6 +12,7 @@ import httpx
 import json
 
 from app.auth import get_current_membership, get_current_user, require_admin
+from app.models.api_key import ApiKey
 from app.models.membership import Membership
 from app.schemas.announcements import (
     AnnouncementCreateRequest,
@@ -35,6 +36,7 @@ from app.schemas.keys import (
     ApiKeyCreateResponse,
     ApiKeyDeleteResponse,
     ApiKeysListResponse,
+    ApiKeyRevealResponse,
     ApiKeyUpdateRequest,
     ApiKeyUpdateResponse,
 )
@@ -72,7 +74,12 @@ from app.storage.channels_db import (
 )
 from app.storage.models_db import UNSET, get_model_config, list_admin_models, list_user_models, upsert_model_config
 from app.storage.usage_db import list_usage_events, record_usage_event
-from app.storage.keys_db import create_api_key, delete_api_key, list_api_keys, set_api_key_revoked
+from app.storage.keys_db import (
+    create_api_key,
+    delete_api_key,
+    list_api_keys,
+    set_api_key_revoked,
+)
 from app.storage.oauth_google import login_with_google
 from app.schemas.logs import LogsListResponse
 from app.db import SessionLocal
@@ -810,3 +817,23 @@ async def delete_key(
     if not ok:
         raise HTTPException(status_code=404, detail="not found")
     return ApiKeyDeleteResponse(ok=True, id=key_id)
+
+
+@router.get("/keys/{key_id}/reveal", response_model=ApiKeyRevealResponse)
+async def reveal_key(
+    key_id: str,
+    session: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+) -> ApiKeyRevealResponse:
+    try:
+        parsed = uuid.UUID(key_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="not found") from None
+
+    row = await session.get(ApiKey, parsed)
+    if not row or row.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="not found")
+    key = getattr(row, "key_plaintext", None)
+    if not isinstance(key, str) or key.strip() == "":
+        raise HTTPException(status_code=409, detail="key not stored; rotate")
+    return ApiKeyRevealResponse(id=key_id, key=key.strip())

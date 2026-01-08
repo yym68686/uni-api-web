@@ -100,7 +100,7 @@ export function CreateKeyDialog({
       const json: ApiKeyCreateResponse = (await res.json()) as ApiKeyCreateResponse;
       setCreatedKey(json.key);
       onCreated(json);
-      toast.success("API Key 已创建（只显示一次）");
+      toast.success("API Key 已创建");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "创建失败");
     } finally {
@@ -140,7 +140,7 @@ export function CreateKeyDialog({
         <DialogHeader>
           <DialogTitle>创建 API Key</DialogTitle>
           <DialogDescription>
-            Key 只会展示一次，请立即复制并妥善保存。
+            请妥善保存 Key；你也可以在列表中随时复制完整 Key。
           </DialogDescription>
         </DialogHeader>
 

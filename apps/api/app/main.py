@@ -61,6 +61,10 @@ def create_app() -> FastAPI:
                 "ADD COLUMN IF NOT EXISTS user_id uuid"
             )
             await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS api_keys "
+                "ADD COLUMN IF NOT EXISTS key_plaintext text"
+            )
+            await conn.exec_driver_sql(
                 "DO $$ BEGIN "
                 "IF NOT EXISTS ("
                 "  SELECT 1 FROM pg_constraint WHERE conname = 'api_keys_user_id_fkey'"

@@ -1,9 +1,10 @@
 "use client";
 
 import * as React from "react";
-import { Copy, MoreHorizontal, RotateCcw, Trash2 } from "lucide-react";
+import { Copy, Loader2, MoreHorizontal, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
+import type { ApiKeyRevealResponse } from "@/lib/types";
 import type { ApiKeyItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -58,6 +59,7 @@ export function KeysTable({
   const [revokingId, setRevokingId] = React.useState<string | null>(null);
   const [deletingId, setDeletingId] = React.useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = React.useState<ApiKeyItem | null>(null);
+  const [copyingId, setCopyingId] = React.useState<string | null>(null);
 
   async function toggleRevoked(id: string, revoked: boolean) {
     setRevokingId(id);
@@ -90,13 +92,39 @@ export function KeysTable({
     }
   }
 
+  function isRevealResponse(value: unknown): value is ApiKeyRevealResponse {
+    if (!value || typeof value !== "object") return false;
+    const v = value as { key?: unknown };
+    return typeof v.key === "string" && v.key.length > 10;
+  }
+
   async function copyFullKey(id: string) {
     const full = fullKeysById?.[id];
-    if (!full) {
-      toast.error("完整 Key 仅在创建时展示一次，无法再次复制");
+    if (full) {
+      await copy(full);
       return;
     }
-    await copy(full);
+
+    setCopyingId(id);
+    try {
+      const res = await fetch(`/api/keys/${encodeURIComponent(id)}/reveal`, { cache: "no-store" });
+      const json: unknown = await res.json().catch(() => null);
+      if (!res.ok) {
+        const message =
+          json && typeof json === "object" && "message" in json
+            ? String((json as { message?: unknown }).message ?? "复制失败")
+            : "复制失败";
+        throw new Error(message);
+      }
+      if (!isRevealResponse(json)) {
+        throw new Error("无法获取完整 Key（可能是旧 Key，请重新创建）");
+      }
+      await copy(json.key);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "复制失败");
+    } finally {
+      setCopyingId(null);
+    }
   }
 
   return (
@@ -118,7 +146,7 @@ export function KeysTable({
             <TableBody>
               {items.map((k) => {
                 const revoked = Boolean(k.revokedAt);
-                const canCopyFull = Boolean(fullKeysById?.[k.id]);
+                const isCopying = copyingId === k.id;
                 return (
                   <TableRow key={k.id}>
                     <TableCell className="font-medium">{k.name}</TableCell>
@@ -131,18 +159,20 @@ export function KeysTable({
                               size="icon"
                               variant="ghost"
                               className="h-8 w-8 rounded-xl"
-                              disabled={!canCopyFull}
+                              disabled={isCopying}
                               onClick={() => {
                                 void copyFullKey(k.id);
                               }}
                             >
-                              <Copy className="h-4 w-4" />
+                              {isCopying ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Copy className="h-4 w-4" />
+                              )}
                               <span className="sr-only">Copy</span>
                             </Button>
                           </TooltipTrigger>
-                          <TooltipContent>
-                            {canCopyFull ? "复制完整 Key" : "完整 Key 不可再次获取"}
-                          </TooltipContent>
+                          <TooltipContent>复制完整 Key</TooltipContent>
                         </Tooltip>
                       </div>
                     </TableCell>
@@ -170,7 +200,7 @@ export function KeysTable({
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem
-                            disabled={!canCopyFull}
+                            disabled={isCopying}
                             onClick={() => {
                               void copyFullKey(k.id);
                             }}
@@ -179,7 +209,7 @@ export function KeysTable({
                             Copy full key
                           </DropdownMenuItem>
                           <DropdownMenuItem
-                            disabled={revokingId === k.id || deletingId === k.id}
+                            disabled={revokingId === k.id || deletingId === k.id || isCopying}
                             onClick={() => {
                               void toggleRevoked(k.id, !revoked);
                             }}

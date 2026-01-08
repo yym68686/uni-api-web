@@ -36,3 +36,8 @@ class ApiKeyUpdateResponse(BaseModel):
 class ApiKeyDeleteResponse(BaseModel):
     ok: bool
     id: str
+
+
+class ApiKeyRevealResponse(BaseModel):
+    id: str
+    key: str

@@ -42,6 +42,11 @@ export interface ApiKeyCreateResponse {
   key: string;
 }
 
+export interface ApiKeyRevealResponse {
+  id: string;
+  key: string;
+}
+
 export interface AnnouncementItem {
   id: string;
   title: string;

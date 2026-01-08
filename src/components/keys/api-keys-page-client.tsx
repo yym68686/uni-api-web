@@ -89,7 +89,7 @@ export function ApiKeysPageClient({ initialItems }: ApiKeysPageClientProps) {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">API Keys</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            创建与管理访问凭证（列表仅显示掩码；完整 Key 只展示一次）。
+            创建与管理访问凭证（列表默认显示掩码，可随时复制完整 Key）。
           </p>
         </div>
 
