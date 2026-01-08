@@ -65,7 +65,7 @@ export default async function AdminAnnouncementsPage() {
   const me = await getMe();
   const items = (await getAnnouncements()) ?? [];
 
-  const isAdmin = me?.role === "admin";
+  const isAdmin = me?.role === "admin" || me?.role === "owner";
 
   return (
     <div className="space-y-6">

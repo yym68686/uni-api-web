@@ -12,6 +12,7 @@ from app.models.user import User
 from app.schemas.auth import AuthResponse, LoginRequest, RegisterRequest, UserPublic
 from app.security import sha256_hex
 from app.security_password import hash_password, verify_password
+from app.storage.orgs_db import ADMIN_LIKE_ROLES, ensure_default_org, ensure_membership, get_membership
 
 
 def _dt_iso(value: dt.datetime | None) -> str | None:
@@ -26,6 +27,7 @@ def _to_user_public(row: User) -> UserPublic:
         email=row.email,
         role=row.role,
         balance=int(row.balance),
+        orgId=None,
         createdAt=_dt_iso(row.created_at) or dt.datetime.now(dt.timezone.utc).isoformat(),
         lastLoginAt=_dt_iso(row.last_login_at),
     )
@@ -66,9 +68,17 @@ async def create_user(session: AsyncSession, input: RegisterRequest) -> User:
         raise ValueError("email already registered")
 
     is_first = await _is_first_user(session)
-    role = "admin" if is_first or _should_grant_admin(input.admin_bootstrap_token) else "user"
-    row = User(email=email, password_hash=hash_password(input.password), role=role)
+    requested_admin = _should_grant_admin(input.admin_bootstrap_token)
+
+    row = User(email=email, password_hash=hash_password(input.password), role="user")
     session.add(row)
+    await session.commit()
+    await session.refresh(row)
+
+    org = await ensure_default_org(session)
+    membership_role = "owner" if is_first else ("admin" if requested_admin else "developer")
+    await ensure_membership(session, org_id=org.id, user_id=row.id, role=membership_role)
+    row.role = "admin" if membership_role in ADMIN_LIKE_ROLES else "user"
     await session.commit()
     await session.refresh(row)
     return row
@@ -93,6 +103,14 @@ async def authenticate_user(session: AsyncSession, input: LoginRequest) -> User 
 async def grant_admin_role(session: AsyncSession, user: User, token: str) -> User:
     if not _should_grant_admin(token):
         raise ValueError("invalid bootstrap token")
+    org = await ensure_default_org(session)
+    membership = await get_membership(session, org_id=org.id, user_id=user.id)
+    if not membership:
+        membership = await ensure_membership(session, org_id=org.id, user_id=user.id, role="admin")
+    if membership.role not in ADMIN_LIKE_ROLES:
+        membership.role = "admin"
+        await session.commit()
+        await session.refresh(membership)
     if user.role != "admin":
         user.role = "admin"
         await session.commit()

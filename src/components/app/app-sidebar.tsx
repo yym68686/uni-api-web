@@ -25,6 +25,7 @@ interface AppSidebarContentProps {
 export function AppSidebarContent({ onNavigate }: AppSidebarContentProps) {
   const pathname = usePathname();
   const [role, setRole] = React.useState<string | null>(null);
+  const isAdmin = role === "admin" || role === "owner";
 
   React.useEffect(() => {
     let cancelled = false;
@@ -104,7 +105,7 @@ export function AppSidebarContent({ onNavigate }: AppSidebarContentProps) {
           })}
         </div>
 
-        {role === "admin" ? (
+        {isAdmin ? (
           <div className="mt-4 space-y-1">
             <div className="px-3 py-2 text-xs font-semibold text-muted-foreground">
               Admin

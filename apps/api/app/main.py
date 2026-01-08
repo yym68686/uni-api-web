@@ -10,6 +10,7 @@ from app.api.router import router as api_router
 from app.db import SessionLocal, engine
 from app.models.base import Base
 from app.storage.announcements_db import ensure_seed_announcements
+from app.storage.orgs_db import ensure_default_org, ensure_membership
 
 import app.models  # noqa: F401
 
@@ -57,6 +58,25 @@ def create_app() -> FastAPI:
                 "SET user_id = (SELECT id FROM users ORDER BY created_at ASC LIMIT 1) "
                 "WHERE user_id IS NULL"
             )
+        # Bootstrap the default org and backfill memberships for existing users.
+        async with SessionLocal() as session:
+            org = await ensure_default_org(session)
+            from sqlalchemy import select
+            from app.models.user import User
+            from app.models.membership import Membership
+
+            users = (await session.execute(select(User).order_by(User.created_at.asc()))).scalars().all()
+            existing = (
+                await session.execute(
+                    select(Membership.user_id).where(Membership.org_id == org.id)
+                )
+            ).scalars().all()
+            existing_ids = set(existing)
+            for idx, user in enumerate(users):
+                if user.id in existing_ids:
+                    continue
+                role = "owner" if idx == 0 else "developer"
+                await ensure_membership(session, org_id=org.id, user_id=user.id, role=role)
         if settings.app_env == "dev" and settings.seed_demo_data:
             async with SessionLocal() as session:
                 await ensure_seed_announcements(session)

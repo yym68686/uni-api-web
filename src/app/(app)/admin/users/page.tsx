@@ -65,7 +65,7 @@ async function getUsers() {
 
 export default async function AdminUsersPage() {
   const me = await getMe();
-  const isAdmin = me?.role === "admin";
+  const isAdmin = me?.role === "admin" || me?.role === "owner";
   const users = isAdmin ? (await getUsers()) ?? [] : [];
 
   return (
@@ -122,7 +122,10 @@ export default async function AdminUsersPage() {
                     <TableRow key={u.id}>
                       <TableCell className="font-medium text-foreground">{u.email}</TableCell>
                       <TableCell>
-                        <Badge variant={u.role === "admin" ? "warning" : "default"} className="capitalize">
+                        <Badge
+                          variant={u.role === "admin" || u.role === "owner" ? "warning" : "default"}
+                          className="capitalize"
+                        >
                           {u.role}
                         </Badge>
                       </TableCell>

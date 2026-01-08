@@ -13,6 +13,7 @@ from app.models.user import User
 from app.schemas.auth import AuthResponse, UserPublic
 from app.security_password import hash_password
 from app.storage.auth_db import create_session
+from app.storage.orgs_db import ADMIN_LIKE_ROLES, ensure_default_org, ensure_membership, get_membership
 
 
 class GoogleProfile:
@@ -34,6 +35,7 @@ def _to_user_public(row: User) -> UserPublic:
         email=row.email,
         role=row.role,
         balance=int(row.balance),
+        orgId=None,
         createdAt=_dt_iso(row.created_at) or dt.datetime.now(dt.timezone.utc).isoformat(),
         lastLoginAt=_dt_iso(row.last_login_at),
     )
@@ -112,12 +114,23 @@ async def login_with_google(
 
     if not user:
         user = User(email=profile.email, password_hash=hash_password(secrets.token_urlsafe(32)))
-        count = (await session.execute(select(func.count()).select_from(User))).scalar_one()
-        if int(count) == 0:
-            user.role = "admin"
         session.add(user)
         await session.commit()
         await session.refresh(user)
+
+        org = await ensure_default_org(session)
+        count = (await session.execute(select(func.count()).select_from(User))).scalar_one()
+        membership_role = "owner" if int(count) == 1 else "developer"
+        await ensure_membership(session, org_id=org.id, user_id=user.id, role=membership_role)
+        user.role = "admin" if membership_role in ADMIN_LIKE_ROLES else "user"
+        await session.commit()
+        await session.refresh(user)
+
+    else:
+        org = await ensure_default_org(session)
+        membership = await get_membership(session, org_id=org.id, user_id=user.id)
+        if not membership:
+            await ensure_membership(session, org_id=org.id, user_id=user.id, role="developer")
 
     if user.banned_at is not None:
         raise ValueError("banned")

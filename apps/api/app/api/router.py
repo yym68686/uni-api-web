@@ -5,7 +5,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user, require_admin
+from app.auth import get_current_membership, get_current_user, require_admin
 from app.schemas.announcements import (
     AnnouncementCreateRequest,
     AnnouncementCreateResponse,
@@ -31,6 +31,7 @@ from app.storage.announcements_db import (
     update_announcement,
 )
 from app.storage.admin_users_db import delete_admin_user, list_admin_users, update_admin_user
+from app.storage.orgs_db import ensure_default_org
 from app.storage.auth_db import grant_admin_role
 from app.storage.auth_db import login as auth_login
 from app.storage.auth_db import register_and_login, revoke_session
@@ -88,7 +89,10 @@ async def logout(
 
 
 @router.get("/auth/me", response_model=UserPublic)
-async def me(current_user=Depends(get_current_user)) -> UserPublic:  # type: ignore[no-untyped-def]
+async def me(
+    current_user=Depends(get_current_user),
+    membership=Depends(get_current_membership),
+) -> UserPublic:  # type: ignore[no-untyped-def]
     import datetime as dt
 
     def _dt_iso(value: dt.datetime | None) -> str | None:
@@ -99,8 +103,9 @@ async def me(current_user=Depends(get_current_user)) -> UserPublic:  # type: ign
     return UserPublic(
         id=str(current_user.id),
         email=current_user.email,
-        role=current_user.role,
+        role=membership.role,
         balance=int(current_user.balance),
+        orgId=str(membership.org_id),
         createdAt=_dt_iso(current_user.created_at) or dt.datetime.now(dt.timezone.utc).isoformat(),
         lastLoginAt=_dt_iso(current_user.last_login_at),
     )
@@ -202,7 +207,8 @@ async def admin_list_users(
     admin_user=Depends(require_admin),
 ) -> AdminUsersListResponse:
     _ = admin_user
-    return await list_admin_users(session)
+    org = await ensure_default_org(session)
+    return await list_admin_users(session, org_id=org.id)
 
 
 @router.patch("/admin/users/{user_id}", response_model=AdminUserUpdateResponse)
