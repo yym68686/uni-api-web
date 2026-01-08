@@ -20,5 +20,10 @@ class Settings(BaseSettings):
 
     admin_bootstrap_token: str = ""
 
+    resend_api_key: str = ""
+    resend_from_email: str = "Uni API <onboarding@resend.dev>"
+    email_verification_ttl_minutes: int = 10
+    email_verification_required: bool = True
+
 
 settings = Settings()

@@ -29,6 +29,7 @@ from app.schemas.admin_users import (
 )
 from app.schemas.account import AccountDeleteResponse
 from app.schemas.auth import AuthResponse, GoogleOAuthExchangeRequest, LoginRequest, RegisterRequest, UserPublic
+from app.schemas.email_verification import EmailCodeRequest, EmailCodeResponse, RegisterVerifyRequest
 from app.schemas.keys import (
     ApiKeyCreateRequest,
     ApiKeyCreateResponse,
@@ -75,6 +76,7 @@ from app.storage.keys_db import create_api_key, delete_api_key, list_api_keys, s
 from app.storage.oauth_google import login_with_google
 from app.schemas.logs import LogsListResponse
 from app.db import SessionLocal
+from app.storage.email_verification_db import request_email_code, verify_email_code
 
 router = APIRouter()
 
@@ -88,8 +90,65 @@ async def health() -> dict[str, str]:
 async def register(
     payload: RegisterRequest, session: AsyncSession = Depends(get_db_session)
 ) -> AuthResponse:
+    from app.core.config import settings
+
+    if settings.email_verification_required:
+        raise HTTPException(status_code=400, detail="email verification required")
     try:
         return await register_and_login(session, payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post("/auth/email/request", response_model=EmailCodeResponse)
+async def email_request_code(
+    payload: EmailCodeRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+) -> EmailCodeResponse:
+    xff = request.headers.get("x-forwarded-for")
+    client_ip = xff.split(",")[0].strip()[:64] if xff and xff.strip() else (request.client.host if request.client else None)
+    try:
+        expires = await request_email_code(
+            session,
+            email=str(payload.email),
+            purpose=str(payload.purpose),
+            client_ip=client_ip,
+        )
+    except ValueError as e:
+        msg = str(e)
+        if msg in {"too many requests", "please wait"}:
+            raise HTTPException(status_code=429, detail=msg) from e
+        raise HTTPException(status_code=400, detail=msg) from e
+    return EmailCodeResponse(ok=True, expiresInSeconds=expires)
+
+
+@router.post("/auth/register/verify", response_model=AuthResponse)
+async def register_verify(
+    payload: RegisterVerifyRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+) -> AuthResponse:
+    _ = request
+    try:
+        await verify_email_code(
+            session,
+            email=str(payload.email),
+            purpose="register",
+            code=str(payload.code),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    try:
+        return await register_and_login(
+            session,
+            RegisterRequest(
+                email=payload.email,
+                password=payload.password,
+                adminBootstrapToken=payload.admin_bootstrap_token,
+            ),
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
