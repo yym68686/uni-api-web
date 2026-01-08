@@ -101,6 +101,7 @@ export interface AdminUserUpdateRequest {
   balance?: number;
   banned?: boolean;
   group?: string | null;
+  role?: "owner" | "admin" | "billing" | "developer" | "viewer" | string | null;
 }
 
 export interface AdminUserUpdateResponse {

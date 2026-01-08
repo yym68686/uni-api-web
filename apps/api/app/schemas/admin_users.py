@@ -26,6 +26,7 @@ class AdminUserUpdateRequest(BaseModel):
     balance: int | None = None
     banned: bool | None = None
     group: str | None = None
+    role: str | None = None
 
 
 class AdminUserUpdateResponse(BaseModel):

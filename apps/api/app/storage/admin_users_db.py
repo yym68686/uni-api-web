@@ -18,6 +18,8 @@ from app.schemas.admin_users import (
     AdminUserUpdateResponse,
 )
 
+ALLOWED_MEMBERSHIP_ROLES: set[str] = {"owner", "admin", "billing", "developer", "viewer"}
+
 
 def _dt_iso(value: dt.datetime | None) -> str | None:
     if not value:
@@ -132,11 +134,27 @@ async def get_admin_user(
 
 
 async def update_admin_user(
-    session: AsyncSession, user_id: uuid.UUID, input: AdminUserUpdateRequest
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_role: str,
+    user_id: uuid.UUID,
+    input: AdminUserUpdateRequest,
 ) -> AdminUserUpdateResponse | None:
     user = await session.get(User, user_id)
     if not user:
         return None
+
+    membership = (
+        await session.execute(
+            select(Membership).where(Membership.org_id == org_id, Membership.user_id == user_id)
+        )
+    ).scalars().first()
+    if not membership:
+        membership = Membership(org_id=org_id, user_id=user_id, role="developer")
+        session.add(membership)
+        await session.commit()
+        await session.refresh(membership)
 
     if input.balance is not None:
         if input.balance < 0:
@@ -165,12 +183,34 @@ async def update_admin_user(
             raise ValueError("group too large (max 64)")
         user.group_name = group
 
+    if "role" in fields_set:
+        raw_role = (input.role or "").strip().lower()
+        if raw_role == "":
+            raise ValueError("missing role")
+        if raw_role not in ALLOWED_MEMBERSHIP_ROLES:
+            raise ValueError("invalid role")
+
+        if raw_role == "owner" or membership.role == "owner":
+            if actor_role != "owner":
+                raise ValueError("only owner can modify owner role")
+
+        if membership.role == "owner" and raw_role != "owner":
+            owners_count = (
+                await session.execute(
+                    select(func.count())
+                    .select_from(Membership)
+                    .where(Membership.org_id == org_id, Membership.role == "owner")
+                )
+            ).scalar_one()
+            if int(owners_count) <= 1:
+                raise ValueError("cannot demote last owner")
+
+        membership.role = raw_role
+        user.role = "admin" if raw_role in {"owner", "admin"} else "user"
+
     await session.commit()
     await session.refresh(user)
-    from app.storage.orgs_db import ensure_default_org
-
-    org = await ensure_default_org(session)
-    item = await get_admin_user(session, org_id=org.id, user_id=user.id)
+    item = await get_admin_user(session, org_id=org_id, user_id=user.id)
     if not item:
         return None
     return AdminUserUpdateResponse(item=item)

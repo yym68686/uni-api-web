@@ -104,7 +104,10 @@ export function LoginForm({ nextPath, className }: LoginFormProps) {
         <div className="space-y-2">
           <div className="text-sm font-medium text-foreground">Email</div>
           <div className="relative">
-            <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Mail
+              suppressHydrationWarning
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+            />
             <Input
               placeholder="you@company.com"
               autoComplete="email"
@@ -128,7 +131,10 @@ export function LoginForm({ nextPath, className }: LoginFormProps) {
         <div className="space-y-2">
           <div className="text-sm font-medium text-foreground">Password</div>
           <div className="relative">
-            <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Lock
+              suppressHydrationWarning
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+            />
             <Input
               type="password"
               placeholder="••••••••"
@@ -185,7 +191,7 @@ export function LoginForm({ nextPath, className }: LoginFormProps) {
             className="w-full rounded-xl bg-transparent"
             onClick={() => toast.message("GitHub 登录：即将支持")}
           >
-            <Github className="h-4 w-4" />
+            <Github suppressHydrationWarning className="h-4 w-4" />
             Continue with GitHub
           </Button>
           <Button
@@ -197,7 +203,7 @@ export function LoginForm({ nextPath, className }: LoginFormProps) {
               window.location.href = `/api/auth/google?next=${encodeURIComponent(next)}`;
             }}
           >
-            <Chrome className="h-4 w-4" />
+            <Chrome suppressHydrationWarning className="h-4 w-4" />
             Continue with Google
           </Button>
         </div>

@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { z } from "zod";
-import { Ban, Coins, Loader2, MoreVertical, Tag, Trash2 } from "lucide-react";
+import { Ban, Coins, Loader2, MoreVertical, Shield, Tag, Trash2 } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 
@@ -34,6 +34,12 @@ const balanceSchema = z.object({
 
 type BalanceFormValues = z.infer<typeof balanceSchema>;
 
+const roleSchema = z.object({
+  role: z.enum(["owner", "admin", "billing", "developer", "viewer"])
+});
+
+type RoleFormValues = z.infer<typeof roleSchema>;
+
 const groupSchema = z.object({
   group: z
     .string()
@@ -48,6 +54,7 @@ type GroupFormValues = z.infer<typeof groupSchema>;
 interface UserRowActionsProps {
   user: AdminUserItem;
   currentUserId: string | null;
+  currentUserRole: string | null;
   className?: string;
 }
 
@@ -60,21 +67,39 @@ function readMessage(json: unknown, fallback: string) {
   return fallback;
 }
 
-export function UserRowActions({ user, currentUserId, className }: UserRowActionsProps) {
+export function UserRowActions({ user, currentUserId, currentUserRole, className }: UserRowActionsProps) {
   const router = useRouter();
   const [balanceOpen, setBalanceOpen] = React.useState(false);
   const [groupOpen, setGroupOpen] = React.useState(false);
+  const [roleOpen, setRoleOpen] = React.useState(false);
   const [banOpen, setBanOpen] = React.useState(false);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
 
   const isSelf = currentUserId != null && currentUserId === user.id;
   const isBanned = Boolean(user.bannedAt);
+  const canManageOwner = currentUserRole === "owner";
 
   const form = useForm<BalanceFormValues>({
     defaultValues: { balance: user.balance },
     mode: "onChange"
   });
+
+  const roleForm = useForm<RoleFormValues>({
+    defaultValues: {
+      role:
+        user.role === "owner" ||
+        user.role === "admin" ||
+        user.role === "billing" ||
+        user.role === "developer" ||
+        user.role === "viewer"
+          ? user.role
+          : "developer"
+    },
+    mode: "onChange"
+  });
+
+  const selectedRole = roleForm.watch("role");
 
   const groupForm = useForm<GroupFormValues>({
     defaultValues: { group: user.group || "default" },
@@ -91,7 +116,21 @@ export function UserRowActions({ user, currentUserId, className }: UserRowAction
     groupForm.reset({ group: user.group || "default" });
   }, [groupForm, groupOpen, user.group]);
 
-  async function patch(payload: { balance?: number; banned?: boolean; group?: string | null }) {
+  React.useEffect(() => {
+    if (!roleOpen) return;
+    roleForm.reset({
+      role:
+        user.role === "owner" ||
+        user.role === "admin" ||
+        user.role === "billing" ||
+        user.role === "developer" ||
+        user.role === "viewer"
+          ? user.role
+          : "developer"
+    });
+  }, [roleForm, roleOpen, user.role]);
+
+  async function patch(payload: { balance?: number; banned?: boolean; group?: string | null; role?: string | null }) {
     const res = await fetch(`/api/admin/users/${encodeURIComponent(user.id)}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -156,6 +195,25 @@ export function UserRowActions({ user, currentUserId, className }: UserRowAction
     }
   }
 
+  async function updateRole(values: RoleFormValues) {
+    setSubmitting(true);
+    try {
+      const parsed = roleSchema.safeParse(values);
+      if (!parsed.success) {
+        toast.error("表单校验失败");
+        return;
+      }
+      await patch({ role: parsed.data.role });
+      toast.success("角色已更新");
+      setRoleOpen(false);
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "操作失败");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   async function toggleBan() {
     setSubmitting(true);
     try {
@@ -212,6 +270,16 @@ export function UserRowActions({ user, currentUserId, className }: UserRowAction
             Set group
           </DropdownMenuItem>
           <DropdownMenuItem
+            disabled={isSelf || (!canManageOwner && user.role === "owner")}
+            onSelect={(e) => {
+              e.preventDefault();
+              setRoleOpen(true);
+            }}
+          >
+            <Shield className="mr-2 h-4 w-4" />
+            Set role
+          </DropdownMenuItem>
+          <DropdownMenuItem
             onSelect={(e) => {
               e.preventDefault();
               setBalanceOpen(true);
@@ -244,6 +312,71 @@ export function UserRowActions({ user, currentUserId, className }: UserRowAction
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <Dialog open={roleOpen} onOpenChange={setRoleOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Set role</DialogTitle>
+            <DialogDescription>角色用于权限控制（Owner/Admin/Billing/Developer/Viewer）。</DialogDescription>
+          </DialogHeader>
+
+          <form
+            className="space-y-4"
+            onSubmit={(e) => {
+              void roleForm.handleSubmit(updateRole)(e);
+            }}
+          >
+            <div className="space-y-2">
+              <Label>Role</Label>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                {(
+                  [
+                    { value: "owner", label: "Owner" },
+                    { value: "admin", label: "Admin" },
+                    { value: "billing", label: "Billing" },
+                    { value: "developer", label: "Dev" },
+                    { value: "viewer", label: "Viewer" }
+                  ] as const
+                ).map((opt) => {
+                  const active = selectedRole === opt.value;
+                  const disabled = opt.value === "owner" ? !canManageOwner : false;
+                  return (
+                    <Button
+                      key={opt.value}
+                      type="button"
+                      variant={active ? "default" : "outline"}
+                      className="rounded-xl"
+                      disabled={disabled}
+                      onClick={() => roleForm.setValue("role", opt.value, { shouldValidate: true })}
+                    >
+                      {opt.label}
+                    </Button>
+                  );
+                })}
+              </div>
+              {!canManageOwner ? (
+                <p className="text-xs text-muted-foreground">只有 Owner 可以授予/调整 Owner 角色。</p>
+              ) : null}
+            </div>
+
+            <DialogFooter>
+              <Button type="button" variant="ghost" onClick={() => setRoleOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!roleForm.formState.isValid || submitting}>
+                {submitting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Saving…
+                  </>
+                ) : (
+                  "Save"
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={groupOpen} onOpenChange={setGroupOpen}>
         <DialogContent>

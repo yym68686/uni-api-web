@@ -153,7 +153,11 @@ export default async function AdminUsersPage() {
                         {formatDateTime(u.createdAt)}
                       </TableCell>
                       <TableCell className="p-2 text-right">
-                        <UserRowActions user={u} currentUserId={me?.id ?? null} />
+                        <UserRowActions
+                          user={u}
+                          currentUserId={me?.id ?? null}
+                          currentUserRole={me?.role ?? null}
+                        />
                       </TableCell>
                     </TableRow>
                   ))}

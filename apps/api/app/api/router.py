@@ -217,6 +217,7 @@ async def admin_update_user(
     payload: AdminUserUpdateRequest,
     session: AsyncSession = Depends(get_db_session),
     admin_user=Depends(require_admin),
+    membership=Depends(get_current_membership),
 ) -> AdminUserUpdateResponse:
     try:
         parsed = uuid.UUID(user_id)
@@ -226,7 +227,14 @@ async def admin_update_user(
         raise HTTPException(status_code=400, detail="cannot ban self")
 
     try:
-        updated = await update_admin_user(session, parsed, payload)
+        org = await ensure_default_org(session)
+        updated = await update_admin_user(
+            session,
+            org_id=org.id,
+            actor_role=membership.role,
+            user_id=parsed,
+            input=payload,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     if not updated:

@@ -25,8 +25,12 @@ export default function RootLayout({ children }: RootLayoutProps) {
     <html
       lang="zh-CN"
       className={cn("dark", GeistSans.variable, GeistMono.variable)}
+      suppressHydrationWarning
     >
-      <body className={cn("min-h-dvh bg-background font-sans text-foreground")}>
+      <body
+        className={cn("min-h-dvh bg-background font-sans text-foreground")}
+        suppressHydrationWarning
+      >
         {children}
         <Toaster theme="dark" richColors closeButton />
       </body>
