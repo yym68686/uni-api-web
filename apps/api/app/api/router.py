@@ -542,7 +542,7 @@ async def admin_delete_channel(
 async def chat_completions(request: Request, session: AsyncSession = Depends(get_db_session)):
     auth = request.headers.get("authorization")
     try:
-        _api_key, user = await authenticate_api_key(session, authorization=auth)
+        api_key, user = await authenticate_api_key(session, authorization=auth)
     except ValueError as e:
         detail = str(e) or "unauthorized"
         status = 403 if detail == "banned" else 401
@@ -626,6 +626,7 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
                                     s,
                                     org_id=membership.org_id,
                                     user_id=user.id,
+                                    api_key_id=api_key.id,
                                     model_id=model_id.strip(),
                                     ok=ok,
                                     status_code=int(res.status_code),
@@ -690,6 +691,7 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
             session,
             org_id=membership.org_id,
             user_id=user.id,
+            api_key_id=api_key.id,
             model_id=model_id.strip(),
             ok=ok,
             status_code=int(res.status_code),

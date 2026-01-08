@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import type { ApiKeyRevealResponse } from "@/lib/types";
 import type { ApiKeyItem } from "@/lib/types";
+import { formatUsd } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -37,6 +38,11 @@ function formatDateTime(value?: string) {
     hour: "2-digit",
     minute: "2-digit"
   }).format(dt);
+}
+
+function formatSpendUsd(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return "$0";
+  return formatUsd(value);
 }
 
 interface KeysTableProps {
@@ -138,6 +144,8 @@ export function KeysTable({
               <TableRow>
                 <TableHead>Name</TableHead>
                 <TableHead>Key</TableHead>
+                <TableHead>Last Used</TableHead>
+                <TableHead>Total Spend</TableHead>
                 <TableHead>Created At</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="w-12 text-right"> </TableHead>
@@ -175,6 +183,12 @@ export function KeysTable({
                           <TooltipContent>复制完整 Key</TooltipContent>
                         </Tooltip>
                       </div>
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground font-mono">
+                      {formatDateTime(k.lastUsedAt)}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground font-mono">
+                      {formatSpendUsd(k.spendUsd)}
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground font-mono">
                       {formatDateTime(k.createdAt)}

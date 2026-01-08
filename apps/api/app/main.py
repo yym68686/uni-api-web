@@ -50,6 +50,21 @@ def create_app() -> FastAPI:
                 "ALTER TABLE IF EXISTS llm_usage_events "
                 "ADD COLUMN IF NOT EXISTS source_ip varchar(64)"
             )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS llm_usage_events "
+                "ADD COLUMN IF NOT EXISTS api_key_id uuid"
+            )
+            await conn.exec_driver_sql(
+                "DO $$ BEGIN "
+                "IF NOT EXISTS ("
+                "  SELECT 1 FROM pg_constraint WHERE conname = 'llm_usage_events_api_key_id_fkey'"
+                ") THEN "
+                "  ALTER TABLE llm_usage_events "
+                "  ADD CONSTRAINT llm_usage_events_api_key_id_fkey "
+                "  FOREIGN KEY (api_key_id) REFERENCES api_keys(id) ON DELETE SET NULL; "
+                "END IF; "
+                "END $$;"
+            )
 
             await conn.exec_driver_sql(
                 "ALTER TABLE IF EXISTS email_verification_codes "

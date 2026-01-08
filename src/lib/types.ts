@@ -27,6 +27,7 @@ export interface ApiKeyItem {
   createdAt: string;
   lastUsedAt?: string;
   revokedAt?: string;
+  spendUsd: number;
 }
 
 export interface ApiKeysListResponse {

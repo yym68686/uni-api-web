@@ -23,6 +23,7 @@ async def record_usage_event(
     *,
     org_id: uuid.UUID,
     user_id: uuid.UUID,
+    api_key_id: uuid.UUID | None = None,
     model_id: str,
     ok: bool,
     status_code: int,
@@ -37,6 +38,7 @@ async def record_usage_event(
     row = LlmUsageEvent(
         org_id=org_id,
         user_id=user_id,
+        api_key_id=api_key_id,
         model_id=model_id,
         ok=bool(ok),
         status_code=int(status_code),

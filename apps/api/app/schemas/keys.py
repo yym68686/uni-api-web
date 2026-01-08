@@ -10,6 +10,7 @@ class ApiKeyItem(BaseModel):
     created_at: str = Field(alias="createdAt")
     last_used_at: str | None = Field(default=None, alias="lastUsedAt")
     revoked_at: str | None = Field(default=None, alias="revokedAt")
+    spend_usd: float = Field(default=0.0, alias="spendUsd")
 
 
 class ApiKeysListResponse(BaseModel):

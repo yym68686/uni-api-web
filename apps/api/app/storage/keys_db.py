@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
-from sqlalchemy import select
+from decimal import Decimal
+
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.api_key import ApiKey
+from app.models.llm_usage_event import LlmUsageEvent
 from app.schemas.keys import (
     ApiKeyCreateRequest,
     ApiKeyCreateResponse,
@@ -15,13 +18,20 @@ from app.schemas.keys import (
 from app.security import generate_api_key, key_prefix, sha256_hex
 
 
+USD_MICROS = Decimal("1000000")
+
+
 def _dt_iso(value: dt.datetime | None) -> str | None:
     if not value:
         return None
     return value.astimezone(dt.timezone.utc).isoformat()
 
 
-def _to_item(row: ApiKey) -> ApiKeyItem:
+def _micros_to_usd(value: int) -> float:
+    return float((Decimal(int(value)) / USD_MICROS).quantize(Decimal("0.0000001")))
+
+
+def _to_item(row: ApiKey, *, spend_usd: float = 0.0) -> ApiKeyItem:
     return ApiKeyItem(
         id=str(row.id),
         name=row.name,
@@ -29,18 +39,34 @@ def _to_item(row: ApiKey) -> ApiKeyItem:
         createdAt=_dt_iso(row.created_at) or dt.datetime.now(dt.timezone.utc).isoformat(),
         lastUsedAt=_dt_iso(row.last_used_at),
         revokedAt=_dt_iso(row.revoked_at),
+        spendUsd=float(spend_usd),
     )
 
 
 async def list_api_keys(session: AsyncSession, user_id: uuid.UUID) -> ApiKeysListResponse:
+    spend_sub = (
+        select(
+            LlmUsageEvent.api_key_id.label("api_key_id"),
+            func.coalesce(func.sum(LlmUsageEvent.cost_usd_micros), 0).label("cost_micros"),
+        )
+        .where(LlmUsageEvent.user_id == user_id)
+        .group_by(LlmUsageEvent.api_key_id)
+        .subquery()
+    )
+
     rows = (
         await session.execute(
-            select(ApiKey)
+            select(ApiKey, func.coalesce(spend_sub.c.cost_micros, 0))
+            .outerjoin(spend_sub, spend_sub.c.api_key_id == ApiKey.id)
             .where(ApiKey.user_id == user_id)
             .order_by(ApiKey.created_at.desc())
         )
-    ).scalars().all()
-    return ApiKeysListResponse(items=[_to_item(r) for r in rows])
+    ).all()
+
+    items: list[ApiKeyItem] = []
+    for key, cost_micros in rows:
+        items.append(_to_item(key, spend_usd=_micros_to_usd(int(cost_micros or 0))))
+    return ApiKeysListResponse(items=items)
 
 
 async def create_api_key(
@@ -58,7 +84,7 @@ async def create_api_key(
     session.add(row)
     await session.commit()
     await session.refresh(row)
-    return ApiKeyCreateResponse(item=_to_item(row), key=full_key)
+    return ApiKeyCreateResponse(item=_to_item(row, spend_usd=0.0), key=full_key)
 
 
 async def reveal_api_key(

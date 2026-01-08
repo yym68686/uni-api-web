@@ -20,6 +20,9 @@ class LlmUsageEvent(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
+    api_key_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("api_keys.id", ondelete="SET NULL"), nullable=True
+    )
 
     model_id: Mapped[str] = mapped_column(String(200), nullable=False)
     ok: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

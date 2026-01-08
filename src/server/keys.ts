@@ -43,7 +43,8 @@ function getStore(): KeyStore {
           key: `sk-${base64Url(crypto.randomBytes(24))}`,
           prefix: "",
           createdAt: new Date(now.getTime() - 1000 * 60 * 60 * 24 * 12).toISOString(),
-          lastUsedAt: new Date(now.getTime() - 1000 * 60 * 6).toISOString()
+          lastUsedAt: new Date(now.getTime() - 1000 * 60 * 6).toISOString(),
+          spendUsd: 3.2
         },
         {
           id: crypto.randomUUID(),
@@ -51,7 +52,8 @@ function getStore(): KeyStore {
           key: `sk-${base64Url(crypto.randomBytes(24))}`,
           prefix: "",
           createdAt: new Date(now.getTime() - 1000 * 60 * 60 * 24 * 3).toISOString(),
-          lastUsedAt: new Date(now.getTime() - 1000 * 60 * 60 * 8).toISOString()
+          lastUsedAt: new Date(now.getTime() - 1000 * 60 * 60 * 8).toISOString(),
+          spendUsd: 0.4
         }
       ]
     };
@@ -59,7 +61,7 @@ function getStore(): KeyStore {
       (item) => ({ ...item, prefix: buildPrefix(item.key) })
     );
   }
-  return globalThis.__uniApiKeyStore;
+  return globalThis.__uniApiKeyStore!;
 }
 
 export function listApiKeys(): ApiKeysListResponse {
@@ -79,7 +81,8 @@ export function createApiKey(input: ApiKeyCreateRequest): ApiKeyCreateResponse {
     name: input.name,
     key,
     prefix: buildPrefix(key),
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    spendUsd: 0
   };
   store.items.unshift(item);
   const { key: _key, ...publicItem } = item;
