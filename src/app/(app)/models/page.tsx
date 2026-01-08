@@ -22,7 +22,8 @@ function formatUsdPerM(value: string | null | undefined) {
 
 async function getModels() {
   const res = await fetch(buildBackendUrl("/models"), {
-    cache: "no-store",
+    cache: "force-cache",
+    next: { tags: ["models:user"] },
     headers: await getBackendAuthHeaders()
   });
   if (!res.ok) return null;

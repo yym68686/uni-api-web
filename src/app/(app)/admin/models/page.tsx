@@ -1,9 +1,9 @@
-import { Boxes, RefreshCw } from "lucide-react";
+import { Boxes } from "lucide-react";
 
 import { ModelRowActions } from "@/components/admin/model-row-actions";
+import { AdminModelsRefreshButton } from "@/components/admin/models-refresh-button";
 import { CopyableModelId } from "@/components/models/copyable-model-id";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { buildBackendUrl, getBackendAuthHeaders } from "@/lib/backend";
@@ -39,7 +39,8 @@ async function getMe() {
 
 async function getModels() {
   const res = await fetch(buildBackendUrl("/admin/models"), {
-    cache: "no-store",
+    cache: "force-cache",
+    next: { tags: ["models:admin-config", "models:user"] },
     headers: await getBackendAuthHeaders()
   });
   if (!res.ok) return null;
@@ -62,14 +63,7 @@ export default async function AdminModelsPage() {
             从各渠道的 `/v1/models` 自动聚合去重，并设置启用与价格（当前：{me?.email ?? "unknown"}）。
           </p>
         </div>
-        {isAdmin ? (
-          <form action="">
-            <Button type="submit" variant="outline" className="rounded-xl bg-transparent">
-              <RefreshCw className="h-4 w-4" />
-              Refresh
-            </Button>
-          </form>
-        ) : null}
+        {isAdmin ? <AdminModelsRefreshButton /> : null}
       </div>
 
       {!isAdmin ? (
