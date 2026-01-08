@@ -13,7 +13,6 @@ const labelMap: Record<string, string> = {
   "/models": "Models",
   "/logs": "Logs",
   "/profile": "Profile",
-  "/settings": "Settings"
 };
 
 interface BreadcrumbItem {
