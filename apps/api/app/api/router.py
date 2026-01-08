@@ -26,6 +26,7 @@ from app.schemas.admin_users import (
     AdminUserUpdateRequest,
     AdminUserUpdateResponse,
 )
+from app.schemas.account import AccountDeleteResponse
 from app.schemas.auth import AuthResponse, GoogleOAuthExchangeRequest, LoginRequest, RegisterRequest, UserPublic
 from app.schemas.keys import (
     ApiKeyCreateRequest,
@@ -120,6 +121,29 @@ async def logout(
     if token:
         await revoke_session(session, token)
     return {"ok": True}
+
+
+@router.delete("/account", response_model=AccountDeleteResponse)
+async def delete_account(
+    session: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+    membership=Depends(get_current_membership),
+) -> AccountDeleteResponse:  # type: ignore[no-untyped-def]
+    if membership.role == "owner":
+        owners_count = (
+            await session.execute(
+                select(func.count())
+                .select_from(Membership)
+                .where(Membership.org_id == membership.org_id, Membership.role == "owner")
+            )
+        ).scalar_one()
+        if int(owners_count) <= 1:
+            raise HTTPException(status_code=400, detail="cannot delete last owner")
+
+    deleted = await delete_admin_user(session, current_user.id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="not found")
+    return AccountDeleteResponse(ok=True, id=str(current_user.id))
 
 
 @router.get("/auth/me", response_model=UserPublic)

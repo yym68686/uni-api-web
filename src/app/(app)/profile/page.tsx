@@ -1,5 +1,6 @@
 import { Shield, User } from "lucide-react";
 
+import { DeleteAccountButton } from "@/components/profile/delete-account-button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { buildBackendUrl, getBackendAuthHeaders } from "@/lib/backend";
@@ -116,7 +117,19 @@ export default async function ProfilePage() {
           )}
         </CardContent>
       </Card>
+
+      <Card className="border-destructive/40 bg-destructive/5">
+        <CardHeader>
+          <CardTitle>Danger zone</CardTitle>
+          <CardDescription>注销账号会永久删除你的数据，且无法恢复。</CardDescription>
+        </CardHeader>
+        <CardContent className="flex items-center justify-between gap-4">
+          <div className="text-sm text-muted-foreground">
+            如果你确定要离开，可以在这里注销账号。
+          </div>
+          <DeleteAccountButton className="rounded-xl" />
+        </CardContent>
+      </Card>
     </div>
   );
 }
-
