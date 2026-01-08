@@ -79,6 +79,8 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
   const isSelf = currentUserId != null && currentUserId === user.id;
   const isBanned = Boolean(user.bannedAt);
   const canManageOwner = currentUserRole === "owner";
+  const isTargetOwner = user.role === "owner";
+  const ownerProtected = isTargetOwner && !canManageOwner;
 
   const form = useForm<BalanceFormValues>({
     defaultValues: { balance: user.balance },
@@ -261,6 +263,7 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuItem
+            disabled={ownerProtected}
             onSelect={(e) => {
               e.preventDefault();
               setGroupOpen(true);
@@ -270,7 +273,7 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
             Set group
           </DropdownMenuItem>
           <DropdownMenuItem
-            disabled={isSelf || (!canManageOwner && user.role === "owner")}
+            disabled={isSelf || ownerProtected}
             onSelect={(e) => {
               e.preventDefault();
               setRoleOpen(true);
@@ -280,6 +283,7 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
             Set role
           </DropdownMenuItem>
           <DropdownMenuItem
+            disabled={ownerProtected}
             onSelect={(e) => {
               e.preventDefault();
               setBalanceOpen(true);
@@ -290,7 +294,7 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
-            disabled={isSelf}
+            disabled={isSelf || ownerProtected}
             onSelect={(e) => {
               e.preventDefault();
               setBanOpen(true);
@@ -300,7 +304,7 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
             {isBanned ? "Unban" : "Ban"}
           </DropdownMenuItem>
           <DropdownMenuItem
-            disabled={isSelf}
+            disabled={isSelf || ownerProtected}
             className="text-destructive focus:text-destructive"
             onSelect={(e) => {
               e.preventDefault();
@@ -339,7 +343,8 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
                   ] as const
                 ).map((opt) => {
                   const active = selectedRole === opt.value;
-                  const disabled = opt.value === "owner" ? !canManageOwner : false;
+                  const disabled =
+                    (opt.value === "owner" && !canManageOwner) || (isTargetOwner && !canManageOwner);
                   return (
                     <Button
                       key={opt.value}

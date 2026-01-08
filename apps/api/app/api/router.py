@@ -3,9 +3,11 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_membership, get_current_user, require_admin
+from app.models.membership import Membership
 from app.schemas.announcements import (
     AnnouncementCreateRequest,
     AnnouncementCreateResponse,
@@ -205,10 +207,10 @@ async def admin_delete_announcement(
 async def admin_list_users(
     session: AsyncSession = Depends(get_db_session),
     admin_user=Depends(require_admin),
+    membership=Depends(get_current_membership),
 ) -> AdminUsersListResponse:
     _ = admin_user
-    org = await ensure_default_org(session)
-    return await list_admin_users(session, org_id=org.id)
+    return await list_admin_users(session, org_id=membership.org_id)
 
 
 @router.patch("/admin/users/{user_id}", response_model=AdminUserUpdateResponse)
@@ -227,10 +229,9 @@ async def admin_update_user(
         raise HTTPException(status_code=400, detail="cannot ban self")
 
     try:
-        org = await ensure_default_org(session)
         updated = await update_admin_user(
             session,
-            org_id=org.id,
+            org_id=membership.org_id,
             actor_role=membership.role,
             user_id=parsed,
             input=payload,
@@ -247,6 +248,7 @@ async def admin_delete_user(
     user_id: str,
     session: AsyncSession = Depends(get_db_session),
     admin_user=Depends(require_admin),
+    membership=Depends(get_current_membership),
 ) -> AdminUserDeleteResponse:
     if str(admin_user.id) == user_id:
         raise HTTPException(status_code=400, detail="cannot delete self")
@@ -254,6 +256,26 @@ async def admin_delete_user(
         parsed = uuid.UUID(user_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="invalid user id") from None
+
+    target_role = (
+        await session.execute(
+            select(Membership.role).where(
+                Membership.org_id == membership.org_id, Membership.user_id == parsed
+            )
+        )
+    ).scalar_one_or_none()
+    if target_role == "owner" and membership.role != "owner":
+        raise HTTPException(status_code=403, detail="cannot delete owner")
+    if target_role == "owner":
+        owners_count = (
+            await session.execute(
+                select(func.count())
+                .select_from(Membership)
+                .where(Membership.org_id == membership.org_id, Membership.role == "owner")
+            )
+        ).scalar_one()
+        if int(owners_count) <= 1:
+            raise HTTPException(status_code=400, detail="cannot delete last owner")
 
     deleted = await delete_admin_user(session, parsed)
     if not deleted:

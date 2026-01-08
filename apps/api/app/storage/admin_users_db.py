@@ -156,6 +156,9 @@ async def update_admin_user(
         await session.commit()
         await session.refresh(membership)
 
+    if membership.role == "owner" and actor_role != "owner":
+        raise ValueError("cannot modify owner")
+
     if input.balance is not None:
         if input.balance < 0:
             raise ValueError("balance must be >= 0")
