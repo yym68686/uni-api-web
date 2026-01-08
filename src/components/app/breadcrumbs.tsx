@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 const labelMap: Record<string, string> = {
   "/": "Dashboard",
   "/keys": "API Keys",
+  "/models": "Models",
   "/settings": "Settings"
 };
 

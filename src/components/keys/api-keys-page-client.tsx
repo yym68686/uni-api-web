@@ -26,20 +26,60 @@ export function ApiKeysPageClient({ initialItems }: ApiKeysPageClientProps) {
     setFullKeysById((prev) => ({ ...prev, [res.item.id]: res.key }));
   }
 
-  async function revoke(id: string) {
-    const res = await fetch(`/api/keys/${id}`, { method: "DELETE" });
-    if (!res.ok) throw new Error(await res.text());
-    setItems((prev) =>
-      prev.map((k) => (k.id === id ? { ...k, revokedAt: new Date().toISOString() } : k))
-    );
+  async function setRevoked(id: string, revoked: boolean) {
+    const res = await fetch(`/api/keys/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ revoked })
+    });
+    const json: unknown = await res.json().catch(() => null);
+    if (!res.ok) {
+      const message =
+        json && typeof json === "object" && "message" in json
+          ? String((json as { message?: unknown }).message ?? "更新失败")
+          : "更新失败";
+      throw new Error(message);
+    }
+    if (!json || typeof json !== "object" || !("item" in json)) return;
+    const item = (json as { item?: ApiKeyItem }).item;
+    if (!item) return;
+    setItems((prev) => prev.map((k) => (k.id === id ? item : k)));
   }
 
-  async function onRevoke(id: string) {
+  async function deleteKey(id: string) {
+    const res = await fetch(`/api/keys/${id}`, { method: "DELETE" });
+    const json: unknown = await res.json().catch(() => null);
+    if (!res.ok) {
+      const message =
+        json && typeof json === "object" && "message" in json
+          ? String((json as { message?: unknown }).message ?? "删除失败")
+          : "删除失败";
+      throw new Error(message);
+    }
+    setItems((prev) => prev.filter((k) => k.id !== id));
+    setFullKeysById((prev) => {
+      if (!(id in prev)) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  }
+
+  async function onToggleRevoked(id: string, revoked: boolean) {
     try {
-      await revoke(id);
-      toast.success("已撤销 Key");
+      await setRevoked(id, revoked);
+      toast.success(revoked ? "已撤销 Key" : "已恢复 Key");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "撤销失败");
+      toast.error(err instanceof Error ? err.message : "更新失败");
+    }
+  }
+
+  async function onDelete(id: string) {
+    try {
+      await deleteKey(id);
+      toast.success("已删除 Key");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "删除失败");
     }
   }
 
@@ -65,7 +105,8 @@ export function ApiKeysPageClient({ initialItems }: ApiKeysPageClientProps) {
           <KeysTable
             items={items}
             fullKeysById={fullKeysById}
-            onRevoke={onRevoke}
+            onToggleRevoked={onToggleRevoked}
+            onDelete={onDelete}
             emptyState={
               <div className="p-6">
                 <div className="rounded-xl border border-dashed border-border bg-muted/10 p-10 text-center">

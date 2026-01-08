@@ -139,6 +139,47 @@ async def pick_channel_for_group(
     return None
 
 
+async def list_channels_for_group(
+    session: AsyncSession, *, org_id: uuid.UUID, group_name: str
+) -> list[LlmChannel]:
+    group = group_name.strip() or "default"
+    channels = (
+        await session.execute(
+            select(LlmChannel)
+            .where(LlmChannel.org_id == org_id)
+            .order_by(LlmChannel.created_at.asc())
+        )
+    ).scalars().all()
+    if not channels:
+        return []
+
+    ids = [c.id for c in channels]
+    group_rows = (
+        await session.execute(
+            select(LlmChannelGroup.channel_id, LlmChannelGroup.group_name).where(
+                LlmChannelGroup.channel_id.in_(ids)
+            )
+        )
+    ).all()
+    allow_map: dict[uuid.UUID, set[str]] = {}
+    for channel_id, group_name_value in group_rows:
+        allow_map.setdefault(channel_id, set()).add(str(group_name_value))
+
+    allowed: list[LlmChannel] = []
+    for c in channels:
+        allow = allow_map.get(c.id, set())
+        if not allow:
+            allowed.append(c)
+            continue
+        if group in allow:
+            allowed.append(c)
+            continue
+        if allow.intersection(WILDCARD_GROUPS):
+            allowed.append(c)
+            continue
+    return allowed
+
+
 async def create_channel(
     session: AsyncSession, *, org_id: uuid.UUID, input: LlmChannelCreateRequest
 ) -> LlmChannelCreateResponse:

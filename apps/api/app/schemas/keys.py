@@ -24,3 +24,15 @@ class ApiKeyCreateResponse(BaseModel):
     item: ApiKeyItem
     key: str
 
+
+class ApiKeyUpdateRequest(BaseModel):
+    revoked: bool
+
+
+class ApiKeyUpdateResponse(BaseModel):
+    item: ApiKeyItem
+
+
+class ApiKeyDeleteResponse(BaseModel):
+    ok: bool
+    id: str

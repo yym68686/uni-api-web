@@ -8,3 +8,8 @@ export async function DELETE(req: Request, ctx: RouteContext) {
   const { id } = await ctx.params;
   return proxyToBackend(req, `/keys/${id}`);
 }
+
+export async function PATCH(req: Request, ctx: RouteContext) {
+  const { id } = await ctx.params;
+  return proxyToBackend(req, `/keys/${id}`);
+}

@@ -176,3 +176,14 @@ export interface AdminModelUpdateRequest {
 export interface AdminModelUpdateResponse {
   item: AdminModelItem;
 }
+
+export interface ModelCatalogItem {
+  model: string;
+  inputUsdPerM?: string | null;
+  outputUsdPerM?: string | null;
+  sources: number;
+}
+
+export interface ModelsListResponse {
+  items: ModelCatalogItem[];
+}

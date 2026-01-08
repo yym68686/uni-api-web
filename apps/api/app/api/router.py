@@ -27,7 +27,14 @@ from app.schemas.admin_users import (
     AdminUserUpdateResponse,
 )
 from app.schemas.auth import AuthResponse, GoogleOAuthExchangeRequest, LoginRequest, RegisterRequest, UserPublic
-from app.schemas.keys import ApiKeyCreateRequest, ApiKeyCreateResponse, ApiKeysListResponse
+from app.schemas.keys import (
+    ApiKeyCreateRequest,
+    ApiKeyCreateResponse,
+    ApiKeyDeleteResponse,
+    ApiKeysListResponse,
+    ApiKeyUpdateRequest,
+    ApiKeyUpdateResponse,
+)
 from app.schemas.usage import UsageResponse
 from app.schemas.channels import (
     LlmChannelCreateRequest,
@@ -37,6 +44,7 @@ from app.schemas.channels import (
     LlmChannelUpdateRequest,
     LlmChannelUpdateResponse,
 )
+from app.schemas.models import ModelsListResponse
 from app.schemas.models_admin import AdminModelsListResponse, AdminModelUpdateRequest, AdminModelUpdateResponse
 from app.db import get_db_session
 from app.storage.announcements_db import (
@@ -48,6 +56,7 @@ from app.storage.announcements_db import (
 from app.storage.admin_users_db import delete_admin_user, list_admin_users, update_admin_user
 from app.storage.orgs_db import ensure_default_org
 from app.storage.auth_db import grant_admin_role
+from app.storage.auth_db import get_user_by_token
 from app.storage.auth_db import login as auth_login
 from app.storage.auth_db import register_and_login, revoke_session
 from app.storage.api_key_auth import authenticate_api_key
@@ -58,9 +67,9 @@ from app.storage.channels_db import (
     pick_channel_for_group,
     update_channel,
 )
-from app.storage.models_db import UNSET, get_model_config, list_admin_models, upsert_model_config
+from app.storage.models_db import UNSET, get_model_config, list_admin_models, list_user_models, upsert_model_config
 from app.storage.usage_db import record_usage_event
-from app.storage.keys_db import create_api_key, list_api_keys, revoke_api_key
+from app.storage.keys_db import create_api_key, delete_api_key, list_api_keys, set_api_key_revoked
 from app.storage.oauth_google import login_with_google
 
 router = APIRouter()
@@ -171,6 +180,53 @@ async def oauth_google(
         if str(e) == "banned":
             raise HTTPException(status_code=403, detail="banned") from e
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+def _extract_bearer_token(value: str | None) -> str | None:
+    if not value:
+        return None
+    prefix = "bearer "
+    if value.lower().startswith(prefix):
+        token = value[len(prefix) :].strip()
+        return token or None
+    return None
+
+
+@router.get("/models", response_model=ModelsListResponse)
+async def list_models(request: Request, session: AsyncSession = Depends(get_db_session)) -> ModelsListResponse:
+    from app.constants import SESSION_COOKIE_NAME
+
+    auth = request.headers.get("authorization")
+    bearer = _extract_bearer_token(auth)
+
+    user = None
+    if bearer and bearer.startswith("sk-"):
+        try:
+            _api_key, user = await authenticate_api_key(session, authorization=auth)
+        except ValueError as e:
+            detail = str(e) or "unauthorized"
+            status = 403 if detail == "banned" else 401
+            raise HTTPException(status_code=status, detail=detail) from e
+    else:
+        token = bearer or request.cookies.get(SESSION_COOKIE_NAME)
+        if not token:
+            raise HTTPException(status_code=401, detail="unauthorized")
+        user = await get_user_by_token(session, token)
+        if not user:
+            raise HTTPException(status_code=401, detail="unauthorized")
+        if user.banned_at is not None:
+            raise HTTPException(status_code=403, detail="banned")
+
+    membership = (
+        await session.execute(
+            select(Membership).where(Membership.user_id == user.id).order_by(Membership.created_at.asc())
+        )
+    ).scalars().first()
+    if not membership:
+        raise HTTPException(status_code=403, detail="missing membership")
+
+    items = await list_user_models(session, org_id=membership.org_id, group_name=user.group_name)
+    return ModelsListResponse(items=items)  # type: ignore[arg-type]
 
 
 @router.get("/announcements", response_model=AnnouncementsListResponse)
@@ -572,15 +628,33 @@ async def create_key(
     return await create_api_key(session, current_user.id, ApiKeyCreateRequest(name=name))
 
 
-@router.delete("/keys/{key_id}")
-async def revoke_key(
+@router.patch("/keys/{key_id}", response_model=ApiKeyUpdateResponse)
+async def update_key(
     key_id: str,
+    payload: ApiKeyUpdateRequest,
     session: AsyncSession = Depends(get_db_session),
     current_user=Depends(get_current_user),
-) -> dict:
-    item = await revoke_api_key(
-        session, key_id, user_id=None if current_user.role == "admin" else current_user.id
+) -> ApiKeyUpdateResponse:
+    item = await set_api_key_revoked(
+        session,
+        key_id,
+        revoked=bool(payload.revoked),
+        user_id=None if current_user.role in {"admin", "owner"} else current_user.id,
     )
     if not item:
         raise HTTPException(status_code=404, detail="not found")
-    return {"item": item}
+    return ApiKeyUpdateResponse(item=item)
+
+
+@router.delete("/keys/{key_id}", response_model=ApiKeyDeleteResponse)
+async def delete_key(
+    key_id: str,
+    session: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+) -> ApiKeyDeleteResponse:
+    ok = await delete_api_key(
+        session, key_id, user_id=None if current_user.role in {"admin", "owner"} else current_user.id
+    )
+    if not ok:
+        raise HTTPException(status_code=404, detail="not found")
+    return ApiKeyDeleteResponse(ok=True, id=key_id)

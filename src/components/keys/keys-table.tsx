@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Copy, MoreHorizontal, Trash2 } from "lucide-react";
+import { Copy, MoreHorizontal, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import type { ApiKeyItem } from "@/lib/types";
@@ -9,9 +9,18 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from "@/components/ui/dialog";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -32,22 +41,43 @@ function formatDateTime(value?: string) {
 interface KeysTableProps {
   items: ApiKeyItem[];
   fullKeysById?: Record<string, string>;
-  onRevoke: (id: string) => Promise<void> | void;
+  onToggleRevoked: (id: string, revoked: boolean) => Promise<void> | void;
+  onDelete: (id: string) => Promise<void> | void;
   emptyState?: React.ReactNode;
   className?: string;
 }
 
-export function KeysTable({ items, fullKeysById, onRevoke, emptyState, className }: KeysTableProps) {
+export function KeysTable({
+  items,
+  fullKeysById,
+  onToggleRevoked,
+  onDelete,
+  emptyState,
+  className
+}: KeysTableProps) {
   const [revokingId, setRevokingId] = React.useState<string | null>(null);
+  const [deletingId, setDeletingId] = React.useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = React.useState<ApiKeyItem | null>(null);
 
-  async function revoke(id: string) {
+  async function toggleRevoked(id: string, revoked: boolean) {
     setRevokingId(id);
     try {
-      await onRevoke(id);
+      await onToggleRevoked(id, revoked);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "撤销失败");
+      toast.error(err instanceof Error ? err.message : "更新失败");
     } finally {
       setRevokingId(null);
+    }
+  }
+
+  async function remove(id: string) {
+    setDeletingId(id);
+    try {
+      await onDelete(id);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "删除失败");
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -88,6 +118,7 @@ export function KeysTable({ items, fullKeysById, onRevoke, emptyState, className
             <TableBody>
               {items.map((k) => {
                 const revoked = Boolean(k.revokedAt);
+                const canCopyFull = Boolean(fullKeysById?.[k.id]);
                 return (
                   <TableRow key={k.id}>
                     <TableCell className="font-medium">{k.name}</TableCell>
@@ -100,6 +131,7 @@ export function KeysTable({ items, fullKeysById, onRevoke, emptyState, className
                               size="icon"
                               variant="ghost"
                               className="h-8 w-8 rounded-xl"
+                              disabled={!canCopyFull}
                               onClick={() => {
                                 void copyFullKey(k.id);
                               }}
@@ -109,7 +141,7 @@ export function KeysTable({ items, fullKeysById, onRevoke, emptyState, className
                             </Button>
                           </TooltipTrigger>
                           <TooltipContent>
-                            {fullKeysById?.[k.id] ? "复制完整 Key" : "完整 Key 不可再次获取"}
+                            {canCopyFull ? "复制完整 Key" : "完整 Key 不可再次获取"}
                           </TooltipContent>
                         </Tooltip>
                       </div>
@@ -138,6 +170,7 @@ export function KeysTable({ items, fullKeysById, onRevoke, emptyState, className
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem
+                            disabled={!canCopyFull}
                             onClick={() => {
                               void copyFullKey(k.id);
                             }}
@@ -146,30 +179,24 @@ export function KeysTable({ items, fullKeysById, onRevoke, emptyState, className
                             Copy full key
                           </DropdownMenuItem>
                           <DropdownMenuItem
+                            disabled={revokingId === k.id || deletingId === k.id}
                             onClick={() => {
-                              void copy(k.prefix);
+                              void toggleRevoked(k.id, !revoked);
                             }}
                           >
-                            <Copy className="mr-2 h-4 w-4" />
-                            Copy masked key
+                            <RotateCcw className="mr-2 h-4 w-4" />
+                            {revokingId === k.id ? "Updating…" : revoked ? "Restore" : "Revoke"}
                           </DropdownMenuItem>
+                          <DropdownMenuSeparator />
                           <DropdownMenuItem
+                            disabled={deletingId === k.id}
                             onClick={() => {
-                              void copy(k.id);
-                            }}
-                          >
-                            <Copy className="mr-2 h-4 w-4" />
-                            Copy ID
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            disabled={revoked || revokingId === k.id}
-                            onClick={() => {
-                              void revoke(k.id);
+                              setDeleteTarget(k);
                             }}
                             className="text-destructive focus:text-destructive"
                           >
                             <Trash2 className="mr-2 h-4 w-4" />
-                            {revokingId === k.id ? "Revoking…" : "Revoke"}
+                            {deletingId === k.id ? "Deleting…" : "Delete"}
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -180,6 +207,42 @@ export function KeysTable({ items, fullKeysById, onRevoke, emptyState, className
             </TableBody>
           </Table>
         )}
+
+        <Dialog
+          open={deleteTarget != null}
+          onOpenChange={(open) => {
+            if (!open) setDeleteTarget(null);
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Delete API key?</DialogTitle>
+              <DialogDescription>将永久删除该 Key，无法恢复。</DialogDescription>
+            </DialogHeader>
+            {deleteTarget ? (
+              <div className="rounded-xl border border-border bg-muted/20 p-4">
+                <div className="text-sm font-medium text-foreground">{deleteTarget.name}</div>
+                <div className="mt-1 text-xs font-mono text-muted-foreground">{deleteTarget.prefix}</div>
+              </div>
+            ) : null}
+            <DialogFooter>
+              <Button type="button" variant="ghost" onClick={() => setDeleteTarget(null)}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={deleteTarget ? deletingId === deleteTarget.id : true}
+                onClick={() => {
+                  if (!deleteTarget) return;
+                  void remove(deleteTarget.id).then(() => setDeleteTarget(null));
+                }}
+              >
+                {deleteTarget && deletingId === deleteTarget.id ? "Deleting…" : "Delete"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </TooltipProvider>
   );

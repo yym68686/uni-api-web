@@ -73,3 +73,46 @@ async def revoke_api_key(
         await session.commit()
         await session.refresh(row)
     return _to_item(row)
+
+
+async def set_api_key_revoked(
+    session: AsyncSession, key_id: str, *, revoked: bool, user_id: uuid.UUID | None = None
+) -> ApiKeyItem | None:
+    try:
+        parsed = uuid.UUID(key_id)
+    except ValueError:
+        return None
+
+    row = await session.get(ApiKey, parsed)
+    if not row:
+        return None
+    if user_id is not None and row.user_id != user_id:
+        return None
+
+    if revoked:
+        if row.revoked_at is None:
+            row.revoked_at = dt.datetime.now(dt.timezone.utc)
+    else:
+        if row.revoked_at is not None:
+            row.revoked_at = None
+    await session.commit()
+    await session.refresh(row)
+    return _to_item(row)
+
+
+async def delete_api_key(
+    session: AsyncSession, key_id: str, *, user_id: uuid.UUID | None = None
+) -> bool:
+    try:
+        parsed = uuid.UUID(key_id)
+    except ValueError:
+        return False
+
+    row = await session.get(ApiKey, parsed)
+    if not row:
+        return False
+    if user_id is not None and row.user_id != user_id:
+        return False
+    await session.delete(row)
+    await session.commit()
+    return True

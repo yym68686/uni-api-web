@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.llm_channel import LlmChannel
 from app.models.llm_model_config import LlmModelConfig
+from app.storage.channels_db import list_channels_for_group
 
 
 USD_MICROS = Decimal("1000000")
@@ -157,12 +158,13 @@ async def fetch_available_models(
     channels = (
         await session.execute(select(LlmChannel).where(LlmChannel.org_id == org_id))
     ).scalars().all()
+    return await fetch_available_models_for_channels(channels)
+
+
+async def fetch_available_models_for_channels(channels: list[LlmChannel]) -> dict[str, int]:
     if not channels:
         return {}
-
-    results = await asyncio.gather(
-        *(fetch_models_for_channel(c) for c in channels), return_exceptions=True
-    )
+    results = await asyncio.gather(*(fetch_models_for_channel(c) for c in channels), return_exceptions=True)
     counts: dict[str, int] = {}
     for res in results:
         if isinstance(res, Exception):
@@ -197,6 +199,45 @@ async def list_admin_models(
                 "outputUsdPerM": _micros_to_str(output_micros),
                 "sources": int(available_counts.get(mid, 0)),
                 "available": mid in available_counts,
+            }
+        )
+    return items
+
+
+async def list_user_models(
+    session: AsyncSession, *, org_id: uuid.UUID, group_name: str
+) -> list[dict]:
+    channels = await list_channels_for_group(session, org_id=org_id, group_name=group_name)
+    available_counts = await fetch_available_models_for_channels(channels)
+    if not available_counts:
+        return []
+
+    configs = (
+        await session.execute(
+            select(LlmModelConfig).where(
+                LlmModelConfig.org_id == org_id,
+                LlmModelConfig.model_id.in_(sorted(available_counts.keys())),
+            )
+        )
+    ).scalars().all()
+    config_map = {c.model_id: c for c in configs}
+
+    items: list[dict] = []
+    for mid in sorted(available_counts.keys()):
+        cfg = config_map.get(mid)
+        if cfg and not cfg.enabled:
+            continue
+        default_in, default_out = default_price_for_model(mid)
+        input_micros = cfg.input_usd_micros_per_m if (cfg and cfg.input_usd_micros_per_m is not None) else default_in
+        output_micros = (
+            cfg.output_usd_micros_per_m if (cfg and cfg.output_usd_micros_per_m is not None) else default_out
+        )
+        items.append(
+            {
+                "model": mid,
+                "inputUsdPerM": _micros_to_str(input_micros),
+                "outputUsdPerM": _micros_to_str(output_micros),
+                "sources": int(available_counts.get(mid, 0)),
             }
         )
     return items

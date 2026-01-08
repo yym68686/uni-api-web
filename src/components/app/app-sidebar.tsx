@@ -3,19 +3,20 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import * as React from "react";
-import { Boxes, KeyRound, LayoutDashboard, Megaphone, PlugZap, Settings, Users } from "lucide-react";
+import { Boxes, KeyRound, LayoutDashboard, Megaphone, PlugZap, Settings, SlidersHorizontal, Users } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/keys", label: "API Keys", icon: KeyRound },
+  { href: "/models", label: "Models", icon: Boxes },
   { href: "/settings", label: "Settings", icon: Settings }
 ] as const;
 
 const adminItems = [
   { href: "/admin/channels", label: "Channels", icon: PlugZap },
-  { href: "/admin/models", label: "Models", icon: Boxes },
+  { href: "/admin/models", label: "Model Config", icon: SlidersHorizontal },
   { href: "/admin/users", label: "Users", icon: Users },
   { href: "/admin/announcements", label: "Announcements", icon: Megaphone }
 ] as const;
