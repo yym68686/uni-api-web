@@ -1,5 +1,6 @@
 import { Boxes } from "lucide-react";
 
+import { CopyableModelId } from "@/components/models/copyable-model-id";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { buildBackendUrl, getBackendAuthHeaders } from "@/lib/backend";
@@ -64,14 +65,16 @@ export default async function ModelsPage() {
                   <TableHead>Output ($/M tokens)</TableHead>
                 </TableRow>
               </TableHeader>
-              <TableBody>
-                {items.map((m) => (
-                  <TableRow key={m.model} className="hover:bg-muted/50">
-                    <TableCell className="font-mono text-xs text-foreground">{m.model}</TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">
-                      {formatUsdPerM(m.inputUsdPerM)}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">
+                <TableBody>
+                  {items.map((m) => (
+                    <TableRow key={m.model} className="hover:bg-muted/50">
+                      <TableCell>
+                        <CopyableModelId value={m.model} />
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">
+                        {formatUsdPerM(m.inputUsdPerM)}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">
                       {formatUsdPerM(m.outputUsdPerM)}
                     </TableCell>
                   </TableRow>

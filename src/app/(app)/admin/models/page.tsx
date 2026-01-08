@@ -1,6 +1,7 @@
 import { Boxes, RefreshCw } from "lucide-react";
 
 import { ModelRowActions } from "@/components/admin/model-row-actions";
+import { CopyableModelId } from "@/components/models/copyable-model-id";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -107,7 +108,9 @@ export default async function AdminModelsPage() {
                 <TableBody>
                   {items.map((m) => (
                     <TableRow key={m.model}>
-                      <TableCell className="font-mono text-xs text-foreground">{m.model}</TableCell>
+                      <TableCell>
+                        <CopyableModelId value={m.model} />
+                      </TableCell>
                       <TableCell>
                         {!m.available ? (
                           <Badge variant="outline">Missing</Badge>

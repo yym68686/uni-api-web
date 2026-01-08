@@ -40,6 +40,12 @@ function isoDate(d: Date) {
   return d.toISOString().slice(0, 10);
 }
 
+function formatUtcDateTime(value: string) {
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return "—";
+  return dt.toISOString().replace("T", " ").slice(0, 16);
+}
+
 function buildEmptyDaily(days: number): DailyUsagePoint[] {
   const now = new Date();
   const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
@@ -209,7 +215,7 @@ export default async function DashboardPage() {
                         {a.title}
                       </div>
                       <div className="mt-1 text-xs text-muted-foreground font-mono">
-                        {a.meta}
+                        {formatUtcDateTime(a.createdAt)} · {a.meta}
                       </div>
                     </div>
                   ))}
