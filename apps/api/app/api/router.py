@@ -37,6 +37,7 @@ from app.schemas.channels import (
     LlmChannelUpdateRequest,
     LlmChannelUpdateResponse,
 )
+from app.schemas.models_admin import AdminModelsListResponse, AdminModelUpdateRequest, AdminModelUpdateResponse
 from app.db import get_db_session
 from app.storage.announcements_db import (
     create_announcement,
@@ -57,6 +58,7 @@ from app.storage.channels_db import (
     pick_channel_for_group,
     update_channel,
 )
+from app.storage.models_db import UNSET, get_model_config, list_admin_models, upsert_model_config
 from app.storage.keys_db import create_api_key, list_api_keys, revoke_api_key
 from app.storage.oauth_google import login_with_google
 
@@ -385,6 +387,10 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="invalid json")
 
+    model_id = payload.get("model")
+    if not isinstance(model_id, str) or not model_id.strip():
+        raise HTTPException(status_code=400, detail="missing model")
+
     membership = (
         await session.execute(
             select(Membership).where(Membership.user_id == user.id).order_by(Membership.created_at.asc())
@@ -392,6 +398,10 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
     ).scalars().first()
     if not membership:
         raise HTTPException(status_code=403, detail="missing membership")
+
+    cfg = await get_model_config(session, org_id=membership.org_id, model_id=model_id.strip())
+    if cfg and not cfg.enabled:
+        raise HTTPException(status_code=403, detail="model disabled")
 
     channel = await pick_channel_for_group(session, org_id=membership.org_id, group_name=user.group_name)
     if not channel:
@@ -428,6 +438,53 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
         res = await client.post(upstream_url, headers=headers, content=raw)
     content_type = res.headers.get("content-type") or "application/json"
     return Response(content=res.content, status_code=res.status_code, media_type=content_type)
+
+
+@router.get("/admin/models", response_model=AdminModelsListResponse)
+async def admin_list_models(
+    session: AsyncSession = Depends(get_db_session),
+    admin_user=Depends(require_admin),
+    membership=Depends(get_current_membership),
+) -> AdminModelsListResponse:
+    _ = admin_user
+    items = await list_admin_models(session, org_id=membership.org_id)
+    return AdminModelsListResponse(items=items)  # type: ignore[arg-type]
+
+
+@router.patch("/admin/models/{model_id:path}", response_model=AdminModelUpdateResponse)
+async def admin_update_model(
+    model_id: str,
+    payload: AdminModelUpdateRequest,
+    session: AsyncSession = Depends(get_db_session),
+    admin_user=Depends(require_admin),
+    membership=Depends(get_current_membership),
+) -> AdminModelUpdateResponse:
+    _ = admin_user
+    fields_set = getattr(payload, "model_fields_set", None)
+    if fields_set is None:
+        fields_set = getattr(payload, "__fields_set__", set())
+
+    enabled = payload.enabled if "enabled" in fields_set else None
+    input_price = payload.input_usd_per_m if "input_usd_per_m" in fields_set else UNSET
+    output_price = payload.output_usd_per_m if "output_usd_per_m" in fields_set else UNSET
+
+    try:
+        row = await upsert_model_config(
+            session,
+            org_id=membership.org_id,
+            model_id=model_id,
+            enabled=enabled,
+            input_usd_per_m=input_price,
+            output_usd_per_m=output_price,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    items = await list_admin_models(session, org_id=membership.org_id)
+    item = next((x for x in items if x.get("model") == row.model_id), None)
+    if not item:
+        item = {"model": row.model_id, "enabled": bool(row.enabled), "sources": 0, "available": False}
+    return AdminModelUpdateResponse(item=item)  # type: ignore[arg-type]
 
 
 @router.get("/usage", response_model=UsageResponse)

@@ -153,3 +153,26 @@ export interface LlmChannelDeleteResponse {
   ok: boolean;
   id: string;
 }
+
+export interface AdminModelItem {
+  model: string;
+  enabled: boolean;
+  inputUsdPerM?: string | null;
+  outputUsdPerM?: string | null;
+  sources: number;
+  available: boolean;
+}
+
+export interface AdminModelsListResponse {
+  items: AdminModelItem[];
+}
+
+export interface AdminModelUpdateRequest {
+  enabled?: boolean;
+  inputUsdPerM?: string | null;
+  outputUsdPerM?: string | null;
+}
+
+export interface AdminModelUpdateResponse {
+  item: AdminModelItem;
+}
