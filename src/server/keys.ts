@@ -40,7 +40,7 @@ function getStore(): KeyStore {
         {
           id: crypto.randomUUID(),
           name: "prod-default",
-          key: `uai_${base64Url(crypto.randomBytes(24))}`,
+          key: `sk-${base64Url(crypto.randomBytes(24))}`,
           prefix: "",
           createdAt: new Date(now.getTime() - 1000 * 60 * 60 * 24 * 12).toISOString(),
           lastUsedAt: new Date(now.getTime() - 1000 * 60 * 6).toISOString()
@@ -48,7 +48,7 @@ function getStore(): KeyStore {
         {
           id: crypto.randomUUID(),
           name: "staging",
-          key: `uai_${base64Url(crypto.randomBytes(24))}`,
+          key: `sk-${base64Url(crypto.randomBytes(24))}`,
           prefix: "",
           createdAt: new Date(now.getTime() - 1000 * 60 * 60 * 24 * 3).toISOString(),
           lastUsedAt: new Date(now.getTime() - 1000 * 60 * 60 * 8).toISOString()
@@ -73,7 +73,7 @@ export function listApiKeys(): ApiKeysListResponse {
 
 export function createApiKey(input: ApiKeyCreateRequest): ApiKeyCreateResponse {
   const store = getStore();
-  const key = `uai_${base64Url(crypto.randomBytes(32))}`;
+  const key = `sk-${base64Url(crypto.randomBytes(32))}`;
   const item: ApiKeyRecord = {
     id: crypto.randomUUID(),
     name: input.name,

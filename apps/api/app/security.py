@@ -5,7 +5,7 @@ import secrets
 
 
 def generate_api_key() -> str:
-    return f"uai_{secrets.token_urlsafe(32)}"
+    return f"sk-{secrets.token_urlsafe(32)}"
 
 
 def key_prefix(full_key: str) -> str:
@@ -16,4 +16,3 @@ def key_prefix(full_key: str) -> str:
 
 def sha256_hex(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
-

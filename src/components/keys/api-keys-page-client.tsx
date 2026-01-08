@@ -19,9 +19,11 @@ const createButtonGlow =
 
 export function ApiKeysPageClient({ initialItems }: ApiKeysPageClientProps) {
   const [items, setItems] = React.useState<ApiKeyItem[]>(initialItems);
+  const [fullKeysById, setFullKeysById] = React.useState<Record<string, string>>({});
 
   function onCreated(res: ApiKeyCreateResponse) {
     setItems((prev) => [res.item, ...prev]);
+    setFullKeysById((prev) => ({ ...prev, [res.item.id]: res.key }));
   }
 
   async function revoke(id: string) {
@@ -62,6 +64,7 @@ export function ApiKeysPageClient({ initialItems }: ApiKeysPageClientProps) {
         <CardContent className="p-0">
           <KeysTable
             items={items}
+            fullKeysById={fullKeysById}
             onRevoke={onRevoke}
             emptyState={
               <div className="p-6">
@@ -91,4 +94,3 @@ export function ApiKeysPageClient({ initialItems }: ApiKeysPageClientProps) {
     </div>
   );
 }
-

@@ -31,12 +31,13 @@ function formatDateTime(value?: string) {
 
 interface KeysTableProps {
   items: ApiKeyItem[];
+  fullKeysById?: Record<string, string>;
   onRevoke: (id: string) => Promise<void> | void;
   emptyState?: React.ReactNode;
   className?: string;
 }
 
-export function KeysTable({ items, onRevoke, emptyState, className }: KeysTableProps) {
+export function KeysTable({ items, fullKeysById, onRevoke, emptyState, className }: KeysTableProps) {
   const [revokingId, setRevokingId] = React.useState<string | null>(null);
 
   async function revoke(id: string) {
@@ -57,6 +58,15 @@ export function KeysTable({ items, onRevoke, emptyState, className }: KeysTableP
     } catch {
       toast.error("复制失败");
     }
+  }
+
+  async function copyFullKey(id: string) {
+    const full = fullKeysById?.[id];
+    if (!full) {
+      toast.error("完整 Key 仅在创建时展示一次，无法再次复制");
+      return;
+    }
+    await copy(full);
   }
 
   return (
@@ -91,14 +101,16 @@ export function KeysTable({ items, onRevoke, emptyState, className }: KeysTableP
                               variant="ghost"
                               className="h-8 w-8 rounded-xl"
                               onClick={() => {
-                                void copy(k.prefix);
+                                void copyFullKey(k.id);
                               }}
                             >
                               <Copy className="h-4 w-4" />
                               <span className="sr-only">Copy</span>
                             </Button>
                           </TooltipTrigger>
-                          <TooltipContent>复制掩码 Key</TooltipContent>
+                          <TooltipContent>
+                            {fullKeysById?.[k.id] ? "复制完整 Key" : "完整 Key 不可再次获取"}
+                          </TooltipContent>
                         </Tooltip>
                       </div>
                     </TableCell>
@@ -125,6 +137,14 @@ export function KeysTable({ items, onRevoke, emptyState, className }: KeysTableP
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onClick={() => {
+                              void copyFullKey(k.id);
+                            }}
+                          >
+                            <Copy className="mr-2 h-4 w-4" />
+                            Copy full key
+                          </DropdownMenuItem>
                           <DropdownMenuItem
                             onClick={() => {
                               void copy(k.prefix);
