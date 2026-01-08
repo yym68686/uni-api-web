@@ -24,6 +24,39 @@ def create_app() -> FastAPI:
                 "ALTER TABLE IF EXISTS users "
                 "ADD COLUMN IF NOT EXISTS role varchar(16) NOT NULL DEFAULT 'user'"
             )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS users "
+                "ADD COLUMN IF NOT EXISTS balance integer NOT NULL DEFAULT 0"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS users "
+                "ADD COLUMN IF NOT EXISTS banned_at timestamptz"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS users "
+                "ADD COLUMN IF NOT EXISTS group_name varchar(64) NOT NULL DEFAULT 'default'"
+            )
+
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS api_keys "
+                "ADD COLUMN IF NOT EXISTS user_id uuid"
+            )
+            await conn.exec_driver_sql(
+                "DO $$ BEGIN "
+                "IF NOT EXISTS ("
+                "  SELECT 1 FROM pg_constraint WHERE conname = 'api_keys_user_id_fkey'"
+                ") THEN "
+                "  ALTER TABLE api_keys "
+                "  ADD CONSTRAINT api_keys_user_id_fkey "
+                "  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE; "
+                "END IF; "
+                "END $$;"
+            )
+            await conn.exec_driver_sql(
+                "UPDATE api_keys "
+                "SET user_id = (SELECT id FROM users ORDER BY created_at ASC LIMIT 1) "
+                "WHERE user_id IS NULL"
+            )
         if settings.app_env == "dev" and settings.seed_demo_data:
             async with SessionLocal() as session:
                 await ensure_seed_announcements(session)

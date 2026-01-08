@@ -78,3 +78,36 @@ export interface AnnouncementDeleteResponse {
   ok: boolean;
   id: string;
 }
+
+export interface AdminUserItem {
+  id: string;
+  email: string;
+  role: "admin" | "user" | string;
+  group: string;
+  balance: number;
+  bannedAt?: string | null;
+  createdAt: string;
+  lastLoginAt?: string | null;
+  apiKeysTotal: number;
+  apiKeysActive: number;
+  sessionsActive: number;
+}
+
+export interface AdminUsersListResponse {
+  items: AdminUserItem[];
+}
+
+export interface AdminUserUpdateRequest {
+  balance?: number;
+  banned?: boolean;
+  group?: string | null;
+}
+
+export interface AdminUserUpdateResponse {
+  item: AdminUserItem;
+}
+
+export interface AdminUserDeleteResponse {
+  ok: boolean;
+  id: string;
+}

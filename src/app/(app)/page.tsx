@@ -61,6 +61,7 @@ function buildEmptyDaily(days: number): DailyUsagePoint[] {
 
 export default async function DashboardPage() {
   let userName = "User";
+  let remainingCredits: number | null = null;
   try {
     const res = await fetch(buildBackendUrl("/auth/me"), {
       cache: "no-store",
@@ -68,9 +69,11 @@ export default async function DashboardPage() {
     });
     if (res.ok) {
       const json: unknown = await res.json();
-      if (json && typeof json === "object" && "email" in json) {
+      if (json && typeof json === "object") {
         const email = (json as { email?: unknown }).email;
         if (typeof email === "string" && email.length > 0) userName = email;
+        const balance = (json as { balance?: unknown }).balance;
+        if (typeof balance === "number" && Number.isFinite(balance)) remainingCredits = balance;
       }
     }
   } catch {
@@ -113,7 +116,6 @@ export default async function DashboardPage() {
   const last7Days = usage.daily.length > 0 ? usage.daily.slice(-7) : buildEmptyDaily(7);
   const requests7d = last7Days.reduce((acc, p) => acc + p.requests, 0);
   const spendMonthUsd = Number((usage.summary.spend24hUsd * 30).toFixed(2));
-  const remainingCredits: number | null = null;
 
   let announcements: AnnouncementsListResponse["items"] = [];
   try {

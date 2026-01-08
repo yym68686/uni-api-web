@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import * as React from "react";
-import { KeyRound, LayoutDashboard, Megaphone, Settings } from "lucide-react";
+import { KeyRound, LayoutDashboard, Megaphone, Settings, Users } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -13,7 +13,10 @@ const navItems = [
   { href: "/settings", label: "Settings", icon: Settings }
 ] as const;
 
-const adminItems = [{ href: "/admin/announcements", label: "Announcements", icon: Megaphone }] as const;
+const adminItems = [
+  { href: "/admin/users", label: "Users", icon: Users },
+  { href: "/admin/announcements", label: "Announcements", icon: Megaphone }
+] as const;
 
 interface AppSidebarContentProps {
   onNavigate?: () => void;

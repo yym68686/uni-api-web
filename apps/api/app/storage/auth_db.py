@@ -25,6 +25,7 @@ def _to_user_public(row: User) -> UserPublic:
         id=str(row.id),
         email=row.email,
         role=row.role,
+        balance=int(row.balance),
         createdAt=_dt_iso(row.created_at) or dt.datetime.now(dt.timezone.utc).isoformat(),
         lastLoginAt=_dt_iso(row.last_login_at),
     )
@@ -78,6 +79,8 @@ async def authenticate_user(session: AsyncSession, input: LoginRequest) -> User 
     row = (await session.execute(select(User).where(User.email == email))).scalar_one_or_none()
     if not row:
         return None
+    if row.banned_at is not None:
+        raise ValueError("banned")
     if not verify_password(input.password, row.password_hash):
         return None
 

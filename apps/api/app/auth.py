@@ -30,6 +30,8 @@ async def get_current_user(
     user = await get_user_by_token(session, token)
     if not user:
         raise HTTPException(status_code=401, detail="unauthorized")
+    if user.banned_at is not None:
+        raise HTTPException(status_code=403, detail="banned")
     return user
 
 

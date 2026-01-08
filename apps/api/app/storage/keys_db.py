@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,16 +27,23 @@ def _to_item(row: ApiKey) -> ApiKeyItem:
     )
 
 
-async def list_api_keys(session: AsyncSession) -> ApiKeysListResponse:
+async def list_api_keys(session: AsyncSession, user_id: uuid.UUID) -> ApiKeysListResponse:
     rows = (
-        await session.execute(select(ApiKey).order_by(ApiKey.created_at.desc()))
+        await session.execute(
+            select(ApiKey)
+            .where(ApiKey.user_id == user_id)
+            .order_by(ApiKey.created_at.desc())
+        )
     ).scalars().all()
     return ApiKeysListResponse(items=[_to_item(r) for r in rows])
 
 
-async def create_api_key(session: AsyncSession, input: ApiKeyCreateRequest) -> ApiKeyCreateResponse:
+async def create_api_key(
+    session: AsyncSession, user_id: uuid.UUID, input: ApiKeyCreateRequest
+) -> ApiKeyCreateResponse:
     full_key = generate_api_key()
     row = ApiKey(
+        user_id=user_id,
         name=input.name.strip(),
         key_hash=sha256_hex(full_key),
         prefix=key_prefix(full_key),
@@ -47,7 +55,9 @@ async def create_api_key(session: AsyncSession, input: ApiKeyCreateRequest) -> A
     return ApiKeyCreateResponse(item=_to_item(row), key=full_key)
 
 
-async def revoke_api_key(session: AsyncSession, key_id: str) -> ApiKeyItem | None:
+async def revoke_api_key(
+    session: AsyncSession, key_id: str, *, user_id: uuid.UUID | None = None
+) -> ApiKeyItem | None:
     try:
         parsed = uuid.UUID(key_id)
     except ValueError:
@@ -55,6 +65,8 @@ async def revoke_api_key(session: AsyncSession, key_id: str) -> ApiKeyItem | Non
 
     row = await session.get(ApiKey, parsed)
     if not row:
+        return None
+    if user_id is not None and row.user_id != user_id:
         return None
     if row.revoked_at is None:
         row.revoked_at = dt.datetime.now(dt.timezone.utc)

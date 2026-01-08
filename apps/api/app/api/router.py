@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +14,12 @@ from app.schemas.announcements import (
     AnnouncementUpdateRequest,
     AnnouncementUpdateResponse,
 )
+from app.schemas.admin_users import (
+    AdminUserDeleteResponse,
+    AdminUsersListResponse,
+    AdminUserUpdateRequest,
+    AdminUserUpdateResponse,
+)
 from app.schemas.auth import AuthResponse, GoogleOAuthExchangeRequest, LoginRequest, RegisterRequest, UserPublic
 from app.schemas.keys import ApiKeyCreateRequest, ApiKeyCreateResponse, ApiKeysListResponse
 from app.schemas.usage import UsageResponse
@@ -22,6 +30,7 @@ from app.storage.announcements_db import (
     list_announcements,
     update_announcement,
 )
+from app.storage.admin_users_db import delete_admin_user, list_admin_users, update_admin_user
 from app.storage.auth_db import grant_admin_role
 from app.storage.auth_db import login as auth_login
 from app.storage.auth_db import register_and_login, revoke_session
@@ -48,7 +57,12 @@ async def register(
 
 @router.post("/auth/login", response_model=AuthResponse)
 async def login(payload: LoginRequest, session: AsyncSession = Depends(get_db_session)) -> AuthResponse:
-    res = await auth_login(session, payload)
+    try:
+        res = await auth_login(session, payload)
+    except ValueError as e:
+        if str(e) == "banned":
+            raise HTTPException(status_code=403, detail="banned") from e
+        raise HTTPException(status_code=400, detail=str(e)) from e
     if not res:
         raise HTTPException(status_code=401, detail="invalid credentials")
     return res
@@ -86,6 +100,7 @@ async def me(current_user=Depends(get_current_user)) -> UserPublic:  # type: ign
         id=str(current_user.id),
         email=current_user.email,
         role=current_user.role,
+        balance=int(current_user.balance),
         createdAt=_dt_iso(current_user.created_at) or dt.datetime.now(dt.timezone.utc).isoformat(),
         lastLoginAt=_dt_iso(current_user.last_login_at),
     )
@@ -123,6 +138,8 @@ async def oauth_google(
             redirect_uri=payload.redirect_uri,
         )
     except ValueError as e:
+        if str(e) == "banned":
+            raise HTTPException(status_code=403, detail="banned") from e
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
@@ -179,6 +196,57 @@ async def admin_delete_announcement(
     return deleted
 
 
+@router.get("/admin/users", response_model=AdminUsersListResponse)
+async def admin_list_users(
+    session: AsyncSession = Depends(get_db_session),
+    admin_user=Depends(require_admin),
+) -> AdminUsersListResponse:
+    _ = admin_user
+    return await list_admin_users(session)
+
+
+@router.patch("/admin/users/{user_id}", response_model=AdminUserUpdateResponse)
+async def admin_update_user(
+    user_id: str,
+    payload: AdminUserUpdateRequest,
+    session: AsyncSession = Depends(get_db_session),
+    admin_user=Depends(require_admin),
+) -> AdminUserUpdateResponse:
+    try:
+        parsed = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid user id") from None
+    if parsed == admin_user.id and payload.banned is True:
+        raise HTTPException(status_code=400, detail="cannot ban self")
+
+    try:
+        updated = await update_admin_user(session, parsed, payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if not updated:
+        raise HTTPException(status_code=404, detail="not found")
+    return updated
+
+
+@router.delete("/admin/users/{user_id}", response_model=AdminUserDeleteResponse)
+async def admin_delete_user(
+    user_id: str,
+    session: AsyncSession = Depends(get_db_session),
+    admin_user=Depends(require_admin),
+) -> AdminUserDeleteResponse:
+    if str(admin_user.id) == user_id:
+        raise HTTPException(status_code=400, detail="cannot delete self")
+    try:
+        parsed = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid user id") from None
+
+    deleted = await delete_admin_user(session, parsed)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="not found")
+    return deleted
+
+
 @router.get("/usage", response_model=UsageResponse)
 async def usage(current_user=Depends(get_current_user)) -> dict:
     # TODO: Replace with real Postgres aggregation.
@@ -194,8 +262,7 @@ async def usage(current_user=Depends(get_current_user)) -> dict:
 async def list_keys(
     session: AsyncSession = Depends(get_db_session), current_user=Depends(get_current_user)
 ) -> ApiKeysListResponse:
-    _ = current_user
-    return await list_api_keys(session)
+    return await list_api_keys(session, current_user.id)
 
 
 @router.post("/keys", response_model=ApiKeyCreateResponse)
@@ -209,8 +276,7 @@ async def create_key(
         raise HTTPException(status_code=400, detail="name too small (min 2)")
     if len(name) > 64:
         raise HTTPException(status_code=400, detail="name too large (max 64)")
-    _ = current_user
-    return await create_api_key(session, ApiKeyCreateRequest(name=name))
+    return await create_api_key(session, current_user.id, ApiKeyCreateRequest(name=name))
 
 
 @router.delete("/keys/{key_id}")
@@ -219,8 +285,9 @@ async def revoke_key(
     session: AsyncSession = Depends(get_db_session),
     current_user=Depends(get_current_user),
 ) -> dict:
-    _ = current_user
-    item = await revoke_api_key(session, key_id)
+    item = await revoke_api_key(
+        session, key_id, user_id=None if current_user.role == "admin" else current_user.id
+    )
     if not item:
         raise HTTPException(status_code=404, detail="not found")
     return {"item": item}

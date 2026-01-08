@@ -33,6 +33,7 @@ def _to_user_public(row: User) -> UserPublic:
         id=str(row.id),
         email=row.email,
         role=row.role,
+        balance=int(row.balance),
         createdAt=_dt_iso(row.created_at) or dt.datetime.now(dt.timezone.utc).isoformat(),
         lastLoginAt=_dt_iso(row.last_login_at),
     )
@@ -117,6 +118,9 @@ async def login_with_google(
         session.add(user)
         await session.commit()
         await session.refresh(user)
+
+    if user.banned_at is not None:
+        raise ValueError("banned")
 
     if not identity:
         identity = OAuthIdentity(
