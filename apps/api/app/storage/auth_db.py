@@ -26,6 +26,7 @@ def _to_user_public(row: User) -> UserPublic:
         id=str(row.id),
         email=row.email,
         role=row.role,
+        group=row.group_name,
         balance=int(row.balance),
         orgId=None,
         createdAt=_dt_iso(row.created_at) or dt.datetime.now(dt.timezone.utc).isoformat(),

@@ -11,6 +11,7 @@ const labelMap: Record<string, string> = {
   "/": "Dashboard",
   "/keys": "API Keys",
   "/models": "Models",
+  "/profile": "Profile",
   "/settings": "Settings"
 };
 

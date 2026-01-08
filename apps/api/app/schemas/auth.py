@@ -7,6 +7,7 @@ class UserPublic(BaseModel):
     id: str
     email: EmailStr
     role: str = "user"
+    group: str = "default"
     balance: int = 0
     org_id: str | None = Field(default=None, alias="orgId")
     created_at: str = Field(alias="createdAt")

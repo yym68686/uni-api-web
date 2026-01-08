@@ -52,18 +52,16 @@ export function UserMenu({ userName, className }: UserMenuProps) {
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
+          <Link href="/profile">
+            <User className="mr-2 h-4 w-4" />
+            Profile
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
           <Link href="/settings">
             <Settings className="mr-2 h-4 w-4" />
             Settings
           </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={() => {
-            toast.message("Demo：未接入真实登录系统");
-          }}
-        >
-          <User className="mr-2 h-4 w-4" />
-          Profile
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem

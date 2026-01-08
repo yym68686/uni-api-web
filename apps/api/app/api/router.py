@@ -138,6 +138,7 @@ async def me(
         id=str(current_user.id),
         email=current_user.email,
         role=membership.role,
+        group=current_user.group_name,
         balance=int(current_user.balance),
         orgId=str(membership.org_id),
         createdAt=_dt_iso(current_user.created_at) or dt.datetime.now(dt.timezone.utc).isoformat(),
