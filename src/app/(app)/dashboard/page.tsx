@@ -158,7 +158,7 @@ export default async function DashboardPage() {
         />
         <StatsCard
           title="Remaining credits"
-          value={remainingCredits === null ? "—" : formatCompactNumber(remainingCredits)}
+          value={remainingCredits === null ? "—" : formatUsd(remainingCredits)}
           trend={remainingCredits === null ? "connect billing" : "plan: Pro"}
           icon={Wallet}
           iconGradientClassName="from-success/35 to-success/10 text-success"
