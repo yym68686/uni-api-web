@@ -54,7 +54,7 @@ export function AppSidebarContent({ onNavigate }: AppSidebarContentProps) {
     <div className="flex h-full flex-col">
       <div className="border-b border-border p-4">
         <Link
-          href="/dashboard"
+          href="/"
           className="group flex items-center gap-3"
           onClick={onNavigate}
         >
