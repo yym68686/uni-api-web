@@ -3,7 +3,7 @@ import { Clock, ScrollText } from "lucide-react";
 import { CopyableModelId } from "@/components/models/copyable-model-id";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { buildBackendUrl, getBackendAuthHeaders } from "@/lib/backend";
+import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
 import { formatUsd } from "@/lib/format";
 import { getRequestLocale } from "@/lib/i18n/server";
 import { t } from "@/lib/i18n/messages";
@@ -46,7 +46,7 @@ function formatCostUsd(value: number) {
 async function getLogs() {
   const res = await fetch(buildBackendUrl("/logs?limit=100"), {
     cache: "no-store",
-    headers: await getBackendAuthHeaders()
+    headers: await getBackendAuthHeadersCached()
   });
   if (!res.ok) return null;
   const json: unknown = await res.json();

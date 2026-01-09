@@ -3,7 +3,7 @@ import { Boxes } from "lucide-react";
 import { CopyableModelId } from "@/components/models/copyable-model-id";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { buildBackendUrl, getBackendAuthHeaders } from "@/lib/backend";
+import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
 import type { ModelsListResponse } from "@/lib/types";
 import { getRequestLocale } from "@/lib/i18n/server";
 import { t } from "@/lib/i18n/messages";
@@ -26,7 +26,7 @@ async function getModels() {
   const res = await fetch(buildBackendUrl("/models"), {
     cache: "force-cache",
     next: { tags: ["models:user"] },
-    headers: await getBackendAuthHeaders()
+    headers: await getBackendAuthHeadersCached()
   });
   if (!res.ok) return null;
   const json: unknown = await res.json();

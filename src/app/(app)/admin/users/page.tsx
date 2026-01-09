@@ -4,7 +4,8 @@ import { UserRowActions } from "@/components/admin/user-row-actions";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { buildBackendUrl, getBackendAuthHeaders } from "@/lib/backend";
+import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
+import { getCurrentUser } from "@/lib/current-user";
 import { t } from "@/lib/i18n/messages";
 import { getRequestLocale } from "@/lib/i18n/server";
 import type { AdminUsersListResponse } from "@/lib/types";
@@ -40,24 +41,15 @@ function groupBadgeVariant(group: string) {
 }
 
 async function getMe() {
-  const res = await fetch(buildBackendUrl("/auth/me"), {
-    cache: "no-store",
-    headers: await getBackendAuthHeaders()
-  });
-  if (!res.ok) return null;
-  const json: unknown = await res.json();
-  if (!json || typeof json !== "object") return null;
-  const id = (json as { id?: unknown }).id;
-  const role = (json as { role?: unknown }).role;
-  const email = (json as { email?: unknown }).email;
-  if (typeof id !== "string" || typeof role !== "string" || typeof email !== "string") return null;
-  return { id, role, email };
+  const me = await getCurrentUser();
+  if (!me) return null;
+  return { id: me.id, role: me.role, email: me.email };
 }
 
 async function getUsers() {
   const res = await fetch(buildBackendUrl("/admin/users"), {
     cache: "no-store",
-    headers: await getBackendAuthHeaders()
+    headers: await getBackendAuthHeadersCached()
   });
   if (!res.ok) return null;
   const json: unknown = await res.json();

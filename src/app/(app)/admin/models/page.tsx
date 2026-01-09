@@ -6,7 +6,8 @@ import { CopyableModelId } from "@/components/models/copyable-model-id";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { buildBackendUrl, getBackendAuthHeaders } from "@/lib/backend";
+import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
+import { getCurrentUser } from "@/lib/current-user";
 import { getRequestLocale } from "@/lib/i18n/server";
 import { t } from "@/lib/i18n/messages";
 import type { AdminModelsListResponse } from "@/lib/types";
@@ -26,24 +27,16 @@ function formatUsdPerM(value: string | null | undefined) {
 }
 
 async function getMe() {
-  const res = await fetch(buildBackendUrl("/auth/me"), {
-    cache: "no-store",
-    headers: await getBackendAuthHeaders()
-  });
-  if (!res.ok) return null;
-  const json: unknown = await res.json();
-  if (!json || typeof json !== "object") return null;
-  const role = (json as { role?: unknown }).role;
-  const email = (json as { email?: unknown }).email;
-  if (typeof role !== "string" || typeof email !== "string") return null;
-  return { role, email };
+  const me = await getCurrentUser();
+  if (!me) return null;
+  return { role: me.role, email: me.email };
 }
 
 async function getModels() {
   const res = await fetch(buildBackendUrl("/admin/models"), {
     cache: "force-cache",
     next: { tags: ["models:admin-config", "models:user"] },
-    headers: await getBackendAuthHeaders()
+    headers: await getBackendAuthHeadersCached()
   });
   if (!res.ok) return null;
   const json: unknown = await res.json();

@@ -2,7 +2,7 @@ import { Activity, CreditCard, KeyRound, Wallet } from "lucide-react";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatsCard } from "@/components/app/stats-card";
-import { UsageAreaChart } from "@/components/charts/usage-area-chart";
+import { UsageAreaChartLazy } from "@/components/charts/usage-area-chart-lazy";
 import { formatCompactNumber, formatUsd } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { getRequestLocale } from "@/lib/i18n/server";
@@ -13,7 +13,8 @@ import type {
   DailyUsagePoint,
   UsageResponse
 } from "@/lib/types";
-import { buildBackendUrl, getBackendAuthHeaders } from "@/lib/backend";
+import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
+import { getCurrentUser } from "@/lib/current-user";
 
 export const dynamic = "force-dynamic";
 
@@ -69,75 +70,41 @@ function buildEmptyDaily(days: number): DailyUsagePoint[] {
 
 export default async function DashboardPage() {
   const locale = await getRequestLocale();
-  let userName = "User";
-  let remainingCredits: number | null = null;
-  try {
-    const res = await fetch(buildBackendUrl("/auth/me"), {
-      cache: "no-store",
-      headers: await getBackendAuthHeaders()
-    });
-    if (res.ok) {
-      const json: unknown = await res.json();
-      if (json && typeof json === "object") {
-        const email = (json as { email?: unknown }).email;
-        if (typeof email === "string" && email.length > 0) userName = email;
-        const balance = (json as { balance?: unknown }).balance;
-        if (typeof balance === "number" && Number.isFinite(balance)) remainingCredits = balance;
-      }
-    }
-  } catch {
-    // ignore
-  }
+  const me = await getCurrentUser();
+  const userName = me?.email && me.email.length > 0 ? me.email : "User";
+  const remainingCredits = typeof me?.balance === "number" && Number.isFinite(me.balance) ? me.balance : null;
+
+  const headers = await getBackendAuthHeadersCached();
+
+  const [usageRes, keysRes, annRes] = await Promise.all([
+    fetch(buildBackendUrl("/usage"), { cache: "no-store", headers }).catch(() => null),
+    fetch(buildBackendUrl("/keys"), { cache: "no-store", headers }).catch(() => null),
+    fetch(buildBackendUrl("/announcements"), { cache: "no-store", headers }).catch(() => null)
+  ]);
 
   let usage: UsageResponse = {
     summary: { requests24h: 0, tokens24h: 0, errorRate24h: 0, spend24hUsd: 0 },
     daily: buildEmptyDaily(7),
     topModels: []
   };
-  try {
-    const res = await fetch(buildBackendUrl("/usage"), {
-      cache: "no-store",
-      headers: await getBackendAuthHeaders()
-    });
-    if (res.ok) {
-      const json: unknown = await res.json();
-      if (isUsageResponse(json)) usage = json;
-    }
-  } catch {
-    // Backend not available; keep dashboard resilient with zeros.
+  if (usageRes?.ok) {
+    const json: unknown = await usageRes.json().catch(() => null);
+    if (isUsageResponse(json)) usage = json;
   }
 
   let activeKeys = 0;
-  try {
-    const keysRes = await fetch(buildBackendUrl("/keys"), {
-      cache: "no-store",
-      headers: await getBackendAuthHeaders()
-    });
-    if (keysRes.ok) {
-      const json: unknown = await keysRes.json();
-      if (isApiKeysListResponse(json)) {
-        activeKeys = json.items.filter((k) => !k.revokedAt).length;
-      }
-    }
-  } catch {
-    // Backend not available; keep KPI resilient.
+  if (keysRes?.ok) {
+    const json: unknown = await keysRes.json().catch(() => null);
+    if (isApiKeysListResponse(json)) activeKeys = json.items.filter((k) => !k.revokedAt).length;
   }
   const last7Days = usage.daily.length > 0 ? usage.daily.slice(-7) : buildEmptyDaily(7);
   const requests7d = last7Days.reduce((acc, p) => acc + p.requests, 0);
   const spendMonthUsd = Number((usage.summary.spend24hUsd * 30).toFixed(2));
 
   let announcements: AnnouncementsListResponse["items"] = [];
-  try {
-    const res = await fetch(buildBackendUrl("/announcements"), {
-      cache: "no-store",
-      headers: await getBackendAuthHeaders()
-    });
-    if (res.ok) {
-      const json: unknown = await res.json();
-      if (isAnnouncementsListResponse(json)) announcements = json.items;
-    }
-  } catch {
-    // Backend not available.
+  if (annRes?.ok) {
+    const json: unknown = await annRes.json().catch(() => null);
+    if (isAnnouncementsListResponse(json)) announcements = json.items;
   }
 
   return (
@@ -189,7 +156,7 @@ export default async function DashboardPage() {
             <CardDescription>{t(locale, "dashboard.chart.desc")}</CardDescription>
           </CardHeader>
           <CardContent>
-            <UsageAreaChart data={last7Days} />
+            <UsageAreaChartLazy data={last7Days} />
           </CardContent>
         </Card>
 

@@ -3,37 +3,11 @@ import { Shield, User } from "lucide-react";
 import { DeleteAccountButton } from "@/components/profile/delete-account-button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { buildBackendUrl, getBackendAuthHeaders } from "@/lib/backend";
 import { getRequestLocale } from "@/lib/i18n/server";
 import { t } from "@/lib/i18n/messages";
+import { getCurrentUser } from "@/lib/current-user";
 
 export const dynamic = "force-dynamic";
-
-interface MeResponse {
-  id: string;
-  email: string;
-  role: string;
-  group: string;
-  balance: number;
-  orgId: string;
-  createdAt: string;
-  lastLoginAt: string | null;
-}
-
-function isMeResponse(value: unknown): value is MeResponse {
-  if (!value || typeof value !== "object") return false;
-  const v = value as Record<string, unknown>;
-  return (
-    typeof v.id === "string" &&
-    typeof v.email === "string" &&
-    typeof v.role === "string" &&
-    typeof v.group === "string" &&
-    typeof v.balance === "number" &&
-    typeof v.orgId === "string" &&
-    typeof v.createdAt === "string" &&
-    (v.lastLoginAt === null || typeof v.lastLoginAt === "string")
-  );
-}
 
 function formatUtcDateTime(value: string | null) {
   if (!value) return "—";
@@ -48,20 +22,9 @@ function roleVariant(role: string): "outline" | "success" | "warning" {
   return "outline";
 }
 
-async function getMe() {
-  const res = await fetch(buildBackendUrl("/auth/me"), {
-    cache: "no-store",
-    headers: await getBackendAuthHeaders()
-  });
-  if (!res.ok) return null;
-  const json: unknown = await res.json();
-  if (!isMeResponse(json)) return null;
-  return json;
-}
-
 export default async function ProfilePage() {
   const locale = await getRequestLocale();
-  const me = await getMe();
+  const me = await getCurrentUser();
 
   return (
     <div className="space-y-6">

@@ -1,6 +1,6 @@
 import { ApiKeysPageClient } from "@/components/keys/api-keys-page-client";
 import type { ApiKeysListResponse } from "@/lib/types";
-import { buildBackendUrl, getBackendAuthHeaders } from "@/lib/backend";
+import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +16,7 @@ export default async function ApiKeysPage() {
   try {
     const res = await fetch(buildBackendUrl("/keys"), {
       cache: "no-store",
-      headers: await getBackendAuthHeaders()
+      headers: await getBackendAuthHeadersCached()
     });
     if (res.ok) {
       const json: unknown = await res.json();

@@ -1,6 +1,7 @@
 import "server-only";
 
 import { cookies } from "next/headers";
+import { cache } from "react";
 
 import { SESSION_COOKIE_NAME } from "@/lib/auth";
 
@@ -25,6 +26,8 @@ export async function getBackendAuthHeaders(): Promise<HeadersInit> {
   if (token) headers.authorization = `Bearer ${token}`;
   return headers;
 }
+
+export const getBackendAuthHeadersCached = cache(getBackendAuthHeaders);
 
 export function buildBackendUrl(path: string) {
   const baseUrl = getBackendBaseUrl();
