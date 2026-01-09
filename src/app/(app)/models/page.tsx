@@ -5,6 +5,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { buildBackendUrl, getBackendAuthHeaders } from "@/lib/backend";
 import type { ModelsListResponse } from "@/lib/types";
+import { getRequestLocale } from "@/lib/i18n/server";
+import { t } from "@/lib/i18n/messages";
 
 export const dynamic = "force-dynamic";
 
@@ -33,14 +35,15 @@ async function getModels() {
 }
 
 export default async function ModelsPage() {
+  const locale = await getRequestLocale();
   const items = (await getModels()) ?? [];
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Models</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">{t(locale, "models.title")}</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          可用模型会根据你的用户组（Group）与管理员配置的渠道权限自动变化。
+          {t(locale, "models.subtitle")}
         </p>
       </div>
 
@@ -48,22 +51,22 @@ export default async function ModelsPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Boxes className="h-5 w-5 text-muted-foreground" />
-            Available models
+            {t(locale, "models.card.title")}
           </CardTitle>
-          <CardDescription>价格按 $/M tokens 计费（展示为 $X）。</CardDescription>
+          <CardDescription>{t(locale, "models.card.desc")}</CardDescription>
         </CardHeader>
         <CardContent>
           {items.length === 0 ? (
             <div className="rounded-xl border border-dashed border-border bg-muted/10 p-8 text-center text-sm text-muted-foreground">
-              暂无可用模型（请联系管理员配置 Channels 与模型开关）
+              {t(locale, "models.empty")}
             </div>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Model</TableHead>
-                  <TableHead>Input ($/M tokens)</TableHead>
-                  <TableHead>Output ($/M tokens)</TableHead>
+                  <TableHead>{t(locale, "models.table.model")}</TableHead>
+                  <TableHead>{t(locale, "models.table.input")}</TableHead>
+                  <TableHead>{t(locale, "models.table.output")}</TableHead>
                 </TableRow>
               </TableHeader>
                 <TableBody>

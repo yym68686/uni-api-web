@@ -8,7 +8,9 @@ import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 
 import type { AdminUserDeleteResponse, AdminUserItem, AdminUserUpdateResponse } from "@/lib/types";
+import type { MessageKey, MessageVars } from "@/lib/i18n/messages";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/components/i18n/i18n-provider";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -28,11 +30,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-const balanceSchema = z.object({
-  balance: z.coerce.number().int().min(0, "余额不能小于 0").max(1_000_000_000, "余额过大")
-});
+function createBalanceSchema(t: (key: MessageKey, vars?: MessageVars) => string) {
+  return z.object({
+    balance: z.coerce.number().int().min(0, t("validation.balanceMin")).max(1_000_000_000, t("validation.balanceMax"))
+  });
+}
 
-type BalanceFormValues = z.infer<typeof balanceSchema>;
+type BalanceFormValues = z.infer<ReturnType<typeof createBalanceSchema>>;
 
 const roleSchema = z.object({
   role: z.enum(["owner", "admin", "billing", "developer", "viewer"])
@@ -40,16 +44,18 @@ const roleSchema = z.object({
 
 type RoleFormValues = z.infer<typeof roleSchema>;
 
-const groupSchema = z.object({
-  group: z
-    .string()
-    .trim()
-    .min(1, "分组不能为空")
-    .max(64, "分组最多 64 个字符")
-    .refine((v) => !v.includes("\n") && !v.includes("\r"), "分组包含非法字符")
-});
+function createGroupSchema(t: (key: MessageKey, vars?: MessageVars) => string) {
+  return z.object({
+    group: z
+      .string()
+      .trim()
+      .min(1, t("validation.groupRequired"))
+      .max(64, t("validation.maxChars", { max: 64 }))
+      .refine((v) => !v.includes("\n") && !v.includes("\r"), t("validation.groupInvalidChars"))
+  });
+}
 
-type GroupFormValues = z.infer<typeof groupSchema>;
+type GroupFormValues = z.infer<ReturnType<typeof createGroupSchema>>;
 
 interface UserRowActionsProps {
   user: AdminUserItem;
@@ -75,12 +81,16 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
   const [banOpen, setBanOpen] = React.useState(false);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
+  const { t } = useI18n();
 
   const isSelf = currentUserId != null && currentUserId === user.id;
   const isBanned = Boolean(user.bannedAt);
   const canManageOwner = currentUserRole === "owner";
   const isTargetOwner = user.role === "owner";
   const ownerProtected = isTargetOwner && !canManageOwner;
+
+  const balanceSchema = React.useMemo(() => createBalanceSchema(t), [t]);
+  const groupSchema = React.useMemo(() => createGroupSchema(t), [t]);
 
   const form = useForm<BalanceFormValues>({
     defaultValues: { balance: user.balance },
@@ -139,7 +149,7 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
       body: JSON.stringify(payload)
     });
     const json: unknown = await res.json().catch(() => null);
-    if (!res.ok) throw new Error(readMessage(json, "操作失败"));
+    if (!res.ok) throw new Error(readMessage(json, t("common.operationFailed")));
     void (json as AdminUserUpdateResponse);
   }
 
@@ -149,15 +159,15 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
       const parsed = balanceSchema.safeParse(values);
       if (!parsed.success) {
         const issue = parsed.error.issues[0];
-        toast.error(issue?.message ?? "表单校验失败");
+        toast.error(issue?.message ?? t("common.formInvalid"));
         return;
       }
       await patch({ balance: parsed.data.balance });
-      toast.success("余额已更新");
+      toast.success(t("admin.users.toast.balanceUpdated"));
       setBalanceOpen(false);
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "操作失败");
+      toast.error(err instanceof Error ? err.message : t("common.operationFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -169,15 +179,15 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
       const parsed = groupSchema.safeParse(values);
       if (!parsed.success) {
         const issue = parsed.error.issues[0];
-        toast.error(issue?.message ?? "表单校验失败");
+        toast.error(issue?.message ?? t("common.formInvalid"));
         return;
       }
       await patch({ group: parsed.data.group });
-      toast.success("分组已更新");
+      toast.success(t("admin.users.toast.groupUpdated"));
       setGroupOpen(false);
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "操作失败");
+      toast.error(err instanceof Error ? err.message : t("common.operationFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -187,11 +197,11 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
     setSubmitting(true);
     try {
       await patch({ group: null });
-      toast.success("分组已重置为 default");
+      toast.success(t("admin.users.toast.groupReset"));
       setGroupOpen(false);
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "操作失败");
+      toast.error(err instanceof Error ? err.message : t("common.operationFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -202,15 +212,15 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
     try {
       const parsed = roleSchema.safeParse(values);
       if (!parsed.success) {
-        toast.error("表单校验失败");
+        toast.error(t("common.formInvalid"));
         return;
       }
       await patch({ role: parsed.data.role });
-      toast.success("角色已更新");
+      toast.success(t("admin.users.toast.roleUpdated"));
       setRoleOpen(false);
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "操作失败");
+      toast.error(err instanceof Error ? err.message : t("common.operationFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -220,11 +230,11 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
     setSubmitting(true);
     try {
       await patch({ banned: !isBanned });
-      toast.success(isBanned ? "已解除封禁" : "已封禁用户");
+      toast.success(isBanned ? t("admin.users.toast.unbanned") : t("admin.users.toast.banned"));
       setBanOpen(false);
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "操作失败");
+      toast.error(err instanceof Error ? err.message : t("common.operationFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -235,13 +245,13 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
     try {
       const res = await fetch(`/api/admin/users/${encodeURIComponent(user.id)}`, { method: "DELETE" });
       const json: unknown = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(readMessage(json, "删除失败"));
+      if (!res.ok) throw new Error(readMessage(json, t("common.deleteFailed")));
       void (json as AdminUserDeleteResponse);
-      toast.success("用户已删除");
+      toast.success(t("admin.users.toast.deleted"));
       setDeleteOpen(false);
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "删除失败");
+      toast.error(err instanceof Error ? err.message : t("common.deleteFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -256,7 +266,7 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
             size="icon"
             variant="ghost"
             className={cn("h-9 w-9 rounded-lg", className)}
-            aria-label="User actions"
+            aria-label={t("common.actions")}
           >
             <MoreVertical className="h-4 w-4" />
           </Button>
@@ -270,7 +280,7 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
             }}
           >
             <Tag className="mr-2 h-4 w-4" />
-            Set group
+            {t("admin.users.actions.setGroup")}
           </DropdownMenuItem>
           <DropdownMenuItem
             disabled={isSelf || ownerProtected}
@@ -280,7 +290,7 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
             }}
           >
             <Shield className="mr-2 h-4 w-4" />
-            Set role
+            {t("admin.users.actions.setRole")}
           </DropdownMenuItem>
           <DropdownMenuItem
             disabled={ownerProtected}
@@ -290,7 +300,7 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
             }}
           >
             <Coins className="mr-2 h-4 w-4" />
-            Adjust balance
+            {t("admin.users.actions.adjustBalance")}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
@@ -301,7 +311,7 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
             }}
           >
             <Ban className="mr-2 h-4 w-4" />
-            {isBanned ? "Unban" : "Ban"}
+            {isBanned ? t("admin.users.actions.unban") : t("admin.users.actions.ban")}
           </DropdownMenuItem>
           <DropdownMenuItem
             disabled={isSelf || ownerProtected}
@@ -312,7 +322,7 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
             }}
           >
             <Trash2 className="mr-2 h-4 w-4" />
-            Delete
+            {t("common.delete")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -320,8 +330,8 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
       <Dialog open={roleOpen} onOpenChange={setRoleOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Set role</DialogTitle>
-            <DialogDescription>角色用于权限控制（Owner/Admin/Billing/Developer/Viewer）。</DialogDescription>
+            <DialogTitle>{t("admin.users.role.title")}</DialogTitle>
+            <DialogDescription>{t("admin.users.role.desc")}</DialogDescription>
           </DialogHeader>
 
           <form
@@ -331,7 +341,7 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
             }}
           >
             <div className="space-y-2">
-              <Label>Role</Label>
+              <Label>{t("admin.users.table.role")}</Label>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
                 {(
                   [
@@ -360,22 +370,22 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
                 })}
               </div>
               {!canManageOwner ? (
-                <p className="text-xs text-muted-foreground">只有 Owner 可以授予/调整 Owner 角色。</p>
+                <p className="text-xs text-muted-foreground">{t("admin.users.role.ownerOnlyHelp")}</p>
               ) : null}
             </div>
 
             <DialogFooter>
               <Button type="button" variant="ghost" onClick={() => setRoleOpen(false)}>
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button type="submit" disabled={!roleForm.formState.isValid || submitting}>
                 {submitting ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    Saving…
+                    {t("common.saving")}
                   </>
                 ) : (
-                  "Save"
+                  t("common.save")
                 )}
               </Button>
             </DialogFooter>
@@ -386,8 +396,8 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
       <Dialog open={groupOpen} onOpenChange={setGroupOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Set group</DialogTitle>
-            <DialogDescription>自定义分组名（例如：admin / team-a / beta）。</DialogDescription>
+            <DialogTitle>{t("admin.users.group.title")}</DialogTitle>
+            <DialogDescription>{t("admin.users.group.desc")}</DialogDescription>
           </DialogHeader>
 
           <form
@@ -397,7 +407,7 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
             }}
           >
             <div className="space-y-2">
-              <Label htmlFor={`group-${user.id}`}>Group</Label>
+              <Label htmlFor={`group-${user.id}`}>{t("admin.users.table.group")}</Label>
               <Input
                 id={`group-${user.id}`}
                 placeholder="default"
@@ -407,26 +417,26 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
               {groupForm.formState.errors.group ? (
                 <p className="text-xs text-destructive">{groupForm.formState.errors.group.message}</p>
               ) : (
-                <p className="text-xs text-muted-foreground">提示：分组不等于 Role，不会自动赋予管理员权限。</p>
+                <p className="text-xs text-muted-foreground">{t("admin.users.group.hint")}</p>
               )}
             </div>
 
             <DialogFooter className="justify-between">
               <Button type="button" variant="ghost" disabled={submitting} onClick={() => void resetGroup()}>
-                Reset to default
+                {t("admin.users.group.reset")}
               </Button>
               <div className="flex gap-2">
                 <Button type="button" variant="ghost" onClick={() => setGroupOpen(false)}>
-                  Cancel
+                  {t("common.cancel")}
                 </Button>
                 <Button type="submit" disabled={!groupForm.formState.isValid || submitting}>
                   {submitting ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      Saving…
+                      {t("common.saving")}
                     </>
                   ) : (
-                    "Save"
+                    t("common.save")
                   )}
                 </Button>
               </div>
@@ -438,8 +448,8 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
       <Dialog open={balanceOpen} onOpenChange={setBalanceOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Adjust balance</DialogTitle>
-            <DialogDescription>修改用户余额（仅影响后台存储的余额字段）。</DialogDescription>
+            <DialogTitle>{t("admin.users.balance.title")}</DialogTitle>
+            <DialogDescription>{t("admin.users.balance.desc")}</DialogDescription>
           </DialogHeader>
 
           <form
@@ -449,7 +459,7 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
             }}
           >
             <div className="space-y-2">
-              <Label htmlFor={`balance-${user.id}`}>Balance</Label>
+              <Label htmlFor={`balance-${user.id}`}>{t("admin.users.table.balance")}</Label>
               <Input
                 id={`balance-${user.id}`}
                 type="number"
@@ -463,16 +473,16 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
             </div>
             <DialogFooter>
               <Button type="button" variant="ghost" onClick={() => setBalanceOpen(false)}>
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button type="submit" disabled={!form.formState.isValid || submitting}>
                 {submitting ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    Saving…
+                    {t("common.saving")}
                   </>
                 ) : (
-                  "Save"
+                  t("common.save")
                 )}
               </Button>
             </DialogFooter>
@@ -483,11 +493,15 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
       <Dialog open={banOpen} onOpenChange={setBanOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{isBanned ? "Unban user?" : "Ban user?"}</DialogTitle>
+            <DialogTitle>
+              {t("admin.users.ban.title", {
+                action: isBanned ? t("admin.users.actions.unban") : t("admin.users.actions.ban")
+              })}
+            </DialogTitle>
             <DialogDescription>
               {isBanned
-                ? "解除封禁后，用户可重新登录。"
-                : "封禁后，该用户将被强制退出并无法登录。"}
+                ? t("admin.users.ban.desc.banned")
+                : t("admin.users.ban.desc.active")}
             </DialogDescription>
           </DialogHeader>
 
@@ -498,18 +512,18 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
 
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => setBanOpen(false)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button type="button" variant={isBanned ? "outline" : "destructive"} disabled={submitting} onClick={() => void toggleBan()}>
               {submitting ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Working…
+                  {t("common.working")}
                 </>
               ) : isBanned ? (
-                "Unban"
+                t("admin.users.actions.unban")
               ) : (
-                "Ban"
+                t("admin.users.actions.ban")
               )}
             </Button>
           </DialogFooter>
@@ -519,8 +533,8 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete user?</DialogTitle>
-            <DialogDescription>将永久删除用户及其 Sessions / OAuth identities / API keys。</DialogDescription>
+            <DialogTitle>{t("admin.users.delete.title")}</DialogTitle>
+            <DialogDescription>{t("admin.users.delete.desc")}</DialogDescription>
           </DialogHeader>
 
           <div className="rounded-xl border border-border bg-muted/20 p-4">
@@ -530,16 +544,16 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
 
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => setDeleteOpen(false)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button type="button" variant="destructive" disabled={submitting} onClick={() => void removeUser()}>
               {submitting ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Deleting…
+                  {t("common.deleting")}
                 </>
               ) : (
-                "Delete"
+                t("common.delete")
               )}
             </Button>
           </DialogFooter>

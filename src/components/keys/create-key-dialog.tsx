@@ -20,18 +20,25 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useI18n } from "@/components/i18n/i18n-provider";
 
-const nameSchema = z
-  .string()
-  .trim()
-  .min(2, "至少 2 个字符")
-  .max(64, "最多 64 个字符");
+import type { MessageKey, MessageVars } from "@/lib/i18n/messages";
 
-const schema = z.object({
-  name: nameSchema
-});
+function createNameSchema(t: (key: MessageKey, vars?: MessageVars) => string) {
+  return z
+    .string()
+    .trim()
+    .min(2, t("validation.minChars", { min: 2 }))
+    .max(64, t("validation.maxChars", { max: 64 }));
+}
 
-type FormValues = z.infer<typeof schema>;
+function createSchema(t: (key: MessageKey, vars?: MessageVars) => string) {
+  return z.object({
+    name: createNameSchema(t)
+  });
+}
+
+type FormValues = z.infer<ReturnType<typeof createSchema>>;
 
 interface CreateKeyDialogProps {
   onCreated: (res: ApiKeyCreateResponse) => void;
@@ -55,12 +62,18 @@ function extractApiErrorMessage(body: unknown): string | null {
 
 export function CreateKeyDialog({
   onCreated,
-  triggerLabel = "创建 Key",
+  triggerLabel,
   triggerClassName
 }: CreateKeyDialogProps) {
   const [open, setOpen] = React.useState(false);
   const [createdKey, setCreatedKey] = React.useState<string | null>(null);
   const [creating, setCreating] = React.useState(false);
+  const { t } = useI18n();
+
+  const nameSchema = React.useMemo(() => createNameSchema(t), [t]);
+  const schema = React.useMemo(() => createSchema(t), [t]);
+
+  const triggerText = triggerLabel ?? t("keys.create");
 
   const form = useForm<FormValues>({
     defaultValues: { name: "" },
@@ -78,7 +91,7 @@ export function CreateKeyDialog({
         if (firstIssue?.path[0] === "name") {
           form.setError("name", { message: firstIssue.message, type: "validate" });
         }
-        toast.error(firstIssue?.message ?? "表单校验失败");
+        toast.error(firstIssue?.message ?? t("keys.toast.updateFailed"));
         return;
       }
 
@@ -88,7 +101,7 @@ export function CreateKeyDialog({
         body: JSON.stringify(parsed.data)
       });
       if (!res.ok) {
-        let message = "创建失败";
+        let message = t("keys.toast.updateFailed");
         try {
           const body: unknown = await res.json();
           message = extractApiErrorMessage(body) ?? message;
@@ -100,9 +113,9 @@ export function CreateKeyDialog({
       const json: ApiKeyCreateResponse = (await res.json()) as ApiKeyCreateResponse;
       setCreatedKey(json.key);
       onCreated(json);
-      toast.success("API Key 已创建");
+      toast.success(t("keys.dialog.created"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "创建失败");
+      toast.error(err instanceof Error ? err.message : t("keys.toast.updateFailed"));
     } finally {
       setCreating(false);
     }
@@ -111,9 +124,9 @@ export function CreateKeyDialog({
   async function copyKey(key: string) {
     try {
       await navigator.clipboard.writeText(key);
-      toast.success("已复制到剪贴板");
+      toast.success(t("keys.dialog.copySuccess"));
     } catch {
-      toast.error("复制失败，请手动复制");
+      toast.error(t("keys.dialog.copyFailed"));
     }
   }
 
@@ -133,21 +146,21 @@ export function CreateKeyDialog({
       <DialogTrigger asChild>
         <Button className={cn("rounded-xl", triggerClassName)}>
           <KeyRound className="h-4 w-4" />
-          {triggerLabel}
+          {triggerText}
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>创建 API Key</DialogTitle>
+          <DialogTitle>{t("keys.dialog.title")}</DialogTitle>
           <DialogDescription>
-            请妥善保存 Key；你也可以在列表中随时复制完整 Key。
+            {t("keys.dialog.desc")}
           </DialogDescription>
         </DialogHeader>
 
         {createdKey ? (
           <div className="space-y-3">
             <div className="rounded-xl border border-border bg-muted/30 p-3">
-              <div className="text-xs text-muted-foreground">Your API Key</div>
+              <div className="text-xs text-muted-foreground">{t("keys.dialog.yourKey")}</div>
               <div className="mt-2 break-all font-mono text-sm">{createdKey}</div>
             </div>
             <DialogFooter>
@@ -157,7 +170,7 @@ export function CreateKeyDialog({
                 onClick={() => copyKey(createdKey)}
               >
                 <Copy className="h-4 w-4" />
-                复制
+                {t("keys.dialog.copy")}
               </Button>
               <Button
                 type="button"
@@ -166,7 +179,7 @@ export function CreateKeyDialog({
                   reset();
                 }}
               >
-                完成
+                {t("keys.dialog.done")}
               </Button>
             </DialogFooter>
           </div>
@@ -178,41 +191,41 @@ export function CreateKeyDialog({
             }}
           >
             <div className="space-y-2">
-              <Label htmlFor="name">名称</Label>
+              <Label htmlFor="name">{t("keys.dialog.name")}</Label>
               <Input
                 id="name"
-                placeholder="例如：prod-default"
+                placeholder={t("keys.dialog.namePlaceholder")}
                 autoComplete="off"
                 {...form.register("name", {
-                  validate: (value) => {
-                    const r = nameSchema.safeParse(value);
-                    return r.success ? true : (r.error.issues[0]?.message ?? "名称不合法");
-                  }
-                })}
-              />
+                validate: (value) => {
+                  const r = nameSchema.safeParse(value);
+                  return r.success ? true : (r.error.issues[0]?.message ?? t("common.formInvalid"));
+                }
+              })}
+            />
               {form.formState.errors.name ? (
                 <p className="text-xs text-destructive">
                   {form.formState.errors.name.message}
                 </p>
               ) : (
                 <p className="text-xs text-muted-foreground">
-                  用于区分环境与用途。
+                  {t("keys.dialog.nameHelp")}
                 </p>
               )}
             </div>
 
             <DialogFooter>
               <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
-                取消
+                {t("keys.dialog.cancel")}
               </Button>
               <Button type="submit" disabled={!canSubmit}>
                 {creating ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    创建中…
+                    {t("keys.dialog.creating")}
                   </>
                 ) : (
-                  "创建"
+                  t("keys.dialog.create")
                 )}
               </Button>
             </DialogFooter>

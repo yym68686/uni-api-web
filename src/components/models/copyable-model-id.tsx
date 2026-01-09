@@ -4,6 +4,7 @@ import { Copy } from "lucide-react";
 import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/components/i18n/i18n-provider";
 
 interface CopyableModelIdProps {
   value: string;
@@ -11,12 +12,14 @@ interface CopyableModelIdProps {
 }
 
 export function CopyableModelId({ value, className }: CopyableModelIdProps) {
+  const { t } = useI18n();
+
   async function copy() {
     try {
       await navigator.clipboard.writeText(value);
-      toast.success("已复制模型名");
+      toast.success(t("common.copied"));
     } catch {
-      toast.error("复制失败");
+      toast.error(t("common.copyFailed"));
     }
   }
 
@@ -37,4 +40,3 @@ export function CopyableModelId({ value, className }: CopyableModelIdProps) {
     </button>
   );
 }
-

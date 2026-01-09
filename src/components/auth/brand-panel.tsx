@@ -1,11 +1,14 @@
 import { cn } from "@/lib/utils";
+import { getRequestLocale } from "@/lib/i18n/server";
+import { t } from "@/lib/i18n/messages";
 
 interface BrandPanelProps {
   appName: string;
   className?: string;
 }
 
-export function BrandPanel({ appName, className }: BrandPanelProps) {
+export async function BrandPanel({ appName, className }: BrandPanelProps) {
+  const locale = await getRequestLocale();
   return (
     <section
       className={cn(
@@ -23,10 +26,10 @@ export function BrandPanel({ appName, className }: BrandPanelProps) {
           {appName} · Console Access
         </div>
         <div className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
-          Secure, fast, and observable LLM API platform.
+          {t(locale, "auth.panel.title")}
         </div>
         <div className="mt-2 text-sm text-muted-foreground">
-          登录后可查看用量、管理 API Keys、配置计费与告警。
+          {t(locale, "auth.panel.desc")}
         </div>
       </div>
     </section>

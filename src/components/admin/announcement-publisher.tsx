@@ -8,7 +8,9 @@ import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 
 import type { AnnouncementCreateResponse } from "@/lib/types";
+import type { MessageKey, MessageVars } from "@/lib/i18n/messages";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/components/i18n/i18n-provider";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -22,13 +24,23 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-const schema = z.object({
-  title: z.string().trim().min(2, "至少 2 个字符").max(180, "最多 180 个字符"),
-  meta: z.string().trim().min(2, "至少 2 个字符").max(120, "最多 120 个字符"),
-  level: z.enum(["info", "warning", "success", "destructive"])
-});
+function createSchema(t: (key: MessageKey, vars?: MessageVars) => string) {
+  return z.object({
+    title: z
+      .string()
+      .trim()
+      .min(2, t("validation.minChars", { min: 2 }))
+      .max(180, t("validation.maxChars", { max: 180 })),
+    meta: z
+      .string()
+      .trim()
+      .min(2, t("validation.minChars", { min: 2 }))
+      .max(120, t("validation.maxChars", { max: 120 })),
+    level: z.enum(["info", "warning", "success", "destructive"])
+  });
+}
 
-type FormValues = z.infer<typeof schema>;
+type FormValues = z.infer<ReturnType<typeof createSchema>>;
 
 interface AnnouncementPublisherProps {
   onCreated?: () => void;
@@ -42,6 +54,9 @@ export function AnnouncementPublisher({ onCreated, className }: AnnouncementPubl
   const [open, setOpen] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
   const router = useRouter();
+  const { t } = useI18n();
+
+  const schema = React.useMemo(() => createSchema(t), [t]);
 
   const form = useForm<FormValues>({
     defaultValues: { title: "", meta: "", level: "warning" },
@@ -58,7 +73,7 @@ export function AnnouncementPublisher({ onCreated, className }: AnnouncementPubl
       const parsed = schema.safeParse(values);
       if (!parsed.success) {
         const issue = parsed.error.issues[0];
-        toast.error(issue?.message ?? "表单校验失败");
+        toast.error(issue?.message ?? t("common.formInvalid"));
         return;
       }
 
@@ -71,20 +86,20 @@ export function AnnouncementPublisher({ onCreated, className }: AnnouncementPubl
       if (!res.ok) {
         const message =
           json && typeof json === "object" && "message" in json
-            ? String((json as { message?: unknown }).message ?? "发布失败")
-            : "发布失败";
+            ? String((json as { message?: unknown }).message ?? t("common.operationFailed"))
+            : t("common.operationFailed");
         throw new Error(message);
       }
 
       const created = json as AnnouncementCreateResponse;
-      toast.success("公告已发布");
+      toast.success(t("admin.ann.toast.published"));
       onCreated?.();
       router.refresh();
       setOpen(false);
       reset();
       return created;
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "发布失败");
+      toast.error(err instanceof Error ? err.message : t("common.operationFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -103,16 +118,16 @@ export function AnnouncementPublisher({ onCreated, className }: AnnouncementPubl
       <DialogTrigger asChild>
         <Button className={cn("rounded-xl", glow, className)}>
           <Plus className="h-4 w-4" />
-          Publish
+          {t("common.publish")}
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Megaphone className="h-5 w-5 text-primary" />
-            发布公告
+            {t("admin.ann.publish")}
           </DialogTitle>
-          <DialogDescription>公告会显示在 Dashboard 右侧栏目。</DialogDescription>
+          <DialogDescription>{t("admin.ann.publishDesc")}</DialogDescription>
         </DialogHeader>
 
         <form
@@ -122,34 +137,34 @@ export function AnnouncementPublisher({ onCreated, className }: AnnouncementPubl
           }}
         >
           <div className="space-y-2">
-            <Label htmlFor="title">标题</Label>
-            <Input id="title" placeholder="例如：新版本发布 / 计费变更" {...form.register("title")} />
+            <Label htmlFor="title">{t("admin.ann.form.title")}</Label>
+            <Input id="title" placeholder={t("admin.ann.form.titlePlaceholder")} {...form.register("title")} />
             {form.formState.errors.title ? (
               <p className="text-xs text-destructive">{form.formState.errors.title.message}</p>
             ) : null}
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="meta">Meta</Label>
-            <Input id="meta" placeholder="例如：Today · Security" {...form.register("meta")} />
+            <Label htmlFor="meta">{t("admin.ann.form.meta")}</Label>
+            <Input id="meta" placeholder={t("admin.ann.form.metaPlaceholder")} {...form.register("meta")} />
             {form.formState.errors.meta ? (
               <p className="text-xs text-destructive">{form.formState.errors.meta.message}</p>
             ) : (
               <p className="text-xs text-muted-foreground font-mono">
-                建议使用 “Today · Category” 格式
+                {t("admin.ann.form.metaHelp")}
               </p>
             )}
           </div>
 
           <div className="space-y-2">
-            <Label>Level</Label>
+            <Label>{t("admin.ann.form.level")}</Label>
             <div className="grid grid-cols-4 gap-2">
               {(
                 [
-                  { value: "info", label: "Info" },
-                  { value: "warning", label: "Warn" },
-                  { value: "success", label: "Good" },
-                  { value: "destructive", label: "Critical" }
+                  { value: "info", label: t("admin.ann.level.info") },
+                  { value: "warning", label: t("admin.ann.level.warning") },
+                  { value: "success", label: t("admin.ann.level.success") },
+                  { value: "destructive", label: t("admin.ann.level.destructive") }
                 ] as const
               ).map((opt) => {
                 const active = level === opt.value;
@@ -170,16 +185,16 @@ export function AnnouncementPublisher({ onCreated, className }: AnnouncementPubl
 
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button type="submit" disabled={!form.formState.isValid || submitting}>
               {submitting ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Publishing…
+                  {t("common.publishing")}
                 </>
               ) : (
-                "Publish"
+                t("common.publish")
               )}
             </Button>
           </DialogFooter>

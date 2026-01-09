@@ -13,24 +13,34 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { BrandWordmark } from "@/components/brand/wordmark";
+import { useI18n } from "@/components/i18n/i18n-provider";
+import type { MessageKey, MessageVars } from "@/lib/i18n/messages";
 
-const emailSchema = z.string().trim().email("请输入正确的邮箱");
-const passwordSchema = z.string().min(6, "至少 6 位密码").max(128, "密码过长");
-const codeSchema = z.string().trim().regex(/^\d{6}$/, "请输入 6 位验证码");
+function createCodeSchema(t: (key: MessageKey, vars?: MessageVars) => string) {
+  return z.string().trim().regex(/^\d{6}$/, t("validation.code6"));
+}
 
-const schema = z
-  .object({
-    email: emailSchema,
-    password: passwordSchema,
-    confirmPassword: z.string(),
-    code: z.string().optional()
-  })
-  .refine((v) => v.password === v.confirmPassword, {
-    message: "两次密码不一致",
-    path: ["confirmPassword"]
-  });
+function createRegisterSchema(t: (key: MessageKey, vars?: MessageVars) => string) {
+  const emailSchema = z.string().trim().email(t("validation.email"));
+  const passwordSchema = z
+    .string()
+    .min(6, t("validation.passwordMin", { min: 6 }))
+    .max(128, t("validation.passwordMax"));
 
-type FormValues = z.infer<typeof schema>;
+  return z
+    .object({
+      email: emailSchema,
+      password: passwordSchema,
+      confirmPassword: z.string(),
+      code: z.string().optional()
+    })
+    .refine((v) => v.password === v.confirmPassword, {
+      message: t("validation.passwordMismatch"),
+      path: ["confirmPassword"]
+    });
+}
+
+type FormValues = z.infer<ReturnType<typeof createRegisterSchema>>;
 
 interface RegisterFormProps {
   appName: string;
@@ -43,6 +53,12 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
   const [step, setStep] = React.useState<"details" | "verify">("details");
   const [cooldown, setCooldown] = React.useState(0);
   const router = useRouter();
+  const { t } = useI18n();
+
+  const schema = React.useMemo(() => createRegisterSchema(t), [t]);
+  const emailSchema = schema.shape.email;
+  const passwordSchema = schema.shape.password;
+  const codeSchema = React.useMemo(() => createCodeSchema(t), [t]);
 
   const form = useForm<FormValues>({
     defaultValues: { email: "", password: "", confirmPassword: "", code: "" },
@@ -68,7 +84,7 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
           form.setError("confirmPassword", { message: issue.message, type: "validate" });
         }
       }
-      toast.error(issues[0]?.message ?? "表单校验失败");
+      toast.error(issues[0]?.message ?? t("common.formInvalid"));
       return;
     }
 
@@ -83,16 +99,16 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
       if (!res.ok) {
         const message =
           json && typeof json === "object" && "message" in json
-            ? String((json as { message?: unknown }).message ?? "发送失败")
-            : "发送失败";
+            ? String((json as { message?: unknown }).message ?? t("register.failed"))
+            : t("register.failed");
         throw new Error(message);
       }
 
-      toast.success("验证码已发送");
+      toast.success(t("register.codeSent"));
       setStep("verify");
       setCooldown(60);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "发送失败");
+      toast.error(err instanceof Error ? err.message : t("register.failed"));
     } finally {
       setLoading(false);
     }
@@ -108,13 +124,13 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
     try {
       const parsed = schema.safeParse(values);
       if (!parsed.success) {
-        toast.error(parsed.error.issues[0]?.message ?? "表单校验失败");
+        toast.error(parsed.error.issues[0]?.message ?? t("register.failed"));
         return;
       }
       const codeParsed = codeSchema.safeParse(parsed.data.code ?? "");
       if (!codeParsed.success) {
-        form.setError("code", { message: codeParsed.error.issues[0]?.message ?? "验证码不合法" });
-        toast.error(codeParsed.error.issues[0]?.message ?? "验证码不合法");
+        form.setError("code", { message: codeParsed.error.issues[0]?.message ?? t("register.failed") });
+        toast.error(codeParsed.error.issues[0]?.message ?? t("register.failed"));
         return;
       }
 
@@ -131,17 +147,17 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
       if (!res.ok) {
         const message =
           json && typeof json === "object" && "message" in json
-            ? String((json as { message?: unknown }).message ?? "注册失败")
-            : "注册失败";
+            ? String((json as { message?: unknown }).message ?? t("register.failed"))
+            : t("register.failed");
         throw new Error(message);
       }
 
-      toast.success("注册成功");
+      toast.success(t("register.success"));
       const next = nextPath && nextPath.startsWith("/") ? nextPath : "/dashboard";
       router.replace(next);
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "注册失败");
+      toast.error(err instanceof Error ? err.message : t("register.failed"));
     } finally {
       setLoading(false);
     }
@@ -154,12 +170,12 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
       <div className="text-center">
         <BrandWordmark name={appName} className="text-lg" />
         <div className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
-          Create account
+          {t("register.title")}
         </div>
         <p className="mt-2 text-sm text-muted-foreground">
-          已有账号？{" "}
+          {t("register.haveAccount")}{" "}
           <Link href={linkHref} className="text-primary hover:underline">
-            Sign in
+            {t("register.signIn")}
           </Link>
         </p>
       </div>
@@ -171,7 +187,7 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
         }}
       >
         <div className={cn("space-y-2", step === "verify" ? "opacity-80" : "")}>
-          <div className="text-sm font-medium text-foreground">Email</div>
+          <div className="text-sm font-medium text-foreground">{t("login.email")}</div>
           <div className="relative">
             <Mail
               suppressHydrationWarning
@@ -188,7 +204,7 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
               {...form.register("email", {
                 validate: (value) => {
                   const r = emailSchema.safeParse(value);
-                  return r.success ? true : (r.error.issues[0]?.message ?? "邮箱不合法");
+                  return r.success ? true : (r.error.issues[0]?.message ?? t("common.formInvalid"));
                 }
               })}
             />
@@ -199,7 +215,7 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
         </div>
 
         <div className={cn("space-y-2", step === "verify" ? "opacity-80" : "")}>
-          <div className="text-sm font-medium text-foreground">Password</div>
+          <div className="text-sm font-medium text-foreground">{t("login.password")}</div>
           <div className="relative">
             <Lock
               suppressHydrationWarning
@@ -217,7 +233,7 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
               {...form.register("password", {
                 validate: (value) => {
                   const r = passwordSchema.safeParse(value);
-                  return r.success ? true : (r.error.issues[0]?.message ?? "密码不合法");
+                  return r.success ? true : (r.error.issues[0]?.message ?? t("common.formInvalid"));
                 }
               })}
             />
@@ -230,7 +246,7 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
         </div>
 
         <div className={cn("space-y-2", step === "verify" ? "opacity-80" : "")}>
-          <div className="text-sm font-medium text-foreground">Confirm password</div>
+          <div className="text-sm font-medium text-foreground">{t("register.confirmPassword")}</div>
           <div className="relative">
             <Lock
               suppressHydrationWarning
@@ -258,7 +274,7 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
         {step === "verify" ? (
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <div className="text-sm font-medium text-foreground">Verification code</div>
+              <div className="text-sm font-medium text-foreground">{t("register.code")}</div>
               <Button
                 type="button"
                 variant="ghost"
@@ -266,7 +282,7 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
                 disabled={loading || cooldown > 0}
                 onClick={() => void requestCode()}
               >
-                {cooldown > 0 ? `Resend in ${cooldown}s` : "Resend"}
+                {cooldown > 0 ? t("register.resendIn", { seconds: cooldown }) : t("register.resend")}
               </Button>
             </div>
             <div className="relative">
@@ -289,7 +305,7 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
               <p className="text-xs text-destructive">{form.formState.errors.code.message}</p>
             ) : (
               <p className="text-xs text-muted-foreground">
-                请输入邮箱中的 6 位验证码。
+                {t("register.codeHint")}
               </p>
             )}
             <Button
@@ -302,7 +318,7 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
                 form.setValue("code", "");
               }}
             >
-              Change email / password
+              {t("register.changeDetails")}
             </Button>
           </div>
         ) : null}
@@ -322,17 +338,17 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
           {loading ? (
             <>
               <Loader2 className="h-4 w-4 animate-spin" />
-              {step === "details" ? "Sending…" : "Creating…"}
+              {step === "details" ? t("register.sending") : t("register.creating")}
             </>
           ) : (
-            step === "details" ? "Send code" : "Create account"
+            step === "details" ? t("register.sendCode") : t("register.title")
           )}
         </Button>
 
         <div className="relative py-2">
           <Separator />
           <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-background px-3 text-xs text-muted-foreground">
-            or
+            {t("login.or")}
           </div>
         </div>
 
@@ -341,11 +357,11 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
             type="button"
             variant="outline"
             className="w-full rounded-xl bg-transparent"
-            onClick={() => toast.message("GitHub 登录：即将支持")}
+            onClick={() => toast.message(t("login.githubSoon"))}
             disabled={step === "verify"}
           >
             <Github suppressHydrationWarning className="h-4 w-4" />
-            Continue with GitHub
+            {t("login.continueGithub")}
           </Button>
           <Button
             type="button"
@@ -358,15 +374,13 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
             disabled={step === "verify"}
           >
             <Chrome suppressHydrationWarning className="h-4 w-4" />
-            Continue with Google
+            {t("login.continueGoogle")}
           </Button>
         </div>
       </form>
 
       <p className="mt-8 text-center text-xs text-muted-foreground">
-        By continuing, you agree to the{" "}
-        <span className="text-foreground/80">Terms</span> and{" "}
-        <span className="text-foreground/80">Privacy Policy</span>.
+        {t("auth.termsLine")}
       </p>
     </div>
   );

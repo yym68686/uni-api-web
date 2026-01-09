@@ -27,11 +27,12 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useI18n } from "@/components/i18n/i18n-provider";
 
-function formatDateTime(value?: string) {
+function formatDateTime(locale: string, value?: string) {
   if (!value) return "—";
   const dt = new Date(value);
-  return new Intl.DateTimeFormat("zh-CN", {
+  return new Intl.DateTimeFormat(locale, {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -62,6 +63,7 @@ export function KeysTable({
   emptyState,
   className
 }: KeysTableProps) {
+  const { locale, t } = useI18n();
   const [revokingId, setRevokingId] = React.useState<string | null>(null);
   const [deletingId, setDeletingId] = React.useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = React.useState<ApiKeyItem | null>(null);
@@ -72,7 +74,7 @@ export function KeysTable({
     try {
       await onToggleRevoked(id, revoked);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "更新失败");
+      toast.error(err instanceof Error ? err.message : t("keys.toast.updateFailed"));
     } finally {
       setRevokingId(null);
     }
@@ -83,7 +85,7 @@ export function KeysTable({
     try {
       await onDelete(id);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "删除失败");
+      toast.error(err instanceof Error ? err.message : t("keys.toast.deleteFailed"));
     } finally {
       setDeletingId(null);
     }
@@ -92,9 +94,9 @@ export function KeysTable({
   async function copy(value: string) {
     try {
       await navigator.clipboard.writeText(value);
-      toast.success("已复制");
+      toast.success(t("keys.dialog.copySuccess"));
     } catch {
-      toast.error("复制失败");
+      toast.error(t("keys.dialog.copyFailed"));
     }
   }
 
@@ -118,16 +120,16 @@ export function KeysTable({
       if (!res.ok) {
         const message =
           json && typeof json === "object" && "message" in json
-            ? String((json as { message?: unknown }).message ?? "复制失败")
-            : "复制失败";
+            ? String((json as { message?: unknown }).message ?? t("common.copyFailed"))
+            : t("common.copyFailed");
         throw new Error(message);
       }
       if (!isRevealResponse(json)) {
-        throw new Error("无法获取完整 Key（可能是旧 Key，请重新创建）");
+        throw new Error(t("keys.dialog.copyFailed"));
       }
       await copy(json.key);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "复制失败");
+      toast.error(err instanceof Error ? err.message : t("keys.dialog.copyFailed"));
     } finally {
       setCopyingId(null);
     }
@@ -142,12 +144,12 @@ export function KeysTable({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Key</TableHead>
-                <TableHead>Last Used</TableHead>
-                <TableHead>Total Spend</TableHead>
-                <TableHead>Created At</TableHead>
-                <TableHead>Status</TableHead>
+                <TableHead>{t("keys.table.name")}</TableHead>
+                <TableHead>{t("keys.table.key")}</TableHead>
+                <TableHead>{t("keys.table.lastUsed")}</TableHead>
+                <TableHead>{t("keys.table.totalSpend")}</TableHead>
+                <TableHead>{t("keys.table.createdAt")}</TableHead>
+                <TableHead>{t("keys.table.status")}</TableHead>
                 <TableHead className="w-12 text-right"> </TableHead>
               </TableRow>
             </TableHeader>
@@ -177,27 +179,27 @@ export function KeysTable({
                               ) : (
                                 <Copy className="h-4 w-4" />
                               )}
-                              <span className="sr-only">Copy</span>
+                              <span className="sr-only">{t("keys.table.copy")}</span>
                             </Button>
                           </TooltipTrigger>
-                          <TooltipContent>复制完整 Key</TooltipContent>
+                          <TooltipContent>{t("keys.table.copyFullKey")}</TooltipContent>
                         </Tooltip>
                       </div>
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground font-mono">
-                      {formatDateTime(k.lastUsedAt)}
+                      {formatDateTime(locale, k.lastUsedAt)}
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground font-mono">
                       {formatSpendUsd(k.spendUsd)}
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground font-mono">
-                      {formatDateTime(k.createdAt)}
+                      {formatDateTime(locale, k.createdAt)}
                     </TableCell>
                     <TableCell>
                       {revoked ? (
-                        <Badge variant="destructive">Revoked</Badge>
+                        <Badge variant="destructive">{t("keys.table.revoked")}</Badge>
                       ) : (
-                        <Badge variant="success">Active</Badge>
+                        <Badge variant="success">{t("keys.table.active")}</Badge>
                       )}
                     </TableCell>
                     <TableCell className="text-right">
@@ -220,7 +222,7 @@ export function KeysTable({
                             }}
                           >
                             <Copy className="mr-2 h-4 w-4" />
-                            Copy full key
+                            {t("keys.table.copyFullKey")}
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             disabled={revokingId === k.id || deletingId === k.id || isCopying}
@@ -229,7 +231,11 @@ export function KeysTable({
                             }}
                           >
                             <RotateCcw className="mr-2 h-4 w-4" />
-                            {revokingId === k.id ? "Updating…" : revoked ? "Restore" : "Revoke"}
+                            {revokingId === k.id
+                              ? t("keys.table.updating")
+                              : revoked
+                                ? t("keys.table.restore")
+                                : t("keys.table.revoke")}
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
@@ -240,7 +246,7 @@ export function KeysTable({
                             className="text-destructive focus:text-destructive"
                           >
                             <Trash2 className="mr-2 h-4 w-4" />
-                            {deletingId === k.id ? "Deleting…" : "Delete"}
+                            {deletingId === k.id ? t("keys.table.deleting") : t("keys.table.delete")}
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -260,8 +266,8 @@ export function KeysTable({
         >
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Delete API key?</DialogTitle>
-              <DialogDescription>将永久删除该 Key，无法恢复。</DialogDescription>
+              <DialogTitle>{t("keys.table.deleteDialogTitle")}</DialogTitle>
+              <DialogDescription>{t("keys.table.deleteDialogDesc")}</DialogDescription>
             </DialogHeader>
             {deleteTarget ? (
               <div className="rounded-xl border border-border bg-muted/20 p-4">
@@ -271,7 +277,7 @@ export function KeysTable({
             ) : null}
             <DialogFooter>
               <Button type="button" variant="ghost" onClick={() => setDeleteTarget(null)}>
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button
                 type="button"
@@ -282,7 +288,7 @@ export function KeysTable({
                   void remove(deleteTarget.id).then(() => setDeleteTarget(null));
                 }}
               >
-                {deleteTarget && deletingId === deleteTarget.id ? "Deleting…" : "Delete"}
+                {deleteTarget && deletingId === deleteTarget.id ? t("keys.table.deleting") : t("keys.table.delete")}
               </Button>
             </DialogFooter>
           </DialogContent>

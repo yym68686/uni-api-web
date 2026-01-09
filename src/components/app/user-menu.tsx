@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { useI18n } from "@/components/i18n/i18n-provider";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -30,6 +31,7 @@ function initials(name: string) {
 
 export function UserMenu({ userName, className }: UserMenuProps) {
   const router = useRouter();
+  const { t } = useI18n();
 
   return (
     <DropdownMenu>
@@ -47,14 +49,14 @@ export function UserMenu({ userName, className }: UserMenuProps) {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuLabel>
-          <div className="text-xs text-muted-foreground">Signed in as</div>
+          <div className="text-xs text-muted-foreground">{t("auth.signedInAs")}</div>
           <div className="truncate text-sm font-medium text-foreground">{userName}</div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
           <Link href="/profile">
             <User className="mr-2 h-4 w-4" />
-            Profile
+            {t("app.profile")}
           </Link>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
@@ -64,16 +66,16 @@ export function UserMenu({ userName, className }: UserMenuProps) {
             try {
               const res = await fetch("/api/auth/logout", { method: "POST" });
               if (!res.ok) throw new Error(await res.text());
-              toast.success("已退出");
+              toast.success(t("auth.logoutSuccess"));
               router.replace("/login");
               router.refresh();
             } catch (err) {
-              toast.error(err instanceof Error ? err.message : "退出失败");
+              toast.error(err instanceof Error ? err.message : t("auth.logoutFailed"));
             }
           }}
         >
           <LogOut className="mr-2 h-4 w-4" />
-          Logout
+          {t("auth.logout")}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

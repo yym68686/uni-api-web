@@ -6,6 +6,7 @@ import { Moon, Sun } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useI18n } from "@/components/i18n/i18n-provider";
 
 type Theme = "dark" | "light";
 
@@ -28,6 +29,7 @@ interface ThemeToggleProps {
 
 export function ThemeToggle({ className }: ThemeToggleProps) {
   const [theme, setTheme] = React.useState<Theme>("dark");
+  const { t } = useI18n();
 
   React.useEffect(() => {
     const initial = getInitialTheme();
@@ -43,7 +45,7 @@ export function ThemeToggle({ className }: ThemeToggleProps) {
   }
 
   const Icon = theme === "dark" ? Sun : Moon;
-  const label = theme === "dark" ? "切换到浅色" : "切换到深色";
+  const label = theme === "dark" ? t("theme.toLight") : t("theme.toDark");
 
   return (
     <Tooltip>
@@ -63,4 +65,3 @@ export function ThemeToggle({ className }: ThemeToggleProps) {
     </Tooltip>
   );
 }
-

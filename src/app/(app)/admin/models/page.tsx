@@ -7,6 +7,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { buildBackendUrl, getBackendAuthHeaders } from "@/lib/backend";
+import { getRequestLocale } from "@/lib/i18n/server";
+import { t } from "@/lib/i18n/messages";
 import type { AdminModelsListResponse } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -50,17 +52,19 @@ async function getModels() {
 }
 
 export default async function AdminModelsPage() {
+  const locale = await getRequestLocale();
   const me = await getMe();
   const isAdmin = me?.role === "admin" || me?.role === "owner";
   const items = isAdmin ? (await getModels()) ?? [] : [];
+  const current = t(locale, "admin.currentUser", { email: me?.email ?? "unknown" });
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Models</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">{t(locale, "app.admin.modelConfig")}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            从各渠道的 `/v1/models` 自动聚合去重，并设置启用与价格（当前：{me?.email ?? "unknown"}）。
+            {t(locale, "admin.models.subtitle", { current })}
           </p>
         </div>
         {isAdmin ? <AdminModelsRefreshButton /> : null}
@@ -71,32 +75,32 @@ export default async function AdminModelsPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Boxes className="h-5 w-5 text-muted-foreground" />
-              Forbidden
+              {t(locale, "admin.forbidden")}
             </CardTitle>
-            <CardDescription>你不是管理员，无法管理模型。</CardDescription>
+            <CardDescription>{t(locale, "admin.models.forbidden")}</CardDescription>
           </CardHeader>
         </Card>
       ) : (
         <Card>
           <CardHeader>
-            <CardTitle>Available models</CardTitle>
-            <CardDescription>关闭模型后，网关会拒绝对应的请求。</CardDescription>
+            <CardTitle>{t(locale, "admin.models.card.title")}</CardTitle>
+            <CardDescription>{t(locale, "admin.models.card.desc")}</CardDescription>
           </CardHeader>
           <CardContent>
             {items.length === 0 ? (
               <div className="rounded-xl border border-dashed border-border bg-muted/10 p-8 text-center text-sm text-muted-foreground">
-                未发现模型（请先配置 Channels）
+                {t(locale, "admin.models.empty")}
               </div>
             ) : (
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Model</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Input ($/M tokens)</TableHead>
-                    <TableHead>Output ($/M tokens)</TableHead>
-                    <TableHead>Sources</TableHead>
-                    <TableHead className="w-12 text-right">Actions</TableHead>
+                    <TableHead>{t(locale, "models.table.model")}</TableHead>
+                    <TableHead>{t(locale, "keys.table.status")}</TableHead>
+                    <TableHead>{t(locale, "models.table.input")}</TableHead>
+                    <TableHead>{t(locale, "models.table.output")}</TableHead>
+                    <TableHead>{t(locale, "admin.models.table.sources")}</TableHead>
+                    <TableHead className="w-12 text-right">{t(locale, "keys.table.actions")}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -107,11 +111,11 @@ export default async function AdminModelsPage() {
                       </TableCell>
                       <TableCell>
                         {!m.available ? (
-                          <Badge variant="outline">Missing</Badge>
+                          <Badge variant="outline">{t(locale, "admin.models.badge.missing")}</Badge>
                         ) : m.enabled ? (
-                          <Badge variant="success">Enabled</Badge>
+                          <Badge variant="success">{t(locale, "admin.models.badge.enabled")}</Badge>
                         ) : (
-                          <Badge variant="destructive">Disabled</Badge>
+                          <Badge variant="destructive">{t(locale, "admin.models.badge.disabled")}</Badge>
                         )}
                       </TableCell>
                       <TableCell className="font-mono text-xs text-muted-foreground">

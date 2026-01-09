@@ -8,7 +8,9 @@ import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 
 import type { LlmChannelDeleteResponse, LlmChannelItem, LlmChannelUpdateResponse } from "@/lib/types";
+import type { MessageKey, MessageVars } from "@/lib/i18n/messages";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/components/i18n/i18n-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,35 +31,41 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-const schema = z.object({
-  name: z.string().trim().min(2, "至少 2 个字符").max(64, "最多 64 个字符"),
-  baseUrl: z
-    .string()
-    .trim()
-    .min(8, "请输入 Base URL")
-    .max(400, "最多 400 个字符")
-    .refine((v) => {
-      try {
-        const u = new URL(v);
-        return u.protocol === "http:" || u.protocol === "https:";
-      } catch {
-        return false;
-      }
-    }, "Base URL 不合法"),
-  apiKey: z.string().trim().min(0).max(4096).optional(),
-  allowGroups: z
-    .array(
-      z
-        .string()
-        .trim()
-        .min(1)
-        .max(64)
-        .refine((v) => !v.includes("\n") && !v.includes("\r"), "分组包含非法字符")
-    )
-    .default([])
-});
+function createSchema(t: (key: MessageKey, vars?: MessageVars) => string) {
+  return z.object({
+    name: z
+      .string()
+      .trim()
+      .min(2, t("validation.minChars", { min: 2 }))
+      .max(64, t("validation.maxChars", { max: 64 })),
+    baseUrl: z
+      .string()
+      .trim()
+      .min(8, t("validation.baseUrlRequired"))
+      .max(400, t("validation.maxChars", { max: 400 }))
+      .refine((v) => {
+        try {
+          const u = new URL(v);
+          return u.protocol === "http:" || u.protocol === "https:";
+        } catch {
+          return false;
+        }
+      }, t("validation.baseUrlInvalid")),
+    apiKey: z.string().trim().min(0).max(4096, t("validation.apiKeyMax")).optional(),
+    allowGroups: z
+      .array(
+        z
+          .string()
+          .trim()
+          .min(1)
+          .max(64)
+          .refine((v) => !v.includes("\n") && !v.includes("\r"), t("validation.groupInvalidChars"))
+      )
+      .default([])
+  });
+}
 
-type FormValues = z.infer<typeof schema>;
+type FormValues = z.infer<ReturnType<typeof createSchema>>;
 
 interface ChannelRowActionsProps {
   channel: LlmChannelItem;
@@ -89,6 +97,9 @@ export function ChannelRowActions({ channel, className }: ChannelRowActionsProps
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [groupDraft, setGroupDraft] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
+  const { t } = useI18n();
+
+  const schema = React.useMemo(() => createSchema(t), [t]);
 
   const form = useForm<FormValues>({
     defaultValues: {
@@ -127,7 +138,7 @@ export function ChannelRowActions({ channel, className }: ChannelRowActionsProps
     try {
       const parsed = schema.safeParse(values);
       if (!parsed.success) {
-        toast.error(parsed.error.issues[0]?.message ?? "表单校验失败");
+        toast.error(parsed.error.issues[0]?.message ?? t("common.formInvalid"));
         return;
       }
 
@@ -145,14 +156,14 @@ export function ChannelRowActions({ channel, className }: ChannelRowActionsProps
         body: JSON.stringify(payload)
       });
       const json: unknown = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(readMessage(json, "更新失败"));
+      if (!res.ok) throw new Error(readMessage(json, t("common.updateFailed")));
 
       void (json as LlmChannelUpdateResponse);
-      toast.success("渠道已更新");
+      toast.success(t("admin.channels.toast.updated"));
       setEditOpen(false);
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "更新失败");
+      toast.error(err instanceof Error ? err.message : t("common.updateFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -165,13 +176,13 @@ export function ChannelRowActions({ channel, className }: ChannelRowActionsProps
         method: "DELETE"
       });
       const json: unknown = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(readMessage(json, "删除失败"));
+      if (!res.ok) throw new Error(readMessage(json, t("common.deleteFailed")));
       void (json as LlmChannelDeleteResponse);
-      toast.success("渠道已删除");
+      toast.success(t("admin.channels.toast.deleted"));
       setDeleteOpen(false);
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "删除失败");
+      toast.error(err instanceof Error ? err.message : t("common.deleteFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -188,7 +199,7 @@ export function ChannelRowActions({ channel, className }: ChannelRowActionsProps
             size="icon"
             variant="ghost"
             className={cn("h-9 w-9 rounded-lg", className)}
-            aria-label="Channel actions"
+            aria-label={t("common.actions")}
           >
             <MoreVertical className="h-4 w-4" />
           </Button>
@@ -201,7 +212,7 @@ export function ChannelRowActions({ channel, className }: ChannelRowActionsProps
             }}
           >
             <Pencil className="mr-2 h-4 w-4" />
-            Edit
+            {t("common.edit")}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
@@ -212,7 +223,7 @@ export function ChannelRowActions({ channel, className }: ChannelRowActionsProps
             }}
           >
             <Trash2 className="mr-2 h-4 w-4" />
-            Delete
+            {t("common.delete")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -222,9 +233,9 @@ export function ChannelRowActions({ channel, className }: ChannelRowActionsProps
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Shield className="h-5 w-5 text-primary" />
-              Edit channel
+              {t("admin.channels.editTitle")}
             </DialogTitle>
-            <DialogDescription>可更新 Base URL、分组白名单，以及旋转 API key。</DialogDescription>
+            <DialogDescription>{t("admin.channels.editDesc")}</DialogDescription>
           </DialogHeader>
 
           <form
@@ -234,7 +245,7 @@ export function ChannelRowActions({ channel, className }: ChannelRowActionsProps
             }}
           >
             <div className="space-y-2">
-              <Label htmlFor={`name-${channel.id}`}>Name</Label>
+              <Label htmlFor={`name-${channel.id}`}>{t("admin.channels.form.name")}</Label>
               <Input id={`name-${channel.id}`} {...form.register("name")} />
               {form.formState.errors.name ? (
                 <p className="text-xs text-destructive">{form.formState.errors.name.message}</p>
@@ -242,7 +253,7 @@ export function ChannelRowActions({ channel, className }: ChannelRowActionsProps
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor={`base-${channel.id}`}>Base URL</Label>
+              <Label htmlFor={`base-${channel.id}`}>{t("admin.channels.form.baseUrl")}</Label>
               <Input id={`base-${channel.id}`} className="font-mono" {...form.register("baseUrl")} />
               {form.formState.errors.baseUrl ? (
                 <p className="text-xs text-destructive">{form.formState.errors.baseUrl.message}</p>
@@ -250,23 +261,23 @@ export function ChannelRowActions({ channel, className }: ChannelRowActionsProps
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor={`key-${channel.id}`}>Rotate API key</Label>
+              <Label htmlFor={`key-${channel.id}`}>{t("admin.channels.form.rotateApiKey")}</Label>
               <Input
                 id={`key-${channel.id}`}
                 type="password"
                 className="font-mono"
-                placeholder="留空表示不修改"
+                placeholder={t("admin.channels.form.rotatePlaceholder")}
                 autoComplete="off"
                 {...form.register("apiKey")}
               />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor={`groups-${channel.id}`}>Allow groups</Label>
+              <Label htmlFor={`groups-${channel.id}`}>{t("admin.channels.form.allowGroups")}</Label>
               <div className="flex gap-2">
                 <Input
                   id={`groups-${channel.id}`}
-                  placeholder="default, team-a, beta"
+                  placeholder={t("admin.channels.form.allowGroupsPlaceholder")}
                   className="font-mono"
                   value={groupDraft}
                   onChange={(e) => setGroupDraft(e.target.value)}
@@ -278,10 +289,10 @@ export function ChannelRowActions({ channel, className }: ChannelRowActionsProps
                   }}
                 />
                 <Button type="button" variant="outline" className="rounded-xl" onClick={addGroupsFromDraft}>
-                  Add
+                  {t("common.add")}
                 </Button>
               </div>
-              <p className="text-xs text-muted-foreground">留空表示所有分组都可用。</p>
+              <p className="text-xs text-muted-foreground">{t("admin.channels.form.allowGroupsHelp")}</p>
               {allowGroups.length > 0 ? (
                 <div className="flex flex-wrap gap-2 pt-1">
                   {allowGroups.map((g) => (
@@ -297,7 +308,7 @@ export function ChannelRowActions({ channel, className }: ChannelRowActionsProps
                             { shouldValidate: true }
                           )
                         }
-                        aria-label={`remove ${g}`}
+                        aria-label={t("admin.channels.form.removeGroup", { group: g })}
                       >
                         <X className="h-3 w-3" />
                       </button>
@@ -309,16 +320,16 @@ export function ChannelRowActions({ channel, className }: ChannelRowActionsProps
 
             <DialogFooter>
               <Button type="button" variant="ghost" onClick={() => setEditOpen(false)}>
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button type="submit" disabled={!form.formState.isValid || submitting}>
                 {submitting ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    Saving…
+                    {t("common.saving")}
                   </>
                 ) : (
-                  "Save"
+                  t("common.save")
                 )}
               </Button>
             </DialogFooter>
@@ -329,8 +340,8 @@ export function ChannelRowActions({ channel, className }: ChannelRowActionsProps
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete channel?</DialogTitle>
-            <DialogDescription>将永久删除该渠道及其分组白名单配置。</DialogDescription>
+            <DialogTitle>{t("admin.channels.deleteTitle")}</DialogTitle>
+            <DialogDescription>{t("admin.channels.deleteDesc")}</DialogDescription>
           </DialogHeader>
 
           <div className="rounded-xl border border-border bg-muted/20 p-4">
@@ -340,16 +351,16 @@ export function ChannelRowActions({ channel, className }: ChannelRowActionsProps
 
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => setDeleteOpen(false)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button type="button" variant="destructive" disabled={submitting} onClick={() => void remove()}>
               {submitting ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Deleting…
+                  {t("common.deleting")}
                 </>
               ) : (
-                "Delete"
+                t("common.delete")
               )}
             </Button>
           </DialogFooter>
@@ -358,4 +369,3 @@ export function ChannelRowActions({ channel, className }: ChannelRowActionsProps
     </>
   );
 }
-

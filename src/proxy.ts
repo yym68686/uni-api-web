@@ -2,6 +2,11 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
 import { isLoggedInCookie, SESSION_COOKIE_NAME } from "@/lib/auth";
+import {
+  detectLocaleFromAcceptLanguage,
+  LOCALE_COOKIE_NAME,
+  normalizeLocale
+} from "@/lib/i18n/messages";
 
 function normalizeBaseUrl(raw: string) {
   return raw.trim().replace(/\/+$/, "");
@@ -34,6 +39,21 @@ function clearSessionCookie(req: NextRequest, res: NextResponse) {
     secure: isSecureRequest(req),
     path: "/",
     maxAge: 0
+  });
+  return res;
+}
+
+function ensureLocaleCookie(req: NextRequest, res: NextResponse) {
+  const existing = normalizeLocale(req.cookies.get(LOCALE_COOKIE_NAME)?.value);
+  if (existing) return res;
+
+  const locale = detectLocaleFromAcceptLanguage(req.headers.get("accept-language"));
+  res.cookies.set(LOCALE_COOKIE_NAME, locale, {
+    httpOnly: false,
+    sameSite: "lax",
+    secure: isSecureRequest(req),
+    path: "/",
+    maxAge: 60 * 60 * 24 * 365
   });
   return res;
 }
@@ -99,23 +119,23 @@ export async function proxy(req: NextRequest) {
       const url = req.nextUrl.clone();
       url.pathname = sanitizeNextPath(searchParams.get("next"), "/dashboard");
       url.search = "";
-      return NextResponse.redirect(url);
+      return ensureLocaleCookie(req, NextResponse.redirect(url));
     }
     if (hasSessionCookie) {
-      return clearSessionCookie(req, NextResponse.next());
+      return ensureLocaleCookie(req, clearSessionCookie(req, NextResponse.next()));
     }
-    return NextResponse.next();
+    return ensureLocaleCookie(req, NextResponse.next());
   }
 
-  if (isPublicPath(pathname)) return NextResponse.next();
-  if (!isProtectedPath(pathname)) return NextResponse.next();
+  if (isPublicPath(pathname)) return ensureLocaleCookie(req, NextResponse.next());
+  if (!isProtectedPath(pathname)) return ensureLocaleCookie(req, NextResponse.next());
 
-  if (sessionValid) return NextResponse.next();
+  if (sessionValid) return ensureLocaleCookie(req, NextResponse.next());
 
   if (pathname.startsWith("/api/")) {
     return clearSessionCookie(
       req,
-      NextResponse.json({ message: "Unauthorized" }, { status: 401 })
+      ensureLocaleCookie(req, NextResponse.json({ message: "Unauthorized" }, { status: 401 }))
     );
   }
 
@@ -124,7 +144,7 @@ export async function proxy(req: NextRequest) {
   if (!searchParams.get("next")) {
     loginUrl.searchParams.set("next", `${pathname}${req.nextUrl.search}`);
   }
-  return clearSessionCookie(req, NextResponse.redirect(loginUrl));
+  return ensureLocaleCookie(req, clearSessionCookie(req, NextResponse.redirect(loginUrl)));
 }
 
 export const config = {

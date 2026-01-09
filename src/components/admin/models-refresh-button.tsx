@@ -6,6 +6,7 @@ import { RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { useI18n } from "@/components/i18n/i18n-provider";
 
 function readMessage(json: unknown, fallback: string) {
   if (!json || typeof json !== "object") return fallback;
@@ -19,6 +20,7 @@ function readMessage(json: unknown, fallback: string) {
 export function AdminModelsRefreshButton() {
   const router = useRouter();
   const [loading, setLoading] = React.useState(false);
+  const { t } = useI18n();
 
   async function refresh() {
     if (loading) return;
@@ -26,11 +28,11 @@ export function AdminModelsRefreshButton() {
     try {
       const res = await fetch("/api/admin/models/refresh", { method: "POST" });
       const json: unknown = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(readMessage(json, "刷新失败"));
-      toast.success("已刷新模型缓存");
+      if (!res.ok) throw new Error(readMessage(json, t("admin.models.refreshFailed")));
+      toast.success(t("admin.models.refreshSuccess"));
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "刷新失败");
+      toast.error(err instanceof Error ? err.message : t("admin.models.refreshFailed"));
     } finally {
       setLoading(false);
     }
@@ -45,8 +47,7 @@ export function AdminModelsRefreshButton() {
       onClick={() => void refresh()}
     >
       <RefreshCw className="h-4 w-4" />
-      {loading ? "Refreshing…" : "Refresh"}
+      {loading ? t("common.refreshing") : t("common.refresh")}
     </Button>
   );
 }
-

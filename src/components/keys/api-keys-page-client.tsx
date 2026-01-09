@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { CreateKeyDialog } from "@/components/keys/create-key-dialog";
 import { KeysTable } from "@/components/keys/keys-table";
 import { Card, CardContent } from "@/components/ui/card";
+import { useI18n } from "@/components/i18n/i18n-provider";
 
 interface ApiKeysPageClientProps {
   initialItems: ApiKeyItem[];
@@ -20,6 +21,7 @@ const createButtonGlow =
 export function ApiKeysPageClient({ initialItems }: ApiKeysPageClientProps) {
   const [items, setItems] = React.useState<ApiKeyItem[]>(initialItems);
   const [fullKeysById, setFullKeysById] = React.useState<Record<string, string>>({});
+  const { t } = useI18n();
 
   function onCreated(res: ApiKeyCreateResponse) {
     setItems((prev) => [res.item, ...prev]);
@@ -36,8 +38,8 @@ export function ApiKeysPageClient({ initialItems }: ApiKeysPageClientProps) {
     if (!res.ok) {
       const message =
         json && typeof json === "object" && "message" in json
-          ? String((json as { message?: unknown }).message ?? "更新失败")
-          : "更新失败";
+          ? String((json as { message?: unknown }).message ?? t("keys.toast.updateFailed"))
+          : t("keys.toast.updateFailed");
       throw new Error(message);
     }
     if (!json || typeof json !== "object" || !("item" in json)) return;
@@ -52,8 +54,8 @@ export function ApiKeysPageClient({ initialItems }: ApiKeysPageClientProps) {
     if (!res.ok) {
       const message =
         json && typeof json === "object" && "message" in json
-          ? String((json as { message?: unknown }).message ?? "删除失败")
-          : "删除失败";
+          ? String((json as { message?: unknown }).message ?? t("keys.toast.deleteFailed"))
+          : t("keys.toast.deleteFailed");
       throw new Error(message);
     }
     setItems((prev) => prev.filter((k) => k.id !== id));
@@ -68,18 +70,18 @@ export function ApiKeysPageClient({ initialItems }: ApiKeysPageClientProps) {
   async function onToggleRevoked(id: string, revoked: boolean) {
     try {
       await setRevoked(id, revoked);
-      toast.success(revoked ? "已撤销 Key" : "已恢复 Key");
+      toast.success(revoked ? t("keys.toast.revoked") : t("keys.toast.restored"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "更新失败");
+      toast.error(err instanceof Error ? err.message : t("keys.toast.updateFailed"));
     }
   }
 
   async function onDelete(id: string) {
     try {
       await deleteKey(id);
-      toast.success("已删除 Key");
+      toast.success(t("keys.toast.deleted"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "删除失败");
+      toast.error(err instanceof Error ? err.message : t("keys.toast.deleteFailed"));
     }
   }
 
@@ -87,15 +89,15 @@ export function ApiKeysPageClient({ initialItems }: ApiKeysPageClientProps) {
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">API Keys</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">{t("keys.title")}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            创建与管理访问凭证（列表默认显示掩码，可随时复制完整 Key）。
+            {t("keys.subtitle")}
           </p>
         </div>
 
         <CreateKeyDialog
           onCreated={onCreated}
-          triggerLabel="Create New Key"
+          triggerLabel={t("keys.create")}
           triggerClassName={cn("rounded-xl", createButtonGlow)}
         />
       </div>
@@ -114,15 +116,15 @@ export function ApiKeysPageClient({ initialItems }: ApiKeysPageClientProps) {
                     <KeyRound className="h-6 w-6 text-muted-foreground" />
                   </div>
                   <div className="mt-4 text-base font-semibold text-foreground">
-                    No API keys yet
+                    {t("keys.empty.title")}
                   </div>
                   <div className="mt-1 text-sm text-muted-foreground">
-                    创建一个新的 Key 来开始调用 API。
+                    {t("keys.empty.desc")}
                   </div>
                   <div className="mt-5 flex justify-center">
                     <CreateKeyDialog
                       onCreated={onCreated}
-                      triggerLabel="Create New Key"
+                      triggerLabel={t("keys.create")}
                       triggerClassName={cn("rounded-xl", createButtonGlow)}
                     />
                   </div>

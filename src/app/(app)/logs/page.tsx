@@ -5,6 +5,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { buildBackendUrl, getBackendAuthHeaders } from "@/lib/backend";
 import { formatUsd } from "@/lib/format";
+import { getRequestLocale } from "@/lib/i18n/server";
+import { t } from "@/lib/i18n/messages";
 import type { LogsListResponse } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -53,14 +55,15 @@ async function getLogs() {
 }
 
 export default async function LogsPage() {
+  const locale = await getRequestLocale();
   const items = (await getLogs()) ?? [];
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Logs</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">{t(locale, "logs.title")}</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          每一次请求的明细：模型、耗时、吞吐与花费（当前仅对非流式请求计入 token/花费）。
+          {t(locale, "logs.subtitle")}
         </p>
       </div>
 
@@ -68,31 +71,31 @@ export default async function LogsPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <ScrollText className="h-5 w-5 text-muted-foreground" />
-            Request logs
+            {t(locale, "logs.card.title")}
           </CardTitle>
           <CardDescription className="flex items-center gap-2">
             <Clock className="h-4 w-4 text-muted-foreground" />
-            最新 100 条
+            {t(locale, "logs.card.latest100")}
           </CardDescription>
         </CardHeader>
         <CardContent>
           {items.length === 0 ? (
             <div className="rounded-xl border border-dashed border-border bg-muted/10 p-8 text-center text-sm text-muted-foreground">
-              暂无日志（先用 API Key 调用一次 `/v1/chat/completions`）
+              {t(locale, "logs.empty")}
             </div>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Time</TableHead>
-                  <TableHead>Model</TableHead>
-                  <TableHead>Input</TableHead>
-                  <TableHead>Output</TableHead>
-                  <TableHead>Total</TableHead>
-                  <TableHead>TTFT</TableHead>
-                  <TableHead>TPS</TableHead>
-                  <TableHead>Cost</TableHead>
-                  <TableHead>IP</TableHead>
+                  <TableHead>{t(locale, "logs.table.time")}</TableHead>
+                  <TableHead>{t(locale, "logs.table.model")}</TableHead>
+                  <TableHead>{t(locale, "logs.table.input")}</TableHead>
+                  <TableHead>{t(locale, "logs.table.output")}</TableHead>
+                  <TableHead>{t(locale, "logs.table.total")}</TableHead>
+                  <TableHead>{t(locale, "logs.table.ttft")}</TableHead>
+                  <TableHead>{t(locale, "logs.table.tps")}</TableHead>
+                  <TableHead>{t(locale, "logs.table.cost")}</TableHead>
+                  <TableHead>{t(locale, "logs.table.ip")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -135,4 +138,3 @@ export default async function LogsPage() {
     </div>
   );
 }
-

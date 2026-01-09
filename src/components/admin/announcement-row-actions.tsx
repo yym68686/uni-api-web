@@ -8,7 +8,9 @@ import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 
 import type { AnnouncementDeleteResponse, AnnouncementItem, AnnouncementUpdateResponse } from "@/lib/types";
+import type { MessageKey, MessageVars } from "@/lib/i18n/messages";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/components/i18n/i18n-provider";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -28,13 +30,23 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-const schema = z.object({
-  title: z.string().trim().min(2, "至少 2 个字符").max(180, "最多 180 个字符"),
-  meta: z.string().trim().min(2, "至少 2 个字符").max(120, "最多 120 个字符"),
-  level: z.enum(["info", "warning", "success", "destructive"])
-});
+function createSchema(t: (key: MessageKey, vars?: MessageVars) => string) {
+  return z.object({
+    title: z
+      .string()
+      .trim()
+      .min(2, t("validation.minChars", { min: 2 }))
+      .max(180, t("validation.maxChars", { max: 180 })),
+    meta: z
+      .string()
+      .trim()
+      .min(2, t("validation.minChars", { min: 2 }))
+      .max(120, t("validation.maxChars", { max: 120 })),
+    level: z.enum(["info", "warning", "success", "destructive"])
+  });
+}
 
-type FormValues = z.infer<typeof schema>;
+type FormValues = z.infer<ReturnType<typeof createSchema>>;
 
 interface AnnouncementRowActionsProps {
   announcement: AnnouncementItem;
@@ -67,6 +79,9 @@ export function AnnouncementRowActions({ announcement, className }: Announcement
   const [editOpen, setEditOpen] = React.useState(false);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
+  const { t } = useI18n();
+
+  const schema = React.useMemo(() => createSchema(t), [t]);
 
   const form = useForm<FormValues>({
     defaultValues: {
@@ -92,7 +107,7 @@ export function AnnouncementRowActions({ announcement, className }: Announcement
       const parsed = schema.safeParse(values);
       if (!parsed.success) {
         const issue = parsed.error.issues[0];
-        toast.error(issue?.message ?? "表单校验失败");
+        toast.error(issue?.message ?? t("common.formInvalid"));
         return;
       }
 
@@ -102,14 +117,14 @@ export function AnnouncementRowActions({ announcement, className }: Announcement
         body: JSON.stringify(parsed.data)
       });
       const json: unknown = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(readMessage(json, "更新失败"));
+      if (!res.ok) throw new Error(readMessage(json, t("common.updateFailed")));
 
       void (json as AnnouncementUpdateResponse);
-      toast.success("公告已更新");
+      toast.success(t("admin.ann.toast.updated"));
       setEditOpen(false);
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "更新失败");
+      toast.error(err instanceof Error ? err.message : t("common.updateFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -122,14 +137,14 @@ export function AnnouncementRowActions({ announcement, className }: Announcement
         method: "DELETE"
       });
       const json: unknown = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(readMessage(json, "删除失败"));
+      if (!res.ok) throw new Error(readMessage(json, t("common.deleteFailed")));
 
       void (json as AnnouncementDeleteResponse);
-      toast.success("公告已删除");
+      toast.success(t("admin.ann.toast.deleted"));
       setDeleteOpen(false);
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "删除失败");
+      toast.error(err instanceof Error ? err.message : t("common.deleteFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -146,7 +161,7 @@ export function AnnouncementRowActions({ announcement, className }: Announcement
             size="icon"
             variant="ghost"
             className={cn("h-9 w-9 rounded-lg", className)}
-            aria-label="Announcement actions"
+            aria-label={t("common.actions")}
           >
             <MoreVertical className="h-4 w-4" />
           </Button>
@@ -159,7 +174,7 @@ export function AnnouncementRowActions({ announcement, className }: Announcement
             }}
           >
             <Pencil className="mr-2 h-4 w-4" />
-            Edit
+            {t("common.edit")}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
@@ -170,7 +185,7 @@ export function AnnouncementRowActions({ announcement, className }: Announcement
             }}
           >
             <Trash2 className="mr-2 h-4 w-4" />
-            Delete
+            {t("common.delete")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -178,8 +193,8 @@ export function AnnouncementRowActions({ announcement, className }: Announcement
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Edit announcement</DialogTitle>
-            <DialogDescription>更新后会同步显示在 Dashboard 公告栏。</DialogDescription>
+            <DialogTitle>{t("admin.ann.editTitle")}</DialogTitle>
+            <DialogDescription>{t("admin.ann.editDesc")}</DialogDescription>
           </DialogHeader>
 
           <form
@@ -189,7 +204,7 @@ export function AnnouncementRowActions({ announcement, className }: Announcement
             }}
           >
             <div className="space-y-2">
-              <Label htmlFor={`title-${announcement.id}`}>标题</Label>
+              <Label htmlFor={`title-${announcement.id}`}>{t("admin.ann.form.title")}</Label>
               <Input id={`title-${announcement.id}`} {...form.register("title")} />
               {form.formState.errors.title ? (
                 <p className="text-xs text-destructive">{form.formState.errors.title.message}</p>
@@ -197,7 +212,7 @@ export function AnnouncementRowActions({ announcement, className }: Announcement
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor={`meta-${announcement.id}`}>Meta</Label>
+              <Label htmlFor={`meta-${announcement.id}`}>{t("admin.ann.form.meta")}</Label>
               <Input id={`meta-${announcement.id}`} {...form.register("meta")} />
               {form.formState.errors.meta ? (
                 <p className="text-xs text-destructive">{form.formState.errors.meta.message}</p>
@@ -205,14 +220,14 @@ export function AnnouncementRowActions({ announcement, className }: Announcement
             </div>
 
             <div className="space-y-2">
-              <Label>Level</Label>
+              <Label>{t("admin.ann.form.level")}</Label>
               <div className="grid grid-cols-4 gap-2">
                 {(
                   [
-                    { value: "info", label: "Info" },
-                    { value: "warning", label: "Warn" },
-                    { value: "success", label: "Good" },
-                    { value: "destructive", label: "Critical" }
+                    { value: "info", label: t("admin.ann.level.info") },
+                    { value: "warning", label: t("admin.ann.level.warning") },
+                    { value: "success", label: t("admin.ann.level.success") },
+                    { value: "destructive", label: t("admin.ann.level.destructive") }
                   ] as const
                 ).map((opt) => {
                   const active = level === opt.value;
@@ -233,16 +248,16 @@ export function AnnouncementRowActions({ announcement, className }: Announcement
 
             <DialogFooter>
               <Button type="button" variant="ghost" onClick={() => setEditOpen(false)}>
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button type="submit" disabled={!form.formState.isValid || submitting}>
                 {submitting ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    Saving…
+                    {t("common.saving")}
                   </>
                 ) : (
-                  "Save"
+                  t("common.save")
                 )}
               </Button>
             </DialogFooter>
@@ -253,9 +268,9 @@ export function AnnouncementRowActions({ announcement, className }: Announcement
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete announcement?</DialogTitle>
+            <DialogTitle>{t("admin.ann.deleteTitle")}</DialogTitle>
             <DialogDescription>
-              将永久删除该公告，并从所有用户的 Dashboard 移除。
+              {t("admin.ann.deleteDesc")}
             </DialogDescription>
           </DialogHeader>
 
@@ -266,16 +281,16 @@ export function AnnouncementRowActions({ announcement, className }: Announcement
 
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => setDeleteOpen(false)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button type="button" variant="destructive" disabled={submitting} onClick={() => void remove()}>
               {submitting ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Deleting…
+                  {t("common.deleting")}
                 </>
               ) : (
-                "Delete"
+                t("common.delete")
               )}
             </Button>
           </DialogFooter>
@@ -284,4 +299,3 @@ export function AnnouncementRowActions({ announcement, className }: Announcement
     </>
   );
 }
-

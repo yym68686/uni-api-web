@@ -6,6 +6,7 @@ import { AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { useI18n } from "@/components/i18n/i18n-provider";
 import {
   Dialog,
   DialogContent,
@@ -32,6 +33,7 @@ function readMessage(json: unknown, fallback: string) {
 
 export function DeleteAccountButton({ className }: DeleteAccountButtonProps) {
   const router = useRouter();
+  const { t } = useI18n();
   const [open, setOpen] = React.useState(false);
   const [confirmText, setConfirmText] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
@@ -44,15 +46,15 @@ export function DeleteAccountButton({ className }: DeleteAccountButtonProps) {
     try {
       const res = await fetch("/api/account", { method: "DELETE" });
       const json: unknown = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(readMessage(json, "注销失败"));
+      if (!res.ok) throw new Error(readMessage(json, t("profile.delete.failed")));
 
       await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
-      toast.success("账号已注销");
+      toast.success(t("profile.delete.success"));
       setOpen(false);
       router.replace("/register");
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "注销失败");
+      toast.error(err instanceof Error ? err.message : t("profile.delete.failed"));
     } finally {
       setSubmitting(false);
     }
@@ -69,7 +71,7 @@ export function DeleteAccountButton({ className }: DeleteAccountButtonProps) {
           setOpen(true);
         }}
       >
-        注销账号
+        {t("profile.delete.button")}
       </Button>
 
       <Dialog
@@ -82,23 +84,22 @@ export function DeleteAccountButton({ className }: DeleteAccountButtonProps) {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-destructive" />
-              注销账号（不可恢复）
+              {t("profile.delete.title")}
             </DialogTitle>
             <DialogDescription>
-              将永久删除你的账号、会话和 API Keys。输入 <span className="font-mono">DELETE</span>{" "}
-              以确认。
+              {t("profile.delete.desc")}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-2">
             <Label htmlFor="confirm-delete" className="text-sm">
-              Confirm
+              {t("profile.delete.confirmLabel")}
             </Label>
             <Input
               id="confirm-delete"
               value={confirmText}
               onChange={(e) => setConfirmText(e.target.value)}
-              placeholder="Type DELETE"
+              placeholder={t("profile.delete.placeholder")}
               autoComplete="off"
             />
           </div>
@@ -110,7 +111,7 @@ export function DeleteAccountButton({ className }: DeleteAccountButtonProps) {
               disabled={submitting}
               onClick={() => setOpen(false)}
             >
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button
               type="button"
@@ -118,7 +119,7 @@ export function DeleteAccountButton({ className }: DeleteAccountButtonProps) {
               disabled={!canSubmit || submitting}
               onClick={() => void handleDelete()}
             >
-              {submitting ? "Deleting…" : "Delete account"}
+              {submitting ? t("profile.delete.submitting") : t("profile.delete.button")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -126,4 +127,3 @@ export function DeleteAccountButton({ className }: DeleteAccountButtonProps) {
     </>
   );
 }
-

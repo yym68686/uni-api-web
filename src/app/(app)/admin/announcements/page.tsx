@@ -6,6 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { buildBackendUrl, getBackendAuthHeaders } from "@/lib/backend";
+import { getRequestLocale } from "@/lib/i18n/server";
+import { t } from "@/lib/i18n/messages";
 import type { AnnouncementsListResponse } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -42,10 +44,10 @@ async function getAnnouncements() {
   return json.items;
 }
 
-function formatCreatedAt(createdAt: string) {
+function formatCreatedAt(locale: string, createdAt: string) {
   const dt = new Date(createdAt);
   if (Number.isNaN(dt.getTime())) return createdAt;
-  return new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(dt);
+  return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(dt);
 }
 
 function levelBadgeVariant(level: string) {
@@ -62,18 +64,20 @@ function levelBadgeVariant(level: string) {
 }
 
 export default async function AdminAnnouncementsPage() {
+  const locale = await getRequestLocale();
   const me = await getMe();
   const items = (await getAnnouncements()) ?? [];
 
   const isAdmin = me?.role === "admin" || me?.role === "owner";
+  const current = t(locale, "admin.currentUser", { email: me?.email ?? "unknown" });
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Announcements</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">{t(locale, "app.admin.announcements")}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            仅管理员可发布公告（当前：{me?.email ?? "unknown"}）。
+            {t(locale, "admin.ann.subtitle", { current })}
           </p>
         </div>
         {isAdmin ? <AnnouncementPublisher /> : null}
@@ -84,22 +88,22 @@ export default async function AdminAnnouncementsPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Megaphone className="h-5 w-5 text-muted-foreground" />
-              Forbidden
+              {t(locale, "admin.forbidden")}
             </CardTitle>
-            <CardDescription>你不是管理员，无法发布公告。</CardDescription>
+            <CardDescription>{t(locale, "admin.ann.forbidden")}</CardDescription>
           </CardHeader>
         </Card>
       ) : null}
 
       <Card>
         <CardHeader>
-          <CardTitle>Recent</CardTitle>
-          <CardDescription>最近展示在 Dashboard 的公告</CardDescription>
+          <CardTitle>{t(locale, "admin.ann.recent")}</CardTitle>
+          <CardDescription>{t(locale, "admin.ann.recentDesc")}</CardDescription>
         </CardHeader>
         <CardContent>
           {items.length === 0 ? (
             <div className="rounded-xl border border-dashed border-border bg-muted/10 p-8 text-center text-sm text-muted-foreground">
-              暂无公告
+              {t(locale, "admin.ann.empty")}
             </div>
           ) : (
             <Table>
@@ -109,7 +113,7 @@ export default async function AdminAnnouncementsPage() {
                   <TableHead>Meta</TableHead>
                   <TableHead>Level</TableHead>
                   <TableHead>Created</TableHead>
-                  {isAdmin ? <TableHead className="w-12 text-right">Actions</TableHead> : null}
+                  {isAdmin ? <TableHead className="w-12 text-right">{t(locale, "keys.table.actions")}</TableHead> : null}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -123,7 +127,7 @@ export default async function AdminAnnouncementsPage() {
                       </Badge>
                     </TableCell>
                     <TableCell className="font-mono text-xs text-muted-foreground">
-                      {formatCreatedAt(a.createdAt)}
+                      {formatCreatedAt(locale, a.createdAt)}
                     </TableCell>
                     {isAdmin ? (
                       <TableCell className="p-2 text-right">

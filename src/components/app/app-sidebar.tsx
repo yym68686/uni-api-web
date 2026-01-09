@@ -3,24 +3,26 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import * as React from "react";
-import { Boxes, KeyRound, LayoutDashboard, Megaphone, PlugZap, ScrollText, SlidersHorizontal, Users } from "lucide-react";
+import { Boxes, KeyRound, LayoutDashboard, Megaphone, PlugZap, ScrollText, SlidersHorizontal, Users, type LucideIcon } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { BrandWordmark } from "@/components/brand/wordmark";
+import { useI18n } from "@/components/i18n/i18n-provider";
+import type { MessageKey } from "@/lib/i18n/messages";
 
 const navItems = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/keys", label: "API Keys", icon: KeyRound },
-  { href: "/models", label: "Models", icon: Boxes },
-  { href: "/logs", label: "Logs", icon: ScrollText },
-] as const;
+  { href: "/dashboard", labelKey: "app.dashboard", icon: LayoutDashboard },
+  { href: "/keys", labelKey: "app.keys", icon: KeyRound },
+  { href: "/models", labelKey: "app.models", icon: Boxes },
+  { href: "/logs", labelKey: "app.logs", icon: ScrollText },
+] as const satisfies ReadonlyArray<{ href: string; labelKey: MessageKey; icon: LucideIcon }>;
 
 const adminItems = [
-  { href: "/admin/channels", label: "Channels", icon: PlugZap },
-  { href: "/admin/models", label: "Model Config", icon: SlidersHorizontal },
-  { href: "/admin/users", label: "Users", icon: Users },
-  { href: "/admin/announcements", label: "Announcements", icon: Megaphone }
-] as const;
+  { href: "/admin/channels", labelKey: "app.admin.channels", icon: PlugZap },
+  { href: "/admin/models", labelKey: "app.admin.modelConfig", icon: SlidersHorizontal },
+  { href: "/admin/users", labelKey: "app.admin.users", icon: Users },
+  { href: "/admin/announcements", labelKey: "app.admin.announcements", icon: Megaphone }
+] as const satisfies ReadonlyArray<{ href: string; labelKey: MessageKey; icon: LucideIcon }>;
 
 interface AppSidebarContentProps {
   appName: string;
@@ -31,6 +33,7 @@ export function AppSidebarContent({ appName, onNavigate }: AppSidebarContentProp
   const pathname = usePathname();
   const [role, setRole] = React.useState<string | null>(null);
   const isAdmin = role === "admin" || role === "owner";
+  const { t } = useI18n();
 
   React.useEffect(() => {
     let cancelled = false;
@@ -86,7 +89,7 @@ export function AppSidebarContent({ appName, onNavigate }: AppSidebarContentProp
                 )}
               >
                 <Icon className="h-4 w-4" />
-                <span className="truncate">{item.label}</span>
+                <span className="truncate">{t(item.labelKey)}</span>
               </Link>
             );
           })}
@@ -94,9 +97,7 @@ export function AppSidebarContent({ appName, onNavigate }: AppSidebarContentProp
 
         {isAdmin ? (
           <div className="mt-4 space-y-1">
-            <div className="px-3 py-2 text-xs font-semibold text-muted-foreground">
-              Admin
-            </div>
+            <div className="px-3 py-2 text-xs font-semibold text-muted-foreground">{t("app.admin")}</div>
             {adminItems.map((item) => {
               const active = pathname.startsWith(item.href);
               const Icon = item.icon;
@@ -114,7 +115,7 @@ export function AppSidebarContent({ appName, onNavigate }: AppSidebarContentProp
                   )}
                 >
                   <Icon className="h-4 w-4" />
-                  <span className="truncate">{item.label}</span>
+                  <span className="truncate">{t(item.labelKey)}</span>
                 </Link>
               );
             })}
@@ -124,9 +125,9 @@ export function AppSidebarContent({ appName, onNavigate }: AppSidebarContentProp
 
       <div className="border-t border-border p-4">
         <div className="rounded-xl border border-border bg-background/40 p-3">
-          <div className="text-xs text-muted-foreground">Workspace</div>
+          <div className="text-xs text-muted-foreground">{t("app.workspace")}</div>
           <div className="mt-1 truncate text-sm font-medium text-sidebar-foreground">
-            Default
+            {t("app.workspace.default")}
           </div>
         </div>
       </div>

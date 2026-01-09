@@ -8,7 +8,9 @@ import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 
 import type { AdminModelItem, AdminModelUpdateResponse } from "@/lib/types";
+import type { MessageKey, MessageVars } from "@/lib/i18n/messages";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/components/i18n/i18n-provider";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -28,22 +30,24 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-const schema = z.object({
-  inputUsdPerM: z
-    .string()
-    .trim()
-    .max(32, "价格过长")
-    .optional()
-    .transform((v) => (v && v.length > 0 ? v : null)),
-  outputUsdPerM: z
-    .string()
-    .trim()
-    .max(32, "价格过长")
-    .optional()
-    .transform((v) => (v && v.length > 0 ? v : null))
-});
+function createSchema(t: (key: MessageKey, vars?: MessageVars) => string) {
+  return z.object({
+    inputUsdPerM: z
+      .string()
+      .trim()
+      .max(32, t("validation.priceTooLong"))
+      .optional()
+      .transform((v) => (v && v.length > 0 ? v : null)),
+    outputUsdPerM: z
+      .string()
+      .trim()
+      .max(32, t("validation.priceTooLong"))
+      .optional()
+      .transform((v) => (v && v.length > 0 ? v : null))
+  });
+}
 
-type FormValues = z.infer<typeof schema>;
+type FormValues = z.infer<ReturnType<typeof createSchema>>;
 
 interface ModelRowActionsProps {
   model: AdminModelItem;
@@ -63,6 +67,9 @@ export function ModelRowActions({ model, className }: ModelRowActionsProps) {
   const router = useRouter();
   const [editOpen, setEditOpen] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
+  const { t } = useI18n();
+
+  const schema = React.useMemo(() => createSchema(t), [t]);
 
   const form = useForm<FormValues>({
     defaultValues: {
@@ -87,7 +94,7 @@ export function ModelRowActions({ model, className }: ModelRowActionsProps) {
       body: JSON.stringify(payload)
     });
     const json: unknown = await res.json().catch(() => null);
-    if (!res.ok) throw new Error(readMessage(json, "更新失败"));
+    if (!res.ok) throw new Error(readMessage(json, t("common.updateFailed")));
     void (json as AdminModelUpdateResponse);
   }
 
@@ -95,10 +102,10 @@ export function ModelRowActions({ model, className }: ModelRowActionsProps) {
     setSubmitting(true);
     try {
       await patch({ enabled: nextEnabled });
-      toast.success(nextEnabled ? "模型已启用" : "模型已关闭");
+      toast.success(nextEnabled ? t("admin.models.toast.enabled") : t("admin.models.toast.disabled"));
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "更新失败");
+      toast.error(err instanceof Error ? err.message : t("common.updateFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -109,18 +116,18 @@ export function ModelRowActions({ model, className }: ModelRowActionsProps) {
     try {
       const parsed = schema.safeParse(values);
       if (!parsed.success) {
-        toast.error(parsed.error.issues[0]?.message ?? "表单校验失败");
+        toast.error(parsed.error.issues[0]?.message ?? t("common.formInvalid"));
         return;
       }
       await patch({
         inputUsdPerM: parsed.data.inputUsdPerM,
         outputUsdPerM: parsed.data.outputUsdPerM
       });
-      toast.success("价格已更新");
+      toast.success(t("admin.models.toast.pricingUpdated"));
       setEditOpen(false);
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "更新失败");
+      toast.error(err instanceof Error ? err.message : t("common.updateFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -135,7 +142,7 @@ export function ModelRowActions({ model, className }: ModelRowActionsProps) {
             size="icon"
             variant="ghost"
             className={cn("h-9 w-9 rounded-lg", className)}
-            aria-label="Model actions"
+            aria-label={t("common.actions")}
           >
             <MoreVertical className="h-4 w-4" />
           </Button>
@@ -151,12 +158,12 @@ export function ModelRowActions({ model, className }: ModelRowActionsProps) {
             {model.enabled ? (
               <>
                 <PowerOff className="mr-2 h-4 w-4" />
-                Disable
+                {t("admin.models.actions.disable")}
               </>
             ) : (
               <>
                 <Power className="mr-2 h-4 w-4" />
-                Enable
+                {t("admin.models.actions.enable")}
               </>
             )}
           </DropdownMenuItem>
@@ -168,7 +175,7 @@ export function ModelRowActions({ model, className }: ModelRowActionsProps) {
             }}
           >
             <Pencil className="mr-2 h-4 w-4" />
-            Set pricing
+            {t("admin.models.pricing.set")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -176,8 +183,8 @@ export function ModelRowActions({ model, className }: ModelRowActionsProps) {
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Model pricing</DialogTitle>
-            <DialogDescription>按 $/M tokens 计价；留空表示未配置。</DialogDescription>
+            <DialogTitle>{t("admin.models.pricing.title")}</DialogTitle>
+            <DialogDescription>{t("admin.models.pricing.desc")}</DialogDescription>
           </DialogHeader>
 
           <form
@@ -187,35 +194,35 @@ export function ModelRowActions({ model, className }: ModelRowActionsProps) {
             }}
           >
             <div className="space-y-2">
-              <Label htmlFor={`in-${model.model}`}>Input ($/M tokens)</Label>
+              <Label htmlFor={`in-${model.model}`}>{t("models.table.input")}</Label>
               <Input
                 id={`in-${model.model}`}
-                placeholder="例如：0.15"
+                placeholder={t("admin.models.pricing.inputPlaceholder")}
                 className="font-mono"
                 {...form.register("inputUsdPerM")}
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor={`out-${model.model}`}>Output ($/M tokens)</Label>
+              <Label htmlFor={`out-${model.model}`}>{t("models.table.output")}</Label>
               <Input
                 id={`out-${model.model}`}
-                placeholder="例如：0.60"
+                placeholder={t("admin.models.pricing.outputPlaceholder")}
                 className="font-mono"
                 {...form.register("outputUsdPerM")}
               />
             </div>
             <DialogFooter>
               <Button type="button" variant="ghost" onClick={() => setEditOpen(false)}>
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button type="submit" disabled={submitting}>
                 {submitting ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    Saving…
+                    {t("common.saving")}
                   </>
                 ) : (
-                  "Save"
+                  t("common.save")
                 )}
               </Button>
             </DialogFooter>

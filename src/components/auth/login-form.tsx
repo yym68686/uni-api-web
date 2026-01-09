@@ -13,16 +13,22 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { BrandWordmark } from "@/components/brand/wordmark";
+import { useI18n } from "@/components/i18n/i18n-provider";
+import type { MessageKey, MessageVars } from "@/lib/i18n/messages";
 
-const emailSchema = z.string().trim().email("请输入正确的邮箱");
-const passwordSchema = z.string().min(6, "至少 6 位密码").max(128, "密码过长");
+function createLoginSchema(t: (key: MessageKey, vars?: MessageVars) => string) {
+  const emailSchema = z.string().trim().email(t("validation.email"));
+  const passwordSchema = z
+    .string()
+    .min(6, t("validation.passwordMin", { min: 6 }))
+    .max(128, t("validation.passwordMax"));
+  return z.object({
+    email: emailSchema,
+    password: passwordSchema
+  });
+}
 
-const schema = z.object({
-  email: emailSchema,
-  password: passwordSchema
-});
-
-type FormValues = z.infer<typeof schema>;
+type FormValues = z.infer<ReturnType<typeof createLoginSchema>>;
 
 interface LoginFormProps {
   appName: string;
@@ -33,6 +39,11 @@ interface LoginFormProps {
 export function LoginForm({ appName, nextPath, className }: LoginFormProps) {
   const [loading, setLoading] = React.useState(false);
   const router = useRouter();
+  const { t } = useI18n();
+
+  const schema = React.useMemo(() => createLoginSchema(t), [t]);
+  const emailSchema = schema.shape.email;
+  const passwordSchema = schema.shape.password;
 
   const form = useForm<FormValues>({
     defaultValues: { email: "", password: "" },
@@ -50,7 +61,7 @@ export function LoginForm({ appName, nextPath, className }: LoginFormProps) {
           if (key === "email") form.setError("email", { message: issue.message, type: "validate" });
           if (key === "password") form.setError("password", { message: issue.message, type: "validate" });
         }
-        toast.error(issues[0]?.message ?? "表单校验失败");
+        toast.error(issues[0]?.message ?? t("login.failed"));
         return;
       }
 
@@ -63,17 +74,17 @@ export function LoginForm({ appName, nextPath, className }: LoginFormProps) {
         const json: unknown = await res.json().catch(() => null);
         const message =
           json && typeof json === "object" && "message" in json
-            ? String((json as { message?: unknown }).message ?? "登录失败")
-            : "登录失败";
+            ? String((json as { message?: unknown }).message ?? t("login.failed"))
+            : t("login.failed");
         throw new Error(message);
       }
 
-      toast.success("登录成功");
+      toast.success(t("login.success"));
       const next = nextPath && nextPath.startsWith("/") ? nextPath : "/dashboard";
       router.replace(next);
       router.refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "登录失败");
+      toast.error(err instanceof Error ? err.message : t("login.failed"));
     } finally {
       setLoading(false);
     }
@@ -84,15 +95,15 @@ export function LoginForm({ appName, nextPath, className }: LoginFormProps) {
       <div className="text-center">
         <BrandWordmark name={appName} className="text-lg" />
         <div className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
-          Sign in
+          {t("login.title")}
         </div>
         <p className="mt-2 text-sm text-muted-foreground">
-          还没有账号？{" "}
+          {t("login.noAccount")}{" "}
           <Link
             href={nextPath ? `/register?next=${encodeURIComponent(nextPath)}` : "/register"}
             className="text-primary hover:underline"
           >
-            Create one
+            {t("login.createOne")}
           </Link>
         </p>
       </div>
@@ -104,7 +115,7 @@ export function LoginForm({ appName, nextPath, className }: LoginFormProps) {
         }}
       >
         <div className="space-y-2">
-          <div className="text-sm font-medium text-foreground">Email</div>
+          <div className="text-sm font-medium text-foreground">{t("login.email")}</div>
           <div className="relative">
             <Mail
               suppressHydrationWarning
@@ -120,7 +131,7 @@ export function LoginForm({ appName, nextPath, className }: LoginFormProps) {
               {...form.register("email", {
                 validate: (value) => {
                   const r = emailSchema.safeParse(value);
-                  return r.success ? true : (r.error.issues[0]?.message ?? "邮箱不合法");
+                  return r.success ? true : (r.error.issues[0]?.message ?? t("common.formInvalid"));
                 }
               })}
             />
@@ -131,7 +142,7 @@ export function LoginForm({ appName, nextPath, className }: LoginFormProps) {
         </div>
 
         <div className="space-y-2">
-          <div className="text-sm font-medium text-foreground">Password</div>
+          <div className="text-sm font-medium text-foreground">{t("login.password")}</div>
           <div className="relative">
             <Lock
               suppressHydrationWarning
@@ -148,7 +159,7 @@ export function LoginForm({ appName, nextPath, className }: LoginFormProps) {
               {...form.register("password", {
                 validate: (value) => {
                   const r = passwordSchema.safeParse(value);
-                  return r.success ? true : (r.error.issues[0]?.message ?? "密码不合法");
+                  return r.success ? true : (r.error.issues[0]?.message ?? t("common.formInvalid"));
                 }
               })}
             />
@@ -172,17 +183,17 @@ export function LoginForm({ appName, nextPath, className }: LoginFormProps) {
           {loading ? (
             <>
               <Loader2 className="h-4 w-4 animate-spin" />
-              Signing in…
+              {t("login.submitting")}
             </>
           ) : (
-            "Sign in"
+            t("login.submit")
           )}
         </Button>
 
         <div className="relative py-2">
           <Separator />
           <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-background px-3 text-xs text-muted-foreground">
-            or
+            {t("login.or")}
           </div>
         </div>
 
@@ -191,10 +202,10 @@ export function LoginForm({ appName, nextPath, className }: LoginFormProps) {
             type="button"
             variant="outline"
             className="w-full rounded-xl bg-transparent"
-            onClick={() => toast.message("GitHub 登录：即将支持")}
+            onClick={() => toast.message(t("login.githubSoon"))}
           >
             <Github suppressHydrationWarning className="h-4 w-4" />
-            Continue with GitHub
+            {t("login.continueGithub")}
           </Button>
           <Button
             type="button"
@@ -206,15 +217,13 @@ export function LoginForm({ appName, nextPath, className }: LoginFormProps) {
             }}
           >
             <Chrome suppressHydrationWarning className="h-4 w-4" />
-            Continue with Google
+            {t("login.continueGoogle")}
           </Button>
         </div>
       </form>
 
       <p className="mt-8 text-center text-xs text-muted-foreground">
-        By continuing, you agree to the{" "}
-        <span className="text-foreground/80">Terms</span> and{" "}
-        <span className="text-foreground/80">Privacy Policy</span>.
+        {t("auth.termsLine")}
       </p>
     </div>
   );

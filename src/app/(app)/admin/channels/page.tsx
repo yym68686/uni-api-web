@@ -6,6 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { buildBackendUrl, getBackendAuthHeaders } from "@/lib/backend";
+import { getRequestLocale } from "@/lib/i18n/server";
+import { t } from "@/lib/i18n/messages";
 import type { LlmChannelsListResponse } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -17,10 +19,10 @@ function isLlmChannelsListResponse(value: unknown): value is LlmChannelsListResp
   return Array.isArray(items);
 }
 
-function formatDateTime(value: string) {
+function formatDateTime(locale: string, value: string) {
   const dt = new Date(value);
   if (Number.isNaN(dt.getTime())) return value;
-  return new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(dt);
+  return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(dt);
 }
 
 async function getMe() {
@@ -55,17 +57,19 @@ function badgeForGroup(group: string) {
 }
 
 export default async function AdminChannelsPage() {
+  const locale = await getRequestLocale();
   const me = await getMe();
   const isAdmin = me?.role === "admin" || me?.role === "owner";
   const items = isAdmin ? (await getChannels()) ?? [] : [];
+  const current = t(locale, "admin.currentUser", { email: me?.email ?? "unknown" });
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Channels</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">{t(locale, "app.admin.channels")}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            管理 LLM API 渠道（当前：{me?.email ?? "unknown"}）。
+            {t(locale, "admin.channels.subtitle", { current })}
           </p>
         </div>
         {isAdmin ? <ChannelPublisher /> : null}
@@ -76,21 +80,21 @@ export default async function AdminChannelsPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <PlugZap className="h-5 w-5 text-muted-foreground" />
-              Forbidden
+              {t(locale, "admin.forbidden")}
             </CardTitle>
-            <CardDescription>你不是管理员，无法管理渠道。</CardDescription>
+            <CardDescription>{t(locale, "admin.channels.forbidden")}</CardDescription>
           </CardHeader>
         </Card>
       ) : (
         <Card>
           <CardHeader>
-            <CardTitle>Configured channels</CardTitle>
-            <CardDescription>渠道可限制哪些分组（group）可用；留空表示所有分组都可用。</CardDescription>
+            <CardTitle>{t(locale, "admin.channels.card.title")}</CardTitle>
+            <CardDescription>{t(locale, "admin.channels.card.desc")}</CardDescription>
           </CardHeader>
           <CardContent>
             {items.length === 0 ? (
               <div className="rounded-xl border border-dashed border-border bg-muted/10 p-8 text-center text-sm text-muted-foreground">
-                暂无渠道
+                {t(locale, "admin.channels.empty")}
               </div>
             ) : (
               <Table>
@@ -99,9 +103,9 @@ export default async function AdminChannelsPage() {
                     <TableHead>Name</TableHead>
                     <TableHead>Base URL</TableHead>
                     <TableHead>API key</TableHead>
-                    <TableHead>Allow groups</TableHead>
-                    <TableHead>Updated</TableHead>
-                    <TableHead className="w-12 text-right">Actions</TableHead>
+                    <TableHead>{t(locale, "admin.channels.table.allowGroups")}</TableHead>
+                    <TableHead>{t(locale, "admin.channels.table.updated")}</TableHead>
+                    <TableHead className="w-12 text-right">{t(locale, "keys.table.actions")}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -116,7 +120,7 @@ export default async function AdminChannelsPage() {
                       </TableCell>
                       <TableCell>
                         {c.allowGroups.length === 0 ? (
-                          <Badge variant="outline">All</Badge>
+                          <Badge variant="outline">{t(locale, "admin.channels.table.all")}</Badge>
                         ) : (
                           <div className="flex flex-wrap gap-1">
                             {c.allowGroups.slice(0, 4).map((g) => (
@@ -131,7 +135,7 @@ export default async function AdminChannelsPage() {
                         )}
                       </TableCell>
                       <TableCell className="font-mono text-xs text-muted-foreground">
-                        {formatDateTime(c.updatedAt)}
+                        {formatDateTime(locale, c.updatedAt)}
                       </TableCell>
                       <TableCell className="p-2 text-right">
                         <ChannelRowActions channel={c} />
@@ -147,4 +151,3 @@ export default async function AdminChannelsPage() {
     </div>
   );
 }
-

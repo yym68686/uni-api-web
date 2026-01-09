@@ -5,6 +5,8 @@ import { StatsCard } from "@/components/app/stats-card";
 import { UsageAreaChart } from "@/components/charts/usage-area-chart";
 import { formatCompactNumber, formatUsd } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { getRequestLocale } from "@/lib/i18n/server";
+import { t } from "@/lib/i18n/messages";
 import type {
   AnnouncementsListResponse,
   ApiKeysListResponse,
@@ -66,6 +68,7 @@ function buildEmptyDaily(days: number): DailyUsagePoint[] {
 }
 
 export default async function DashboardPage() {
+  const locale = await getRequestLocale();
   let userName = "User";
   let remainingCredits: number | null = null;
   try {
@@ -141,37 +144,37 @@ export default async function DashboardPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">
-          Welcome back, <span className="text-foreground">{userName}</span>
+          {t(locale, "dashboard.welcomeBack", { name: userName })}
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          这是你的控制台概览：KPI、近 7 天趋势与公告。
+          {t(locale, "dashboard.subtitle")}
         </p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatsCard
-          title="Total calls (7d)"
+          title={t(locale, "dashboard.kpi.totalCalls7d")}
           value={formatCompactNumber(requests7d)}
           trend="+6.1% wow"
           icon={Activity}
           iconGradientClassName="from-primary/40 to-primary/10 text-primary"
         />
         <StatsCard
-          title="Remaining credits"
+          title={t(locale, "dashboard.kpi.remainingCredits")}
           value={remainingCredits === null ? "—" : formatUsd(remainingCredits)}
           trend={remainingCredits === null ? "connect billing" : "plan: Pro"}
           icon={Wallet}
           iconGradientClassName="from-success/35 to-success/10 text-success"
         />
         <StatsCard
-          title="Active keys"
+          title={t(locale, "dashboard.kpi.activeKeys")}
           value={formatCompactNumber(activeKeys)}
           trend="rotate monthly"
           icon={KeyRound}
           iconGradientClassName="from-warning/35 to-warning/10 text-warning"
         />
         <StatsCard
-          title="Spend (month)"
+          title={t(locale, "dashboard.kpi.spendMonth")}
           value={formatUsd(spendMonthUsd)}
           trend={`last 24h: ${formatUsd(usage.summary.spend24hUsd)}`}
           icon={CreditCard}
@@ -182,8 +185,8 @@ export default async function DashboardPage() {
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle>Usage Trend</CardTitle>
-            <CardDescription>近 7 天 API 调用趋势</CardDescription>
+            <CardTitle>{t(locale, "dashboard.chart.title")}</CardTitle>
+            <CardDescription>{t(locale, "dashboard.chart.desc")}</CardDescription>
           </CardHeader>
           <CardContent>
             <UsageAreaChart data={last7Days} />
@@ -193,13 +196,13 @@ export default async function DashboardPage() {
         <div className="space-y-4">
           <Card className="bg-warning/10">
             <CardHeader>
-              <CardTitle>Announcements</CardTitle>
-              <CardDescription>重要变更与近期动态</CardDescription>
+              <CardTitle>{t(locale, "dashboard.ann.title")}</CardTitle>
+              <CardDescription>{t(locale, "dashboard.ann.desc")}</CardDescription>
             </CardHeader>
             <CardContent>
               {announcements.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-border bg-background/20 p-6 text-center text-sm text-muted-foreground">
-                  暂无公告
+                  {t(locale, "dashboard.ann.empty")}
                 </div>
               ) : (
                 <div className="space-y-3">

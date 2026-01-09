@@ -8,6 +8,8 @@ import { Toaster } from "sonner";
 
 import { cn } from "@/lib/utils";
 import { getAppName } from "@/lib/app-config";
+import { getRequestLocale } from "@/lib/i18n/server";
+import { I18nProvider } from "@/components/i18n/i18n-provider";
 
 export function generateMetadata(): Metadata {
   const appName = getAppName();
@@ -27,10 +29,11 @@ interface RootLayoutProps {
   children: React.ReactNode;
 }
 
-export default function RootLayout({ children }: RootLayoutProps) {
+export default async function RootLayout({ children }: RootLayoutProps) {
+  const locale = await getRequestLocale();
   return (
     <html
-      lang="zh-CN"
+      lang={locale}
       className={cn("dark", GeistSans.variable, GeistMono.variable)}
       suppressHydrationWarning
     >
@@ -38,8 +41,10 @@ export default function RootLayout({ children }: RootLayoutProps) {
         className={cn("min-h-dvh bg-background font-sans text-foreground")}
         suppressHydrationWarning
       >
-        {children}
-        <Toaster theme="dark" richColors closeButton />
+        <I18nProvider locale={locale}>
+          {children}
+          <Toaster theme="dark" richColors closeButton />
+        </I18nProvider>
       </body>
     </html>
   );
