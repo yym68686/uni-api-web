@@ -16,6 +16,9 @@ export function generateMetadata(): Metadata {
       default: appName,
       template: `%s · ${appName}`
     },
+    icons: {
+      icon: "/favicon.ico"
+    },
     description: "LLM API usage dashboard and key management console."
   };
 }

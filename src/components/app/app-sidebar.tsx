@@ -62,10 +62,7 @@ export function AppSidebarContent({ appName, onNavigate }: AppSidebarContentProp
         >
           <BrandWordmark
             name={appName}
-            className={cn(
-              "text-lg",
-              "transition-colors duration-200 group-hover:text-foreground"
-            )}
+            className="text-lg transition-colors duration-200 group-hover:text-foreground"
           />
         </Link>
       </div>
