@@ -1,3 +1,4 @@
+## syntax=docker/dockerfile:1.7
 FROM node:20-alpine AS base
 
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -7,7 +8,7 @@ WORKDIR /app
 FROM base AS deps
 
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci
 
 FROM base AS builder
 
@@ -15,7 +16,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
 ENV NEXT_DISABLE_TURBOPACK=1
-RUN npm run build
+RUN --mount=type=cache,target=/app/.next/cache npm run build
 
 FROM base AS runner
 
@@ -37,4 +38,3 @@ USER app
 EXPOSE 3000
 
 CMD ["npm", "start"]
-
