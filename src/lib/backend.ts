@@ -15,12 +15,12 @@ export function getBackendBaseUrl() {
   return normalizeBaseUrl(raw);
 }
 
-export async function getSessionTokenFromCookies() {
+async function getSessionTokenFromCookies() {
   const cookieStore = await cookies();
   return cookieStore.get(SESSION_COOKIE_NAME)?.value ?? null;
 }
 
-export async function getBackendAuthHeaders(): Promise<HeadersInit> {
+async function getBackendAuthHeaders(): Promise<HeadersInit> {
   const token = await getSessionTokenFromCookies();
   const headers: Record<string, string> = {};
   if (token) headers.authorization = `Bearer ${token}`;

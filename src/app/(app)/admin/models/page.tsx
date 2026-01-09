@@ -26,12 +26,6 @@ function formatUsdPerM(value: string | null | undefined) {
   return `$${value}`;
 }
 
-async function getMe() {
-  const me = await getCurrentUser();
-  if (!me) return null;
-  return { role: me.role, email: me.email };
-}
-
 async function getModels() {
   const res = await fetch(buildBackendUrl("/admin/models"), {
     cache: "force-cache",
@@ -46,7 +40,7 @@ async function getModels() {
 
 export default async function AdminModelsPage() {
   const locale = await getRequestLocale();
-  const me = await getMe();
+  const me = await getCurrentUser();
   const isAdmin = me?.role === "admin" || me?.role === "owner";
   const items = isAdmin ? (await getModels()) ?? [] : [];
   const current = t(locale, "admin.currentUser", { email: me?.email ?? "unknown" });

@@ -26,12 +26,6 @@ function formatDateTime(locale: string, value: string) {
   return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(dt);
 }
 
-async function getMe() {
-  const me = await getCurrentUser();
-  if (!me) return null;
-  return { role: me.role, email: me.email };
-}
-
 async function getChannels() {
   const res = await fetch(buildBackendUrl("/admin/channels"), {
     cache: "no-store",
@@ -51,7 +45,7 @@ function badgeForGroup(group: string) {
 
 export default async function AdminChannelsPage() {
   const locale = await getRequestLocale();
-  const me = await getMe();
+  const me = await getCurrentUser();
   const isAdmin = me?.role === "admin" || me?.role === "owner";
   const items = isAdmin ? (await getChannels()) ?? [] : [];
   const current = t(locale, "admin.currentUser", { email: me?.email ?? "unknown" });

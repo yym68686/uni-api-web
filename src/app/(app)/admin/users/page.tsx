@@ -40,12 +40,6 @@ function groupBadgeVariant(group: string) {
   return "secondary";
 }
 
-async function getMe() {
-  const me = await getCurrentUser();
-  if (!me) return null;
-  return { id: me.id, role: me.role, email: me.email };
-}
-
 async function getUsers() {
   const res = await fetch(buildBackendUrl("/admin/users"), {
     cache: "no-store",
@@ -59,7 +53,7 @@ async function getUsers() {
 
 export default async function AdminUsersPage() {
   const locale = await getRequestLocale();
-  const me = await getMe();
+  const me = await getCurrentUser();
   const isAdmin = me?.role === "admin" || me?.role === "owner";
   const users = isAdmin ? (await getUsers()) ?? [] : [];
 

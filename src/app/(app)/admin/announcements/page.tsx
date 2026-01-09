@@ -20,12 +20,6 @@ function isAnnouncementsListResponse(value: unknown): value is AnnouncementsList
   return Array.isArray(items);
 }
 
-async function getMe() {
-  const me = await getCurrentUser();
-  if (!me) return null;
-  return { role: me.role, email: me.email };
-}
-
 async function getAnnouncements() {
   const res = await fetch(buildBackendUrl("/announcements"), {
     cache: "no-store",
@@ -58,7 +52,7 @@ function levelBadgeVariant(level: string) {
 
 export default async function AdminAnnouncementsPage() {
   const locale = await getRequestLocale();
-  const me = await getMe();
+  const me = await getCurrentUser();
   const items = (await getAnnouncements()) ?? [];
 
   const isAdmin = me?.role === "admin" || me?.role === "owner";
