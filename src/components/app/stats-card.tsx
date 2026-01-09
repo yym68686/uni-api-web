@@ -22,15 +22,16 @@ export function StatsCard({
   return (
     <div
       className={cn(
-        "group relative overflow-hidden rounded-xl border border-border bg-card p-6",
+        "uai-cq uai-kpi-card group relative overflow-hidden rounded-xl border border-border bg-card p-6",
         "transition-all duration-300 hover:scale-[1.02] hover:shadow-lg hover:border-primary/20",
         className
       )}
     >
-      <div className="flex items-center justify-between">
+      <div className="uai-kpi-head flex items-center justify-between">
         <h3 className="text-sm font-medium text-muted-foreground">{title}</h3>
         <div
           className={cn(
+            "uai-kpi-icon",
             "flex h-10 w-10 items-center justify-center rounded-xl",
             "text-foreground ring-1 ring-inset ring-border/60",
             "bg-gradient-to-br from-primary/30 to-primary/10",
@@ -43,7 +44,7 @@ export function StatsCard({
       </div>
       <div className="mt-4">
         <div className="text-2xl font-bold tracking-tight text-foreground">
-          <span className="tabular-nums">{value}</span>
+          <span className="uai-kpi-value tabular-nums">{value}</span>
         </div>
         {trend ? (
           <p className="mt-1 text-xs text-success font-mono">{trend}</p>

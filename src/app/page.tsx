@@ -171,7 +171,7 @@ export default async function LandingPage() {
                   <Button
                     asChild
                     className={cn(
-                      "rounded-xl",
+                      "rounded-xl uai-border-beam",
                       "shadow-[0_0_0_1px_oklch(var(--primary)/0.35),0_12px_34px_oklch(var(--primary)/0.22),inset_0_1px_0_0_oklch(var(--foreground)/0.12)]"
                     )}
                   >
@@ -185,7 +185,7 @@ export default async function LandingPage() {
                     <Button
                       asChild
                       className={cn(
-                        "rounded-xl",
+                        "rounded-xl uai-border-beam",
                         "shadow-[0_0_0_1px_oklch(var(--primary)/0.35),0_12px_34px_oklch(var(--primary)/0.22),inset_0_1px_0_0_oklch(var(--foreground)/0.12)]"
                       )}
                     >

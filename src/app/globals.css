@@ -137,9 +137,70 @@
     }
   }
 
+  @keyframes uai-border-beam {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
   .uai-float-sm {
     animation: uai-float-sm 6.5s ease-in-out infinite;
     will-change: transform;
+  }
+
+  .uai-border-beam {
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+  }
+
+  .uai-border-beam::before {
+    content: "";
+    pointer-events: none;
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    padding: 1px;
+    background: conic-gradient(
+      from 180deg,
+      transparent 0deg,
+      transparent 120deg,
+      oklch(var(--primary) / 0.55) 160deg,
+      transparent 210deg,
+      transparent 360deg
+    );
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    animation: uai-border-beam 3.8s linear infinite;
+    opacity: 0.95;
+    will-change: transform;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .uai-border-beam::before {
+      animation: none;
+    }
+  }
+
+  .uai-cq {
+    container-type: inline-size;
+  }
+
+  @container (max-width: 22rem) {
+    .uai-kpi-card .uai-kpi-head {
+      align-items: flex-start;
+      gap: 0.75rem;
+    }
+
+    .uai-kpi-card .uai-kpi-icon {
+      height: 2.25rem;
+      width: 2.25rem;
+    }
+
+    .uai-kpi-card .uai-kpi-value {
+      font-size: 1.25rem;
+    }
   }
 
   .uai-noise-drift {

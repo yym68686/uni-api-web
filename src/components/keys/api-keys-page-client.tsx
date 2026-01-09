@@ -98,7 +98,7 @@ export function ApiKeysPageClient({ initialItems }: ApiKeysPageClientProps) {
         <CreateKeyDialog
           onCreated={onCreated}
           triggerLabel={t("keys.create")}
-          triggerClassName={cn("rounded-xl", createButtonGlow)}
+          triggerClassName={cn("rounded-xl uai-border-beam", createButtonGlow)}
         />
       </div>
 
@@ -125,7 +125,7 @@ export function ApiKeysPageClient({ initialItems }: ApiKeysPageClientProps) {
                     <CreateKeyDialog
                       onCreated={onCreated}
                       triggerLabel={t("keys.create")}
-                      triggerClassName={cn("rounded-xl", createButtonGlow)}
+                      triggerClassName={cn("rounded-xl uai-border-beam", createButtonGlow)}
                     />
                   </div>
                 </div>
