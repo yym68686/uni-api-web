@@ -53,6 +53,7 @@ Tags:
 
 Set backend URL (recommended):
 - `cp .env.example .env` (or set `API_BASE_URL`)
+- Optional branding: set `APP_NAME` (default: `MyApp`)
 
 Google 登录：
 - 在 Google Cloud Console 创建 OAuth Client（Web）

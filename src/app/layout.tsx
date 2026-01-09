@@ -7,14 +7,18 @@ import { GeistSans } from "geist/font/sans";
 import { Toaster } from "sonner";
 
 import { cn } from "@/lib/utils";
+import { getAppName } from "@/lib/app-config";
 
-export const metadata: Metadata = {
-  title: {
-    default: "Uni API Console",
-    template: "%s · Uni API Console"
-  },
-  description: "LLM API usage dashboard and key management console."
-};
+export function generateMetadata(): Metadata {
+  const appName = getAppName();
+  return {
+    title: {
+      default: appName,
+      template: `%s · ${appName}`
+    },
+    description: "LLM API usage dashboard and key management console."
+  };
+}
 
 interface RootLayoutProps {
   children: React.ReactNode;

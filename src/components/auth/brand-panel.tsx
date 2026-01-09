@@ -1,10 +1,11 @@
 import { cn } from "@/lib/utils";
 
 interface BrandPanelProps {
+  appName: string;
   className?: string;
 }
 
-export function BrandPanel({ className }: BrandPanelProps) {
+export function BrandPanel({ appName, className }: BrandPanelProps) {
   return (
     <section
       className={cn(
@@ -19,7 +20,7 @@ export function BrandPanel({ className }: BrandPanelProps) {
 
       <div className="absolute bottom-10 left-10 max-w-md">
         <div className="text-xs font-mono text-muted-foreground">
-          Deep Indigo Dark · Console Access
+          {appName} · Console Access
         </div>
         <div className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
           Secure, fast, and observable LLM API platform.

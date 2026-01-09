@@ -1,11 +1,13 @@
 import { DashboardLayout } from "@/components/app/dashboard-layout";
 import { buildBackendUrl, getBackendAuthHeaders } from "@/lib/backend";
+import { getAppName } from "@/lib/app-config";
 
 interface AppLayoutProps {
   children: React.ReactNode;
 }
 
 export default async function AppLayout({ children }: AppLayoutProps) {
+  const appName = getAppName();
   let userName = "User";
   try {
     const res = await fetch(buildBackendUrl("/auth/me"), {
@@ -23,5 +25,9 @@ export default async function AppLayout({ children }: AppLayoutProps) {
     // ignore
   }
 
-  return <DashboardLayout userName={userName}>{children}</DashboardLayout>;
+  return (
+    <DashboardLayout appName={appName} userName={userName}>
+      {children}
+    </DashboardLayout>
+  );
 }

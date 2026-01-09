@@ -6,6 +6,7 @@ import * as React from "react";
 import { Boxes, KeyRound, LayoutDashboard, Megaphone, PlugZap, ScrollText, SlidersHorizontal, Users } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { BrandWordmark } from "@/components/brand/wordmark";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -22,10 +23,11 @@ const adminItems = [
 ] as const;
 
 interface AppSidebarContentProps {
+  appName: string;
   onNavigate?: () => void;
 }
 
-export function AppSidebarContent({ onNavigate }: AppSidebarContentProps) {
+export function AppSidebarContent({ appName, onNavigate }: AppSidebarContentProps) {
   const pathname = usePathname();
   const [role, setRole] = React.useState<string | null>(null);
   const isAdmin = role === "admin" || role === "owner";
@@ -58,25 +60,13 @@ export function AppSidebarContent({ onNavigate }: AppSidebarContentProps) {
           className="group flex items-center gap-3"
           onClick={onNavigate}
         >
-          <div
+          <BrandWordmark
+            name={appName}
             className={cn(
-              "flex h-10 w-10 items-center justify-center rounded-xl",
-              "bg-gradient-to-br from-primary to-primary/80 text-primary-foreground shadow-sm",
-              "transition-transform duration-300 group-hover:scale-[1.04]"
+              "text-base",
+              "transition-colors duration-200 group-hover:text-foreground"
             )}
-          >
-            <span className="font-logo text-[10px] leading-none tracking-tight">
-              UA
-            </span>
-          </div>
-          <div className="min-w-0">
-            <div className="truncate font-semibold text-sidebar-foreground">
-              Uni API Console
-            </div>
-            <div className="truncate text-xs text-muted-foreground">
-              Deep Indigo Dark
-            </div>
-          </div>
+          />
         </Link>
       </div>
 
@@ -147,10 +137,14 @@ export function AppSidebarContent({ onNavigate }: AppSidebarContentProps) {
   );
 }
 
-export function AppSidebar() {
+interface AppSidebarProps {
+  appName: string;
+}
+
+export function AppSidebar({ appName }: AppSidebarProps) {
   return (
     <aside className="fixed inset-y-0 left-0 hidden w-64 border-r border-border bg-sidebar sm:block">
-      <AppSidebarContent />
+      <AppSidebarContent appName={appName} />
     </aside>
   );
 }

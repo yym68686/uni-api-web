@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import { BrandWordmark } from "@/components/brand/wordmark";
 
 const emailSchema = z.string().trim().email("请输入正确的邮箱");
 const passwordSchema = z.string().min(6, "至少 6 位密码").max(128, "密码过长");
@@ -24,11 +25,12 @@ const schema = z.object({
 type FormValues = z.infer<typeof schema>;
 
 interface LoginFormProps {
+  appName: string;
   nextPath?: string;
   className?: string;
 }
 
-export function LoginForm({ nextPath, className }: LoginFormProps) {
+export function LoginForm({ appName, nextPath, className }: LoginFormProps) {
   const [loading, setLoading] = React.useState(false);
   const router = useRouter();
 
@@ -80,7 +82,7 @@ export function LoginForm({ nextPath, className }: LoginFormProps) {
   return (
     <div className={cn("w-full max-w-sm", className)}>
       <div className="text-center">
-        <div className="font-logo text-lg tracking-tight text-foreground">MyApp</div>
+        <BrandWordmark name={appName} className="text-lg" />
         <div className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
           Sign in
         </div>

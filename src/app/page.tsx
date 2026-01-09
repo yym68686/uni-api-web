@@ -18,10 +18,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { SpotlightCard } from "@/components/landing/spotlight-card";
 import { cn } from "@/lib/utils";
 import { isLoggedInCookie, SESSION_COOKIE_NAME } from "@/lib/auth";
+import { getAppName } from "@/lib/app-config";
+import { BrandWordmark } from "@/components/brand/wordmark";
 
 export default async function LandingPage() {
   const token = (await cookies()).get(SESSION_COOKIE_NAME)?.value;
   const hasSession = isLoggedInCookie(token);
+  const appName = getAppName();
 
   return (
     <div className="relative min-h-dvh overflow-hidden bg-background">
@@ -50,20 +53,10 @@ export default async function LandingPage() {
       <header className="sticky top-0 z-40 border-b border-border bg-background/70 backdrop-blur-xl">
         <div className="mx-auto flex h-14 max-w-6xl items-center justify-between gap-3 px-4 sm:px-6">
           <Link href="/" className="group flex items-center gap-3">
-            <div
-              className={cn(
-                "flex h-9 w-9 items-center justify-center rounded-xl",
-                "bg-gradient-to-br from-primary to-primary/80 text-primary-foreground shadow-sm",
-                "transition-transform duration-300 group-hover:scale-[1.04]",
-                "shadow-[0_0_0_1px_oklch(var(--primary)/0.25),0_12px_30px_oklch(var(--primary)/0.18)]"
-              )}
-            >
-              <span className="font-logo text-[10px] leading-none tracking-tight">UA</span>
-            </div>
-            <div className="min-w-0">
-              <div className="truncate text-sm font-semibold text-foreground">Uni API</div>
-              <div className="truncate text-[11px] text-muted-foreground">Deep Indigo Dark</div>
-            </div>
+            <BrandWordmark
+              name={appName}
+              className="text-sm transition-colors duration-200 group-hover:text-foreground"
+            />
           </Link>
 
           <nav className="hidden items-center gap-6 text-sm text-muted-foreground md:flex">
@@ -389,7 +382,7 @@ export default async function LandingPage() {
 
         <footer className="mt-10 border-t border-border pt-8 text-xs text-muted-foreground">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div>© {new Date().getUTCFullYear()} Uni API Console</div>
+            <div>© {new Date().getUTCFullYear()} {appName}</div>
             <div className="font-mono">OKLCH · shadcn/ui · Next.js</div>
           </div>
         </footer>
