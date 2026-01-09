@@ -20,14 +20,19 @@ UNSET = object()
 DEFAULT_USD_PER_M_BY_PREFIX: dict[str, tuple[str | None, str | None]] = {
     # NOTE: Prices are "$/M tokens" as strings, e.g. "0.15" => $0.15 per 1M tokens.
     # Longest-prefix match (more specific prefixes override shorter ones).
-    "claude-3-7-sonnet": ("3", "15"),
-    "claude-opus-4": ("3", "15"),
-    "gemini-2.5-pro": ("3", "15"),
-    "gemini-3-pro": ("3", "15"),
-    "claude-3-7-sonnet-think": ("4", "20"),
-    "gemini-2.5-flash": ("0.15", "0.60"),
+    "claude-3-5-sonnet": ("2.1", "10.5"),
+    "claude-3-7-sonnet": ("2.1", "10.5"),
+    "claude-opus-4": ("10.5", "52.5"),
+    "claude-sonnet-4": ("2.1", "10.5"),
+    "claude-haiku-4-5": ("0.3", "1.5"),
+    "gemini-2.5-pro": ("0.25", "2"),
+    "gemini-2.5-flash": ("0.06", "0.5"),
+    "gemini-3-pro": ("0.6", "3.6"),
     "gemini-3-flash": ("0.15", "0.60"),
-    "deepseek-chat": ("0.14", None),
+    "gemini-embedding-001": ("0.3", "1.5"),
+    "gpt-5": ("0.375", "3"),
+    "text-embedding-004": ("0.3", "1.5"),
+    "deepseek-chat": ("0.14", "0.60"),
 }
 
 

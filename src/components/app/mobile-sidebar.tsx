@@ -9,9 +9,10 @@ import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 
 interface MobileSidebarProps {
   appName: string;
+  userRole: string | null;
 }
 
-export function MobileSidebar({ appName }: MobileSidebarProps) {
+export function MobileSidebar({ appName, userRole }: MobileSidebarProps) {
   const [open, setOpen] = React.useState(false);
 
   return (
@@ -24,7 +25,7 @@ export function MobileSidebar({ appName }: MobileSidebarProps) {
       <DialogContent
         className="left-0 top-0 h-dvh w-72 max-w-[85vw] translate-x-0 translate-y-0 rounded-none border-r border-border bg-sidebar p-0"
       >
-        <AppSidebarContent appName={appName} onNavigate={() => setOpen(false)} />
+        <AppSidebarContent appName={appName} userRole={userRole} onNavigate={() => setOpen(false)} />
       </DialogContent>
     </Dialog>
   );

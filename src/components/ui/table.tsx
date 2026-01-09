@@ -6,7 +6,7 @@ interface TableProps extends React.TableHTMLAttributes<HTMLTableElement> {}
 
 export function Table({ className, ...props }: TableProps) {
   return (
-    <div className="w-full overflow-auto rounded-xl border border-border">
+    <div className="scrollbar-hide w-full overflow-auto rounded-xl border border-border">
       <table
         className={cn("w-full caption-bottom text-sm", className)}
         {...props}

@@ -59,9 +59,9 @@ export async function AdminChannelsContent({ locale }: AdminChannelsContentProps
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Base URL</TableHead>
-                <TableHead>API key</TableHead>
+                <TableHead>{t(locale, "admin.channels.table.name")}</TableHead>
+                <TableHead>{t(locale, "admin.channels.table.baseUrl")}</TableHead>
+                <TableHead>{t(locale, "admin.channels.table.apiKey")}</TableHead>
                 <TableHead>{t(locale, "admin.channels.table.allowGroups")}</TableHead>
                 <TableHead>{t(locale, "admin.channels.table.updated")}</TableHead>
                 <TableHead className="w-12 text-right">{t(locale, "keys.table.actions")}</TableHead>

@@ -9,6 +9,7 @@ import { Toaster } from "sonner";
 import { cn } from "@/lib/utils";
 import { getAppName } from "@/lib/app-config";
 import { getRequestLocale } from "@/lib/i18n/server";
+import { t } from "@/lib/i18n/messages";
 import { I18nProvider } from "@/components/i18n/i18n-provider";
 
 export function generateMetadata(): Metadata {
@@ -42,6 +43,16 @@ export default async function RootLayout({ children }: RootLayoutProps) {
         suppressHydrationWarning
       >
         <I18nProvider locale={locale}>
+          <a
+            href="#main"
+            className={cn(
+              "sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100]",
+              "rounded-xl border border-border bg-background/80 px-4 py-2 text-sm text-foreground backdrop-blur",
+              "shadow-[0_0_0_1px_oklch(var(--border)/0.55),0_12px_34px_oklch(var(--background)/0.65)]"
+            )}
+          >
+            {t(locale, "common.skipToContent")}
+          </a>
           {children}
           <Toaster theme="dark" richColors closeButton />
         </I18nProvider>

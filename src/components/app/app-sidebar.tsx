@@ -26,34 +26,14 @@ const adminItems = [
 
 interface AppSidebarContentProps {
   appName: string;
+  userRole: string | null;
   onNavigate?: () => void;
 }
 
-export function AppSidebarContent({ appName, onNavigate }: AppSidebarContentProps) {
+export function AppSidebarContent({ appName, userRole, onNavigate }: AppSidebarContentProps) {
   const pathname = usePathname();
-  const [role, setRole] = React.useState<string | null>(null);
-  const isAdmin = role === "admin" || role === "owner";
+  const isAdmin = userRole === "admin" || userRole === "owner";
   const { t } = useI18n();
-
-  React.useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        const res = await fetch("/api/auth/me", { cache: "no-store" });
-        if (!res.ok) return;
-        const json: unknown = await res.json();
-        if (!json || typeof json !== "object") return;
-        const r = (json as { role?: unknown }).role;
-        if (!cancelled && typeof r === "string") setRole(r);
-      } catch {
-        // ignore
-      }
-    }
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   return (
     <div className="flex h-full flex-col">
@@ -137,12 +117,13 @@ export function AppSidebarContent({ appName, onNavigate }: AppSidebarContentProp
 
 interface AppSidebarProps {
   appName: string;
+  userRole: string | null;
 }
 
-export function AppSidebar({ appName }: AppSidebarProps) {
+export function AppSidebar({ appName, userRole }: AppSidebarProps) {
   return (
     <aside className="fixed inset-y-0 left-0 hidden w-64 border-r border-border bg-sidebar sm:block">
-      <AppSidebarContent appName={appName} />
+      <AppSidebarContent appName={appName} userRole={userRole} />
     </aside>
   );
 }

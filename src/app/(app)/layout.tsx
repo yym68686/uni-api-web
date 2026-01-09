@@ -10,9 +10,10 @@ export default async function AppLayout({ children }: AppLayoutProps) {
   const appName = getAppName();
   const me = await getCurrentUser();
   const userName = me?.email && me.email.length > 0 ? me.email : "User";
+  const userRole = me?.role ?? null;
 
   return (
-    <DashboardLayout appName={appName} userName={userName}>
+    <DashboardLayout appName={appName} userName={userName} userRole={userRole}>
       {children}
     </DashboardLayout>
   );

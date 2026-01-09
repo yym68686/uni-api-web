@@ -119,7 +119,7 @@ export default async function LandingPage() {
         </div>
       </header>
 
-      <main className="relative mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 sm:py-14">
+      <main id="main" className="relative mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 sm:py-14">
         <section className="relative">
           <div className="pointer-events-none absolute -left-6 -top-10 hidden h-40 w-40 rounded-full bg-primary/10 blur-2xl lg:block" />
           <div className="pointer-events-none absolute -right-8 top-10 hidden h-52 w-52 rounded-full bg-primary/10 blur-3xl lg:block" />
@@ -176,7 +176,7 @@ export default async function LandingPage() {
                     )}
                   >
                     <Link href="/dashboard">
-                      Open dashboard
+                      {t(locale, "landing.openDashboard")}
                       <ArrowRight className="h-4 w-4" />
                     </Link>
                   </Button>

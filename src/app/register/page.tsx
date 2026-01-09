@@ -27,7 +27,7 @@ export default async function RegisterPage({ searchParams }: RegisterPageProps) 
     <div className="min-h-dvh bg-background">
       <div className="grid min-h-dvh grid-cols-1 lg:grid-cols-2">
         <BrandPanel appName={appName} />
-        <section className="flex items-center justify-center px-6 py-12 lg:px-12">
+        <section id="main" className="flex items-center justify-center px-6 py-12 lg:px-12">
           <RegisterForm appName={appName} nextPath={next} />
         </section>
       </div>

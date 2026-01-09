@@ -67,7 +67,7 @@ export async function ModelsContent({ locale }: ModelsContentProps) {
             </TableHeader>
             <TableBody>
               {items.map((m) => (
-                <TableRow key={m.model} className="hover:bg-muted/50">
+                <TableRow key={m.model}>
                   <TableCell>
                     <CopyableModelId value={m.model} />
                   </TableCell>
@@ -86,4 +86,3 @@ export async function ModelsContent({ locale }: ModelsContentProps) {
     </Card>
   );
 }
-

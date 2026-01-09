@@ -67,10 +67,10 @@ export async function AdminAnnouncementsContent({ locale, isAdmin }: AdminAnnoun
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Title</TableHead>
-                <TableHead>Meta</TableHead>
-                <TableHead>Level</TableHead>
-                <TableHead>Created</TableHead>
+                <TableHead>{t(locale, "admin.ann.table.title")}</TableHead>
+                <TableHead>{t(locale, "admin.ann.table.meta")}</TableHead>
+                <TableHead>{t(locale, "admin.ann.table.level")}</TableHead>
+                <TableHead>{t(locale, "admin.ann.table.created")}</TableHead>
                 {isAdmin ? <TableHead className="w-12 text-right">{t(locale, "keys.table.actions")}</TableHead> : null}
               </TableRow>
             </TableHeader>
