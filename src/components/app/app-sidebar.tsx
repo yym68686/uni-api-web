@@ -57,13 +57,13 @@ export function AppSidebarContent({ appName, onNavigate }: AppSidebarContentProp
       <div className="border-b border-border p-4">
         <Link
           href="/"
-          className="group flex items-center gap-3"
+          className="group flex w-full items-center justify-center"
           onClick={onNavigate}
         >
           <BrandWordmark
             name={appName}
             className={cn(
-              "text-base",
+              "text-lg",
               "transition-colors duration-200 group-hover:text-foreground"
             )}
           />
