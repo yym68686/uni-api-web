@@ -113,7 +113,7 @@ export function ApiKeysPageClient({ initialItems }: ApiKeysPageClientProps) {
               <div className="p-6">
                 <div className="rounded-xl border border-dashed border-border bg-muted/10 p-10 text-center">
                   <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl border border-border bg-background/50">
-                    <KeyRound className="h-6 w-6 text-muted-foreground" />
+                    <KeyRound className="h-6 w-6 text-muted-foreground uai-float-sm" />
                   </div>
                   <div className="mt-4 text-base font-semibold text-foreground">
                     {t("keys.empty.title")}

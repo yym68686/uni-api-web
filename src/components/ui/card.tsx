@@ -8,7 +8,9 @@ export function Card({ className, ...props }: CardProps) {
   return (
     <div
       className={cn(
-        "rounded-xl border border-border bg-card text-card-foreground",
+        "relative rounded-xl border border-border bg-card text-card-foreground",
+        "after:pointer-events-none after:absolute after:inset-x-0 after:top-0 after:h-px",
+        "after:bg-gradient-to-r after:from-transparent after:via-foreground/14 after:to-transparent",
         className
       )}
       {...props}
@@ -56,4 +58,3 @@ export function CardFooter({ className, ...props }: CardFooterProps) {
     <div className={cn("flex items-center p-6 pt-0", className)} {...props} />
   );
 }
-

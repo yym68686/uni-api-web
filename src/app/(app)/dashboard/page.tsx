@@ -1,4 +1,4 @@
-import { Activity, CreditCard, KeyRound, Wallet } from "lucide-react";
+import { Activity, CreditCard, KeyRound, Megaphone, Wallet } from "lucide-react";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatsCard } from "@/components/app/stats-card";
@@ -169,7 +169,12 @@ export default async function DashboardPage() {
             <CardContent>
               {announcements.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-border bg-background/20 p-6 text-center text-sm text-muted-foreground">
-                  {t(locale, "dashboard.ann.empty")}
+                  <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl border border-border bg-background/40">
+                    <Megaphone className="h-6 w-6 text-muted-foreground uai-float-sm" />
+                  </div>
+                  <div className="mt-3">
+                    {t(locale, "dashboard.ann.empty")}
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-3">

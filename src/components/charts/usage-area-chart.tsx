@@ -14,6 +14,7 @@ import {
 import type { DailyUsagePoint } from "@/lib/types";
 import { formatCompactNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/components/i18n/i18n-provider";
 
 interface UsageAreaChartProps {
   data: DailyUsagePoint[];
@@ -31,20 +32,33 @@ interface TooltipProps {
 }
 
 function UsageTooltip({ active, payload, label }: TooltipProps) {
+  const { t } = useI18n();
   if (!active || !payload?.length || !label) return null;
   const point = payload[0]?.payload;
   if (!point) return null;
 
   return (
-    <div className="rounded-xl border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-md">
-      <div className="font-mono text-muted-foreground">{label}</div>
-      <div className="mt-1 grid grid-cols-2 gap-x-4 gap-y-1">
-        <div className="text-muted-foreground">Requests</div>
-        <div className="text-right font-mono">
+    <div
+      className={cn(
+        "rounded-xl border border-border bg-background/70 text-xs text-foreground",
+        "backdrop-blur-md shadow-lg",
+        "px-3 py-2"
+      )}
+    >
+      <div className="font-mono tabular-nums text-muted-foreground">{label}</div>
+      <div className="mt-2 grid grid-cols-[1fr_auto] gap-x-5 gap-y-1.5">
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <span className="h-1.5 w-1.5 rounded-full bg-primary shadow-[0_0_0_3px_oklch(var(--primary)/0.12)]" />
+          {t("chart.tooltip.requests")}
+        </div>
+        <div className="text-right font-mono tabular-nums">
           {formatCompactNumber(point.requests)}
         </div>
-        <div className="text-muted-foreground">Tokens</div>
-        <div className="text-right font-mono">
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <span className="h-1.5 w-1.5 rounded-full bg-foreground/80 shadow-[0_0_0_3px_oklch(var(--foreground)/0.08)]" />
+          {t("chart.tooltip.tokens")}
+        </div>
+        <div className="text-right font-mono tabular-nums">
           {formatCompactNumber(point.totalTokens)}
         </div>
       </div>
@@ -54,6 +68,11 @@ function UsageTooltip({ active, payload, label }: TooltipProps) {
 
 export function UsageAreaChart({ data, className }: UsageAreaChartProps) {
   const gradientId = React.useId();
+  const strokeStyle = React.useMemo<React.CSSProperties>(() => {
+    return {
+      filter: "drop-shadow(0 0 8px oklch(var(--primary)/0.35))"
+    };
+  }, []);
 
   return (
     <div className={cn("h-72 w-full", className)}>
@@ -84,12 +103,20 @@ export function UsageAreaChart({ data, className }: UsageAreaChartProps) {
             fontSize={12}
             tickFormatter={formatCompactNumber}
           />
-          <Tooltip content={<UsageTooltip />} cursor={{ stroke: "oklch(var(--border))", strokeWidth: 1 }} />
+          <Tooltip
+            content={<UsageTooltip />}
+            cursor={{
+              stroke: "oklch(var(--border))",
+              strokeWidth: 1,
+              strokeDasharray: "4 4"
+            }}
+          />
           <Area
             type="monotone"
             dataKey="requests"
             stroke="oklch(var(--primary))"
             strokeWidth={2}
+            style={strokeStyle}
             fill={`url(#${gradientId})`}
             dot={false}
             activeDot={{ r: 4 }}

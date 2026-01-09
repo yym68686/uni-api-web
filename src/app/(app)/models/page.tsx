@@ -58,7 +58,10 @@ export default async function ModelsPage() {
         <CardContent>
           {items.length === 0 ? (
             <div className="rounded-xl border border-dashed border-border bg-muted/10 p-8 text-center text-sm text-muted-foreground">
-              {t(locale, "models.empty")}
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl border border-border bg-background/50">
+                <Boxes className="h-6 w-6 text-muted-foreground uai-float-sm" />
+              </div>
+              <div className="mt-3">{t(locale, "models.empty")}</div>
             </div>
           ) : (
             <Table>
@@ -75,14 +78,14 @@ export default async function ModelsPage() {
                       <TableCell>
                         <CopyableModelId value={m.model} />
                       </TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">
+                      <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
                         {formatUsdPerM(m.inputUsdPerM)}
                       </TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">
-                      {formatUsdPerM(m.outputUsdPerM)}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                      <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
+                        {formatUsdPerM(m.outputUsdPerM)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
               </TableBody>
             </Table>
           )}

@@ -65,15 +65,15 @@ export default async function ProfilePage() {
               </div>
               <div className="rounded-xl border border-border bg-background/35 p-4">
                 <div className="text-xs text-muted-foreground">{t(locale, "profile.field.balance")}</div>
-                <div className="mt-1 font-mono text-sm text-foreground">{me.balance}</div>
+                <div className="mt-1 font-mono tabular-nums text-sm text-foreground">{me.balance}</div>
               </div>
               <div className="rounded-xl border border-border bg-background/35 p-4">
                 <div className="text-xs text-muted-foreground">{t(locale, "profile.field.created")}</div>
-                <div className="mt-1 font-mono text-xs text-foreground">{formatUtcDateTime(me.createdAt)}</div>
+                <div className="mt-1 font-mono tabular-nums text-xs text-foreground">{formatUtcDateTime(me.createdAt)}</div>
               </div>
               <div className="rounded-xl border border-border bg-background/35 p-4">
                 <div className="text-xs text-muted-foreground">{t(locale, "profile.field.lastLogin")}</div>
-                <div className="mt-1 font-mono text-xs text-foreground">{formatUtcDateTime(me.lastLoginAt)}</div>
+                <div className="mt-1 font-mono tabular-nums text-xs text-foreground">{formatUtcDateTime(me.lastLoginAt)}</div>
               </div>
               <div className="rounded-xl border border-border bg-background/35 p-4 sm:col-span-2">
                 <div className="text-xs text-muted-foreground">{t(locale, "profile.field.workspace")}</div>

@@ -117,6 +117,43 @@
     }
   }
 
+  @keyframes uai-float-sm {
+    0%,
+    100% {
+      transform: translate3d(0, 0, 0);
+    }
+    50% {
+      transform: translate3d(0, -6px, 0);
+    }
+  }
+
+  @keyframes uai-noise-drift {
+    0%,
+    100% {
+      transform: translate3d(0, 0, 0);
+    }
+    50% {
+      transform: translate3d(-1%, 0.5%, 0);
+    }
+  }
+
+  .uai-float-sm {
+    animation: uai-float-sm 6.5s ease-in-out infinite;
+    will-change: transform;
+  }
+
+  .uai-noise-drift {
+    animation: uai-noise-drift 8.5s linear infinite;
+    will-change: transform;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .uai-float-sm,
+    .uai-noise-drift {
+      animation: none;
+    }
+  }
+
   .uai-brand-panel {
     background-image:
       radial-gradient(
@@ -222,6 +259,8 @@
     background-size: 260px 260px;
     mix-blend-mode: overlay;
     opacity: 0.14;
+    animation: uai-noise-drift 9.5s linear infinite;
+    will-change: transform;
   }
 
   .uai-landing-blob {

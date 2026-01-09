@@ -81,7 +81,10 @@ export default async function LogsPage() {
         <CardContent>
           {items.length === 0 ? (
             <div className="rounded-xl border border-dashed border-border bg-muted/10 p-8 text-center text-sm text-muted-foreground">
-              {t(locale, "logs.empty")}
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl border border-border bg-background/50">
+                <ScrollText className="h-6 w-6 text-muted-foreground uai-float-sm" />
+              </div>
+              <div className="mt-3">{t(locale, "logs.empty")}</div>
             </div>
           ) : (
             <Table>
@@ -101,31 +104,31 @@ export default async function LogsPage() {
               <TableBody>
                 {items.map((r) => (
                   <TableRow key={r.id} className="hover:bg-muted/50">
-                    <TableCell className="font-mono text-xs text-muted-foreground">
+                    <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
                       {formatUtcDateTime(r.createdAt)}
                     </TableCell>
                     <TableCell>
                       <CopyableModelId value={r.model} />
                     </TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">
+                    <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
                       {r.inputTokens}
                     </TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">
+                    <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
                       {r.outputTokens}
                     </TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">
+                    <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
                       {formatMs(r.totalDurationMs)}
                     </TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">
+                    <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
                       {formatMs(r.ttftMs)}
                     </TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">
+                    <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
                       {formatTps(r.tps)}
                     </TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">
+                    <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
                       {formatCostUsd(r.costUsd)}
                     </TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">
+                    <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
                       {r.sourceIp ?? "—"}
                     </TableCell>
                   </TableRow>

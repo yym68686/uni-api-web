@@ -43,7 +43,7 @@ export function StatsCard({
       </div>
       <div className="mt-4">
         <div className="text-2xl font-bold tracking-tight text-foreground">
-          {value}
+          <span className="tabular-nums">{value}</span>
         </div>
         {trend ? (
           <p className="mt-1 text-xs text-success font-mono">{trend}</p>

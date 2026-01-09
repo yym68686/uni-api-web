@@ -133,17 +133,17 @@ export default async function AdminUsersPage() {
                           {u.bannedAt ? t(locale, "admin.users.status.banned") : t(locale, "admin.users.status.active")}
                         </Badge>
                       </TableCell>
-                      <TableCell className="font-mono text-sm">{formatBalance(locale, u.balance)}</TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">
+                      <TableCell className="font-mono tabular-nums text-sm">{formatBalance(locale, u.balance)}</TableCell>
+                      <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
                         {u.apiKeysActive}/{u.apiKeysTotal}
                       </TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">
+                      <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
                         {u.sessionsActive}
                       </TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">
+                      <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
                         {formatDateTime(locale, u.lastLoginAt ?? null)}
                       </TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">
+                      <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
                         {formatDateTime(locale, u.createdAt)}
                       </TableCell>
                       <TableCell className="p-2 text-right">

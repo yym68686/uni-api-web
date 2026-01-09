@@ -161,7 +161,7 @@ export function CreateKeyDialog({
           <div className="space-y-3">
             <div className="rounded-xl border border-border bg-muted/30 p-3">
               <div className="text-xs text-muted-foreground">{t("keys.dialog.yourKey")}</div>
-              <div className="mt-2 break-all font-mono text-sm">{createdKey}</div>
+              <div className="mt-2 break-all font-mono tabular-nums tracking-wide text-sm">{createdKey}</div>
             </div>
             <DialogFooter>
               <Button

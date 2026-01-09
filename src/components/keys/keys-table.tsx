@@ -160,9 +160,9 @@ export function KeysTable({
                 return (
                   <TableRow key={k.id}>
                     <TableCell className="font-medium">{k.name}</TableCell>
-                    <TableCell className="font-mono text-xs">
+                    <TableCell className="font-mono text-xs tabular-nums">
                       <div className="flex items-center gap-2">
-                        <span className="truncate">{k.prefix}</span>
+                        <span className="truncate tracking-wide">{k.prefix}</span>
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Button
@@ -186,13 +186,13 @@ export function KeysTable({
                         </Tooltip>
                       </div>
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground font-mono">
+                    <TableCell className="text-xs text-muted-foreground font-mono tabular-nums">
                       {formatDateTime(locale, k.lastUsedAt)}
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground font-mono">
+                    <TableCell className="text-xs text-muted-foreground font-mono tabular-nums">
                       {formatSpendUsd(k.spendUsd)}
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground font-mono">
+                    <TableCell className="text-xs text-muted-foreground font-mono tabular-nums">
                       {formatDateTime(locale, k.createdAt)}
                     </TableCell>
                     <TableCell>
