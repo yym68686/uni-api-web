@@ -8,6 +8,7 @@ const buttonVariants = cva(
   cn(
     "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl text-sm font-medium",
     "ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+    "uai-click-feedback",
     "disabled:pointer-events-none disabled:opacity-50"
   ),
   {
@@ -56,4 +57,3 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   }
 );
 Button.displayName = "Button";
-

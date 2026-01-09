@@ -177,6 +177,24 @@
     will-change: transform;
   }
 
+  .uai-click-feedback {
+    transition: transform 120ms cubic-bezier(0.16, 1, 0.3, 1);
+    will-change: transform;
+  }
+
+  .uai-click-feedback:active {
+    transform: scale(0.97);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .uai-click-feedback {
+      transition: none;
+    }
+    .uai-click-feedback:active {
+      transform: none;
+    }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .uai-border-beam::before {
       animation: none;
