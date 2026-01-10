@@ -1,6 +1,7 @@
 import { Clock, ScrollText } from "lucide-react";
 
 import { CopyableModelId } from "@/components/models/copyable-model-id";
+import { ClientDateTime } from "@/components/common/client-datetime";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
@@ -14,12 +15,6 @@ function isLogsListResponse(value: unknown): value is LogsListResponse {
   if (!("items" in value)) return false;
   const items = (value as { items?: unknown }).items;
   return Array.isArray(items);
-}
-
-function formatUtcDateTime(value: string) {
-  const dt = new Date(value);
-  if (Number.isNaN(dt.getTime())) return "—";
-  return dt.toISOString().replace("T", " ").slice(0, 19);
 }
 
 function formatMs(value: number) {
@@ -98,7 +93,7 @@ export async function LogsContent({ locale }: LogsContentProps) {
               {items.map((r) => (
                 <TableRow key={r.id} className="hover:bg-muted/50">
                   <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
-                    {formatUtcDateTime(r.createdAt)}
+                    <ClientDateTime value={r.createdAt} locale={locale} timeStyle="medium" />
                   </TableCell>
                   <TableCell>
                     <CopyableModelId value={r.model} />
@@ -133,4 +128,3 @@ export async function LogsContent({ locale }: LogsContentProps) {
     </Card>
   );
 }
-

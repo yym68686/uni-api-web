@@ -1,6 +1,7 @@
 import { Users } from "lucide-react";
 
 import { UserRowActions } from "@/components/admin/user-row-actions";
+import { ClientDateTime } from "@/components/common/client-datetime";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -14,13 +15,6 @@ function isAdminUsersListResponse(value: unknown): value is AdminUsersListRespon
   if (!("items" in value)) return false;
   const items = (value as { items?: unknown }).items;
   return Array.isArray(items);
-}
-
-function formatDateTime(locale: string, value: string | null | undefined) {
-  if (!value) return "—";
-  const dt = new Date(value);
-  if (Number.isNaN(dt.getTime())) return value;
-  return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(dt);
 }
 
 function formatBalance(locale: string, value: number) {
@@ -117,10 +111,10 @@ export async function AdminUsersContent({ locale, currentUserId, currentUserRole
                     {u.sessionsActive}
                   </TableCell>
                   <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
-                    {formatDateTime(locale, u.lastLoginAt ?? null)}
+                    <ClientDateTime value={u.lastLoginAt ?? null} locale={locale} />
                   </TableCell>
                   <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
-                    {formatDateTime(locale, u.createdAt)}
+                    <ClientDateTime value={u.createdAt} locale={locale} />
                   </TableCell>
                   <TableCell className="p-2 text-right">
                     <UserRowActions user={u} currentUserId={currentUserId} currentUserRole={currentUserRole} />

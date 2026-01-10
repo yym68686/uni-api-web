@@ -1,16 +1,11 @@
 import { Megaphone } from "lucide-react";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ClientDateTime } from "@/components/common/client-datetime";
 import { cn } from "@/lib/utils";
 import type { Locale } from "@/lib/i18n/messages";
 import { t } from "@/lib/i18n/messages";
 import { getDashboardAnnouncements } from "./dashboard-data";
-
-function formatUtcDateTime(value: string) {
-  const dt = new Date(value);
-  if (Number.isNaN(dt.getTime())) return "—";
-  return dt.toISOString().replace("T", " ").slice(0, 16);
-}
 
 interface DashboardAnnouncementsProps {
   locale: Locale;
@@ -45,7 +40,7 @@ export async function DashboardAnnouncements({ locale }: DashboardAnnouncementsP
               >
                 <div className="text-sm font-medium text-foreground">{a.title}</div>
                 <div className="mt-1 font-mono tabular-nums text-xs text-muted-foreground">
-                  {formatUtcDateTime(a.createdAt)} · {a.meta}
+                  <ClientDateTime value={a.createdAt} locale={locale} /> · {a.meta}
                 </div>
               </div>
             ))}
@@ -55,4 +50,3 @@ export async function DashboardAnnouncements({ locale }: DashboardAnnouncementsP
     </Card>
   );
 }
-

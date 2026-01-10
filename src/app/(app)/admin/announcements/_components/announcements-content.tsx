@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import { ClientDateTime } from "@/components/common/client-datetime";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
@@ -23,12 +24,6 @@ async function getAnnouncements() {
   const json: unknown = await res.json();
   if (!isAnnouncementsListResponse(json)) return null;
   return json.items;
-}
-
-function formatCreatedAt(locale: string, createdAt: string) {
-  const dt = new Date(createdAt);
-  if (Number.isNaN(dt.getTime())) return createdAt;
-  return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(dt);
 }
 
 function levelBadgeVariant(level: string) {
@@ -85,7 +80,7 @@ export async function AdminAnnouncementsContent({ locale, isAdmin }: AdminAnnoun
                     </Badge>
                   </TableCell>
                   <TableCell className="font-mono text-xs text-muted-foreground">
-                    {formatCreatedAt(locale, a.createdAt)}
+                    <ClientDateTime value={a.createdAt} locale={locale} />
                   </TableCell>
                   {isAdmin ? (
                     <TableCell className="p-2 text-right">

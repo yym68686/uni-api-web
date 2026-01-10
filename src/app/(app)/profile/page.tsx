@@ -1,6 +1,7 @@
 import { Shield, User } from "lucide-react";
 
 import { DeleteAccountButton } from "@/components/profile/delete-account-button";
+import { ClientDateTime } from "@/components/common/client-datetime";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { getRequestLocale } from "@/lib/i18n/server";
@@ -8,13 +9,6 @@ import { t } from "@/lib/i18n/messages";
 import { getCurrentUser } from "@/lib/current-user";
 
 export const dynamic = "force-dynamic";
-
-function formatUtcDateTime(value: string | null) {
-  if (!value) return "—";
-  const dt = new Date(value);
-  if (Number.isNaN(dt.getTime())) return "—";
-  return dt.toISOString().replace("T", " ").slice(0, 16);
-}
 
 function roleVariant(role: string): "outline" | "success" | "warning" {
   if (role === "owner") return "warning";
@@ -69,11 +63,15 @@ export default async function ProfilePage() {
               </div>
               <div className="rounded-xl border border-border bg-background/35 p-4">
                 <div className="text-xs text-muted-foreground">{t(locale, "profile.field.created")}</div>
-                <div className="mt-1 font-mono tabular-nums text-xs text-foreground">{formatUtcDateTime(me.createdAt)}</div>
+                <div className="mt-1 text-xs text-foreground">
+                  <ClientDateTime value={me.createdAt} locale={locale} />
+                </div>
               </div>
               <div className="rounded-xl border border-border bg-background/35 p-4">
                 <div className="text-xs text-muted-foreground">{t(locale, "profile.field.lastLogin")}</div>
-                <div className="mt-1 font-mono tabular-nums text-xs text-foreground">{formatUtcDateTime(me.lastLoginAt)}</div>
+                <div className="mt-1 text-xs text-foreground">
+                  <ClientDateTime value={me.lastLoginAt} locale={locale} />
+                </div>
               </div>
               <div className="rounded-xl border border-border bg-background/35 p-4 sm:col-span-2">
                 <div className="text-xs text-muted-foreground">{t(locale, "profile.field.workspace")}</div>

@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import { ClientDateTime } from "@/components/common/client-datetime";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
@@ -12,12 +13,6 @@ function isLlmChannelsListResponse(value: unknown): value is LlmChannelsListResp
   if (!("items" in value)) return false;
   const items = (value as { items?: unknown }).items;
   return Array.isArray(items);
-}
-
-function formatDateTime(locale: string, value: string) {
-  const dt = new Date(value);
-  if (Number.isNaN(dt.getTime())) return value;
-  return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(dt);
 }
 
 async function getChannels() {
@@ -91,8 +86,8 @@ export async function AdminChannelsContent({ locale }: AdminChannelsContentProps
                       </div>
                     )}
                   </TableCell>
-                  <TableCell className="font-mono text-xs text-muted-foreground">
-                    {formatDateTime(locale, c.updatedAt)}
+                  <TableCell className="text-xs text-muted-foreground">
+                    <ClientDateTime value={c.updatedAt} locale={locale} />
                   </TableCell>
                   <TableCell className="p-2 text-right">
                     <ChannelRowActions channel={c} />
