@@ -17,7 +17,6 @@ export default function AppError({ error, reset }: AppErrorProps) {
   const { t } = useI18n();
 
   React.useEffect(() => {
-    // eslint-disable-next-line no-console
     console.error(error);
   }, [error]);
 
@@ -50,4 +49,3 @@ export default function AppError({ error, reset }: AppErrorProps) {
     </div>
   );
 }
-

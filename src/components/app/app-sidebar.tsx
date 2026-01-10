@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import * as React from "react";
 import { Boxes, KeyRound, LayoutDashboard, Megaphone, PlugZap, ScrollText, Settings, SlidersHorizontal, Users, type LucideIcon } from "lucide-react";
 
 import { cn } from "@/lib/utils";

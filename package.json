@@ -7,7 +7,7 @@
     "dev": "next dev",
     "build": "NEXT_DISABLE_TURBOPACK=1 next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
