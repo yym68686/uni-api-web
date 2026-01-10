@@ -631,15 +631,53 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
         res = await client.send(req_up, stream=True)
         content_type = res.headers.get("content-type") or "application/json"
         ok = res.status_code < 400
+        input_tokens = 0
+        output_tokens = 0
+        total_tokens = 0
 
         async def iterator():
-            nonlocal ttft_ms, total_ms
+            nonlocal ttft_ms, total_ms, input_tokens, output_tokens, total_tokens
             first = None
+            sse_buf = bytearray()
             try:
                 async for chunk in res.aiter_bytes():
                     if first is None:
                         first = time.perf_counter()
                         ttft_ms = int((first - started) * 1000)
+                    if ok and content_type.startswith("text/event-stream"):
+                        sse_buf.extend(chunk)
+                        while True:
+                            idx = sse_buf.find(b"\n")
+                            if idx < 0:
+                                break
+                            raw_line = bytes(sse_buf[:idx]).rstrip(b"\r")
+                            del sse_buf[: idx + 1]
+                            line = raw_line.strip()
+                            if not line.startswith(b"data:"):
+                                continue
+                            data = line[len(b"data:") :].strip()
+                            if not data or data == b"[DONE]":
+                                continue
+                            try:
+                                obj = json.loads(data.decode("utf-8"))
+                            except Exception:
+                                continue
+                            if not isinstance(obj, dict):
+                                continue
+                            usage = obj.get("usage")
+                            if not isinstance(usage, dict):
+                                continue
+                            try:
+                                prompt = int(usage.get("prompt_tokens") or 0)
+                                completion = int(usage.get("completion_tokens") or 0)
+                                total_raw = usage.get("total_tokens")
+                                total = int(total_raw) if total_raw is not None else 0
+                                output = max(total - prompt, 0) if total > 0 else completion
+                                input_tokens = prompt
+                                output_tokens = output
+                                total_tokens = total if total > 0 else (input_tokens + output_tokens)
+                            except Exception:
+                                continue
                     yield chunk
             except (httpx.ReadError, httpx.StreamError):
                 # Treat upstream disconnects/cancellation as a normal stream termination.
@@ -656,6 +694,27 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
                     pass
                 try:
                     async with SessionLocal() as s:
+                        cost_micros = 0
+                        if ok and total_tokens > 0:
+                            cfg = await get_model_config(s, org_id=membership.org_id, model_id=model_id.strip())
+                            from app.storage.models_db import default_price_for_model
+
+                            default_in, default_out = default_price_for_model(model_id.strip())
+                            in_price = (
+                                cfg.input_usd_micros_per_m
+                                if (cfg and cfg.input_usd_micros_per_m is not None)
+                                else default_in
+                            )
+                            out_price = (
+                                cfg.output_usd_micros_per_m
+                                if (cfg and cfg.output_usd_micros_per_m is not None)
+                                else default_out
+                            )
+                            if in_price is not None and input_tokens > 0:
+                                cost_micros += int((input_tokens * int(in_price) + 999_999) // 1_000_000)
+                            if out_price is not None and output_tokens > 0:
+                                cost_micros += int((output_tokens * int(out_price) + 999_999) // 1_000_000)
+
                         await record_usage_event(
                             s,
                             org_id=membership.org_id,
@@ -664,10 +723,10 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
                             model_id=model_id.strip(),
                             ok=ok,
                             status_code=int(res.status_code),
-                            input_tokens=0,
-                            output_tokens=0,
-                            total_tokens=0,
-                            cost_usd_micros=0,
+                            input_tokens=input_tokens,
+                            output_tokens=output_tokens,
+                            total_tokens=total_tokens,
+                            cost_usd_micros=cost_micros,
                             total_duration_ms=total_ms,
                             ttft_ms=ttft_ms,
                             source_ip=source_ip,
@@ -708,8 +767,12 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
             usage = body.get("usage") if isinstance(body, dict) else None
             if isinstance(usage, dict):
                 input_tokens = int(usage.get("prompt_tokens") or 0)
-                output_tokens = int(usage.get("completion_tokens") or 0)
-                total_tokens = int(usage.get("total_tokens") or (input_tokens + output_tokens))
+                completion = int(usage.get("completion_tokens") or 0)
+                total_raw = usage.get("total_tokens")
+                total_tokens = int(total_raw) if total_raw is not None else 0
+                output_tokens = max(total_tokens - input_tokens, 0) if total_tokens > 0 else completion
+                if total_tokens <= 0:
+                    total_tokens = input_tokens + output_tokens
         except Exception:
             pass
 
