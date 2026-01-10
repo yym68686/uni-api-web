@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { Settings } from "lucide-react";
 
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeader } from "@/components/common/page-header";
 import { getCurrentUser } from "@/lib/current-user";
 import { getRequestLocale } from "@/lib/i18n/server";
 import { t } from "@/lib/i18n/messages";
@@ -18,12 +19,10 @@ export default async function AdminSettingsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">{t(locale, "app.admin.settings")}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {t(locale, "admin.settings.subtitle", { current })}
-        </p>
-      </div>
+      <PageHeader
+        title={t(locale, "app.admin.settings")}
+        description={t(locale, "admin.settings.subtitle", { current })}
+      />
 
       {!isAdmin ? (
         <Card>
@@ -43,4 +42,3 @@ export default async function AdminSettingsPage() {
     </div>
   );
 }
-

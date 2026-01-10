@@ -1,4 +1,7 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Settings } from "lucide-react";
+
+import { EmptyState } from "@/components/common/empty-state";
+import { Card, CardContent } from "@/components/ui/card";
 import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
 import type { Locale } from "@/lib/i18n/messages";
 import { t } from "@/lib/i18n/messages";
@@ -35,21 +38,19 @@ export async function AdminSettingsContent({ locale }: AdminSettingsContentProps
   if (!settings) {
     return (
       <Card>
-        <CardHeader>
-          <CardTitle>{t(locale, "admin.settings.card.title")}</CardTitle>
-          <CardDescription>{t(locale, "admin.settings.loadFailed")}</CardDescription>
-        </CardHeader>
+        <CardContent className="p-6">
+          <EmptyState
+            icon={<Settings className="h-6 w-6 text-muted-foreground uai-float-sm" />}
+            title={t(locale, "admin.settings.loadFailed")}
+          />
+        </CardContent>
       </Card>
     );
   }
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>{t(locale, "admin.settings.card.title")}</CardTitle>
-        <CardDescription>{t(locale, "admin.settings.card.desc")}</CardDescription>
-      </CardHeader>
-      <CardContent>
+      <CardContent className="p-6">
         <AdminSettingsPanel initialRegistrationEnabled={settings.registrationEnabled} />
       </CardContent>
     </Card>

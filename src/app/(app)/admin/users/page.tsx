@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { Shield } from "lucide-react";
 
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeader } from "@/components/common/page-header";
 import { getCurrentUser } from "@/lib/current-user";
 import { t } from "@/lib/i18n/messages";
 import { getRequestLocale } from "@/lib/i18n/server";
@@ -22,12 +23,7 @@ export default async function AdminUsersPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{t(locale, "app.admin.users")}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">{t(locale, "admin.users.subtitle", { current })}</p>
-        </div>
-      </div>
+      <PageHeader title={t(locale, "app.admin.users")} description={t(locale, "admin.users.subtitle", { current })} />
 
       {!isAdmin ? (
         <Card>

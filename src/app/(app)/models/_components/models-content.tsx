@@ -1,7 +1,8 @@
 import { Boxes } from "lucide-react";
 
 import { CopyableModelId } from "@/components/models/copyable-model-id";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { EmptyState } from "@/components/common/empty-state";
+import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
 import type { Locale } from "@/lib/i18n/messages";
@@ -41,22 +42,15 @@ export async function ModelsContent({ locale }: ModelsContentProps) {
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Boxes className="h-5 w-5 text-muted-foreground" />
-          {t(locale, "models.card.title")}
-        </CardTitle>
-        <CardDescription>{t(locale, "models.card.desc")}</CardDescription>
-      </CardHeader>
-      <CardContent>
-        {items.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-border bg-muted/10 p-8 text-center text-sm text-muted-foreground">
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl border border-border bg-background/50">
-              <Boxes className="h-6 w-6 text-muted-foreground uai-float-sm" />
-            </div>
-            <div className="mt-3">{t(locale, "models.empty")}</div>
-          </div>
-        ) : (
+      {items.length === 0 ? (
+        <CardContent className="p-6">
+          <EmptyState
+            icon={<Boxes className="h-6 w-6 text-muted-foreground uai-float-sm" />}
+            title={t(locale, "models.empty")}
+          />
+        </CardContent>
+      ) : (
+        <CardContent className="p-0">
           <Table>
             <TableHeader>
               <TableRow>
@@ -81,8 +75,8 @@ export async function ModelsContent({ locale }: ModelsContentProps) {
               ))}
             </TableBody>
           </Table>
-        )}
-      </CardContent>
+        </CardContent>
+      )}
     </Card>
   );
 }

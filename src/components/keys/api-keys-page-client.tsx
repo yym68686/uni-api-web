@@ -10,6 +10,7 @@ import { CreateKeyDialog } from "@/components/keys/create-key-dialog";
 import { KeysTable } from "@/components/keys/keys-table";
 import { Card, CardContent } from "@/components/ui/card";
 import { useI18n } from "@/components/i18n/i18n-provider";
+import { PageHeader } from "@/components/common/page-header";
 
 interface ApiKeysPageClientProps {
   initialItems: ApiKeyItem[];
@@ -87,20 +88,17 @@ export function ApiKeysPageClient({ initialItems }: ApiKeysPageClientProps) {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{t("keys.title")}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {t("keys.subtitle")}
-          </p>
-        </div>
-
-        <CreateKeyDialog
-          onCreated={onCreated}
-          triggerLabel={t("keys.create")}
-          triggerClassName={cn("rounded-xl uai-border-beam", createButtonGlow)}
-        />
-      </div>
+      <PageHeader
+        title={t("keys.title")}
+        description={t("keys.subtitle")}
+        actions={
+          <CreateKeyDialog
+            onCreated={onCreated}
+            triggerLabel={t("keys.create")}
+            triggerClassName={cn("rounded-xl uai-border-beam", createButtonGlow)}
+          />
+        }
+      />
 
       <Card>
         <CardContent className="p-0">

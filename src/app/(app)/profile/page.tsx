@@ -4,6 +4,7 @@ import { DeleteAccountButton } from "@/components/profile/delete-account-button"
 import { ClientDateTime } from "@/components/common/client-datetime";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/common/page-header";
 import { getRequestLocale } from "@/lib/i18n/server";
 import { t } from "@/lib/i18n/messages";
 import { getCurrentUser } from "@/lib/current-user";
@@ -22,10 +23,7 @@ export default async function ProfilePage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">{t(locale, "profile.title")}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">{t(locale, "profile.subtitle")}</p>
-      </div>
+      <PageHeader title={t(locale, "profile.title")} description={t(locale, "profile.subtitle")} />
 
       <Card>
         <CardHeader>

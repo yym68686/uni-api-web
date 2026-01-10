@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { getRequestLocale } from "@/lib/i18n/server";
 import { t } from "@/lib/i18n/messages";
 import { getCurrentUser } from "@/lib/current-user";
+import { PageHeader } from "@/components/common/page-header";
 import { DashboardKpis } from "./_components/dashboard-kpis";
 import { DashboardChart } from "./_components/dashboard-chart";
 import { DashboardAnnouncements } from "./_components/dashboard-announcements";
@@ -22,14 +23,7 @@ export default async function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          {t(locale, "dashboard.welcomeBack", { name: userName })}
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {t(locale, "dashboard.subtitle")}
-        </p>
-      </div>
+      <PageHeader title={t(locale, "dashboard.welcomeBack", { name: userName })} description={t(locale, "dashboard.subtitle")} />
 
       <Suspense fallback={<DashboardKpisSkeleton />}>
         <DashboardKpis locale={locale} remainingCredits={remainingCredits} />

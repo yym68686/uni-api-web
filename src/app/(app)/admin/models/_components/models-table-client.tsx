@@ -1,11 +1,13 @@
 "use client";
 
 import * as React from "react";
+import { Boxes } from "lucide-react";
 
 import { ModelRowActions } from "@/components/admin/model-row-actions";
 import { CopyableModelId } from "@/components/models/copyable-model-id";
+import { EmptyState } from "@/components/common/empty-state";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { AdminModelItem, AdminModelsListResponse } from "@/lib/types";
 import { useI18n } from "@/components/i18n/i18n-provider";
@@ -59,16 +61,12 @@ export function AdminModelsTableClient({ initialItems }: AdminModelsTableClientP
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>{t("admin.models.card.title")}</CardTitle>
-        <CardDescription>{t("admin.models.card.desc")}</CardDescription>
-      </CardHeader>
-      <CardContent>
-        {items.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-border bg-muted/10 p-8 text-center text-sm text-muted-foreground">
-            {t("admin.models.empty")}
-          </div>
-        ) : (
+      {items.length === 0 ? (
+        <CardContent className="p-6">
+          <EmptyState icon={<Boxes className="h-6 w-6 text-muted-foreground uai-float-sm" />} title={t("admin.models.empty")} />
+        </CardContent>
+      ) : (
+        <CardContent className="p-0">
           <Table>
             <TableHeader>
               <TableRow>
@@ -109,8 +107,8 @@ export function AdminModelsTableClient({ initialItems }: AdminModelsTableClientP
               ))}
             </TableBody>
           </Table>
-        )}
-      </CardContent>
+        </CardContent>
+      )}
     </Card>
   );
 }

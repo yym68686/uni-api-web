@@ -5,8 +5,9 @@ import { Users } from "lucide-react";
 
 import { UserRowActions } from "@/components/admin/user-row-actions";
 import { ClientDateTime } from "@/components/common/client-datetime";
+import { EmptyState } from "@/components/common/empty-state";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { AdminUserItem } from "@/lib/types";
 import { useI18n } from "@/components/i18n/i18n-provider";
@@ -45,19 +46,12 @@ export function AdminUsersTableClient({ initialItems, currentUserId, currentUser
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Users className="h-5 w-5 text-primary" />
-          {t("admin.users.card.title")}
-        </CardTitle>
-        <CardDescription>{t("admin.users.card.desc")}</CardDescription>
-      </CardHeader>
-      <CardContent>
-        {items.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-border bg-muted/10 p-8 text-center text-sm text-muted-foreground">
-            {t("admin.users.empty")}
-          </div>
-        ) : (
+      {items.length === 0 ? (
+        <CardContent className="p-6">
+          <EmptyState icon={<Users className="h-6 w-6 text-muted-foreground uai-float-sm" />} title={t("admin.users.empty")} />
+        </CardContent>
+      ) : (
+        <CardContent className="p-0">
           <Table>
             <TableHeader>
               <TableRow>
@@ -121,9 +115,8 @@ export function AdminUsersTableClient({ initialItems, currentUserId, currentUser
               ))}
             </TableBody>
           </Table>
-        )}
-      </CardContent>
+        </CardContent>
+      )}
     </Card>
   );
 }
-

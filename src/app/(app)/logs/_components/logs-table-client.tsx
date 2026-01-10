@@ -6,8 +6,9 @@ import { toast } from "sonner";
 
 import { CopyableModelId } from "@/components/models/copyable-model-id";
 import { ClientDateTime } from "@/components/common/client-datetime";
+import { EmptyState } from "@/components/common/empty-state";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatUsd } from "@/lib/format";
 import type { LogItem, LogsListResponse } from "@/lib/types";
@@ -96,27 +97,21 @@ export function LogsTableClient({ initialItems, pageSize }: LogsTableClientProps
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <ScrollText className="h-5 w-5 text-muted-foreground" />
-          {t("logs.card.title")}
-        </CardTitle>
-        <CardDescription className="flex items-center gap-2">
-          <Clock className="h-4 w-4 text-muted-foreground" />
-          {t("logs.card.showing", { count: String(items.length) })}
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        {items.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-border bg-muted/10 p-8 text-center text-sm text-muted-foreground">
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl border border-border bg-background/50">
-              <ScrollText className="h-6 w-6 text-muted-foreground uai-float-sm" />
-            </div>
-            <div className="mt-3">{t("logs.empty")}</div>
+      {items.length === 0 ? (
+        <CardContent className="p-6">
+          <EmptyState
+            icon={<ScrollText className="h-6 w-6 text-muted-foreground uai-float-sm" />}
+            title={t("logs.empty.title")}
+            description={t("logs.empty.desc")}
+          />
+        </CardContent>
+      ) : (
+        <CardContent className="p-0">
+          <div className="flex items-center gap-2 border-b border-border px-6 py-4 text-sm text-muted-foreground">
+            <Clock className="h-4 w-4 text-muted-foreground" />
+            {t("logs.card.showing", { count: String(items.length) })}
           </div>
-        ) : (
-          <>
-            <Table>
+          <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>{t("logs.table.time")}</TableHead>
@@ -132,7 +127,7 @@ export function LogsTableClient({ initialItems, pageSize }: LogsTableClientProps
               </TableHeader>
               <TableBody>
                 {items.map((r) => (
-                  <TableRow key={r.id} className="hover:bg-muted/50">
+                  <TableRow key={r.id}>
                     <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
                       <ClientDateTime value={r.createdAt} locale={locale} timeStyle="medium" />
                     </TableCell>
@@ -163,23 +158,22 @@ export function LogsTableClient({ initialItems, pageSize }: LogsTableClientProps
                   </TableRow>
                 ))}
               </TableBody>
-            </Table>
+          </Table>
 
-            <div className="flex justify-center py-4">
-              <Button
-                type="button"
-                variant="outline"
-                className="rounded-xl bg-transparent"
-                disabled={loadingMore || !canLoadMore}
-                onClick={() => void loadMore()}
-              >
-                {loadingMore ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                {loadingMore ? t("common.loadingMore") : t("common.loadMore")}
-              </Button>
-            </div>
-          </>
-        )}
-      </CardContent>
+          <div className="flex justify-center py-4">
+            <Button
+              type="button"
+              variant="outline"
+              className="rounded-xl bg-transparent"
+              disabled={loadingMore || !canLoadMore}
+              onClick={() => void loadMore()}
+            >
+              {loadingMore ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {loadingMore ? t("common.loadingMore") : t("common.loadMore")}
+            </Button>
+          </div>
+        </CardContent>
+      )}
     </Card>
   );
 }

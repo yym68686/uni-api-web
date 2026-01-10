@@ -1,11 +1,13 @@
 "use client";
 
 import * as React from "react";
+import { PlugZap } from "lucide-react";
 
 import { ChannelRowActions } from "@/components/admin/channel-row-actions";
 import { ClientDateTime } from "@/components/common/client-datetime";
+import { EmptyState } from "@/components/common/empty-state";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { LlmChannelItem } from "@/lib/types";
 import { useI18n } from "@/components/i18n/i18n-provider";
@@ -58,16 +60,15 @@ export function AdminChannelsTableClient({ initialItems }: AdminChannelsTableCli
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>{t("admin.channels.card.title")}</CardTitle>
-        <CardDescription>{t("admin.channels.card.desc")}</CardDescription>
-      </CardHeader>
-      <CardContent>
-        {items.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-border bg-muted/10 p-8 text-center text-sm text-muted-foreground">
-            {t("admin.channels.empty")}
-          </div>
-        ) : (
+      {items.length === 0 ? (
+        <CardContent className="p-6">
+          <EmptyState
+            icon={<PlugZap className="h-6 w-6 text-muted-foreground uai-float-sm" />}
+            title={t("admin.channels.empty")}
+          />
+        </CardContent>
+      ) : (
+        <CardContent className="p-0">
           <Table>
             <TableHeader>
               <TableRow>
@@ -113,8 +114,8 @@ export function AdminChannelsTableClient({ initialItems }: AdminChannelsTableCli
               ))}
             </TableBody>
           </Table>
-        )}
-      </CardContent>
+        </CardContent>
+      )}
     </Card>
   );
 }
