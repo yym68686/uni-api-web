@@ -2,11 +2,20 @@ import * as React from "react";
 
 import { cn } from "@/lib/utils";
 
-interface TableProps extends React.TableHTMLAttributes<HTMLTableElement> {}
+type TableVariant = "default" | "card";
 
-export function Table({ className, ...props }: TableProps) {
+interface TableProps extends React.TableHTMLAttributes<HTMLTableElement> {
+  variant?: TableVariant;
+}
+
+export function Table({ className, variant = "default", ...props }: TableProps) {
   return (
-    <div className="scrollbar-hide w-full overflow-auto rounded-xl border border-border">
+    <div
+      className={cn(
+        "scrollbar-hide w-full overflow-auto rounded-xl",
+        variant === "default" ? "border border-border" : null
+      )}
+    >
       <table
         className={cn("w-full caption-bottom text-sm", className)}
         {...props}
@@ -47,7 +56,7 @@ export function TableHead({ className, ...props }: TableHeadProps) {
   return (
     <th
       className={cn(
-        "h-10 px-4 text-left align-middle text-xs font-semibold text-muted-foreground",
+        "h-10 whitespace-nowrap px-4 text-left align-middle text-xs font-semibold text-muted-foreground sm:px-6",
         className
       )}
       {...props}
@@ -58,7 +67,7 @@ export function TableHead({ className, ...props }: TableHeadProps) {
 interface TableCellProps extends React.TdHTMLAttributes<HTMLTableCellElement> {}
 
 export function TableCell({ className, ...props }: TableCellProps) {
-  return <td className={cn("p-4 align-middle", className)} {...props} />;
+  return <td className={cn("px-4 py-4 align-middle sm:px-6", className)} {...props} />;
 }
 
 interface TableCaptionProps extends React.HTMLAttributes<HTMLTableCaptionElement> {}

@@ -67,7 +67,7 @@ export function AdminModelsTableClient({ initialItems }: AdminModelsTableClientP
         </CardContent>
       ) : (
         <CardContent className="p-0">
-          <Table>
+          <Table variant="card">
             <TableHeader>
               <TableRow>
                 <TableHead>{t("models.table.model")}</TableHead>
@@ -100,7 +100,7 @@ export function AdminModelsTableClient({ initialItems }: AdminModelsTableClientP
                     {formatUsdPerM(m.outputUsdPerM)}
                   </TableCell>
                   <TableCell className="font-mono text-xs text-muted-foreground">{m.sources}</TableCell>
-                  <TableCell className="p-2 text-right">
+                  <TableCell className="text-right">
                     <ModelRowActions model={m} onUpdated={upsert} />
                   </TableCell>
                 </TableRow>

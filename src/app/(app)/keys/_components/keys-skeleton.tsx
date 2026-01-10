@@ -18,27 +18,25 @@ export function KeysPageSkeleton() {
 
       <Card>
         <CardContent className="p-0">
-          <div className="p-6">
-            <div className="grid grid-cols-6 gap-3 border-b border-border px-4 py-3">
-              <Skeleton className="h-4 w-24" />
-              <Skeleton className="h-4 w-28" />
-              <Skeleton className="h-4 w-24" />
-              <Skeleton className="h-4 w-24" />
-              <Skeleton className="h-4 w-24" />
-              <Skeleton className="ml-auto h-4 w-10" />
-            </div>
-            <div className="space-y-3 p-4">
-              {Array.from({ length: 6 }).map((_, idx) => (
-                <div key={idx} className="grid grid-cols-6 items-center gap-3">
-                  <Skeleton className="h-4 w-28" />
-                  <Skeleton className="h-4 w-40" />
-                  <Skeleton className="h-4 w-24" />
-                  <Skeleton className="h-4 w-20" />
-                  <Skeleton className="h-4 w-24" />
-                  <Skeleton className="ml-auto h-8 w-8 rounded-xl" />
-                </div>
-              ))}
-            </div>
+          <div className="grid grid-cols-6 gap-3 border-b border-border px-4 py-3 sm:px-6">
+            <Skeleton className="h-4 w-24" />
+            <Skeleton className="h-4 w-28" />
+            <Skeleton className="h-4 w-24" />
+            <Skeleton className="h-4 w-24" />
+            <Skeleton className="h-4 w-24" />
+            <Skeleton className="ml-auto h-4 w-10" />
+          </div>
+          <div className="space-y-3 p-4 sm:px-6">
+            {Array.from({ length: 6 }).map((_, idx) => (
+              <div key={idx} className="grid grid-cols-6 items-center gap-3">
+                <Skeleton className="h-4 w-28" />
+                <Skeleton className="h-4 w-40" />
+                <Skeleton className="h-4 w-24" />
+                <Skeleton className="h-4 w-20" />
+                <Skeleton className="h-4 w-24" />
+                <Skeleton className="ml-auto h-8 w-8 rounded-xl" />
+              </div>
+            ))}
           </div>
         </CardContent>
       </Card>

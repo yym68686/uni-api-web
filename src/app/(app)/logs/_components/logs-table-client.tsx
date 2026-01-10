@@ -107,57 +107,57 @@ export function LogsTableClient({ initialItems, pageSize }: LogsTableClientProps
         </CardContent>
       ) : (
         <CardContent className="p-0">
-          <div className="flex items-center gap-2 border-b border-border px-6 py-4 text-sm text-muted-foreground">
+          <div className="flex items-center gap-2 border-b border-border px-4 py-4 text-sm text-muted-foreground sm:px-6">
             <Clock className="h-4 w-4 text-muted-foreground" />
             {t("logs.card.showing", { count: String(items.length) })}
           </div>
-          <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t("logs.table.time")}</TableHead>
-                  <TableHead>{t("logs.table.model")}</TableHead>
-                  <TableHead>{t("logs.table.input")}</TableHead>
-                  <TableHead>{t("logs.table.output")}</TableHead>
-                  <TableHead>{t("logs.table.total")}</TableHead>
-                  <TableHead>{t("logs.table.ttft")}</TableHead>
-                  <TableHead>{t("logs.table.tps")}</TableHead>
-                  <TableHead>{t("logs.table.cost")}</TableHead>
-                  <TableHead>{t("logs.table.ip")}</TableHead>
+          <Table variant="card">
+            <TableHeader>
+              <TableRow>
+                <TableHead>{t("logs.table.time")}</TableHead>
+                <TableHead>{t("logs.table.model")}</TableHead>
+                <TableHead>{t("logs.table.input")}</TableHead>
+                <TableHead>{t("logs.table.output")}</TableHead>
+                <TableHead>{t("logs.table.total")}</TableHead>
+                <TableHead>{t("logs.table.ttft")}</TableHead>
+                <TableHead>{t("logs.table.tps")}</TableHead>
+                <TableHead>{t("logs.table.cost")}</TableHead>
+                <TableHead>{t("logs.table.ip")}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {items.map((r) => (
+                <TableRow key={r.id}>
+                  <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
+                    <ClientDateTime value={r.createdAt} locale={locale} timeStyle="medium" />
+                  </TableCell>
+                  <TableCell>
+                    <CopyableModelId value={r.model} />
+                  </TableCell>
+                  <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
+                    {r.inputTokens}
+                  </TableCell>
+                  <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
+                    {r.outputTokens}
+                  </TableCell>
+                  <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
+                    {formatMs(r.totalDurationMs)}
+                  </TableCell>
+                  <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
+                    {formatMs(r.ttftMs)}
+                  </TableCell>
+                  <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
+                    {formatTps(r.tps)}
+                  </TableCell>
+                  <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
+                    {formatCostUsd(r.costUsd)}
+                  </TableCell>
+                  <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
+                    {r.sourceIp ?? "—"}
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {items.map((r) => (
-                  <TableRow key={r.id}>
-                    <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
-                      <ClientDateTime value={r.createdAt} locale={locale} timeStyle="medium" />
-                    </TableCell>
-                    <TableCell>
-                      <CopyableModelId value={r.model} />
-                    </TableCell>
-                    <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
-                      {r.inputTokens}
-                    </TableCell>
-                    <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
-                      {r.outputTokens}
-                    </TableCell>
-                    <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
-                      {formatMs(r.totalDurationMs)}
-                    </TableCell>
-                    <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
-                      {formatMs(r.ttftMs)}
-                    </TableCell>
-                    <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
-                      {formatTps(r.tps)}
-                    </TableCell>
-                    <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
-                      {formatCostUsd(r.costUsd)}
-                    </TableCell>
-                    <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
-                      {r.sourceIp ?? "—"}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
+              ))}
+            </TableBody>
           </Table>
 
           <div className="flex justify-center py-4">

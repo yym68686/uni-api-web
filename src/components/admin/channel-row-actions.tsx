@@ -202,7 +202,7 @@ export function ChannelRowActions({ channel, onUpdated, onDeleted, className }: 
             type="button"
             size="icon"
             variant="ghost"
-            className={cn("h-9 w-9 rounded-lg", className)}
+            className={cn("h-8 w-8 rounded-xl", className)}
             aria-label={t("common.actions")}
           >
             <MoreVertical className="h-4 w-4" />

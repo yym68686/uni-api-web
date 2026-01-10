@@ -9,12 +9,12 @@ export function AdminUsersCardSkeleton() {
   return (
     <Card>
       <CardContent className="p-0">
-        <div className="grid grid-cols-10 gap-3 border-b border-border px-4 py-3">
+        <div className="grid grid-cols-10 gap-3 border-b border-border px-4 py-3 sm:px-6">
           {Array.from({ length: 10 }).map((_, idx) => (
             <Skeleton key={idx} className="h-4 w-20" />
           ))}
         </div>
-        <div className="space-y-3 p-4">
+        <div className="space-y-3 p-4 sm:px-6">
           {Array.from({ length: 10 }).map((_, idx) => (
             <div key={idx} className="grid grid-cols-10 items-center gap-3">
               {Array.from({ length: 10 }).map((__, jdx) => (

@@ -55,7 +55,7 @@ export const DialogContent = React.forwardRef<
       {children}
       <DialogPrimitive.Close
         className={cn(
-          "absolute right-4 top-4 rounded-lg p-1 text-muted-foreground",
+          "absolute right-4 top-4 rounded-xl p-1 text-muted-foreground",
           "opacity-70 transition-opacity hover:opacity-100",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         )}
@@ -119,4 +119,3 @@ export const DialogDescription = React.forwardRef<
   />
 ));
 DialogDescription.displayName = DialogPrimitive.Description.displayName;
-

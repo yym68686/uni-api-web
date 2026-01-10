@@ -51,7 +51,7 @@ export async function ModelsContent({ locale }: ModelsContentProps) {
         </CardContent>
       ) : (
         <CardContent className="p-0">
-          <Table>
+          <Table variant="card">
             <TableHeader>
               <TableRow>
                 <TableHead>{t(locale, "models.table.model")}</TableHead>

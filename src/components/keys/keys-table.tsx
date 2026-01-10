@@ -141,7 +141,7 @@ export function KeysTable({
         {items.length === 0 && emptyState ? (
           emptyState
         ) : (
-          <Table>
+          <Table variant="card">
             <TableHeader>
               <TableRow>
                 <TableHead>{t("keys.table.name")}</TableHead>

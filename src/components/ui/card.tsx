@@ -37,11 +37,11 @@ export function CardTitle({ className, ...props }: CardTitleProps) {
   );
 }
 
-interface CardDescriptionProps extends React.HTMLAttributes<HTMLParagraphElement> {}
+interface CardDescriptionProps extends React.HTMLAttributes<HTMLDivElement> {}
 
 export function CardDescription({ className, ...props }: CardDescriptionProps) {
   return (
-    <p className={cn("text-sm text-muted-foreground", className)} {...props} />
+    <div className={cn("text-sm text-muted-foreground", className)} {...props} />
   );
 }
 

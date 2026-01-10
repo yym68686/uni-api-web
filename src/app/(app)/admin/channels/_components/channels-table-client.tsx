@@ -69,7 +69,7 @@ export function AdminChannelsTableClient({ initialItems }: AdminChannelsTableCli
         </CardContent>
       ) : (
         <CardContent className="p-0">
-          <Table>
+          <Table variant="card">
             <TableHeader>
               <TableRow>
                 <TableHead>{t("admin.channels.table.name")}</TableHead>
@@ -107,7 +107,7 @@ export function AdminChannelsTableClient({ initialItems }: AdminChannelsTableCli
                   <TableCell className="text-xs text-muted-foreground">
                     <ClientDateTime value={c.updatedAt} locale={locale} />
                   </TableCell>
-                  <TableCell className="p-2 text-right">
+                  <TableCell className="text-right">
                     <ChannelRowActions channel={c} onUpdated={upsert} onDeleted={remove} />
                   </TableCell>
                 </TableRow>

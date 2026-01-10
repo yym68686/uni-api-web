@@ -15,12 +15,17 @@ export function AdminAnnouncementsCardSkeleton({ showActions = true }: AdminAnno
   return (
     <Card>
       <CardContent className="p-0">
-        <div className={cn("grid gap-3 border-b border-border px-4 py-3", cols === 5 ? "grid-cols-5" : "grid-cols-4")}>
+        <div
+          className={cn(
+            "grid gap-3 border-b border-border px-4 py-3 sm:px-6",
+            cols === 5 ? "grid-cols-5" : "grid-cols-4"
+          )}
+        >
           {Array.from({ length: cols }).map((_, idx) => (
             <Skeleton key={idx} className="h-4 w-24" />
           ))}
         </div>
-        <div className="space-y-3 p-4">
+        <div className="space-y-3 p-4 sm:px-6">
           {Array.from({ length: 6 }).map((_, idx) => (
             <div key={idx} className={cn("grid items-center gap-3", cols === 5 ? "grid-cols-5" : "grid-cols-4")}>
               {Array.from({ length: cols }).map((__, jdx) => (

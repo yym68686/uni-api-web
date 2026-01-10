@@ -1,7 +1,6 @@
 import { Suspense } from "react";
-import { Shield } from "lucide-react";
 
-import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { AdminForbiddenCard } from "@/components/admin/admin-forbidden-card";
 import { PageHeader } from "@/components/common/page-header";
 import { getCurrentUser } from "@/lib/current-user";
 import { t } from "@/lib/i18n/messages";
@@ -26,15 +25,10 @@ export default async function AdminUsersPage() {
       <PageHeader title={t(locale, "app.admin.users")} description={t(locale, "admin.users.subtitle", { current })} />
 
       {!isAdmin ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Shield className="h-5 w-5 text-muted-foreground" />
-              {t(locale, "admin.forbidden")}
-            </CardTitle>
-            <CardDescription>{t(locale, "admin.users.forbidden")}</CardDescription>
-          </CardHeader>
-        </Card>
+        <AdminForbiddenCard
+          title={t(locale, "admin.forbidden")}
+          description={t(locale, "admin.users.forbidden")}
+        />
       ) : (
         <Suspense fallback={<AdminUsersCardSkeleton />}>
           <AdminUsersContent

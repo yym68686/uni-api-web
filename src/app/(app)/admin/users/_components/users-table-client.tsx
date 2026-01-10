@@ -52,7 +52,7 @@ export function AdminUsersTableClient({ initialItems, currentUserId, currentUser
         </CardContent>
       ) : (
         <CardContent className="p-0">
-          <Table>
+          <Table variant="card">
             <TableHeader>
               <TableRow>
                 <TableHead>{t("admin.users.table.email")}</TableHead>
@@ -102,7 +102,7 @@ export function AdminUsersTableClient({ initialItems, currentUserId, currentUser
                   <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
                     <ClientDateTime value={u.createdAt} locale={locale} />
                   </TableCell>
-                  <TableCell className="p-2 text-right">
+                  <TableCell className="text-right">
                     <UserRowActions
                       user={u}
                       currentUserId={currentUserId}

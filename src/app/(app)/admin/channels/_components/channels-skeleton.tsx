@@ -9,7 +9,7 @@ export function AdminChannelsCardSkeleton() {
   return (
     <Card>
       <CardContent className="p-0">
-        <div className="grid grid-cols-6 gap-3 border-b border-border px-4 py-3">
+        <div className="grid grid-cols-6 gap-3 border-b border-border px-4 py-3 sm:px-6">
           <Skeleton className="h-4 w-28" />
           <Skeleton className="h-4 w-32" />
           <Skeleton className="h-4 w-28" />
@@ -17,7 +17,7 @@ export function AdminChannelsCardSkeleton() {
           <Skeleton className="h-4 w-28" />
           <Skeleton className="ml-auto h-4 w-10" />
         </div>
-        <div className="space-y-3 p-4">
+        <div className="space-y-3 p-4 sm:px-6">
           {Array.from({ length: 7 }).map((_, idx) => (
             <div key={idx} className="grid grid-cols-6 items-center gap-3">
               <Skeleton className="h-4 w-28" />

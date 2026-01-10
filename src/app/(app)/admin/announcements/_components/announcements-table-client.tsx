@@ -74,7 +74,7 @@ export function AdminAnnouncementsTableClient({ initialItems, canManage }: Admin
         </CardContent>
       ) : (
         <CardContent className="p-0">
-          <Table>
+          <Table variant="card">
             <TableHeader>
               <TableRow>
                 <TableHead>{t("admin.ann.table.title")}</TableHead>
@@ -98,7 +98,7 @@ export function AdminAnnouncementsTableClient({ initialItems, canManage }: Admin
                     <ClientDateTime value={a.createdAt} locale={locale} />
                   </TableCell>
                   {canManage ? (
-                    <TableCell className="p-2 text-right">
+                    <TableCell className="text-right">
                       <AnnouncementRowActions announcement={a} onUpdated={upsert} onDeleted={remove} />
                     </TableCell>
                   ) : null}

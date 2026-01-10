@@ -73,9 +73,11 @@ export function DashboardAnnouncementsSkeleton() {
 export function DashboardSkeleton() {
   return (
     <div className="space-y-6">
-      <div className="space-y-2">
-        <Skeleton className="h-7 w-64" />
-        <Skeleton className="h-4 w-80" />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="space-y-2">
+          <Skeleton className="h-7 w-64" />
+          <Skeleton className="h-4 w-[560px] max-w-full" />
+        </div>
       </div>
       <DashboardKpisSkeleton />
       <div className="grid gap-4 lg:grid-cols-3">
@@ -85,4 +87,3 @@ export function DashboardSkeleton() {
     </div>
   );
 }
-

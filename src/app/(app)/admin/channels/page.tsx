@@ -1,8 +1,7 @@
 import { Suspense } from "react";
-import { PlugZap } from "lucide-react";
 
 import { ChannelPublisher } from "@/components/admin/channel-publisher";
-import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { AdminForbiddenCard } from "@/components/admin/admin-forbidden-card";
 import { PageHeader } from "@/components/common/page-header";
 import { getCurrentUser } from "@/lib/current-user";
 import { getRequestLocale } from "@/lib/i18n/server";
@@ -27,15 +26,10 @@ export default async function AdminChannelsPage() {
       />
 
       {!isAdmin ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <PlugZap className="h-5 w-5 text-muted-foreground" />
-              {t(locale, "admin.forbidden")}
-            </CardTitle>
-            <CardDescription>{t(locale, "admin.channels.forbidden")}</CardDescription>
-          </CardHeader>
-        </Card>
+        <AdminForbiddenCard
+          title={t(locale, "admin.forbidden")}
+          description={t(locale, "admin.channels.forbidden")}
+        />
       ) : (
         <Suspense fallback={<AdminChannelsCardSkeleton />}>
           <AdminChannelsContent locale={locale} />
