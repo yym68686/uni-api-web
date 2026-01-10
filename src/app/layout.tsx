@@ -53,8 +53,8 @@ export default async function RootLayout({ children }: RootLayoutProps) {
           >
             {t(locale, "common.skipToContent")}
           </a>
-          {children}
           <Toaster theme="dark" richColors closeButton />
+          {children}
         </I18nProvider>
       </body>
     </html>

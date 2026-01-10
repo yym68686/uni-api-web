@@ -7,6 +7,7 @@ import { buildBackendUrl } from "@/lib/backend";
 const OAUTH_STATE_COOKIE = "uai_oauth_state";
 const OAUTH_VERIFIER_COOKIE = "uai_oauth_verifier";
 const OAUTH_NEXT_COOKIE = "uai_oauth_next";
+const OAUTH_FROM_COOKIE = "uai_oauth_from";
 
 function firstHeader(req: Request, name: string) {
   const raw = req.headers.get(name);
@@ -31,6 +32,33 @@ function sanitizeNextPath(value: string | null) {
   return value;
 }
 
+function sanitizeFromPath(value: string | null) {
+  if (value === "/login") return "/login";
+  if (value === "/register") return "/register";
+  return "/login";
+}
+
+function redirectWithError(
+  publicOrigin: string,
+  { fromPath, nextPath, errorCode }: { fromPath: string; nextPath: string; errorCode: string }
+) {
+  const url = new URL(fromPath, publicOrigin);
+  url.searchParams.set("oauth_error", errorCode);
+  if (nextPath && nextPath.startsWith("/")) {
+    url.searchParams.set("next", nextPath);
+  }
+  return NextResponse.redirect(url);
+}
+
+function extractErrorCode(json: unknown): string | null {
+  if (!json || typeof json !== "object") return null;
+  const detail = (json as { detail?: unknown }).detail;
+  if (typeof detail !== "string") return null;
+  if (detail === "registration disabled") return "registration_disabled";
+  if (detail === "banned") return "banned";
+  return null;
+}
+
 interface UpstreamAuthResponse {
   token: string;
   user: { id: string; email: string };
@@ -53,14 +81,21 @@ export async function GET(req: Request) {
   const savedState = store.get(OAUTH_STATE_COOKIE)?.value ?? null;
   const verifier = store.get(OAUTH_VERIFIER_COOKIE)?.value ?? null;
   const nextPath = sanitizeNextPath(store.get(OAUTH_NEXT_COOKIE)?.value ?? "/dashboard");
+  const fromPath = sanitizeFromPath(store.get(OAUTH_FROM_COOKIE)?.value ?? "/login");
 
   const clear = NextResponse.redirect(new URL("/login", publicOrigin));
   clear.cookies.set(OAUTH_STATE_COOKIE, "", { path: "/", maxAge: 0 });
   clear.cookies.set(OAUTH_VERIFIER_COOKIE, "", { path: "/", maxAge: 0 });
   clear.cookies.set(OAUTH_NEXT_COOKIE, "", { path: "/", maxAge: 0 });
+  clear.cookies.set(OAUTH_FROM_COOKIE, "", { path: "/", maxAge: 0 });
 
   if (!code || !state || !savedState || state !== savedState || !verifier) {
-    return clear;
+    const res = redirectWithError(publicOrigin, { fromPath, nextPath, errorCode: "oauth_failed" });
+    res.cookies.set(OAUTH_STATE_COOKIE, "", { path: "/", maxAge: 0 });
+    res.cookies.set(OAUTH_VERIFIER_COOKIE, "", { path: "/", maxAge: 0 });
+    res.cookies.set(OAUTH_NEXT_COOKIE, "", { path: "/", maxAge: 0 });
+    res.cookies.set(OAUTH_FROM_COOKIE, "", { path: "/", maxAge: 0 });
+    return res;
   }
 
   const redirectUri =
@@ -74,9 +109,30 @@ export async function GET(req: Request) {
     cache: "no-store"
   }).catch(() => null);
 
-  if (!upstream) return clear;
+  if (!upstream) {
+    const res = redirectWithError(publicOrigin, { fromPath, nextPath, errorCode: "oauth_failed" });
+    res.cookies.set(OAUTH_STATE_COOKIE, "", { path: "/", maxAge: 0 });
+    res.cookies.set(OAUTH_VERIFIER_COOKIE, "", { path: "/", maxAge: 0 });
+    res.cookies.set(OAUTH_NEXT_COOKIE, "", { path: "/", maxAge: 0 });
+    res.cookies.set(OAUTH_FROM_COOKIE, "", { path: "/", maxAge: 0 });
+    return res;
+  }
+
   const json: unknown = await upstream.json().catch(() => null);
-  if (!upstream.ok || !isUpstreamAuthResponse(json)) return clear;
+  if (!upstream.ok) {
+    const mapped = extractErrorCode(json);
+    const res = redirectWithError(publicOrigin, {
+      fromPath,
+      nextPath,
+      errorCode: mapped ?? "oauth_failed"
+    });
+    res.cookies.set(OAUTH_STATE_COOKIE, "", { path: "/", maxAge: 0 });
+    res.cookies.set(OAUTH_VERIFIER_COOKIE, "", { path: "/", maxAge: 0 });
+    res.cookies.set(OAUTH_NEXT_COOKIE, "", { path: "/", maxAge: 0 });
+    res.cookies.set(OAUTH_FROM_COOKIE, "", { path: "/", maxAge: 0 });
+    return res;
+  }
+  if (!isUpstreamAuthResponse(json)) return clear;
 
   const isSecureRequest =
     req.headers.get("x-forwarded-proto") === "https" || url.protocol === "https:";
@@ -92,5 +148,6 @@ export async function GET(req: Request) {
   res.cookies.set(OAUTH_STATE_COOKIE, "", { path: "/", maxAge: 0 });
   res.cookies.set(OAUTH_VERIFIER_COOKIE, "", { path: "/", maxAge: 0 });
   res.cookies.set(OAUTH_NEXT_COOKIE, "", { path: "/", maxAge: 0 });
+  res.cookies.set(OAUTH_FROM_COOKIE, "", { path: "/", maxAge: 0 });
   return res;
 }

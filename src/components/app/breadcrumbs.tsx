@@ -20,7 +20,8 @@ const labelKeyMap: Record<string, MessageKey> = {
   "/admin/channels": "app.admin.channels",
   "/admin/models": "app.admin.modelConfig",
   "/admin/users": "app.admin.users",
-  "/admin/announcements": "app.admin.announcements"
+  "/admin/announcements": "app.admin.announcements",
+  "/admin/settings": "app.admin.settings"
 };
 
 type BreadcrumbItem = { href: string; labelKey: MessageKey } | { href: string; label: string };

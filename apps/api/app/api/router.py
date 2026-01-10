@@ -29,6 +29,7 @@ from app.schemas.admin_users import (
     AdminUserUpdateResponse,
 )
 from app.schemas.account import AccountDeleteResponse
+from app.schemas.admin_settings import AdminSettingsResponse, AdminSettingsUpdateRequest
 from app.schemas.auth import AuthResponse, GoogleOAuthExchangeRequest, LoginRequest, RegisterRequest, UserPublic
 from app.schemas.email_verification import EmailCodeRequest, EmailCodeResponse, RegisterVerifyRequest
 from app.schemas.keys import (
@@ -84,6 +85,7 @@ from app.storage.oauth_google import login_with_google
 from app.schemas.logs import LogsListResponse
 from app.db import SessionLocal
 from app.storage.email_verification_db import request_email_code, verify_email_code
+from app.models.organization import Organization
 
 router = APIRouter()
 
@@ -93,11 +95,46 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@router.get("/admin/settings", response_model=AdminSettingsResponse)
+async def admin_settings(
+    session: AsyncSession = Depends(get_db_session),
+    admin_user=Depends(require_admin),
+    membership=Depends(get_current_membership),
+) -> dict:
+    _ = admin_user
+    org = await session.get(Organization, membership.org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="not found")
+    return {"registrationEnabled": bool(org.registration_enabled)}
+
+
+@router.patch("/admin/settings", response_model=AdminSettingsResponse)
+async def admin_update_settings(
+    payload: AdminSettingsUpdateRequest,
+    session: AsyncSession = Depends(get_db_session),
+    admin_user=Depends(require_admin),
+    membership=Depends(get_current_membership),
+) -> dict:
+    _ = admin_user
+    org = await session.get(Organization, membership.org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="not found")
+    if payload.registration_enabled is not None:
+        org.registration_enabled = bool(payload.registration_enabled)
+        await session.commit()
+        await session.refresh(org)
+    return {"registrationEnabled": bool(org.registration_enabled)}
+
+
 @router.post("/auth/register", response_model=AuthResponse)
 async def register(
     payload: RegisterRequest, session: AsyncSession = Depends(get_db_session)
 ) -> AuthResponse:
     from app.core.config import settings
+
+    org = await ensure_default_org(session)
+    if not bool(getattr(org, "registration_enabled", True)):
+        raise HTTPException(status_code=403, detail="registration disabled")
 
     if settings.email_verification_required:
         raise HTTPException(status_code=400, detail="email verification required")
@@ -113,6 +150,10 @@ async def email_request_code(
     request: Request,
     session: AsyncSession = Depends(get_db_session),
 ) -> EmailCodeResponse:
+    org = await ensure_default_org(session)
+    if str(payload.purpose or "").strip() == "register" and not bool(getattr(org, "registration_enabled", True)):
+        raise HTTPException(status_code=403, detail="registration disabled")
+
     xff = request.headers.get("x-forwarded-for")
     client_ip = xff.split(",")[0].strip()[:64] if xff and xff.strip() else (request.client.host if request.client else None)
     try:
@@ -137,6 +178,9 @@ async def register_verify(
     session: AsyncSession = Depends(get_db_session),
 ) -> AuthResponse:
     _ = request
+    org = await ensure_default_org(session)
+    if not bool(getattr(org, "registration_enabled", True)):
+        raise HTTPException(status_code=403, detail="registration disabled")
     try:
         await verify_email_code(
             session,
@@ -273,6 +317,8 @@ async def oauth_google(
     except ValueError as e:
         if str(e) == "banned":
             raise HTTPException(status_code=403, detail="banned") from e
+        if str(e) == "registration disabled":
+            raise HTTPException(status_code=403, detail="registration disabled") from e
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 

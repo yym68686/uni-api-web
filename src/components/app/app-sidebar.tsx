@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import * as React from "react";
-import { Boxes, KeyRound, LayoutDashboard, Megaphone, PlugZap, ScrollText, SlidersHorizontal, Users, type LucideIcon } from "lucide-react";
+import { Boxes, KeyRound, LayoutDashboard, Megaphone, PlugZap, ScrollText, Settings, SlidersHorizontal, Users, type LucideIcon } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { BrandWordmark } from "@/components/brand/wordmark";
@@ -21,7 +21,8 @@ const adminItems = [
   { href: "/admin/channels", labelKey: "app.admin.channels", icon: PlugZap },
   { href: "/admin/models", labelKey: "app.admin.modelConfig", icon: SlidersHorizontal },
   { href: "/admin/users", labelKey: "app.admin.users", icon: Users },
-  { href: "/admin/announcements", labelKey: "app.admin.announcements", icon: Megaphone }
+  { href: "/admin/announcements", labelKey: "app.admin.announcements", icon: Megaphone },
+  { href: "/admin/settings", labelKey: "app.admin.settings", icon: Settings }
 ] as const satisfies ReadonlyArray<{ href: string; labelKey: MessageKey; icon: LucideIcon }>;
 
 interface AppSidebarContentProps {

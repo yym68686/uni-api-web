@@ -95,6 +95,22 @@ def create_app() -> FastAPI:
                 "SET user_id = (SELECT id FROM users ORDER BY created_at ASC LIMIT 1) "
                 "WHERE user_id IS NULL"
             )
+
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS organizations "
+                "ADD COLUMN IF NOT EXISTS registration_enabled boolean"
+            )
+            await conn.exec_driver_sql(
+                "UPDATE organizations SET registration_enabled = true WHERE registration_enabled IS NULL"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS organizations "
+                "ALTER COLUMN registration_enabled SET DEFAULT true"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS organizations "
+                "ALTER COLUMN registration_enabled SET NOT NULL"
+            )
         # Bootstrap the default org and backfill memberships for existing users.
         async with SessionLocal() as session:
             org = await ensure_default_org(session)

@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { z } from "zod";
 import { Chrome, Github, Loader2, Lock, Mail, ShieldCheck } from "lucide-react";
 import { useForm } from "react-hook-form";
@@ -53,7 +53,9 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
   const [step, setStep] = React.useState<"details" | "verify">("details");
   const [cooldown, setCooldown] = React.useState(0);
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { t } = useI18n();
+  const oauthToastShownRef = React.useRef(false);
 
   const schema = React.useMemo(() => createRegisterSchema(t), [t]);
   const emailSchema = schema.shape.email;
@@ -70,6 +72,24 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
     const t = window.setInterval(() => setCooldown((v) => Math.max(0, v - 1)), 1000);
     return () => window.clearInterval(t);
   }, [cooldown]);
+
+  React.useEffect(() => {
+    const oauthError = searchParams.get("oauth_error");
+    if (!oauthError || oauthToastShownRef.current) return;
+    oauthToastShownRef.current = true;
+    const message =
+      oauthError === "registration_disabled"
+        ? t("auth.oauth.registrationDisabled")
+        : oauthError === "banned"
+          ? t("auth.oauth.banned")
+          : t("auth.oauth.failed");
+    const id = window.setTimeout(() => toast.error(message), 0);
+
+    const url = new URL(window.location.href);
+    url.searchParams.delete("oauth_error");
+    window.history.replaceState(null, "", url.toString());
+    return () => window.clearTimeout(id);
+  }, [router, searchParams, t]);
 
   async function requestCode() {
     const values = form.getValues();
@@ -369,7 +389,7 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
             className="w-full rounded-xl bg-transparent"
             onClick={() => {
               const next = nextPath && nextPath.startsWith("/") ? nextPath : "/dashboard";
-              window.location.href = `/api/auth/google?next=${encodeURIComponent(next)}`;
+              window.location.href = `/api/auth/google?from=/register&next=${encodeURIComponent(next)}`;
             }}
             disabled={step === "verify"}
           >

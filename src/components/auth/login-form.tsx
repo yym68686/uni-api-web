@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { z } from "zod";
 import { Chrome, Github, Loader2, Lock, Mail } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 
@@ -39,7 +39,9 @@ interface LoginFormProps {
 export function LoginForm({ appName, nextPath, className }: LoginFormProps) {
   const [loading, setLoading] = React.useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { t } = useI18n();
+  const oauthToastShownRef = React.useRef(false);
 
   const schema = React.useMemo(() => createLoginSchema(t), [t]);
   const emailSchema = schema.shape.email;
@@ -49,6 +51,24 @@ export function LoginForm({ appName, nextPath, className }: LoginFormProps) {
     defaultValues: { email: "", password: "" },
     mode: "onChange"
   });
+
+  React.useEffect(() => {
+    const oauthError = searchParams.get("oauth_error");
+    if (!oauthError || oauthToastShownRef.current) return;
+    oauthToastShownRef.current = true;
+    const message =
+      oauthError === "registration_disabled"
+        ? t("auth.oauth.registrationDisabled")
+        : oauthError === "banned"
+          ? t("auth.oauth.banned")
+          : t("auth.oauth.failed");
+    const id = window.setTimeout(() => toast.error(message), 0);
+
+    const url = new URL(window.location.href);
+    url.searchParams.delete("oauth_error");
+    window.history.replaceState(null, "", url.toString());
+    return () => window.clearTimeout(id);
+  }, [router, searchParams, t]);
 
   async function onSubmit(values: FormValues) {
     setLoading(true);
@@ -213,7 +233,7 @@ export function LoginForm({ appName, nextPath, className }: LoginFormProps) {
             className="w-full rounded-xl bg-transparent"
             onClick={() => {
               const next = nextPath && nextPath.startsWith("/") ? nextPath : "/dashboard";
-              window.location.href = `/api/auth/google?next=${encodeURIComponent(next)}`;
+              window.location.href = `/api/auth/google?from=/login&next=${encodeURIComponent(next)}`;
             }}
           >
             <Chrome suppressHydrationWarning className="h-4 w-4" />

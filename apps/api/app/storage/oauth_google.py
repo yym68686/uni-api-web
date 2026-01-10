@@ -113,12 +113,15 @@ async def login_with_google(
         ).scalar_one_or_none()
 
     if not user:
+        org = await ensure_default_org(session)
+        if not bool(getattr(org, "registration_enabled", True)):
+            raise ValueError("registration disabled")
+
         user = User(email=profile.email, password_hash=hash_password(secrets.token_urlsafe(32)))
         session.add(user)
         await session.commit()
         await session.refresh(user)
 
-        org = await ensure_default_org(session)
         count = (await session.execute(select(func.count()).select_from(User))).scalar_one()
         membership_role = "owner" if int(count) == 1 else "developer"
         await ensure_membership(session, org_id=org.id, user_id=user.id, role=membership_role)

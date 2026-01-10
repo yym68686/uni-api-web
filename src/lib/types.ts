@@ -173,6 +173,14 @@ export interface AdminModelsListResponse {
   items: AdminModelItem[];
 }
 
+export interface AdminSettingsResponse {
+  registrationEnabled: boolean;
+}
+
+export interface AdminSettingsUpdateRequest {
+  registrationEnabled?: boolean;
+}
+
 export interface AdminModelUpdateRequest {
   enabled?: boolean;
   inputUsdPerM?: string | null;

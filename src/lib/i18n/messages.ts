@@ -15,6 +15,7 @@ const en = {
   "app.admin.modelConfig": "Model Config",
   "app.admin.users": "Users",
   "app.admin.announcements": "Announcements",
+  "app.admin.settings": "Settings",
   "app.workspace": "Workspace",
   "app.workspace.default": "Default",
 
@@ -22,6 +23,9 @@ const en = {
   "auth.logout": "Logout",
   "auth.logoutSuccess": "Signed out",
   "auth.logoutFailed": "Sign out failed",
+  "auth.oauth.failed": "Google sign-in failed",
+  "auth.oauth.registrationDisabled": "Registration is disabled. Please contact an admin.",
+  "auth.oauth.banned": "This account is banned.",
 
   "theme.toLight": "Switch to light",
   "theme.toDark": "Switch to dark",
@@ -255,6 +259,16 @@ const en = {
   "admin.users.status.banned": "Banned",
   "admin.users.status.active": "Active",
 
+  "admin.settings.subtitle": "Control console-wide settings ({current}).",
+  "admin.settings.forbidden": "You are not an admin and cannot manage settings.",
+  "admin.settings.card.title": "Settings",
+  "admin.settings.card.desc": "Toggle features that affect onboarding and access.",
+  "admin.settings.loadFailed": "Failed to load settings.",
+  "admin.settings.registration.label": "Registration",
+  "admin.settings.registration.desc": "Allow new users to create an account.",
+  "admin.settings.toast.updated": "Settings updated",
+  "admin.settings.toast.failed": "Update failed",
+
   "admin.ann.publish": "Publish announcement",
   "admin.ann.publishDesc": "Announcements appear on the Dashboard.",
   "admin.ann.editTitle": "Edit announcement",
@@ -425,6 +439,7 @@ const zhCN: Record<MessageKey, string> = {
   "app.admin.modelConfig": "模型配置",
   "app.admin.users": "用户",
   "app.admin.announcements": "公告",
+  "app.admin.settings": "设置",
   "app.workspace": "工作区",
   "app.workspace.default": "默认",
 
@@ -432,6 +447,9 @@ const zhCN: Record<MessageKey, string> = {
   "auth.logout": "退出登录",
   "auth.logoutSuccess": "已退出",
   "auth.logoutFailed": "退出失败",
+  "auth.oauth.failed": "Google 登录失败",
+  "auth.oauth.registrationDisabled": "已关闭注册功能，请联系管理员。",
+  "auth.oauth.banned": "该账号已被封禁。",
 
   "theme.toLight": "切换到浅色",
   "theme.toDark": "切换到深色",
@@ -663,6 +681,16 @@ const zhCN: Record<MessageKey, string> = {
   "admin.users.table.created": "创建时间",
   "admin.users.status.banned": "已封禁",
   "admin.users.status.active": "正常",
+
+  "admin.settings.subtitle": "管理控制台全局设置（{current}）。",
+  "admin.settings.forbidden": "你不是管理员，无法管理设置。",
+  "admin.settings.card.title": "设置",
+  "admin.settings.card.desc": "用于控制注册与访问等全局开关。",
+  "admin.settings.loadFailed": "加载设置失败。",
+  "admin.settings.registration.label": "注册功能",
+  "admin.settings.registration.desc": "允许新用户创建账号。",
+  "admin.settings.toast.updated": "设置已更新",
+  "admin.settings.toast.failed": "更新失败",
 
   "admin.ann.publish": "发布公告",
   "admin.ann.publishDesc": "公告会显示在 Dashboard 右侧栏目。",
