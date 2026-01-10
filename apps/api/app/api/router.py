@@ -603,50 +603,71 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
     ttft_ms = 0
     total_ms = 0
 
+    if stream:
+        # Important: do NOT use `async with client.stream(...)` here, otherwise the upstream
+        # stream is closed immediately when the request handler returns. Keep the stream open
+        # and close it inside the generator's `finally`.
+        client = httpx.AsyncClient(timeout=timeout)
+        req_up = client.build_request("POST", upstream_url, headers=headers, content=raw)
+        res = await client.send(req_up, stream=True)
+        content_type = res.headers.get("content-type") or "application/json"
+        ok = res.status_code < 400
+
+        async def iterator():
+            nonlocal ttft_ms, total_ms
+            first = None
+            try:
+                async for chunk in res.aiter_bytes():
+                    if first is None:
+                        first = time.perf_counter()
+                        ttft_ms = int((first - started) * 1000)
+                    yield chunk
+            except (httpx.ReadError, httpx.StreamError):
+                # Treat upstream disconnects/cancellation as a normal stream termination.
+                pass
+            finally:
+                total_ms = int((time.perf_counter() - started) * 1000)
+                try:
+                    await res.aclose()
+                except Exception:
+                    pass
+                try:
+                    await client.aclose()
+                except Exception:
+                    pass
+                try:
+                    async with SessionLocal() as s:
+                        await record_usage_event(
+                            s,
+                            org_id=membership.org_id,
+                            user_id=user.id,
+                            api_key_id=api_key.id,
+                            model_id=model_id.strip(),
+                            ok=ok,
+                            status_code=int(res.status_code),
+                            input_tokens=0,
+                            output_tokens=0,
+                            total_tokens=0,
+                            cost_usd_micros=0,
+                            total_duration_ms=total_ms,
+                            ttft_ms=ttft_ms,
+                            source_ip=source_ip,
+                        )
+                except Exception:
+                    pass
+
+        return StreamingResponse(
+            iterator(),
+            status_code=int(res.status_code),
+            media_type=content_type,
+            headers={"cache-control": "no-cache", "x-accel-buffering": "no"},
+        )
+
+    # Non-stream response: read full body then close the upstream response/client.
     async with httpx.AsyncClient(timeout=timeout) as client:
         async with client.stream("POST", upstream_url, headers=headers, content=raw) as res:
             content_type = res.headers.get("content-type") or "application/json"
             ok = res.status_code < 400
-
-            if stream:
-                async def iterator():
-                    nonlocal ttft_ms, total_ms
-                    first = None
-                    try:
-                        async for chunk in res.aiter_bytes():
-                            if first is None:
-                                first = time.perf_counter()
-                                ttft_ms = int((first - started) * 1000)
-                            yield chunk
-                    finally:
-                        total_ms = int((time.perf_counter() - started) * 1000)
-                        try:
-                            async with SessionLocal() as s:
-                                await record_usage_event(
-                                    s,
-                                    org_id=membership.org_id,
-                                    user_id=user.id,
-                                    api_key_id=api_key.id,
-                                    model_id=model_id.strip(),
-                                    ok=ok,
-                                    status_code=int(res.status_code),
-                                    input_tokens=0,
-                                    output_tokens=0,
-                                    total_tokens=0,
-                                    cost_usd_micros=0,
-                                    total_duration_ms=total_ms,
-                                    ttft_ms=ttft_ms,
-                                    source_ip=source_ip,
-                                )
-                        except Exception:
-                            pass
-
-                return StreamingResponse(
-                    iterator(),
-                    status_code=int(res.status_code),
-                    media_type=content_type,
-                    headers={"cache-control": "no-cache"},
-                )
 
             body_bytes = bytearray()
             first = None
