@@ -1,13 +1,6 @@
-import { Clock, ScrollText } from "lucide-react";
-
-import { CopyableModelId } from "@/components/models/copyable-model-id";
-import { ClientDateTime } from "@/components/common/client-datetime";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { LogsTableClient } from "./logs-table-client";
 import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
-import { formatUsd } from "@/lib/format";
 import type { Locale } from "@/lib/i18n/messages";
-import { t } from "@/lib/i18n/messages";
 import type { LogsListResponse } from "@/lib/types";
 
 function isLogsListResponse(value: unknown): value is LogsListResponse {
@@ -17,27 +10,10 @@ function isLogsListResponse(value: unknown): value is LogsListResponse {
   return Array.isArray(items);
 }
 
-function formatMs(value: number) {
-  const ms = Math.max(0, Math.round(value));
-  if (ms < 1000) return `${ms} ms`;
-  return `${(ms / 1000).toFixed(2)} s`;
-}
-
-function formatTps(value: number | null | undefined) {
-  if (value == null || !Number.isFinite(value)) return "—";
-  if (value <= 0) return "0";
-  if (value < 10) return value.toFixed(2);
-  return value.toFixed(1);
-}
-
-function formatCostUsd(value: number) {
-  if (!Number.isFinite(value) || value <= 0) return "$0";
-  if (value < 0.01) return `$${value.toFixed(6)}`;
-  return formatUsd(value);
-}
+const PAGE_SIZE = 50;
 
 async function getLogs() {
-  const res = await fetch(buildBackendUrl("/logs?limit=100"), {
+  const res = await fetch(buildBackendUrl(`/logs?limit=${PAGE_SIZE}&offset=0`), {
     cache: "no-store",
     headers: await getBackendAuthHeadersCached()
   });
@@ -53,78 +29,6 @@ interface LogsContentProps {
 
 export async function LogsContent({ locale }: LogsContentProps) {
   const items = (await getLogs()) ?? [];
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <ScrollText className="h-5 w-5 text-muted-foreground" />
-          {t(locale, "logs.card.title")}
-        </CardTitle>
-        <CardDescription className="flex items-center gap-2">
-          <Clock className="h-4 w-4 text-muted-foreground" />
-          {t(locale, "logs.card.latest100")}
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        {items.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-border bg-muted/10 p-8 text-center text-sm text-muted-foreground">
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl border border-border bg-background/50">
-              <ScrollText className="h-6 w-6 text-muted-foreground uai-float-sm" />
-            </div>
-            <div className="mt-3">{t(locale, "logs.empty")}</div>
-          </div>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t(locale, "logs.table.time")}</TableHead>
-                <TableHead>{t(locale, "logs.table.model")}</TableHead>
-                <TableHead>{t(locale, "logs.table.input")}</TableHead>
-                <TableHead>{t(locale, "logs.table.output")}</TableHead>
-                <TableHead>{t(locale, "logs.table.total")}</TableHead>
-                <TableHead>{t(locale, "logs.table.ttft")}</TableHead>
-                <TableHead>{t(locale, "logs.table.tps")}</TableHead>
-                <TableHead>{t(locale, "logs.table.cost")}</TableHead>
-                <TableHead>{t(locale, "logs.table.ip")}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {items.map((r) => (
-                <TableRow key={r.id} className="hover:bg-muted/50">
-                  <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
-                    <ClientDateTime value={r.createdAt} locale={locale} timeStyle="medium" />
-                  </TableCell>
-                  <TableCell>
-                    <CopyableModelId value={r.model} />
-                  </TableCell>
-                  <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
-                    {r.inputTokens}
-                  </TableCell>
-                  <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
-                    {r.outputTokens}
-                  </TableCell>
-                  <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
-                    {formatMs(r.totalDurationMs)}
-                  </TableCell>
-                  <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
-                    {formatMs(r.ttftMs)}
-                  </TableCell>
-                  <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
-                    {formatTps(r.tps)}
-                  </TableCell>
-                  <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
-                    {formatCostUsd(r.costUsd)}
-                  </TableCell>
-                  <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
-                    {r.sourceIp ?? "—"}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </CardContent>
-    </Card>
-  );
+  void locale;
+  return <LogsTableClient initialItems={items} pageSize={PAGE_SIZE} />;
 }

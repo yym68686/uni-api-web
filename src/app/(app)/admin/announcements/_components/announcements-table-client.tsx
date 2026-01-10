@@ -9,8 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { AnnouncementItem } from "@/lib/types";
 import { useI18n } from "@/components/i18n/i18n-provider";
-
-const ANNOUNCEMENT_CREATED_EVENT = "uai:admin:announcements:created";
+import { UI_EVENTS } from "@/lib/ui-events";
 
 function isAnnouncementItem(value: unknown): value is AnnouncementItem {
   if (!value || typeof value !== "object") return false;
@@ -61,8 +60,8 @@ export function AdminAnnouncementsTableClient({ initialItems, canManage }: Admin
       if (!isAnnouncementItem(detail)) return;
       upsert(detail);
     }
-    window.addEventListener(ANNOUNCEMENT_CREATED_EVENT, onCreated);
-    return () => window.removeEventListener(ANNOUNCEMENT_CREATED_EVENT, onCreated);
+    window.addEventListener(UI_EVENTS.adminAnnouncementsCreated, onCreated);
+    return () => window.removeEventListener(UI_EVENTS.adminAnnouncementsCreated, onCreated);
   }, []);
 
   return (
@@ -114,4 +113,3 @@ export function AdminAnnouncementsTableClient({ initialItems, canManage }: Admin
     </Card>
   );
 }
-

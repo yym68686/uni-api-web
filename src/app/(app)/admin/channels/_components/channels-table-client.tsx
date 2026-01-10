@@ -9,8 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { LlmChannelItem } from "@/lib/types";
 import { useI18n } from "@/components/i18n/i18n-provider";
-
-const CHANNEL_CREATED_EVENT = "uai:admin:channels:created";
+import { UI_EVENTS } from "@/lib/ui-events";
 
 function isChannelItem(value: unknown): value is LlmChannelItem {
   if (!value || typeof value !== "object") return false;
@@ -53,8 +52,8 @@ export function AdminChannelsTableClient({ initialItems }: AdminChannelsTableCli
       if (!isChannelItem(detail)) return;
       upsert(detail);
     }
-    window.addEventListener(CHANNEL_CREATED_EVENT, onCreated);
-    return () => window.removeEventListener(CHANNEL_CREATED_EVENT, onCreated);
+    window.addEventListener(UI_EVENTS.adminChannelsCreated, onCreated);
+    return () => window.removeEventListener(UI_EVENTS.adminChannelsCreated, onCreated);
   }, []);
 
   return (
@@ -119,4 +118,3 @@ export function AdminChannelsTableClient({ initialItems }: AdminChannelsTableCli
     </Card>
   );
 }
-

@@ -68,7 +68,6 @@ export function UserMenu({ userName, className }: UserMenuProps) {
               if (!res.ok) throw new Error(await res.text());
               toast.success(t("auth.logoutSuccess"));
               router.replace("/login");
-              router.refresh();
             } catch (err) {
               toast.error(err instanceof Error ? err.message : t("auth.logoutFailed"));
             }

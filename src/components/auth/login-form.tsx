@@ -68,7 +68,7 @@ export function LoginForm({ appName, nextPath, className }: LoginFormProps) {
     url.searchParams.delete("oauth_error");
     window.history.replaceState(null, "", url.toString());
     return () => window.clearTimeout(id);
-  }, [router, searchParams, t]);
+  }, [searchParams, t]);
 
   async function onSubmit(values: FormValues) {
     setLoading(true);
@@ -102,7 +102,6 @@ export function LoginForm({ appName, nextPath, className }: LoginFormProps) {
       toast.success(t("login.success"));
       const next = nextPath && nextPath.startsWith("/") ? nextPath : "/dashboard";
       router.replace(next);
-      router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("login.failed"));
     } finally {

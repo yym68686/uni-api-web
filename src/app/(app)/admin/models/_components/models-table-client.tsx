@@ -9,8 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { AdminModelItem, AdminModelsListResponse } from "@/lib/types";
 import { useI18n } from "@/components/i18n/i18n-provider";
-
-const MODELS_REFRESHED_EVENT = "uai:admin:models:refreshed";
+import { UI_EVENTS } from "@/lib/ui-events";
 
 function isAdminModelsListResponse(value: unknown): value is AdminModelsListResponse {
   if (!value || typeof value !== "object") return false;
@@ -54,8 +53,8 @@ export function AdminModelsTableClient({ initialItems }: AdminModelsTableClientP
     function onRefreshed() {
       void refetch();
     }
-    window.addEventListener(MODELS_REFRESHED_EVENT, onRefreshed);
-    return () => window.removeEventListener(MODELS_REFRESHED_EVENT, onRefreshed);
+    window.addEventListener(UI_EVENTS.adminModelsRefreshed, onRefreshed);
+    return () => window.removeEventListener(UI_EVENTS.adminModelsRefreshed, onRefreshed);
   }, []);
 
   return (
@@ -115,4 +114,3 @@ export function AdminModelsTableClient({ initialItems }: AdminModelsTableClientP
     </Card>
   );
 }
-

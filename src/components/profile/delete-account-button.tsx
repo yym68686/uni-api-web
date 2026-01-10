@@ -52,7 +52,6 @@ export function DeleteAccountButton({ className }: DeleteAccountButtonProps) {
       toast.success(t("profile.delete.success"));
       setOpen(false);
       router.replace("/register");
-      router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("profile.delete.failed"));
     } finally {

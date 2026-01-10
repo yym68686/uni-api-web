@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Boxes, KeyRound, LayoutDashboard, Megaphone, PlugZap, ScrollText, Settings, SlidersHorizontal, Users, type LucideIcon } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -32,6 +32,7 @@ interface AppSidebarContentProps {
 
 export function AppSidebarContent({ appName, userRole, onNavigate }: AppSidebarContentProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const isAdmin = userRole === "admin" || userRole === "owner";
   const { t } = useI18n();
 
@@ -40,8 +41,12 @@ export function AppSidebarContent({ appName, userRole, onNavigate }: AppSidebarC
       <div className="border-b border-border p-4">
         <Link
           href="/"
+          prefetch={false}
           className="group flex w-full items-center justify-center"
           onClick={onNavigate}
+          onMouseEnter={() => router.prefetch("/")}
+          onFocus={() => router.prefetch("/")}
+          onTouchStart={() => router.prefetch("/")}
         >
           <BrandWordmark
             name={appName}
@@ -59,7 +64,11 @@ export function AppSidebarContent({ appName, userRole, onNavigate }: AppSidebarC
               <Link
                 key={item.href}
                 href={item.href}
+                prefetch={false}
                 onClick={onNavigate}
+                onMouseEnter={() => router.prefetch(item.href)}
+                onFocus={() => router.prefetch(item.href)}
+                onTouchStart={() => router.prefetch(item.href)}
                 className={cn(
                   "flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium",
                   "transition-colors",
@@ -85,7 +94,11 @@ export function AppSidebarContent({ appName, userRole, onNavigate }: AppSidebarC
                 <Link
                   key={item.href}
                   href={item.href}
+                  prefetch={false}
                   onClick={onNavigate}
+                  onMouseEnter={() => router.prefetch(item.href)}
+                  onFocus={() => router.prefetch(item.href)}
+                  onTouchStart={() => router.prefetch(item.href)}
                   className={cn(
                     "flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium",
                     "transition-colors",

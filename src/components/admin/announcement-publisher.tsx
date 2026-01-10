@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { dispatchUiEvent, UI_EVENTS } from "@/lib/ui-events";
 
 function createSchema(t: (key: MessageKey, vars?: MessageVars) => string) {
   return z.object({
@@ -45,8 +46,6 @@ interface AnnouncementPublisherProps {
   onCreated?: (item: AnnouncementItem) => void;
   className?: string;
 }
-
-const ANNOUNCEMENT_CREATED_EVENT = "uai:admin:announcements:created";
 
 const glow =
   "shadow-[0_0_0_1px_oklch(var(--primary)/0.25),0_12px_30px_oklch(var(--primary)/0.22)] hover:shadow-[0_0_0_1px_oklch(var(--primary)/0.35),0_16px_40px_oklch(var(--primary)/0.28)]";
@@ -94,7 +93,7 @@ export function AnnouncementPublisher({ onCreated, className }: AnnouncementPubl
       const created = json as AnnouncementCreateResponse;
       toast.success(t("admin.ann.toast.published"));
       onCreated?.(created.item);
-      window.dispatchEvent(new CustomEvent(ANNOUNCEMENT_CREATED_EVENT, { detail: created.item }));
+      dispatchUiEvent(UI_EVENTS.adminAnnouncementsCreated, created.item);
       setOpen(false);
       reset();
       return created;

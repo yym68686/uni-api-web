@@ -6,8 +6,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/components/i18n/i18n-provider";
-
-const MODELS_REFRESHED_EVENT = "uai:admin:models:refreshed";
+import { dispatchUiEvent, UI_EVENTS } from "@/lib/ui-events";
 
 function readMessage(json: unknown, fallback: string) {
   if (!json || typeof json !== "object") return fallback;
@@ -30,7 +29,7 @@ export function AdminModelsRefreshButton() {
       const json: unknown = await res.json().catch(() => null);
       if (!res.ok) throw new Error(readMessage(json, t("admin.models.refreshFailed")));
       toast.success(t("admin.models.refreshSuccess"));
-      window.dispatchEvent(new Event(MODELS_REFRESHED_EVENT));
+      dispatchUiEvent(UI_EVENTS.adminModelsRefreshed);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("admin.models.refreshFailed"));
     } finally {

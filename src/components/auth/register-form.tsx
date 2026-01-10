@@ -89,7 +89,7 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
     url.searchParams.delete("oauth_error");
     window.history.replaceState(null, "", url.toString());
     return () => window.clearTimeout(id);
-  }, [router, searchParams, t]);
+  }, [searchParams, t]);
 
   async function requestCode() {
     const values = form.getValues();
@@ -175,7 +175,6 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
       toast.success(t("register.success"));
       const next = nextPath && nextPath.startsWith("/") ? nextPath : "/dashboard";
       router.replace(next);
-      router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("register.failed"));
     } finally {
