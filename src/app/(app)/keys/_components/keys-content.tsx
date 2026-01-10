@@ -13,7 +13,8 @@ export async function KeysContent() {
   let items: ApiKeysListResponse["items"] = [];
   try {
     const res = await fetch(buildBackendUrl("/keys"), {
-      cache: "no-store",
+      cache: "force-cache",
+      next: { tags: ["keys:user"] },
       headers: await getBackendAuthHeadersCached()
     });
     if (res.ok) {
@@ -26,4 +27,3 @@ export async function KeysContent() {
 
   return <ApiKeysPageClient initialItems={items} />;
 }
-

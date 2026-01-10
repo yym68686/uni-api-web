@@ -17,7 +17,8 @@ function isAnnouncementsListResponse(value: unknown): value is AnnouncementsList
 
 async function getAnnouncements() {
   const res = await fetch(buildBackendUrl("/announcements"), {
-    cache: "no-store",
+    cache: "force-cache",
+    next: { tags: ["announcements"] },
     headers: await getBackendAuthHeadersCached()
   });
   if (!res.ok) return null;

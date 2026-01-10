@@ -105,12 +105,8 @@ export async function proxy(req: NextRequest) {
 
   const session = req.cookies.get(SESSION_COOKIE_NAME)?.value;
   const hasSessionCookie = isLoggedInCookie(session);
-  const shouldValidateSession =
-    pathname === "/login" ||
-    pathname === "/register" ||
-    isProtectedPath(pathname);
   const sessionValid =
-    shouldValidateSession && hasSessionCookie && session
+    (pathname === "/login" || pathname === "/register") && hasSessionCookie && session
       ? await isSessionValid(session)
       : false;
 
@@ -130,7 +126,7 @@ export async function proxy(req: NextRequest) {
   if (isPublicPath(pathname)) return ensureLocaleCookie(req, NextResponse.next());
   if (!isProtectedPath(pathname)) return ensureLocaleCookie(req, NextResponse.next());
 
-  if (sessionValid) return ensureLocaleCookie(req, NextResponse.next());
+  if (hasSessionCookie) return ensureLocaleCookie(req, NextResponse.next());
 
   if (pathname.startsWith("/api/")) {
     return clearSessionCookie(

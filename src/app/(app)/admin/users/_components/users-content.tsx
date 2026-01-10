@@ -33,7 +33,8 @@ function groupBadgeVariant(group: string) {
 
 async function getUsers() {
   const res = await fetch(buildBackendUrl("/admin/users"), {
-    cache: "no-store",
+    cache: "force-cache",
+    next: { tags: ["admin:users"] },
     headers: await getBackendAuthHeadersCached()
   });
   if (!res.ok) return null;

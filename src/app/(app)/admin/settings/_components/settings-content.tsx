@@ -15,7 +15,8 @@ function isAdminSettingsResponse(value: unknown): value is AdminSettingsResponse
 
 async function getAdminSettings() {
   const res = await fetch(buildBackendUrl("/admin/settings"), {
-    cache: "no-store",
+    cache: "force-cache",
+    next: { tags: ["admin:settings"] },
     headers: await getBackendAuthHeadersCached()
   });
   if (!res.ok) return null;
@@ -54,4 +55,3 @@ export async function AdminSettingsContent({ locale }: AdminSettingsContentProps
     </Card>
   );
 }
-

@@ -80,7 +80,11 @@ export const getDashboardUsage = cache(async (): Promise<UsageResponse> => {
 export const getDashboardApiKeys = cache(async (): Promise<ApiKeysListResponse["items"]> => {
   try {
     const headers = await getBackendAuthHeadersCached();
-    const res = await fetch(buildBackendUrl("/keys"), { cache: "no-store", headers });
+    const res = await fetch(buildBackendUrl("/keys"), {
+      cache: "force-cache",
+      next: { tags: ["keys:user"] },
+      headers
+    });
     if (!res.ok) return [];
     const json: unknown = await res.json().catch(() => null);
     if (isApiKeysListResponse(json)) return json.items;
@@ -93,7 +97,11 @@ export const getDashboardApiKeys = cache(async (): Promise<ApiKeysListResponse["
 export const getDashboardAnnouncements = cache(async (): Promise<AnnouncementsListResponse["items"]> => {
   try {
     const headers = await getBackendAuthHeadersCached();
-    const res = await fetch(buildBackendUrl("/announcements"), { cache: "no-store", headers });
+    const res = await fetch(buildBackendUrl("/announcements"), {
+      cache: "force-cache",
+      next: { tags: ["announcements"] },
+      headers
+    });
     if (!res.ok) return [];
     const json: unknown = await res.json().catch(() => null);
     if (isAnnouncementsListResponse(json)) return json.items;
@@ -102,4 +110,3 @@ export const getDashboardAnnouncements = cache(async (): Promise<AnnouncementsLi
   }
   return [];
 });
-

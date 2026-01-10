@@ -17,7 +17,8 @@ function isLlmChannelsListResponse(value: unknown): value is LlmChannelsListResp
 
 async function getChannels() {
   const res = await fetch(buildBackendUrl("/admin/channels"), {
-    cache: "no-store",
+    cache: "force-cache",
+    next: { tags: ["admin:channels", "models:admin-config", "models:user"] },
     headers: await getBackendAuthHeadersCached()
   });
   if (!res.ok) return null;
