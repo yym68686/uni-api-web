@@ -1,12 +1,13 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
 import { RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/components/i18n/i18n-provider";
+
+const MODELS_REFRESHED_EVENT = "uai:admin:models:refreshed";
 
 function readMessage(json: unknown, fallback: string) {
   if (!json || typeof json !== "object") return fallback;
@@ -18,7 +19,6 @@ function readMessage(json: unknown, fallback: string) {
 }
 
 export function AdminModelsRefreshButton() {
-  const router = useRouter();
   const [loading, setLoading] = React.useState(false);
   const { t } = useI18n();
 
@@ -30,7 +30,7 @@ export function AdminModelsRefreshButton() {
       const json: unknown = await res.json().catch(() => null);
       if (!res.ok) throw new Error(readMessage(json, t("admin.models.refreshFailed")));
       toast.success(t("admin.models.refreshSuccess"));
-      router.refresh();
+      window.dispatchEvent(new Event(MODELS_REFRESHED_EVENT));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("admin.models.refreshFailed"));
     } finally {

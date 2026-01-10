@@ -69,6 +69,8 @@ type FormValues = z.infer<ReturnType<typeof createSchema>>;
 
 interface ChannelRowActionsProps {
   channel: LlmChannelItem;
+  onUpdated?: (next: LlmChannelItem) => void;
+  onDeleted?: (id: string) => void;
   className?: string;
 }
 
@@ -91,7 +93,7 @@ function readMessage(json: unknown, fallback: string) {
   return fallback;
 }
 
-export function ChannelRowActions({ channel, className }: ChannelRowActionsProps) {
+export function ChannelRowActions({ channel, onUpdated, onDeleted, className }: ChannelRowActionsProps) {
   const router = useRouter();
   const [editOpen, setEditOpen] = React.useState(false);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
@@ -158,10 +160,11 @@ export function ChannelRowActions({ channel, className }: ChannelRowActionsProps
       const json: unknown = await res.json().catch(() => null);
       if (!res.ok) throw new Error(readMessage(json, t("common.updateFailed")));
 
-      void (json as LlmChannelUpdateResponse);
+      const next = json as LlmChannelUpdateResponse;
       toast.success(t("admin.channels.toast.updated"));
       setEditOpen(false);
-      router.refresh();
+      onUpdated?.(next.item);
+      if (!onUpdated) router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("common.updateFailed"));
     } finally {
@@ -180,7 +183,8 @@ export function ChannelRowActions({ channel, className }: ChannelRowActionsProps
       void (json as LlmChannelDeleteResponse);
       toast.success(t("admin.channels.toast.deleted"));
       setDeleteOpen(false);
-      router.refresh();
+      onDeleted?.(channel.id);
+      if (!onDeleted) router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("common.deleteFailed"));
     } finally {

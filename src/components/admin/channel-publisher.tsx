@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
 import { z } from "zod";
 import { Loader2, PlugZap, Plus, X } from "lucide-react";
 import { useForm } from "react-hook-form";
@@ -69,6 +68,8 @@ interface ChannelPublisherProps {
   className?: string;
 }
 
+const CHANNEL_CREATED_EVENT = "uai:admin:channels:created";
+
 const glow =
   "shadow-[0_0_0_1px_oklch(var(--primary)/0.25),0_12px_30px_oklch(var(--primary)/0.22)] hover:shadow-[0_0_0_1px_oklch(var(--primary)/0.35),0_16px_40px_oklch(var(--primary)/0.28)]";
 
@@ -86,7 +87,6 @@ export function ChannelPublisher({ className }: ChannelPublisherProps) {
   const [open, setOpen] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
   const [groupDraft, setGroupDraft] = React.useState("");
-  const router = useRouter();
   const { t } = useI18n();
 
   const schema = React.useMemo(() => createSchema(t), [t]);
@@ -136,8 +136,9 @@ export function ChannelPublisher({ className }: ChannelPublisherProps) {
       }
 
       void (json as LlmChannelCreateResponse);
+      const created = json as LlmChannelCreateResponse;
       toast.success(t("admin.channels.toast.created"));
-      router.refresh();
+      window.dispatchEvent(new CustomEvent(CHANNEL_CREATED_EVENT, { detail: created.item }));
       setOpen(false);
       reset();
     } catch (err) {
@@ -177,11 +178,11 @@ export function ChannelPublisher({ className }: ChannelPublisherProps) {
           onSubmit={(e) => {
             void form.handleSubmit(onSubmit)(e);
           }}
-          >
-            <div className="space-y-2">
-              <Label htmlFor="channel-name">{t("admin.channels.form.name")}</Label>
-              <Input
-                id="channel-name"
+        >
+          <div className="space-y-2">
+            <Label htmlFor="channel-name">{t("admin.channels.form.name")}</Label>
+            <Input
+              id="channel-name"
                 placeholder={t("admin.channels.form.namePlaceholder")}
                 {...form.register("name")}
               />

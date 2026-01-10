@@ -1,13 +1,12 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
 import { z } from "zod";
 import { Loader2, Megaphone, Plus } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 
-import type { AnnouncementCreateResponse } from "@/lib/types";
+import type { AnnouncementCreateResponse, AnnouncementItem } from "@/lib/types";
 import type { MessageKey, MessageVars } from "@/lib/i18n/messages";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/components/i18n/i18n-provider";
@@ -43,9 +42,11 @@ function createSchema(t: (key: MessageKey, vars?: MessageVars) => string) {
 type FormValues = z.infer<ReturnType<typeof createSchema>>;
 
 interface AnnouncementPublisherProps {
-  onCreated?: () => void;
+  onCreated?: (item: AnnouncementItem) => void;
   className?: string;
 }
+
+const ANNOUNCEMENT_CREATED_EVENT = "uai:admin:announcements:created";
 
 const glow =
   "shadow-[0_0_0_1px_oklch(var(--primary)/0.25),0_12px_30px_oklch(var(--primary)/0.22)] hover:shadow-[0_0_0_1px_oklch(var(--primary)/0.35),0_16px_40px_oklch(var(--primary)/0.28)]";
@@ -53,7 +54,6 @@ const glow =
 export function AnnouncementPublisher({ onCreated, className }: AnnouncementPublisherProps) {
   const [open, setOpen] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
-  const router = useRouter();
   const { t } = useI18n();
 
   const schema = React.useMemo(() => createSchema(t), [t]);
@@ -93,8 +93,8 @@ export function AnnouncementPublisher({ onCreated, className }: AnnouncementPubl
 
       const created = json as AnnouncementCreateResponse;
       toast.success(t("admin.ann.toast.published"));
-      onCreated?.();
-      router.refresh();
+      onCreated?.(created.item);
+      window.dispatchEvent(new CustomEvent(ANNOUNCEMENT_CREATED_EVENT, { detail: created.item }));
       setOpen(false);
       reset();
       return created;

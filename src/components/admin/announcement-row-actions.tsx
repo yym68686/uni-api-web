@@ -50,6 +50,8 @@ type FormValues = z.infer<ReturnType<typeof createSchema>>;
 
 interface AnnouncementRowActionsProps {
   announcement: AnnouncementItem;
+  onUpdated?: (next: AnnouncementItem) => void;
+  onDeleted?: (id: string) => void;
   className?: string;
 }
 
@@ -74,7 +76,7 @@ function readMessage(json: unknown, fallback: string) {
   return fallback;
 }
 
-export function AnnouncementRowActions({ announcement, className }: AnnouncementRowActionsProps) {
+export function AnnouncementRowActions({ announcement, onUpdated, onDeleted, className }: AnnouncementRowActionsProps) {
   const router = useRouter();
   const [editOpen, setEditOpen] = React.useState(false);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
@@ -119,10 +121,11 @@ export function AnnouncementRowActions({ announcement, className }: Announcement
       const json: unknown = await res.json().catch(() => null);
       if (!res.ok) throw new Error(readMessage(json, t("common.updateFailed")));
 
-      void (json as AnnouncementUpdateResponse);
+      const next = json as AnnouncementUpdateResponse;
       toast.success(t("admin.ann.toast.updated"));
       setEditOpen(false);
-      router.refresh();
+      onUpdated?.(next.item);
+      if (!onUpdated) router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("common.updateFailed"));
     } finally {
@@ -142,7 +145,8 @@ export function AnnouncementRowActions({ announcement, className }: Announcement
       void (json as AnnouncementDeleteResponse);
       toast.success(t("admin.ann.toast.deleted"));
       setDeleteOpen(false);
-      router.refresh();
+      onDeleted?.(announcement.id);
+      if (!onDeleted) router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("common.deleteFailed"));
     } finally {

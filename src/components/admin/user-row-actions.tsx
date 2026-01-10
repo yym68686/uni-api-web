@@ -61,6 +61,8 @@ interface UserRowActionsProps {
   user: AdminUserItem;
   currentUserId: string | null;
   currentUserRole: string | null;
+  onUpdated?: (next: AdminUserItem) => void;
+  onDeleted?: (id: string) => void;
   className?: string;
 }
 
@@ -73,7 +75,7 @@ function readMessage(json: unknown, fallback: string) {
   return fallback;
 }
 
-export function UserRowActions({ user, currentUserId, currentUserRole, className }: UserRowActionsProps) {
+export function UserRowActions({ user, currentUserId, currentUserRole, onUpdated, onDeleted, className }: UserRowActionsProps) {
   const router = useRouter();
   const [balanceOpen, setBalanceOpen] = React.useState(false);
   const [groupOpen, setGroupOpen] = React.useState(false);
@@ -150,7 +152,8 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
     });
     const json: unknown = await res.json().catch(() => null);
     if (!res.ok) throw new Error(readMessage(json, t("common.operationFailed")));
-    void (json as AdminUserUpdateResponse);
+    const next = json as AdminUserUpdateResponse;
+    return next.item;
   }
 
   async function updateBalance(values: BalanceFormValues) {
@@ -162,11 +165,14 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
         toast.error(issue?.message ?? t("common.formInvalid"));
         return;
       }
-      await patch({ balance: parsed.data.balance });
+      onUpdated?.({ ...user, balance: parsed.data.balance });
+      const next = await patch({ balance: parsed.data.balance });
+      onUpdated?.(next);
       toast.success(t("admin.users.toast.balanceUpdated"));
       setBalanceOpen(false);
-      router.refresh();
+      if (!onUpdated) router.refresh();
     } catch (err) {
+      onUpdated?.(user);
       toast.error(err instanceof Error ? err.message : t("common.operationFailed"));
     } finally {
       setSubmitting(false);
@@ -182,11 +188,14 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
         toast.error(issue?.message ?? t("common.formInvalid"));
         return;
       }
-      await patch({ group: parsed.data.group });
+      onUpdated?.({ ...user, group: parsed.data.group });
+      const next = await patch({ group: parsed.data.group });
+      onUpdated?.(next);
       toast.success(t("admin.users.toast.groupUpdated"));
       setGroupOpen(false);
-      router.refresh();
+      if (!onUpdated) router.refresh();
     } catch (err) {
+      onUpdated?.(user);
       toast.error(err instanceof Error ? err.message : t("common.operationFailed"));
     } finally {
       setSubmitting(false);
@@ -196,11 +205,14 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
   async function resetGroup() {
     setSubmitting(true);
     try {
-      await patch({ group: null });
+      onUpdated?.({ ...user, group: "default" });
+      const next = await patch({ group: null });
+      onUpdated?.(next);
       toast.success(t("admin.users.toast.groupReset"));
       setGroupOpen(false);
-      router.refresh();
+      if (!onUpdated) router.refresh();
     } catch (err) {
+      onUpdated?.(user);
       toast.error(err instanceof Error ? err.message : t("common.operationFailed"));
     } finally {
       setSubmitting(false);
@@ -215,11 +227,14 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
         toast.error(t("common.formInvalid"));
         return;
       }
-      await patch({ role: parsed.data.role });
+      onUpdated?.({ ...user, role: parsed.data.role });
+      const next = await patch({ role: parsed.data.role });
+      onUpdated?.(next);
       toast.success(t("admin.users.toast.roleUpdated"));
       setRoleOpen(false);
-      router.refresh();
+      if (!onUpdated) router.refresh();
     } catch (err) {
+      onUpdated?.(user);
       toast.error(err instanceof Error ? err.message : t("common.operationFailed"));
     } finally {
       setSubmitting(false);
@@ -229,11 +244,15 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
   async function toggleBan() {
     setSubmitting(true);
     try {
-      await patch({ banned: !isBanned });
+      const nextBanned = !isBanned;
+      onUpdated?.({ ...user, bannedAt: nextBanned ? new Date().toISOString() : null });
+      const next = await patch({ banned: nextBanned });
+      onUpdated?.(next);
       toast.success(isBanned ? t("admin.users.toast.unbanned") : t("admin.users.toast.banned"));
       setBanOpen(false);
-      router.refresh();
+      if (!onUpdated) router.refresh();
     } catch (err) {
+      onUpdated?.(user);
       toast.error(err instanceof Error ? err.message : t("common.operationFailed"));
     } finally {
       setSubmitting(false);
@@ -249,7 +268,8 @@ export function UserRowActions({ user, currentUserId, currentUserRole, className
       void (json as AdminUserDeleteResponse);
       toast.success(t("admin.users.toast.deleted"));
       setDeleteOpen(false);
-      router.refresh();
+      onDeleted?.(user.id);
+      if (!onDeleted) router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("common.deleteFailed"));
     } finally {

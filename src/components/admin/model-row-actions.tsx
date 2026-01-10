@@ -51,6 +51,7 @@ type FormValues = z.infer<ReturnType<typeof createSchema>>;
 
 interface ModelRowActionsProps {
   model: AdminModelItem;
+  onUpdated?: (next: AdminModelItem) => void;
   className?: string;
 }
 
@@ -63,7 +64,7 @@ function readMessage(json: unknown, fallback: string) {
   return fallback;
 }
 
-export function ModelRowActions({ model, className }: ModelRowActionsProps) {
+export function ModelRowActions({ model, onUpdated, className }: ModelRowActionsProps) {
   const router = useRouter();
   const [editOpen, setEditOpen] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
@@ -95,16 +96,20 @@ export function ModelRowActions({ model, className }: ModelRowActionsProps) {
     });
     const json: unknown = await res.json().catch(() => null);
     if (!res.ok) throw new Error(readMessage(json, t("common.updateFailed")));
-    void (json as AdminModelUpdateResponse);
+    const next = json as AdminModelUpdateResponse;
+    return next.item;
   }
 
   async function toggleEnabled(nextEnabled: boolean) {
     setSubmitting(true);
     try {
-      await patch({ enabled: nextEnabled });
+      onUpdated?.({ ...model, enabled: nextEnabled });
+      const next = await patch({ enabled: nextEnabled });
+      onUpdated?.(next);
       toast.success(nextEnabled ? t("admin.models.toast.enabled") : t("admin.models.toast.disabled"));
-      router.refresh();
+      if (!onUpdated) router.refresh();
     } catch (err) {
+      onUpdated?.(model);
       toast.error(err instanceof Error ? err.message : t("common.updateFailed"));
     } finally {
       setSubmitting(false);
@@ -119,14 +124,21 @@ export function ModelRowActions({ model, className }: ModelRowActionsProps) {
         toast.error(parsed.error.issues[0]?.message ?? t("common.formInvalid"));
         return;
       }
-      await patch({
+      onUpdated?.({
+        ...model,
+        inputUsdPerM: parsed.data.inputUsdPerM ?? null,
+        outputUsdPerM: parsed.data.outputUsdPerM ?? null
+      });
+      const next = await patch({
         inputUsdPerM: parsed.data.inputUsdPerM,
         outputUsdPerM: parsed.data.outputUsdPerM
       });
+      onUpdated?.(next);
       toast.success(t("admin.models.toast.pricingUpdated"));
       setEditOpen(false);
-      router.refresh();
+      if (!onUpdated) router.refresh();
     } catch (err) {
+      onUpdated?.(model);
       toast.error(err instanceof Error ? err.message : t("common.updateFailed"));
     } finally {
       setSubmitting(false);
