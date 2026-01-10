@@ -49,7 +49,7 @@ from app.schemas.channels import (
     LlmChannelUpdateRequest,
     LlmChannelUpdateResponse,
 )
-from app.schemas.models import ModelsListResponse
+from app.schemas.models import ModelsListResponse, OpenAIModelsListResponse, OpenAIModelItem
 from app.schemas.models_admin import AdminModelsListResponse, AdminModelUpdateRequest, AdminModelUpdateResponse
 from app.db import get_db_session
 from app.storage.announcements_db import (
@@ -286,8 +286,7 @@ def _extract_bearer_token(value: str | None) -> str | None:
     return None
 
 
-@router.get("/models", response_model=ModelsListResponse)
-async def list_models(request: Request, session: AsyncSession = Depends(get_db_session)) -> ModelsListResponse:
+async def _require_user_for_models(request: Request, session: AsyncSession):
     from app.constants import SESSION_COOKIE_NAME
 
     auth = request.headers.get("authorization")
@@ -318,9 +317,29 @@ async def list_models(request: Request, session: AsyncSession = Depends(get_db_s
     ).scalars().first()
     if not membership:
         raise HTTPException(status_code=403, detail="missing membership")
+    return user, membership
 
+
+@router.get("/console/models", response_model=ModelsListResponse)
+async def console_list_models(request: Request, session: AsyncSession = Depends(get_db_session)) -> ModelsListResponse:
+    user, membership = await _require_user_for_models(request, session)
     items = await list_user_models(session, org_id=membership.org_id, group_name=user.group_name)
     return ModelsListResponse(items=items)  # type: ignore[arg-type]
+
+
+@router.get("/models", response_model=OpenAIModelsListResponse)
+async def list_models(request: Request, session: AsyncSession = Depends(get_db_session)) -> OpenAIModelsListResponse:
+    user, membership = await _require_user_for_models(request, session)
+
+    items = await list_user_models(session, org_id=membership.org_id, group_name=user.group_name)
+    def _model_id(value: object) -> str:
+        if isinstance(value, dict):
+            raw = value.get("model")
+            return str(raw) if raw is not None else ""
+        return str(getattr(value, "model", "") or "")
+
+    data = [OpenAIModelItem(id=_model_id(item)) for item in sorted(items, key=_model_id) if _model_id(item)]
+    return OpenAIModelsListResponse(data=data)
 
 
 @router.get("/logs", response_model=LogsListResponse)

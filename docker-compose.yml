@@ -39,7 +39,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-uniapi}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-uniapi}
       APP_ENV: dev
-      APP_NAME: Uni API Backend
+      APP_NAME: ${APP_NAME:-MyApp}
       API_PREFIX: /v1
       SESSION_TTL_DAYS: 7
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
