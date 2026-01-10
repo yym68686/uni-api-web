@@ -24,6 +24,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { dispatchUiEvent, UI_EVENTS } from "@/lib/ui-events";
+import { PRIMARY_CTA_CLASSNAME } from "@/lib/ui-styles";
 
 function createSchema(t: (key: MessageKey, vars?: MessageVars) => string) {
   return z.object({
@@ -68,9 +69,6 @@ type FormValues = z.infer<ReturnType<typeof createSchema>>;
 interface ChannelPublisherProps {
   className?: string;
 }
-
-const glow =
-  "shadow-[0_0_0_1px_oklch(var(--primary)/0.25),0_12px_30px_oklch(var(--primary)/0.22)] hover:shadow-[0_0_0_1px_oklch(var(--primary)/0.35),0_16px_40px_oklch(var(--primary)/0.28)]";
 
 function normalizeGroups(value: string[]) {
   const unique = new Set<string>();
@@ -158,7 +156,7 @@ export function ChannelPublisher({ className }: ChannelPublisherProps) {
       }}
     >
       <DialogTrigger asChild>
-        <Button className={cn("rounded-xl", glow, className)}>
+        <Button className={cn("rounded-xl uai-border-beam", PRIMARY_CTA_CLASSNAME, className)}>
           <Plus className="h-4 w-4" />
           {t("admin.channels.create")}
         </Button>

@@ -3,7 +3,7 @@ import { Suspense } from "react";
 import { getRequestLocale } from "@/lib/i18n/server";
 import { t } from "@/lib/i18n/messages";
 import { LogsContent } from "./_components/logs-content";
-import { LogsPageSkeleton } from "./_components/logs-skeleton";
+import { LogsContentSkeleton } from "./_components/logs-skeleton";
 import { LogsRefreshButton } from "@/components/logs/logs-refresh-button";
 import { PageHeader } from "@/components/common/page-header";
 
@@ -20,7 +20,7 @@ export default async function LogsPage() {
         actions={<LogsRefreshButton pageSize={50} className="rounded-xl bg-transparent" />}
       />
 
-      <Suspense fallback={<LogsPageSkeleton />}>
+      <Suspense fallback={<LogsContentSkeleton />}>
         <LogsContent locale={locale} />
       </Suspense>
     </div>

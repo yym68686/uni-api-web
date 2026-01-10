@@ -2,6 +2,7 @@ import { Shield, User } from "lucide-react";
 
 import { DeleteAccountButton } from "@/components/profile/delete-account-button";
 import { ClientDateTime } from "@/components/common/client-datetime";
+import { EmptyState } from "@/components/common/empty-state";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/common/page-header";
@@ -35,9 +36,7 @@ export default async function ProfilePage() {
         </CardHeader>
         <CardContent>
           {!me ? (
-            <div className="rounded-xl border border-dashed border-border bg-muted/10 p-8 text-center text-sm text-muted-foreground">
-              {t(locale, "profile.error")}
-            </div>
+            <EmptyState icon={<User className="h-6 w-6 text-muted-foreground uai-float-sm" />} title={t(locale, "profile.error")} />
           ) : (
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="rounded-xl border border-border bg-background/35 p-4">

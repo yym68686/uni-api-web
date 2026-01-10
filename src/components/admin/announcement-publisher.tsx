@@ -23,6 +23,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { dispatchUiEvent, UI_EVENTS } from "@/lib/ui-events";
+import { PRIMARY_CTA_CLASSNAME } from "@/lib/ui-styles";
 
 function createSchema(t: (key: MessageKey, vars?: MessageVars) => string) {
   return z.object({
@@ -46,9 +47,6 @@ interface AnnouncementPublisherProps {
   onCreated?: (item: AnnouncementItem) => void;
   className?: string;
 }
-
-const glow =
-  "shadow-[0_0_0_1px_oklch(var(--primary)/0.25),0_12px_30px_oklch(var(--primary)/0.22)] hover:shadow-[0_0_0_1px_oklch(var(--primary)/0.35),0_16px_40px_oklch(var(--primary)/0.28)]";
 
 export function AnnouncementPublisher({ onCreated, className }: AnnouncementPublisherProps) {
   const [open, setOpen] = React.useState(false);
@@ -115,7 +113,7 @@ export function AnnouncementPublisher({ onCreated, className }: AnnouncementPubl
       }}
     >
       <DialogTrigger asChild>
-        <Button className={cn("rounded-xl", glow, className)}>
+        <Button className={cn("rounded-xl uai-border-beam", PRIMARY_CTA_CLASSNAME, className)}>
           <Plus className="h-4 w-4" />
           {t("common.publish")}
         </Button>

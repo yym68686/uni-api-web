@@ -11,13 +11,12 @@ import { KeysTable } from "@/components/keys/keys-table";
 import { Card, CardContent } from "@/components/ui/card";
 import { useI18n } from "@/components/i18n/i18n-provider";
 import { PageHeader } from "@/components/common/page-header";
+import { EmptyState } from "@/components/common/empty-state";
+import { PRIMARY_CTA_CLASSNAME } from "@/lib/ui-styles";
 
 interface ApiKeysPageClientProps {
   initialItems: ApiKeyItem[];
 }
-
-const createButtonGlow =
-  "shadow-[0_0_0_1px_oklch(var(--primary)/0.25),0_12px_30px_oklch(var(--primary)/0.22)] hover:shadow-[0_0_0_1px_oklch(var(--primary)/0.35),0_16px_40px_oklch(var(--primary)/0.28)]";
 
 export function ApiKeysPageClient({ initialItems }: ApiKeysPageClientProps) {
   const [items, setItems] = React.useState<ApiKeyItem[]>(initialItems);
@@ -95,7 +94,7 @@ export function ApiKeysPageClient({ initialItems }: ApiKeysPageClientProps) {
           <CreateKeyDialog
             onCreated={onCreated}
             triggerLabel={t("keys.create")}
-            triggerClassName={cn("rounded-xl uai-border-beam", createButtonGlow)}
+            triggerClassName={cn("uai-border-beam", PRIMARY_CTA_CLASSNAME)}
           />
         }
       />
@@ -109,24 +108,18 @@ export function ApiKeysPageClient({ initialItems }: ApiKeysPageClientProps) {
             onDelete={onDelete}
             emptyState={
               <div className="p-6">
-                <div className="rounded-xl border border-dashed border-border bg-muted/10 p-10 text-center">
-                  <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl border border-border bg-background/50">
-                    <KeyRound className="h-6 w-6 text-muted-foreground uai-float-sm" />
-                  </div>
-                  <div className="mt-4 text-base font-semibold text-foreground">
-                    {t("keys.empty.title")}
-                  </div>
-                  <div className="mt-1 text-sm text-muted-foreground">
-                    {t("keys.empty.desc")}
-                  </div>
-                  <div className="mt-5 flex justify-center">
+                <EmptyState
+                  icon={<KeyRound className="h-6 w-6 text-muted-foreground uai-float-sm" />}
+                  title={t("keys.empty.title")}
+                  description={t("keys.empty.desc")}
+                  action={
                     <CreateKeyDialog
                       onCreated={onCreated}
                       triggerLabel={t("keys.create")}
-                      triggerClassName={cn("rounded-xl uai-border-beam", createButtonGlow)}
+                      triggerClassName={cn("uai-border-beam", PRIMARY_CTA_CLASSNAME)}
                     />
-                  </div>
-                </div>
+                  }
+                />
               </div>
             }
           />

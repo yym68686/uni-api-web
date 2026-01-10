@@ -1,4 +1,4 @@
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 function Skeleton({ className }: { className: string }) {
@@ -8,32 +8,26 @@ function Skeleton({ className }: { className: string }) {
 export function AdminChannelsCardSkeleton() {
   return (
     <Card>
-      <CardHeader>
-        <Skeleton className="h-5 w-36" />
-        <Skeleton className="h-4 w-[520px] max-w-full" />
-      </CardHeader>
-      <CardContent>
-        <div className="rounded-xl border border-border bg-muted/10">
-          <div className="grid grid-cols-6 gap-3 border-b border-border px-4 py-3">
-            <Skeleton className="h-4 w-28" />
-            <Skeleton className="h-4 w-32" />
-            <Skeleton className="h-4 w-28" />
-            <Skeleton className="h-4 w-28" />
-            <Skeleton className="h-4 w-28" />
-            <Skeleton className="ml-auto h-4 w-10" />
-          </div>
-          <div className="space-y-3 p-4">
-            {Array.from({ length: 7 }).map((_, idx) => (
-              <div key={idx} className="grid grid-cols-6 items-center gap-3">
-                <Skeleton className="h-4 w-28" />
-                <Skeleton className="h-4 w-40" />
-                <Skeleton className="h-4 w-36" />
-                <Skeleton className="h-4 w-32" />
-                <Skeleton className="h-4 w-24" />
-                <Skeleton className="ml-auto h-8 w-8 rounded-xl" />
-              </div>
-            ))}
-          </div>
+      <CardContent className="p-0">
+        <div className="grid grid-cols-6 gap-3 border-b border-border px-4 py-3">
+          <Skeleton className="h-4 w-28" />
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="h-4 w-28" />
+          <Skeleton className="h-4 w-28" />
+          <Skeleton className="h-4 w-28" />
+          <Skeleton className="ml-auto h-4 w-10" />
+        </div>
+        <div className="space-y-3 p-4">
+          {Array.from({ length: 7 }).map((_, idx) => (
+            <div key={idx} className="grid grid-cols-6 items-center gap-3">
+              <Skeleton className="h-4 w-28" />
+              <Skeleton className="h-4 w-40" />
+              <Skeleton className="h-4 w-36" />
+              <Skeleton className="h-4 w-32" />
+              <Skeleton className="h-4 w-24" />
+              <Skeleton className="ml-auto h-8 w-8 rounded-xl" />
+            </div>
+          ))}
         </div>
       </CardContent>
     </Card>
@@ -54,4 +48,3 @@ export function AdminChannelsPageSkeleton() {
     </div>
   );
 }
-

@@ -197,12 +197,12 @@ export function CreateKeyDialog({
                 placeholder={t("keys.dialog.namePlaceholder")}
                 autoComplete="off"
                 {...form.register("name", {
-                validate: (value) => {
-                  const r = nameSchema.safeParse(value);
-                  return r.success ? true : (r.error.issues[0]?.message ?? t("common.formInvalid"));
-                }
-              })}
-            />
+                  validate: (value) => {
+                    const r = nameSchema.safeParse(value);
+                    return r.success ? true : (r.error.issues[0]?.message ?? t("common.formInvalid"));
+                  }
+                })}
+              />
               {form.formState.errors.name ? (
                 <p className="text-xs text-destructive">
                   {form.formState.errors.name.message}

@@ -1,5 +1,6 @@
 import { Megaphone } from "lucide-react";
 
+import { EmptyState } from "@/components/common/empty-state";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ClientDateTime } from "@/components/common/client-datetime";
 import { cn } from "@/lib/utils";
@@ -22,12 +23,11 @@ export async function DashboardAnnouncements({ locale }: DashboardAnnouncementsP
       </CardHeader>
       <CardContent>
         {announcements.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-border bg-background/20 p-6 text-center text-sm text-muted-foreground">
-            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl border border-border bg-background/40">
-              <Megaphone className="h-6 w-6 text-muted-foreground uai-float-sm" />
-            </div>
-            <div className="mt-3">{t(locale, "dashboard.ann.empty")}</div>
-          </div>
+          <EmptyState
+            className="bg-background/20 p-6"
+            icon={<Megaphone className="h-6 w-6 text-muted-foreground uai-float-sm" />}
+            title={t(locale, "dashboard.ann.empty")}
+          />
         ) : (
           <div className="space-y-3">
             {announcements.map((a) => (

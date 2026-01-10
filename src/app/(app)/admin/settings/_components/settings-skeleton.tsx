@@ -1,4 +1,4 @@
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 function Skeleton({ className }: { className: string }) {
@@ -8,11 +8,7 @@ function Skeleton({ className }: { className: string }) {
 export function AdminSettingsCardSkeleton() {
   return (
     <Card>
-      <CardHeader>
-        <Skeleton className="h-5 w-40" />
-        <Skeleton className="h-4 w-[520px] max-w-full" />
-      </CardHeader>
-      <CardContent>
+      <CardContent className="p-6">
         <div className="rounded-xl border border-border bg-muted/10 p-4">
           <div className="flex items-start justify-between gap-4">
             <div className="space-y-2">
@@ -30,12 +26,13 @@ export function AdminSettingsCardSkeleton() {
 export function AdminSettingsPageSkeleton() {
   return (
     <div className="space-y-6">
-      <div className="space-y-2">
-        <Skeleton className="h-7 w-44" />
-        <Skeleton className="h-4 w-[560px] max-w-full" />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="space-y-2">
+          <Skeleton className="h-7 w-44" />
+          <Skeleton className="h-4 w-[560px] max-w-full" />
+        </div>
       </div>
       <AdminSettingsCardSkeleton />
     </div>
   );
 }
-
