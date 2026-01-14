@@ -56,7 +56,7 @@ const config: Config = {
       fontFamily: {
         sans: ["var(--font-geist-sans)", "ui-sans-serif", "system-ui"],
         mono: ["var(--font-geist-mono)", "ui-monospace", "SFMono-Regular"],
-        logo: ["var(--font-press-start)", "var(--font-geist-mono)"]
+        logo: ['var(--font-press-start, "Press Start 2P")', "var(--font-geist-mono)"]
       }
     }
   },

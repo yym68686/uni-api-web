@@ -12,8 +12,7 @@ import { AdminAnnouncementsCardSkeleton } from "./_components/announcements-skel
 export const dynamic = "force-dynamic";
 
 export default async function AdminAnnouncementsPage() {
-  const locale = await getRequestLocale();
-  const me = await getCurrentUser();
+  const [locale, me] = await Promise.all([getRequestLocale(), getCurrentUser()]);
 
   const isAdmin = me?.role === "admin" || me?.role === "owner";
   const current = t(locale, "admin.currentUser", { email: me?.email ?? "unknown" });
@@ -33,7 +32,7 @@ export default async function AdminAnnouncementsPage() {
         />
       ) : (
         <Suspense fallback={<AdminAnnouncementsCardSkeleton showActions />}>
-          <AdminAnnouncementsContent locale={locale} isAdmin />
+          <AdminAnnouncementsContent isAdmin />
         </Suspense>
       )}
     </div>

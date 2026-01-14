@@ -19,8 +19,7 @@ function roleVariant(role: string): "outline" | "success" | "warning" {
 }
 
 export default async function ProfilePage() {
-  const locale = await getRequestLocale();
-  const me = await getCurrentUser();
+  const [locale, me] = await Promise.all([getRequestLocale(), getCurrentUser()]);
 
   return (
     <div className="space-y-6">

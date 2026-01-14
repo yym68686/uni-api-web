@@ -3,7 +3,6 @@
 
 @layer base {
   :root {
-    --font-press-start: "Press Start 2P";
     --background: 99% 0.004 250;
     --foreground: 22% 0.02 250;
     --card: 100% 0.004 250;

@@ -1,6 +1,5 @@
 import { AdminModelsTableClient } from "./models-table-client";
 import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
-import type { Locale } from "@/lib/i18n/messages";
 import type { AdminModelsListResponse } from "@/lib/types";
 
 function isAdminModelsListResponse(value: unknown): value is AdminModelsListResponse {
@@ -22,13 +21,8 @@ async function getModels() {
   return json.items;
 }
 
-interface AdminModelsContentProps {
-  locale: Locale;
-}
-
-export async function AdminModelsContent({ locale }: AdminModelsContentProps) {
+export async function AdminModelsContent() {
   const items = (await getModels()) ?? [];
 
-  void locale;
   return <AdminModelsTableClient initialItems={items} />;
 }

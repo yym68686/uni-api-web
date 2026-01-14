@@ -1,6 +1,5 @@
 import { AdminUsersTableClient } from "./users-table-client";
 import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
-import type { Locale } from "@/lib/i18n/messages";
 import type { AdminUsersListResponse } from "@/lib/types";
 
 function isAdminUsersListResponse(value: unknown): value is AdminUsersListResponse {
@@ -23,14 +22,12 @@ async function getUsers() {
 }
 
 interface AdminUsersContentProps {
-  locale: Locale;
   currentUserId: string | null;
   currentUserRole: string | null;
 }
 
-export async function AdminUsersContent({ locale, currentUserId, currentUserRole }: AdminUsersContentProps) {
+export async function AdminUsersContent({ currentUserId, currentUserRole }: AdminUsersContentProps) {
   const users = (await getUsers()) ?? [];
 
-  void locale;
   return <AdminUsersTableClient initialItems={users} currentUserId={currentUserId} currentUserRole={currentUserRole} />;
 }

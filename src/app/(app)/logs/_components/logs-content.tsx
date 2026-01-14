@@ -1,6 +1,5 @@
 import { LogsTableClient } from "./logs-table-client";
 import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
-import type { Locale } from "@/lib/i18n/messages";
 import type { LogsListResponse } from "@/lib/types";
 
 function isLogsListResponse(value: unknown): value is LogsListResponse {
@@ -23,12 +22,7 @@ async function getLogs() {
   return json.items;
 }
 
-interface LogsContentProps {
-  locale: Locale;
-}
-
-export async function LogsContent({ locale }: LogsContentProps) {
+export async function LogsContent() {
   const items = (await getLogs()) ?? [];
-  void locale;
   return <LogsTableClient initialItems={items} pageSize={PAGE_SIZE} />;
 }

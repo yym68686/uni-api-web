@@ -12,8 +12,7 @@ import { AdminModelsCardSkeleton } from "./_components/models-skeleton";
 export const dynamic = "force-dynamic";
 
 export default async function AdminModelsPage() {
-  const locale = await getRequestLocale();
-  const me = await getCurrentUser();
+  const [locale, me] = await Promise.all([getRequestLocale(), getCurrentUser()]);
   const isAdmin = me?.role === "admin" || me?.role === "owner";
   const current = t(locale, "admin.currentUser", { email: me?.email ?? "unknown" });
 
@@ -32,7 +31,7 @@ export default async function AdminModelsPage() {
         />
       ) : (
         <Suspense fallback={<AdminModelsCardSkeleton />}>
-          <AdminModelsContent locale={locale} />
+          <AdminModelsContent />
         </Suspense>
       )}
     </div>

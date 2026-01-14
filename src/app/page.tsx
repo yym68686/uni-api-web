@@ -20,14 +20,15 @@ import { cn } from "@/lib/utils";
 import { isLoggedInCookie, SESSION_COOKIE_NAME } from "@/lib/auth";
 import { getAppName } from "@/lib/app-config";
 import { BrandWordmark } from "@/components/brand/wordmark";
-import { getRequestLocale } from "@/lib/i18n/server";
+import { getRequestLocaleFromCookies } from "@/lib/i18n/server";
 import { t } from "@/lib/i18n/messages";
 
 export default async function LandingPage() {
-  const token = (await cookies()).get(SESSION_COOKIE_NAME)?.value;
+  const store = await cookies();
+  const token = store.get(SESSION_COOKIE_NAME)?.value;
   const hasSession = isLoggedInCookie(token);
   const appName = getAppName();
-  const locale = await getRequestLocale();
+  const locale = await getRequestLocaleFromCookies(store);
 
   return (
     <div className="relative min-h-dvh overflow-hidden bg-background">

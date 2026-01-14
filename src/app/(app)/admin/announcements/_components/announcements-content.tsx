@@ -1,6 +1,5 @@
 import { AdminAnnouncementsTableClient } from "./announcements-table-client";
 import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
-import type { Locale } from "@/lib/i18n/messages";
 import type { AnnouncementsListResponse } from "@/lib/types";
 
 function isAnnouncementsListResponse(value: unknown): value is AnnouncementsListResponse {
@@ -23,13 +22,11 @@ async function getAnnouncements() {
 }
 
 interface AdminAnnouncementsContentProps {
-  locale: Locale;
   isAdmin: boolean;
 }
 
-export async function AdminAnnouncementsContent({ locale, isAdmin }: AdminAnnouncementsContentProps) {
+export async function AdminAnnouncementsContent({ isAdmin }: AdminAnnouncementsContentProps) {
   const items = (await getAnnouncements()) ?? [];
 
-  void locale;
   return <AdminAnnouncementsTableClient initialItems={items} canManage={isAdmin} />;
 }

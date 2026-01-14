@@ -16,8 +16,7 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const locale = await getRequestLocale();
-  const me = await getCurrentUser();
+  const [locale, me] = await Promise.all([getRequestLocale(), getCurrentUser()]);
   const userName = me?.email && me.email.length > 0 ? me.email : "User";
   const remainingCredits = typeof me?.balance === "number" && Number.isFinite(me.balance) ? me.balance : null;
 

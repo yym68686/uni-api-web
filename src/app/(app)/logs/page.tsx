@@ -21,7 +21,7 @@ export default async function LogsPage() {
       />
 
       <Suspense fallback={<LogsContentSkeleton />}>
-        <LogsContent locale={locale} />
+        <LogsContent />
       </Suspense>
     </div>
   );

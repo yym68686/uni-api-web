@@ -11,8 +11,7 @@ import { AdminUsersCardSkeleton } from "./_components/users-skeleton";
 export const dynamic = "force-dynamic";
 
 export default async function AdminUsersPage() {
-  const locale = await getRequestLocale();
-  const me = await getCurrentUser();
+  const [locale, me] = await Promise.all([getRequestLocale(), getCurrentUser()]);
   const isAdmin = me?.role === "admin" || me?.role === "owner";
 
   const current =
@@ -32,7 +31,6 @@ export default async function AdminUsersPage() {
       ) : (
         <Suspense fallback={<AdminUsersCardSkeleton />}>
           <AdminUsersContent
-            locale={locale}
             currentUserId={me?.id ?? null}
             currentUserRole={me?.role ?? null}
           />

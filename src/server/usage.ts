@@ -102,6 +102,9 @@ export function getUsageData(): UsageResponse {
   return {
     summary,
     daily,
-    topModels: normalized.sort((a, b) => b.requests - a.requests).slice(0, 5)
+    topModels: normalized
+      .slice()
+      .sort((a, b) => b.requests - a.requests)
+      .slice(0, 5)
   };
 }

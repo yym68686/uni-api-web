@@ -1,6 +1,5 @@
 import { AdminChannelsTableClient } from "./channels-table-client";
 import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
-import type { Locale } from "@/lib/i18n/messages";
 import type { LlmChannelsListResponse } from "@/lib/types";
 
 function isLlmChannelsListResponse(value: unknown): value is LlmChannelsListResponse {
@@ -22,13 +21,8 @@ async function getChannels() {
   return json.items;
 }
 
-interface AdminChannelsContentProps {
-  locale: Locale;
-}
-
-export async function AdminChannelsContent({ locale }: AdminChannelsContentProps) {
+export async function AdminChannelsContent() {
   const items = (await getChannels()) ?? [];
 
-  void locale;
   return <AdminChannelsTableClient initialItems={items} />;
 }
