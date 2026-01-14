@@ -75,13 +75,25 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
-  const publicOrigin = getPublicOrigin(req, url);
+  const requestOrigin = getPublicOrigin(req, url);
 
   const store = await cookies();
   const savedState = store.get(OAUTH_STATE_COOKIE)?.value ?? null;
   const verifier = store.get(OAUTH_VERIFIER_COOKIE)?.value ?? null;
   const nextPath = sanitizeNextPath(store.get(OAUTH_NEXT_COOKIE)?.value ?? "/dashboard");
   const fromPath = sanitizeFromPath(store.get(OAUTH_FROM_COOKIE)?.value ?? "/login");
+
+  const redirectUri =
+    process.env.GOOGLE_REDIRECT_URI ??
+    new URL("/api/auth/google/callback", requestOrigin).toString();
+
+  const publicOrigin = (() => {
+    try {
+      return new URL(redirectUri).origin;
+    } catch {
+      return requestOrigin;
+    }
+  })();
 
   const clear = NextResponse.redirect(new URL("/login", publicOrigin));
   clear.cookies.set(OAUTH_STATE_COOKIE, "", { path: "/", maxAge: 0 });
@@ -97,10 +109,6 @@ export async function GET(req: Request) {
     res.cookies.set(OAUTH_FROM_COOKIE, "", { path: "/", maxAge: 0 });
     return res;
   }
-
-  const redirectUri =
-    process.env.GOOGLE_REDIRECT_URI ??
-    new URL("/api/auth/google/callback", publicOrigin).toString();
 
   const upstream = await fetch(buildBackendUrl("/auth/oauth/google"), {
     method: "POST",
