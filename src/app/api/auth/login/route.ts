@@ -14,6 +14,11 @@ interface AuthResponseBody {
   user: { id: string; email: string };
 }
 
+interface ErrorResponseBody {
+  code?: string;
+  message: string;
+}
+
 function isAuthResponseBody(value: unknown): value is AuthResponseBody {
   if (!value || typeof value !== "object") return false;
   if (!("token" in value) || !("user" in value)) return false;
@@ -30,7 +35,7 @@ export async function POST(req: Request) {
   const parsed = schema.safeParse(json);
   if (!parsed.success) {
     return NextResponse.json(
-      { message: "Invalid payload", issues: parsed.error.issues },
+      { code: "invalid_payload", message: "Invalid payload", issues: parsed.error.issues },
       { status: 400 }
     );
   }
@@ -44,15 +49,25 @@ export async function POST(req: Request) {
 
   const upstreamJson: unknown = await upstream.json().catch(() => null);
   if (!upstream.ok) {
-    const message =
+    const detail =
       upstreamJson && typeof upstreamJson === "object" && "detail" in upstreamJson
-        ? String((upstreamJson as { detail?: unknown }).detail ?? "Login failed")
-        : "Login failed";
-    return NextResponse.json({ message }, { status: upstream.status });
+        ? String((upstreamJson as { detail?: unknown }).detail ?? "")
+        : "";
+
+    let code: ErrorResponseBody["code"];
+    if (upstream.status === 401 && /invalid credentials/i.test(detail)) {
+      code = "invalid_credentials";
+    }
+
+    const message = detail.length > 0 ? detail : "Login failed";
+    return NextResponse.json<ErrorResponseBody>({ code, message }, { status: upstream.status });
   }
 
   if (!isAuthResponseBody(upstreamJson)) {
-    return NextResponse.json({ message: "Invalid upstream response" }, { status: 502 });
+    return NextResponse.json<ErrorResponseBody>(
+      { code: "invalid_upstream_response", message: "Invalid upstream response" },
+      { status: 502 }
+    );
   }
 
   const res = NextResponse.json({ ok: true, user: upstreamJson.user });

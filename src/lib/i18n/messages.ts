@@ -102,6 +102,7 @@ const en = {
   "login.githubSoon": "GitHub login: coming soon",
   "login.continueGithub": "Continue with GitHub",
   "login.continueGoogle": "Continue with Google",
+  "login.invalidCredentials": "Invalid email or password",
   "login.success": "Signed in",
   "login.failed": "Sign in failed",
 
@@ -531,6 +532,7 @@ const zhCN: Record<MessageKey, string> = {
   "login.githubSoon": "GitHub 登录：即将支持",
   "login.continueGithub": "使用 GitHub 继续",
   "login.continueGoogle": "使用 Google 继续",
+  "login.invalidCredentials": "邮箱或密码错误",
   "login.success": "登录成功",
   "login.failed": "登录失败",
 

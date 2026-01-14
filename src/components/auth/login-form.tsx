@@ -70,6 +70,18 @@ export function LoginForm({ appName, nextPath, className }: LoginFormProps) {
     return () => window.clearTimeout(id);
   }, [searchParams, t]);
 
+  function resolveLoginErrorMessage(payload: unknown) {
+    if (!payload || typeof payload !== "object") return t("login.failed");
+    const obj = payload as { code?: unknown; message?: unknown };
+    const code = typeof obj.code === "string" ? obj.code : null;
+    const message = typeof obj.message === "string" ? obj.message : null;
+
+    if (code === "invalid_credentials") return t("login.invalidCredentials");
+    if (message && /invalid credentials/i.test(message)) return t("login.invalidCredentials");
+
+    return message ?? t("login.failed");
+  }
+
   async function onSubmit(values: FormValues) {
     setLoading(true);
     try {
@@ -92,11 +104,7 @@ export function LoginForm({ appName, nextPath, className }: LoginFormProps) {
       });
       if (!res.ok) {
         const json: unknown = await res.json().catch(() => null);
-        const message =
-          json && typeof json === "object" && "message" in json
-            ? String((json as { message?: unknown }).message ?? t("login.failed"))
-            : t("login.failed");
-        throw new Error(message);
+        throw new Error(resolveLoginErrorMessage(json));
       }
 
       toast.success(t("login.success"));
