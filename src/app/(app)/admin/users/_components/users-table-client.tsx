@@ -13,7 +13,13 @@ import type { AdminUserItem } from "@/lib/types";
 import { useI18n } from "@/components/i18n/i18n-provider";
 
 function formatBalance(locale: string, value: number) {
-  return new Intl.NumberFormat(locale).format(value);
+  return new Intl.NumberFormat(locale, {
+    style: "currency",
+    currency: "USD",
+    currencyDisplay: "narrowSymbol",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(value);
 }
 
 function statusVariant(bannedAt: string | null | undefined) {

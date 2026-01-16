@@ -220,3 +220,15 @@ export interface LogItem {
 export interface LogsListResponse {
   items: LogItem[];
 }
+
+export interface BillingLedgerItem {
+  id: string;
+  type: string;
+  deltaUsd: number;
+  balanceUsd: number;
+  createdAt: string;
+}
+
+export interface BillingLedgerListResponse {
+  items: BillingLedgerItem[];
+}

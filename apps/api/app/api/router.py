@@ -50,6 +50,7 @@ from app.schemas.channels import (
     LlmChannelUpdateRequest,
     LlmChannelUpdateResponse,
 )
+from app.schemas.billing import BillingLedgerListResponse
 from app.schemas.models import ModelsListResponse, OpenAIModelsListResponse, OpenAIModelItem
 from app.schemas.models_admin import AdminModelsListResponse, AdminModelUpdateRequest, AdminModelUpdateResponse
 from app.db import get_db_session
@@ -81,6 +82,7 @@ from app.storage.keys_db import (
     list_api_keys,
     set_api_key_revoked,
 )
+from app.storage.billing_db import list_balance_ledger
 from app.storage.oauth_google import login_with_google
 from app.schemas.logs import LogsListResponse
 from app.db import SessionLocal
@@ -489,6 +491,7 @@ async def admin_update_user(
             session,
             org_id=membership.org_id,
             actor_role=membership.role,
+            actor_user_id=admin_user.id,
             user_id=parsed,
             input=payload,
         )
@@ -915,6 +918,24 @@ async def usage(
     from app.storage.usage_db import get_usage_response
 
     return await get_usage_response(session, org_id=membership.org_id, user_id=current_user.id)
+
+
+@router.get("/billing/ledger", response_model=BillingLedgerListResponse)
+async def billing_ledger(
+    limit: int = 50,
+    offset: int = 0,
+    session: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+    membership=Depends(get_current_membership),
+) -> BillingLedgerListResponse:  # type: ignore[no-untyped-def]
+    items = await list_balance_ledger(
+        session,
+        org_id=membership.org_id,
+        user_id=current_user.id,
+        limit=int(limit),
+        offset=int(offset),
+    )
+    return BillingLedgerListResponse(items=items)  # type: ignore[arg-type]
 
 
 @router.get("/keys", response_model=ApiKeysListResponse)

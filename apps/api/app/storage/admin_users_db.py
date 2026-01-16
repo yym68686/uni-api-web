@@ -17,6 +17,7 @@ from app.schemas.admin_users import (
     AdminUserUpdateRequest,
     AdminUserUpdateResponse,
 )
+from app.storage.billing_db import stage_balance_adjustment_ledger_entry
 
 ALLOWED_MEMBERSHIP_ROLES: set[str] = {"owner", "admin", "billing", "developer", "viewer"}
 
@@ -138,6 +139,7 @@ async def update_admin_user(
     *,
     org_id: uuid.UUID,
     actor_role: str,
+    actor_user_id: uuid.UUID | None,
     user_id: uuid.UUID,
     input: AdminUserUpdateRequest,
 ) -> AdminUserUpdateResponse | None:
@@ -159,12 +161,15 @@ async def update_admin_user(
     if membership.role == "owner" and actor_role != "owner":
         raise ValueError("cannot modify owner")
 
+    balance_before = int(user.balance)
+    balance_after: int | None = None
     if input.balance is not None:
         if input.balance < 0:
             raise ValueError("balance must be >= 0")
         if input.balance > 1_000_000_000:
             raise ValueError("balance too large")
-        user.balance = int(input.balance)
+        balance_after = int(input.balance)
+        user.balance = balance_after
 
     if input.banned is not None:
         user.banned_at = dt.datetime.now(dt.timezone.utc) if input.banned else None
@@ -210,6 +215,16 @@ async def update_admin_user(
 
         membership.role = raw_role
         user.role = "admin" if raw_role in {"owner", "admin"} else "user"
+
+    if balance_after is not None:
+        stage_balance_adjustment_ledger_entry(
+            session,
+            org_id=org_id,
+            user_id=user.id,
+            actor_user_id=actor_user_id,
+            balance_before=balance_before,
+            balance_after=int(balance_after),
+        )
 
     await session.commit()
     await session.refresh(user)
