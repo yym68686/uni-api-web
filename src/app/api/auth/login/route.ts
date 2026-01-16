@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { revalidateTag } from "next/cache";
 
 import { SESSION_COOKIE_NAME } from "@/lib/auth";
 import { buildBackendUrl } from "@/lib/backend";
@@ -78,5 +79,6 @@ export async function POST(req: Request) {
     path: "/",
     maxAge: 60 * 60 * 24 * 7
   });
+  revalidateTag("admin:users", { expire: 0 });
   return res;
 }

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { revalidateTag } from "next/cache";
 
 import { SESSION_COOKIE_NAME } from "@/lib/auth";
 import { buildBackendUrl } from "@/lib/backend";
@@ -153,6 +154,7 @@ export async function GET(req: Request) {
     path: "/",
     maxAge: 60 * 60 * 24 * 7
   });
+  revalidateTag("admin:users", { expire: 0 });
   res.cookies.set(OAUTH_STATE_COOKIE, "", { path: "/", maxAge: 0 });
   res.cookies.set(OAUTH_VERIFIER_COOKIE, "", { path: "/", maxAge: 0 });
   res.cookies.set(OAUTH_NEXT_COOKIE, "", { path: "/", maxAge: 0 });
