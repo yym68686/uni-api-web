@@ -17,15 +17,6 @@ interface BillingTableClientProps {
   className?: string;
 }
 
-function formatUsd(locale: string, value: number) {
-  return new Intl.NumberFormat(locale, {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  }).format(value);
-}
-
 function typeLabelKey(type: string) {
   if (type === "adjustment") return "billing.type.adjustment" as const;
   if (type === "usage_charge") return "billing.type.usageCharge" as const;
@@ -38,6 +29,15 @@ function typeLabelKey(type: string) {
 export function BillingTableClient({ initialItems, locale, className }: BillingTableClientProps) {
   const { t } = useI18n();
   const items = initialItems;
+  const currencyFormatter = React.useMemo(() => {
+    return new Intl.NumberFormat(locale, {
+      style: "currency",
+      currency: "USD",
+      currencyDisplay: "narrowSymbol",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+  }, [locale]);
 
   return (
     <Card className={className}>
@@ -86,10 +86,10 @@ export function BillingTableClient({ initialItems, locale, className }: BillingT
                       )}
                     >
                       {delta > 0 ? "+" : ""}
-                      {formatUsd(locale, delta)}
+                      {currencyFormatter.format(delta)}
                     </TableCell>
                     <TableCell className="text-right font-mono tabular-nums">
-                      {formatUsd(locale, Number(row.balanceUsd ?? 0))}
+                      {currencyFormatter.format(Number(row.balanceUsd ?? 0))}
                     </TableCell>
                   </TableRow>
                 );
@@ -101,4 +101,3 @@ export function BillingTableClient({ initialItems, locale, className }: BillingT
     </Card>
   );
 }
-

@@ -12,16 +12,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import type { AdminUserItem } from "@/lib/types";
 import { useI18n } from "@/components/i18n/i18n-provider";
 
-function formatBalance(locale: string, value: number) {
-  return new Intl.NumberFormat(locale, {
-    style: "currency",
-    currency: "USD",
-    currencyDisplay: "narrowSymbol",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  }).format(value);
-}
-
 function statusVariant(bannedAt: string | null | undefined) {
   return bannedAt ? "destructive" : "success";
 }
@@ -41,6 +31,15 @@ interface AdminUsersTableClientProps {
 export function AdminUsersTableClient({ initialItems, currentUserId, currentUserRole }: AdminUsersTableClientProps) {
   const { locale, t } = useI18n();
   const [items, setItems] = React.useState<AdminUserItem[]>(initialItems);
+  const balanceFormatter = React.useMemo(() => {
+    return new Intl.NumberFormat(locale, {
+      style: "currency",
+      currency: "USD",
+      currencyDisplay: "narrowSymbol",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+  }, [locale]);
 
   function updateUser(next: AdminUserItem) {
     setItems((prev) => prev.map((u) => (u.id === next.id ? next : u)));
@@ -95,7 +94,7 @@ export function AdminUsersTableClient({ initialItems, currentUserId, currentUser
                       {u.bannedAt ? t("admin.users.status.banned") : t("admin.users.status.active")}
                     </Badge>
                   </TableCell>
-                  <TableCell className="font-mono tabular-nums text-sm">{formatBalance(locale, u.balance)}</TableCell>
+                  <TableCell className="font-mono tabular-nums text-sm">{balanceFormatter.format(u.balance)}</TableCell>
                   <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
                     {u.apiKeysActive}/{u.apiKeysTotal}
                   </TableCell>
