@@ -5,6 +5,7 @@ import { EmptyState } from "@/components/common/empty-state";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
+import { CACHE_TAGS } from "@/lib/cache-tags";
 import type { Locale } from "@/lib/i18n/messages";
 import { t } from "@/lib/i18n/messages";
 import type { ModelsListResponse } from "@/lib/types";
@@ -24,7 +25,7 @@ function formatUsdPerM(value: string | null | undefined) {
 async function getModels() {
   const res = await fetch(buildBackendUrl("/console/models"), {
     cache: "force-cache",
-    next: { tags: ["models:user"] },
+    next: { tags: [CACHE_TAGS.modelsUser] },
     headers: await getBackendAuthHeadersCached()
   });
   if (!res.ok) return null;

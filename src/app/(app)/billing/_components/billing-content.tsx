@@ -2,6 +2,7 @@ import { CreditCard } from "lucide-react";
 
 import { StatsCard } from "@/components/app/stats-card";
 import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
+import { CACHE_TAGS } from "@/lib/cache-tags";
 import { getCurrentUser } from "@/lib/current-user";
 import { formatUsdFixed2 } from "@/lib/format";
 import { getRequestLocale } from "@/lib/i18n/server";
@@ -21,7 +22,7 @@ const PAGE_SIZE = 50;
 async function getLedger() {
   const res = await fetch(buildBackendUrl(`/billing/ledger?limit=${PAGE_SIZE}&offset=0`), {
     cache: "force-cache",
-    next: { tags: ["billing:ledger"] },
+    next: { tags: [CACHE_TAGS.billingLedger] },
     headers: await getBackendAuthHeadersCached()
   });
   if (!res.ok) return null;

@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 
 import { SESSION_COOKIE_NAME } from "@/lib/auth";
 import { buildBackendUrl } from "@/lib/backend";
+import { CACHE_TAGS } from "@/lib/cache-tags";
 
 interface MeResponse {
   role?: unknown;
@@ -25,7 +26,7 @@ export async function POST() {
     return NextResponse.json({ message: "Forbidden" }, { status: 403 });
   }
 
-  revalidateTag("models:admin-config", { expire: 0 });
-  revalidateTag("models:user", { expire: 0 });
+  revalidateTag(CACHE_TAGS.modelsAdminConfig, { expire: 0 });
+  revalidateTag(CACHE_TAGS.modelsUser, { expire: 0 });
   return NextResponse.json({ ok: true });
 }

@@ -3,6 +3,7 @@ import "server-only";
 import { cache } from "react";
 
 import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
+import { CACHE_TAGS } from "@/lib/cache-tags";
 import type {
   AnnouncementsListResponse,
   ApiKeysListResponse,
@@ -82,7 +83,7 @@ export const getDashboardApiKeys = cache(async (): Promise<ApiKeysListResponse["
     const headers = await getBackendAuthHeadersCached();
     const res = await fetch(buildBackendUrl("/keys"), {
       cache: "force-cache",
-      next: { tags: ["keys:user"] },
+      next: { tags: [CACHE_TAGS.keysUser] },
       headers
     });
     if (!res.ok) return [];
@@ -99,7 +100,7 @@ export const getDashboardAnnouncements = cache(async (): Promise<AnnouncementsLi
     const headers = await getBackendAuthHeadersCached();
     const res = await fetch(buildBackendUrl("/announcements"), {
       cache: "force-cache",
-      next: { tags: ["announcements"] },
+      next: { tags: [CACHE_TAGS.announcements] },
       headers
     });
     if (!res.ok) return [];

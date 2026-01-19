@@ -1,5 +1,6 @@
 import { AdminModelsTableClient } from "./models-table-client";
 import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
+import { CACHE_TAGS } from "@/lib/cache-tags";
 import type { AdminModelsListResponse } from "@/lib/types";
 
 function isAdminModelsListResponse(value: unknown): value is AdminModelsListResponse {
@@ -12,7 +13,7 @@ function isAdminModelsListResponse(value: unknown): value is AdminModelsListResp
 async function getModels() {
   const res = await fetch(buildBackendUrl("/admin/models"), {
     cache: "force-cache",
-    next: { tags: ["models:admin-config", "models:user"] },
+    next: { tags: [CACHE_TAGS.modelsAdminConfig, CACHE_TAGS.modelsUser] },
     headers: await getBackendAuthHeadersCached()
   });
   if (!res.ok) return null;

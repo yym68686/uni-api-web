@@ -3,6 +3,7 @@ import { Settings } from "lucide-react";
 import { EmptyState } from "@/components/common/empty-state";
 import { Card, CardContent } from "@/components/ui/card";
 import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
+import { CACHE_TAGS } from "@/lib/cache-tags";
 import type { Locale } from "@/lib/i18n/messages";
 import { t } from "@/lib/i18n/messages";
 import { AdminSettingsPanel } from "./settings-panel";
@@ -19,7 +20,7 @@ function isAdminSettingsResponse(value: unknown): value is AdminSettingsResponse
 async function getAdminSettings() {
   const res = await fetch(buildBackendUrl("/admin/settings"), {
     cache: "force-cache",
-    next: { tags: ["admin:settings"] },
+    next: { tags: [CACHE_TAGS.adminSettings] },
     headers: await getBackendAuthHeadersCached()
   });
   if (!res.ok) return null;

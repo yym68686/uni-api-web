@@ -4,6 +4,7 @@ import { revalidateTag } from "next/cache";
 
 import { SESSION_COOKIE_NAME } from "@/lib/auth";
 import { buildBackendUrl } from "@/lib/backend";
+import { CACHE_TAGS } from "@/lib/cache-tags";
 
 const schema = z.object({
   email: z.string().trim().email(),
@@ -79,6 +80,6 @@ export async function POST(req: Request) {
     path: "/",
     maxAge: 60 * 60 * 24 * 7
   });
-  revalidateTag("admin:users", { expire: 0 });
+  revalidateTag(CACHE_TAGS.adminUsers, { expire: 0 });
   return res;
 }

@@ -1,4 +1,5 @@
 import { proxyToBackend } from "@/lib/proxy";
+import { CACHE_TAGS } from "@/lib/cache-tags";
 import { revalidateTag } from "next/cache";
 
 export function GET(req: Request) {
@@ -7,6 +8,6 @@ export function GET(req: Request) {
 
 export async function POST(req: Request) {
   const res = await proxyToBackend(req, "/keys");
-  if (res.ok) revalidateTag("keys:user", { expire: 0 });
+  if (res.ok) revalidateTag(CACHE_TAGS.keysUser, { expire: 0 });
   return res;
 }

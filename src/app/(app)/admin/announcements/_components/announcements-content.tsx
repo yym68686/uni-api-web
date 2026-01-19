@@ -1,5 +1,6 @@
 import { AdminAnnouncementsTableClient } from "./announcements-table-client";
 import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
+import { CACHE_TAGS } from "@/lib/cache-tags";
 import type { AnnouncementsListResponse } from "@/lib/types";
 
 function isAnnouncementsListResponse(value: unknown): value is AnnouncementsListResponse {
@@ -12,7 +13,7 @@ function isAnnouncementsListResponse(value: unknown): value is AnnouncementsList
 async function getAnnouncements() {
   const res = await fetch(buildBackendUrl("/announcements"), {
     cache: "force-cache",
-    next: { tags: ["announcements"] },
+    next: { tags: [CACHE_TAGS.announcements] },
     headers: await getBackendAuthHeadersCached()
   });
   if (!res.ok) return null;

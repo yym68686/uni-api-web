@@ -4,6 +4,7 @@ import { revalidateTag } from "next/cache";
 
 import { SESSION_COOKIE_NAME } from "@/lib/auth";
 import { buildBackendUrl } from "@/lib/backend";
+import { CACHE_TAGS } from "@/lib/cache-tags";
 
 const OAUTH_STATE_COOKIE = "uai_oauth_state";
 const OAUTH_VERIFIER_COOKIE = "uai_oauth_verifier";
@@ -154,7 +155,7 @@ export async function GET(req: Request) {
     path: "/",
     maxAge: 60 * 60 * 24 * 7
   });
-  revalidateTag("admin:users", { expire: 0 });
+  revalidateTag(CACHE_TAGS.adminUsers, { expire: 0 });
   res.cookies.set(OAUTH_STATE_COOKIE, "", { path: "/", maxAge: 0 });
   res.cookies.set(OAUTH_VERIFIER_COOKIE, "", { path: "/", maxAge: 0 });
   res.cookies.set(OAUTH_NEXT_COOKIE, "", { path: "/", maxAge: 0 });

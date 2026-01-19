@@ -1,5 +1,6 @@
 import { AdminUsersTableClient } from "./users-table-client";
 import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
+import { CACHE_TAGS } from "@/lib/cache-tags";
 import type { AdminUsersListResponse } from "@/lib/types";
 
 function isAdminUsersListResponse(value: unknown): value is AdminUsersListResponse {
@@ -12,7 +13,7 @@ function isAdminUsersListResponse(value: unknown): value is AdminUsersListRespon
 async function getUsers() {
   const res = await fetch(buildBackendUrl("/admin/users"), {
     cache: "force-cache",
-    next: { tags: ["admin:users"] },
+    next: { tags: [CACHE_TAGS.adminUsers] },
     headers: await getBackendAuthHeadersCached()
   });
   if (!res.ok) return null;
