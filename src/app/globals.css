@@ -378,6 +378,11 @@
     animation: uai-orb-float 18s ease-in-out infinite;
   }
 
+  .uai-cv-auto {
+    content-visibility: auto;
+    contain-intrinsic-size: 1000px;
+  }
+
   @keyframes uai-blob-float-a {
     0% {
       transform: translate3d(-6%, -2%, 0) rotate(0deg);
@@ -448,8 +453,25 @@
   }
 
   .uai-landing-blob {
-    filter: blur(140px);
     will-change: transform, opacity;
+  }
+
+  @media (min-width: 40rem) and (pointer: fine) {
+    .uai-landing-blob {
+      filter: blur(110px);
+    }
+  }
+
+  @media (min-width: 64rem) and (pointer: fine) {
+    .uai-landing-blob {
+      filter: blur(140px);
+    }
+  }
+
+  @media (max-width: 40rem) {
+    .uai-landing-noise {
+      animation: none;
+    }
   }
 
   .uai-landing-blob-a {

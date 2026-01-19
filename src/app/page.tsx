@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { cookies } from "next/headers";
+import { headers } from "next/headers";
 import {
   ArrowRight,
   BadgeCheck,
@@ -13,22 +13,18 @@ import {
   Zap
 } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { SpotlightCard } from "@/components/landing/spotlight-card";
+import { IntentLink } from "@/components/landing/intent-link";
+import { SpotlightSurface } from "@/components/landing/spotlight-surface";
 import { cn } from "@/lib/utils";
-import { isLoggedInCookie, SESSION_COOKIE_NAME } from "@/lib/auth";
 import { getAppName } from "@/lib/app-config";
 import { BrandWordmark } from "@/components/brand/wordmark";
-import { getRequestLocaleFromCookies } from "@/lib/i18n/server";
-import { t } from "@/lib/i18n/messages";
+import { detectLocaleFromAcceptLanguage, type Locale, t } from "@/lib/i18n/messages";
 
 export default async function LandingPage() {
-  const store = await cookies();
-  const token = store.get(SESSION_COOKIE_NAME)?.value;
-  const hasSession = isLoggedInCookie(token);
   const appName = getAppName();
-  const locale = await getRequestLocaleFromCookies(store);
+  const h = await headers();
+  const locale: Locale = detectLocaleFromAcceptLanguage(h.get("accept-language"));
 
   return (
     <div className="relative min-h-dvh overflow-hidden bg-background">
@@ -76,46 +72,24 @@ export default async function LandingPage() {
           </nav>
 
           <div className="flex items-center gap-2">
-            {hasSession ? (
-              <Button
-                asChild
-                className={cn(
-                  "rounded-xl",
-                  "shadow-[0_0_0_1px_oklch(var(--primary)/0.35),0_12px_34px_oklch(var(--primary)/0.22),inset_0_1px_0_0_oklch(var(--foreground)/0.12)]"
-                )}
-              >
-                <Link href="/dashboard">
-                  {t(locale, "landing.openDashboard")}
-                  <ArrowRight className="h-4 w-4" />
-                </Link>
-              </Button>
-            ) : (
-              <>
-                <Button
-                  asChild
-                  variant="outline"
-                  className={cn(
-                    "rounded-xl bg-transparent",
-                    "border-border/80 hover:bg-background/40"
-                  )}
-                >
-                  <Link href="/login">{t(locale, "landing.signIn")}</Link>
-                </Button>
-                <Button
-                  asChild
-                  className={cn(
-                    "rounded-xl",
-                    "shadow-[0_0_0_1px_oklch(var(--primary)/0.35),0_12px_34px_oklch(var(--primary)/0.22),inset_0_1px_0_0_oklch(var(--foreground)/0.12)]",
-                    "transition-all duration-300 [transition-timing-function:cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_0_0_1px_oklch(var(--primary)/0.45),0_18px_48px_oklch(var(--primary)/0.26),inset_0_1px_0_0_oklch(var(--foreground)/0.14)]"
-                  )}
-                >
-                  <Link href="/register">
-                    {t(locale, "landing.getStarted")}
-                    <ArrowRight className="h-4 w-4" />
-                  </Link>
-                </Button>
-              </>
-            )}
+            <IntentLink
+              href="/login"
+              variant="outline"
+              className={cn("rounded-xl bg-transparent", "border-border/80 hover:bg-background/40")}
+            >
+              {t(locale, "landing.signIn")}
+            </IntentLink>
+            <IntentLink
+              href="/register"
+              className={cn(
+                "rounded-xl",
+                "shadow-[0_0_0_1px_oklch(var(--primary)/0.35),0_12px_34px_oklch(var(--primary)/0.22),inset_0_1px_0_0_oklch(var(--foreground)/0.12)]",
+                "transition-all duration-300 [transition-timing-function:cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-0.5 hover:shadow-[0_0_0_1px_oklch(var(--primary)/0.45),0_18px_48px_oklch(var(--primary)/0.26),inset_0_1px_0_0_oklch(var(--foreground)/0.14)]"
+              )}
+            >
+              {t(locale, "landing.getStarted")}
+              <ArrowRight className="h-4 w-4" />
+            </IntentLink>
           </div>
         </div>
       </header>
@@ -168,46 +142,27 @@ export default async function LandingPage() {
               </div>
 
               <div className="flex flex-col gap-3 sm:flex-row">
-                {hasSession ? (
-                  <Button
-                    asChild
-                    className={cn(
-                      "rounded-xl uai-border-beam",
-                      "shadow-[0_0_0_1px_oklch(var(--primary)/0.35),0_12px_34px_oklch(var(--primary)/0.22),inset_0_1px_0_0_oklch(var(--foreground)/0.12)]"
-                    )}
-                  >
-                    <Link href="/dashboard">
-                      {t(locale, "landing.openDashboard")}
-                      <ArrowRight className="h-4 w-4" />
-                    </Link>
-                  </Button>
-                ) : (
-                  <>
-                    <Button
-                      asChild
-                      className={cn(
-                        "rounded-xl uai-border-beam",
-                        "shadow-[0_0_0_1px_oklch(var(--primary)/0.35),0_12px_34px_oklch(var(--primary)/0.22),inset_0_1px_0_0_oklch(var(--foreground)/0.12)]"
-                      )}
-                    >
-                      <Link href="/register">
-                        {t(locale, "register.title")}
-                        <ArrowRight className="h-4 w-4" />
-                      </Link>
-                    </Button>
-                    <Button
-                      asChild
-                      variant="outline"
-                      className="rounded-xl bg-transparent border-border/80 hover:bg-background/40"
-                    >
-                      <Link href="/login">{t(locale, "landing.signIn")}</Link>
-                    </Button>
-                  </>
-                )}
+                <IntentLink
+                  href="/register"
+                  className={cn(
+                    "rounded-xl uai-border-beam",
+                    "shadow-[0_0_0_1px_oklch(var(--primary)/0.35),0_12px_34px_oklch(var(--primary)/0.22),inset_0_1px_0_0_oklch(var(--foreground)/0.12)]"
+                  )}
+                >
+                  {t(locale, "register.title")}
+                  <ArrowRight className="h-4 w-4" />
+                </IntentLink>
+                <IntentLink
+                  href="/login"
+                  variant="outline"
+                  className="rounded-xl bg-transparent border-border/80 hover:bg-background/40"
+                >
+                  {t(locale, "landing.signIn")}
+                </IntentLink>
               </div>
             </div>
 
-            <SpotlightCard className="rounded-2xl">
+            <SpotlightSurface className="rounded-2xl">
               <CardHeader className="pb-4">
                 <CardTitle className="flex items-center gap-2">
                   <Layers3 className="h-5 w-5 text-muted-foreground" />
@@ -263,11 +218,11 @@ export default async function LandingPage() {
                   <span className="font-mono">/v1/*</span>
                 </div>
               </CardContent>
-            </SpotlightCard>
+            </SpotlightSurface>
           </div>
         </section>
 
-        <section id="features" className="mt-12 sm:mt-16">
+        <section id="features" className="uai-cv-auto mt-12 sm:mt-16">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <div className="text-xs font-mono tracking-widest text-muted-foreground">{t(locale, "landing.features.tag")}</div>
@@ -286,7 +241,13 @@ export default async function LandingPage() {
           </div>
 
           <div className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            <SpotlightCard>
+            <Card
+              className={cn(
+                "group overflow-hidden rounded-2xl border-border bg-card/40 backdrop-blur-xl",
+                "transition-all duration-300 [transition-timing-function:cubic-bezier(0.16,1,0.3,1)]",
+                "hover:-translate-y-1 hover:shadow-lg hover:border-primary/20"
+              )}
+            >
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <LineChart className="h-5 w-5 text-primary" />
@@ -297,9 +258,15 @@ export default async function LandingPage() {
               <CardContent className="text-sm text-muted-foreground">
                 {t(locale, "landing.features.card.spend.body")}
               </CardContent>
-            </SpotlightCard>
+            </Card>
 
-            <SpotlightCard>
+            <Card
+              className={cn(
+                "group overflow-hidden rounded-2xl border-border bg-card/40 backdrop-blur-xl",
+                "transition-all duration-300 [transition-timing-function:cubic-bezier(0.16,1,0.3,1)]",
+                "hover:-translate-y-1 hover:shadow-lg hover:border-primary/20"
+              )}
+            >
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <KeyRound className="h-5 w-5 text-warning" />
@@ -310,9 +277,16 @@ export default async function LandingPage() {
               <CardContent className="text-sm text-muted-foreground">
                 {t(locale, "landing.features.card.keys.body")}
               </CardContent>
-            </SpotlightCard>
+            </Card>
 
-            <SpotlightCard className="md:col-span-2 lg:col-span-1">
+            <Card
+              className={cn(
+                "group overflow-hidden rounded-2xl border-border bg-card/40 backdrop-blur-xl",
+                "transition-all duration-300 [transition-timing-function:cubic-bezier(0.16,1,0.3,1)]",
+                "hover:-translate-y-1 hover:shadow-lg hover:border-primary/20",
+                "md:col-span-2 lg:col-span-1"
+              )}
+            >
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <ScrollText className="h-5 w-5 text-muted-foreground" />
@@ -323,11 +297,11 @@ export default async function LandingPage() {
               <CardContent className="text-sm text-muted-foreground">
                 {t(locale, "landing.features.card.logs.body")}
               </CardContent>
-            </SpotlightCard>
+            </Card>
           </div>
         </section>
 
-        <section id="security" className="mt-10 sm:mt-12">
+        <section id="security" className="uai-cv-auto mt-10 sm:mt-12">
           <Card className="rounded-2xl border-border bg-card/40">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -353,7 +327,7 @@ export default async function LandingPage() {
           </Card>
         </section>
 
-        <section id="docs" className="mt-10 sm:mt-12">
+        <section id="docs" className="uai-cv-auto mt-10 sm:mt-12">
           <Card className="rounded-2xl border-border bg-card/40">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -366,17 +340,15 @@ export default async function LandingPage() {
               <div className="text-sm text-muted-foreground">
                 {t(locale, "landing.section.docs.body")}
               </div>
-              <Button asChild variant="outline" className="rounded-xl bg-transparent">
-                <Link href={hasSession ? "/dashboard" : "/login"}>
-                  {hasSession ? t(locale, "landing.cta.openConsole") : t(locale, "landing.signIn")}
-                  <ArrowRight className="h-4 w-4" />
-                </Link>
-              </Button>
+              <IntentLink href="/dashboard" variant="outline" className="rounded-xl bg-transparent">
+                {t(locale, "landing.cta.openConsole")}
+                <ArrowRight className="h-4 w-4" />
+              </IntentLink>
             </CardContent>
           </Card>
         </section>
 
-        <footer className="mt-10 border-t border-border pt-8 text-xs text-muted-foreground">
+        <footer className="uai-cv-auto mt-10 border-t border-border pt-8 text-xs text-muted-foreground">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>© {new Date().getUTCFullYear()} {appName}</div>
             <div className="font-mono">{t(locale, "landing.footer.stack")}</div>
