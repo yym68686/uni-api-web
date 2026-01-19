@@ -35,7 +35,7 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   try {
     const res = await fetch(buildBackendUrl("/auth/me"), {
       cache: "force-cache",
-      next: { tags: [CACHE_TAGS.currentUser], revalidate: 3 },
+      next: { tags: [CACHE_TAGS.currentUser], revalidate: 30 },
       headers: await getBackendAuthHeadersCached()
     });
     if (!res.ok) return null;
