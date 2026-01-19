@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Copy, Loader2, MoreHorizontal, RotateCcw, Trash2 } from "lucide-react";
+import { Copy, Loader2, MoreHorizontal, PencilLine, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import type { ApiKeyRevealResponse } from "@/lib/types";
@@ -25,6 +25,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/components/i18n/i18n-provider";
@@ -51,6 +53,7 @@ interface KeysTableProps {
   fullKeysById?: Record<string, string>;
   onToggleRevoked: (id: string, revoked: boolean) => Promise<void> | void;
   onDelete: (id: string) => Promise<void> | void;
+  onRename: (id: string, name: string) => Promise<void> | void;
   emptyState?: React.ReactNode;
   className?: string;
 }
@@ -60,6 +63,7 @@ export function KeysTable({
   fullKeysById,
   onToggleRevoked,
   onDelete,
+  onRename,
   emptyState,
   className
 }: KeysTableProps) {
@@ -68,6 +72,9 @@ export function KeysTable({
   const [deletingId, setDeletingId] = React.useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = React.useState<ApiKeyItem | null>(null);
   const [copyingId, setCopyingId] = React.useState<string | null>(null);
+  const [renameTarget, setRenameTarget] = React.useState<ApiKeyItem | null>(null);
+  const [renameValue, setRenameValue] = React.useState("");
+  const [renamingId, setRenamingId] = React.useState<string | null>(null);
 
   async function toggleRevoked(id: string, revoked: boolean) {
     setRevokingId(id);
@@ -88,6 +95,28 @@ export function KeysTable({
       toast.error(err instanceof Error ? err.message : t("keys.toast.deleteFailed"));
     } finally {
       setDeletingId(null);
+    }
+  }
+
+  async function rename(id: string, name: string) {
+    const trimmed = name.trim();
+    if (trimmed.length < 2) {
+      toast.error(t("validation.minChars", { min: 2 }));
+      return;
+    }
+    if (trimmed.length > 64) {
+      toast.error(t("validation.maxChars", { max: 64 }));
+      return;
+    }
+    if (renamingId) return;
+    setRenamingId(id);
+    try {
+      await onRename(id, trimmed);
+      setRenameTarget(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("keys.toast.updateFailed"));
+    } finally {
+      setRenamingId(null);
     }
   }
 
@@ -216,6 +245,16 @@ export function KeysTable({
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem
+                            disabled={deletingId === k.id || revokingId === k.id || isCopying}
+                            onClick={() => {
+                              setRenameTarget(k);
+                              setRenameValue(k.name);
+                            }}
+                          >
+                            <PencilLine className="mr-2 h-4 w-4" />
+                            {t("keys.table.rename")}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
                             disabled={isCopying}
                             onClick={() => {
                               void copyFullKey(k.id);
@@ -257,6 +296,61 @@ export function KeysTable({
             </TableBody>
           </Table>
         )}
+
+        <Dialog
+          open={renameTarget != null}
+          onOpenChange={(open) => {
+            if (!open) setRenameTarget(null);
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{t("keys.rename.title")}</DialogTitle>
+              <DialogDescription>{t("keys.rename.desc")}</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2">
+              <Label htmlFor="rename-name">{t("keys.dialog.name")}</Label>
+              <Input
+                id="rename-name"
+                value={renameValue}
+                autoComplete="off"
+                onChange={(e) => setRenameValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter") return;
+                  if (!renameTarget) return;
+                  e.preventDefault();
+                  void rename(renameTarget.id, renameValue);
+                }}
+              />
+              <p className="text-xs text-muted-foreground">{t("keys.dialog.nameHelp")}</p>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="ghost" onClick={() => setRenameTarget(null)}>
+                {t("common.cancel")}
+              </Button>
+              <Button
+                type="button"
+                disabled={!renameTarget || renamingId === renameTarget.id}
+                onClick={() => {
+                  if (!renameTarget) return;
+                  void rename(renameTarget.id, renameValue);
+                }}
+              >
+                {renameTarget && renamingId === renameTarget.id ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    {t("common.saving")}
+                  </>
+                ) : (
+                  <>
+                    <PencilLine className="h-4 w-4" />
+                    {t("common.save")}
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <Dialog
           open={deleteTarget != null}

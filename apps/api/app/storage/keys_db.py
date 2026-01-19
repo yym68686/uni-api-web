@@ -14,6 +14,7 @@ from app.schemas.keys import (
     ApiKeyCreateResponse,
     ApiKeyItem,
     ApiKeysListResponse,
+    ApiKeyUpdateRequest,
 )
 from app.security import generate_api_key, key_prefix, sha256_hex
 
@@ -105,29 +106,8 @@ async def reveal_api_key(
         return None
     return secret.strip()
 
-
-async def revoke_api_key(
-    session: AsyncSession, key_id: str, *, user_id: uuid.UUID | None = None
-) -> ApiKeyItem | None:
-    try:
-        parsed = uuid.UUID(key_id)
-    except ValueError:
-        return None
-
-    row = await session.get(ApiKey, parsed)
-    if not row:
-        return None
-    if user_id is not None and row.user_id != user_id:
-        return None
-    if row.revoked_at is None:
-        row.revoked_at = dt.datetime.now(dt.timezone.utc)
-        await session.commit()
-        await session.refresh(row)
-    return _to_item(row)
-
-
-async def set_api_key_revoked(
-    session: AsyncSession, key_id: str, *, revoked: bool, user_id: uuid.UUID | None = None
+async def update_api_key(
+    session: AsyncSession, key_id: str, *, input: ApiKeyUpdateRequest, user_id: uuid.UUID | None = None
 ) -> ApiKeyItem | None:
     try:
         parsed = uuid.UUID(key_id)
@@ -140,12 +120,29 @@ async def set_api_key_revoked(
     if user_id is not None and row.user_id != user_id:
         return None
 
-    if revoked:
-        if row.revoked_at is None:
-            row.revoked_at = dt.datetime.now(dt.timezone.utc)
-    else:
-        if row.revoked_at is not None:
-            row.revoked_at = None
+    fields_set = getattr(input, "model_fields_set", None)
+    if fields_set is None:
+        fields_set = getattr(input, "__fields_set__", set())
+
+    if "name" in fields_set:
+        raw = input.name
+        name = (raw or "").strip()
+        if len(name) < 2:
+            raise ValueError("name too small (min 2)")
+        if len(name) > 64:
+            raise ValueError("name too large (max 64)")
+        if "\n" in name or "\r" in name:
+            raise ValueError("invalid name")
+        row.name = name
+
+    if "revoked" in fields_set and input.revoked is not None:
+        if bool(input.revoked):
+            if row.revoked_at is None:
+                row.revoked_at = dt.datetime.now(dt.timezone.utc)
+        else:
+            if row.revoked_at is not None:
+                row.revoked_at = None
+
     await session.commit()
     await session.refresh(row)
     return _to_item(row)

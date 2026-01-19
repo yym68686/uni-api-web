@@ -27,7 +27,8 @@ class ApiKeyCreateResponse(BaseModel):
 
 
 class ApiKeyUpdateRequest(BaseModel):
-    revoked: bool
+    revoked: bool | None = None
+    name: str | None = None
 
 
 class ApiKeyUpdateResponse(BaseModel):

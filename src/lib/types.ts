@@ -43,6 +43,20 @@ export interface ApiKeyCreateResponse {
   key: string;
 }
 
+export interface ApiKeyUpdateRequest {
+  revoked?: boolean | null;
+  name?: string | null;
+}
+
+export interface ApiKeyUpdateResponse {
+  item: ApiKeyItem;
+}
+
+export interface ApiKeyDeleteResponse {
+  ok: boolean;
+  id: string;
+}
+
 export interface ApiKeyRevealResponse {
   id: string;
   key: string;

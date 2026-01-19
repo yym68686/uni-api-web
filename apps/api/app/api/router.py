@@ -80,7 +80,7 @@ from app.storage.keys_db import (
     create_api_key,
     delete_api_key,
     list_api_keys,
-    set_api_key_revoked,
+    update_api_key,
 )
 from app.storage.billing_db import list_balance_ledger
 from app.storage.oauth_google import login_with_google
@@ -966,12 +966,15 @@ async def update_key(
     session: AsyncSession = Depends(get_db_session),
     current_user=Depends(get_current_user),
 ) -> ApiKeyUpdateResponse:
-    item = await set_api_key_revoked(
-        session,
-        key_id,
-        revoked=bool(payload.revoked),
-        user_id=None if current_user.role in {"admin", "owner"} else current_user.id,
-    )
+    try:
+        item = await update_api_key(
+            session,
+            key_id,
+            input=payload,
+            user_id=None if current_user.role in {"admin", "owner"} else current_user.id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     if not item:
         raise HTTPException(status_code=404, detail="not found")
     return ApiKeyUpdateResponse(item=item)

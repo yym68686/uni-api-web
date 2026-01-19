@@ -1,12 +1,10 @@
 "use client";
 
 import * as React from "react";
-import { Copy, KeyRound, Loader2 } from "lucide-react";
-import { useForm } from "react-hook-form";
+import { Copy, KeyRound, Loader2, PencilLine } from "lucide-react";
 import { toast } from "sonner";
-import { z } from "zod";
 
-import type { ApiKeyCreateResponse } from "@/lib/types";
+import type { ApiKeyCreateResponse, ApiKeyItem, ApiKeyUpdateResponse } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,33 +13,15 @@ import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
-  DialogTitle,
-  DialogTrigger
+  DialogTitle
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useI18n } from "@/components/i18n/i18n-provider";
 
-import type { MessageKey, MessageVars } from "@/lib/i18n/messages";
-
-function createNameSchema(t: (key: MessageKey, vars?: MessageVars) => string) {
-  return z
-    .string()
-    .trim()
-    .min(2, t("validation.minChars", { min: 2 }))
-    .max(64, t("validation.maxChars", { max: 64 }));
-}
-
-function createSchema(t: (key: MessageKey, vars?: MessageVars) => string) {
-  return z.object({
-    name: createNameSchema(t)
-  });
-}
-
-type FormValues = z.infer<ReturnType<typeof createSchema>>;
-
 interface CreateKeyDialogProps {
   onCreated: (res: ApiKeyCreateResponse) => void;
+  onRenamed?: (item: ApiKeyItem) => void;
   triggerLabel?: string;
   triggerClassName?: string;
 }
@@ -60,45 +40,55 @@ function extractApiErrorMessage(body: unknown): string | null {
   return null;
 }
 
-export function CreateKeyDialog({
-  onCreated,
-  triggerLabel,
-  triggerClassName
-}: CreateKeyDialogProps) {
-  const [open, setOpen] = React.useState(false);
-  const [createdKey, setCreatedKey] = React.useState<string | null>(null);
-  const [creating, setCreating] = React.useState(false);
-  const { t } = useI18n();
+function generateDefaultName() {
+  const date = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+  const uuid =
+    typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Math.random()}`;
+  const suffix = uuid.replaceAll("-", "").slice(0, 8);
+  return `key-${date}-${suffix}`;
+}
 
-  const nameSchema = React.useMemo(() => createNameSchema(t), [t]);
-  const schema = React.useMemo(() => createSchema(t), [t]);
+function isApiKeyUpdateResponse(value: unknown): value is ApiKeyUpdateResponse {
+  if (!value || typeof value !== "object") return false;
+  return "item" in value;
+}
+
+export function CreateKeyDialog({ onCreated, onRenamed, triggerLabel, triggerClassName }: CreateKeyDialogProps) {
+  const { t } = useI18n();
+  const [open, setOpen] = React.useState(false);
+  const [creating, setCreating] = React.useState(false);
+  const [createdKey, setCreatedKey] = React.useState<string | null>(null);
+  const [createdItem, setCreatedItem] = React.useState<ApiKeyItem | null>(null);
+  const [name, setName] = React.useState("");
+  const [savingName, setSavingName] = React.useState(false);
 
   const triggerText = triggerLabel ?? t("keys.create");
 
-  const form = useForm<FormValues>({
-    defaultValues: { name: "" },
-    mode: "onChange"
-  });
+  function reset() {
+    setCreatedKey(null);
+    setCreatedItem(null);
+    setName("");
+    setSavingName(false);
+    setCreating(false);
+  }
 
-  const canSubmit = form.formState.isValid && !creating;
+  async function copyKey(value: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success(t("keys.dialog.copySuccess"));
+    } catch {
+      toast.error(t("keys.dialog.copyFailed"));
+    }
+  }
 
-  async function onSubmit(values: FormValues) {
+  async function createNow() {
+    if (creating) return;
     setCreating(true);
     try {
-      const parsed = schema.safeParse(values);
-      if (!parsed.success) {
-        const firstIssue = parsed.error.issues[0];
-        if (firstIssue?.path[0] === "name") {
-          form.setError("name", { message: firstIssue.message, type: "validate" });
-        }
-        toast.error(firstIssue?.message ?? t("keys.toast.updateFailed"));
-        return;
-      }
-
       const res = await fetch("/api/keys", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(parsed.data)
+        body: JSON.stringify({ name: generateDefaultName() })
       });
       if (!res.ok) {
         let message = t("keys.toast.updateFailed");
@@ -112,8 +102,10 @@ export function CreateKeyDialog({
       }
       const json: ApiKeyCreateResponse = (await res.json()) as ApiKeyCreateResponse;
       setCreatedKey(json.key);
+      setCreatedItem(json.item);
+      setName(json.item.name);
       onCreated(json);
-      toast.success(t("keys.dialog.created"));
+      setOpen(true);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("keys.toast.updateFailed"));
     } finally {
@@ -121,117 +113,118 @@ export function CreateKeyDialog({
     }
   }
 
-  async function copyKey(key: string) {
+  async function saveRename() {
+    if (!createdItem) return;
+    const trimmed = name.trim();
+    if (trimmed === createdItem.name) return;
+    if (trimmed.length < 2) {
+      toast.error(t("validation.minChars", { min: 2 }));
+      return;
+    }
+    if (trimmed.length > 64) {
+      toast.error(t("validation.maxChars", { max: 64 }));
+      return;
+    }
+    setSavingName(true);
     try {
-      await navigator.clipboard.writeText(key);
-      toast.success(t("keys.dialog.copySuccess"));
-    } catch {
-      toast.error(t("keys.dialog.copyFailed"));
+      const res = await fetch(`/api/keys/${encodeURIComponent(createdItem.id)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: trimmed })
+      });
+      const json: unknown = await res.json().catch(() => null);
+      if (!res.ok) {
+        const message = extractApiErrorMessage(json) ?? t("keys.toast.updateFailed");
+        throw new Error(message);
+      }
+      if (!isApiKeyUpdateResponse(json)) throw new Error(t("common.unexpectedError"));
+      const next = json.item;
+      setCreatedItem(next);
+      onRenamed?.(next);
+      toast.success(t("keys.toast.renamed"));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("keys.toast.updateFailed"));
+    } finally {
+      setSavingName(false);
     }
   }
 
-  function reset() {
-    setCreatedKey(null);
-    form.reset({ name: "" });
-  }
-
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (!next) reset();
-      }}
-    >
-      <DialogTrigger asChild>
-        <Button className={cn("rounded-xl", triggerClassName)}>
-          <KeyRound className="h-4 w-4" />
-          {triggerText}
-        </Button>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{t("keys.dialog.title")}</DialogTitle>
-          <DialogDescription>
-            {t("keys.dialog.desc")}
-          </DialogDescription>
-        </DialogHeader>
+    <>
+      <Button
+        className={cn("rounded-xl", triggerClassName)}
+        disabled={creating}
+        onClick={() => void createNow()}
+      >
+        {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+        {creating ? t("keys.dialog.creating") : triggerText}
+      </Button>
 
-        {createdKey ? (
-          <div className="space-y-3">
-            <div className="rounded-xl border border-border bg-muted/30 p-3">
-              <div className="text-xs text-muted-foreground">{t("keys.dialog.yourKey")}</div>
-              <div className="mt-2 break-all font-mono tabular-nums tracking-wide text-sm">{createdKey}</div>
-            </div>
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => copyKey(createdKey)}
-              >
-                <Copy className="h-4 w-4" />
-                {t("keys.dialog.copy")}
-              </Button>
-              <Button
-                type="button"
-                onClick={() => {
-                  setOpen(false);
-                  reset();
-                }}
-              >
-                {t("keys.dialog.done")}
-              </Button>
-            </DialogFooter>
-          </div>
-        ) : (
-          <form
-            className="space-y-4"
-            onSubmit={(e) => {
-              void form.handleSubmit(onSubmit)(e);
-            }}
-          >
-            <div className="space-y-2">
-              <Label htmlFor="name">{t("keys.dialog.name")}</Label>
-              <Input
-                id="name"
-                placeholder={t("keys.dialog.namePlaceholder")}
-                autoComplete="off"
-                {...form.register("name", {
-                  validate: (value) => {
-                    const r = nameSchema.safeParse(value);
-                    return r.success ? true : (r.error.issues[0]?.message ?? t("common.formInvalid"));
-                  }
-                })}
-              />
-              {form.formState.errors.name ? (
-                <p className="text-xs text-destructive">
-                  {form.formState.errors.name.message}
-                </p>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  {t("keys.dialog.nameHelp")}
-                </p>
-              )}
-            </div>
+      <Dialog
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next);
+          if (!next) reset();
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("keys.dialog.title")}</DialogTitle>
+            <DialogDescription>{t("keys.dialog.desc")}</DialogDescription>
+          </DialogHeader>
 
-            <DialogFooter>
-              <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
-                {t("keys.dialog.cancel")}
-              </Button>
-              <Button type="submit" disabled={!canSubmit}>
-                {creating ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    {t("keys.dialog.creating")}
-                  </>
-                ) : (
-                  t("keys.dialog.create")
-                )}
-              </Button>
-            </DialogFooter>
-          </form>
-        )}
-      </DialogContent>
-    </Dialog>
+          {createdKey ? (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-border bg-muted/30 p-3">
+                <div className="text-xs text-muted-foreground">{t("keys.dialog.yourKey")}</div>
+                <div className="mt-2 break-all font-mono tabular-nums tracking-wide text-sm">{createdKey}</div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="key-name">{t("keys.dialog.name")}</Label>
+                <Input
+                  id="key-name"
+                  value={name}
+                  autoComplete="off"
+                  onChange={(e) => setName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter") return;
+                    e.preventDefault();
+                    void saveRename();
+                  }}
+                />
+                <p className="text-xs text-muted-foreground">{t("keys.dialog.nameHelp")}</p>
+              </div>
+
+              <DialogFooter>
+                <Button type="button" variant="secondary" onClick={() => void copyKey(createdKey)}>
+                  <Copy className="h-4 w-4" />
+                  {t("keys.dialog.copy")}
+                </Button>
+                <Button type="button" variant="outline" disabled={savingName} onClick={() => void saveRename()}>
+                  {savingName ? <Loader2 className="h-4 w-4 animate-spin" /> : <PencilLine className="h-4 w-4" />}
+                  {savingName ? t("common.saving") : t("common.save")}
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    setOpen(false);
+                    reset();
+                  }}
+                >
+                  {t("keys.dialog.done")}
+                </Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              {t("common.working")}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
+

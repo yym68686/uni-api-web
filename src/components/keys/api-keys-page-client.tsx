@@ -4,7 +4,7 @@ import * as React from "react";
 import { KeyRound } from "lucide-react";
 import { toast } from "sonner";
 
-import type { ApiKeyCreateResponse, ApiKeyItem } from "@/lib/types";
+import type { ApiKeyCreateResponse, ApiKeyItem, ApiKeyUpdateResponse } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { CreateKeyDialog } from "@/components/keys/create-key-dialog";
 import { KeysTable } from "@/components/keys/keys-table";
@@ -28,11 +28,11 @@ export function ApiKeysPageClient({ initialItems }: ApiKeysPageClientProps) {
     setFullKeysById((prev) => ({ ...prev, [res.item.id]: res.key }));
   }
 
-  async function setRevoked(id: string, revoked: boolean) {
+  async function patchKey(id: string, body: Record<string, unknown>) {
     const res = await fetch(`/api/keys/${id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ revoked })
+      body: JSON.stringify(body)
     });
     const json: unknown = await res.json().catch(() => null);
     if (!res.ok) {
@@ -42,10 +42,19 @@ export function ApiKeysPageClient({ initialItems }: ApiKeysPageClientProps) {
           : t("keys.toast.updateFailed");
       throw new Error(message);
     }
-    if (!json || typeof json !== "object" || !("item" in json)) return;
-    const item = (json as { item?: ApiKeyItem }).item;
+    if (!json || typeof json !== "object" || !("item" in json)) return null;
+    const item = (json as ApiKeyUpdateResponse).item;
     if (!item) return;
     setItems((prev) => prev.map((k) => (k.id === id ? item : k)));
+    return item;
+  }
+
+  async function setRevoked(id: string, revoked: boolean) {
+    await patchKey(id, { revoked });
+  }
+
+  async function renameKey(id: string, name: string) {
+    await patchKey(id, { name });
   }
 
   async function deleteKey(id: string) {
@@ -93,6 +102,9 @@ export function ApiKeysPageClient({ initialItems }: ApiKeysPageClientProps) {
         actions={
           <CreateKeyDialog
             onCreated={onCreated}
+            onRenamed={(item) => {
+              setItems((prev) => prev.map((k) => (k.id === item.id ? item : k)));
+            }}
             triggerLabel={t("keys.create")}
             triggerClassName={cn("uai-border-beam", PRIMARY_CTA_CLASSNAME)}
           />
@@ -106,6 +118,10 @@ export function ApiKeysPageClient({ initialItems }: ApiKeysPageClientProps) {
             fullKeysById={fullKeysById}
             onToggleRevoked={onToggleRevoked}
             onDelete={onDelete}
+            onRename={async (id, name) => {
+              await renameKey(id, name);
+              toast.success(t("keys.toast.renamed"));
+            }}
             emptyState={
               <div className="p-6">
                 <EmptyState
@@ -115,6 +131,9 @@ export function ApiKeysPageClient({ initialItems }: ApiKeysPageClientProps) {
                   action={
                     <CreateKeyDialog
                       onCreated={onCreated}
+                      onRenamed={(item) => {
+                        setItems((prev) => prev.map((k) => (k.id === item.id ? item : k)));
+                      }}
                       triggerLabel={t("keys.create")}
                       triggerClassName={cn("uai-border-beam", PRIMARY_CTA_CLASSNAME)}
                     />

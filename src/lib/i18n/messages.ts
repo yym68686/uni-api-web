@@ -194,6 +194,7 @@ const en = {
   "keys.toast.revoked": "Key revoked",
   "keys.toast.restored": "Key restored",
   "keys.toast.deleted": "Key deleted",
+  "keys.toast.renamed": "Key renamed",
 
   "keys.dialog.title": "Create API key",
   "keys.dialog.desc": "Keep your key safe; you can also copy the full key anytime from the list.",
@@ -217,6 +218,7 @@ const en = {
   "keys.table.createdAt": "Created At",
   "keys.table.status": "Status",
   "keys.table.actions": "Actions",
+  "keys.table.rename": "Rename",
   "keys.table.copyFullKey": "Copy full key",
   "keys.table.copy": "Copy",
   "keys.table.active": "Active",
@@ -228,6 +230,8 @@ const en = {
   "keys.table.deleting": "Deleting…",
   "keys.table.deleteDialogTitle": "Delete API key?",
   "keys.table.deleteDialogDesc": "This will permanently delete the key and cannot be undone.",
+  "keys.rename.title": "Rename API key",
+  "keys.rename.desc": "Update the display name (the key itself does not change).",
 
   "admin.forbidden": "Forbidden",
   "admin.currentUser": "Current: {email}",
@@ -643,6 +647,7 @@ const zhCN: Record<MessageKey, string> = {
   "keys.toast.revoked": "已撤销密钥",
   "keys.toast.restored": "已恢复密钥",
   "keys.toast.deleted": "已删除密钥",
+  "keys.toast.renamed": "已重命名密钥",
 
   "keys.dialog.title": "创建密钥",
   "keys.dialog.desc": "请妥善保存密钥；你也可以在列表中随时复制完整密钥。",
@@ -666,6 +671,7 @@ const zhCN: Record<MessageKey, string> = {
   "keys.table.createdAt": "创建时间",
   "keys.table.status": "状态",
   "keys.table.actions": "操作",
+  "keys.table.rename": "重命名",
   "keys.table.copyFullKey": "复制完整密钥",
   "keys.table.copy": "复制",
   "keys.table.active": "正常",
@@ -677,6 +683,8 @@ const zhCN: Record<MessageKey, string> = {
   "keys.table.deleting": "删除中…",
   "keys.table.deleteDialogTitle": "删除密钥？",
   "keys.table.deleteDialogDesc": "将永久删除该密钥，无法恢复。",
+  "keys.rename.title": "重命名密钥",
+  "keys.rename.desc": "仅修改显示名称（密钥本身不会改变）。",
 
   "admin.forbidden": "无权限",
   "admin.currentUser": "当前：{email}",
