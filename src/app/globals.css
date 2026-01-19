@@ -239,6 +239,77 @@
     animation: uai-page-in 120ms cubic-bezier(0.16, 1, 0.3, 1) both;
   }
 
+  @keyframes uai-dialog-overlay-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes uai-dialog-overlay-out {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+    }
+  }
+
+  @keyframes uai-dialog-content-in {
+    from {
+      opacity: 0;
+      scale: 0.98;
+    }
+    to {
+      opacity: 1;
+      scale: 1;
+    }
+  }
+
+  @keyframes uai-dialog-content-out {
+    from {
+      opacity: 1;
+      scale: 1;
+    }
+    to {
+      opacity: 0;
+      scale: 0.98;
+    }
+  }
+
+  .uai-dialog-overlay {
+    animation-duration: 220ms;
+    animation-timing-function: var(--uai-expo-out);
+    animation-fill-mode: both;
+    will-change: opacity;
+  }
+  .uai-dialog-overlay[data-state="open"] {
+    animation-name: uai-dialog-overlay-in;
+  }
+  .uai-dialog-overlay[data-state="closed"] {
+    animation-name: uai-dialog-overlay-out;
+    animation-duration: 160ms;
+    animation-timing-function: cubic-bezier(0.4, 0, 1, 1);
+  }
+
+  .uai-dialog-content {
+    animation-duration: 220ms;
+    animation-timing-function: var(--uai-expo-out);
+    animation-fill-mode: both;
+    transform-origin: center;
+    will-change: scale, opacity;
+  }
+  .uai-dialog-content[data-state="open"] {
+    animation-name: uai-dialog-content-in;
+  }
+  .uai-dialog-content[data-state="closed"] {
+    animation-name: uai-dialog-content-out;
+    animation-duration: 160ms;
+    animation-timing-function: cubic-bezier(0.4, 0, 1, 1);
+  }
+
   .uai-float-sm {
     animation: uai-float-sm 6.5s ease-in-out infinite;
     will-change: transform;
@@ -324,6 +395,10 @@
 
   @media (prefers-reduced-motion: reduce) {
     .uai-page-transition {
+      animation: none;
+    }
+    .uai-dialog-overlay,
+    .uai-dialog-content {
       animation: none;
     }
     .uai-float-sm,
