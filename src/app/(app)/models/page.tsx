@@ -1,10 +1,7 @@
-import { Suspense } from "react";
-
 import { getRequestLocale } from "@/lib/i18n/server";
 import { t } from "@/lib/i18n/messages";
 import { PageHeader } from "@/components/common/page-header";
 import { ModelsContent } from "./_components/models-content";
-import { ModelsContentSkeleton } from "./_components/models-skeleton";
 
 export const dynamic = "force-dynamic";
 
@@ -23,9 +20,7 @@ export default async function ModelsPage() {
         }
       />
 
-      <Suspense fallback={<ModelsContentSkeleton />}>
-        <ModelsContent locale={locale} />
-      </Suspense>
+      <ModelsContent locale={locale} />
     </div>
   );
 }

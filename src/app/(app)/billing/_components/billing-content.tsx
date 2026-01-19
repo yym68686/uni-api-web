@@ -1,14 +1,8 @@
-import { CreditCard } from "lucide-react";
-
-import { StatsCard } from "@/components/app/stats-card";
 import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
 import { CACHE_TAGS } from "@/lib/cache-tags";
-import { getCurrentUser } from "@/lib/current-user";
-import { formatUsdFixed2 } from "@/lib/format";
 import { getRequestLocale } from "@/lib/i18n/server";
-import { t } from "@/lib/i18n/messages";
 import type { BillingLedgerListResponse } from "@/lib/types";
-import { BillingTableClient } from "./billing-table-client";
+import { BillingContentClient } from "./billing-content-client";
 
 function isBillingLedgerListResponse(value: unknown): value is BillingLedgerListResponse {
   if (!value || typeof value !== "object") return false;
@@ -32,21 +26,6 @@ async function getLedger() {
 }
 
 export async function BillingContent() {
-  const [locale, me, items] = await Promise.all([getRequestLocale(), getCurrentUser(), getLedger()]);
-  const balanceUsd = me?.balance ?? 0;
-
-  return (
-    <div className="space-y-6">
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatsCard
-          title={t(locale, "billing.kpi.balance")}
-          value={formatUsdFixed2(balanceUsd, locale)}
-          icon={CreditCard}
-          className="lg:col-span-2"
-        />
-      </div>
-
-      <BillingTableClient initialItems={items ?? []} locale={locale} />
-    </div>
-  );
+  const [locale, items] = await Promise.all([getRequestLocale(), getLedger()]);
+  return <BillingContentClient locale={locale} initialItems={items ?? []} pageSize={PAGE_SIZE} />;
 }

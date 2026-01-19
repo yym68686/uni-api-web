@@ -4,7 +4,9 @@ import * as React from "react";
 import { Copy, Info, KeyRound } from "lucide-react";
 import { toast } from "sonner";
 
-import type { ApiKeyCreateResponse, ApiKeyItem, ApiKeyUpdateResponse } from "@/lib/types";
+import { API_PATHS } from "@/lib/api-paths";
+import { useSwrLite } from "@/lib/swr-lite";
+import type { ApiKeyCreateResponse, ApiKeyItem, ApiKeysListResponse, ApiKeyUpdateResponse } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { CreateKeyDialog } from "@/components/keys/create-key-dialog";
 import { KeysTable } from "@/components/keys/keys-table";
@@ -21,13 +23,45 @@ interface ApiKeysPageClientProps {
   publicApiBaseUrl?: string | null;
 }
 
+function isApiKeysListResponse(value: unknown): value is ApiKeysListResponse {
+  if (!value || typeof value !== "object") return false;
+  if (!("items" in value)) return false;
+  const items = (value as { items?: unknown }).items;
+  return Array.isArray(items);
+}
+
+async function fetchKeysList() {
+  const res = await fetch(API_PATHS.keys, { cache: "no-store" });
+  const json: unknown = await res.json().catch(() => null);
+  if (!res.ok) {
+    const message =
+      json && typeof json === "object" && "message" in json
+        ? String((json as { message?: unknown }).message ?? "Request failed")
+        : "Request failed";
+    throw new Error(message);
+  }
+  if (!isApiKeysListResponse(json)) throw new Error("Invalid response");
+  return json.items;
+}
+
 export function ApiKeysPageClient({ initialItems, publicApiBaseUrl }: ApiKeysPageClientProps) {
-  const [items, setItems] = React.useState<ApiKeyItem[]>(initialItems);
   const [fullKeysById, setFullKeysById] = React.useState<Record<string, string>>({});
   const { t } = useI18n();
 
+  const { data, mutate } = useSwrLite<ApiKeyItem[]>(API_PATHS.keys, fetchKeysList, {
+    fallbackData: initialItems,
+    dedupingIntervalMs: 0,
+    revalidateOnFocus: false
+  });
+
+  React.useEffect(() => {
+    void mutate(undefined, { revalidate: true });
+  }, [mutate]);
+
+  const items = data ?? initialItems;
+
   function onCreated(res: ApiKeyCreateResponse) {
-    setItems((prev) => [res.item, ...prev]);
+    void mutate((prev) => [res.item, ...(prev ?? [])]);
     setFullKeysById((prev) => ({ ...prev, [res.item.id]: res.key }));
   }
 
@@ -48,7 +82,7 @@ export function ApiKeysPageClient({ initialItems, publicApiBaseUrl }: ApiKeysPag
     if (!json || typeof json !== "object" || !("item" in json)) return null;
     const item = (json as ApiKeyUpdateResponse).item;
     if (!item) return;
-    setItems((prev) => prev.map((k) => (k.id === id ? item : k)));
+    await mutate((prev) => (prev ?? []).map((k) => (k.id === id ? item : k)));
     return item;
   }
 
@@ -70,7 +104,7 @@ export function ApiKeysPageClient({ initialItems, publicApiBaseUrl }: ApiKeysPag
           : t("keys.toast.deleteFailed");
       throw new Error(message);
     }
-    setItems((prev) => prev.filter((k) => k.id !== id));
+    await mutate((prev) => (prev ?? []).filter((k) => k.id !== id));
     setFullKeysById((prev) => {
       if (!(id in prev)) return prev;
       const next = { ...prev };
@@ -159,7 +193,7 @@ export function ApiKeysPageClient({ initialItems, publicApiBaseUrl }: ApiKeysPag
           <CreateKeyDialog
             onCreated={onCreated}
             onRenamed={(item) => {
-              setItems((prev) => prev.map((k) => (k.id === item.id ? item : k)));
+              void mutate((prev) => (prev ?? []).map((k) => (k.id === item.id ? item : k)));
             }}
             triggerLabel={t("keys.create")}
             triggerClassName={cn("uai-border-beam", PRIMARY_CTA_CLASSNAME)}
@@ -188,7 +222,7 @@ export function ApiKeysPageClient({ initialItems, publicApiBaseUrl }: ApiKeysPag
                     <CreateKeyDialog
                       onCreated={onCreated}
                       onRenamed={(item) => {
-                        setItems((prev) => prev.map((k) => (k.id === item.id ? item : k)));
+                        void mutate((prev) => (prev ?? []).map((k) => (k.id === item.id ? item : k)));
                       }}
                       triggerLabel={t("keys.create")}
                       triggerClassName={cn("uai-border-beam", PRIMARY_CTA_CLASSNAME)}
