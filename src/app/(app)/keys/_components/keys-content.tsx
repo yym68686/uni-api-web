@@ -1,4 +1,5 @@
 import { ApiKeysPageClient } from "@/components/keys/api-keys-page-client";
+import { getPublicApiBaseUrl } from "@/lib/app-config";
 import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
 import type { ApiKeysListResponse } from "@/lib/types";
 
@@ -10,6 +11,7 @@ function isApiKeysListResponse(value: unknown): value is ApiKeysListResponse {
 }
 
 export async function KeysContent() {
+  const publicApiBaseUrl = getPublicApiBaseUrl();
   let items: ApiKeysListResponse["items"] = [];
   try {
     const res = await fetch(buildBackendUrl("/keys"), {
@@ -25,5 +27,5 @@ export async function KeysContent() {
     // Backend not available; keep page resilient.
   }
 
-  return <ApiKeysPageClient initialItems={items} />;
+  return <ApiKeysPageClient initialItems={items} publicApiBaseUrl={publicApiBaseUrl} />;
 }

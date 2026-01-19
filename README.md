@@ -14,9 +14,10 @@ This repo contains:
 - Landing page (dark, glass, micro-interactions)
 - Auth: email/password + email verification codes (Resend) + Google OAuth (PKCE)
 - Dashboard: usage/spend trend, remaining balance, announcements (server data)
-- API Keys: create/revoke/restore/delete; masked by default; **copy full key anytime**; last used + total spend
+- API Keys: one-click create (auto name), rename anytime, revoke/restore/delete; masked by default; **copy full key anytime**; last used + total spend
 - Models: list available models + input/output prices (priced in $/M tokens; UI shows as `$X`)
 - Logs: model/time/tokens/latency/TTFT/TPS/cost/source IP for every request
+- Billing: balance + balance adjustment history
 - Profile: account info + delete account
 
 **Admin**
@@ -136,6 +137,7 @@ services:
     depends_on: [api]
     environment:
       API_BASE_URL: http://api:8000/v1
+      PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-}
       APP_NAME: ${APP_NAME:-MyApp}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
@@ -198,6 +200,7 @@ Security notes:
 - `API_BASE_URL`: backend base URL (default `http://localhost:8001/v1`), used by:
   - server-side backend calls (`src/lib/backend.ts`)
   - `/v1/*` proxy rewrite (`src/proxy.ts`)
+- `PUBLIC_API_BASE_URL`: user-facing API Base URL (shown on the API Keys page, copyable; example `https://api.0-0.pro/v1`)
 - `APP_NAME`: site/app name (default `MyApp`)
 - `GOOGLE_CLIENT_ID`: Google OAuth client ID
 - `GOOGLE_REDIRECT_URI`: OAuth redirect URI (must match GCP config)

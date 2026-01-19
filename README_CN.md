@@ -14,9 +14,10 @@ Uni API Web 是一个完整的 **LLM API 控制台 + 网关后端**：账号体�
 - 落地页：深色氛围 + 毛玻璃 + 微交互
 - 登录/注册：邮箱密码 + 邮箱验证码（Resend）+ Google OAuth（PKCE）
 - Dashboard：用量/消费趋势、剩余余额、公告列表（服务端数据）
-- 密钥：创建/撤销/恢复/删除；默认掩码；**随时可复制完整密钥**；显示上次使用与总消费
+- 密钥：一键创建（自动命名），可随时重命名；撤销/恢复/删除；默认掩码；**随时可复制完整密钥**；显示上次使用与总消费
 - 模型：展示当前账号可用模型与输入/输出价格（按 $/M tokens 计费；列表显示为 `$X`）
 - 日志：每次请求的模型、时间、输入/输出 token、总时长、首字时长、TPS、花费、来源 IP
+- 账单：余额 + 余额变更历史（当前仅包含管理员调整）
 - Profile：账号信息 + 注销账号
 
 **管理员侧**
@@ -136,6 +137,7 @@ services:
     depends_on: [api]
     environment:
       API_BASE_URL: http://api:8000/v1
+      PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-}
       APP_NAME: ${APP_NAME:-MyApp}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
@@ -198,6 +200,7 @@ docker compose -f docker-compose.prod.yml up -d
 - `API_BASE_URL`：后端 API 基地址（默认 `http://localhost:8001/v1`），用于：
   - Next.js Server 侧请求后端（`src/lib/backend.ts`）
   - `src/proxy.ts` 将 `/v1/*` rewrite 到该地址
+- `PUBLIC_API_BASE_URL`：对用户展示的 API Base URL（显示在「密钥」页面顶部，可一键复制；例如 `https://api.0-0.pro/v1`）
 - `APP_NAME`：站点名称（默认 `MyApp`）
 - `GOOGLE_CLIENT_ID`：Google OAuth Client ID
 - `GOOGLE_REDIRECT_URI`：OAuth 回调地址（必须与 GCP 配置一致）

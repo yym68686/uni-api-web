@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { KeyRound } from "lucide-react";
+import { Copy, Info, KeyRound } from "lucide-react";
 import { toast } from "sonner";
 
 import type { ApiKeyCreateResponse, ApiKeyItem, ApiKeyUpdateResponse } from "@/lib/types";
@@ -13,12 +13,15 @@ import { useI18n } from "@/components/i18n/i18n-provider";
 import { PageHeader } from "@/components/common/page-header";
 import { EmptyState } from "@/components/common/empty-state";
 import { PRIMARY_CTA_CLASSNAME } from "@/lib/ui-styles";
+import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface ApiKeysPageClientProps {
   initialItems: ApiKeyItem[];
+  publicApiBaseUrl?: string | null;
 }
 
-export function ApiKeysPageClient({ initialItems }: ApiKeysPageClientProps) {
+export function ApiKeysPageClient({ initialItems, publicApiBaseUrl }: ApiKeysPageClientProps) {
   const [items, setItems] = React.useState<ApiKeyItem[]>(initialItems);
   const [fullKeysById, setFullKeysById] = React.useState<Record<string, string>>({});
   const { t } = useI18n();
@@ -94,11 +97,64 @@ export function ApiKeysPageClient({ initialItems }: ApiKeysPageClientProps) {
     }
   }
 
+  async function copyApiBaseUrl() {
+    if (!publicApiBaseUrl) return;
+    try {
+      await navigator.clipboard.writeText(publicApiBaseUrl);
+      toast.success(t("keys.dialog.copySuccess"));
+    } catch {
+      toast.error(t("keys.dialog.copyFailed"));
+    }
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
         title={t("keys.title")}
-        description={t("keys.subtitle")}
+        description={
+          <TooltipProvider delayDuration={150}>
+            <div className="space-y-2">
+              <div>{t("keys.subtitle")}</div>
+              {publicApiBaseUrl ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-muted-foreground">{t("keys.baseUrl.label")}</span>
+                  <span className="rounded-lg border border-border bg-muted/20 px-2 py-1 font-mono text-xs tabular-nums text-foreground">
+                    {publicApiBaseUrl}
+                  </span>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8 rounded-xl"
+                        onClick={() => void copyApiBaseUrl()}
+                        aria-label={t("keys.baseUrl.copy")}
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("keys.baseUrl.copy")}</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8 rounded-xl"
+                        aria-label={t("keys.baseUrl.moreInfo")}
+                      >
+                        <Info className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-[360px]">{t("keys.baseUrl.help")}</TooltipContent>
+                  </Tooltip>
+                </div>
+              ) : null}
+            </div>
+          </TooltipProvider>
+        }
         actions={
           <CreateKeyDialog
             onCreated={onCreated}

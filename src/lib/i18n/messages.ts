@@ -232,6 +232,10 @@ const en = {
   "keys.table.deleteDialogDesc": "This will permanently delete the key and cannot be undone.",
   "keys.rename.title": "Rename API key",
   "keys.rename.desc": "Update the display name (the key itself does not change).",
+  "keys.baseUrl.label": "API Base URL",
+  "keys.baseUrl.copy": "Copy Base URL",
+  "keys.baseUrl.moreInfo": "Why this URL?",
+  "keys.baseUrl.help": "Use this Base URL for API requests. The console and the API gateway may be served on different domains.",
 
   "admin.forbidden": "Forbidden",
   "admin.currentUser": "Current: {email}",
@@ -685,6 +689,10 @@ const zhCN: Record<MessageKey, string> = {
   "keys.table.deleteDialogDesc": "将永久删除该密钥，无法恢复。",
   "keys.rename.title": "重命名密钥",
   "keys.rename.desc": "仅修改显示名称（密钥本身不会改变）。",
+  "keys.baseUrl.label": "API Base URL",
+  "keys.baseUrl.copy": "复制 Base URL",
+  "keys.baseUrl.moreInfo": "为什么是这个地址？",
+  "keys.baseUrl.help": "请使用该 Base URL 发起 API 请求。控制台与 API 网关可能运行在不同域名。",
 
   "admin.forbidden": "无权限",
   "admin.currentUser": "当前：{email}",
