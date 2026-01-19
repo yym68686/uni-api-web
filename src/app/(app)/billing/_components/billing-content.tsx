@@ -3,6 +3,7 @@ import { CreditCard } from "lucide-react";
 import { StatsCard } from "@/components/app/stats-card";
 import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
 import { getCurrentUser } from "@/lib/current-user";
+import { formatUsdFixed2 } from "@/lib/format";
 import { getRequestLocale } from "@/lib/i18n/server";
 import { t } from "@/lib/i18n/messages";
 import type { BillingLedgerListResponse } from "@/lib/types";
@@ -38,12 +39,7 @@ export async function BillingContent() {
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatsCard
           title={t(locale, "billing.kpi.balance")}
-          value={new Intl.NumberFormat(locale, {
-            style: "currency",
-            currency: "USD",
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2
-          }).format(balanceUsd)}
+          value={formatUsdFixed2(balanceUsd, locale)}
           icon={CreditCard}
           className="lg:col-span-2"
         />
@@ -53,4 +49,3 @@ export async function BillingContent() {
     </div>
   );
 }
-

@@ -27,6 +27,10 @@ export function ClientDateTime({
     setMounted(true);
   }, []);
 
+  const dateTimeFormatter = React.useMemo(() => {
+    return new Intl.DateTimeFormat(locale, { dateStyle, timeStyle });
+  }, [locale, dateStyle, timeStyle]);
+
   if (!mounted) {
     return (
       <span className={cn("font-mono tabular-nums", className)} suppressHydrationWarning>
@@ -44,7 +48,7 @@ export function ClientDateTime({
     return <span className={cn("font-mono tabular-nums", className)}>{fallback}</span>;
   }
 
-  const formatted = new Intl.DateTimeFormat(locale, { dateStyle, timeStyle }).format(dt);
+  const formatted = dateTimeFormatter.format(dt);
 
   return (
     <span className={cn("font-mono tabular-nums", className)} title={dt.toISOString()}>
@@ -52,4 +56,3 @@ export function ClientDateTime({
     </span>
   );
 }
-

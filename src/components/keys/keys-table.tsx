@@ -31,18 +31,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/components/i18n/i18n-provider";
 
-function formatDateTime(locale: string, value?: string) {
-  if (!value) return "—";
-  const dt = new Date(value);
-  return new Intl.DateTimeFormat(locale, {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit"
-  }).format(dt);
-}
-
 function formatSpendUsd(value: number) {
   if (!Number.isFinite(value) || value <= 0) return "$0";
   return formatUsd(value);
@@ -75,6 +63,23 @@ export function KeysTable({
   const [renameTarget, setRenameTarget] = React.useState<ApiKeyItem | null>(null);
   const [renameValue, setRenameValue] = React.useState("");
   const [renamingId, setRenamingId] = React.useState<string | null>(null);
+
+  const dateTimeFormatter = React.useMemo(() => {
+    return new Intl.DateTimeFormat(locale, {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+  }, [locale]);
+
+  function formatDateTime(value?: string) {
+    if (!value) return "—";
+    const dt = new Date(value);
+    if (Number.isNaN(dt.getTime())) return "—";
+    return dateTimeFormatter.format(dt);
+  }
 
   async function toggleRevoked(id: string, revoked: boolean) {
     setRevokingId(id);
@@ -216,13 +221,13 @@ export function KeysTable({
                       </div>
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground font-mono tabular-nums">
-                      {formatDateTime(locale, k.lastUsedAt)}
+                      {formatDateTime(k.lastUsedAt)}
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground font-mono tabular-nums">
                       {formatSpendUsd(k.spendUsd)}
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground font-mono tabular-nums">
-                      {formatDateTime(locale, k.createdAt)}
+                      {formatDateTime(k.createdAt)}
                     </TableCell>
                     <TableCell>
                       {revoked ? (
