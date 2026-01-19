@@ -11,7 +11,7 @@ export default async function BillingPage() {
   return (
     <div className="space-y-6">
       <PageHeader title={t(locale, "billing.title")} description={t(locale, "billing.subtitle")} />
-      <BillingContent />
+      <BillingContent locale={locale} />
     </div>
   );
 }

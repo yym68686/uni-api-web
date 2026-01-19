@@ -17,7 +17,7 @@ export async function KeysContent() {
   try {
     const res = await fetch(buildBackendUrl("/keys"), {
       cache: "force-cache",
-      next: { tags: [CACHE_TAGS.keysUser] },
+      next: { tags: [CACHE_TAGS.keysUser], revalidate: 30 },
       headers: await getBackendAuthHeadersCached()
     });
     if (res.ok) {

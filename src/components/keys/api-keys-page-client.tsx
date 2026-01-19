@@ -17,10 +17,13 @@ import { EmptyState } from "@/components/common/empty-state";
 import { PRIMARY_CTA_CLASSNAME } from "@/lib/ui-styles";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { getPublicApiBaseUrlClient } from "@/lib/runtime-config-client";
+import { KeysPageSkeleton } from "@/app/(app)/keys/_components/keys-skeleton";
 
 interface ApiKeysPageClientProps {
-  initialItems: ApiKeyItem[];
+  initialItems: ApiKeyItem[] | null;
   publicApiBaseUrl?: string | null;
+  autoRevalidate?: boolean;
 }
 
 function isApiKeysListResponse(value: unknown): value is ApiKeysListResponse {
@@ -44,21 +47,25 @@ async function fetchKeysList() {
   return json.items;
 }
 
-export function ApiKeysPageClient({ initialItems, publicApiBaseUrl }: ApiKeysPageClientProps) {
+export function ApiKeysPageClient({ initialItems, publicApiBaseUrl, autoRevalidate = true }: ApiKeysPageClientProps) {
   const [fullKeysById, setFullKeysById] = React.useState<Record<string, string>>({});
   const { t } = useI18n();
+  const resolvedPublicApiBaseUrl = publicApiBaseUrl ?? getPublicApiBaseUrlClient();
 
   const { data, mutate } = useSwrLite<ApiKeyItem[]>(API_PATHS.keys, fetchKeysList, {
-    fallbackData: initialItems,
+    fallbackData: initialItems ?? undefined,
     dedupingIntervalMs: 0,
     revalidateOnFocus: false
   });
 
   React.useEffect(() => {
+    if (!autoRevalidate) return;
     void mutate(undefined, { revalidate: true });
-  }, [mutate]);
+  }, [autoRevalidate, mutate]);
 
-  const items = data ?? initialItems;
+  if (data === undefined && initialItems === null) return <KeysPageSkeleton />;
+
+  const items = data ?? initialItems ?? [];
 
   function onCreated(res: ApiKeyCreateResponse) {
     void mutate((prev) => [res.item, ...(prev ?? [])]);
@@ -132,9 +139,9 @@ export function ApiKeysPageClient({ initialItems, publicApiBaseUrl }: ApiKeysPag
   }
 
   async function copyApiBaseUrl() {
-    if (!publicApiBaseUrl) return;
+    if (!resolvedPublicApiBaseUrl) return;
     try {
-      await navigator.clipboard.writeText(publicApiBaseUrl);
+      await navigator.clipboard.writeText(resolvedPublicApiBaseUrl);
       toast.success(t("keys.dialog.copySuccess"));
     } catch {
       toast.error(t("keys.dialog.copyFailed"));
@@ -149,11 +156,11 @@ export function ApiKeysPageClient({ initialItems, publicApiBaseUrl }: ApiKeysPag
           <TooltipProvider delayDuration={150}>
             <div className="space-y-2">
               <div>{t("keys.subtitle")}</div>
-              {publicApiBaseUrl ? (
+              {resolvedPublicApiBaseUrl ? (
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-muted-foreground">{t("keys.baseUrl.label")}</span>
                   <span className="rounded-lg border border-border bg-muted/20 px-2 py-1 font-mono text-xs tabular-nums text-foreground">
-                    {publicApiBaseUrl}
+                    {resolvedPublicApiBaseUrl}
                   </span>
                   <Tooltip>
                     <TooltipTrigger asChild>

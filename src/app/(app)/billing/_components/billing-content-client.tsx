@@ -11,6 +11,7 @@ import { useSwrLite } from "@/lib/swr-lite";
 import type { BillingLedgerItem, BillingLedgerListResponse } from "@/lib/types";
 import type { Locale } from "@/lib/i18n/messages";
 import { t } from "@/lib/i18n/messages";
+import { BillingPageSkeleton } from "./billing-skeleton";
 
 function isBillingLedgerListResponse(value: unknown): value is BillingLedgerListResponse {
   if (!value || typeof value !== "object") return false;
@@ -29,24 +30,28 @@ async function fetchLedger(key: string) {
 
 interface BillingContentClientProps {
   locale: Locale;
-  initialItems: BillingLedgerItem[];
+  initialItems: BillingLedgerItem[] | null;
   pageSize: number;
+  autoRevalidate?: boolean;
 }
 
-export function BillingContentClient({ locale, initialItems, pageSize }: BillingContentClientProps) {
+export function BillingContentClient({ locale, initialItems, pageSize, autoRevalidate = true }: BillingContentClientProps) {
   const key = billingLedgerListApiPath(pageSize, 0);
   const { data, mutate } = useSwrLite<BillingLedgerItem[]>(key, fetchLedger, {
-    fallbackData: initialItems,
+    fallbackData: initialItems ?? undefined,
     dedupingIntervalMs: 0,
     revalidateOnFocus: false
   });
 
   // Silent revalidate once after mount (no skeleton).
   React.useEffect(() => {
+    if (!autoRevalidate) return;
     void mutate(undefined, { revalidate: true });
-  }, [mutate]);
+  }, [autoRevalidate, mutate]);
 
-  const items = data ?? initialItems;
+  if (data === undefined && initialItems === null) return <BillingPageSkeleton />;
+
+  const items = data ?? initialItems ?? [];
   const balanceUsd = items.length > 0 ? Number(items[0]?.balanceUsd ?? 0) : 0;
 
   return (

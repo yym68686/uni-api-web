@@ -12,6 +12,7 @@ import type { Locale } from "@/lib/i18n/messages";
 import { t } from "@/lib/i18n/messages";
 import type { ModelsListResponse } from "@/lib/types";
 import { useSwrLite } from "@/lib/swr-lite";
+import { ModelsContentSkeleton } from "@/app/(app)/models/_components/models-skeleton";
 
 function isModelsListResponse(value: unknown): value is ModelsListResponse {
   if (!value || typeof value !== "object") return false;
@@ -35,21 +36,25 @@ function formatUsdPerM(value: string | null | undefined) {
 
 interface ModelsContentClientProps {
   locale: Locale;
-  initialItems: ModelsListResponse["items"];
+  initialItems: ModelsListResponse["items"] | null;
+  autoRevalidate?: boolean;
 }
 
-export function ModelsContentClient({ locale, initialItems }: ModelsContentClientProps) {
+export function ModelsContentClient({ locale, initialItems, autoRevalidate = true }: ModelsContentClientProps) {
   const { data, mutate } = useSwrLite<ModelsListResponse["items"]>(API_PATHS.models, fetchModels, {
-    fallbackData: initialItems,
+    fallbackData: initialItems ?? undefined,
     dedupingIntervalMs: 0,
     revalidateOnFocus: false
   });
 
   React.useEffect(() => {
+    if (!autoRevalidate) return;
     void mutate(undefined, { revalidate: true });
-  }, [mutate]);
+  }, [autoRevalidate, mutate]);
 
-  const items = data ?? initialItems;
+  if (data === undefined && initialItems === null) return <ModelsContentSkeleton />;
+
+  const items = data ?? initialItems ?? [];
 
   return (
     <Card>
@@ -91,4 +96,3 @@ export function ModelsContentClient({ locale, initialItems }: ModelsContentClien
     </Card>
   );
 }
-

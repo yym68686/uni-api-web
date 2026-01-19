@@ -1,8 +1,14 @@
 import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
 import { CACHE_TAGS } from "@/lib/cache-tags";
-import { getRequestLocale } from "@/lib/i18n/server";
+import type { Locale } from "@/lib/i18n/messages";
 import type { BillingLedgerListResponse } from "@/lib/types";
 import { BillingContentClient } from "./billing-content-client";
+
+const PAGE_SIZE = 50;
+
+interface BillingContentProps {
+  locale: Locale;
+}
 
 function isBillingLedgerListResponse(value: unknown): value is BillingLedgerListResponse {
   if (!value || typeof value !== "object") return false;
@@ -11,12 +17,10 @@ function isBillingLedgerListResponse(value: unknown): value is BillingLedgerList
   return Array.isArray(items);
 }
 
-const PAGE_SIZE = 50;
-
 async function getLedger() {
   const res = await fetch(buildBackendUrl(`/billing/ledger?limit=${PAGE_SIZE}&offset=0`), {
     cache: "force-cache",
-    next: { tags: [CACHE_TAGS.billingLedger] },
+    next: { tags: [CACHE_TAGS.billingLedger], revalidate: 30 },
     headers: await getBackendAuthHeadersCached()
   });
   if (!res.ok) return null;
@@ -25,7 +29,7 @@ async function getLedger() {
   return json.items;
 }
 
-export async function BillingContent() {
-  const [locale, items] = await Promise.all([getRequestLocale(), getLedger()]);
-  return <BillingContentClient locale={locale} initialItems={items ?? []} pageSize={PAGE_SIZE} />;
+export async function BillingContent({ locale }: BillingContentProps) {
+  const items = (await getLedger()) ?? [];
+  return <BillingContentClient locale={locale} initialItems={items} pageSize={PAGE_SIZE} />;
 }

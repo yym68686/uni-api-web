@@ -33,6 +33,11 @@ function getEntry<T>(key: Key): CacheEntry<T> {
   return created;
 }
 
+export function peekSwrLite<T>(key: Key): T | undefined {
+  const existing = store.get(key) as CacheEntry<T> | undefined;
+  return existing?.data;
+}
+
 function notify(entry: CacheEntry<unknown>) {
   entry.version += 1;
   for (const listener of entry.listeners) listener();

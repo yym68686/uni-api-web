@@ -14,7 +14,7 @@ function isModelsListResponse(value: unknown): value is ModelsListResponse {
 async function getModels() {
   const res = await fetch(buildBackendUrl("/console/models"), {
     cache: "force-cache",
-    next: { tags: [CACHE_TAGS.modelsUser] },
+    next: { tags: [CACHE_TAGS.modelsUser], revalidate: 30 },
     headers: await getBackendAuthHeadersCached()
   });
   if (!res.ok) return null;
