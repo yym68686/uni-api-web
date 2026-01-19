@@ -10,10 +10,11 @@ import { EmptyState } from "@/components/common/empty-state";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { logsListApiPath } from "@/lib/api-paths";
 import { formatUsd } from "@/lib/format";
 import type { LogItem, LogsListResponse } from "@/lib/types";
 import { useI18n } from "@/components/i18n/i18n-provider";
-import { UI_EVENTS } from "@/lib/ui-events";
+import { useSwrLite } from "@/lib/swr-lite";
 
 function isLogsListResponse(value: unknown): value is LogsListResponse {
   if (!value || typeof value !== "object") return false;
@@ -48,16 +49,40 @@ interface LogsTableClientProps {
 
 export function LogsTableClient({ initialItems, pageSize }: LogsTableClientProps) {
   const { locale, t } = useI18n();
-  const [items, setItems] = React.useState<LogItem[]>(initialItems);
+  const listKey = logsListApiPath(pageSize, 0);
+  const swr = useSwrLite<LogItem[]>(
+    listKey,
+    async (key) => {
+      const res = await fetch(key, { cache: "no-store" });
+      const json: unknown = await res.json().catch(() => null);
+      if (!res.ok) {
+        const message =
+          json && typeof json === "object" && "message" in json
+            ? String((json as { message?: unknown }).message ?? t("common.operationFailed"))
+            : t("common.operationFailed");
+        throw new Error(message);
+      }
+      if (!isLogsListResponse(json)) throw new Error(t("common.unexpectedError"));
+      return json.items;
+    },
+    { fallbackData: initialItems, revalidateOnFocus: false }
+  );
+
+  const baseItems = swr.data ?? initialItems;
+  const [extraItems, setExtraItems] = React.useState<LogItem[]>([]);
   const [loadingMore, setLoadingMore] = React.useState(false);
 
+  React.useEffect(() => {
+    setExtraItems([]);
+    setLoadingMore(false);
+  }, [baseItems]);
+
+  const items = React.useMemo(() => [...baseItems, ...extraItems], [baseItems, extraItems]);
   const offset = items.length;
   const canLoadMore = items.length > 0 && items.length % pageSize === 0;
 
   async function fetchPage(nextOffset: number) {
-    const res = await fetch(`/api/logs?limit=${encodeURIComponent(pageSize)}&offset=${encodeURIComponent(nextOffset)}`, {
-      cache: "no-store"
-    });
+    const res = await fetch(logsListApiPath(pageSize, nextOffset), { cache: "no-store" });
     const json: unknown = await res.json().catch(() => null);
     if (!res.ok) {
       const message =
@@ -70,24 +95,12 @@ export function LogsTableClient({ initialItems, pageSize }: LogsTableClientProps
     return json.items;
   }
 
-  React.useEffect(() => {
-    function onRefreshed(event: Event) {
-      if (!(event instanceof CustomEvent)) return;
-      const detail: unknown = event.detail;
-      if (!Array.isArray(detail)) return;
-      setLoadingMore(false);
-      setItems(detail as LogItem[]);
-    }
-    window.addEventListener(UI_EVENTS.logsRefreshed, onRefreshed);
-    return () => window.removeEventListener(UI_EVENTS.logsRefreshed, onRefreshed);
-  }, []);
-
   async function loadMore() {
     if (loadingMore || !canLoadMore) return;
     setLoadingMore(true);
     try {
       const nextItems = await fetchPage(offset);
-      setItems((prev) => [...prev, ...nextItems]);
+      setExtraItems((prev) => [...prev, ...nextItems]);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("common.operationFailed"));
     } finally {

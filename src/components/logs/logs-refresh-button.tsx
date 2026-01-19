@@ -6,8 +6,9 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/components/i18n/i18n-provider";
-import type { LogItem, LogsListResponse } from "@/lib/types";
-import { dispatchUiEvent, UI_EVENTS } from "@/lib/ui-events";
+import { logsListApiPath } from "@/lib/api-paths";
+import type { LogsListResponse } from "@/lib/types";
+import { mutateSwrLite } from "@/lib/swr-lite";
 
 function isLogsListResponse(value: unknown): value is LogsListResponse {
   if (!value || typeof value !== "object") return false;
@@ -29,7 +30,8 @@ export function LogsRefreshButton({ pageSize, className }: LogsRefreshButtonProp
     if (loading) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/logs?limit=${encodeURIComponent(pageSize)}&offset=0`, { cache: "no-store" });
+      const key = logsListApiPath(pageSize, 0);
+      const res = await fetch(key, { cache: "no-store" });
       const json: unknown = await res.json().catch(() => null);
       if (!res.ok) {
         const message =
@@ -39,7 +41,7 @@ export function LogsRefreshButton({ pageSize, className }: LogsRefreshButtonProp
         throw new Error(message);
       }
       if (!isLogsListResponse(json)) throw new Error(t("common.unexpectedError"));
-      dispatchUiEvent<LogItem[]>(UI_EVENTS.logsRefreshed, json.items);
+      await mutateSwrLite(key, json.items);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("common.operationFailed"));
     } finally {
@@ -60,4 +62,3 @@ export function LogsRefreshButton({ pageSize, className }: LogsRefreshButtonProp
     </Button>
   );
 }
-

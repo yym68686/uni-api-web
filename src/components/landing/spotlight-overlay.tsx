@@ -36,6 +36,8 @@ export function SpotlightOverlay({ targetId }: SpotlightOverlayProps) {
 
     const onEnter = () => {
       rect = el.getBoundingClientRect();
+      el.style.setProperty("--uai-spot-x", "50%");
+      el.style.setProperty("--uai-spot-y", "50%");
     };
 
     const onMove = (e: PointerEvent) => {
@@ -48,8 +50,6 @@ export function SpotlightOverlay({ targetId }: SpotlightOverlayProps) {
     const onLeave = () => {
       rect = null;
       last = null;
-      el.style.setProperty("--uai-spot-x", "50%");
-      el.style.setProperty("--uai-spot-y", "50%");
       if (frame != null) {
         window.cancelAnimationFrame(frame);
         frame = null;
@@ -70,4 +70,3 @@ export function SpotlightOverlay({ targetId }: SpotlightOverlayProps) {
 
   return null;
 }
-
