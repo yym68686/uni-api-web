@@ -67,6 +67,7 @@ export async function POST(req: Request) {
     path: "/",
     maxAge: 60 * 60 * 24 * 7
   });
+  revalidateTag(CACHE_TAGS.currentUser, { expire: 0 });
   revalidateTag(CACHE_TAGS.adminUsers, { expire: 0 });
   return res;
 }

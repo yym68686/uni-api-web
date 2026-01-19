@@ -3,6 +3,7 @@ import "server-only";
 import { cache } from "react";
 
 import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
+import { CACHE_TAGS } from "@/lib/cache-tags";
 
 export interface CurrentUser {
   id: string;
@@ -33,7 +34,8 @@ function isCurrentUser(value: unknown): value is CurrentUser {
 export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   try {
     const res = await fetch(buildBackendUrl("/auth/me"), {
-      cache: "no-store",
+      cache: "force-cache",
+      next: { tags: [CACHE_TAGS.currentUser], revalidate: 3 },
       headers: await getBackendAuthHeadersCached()
     });
     if (!res.ok) return null;
@@ -44,4 +46,3 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
     return null;
   }
 });
-

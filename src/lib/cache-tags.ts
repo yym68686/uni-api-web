@@ -1,5 +1,6 @@
 export const CACHE_TAGS = {
   announcements: "announcements",
+  currentUser: "auth:me",
   keysUser: "keys:user",
   modelsUser: "models:user",
   modelsAdminConfig: "models:admin-config",
@@ -8,4 +9,3 @@ export const CACHE_TAGS = {
   adminSettings: "admin:settings",
   billingLedger: "billing:ledger"
 } as const;
-

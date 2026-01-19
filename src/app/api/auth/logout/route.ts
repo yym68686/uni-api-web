@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { revalidateTag } from "next/cache";
 
 import { SESSION_COOKIE_NAME } from "@/lib/auth";
 import { buildBackendUrl } from "@/lib/backend";
+import { CACHE_TAGS } from "@/lib/cache-tags";
 
 export async function POST(req: Request) {
   const url = new URL(req.url);
@@ -27,5 +29,6 @@ export async function POST(req: Request) {
     path: "/",
     maxAge: 0
   });
+  revalidateTag(CACHE_TAGS.currentUser, { expire: 0 });
   return res;
 }
