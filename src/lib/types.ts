@@ -111,6 +111,22 @@ export interface AnnouncementDeleteResponse {
   id: string;
 }
 
+export interface OAuthProviderItem {
+  provider: string;
+  email: string;
+  createdAt: string;
+}
+
+export interface AuthMethodsResponse {
+  passwordSet: boolean;
+  oauth: OAuthProviderItem[];
+}
+
+export interface PasswordRequestCodeResponse {
+  ok: boolean;
+  expiresInSeconds: number;
+}
+
 export interface AdminUserItem {
   id: string;
   email: string;

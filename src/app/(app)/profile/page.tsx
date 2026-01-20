@@ -1,6 +1,7 @@
 import { Shield, User } from "lucide-react";
 
 import { DeleteAccountButton } from "@/components/profile/delete-account-button";
+import { SecurityCard } from "@/components/profile/security-card";
 import { ClientDateTime } from "@/components/common/client-datetime";
 import { EmptyState } from "@/components/common/empty-state";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,6 +10,7 @@ import { PageHeader } from "@/components/common/page-header";
 import { getRequestLocale } from "@/lib/i18n/server";
 import { t } from "@/lib/i18n/messages";
 import { getCurrentUser } from "@/lib/current-user";
+import { getAuthMethods } from "@/lib/auth-methods";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +21,7 @@ function roleVariant(role: string): "outline" | "success" | "warning" {
 }
 
 export default async function ProfilePage() {
-  const [locale, me] = await Promise.all([getRequestLocale(), getCurrentUser()]);
+  const [locale, me, methods] = await Promise.all([getRequestLocale(), getCurrentUser(), getAuthMethods()]);
 
   return (
     <div className="space-y-6">
@@ -84,6 +86,13 @@ export default async function ProfilePage() {
           )}
         </CardContent>
       </Card>
+
+      {me ? (
+        <SecurityCard
+          email={me.email}
+          initialMethods={methods}
+        />
+      ) : null}
 
       <Card className="border-destructive/40 bg-destructive/5">
         <CardHeader>

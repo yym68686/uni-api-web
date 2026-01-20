@@ -71,7 +71,13 @@ async def create_user(session: AsyncSession, input: RegisterRequest) -> User:
     is_first = await _is_first_user(session)
     requested_admin = _should_grant_admin(input.admin_bootstrap_token)
 
-    row = User(email=email, password_hash=hash_password(input.password), role="user")
+    now = dt.datetime.now(dt.timezone.utc)
+    row = User(
+        email=email,
+        password_hash=hash_password(input.password),
+        password_set_at=now,
+        role="user",
+    )
     session.add(row)
     await session.commit()
     await session.refresh(row)
@@ -95,7 +101,10 @@ async def authenticate_user(session: AsyncSession, input: LoginRequest) -> User 
     if not verify_password(input.password, row.password_hash):
         return None
 
-    row.last_login_at = dt.datetime.now(dt.timezone.utc)
+    now = dt.datetime.now(dt.timezone.utc)
+    row.last_login_at = now
+    if row.password_set_at is None:
+        row.password_set_at = now
     await session.commit()
     await session.refresh(row)
     return row
@@ -138,6 +147,24 @@ async def revoke_session(session: AsyncSession, token: str) -> None:
     if row.revoked_at is None:
         row.revoked_at = dt.datetime.now(dt.timezone.utc)
         await session.commit()
+
+
+async def revoke_other_sessions(session: AsyncSession, *, user_id: uuid.UUID, current_token: str) -> None:
+    from sqlalchemy import update
+
+    now = dt.datetime.now(dt.timezone.utc)
+    current_hash = sha256_hex(current_token)
+    await session.execute(
+        update(Session)
+        .where(
+            Session.user_id == user_id,
+            Session.revoked_at.is_(None),
+            Session.expires_at > now,
+            Session.token_hash != current_hash,
+        )
+        .values(revoked_at=now)
+    )
+    await session.commit()
 
 
 async def get_user_by_token(session: AsyncSession, token: str) -> User | None:

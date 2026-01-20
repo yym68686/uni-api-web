@@ -16,6 +16,7 @@ class User(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email: Mapped[str] = mapped_column(String(254), unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    password_set_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     role: Mapped[str] = mapped_column(String(16), nullable=False, default="user")
     group_name: Mapped[str] = mapped_column(String(64), nullable=False, default="default")
     balance: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

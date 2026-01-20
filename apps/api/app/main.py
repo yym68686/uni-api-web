@@ -37,6 +37,16 @@ def create_app() -> FastAPI:
                 "ALTER TABLE IF EXISTS users "
                 "ADD COLUMN IF NOT EXISTS group_name varchar(64) NOT NULL DEFAULT 'default'"
             )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS users "
+                "ADD COLUMN IF NOT EXISTS password_set_at timestamptz"
+            )
+            await conn.exec_driver_sql(
+                "UPDATE users u "
+                "SET password_set_at = u.created_at "
+                "WHERE password_set_at IS NULL "
+                "AND NOT EXISTS (SELECT 1 FROM oauth_identities oi WHERE oi.user_id = u.id)"
+            )
 
             await conn.exec_driver_sql(
                 "ALTER TABLE IF EXISTS llm_usage_events "

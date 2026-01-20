@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import uuid
 import time
+import datetime as dt
+import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func, select
@@ -14,6 +16,7 @@ import json
 from app.auth import get_current_membership, get_current_user, require_admin
 from app.models.api_key import ApiKey
 from app.models.membership import Membership
+from app.models.oauth_identity import OAuthIdentity
 from app.schemas.announcements import (
     AnnouncementCreateRequest,
     AnnouncementCreateResponse,
@@ -31,6 +34,13 @@ from app.schemas.admin_users import (
 from app.schemas.account import AccountDeleteResponse
 from app.schemas.admin_settings import AdminSettingsResponse, AdminSettingsUpdateRequest
 from app.schemas.auth import AuthResponse, GoogleOAuthExchangeRequest, LoginRequest, RegisterRequest, UserPublic
+from app.schemas.auth_methods import (
+    AuthMethodsResponse,
+    PasswordChangeRequest,
+    PasswordRemoveRequest,
+    PasswordRequestCodeResponse,
+    PasswordSetRequest,
+)
 from app.schemas.email_verification import EmailCodeRequest, EmailCodeResponse, RegisterVerifyRequest
 from app.schemas.keys import (
     ApiKeyCreateRequest,
@@ -66,6 +76,7 @@ from app.storage.auth_db import grant_admin_role
 from app.storage.auth_db import get_user_by_token
 from app.storage.auth_db import login as auth_login
 from app.storage.auth_db import register_and_login, revoke_session
+from app.storage.auth_db import revoke_other_sessions
 from app.storage.api_key_auth import authenticate_api_key
 from app.storage.channels_db import (
     create_channel,
@@ -88,6 +99,7 @@ from app.schemas.logs import LogsListResponse
 from app.db import SessionLocal
 from app.storage.email_verification_db import request_email_code, verify_email_code
 from app.models.organization import Organization
+from app.security_password import hash_password, verify_password
 
 router = APIRouter()
 
@@ -266,8 +278,6 @@ async def me(
     current_user=Depends(get_current_user),
     membership=Depends(get_current_membership),
 ) -> UserPublic:  # type: ignore[no-untyped-def]
-    import datetime as dt
-
     def _dt_iso(value: dt.datetime | None) -> str | None:
         if not value:
             return None
@@ -283,6 +293,171 @@ async def me(
         createdAt=_dt_iso(current_user.created_at) or dt.datetime.now(dt.timezone.utc).isoformat(),
         lastLoginAt=_dt_iso(current_user.last_login_at),
     )
+
+
+def _dt_iso(value: dt.datetime | None) -> str | None:
+    if not value:
+        return None
+    return value.astimezone(dt.timezone.utc).isoformat()
+
+
+def _get_request_session_token(request: Request) -> str | None:
+    from app.constants import SESSION_COOKIE_NAME
+
+    auth = request.headers.get("authorization")
+    token = _extract_bearer_token(auth)
+    if not token:
+        token = request.cookies.get(SESSION_COOKIE_NAME)
+    return token
+
+
+async def _auth_methods(session: AsyncSession, *, user_id: uuid.UUID) -> list[OAuthIdentity]:
+    return (
+        await session.execute(select(OAuthIdentity).where(OAuthIdentity.user_id == user_id))
+    ).scalars().all()
+
+
+async def _build_auth_methods_response(session: AsyncSession, *, current_user) -> AuthMethodsResponse:
+    identities = await _auth_methods(session, user_id=current_user.id)
+    oauth = [
+        {
+            "provider": identity.provider,
+            "email": identity.email,
+            "createdAt": _dt_iso(identity.created_at) or dt.datetime.now(dt.timezone.utc).isoformat(),
+        }
+        for identity in identities
+    ]
+    return AuthMethodsResponse(passwordSet=bool(current_user.password_set_at), oauth=oauth)
+
+
+def _validate_password_value(password: str) -> None:
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="password too small (min 6)")
+    if len(password) > 128:
+        raise HTTPException(status_code=400, detail="password too large (max 128)")
+
+
+@router.get("/auth/methods", response_model=AuthMethodsResponse)
+async def auth_methods(
+    session: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+) -> AuthMethodsResponse:
+    return await _build_auth_methods_response(session, current_user=current_user)
+
+
+@router.post("/auth/password/request-code", response_model=PasswordRequestCodeResponse)
+async def password_request_code(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+) -> PasswordRequestCodeResponse:
+    xff = request.headers.get("x-forwarded-for")
+    client_ip = (
+        xff.split(",")[0].strip()[:64]
+        if xff and xff.strip()
+        else (request.client.host if request.client else None)
+    )
+    try:
+        expires = await request_email_code(
+            session,
+            email=str(current_user.email),
+            purpose="password",
+            client_ip=client_ip,
+        )
+    except ValueError as e:
+        msg = str(e)
+        if msg in {"too many requests", "please wait"}:
+            raise HTTPException(status_code=429, detail=msg) from e
+        raise HTTPException(status_code=400, detail=msg) from e
+    return PasswordRequestCodeResponse(ok=True, expiresInSeconds=expires)
+
+
+@router.post("/auth/password/set", response_model=AuthMethodsResponse)
+async def password_set(
+    payload: PasswordSetRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+) -> AuthMethodsResponse:
+    try:
+        await verify_email_code(
+            session,
+            email=str(current_user.email),
+            purpose="password",
+            code=str(payload.code),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    _validate_password_value(payload.password)
+    now = dt.datetime.now(dt.timezone.utc)
+    current_user.password_hash = hash_password(payload.password)
+    current_user.password_set_at = now
+    await session.commit()
+    await session.refresh(current_user)
+
+    token = _get_request_session_token(request)
+    if token:
+        await revoke_other_sessions(session, user_id=current_user.id, current_token=token)
+
+    return await _build_auth_methods_response(session, current_user=current_user)
+
+
+@router.post("/auth/password/change", response_model=AuthMethodsResponse)
+async def password_change(
+    payload: PasswordChangeRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+) -> AuthMethodsResponse:
+    if not verify_password(payload.current_password, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="invalid current password")
+
+    _validate_password_value(payload.new_password)
+    now = dt.datetime.now(dt.timezone.utc)
+    current_user.password_hash = hash_password(payload.new_password)
+    current_user.password_set_at = now
+    await session.commit()
+    await session.refresh(current_user)
+
+    token = _get_request_session_token(request)
+    if token:
+        await revoke_other_sessions(session, user_id=current_user.id, current_token=token)
+
+    return await _build_auth_methods_response(session, current_user=current_user)
+
+
+@router.post("/auth/password/remove", response_model=AuthMethodsResponse)
+async def password_remove(
+    payload: PasswordRemoveRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+) -> AuthMethodsResponse:
+    identities = await _auth_methods(session, user_id=current_user.id)
+    if len(identities) == 0:
+        raise HTTPException(status_code=400, detail="no oauth identity")
+
+    try:
+        await verify_email_code(
+            session,
+            email=str(current_user.email),
+            purpose="password",
+            code=str(payload.code),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    current_user.password_hash = hash_password(secrets.token_urlsafe(32))
+    current_user.password_set_at = None
+    await session.commit()
+    await session.refresh(current_user)
+
+    token = _get_request_session_token(request)
+    if token:
+        await revoke_other_sessions(session, user_id=current_user.id, current_token=token)
+
+    return await _build_auth_methods_response(session, current_user=current_user)
 
 
 @router.post("/auth/admin/claim")
