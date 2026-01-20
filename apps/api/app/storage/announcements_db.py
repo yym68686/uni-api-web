@@ -46,9 +46,9 @@ def _to_item(row: Announcement) -> AnnouncementItem:
         title=row.title,
         title_zh=row.title_zh,
         title_en=row.title_en,
-        meta=row.meta,
-        meta_zh=row.meta_zh,
-        meta_en=row.meta_en,
+        content=row.content,
+        content_zh=row.content_zh,
+        content_en=row.content_en,
         level=row.level,
         createdAt=_dt_iso(row.created_at),
     )
@@ -70,41 +70,41 @@ async def create_announcement(
     title_en = _normalize_optional_text(input.title_en)
     title_legacy = _normalize_optional_text(input.title)
 
-    meta_zh = _normalize_optional_text(input.meta_zh)
-    meta_en = _normalize_optional_text(input.meta_en)
-    meta_legacy = _normalize_optional_text(input.meta)
+    content_zh = _normalize_optional_text(input.content_zh)
+    content_en = _normalize_optional_text(input.content_en)
+    content_legacy = _normalize_optional_text(input.content)
 
     level = input.level.strip() or "warning"
 
     if title_legacy and not title_zh and not title_en:
         title_zh = title_legacy
-    if meta_legacy and not meta_zh and not meta_en:
-        meta_zh = meta_legacy
+    if content_legacy and not content_zh and not content_en:
+        content_zh = content_legacy
 
     _validate_optional_text(title_zh, field="titleZh", min_len=2, max_len=180)
     _validate_optional_text(title_en, field="titleEn", min_len=2, max_len=180)
     _validate_optional_text(title_legacy, field="title", min_len=2, max_len=180)
-    _validate_optional_text(meta_zh, field="metaZh", min_len=2, max_len=120)
-    _validate_optional_text(meta_en, field="metaEn", min_len=2, max_len=120)
-    _validate_optional_text(meta_legacy, field="meta", min_len=2, max_len=120)
+    _validate_optional_text(content_zh, field="contentZh", min_len=2, max_len=2000)
+    _validate_optional_text(content_en, field="contentEn", min_len=2, max_len=2000)
+    _validate_optional_text(content_legacy, field="content", min_len=2, max_len=2000)
 
     if level not in _VALID_LEVELS:
         raise ValueError("invalid level")
 
     fallback_title = title_zh or title_en or title_legacy
-    fallback_meta = meta_zh or meta_en or meta_legacy
+    fallback_content = content_zh or content_en or content_legacy
     if not fallback_title:
         raise ValueError("missing title")
-    if not fallback_meta:
-        raise ValueError("missing meta")
+    if not fallback_content:
+        raise ValueError("missing content")
 
     row = Announcement(
         title=fallback_title,
         title_zh=title_zh,
         title_en=title_en,
-        meta=fallback_meta,
-        meta_zh=meta_zh,
-        meta_en=meta_en,
+        content=fallback_content,
+        content_zh=content_zh,
+        content_en=content_en,
         level=level,
     )
     session.add(row)
@@ -131,8 +131,8 @@ async def update_announcement(
 
     title_zh = row.title_zh
     title_en = row.title_en
-    meta_zh = row.meta_zh
-    meta_en = row.meta_en
+    content_zh = row.content_zh
+    content_en = row.content_en
 
     if "title_zh" in fields_set:
         title_zh = _normalize_optional_text(input.title_zh)
@@ -140,19 +140,19 @@ async def update_announcement(
     if "title_en" in fields_set:
         title_en = _normalize_optional_text(input.title_en)
         _validate_optional_text(title_en, field="titleEn", min_len=2, max_len=180)
-    if "meta_zh" in fields_set:
-        meta_zh = _normalize_optional_text(input.meta_zh)
-        _validate_optional_text(meta_zh, field="metaZh", min_len=2, max_len=120)
-    if "meta_en" in fields_set:
-        meta_en = _normalize_optional_text(input.meta_en)
-        _validate_optional_text(meta_en, field="metaEn", min_len=2, max_len=120)
+    if "content_zh" in fields_set:
+        content_zh = _normalize_optional_text(input.content_zh)
+        _validate_optional_text(content_zh, field="contentZh", min_len=2, max_len=2000)
+    if "content_en" in fields_set:
+        content_en = _normalize_optional_text(input.content_en)
+        _validate_optional_text(content_en, field="contentEn", min_len=2, max_len=2000)
 
     title_legacy = _normalize_optional_text(input.title) if "title" in fields_set else None
-    meta_legacy = _normalize_optional_text(input.meta) if "meta" in fields_set else None
+    content_legacy = _normalize_optional_text(input.content) if "content" in fields_set else None
     if title_legacy is not None:
         _validate_optional_text(title_legacy, field="title", min_len=2, max_len=180)
-    if meta_legacy is not None:
-        _validate_optional_text(meta_legacy, field="meta", min_len=2, max_len=120)
+    if content_legacy is not None:
+        _validate_optional_text(content_legacy, field="content", min_len=2, max_len=2000)
 
     level = row.level
     if "level" in fields_set:
@@ -163,22 +163,22 @@ async def update_announcement(
 
     if title_legacy and "title_zh" not in fields_set and "title_en" not in fields_set:
         title_zh = title_legacy
-    if meta_legacy and "meta_zh" not in fields_set and "meta_en" not in fields_set:
-        meta_zh = meta_legacy
+    if content_legacy and "content_zh" not in fields_set and "content_en" not in fields_set:
+        content_zh = content_legacy
 
     fallback_title = title_zh or title_en or title_legacy
-    fallback_meta = meta_zh or meta_en or meta_legacy
+    fallback_content = content_zh or content_en or content_legacy
     if not fallback_title:
         raise ValueError("missing title")
-    if not fallback_meta:
-        raise ValueError("missing meta")
+    if not fallback_content:
+        raise ValueError("missing content")
 
     row.title_zh = title_zh
     row.title_en = title_en
-    row.meta_zh = meta_zh
-    row.meta_en = meta_en
+    row.content_zh = content_zh
+    row.content_en = content_en
     row.title = fallback_title
-    row.meta = fallback_meta
+    row.content = fallback_content
     row.level = level
     await session.commit()
     await session.refresh(row)
@@ -215,9 +215,9 @@ async def ensure_seed_announcements(session: AsyncSession) -> None:
             title="新增：API Keys 支持一键撤销",
             title_zh="新增：API Keys 支持一键撤销",
             title_en="New: API keys support one-click revoke",
-            meta="Today · Security",
-            meta_zh="今天 · 安全",
-            meta_en="Today · Security",
+            content="API keys can now be revoked (and restored) at any time in the console.",
+            content_zh="API Keys 现在支持随时撤销与恢复。",
+            content_en="API keys can now be revoked (and restored) at any time in the console.",
             level="warning",
             created_at=now - dt.timedelta(hours=2),
         ),
@@ -225,9 +225,9 @@ async def ensure_seed_announcements(session: AsyncSession) -> None:
             title="计费：本月成本统计将接入真实账单",
             title_zh="计费：本月成本统计将接入真实账单",
             title_en="Billing: monthly cost will reflect real invoices",
-            meta="This week · Billing",
-            meta_zh="本周 · 计费",
-            meta_en="This week · Billing",
+            content="Billing will show a clearer breakdown of balance adjustments and model spend.",
+            content_zh="账单页将展示更清晰的余额变更记录与模型消费统计。",
+            content_en="Billing will show a clearer breakdown of balance adjustments and model spend.",
             level="info",
             created_at=now - dt.timedelta(days=2),
         ),
@@ -235,9 +235,9 @@ async def ensure_seed_announcements(session: AsyncSession) -> None:
             title="模型路由：支持按 Workspace 配置默认模型",
             title_zh="模型路由：支持按 Workspace 配置默认模型",
             title_en="Model routing: default model by workspace",
-            meta="Soon · Routing",
-            meta_zh="即将 · 路由",
-            meta_en="Soon · Routing",
+            content="You will be able to set default models per workspace to reduce misconfiguration.",
+            content_zh="即将支持按工作区设置默认模型，减少误配与来回沟通。",
+            content_en="You will be able to set default models per workspace to reduce misconfiguration.",
             level="info",
             created_at=now - dt.timedelta(days=6),
         ),

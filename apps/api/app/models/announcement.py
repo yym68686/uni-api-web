@@ -17,9 +17,9 @@ class Announcement(Base):
     title: Mapped[str] = mapped_column(String(180), nullable=False)
     title_zh: Mapped[str | None] = mapped_column(String(180), nullable=True)
     title_en: Mapped[str | None] = mapped_column(String(180), nullable=True)
-    meta: Mapped[str] = mapped_column(String(120), nullable=False)
-    meta_zh: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    meta_en: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    content: Mapped[str] = mapped_column(String(2000), nullable=False)
+    content_zh: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    content_en: Mapped[str | None] = mapped_column(String(2000), nullable=True)
     level: Mapped[str] = mapped_column(String(16), nullable=False, default="warning")
 
     created_at: Mapped[dt.datetime] = mapped_column(

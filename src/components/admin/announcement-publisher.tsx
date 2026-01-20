@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { dispatchUiEvent, UI_EVENTS } from "@/lib/ui-events";
 import { PRIMARY_CTA_CLASSNAME } from "@/lib/ui-styles";
 
@@ -38,21 +39,21 @@ function createSchema(t: (key: MessageKey, vars?: MessageVars) => string) {
         .trim()
         .max(180, t("validation.maxChars", { max: 180 }))
         .refine((v) => v === "" || v.length >= 2, t("validation.minChars", { min: 2 })),
-      metaZh: z
+      contentZh: z
         .string()
         .trim()
-        .max(120, t("validation.maxChars", { max: 120 }))
+        .max(2000, t("validation.maxChars", { max: 2000 }))
         .refine((v) => v === "" || v.length >= 2, t("validation.minChars", { min: 2 })),
-      metaEn: z
+      contentEn: z
         .string()
         .trim()
-        .max(120, t("validation.maxChars", { max: 120 }))
+        .max(2000, t("validation.maxChars", { max: 2000 }))
         .refine((v) => v === "" || v.length >= 2, t("validation.minChars", { min: 2 })),
       level: z.enum(["info", "warning", "success", "destructive"])
     })
     .superRefine((values, ctx) => {
       const hasTitle = Boolean(values.titleZh || values.titleEn);
-      const hasMeta = Boolean(values.metaZh || values.metaEn);
+      const hasContent = Boolean(values.contentZh || values.contentEn);
       if (!hasTitle) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
@@ -60,11 +61,11 @@ function createSchema(t: (key: MessageKey, vars?: MessageVars) => string) {
           path: ["titleZh"]
         });
       }
-      if (!hasMeta) {
+      if (!hasContent) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: t("admin.ann.form.needMeta"),
-          path: ["metaZh"]
+          message: t("admin.ann.form.needContent"),
+          path: ["contentZh"]
         });
       }
     });
@@ -86,12 +87,12 @@ export function AnnouncementPublisher({ onCreated, className }: AnnouncementPubl
   const schema = React.useMemo(() => createSchema(t), [t]);
 
   const form = useForm<FormValues>({
-    defaultValues: { titleZh: "", titleEn: "", metaZh: "", metaEn: "", level: "warning" },
+    defaultValues: { titleZh: "", titleEn: "", contentZh: "", contentEn: "", level: "warning" },
     mode: "onChange"
   });
 
   function reset() {
-    form.reset({ titleZh: "", titleEn: "", metaZh: "", metaEn: "", level: "warning" });
+    form.reset({ titleZh: "", titleEn: "", contentZh: "", contentEn: "", level: "warning" });
     setActiveLang("zh");
   }
 
@@ -210,13 +211,16 @@ export function AnnouncementPublisher({ onCreated, className }: AnnouncementPubl
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="meta-zh">{t("admin.ann.form.meta")}</Label>
-                <Input id="meta-zh" placeholder="例如：今天 · 安全" {...form.register("metaZh")} />
-                {form.formState.errors.metaZh ? (
-                  <p className="text-xs text-destructive">{form.formState.errors.metaZh.message}</p>
-                ) : (
-                  <p className="text-xs text-muted-foreground font-mono">建议格式：今天 · 分类</p>
-                )}
+                <Label htmlFor="content-zh">{t("admin.ann.form.content")}</Label>
+                <Textarea
+                  id="content-zh"
+                  rows={5}
+                  placeholder={t("admin.ann.form.contentPlaceholder")}
+                  {...form.register("contentZh")}
+                />
+                {form.formState.errors.contentZh ? (
+                  <p className="text-xs text-destructive">{form.formState.errors.contentZh.message}</p>
+                ) : null}
               </div>
             </div>
 
@@ -238,13 +242,16 @@ export function AnnouncementPublisher({ onCreated, className }: AnnouncementPubl
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="meta-en">{t("admin.ann.form.meta")}</Label>
-                <Input id="meta-en" placeholder="e.g. Today · Security" {...form.register("metaEn")} />
-                {form.formState.errors.metaEn ? (
-                  <p className="text-xs text-destructive">{form.formState.errors.metaEn.message}</p>
-                ) : (
-                  <p className="text-xs text-muted-foreground font-mono">Suggested format: “Today · Category”</p>
-                )}
+                <Label htmlFor="content-en">{t("admin.ann.form.content")}</Label>
+                <Textarea
+                  id="content-en"
+                  rows={5}
+                  placeholder={t("admin.ann.form.contentPlaceholder")}
+                  {...form.register("contentEn")}
+                />
+                {form.formState.errors.contentEn ? (
+                  <p className="text-xs text-destructive">{form.formState.errors.contentEn.message}</p>
+                ) : null}
               </div>
             </div>
           </div>

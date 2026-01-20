@@ -67,9 +67,9 @@ export interface AnnouncementItem {
   title: string;
   titleZh?: string | null;
   titleEn?: string | null;
-  meta: string;
-  metaZh?: string | null;
-  metaEn?: string | null;
+  content: string;
+  contentZh?: string | null;
+  contentEn?: string | null;
   level: "info" | "warning" | "success" | "destructive" | string;
   createdAt: string;
 }
@@ -82,9 +82,9 @@ export interface AnnouncementCreateRequest {
   title?: string | null;
   titleZh?: string | null;
   titleEn?: string | null;
-  meta?: string | null;
-  metaZh?: string | null;
-  metaEn?: string | null;
+  content?: string | null;
+  contentZh?: string | null;
+  contentEn?: string | null;
   level: "info" | "warning" | "success" | "destructive";
 }
 
@@ -96,9 +96,9 @@ export interface AnnouncementUpdateRequest {
   title?: string | null;
   titleZh?: string | null;
   titleEn?: string | null;
-  meta?: string | null;
-  metaZh?: string | null;
-  metaEn?: string | null;
+  content?: string | null;
+  contentZh?: string | null;
+  contentEn?: string | null;
   level: "info" | "warning" | "success" | "destructive";
 }
 

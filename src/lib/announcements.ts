@@ -25,12 +25,11 @@ export function getAnnouncementTitle(announcement: AnnouncementItem, locale: Loc
   });
 }
 
-export function getAnnouncementMeta(announcement: AnnouncementItem, locale: Locale) {
+export function getAnnouncementContent(announcement: AnnouncementItem, locale: Locale) {
   return pickByLocale({
     locale,
-    zh: announcement.metaZh,
-    en: announcement.metaEn,
-    fallback: announcement.meta
+    zh: announcement.contentZh,
+    en: announcement.contentEn,
+    fallback: announcement.content
   });
 }
-

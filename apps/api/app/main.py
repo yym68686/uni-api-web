@@ -130,19 +130,73 @@ def create_app() -> FastAPI:
                 "ALTER TABLE IF EXISTS announcements "
                 "ADD COLUMN IF NOT EXISTS title_en varchar(180)"
             )
+
+            # Rename legacy columns (meta/meta_zh/meta_en) -> (content/content_zh/content_en).
+            await conn.exec_driver_sql(
+                "DO $$ BEGIN "
+                "IF EXISTS ("
+                "  SELECT 1 FROM information_schema.columns "
+                "  WHERE table_name='announcements' AND column_name='meta'"
+                ") AND NOT EXISTS ("
+                "  SELECT 1 FROM information_schema.columns "
+                "  WHERE table_name='announcements' AND column_name='content'"
+                ") THEN "
+                "  ALTER TABLE announcements RENAME COLUMN meta TO content; "
+                "END IF; "
+                "END $$;"
+            )
+            await conn.exec_driver_sql(
+                "DO $$ BEGIN "
+                "IF EXISTS ("
+                "  SELECT 1 FROM information_schema.columns "
+                "  WHERE table_name='announcements' AND column_name='meta_zh'"
+                ") AND NOT EXISTS ("
+                "  SELECT 1 FROM information_schema.columns "
+                "  WHERE table_name='announcements' AND column_name='content_zh'"
+                ") THEN "
+                "  ALTER TABLE announcements RENAME COLUMN meta_zh TO content_zh; "
+                "END IF; "
+                "END $$;"
+            )
+            await conn.exec_driver_sql(
+                "DO $$ BEGIN "
+                "IF EXISTS ("
+                "  SELECT 1 FROM information_schema.columns "
+                "  WHERE table_name='announcements' AND column_name='meta_en'"
+                ") AND NOT EXISTS ("
+                "  SELECT 1 FROM information_schema.columns "
+                "  WHERE table_name='announcements' AND column_name='content_en'"
+                ") THEN "
+                "  ALTER TABLE announcements RENAME COLUMN meta_en TO content_en; "
+                "END IF; "
+                "END $$;"
+            )
+
             await conn.exec_driver_sql(
                 "ALTER TABLE IF EXISTS announcements "
-                "ADD COLUMN IF NOT EXISTS meta_zh varchar(120)"
+                "ADD COLUMN IF NOT EXISTS content_zh varchar(2000)"
             )
             await conn.exec_driver_sql(
                 "ALTER TABLE IF EXISTS announcements "
-                "ADD COLUMN IF NOT EXISTS meta_en varchar(120)"
+                "ADD COLUMN IF NOT EXISTS content_en varchar(2000)"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS announcements "
+                "ALTER COLUMN content TYPE varchar(2000)"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS announcements "
+                "ALTER COLUMN content_zh TYPE varchar(2000)"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS announcements "
+                "ALTER COLUMN content_en TYPE varchar(2000)"
             )
             await conn.exec_driver_sql(
                 "UPDATE announcements SET title_zh = title WHERE title_zh IS NULL"
             )
             await conn.exec_driver_sql(
-                "UPDATE announcements SET meta_zh = meta WHERE meta_zh IS NULL"
+                "UPDATE announcements SET content_zh = content WHERE content_zh IS NULL"
             )
         # Bootstrap the default org and backfill memberships for existing users.
         async with SessionLocal() as session:

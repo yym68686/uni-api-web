@@ -10,14 +10,14 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { AnnouncementItem } from "@/lib/types";
-import { getAnnouncementMeta, getAnnouncementTitle } from "@/lib/announcements";
+import { getAnnouncementContent, getAnnouncementTitle } from "@/lib/announcements";
 import { useI18n } from "@/components/i18n/i18n-provider";
 import { UI_EVENTS } from "@/lib/ui-events";
 
 function isAnnouncementItem(value: unknown): value is AnnouncementItem {
   if (!value || typeof value !== "object") return false;
   const v = value as Partial<AnnouncementItem>;
-  return typeof v.id === "string" && typeof v.title === "string" && typeof v.meta === "string";
+  return typeof v.id === "string" && typeof v.title === "string" && typeof v.content === "string";
 }
 
 function levelBadgeVariant(level: string) {
@@ -86,7 +86,7 @@ export function AdminAnnouncementsTableClient({ initialItems, canManage }: Admin
             <TableHeader>
               <TableRow>
                 <TableHead>{t("admin.ann.table.title")}</TableHead>
-                <TableHead>{t("admin.ann.table.meta")}</TableHead>
+                <TableHead>{t("admin.ann.table.content")}</TableHead>
                 <TableHead>{t("admin.ann.table.level")}</TableHead>
                 <TableHead>{t("admin.ann.table.created")}</TableHead>
                 {canManage ? <TableHead className="w-12 text-right">{t("keys.table.actions")}</TableHead> : null}
@@ -96,7 +96,9 @@ export function AdminAnnouncementsTableClient({ initialItems, canManage }: Admin
               {items.map((a) => (
                 <TableRow key={a.id} className="uai-cv-auto">
                   <TableCell className="font-medium text-foreground">{getAnnouncementTitle(a, locale)}</TableCell>
-                  <TableCell className="font-mono text-xs text-muted-foreground">{getAnnouncementMeta(a, locale)}</TableCell>
+                  <TableCell className="max-w-[420px] font-mono text-xs text-muted-foreground">
+                    <span className="block truncate">{getAnnouncementContent(a, locale)}</span>
+                  </TableCell>
                   <TableCell>
                     <Badge variant={levelBadgeVariant(a.level)} className="capitalize">
                       {a.level}

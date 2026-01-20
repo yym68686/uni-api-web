@@ -29,7 +29,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { getAnnouncementMeta, getAnnouncementTitle } from "@/lib/announcements";
+import { Textarea } from "@/components/ui/textarea";
+import { getAnnouncementContent, getAnnouncementTitle } from "@/lib/announcements";
 
 function createSchema(t: (key: MessageKey, vars?: MessageVars) => string) {
   return z
@@ -44,21 +45,21 @@ function createSchema(t: (key: MessageKey, vars?: MessageVars) => string) {
         .trim()
         .max(180, t("validation.maxChars", { max: 180 }))
         .refine((v) => v === "" || v.length >= 2, t("validation.minChars", { min: 2 })),
-      metaZh: z
+      contentZh: z
         .string()
         .trim()
-        .max(120, t("validation.maxChars", { max: 120 }))
+        .max(2000, t("validation.maxChars", { max: 2000 }))
         .refine((v) => v === "" || v.length >= 2, t("validation.minChars", { min: 2 })),
-      metaEn: z
+      contentEn: z
         .string()
         .trim()
-        .max(120, t("validation.maxChars", { max: 120 }))
+        .max(2000, t("validation.maxChars", { max: 2000 }))
         .refine((v) => v === "" || v.length >= 2, t("validation.minChars", { min: 2 })),
       level: z.enum(["info", "warning", "success", "destructive"])
     })
     .superRefine((values, ctx) => {
       const hasTitle = Boolean(values.titleZh || values.titleEn);
-      const hasMeta = Boolean(values.metaZh || values.metaEn);
+      const hasContent = Boolean(values.contentZh || values.contentEn);
       if (!hasTitle) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
@@ -66,11 +67,11 @@ function createSchema(t: (key: MessageKey, vars?: MessageVars) => string) {
           path: ["titleZh"]
         });
       }
-      if (!hasMeta) {
+      if (!hasContent) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: t("admin.ann.form.needMeta"),
-          path: ["metaZh"]
+          message: t("admin.ann.form.needContent"),
+          path: ["contentZh"]
         });
       }
     });
@@ -108,23 +109,23 @@ function readMessage(json: unknown, fallback: string) {
 
 function initialValuesFromAnnouncement(announcement: AnnouncementItem): Omit<FormValues, "level"> {
   const hasAnyI18n =
-    Boolean(announcement.titleZh || announcement.metaZh || announcement.titleEn || announcement.metaEn);
-  const hasEn = Boolean(announcement.titleEn || announcement.metaEn);
+    Boolean(announcement.titleZh || announcement.contentZh || announcement.titleEn || announcement.contentEn);
+  const hasEn = Boolean(announcement.titleEn || announcement.contentEn);
 
   if (!hasAnyI18n) {
     return {
       titleZh: announcement.title ?? "",
-      metaZh: announcement.meta ?? "",
+      contentZh: announcement.content ?? "",
       titleEn: "",
-      metaEn: ""
+      contentEn: ""
     };
   }
 
   return {
     titleZh: announcement.titleZh ?? (hasEn ? "" : announcement.title ?? ""),
-    metaZh: announcement.metaZh ?? (hasEn ? "" : announcement.meta ?? ""),
+    contentZh: announcement.contentZh ?? (hasEn ? "" : announcement.content ?? ""),
     titleEn: announcement.titleEn ?? "",
-    metaEn: announcement.metaEn ?? ""
+    contentEn: announcement.contentEn ?? ""
   };
 }
 
@@ -164,8 +165,8 @@ export function AnnouncementRowActions({ announcement, onUpdated, onDeleted, cla
       const dirty = form.formState.dirtyFields;
       if (isDirtyField(dirty.titleZh)) payload.titleZh = parsed.data.titleZh;
       if (isDirtyField(dirty.titleEn)) payload.titleEn = parsed.data.titleEn;
-      if (isDirtyField(dirty.metaZh)) payload.metaZh = parsed.data.metaZh;
-      if (isDirtyField(dirty.metaEn)) payload.metaEn = parsed.data.metaEn;
+      if (isDirtyField(dirty.contentZh)) payload.contentZh = parsed.data.contentZh;
+      if (isDirtyField(dirty.contentEn)) payload.contentEn = parsed.data.contentEn;
       if (isDirtyField(dirty.level)) payload.level = parsed.data.level;
 
       if (Object.keys(payload).length === 0) {
@@ -324,14 +325,15 @@ export function AnnouncementRowActions({ announcement, onUpdated, onDeleted, cla
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor={`meta-zh-${announcement.id}`}>{t("admin.ann.form.meta")}</Label>
-                  <Input
-                    id={`meta-zh-${announcement.id}`}
-                    placeholder="例如：今天 · 安全"
-                    {...form.register("metaZh")}
+                  <Label htmlFor={`content-zh-${announcement.id}`}>{t("admin.ann.form.content")}</Label>
+                  <Textarea
+                    id={`content-zh-${announcement.id}`}
+                    rows={5}
+                    placeholder={t("admin.ann.form.contentPlaceholder")}
+                    {...form.register("contentZh")}
                   />
-                  {form.formState.errors.metaZh ? (
-                    <p className="text-xs text-destructive">{form.formState.errors.metaZh.message}</p>
+                  {form.formState.errors.contentZh ? (
+                    <p className="text-xs text-destructive">{form.formState.errors.contentZh.message}</p>
                   ) : null}
                 </div>
               </div>
@@ -354,14 +356,15 @@ export function AnnouncementRowActions({ announcement, onUpdated, onDeleted, cla
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor={`meta-en-${announcement.id}`}>{t("admin.ann.form.meta")}</Label>
-                  <Input
-                    id={`meta-en-${announcement.id}`}
-                    placeholder="e.g. Today · Security"
-                    {...form.register("metaEn")}
+                  <Label htmlFor={`content-en-${announcement.id}`}>{t("admin.ann.form.content")}</Label>
+                  <Textarea
+                    id={`content-en-${announcement.id}`}
+                    rows={5}
+                    placeholder={t("admin.ann.form.contentPlaceholder")}
+                    {...form.register("contentEn")}
                   />
-                  {form.formState.errors.metaEn ? (
-                    <p className="text-xs text-destructive">{form.formState.errors.metaEn.message}</p>
+                  {form.formState.errors.contentEn ? (
+                    <p className="text-xs text-destructive">{form.formState.errors.contentEn.message}</p>
                   ) : null}
                 </div>
               </div>
@@ -426,7 +429,9 @@ export function AnnouncementRowActions({ announcement, onUpdated, onDeleted, cla
 
           <div className="rounded-xl border border-border bg-muted/20 p-4">
             <div className="text-sm font-medium text-foreground">{getAnnouncementTitle(announcement, locale)}</div>
-            <div className="mt-1 text-xs font-mono text-muted-foreground">{getAnnouncementMeta(announcement, locale)}</div>
+            <div className="mt-2 whitespace-pre-wrap text-xs text-muted-foreground">
+              {getAnnouncementContent(announcement, locale)}
+            </div>
           </div>
 
           <DialogFooter>
