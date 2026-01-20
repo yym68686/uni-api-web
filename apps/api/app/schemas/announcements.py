@@ -6,7 +6,11 @@ from pydantic import BaseModel, Field
 class AnnouncementItem(BaseModel):
     id: str
     title: str
+    title_zh: str | None = Field(default=None, alias="titleZh")
+    title_en: str | None = Field(default=None, alias="titleEn")
     meta: str
+    meta_zh: str | None = Field(default=None, alias="metaZh")
+    meta_en: str | None = Field(default=None, alias="metaEn")
     level: str
     created_at: str = Field(alias="createdAt")
 
@@ -16,8 +20,12 @@ class AnnouncementsListResponse(BaseModel):
 
 
 class AnnouncementCreateRequest(BaseModel):
-    title: str
-    meta: str
+    title: str | None = None
+    title_zh: str | None = Field(default=None, alias="titleZh")
+    title_en: str | None = Field(default=None, alias="titleEn")
+    meta: str | None = None
+    meta_zh: str | None = Field(default=None, alias="metaZh")
+    meta_en: str | None = Field(default=None, alias="metaEn")
     level: str = "warning"
 
 
@@ -26,8 +34,12 @@ class AnnouncementCreateResponse(BaseModel):
 
 
 class AnnouncementUpdateRequest(BaseModel):
-    title: str
-    meta: str
+    title: str | None = None
+    title_zh: str | None = Field(default=None, alias="titleZh")
+    title_en: str | None = Field(default=None, alias="titleEn")
+    meta: str | None = None
+    meta_zh: str | None = Field(default=None, alias="metaZh")
+    meta_en: str | None = Field(default=None, alias="metaEn")
     level: str = "warning"
 
 

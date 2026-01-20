@@ -29,21 +29,51 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { getAnnouncementMeta, getAnnouncementTitle } from "@/lib/announcements";
 
 function createSchema(t: (key: MessageKey, vars?: MessageVars) => string) {
-  return z.object({
-    title: z
-      .string()
-      .trim()
-      .min(2, t("validation.minChars", { min: 2 }))
-      .max(180, t("validation.maxChars", { max: 180 })),
-    meta: z
-      .string()
-      .trim()
-      .min(2, t("validation.minChars", { min: 2 }))
-      .max(120, t("validation.maxChars", { max: 120 })),
-    level: z.enum(["info", "warning", "success", "destructive"])
-  });
+  return z
+    .object({
+      titleZh: z
+        .string()
+        .trim()
+        .max(180, t("validation.maxChars", { max: 180 }))
+        .refine((v) => v === "" || v.length >= 2, t("validation.minChars", { min: 2 })),
+      titleEn: z
+        .string()
+        .trim()
+        .max(180, t("validation.maxChars", { max: 180 }))
+        .refine((v) => v === "" || v.length >= 2, t("validation.minChars", { min: 2 })),
+      metaZh: z
+        .string()
+        .trim()
+        .max(120, t("validation.maxChars", { max: 120 }))
+        .refine((v) => v === "" || v.length >= 2, t("validation.minChars", { min: 2 })),
+      metaEn: z
+        .string()
+        .trim()
+        .max(120, t("validation.maxChars", { max: 120 }))
+        .refine((v) => v === "" || v.length >= 2, t("validation.minChars", { min: 2 })),
+      level: z.enum(["info", "warning", "success", "destructive"])
+    })
+    .superRefine((values, ctx) => {
+      const hasTitle = Boolean(values.titleZh || values.titleEn);
+      const hasMeta = Boolean(values.metaZh || values.metaEn);
+      if (!hasTitle) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: t("admin.ann.form.needTitle"),
+          path: ["titleZh"]
+        });
+      }
+      if (!hasMeta) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: t("admin.ann.form.needMeta"),
+          path: ["metaZh"]
+        });
+      }
+    });
 }
 
 type FormValues = z.infer<ReturnType<typeof createSchema>>;
@@ -76,32 +106,49 @@ function readMessage(json: unknown, fallback: string) {
   return fallback;
 }
 
+function initialValuesFromAnnouncement(announcement: AnnouncementItem): Omit<FormValues, "level"> {
+  const hasAnyI18n =
+    Boolean(announcement.titleZh || announcement.metaZh || announcement.titleEn || announcement.metaEn);
+  const hasEn = Boolean(announcement.titleEn || announcement.metaEn);
+
+  if (!hasAnyI18n) {
+    return {
+      titleZh: announcement.title ?? "",
+      metaZh: announcement.meta ?? "",
+      titleEn: "",
+      metaEn: ""
+    };
+  }
+
+  return {
+    titleZh: announcement.titleZh ?? (hasEn ? "" : announcement.title ?? ""),
+    metaZh: announcement.metaZh ?? (hasEn ? "" : announcement.meta ?? ""),
+    titleEn: announcement.titleEn ?? "",
+    metaEn: announcement.metaEn ?? ""
+  };
+}
+
+function isDirtyField(value: unknown): value is true {
+  return value === true;
+}
+
 export function AnnouncementRowActions({ announcement, onUpdated, onDeleted, className }: AnnouncementRowActionsProps) {
   const router = useRouter();
   const [editOpen, setEditOpen] = React.useState(false);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
-  const { t } = useI18n();
+  const [activeLang, setActiveLang] = React.useState<"zh" | "en">("zh");
+  const { locale, t } = useI18n();
 
   const schema = React.useMemo(() => createSchema(t), [t]);
 
   const form = useForm<FormValues>({
     defaultValues: {
-      title: announcement.title,
-      meta: announcement.meta,
+      ...initialValuesFromAnnouncement(announcement),
       level: normalizeLevel(announcement.level)
     },
     mode: "onChange"
   });
-
-  React.useEffect(() => {
-    if (!editOpen) return;
-    form.reset({
-      title: announcement.title,
-      meta: announcement.meta,
-      level: normalizeLevel(announcement.level)
-    });
-  }, [announcement.level, announcement.meta, announcement.title, editOpen, form]);
 
   async function update(values: FormValues) {
     setSubmitting(true);
@@ -113,10 +160,23 @@ export function AnnouncementRowActions({ announcement, onUpdated, onDeleted, cla
         return;
       }
 
+      const payload: Record<string, unknown> = {};
+      const dirty = form.formState.dirtyFields;
+      if (isDirtyField(dirty.titleZh)) payload.titleZh = parsed.data.titleZh;
+      if (isDirtyField(dirty.titleEn)) payload.titleEn = parsed.data.titleEn;
+      if (isDirtyField(dirty.metaZh)) payload.metaZh = parsed.data.metaZh;
+      if (isDirtyField(dirty.metaEn)) payload.metaEn = parsed.data.metaEn;
+      if (isDirtyField(dirty.level)) payload.level = parsed.data.level;
+
+      if (Object.keys(payload).length === 0) {
+        setEditOpen(false);
+        return;
+      }
+
       const res = await fetch(`/api/admin/announcements/${encodeURIComponent(announcement.id)}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(parsed.data)
+        body: JSON.stringify(payload)
       });
       const json: unknown = await res.json().catch(() => null);
       if (!res.ok) throw new Error(readMessage(json, t("common.updateFailed")));
@@ -194,7 +254,18 @@ export function AnnouncementRowActions({ announcement, onUpdated, onDeleted, cla
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+      <Dialog
+        open={editOpen}
+        onOpenChange={(next) => {
+          setEditOpen(next);
+          if (!next) return;
+          setActiveLang("zh");
+          form.reset({
+            ...initialValuesFromAnnouncement(announcement),
+            level: normalizeLevel(announcement.level)
+          });
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t("admin.ann.editTitle")}</DialogTitle>
@@ -207,20 +278,79 @@ export function AnnouncementRowActions({ announcement, onUpdated, onDeleted, cla
               void form.handleSubmit(update)(e);
             }}
           >
-            <div className="space-y-2">
-              <Label htmlFor={`title-${announcement.id}`}>{t("admin.ann.form.title")}</Label>
-              <Input id={`title-${announcement.id}`} {...form.register("title")} />
-              {form.formState.errors.title ? (
-                <p className="text-xs text-destructive">{form.formState.errors.title.message}</p>
-              ) : null}
-            </div>
+            <div className="space-y-4">
+              <div
+                role="tablist"
+                aria-label={t("admin.ann.form.title")}
+                className="grid grid-cols-2 gap-2 rounded-xl border border-border bg-muted/20 p-1"
+              >
+                <Button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeLang === "zh"}
+                  variant={activeLang === "zh" ? "default" : "ghost"}
+                  className="rounded-lg"
+                  onClick={() => setActiveLang("zh")}
+                >
+                  {t("common.lang.zh")}
+                </Button>
+                <Button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeLang === "en"}
+                  variant={activeLang === "en" ? "default" : "ghost"}
+                  className="rounded-lg"
+                  onClick={() => setActiveLang("en")}
+                >
+                  {t("common.lang.en")}
+                </Button>
+              </div>
 
-            <div className="space-y-2">
-              <Label htmlFor={`meta-${announcement.id}`}>{t("admin.ann.form.meta")}</Label>
-              <Input id={`meta-${announcement.id}`} {...form.register("meta")} />
-              {form.formState.errors.meta ? (
-                <p className="text-xs text-destructive">{form.formState.errors.meta.message}</p>
-              ) : null}
+              {activeLang === "zh" ? (
+                <div key="zh" className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor={`title-zh-${announcement.id}`}>{t("admin.ann.form.title")}</Label>
+                    <Input
+                      id={`title-zh-${announcement.id}`}
+                      placeholder="例如：新版本发布 / 计费变更"
+                      {...form.register("titleZh")}
+                    />
+                    {form.formState.errors.titleZh ? (
+                      <p className="text-xs text-destructive">{form.formState.errors.titleZh.message}</p>
+                    ) : null}
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor={`meta-zh-${announcement.id}`}>{t("admin.ann.form.meta")}</Label>
+                    <Input id={`meta-zh-${announcement.id}`} placeholder="例如：今天 · 安全" {...form.register("metaZh")} />
+                    {form.formState.errors.metaZh ? (
+                      <p className="text-xs text-destructive">{form.formState.errors.metaZh.message}</p>
+                    ) : null}
+                  </div>
+                </div>
+              ) : (
+                <div key="en" className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor={`title-en-${announcement.id}`}>{t("admin.ann.form.title")}</Label>
+                    <Input
+                      id={`title-en-${announcement.id}`}
+                      placeholder="e.g. New release / Billing changes"
+                      {...form.register("titleEn")}
+                    />
+                    {form.formState.errors.titleEn ? (
+                      <p className="text-xs text-destructive">{form.formState.errors.titleEn.message}</p>
+                    ) : null}
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor={`meta-en-${announcement.id}`}>{t("admin.ann.form.meta")}</Label>
+                    <Input id={`meta-en-${announcement.id}`} placeholder="e.g. Today · Security" {...form.register("metaEn")} />
+                    {form.formState.errors.metaEn ? (
+                      <p className="text-xs text-destructive">{form.formState.errors.metaEn.message}</p>
+                    ) : null}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -281,8 +411,8 @@ export function AnnouncementRowActions({ announcement, onUpdated, onDeleted, cla
           </DialogHeader>
 
           <div className="rounded-xl border border-border bg-muted/20 p-4">
-            <div className="text-sm font-medium text-foreground">{announcement.title}</div>
-            <div className="mt-1 text-xs font-mono text-muted-foreground">{announcement.meta}</div>
+            <div className="text-sm font-medium text-foreground">{getAnnouncementTitle(announcement, locale)}</div>
+            <div className="mt-1 text-xs font-mono text-muted-foreground">{getAnnouncementMeta(announcement, locale)}</div>
           </div>
 
           <DialogFooter>

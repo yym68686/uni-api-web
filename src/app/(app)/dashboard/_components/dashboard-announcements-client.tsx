@@ -11,6 +11,7 @@ import type { Locale } from "@/lib/i18n/messages";
 import { t } from "@/lib/i18n/messages";
 import type { AnnouncementsListResponse } from "@/lib/types";
 import { useSwrLite } from "@/lib/swr-lite";
+import { getAnnouncementMeta, getAnnouncementTitle } from "@/lib/announcements";
 
 function isAnnouncementsListResponse(value: unknown): value is AnnouncementsListResponse {
   if (!value || typeof value !== "object") return false;
@@ -70,9 +71,9 @@ export function DashboardAnnouncementsClient({
                   "transition-all duration-300 hover:shadow-lg hover:scale-[1.01]"
                 )}
               >
-                <div className="text-sm font-medium text-foreground">{a.title}</div>
+                <div className="text-sm font-medium text-foreground">{getAnnouncementTitle(a, locale)}</div>
                 <div className="mt-1 font-mono tabular-nums text-xs text-muted-foreground">
-                  <ClientDateTime value={a.createdAt} locale={locale} /> · {a.meta}
+                  <ClientDateTime value={a.createdAt} locale={locale} /> · {getAnnouncementMeta(a, locale)}
                 </div>
               </div>
             ))}

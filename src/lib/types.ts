@@ -65,7 +65,11 @@ export interface ApiKeyRevealResponse {
 export interface AnnouncementItem {
   id: string;
   title: string;
+  titleZh?: string | null;
+  titleEn?: string | null;
   meta: string;
+  metaZh?: string | null;
+  metaEn?: string | null;
   level: "info" | "warning" | "success" | "destructive" | string;
   createdAt: string;
 }
@@ -75,8 +79,12 @@ export interface AnnouncementsListResponse {
 }
 
 export interface AnnouncementCreateRequest {
-  title: string;
-  meta: string;
+  title?: string | null;
+  titleZh?: string | null;
+  titleEn?: string | null;
+  meta?: string | null;
+  metaZh?: string | null;
+  metaEn?: string | null;
   level: "info" | "warning" | "success" | "destructive";
 }
 
@@ -85,8 +93,12 @@ export interface AnnouncementCreateResponse {
 }
 
 export interface AnnouncementUpdateRequest {
-  title: string;
-  meta: string;
+  title?: string | null;
+  titleZh?: string | null;
+  titleEn?: string | null;
+  meta?: string | null;
+  metaZh?: string | null;
+  metaEn?: string | null;
   level: "info" | "warning" | "success" | "destructive";
 }
 

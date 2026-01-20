@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { AnnouncementItem } from "@/lib/types";
+import { getAnnouncementMeta, getAnnouncementTitle } from "@/lib/announcements";
 import { useI18n } from "@/components/i18n/i18n-provider";
 import { UI_EVENTS } from "@/lib/ui-events";
 
@@ -94,8 +95,8 @@ export function AdminAnnouncementsTableClient({ initialItems, canManage }: Admin
             <TableBody>
               {items.map((a) => (
                 <TableRow key={a.id} className="uai-cv-auto">
-                  <TableCell className="font-medium text-foreground">{a.title}</TableCell>
-                  <TableCell className="font-mono text-xs text-muted-foreground">{a.meta}</TableCell>
+                  <TableCell className="font-medium text-foreground">{getAnnouncementTitle(a, locale)}</TableCell>
+                  <TableCell className="font-mono text-xs text-muted-foreground">{getAnnouncementMeta(a, locale)}</TableCell>
                   <TableCell>
                     <Badge variant={levelBadgeVariant(a.level)} className="capitalize">
                       {a.level}
