@@ -222,7 +222,11 @@ export function ApiKeysPageClient({ initialItems, publicApiBaseUrl, autoRevalida
             emptyState={
               <div className="p-6">
                 <EmptyState
-                  icon={<KeyRound className="h-6 w-6 text-muted-foreground uai-float-sm" />}
+                  icon={(
+                    <span className="inline-flex uai-float-sm">
+                      <KeyRound className="h-6 w-6 text-muted-foreground" />
+                    </span>
+                  )}
                   title={t("keys.empty.title")}
                   description={t("keys.empty.desc")}
                   action={

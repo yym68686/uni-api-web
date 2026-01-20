@@ -187,7 +187,9 @@ export function AnnouncementPublisher({ onCreated, className }: AnnouncementPubl
             <Button type="submit" disabled={!form.formState.isValid || submitting}>
               {submitting ? (
                 <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span className="inline-flex animate-spin">
+                    <Loader2 className="h-4 w-4" />
+                  </span>
                   {t("common.publishing")}
                 </>
               ) : (

@@ -19,6 +19,32 @@ const pressStart2p = Press_Start_2P({
   variable: "--font-press-start"
 });
 
+const THEME_INIT_SCRIPT = `
+(function () {
+  try {
+    var storageKey = "uai-theme";
+    var saved = localStorage.getItem(storageKey);
+    var theme = saved === "light" || saved === "dark" ? saved : "dark";
+    var root = document.documentElement;
+    root.classList.toggle("dark", theme === "dark");
+
+    var ua = navigator.userAgent || "";
+    var isWebKit =
+      ua.indexOf("AppleWebKit") !== -1 &&
+      ua.indexOf("Chrome") === -1 &&
+      ua.indexOf("Chromium") === -1 &&
+      ua.indexOf("Edg") === -1 &&
+      ua.indexOf("OPR") === -1;
+    var mask = isWebKit || ua.indexOf("Firefox") !== -1 ? "circle" : "blur";
+    if (mask === "circle") {
+      root.setAttribute("data-uai-vt-mask", "circle");
+    } else {
+      root.removeAttribute("data-uai-vt-mask");
+    }
+  } catch (e) {}
+})();
+`.trim();
+
 export function generateMetadata(): Metadata {
   const appName = getAppName();
   return {
@@ -47,6 +73,11 @@ export default async function RootLayout({ children }: RootLayoutProps) {
       className={cn("dark", GeistSans.variable, GeistMono.variable, pressStart2p.variable)}
       suppressHydrationWarning
     >
+      <head>
+        <script
+          dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }}
+        />
+      </head>
       <body
         className={cn("min-h-dvh bg-background font-sans text-foreground")}
         suppressHydrationWarning

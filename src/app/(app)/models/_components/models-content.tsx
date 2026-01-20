@@ -11,7 +11,7 @@ function isModelsListResponse(value: unknown): value is ModelsListResponse {
   return Array.isArray(items);
 }
 
-async function getModels() {
+export async function getModels() {
   const res = await fetch(buildBackendUrl("/console/models"), {
     cache: "force-cache",
     next: { tags: [CACHE_TAGS.modelsUser], revalidate: 30 },
@@ -25,9 +25,9 @@ async function getModels() {
 
 interface ModelsContentProps {
   locale: Locale;
+  initialItems: ModelsListResponse["items"];
 }
 
-export async function ModelsContent({ locale }: ModelsContentProps) {
-  const items = (await getModels()) ?? [];
-  return <ModelsContentClient locale={locale} initialItems={items} />;
+export function ModelsContent({ locale, initialItems }: ModelsContentProps) {
+  return <ModelsContentClient locale={locale} initialItems={initialItems} />;
 }

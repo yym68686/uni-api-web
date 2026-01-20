@@ -35,7 +35,14 @@ export default async function ProfilePage() {
         </CardHeader>
         <CardContent>
           {!me ? (
-            <EmptyState icon={<User className="h-6 w-6 text-muted-foreground uai-float-sm" />} title={t(locale, "profile.error")} />
+            <EmptyState
+              icon={(
+                <span className="inline-flex uai-float-sm">
+                  <User className="h-6 w-6 text-muted-foreground" />
+                </span>
+              )}
+              title={t(locale, "profile.error")}
+            />
           ) : (
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="rounded-xl border border-border bg-background/35 p-4">

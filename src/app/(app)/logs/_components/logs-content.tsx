@@ -1,6 +1,6 @@
 import { LogsTableClient } from "./logs-table-client";
 import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
-import type { LogsListResponse } from "@/lib/types";
+import type { LogItem, LogsListResponse } from "@/lib/types";
 
 function isLogsListResponse(value: unknown): value is LogsListResponse {
   if (!value || typeof value !== "object") return false;
@@ -9,10 +9,10 @@ function isLogsListResponse(value: unknown): value is LogsListResponse {
   return Array.isArray(items);
 }
 
-const PAGE_SIZE = 50;
+export const LOGS_PAGE_SIZE = 50;
 
-async function getLogs() {
-  const res = await fetch(buildBackendUrl(`/logs?limit=${PAGE_SIZE}&offset=0`), {
+export async function getLogs() {
+  const res = await fetch(buildBackendUrl(`/logs?limit=${LOGS_PAGE_SIZE}&offset=0`), {
     cache: "no-store",
     headers: await getBackendAuthHeadersCached()
   });
@@ -22,7 +22,11 @@ async function getLogs() {
   return json.items;
 }
 
-export async function LogsContent() {
-  const items = (await getLogs()) ?? [];
-  return <LogsTableClient initialItems={items} pageSize={PAGE_SIZE} />;
+interface LogsContentProps {
+  initialItemsPromise?: Promise<LogItem[] | null>;
+}
+
+export async function LogsContent({ initialItemsPromise }: LogsContentProps) {
+  const items = (await (initialItemsPromise ?? getLogs())) ?? [];
+  return <LogsTableClient initialItems={items} pageSize={LOGS_PAGE_SIZE} />;
 }

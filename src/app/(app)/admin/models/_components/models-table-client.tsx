@@ -63,7 +63,14 @@ export function AdminModelsTableClient({ initialItems }: AdminModelsTableClientP
     <Card>
       {items.length === 0 ? (
         <CardContent className="p-6">
-          <EmptyState icon={<Boxes className="h-6 w-6 text-muted-foreground uai-float-sm" />} title={t("admin.models.empty")} />
+          <EmptyState
+            icon={(
+              <span className="inline-flex uai-float-sm">
+                <Boxes className="h-6 w-6 text-muted-foreground" />
+              </span>
+            )}
+            title={t("admin.models.empty")}
+          />
         </CardContent>
       ) : (
         <CardContent className="p-0">
@@ -80,7 +87,7 @@ export function AdminModelsTableClient({ initialItems }: AdminModelsTableClientP
             </TableHeader>
             <TableBody>
               {items.map((m) => (
-                <TableRow key={m.model}>
+                <TableRow key={m.model} className="uai-cv-auto">
                   <TableCell>
                     <CopyableModelId value={m.model} />
                   </TableCell>

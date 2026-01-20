@@ -1,12 +1,12 @@
 import { getRequestLocale } from "@/lib/i18n/server";
 import { t } from "@/lib/i18n/messages";
 import { PageHeader } from "@/components/common/page-header";
-import { ModelsContent } from "./_components/models-content";
+import { getModels, ModelsContent } from "./_components/models-content";
 
 export const dynamic = "force-dynamic";
 
 export default async function ModelsPage() {
-  const locale = await getRequestLocale();
+  const [locale, items] = await Promise.all([getRequestLocale(), getModels()]);
 
   return (
     <div className="space-y-6">
@@ -20,7 +20,7 @@ export default async function ModelsPage() {
         }
       />
 
-      <ModelsContent locale={locale} />
+      <ModelsContent locale={locale} initialItems={items ?? []} />
     </div>
   );
 }

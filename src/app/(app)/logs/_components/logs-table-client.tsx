@@ -113,7 +113,11 @@ export function LogsTableClient({ initialItems, pageSize }: LogsTableClientProps
       {items.length === 0 ? (
         <CardContent className="p-6">
           <EmptyState
-            icon={<ScrollText className="h-6 w-6 text-muted-foreground uai-float-sm" />}
+            icon={(
+              <span className="inline-flex uai-float-sm">
+                <ScrollText className="h-6 w-6 text-muted-foreground" />
+              </span>
+            )}
             title={t("logs.empty.title")}
             description={t("logs.empty.desc")}
           />
@@ -140,7 +144,7 @@ export function LogsTableClient({ initialItems, pageSize }: LogsTableClientProps
             </TableHeader>
             <TableBody>
               {items.map((r) => (
-                <TableRow key={r.id}>
+                <TableRow key={r.id} className="uai-cv-auto">
                   <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
                     <ClientDateTime value={r.createdAt} locale={locale} timeStyle="medium" />
                   </TableCell>
@@ -181,7 +185,11 @@ export function LogsTableClient({ initialItems, pageSize }: LogsTableClientProps
               disabled={loadingMore || !canLoadMore}
               onClick={() => void loadMore()}
             >
-              {loadingMore ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {loadingMore ? (
+                <span className="inline-flex animate-spin">
+                  <Loader2 className="h-4 w-4" />
+                </span>
+              ) : null}
               {loadingMore ? t("common.loadingMore") : t("common.loadMore")}
             </Button>
           </div>

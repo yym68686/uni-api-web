@@ -53,7 +53,14 @@ export function AdminUsersTableClient({ initialItems, currentUserId, currentUser
     <Card>
       {items.length === 0 ? (
         <CardContent className="p-6">
-          <EmptyState icon={<Users className="h-6 w-6 text-muted-foreground uai-float-sm" />} title={t("admin.users.empty")} />
+          <EmptyState
+            icon={(
+              <span className="inline-flex uai-float-sm">
+                <Users className="h-6 w-6 text-muted-foreground" />
+              </span>
+            )}
+            title={t("admin.users.empty")}
+          />
         </CardContent>
       ) : (
         <CardContent className="p-0">
@@ -74,7 +81,7 @@ export function AdminUsersTableClient({ initialItems, currentUserId, currentUser
             </TableHeader>
             <TableBody>
               {items.map((u) => (
-                <TableRow key={u.id}>
+                <TableRow key={u.id} className="uai-cv-auto">
                   <TableCell className="font-medium text-foreground">{u.email}</TableCell>
                   <TableCell>
                     <Badge

@@ -65,7 +65,11 @@ export function AdminSettingsPanel({ initialRegistrationEnabled, className }: Ad
           <div className="text-sm text-muted-foreground">{t("admin.settings.registration.desc")}</div>
         </div>
         <div className="flex items-center gap-3">
-          {saving ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
+          {saving ? (
+            <span className="inline-flex animate-spin text-muted-foreground">
+              <Loader2 className="h-4 w-4" />
+            </span>
+          ) : null}
           <Switch
             checked={registrationEnabled}
             disabled={saving}
@@ -79,4 +83,3 @@ export function AdminSettingsPanel({ initialRegistrationEnabled, className }: Ad
     </div>
   );
 }
-

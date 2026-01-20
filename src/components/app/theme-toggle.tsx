@@ -27,23 +27,15 @@ function getViewTransitionMask(): ViewTransitionMask {
   return "blur";
 }
 
-function applyTheme(theme: Theme) {
-  const root = document.documentElement;
-  root.classList.toggle("dark", theme === "dark");
-}
-
-function getInitialTheme(): Theme {
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (saved === "light" || saved === "dark") return saved;
-  return "dark";
-}
-
 interface ThemeToggleProps {
   className?: string;
 }
 
 export function ThemeToggle({ className }: ThemeToggleProps) {
-  const [theme, setTheme] = React.useState<Theme>("dark");
+  const [theme, setTheme] = React.useState<Theme>(() => {
+    if (typeof document === "undefined") return "dark";
+    return document.documentElement.classList.contains("dark") ? "dark" : "light";
+  });
   const buttonRef = React.useRef<HTMLButtonElement | null>(null);
   const { t } = useI18n();
 
@@ -57,18 +49,16 @@ export function ThemeToggle({ className }: ThemeToggleProps) {
   }
 
   React.useEffect(() => {
-    const initial = getInitialTheme();
-    setTheme(initial);
-    applyTheme(initial);
     applyViewTransitionMaskVariant();
   }, []);
 
   function switchTheme() {
-    const current: Theme = document.documentElement.classList.contains("dark") ? "dark" : "light";
-    const next: Theme = current === "dark" ? "light" : "dark";
-    setTheme(next);
-    localStorage.setItem(STORAGE_KEY, next);
-    applyTheme(next);
+    setTheme((current) => {
+      const next: Theme = current === "dark" ? "light" : "dark";
+      localStorage.setItem(STORAGE_KEY, next);
+      document.documentElement.classList.toggle("dark", next === "dark");
+      return next;
+    });
   }
 
   const Icon = theme === "dark" ? Sun : Moon;

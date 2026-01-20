@@ -230,7 +230,9 @@ export function ModelRowActions({ model, onUpdated, className }: ModelRowActions
               <Button type="submit" disabled={submitting}>
                 {submitting ? (
                   <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span className="inline-flex animate-spin">
+                      <Loader2 className="h-4 w-4" />
+                    </span>
                     {t("common.saving")}
                   </>
                 ) : (

@@ -257,7 +257,9 @@ export function AnnouncementRowActions({ announcement, onUpdated, onDeleted, cla
               <Button type="submit" disabled={!form.formState.isValid || submitting}>
                 {submitting ? (
                   <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span className="inline-flex animate-spin">
+                      <Loader2 className="h-4 w-4" />
+                    </span>
                     {t("common.saving")}
                   </>
                 ) : (
@@ -290,7 +292,9 @@ export function AnnouncementRowActions({ announcement, onUpdated, onDeleted, cla
             <Button type="button" variant="destructive" disabled={submitting} onClick={() => void remove()}>
               {submitting ? (
                 <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span className="inline-flex animate-spin">
+                    <Loader2 className="h-4 w-4" />
+                  </span>
                   {t("common.deleting")}
                 </>
               ) : (

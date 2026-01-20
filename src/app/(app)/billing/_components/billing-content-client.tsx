@@ -39,7 +39,6 @@ export function BillingContentClient({ locale, initialItems, pageSize, autoReval
   const key = billingLedgerListApiPath(pageSize, 0);
   const { data, mutate } = useSwrLite<BillingLedgerItem[]>(key, fetchLedger, {
     fallbackData: initialItems ?? undefined,
-    dedupingIntervalMs: 0,
     revalidateOnFocus: false
   });
 

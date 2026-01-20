@@ -72,7 +72,7 @@ export function BillingTableClient({ initialItems, locale, className }: BillingT
               {items.map((row) => {
                 const delta = Number(row.deltaUsd ?? 0);
                 return (
-                  <TableRow key={row.id} className="hover:bg-muted/50">
+                  <TableRow key={row.id} className={cn("uai-cv-auto", "hover:bg-muted/50")}>
                     <TableCell className="font-mono tabular-nums">
                       <ClientDateTime value={row.createdAt} locale={locale} timeStyle="medium" />
                     </TableCell>

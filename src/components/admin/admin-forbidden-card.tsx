@@ -14,7 +14,11 @@ export function AdminForbiddenCard({ title, description }: AdminForbiddenCardPro
     <Card>
       <CardContent className="p-6">
         <EmptyState
-          icon={<ShieldAlert className="h-6 w-6 text-muted-foreground uai-float-sm" />}
+          icon={(
+            <span className="inline-flex uai-float-sm">
+              <ShieldAlert className="h-6 w-6 text-muted-foreground" />
+            </span>
+          )}
           title={title}
           description={description}
         />

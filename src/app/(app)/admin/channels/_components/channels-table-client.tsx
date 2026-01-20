@@ -63,7 +63,11 @@ export function AdminChannelsTableClient({ initialItems }: AdminChannelsTableCli
       {items.length === 0 ? (
         <CardContent className="p-6">
           <EmptyState
-            icon={<PlugZap className="h-6 w-6 text-muted-foreground uai-float-sm" />}
+            icon={(
+              <span className="inline-flex uai-float-sm">
+                <PlugZap className="h-6 w-6 text-muted-foreground" />
+              </span>
+            )}
             title={t("admin.channels.empty")}
           />
         </CardContent>
@@ -82,7 +86,7 @@ export function AdminChannelsTableClient({ initialItems }: AdminChannelsTableCli
             </TableHeader>
             <TableBody>
               {items.map((c) => (
-                <TableRow key={c.id}>
+                <TableRow key={c.id} className="uai-cv-auto">
                   <TableCell className="font-medium text-foreground">{c.name}</TableCell>
                   <TableCell className="max-w-[360px] truncate font-mono text-xs text-muted-foreground">
                     {c.baseUrl}

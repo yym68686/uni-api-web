@@ -401,7 +401,9 @@ export function UserRowActions({ user, currentUserId, currentUserRole, onUpdated
               <Button type="submit" disabled={!roleForm.formState.isValid || submitting}>
                 {submitting ? (
                   <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span className="inline-flex animate-spin">
+                      <Loader2 className="h-4 w-4" />
+                    </span>
                     {t("common.saving")}
                   </>
                 ) : (
@@ -452,7 +454,9 @@ export function UserRowActions({ user, currentUserId, currentUserRole, onUpdated
                 <Button type="submit" disabled={!groupForm.formState.isValid || submitting}>
                   {submitting ? (
                     <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span className="inline-flex animate-spin">
+                        <Loader2 className="h-4 w-4" />
+                      </span>
                       {t("common.saving")}
                     </>
                   ) : (
@@ -498,7 +502,9 @@ export function UserRowActions({ user, currentUserId, currentUserRole, onUpdated
               <Button type="submit" disabled={!form.formState.isValid || submitting}>
                 {submitting ? (
                   <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span className="inline-flex animate-spin">
+                      <Loader2 className="h-4 w-4" />
+                    </span>
                     {t("common.saving")}
                   </>
                 ) : (
@@ -537,7 +543,9 @@ export function UserRowActions({ user, currentUserId, currentUserRole, onUpdated
             <Button type="button" variant={isBanned ? "outline" : "destructive"} disabled={submitting} onClick={() => void toggleBan()}>
               {submitting ? (
                 <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span className="inline-flex animate-spin">
+                    <Loader2 className="h-4 w-4" />
+                  </span>
                   {t("common.working")}
                 </>
               ) : isBanned ? (
@@ -569,7 +577,9 @@ export function UserRowActions({ user, currentUserId, currentUserRole, onUpdated
             <Button type="button" variant="destructive" disabled={submitting} onClick={() => void removeUser()}>
               {submitting ? (
                 <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span className="inline-flex animate-spin">
+                    <Loader2 className="h-4 w-4" />
+                  </span>
                   {t("common.deleting")}
                 </>
               ) : (

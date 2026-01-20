@@ -43,7 +43,6 @@ interface ModelsContentClientProps {
 export function ModelsContentClient({ locale, initialItems, autoRevalidate = true }: ModelsContentClientProps) {
   const { data, mutate } = useSwrLite<ModelsListResponse["items"]>(API_PATHS.models, fetchModels, {
     fallbackData: initialItems ?? undefined,
-    dedupingIntervalMs: 0,
     revalidateOnFocus: false
   });
 
@@ -61,7 +60,11 @@ export function ModelsContentClient({ locale, initialItems, autoRevalidate = tru
       {items.length === 0 ? (
         <CardContent className="p-6">
           <EmptyState
-            icon={<Boxes className="h-6 w-6 text-muted-foreground uai-float-sm" />}
+            icon={(
+              <span className="inline-flex uai-float-sm">
+                <Boxes className="h-6 w-6 text-muted-foreground" />
+              </span>
+            )}
             title={t(locale, "models.empty")}
           />
         </CardContent>
@@ -77,7 +80,7 @@ export function ModelsContentClient({ locale, initialItems, autoRevalidate = tru
             </TableHeader>
             <TableBody>
               {items.map((m) => (
-                <TableRow key={m.model}>
+                <TableRow key={m.model} className="uai-cv-auto">
                   <TableCell>
                     <CopyableModelId value={m.model} />
                   </TableCell>

@@ -66,8 +66,7 @@ function getStore(): KeyStore {
 export function listApiKeys(): ApiKeysListResponse {
   const store = getStore();
   const items: ApiKeyItem[] = store.items
-    .slice()
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .toSorted((a, b) => b.createdAt.localeCompare(a.createdAt))
     .map(({ key: _key, ...rest }) => rest);
   return { items };
 }

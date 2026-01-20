@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { z } from "zod";
 import { Chrome, Github, Loader2, Lock, Mail, ShieldCheck } from "lucide-react";
 import { useForm } from "react-hook-form";
@@ -53,7 +53,6 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
   const [step, setStep] = React.useState<"details" | "verify">("details");
   const [cooldown, setCooldown] = React.useState(0);
   const router = useRouter();
-  const searchParams = useSearchParams();
   const { t } = useI18n();
   const oauthToastShownRef = React.useRef(false);
 
@@ -74,8 +73,9 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
   }, [cooldown]);
 
   React.useEffect(() => {
-    const oauthError = searchParams.get("oauth_error");
-    if (!oauthError || oauthToastShownRef.current) return;
+    if (oauthToastShownRef.current) return;
+    const oauthError = new URLSearchParams(window.location.search).get("oauth_error");
+    if (!oauthError) return;
     oauthToastShownRef.current = true;
     const message =
       oauthError === "registration_disabled"
@@ -89,7 +89,7 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
     url.searchParams.delete("oauth_error");
     window.history.replaceState(null, "", url.toString());
     return () => window.clearTimeout(id);
-  }, [searchParams, t]);
+  }, [t]);
 
   async function requestCode() {
     const values = form.getValues();
@@ -353,15 +353,17 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
             loading ||
             (step === "details" ? !form.formState.isValid : !form.getValues().code)
           }
-        >
-          {loading ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              {step === "details" ? t("register.sending") : t("register.creating")}
-            </>
-          ) : (
-            step === "details" ? t("register.sendCode") : t("register.title")
-          )}
+      >
+        {loading ? (
+          <>
+            <span className="inline-flex animate-spin">
+              <Loader2 className="h-4 w-4" />
+            </span>
+            {step === "details" ? t("register.sending") : t("register.creating")}
+          </>
+        ) : (
+          step === "details" ? t("register.sendCode") : t("register.title")
+        )}
         </Button>
 
         <div className="relative py-2">

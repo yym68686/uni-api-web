@@ -315,6 +315,11 @@
     will-change: transform;
   }
 
+  .uai-cv-auto {
+    content-visibility: auto;
+    contain-intrinsic-size: 0 56px;
+  }
+
   .uai-border-beam {
     position: relative;
     overflow: hidden;

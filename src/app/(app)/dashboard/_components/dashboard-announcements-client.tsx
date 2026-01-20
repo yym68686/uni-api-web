@@ -53,7 +53,11 @@ export function DashboardAnnouncementsClient({
         {announcements.length === 0 ? (
           <EmptyState
             className="bg-background/20 p-6"
-            icon={<Megaphone className="h-6 w-6 text-muted-foreground uai-float-sm" />}
+            icon={(
+              <span className="inline-flex uai-float-sm">
+                <Megaphone className="h-6 w-6 text-muted-foreground" />
+              </span>
+            )}
             title={t(locale, "dashboard.ann.empty")}
           />
         ) : (
@@ -78,4 +82,3 @@ export function DashboardAnnouncementsClient({
     </Card>
   );
 }
-

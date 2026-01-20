@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { useI18n } from "@/components/i18n/i18n-provider";
 import { logsListApiPath } from "@/lib/api-paths";
 import type { LogsListResponse } from "@/lib/types";
+import { cn } from "@/lib/utils";
 import { mutateSwrLite } from "@/lib/swr-lite";
 
 function isLogsListResponse(value: unknown): value is LogsListResponse {
@@ -57,7 +58,9 @@ export function LogsRefreshButton({ pageSize, className }: LogsRefreshButtonProp
       disabled={loading}
       onClick={() => void refresh()}
     >
-      <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+      <span className={cn("inline-flex", loading ? "animate-spin" : null)}>
+        <RefreshCw className="h-4 w-4" />
+      </span>
       {loading ? t("common.refreshing") : t("common.refresh")}
     </Button>
   );

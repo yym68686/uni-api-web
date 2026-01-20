@@ -103,8 +103,7 @@ export function getUsageData(): UsageResponse {
     summary,
     daily,
     topModels: normalized
-      .slice()
-      .sort((a, b) => b.requests - a.requests)
+      .toSorted((a, b) => b.requests - a.requests)
       .slice(0, 5)
   };
 }

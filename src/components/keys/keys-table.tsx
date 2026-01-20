@@ -192,7 +192,7 @@ export function KeysTable({
                 const revoked = Boolean(k.revokedAt);
                 const isCopying = copyingId === k.id;
                 return (
-                  <TableRow key={k.id}>
+                  <TableRow key={k.id} className="uai-cv-auto">
                     <TableCell className="font-medium">{k.name}</TableCell>
                     <TableCell className="font-mono text-xs tabular-nums">
                       <div className="flex items-center gap-2">
@@ -209,7 +209,9 @@ export function KeysTable({
                               }}
                             >
                               {isCopying ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
+                                <span className="inline-flex animate-spin">
+                                  <Loader2 className="h-4 w-4" />
+                                </span>
                               ) : (
                                 <Copy className="h-4 w-4" />
                               )}
@@ -343,7 +345,9 @@ export function KeysTable({
               >
                 {renameTarget && renamingId === renameTarget.id ? (
                   <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span className="inline-flex animate-spin">
+                      <Loader2 className="h-4 w-4" />
+                    </span>
                     {t("common.saving")}
                   </>
                 ) : (

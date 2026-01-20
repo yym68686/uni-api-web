@@ -156,7 +156,13 @@ export function CreateKeyDialog({ onCreated, onRenamed, triggerLabel, triggerCla
         disabled={creating}
         onClick={() => void createNow()}
       >
-        {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+        {creating ? (
+          <span className="inline-flex animate-spin">
+            <Loader2 className="h-4 w-4" />
+          </span>
+        ) : (
+          <KeyRound className="h-4 w-4" />
+        )}
         {creating ? t("keys.dialog.creating") : triggerText}
       </Button>
 
@@ -202,7 +208,13 @@ export function CreateKeyDialog({ onCreated, onRenamed, triggerLabel, triggerCla
                   {t("keys.dialog.copy")}
                 </Button>
                 <Button type="button" variant="outline" disabled={savingName} onClick={() => void saveRename()}>
-                  {savingName ? <Loader2 className="h-4 w-4 animate-spin" /> : <PencilLine className="h-4 w-4" />}
+                  {savingName ? (
+                    <span className="inline-flex animate-spin">
+                      <Loader2 className="h-4 w-4" />
+                    </span>
+                  ) : (
+                    <PencilLine className="h-4 w-4" />
+                  )}
                   {savingName ? t("common.saving") : t("common.save")}
                 </Button>
                 <Button
@@ -218,7 +230,9 @@ export function CreateKeyDialog({ onCreated, onRenamed, triggerLabel, triggerCla
             </div>
           ) : (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <span className="inline-flex animate-spin">
+                <Loader2 className="h-4 w-4" />
+              </span>
               {t("common.working")}
             </div>
           )}
@@ -227,4 +241,3 @@ export function CreateKeyDialog({ onCreated, onRenamed, triggerLabel, triggerCla
     </>
   );
 }
-

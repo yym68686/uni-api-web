@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { z } from "zod";
 import { Chrome, Github, Loader2, Lock, Mail } from "lucide-react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 
@@ -39,7 +39,6 @@ interface LoginFormProps {
 export function LoginForm({ appName, nextPath, className }: LoginFormProps) {
   const [loading, setLoading] = React.useState(false);
   const router = useRouter();
-  const searchParams = useSearchParams();
   const { t } = useI18n();
   const oauthToastShownRef = React.useRef(false);
 
@@ -53,8 +52,9 @@ export function LoginForm({ appName, nextPath, className }: LoginFormProps) {
   });
 
   React.useEffect(() => {
-    const oauthError = searchParams.get("oauth_error");
-    if (!oauthError || oauthToastShownRef.current) return;
+    if (oauthToastShownRef.current) return;
+    const oauthError = new URLSearchParams(window.location.search).get("oauth_error");
+    if (!oauthError) return;
     oauthToastShownRef.current = true;
     const message =
       oauthError === "registration_disabled"
@@ -68,7 +68,7 @@ export function LoginForm({ appName, nextPath, className }: LoginFormProps) {
     url.searchParams.delete("oauth_error");
     window.history.replaceState(null, "", url.toString());
     return () => window.clearTimeout(id);
-  }, [searchParams, t]);
+  }, [t]);
 
   function resolveLoginErrorMessage(payload: unknown) {
     if (!payload || typeof payload !== "object") return t("login.failed");
@@ -198,24 +198,26 @@ export function LoginForm({ appName, nextPath, className }: LoginFormProps) {
           ) : null}
         </div>
 
-        <Button
-          type="submit"
-          className={cn(
-            "w-full rounded-xl",
-            "transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg",
+      <Button
+        type="submit"
+        className={cn(
+          "w-full rounded-xl",
+          "transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg",
             "disabled:hover:translate-y-0 disabled:hover:shadow-none"
           )}
           disabled={!form.formState.isValid || loading}
-        >
-          {loading ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              {t("login.submitting")}
-            </>
-          ) : (
-            t("login.submit")
-          )}
-        </Button>
+      >
+        {loading ? (
+          <>
+            <span className="inline-flex animate-spin">
+              <Loader2 className="h-4 w-4" />
+            </span>
+            {t("login.submitting")}
+          </>
+        ) : (
+          t("login.submit")
+        )}
+      </Button>
 
         <div className="relative py-2">
           <Separator />

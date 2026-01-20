@@ -70,7 +70,14 @@ export function AdminAnnouncementsTableClient({ initialItems, canManage }: Admin
     <Card>
       {items.length === 0 ? (
         <CardContent className="p-6">
-          <EmptyState icon={<Megaphone className="h-6 w-6 text-muted-foreground uai-float-sm" />} title={t("admin.ann.empty")} />
+          <EmptyState
+            icon={(
+              <span className="inline-flex uai-float-sm">
+                <Megaphone className="h-6 w-6 text-muted-foreground" />
+              </span>
+            )}
+            title={t("admin.ann.empty")}
+          />
         </CardContent>
       ) : (
         <CardContent className="p-0">
@@ -86,7 +93,7 @@ export function AdminAnnouncementsTableClient({ initialItems, canManage }: Admin
             </TableHeader>
             <TableBody>
               {items.map((a) => (
-                <TableRow key={a.id}>
+                <TableRow key={a.id} className="uai-cv-auto">
                   <TableCell className="font-medium text-foreground">{a.title}</TableCell>
                   <TableCell className="font-mono text-xs text-muted-foreground">{a.meta}</TableCell>
                   <TableCell>

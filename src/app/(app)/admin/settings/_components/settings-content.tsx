@@ -41,7 +41,11 @@ export async function AdminSettingsContent({ locale }: AdminSettingsContentProps
       <Card>
         <CardContent className="p-6">
           <EmptyState
-            icon={<Settings className="h-6 w-6 text-muted-foreground uai-float-sm" />}
+            icon={(
+              <span className="inline-flex uai-float-sm">
+                <Settings className="h-6 w-6 text-muted-foreground" />
+              </span>
+            )}
             title={t(locale, "admin.settings.loadFailed")}
           />
         </CardContent>
