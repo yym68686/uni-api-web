@@ -5,50 +5,26 @@ import { Megaphone } from "lucide-react";
 import { EmptyState } from "@/components/common/empty-state";
 import { ClientDateTime } from "@/components/common/client-datetime";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { API_PATHS } from "@/lib/api-paths";
 import { cn } from "@/lib/utils";
-import type { Locale } from "@/lib/i18n/messages";
-import { t } from "@/lib/i18n/messages";
+import { useI18n } from "@/components/i18n/i18n-provider";
 import type { AnnouncementsListResponse } from "@/lib/types";
-import { useSwrLite } from "@/lib/swr-lite";
 import { getAnnouncementMeta, getAnnouncementTitle } from "@/lib/announcements";
 
-function isAnnouncementsListResponse(value: unknown): value is AnnouncementsListResponse {
-  if (!value || typeof value !== "object") return false;
-  if (!("items" in value)) return false;
-  const items = (value as { items?: unknown }).items;
-  return Array.isArray(items);
-}
-
-async function fetchAnnouncements() {
-  const res = await fetch(API_PATHS.announcements, { cache: "no-store" });
-  const json: unknown = await res.json().catch(() => null);
-  if (!res.ok) throw new Error("Request failed");
-  if (!isAnnouncementsListResponse(json)) throw new Error("Invalid response");
-  return json.items;
-}
-
 interface DashboardAnnouncementsClientProps {
-  locale: Locale;
   initialItems: AnnouncementsListResponse["items"];
 }
 
 export function DashboardAnnouncementsClient({
-  locale,
   initialItems
 }: DashboardAnnouncementsClientProps) {
-  const { data } = useSwrLite<AnnouncementsListResponse["items"]>(API_PATHS.announcements, fetchAnnouncements, {
-    fallbackData: initialItems,
-    revalidateOnFocus: true
-  });
-
-  const announcements = data ?? initialItems;
+  const { locale, t } = useI18n();
+  const announcements = initialItems;
 
   return (
     <Card className="bg-warning/10">
       <CardHeader>
-        <CardTitle>{t(locale, "dashboard.ann.title")}</CardTitle>
-        <CardDescription>{t(locale, "dashboard.ann.desc")}</CardDescription>
+        <CardTitle>{t("dashboard.ann.title")}</CardTitle>
+        <CardDescription>{t("dashboard.ann.desc")}</CardDescription>
       </CardHeader>
       <CardContent>
         {announcements.length === 0 ? (
@@ -56,10 +32,10 @@ export function DashboardAnnouncementsClient({
             className="bg-background/20 p-6"
             icon={(
               <span className="inline-flex uai-float-sm">
-                <Megaphone className="h-6 w-6 text-muted-foreground" />
-              </span>
+              <Megaphone className="h-6 w-6 text-muted-foreground" />
+            </span>
             )}
-            title={t(locale, "dashboard.ann.empty")}
+            title={t("dashboard.ann.empty")}
           />
         ) : (
           <div className="space-y-3">

@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Breadcrumbs } from "@/components/app/breadcrumbs";
 import { MobileSidebar } from "@/components/app/mobile-sidebar";
 import { ThemeToggle } from "@/components/app/theme-toggle";
+import { LanguageToggle } from "@/components/app/language-toggle";
 import { UserMenu } from "@/components/app/user-menu";
 
 interface AppTopbarProps {
@@ -19,6 +20,7 @@ export function AppTopbar({ userName, userRole, appName }: AppTopbarProps) {
         <div className="mx-auto flex h-14 max-w-6xl items-center gap-3 px-4 sm:px-6">
           <MobileSidebar appName={appName} userRole={userRole} />
           <Breadcrumbs className="min-w-0 flex-1" />
+          <LanguageToggle />
           <ThemeToggle />
           <UserMenu userName={userName} />
         </div>

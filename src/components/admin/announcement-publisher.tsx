@@ -192,55 +192,61 @@ export function AnnouncementPublisher({ onCreated, className }: AnnouncementPubl
               </Button>
             </div>
 
-            {activeLang === "zh" ? (
-              <div key="zh" className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="title-zh">{t("admin.ann.form.title")}</Label>
-                  <Input
-                    id="title-zh"
-                    placeholder="例如：新版本发布 / 计费变更"
-                    {...form.register("titleZh")}
-                  />
-                  {form.formState.errors.titleZh ? (
-                    <p className="text-xs text-destructive">{form.formState.errors.titleZh.message}</p>
-                  ) : null}
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="meta-zh">{t("admin.ann.form.meta")}</Label>
-                  <Input id="meta-zh" placeholder="例如：今天 · 安全" {...form.register("metaZh")} />
-                  {form.formState.errors.metaZh ? (
-                    <p className="text-xs text-destructive">{form.formState.errors.metaZh.message}</p>
-                  ) : (
-                    <p className="text-xs text-muted-foreground font-mono">建议格式：今天 · 分类</p>
-                  )}
-                </div>
+            <div
+              role="tabpanel"
+              aria-label={t("common.lang.zh")}
+              className={cn("space-y-4", activeLang === "zh" ? "block" : "hidden")}
+            >
+              <div className="space-y-2">
+                <Label htmlFor="title-zh">{t("admin.ann.form.title")}</Label>
+                <Input
+                  id="title-zh"
+                  placeholder="例如：新版本发布 / 计费变更"
+                  {...form.register("titleZh")}
+                />
+                {form.formState.errors.titleZh ? (
+                  <p className="text-xs text-destructive">{form.formState.errors.titleZh.message}</p>
+                ) : null}
               </div>
-            ) : (
-              <div key="en" className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="title-en">{t("admin.ann.form.title")}</Label>
-                  <Input
-                    id="title-en"
-                    placeholder="e.g. New release / Billing changes"
-                    {...form.register("titleEn")}
-                  />
-                  {form.formState.errors.titleEn ? (
-                    <p className="text-xs text-destructive">{form.formState.errors.titleEn.message}</p>
-                  ) : null}
-                </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="meta-en">{t("admin.ann.form.meta")}</Label>
-                  <Input id="meta-en" placeholder="e.g. Today · Security" {...form.register("metaEn")} />
-                  {form.formState.errors.metaEn ? (
-                    <p className="text-xs text-destructive">{form.formState.errors.metaEn.message}</p>
-                  ) : (
-                    <p className="text-xs text-muted-foreground font-mono">Suggested format: “Today · Category”</p>
-                  )}
-                </div>
+              <div className="space-y-2">
+                <Label htmlFor="meta-zh">{t("admin.ann.form.meta")}</Label>
+                <Input id="meta-zh" placeholder="例如：今天 · 安全" {...form.register("metaZh")} />
+                {form.formState.errors.metaZh ? (
+                  <p className="text-xs text-destructive">{form.formState.errors.metaZh.message}</p>
+                ) : (
+                  <p className="text-xs text-muted-foreground font-mono">建议格式：今天 · 分类</p>
+                )}
               </div>
-            )}
+            </div>
+
+            <div
+              role="tabpanel"
+              aria-label={t("common.lang.en")}
+              className={cn("space-y-4", activeLang === "en" ? "block" : "hidden")}
+            >
+              <div className="space-y-2">
+                <Label htmlFor="title-en">{t("admin.ann.form.title")}</Label>
+                <Input
+                  id="title-en"
+                  placeholder="e.g. New release / Billing changes"
+                  {...form.register("titleEn")}
+                />
+                {form.formState.errors.titleEn ? (
+                  <p className="text-xs text-destructive">{form.formState.errors.titleEn.message}</p>
+                ) : null}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="meta-en">{t("admin.ann.form.meta")}</Label>
+                <Input id="meta-en" placeholder="e.g. Today · Security" {...form.register("metaEn")} />
+                {form.formState.errors.metaEn ? (
+                  <p className="text-xs text-destructive">{form.formState.errors.metaEn.message}</p>
+                ) : (
+                  <p className="text-xs text-muted-foreground font-mono">Suggested format: “Today · Category”</p>
+                )}
+              </div>
+            </div>
           </div>
 
           <div className="space-y-2">

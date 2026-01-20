@@ -306,51 +306,65 @@ export function AnnouncementRowActions({ announcement, onUpdated, onDeleted, cla
                 </Button>
               </div>
 
-              {activeLang === "zh" ? (
-                <div key="zh" className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor={`title-zh-${announcement.id}`}>{t("admin.ann.form.title")}</Label>
-                    <Input
-                      id={`title-zh-${announcement.id}`}
-                      placeholder="例如：新版本发布 / 计费变更"
-                      {...form.register("titleZh")}
-                    />
-                    {form.formState.errors.titleZh ? (
-                      <p className="text-xs text-destructive">{form.formState.errors.titleZh.message}</p>
-                    ) : null}
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor={`meta-zh-${announcement.id}`}>{t("admin.ann.form.meta")}</Label>
-                    <Input id={`meta-zh-${announcement.id}`} placeholder="例如：今天 · 安全" {...form.register("metaZh")} />
-                    {form.formState.errors.metaZh ? (
-                      <p className="text-xs text-destructive">{form.formState.errors.metaZh.message}</p>
-                    ) : null}
-                  </div>
+              <div
+                role="tabpanel"
+                aria-label={t("common.lang.zh")}
+                className={cn("space-y-4", activeLang === "zh" ? "block" : "hidden")}
+              >
+                <div className="space-y-2">
+                  <Label htmlFor={`title-zh-${announcement.id}`}>{t("admin.ann.form.title")}</Label>
+                  <Input
+                    id={`title-zh-${announcement.id}`}
+                    placeholder="例如：新版本发布 / 计费变更"
+                    {...form.register("titleZh")}
+                  />
+                  {form.formState.errors.titleZh ? (
+                    <p className="text-xs text-destructive">{form.formState.errors.titleZh.message}</p>
+                  ) : null}
                 </div>
-              ) : (
-                <div key="en" className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor={`title-en-${announcement.id}`}>{t("admin.ann.form.title")}</Label>
-                    <Input
-                      id={`title-en-${announcement.id}`}
-                      placeholder="e.g. New release / Billing changes"
-                      {...form.register("titleEn")}
-                    />
-                    {form.formState.errors.titleEn ? (
-                      <p className="text-xs text-destructive">{form.formState.errors.titleEn.message}</p>
-                    ) : null}
-                  </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor={`meta-en-${announcement.id}`}>{t("admin.ann.form.meta")}</Label>
-                    <Input id={`meta-en-${announcement.id}`} placeholder="e.g. Today · Security" {...form.register("metaEn")} />
-                    {form.formState.errors.metaEn ? (
-                      <p className="text-xs text-destructive">{form.formState.errors.metaEn.message}</p>
-                    ) : null}
-                  </div>
+                <div className="space-y-2">
+                  <Label htmlFor={`meta-zh-${announcement.id}`}>{t("admin.ann.form.meta")}</Label>
+                  <Input
+                    id={`meta-zh-${announcement.id}`}
+                    placeholder="例如：今天 · 安全"
+                    {...form.register("metaZh")}
+                  />
+                  {form.formState.errors.metaZh ? (
+                    <p className="text-xs text-destructive">{form.formState.errors.metaZh.message}</p>
+                  ) : null}
                 </div>
-              )}
+              </div>
+
+              <div
+                role="tabpanel"
+                aria-label={t("common.lang.en")}
+                className={cn("space-y-4", activeLang === "en" ? "block" : "hidden")}
+              >
+                <div className="space-y-2">
+                  <Label htmlFor={`title-en-${announcement.id}`}>{t("admin.ann.form.title")}</Label>
+                  <Input
+                    id={`title-en-${announcement.id}`}
+                    placeholder="e.g. New release / Billing changes"
+                    {...form.register("titleEn")}
+                  />
+                  {form.formState.errors.titleEn ? (
+                    <p className="text-xs text-destructive">{form.formState.errors.titleEn.message}</p>
+                  ) : null}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor={`meta-en-${announcement.id}`}>{t("admin.ann.form.meta")}</Label>
+                  <Input
+                    id={`meta-en-${announcement.id}`}
+                    placeholder="e.g. Today · Security"
+                    {...form.register("metaEn")}
+                  />
+                  {form.formState.errors.metaEn ? (
+                    <p className="text-xs text-destructive">{form.formState.errors.metaEn.message}</p>
+                  ) : null}
+                </div>
+              </div>
             </div>
 
             <div className="space-y-2">

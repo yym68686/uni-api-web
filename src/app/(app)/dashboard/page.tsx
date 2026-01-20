@@ -34,7 +34,7 @@ export default async function DashboardPage() {
         </Suspense>
 
         <Suspense fallback={<DashboardAnnouncementsSkeleton />}>
-          <DashboardAnnouncements locale={locale} />
+          <DashboardAnnouncements />
         </Suspense>
       </div>
     </div>

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class AnnouncementItem(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     id: str
     title: str
     title_zh: str | None = Field(default=None, alias="titleZh")
@@ -16,10 +18,14 @@ class AnnouncementItem(BaseModel):
 
 
 class AnnouncementsListResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     items: list[AnnouncementItem]
 
 
 class AnnouncementCreateRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     title: str | None = None
     title_zh: str | None = Field(default=None, alias="titleZh")
     title_en: str | None = Field(default=None, alias="titleEn")
@@ -30,10 +36,14 @@ class AnnouncementCreateRequest(BaseModel):
 
 
 class AnnouncementCreateResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     item: AnnouncementItem
 
 
 class AnnouncementUpdateRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     title: str | None = None
     title_zh: str | None = Field(default=None, alias="titleZh")
     title_en: str | None = Field(default=None, alias="titleEn")
@@ -44,9 +54,13 @@ class AnnouncementUpdateRequest(BaseModel):
 
 
 class AnnouncementUpdateResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     item: AnnouncementItem
 
 
 class AnnouncementDeleteResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     ok: bool
     id: str
