@@ -12,6 +12,7 @@ export async function PATCH(req: Request, ctx: RouteContext) {
   if (res.ok) {
     revalidateTag(CACHE_TAGS.modelsAdminConfig, { expire: 0 });
     revalidateTag(CACHE_TAGS.modelsUser, { expire: 0 });
+    revalidateTag(CACHE_TAGS.adminOverview, { expire: 0 });
   }
   return res;
 }

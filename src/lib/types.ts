@@ -223,6 +223,55 @@ export interface AdminSettingsUpdateRequest {
   registrationEnabled?: boolean;
 }
 
+export type AdminOverviewHealthLevel = "info" | "warning" | "destructive";
+
+export interface AdminOverviewHealthItem {
+  id: string;
+  level: AdminOverviewHealthLevel;
+  value?: number | null;
+}
+
+export type AdminOverviewEventType =
+  | "user_created"
+  | "balance_adjusted"
+  | "announcement_published"
+  | "channel_updated";
+
+export interface AdminOverviewEventItem {
+  id: string;
+  type: AdminOverviewEventType;
+  createdAt: string;
+  href: string;
+  email?: string | null;
+  deltaUsd?: number | null;
+  balanceUsd?: number | null;
+  title?: string | null;
+  titleZh?: string | null;
+  titleEn?: string | null;
+  channelName?: string | null;
+}
+
+export interface AdminOverviewResponse {
+  registrationEnabled: boolean;
+  kpis: {
+    calls24h: number;
+    errors24h: number;
+    spendUsd24h: number;
+    activeUsers24h: number;
+    activeKeys24h: number;
+  };
+  counts: {
+    usersTotal: number;
+    usersBanned: number;
+    channelsTotal: number;
+    modelsConfigTotal: number;
+    modelsDisabled: number;
+    announcementsTotal: number;
+  };
+  health: AdminOverviewHealthItem[];
+  events: AdminOverviewEventItem[];
+}
+
 export interface AdminModelUpdateRequest {
   enabled?: boolean;
   inputUsdPerM?: string | null;

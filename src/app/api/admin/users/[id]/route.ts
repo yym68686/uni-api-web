@@ -12,6 +12,7 @@ export async function PATCH(req: Request, ctx: RouteContext) {
   if (res.ok) {
     revalidateTag(CACHE_TAGS.adminUsers, { expire: 0 });
     revalidateTag(CACHE_TAGS.billingLedger, { expire: 0 });
+    revalidateTag(CACHE_TAGS.adminOverview, { expire: 0 });
   }
   return res;
 }
@@ -22,6 +23,7 @@ export async function DELETE(req: Request, ctx: RouteContext) {
   if (res.ok) {
     revalidateTag(CACHE_TAGS.adminUsers, { expire: 0 });
     revalidateTag(CACHE_TAGS.billingLedger, { expire: 0 });
+    revalidateTag(CACHE_TAGS.adminOverview, { expire: 0 });
   }
   return res;
 }

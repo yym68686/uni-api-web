@@ -13,6 +13,7 @@ export async function PATCH(req: Request, ctx: RouteContext) {
     revalidateTag(CACHE_TAGS.adminChannels, { expire: 0 });
     revalidateTag(CACHE_TAGS.modelsAdminConfig, { expire: 0 });
     revalidateTag(CACHE_TAGS.modelsUser, { expire: 0 });
+    revalidateTag(CACHE_TAGS.adminOverview, { expire: 0 });
   }
   return res;
 }
@@ -24,6 +25,7 @@ export async function DELETE(req: Request, ctx: RouteContext) {
     revalidateTag(CACHE_TAGS.adminChannels, { expire: 0 });
     revalidateTag(CACHE_TAGS.modelsAdminConfig, { expire: 0 });
     revalidateTag(CACHE_TAGS.modelsUser, { expire: 0 });
+    revalidateTag(CACHE_TAGS.adminOverview, { expire: 0 });
   }
   return res;
 }

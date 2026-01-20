@@ -8,6 +8,9 @@ export async function GET(req: Request) {
 
 export async function PATCH(req: Request) {
   const res = await proxyToBackend(req, "/admin/settings");
-  if (res.ok) revalidateTag(CACHE_TAGS.adminSettings, { expire: 0 });
+  if (res.ok) {
+    revalidateTag(CACHE_TAGS.adminSettings, { expire: 0 });
+    revalidateTag(CACHE_TAGS.adminOverview, { expire: 0 });
+  }
   return res;
 }

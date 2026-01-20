@@ -8,6 +8,9 @@ export function GET(req: Request) {
 
 export async function POST(req: Request) {
   const res = await proxyToBackend(req, "/admin/announcements");
-  if (res.ok) revalidateTag(CACHE_TAGS.announcements, { expire: 0 });
+  if (res.ok) {
+    revalidateTag(CACHE_TAGS.announcements, { expire: 0 });
+    revalidateTag(CACHE_TAGS.adminOverview, { expire: 0 });
+  }
   return res;
 }

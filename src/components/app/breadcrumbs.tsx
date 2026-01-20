@@ -18,6 +18,7 @@ const labelKeyMap: Record<string, MessageKey> = {
   "/billing": "app.billing",
   "/profile": "app.profile",
   "/admin": "app.admin",
+  "/admin/overview": "app.admin.overview",
   "/admin/channels": "app.admin.channels",
   "/admin/models": "app.admin.modelConfig",
   "/admin/users": "app.admin.users",

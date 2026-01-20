@@ -157,6 +157,7 @@ export async function GET(req: Request) {
   });
   revalidateTag(CACHE_TAGS.currentUser, { expire: 0 });
   revalidateTag(CACHE_TAGS.adminUsers, { expire: 0 });
+  revalidateTag(CACHE_TAGS.adminOverview, { expire: 0 });
   res.cookies.set(OAUTH_STATE_COOKIE, "", { path: "/", maxAge: 0 });
   res.cookies.set(OAUTH_VERIFIER_COOKIE, "", { path: "/", maxAge: 0 });
   res.cookies.set(OAUTH_NEXT_COOKIE, "", { path: "/", maxAge: 0 });

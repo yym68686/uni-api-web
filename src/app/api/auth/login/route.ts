@@ -82,5 +82,6 @@ export async function POST(req: Request) {
   });
   revalidateTag(CACHE_TAGS.currentUser, { expire: 0 });
   revalidateTag(CACHE_TAGS.adminUsers, { expire: 0 });
+  revalidateTag(CACHE_TAGS.adminOverview, { expire: 0 });
   return res;
 }

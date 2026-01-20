@@ -18,6 +18,7 @@ const navItems = [
 ] as const satisfies ReadonlyArray<{ href: string; labelKey: MessageKey; icon: LucideIcon }>;
 
 const adminItems = [
+  { href: "/admin/overview", labelKey: "app.admin.overview", icon: LayoutDashboard },
   { href: "/admin/channels", labelKey: "app.admin.channels", icon: PlugZap },
   { href: "/admin/models", labelKey: "app.admin.modelConfig", icon: SlidersHorizontal },
   { href: "/admin/users", labelKey: "app.admin.users", icon: Users },
