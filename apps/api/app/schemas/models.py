@@ -14,6 +14,7 @@ class ModelCatalogItem(BaseModel):
     input_usd_per_m_original: str | None = Field(default=None, alias="inputUsdPerMOriginal")
     output_usd_per_m_original: str | None = Field(default=None, alias="outputUsdPerMOriginal")
     discount: float | None = Field(default=None, alias="discount")
+    availability_24h: list[int] = Field(default_factory=list, alias="availability24h")
     sources: int = 0
 
 

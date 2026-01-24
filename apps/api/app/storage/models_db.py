@@ -6,11 +6,12 @@ import uuid
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import Integer, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.llm_channel import LlmChannel
 from app.models.llm_model_config import LlmModelConfig
+from app.models.llm_usage_event import LlmUsageEvent
 from app.storage.channels_db import list_channels_for_group
 
 
@@ -128,6 +129,59 @@ def _parse_usd_per_m(value: str | None) -> int | None:
     if micros > 10_000_000_000:
         raise ValueError("price too large")
     return micros
+
+
+AVAILABILITY_24H_BUCKETS = 48
+AVAILABILITY_24H_BUCKET_SECONDS = 30 * 60
+
+
+async def fetch_model_availability_24h(
+    session: AsyncSession, *, org_id: uuid.UUID, model_ids: list[str]
+) -> dict[str, list[int]]:
+    if not model_ids:
+        return {}
+    now = dt.datetime.now(dt.timezone.utc)
+    start = now - dt.timedelta(hours=24)
+    start_epoch = start.timestamp()
+
+    bucket_expr = cast(
+        func.floor(
+            (func.extract("epoch", LlmUsageEvent.created_at) - start_epoch) / AVAILABILITY_24H_BUCKET_SECONDS
+        ),
+        Integer,
+    )
+
+    down_filter = (LlmUsageEvent.status_code >= 500) | (
+        LlmUsageEvent.status_code.in_([401, 403, 408, 429])
+    )
+
+    rows = (
+        await session.execute(
+            select(LlmUsageEvent.model_id, bucket_expr)
+            .where(
+                LlmUsageEvent.org_id == org_id,
+                LlmUsageEvent.created_at >= start,
+                LlmUsageEvent.model_id.in_(model_ids),
+                down_filter,
+            )
+            .group_by(LlmUsageEvent.model_id, bucket_expr)
+        )
+    ).all()
+
+    availability: dict[str, list[int]] = {mid: [0] * AVAILABILITY_24H_BUCKETS for mid in model_ids}
+    for mid, bucket in rows:
+        model = str(mid)
+        idx = int(bucket) if bucket is not None else None
+        if idx is None or idx < 0:
+            continue
+        if idx >= AVAILABILITY_24H_BUCKETS:
+            idx = AVAILABILITY_24H_BUCKETS - 1
+        slots = availability.get(model)
+        if slots is None:
+            slots = [0] * AVAILABILITY_24H_BUCKETS
+            availability[model] = slots
+        slots[idx] = 1
+    return availability
 
 
 async def get_model_config(
@@ -253,7 +307,7 @@ async def list_admin_models(
 
 
 async def list_user_models(
-    session: AsyncSession, *, org_id: uuid.UUID, group_name: str
+    session: AsyncSession, *, org_id: uuid.UUID, group_name: str, include_availability: bool = False
 ) -> list[dict]:
     channels = await list_channels_for_group(session, org_id=org_id, group_name=group_name)
     available_counts = await fetch_available_models_for_channels(channels)
@@ -270,11 +324,18 @@ async def list_user_models(
     ).scalars().all()
     config_map = {c.model_id: c for c in configs}
 
+    model_ids = [
+        mid for mid in sorted(available_counts.keys()) if not (config_map.get(mid) and not config_map[mid].enabled)
+    ]
+    availability_map = (
+        await fetch_model_availability_24h(session, org_id=org_id, model_ids=model_ids)
+        if include_availability
+        else {}
+    )
+
     items: list[dict] = []
-    for mid in sorted(available_counts.keys()):
+    for mid in model_ids:
         cfg = config_map.get(mid)
-        if cfg and not cfg.enabled:
-            continue
         eff_in_default, eff_out_default, orig_in_default, orig_out_default, discount = default_price_detail_for_model(
             mid
         )
@@ -298,6 +359,7 @@ async def list_user_models(
                 "inputUsdPerMOriginal": _micros_to_str(input_orig),
                 "outputUsdPerMOriginal": _micros_to_str(output_orig),
                 "discount": discount_out,
+                "availability24h": availability_map.get(mid, [0] * AVAILABILITY_24H_BUCKETS),
                 "sources": int(available_counts.get(mid, 0)),
             }
         )

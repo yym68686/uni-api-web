@@ -11,15 +11,17 @@ export function ModelsContentSkeleton() {
   return (
     <Card>
       <CardContent className="p-0">
-        <div className="grid grid-cols-2 gap-3 border-b border-border px-4 py-3 sm:px-6">
+        <div className="grid grid-cols-3 gap-3 border-b border-border px-4 py-3 sm:px-6">
           <Skeleton className="h-4 w-28" />
           <Skeleton className="h-4 w-40" />
+          <Skeleton className="h-4 w-28" />
         </div>
         <div className="space-y-3 p-4 sm:px-6">
           {Array.from({ length: 8 }).map((_, idx) => (
-            <div key={idx} className="grid grid-cols-2 items-center gap-3">
+            <div key={idx} className="grid grid-cols-3 items-center gap-3">
               <Skeleton className="h-4 w-56" />
               <Skeleton className="h-4 w-44" />
+              <Skeleton className="h-4 w-32" />
             </div>
           ))}
         </div>

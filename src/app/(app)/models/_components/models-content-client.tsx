@@ -14,6 +14,7 @@ import { t } from "@/lib/i18n/messages";
 import type { ModelsListResponse } from "@/lib/types";
 import { useSwrLite } from "@/lib/swr-lite";
 import { ModelsContentSkeleton } from "@/app/(app)/models/_components/models-skeleton";
+import { cn } from "@/lib/utils";
 
 function isModelsListResponse(value: unknown): value is ModelsListResponse {
   if (!value || typeof value !== "object") return false;
@@ -39,6 +40,49 @@ function formatDiscountPercent(discount: number) {
   const raw = (1 - discount) * 100;
   const pct = Math.round(raw);
   return pct <= 0 ? null : pct;
+}
+
+const AVAILABILITY_24H_BUCKETS = 48;
+
+function normalizeAvailability24h(value: number[] | null | undefined) {
+  if (!Array.isArray(value) || value.length === 0) return Array.from({ length: AVAILABILITY_24H_BUCKETS }, () => 0);
+  const slots = Array.from({ length: AVAILABILITY_24H_BUCKETS }, (_, idx) => (value[idx] ? 1 : 0));
+  return slots;
+}
+
+function formatAvailabilityPercent(downSlots: number[]) {
+  if (downSlots.length === 0) return "100%";
+  const down = downSlots.reduce((acc, v) => acc + (v ? 1 : 0), 0);
+  const pct = ((downSlots.length - down) / downSlots.length) * 100;
+  const rounded = Math.round(pct * 10) / 10;
+  const normalized = (Number.isFinite(rounded) ? rounded : 100).toFixed(1).replace(/\.0$/, "");
+  return `${normalized}%`;
+}
+
+interface Availability24hBarsProps {
+  value: number[] | null | undefined;
+}
+
+function Availability24hBars({ value }: Availability24hBarsProps) {
+  const slots = React.useMemo(() => normalizeAvailability24h(value), [value]);
+  const percent = React.useMemo(() => formatAvailabilityPercent(slots), [slots]);
+  return (
+    <div className="inline-flex items-center gap-2">
+      <div className="inline-flex items-center gap-px rounded-md bg-muted/40 p-1">
+        {slots.map((down, idx) => (
+          <span
+            // `idx` is stable (fixed 48 buckets), and we never reorder.
+            key={idx}
+            className={cn(
+              "h-3 w-[2px] rounded-[1px] bg-success/70",
+              down ? "bg-destructive/80" : null
+            )}
+          />
+        ))}
+      </div>
+      <span className="w-12 text-right font-mono tabular-nums text-xs text-muted-foreground">{percent}</span>
+    </div>
+  );
 }
 
 interface PricePartProps {
@@ -136,6 +180,7 @@ export function ModelsContentClient({ locale, initialItems, autoRevalidate = tru
               <TableRow>
                 <TableHead>{t(locale, "models.table.model")}</TableHead>
                 <TableHead>{t(locale, "models.table.price")}</TableHead>
+                <TableHead>{t(locale, "models.table.availability24h")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -151,6 +196,9 @@ export function ModelsContentClient({ locale, initialItems, autoRevalidate = tru
                       output={m.outputUsdPerM}
                       discount={m.discount}
                     />
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    <Availability24hBars value={m.availability24h} />
                   </TableCell>
                 </TableRow>
               ))}

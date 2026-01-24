@@ -558,7 +558,9 @@ async def _require_user_for_models(request: Request, session: AsyncSession):
 @router.get("/console/models", response_model=ModelsListResponse)
 async def console_list_models(request: Request, session: AsyncSession = Depends(get_db_session)) -> ModelsListResponse:
     user, membership = await _require_user_for_models(request, session)
-    items = await list_user_models(session, org_id=membership.org_id, group_name=user.group_name)
+    items = await list_user_models(
+        session, org_id=membership.org_id, group_name=user.group_name, include_availability=True
+    )
     return ModelsListResponse(items=items)  # type: ignore[arg-type]
 
 
