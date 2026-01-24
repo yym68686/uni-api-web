@@ -150,6 +150,7 @@ const en = {
   "logs.empty.desc": "Call `/v1/chat/completions` once with an API key to generate logs.",
   "logs.table.time": "Time",
   "logs.table.model": "Model",
+  "logs.table.io": "Input/Output",
   "logs.table.input": "Input",
   "logs.table.output": "Output",
   "logs.table.total": "Total",
@@ -182,6 +183,7 @@ const en = {
   "models.card.desc": "Prices are billed in $/M tokens (shown as $X).",
   "models.empty": "No models available (ask an admin to configure Channels and model toggles)",
   "models.table.model": "Model",
+  "models.table.price": "Input/Output ($/M tokens)",
   "models.table.input": "Input ($/M tokens)",
   "models.table.output": "Output ($/M tokens)",
 
@@ -683,6 +685,7 @@ const zhCN: Record<MessageKey, string> = {
   "logs.empty.desc": "先用 API Key 调用一次 `/v1/chat/completions` 以生成日志。",
   "logs.table.time": "时间",
   "logs.table.model": "模型",
+  "logs.table.io": "输入/输出",
   "logs.table.input": "输入",
   "logs.table.output": "输出",
   "logs.table.total": "总耗时",
@@ -715,6 +718,7 @@ const zhCN: Record<MessageKey, string> = {
   "models.card.desc": "价格按 $/M tokens 计费（展示为 $X）。",
   "models.empty": "暂无可用模型（请联系管理员配置 Channels 与模型开关）",
   "models.table.model": "模型",
+  "models.table.price": "输入/输出价格（$/M tokens）",
   "models.table.input": "输入（$/M tokens）",
   "models.table.output": "输出（$/M tokens）",
 

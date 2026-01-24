@@ -12,15 +12,15 @@ export function LogsContentSkeleton() {
         <div className="flex items-center gap-2 border-b border-border px-4 py-4 sm:px-6">
           <Skeleton className="h-4 w-40" />
         </div>
-        <div className="grid grid-cols-9 gap-3 border-b border-border px-4 py-3 sm:px-6">
-          {Array.from({ length: 9 }).map((_, idx) => (
+        <div className="grid grid-cols-8 gap-3 border-b border-border px-4 py-3 sm:px-6">
+          {Array.from({ length: 8 }).map((_, idx) => (
             <Skeleton key={idx} className="h-4 w-16" />
           ))}
         </div>
         <div className="space-y-3 p-4 sm:px-6">
           {Array.from({ length: 10 }).map((_, idx) => (
-            <div key={idx} className="grid grid-cols-9 items-center gap-3">
-              {Array.from({ length: 9 }).map((__, jdx) => (
+            <div key={idx} className="grid grid-cols-8 items-center gap-3">
+              {Array.from({ length: 8 }).map((__, jdx) => (
                 <Skeleton key={jdx} className="h-4 w-16" />
               ))}
             </div>

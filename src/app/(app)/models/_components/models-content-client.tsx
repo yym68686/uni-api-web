@@ -41,34 +41,49 @@ function formatDiscountPercent(discount: number) {
   return pct <= 0 ? null : pct;
 }
 
-interface PriceCellProps {
+interface PricePartProps {
   price: string | null | undefined;
   original: string | null | undefined;
+  showOriginal: boolean;
+}
+
+function PricePart({ price, original, showOriginal }: PricePartProps) {
+  return (
+    <span className="inline-flex items-baseline gap-1">
+      <span className="font-mono tabular-nums text-xs text-foreground">{formatUsdPerM(price)}</span>
+      {showOriginal ? (
+        <span className="font-mono tabular-nums text-xs text-muted-foreground line-through">
+          {formatUsdPerM(original)}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+interface PriceSummaryProps {
+  input: string | null | undefined;
+  output: string | null | undefined;
+  inputOriginal: string | null | undefined;
+  outputOriginal: string | null | undefined;
   discount: number | null | undefined;
 }
 
-function PriceCell({ price, original, discount }: PriceCellProps) {
-  if (!price) {
-    return <span className="font-mono tabular-nums text-xs text-muted-foreground">—</span>;
-  }
-
-  const hasDiscount = typeof discount === "number" && discount > 0 && discount < 1 && Boolean(original);
+function PriceSummary({ input, output, inputOriginal, outputOriginal, discount }: PriceSummaryProps) {
+  const hasDiscount = typeof discount === "number" && discount > 0 && discount < 1;
+  const showInputOriginal = hasDiscount && Boolean(input) && Boolean(inputOriginal) && input !== inputOriginal;
+  const showOutputOriginal = hasDiscount && Boolean(output) && Boolean(outputOriginal) && output !== outputOriginal;
   const pct = hasDiscount ? formatDiscountPercent(discount) : null;
+  const showBadge = (showInputOriginal || showOutputOriginal) && pct != null;
 
   return (
-    <div className="flex items-center gap-2">
-      <span className="font-mono tabular-nums text-xs text-foreground">{formatUsdPerM(price)}</span>
-      {hasDiscount ? (
-        <>
-          <span className="font-mono tabular-nums text-xs text-muted-foreground line-through">
-            {formatUsdPerM(original)}
-          </span>
-          {pct != null ? (
-            <Badge variant="success" className="rounded-full px-2 py-0 text-[10px]">
-              -{pct}%
-            </Badge>
-          ) : null}
-        </>
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+      <PricePart price={input} original={inputOriginal} showOriginal={showInputOriginal} />
+      <span className="text-xs text-muted-foreground">/</span>
+      <PricePart price={output} original={outputOriginal} showOriginal={showOutputOriginal} />
+      {showBadge ? (
+        <Badge variant="success" className="ml-1 rounded-full px-2 py-0 text-[10px]">
+          -{pct}%
+        </Badge>
       ) : null}
     </div>
   );
@@ -119,8 +134,7 @@ export function ModelsContentClient({ locale, initialItems, autoRevalidate = tru
             <TableHeader>
               <TableRow>
                 <TableHead>{t(locale, "models.table.model")}</TableHead>
-                <TableHead>{t(locale, "models.table.input")}</TableHead>
-                <TableHead>{t(locale, "models.table.output")}</TableHead>
+                <TableHead>{t(locale, "models.table.price")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -129,17 +143,12 @@ export function ModelsContentClient({ locale, initialItems, autoRevalidate = tru
                   <TableCell>
                     <CopyableModelId value={m.model} />
                   </TableCell>
-                  <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
-                    <PriceCell
-                      price={m.inputUsdPerM}
-                      original={m.inputUsdPerMOriginal}
-                      discount={m.discount}
-                    />
-                  </TableCell>
-                  <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
-                    <PriceCell
-                      price={m.outputUsdPerM}
-                      original={m.outputUsdPerMOriginal}
+                  <TableCell className="text-xs text-muted-foreground">
+                    <PriceSummary
+                      input={m.inputUsdPerM}
+                      output={m.outputUsdPerM}
+                      inputOriginal={m.inputUsdPerMOriginal}
+                      outputOriginal={m.outputUsdPerMOriginal}
                       discount={m.discount}
                     />
                   </TableCell>
