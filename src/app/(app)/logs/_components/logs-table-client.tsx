@@ -8,6 +8,7 @@ import { CopyableModelId } from "@/components/models/copyable-model-id";
 import { ClientDateTime } from "@/components/common/client-datetime";
 import { EmptyState } from "@/components/common/empty-state";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { logsListApiPath } from "@/lib/api-paths";
@@ -40,6 +41,13 @@ function formatCostUsd(value: number) {
   if (!Number.isFinite(value) || value <= 0) return "$0";
   if (value < 0.01) return `$${value.toFixed(6)}`;
   return formatUsd(value);
+}
+
+function ttftVariant(value: number): "success" | "warning" | "destructive" {
+  const ms = Math.max(0, Math.round(value));
+  if (ms <= 5000) return "success";
+  if (ms <= 10000) return "warning";
+  return "destructive";
 }
 
 interface LogsTableClientProps {
@@ -156,8 +164,13 @@ export function LogsTableClient({ initialItems, pageSize }: LogsTableClientProps
                   <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
                     {formatMs(r.totalDurationMs)}
                   </TableCell>
-                  <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
-                    {formatMs(r.ttftMs)}
+                  <TableCell className="text-xs text-muted-foreground">
+                    <Badge
+                      variant={ttftVariant(r.ttftMs)}
+                      className="rounded-full px-2 py-0 text-[10px] font-mono tabular-nums"
+                    >
+                      {formatMs(r.ttftMs)}
+                    </Badge>
                   </TableCell>
                   <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
                     {formatTps(r.tps)}
