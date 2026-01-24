@@ -5,6 +5,7 @@ import * as React from "react";
 
 import { CopyableModelId } from "@/components/models/copyable-model-id";
 import { EmptyState } from "@/components/common/empty-state";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { API_PATHS } from "@/lib/api-paths";
@@ -34,6 +35,45 @@ function formatUsdPerM(value: string | null | undefined) {
   return `$${value}`;
 }
 
+function formatDiscountPercent(discount: number) {
+  const raw = (1 - discount) * 100;
+  const pct = Math.round(raw);
+  return pct <= 0 ? null : pct;
+}
+
+interface PriceCellProps {
+  price: string | null | undefined;
+  original: string | null | undefined;
+  discount: number | null | undefined;
+}
+
+function PriceCell({ price, original, discount }: PriceCellProps) {
+  if (!price) {
+    return <span className="font-mono tabular-nums text-xs text-muted-foreground">—</span>;
+  }
+
+  const hasDiscount = typeof discount === "number" && discount > 0 && discount < 1 && Boolean(original);
+  const pct = hasDiscount ? formatDiscountPercent(discount) : null;
+
+  return (
+    <div className="flex items-center gap-2">
+      <span className="font-mono tabular-nums text-xs text-foreground">{formatUsdPerM(price)}</span>
+      {hasDiscount ? (
+        <>
+          <span className="font-mono tabular-nums text-xs text-muted-foreground line-through">
+            {formatUsdPerM(original)}
+          </span>
+          {pct != null ? (
+            <Badge variant="success" className="rounded-full px-2 py-0 text-[10px]">
+              -{pct}%
+            </Badge>
+          ) : null}
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 interface ModelsContentClientProps {
   locale: Locale;
   initialItems: ModelsListResponse["items"] | null;
@@ -41,10 +81,15 @@ interface ModelsContentClientProps {
 }
 
 export function ModelsContentClient({ locale, initialItems, autoRevalidate = true }: ModelsContentClientProps) {
+  const [hydrated, setHydrated] = React.useState(false);
   const { data, mutate } = useSwrLite<ModelsListResponse["items"]>(API_PATHS.models, fetchModels, {
     fallbackData: initialItems ?? undefined,
     revalidateOnFocus: false
   });
+
+  React.useEffect(() => {
+    setHydrated(true);
+  }, []);
 
   React.useEffect(() => {
     if (!autoRevalidate) return;
@@ -53,7 +98,7 @@ export function ModelsContentClient({ locale, initialItems, autoRevalidate = tru
 
   if (data === undefined && initialItems === null) return <ModelsContentSkeleton />;
 
-  const items = data ?? initialItems ?? [];
+  const items = hydrated ? (data ?? initialItems ?? []) : (initialItems ?? []);
 
   return (
     <Card>
@@ -85,10 +130,18 @@ export function ModelsContentClient({ locale, initialItems, autoRevalidate = tru
                     <CopyableModelId value={m.model} />
                   </TableCell>
                   <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
-                    {formatUsdPerM(m.inputUsdPerM)}
+                    <PriceCell
+                      price={m.inputUsdPerM}
+                      original={m.inputUsdPerMOriginal}
+                      discount={m.discount}
+                    />
                   </TableCell>
                   <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
-                    {formatUsdPerM(m.outputUsdPerM)}
+                    <PriceCell
+                      price={m.outputUsdPerM}
+                      original={m.outputUsdPerMOriginal}
+                      discount={m.discount}
+                    />
                   </TableCell>
                 </TableRow>
               ))}

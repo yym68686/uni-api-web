@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import uuid
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 import httpx
 from sqlalchemy import select
@@ -17,21 +17,25 @@ from app.storage.channels_db import list_channels_for_group
 USD_MICROS = Decimal("1000000")
 UNSET = object()
 
-DEFAULT_USD_PER_M_BY_PREFIX: dict[str, tuple[str | None, str | None]] = {
-    # NOTE: Prices are "$/M tokens" as strings, e.g. "0.15" => $0.15 per 1M tokens.
-    # Longest-prefix match (more specific prefixes override shorter ones).
-    "claude-3-5-sonnet": ("2.1", "10.5"),
-    "claude-3-7-sonnet": ("2.1", "10.5"),
-    "claude-opus-4": ("10.5", "52.5"),
-    "claude-sonnet-4": ("2.1", "10.5"),
-    "claude-haiku-4-5": ("0.3", "1.5"),
-    "gemini-2.5-pro": ("0.25", "2"),
-    "gemini-2.5-flash": ("0.06", "0.5"),
-    "gemini-3-pro": ("0.6", "3.6"),
-    "gemini-3-flash": ("0.15", "0.60"),
-    "gemini-embedding-001": ("0.3", "1.5"),
-    "gpt-5": ("0.375", "3"),
-    "text-embedding-004": ("0.3", "1.5"),
+DefaultPriceEntry = tuple[str | None, str | None] | tuple[str | None, str | None, float]
+
+DEFAULT_USD_PER_M_BY_PREFIX: dict[str, DefaultPriceEntry] = {
+    # NOTE:
+    # - Prices are "$/M tokens" as strings, e.g. "2.5" => $2.5 per 1M tokens.
+    # - Optional 3rd value is a discount multiplier: 0.1 => 10% of original (10x cheaper).
+    # - Longest-prefix match (more specific prefixes override shorter ones).
+    "claude-3-5-sonnet": ("3", "15", 0.7),
+    "claude-3-7-sonnet": ("3", "15", 0.7),
+    "claude-opus-4": ("15", "75", 0.7),
+    "claude-sonnet-4": ("3", "15", 0.7),
+    "claude-haiku-4-5": ("0.5", "2.5", 0.6),
+    "gemini-2.5-pro": ("2.5", "20", 0.1),
+    "gemini-2.5-flash": ("0.6", "5", 0.1),
+    "gemini-3-pro": ("6", "36", 0.1),
+    "gemini-3-flash": ("1.5", "6", 0.1),
+    "gemini-embedding-001": ("3", "15", 0.1),
+    "gpt-5": ("3.75", "30", 0.1),
+    "text-embedding-004": ("3", "15", 0.1),
     "deepseek-chat": ("0.14", "0.60"),
 }
 
@@ -52,11 +56,50 @@ def _normalize_model_id(value: str) -> str:
 
 
 def default_price_for_model(model_id: str) -> tuple[int | None, int | None]:
+    eff_in, eff_out, _, _, _ = default_price_detail_for_model(model_id)
+    return eff_in, eff_out
+
+
+def default_price_detail_for_model(
+    model_id: str,
+) -> tuple[int | None, int | None, int | None, int | None, float | None]:
     for prefix in sorted(DEFAULT_USD_PER_M_BY_PREFIX.keys(), key=len, reverse=True):
-        if model_id.startswith(prefix):
-            input_usd, output_usd = DEFAULT_USD_PER_M_BY_PREFIX.get(prefix, (None, None))
-            return (_parse_usd_per_m(input_usd), _parse_usd_per_m(output_usd))
-    return (None, None)
+        if not model_id.startswith(prefix):
+            continue
+        entry = DEFAULT_USD_PER_M_BY_PREFIX.get(prefix)
+        if not entry:
+            return (None, None, None, None, None)
+
+        input_usd: str | None
+        output_usd: str | None
+        discount: float | None
+        if len(entry) == 2:
+            input_usd, output_usd = entry
+            discount = None
+        else:
+            input_usd, output_usd, discount_raw = entry
+            discount = float(discount_raw)
+            if discount <= 0 or discount > 1:
+                raise ValueError("invalid discount")
+
+        original_in = _parse_usd_per_m(input_usd)
+        original_out = _parse_usd_per_m(output_usd)
+
+        if discount is None or discount >= 1:
+            return (original_in, original_out, original_in, original_out, None)
+
+        eff_in = _apply_discount(original_in, discount)
+        eff_out = _apply_discount(original_out, discount)
+        return (eff_in, eff_out, original_in, original_out, discount)
+
+    return (None, None, None, None, None)
+
+
+def _apply_discount(value: int | None, discount: float) -> int | None:
+    if value is None:
+        return None
+    dec = (Decimal(int(value)) * Decimal(str(discount))).to_integral_value(rounding=ROUND_HALF_UP)
+    return int(dec)
 
 
 def _micros_to_str(value: int | None) -> str | None:
@@ -232,16 +275,29 @@ async def list_user_models(
         cfg = config_map.get(mid)
         if cfg and not cfg.enabled:
             continue
-        default_in, default_out = default_price_for_model(mid)
-        input_micros = cfg.input_usd_micros_per_m if (cfg and cfg.input_usd_micros_per_m is not None) else default_in
-        output_micros = (
-            cfg.output_usd_micros_per_m if (cfg and cfg.output_usd_micros_per_m is not None) else default_out
+        eff_in_default, eff_out_default, orig_in_default, orig_out_default, discount = default_price_detail_for_model(
+            mid
         )
+
+        input_from_cfg = bool(cfg and cfg.input_usd_micros_per_m is not None)
+        output_from_cfg = bool(cfg and cfg.output_usd_micros_per_m is not None)
+
+        input_micros = cfg.input_usd_micros_per_m if input_from_cfg else eff_in_default
+        output_micros = cfg.output_usd_micros_per_m if output_from_cfg else eff_out_default
+
+        show_discount = bool(discount is not None and discount < 1)
+        input_orig = orig_in_default if (show_discount and not input_from_cfg) else None
+        output_orig = orig_out_default if (show_discount and not output_from_cfg) else None
+        discount_out = float(discount) if (show_discount and (input_orig is not None or output_orig is not None)) else None
+
         items.append(
             {
                 "model": mid,
                 "inputUsdPerM": _micros_to_str(input_micros),
                 "outputUsdPerM": _micros_to_str(output_micros),
+                "inputUsdPerMOriginal": _micros_to_str(input_orig),
+                "outputUsdPerMOriginal": _micros_to_str(output_orig),
+                "discount": discount_out,
                 "sources": int(available_counts.get(mid, 0)),
             }
         )

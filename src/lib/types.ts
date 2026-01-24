@@ -286,6 +286,9 @@ export interface ModelCatalogItem {
   model: string;
   inputUsdPerM?: string | null;
   outputUsdPerM?: string | null;
+  inputUsdPerMOriginal?: string | null;
+  outputUsdPerMOriginal?: string | null;
+  discount?: number | null;
   sources: number;
 }
 

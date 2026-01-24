@@ -11,6 +11,9 @@ class ModelCatalogItem(BaseModel):
     model: str
     input_usd_per_m: str | None = Field(default=None, alias="inputUsdPerM")
     output_usd_per_m: str | None = Field(default=None, alias="outputUsdPerM")
+    input_usd_per_m_original: str | None = Field(default=None, alias="inputUsdPerMOriginal")
+    output_usd_per_m_original: str | None = Field(default=None, alias="outputUsdPerMOriginal")
+    discount: float | None = Field(default=None, alias="discount")
     sources: int = 0
 
 
