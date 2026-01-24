@@ -43,46 +43,47 @@ function formatDiscountPercent(discount: number) {
 
 interface PricePartProps {
   price: string | null | undefined;
-  original: string | null | undefined;
-  showOriginal: boolean;
 }
 
-function PricePart({ price, original, showOriginal }: PricePartProps) {
-  return (
-    <span className="inline-flex items-baseline gap-1">
-      <span className="font-mono tabular-nums text-xs text-foreground">{formatUsdPerM(price)}</span>
-      {showOriginal ? (
-        <span className="font-mono tabular-nums text-xs text-muted-foreground line-through">
-          {formatUsdPerM(original)}
-        </span>
-      ) : null}
-    </span>
-  );
+function formatDiscountZhe(discount: number) {
+  const zhe = Math.round(discount * 100) / 10;
+  if (!Number.isFinite(zhe)) return null;
+  const normalized = zhe.toFixed(1).replace(/\.0$/, "");
+  return normalized === "0" ? null : normalized;
+}
+
+function PricePart({ price }: PricePartProps) {
+  return <span className="font-mono tabular-nums text-xs text-foreground">{formatUsdPerM(price)}</span>;
 }
 
 interface PriceSummaryProps {
+  locale: Locale;
   input: string | null | undefined;
   output: string | null | undefined;
-  inputOriginal: string | null | undefined;
-  outputOriginal: string | null | undefined;
   discount: number | null | undefined;
 }
 
-function PriceSummary({ input, output, inputOriginal, outputOriginal, discount }: PriceSummaryProps) {
+function PriceSummary({ locale, input, output, discount }: PriceSummaryProps) {
   const hasDiscount = typeof discount === "number" && discount > 0 && discount < 1;
-  const showInputOriginal = hasDiscount && Boolean(input) && Boolean(inputOriginal) && input !== inputOriginal;
-  const showOutputOriginal = hasDiscount && Boolean(output) && Boolean(outputOriginal) && output !== outputOriginal;
   const pct = hasDiscount ? formatDiscountPercent(discount) : null;
-  const showBadge = (showInputOriginal || showOutputOriginal) && pct != null;
+  const zhe = hasDiscount ? formatDiscountZhe(discount) : null;
+  const badge =
+    locale === "zh-CN"
+      ? zhe
+        ? t(locale, "models.discountBadge", { zhe })
+        : null
+      : pct != null
+        ? t(locale, "models.discountBadge", { pct })
+        : null;
 
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-      <PricePart price={input} original={inputOriginal} showOriginal={showInputOriginal} />
+      <PricePart price={input} />
       <span className="text-xs text-muted-foreground">/</span>
-      <PricePart price={output} original={outputOriginal} showOriginal={showOutputOriginal} />
-      {showBadge ? (
+      <PricePart price={output} />
+      {badge ? (
         <Badge variant="success" className="ml-1 rounded-full px-2 py-0 text-[10px]">
-          -{pct}%
+          {badge}
         </Badge>
       ) : null}
     </div>
@@ -145,10 +146,9 @@ export function ModelsContentClient({ locale, initialItems, autoRevalidate = tru
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     <PriceSummary
+                      locale={locale}
                       input={m.inputUsdPerM}
                       output={m.outputUsdPerM}
-                      inputOriginal={m.inputUsdPerMOriginal}
-                      outputOriginal={m.outputUsdPerMOriginal}
                       discount={m.discount}
                     />
                   </TableCell>

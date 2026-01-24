@@ -186,6 +186,7 @@ const en = {
   "models.table.price": "Input/Output ($/M tokens)",
   "models.table.input": "Input ($/M tokens)",
   "models.table.output": "Output ($/M tokens)",
+  "models.discountBadge": "{pct}% off",
 
   "keys.title": "API Keys",
   "keys.subtitle": "Create and manage access credentials (masked by default; you can always copy the full key).",
@@ -721,6 +722,7 @@ const zhCN: Record<MessageKey, string> = {
   "models.table.price": "输入/输出价格（$/M tokens）",
   "models.table.input": "输入（$/M tokens）",
   "models.table.output": "输出（$/M tokens）",
+  "models.discountBadge": "{zhe}折",
 
   "keys.title": "密钥",
   "keys.subtitle": "创建与管理访问凭证（列表默认显示掩码，可随时复制完整密钥）。",
