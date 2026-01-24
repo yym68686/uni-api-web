@@ -868,11 +868,12 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
         content_type = res.headers.get("content-type") or "application/json"
         ok = res.status_code < 400
         input_tokens = 0
+        cached_tokens = 0
         output_tokens = 0
         total_tokens = 0
 
         async def iterator():
-            nonlocal ttft_ms, total_ms, input_tokens, output_tokens, total_tokens
+            nonlocal ttft_ms, total_ms, input_tokens, cached_tokens, output_tokens, total_tokens
             first = None
             sse_buf = bytearray()
             try:
@@ -906,10 +907,17 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
                             try:
                                 prompt = int(usage.get("prompt_tokens") or 0)
                                 completion = int(usage.get("completion_tokens") or 0)
+                                cached = 0
+                                details = usage.get("prompt_tokens_details")
+                                if isinstance(details, dict):
+                                    cached_raw = details.get("cached_tokens")
+                                    if cached_raw is not None:
+                                        cached = int(cached_raw)
                                 total_raw = usage.get("total_tokens")
                                 total = int(total_raw) if total_raw is not None else 0
                                 output = max(total - prompt, 0) if total > 0 else completion
                                 input_tokens = prompt
+                                cached_tokens = min(max(cached, 0), max(prompt, 0))
                                 output_tokens = output
                                 total_tokens = total if total > 0 else (input_tokens + output_tokens)
                             except Exception:
@@ -947,7 +955,12 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
                                 else default_out
                             )
                             if in_price is not None and input_tokens > 0:
-                                cost_micros += int((input_tokens * int(in_price) + 999_999) // 1_000_000)
+                                cached = min(max(int(cached_tokens), 0), int(input_tokens))
+                                uncached = max(int(input_tokens) - cached, 0)
+                                if uncached > 0:
+                                    cost_micros += int((uncached * int(in_price) + 999_999) // 1_000_000)
+                                if cached > 0:
+                                    cost_micros += int((cached * int(in_price) + 9_999_999) // 10_000_000)
                             if out_price is not None and output_tokens > 0:
                                 cost_micros += int((output_tokens * int(out_price) + 999_999) // 1_000_000)
 
@@ -960,6 +973,7 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
                             ok=ok,
                             status_code=int(res.status_code),
                             input_tokens=input_tokens,
+                            cached_tokens=cached_tokens,
                             output_tokens=output_tokens,
                             total_tokens=total_tokens,
                             cost_usd_micros=cost_micros,
@@ -994,6 +1008,7 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
 
     # Record usage/spend for dashboard and logs.
     input_tokens = 0
+    cached_tokens = 0
     output_tokens = 0
     total_tokens = 0
     cost_micros = 0
@@ -1004,6 +1019,11 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
             if isinstance(usage, dict):
                 input_tokens = int(usage.get("prompt_tokens") or 0)
                 completion = int(usage.get("completion_tokens") or 0)
+                details = usage.get("prompt_tokens_details")
+                if isinstance(details, dict):
+                    cached_raw = details.get("cached_tokens")
+                    if cached_raw is not None:
+                        cached_tokens = min(max(int(cached_raw), 0), max(input_tokens, 0))
                 total_raw = usage.get("total_tokens")
                 total_tokens = int(total_raw) if total_raw is not None else 0
                 output_tokens = max(total_tokens - input_tokens, 0) if total_tokens > 0 else completion
@@ -1021,7 +1041,12 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
         in_price = cfg.input_usd_micros_per_m if (cfg and cfg.input_usd_micros_per_m is not None) else default_in
         out_price = cfg.output_usd_micros_per_m if (cfg and cfg.output_usd_micros_per_m is not None) else default_out
         if in_price is not None and input_tokens > 0:
-            cost_micros += int((input_tokens * int(in_price) + 999_999) // 1_000_000)
+            cached = min(max(int(cached_tokens), 0), int(input_tokens))
+            uncached = max(int(input_tokens) - cached, 0)
+            if uncached > 0:
+                cost_micros += int((uncached * int(in_price) + 999_999) // 1_000_000)
+            if cached > 0:
+                cost_micros += int((cached * int(in_price) + 9_999_999) // 10_000_000)
         if out_price is not None and output_tokens > 0:
             cost_micros += int((output_tokens * int(out_price) + 999_999) // 1_000_000)
 
@@ -1035,6 +1060,7 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
             ok=ok,
             status_code=int(res.status_code),
             input_tokens=input_tokens,
+            cached_tokens=cached_tokens,
             output_tokens=output_tokens,
             total_tokens=total_tokens,
             cost_usd_micros=cost_micros,

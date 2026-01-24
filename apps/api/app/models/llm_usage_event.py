@@ -29,6 +29,7 @@ class LlmUsageEvent(Base):
     status_code: Mapped[int] = mapped_column(Integer, nullable=False, default=200)
 
     input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cached_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     total_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     cost_usd_micros: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

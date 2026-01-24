@@ -10,6 +10,7 @@ class LogItem(BaseModel):
     ok: bool
     status_code: int = Field(alias="statusCode")
     input_tokens: int = Field(alias="inputTokens")
+    cached_tokens: int = Field(alias="cachedTokens")
     output_tokens: int = Field(alias="outputTokens")
     total_duration_ms: int = Field(alias="totalDurationMs")
     ttft_ms: int = Field(alias="ttftMs")
@@ -20,4 +21,3 @@ class LogItem(BaseModel):
 
 class LogsListResponse(BaseModel):
     items: list[LogItem]
-

@@ -151,7 +151,7 @@ export function LogsTableClient({ initialItems, pageSize }: LogsTableClientProps
                     <CopyableModelId value={r.model} />
                   </TableCell>
                   <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
-                    {r.inputTokens} / {r.outputTokens}
+                    {r.inputTokens} / {r.cachedTokens} / {r.outputTokens}
                   </TableCell>
                   <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
                     {formatMs(r.totalDurationMs)}

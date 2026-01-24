@@ -303,6 +303,7 @@ export interface LogItem {
   ok: boolean;
   statusCode: number;
   inputTokens: number;
+  cachedTokens: number;
   outputTokens: number;
   totalDurationMs: number;
   ttftMs: number;
