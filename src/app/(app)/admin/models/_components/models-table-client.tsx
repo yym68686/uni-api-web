@@ -25,6 +25,61 @@ function formatUsdPerM(value: string | null | undefined) {
   return `$${value}`;
 }
 
+function formatDiscountPercent(discount: number) {
+  const raw = (1 - discount) * 100;
+  const pct = Math.round(raw);
+  return pct <= 0 ? null : pct;
+}
+
+function formatDiscountZhe(discount: number) {
+  const zhe = Math.round(discount * 100) / 10;
+  if (!Number.isFinite(zhe)) return null;
+  const normalized = zhe.toFixed(1).replace(/\.0$/, "");
+  return normalized === "0" ? null : normalized;
+}
+
+interface PricePartProps {
+  price: string | null | undefined;
+}
+
+function PricePart({ price }: PricePartProps) {
+  return <span className="font-mono tabular-nums text-xs text-foreground">{formatUsdPerM(price)}</span>;
+}
+
+interface PriceSummaryProps {
+  input: string | null | undefined;
+  output: string | null | undefined;
+  discount: number | null | undefined;
+}
+
+function PriceSummary({ input, output, discount }: PriceSummaryProps) {
+  const { locale, t } = useI18n();
+  const hasDiscount = typeof discount === "number" && discount > 0 && discount < 1;
+  const pct = hasDiscount ? formatDiscountPercent(discount) : null;
+  const zhe = hasDiscount ? formatDiscountZhe(discount) : null;
+  const badge =
+    locale === "zh-CN"
+      ? zhe
+        ? t("models.discountBadge", { zhe })
+        : null
+      : pct != null
+        ? t("models.discountBadge", { pct })
+        : null;
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+      <PricePart price={input} />
+      <span className="text-xs text-muted-foreground">/</span>
+      <PricePart price={output} />
+      {badge ? (
+        <Badge variant="success" className="ml-1 rounded-full px-2 py-0 text-[10px]">
+          {badge}
+        </Badge>
+      ) : null}
+    </div>
+  );
+}
+
 interface AdminModelsTableClientProps {
   initialItems: AdminModelItem[];
 }
@@ -79,8 +134,7 @@ export function AdminModelsTableClient({ initialItems }: AdminModelsTableClientP
               <TableRow>
                 <TableHead>{t("models.table.model")}</TableHead>
                 <TableHead>{t("keys.table.status")}</TableHead>
-                <TableHead>{t("models.table.input")}</TableHead>
-                <TableHead>{t("models.table.output")}</TableHead>
+                <TableHead>{t("models.table.price")}</TableHead>
                 <TableHead>{t("admin.models.table.sources")}</TableHead>
                 <TableHead className="w-12 text-right">{t("keys.table.actions")}</TableHead>
               </TableRow>
@@ -100,11 +154,8 @@ export function AdminModelsTableClient({ initialItems }: AdminModelsTableClientP
                       <Badge variant="destructive">{t("admin.models.badge.disabled")}</Badge>
                     )}
                   </TableCell>
-                  <TableCell className="font-mono text-xs text-muted-foreground">
-                    {formatUsdPerM(m.inputUsdPerM)}
-                  </TableCell>
-                  <TableCell className="font-mono text-xs text-muted-foreground">
-                    {formatUsdPerM(m.outputUsdPerM)}
+                  <TableCell className="text-xs text-muted-foreground">
+                    <PriceSummary input={m.inputUsdPerM} output={m.outputUsdPerM} discount={m.discount} />
                   </TableCell>
                   <TableCell className="font-mono text-xs text-muted-foreground">{m.sources}</TableCell>
                   <TableCell className="text-right">

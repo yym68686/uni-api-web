@@ -292,15 +292,27 @@ async def list_admin_models(
     for mid in sorted(all_ids):
         cfg = config_map.get(mid)
         enabled = True if not cfg else bool(cfg.enabled)
-        default_in, default_out = default_price_for_model(mid)
-        input_micros = cfg.input_usd_micros_per_m if (cfg and cfg.input_usd_micros_per_m is not None) else default_in
-        output_micros = cfg.output_usd_micros_per_m if (cfg and cfg.output_usd_micros_per_m is not None) else default_out
+        eff_in_default, eff_out_default, orig_in_default, orig_out_default, discount = default_price_detail_for_model(
+            mid
+        )
+
+        input_from_cfg = bool(cfg and cfg.input_usd_micros_per_m is not None)
+        output_from_cfg = bool(cfg and cfg.output_usd_micros_per_m is not None)
+
+        input_micros = cfg.input_usd_micros_per_m if input_from_cfg else eff_in_default
+        output_micros = cfg.output_usd_micros_per_m if output_from_cfg else eff_out_default
+
+        show_discount = bool(discount is not None and discount < 1)
+        input_orig = orig_in_default if (show_discount and not input_from_cfg) else None
+        output_orig = orig_out_default if (show_discount and not output_from_cfg) else None
+        discount_out = float(discount) if (show_discount and (input_orig is not None or output_orig is not None)) else None
         items.append(
             {
                 "model": mid,
                 "enabled": enabled,
                 "inputUsdPerM": _micros_to_str(input_micros),
                 "outputUsdPerM": _micros_to_str(output_micros),
+                "discount": discount_out,
                 "sources": int(available_counts.get(mid, 0)),
                 "available": mid in available_counts,
             }

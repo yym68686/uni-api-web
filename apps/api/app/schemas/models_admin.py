@@ -8,6 +8,7 @@ class AdminModelItem(BaseModel):
     enabled: bool
     input_usd_per_m: str | None = Field(default=None, alias="inputUsdPerM")
     output_usd_per_m: str | None = Field(default=None, alias="outputUsdPerM")
+    discount: float | None = Field(default=None, alias="discount")
     sources: int = 0
     available: bool = True
 

@@ -207,6 +207,7 @@ export interface AdminModelItem {
   enabled: boolean;
   inputUsdPerM?: string | null;
   outputUsdPerM?: string | null;
+  discount?: number | null;
   sources: number;
   available: boolean;
 }
