@@ -105,6 +105,101 @@ from app.security_password import hash_password, verify_password
 
 router = APIRouter()
 
+HOP_BY_HOP_HEADERS = {
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+}
+
+
+def _build_upstream_headers(request: Request, *, upstream_api_key: str) -> list[tuple[str, str]]:
+    headers: list[tuple[str, str]] = []
+    for raw_name, raw_value in request.headers.raw:
+        try:
+            name = raw_name.decode("latin-1")
+            value = raw_value.decode("latin-1")
+        except Exception:
+            continue
+        key = name.lower()
+        if key in HOP_BY_HOP_HEADERS:
+            continue
+        if key in {"host", "content-length", "authorization"}:
+            continue
+        headers.append((name, value))
+    headers.append(("authorization", f"Bearer {upstream_api_key}"))
+    return headers
+
+
+def _filter_upstream_response_headers(headers: dict[str, str]) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for name, value in headers.items():
+        key = name.lower()
+        if key in HOP_BY_HOP_HEADERS:
+            continue
+        if key in {"content-length", "content-encoding"}:
+            continue
+        out[name] = value
+    return out
+
+
+def _safe_int(value: object) -> int:
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except Exception:
+        return 0
+
+
+def _extract_usage_tokens(obj: dict) -> tuple[int, int, int, int] | None:
+    usage = obj.get("usage")
+    if not isinstance(usage, dict):
+        response = obj.get("response")
+        if isinstance(response, dict):
+            usage = response.get("usage")
+    if not isinstance(usage, dict):
+        return None
+
+    # OpenAI chat.completions usage
+    if "prompt_tokens" in usage or "completion_tokens" in usage:
+        prompt = _safe_int(usage.get("prompt_tokens") or 0)
+        completion = _safe_int(usage.get("completion_tokens") or 0)
+        total_raw = usage.get("total_tokens")
+        total = _safe_int(total_raw) if total_raw is not None else 0
+        details = usage.get("prompt_tokens_details")
+        cached = 0
+        if isinstance(details, dict):
+            cached = _safe_int(details.get("cached_tokens") or 0)
+
+        output = max(total - prompt, 0) if total > 0 else completion
+        total_tokens = total if total > 0 else (prompt + output)
+        cached_tokens = min(max(cached, 0), max(prompt, 0))
+        return prompt, cached_tokens, output, total_tokens
+
+    # OpenAI responses usage
+    if "input_tokens" in usage or "output_tokens" in usage:
+        input_tokens = _safe_int(usage.get("input_tokens") or 0)
+        output_tokens = _safe_int(usage.get("output_tokens") or 0)
+        total_raw = usage.get("total_tokens")
+        total_tokens = _safe_int(total_raw) if total_raw is not None else 0
+        details = usage.get("input_tokens_details")
+        cached = 0
+        if isinstance(details, dict):
+            cached = _safe_int(details.get("cached_tokens") or 0)
+
+        if output_tokens <= 0 and total_tokens > 0:
+            output_tokens = max(total_tokens - input_tokens, 0)
+        if total_tokens <= 0:
+            total_tokens = input_tokens + output_tokens
+
+        cached_tokens = min(max(cached, 0), max(input_tokens, 0))
+        return input_tokens, cached_tokens, output_tokens, total_tokens
+
+    return None
+
 
 @router.get("/health")
 async def health() -> dict[str, str]:
@@ -1075,6 +1170,254 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
         pass
 
     return Response(content=bytes(body_bytes), status_code=int(res.status_code), media_type=content_type)
+
+
+@router.post("/responses")
+async def responses(request: Request, session: AsyncSession = Depends(get_db_session)):
+    auth = request.headers.get("authorization")
+    try:
+        api_key, user = await authenticate_api_key(session, authorization=auth)
+    except ValueError as e:
+        detail = str(e) or "unauthorized"
+        status = 403 if detail == "banned" else 401
+        raise HTTPException(status_code=status, detail=detail) from e
+
+    raw = await request.body()
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="invalid json") from e
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="invalid json")
+
+    model_id = payload.get("model")
+    if not isinstance(model_id, str) or not model_id.strip():
+        raise HTTPException(status_code=400, detail="missing model")
+
+    if int(getattr(user, "balance", 0)) <= 0:
+        raise HTTPException(status_code=402, detail="insufficient balance")
+
+    membership = (
+        await session.execute(
+            select(Membership).where(Membership.user_id == user.id).order_by(Membership.created_at.asc())
+        )
+    ).scalars().first()
+    if not membership:
+        raise HTTPException(status_code=403, detail="missing membership")
+
+    cfg = await get_model_config(session, org_id=membership.org_id, model_id=model_id.strip())
+    if cfg and not cfg.enabled:
+        raise HTTPException(status_code=403, detail="model disabled")
+
+    channel = await pick_channel_for_group(session, org_id=membership.org_id, group_name=user.group_name)
+    if not channel:
+        raise HTTPException(status_code=503, detail="no channel configured")
+
+    upstream_url = f"{channel.base_url.rstrip('/')}/responses"
+    headers = _build_upstream_headers(request, upstream_api_key=channel.api_key)
+
+    stream = bool(payload.get("stream"))
+    timeout = httpx.Timeout(60.0, connect=10.0)
+
+    forwarded_for = request.headers.get("x-forwarded-for") or ""
+    source_ip = forwarded_for.split(",")[0].strip() if forwarded_for.strip() else None
+    if not source_ip and request.client:
+        source_ip = request.client.host
+
+    started = time.perf_counter()
+    ttft_ms = 0
+    total_ms = 0
+
+    if stream:
+        client = httpx.AsyncClient(timeout=timeout)
+        req_up = client.build_request("POST", upstream_url, headers=headers, content=raw)
+        res = await client.send(req_up, stream=True)
+        content_type = res.headers.get("content-type") or "application/json"
+        ok = res.status_code < 400
+        input_tokens = 0
+        cached_tokens = 0
+        output_tokens = 0
+        total_tokens = 0
+        upstream_headers = _filter_upstream_response_headers(dict(res.headers))
+        upstream_headers.setdefault("cache-control", "no-cache")
+        upstream_headers.setdefault("x-accel-buffering", "no")
+
+        async def iterator():
+            nonlocal ttft_ms, total_ms, input_tokens, cached_tokens, output_tokens, total_tokens
+            first = None
+            sse_buf = bytearray()
+            try:
+                async for chunk in res.aiter_bytes():
+                    if first is None:
+                        first = time.perf_counter()
+                        ttft_ms = int((first - started) * 1000)
+                    if ok and content_type.startswith("text/event-stream"):
+                        sse_buf.extend(chunk)
+                        while True:
+                            idx = sse_buf.find(b"\n")
+                            if idx < 0:
+                                break
+                            raw_line = bytes(sse_buf[:idx]).rstrip(b"\r")
+                            del sse_buf[: idx + 1]
+                            line = raw_line.strip()
+                            if not line.startswith(b"data:"):
+                                continue
+                            data = line[len(b"data:") :].strip()
+                            if not data or data == b"[DONE]":
+                                continue
+                            try:
+                                obj = json.loads(data.decode("utf-8"))
+                            except Exception:
+                                continue
+                            if not isinstance(obj, dict):
+                                continue
+                            parsed = _extract_usage_tokens(obj)
+                            if not parsed:
+                                continue
+                            input_tokens, cached_tokens, output_tokens, total_tokens = parsed
+                    yield chunk
+            except (httpx.ReadError, httpx.StreamError):
+                pass
+            finally:
+                total_ms = int((time.perf_counter() - started) * 1000)
+                try:
+                    await res.aclose()
+                except Exception:
+                    pass
+                try:
+                    await client.aclose()
+                except Exception:
+                    pass
+                try:
+                    async with SessionLocal() as s:
+                        cost_micros = 0
+                        if ok and total_tokens > 0:
+                            cfg = await get_model_config(s, org_id=membership.org_id, model_id=model_id.strip())
+                            from app.storage.models_db import default_price_for_model
+
+                            default_in, default_out = default_price_for_model(model_id.strip())
+                            in_price = (
+                                cfg.input_usd_micros_per_m
+                                if (cfg and cfg.input_usd_micros_per_m is not None)
+                                else default_in
+                            )
+                            out_price = (
+                                cfg.output_usd_micros_per_m
+                                if (cfg and cfg.output_usd_micros_per_m is not None)
+                                else default_out
+                            )
+                            if in_price is not None and input_tokens > 0:
+                                cached = min(max(int(cached_tokens), 0), int(input_tokens))
+                                uncached = max(int(input_tokens) - cached, 0)
+                                if uncached > 0:
+                                    cost_micros += int((uncached * int(in_price) + 999_999) // 1_000_000)
+                                if cached > 0:
+                                    cost_micros += int((cached * int(in_price) + 9_999_999) // 10_000_000)
+                            if out_price is not None and output_tokens > 0:
+                                cost_micros += int((output_tokens * int(out_price) + 999_999) // 1_000_000)
+
+                        await record_usage_event(
+                            s,
+                            org_id=membership.org_id,
+                            user_id=user.id,
+                            api_key_id=api_key.id,
+                            model_id=model_id.strip(),
+                            ok=ok,
+                            status_code=int(res.status_code),
+                            input_tokens=input_tokens,
+                            cached_tokens=cached_tokens,
+                            output_tokens=output_tokens,
+                            total_tokens=total_tokens,
+                            cost_usd_micros=cost_micros,
+                            total_duration_ms=total_ms,
+                            ttft_ms=ttft_ms,
+                            source_ip=source_ip,
+                        )
+                except Exception:
+                    pass
+
+        return StreamingResponse(
+            iterator(),
+            status_code=int(res.status_code),
+            media_type=content_type,
+            headers=upstream_headers,
+        )
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        async with client.stream("POST", upstream_url, headers=headers, content=raw) as res:
+            content_type = res.headers.get("content-type") or "application/json"
+            ok = res.status_code < 400
+
+            body_bytes = bytearray()
+            first = None
+            async for chunk in res.aiter_bytes():
+                if first is None:
+                    first = time.perf_counter()
+                    ttft_ms = int((first - started) * 1000)
+                body_bytes.extend(chunk)
+            total_ms = int((time.perf_counter() - started) * 1000)
+            upstream_headers = _filter_upstream_response_headers(dict(res.headers))
+
+    input_tokens = 0
+    cached_tokens = 0
+    output_tokens = 0
+    total_tokens = 0
+    cost_micros = 0
+    if ok and content_type.startswith("application/json"):
+        try:
+            body = json.loads(body_bytes.decode("utf-8"))
+            if isinstance(body, dict):
+                parsed = _extract_usage_tokens(body)
+                if parsed:
+                    input_tokens, cached_tokens, output_tokens, total_tokens = parsed
+        except Exception:
+            pass
+
+    if ok and total_tokens > 0:
+        cfg = await get_model_config(session, org_id=membership.org_id, model_id=model_id.strip())
+        from app.storage.models_db import default_price_for_model
+
+        default_in, default_out = default_price_for_model(model_id.strip())
+        in_price = cfg.input_usd_micros_per_m if (cfg and cfg.input_usd_micros_per_m is not None) else default_in
+        out_price = cfg.output_usd_micros_per_m if (cfg and cfg.output_usd_micros_per_m is not None) else default_out
+        if in_price is not None and input_tokens > 0:
+            cached = min(max(int(cached_tokens), 0), int(input_tokens))
+            uncached = max(int(input_tokens) - cached, 0)
+            if uncached > 0:
+                cost_micros += int((uncached * int(in_price) + 999_999) // 1_000_000)
+            if cached > 0:
+                cost_micros += int((cached * int(in_price) + 9_999_999) // 10_000_000)
+        if out_price is not None and output_tokens > 0:
+            cost_micros += int((output_tokens * int(out_price) + 999_999) // 1_000_000)
+
+    try:
+        await record_usage_event(
+            session,
+            org_id=membership.org_id,
+            user_id=user.id,
+            api_key_id=api_key.id,
+            model_id=model_id.strip(),
+            ok=ok,
+            status_code=int(res.status_code),
+            input_tokens=input_tokens,
+            cached_tokens=cached_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+            cost_usd_micros=cost_micros,
+            total_duration_ms=total_ms,
+            ttft_ms=ttft_ms,
+            source_ip=source_ip,
+        )
+    except Exception:
+        pass
+
+    upstream_headers.setdefault("cache-control", "no-cache")
+    return Response(
+        content=bytes(body_bytes),
+        status_code=int(res.status_code),
+        media_type=content_type,
+        headers=upstream_headers,
+    )
 
 
 @router.get("/admin/models", response_model=AdminModelsListResponse)
