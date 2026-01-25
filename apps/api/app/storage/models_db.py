@@ -35,7 +35,9 @@ DEFAULT_USD_PER_M_BY_PREFIX: dict[str, DefaultPriceEntry] = {
     "gemini-3-pro": ("6", "36", 0.1),
     "gemini-3-flash": ("1.5", "6", 0.1),
     "gemini-embedding-001": ("3", "15", 0.1),
-    "gpt-5": ("3.75", "30", 0.05),
+    "gpt-5": ("3.75", "30", 0.1),
+    "gpt-5.1": ("3.75", "30", 0.05),
+    "gpt-5.2": ("3.75", "30", 0.05),
     "text-embedding-004": ("3", "15", 0.1),
     "deepseek-chat": ("0.14", "0.60"),
 }
