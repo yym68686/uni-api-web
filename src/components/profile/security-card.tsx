@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { z } from "zod";
 import { Chrome, KeyRound, Loader2, Lock, Mail, ShieldCheck } from "lucide-react";
 import { useForm } from "react-hook-form";
@@ -99,7 +99,6 @@ interface SecurityCardProps {
 export function SecurityCard({ email, initialMethods, className }: SecurityCardProps) {
   const { t } = useI18n();
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [methods, setMethods] = React.useState<AuthMethodsResponse | null>(initialMethods);
   const [mode, setMode] = React.useState<DialogMode>("closed");
   const [submitting, setSubmitting] = React.useState(false);
@@ -110,6 +109,7 @@ export function SecurityCard({ email, initialMethods, className }: SecurityCardP
   const [newEmailCooldown, setNewEmailCooldown] = React.useState(0);
   const [currentEmailCooldown, setCurrentEmailCooldown] = React.useState(0);
   const [unlinkingId, setUnlinkingId] = React.useState<string | null>(null);
+  const oauthToastHandledRef = React.useRef(false);
 
   const codeSchema = React.useMemo(() => createCodeSchema(t), [t]);
   const emailSchema = React.useMemo(() => createEmailSchema(t), [t]);
@@ -159,9 +159,14 @@ export function SecurityCard({ email, initialMethods, className }: SecurityCardP
   }, [newEmailCooldown, currentEmailCooldown]);
 
   React.useEffect(() => {
-    const err = searchParams.get("oauth_error");
-    const success = searchParams.get("oauth_success");
+    if (oauthToastHandledRef.current) return;
+    if (typeof window === "undefined") return;
+
+    const params = new URLSearchParams(window.location.search);
+    const err = params.get("oauth_error");
+    const success = params.get("oauth_success");
     if (!err && !success) return;
+    oauthToastHandledRef.current = true;
 
     if (success === "google_linked") {
       toast.success(t("profile.security.googleLinkSuccess"));
@@ -176,7 +181,7 @@ export function SecurityCard({ email, initialMethods, className }: SecurityCardP
     }
 
     router.replace("/profile");
-  }, [router, searchParams, t]);
+  }, [router, t]);
 
   React.useEffect(() => {
     if (methods !== null) return;

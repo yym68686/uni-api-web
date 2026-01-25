@@ -1,7 +1,7 @@
 import "@/app/globals.css";
+import "@fontsource/press-start-2p/latin-400.css";
 
 import type { Metadata } from "next";
-import { Press_Start_2P } from "next/font/google";
 import { GeistMono } from "geist/font/mono";
 import { GeistSans } from "geist/font/sans";
 import { Toaster } from "sonner";
@@ -11,13 +11,6 @@ import { getAppName, getPublicApiBaseUrl } from "@/lib/app-config";
 import { getRequestLocale } from "@/lib/i18n/server";
 import { t } from "@/lib/i18n/messages";
 import { I18nProvider } from "@/components/i18n/i18n-provider";
-
-const pressStart2p = Press_Start_2P({
-  weight: "400",
-  subsets: ["latin"],
-  display: "swap",
-  variable: "--font-press-start"
-});
 
 const THEME_INIT_SCRIPT = `
 (function () {
@@ -70,7 +63,7 @@ export default async function RootLayout({ children }: RootLayoutProps) {
     <html
       lang={locale}
       data-public-api-base-url={publicApiBaseUrl ?? ""}
-      className={cn("dark", GeistSans.variable, GeistMono.variable, pressStart2p.variable)}
+      className={cn("dark", GeistSans.variable, GeistMono.variable)}
       suppressHydrationWarning
     >
       <head>

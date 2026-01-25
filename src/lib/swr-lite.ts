@@ -43,13 +43,21 @@ function notify(entry: CacheEntry<unknown>) {
   for (const listener of entry.listeners) listener();
 }
 
-const focusRegistry = new Map<Key, { count: number; revalidate: () => void }>();
+type FocusRevalidate = () => unknown;
+
+const focusRegistry = new Map<Key, Set<FocusRevalidate>>();
 let focusListenerAttached = false;
 
 function handleFocus() {
-  for (const { revalidate } of focusRegistry.values()) {
-    revalidate();
+  for (const validators of focusRegistry.values()) {
+    for (const revalidate of validators) {
+      void revalidate();
+    }
   }
+}
+
+function handleVisibilityChange() {
+  if (document.visibilityState === "visible") handleFocus();
 }
 
 function ensureFocusListener() {
@@ -57,31 +65,34 @@ function ensureFocusListener() {
   focusListenerAttached = true;
 
   window.addEventListener("focus", handleFocus, { passive: true });
-  document.addEventListener(
-    "visibilitychange",
-    () => {
-      if (document.visibilityState === "visible") handleFocus();
-    },
-    { passive: true }
-  );
+  document.addEventListener("visibilitychange", handleVisibilityChange, { passive: true });
 }
 
-function registerFocusKey(key: Key, revalidate: () => void) {
+function maybeCleanupFocusListener() {
+  if (!focusListenerAttached) return;
+  if (focusRegistry.size > 0) return;
+  focusListenerAttached = false;
+  window.removeEventListener("focus", handleFocus);
+  document.removeEventListener("visibilitychange", handleVisibilityChange);
+}
+
+function registerFocusKey(key: Key, revalidate: FocusRevalidate) {
   const existing = focusRegistry.get(key);
   if (existing) {
-    existing.count += 1;
-    existing.revalidate = revalidate;
-  } else {
-    focusRegistry.set(key, { count: 1, revalidate });
-    ensureFocusListener();
+    existing.add(revalidate);
+    return;
   }
+
+  focusRegistry.set(key, new Set([revalidate]));
+  ensureFocusListener();
 }
 
-function unregisterFocusKey(key: Key) {
+function unregisterFocusKey(key: Key, revalidate: FocusRevalidate) {
   const existing = focusRegistry.get(key);
   if (!existing) return;
-  existing.count -= 1;
-  if (existing.count <= 0) focusRegistry.delete(key);
+  existing.delete(revalidate);
+  if (existing.size <= 0) focusRegistry.delete(key);
+  maybeCleanupFocusListener();
 }
 
 export interface SwrLiteOptions<T> {
@@ -187,8 +198,8 @@ export function useSwrLite<T>(
   React.useEffect(() => {
     if (!key) return;
     if (!revalidateOnFocus) return;
-    registerFocusKey(key, () => void revalidate());
-    return () => unregisterFocusKey(key);
+    registerFocusKey(key, revalidate);
+    return () => unregisterFocusKey(key, revalidate);
   }, [key, revalidate, revalidateOnFocus]);
 
   const mutate = React.useCallback<SwrLiteResponse<T>["mutate"]>(

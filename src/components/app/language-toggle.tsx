@@ -4,7 +4,7 @@ import * as React from "react";
 import { Check, Languages } from "lucide-react";
 import { useRouter } from "next/navigation";
 
-import { LOCALE_COOKIE_NAME, normalizeLocale, type Locale } from "@/lib/i18n/messages";
+import { LOCALE_COOKIE_NAME, type LocaleMode } from "@/lib/i18n/messages";
 import { useI18n } from "@/components/i18n/i18n-provider";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,19 +17,6 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
-type LocaleMode = "auto" | Locale;
-
-function readCookieValue(name: string) {
-  if (typeof document === "undefined") return null;
-  const prefix = `${encodeURIComponent(name)}=`;
-  const parts = document.cookie.split(";").map((p) => p.trim());
-  for (const part of parts) {
-    if (!part.startsWith(prefix)) continue;
-    return decodeURIComponent(part.slice(prefix.length));
-  }
-  return null;
-}
-
 function setCookie(name: string, value: string) {
   const encoded = `${encodeURIComponent(name)}=${encodeURIComponent(value)}`;
   document.cookie = `${encoded}; Path=/; Max-Age=31536000; SameSite=Lax`;
@@ -39,24 +26,15 @@ function deleteCookie(name: string) {
   document.cookie = `${encodeURIComponent(name)}=; Path=/; Max-Age=0; SameSite=Lax`;
 }
 
-function getModeFromCookie(): LocaleMode {
-  const raw = readCookieValue(LOCALE_COOKIE_NAME);
-  const normalized = normalizeLocale(raw);
-  return normalized ?? "auto";
-}
-
 interface LanguageToggleProps {
+  initialMode: LocaleMode;
   className?: string;
 }
 
-export function LanguageToggle({ className }: LanguageToggleProps) {
+export function LanguageToggle({ className, initialMode }: LanguageToggleProps) {
   const router = useRouter();
   const { locale, t } = useI18n();
-  const [mode, setMode] = React.useState<LocaleMode>("auto");
-
-  React.useEffect(() => {
-    setMode(getModeFromCookie());
-  }, []);
+  const [mode, setMode] = React.useState<LocaleMode>(initialMode);
 
   const label =
     mode === "auto"
