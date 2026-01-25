@@ -112,6 +112,7 @@ export interface AnnouncementDeleteResponse {
 }
 
 export interface OAuthProviderItem {
+  id: string;
   provider: string;
   email: string;
   createdAt: string;

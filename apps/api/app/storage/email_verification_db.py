@@ -15,6 +15,8 @@ from app.security import sha256_hex
 
 PURPOSE_REGISTER: Final[str] = "register"
 PURPOSE_PASSWORD: Final[str] = "password"
+PURPOSE_EMAIL_CHANGE_NEW: Final[str] = "email_change_new"
+PURPOSE_EMAIL_CHANGE_CURRENT: Final[str] = "email_change_current"
 
 
 def _normalize_email(value: str) -> str:
@@ -23,7 +25,12 @@ def _normalize_email(value: str) -> str:
 
 def _normalize_purpose(value: str) -> str:
     p = value.strip().lower() or PURPOSE_REGISTER
-    if p not in {PURPOSE_REGISTER, PURPOSE_PASSWORD}:
+    if p not in {
+        PURPOSE_REGISTER,
+        PURPOSE_PASSWORD,
+        PURPOSE_EMAIL_CHANGE_NEW,
+        PURPOSE_EMAIL_CHANGE_CURRENT,
+    }:
         raise ValueError("invalid purpose")
     return p
 

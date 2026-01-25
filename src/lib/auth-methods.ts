@@ -11,6 +11,14 @@ function isAuthMethodsResponse(value: unknown): value is AuthMethodsResponse {
   const v = value as Record<string, unknown>;
   if (typeof v.passwordSet !== "boolean") return false;
   if (!Array.isArray(v.oauth)) return false;
+  for (const item of v.oauth) {
+    if (!item || typeof item !== "object") return false;
+    const row = item as Record<string, unknown>;
+    if (typeof row.id !== "string") return false;
+    if (typeof row.provider !== "string") return false;
+    if (typeof row.email !== "string") return false;
+    if (typeof row.createdAt !== "string") return false;
+  }
   return true;
 }
 
@@ -29,4 +37,3 @@ export const getAuthMethods = cache(async (): Promise<AuthMethodsResponse | null
     return null;
   }
 });
-

@@ -10,6 +10,7 @@ const OAUTH_STATE_COOKIE = "uai_oauth_state";
 const OAUTH_VERIFIER_COOKIE = "uai_oauth_verifier";
 const OAUTH_NEXT_COOKIE = "uai_oauth_next";
 const OAUTH_FROM_COOKIE = "uai_oauth_from";
+const OAUTH_MODE_COOKIE = "uai_oauth_mode";
 
 function firstHeader(req: Request, name: string) {
   const raw = req.headers.get(name);
@@ -35,6 +36,7 @@ function sanitizeNextPath(value: string | null) {
 }
 
 function sanitizeFromPath(value: string | null) {
+  if (value === "/profile") return "/profile";
   if (value === "/login") return "/login";
   if (value === "/register") return "/register";
   return "/login";
@@ -52,12 +54,22 @@ function redirectWithError(
   return NextResponse.redirect(url);
 }
 
+function redirectWithSuccess(
+  publicOrigin: string,
+  { nextPath, successCode }: { nextPath: string; successCode: string }
+) {
+  const url = new URL(nextPath, publicOrigin);
+  url.searchParams.set("oauth_success", successCode);
+  return NextResponse.redirect(url);
+}
+
 function extractErrorCode(json: unknown): string | null {
   if (!json || typeof json !== "object") return null;
   const detail = (json as { detail?: unknown }).detail;
   if (typeof detail !== "string") return null;
   if (detail === "registration disabled") return "registration_disabled";
   if (detail === "banned") return "banned";
+  if (detail === "oauth already linked") return "oauth_already_linked";
   return null;
 }
 
@@ -84,6 +96,7 @@ export async function GET(req: Request) {
   const verifier = store.get(OAUTH_VERIFIER_COOKIE)?.value ?? null;
   const nextPath = sanitizeNextPath(store.get(OAUTH_NEXT_COOKIE)?.value ?? "/dashboard");
   const fromPath = sanitizeFromPath(store.get(OAUTH_FROM_COOKIE)?.value ?? "/login");
+  const mode = store.get(OAUTH_MODE_COOKIE)?.value ?? "login";
 
   const redirectUri =
     process.env.GOOGLE_REDIRECT_URI ??
@@ -102,6 +115,7 @@ export async function GET(req: Request) {
   clear.cookies.set(OAUTH_VERIFIER_COOKIE, "", { path: "/", maxAge: 0 });
   clear.cookies.set(OAUTH_NEXT_COOKIE, "", { path: "/", maxAge: 0 });
   clear.cookies.set(OAUTH_FROM_COOKIE, "", { path: "/", maxAge: 0 });
+  clear.cookies.set(OAUTH_MODE_COOKIE, "", { path: "/", maxAge: 0 });
 
   if (!code || !state || !savedState || state !== savedState || !verifier) {
     const res = redirectWithError(publicOrigin, { fromPath, nextPath, errorCode: "oauth_failed" });
@@ -109,12 +123,18 @@ export async function GET(req: Request) {
     res.cookies.set(OAUTH_VERIFIER_COOKIE, "", { path: "/", maxAge: 0 });
     res.cookies.set(OAUTH_NEXT_COOKIE, "", { path: "/", maxAge: 0 });
     res.cookies.set(OAUTH_FROM_COOKIE, "", { path: "/", maxAge: 0 });
+    res.cookies.set(OAUTH_MODE_COOKIE, "", { path: "/", maxAge: 0 });
     return res;
   }
 
-  const upstream = await fetch(buildBackendUrl("/auth/oauth/google"), {
+  const upstreamPath = mode === "link" ? "/auth/oauth/google/link" : "/auth/oauth/google";
+  const sessionToken = store.get(SESSION_COOKIE_NAME)?.value ?? null;
+  const upstreamHeaders: Record<string, string> = { "content-type": "application/json" };
+  if (mode === "link" && sessionToken) upstreamHeaders.authorization = `Bearer ${sessionToken}`;
+
+  const upstream = await fetch(buildBackendUrl(upstreamPath), {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: upstreamHeaders,
     body: JSON.stringify({ code, codeVerifier: verifier, redirectUri }),
     cache: "no-store"
   }).catch(() => null);
@@ -125,6 +145,7 @@ export async function GET(req: Request) {
     res.cookies.set(OAUTH_VERIFIER_COOKIE, "", { path: "/", maxAge: 0 });
     res.cookies.set(OAUTH_NEXT_COOKIE, "", { path: "/", maxAge: 0 });
     res.cookies.set(OAUTH_FROM_COOKIE, "", { path: "/", maxAge: 0 });
+    res.cookies.set(OAUTH_MODE_COOKIE, "", { path: "/", maxAge: 0 });
     return res;
   }
 
@@ -140,8 +161,21 @@ export async function GET(req: Request) {
     res.cookies.set(OAUTH_VERIFIER_COOKIE, "", { path: "/", maxAge: 0 });
     res.cookies.set(OAUTH_NEXT_COOKIE, "", { path: "/", maxAge: 0 });
     res.cookies.set(OAUTH_FROM_COOKIE, "", { path: "/", maxAge: 0 });
+    res.cookies.set(OAUTH_MODE_COOKIE, "", { path: "/", maxAge: 0 });
     return res;
   }
+  if (mode === "link") {
+    revalidateTag(CACHE_TAGS.currentUser, { expire: 0 });
+    revalidateTag(CACHE_TAGS.authMethods, { expire: 0 });
+    const res = redirectWithSuccess(publicOrigin, { nextPath, successCode: "google_linked" });
+    res.cookies.set(OAUTH_STATE_COOKIE, "", { path: "/", maxAge: 0 });
+    res.cookies.set(OAUTH_VERIFIER_COOKIE, "", { path: "/", maxAge: 0 });
+    res.cookies.set(OAUTH_NEXT_COOKIE, "", { path: "/", maxAge: 0 });
+    res.cookies.set(OAUTH_FROM_COOKIE, "", { path: "/", maxAge: 0 });
+    res.cookies.set(OAUTH_MODE_COOKIE, "", { path: "/", maxAge: 0 });
+    return res;
+  }
+
   if (!isUpstreamAuthResponse(json)) return clear;
 
   const isSecureRequest =
@@ -162,5 +196,6 @@ export async function GET(req: Request) {
   res.cookies.set(OAUTH_VERIFIER_COOKIE, "", { path: "/", maxAge: 0 });
   res.cookies.set(OAUTH_NEXT_COOKIE, "", { path: "/", maxAge: 0 });
   res.cookies.set(OAUTH_FROM_COOKIE, "", { path: "/", maxAge: 0 });
+  res.cookies.set(OAUTH_MODE_COOKIE, "", { path: "/", maxAge: 0 });
   return res;
 }

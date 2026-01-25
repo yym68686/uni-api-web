@@ -19,6 +19,7 @@ from app.auth import get_current_membership, get_current_user, require_admin
 from app.models.api_key import ApiKey
 from app.models.membership import Membership
 from app.models.oauth_identity import OAuthIdentity
+from app.models.user import User
 from app.schemas.announcements import (
     AnnouncementCreateRequest,
     AnnouncementCreateResponse,
@@ -38,6 +39,9 @@ from app.schemas.admin_settings import AdminSettingsResponse, AdminSettingsUpdat
 from app.schemas.auth import AuthResponse, GoogleOAuthExchangeRequest, LoginRequest, RegisterRequest, UserPublic
 from app.schemas.auth_methods import (
     AuthMethodsResponse,
+    EmailChangeConfirmRequest,
+    EmailChangeConfirmResponse,
+    EmailChangeRequestCodeRequest,
     PasswordChangeRequest,
     PasswordRemoveRequest,
     PasswordRequestCodeResponse,
@@ -98,7 +102,7 @@ from app.storage.keys_db import (
 )
 from app.storage.billing_db import list_balance_ledger
 from app.storage.admin_overview_db import get_admin_overview
-from app.storage.oauth_google import login_with_google
+from app.storage.oauth_google import link_google_identity, login_with_google
 from app.schemas.logs import LogsListResponse
 from app.db import SessionLocal
 from app.storage.email_verification_db import request_email_code, verify_email_code
@@ -516,6 +520,7 @@ async def _build_auth_methods_response(session: AsyncSession, *, current_user) -
     identities = await _auth_methods(session, user_id=current_user.id)
     oauth = [
         {
+            "id": str(identity.id),
             "provider": identity.provider,
             "email": identity.email,
             "createdAt": _dt_iso(identity.created_at) or dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -655,6 +660,117 @@ async def password_remove(
     return await _build_auth_methods_response(session, current_user=current_user)
 
 
+@router.post("/auth/email/change/request-code", response_model=PasswordRequestCodeResponse)
+async def email_change_request_code(
+    payload: EmailChangeRequestCodeRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+) -> PasswordRequestCodeResponse:
+    new_email = str(payload.new_email).strip().lower()
+    if new_email == str(current_user.email).strip().lower():
+        raise HTTPException(status_code=400, detail="same email")
+
+    existing = (await session.execute(select(User).where(User.email == new_email))).scalar_one_or_none()
+    if existing and existing.id != current_user.id:
+        raise HTTPException(status_code=400, detail="email already registered")
+
+    xff = request.headers.get("x-forwarded-for")
+    client_ip = (
+        xff.split(",")[0].strip()[:64]
+        if xff and xff.strip()
+        else (request.client.host if request.client else None)
+    )
+    try:
+        expires = await request_email_code(
+            session,
+            email=new_email,
+            purpose="email_change_new",
+            client_ip=client_ip,
+        )
+    except ValueError as e:
+        msg = str(e)
+        if msg in {"too many requests", "please wait"}:
+            raise HTTPException(status_code=429, detail=msg) from e
+        raise HTTPException(status_code=400, detail=msg) from e
+    return PasswordRequestCodeResponse(ok=True, expiresInSeconds=expires)
+
+
+@router.post("/auth/email/change/request-current-code", response_model=PasswordRequestCodeResponse)
+async def email_change_request_current_code(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+) -> PasswordRequestCodeResponse:
+    xff = request.headers.get("x-forwarded-for")
+    client_ip = (
+        xff.split(",")[0].strip()[:64]
+        if xff and xff.strip()
+        else (request.client.host if request.client else None)
+    )
+    try:
+        expires = await request_email_code(
+            session,
+            email=str(current_user.email),
+            purpose="email_change_current",
+            client_ip=client_ip,
+        )
+    except ValueError as e:
+        msg = str(e)
+        if msg in {"too many requests", "please wait"}:
+            raise HTTPException(status_code=429, detail=msg) from e
+        raise HTTPException(status_code=400, detail=msg) from e
+    return PasswordRequestCodeResponse(ok=True, expiresInSeconds=expires)
+
+
+@router.post("/auth/email/change/confirm", response_model=EmailChangeConfirmResponse)
+async def email_change_confirm(
+    payload: EmailChangeConfirmRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+) -> EmailChangeConfirmResponse:
+    new_email = str(payload.new_email).strip().lower()
+    if new_email == str(current_user.email).strip().lower():
+        raise HTTPException(status_code=400, detail="same email")
+
+    existing = (await session.execute(select(User).where(User.email == new_email))).scalar_one_or_none()
+    if existing and existing.id != current_user.id:
+        raise HTTPException(status_code=400, detail="email already registered")
+
+    if not payload.current_email_code:
+        raise HTTPException(status_code=400, detail="missing current email code")
+    try:
+        await verify_email_code(
+            session,
+            email=str(current_user.email),
+            purpose="email_change_current",
+            code=str(payload.current_email_code),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    try:
+        await verify_email_code(
+            session,
+            email=new_email,
+            purpose="email_change_new",
+            code=str(payload.new_email_code),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    current_user.email = new_email
+    await session.commit()
+    await session.refresh(current_user)
+
+    token = _get_request_session_token(request)
+    if token:
+        await revoke_other_sessions(session, user_id=current_user.id, current_token=token)
+
+    return EmailChangeConfirmResponse(ok=True, email=current_user.email)
+
+
 @router.post("/auth/admin/claim")
 async def claim_admin(
     payload: dict,
@@ -692,6 +808,62 @@ async def oauth_google(
         if str(e) == "registration disabled":
             raise HTTPException(status_code=403, detail="registration disabled") from e
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post("/auth/oauth/google/link", response_model=AuthMethodsResponse)
+async def oauth_google_link(
+    payload: GoogleOAuthExchangeRequest, session: AsyncSession = Depends(get_db_session), current_user=Depends(get_current_user)
+) -> AuthMethodsResponse:
+    from app.core.config import settings
+
+    if payload.redirect_uri != settings.google_redirect_uri:
+        raise HTTPException(status_code=400, detail="invalid redirect_uri")
+
+    try:
+        await link_google_identity(
+            session,
+            user=current_user,
+            code=payload.code,
+            code_verifier=payload.code_verifier,
+            redirect_uri=payload.redirect_uri,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    return await _build_auth_methods_response(session, current_user=current_user)
+
+
+@router.delete("/auth/oauth/{oauth_id}", response_model=AuthMethodsResponse)
+async def oauth_unlink(
+    oauth_id: str,
+    session: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+) -> AuthMethodsResponse:
+    try:
+        parsed = uuid.UUID(oauth_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid oauth id") from None
+
+    identity = await session.get(OAuthIdentity, parsed)
+    if not identity or identity.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="not found")
+
+    identities = await _auth_methods(session, user_id=current_user.id)
+    if identity.provider == "google":
+        provider_identities = [row for row in identities if row.provider == "google"]
+        remaining = len(identities) - len(provider_identities)
+        if current_user.password_set_at is None and remaining <= 0:
+            raise HTTPException(status_code=400, detail="cannot remove last sign-in method")
+        for row in provider_identities:
+            await session.delete(row)
+    else:
+        remaining = len(identities) - 1
+        if current_user.password_set_at is None and remaining <= 0:
+            raise HTTPException(status_code=400, detail="cannot remove last sign-in method")
+        await session.delete(identity)
+
+    await session.commit()
+    return await _build_auth_methods_response(session, current_user=current_user)
 
 
 def _extract_bearer_token(value: str | None) -> str | None:

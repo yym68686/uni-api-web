@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 
 class OAuthProviderItem(BaseModel):
+    id: str
     provider: str
     email: str
     created_at: str = Field(alias="createdAt")
@@ -32,3 +33,18 @@ class PasswordChangeRequest(BaseModel):
 class PasswordRemoveRequest(BaseModel):
     code: str
 
+
+class EmailChangeRequestCodeRequest(BaseModel):
+    new_email: EmailStr = Field(alias="newEmail")
+
+
+class EmailChangeConfirmRequest(BaseModel):
+    new_email: EmailStr = Field(alias="newEmail")
+    new_email_code: str = Field(alias="newEmailCode")
+    current_password: str | None = Field(default=None, alias="currentPassword")
+    current_email_code: str | None = Field(default=None, alias="currentEmailCode")
+
+
+class EmailChangeConfirmResponse(BaseModel):
+    ok: bool = True
+    email: EmailStr

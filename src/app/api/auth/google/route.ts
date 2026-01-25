@@ -23,6 +23,7 @@ function sanitizeNextPath(value: string | null) {
 }
 
 function sanitizeFromPath(value: string | null) {
+  if (value === "/profile") return "/profile";
   if (value === "/login") return "/login";
   if (value === "/register") return "/register";
   return "/login";
@@ -48,9 +49,11 @@ const OAUTH_STATE_COOKIE = "uai_oauth_state";
 const OAUTH_VERIFIER_COOKIE = "uai_oauth_verifier";
 const OAUTH_NEXT_COOKIE = "uai_oauth_next";
 const OAUTH_FROM_COOKIE = "uai_oauth_from";
+const OAUTH_MODE_COOKIE = "uai_oauth_mode";
 
 export function GET(req: Request) {
   const url = new URL(req.url);
+  const mode = url.searchParams.get("mode") === "link" ? "link" : "login";
   const nextPath = sanitizeNextPath(url.searchParams.get("next"));
   const fromPath = sanitizeFromPath(url.searchParams.get("from"));
 
@@ -92,5 +95,6 @@ export function GET(req: Request) {
   res.cookies.set(OAUTH_VERIFIER_COOKIE, verifier, cookieOptions);
   res.cookies.set(OAUTH_NEXT_COOKIE, nextPath, cookieOptions);
   res.cookies.set(OAUTH_FROM_COOKIE, fromPath, cookieOptions);
+  res.cookies.set(OAUTH_MODE_COOKIE, mode, cookieOptions);
   return res;
 }

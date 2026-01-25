@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import secrets
+import uuid
 
 import httpx
 from sqlalchemy import func, select
@@ -39,6 +40,36 @@ def _to_user_public(row: User) -> UserPublic:
         createdAt=_dt_iso(row.created_at) or dt.datetime.now(dt.timezone.utc).isoformat(),
         lastLoginAt=_dt_iso(row.last_login_at),
     )
+
+
+async def _ensure_single_google_identity(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    subject: str,
+    email: str,
+) -> None:
+    identities = (
+        await session.execute(
+            select(OAuthIdentity)
+            .where(OAuthIdentity.user_id == user_id, OAuthIdentity.provider == "google")
+            .order_by(OAuthIdentity.created_at.desc())
+        )
+    ).scalars().all()
+
+    canonical = next((row for row in identities if row.subject == subject), None)
+    if canonical is None and identities:
+        canonical = identities[0]
+        canonical.subject = subject
+
+    if canonical is None:
+        session.add(OAuthIdentity(provider="google", subject=subject, user_id=user_id, email=email))
+        return
+
+    canonical.email = email
+    for row in identities:
+        if row.id != canonical.id:
+            await session.delete(row)
 
 
 async def _exchange_google_code(code: str, code_verifier: str, redirect_uri: str) -> str:
@@ -138,12 +169,7 @@ async def login_with_google(
     if user.banned_at is not None:
         raise ValueError("banned")
 
-    if not identity:
-        identity = OAuthIdentity(
-            provider="google", subject=profile.sub, user_id=user.id, email=profile.email
-        )
-        session.add(identity)
-        await session.commit()
+    await _ensure_single_google_identity(session, user_id=user.id, subject=profile.sub, email=profile.email)
 
     user.last_login_at = dt.datetime.now(dt.timezone.utc)
     await session.commit()
@@ -151,3 +177,32 @@ async def login_with_google(
 
     token = await create_session(session, user.id, ttl_days=settings.session_ttl_days)
     return AuthResponse(token=token, user=_to_user_public(user))
+
+
+async def link_google_identity(
+    session: AsyncSession,
+    *,
+    user: User,
+    code: str,
+    code_verifier: str,
+    redirect_uri: str,
+) -> None:
+    access_token = await _exchange_google_code(code, code_verifier, redirect_uri)
+    profile = await _fetch_google_profile(access_token)
+
+    if not profile.email_verified:
+        raise ValueError("email not verified")
+
+    identity = (
+        await session.execute(
+            select(OAuthIdentity).where(
+                OAuthIdentity.provider == "google", OAuthIdentity.subject == profile.sub
+            )
+        )
+    ).scalar_one_or_none()
+
+    if identity and identity.user_id != user.id:
+        raise ValueError("oauth already linked")
+
+    await _ensure_single_google_identity(session, user_id=user.id, subject=profile.sub, email=profile.email)
+    await session.commit()

@@ -47,6 +47,18 @@ def create_app() -> FastAPI:
                 "WHERE password_set_at IS NULL "
                 "AND NOT EXISTS (SELECT 1 FROM oauth_identities oi WHERE oi.user_id = u.id)"
             )
+            await conn.exec_driver_sql(
+                "DELETE FROM oauth_identities WHERE id IN ("
+                "  SELECT id FROM ("
+                "    SELECT id, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY created_at DESC) AS rn "
+                "    FROM oauth_identities WHERE provider = 'google'"
+                "  ) t WHERE t.rn > 1"
+                ")"
+            )
+            await conn.exec_driver_sql(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_oauth_user_google "
+                "ON oauth_identities(user_id) WHERE provider = 'google'"
+            )
 
             await conn.exec_driver_sql(
                 "ALTER TABLE IF EXISTS llm_usage_events "
