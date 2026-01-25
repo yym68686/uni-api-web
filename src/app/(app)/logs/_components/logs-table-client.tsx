@@ -141,7 +141,7 @@ export function LogsTableClient({ initialItems, pageSize }: LogsTableClientProps
               <TableRow>
                 <TableHead>{t("logs.table.time")}</TableHead>
                 <TableHead>{t("logs.table.model")}</TableHead>
-                <TableHead>{t("logs.table.io")}</TableHead>
+                <TableHead className="whitespace-nowrap">{t("logs.table.io")}</TableHead>
                 <TableHead>{t("logs.table.total")}</TableHead>
                 <TableHead>{t("logs.table.ttft")}</TableHead>
                 <TableHead>{t("logs.table.tps")}</TableHead>
@@ -158,7 +158,7 @@ export function LogsTableClient({ initialItems, pageSize }: LogsTableClientProps
                   <TableCell>
                     <CopyableModelId value={r.model} />
                   </TableCell>
-                  <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
+                  <TableCell className="whitespace-nowrap font-mono tabular-nums text-xs text-muted-foreground">
                     {r.inputTokens} / {r.cachedTokens} / {r.outputTokens}
                   </TableCell>
                   <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">

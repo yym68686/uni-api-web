@@ -1,9 +1,11 @@
 import "server-only";
 
 import { cache } from "react";
+import { cookies } from "next/headers";
 
 import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
 import { CACHE_TAGS } from "@/lib/cache-tags";
+import { isLoggedInCookie, SESSION_COOKIE_NAME } from "@/lib/auth";
 
 export interface CurrentUser {
   id: string;
@@ -32,6 +34,8 @@ function isCurrentUser(value: unknown): value is CurrentUser {
 }
 
 export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
+  const token = (await cookies()).get(SESSION_COOKIE_NAME)?.value;
+  if (!isLoggedInCookie(token)) return null;
   try {
     const res = await fetch(buildBackendUrl("/auth/me"), {
       cache: "force-cache",

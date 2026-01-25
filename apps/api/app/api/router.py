@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 import uuid
 import time
 import datetime as dt
@@ -72,7 +74,7 @@ from app.storage.announcements_db import (
     update_announcement,
 )
 from app.storage.admin_users_db import delete_admin_user, list_admin_users, update_admin_user
-from app.storage.orgs_db import ensure_default_org
+from app.storage.orgs_db import ensure_default_org, ensure_membership
 from app.storage.auth_db import grant_admin_role
 from app.storage.auth_db import get_user_by_token
 from app.storage.auth_db import login as auth_login
@@ -104,6 +106,7 @@ from app.models.organization import Organization
 from app.security_password import hash_password, verify_password
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 HOP_BY_HOP_HEADERS = {
     "connection",
@@ -152,6 +155,91 @@ def _safe_int(value: object) -> int:
         return int(value)  # type: ignore[arg-type]
     except Exception:
         return 0
+
+
+async def _compute_cost_usd_micros(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    model_id: str,
+    input_tokens: int,
+    cached_tokens: int,
+    output_tokens: int,
+) -> int:
+    cfg = await get_model_config(session, org_id=org_id, model_id=model_id.strip())
+    from app.storage.models_db import default_price_for_model
+
+    default_in, default_out = default_price_for_model(model_id.strip())
+    in_price = cfg.input_usd_micros_per_m if (cfg and cfg.input_usd_micros_per_m is not None) else default_in
+    out_price = cfg.output_usd_micros_per_m if (cfg and cfg.output_usd_micros_per_m is not None) else default_out
+
+    cost_micros = 0
+    if in_price is not None and input_tokens > 0:
+        cached = min(max(int(cached_tokens), 0), int(input_tokens))
+        uncached = max(int(input_tokens) - cached, 0)
+        if uncached > 0:
+            cost_micros += int((uncached * int(in_price) + 999_999) // 1_000_000)
+        if cached > 0:
+            cost_micros += int((cached * int(in_price) + 9_999_999) // 10_000_000)
+    if out_price is not None and output_tokens > 0:
+        cost_micros += int((output_tokens * int(out_price) + 999_999) // 1_000_000)
+    return int(max(cost_micros, 0))
+
+
+async def _record_usage_event_best_effort(
+    *,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+    api_key_id: uuid.UUID | None,
+    model_id: str,
+    ok: bool,
+    status_code: int,
+    input_tokens: int,
+    cached_tokens: int,
+    output_tokens: int,
+    total_tokens: int,
+    cost_usd_micros: int,
+    total_duration_ms: int,
+    ttft_ms: int,
+    source_ip: str | None,
+) -> None:
+    computed_cost = int(max(cost_usd_micros, 0))
+
+    try:
+        async with SessionLocal() as s:
+            if ok and total_tokens > 0 and computed_cost <= 0:
+                try:
+                    computed_cost = await _compute_cost_usd_micros(
+                        s,
+                        org_id=org_id,
+                        model_id=model_id,
+                        input_tokens=input_tokens,
+                        cached_tokens=cached_tokens,
+                        output_tokens=output_tokens,
+                    )
+                except Exception:
+                    logger.exception("usage: cost compute failed")
+                    computed_cost = 0
+
+            await record_usage_event(
+                s,
+                org_id=org_id,
+                user_id=user_id,
+                api_key_id=api_key_id,
+                model_id=model_id,
+                ok=ok,
+                status_code=status_code,
+                input_tokens=input_tokens,
+                cached_tokens=cached_tokens,
+                output_tokens=output_tokens,
+                total_tokens=total_tokens,
+                cost_usd_micros=computed_cost,
+                total_duration_ms=total_duration_ms,
+                ttft_ms=ttft_ms,
+                source_ip=source_ip,
+            )
+    except Exception:
+        logger.exception("usage: record failed")
 
 
 def _extract_usage_tokens(obj: dict) -> tuple[int, int, int, int] | None:
@@ -616,6 +704,11 @@ def _extract_bearer_token(value: str | None) -> str | None:
     return None
 
 
+async def _require_default_membership(session: AsyncSession, *, user_id: uuid.UUID) -> Membership:
+    org = await ensure_default_org(session)
+    return await ensure_membership(session, org_id=org.id, user_id=user_id, role="developer")
+
+
 async def _require_user_for_models(request: Request, session: AsyncSession):
     from app.constants import SESSION_COOKIE_NAME
 
@@ -640,13 +733,7 @@ async def _require_user_for_models(request: Request, session: AsyncSession):
         if user.banned_at is not None:
             raise HTTPException(status_code=403, detail="banned")
 
-    membership = (
-        await session.execute(
-            select(Membership).where(Membership.user_id == user.id).order_by(Membership.created_at.asc())
-        )
-    ).scalars().first()
-    if not membership:
-        raise HTTPException(status_code=403, detail="missing membership")
+    membership = await _require_default_membership(session, user_id=user.id)
     return user, membership
 
 
@@ -916,13 +1003,7 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
     if int(getattr(user, "balance", 0)) <= 0:
         raise HTTPException(status_code=402, detail="insufficient balance")
 
-    membership = (
-        await session.execute(
-            select(Membership).where(Membership.user_id == user.id).order_by(Membership.created_at.asc())
-        )
-    ).scalars().first()
-    if not membership:
-        raise HTTPException(status_code=403, detail="missing membership")
+    membership = await _require_default_membership(session, user_id=user.id)
 
     cfg = await get_model_config(session, org_id=membership.org_id, model_id=model_id.strip())
     if cfg and not cfg.enabled:
@@ -1024,62 +1105,36 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
                 # Treat upstream disconnects/cancellation as a normal stream termination.
                 pass
             finally:
-                total_ms = int((time.perf_counter() - started) * 1000)
-                try:
-                    await res.aclose()
-                except Exception:
-                    pass
-                try:
-                    await client.aclose()
-                except Exception:
-                    pass
-                try:
-                    async with SessionLocal() as s:
-                        cost_micros = 0
-                        if ok and total_tokens > 0:
-                            cfg = await get_model_config(s, org_id=membership.org_id, model_id=model_id.strip())
-                            from app.storage.models_db import default_price_for_model
+                total_ms_local = int((time.perf_counter() - started) * 1000)
 
-                            default_in, default_out = default_price_for_model(model_id.strip())
-                            in_price = (
-                                cfg.input_usd_micros_per_m
-                                if (cfg and cfg.input_usd_micros_per_m is not None)
-                                else default_in
-                            )
-                            out_price = (
-                                cfg.output_usd_micros_per_m
-                                if (cfg and cfg.output_usd_micros_per_m is not None)
-                                else default_out
-                            )
-                            if in_price is not None and input_tokens > 0:
-                                cached = min(max(int(cached_tokens), 0), int(input_tokens))
-                                uncached = max(int(input_tokens) - cached, 0)
-                                if uncached > 0:
-                                    cost_micros += int((uncached * int(in_price) + 999_999) // 1_000_000)
-                                if cached > 0:
-                                    cost_micros += int((cached * int(in_price) + 9_999_999) // 10_000_000)
-                            if out_price is not None and output_tokens > 0:
-                                cost_micros += int((output_tokens * int(out_price) + 999_999) // 1_000_000)
+                async def finalize() -> None:
+                    try:
+                        await res.aclose()
+                    except Exception:
+                        pass
+                    try:
+                        await client.aclose()
+                    except Exception:
+                        pass
 
-                        await record_usage_event(
-                            s,
-                            org_id=membership.org_id,
-                            user_id=user.id,
-                            api_key_id=api_key.id,
-                            model_id=model_id.strip(),
-                            ok=ok,
-                            status_code=int(res.status_code),
-                            input_tokens=input_tokens,
-                            cached_tokens=cached_tokens,
-                            output_tokens=output_tokens,
-                            total_tokens=total_tokens,
-                            cost_usd_micros=cost_micros,
-                            total_duration_ms=total_ms,
-                            ttft_ms=ttft_ms,
-                            source_ip=source_ip,
-                        )
-                except Exception:
-                    pass
+                    await _record_usage_event_best_effort(
+                        org_id=membership.org_id,
+                        user_id=user.id,
+                        api_key_id=api_key.id,
+                        model_id=model_id.strip(),
+                        ok=ok,
+                        status_code=int(res.status_code),
+                        input_tokens=input_tokens,
+                        cached_tokens=cached_tokens,
+                        output_tokens=output_tokens,
+                        total_tokens=total_tokens,
+                        cost_usd_micros=0,
+                        total_duration_ms=total_ms_local,
+                        ttft_ms=ttft_ms,
+                        source_ip=source_ip,
+                    )
+
+                asyncio.create_task(finalize())
 
         return StreamingResponse(
             iterator(),
@@ -1147,27 +1202,22 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
         if out_price is not None and output_tokens > 0:
             cost_micros += int((output_tokens * int(out_price) + 999_999) // 1_000_000)
 
-    try:
-        await record_usage_event(
-            session,
-            org_id=membership.org_id,
-            user_id=user.id,
-            api_key_id=api_key.id,
-            model_id=model_id.strip(),
-            ok=ok,
-            status_code=int(res.status_code),
-            input_tokens=input_tokens,
-            cached_tokens=cached_tokens,
-            output_tokens=output_tokens,
-            total_tokens=total_tokens,
-            cost_usd_micros=cost_micros,
-            total_duration_ms=total_ms,
-            ttft_ms=ttft_ms,
-            source_ip=source_ip,
-        )
-    except Exception:
-        # Accounting should not break the request path.
-        pass
+    await _record_usage_event_best_effort(
+        org_id=membership.org_id,
+        user_id=user.id,
+        api_key_id=api_key.id,
+        model_id=model_id.strip(),
+        ok=ok,
+        status_code=int(res.status_code),
+        input_tokens=input_tokens,
+        cached_tokens=cached_tokens,
+        output_tokens=output_tokens,
+        total_tokens=total_tokens,
+        cost_usd_micros=cost_micros,
+        total_duration_ms=total_ms,
+        ttft_ms=ttft_ms,
+        source_ip=source_ip,
+    )
 
     return Response(content=bytes(body_bytes), status_code=int(res.status_code), media_type=content_type)
 
@@ -1197,13 +1247,7 @@ async def responses(request: Request, session: AsyncSession = Depends(get_db_ses
     if int(getattr(user, "balance", 0)) <= 0:
         raise HTTPException(status_code=402, detail="insufficient balance")
 
-    membership = (
-        await session.execute(
-            select(Membership).where(Membership.user_id == user.id).order_by(Membership.created_at.asc())
-        )
-    ).scalars().first()
-    if not membership:
-        raise HTTPException(status_code=403, detail="missing membership")
+    membership = await _require_default_membership(session, user_id=user.id)
 
     cfg = await get_model_config(session, org_id=membership.org_id, model_id=model_id.strip())
     if cfg and not cfg.enabled:
@@ -1279,62 +1323,36 @@ async def responses(request: Request, session: AsyncSession = Depends(get_db_ses
             except (httpx.ReadError, httpx.StreamError):
                 pass
             finally:
-                total_ms = int((time.perf_counter() - started) * 1000)
-                try:
-                    await res.aclose()
-                except Exception:
-                    pass
-                try:
-                    await client.aclose()
-                except Exception:
-                    pass
-                try:
-                    async with SessionLocal() as s:
-                        cost_micros = 0
-                        if ok and total_tokens > 0:
-                            cfg = await get_model_config(s, org_id=membership.org_id, model_id=model_id.strip())
-                            from app.storage.models_db import default_price_for_model
+                total_ms_local = int((time.perf_counter() - started) * 1000)
 
-                            default_in, default_out = default_price_for_model(model_id.strip())
-                            in_price = (
-                                cfg.input_usd_micros_per_m
-                                if (cfg and cfg.input_usd_micros_per_m is not None)
-                                else default_in
-                            )
-                            out_price = (
-                                cfg.output_usd_micros_per_m
-                                if (cfg and cfg.output_usd_micros_per_m is not None)
-                                else default_out
-                            )
-                            if in_price is not None and input_tokens > 0:
-                                cached = min(max(int(cached_tokens), 0), int(input_tokens))
-                                uncached = max(int(input_tokens) - cached, 0)
-                                if uncached > 0:
-                                    cost_micros += int((uncached * int(in_price) + 999_999) // 1_000_000)
-                                if cached > 0:
-                                    cost_micros += int((cached * int(in_price) + 9_999_999) // 10_000_000)
-                            if out_price is not None and output_tokens > 0:
-                                cost_micros += int((output_tokens * int(out_price) + 999_999) // 1_000_000)
+                async def finalize() -> None:
+                    try:
+                        await res.aclose()
+                    except Exception:
+                        pass
+                    try:
+                        await client.aclose()
+                    except Exception:
+                        pass
 
-                        await record_usage_event(
-                            s,
-                            org_id=membership.org_id,
-                            user_id=user.id,
-                            api_key_id=api_key.id,
-                            model_id=model_id.strip(),
-                            ok=ok,
-                            status_code=int(res.status_code),
-                            input_tokens=input_tokens,
-                            cached_tokens=cached_tokens,
-                            output_tokens=output_tokens,
-                            total_tokens=total_tokens,
-                            cost_usd_micros=cost_micros,
-                            total_duration_ms=total_ms,
-                            ttft_ms=ttft_ms,
-                            source_ip=source_ip,
-                        )
-                except Exception:
-                    pass
+                    await _record_usage_event_best_effort(
+                        org_id=membership.org_id,
+                        user_id=user.id,
+                        api_key_id=api_key.id,
+                        model_id=model_id.strip(),
+                        ok=ok,
+                        status_code=int(res.status_code),
+                        input_tokens=input_tokens,
+                        cached_tokens=cached_tokens,
+                        output_tokens=output_tokens,
+                        total_tokens=total_tokens,
+                        cost_usd_micros=0,
+                        total_duration_ms=total_ms_local,
+                        ttft_ms=ttft_ms,
+                        source_ip=source_ip,
+                    )
+
+                asyncio.create_task(finalize())
 
         return StreamingResponse(
             iterator(),
@@ -1390,26 +1408,22 @@ async def responses(request: Request, session: AsyncSession = Depends(get_db_ses
         if out_price is not None and output_tokens > 0:
             cost_micros += int((output_tokens * int(out_price) + 999_999) // 1_000_000)
 
-    try:
-        await record_usage_event(
-            session,
-            org_id=membership.org_id,
-            user_id=user.id,
-            api_key_id=api_key.id,
-            model_id=model_id.strip(),
-            ok=ok,
-            status_code=int(res.status_code),
-            input_tokens=input_tokens,
-            cached_tokens=cached_tokens,
-            output_tokens=output_tokens,
-            total_tokens=total_tokens,
-            cost_usd_micros=cost_micros,
-            total_duration_ms=total_ms,
-            ttft_ms=ttft_ms,
-            source_ip=source_ip,
-        )
-    except Exception:
-        pass
+    await _record_usage_event_best_effort(
+        org_id=membership.org_id,
+        user_id=user.id,
+        api_key_id=api_key.id,
+        model_id=model_id.strip(),
+        ok=ok,
+        status_code=int(res.status_code),
+        input_tokens=input_tokens,
+        cached_tokens=cached_tokens,
+        output_tokens=output_tokens,
+        total_tokens=total_tokens,
+        cost_usd_micros=cost_micros,
+        total_duration_ms=total_ms,
+        ttft_ms=ttft_ms,
+        source_ip=source_ip,
+    )
 
     upstream_headers.setdefault("cache-control", "no-cache")
     return Response(
