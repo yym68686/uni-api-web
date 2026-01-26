@@ -30,6 +30,7 @@ def stage_balance_adjustment_ledger_entry(
     actor_user_id: uuid.UUID | None,
     balance_before: int,
     balance_after: int,
+    entry_type: str = "adjustment",
 ) -> None:
     delta = int(balance_after) - int(balance_before)
     if delta == 0:
@@ -38,7 +39,7 @@ def stage_balance_adjustment_ledger_entry(
         org_id=org_id,
         user_id=user_id,
         actor_user_id=actor_user_id,
-        entry_type="adjustment",
+        entry_type=str(entry_type),
         delta_usd_micros=int(delta) * 1_000_000,
         balance_usd_micros=int(balance_after) * 1_000_000,
     )
@@ -78,4 +79,3 @@ async def list_balance_ledger(
             }
         )
     return items
-

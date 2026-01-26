@@ -6,8 +6,11 @@ import uuid
 import time
 import datetime as dt
 import secrets
+import hashlib
+import hmac
+from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import Response, StreamingResponse
@@ -67,7 +70,12 @@ from app.schemas.channels import (
     LlmChannelUpdateResponse,
 )
 from app.schemas.admin_overview import AdminOverviewResponse
-from app.schemas.billing import BillingLedgerListResponse
+from app.schemas.billing import (
+    BillingLedgerListResponse,
+    BillingTopupCheckoutRequest,
+    BillingTopupCheckoutResponse,
+    BillingTopupStatusResponse,
+)
 from app.schemas.models import ModelsListResponse, OpenAIModelsListResponse, OpenAIModelItem
 from app.schemas.models_admin import AdminModelsListResponse, AdminModelUpdateRequest, AdminModelUpdateResponse
 from app.db import get_db_session
@@ -108,6 +116,16 @@ from app.db import SessionLocal
 from app.storage.email_verification_db import request_email_code, verify_email_code
 from app.models.organization import Organization
 from app.security_password import hash_password, verify_password
+from app.core.config import settings
+from app.storage.topups_db import (
+    complete_billing_topup,
+    create_billing_topup,
+    creem_event_exists,
+    generate_topup_request_id,
+    get_billing_topup_for_user,
+    mark_billing_topup_failed,
+    record_creem_event,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -159,6 +177,100 @@ def _safe_int(value: object) -> int:
         return int(value)  # type: ignore[arg-type]
     except Exception:
         return 0
+
+
+def _normalize_public_url(raw: str) -> str:
+    value = (raw or "").strip()
+    if value == "":
+        return "http://localhost:3000"
+    return value.rstrip("/")
+
+
+def _creem_base_url() -> str:
+    api_key = (settings.creem_api_key or "").strip()
+    if api_key.startswith("creem_test_"):
+        return "https://test-api.creem.io"
+    return "https://api.creem.io"
+
+
+def _verify_creem_signature(*, raw_body: bytes, signature: str) -> bool:
+    secret = (settings.creem_webhook_secret or "").strip()
+    if secret == "":
+        return False
+    computed = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
+    try:
+        return hmac.compare_digest(computed, signature)
+    except Exception:
+        return False
+
+
+def _extract_creem_currency(obj: dict) -> str | None:
+    order = obj.get("order")
+    if isinstance(order, dict):
+        cur = order.get("currency")
+        if isinstance(cur, str) and cur.strip():
+            return cur.strip().upper()[:8]
+
+    txn = obj.get("transaction")
+    if isinstance(txn, dict):
+        cur = txn.get("currency")
+        if isinstance(cur, str) and cur.strip():
+            return cur.strip().upper()[:8]
+
+    product = obj.get("product")
+    if isinstance(product, dict):
+        cur = product.get("currency")
+        if isinstance(cur, str) and cur.strip():
+            return cur.strip().upper()[:8]
+
+    return None
+
+
+def _extract_creem_product_id(obj: dict) -> str | None:
+    order = obj.get("order")
+    if isinstance(order, dict):
+        raw = order.get("product")
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+
+    product = obj.get("product")
+    if isinstance(product, dict):
+        raw = product.get("id")
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+    if isinstance(product, str) and product.strip():
+        return product.strip()
+
+    return None
+
+
+def _extract_creem_amount_total_cents(obj: dict) -> int | None:
+    raw_total = obj.get("amount_total")
+    if raw_total is not None:
+        try:
+            return int(raw_total)
+        except Exception:
+            pass
+
+    txn = obj.get("transaction")
+    if isinstance(txn, dict):
+        paid = txn.get("amount_paid")
+        if paid is not None:
+            try:
+                return int(paid)
+            except Exception:
+                pass
+
+    order = obj.get("order")
+    if isinstance(order, dict):
+        paid = order.get("amount_paid")
+        if paid is not None:
+            try:
+                return int(paid)
+            except Exception:
+                pass
+
+    return None
 
 
 async def _compute_cost_usd_micros(
@@ -1662,6 +1774,333 @@ async def usage(
     from app.storage.usage_db import get_usage_response
 
     return await get_usage_response(session, org_id=membership.org_id, user_id=current_user.id)
+
+
+@router.post("/billing/topup/checkout", response_model=BillingTopupCheckoutResponse)
+async def billing_topup_checkout(
+    payload: BillingTopupCheckoutRequest,
+    session: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+    membership=Depends(get_current_membership),
+) -> dict:
+    api_key = (settings.creem_api_key or "").strip()
+    product_id = (settings.creem_product_id or "").strip()
+    if api_key == "" or product_id == "":
+        raise HTTPException(status_code=503, detail="billing not configured")
+
+    units = int(payload.amount_usd)
+    if units < 5 or units > 5000:
+        raise HTTPException(status_code=400, detail="invalid amount")
+
+    request_id = generate_topup_request_id()
+    await create_billing_topup(
+        session,
+        org_id=membership.org_id,
+        user_id=current_user.id,
+        request_id=request_id,
+        units=units,
+    )
+
+    public_url = _normalize_public_url(settings.app_public_url)
+    success_url = f"{public_url}/billing?request_id={quote(request_id)}"
+
+    body = {
+        "product_id": product_id,
+        "units": units,
+        "request_id": request_id,
+        "success_url": success_url,
+        "customer": {"email": str(current_user.email)},
+        "metadata": {
+            "purpose": "top_up",
+            "userId": str(current_user.id),
+            "orgId": str(membership.org_id),
+            "units": units,
+        },
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=10.0)) as client:
+            upstream = await client.post(
+                f"{_creem_base_url()}/v1/checkouts",
+                headers={"x-api-key": api_key, "content-type": "application/json"},
+                json=body,
+            )
+    except Exception:
+        logger.exception("creem: checkout create failed")
+        await mark_billing_topup_failed(
+            session,
+            request_id=request_id,
+            checkout_id=None,
+            order_id=None,
+            currency=None,
+            amount_total_cents=None,
+        )
+        raise HTTPException(status_code=502, detail="payment provider error") from None
+
+    if upstream.status_code >= 400:
+        logger.warning("creem: checkout create error status=%s body=%s", upstream.status_code, upstream.text[:500])
+        await mark_billing_topup_failed(
+            session,
+            request_id=request_id,
+            checkout_id=None,
+            order_id=None,
+            currency=None,
+            amount_total_cents=None,
+        )
+        raise HTTPException(status_code=502, detail="payment provider error")
+
+    checkout_url = None
+    try:
+        j = upstream.json()
+        if isinstance(j, dict):
+            raw = j.get("checkout_url")
+            if isinstance(raw, str) and raw.strip():
+                checkout_url = raw.strip()
+    except Exception:
+        checkout_url = None
+
+    if not checkout_url:
+        await mark_billing_topup_failed(
+            session,
+            request_id=request_id,
+            checkout_id=None,
+            order_id=None,
+            currency=None,
+            amount_total_cents=None,
+        )
+        raise HTTPException(status_code=502, detail="payment provider error")
+
+    return {"checkoutUrl": checkout_url, "requestId": request_id}
+
+
+@router.get("/billing/topup/status", response_model=BillingTopupStatusResponse)
+async def billing_topup_status(
+    request_id: str | None = None,
+    request_id_alt: str | None = Query(default=None, alias="requestId"),
+    session: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+    membership=Depends(get_current_membership),
+) -> dict:
+    raw_request_id = request_id_alt or request_id
+    if not isinstance(raw_request_id, str) or raw_request_id.strip() == "":
+        raise HTTPException(status_code=400, detail="missing request id")
+
+    topup = await get_billing_topup_for_user(
+        session,
+        org_id=membership.org_id,
+        user_id=current_user.id,
+        request_id=raw_request_id.strip(),
+    )
+    if not topup:
+        raise HTTPException(status_code=404, detail="not found")
+
+    status = str(topup.status or "pending")
+    units = int(getattr(topup, "units", 0) or 0)
+    out: dict[str, object] = {"requestId": str(topup.request_id), "status": status, "units": units}
+    if status == "completed":
+        try:
+            await session.refresh(current_user)
+        except Exception:
+            pass
+        out["newBalance"] = int(getattr(current_user, "balance", 0) or 0)
+    return out
+
+
+@router.post("/webhook/creem")
+async def creem_webhook(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+) -> dict:
+    signature = request.headers.get("creem-signature") or ""
+    raw = await request.body()
+    if signature.strip() == "":
+        raise HTTPException(status_code=401, detail="missing signature")
+    if not _verify_creem_signature(raw_body=raw, signature=signature.strip()):
+        raise HTTPException(status_code=401, detail="invalid signature")
+
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid json") from None
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="invalid json")
+
+    event_id = payload.get("id")
+    event_type = payload.get("eventType")
+    if not isinstance(event_id, str) or not event_id.strip():
+        raise HTTPException(status_code=400, detail="missing event id")
+    if not isinstance(event_type, str) or not event_type.strip():
+        raise HTTPException(status_code=400, detail="missing event type")
+
+    creem_event_id = event_id.strip()
+    if await creem_event_exists(session, creem_event_id=creem_event_id):
+        return {"ok": True}
+
+    obj = payload.get("object")
+    if not isinstance(obj, dict):
+        await record_creem_event(
+            session,
+            creem_event_id=creem_event_id,
+            event_type=event_type,
+            status="failed",
+            raw_payload=payload,
+        )
+        return {"ok": True}
+
+    request_id = obj.get("request_id")
+    checkout_id = obj.get("id") if isinstance(obj.get("id"), str) else None
+    order_id = None
+    order = obj.get("order")
+    if isinstance(order, dict) and isinstance(order.get("id"), str):
+        order_id = order.get("id")
+
+    currency = _extract_creem_currency(obj)
+    product_id = _extract_creem_product_id(obj)
+    amount_total_cents = _extract_creem_amount_total_cents(obj)
+    metadata = obj.get("metadata")
+
+    purpose = None
+    if isinstance(metadata, dict):
+        raw_purpose = metadata.get("purpose")
+        if isinstance(raw_purpose, str) and raw_purpose.strip():
+            purpose = raw_purpose.strip()
+
+    org_id = None
+    user_id = None
+    if isinstance(metadata, dict):
+        raw_org = metadata.get("orgId")
+        raw_user = metadata.get("userId")
+        try:
+            if isinstance(raw_org, str) and raw_org.strip():
+                org_id = uuid.UUID(raw_org.strip())
+        except Exception:
+            org_id = None
+        try:
+            if isinstance(raw_user, str) and raw_user.strip():
+                user_id = uuid.UUID(raw_user.strip())
+        except Exception:
+            user_id = None
+
+    if event_type.strip() != "checkout.completed":
+        await record_creem_event(
+            session,
+            creem_event_id=creem_event_id,
+            event_type=event_type,
+            status="processed",
+            raw_payload=payload,
+            org_id=org_id,
+            user_id=user_id,
+            amount_units=0,
+            amount_total_cents=amount_total_cents,
+            currency=currency,
+        )
+        return {"ok": True}
+
+    if not isinstance(request_id, str) or not request_id.strip():
+        await record_creem_event(
+            session,
+            creem_event_id=creem_event_id,
+            event_type=event_type,
+            status="failed",
+            raw_payload=payload,
+            org_id=org_id,
+            user_id=user_id,
+            amount_units=0,
+            amount_total_cents=amount_total_cents,
+            currency=currency,
+        )
+        return {"ok": True}
+
+    if purpose != "top_up":
+        await record_creem_event(
+            session,
+            creem_event_id=creem_event_id,
+            event_type=event_type,
+            status="processed",
+            raw_payload=payload,
+            org_id=org_id,
+            user_id=user_id,
+            amount_units=0,
+            amount_total_cents=amount_total_cents,
+            currency=currency,
+        )
+        return {"ok": True}
+
+    expected_product_id = (settings.creem_product_id or "").strip()
+    if expected_product_id == "" or not product_id or product_id != expected_product_id:
+        await record_creem_event(
+            session,
+            creem_event_id=creem_event_id,
+            event_type=event_type,
+            status="failed",
+            raw_payload=payload,
+            org_id=org_id,
+            user_id=user_id,
+            amount_units=0,
+            amount_total_cents=amount_total_cents,
+            currency=currency,
+        )
+        return {"ok": True}
+
+    if currency != "USD":
+        await mark_billing_topup_failed(
+            session,
+            request_id=request_id.strip(),
+            checkout_id=checkout_id,
+            order_id=order_id,
+            currency=currency,
+            amount_total_cents=amount_total_cents,
+        )
+        await record_creem_event(
+            session,
+            creem_event_id=creem_event_id,
+            event_type=event_type,
+            status="failed",
+            raw_payload=payload,
+            org_id=org_id,
+            user_id=user_id,
+            amount_units=0,
+            amount_total_cents=amount_total_cents,
+            currency=currency,
+        )
+        return {"ok": True}
+
+    topup = await complete_billing_topup(
+        session,
+        request_id=request_id.strip(),
+        checkout_id=checkout_id,
+        order_id=order_id,
+        currency=currency,
+        amount_total_cents=amount_total_cents,
+    )
+    if not topup:
+        await record_creem_event(
+            session,
+            creem_event_id=creem_event_id,
+            event_type=event_type,
+            status="failed",
+            raw_payload=payload,
+            org_id=org_id,
+            user_id=user_id,
+            amount_units=0,
+            amount_total_cents=amount_total_cents,
+            currency=currency,
+        )
+        return {"ok": True}
+
+    await record_creem_event(
+        session,
+        creem_event_id=creem_event_id,
+        event_type=event_type,
+        status="processed",
+        raw_payload=payload,
+        org_id=topup.org_id,
+        user_id=topup.user_id,
+        amount_units=int(topup.units),
+        amount_total_cents=amount_total_cents,
+        currency=currency,
+    )
+    return {"ok": True}
 
 
 @router.get("/billing/ledger", response_model=BillingLedgerListResponse)

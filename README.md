@@ -17,7 +17,7 @@ This repo contains:
 - API Keys: one-click create (auto name), rename anytime, revoke/restore/delete; masked by default; **copy full key anytime**; last used + total spend
 - Models: list available models + input/output prices (priced in $/M tokens; UI shows as `$X`)
 - Logs: model/time/tokens/latency/TTFT/TPS/cost/source IP for every request
-- Billing: balance + balance adjustment history
+- Billing: top up API credits (Creem) + balance history
 - Profile: account info + delete account
 
 **Admin**
@@ -109,6 +109,15 @@ docker compose up -d --build
 - Set `RESEND_API_KEY` and `RESEND_FROM_EMAIL`
 - `EMAIL_VERIFICATION_REQUIRED=true` enforces verification on auth flows
 - `EMAIL_VERIFICATION_TTL_MINUTES` controls code TTL (default `10`)
+
+## Billing Top-ups (Creem)
+
+Set env vars (backend):
+- `CREEM_API_KEY`, `CREEM_PRODUCT_ID`, `CREEM_WEBHOOK_SECRET`
+- `APP_PUBLIC_URL` (e.g. `http://localhost:3000`, used for checkout `success_url`)
+
+Creem Webhook URL should point to the console:
+- `POST <APP_PUBLIC_URL>/api/webhook/creem` (use a public tunnel in dev if needed)
 
 ## Deployment (Docker Images + Docker Hub)
 

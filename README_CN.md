@@ -17,7 +17,7 @@ Uni API Web 是一个完整的 **LLM API 控制台 + 网关后端**：账号体�
 - 密钥：一键创建（自动命名），可随时重命名；撤销/恢复/删除；默认掩码；**随时可复制完整密钥**；显示上次使用与总消费
 - 模型：展示当前账号可用模型与输入/输出价格（按 $/M tokens 计费；列表显示为 `$X`）
 - 日志：每次请求的模型、时间、输入/输出 token、总时长、首字时长、TPS、花费、来源 IP
-- 账单：余额 + 余额变更历史（当前仅包含管理员调整）
+- 账单：余额充值（Creem）+ 余额变更历史
 - Profile：账号信息 + 注销账号
 
 **管理员侧**
@@ -109,6 +109,15 @@ docker compose up -d --build
 - 设置 `RESEND_API_KEY` 与 `RESEND_FROM_EMAIL`
 - `EMAIL_VERIFICATION_REQUIRED=true` 时注册/登录会要求邮箱验证码
 - `EMAIL_VERIFICATION_TTL_MINUTES` 调整验证码有效期（默认 `10` 分钟）
+
+## 余额充值（Creem）
+
+后端需要配置环境变量：
+- `CREEM_API_KEY`、`CREEM_PRODUCT_ID`、`CREEM_WEBHOOK_SECRET`
+- `APP_PUBLIC_URL`（例如 `http://localhost:3000`，用于生成 checkout 的 `success_url`）
+
+Creem Webhook URL 需要指向前端（再薄转发到后端校验签名）：
+- `POST <APP_PUBLIC_URL>/api/webhook/creem`（本地开发如需接收回调，请使用可访问的公网隧道）
 
 ## 部署（镜像 + Docker Hub）
 

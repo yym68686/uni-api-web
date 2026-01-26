@@ -25,5 +25,11 @@ class Settings(BaseSettings):
     email_verification_ttl_minutes: int = 10
     email_verification_required: bool = True
 
+    # Creem (billing top-ups)
+    creem_api_key: str = ""
+    creem_product_id: str = ""
+    creem_webhook_secret: str = ""
+    app_public_url: str = "http://localhost:3000"
+
 
 settings = Settings()

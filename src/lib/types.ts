@@ -330,3 +330,15 @@ export interface BillingLedgerItem {
 export interface BillingLedgerListResponse {
   items: BillingLedgerItem[];
 }
+
+export interface BillingTopupCheckoutResponse {
+  checkoutUrl: string;
+  requestId: string;
+}
+
+export interface BillingTopupStatusResponse {
+  requestId: string;
+  status: string;
+  units: number;
+  newBalance?: number | null;
+}

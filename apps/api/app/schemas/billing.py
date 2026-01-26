@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictInt
 
 
 class BillingLedgerItem(BaseModel):
@@ -14,3 +14,18 @@ class BillingLedgerItem(BaseModel):
 class BillingLedgerListResponse(BaseModel):
     items: list[BillingLedgerItem]
 
+
+class BillingTopupCheckoutRequest(BaseModel):
+    amount_usd: StrictInt = Field(alias="amountUsd", ge=5, le=5000)
+
+
+class BillingTopupCheckoutResponse(BaseModel):
+    checkout_url: str = Field(alias="checkoutUrl")
+    request_id: str = Field(alias="requestId")
+
+
+class BillingTopupStatusResponse(BaseModel):
+    request_id: str = Field(alias="requestId")
+    status: str
+    units: int
+    new_balance: int | None = Field(default=None, alias="newBalance")
