@@ -3,6 +3,7 @@ import {
   ArrowRight,
   BadgeCheck,
   BookOpen,
+  CreditCard,
   KeyRound,
   Layers3,
   LineChart,
@@ -65,6 +66,9 @@ export default async function LandingPage() {
             </a>
             <a href="#security" className="transition-colors hover:text-foreground">
               {t(locale, "landing.nav.security")}
+            </a>
+            <a href="#pricing" className="transition-colors hover:text-foreground">
+              {t(locale, "landing.nav.pricing")}
             </a>
             <a href="#docs" className="transition-colors hover:text-foreground">
               {t(locale, "landing.nav.docs")}
@@ -210,6 +214,9 @@ export default async function LandingPage() {
                       <span className="truncate">deepseek-chat</span>
                       <span>ttft 280ms · tps 55.4 · $0.0007</span>
                     </div>
+                    <div className="border-t border-border/70 pt-2 text-[11px] leading-relaxed">
+                      {t(locale, "landing.mock.disclaimer")}
+                    </div>
                   </div>
                 </div>
 
@@ -322,6 +329,36 @@ export default async function LandingPage() {
               <div className="rounded-xl border border-border bg-background/35 p-4">
                 <div className="font-medium text-foreground">{t(locale, "landing.security.gateway.title")}</div>
                 <div className="mt-1">{t(locale, "landing.security.gateway.desc")}</div>
+              </div>
+            </CardContent>
+          </Card>
+        </section>
+
+        <section id="pricing" className="uai-cv-auto mt-10 sm:mt-12">
+          <Card className="rounded-2xl border-border bg-card/40">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <CreditCard className="h-5 w-5 text-primary" />
+                {t(locale, "landing.section.pricing.title")}
+              </CardTitle>
+              <CardDescription>{t(locale, "landing.section.pricing.desc")}</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-3 text-sm text-muted-foreground sm:grid-cols-3">
+              <div className="rounded-xl border border-border bg-background/35 p-4">
+                <div className="font-medium text-foreground">{t(locale, "landing.pricing.rate.title")}</div>
+                <div className="mt-2 font-mono text-sm tabular-nums text-foreground">
+                  {t(locale, "landing.pricing.rate.desc")}
+                </div>
+              </div>
+              <div className="rounded-xl border border-border bg-background/35 p-4">
+                <div className="font-medium text-foreground">{t(locale, "landing.pricing.limits.title")}</div>
+                <div className="mt-2 font-mono text-sm tabular-nums text-foreground">
+                  {t(locale, "landing.pricing.limits.desc")}
+                </div>
+              </div>
+              <div className="rounded-xl border border-border bg-background/35 p-4">
+                <div className="font-medium text-foreground">{t(locale, "landing.pricing.how.title")}</div>
+                <div className="mt-2">{t(locale, "landing.pricing.how.desc")}</div>
               </div>
             </CardContent>
           </Card>

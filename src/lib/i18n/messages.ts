@@ -35,6 +35,7 @@ const en = {
 
   "landing.nav.features": "Features",
   "landing.nav.security": "Security",
+  "landing.nav.pricing": "Pricing",
   "landing.nav.docs": "Docs",
   "landing.openDashboard": "Open dashboard",
   "landing.signIn": "Sign in",
@@ -78,6 +79,8 @@ const en = {
   "landing.mock.requestLog": "Request log",
   "landing.mock.metrics": "TTFT / TPS / Cost",
   "landing.mock.gateway": "All traffic through one gateway.",
+  "landing.mock.disclaimer":
+    "Model names are used for compatibility identification. This product is independent and not affiliated with or endorsed by Google, Anthropic, or DeepSeek.",
 
   "landing.section.security.title": "Security by default",
   "landing.section.security.desc": "Email verification, user bans, and strict permission boundaries.",
@@ -87,6 +90,14 @@ const en = {
   "landing.security.role.desc": "Owner protection: admins can't ban/delete beyond authority.",
   "landing.security.gateway.title": "Gateway isolation",
   "landing.security.gateway.desc": "Upstream API keys never reach the frontend; a single gateway exit.",
+  "landing.section.pricing.title": "Pricing",
+  "landing.section.pricing.desc": "Simple USD credits with clear limits.",
+  "landing.pricing.rate.title": "Unit price",
+  "landing.pricing.rate.desc": "$1 = 1 API Credit (USD).",
+  "landing.pricing.limits.title": "Top-up limits",
+  "landing.pricing.limits.desc": "Minimum $5, maximum $5000 (integer USD).",
+  "landing.pricing.how.title": "How it works",
+  "landing.pricing.how.desc": "Credits are used to pay for API usage. Model pricing is shown in the Console after sign-in.",
   "landing.section.docs.title": "Next steps",
   "landing.section.docs.desc": "3 steps: register → create key → start calling.",
   "landing.section.docs.body":
@@ -164,7 +175,7 @@ const en = {
   "logs.table.ip": "IP",
 
   "billing.title": "Billing",
-  "billing.subtitle": "Top up your credits and review balance history.",
+  "billing.subtitle": "Top up your credits and review balance history. Support: support@0-0.pro",
   "billing.kpi.balance": "Balance",
   "billing.kpi.balanceHint": "Available now",
   "billing.card.title": "Balance history",
@@ -620,6 +631,7 @@ const zhCN: Record<MessageKey, string> = {
 
   "landing.nav.features": "特性",
   "landing.nav.security": "安全",
+  "landing.nav.pricing": "价格",
   "landing.nav.docs": "文档",
   "landing.openDashboard": "打开控制台",
   "landing.signIn": "登录",
@@ -662,6 +674,8 @@ const zhCN: Record<MessageKey, string> = {
   "landing.mock.requestLog": "请求日志",
   "landing.mock.metrics": "TTFT / TPS / 花费",
   "landing.mock.gateway": "所有流量统一走网关。",
+  "landing.mock.disclaimer":
+    "模型名称仅用于说明兼容性。本产品为独立服务，与 Google / Anthropic / DeepSeek 无关联亦未获其背书。",
 
   "landing.section.security.title": "默认安全",
   "landing.section.security.desc": "邮箱验证码、禁用用户、权限边界。",
@@ -671,6 +685,14 @@ const zhCN: Record<MessageKey, string> = {
   "landing.security.role.desc": "Owner 保护，管理员不可越权封禁/删除。",
   "landing.security.gateway.title": "网关隔离",
   "landing.security.gateway.desc": "上游 API Key 不返回前端，统一网关出口。",
+  "landing.section.pricing.title": "价格",
+  "landing.section.pricing.desc": "简单清晰的美元 Credits 计费。",
+  "landing.pricing.rate.title": "单价",
+  "landing.pricing.rate.desc": "$1 = 1 API Credit（USD）",
+  "landing.pricing.limits.title": "充值范围",
+  "landing.pricing.limits.desc": "最小 $5，最大 $5000（整数美元）",
+  "landing.pricing.how.title": "如何计费",
+  "landing.pricing.how.desc": "Credits 用于支付 API 调用费用；模型单价请在登录后的控制台查看。",
   "landing.section.docs.title": "下一步",
   "landing.section.docs.desc": "三步走：注册 → 创建 Key → 开始调用。",
   "landing.section.docs.body":
@@ -748,7 +770,7 @@ const zhCN: Record<MessageKey, string> = {
   "logs.table.ip": "来源 IP",
 
   "billing.title": "账单",
-  "billing.subtitle": "充值 API Credits，并查看余额变更历史。",
+  "billing.subtitle": "充值 API Credits，并查看余额变更历史。如需帮助：support@0-0.pro",
   "billing.kpi.balance": "余额",
   "billing.kpi.balanceHint": "当前可用",
   "billing.card.title": "余额变更历史",
