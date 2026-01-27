@@ -19,7 +19,7 @@ import { mutateSwrLite, useSwrLite } from "@/lib/swr-lite";
 import type { BillingLedgerItem, BillingLedgerListResponse, BillingTopupCheckoutResponse, BillingTopupStatusResponse } from "@/lib/types";
 import type { Locale, MessageKey, MessageVars } from "@/lib/i18n/messages";
 import { cn } from "@/lib/utils";
-import { BillingPageSkeleton } from "./billing-skeleton";
+import { BillingContentSkeleton } from "./billing-skeleton";
 
 function isBillingLedgerListResponse(value: unknown): value is BillingLedgerListResponse {
   if (!value || typeof value !== "object") return false;
@@ -267,7 +267,7 @@ export function BillingContentClient({
     setBalanceOverrideUsd(null);
   }, [balanceOverrideUsd, ledgerBalanceUsd]);
 
-  if (shouldShowSkeleton) return <BillingPageSkeleton />;
+  if (shouldShowSkeleton) return <BillingContentSkeleton topupEnabled={topupEnabled} />;
 
   async function onSubmit(values: TopupFormValues) {
     try {

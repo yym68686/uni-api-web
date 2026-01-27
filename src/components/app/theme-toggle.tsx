@@ -32,10 +32,7 @@ interface ThemeToggleProps {
 }
 
 export function ThemeToggle({ className }: ThemeToggleProps) {
-  const [theme, setTheme] = React.useState<Theme>(() => {
-    if (typeof document === "undefined") return "dark";
-    return document.documentElement.classList.contains("dark") ? "dark" : "light";
-  });
+  const [theme, setTheme] = React.useState<Theme>("dark");
   const buttonRef = React.useRef<HTMLButtonElement | null>(null);
   const { t } = useI18n();
 
@@ -49,6 +46,7 @@ export function ThemeToggle({ className }: ThemeToggleProps) {
   }
 
   React.useEffect(() => {
+    setTheme(document.documentElement.classList.contains("dark") ? "dark" : "light");
     applyViewTransitionMaskVariant();
   }, []);
 

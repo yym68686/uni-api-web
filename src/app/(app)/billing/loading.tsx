@@ -15,14 +15,7 @@ export default function Loading() {
   const { locale, t } = useI18n();
   const key = billingLedgerListApiPath(PAGE_SIZE, 0);
   const cached = peekSwrLite<BillingLedgerItem[]>(key);
-  if (cached === undefined) {
-    return (
-      <div className="space-y-6">
-        <PageHeader title={t("billing.title")} description={t("billing.subtitle")} />
-        <BillingPageSkeleton />
-      </div>
-    );
-  }
+  if (cached === undefined) return <BillingPageSkeleton />;
 
   return (
     <div className="space-y-6">
@@ -31,7 +24,7 @@ export default function Loading() {
         locale={locale}
         initialItems={cached}
         pageSize={PAGE_SIZE}
-        topupEnabled={false}
+        topupEnabled={true}
         autoRevalidate={false}
       />
     </div>

@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { Boxes, CreditCard, KeyRound, LayoutDashboard, Megaphone, PlugZap, ScrollText, Settings, SlidersHorizontal, Users, type LucideIcon } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { setPendingPathname } from "@/lib/navigation-intent";
 import { BrandWordmark } from "@/components/brand/wordmark";
 import { useI18n } from "@/components/i18n/i18n-provider";
 import type { MessageKey } from "@/lib/i18n/messages";
@@ -62,7 +63,19 @@ export function AppSidebarContent({ appName, userRole, onNavigate }: AppSidebarC
               <Link
                 key={item.href}
                 href={item.href}
-                onClick={onNavigate}
+                onPointerDown={(e) => {
+                  if (e.button !== 0) return;
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                  setPendingPathname(item.href);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter" && e.key !== " ") return;
+                  setPendingPathname(item.href);
+                }}
+                onClick={() => {
+                  setPendingPathname(item.href);
+                  onNavigate?.();
+                }}
                 className={cn(
                   "flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium",
                   "transition-colors",
@@ -90,7 +103,19 @@ export function AppSidebarContent({ appName, userRole, onNavigate }: AppSidebarC
                   key={item.href}
                   href={item.href}
                   prefetch={false}
-                  onClick={onNavigate}
+                  onPointerDown={(e) => {
+                    if (e.button !== 0) return;
+                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                    setPendingPathname(item.href);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter" && e.key !== " ") return;
+                    setPendingPathname(item.href);
+                  }}
+                  onClick={() => {
+                    setPendingPathname(item.href);
+                    onNavigate?.();
+                  }}
                   onMouseEnter={() => router.prefetch(item.href)}
                   onFocus={() => router.prefetch(item.href)}
                   onTouchStart={() => router.prefetch(item.href)}

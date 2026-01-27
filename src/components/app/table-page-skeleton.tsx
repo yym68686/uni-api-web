@@ -1,0 +1,57 @@
+"use client";
+
+import { Card, CardContent } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
+
+interface SkeletonProps {
+  className: string;
+}
+
+function Skeleton({ className }: SkeletonProps) {
+  return <div className={cn("animate-pulse rounded-lg bg-muted/40", className)} />;
+}
+
+export function TableContentSkeleton() {
+  return (
+    <Card>
+      <CardContent className="p-0">
+        <div className="flex items-center gap-2 border-b border-border px-4 py-4 sm:px-6">
+          <Skeleton className="h-4 w-40" />
+        </div>
+        <div className="grid grid-cols-8 gap-3 border-b border-border px-4 py-3 sm:px-6">
+          {Array.from({ length: 8 }).map((_, idx) => (
+            <Skeleton key={idx} className="h-4 w-16" />
+          ))}
+        </div>
+        <div className="space-y-3 p-4 sm:px-6">
+          {Array.from({ length: 10 }).map((_, idx) => (
+            <div key={idx} className="grid grid-cols-8 items-center gap-3">
+              {Array.from({ length: 8 }).map((__, jdx) => (
+                <Skeleton key={jdx} className="h-4 w-16" />
+              ))}
+            </div>
+          ))}
+        </div>
+        <div className="flex justify-center border-t border-border py-4">
+          <Skeleton className="h-9 w-32 rounded-xl" />
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+export function TablePageSkeleton() {
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="space-y-2">
+          <Skeleton className="h-7 w-24" />
+          <Skeleton className="h-4 w-[560px] max-w-full" />
+        </div>
+        <Skeleton className="h-10 w-40 rounded-xl" />
+      </div>
+      <TableContentSkeleton />
+    </div>
+  );
+}
+

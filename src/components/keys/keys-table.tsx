@@ -8,6 +8,7 @@ import type { ApiKeyRevealResponse } from "@/lib/types";
 import type { ApiKeyItem } from "@/lib/types";
 import { formatUsd } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { ClientDateTime } from "@/components/common/client-datetime";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -63,23 +64,6 @@ export function KeysTable({
   const [renameTarget, setRenameTarget] = React.useState<ApiKeyItem | null>(null);
   const [renameValue, setRenameValue] = React.useState("");
   const [renamingId, setRenamingId] = React.useState<string | null>(null);
-
-  const dateTimeFormatter = React.useMemo(() => {
-    return new Intl.DateTimeFormat(locale, {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit"
-    });
-  }, [locale]);
-
-  function formatDateTime(value?: string) {
-    if (!value) return "—";
-    const dt = new Date(value);
-    if (Number.isNaN(dt.getTime())) return "—";
-    return dateTimeFormatter.format(dt);
-  }
 
   async function toggleRevoked(id: string, revoked: boolean) {
     setRevokingId(id);
@@ -222,14 +206,14 @@ export function KeysTable({
                         </Tooltip>
                       </div>
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground font-mono tabular-nums">
-                      {formatDateTime(k.lastUsedAt)}
+                    <TableCell className="text-xs text-muted-foreground">
+                      <ClientDateTime value={k.lastUsedAt} locale={locale} />
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground font-mono tabular-nums">
                       {formatSpendUsd(k.spendUsd)}
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground font-mono tabular-nums">
-                      {formatDateTime(k.createdAt)}
+                    <TableCell className="text-xs text-muted-foreground">
+                      <ClientDateTime value={k.createdAt} locale={locale} />
                     </TableCell>
                     <TableCell>
                       {revoked ? (
@@ -240,7 +224,7 @@ export function KeysTable({
                     </TableCell>
                     <TableCell className="text-right">
                       <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
+                        <DropdownMenuTrigger asChild id={`keys-actions-${k.id}`}>
                           <Button
                             variant="ghost"
                             size="icon"

@@ -4,6 +4,8 @@ import * as React from "react";
 
 type Key = string;
 
+const IS_BROWSER = typeof window !== "undefined";
+
 interface CacheEntry<T> {
   data: T | undefined;
   error: unknown;
@@ -17,6 +19,17 @@ interface CacheEntry<T> {
 const store = new Map<Key, CacheEntry<unknown>>();
 
 function getEntry<T>(key: Key): CacheEntry<T> {
+  if (!IS_BROWSER) {
+    return {
+      data: undefined,
+      error: undefined,
+      promise: null,
+      fetchedAt: 0,
+      version: 0,
+      fetcher: null,
+      listeners: new Set()
+    };
+  }
   const existing = store.get(key) as CacheEntry<T> | undefined;
   if (existing) return existing;
 
@@ -34,6 +47,7 @@ function getEntry<T>(key: Key): CacheEntry<T> {
 }
 
 export function peekSwrLite<T>(key: Key): T | undefined {
+  if (!IS_BROWSER) return undefined;
   const existing = store.get(key) as CacheEntry<T> | undefined;
   return existing?.data;
 }
@@ -49,6 +63,7 @@ const focusRegistry = new Map<Key, Set<FocusRevalidate>>();
 let focusListenerAttached = false;
 
 function handleFocus() {
+  if (!IS_BROWSER) return;
   for (const validators of focusRegistry.values()) {
     for (const revalidate of validators) {
       void revalidate();
@@ -57,10 +72,12 @@ function handleFocus() {
 }
 
 function handleVisibilityChange() {
+  if (!IS_BROWSER) return;
   if (document.visibilityState === "visible") handleFocus();
 }
 
 function ensureFocusListener() {
+  if (!IS_BROWSER) return;
   if (focusListenerAttached) return;
   focusListenerAttached = true;
 
@@ -69,6 +86,7 @@ function ensureFocusListener() {
 }
 
 function maybeCleanupFocusListener() {
+  if (!IS_BROWSER) return;
   if (!focusListenerAttached) return;
   if (focusRegistry.size > 0) return;
   focusListenerAttached = false;
@@ -242,6 +260,7 @@ export async function mutateSwrLite<T>(
   nextData?: T | Promise<T> | ((current: T | undefined) => T | Promise<T>),
   opts?: { revalidate?: boolean; dedupingIntervalMs?: number }
 ): Promise<T | undefined> {
+  if (!IS_BROWSER) return undefined;
   const entry = getEntry<T>(key);
   const dedupingIntervalMs = opts?.dedupingIntervalMs ?? 2000;
 

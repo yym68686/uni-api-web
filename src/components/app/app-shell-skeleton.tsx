@@ -1,3 +1,7 @@
+"use client";
+
+import * as React from "react";
+
 import { cn } from "@/lib/utils";
 
 interface SkeletonProps {
@@ -8,7 +12,28 @@ function Skeleton({ className }: SkeletonProps) {
   return <div className={cn("animate-pulse rounded-lg bg-muted/40", className)} />;
 }
 
-export function AppShellSkeleton() {
+interface AppShellSkeletonProps {
+  children?: React.ReactNode;
+}
+
+function DefaultContentSkeleton() {
+  return (
+    <div className="space-y-6">
+      <div className="space-y-2">
+        <Skeleton className="h-8 w-52" />
+        <Skeleton className="h-4 w-[520px] max-w-full" />
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {Array.from({ length: 3 }).map((_, idx) => (
+          <Skeleton key={idx} className="h-32 rounded-2xl" />
+        ))}
+      </div>
+      <Skeleton className="h-72 rounded-2xl" />
+    </div>
+  );
+}
+
+export function AppShellSkeleton({ children }: AppShellSkeletonProps) {
   return (
     <div className="min-h-dvh bg-background">
       <aside className="fixed inset-y-0 left-0 hidden w-64 border-r border-border bg-sidebar/40 p-4 sm:block">
@@ -32,21 +57,11 @@ export function AppShellSkeleton() {
         </header>
 
         <main id="main" className="min-w-0 flex-1 p-4 sm:p-6">
-          <div className="mx-auto w-full max-w-6xl space-y-6">
-            <div className="space-y-2">
-              <Skeleton className="h-8 w-52" />
-              <Skeleton className="h-4 w-[520px] max-w-full" />
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {Array.from({ length: 3 }).map((_, idx) => (
-                <Skeleton key={idx} className="h-32 rounded-2xl" />
-              ))}
-            </div>
-            <Skeleton className="h-72 rounded-2xl" />
+          <div className="mx-auto w-full max-w-6xl">
+            {children ?? <DefaultContentSkeleton />}
           </div>
         </main>
       </div>
     </div>
   );
 }
-

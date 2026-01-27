@@ -1,5 +1,6 @@
 "use client";
 
+import * as React from "react";
 import { Activity, CreditCard, KeyRound, Wallet } from "lucide-react";
 
 import { StatsCard } from "@/components/app/stats-card";
@@ -68,6 +69,8 @@ export function DashboardKpisClient({
   initialUsage,
   initialKeys
 }: DashboardKpisClientProps) {
+  const [hydrated, setHydrated] = React.useState(false);
+
   const usageSwr = useSwrLite<UsageResponse>(API_PATHS.usage, fetchUsage, {
     fallbackData: initialUsage,
     revalidateOnFocus: true
@@ -78,8 +81,12 @@ export function DashboardKpisClient({
     revalidateOnFocus: true
   });
 
-  const usage = usageSwr.data ?? initialUsage;
-  const keys = keysSwr.data ?? initialKeys;
+  React.useEffect(() => {
+    setHydrated(true);
+  }, []);
+
+  const usage = hydrated ? (usageSwr.data ?? initialUsage) : initialUsage;
+  const keys = hydrated ? (keysSwr.data ?? initialKeys) : initialKeys;
   const activeKeys = keys.filter((k) => !k.revokedAt).length;
 
   const { requests7d } = buildDaily7d(usage.daily);
@@ -118,4 +125,3 @@ export function DashboardKpisClient({
     </div>
   );
 }
-

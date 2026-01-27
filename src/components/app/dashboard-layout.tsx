@@ -1,8 +1,10 @@
 import { AppSidebar } from "@/components/app/app-sidebar";
 import { AppTopbar } from "@/components/app/app-topbar";
 import { cookies } from "next/headers";
+import { Suspense } from "react";
 
 import { LOCALE_COOKIE_NAME, normalizeLocale, type LocaleMode } from "@/lib/i18n/messages";
+import { NavigationIntentCleaner } from "@/components/app/navigation-intent-cleaner";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -18,11 +20,14 @@ export async function DashboardLayout({ children, userName, userRole, appName }:
 
   return (
     <div className="min-h-dvh bg-background">
+      <NavigationIntentCleaner />
       <AppSidebar appName={appName} userRole={userRole} />
       <div className="flex min-h-dvh min-w-0 flex-col sm:pl-64">
         <AppTopbar appName={appName} userName={userName} userRole={userRole} initialLocaleMode={initialLocaleMode} />
         <main id="main" className="min-w-0 flex-1 p-4 sm:p-6">
-          <div className="mx-auto w-full max-w-6xl">{children}</div>
+          <Suspense fallback={null}>
+            <div className="mx-auto w-full max-w-6xl">{children}</div>
+          </Suspense>
         </main>
       </div>
     </div>

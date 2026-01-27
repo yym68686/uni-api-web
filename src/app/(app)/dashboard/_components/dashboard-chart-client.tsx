@@ -1,5 +1,7 @@
 "use client";
 
+import * as React from "react";
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { UsageAreaChartLazy } from "@/components/charts/usage-area-chart-lazy";
 import { API_PATHS } from "@/lib/api-paths";
@@ -29,12 +31,17 @@ interface DashboardChartClientProps {
 }
 
 export function DashboardChartClient({ locale, initialUsage }: DashboardChartClientProps) {
+  const [hydrated, setHydrated] = React.useState(false);
   const { data } = useSwrLite<UsageResponse>(API_PATHS.usage, fetchUsage, {
     fallbackData: initialUsage,
     revalidateOnFocus: true
   });
 
-  const usage = data ?? initialUsage;
+  React.useEffect(() => {
+    setHydrated(true);
+  }, []);
+
+  const usage = hydrated ? (data ?? initialUsage) : initialUsage;
   const last7Days = usage.daily.length > 0 ? usage.daily.slice(-7) : usage.daily;
 
   return (
@@ -49,4 +56,3 @@ export function DashboardChartClient({ locale, initialUsage }: DashboardChartCli
     </Card>
   );
 }
-
