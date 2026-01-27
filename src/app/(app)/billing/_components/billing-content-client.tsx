@@ -92,10 +92,17 @@ interface BillingContentClientProps {
   locale: Locale;
   initialItems: BillingLedgerItem[] | null;
   pageSize: number;
+  topupEnabled: boolean;
   autoRevalidate?: boolean;
 }
 
-export function BillingContentClient({ locale, initialItems, pageSize, autoRevalidate = true }: BillingContentClientProps) {
+export function BillingContentClient({
+  locale,
+  initialItems,
+  pageSize,
+  topupEnabled,
+  autoRevalidate = true
+}: BillingContentClientProps) {
   const { t } = useI18n();
   const searchParams = useSearchParams();
 
@@ -279,138 +286,138 @@ export function BillingContentClient({ locale, initialItems, pageSize, autoReval
           value={formatUsdFixed2(balanceUsd, locale)}
           trend={t("billing.kpi.balanceHint")}
           icon={CreditCard}
-          className="lg:col-span-2"
+          className={cn(topupEnabled ? "lg:col-span-2" : "sm:col-span-2 lg:col-span-4")}
         />
 
-        <Card className="lg:col-span-2">
-          <CardHeader className="flex flex-row items-start justify-between gap-3">
-            <div className="space-y-1">
-              <CardTitle>{t("billing.topup.title")}</CardTitle>
-              <CardDescription>{t("billing.topup.desc")}</CardDescription>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <form
-              className="space-y-3"
-              onSubmit={(e) => {
-                void form.handleSubmit(onSubmit)(e);
-              }}
-            >
-              <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-                <div className="order-1 space-y-2">
-                  <div className="text-sm font-medium text-foreground">{t("billing.topup.amountLabel")}</div>
-                  <div className="relative">
-                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                      $
-                    </span>
-                    <Input
-                      inputMode="numeric"
-                      type="number"
-                      min={5}
-                      max={5000}
-                      step={1}
-                      className="pl-7"
-                      disabled={topupSubmitting}
-                      {...form.register("amountUsd", {
-                        setValueAs: (value) => {
-                          if (value == null || value === "") return 0;
-                          const parsed = Number(value);
-                          return Number.isFinite(parsed) ? parsed : 0;
-                        },
-                        validate: (value) => {
-                          const r = amountUsdSchema.safeParse(value);
-                          return r.success
-                            ? true
-                            : (r.error.issues[0]?.message ?? t("common.formInvalid"));
-                        }
-                      })}
-                    />
-                  </div>
-                </div>
-
-                <Button
-                  type="submit"
-                  className={cn(
-                    "order-3 rounded-xl sm:order-2 sm:self-end",
-                    "transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
-                  )}
-                  disabled={!form.formState.isValid || topupSubmitting || topupBlocking}
-                >
-                  {topupSubmitting ? (
-                    <>
-                      <span className="inline-flex animate-spin">
-                        <Loader2 className="h-4 w-4" />
-                      </span>
-                      {t("billing.topup.submitting")}
-                    </>
-                  ) : (
-                    <>
-                      <ArrowUpRight className="h-4 w-4" />
-                      {t("billing.topup.submit")}
-                    </>
-                  )}
-                </Button>
+        {topupEnabled ? (
+          <Card className="lg:col-span-2">
+            <CardHeader className="flex flex-row items-start justify-between gap-3">
+              <div className="space-y-1">
+                <CardTitle>{t("billing.topup.title")}</CardTitle>
+                <CardDescription>{t("billing.topup.desc")}</CardDescription>
               </div>
-              <p
-                className={cn(
-                  "order-2 text-xs",
-                  form.formState.errors.amountUsd ? "text-destructive" : "text-muted-foreground",
-                  "sm:order-3 sm:col-span-2"
-                )}
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <form
+                className="space-y-3"
+                onSubmit={(e) => {
+                  void form.handleSubmit(onSubmit)(e);
+                }}
               >
-                {form.formState.errors.amountUsd?.message ?? t("billing.topup.amountHelp")}
-              </p>
-
-              <div className="flex flex-wrap gap-2">
-                {presetAmounts.map((amount) => (
-                  <Button
-                    key={amount}
-                    type="button"
-                    variant="secondary"
-                    className="h-8 rounded-xl px-3 text-xs"
-                    onClick={() => form.setValue("amountUsd", amount, { shouldValidate: true })}
-                    disabled={topupSubmitting || topupBlocking}
-                  >
-                    ${amount}
-                  </Button>
-                ))}
-              </div>
-            </form>
-
-            {topupBlocking ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <span className="inline-flex animate-spin">
-                  <Loader2 className="h-4 w-4" />
-                </span>
-                {t("billing.topup.checking")}
-              </div>
-            ) : topupPending && trackedTopupRequestId ? (
-              <div className="flex items-start justify-between gap-4 rounded-xl border border-border bg-muted/10 p-4">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-foreground">{t("billing.topup.processing")}</span>
-                    <span className="font-mono text-xs text-muted-foreground">
-                      {trackedTopupRequestId.slice(0, 10)}…
-                    </span>
+                <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+                  <div className="order-1 space-y-2">
+                    <div className="text-sm font-medium text-foreground">{t("billing.topup.amountLabel")}</div>
+                    <div className="relative">
+                      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+                        $
+                      </span>
+                      <Input
+                        inputMode="numeric"
+                        type="number"
+                        min={5}
+                        max={5000}
+                        step={1}
+                        className="pl-7"
+                        disabled={topupSubmitting}
+                        {...form.register("amountUsd", {
+                          setValueAs: (value) => {
+                            if (value == null || value === "") return 0;
+                            const parsed = Number(value);
+                            return Number.isFinite(parsed) ? parsed : 0;
+                          },
+                          validate: (value) => {
+                            const r = amountUsdSchema.safeParse(value);
+                            return r.success ? true : (r.error.issues[0]?.message ?? t("common.formInvalid"));
+                          }
+                        })}
+                      />
+                    </div>
                   </div>
-                  <div className="text-sm text-muted-foreground">{t("billing.topup.processingDesc")}</div>
+
+                  <Button
+                    type="submit"
+                    className={cn(
+                      "order-3 rounded-xl sm:order-2 sm:self-end",
+                      "transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg"
+                    )}
+                    disabled={!form.formState.isValid || topupSubmitting || topupBlocking}
+                  >
+                    {topupSubmitting ? (
+                      <>
+                        <span className="inline-flex animate-spin">
+                          <Loader2 className="h-4 w-4" />
+                        </span>
+                        {t("billing.topup.submitting")}
+                      </>
+                    ) : (
+                      <>
+                        <ArrowUpRight className="h-4 w-4" />
+                        {t("billing.topup.submit")}
+                      </>
+                    )}
+                  </Button>
                 </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="shrink-0 rounded-xl"
-                  onClick={() => void recheckTopup()}
-                  disabled={checkingStatus}
+                <p
+                  className={cn(
+                    "order-2 text-xs",
+                    form.formState.errors.amountUsd ? "text-destructive" : "text-muted-foreground",
+                    "sm:order-3 sm:col-span-2"
+                  )}
                 >
-                  <span className={cn("inline-flex", checkingStatus ? "animate-spin" : null)}>
-                    {checkingStatus ? <Loader2 className="h-4 w-4" /> : <RefreshCw className="h-4 w-4" />}
+                  {form.formState.errors.amountUsd?.message ?? t("billing.topup.amountHelp")}
+                </p>
+
+                <div className="flex flex-wrap gap-2">
+                  {presetAmounts.map((amount) => (
+                    <Button
+                      key={amount}
+                      type="button"
+                      variant="secondary"
+                      className="h-8 rounded-xl px-3 text-xs"
+                      onClick={() => form.setValue("amountUsd", amount, { shouldValidate: true })}
+                      disabled={topupSubmitting || topupBlocking}
+                    >
+                      ${amount}
+                    </Button>
+                  ))}
+                </div>
+              </form>
+
+              {topupBlocking ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <span className="inline-flex animate-spin">
+                    <Loader2 className="h-4 w-4" />
                   </span>
-                  {checkingStatus ? t("billing.topup.checkingShort") : t("billing.topup.recheck")}
-                </Button>
-              </div>
-            ) : null}
-          </CardContent>
-        </Card>
+                  {t("billing.topup.checking")}
+                </div>
+              ) : topupPending && trackedTopupRequestId ? (
+                <div className="flex items-start justify-between gap-4 rounded-xl border border-border bg-muted/10 p-4">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-foreground">{t("billing.topup.processing")}</span>
+                      <span className="font-mono text-xs text-muted-foreground">
+                        {trackedTopupRequestId.slice(0, 10)}…
+                      </span>
+                    </div>
+                    <div className="text-sm text-muted-foreground">{t("billing.topup.processingDesc")}</div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="shrink-0 rounded-xl"
+                    onClick={() => void recheckTopup()}
+                    disabled={checkingStatus}
+                  >
+                    <span className={cn("inline-flex", checkingStatus ? "animate-spin" : null)}>
+                      {checkingStatus ? <Loader2 className="h-4 w-4" /> : <RefreshCw className="h-4 w-4" />}
+                    </span>
+                    {checkingStatus ? t("billing.topup.checkingShort") : t("billing.topup.recheck")}
+                  </Button>
+                </div>
+              ) : null}
+            </CardContent>
+          </Card>
+        ) : null}
       </div>
 
       <BillingTableClient initialItems={items} locale={locale} />

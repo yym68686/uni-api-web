@@ -72,6 +72,7 @@ from app.schemas.channels import (
 from app.schemas.admin_overview import AdminOverviewResponse
 from app.schemas.billing import (
     BillingLedgerListResponse,
+    BillingSettingsResponse,
     BillingTopupCheckoutRequest,
     BillingTopupCheckoutResponse,
     BillingTopupStatusResponse,
@@ -420,7 +421,10 @@ async def admin_settings(
     org = await session.get(Organization, membership.org_id)
     if not org:
         raise HTTPException(status_code=404, detail="not found")
-    return {"registrationEnabled": bool(org.registration_enabled)}
+    return {
+        "registrationEnabled": bool(getattr(org, "registration_enabled", True)),
+        "billingTopupEnabled": bool(getattr(org, "billing_topup_enabled", True)),
+    }
 
 
 @router.patch("/admin/settings", response_model=AdminSettingsResponse)
@@ -436,9 +440,15 @@ async def admin_update_settings(
         raise HTTPException(status_code=404, detail="not found")
     if payload.registration_enabled is not None:
         org.registration_enabled = bool(payload.registration_enabled)
+    if payload.billing_topup_enabled is not None:
+        org.billing_topup_enabled = bool(payload.billing_topup_enabled)
+    if payload.registration_enabled is not None or payload.billing_topup_enabled is not None:
         await session.commit()
         await session.refresh(org)
-    return {"registrationEnabled": bool(org.registration_enabled)}
+    return {
+        "registrationEnabled": bool(getattr(org, "registration_enabled", True)),
+        "billingTopupEnabled": bool(getattr(org, "billing_topup_enabled", True)),
+    }
 
 
 @router.get("/admin/overview", response_model=AdminOverviewResponse)
@@ -1783,6 +1793,12 @@ async def billing_topup_checkout(
     current_user=Depends(get_current_user),
     membership=Depends(get_current_membership),
 ) -> dict:
+    org = await session.get(Organization, membership.org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="not found")
+    if not bool(getattr(org, "billing_topup_enabled", True)):
+        raise HTTPException(status_code=403, detail="billing topup disabled")
+
     api_key = (settings.creem_api_key or "").strip()
     product_id = (settings.creem_product_id or "").strip()
     if api_key == "" or product_id == "":
@@ -1871,6 +1887,19 @@ async def billing_topup_checkout(
         raise HTTPException(status_code=502, detail="payment provider error")
 
     return {"checkoutUrl": checkout_url, "requestId": request_id}
+
+
+@router.get("/billing/settings", response_model=BillingSettingsResponse)
+async def billing_settings(
+    session: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+    membership=Depends(get_current_membership),
+) -> dict:
+    _ = current_user
+    org = await session.get(Organization, membership.org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="not found")
+    return {"billingTopupEnabled": bool(getattr(org, "billing_topup_enabled", True))}
 
 
 @router.get("/billing/topup/status", response_model=BillingTopupStatusResponse)

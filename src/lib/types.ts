@@ -219,10 +219,12 @@ export interface AdminModelsListResponse {
 
 export interface AdminSettingsResponse {
   registrationEnabled: boolean;
+  billingTopupEnabled: boolean;
 }
 
 export interface AdminSettingsUpdateRequest {
   registrationEnabled?: boolean;
+  billingTopupEnabled?: boolean;
 }
 
 export type AdminOverviewHealthLevel = "info" | "warning" | "destructive";

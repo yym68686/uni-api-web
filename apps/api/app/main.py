@@ -137,6 +137,21 @@ def create_app() -> FastAPI:
                 "ALTER TABLE IF EXISTS organizations "
                 "ALTER COLUMN registration_enabled SET NOT NULL"
             )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS organizations "
+                "ADD COLUMN IF NOT EXISTS billing_topup_enabled boolean"
+            )
+            await conn.exec_driver_sql(
+                "UPDATE organizations SET billing_topup_enabled = true WHERE billing_topup_enabled IS NULL"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS organizations "
+                "ALTER COLUMN billing_topup_enabled SET DEFAULT true"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS organizations "
+                "ALTER COLUMN billing_topup_enabled SET NOT NULL"
+            )
 
             await conn.exec_driver_sql(
                 "ALTER TABLE IF EXISTS announcements "

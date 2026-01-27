@@ -10,11 +10,20 @@ import { AdminSettingsPanel } from "./settings-panel";
 
 interface AdminSettingsResponse {
   registrationEnabled: boolean;
+  billingTopupEnabled: boolean;
 }
 
-function isAdminSettingsResponse(value: unknown): value is AdminSettingsResponse {
-  if (!value || typeof value !== "object") return false;
-  return typeof (value as { registrationEnabled?: unknown }).registrationEnabled === "boolean";
+function normalizeAdminSettingsResponse(value: unknown): AdminSettingsResponse | null {
+  if (!value || typeof value !== "object") return null;
+  const obj = value as Record<string, unknown>;
+
+  const registrationEnabled = obj.registrationEnabled ?? obj.registration_enabled;
+  if (typeof registrationEnabled !== "boolean") return null;
+
+  const billingTopupEnabledRaw = obj.billingTopupEnabled ?? obj.billing_topup_enabled;
+  const billingTopupEnabled = typeof billingTopupEnabledRaw === "boolean" ? billingTopupEnabledRaw : true;
+
+  return { registrationEnabled, billingTopupEnabled };
 }
 
 async function getAdminSettings() {
@@ -25,8 +34,7 @@ async function getAdminSettings() {
   });
   if (!res.ok) return null;
   const json: unknown = await res.json().catch(() => null);
-  if (!isAdminSettingsResponse(json)) return null;
-  return json;
+  return normalizeAdminSettingsResponse(json);
 }
 
 interface AdminSettingsContentProps {
@@ -56,7 +64,10 @@ export async function AdminSettingsContent({ locale }: AdminSettingsContentProps
   return (
     <Card>
       <CardContent className="p-6">
-        <AdminSettingsPanel initialRegistrationEnabled={settings.registrationEnabled} />
+        <AdminSettingsPanel
+          initialRegistrationEnabled={settings.registrationEnabled}
+          initialBillingTopupEnabled={settings.billingTopupEnabled}
+        />
       </CardContent>
     </Card>
   );

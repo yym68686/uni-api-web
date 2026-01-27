@@ -27,8 +27,13 @@ export default function Loading() {
   return (
     <div className="space-y-6">
       <PageHeader title={t("billing.title")} description={t("billing.subtitle")} />
-      <BillingContentClient locale={locale} initialItems={cached} pageSize={PAGE_SIZE} autoRevalidate={false} />
+      <BillingContentClient
+        locale={locale}
+        initialItems={cached}
+        pageSize={PAGE_SIZE}
+        topupEnabled={false}
+        autoRevalidate={false}
+      />
     </div>
   );
 }
-

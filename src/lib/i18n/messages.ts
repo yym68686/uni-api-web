@@ -356,6 +356,8 @@ const en = {
   "admin.settings.loadFailed": "Failed to load settings.",
   "admin.settings.registration.label": "Registration",
   "admin.settings.registration.desc": "Allow new users to create an account.",
+  "admin.settings.billingTopup.label": "Billing top-ups",
+  "admin.settings.billingTopup.desc": "Show the top-up card on Billing and allow users to create checkouts.",
   "admin.settings.toast.updated": "Settings updated",
   "admin.settings.toast.failed": "Update failed",
 
@@ -938,6 +940,8 @@ const zhCN: Record<MessageKey, string> = {
   "admin.settings.loadFailed": "加载设置失败。",
   "admin.settings.registration.label": "注册功能",
   "admin.settings.registration.desc": "允许新用户创建账号。",
+  "admin.settings.billingTopup.label": "充值功能",
+  "admin.settings.billingTopup.desc": "关闭后 Billing 页面不显示充值卡片，用户无法发起充值。",
   "admin.settings.toast.updated": "设置已更新",
   "admin.settings.toast.failed": "更新失败",
 

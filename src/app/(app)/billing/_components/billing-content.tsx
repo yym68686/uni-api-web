@@ -6,9 +6,14 @@ import { BillingContentClient } from "./billing-content-client";
 
 export const BILLING_PAGE_SIZE = 50;
 
+interface BillingSettingsResponse {
+  billingTopupEnabled: boolean;
+}
+
 interface BillingContentProps {
   locale: Locale;
   initialItems: BillingLedgerListResponse["items"];
+  topupEnabled: boolean;
   pageSize?: number;
 }
 
@@ -17,6 +22,11 @@ function isBillingLedgerListResponse(value: unknown): value is BillingLedgerList
   if (!("items" in value)) return false;
   const items = (value as { items?: unknown }).items;
   return Array.isArray(items);
+}
+
+function isBillingSettingsResponse(value: unknown): value is BillingSettingsResponse {
+  if (!value || typeof value !== "object") return false;
+  return typeof (value as { billingTopupEnabled?: unknown }).billingTopupEnabled === "boolean";
 }
 
 export async function getLedger(pageSize = BILLING_PAGE_SIZE) {
@@ -31,6 +41,20 @@ export async function getLedger(pageSize = BILLING_PAGE_SIZE) {
   return json.items;
 }
 
-export function BillingContent({ locale, initialItems, pageSize = BILLING_PAGE_SIZE }: BillingContentProps) {
-  return <BillingContentClient locale={locale} initialItems={initialItems} pageSize={pageSize} />;
+export async function getBillingSettings() {
+  const res = await fetch(buildBackendUrl("/billing/settings"), {
+    cache: "force-cache",
+    next: { tags: [CACHE_TAGS.adminSettings], revalidate: 30 },
+    headers: await getBackendAuthHeadersCached()
+  });
+  if (!res.ok) return null;
+  const json: unknown = await res.json().catch(() => null);
+  if (!isBillingSettingsResponse(json)) return null;
+  return json;
+}
+
+export function BillingContent({ locale, initialItems, topupEnabled, pageSize = BILLING_PAGE_SIZE }: BillingContentProps) {
+  return (
+    <BillingContentClient locale={locale} initialItems={initialItems} pageSize={pageSize} topupEnabled={topupEnabled} />
+  );
 }

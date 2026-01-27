@@ -15,6 +15,10 @@ class BillingLedgerListResponse(BaseModel):
     items: list[BillingLedgerItem]
 
 
+class BillingSettingsResponse(BaseModel):
+    billing_topup_enabled: bool = Field(alias="billingTopupEnabled")
+
+
 class BillingTopupCheckoutRequest(BaseModel):
     amount_usd: StrictInt = Field(alias="amountUsd", ge=5, le=5000)
 
