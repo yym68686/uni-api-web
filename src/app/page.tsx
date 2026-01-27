@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { headers } from "next/headers";
 import {
   ArrowRight,
   BadgeCheck,
@@ -10,7 +9,8 @@ import {
   ScrollText,
   Shield,
   Sparkles,
-  Zap
+  Zap,
+  Mail
 } from "lucide-react";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,12 +19,12 @@ import { SpotlightSurface } from "@/components/landing/spotlight-surface";
 import { cn } from "@/lib/utils";
 import { getAppName } from "@/lib/app-config";
 import { BrandWordmark } from "@/components/brand/wordmark";
-import { detectLocaleFromAcceptLanguage, type Locale, t } from "@/lib/i18n/messages";
+import { t } from "@/lib/i18n/messages";
+import { getRequestLocale } from "@/lib/i18n/server";
 
 export default async function LandingPage() {
   const appName = getAppName();
-  const h = await headers();
-  const locale: Locale = detectLocaleFromAcceptLanguage(h.get("accept-language"));
+  const locale = await getRequestLocale();
 
   return (
     <div className="relative min-h-dvh overflow-hidden bg-background">
@@ -349,9 +349,37 @@ export default async function LandingPage() {
         </section>
 
         <footer className="uai-cv-auto mt-10 border-t border-border pt-8 text-xs text-muted-foreground">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div>© {new Date().getUTCFullYear()} {appName}</div>
-            <div className="font-mono">{t(locale, "landing.footer.stack")}</div>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1">
+              <div>© {new Date().getUTCFullYear()} {appName}</div>
+              <div className="font-mono">{t(locale, "landing.footer.stack")}</div>
+            </div>
+
+            <div className="flex flex-col gap-2 sm:items-end">
+              <div className="flex flex-wrap items-center gap-3">
+                <Link
+                  href="/terms"
+                  className="transition-colors hover:text-foreground hover:underline underline-offset-4"
+                >
+                  {t(locale, "landing.footer.terms")}
+                </Link>
+                <span className="h-3 w-px bg-border/70" aria-hidden="true" />
+                <Link
+                  href="/privacy"
+                  className="transition-colors hover:text-foreground hover:underline underline-offset-4"
+                >
+                  {t(locale, "landing.footer.privacy")}
+                </Link>
+              </div>
+              <a
+                href="mailto:support@0-0.pro"
+                className="inline-flex items-center gap-2 font-mono transition-colors hover:text-foreground"
+              >
+                <Mail className="h-4 w-4 text-muted-foreground" />
+                <span className="text-muted-foreground">{t(locale, "landing.footer.support")}:</span>
+                <span>support@0-0.pro</span>
+              </a>
+            </div>
           </div>
         </footer>
       </main>

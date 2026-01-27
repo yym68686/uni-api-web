@@ -44,7 +44,7 @@ const en = {
     "Your LLM control center — calm, fast, and observable.",
   "landing.hero.lead":
     "Connect multiple model providers with one entrypoint. See usage and spend clearly, and audit every request. Even non-technical users can understand what happened and what it cost.",
-  "landing.pill.keys.label": "密钥",
+  "landing.pill.keys.label": "Keys",
   "landing.pill.spend.label": "Spend",
   "landing.pill.logs.label": "Logs",
   "landing.pill.keys.title": "Secure credentials",
@@ -92,6 +92,9 @@ const en = {
   "landing.section.docs.body":
     "Admins configure Channels and Model Config first; then team members create API keys and call `/v1/chat/completions`.",
   "landing.footer.stack": "OKLCH · shadcn/ui · Next.js",
+  "landing.footer.terms": "Terms",
+  "landing.footer.privacy": "Privacy",
+  "landing.footer.support": "Support",
   "landing.cta.openConsole": "Open console",
 
   "login.title": "Sign in",
@@ -339,7 +342,7 @@ const en = {
   "admin.users.table.group": "Group",
   "admin.users.table.status": "Status",
   "admin.users.table.balance": "Balance",
-  "admin.users.table.keys": "密钥",
+  "admin.users.table.keys": "Keys",
   "admin.users.table.sessions": "Sessions",
   "admin.users.table.lastLogin": "Last login",
   "admin.users.table.created": "Created",
@@ -671,6 +674,9 @@ const zhCN: Record<MessageKey, string> = {
   "landing.section.docs.body":
     "管理员先配置 Channels 与 Model Config；然后团队成员创建 API Key 即可调用 `/v1/chat/completions`。",
   "landing.footer.stack": "OKLCH · shadcn/ui · Next.js",
+  "landing.footer.terms": "服务条款",
+  "landing.footer.privacy": "隐私政策",
+  "landing.footer.support": "客服邮箱",
   "landing.cta.openConsole": "打开控制台",
 
   "login.title": "登录",
