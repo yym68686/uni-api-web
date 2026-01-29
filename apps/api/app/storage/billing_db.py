@@ -12,6 +12,7 @@ from app.models.balance_ledger_entry import BalanceLedgerEntry
 
 
 USD_MICROS = Decimal("1000000")
+USD_MICROS_PER_CENT = 10_000
 
 
 def _dt_iso(value: dt.datetime) -> str:
@@ -40,8 +41,8 @@ def stage_balance_adjustment_ledger_entry(
         user_id=user_id,
         actor_user_id=actor_user_id,
         entry_type=str(entry_type),
-        delta_usd_micros=int(delta) * 1_000_000,
-        balance_usd_micros=int(balance_after) * 1_000_000,
+        delta_usd_micros=int(delta) * USD_MICROS_PER_CENT,
+        balance_usd_micros=int(balance_after) * USD_MICROS_PER_CENT,
     )
     session.add(row)
 

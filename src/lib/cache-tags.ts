@@ -9,5 +9,6 @@ export const CACHE_TAGS = {
   adminUsers: "admin:users",
   adminChannels: "admin:channels",
   adminSettings: "admin:settings",
-  billingLedger: "billing:ledger"
+  billingLedger: "billing:ledger",
+  inviteSummary: "invite:summary"
 } as const;

@@ -11,6 +11,7 @@ const OAUTH_VERIFIER_COOKIE = "uai_oauth_verifier";
 const OAUTH_NEXT_COOKIE = "uai_oauth_next";
 const OAUTH_FROM_COOKIE = "uai_oauth_from";
 const OAUTH_MODE_COOKIE = "uai_oauth_mode";
+const OAUTH_REF_COOKIE = "uai_oauth_ref";
 
 function firstHeader(req: Request, name: string) {
   const raw = req.headers.get(name);
@@ -70,6 +71,7 @@ function extractErrorCode(json: unknown): string | null {
   if (detail === "registration disabled") return "registration_disabled";
   if (detail === "banned") return "banned";
   if (detail === "oauth already linked") return "oauth_already_linked";
+  if (detail === "invalid invite code") return "invalid_invite_code";
   return null;
 }
 
@@ -97,6 +99,7 @@ export async function GET(req: Request) {
   const nextPath = sanitizeNextPath(store.get(OAUTH_NEXT_COOKIE)?.value ?? "/dashboard");
   const fromPath = sanitizeFromPath(store.get(OAUTH_FROM_COOKIE)?.value ?? "/login");
   const mode = store.get(OAUTH_MODE_COOKIE)?.value ?? "login";
+  const inviteCode = store.get(OAUTH_REF_COOKIE)?.value ?? null;
 
   const redirectUri =
     process.env.GOOGLE_REDIRECT_URI ??
@@ -116,6 +119,7 @@ export async function GET(req: Request) {
   clear.cookies.set(OAUTH_NEXT_COOKIE, "", { path: "/", maxAge: 0 });
   clear.cookies.set(OAUTH_FROM_COOKIE, "", { path: "/", maxAge: 0 });
   clear.cookies.set(OAUTH_MODE_COOKIE, "", { path: "/", maxAge: 0 });
+  clear.cookies.set(OAUTH_REF_COOKIE, "", { path: "/", maxAge: 0 });
 
   if (!code || !state || !savedState || state !== savedState || !verifier) {
     const res = redirectWithError(publicOrigin, { fromPath, nextPath, errorCode: "oauth_failed" });
@@ -124,6 +128,7 @@ export async function GET(req: Request) {
     res.cookies.set(OAUTH_NEXT_COOKIE, "", { path: "/", maxAge: 0 });
     res.cookies.set(OAUTH_FROM_COOKIE, "", { path: "/", maxAge: 0 });
     res.cookies.set(OAUTH_MODE_COOKIE, "", { path: "/", maxAge: 0 });
+    res.cookies.set(OAUTH_REF_COOKIE, "", { path: "/", maxAge: 0 });
     return res;
   }
 
@@ -131,11 +136,19 @@ export async function GET(req: Request) {
   const sessionToken = store.get(SESSION_COOKIE_NAME)?.value ?? null;
   const upstreamHeaders: Record<string, string> = { "content-type": "application/json" };
   if (mode === "link" && sessionToken) upstreamHeaders.authorization = `Bearer ${sessionToken}`;
+  const cookie = req.headers.get("cookie");
+  if (cookie) upstreamHeaders.cookie = cookie;
+  const xff = req.headers.get("x-forwarded-for");
+  if (xff) upstreamHeaders["x-forwarded-for"] = xff;
+  const realIp = req.headers.get("x-real-ip");
+  if (realIp) upstreamHeaders["x-real-ip"] = realIp;
+  const ua = req.headers.get("user-agent");
+  if (ua) upstreamHeaders["user-agent"] = ua;
 
   const upstream = await fetch(buildBackendUrl(upstreamPath), {
     method: "POST",
     headers: upstreamHeaders,
-    body: JSON.stringify({ code, codeVerifier: verifier, redirectUri }),
+    body: JSON.stringify({ code, codeVerifier: verifier, redirectUri, inviteCode: inviteCode || undefined }),
     cache: "no-store"
   }).catch(() => null);
 
@@ -162,6 +175,7 @@ export async function GET(req: Request) {
     res.cookies.set(OAUTH_NEXT_COOKIE, "", { path: "/", maxAge: 0 });
     res.cookies.set(OAUTH_FROM_COOKIE, "", { path: "/", maxAge: 0 });
     res.cookies.set(OAUTH_MODE_COOKIE, "", { path: "/", maxAge: 0 });
+    res.cookies.set(OAUTH_REF_COOKIE, "", { path: "/", maxAge: 0 });
     return res;
   }
   if (mode === "link") {
@@ -173,6 +187,7 @@ export async function GET(req: Request) {
     res.cookies.set(OAUTH_NEXT_COOKIE, "", { path: "/", maxAge: 0 });
     res.cookies.set(OAUTH_FROM_COOKIE, "", { path: "/", maxAge: 0 });
     res.cookies.set(OAUTH_MODE_COOKIE, "", { path: "/", maxAge: 0 });
+    res.cookies.set(OAUTH_REF_COOKIE, "", { path: "/", maxAge: 0 });
     return res;
   }
 
@@ -197,5 +212,6 @@ export async function GET(req: Request) {
   res.cookies.set(OAUTH_NEXT_COOKIE, "", { path: "/", maxAge: 0 });
   res.cookies.set(OAUTH_FROM_COOKIE, "", { path: "/", maxAge: 0 });
   res.cookies.set(OAUTH_MODE_COOKIE, "", { path: "/", maxAge: 0 });
+  res.cookies.set(OAUTH_REF_COOKIE, "", { path: "/", maxAge: 0 });
   return res;
 }

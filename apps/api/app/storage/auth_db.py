@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import secrets
 import uuid
+from decimal import Decimal
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +13,7 @@ from app.models.user import User
 from app.schemas.auth import AuthResponse, LoginRequest, RegisterRequest, UserPublic
 from app.security import sha256_hex
 from app.security_password import hash_password, verify_password
+from app.storage.invites_db import find_user_by_invite_code, generate_unique_invite_code
 from app.storage.orgs_db import ADMIN_LIKE_ROLES, ensure_default_org, ensure_membership, get_membership
 
 
@@ -21,13 +23,20 @@ def _dt_iso(value: dt.datetime | None) -> str | None:
     return value.astimezone(dt.timezone.utc).isoformat()
 
 
+USD_CENTS = Decimal("100")
+
+
+def _cents_to_usd_2(value: int) -> float:
+    return float((Decimal(int(value)) / USD_CENTS).quantize(Decimal("0.01")))
+
+
 def _to_user_public(row: User) -> UserPublic:
     return UserPublic(
         id=str(row.id),
         email=row.email,
         role=row.role,
         group=row.group_name,
-        balance=int(row.balance),
+        balance=_cents_to_usd_2(int(row.balance)),
         orgId=None,
         createdAt=_dt_iso(row.created_at) or dt.datetime.now(dt.timezone.utc).isoformat(),
         lastLoginAt=_dt_iso(row.last_login_at),
@@ -60,7 +69,14 @@ def _should_grant_admin(requested_token: str | None) -> bool:
     return secrets.compare_digest(requested_token, settings.admin_bootstrap_token)
 
 
-async def create_user(session: AsyncSession, input: RegisterRequest) -> User:
+async def create_user(
+    session: AsyncSession,
+    input: RegisterRequest,
+    *,
+    signup_ip: str | None = None,
+    signup_device_id: str | None = None,
+    signup_user_agent: str | None = None,
+) -> User:
     email = _normalize_email(str(input.email))
     _validate_password(input.password)
 
@@ -72,11 +88,29 @@ async def create_user(session: AsyncSession, input: RegisterRequest) -> User:
     requested_admin = _should_grant_admin(input.admin_bootstrap_token)
 
     now = dt.datetime.now(dt.timezone.utc)
+    inviter_user_id = None
+    raw_invite_code = getattr(input, "invite_code", None)
+    if isinstance(raw_invite_code, str) and raw_invite_code.strip():
+        inviter = await find_user_by_invite_code(session, raw_invite_code)
+        if not inviter:
+            raise ValueError("invalid invite code")
+        inviter_user_id = inviter.id
+
     row = User(
         email=email,
         password_hash=hash_password(input.password),
         password_set_at=now,
         role="user",
+        invite_code=await generate_unique_invite_code(session),
+        invited_by_user_id=inviter_user_id,
+        invited_at=(now if inviter_user_id else None),
+        signup_ip=(signup_ip.strip()[:64] if isinstance(signup_ip, str) and signup_ip.strip() else None),
+        signup_device_id=(
+            signup_device_id.strip()[:64] if isinstance(signup_device_id, str) and signup_device_id.strip() else None
+        ),
+        signup_user_agent=(
+            signup_user_agent.strip()[:255] if isinstance(signup_user_agent, str) and signup_user_agent.strip() else None
+        ),
     )
     session.add(row)
     await session.commit()
@@ -188,8 +222,21 @@ async def get_user_by_token(session: AsyncSession, token: str) -> User | None:
     return user
 
 
-async def register_and_login(session: AsyncSession, input: RegisterRequest) -> AuthResponse:
-    user = await create_user(session, input)
+async def register_and_login(
+    session: AsyncSession,
+    input: RegisterRequest,
+    *,
+    signup_ip: str | None = None,
+    signup_device_id: str | None = None,
+    signup_user_agent: str | None = None,
+) -> AuthResponse:
+    user = await create_user(
+        session,
+        input,
+        signup_ip=signup_ip,
+        signup_device_id=signup_device_id,
+        signup_user_agent=signup_user_agent,
+    )
     from app.core.config import settings
 
     token = await create_session(session, user.id, ttl_days=settings.session_ttl_days)

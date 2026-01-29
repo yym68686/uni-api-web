@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Boxes, CreditCard, KeyRound, LayoutDashboard, Megaphone, PlugZap, ScrollText, Settings, SlidersHorizontal, Users, type LucideIcon } from "lucide-react";
+import { Boxes, CreditCard, Gift, KeyRound, LayoutDashboard, Megaphone, PlugZap, ScrollText, Settings, SlidersHorizontal, Users, type LucideIcon } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { setPendingPathname } from "@/lib/navigation-intent";
@@ -16,6 +16,7 @@ const navItems = [
   { href: "/models", labelKey: "app.models", icon: Boxes },
   { href: "/logs", labelKey: "app.logs", icon: ScrollText },
   { href: "/billing", labelKey: "app.billing", icon: CreditCard },
+  { href: "/invite", labelKey: "app.invite", icon: Gift },
 ] as const satisfies ReadonlyArray<{ href: string; labelKey: MessageKey; icon: LucideIcon }>;
 
 const adminItems = [

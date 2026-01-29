@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 
 import { peekPendingPathname } from "@/lib/navigation-intent";
 import { BillingPageSkeleton } from "./billing/_components/billing-skeleton";
+import { InvitePageSkeleton } from "./invite/_components/invite-skeleton";
 import { KeysPageSkeleton } from "./keys/_components/keys-skeleton";
 import { LogsPageSkeleton } from "./logs/_components/logs-skeleton";
 import { ModelsPageSkeleton } from "./models/_components/models-skeleton";
@@ -32,6 +33,10 @@ export default function Loading() {
           ? (
             <BillingPageSkeleton />
           )
+          : activePathname === "/invite" || activePathname.startsWith("/invite/")
+            ? (
+              <InvitePageSkeleton />
+            )
           : activePathname === "/logs" || activePathname.startsWith("/logs/")
             ? (
               <LogsPageSkeleton />

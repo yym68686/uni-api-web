@@ -50,12 +50,16 @@ const OAUTH_VERIFIER_COOKIE = "uai_oauth_verifier";
 const OAUTH_NEXT_COOKIE = "uai_oauth_next";
 const OAUTH_FROM_COOKIE = "uai_oauth_from";
 const OAUTH_MODE_COOKIE = "uai_oauth_mode";
+const OAUTH_REF_COOKIE = "uai_oauth_ref";
 
 export function GET(req: Request) {
   const url = new URL(req.url);
   const mode = url.searchParams.get("mode") === "link" ? "link" : "login";
   const nextPath = sanitizeNextPath(url.searchParams.get("next"));
   const fromPath = sanitizeFromPath(url.searchParams.get("from"));
+  const ref = url.searchParams.get("ref");
+  const inviteCode =
+    ref && /^[a-zA-Z0-9]{1,16}$/.test(ref.trim()) ? ref.trim() : null;
 
   const clientId = process.env.GOOGLE_CLIENT_ID ?? "";
   const publicOrigin = getPublicOrigin(req, url);
@@ -96,5 +100,6 @@ export function GET(req: Request) {
   res.cookies.set(OAUTH_NEXT_COOKIE, nextPath, cookieOptions);
   res.cookies.set(OAUTH_FROM_COOKIE, fromPath, cookieOptions);
   res.cookies.set(OAUTH_MODE_COOKIE, mode, cookieOptions);
+  if (inviteCode) res.cookies.set(OAUTH_REF_COOKIE, inviteCode, cookieOptions);
   return res;
 }

@@ -77,6 +77,7 @@ from app.schemas.billing import (
     BillingTopupCheckoutResponse,
     BillingTopupStatusResponse,
 )
+from app.schemas.invite import InviteSummaryResponse
 from app.schemas.models import ModelsListResponse, OpenAIModelsListResponse, OpenAIModelItem
 from app.schemas.models_admin import AdminModelsListResponse, AdminModelUpdateRequest, AdminModelUpdateResponse
 from app.db import get_db_session
@@ -123,10 +124,14 @@ from app.storage.topups_db import (
     create_billing_topup,
     creem_event_exists,
     generate_topup_request_id,
+    get_billing_topup_by_checkout_id,
+    get_billing_topup_by_order_id,
+    get_billing_topup_by_request_id,
     get_billing_topup_for_user,
     mark_billing_topup_failed,
     record_creem_event,
 )
+from app.storage.referrals_db import process_referral_refund
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -270,6 +275,36 @@ def _extract_creem_amount_total_cents(obj: dict) -> int | None:
                 return int(paid)
             except Exception:
                 pass
+
+    return None
+
+
+def _extract_creem_payer_email(obj: dict) -> str | None:
+    customer = obj.get("customer")
+    if isinstance(customer, dict):
+        email = customer.get("email")
+        if isinstance(email, str) and email.strip():
+            return email.strip().lower()[:254]
+
+    order = obj.get("order")
+    if isinstance(order, dict):
+        raw = order.get("customer_email")
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip().lower()[:254]
+        raw = order.get("email")
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip().lower()[:254]
+        cust = order.get("customer")
+        if isinstance(cust, dict):
+            email = cust.get("email")
+            if isinstance(email, str) and email.strip():
+                return email.strip().lower()[:254]
+
+    txn = obj.get("transaction")
+    if isinstance(txn, dict):
+        raw = txn.get("customer_email")
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip().lower()[:254]
 
     return None
 
@@ -512,7 +547,6 @@ async def register_verify(
     request: Request,
     session: AsyncSession = Depends(get_db_session),
 ) -> AuthResponse:
-    _ = request
     org = await ensure_default_org(session)
     if not bool(getattr(org, "registration_enabled", True)):
         raise HTTPException(status_code=403, detail="registration disabled")
@@ -527,13 +561,27 @@ async def register_verify(
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     try:
+        from app.constants import DEVICE_ID_COOKIE_NAME
+
+        xff = request.headers.get("x-forwarded-for")
+        signup_ip = (
+            xff.split(",")[0].strip()[:64]
+            if xff and xff.strip()
+            else (request.client.host if request.client else None)
+        )
+        signup_device_id = request.cookies.get(DEVICE_ID_COOKIE_NAME)
+        signup_user_agent = request.headers.get("user-agent")
         return await register_and_login(
             session,
             RegisterRequest(
                 email=payload.email,
                 password=payload.password,
                 adminBootstrapToken=payload.admin_bootstrap_token,
+                inviteCode=payload.invite_code,
             ),
+            signup_ip=signup_ip,
+            signup_device_id=signup_device_id,
+            signup_user_agent=signup_user_agent,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -599,17 +647,21 @@ async def me(
     current_user=Depends(get_current_user),
     membership=Depends(get_current_membership),
 ) -> UserPublic:  # type: ignore[no-untyped-def]
+    from decimal import Decimal
+
     def _dt_iso(value: dt.datetime | None) -> str | None:
         if not value:
             return None
         return value.astimezone(dt.timezone.utc).isoformat()
+
+    balance_usd = float((Decimal(int(getattr(current_user, "balance", 0) or 0)) / Decimal("100")).quantize(Decimal("0.01")))
 
     return UserPublic(
         id=str(current_user.id),
         email=current_user.email,
         role=membership.role,
         group=current_user.group_name,
-        balance=int(current_user.balance),
+        balance=balance_usd,
         orgId=str(membership.org_id),
         createdAt=_dt_iso(current_user.created_at) or dt.datetime.now(dt.timezone.utc).isoformat(),
         lastLoginAt=_dt_iso(current_user.last_login_at),
@@ -911,18 +963,32 @@ async def claim_admin(
 
 @router.post("/auth/oauth/google", response_model=AuthResponse)
 async def oauth_google(
-    payload: GoogleOAuthExchangeRequest, session: AsyncSession = Depends(get_db_session)
+    payload: GoogleOAuthExchangeRequest, request: Request, session: AsyncSession = Depends(get_db_session)
 ) -> AuthResponse:
     from app.core.config import settings
 
     if payload.redirect_uri != settings.google_redirect_uri:
         raise HTTPException(status_code=400, detail="invalid redirect_uri")
     try:
+        from app.constants import DEVICE_ID_COOKIE_NAME
+
+        xff = request.headers.get("x-forwarded-for")
+        signup_ip = (
+            xff.split(",")[0].strip()[:64]
+            if xff and xff.strip()
+            else (request.client.host if request.client else None)
+        )
+        signup_device_id = request.cookies.get(DEVICE_ID_COOKIE_NAME)
+        signup_user_agent = request.headers.get("user-agent")
         return await login_with_google(
             session,
             code=payload.code,
             code_verifier=payload.code_verifier,
             redirect_uri=payload.redirect_uri,
+            invite_code=payload.invite_code,
+            signup_ip=signup_ip,
+            signup_device_id=signup_device_id,
+            signup_user_agent=signup_user_agent,
         )
     except ValueError as e:
         if str(e) == "banned":
@@ -1789,6 +1855,7 @@ async def usage(
 @router.post("/billing/topup/checkout", response_model=BillingTopupCheckoutResponse)
 async def billing_topup_checkout(
     payload: BillingTopupCheckoutRequest,
+    request: Request,
     session: AsyncSession = Depends(get_db_session),
     current_user=Depends(get_current_user),
     membership=Depends(get_current_membership),
@@ -1809,12 +1876,23 @@ async def billing_topup_checkout(
         raise HTTPException(status_code=400, detail="invalid amount")
 
     request_id = generate_topup_request_id()
+    from app.constants import DEVICE_ID_COOKIE_NAME
+
+    xff = request.headers.get("x-forwarded-for")
+    client_ip = (
+        xff.split(",")[0].strip()[:64]
+        if xff and xff.strip()
+        else (request.client.host if request.client else None)
+    )
+    client_device_id = request.cookies.get(DEVICE_ID_COOKIE_NAME)
     await create_billing_topup(
         session,
         org_id=membership.org_id,
         user_id=current_user.id,
         request_id=request_id,
         units=units,
+        client_ip=client_ip,
+        client_device_id=client_device_id,
     )
 
     public_url = _normalize_public_url(settings.app_public_url)
@@ -1927,11 +2005,13 @@ async def billing_topup_status(
     units = int(getattr(topup, "units", 0) or 0)
     out: dict[str, object] = {"requestId": str(topup.request_id), "status": status, "units": units}
     if status == "completed":
+        from decimal import Decimal
+
         try:
             await session.refresh(current_user)
         except Exception:
             pass
-        out["newBalance"] = int(getattr(current_user, "balance", 0) or 0)
+        out["newBalance"] = float((Decimal(int(getattr(current_user, "balance", 0) or 0)) / Decimal("100")).quantize(Decimal("0.01")))
     return out
 
 
@@ -1986,6 +2066,7 @@ async def creem_webhook(
     currency = _extract_creem_currency(obj)
     product_id = _extract_creem_product_id(obj)
     amount_total_cents = _extract_creem_amount_total_cents(obj)
+    payer_email = _extract_creem_payer_email(obj)
     metadata = obj.get("metadata")
 
     purpose = None
@@ -2010,7 +2091,30 @@ async def creem_webhook(
         except Exception:
             user_id = None
 
-    if event_type.strip() != "checkout.completed":
+    normalized_event_type = event_type.strip().lower()
+    if normalized_event_type != "checkout.completed":
+        if purpose == "top_up" and any(k in normalized_event_type for k in ("refund", "chargeback", "dispute")):
+            topup = None
+            if isinstance(request_id, str) and request_id.strip():
+                topup = await get_billing_topup_by_request_id(session, request_id=request_id.strip())
+            if not topup and isinstance(order_id, str) and order_id.strip():
+                topup = await get_billing_topup_by_order_id(session, order_id=order_id.strip())
+
+            checkout_id_alt = None
+            raw_checkout = obj.get("checkout_id") or obj.get("checkoutId") or obj.get("checkout")
+            if isinstance(raw_checkout, str) and raw_checkout.strip():
+                checkout_id_alt = raw_checkout.strip()
+            elif isinstance(raw_checkout, dict) and isinstance(raw_checkout.get("id"), str):
+                checkout_id_alt = raw_checkout.get("id")
+            if not topup and checkout_id_alt:
+                topup = await get_billing_topup_by_checkout_id(session, checkout_id=checkout_id_alt.strip())
+
+            if topup:
+                try:
+                    await process_referral_refund(session, topup=topup)
+                except Exception:
+                    logger.exception("referral: refund processing failed")
+
         await record_creem_event(
             session,
             creem_event_id=creem_event_id,
@@ -2101,6 +2205,7 @@ async def creem_webhook(
         order_id=order_id,
         currency=currency,
         amount_total_cents=amount_total_cents,
+        payer_email=payer_email,
     )
     if not topup:
         await record_creem_event(
@@ -2148,6 +2253,98 @@ async def billing_ledger(
         offset=int(offset),
     )
     return BillingLedgerListResponse(items=items)  # type: ignore[arg-type]
+
+
+@router.get("/invite/summary", response_model=InviteSummaryResponse)
+async def invite_summary(
+    session: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+    membership=Depends(get_current_membership),
+) -> dict:
+    _ = membership
+    from decimal import Decimal
+
+    from app.models.referral_bonus_event import ReferralBonusEvent
+    from app.storage.invites_db import ensure_user_invite_code
+
+    invite_code = (await ensure_user_invite_code(session, current_user)).upper()
+
+    invited_total = (
+        await session.execute(select(func.count()).select_from(User).where(User.invited_by_user_id == current_user.id))
+    ).scalar_one()
+
+    rewards_pending = (
+        await session.execute(
+            select(func.count())
+            .select_from(ReferralBonusEvent)
+            .where(ReferralBonusEvent.inviter_user_id == current_user.id, ReferralBonusEvent.status == "pending")
+        )
+    ).scalar_one()
+
+    rewards_confirmed = (
+        await session.execute(
+            select(func.count())
+            .select_from(ReferralBonusEvent)
+            .where(ReferralBonusEvent.inviter_user_id == current_user.id, ReferralBonusEvent.status == "confirmed")
+        )
+    ).scalar_one()
+
+    invitees = (
+        await session.execute(
+            select(User)
+            .where(User.invited_by_user_id == current_user.id)
+            .order_by(User.created_at.desc())
+            .limit(200)
+        )
+    ).scalars().all()
+
+    invitee_ids = [u.id for u in invitees]
+    latest_by_invitee: dict[uuid.UUID, ReferralBonusEvent] = {}
+    if invitee_ids:
+        events = (
+            await session.execute(
+                select(ReferralBonusEvent)
+                .where(
+                    ReferralBonusEvent.inviter_user_id == current_user.id,
+                    ReferralBonusEvent.invitee_user_id.in_(invitee_ids),
+                )
+                .order_by(ReferralBonusEvent.created_at.desc())
+            )
+        ).scalars().all()
+        for ev in events:
+            if ev.invitee_user_id not in latest_by_invitee:
+                latest_by_invitee[ev.invitee_user_id] = ev
+
+    def _dt_iso(value: dt.datetime | None) -> str:
+        if not value:
+            return dt.datetime.now(dt.timezone.utc).isoformat()
+        return value.astimezone(dt.timezone.utc).isoformat()
+
+    items: list[dict[str, object]] = []
+    for u in invitees:
+        ev = latest_by_invitee.get(u.id)
+        status = str(getattr(ev, "status", "") or "none") if ev else "none"
+        reward_usd = None
+        if ev and status in {"pending", "confirmed"}:
+            reward_usd = float((Decimal(int(ev.bonus_usd_cents)) / Decimal("100")).quantize(Decimal("0.01")))
+        invited_at = getattr(u, "invited_at", None) or getattr(u, "created_at", None)
+        items.append(
+            {
+                "id": str(u.id),
+                "email": str(u.email),
+                "invitedAt": _dt_iso(invited_at),
+                "rewardStatus": status,
+                "rewardUsd": reward_usd,
+            }
+        )
+
+    return {
+        "inviteCode": invite_code,
+        "invitedTotal": int(invited_total or 0),
+        "rewardsPending": int(rewards_pending or 0),
+        "rewardsConfirmed": int(rewards_confirmed or 0),
+        "items": items,
+    }
 
 
 @router.get("/keys", response_model=ApiKeysListResponse)

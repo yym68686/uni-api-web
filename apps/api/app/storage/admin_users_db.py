@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
+from decimal import Decimal, ROUND_HALF_UP
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,12 +21,22 @@ from app.schemas.admin_users import (
 from app.storage.billing_db import stage_balance_adjustment_ledger_entry
 
 ALLOWED_MEMBERSHIP_ROLES: set[str] = {"owner", "admin", "billing", "developer", "viewer"}
+USD_CENTS = Decimal("100")
 
 
 def _dt_iso(value: dt.datetime | None) -> str | None:
     if not value:
         return None
     return value.astimezone(dt.timezone.utc).isoformat()
+
+
+def _cents_to_usd_2(value: int) -> float:
+    return float((Decimal(int(value)) / USD_CENTS).quantize(Decimal("0.01")))
+
+
+def _usd_to_cents_2(value: float) -> int:
+    dec = Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return int((dec * USD_CENTS).to_integral_value(rounding=ROUND_HALF_UP))
 
 
 def _to_item(
@@ -41,7 +52,7 @@ def _to_item(
         email=row.email,
         role=role,
         group=row.group_name,
-        balance=int(row.balance),
+        balance=_cents_to_usd_2(int(row.balance)),
         bannedAt=_dt_iso(row.banned_at),
         createdAt=_dt_iso(row.created_at) or dt.datetime.now(dt.timezone.utc).isoformat(),
         lastLoginAt=_dt_iso(row.last_login_at),
@@ -164,11 +175,13 @@ async def update_admin_user(
     balance_before = int(user.balance)
     balance_after: int | None = None
     if input.balance is not None:
+        if not isinstance(input.balance, (int, float)):
+            raise ValueError("balance must be a number")
         if input.balance < 0:
             raise ValueError("balance must be >= 0")
         if input.balance > 1_000_000_000:
             raise ValueError("balance too large")
-        balance_after = int(input.balance)
+        balance_after = _usd_to_cents_2(float(input.balance))
         user.balance = balance_after
 
     if input.banned is not None:

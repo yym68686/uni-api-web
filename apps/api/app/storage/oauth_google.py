@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import secrets
 import uuid
+from decimal import Decimal
 
 import httpx
 from sqlalchemy import func, select
@@ -14,6 +15,7 @@ from app.models.user import User
 from app.schemas.auth import AuthResponse, UserPublic
 from app.security_password import hash_password
 from app.storage.auth_db import create_session
+from app.storage.invites_db import ensure_user_invite_code, find_user_by_invite_code, generate_unique_invite_code
 from app.storage.orgs_db import ADMIN_LIKE_ROLES, ensure_default_org, ensure_membership, get_membership
 
 
@@ -30,12 +32,19 @@ def _dt_iso(value: dt.datetime | None) -> str | None:
     return value.astimezone(dt.timezone.utc).isoformat()
 
 
+USD_CENTS = Decimal("100")
+
+
+def _cents_to_usd_2(value: int) -> float:
+    return float((Decimal(int(value)) / USD_CENTS).quantize(Decimal("0.01")))
+
+
 def _to_user_public(row: User) -> UserPublic:
     return UserPublic(
         id=str(row.id),
         email=row.email,
         role=row.role,
-        balance=int(row.balance),
+        balance=_cents_to_usd_2(int(row.balance)),
         orgId=None,
         createdAt=_dt_iso(row.created_at) or dt.datetime.now(dt.timezone.utc).isoformat(),
         lastLoginAt=_dt_iso(row.last_login_at),
@@ -118,7 +127,15 @@ async def _fetch_google_profile(access_token: str) -> GoogleProfile:
 
 
 async def login_with_google(
-    session: AsyncSession, *, code: str, code_verifier: str, redirect_uri: str
+    session: AsyncSession,
+    *,
+    code: str,
+    code_verifier: str,
+    redirect_uri: str,
+    invite_code: str | None = None,
+    signup_ip: str | None = None,
+    signup_device_id: str | None = None,
+    signup_user_agent: str | None = None,
 ) -> AuthResponse:
     access_token = await _exchange_google_code(code, code_verifier, redirect_uri)
     profile = await _fetch_google_profile(access_token)
@@ -148,7 +165,28 @@ async def login_with_google(
         if not bool(getattr(org, "registration_enabled", True)):
             raise ValueError("registration disabled")
 
-        user = User(email=profile.email, password_hash=hash_password(secrets.token_urlsafe(32)))
+        now = dt.datetime.now(dt.timezone.utc)
+        inviter_user_id = None
+        if isinstance(invite_code, str) and invite_code.strip():
+            inviter = await find_user_by_invite_code(session, invite_code)
+            if not inviter:
+                raise ValueError("invalid invite code")
+            inviter_user_id = inviter.id
+
+        user = User(
+            email=profile.email,
+            password_hash=hash_password(secrets.token_urlsafe(32)),
+            invite_code=await generate_unique_invite_code(session),
+            invited_by_user_id=inviter_user_id,
+            invited_at=(now if inviter_user_id else None),
+            signup_ip=(signup_ip.strip()[:64] if isinstance(signup_ip, str) and signup_ip.strip() else None),
+            signup_device_id=(
+                signup_device_id.strip()[:64] if isinstance(signup_device_id, str) and signup_device_id.strip() else None
+            ),
+            signup_user_agent=(
+                signup_user_agent.strip()[:255] if isinstance(signup_user_agent, str) and signup_user_agent.strip() else None
+            ),
+        )
         session.add(user)
         await session.commit()
         await session.refresh(user)
@@ -168,6 +206,11 @@ async def login_with_google(
 
     if user.banned_at is not None:
         raise ValueError("banned")
+
+    try:
+        await ensure_user_invite_code(session, user)
+    except Exception:
+        pass
 
     await _ensure_single_google_identity(session, user_id=user.id, subject=profile.sub, email=profile.email)
 

@@ -30,6 +30,12 @@ export async function proxyToBackend(req: Request, path: string) {
   if (authorization) headers.set("authorization", authorization);
   const cookie = req.headers.get("cookie");
   if (cookie) headers.set("cookie", cookie);
+  const xff = req.headers.get("x-forwarded-for");
+  if (xff) headers.set("x-forwarded-for", xff);
+  const realIp = req.headers.get("x-real-ip");
+  if (realIp) headers.set("x-real-ip", realIp);
+  const userAgent = req.headers.get("user-agent");
+  if (userAgent) headers.set("user-agent", userAgent);
 
   const body =
     req.method === "GET" || req.method === "HEAD" ? undefined : await req.text();

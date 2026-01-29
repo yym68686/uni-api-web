@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { z } from "zod";
-import { Chrome, Github, Loader2, Lock, Mail, ShieldCheck } from "lucide-react";
+import { Chrome, Github, Loader2, Lock, Mail, ShieldCheck, Tag } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 
@@ -15,6 +15,29 @@ import { Separator } from "@/components/ui/separator";
 import { BrandWordmark } from "@/components/brand/wordmark";
 import { useI18n } from "@/components/i18n/i18n-provider";
 import type { MessageKey, MessageVars } from "@/lib/i18n/messages";
+import { ensureDeviceIdCookie } from "@/lib/device-id";
+import { writeLoginPrefill } from "@/lib/login-prefill";
+
+function formatUpstreamMessage(
+  json: unknown,
+  fallback: string,
+  t: (key: MessageKey, vars?: MessageVars) => string
+) {
+  if (!json || typeof json !== "object") return fallback;
+  if (!("message" in json) || typeof (json as { message?: unknown }).message !== "string") return fallback;
+
+  const message = String((json as { message?: string }).message ?? "").trim();
+  if (message === "") return fallback;
+
+  if (message === "registration disabled") return t("auth.oauth.registrationDisabled");
+  if (message === "email already registered") return t("profile.security.emailAlreadyRegistered");
+  if (message === "invalid invite code") return t("register.inviteCodeInvalid");
+  if (message === "invalid code") return t("profile.security.invalidCode");
+  if (message === "too many requests") return t("profile.security.tooManyRequests");
+  if (message === "please wait") return t("profile.security.pleaseWait");
+
+  return message;
+}
 
 function createCodeSchema(t: (key: MessageKey, vars?: MessageVars) => string) {
   return z.string().trim().regex(/^\d{6}$/, t("validation.code6"));
@@ -26,12 +49,18 @@ function createRegisterSchema(t: (key: MessageKey, vars?: MessageVars) => string
     .string()
     .min(6, t("validation.passwordMin", { min: 6 }))
     .max(128, t("validation.passwordMax"));
+  const inviteCodeSchema = z
+    .string()
+    .trim()
+    .max(16, t("validation.maxChars", { max: 16 }))
+    .regex(/^[a-zA-Z0-9]*$/, t("validation.inviteCode"));
 
   return z
     .object({
       email: emailSchema,
       password: passwordSchema,
       confirmPassword: z.string(),
+      inviteCode: inviteCodeSchema.optional(),
       code: z.string().optional()
     })
     .refine((v) => v.password === v.confirmPassword, {
@@ -45,11 +74,13 @@ type FormValues = z.infer<ReturnType<typeof createRegisterSchema>>;
 interface RegisterFormProps {
   appName: string;
   nextPath?: string;
+  defaultInviteCode?: string;
   className?: string;
 }
 
-export function RegisterForm({ appName, nextPath, className }: RegisterFormProps) {
-  const [loading, setLoading] = React.useState(false);
+export function RegisterForm({ appName, nextPath, defaultInviteCode, className }: RegisterFormProps) {
+  const [sendingCode, setSendingCode] = React.useState(false);
+  const [creating, setCreating] = React.useState(false);
   const [step, setStep] = React.useState<"details" | "verify">("details");
   const [cooldown, setCooldown] = React.useState(0);
   const router = useRouter();
@@ -59,12 +90,29 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
   const schema = React.useMemo(() => createRegisterSchema(t), [t]);
   const emailSchema = schema.shape.email;
   const passwordSchema = schema.shape.password;
+  const inviteCodeSchema = schema.shape.inviteCode;
   const codeSchema = React.useMemo(() => createCodeSchema(t), [t]);
 
   const form = useForm<FormValues>({
-    defaultValues: { email: "", password: "", confirmPassword: "", code: "" },
+    defaultValues: {
+      email: "",
+      password: "",
+      confirmPassword: "",
+      inviteCode: defaultInviteCode ?? "",
+      code: ""
+    },
     mode: "onChange"
   });
+
+  const [passwordValue, confirmPasswordValue, codeValue] = form.watch(["password", "confirmPassword", "code"]);
+  const canCreate =
+    form.formState.isValid &&
+    passwordValue === confirmPasswordValue &&
+    /^\d{6}$/.test(String(codeValue ?? "").trim());
+
+  React.useEffect(() => {
+    ensureDeviceIdCookie();
+  }, []);
 
   React.useEffect(() => {
     if (cooldown <= 0) return;
@@ -82,6 +130,8 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
         ? t("auth.oauth.registrationDisabled")
         : oauthError === "banned"
           ? t("auth.oauth.banned")
+          : oauthError === "invalid_invite_code"
+            ? t("register.inviteCodeInvalid")
           : t("auth.oauth.failed");
     const id = window.setTimeout(() => toast.error(message), 0);
 
@@ -100,6 +150,7 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
         const key = issue.path[0];
         if (key === "email") form.setError("email", { message: issue.message, type: "validate" });
         if (key === "password") form.setError("password", { message: issue.message, type: "validate" });
+        if (key === "inviteCode") form.setError("inviteCode", { message: issue.message, type: "validate" });
         if (key === "confirmPassword") {
           form.setError("confirmPassword", { message: issue.message, type: "validate" });
         }
@@ -108,7 +159,7 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
       return;
     }
 
-    setLoading(true);
+    setSendingCode(true);
     try {
       const res = await fetch("/api/auth/email/request", {
         method: "POST",
@@ -117,30 +168,24 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
       });
       const json: unknown = await res.json().catch(() => null);
       if (!res.ok) {
-        const message =
-          json && typeof json === "object" && "message" in json
-            ? String((json as { message?: unknown }).message ?? t("register.failed"))
-            : t("register.failed");
+        const message = formatUpstreamMessage(json, t("register.failed"), t);
         throw new Error(message);
       }
 
       toast.success(t("register.codeSent"));
       setStep("verify");
       setCooldown(60);
+      form.setValue("code", "");
+      form.setFocus("code");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("register.failed"));
     } finally {
-      setLoading(false);
+      setSendingCode(false);
     }
   }
 
   async function onSubmit(values: FormValues) {
-    if (step === "details") {
-      await requestCode();
-      return;
-    }
-
-    setLoading(true);
+    setCreating(true);
     try {
       const parsed = schema.safeParse(values);
       if (!parsed.success) {
@@ -160,15 +205,31 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
         body: JSON.stringify({
           email: parsed.data.email,
           password: parsed.data.password,
-          code: codeParsed.data
+          code: codeParsed.data,
+          inviteCode: (parsed.data.inviteCode ?? "").trim() || undefined
         })
       });
       const json: unknown = await res.json().catch(() => null);
       if (!res.ok) {
-        const message =
-          json && typeof json === "object" && "message" in json
-            ? String((json as { message?: unknown }).message ?? t("register.failed"))
-            : t("register.failed");
+        const rawMessage =
+          json && typeof json === "object" && "message" in json ? String((json as { message?: unknown }).message) : "";
+        const normalized = rawMessage.trim().toLowerCase();
+        const message = formatUpstreamMessage(json, t("register.failed"), t);
+
+        if (normalized === "email already registered") {
+          toast.error(message, {
+            action: {
+              label: t("register.signIn"),
+              onClick: () => {
+                writeLoginPrefill({ email: parsed.data.email, password: parsed.data.password });
+                const href = nextPath ? `/login?next=${encodeURIComponent(nextPath)}` : "/login";
+                router.push(href);
+              }
+            }
+          });
+          return;
+        }
+
         throw new Error(message);
       }
 
@@ -178,7 +239,7 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("register.failed"));
     } finally {
-      setLoading(false);
+      setCreating(false);
     }
   }
 
@@ -193,7 +254,18 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
         </div>
         <p className="mt-2 text-sm text-muted-foreground">
           {t("register.haveAccount")}{" "}
-          <Link href={linkHref} className="text-primary hover:underline">
+          <Link
+            href={linkHref}
+            className="text-primary hover:underline"
+            onClick={() => {
+              const { email, password } = form.getValues();
+              const safeEmail = String(email ?? "").trim();
+              const safePassword = String(password ?? "");
+              if (safeEmail && safePassword) {
+                writeLoginPrefill({ email: safeEmail, password: safePassword });
+              }
+            }}
+          >
             {t("register.signIn")}
           </Link>
         </p>
@@ -205,7 +277,7 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
           void form.handleSubmit(onSubmit)(e);
         }}
       >
-        <div className={cn("space-y-2", step === "verify" ? "opacity-80" : "")}>
+        <div className="space-y-2">
           <div className="text-sm font-medium text-foreground">{t("login.email")}</div>
           <div className="relative">
             <Mail
@@ -215,7 +287,6 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
             <Input
               placeholder="you@company.com"
               autoComplete="email"
-              disabled={step === "verify"}
               className={cn(
                 "bg-transparent pl-9",
                 "border-border/60 focus-visible:ring-primary focus-visible:border-primary/40"
@@ -228,12 +299,12 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
               })}
             />
           </div>
-          {form.formState.errors.email ? (
-            <p className="text-xs text-destructive">{form.formState.errors.email.message}</p>
+        {form.formState.errors.email ? (
+          <p className="text-xs text-destructive">{form.formState.errors.email.message}</p>
           ) : null}
         </div>
 
-        <div className={cn("space-y-2", step === "verify" ? "opacity-80" : "")}>
+        <div className="space-y-2">
           <div className="text-sm font-medium text-foreground">{t("login.password")}</div>
           <div className="relative">
             <Lock
@@ -244,7 +315,6 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
               type="password"
               placeholder="••••••••"
               autoComplete="new-password"
-              disabled={step === "verify"}
               className={cn(
                 "bg-transparent pl-9",
                 "border-border/60 focus-visible:ring-primary focus-visible:border-primary/40"
@@ -264,7 +334,7 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
           ) : null}
         </div>
 
-        <div className={cn("space-y-2", step === "verify" ? "opacity-80" : "")}>
+        <div className="space-y-2">
           <div className="text-sm font-medium text-foreground">{t("register.confirmPassword")}</div>
           <div className="relative">
             <Lock
@@ -275,12 +345,16 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
               type="password"
               placeholder="••••••••"
               autoComplete="new-password"
-              disabled={step === "verify"}
               className={cn(
                 "bg-transparent pl-9",
                 "border-border/60 focus-visible:ring-primary focus-visible:border-primary/40"
               )}
-              {...form.register("confirmPassword")}
+              {...form.register("confirmPassword", {
+                validate: (value) => {
+                  const password = form.getValues().password;
+                  return value === password ? true : t("validation.passwordMismatch");
+                }
+              })}
             />
           </div>
           {form.formState.errors.confirmPassword ? (
@@ -290,21 +364,10 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
           ) : null}
         </div>
 
-        {step === "verify" ? (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <div className="text-sm font-medium text-foreground">{t("register.code")}</div>
-              <Button
-                type="button"
-                variant="ghost"
-                className="h-8 rounded-xl px-3 text-xs"
-                disabled={loading || cooldown > 0}
-                onClick={() => void requestCode()}
-              >
-                {cooldown > 0 ? t("register.resendIn", { seconds: cooldown }) : t("register.resend")}
-              </Button>
-            </div>
-            <div className="relative">
+        <div className="space-y-2">
+          <div className="text-sm font-medium text-foreground">{t("register.code")}</div>
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
               <ShieldCheck
                 suppressHydrationWarning
                 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
@@ -320,27 +383,56 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
                 {...form.register("code")}
               />
             </div>
-            {form.formState.errors.code ? (
-              <p className="text-xs text-destructive">{form.formState.errors.code.message}</p>
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                {t("register.codeHint")}
-              </p>
-            )}
             <Button
               type="button"
-              variant="ghost"
-              className="h-9 w-full rounded-xl"
-              disabled={loading}
-              onClick={() => {
-                setStep("details");
-                form.setValue("code", "");
-              }}
+              variant="outline"
+              className="h-10 shrink-0 rounded-xl bg-transparent"
+              disabled={sendingCode || cooldown > 0}
+              onClick={() => void requestCode()}
             >
-              {t("register.changeDetails")}
+              {sendingCode ? (
+                <span className="inline-flex animate-spin">
+                  <Loader2 className="h-4 w-4" />
+                </span>
+              ) : null}
+              {cooldown > 0
+                ? t("register.resendIn", { seconds: cooldown })
+                : step === "verify"
+                  ? t("register.resend")
+                  : t("register.sendCode")}
             </Button>
           </div>
-        ) : null}
+          {form.formState.errors.code ? (
+            <p className="text-xs text-destructive">{form.formState.errors.code.message}</p>
+          ) : null}
+        </div>
+
+        <div className="space-y-2">
+          <div className="text-sm font-medium text-foreground">{t("register.inviteCode")}</div>
+          <div className="relative">
+            <Tag
+              suppressHydrationWarning
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+            />
+            <Input
+              placeholder={t("register.inviteCodePlaceholder")}
+              autoComplete="off"
+              className={cn(
+                "bg-transparent pl-9",
+                "border-border/60 focus-visible:ring-primary focus-visible:border-primary/40"
+              )}
+              {...form.register("inviteCode", {
+                validate: (value) => {
+                  const r = inviteCodeSchema.safeParse(value);
+                  return r.success ? true : (r.error.issues[0]?.message ?? t("common.formInvalid"));
+                }
+              })}
+            />
+          </div>
+          {form.formState.errors.inviteCode ? (
+            <p className="text-xs text-destructive">{form.formState.errors.inviteCode.message}</p>
+          ) : null}
+        </div>
 
         <Button
           type="submit"
@@ -349,20 +441,17 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
             "transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg",
             "disabled:hover:translate-y-0 disabled:hover:shadow-none"
           )}
-          disabled={
-            loading ||
-            (step === "details" ? !form.formState.isValid : !form.getValues().code)
-          }
+          disabled={creating || !canCreate}
       >
-        {loading ? (
+        {creating ? (
           <>
             <span className="inline-flex animate-spin">
               <Loader2 className="h-4 w-4" />
             </span>
-            {step === "details" ? t("register.sending") : t("register.creating")}
+            {t("register.creating")}
           </>
         ) : (
-          step === "details" ? t("register.sendCode") : t("register.title")
+          t("register.title")
         )}
         </Button>
 
@@ -390,7 +479,9 @@ export function RegisterForm({ appName, nextPath, className }: RegisterFormProps
             className="w-full rounded-xl bg-transparent"
             onClick={() => {
               const next = nextPath && nextPath.startsWith("/") ? nextPath : "/dashboard";
-              window.location.href = `/api/auth/google?from=/register&next=${encodeURIComponent(next)}`;
+              const inviteCode = (form.getValues().inviteCode ?? "").trim();
+              const refParam = inviteCode ? `&ref=${encodeURIComponent(inviteCode)}` : "";
+              window.location.href = `/api/auth/google?from=/register&next=${encodeURIComponent(next)}${refParam}`;
             }}
             disabled={step === "verify"}
           >

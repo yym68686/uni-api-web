@@ -8,7 +8,7 @@ class AdminUserItem(BaseModel):
     email: EmailStr
     role: str
     group: str = "default"
-    balance: int
+    balance: float
     banned_at: str | None = Field(default=None, alias="bannedAt")
     created_at: str = Field(alias="createdAt")
     last_login_at: str | None = Field(default=None, alias="lastLoginAt")
@@ -23,7 +23,7 @@ class AdminUsersListResponse(BaseModel):
 
 
 class AdminUserUpdateRequest(BaseModel):
-    balance: int | None = None
+    balance: float | None = None
     banned: bool | None = None
     group: str | None = None
     role: str | None = None

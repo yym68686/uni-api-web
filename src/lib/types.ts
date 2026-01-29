@@ -344,3 +344,19 @@ export interface BillingTopupStatusResponse {
   units: number;
   newBalance?: number | null;
 }
+
+export interface InviteeItem {
+  id: string;
+  email: string;
+  invitedAt: string;
+  rewardStatus: string;
+  rewardUsd?: number | null;
+}
+
+export interface InviteSummaryResponse {
+  inviteCode: string;
+  invitedTotal: number;
+  rewardsPending: number;
+  rewardsConfirmed: number;
+  items: InviteeItem[];
+}

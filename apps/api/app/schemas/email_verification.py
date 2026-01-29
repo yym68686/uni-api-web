@@ -18,4 +18,4 @@ class RegisterVerifyRequest(BaseModel):
     password: str
     code: str
     admin_bootstrap_token: str | None = Field(default=None, alias="adminBootstrapToken")
-
+    invite_code: str | None = Field(default=None, alias="inviteCode")

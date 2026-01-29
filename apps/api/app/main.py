@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
+import asyncio
+import logging
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,8 +13,11 @@ from app.db import SessionLocal, engine
 from app.models.base import Base
 from app.storage.announcements_db import ensure_seed_announcements
 from app.storage.orgs_db import ensure_default_org, ensure_membership
+from app.storage.referrals_db import confirm_due_referral_bonuses
 
 import app.models  # noqa: F401
+
+logger = logging.getLogger(__name__)
 
 
 def create_app() -> FastAPI:
@@ -31,6 +36,15 @@ def create_app() -> FastAPI:
             )
             await conn.exec_driver_sql(
                 "ALTER TABLE IF EXISTS users "
+                "ADD COLUMN IF NOT EXISTS balance_usd_cents integer NOT NULL DEFAULT 0"
+            )
+            await conn.exec_driver_sql(
+                "UPDATE users "
+                "SET balance_usd_cents = balance * 100 "
+                "WHERE balance_usd_cents = 0 AND balance <> 0"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS users "
                 "ADD COLUMN IF NOT EXISTS banned_at timestamptz"
             )
             await conn.exec_driver_sql(
@@ -40,6 +54,62 @@ def create_app() -> FastAPI:
             await conn.exec_driver_sql(
                 "ALTER TABLE IF EXISTS users "
                 "ADD COLUMN IF NOT EXISTS password_set_at timestamptz"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS users "
+                "ADD COLUMN IF NOT EXISTS invite_code varchar(16)"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS users "
+                "ADD COLUMN IF NOT EXISTS invited_by_user_id uuid"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS users "
+                "ADD COLUMN IF NOT EXISTS invited_at timestamptz"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS users "
+                "ADD COLUMN IF NOT EXISTS signup_ip varchar(64)"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS users "
+                "ADD COLUMN IF NOT EXISTS signup_device_id varchar(64)"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS users "
+                "ADD COLUMN IF NOT EXISTS signup_user_agent varchar(255)"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS users "
+                "ADD COLUMN IF NOT EXISTS first_payment_email varchar(254)"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS users "
+                "ADD COLUMN IF NOT EXISTS first_payment_ip varchar(64)"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS users "
+                "ADD COLUMN IF NOT EXISTS first_payment_device_id varchar(64)"
+            )
+            await conn.exec_driver_sql(
+                "DO $$ BEGIN "
+                "IF NOT EXISTS ("
+                "  SELECT 1 FROM pg_constraint WHERE conname = 'users_invited_by_user_id_fkey'"
+                ") THEN "
+                "  ALTER TABLE users "
+                "  ADD CONSTRAINT users_invited_by_user_id_fkey "
+                "  FOREIGN KEY (invited_by_user_id) REFERENCES users(id) ON DELETE SET NULL; "
+                "END IF; "
+                "END $$;"
+            )
+            await conn.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_users_invited_by_user_id "
+                "ON users(invited_by_user_id)"
+            )
+            await conn.exec_driver_sql(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_invite_code "
+                "ON users(invite_code) "
+                "WHERE invite_code IS NOT NULL"
             )
             await conn.exec_driver_sql(
                 "UPDATE users u "
@@ -154,6 +224,31 @@ def create_app() -> FastAPI:
             )
 
             await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS billing_topups "
+                "ADD COLUMN IF NOT EXISTS payer_email varchar(254)"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS billing_topups "
+                "ADD COLUMN IF NOT EXISTS client_ip varchar(64)"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS billing_topups "
+                "ADD COLUMN IF NOT EXISTS client_device_id varchar(64)"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS billing_topups "
+                "ADD COLUMN IF NOT EXISTS refunded_at timestamptz"
+            )
+            await conn.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_billing_topups_order_id "
+                "ON billing_topups(order_id)"
+            )
+            await conn.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_billing_topups_checkout_id "
+                "ON billing_topups(checkout_id)"
+            )
+
+            await conn.exec_driver_sql(
                 "ALTER TABLE IF EXISTS announcements "
                 "ADD COLUMN IF NOT EXISTS title_zh varchar(180)"
             )
@@ -229,6 +324,20 @@ def create_app() -> FastAPI:
             await conn.exec_driver_sql(
                 "UPDATE announcements SET content_zh = content WHERE content_zh IS NULL"
             )
+
+            await conn.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_referral_bonus_events_inviter_user_id "
+                "ON referral_bonus_events(inviter_user_id)"
+            )
+            await conn.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_referral_bonus_events_invitee_user_id "
+                "ON referral_bonus_events(invitee_user_id)"
+            )
+            await conn.exec_driver_sql(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_referral_bonus_active_invitee "
+                "ON referral_bonus_events(invitee_user_id) "
+                "WHERE status IN ('pending', 'confirmed')"
+            )
         # Bootstrap the default org and backfill memberships for existing users.
         async with SessionLocal() as session:
             org = await ensure_default_org(session)
@@ -251,7 +360,27 @@ def create_app() -> FastAPI:
         if settings.app_env == "dev" and settings.seed_demo_data:
             async with SessionLocal() as session:
                 await ensure_seed_announcements(session)
+
+        stop_event = asyncio.Event()
+
+        async def referral_worker():
+            while not stop_event.is_set():
+                try:
+                    async with SessionLocal() as session:
+                        await confirm_due_referral_bonuses(session)
+                except Exception:
+                    logger.exception("referral bonus worker failed")
+                try:
+                    await asyncio.wait_for(stop_event.wait(), timeout=300)
+                except asyncio.TimeoutError:
+                    continue
+
+        task = asyncio.create_task(referral_worker())
         yield
+        stop_event.set()
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
 
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
 

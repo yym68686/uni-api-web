@@ -1,5 +1,7 @@
 "use client";
 
+import * as React from "react";
+
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Breadcrumbs } from "@/components/app/breadcrumbs";
 import { MobileSidebar } from "@/components/app/mobile-sidebar";
@@ -7,6 +9,7 @@ import { ThemeToggle } from "@/components/app/theme-toggle";
 import { LanguageToggle } from "@/components/app/language-toggle";
 import { UserMenu } from "@/components/app/user-menu";
 import type { LocaleMode } from "@/lib/i18n/messages";
+import { ensureDeviceIdCookie } from "@/lib/device-id";
 
 interface AppTopbarProps {
   userName: string;
@@ -16,6 +19,10 @@ interface AppTopbarProps {
 }
 
 export function AppTopbar({ userName, userRole, appName, initialLocaleMode }: AppTopbarProps) {
+  React.useEffect(() => {
+    ensureDeviceIdCookie();
+  }, []);
+
   return (
     <TooltipProvider delayDuration={150}>
       <header className="sticky top-0 z-40 border-b border-border bg-background/80 backdrop-blur">

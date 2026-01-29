@@ -32,7 +32,11 @@ import { Label } from "@/components/ui/label";
 
 function createBalanceSchema(t: (key: MessageKey, vars?: MessageVars) => string) {
   return z.object({
-    balance: z.coerce.number().int().min(0, t("validation.balanceMin")).max(1_000_000_000, t("validation.balanceMax"))
+    balance: z.coerce
+      .number()
+      .min(0, t("validation.balanceMin"))
+      .max(1_000_000_000, t("validation.balanceMax"))
+      .refine((v) => Number.isFinite(v) && Math.round(v * 100) === v * 100, t("validation.currency2Decimals"))
   });
 }
 
@@ -487,7 +491,8 @@ export function UserRowActions({ user, currentUserId, currentUserRole, onUpdated
               <Input
                 id={`balance-${user.id}`}
                 type="number"
-                inputMode="numeric"
+                inputMode="decimal"
+                step="0.01"
                 className="font-mono"
                 {...form.register("balance")}
               />

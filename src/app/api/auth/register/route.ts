@@ -8,7 +8,8 @@ import { CACHE_TAGS } from "@/lib/cache-tags";
 
 const schema = z.object({
   email: z.string().trim().email(),
-  password: z.string().min(6).max(128)
+  password: z.string().min(6).max(128),
+  inviteCode: z.string().trim().max(16).optional()
 });
 
 interface AuthResponseBody {
@@ -37,9 +38,19 @@ export async function POST(req: Request) {
     );
   }
 
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  const cookie = req.headers.get("cookie");
+  if (cookie) headers.cookie = cookie;
+  const xff = req.headers.get("x-forwarded-for");
+  if (xff) headers["x-forwarded-for"] = xff;
+  const realIp = req.headers.get("x-real-ip");
+  if (realIp) headers["x-real-ip"] = realIp;
+  const ua = req.headers.get("user-agent");
+  if (ua) headers["user-agent"] = ua;
+
   const upstream = await fetch(buildBackendUrl("/auth/register"), {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers,
     body: JSON.stringify(parsed.data),
     cache: "no-store"
   });

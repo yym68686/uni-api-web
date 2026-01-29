@@ -3,6 +3,7 @@ export const API_PATHS = {
   billingLedger: "/api/billing/ledger",
   billingTopupCheckout: "/api/billing/topup/checkout",
   billingTopupStatus: "/api/billing/topup/status",
+  inviteSummary: "/api/invite/summary",
   keys: "/api/keys",
   models: "/api/models",
   usage: "/api/usage"

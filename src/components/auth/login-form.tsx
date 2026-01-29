@@ -15,6 +15,7 @@ import { Separator } from "@/components/ui/separator";
 import { BrandWordmark } from "@/components/brand/wordmark";
 import { useI18n } from "@/components/i18n/i18n-provider";
 import type { MessageKey, MessageVars } from "@/lib/i18n/messages";
+import { readLoginPrefill } from "@/lib/login-prefill";
 
 function createLoginSchema(t: (key: MessageKey, vars?: MessageVars) => string) {
   const emailSchema = z.string().trim().email(t("validation.email"));
@@ -50,6 +51,14 @@ export function LoginForm({ appName, nextPath, className }: LoginFormProps) {
     defaultValues: { email: "", password: "" },
     mode: "onChange"
   });
+
+  React.useEffect(() => {
+    const prefill = readLoginPrefill();
+    if (!prefill) return;
+
+    form.setValue("email", prefill.email, { shouldDirty: true, shouldValidate: true });
+    form.setValue("password", prefill.password, { shouldDirty: true, shouldValidate: true });
+  }, [form]);
 
   React.useEffect(() => {
     if (oauthToastShownRef.current) return;

@@ -8,7 +8,7 @@ class UserPublic(BaseModel):
     email: EmailStr
     role: str = "user"
     group: str = "default"
-    balance: int = 0
+    balance: float = 0
     org_id: str | None = Field(default=None, alias="orgId")
     created_at: str = Field(alias="createdAt")
     last_login_at: str | None = Field(default=None, alias="lastLoginAt")
@@ -18,6 +18,7 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
     admin_bootstrap_token: str | None = Field(default=None, alias="adminBootstrapToken")
+    invite_code: str | None = Field(default=None, alias="inviteCode")
 
 
 class LoginRequest(BaseModel):
@@ -34,3 +35,4 @@ class GoogleOAuthExchangeRequest(BaseModel):
     code: str
     code_verifier: str = Field(alias="codeVerifier")
     redirect_uri: str = Field(alias="redirectUri")
+    invite_code: str | None = Field(default=None, alias="inviteCode")

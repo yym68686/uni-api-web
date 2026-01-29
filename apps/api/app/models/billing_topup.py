@@ -30,6 +30,11 @@ class BillingTopup(Base):
     currency: Mapped[str | None] = mapped_column(String(8), nullable=True)
     amount_total_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    payer_email: Mapped[str | None] = mapped_column(String(254), nullable=True)
+    client_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    client_device_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    refunded_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
     )
@@ -40,4 +45,3 @@ class BillingTopup(Base):
         nullable=False,
     )
     completed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-

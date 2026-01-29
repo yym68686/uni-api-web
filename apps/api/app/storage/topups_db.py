@@ -12,9 +12,10 @@ from app.models.billing_topup import BillingTopup
 from app.models.creem_event import CreemEvent
 from app.models.user import User
 from app.storage.billing_db import stage_balance_adjustment_ledger_entry
+from app.storage.referrals_db import maybe_create_referral_bonus_event
 
 
-MAX_BALANCE_USD = 1_000_000_000
+MAX_BALANCE_USD_CENTS = 100_000_000_000
 
 
 def generate_topup_request_id() -> str:
@@ -28,6 +29,8 @@ async def create_billing_topup(
     user_id: uuid.UUID,
     request_id: str,
     units: int,
+    client_ip: str | None = None,
+    client_device_id: str | None = None,
 ) -> BillingTopup:
     row = BillingTopup(
         org_id=org_id,
@@ -35,6 +38,10 @@ async def create_billing_topup(
         request_id=request_id,
         units=int(max(units, 0)),
         status="pending",
+        client_ip=(client_ip.strip()[:64] if isinstance(client_ip, str) and client_ip.strip() else None),
+        client_device_id=(
+            client_device_id.strip()[:64] if isinstance(client_device_id, str) and client_device_id.strip() else None
+        ),
     )
     session.add(row)
     await session.commit()
@@ -69,6 +76,30 @@ async def get_billing_topup_by_request_id(
 ) -> BillingTopup | None:
     return (
         (await session.execute(select(BillingTopup).where(BillingTopup.request_id == request_id)))
+        .scalars()
+        .first()
+    )
+
+
+async def get_billing_topup_by_order_id(session: AsyncSession, *, order_id: str) -> BillingTopup | None:
+    return (
+        (
+            await session.execute(
+                select(BillingTopup).where(BillingTopup.order_id == str(order_id).strip())
+            )
+        )
+        .scalars()
+        .first()
+    )
+
+
+async def get_billing_topup_by_checkout_id(session: AsyncSession, *, checkout_id: str) -> BillingTopup | None:
+    return (
+        (
+            await session.execute(
+                select(BillingTopup).where(BillingTopup.checkout_id == str(checkout_id).strip())
+            )
+        )
         .scalars()
         .first()
     )
@@ -143,6 +174,7 @@ async def complete_billing_topup(
     order_id: str | None,
     currency: str | None,
     amount_total_cents: int | None,
+    payer_email: str | None,
 ) -> BillingTopup | None:
     now = dt.datetime.now(dt.timezone.utc)
     topup = (
@@ -170,12 +202,18 @@ async def complete_billing_topup(
         return None
 
     balance_before = int(user.balance)
-    delta = int(max(topup.units, 0))
-    balance_after = balance_before + delta
-    if balance_after > MAX_BALANCE_USD:
+    delta_cents = int(max(topup.units, 0)) * 100
+    balance_after = balance_before + delta_cents
+    if balance_after > MAX_BALANCE_USD_CENTS:
         raise ValueError("balance too large")
 
     user.balance = balance_after
+    if payer_email and not getattr(user, "first_payment_email", None):
+        user.first_payment_email = payer_email.strip().lower()[:254]
+    if getattr(user, "first_payment_ip", None) is None and getattr(topup, "client_ip", None):
+        user.first_payment_ip = str(getattr(topup, "client_ip", "")).strip()[:64]
+    if getattr(user, "first_payment_device_id", None) is None and getattr(topup, "client_device_id", None):
+        user.first_payment_device_id = str(getattr(topup, "client_device_id", "")).strip()[:64]
     stage_balance_adjustment_ledger_entry(
         session,
         org_id=topup.org_id,
@@ -196,6 +234,14 @@ async def complete_billing_topup(
         topup.currency = currency[:8]
     if amount_total_cents is not None:
         topup.amount_total_cents = int(max(amount_total_cents, 0))
+    if payer_email:
+        topup.payer_email = payer_email.strip().lower()[:254]
+
+    try:
+        await maybe_create_referral_bonus_event(session, org_id=topup.org_id, topup=topup, invitee=user, now=now)
+    except Exception:
+        # Referral is best-effort; top-up must still complete.
+        pass
 
     await session.commit()
     await session.refresh(topup)

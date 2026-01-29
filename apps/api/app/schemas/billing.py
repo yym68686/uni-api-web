@@ -32,4 +32,4 @@ class BillingTopupStatusResponse(BaseModel):
     request_id: str = Field(alias="requestId")
     status: str
     units: int
-    new_balance: int | None = Field(default=None, alias="newBalance")
+    new_balance: float | None = Field(default=None, alias="newBalance")
