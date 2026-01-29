@@ -8,6 +8,7 @@ function isInviteSummaryResponse(value: unknown): value is InviteSummaryResponse
   const v = value as Record<string, unknown>;
   if (typeof v.inviteCode !== "string") return false;
   if (typeof v.invitedTotal !== "number") return false;
+  if (typeof v.visitsTotal !== "number") return false;
   if (typeof v.rewardsPending !== "number") return false;
   if (typeof v.rewardsConfirmed !== "number") return false;
   if (!Array.isArray(v.items)) return false;
@@ -33,4 +34,3 @@ interface InviteContentProps {
 export function InviteContent({ initialSummary }: InviteContentProps) {
   return <InviteContentClient initialSummary={initialSummary} />;
 }
-

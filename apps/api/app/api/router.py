@@ -77,7 +77,7 @@ from app.schemas.billing import (
     BillingTopupCheckoutResponse,
     BillingTopupStatusResponse,
 )
-from app.schemas.invite import InviteSummaryResponse
+from app.schemas.invite import InviteSummaryResponse, InviteVisitRequest
 from app.schemas.models import ModelsListResponse, OpenAIModelsListResponse, OpenAIModelItem
 from app.schemas.models_admin import AdminModelsListResponse, AdminModelUpdateRequest, AdminModelUpdateResponse
 from app.db import get_db_session
@@ -2255,6 +2255,42 @@ async def billing_ledger(
     return BillingLedgerListResponse(items=items)  # type: ignore[arg-type]
 
 
+@router.post("/invite/visit")
+async def invite_visit(
+    payload: InviteVisitRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+) -> dict:
+    raw_code = str(getattr(payload, "invite_code", None) or "").strip()
+    if raw_code == "":
+        return {"ok": True}
+
+    from app.constants import DEVICE_ID_COOKIE_NAME
+    from app.storage.invite_visits_db import record_invite_visit
+
+    xff = request.headers.get("x-forwarded-for")
+    client_ip = (
+        xff.split(",")[0].strip()[:64]
+        if xff and xff.strip()
+        else (request.client.host if request.client else None)
+    )
+    device_id = request.cookies.get(DEVICE_ID_COOKIE_NAME)
+    user_agent = request.headers.get("user-agent")
+
+    try:
+        await record_invite_visit(
+            session,
+            invite_code=raw_code,
+            visitor_device_id=device_id,
+            visitor_ip=client_ip,
+            visitor_user_agent=user_agent,
+        )
+    except Exception:
+        logger.exception("invite: visit record failed")
+
+    return {"ok": True}
+
+
 @router.get("/invite/summary", response_model=InviteSummaryResponse)
 async def invite_summary(
     session: AsyncSession = Depends(get_db_session),
@@ -2264,6 +2300,7 @@ async def invite_summary(
     _ = membership
     from decimal import Decimal
 
+    from app.models.invite_visit import InviteVisit
     from app.models.referral_bonus_event import ReferralBonusEvent
     from app.storage.invites_db import ensure_user_invite_code
 
@@ -2271,6 +2308,12 @@ async def invite_summary(
 
     invited_total = (
         await session.execute(select(func.count()).select_from(User).where(User.invited_by_user_id == current_user.id))
+    ).scalar_one()
+
+    visits_total = (
+        await session.execute(
+            select(func.count()).select_from(InviteVisit).where(InviteVisit.inviter_user_id == current_user.id)
+        )
     ).scalar_one()
 
     rewards_pending = (
@@ -2341,6 +2384,7 @@ async def invite_summary(
     return {
         "inviteCode": invite_code,
         "invitedTotal": int(invited_total or 0),
+        "visitsTotal": int(visits_total or 0),
         "rewardsPending": int(rewards_pending or 0),
         "rewardsConfirmed": int(rewards_confirmed or 0),
         "items": items,

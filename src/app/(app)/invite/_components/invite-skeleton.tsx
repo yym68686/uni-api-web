@@ -24,8 +24,8 @@ export function InviteContentSkeleton() {
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {Array.from({ length: 3 }).map((_, idx) => (
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, idx) => (
           <div
             key={idx}
             className={cn(

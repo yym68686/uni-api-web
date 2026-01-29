@@ -9,6 +9,7 @@ import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
+import { API_PATHS } from "@/lib/api-paths";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
@@ -86,6 +87,7 @@ export function RegisterForm({ appName, nextPath, defaultInviteCode, className }
   const router = useRouter();
   const { t } = useI18n();
   const oauthToastShownRef = React.useRef(false);
+  const inviteVisitTrackedRef = React.useRef(false);
 
   const schema = React.useMemo(() => createRegisterSchema(t), [t]);
   const emailSchema = schema.shape.email;
@@ -113,6 +115,21 @@ export function RegisterForm({ appName, nextPath, defaultInviteCode, className }
   React.useEffect(() => {
     ensureDeviceIdCookie();
   }, []);
+
+  React.useEffect(() => {
+    if (inviteVisitTrackedRef.current) return;
+    const code = String(defaultInviteCode ?? "").trim();
+    if (!code) return;
+    if (!/^[a-zA-Z0-9]{1,16}$/.test(code)) return;
+    inviteVisitTrackedRef.current = true;
+
+    ensureDeviceIdCookie();
+    void fetch(API_PATHS.inviteVisit, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ inviteCode: code })
+    }).catch(() => null);
+  }, [defaultInviteCode]);
 
   React.useEffect(() => {
     if (cooldown <= 0) return;

@@ -356,6 +356,7 @@ export interface InviteeItem {
 export interface InviteSummaryResponse {
   inviteCode: string;
   invitedTotal: number;
+  visitsTotal: number;
   rewardsPending: number;
   rewardsConfirmed: number;
   items: InviteeItem[];

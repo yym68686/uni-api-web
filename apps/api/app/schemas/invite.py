@@ -3,6 +3,10 @@ from __future__ import annotations
 from pydantic import BaseModel, EmailStr, Field
 
 
+class InviteVisitRequest(BaseModel):
+    invite_code: str | None = Field(default=None, alias="inviteCode")
+
+
 class InviteeItem(BaseModel):
     id: str
     email: EmailStr
@@ -14,7 +18,7 @@ class InviteeItem(BaseModel):
 class InviteSummaryResponse(BaseModel):
     invite_code: str = Field(alias="inviteCode")
     invited_total: int = Field(alias="invitedTotal")
+    visits_total: int = Field(alias="visitsTotal")
     rewards_pending: int = Field(alias="rewardsPending")
     rewards_confirmed: int = Field(alias="rewardsConfirmed")
     items: list[InviteeItem]
-

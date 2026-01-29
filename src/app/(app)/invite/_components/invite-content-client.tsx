@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { CheckCircle2, Clock, Copy, Gift, Users } from "lucide-react";
+import { CheckCircle2, Clock, Copy, Eye, Gift, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import { API_PATHS } from "@/lib/api-paths";
@@ -23,6 +23,7 @@ function isInviteSummaryResponse(value: unknown): value is InviteSummaryResponse
   const v = value as Record<string, unknown>;
   if (typeof v.inviteCode !== "string") return false;
   if (typeof v.invitedTotal !== "number") return false;
+  if (typeof v.visitsTotal !== "number") return false;
   if (typeof v.rewardsPending !== "number") return false;
   if (typeof v.rewardsConfirmed !== "number") return false;
   if (!Array.isArray(v.items)) return false;
@@ -102,6 +103,11 @@ export function InviteContentClient({ initialSummary }: InviteContentClientProps
   }
 
   const kpiTrend = t("invite.kpi.trend");
+  const conversionRate =
+    summary.visitsTotal > 0
+      ? `${((summary.invitedTotal / summary.visitsTotal) * 100).toFixed(1)}%`
+      : "—";
+  const conversionLabel = t("invite.kpi.conversion", { rate: conversionRate });
 
   return (
     <div className="space-y-6">
@@ -136,13 +142,20 @@ export function InviteContentClient({ initialSummary }: InviteContentClientProps
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatsCard
           title={t("invite.kpi.invited")}
           value={String(summary.invitedTotal)}
           trend={kpiTrend}
           icon={Users}
           iconGradientClassName="from-primary/30 to-primary/10 text-primary"
+        />
+        <StatsCard
+          title={t("invite.kpi.visits")}
+          value={String(summary.visitsTotal)}
+          trend={conversionLabel}
+          icon={Eye}
+          iconGradientClassName="from-muted/30 to-muted/10 text-muted-foreground"
         />
         <StatsCard
           title={t("invite.kpi.pending")}

@@ -4,6 +4,7 @@ from app.models.balance_ledger_entry import BalanceLedgerEntry as BalanceLedgerE
 from app.models.billing_topup import BillingTopup as BillingTopup
 from app.models.creem_event import CreemEvent as CreemEvent
 from app.models.email_verification_code import EmailVerificationCode as EmailVerificationCode
+from app.models.invite_visit import InviteVisit as InviteVisit
 from app.models.llm_channel import LlmChannel as LlmChannel
 from app.models.llm_channel_group import LlmChannelGroup as LlmChannelGroup
 from app.models.llm_model_config import LlmModelConfig as LlmModelConfig
