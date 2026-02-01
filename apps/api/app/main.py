@@ -36,6 +36,13 @@ def create_app() -> FastAPI:
             )
             await conn.exec_driver_sql(
                 "ALTER TABLE IF EXISTS users "
+                "ALTER COLUMN balance SET DEFAULT 0"
+            )
+            await conn.exec_driver_sql(
+                "UPDATE users SET balance = 0 WHERE balance IS NULL"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS users "
                 "ADD COLUMN IF NOT EXISTS balance_usd_cents integer NOT NULL DEFAULT 0"
             )
             await conn.exec_driver_sql(
