@@ -166,6 +166,14 @@ def create_app() -> FastAPI:
                 "ALTER TABLE IF EXISTS email_verification_codes "
                 "ALTER COLUMN email TYPE varchar(254)"
             )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS email_verification_codes "
+                "ADD COLUMN IF NOT EXISTS source_ip varchar(64)"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS email_verification_codes "
+                "ADD COLUMN IF NOT EXISTS used_at timestamptz"
+            )
 
             await conn.exec_driver_sql(
                 "ALTER TABLE IF EXISTS api_keys "
