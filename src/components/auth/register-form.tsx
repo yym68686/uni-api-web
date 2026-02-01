@@ -30,6 +30,10 @@ function formatUpstreamMessage(
   const message = String((json as { message?: string }).message ?? "").trim();
   if (message === "") return fallback;
 
+  if (message === "register_failed" || message === "Register failed") return t("register.failed");
+  if (message === "invalid_payload" || message === "Invalid payload") return t("common.formInvalid");
+  if (message === "invalid_upstream_response") return t("register.failed");
+
   if (message === "registration disabled") return t("auth.oauth.registrationDisabled");
   if (message === "email already registered") return t("profile.security.emailAlreadyRegistered");
   if (message === "invalid invite code") return t("register.inviteCodeInvalid");
