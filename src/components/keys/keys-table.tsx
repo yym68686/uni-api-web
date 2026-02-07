@@ -1,12 +1,12 @@
 "use client";
 
 import * as React from "react";
-import { Copy, Loader2, MoreHorizontal, PencilLine, RotateCcw, Trash2 } from "lucide-react";
+import { Copy, DollarSign, Loader2, MoreHorizontal, PencilLine, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import type { ApiKeyRevealResponse } from "@/lib/types";
 import type { ApiKeyItem } from "@/lib/types";
-import { formatUsd } from "@/lib/format";
+import { formatUsd, formatUsdFixed2 } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { ClientDateTime } from "@/components/common/client-datetime";
 import { Badge } from "@/components/ui/badge";
@@ -43,6 +43,7 @@ interface KeysTableProps {
   onToggleRevoked: (id: string, revoked: boolean) => Promise<void> | void;
   onDelete: (id: string) => Promise<void> | void;
   onRename: (id: string, name: string) => Promise<void> | void;
+  onSetSpendLimit: (id: string, spendLimitUsd: string | null) => Promise<void> | void;
   emptyState?: React.ReactNode;
   className?: string;
 }
@@ -53,6 +54,7 @@ export function KeysTable({
   onToggleRevoked,
   onDelete,
   onRename,
+  onSetSpendLimit,
   emptyState,
   className
 }: KeysTableProps) {
@@ -64,6 +66,9 @@ export function KeysTable({
   const [renameTarget, setRenameTarget] = React.useState<ApiKeyItem | null>(null);
   const [renameValue, setRenameValue] = React.useState("");
   const [renamingId, setRenamingId] = React.useState<string | null>(null);
+  const [limitTarget, setLimitTarget] = React.useState<ApiKeyItem | null>(null);
+  const [limitValue, setLimitValue] = React.useState("");
+  const [savingLimitId, setSavingLimitId] = React.useState<string | null>(null);
 
   async function toggleRevoked(id: string, revoked: boolean) {
     setRevokingId(id);
@@ -106,6 +111,39 @@ export function KeysTable({
       toast.error(err instanceof Error ? err.message : t("keys.toast.updateFailed"));
     } finally {
       setRenamingId(null);
+    }
+  }
+
+  async function saveSpendLimit(id: string, raw: string) {
+    const trimmed = raw.trim();
+    let spendLimitUsd: string | null = null;
+
+    if (trimmed.length > 0) {
+      if (!/^\d+(\.\d{1,2})?$/.test(trimmed)) {
+        toast.error(t("keys.limit.invalid"));
+        return;
+      }
+      const parsed = Number(trimmed);
+      if (!Number.isFinite(parsed)) {
+        toast.error(t("keys.limit.invalid"));
+        return;
+      }
+      if (parsed <= 0) {
+        toast.error(t("keys.limit.positive"));
+        return;
+      }
+      spendLimitUsd = trimmed;
+    }
+
+    if (savingLimitId) return;
+    setSavingLimitId(id);
+    try {
+      await onSetSpendLimit(id, spendLimitUsd);
+      setLimitTarget(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("keys.toast.updateFailed"));
+    } finally {
+      setSavingLimitId(null);
     }
   }
 
@@ -166,6 +204,7 @@ export function KeysTable({
                 <TableHead>{t("keys.table.key")}</TableHead>
                 <TableHead>{t("keys.table.lastUsed")}</TableHead>
                 <TableHead>{t("keys.table.totalSpend")}</TableHead>
+                <TableHead>{t("keys.table.limit")}</TableHead>
                 <TableHead>{t("keys.table.createdAt")}</TableHead>
                 <TableHead>{t("keys.table.status")}</TableHead>
                 <TableHead className="w-12 text-right"> </TableHead>
@@ -175,7 +214,7 @@ export function KeysTable({
               {items.map((k) => {
                 const revoked = Boolean(k.revokedAt);
                 const isCopying = copyingId === k.id;
-                return (
+                  return (
                   <TableRow key={k.id} className="uai-cv-auto">
                     <TableCell className="font-medium">{k.name}</TableCell>
                     <TableCell className="font-mono text-xs tabular-nums">
@@ -213,6 +252,15 @@ export function KeysTable({
                       {formatSpendUsd(k.spendUsd)}
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
+                      {typeof k.spendLimitUsd === "number" && Number.isFinite(k.spendLimitUsd) ? (
+                        <span className="font-mono tabular-nums">
+                          {formatUsdFixed2(k.spendLimitUsd, locale)}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">{t("keys.table.noLimit")}</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
                       <ClientDateTime value={k.createdAt} locale={locale} />
                     </TableCell>
                     <TableCell>
@@ -244,6 +292,20 @@ export function KeysTable({
                           >
                             <PencilLine className="mr-2 h-4 w-4" />
                             {t("keys.table.rename")}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            disabled={deletingId === k.id || revokingId === k.id || isCopying}
+                            onClick={() => {
+                              setLimitTarget(k);
+                              setLimitValue(
+                                typeof k.spendLimitUsd === "number" && Number.isFinite(k.spendLimitUsd) && k.spendLimitUsd > 0
+                                  ? String(k.spendLimitUsd)
+                                  : ""
+                              );
+                            }}
+                          >
+                            <DollarSign className="mr-2 h-4 w-4" />
+                            {t("keys.table.setLimit")}
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             disabled={isCopying}
@@ -337,6 +399,77 @@ export function KeysTable({
                 ) : (
                   <>
                     <PencilLine className="h-4 w-4" />
+                    {t("common.save")}
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog
+          open={limitTarget != null}
+          onOpenChange={(open) => {
+            if (!open) setLimitTarget(null);
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{t("keys.limit.title")}</DialogTitle>
+              <DialogDescription>{t("keys.limit.desc")}</DialogDescription>
+            </DialogHeader>
+            {limitTarget ? (
+              <div className="rounded-xl border border-border bg-muted/20 p-4">
+                <div className="text-sm font-medium text-foreground">{limitTarget.name}</div>
+                <div className="mt-1 text-xs font-mono text-muted-foreground">{limitTarget.prefix}</div>
+                <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
+                  <span>{t("keys.limit.currentSpend")}</span>
+                  <span className="font-mono tabular-nums text-foreground">
+                    {formatUsdFixed2(limitTarget.spendUsd, locale)}
+                  </span>
+                </div>
+              </div>
+            ) : null}
+            <div className="space-y-2">
+              <Label htmlFor="key-limit">{t("keys.limit.label")}</Label>
+              <Input
+                id="key-limit"
+                value={limitValue}
+                placeholder={t("keys.limit.placeholder")}
+                inputMode="decimal"
+                autoComplete="off"
+                onChange={(e) => setLimitValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter") return;
+                  if (!limitTarget) return;
+                  e.preventDefault();
+                  void saveSpendLimit(limitTarget.id, limitValue);
+                }}
+              />
+              <p className="text-xs text-muted-foreground">{t("keys.limit.help")}</p>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="ghost" onClick={() => setLimitTarget(null)}>
+                {t("common.cancel")}
+              </Button>
+              <Button
+                type="button"
+                disabled={!limitTarget || savingLimitId === limitTarget.id}
+                onClick={() => {
+                  if (!limitTarget) return;
+                  void saveSpendLimit(limitTarget.id, limitValue);
+                }}
+              >
+                {limitTarget && savingLimitId === limitTarget.id ? (
+                  <>
+                    <span className="inline-flex animate-spin">
+                      <Loader2 className="h-4 w-4" />
+                    </span>
+                    {t("common.saving")}
+                  </>
+                ) : (
+                  <>
+                    <DollarSign className="h-4 w-4" />
                     {t("common.save")}
                   </>
                 )}

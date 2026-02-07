@@ -15,3 +15,10 @@ export function getPublicApiBaseUrl() {
   const normalized = normalizeBaseUrl(raw);
   return normalized.length > 0 ? normalized : null;
 }
+
+export function getPublicAppBaseUrl() {
+  const raw = process.env.APP_PUBLIC_URL?.trim();
+  if (!raw) return null;
+  const normalized = normalizeBaseUrl(raw);
+  return normalized.length > 0 ? normalized : null;
+}

@@ -28,6 +28,7 @@ export interface ApiKeyItem {
   lastUsedAt?: string;
   revokedAt?: string;
   spendUsd: number;
+  spendLimitUsd?: number | null;
 }
 
 export interface ApiKeysListResponse {
@@ -46,6 +47,7 @@ export interface ApiKeyCreateResponse {
 export interface ApiKeyUpdateRequest {
   revoked?: boolean | null;
   name?: string | null;
+  spendLimitUsd?: number | null;
 }
 
 export interface ApiKeyUpdateResponse {

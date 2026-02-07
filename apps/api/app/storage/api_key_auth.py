@@ -45,6 +45,11 @@ async def authenticate_api_key(
     if user.banned_at is not None:
         raise ValueError("banned")
 
+    limit = getattr(row, "spend_limit_usd_micros", None)
+    spend_total = int(getattr(row, "spend_usd_micros_total", 0) or 0)
+    if limit is not None and spend_total >= int(limit):
+        raise ValueError("api_key_spend_limit_exceeded")
+
     row.last_used_at = dt.datetime.now(dt.timezone.utc)
     await session.commit()
     await session.refresh(row)
@@ -52,4 +57,3 @@ async def authenticate_api_key(
     org = await ensure_default_org(session)
     await ensure_membership(session, org_id=org.id, user_id=user.id, role="developer")
     return row, user
-

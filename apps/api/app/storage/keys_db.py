@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.api_key import ApiKey
-from app.models.llm_usage_event import LlmUsageEvent
 from app.schemas.keys import (
     ApiKeyCreateRequest,
     ApiKeyCreateResponse,
@@ -20,6 +19,7 @@ from app.security import generate_api_key, key_prefix, sha256_hex
 
 
 USD_MICROS = Decimal("1000000")
+USD_DECIMAL_2DP = Decimal("0.01")
 
 
 def _dt_iso(value: dt.datetime | None) -> str | None:
@@ -31,8 +31,13 @@ def _dt_iso(value: dt.datetime | None) -> str | None:
 def _micros_to_usd(value: int) -> float:
     return float((Decimal(int(value)) / USD_MICROS).quantize(Decimal("0.0000001")))
 
+def _micros_to_usd_2(value: int) -> float:
+    return float((Decimal(int(value)) / USD_MICROS).quantize(USD_DECIMAL_2DP))
 
-def _to_item(row: ApiKey, *, spend_usd: float = 0.0) -> ApiKeyItem:
+def _to_item(row: ApiKey) -> ApiKeyItem:
+    spend_micros = int(getattr(row, "spend_usd_micros_total", 0) or 0)
+    limit_micros = getattr(row, "spend_limit_usd_micros", None)
+    limit_usd = _micros_to_usd_2(int(limit_micros)) if limit_micros is not None else None
     return ApiKeyItem(
         id=str(row.id),
         name=row.name,
@@ -40,34 +45,21 @@ def _to_item(row: ApiKey, *, spend_usd: float = 0.0) -> ApiKeyItem:
         createdAt=_dt_iso(row.created_at) or dt.datetime.now(dt.timezone.utc).isoformat(),
         lastUsedAt=_dt_iso(row.last_used_at),
         revokedAt=_dt_iso(row.revoked_at),
-        spendUsd=float(spend_usd),
+        spendUsd=_micros_to_usd(spend_micros),
+        spendLimitUsd=limit_usd,
     )
 
 
 async def list_api_keys(session: AsyncSession, user_id: uuid.UUID) -> ApiKeysListResponse:
-    spend_sub = (
-        select(
-            LlmUsageEvent.api_key_id.label("api_key_id"),
-            func.coalesce(func.sum(LlmUsageEvent.cost_usd_micros), 0).label("cost_micros"),
-        )
-        .where(LlmUsageEvent.user_id == user_id)
-        .group_by(LlmUsageEvent.api_key_id)
-        .subquery()
-    )
-
     rows = (
         await session.execute(
-            select(ApiKey, func.coalesce(spend_sub.c.cost_micros, 0))
-            .outerjoin(spend_sub, spend_sub.c.api_key_id == ApiKey.id)
+            select(ApiKey)
             .where(ApiKey.user_id == user_id)
             .order_by(ApiKey.created_at.desc())
         )
-    ).all()
+    ).scalars().all()
 
-    items: list[ApiKeyItem] = []
-    for key, cost_micros in rows:
-        items.append(_to_item(key, spend_usd=_micros_to_usd(int(cost_micros or 0))))
-    return ApiKeysListResponse(items=items)
+    return ApiKeysListResponse(items=[_to_item(row) for row in rows])
 
 
 async def create_api_key(
@@ -85,7 +77,7 @@ async def create_api_key(
     session.add(row)
     await session.commit()
     await session.refresh(row)
-    return ApiKeyCreateResponse(item=_to_item(row, spend_usd=0.0), key=full_key)
+    return ApiKeyCreateResponse(item=_to_item(row), key=full_key)
 
 
 async def reveal_api_key(
@@ -142,6 +134,20 @@ async def update_api_key(
         else:
             if row.revoked_at is not None:
                 row.revoked_at = None
+
+    if "spend_limit_usd" in fields_set:
+        raw_limit = input.spend_limit_usd
+        if raw_limit is None:
+            row.spend_limit_usd_micros = None
+        else:
+            limit = Decimal(raw_limit)
+            if limit <= 0:
+                raise ValueError("invalid spend limit")
+            quantized = limit.quantize(USD_DECIMAL_2DP, rounding=ROUND_HALF_UP)
+            if quantized != limit:
+                raise ValueError("spend limit must have at most 2 decimals")
+            cents = int((quantized * Decimal("100")).to_integral_value(rounding=ROUND_HALF_UP))
+            row.spend_limit_usd_micros = int(max(cents, 0)) * 10_000
 
     await session.commit()
     await session.refresh(row)

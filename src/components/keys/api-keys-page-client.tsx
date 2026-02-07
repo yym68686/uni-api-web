@@ -101,6 +101,10 @@ export function ApiKeysPageClient({ initialItems, publicApiBaseUrl, autoRevalida
     await patchKey(id, { name });
   }
 
+  async function setSpendLimit(id: string, spendLimitUsd: string | null) {
+    await patchKey(id, { spendLimitUsd });
+  }
+
   async function deleteKey(id: string) {
     const res = await fetch(`/api/keys/${id}`, { method: "DELETE" });
     const json: unknown = await res.json().catch(() => null);
@@ -218,6 +222,10 @@ export function ApiKeysPageClient({ initialItems, publicApiBaseUrl, autoRevalida
             onRename={async (id, name) => {
               await renameKey(id, name);
               toast.success(t("keys.toast.renamed"));
+            }}
+            onSetSpendLimit={async (id, spendLimitUsd) => {
+              await setSpendLimit(id, spendLimitUsd);
+              toast.success(spendLimitUsd ? t("keys.toast.limitUpdated") : t("keys.toast.limitCleared"));
             }}
             emptyState={
               <div className="p-6">

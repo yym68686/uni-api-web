@@ -191,6 +191,14 @@ def create_app() -> FastAPI:
                 "ADD COLUMN IF NOT EXISTS key_plaintext text"
             )
             await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS api_keys "
+                "ADD COLUMN IF NOT EXISTS spend_usd_micros_total bigint NOT NULL DEFAULT 0"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS api_keys "
+                "ADD COLUMN IF NOT EXISTS spend_limit_usd_micros bigint"
+            )
+            await conn.exec_driver_sql(
                 "DO $$ BEGIN "
                 "IF NOT EXISTS ("
                 "  SELECT 1 FROM pg_constraint WHERE conname = 'api_keys_user_id_fkey'"
@@ -205,6 +213,23 @@ def create_app() -> FastAPI:
                 "UPDATE api_keys "
                 "SET user_id = (SELECT id FROM users ORDER BY created_at ASC LIMIT 1) "
                 "WHERE user_id IS NULL"
+            )
+            await conn.exec_driver_sql(
+                "UPDATE api_keys "
+                "SET spend_usd_micros_total = 0 "
+                "WHERE spend_usd_micros_total IS NULL"
+            )
+            await conn.exec_driver_sql(
+                "WITH sums AS ("
+                "  SELECT api_key_id, COALESCE(SUM(cost_usd_micros), 0) AS cost_micros "
+                "  FROM llm_usage_events "
+                "  WHERE api_key_id IS NOT NULL "
+                "  GROUP BY api_key_id"
+                ") "
+                "UPDATE api_keys k "
+                "SET spend_usd_micros_total = sums.cost_micros "
+                "FROM sums "
+                "WHERE k.id = sums.api_key_id"
             )
 
             await conn.exec_driver_sql(

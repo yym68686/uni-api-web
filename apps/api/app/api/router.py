@@ -1081,7 +1081,7 @@ async def _require_user_for_models(request: Request, session: AsyncSession):
             _api_key, user = await authenticate_api_key(session, authorization=auth)
         except ValueError as e:
             detail = str(e) or "unauthorized"
-            status = 403 if detail == "banned" else 401
+            status = 403 if detail in {"banned", "api_key_spend_limit_exceeded"} else 401
             raise HTTPException(status_code=status, detail=detail) from e
     else:
         token = bearer or request.cookies.get(SESSION_COOKIE_NAME)
@@ -1344,7 +1344,7 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
         api_key, user = await authenticate_api_key(session, authorization=auth)
     except ValueError as e:
         detail = str(e) or "unauthorized"
-        status = 403 if detail == "banned" else 401
+        status = 403 if detail in {"banned", "api_key_spend_limit_exceeded"} else 401
         raise HTTPException(status_code=status, detail=detail) from e
 
     raw = await request.body()
@@ -1589,7 +1589,7 @@ async def responses(request: Request, session: AsyncSession = Depends(get_db_ses
         api_key, user = await authenticate_api_key(session, authorization=auth)
     except ValueError as e:
         detail = str(e) or "unauthorized"
-        status = 403 if detail == "banned" else 401
+        status = 403 if detail in {"banned", "api_key_spend_limit_exceeded"} else 401
         raise HTTPException(status_code=status, detail=detail) from e
 
     raw = await request.body()

@@ -7,7 +7,7 @@ import { GeistSans } from "geist/font/sans";
 import { Toaster } from "sonner";
 
 import { cn } from "@/lib/utils";
-import { getAppName, getPublicApiBaseUrl } from "@/lib/app-config";
+import { getAppName, getPublicApiBaseUrl, getPublicAppBaseUrl } from "@/lib/app-config";
 import { getRequestLocale } from "@/lib/i18n/server";
 import { t } from "@/lib/i18n/messages";
 import { I18nProvider } from "@/components/i18n/i18n-provider";
@@ -40,7 +40,9 @@ const THEME_INIT_SCRIPT = `
 
 export function generateMetadata(): Metadata {
   const appName = getAppName();
+  const base = getPublicAppBaseUrl();
   return {
+    metadataBase: base ? new URL(base) : undefined,
     title: {
       default: appName,
       template: `%s · ${appName}`

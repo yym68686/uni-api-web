@@ -70,9 +70,9 @@ export default async function LandingPage() {
             <a href="#pricing" className="transition-colors hover:text-foreground">
               {t(locale, "landing.nav.pricing")}
             </a>
-            <a href="#docs" className="transition-colors hover:text-foreground">
+            <Link href="/docs" className="transition-colors hover:text-foreground">
               {t(locale, "landing.nav.docs")}
-            </a>
+            </Link>
           </nav>
 
           <div className="flex items-center gap-2">
@@ -92,7 +92,7 @@ export default async function LandingPage() {
               )}
             >
               {t(locale, "landing.getStarted")}
-              <ArrowRight className="h-4 w-4" />
+              <ArrowRight suppressHydrationWarning className="h-4 w-4" />
             </IntentLink>
           </div>
         </div>
@@ -106,7 +106,7 @@ export default async function LandingPage() {
           <div className="grid gap-8 lg:grid-cols-2 lg:items-center">
             <div className="space-y-7">
               <div className="inline-flex items-center gap-2 rounded-full border border-border bg-background/40 px-3 py-1 text-xs text-muted-foreground backdrop-blur">
-                <Sparkles className="h-3.5 w-3.5 text-primary" />
+                <Sparkles suppressHydrationWarning className="h-3.5 w-3.5 text-primary" />
                 {t(locale, "landing.hero.badge")}
               </div>
 
@@ -121,7 +121,7 @@ export default async function LandingPage() {
               <div className="grid gap-3 sm:grid-cols-3">
                 <div className="rounded-xl border border-border bg-background/35 p-4 backdrop-blur">
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <BadgeCheck className="h-4 w-4 text-success" />
+                    <BadgeCheck suppressHydrationWarning className="h-4 w-4 text-success" />
                     {t(locale, "landing.pill.keys.label")}
                   </div>
                   <div className="mt-2 text-sm font-medium text-foreground">{t(locale, "landing.pill.keys.title")}</div>
@@ -129,7 +129,7 @@ export default async function LandingPage() {
                 </div>
                 <div className="rounded-xl border border-border bg-background/35 p-4 backdrop-blur">
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <LineChart className="h-4 w-4 text-primary" />
+                    <LineChart suppressHydrationWarning className="h-4 w-4 text-primary" />
                     {t(locale, "landing.pill.spend.label")}
                   </div>
                   <div className="mt-2 text-sm font-medium text-foreground">{t(locale, "landing.pill.spend.title")}</div>
@@ -137,7 +137,7 @@ export default async function LandingPage() {
                 </div>
                 <div className="rounded-xl border border-border bg-background/35 p-4 backdrop-blur">
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <ScrollText className="h-4 w-4 text-warning" />
+                    <ScrollText suppressHydrationWarning className="h-4 w-4 text-warning" />
                     {t(locale, "landing.pill.logs.label")}
                   </div>
                   <div className="mt-2 text-sm font-medium text-foreground">{t(locale, "landing.pill.logs.title")}</div>
@@ -154,7 +154,7 @@ export default async function LandingPage() {
                   )}
                 >
                   {t(locale, "register.title")}
-                  <ArrowRight className="h-4 w-4" />
+                  <ArrowRight suppressHydrationWarning className="h-4 w-4" />
                 </IntentLink>
                 <IntentLink
                   href="/login"
@@ -169,7 +169,7 @@ export default async function LandingPage() {
             <SpotlightSurface className="rounded-2xl">
               <CardHeader className="pb-4">
                 <CardTitle className="flex items-center gap-2">
-                  <Layers3 className="h-5 w-5 text-muted-foreground" />
+                  <Layers3 suppressHydrationWarning className="h-5 w-5 text-muted-foreground" />
                   {t(locale, "landing.mock.title")}
                 </CardTitle>
                 <CardDescription>{t(locale, "landing.mock.desc")}</CardDescription>
@@ -196,7 +196,7 @@ export default async function LandingPage() {
                 <div className="overflow-hidden rounded-xl border border-border bg-background/35">
                   <div className="flex items-center justify-between border-b border-border bg-background/40 px-3 py-2">
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Zap className="h-4 w-4 text-primary" />
+                      <Zap suppressHydrationWarning className="h-4 w-4 text-primary" />
                       {t(locale, "landing.mock.requestLog")}
                     </div>
                     <div className="text-[11px] text-muted-foreground">{t(locale, "landing.mock.metrics")}</div>
@@ -257,7 +257,7 @@ export default async function LandingPage() {
             >
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <LineChart className="h-5 w-5 text-primary" />
+                  <LineChart suppressHydrationWarning className="h-5 w-5 text-primary" />
                   {t(locale, "landing.features.card.spend.title")}
                 </CardTitle>
                 <CardDescription>{t(locale, "landing.features.card.spend.desc")}</CardDescription>
@@ -276,7 +276,7 @@ export default async function LandingPage() {
             >
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <KeyRound className="h-5 w-5 text-warning" />
+                  <KeyRound suppressHydrationWarning className="h-5 w-5 text-warning" />
                   {t(locale, "landing.features.card.keys.title")}
                 </CardTitle>
                 <CardDescription>{t(locale, "landing.features.card.keys.desc")}</CardDescription>
@@ -296,7 +296,7 @@ export default async function LandingPage() {
             >
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <ScrollText className="h-5 w-5 text-muted-foreground" />
+                  <ScrollText suppressHydrationWarning className="h-5 w-5 text-muted-foreground" />
                   {t(locale, "landing.features.card.logs.title")}
                 </CardTitle>
                 <CardDescription>{t(locale, "landing.features.card.logs.desc")}</CardDescription>
@@ -312,7 +312,7 @@ export default async function LandingPage() {
           <Card className="rounded-2xl border-border bg-card/40">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <Shield className="h-5 w-5 text-success" />
+                <Shield suppressHydrationWarning className="h-5 w-5 text-success" />
                 {t(locale, "landing.section.security.title")}
               </CardTitle>
               <CardDescription>{t(locale, "landing.section.security.desc")}</CardDescription>
@@ -338,7 +338,7 @@ export default async function LandingPage() {
           <Card className="rounded-2xl border-border bg-card/40">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <CreditCard className="h-5 w-5 text-primary" />
+                <CreditCard suppressHydrationWarning className="h-5 w-5 text-primary" />
                 {t(locale, "landing.section.pricing.title")}
               </CardTitle>
               <CardDescription>{t(locale, "landing.section.pricing.desc")}</CardDescription>
@@ -368,7 +368,7 @@ export default async function LandingPage() {
           <Card className="rounded-2xl border-border bg-card/40">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <BookOpen className="h-5 w-5 text-muted-foreground" />
+                <BookOpen suppressHydrationWarning className="h-5 w-5 text-muted-foreground" />
                 {t(locale, "landing.section.docs.title")}
               </CardTitle>
               <CardDescription>{t(locale, "landing.section.docs.desc")}</CardDescription>
@@ -379,7 +379,7 @@ export default async function LandingPage() {
               </div>
               <IntentLink href="/dashboard" variant="outline" className="rounded-xl bg-transparent">
                 {t(locale, "landing.cta.openConsole")}
-                <ArrowRight className="h-4 w-4" />
+                <ArrowRight suppressHydrationWarning className="h-4 w-4" />
               </IntentLink>
             </CardContent>
           </Card>
@@ -412,7 +412,7 @@ export default async function LandingPage() {
                 href="mailto:support@0-0.pro"
                 className="inline-flex items-center gap-2 font-mono transition-colors hover:text-foreground"
               >
-                <Mail className="h-4 w-4 text-muted-foreground" />
+                <Mail suppressHydrationWarning className="h-4 w-4 text-muted-foreground" />
                 <span className="text-muted-foreground">{t(locale, "landing.footer.support")}:</span>
                 <span>support@0-0.pro</span>
               </a>

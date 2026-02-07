@@ -5,9 +5,10 @@ import uuid
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.api_key import ApiKey
 from app.models.llm_usage_event import LlmUsageEvent
 
 
@@ -36,6 +37,7 @@ async def record_usage_event(
     ttft_ms: int = 0,
     source_ip: str | None = None,
 ) -> None:
+    computed_cost = int(max(0, cost_usd_micros))
     row = LlmUsageEvent(
         org_id=org_id,
         user_id=user_id,
@@ -47,12 +49,19 @@ async def record_usage_event(
         cached_tokens=int(max(0, cached_tokens)),
         output_tokens=int(max(0, output_tokens)),
         total_tokens=int(max(0, total_tokens)),
-        cost_usd_micros=int(max(0, cost_usd_micros)),
+        cost_usd_micros=computed_cost,
         total_duration_ms=int(max(0, total_duration_ms)),
         ttft_ms=int(max(0, ttft_ms)),
         source_ip=(source_ip.strip()[:64] if isinstance(source_ip, str) and source_ip.strip() else None),
     )
     session.add(row)
+
+    if api_key_id is not None and computed_cost > 0:
+        await session.execute(
+            update(ApiKey)
+            .where(ApiKey.id == api_key_id)
+            .values(spend_usd_micros_total=ApiKey.spend_usd_micros_total + computed_cost)
+        )
     await session.commit()
 
 
