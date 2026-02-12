@@ -78,6 +78,11 @@ const DOCS_GROUPS: readonly DocsNavGroupDefinition[] = [
     id: "console",
     title: { en: "Console", "zh-CN": "控制台" },
     pageIds: ["console-keys", "console-logs", "console-billing"]
+  },
+  {
+    id: "integrations",
+    title: { en: "Integrations", "zh-CN": "集成" },
+    pageIds: ["codex"]
   }
 ] as const;
 
@@ -730,6 +735,298 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
         ]
       }
     }
+  },
+  {
+    id: "codex",
+    slug: ["integrations", "codex"],
+    groupId: "integrations",
+    content: {
+      en: {
+        title: "Codex setup",
+        description: "Configure Codex to use 0-0.pro as the model provider (wire_api = responses).",
+        sections: [
+          {
+            id: "install",
+            title: "1) Install Codex",
+            content: (
+              <p>
+                Install Codex in your editor (VS Code). After installation, Codex will read its configuration from{" "}
+                <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">~/.codex</code>.
+              </p>
+            )
+          },
+          {
+            id: "config",
+            title: "2) Update ~/.codex/config.toml",
+            content: (
+              <>
+                <p>
+                  Open{" "}
+                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">
+                    ~/.codex/config.toml
+                  </code>
+                  . Below is a complete example you can copy. Replace the paths under{" "}
+                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">[projects.*]</code>{" "}
+                  with your own.
+                </p>
+                <CodeBlock
+                  lang="toml"
+                  code={[
+                    'model = "gpt-5.2"',
+                    'model_reasoning_effort = "xhigh"',
+                    "",
+                    "# Added for 0-0.pro (only 6 lines)",
+                    'model_provider = "0-0"',
+                    "",
+                    "[model_providers.0-0]",
+                    'name = "0-0"',
+                    'base_url = "https://0-0.pro/v1"',
+                    'wire_api = "responses"',
+                    "requires_openai_auth = true",
+                    "# End added block",
+                    "",
+                    '[projects.\"/Users/xxx/Downloads/GitHub/cerebr\"]',
+                    'trust_level = "trusted"',
+                    "",
+                    '[projects.\"/Users/xxx\"]',
+                    'trust_level = "untrusted"',
+                    "",
+                    '[projects.\"/Users/xxx/.codex/sessions/2026/01/24\"]',
+                    'trust_level = "untrusted"',
+                    "",
+                    "[notice.model_migrations]",
+                    '\"gpt-5.2\" = \"gpt-5.2-codex\"'
+                  ].join("\n")}
+                />
+
+                <p className="mt-4">
+                  If you already have a config, you only need to add the following 6 lines (plus an optional blank line)
+                  near the top:
+                </p>
+                <CodeBlock
+                  lang="toml"
+                  code={[
+                    'model_provider = "0-0"',
+                    "",
+                    "[model_providers.0-0]",
+                    'name = "0-0"',
+                    'base_url = "https://0-0.pro/v1"',
+                    'wire_api = "responses"',
+                    "requires_openai_auth = true"
+                  ].join("\n")}
+                />
+
+                <div className="mt-4 rounded-xl border border-border bg-background/35 p-4 text-sm text-muted-foreground">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="secondary">Note</Badge>
+                    <span>
+                      Keep your existing{" "}
+                      <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">model</code> and{" "}
+                      <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">
+                        model_reasoning_effort
+                      </code>{" "}
+                      unchanged.
+                    </span>
+                  </div>
+                </div>
+              </>
+            )
+          },
+          {
+            id: "auth",
+            title: "3) Update ~/.codex/auth.json",
+            content: (
+              <>
+                <p>
+                  Set your Uni API key as{" "}
+                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">OPENAI_API_KEY</code>:
+                </p>
+                <CodeBlock
+                  lang="json"
+                  code={JSON.stringify({ OPENAI_API_KEY: "your-api-key" }, null, 2)}
+                />
+              </>
+            )
+          },
+          {
+            id: "restart",
+            title: "4) Restart VS Code",
+            content: (
+              <p>
+                Restart VS Code (or reload the window) so Codex picks up the updated configuration.
+              </p>
+            )
+          },
+          {
+            id: "history",
+            title: "Why did my past chats disappear?",
+            content: (
+              <>
+                <p>
+                  Codex conversations are associated with the{" "}
+                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">model_provider</code>. All
+                  session data is stored locally, but switching providers can make older sessions “invisible”.
+                </p>
+                <p>
+                  To show older sessions under the new provider, find the JSONL files in{" "}
+                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">~/.codex/sessions</code>{" "}
+                  and update the{" "}
+                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">model_provider</code>{" "}
+                  in the first line:
+                </p>
+                <CodeBlock
+                  lang="json"
+                  code={'{ "model_provider": "openai", "...": "..." }  →  { "model_provider": "0-0", "...": "..." }'}
+                />
+                <p>Restart VS Code after the change to re-load the sessions.</p>
+              </>
+            )
+          }
+        ]
+      },
+      "zh-CN": {
+        title: "Codex 配置",
+        description: "让 Codex 使用 0-0.pro 作为模型提供商（wire_api = responses）。",
+        sections: [
+          {
+            id: "install",
+            title: "1）安装 Codex",
+            content: (
+              <p>
+                在你的编辑器（VS Code）中安装 Codex。安装后，Codex 会从{" "}
+                <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">~/.codex</code>{" "}
+                读取配置。
+              </p>
+            )
+          },
+          {
+            id: "config",
+            title: "2）修改 ~/.codex/config.toml",
+            content: (
+              <>
+                <p>
+                  打开{" "}
+                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">
+                    ~/.codex/config.toml
+                  </code>
+                  。下面给一个可以直接复制的完整示例；你只需要把{" "}
+                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">[projects.*]</code>{" "}
+                  下的路径替换成自己的即可。
+                </p>
+                <CodeBlock
+                  lang="toml"
+                  code={[
+                    'model = "gpt-5.2"',
+                    'model_reasoning_effort = "xhigh"',
+                    "",
+                    "# 新增：0-0.pro 提供商（仅 6 行）",
+                    'model_provider = "0-0"',
+                    "",
+                    "[model_providers.0-0]",
+                    'name = "0-0"',
+                    'base_url = "https://0-0.pro/v1"',
+                    'wire_api = "responses"',
+                    "requires_openai_auth = true",
+                    "# 新增结束",
+                    "",
+                    '[projects.\"/Users/xxx/Downloads/GitHub/cerebr\"]',
+                    'trust_level = "trusted"',
+                    "",
+                    '[projects.\"/Users/xxx\"]',
+                    'trust_level = "untrusted"',
+                    "",
+                    '[projects.\"/Users/xxx/.codex/sessions/2026/01/24\"]',
+                    'trust_level = "untrusted"',
+                    "",
+                    "[notice.model_migrations]",
+                    '\"gpt-5.2\" = \"gpt-5.2-codex\"'
+                  ].join("\n")}
+                />
+
+                <p className="mt-4">
+                  如果你已经有自己的配置，只需要在文件顶部附近新增下面 6 行（可以包含 1 行空行）即可：
+                </p>
+                <CodeBlock
+                  lang="toml"
+                  code={[
+                    'model_provider = "0-0"',
+                    "",
+                    "[model_providers.0-0]",
+                    'name = "0-0"',
+                    'base_url = "https://0-0.pro/v1"',
+                    'wire_api = "responses"',
+                    "requires_openai_auth = true"
+                  ].join("\n")}
+                />
+
+                <div className="mt-4 rounded-xl border border-border bg-background/35 p-4 text-sm text-muted-foreground">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="secondary">提示</Badge>
+                    <span>
+                      原来的{" "}
+                      <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">model</code>{" "}
+                      与{" "}
+                      <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">
+                        model_reasoning_effort
+                      </code>{" "}
+                      保持不变即可。
+                    </span>
+                  </div>
+                </div>
+              </>
+            )
+          },
+          {
+            id: "auth",
+            title: "3）修改 ~/.codex/auth.json",
+            content: (
+              <>
+                <p>
+                  将你的 Uni API 密钥写入{" "}
+                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">OPENAI_API_KEY</code>：
+                </p>
+                <CodeBlock lang="json" code={JSON.stringify({ OPENAI_API_KEY: "your-api-key" }, null, 2)} />
+              </>
+            )
+          },
+          {
+            id: "restart",
+            title: "4）重启 VS Code",
+            content: <p>重启 VS Code（或 Reload Window），使 Codex 读取最新配置。</p>
+          },
+          {
+            id: "history",
+            title: "为什么过去的对话丢失了？",
+            content: (
+              <>
+                <p>
+                  Codex 的对话会跟随{" "}
+                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">model_provider</code>。
+                  数据都在本地，但切换提供商会导致旧会话暂时“不显示”。
+                </p>
+                <p>
+                  如果希望旧会话在新提供商下显示：在{" "}
+                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">~/.codex/sessions</code>{" "}
+                  目录下找到对应的{" "}
+                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">.jsonl</code>{" "}
+                  文件，把第一行里的{" "}
+                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">model_provider</code>{" "}
+                  从{" "}
+                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">openai</code>{" "}
+                  改为{" "}
+                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">0-0</code>：
+                </p>
+                <CodeBlock
+                  lang="json"
+                  code={'{ "model_provider": "openai", "...": "..." }  →  { "model_provider": "0-0", "...": "..." }'}
+                />
+                <p>修改后重启 VS Code，原来的对话就会重新出现。</p>
+              </>
+            )
+          }
+        ]
+      }
+    }
   }
 ] as const;
 
@@ -818,4 +1115,3 @@ export function getDocsAlternates(slug: readonly string[]) {
     "zh-CN": docsHref("zh-CN", slug)
   } as const;
 }
-
