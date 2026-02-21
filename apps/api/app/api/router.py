@@ -1121,6 +1121,31 @@ async def list_models(request: Request, session: AsyncSession = Depends(get_db_s
     return OpenAIModelsListResponse(data=data)
 
 
+@router.get("/models/{model:path}", response_model=OpenAIModelItem)
+async def retrieve_model(
+    model: str, request: Request, session: AsyncSession = Depends(get_db_session)
+) -> OpenAIModelItem:
+    user, membership = await _require_user_for_models(request, session)
+
+    model_id = model.strip()
+    if model_id == "" or "\n" in model_id or "\r" in model_id or len(model_id) > 200:
+        raise HTTPException(status_code=404, detail="not_found")
+
+    items = await list_user_models(session, org_id=membership.org_id, group_name=user.group_name)
+
+    def _model_id(value: object) -> str:
+        if isinstance(value, dict):
+            raw = value.get("model")
+            return str(raw) if raw is not None else ""
+        return str(getattr(value, "model", "") or "")
+
+    allowed = {_model_id(item) for item in items}
+    if model_id not in allowed:
+        raise HTTPException(status_code=404, detail="not_found")
+
+    return OpenAIModelItem(id=model_id)
+
+
 @router.get("/logs", response_model=LogsListResponse)
 async def logs(
     limit: int = 50,
