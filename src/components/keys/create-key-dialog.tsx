@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Copy, KeyRound, Loader2, PencilLine } from "lucide-react";
+import { Copy, KeyRound, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 import type { ApiKeyCreateResponse, ApiKeyItem, ApiKeyUpdateResponse } from "@/lib/types";
@@ -114,16 +114,16 @@ export function CreateKeyDialog({ onCreated, onRenamed, triggerLabel, triggerCla
   }
 
   async function saveRename() {
-    if (!createdItem) return;
+    if (!createdItem) return true;
     const trimmed = name.trim();
-    if (trimmed === createdItem.name) return;
+    if (trimmed === createdItem.name) return true;
     if (trimmed.length < 2) {
       toast.error(t("validation.minChars", { min: 2 }));
-      return;
+      return false;
     }
     if (trimmed.length > 64) {
       toast.error(t("validation.maxChars", { max: 64 }));
-      return;
+      return false;
     }
     setSavingName(true);
     try {
@@ -142,11 +142,21 @@ export function CreateKeyDialog({ onCreated, onRenamed, triggerLabel, triggerCla
       setCreatedItem(next);
       onRenamed?.(next);
       toast.success(t("keys.toast.renamed"));
+      return true;
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("keys.toast.updateFailed"));
+      return false;
     } finally {
       setSavingName(false);
     }
+  }
+
+  async function saveAndClose() {
+    if (savingName) return;
+    const ok = await saveRename();
+    if (!ok) return;
+    setOpen(false);
+    reset();
   }
 
   return (
@@ -181,11 +191,6 @@ export function CreateKeyDialog({ onCreated, onRenamed, triggerLabel, triggerCla
 
           {createdKey ? (
             <div className="space-y-4">
-              <div className="rounded-xl border border-border bg-muted/30 p-3">
-                <div className="text-xs text-muted-foreground">{t("keys.dialog.yourKey")}</div>
-                <div className="mt-2 break-all font-mono tabular-nums tracking-wide text-sm">{createdKey}</div>
-              </div>
-
               <div className="space-y-2">
                 <Label htmlFor="key-name">{t("keys.dialog.name")}</Label>
                 <Input
@@ -202,29 +207,29 @@ export function CreateKeyDialog({ onCreated, onRenamed, triggerLabel, triggerCla
                 <p className="text-xs text-muted-foreground">{t("keys.dialog.nameHelp")}</p>
               </div>
 
+              <div className="rounded-xl border border-border bg-muted/30 p-3">
+                <div className="text-xs text-muted-foreground">{t("keys.dialog.yourKey")}</div>
+                <div className="mt-2 break-all font-mono tabular-nums tracking-wide text-sm">{createdKey}</div>
+              </div>
+
               <DialogFooter>
-                <Button type="button" variant="secondary" onClick={() => void copyKey(createdKey)}>
+                <Button type="button" variant="outline" onClick={() => void copyKey(createdKey)}>
                   <Copy className="h-4 w-4" />
                   {t("keys.dialog.copy")}
                 </Button>
-                <Button type="button" variant="outline" disabled={savingName} onClick={() => void saveRename()}>
+                <Button
+                  type="button"
+                  disabled={savingName}
+                  onClick={() => {
+                    void saveAndClose();
+                  }}
+                >
                   {savingName ? (
                     <span className="inline-flex animate-spin">
                       <Loader2 className="h-4 w-4" />
                     </span>
-                  ) : (
-                    <PencilLine className="h-4 w-4" />
-                  )}
-                  {savingName ? t("common.saving") : t("common.save")}
-                </Button>
-                <Button
-                  type="button"
-                  onClick={() => {
-                    setOpen(false);
-                    reset();
-                  }}
-                >
-                  {t("keys.dialog.done")}
+                  ) : null}
+                  {savingName ? t("common.saving") : t("keys.dialog.done")}
                 </Button>
               </DialogFooter>
             </div>

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import hashlib
+import string
 import secrets
 
 
 def generate_api_key() -> str:
-    return f"sk-{secrets.token_urlsafe(32)}"
+    # Keep the OpenAI-style prefix, but restrict the rest to alphanumeric
+    # (no "-" / "_" like token_urlsafe()).
+    alphabet = string.ascii_letters + string.digits
+    body = "".join(secrets.choice(alphabet) for _ in range(43))
+    return f"sk-{body}"
 
 
 def key_prefix(full_key: str) -> str:

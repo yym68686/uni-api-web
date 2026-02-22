@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Clock, Loader2, ScrollText } from "lucide-react";
+import { Loader2, ScrollText } from "lucide-react";
 import { toast } from "sonner";
 
 import { CopyableModelId } from "@/components/models/copyable-model-id";
@@ -23,6 +23,8 @@ function isLogsListResponse(value: unknown): value is LogsListResponse {
   const items = (value as { items?: unknown }).items;
   return Array.isArray(items);
 }
+
+type BadgeVariant = React.ComponentProps<typeof Badge>["variant"];
 
 function formatMs(value: number) {
   const ms = Math.max(0, Math.round(value));
@@ -48,6 +50,15 @@ function ttftVariant(value: number): "success" | "warning" | "destructive" {
   if (ms <= 5000) return "success";
   if (ms <= 10000) return "warning";
   return "destructive";
+}
+
+function statusCodeVariant(value: number): BadgeVariant {
+  const code = Number.isFinite(value) ? Math.trunc(value) : 0;
+  if (code >= 200 && code < 300) return "success";
+  if (code >= 400 && code < 500) return "destructive";
+  if (code >= 500 && code < 600) return "warning";
+  if (code >= 300 && code < 400) return "secondary";
+  return "outline";
 }
 
 interface LogsTableClientProps {
@@ -132,15 +143,12 @@ export function LogsTableClient({ initialItems, pageSize }: LogsTableClientProps
         </CardContent>
       ) : (
         <CardContent className="p-0">
-          <div className="flex items-center gap-2 border-b border-border px-4 py-4 text-sm text-muted-foreground sm:px-6">
-            <Clock className="h-4 w-4 text-muted-foreground" />
-            {t("logs.card.showing", { count: String(items.length) })}
-          </div>
           <Table variant="card">
             <TableHeader>
               <TableRow>
                 <TableHead>{t("logs.table.time")}</TableHead>
                 <TableHead>{t("logs.table.model")}</TableHead>
+                <TableHead>{t("logs.table.status")}</TableHead>
                 <TableHead className="whitespace-nowrap">{t("logs.table.io")}</TableHead>
                 <TableHead>{t("logs.table.total")}</TableHead>
                 <TableHead>{t("logs.table.ttft")}</TableHead>
@@ -152,19 +160,27 @@ export function LogsTableClient({ initialItems, pageSize }: LogsTableClientProps
             <TableBody>
               {items.map((r) => (
                 <TableRow key={r.id} className="uai-cv-auto">
-                  <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
+                  <TableCell className="whitespace-nowrap font-mono tabular-nums text-xs text-muted-foreground">
                     <ClientDateTime value={r.createdAt} locale={locale} timeStyle="medium" />
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="whitespace-nowrap">
                     <CopyableModelId value={r.model} />
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                    <Badge
+                      variant={statusCodeVariant(r.statusCode)}
+                      className="rounded-full px-2 py-0 text-[10px] font-mono tabular-nums"
+                    >
+                      {r.statusCode}
+                    </Badge>
                   </TableCell>
                   <TableCell className="whitespace-nowrap font-mono tabular-nums text-xs text-muted-foreground">
                     {r.inputTokens} / {r.cachedTokens} / {r.outputTokens}
                   </TableCell>
-                  <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
+                  <TableCell className="whitespace-nowrap font-mono tabular-nums text-xs text-muted-foreground">
                     {formatMs(r.totalDurationMs)}
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
+                  <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
                     <Badge
                       variant={ttftVariant(r.ttftMs)}
                       className="rounded-full px-2 py-0 text-[10px] font-mono tabular-nums"
@@ -172,13 +188,13 @@ export function LogsTableClient({ initialItems, pageSize }: LogsTableClientProps
                       {formatMs(r.ttftMs)}
                     </Badge>
                   </TableCell>
-                  <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
+                  <TableCell className="whitespace-nowrap font-mono tabular-nums text-xs text-muted-foreground">
                     {formatTps(r.tps)}
                   </TableCell>
-                  <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
+                  <TableCell className="whitespace-nowrap font-mono tabular-nums text-xs text-muted-foreground">
                     {formatCostUsd(r.costUsd)}
                   </TableCell>
-                  <TableCell className="font-mono tabular-nums text-xs text-muted-foreground">
+                  <TableCell className="whitespace-nowrap font-mono tabular-nums text-xs text-muted-foreground">
                     {r.sourceIp ?? "—"}
                   </TableCell>
                 </TableRow>
