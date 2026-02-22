@@ -13,7 +13,7 @@ export function AdminOverviewSkeleton() {
           </div>
           <Skeleton className="h-9 w-32" />
         </div>
-        <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
           <Skeleton className="h-10" />
           <Skeleton className="h-10" />
           <Skeleton className="h-10" />
@@ -21,14 +21,14 @@ export function AdminOverviewSkeleton() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Skeleton className="h-[132px]" />
         <Skeleton className="h-[132px]" />
         <Skeleton className="h-[132px]" />
         <Skeleton className="h-[132px]" />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2">
           <div className="rounded-2xl border border-border bg-card">
             <div className="border-b border-border p-6">
@@ -56,4 +56,3 @@ export function AdminOverviewSkeleton() {
     </div>
   );
 }
-

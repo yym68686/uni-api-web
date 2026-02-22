@@ -171,7 +171,7 @@ export async function AdminOverviewContent({ locale }: { locale: Locale }) {
         </CardHeader>
         <CardContent>
           {hasHealth ? (
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
               {overview.health.map((item) => {
                 const Icon = healthIcon(item.id);
                 return (
@@ -212,14 +212,14 @@ export async function AdminOverviewContent({ locale }: { locale: Locale }) {
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
         <StatsCard title={t(locale, "admin.overview.kpi.calls")} value={calls} icon={LayoutDashboard} />
         <StatsCard title={t(locale, "admin.overview.kpi.spend")} value={spend} icon={LayoutDashboard} />
         <StatsCard title={t(locale, "admin.overview.kpi.activeUsers")} value={activeUsers} icon={Users} />
         <StatsCard title={t(locale, "admin.overview.kpi.activeKeys")} value={activeKeys} icon={PlugZap} />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle>{t(locale, "admin.overview.activity.title")}</CardTitle>
