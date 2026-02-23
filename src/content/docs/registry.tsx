@@ -765,9 +765,7 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
                   <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">
                     ~/.codex/config.toml
                   </code>
-                  . Below is a complete example you can copy. Replace the paths under{" "}
-                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">[projects.*]</code>{" "}
-                  with your own.
+                  . Below is a minimal example you can copy:
                 </p>
                 <CodeBlock
                   lang="toml"
@@ -783,19 +781,7 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
                     'base_url = "https://0-0.pro/v1"',
                     'wire_api = "responses"',
                     "requires_openai_auth = true",
-                    "# End added block",
-                    "",
-                    '[projects.\"/Users/xxx/Downloads/GitHub/cerebr\"]',
-                    'trust_level = "trusted"',
-                    "",
-                    '[projects.\"/Users/xxx\"]',
-                    'trust_level = "untrusted"',
-                    "",
-                    '[projects.\"/Users/xxx/.codex/sessions/2026/01/24\"]',
-                    'trust_level = "untrusted"',
-                    "",
-                    "[notice.model_migrations]",
-                    '\"gpt-5.2\" = \"gpt-5.2-codex\"'
+                    "# End added block"
                   ].join("\n")}
                 />
 
@@ -909,9 +895,7 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
                   <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">
                     ~/.codex/config.toml
                   </code>
-                  。下面给一个可以直接复制的完整示例；你只需要把{" "}
-                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">[projects.*]</code>{" "}
-                  下的路径替换成自己的即可。
+                  。下面给一个可以直接复制的完整（最小可用）示例：
                 </p>
                 <CodeBlock
                   lang="toml"
@@ -927,19 +911,7 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
                     'base_url = "https://0-0.pro/v1"',
                     'wire_api = "responses"',
                     "requires_openai_auth = true",
-                    "# 新增结束",
-                    "",
-                    '[projects.\"/Users/xxx/Downloads/GitHub/cerebr\"]',
-                    'trust_level = "trusted"',
-                    "",
-                    '[projects.\"/Users/xxx\"]',
-                    'trust_level = "untrusted"',
-                    "",
-                    '[projects.\"/Users/xxx/.codex/sessions/2026/01/24\"]',
-                    'trust_level = "untrusted"',
-                    "",
-                    "[notice.model_migrations]",
-                    '\"gpt-5.2\" = \"gpt-5.2-codex\"'
+                    "# 新增结束"
                   ].join("\n")}
                 />
 
