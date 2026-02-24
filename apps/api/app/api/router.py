@@ -69,6 +69,7 @@ from app.schemas.channels import (
     LlmChannelUpdateRequest,
     LlmChannelUpdateResponse,
 )
+from app.schemas.admin_analytics import AdminAnalyticsResponse
 from app.schemas.admin_overview import AdminOverviewResponse
 from app.schemas.billing import (
     BillingLedgerListResponse,
@@ -111,6 +112,7 @@ from app.storage.keys_db import (
     update_api_key,
 )
 from app.storage.billing_db import list_balance_ledger
+from app.storage.admin_analytics_db import get_admin_analytics
 from app.storage.admin_overview_db import get_admin_overview
 from app.storage.oauth_google import link_google_identity, login_with_google
 from app.schemas.logs import LogsListResponse
@@ -494,6 +496,32 @@ async def admin_overview(
 ) -> dict:
     _ = admin_user
     return await get_admin_overview(session, org_id=membership.org_id)
+
+
+@router.get("/admin/analytics", response_model=AdminAnalyticsResponse)
+async def admin_analytics(
+    from_: dt.datetime = Query(..., alias="from"),
+    to: dt.datetime = Query(...),
+    tz: str = "UTC",
+    granularity: str = "day",
+    limit: int = 10,
+    session: AsyncSession = Depends(get_db_session),
+    admin_user=Depends(require_admin),
+    membership=Depends(get_current_membership),
+) -> dict:
+    _ = admin_user
+    try:
+        return await get_admin_analytics(
+            session,
+            org_id=membership.org_id,
+            start=from_,
+            end=to,
+            tz=tz,
+            granularity=granularity,
+            limit=limit,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.post("/auth/register", response_model=AuthResponse)
