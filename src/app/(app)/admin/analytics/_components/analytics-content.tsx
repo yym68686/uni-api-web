@@ -2,10 +2,10 @@ import type {
   AdminAnalyticsGranularity,
   AdminAnalyticsPreset,
   AdminAnalyticsResponse,
-  AdminAnalyticsTab
+  AdminAnalyticsTab,
+  AdminOverviewResponse
 } from "@/lib/types";
 import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
-import { CACHE_TAGS } from "@/lib/cache-tags";
 import { AdminAnalyticsViewClient } from "./analytics-view-client";
 
 function getParam(params: Record<string, string | string[] | undefined>, key: string) {
@@ -227,6 +227,23 @@ function normalizeAnalyticsResponse(
   };
 }
 
+function isAdminOverviewResponse(value: unknown): value is AdminOverviewResponse {
+  if (!value || typeof value !== "object") return false;
+  if (!("kpis" in value) || !("counts" in value) || !("health" in value) || !("events" in value)) return false;
+  const kpis = (value as { kpis?: unknown }).kpis;
+  const counts = (value as { counts?: unknown }).counts;
+  return Boolean(kpis && typeof kpis === "object" && counts && typeof counts === "object");
+}
+
+function readBackendMessage(json: unknown) {
+  if (!json || typeof json !== "object") return null;
+  if ("message" in json && typeof (json as { message?: unknown }).message === "string") {
+    const msg = String((json as { message?: string }).message ?? "");
+    return msg.length > 0 ? msg : null;
+  }
+  return null;
+}
+
 async function getAnalytics(range: AdminAnalyticsResponse["range"]) {
   const qs = new URLSearchParams();
   qs.set("from", startOfDayUtc(range.from).toISOString());
@@ -236,13 +253,55 @@ async function getAnalytics(range: AdminAnalyticsResponse["range"]) {
   qs.set("limit", "10");
 
   const res = await fetch(buildBackendUrl(`/admin/analytics?${qs.toString()}`), {
-    cache: "force-cache",
-    next: { tags: [CACHE_TAGS.adminAnalytics], revalidate: 30 },
+    cache: "no-store",
+    headers: await getBackendAuthHeadersCached()
+  });
+  const json: unknown = await res.json().catch(() => null);
+  if (!res.ok) {
+    return {
+      data: null as AdminAnalyticsResponse | null,
+      supported: false,
+      status: res.status,
+      message: readBackendMessage(json)
+    };
+  }
+  const data = normalizeAnalyticsResponse(json, { range });
+  return {
+    data,
+    supported: data != null,
+    status: res.status,
+    message: data ? null : "Unexpected response shape"
+  };
+}
+
+async function getOverviewFallback(range: AdminAnalyticsResponse["range"]) {
+  const res = await fetch(buildBackendUrl("/admin/overview"), {
+    cache: "no-store",
     headers: await getBackendAuthHeadersCached()
   });
   if (!res.ok) return null;
   const json: unknown = await res.json().catch(() => null);
-  return normalizeAnalyticsResponse(json, { range });
+  if (!isAdminOverviewResponse(json)) return null;
+  const overview = json;
+
+  const kpis: AdminAnalyticsResponse["kpis"] = {
+    spendUsd: overview.kpis.spendUsd24h,
+    calls: overview.kpis.calls24h,
+    errors: overview.kpis.errors24h,
+    activeUsers: overview.kpis.activeUsers24h,
+    inputTokens: 0,
+    outputTokens: 0,
+    cachedTokens: 0,
+    p95LatencyMs: null,
+    p95TtftMs: null
+  };
+
+  return {
+    range,
+    kpis,
+    series: [],
+    leaders: { users: [], models: [], errors: [] }
+  } satisfies AdminAnalyticsResponse;
 }
 
 interface AdminAnalyticsContentProps {
@@ -317,13 +376,16 @@ export async function AdminAnalyticsContent({ searchParams }: AdminAnalyticsCont
     granularity
   };
 
-  const analytics = await getAnalytics(range);
+  const analyticsResult = await getAnalytics(range);
+  const analytics = analyticsResult.data ?? (await getOverviewFallback(range));
+  const fallback = analyticsResult.data == null;
 
   return (
     <AdminAnalyticsViewClient
       initialTab={tab}
       initialRange={range}
       initialData={analytics}
+      showFallbackNotice={fallback}
     />
   );
 }

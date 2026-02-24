@@ -57,9 +57,10 @@ interface AdminAnalyticsViewClientProps {
   initialTab: AdminAnalyticsTab;
   initialRange: AdminAnalyticsResponse["range"];
   initialData: AdminAnalyticsResponse | null;
+  showFallbackNotice?: boolean;
 }
 
-export function AdminAnalyticsViewClient({ initialTab, initialRange, initialData }: AdminAnalyticsViewClientProps) {
+export function AdminAnalyticsViewClient({ initialTab, initialRange, initialData, showFallbackNotice }: AdminAnalyticsViewClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { t, locale } = useI18n();
@@ -315,6 +316,18 @@ export function AdminAnalyticsViewClient({ initialTab, initialRange, initialData
                 </Button>
               ))}
             </div>
+
+            {showFallbackNotice ? (
+              <div className="mt-3 flex items-start gap-3 rounded-xl border border-border bg-muted/10 px-3 py-2">
+                <span className="mt-0.5 inline-flex h-7 w-7 items-center justify-center rounded-xl bg-warning/15 text-warning ring-1 ring-inset ring-warning/25">
+                  <AlertTriangle className="h-4 w-4" />
+                </span>
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-foreground">{t("admin.analytics.fallback.title")}</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">{t("admin.analytics.fallback.desc")}</div>
+                </div>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       </div>
@@ -392,60 +405,66 @@ export function AdminAnalyticsViewClient({ initialTab, initialRange, initialData
                 <CardDescription className="font-mono">{rangeHint}</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="h-64">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={series}>
-                      <CartesianGrid stroke="oklch(var(--border))" strokeOpacity={0.6} vertical={false} />
-                      <XAxis
-                        dataKey="ts"
-                        tickMargin={8}
-                        minTickGap={18}
-                        tickFormatter={(v) => chartTick(String(v), data?.range.granularity ?? initialRange.granularity, locale)}
-                        stroke="oklch(var(--muted-foreground))"
-                      />
-                      <YAxis
-                        yAxisId="left"
-                        tickMargin={10}
-                        tickFormatter={(v) => String(v)}
-                        stroke="oklch(var(--muted-foreground))"
-                      />
-                      <YAxis
-                        yAxisId="right"
-                        orientation="right"
-                        tickMargin={10}
-                        tickFormatter={(v) => String(v)}
-                        stroke="oklch(var(--muted-foreground))"
-                      />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: "oklch(var(--popover) / 0.9)",
-                          border: "1px solid oklch(var(--border))",
-                          borderRadius: 12
-                        }}
-                        labelStyle={{ color: "oklch(var(--foreground))" }}
-                      />
-                      <Line
-                        yAxisId="left"
-                        type="monotone"
-                        dataKey="spendUsd"
-                        stroke="oklch(var(--primary))"
-                        strokeWidth={2}
-                        dot={false}
-                        name={t("admin.analytics.kpi.spend")}
-                      />
-                      <Line
-                        yAxisId="right"
-                        type="monotone"
-                        dataKey="calls"
-                        stroke="oklch(var(--foreground))"
-                        strokeOpacity={0.55}
-                        strokeWidth={2}
-                        dot={false}
-                        name={t("admin.analytics.kpi.calls")}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
+                {series.length === 0 ? (
+                  <div className="flex h-64 items-center justify-center rounded-xl border border-dashed border-border bg-muted/10 text-sm text-muted-foreground">
+                    {t("admin.analytics.chart.empty")}
+                  </div>
+                ) : (
+                  <div className="h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={series}>
+                        <CartesianGrid stroke="oklch(var(--border))" strokeOpacity={0.6} vertical={false} />
+                        <XAxis
+                          dataKey="ts"
+                          tickMargin={8}
+                          minTickGap={18}
+                          tickFormatter={(v) => chartTick(String(v), data?.range.granularity ?? initialRange.granularity, locale)}
+                          stroke="oklch(var(--muted-foreground))"
+                        />
+                        <YAxis
+                          yAxisId="left"
+                          tickMargin={10}
+                          tickFormatter={(v) => String(v)}
+                          stroke="oklch(var(--muted-foreground))"
+                        />
+                        <YAxis
+                          yAxisId="right"
+                          orientation="right"
+                          tickMargin={10}
+                          tickFormatter={(v) => String(v)}
+                          stroke="oklch(var(--muted-foreground))"
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: "oklch(var(--popover) / 0.9)",
+                            border: "1px solid oklch(var(--border))",
+                            borderRadius: 12
+                          }}
+                          labelStyle={{ color: "oklch(var(--foreground))" }}
+                        />
+                        <Line
+                          yAxisId="left"
+                          type="monotone"
+                          dataKey="spendUsd"
+                          stroke="oklch(var(--primary))"
+                          strokeWidth={2}
+                          dot={false}
+                          name={t("admin.analytics.kpi.spend")}
+                        />
+                        <Line
+                          yAxisId="right"
+                          type="monotone"
+                          dataKey="calls"
+                          stroke="oklch(var(--foreground))"
+                          strokeOpacity={0.55}
+                          strokeWidth={2}
+                          dot={false}
+                          name={t("admin.analytics.kpi.calls")}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -455,53 +474,59 @@ export function AdminAnalyticsViewClient({ initialTab, initialRange, initialData
                 <CardDescription className="font-mono">{rangeHint}</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="h-64">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={series}>
-                      <CartesianGrid stroke="oklch(var(--border))" strokeOpacity={0.6} vertical={false} />
-                      <XAxis
-                        dataKey="ts"
-                        tickMargin={8}
-                        minTickGap={18}
-                        tickFormatter={(v) => chartTick(String(v), data?.range.granularity ?? initialRange.granularity, locale)}
-                        stroke="oklch(var(--muted-foreground))"
-                      />
-                      <YAxis tickMargin={10} stroke="oklch(var(--muted-foreground))" />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: "oklch(var(--popover) / 0.9)",
-                          border: "1px solid oklch(var(--border))",
-                          borderRadius: 12
-                        }}
-                        labelStyle={{ color: "oklch(var(--foreground))" }}
-                      />
-                      <Area
-                        type="monotone"
-                        dataKey="inputTokens"
-                        stackId="1"
-                        stroke="oklch(var(--primary))"
-                        fill="oklch(var(--primary) / 0.25)"
-                        name="input"
-                      />
-                      <Area
-                        type="monotone"
-                        dataKey="outputTokens"
-                        stackId="1"
-                        stroke="oklch(var(--foreground) / 0.75)"
-                        fill="oklch(var(--foreground) / 0.14)"
-                        name="output"
-                      />
-                      <Area
-                        type="monotone"
-                        dataKey="cachedTokens"
-                        stackId="1"
-                        stroke="oklch(var(--muted-foreground) / 0.9)"
-                        fill="oklch(var(--muted-foreground) / 0.16)"
-                        name="cached"
-                      />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
+                {series.length === 0 ? (
+                  <div className="flex h-64 items-center justify-center rounded-xl border border-dashed border-border bg-muted/10 text-sm text-muted-foreground">
+                    {t("admin.analytics.chart.empty")}
+                  </div>
+                ) : (
+                  <div className="h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={series}>
+                        <CartesianGrid stroke="oklch(var(--border))" strokeOpacity={0.6} vertical={false} />
+                        <XAxis
+                          dataKey="ts"
+                          tickMargin={8}
+                          minTickGap={18}
+                          tickFormatter={(v) => chartTick(String(v), data?.range.granularity ?? initialRange.granularity, locale)}
+                          stroke="oklch(var(--muted-foreground))"
+                        />
+                        <YAxis tickMargin={10} stroke="oklch(var(--muted-foreground))" />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: "oklch(var(--popover) / 0.9)",
+                            border: "1px solid oklch(var(--border))",
+                            borderRadius: 12
+                          }}
+                          labelStyle={{ color: "oklch(var(--foreground))" }}
+                        />
+                        <Area
+                          type="monotone"
+                          dataKey="inputTokens"
+                          stackId="1"
+                          stroke="oklch(var(--primary))"
+                          fill="oklch(var(--primary) / 0.25)"
+                          name="input"
+                        />
+                        <Area
+                          type="monotone"
+                          dataKey="outputTokens"
+                          stackId="1"
+                          stroke="oklch(var(--foreground) / 0.75)"
+                          fill="oklch(var(--foreground) / 0.14)"
+                          name="output"
+                        />
+                        <Area
+                          type="monotone"
+                          dataKey="cachedTokens"
+                          stackId="1"
+                          stroke="oklch(var(--muted-foreground) / 0.9)"
+                          fill="oklch(var(--muted-foreground) / 0.16)"
+                          name="cached"
+                        />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>

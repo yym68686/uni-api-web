@@ -367,6 +367,9 @@ const en = {
   "admin.analytics.table.count": "Count",
   "admin.analytics.empty.title": "No analytics data",
   "admin.analytics.empty.desc": "The backend did not return analytics for this range. Check backend support for `/admin/analytics`.",
+  "admin.analytics.fallback.title": "Limited analytics (fallback)",
+  "admin.analytics.fallback.desc": "Backend `/admin/analytics` is unavailable; showing 24h KPIs from `/admin/overview`. Trends and leaders may be empty.",
+  "admin.analytics.chart.empty": "No timeseries data for this range.",
 
   "admin.overview.subtitle": "Monitor health, usage and recent changes ({current}).",
   "admin.overview.forbidden": "You are not an admin and cannot view the overview.",
@@ -1053,6 +1056,9 @@ const zhCN: Record<MessageKey, string> = {
   "admin.analytics.table.count": "次数",
   "admin.analytics.empty.title": "暂无分析数据",
   "admin.analytics.empty.desc": "后端未返回该范围的分析结果。请确认后端是否支持 `/admin/analytics`。",
+  "admin.analytics.fallback.title": "分析能力受限（回退）",
+  "admin.analytics.fallback.desc": "后端暂不支持 `/admin/analytics`，当前仅展示 `/admin/overview` 的 24h 指标；趋势与 Top 榜可能为空。",
+  "admin.analytics.chart.empty": "该范围暂无趋势数据。",
 
   "admin.overview.subtitle": "监控健康、用量与最近变化（{current}）。",
   "admin.overview.forbidden": "你不是管理员，无法查看总览。",
