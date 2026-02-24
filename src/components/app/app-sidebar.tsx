@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Boxes, CreditCard, Gift, KeyRound, LayoutDashboard, Megaphone, PlugZap, ScrollText, Settings, SlidersHorizontal, Users, type LucideIcon } from "lucide-react";
+import { BarChart3, Boxes, CreditCard, Gift, KeyRound, LayoutDashboard, Megaphone, PlugZap, ScrollText, Settings, SlidersHorizontal, Users, type LucideIcon } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { setPendingPathname } from "@/lib/navigation-intent";
@@ -21,6 +21,7 @@ const navItems = [
 
 const adminItems = [
   { href: "/admin/overview", labelKey: "app.admin.overview", icon: LayoutDashboard },
+  { href: "/admin/analytics", labelKey: "app.admin.analytics", icon: BarChart3 },
   { href: "/admin/channels", labelKey: "app.admin.channels", icon: PlugZap },
   { href: "/admin/models", labelKey: "app.admin.modelConfig", icon: SlidersHorizontal },
   { href: "/admin/users", labelKey: "app.admin.users", icon: Users },

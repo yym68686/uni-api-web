@@ -278,6 +278,79 @@ export interface AdminOverviewResponse {
   events: AdminOverviewEventItem[];
 }
 
+export type AdminAnalyticsPreset = "today" | "week" | "month" | "year" | "all" | "custom";
+
+export type AdminAnalyticsTab = "summary" | "users" | "models" | "errors" | "performance";
+
+export type AdminAnalyticsGranularity = "hour" | "day";
+
+export interface AdminAnalyticsRange {
+  preset: AdminAnalyticsPreset;
+  from: string;
+  to: string;
+  tz: string;
+  granularity: AdminAnalyticsGranularity;
+}
+
+export interface AdminAnalyticsKpis {
+  spendUsd: number;
+  calls: number;
+  errors: number;
+  activeUsers: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+  p95LatencyMs: number | null;
+  p95TtftMs: number | null;
+}
+
+export interface AdminAnalyticsSeriesPoint {
+  ts: string;
+  spendUsd: number;
+  calls: number;
+  errors: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+  p95LatencyMs: number | null;
+}
+
+export interface AdminAnalyticsUserLeader {
+  userId: string;
+  email: string | null;
+  spendUsd: number;
+  calls: number;
+  errors: number;
+  totalTokens: number;
+}
+
+export interface AdminAnalyticsModelLeader {
+  model: string;
+  spendUsd: number;
+  calls: number;
+  errors: number;
+  totalTokens: number;
+}
+
+export interface AdminAnalyticsErrorLeader {
+  key: string;
+  count: number;
+  share: number | null;
+}
+
+export interface AdminAnalyticsLeaders {
+  users: AdminAnalyticsUserLeader[];
+  models: AdminAnalyticsModelLeader[];
+  errors: AdminAnalyticsErrorLeader[];
+}
+
+export interface AdminAnalyticsResponse {
+  range: AdminAnalyticsRange;
+  kpis: AdminAnalyticsKpis;
+  series: AdminAnalyticsSeriesPoint[];
+  leaders: AdminAnalyticsLeaders;
+}
+
 export interface AdminModelUpdateRequest {
   enabled?: boolean;
   inputUsdPerM?: string | null;
