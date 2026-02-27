@@ -778,7 +778,7 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
                     "",
                     "[model_providers.0-0]",
                     'name = "0-0"',
-                    'base_url = "https://0-0.pro/v1"',
+                    'base_url = "https://api.0-0.pro/v1"',
                     'wire_api = "responses"',
                     "requires_openai_auth = true",
                     "# End added block"
@@ -796,7 +796,7 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
                     "",
                     "[model_providers.0-0]",
                     'name = "0-0"',
-                    'base_url = "https://0-0.pro/v1"',
+                    'base_url = "https://api.0-0.pro/v1"',
                     'wire_api = "responses"',
                     "requires_openai_auth = true"
                   ].join("\n")}
@@ -908,7 +908,7 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
                     "",
                     "[model_providers.0-0]",
                     'name = "0-0"',
-                    'base_url = "https://0-0.pro/v1"',
+                    'base_url = "https://api.0-0.pro/v1"',
                     'wire_api = "responses"',
                     "requires_openai_auth = true",
                     "# 新增结束"
@@ -925,7 +925,7 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
                     "",
                     "[model_providers.0-0]",
                     'name = "0-0"',
-                    'base_url = "https://0-0.pro/v1"',
+                    'base_url = "https://api.0-0.pro/v1"',
                     'wire_api = "responses"',
                     "requires_openai_auth = true"
                   ].join("\n")}
