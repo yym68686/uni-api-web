@@ -3,7 +3,21 @@ import { NextResponse, type NextRequest } from "next/server";
 const LOCALE_COOKIE_NAME = "uai_locale";
 const SUPPORTED_DOCS_LOCALES = new Set(["zh-CN", "en"]);
 
+function isPrefetchRequest(request: NextRequest) {
+  const headers = request.headers;
+  if (headers.get("x-middleware-prefetch")) return true;
+
+  const purpose = headers.get("purpose") ?? headers.get("sec-purpose");
+  if (purpose?.toLowerCase() === "prefetch") return true;
+
+  if (headers.get("next-router-prefetch")) return true;
+
+  return false;
+}
+
 export function middleware(request: NextRequest) {
+  if (isPrefetchRequest(request)) return NextResponse.next();
+
   const pathname = request.nextUrl.pathname;
   const segments = pathname.split("/").filter(Boolean);
   const locale = segments[1];
@@ -25,4 +39,3 @@ export function middleware(request: NextRequest) {
 export const config = {
   matcher: ["/docs/:path*"]
 };
-

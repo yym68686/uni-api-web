@@ -33,6 +33,7 @@ function DocsLanguageSwitch({ locale, slug }: { locale: Locale; slug: readonly s
     <div className="inline-flex items-center rounded-xl border border-border bg-background/40 p-1 text-xs backdrop-blur">
       <Link
         href={alternates["zh-CN"]}
+        prefetch={false}
         className={cn(
           "rounded-lg px-2 py-1 transition-colors",
           zhActive ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"
@@ -43,6 +44,7 @@ function DocsLanguageSwitch({ locale, slug }: { locale: Locale; slug: readonly s
       </Link>
       <Link
         href={alternates.en}
+        prefetch={false}
         className={cn(
           "rounded-lg px-2 py-1 transition-colors",
           enActive ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"
