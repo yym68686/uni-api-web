@@ -11,11 +11,21 @@ import { t } from "@/lib/i18n/messages";
 import type { ApiKeysListResponse, UsageResponse } from "@/lib/types";
 import { useSwrLite } from "@/lib/swr-lite";
 
+interface AuthMeResponse {
+  balance: number;
+}
+
 function isApiKeysListResponse(value: unknown): value is ApiKeysListResponse {
   if (!value || typeof value !== "object") return false;
   if (!("items" in value)) return false;
   const items = (value as { items?: unknown }).items;
   return Array.isArray(items);
+}
+
+function isAuthMeResponse(value: unknown): value is AuthMeResponse {
+  if (!value || typeof value !== "object") return false;
+  const v = value as { balance?: unknown };
+  return typeof v.balance === "number" && Number.isFinite(v.balance);
 }
 
 function isUsageResponse(value: unknown): value is UsageResponse {
@@ -50,6 +60,12 @@ async function fetchKeys() {
   return json.items;
 }
 
+async function fetchRemainingCredits() {
+  const json = await fetchJson(API_PATHS.authMe);
+  if (!isAuthMeResponse(json)) throw new Error("Invalid response");
+  return json.balance;
+}
+
 interface DashboardKpisClientProps {
   locale: Locale;
   remainingCredits: number | null;
@@ -81,12 +97,27 @@ export function DashboardKpisClient({
     revalidateOnFocus: true
   });
 
+  const remainingCreditsSwr = useSwrLite<number>(API_PATHS.authMe, fetchRemainingCredits, {
+    fallbackData: remainingCredits ?? undefined,
+    revalidateOnFocus: true
+  });
+
   React.useEffect(() => {
     setHydrated(true);
   }, []);
 
+  React.useEffect(() => {
+    if (!hydrated) return;
+    const interval = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      void remainingCreditsSwr.mutate(fetchRemainingCredits(), { revalidate: false });
+    }, 15_000);
+    return () => window.clearInterval(interval);
+  }, [hydrated, remainingCreditsSwr.mutate]);
+
   const usage = hydrated ? (usageSwr.data ?? initialUsage) : initialUsage;
   const keys = hydrated ? (keysSwr.data ?? initialKeys) : initialKeys;
+  const liveRemainingCredits = hydrated ? (remainingCreditsSwr.data ?? remainingCredits) : remainingCredits;
   const activeKeys = keys.filter((k) => !k.revokedAt).length;
 
   const { requests7d } = buildDaily7d(usage.daily);
@@ -103,8 +134,8 @@ export function DashboardKpisClient({
       />
       <StatsCard
         title={t(locale, "dashboard.kpi.remainingCredits")}
-        value={remainingCredits === null ? "—" : formatUsd(remainingCredits)}
-        trend={remainingCredits === null ? "connect billing" : "plan: Pro"}
+        value={liveRemainingCredits === null ? "—" : formatUsd(liveRemainingCredits)}
+        trend={liveRemainingCredits === null ? "connect billing" : "plan: Pro"}
         icon={Wallet}
         iconGradientClassName="from-success/35 to-success/10 text-success"
       />

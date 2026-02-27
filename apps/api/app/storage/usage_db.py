@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.api_key import ApiKey
 from app.models.llm_usage_event import LlmUsageEvent
+from app.models.user import User
 
 
 USD_MICROS = Decimal("1000000")
@@ -61,6 +62,12 @@ async def record_usage_event(
             update(ApiKey)
             .where(ApiKey.id == api_key_id)
             .values(spend_usd_micros_total=ApiKey.spend_usd_micros_total + computed_cost)
+        )
+    if computed_cost > 0:
+        await session.execute(
+            update(User)
+            .where(User.id == user_id)
+            .values(spend_usd_micros_total=User.spend_usd_micros_total + computed_cost)
         )
     await session.commit()
 

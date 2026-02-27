@@ -1,5 +1,6 @@
 export const API_PATHS = {
   announcements: "/api/announcements",
+  authMe: "/api/auth/me",
   billingLedger: "/api/billing/ledger",
   billingTopupCheckout: "/api/billing/topup/checkout",
   billingTopupStatus: "/api/billing/topup/status",

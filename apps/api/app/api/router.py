@@ -675,14 +675,16 @@ async def me(
     current_user=Depends(get_current_user),
     membership=Depends(get_current_membership),
 ) -> UserPublic:  # type: ignore[no-untyped-def]
-    from decimal import Decimal
+    from app.storage.balance_math import remaining_usd_2
 
     def _dt_iso(value: dt.datetime | None) -> str | None:
         if not value:
             return None
         return value.astimezone(dt.timezone.utc).isoformat()
 
-    balance_usd = float((Decimal(int(getattr(current_user, "balance", 0) or 0)) / Decimal("100")).quantize(Decimal("0.01")))
+    credits_cents = int(getattr(current_user, "balance", 0) or 0)
+    spend_micros_total = int(getattr(current_user, "spend_usd_micros_total", 0) or 0)
+    balance_usd = remaining_usd_2(credits_usd_cents=credits_cents, spend_usd_micros_total=spend_micros_total)
 
     return UserPublic(
         id=str(current_user.id),
@@ -1412,8 +1414,12 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
     if not isinstance(model_id, str) or not model_id.strip():
         raise HTTPException(status_code=400, detail="missing model")
 
-    # Basic credit gate (balance is maintained by admin for now).
-    if int(getattr(user, "balance", 0)) <= 0:
+    # Credit gate: remaining balance is credits - spend.
+    from app.storage.balance_math import remaining_usd_micros
+
+    credits_cents = int(getattr(user, "balance", 0) or 0)
+    spend_micros_total = int(getattr(user, "spend_usd_micros_total", 0) or 0)
+    if remaining_usd_micros(credits_usd_cents=credits_cents, spend_usd_micros_total=spend_micros_total) <= 0:
         raise HTTPException(status_code=402, detail="insufficient balance")
 
     membership = await _require_default_membership(session, user_id=user.id)
@@ -1657,7 +1663,11 @@ async def responses(request: Request, session: AsyncSession = Depends(get_db_ses
     if not isinstance(model_id, str) or not model_id.strip():
         raise HTTPException(status_code=400, detail="missing model")
 
-    if int(getattr(user, "balance", 0)) <= 0:
+    from app.storage.balance_math import remaining_usd_micros
+
+    credits_cents = int(getattr(user, "balance", 0) or 0)
+    spend_micros_total = int(getattr(user, "spend_usd_micros_total", 0) or 0)
+    if remaining_usd_micros(credits_usd_cents=credits_cents, spend_usd_micros_total=spend_micros_total) <= 0:
         raise HTTPException(status_code=402, detail="insufficient balance")
 
     membership = await _require_default_membership(session, user_id=user.id)
@@ -2058,13 +2068,15 @@ async def billing_topup_status(
     units = int(getattr(topup, "units", 0) or 0)
     out: dict[str, object] = {"requestId": str(topup.request_id), "status": status, "units": units}
     if status == "completed":
-        from decimal import Decimal
+        from app.storage.balance_math import remaining_usd_2
 
         try:
             await session.refresh(current_user)
         except Exception:
             pass
-        out["newBalance"] = float((Decimal(int(getattr(current_user, "balance", 0) or 0)) / Decimal("100")).quantize(Decimal("0.01")))
+        credits_cents = int(getattr(current_user, "balance", 0) or 0)
+        spend_micros_total = int(getattr(current_user, "spend_usd_micros_total", 0) or 0)
+        out["newBalance"] = remaining_usd_2(credits_usd_cents=credits_cents, spend_usd_micros_total=spend_micros_total)
     return out
 
 

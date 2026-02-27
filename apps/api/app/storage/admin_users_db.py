@@ -18,6 +18,7 @@ from app.schemas.admin_users import (
     AdminUserUpdateRequest,
     AdminUserUpdateResponse,
 )
+from app.storage.balance_math import credits_usd_cents_for_desired_remaining, remaining_usd_2
 from app.storage.billing_db import stage_balance_adjustment_ledger_entry
 
 ALLOWED_MEMBERSHIP_ROLES: set[str] = {"owner", "admin", "billing", "developer", "viewer"}
@@ -28,10 +29,6 @@ def _dt_iso(value: dt.datetime | None) -> str | None:
     if not value:
         return None
     return value.astimezone(dt.timezone.utc).isoformat()
-
-
-def _cents_to_usd_2(value: int) -> float:
-    return float((Decimal(int(value)) / USD_CENTS).quantize(Decimal("0.01")))
 
 
 def _usd_to_cents_2(value: float) -> int:
@@ -47,12 +44,14 @@ def _to_item(
     keys_active: int,
     sessions_active: int,
 ) -> AdminUserItem:
+    credits_cents = int(getattr(row, "balance", 0) or 0)
+    spend_micros_total = int(getattr(row, "spend_usd_micros_total", 0) or 0)
     return AdminUserItem(
         id=str(row.id),
         email=row.email,
         role=role,
         group=row.group_name,
-        balance=_cents_to_usd_2(int(row.balance)),
+        balance=remaining_usd_2(credits_usd_cents=credits_cents, spend_usd_micros_total=spend_micros_total),
         bannedAt=_dt_iso(row.banned_at),
         createdAt=_dt_iso(row.created_at) or dt.datetime.now(dt.timezone.utc).isoformat(),
         lastLoginAt=_dt_iso(row.last_login_at),
@@ -181,7 +180,12 @@ async def update_admin_user(
             raise ValueError("balance must be >= 0")
         if input.balance > 1_000_000_000:
             raise ValueError("balance too large")
-        balance_after = _usd_to_cents_2(float(input.balance))
+        desired_remaining_cents = _usd_to_cents_2(float(input.balance))
+        spend_micros_total = int(getattr(user, "spend_usd_micros_total", 0) or 0)
+        balance_after = credits_usd_cents_for_desired_remaining(
+            desired_remaining_usd_cents=desired_remaining_cents,
+            spend_usd_micros_total=spend_micros_total,
+        )
         user.balance = balance_after
 
     if input.banned is not None:

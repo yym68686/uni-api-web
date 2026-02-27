@@ -52,6 +52,26 @@ def create_app() -> FastAPI:
             )
             await conn.exec_driver_sql(
                 "ALTER TABLE IF EXISTS users "
+                "ADD COLUMN IF NOT EXISTS spend_usd_micros_total bigint NOT NULL DEFAULT 0"
+            )
+            await conn.exec_driver_sql(
+                "UPDATE users "
+                "SET spend_usd_micros_total = 0 "
+                "WHERE spend_usd_micros_total IS NULL"
+            )
+            await conn.exec_driver_sql(
+                "WITH sums AS ("
+                "  SELECT user_id, COALESCE(SUM(cost_usd_micros), 0) AS cost_micros "
+                "  FROM llm_usage_events "
+                "  GROUP BY user_id"
+                ") "
+                "UPDATE users u "
+                "SET spend_usd_micros_total = sums.cost_micros "
+                "FROM sums "
+                "WHERE u.id = sums.user_id"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS users "
                 "ADD COLUMN IF NOT EXISTS banned_at timestamptz"
             )
             await conn.exec_driver_sql(

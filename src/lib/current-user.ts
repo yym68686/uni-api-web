@@ -4,7 +4,6 @@ import { cache } from "react";
 import { cookies } from "next/headers";
 
 import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
-import { CACHE_TAGS } from "@/lib/cache-tags";
 import { isLoggedInCookie, SESSION_COOKIE_NAME } from "@/lib/auth";
 
 export interface CurrentUser {
@@ -38,8 +37,7 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   if (!isLoggedInCookie(token)) return null;
   try {
     const res = await fetch(buildBackendUrl("/auth/me"), {
-      cache: "force-cache",
-      next: { tags: [CACHE_TAGS.currentUser], revalidate: 30 },
+      cache: "no-store",
       headers: await getBackendAuthHeadersCached()
     });
     if (!res.ok) return null;

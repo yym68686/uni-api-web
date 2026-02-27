@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -20,6 +20,7 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(16), nullable=False, default="user")
     group_name: Mapped[str] = mapped_column(String(64), nullable=False, default="default")
     balance: Mapped[int] = mapped_column("balance_usd_cents", Integer, nullable=False, default=0)
+    spend_usd_micros_total: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     banned_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     invite_code: Mapped[str | None] = mapped_column(String(16), nullable=True, unique=True)

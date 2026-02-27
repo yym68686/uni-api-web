@@ -3,7 +3,6 @@ from __future__ import annotations
 import datetime as dt
 import secrets
 import uuid
-from decimal import Decimal
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +12,7 @@ from app.models.user import User
 from app.schemas.auth import AuthResponse, LoginRequest, RegisterRequest, UserPublic
 from app.security import sha256_hex
 from app.security_password import hash_password, verify_password
+from app.storage.balance_math import remaining_usd_2
 from app.storage.invites_db import find_user_by_invite_code, generate_unique_invite_code
 from app.storage.orgs_db import ADMIN_LIKE_ROLES, ensure_default_org, ensure_membership, get_membership
 
@@ -23,20 +23,15 @@ def _dt_iso(value: dt.datetime | None) -> str | None:
     return value.astimezone(dt.timezone.utc).isoformat()
 
 
-USD_CENTS = Decimal("100")
-
-
-def _cents_to_usd_2(value: int) -> float:
-    return float((Decimal(int(value)) / USD_CENTS).quantize(Decimal("0.01")))
-
-
 def _to_user_public(row: User) -> UserPublic:
+    credits_cents = int(getattr(row, "balance", 0) or 0)
+    spend_micros_total = int(getattr(row, "spend_usd_micros_total", 0) or 0)
     return UserPublic(
         id=str(row.id),
         email=row.email,
         role=row.role,
         group=row.group_name,
-        balance=_cents_to_usd_2(int(row.balance)),
+        balance=remaining_usd_2(credits_usd_cents=credits_cents, spend_usd_micros_total=spend_micros_total),
         orgId=None,
         createdAt=_dt_iso(row.created_at) or dt.datetime.now(dt.timezone.utc).isoformat(),
         lastLoginAt=_dt_iso(row.last_login_at),
