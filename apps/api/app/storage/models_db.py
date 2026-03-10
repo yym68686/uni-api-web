@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import uuid
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation, ROUND_DOWN
 
 import httpx
 from sqlalchemy import Integer, cast, func, select
@@ -104,7 +104,7 @@ def default_price_detail_for_model(
 def _apply_discount(value: int | None, discount: float) -> int | None:
     if value is None:
         return None
-    dec = (Decimal(int(value)) * Decimal(str(discount))).to_integral_value(rounding=ROUND_HALF_UP)
+    dec = (Decimal(int(value)) * Decimal(str(discount))).to_integral_value(rounding=ROUND_DOWN)
     return int(dec)
 
 

@@ -11,6 +11,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { AdminModelItem, AdminModelsListResponse } from "@/lib/types";
 import { useI18n } from "@/components/i18n/i18n-provider";
+import { formatDiscountPercentOff, formatDiscountZhe } from "@/lib/format";
 import { UI_EVENTS } from "@/lib/ui-events";
 
 function isAdminModelsListResponse(value: unknown): value is AdminModelsListResponse {
@@ -23,19 +24,6 @@ function isAdminModelsListResponse(value: unknown): value is AdminModelsListResp
 function formatUsdPerM(value: string | null | undefined) {
   if (!value) return "—";
   return `$${value}`;
-}
-
-function formatDiscountPercent(discount: number) {
-  const raw = (1 - discount) * 100;
-  const pct = Math.round(raw);
-  return pct <= 0 ? null : pct;
-}
-
-function formatDiscountZhe(discount: number) {
-  const zhe = Math.round(discount * 100) / 10;
-  if (!Number.isFinite(zhe)) return null;
-  const normalized = zhe.toFixed(1).replace(/\.0$/, "");
-  return normalized === "0" ? null : normalized;
 }
 
 interface PricePartProps {
@@ -55,14 +43,14 @@ interface PriceSummaryProps {
 function PriceSummary({ input, output, discount }: PriceSummaryProps) {
   const { locale, t } = useI18n();
   const hasDiscount = typeof discount === "number" && discount > 0 && discount < 1;
-  const pct = hasDiscount ? formatDiscountPercent(discount) : null;
+  const pct = hasDiscount ? formatDiscountPercentOff(discount) : null;
   const zhe = hasDiscount ? formatDiscountZhe(discount) : null;
   const badge =
     locale === "zh-CN"
       ? zhe
         ? t("models.discountBadge", { zhe })
         : null
-      : pct != null
+      : pct
         ? t("models.discountBadge", { pct })
         : null;
 

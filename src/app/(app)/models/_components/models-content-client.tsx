@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { API_PATHS } from "@/lib/api-paths";
+import { formatDiscountPercentOff, formatDiscountZhe } from "@/lib/format";
 import type { Locale } from "@/lib/i18n/messages";
 import { t } from "@/lib/i18n/messages";
 import type { ModelsListResponse } from "@/lib/types";
@@ -34,12 +35,6 @@ async function fetchModels() {
 function formatUsdPerM(value: string | null | undefined) {
   if (!value) return "—";
   return `$${value}`;
-}
-
-function formatDiscountPercent(discount: number) {
-  const raw = (1 - discount) * 100;
-  const pct = Math.round(raw);
-  return pct <= 0 ? null : pct;
 }
 
 const AVAILABILITY_24H_BUCKETS = 48;
@@ -89,13 +84,6 @@ interface PricePartProps {
   price: string | null | undefined;
 }
 
-function formatDiscountZhe(discount: number) {
-  const zhe = Math.round(discount * 100) / 10;
-  if (!Number.isFinite(zhe)) return null;
-  const normalized = zhe.toFixed(1).replace(/\.0$/, "");
-  return normalized === "0" ? null : normalized;
-}
-
 function PricePart({ price }: PricePartProps) {
   return <span className="font-mono tabular-nums text-xs text-foreground">{formatUsdPerM(price)}</span>;
 }
@@ -109,14 +97,14 @@ interface PriceSummaryProps {
 
 function PriceSummary({ locale, input, output, discount }: PriceSummaryProps) {
   const hasDiscount = typeof discount === "number" && discount > 0 && discount < 1;
-  const pct = hasDiscount ? formatDiscountPercent(discount) : null;
+  const pct = hasDiscount ? formatDiscountPercentOff(discount) : null;
   const zhe = hasDiscount ? formatDiscountZhe(discount) : null;
   const badge =
     locale === "zh-CN"
       ? zhe
         ? t(locale, "models.discountBadge", { zhe })
         : null
-      : pct != null
+      : pct
         ? t(locale, "models.discountBadge", { pct })
         : null;
 

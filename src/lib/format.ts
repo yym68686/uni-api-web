@@ -42,3 +42,25 @@ export function formatUsdFixed2(value: number, locale: string) {
   usdFixed2ByLocale.set(locale, created);
   return created.format(value);
 }
+
+function formatTruncatedDecimal(value: number, maxFractionDigits: number) {
+  if (!Number.isFinite(value)) return null;
+
+  const factor = 10 ** maxFractionDigits;
+  const normalized = Number(value.toFixed(maxFractionDigits + 6));
+  const truncated = Math.trunc(normalized * factor) / factor;
+  if (truncated <= 0) return null;
+
+  return truncated
+    .toFixed(maxFractionDigits)
+    .replace(/(\.\d*?[1-9])0+$/, "$1")
+    .replace(/\.0+$/, "");
+}
+
+export function formatDiscountPercentOff(discount: number) {
+  return formatTruncatedDecimal((1 - discount) * 100, 1);
+}
+
+export function formatDiscountZhe(discount: number) {
+  return formatTruncatedDecimal(discount * 10, 2);
+}
