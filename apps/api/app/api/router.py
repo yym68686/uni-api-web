@@ -18,6 +18,7 @@ from starlette.responses import Response, StreamingResponse
 import httpx
 import json
 
+from app.api.upstream_headers import _build_upstream_headers, _filter_upstream_response_headers
 from app.auth import get_current_membership, get_current_user, require_admin
 from app.models.api_key import ApiKey
 from app.models.membership import Membership
@@ -137,48 +138,6 @@ from app.storage.referrals_db import process_referral_refund
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-HOP_BY_HOP_HEADERS = {
-    "connection",
-    "keep-alive",
-    "proxy-authenticate",
-    "proxy-authorization",
-    "te",
-    "trailer",
-    "transfer-encoding",
-    "upgrade",
-}
-
-
-def _build_upstream_headers(request: Request, *, upstream_api_key: str) -> list[tuple[str, str]]:
-    headers: list[tuple[str, str]] = []
-    for raw_name, raw_value in request.headers.raw:
-        try:
-            name = raw_name.decode("latin-1")
-            value = raw_value.decode("latin-1")
-        except Exception:
-            continue
-        key = name.lower()
-        if key in HOP_BY_HOP_HEADERS:
-            continue
-        if key in {"host", "content-length", "authorization"}:
-            continue
-        headers.append((name, value))
-    headers.append(("authorization", f"Bearer {upstream_api_key}"))
-    return headers
-
-
-def _filter_upstream_response_headers(headers: dict[str, str]) -> dict[str, str]:
-    out: dict[str, str] = {}
-    for name, value in headers.items():
-        key = name.lower()
-        if key in HOP_BY_HOP_HEADERS:
-            continue
-        if key in {"content-length", "content-encoding"}:
-            continue
-        out[name] = value
-    return out
-
 
 def _safe_int(value: object) -> int:
     try:
