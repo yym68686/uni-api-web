@@ -4,6 +4,7 @@ import datetime as dt
 import uuid
 from decimal import Decimal
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +19,23 @@ USD_MICROS = Decimal("1000000")
 
 def _iso_day(value: dt.datetime) -> str:
     return value.date().isoformat()
+
+
+def _coerce_timezone(value: str | None) -> tuple[dt.tzinfo, str]:
+    raw = str(value or "").strip()
+    if raw:
+        try:
+            zone = ZoneInfo(raw)
+            return zone, getattr(zone, "key", raw)
+        except ZoneInfoNotFoundError:
+            pass
+
+    zone = ZoneInfo("UTC")
+    return zone, "UTC"
+
+
+def _local_day_start_utc(day: dt.date, tzinfo: dt.tzinfo) -> dt.datetime:
+    return dt.datetime(day.year, day.month, day.day, tzinfo=tzinfo).astimezone(dt.timezone.utc)
 
 
 async def record_usage_event(
@@ -129,41 +147,72 @@ async def list_usage_events(
 
 
 async def get_usage_response(
-    session: AsyncSession, *, org_id: uuid.UUID, user_id: uuid.UUID, days: int = 7
+    session: AsyncSession, *, org_id: uuid.UUID, user_id: uuid.UUID, days: int = 7, tz: str = "UTC"
 ) -> dict:
+    safe_days = max(int(days), 1)
     now = dt.datetime.now(dt.timezone.utc)
+    tzinfo, tz_name = _coerce_timezone(tz)
+    local_now = now.astimezone(tzinfo)
+    local_today = local_now.date()
     start_24h = now - dt.timedelta(hours=24)
-    start_days = now - dt.timedelta(days=days)
+    start_today = _local_day_start_utc(local_today, tzinfo)
+    start_month = _local_day_start_utc(local_today.replace(day=1), tzinfo)
+    start_days = _local_day_start_utc(local_today - dt.timedelta(days=safe_days - 1), tzinfo)
+    summary_window_start = min(start_24h, start_today, start_month)
 
     errors_expr = case((LlmUsageEvent.ok.is_(False), 1), else_=0)
 
     summary_row = (
         await session.execute(
             select(
-                func.count(LlmUsageEvent.id),
-                func.coalesce(func.sum(LlmUsageEvent.total_tokens), 0),
-                func.coalesce(func.sum(errors_expr), 0),
-                func.coalesce(func.sum(LlmUsageEvent.cost_usd_micros), 0),
+                func.coalesce(func.sum(case((LlmUsageEvent.created_at >= start_24h, 1), else_=0)), 0),
+                func.coalesce(func.sum(case((LlmUsageEvent.created_at >= start_24h, LlmUsageEvent.total_tokens), else_=0)), 0),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            ((LlmUsageEvent.created_at >= start_24h) & LlmUsageEvent.ok.is_(False), 1),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ),
+                func.coalesce(
+                    func.sum(case((LlmUsageEvent.created_at >= start_24h, LlmUsageEvent.cost_usd_micros), else_=0)),
+                    0,
+                ),
+                func.coalesce(
+                    func.sum(case((LlmUsageEvent.created_at >= start_today, LlmUsageEvent.cost_usd_micros), else_=0)),
+                    0,
+                ),
+                func.coalesce(
+                    func.sum(case((LlmUsageEvent.created_at >= start_month, LlmUsageEvent.cost_usd_micros), else_=0)),
+                    0,
+                ),
             ).where(
                 LlmUsageEvent.org_id == org_id,
                 LlmUsageEvent.user_id == user_id,
-                LlmUsageEvent.created_at >= start_24h,
+                LlmUsageEvent.created_at >= summary_window_start,
             )
         )
     ).one()
 
-    requests_24h = int(summary_row[0])
+    requests_24h = int(summary_row[0] or 0)
     tokens_24h = int(summary_row[1] or 0)
     errors_24h = int(summary_row[2] or 0)
     spend_24h_micros = int(summary_row[3] or 0)
+    spend_today_micros = int(summary_row[4] or 0)
+    spend_month_micros = int(summary_row[5] or 0)
     error_rate_24h = float(errors_24h / requests_24h) if requests_24h > 0 else 0.0
-    spend_24h_usd = float((Decimal(spend_24h_micros) / USD_MICROS).quantize(Decimal("0.0000001")))
+    spend_24h_usd = _micros_to_usd(spend_24h_micros)
+    spend_today_usd = _micros_to_usd(spend_today_micros)
+    spend_month_usd = _micros_to_usd(spend_month_micros)
 
     # Daily points
+    local_day_expr = func.date_trunc("day", func.timezone(tz_name, LlmUsageEvent.created_at))
     daily_rows = (
         await session.execute(
             select(
-                func.date_trunc("day", LlmUsageEvent.created_at).label("day"),
+                local_day_expr.label("day"),
                 func.count(LlmUsageEvent.id),
                 func.coalesce(func.sum(LlmUsageEvent.input_tokens), 0),
                 func.coalesce(func.sum(LlmUsageEvent.output_tokens), 0),
@@ -175,8 +224,8 @@ async def get_usage_response(
                 LlmUsageEvent.user_id == user_id,
                 LlmUsageEvent.created_at >= start_days,
             )
-            .group_by("day")
-            .order_by("day")
+            .group_by(local_day_expr)
+            .order_by(local_day_expr)
         )
     ).all()
 
@@ -196,9 +245,8 @@ async def get_usage_response(
 
     # Ensure contiguous last N days.
     daily: list[dict] = []
-    today = dt.datetime.now(dt.timezone.utc).date()
-    for i in range(days - 1, -1, -1):
-        day = (today - dt.timedelta(days=i)).isoformat()
+    for i in range(safe_days - 1, -1, -1):
+        day = (local_today - dt.timedelta(days=i)).isoformat()
         daily.append(
             points_map.get(
                 day,
@@ -242,6 +290,8 @@ async def get_usage_response(
             "tokens24h": tokens_24h,
             "errorRate24h": error_rate_24h,
             "spend24hUsd": spend_24h_usd,
+            "spendTodayUsd": spend_today_usd,
+            "spendMonthUsd": spend_month_usd,
         },
         "daily": daily,
         "topModels": top_models,

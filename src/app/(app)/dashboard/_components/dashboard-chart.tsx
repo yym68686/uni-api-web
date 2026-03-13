@@ -4,10 +4,11 @@ import { DashboardChartClient } from "./dashboard-chart-client";
 
 interface DashboardChartProps {
   locale: Locale;
+  initialTimeZone: string;
 }
 
-export async function DashboardChart({ locale }: DashboardChartProps) {
-  const usage = await getDashboardUsage();
+export async function DashboardChart({ locale, initialTimeZone }: DashboardChartProps) {
+  const usage = await getDashboardUsage(initialTimeZone);
 
-  return <DashboardChartClient locale={locale} initialUsage={usage} />;
+  return <DashboardChartClient locale={locale} initialTimeZone={initialTimeZone} initialUsage={usage} />;
 }

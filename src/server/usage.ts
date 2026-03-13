@@ -65,12 +65,22 @@ export function getUsageData(): UsageResponse {
   const latest = daily[daily.length - 1];
   if (!latest) {
     return {
-      summary: { requests24h: 0, tokens24h: 0, errorRate24h: 0, spend24hUsd: 0 },
+      summary: {
+        requests24h: 0,
+        tokens24h: 0,
+        errorRate24h: 0,
+        spend24hUsd: 0,
+        spendTodayUsd: 0,
+        spendMonthUsd: 0
+      },
       daily: [],
       topModels: []
     };
   }
   const spend24hUsd = Number(((latest.totalTokens / 1000) * 0.008).toFixed(4));
+  const spendMonthUsd = Number(
+    daily.reduce((total, point) => total + (point.totalTokens / 1000) * 0.008, 0).toFixed(4)
+  );
 
   const topModels = [
     "gpt-4.1-mini",
@@ -96,7 +106,9 @@ export function getUsageData(): UsageResponse {
     requests24h: latest.requests,
     tokens24h: latest.totalTokens,
     errorRate24h: latest.errorRate,
-    spend24hUsd
+    spend24hUsd,
+    spendTodayUsd: spend24hUsd,
+    spendMonthUsd
   };
 
   return {

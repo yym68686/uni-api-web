@@ -12,6 +12,8 @@ export interface UsageSummary {
   tokens24h: number;
   errorRate24h: number;
   spend24hUsd: number;
+  spendTodayUsd: number;
+  spendMonthUsd: number;
 }
 
 export interface UsageResponse {

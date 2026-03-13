@@ -1865,13 +1865,14 @@ async def admin_update_model(
 
 @router.get("/usage", response_model=UsageResponse)
 async def usage(
+    tz: str = "UTC",
     session: AsyncSession = Depends(get_db_session),
     current_user=Depends(get_current_user),
     membership=Depends(get_current_membership),
 ) -> dict:
     from app.storage.usage_db import get_usage_response
 
-    return await get_usage_response(session, org_id=membership.org_id, user_id=current_user.id)
+    return await get_usage_response(session, org_id=membership.org_id, user_id=current_user.id, tz=tz)
 
 
 @router.post("/billing/topup/checkout", response_model=BillingTopupCheckoutResponse)

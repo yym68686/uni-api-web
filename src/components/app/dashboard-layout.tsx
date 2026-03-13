@@ -5,6 +5,7 @@ import { Suspense } from "react";
 
 import { LOCALE_COOKIE_NAME, normalizeLocale, type LocaleMode } from "@/lib/i18n/messages";
 import { NavigationIntentCleaner } from "@/components/app/navigation-intent-cleaner";
+import { TimeZoneSync } from "@/components/app/timezone-sync";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -21,6 +22,7 @@ export async function DashboardLayout({ children, userName, userRole, appName }:
   return (
     <div className="min-h-dvh bg-background">
       <NavigationIntentCleaner />
+      <TimeZoneSync />
       <AppSidebar appName={appName} userRole={userRole} />
       <div className="flex min-h-dvh min-w-0 flex-col sm:pl-64">
         <AppTopbar appName={appName} userName={userName} userRole={userRole} initialLocaleMode={initialLocaleMode} />

@@ -55,27 +55,33 @@ function buildEmptyDaily(days: number): DailyUsagePoint[] {
   return points;
 }
 
-export const getDashboardUsage = cache(async (): Promise<UsageResponse> => {
+function buildEmptyUsage(days: number): UsageResponse {
+  return {
+    summary: {
+      requests24h: 0,
+      tokens24h: 0,
+      errorRate24h: 0,
+      spend24hUsd: 0,
+      spendTodayUsd: 0,
+      spendMonthUsd: 0
+    },
+    daily: buildEmptyDaily(days),
+    topModels: []
+  };
+}
+
+export const getDashboardUsage = cache(async (timeZone: string): Promise<UsageResponse> => {
   try {
     const headers = await getBackendAuthHeadersCached();
-    const res = await fetch(buildBackendUrl("/usage"), { cache: "no-store", headers });
-    if (!res.ok) {
-      return {
-        summary: { requests24h: 0, tokens24h: 0, errorRate24h: 0, spend24hUsd: 0 },
-        daily: buildEmptyDaily(7),
-        topModels: []
-      };
-    }
+    const path = `/usage?tz=${encodeURIComponent(timeZone)}`;
+    const res = await fetch(buildBackendUrl(path), { cache: "no-store", headers });
+    if (!res.ok) return buildEmptyUsage(7);
     const json: unknown = await res.json().catch(() => null);
     if (isUsageResponse(json)) return json;
   } catch {
     // ignore
   }
-  return {
-    summary: { requests24h: 0, tokens24h: 0, errorRate24h: 0, spend24hUsd: 0 },
-    daily: buildEmptyDaily(7),
-    topModels: []
-  };
+  return buildEmptyUsage(7);
 });
 
 export const getDashboardApiKeys = cache(async (): Promise<ApiKeysListResponse["items"]> => {

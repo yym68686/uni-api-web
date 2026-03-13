@@ -11,6 +11,12 @@ export const API_PATHS = {
   usage: "/api/usage"
 } as const;
 
+export function usageApiPath(timeZone?: string | null) {
+  const tz = typeof timeZone === "string" ? timeZone.trim() : "";
+  if (tz.length <= 0) return API_PATHS.usage;
+  return `${API_PATHS.usage}?tz=${encodeURIComponent(tz)}`;
+}
+
 export function logsListApiPath(limit: number, offset: number) {
   return `/api/logs?limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`;
 }

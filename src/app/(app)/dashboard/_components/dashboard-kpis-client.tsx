@@ -4,10 +4,11 @@ import * as React from "react";
 import { Activity, CreditCard, KeyRound, Wallet } from "lucide-react";
 
 import { StatsCard } from "@/components/app/stats-card";
-import { API_PATHS } from "@/lib/api-paths";
+import { API_PATHS, usageApiPath } from "@/lib/api-paths";
 import { formatCompactNumber, formatUsd } from "@/lib/format";
 import type { Locale } from "@/lib/i18n/messages";
 import { t } from "@/lib/i18n/messages";
+import { getBrowserTimeZone } from "@/lib/timezone";
 import type { ApiKeysListResponse, UsageResponse } from "@/lib/types";
 import { useSwrLite } from "@/lib/swr-lite";
 
@@ -48,8 +49,8 @@ async function fetchJson(url: string) {
   return json;
 }
 
-async function fetchUsage() {
-  const json = await fetchJson(API_PATHS.usage);
+async function fetchUsage(url: string) {
+  const json = await fetchJson(url);
   if (!isUsageResponse(json)) throw new Error("Invalid response");
   return json;
 }
@@ -69,6 +70,7 @@ async function fetchRemainingCredits() {
 interface DashboardKpisClientProps {
   locale: Locale;
   remainingCredits: number | null;
+  initialTimeZone: string;
   initialUsage: UsageResponse;
   initialKeys: ApiKeysListResponse["items"];
 }
@@ -82,12 +84,15 @@ function buildDaily7d(usageDaily: Array<{ requests: number }>) {
 export function DashboardKpisClient({
   locale,
   remainingCredits,
+  initialTimeZone,
   initialUsage,
   initialKeys
 }: DashboardKpisClientProps) {
   const [hydrated, setHydrated] = React.useState(false);
+  const [timeZone, setTimeZone] = React.useState(initialTimeZone);
+  const usagePath = React.useMemo(() => usageApiPath(timeZone), [timeZone]);
 
-  const usageSwr = useSwrLite<UsageResponse>(API_PATHS.usage, fetchUsage, {
+  const usageSwr = useSwrLite<UsageResponse>(usagePath, fetchUsage, {
     fallbackData: initialUsage,
     revalidateOnFocus: true
   });
@@ -104,7 +109,14 @@ export function DashboardKpisClient({
 
   React.useEffect(() => {
     setHydrated(true);
+    const browserTimeZone = getBrowserTimeZone();
+    setTimeZone((current) => (current === browserTimeZone ? current : browserTimeZone));
   }, []);
+
+  React.useEffect(() => {
+    if (!hydrated) return;
+    void usageSwr.mutate(undefined, { revalidate: true });
+  }, [hydrated, usagePath, usageSwr.mutate]);
 
   React.useEffect(() => {
     if (!hydrated) return;
@@ -121,7 +133,7 @@ export function DashboardKpisClient({
   const activeKeys = keys.filter((k) => !k.revokedAt).length;
 
   const { requests7d } = buildDaily7d(usage.daily);
-  const spendMonthUsd = Number((usage.summary.spend24hUsd * 30).toFixed(2));
+  const spendMonthUsd = usage.summary.spendMonthUsd;
 
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -149,7 +161,7 @@ export function DashboardKpisClient({
       <StatsCard
         title={t(locale, "dashboard.kpi.spendMonth")}
         value={formatUsd(spendMonthUsd)}
-        trend={`last 24h: ${formatUsd(usage.summary.spend24hUsd)}`}
+        trend={t(locale, "dashboard.kpi.spendToday", { amount: formatUsd(usage.summary.spendTodayUsd) })}
         icon={CreditCard}
         iconGradientClassName="from-primary/25 to-muted/10 text-foreground"
       />

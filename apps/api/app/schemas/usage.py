@@ -17,6 +17,8 @@ class UsageSummary(BaseModel):
     tokens_24h: int = Field(alias="tokens24h")
     error_rate_24h: float = Field(alias="errorRate24h")
     spend_24h_usd: float = Field(alias="spend24hUsd")
+    spend_today_usd: float = Field(alias="spendTodayUsd")
+    spend_month_usd: float = Field(alias="spendMonthUsd")
 
 
 class TopModel(BaseModel):
@@ -29,4 +31,3 @@ class UsageResponse(BaseModel):
     summary: UsageSummary
     daily: list[DailyUsagePoint]
     top_models: list[TopModel] = Field(alias="topModels")
-
