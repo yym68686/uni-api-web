@@ -41,7 +41,7 @@ DEFAULT_USD_PER_M_BY_PREFIX: dict[str, DefaultPriceEntry] = {
     "gpt-5.1": ("3.75", "30", 0.3),
     "gpt-5.2": ("3.75", "30", 0.05),
     "gpt-5.3": ("3.75", "30", 0.05),
-    "gpt-5.4": ("2.5", "15", 0.03),
+    "gpt-5.4": ("2.5", "15", 0.01),
     "text-embedding-004": ("3", "15", 0.1),
     "deepseek-chat": ("0.14", "0.60"),
 }
