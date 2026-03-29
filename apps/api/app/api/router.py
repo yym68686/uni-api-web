@@ -160,6 +160,42 @@ def _creem_base_url() -> str:
     return "https://api.creem.io"
 
 
+def _llm_upstream_timeout_seconds() -> float:
+    raw_value = int(settings.llm_upstream_timeout_seconds)
+    if raw_value < 1:
+        return 1.0
+    return float(raw_value)
+
+
+def _llm_upstream_timeout() -> httpx.Timeout:
+    seconds = _llm_upstream_timeout_seconds()
+    return httpx.Timeout(seconds, connect=min(10.0, seconds))
+
+
+def _translate_upstream_http_error(exc: httpx.HTTPError) -> HTTPException:
+    if isinstance(exc, httpx.ReadTimeout):
+        seconds = int(_llm_upstream_timeout_seconds())
+        return HTTPException(status_code=504, detail=f"upstream read timeout after {seconds}s")
+    if isinstance(exc, httpx.ConnectTimeout):
+        return HTTPException(status_code=504, detail="upstream connect timeout")
+    if isinstance(exc, httpx.ConnectError):
+        return HTTPException(status_code=503, detail="upstream unavailable")
+    if isinstance(
+        exc,
+        (
+            httpx.ReadError,
+            httpx.WriteError,
+            httpx.RemoteProtocolError,
+            httpx.LocalProtocolError,
+            httpx.ProtocolError,
+        ),
+    ):
+        return HTTPException(status_code=502, detail="upstream communication error")
+    if isinstance(exc, httpx.StreamError):
+        return HTTPException(status_code=502, detail="upstream stream error")
+    return HTTPException(status_code=502, detail="upstream request failed")
+
+
 def _verify_creem_signature(*, raw_body: bytes, signature: str) -> bool:
     secret = (settings.creem_webhook_secret or "").strip()
     if secret == "":
@@ -1403,7 +1439,7 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
             headers[name] = value
 
     stream = bool(payload.get("stream"))
-    timeout = httpx.Timeout(60.0, connect=10.0)
+    timeout = _llm_upstream_timeout()
 
     forwarded_for = request.headers.get("x-forwarded-for") or ""
     source_ip = forwarded_for.split(",")[0].strip() if forwarded_for.strip() else None
@@ -1419,8 +1455,15 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
         # stream is closed immediately when the request handler returns. Keep the stream open
         # and close it inside the generator's `finally`.
         client = httpx.AsyncClient(timeout=timeout)
-        req_up = client.build_request("POST", upstream_url, headers=headers, content=raw)
-        res = await client.send(req_up, stream=True)
+        try:
+            req_up = client.build_request("POST", upstream_url, headers=headers, content=raw)
+            res = await client.send(req_up, stream=True)
+        except httpx.HTTPError as exc:
+            try:
+                await client.aclose()
+            except Exception:
+                pass
+            raise _translate_upstream_http_error(exc) from exc
         content_type = res.headers.get("content-type") or "application/json"
         ok = res.status_code < 400
         input_tokens = 0
@@ -1479,7 +1522,14 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
                             except Exception:
                                 continue
                     yield chunk
-            except (httpx.ReadError, httpx.StreamError):
+            except (
+                httpx.ReadError,
+                httpx.ReadTimeout,
+                httpx.ConnectError,
+                httpx.RemoteProtocolError,
+                httpx.LocalProtocolError,
+                httpx.StreamError,
+            ):
                 # Treat upstream disconnects/cancellation as a normal stream termination.
                 pass
             finally:
@@ -1522,19 +1572,22 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
         )
 
     # Non-stream response: read full body then close the upstream response/client.
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        async with client.stream("POST", upstream_url, headers=headers, content=raw) as res:
-            content_type = res.headers.get("content-type") or "application/json"
-            ok = res.status_code < 400
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            async with client.stream("POST", upstream_url, headers=headers, content=raw) as res:
+                content_type = res.headers.get("content-type") or "application/json"
+                ok = res.status_code < 400
 
-            body_bytes = bytearray()
-            first = None
-            async for chunk in res.aiter_bytes():
-                if first is None:
-                    first = time.perf_counter()
-                    ttft_ms = int((first - started) * 1000)
-                body_bytes.extend(chunk)
-            total_ms = int((time.perf_counter() - started) * 1000)
+                body_bytes = bytearray()
+                first = None
+                async for chunk in res.aiter_bytes():
+                    if first is None:
+                        first = time.perf_counter()
+                        ttft_ms = int((first - started) * 1000)
+                    body_bytes.extend(chunk)
+                total_ms = int((time.perf_counter() - started) * 1000)
+    except httpx.HTTPError as exc:
+        raise _translate_upstream_http_error(exc) from exc
 
     # Record usage/spend for dashboard and logs.
     input_tokens = 0
@@ -1643,7 +1696,7 @@ async def responses(request: Request, session: AsyncSession = Depends(get_db_ses
     headers = _build_upstream_headers(request, upstream_api_key=channel.api_key)
 
     stream = bool(payload.get("stream"))
-    timeout = httpx.Timeout(60.0, connect=10.0)
+    timeout = _llm_upstream_timeout()
 
     forwarded_for = request.headers.get("x-forwarded-for") or ""
     source_ip = forwarded_for.split(",")[0].strip() if forwarded_for.strip() else None
@@ -1656,8 +1709,15 @@ async def responses(request: Request, session: AsyncSession = Depends(get_db_ses
 
     if stream:
         client = httpx.AsyncClient(timeout=timeout)
-        req_up = client.build_request("POST", upstream_url, headers=headers, content=raw)
-        res = await client.send(req_up, stream=True)
+        try:
+            req_up = client.build_request("POST", upstream_url, headers=headers, content=raw)
+            res = await client.send(req_up, stream=True)
+        except httpx.HTTPError as exc:
+            try:
+                await client.aclose()
+            except Exception:
+                pass
+            raise _translate_upstream_http_error(exc) from exc
         content_type = res.headers.get("content-type") or "application/json"
         ok = res.status_code < 400
         input_tokens = 0
@@ -1702,7 +1762,14 @@ async def responses(request: Request, session: AsyncSession = Depends(get_db_ses
                                 continue
                             input_tokens, cached_tokens, output_tokens, total_tokens = parsed
                     yield chunk
-            except (httpx.ReadError, httpx.StreamError):
+            except (
+                httpx.ReadError,
+                httpx.ReadTimeout,
+                httpx.ConnectError,
+                httpx.RemoteProtocolError,
+                httpx.LocalProtocolError,
+                httpx.StreamError,
+            ):
                 pass
             finally:
                 total_ms_local = int((time.perf_counter() - started) * 1000)
@@ -1743,20 +1810,23 @@ async def responses(request: Request, session: AsyncSession = Depends(get_db_ses
             headers=upstream_headers,
         )
 
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        async with client.stream("POST", upstream_url, headers=headers, content=raw) as res:
-            content_type = res.headers.get("content-type") or "application/json"
-            ok = res.status_code < 400
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            async with client.stream("POST", upstream_url, headers=headers, content=raw) as res:
+                content_type = res.headers.get("content-type") or "application/json"
+                ok = res.status_code < 400
 
-            body_bytes = bytearray()
-            first = None
-            async for chunk in res.aiter_bytes():
-                if first is None:
-                    first = time.perf_counter()
-                    ttft_ms = int((first - started) * 1000)
-                body_bytes.extend(chunk)
-            total_ms = int((time.perf_counter() - started) * 1000)
-            upstream_headers = _filter_upstream_response_headers(dict(res.headers))
+                body_bytes = bytearray()
+                first = None
+                async for chunk in res.aiter_bytes():
+                    if first is None:
+                        first = time.perf_counter()
+                        ttft_ms = int((first - started) * 1000)
+                    body_bytes.extend(chunk)
+                total_ms = int((time.perf_counter() - started) * 1000)
+                upstream_headers = _filter_upstream_response_headers(dict(res.headers))
+    except httpx.HTTPError as exc:
+        raise _translate_upstream_http_error(exc) from exc
 
     input_tokens = 0
     cached_tokens = 0
