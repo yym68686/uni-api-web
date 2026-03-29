@@ -25,11 +25,9 @@ DEFAULT_USD_PER_M_BY_PREFIX: dict[str, DefaultPriceEntry] = {
     # - Prices are "$/M tokens" as strings, e.g. "2.5" => $2.5 per 1M tokens.
     # - Optional 3rd value is a discount multiplier: 0.1 => 10% of original (10x cheaper).
     # - Longest-prefix match (more specific prefixes override shorter ones).
-    "claude-3-5-sonnet": ("3", "15", 0.7),
-    "claude-3-7-sonnet": ("3", "15", 0.7),
-    "claude-opus-4": ("15", "75", 0.7),
-    "claude-sonnet-4": ("3", "15", 0.7),
-    "claude-haiku-4-5": ("0.5", "2.5", 0.6),
+    "claude-sonnet-4-6": ("3", "15", 0.5),
+    "claude-opus-4-6": ("5", "25", 0.5),
+    "claude-haiku-4-5": ("1", "1.25", 0.5),
     "gemini-2.5-pro": ("2.5", "20", 0.1),
     "gemini-2.5-flash": ("0.6", "5", 0.1),
     "gemini-3-pro": ("6", "36", 0.1),
