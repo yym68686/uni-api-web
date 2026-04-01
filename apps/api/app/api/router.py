@@ -1244,12 +1244,19 @@ async def admin_delete_announcement(
 
 @router.get("/admin/users", response_model=AdminUsersListResponse)
 async def admin_list_users(
+    limit: int = 50,
+    offset: int = 0,
     session: AsyncSession = Depends(get_db_session),
     admin_user=Depends(require_admin),
     membership=Depends(get_current_membership),
 ) -> AdminUsersListResponse:
     _ = admin_user
-    return await list_admin_users(session, org_id=membership.org_id)
+    return await list_admin_users(
+        session,
+        org_id=membership.org_id,
+        limit=int(limit),
+        offset=int(offset),
+    )
 
 
 @router.patch("/admin/users/{user_id}", response_model=AdminUserUpdateResponse)

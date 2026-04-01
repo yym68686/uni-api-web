@@ -10,9 +10,14 @@ import { AdminUsersCardSkeleton } from "./_components/users-skeleton";
 
 export const dynamic = "force-dynamic";
 
-export default async function AdminUsersPage() {
+interface AdminUsersPageProps {
+  searchParams?: Record<string, string | string[] | undefined> | Promise<Record<string, string | string[] | undefined>>;
+}
+
+export default async function AdminUsersPage({ searchParams }: AdminUsersPageProps) {
   const [locale, me] = await Promise.all([getRequestLocale(), getCurrentUser()]);
   const isAdmin = me?.role === "admin" || me?.role === "owner";
+  const resolvedSearchParams = ((await searchParams) ?? {}) satisfies Record<string, string | string[] | undefined>;
 
   const current =
     me?.email != null && me.email.length > 0
@@ -33,6 +38,7 @@ export default async function AdminUsersPage() {
           <AdminUsersContent
             currentUserId={me?.id ?? null}
             currentUserRole={me?.role ?? null}
+            searchParams={resolvedSearchParams}
           />
         </Suspense>
       )}

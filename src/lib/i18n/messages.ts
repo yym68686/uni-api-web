@@ -451,6 +451,7 @@ const en = {
   "admin.users.table.created": "Created",
   "admin.users.status.banned": "Banned",
   "admin.users.status.active": "Active",
+  "admin.users.pagination.summary": "Page {page} of {pages} · {count} users",
 
   "admin.settings.subtitle": "Control console-wide settings ({current}).",
   "admin.settings.forbidden": "You are not an admin and cannot manage settings.",
@@ -638,6 +639,8 @@ const en = {
   "common.publishing": "Publishing…",
   "common.refresh": "Refresh",
   "common.refreshing": "Refreshing…",
+  "common.previous": "Previous",
+  "common.next": "Next",
   "common.loadMore": "Load more",
   "common.loadingMore": "Loading…",
   "common.actions": "Actions",
@@ -1141,6 +1144,7 @@ const zhCN: Record<MessageKey, string> = {
   "admin.users.table.created": "创建时间",
   "admin.users.status.banned": "已封禁",
   "admin.users.status.active": "正常",
+  "admin.users.pagination.summary": "第 {page}/{pages} 页 · 共 {count} 位用户",
 
   "admin.settings.subtitle": "管理控制台全局设置（{current}）。",
   "admin.settings.forbidden": "你不是管理员，无法管理设置。",
@@ -1328,6 +1332,8 @@ const zhCN: Record<MessageKey, string> = {
   "common.publishing": "发布中…",
   "common.refresh": "刷新",
   "common.refreshing": "刷新中…",
+  "common.previous": "上一页",
+  "common.next": "下一页",
   "common.loadMore": "加载更多",
   "common.loadingMore": "加载中…",
   "common.actions": "操作",

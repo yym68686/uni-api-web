@@ -105,6 +105,11 @@ async def list_admin_users(
     session: AsyncSession, *, org_id: uuid.UUID, limit: int = 50, offset: int = 0
 ) -> AdminUsersListResponse:
     now = dt.datetime.now(dt.timezone.utc)
+    total = int(
+        (await session.execute(select(func.count()).select_from(_with_counts_query(now, org_id).order_by(None).subquery())))
+        .scalar_one()
+        or 0
+    )
     q = (
         _with_counts_query(now, org_id)
         .order_by(User.created_at.desc())
@@ -123,7 +128,7 @@ async def list_admin_users(
                 sessions_active=int(sessions_active),
             )
         )
-    return AdminUsersListResponse(items=items)
+    return AdminUsersListResponse(items=items, total=total)
 
 
 async def get_admin_user(

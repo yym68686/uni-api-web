@@ -20,6 +20,7 @@ class AdminUserItem(BaseModel):
 
 class AdminUsersListResponse(BaseModel):
     items: list[AdminUserItem]
+    total: int
 
 
 class AdminUserUpdateRequest(BaseModel):

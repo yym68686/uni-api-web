@@ -148,6 +148,7 @@ export interface AdminUserItem {
 
 export interface AdminUsersListResponse {
   items: AdminUserItem[];
+  total: number;
 }
 
 export interface AdminUserUpdateRequest {
