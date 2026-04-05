@@ -2,7 +2,7 @@
 
 import { PageHeader } from "@/components/common/page-header";
 import { useI18n } from "@/components/i18n/i18n-provider";
-import { billingLedgerListApiPath } from "@/lib/api-paths";
+import { API_PATHS, billingLedgerListApiPath } from "@/lib/api-paths";
 import { peekSwrLite } from "@/lib/swr-lite";
 import type { BillingLedgerItem } from "@/lib/types";
 
@@ -15,6 +15,7 @@ export default function Loading() {
   const { locale, t } = useI18n();
   const key = billingLedgerListApiPath(PAGE_SIZE, 0);
   const cached = peekSwrLite<BillingLedgerItem[]>(key);
+  const cachedBalance = peekSwrLite<number>(API_PATHS.authMe) ?? null;
   if (cached === undefined) return <BillingPageSkeleton />;
 
   return (
@@ -23,6 +24,7 @@ export default function Loading() {
       <BillingContentClient
         locale={locale}
         initialItems={cached}
+        initialBalance={cachedBalance}
         pageSize={PAGE_SIZE}
         topupEnabled={true}
         autoRevalidate={false}

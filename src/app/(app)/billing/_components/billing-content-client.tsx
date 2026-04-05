@@ -21,11 +21,21 @@ import type { Locale, MessageKey, MessageVars } from "@/lib/i18n/messages";
 import { cn } from "@/lib/utils";
 import { BillingContentSkeleton } from "./billing-skeleton";
 
+interface AuthMeResponse {
+  balance: number;
+}
+
 function isBillingLedgerListResponse(value: unknown): value is BillingLedgerListResponse {
   if (!value || typeof value !== "object") return false;
   if (!("items" in value)) return false;
   const items = (value as { items?: unknown }).items;
   return Array.isArray(items);
+}
+
+function isAuthMeResponse(value: unknown): value is AuthMeResponse {
+  if (!value || typeof value !== "object") return false;
+  const v = value as { balance?: unknown };
+  return typeof v.balance === "number" && Number.isFinite(v.balance);
 }
 
 async function fetchLedger(key: string) {
@@ -34,6 +44,14 @@ async function fetchLedger(key: string) {
   if (!res.ok) throw new Error("Request failed");
   if (!isBillingLedgerListResponse(json)) throw new Error("Invalid response");
   return json.items;
+}
+
+async function fetchCurrentBalance(key: string) {
+  const res = await fetch(key, { cache: "no-store" });
+  const json: unknown = await res.json().catch(() => null);
+  if (!res.ok) throw new Error("Request failed");
+  if (!isAuthMeResponse(json)) throw new Error("Invalid response");
+  return json.balance;
 }
 
 function isBillingTopupCheckoutResponse(value: unknown): value is BillingTopupCheckoutResponse {
@@ -91,6 +109,7 @@ function clearTopupQueryParams() {
 interface BillingContentClientProps {
   locale: Locale;
   initialItems: BillingLedgerItem[] | null;
+  initialBalance: number | null;
   pageSize: number;
   topupEnabled: boolean;
   autoRevalidate?: boolean;
@@ -99,6 +118,7 @@ interface BillingContentClientProps {
 export function BillingContentClient({
   locale,
   initialItems,
+  initialBalance,
   pageSize,
   topupEnabled,
   autoRevalidate = true
@@ -118,12 +138,22 @@ export function BillingContentClient({
     fallbackData: initialItems ?? undefined,
     revalidateOnFocus: false
   });
+  const { data: currentBalanceData, mutate: mutateCurrentBalance } = useSwrLite<number>(API_PATHS.authMe, fetchCurrentBalance, {
+    fallbackData: initialBalance ?? undefined,
+    revalidateOnFocus: true
+  });
 
   const [balanceOverrideUsd, setBalanceOverrideUsd] = React.useState<number | null>(null);
   const [trackedTopupRequestId, setTrackedTopupRequestId] = React.useState<string | null>(null);
   const [topupBlocking, setTopupBlocking] = React.useState(false);
   const [topupPending, setTopupPending] = React.useState(false);
   const [checkingStatus, setCheckingStatus] = React.useState(false);
+
+  function applyReportedBalance(nextBalance: number | null | undefined) {
+    if (typeof nextBalance !== "number" || !Number.isFinite(nextBalance)) return;
+    setBalanceOverrideUsd(nextBalance);
+    void mutateSwrLite<number>(API_PATHS.authMe, nextBalance);
+  }
 
   async function fetchTopupStatus(requestId: string, signal?: AbortSignal): Promise<BillingTopupStatusResponse> {
     const res = await fetch(billingTopupStatusApiPath(requestId), {
@@ -183,12 +213,13 @@ export function BillingContentClient({
             setTopupBlocking(false);
             setTopupPending(false);
             clearTopupQueryParams();
-            if (typeof status.newBalance === "number") setBalanceOverrideUsd(status.newBalance);
+            applyReportedBalance(status.newBalance);
             toast.success(t("billing.topup.toast.completed"));
             await mutateSwrLite<BillingLedgerItem[]>(key, undefined, {
               revalidate: true,
               dedupingIntervalMs: 0
             });
+            void mutateCurrentBalance(undefined, { revalidate: true });
             return;
           }
           if (status.status === "failed") {
@@ -213,7 +244,7 @@ export function BillingContentClient({
       cancelled = true;
       controller.abort();
     };
-  }, [key, t, topupRequestIdFromUrl]);
+  }, [key, mutateCurrentBalance, t, topupRequestIdFromUrl]);
 
   async function recheckTopup() {
     if (!trackedTopupRequestId) return;
@@ -226,12 +257,13 @@ export function BillingContentClient({
         setTopupBlocking(false);
         setTopupPending(false);
         clearTopupQueryParams();
-        if (typeof status.newBalance === "number") setBalanceOverrideUsd(status.newBalance);
+        applyReportedBalance(status.newBalance);
         toast.success(t("billing.topup.toast.completed"));
         await mutateSwrLite<BillingLedgerItem[]>(key, undefined, {
           revalidate: true,
           dedupingIntervalMs: 0
         });
+        void mutateCurrentBalance(undefined, { revalidate: true });
       } else if (status.status === "failed") {
         setTopupBlocking(false);
         setTopupPending(false);
@@ -256,16 +288,29 @@ export function BillingContentClient({
     void mutate(undefined, { revalidate: true });
   }, [autoRevalidate, mutate]);
 
+  React.useEffect(() => {
+    void mutateCurrentBalance(undefined, { revalidate: true });
+  }, [mutateCurrentBalance]);
+
+  React.useEffect(() => {
+    const interval = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      void mutateCurrentBalance(fetchCurrentBalance(API_PATHS.authMe), { revalidate: false });
+    }, 15_000);
+    return () => window.clearInterval(interval);
+  }, [mutateCurrentBalance]);
+
   const shouldShowSkeleton = data === undefined && initialItems === null;
   const items = data ?? initialItems ?? [];
-  const ledgerBalanceUsd = items.length > 0 ? Number(items[0]?.balanceUsd ?? 0) : 0;
-  const balanceUsd = balanceOverrideUsd ?? ledgerBalanceUsd;
+  const currentBalanceUsd = currentBalanceData ?? initialBalance;
+  const balanceUsd = balanceOverrideUsd ?? currentBalanceUsd;
 
   React.useEffect(() => {
     if (balanceOverrideUsd === null) return;
-    if (Math.abs(ledgerBalanceUsd - balanceOverrideUsd) > 0.0001) return;
+    if (currentBalanceUsd === null) return;
+    if (Math.abs(currentBalanceUsd - balanceOverrideUsd) > 0.0001) return;
     setBalanceOverrideUsd(null);
-  }, [balanceOverrideUsd, ledgerBalanceUsd]);
+  }, [balanceOverrideUsd, currentBalanceUsd]);
 
   if (shouldShowSkeleton) return <BillingContentSkeleton topupEnabled={topupEnabled} />;
 
@@ -283,7 +328,7 @@ export function BillingContentClient({
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatsCard
           title={t("billing.kpi.balance")}
-          value={formatUsdFixed2(balanceUsd, locale)}
+          value={balanceUsd === null ? "—" : formatUsdFixed2(balanceUsd, locale)}
           trend={t("billing.kpi.balanceHint")}
           icon={CreditCard}
           className={cn(topupEnabled ? "lg:col-span-2" : "sm:col-span-2 lg:col-span-4")}

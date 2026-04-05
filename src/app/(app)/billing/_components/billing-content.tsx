@@ -13,6 +13,7 @@ interface BillingSettingsResponse {
 interface BillingContentProps {
   locale: Locale;
   initialItems: BillingLedgerListResponse["items"];
+  initialBalance: number | null;
   topupEnabled: boolean;
   pageSize?: number;
 }
@@ -53,8 +54,14 @@ export async function getBillingSettings() {
   return json;
 }
 
-export function BillingContent({ locale, initialItems, topupEnabled, pageSize = BILLING_PAGE_SIZE }: BillingContentProps) {
+export function BillingContent({ locale, initialItems, initialBalance, topupEnabled, pageSize = BILLING_PAGE_SIZE }: BillingContentProps) {
   return (
-    <BillingContentClient locale={locale} initialItems={initialItems} pageSize={pageSize} topupEnabled={topupEnabled} />
+    <BillingContentClient
+      locale={locale}
+      initialItems={initialItems}
+      initialBalance={initialBalance}
+      pageSize={pageSize}
+      topupEnabled={topupEnabled}
+    />
   );
 }
