@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/components/i18n/i18n-provider";
+import { copyText } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 
 interface CodeBlockProps {
@@ -255,7 +256,7 @@ export function CodeBlock({ code, lang, className }: CodeBlockProps) {
 
   async function copy() {
     try {
-      await navigator.clipboard.writeText(code);
+      await copyText(code);
       setCopied(true);
       toast.success(t("common.copied"));
       window.setTimeout(() => setCopied(false), 1200);

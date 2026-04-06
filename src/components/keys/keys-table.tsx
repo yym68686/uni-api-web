@@ -4,6 +4,7 @@ import * as React from "react";
 import { Copy, DollarSign, Loader2, MoreHorizontal, PencilLine, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
+import { copyText, copyTextFromAsyncSource } from "@/lib/clipboard";
 import type { ApiKeyRevealResponse } from "@/lib/types";
 import type { ApiKeyItem } from "@/lib/types";
 import { formatUsd, formatUsdFixed2 } from "@/lib/format";
@@ -149,7 +150,7 @@ export function KeysTable({
 
   async function copy(value: string) {
     try {
-      await navigator.clipboard.writeText(value);
+      await copyText(value);
       toast.success(t("keys.dialog.copySuccess"));
     } catch {
       toast.error(t("keys.dialog.copyFailed"));
@@ -171,19 +172,22 @@ export function KeysTable({
 
     setCopyingId(id);
     try {
-      const res = await fetch(`/api/keys/${encodeURIComponent(id)}/reveal`, { cache: "no-store" });
-      const json: unknown = await res.json().catch(() => null);
-      if (!res.ok) {
-        const message =
-          json && typeof json === "object" && "message" in json
-            ? String((json as { message?: unknown }).message ?? t("common.copyFailed"))
-            : t("common.copyFailed");
-        throw new Error(message);
-      }
-      if (!isRevealResponse(json)) {
-        throw new Error(t("keys.dialog.copyFailed"));
-      }
-      await copy(json.key);
+      await copyTextFromAsyncSource(async () => {
+        const res = await fetch(`/api/keys/${encodeURIComponent(id)}/reveal`, { cache: "no-store" });
+        const json: unknown = await res.json().catch(() => null);
+        if (!res.ok) {
+          const message =
+            json && typeof json === "object" && "message" in json
+              ? String((json as { message?: unknown }).message ?? t("common.copyFailed"))
+              : t("common.copyFailed");
+          throw new Error(message);
+        }
+        if (!isRevealResponse(json)) {
+          throw new Error(t("keys.dialog.copyFailed"));
+        }
+        return json.key;
+      });
+      toast.success(t("keys.dialog.copySuccess"));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("keys.dialog.copyFailed"));
     } finally {

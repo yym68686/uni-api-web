@@ -4,6 +4,7 @@ import * as React from "react";
 import { Copy, KeyRound, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
+import { copyText } from "@/lib/clipboard";
 import type { ApiKeyCreateResponse, ApiKeyItem, ApiKeyUpdateResponse } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -74,7 +75,7 @@ export function CreateKeyDialog({ onCreated, onRenamed, triggerLabel, triggerCla
 
   async function copyKey(value: string) {
     try {
-      await navigator.clipboard.writeText(value);
+      await copyText(value);
       toast.success(t("keys.dialog.copySuccess"));
     } catch {
       toast.error(t("keys.dialog.copyFailed"));

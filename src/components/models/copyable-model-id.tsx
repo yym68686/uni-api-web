@@ -3,6 +3,7 @@
 import { Copy } from "lucide-react";
 import { toast } from "sonner";
 
+import { copyText } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/components/i18n/i18n-provider";
 
@@ -16,7 +17,7 @@ export function CopyableModelId({ value, className }: CopyableModelIdProps) {
 
   async function copy() {
     try {
-      await navigator.clipboard.writeText(value);
+      await copyText(value);
       toast.success(t("common.copied"));
     } catch {
       toast.error(t("common.copyFailed"));

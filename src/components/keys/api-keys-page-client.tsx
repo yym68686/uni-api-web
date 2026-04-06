@@ -5,6 +5,7 @@ import { Copy, Info, KeyRound } from "lucide-react";
 import { toast } from "sonner";
 
 import { API_PATHS } from "@/lib/api-paths";
+import { copyText } from "@/lib/clipboard";
 import { useSwrLite } from "@/lib/swr-lite";
 import type { ApiKeyCreateResponse, ApiKeyItem, ApiKeysListResponse, ApiKeyUpdateResponse } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -145,7 +146,7 @@ export function ApiKeysPageClient({ initialItems, publicApiBaseUrl, autoRevalida
   async function copyApiBaseUrl() {
     if (!resolvedPublicApiBaseUrl) return;
     try {
-      await navigator.clipboard.writeText(resolvedPublicApiBaseUrl);
+      await copyText(resolvedPublicApiBaseUrl);
       toast.success(t("keys.dialog.copySuccess"));
     } catch {
       toast.error(t("keys.dialog.copyFailed"));

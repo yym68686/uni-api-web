@@ -5,6 +5,7 @@ import { CheckCircle2, Clock, Copy, Eye, Gift, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import { API_PATHS } from "@/lib/api-paths";
+import { copyText } from "@/lib/clipboard";
 import type { InviteSummaryResponse } from "@/lib/types";
 import { useSwrLite } from "@/lib/swr-lite";
 import { cn } from "@/lib/utils";
@@ -95,7 +96,7 @@ export function InviteContentClient({ initialSummary }: InviteContentClientProps
 
   async function copy(text: string) {
     try {
-      await navigator.clipboard.writeText(text);
+      await copyText(text);
       toast.success(t("common.copied"));
     } catch {
       toast.error(t("common.copyFailed"));
