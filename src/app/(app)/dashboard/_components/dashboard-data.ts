@@ -88,8 +88,7 @@ export const getDashboardApiKeys = cache(async (): Promise<ApiKeysListResponse["
   try {
     const headers = await getBackendAuthHeadersCached();
     const res = await fetch(buildBackendUrl("/keys"), {
-      cache: "force-cache",
-      next: { tags: [CACHE_TAGS.keysUser] },
+      cache: "no-store",
       headers
     });
     if (!res.ok) return [];

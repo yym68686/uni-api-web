@@ -1,5 +1,4 @@
 import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
-import { CACHE_TAGS } from "@/lib/cache-tags";
 import type { Locale } from "@/lib/i18n/messages";
 import type { ModelsListResponse } from "@/lib/types";
 import { ModelsContentClient } from "./models-content-client";
@@ -13,8 +12,7 @@ function isModelsListResponse(value: unknown): value is ModelsListResponse {
 
 export async function getModels() {
   const res = await fetch(buildBackendUrl("/console/models"), {
-    cache: "force-cache",
-    next: { tags: [CACHE_TAGS.modelsUser], revalidate: 30 },
+    cache: "no-store",
     headers: await getBackendAuthHeadersCached()
   });
   if (!res.ok) return null;

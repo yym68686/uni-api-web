@@ -1,5 +1,4 @@
 import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
-import { CACHE_TAGS } from "@/lib/cache-tags";
 import type { InviteSummaryResponse } from "@/lib/types";
 import { InviteContentClient } from "./invite-content-client";
 
@@ -17,8 +16,7 @@ function isInviteSummaryResponse(value: unknown): value is InviteSummaryResponse
 
 export async function getInviteSummary() {
   const res = await fetch(buildBackendUrl("/invite/summary"), {
-    cache: "force-cache",
-    next: { tags: [CACHE_TAGS.inviteSummary], revalidate: 30 },
+    cache: "no-store",
     headers: await getBackendAuthHeadersCached()
   });
   if (!res.ok) return null;

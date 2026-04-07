@@ -1,10 +1,10 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
 import { AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 
+import { clearSwrLite } from "@/lib/swr-lite";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/components/i18n/i18n-provider";
 import {
@@ -32,7 +32,6 @@ function readMessage(json: unknown, fallback: string) {
 }
 
 export function DeleteAccountButton({ className }: DeleteAccountButtonProps) {
-  const router = useRouter();
   const { t } = useI18n();
   const [open, setOpen] = React.useState(false);
   const [confirmText, setConfirmText] = React.useState("");
@@ -48,10 +47,12 @@ export function DeleteAccountButton({ className }: DeleteAccountButtonProps) {
       const json: unknown = await res.json().catch(() => null);
       if (!res.ok) throw new Error(readMessage(json, t("profile.delete.failed")));
 
-      await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
+      await fetch("/api/auth/logout", { method: "POST", cache: "no-store" }).catch(() => null);
+      clearSwrLite();
       toast.success(t("profile.delete.success"));
       setOpen(false);
-      router.replace("/register");
+      window.location.replace("/register");
+      return;
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("profile.delete.failed"));
     } finally {

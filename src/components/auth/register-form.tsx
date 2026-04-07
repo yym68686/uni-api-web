@@ -10,6 +10,7 @@ import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
 import { API_PATHS } from "@/lib/api-paths";
+import { clearSwrLite } from "@/lib/swr-lite";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
@@ -256,7 +257,9 @@ export function RegisterForm({ appName, nextPath, defaultInviteCode, className }
 
       toast.success(t("register.success"));
       const next = nextPath && nextPath.startsWith("/") ? nextPath : "/dashboard";
-      router.replace(next);
+      clearSwrLite();
+      window.location.replace(next);
+      return;
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("register.failed"));
     } finally {

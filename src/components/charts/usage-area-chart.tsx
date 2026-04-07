@@ -77,7 +77,7 @@ export function UsageAreaChart({ data, className }: UsageAreaChartProps) {
   return (
     <div className={cn("h-72 w-full", className)}>
       <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={data} margin={{ top: 16, right: 12, left: -8, bottom: 0 }}>
+        <AreaChart data={data} margin={{ top: 16, right: 12, left: 8, bottom: 0 }}>
           <defs>
             <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="oklch(var(--primary))" stopOpacity={0.35} />
@@ -97,8 +97,8 @@ export function UsageAreaChart({ data, className }: UsageAreaChartProps) {
           <YAxis
             tickLine={false}
             axisLine={false}
-            tickMargin={10}
-            width={42}
+            tickMargin={12}
+            width={56}
             stroke="oklch(var(--muted-foreground))"
             fontSize={12}
             tickFormatter={formatCompactNumber}

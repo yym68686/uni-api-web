@@ -52,6 +52,28 @@ export function peekSwrLite<T>(key: Key): T | undefined {
   return existing?.data;
 }
 
+export function clearSwrLite(match?: (key: Key) => boolean) {
+  if (!IS_BROWSER) return;
+
+  const keys = [...store.keys()].filter((key) => (match ? match(key) : true));
+  for (const key of keys) {
+    const entry = store.get(key);
+    if (!entry) continue;
+
+    store.delete(key);
+    focusRegistry.delete(key);
+    entry.data = undefined;
+    entry.error = undefined;
+    entry.promise = null;
+    entry.fetcher = null;
+    entry.fetchedAt = 0;
+    notify(entry);
+    entry.listeners.clear();
+  }
+
+  maybeCleanupFocusListener();
+}
+
 function notify(entry: CacheEntry<unknown>) {
   entry.version += 1;
   for (const listener of entry.listeners) listener();

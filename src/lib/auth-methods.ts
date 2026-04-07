@@ -3,7 +3,6 @@ import "server-only";
 import { cache } from "react";
 
 import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
-import { CACHE_TAGS } from "@/lib/cache-tags";
 import type { AuthMethodsResponse } from "@/lib/types";
 
 function isAuthMethodsResponse(value: unknown): value is AuthMethodsResponse {
@@ -25,8 +24,7 @@ function isAuthMethodsResponse(value: unknown): value is AuthMethodsResponse {
 export const getAuthMethods = cache(async (): Promise<AuthMethodsResponse | null> => {
   try {
     const res = await fetch(buildBackendUrl("/auth/methods"), {
-      cache: "force-cache",
-      next: { tags: [CACHE_TAGS.authMethods], revalidate: 30 },
+      cache: "no-store",
       headers: await getBackendAuthHeadersCached()
     });
     if (!res.ok) return null;

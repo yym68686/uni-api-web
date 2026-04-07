@@ -198,7 +198,7 @@ const en = {
   "billing.type.usageCharge": "Usage charge",
   "billing.type.refund": "Refund",
   "billing.type.topUp": "Top-up",
-  "billing.type.referralBonus": "Referral bonus",
+  "billing.type.referralBonus": "Invite reward",
   "billing.type.unknown": "Unknown",
   "billing.empty.title": "No billing events yet",
   "billing.empty.desc": "Your balance history will appear here after your first top-up or an admin adjustment.",
@@ -223,7 +223,7 @@ const en = {
   "billing.topup.validation.max": "Maximum top-up is ${max}",
 
   "invite.title": "Invite",
-  "invite.subtitle": "Invite a friend. Earn 25% of their first credited top-up (max $100), confirmed after 72 hours.",
+  "invite.subtitle": "Invite a friend. You and your friend each earn 25% of the friend's first credited top-up (max $100 each), confirmed after 72 hours.",
   "invite.link.title": "Invite link",
   "invite.link.desc": "Share your link. Your invite code is applied at registration.",
   "invite.link.copy": "Copy invite link",
@@ -916,7 +916,7 @@ const zhCN: Record<MessageKey, string> = {
   "billing.topup.validation.max": "最大充值金额为 ${max}",
 
   "invite.title": "邀请",
-  "invite.subtitle": "邀请好友。好友首次充值入账后返利 25%（单人封顶 $100），72 小时后确认。",
+  "invite.subtitle": "邀请好友。你和好友都可获得该好友首次充值入账金额 25% 的奖励（每人单笔封顶 $100），72 小时后确认。",
   "invite.link.title": "邀请链接",
   "invite.link.desc": "分享链接，被邀请人在注册时会自动带入邀请码。",
   "invite.link.copy": "复制邀请链接",

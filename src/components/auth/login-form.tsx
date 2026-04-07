@@ -4,11 +4,11 @@ import * as React from "react";
 import Link from "next/link";
 import { z } from "zod";
 import { Chrome, Github, Loader2, Lock, Mail } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
+import { clearSwrLite } from "@/lib/swr-lite";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
@@ -39,7 +39,6 @@ interface LoginFormProps {
 
 export function LoginForm({ appName, nextPath, className }: LoginFormProps) {
   const [loading, setLoading] = React.useState(false);
-  const router = useRouter();
   const { t } = useI18n();
   const oauthToastShownRef = React.useRef(false);
 
@@ -118,7 +117,9 @@ export function LoginForm({ appName, nextPath, className }: LoginFormProps) {
 
       toast.success(t("login.success"));
       const next = nextPath && nextPath.startsWith("/") ? nextPath : "/dashboard";
-      router.replace(next);
+      clearSwrLite();
+      window.location.replace(next);
+      return;
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("login.failed"));
     } finally {

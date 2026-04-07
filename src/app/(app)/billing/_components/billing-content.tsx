@@ -1,5 +1,4 @@
 import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
-import { CACHE_TAGS } from "@/lib/cache-tags";
 import type { Locale } from "@/lib/i18n/messages";
 import type { BillingLedgerListResponse } from "@/lib/types";
 import { BillingContentClient } from "./billing-content-client";
@@ -32,8 +31,7 @@ function isBillingSettingsResponse(value: unknown): value is BillingSettingsResp
 
 export async function getLedger(pageSize = BILLING_PAGE_SIZE) {
   const res = await fetch(buildBackendUrl(`/billing/ledger?limit=${pageSize}&offset=0`), {
-    cache: "force-cache",
-    next: { tags: [CACHE_TAGS.billingLedger], revalidate: 30 },
+    cache: "no-store",
     headers: await getBackendAuthHeadersCached()
   });
   if (!res.ok) return null;
@@ -44,8 +42,7 @@ export async function getLedger(pageSize = BILLING_PAGE_SIZE) {
 
 export async function getBillingSettings() {
   const res = await fetch(buildBackendUrl("/billing/settings"), {
-    cache: "force-cache",
-    next: { tags: [CACHE_TAGS.adminSettings], revalidate: 30 },
+    cache: "no-store",
     headers: await getBackendAuthHeadersCached()
   });
   if (!res.ok) return null;

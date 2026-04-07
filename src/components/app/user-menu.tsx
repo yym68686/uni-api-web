@@ -2,9 +2,9 @@
 
 import { LogOut, User } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
+import { clearSwrLite } from "@/lib/swr-lite";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/components/i18n/i18n-provider";
@@ -30,7 +30,6 @@ function initials(name: string) {
 }
 
 export function UserMenu({ userName, className }: UserMenuProps) {
-  const router = useRouter();
   const { t } = useI18n();
 
   return (
@@ -64,10 +63,12 @@ export function UserMenu({ userName, className }: UserMenuProps) {
           className="text-destructive focus:text-destructive"
           onClick={async () => {
             try {
-              const res = await fetch("/api/auth/logout", { method: "POST" });
+              const res = await fetch("/api/auth/logout", { method: "POST", cache: "no-store" });
               if (!res.ok) throw new Error(await res.text());
+              clearSwrLite();
               toast.success(t("auth.logoutSuccess"));
-              router.replace("/login");
+              window.location.replace("/login");
+              return;
             } catch (err) {
               toast.error(err instanceof Error ? err.message : t("auth.logoutFailed"));
             }

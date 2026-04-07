@@ -43,6 +43,139 @@ def compute_referral_bonus_usd_cents(units: int) -> int:
     return int(min(max(cents, 0), REFERRAL_CAP_USD_CENTS))
 
 
+def _safe_bonus_cents(value: int) -> int:
+    return int(max(int(value), 0))
+
+
+async def _load_locked_user(session: AsyncSession, *, user_id: uuid.UUID) -> User | None:
+    return await session.get(User, user_id, populate_existing=True, with_for_update=True)
+
+
+def _mark_referral_event_blocked(event: ReferralBonusEvent, *, reason: str, ts: dt.datetime) -> None:
+    event.status = "blocked"
+    event.blocked_reason = event.blocked_reason or reason
+    event.reversed_at = ts
+
+
+def _stage_referral_bonus_credit(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    user: User,
+    delta_cents: int,
+) -> None:
+    safe_delta = _safe_bonus_cents(delta_cents)
+    balance_before = int(user.balance)
+    user.balance = balance_before + safe_delta
+    stage_balance_adjustment_ledger_entry(
+        session,
+        org_id=org_id,
+        user_id=user.id,
+        actor_user_id=None,
+        balance_before=balance_before,
+        balance_after=int(user.balance),
+        entry_type="referral_bonus",
+    )
+
+
+def _stage_referral_bonus_reversal(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    user: User,
+    delta_cents: int,
+) -> None:
+    safe_delta = _safe_bonus_cents(delta_cents)
+    balance_before = int(user.balance)
+    user.balance = balance_before - safe_delta
+    stage_balance_adjustment_ledger_entry(
+        session,
+        org_id=org_id,
+        user_id=user.id,
+        actor_user_id=None,
+        balance_before=balance_before,
+        balance_after=int(user.balance),
+        entry_type="referral_bonus",
+    )
+
+
+async def _confirm_pending_referral_bonus_event(
+    session: AsyncSession,
+    *,
+    event: ReferralBonusEvent,
+    ts: dt.datetime,
+) -> bool:
+    topup = await session.get(BillingTopup, event.topup_id)
+    if not topup or getattr(topup, "refunded_at", None) is not None:
+        _mark_referral_event_blocked(event, reason="refunded", ts=ts)
+        return False
+
+    inviter = await _load_locked_user(session, user_id=event.inviter_user_id)
+    if not inviter:
+        _mark_referral_event_blocked(event, reason="missing_inviter", ts=ts)
+        return False
+
+    invitee = await _load_locked_user(session, user_id=event.invitee_user_id)
+    if not invitee:
+        _mark_referral_event_blocked(event, reason="missing_invitee", ts=ts)
+        return False
+
+    delta_cents = _safe_bonus_cents(event.bonus_usd_cents)
+    _stage_referral_bonus_credit(session, org_id=event.org_id, user=inviter, delta_cents=delta_cents)
+    if invitee.id != inviter.id:
+        _stage_referral_bonus_credit(session, org_id=event.org_id, user=invitee, delta_cents=delta_cents)
+    event.status = "confirmed"
+    event.confirmed_at = ts
+    event.invitee_confirmed_at = ts
+    return True
+
+
+async def _backfill_missing_invitee_bonus(
+    session: AsyncSession,
+    *,
+    event: ReferralBonusEvent,
+    ts: dt.datetime,
+) -> bool:
+    if event.status != "confirmed" or event.invitee_confirmed_at is not None:
+        return False
+    if event.invitee_user_id == event.inviter_user_id:
+        event.invitee_confirmed_at = event.confirmed_at or ts
+        return False
+
+    topup = await session.get(BillingTopup, event.topup_id)
+    if not topup or getattr(topup, "refunded_at", None) is not None:
+        return False
+
+    invitee = await _load_locked_user(session, user_id=event.invitee_user_id)
+    if not invitee:
+        return False
+
+    delta_cents = _safe_bonus_cents(event.bonus_usd_cents)
+    _stage_referral_bonus_credit(session, org_id=event.org_id, user=invitee, delta_cents=delta_cents)
+    event.invitee_confirmed_at = event.confirmed_at or ts
+    return True
+
+
+async def _reverse_confirmed_referral_bonus_event(
+    session: AsyncSession,
+    *,
+    event: ReferralBonusEvent,
+    ts: dt.datetime,
+) -> None:
+    delta_cents = _safe_bonus_cents(event.bonus_usd_cents)
+    inviter = await _load_locked_user(session, user_id=event.inviter_user_id)
+    if inviter:
+        _stage_referral_bonus_reversal(session, org_id=event.org_id, user=inviter, delta_cents=delta_cents)
+
+    if event.invitee_confirmed_at is not None and event.invitee_user_id != event.inviter_user_id:
+        invitee = await _load_locked_user(session, user_id=event.invitee_user_id)
+        if invitee:
+            _stage_referral_bonus_reversal(session, org_id=event.org_id, user=invitee, delta_cents=delta_cents)
+
+    event.status = "reversed"
+    event.reversed_at = ts
+
+
 def detect_referral_block_reason(*, inviter: User, invitee: User, topup: BillingTopup) -> str | None:
     if inviter.id == invitee.id:
         return "self_invite"
@@ -136,7 +269,7 @@ async def confirm_due_referral_bonuses(session: AsyncSession, *, now: dt.datetim
     ts = now or dt.datetime.now(dt.timezone.utc)
     cutoff = ts - dt.timedelta(hours=REFERRAL_PENDING_HOURS)
 
-    rows = (
+    pending_rows = (
         await session.execute(
             select(ReferralBonusEvent)
             .where(ReferralBonusEvent.status == "pending", ReferralBonusEvent.created_at <= cutoff)
@@ -146,48 +279,33 @@ async def confirm_due_referral_bonuses(session: AsyncSession, *, now: dt.datetim
     ).scalars().all()
 
     confirmed = 0
-    for event in rows:
-        topup = await session.get(BillingTopup, event.topup_id)
-        if not topup or getattr(topup, "refunded_at", None) is not None:
-            event.status = "blocked"
-            event.blocked_reason = event.blocked_reason or "refunded"
-            event.reversed_at = ts
-            continue
+    for event in pending_rows:
+        if await _confirm_pending_referral_bonus_event(session, event=event, ts=ts):
+            confirmed += 1
 
-        inviter = (
-            (
-                await session.execute(
-                    select(User).where(User.id == event.inviter_user_id).with_for_update()
-                )
+    await session.flush()
+
+    backfill_rows = (
+        await session.execute(
+            select(ReferralBonusEvent)
+            .where(
+                ReferralBonusEvent.status == "confirmed",
+                ReferralBonusEvent.invitee_confirmed_at.is_(None),
+                ReferralBonusEvent.reversed_at.is_(None),
             )
-            .scalars()
-            .first()
+            .with_for_update(skip_locked=True)
+            .limit(safe_limit)
         )
-        if not inviter:
-            event.status = "blocked"
-            event.blocked_reason = event.blocked_reason or "missing_inviter"
-            event.reversed_at = ts
-            continue
+    ).scalars().all()
 
-        balance_before = int(inviter.balance)
-        delta_cents = int(max(int(event.bonus_usd_cents), 0))
-        inviter.balance = balance_before + delta_cents
-        stage_balance_adjustment_ledger_entry(
-            session,
-            org_id=event.org_id,
-            user_id=inviter.id,
-            actor_user_id=None,
-            balance_before=balance_before,
-            balance_after=int(inviter.balance),
-            entry_type="referral_bonus",
-        )
-        event.status = "confirmed"
-        event.confirmed_at = ts
-        confirmed += 1
+    backfilled = 0
+    for event in backfill_rows:
+        if await _backfill_missing_invitee_bonus(session, event=event, ts=ts):
+            backfilled += 1
 
-    if confirmed > 0 or len(rows) > 0:
+    if confirmed > 0 or backfilled > 0 or len(pending_rows) > 0 or len(backfill_rows) > 0:
         await session.commit()
-    return confirmed
+    return confirmed + backfilled
 
 
 async def process_referral_refund(session: AsyncSession, *, topup: BillingTopup, now: dt.datetime | None = None) -> None:
@@ -209,9 +327,7 @@ async def process_referral_refund(session: AsyncSession, *, topup: BillingTopup,
         return
 
     if event.status == "pending":
-        event.status = "blocked"
-        event.blocked_reason = event.blocked_reason or "refunded"
-        event.reversed_at = ts
+        _mark_referral_event_blocked(event, reason="refunded", ts=ts)
         await session.commit()
         return
 
@@ -219,32 +335,5 @@ async def process_referral_refund(session: AsyncSession, *, topup: BillingTopup,
         await session.commit()
         return
 
-    inviter = (
-        (
-            await session.execute(select(User).where(User.id == event.inviter_user_id).with_for_update())
-        )
-        .scalars()
-        .first()
-    )
-    if not inviter:
-        event.status = "reversed"
-        event.reversed_at = ts
-        await session.commit()
-        return
-
-    balance_before = int(inviter.balance)
-    delta_cents = int(max(int(event.bonus_usd_cents), 0))
-    inviter.balance = balance_before - delta_cents
-    stage_balance_adjustment_ledger_entry(
-        session,
-        org_id=event.org_id,
-        user_id=inviter.id,
-        actor_user_id=None,
-        balance_before=balance_before,
-        balance_after=int(inviter.balance),
-        entry_type="referral_bonus",
-    )
-    event.status = "reversed"
-    event.reversed_at = ts
+    await _reverse_confirmed_referral_bonus_event(session, event=event, ts=ts)
     await session.commit()
-

@@ -1,7 +1,6 @@
 import { ApiKeysPageClient } from "@/components/keys/api-keys-page-client";
 import { getPublicApiBaseUrl } from "@/lib/app-config";
 import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
-import { CACHE_TAGS } from "@/lib/cache-tags";
 import type { ApiKeysListResponse } from "@/lib/types";
 
 function isApiKeysListResponse(value: unknown): value is ApiKeysListResponse {
@@ -16,8 +15,7 @@ export async function KeysContent() {
   let items: ApiKeysListResponse["items"] = [];
   try {
     const res = await fetch(buildBackendUrl("/keys"), {
-      cache: "force-cache",
-      next: { tags: [CACHE_TAGS.keysUser], revalidate: 30 },
+      cache: "no-store",
       headers: await getBackendAuthHeadersCached()
     });
     if (res.ok) {

@@ -35,5 +35,5 @@ class ReferralBonusEvent(Base):
         DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
     )
     confirmed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    invitee_confirmed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     reversed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-

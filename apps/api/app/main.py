@@ -390,6 +390,10 @@ def create_app() -> FastAPI:
                 "ON referral_bonus_events(inviter_user_id)"
             )
             await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS referral_bonus_events "
+                "ADD COLUMN IF NOT EXISTS invitee_confirmed_at timestamptz"
+            )
+            await conn.exec_driver_sql(
                 "CREATE INDEX IF NOT EXISTS ix_referral_bonus_events_invitee_user_id "
                 "ON referral_bonus_events(invitee_user_id)"
             )
