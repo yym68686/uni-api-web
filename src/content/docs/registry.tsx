@@ -743,7 +743,7 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
     content: {
       en: {
         title: "Codex setup",
-        description: "Configure Codex to use 0-0.pro as the model provider (wire_api = responses).",
+        description: "Configure Codex to use OpenAI as the model provider via 0-0.pro (wire_api = responses).",
         sections: [
           {
             id: "install",
@@ -773,11 +773,11 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
                     'model = "gpt-5.2"',
                     'model_reasoning_effort = "xhigh"',
                     "",
-                    "# Added for 0-0.pro (only 6 lines)",
-                    'model_provider = "0-0"',
+                    "# Added OpenAI provider via 0-0.pro (only 6 lines)",
+                    'model_provider = "OpenAI"',
                     "",
-                    "[model_providers.0-0]",
-                    'name = "0-0"',
+                    "[model_providers.OpenAI]",
+                    'name = "OpenAI"',
                     'base_url = "https://api.0-0.pro/v1"',
                     'wire_api = "responses"',
                     "requires_openai_auth = true",
@@ -792,10 +792,10 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
                 <CodeBlock
                   lang="toml"
                   code={[
-                    'model_provider = "0-0"',
+                    'model_provider = "OpenAI"',
                     "",
-                    "[model_providers.0-0]",
-                    'name = "0-0"',
+                    "[model_providers.OpenAI]",
+                    'name = "OpenAI"',
                     'base_url = "https://api.0-0.pro/v1"',
                     'wire_api = "responses"',
                     "requires_openai_auth = true"
@@ -862,7 +862,7 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
                 </p>
                 <CodeBlock
                   lang="json"
-                  code={'{ "model_provider": "openai", "...": "..." }  →  { "model_provider": "0-0", "...": "..." }'}
+                  code={'{ "model_provider": "openai", "...": "..." }  →  { "model_provider": "OpenAI", "...": "..." }'}
                 />
                 <p>Restart VS Code after the change to re-load the sessions.</p>
               </>
@@ -872,7 +872,7 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
       },
       "zh-CN": {
         title: "Codex 配置",
-        description: "让 Codex 使用 0-0.pro 作为模型提供商（wire_api = responses）。",
+        description: "让 Codex 通过 0-0.pro 使用 OpenAI 作为模型提供商（wire_api = responses）。",
         sections: [
           {
             id: "install",
@@ -903,11 +903,11 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
                     'model = "gpt-5.2"',
                     'model_reasoning_effort = "xhigh"',
                     "",
-                    "# 新增：0-0.pro 提供商（仅 6 行）",
-                    'model_provider = "0-0"',
+                    "# 新增：通过 0-0.pro 接入 OpenAI 提供商（仅 6 行）",
+                    'model_provider = "OpenAI"',
                     "",
-                    "[model_providers.0-0]",
-                    'name = "0-0"',
+                    "[model_providers.OpenAI]",
+                    'name = "OpenAI"',
                     'base_url = "https://api.0-0.pro/v1"',
                     'wire_api = "responses"',
                     "requires_openai_auth = true",
@@ -921,10 +921,10 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
                 <CodeBlock
                   lang="toml"
                   code={[
-                    'model_provider = "0-0"',
+                    'model_provider = "OpenAI"',
                     "",
-                    "[model_providers.0-0]",
-                    'name = "0-0"',
+                    "[model_providers.OpenAI]",
+                    'name = "OpenAI"',
                     'base_url = "https://api.0-0.pro/v1"',
                     'wire_api = "responses"',
                     "requires_openai_auth = true"
@@ -986,11 +986,11 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
                   从{" "}
                   <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">openai</code>{" "}
                   改为{" "}
-                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">0-0</code>：
+                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">OpenAI</code>：
                 </p>
                 <CodeBlock
                   lang="json"
-                  code={'{ "model_provider": "openai", "...": "..." }  →  { "model_provider": "0-0", "...": "..." }'}
+                  code={'{ "model_provider": "openai", "...": "..." }  →  { "model_provider": "OpenAI", "...": "..." }'}
                 />
                 <p>修改后重启 VS Code，原来的对话就会重新出现。</p>
               </>
