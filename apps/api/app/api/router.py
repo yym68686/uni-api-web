@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 import logging
 import uuid
 import time
@@ -18,6 +19,7 @@ from starlette.responses import Response, StreamingResponse
 import httpx
 import json
 
+from app.api.llm_proxy import LlmProxyContext, UsagePricing, estimate_cost_usd_micros
 from app.api.upstream_headers import _build_upstream_headers, _filter_upstream_response_headers
 from app.auth import get_current_membership, get_current_user, require_admin
 from app.models.api_key import ApiKey
@@ -316,23 +318,13 @@ async def _compute_cost_usd_micros(
     output_tokens: int,
 ) -> int:
     cfg = await get_model_config(session, org_id=org_id, model_id=model_id.strip())
-    from app.storage.models_db import default_price_for_model
-
-    default_in, default_out = default_price_for_model(model_id.strip())
-    in_price = cfg.input_usd_micros_per_m if (cfg and cfg.input_usd_micros_per_m is not None) else default_in
-    out_price = cfg.output_usd_micros_per_m if (cfg and cfg.output_usd_micros_per_m is not None) else default_out
-
-    cost_micros = 0
-    if in_price is not None and input_tokens > 0:
-        cached = min(max(int(cached_tokens), 0), int(input_tokens))
-        uncached = max(int(input_tokens) - cached, 0)
-        if uncached > 0:
-            cost_micros += int((uncached * int(in_price) + 999_999) // 1_000_000)
-        if cached > 0:
-            cost_micros += int((cached * int(in_price) + 9_999_999) // 10_000_000)
-    if out_price is not None and output_tokens > 0:
-        cost_micros += int((output_tokens * int(out_price) + 999_999) // 1_000_000)
-    return int(max(cost_micros, 0))
+    pricing = _resolve_usage_pricing(cfg, model_id=model_id.strip())
+    return estimate_cost_usd_micros(
+        pricing=pricing,
+        input_tokens=input_tokens,
+        cached_tokens=cached_tokens,
+        output_tokens=output_tokens,
+    )
 
 
 async def _record_usage_event_best_effort(
@@ -351,12 +343,13 @@ async def _record_usage_event_best_effort(
     total_duration_ms: int,
     ttft_ms: int,
     source_ip: str | None,
+    recompute_cost: bool = True,
 ) -> None:
     computed_cost = int(max(cost_usd_micros, 0))
 
     try:
         async with SessionLocal() as s:
-            if ok and total_tokens > 0 and computed_cost <= 0:
+            if recompute_cost and ok and total_tokens > 0 and computed_cost <= 0:
                 try:
                     computed_cost = await _compute_cost_usd_micros(
                         s,
@@ -436,6 +429,99 @@ def _extract_usage_tokens(obj: dict) -> tuple[int, int, int, int] | None:
         return input_tokens, cached_tokens, output_tokens, total_tokens
 
     return None
+
+
+@dataclass(frozen=True)
+class _ParsedLlmRequest:
+    payload: dict[str, object]
+    model_id: str
+
+
+def _parse_llm_request(raw: bytes) -> _ParsedLlmRequest:
+    try:
+        payload_obj = json.loads(raw.decode("utf-8"))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="invalid json") from e
+    if not isinstance(payload_obj, dict):
+        raise HTTPException(status_code=400, detail="invalid json")
+
+    payload: dict[str, object] = payload_obj
+    model_raw = payload.get("model")
+    if not isinstance(model_raw, str) or not model_raw.strip():
+        raise HTTPException(status_code=400, detail="missing model")
+
+    return _ParsedLlmRequest(payload=payload, model_id=model_raw.strip())
+
+
+def _extract_source_ip(request: Request) -> str | None:
+    forwarded_for = request.headers.get("x-forwarded-for") or ""
+    source_ip = forwarded_for.split(",")[0].strip() if forwarded_for.strip() else None
+    if source_ip:
+        return source_ip
+    if request.client:
+        return request.client.host
+    return None
+
+
+def _resolve_usage_pricing(cfg: object | None, *, model_id: str) -> UsagePricing:
+    from app.storage.models_db import default_price_for_model
+
+    default_in, default_out = default_price_for_model(model_id.strip())
+    input_price = getattr(cfg, "input_usd_micros_per_m", None)
+    output_price = getattr(cfg, "output_usd_micros_per_m", None)
+
+    return UsagePricing(
+        input_usd_micros_per_m=input_price if input_price is not None else default_in,
+        output_usd_micros_per_m=output_price if output_price is not None else default_out,
+    )
+
+
+async def _resolve_llm_proxy_context(
+    request: Request,
+    session: AsyncSession,
+    *,
+    model_id: str,
+) -> LlmProxyContext:
+    auth = request.headers.get("authorization")
+    try:
+        api_key, user = await authenticate_api_key(session, authorization=auth)
+    except ValueError as e:
+        detail = str(e) or "unauthorized"
+        status = 403 if detail in {"banned", "api_key_spend_limit_exceeded"} else 401
+        raise HTTPException(status_code=status, detail=detail) from e
+
+    from app.storage.balance_math import remaining_usd_micros
+
+    credits_cents = int(getattr(user, "balance", 0) or 0)
+    spend_micros_total = int(getattr(user, "spend_usd_micros_total", 0) or 0)
+    if remaining_usd_micros(credits_usd_cents=credits_cents, spend_usd_micros_total=spend_micros_total) <= 0:
+        raise HTTPException(status_code=402, detail="insufficient balance")
+
+    membership = await _require_default_membership(session, user_id=user.id)
+
+    cfg = await get_model_config(session, org_id=membership.org_id, model_id=model_id)
+    if cfg and not cfg.enabled:
+        raise HTTPException(status_code=403, detail="model disabled")
+
+    channel = await pick_channel_for_group(session, org_id=membership.org_id, group_name=user.group_name)
+    if not channel:
+        raise HTTPException(status_code=503, detail="no channel configured")
+
+    context = LlmProxyContext(
+        api_key_id=api_key.id,
+        user_id=user.id,
+        org_id=membership.org_id,
+        model_id=model_id,
+        source_ip=_extract_source_ip(request),
+        upstream_base_url=str(channel.base_url).rstrip("/"),
+        upstream_api_key=str(channel.api_key),
+        pricing=_resolve_usage_pricing(cfg, model_id=model_id),
+    )
+
+    # Streaming responses can stay open for a long time; release the request-scoped
+    # SQLAlchemy session before any upstream I/O so we do not pin a DB transaction.
+    await session.close()
+    return context
 
 
 @router.get("/health")
@@ -1396,47 +1482,14 @@ async def admin_delete_channel(
 
 @router.post("/chat/completions")
 async def chat_completions(request: Request, session: AsyncSession = Depends(get_db_session)):
-    auth = request.headers.get("authorization")
-    try:
-        api_key, user = await authenticate_api_key(session, authorization=auth)
-    except ValueError as e:
-        detail = str(e) or "unauthorized"
-        status = 403 if detail in {"banned", "api_key_spend_limit_exceeded"} else 401
-        raise HTTPException(status_code=status, detail=detail) from e
-
     raw = await request.body()
-    try:
-        payload = json.loads(raw.decode("utf-8"))
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=400, detail="invalid json") from e
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=400, detail="invalid json")
+    parsed = _parse_llm_request(raw)
+    payload = parsed.payload
+    context = await _resolve_llm_proxy_context(request, session, model_id=parsed.model_id)
 
-    model_id = payload.get("model")
-    if not isinstance(model_id, str) or not model_id.strip():
-        raise HTTPException(status_code=400, detail="missing model")
-
-    # Credit gate: remaining balance is credits - spend.
-    from app.storage.balance_math import remaining_usd_micros
-
-    credits_cents = int(getattr(user, "balance", 0) or 0)
-    spend_micros_total = int(getattr(user, "spend_usd_micros_total", 0) or 0)
-    if remaining_usd_micros(credits_usd_cents=credits_cents, spend_usd_micros_total=spend_micros_total) <= 0:
-        raise HTTPException(status_code=402, detail="insufficient balance")
-
-    membership = await _require_default_membership(session, user_id=user.id)
-
-    cfg = await get_model_config(session, org_id=membership.org_id, model_id=model_id.strip())
-    if cfg and not cfg.enabled:
-        raise HTTPException(status_code=403, detail="model disabled")
-
-    channel = await pick_channel_for_group(session, org_id=membership.org_id, group_name=user.group_name)
-    if not channel:
-        raise HTTPException(status_code=503, detail="no channel configured")
-
-    upstream_url = f"{channel.base_url.rstrip('/')}/chat/completions"
+    upstream_url = f"{context.upstream_base_url}/chat/completions"
     headers: dict[str, str] = {
-        "authorization": f"Bearer {channel.api_key}",
+        "authorization": f"Bearer {context.upstream_api_key}",
         "content-type": "application/json",
     }
     # Forward optional OpenAI compatibility headers if present.
@@ -1447,11 +1500,6 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
 
     stream = bool(payload.get("stream"))
     timeout = _llm_upstream_timeout()
-
-    forwarded_for = request.headers.get("x-forwarded-for") or ""
-    source_ip = forwarded_for.split(",")[0].strip() if forwarded_for.strip() else None
-    if not source_ip and request.client:
-        source_ip = request.client.host
 
     started = time.perf_counter()
     ttft_ms = 0
@@ -1552,21 +1600,28 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
                     except Exception:
                         pass
 
+                    cost_micros = estimate_cost_usd_micros(
+                        pricing=context.pricing,
+                        input_tokens=input_tokens,
+                        cached_tokens=cached_tokens,
+                        output_tokens=output_tokens,
+                    )
                     await _record_usage_event_best_effort(
-                        org_id=membership.org_id,
-                        user_id=user.id,
-                        api_key_id=api_key.id,
-                        model_id=model_id.strip(),
+                        org_id=context.org_id,
+                        user_id=context.user_id,
+                        api_key_id=context.api_key_id,
+                        model_id=context.model_id,
                         ok=ok,
                         status_code=int(res.status_code),
                         input_tokens=input_tokens,
                         cached_tokens=cached_tokens,
                         output_tokens=output_tokens,
                         total_tokens=total_tokens,
-                        cost_usd_micros=0,
+                        cost_usd_micros=cost_micros,
                         total_duration_ms=total_ms_local,
                         ttft_ms=ttft_ms,
-                        source_ip=source_ip,
+                        source_ip=context.source_ip,
+                        recompute_cost=False,
                     )
 
                 asyncio.create_task(finalize())
@@ -1601,7 +1656,6 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
     cached_tokens = 0
     output_tokens = 0
     total_tokens = 0
-    cost_micros = 0
     if ok and content_type.startswith("application/json"):
         try:
             body = json.loads(body_bytes.decode("utf-8"))
@@ -1622,29 +1676,18 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
         except Exception:
             pass
 
-    # Estimate cost using configured/default pricing when usage is present.
-    if ok and total_tokens > 0:
-        cfg = await get_model_config(session, org_id=membership.org_id, model_id=model_id.strip())
-        from app.storage.models_db import default_price_for_model
-
-        default_in, default_out = default_price_for_model(model_id.strip())
-        in_price = cfg.input_usd_micros_per_m if (cfg and cfg.input_usd_micros_per_m is not None) else default_in
-        out_price = cfg.output_usd_micros_per_m if (cfg and cfg.output_usd_micros_per_m is not None) else default_out
-        if in_price is not None and input_tokens > 0:
-            cached = min(max(int(cached_tokens), 0), int(input_tokens))
-            uncached = max(int(input_tokens) - cached, 0)
-            if uncached > 0:
-                cost_micros += int((uncached * int(in_price) + 999_999) // 1_000_000)
-            if cached > 0:
-                cost_micros += int((cached * int(in_price) + 9_999_999) // 10_000_000)
-        if out_price is not None and output_tokens > 0:
-            cost_micros += int((output_tokens * int(out_price) + 999_999) // 1_000_000)
+    cost_micros = estimate_cost_usd_micros(
+        pricing=context.pricing,
+        input_tokens=input_tokens,
+        cached_tokens=cached_tokens,
+        output_tokens=output_tokens,
+    )
 
     await _record_usage_event_best_effort(
-        org_id=membership.org_id,
-        user_id=user.id,
-        api_key_id=api_key.id,
-        model_id=model_id.strip(),
+        org_id=context.org_id,
+        user_id=context.user_id,
+        api_key_id=context.api_key_id,
+        model_id=context.model_id,
         ok=ok,
         status_code=int(res.status_code),
         input_tokens=input_tokens,
@@ -1654,7 +1697,8 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
         cost_usd_micros=cost_micros,
         total_duration_ms=total_ms,
         ttft_ms=ttft_ms,
-        source_ip=source_ip,
+        source_ip=context.source_ip,
+        recompute_cost=False,
     )
 
     return Response(content=bytes(body_bytes), status_code=int(res.status_code), media_type=content_type)
@@ -1666,53 +1710,16 @@ async def _proxy_responses_request(
     *,
     upstream_path: str,
 ):
-    auth = request.headers.get("authorization")
-    try:
-        api_key, user = await authenticate_api_key(session, authorization=auth)
-    except ValueError as e:
-        detail = str(e) or "unauthorized"
-        status = 403 if detail in {"banned", "api_key_spend_limit_exceeded"} else 401
-        raise HTTPException(status_code=status, detail=detail) from e
-
     raw = await request.body()
-    try:
-        payload = json.loads(raw.decode("utf-8"))
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=400, detail="invalid json") from e
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=400, detail="invalid json")
+    parsed = _parse_llm_request(raw)
+    payload = parsed.payload
+    context = await _resolve_llm_proxy_context(request, session, model_id=parsed.model_id)
 
-    model_id = payload.get("model")
-    if not isinstance(model_id, str) or not model_id.strip():
-        raise HTTPException(status_code=400, detail="missing model")
-
-    from app.storage.balance_math import remaining_usd_micros
-
-    credits_cents = int(getattr(user, "balance", 0) or 0)
-    spend_micros_total = int(getattr(user, "spend_usd_micros_total", 0) or 0)
-    if remaining_usd_micros(credits_usd_cents=credits_cents, spend_usd_micros_total=spend_micros_total) <= 0:
-        raise HTTPException(status_code=402, detail="insufficient balance")
-
-    membership = await _require_default_membership(session, user_id=user.id)
-
-    cfg = await get_model_config(session, org_id=membership.org_id, model_id=model_id.strip())
-    if cfg and not cfg.enabled:
-        raise HTTPException(status_code=403, detail="model disabled")
-
-    channel = await pick_channel_for_group(session, org_id=membership.org_id, group_name=user.group_name)
-    if not channel:
-        raise HTTPException(status_code=503, detail="no channel configured")
-
-    upstream_url = f"{channel.base_url.rstrip('/')}{upstream_path}"
-    headers = _build_upstream_headers(request, upstream_api_key=channel.api_key)
+    upstream_url = f"{context.upstream_base_url}{upstream_path}"
+    headers = _build_upstream_headers(request, upstream_api_key=context.upstream_api_key)
 
     stream = bool(payload.get("stream"))
     timeout = _llm_upstream_timeout()
-
-    forwarded_for = request.headers.get("x-forwarded-for") or ""
-    source_ip = forwarded_for.split(",")[0].strip() if forwarded_for.strip() else None
-    if not source_ip and request.client:
-        source_ip = request.client.host
 
     started = time.perf_counter()
     ttft_ms = 0
@@ -1795,21 +1802,28 @@ async def _proxy_responses_request(
                     except Exception:
                         pass
 
+                    cost_micros = estimate_cost_usd_micros(
+                        pricing=context.pricing,
+                        input_tokens=input_tokens,
+                        cached_tokens=cached_tokens,
+                        output_tokens=output_tokens,
+                    )
                     await _record_usage_event_best_effort(
-                        org_id=membership.org_id,
-                        user_id=user.id,
-                        api_key_id=api_key.id,
-                        model_id=model_id.strip(),
+                        org_id=context.org_id,
+                        user_id=context.user_id,
+                        api_key_id=context.api_key_id,
+                        model_id=context.model_id,
                         ok=ok,
                         status_code=int(res.status_code),
                         input_tokens=input_tokens,
                         cached_tokens=cached_tokens,
                         output_tokens=output_tokens,
                         total_tokens=total_tokens,
-                        cost_usd_micros=0,
+                        cost_usd_micros=cost_micros,
                         total_duration_ms=total_ms_local,
                         ttft_ms=ttft_ms,
-                        source_ip=source_ip,
+                        source_ip=context.source_ip,
+                        recompute_cost=False,
                     )
 
                 asyncio.create_task(finalize())
@@ -1843,7 +1857,6 @@ async def _proxy_responses_request(
     cached_tokens = 0
     output_tokens = 0
     total_tokens = 0
-    cost_micros = 0
     if ok and content_type.startswith("application/json"):
         try:
             body = json.loads(body_bytes.decode("utf-8"))
@@ -1854,28 +1867,18 @@ async def _proxy_responses_request(
         except Exception:
             pass
 
-    if ok and total_tokens > 0:
-        cfg = await get_model_config(session, org_id=membership.org_id, model_id=model_id.strip())
-        from app.storage.models_db import default_price_for_model
-
-        default_in, default_out = default_price_for_model(model_id.strip())
-        in_price = cfg.input_usd_micros_per_m if (cfg and cfg.input_usd_micros_per_m is not None) else default_in
-        out_price = cfg.output_usd_micros_per_m if (cfg and cfg.output_usd_micros_per_m is not None) else default_out
-        if in_price is not None and input_tokens > 0:
-            cached = min(max(int(cached_tokens), 0), int(input_tokens))
-            uncached = max(int(input_tokens) - cached, 0)
-            if uncached > 0:
-                cost_micros += int((uncached * int(in_price) + 999_999) // 1_000_000)
-            if cached > 0:
-                cost_micros += int((cached * int(in_price) + 9_999_999) // 10_000_000)
-        if out_price is not None and output_tokens > 0:
-            cost_micros += int((output_tokens * int(out_price) + 999_999) // 1_000_000)
+    cost_micros = estimate_cost_usd_micros(
+        pricing=context.pricing,
+        input_tokens=input_tokens,
+        cached_tokens=cached_tokens,
+        output_tokens=output_tokens,
+    )
 
     await _record_usage_event_best_effort(
-        org_id=membership.org_id,
-        user_id=user.id,
-        api_key_id=api_key.id,
-        model_id=model_id.strip(),
+        org_id=context.org_id,
+        user_id=context.user_id,
+        api_key_id=context.api_key_id,
+        model_id=context.model_id,
         ok=ok,
         status_code=int(res.status_code),
         input_tokens=input_tokens,
@@ -1885,7 +1888,8 @@ async def _proxy_responses_request(
         cost_usd_micros=cost_micros,
         total_duration_ms=total_ms,
         ttft_ms=ttft_ms,
-        source_ip=source_ip,
+        source_ip=context.source_ip,
+        recompute_cost=False,
     )
 
     upstream_headers.setdefault("cache-control", "no-cache")

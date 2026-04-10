@@ -23,6 +23,8 @@ const en = {
   "app.admin.settings": "Settings",
   "app.workspace": "Workspace",
   "app.workspace.default": "Default",
+  "app.feedback": "Feedback",
+  "app.feedback.joinGroup": "Join Telegram group",
 
   "auth.signedInAs": "Signed in as",
   "auth.logout": "Logout",
@@ -717,6 +719,8 @@ const zhCN: Record<MessageKey, string> = {
   "app.admin.settings": "设置",
   "app.workspace": "工作区",
   "app.workspace.default": "默认",
+  "app.feedback": "问题反馈",
+  "app.feedback.joinGroup": "加入 Telegram 群",
 
   "auth.signedInAs": "登录账号",
   "auth.logout": "退出登录",

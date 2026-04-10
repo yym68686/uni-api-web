@@ -30,13 +30,18 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
+function hasAtMostTwoDecimals(value: number) {
+  if (!Number.isFinite(value)) return false;
+  return Math.abs(value * 100 - Math.round(value * 100)) < 1e-9;
+}
+
 function createBalanceSchema(t: (key: MessageKey, vars?: MessageVars) => string) {
   return z.object({
     balance: z.coerce
       .number()
       .min(0, t("validation.balanceMin"))
       .max(1_000_000_000, t("validation.balanceMax"))
-      .refine((v) => Number.isFinite(v) && Math.round(v * 100) === v * 100, t("validation.currency2Decimals"))
+      .refine((v) => hasAtMostTwoDecimals(v), t("validation.currency2Decimals"))
   });
 }
 

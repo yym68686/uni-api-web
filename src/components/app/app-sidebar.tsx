@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { BarChart3, Boxes, CreditCard, Gift, KeyRound, LayoutDashboard, Megaphone, PlugZap, ScrollText, Settings, SlidersHorizontal, Users, type LucideIcon } from "lucide-react";
+import { ArrowUpRight, BarChart3, Boxes, CreditCard, Gift, KeyRound, LayoutDashboard, Megaphone, PlugZap, ScrollText, Settings, SlidersHorizontal, Users, type LucideIcon } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { setPendingPathname } from "@/lib/navigation-intent";
@@ -28,6 +28,8 @@ const adminItems = [
   { href: "/admin/announcements", labelKey: "app.admin.announcements", icon: Megaphone },
   { href: "/admin/settings", labelKey: "app.admin.settings", icon: Settings }
 ] as const satisfies ReadonlyArray<{ href: string; labelKey: MessageKey; icon: LucideIcon }>;
+
+const TELEGRAM_GROUP_URL = "https://t.me/i00pro";
 
 interface AppSidebarContentProps {
   appName: string;
@@ -140,12 +142,28 @@ export function AppSidebarContent({ appName, userRole, onNavigate }: AppSidebarC
       </nav>
 
       <div className="border-t border-border p-4">
-        <div className="rounded-xl border border-border bg-background/40 p-3">
-          <div className="text-xs text-muted-foreground">{t("app.workspace")}</div>
-          <div className="mt-1 truncate text-sm font-medium text-sidebar-foreground">
-            {t("app.workspace.default")}
+        <a
+          href={TELEGRAM_GROUP_URL}
+          target="_blank"
+          rel="noreferrer"
+          onClick={() => onNavigate?.()}
+          className={cn(
+            "group block rounded-xl border border-border bg-background/40 p-3",
+            "transition-all duration-300 [transition-timing-function:cubic-bezier(0.16,1,0.3,1)]",
+            "hover:-translate-y-1 hover:border-primary/20 hover:bg-background/60",
+            "hover:shadow-[0_0_0_1px_oklch(var(--border)/0.6),0_14px_40px_oklch(0%_0_0/0.35)]"
+          )}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-xs text-muted-foreground">{t("app.feedback")}</div>
+              <div className="mt-1 truncate text-sm font-medium text-sidebar-foreground transition-colors group-hover:text-primary">
+                {t("app.feedback.joinGroup")}
+              </div>
+            </div>
+            <ArrowUpRight className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-all duration-300 group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-primary" />
           </div>
-        </div>
+        </a>
       </div>
     </div>
   );
