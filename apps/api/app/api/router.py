@@ -1660,8 +1660,12 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
     return Response(content=bytes(body_bytes), status_code=int(res.status_code), media_type=content_type)
 
 
-@router.post("/responses")
-async def responses(request: Request, session: AsyncSession = Depends(get_db_session)):
+async def _proxy_responses_request(
+    request: Request,
+    session: AsyncSession,
+    *,
+    upstream_path: str,
+):
     auth = request.headers.get("authorization")
     try:
         api_key, user = await authenticate_api_key(session, authorization=auth)
@@ -1699,7 +1703,7 @@ async def responses(request: Request, session: AsyncSession = Depends(get_db_ses
     if not channel:
         raise HTTPException(status_code=503, detail="no channel configured")
 
-    upstream_url = f"{channel.base_url.rstrip('/')}/responses"
+    upstream_url = f"{channel.base_url.rstrip('/')}{upstream_path}"
     headers = _build_upstream_headers(request, upstream_api_key=channel.api_key)
 
     stream = bool(payload.get("stream"))
@@ -1891,6 +1895,16 @@ async def responses(request: Request, session: AsyncSession = Depends(get_db_ses
         media_type=content_type,
         headers=upstream_headers,
     )
+
+
+@router.post("/responses")
+async def responses(request: Request, session: AsyncSession = Depends(get_db_session)):
+    return await _proxy_responses_request(request, session, upstream_path="/responses")
+
+
+@router.post("/responses/compact")
+async def responses_compact(request: Request, session: AsyncSession = Depends(get_db_session)):
+    return await _proxy_responses_request(request, session, upstream_path="/responses/compact")
 
 
 @router.get("/admin/models", response_model=AdminModelsListResponse)

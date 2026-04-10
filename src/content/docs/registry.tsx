@@ -531,8 +531,8 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
     groupId: "api",
     content: {
       en: {
-        title: "Responses (v1/responses)",
-        description: "Pass-through endpoint compatible with upstream Responses API.",
+        title: "Responses (v1/responses, v1/responses/compact)",
+        description: "Pass-through endpoints compatible with upstream Responses API variants.",
         sections: [
           {
             id: "overview",
@@ -540,7 +540,9 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
             content: (
               <p>
                 Uni API exposes <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">/v1/responses</code>{" "}
-                and forwards the request body and headers upstream, while still enforcing your API key authentication and
+                and{" "}
+                <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">/v1/responses/compact</code>,
+                forwarding request bodies and headers upstream while still enforcing your API key authentication and
                 recording usage.
               </p>
             )
@@ -561,8 +563,8 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
         ]
       },
       "zh-CN": {
-        title: "Responses（v1/responses）",
-        description: "与上游 Responses API 兼容的透传端点。",
+        title: "Responses（v1/responses、v1/responses/compact）",
+        description: "与上游 Responses API 各变体兼容的透传端点。",
         sections: [
           {
             id: "overview",
@@ -571,6 +573,8 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
               <p>
                 Uni API 提供{" "}
                 <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">/v1/responses</code>{" "}
+                和{" "}
+                <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">/v1/responses/compact</code>{" "}
                 端点，原样转发请求 body 与 headers 到上游；同时仍会执行本项目的 API key 鉴权并记录 usage。
               </p>
             )
