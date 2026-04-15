@@ -21,6 +21,10 @@ export function logsListApiPath(limit: number, offset: number) {
   return `/api/logs?limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`;
 }
 
+export function logsExportApiPath() {
+  return "/api/logs/export";
+}
+
 export function billingLedgerListApiPath(limit: number, offset: number) {
   return `/api/billing/ledger?limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`;
 }
