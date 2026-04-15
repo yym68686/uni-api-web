@@ -23,6 +23,10 @@ function parsePage(value: string | undefined) {
   return parsed;
 }
 
+function parseEmailQuery(value: string | undefined) {
+  return value?.trim() ?? "";
+}
+
 function buildPageHref(searchParams: Record<string, string | string[] | undefined>, page: number) {
   const qs = new URLSearchParams();
   for (const [key, value] of Object.entries(searchParams)) {
@@ -38,9 +42,15 @@ function buildPageHref(searchParams: Record<string, string | string[] | undefine
   return query.length > 0 ? `/admin/users?${query}` : "/admin/users";
 }
 
-async function getUsers(page: number) {
+async function getUsers(page: number, emailQuery: string) {
   const offset = (page - 1) * ADMIN_USERS_PAGE_SIZE;
-  const res = await fetch(buildBackendUrl(`/admin/users?limit=${ADMIN_USERS_PAGE_SIZE}&offset=${offset}`), {
+  const qs = new URLSearchParams({
+    limit: String(ADMIN_USERS_PAGE_SIZE),
+    offset: String(offset)
+  });
+  if (emailQuery.length > 0) qs.set("email", emailQuery);
+
+  const res = await fetch(buildBackendUrl(`/admin/users?${qs.toString()}`), {
     cache: "no-store",
     headers: await getBackendAuthHeadersCached()
   });
@@ -60,7 +70,8 @@ interface AdminUsersContentProps {
 
 export async function AdminUsersContent({ currentUserId, currentUserRole, searchParams }: AdminUsersContentProps) {
   const requestedPage = parsePage(getParam(searchParams, "page"));
-  const response = await getUsers(requestedPage);
+  const emailQuery = parseEmailQuery(getParam(searchParams, "email"));
+  const response = await getUsers(requestedPage, emailQuery);
   const totalItems = response?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalItems / ADMIN_USERS_PAGE_SIZE));
   const currentPage = Math.min(requestedPage, totalPages);
@@ -77,6 +88,7 @@ export async function AdminUsersContent({ currentUserId, currentUserRole, search
       currentPage={currentPage}
       pageSize={ADMIN_USERS_PAGE_SIZE}
       totalItems={totalItems}
+      initialEmailQuery={emailQuery}
       currentUserId={currentUserId}
       currentUserRole={currentUserRole}
     />

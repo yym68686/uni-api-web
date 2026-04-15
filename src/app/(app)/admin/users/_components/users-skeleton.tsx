@@ -9,6 +9,18 @@ export function AdminUsersCardSkeleton() {
   return (
     <Card>
       <CardContent className="p-0">
+        <div className="border-b border-border px-4 py-4 sm:px-6">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+            <div className="w-full max-w-2xl space-y-2">
+              <Skeleton className="h-3 w-28" />
+              <Skeleton className="h-11 w-full rounded-2xl" />
+            </div>
+            <div className="flex gap-2">
+              <Skeleton className="h-11 w-24 rounded-2xl" />
+              <Skeleton className="h-11 w-24 rounded-2xl" />
+            </div>
+          </div>
+        </div>
         <div className="grid grid-cols-10 gap-3 border-b border-border px-4 py-3 sm:px-6">
           {Array.from({ length: 10 }).map((_, idx) => (
             <Skeleton key={idx} className="h-4 w-20" />

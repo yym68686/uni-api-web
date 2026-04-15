@@ -335,7 +335,7 @@ export function BillingContentClient({
         />
 
         {topupEnabled ? (
-          <Card className="lg:col-span-2">
+          <Card id="billing-topup" className="scroll-mt-24 lg:col-span-2">
             <CardHeader className="flex flex-row items-start justify-between gap-3">
               <div className="space-y-1">
                 <CardTitle>{t("billing.topup.title")}</CardTitle>

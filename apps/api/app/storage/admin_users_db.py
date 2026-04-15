@@ -101,21 +101,24 @@ def _with_counts_query(now: dt.datetime, org_id: uuid.UUID):
     return q
 
 
+def _apply_email_filter(query, email: str | None):
+    normalized = (email or "").strip().lower()
+    if not normalized:
+        return query
+    return query.where(func.lower(User.email).contains(normalized))
+
+
 async def list_admin_users(
-    session: AsyncSession, *, org_id: uuid.UUID, limit: int = 50, offset: int = 0
+    session: AsyncSession, *, org_id: uuid.UUID, limit: int = 50, offset: int = 0, email: str | None = None
 ) -> AdminUsersListResponse:
     now = dt.datetime.now(dt.timezone.utc)
+    base_query = _apply_email_filter(_with_counts_query(now, org_id), email)
     total = int(
-        (await session.execute(select(func.count()).select_from(_with_counts_query(now, org_id).order_by(None).subquery())))
+        (await session.execute(select(func.count()).select_from(base_query.order_by(None).subquery())))
         .scalar_one()
         or 0
     )
-    q = (
-        _with_counts_query(now, org_id)
-        .order_by(User.created_at.desc())
-        .limit(limit)
-        .offset(offset)
-    )
+    q = base_query.order_by(User.created_at.desc()).limit(limit).offset(offset)
     rows = (await session.execute(q)).all()
     items: list[AdminUserItem] = []
     for user, role, keys_total, keys_active, sessions_active in rows:

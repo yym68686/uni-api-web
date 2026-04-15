@@ -1332,6 +1332,7 @@ async def admin_delete_announcement(
 async def admin_list_users(
     limit: int = 50,
     offset: int = 0,
+    email: str | None = None,
     session: AsyncSession = Depends(get_db_session),
     admin_user=Depends(require_admin),
     membership=Depends(get_current_membership),
@@ -1342,6 +1343,7 @@ async def admin_list_users(
         org_id=membership.org_id,
         limit=int(limit),
         offset=int(offset),
+        email=email,
     )
 
 
