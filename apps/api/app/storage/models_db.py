@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import json
 import uuid
 from decimal import Decimal, InvalidOperation, ROUND_DOWN
+from pathlib import Path
 
 import httpx
 from sqlalchemy import Integer, cast, func, select
@@ -20,30 +22,42 @@ UNSET = object()
 
 DefaultPriceEntry = tuple[str | None, str | None] | tuple[str | None, str | None, float]
 
-DEFAULT_USD_PER_M_BY_PREFIX: dict[str, DefaultPriceEntry] = {
-    # NOTE:
-    # - Prices are "$/M tokens" as strings, e.g. "2.5" => $2.5 per 1M tokens.
-    # - Optional 3rd value is a discount multiplier: 0.1 => 10% of original (10x cheaper).
-    # - Longest-prefix match (more specific prefixes override shorter ones).
-    "claude-sonnet-4-6": ("3", "15", 0.5),
-    "claude-opus-4-6": ("5", "25", 0.5),
-    "claude-haiku-4-5": ("1", "1.25", 0.5),
-    "gemini-2.5-pro": ("2.5", "20", 0.15),
-    "gemini-2.5-flash": ("0.6", "5", 0.15),
-    "gemini-3-pro": ("6", "36", 0.1),
-    "gemini-3.1-pro": ("2", "12", 0.15),
-    "gemini-3.1-flash-image": ("0.5", "60", 0.15),
-    "gemini-3.1-flash": ("4.5", "12", 0.15),
-    "gemini-3-flash": ("1.5", "6", 0.1),
-    "gemini-embedding-001": ("3", "15", 0.1),
-    "gpt-5": ("3.75", "30", 0.1),
-    "gpt-5.1": ("3.75", "30", 0.3),
-    "gpt-5.2": ("3.75", "30", 0.05),
-    "gpt-5.3": ("3.75", "30", 0.05),
-    "gpt-5.4": ("2.5", "15", 0.01),
-    "text-embedding-004": ("3", "15", 0.1),
-    "deepseek-chat": ("0.14", "0.60"),
-}
+DEFAULT_MODEL_PRICING_PATH = Path(__file__).resolve().parents[4] / "data" / "default-model-pricing.json"
+
+
+def _load_default_prices() -> dict[str, DefaultPriceEntry]:
+    raw = json.loads(DEFAULT_MODEL_PRICING_PATH.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError("invalid default pricing file")
+
+    prices: dict[str, DefaultPriceEntry] = {}
+    for prefix, entry in raw.items():
+        if not isinstance(prefix, str) or not isinstance(entry, dict):
+            raise ValueError("invalid default pricing entry")
+
+        input_usd = entry.get("inputUsdPerM")
+        output_usd = entry.get("outputUsdPerM")
+        discount_raw = entry.get("discount")
+
+        if input_usd is not None and not isinstance(input_usd, str):
+            raise ValueError("invalid default input price")
+        if output_usd is not None and not isinstance(output_usd, str):
+            raise ValueError("invalid default output price")
+        if discount_raw is None:
+            prices[prefix] = (input_usd, output_usd)
+            continue
+        if not isinstance(discount_raw, str):
+            raise ValueError("invalid default discount")
+
+        prices[prefix] = (input_usd, output_usd, float(discount_raw))
+    return prices
+
+
+# NOTE:
+# - Prices are "$/M tokens" as strings, e.g. "2.5" => $2.5 per 1M tokens.
+# - Optional 3rd value is a discount multiplier: 0.1 => 10% of original (10x cheaper).
+# - Longest-prefix match (more specific prefixes override shorter ones).
+DEFAULT_USD_PER_M_BY_PREFIX: dict[str, DefaultPriceEntry] = _load_default_prices()
 
 
 def _dt_iso(value: dt.datetime) -> str:

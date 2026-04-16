@@ -1,0 +1,91 @@
+{
+  "claude-sonnet-4-6": {
+    "inputUsdPerM": "3",
+    "outputUsdPerM": "15",
+    "discount": "0.5"
+  },
+  "claude-opus-4-6": {
+    "inputUsdPerM": "5",
+    "outputUsdPerM": "25",
+    "discount": "0.5"
+  },
+  "claude-haiku-4-5": {
+    "inputUsdPerM": "1",
+    "outputUsdPerM": "1.25",
+    "discount": "0.5"
+  },
+  "gemini-2.5-pro": {
+    "inputUsdPerM": "2.5",
+    "outputUsdPerM": "20",
+    "discount": "0.15"
+  },
+  "gemini-2.5-flash": {
+    "inputUsdPerM": "0.6",
+    "outputUsdPerM": "5",
+    "discount": "0.15"
+  },
+  "gemini-3-pro": {
+    "inputUsdPerM": "6",
+    "outputUsdPerM": "36",
+    "discount": "0.1"
+  },
+  "gemini-3.1-pro": {
+    "inputUsdPerM": "2",
+    "outputUsdPerM": "12",
+    "discount": "0.15"
+  },
+  "gemini-3.1-flash-image": {
+    "inputUsdPerM": "0.5",
+    "outputUsdPerM": "60",
+    "discount": "0.15"
+  },
+  "gemini-3.1-flash": {
+    "inputUsdPerM": "4.5",
+    "outputUsdPerM": "12",
+    "discount": "0.15"
+  },
+  "gemini-3-flash": {
+    "inputUsdPerM": "1.5",
+    "outputUsdPerM": "6",
+    "discount": "0.1"
+  },
+  "gemini-embedding-001": {
+    "inputUsdPerM": "3",
+    "outputUsdPerM": "15",
+    "discount": "0.1"
+  },
+  "gpt-5": {
+    "inputUsdPerM": "3.75",
+    "outputUsdPerM": "30",
+    "discount": "0.1"
+  },
+  "gpt-5.1": {
+    "inputUsdPerM": "3.75",
+    "outputUsdPerM": "30",
+    "discount": "0.3"
+  },
+  "gpt-5.2": {
+    "inputUsdPerM": "3.75",
+    "outputUsdPerM": "30",
+    "discount": "0.05"
+  },
+  "gpt-5.3": {
+    "inputUsdPerM": "3.75",
+    "outputUsdPerM": "30",
+    "discount": "0.05"
+  },
+  "gpt-5.4": {
+    "inputUsdPerM": "2.5",
+    "outputUsdPerM": "15",
+    "discount": "0.01"
+  },
+  "text-embedding-004": {
+    "inputUsdPerM": "3",
+    "outputUsdPerM": "15",
+    "discount": "0.1"
+  },
+  "deepseek-chat": {
+    "inputUsdPerM": "0.14",
+    "outputUsdPerM": "0.60"
+  }
+}

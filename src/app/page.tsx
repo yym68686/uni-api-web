@@ -14,14 +14,24 @@ import {
   Mail
 } from "lucide-react";
 
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { IntentLink } from "@/components/landing/intent-link";
 import { SpotlightSurface } from "@/components/landing/spotlight-surface";
+import { getLandingModelPricingEntries } from "@/lib/default-model-pricing";
+import { formatDiscountPercentOff, formatDiscountZhe } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { getAppName } from "@/lib/app-config";
 import { BrandWordmark } from "@/components/brand/wordmark";
 import { t } from "@/lib/i18n/messages";
 import { getRequestLocale } from "@/lib/i18n/server";
+
+const landingModelPricing = getLandingModelPricingEntries();
+
+function formatUsdPerM(value: string | null) {
+  if (!value) return "—";
+  return `$${value}`;
+}
 
 export default async function LandingPage() {
   const appName = getAppName();
@@ -343,22 +353,91 @@ export default async function LandingPage() {
               </CardTitle>
               <CardDescription>{t(locale, "landing.section.pricing.desc")}</CardDescription>
             </CardHeader>
-            <CardContent className="grid gap-3 text-sm text-muted-foreground sm:grid-cols-3">
-              <div className="rounded-xl border border-border bg-background/35 p-4">
-                <div className="font-medium text-foreground">{t(locale, "landing.pricing.rate.title")}</div>
-                <div className="mt-2 font-mono text-sm tabular-nums text-foreground">
-                  {t(locale, "landing.pricing.rate.desc")}
-                </div>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                {landingModelPricing.map((item) => {
+                  const hasDiscount = typeof item.discount === "number" && item.discount > 0 && item.discount < 1;
+                  const discount = hasDiscount ? item.discount : null;
+                  const pct = discount !== null ? formatDiscountPercentOff(discount) : null;
+                  const zhe = discount !== null ? formatDiscountZhe(discount) : null;
+                  const badge =
+                    locale === "zh-CN"
+                      ? zhe
+                        ? t(locale, "models.discountBadge", { zhe })
+                        : null
+                      : pct
+                        ? t(locale, "models.discountBadge", { pct })
+                        : null;
+
+                  return (
+                    <div
+                      key={item.prefix}
+                      className={cn(
+                        "rounded-2xl border border-border bg-background/35 p-4",
+                        "shadow-[0_0_0_1px_oklch(var(--border)/0.6),0_14px_40px_oklch(0%_0_0/0.35)]"
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-[11px] font-mono tracking-[0.18em] text-muted-foreground">
+                            {t(locale, "landing.pricing.card.unit")}
+                          </div>
+                          <div className="mt-2 text-base font-semibold tracking-tight text-foreground">{item.prefix}</div>
+                        </div>
+                        {badge ? (
+                          <Badge variant="success" className="rounded-full px-2 py-0 text-[10px]">
+                            {badge}
+                          </Badge>
+                        ) : null}
+                      </div>
+
+                      <div className="mt-4 space-y-3">
+                        <div className="rounded-xl border border-border/60 bg-background/40 px-3 py-2">
+                          <div className="text-[11px] font-mono tracking-[0.18em] text-muted-foreground">
+                            {t(locale, "landing.pricing.card.input")}
+                          </div>
+                          <div className="mt-1 flex items-baseline gap-2">
+                            <span className="font-mono text-lg tabular-nums text-foreground">
+                              {formatUsdPerM(item.inputUsdPerM)}
+                            </span>
+                            {item.discount !== null && item.inputUsdPerMOriginal ? (
+                              <span className="font-mono text-xs tabular-nums text-muted-foreground line-through">
+                                {formatUsdPerM(item.inputUsdPerMOriginal)}
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        <div className="rounded-xl border border-border/60 bg-background/40 px-3 py-2">
+                          <div className="text-[11px] font-mono tracking-[0.18em] text-muted-foreground">
+                            {t(locale, "landing.pricing.card.output")}
+                          </div>
+                          <div className="mt-1 flex items-baseline gap-2">
+                            <span className="font-mono text-lg tabular-nums text-foreground">
+                              {formatUsdPerM(item.outputUsdPerM)}
+                            </span>
+                            {item.discount !== null && item.outputUsdPerMOriginal ? (
+                              <span className="font-mono text-xs tabular-nums text-muted-foreground line-through">
+                                {formatUsdPerM(item.outputUsdPerMOriginal)}
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-              <div className="rounded-xl border border-border bg-background/35 p-4">
-                <div className="font-medium text-foreground">{t(locale, "landing.pricing.limits.title")}</div>
-                <div className="mt-2 font-mono text-sm tabular-nums text-foreground">
-                  {t(locale, "landing.pricing.limits.desc")}
+
+              <div className="grid gap-3 text-sm text-muted-foreground lg:grid-cols-2">
+                <div className="rounded-xl border border-border bg-background/35 p-4">
+                  <div className="font-medium text-foreground">{t(locale, "landing.pricing.matching.title")}</div>
+                  <div className="mt-2">{t(locale, "landing.pricing.matching.desc")}</div>
                 </div>
-              </div>
-              <div className="rounded-xl border border-border bg-background/35 p-4">
-                <div className="font-medium text-foreground">{t(locale, "landing.pricing.how.title")}</div>
-                <div className="mt-2">{t(locale, "landing.pricing.how.desc")}</div>
+                <div className="rounded-xl border border-border bg-background/35 p-4">
+                  <div className="font-medium text-foreground">{t(locale, "landing.pricing.cached.title")}</div>
+                  <div className="mt-2">{t(locale, "landing.pricing.cached.desc")}</div>
+                </div>
               </div>
             </CardContent>
           </Card>
