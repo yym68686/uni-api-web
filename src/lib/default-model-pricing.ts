@@ -1,4 +1,4 @@
-import rawDefaultModelPricing from "../../data/default-model-pricing.json";
+import rawDefaultModelPricing from "../../apps/api/app/data/default-model-pricing.json";
 
 interface RawDefaultModelPricingEntry {
   inputUsdPerM: string | null;

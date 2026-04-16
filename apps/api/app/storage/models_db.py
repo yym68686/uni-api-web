@@ -22,7 +22,7 @@ UNSET = object()
 
 DefaultPriceEntry = tuple[str | None, str | None] | tuple[str | None, str | None, float]
 
-DEFAULT_MODEL_PRICING_PATH = Path(__file__).resolve().parents[4] / "data" / "default-model-pricing.json"
+DEFAULT_MODEL_PRICING_PATH = Path(__file__).resolve().parent.parent / "data" / "default-model-pricing.json"
 
 
 def _load_default_prices() -> dict[str, DefaultPriceEntry]:
