@@ -26,10 +26,19 @@ class Settings(BaseSettings):
     email_verification_ttl_minutes: int = 10
     email_verification_required: bool = True
 
-    # Creem (billing top-ups)
+    # Billing providers
+    # ZhuPay (Alipay / WeChat Pay)
+    zhupay_pid: str = ""
+    zhupay_private_key: str = ""
+    zhupay_public_key: str = ""
+    zhupay_api_base_url: str = "https://pay.lxsd.cn"
+    zhupay_cny_per_credit: str = ""
+
+    # Creem (card checkout)
     creem_api_key: str = ""
     creem_product_id: str = ""
     creem_webhook_secret: str = ""
+    # Public console URL used for return URLs and front-door webhook routes.
     app_public_url: str = "http://localhost:3000"
 
 

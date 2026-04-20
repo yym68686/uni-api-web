@@ -411,6 +411,8 @@ export interface BillingLedgerListResponse {
   items: BillingLedgerItem[];
 }
 
+export type BillingPaymentMethod = "card" | "alipay" | "wxpay";
+
 export interface BillingTopupCheckoutResponse {
   checkoutUrl: string;
   requestId: string;

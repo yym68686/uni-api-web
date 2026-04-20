@@ -24,6 +24,7 @@ class BillingTopup(Base):
     request_id: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
     units: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="pending")
+    provider: Mapped[str | None] = mapped_column(String(24), nullable=True)
 
     checkout_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     order_id: Mapped[str | None] = mapped_column(String(64), nullable=True)

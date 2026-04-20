@@ -29,6 +29,7 @@ async def create_billing_topup(
     user_id: uuid.UUID,
     request_id: str,
     units: int,
+    provider: str | None = None,
     client_ip: str | None = None,
     client_device_id: str | None = None,
 ) -> BillingTopup:
@@ -38,6 +39,7 @@ async def create_billing_topup(
         request_id=request_id,
         units=int(max(units, 0)),
         status="pending",
+        provider=(provider.strip()[:24] if isinstance(provider, str) and provider.strip() else None),
         client_ip=(client_ip.strip()[:64] if isinstance(client_ip, str) and client_ip.strip() else None),
         client_device_id=(
             client_device_id.strip()[:64] if isinstance(client_device_id, str) and client_device_id.strip() else None
@@ -109,6 +111,7 @@ async def mark_billing_topup_failed(
     session: AsyncSession,
     *,
     request_id: str,
+    provider: str | None = None,
     checkout_id: str | None,
     order_id: str | None,
     currency: str | None,
@@ -120,6 +123,8 @@ async def mark_billing_topup_failed(
     if topup.status == "completed":
         return topup
     topup.status = "failed"
+    if provider:
+        topup.provider = provider[:24]
     if checkout_id:
         topup.checkout_id = checkout_id
     if order_id:
@@ -138,6 +143,7 @@ async def set_billing_topup_status(
     *,
     request_id: str,
     status: str,
+    provider: str | None = None,
     checkout_id: str | None,
     order_id: str | None,
     currency: str | None,
@@ -152,6 +158,8 @@ async def set_billing_topup_status(
         normalized_status = "pending"
 
     topup.status = normalized_status[:24]
+    if provider:
+        topup.provider = provider[:24]
     if checkout_id:
         topup.checkout_id = checkout_id
     if order_id:
@@ -170,6 +178,7 @@ async def complete_billing_topup(
     session: AsyncSession,
     *,
     request_id: str,
+    provider: str | None = None,
     checkout_id: str | None,
     order_id: str | None,
     currency: str | None,
@@ -226,6 +235,8 @@ async def complete_billing_topup(
 
     topup.status = "completed"
     topup.completed_at = now
+    if provider:
+        topup.provider = provider[:24]
     if checkout_id:
         topup.checkout_id = checkout_id
     if order_id:

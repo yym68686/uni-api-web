@@ -9,7 +9,6 @@ import datetime as dt
 import secrets
 import hashlib
 import hmac
-from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from sqlalchemy import func, select
@@ -124,6 +123,15 @@ from app.storage.email_verification_db import request_email_code, verify_email_c
 from app.models.organization import Organization
 from app.security_password import hash_password, verify_password
 from app.core.config import settings
+from app.core.zhupay import (
+    ZhupayError,
+    convert_credits_to_money,
+    create_jump_order,
+    is_configured as zhupay_is_configured,
+    money_to_cents as zhupay_money_to_cents,
+    query_order as zhupay_query_order,
+    verify_payload as zhupay_verify_payload,
+)
 from app.storage.topups_db import (
     complete_billing_topup,
     create_billing_topup,
@@ -135,6 +143,7 @@ from app.storage.topups_db import (
     get_billing_topup_for_user,
     mark_billing_topup_failed,
     record_creem_event,
+    set_billing_topup_status,
 )
 from app.storage.referrals_db import process_referral_refund
 
@@ -153,6 +162,40 @@ def _normalize_public_url(raw: str) -> str:
     if value == "":
         return "http://localhost:3000"
     return value.rstrip("/")
+
+
+def _get_request_client_ip(request: Request) -> str:
+    xff = request.headers.get("x-forwarded-for")
+    if isinstance(xff, str) and xff.strip():
+        return xff.split(",")[0].strip()[:64]
+    if request.client and request.client.host:
+        return request.client.host.strip()[:64]
+    return "127.0.0.1"
+
+
+def _translate_zhupay_error(exc: ZhupayError) -> HTTPException:
+    message = str(exc).strip().lower()
+    if any(
+        token in message
+        for token in (
+            "configured",
+            "private key",
+            "public key",
+            "conversion rate",
+            "pid",
+        )
+    ):
+        return HTTPException(status_code=503, detail="billing not configured")
+    return HTTPException(status_code=502, detail="payment provider error")
+
+
+def _creem_is_configured() -> bool:
+    return all(
+        (
+            (settings.creem_api_key or "").strip(),
+            (settings.creem_product_id or "").strip(),
+        )
+    )
 
 
 def _creem_base_url() -> str:
@@ -306,6 +349,92 @@ def _extract_creem_payer_email(obj: dict) -> str | None:
             return raw.strip().lower()[:254]
 
     return None
+
+
+def _topup_provider(topup) -> str | None:
+    provider = str(getattr(topup, "provider", "") or "").strip().lower()
+    if provider:
+        return provider
+    currency = str(getattr(topup, "currency", "") or "").strip().upper()
+    if currency == "CNY":
+        return "zhupay"
+    if currency == "USD":
+        return "creem"
+    return None
+
+
+async def _sync_pending_topup_from_zhupay(
+    session: AsyncSession,
+    *,
+    topup,
+):
+    if str(getattr(topup, "status", "") or "").strip().lower() != "pending":
+        return topup
+    if _topup_provider(topup) != "zhupay":
+        return topup
+    if not zhupay_is_configured():
+        return topup
+
+    try:
+        remote = await zhupay_query_order(out_trade_no=str(topup.request_id))
+    except ZhupayError:
+        return topup
+
+    expected_cents = int(getattr(topup, "amount_total_cents", 0) or 0) or None
+    if expected_cents is not None and remote.money_cents is not None and remote.money_cents != expected_cents:
+        synced = await mark_billing_topup_failed(
+            session,
+            request_id=str(topup.request_id),
+            provider="zhupay",
+            checkout_id=remote.trade_no,
+            order_id=remote.api_trade_no,
+            currency="CNY",
+            amount_total_cents=remote.money_cents,
+        )
+        return synced or topup
+
+    if remote.status == 1:
+        synced = await complete_billing_topup(
+            session,
+            request_id=str(topup.request_id),
+            provider="zhupay",
+            checkout_id=remote.trade_no,
+            order_id=remote.api_trade_no,
+            currency="CNY",
+            amount_total_cents=remote.money_cents,
+            payer_email=None,
+        )
+        return synced or topup
+
+    if remote.status in {2, 3, 4}:
+        synced = await mark_billing_topup_failed(
+            session,
+            request_id=str(topup.request_id),
+            provider="zhupay",
+            checkout_id=remote.trade_no,
+            order_id=remote.api_trade_no,
+            currency="CNY",
+            amount_total_cents=remote.money_cents,
+        )
+        return synced or topup
+
+    if (
+        getattr(topup, "checkout_id", None) != remote.trade_no
+        or (remote.api_trade_no and getattr(topup, "order_id", None) != remote.api_trade_no)
+    ):
+        synced = await set_billing_topup_status(
+            session,
+            request_id=str(topup.request_id),
+            status="pending",
+            provider="zhupay",
+            checkout_id=remote.trade_no,
+            order_id=remote.api_trade_no,
+            currency="CNY",
+            amount_total_cents=remote.money_cents,
+        )
+        return synced or topup
+
+    return topup
 
 
 async def _compute_cost_usd_micros(
@@ -1986,105 +2115,165 @@ async def billing_topup_checkout(
     if not bool(getattr(org, "billing_topup_enabled", True)):
         raise HTTPException(status_code=403, detail="billing topup disabled")
 
-    api_key = (settings.creem_api_key or "").strip()
-    product_id = (settings.creem_product_id or "").strip()
-    if api_key == "" or product_id == "":
-        raise HTTPException(status_code=503, detail="billing not configured")
-
     units = int(payload.amount_usd)
     if units < 5 or units > 5000:
         raise HTTPException(status_code=400, detail="invalid amount")
+    payment_method = str(payload.payment_method).strip().lower()
+    if payment_method not in {"card", "alipay", "wxpay"}:
+        raise HTTPException(status_code=400, detail="invalid payment method")
 
     request_id = generate_topup_request_id()
     from app.constants import DEVICE_ID_COOKIE_NAME
 
-    xff = request.headers.get("x-forwarded-for")
-    client_ip = (
-        xff.split(",")[0].strip()[:64]
-        if xff and xff.strip()
-        else (request.client.host if request.client else None)
-    )
+    client_ip = _get_request_client_ip(request)
     client_device_id = request.cookies.get(DEVICE_ID_COOKIE_NAME)
+    public_url = _normalize_public_url(settings.app_public_url)
+    product_name = f"{(settings.app_name or 'Uni API').strip()[:48]} API Credits"
+
+    if payment_method == "card":
+        if not _creem_is_configured():
+            raise HTTPException(status_code=503, detail="billing not configured")
+
+        await create_billing_topup(
+            session,
+            org_id=membership.org_id,
+            user_id=current_user.id,
+            request_id=request_id,
+            units=units,
+            provider="creem",
+            client_ip=client_ip,
+            client_device_id=client_device_id,
+        )
+
+        success_url = f"{public_url}/billing?request_id={request_id}"
+        body = {
+            "product_id": str(settings.creem_product_id).strip(),
+            "units": units,
+            "request_id": request_id,
+            "success_url": success_url,
+            "customer": {"email": str(current_user.email)},
+            "metadata": {
+                "purpose": "top_up",
+                "userId": str(current_user.id),
+                "orgId": str(membership.org_id),
+                "units": units,
+            },
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=10.0)) as client:
+                upstream = await client.post(
+                    f"{_creem_base_url()}/v1/checkouts",
+                    headers={"x-api-key": str(settings.creem_api_key).strip(), "content-type": "application/json"},
+                    json=body,
+                )
+        except Exception:
+            logger.exception("creem: checkout create failed")
+            await mark_billing_topup_failed(
+                session,
+                request_id=request_id,
+                provider="creem",
+                checkout_id=None,
+                order_id=None,
+                currency=None,
+                amount_total_cents=None,
+            )
+            raise HTTPException(status_code=502, detail="payment provider error") from None
+
+        if upstream.status_code >= 400:
+            logger.warning("creem: checkout create error status=%s body=%s", upstream.status_code, upstream.text[:500])
+            await mark_billing_topup_failed(
+                session,
+                request_id=request_id,
+                provider="creem",
+                checkout_id=None,
+                order_id=None,
+                currency=None,
+                amount_total_cents=None,
+            )
+            raise HTTPException(status_code=502, detail="payment provider error")
+
+        checkout_url = None
+        try:
+            j = upstream.json()
+            if isinstance(j, dict):
+                raw = j.get("checkout_url")
+                if isinstance(raw, str) and raw.strip():
+                    checkout_url = raw.strip()
+        except Exception:
+            checkout_url = None
+
+        if not checkout_url:
+            await mark_billing_topup_failed(
+                session,
+                request_id=request_id,
+                provider="creem",
+                checkout_id=None,
+                order_id=None,
+                currency=None,
+                amount_total_cents=None,
+            )
+            raise HTTPException(status_code=502, detail="payment provider error")
+
+        return {"checkoutUrl": checkout_url, "requestId": request_id}
+
+    if not zhupay_is_configured():
+        raise HTTPException(status_code=503, detail="billing not configured")
+
+    try:
+        payable_cny, payable_cents = convert_credits_to_money(credits=units)
+    except ZhupayError as exc:
+        raise _translate_zhupay_error(exc) from None
+
     await create_billing_topup(
         session,
         org_id=membership.org_id,
         user_id=current_user.id,
         request_id=request_id,
         units=units,
+        provider="zhupay",
         client_ip=client_ip,
         client_device_id=client_device_id,
     )
 
-    public_url = _normalize_public_url(settings.app_public_url)
-    success_url = f"{public_url}/billing?request_id={quote(request_id)}"
-
-    body = {
-        "product_id": product_id,
-        "units": units,
-        "request_id": request_id,
-        "success_url": success_url,
-        "customer": {"email": str(current_user.email)},
-        "metadata": {
-            "purpose": "top_up",
-            "userId": str(current_user.id),
-            "orgId": str(membership.org_id),
-            "units": units,
-        },
-    }
-
+    notify_url = f"{public_url}/api/webhook/zhupay"
+    return_url = f"{public_url}/billing"
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=10.0)) as client:
-            upstream = await client.post(
-                f"{_creem_base_url()}/v1/checkouts",
-                headers={"x-api-key": api_key, "content-type": "application/json"},
-                json=body,
-            )
-    except Exception:
-        logger.exception("creem: checkout create failed")
+        created = await create_jump_order(
+            payment_method=payment_method,
+            out_trade_no=request_id,
+            notify_url=notify_url,
+            return_url=return_url,
+            name=product_name,
+            money=payable_cny,
+            client_ip=client_ip,
+            param=request_id,
+        )
+    except ZhupayError as exc:
+        logger.exception("zhupay: checkout create failed")
         await mark_billing_topup_failed(
             session,
             request_id=request_id,
+            provider="zhupay",
             checkout_id=None,
             order_id=None,
-            currency=None,
-            amount_total_cents=None,
+            currency="CNY",
+            amount_total_cents=payable_cents,
         )
-        raise HTTPException(status_code=502, detail="payment provider error") from None
+        raise _translate_zhupay_error(exc) from None
 
-    if upstream.status_code >= 400:
-        logger.warning("creem: checkout create error status=%s body=%s", upstream.status_code, upstream.text[:500])
-        await mark_billing_topup_failed(
-            session,
-            request_id=request_id,
-            checkout_id=None,
-            order_id=None,
-            currency=None,
-            amount_total_cents=None,
-        )
-        raise HTTPException(status_code=502, detail="payment provider error")
+    await set_billing_topup_status(
+        session,
+        request_id=request_id,
+        status="pending",
+        provider="zhupay",
+        checkout_id=created.trade_no,
+        order_id=None,
+        currency="CNY",
+        amount_total_cents=payable_cents,
+    )
 
-    checkout_url = None
-    try:
-        j = upstream.json()
-        if isinstance(j, dict):
-            raw = j.get("checkout_url")
-            if isinstance(raw, str) and raw.strip():
-                checkout_url = raw.strip()
-    except Exception:
-        checkout_url = None
-
-    if not checkout_url:
-        await mark_billing_topup_failed(
-            session,
-            request_id=request_id,
-            checkout_id=None,
-            order_id=None,
-            currency=None,
-            amount_total_cents=None,
-        )
-        raise HTTPException(status_code=502, detail="payment provider error")
-
-    return {"checkoutUrl": checkout_url, "requestId": request_id}
+    return {"checkoutUrl": created.pay_info, "requestId": request_id}
 
 
 @router.get("/billing/settings", response_model=BillingSettingsResponse)
@@ -2121,6 +2310,8 @@ async def billing_topup_status(
     if not topup:
         raise HTTPException(status_code=404, detail="not found")
 
+    topup = await _sync_pending_topup_from_zhupay(session, topup=topup)
+
     status = str(topup.status or "pending")
     units = int(getattr(topup, "units", 0) or 0)
     out: dict[str, object] = {"requestId": str(topup.request_id), "status": status, "units": units}
@@ -2135,6 +2326,65 @@ async def billing_topup_status(
         spend_micros_total = int(getattr(current_user, "spend_usd_micros_total", 0) or 0)
         out["newBalance"] = remaining_usd_2(credits_usd_cents=credits_cents, spend_usd_micros_total=spend_micros_total)
     return out
+
+
+@router.get("/webhook/zhupay")
+async def zhupay_webhook(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+) -> Response:
+    payload = {key: value for key, value in request.query_params.items()}
+    if not payload:
+        raise HTTPException(status_code=400, detail="missing payload")
+    if not zhupay_verify_payload(payload):
+        raise HTTPException(status_code=401, detail="invalid signature")
+
+    expected_pid = (settings.zhupay_pid or "").strip()
+    pid = str(payload.get("pid") or "").strip()
+    if expected_pid == "" or pid != expected_pid:
+        raise HTTPException(status_code=401, detail="invalid pid")
+
+    if str(payload.get("trade_status") or "").strip() != "TRADE_SUCCESS":
+        raise HTTPException(status_code=400, detail="invalid trade status")
+
+    request_id = str(payload.get("out_trade_no") or "").strip()
+    if request_id == "":
+        raise HTTPException(status_code=400, detail="missing request id")
+
+    topup = await get_billing_topup_by_request_id(session, request_id=request_id)
+    if not topup:
+        raise HTTPException(status_code=404, detail="not found")
+
+    trade_no = str(payload.get("trade_no") or "").strip() or None
+    api_trade_no = str(payload.get("api_trade_no") or "").strip() or None
+    money_cents = zhupay_money_to_cents(str(payload.get("money") or "").strip() or None)
+    expected_cents = int(getattr(topup, "amount_total_cents", 0) or 0) or None
+    if expected_cents is not None and money_cents is not None and money_cents != expected_cents:
+        await mark_billing_topup_failed(
+            session,
+            request_id=request_id,
+            provider="zhupay",
+            checkout_id=trade_no,
+            order_id=api_trade_no,
+            currency="CNY",
+            amount_total_cents=money_cents,
+        )
+        raise HTTPException(status_code=400, detail="amount mismatch")
+
+    completed = await complete_billing_topup(
+        session,
+        request_id=request_id,
+        provider="zhupay",
+        checkout_id=trade_no,
+        order_id=api_trade_no,
+        currency="CNY",
+        amount_total_cents=money_cents,
+        payer_email=None,
+    )
+    if not completed:
+        raise HTTPException(status_code=404, detail="not found")
+
+    return Response(content="success", media_type="text/plain")
 
 
 @router.post("/webhook/creem")
@@ -2301,6 +2551,7 @@ async def creem_webhook(
         await mark_billing_topup_failed(
             session,
             request_id=request_id.strip(),
+            provider="creem",
             checkout_id=checkout_id,
             order_id=order_id,
             currency=currency,
@@ -2323,6 +2574,7 @@ async def creem_webhook(
     topup = await complete_billing_topup(
         session,
         request_id=request_id.strip(),
+        provider="creem",
         checkout_id=checkout_id,
         order_id=order_id,
         currency=currency,

@@ -300,6 +300,20 @@ def create_app() -> FastAPI:
                 "ADD COLUMN IF NOT EXISTS refunded_at timestamptz"
             )
             await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS billing_topups "
+                "ADD COLUMN IF NOT EXISTS provider varchar(24)"
+            )
+            await conn.exec_driver_sql(
+                "UPDATE billing_topups "
+                "SET provider = 'zhupay' "
+                "WHERE provider IS NULL AND currency = 'CNY'"
+            )
+            await conn.exec_driver_sql(
+                "UPDATE billing_topups "
+                "SET provider = 'creem' "
+                "WHERE provider IS NULL AND (currency = 'USD' OR currency IS NULL)"
+            )
+            await conn.exec_driver_sql(
                 "CREATE INDEX IF NOT EXISTS ix_billing_topups_order_id "
                 "ON billing_topups(order_id)"
             )

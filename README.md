@@ -17,7 +17,7 @@ This repo contains:
 - API Keys: one-click create (auto name), rename anytime, revoke/restore/delete; masked by default; **copy full key anytime**; last used + total spend
 - Models: list available models + input/output prices (priced in $/M tokens; UI shows as `$X`)
 - Logs: model/time/tokens/latency/TTFT/TPS/cost/source IP for every request
-- Billing: top up API credits (Creem) + balance history
+- Billing: top up API credits (Creem cards + ZhuPay Alipay / WeChat Pay) + balance history
 - Profile: account info + delete account
 
 **Admin**
@@ -110,14 +110,22 @@ docker compose up -d --build
 - `EMAIL_VERIFICATION_REQUIRED=true` enforces verification on auth flows
 - `EMAIL_VERIFICATION_TTL_MINUTES` controls code TTL (default `10`)
 
-## Billing Top-ups (Creem)
+## Billing Top-ups (Creem + ZhuPay)
+
+Supported payment methods:
+- Card checkout via Creem (settled in USD)
+- Alipay / WeChat Pay via ZhuPay (settled in CNY)
 
 Set env vars (backend):
-- `CREEM_API_KEY`, `CREEM_PRODUCT_ID`, `CREEM_WEBHOOK_SECRET`
-- `APP_PUBLIC_URL` (e.g. `http://localhost:3000`, used for checkout `success_url`)
+- Creem: `CREEM_API_KEY`, `CREEM_PRODUCT_ID`, `CREEM_WEBHOOK_SECRET`
+- ZhuPay: `ZHUPAY_PID`, `ZHUPAY_PRIVATE_KEY`, `ZHUPAY_PUBLIC_KEY`
+- Shared: `ZHUPAY_CNY_PER_CREDIT` (CNY charged per 1 USD credit via ZhuPay), `APP_PUBLIC_URL` (e.g. `http://localhost:3000`, used for card return URLs and ZhuPay callbacks)
 
-Creem Webhook URL should point to the console:
-- `POST <APP_PUBLIC_URL>/api/webhook/creem` (use a public tunnel in dev if needed)
+Webhook URLs should point to the console:
+- `POST <APP_PUBLIC_URL>/api/webhook/creem`
+- `GET <APP_PUBLIC_URL>/api/webhook/zhupay`
+
+Use a public tunnel in local development if either provider needs to call back into your machine.
 
 ## Deployment (Docker Images + Docker Hub)
 

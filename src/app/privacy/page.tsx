@@ -216,8 +216,8 @@ export default async function PrivacyPage() {
                   </li>
                   <li>
                     {zh
-                      ? "服务供应商：用于邮件发送（例如验证码）、支付处理（Creem）等。"
-                      : "Service providers: email delivery (e.g., verification codes), payment processing (Creem), etc."}
+                      ? "服务供应商：用于邮件发送（例如验证码）、支付处理（例如 Creem、ZhuPay）等。"
+                      : "Service providers: email delivery (e.g., verification codes), payment processing (e.g. Creem and ZhuPay), etc."}
                   </li>
                   <li>
                     {zh

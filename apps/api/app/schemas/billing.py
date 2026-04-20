@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field, StrictInt
 
 
@@ -21,6 +23,7 @@ class BillingSettingsResponse(BaseModel):
 
 class BillingTopupCheckoutRequest(BaseModel):
     amount_usd: StrictInt = Field(alias="amountUsd", ge=5, le=5000)
+    payment_method: Literal["card", "alipay", "wxpay"] = Field(alias="paymentMethod")
 
 
 class BillingTopupCheckoutResponse(BaseModel):

@@ -16,7 +16,13 @@ import { BillingTableClient } from "./billing-table-client";
 import { API_PATHS, billingLedgerListApiPath, billingTopupStatusApiPath } from "@/lib/api-paths";
 import { formatUsdFixed2 } from "@/lib/format";
 import { mutateSwrLite, useSwrLite } from "@/lib/swr-lite";
-import type { BillingLedgerItem, BillingLedgerListResponse, BillingTopupCheckoutResponse, BillingTopupStatusResponse } from "@/lib/types";
+import type {
+  BillingLedgerItem,
+  BillingLedgerListResponse,
+  BillingPaymentMethod,
+  BillingTopupCheckoutResponse,
+  BillingTopupStatusResponse
+} from "@/lib/types";
 import type { Locale, MessageKey, MessageVars } from "@/lib/i18n/messages";
 import { cn } from "@/lib/utils";
 import { BillingContentSkeleton } from "./billing-skeleton";
@@ -77,7 +83,8 @@ function createTopupSchema(t: (key: MessageKey, vars?: MessageVars) => string) {
       .finite()
       .refine((value) => Number.isInteger(value), t("billing.topup.validation.integer"))
       .min(5, t("billing.topup.validation.min", { min: 5 }))
-      .max(5000, t("billing.topup.validation.max", { max: 5000 }))
+      .max(5000, t("billing.topup.validation.max", { max: 5000 })),
+    paymentMethod: z.enum(["card", "alipay", "wxpay"])
   });
 }
 
@@ -100,8 +107,23 @@ function waitMs(ms: number, signal?: AbortSignal) {
 
 function clearTopupQueryParams() {
   const url = new URL(window.location.href);
-  url.searchParams.delete("request_id");
-  url.searchParams.delete("requestId");
+  [
+    "request_id",
+    "requestId",
+    "out_trade_no",
+    "trade_no",
+    "api_trade_no",
+    "trade_status",
+    "type",
+    "name",
+    "money",
+    "buyer",
+    "pid",
+    "sign",
+    "sign_type",
+    "timestamp",
+    "param"
+  ].forEach((key) => url.searchParams.delete(key));
   if (url.toString() === window.location.href) return;
   window.history.replaceState(null, "", url.toString());
 }
@@ -127,7 +149,11 @@ export function BillingContentClient({
   const searchParams = useSearchParams();
 
   const topupRequestIdFromUrl = React.useMemo(() => {
-    const raw = searchParams.get("request_id") ?? searchParams.get("requestId");
+    const raw =
+      searchParams.get("request_id") ??
+      searchParams.get("requestId") ??
+      searchParams.get("out_trade_no") ??
+      searchParams.get("param");
     if (!raw) return null;
     const trimmed = raw.trim();
     return trimmed.length > 0 ? trimmed : null;
@@ -166,11 +192,11 @@ export function BillingContentClient({
     return json;
   }
 
-  async function createTopupCheckout(amountUsd: number) {
+  async function createTopupCheckout(amountUsd: number, paymentMethod: BillingPaymentMethod) {
     const res = await fetch(API_PATHS.billingTopupCheckout, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ amountUsd })
+      body: JSON.stringify({ amountUsd, paymentMethod })
     });
     const json: unknown = await res.json().catch(() => null);
     if (!res.ok) throw new Error("Request failed");
@@ -181,7 +207,7 @@ export function BillingContentClient({
   const schema = React.useMemo(() => createTopupSchema(t), [t]);
   const amountUsdSchema = schema.shape.amountUsd;
   const form = useForm<TopupFormValues>({
-    defaultValues: { amountUsd: 50 },
+    defaultValues: { amountUsd: 50, paymentMethod: "card" },
     mode: "onChange"
   });
 
@@ -190,6 +216,16 @@ export function BillingContentClient({
   }, [form]);
 
   const presetAmounts = React.useMemo(() => [10, 50, 100, 500], []);
+  const paymentMethods = React.useMemo(
+    () =>
+      [
+        { value: "card" as const, label: t("billing.topup.method.card") },
+        { value: "alipay" as const, label: t("billing.topup.method.alipay") },
+        { value: "wxpay" as const, label: t("billing.topup.method.wxpay") }
+      ] satisfies ReadonlyArray<{ value: BillingPaymentMethod; label: string }>,
+    [t]
+  );
+  const selectedPaymentMethod = form.watch("paymentMethod") ?? "card";
 
   const topupSubmitting = form.formState.isSubmitting;
 
@@ -316,7 +352,7 @@ export function BillingContentClient({
 
   async function onSubmit(values: TopupFormValues) {
     try {
-      const checkout = await createTopupCheckout(values.amountUsd);
+      const checkout = await createTopupCheckout(values.amountUsd, values.paymentMethod);
       window.location.href = checkout.checkoutUrl;
     } catch {
       toast.error(t("billing.topup.toast.checkoutFailed"));
@@ -349,6 +385,39 @@ export function BillingContentClient({
                   void form.handleSubmit(onSubmit)(e);
                 }}
               >
+                <input type="hidden" {...form.register("paymentMethod")} />
+                <div className="space-y-2">
+                  <div className="text-sm font-medium text-foreground">{t("billing.topup.methodLabel")}</div>
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    {paymentMethods.map((method) => {
+                      const active = selectedPaymentMethod === method.value;
+                      return (
+                        <Button
+                          key={method.value}
+                          type="button"
+                          variant="outline"
+                          className={cn(
+                            "justify-start rounded-xl border-border/70 bg-background/40",
+                            "transition-all duration-300 [transition-timing-function:cubic-bezier(0.16,1,0.3,1)]",
+                            active
+                              ? "border-primary/40 bg-primary/10 text-foreground shadow-[0_0_0_1px_oklch(var(--primary)/0.2),0_10px_24px_oklch(var(--primary)/0.12)]"
+                              : "text-muted-foreground hover:border-primary/20 hover:bg-background/65"
+                          )}
+                          onClick={() =>
+                            form.setValue("paymentMethod", method.value, {
+                              shouldDirty: true,
+                              shouldValidate: true
+                            })
+                          }
+                          disabled={topupSubmitting || topupBlocking}
+                        >
+                          {method.label}
+                        </Button>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
                   <div className="order-1 space-y-2">
                     <div className="text-sm font-medium text-foreground">{t("billing.topup.amountLabel")}</div>
@@ -426,6 +495,8 @@ export function BillingContentClient({
                     </Button>
                   ))}
                 </div>
+
+                <p className="text-xs text-muted-foreground">{t("billing.topup.providerNote")}</p>
               </form>
 
               {topupBlocking ? (

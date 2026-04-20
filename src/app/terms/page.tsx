@@ -228,8 +228,8 @@ export default async function TermsPage() {
               <Section id="billing" title={zh ? "5. Credits、充值与计费" : "5. Credits, Billing & Refunds"}>
                 <p>
                   {zh
-                    ? "你可以通过一次性支付为账号充值 Credits。支付由第三方支付平台处理；我们在收到并验证支付成功事件后，为你的账号入账对应的 Credits。"
-                    : "You can top up Credits through a one-time payment. Payments are processed by a third-party provider; after we receive and verify a successful payment event, we credit your account accordingly."}
+                    ? "你可以通过一次性支付为账号充值 Credits。银行卡支付由 Creem 处理，支付宝 / 微信支付由 ZhuPay 处理；我们在收到并验证支付成功事件后，为你的账号入账对应的 Credits。"
+                    : "You can top up Credits through a one-time payment. Card payments are processed by Creem, while Alipay and WeChat Pay are processed by ZhuPay. After we receive and verify a successful payment event, we credit your account accordingly."}
                 </p>
                 <p>
                   {zh
@@ -244,8 +244,8 @@ export default async function TermsPage() {
                   </li>
                   <li>
                     {zh
-                      ? "我们可能要求以 USD 结算并对充值金额设置最小/最大限制；实际可用规则以控制台提示为准。"
-                      : "We may require USD settlement and enforce minimum/maximum top-up amounts. The Console will show the applicable limits."}
+                      ? "Credits 额度可能以 USD 计价，而实际支付会通过第三方支付平台按本地货币结算；具体汇率、最小/最大充值限制以控制台提示为准。"
+                      : "Credits may be denominated in USD while payments are settled in local currency through a third-party provider. The Console will show the applicable conversion and min/max limits."}
                   </li>
                   <li>
                     {zh
@@ -342,8 +342,8 @@ export default async function TermsPage() {
               <Section id="third-party" title={zh ? "9. 第三方服务" : "9. Third-Party Services"}>
                 <p>
                   {zh
-                    ? "本服务可能集成或依赖第三方服务（例如：Google OAuth 登录、邮件服务、支付平台、上游模型提供方）。你使用相关能力时，也应遵守第三方的条款与政策。"
-                    : "The Service integrates with or depends on third-party services (e.g., Google OAuth, email delivery, payments, and upstream model providers). Your use of those services may be subject to their terms and policies."}
+                    ? "本服务可能集成或依赖第三方服务（例如：Google OAuth 登录、邮件服务、支付平台如 Creem / ZhuPay、上游模型提供方）。你使用相关能力时，也应遵守第三方的条款与政策。"
+                    : "The Service integrates with or depends on third-party services (e.g., Google OAuth, email delivery, payment providers such as Creem / ZhuPay, and upstream model providers). Your use of those services may be subject to their terms and policies."}
                 </p>
                 <p>
                   {zh
