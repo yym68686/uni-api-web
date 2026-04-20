@@ -10,11 +10,15 @@ pnpm-debug.log*
 .env
 .env.*
 
-apps/api
+apps/api/*
+!apps/api/app/
+apps/api/app/*
+!apps/api/app/data/
+apps/api/app/data/*
+!apps/api/app/data/default-model-pricing.json
 __pycache__
 .pytest_cache
 .mypy_cache
 .ruff_cache
 .venv
 venv
-
