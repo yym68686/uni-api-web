@@ -496,7 +496,6 @@ export function BillingContentClient({
                   ))}
                 </div>
 
-                <p className="text-xs text-muted-foreground">{t("billing.topup.providerNote")}</p>
               </form>
 
               {topupBlocking ? (
