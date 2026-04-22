@@ -592,6 +592,23 @@ def _extract_source_ip(request: Request) -> str | None:
     return None
 
 
+def _log_llm_request_received(
+    request: Request,
+    *,
+    context: LlmProxyContext,
+    stream: bool,
+) -> None:
+    logger.info(
+        "llm request: user_email=%s method=%s path=%s model=%s stream=%s source_ip=%s",
+        context.user_email,
+        request.method,
+        request.url.path,
+        context.model_id,
+        "true" if stream else "false",
+        context.source_ip or "-",
+    )
+
+
 def _resolve_usage_pricing(cfg: object | None, *, model_id: str) -> UsagePricing:
     from app.storage.models_db import default_price_for_model
 
@@ -639,6 +656,7 @@ async def _resolve_llm_proxy_context(
     context = LlmProxyContext(
         api_key_id=api_key.id,
         user_id=user.id,
+        user_email=str(user.email),
         org_id=membership.org_id,
         model_id=model_id,
         source_ip=_extract_source_ip(request),
@@ -1617,6 +1635,8 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
     parsed = _parse_llm_request(raw)
     payload = parsed.payload
     context = await _resolve_llm_proxy_context(request, session, model_id=parsed.model_id)
+    stream = bool(payload.get("stream"))
+    _log_llm_request_received(request, context=context, stream=stream)
 
     upstream_url = f"{context.upstream_base_url}/chat/completions"
     headers: dict[str, str] = {
@@ -1629,7 +1649,6 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
         if value:
             headers[name] = value
 
-    stream = bool(payload.get("stream"))
     timeout = _llm_upstream_timeout()
 
     started = time.perf_counter()
@@ -1845,11 +1864,12 @@ async def _proxy_responses_request(
     parsed = _parse_llm_request(raw)
     payload = parsed.payload
     context = await _resolve_llm_proxy_context(request, session, model_id=parsed.model_id)
+    stream = bool(payload.get("stream"))
+    _log_llm_request_received(request, context=context, stream=stream)
 
     upstream_url = f"{context.upstream_base_url}{upstream_path}"
     headers = _build_upstream_headers(request, upstream_api_key=context.upstream_api_key)
 
-    stream = bool(payload.get("stream"))
     timeout = _llm_upstream_timeout()
 
     started = time.perf_counter()

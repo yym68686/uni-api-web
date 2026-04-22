@@ -14,6 +14,7 @@ class UsagePricing:
 class LlmProxyContext:
     api_key_id: uuid.UUID
     user_id: uuid.UUID
+    user_email: str
     org_id: uuid.UUID
     model_id: str
     source_ip: str | None
