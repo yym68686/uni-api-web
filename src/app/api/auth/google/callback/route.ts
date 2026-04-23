@@ -5,6 +5,7 @@ import { revalidateTag } from "next/cache";
 import { SESSION_COOKIE_NAME } from "@/lib/auth";
 import { buildBackendUrl } from "@/lib/backend";
 import { CACHE_TAGS } from "@/lib/cache-tags";
+import { copyForwardedClientIpHeaders } from "@/lib/client-ip";
 
 const OAUTH_STATE_COOKIE = "uai_oauth_state";
 const OAUTH_VERIFIER_COOKIE = "uai_oauth_verifier";
@@ -134,16 +135,13 @@ export async function GET(req: Request) {
 
   const upstreamPath = mode === "link" ? "/auth/oauth/google/link" : "/auth/oauth/google";
   const sessionToken = store.get(SESSION_COOKIE_NAME)?.value ?? null;
-  const upstreamHeaders: Record<string, string> = { "content-type": "application/json" };
-  if (mode === "link" && sessionToken) upstreamHeaders.authorization = `Bearer ${sessionToken}`;
+  const upstreamHeaders = new Headers({ "content-type": "application/json" });
+  if (mode === "link" && sessionToken) upstreamHeaders.set("authorization", `Bearer ${sessionToken}`);
   const cookie = req.headers.get("cookie");
-  if (cookie) upstreamHeaders.cookie = cookie;
-  const xff = req.headers.get("x-forwarded-for");
-  if (xff) upstreamHeaders["x-forwarded-for"] = xff;
-  const realIp = req.headers.get("x-real-ip");
-  if (realIp) upstreamHeaders["x-real-ip"] = realIp;
+  if (cookie) upstreamHeaders.set("cookie", cookie);
+  copyForwardedClientIpHeaders(req.headers, upstreamHeaders);
   const ua = req.headers.get("user-agent");
-  if (ua) upstreamHeaders["user-agent"] = ua;
+  if (ua) upstreamHeaders.set("user-agent", ua);
 
   const upstream = await fetch(buildBackendUrl(upstreamPath), {
     method: "POST",

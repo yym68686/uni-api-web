@@ -3,6 +3,7 @@ import "server-only";
 import { NextResponse } from "next/server";
 
 import { getBackendBaseUrl } from "@/lib/backend";
+import { copyForwardedClientIpHeaders } from "@/lib/client-ip";
 
 interface FastApiErrorBody {
   detail?: unknown;
@@ -30,10 +31,7 @@ export async function proxyToBackend(req: Request, path: string) {
   if (authorization) headers.set("authorization", authorization);
   const cookie = req.headers.get("cookie");
   if (cookie) headers.set("cookie", cookie);
-  const xff = req.headers.get("x-forwarded-for");
-  if (xff) headers.set("x-forwarded-for", xff);
-  const realIp = req.headers.get("x-real-ip");
-  if (realIp) headers.set("x-real-ip", realIp);
+  copyForwardedClientIpHeaders(req.headers, headers);
   const userAgent = req.headers.get("user-agent");
   if (userAgent) headers.set("user-agent", userAgent);
 

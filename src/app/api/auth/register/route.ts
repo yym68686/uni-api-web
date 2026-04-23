@@ -5,6 +5,7 @@ import { revalidateTag } from "next/cache";
 import { SESSION_COOKIE_NAME } from "@/lib/auth";
 import { buildBackendUrl } from "@/lib/backend";
 import { CACHE_TAGS } from "@/lib/cache-tags";
+import { copyForwardedClientIpHeaders } from "@/lib/client-ip";
 
 const schema = z.object({
   email: z.string().trim().email(),
@@ -46,15 +47,12 @@ export async function POST(req: Request) {
     );
   }
 
-  const headers: Record<string, string> = { "content-type": "application/json" };
+  const headers = new Headers({ "content-type": "application/json" });
   const cookie = req.headers.get("cookie");
-  if (cookie) headers.cookie = cookie;
-  const xff = req.headers.get("x-forwarded-for");
-  if (xff) headers["x-forwarded-for"] = xff;
-  const realIp = req.headers.get("x-real-ip");
-  if (realIp) headers["x-real-ip"] = realIp;
+  if (cookie) headers.set("cookie", cookie);
+  copyForwardedClientIpHeaders(req.headers, headers);
   const ua = req.headers.get("user-agent");
-  if (ua) headers["user-agent"] = ua;
+  if (ua) headers.set("user-agent", ua);
 
   const upstream = await fetch(buildBackendUrl("/auth/register"), {
     method: "POST",

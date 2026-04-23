@@ -18,6 +18,7 @@ from starlette.responses import Response, StreamingResponse
 import httpx
 import json
 
+from app.api.client_ip import extract_request_client_ip, extract_request_client_ip_or_localhost
 from app.api.llm_proxy import LlmProxyContext, UsagePricing, estimate_cost_usd_micros
 from app.api.upstream_headers import _build_upstream_headers, _filter_upstream_response_headers
 from app.auth import get_current_membership, get_current_user, require_admin
@@ -165,12 +166,7 @@ def _normalize_public_url(raw: str) -> str:
 
 
 def _get_request_client_ip(request: Request) -> str:
-    xff = request.headers.get("x-forwarded-for")
-    if isinstance(xff, str) and xff.strip():
-        return xff.split(",")[0].strip()[:64]
-    if request.client and request.client.host:
-        return request.client.host.strip()[:64]
-    return "127.0.0.1"
+    return extract_request_client_ip_or_localhost(request)
 
 
 def _translate_zhupay_error(exc: ZhupayError) -> HTTPException:
@@ -583,13 +579,7 @@ def _parse_llm_request(raw: bytes) -> _ParsedLlmRequest:
 
 
 def _extract_source_ip(request: Request) -> str | None:
-    forwarded_for = request.headers.get("x-forwarded-for") or ""
-    source_ip = forwarded_for.split(",")[0].strip() if forwarded_for.strip() else None
-    if source_ip:
-        return source_ip
-    if request.client:
-        return request.client.host
-    return None
+    return extract_request_client_ip(request)
 
 
 def _log_llm_request_received(
@@ -780,8 +770,7 @@ async def email_request_code(
     if str(payload.purpose or "").strip() == "register" and not bool(getattr(org, "registration_enabled", True)):
         raise HTTPException(status_code=403, detail="registration disabled")
 
-    xff = request.headers.get("x-forwarded-for")
-    client_ip = xff.split(",")[0].strip()[:64] if xff and xff.strip() else (request.client.host if request.client else None)
+    client_ip = _extract_source_ip(request)
     try:
         expires = await request_email_code(
             session,
@@ -819,12 +808,7 @@ async def register_verify(
     try:
         from app.constants import DEVICE_ID_COOKIE_NAME
 
-        xff = request.headers.get("x-forwarded-for")
-        signup_ip = (
-            xff.split(",")[0].strip()[:64]
-            if xff and xff.strip()
-            else (request.client.host if request.client else None)
-        )
+        signup_ip = _extract_source_ip(request)
         signup_device_id = request.cookies.get(DEVICE_ID_COOKIE_NAME)
         signup_user_agent = request.headers.get("user-agent")
         return await register_and_login(
@@ -983,12 +967,7 @@ async def password_request_code(
     session: AsyncSession = Depends(get_db_session),
     current_user=Depends(get_current_user),
 ) -> PasswordRequestCodeResponse:
-    xff = request.headers.get("x-forwarded-for")
-    client_ip = (
-        xff.split(",")[0].strip()[:64]
-        if xff and xff.strip()
-        else (request.client.host if request.client else None)
-    )
+    client_ip = _extract_source_ip(request)
     try:
         expires = await request_email_code(
             session,
@@ -1107,12 +1086,7 @@ async def email_change_request_code(
     if existing and existing.id != current_user.id:
         raise HTTPException(status_code=400, detail="email already registered")
 
-    xff = request.headers.get("x-forwarded-for")
-    client_ip = (
-        xff.split(",")[0].strip()[:64]
-        if xff and xff.strip()
-        else (request.client.host if request.client else None)
-    )
+    client_ip = _extract_source_ip(request)
     try:
         expires = await request_email_code(
             session,
@@ -1134,12 +1108,7 @@ async def email_change_request_current_code(
     session: AsyncSession = Depends(get_db_session),
     current_user=Depends(get_current_user),
 ) -> PasswordRequestCodeResponse:
-    xff = request.headers.get("x-forwarded-for")
-    client_ip = (
-        xff.split(",")[0].strip()[:64]
-        if xff and xff.strip()
-        else (request.client.host if request.client else None)
-    )
+    client_ip = _extract_source_ip(request)
     try:
         expires = await request_email_code(
             session,
@@ -1230,12 +1199,7 @@ async def oauth_google(
     try:
         from app.constants import DEVICE_ID_COOKIE_NAME
 
-        xff = request.headers.get("x-forwarded-for")
-        signup_ip = (
-            xff.split(",")[0].strip()[:64]
-            if xff and xff.strip()
-            else (request.client.host if request.client else None)
-        )
+        signup_ip = _extract_source_ip(request)
         signup_device_id = request.cookies.get(DEVICE_ID_COOKIE_NAME)
         signup_user_agent = request.headers.get("user-agent")
         return await login_with_google(
@@ -2662,12 +2626,7 @@ async def invite_visit(
     from app.constants import DEVICE_ID_COOKIE_NAME
     from app.storage.invite_visits_db import record_invite_visit
 
-    xff = request.headers.get("x-forwarded-for")
-    client_ip = (
-        xff.split(",")[0].strip()[:64]
-        if xff and xff.strip()
-        else (request.client.host if request.client else None)
-    )
+    client_ip = _extract_source_ip(request)
     device_id = request.cookies.get(DEVICE_ID_COOKIE_NAME)
     user_agent = request.headers.get("user-agent")
 

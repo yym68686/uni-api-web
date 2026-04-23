@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
 import { isLoggedInCookie, SESSION_COOKIE_NAME } from "@/lib/auth";
+import { copyForwardedClientIpHeaders } from "@/lib/client-ip";
 import {
   detectLocaleFromAcceptLanguage,
   LOCALE_COOKIE_NAME,
@@ -100,7 +101,14 @@ export async function proxy(req: NextRequest) {
   if (pathname === "/v1" || pathname.startsWith("/v1/")) {
     const upstreamPath = pathname.replace(/^\/v1/, "") || "/";
     const upstream = buildBackendUrl(upstreamPath) + req.nextUrl.search;
-    return NextResponse.rewrite(new URL(upstream));
+    const upstreamHeaders = new Headers(req.headers);
+    upstreamHeaders.delete("host");
+    copyForwardedClientIpHeaders(req.headers, upstreamHeaders);
+    return NextResponse.rewrite(new URL(upstream), {
+      request: {
+        headers: upstreamHeaders
+      }
+    });
   }
 
   const session = req.cookies.get(SESSION_COOKIE_NAME)?.value;
