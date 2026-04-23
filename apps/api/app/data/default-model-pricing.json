@@ -79,6 +79,11 @@
     "outputUsdPerM": "15",
     "discount": "0.01"
   },
+  "gpt-image-2": {
+    "inputUsdPerM": "5",
+    "outputUsdPerM": "30",
+    "discount": "0.01"
+  },
   "text-embedding-004": {
     "inputUsdPerM": "3",
     "outputUsdPerM": "15",
