@@ -33,6 +33,10 @@ Endpoints:
 - `GET /v1/keys`
 - `POST /v1/keys`
 - `DELETE /v1/keys/{key_id}`
+- `POST /v1/chat/completions`
+- `POST /v1/responses`
+- `POST /v1/responses/compact`
+- `POST /v1/images/generations`
 - `POST /v1/admin/announcements`
 
 Notes:

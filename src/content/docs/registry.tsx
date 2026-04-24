@@ -72,7 +72,7 @@ const DOCS_GROUPS: readonly DocsNavGroupDefinition[] = [
   {
     id: "api",
     title: { en: "API", "zh-CN": "API" },
-    pageIds: ["auth", "chat-completions", "responses"]
+    pageIds: ["auth", "chat-completions", "responses", "image-generations"]
   },
   {
     id: "console",
@@ -591,6 +591,107 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
                 </li>
                 <li>日志会在字段存在时展示 输入 / 缓存 / 输出 tokens。</li>
               </ul>
+            )
+          }
+        ]
+      }
+    }
+  },
+  {
+    id: "image-generations",
+    slug: ["api", "image-generations"],
+    groupId: "api",
+    content: {
+      en: {
+        title: "Image Generations",
+        description: "Pass-through endpoint for upstream image generation models.",
+        sections: [
+          {
+            id: "endpoint",
+            title: "Endpoint",
+            content: (
+              <CodeBlock
+                lang="http"
+                code={["POST /v1/images/generations", "Content-Type: application/json"].join("\n")}
+              />
+            )
+          },
+          {
+            id: "request",
+            title: "Request example",
+            content: (
+              <CodeBlock
+                lang="json"
+                code={JSON.stringify(
+                  {
+                    model: "gpt-image-2",
+                    prompt: "A precise product render of a translucent API gateway cube",
+                    size: "1024x1024",
+                    n: 1
+                  },
+                  null,
+                  2
+                )}
+              />
+            )
+          },
+          {
+            id: "pass-through",
+            title: "Pass-through behavior",
+            content: (
+              <p>
+                Uni API forwards the request body and compatible headers upstream, then returns the upstream response
+                body unchanged. The gateway still authenticates the API key and records model, status, latency, source
+                IP, and usage tokens when the upstream response includes a{" "}
+                <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">usage</code> object.
+              </p>
+            )
+          }
+        ]
+      },
+      "zh-CN": {
+        title: "Image Generations",
+        description: "面向上游图片生成模型的透传端点。",
+        sections: [
+          {
+            id: "endpoint",
+            title: "端点",
+            content: (
+              <CodeBlock
+                lang="http"
+                code={["POST /v1/images/generations", "Content-Type: application/json"].join("\n")}
+              />
+            )
+          },
+          {
+            id: "request",
+            title: "请求示例",
+            content: (
+              <CodeBlock
+                lang="json"
+                code={JSON.stringify(
+                  {
+                    model: "gpt-image-2",
+                    prompt: "一个半透明 API 网关立方体的精细产品渲染图",
+                    size: "1024x1024",
+                    n: 1
+                  },
+                  null,
+                  2
+                )}
+              />
+            )
+          },
+          {
+            id: "pass-through",
+            title: "透传行为",
+            content: (
+              <p>
+                Uni API 会将请求 body 与兼容 headers 转发到上游，并原样返回上游响应 body。网关仍会执行 API key
+                鉴权，并记录模型、状态码、延迟、来源 IP；如果上游响应包含{" "}
+                <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">usage</code>{" "}
+                对象，也会记录对应 tokens。
+              </p>
             )
           }
         ]

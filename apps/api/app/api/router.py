@@ -2026,6 +2026,11 @@ async def responses_compact(request: Request, session: AsyncSession = Depends(ge
     return await _proxy_responses_request(request, session, upstream_path="/responses/compact")
 
 
+@router.post("/images/generations")
+async def image_generations(request: Request, session: AsyncSession = Depends(get_db_session)):
+    return await _proxy_responses_request(request, session, upstream_path="/images/generations")
+
+
 @router.get("/admin/models", response_model=AdminModelsListResponse)
 async def admin_list_models(
     session: AsyncSession = Depends(get_db_session),

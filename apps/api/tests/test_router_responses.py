@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 import app.api.router as router_module
-from app.api.router import responses, responses_compact, router
+from app.api.router import image_generations, responses, responses_compact, router
 
 
 class ResponsesRoutesTests(unittest.IsolatedAsyncioTestCase):
@@ -16,6 +16,7 @@ class ResponsesRoutesTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("/responses", post_paths)
         self.assertIn("/responses/compact", post_paths)
+        self.assertIn("/images/generations", post_paths)
 
     async def test_responses_uses_standard_upstream_path(self) -> None:
         request = object()
@@ -32,6 +33,26 @@ class ResponsesRoutesTests(unittest.IsolatedAsyncioTestCase):
         router_module._proxy_responses_request = fake_proxy
         try:
             result = await responses(request, session)  # type: ignore[arg-type]
+        finally:
+            router_module._proxy_responses_request = original
+
+        self.assertIs(result, sentinel)
+
+    async def test_image_generations_uses_images_upstream_path(self) -> None:
+        request = object()
+        session = object()
+        sentinel = object()
+        original = router_module._proxy_responses_request
+
+        async def fake_proxy(request_arg: object, session_arg: object, *, upstream_path: str) -> object:
+            self.assertIs(request_arg, request)
+            self.assertIs(session_arg, session)
+            self.assertEqual(upstream_path, "/images/generations")
+            return sentinel
+
+        router_module._proxy_responses_request = fake_proxy
+        try:
+            result = await image_generations(request, session)  # type: ignore[arg-type]
         finally:
             router_module._proxy_responses_request = original
 
