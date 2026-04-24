@@ -79,6 +79,11 @@
     "outputUsdPerM": "15",
     "discount": "0.01"
   },
+  "gpt-5.4-mini": {
+    "inputUsdPerM": "0.75",
+    "outputUsdPerM": "4.50",
+    "discount": "0.01"
+  },
   "gpt-5.5": {
     "inputUsdPerM": "5",
     "outputUsdPerM": "30",
@@ -87,7 +92,7 @@
   "gpt-image-2": {
     "inputUsdPerM": "5",
     "outputUsdPerM": "30",
-    "discount": "0.01"
+    "discount": "0.06"
   },
   "text-embedding-004": {
     "inputUsdPerM": "3",
