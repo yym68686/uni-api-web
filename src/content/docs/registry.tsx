@@ -72,7 +72,7 @@ const DOCS_GROUPS: readonly DocsNavGroupDefinition[] = [
   {
     id: "api",
     title: { en: "API", "zh-CN": "API" },
-    pageIds: ["auth", "chat-completions", "responses", "image-generations"]
+    pageIds: ["auth", "chat-completions", "responses", "image-generations", "image-edits"]
   },
   {
     id: "console",
@@ -691,6 +691,97 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
                 鉴权，并记录模型、状态码、延迟、来源 IP；如果上游响应包含{" "}
                 <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">usage</code>{" "}
                 对象，也会记录对应 tokens。
+              </p>
+            )
+          }
+        ]
+      }
+    }
+  },
+  {
+    id: "image-edits",
+    slug: ["api", "image-edits"],
+    groupId: "api",
+    content: {
+      en: {
+        title: "Image Edits",
+        description: "Pass-through endpoint for upstream image editing models.",
+        sections: [
+          {
+            id: "endpoint",
+            title: "Endpoint",
+            content: (
+              <CodeBlock
+                lang="http"
+                code={["POST /v1/images/edits", "Content-Type: application/json or multipart/form-data"].join("\n")}
+              />
+            )
+          },
+          {
+            id: "request",
+            title: "Multipart request example",
+            content: (
+              <CodeBlock
+                lang="bash"
+                code={[
+                  "curl -X POST $UNI_API_BASE_URL/images/edits \\",
+                  "  -H \"Authorization: Bearer $UNI_API_KEY\" \\",
+                  "  -F model=gpt-image-2 \\",
+                  "  -F prompt=\"Make the product render brighter\" \\",
+                  "  -F image=@input.png"
+                ].join("\n")}
+              />
+            )
+          },
+          {
+            id: "pass-through",
+            title: "Pass-through behavior",
+            content: (
+              <p>
+                Uni API forwards the original request body and compatible headers upstream, then returns the upstream
+                status, body, and response type. JSON and multipart form-data requests are supported.
+              </p>
+            )
+          }
+        ]
+      },
+      "zh-CN": {
+        title: "Image Edits",
+        description: "面向上游图片编辑模型的透传端点。",
+        sections: [
+          {
+            id: "endpoint",
+            title: "端点",
+            content: (
+              <CodeBlock
+                lang="http"
+                code={["POST /v1/images/edits", "Content-Type: application/json 或 multipart/form-data"].join("\n")}
+              />
+            )
+          },
+          {
+            id: "request",
+            title: "Multipart 请求示例",
+            content: (
+              <CodeBlock
+                lang="bash"
+                code={[
+                  "curl -X POST $UNI_API_BASE_URL/images/edits \\",
+                  "  -H \"Authorization: Bearer $UNI_API_KEY\" \\",
+                  "  -F model=gpt-image-2 \\",
+                  "  -F prompt=\"把产品渲染图调亮\" \\",
+                  "  -F image=@input.png"
+                ].join("\n")}
+              />
+            )
+          },
+          {
+            id: "pass-through",
+            title: "透传行为",
+            content: (
+              <p>
+                Uni API 会把原始请求 body 与兼容 headers 转发到上游，并返回上游状态码、body 与响应类型；支持 JSON 和
+                multipart form-data 请求。
               </p>
             )
           }

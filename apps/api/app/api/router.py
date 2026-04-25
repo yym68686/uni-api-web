@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from email.parser import BytesParser
+from email.policy import default as email_policy
 import logging
 import uuid
 import time
@@ -562,6 +564,12 @@ class _ParsedLlmRequest:
     model_id: str
 
 
+@dataclass(frozen=True)
+class _ParsedProxyRequest:
+    model_id: str
+    stream: bool
+
+
 def _parse_llm_request(raw: bytes) -> _ParsedLlmRequest:
     try:
         payload_obj = json.loads(raw.decode("utf-8"))
@@ -576,6 +584,62 @@ def _parse_llm_request(raw: bytes) -> _ParsedLlmRequest:
         raise HTTPException(status_code=400, detail="missing model")
 
     return _ParsedLlmRequest(payload=payload, model_id=model_raw.strip())
+
+
+def _coerce_form_bool(value: str | None) -> bool:
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _parse_multipart_text_fields(raw: bytes, *, content_type: str) -> dict[str, str]:
+    try:
+        header = f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode("latin-1")
+    except UnicodeEncodeError as e:
+        raise HTTPException(status_code=400, detail="invalid multipart content type") from e
+
+    try:
+        message = BytesParser(policy=email_policy).parsebytes(header + raw)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="invalid multipart form") from e
+
+    if not message.is_multipart():
+        raise HTTPException(status_code=400, detail="invalid multipart form")
+
+    fields: dict[str, str] = {}
+    for part in message.iter_parts():
+        if part.get_content_disposition() != "form-data":
+            continue
+        name = part.get_param("name", header="content-disposition")
+        if not isinstance(name, str) or not name:
+            continue
+        if part.get_filename() is not None:
+            continue
+        if name in fields:
+            continue
+        try:
+            value = part.get_content()
+        except Exception:
+            payload = part.get_payload(decode=True)
+            if not isinstance(payload, bytes):
+                continue
+            value = payload.decode("utf-8", errors="replace")
+        if isinstance(value, str):
+            fields[name] = value
+    return fields
+
+
+def _parse_proxy_request(raw: bytes, *, content_type: str, allow_multipart: bool = False) -> _ParsedProxyRequest:
+    normalized_content_type = content_type.strip().lower()
+    if allow_multipart and normalized_content_type.startswith("multipart/form-data"):
+        fields = _parse_multipart_text_fields(raw, content_type=content_type)
+        model_raw = fields.get("model")
+        if not isinstance(model_raw, str) or not model_raw.strip():
+            raise HTTPException(status_code=400, detail="missing model")
+        return _ParsedProxyRequest(model_id=model_raw.strip(), stream=_coerce_form_bool(fields.get("stream")))
+
+    parsed = _parse_llm_request(raw)
+    return _ParsedProxyRequest(model_id=parsed.model_id, stream=bool(parsed.payload.get("stream")))
 
 
 def _extract_source_ip(request: Request) -> str | None:
@@ -1823,13 +1887,16 @@ async def _proxy_responses_request(
     session: AsyncSession,
     *,
     upstream_path: str,
+    allow_multipart: bool = False,
 ):
     raw = await request.body()
-    parsed = _parse_llm_request(raw)
-    payload = parsed.payload
+    parsed = _parse_proxy_request(
+        raw,
+        content_type=request.headers.get("content-type") or "",
+        allow_multipart=allow_multipart,
+    )
     context = await _resolve_llm_proxy_context(request, session, model_id=parsed.model_id)
-    stream = bool(payload.get("stream"))
-    _log_llm_request_received(request, context=context, stream=stream)
+    _log_llm_request_received(request, context=context, stream=parsed.stream)
 
     upstream_url = f"{context.upstream_base_url}{upstream_path}"
     headers = _build_upstream_headers(request, upstream_api_key=context.upstream_api_key)
@@ -1840,7 +1907,7 @@ async def _proxy_responses_request(
     ttft_ms = 0
     total_ms = 0
 
-    if stream:
+    if parsed.stream:
         client = httpx.AsyncClient(timeout=timeout)
         try:
             req_up = client.build_request("POST", upstream_url, headers=headers, content=raw)
@@ -2029,6 +2096,16 @@ async def responses_compact(request: Request, session: AsyncSession = Depends(ge
 @router.post("/images/generations")
 async def image_generations(request: Request, session: AsyncSession = Depends(get_db_session)):
     return await _proxy_responses_request(request, session, upstream_path="/images/generations")
+
+
+@router.post("/images/edits")
+async def image_edits(request: Request, session: AsyncSession = Depends(get_db_session)):
+    return await _proxy_responses_request(
+        request,
+        session,
+        upstream_path="/images/edits",
+        allow_multipart=True,
+    )
 
 
 @router.get("/admin/models", response_model=AdminModelsListResponse)
