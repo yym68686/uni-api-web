@@ -51,6 +51,19 @@ interface DocsNavGroupDefinition {
   pageIds: readonly string[];
 }
 
+interface ApiReferenceCurlExample {
+  id: string;
+  method: "GET" | "POST";
+  path: string;
+  title: string;
+  description: string;
+  code: string;
+}
+
+interface ApiReferenceCurlExamplesProps {
+  examples: readonly ApiReferenceCurlExample[];
+}
+
 function docsHref(locale: Locale, slug: readonly string[]) {
   const rest = slug.length > 0 ? `/${slug.join("/")}` : "";
   return `/docs/${locale}${rest}`;
@@ -63,6 +76,264 @@ export function parseDocsLocale(value: string): Locale | null {
     : null;
 }
 
+const CHAT_COMPLETIONS_CURL: Record<Locale, string> = {
+  en: [
+    "curl \"$UNI_API_BASE_URL/chat/completions\" \\",
+    "  -H \"Authorization: Bearer $UNI_API_KEY\" \\",
+    "  -H \"Content-Type: application/json\" \\",
+    "  -d '{",
+    "    \"model\": \"gpt-5.5\",",
+    "    \"messages\": [{\"role\":\"user\",\"content\":\"Hello\"}]",
+    "  }'"
+  ].join("\n"),
+  "zh-CN": [
+    "curl \"$UNI_API_BASE_URL/chat/completions\" \\",
+    "  -H \"Authorization: Bearer $UNI_API_KEY\" \\",
+    "  -H \"Content-Type: application/json\" \\",
+    "  -d '{",
+    "    \"model\": \"gpt-5.5\",",
+    "    \"messages\": [{\"role\":\"user\",\"content\":\"你好\"}]",
+    "  }'"
+  ].join("\n")
+};
+
+const IMAGE_EDITS_CURL: Record<Locale, string> = {
+  en: [
+    "curl -X POST \"$UNI_API_BASE_URL/images/edits\" \\",
+    "  -H \"Authorization: Bearer $UNI_API_KEY\" \\",
+    "  -F model=gpt-image-2 \\",
+    "  -F prompt=\"Make the product render brighter\" \\",
+    "  -F image=@input.png"
+  ].join("\n"),
+  "zh-CN": [
+    "curl -X POST \"$UNI_API_BASE_URL/images/edits\" \\",
+    "  -H \"Authorization: Bearer $UNI_API_KEY\" \\",
+    "  -F model=gpt-image-2 \\",
+    "  -F prompt=\"把产品渲染图调亮\" \\",
+    "  -F image=@input.png"
+  ].join("\n")
+};
+
+const API_REFERENCE_ENV_CURL: Record<Locale, string> = {
+  en: [
+    "export UNI_API_BASE_URL=\"https://api.0-0.pro/v1\"",
+    "export UNI_API_KEY=\"<YOUR_API_KEY>\""
+  ].join("\n"),
+  "zh-CN": [
+    "export UNI_API_BASE_URL=\"https://api.0-0.pro/v1\"",
+    "export UNI_API_KEY=\"<YOUR_API_KEY>\""
+  ].join("\n")
+};
+
+const API_REFERENCE_CURL_EXAMPLES: Record<Locale, readonly ApiReferenceCurlExample[]> = {
+  en: [
+    {
+      id: "models-list",
+      method: "GET",
+      path: "/v1/models",
+      title: "List enabled models",
+      description: "Returns the OpenAI-compatible model list available to your API key.",
+      code: [
+        "curl \"$UNI_API_BASE_URL/models\" \\",
+        "  -H \"Authorization: Bearer $UNI_API_KEY\""
+      ].join("\n")
+    },
+    {
+      id: "models-retrieve",
+      method: "GET",
+      path: "/v1/models/{model}",
+      title: "Retrieve a model",
+      description: "Checks whether a single model is available for the current workspace and group.",
+      code: [
+        "curl \"$UNI_API_BASE_URL/models/gpt-5.5\" \\",
+        "  -H \"Authorization: Bearer $UNI_API_KEY\""
+      ].join("\n")
+    },
+    {
+      id: "chat-completions",
+      method: "POST",
+      path: "/v1/chat/completions",
+      title: "Create a chat completion",
+      description: "OpenAI-compatible chat generation with normal and streaming responses.",
+      code: CHAT_COMPLETIONS_CURL.en
+    },
+    {
+      id: "responses",
+      method: "POST",
+      path: "/v1/responses",
+      title: "Create a response",
+      description: "Passes a Responses API request upstream while Uni API records usage and latency.",
+      code: [
+        "curl \"$UNI_API_BASE_URL/responses\" \\",
+        "  -H \"Authorization: Bearer $UNI_API_KEY\" \\",
+        "  -H \"Content-Type: application/json\" \\",
+        "  -d '{",
+        "    \"model\": \"gpt-5.5\",",
+        "    \"input\": \"Summarize request observability in one sentence.\"",
+        "  }'"
+      ].join("\n")
+    },
+    {
+      id: "responses-compact",
+      method: "POST",
+      path: "/v1/responses/compact",
+      title: "Compact a response context",
+      description: "Pass-through endpoint for upstream context compaction flows.",
+      code: [
+        "curl \"$UNI_API_BASE_URL/responses/compact\" \\",
+        "  -H \"Authorization: Bearer $UNI_API_KEY\" \\",
+        "  -H \"Content-Type: application/json\" \\",
+        "  -d '{",
+        "    \"model\": \"gpt-5.5\",",
+        "    \"input\": \"Compress the previous conversation into durable context.\"",
+        "  }'"
+      ].join("\n")
+    },
+    {
+      id: "image-generations",
+      method: "POST",
+      path: "/v1/images/generations",
+      title: "Generate an image",
+      description: "Forwards an image generation request to the selected upstream model.",
+      code: [
+        "curl \"$UNI_API_BASE_URL/images/generations\" \\",
+        "  -H \"Authorization: Bearer $UNI_API_KEY\" \\",
+        "  -H \"Content-Type: application/json\" \\",
+        "  -d '{",
+        "    \"model\": \"gpt-image-2\",",
+        "    \"prompt\": \"A precise product render of a translucent API gateway cube\",",
+        "    \"size\": \"1024x1024\",",
+        "    \"n\": 1",
+        "  }'"
+      ].join("\n")
+    },
+    {
+      id: "image-edits",
+      method: "POST",
+      path: "/v1/images/edits",
+      title: "Edit an image",
+      description: "Multipart image editing request; JSON and multipart bodies are forwarded upstream.",
+      code: IMAGE_EDITS_CURL.en
+    }
+  ],
+  "zh-CN": [
+    {
+      id: "models-list",
+      method: "GET",
+      path: "/v1/models",
+      title: "列出可用模型",
+      description: "返回当前 API Key 可用的 OpenAI 兼容模型列表。",
+      code: [
+        "curl \"$UNI_API_BASE_URL/models\" \\",
+        "  -H \"Authorization: Bearer $UNI_API_KEY\""
+      ].join("\n")
+    },
+    {
+      id: "models-retrieve",
+      method: "GET",
+      path: "/v1/models/{model}",
+      title: "获取单个模型",
+      description: "检查某个模型是否对当前工作区与分组可用。",
+      code: [
+        "curl \"$UNI_API_BASE_URL/models/gpt-5.5\" \\",
+        "  -H \"Authorization: Bearer $UNI_API_KEY\""
+      ].join("\n")
+    },
+    {
+      id: "chat-completions",
+      method: "POST",
+      path: "/v1/chat/completions",
+      title: "创建 Chat Completion",
+      description: "OpenAI 兼容的对话生成接口，支持普通与流式响应。",
+      code: CHAT_COMPLETIONS_CURL["zh-CN"]
+    },
+    {
+      id: "responses",
+      method: "POST",
+      path: "/v1/responses",
+      title: "创建 Response",
+      description: "透传 Responses API 请求到上游，同时由 Uni API 记录 usage 与延迟。",
+      code: [
+        "curl \"$UNI_API_BASE_URL/responses\" \\",
+        "  -H \"Authorization: Bearer $UNI_API_KEY\" \\",
+        "  -H \"Content-Type: application/json\" \\",
+        "  -d '{",
+        "    \"model\": \"gpt-5.5\",",
+        "    \"input\": \"用一句话总结请求可观测性。\"",
+        "  }'"
+      ].join("\n")
+    },
+    {
+      id: "responses-compact",
+      method: "POST",
+      path: "/v1/responses/compact",
+      title: "压缩 Response 上下文",
+      description: "面向上游上下文压缩流程的透传端点。",
+      code: [
+        "curl \"$UNI_API_BASE_URL/responses/compact\" \\",
+        "  -H \"Authorization: Bearer $UNI_API_KEY\" \\",
+        "  -H \"Content-Type: application/json\" \\",
+        "  -d '{",
+        "    \"model\": \"gpt-5.5\",",
+        "    \"input\": \"把上一轮对话压缩成可持久保存的上下文。\"",
+        "  }'"
+      ].join("\n")
+    },
+    {
+      id: "image-generations",
+      method: "POST",
+      path: "/v1/images/generations",
+      title: "生成图片",
+      description: "把图片生成请求转发到指定上游模型。",
+      code: [
+        "curl \"$UNI_API_BASE_URL/images/generations\" \\",
+        "  -H \"Authorization: Bearer $UNI_API_KEY\" \\",
+        "  -H \"Content-Type: application/json\" \\",
+        "  -d '{",
+        "    \"model\": \"gpt-image-2\",",
+        "    \"prompt\": \"一个半透明 API 网关立方体的精细产品渲染图\",",
+        "    \"size\": \"1024x1024\",",
+        "    \"n\": 1",
+        "  }'"
+      ].join("\n")
+    },
+    {
+      id: "image-edits",
+      method: "POST",
+      path: "/v1/images/edits",
+      title: "编辑图片",
+      description: "Multipart 图片编辑请求；JSON 与 multipart body 都会转发到上游。",
+      code: IMAGE_EDITS_CURL["zh-CN"]
+    }
+  ]
+};
+
+function ApiReferenceCurlExamples({ examples }: ApiReferenceCurlExamplesProps) {
+  return (
+    <div className="grid gap-4">
+      {examples.map((example) => (
+        <article
+          key={example.id}
+          className={cn(
+            "rounded-2xl border border-border bg-card/40 p-4 backdrop-blur",
+            "shadow-[0_0_0_1px_oklch(var(--border)/0.45),0_12px_32px_oklch(0%_0_0/0.22)]"
+          )}
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="secondary">{example.method}</Badge>
+            <code className="rounded-lg bg-muted px-2 py-1 font-mono text-xs text-foreground">
+              {example.path}
+            </code>
+          </div>
+          <h3 className="mt-3 text-sm font-semibold tracking-tight text-foreground">{example.title}</h3>
+          <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{example.description}</p>
+          <CodeBlock lang="bash" code={example.code} className="mt-4" />
+        </article>
+      ))}
+    </div>
+  );
+}
+
 const DOCS_GROUPS: readonly DocsNavGroupDefinition[] = [
   {
     id: "getting-started",
@@ -72,7 +343,7 @@ const DOCS_GROUPS: readonly DocsNavGroupDefinition[] = [
   {
     id: "api",
     title: { en: "API", "zh-CN": "API" },
-    pageIds: ["auth", "chat-completions", "responses", "image-generations", "image-edits"]
+    pageIds: ["api-reference", "auth", "chat-completions", "responses", "image-generations", "image-edits"]
   },
   {
     id: "console",
@@ -261,20 +532,7 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
           {
             id: "step-3",
             title: "3) Call /v1/chat/completions",
-            content: (
-              <CodeBlock
-                lang="bash"
-                code={[
-                  "curl \"$BASE_URL/chat/completions\" \\",
-                  "  -H \"Authorization: Bearer $API_KEY\" \\",
-                  "  -H \"Content-Type: application/json\" \\",
-                  "  -d '{",
-                  "    \"model\": \"gpt-5.5\",",
-                  "    \"messages\": [{\"role\":\"user\",\"content\":\"Hello\"}]",
-                  "  }'"
-                ].join("\n")}
-              />
-            )
+            content: <CodeBlock lang="bash" code={CHAT_COMPLETIONS_CURL.en} />
           },
           {
             id: "step-4",
@@ -313,20 +571,7 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
           {
             id: "step-3",
             title: "3）调用 /v1/chat/completions",
-            content: (
-              <CodeBlock
-                lang="bash"
-                code={[
-                  "curl \"$BASE_URL/chat/completions\" \\",
-                  "  -H \"Authorization: Bearer $API_KEY\" \\",
-                  "  -H \"Content-Type: application/json\" \\",
-                  "  -d '{",
-                  "    \"model\": \"gpt-5.5\",",
-                  "    \"messages\": [{\"role\":\"user\",\"content\":\"你好\"}]",
-                  "  }'"
-                ].join("\n")}
-              />
-            )
+            content: <CodeBlock lang="bash" code={CHAT_COMPLETIONS_CURL["zh-CN"]} />
           },
           {
             id: "step-4",
@@ -340,6 +585,63 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
                 页面，你应该能看到该请求的 tokens、延迟、TTFT、费用等信息。
               </p>
             )
+          }
+        ]
+      }
+    }
+  },
+  {
+    id: "api-reference",
+    slug: ["api", "reference"],
+    groupId: "api",
+    content: {
+      en: {
+        title: "API Reference",
+        description: "All public cURL request examples for the OpenAI-compatible API surface.",
+        sections: [
+          {
+            id: "base-url",
+            title: "Base URL and key",
+            content: (
+              <>
+                <p>
+                  The examples below assume the Base URL includes{" "}
+                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">/v1</code>. Create an
+                  API key in the Console, then export it before running the requests.
+                </p>
+                <CodeBlock lang="bash" code={API_REFERENCE_ENV_CURL.en} />
+              </>
+            )
+          },
+          {
+            id: "curl-requests",
+            title: "cURL requests",
+            content: <ApiReferenceCurlExamples examples={API_REFERENCE_CURL_EXAMPLES.en} />
+          }
+        ]
+      },
+      "zh-CN": {
+        title: "API 参考",
+        description: "本站 OpenAI 兼容 API 的全部公开 cURL 请求示例。",
+        sections: [
+          {
+            id: "base-url",
+            title: "Base URL 与密钥",
+            content: (
+              <>
+                <p>
+                  下面的示例默认 Base URL 已包含{" "}
+                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">/v1</code>
+                  。先在控制台创建 API Key，再导出环境变量运行请求。
+                </p>
+                <CodeBlock lang="bash" code={API_REFERENCE_ENV_CURL["zh-CN"]} />
+              </>
+            )
+          },
+          {
+            id: "curl-requests",
+            title: "cURL 请求",
+            content: <ApiReferenceCurlExamples examples={API_REFERENCE_CURL_EXAMPLES["zh-CN"]} />
           }
         ]
       }
@@ -720,18 +1022,7 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
           {
             id: "request",
             title: "Multipart request example",
-            content: (
-              <CodeBlock
-                lang="bash"
-                code={[
-                  "curl -X POST $UNI_API_BASE_URL/images/edits \\",
-                  "  -H \"Authorization: Bearer $UNI_API_KEY\" \\",
-                  "  -F model=gpt-image-2 \\",
-                  "  -F prompt=\"Make the product render brighter\" \\",
-                  "  -F image=@input.png"
-                ].join("\n")}
-              />
-            )
+            content: <CodeBlock lang="bash" code={IMAGE_EDITS_CURL.en} />
           },
           {
             id: "pass-through",
@@ -762,18 +1053,7 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
           {
             id: "request",
             title: "Multipart 请求示例",
-            content: (
-              <CodeBlock
-                lang="bash"
-                code={[
-                  "curl -X POST $UNI_API_BASE_URL/images/edits \\",
-                  "  -H \"Authorization: Bearer $UNI_API_KEY\" \\",
-                  "  -F model=gpt-image-2 \\",
-                  "  -F prompt=\"把产品渲染图调亮\" \\",
-                  "  -F image=@input.png"
-                ].join("\n")}
-              />
-            )
+            content: <CodeBlock lang="bash" code={IMAGE_EDITS_CURL["zh-CN"]} />
           },
           {
             id: "pass-through",
