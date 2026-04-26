@@ -269,7 +269,7 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
                   "  -H \"Authorization: Bearer $API_KEY\" \\",
                   "  -H \"Content-Type: application/json\" \\",
                   "  -d '{",
-                  "    \"model\": \"gpt-5.2\",",
+                  "    \"model\": \"gpt-5.5\",",
                   "    \"messages\": [{\"role\":\"user\",\"content\":\"Hello\"}]",
                   "  }'"
                 ].join("\n")}
@@ -321,7 +321,7 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
                   "  -H \"Authorization: Bearer $API_KEY\" \\",
                   "  -H \"Content-Type: application/json\" \\",
                   "  -d '{",
-                  "    \"model\": \"gpt-5.2\",",
+                  "    \"model\": \"gpt-5.5\",",
                   "    \"messages\": [{\"role\":\"user\",\"content\":\"你好\"}]",
                   "  }'"
                 ].join("\n")}
@@ -436,7 +436,7 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
                 lang="json"
                 code={JSON.stringify(
                   {
-                    model: "gpt-5.2",
+                    model: "gpt-5.5",
                     messages: [
                       { role: "system", content: "You are a helpful assistant." },
                       { role: "user", content: "Write a haiku about observability." }
@@ -490,7 +490,7 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
                 lang="json"
                 code={JSON.stringify(
                   {
-                    model: "gpt-5.2",
+                    model: "gpt-5.5",
                     messages: [
                       { role: "system", content: "你是一个有帮助的助手。" },
                       { role: "user", content: "用一句话解释什么是可观测性。" }
@@ -966,7 +966,7 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
                 <CodeBlock
                   lang="toml"
                   code={[
-                    'model = "gpt-5.2"',
+                    'model = "gpt-5.5"',
                     'model_reasoning_effort = "xhigh"',
                     "",
                     "# Added OpenAI provider via 0-0.pro (only 6 lines)",
@@ -1096,7 +1096,7 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
                 <CodeBlock
                   lang="toml"
                   code={[
-                    'model = "gpt-5.2"',
+                    'model = "gpt-5.5"',
                     'model_reasoning_effort = "xhigh"',
                     "",
                     "# 新增：通过 0-0.pro 接入 OpenAI 提供商（仅 6 行）",
