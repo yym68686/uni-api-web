@@ -139,6 +139,7 @@ export interface AdminUserItem {
   group: string;
   balance: number;
   bannedAt?: string | null;
+  softLimitedAt?: string | null;
   createdAt: string;
   lastLoginAt?: string | null;
   apiKeysTotal: number;
@@ -154,6 +155,7 @@ export interface AdminUsersListResponse {
 export interface AdminUserUpdateRequest {
   balance?: number;
   banned?: boolean;
+  softLimited?: boolean;
   group?: string | null;
   role?: "owner" | "admin" | "billing" | "developer" | "viewer" | string | null;
 }

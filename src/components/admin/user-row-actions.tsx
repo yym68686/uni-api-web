@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { z } from "zod";
-import { Ban, Coins, Loader2, MoreVertical, Shield, Tag, Trash2 } from "lucide-react";
+import { Ban, Coins, Loader2, MoreVertical, Shield, ShieldAlert, Tag, Trash2 } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 
@@ -90,12 +90,14 @@ export function UserRowActions({ user, currentUserId, currentUserRole, onUpdated
   const [groupOpen, setGroupOpen] = React.useState(false);
   const [roleOpen, setRoleOpen] = React.useState(false);
   const [banOpen, setBanOpen] = React.useState(false);
+  const [softLimitOpen, setSoftLimitOpen] = React.useState(false);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
   const { t } = useI18n();
 
   const isSelf = currentUserId != null && currentUserId === user.id;
   const isBanned = Boolean(user.bannedAt);
+  const isSoftLimited = Boolean(user.softLimitedAt);
   const canManageOwner = currentUserRole === "owner";
   const isTargetOwner = user.role === "owner";
   const ownerProtected = isTargetOwner && !canManageOwner;
@@ -153,7 +155,13 @@ export function UserRowActions({ user, currentUserId, currentUserRole, onUpdated
     });
   }, [roleForm, roleOpen, user.role]);
 
-  async function patch(payload: { balance?: number; banned?: boolean; group?: string | null; role?: string | null }) {
+  async function patch(payload: {
+    balance?: number;
+    banned?: boolean;
+    softLimited?: boolean;
+    group?: string | null;
+    role?: string | null;
+  }) {
     const res = await fetch(`/api/admin/users/${encodeURIComponent(user.id)}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -268,6 +276,26 @@ export function UserRowActions({ user, currentUserId, currentUserRole, onUpdated
     }
   }
 
+  async function toggleSoftLimit() {
+    setSubmitting(true);
+    try {
+      const nextSoftLimited = !isSoftLimited;
+      onUpdated?.({ ...user, softLimitedAt: nextSoftLimited ? new Date().toISOString() : null });
+      const next = await patch({ softLimited: nextSoftLimited });
+      onUpdated?.(next);
+      toast.success(
+        isSoftLimited ? t("admin.users.toast.softLimitDisabled") : t("admin.users.toast.softLimitEnabled")
+      );
+      setSoftLimitOpen(false);
+      if (!onUpdated) router.refresh();
+    } catch (err) {
+      onUpdated?.(user);
+      toast.error(err instanceof Error ? err.message : t("common.operationFailed"));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   async function removeUser() {
     setSubmitting(true);
     try {
@@ -341,6 +369,16 @@ export function UserRowActions({ user, currentUserId, currentUserRole, onUpdated
           >
             <Ban className="mr-2 h-4 w-4" />
             {isBanned ? t("admin.users.actions.unban") : t("admin.users.actions.ban")}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={isSelf || ownerProtected}
+            onSelect={(e) => {
+              e.preventDefault();
+              setSoftLimitOpen(true);
+            }}
+          >
+            <ShieldAlert className="mr-2 h-4 w-4" />
+            {isSoftLimited ? t("admin.users.actions.disableSoftLimit") : t("admin.users.actions.enableSoftLimit")}
           </DropdownMenuItem>
           <DropdownMenuItem
             disabled={isSelf || ownerProtected}
@@ -562,6 +600,58 @@ export function UserRowActions({ user, currentUserId, currentUserRole, onUpdated
                 t("admin.users.actions.unban")
               ) : (
                 t("admin.users.actions.ban")
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={softLimitOpen} onOpenChange={setSoftLimitOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {t("admin.users.softLimit.title", {
+                action: isSoftLimited
+                  ? t("admin.users.actions.disableSoftLimit")
+                  : t("admin.users.actions.enableSoftLimit")
+              })}
+            </DialogTitle>
+            <DialogDescription>
+              {isSoftLimited
+                ? t("admin.users.softLimit.desc.limited")
+                : t("admin.users.softLimit.desc.active")}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="rounded-xl border border-border bg-muted/20 p-4">
+            <div className="text-sm font-medium text-foreground">{user.email}</div>
+            <div className="mt-1 text-xs font-mono text-muted-foreground">{user.id}</div>
+            <div className="mt-3 rounded-lg border border-warning/25 bg-warning/10 px-3 py-2 text-xs text-warning">
+              {t("admin.users.softLimit.httpHint")}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => setSoftLimitOpen(false)}>
+              {t("common.cancel")}
+            </Button>
+            <Button
+              type="button"
+              variant={isSoftLimited ? "outline" : "default"}
+              disabled={submitting}
+              onClick={() => void toggleSoftLimit()}
+            >
+              {submitting ? (
+                <>
+                  <span className="inline-flex animate-spin">
+                    <Loader2 className="h-4 w-4" />
+                  </span>
+                  {t("common.working")}
+                </>
+              ) : isSoftLimited ? (
+                t("admin.users.actions.disableSoftLimit")
+              ) : (
+                t("admin.users.actions.enableSoftLimit")
               )}
             </Button>
           </DialogFooter>

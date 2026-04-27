@@ -13,6 +13,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import type { MessageKey } from "@/lib/i18n/messages";
 import type { AdminUserItem } from "@/lib/types";
 import { useI18n } from "@/components/i18n/i18n-provider";
 import { cn } from "@/lib/utils";
@@ -47,8 +48,16 @@ function buildPageTokens(currentPage: number, totalPages: number): PageToken[] {
   return tokens;
 }
 
-function statusVariant(bannedAt: string | null | undefined) {
-  return bannedAt ? "destructive" : "success";
+function statusVariant(user: Pick<AdminUserItem, "bannedAt" | "softLimitedAt">) {
+  if (user.bannedAt) return "destructive";
+  if (user.softLimitedAt) return "warning";
+  return "success";
+}
+
+function statusLabelKey(user: Pick<AdminUserItem, "bannedAt" | "softLimitedAt">): MessageKey {
+  if (user.bannedAt) return "admin.users.status.banned";
+  if (user.softLimitedAt) return "admin.users.status.limited";
+  return "admin.users.status.active";
 }
 
 function groupBadgeVariant(group: string) {
@@ -282,8 +291,8 @@ export function AdminUsersTableClient({
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      <Badge variant={statusVariant(u.bannedAt ?? null)}>
-                        {u.bannedAt ? t("admin.users.status.banned") : t("admin.users.status.active")}
+                      <Badge variant={statusVariant(u)}>
+                        {t(statusLabelKey(u))}
                       </Badge>
                     </TableCell>
                     <TableCell className="font-mono tabular-nums text-sm">{balanceFormatter.format(u.balance)}</TableCell>

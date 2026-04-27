@@ -24,6 +24,7 @@ from app.api.client_ip import extract_request_client_ip, extract_request_client_
 from app.api.llm_proxy import LlmProxyContext, UsagePricing, estimate_cost_usd_micros
 from app.api.upstream_headers import _build_upstream_headers, _filter_upstream_response_headers
 from app.auth import get_current_membership, get_current_user, require_admin
+from app.constants import ACCOUNT_TEMPORARILY_LIMITED_DETAIL
 from app.models.api_key import ApiKey
 from app.models.membership import Membership
 from app.models.oauth_identity import OAuthIdentity
@@ -676,6 +677,14 @@ def _resolve_usage_pricing(cfg: object | None, *, model_id: str) -> UsagePricing
     )
 
 
+def _auth_error_status(detail: str) -> int:
+    if detail == ACCOUNT_TEMPORARILY_LIMITED_DETAIL:
+        return 429
+    if detail in {"banned", "api_key_spend_limit_exceeded"}:
+        return 403
+    return 401
+
+
 async def _resolve_llm_proxy_context(
     request: Request,
     session: AsyncSession,
@@ -687,8 +696,7 @@ async def _resolve_llm_proxy_context(
         api_key, user = await authenticate_api_key(session, authorization=auth)
     except ValueError as e:
         detail = str(e) or "unauthorized"
-        status = 403 if detail in {"banned", "api_key_spend_limit_exceeded"} else 401
-        raise HTTPException(status_code=status, detail=detail) from e
+        raise HTTPException(status_code=_auth_error_status(detail), detail=detail) from e
 
     from app.storage.balance_math import remaining_usd_micros
 
@@ -1367,8 +1375,7 @@ async def _require_user_for_models(request: Request, session: AsyncSession):
             _api_key, user = await authenticate_api_key(session, authorization=auth)
         except ValueError as e:
             detail = str(e) or "unauthorized"
-            status = 403 if detail in {"banned", "api_key_spend_limit_exceeded"} else 401
-            raise HTTPException(status_code=status, detail=detail) from e
+            raise HTTPException(status_code=_auth_error_status(detail), detail=detail) from e
     else:
         token = bearer or request.cookies.get(SESSION_COOKIE_NAME)
         if not token:
@@ -1536,6 +1543,8 @@ async def admin_update_user(
         raise HTTPException(status_code=400, detail="invalid user id") from None
     if parsed == admin_user.id and payload.banned is True:
         raise HTTPException(status_code=400, detail="cannot ban self")
+    if parsed == admin_user.id and payload.soft_limited is True:
+        raise HTTPException(status_code=400, detail="cannot limit self")
 
     try:
         updated = await update_admin_user(

@@ -22,6 +22,7 @@ class User(Base):
     balance: Mapped[int] = mapped_column("balance_usd_cents", Integer, nullable=False, default=0)
     spend_usd_micros_total: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     banned_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    soft_limited_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     invite_code: Mapped[str | None] = mapped_column(String(16), nullable=True, unique=True)
     invited_by_user_id: Mapped[uuid.UUID | None] = mapped_column(

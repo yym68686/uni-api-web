@@ -5,6 +5,7 @@ import unittest
 import uuid
 
 import app.api.router as router_module
+from app.constants import ACCOUNT_TEMPORARILY_LIMITED_DETAIL
 from app.api.llm_proxy import LlmProxyContext, UsagePricing
 
 
@@ -62,6 +63,30 @@ class LlmRequestLoggingTests(unittest.TestCase):
 
 
 class ResolveLlmProxyContextTests(unittest.IsolatedAsyncioTestCase):
+    async def test_resolve_context_maps_soft_limit_to_429(self) -> None:
+        request = _Request(
+            path="/v1/chat/completions",
+            headers={"authorization": "Bearer sk-test"},
+        )
+        session = _Session()
+        original_authenticate_api_key = router_module.authenticate_api_key
+
+        async def fake_authenticate_api_key(session_arg: object, *, authorization: str | None):
+            self.assertIs(session_arg, session)
+            self.assertEqual(authorization, "Bearer sk-test")
+            raise ValueError(ACCOUNT_TEMPORARILY_LIMITED_DETAIL)
+
+        router_module.authenticate_api_key = fake_authenticate_api_key
+        try:
+            with self.assertRaises(router_module.HTTPException) as raised:
+                await router_module._resolve_llm_proxy_context(request, session, model_id="gpt-4.1")
+        finally:
+            router_module.authenticate_api_key = original_authenticate_api_key
+
+        self.assertEqual(raised.exception.status_code, 429)
+        self.assertEqual(raised.exception.detail, ACCOUNT_TEMPORARILY_LIMITED_DETAIL)
+        self.assertFalse(session.closed)
+
     async def test_resolve_context_carries_authenticated_user_email(self) -> None:
         request = _Request(
             path="/v1/chat/completions",

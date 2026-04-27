@@ -1,2 +1,3 @@
 SESSION_COOKIE_NAME = "uai_session"
 DEVICE_ID_COOKIE_NAME = "uai_device_id"
+ACCOUNT_TEMPORARILY_LIMITED_DETAIL = "上游已达到最大限制"

@@ -76,6 +76,10 @@ def create_app() -> FastAPI:
             )
             await conn.exec_driver_sql(
                 "ALTER TABLE IF EXISTS users "
+                "ADD COLUMN IF NOT EXISTS soft_limited_at timestamptz"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS users "
                 "ADD COLUMN IF NOT EXISTS group_name varchar(64) NOT NULL DEFAULT 'default'"
             )
             await conn.exec_driver_sql(

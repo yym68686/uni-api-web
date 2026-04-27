@@ -5,6 +5,7 @@ import datetime as dt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.constants import ACCOUNT_TEMPORARILY_LIMITED_DETAIL
 from app.models.api_key import ApiKey
 from app.models.user import User
 from app.security import sha256_hex
@@ -44,6 +45,8 @@ async def authenticate_api_key(
         raise ValueError("invalid api key")
     if user.banned_at is not None:
         raise ValueError("banned")
+    if user.soft_limited_at is not None:
+        raise ValueError(ACCOUNT_TEMPORARILY_LIMITED_DETAIL)
 
     limit = getattr(row, "spend_limit_usd_micros", None)
     spend_total = int(getattr(row, "spend_usd_micros_total", 0) or 0)

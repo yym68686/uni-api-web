@@ -10,6 +10,7 @@ class AdminUserItem(BaseModel):
     group: str = "default"
     balance: float
     banned_at: str | None = Field(default=None, alias="bannedAt")
+    soft_limited_at: str | None = Field(default=None, alias="softLimitedAt")
     created_at: str = Field(alias="createdAt")
     last_login_at: str | None = Field(default=None, alias="lastLoginAt")
 
@@ -26,6 +27,7 @@ class AdminUsersListResponse(BaseModel):
 class AdminUserUpdateRequest(BaseModel):
     balance: float | None = None
     banned: bool | None = None
+    soft_limited: bool | None = Field(default=None, alias="softLimited")
     group: str | None = None
     role: str | None = None
 

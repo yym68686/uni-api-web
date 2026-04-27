@@ -53,6 +53,7 @@ def _to_item(
         group=row.group_name,
         balance=remaining_usd_2(credits_usd_cents=credits_cents, spend_usd_micros_total=spend_micros_total),
         bannedAt=_dt_iso(row.banned_at),
+        softLimitedAt=_dt_iso(row.soft_limited_at),
         createdAt=_dt_iso(row.created_at) or dt.datetime.now(dt.timezone.utc).isoformat(),
         lastLoginAt=_dt_iso(row.last_login_at),
         apiKeysTotal=int(keys_total),
@@ -200,6 +201,9 @@ async def update_admin_user(
         user.banned_at = dt.datetime.now(dt.timezone.utc) if input.banned else None
         if input.banned:
             user.group_name = user.group_name or "default"
+
+    if input.soft_limited is not None:
+        user.soft_limited_at = dt.datetime.now(dt.timezone.utc) if input.soft_limited else None
 
     fields_set = getattr(input, "model_fields_set", None)
     if fields_set is None:
