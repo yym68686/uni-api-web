@@ -1,12 +1,14 @@
 import type { LucideIcon } from "lucide-react";
 
+import { NumberPopIn } from "@/components/common/number-pop-in";
 import { cn } from "@/lib/utils";
 
-interface StatsCardProps {
+export interface StatsCardProps {
   title: string;
   value: string;
   trend?: string;
   icon: LucideIcon;
+  animateValue?: boolean;
   iconGradientClassName?: string;
   className?: string;
 }
@@ -16,6 +18,7 @@ export function StatsCard({
   value,
   trend,
   icon: Icon,
+  animateValue = true,
   iconGradientClassName,
   className
 }: StatsCardProps) {
@@ -44,7 +47,11 @@ export function StatsCard({
       </div>
       <div className="mt-4">
         <div className="text-2xl font-bold tracking-tight text-foreground">
-          <span className="uai-kpi-value tabular-nums">{value}</span>
+          {animateValue ? (
+            <NumberPopIn value={value} className="uai-kpi-value tabular-nums" />
+          ) : (
+            <span className="uai-kpi-value tabular-nums">{value}</span>
+          )}
         </div>
         {trend ? (
           <p className="mt-1 text-xs text-success font-mono">{trend}</p>

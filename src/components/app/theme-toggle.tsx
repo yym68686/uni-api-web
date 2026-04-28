@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Moon, Sun } from "lucide-react";
 
+import { IconSwap } from "@/components/common/icon-swap";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -59,7 +60,6 @@ export function ThemeToggle({ className }: ThemeToggleProps) {
     });
   }
 
-  const Icon = theme === "dark" ? Sun : Moon;
   const label = theme === "dark" ? t("theme.toLight") : t("theme.toDark");
 
   function setTransitionOrigin(event: React.MouseEvent<HTMLButtonElement>) {
@@ -109,7 +109,11 @@ export function ThemeToggle({ className }: ThemeToggleProps) {
           aria-label={label}
           ref={buttonRef}
         >
-          <Icon className="h-5 w-5" />
+          <IconSwap
+            state={theme === "dark" ? "a" : "b"}
+            iconA={<Sun className="h-5 w-5" />}
+            iconB={<Moon className="h-5 w-5" />}
+          />
         </Button>
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
