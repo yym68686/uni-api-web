@@ -1,18 +1,7 @@
 import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
+import { isInviteSummaryResponse } from "@/lib/invite-summary";
 import type { InviteSummaryResponse } from "@/lib/types";
 import { InviteContentClient } from "./invite-content-client";
-
-function isInviteSummaryResponse(value: unknown): value is InviteSummaryResponse {
-  if (!value || typeof value !== "object") return false;
-  const v = value as Record<string, unknown>;
-  if (typeof v.inviteCode !== "string") return false;
-  if (typeof v.invitedTotal !== "number") return false;
-  if (typeof v.visitsTotal !== "number") return false;
-  if (typeof v.rewardsPending !== "number") return false;
-  if (typeof v.rewardsConfirmed !== "number") return false;
-  if (!Array.isArray(v.items)) return false;
-  return true;
-}
 
 export async function getInviteSummary() {
   const res = await fetch(buildBackendUrl("/invite/summary"), {

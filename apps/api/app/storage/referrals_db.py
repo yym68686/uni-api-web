@@ -18,6 +18,10 @@ REFERRAL_CAP_USD_CENTS = 10_000
 REFERRAL_PENDING_HOURS = 72
 
 
+def _dt_iso(value: dt.datetime) -> str:
+    return value.astimezone(dt.timezone.utc).isoformat()
+
+
 def _normalize_email(value: str | None) -> str | None:
     if not isinstance(value, str):
         return None
@@ -45,6 +49,35 @@ def compute_referral_bonus_usd_cents(units: int) -> int:
 
 def _safe_bonus_cents(value: int) -> int:
     return int(max(int(value), 0))
+
+
+def _bonus_cents_to_usd_2(value: int) -> float:
+    return float((Decimal(_safe_bonus_cents(value)) / Decimal("100")).quantize(Decimal("0.01")))
+
+
+def referral_bonus_event_to_received_reward(event: ReferralBonusEvent) -> dict[str, object]:
+    created_at = getattr(event, "created_at", None)
+    if not isinstance(created_at, dt.datetime):
+        created_at = dt.datetime.now(dt.timezone.utc)
+
+    status = str(getattr(event, "status", "") or "none")
+    reward_usd: float | None = None
+    if status in {"pending", "confirmed"}:
+        reward_usd = _bonus_cents_to_usd_2(int(getattr(event, "bonus_usd_cents", 0) or 0))
+
+    available_at: str | None = None
+    if status == "pending":
+        available_at = _dt_iso(created_at + dt.timedelta(hours=REFERRAL_PENDING_HOURS))
+
+    confirmed_at = getattr(event, "confirmed_at", None)
+    return {
+        "id": str(getattr(event, "id", None) or getattr(event, "topup_id", "")),
+        "status": status,
+        "rewardUsd": reward_usd,
+        "createdAt": _dt_iso(created_at),
+        "availableAt": available_at,
+        "confirmedAt": _dt_iso(confirmed_at) if isinstance(confirmed_at, dt.datetime) else None,
+    }
 
 
 async def _load_locked_user(session: AsyncSession, *, user_id: uuid.UUID) -> User | None:

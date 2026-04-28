@@ -2747,6 +2747,7 @@ async def invite_summary(
     from app.models.invite_visit import InviteVisit
     from app.models.referral_bonus_event import ReferralBonusEvent
     from app.storage.invites_db import ensure_user_invite_code
+    from app.storage.referrals_db import referral_bonus_event_to_received_reward
 
     invite_code = (await ensure_user_invite_code(session, current_user)).upper()
 
@@ -2802,6 +2803,24 @@ async def invite_summary(
             if ev.invitee_user_id not in latest_by_invitee:
                 latest_by_invitee[ev.invitee_user_id] = ev
 
+    received_reward_event = (
+        (
+            await session.execute(
+                select(ReferralBonusEvent)
+                .where(ReferralBonusEvent.invitee_user_id == current_user.id)
+                .order_by(ReferralBonusEvent.created_at.desc())
+                .limit(1)
+            )
+        )
+        .scalars()
+        .first()
+    )
+    received_reward = (
+        referral_bonus_event_to_received_reward(received_reward_event)
+        if received_reward_event is not None
+        else None
+    )
+
     def _dt_iso(value: dt.datetime | None) -> str:
         if not value:
             return dt.datetime.now(dt.timezone.utc).isoformat()
@@ -2831,6 +2850,7 @@ async def invite_summary(
         "visitsTotal": int(visits_total or 0),
         "rewardsPending": int(rewards_pending or 0),
         "rewardsConfirmed": int(rewards_confirmed or 0),
+        "receivedReward": received_reward,
         "items": items,
     }
 

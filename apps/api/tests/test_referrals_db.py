@@ -12,6 +12,7 @@ from app.storage.referrals_db import (
     _backfill_missing_invitee_bonus,
     _confirm_pending_referral_bonus_event,
     _reverse_confirmed_referral_bonus_event,
+    referral_bonus_event_to_received_reward,
 )
 
 
@@ -74,22 +75,47 @@ def _build_event(
     topup_id: uuid.UUID,
     status: str,
     bonus_cents: int,
+    created_at: dt.datetime | None = None,
     confirmed_at: dt.datetime | None = None,
     invitee_confirmed_at: dt.datetime | None = None,
 ) -> ReferralBonusEvent:
     return ReferralBonusEvent(
+        id=uuid.uuid4(),
         org_id=org_id,
         inviter_user_id=inviter_user_id,
         invitee_user_id=invitee_user_id,
         topup_id=topup_id,
         status=status,
         bonus_usd_cents=bonus_cents,
+        created_at=created_at or dt.datetime(2026, 4, 1, 12, 0, tzinfo=dt.timezone.utc),
         confirmed_at=confirmed_at,
         invitee_confirmed_at=invitee_confirmed_at,
     )
 
 
 class ReferralBonusLogicTests(unittest.IsolatedAsyncioTestCase):
+    async def test_received_reward_summary_exposes_pending_invitee_reward(self) -> None:
+        org_id = uuid.uuid4()
+        created_at = dt.datetime(2026, 4, 7, 12, 0, tzinfo=dt.timezone.utc)
+        event = _build_event(
+            org_id=org_id,
+            inviter_user_id=uuid.uuid4(),
+            invitee_user_id=uuid.uuid4(),
+            topup_id=uuid.uuid4(),
+            status="pending",
+            bonus_cents=1250,
+            created_at=created_at,
+        )
+
+        summary = referral_bonus_event_to_received_reward(event)
+
+        self.assertEqual(summary["id"], str(event.id))
+        self.assertEqual(summary["status"], "pending")
+        self.assertEqual(summary["rewardUsd"], 12.5)
+        self.assertEqual(summary["createdAt"], "2026-04-07T12:00:00+00:00")
+        self.assertEqual(summary["availableAt"], "2026-04-10T12:00:00+00:00")
+        self.assertIsNone(summary["confirmedAt"])
+
     async def test_confirm_pending_event_credits_inviter_and_invitee(self) -> None:
         org_id = uuid.uuid4()
         now = dt.datetime(2026, 4, 7, 12, 0, tzinfo=dt.timezone.utc)

@@ -2,26 +2,30 @@
 
 import * as React from "react";
 import { z } from "zod";
-import { ArrowUpRight, CreditCard, Loader2, RefreshCw } from "lucide-react";
+import { ArrowUpRight, Clock, CreditCard, Gift, Loader2, RefreshCw } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 
 import { StatsCard } from "@/components/app/stats-card";
+import { ClientDateTime } from "@/components/common/client-datetime";
 import { useI18n } from "@/components/i18n/i18n-provider";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { BillingTableClient } from "./billing-table-client";
 import { API_PATHS, billingLedgerListApiPath, billingTopupStatusApiPath } from "@/lib/api-paths";
 import { formatUsdFixed2 } from "@/lib/format";
+import { isInviteSummaryResponse } from "@/lib/invite-summary";
 import { mutateSwrLite, useSwrLite } from "@/lib/swr-lite";
 import type {
   BillingLedgerItem,
   BillingLedgerListResponse,
   BillingPaymentMethod,
   BillingTopupCheckoutResponse,
-  BillingTopupStatusResponse
+  BillingTopupStatusResponse,
+  InviteSummaryResponse
 } from "@/lib/types";
 import type { Locale, MessageKey, MessageVars } from "@/lib/i18n/messages";
 import { cn } from "@/lib/utils";
@@ -58,6 +62,14 @@ async function fetchCurrentBalance(key: string) {
   if (!res.ok) throw new Error("Request failed");
   if (!isAuthMeResponse(json)) throw new Error("Invalid response");
   return json.balance;
+}
+
+async function fetchInviteSummary(key: string) {
+  const res = await fetch(key, { cache: "no-store" });
+  const json: unknown = await res.json().catch(() => null);
+  if (!res.ok) throw new Error("Request failed");
+  if (!isInviteSummaryResponse(json)) throw new Error("Invalid response");
+  return json;
 }
 
 function isBillingTopupCheckoutResponse(value: unknown): value is BillingTopupCheckoutResponse {
@@ -168,6 +180,13 @@ export function BillingContentClient({
     fallbackData: initialBalance ?? undefined,
     revalidateOnFocus: true
   });
+  const { data: inviteSummary, mutate: mutateInviteSummary } = useSwrLite<InviteSummaryResponse>(
+    API_PATHS.inviteSummary,
+    fetchInviteSummary,
+    {
+      revalidateOnFocus: true
+    }
+  );
 
   const [balanceOverrideUsd, setBalanceOverrideUsd] = React.useState<number | null>(null);
   const [trackedTopupRequestId, setTrackedTopupRequestId] = React.useState<string | null>(null);
@@ -256,6 +275,10 @@ export function BillingContentClient({
               dedupingIntervalMs: 0
             });
             void mutateCurrentBalance(undefined, { revalidate: true });
+            void mutateSwrLite<InviteSummaryResponse>(API_PATHS.inviteSummary, undefined, {
+              revalidate: true,
+              dedupingIntervalMs: 0
+            });
             return;
           }
           if (status.status === "failed") {
@@ -300,6 +323,10 @@ export function BillingContentClient({
           dedupingIntervalMs: 0
         });
         void mutateCurrentBalance(undefined, { revalidate: true });
+        void mutateSwrLite<InviteSummaryResponse>(API_PATHS.inviteSummary, undefined, {
+          revalidate: true,
+          dedupingIntervalMs: 0
+        });
       } else if (status.status === "failed") {
         setTopupBlocking(false);
         setTopupPending(false);
@@ -329,6 +356,10 @@ export function BillingContentClient({
   }, [mutateCurrentBalance]);
 
   React.useEffect(() => {
+    void mutateInviteSummary(undefined, { revalidate: true });
+  }, [mutateInviteSummary]);
+
+  React.useEffect(() => {
     const interval = window.setInterval(() => {
       if (document.visibilityState !== "visible") return;
       void mutateCurrentBalance(fetchCurrentBalance(API_PATHS.authMe), { revalidate: false });
@@ -340,6 +371,8 @@ export function BillingContentClient({
   const items = data ?? initialItems ?? [];
   const currentBalanceUsd = currentBalanceData ?? initialBalance;
   const balanceUsd = balanceOverrideUsd ?? currentBalanceUsd;
+  const pendingReceivedReward =
+    inviteSummary?.receivedReward?.status === "pending" ? inviteSummary.receivedReward : null;
 
   React.useEffect(() => {
     if (balanceOverrideUsd === null) return;
@@ -534,6 +567,39 @@ export function BillingContentClient({
           </Card>
         ) : null}
       </div>
+
+      {pendingReceivedReward ? (
+        <Card className="overflow-hidden border-warning/25 bg-warning/5">
+          <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-warning/25 bg-warning/15 text-warning">
+                <Gift className="h-4 w-4" />
+              </div>
+              <div className="min-w-0 space-y-1">
+                <div className="text-sm font-medium text-foreground">{t("invite.received.title")}</div>
+                <div className="text-sm text-muted-foreground">{t("invite.received.desc.pending")}</div>
+              </div>
+            </div>
+            <div className="flex shrink-0 flex-col items-start gap-2 sm:items-end">
+              <Badge variant="warning">{t("invite.status.pending")}</Badge>
+              <div className="font-mono text-lg font-semibold tabular-nums text-foreground">
+                {typeof pendingReceivedReward.rewardUsd === "number" && Number.isFinite(pendingReceivedReward.rewardUsd)
+                  ? formatUsdFixed2(pendingReceivedReward.rewardUsd, locale)
+                  : "—"}
+              </div>
+              {pendingReceivedReward.availableAt ? (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Clock className="h-3.5 w-3.5" />
+                  <span>{t("invite.received.availableAt")}</span>
+                  <span className="font-mono tabular-nums text-foreground">
+                    <ClientDateTime value={pendingReceivedReward.availableAt} locale={locale} timeStyle="medium" />
+                  </span>
+                </div>
+              ) : null}
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <BillingTableClient initialItems={items} locale={locale} />
     </div>

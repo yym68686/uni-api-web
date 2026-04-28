@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import { API_PATHS } from "@/lib/api-paths";
 import { copyText } from "@/lib/clipboard";
+import { isInviteSummaryResponse } from "@/lib/invite-summary";
 import type { InviteSummaryResponse } from "@/lib/types";
 import { useSwrLite } from "@/lib/swr-lite";
 import { cn } from "@/lib/utils";
@@ -18,18 +19,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { InviteContentSkeleton } from "./invite-skeleton";
-
-function isInviteSummaryResponse(value: unknown): value is InviteSummaryResponse {
-  if (!value || typeof value !== "object") return false;
-  const v = value as Record<string, unknown>;
-  if (typeof v.inviteCode !== "string") return false;
-  if (typeof v.invitedTotal !== "number") return false;
-  if (typeof v.visitsTotal !== "number") return false;
-  if (typeof v.rewardsPending !== "number") return false;
-  if (typeof v.rewardsConfirmed !== "number") return false;
-  if (!Array.isArray(v.items)) return false;
-  return true;
-}
 
 async function fetchInviteSummary() {
   const res = await fetch(API_PATHS.inviteSummary, { cache: "no-store" });
@@ -58,6 +47,13 @@ function statusLabelKey(status: string): MessageKey {
   if (status === "blocked") return "invite.status.blocked";
   if (status === "reversed") return "invite.status.reversed";
   return "invite.status.none";
+}
+
+function receivedRewardDescKey(status: string): MessageKey {
+  if (status === "confirmed") return "invite.received.desc.confirmed";
+  if (status === "blocked") return "invite.received.desc.blocked";
+  if (status === "reversed") return "invite.received.desc.reversed";
+  return "invite.received.desc.pending";
 }
 
 interface InviteContentClientProps {
@@ -109,9 +105,62 @@ export function InviteContentClient({ initialSummary }: InviteContentClientProps
       ? `${((summary.invitedTotal / summary.visitsTotal) * 100).toFixed(1)}%`
       : "—";
   const conversionLabel = t("invite.kpi.conversion", { rate: conversionRate });
+  const receivedReward = summary.receivedReward ?? null;
+  const receivedRewardTimeValue =
+    receivedReward?.status === "pending"
+      ? receivedReward.availableAt
+      : receivedReward?.confirmedAt;
+  const receivedRewardTimeLabel =
+    receivedReward?.status === "pending"
+      ? t("invite.received.availableAt")
+      : receivedReward?.status === "confirmed"
+        ? t("invite.received.confirmedAt")
+        : null;
 
   return (
     <div className="space-y-6">
+      {receivedReward ? (
+        <Card className="overflow-hidden border-primary/15 bg-card/80">
+          <CardHeader className="flex flex-row items-start justify-between gap-3">
+            <div className="space-y-1">
+              <CardTitle className="flex items-center gap-2">
+                <Gift className="h-4 w-4 text-primary" />
+                {t("invite.received.title")}
+              </CardTitle>
+              <div className="text-sm text-muted-foreground">
+                {t(receivedRewardDescKey(receivedReward.status))}
+              </div>
+            </div>
+            <Badge variant={statusVariant(receivedReward.status)}>
+              {t(statusLabelKey(receivedReward.status))}
+            </Badge>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
+              <div className="space-y-1">
+                <div className="text-xs font-medium uppercase text-muted-foreground">
+                  {t("invite.received.amount")}
+                </div>
+                <div className="font-mono text-2xl font-semibold tabular-nums text-foreground">
+                  {typeof receivedReward.rewardUsd === "number" && Number.isFinite(receivedReward.rewardUsd)
+                    ? currencyFormatter.format(receivedReward.rewardUsd)
+                    : "—"}
+                </div>
+              </div>
+              {receivedRewardTimeLabel && receivedRewardTimeValue ? (
+                <div className="flex items-center gap-2 rounded-xl border border-border bg-background/40 px-3 py-2 text-xs text-muted-foreground">
+                  <Clock className="h-4 w-4 text-muted-foreground" />
+                  <span>{receivedRewardTimeLabel}</span>
+                  <span className="font-mono tabular-nums text-foreground">
+                    <ClientDateTime value={receivedRewardTimeValue} locale={locale} timeStyle="medium" />
+                  </span>
+                </div>
+              ) : null}
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
       <Card>
         <CardHeader>
           <div className="space-y-1">

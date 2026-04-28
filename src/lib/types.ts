@@ -435,11 +435,21 @@ export interface InviteeItem {
   rewardUsd?: number | null;
 }
 
+export interface ReceivedInviteReward {
+  id: string;
+  status: string;
+  rewardUsd?: number | null;
+  createdAt: string;
+  availableAt?: string | null;
+  confirmedAt?: string | null;
+}
+
 export interface InviteSummaryResponse {
   inviteCode: string;
   invitedTotal: number;
   visitsTotal: number;
   rewardsPending: number;
   rewardsConfirmed: number;
+  receivedReward?: ReceivedInviteReward | null;
   items: InviteeItem[];
 }
