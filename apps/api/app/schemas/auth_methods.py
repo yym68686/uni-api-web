@@ -25,6 +25,20 @@ class PasswordSetRequest(BaseModel):
     code: str
 
 
+class PasswordResetRequestCodeRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    email: EmailStr
+    code: str
+    password: str
+
+
+class PasswordResetConfirmResponse(BaseModel):
+    ok: bool = True
+
+
 class PasswordChangeRequest(BaseModel):
     current_password: str = Field(alias="currentPassword")
     new_password: str = Field(alias="newPassword")

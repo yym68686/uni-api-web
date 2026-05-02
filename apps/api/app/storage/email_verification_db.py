@@ -79,6 +79,7 @@ async def request_email_code(
     email: str,
     purpose: str,
     client_ip: str | None,
+    send_email: bool = True,
 ) -> int:
     normalized_email = _normalize_email(email)
     normalized_purpose = _normalize_purpose(purpose)
@@ -132,12 +133,13 @@ async def request_email_code(
         f"{code}\n\n"
         f"This code expires in {settings.email_verification_ttl_minutes} minutes."
     )
-    try:
-        await _send_resend_email(to_email=normalized_email, subject=subject, text=text)
-    except Exception:
-        row.used_at = now
-        await session.commit()
-        raise
+    if send_email:
+        try:
+            await _send_resend_email(to_email=normalized_email, subject=subject, text=text)
+        except Exception:
+            row.used_at = now
+            await session.commit()
+            raise
     return int((expires_at - now).total_seconds())
 
 

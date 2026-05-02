@@ -53,6 +53,9 @@ from app.schemas.auth_methods import (
     EmailChangeRequestCodeRequest,
     PasswordChangeRequest,
     PasswordRemoveRequest,
+    PasswordResetConfirmRequest,
+    PasswordResetConfirmResponse,
+    PasswordResetRequestCodeRequest,
     PasswordRequestCodeResponse,
     PasswordSetRequest,
 )
@@ -100,6 +103,7 @@ from app.storage.auth_db import grant_admin_role
 from app.storage.auth_db import get_user_by_token
 from app.storage.auth_db import login as auth_login
 from app.storage.auth_db import register_and_login, revoke_session
+from app.storage.auth_db import revoke_all_sessions
 from app.storage.auth_db import revoke_other_sessions
 from app.storage.api_key_auth import authenticate_api_key
 from app.storage.channels_db import (
@@ -1084,6 +1088,62 @@ async def password_set(
         await revoke_other_sessions(session, user_id=current_user.id, current_token=token)
 
     return await _build_auth_methods_response(session, current_user=current_user)
+
+
+@router.post("/auth/password/reset/request-code", response_model=PasswordRequestCodeResponse)
+async def password_reset_request_code(
+    payload: PasswordResetRequestCodeRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+) -> PasswordRequestCodeResponse:
+    email = str(payload.email).strip().lower()
+    user = (await session.execute(select(User).where(User.email == email))).scalar_one_or_none()
+    client_ip = _extract_source_ip(request)
+    try:
+        expires = await request_email_code(
+            session,
+            email=email,
+            purpose="password",
+            client_ip=client_ip,
+            send_email=user is not None,
+        )
+    except ValueError as e:
+        msg = str(e)
+        if msg in {"too many requests", "please wait"}:
+            raise HTTPException(status_code=429, detail=msg) from e
+        raise HTTPException(status_code=400, detail=msg) from e
+    return PasswordRequestCodeResponse(ok=True, expiresInSeconds=expires)
+
+
+@router.post("/auth/password/reset", response_model=PasswordResetConfirmResponse)
+async def password_reset(
+    payload: PasswordResetConfirmRequest,
+    session: AsyncSession = Depends(get_db_session),
+) -> PasswordResetConfirmResponse:
+    email = str(payload.email).strip().lower()
+    user = (await session.execute(select(User).where(User.email == email))).scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=400, detail="invalid code")
+
+    _validate_password_value(payload.password)
+    try:
+        await verify_email_code(
+            session,
+            email=email,
+            purpose="password",
+            code=str(payload.code),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    now = dt.datetime.now(dt.timezone.utc)
+    user.password_hash = hash_password(payload.password)
+    user.password_set_at = now
+    await session.commit()
+    await session.refresh(user)
+    await revoke_all_sessions(session, user_id=user.id)
+
+    return PasswordResetConfirmResponse(ok=True)
 
 
 @router.post("/auth/password/change", response_model=AuthMethodsResponse)

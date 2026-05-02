@@ -196,6 +196,22 @@ async def revoke_other_sessions(session: AsyncSession, *, user_id: uuid.UUID, cu
     await session.commit()
 
 
+async def revoke_all_sessions(session: AsyncSession, *, user_id: uuid.UUID) -> None:
+    from sqlalchemy import update
+
+    now = dt.datetime.now(dt.timezone.utc)
+    await session.execute(
+        update(Session)
+        .where(
+            Session.user_id == user_id,
+            Session.revoked_at.is_(None),
+            Session.expires_at > now,
+        )
+        .values(revoked_at=now)
+    )
+    await session.commit()
+
+
 async def get_user_by_token(session: AsyncSession, token: str) -> User | None:
     now = dt.datetime.now(dt.timezone.utc)
     token_hash = sha256_hex(token)
