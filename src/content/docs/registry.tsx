@@ -1222,11 +1222,27 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
         description: "Configure Codex to use OpenAI as the model provider via 0-0.pro (wire_api = responses).",
         sections: [
           {
+            id: "scope",
+            title: "Scope",
+            content: (
+              <div className="rounded-xl border border-border bg-background/35 p-4 text-sm text-muted-foreground">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="secondary">Compatible</Badge>
+                  <span>
+                    This setup applies to all Codex clients that read the standard{" "}
+                    <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">~/.codex</code>{" "}
+                    directory, including VS Code Codex extensions/plugins, Codex CLI, and the Codex app.
+                  </span>
+                </div>
+              </div>
+            )
+          },
+          {
             id: "install",
-            title: "1) Install Codex",
+            title: "1) Install or open Codex",
             content: (
               <p>
-                Install Codex in your editor (VS Code). After installation, Codex will read its configuration from{" "}
+                Install or open the Codex client you use. Codex reads its shared configuration from{" "}
                 <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">~/.codex</code>.
               </p>
             )
@@ -1312,10 +1328,11 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
           },
           {
             id: "restart",
-            title: "4) Restart VS Code",
+            title: "4) Restart or reload Codex",
             content: (
               <p>
-                Restart VS Code (or reload the window) so Codex picks up the updated configuration.
+                Restart or reload the Codex client you use: reload the VS Code window for VS Code extensions/plugins,
+                restart your Codex CLI session, or reopen the Codex app.
               </p>
             )
           },
@@ -1340,7 +1357,7 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
                   lang="json"
                   code={'{ "model_provider": "openai", "...": "..." }  →  { "model_provider": "OpenAI", "...": "..." }'}
                 />
-                <p>Restart VS Code after the change to re-load the sessions.</p>
+                <p>Restart or reload your Codex client after the change to re-load the sessions.</p>
               </>
             )
           }
@@ -1351,13 +1368,29 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
         description: "让 Codex 通过 0-0.pro 使用 OpenAI 作为模型提供商（wire_api = responses）。",
         sections: [
           {
+            id: "scope",
+            title: "适用范围",
+            content: (
+              <div className="rounded-xl border border-border bg-background/35 p-4 text-sm text-muted-foreground">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="secondary">兼容</Badge>
+                  <span>
+                    本配置适用于所有读取标准{" "}
+                    <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">~/.codex</code>{" "}
+                    目录的 Codex 客户端，包括所有 VS Code Codex 插件/扩展、Codex CLI 与 Codex App。
+                  </span>
+                </div>
+              </div>
+            )
+          },
+          {
             id: "install",
-            title: "1）安装 Codex",
+            title: "1）安装或打开 Codex",
             content: (
               <p>
-                在你的编辑器（VS Code）中安装 Codex。安装后，Codex 会从{" "}
+                安装或打开你正在使用的 Codex 客户端。Codex 会从{" "}
                 <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">~/.codex</code>{" "}
-                读取配置。
+                读取共享配置。
               </p>
             )
           },
@@ -1439,8 +1472,13 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
           },
           {
             id: "restart",
-            title: "4）重启 VS Code",
-            content: <p>重启 VS Code（或 Reload Window），使 Codex 读取最新配置。</p>
+            title: "4）重启或重新加载 Codex",
+            content: (
+              <p>
+                重启或重新加载你正在使用的 Codex 客户端：VS Code 插件/扩展请 Reload Window 或重启 VS Code，Codex
+                CLI 请重新启动会话，Codex App 请重新打开应用。
+              </p>
+            )
           },
           {
             id: "history",
@@ -1468,7 +1506,7 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
                   lang="json"
                   code={'{ "model_provider": "openai", "...": "..." }  →  { "model_provider": "OpenAI", "...": "..." }'}
                 />
-                <p>修改后重启 VS Code，原来的对话就会重新出现。</p>
+                <p>修改后重启或重新加载当前 Codex 客户端，原来的对话就会重新出现。</p>
               </>
             )
           }

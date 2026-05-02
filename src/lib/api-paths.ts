@@ -11,10 +11,16 @@ export const API_PATHS = {
   usage: "/api/usage"
 } as const;
 
-export function usageApiPath(timeZone?: string | null) {
+export function usageApiPath(timeZone?: string | null, days?: number | null) {
   const tz = typeof timeZone === "string" ? timeZone.trim() : "";
-  if (tz.length <= 0) return API_PATHS.usage;
-  return `${API_PATHS.usage}?tz=${encodeURIComponent(tz)}`;
+  const params = new URLSearchParams();
+  if (tz.length > 0) params.set("tz", tz);
+  if (typeof days === "number" && Number.isFinite(days)) {
+    params.set("days", String(Math.trunc(days)));
+  }
+  const qs = params.toString();
+  if (qs.length <= 0) return API_PATHS.usage;
+  return `${API_PATHS.usage}?${qs}`;
 }
 
 export function logsListApiPath(limit: number, offset: number) {

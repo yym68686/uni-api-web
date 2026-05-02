@@ -96,16 +96,22 @@ export function DashboardKpisClient({
     fallbackData: initialUsage,
     revalidateOnFocus: true
   });
+  const { data: usageData, mutate: mutateUsage } = usageSwr;
 
   const keysSwr = useSwrLite<ApiKeysListResponse["items"]>(API_PATHS.keys, fetchKeys, {
     fallbackData: initialKeys,
     revalidateOnFocus: true
   });
+  const { data: keysData } = keysSwr;
 
   const remainingCreditsSwr = useSwrLite<number>(API_PATHS.authMe, fetchRemainingCredits, {
     fallbackData: remainingCredits ?? undefined,
     revalidateOnFocus: true
   });
+  const {
+    data: remainingCreditsData,
+    mutate: mutateRemainingCredits
+  } = remainingCreditsSwr;
 
   React.useEffect(() => {
     setHydrated(true);
@@ -115,21 +121,21 @@ export function DashboardKpisClient({
 
   React.useEffect(() => {
     if (!hydrated) return;
-    void usageSwr.mutate(undefined, { revalidate: true });
-  }, [hydrated, usagePath, usageSwr.mutate]);
+    void mutateUsage(undefined, { revalidate: true });
+  }, [hydrated, usagePath, mutateUsage]);
 
   React.useEffect(() => {
     if (!hydrated) return;
     const interval = window.setInterval(() => {
       if (document.visibilityState !== "visible") return;
-      void remainingCreditsSwr.mutate(fetchRemainingCredits(), { revalidate: false });
+      void mutateRemainingCredits(fetchRemainingCredits(), { revalidate: false });
     }, 15_000);
     return () => window.clearInterval(interval);
-  }, [hydrated, remainingCreditsSwr.mutate]);
+  }, [hydrated, mutateRemainingCredits]);
 
-  const usage = hydrated ? (usageSwr.data ?? initialUsage) : initialUsage;
-  const keys = hydrated ? (keysSwr.data ?? initialKeys) : initialKeys;
-  const liveRemainingCredits = hydrated ? (remainingCreditsSwr.data ?? remainingCredits) : remainingCredits;
+  const usage = hydrated ? (usageData ?? initialUsage) : initialUsage;
+  const keys = hydrated ? (keysData ?? initialKeys) : initialKeys;
+  const liveRemainingCredits = hydrated ? (remainingCreditsData ?? remainingCredits) : remainingCredits;
   const activeKeys = keys.filter((k) => !k.revokedAt).length;
 
   const { requests7d } = buildDaily7d(usage.daily);

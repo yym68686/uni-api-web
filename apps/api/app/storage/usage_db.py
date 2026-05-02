@@ -149,7 +149,7 @@ async def list_usage_events(
 async def get_usage_response(
     session: AsyncSession, *, org_id: uuid.UUID, user_id: uuid.UUID, days: int = 7, tz: str = "UTC"
 ) -> dict:
-    safe_days = max(int(days), 1)
+    safe_days = min(max(int(days), 1), 366)
     now = dt.datetime.now(dt.timezone.utc)
     tzinfo, tz_name = _coerce_timezone(tz)
     local_now = now.astimezone(tzinfo)
