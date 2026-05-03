@@ -1337,6 +1337,27 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
             )
           },
           {
+            id: "troubleshooting",
+            title: "Troubleshooting",
+            content: (
+              <div className="rounded-xl border border-border bg-background/35 p-4 text-sm text-muted-foreground">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="secondary">Network</Badge>
+                  <span>
+                    If Codex reports{" "}
+                    <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">
+                      stream disconnected before completion: error sending request for url
+                      (https://api.0-0.pro/v1/responses)
+                    </code>
+                    , first check the local VPN or proxy. A common cause is a local 60s idle timeout cutting the
+                    streaming connection; Codex may retry 5 times, which makes the request look stuck for about 5
+                    minutes.
+                  </span>
+                </div>
+              </div>
+            )
+          },
+          {
             id: "history",
             title: "Why did my past chats disappear?",
             content: (
@@ -1478,6 +1499,26 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
                 重启或重新加载你正在使用的 Codex 客户端：VS Code 插件/扩展请 Reload Window 或重启 VS Code，Codex
                 CLI 请重新启动会话，Codex App 请重新打开应用。
               </p>
+            )
+          },
+          {
+            id: "troubleshooting",
+            title: "排错",
+            content: (
+              <div className="rounded-xl border border-border bg-background/35 p-4 text-sm text-muted-foreground">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="secondary">网络</Badge>
+                  <span>
+                    如果 Codex 报{" "}
+                    <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">
+                      stream disconnected before completion: error sending request for url
+                      (https://api.0-0.pro/v1/responses)
+                    </code>
+                    ，优先检查本地 VPN 或代理。此类报错通常是本地 VPN 的 60s 空闲超时机制掐断了流式连接；Codex
+                    会重试约 5 次，所以表现出来就是卡住约 5 分钟。
+                  </span>
+                </div>
+              </div>
             )
           },
           {

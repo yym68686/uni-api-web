@@ -1993,12 +1993,14 @@ async def _proxy_responses_request(
         cached_tokens = 0
         output_tokens = 0
         total_tokens = 0
+        client_disconnected = False
         upstream_headers = _filter_upstream_response_headers(dict(res.headers))
         upstream_headers.setdefault("cache-control", "no-cache")
         upstream_headers.setdefault("x-accel-buffering", "no")
 
         async def iterator():
             nonlocal ttft_ms, total_ms, input_tokens, cached_tokens, output_tokens, total_tokens
+            nonlocal client_disconnected
             first = None
             sse_buf = bytearray()
             try:
@@ -2031,6 +2033,9 @@ async def _proxy_responses_request(
                                 continue
                             input_tokens, cached_tokens, output_tokens, total_tokens = parsed
                     yield chunk
+            except (asyncio.CancelledError, GeneratorExit):
+                client_disconnected = True
+                raise
             except (
                 httpx.ReadError,
                 httpx.ReadTimeout,
@@ -2059,13 +2064,15 @@ async def _proxy_responses_request(
                         cached_tokens=cached_tokens,
                         output_tokens=output_tokens,
                     )
+                    record_ok = ok and not client_disconnected
+                    record_status_code = 499 if client_disconnected else int(res.status_code)
                     await _record_usage_event_best_effort(
                         org_id=context.org_id,
                         user_id=context.user_id,
                         api_key_id=context.api_key_id,
                         model_id=context.model_id,
-                        ok=ok,
-                        status_code=int(res.status_code),
+                        ok=record_ok,
+                        status_code=record_status_code,
                         input_tokens=input_tokens,
                         cached_tokens=cached_tokens,
                         output_tokens=output_tokens,
