@@ -31,6 +31,14 @@ def remaining_usd_2(*, credits_usd_cents: int, spend_usd_micros_total: int) -> f
     return float(Decimal(int(cents)) / Decimal("100"))
 
 
+def remaining_usd_2_from_micros(*, credits_usd_micros: int, spend_usd_micros_total: int) -> float:
+    remaining_micros = int(max(int(credits_usd_micros) - int(spend_usd_micros_total), 0))
+    if remaining_micros <= 0:
+        return 0.0
+    cents = int((remaining_micros + (USD_MICROS_PER_CENT // 2)) // USD_MICROS_PER_CENT)
+    return float(Decimal(int(cents)) / Decimal("100"))
+
+
 def credits_usd_cents_for_desired_remaining(
     *,
     desired_remaining_usd_cents: int,
@@ -41,4 +49,3 @@ def credits_usd_cents_for_desired_remaining(
     spend_cents, spend_remainder = divmod(spend_micros, USD_MICROS_PER_CENT)
     bump = 1 if spend_remainder > (USD_MICROS_PER_CENT // 2) else 0
     return int(safe_remaining + int(spend_cents) + bump)
-

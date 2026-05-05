@@ -16,6 +16,8 @@ from app.models.llm_usage_event import LlmUsageEvent
 from app.models.membership import Membership
 from app.models.organization import Organization
 from app.models.user import User
+from app.storage.balance_math import remaining_usd_2_from_micros
+from app.storage.billing_db import ledger_spend_micros_at_entry_expr
 
 
 USD_MICROS = Decimal("1000000")
@@ -107,9 +109,10 @@ async def get_admin_overview(session: AsyncSession, *, org_id: uuid.UUID) -> dic
         )
     ).scalars().all()
 
+    spend_micros_at_entry = ledger_spend_micros_at_entry_expr().label("spend_micros_at_entry")
     ledger_rows = (
         await session.execute(
-            select(BalanceLedgerEntry, User.email)
+            select(BalanceLedgerEntry, User.email, spend_micros_at_entry)
             .join(User, User.id == BalanceLedgerEntry.user_id)
             .where(BalanceLedgerEntry.org_id == org_id)
             .order_by(BalanceLedgerEntry.created_at.desc())
@@ -139,7 +142,7 @@ async def get_admin_overview(session: AsyncSession, *, org_id: uuid.UUID) -> dic
             }
         )
 
-    for row, email in ledger_rows:
+    for row, email, spend_micros in ledger_rows:
         events.append(
             {
                 "id": f"ledger:{row.id}",
@@ -148,7 +151,10 @@ async def get_admin_overview(session: AsyncSession, *, org_id: uuid.UUID) -> dic
                 "href": "/admin/users",
                 "email": str(email),
                 "deltaUsd": _micros_to_usd_2(int(row.delta_usd_micros)),
-                "balanceUsd": _micros_to_usd_2(int(row.balance_usd_micros)),
+                "balanceUsd": remaining_usd_2_from_micros(
+                    credits_usd_micros=int(row.balance_usd_micros),
+                    spend_usd_micros_total=int(spend_micros or 0),
+                ),
             }
         )
 
@@ -202,4 +208,3 @@ async def get_admin_overview(session: AsyncSession, *, org_id: uuid.UUID) -> dic
         "health": health,
         "events": events_sorted,
     }
-
