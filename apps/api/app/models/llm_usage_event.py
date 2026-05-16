@@ -37,6 +37,8 @@ class LlmUsageEvent(Base):
     total_duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     ttft_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     source_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    request_endpoint: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_streaming: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False

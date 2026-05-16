@@ -395,6 +395,8 @@ export interface LogItem {
   tps?: number | null;
   costUsd: number;
   sourceIp?: string | null;
+  requestEndpoint?: string | null;
+  isStreaming: boolean;
 }
 
 export interface LogsListResponse {

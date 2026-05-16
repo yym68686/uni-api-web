@@ -55,6 +55,8 @@ async def record_usage_event(
     total_duration_ms: int = 0,
     ttft_ms: int = 0,
     source_ip: str | None = None,
+    request_endpoint: str | None = None,
+    is_streaming: bool = False,
 ) -> None:
     computed_cost = int(max(0, cost_usd_micros))
     row = LlmUsageEvent(
@@ -72,6 +74,12 @@ async def record_usage_event(
         total_duration_ms=int(max(0, total_duration_ms)),
         ttft_ms=int(max(0, ttft_ms)),
         source_ip=(source_ip.strip()[:64] if isinstance(source_ip, str) and source_ip.strip() else None),
+        request_endpoint=(
+            request_endpoint.strip()[:255]
+            if isinstance(request_endpoint, str) and request_endpoint.strip()
+            else None
+        ),
+        is_streaming=bool(is_streaming),
     )
     session.add(row)
 
@@ -141,6 +149,8 @@ async def list_usage_events(
                 "tps": tps,
                 "costUsd": _micros_to_usd(int(r.cost_usd_micros)),
                 "sourceIp": (str(r.source_ip) if r.source_ip else None),
+                "requestEndpoint": (str(r.request_endpoint) if r.request_endpoint else None),
+                "isStreaming": bool(getattr(r, "is_streaming", False)),
             }
         )
     return items

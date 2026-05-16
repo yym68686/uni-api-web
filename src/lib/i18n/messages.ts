@@ -215,6 +215,10 @@ const en = {
   "logs.table.tps": "TPS",
   "logs.table.cost": "Cost",
   "logs.table.ip": "IP",
+  "logs.table.endpoint": "Endpoint",
+  "logs.table.streaming": "Streaming",
+  "logs.stream.yes": "Yes",
+  "logs.stream.no": "No",
 
   "billing.title": "Billing",
   "billing.subtitle": "Top up your credits and review balance history. Support: support@0-0.pro",
@@ -966,6 +970,10 @@ const zhCN: Record<MessageKey, string> = {
   "logs.table.tps": "TPS",
   "logs.table.cost": "花费",
   "logs.table.ip": "来源 IP",
+  "logs.table.endpoint": "请求端点",
+  "logs.table.streaming": "流式响应",
+  "logs.stream.yes": "是",
+  "logs.stream.no": "否",
 
   "billing.title": "账单",
   "billing.subtitle": "充值 API Credits，并查看余额变更历史。如需帮助：support@0-0.pro",

@@ -475,6 +475,8 @@ async def _record_usage_event_best_effort(
     total_duration_ms: int,
     ttft_ms: int,
     source_ip: str | None,
+    request_endpoint: str | None,
+    is_streaming: bool,
     recompute_cost: bool = True,
 ) -> None:
     computed_cost = int(max(cost_usd_micros, 0))
@@ -511,9 +513,16 @@ async def _record_usage_event_best_effort(
                 total_duration_ms=total_duration_ms,
                 ttft_ms=ttft_ms,
                 source_ip=source_ip,
+                request_endpoint=request_endpoint,
+                is_streaming=is_streaming,
             )
     except Exception:
         logger.exception("usage: record failed")
+
+
+def _request_endpoint(request: Request) -> str | None:
+    path = str(request.url.path or "").strip()
+    return path[:255] if path else None
 
 
 def _extract_usage_tokens(obj: dict) -> tuple[int, int, int, int] | None:
@@ -1868,6 +1877,8 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
                         total_duration_ms=total_ms_local,
                         ttft_ms=ttft_ms,
                         source_ip=context.source_ip,
+                        request_endpoint=_request_endpoint(request),
+                        is_streaming=True,
                         recompute_cost=False,
                     )
 
@@ -1945,6 +1956,8 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
         total_duration_ms=total_ms,
         ttft_ms=ttft_ms,
         source_ip=context.source_ip,
+        request_endpoint=_request_endpoint(request),
+        is_streaming=False,
         recompute_cost=False,
     )
 
@@ -2081,6 +2094,8 @@ async def _proxy_responses_request(
                         total_duration_ms=total_ms_local,
                         ttft_ms=ttft_ms,
                         source_ip=context.source_ip,
+                        request_endpoint=_request_endpoint(request),
+                        is_streaming=True,
                         recompute_cost=False,
                     )
 
@@ -2147,6 +2162,8 @@ async def _proxy_responses_request(
         total_duration_ms=total_ms,
         ttft_ms=ttft_ms,
         source_ip=context.source_ip,
+        request_endpoint=_request_endpoint(request),
+        is_streaming=False,
         recompute_cost=False,
     )
 

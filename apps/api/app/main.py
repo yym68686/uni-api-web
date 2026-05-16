@@ -179,6 +179,14 @@ def create_app() -> FastAPI:
             )
             await conn.exec_driver_sql(
                 "ALTER TABLE IF EXISTS llm_usage_events "
+                "ADD COLUMN IF NOT EXISTS request_endpoint varchar(255)"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS llm_usage_events "
+                "ADD COLUMN IF NOT EXISTS is_streaming boolean NOT NULL DEFAULT false"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS llm_usage_events "
                 "ADD COLUMN IF NOT EXISTS api_key_id uuid"
             )
             await conn.exec_driver_sql(

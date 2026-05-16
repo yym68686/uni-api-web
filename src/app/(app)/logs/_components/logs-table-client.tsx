@@ -155,6 +155,8 @@ export function LogsTableClient({ initialItems, pageSize }: LogsTableClientProps
                 <TableHead>{t("logs.table.tps")}</TableHead>
                 <TableHead>{t("logs.table.cost")}</TableHead>
                 <TableHead>{t("logs.table.ip")}</TableHead>
+                <TableHead>{t("logs.table.endpoint")}</TableHead>
+                <TableHead>{t("logs.table.streaming")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -196,6 +198,20 @@ export function LogsTableClient({ initialItems, pageSize }: LogsTableClientProps
                   </TableCell>
                   <TableCell className="whitespace-nowrap font-mono tabular-nums text-xs text-muted-foreground">
                     {r.sourceIp ?? "—"}
+                  </TableCell>
+                  <TableCell
+                    className="max-w-[220px] truncate whitespace-nowrap font-mono text-xs text-muted-foreground"
+                    title={r.requestEndpoint ?? undefined}
+                  >
+                    {r.requestEndpoint ?? "—"}
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                    <Badge
+                      variant={r.isStreaming ? "success" : "secondary"}
+                      className="rounded-full px-2 py-0 text-[10px] font-mono"
+                    >
+                      {r.isStreaming ? t("logs.stream.yes") : t("logs.stream.no")}
+                    </Badge>
                   </TableCell>
                 </TableRow>
               ))}

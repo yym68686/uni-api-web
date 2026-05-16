@@ -17,6 +17,8 @@ class LogItem(BaseModel):
     tps: float | None = None
     cost_usd: float = Field(alias="costUsd")
     source_ip: str | None = Field(default=None, alias="sourceIp")
+    request_endpoint: str | None = Field(default=None, alias="requestEndpoint")
+    is_streaming: bool = Field(default=False, alias="isStreaming")
 
 
 class LogsListResponse(BaseModel):

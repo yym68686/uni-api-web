@@ -19,7 +19,9 @@ const CSV_HEADERS = [
   "ttft_ms",
   "tps",
   "cost_usd",
-  "source_ip"
+  "source_ip",
+  "request_endpoint",
+  "is_streaming"
 ] as const;
 
 class RouteError extends Error {
@@ -93,7 +95,9 @@ function toCsvRow(item: LogItem) {
     item.ttftMs,
     item.tps,
     item.costUsd,
-    item.sourceIp
+    item.sourceIp,
+    item.requestEndpoint,
+    item.isStreaming
   ]
     .map(escapeCsv)
     .join(",");
