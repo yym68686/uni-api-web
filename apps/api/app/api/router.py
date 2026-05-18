@@ -79,6 +79,7 @@ from app.schemas.channels import (
     LlmChannelUpdateResponse,
 )
 from app.schemas.admin_analytics import AdminAnalyticsResponse
+from app.schemas.analytics import AnalyticsCollectRequest
 from app.schemas.admin_overview import AdminOverviewResponse
 from app.schemas.billing import (
     BillingLedgerListResponse,
@@ -98,6 +99,7 @@ from app.storage.announcements_db import (
     update_announcement,
 )
 from app.storage.admin_users_db import delete_admin_user, list_admin_users, update_admin_user
+from app.storage.analytics_outbox import enqueue_analytics_event, get_dataocean_status
 from app.storage.orgs_db import ensure_default_org, ensure_membership
 from app.storage.auth_db import grant_admin_role
 from app.storage.auth_db import get_user_by_token
@@ -157,6 +159,9 @@ from app.storage.referrals_db import process_referral_refund
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+_ANALYTICS_RATE_LIMIT: dict[str, tuple[float, int]] = {}
+_ANALYTICS_RATE_LIMIT_WINDOW_SECONDS = 60
+_ANALYTICS_RATE_LIMIT_MAX_EVENTS = 240
 
 def _safe_int(value: object) -> int:
     try:
@@ -572,6 +577,57 @@ def _extract_usage_tokens(obj: dict) -> tuple[int, int, int, int] | None:
     return None
 
 
+class _SseLineBuffer:
+    def __init__(self) -> None:
+        self._buffer = bytearray()
+        self._line_start = 0
+        self._search_from = 0
+
+    def feed(self, chunk: bytes) -> list[bytes]:
+        self._buffer.extend(chunk)
+        lines: list[bytes] = []
+
+        while True:
+            idx = self._buffer.find(b"\n", self._search_from)
+            if idx < 0:
+                self._search_from = len(self._buffer)
+                break
+
+            lines.append(bytes(self._buffer[self._line_start : idx]).rstrip(b"\r"))
+            self._line_start = idx + 1
+            self._search_from = self._line_start
+
+        if self._line_start == len(self._buffer):
+            self._buffer.clear()
+            self._line_start = 0
+            self._search_from = 0
+        elif self._line_start > 4096 or self._line_start > len(self._buffer) // 2:
+            del self._buffer[: self._line_start]
+            self._search_from = max(0, self._search_from - self._line_start)
+            self._line_start = 0
+
+        return lines
+
+
+def _extract_usage_tokens_from_sse_line(raw_line: bytes) -> tuple[int, int, int, int] | None:
+    line = raw_line.strip()
+    if not line.startswith(b"data:"):
+        return None
+
+    data = line[len(b"data:") :].strip()
+    if not data or data == b"[DONE]":
+        return None
+
+    try:
+        obj = json.loads(data.decode("utf-8"))
+    except Exception:
+        return None
+    if not isinstance(obj, dict):
+        return None
+
+    return _extract_usage_tokens(obj)
+
+
 @dataclass(frozen=True)
 class _ParsedLlmRequest:
     payload: dict[str, object]
@@ -658,6 +714,81 @@ def _parse_proxy_request(raw: bytes, *, content_type: str, allow_multipart: bool
 
 def _extract_source_ip(request: Request) -> str | None:
     return extract_request_client_ip(request)
+
+
+def _extract_bearer_token(value: str | None) -> str | None:
+    if not value:
+        return None
+    prefix = "bearer "
+    if not value.lower().startswith(prefix):
+        return None
+    token = value[len(prefix) :].strip()
+    return token or None
+
+
+async def _get_optional_current_user(request: Request, session: AsyncSession) -> User | None:
+    from app.constants import SESSION_COOKIE_NAME
+
+    token = _extract_bearer_token(request.headers.get("authorization")) or request.cookies.get(SESSION_COOKIE_NAME)
+    if not token:
+        return None
+    user = await get_user_by_token(session, token)
+    if not user or user.banned_at is not None:
+        return None
+    return user
+
+
+def _check_analytics_rate_limit(request: Request) -> None:
+    key = _extract_source_ip(request) or request.headers.get("user-agent") or "unknown"
+    now = time.time()
+    window_start, count = _ANALYTICS_RATE_LIMIT.get(key, (now, 0))
+    if now - window_start >= _ANALYTICS_RATE_LIMIT_WINDOW_SECONDS:
+        window_start = now
+        count = 0
+    count += 1
+    _ANALYTICS_RATE_LIMIT[key] = (window_start, count)
+    if len(_ANALYTICS_RATE_LIMIT) > 10000:
+        expired_before = now - _ANALYTICS_RATE_LIMIT_WINDOW_SECONDS
+        for existing_key, (existing_start, _) in list(_ANALYTICS_RATE_LIMIT.items()):
+            if existing_start < expired_before:
+                _ANALYTICS_RATE_LIMIT.pop(existing_key, None)
+    if count > _ANALYTICS_RATE_LIMIT_MAX_EVENTS:
+        raise HTTPException(status_code=429, detail="too many analytics events")
+
+
+def _normalize_browser_analytics_time(value: dt.datetime | None) -> dt.datetime:
+    now = dt.datetime.now(dt.timezone.utc)
+    if not value:
+        return now
+    ts = value.replace(tzinfo=dt.timezone.utc) if value.tzinfo is None else value.astimezone(dt.timezone.utc)
+    if ts < now - dt.timedelta(hours=24) or ts > now + dt.timedelta(minutes=2):
+        return now
+    return ts
+
+
+def _browser_analytics_context(
+    request: Request,
+    *,
+    payload: AnalyticsCollectRequest,
+    anonymous_id: str,
+    session_id: str,
+    user: User | None,
+) -> dict:
+    context = dict(payload.context)
+    context["anonymousId"] = anonymous_id
+    context["sessionId"] = session_id
+    if user:
+        context["userId"] = str(user.id)
+    context["gateway"] = {
+        "name": "uni-api-web-api",
+        "source": "browser",
+        "clientIpPresent": bool(_extract_source_ip(request)),
+        "userAgent": (request.headers.get("user-agent") or "")[:255] or None,
+        "origin": (request.headers.get("origin") or "")[:255] or None,
+        "referer": (request.headers.get("referer") or "")[:500] or None,
+        "secFetchSite": (request.headers.get("sec-fetch-site") or "")[:64] or None,
+    }
+    return context
 
 
 def _log_llm_request_received(
@@ -791,6 +922,54 @@ async def admin_update_settings(
     }
 
 
+@router.get("/admin/dataocean/status")
+async def admin_dataocean_status(
+    session: AsyncSession = Depends(get_db_session),
+    admin_user=Depends(require_admin),
+) -> dict:
+    _ = admin_user
+    return await get_dataocean_status(session)
+
+
+@router.post("/analytics/collect", status_code=202)
+async def collect_browser_analytics(
+    payload: AnalyticsCollectRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+) -> dict:
+    from app.constants import DEVICE_ID_COOKIE_NAME
+
+    _check_analytics_rate_limit(request)
+    anonymous_id = payload.anonymous_id or request.cookies.get(DEVICE_ID_COOKIE_NAME)
+    session_id = payload.session_id
+    if not anonymous_id or not session_id:
+        raise HTTPException(status_code=400, detail="missing analytics ids")
+
+    current_user = await _get_optional_current_user(request, session)
+    row = await enqueue_analytics_event(
+        session,
+        name=payload.name,
+        user_id=str(current_user.id) if current_user else None,
+        anonymous_id=anonymous_id,
+        session_id=session_id,
+        occurred_at=_normalize_browser_analytics_time(payload.timestamp),
+        properties=dict(payload.properties),
+        context=_browser_analytics_context(
+            request,
+            payload=payload,
+            anonymous_id=anonymous_id,
+            session_id=session_id,
+            user=current_user,
+        ),
+        event_id=payload.event_id,
+    )
+    return {
+        "ok": True,
+        "queued": bool(row),
+        "eventId": row.event_id if row else payload.event_id,
+    }
+
+
 @router.get("/admin/overview", response_model=AdminOverviewResponse)
 async def admin_overview(
     session: AsyncSession = Depends(get_db_session),
@@ -896,6 +1075,17 @@ async def register_verify(
         signup_ip = _extract_source_ip(request)
         signup_device_id = request.cookies.get(DEVICE_ID_COOKIE_NAME)
         signup_user_agent = request.headers.get("user-agent")
+        await enqueue_analytics_event(
+            session,
+            name="email_verified",
+            anonymous_id=signup_device_id,
+            properties={"purpose": "register"},
+            context={
+                "source": "server",
+                "signupIpPresent": bool(signup_ip),
+                "signupUserAgentPresent": bool(signup_user_agent),
+            },
+        )
         return await register_and_login(
             session,
             RegisterRequest(
@@ -913,7 +1103,11 @@ async def register_verify(
 
 
 @router.post("/auth/login", response_model=AuthResponse)
-async def login(payload: LoginRequest, session: AsyncSession = Depends(get_db_session)) -> AuthResponse:
+async def login(
+    payload: LoginRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+) -> AuthResponse:
     try:
         res = await auth_login(session, payload)
     except ValueError as e:
@@ -922,6 +1116,14 @@ async def login(payload: LoginRequest, session: AsyncSession = Depends(get_db_se
         raise HTTPException(status_code=400, detail=str(e)) from e
     if not res:
         raise HTTPException(status_code=401, detail="invalid credentials")
+    await enqueue_analytics_event(
+        session,
+        name="login_completed",
+        user_id=res.user.id,
+        anonymous_id=request.cookies.get("uai_device_id"),
+        properties={"method": "password"},
+        context={"source": "server"},
+    )
     return res
 
 
@@ -1785,53 +1987,18 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
         async def iterator():
             nonlocal ttft_ms, total_ms, input_tokens, cached_tokens, output_tokens, total_tokens
             first = None
-            sse_buf = bytearray()
+            sse_lines = _SseLineBuffer()
             try:
                 async for chunk in res.aiter_bytes():
                     if first is None:
                         first = time.perf_counter()
                         ttft_ms = int((first - started) * 1000)
                     if ok and content_type.startswith("text/event-stream"):
-                        sse_buf.extend(chunk)
-                        while True:
-                            idx = sse_buf.find(b"\n")
-                            if idx < 0:
-                                break
-                            raw_line = bytes(sse_buf[:idx]).rstrip(b"\r")
-                            del sse_buf[: idx + 1]
-                            line = raw_line.strip()
-                            if not line.startswith(b"data:"):
+                        for raw_line in sse_lines.feed(chunk):
+                            parsed = _extract_usage_tokens_from_sse_line(raw_line)
+                            if not parsed:
                                 continue
-                            data = line[len(b"data:") :].strip()
-                            if not data or data == b"[DONE]":
-                                continue
-                            try:
-                                obj = json.loads(data.decode("utf-8"))
-                            except Exception:
-                                continue
-                            if not isinstance(obj, dict):
-                                continue
-                            usage = obj.get("usage")
-                            if not isinstance(usage, dict):
-                                continue
-                            try:
-                                prompt = int(usage.get("prompt_tokens") or 0)
-                                completion = int(usage.get("completion_tokens") or 0)
-                                cached = 0
-                                details = usage.get("prompt_tokens_details")
-                                if isinstance(details, dict):
-                                    cached_raw = details.get("cached_tokens")
-                                    if cached_raw is not None:
-                                        cached = int(cached_raw)
-                                total_raw = usage.get("total_tokens")
-                                total = int(total_raw) if total_raw is not None else 0
-                                output = max(total - prompt, 0) if total > 0 else completion
-                                input_tokens = prompt
-                                cached_tokens = min(max(cached, 0), max(prompt, 0))
-                                output_tokens = output
-                                total_tokens = total if total > 0 else (input_tokens + output_tokens)
-                            except Exception:
-                                continue
+                            input_tokens, cached_tokens, output_tokens, total_tokens = parsed
                     yield chunk
             except (
                 httpx.ReadError,
@@ -2015,33 +2182,15 @@ async def _proxy_responses_request(
             nonlocal ttft_ms, total_ms, input_tokens, cached_tokens, output_tokens, total_tokens
             nonlocal client_disconnected
             first = None
-            sse_buf = bytearray()
+            sse_lines = _SseLineBuffer()
             try:
                 async for chunk in res.aiter_bytes():
                     if first is None:
                         first = time.perf_counter()
                         ttft_ms = int((first - started) * 1000)
                     if ok and content_type.startswith("text/event-stream"):
-                        sse_buf.extend(chunk)
-                        while True:
-                            idx = sse_buf.find(b"\n")
-                            if idx < 0:
-                                break
-                            raw_line = bytes(sse_buf[:idx]).rstrip(b"\r")
-                            del sse_buf[: idx + 1]
-                            line = raw_line.strip()
-                            if not line.startswith(b"data:"):
-                                continue
-                            data = line[len(b"data:") :].strip()
-                            if not data or data == b"[DONE]":
-                                continue
-                            try:
-                                obj = json.loads(data.decode("utf-8"))
-                            except Exception:
-                                continue
-                            if not isinstance(obj, dict):
-                                continue
-                            parsed = _extract_usage_tokens(obj)
+                        for raw_line in sse_lines.feed(chunk):
+                            parsed = _extract_usage_tokens_from_sse_line(raw_line)
                             if not parsed:
                                 continue
                             input_tokens, cached_tokens, output_tokens, total_tokens = parsed
@@ -2958,7 +3107,15 @@ async def create_key(
         raise HTTPException(status_code=400, detail="name too small (min 2)")
     if len(name) > 64:
         raise HTTPException(status_code=400, detail="name too large (max 64)")
-    return await create_api_key(session, current_user.id, ApiKeyCreateRequest(name=name))
+    response = await create_api_key(session, current_user.id, ApiKeyCreateRequest(name=name))
+    await enqueue_analytics_event(
+        session,
+        name="api_key_created",
+        user_id=current_user.id,
+        properties={"keyId": response.item.id, "name": response.item.name},
+        context={"source": "server"},
+    )
+    return response
 
 
 @router.patch("/keys/{key_id}", response_model=ApiKeyUpdateResponse)

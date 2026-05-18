@@ -103,20 +103,15 @@ function toCsvRow(item: LogItem) {
     .join(",");
 }
 
-function buildCsv(items: LogItem[]) {
-  const rows = items.map(toCsvRow);
-  return `\uFEFF${CSV_HEADERS.join(",")}\r\n${rows.join("\r\n")}`;
-}
-
 function buildFilename(now = new Date()) {
   const stamp = now.toISOString().replace(/\.\d{3}Z$/, "Z").replace(/:/g, "-");
   return `logs-${stamp}.csv`;
 }
 
-async function fetchLogsPage(offset: number) {
+async function fetchLogsPage(offset: number, headers: HeadersInit) {
   const res = await fetch(buildBackendUrl(`/logs?limit=${EXPORT_PAGE_SIZE}&offset=${offset}`), {
     cache: "no-store",
-    headers: await getBackendAuthHeadersCached()
+    headers
   });
 
   if (!res.ok) {
@@ -131,33 +126,51 @@ async function fetchLogsPage(offset: number) {
   return json.items;
 }
 
-async function fetchAllLogs() {
-  const items: LogItem[] = [];
-  let offset = 0;
+function encodeCsvRows(items: LogItem[], prefix: string) {
+  if (items.length === 0) return prefix;
+  const rows = items.map(toCsvRow).join("\r\n");
+  return `${prefix}${rows}`;
+}
 
-  while (true) {
-    const pageItems = await fetchLogsPage(offset);
-    items.push(...pageItems);
+function createCsvStream(firstPage: LogItem[], headers: HeadersInit) {
+  const encoder = new TextEncoder();
 
-    if (pageItems.length < EXPORT_PAGE_SIZE) break;
-    offset += pageItems.length;
-  }
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      try {
+        controller.enqueue(encoder.encode(encodeCsvRows(firstPage, `\uFEFF${CSV_HEADERS.join(",")}\r\n`)));
 
-  return items;
+        let pageItems = firstPage;
+        let offset = firstPage.length;
+
+        while (pageItems.length === EXPORT_PAGE_SIZE) {
+          pageItems = await fetchLogsPage(offset, headers);
+          if (pageItems.length > 0) {
+            controller.enqueue(encoder.encode(encodeCsvRows(pageItems, "\r\n")));
+          }
+          offset += pageItems.length;
+        }
+
+        controller.close();
+      } catch (err) {
+        controller.error(err);
+      }
+    }
+  });
 }
 
 export async function GET() {
   try {
-    const items = await fetchAllLogs();
-    const csv = buildCsv(items);
+    const headers = await getBackendAuthHeadersCached();
+    const firstPage = await fetchLogsPage(0, headers);
+    const csv = createCsvStream(firstPage, headers);
 
     return new Response(csv, {
       status: 200,
       headers: {
         "cache-control": "no-store",
         "content-disposition": `attachment; filename="${buildFilename()}"`,
-        "content-type": "text/csv; charset=utf-8",
-        "x-log-export-count": String(items.length)
+        "content-type": "text/csv; charset=utf-8"
       }
     });
   } catch (err) {

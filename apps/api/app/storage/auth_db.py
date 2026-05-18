@@ -13,6 +13,7 @@ from app.schemas.auth import AuthResponse, LoginRequest, RegisterRequest, UserPu
 from app.security import sha256_hex
 from app.security_password import hash_password, verify_password
 from app.storage.balance_math import remaining_usd_2
+from app.storage.analytics_outbox import enqueue_analytics_event
 from app.storage.invites_db import find_user_by_invite_code, generate_unique_invite_code
 from app.storage.orgs_db import ADMIN_LIKE_ROLES, ensure_default_org, ensure_membership, get_membership
 
@@ -251,6 +252,22 @@ async def register_and_login(
     from app.core.config import settings
 
     token = await create_session(session, user.id, ttl_days=settings.session_ttl_days)
+    await enqueue_analytics_event(
+        session,
+        name="signup_completed",
+        user_id=user.id,
+        anonymous_id=signup_device_id,
+        properties={
+            "role": user.role,
+            "group": user.group_name,
+            "inviteCodeProvided": bool(getattr(input, "invite_code", None)),
+        },
+        context={
+            "source": "server",
+            "signupIpPresent": bool(signup_ip),
+            "signupUserAgentPresent": bool(signup_user_agent),
+        },
+    )
     return AuthResponse(token=token, user=_to_user_public(user))
 
 

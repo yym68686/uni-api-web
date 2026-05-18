@@ -10,6 +10,7 @@ export const CACHE_TAGS = {
   adminUsers: "admin:users",
   adminChannels: "admin:channels",
   adminSettings: "admin:settings",
+  adminDataOcean: "admin:dataocean",
   billingLedger: "billing:ledger",
   inviteSummary: "invite:summary"
 } as const;

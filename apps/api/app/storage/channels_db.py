@@ -76,6 +76,26 @@ async def _get_groups(session: AsyncSession, channel_id: uuid.UUID) -> list[str]
     return [str(r) for r in rows]
 
 
+async def _get_groups_by_channel_ids(
+    session: AsyncSession, channel_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, list[str]]:
+    if not channel_ids:
+        return {}
+
+    rows = (
+        await session.execute(
+            select(LlmChannelGroup.channel_id, LlmChannelGroup.group_name).where(
+                LlmChannelGroup.channel_id.in_(channel_ids)
+            )
+        )
+    ).all()
+
+    groups_by_channel_id: dict[uuid.UUID, list[str]] = {}
+    for channel_id, group_name_value in rows:
+        groups_by_channel_id.setdefault(channel_id, []).append(str(group_name_value))
+    return groups_by_channel_id
+
+
 def _to_item(row: LlmChannel, groups: list[str]) -> LlmChannelItem:
     return LlmChannelItem(
         id=str(row.id),
@@ -96,8 +116,9 @@ async def list_channels(session: AsyncSession, *, org_id: uuid.UUID) -> LlmChann
     ).scalars().all()
 
     items: list[LlmChannelItem] = []
+    groups_by_channel_id = await _get_groups_by_channel_ids(session, [row.id for row in rows])
     for row in rows:
-        groups = await _get_groups(session, row.id)
+        groups = groups_by_channel_id.get(row.id, [])
         items.append(_to_item(row, groups))
     return LlmChannelsListResponse(items=items)
 
@@ -197,11 +218,12 @@ async def create_channel(
     groups = []
     for g in input.allow_groups:
         groups.append(_normalize_group(g))
-    for g in sorted(set(groups)):
+    normalized_groups = sorted(set(groups))
+    for g in normalized_groups:
         session.add(LlmChannelGroup(channel_id=row.id, group_name=g))
     await session.commit()
 
-    return LlmChannelCreateResponse(item=_to_item(row, sorted(set(groups))))
+    return LlmChannelCreateResponse(item=_to_item(row, normalized_groups))
 
 
 async def update_channel(

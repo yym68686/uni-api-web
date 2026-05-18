@@ -4,6 +4,8 @@ import unittest
 
 import app.api.router as router_module
 from app.api.router import (
+    _SseLineBuffer,
+    _extract_usage_tokens_from_sse_line,
     _parse_proxy_request,
     image_edits,
     image_generations,
@@ -140,6 +142,26 @@ class ResponsesRoutesTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(parsed.model_id, "gpt-image-2")
         self.assertTrue(parsed.stream)
+
+    def test_sse_line_buffer_handles_fragmented_lines_without_dropping_data(self) -> None:
+        buf = _SseLineBuffer()
+
+        self.assertEqual(buf.feed(b"data: {\"usage\""), [])
+        self.assertEqual(buf.feed(b": {\"prompt_tokens\": 3}}\r\n"), [b'data: {"usage": {"prompt_tokens": 3}}'])
+        self.assertEqual(buf.feed(b"data: [DONE]\n"), [b"data: [DONE]"])
+
+    def test_extract_usage_tokens_from_sse_line_supports_chat_and_responses_shapes(self) -> None:
+        chat_line = (
+            b'data: {"usage":{"prompt_tokens":10,"completion_tokens":4,'
+            b'"prompt_tokens_details":{"cached_tokens":2},"total_tokens":14}}\n'
+        )
+        responses_line = (
+            b'data: {"response":{"usage":{"input_tokens":8,"output_tokens":3,'
+            b'"input_tokens_details":{"cached_tokens":1},"total_tokens":11}}}\n'
+        )
+
+        self.assertEqual(_extract_usage_tokens_from_sse_line(chat_line), (10, 2, 4, 14))
+        self.assertEqual(_extract_usage_tokens_from_sse_line(responses_line), (8, 1, 3, 11))
 
 
 if __name__ == "__main__":

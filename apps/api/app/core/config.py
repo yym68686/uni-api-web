@@ -41,5 +41,15 @@ class Settings(BaseSettings):
     # Public console URL used for return URLs and front-door webhook routes.
     app_public_url: str = "http://localhost:3000"
 
+    # DataOcean analytics integration
+    dataocean_collect_url: str = ""
+    dataocean_project_id: str = "uni-api-web"
+    # Legacy compatibility only; browser analytics now enters through the server-side outbox.
+    dataocean_public_write_key: str = ""
+    dataocean_server_key: str = ""
+    dataocean_dashboard_url: str = ""
+    dataocean_outbox_enabled: bool = True
+    dataocean_flush_interval_seconds: int = 30
+
 
 settings = Settings()

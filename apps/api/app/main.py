@@ -12,6 +12,7 @@ from app.api.router import router as api_router
 from app.db import SessionLocal, engine
 from app.models.base import Base
 from app.storage.announcements_db import ensure_seed_announcements
+from app.storage.analytics_outbox import run_dataocean_outbox_worker
 from app.storage.orgs_db import ensure_default_org, ensure_membership
 from app.storage.referrals_db import confirm_due_referral_bonuses
 
@@ -77,6 +78,10 @@ def create_app() -> FastAPI:
             await conn.exec_driver_sql(
                 "ALTER TABLE IF EXISTS users "
                 "ADD COLUMN IF NOT EXISTS soft_limited_at timestamptz"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS users "
+                "ADD COLUMN IF NOT EXISTS first_api_call_at timestamptz"
             )
             await conn.exec_driver_sql(
                 "ALTER TABLE IF EXISTS users "
@@ -199,6 +204,18 @@ def create_app() -> FastAPI:
                 "  FOREIGN KEY (api_key_id) REFERENCES api_keys(id) ON DELETE SET NULL; "
                 "END IF; "
                 "END $$;"
+            )
+            await conn.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_llm_usage_events_org_created_at "
+                "ON llm_usage_events(org_id, created_at)"
+            )
+            await conn.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_llm_usage_events_org_user_created_at "
+                "ON llm_usage_events(org_id, user_id, created_at)"
+            )
+            await conn.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_llm_usage_events_org_model_created_at "
+                "ON llm_usage_events(org_id, model_id, created_at)"
             )
 
             await conn.exec_driver_sql(
@@ -428,6 +445,18 @@ def create_app() -> FastAPI:
                 "ON referral_bonus_events(invitee_user_id) "
                 "WHERE status IN ('pending', 'confirmed')"
             )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS analytics_outbox_events "
+                "ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now()"
+            )
+            await conn.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_analytics_outbox_status_next "
+                "ON analytics_outbox_events(status, next_attempt_at)"
+            )
+            await conn.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_analytics_outbox_created_at "
+                "ON analytics_outbox_events(created_at DESC)"
+            )
         # Bootstrap the default org and backfill memberships for existing users.
         async with SessionLocal() as session:
             org = await ensure_default_org(session)
@@ -465,12 +494,16 @@ def create_app() -> FastAPI:
                 except asyncio.TimeoutError:
                     continue
 
-        task = asyncio.create_task(referral_worker())
+        referral_task = asyncio.create_task(referral_worker())
+        dataocean_task = asyncio.create_task(run_dataocean_outbox_worker(stop_event))
         yield
         stop_event.set()
-        task.cancel()
+        referral_task.cancel()
+        dataocean_task.cancel()
         with suppress(asyncio.CancelledError):
-            await task
+            await referral_task
+        with suppress(asyncio.CancelledError):
+            await dataocean_task
 
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
 

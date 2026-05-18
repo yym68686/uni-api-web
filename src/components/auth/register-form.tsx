@@ -18,6 +18,7 @@ import { BrandWordmark } from "@/components/brand/wordmark";
 import { useI18n } from "@/components/i18n/i18n-provider";
 import type { MessageKey, MessageVars } from "@/lib/i18n/messages";
 import { ensureDeviceIdCookie } from "@/lib/device-id";
+import { trackDataOceanEvent } from "@/lib/dataocean";
 import { writeLoginPrefill } from "@/lib/login-prefill";
 
 function formatUpstreamMessage(
@@ -93,6 +94,7 @@ export function RegisterForm({ appName, nextPath, defaultInviteCode, className }
   const { t } = useI18n();
   const oauthToastShownRef = React.useRef(false);
   const inviteVisitTrackedRef = React.useRef(false);
+  const signupStartedTrackedRef = React.useRef(false);
 
   const schema = React.useMemo(() => createRegisterSchema(t), [t]);
   const emailSchema = schema.shape.email;
@@ -183,6 +185,15 @@ export function RegisterForm({ appName, nextPath, defaultInviteCode, className }
 
     setSendingCode(true);
     try {
+      if (!signupStartedTrackedRef.current) {
+        signupStartedTrackedRef.current = true;
+        trackDataOceanEvent("signup_started", {
+          properties: {
+            inviteCodeProvided: Boolean((parsed.data.inviteCode ?? "").trim()),
+            method: "email",
+          },
+        });
+      }
       const res = await fetch("/api/auth/email/request", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -504,6 +515,15 @@ export function RegisterForm({ appName, nextPath, defaultInviteCode, className }
             onClick={() => {
               const next = nextPath && nextPath.startsWith("/") ? nextPath : "/dashboard";
               const inviteCode = (form.getValues().inviteCode ?? "").trim();
+              if (!signupStartedTrackedRef.current) {
+                signupStartedTrackedRef.current = true;
+                trackDataOceanEvent("signup_started", {
+                  properties: {
+                    inviteCodeProvided: Boolean(inviteCode),
+                    method: "google",
+                  },
+                });
+              }
               const refParam = inviteCode ? `&ref=${encodeURIComponent(inviteCode)}` : "";
               window.location.href = `/api/auth/google?from=/register&next=${encodeURIComponent(next)}${refParam}`;
             }}

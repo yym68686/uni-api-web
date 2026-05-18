@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.api_key import ApiKey
 from app.models.llm_usage_event import LlmUsageEvent
 from app.models.user import User
+from app.storage.analytics_outbox import enqueue_analytics_event
 
 
 USD_MICROS = Decimal("1000000")
@@ -59,6 +60,7 @@ async def record_usage_event(
     is_streaming: bool = False,
 ) -> None:
     computed_cost = int(max(0, cost_usd_micros))
+    created_at = dt.datetime.now(dt.timezone.utc)
     row = LlmUsageEvent(
         org_id=org_id,
         user_id=user_id,
@@ -80,8 +82,18 @@ async def record_usage_event(
             else None
         ),
         is_streaming=bool(is_streaming),
+        created_at=created_at,
     )
     session.add(row)
+
+    first_call_marked = (
+        await session.execute(
+            update(User)
+            .where(User.id == user_id, User.first_api_call_at.is_(None))
+            .values(first_api_call_at=created_at)
+            .returning(User.id)
+        )
+    ).first() is not None
 
     if api_key_id is not None and computed_cost > 0:
         await session.execute(
@@ -94,6 +106,21 @@ async def record_usage_event(
             update(User)
             .where(User.id == user_id)
             .values(spend_usd_micros_total=User.spend_usd_micros_total + computed_cost)
+        )
+    if first_call_marked and bool(ok):
+        await enqueue_analytics_event(
+            session,
+            name="first_api_call",
+            user_id=user_id,
+            occurred_at=created_at,
+            properties={
+                "modelId": model_id,
+                "statusCode": int(status_code),
+                "endpoint": request_endpoint,
+                "streaming": bool(is_streaming),
+            },
+            context={"source": "server"},
+            commit=False,
         )
     await session.commit()
 

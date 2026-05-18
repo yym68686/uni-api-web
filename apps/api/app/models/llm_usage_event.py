@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -12,6 +12,11 @@ from app.models.base import Base
 
 class LlmUsageEvent(Base):
     __tablename__ = "llm_usage_events"
+    __table_args__ = (
+        Index("ix_llm_usage_events_org_created_at", "org_id", "created_at"),
+        Index("ix_llm_usage_events_org_user_created_at", "org_id", "user_id", "created_at"),
+        Index("ix_llm_usage_events_org_model_created_at", "org_id", "model_id", "created_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     org_id: Mapped[uuid.UUID] = mapped_column(

@@ -7,10 +7,15 @@ import { GeistSans } from "geist/font/sans";
 import { Toaster } from "sonner";
 
 import { cn } from "@/lib/utils";
-import { getAppName, getPublicApiBaseUrl, getPublicAppBaseUrl } from "@/lib/app-config";
+import {
+  getAppName,
+  getPublicApiBaseUrl,
+  getPublicAppBaseUrl
+} from "@/lib/app-config";
 import { getRequestLocale } from "@/lib/i18n/server";
 import { t } from "@/lib/i18n/messages";
 import { I18nProvider } from "@/components/i18n/i18n-provider";
+import { DataOceanTracker } from "@/components/analytics/dataocean-tracker";
 
 const THEME_INIT_SCRIPT = `
 (function () {
@@ -89,6 +94,7 @@ export default async function RootLayout({ children }: RootLayoutProps) {
             {t(locale, "common.skipToContent")}
           </a>
           <Toaster theme="dark" richColors closeButton />
+          <DataOceanTracker />
           {children}
         </I18nProvider>
       </body>

@@ -15,6 +15,7 @@ from app.schemas.auth import AuthResponse, UserPublic
 from app.security_password import hash_password
 from app.storage.balance_math import remaining_usd_2
 from app.storage.auth_db import create_session
+from app.storage.analytics_outbox import enqueue_analytics_event
 from app.storage.invites_db import ensure_user_invite_code, find_user_by_invite_code, generate_unique_invite_code
 from app.storage.orgs_db import ADMIN_LIKE_ROLES, ensure_default_org, ensure_membership, get_membership
 
@@ -150,6 +151,7 @@ async def login_with_google(
     if identity:
         user = await session.get(User, identity.user_id)
 
+    created_user = False
     if not user:
         user = (
             await session.execute(select(User).where(User.email == profile.email))
@@ -192,6 +194,7 @@ async def login_with_google(
         user.role = "admin" if membership_role in ADMIN_LIKE_ROLES else "user"
         await session.commit()
         await session.refresh(user)
+        created_user = True
 
     else:
         org = await ensure_default_org(session)
@@ -214,6 +217,24 @@ async def login_with_google(
     await session.refresh(user)
 
     token = await create_session(session, user.id, ttl_days=settings.session_ttl_days)
+    if created_user:
+        await enqueue_analytics_event(
+            session,
+            name="signup_completed",
+            user_id=user.id,
+            anonymous_id=signup_device_id,
+            properties={
+                "role": user.role,
+                "group": user.group_name,
+                "method": "google",
+                "inviteCodeProvided": bool(invite_code),
+            },
+            context={
+                "source": "server",
+                "signupIpPresent": bool(signup_ip),
+                "signupUserAgentPresent": bool(signup_user_agent),
+            },
+        )
     return AuthResponse(token=token, user=_to_user_public(user))
 
 

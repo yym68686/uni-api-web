@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.billing_topup import BillingTopup
 from app.models.creem_event import CreemEvent
 from app.models.user import User
+from app.storage.analytics_outbox import enqueue_analytics_event
 from app.storage.billing_db import stage_balance_adjustment_ledger_entry
 from app.storage.referrals_db import maybe_create_referral_bonus_event
 
@@ -253,6 +254,24 @@ async def complete_billing_topup(
     except Exception:
         # Referral is best-effort; top-up must still complete.
         pass
+
+    await enqueue_analytics_event(
+        session,
+        name="topup_completed",
+        user_id=topup.user_id,
+        anonymous_id=getattr(topup, "client_device_id", None),
+        occurred_at=now,
+        properties={
+            "requestId": str(topup.request_id),
+            "provider": provider or getattr(topup, "provider", None),
+            "currency": currency or getattr(topup, "currency", None),
+            "amountTotalCents": int(amount_total_cents if amount_total_cents is not None else getattr(topup, "amount_total_cents", 0) or 0),
+            "units": int(getattr(topup, "units", 0) or 0),
+        },
+        context={"source": "server"},
+        event_id=f"uni:topup_completed:{topup.id}",
+        commit=False,
+    )
 
     await session.commit()
     await session.refresh(topup)

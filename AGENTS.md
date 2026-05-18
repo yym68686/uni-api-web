@@ -64,6 +64,13 @@
     - 例外：落地页氛围交互（Spotlight/Parallax）允许小型 Client Component，但必须可降级。
 5. **类型定义** : 使用 `interface` 定义 Props，并明确导出。
 
+# Deployment Rules (生产发布原则)
+
+- 生产环境不使用本地源码上传部署，不要用 `fugue deploy . --app ...` 或 `fugue deploy ./apps/api --app ...` 直接把本机 worktree 发布到线上。
+- 正确流程是：先把代码 push 到 GitHub，让 GitHub Actions 构建并推送新的前端/后端镜像；镜像构建完成后，再触发 Fugue 的 GitHub app 部署，让 Fugue 拉取最新镜像完成发布。
+- 如果需要更新线上环境变量，可以使用 `fugue app env set/unset`；但代码和镜像发布必须走 GitHub Actions + Fugue GitHub app 的链路。
+- 只有用户明确要求临时本地部署或排障时，才可以偏离上述流程；偏离前必须说明原因和风险。
+
 # Code Example Style (代码风格示例)
 
 ```tsx
@@ -103,3 +110,4 @@ export function StatsCard({ title, value, trend, className }: StatsCardProps) {
     </div>
   );
 }
+```

@@ -1,4 +1,5 @@
 from app.models.announcement import Announcement as Announcement
+from app.models.analytics_outbox_event import AnalyticsOutboxEvent as AnalyticsOutboxEvent
 from app.models.api_key import ApiKey as ApiKey
 from app.models.balance_ledger_entry import BalanceLedgerEntry as BalanceLedgerEntry
 from app.models.billing_topup import BillingTopup as BillingTopup
