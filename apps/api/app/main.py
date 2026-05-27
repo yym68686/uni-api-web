@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from contextlib import asynccontextmanager, suppress
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from app.core.config import settings
 from app.api.router import router as api_router
@@ -20,11 +23,53 @@ import app.models  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
+_STARTUP_MIGRATION_LOCK_ID = 177895882971965
+_ADD_COLUMN_IF_MISSING_RE = re.compile(
+    r"^\s*ALTER\s+TABLE\s+IF\s+EXISTS\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+"
+    r"ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+([a-zA-Z_][a-zA-Z0-9_]*)\b",
+    re.IGNORECASE,
+)
+
+
+class _StartupMigrationConnection:
+    def __init__(self, conn: Any):
+        self._conn = conn
+
+    async def run_sync(self, *args: Any, **kwargs: Any) -> Any:
+        return await self._conn.run_sync(*args, **kwargs)
+
+    async def exec_driver_sql(self, statement: str, *args: Any, **kwargs: Any) -> Any:
+        if await self._should_skip_add_column(statement):
+            return None
+        return await self._conn.exec_driver_sql(statement, *args, **kwargs)
+
+    async def _should_skip_add_column(self, statement: str) -> bool:
+        match = _ADD_COLUMN_IF_MISSING_RE.match(statement)
+        if match is None:
+            return False
+
+        table_name, column_name = match.groups()
+        result = await self._conn.execute(
+            text(
+                "SELECT 1 FROM information_schema.columns "
+                "WHERE table_schema = current_schema() "
+                "AND table_name = :table_name "
+                "AND column_name = :column_name "
+                "LIMIT 1"
+            ),
+            {"table_name": table_name, "column_name": column_name},
+        )
+        return result.first() is not None
+
 
 def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
-        async with engine.begin() as conn:
+        async with engine.begin() as raw_conn:
+            await raw_conn.exec_driver_sql(
+                f"SELECT pg_advisory_xact_lock({_STARTUP_MIGRATION_LOCK_ID})"
+            )
+            conn = _StartupMigrationConnection(raw_conn)
             await conn.run_sync(Base.metadata.create_all)
             # Minimal dev-time migration for early-stage schema changes.
             await conn.exec_driver_sql(
