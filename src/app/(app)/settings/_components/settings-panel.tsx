@@ -20,19 +20,16 @@ const currencyOptions = [
   {
     value: "USD",
     titleKey: "settings.currency.usd.title",
-    descKey: "settings.currency.usd.desc",
     icon: DollarSign
   },
   {
     value: "CNY",
     titleKey: "settings.currency.cny.title",
-    descKey: "settings.currency.cny.desc",
     icon: CircleDollarSign
   }
 ] as const satisfies ReadonlyArray<{
   value: DisplayCurrency;
   titleKey: MessageKey;
-  descKey: MessageKey;
   icon: LucideIcon;
 }>;
 
@@ -83,7 +80,7 @@ export function SettingsPanel() {
                   aria-pressed={active}
                   onClick={() => chooseCurrency(option.value)}
                   className={cn(
-                    "group flex min-h-28 items-start gap-4 rounded-xl border p-4 text-left",
+                    "group flex min-h-20 items-center gap-4 rounded-xl border p-4 text-left",
                     "bg-background/35 transition-all duration-300 [transition-timing-function:cubic-bezier(0.16,1,0.3,1)]",
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     "motion-reduce:transform-none motion-reduce:transition-none",
@@ -108,7 +105,6 @@ export function SettingsPanel() {
                       <span className="font-medium text-foreground">{t(option.titleKey)}</span>
                       {active ? <Check className="h-4 w-4 shrink-0 text-primary" /> : null}
                     </span>
-                    <span className="mt-1 block text-sm text-muted-foreground">{t(option.descKey)}</span>
                   </span>
                 </button>
               );
