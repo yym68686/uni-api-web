@@ -49,6 +49,12 @@ _ALTER_COLUMN_TYPE_RE = re.compile(
     r"ALTER\s+COLUMN\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+TYPE\s+(.+?)\s*;?\s*$",
     re.IGNORECASE,
 )
+_USAGE_TOTAL_BACKFILL_RE = re.compile(
+    r"^\s*WITH\s+sums\s+AS\s*\(.+FROM\s+llm_usage_events\b.+GROUP\s+BY\s+"
+    r"(?:user_id|api_key_id)\s*\)\s+UPDATE\s+(?:users|api_keys)\b.+"
+    r"spend_usd_micros_total\b",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 class _StartupMigrationConnection:
@@ -59,6 +65,8 @@ class _StartupMigrationConnection:
         return await self._conn.run_sync(*args, **kwargs)
 
     async def exec_driver_sql(self, statement: str, *args: Any, **kwargs: Any) -> Any:
+        if self._should_skip_usage_total_backfill(statement):
+            return None
         if await self._should_skip_add_column(statement):
             return None
         if await self._should_skip_create_index(statement):
@@ -88,6 +96,11 @@ class _StartupMigrationConnection:
             {"table_name": table_name, "column_name": column_name},
         )
         return result.first() is not None
+
+    def _should_skip_usage_total_backfill(self, statement: str) -> bool:
+        # Usage totals are incrementally maintained on each request. Historical
+        # reconciliation scans live traffic tables and belongs in an offline job.
+        return _USAGE_TOTAL_BACKFILL_RE.match(statement) is not None
 
     async def _column_metadata(self, table_name: str, column_name: str) -> Any | None:
         result = await self._conn.execute(
