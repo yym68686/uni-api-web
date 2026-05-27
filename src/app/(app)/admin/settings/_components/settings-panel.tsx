@@ -287,9 +287,9 @@ export function AdminSettingsPanel({
 
         <div className="space-y-4 border-t border-border pt-5">
           {renderSettingRow(trialRow)}
-          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-            <div className="space-y-2">
-              <Label htmlFor="new-user-trial-balance">{t("admin.settings.newUserTrial.amountLabel")}</Label>
+          <div className="space-y-2">
+            <Label htmlFor="new-user-trial-balance">{t("admin.settings.newUserTrial.amountLabel")}</Label>
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
               <div className="relative">
                 <DollarSign className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -304,23 +304,23 @@ export function AdminSettingsPanel({
                   onChange={(event) => setTrialBalanceInput(event.target.value)}
                 />
               </div>
-              <p className="text-xs text-muted-foreground">{t("admin.settings.newUserTrial.amountHelp")}</p>
+              <Button
+                type="button"
+                className="w-full shrink-0 rounded-xl sm:w-auto"
+                disabled={!settings.newUserTrialEnabled || saving || !trialBalanceChanged}
+                onClick={() => {
+                  void updateTrialBalance();
+                }}
+              >
+                {savingKey === "newUserTrialBalance" ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="h-4 w-4" />
+                )}
+                {t("admin.settings.newUserTrial.save")}
+              </Button>
             </div>
-            <Button
-              type="button"
-              className="shrink-0 rounded-xl"
-              disabled={!settings.newUserTrialEnabled || saving || !trialBalanceChanged}
-              onClick={() => {
-                void updateTrialBalance();
-              }}
-            >
-              {savingKey === "newUserTrialBalance" ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Save className="h-4 w-4" />
-              )}
-              {t("admin.settings.newUserTrial.save")}
-            </Button>
+            <p className="text-xs text-muted-foreground">{t("admin.settings.newUserTrial.amountHelp")}</p>
           </div>
         </div>
 
