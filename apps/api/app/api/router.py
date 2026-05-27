@@ -15,6 +15,7 @@ import hmac
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.requests import ClientDisconnect
 from starlette.responses import Response, StreamingResponse
 
 import httpx
@@ -528,6 +529,13 @@ async def _record_usage_event_best_effort(
 def _request_endpoint(request: Request) -> str | None:
     path = str(request.url.path or "").strip()
     return path[:255] if path else None
+
+
+async def _read_request_body_or_499(request: Request) -> bytes:
+    try:
+        return await request.body()
+    except ClientDisconnect as exc:
+        raise HTTPException(status_code=499, detail="client disconnected") from exc
 
 
 def _extract_usage_tokens(obj: dict) -> tuple[int, int, int, int] | None:
@@ -1939,7 +1947,7 @@ async def admin_delete_channel(
 
 @router.post("/chat/completions")
 async def chat_completions(request: Request, session: AsyncSession = Depends(get_db_session)):
-    raw = await request.body()
+    raw = await _read_request_body_or_499(request)
     parsed = _parse_llm_request(raw)
     payload = parsed.payload
     context = await _resolve_llm_proxy_context(request, session, model_id=parsed.model_id)
@@ -2138,7 +2146,7 @@ async def _proxy_responses_request(
     upstream_path: str,
     allow_multipart: bool = False,
 ):
-    raw = await request.body()
+    raw = await _read_request_body_or_499(request)
     parsed = _parse_proxy_request(
         raw,
         content_type=request.headers.get("content-type") or "",
@@ -2702,7 +2710,7 @@ async def creem_webhook(
     session: AsyncSession = Depends(get_db_session),
 ) -> dict:
     signature = request.headers.get("creem-signature") or ""
-    raw = await request.body()
+    raw = await _read_request_body_or_499(request)
     if signature.strip() == "":
         raise HTTPException(status_code=401, detail="missing signature")
     if not _verify_creem_signature(raw_body=raw, signature=signature.strip()):

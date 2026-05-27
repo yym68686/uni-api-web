@@ -7,10 +7,12 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import case, func, select, update
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.api_key import ApiKey
 from app.models.llm_usage_event import LlmUsageEvent
+from app.models.llm_usage_hourly_stat import LlmUsageHourlyStat
 from app.models.user import User
 from app.storage.analytics_outbox import enqueue_analytics_event
 
@@ -37,6 +39,66 @@ def _coerce_timezone(value: str | None) -> tuple[dt.tzinfo, str]:
 
 def _local_day_start_utc(day: dt.date, tzinfo: dt.tzinfo) -> dt.datetime:
     return dt.datetime(day.year, day.month, day.day, tzinfo=tzinfo).astimezone(dt.timezone.utc)
+
+
+def _hour_start(value: dt.datetime) -> dt.datetime:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=dt.timezone.utc)
+    return value.astimezone(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
+
+
+async def _upsert_usage_hourly_stat(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+    model_id: str,
+    created_at: dt.datetime,
+    ok: bool,
+    input_tokens: int,
+    cached_tokens: int,
+    output_tokens: int,
+    total_tokens: int,
+    cost_usd_micros: int,
+) -> None:
+    now = dt.datetime.now(dt.timezone.utc)
+    errors = 0 if bool(ok) else 1
+    statement = (
+        insert(LlmUsageHourlyStat)
+        .values(
+            org_id=org_id,
+            user_id=user_id,
+            model_id=model_id,
+            bucket_start=_hour_start(created_at),
+            requests=1,
+            errors=errors,
+            input_tokens=int(max(0, input_tokens)),
+            cached_tokens=int(max(0, cached_tokens)),
+            output_tokens=int(max(0, output_tokens)),
+            total_tokens=int(max(0, total_tokens)),
+            cost_usd_micros=int(max(0, cost_usd_micros)),
+            updated_at=now,
+        )
+        .on_conflict_do_update(
+            index_elements=[
+                LlmUsageHourlyStat.org_id,
+                LlmUsageHourlyStat.user_id,
+                LlmUsageHourlyStat.model_id,
+                LlmUsageHourlyStat.bucket_start,
+            ],
+            set_={
+                "requests": LlmUsageHourlyStat.requests + 1,
+                "errors": LlmUsageHourlyStat.errors + errors,
+                "input_tokens": LlmUsageHourlyStat.input_tokens + int(max(0, input_tokens)),
+                "cached_tokens": LlmUsageHourlyStat.cached_tokens + int(max(0, cached_tokens)),
+                "output_tokens": LlmUsageHourlyStat.output_tokens + int(max(0, output_tokens)),
+                "total_tokens": LlmUsageHourlyStat.total_tokens + int(max(0, total_tokens)),
+                "cost_usd_micros": LlmUsageHourlyStat.cost_usd_micros + int(max(0, cost_usd_micros)),
+                "updated_at": now,
+            },
+        )
+    )
+    await session.execute(statement)
 
 
 async def record_usage_event(
@@ -85,6 +147,19 @@ async def record_usage_event(
         created_at=created_at,
     )
     session.add(row)
+    await _upsert_usage_hourly_stat(
+        session,
+        org_id=org_id,
+        user_id=user_id,
+        model_id=model_id,
+        created_at=created_at,
+        ok=ok,
+        input_tokens=input_tokens,
+        cached_tokens=cached_tokens,
+        output_tokens=output_tokens,
+        total_tokens=total_tokens,
+        cost_usd_micros=computed_cost,
+    )
 
     first_call_marked = (
         await session.execute(
@@ -195,40 +270,42 @@ async def get_usage_response(
     start_today = _local_day_start_utc(local_today, tzinfo)
     start_month = _local_day_start_utc(local_today.replace(day=1), tzinfo)
     start_days = _local_day_start_utc(local_today - dt.timedelta(days=safe_days - 1), tzinfo)
-    summary_window_start = min(start_24h, start_today, start_month)
-
-    errors_expr = case((LlmUsageEvent.ok.is_(False), 1), else_=0)
+    start_24h_bucket = _hour_start(start_24h)
+    start_today_bucket = _hour_start(start_today)
+    start_month_bucket = _hour_start(start_month)
+    start_days_bucket = _hour_start(start_days)
+    summary_window_start = min(start_24h_bucket, start_today_bucket, start_month_bucket)
 
     summary_row = (
         await session.execute(
             select(
-                func.coalesce(func.sum(case((LlmUsageEvent.created_at >= start_24h, 1), else_=0)), 0),
-                func.coalesce(func.sum(case((LlmUsageEvent.created_at >= start_24h, LlmUsageEvent.total_tokens), else_=0)), 0),
+                func.coalesce(func.sum(case((LlmUsageHourlyStat.bucket_start >= start_24h_bucket, LlmUsageHourlyStat.requests), else_=0)), 0),
+                func.coalesce(func.sum(case((LlmUsageHourlyStat.bucket_start >= start_24h_bucket, LlmUsageHourlyStat.total_tokens), else_=0)), 0),
                 func.coalesce(
                     func.sum(
                         case(
-                            ((LlmUsageEvent.created_at >= start_24h) & LlmUsageEvent.ok.is_(False), 1),
+                            (LlmUsageHourlyStat.bucket_start >= start_24h_bucket, LlmUsageHourlyStat.errors),
                             else_=0,
                         )
                     ),
                     0,
                 ),
                 func.coalesce(
-                    func.sum(case((LlmUsageEvent.created_at >= start_24h, LlmUsageEvent.cost_usd_micros), else_=0)),
+                    func.sum(case((LlmUsageHourlyStat.bucket_start >= start_24h_bucket, LlmUsageHourlyStat.cost_usd_micros), else_=0)),
                     0,
                 ),
                 func.coalesce(
-                    func.sum(case((LlmUsageEvent.created_at >= start_today, LlmUsageEvent.cost_usd_micros), else_=0)),
+                    func.sum(case((LlmUsageHourlyStat.bucket_start >= start_today_bucket, LlmUsageHourlyStat.cost_usd_micros), else_=0)),
                     0,
                 ),
                 func.coalesce(
-                    func.sum(case((LlmUsageEvent.created_at >= start_month, LlmUsageEvent.cost_usd_micros), else_=0)),
+                    func.sum(case((LlmUsageHourlyStat.bucket_start >= start_month_bucket, LlmUsageHourlyStat.cost_usd_micros), else_=0)),
                     0,
                 ),
             ).where(
-                LlmUsageEvent.org_id == org_id,
-                LlmUsageEvent.user_id == user_id,
-                LlmUsageEvent.created_at >= summary_window_start,
+                LlmUsageHourlyStat.org_id == org_id,
+                LlmUsageHourlyStat.user_id == user_id,
+                LlmUsageHourlyStat.bucket_start >= summary_window_start,
             )
         )
     ).one()
@@ -245,21 +322,21 @@ async def get_usage_response(
     spend_month_usd = _micros_to_usd(spend_month_micros)
 
     # Daily points
-    local_day_expr = func.date_trunc("day", func.timezone(tz_name, LlmUsageEvent.created_at))
+    local_day_expr = func.date_trunc("day", func.timezone(tz_name, LlmUsageHourlyStat.bucket_start))
     daily_rows = (
         await session.execute(
             select(
                 local_day_expr.label("day"),
-                func.count(LlmUsageEvent.id),
-                func.coalesce(func.sum(LlmUsageEvent.input_tokens), 0),
-                func.coalesce(func.sum(LlmUsageEvent.output_tokens), 0),
-                func.coalesce(func.sum(LlmUsageEvent.total_tokens), 0),
-                func.coalesce(func.sum(errors_expr), 0),
+                func.coalesce(func.sum(LlmUsageHourlyStat.requests), 0),
+                func.coalesce(func.sum(LlmUsageHourlyStat.input_tokens), 0),
+                func.coalesce(func.sum(LlmUsageHourlyStat.output_tokens), 0),
+                func.coalesce(func.sum(LlmUsageHourlyStat.total_tokens), 0),
+                func.coalesce(func.sum(LlmUsageHourlyStat.errors), 0),
             )
             .where(
-                LlmUsageEvent.org_id == org_id,
-                LlmUsageEvent.user_id == user_id,
-                LlmUsageEvent.created_at >= start_days,
+                LlmUsageHourlyStat.org_id == org_id,
+                LlmUsageHourlyStat.user_id == user_id,
+                LlmUsageHourlyStat.bucket_start >= start_days_bucket,
             )
             .group_by(local_day_expr)
             .order_by(local_day_expr)
@@ -299,20 +376,21 @@ async def get_usage_response(
         )
 
     # Top models (24h)
+    top_requests_expr = func.coalesce(func.sum(LlmUsageHourlyStat.requests), 0)
     top_rows = (
         await session.execute(
             select(
-                LlmUsageEvent.model_id,
-                func.count(LlmUsageEvent.id),
-                func.coalesce(func.sum(LlmUsageEvent.total_tokens), 0),
+                LlmUsageHourlyStat.model_id,
+                top_requests_expr,
+                func.coalesce(func.sum(LlmUsageHourlyStat.total_tokens), 0),
             )
             .where(
-                LlmUsageEvent.org_id == org_id,
-                LlmUsageEvent.user_id == user_id,
-                LlmUsageEvent.created_at >= start_24h,
+                LlmUsageHourlyStat.org_id == org_id,
+                LlmUsageHourlyStat.user_id == user_id,
+                LlmUsageHourlyStat.bucket_start >= start_24h_bucket,
             )
-            .group_by(LlmUsageEvent.model_id)
-            .order_by(func.count(LlmUsageEvent.id).desc())
+            .group_by(LlmUsageHourlyStat.model_id)
+            .order_by(top_requests_expr.desc())
             .limit(8)
         )
     ).all()

@@ -3,6 +3,8 @@ from __future__ import annotations
 import unittest
 import uuid
 
+from sqlalchemy.dialects import postgresql
+
 from app.models.api_key import ApiKey
 from app.models.user import User
 from app.storage import usage_db
@@ -27,7 +29,10 @@ class _FakeSession:
         self.added.append(obj)
 
     async def execute(self, statement: object) -> _FakeExecuteResult:
-        statement_text = str(statement)
+        try:
+            statement_text = str(statement.compile(dialect=postgresql.dialect()))  # type: ignore[attr-defined]
+        except Exception:
+            statement_text = str(statement)
         self.executed.append(statement_text)
 
         if "UPDATE users" in statement_text and "RETURNING" in statement_text:
@@ -115,6 +120,8 @@ class RecordUsageEventTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(session.commits, 2)
         self.assertFalse(any("COUNT(" in text.upper() for text in session.executed))
         self.assertTrue(any("RETURNING" in text.upper() for text in session.executed))
+        self.assertTrue(any("llm_usage_hourly_stats" in text for text in session.executed))
+        self.assertTrue(any("ON CONFLICT" in text.upper() for text in session.executed))
 
 
 if __name__ == "__main__":

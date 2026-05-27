@@ -24,9 +24,14 @@ import app.models  # noqa: F401
 logger = logging.getLogger(__name__)
 
 _STARTUP_MIGRATION_LOCK_ID = 177895882971965
+_USAGE_MAINTENANCE_LOCK_ID = 177895882971966
 _ADD_COLUMN_IF_MISSING_RE = re.compile(
     r"^\s*ALTER\s+TABLE\s+IF\s+EXISTS\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+"
     r"ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+([a-zA-Z_][a-zA-Z0-9_]*)\b",
+    re.IGNORECASE,
+)
+_CREATE_INDEX_IF_MISSING_RE = re.compile(
+    r"^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s+([a-zA-Z_][a-zA-Z0-9_]*)\b",
     re.IGNORECASE,
 )
 
@@ -40,6 +45,8 @@ class _StartupMigrationConnection:
 
     async def exec_driver_sql(self, statement: str, *args: Any, **kwargs: Any) -> Any:
         if await self._should_skip_add_column(statement):
+            return None
+        if await self._should_skip_create_index(statement):
             return None
         return await self._conn.exec_driver_sql(statement, *args, **kwargs)
 
@@ -60,6 +67,125 @@ class _StartupMigrationConnection:
             {"table_name": table_name, "column_name": column_name},
         )
         return result.first() is not None
+
+    async def _should_skip_create_index(self, statement: str) -> bool:
+        match = _CREATE_INDEX_IF_MISSING_RE.match(statement)
+        if match is None:
+            return False
+
+        index_name = match.group(1)
+        result = await self._conn.execute(
+            text(
+                "SELECT 1 "
+                "FROM pg_class c "
+                "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                "WHERE n.nspname = current_schema() "
+                "AND c.relkind = 'i' "
+                "AND c.relname = :index_name "
+                "LIMIT 1"
+            ),
+            {"index_name": index_name},
+        )
+        return result.first() is not None
+
+
+async def _run_usage_table_maintenance_once() -> None:
+    try:
+        async with engine.connect() as raw_conn:
+            conn = await raw_conn.execution_options(isolation_level="AUTOCOMMIT")
+            locked = (
+                await conn.execute(
+                    text("SELECT pg_try_advisory_lock(:lock_id)"),
+                    {"lock_id": _USAGE_MAINTENANCE_LOCK_ID},
+                )
+            ).scalar()
+            if not bool(locked):
+                return
+            try:
+                await conn.execute(
+                    text(
+                        """
+                        WITH rollup AS (
+                          SELECT
+                            org_id,
+                            user_id,
+                            model_id,
+                            date_trunc('hour', created_at) AS bucket_start,
+                            COUNT(*)::bigint AS requests,
+                            COALESCE(SUM(CASE WHEN ok IS FALSE THEN 1 ELSE 0 END), 0)::bigint AS errors,
+                            COALESCE(SUM(input_tokens), 0)::bigint AS input_tokens,
+                            COALESCE(SUM(cached_tokens), 0)::bigint AS cached_tokens,
+                            COALESCE(SUM(output_tokens), 0)::bigint AS output_tokens,
+                            COALESCE(SUM(total_tokens), 0)::bigint AS total_tokens,
+                            COALESCE(SUM(cost_usd_micros), 0)::bigint AS cost_usd_micros
+                          FROM llm_usage_events
+                          WHERE created_at >= now() - interval '366 days'
+                            AND created_at < date_trunc('hour', now())
+                          GROUP BY org_id, user_id, model_id, date_trunc('hour', created_at)
+                        )
+                        INSERT INTO llm_usage_hourly_stats (
+                          org_id,
+                          user_id,
+                          model_id,
+                          bucket_start,
+                          requests,
+                          errors,
+                          input_tokens,
+                          cached_tokens,
+                          output_tokens,
+                          total_tokens,
+                          cost_usd_micros,
+                          updated_at
+                        )
+                        SELECT
+                          org_id,
+                          user_id,
+                          model_id,
+                          bucket_start,
+                          requests,
+                          errors,
+                          input_tokens,
+                          cached_tokens,
+                          output_tokens,
+                          total_tokens,
+                          cost_usd_micros,
+                          now()
+                        FROM rollup
+                        ON CONFLICT (org_id, user_id, model_id, bucket_start) DO UPDATE SET
+                          requests = EXCLUDED.requests,
+                          errors = EXCLUDED.errors,
+                          input_tokens = EXCLUDED.input_tokens,
+                          cached_tokens = EXCLUDED.cached_tokens,
+                          output_tokens = EXCLUDED.output_tokens,
+                          total_tokens = EXCLUDED.total_tokens,
+                          cost_usd_micros = EXCLUDED.cost_usd_micros,
+                          updated_at = now()
+                        """
+                    )
+                )
+                await conn.execute(text("ANALYZE llm_usage_events"))
+                await conn.execute(text("ANALYZE llm_usage_hourly_stats"))
+                stats = (
+                    await conn.execute(
+                        text(
+                            "SELECT COALESCE(n_dead_tup, 0), COALESCE(n_mod_since_analyze, 0) "
+                            "FROM pg_stat_user_tables "
+                            "WHERE relname = 'llm_usage_events'"
+                        )
+                    )
+                ).first()
+                if stats is not None:
+                    dead_tuples = int(stats[0] or 0)
+                    modified_tuples = int(stats[1] or 0)
+                    if dead_tuples >= 50000 or modified_tuples >= 50000:
+                        await conn.execute(text("VACUUM (ANALYZE) llm_usage_events"))
+            finally:
+                await conn.execute(
+                    text("SELECT pg_advisory_unlock(:lock_id)"),
+                    {"lock_id": _USAGE_MAINTENANCE_LOCK_ID},
+                )
+    except Exception:
+        logger.exception("usage table maintenance failed")
 
 
 def create_app() -> FastAPI:
@@ -541,14 +667,18 @@ def create_app() -> FastAPI:
 
         referral_task = asyncio.create_task(referral_worker())
         dataocean_task = asyncio.create_task(run_dataocean_outbox_worker(stop_event))
+        usage_maintenance_task = asyncio.create_task(_run_usage_table_maintenance_once())
         yield
         stop_event.set()
         referral_task.cancel()
         dataocean_task.cancel()
+        usage_maintenance_task.cancel()
         with suppress(asyncio.CancelledError):
             await referral_task
         with suppress(asyncio.CancelledError):
             await dataocean_task
+        with suppress(asyncio.CancelledError):
+            await usage_maintenance_task
 
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
 
@@ -559,6 +689,10 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.get("/healthz", include_in_schema=False)
+    async def healthz() -> dict[str, bool]:
+        return {"ok": True}
 
     app.include_router(api_router, prefix=settings.api_prefix)
     return app

@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import unittest
 
+from fastapi import HTTPException
+from starlette.requests import ClientDisconnect
+
 import app.api.router as router_module
 from app.api.router import (
     _SseLineBuffer,
     _extract_usage_tokens_from_sse_line,
     _parse_proxy_request,
+    _read_request_body_or_499,
     image_edits,
     image_generations,
     responses,
@@ -27,6 +31,16 @@ class ResponsesRoutesTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("/responses/compact", post_paths)
         self.assertIn("/images/generations", post_paths)
         self.assertIn("/images/edits", post_paths)
+
+    async def test_read_request_body_maps_client_disconnect_to_499(self) -> None:
+        class DisconnectedRequest:
+            async def body(self) -> bytes:
+                raise ClientDisconnect()
+
+        with self.assertRaises(HTTPException) as ctx:
+            await _read_request_body_or_499(DisconnectedRequest())  # type: ignore[arg-type]
+
+        self.assertEqual(ctx.exception.status_code, 499)
 
     async def test_responses_uses_standard_upstream_path(self) -> None:
         request = object()
