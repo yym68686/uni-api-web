@@ -1,12 +1,15 @@
 import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
 import type { Locale } from "@/lib/i18n/messages";
-import type { BillingLedgerListResponse } from "@/lib/types";
+import type { BillingLedgerListResponse, BillingPaymentMethod } from "@/lib/types";
 import { BillingContentClient } from "./billing-content-client";
 
 export const BILLING_PAGE_SIZE = 50;
 
 interface BillingSettingsResponse {
   billingTopupEnabled: boolean;
+  billingPaymentCardEnabled: boolean;
+  billingPaymentAlipayEnabled: boolean;
+  billingPaymentWxpayEnabled: boolean;
 }
 
 interface BillingContentProps {
@@ -14,6 +17,7 @@ interface BillingContentProps {
   initialItems: BillingLedgerListResponse["items"];
   initialBalance: number | null;
   topupEnabled: boolean;
+  availablePaymentMethods: BillingPaymentMethod[];
   pageSize?: number;
 }
 
@@ -24,9 +28,21 @@ function isBillingLedgerListResponse(value: unknown): value is BillingLedgerList
   return Array.isArray(items);
 }
 
-function isBillingSettingsResponse(value: unknown): value is BillingSettingsResponse {
-  if (!value || typeof value !== "object") return false;
-  return typeof (value as { billingTopupEnabled?: unknown }).billingTopupEnabled === "boolean";
+function normalizeBillingSettingsResponse(value: unknown): BillingSettingsResponse | null {
+  if (!value || typeof value !== "object") return null;
+  const obj = value as Record<string, unknown>;
+  const billingTopupEnabled = obj.billingTopupEnabled ?? obj.billing_topup_enabled;
+  if (typeof billingTopupEnabled !== "boolean") return null;
+  const billingPaymentCardEnabled = obj.billingPaymentCardEnabled ?? obj.billing_payment_card_enabled;
+  const billingPaymentAlipayEnabled = obj.billingPaymentAlipayEnabled ?? obj.billing_payment_alipay_enabled;
+  const billingPaymentWxpayEnabled = obj.billingPaymentWxpayEnabled ?? obj.billing_payment_wxpay_enabled;
+
+  return {
+    billingTopupEnabled,
+    billingPaymentCardEnabled: typeof billingPaymentCardEnabled === "boolean" ? billingPaymentCardEnabled : true,
+    billingPaymentAlipayEnabled: typeof billingPaymentAlipayEnabled === "boolean" ? billingPaymentAlipayEnabled : true,
+    billingPaymentWxpayEnabled: typeof billingPaymentWxpayEnabled === "boolean" ? billingPaymentWxpayEnabled : true
+  };
 }
 
 export async function getLedger(pageSize = BILLING_PAGE_SIZE) {
@@ -47,11 +63,17 @@ export async function getBillingSettings() {
   });
   if (!res.ok) return null;
   const json: unknown = await res.json().catch(() => null);
-  if (!isBillingSettingsResponse(json)) return null;
-  return json;
+  return normalizeBillingSettingsResponse(json);
 }
 
-export function BillingContent({ locale, initialItems, initialBalance, topupEnabled, pageSize = BILLING_PAGE_SIZE }: BillingContentProps) {
+export function BillingContent({
+  locale,
+  initialItems,
+  initialBalance,
+  topupEnabled,
+  availablePaymentMethods,
+  pageSize = BILLING_PAGE_SIZE
+}: BillingContentProps) {
   return (
     <BillingContentClient
       locale={locale}
@@ -59,6 +81,7 @@ export function BillingContent({ locale, initialItems, initialBalance, topupEnab
       initialBalance={initialBalance}
       pageSize={pageSize}
       topupEnabled={topupEnabled}
+      availablePaymentMethods={availablePaymentMethods}
     />
   );
 }

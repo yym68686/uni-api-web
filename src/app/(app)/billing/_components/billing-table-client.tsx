@@ -23,6 +23,7 @@ function typeLabelKey(type: string) {
   if (type === "refund") return "billing.type.refund" as const;
   if (type === "top_up") return "billing.type.topUp" as const;
   if (type === "referral_bonus") return "billing.type.referralBonus" as const;
+  if (type === "trial_credit") return "billing.type.trialCredit" as const;
   return "billing.type.unknown" as const;
 }
 

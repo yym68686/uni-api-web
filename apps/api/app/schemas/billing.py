@@ -19,6 +19,9 @@ class BillingLedgerListResponse(BaseModel):
 
 class BillingSettingsResponse(BaseModel):
     billing_topup_enabled: bool = Field(alias="billingTopupEnabled")
+    billing_payment_card_enabled: bool = Field(alias="billingPaymentCardEnabled")
+    billing_payment_alipay_enabled: bool = Field(alias="billingPaymentAlipayEnabled")
+    billing_payment_wxpay_enabled: bool = Field(alias="billingPaymentWxpayEnabled")
 
 
 class BillingTopupCheckoutRequest(BaseModel):

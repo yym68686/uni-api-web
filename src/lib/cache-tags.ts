@@ -5,6 +5,7 @@ export const CACHE_TAGS = {
   keysUser: "keys:user",
   modelsUser: "models:user",
   modelsAdminConfig: "models:admin-config",
+  modelPricingAdminConfig: "model-pricing:admin-config",
   adminOverview: "admin:overview",
   adminAnalytics: "admin:analytics",
   adminUsers: "admin:users",

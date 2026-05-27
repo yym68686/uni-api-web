@@ -91,7 +91,15 @@ from app.schemas.billing import (
 )
 from app.schemas.invite import InviteSummaryResponse, InviteVisitRequest
 from app.schemas.models import ModelsListResponse, OpenAIModelsListResponse, OpenAIModelItem
-from app.schemas.models_admin import AdminModelsListResponse, AdminModelUpdateRequest, AdminModelUpdateResponse
+from app.schemas.models_admin import (
+    AdminModelPricingDeleteResponse,
+    AdminModelPricingListResponse,
+    AdminModelPricingUpdateResponse,
+    AdminModelPricingUpsertRequest,
+    AdminModelsListResponse,
+    AdminModelUpdateRequest,
+    AdminModelUpdateResponse,
+)
 from app.db import get_db_session
 from app.storage.announcements_db import (
     create_announcement,
@@ -116,7 +124,19 @@ from app.storage.channels_db import (
     pick_channel_for_group,
     update_channel,
 )
-from app.storage.models_db import UNSET, get_model_config, list_admin_models, list_user_models, upsert_model_config
+from app.storage.models_db import (
+    UNSET,
+    create_model_pricing_rule,
+    delete_model_pricing_rule,
+    get_model_config,
+    get_price_detail_for_model,
+    list_admin_model_pricing,
+    list_admin_models,
+    list_user_models,
+    model_pricing_rule_to_item,
+    update_model_pricing_rule,
+    upsert_model_config,
+)
 from app.storage.usage_db import list_usage_events, record_usage_event
 from app.storage.keys_db import (
     create_api_key,
@@ -125,6 +145,7 @@ from app.storage.keys_db import (
     update_api_key,
 )
 from app.storage.billing_db import list_balance_ledger
+from app.storage.trial_credits import cents_to_usd_2, usd_to_cents_2
 from app.storage.admin_analytics_db import get_admin_analytics
 from app.storage.admin_overview_db import get_admin_overview
 from app.storage.oauth_google import link_google_identity, login_with_google
@@ -214,22 +235,26 @@ def _creem_base_url() -> str:
     return "https://api.creem.io"
 
 
-def _llm_upstream_timeout_seconds() -> float:
+def _llm_upstream_timeout_seconds() -> float | None:
     raw_value = int(settings.llm_upstream_timeout_seconds)
-    if raw_value < 1:
-        return 1.0
+    if raw_value <= 0:
+        return None
     return float(raw_value)
 
 
 def _llm_upstream_timeout() -> httpx.Timeout:
     seconds = _llm_upstream_timeout_seconds()
+    if seconds is None:
+        return httpx.Timeout(None, connect=10.0)
     return httpx.Timeout(seconds, connect=min(10.0, seconds))
 
 
 def _translate_upstream_http_error(exc: httpx.HTTPError) -> HTTPException:
     if isinstance(exc, httpx.ReadTimeout):
-        seconds = int(_llm_upstream_timeout_seconds())
-        return HTTPException(status_code=504, detail=f"upstream read timeout after {seconds}s")
+        seconds = _llm_upstream_timeout_seconds()
+        if seconds is None:
+            return HTTPException(status_code=504, detail="upstream read timeout")
+        return HTTPException(status_code=504, detail=f"upstream read timeout after {int(seconds)}s")
     if isinstance(exc, httpx.ConnectTimeout):
         return HTTPException(status_code=504, detail="upstream connect timeout")
     if isinstance(exc, httpx.ConnectError):
@@ -456,7 +481,7 @@ async def _compute_cost_usd_micros(
     output_tokens: int,
 ) -> int:
     cfg = await get_model_config(session, org_id=org_id, model_id=model_id.strip())
-    pricing = _resolve_usage_pricing(cfg, model_id=model_id.strip())
+    pricing = await _resolve_usage_pricing(session, org_id=org_id, cfg=cfg, model_id=model_id.strip())
     return estimate_cost_usd_micros(
         pricing=pricing,
         input_tokens=input_tokens,
@@ -816,16 +841,18 @@ def _log_llm_request_received(
     )
 
 
-def _resolve_usage_pricing(cfg: object | None, *, model_id: str) -> UsagePricing:
-    from app.storage.models_db import default_price_for_model
-
-    default_in, default_out = default_price_for_model(model_id.strip())
+async def _resolve_usage_pricing(
+    session: AsyncSession, *, org_id: uuid.UUID, cfg: object | None, model_id: str
+) -> UsagePricing:
+    rule_in, rule_out, _, _, _ = await get_price_detail_for_model(
+        session, org_id=org_id, model_id=model_id.strip()
+    )
     input_price = getattr(cfg, "input_usd_micros_per_m", None)
     output_price = getattr(cfg, "output_usd_micros_per_m", None)
 
     return UsagePricing(
-        input_usd_micros_per_m=input_price if input_price is not None else default_in,
-        output_usd_micros_per_m=output_price if output_price is not None else default_out,
+        input_usd_micros_per_m=input_price if input_price is not None else rule_in,
+        output_usd_micros_per_m=output_price if output_price is not None else rule_out,
     )
 
 
@@ -876,7 +903,7 @@ async def _resolve_llm_proxy_context(
         source_ip=_extract_source_ip(request),
         upstream_base_url=str(channel.base_url).rstrip("/"),
         upstream_api_key=str(channel.api_key),
-        pricing=_resolve_usage_pricing(cfg, model_id=model_id),
+        pricing=await _resolve_usage_pricing(session, org_id=membership.org_id, cfg=cfg, model_id=model_id),
     )
 
     # Streaming responses can stay open for a long time; release the request-scoped
@@ -890,6 +917,36 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+_BILLING_PAYMENT_METHOD_ATTRS = {
+    "card": "billing_payment_card_enabled",
+    "alipay": "billing_payment_alipay_enabled",
+    "wxpay": "billing_payment_wxpay_enabled",
+}
+
+
+def _billing_payment_method_enabled(org: Organization, payment_method: str) -> bool:
+    attr = _BILLING_PAYMENT_METHOD_ATTRS.get(payment_method)
+    return bool(getattr(org, attr, True)) if attr else False
+
+
+def _billing_payment_settings(org: Organization) -> dict[str, bool]:
+    return {
+        "billingPaymentCardEnabled": bool(getattr(org, "billing_payment_card_enabled", True)),
+        "billingPaymentAlipayEnabled": bool(getattr(org, "billing_payment_alipay_enabled", True)),
+        "billingPaymentWxpayEnabled": bool(getattr(org, "billing_payment_wxpay_enabled", True)),
+    }
+
+
+def _admin_settings_response(org: Organization) -> dict[str, bool | float]:
+    return {
+        "registrationEnabled": bool(getattr(org, "registration_enabled", True)),
+        "billingTopupEnabled": bool(getattr(org, "billing_topup_enabled", True)),
+        **_billing_payment_settings(org),
+        "newUserTrialEnabled": bool(getattr(org, "new_user_trial_enabled", False)),
+        "newUserTrialBalance": cents_to_usd_2(int(getattr(org, "new_user_trial_balance_usd_cents", 0) or 0)),
+    }
+
+
 @router.get("/admin/settings", response_model=AdminSettingsResponse)
 async def admin_settings(
     session: AsyncSession = Depends(get_db_session),
@@ -900,10 +957,7 @@ async def admin_settings(
     org = await session.get(Organization, membership.org_id)
     if not org:
         raise HTTPException(status_code=404, detail="not found")
-    return {
-        "registrationEnabled": bool(getattr(org, "registration_enabled", True)),
-        "billingTopupEnabled": bool(getattr(org, "billing_topup_enabled", True)),
-    }
+    return _admin_settings_response(org)
 
 
 @router.patch("/admin/settings", response_model=AdminSettingsResponse)
@@ -917,17 +971,35 @@ async def admin_update_settings(
     org = await session.get(Organization, membership.org_id)
     if not org:
         raise HTTPException(status_code=404, detail="not found")
+    changed = False
     if payload.registration_enabled is not None:
         org.registration_enabled = bool(payload.registration_enabled)
+        changed = True
     if payload.billing_topup_enabled is not None:
         org.billing_topup_enabled = bool(payload.billing_topup_enabled)
-    if payload.registration_enabled is not None or payload.billing_topup_enabled is not None:
+        changed = True
+    if payload.billing_payment_card_enabled is not None:
+        org.billing_payment_card_enabled = bool(payload.billing_payment_card_enabled)
+        changed = True
+    if payload.billing_payment_alipay_enabled is not None:
+        org.billing_payment_alipay_enabled = bool(payload.billing_payment_alipay_enabled)
+        changed = True
+    if payload.billing_payment_wxpay_enabled is not None:
+        org.billing_payment_wxpay_enabled = bool(payload.billing_payment_wxpay_enabled)
+        changed = True
+    if payload.new_user_trial_enabled is not None:
+        org.new_user_trial_enabled = bool(payload.new_user_trial_enabled)
+        changed = True
+    if payload.new_user_trial_balance is not None:
+        try:
+            org.new_user_trial_balance_usd_cents = usd_to_cents_2(payload.new_user_trial_balance)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        changed = True
+    if changed:
         await session.commit()
         await session.refresh(org)
-    return {
-        "registrationEnabled": bool(getattr(org, "registration_enabled", True)),
-        "billingTopupEnabled": bool(getattr(org, "billing_topup_enabled", True)),
-    }
+    return _admin_settings_response(org)
 
 
 @router.get("/admin/dataocean/status")
@@ -2405,6 +2477,79 @@ async def admin_update_model(
     return AdminModelUpdateResponse(item=item)  # type: ignore[arg-type]
 
 
+@router.get("/admin/model-pricing", response_model=AdminModelPricingListResponse)
+async def admin_list_model_pricing(
+    session: AsyncSession = Depends(get_db_session),
+    admin_user=Depends(require_admin),
+    membership=Depends(get_current_membership),
+) -> AdminModelPricingListResponse:
+    _ = admin_user
+    items = await list_admin_model_pricing(session, org_id=membership.org_id)
+    return AdminModelPricingListResponse(items=items)  # type: ignore[arg-type]
+
+
+@router.post("/admin/model-pricing", response_model=AdminModelPricingUpdateResponse)
+async def admin_create_model_pricing(
+    payload: AdminModelPricingUpsertRequest,
+    session: AsyncSession = Depends(get_db_session),
+    admin_user=Depends(require_admin),
+    membership=Depends(get_current_membership),
+) -> AdminModelPricingUpdateResponse:
+    _ = admin_user
+    try:
+        row = await create_model_pricing_rule(
+            session,
+            org_id=membership.org_id,
+            prefix=payload.prefix,
+            input_usd_per_m_original=payload.input_usd_per_m_original,
+            output_usd_per_m_original=payload.output_usd_per_m_original,
+            discount=payload.discount,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return AdminModelPricingUpdateResponse(item=model_pricing_rule_to_item(row))  # type: ignore[arg-type]
+
+
+@router.patch("/admin/model-pricing/{prefix:path}", response_model=AdminModelPricingUpdateResponse)
+async def admin_update_model_pricing(
+    prefix: str,
+    payload: AdminModelPricingUpsertRequest,
+    session: AsyncSession = Depends(get_db_session),
+    admin_user=Depends(require_admin),
+    membership=Depends(get_current_membership),
+) -> AdminModelPricingUpdateResponse:
+    _ = admin_user
+    try:
+        row = await update_model_pricing_rule(
+            session,
+            org_id=membership.org_id,
+            current_prefix=prefix,
+            prefix=payload.prefix,
+            input_usd_per_m_original=payload.input_usd_per_m_original,
+            output_usd_per_m_original=payload.output_usd_per_m_original,
+            discount=payload.discount,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if row is None:
+        raise HTTPException(status_code=404, detail="not found")
+    return AdminModelPricingUpdateResponse(item=model_pricing_rule_to_item(row))  # type: ignore[arg-type]
+
+
+@router.delete("/admin/model-pricing/{prefix:path}", response_model=AdminModelPricingDeleteResponse)
+async def admin_delete_model_pricing(
+    prefix: str,
+    session: AsyncSession = Depends(get_db_session),
+    admin_user=Depends(require_admin),
+    membership=Depends(get_current_membership),
+) -> AdminModelPricingDeleteResponse:
+    _ = admin_user
+    ok = await delete_model_pricing_rule(session, org_id=membership.org_id, prefix=prefix)
+    if not ok:
+        raise HTTPException(status_code=404, detail="not found")
+    return AdminModelPricingDeleteResponse(ok=True, prefix=prefix)
+
+
 @router.get("/usage", response_model=UsageResponse)
 async def usage(
     tz: str = "UTC",
@@ -2438,6 +2583,8 @@ async def billing_topup_checkout(
     payment_method = str(payload.payment_method).strip().lower()
     if payment_method not in {"card", "alipay", "wxpay"}:
         raise HTTPException(status_code=400, detail="invalid payment method")
+    if not _billing_payment_method_enabled(org, payment_method):
+        raise HTTPException(status_code=403, detail="payment method disabled")
 
     request_id = generate_topup_request_id()
     from app.constants import DEVICE_ID_COOKIE_NAME
@@ -2603,7 +2750,10 @@ async def billing_settings(
     org = await session.get(Organization, membership.org_id)
     if not org:
         raise HTTPException(status_code=404, detail="not found")
-    return {"billingTopupEnabled": bool(getattr(org, "billing_topup_enabled", True))}
+    return {
+        "billingTopupEnabled": bool(getattr(org, "billing_topup_enabled", True)),
+        **_billing_payment_settings(org),
+    }
 
 
 @router.get("/billing/topup/status", response_model=BillingTopupStatusResponse)

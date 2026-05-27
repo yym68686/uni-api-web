@@ -224,14 +224,53 @@ export interface AdminModelsListResponse {
   items: AdminModelItem[];
 }
 
+export interface AdminModelPricingItem {
+  prefix: string;
+  inputUsdPerM?: string | null;
+  outputUsdPerM?: string | null;
+  inputUsdPerMOriginal?: string | null;
+  outputUsdPerMOriginal?: string | null;
+  discount?: number | null;
+}
+
+export interface AdminModelPricingListResponse {
+  items: AdminModelPricingItem[];
+}
+
+export interface AdminModelPricingUpsertRequest {
+  prefix: string;
+  inputUsdPerMOriginal?: string | null;
+  outputUsdPerMOriginal?: string | null;
+  discount?: number | null;
+}
+
+export interface AdminModelPricingUpdateResponse {
+  item: AdminModelPricingItem;
+}
+
+export interface AdminModelPricingDeleteResponse {
+  ok: boolean;
+  prefix: string;
+}
+
 export interface AdminSettingsResponse {
   registrationEnabled: boolean;
   billingTopupEnabled: boolean;
+  billingPaymentCardEnabled: boolean;
+  billingPaymentAlipayEnabled: boolean;
+  billingPaymentWxpayEnabled: boolean;
+  newUserTrialEnabled: boolean;
+  newUserTrialBalance: number;
 }
 
 export interface AdminSettingsUpdateRequest {
   registrationEnabled?: boolean;
   billingTopupEnabled?: boolean;
+  billingPaymentCardEnabled?: boolean;
+  billingPaymentAlipayEnabled?: boolean;
+  billingPaymentWxpayEnabled?: boolean;
+  newUserTrialEnabled?: boolean;
+  newUserTrialBalance?: number;
 }
 
 export type AdminOverviewHealthLevel = "info" | "warning" | "destructive";

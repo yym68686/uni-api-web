@@ -32,6 +32,40 @@ export function AdminModelsCardSkeleton() {
   );
 }
 
+export function AdminModelPricingCardSkeleton() {
+  return (
+    <Card>
+      <CardContent className="p-0">
+        <div className="flex items-start justify-between gap-4 border-b border-border p-6">
+          <div className="space-y-2">
+            <Skeleton className="h-5 w-44" />
+            <Skeleton className="h-4 w-[520px] max-w-full" />
+          </div>
+          <Skeleton className="h-10 w-28 rounded-xl" />
+        </div>
+        <div className="grid grid-cols-5 gap-3 border-b border-border px-4 py-3 sm:px-6">
+          <Skeleton className="h-4 w-28" />
+          <Skeleton className="h-4 w-36" />
+          <Skeleton className="h-4 w-20" />
+          <Skeleton className="h-4 w-36" />
+          <Skeleton className="ml-auto h-4 w-10" />
+        </div>
+        <div className="space-y-3 p-4 sm:px-6">
+          {Array.from({ length: 6 }).map((_, idx) => (
+            <div key={idx} className="grid grid-cols-5 items-center gap-3">
+              <Skeleton className="h-4 w-36" />
+              <Skeleton className="h-4 w-32" />
+              <Skeleton className="h-4 w-16" />
+              <Skeleton className="h-4 w-32" />
+              <Skeleton className="ml-auto h-8 w-8 rounded-xl" />
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export function AdminModelsPageSkeleton() {
   return (
     <div className="space-y-6">
@@ -43,6 +77,7 @@ export function AdminModelsPageSkeleton() {
         <Skeleton className="h-10 w-40 rounded-xl" />
       </div>
       <AdminModelsCardSkeleton />
+      <AdminModelPricingCardSkeleton />
     </div>
   );
 }

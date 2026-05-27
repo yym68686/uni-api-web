@@ -6,12 +6,8 @@ import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
 import { CACHE_TAGS } from "@/lib/cache-tags";
 import type { Locale } from "@/lib/i18n/messages";
 import { t } from "@/lib/i18n/messages";
+import type { AdminSettingsResponse } from "@/lib/types";
 import { AdminSettingsPanel } from "./settings-panel";
-
-interface AdminSettingsResponse {
-  registrationEnabled: boolean;
-  billingTopupEnabled: boolean;
-}
 
 interface AdminDataOceanStatus {
   enabled: boolean;
@@ -37,8 +33,28 @@ function normalizeAdminSettingsResponse(value: unknown): AdminSettingsResponse |
 
   const billingTopupEnabledRaw = obj.billingTopupEnabled ?? obj.billing_topup_enabled;
   const billingTopupEnabled = typeof billingTopupEnabledRaw === "boolean" ? billingTopupEnabledRaw : true;
+  const billingPaymentCardEnabledRaw = obj.billingPaymentCardEnabled ?? obj.billing_payment_card_enabled;
+  const billingPaymentAlipayEnabledRaw = obj.billingPaymentAlipayEnabled ?? obj.billing_payment_alipay_enabled;
+  const billingPaymentWxpayEnabledRaw = obj.billingPaymentWxpayEnabled ?? obj.billing_payment_wxpay_enabled;
+  const newUserTrialEnabledRaw = obj.newUserTrialEnabled ?? obj.new_user_trial_enabled;
+  const newUserTrialBalanceRaw = obj.newUserTrialBalance ?? obj.new_user_trial_balance;
+  const newUserTrialBalance =
+    typeof newUserTrialBalanceRaw === "number" && Number.isFinite(newUserTrialBalanceRaw)
+      ? newUserTrialBalanceRaw
+      : 0;
 
-  return { registrationEnabled, billingTopupEnabled };
+  return {
+    registrationEnabled,
+    billingTopupEnabled,
+    billingPaymentCardEnabled:
+      typeof billingPaymentCardEnabledRaw === "boolean" ? billingPaymentCardEnabledRaw : true,
+    billingPaymentAlipayEnabled:
+      typeof billingPaymentAlipayEnabledRaw === "boolean" ? billingPaymentAlipayEnabledRaw : true,
+    billingPaymentWxpayEnabled:
+      typeof billingPaymentWxpayEnabledRaw === "boolean" ? billingPaymentWxpayEnabledRaw : true,
+    newUserTrialEnabled: typeof newUserTrialEnabledRaw === "boolean" ? newUserTrialEnabledRaw : false,
+    newUserTrialBalance
+  };
 }
 
 async function getAdminSettings() {
@@ -109,6 +125,11 @@ export async function AdminSettingsContent({ locale }: AdminSettingsContentProps
           <AdminSettingsPanel
             initialRegistrationEnabled={settings.registrationEnabled}
             initialBillingTopupEnabled={settings.billingTopupEnabled}
+            initialBillingPaymentCardEnabled={settings.billingPaymentCardEnabled}
+            initialBillingPaymentAlipayEnabled={settings.billingPaymentAlipayEnabled}
+            initialBillingPaymentWxpayEnabled={settings.billingPaymentWxpayEnabled}
+            initialNewUserTrialEnabled={settings.newUserTrialEnabled}
+            initialNewUserTrialBalance={settings.newUserTrialBalance}
           />
         </CardContent>
       </Card>

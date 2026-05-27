@@ -27,6 +27,7 @@ export default function Loading() {
         initialBalance={cachedBalance}
         pageSize={PAGE_SIZE}
         topupEnabled={true}
+        availablePaymentMethods={["card", "alipay", "wxpay"]}
         autoRevalidate={false}
       />
     </div>

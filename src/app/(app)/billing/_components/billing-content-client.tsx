@@ -146,6 +146,7 @@ interface BillingContentClientProps {
   initialBalance: number | null;
   pageSize: number;
   topupEnabled: boolean;
+  availablePaymentMethods: BillingPaymentMethod[];
   autoRevalidate?: boolean;
 }
 
@@ -155,6 +156,7 @@ export function BillingContentClient({
   initialBalance,
   pageSize,
   topupEnabled,
+  availablePaymentMethods,
   autoRevalidate = true
 }: BillingContentClientProps) {
   const { t } = useI18n();
@@ -225,28 +227,39 @@ export function BillingContentClient({
 
   const schema = React.useMemo(() => createTopupSchema(t), [t]);
   const amountUsdSchema = schema.shape.amountUsd;
+  const presetAmounts = React.useMemo(() => [10, 50, 100, 500], []);
+  const paymentMethods = React.useMemo(() => {
+    const allPaymentMethods = [
+      { value: "card" as const, label: t("billing.topup.method.card") },
+      { value: "alipay" as const, label: t("billing.topup.method.alipay") },
+      { value: "wxpay" as const, label: t("billing.topup.method.wxpay") }
+    ] satisfies ReadonlyArray<{ value: BillingPaymentMethod; label: string }>;
+
+    return allPaymentMethods.filter((method) => availablePaymentMethods.includes(method.value));
+  }, [availablePaymentMethods, t]);
   const form = useForm<TopupFormValues>({
-    defaultValues: { amountUsd: 50, paymentMethod: "card" },
+    defaultValues: { amountUsd: 50, paymentMethod: availablePaymentMethods[0] ?? "card" },
     mode: "onChange"
   });
+  const selectedPaymentMethod = form.watch("paymentMethod") ?? "card";
+  const topupAvailable = topupEnabled && paymentMethods.length > 0;
+
+  const topupSubmitting = form.formState.isSubmitting;
 
   React.useEffect(() => {
     void form.trigger();
   }, [form]);
 
-  const presetAmounts = React.useMemo(() => [10, 50, 100, 500], []);
-  const paymentMethods = React.useMemo(
-    () =>
-      [
-        { value: "card" as const, label: t("billing.topup.method.card") },
-        { value: "alipay" as const, label: t("billing.topup.method.alipay") },
-        { value: "wxpay" as const, label: t("billing.topup.method.wxpay") }
-      ] satisfies ReadonlyArray<{ value: BillingPaymentMethod; label: string }>,
-    [t]
-  );
-  const selectedPaymentMethod = form.watch("paymentMethod") ?? "card";
-
-  const topupSubmitting = form.formState.isSubmitting;
+  React.useEffect(() => {
+    if (!topupAvailable) return;
+    if (paymentMethods.some((method) => method.value === selectedPaymentMethod)) return;
+    const nextPaymentMethod = paymentMethods[0]?.value;
+    if (!nextPaymentMethod) return;
+    form.setValue("paymentMethod", nextPaymentMethod, {
+      shouldDirty: false,
+      shouldValidate: true
+    });
+  }, [form, paymentMethods, selectedPaymentMethod, topupAvailable]);
 
   React.useEffect(() => {
     if (!topupRequestIdFromUrl) return;
@@ -381,9 +394,14 @@ export function BillingContentClient({
     setBalanceOverrideUsd(null);
   }, [balanceOverrideUsd, currentBalanceUsd]);
 
-  if (shouldShowSkeleton) return <BillingContentSkeleton topupEnabled={topupEnabled} />;
+  if (shouldShowSkeleton) return <BillingContentSkeleton topupEnabled={topupAvailable} />;
 
   async function onSubmit(values: TopupFormValues) {
+    if (!availablePaymentMethods.includes(values.paymentMethod)) {
+      toast.error(t("billing.topup.toast.methodUnavailable"));
+      return;
+    }
+
     try {
       const checkout = await createTopupCheckout(values.amountUsd, values.paymentMethod);
       window.location.href = checkout.checkoutUrl;
@@ -400,10 +418,10 @@ export function BillingContentClient({
           value={balanceUsd === null ? "—" : formatUsdFixed2(balanceUsd, locale)}
           trend={t("billing.kpi.balanceHint")}
           icon={CreditCard}
-          className={cn(topupEnabled ? "lg:col-span-2" : "sm:col-span-2 lg:col-span-4")}
+          className={cn(topupAvailable ? "lg:col-span-2" : "sm:col-span-2 lg:col-span-4")}
         />
 
-        {topupEnabled ? (
+        {topupAvailable ? (
           <Card id="billing-topup" className="scroll-mt-24 lg:col-span-2">
             <CardHeader className="flex flex-row items-start justify-between gap-3">
               <div className="space-y-1">
@@ -421,7 +439,16 @@ export function BillingContentClient({
                 <input type="hidden" {...form.register("paymentMethod")} />
                 <div className="space-y-2">
                   <div className="text-sm font-medium text-foreground">{t("billing.topup.methodLabel")}</div>
-                  <div className="grid gap-2 sm:grid-cols-3">
+                  <div
+                    className={cn(
+                      "grid gap-2",
+                      paymentMethods.length >= 3
+                        ? "sm:grid-cols-3"
+                        : paymentMethods.length === 2
+                          ? "sm:grid-cols-2"
+                          : "sm:grid-cols-1"
+                    )}
+                  >
                     {paymentMethods.map((method) => {
                       const active = selectedPaymentMethod === method.value;
                       return (

@@ -18,6 +18,7 @@ from app.storage.auth_db import create_session
 from app.storage.analytics_outbox import enqueue_analytics_event
 from app.storage.invites_db import ensure_user_invite_code, find_user_by_invite_code, generate_unique_invite_code
 from app.storage.orgs_db import ADMIN_LIKE_ROLES, ensure_default_org, ensure_membership, get_membership
+from app.storage.trial_credits import stage_new_user_trial_credit
 
 
 class GoogleProfile:
@@ -185,6 +186,8 @@ async def login_with_google(
             ),
         )
         session.add(user)
+        await session.flush()
+        stage_new_user_trial_credit(session, org=org, user=user)
         await session.commit()
         await session.refresh(user)
 

@@ -16,6 +16,7 @@ from app.storage.balance_math import remaining_usd_2
 from app.storage.analytics_outbox import enqueue_analytics_event
 from app.storage.invites_db import find_user_by_invite_code, generate_unique_invite_code
 from app.storage.orgs_db import ADMIN_LIKE_ROLES, ensure_default_org, ensure_membership, get_membership
+from app.storage.trial_credits import stage_new_user_trial_credit
 
 
 def _dt_iso(value: dt.datetime | None) -> str | None:
@@ -82,6 +83,7 @@ async def create_user(
 
     is_first = await _is_first_user(session)
     requested_admin = _should_grant_admin(input.admin_bootstrap_token)
+    org = await ensure_default_org(session)
 
     now = dt.datetime.now(dt.timezone.utc)
     inviter_user_id = None
@@ -109,10 +111,11 @@ async def create_user(
         ),
     )
     session.add(row)
+    await session.flush()
+    stage_new_user_trial_credit(session, org=org, user=row)
     await session.commit()
     await session.refresh(row)
 
-    org = await ensure_default_org(session)
     membership_role = "owner" if is_first else ("admin" if requested_admin else "developer")
     await ensure_membership(session, org_id=org.id, user_id=row.id, role=membership_role)
     row.role = "admin" if membership_role in ADMIN_LIKE_ROLES else "user"

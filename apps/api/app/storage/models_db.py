@@ -9,11 +9,14 @@ from pathlib import Path
 
 import httpx
 from sqlalchemy import Integer, cast, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.llm_channel import LlmChannel
 from app.models.llm_model_config import LlmModelConfig
+from app.models.llm_model_pricing_rule import LlmModelPricingRule
 from app.models.llm_usage_event import LlmUsageEvent
+from app.models.organization import Organization
 from app.storage.channels_db import list_channels_for_group
 
 
@@ -142,12 +145,103 @@ def _parse_usd_per_m(value: str | None) -> int | None:
         dec = Decimal(raw)
     except InvalidOperation as e:
         raise ValueError("invalid price") from e
-    if dec < 0:
+    if not dec.is_finite() or dec < 0:
         raise ValueError("invalid price")
     micros = int((dec * USD_MICROS).to_integral_value())
     if micros > 10_000_000_000:
         raise ValueError("price too large")
     return micros
+
+
+def _parse_discount(value: float | str | None) -> float | None:
+    if value is None:
+        return None
+    try:
+        dec = Decimal(str(value).strip())
+    except InvalidOperation as e:
+        raise ValueError("invalid discount") from e
+    if not dec.is_finite() or dec <= 0 or dec > 1:
+        raise ValueError("invalid discount")
+    if dec >= 1:
+        return None
+    return float(dec)
+
+
+def _normalize_price_fields(input_micros: int | None, output_micros: int | None) -> None:
+    if input_micros is None and output_micros is None:
+        raise ValueError("at least one price is required")
+
+
+def default_model_pricing_seed_rows() -> list[tuple[str, int | None, int | None, float | None]]:
+    rows: list[tuple[str, int | None, int | None, float | None]] = []
+    for prefix, entry in DEFAULT_USD_PER_M_BY_PREFIX.items():
+        if len(entry) == 2:
+            input_usd, output_usd = entry
+            discount = None
+        else:
+            input_usd, output_usd, discount_raw = entry
+            discount = _parse_discount(discount_raw)
+
+        input_micros = _parse_usd_per_m(input_usd)
+        output_micros = _parse_usd_per_m(output_usd)
+        _normalize_price_fields(input_micros, output_micros)
+        rows.append((prefix, input_micros, output_micros, discount))
+    return rows
+
+
+def _pricing_rule_detail(
+    input_original: int | None,
+    output_original: int | None,
+    discount: float | None,
+) -> tuple[int | None, int | None, int | None, int | None, float | None]:
+    if discount is None or discount >= 1:
+        return (input_original, output_original, input_original, output_original, None)
+
+    if discount <= 0:
+        raise ValueError("invalid discount")
+    return (
+        _apply_discount(input_original, discount),
+        _apply_discount(output_original, discount),
+        input_original,
+        output_original,
+        float(discount),
+    )
+
+
+def model_pricing_rule_to_item(row: LlmModelPricingRule) -> dict:
+    eff_in, eff_out, orig_in, orig_out, discount = _pricing_rule_detail(
+        row.input_usd_micros_per_m_original,
+        row.output_usd_micros_per_m_original,
+        row.discount,
+    )
+    return {
+        "prefix": row.prefix,
+        "inputUsdPerM": _micros_to_str(eff_in),
+        "outputUsdPerM": _micros_to_str(eff_out),
+        "inputUsdPerMOriginal": _micros_to_str(orig_in),
+        "outputUsdPerMOriginal": _micros_to_str(orig_out),
+        "discount": discount,
+    }
+
+
+def price_detail_for_model_from_rules(
+    model_id: str, rules: list[LlmModelPricingRule]
+) -> tuple[int | None, int | None, int | None, int | None, float | None]:
+    model = model_id.strip()
+    best: LlmModelPricingRule | None = None
+    for rule in rules:
+        if not model.startswith(rule.prefix):
+            continue
+        if best is None or len(rule.prefix) > len(best.prefix):
+            best = rule
+
+    if best is None:
+        return (None, None, None, None, None)
+    return _pricing_rule_detail(
+        best.input_usd_micros_per_m_original,
+        best.output_usd_micros_per_m_original,
+        best.discount,
+    )
 
 
 AVAILABILITY_24H_BUCKETS = 48
@@ -243,6 +337,146 @@ async def upsert_model_config(
     return row
 
 
+async def list_model_pricing_rules(session: AsyncSession, *, org_id: uuid.UUID) -> list[LlmModelPricingRule]:
+    return (
+        await session.execute(
+            select(LlmModelPricingRule)
+            .where(LlmModelPricingRule.org_id == org_id)
+            .order_by(func.length(LlmModelPricingRule.prefix).desc(), LlmModelPricingRule.prefix.asc())
+        )
+    ).scalars().all()
+
+
+async def list_admin_model_pricing(session: AsyncSession, *, org_id: uuid.UUID) -> list[dict]:
+    return [model_pricing_rule_to_item(row) for row in await list_model_pricing_rules(session, org_id=org_id)]
+
+
+async def ensure_default_model_pricing_rules(session: AsyncSession, *, org_id: uuid.UUID) -> None:
+    org = await session.get(Organization, org_id)
+    if org is not None and bool(getattr(org, "model_pricing_initialized", False)):
+        return
+
+    existing = (
+        await session.execute(
+            select(func.count())
+            .select_from(LlmModelPricingRule)
+            .where(LlmModelPricingRule.org_id == org_id)
+        )
+    ).scalar_one()
+    if int(existing or 0) == 0:
+        for prefix, input_micros, output_micros, discount in default_model_pricing_seed_rows():
+            session.add(
+                LlmModelPricingRule(
+                    org_id=org_id,
+                    prefix=prefix,
+                    input_usd_micros_per_m_original=input_micros,
+                    output_usd_micros_per_m_original=output_micros,
+                    discount=discount,
+                )
+            )
+    if org is not None:
+        org.model_pricing_initialized = True
+    await session.commit()
+    if org is not None:
+        await session.refresh(org)
+
+
+async def get_model_pricing_rule(
+    session: AsyncSession, *, org_id: uuid.UUID, prefix: str
+) -> LlmModelPricingRule | None:
+    normalized = _normalize_model_id(prefix)
+    return (
+        await session.execute(
+            select(LlmModelPricingRule).where(
+                LlmModelPricingRule.org_id == org_id,
+                LlmModelPricingRule.prefix == normalized,
+            )
+        )
+    ).scalars().first()
+
+
+async def create_model_pricing_rule(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    prefix: str,
+    input_usd_per_m_original: str | None,
+    output_usd_per_m_original: str | None,
+    discount: float | str | None,
+) -> LlmModelPricingRule:
+    normalized = _normalize_model_id(prefix)
+    input_micros = _parse_usd_per_m(input_usd_per_m_original)
+    output_micros = _parse_usd_per_m(output_usd_per_m_original)
+    _normalize_price_fields(input_micros, output_micros)
+
+    row = LlmModelPricingRule(
+        org_id=org_id,
+        prefix=normalized,
+        input_usd_micros_per_m_original=input_micros,
+        output_usd_micros_per_m_original=output_micros,
+        discount=_parse_discount(discount),
+    )
+    session.add(row)
+    try:
+        await session.commit()
+    except IntegrityError as e:
+        await session.rollback()
+        raise ValueError("pricing prefix already exists") from e
+    await session.refresh(row)
+    return row
+
+
+async def update_model_pricing_rule(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    current_prefix: str,
+    prefix: str,
+    input_usd_per_m_original: str | None,
+    output_usd_per_m_original: str | None,
+    discount: float | str | None,
+) -> LlmModelPricingRule | None:
+    row = await get_model_pricing_rule(session, org_id=org_id, prefix=current_prefix)
+    if row is None:
+        return None
+
+    normalized = _normalize_model_id(prefix)
+    input_micros = _parse_usd_per_m(input_usd_per_m_original)
+    output_micros = _parse_usd_per_m(output_usd_per_m_original)
+    _normalize_price_fields(input_micros, output_micros)
+
+    row.prefix = normalized
+    row.input_usd_micros_per_m_original = input_micros
+    row.output_usd_micros_per_m_original = output_micros
+    row.discount = _parse_discount(discount)
+
+    try:
+        await session.commit()
+    except IntegrityError as e:
+        await session.rollback()
+        raise ValueError("pricing prefix already exists") from e
+    await session.refresh(row)
+    return row
+
+
+async def delete_model_pricing_rule(session: AsyncSession, *, org_id: uuid.UUID, prefix: str) -> bool:
+    row = await get_model_pricing_rule(session, org_id=org_id, prefix=prefix)
+    if row is None:
+        return False
+    await session.delete(row)
+    await session.commit()
+    return True
+
+
+async def get_price_detail_for_model(
+    session: AsyncSession, *, org_id: uuid.UUID, model_id: str
+) -> tuple[int | None, int | None, int | None, int | None, float | None]:
+    return price_detail_for_model_from_rules(
+        model_id,
+        await list_model_pricing_rules(session, org_id=org_id),
+    )
+
+
 async def fetch_models_for_channel(channel: LlmChannel) -> set[str]:
     url = f"{channel.base_url.rstrip('/')}/models"
     headers = {"authorization": f"Bearer {channel.api_key}"}
@@ -303,25 +537,26 @@ async def list_admin_models(
         await session.execute(select(LlmModelConfig).where(LlmModelConfig.org_id == org_id))
     ).scalars().all()
     config_map = {c.model_id: c for c in configs}
+    pricing_rules = await list_model_pricing_rules(session, org_id=org_id)
 
     all_ids = set(available_counts.keys()) | set(config_map.keys())
     items: list[dict] = []
     for mid in sorted(all_ids):
         cfg = config_map.get(mid)
         enabled = True if not cfg else bool(cfg.enabled)
-        eff_in_default, eff_out_default, orig_in_default, orig_out_default, discount = default_price_detail_for_model(
-            mid
+        eff_in_rule, eff_out_rule, orig_in_rule, orig_out_rule, discount = price_detail_for_model_from_rules(
+            mid, pricing_rules
         )
 
         input_from_cfg = bool(cfg and cfg.input_usd_micros_per_m is not None)
         output_from_cfg = bool(cfg and cfg.output_usd_micros_per_m is not None)
 
-        input_micros = cfg.input_usd_micros_per_m if input_from_cfg else eff_in_default
-        output_micros = cfg.output_usd_micros_per_m if output_from_cfg else eff_out_default
+        input_micros = cfg.input_usd_micros_per_m if input_from_cfg else eff_in_rule
+        output_micros = cfg.output_usd_micros_per_m if output_from_cfg else eff_out_rule
 
         show_discount = bool(discount is not None and discount < 1)
-        input_orig = orig_in_default if (show_discount and not input_from_cfg) else None
-        output_orig = orig_out_default if (show_discount and not output_from_cfg) else None
+        input_orig = orig_in_rule if (show_discount and not input_from_cfg) else None
+        output_orig = orig_out_rule if (show_discount and not output_from_cfg) else None
         discount_out = float(discount) if (show_discount and (input_orig is not None or output_orig is not None)) else None
         items.append(
             {
@@ -363,23 +598,24 @@ async def list_user_models(
         if include_availability
         else {}
     )
+    pricing_rules = await list_model_pricing_rules(session, org_id=org_id)
 
     items: list[dict] = []
     for mid in model_ids:
         cfg = config_map.get(mid)
-        eff_in_default, eff_out_default, orig_in_default, orig_out_default, discount = default_price_detail_for_model(
-            mid
+        eff_in_rule, eff_out_rule, orig_in_rule, orig_out_rule, discount = price_detail_for_model_from_rules(
+            mid, pricing_rules
         )
 
         input_from_cfg = bool(cfg and cfg.input_usd_micros_per_m is not None)
         output_from_cfg = bool(cfg and cfg.output_usd_micros_per_m is not None)
 
-        input_micros = cfg.input_usd_micros_per_m if input_from_cfg else eff_in_default
-        output_micros = cfg.output_usd_micros_per_m if output_from_cfg else eff_out_default
+        input_micros = cfg.input_usd_micros_per_m if input_from_cfg else eff_in_rule
+        output_micros = cfg.output_usd_micros_per_m if output_from_cfg else eff_out_rule
 
         show_discount = bool(discount is not None and discount < 1)
-        input_orig = orig_in_default if (show_discount and not input_from_cfg) else None
-        output_orig = orig_out_default if (show_discount and not output_from_cfg) else None
+        input_orig = orig_in_rule if (show_discount and not input_from_cfg) else None
+        output_orig = orig_out_rule if (show_discount and not output_from_cfg) else None
         discount_out = float(discount) if (show_discount and (input_orig is not None or output_orig is not None)) else None
 
         items.append(

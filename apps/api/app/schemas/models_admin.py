@@ -25,3 +25,32 @@ class AdminModelUpdateRequest(BaseModel):
 
 class AdminModelUpdateResponse(BaseModel):
     item: AdminModelItem
+
+
+class AdminModelPricingItem(BaseModel):
+    prefix: str
+    input_usd_per_m: str | None = Field(default=None, alias="inputUsdPerM")
+    output_usd_per_m: str | None = Field(default=None, alias="outputUsdPerM")
+    input_usd_per_m_original: str | None = Field(default=None, alias="inputUsdPerMOriginal")
+    output_usd_per_m_original: str | None = Field(default=None, alias="outputUsdPerMOriginal")
+    discount: float | None = None
+
+
+class AdminModelPricingListResponse(BaseModel):
+    items: list[AdminModelPricingItem]
+
+
+class AdminModelPricingUpsertRequest(BaseModel):
+    prefix: str
+    input_usd_per_m_original: str | None = Field(default=None, alias="inputUsdPerMOriginal")
+    output_usd_per_m_original: str | None = Field(default=None, alias="outputUsdPerMOriginal")
+    discount: float | None = None
+
+
+class AdminModelPricingUpdateResponse(BaseModel):
+    item: AdminModelPricingItem
+
+
+class AdminModelPricingDeleteResponse(BaseModel):
+    ok: bool
+    prefix: str

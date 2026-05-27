@@ -30,14 +30,16 @@ class UpstreamTimeoutTests(unittest.TestCase):
         self.assertEqual(timeout.write, 123.0)
         self.assertEqual(timeout.pool, 123.0)
 
-    def test_llm_upstream_timeout_is_clamped_to_positive_value(self) -> None:
+    def test_llm_upstream_timeout_can_be_disabled(self) -> None:
         settings.llm_upstream_timeout_seconds = 0
 
         timeout = _llm_upstream_timeout()
 
-        self.assertEqual(_llm_upstream_timeout_seconds(), 1.0)
-        self.assertEqual(timeout.connect, 1.0)
-        self.assertEqual(timeout.read, 1.0)
+        self.assertIsNone(_llm_upstream_timeout_seconds())
+        self.assertEqual(timeout.connect, 10.0)
+        self.assertIsNone(timeout.read)
+        self.assertIsNone(timeout.write)
+        self.assertIsNone(timeout.pool)
 
     def test_translate_read_timeout_to_gateway_timeout(self) -> None:
         settings.llm_upstream_timeout_seconds = 300
@@ -46,6 +48,14 @@ class UpstreamTimeoutTests(unittest.TestCase):
 
         self.assertEqual(error.status_code, 504)
         self.assertEqual(error.detail, "upstream read timeout after 300s")
+
+    def test_translate_read_timeout_when_timeout_is_disabled(self) -> None:
+        settings.llm_upstream_timeout_seconds = 0
+
+        error = _translate_upstream_http_error(httpx.ReadTimeout("timed out"))
+
+        self.assertEqual(error.status_code, 504)
+        self.assertEqual(error.detail, "upstream read timeout")
 
     def test_translate_connect_error_to_service_unavailable(self) -> None:
         error = _translate_upstream_http_error(httpx.ConnectError("connect failed"))

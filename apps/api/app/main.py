@@ -16,6 +16,7 @@ from app.db import SessionLocal, engine
 from app.models.base import Base
 from app.storage.announcements_db import ensure_seed_announcements
 from app.storage.analytics_outbox import run_dataocean_outbox_worker
+from app.storage.models_db import ensure_default_model_pricing_rules
 from app.storage.orgs_db import ensure_default_org, ensure_membership
 from app.storage.referrals_db import confirm_due_referral_bonuses
 
@@ -625,6 +626,102 @@ def create_app() -> FastAPI:
                 "ALTER TABLE IF EXISTS organizations "
                 "ALTER COLUMN billing_topup_enabled SET NOT NULL"
             )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS organizations "
+                "ADD COLUMN IF NOT EXISTS billing_payment_card_enabled boolean"
+            )
+            await conn.exec_driver_sql(
+                "UPDATE organizations SET billing_payment_card_enabled = true "
+                "WHERE billing_payment_card_enabled IS NULL"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS organizations "
+                "ALTER COLUMN billing_payment_card_enabled SET DEFAULT true"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS organizations "
+                "ALTER COLUMN billing_payment_card_enabled SET NOT NULL"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS organizations "
+                "ADD COLUMN IF NOT EXISTS billing_payment_alipay_enabled boolean"
+            )
+            await conn.exec_driver_sql(
+                "UPDATE organizations SET billing_payment_alipay_enabled = true "
+                "WHERE billing_payment_alipay_enabled IS NULL"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS organizations "
+                "ALTER COLUMN billing_payment_alipay_enabled SET DEFAULT true"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS organizations "
+                "ALTER COLUMN billing_payment_alipay_enabled SET NOT NULL"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS organizations "
+                "ADD COLUMN IF NOT EXISTS billing_payment_wxpay_enabled boolean"
+            )
+            await conn.exec_driver_sql(
+                "UPDATE organizations SET billing_payment_wxpay_enabled = true "
+                "WHERE billing_payment_wxpay_enabled IS NULL"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS organizations "
+                "ALTER COLUMN billing_payment_wxpay_enabled SET DEFAULT true"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS organizations "
+                "ALTER COLUMN billing_payment_wxpay_enabled SET NOT NULL"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS organizations "
+                "ADD COLUMN IF NOT EXISTS new_user_trial_enabled boolean"
+            )
+            await conn.exec_driver_sql(
+                "UPDATE organizations SET new_user_trial_enabled = false "
+                "WHERE new_user_trial_enabled IS NULL"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS organizations "
+                "ALTER COLUMN new_user_trial_enabled SET DEFAULT false"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS organizations "
+                "ALTER COLUMN new_user_trial_enabled SET NOT NULL"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS organizations "
+                "ADD COLUMN IF NOT EXISTS new_user_trial_balance_usd_cents integer"
+            )
+            await conn.exec_driver_sql(
+                "UPDATE organizations SET new_user_trial_balance_usd_cents = 0 "
+                "WHERE new_user_trial_balance_usd_cents IS NULL"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS organizations "
+                "ALTER COLUMN new_user_trial_balance_usd_cents SET DEFAULT 0"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS organizations "
+                "ALTER COLUMN new_user_trial_balance_usd_cents SET NOT NULL"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS organizations "
+                "ADD COLUMN IF NOT EXISTS model_pricing_initialized boolean"
+            )
+            await conn.exec_driver_sql(
+                "UPDATE organizations SET model_pricing_initialized = false "
+                "WHERE model_pricing_initialized IS NULL"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS organizations "
+                "ALTER COLUMN model_pricing_initialized SET DEFAULT false"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS organizations "
+                "ALTER COLUMN model_pricing_initialized SET NOT NULL"
+            )
 
             await conn.exec_driver_sql(
                 "ALTER TABLE IF EXISTS billing_topups "
@@ -774,6 +871,7 @@ def create_app() -> FastAPI:
         # Bootstrap the default org and backfill memberships for existing users.
         async with SessionLocal() as session:
             org = await ensure_default_org(session)
+            await ensure_default_model_pricing_rules(session, org_id=org.id)
             from sqlalchemy import select
             from app.models.user import User
             from app.models.membership import Membership
