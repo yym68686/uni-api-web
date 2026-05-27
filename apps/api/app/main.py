@@ -34,6 +34,21 @@ _CREATE_INDEX_IF_MISSING_RE = re.compile(
     r"^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s+([a-zA-Z_][a-zA-Z0-9_]*)\b",
     re.IGNORECASE,
 )
+_ALTER_COLUMN_SET_DEFAULT_RE = re.compile(
+    r"^\s*ALTER\s+TABLE\s+IF\s+EXISTS\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+"
+    r"ALTER\s+COLUMN\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+SET\s+DEFAULT\s+(.+?)\s*;?\s*$",
+    re.IGNORECASE,
+)
+_ALTER_COLUMN_SET_NOT_NULL_RE = re.compile(
+    r"^\s*ALTER\s+TABLE\s+IF\s+EXISTS\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+"
+    r"ALTER\s+COLUMN\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+SET\s+NOT\s+NULL\s*;?\s*$",
+    re.IGNORECASE,
+)
+_ALTER_COLUMN_TYPE_RE = re.compile(
+    r"^\s*ALTER\s+TABLE\s+IF\s+EXISTS\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+"
+    r"ALTER\s+COLUMN\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+TYPE\s+(.+?)\s*;?\s*$",
+    re.IGNORECASE,
+)
 
 
 class _StartupMigrationConnection:
@@ -47,6 +62,12 @@ class _StartupMigrationConnection:
         if await self._should_skip_add_column(statement):
             return None
         if await self._should_skip_create_index(statement):
+            return None
+        if await self._should_skip_set_default(statement):
+            return None
+        if await self._should_skip_set_not_null(statement):
+            return None
+        if await self._should_skip_alter_type(statement):
             return None
         return await self._conn.exec_driver_sql(statement, *args, **kwargs)
 
@@ -68,6 +89,68 @@ class _StartupMigrationConnection:
         )
         return result.first() is not None
 
+    async def _column_metadata(self, table_name: str, column_name: str) -> Any | None:
+        result = await self._conn.execute(
+            text(
+                "SELECT "
+                "c.data_type, "
+                "c.udt_name, "
+                "c.character_maximum_length, "
+                "c.is_nullable, "
+                "pg_get_expr(d.adbin, d.adrelid) AS column_default "
+                "FROM information_schema.columns c "
+                "JOIN pg_class cls ON cls.relname = c.table_name "
+                "JOIN pg_namespace n ON n.oid = cls.relnamespace "
+                "AND n.nspname = c.table_schema "
+                "LEFT JOIN pg_attribute a ON a.attrelid = cls.oid "
+                "AND a.attname = c.column_name "
+                "AND NOT a.attisdropped "
+                "LEFT JOIN pg_attrdef d ON d.adrelid = cls.oid "
+                "AND d.adnum = a.attnum "
+                "WHERE c.table_schema = current_schema() "
+                "AND c.table_name = :table_name "
+                "AND c.column_name = :column_name "
+                "LIMIT 1"
+            ),
+            {"table_name": table_name, "column_name": column_name},
+        )
+        return result.first()
+
+    async def _should_skip_set_default(self, statement: str) -> bool:
+        match = _ALTER_COLUMN_SET_DEFAULT_RE.match(statement)
+        if match is None:
+            return False
+
+        table_name, column_name, expected_default = match.groups()
+        row = await self._column_metadata(table_name, column_name)
+        if row is None:
+            return False
+
+        current_default = row[4]
+        if current_default is None:
+            return False
+        return _normalize_sql_expression(str(current_default)) == _normalize_sql_expression(
+            expected_default
+        )
+
+    async def _should_skip_set_not_null(self, statement: str) -> bool:
+        match = _ALTER_COLUMN_SET_NOT_NULL_RE.match(statement)
+        if match is None:
+            return False
+
+        table_name, column_name = match.groups()
+        row = await self._column_metadata(table_name, column_name)
+        return row is not None and str(row[3]).upper() == "NO"
+
+    async def _should_skip_alter_type(self, statement: str) -> bool:
+        match = _ALTER_COLUMN_TYPE_RE.match(statement)
+        if match is None:
+            return False
+
+        table_name, column_name, expected_type = match.groups()
+        row = await self._column_metadata(table_name, column_name)
+        return row is not None and _column_type_matches(row, expected_type)
+
     async def _should_skip_create_index(self, statement: str) -> bool:
         match = _CREATE_INDEX_IF_MISSING_RE.match(statement)
         if match is None:
@@ -87,6 +170,53 @@ class _StartupMigrationConnection:
             {"index_name": index_name},
         )
         return result.first() is not None
+
+
+def _normalize_sql_expression(expression: str) -> str:
+    normalized = expression.strip().rstrip(";")
+    while normalized.startswith("(") and normalized.endswith(")"):
+        inner = normalized[1:-1].strip()
+        if not inner:
+            break
+        normalized = inner
+    normalized = re.sub(
+        r"::[a-zA-Z_][a-zA-Z0-9_]*(?:\s+[a-zA-Z_][a-zA-Z0-9_]*)*",
+        "",
+        normalized,
+    )
+    normalized = re.sub(r"\s+", "", normalized)
+    return normalized.lower()
+
+
+def _column_type_matches(row: Any, expected_type: str) -> bool:
+    data_type = str(row[0] or "").lower()
+    udt_name = str(row[1] or "").lower()
+    char_length = row[2]
+    normalized_expected = re.sub(r"\s+", " ", expected_type.strip().lower())
+
+    varchar_match = re.fullmatch(
+        r"(?:character varying|varchar)\s*\(\s*(\d+)\s*\)", normalized_expected
+    )
+    if varchar_match is not None:
+        expected_length = int(varchar_match.group(1))
+        return data_type == "character varying" and int(char_length or 0) == expected_length
+
+    if normalized_expected in {"timestamptz", "timestamp with time zone"}:
+        return data_type == "timestamp with time zone"
+    if normalized_expected in {"timestamp", "timestamp without time zone"}:
+        return data_type == "timestamp without time zone"
+    if normalized_expected in {"bool", "boolean"}:
+        return data_type == "boolean"
+    if normalized_expected in {"int", "integer", "int4"}:
+        return data_type == "integer" or udt_name == "int4"
+    if normalized_expected in {"bigint", "int8"}:
+        return data_type == "bigint" or udt_name == "int8"
+    if normalized_expected == "uuid":
+        return data_type == "uuid" or udt_name == "uuid"
+    if normalized_expected == "text":
+        return data_type == "text"
+
+    return data_type == normalized_expected or udt_name == normalized_expected
 
 
 async def _run_usage_table_maintenance_once() -> None:
