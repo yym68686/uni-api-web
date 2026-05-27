@@ -4,11 +4,13 @@ import * as React from "react";
 import { ReceiptText } from "lucide-react";
 
 import { ClientDateTime } from "@/components/common/client-datetime";
+import { useDisplayCurrency } from "@/components/currency/currency-provider";
 import { useI18n } from "@/components/i18n/i18n-provider";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { formatDisplayCurrencyFixed2 } from "@/lib/currency";
 import type { BillingLedgerItem } from "@/lib/types";
 
 interface BillingTableClientProps {
@@ -29,16 +31,16 @@ function typeLabelKey(type: string) {
 
 export function BillingTableClient({ initialItems, locale, className }: BillingTableClientProps) {
   const { t } = useI18n();
+  const displayCurrency = useDisplayCurrency();
   const items = initialItems;
-  const currencyFormatter = React.useMemo(() => {
-    return new Intl.NumberFormat(locale, {
-      style: "currency",
-      currency: "USD",
-      currencyDisplay: "narrowSymbol",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    });
-  }, [locale]);
+  const formatMoney = React.useCallback(
+    (valueUsd: number) =>
+      formatDisplayCurrencyFixed2(valueUsd, {
+        locale,
+        ...displayCurrency
+      }),
+    [displayCurrency, locale]
+  );
 
   return (
     <Card className={className}>
@@ -87,10 +89,10 @@ export function BillingTableClient({ initialItems, locale, className }: BillingT
                       )}
                     >
                       {delta > 0 ? "+" : ""}
-                      {currencyFormatter.format(delta)}
+                      {formatMoney(delta)}
                     </TableCell>
                     <TableCell className="text-right font-mono tabular-nums">
-                      {currencyFormatter.format(Number(row.balanceUsd ?? 0))}
+                      {formatMoney(Number(row.balanceUsd ?? 0))}
                     </TableCell>
                   </TableRow>
                 );

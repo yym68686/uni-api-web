@@ -17,6 +17,7 @@ const navItems = [
   { href: "/logs", labelKey: "app.logs", icon: ScrollText },
   { href: "/billing", labelKey: "app.billing", icon: CreditCard },
   { href: "/invite", labelKey: "app.invite", icon: Gift },
+  { href: "/settings", labelKey: "app.settings", icon: Settings },
 ] as const satisfies ReadonlyArray<{ href: string; labelKey: MessageKey; icon: LucideIcon }>;
 
 const adminItems = [

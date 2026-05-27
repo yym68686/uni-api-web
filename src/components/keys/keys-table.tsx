@@ -7,7 +7,8 @@ import { toast } from "sonner";
 import { copyText, copyTextFromAsyncSource } from "@/lib/clipboard";
 import type { ApiKeyRevealResponse } from "@/lib/types";
 import type { ApiKeyItem } from "@/lib/types";
-import { formatUsd, formatUsdFixed2 } from "@/lib/format";
+import { useDisplayCurrency } from "@/components/currency/currency-provider";
+import { formatDisplayCurrency, formatDisplayCurrencyFixed2 } from "@/lib/currency";
 import { cn } from "@/lib/utils";
 import { ClientDateTime } from "@/components/common/client-datetime";
 import { Badge } from "@/components/ui/badge";
@@ -33,11 +34,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/components/i18n/i18n-provider";
 
-function formatSpendUsd(value: number) {
-  if (!Number.isFinite(value) || value <= 0) return "$0";
-  return formatUsd(value);
-}
-
 interface KeysTableProps {
   items: ApiKeyItem[];
   fullKeysById?: Record<string, string>;
@@ -60,6 +56,7 @@ export function KeysTable({
   className
 }: KeysTableProps) {
   const { locale, t } = useI18n();
+  const displayCurrency = useDisplayCurrency();
   const [revokingId, setRevokingId] = React.useState<string | null>(null);
   const [deletingId, setDeletingId] = React.useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = React.useState<ApiKeyItem | null>(null);
@@ -195,6 +192,31 @@ export function KeysTable({
     }
   }
 
+  const formatSpend = React.useCallback(
+    (valueUsd: number) => {
+      if (!Number.isFinite(valueUsd) || valueUsd <= 0) {
+        return formatDisplayCurrency(0, {
+          locale,
+          maximumFractionDigits: 0,
+          ...displayCurrency
+        });
+      }
+      return formatDisplayCurrency(valueUsd, {
+        locale,
+        ...displayCurrency
+      });
+    },
+    [displayCurrency, locale]
+  );
+  const formatMoneyFixed2 = React.useCallback(
+    (valueUsd: number) =>
+      formatDisplayCurrencyFixed2(valueUsd, {
+        locale,
+        ...displayCurrency
+      }),
+    [displayCurrency, locale]
+  );
+
   return (
     <TooltipProvider delayDuration={150}>
       <div className={cn("space-y-4", className)}>
@@ -253,12 +275,12 @@ export function KeysTable({
                       <ClientDateTime value={k.lastUsedAt} locale={locale} />
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground font-mono tabular-nums">
-                      {formatSpendUsd(k.spendUsd)}
+                      {formatSpend(k.spendUsd)}
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       {typeof k.spendLimitUsd === "number" && Number.isFinite(k.spendLimitUsd) ? (
                         <span className="font-mono tabular-nums">
-                          {formatUsdFixed2(k.spendLimitUsd, locale)}
+                          {formatMoneyFixed2(k.spendLimitUsd)}
                         </span>
                       ) : (
                         <span className="text-muted-foreground">{t("keys.table.noLimit")}</span>
@@ -429,7 +451,7 @@ export function KeysTable({
                 <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
                   <span>{t("keys.limit.currentSpend")}</span>
                   <span className="font-mono tabular-nums text-foreground">
-                    {formatUsdFixed2(limitTarget.spendUsd, locale)}
+                    {formatMoneyFixed2(limitTarget.spendUsd)}
                   </span>
                 </div>
               </div>

@@ -3,6 +3,7 @@ import { Shield, User } from "lucide-react";
 import { DeleteAccountButton } from "@/components/profile/delete-account-button";
 import { SecurityCard } from "@/components/profile/security-card";
 import { ClientDateTime } from "@/components/common/client-datetime";
+import { MoneyText } from "@/components/currency/money-text";
 import { EmptyState } from "@/components/common/empty-state";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -64,7 +65,9 @@ export default async function ProfilePage() {
               </div>
               <div className="rounded-xl border border-border bg-background/35 p-4">
                 <div className="text-xs text-muted-foreground">{t(locale, "profile.field.balance")}</div>
-                <div className="mt-1 font-mono tabular-nums text-sm text-foreground">{me.balance}</div>
+                <div className="mt-1 font-mono text-sm text-foreground">
+                  <MoneyText valueUsd={me.balance} locale={locale} minimumFractionDigits={2} maximumFractionDigits={2} />
+                </div>
               </div>
               <div className="rounded-xl border border-border bg-background/35 p-4">
                 <div className="text-xs text-muted-foreground">{t(locale, "profile.field.created")}</div>

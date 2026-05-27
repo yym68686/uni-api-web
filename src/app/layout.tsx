@@ -8,6 +8,7 @@ import { Toaster } from "sonner";
 
 import { cn } from "@/lib/utils";
 import {
+  getDisplayCnyPerUsd,
   getAppName,
   getPublicApiBaseUrl,
   getPublicAppBaseUrl
@@ -16,6 +17,7 @@ import { getRequestLocale } from "@/lib/i18n/server";
 import { t } from "@/lib/i18n/messages";
 import { I18nProvider } from "@/components/i18n/i18n-provider";
 import { DataOceanTracker } from "@/components/analytics/dataocean-tracker";
+import { CurrencyProvider } from "@/components/currency/currency-provider";
 
 const THEME_INIT_SCRIPT = `
 (function () {
@@ -66,10 +68,12 @@ interface RootLayoutProps {
 export default async function RootLayout({ children }: RootLayoutProps) {
   const locale = await getRequestLocale();
   const publicApiBaseUrl = getPublicApiBaseUrl();
+  const displayCnyPerUsd = getDisplayCnyPerUsd();
   return (
     <html
       lang={locale}
       data-public-api-base-url={publicApiBaseUrl ?? ""}
+      data-display-cny-per-usd={String(displayCnyPerUsd)}
       className={cn("dark", GeistSans.variable, GeistMono.variable)}
       suppressHydrationWarning
     >
@@ -83,19 +87,21 @@ export default async function RootLayout({ children }: RootLayoutProps) {
         suppressHydrationWarning
       >
         <I18nProvider locale={locale}>
-          <a
-            href="#main"
-            className={cn(
-              "sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100]",
-              "rounded-xl border border-border bg-background/80 px-4 py-2 text-sm text-foreground backdrop-blur",
-              "shadow-[0_0_0_1px_oklch(var(--border)/0.55),0_12px_34px_oklch(var(--background)/0.65)]"
-            )}
-          >
-            {t(locale, "common.skipToContent")}
-          </a>
-          <Toaster theme="dark" richColors closeButton />
-          <DataOceanTracker />
-          {children}
+          <CurrencyProvider initialCnyPerUsd={displayCnyPerUsd}>
+            <a
+              href="#main"
+              className={cn(
+                "sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100]",
+                "rounded-xl border border-border bg-background/80 px-4 py-2 text-sm text-foreground backdrop-blur",
+                "shadow-[0_0_0_1px_oklch(var(--border)/0.55),0_12px_34px_oklch(var(--background)/0.65)]"
+              )}
+            >
+              {t(locale, "common.skipToContent")}
+            </a>
+            <Toaster theme="dark" richColors closeButton />
+            <DataOceanTracker />
+            {children}
+          </CurrencyProvider>
         </I18nProvider>
       </body>
     </html>

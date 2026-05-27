@@ -4,6 +4,7 @@ import * as React from "react";
 import { Loader2, ScrollText } from "lucide-react";
 import { toast } from "sonner";
 
+import { useDisplayCurrency } from "@/components/currency/currency-provider";
 import { CopyableModelId } from "@/components/models/copyable-model-id";
 import { ClientDateTime } from "@/components/common/client-datetime";
 import { EmptyState } from "@/components/common/empty-state";
@@ -12,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { logsListApiPath } from "@/lib/api-paths";
-import { formatUsd } from "@/lib/format";
+import { convertUsdToDisplay, formatDisplayCurrency, type DisplayCurrency } from "@/lib/currency";
 import type { LogItem, LogsListResponse } from "@/lib/types";
 import { useI18n } from "@/components/i18n/i18n-provider";
 import { useSwrLite } from "@/lib/swr-lite";
@@ -39,10 +40,26 @@ function formatTps(value: number | null | undefined) {
   return value.toFixed(1);
 }
 
-function formatCostUsd(value: number) {
-  if (!Number.isFinite(value) || value <= 0) return "$0";
-  if (value < 0.01) return `$${value.toFixed(6)}`;
-  return formatUsd(value);
+interface DisplayCurrencySnapshot {
+  currency: DisplayCurrency;
+  cnyPerUsd: number;
+}
+
+function formatCostUsd(value: number, locale: string, displayCurrency: DisplayCurrencySnapshot) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return formatDisplayCurrency(0, {
+      locale,
+      maximumFractionDigits: 0,
+      ...displayCurrency
+    });
+  }
+  const displayValue = convertUsdToDisplay(value, displayCurrency.currency, displayCurrency.cnyPerUsd);
+  const maxDigits = displayValue < 0.01 ? 6 : 4;
+  return formatDisplayCurrency(value, {
+    locale,
+    maximumFractionDigits: maxDigits,
+    ...displayCurrency
+  });
 }
 
 function ttftVariant(value: number): "success" | "warning" | "destructive" {
@@ -68,6 +85,7 @@ interface LogsTableClientProps {
 
 export function LogsTableClient({ initialItems, pageSize }: LogsTableClientProps) {
   const { locale, t } = useI18n();
+  const displayCurrency = useDisplayCurrency();
   const listKey = logsListApiPath(pageSize, 0);
   const swr = useSwrLite<LogItem[]>(
     listKey,
@@ -194,7 +212,7 @@ export function LogsTableClient({ initialItems, pageSize }: LogsTableClientProps
                     {formatTps(r.tps)}
                   </TableCell>
                   <TableCell className="whitespace-nowrap font-mono tabular-nums text-xs text-muted-foreground">
-                    {formatCostUsd(r.costUsd)}
+                    {formatCostUsd(r.costUsd, locale, displayCurrency)}
                   </TableCell>
                   <TableCell className="whitespace-nowrap font-mono tabular-nums text-xs text-muted-foreground">
                     {r.sourceIp ?? "—"}

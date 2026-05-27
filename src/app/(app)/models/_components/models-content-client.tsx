@@ -3,12 +3,18 @@
 import { Boxes } from "lucide-react";
 import * as React from "react";
 
+import { useDisplayCurrency } from "@/components/currency/currency-provider";
 import { CopyableModelId } from "@/components/models/copyable-model-id";
 import { EmptyState } from "@/components/common/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { API_PATHS } from "@/lib/api-paths";
+import {
+  displayCurrencyCode,
+  formatDisplayUsdPrice,
+  type DisplayCurrency
+} from "@/lib/currency";
 import { formatDiscountPercentOff, formatDiscountZhe } from "@/lib/format";
 import type { Locale } from "@/lib/i18n/messages";
 import { t } from "@/lib/i18n/messages";
@@ -30,11 +36,6 @@ async function fetchModels() {
   if (!res.ok) throw new Error("Request failed");
   if (!isModelsListResponse(json)) throw new Error("Invalid response");
   return json.items;
-}
-
-function formatUsdPerM(value: string | null | undefined) {
-  if (!value) return "—";
-  return `$${value}`;
 }
 
 const AVAILABILITY_24H_BUCKETS = 48;
@@ -81,11 +82,23 @@ function Availability24hBars({ value }: Availability24hBarsProps) {
 }
 
 interface PricePartProps {
+  locale: Locale;
   price: string | null | undefined;
+  displayCurrency: {
+    currency: DisplayCurrency;
+    cnyPerUsd: number;
+  };
 }
 
-function PricePart({ price }: PricePartProps) {
-  return <span className="font-mono tabular-nums text-xs text-foreground">{formatUsdPerM(price)}</span>;
+function PricePart({ locale, price, displayCurrency }: PricePartProps) {
+  return (
+    <span className="font-mono tabular-nums text-xs text-foreground">
+      {formatDisplayUsdPrice(price, {
+        locale,
+        ...displayCurrency
+      })}
+    </span>
+  );
 }
 
 interface PriceSummaryProps {
@@ -93,9 +106,13 @@ interface PriceSummaryProps {
   input: string | null | undefined;
   output: string | null | undefined;
   discount: number | null | undefined;
+  displayCurrency: {
+    currency: DisplayCurrency;
+    cnyPerUsd: number;
+  };
 }
 
-function PriceSummary({ locale, input, output, discount }: PriceSummaryProps) {
+function PriceSummary({ locale, input, output, discount, displayCurrency }: PriceSummaryProps) {
   const hasDiscount = typeof discount === "number" && discount > 0 && discount < 1;
   const pct = hasDiscount ? formatDiscountPercentOff(discount) : null;
   const zhe = hasDiscount ? formatDiscountZhe(discount) : null;
@@ -110,9 +127,9 @@ function PriceSummary({ locale, input, output, discount }: PriceSummaryProps) {
 
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-      <PricePart price={input} />
+      <PricePart locale={locale} price={input} displayCurrency={displayCurrency} />
       <span className="text-xs text-muted-foreground">/</span>
-      <PricePart price={output} />
+      <PricePart locale={locale} price={output} displayCurrency={displayCurrency} />
       {badge ? (
         <Badge variant="success" className="ml-1 rounded-full px-2 py-0 text-[10px]">
           {badge}
@@ -130,6 +147,7 @@ interface ModelsContentClientProps {
 
 export function ModelsContentClient({ locale, initialItems, autoRevalidate = true }: ModelsContentClientProps) {
   const [hydrated, setHydrated] = React.useState(false);
+  const displayCurrency = useDisplayCurrency();
   const { data, mutate } = useSwrLite<ModelsListResponse["items"]>(API_PATHS.models, fetchModels, {
     fallbackData: initialItems ?? undefined,
     revalidateOnFocus: false
@@ -147,6 +165,7 @@ export function ModelsContentClient({ locale, initialItems, autoRevalidate = tru
   if (data === undefined && initialItems === null) return <ModelsContentSkeleton />;
 
   const items = hydrated ? (data ?? initialItems ?? []) : (initialItems ?? []);
+  const currencyLabel = displayCurrencyCode(displayCurrency.currency);
 
   return (
     <Card>
@@ -167,7 +186,7 @@ export function ModelsContentClient({ locale, initialItems, autoRevalidate = tru
             <TableHeader>
               <TableRow>
                 <TableHead>{t(locale, "models.table.model")}</TableHead>
-                <TableHead>{t(locale, "models.table.price")}</TableHead>
+                <TableHead>{t(locale, "models.table.priceDisplay", { currency: currencyLabel })}</TableHead>
                 <TableHead>{t(locale, "models.table.availability24h")}</TableHead>
               </TableRow>
             </TableHeader>
@@ -183,6 +202,7 @@ export function ModelsContentClient({ locale, initialItems, autoRevalidate = tru
                       input={m.inputUsdPerM}
                       output={m.outputUsdPerM}
                       discount={m.discount}
+                      displayCurrency={displayCurrency}
                     />
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">

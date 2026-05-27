@@ -3,9 +3,11 @@
 import * as React from "react";
 import { Activity, CreditCard, KeyRound, Wallet } from "lucide-react";
 
+import { useDisplayCurrency } from "@/components/currency/currency-provider";
 import { StatsCard } from "@/components/app/stats-card";
 import { API_PATHS, usageApiPath } from "@/lib/api-paths";
-import { formatCompactNumber, formatUsd } from "@/lib/format";
+import { formatDisplayCurrency } from "@/lib/currency";
+import { formatCompactNumber } from "@/lib/format";
 import type { Locale } from "@/lib/i18n/messages";
 import { t } from "@/lib/i18n/messages";
 import { getBrowserTimeZone } from "@/lib/timezone";
@@ -90,6 +92,7 @@ export function DashboardKpisClient({
 }: DashboardKpisClientProps) {
   const [hydrated, setHydrated] = React.useState(false);
   const [timeZone, setTimeZone] = React.useState(initialTimeZone);
+  const displayCurrency = useDisplayCurrency();
   const usagePath = React.useMemo(() => usageApiPath(timeZone), [timeZone]);
 
   const usageSwr = useSwrLite<UsageResponse>(usagePath, fetchUsage, {
@@ -140,6 +143,14 @@ export function DashboardKpisClient({
 
   const { requests7d } = buildDaily7d(usage.daily);
   const spendMonthUsd = usage.summary.spendMonthUsd;
+  const formatMoney = React.useCallback(
+    (valueUsd: number) =>
+      formatDisplayCurrency(valueUsd, {
+        locale,
+        ...displayCurrency
+      }),
+    [displayCurrency, locale]
+  );
 
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -152,7 +163,7 @@ export function DashboardKpisClient({
       />
       <StatsCard
         title={t(locale, "dashboard.kpi.remainingCredits")}
-        value={liveRemainingCredits === null ? "—" : formatUsd(liveRemainingCredits)}
+        value={liveRemainingCredits === null ? "—" : formatMoney(liveRemainingCredits)}
         trend={liveRemainingCredits === null ? "connect billing" : "plan: Pro"}
         icon={Wallet}
         iconGradientClassName="from-success/35 to-success/10 text-success"
@@ -166,8 +177,8 @@ export function DashboardKpisClient({
       />
       <StatsCard
         title={t(locale, "dashboard.kpi.spendMonth")}
-        value={formatUsd(spendMonthUsd)}
-        trend={t(locale, "dashboard.kpi.spendToday", { amount: formatUsd(usage.summary.spendTodayUsd) })}
+        value={formatMoney(spendMonthUsd)}
+        trend={t(locale, "dashboard.kpi.spendToday", { amount: formatMoney(usage.summary.spendTodayUsd) })}
         icon={CreditCard}
         iconGradientClassName="from-primary/25 to-muted/10 text-foreground"
       />

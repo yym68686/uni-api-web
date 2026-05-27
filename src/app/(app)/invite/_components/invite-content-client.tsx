@@ -6,10 +6,12 @@ import { toast } from "sonner";
 
 import { API_PATHS } from "@/lib/api-paths";
 import { copyText } from "@/lib/clipboard";
+import { formatDisplayCurrencyFixed2 } from "@/lib/currency";
 import { isInviteSummaryResponse } from "@/lib/invite-summary";
 import type { InviteSummaryResponse } from "@/lib/types";
 import { useSwrLite } from "@/lib/swr-lite";
 import { cn } from "@/lib/utils";
+import { useDisplayCurrency } from "@/components/currency/currency-provider";
 import { useI18n } from "@/components/i18n/i18n-provider";
 import type { MessageKey } from "@/lib/i18n/messages";
 import { StatsCard } from "@/components/app/stats-card";
@@ -62,16 +64,16 @@ interface InviteContentClientProps {
 
 export function InviteContentClient({ initialSummary }: InviteContentClientProps) {
   const { t, locale } = useI18n();
+  const displayCurrency = useDisplayCurrency();
   const [origin, setOrigin] = React.useState<string | null>(null);
-  const currencyFormatter = React.useMemo(() => {
-    return new Intl.NumberFormat(locale, {
-      style: "currency",
-      currency: "USD",
-      currencyDisplay: "narrowSymbol",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    });
-  }, [locale]);
+  const formatMoney = React.useCallback(
+    (valueUsd: number) =>
+      formatDisplayCurrencyFixed2(valueUsd, {
+        locale,
+        ...displayCurrency
+      }),
+    [displayCurrency, locale]
+  );
   const { data } = useSwrLite<InviteSummaryResponse>(API_PATHS.inviteSummary, fetchInviteSummary, {
     fallbackData: initialSummary ?? undefined,
     dedupingIntervalMs: 0,
@@ -143,7 +145,7 @@ export function InviteContentClient({ initialSummary }: InviteContentClientProps
                 </div>
                 <div className="font-mono text-2xl font-semibold tabular-nums text-foreground">
                   {typeof receivedReward.rewardUsd === "number" && Number.isFinite(receivedReward.rewardUsd)
-                    ? currencyFormatter.format(receivedReward.rewardUsd)
+                    ? formatMoney(receivedReward.rewardUsd)
                     : "—"}
                 </div>
               </div>
@@ -262,7 +264,7 @@ export function InviteContentClient({ initialSummary }: InviteContentClientProps
                     </TableCell>
                     <TableCell className="text-right font-mono tabular-nums text-sm">
                       {typeof row.rewardUsd === "number" && Number.isFinite(row.rewardUsd)
-                        ? currencyFormatter.format(row.rewardUsd)
+                        ? formatMoney(row.rewardUsd)
                         : "—"}
                     </TableCell>
                     <TableCell className="text-right font-mono tabular-nums text-xs text-muted-foreground">

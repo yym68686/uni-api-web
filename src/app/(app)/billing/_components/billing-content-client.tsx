@@ -9,6 +9,7 @@ import { toast } from "sonner";
 
 import { StatsCard } from "@/components/app/stats-card";
 import { ClientDateTime } from "@/components/common/client-datetime";
+import { useDisplayCurrency } from "@/components/currency/currency-provider";
 import { useI18n } from "@/components/i18n/i18n-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,7 +17,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { BillingTableClient } from "./billing-table-client";
 import { API_PATHS, billingLedgerListApiPath, billingTopupStatusApiPath } from "@/lib/api-paths";
-import { formatUsdFixed2 } from "@/lib/format";
+import { formatDisplayCurrencyFixed2 } from "@/lib/currency";
 import { isInviteSummaryResponse } from "@/lib/invite-summary";
 import { mutateSwrLite, useSwrLite } from "@/lib/swr-lite";
 import type {
@@ -160,6 +161,7 @@ export function BillingContentClient({
   autoRevalidate = true
 }: BillingContentClientProps) {
   const { t } = useI18n();
+  const displayCurrency = useDisplayCurrency();
   const searchParams = useSearchParams();
 
   const topupRequestIdFromUrl = React.useMemo(() => {
@@ -384,6 +386,14 @@ export function BillingContentClient({
   const items = data ?? initialItems ?? [];
   const currentBalanceUsd = currentBalanceData ?? initialBalance;
   const balanceUsd = balanceOverrideUsd ?? currentBalanceUsd;
+  const formatMoneyFixed2 = React.useCallback(
+    (valueUsd: number) =>
+      formatDisplayCurrencyFixed2(valueUsd, {
+        locale,
+        ...displayCurrency
+      }),
+    [displayCurrency, locale]
+  );
   const pendingReceivedReward =
     inviteSummary?.receivedReward?.status === "pending" ? inviteSummary.receivedReward : null;
 
@@ -415,7 +425,7 @@ export function BillingContentClient({
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatsCard
           title={t("billing.kpi.balance")}
-          value={balanceUsd === null ? "—" : formatUsdFixed2(balanceUsd, locale)}
+          value={balanceUsd === null ? "—" : formatMoneyFixed2(balanceUsd)}
           trend={t("billing.kpi.balanceHint")}
           icon={CreditCard}
           className={cn(topupAvailable ? "lg:col-span-2" : "sm:col-span-2 lg:col-span-4")}
@@ -611,7 +621,7 @@ export function BillingContentClient({
               <Badge variant="warning">{t("invite.status.pending")}</Badge>
               <div className="font-mono text-lg font-semibold tabular-nums text-foreground">
                 {typeof pendingReceivedReward.rewardUsd === "number" && Number.isFinite(pendingReceivedReward.rewardUsd)
-                  ? formatUsdFixed2(pendingReceivedReward.rewardUsd, locale)
+                  ? formatMoneyFixed2(pendingReceivedReward.rewardUsd)
                   : "—"}
               </div>
               {pendingReceivedReward.availableAt ? (
