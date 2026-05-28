@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.balance_ledger_entry import BalanceLedgerEntry
-from app.models.llm_usage_event import LlmUsageEvent
+from app.models.llm_usage_hourly_stat import LlmUsageHourlyStat
 from app.storage.balance_math import remaining_usd_2_from_micros
 
 
@@ -27,11 +27,11 @@ def _micros_to_usd_2(value: int) -> float:
 
 def ledger_spend_micros_at_entry_expr():
     return (
-        select(func.coalesce(func.sum(LlmUsageEvent.cost_usd_micros), 0))
+        select(func.coalesce(func.sum(LlmUsageHourlyStat.cost_usd_micros), 0))
         .where(
-            LlmUsageEvent.org_id == BalanceLedgerEntry.org_id,
-            LlmUsageEvent.user_id == BalanceLedgerEntry.user_id,
-            LlmUsageEvent.created_at <= BalanceLedgerEntry.created_at,
+            LlmUsageHourlyStat.org_id == BalanceLedgerEntry.org_id,
+            LlmUsageHourlyStat.user_id == BalanceLedgerEntry.user_id,
+            LlmUsageHourlyStat.bucket_start <= func.date_trunc("hour", BalanceLedgerEntry.created_at),
         )
         .correlate(BalanceLedgerEntry)
         .scalar_subquery()

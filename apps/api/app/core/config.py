@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://uniapi:uniapi@localhost:5432/uniapi"
     session_ttl_days: int = 7
     llm_upstream_timeout_seconds: int = 0
+    usage_events_retention_days: int = 30
+    usage_hourly_stats_retention_days: int = 366
+    usage_retention_batch_size: int = 50000
+    usage_retention_max_batches: int = 20
 
     google_client_id: str = ""
     google_client_secret: str = ""

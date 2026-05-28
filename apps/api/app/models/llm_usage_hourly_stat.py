@@ -13,6 +13,7 @@ from app.models.base import Base
 class LlmUsageHourlyStat(Base):
     __tablename__ = "llm_usage_hourly_stats"
     __table_args__ = (
+        Index("ix_llm_usage_hourly_org_bucket", "org_id", "bucket_start"),
         Index("ix_llm_usage_hourly_org_user_bucket", "org_id", "user_id", "bucket_start"),
     )
 

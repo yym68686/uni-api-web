@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import logging
 import re
 from contextlib import asynccontextmanager, suppress
@@ -26,6 +27,12 @@ logger = logging.getLogger(__name__)
 
 _STARTUP_MIGRATION_LOCK_ID = 177895882971965
 _USAGE_MAINTENANCE_LOCK_ID = 177895882971966
+_MIN_USAGE_EVENTS_RETENTION_DAYS = 7
+_MIN_USAGE_HOURLY_STATS_RETENTION_DAYS = 30
+_MIN_USAGE_RETENTION_BATCH_SIZE = 1000
+_MAX_USAGE_RETENTION_BATCH_SIZE = 100000
+_MIN_USAGE_RETENTION_MAX_BATCHES = 1
+_MAX_USAGE_RETENTION_MAX_BATCHES = 100
 _ADD_COLUMN_IF_MISSING_RE = re.compile(
     r"^\s*ALTER\s+TABLE\s+IF\s+EXISTS\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+"
     r"ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+([a-zA-Z_][a-zA-Z0-9_]*)\b",
@@ -233,6 +240,25 @@ def _column_type_matches(row: Any, expected_type: str) -> bool:
     return data_type == normalized_expected or udt_name == normalized_expected
 
 
+def _clamp_int(value: int, *, minimum: int, maximum: int) -> int:
+    return min(max(int(value), minimum), maximum)
+
+
+async def _ensure_usage_maintenance_indexes(conn: Any) -> None:
+    await conn.execute(
+        text(
+            "CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_llm_usage_events_created_at "
+            "ON llm_usage_events(created_at)"
+        )
+    )
+    await conn.execute(
+        text(
+            "CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_llm_usage_hourly_org_bucket "
+            "ON llm_usage_hourly_stats(org_id, bucket_start)"
+        )
+    )
+
+
 async def _run_usage_table_maintenance_once() -> None:
     try:
         async with engine.connect() as raw_conn:
@@ -246,6 +272,30 @@ async def _run_usage_table_maintenance_once() -> None:
             if not bool(locked):
                 return
             try:
+                retention_days = max(
+                    int(settings.usage_events_retention_days),
+                    _MIN_USAGE_EVENTS_RETENTION_DAYS,
+                )
+                hourly_retention_days = max(
+                    int(settings.usage_hourly_stats_retention_days),
+                    retention_days,
+                    _MIN_USAGE_HOURLY_STATS_RETENTION_DAYS,
+                )
+                batch_size = _clamp_int(
+                    int(settings.usage_retention_batch_size),
+                    minimum=_MIN_USAGE_RETENTION_BATCH_SIZE,
+                    maximum=_MAX_USAGE_RETENTION_BATCH_SIZE,
+                )
+                max_batches = _clamp_int(
+                    int(settings.usage_retention_max_batches),
+                    minimum=_MIN_USAGE_RETENTION_MAX_BATCHES,
+                    maximum=_MAX_USAGE_RETENTION_MAX_BATCHES,
+                )
+                now = dt.datetime.now(dt.timezone.utc)
+                raw_cutoff = now - dt.timedelta(days=retention_days)
+                hourly_cutoff = now - dt.timedelta(days=hourly_retention_days)
+
+                await _ensure_usage_maintenance_indexes(conn)
                 await conn.execute(
                     text(
                         """
@@ -263,7 +313,7 @@ async def _run_usage_table_maintenance_once() -> None:
                             COALESCE(SUM(total_tokens), 0)::bigint AS total_tokens,
                             COALESCE(SUM(cost_usd_micros), 0)::bigint AS cost_usd_micros
                           FROM llm_usage_events
-                          WHERE created_at >= now() - interval '366 days'
+                          WHERE created_at >= :hourly_cutoff
                             AND created_at < date_trunc('hour', now())
                           GROUP BY org_id, user_id, model_id, date_trunc('hour', created_at)
                         )
@@ -305,7 +355,35 @@ async def _run_usage_table_maintenance_once() -> None:
                           cost_usd_micros = EXCLUDED.cost_usd_micros,
                           updated_at = now()
                         """
+                    ),
+                    {"hourly_cutoff": hourly_cutoff},
+                )
+                deleted_total = 0
+                for _ in range(max_batches):
+                    result = await conn.execute(
+                        text(
+                            """
+                            WITH doomed AS (
+                              SELECT id
+                              FROM llm_usage_events
+                              WHERE created_at < :raw_cutoff
+                              ORDER BY created_at
+                              LIMIT :batch_size
+                            )
+                            DELETE FROM llm_usage_events e
+                            USING doomed
+                            WHERE e.id = doomed.id
+                            """
+                        ),
+                        {"raw_cutoff": raw_cutoff, "batch_size": batch_size},
                     )
+                    deleted = max(int(result.rowcount or 0), 0)
+                    deleted_total += deleted
+                    if deleted < batch_size:
+                        break
+                await conn.execute(
+                    text("DELETE FROM llm_usage_hourly_stats WHERE bucket_start < :hourly_cutoff"),
+                    {"hourly_cutoff": hourly_cutoff},
                 )
                 await conn.execute(text("ANALYZE llm_usage_events"))
                 await conn.execute(text("ANALYZE llm_usage_hourly_stats"))
@@ -323,6 +401,12 @@ async def _run_usage_table_maintenance_once() -> None:
                     modified_tuples = int(stats[1] or 0)
                     if dead_tuples >= 50000 or modified_tuples >= 50000:
                         await conn.execute(text("VACUUM (ANALYZE) llm_usage_events"))
+                if deleted_total > 0:
+                    logger.info(
+                        "usage table maintenance deleted %s raw events older than %s days",
+                        deleted_total,
+                        retention_days,
+                    )
             finally:
                 await conn.execute(
                     text("SELECT pg_advisory_unlock(:lock_id)"),

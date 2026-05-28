@@ -114,6 +114,7 @@ class ResolveLlmProxyContextTests(unittest.IsolatedAsyncioTestCase):
         original_authenticate_api_key = router_module.authenticate_api_key
         original_require_default_membership = router_module._require_default_membership
         original_get_model_config = router_module.get_model_config
+        original_get_price_detail_for_model = router_module.get_price_detail_for_model
         original_pick_channel_for_group = router_module.pick_channel_for_group
 
         async def fake_authenticate_api_key(session_arg: object, *, authorization: str | None):
@@ -132,6 +133,14 @@ class ResolveLlmProxyContextTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(model_id, "gpt-4.1")
             return None
 
+        async def fake_get_price_detail_for_model(
+            session_arg: object, *, org_id: uuid.UUID, model_id: str
+        ):
+            self.assertIs(session_arg, session)
+            self.assertEqual(org_id, membership.org_id)
+            self.assertEqual(model_id, "gpt-4.1")
+            return (None, None, None, None, None)
+
         async def fake_pick_channel_for_group(session_arg: object, *, org_id: uuid.UUID, group_name: str):
             self.assertIs(session_arg, session)
             self.assertEqual(org_id, membership.org_id)
@@ -141,6 +150,7 @@ class ResolveLlmProxyContextTests(unittest.IsolatedAsyncioTestCase):
         router_module.authenticate_api_key = fake_authenticate_api_key
         router_module._require_default_membership = fake_require_default_membership
         router_module.get_model_config = fake_get_model_config
+        router_module.get_price_detail_for_model = fake_get_price_detail_for_model
         router_module.pick_channel_for_group = fake_pick_channel_for_group
         try:
             context = await router_module._resolve_llm_proxy_context(request, session, model_id="gpt-4.1")
@@ -148,6 +158,7 @@ class ResolveLlmProxyContextTests(unittest.IsolatedAsyncioTestCase):
             router_module.authenticate_api_key = original_authenticate_api_key
             router_module._require_default_membership = original_require_default_membership
             router_module.get_model_config = original_get_model_config
+            router_module.get_price_detail_for_model = original_get_price_detail_for_model
             router_module.pick_channel_for_group = original_pick_channel_for_group
 
         self.assertEqual(context.api_key_id, api_key.id)
@@ -188,6 +199,7 @@ class ResolveLlmProxyContextTests(unittest.IsolatedAsyncioTestCase):
         original_authenticate_api_key = router_module.authenticate_api_key
         original_require_default_membership = router_module._require_default_membership
         original_get_model_config = router_module.get_model_config
+        original_get_price_detail_for_model = router_module.get_price_detail_for_model
         original_pick_channel_for_group = router_module.pick_channel_for_group
 
         async def fake_authenticate_api_key(session_arg: object, *, authorization: str | None):
@@ -206,6 +218,14 @@ class ResolveLlmProxyContextTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(model_id, "gpt-4.1")
             return None
 
+        async def fake_get_price_detail_for_model(
+            session_arg: object, *, org_id: uuid.UUID, model_id: str
+        ):
+            self.assertIs(session_arg, session)
+            self.assertEqual(org_id, membership.org_id)
+            self.assertEqual(model_id, "gpt-4.1")
+            return (None, None, None, None, None)
+
         async def fake_pick_channel_for_group(session_arg: object, *, org_id: uuid.UUID, group_name: str):
             self.assertIs(session_arg, session)
             self.assertEqual(org_id, membership.org_id)
@@ -215,6 +235,7 @@ class ResolveLlmProxyContextTests(unittest.IsolatedAsyncioTestCase):
         router_module.authenticate_api_key = fake_authenticate_api_key
         router_module._require_default_membership = fake_require_default_membership
         router_module.get_model_config = fake_get_model_config
+        router_module.get_price_detail_for_model = fake_get_price_detail_for_model
         router_module.pick_channel_for_group = fake_pick_channel_for_group
         try:
             context = await router_module._resolve_llm_proxy_context(request, session, model_id="gpt-4.1")
@@ -222,6 +243,7 @@ class ResolveLlmProxyContextTests(unittest.IsolatedAsyncioTestCase):
             router_module.authenticate_api_key = original_authenticate_api_key
             router_module._require_default_membership = original_require_default_membership
             router_module.get_model_config = original_get_model_config
+            router_module.get_price_detail_for_model = original_get_price_detail_for_model
             router_module.pick_channel_for_group = original_pick_channel_for_group
 
         self.assertEqual(context.source_ip, "198.51.100.42")

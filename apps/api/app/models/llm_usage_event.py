@@ -13,6 +13,7 @@ from app.models.base import Base
 class LlmUsageEvent(Base):
     __tablename__ = "llm_usage_events"
     __table_args__ = (
+        Index("ix_llm_usage_events_created_at", "created_at"),
         Index("ix_llm_usage_events_org_created_at", "org_id", "created_at"),
         Index("ix_llm_usage_events_org_user_created_at", "org_id", "user_id", "created_at"),
         Index("ix_llm_usage_events_org_model_created_at", "org_id", "model_id", "created_at"),

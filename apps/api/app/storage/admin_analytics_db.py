@@ -14,17 +14,26 @@ USD_MICROS = Decimal("1000000")
 
 _ADMIN_ANALYTICS_SQL = text(
     """
-    WITH filtered AS MATERIALIZED (
+    WITH stats_filtered AS MATERIALIZED (
       SELECT
         user_id,
         model_id,
-        ok,
-        status_code,
+        bucket_start,
+        requests,
+        errors,
         input_tokens,
         output_tokens,
         cached_tokens,
         total_tokens,
-        cost_usd_micros,
+        cost_usd_micros
+      FROM llm_usage_hourly_stats
+      WHERE org_id = :org_id
+        AND bucket_start >= date_trunc('hour', CAST(:start_utc AS TIMESTAMP WITH TIME ZONE))
+        AND bucket_start <= CAST(:end_utc AS TIMESTAMP WITH TIME ZONE)
+    ),
+    raw_filtered AS MATERIALIZED (
+      SELECT
+        status_code,
         total_duration_ms,
         ttft_ms,
         created_at
@@ -35,40 +44,63 @@ _ADMIN_ANALYTICS_SQL = text(
     ),
     kpi AS (
       SELECT
-        COUNT(*) AS calls,
-        COALESCE(SUM(CASE WHEN ok IS FALSE THEN 1 ELSE 0 END), 0) AS errors,
-        COALESCE(SUM(input_tokens), 0) AS input_tokens,
-        COALESCE(SUM(output_tokens), 0) AS output_tokens,
-        COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
-        COALESCE(SUM(cost_usd_micros), 0) AS spend_micros,
+        COALESCE(SUM(requests), 0)::bigint AS calls,
+        COALESCE(SUM(errors), 0)::bigint AS errors,
+        COALESCE(SUM(input_tokens), 0)::bigint AS input_tokens,
+        COALESCE(SUM(output_tokens), 0)::bigint AS output_tokens,
+        COALESCE(SUM(cached_tokens), 0)::bigint AS cached_tokens,
+        COALESCE(SUM(cost_usd_micros), 0)::bigint AS spend_micros
+      FROM stats_filtered
+    ),
+    raw_latency_kpi AS (
+      SELECT
         percentile_cont(0.95) WITHIN GROUP (ORDER BY total_duration_ms) AS p95_latency_ms,
         percentile_cont(0.95) WITHIN GROUP (ORDER BY ttft_ms) AS p95_ttft_ms
-      FROM filtered
+      FROM raw_filtered
     ),
     series AS (
       SELECT
-        date_trunc(:granularity, created_at) AS bucket,
-        COUNT(*) AS calls,
-        COALESCE(SUM(CASE WHEN ok IS FALSE THEN 1 ELSE 0 END), 0) AS errors,
-        COALESCE(SUM(input_tokens), 0) AS input_tokens,
-        COALESCE(SUM(output_tokens), 0) AS output_tokens,
-        COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
-        COALESCE(SUM(cost_usd_micros), 0) AS spend_micros,
-        percentile_cont(0.95) WITHIN GROUP (ORDER BY total_duration_ms) AS p95_latency_ms
-      FROM filtered
+        date_trunc(:granularity, bucket_start) AS bucket,
+        COALESCE(SUM(requests), 0)::bigint AS calls,
+        COALESCE(SUM(errors), 0)::bigint AS errors,
+        COALESCE(SUM(input_tokens), 0)::bigint AS input_tokens,
+        COALESCE(SUM(output_tokens), 0)::bigint AS output_tokens,
+        COALESCE(SUM(cached_tokens), 0)::bigint AS cached_tokens,
+        COALESCE(SUM(cost_usd_micros), 0)::bigint AS spend_micros
+      FROM stats_filtered
       GROUP BY bucket
+    ),
+    raw_latency_series AS (
+      SELECT
+        date_trunc(:granularity, created_at) AS bucket,
+        percentile_cont(0.95) WITHIN GROUP (ORDER BY total_duration_ms) AS p95_latency_ms
+      FROM raw_filtered
+      GROUP BY bucket
+    ),
+    series_with_latency AS (
+      SELECT
+        series.bucket AS bucket,
+        series.calls AS calls,
+        series.errors AS errors,
+        series.input_tokens AS input_tokens,
+        series.output_tokens AS output_tokens,
+        series.cached_tokens AS cached_tokens,
+        series.spend_micros AS spend_micros,
+        raw_latency_series.p95_latency_ms AS p95_latency_ms
+      FROM series
+      LEFT JOIN raw_latency_series ON raw_latency_series.bucket = series.bucket
     ),
     users_grouped AS (
       SELECT
-        filtered.user_id AS user_id,
+        stats_filtered.user_id AS user_id,
         users.email AS email,
-        COALESCE(SUM(filtered.cost_usd_micros), 0) AS spend_micros,
-        COUNT(*) AS calls,
-        COALESCE(SUM(CASE WHEN filtered.ok IS FALSE THEN 1 ELSE 0 END), 0) AS errors,
-        COALESCE(SUM(filtered.total_tokens), 0) AS total_tokens
-      FROM filtered
-      JOIN users ON users.id = filtered.user_id
-      GROUP BY filtered.user_id, users.email
+        COALESCE(SUM(stats_filtered.cost_usd_micros), 0)::bigint AS spend_micros,
+        COALESCE(SUM(stats_filtered.requests), 0)::bigint AS calls,
+        COALESCE(SUM(stats_filtered.errors), 0)::bigint AS errors,
+        COALESCE(SUM(stats_filtered.total_tokens), 0)::bigint AS total_tokens
+      FROM stats_filtered
+      JOIN users ON users.id = stats_filtered.user_id
+      GROUP BY stats_filtered.user_id, users.email
     ),
     user_count AS (
       SELECT COUNT(*) AS active_users
@@ -90,11 +122,11 @@ _ADMIN_ANALYTICS_SQL = text(
     models_grouped AS (
       SELECT
         model_id AS model,
-        COALESCE(SUM(cost_usd_micros), 0) AS spend_micros,
-        COUNT(*) AS calls,
-        COALESCE(SUM(CASE WHEN ok IS FALSE THEN 1 ELSE 0 END), 0) AS errors,
-        COALESCE(SUM(total_tokens), 0) AS total_tokens
-      FROM filtered
+        COALESCE(SUM(cost_usd_micros), 0)::bigint AS spend_micros,
+        COALESCE(SUM(requests), 0)::bigint AS calls,
+        COALESCE(SUM(errors), 0)::bigint AS errors,
+        COALESCE(SUM(total_tokens), 0)::bigint AS total_tokens
+      FROM stats_filtered
       WHERE BTRIM(model_id) <> ''
       GROUP BY model_id
     ),
@@ -114,8 +146,8 @@ _ADMIN_ANALYTICS_SQL = text(
       SELECT
         status_code,
         COUNT(*) AS count
-      FROM filtered
-      WHERE ok IS FALSE
+      FROM raw_filtered
+      WHERE status_code >= 400
       GROUP BY status_code
     ),
     top_errors AS (
@@ -142,33 +174,34 @@ _ADMIN_ANALYTICS_SQL = text(
       CAST(NULL AS bigint) AS total_tokens,
       user_count.active_users AS active_users,
       kpi.spend_micros AS spend_micros,
-      kpi.p95_latency_ms AS p95_latency_ms,
-      kpi.p95_ttft_ms AS p95_ttft_ms,
+      raw_latency_kpi.p95_latency_ms AS p95_latency_ms,
+      raw_latency_kpi.p95_ttft_ms AS p95_ttft_ms,
       CAST(NULL AS bigint) AS sort_rank,
       0 AS sort_group
     FROM kpi
     CROSS JOIN user_count
+    CROSS JOIN raw_latency_kpi
     UNION ALL
     SELECT
       'series' AS row_kind,
-      series.bucket AS bucket,
+      series_with_latency.bucket AS bucket,
       CAST(NULL AS uuid) AS user_id,
       CAST(NULL AS varchar) AS email,
       CAST(NULL AS varchar) AS model,
       CAST(NULL AS integer) AS status_code,
-      series.calls AS calls,
-      series.errors AS errors,
-      series.input_tokens AS input_tokens,
-      series.output_tokens AS output_tokens,
-      series.cached_tokens AS cached_tokens,
+      series_with_latency.calls AS calls,
+      series_with_latency.errors AS errors,
+      series_with_latency.input_tokens AS input_tokens,
+      series_with_latency.output_tokens AS output_tokens,
+      series_with_latency.cached_tokens AS cached_tokens,
       CAST(NULL AS bigint) AS total_tokens,
       CAST(NULL AS bigint) AS active_users,
-      series.spend_micros AS spend_micros,
-      series.p95_latency_ms AS p95_latency_ms,
+      series_with_latency.spend_micros AS spend_micros,
+      series_with_latency.p95_latency_ms AS p95_latency_ms,
       CAST(NULL AS double precision) AS p95_ttft_ms,
       CAST(NULL AS bigint) AS sort_rank,
       1 AS sort_group
-    FROM series
+    FROM series_with_latency
     UNION ALL
     SELECT
       'user' AS row_kind,

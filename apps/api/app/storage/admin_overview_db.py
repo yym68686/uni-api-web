@@ -13,6 +13,7 @@ from app.models.balance_ledger_entry import BalanceLedgerEntry
 from app.models.llm_channel import LlmChannel
 from app.models.llm_model_config import LlmModelConfig
 from app.models.llm_usage_event import LlmUsageEvent
+from app.models.llm_usage_hourly_stat import LlmUsageHourlyStat
 from app.models.membership import Membership
 from app.models.organization import Organization
 from app.models.user import User
@@ -31,9 +32,16 @@ def _micros_to_usd_2(value: int) -> float:
     return float((Decimal(int(value)) / USD_MICROS).quantize(Decimal("0.01")))
 
 
+def _hour_start(value: dt.datetime) -> dt.datetime:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=dt.timezone.utc)
+    return value.astimezone(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
+
+
 async def get_admin_overview(session: AsyncSession, *, org_id: uuid.UUID) -> dict[str, Any]:
     now = dt.datetime.now(dt.timezone.utc)
     start_24h = now - dt.timedelta(hours=24)
+    start_24h_bucket = _hour_start(start_24h)
 
     org = await session.get(Organization, org_id)
     registration_enabled = bool(getattr(org, "registration_enabled", True)) if org else True
@@ -69,21 +77,32 @@ async def get_admin_overview(session: AsyncSession, *, org_id: uuid.UUID) -> dic
     usage_row = (
         await session.execute(
             select(
-                func.count(LlmUsageEvent.id).label("calls"),
-                func.count(LlmUsageEvent.id).filter(LlmUsageEvent.ok.is_(False)).label("errors"),
-                func.count(func.distinct(LlmUsageEvent.user_id)).label("active_users"),
-                func.count(func.distinct(LlmUsageEvent.api_key_id))
-                .filter(LlmUsageEvent.api_key_id.is_not(None))
-                .label("active_keys"),
-                func.coalesce(func.sum(LlmUsageEvent.cost_usd_micros), 0).label("spend_micros"),
-            ).where(LlmUsageEvent.org_id == org_id, LlmUsageEvent.created_at >= start_24h)
+                func.coalesce(func.sum(LlmUsageHourlyStat.requests), 0).label("calls"),
+                func.coalesce(func.sum(LlmUsageHourlyStat.errors), 0).label("errors"),
+                func.count(func.distinct(LlmUsageHourlyStat.user_id)).label("active_users"),
+                func.coalesce(func.sum(LlmUsageHourlyStat.cost_usd_micros), 0).label("spend_micros"),
+            ).where(
+                LlmUsageHourlyStat.org_id == org_id,
+                LlmUsageHourlyStat.bucket_start >= start_24h_bucket,
+            )
         )
     ).first()
+
+    active_keys_24h = (
+        await session.execute(
+            select(func.count(func.distinct(LlmUsageEvent.api_key_id)))
+            .where(
+                LlmUsageEvent.org_id == org_id,
+                LlmUsageEvent.created_at >= start_24h,
+                LlmUsageEvent.api_key_id.is_not(None),
+            )
+        )
+    ).scalar_one()
 
     calls_24h = int(getattr(usage_row, "calls", 0) or 0) if usage_row else 0
     errors_24h = int(getattr(usage_row, "errors", 0) or 0) if usage_row else 0
     active_users_24h = int(getattr(usage_row, "active_users", 0) or 0) if usage_row else 0
-    active_keys_24h = int(getattr(usage_row, "active_keys", 0) or 0) if usage_row else 0
+    active_keys_24h = int(active_keys_24h or 0)
     spend_micros_24h = int(getattr(usage_row, "spend_micros", 0) or 0) if usage_row else 0
     spend_usd_24h = _micros_to_usd_2(spend_micros_24h)
 
