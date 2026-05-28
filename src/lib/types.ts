@@ -414,7 +414,16 @@ export interface ModelCatalogItem {
   outputUsdPerMOriginal?: string | null;
   discount?: number | null;
   availability24h?: number[];
+  availability24hBuckets?: ModelAvailabilityBucket[];
   sources: number;
+}
+
+export type ModelAvailabilityStatus = "healthy" | "degraded" | "down" | "unknown";
+
+export interface ModelAvailabilityBucket {
+  total: number;
+  failed: number;
+  status: ModelAvailabilityStatus;
 }
 
 export interface ModelsListResponse {

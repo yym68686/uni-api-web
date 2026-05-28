@@ -18,7 +18,7 @@ import {
 import { formatDiscountPercentOff, formatDiscountZhe } from "@/lib/format";
 import type { Locale } from "@/lib/i18n/messages";
 import { t } from "@/lib/i18n/messages";
-import type { ModelsListResponse } from "@/lib/types";
+import type { ModelAvailabilityBucket, ModelAvailabilityStatus, ModelsListResponse } from "@/lib/types";
 import { useSwrLite } from "@/lib/swr-lite";
 import { ModelsContentSkeleton } from "@/app/(app)/models/_components/models-skeleton";
 import { cn } from "@/lib/utils";
@@ -40,38 +40,98 @@ async function fetchModels() {
 
 const AVAILABILITY_24H_BUCKETS = 48;
 
-function normalizeAvailability24h(value: number[] | null | undefined) {
-  if (!Array.isArray(value) || value.length === 0) return Array.from({ length: AVAILABILITY_24H_BUCKETS }, () => 0);
-  const slots = Array.from({ length: AVAILABILITY_24H_BUCKETS }, (_, idx) => (value[idx] ? 1 : 0));
-  return slots;
+const AVAILABILITY_BUCKET_STATUSES: readonly ModelAvailabilityStatus[] = [
+  "healthy",
+  "degraded",
+  "down",
+  "unknown"
+];
+
+function emptyAvailabilityBucket(): ModelAvailabilityBucket {
+  return { total: 0, failed: 0, status: "unknown" };
 }
 
-function formatAvailabilityPercent(downSlots: number[]) {
-  if (downSlots.length === 0) return "100%";
-  const down = downSlots.reduce((acc, v) => acc + (v ? 1 : 0), 0);
-  const pct = ((downSlots.length - down) / downSlots.length) * 100;
+function normalizeCount(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
+  return Math.max(0, Math.floor(value));
+}
+
+function normalizeAvailabilityStatus(value: ModelAvailabilityStatus | null | undefined): ModelAvailabilityStatus {
+  return value && AVAILABILITY_BUCKET_STATUSES.includes(value) ? value : "unknown";
+}
+
+function normalizeAvailabilityBucket(value: ModelAvailabilityBucket | null | undefined): ModelAvailabilityBucket {
+  if (!value) return emptyAvailabilityBucket();
+  const total = normalizeCount(value.total);
+  const failed = Math.min(normalizeCount(value.failed), total);
+  return {
+    total,
+    failed,
+    status: normalizeAvailabilityStatus(value.status)
+  };
+}
+
+function normalizeAvailability24h(
+  buckets: ModelAvailabilityBucket[] | null | undefined,
+  legacyValue: number[] | null | undefined
+) {
+  if (Array.isArray(buckets) && buckets.length > 0) {
+    return Array.from({ length: AVAILABILITY_24H_BUCKETS }, (_, idx) => normalizeAvailabilityBucket(buckets[idx]));
+  }
+  if (Array.isArray(legacyValue) && legacyValue.length > 0) {
+    return Array.from({ length: AVAILABILITY_24H_BUCKETS }, (_, idx) => {
+      const down = legacyValue[idx] ? 1 : 0;
+      return {
+        total: 1,
+        failed: down,
+        status: down ? "down" : "healthy"
+      } satisfies ModelAvailabilityBucket;
+    });
+  }
+  return Array.from({ length: AVAILABILITY_24H_BUCKETS }, () => emptyAvailabilityBucket());
+}
+
+function formatAvailabilityPercent(buckets: ModelAvailabilityBucket[]) {
+  const sampled = buckets.filter((bucket) => bucket.status !== "unknown" && bucket.total > 0);
+  if (sampled.length === 0) return "100%";
+  const availability = sampled.reduce((acc, bucket) => acc + (bucket.total - bucket.failed) / bucket.total, 0);
+  const pct = (availability / sampled.length) * 100;
   const rounded = Math.round(pct * 10) / 10;
   const normalized = (Number.isFinite(rounded) ? rounded : 100).toFixed(1).replace(/\.0$/, "");
   return `${normalized}%`;
 }
 
-interface Availability24hBarsProps {
-  value: number[] | null | undefined;
+function availabilityBucketClass(status: ModelAvailabilityStatus) {
+  switch (status) {
+    case "down":
+      return "bg-destructive/80";
+    case "degraded":
+      return "bg-warning/80";
+    case "healthy":
+      return "bg-success/70";
+    case "unknown":
+      return "bg-muted-foreground/25";
+  }
 }
 
-function Availability24hBars({ value }: Availability24hBarsProps) {
-  const slots = React.useMemo(() => normalizeAvailability24h(value), [value]);
+interface Availability24hBarsProps {
+  value: number[] | null | undefined;
+  buckets?: ModelAvailabilityBucket[] | null;
+}
+
+function Availability24hBars({ value, buckets }: Availability24hBarsProps) {
+  const slots = React.useMemo(() => normalizeAvailability24h(buckets, value), [buckets, value]);
   const percent = React.useMemo(() => formatAvailabilityPercent(slots), [slots]);
   return (
     <div className="inline-flex items-center gap-2">
       <div className="inline-flex items-center gap-px rounded-md bg-muted/40 p-1">
-        {slots.map((down, idx) => (
+        {slots.map((bucket, idx) => (
           <span
             // `idx` is stable (fixed 48 buckets), and we never reorder.
             key={idx}
             className={cn(
-              "h-3 w-[2px] rounded-[1px] bg-success/70",
-              down ? "bg-destructive/80" : null
+              "h-3 w-[2px] rounded-[1px]",
+              availabilityBucketClass(bucket.status)
             )}
           />
         ))}
@@ -206,7 +266,7 @@ export function ModelsContentClient({ locale, initialItems, autoRevalidate = tru
                     />
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
-                    <Availability24hBars value={m.availability24h} />
+                    <Availability24hBars value={m.availability24h} buckets={m.availability24hBuckets} />
                   </TableCell>
                 </TableRow>
               ))}

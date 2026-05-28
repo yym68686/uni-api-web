@@ -6,9 +6,10 @@ import json
 import uuid
 from decimal import Decimal, InvalidOperation, ROUND_DOWN
 from pathlib import Path
+from typing import Literal, TypedDict
 
 import httpx
-from sqlalchemy import Integer, cast, func, select
+from sqlalchemy import Integer, case, cast, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -246,11 +247,53 @@ def price_detail_for_model_from_rules(
 
 AVAILABILITY_24H_BUCKETS = 48
 AVAILABILITY_24H_BUCKET_SECONDS = 30 * 60
+MODEL_AVAILABILITY_FAILURE_STATUS_MIN = 500
+MODEL_AVAILABILITY_MIN_BUCKET_REQUESTS = 5
+MODEL_AVAILABILITY_DEGRADED_RATE = 0.05
+MODEL_AVAILABILITY_DOWN_RATE = 0.2
+
+ModelAvailabilityStatus = Literal["healthy", "degraded", "down", "unknown"]
+
+
+class ModelAvailabilityBucket(TypedDict):
+    total: int
+    failed: int
+    status: ModelAvailabilityStatus
+
+
+def _model_availability_relevant_filter():
+    return (LlmUsageEvent.status_code < 400) | (
+        LlmUsageEvent.status_code >= MODEL_AVAILABILITY_FAILURE_STATUS_MIN
+    )
+
+
+def model_availability_bucket(total: int, failed: int) -> ModelAvailabilityBucket:
+    total_count = max(0, int(total))
+    failed_count = min(max(0, int(failed)), total_count)
+    if total_count < MODEL_AVAILABILITY_MIN_BUCKET_REQUESTS:
+        status: ModelAvailabilityStatus = "unknown"
+    else:
+        failure_rate = failed_count / total_count
+        if failure_rate >= MODEL_AVAILABILITY_DOWN_RATE:
+            status = "down"
+        elif failure_rate >= MODEL_AVAILABILITY_DEGRADED_RATE:
+            status = "degraded"
+        else:
+            status = "healthy"
+    return {"total": total_count, "failed": failed_count, "status": status}
+
+
+def _empty_availability_24h_buckets() -> list[ModelAvailabilityBucket]:
+    return [model_availability_bucket(0, 0) for _ in range(AVAILABILITY_24H_BUCKETS)]
+
+
+def _availability_legacy_slots(buckets: list[ModelAvailabilityBucket]) -> list[int]:
+    return [1 if bucket["status"] == "down" else 0 for bucket in buckets]
 
 
 async def fetch_model_availability_24h(
     session: AsyncSession, *, org_id: uuid.UUID, model_ids: list[str]
-) -> dict[str, list[int]]:
+) -> dict[str, list[ModelAvailabilityBucket]]:
     if not model_ids:
         return {}
     now = dt.datetime.now(dt.timezone.utc)
@@ -264,25 +307,34 @@ async def fetch_model_availability_24h(
         Integer,
     )
 
-    down_filter = (LlmUsageEvent.status_code >= 500) | (
-        LlmUsageEvent.status_code.in_([401, 403, 408, 429])
-    )
+    total_count_expr = func.count().label("total_count")
+    failed_count_expr = func.coalesce(
+        func.sum(
+            case(
+                (LlmUsageEvent.status_code >= MODEL_AVAILABILITY_FAILURE_STATUS_MIN, 1),
+                else_=0,
+            )
+        ),
+        0,
+    ).label("failed_count")
 
     rows = (
         await session.execute(
-            select(LlmUsageEvent.model_id, bucket_expr)
+            select(LlmUsageEvent.model_id, bucket_expr, total_count_expr, failed_count_expr)
             .where(
                 LlmUsageEvent.org_id == org_id,
                 LlmUsageEvent.created_at >= start,
                 LlmUsageEvent.model_id.in_(model_ids),
-                down_filter,
+                _model_availability_relevant_filter(),
             )
             .group_by(LlmUsageEvent.model_id, bucket_expr)
         )
     ).all()
 
-    availability: dict[str, list[int]] = {mid: [0] * AVAILABILITY_24H_BUCKETS for mid in model_ids}
-    for mid, bucket in rows:
+    availability: dict[str, list[ModelAvailabilityBucket]] = {
+        mid: _empty_availability_24h_buckets() for mid in model_ids
+    }
+    for mid, bucket, total_count, failed_count in rows:
         model = str(mid)
         idx = int(bucket) if bucket is not None else None
         if idx is None or idx < 0:
@@ -291,9 +343,9 @@ async def fetch_model_availability_24h(
             idx = AVAILABILITY_24H_BUCKETS - 1
         slots = availability.get(model)
         if slots is None:
-            slots = [0] * AVAILABILITY_24H_BUCKETS
+            slots = _empty_availability_24h_buckets()
             availability[model] = slots
-        slots[idx] = 1
+        slots[idx] = model_availability_bucket(int(total_count or 0), int(failed_count or 0))
     return availability
 
 
@@ -617,6 +669,7 @@ async def list_user_models(
         input_orig = orig_in_rule if (show_discount and not input_from_cfg) else None
         output_orig = orig_out_rule if (show_discount and not output_from_cfg) else None
         discount_out = float(discount) if (show_discount and (input_orig is not None or output_orig is not None)) else None
+        availability_buckets = availability_map.get(mid, _empty_availability_24h_buckets())
 
         items.append(
             {
@@ -626,7 +679,8 @@ async def list_user_models(
                 "inputUsdPerMOriginal": _micros_to_str(input_orig),
                 "outputUsdPerMOriginal": _micros_to_str(output_orig),
                 "discount": discount_out,
-                "availability24h": availability_map.get(mid, [0] * AVAILABILITY_24H_BUCKETS),
+                "availability24h": _availability_legacy_slots(availability_buckets),
+                "availability24hBuckets": availability_buckets,
                 "sources": int(available_counts.get(mid, 0)),
             }
         )

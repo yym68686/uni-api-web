@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 import time
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
+
+
+class ModelAvailabilityBucket(BaseModel):
+    total: int = 0
+    failed: int = 0
+    status: Literal["healthy", "degraded", "down", "unknown"] = "unknown"
 
 
 class ModelCatalogItem(BaseModel):
@@ -15,6 +22,9 @@ class ModelCatalogItem(BaseModel):
     output_usd_per_m_original: str | None = Field(default=None, alias="outputUsdPerMOriginal")
     discount: float | None = Field(default=None, alias="discount")
     availability_24h: list[int] = Field(default_factory=list, alias="availability24h")
+    availability_24h_buckets: list[ModelAvailabilityBucket] = Field(
+        default_factory=list, alias="availability24hBuckets"
+    )
     sources: int = 0
 
 
