@@ -38,13 +38,14 @@ async function fetchInviteSummary() {
 
 function statusVariant(status: string) {
   if (status === "confirmed") return "success";
-  if (status === "pending") return "warning";
+  if (status === "pending" || status === "pending_review") return "warning";
   if (status === "blocked" || status === "reversed") return "destructive";
   return "secondary";
 }
 
 function statusLabelKey(status: string): MessageKey {
   if (status === "pending") return "invite.status.pending";
+  if (status === "pending_review") return "invite.status.pendingReview";
   if (status === "confirmed") return "invite.status.confirmed";
   if (status === "blocked") return "invite.status.blocked";
   if (status === "reversed") return "invite.status.reversed";
@@ -53,6 +54,7 @@ function statusLabelKey(status: string): MessageKey {
 
 function receivedRewardDescKey(status: string): MessageKey {
   if (status === "confirmed") return "invite.received.desc.confirmed";
+  if (status === "pending_review") return "invite.received.desc.pendingReview";
   if (status === "blocked") return "invite.received.desc.blocked";
   if (status === "reversed") return "invite.received.desc.reversed";
   return "invite.received.desc.pending";
@@ -108,13 +110,17 @@ export function InviteContentClient({ initialSummary }: InviteContentClientProps
       : "—";
   const conversionLabel = t("invite.kpi.conversion", { rate: conversionRate });
   const receivedReward = summary.receivedReward ?? null;
+  const receivedRewardIsOpen =
+    receivedReward?.status === "pending" || receivedReward?.status === "pending_review";
   const receivedRewardTimeValue =
-    receivedReward?.status === "pending"
+    receivedRewardIsOpen
       ? receivedReward.availableAt
       : receivedReward?.confirmedAt;
   const receivedRewardTimeLabel =
-    receivedReward?.status === "pending"
-      ? t("invite.received.availableAt")
+    receivedReward?.status === "pending_review"
+      ? t("invite.received.reviewAt")
+      : receivedReward?.status === "pending"
+        ? t("invite.received.availableAt")
       : receivedReward?.status === "confirmed"
         ? t("invite.received.confirmedAt")
         : null;
@@ -258,7 +264,7 @@ export function InviteContentClient({ initialSummary }: InviteContentClientProps
                   <TableRow key={row.id} className={cn("uai-cv-auto", "hover:bg-muted/50")}>
                     <TableCell className="whitespace-nowrap font-mono text-xs text-foreground">{row.email}</TableCell>
                     <TableCell>
-                      <Badge variant={statusVariant(row.rewardStatus)} className="capitalize">
+                      <Badge variant={statusVariant(row.rewardStatus)}>
                         {t(statusLabelKey(row.rewardStatus))}
                       </Badge>
                     </TableCell>

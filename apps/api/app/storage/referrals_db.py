@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import datetime as dt
+import ipaddress
 import uuid
+from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.billing_topup import BillingTopup
@@ -16,6 +18,49 @@ from app.storage.billing_db import stage_balance_adjustment_ledger_entry
 REFERRAL_RATE = Decimal("0.25")
 REFERRAL_CAP_USD_CENTS = 10_000
 REFERRAL_PENDING_HOURS = 72
+REFERRAL_REVIEW_HOURS = 168
+REFERRAL_REVIEW_SCORE = 50
+REFERRAL_BLOCK_SCORE = 90
+REFERRAL_FAST_TOPUP_MINUTES = 60
+REFERRAL_SMALL_TOPUP_UNITS = 10
+REFERRAL_REVIEW_MIN_SPEND_RATIO = Decimal("0.20")
+USD_MICROS_PER_CREDIT = 1_000_000
+
+_CLOUDFLARE_EDGE_NETWORKS = tuple(
+    ipaddress.ip_network(raw)
+    for raw in (
+        "173.245.48.0/20",
+        "103.21.244.0/22",
+        "103.22.200.0/22",
+        "103.31.4.0/22",
+        "141.101.64.0/18",
+        "108.162.192.0/18",
+        "190.93.240.0/20",
+        "188.114.96.0/20",
+        "197.234.240.0/22",
+        "198.41.128.0/17",
+        "162.158.0.0/15",
+        "104.16.0.0/13",
+        "104.24.0.0/14",
+        "172.64.0.0/13",
+        "131.0.72.0/22",
+    )
+)
+
+
+@dataclass(frozen=True)
+class ReferralRiskSignal:
+    code: str
+    score: int
+    severity: str
+
+
+@dataclass(frozen=True)
+class ReferralRiskDecision:
+    status: str
+    blocked_reason: str | None
+    score: int
+    evidence: dict[str, object]
 
 
 def _dt_iso(value: dt.datetime) -> str:
@@ -36,6 +81,73 @@ def _normalize_token(value: str | None, *, max_len: int) -> str | None:
     if v == "":
         return None
     return v[:max_len]
+
+
+def _normalize_high_confidence_ip(value: str | None) -> str | None:
+    raw = _normalize_token(value, max_len=64)
+    if raw is None:
+        return None
+    try:
+        parsed = ipaddress.ip_address(raw)
+    except ValueError:
+        return None
+    if (
+        parsed.is_loopback
+        or parsed.is_private
+        or parsed.is_link_local
+        or parsed.is_multicast
+        or parsed.is_reserved
+        or parsed.is_unspecified
+    ):
+        return None
+    if any(parsed in network for network in _CLOUDFLARE_EDGE_NETWORKS):
+        return None
+    return str(parsed)
+
+
+def _event_timestamp(value: object) -> dt.datetime | None:
+    return value if isinstance(value, dt.datetime) else None
+
+
+def _topup_reference_at(topup: BillingTopup) -> dt.datetime | None:
+    return (
+        _event_timestamp(getattr(topup, "completed_at", None))
+        or _event_timestamp(getattr(topup, "updated_at", None))
+        or _event_timestamp(getattr(topup, "created_at", None))
+    )
+
+
+def _minutes_between(start: dt.datetime | None, end: dt.datetime | None) -> float | None:
+    if start is None or end is None:
+        return None
+    delta = end - start
+    return max(delta.total_seconds() / 60, 0.0)
+
+
+def _signals_to_evidence(
+    *,
+    signals: list[ReferralRiskSignal],
+    score: int,
+    decision: str,
+    include_usage_review: bool,
+) -> dict[str, object]:
+    return {
+        "version": 1,
+        "decision": decision,
+        "score": int(score),
+        "signals": [
+            {"code": signal.code, "score": int(signal.score), "severity": signal.severity}
+            for signal in signals
+        ],
+        "thresholds": {
+            "reviewScore": REFERRAL_REVIEW_SCORE,
+            "blockScore": REFERRAL_BLOCK_SCORE,
+            "pendingHours": REFERRAL_PENDING_HOURS,
+            "reviewHours": REFERRAL_REVIEW_HOURS,
+            "reviewMinSpendRatio": str(REFERRAL_REVIEW_MIN_SPEND_RATIO),
+        },
+        "includeUsageReview": bool(include_usage_review),
+    }
 
 
 def compute_referral_bonus_usd_cents(units: int) -> int:
@@ -62,12 +174,13 @@ def referral_bonus_event_to_received_reward(event: ReferralBonusEvent) -> dict[s
 
     status = str(getattr(event, "status", "") or "none")
     reward_usd: float | None = None
-    if status in {"pending", "confirmed"}:
+    if status in {"pending", "pending_review", "confirmed"}:
         reward_usd = _bonus_cents_to_usd_2(int(getattr(event, "bonus_usd_cents", 0) or 0))
 
     available_at: str | None = None
-    if status == "pending":
-        available_at = _dt_iso(created_at + dt.timedelta(hours=REFERRAL_PENDING_HOURS))
+    if status in {"pending", "pending_review"}:
+        hours = REFERRAL_REVIEW_HOURS if status == "pending_review" else REFERRAL_PENDING_HOURS
+        available_at = _dt_iso(created_at + dt.timedelta(hours=hours))
 
     confirmed_at = getattr(event, "confirmed_at", None)
     return {
@@ -84,10 +197,19 @@ async def _load_locked_user(session: AsyncSession, *, user_id: uuid.UUID) -> Use
     return await session.get(User, user_id, populate_existing=True, with_for_update=True)
 
 
-def _mark_referral_event_blocked(event: ReferralBonusEvent, *, reason: str, ts: dt.datetime) -> None:
+def _mark_referral_event_blocked(
+    event: ReferralBonusEvent,
+    *,
+    reason: str,
+    ts: dt.datetime,
+    risk_decision: ReferralRiskDecision | None = None,
+) -> None:
     event.status = "blocked"
     event.blocked_reason = event.blocked_reason or reason
     event.reversed_at = ts
+    if risk_decision is not None:
+        event.risk_score = risk_decision.score
+        event.risk_evidence = risk_decision.evidence
 
 
 def _stage_referral_bonus_credit(
@@ -153,6 +275,24 @@ async def _confirm_pending_referral_bonus_event(
         _mark_referral_event_blocked(event, reason="missing_invitee", ts=ts)
         return False
 
+    if event.status == "pending_review":
+        risk_decision = evaluate_referral_risk(
+            inviter=inviter,
+            invitee=invitee,
+            topup=topup,
+            include_usage_review=True,
+        )
+        event.risk_score = risk_decision.score
+        event.risk_evidence = risk_decision.evidence
+        if risk_decision.blocked_reason or risk_decision.score >= REFERRAL_BLOCK_SCORE:
+            _mark_referral_event_blocked(
+                event,
+                reason=risk_decision.blocked_reason or "risk_score",
+                ts=ts,
+                risk_decision=risk_decision,
+            )
+            return False
+
     delta_cents = _safe_bonus_cents(event.bonus_usd_cents)
     _stage_referral_bonus_credit(session, org_id=event.org_id, user=inviter, delta_cents=delta_cents)
     if invitee.id != inviter.id:
@@ -209,15 +349,30 @@ async def _reverse_confirmed_referral_bonus_event(
     event.reversed_at = ts
 
 
-def detect_referral_block_reason(*, inviter: User, invitee: User, topup: BillingTopup) -> str | None:
+def evaluate_referral_risk(
+    *,
+    inviter: User,
+    invitee: User,
+    topup: BillingTopup,
+    include_usage_review: bool = False,
+) -> ReferralRiskDecision:
+    signals: list[ReferralRiskSignal] = []
+    hard_reason: str | None = None
+
+    def add_signal(code: str, score: int, severity: str) -> None:
+        nonlocal hard_reason
+        signals.append(ReferralRiskSignal(code=code, score=score, severity=severity))
+        if severity == "block" and hard_reason is None:
+            hard_reason = code
+
     if inviter.id == invitee.id:
-        return "self_invite"
+        add_signal("self_invite", 100, "block")
 
     payer_email = _normalize_email(getattr(topup, "payer_email", None))
     inviter_email = _normalize_email(getattr(inviter, "email", None))
     inviter_payment_email = _normalize_email(getattr(inviter, "first_payment_email", None))
     if payer_email and ((inviter_email and payer_email == inviter_email) or (inviter_payment_email and payer_email == inviter_payment_email)):
-        return "same_payment_email"
+        add_signal("same_payment_email", 100, "block")
 
     invitee_device_ids = {
         _normalize_token(getattr(invitee, "signup_device_id", None), max_len=64),
@@ -230,22 +385,65 @@ def detect_referral_block_reason(*, inviter: User, invitee: User, topup: Billing
     invitee_device_ids.discard(None)
     inviter_device_ids.discard(None)
     if invitee_device_ids and inviter_device_ids and invitee_device_ids.intersection(inviter_device_ids):
-        return "same_device"
+        add_signal("same_device", 100, "block")
 
     invitee_ips = {
-        _normalize_token(getattr(invitee, "signup_ip", None), max_len=64),
-        _normalize_token(getattr(topup, "client_ip", None), max_len=64),
+        _normalize_high_confidence_ip(getattr(invitee, "signup_ip", None)),
+        _normalize_high_confidence_ip(getattr(topup, "client_ip", None)),
     }
     inviter_ips = {
-        _normalize_token(getattr(inviter, "signup_ip", None), max_len=64),
-        _normalize_token(getattr(inviter, "first_payment_ip", None), max_len=64),
+        _normalize_high_confidence_ip(getattr(inviter, "signup_ip", None)),
+        _normalize_high_confidence_ip(getattr(inviter, "first_payment_ip", None)),
     }
     invitee_ips.discard(None)
     inviter_ips.discard(None)
     if invitee_ips and inviter_ips and invitee_ips.intersection(inviter_ips):
-        return "same_ip"
+        add_signal("same_ip", 20, "weak")
 
-    return None
+    minutes_to_topup = _minutes_between(
+        _event_timestamp(getattr(invitee, "created_at", None)),
+        _topup_reference_at(topup),
+    )
+    if minutes_to_topup is not None and minutes_to_topup <= REFERRAL_FAST_TOPUP_MINUTES:
+        add_signal("fast_topup_after_signup", 20, "weak")
+
+    if int(getattr(topup, "units", 0) or 0) <= REFERRAL_SMALL_TOPUP_UNITS:
+        add_signal("small_first_topup", 10, "weak")
+
+    if include_usage_review:
+        topup_units = int(max(int(getattr(topup, "units", 0) or 0), 0))
+        required_spend_micros = int((Decimal(topup_units * USD_MICROS_PER_CREDIT) * REFERRAL_REVIEW_MIN_SPEND_RATIO).to_integral_value(rounding=ROUND_HALF_UP))
+        actual_spend_micros = int(max(int(getattr(invitee, "spend_usd_micros_total", 0) or 0), 0))
+        if required_spend_micros > 0 and actual_spend_micros < required_spend_micros:
+            add_signal("low_invitee_usage_after_review", 45, "review")
+
+    score = int(sum(signal.score for signal in signals))
+    if hard_reason or score >= REFERRAL_BLOCK_SCORE:
+        status = "blocked"
+        blocked_reason = hard_reason or "risk_score"
+    elif score >= REFERRAL_REVIEW_SCORE:
+        status = "pending_review"
+        blocked_reason = None
+    else:
+        status = "pending"
+        blocked_reason = None
+
+    return ReferralRiskDecision(
+        status=status,
+        blocked_reason=blocked_reason,
+        score=score,
+        evidence=_signals_to_evidence(
+            signals=signals,
+            score=score,
+            decision=status,
+            include_usage_review=include_usage_review,
+        ),
+    )
+
+
+def detect_referral_block_reason(*, inviter: User, invitee: User, topup: BillingTopup) -> str | None:
+    decision = evaluate_referral_risk(inviter=inviter, invitee=invitee, topup=topup)
+    return decision.blocked_reason
 
 
 async def maybe_create_referral_bonus_event(
@@ -265,7 +463,7 @@ async def maybe_create_referral_bonus_event(
             select(ReferralBonusEvent.id)
             .where(
                 ReferralBonusEvent.invitee_user_id == invitee.id,
-                ReferralBonusEvent.status.in_(["pending", "confirmed"]),
+                ReferralBonusEvent.status.in_(["pending", "pending_review", "confirmed"]),
             )
             .limit(1)
         )
@@ -279,17 +477,18 @@ async def maybe_create_referral_bonus_event(
 
     created_at = now or dt.datetime.now(dt.timezone.utc)
     bonus_cents = compute_referral_bonus_usd_cents(int(getattr(topup, "units", 0) or 0))
-    reason = detect_referral_block_reason(inviter=inviter, invitee=invitee, topup=topup)
-    status = "blocked" if reason else "pending"
+    decision = evaluate_referral_risk(inviter=inviter, invitee=invitee, topup=topup)
 
     row = ReferralBonusEvent(
         org_id=org_id,
         inviter_user_id=inviter.id,
         invitee_user_id=invitee.id,
         topup_id=topup.id,
-        status=status,
+        status=decision.status,
         bonus_usd_cents=bonus_cents,
-        blocked_reason=reason,
+        blocked_reason=decision.blocked_reason,
+        risk_score=decision.score,
+        risk_evidence=decision.evidence,
         created_at=created_at,
     )
     session.add(row)
@@ -305,7 +504,15 @@ async def confirm_due_referral_bonuses(session: AsyncSession, *, now: dt.datetim
     pending_rows = (
         await session.execute(
             select(ReferralBonusEvent)
-            .where(ReferralBonusEvent.status == "pending", ReferralBonusEvent.created_at <= cutoff)
+            .where(
+                or_(
+                    and_(ReferralBonusEvent.status == "pending", ReferralBonusEvent.created_at <= cutoff),
+                    and_(
+                        ReferralBonusEvent.status == "pending_review",
+                        ReferralBonusEvent.created_at <= ts - dt.timedelta(hours=REFERRAL_REVIEW_HOURS),
+                    ),
+                )
+            )
             .with_for_update(skip_locked=True)
             .limit(safe_limit)
         )
@@ -359,7 +566,7 @@ async def process_referral_refund(session: AsyncSession, *, topup: BillingTopup,
         await session.commit()
         return
 
-    if event.status == "pending":
+    if event.status in {"pending", "pending_review"}:
         _mark_referral_event_blocked(event, reason="refunded", ts=ts)
         await session.commit()
         return

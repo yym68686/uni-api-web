@@ -3157,7 +3157,10 @@ async def invite_summary(
         await session.execute(
             select(func.count())
             .select_from(ReferralBonusEvent)
-            .where(ReferralBonusEvent.inviter_user_id == current_user.id, ReferralBonusEvent.status == "pending")
+            .where(
+                ReferralBonusEvent.inviter_user_id == current_user.id,
+                ReferralBonusEvent.status.in_(["pending", "pending_review"]),
+            )
         )
     ).scalar_one()
 
@@ -3223,7 +3226,7 @@ async def invite_summary(
         ev = latest_by_invitee.get(u.id)
         status = str(getattr(ev, "status", "") or "none") if ev else "none"
         reward_usd = None
-        if ev and status in {"pending", "confirmed"}:
+        if ev and status in {"pending", "pending_review", "confirmed"}:
             reward_usd = float((Decimal(int(ev.bonus_usd_cents)) / Decimal("100")).quantize(Decimal("0.01")))
         invited_at = getattr(u, "invited_at", None) or getattr(u, "created_at", None)
         items.append(

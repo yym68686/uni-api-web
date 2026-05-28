@@ -4,7 +4,7 @@ import datetime as dt
 import uuid
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -30,6 +30,8 @@ class ReferralBonusEvent(Base):
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="pending")
     bonus_usd_cents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     blocked_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    risk_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    risk_evidence: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
 
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False

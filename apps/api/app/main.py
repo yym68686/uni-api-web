@@ -946,13 +946,65 @@ def create_app() -> FastAPI:
                 "ADD COLUMN IF NOT EXISTS invitee_confirmed_at timestamptz"
             )
             await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS referral_bonus_events "
+                "ADD COLUMN IF NOT EXISTS risk_score integer NOT NULL DEFAULT 0"
+            )
+            await conn.exec_driver_sql(
+                "ALTER TABLE IF EXISTS referral_bonus_events "
+                "ADD COLUMN IF NOT EXISTS risk_evidence jsonb"
+            )
+            await conn.exec_driver_sql(
+                "WITH candidates AS ("
+                "  SELECT e.id, "
+                "         row_number() OVER (PARTITION BY e.invitee_user_id ORDER BY e.created_at DESC) AS rn "
+                "  FROM referral_bonus_events e "
+                "  JOIN billing_topups t ON t.id = e.topup_id "
+                "  WHERE e.status = 'blocked' "
+                "    AND e.blocked_reason = 'same_ip' "
+                "    AND e.confirmed_at IS NULL "
+                "    AND t.refunded_at IS NULL"
+                ") "
+                "UPDATE referral_bonus_events e "
+                "SET status = 'pending_review', "
+                "    blocked_reason = NULL, "
+                "    reversed_at = NULL, "
+                "    risk_score = GREATEST(COALESCE(e.risk_score, 0), 50), "
+                "    risk_evidence = COALESCE(e.risk_evidence, jsonb_build_object("
+                "      'version', 1, "
+                "      'decision', 'pending_review', "
+                "      'score', 50, "
+                "      'signals', jsonb_build_array(jsonb_build_object("
+                "        'code', 'same_ip', 'score', 20, 'severity', 'weak'"
+                "      )), "
+                "      'migratedFrom', 'same_ip_block'"
+                "    )) "
+                "FROM candidates c "
+                "WHERE e.id = c.id "
+                "  AND c.rn = 1 "
+                "  AND NOT EXISTS ("
+                "    SELECT 1 FROM referral_bonus_events open_ev "
+                "    WHERE open_ev.invitee_user_id = e.invitee_user_id "
+                "      AND open_ev.id <> e.id "
+                "      AND open_ev.status IN ('pending', 'pending_review', 'confirmed')"
+                "  )"
+            )
+            await conn.exec_driver_sql(
                 "CREATE INDEX IF NOT EXISTS ix_referral_bonus_events_invitee_user_id "
                 "ON referral_bonus_events(invitee_user_id)"
+            )
+            await conn.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_referral_bonus_events_status_created_at "
+                "ON referral_bonus_events(status, created_at)"
             )
             await conn.exec_driver_sql(
                 "CREATE UNIQUE INDEX IF NOT EXISTS uq_referral_bonus_active_invitee "
                 "ON referral_bonus_events(invitee_user_id) "
                 "WHERE status IN ('pending', 'confirmed')"
+            )
+            await conn.exec_driver_sql(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_referral_bonus_open_invitee "
+                "ON referral_bonus_events(invitee_user_id) "
+                "WHERE status IN ('pending', 'pending_review', 'confirmed')"
             )
             await conn.exec_driver_sql(
                 "ALTER TABLE IF EXISTS analytics_outbox_events "

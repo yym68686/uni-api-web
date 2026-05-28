@@ -395,7 +395,17 @@ export function BillingContentClient({
     [displayCurrency, locale]
   );
   const pendingReceivedReward =
-    inviteSummary?.receivedReward?.status === "pending" ? inviteSummary.receivedReward : null;
+    inviteSummary?.receivedReward?.status === "pending" || inviteSummary?.receivedReward?.status === "pending_review"
+      ? inviteSummary.receivedReward
+      : null;
+  const pendingReceivedRewardDescKey =
+    pendingReceivedReward?.status === "pending_review"
+      ? "invite.received.desc.pendingReview"
+      : "invite.received.desc.pending";
+  const pendingReceivedRewardTimeLabel =
+    pendingReceivedReward?.status === "pending_review"
+      ? "invite.received.reviewAt"
+      : "invite.received.availableAt";
 
   React.useEffect(() => {
     if (balanceOverrideUsd === null) return;
@@ -614,11 +624,17 @@ export function BillingContentClient({
               </div>
               <div className="min-w-0 space-y-1">
                 <div className="text-sm font-medium text-foreground">{t("invite.received.title")}</div>
-                <div className="text-sm text-muted-foreground">{t("invite.received.desc.pending")}</div>
+                <div className="text-sm text-muted-foreground">{t(pendingReceivedRewardDescKey)}</div>
               </div>
             </div>
             <div className="flex shrink-0 flex-col items-start gap-2 sm:items-end">
-              <Badge variant="warning">{t("invite.status.pending")}</Badge>
+              <Badge variant="warning">
+                {t(
+                  pendingReceivedReward.status === "pending_review"
+                    ? "invite.status.pendingReview"
+                    : "invite.status.pending"
+                )}
+              </Badge>
               <div className="font-mono text-lg font-semibold tabular-nums text-foreground">
                 {typeof pendingReceivedReward.rewardUsd === "number" && Number.isFinite(pendingReceivedReward.rewardUsd)
                   ? formatMoneyFixed2(pendingReceivedReward.rewardUsd)
@@ -627,7 +643,7 @@ export function BillingContentClient({
               {pendingReceivedReward.availableAt ? (
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <Clock className="h-3.5 w-3.5" />
-                  <span>{t("invite.received.availableAt")}</span>
+                  <span>{t(pendingReceivedRewardTimeLabel)}</span>
                   <span className="font-mono tabular-nums text-foreground">
                     <ClientDateTime value={pendingReceivedReward.availableAt} locale={locale} timeStyle="medium" />
                   </span>
