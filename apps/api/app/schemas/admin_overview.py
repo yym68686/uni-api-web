@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 
 class AdminOverviewKpis(BaseModel):
+    rpm: int
     calls_24h: int = Field(alias="calls24h")
     errors_24h: int = Field(alias="errors24h")
     spend_usd_24h: float = Field(alias="spendUsd24h")

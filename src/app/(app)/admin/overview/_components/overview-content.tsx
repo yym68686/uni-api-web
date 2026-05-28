@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlertTriangle, Ban, CheckCircle2, LayoutDashboard, Megaphone, PlugZap, Settings, Users } from "lucide-react";
+import { Activity, AlertTriangle, Ban, CheckCircle2, LayoutDashboard, Megaphone, PlugZap, Settings, Users } from "lucide-react";
 
 import type { Locale } from "@/lib/i18n/messages";
 import type { AdminOverviewEventItem, AdminOverviewHealthItem, AdminOverviewResponse } from "@/lib/types";
@@ -144,6 +144,7 @@ export async function AdminOverviewContent({ locale }: { locale: Locale }) {
   if (!overview) return null;
 
   const number = new Intl.NumberFormat(locale);
+  const rpm = number.format(Number.isFinite(overview.kpis.rpm) ? overview.kpis.rpm : 0);
   const calls = number.format(overview.kpis.calls24h);
   const spend = `$${overview.kpis.spendUsd24h.toFixed(2)}`;
   const activeUsers = number.format(overview.kpis.activeUsers24h);
@@ -212,7 +213,8 @@ export async function AdminOverviewContent({ locale }: { locale: Locale }) {
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
+        <StatsCard title={t(locale, "admin.overview.kpi.rpm")} value={rpm} trend={t(locale, "admin.overview.kpi.rpmTrend")} icon={Activity} />
         <StatsCard title={t(locale, "admin.overview.kpi.calls")} value={calls} icon={LayoutDashboard} />
         <StatsCard title={t(locale, "admin.overview.kpi.spend")} value={spend} icon={LayoutDashboard} />
         <StatsCard title={t(locale, "admin.overview.kpi.activeUsers")} value={activeUsers} icon={Users} />

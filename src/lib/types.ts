@@ -304,6 +304,7 @@ export interface AdminOverviewEventItem {
 export interface AdminOverviewResponse {
   registrationEnabled: boolean;
   kpis: {
+    rpm: number;
     calls24h: number;
     errors24h: number;
     spendUsd24h: number;

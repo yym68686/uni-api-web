@@ -40,6 +40,7 @@ def _hour_start(value: dt.datetime) -> dt.datetime:
 
 async def get_admin_overview(session: AsyncSession, *, org_id: uuid.UUID) -> dict[str, Any]:
     now = dt.datetime.now(dt.timezone.utc)
+    start_1m = now - dt.timedelta(minutes=1)
     start_24h = now - dt.timedelta(hours=24)
     start_24h_bucket = _hour_start(start_24h)
 
@@ -99,8 +100,18 @@ async def get_admin_overview(session: AsyncSession, *, org_id: uuid.UUID) -> dic
         )
     ).scalar_one()
 
+    current_rpm = (
+        await session.execute(
+            select(func.count()).select_from(LlmUsageEvent).where(
+                LlmUsageEvent.org_id == org_id,
+                LlmUsageEvent.created_at >= start_1m,
+            )
+        )
+    ).scalar_one()
+
     calls_24h = int(getattr(usage_row, "calls", 0) or 0) if usage_row else 0
     errors_24h = int(getattr(usage_row, "errors", 0) or 0) if usage_row else 0
+    current_rpm = int(current_rpm or 0)
     active_users_24h = int(getattr(usage_row, "active_users", 0) or 0) if usage_row else 0
     active_keys_24h = int(active_keys_24h or 0)
     spend_micros_24h = int(getattr(usage_row, "spend_micros", 0) or 0) if usage_row else 0
@@ -210,6 +221,7 @@ async def get_admin_overview(session: AsyncSession, *, org_id: uuid.UUID) -> dic
     return {
         "registrationEnabled": registration_enabled,
         "kpis": {
+            "rpm": current_rpm,
             "calls24h": calls_24h,
             "errors24h": errors_24h,
             "spendUsd24h": spend_usd_24h,
