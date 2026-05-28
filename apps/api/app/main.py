@@ -33,6 +33,7 @@ _MIN_USAGE_RETENTION_BATCH_SIZE = 1000
 _MAX_USAGE_RETENTION_BATCH_SIZE = 100000
 _MIN_USAGE_RETENTION_MAX_BATCHES = 1
 _MAX_USAGE_RETENTION_MAX_BATCHES = 100
+_MIN_USAGE_MAINTENANCE_INTERVAL_SECONDS = 3600
 _ADD_COLUMN_IF_MISSING_RE = re.compile(
     r"^\s*ALTER\s+TABLE\s+IF\s+EXISTS\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+"
     r"ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+([a-zA-Z_][a-zA-Z0-9_]*)\b",
@@ -414,6 +415,19 @@ async def _run_usage_table_maintenance_once() -> None:
                 )
     except Exception:
         logger.exception("usage table maintenance failed")
+
+
+async def _run_usage_table_maintenance_worker(stop_event: asyncio.Event) -> None:
+    while not stop_event.is_set():
+        await _run_usage_table_maintenance_once()
+        interval_seconds = max(
+            int(settings.usage_maintenance_interval_seconds),
+            _MIN_USAGE_MAINTENANCE_INTERVAL_SECONDS,
+        )
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
+        except asyncio.TimeoutError:
+            continue
 
 
 def create_app() -> FastAPI:
@@ -992,7 +1006,7 @@ def create_app() -> FastAPI:
 
         referral_task = asyncio.create_task(referral_worker())
         dataocean_task = asyncio.create_task(run_dataocean_outbox_worker(stop_event))
-        usage_maintenance_task = asyncio.create_task(_run_usage_table_maintenance_once())
+        usage_maintenance_task = asyncio.create_task(_run_usage_table_maintenance_worker(stop_event))
         yield
         stop_event.set()
         referral_task.cancel()

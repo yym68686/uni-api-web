@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     usage_hourly_stats_retention_days: int = 366
     usage_retention_batch_size: int = 50000
     usage_retention_max_batches: int = 20
+    usage_maintenance_interval_seconds: int = 21600
 
     google_client_id: str = ""
     google_client_secret: str = ""
