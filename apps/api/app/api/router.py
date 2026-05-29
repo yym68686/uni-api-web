@@ -551,6 +551,37 @@ async def _record_usage_event_best_effort(
         logger.exception("usage: record failed")
 
 
+async def _record_upstream_http_error_usage(
+    *,
+    request: Request,
+    context: LlmProxyContext,
+    exc: httpx.HTTPError,
+    started: float,
+    is_streaming: bool,
+) -> HTTPException:
+    error = _translate_upstream_http_error(exc)
+    await _record_usage_event_best_effort(
+        org_id=context.org_id,
+        user_id=context.user_id,
+        api_key_id=context.api_key_id,
+        model_id=context.model_id,
+        ok=False,
+        status_code=int(error.status_code),
+        input_tokens=0,
+        cached_tokens=0,
+        output_tokens=0,
+        total_tokens=0,
+        cost_usd_micros=0,
+        total_duration_ms=int((time.perf_counter() - started) * 1000),
+        ttft_ms=0,
+        source_ip=context.source_ip,
+        request_endpoint=_request_endpoint(request),
+        is_streaming=is_streaming,
+        recompute_cost=False,
+    )
+    return error
+
+
 def _request_endpoint(request: Request) -> str | None:
     path = str(request.url.path or "").strip()
     return path[:255] if path else None
@@ -2056,7 +2087,14 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
                 await client.aclose()
             except Exception:
                 pass
-            raise _translate_upstream_http_error(exc) from exc
+            error = await _record_upstream_http_error_usage(
+                request=request,
+                context=context,
+                exc=exc,
+                started=started,
+                is_streaming=True,
+            )
+            raise error from exc
         content_type = res.headers.get("content-type") or "application/json"
         ok = res.status_code < 400
         input_tokens = 0
@@ -2154,7 +2192,14 @@ async def chat_completions(request: Request, session: AsyncSession = Depends(get
                     body_bytes.extend(chunk)
                 total_ms = int((time.perf_counter() - started) * 1000)
     except httpx.HTTPError as exc:
-        raise _translate_upstream_http_error(exc) from exc
+        error = await _record_upstream_http_error_usage(
+            request=request,
+            context=context,
+            exc=exc,
+            started=started,
+            is_streaming=False,
+        )
+        raise error from exc
 
     # Record usage/spend for dashboard and logs.
     input_tokens = 0
@@ -2246,7 +2291,14 @@ async def _proxy_responses_request(
                 await client.aclose()
             except Exception:
                 pass
-            raise _translate_upstream_http_error(exc) from exc
+            error = await _record_upstream_http_error_usage(
+                request=request,
+                context=context,
+                exc=exc,
+                started=started,
+                is_streaming=True,
+            )
+            raise error from exc
         content_type = res.headers.get("content-type") or "application/json"
         ok = res.status_code < 400
         input_tokens = 0
@@ -2353,7 +2405,14 @@ async def _proxy_responses_request(
                 total_ms = int((time.perf_counter() - started) * 1000)
                 upstream_headers = _filter_upstream_response_headers(dict(res.headers))
     except httpx.HTTPError as exc:
-        raise _translate_upstream_http_error(exc) from exc
+        error = await _record_upstream_http_error_usage(
+            request=request,
+            context=context,
+            exc=exc,
+            started=started,
+            is_streaming=False,
+        )
+        raise error from exc
 
     input_tokens = 0
     cached_tokens = 0
