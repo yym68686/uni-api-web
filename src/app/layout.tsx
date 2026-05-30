@@ -14,8 +14,8 @@ import {
   getPublicAppBaseUrl
 } from "@/lib/app-config";
 import { getRequestLocale } from "@/lib/i18n/server";
-import { t } from "@/lib/i18n/messages";
 import { I18nProvider } from "@/components/i18n/i18n-provider";
+import { SkipToContentLink } from "@/components/i18n/skip-to-content-link";
 import { DataOceanTracker } from "@/components/analytics/dataocean-tracker";
 import { CurrencyProvider } from "@/components/currency/currency-provider";
 
@@ -107,16 +107,7 @@ export default async function RootLayout({ children }: RootLayoutProps) {
       >
         <I18nProvider locale={locale}>
           <CurrencyProvider initialCnyPerUsd={displayCnyPerUsd}>
-            <a
-              href="#main"
-              className={cn(
-                "sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100]",
-                "rounded-xl border border-border bg-background/80 px-4 py-2 text-sm text-foreground backdrop-blur",
-                "shadow-[0_0_0_1px_oklch(var(--border)/0.55),0_12px_34px_oklch(var(--background)/0.65)]"
-              )}
-            >
-              {t(locale, "common.skipToContent")}
-            </a>
+            <SkipToContentLink />
             <Toaster theme="dark" richColors closeButton />
             <DataOceanTracker />
             {children}
