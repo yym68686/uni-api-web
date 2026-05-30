@@ -3,6 +3,11 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 
+class LogsCursor(BaseModel):
+    created_at: str = Field(alias="createdAt")
+    id: str
+
+
 class LogItem(BaseModel):
     id: str
     model: str
@@ -23,3 +28,4 @@ class LogItem(BaseModel):
 
 class LogsListResponse(BaseModel):
     items: list[LogItem]
+    next_cursor: LogsCursor | None = Field(default=None, alias="nextCursor")

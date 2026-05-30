@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import unittest
 import uuid
 
@@ -46,6 +47,26 @@ class _FakeSession:
 
     async def commit(self) -> None:
         self.commits += 1
+
+
+class _FakeScalars:
+    def all(self) -> list[object]:
+        return []
+
+
+class _FakeListResult:
+    def scalars(self) -> _FakeScalars:
+        return _FakeScalars()
+
+
+class _CaptureListSession:
+    def __init__(self) -> None:
+        self.executed: list[str] = []
+
+    async def execute(self, statement: object) -> _FakeListResult:
+        statement_text = str(statement.compile(dialect=postgresql.dialect()))  # type: ignore[attr-defined]
+        self.executed.append(statement_text)
+        return _FakeListResult()
 
 
 class RecordUsageEventTests(unittest.IsolatedAsyncioTestCase):
@@ -122,6 +143,44 @@ class RecordUsageEventTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("RETURNING" in text.upper() for text in session.executed))
         self.assertTrue(any("llm_usage_hourly_stats" in text for text in session.executed))
         self.assertTrue(any("ON CONFLICT" in text.upper() for text in session.executed))
+
+
+class ListUsageEventsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cursor_query_uses_stable_created_at_and_id_order_without_offset(self) -> None:
+        session = _CaptureListSession()
+        before = dt.datetime(2026, 5, 30, 8, 52, 33, 222849, tzinfo=dt.timezone.utc)
+
+        await usage_db.list_usage_events(
+            session,  # type: ignore[arg-type]
+            org_id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+            limit=50,
+            offset=50,
+            before=before,
+            before_id=uuid.UUID("b2c8fa8d-07ec-4cfd-8d38-c7fafbfe437b"),
+        )
+
+        statement = session.executed[-1]
+        self.assertIn("ORDER BY llm_usage_events.created_at DESC, llm_usage_events.id DESC", statement)
+        self.assertIn("llm_usage_events.created_at < ", statement)
+        self.assertIn("llm_usage_events.created_at = ", statement)
+        self.assertIn("llm_usage_events.id < ", statement)
+        self.assertNotIn("OFFSET", statement.upper())
+
+    async def test_offset_query_keeps_backward_compatible_offset_without_cursor(self) -> None:
+        session = _CaptureListSession()
+
+        await usage_db.list_usage_events(
+            session,  # type: ignore[arg-type]
+            org_id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+            limit=50,
+            offset=50,
+        )
+
+        statement = session.executed[-1]
+        self.assertIn("ORDER BY llm_usage_events.created_at DESC, llm_usage_events.id DESC", statement)
+        self.assertIn("OFFSET", statement.upper())
 
 
 if __name__ == "__main__":

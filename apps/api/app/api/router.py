@@ -2077,6 +2077,8 @@ async def retrieve_model(
 async def logs(
     limit: int = 50,
     offset: int = 0,
+    before: dt.datetime | None = None,
+    before_id: uuid.UUID | None = Query(default=None, alias="beforeId"),
     session: AsyncSession = Depends(get_db_session),
     current_user=Depends(get_current_user),
     membership=Depends(get_current_membership),
@@ -2087,8 +2089,17 @@ async def logs(
         user_id=current_user.id,
         limit=limit,
         offset=offset,
+        before=before,
+        before_id=before_id,
     )
-    return LogsListResponse(items=items)  # type: ignore[arg-type]
+    safe_limit = min(max(int(limit), 1), 200)
+    last_item = items[-1] if len(items) == safe_limit else None
+    next_cursor = (
+        {"createdAt": str(last_item["createdAt"]), "id": str(last_item["id"])}
+        if last_item is not None
+        else None
+    )
+    return LogsListResponse(items=items, nextCursor=next_cursor)  # type: ignore[arg-type]
 
 
 @router.get("/announcements", response_model=AnnouncementsListResponse)

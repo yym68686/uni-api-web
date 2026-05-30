@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import case, func, select, update
+from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -208,6 +208,12 @@ def _dt_iso(value: dt.datetime) -> str:
     return value.astimezone(dt.timezone.utc).isoformat()
 
 
+def _normalize_utc(value: dt.datetime) -> dt.datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=dt.timezone.utc)
+    return value.astimezone(dt.timezone.utc)
+
+
 async def list_usage_events(
     session: AsyncSession,
     *,
@@ -215,17 +221,30 @@ async def list_usage_events(
     user_id: uuid.UUID,
     limit: int = 50,
     offset: int = 0,
+    before: dt.datetime | None = None,
+    before_id: uuid.UUID | None = None,
 ) -> list[dict[str, Any]]:
     safe_limit = min(max(int(limit), 1), 200)
     safe_offset = max(int(offset), 0)
+    statement = select(LlmUsageEvent).where(LlmUsageEvent.org_id == org_id, LlmUsageEvent.user_id == user_id)
+    if before is not None:
+        safe_before = _normalize_utc(before)
+        if before_id is not None:
+            statement = statement.where(
+                or_(
+                    LlmUsageEvent.created_at < safe_before,
+                    and_(LlmUsageEvent.created_at == safe_before, LlmUsageEvent.id < before_id),
+                )
+            )
+        else:
+            statement = statement.where(LlmUsageEvent.created_at < safe_before)
+
+    statement = statement.order_by(LlmUsageEvent.created_at.desc(), LlmUsageEvent.id.desc()).limit(safe_limit)
+    if before is None and safe_offset > 0:
+        statement = statement.offset(safe_offset)
+
     rows = (
-        await session.execute(
-            select(LlmUsageEvent)
-            .where(LlmUsageEvent.org_id == org_id, LlmUsageEvent.user_id == user_id)
-            .order_by(LlmUsageEvent.created_at.desc())
-            .limit(safe_limit)
-            .offset(safe_offset)
-        )
+        await session.execute(statement)
     ).scalars().all()
 
     items: list[dict[str, Any]] = []

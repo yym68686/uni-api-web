@@ -19,14 +19,14 @@ export async function getLogs() {
   if (!res.ok) return null;
   const json: unknown = await res.json();
   if (!isLogsListResponse(json)) return null;
-  return json.items;
+  return json;
 }
 
 interface LogsContentProps {
-  initialItemsPromise?: Promise<LogItem[] | null>;
+  initialItemsPromise?: Promise<LogsListResponse | null>;
 }
 
 export async function LogsContent({ initialItemsPromise }: LogsContentProps) {
-  const items = (await (initialItemsPromise ?? getLogs())) ?? [];
-  return <LogsTableClient initialItems={items} pageSize={LOGS_PAGE_SIZE} />;
+  const response = (await (initialItemsPromise ?? getLogs())) ?? { items: [] satisfies LogItem[] };
+  return <LogsTableClient initialResponse={response} pageSize={LOGS_PAGE_SIZE} />;
 }

@@ -14,9 +14,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { logsListApiPath } from "@/lib/api-paths";
 import { convertUsdToDisplay, formatDisplayCurrency, type DisplayCurrency } from "@/lib/currency";
-import type { LogItem, LogsListResponse } from "@/lib/types";
+import type { LogItem, LogsCursor, LogsListResponse } from "@/lib/types";
 import { useI18n } from "@/components/i18n/i18n-provider";
-import { useSwrLite } from "@/lib/swr-lite";
+import { mutateSwrLite, useSwrLite } from "@/lib/swr-lite";
 
 function isLogsListResponse(value: unknown): value is LogsListResponse {
   if (!value || typeof value !== "object") return false;
@@ -78,16 +78,35 @@ function statusCodeVariant(value: number): BadgeVariant {
   return "outline";
 }
 
+function compareLogItemsDesc(a: LogItem, b: LogItem) {
+  const aTime = Date.parse(a.createdAt);
+  const bTime = Date.parse(b.createdAt);
+  if (Number.isFinite(aTime) && Number.isFinite(bTime) && aTime !== bTime) {
+    return bTime - aTime;
+  }
+  const createdAtOrder = b.createdAt.localeCompare(a.createdAt);
+  if (createdAtOrder !== 0) return createdAtOrder;
+  return b.id.localeCompare(a.id);
+}
+
+function mergeLogItems(baseItems: LogItem[], extraItems: LogItem[]) {
+  const byId = new Map<string, LogItem>();
+  for (const item of [...baseItems, ...extraItems]) {
+    if (!byId.has(item.id)) byId.set(item.id, item);
+  }
+  return [...byId.values()].sort(compareLogItemsDesc);
+}
+
 interface LogsTableClientProps {
-  initialItems: LogItem[];
+  initialResponse: LogsListResponse;
   pageSize: number;
 }
 
-export function LogsTableClient({ initialItems, pageSize }: LogsTableClientProps) {
+export function LogsTableClient({ initialResponse, pageSize }: LogsTableClientProps) {
   const { locale, t } = useI18n();
   const displayCurrency = useDisplayCurrency();
-  const listKey = logsListApiPath(pageSize, 0);
-  const swr = useSwrLite<LogItem[]>(
+  const listKey = logsListApiPath(pageSize, { offset: 0 });
+  const swr = useSwrLite<LogsListResponse>(
     listKey,
     async (key) => {
       const res = await fetch(key, { cache: "no-store" });
@@ -100,26 +119,38 @@ export function LogsTableClient({ initialItems, pageSize }: LogsTableClientProps
         throw new Error(message);
       }
       if (!isLogsListResponse(json)) throw new Error(t("common.unexpectedError"));
-      return json.items;
+      return json;
     },
-    { fallbackData: initialItems, revalidateOnFocus: false }
+    { fallbackData: initialResponse, revalidateOnFocus: false }
   );
 
-  const baseItems = swr.data ?? initialItems;
+  React.useEffect(() => {
+    void mutateSwrLite(listKey, initialResponse);
+  }, [initialResponse, listKey]);
+
+  const baseResponse = swr.data ?? initialResponse;
+  const baseItems = baseResponse.items;
   const [extraItems, setExtraItems] = React.useState<LogItem[]>([]);
+  const [nextCursor, setNextCursor] = React.useState<LogsCursor | null>(baseResponse.nextCursor ?? null);
   const [loadingMore, setLoadingMore] = React.useState(false);
 
   React.useEffect(() => {
     setExtraItems([]);
+    setNextCursor(baseResponse.nextCursor ?? null);
     setLoadingMore(false);
-  }, [baseItems]);
+  }, [baseResponse]);
 
-  const items = React.useMemo(() => [...baseItems, ...extraItems], [baseItems, extraItems]);
-  const offset = items.length;
-  const canLoadMore = items.length > 0 && items.length % pageSize === 0;
+  const items = React.useMemo(() => mergeLogItems(baseItems, extraItems), [baseItems, extraItems]);
+  const canLoadMore = nextCursor !== null;
 
-  async function fetchPage(nextOffset: number) {
-    const res = await fetch(logsListApiPath(pageSize, nextOffset), { cache: "no-store" });
+  async function fetchPage(cursor: LogsCursor) {
+    const res = await fetch(
+      logsListApiPath(pageSize, {
+        before: cursor.createdAt,
+        beforeId: cursor.id
+      }),
+      { cache: "no-store" }
+    );
     const json: unknown = await res.json().catch(() => null);
     if (!res.ok) {
       const message =
@@ -129,15 +160,16 @@ export function LogsTableClient({ initialItems, pageSize }: LogsTableClientProps
       throw new Error(message);
     }
     if (!isLogsListResponse(json)) throw new Error(t("common.unexpectedError"));
-    return json.items;
+    return json;
   }
 
   async function loadMore() {
-    if (loadingMore || !canLoadMore) return;
+    if (loadingMore || !nextCursor) return;
     setLoadingMore(true);
     try {
-      const nextItems = await fetchPage(offset);
-      setExtraItems((prev) => [...prev, ...nextItems]);
+      const nextPage = await fetchPage(nextCursor);
+      setExtraItems((prev) => [...prev, ...nextPage.items]);
+      setNextCursor(nextPage.nextCursor ?? null);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("common.operationFailed"));
     } finally {

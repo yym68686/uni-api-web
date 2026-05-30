@@ -31,7 +31,7 @@ export function LogsRefreshButton({ pageSize, className }: LogsRefreshButtonProp
     if (loading) return;
     setLoading(true);
     try {
-      const key = logsListApiPath(pageSize, 0);
+      const key = logsListApiPath(pageSize, { offset: 0 });
       const res = await fetch(key, { cache: "no-store" });
       const json: unknown = await res.json().catch(() => null);
       if (!res.ok) {
@@ -42,7 +42,7 @@ export function LogsRefreshButton({ pageSize, className }: LogsRefreshButtonProp
         throw new Error(message);
       }
       if (!isLogsListResponse(json)) throw new Error(t("common.unexpectedError"));
-      await mutateSwrLite(key, json.items);
+      await mutateSwrLite(key, json);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("common.operationFailed"));
     } finally {

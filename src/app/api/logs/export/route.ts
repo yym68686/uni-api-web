@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { buildBackendUrl, getBackendAuthHeadersCached } from "@/lib/backend";
-import type { LogItem, LogsListResponse } from "@/lib/types";
+import type { LogItem, LogsCursor, LogsListResponse } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -108,8 +108,20 @@ function buildFilename(now = new Date()) {
   return `logs-${stamp}.csv`;
 }
 
-async function fetchLogsPage(offset: number, headers: HeadersInit) {
-  const res = await fetch(buildBackendUrl(`/logs?limit=${EXPORT_PAGE_SIZE}&offset=${offset}`), {
+function buildLogsPagePath(cursor?: LogsCursor | null) {
+  const params = new URLSearchParams();
+  params.set("limit", String(EXPORT_PAGE_SIZE));
+  if (cursor) {
+    params.set("before", cursor.createdAt);
+    params.set("beforeId", cursor.id);
+  } else {
+    params.set("offset", "0");
+  }
+  return `/logs?${params.toString()}`;
+}
+
+async function fetchLogsPage(headers: HeadersInit, cursor?: LogsCursor | null) {
+  const res = await fetch(buildBackendUrl(buildLogsPagePath(cursor)), {
     cache: "no-store",
     headers
   });
@@ -123,7 +135,7 @@ async function fetchLogsPage(offset: number, headers: HeadersInit) {
     throw new RouteError(502, "Unexpected response shape");
   }
 
-  return json.items;
+  return json;
 }
 
 function encodeCsvRows(items: LogItem[], prefix: string) {
@@ -132,23 +144,21 @@ function encodeCsvRows(items: LogItem[], prefix: string) {
   return `${prefix}${rows}`;
 }
 
-function createCsvStream(firstPage: LogItem[], headers: HeadersInit) {
+function createCsvStream(firstPage: LogsListResponse, headers: HeadersInit) {
   const encoder = new TextEncoder();
 
   return new ReadableStream<Uint8Array>({
     async start(controller) {
       try {
-        controller.enqueue(encoder.encode(encodeCsvRows(firstPage, `\uFEFF${CSV_HEADERS.join(",")}\r\n`)));
+        controller.enqueue(encoder.encode(encodeCsvRows(firstPage.items, `\uFEFF${CSV_HEADERS.join(",")}\r\n`)));
 
         let pageItems = firstPage;
-        let offset = firstPage.length;
 
-        while (pageItems.length === EXPORT_PAGE_SIZE) {
-          pageItems = await fetchLogsPage(offset, headers);
-          if (pageItems.length > 0) {
-            controller.enqueue(encoder.encode(encodeCsvRows(pageItems, "\r\n")));
+        while (pageItems.nextCursor) {
+          pageItems = await fetchLogsPage(headers, pageItems.nextCursor);
+          if (pageItems.items.length > 0) {
+            controller.enqueue(encoder.encode(encodeCsvRows(pageItems.items, "\r\n")));
           }
-          offset += pageItems.length;
         }
 
         controller.close();
@@ -162,7 +172,7 @@ function createCsvStream(firstPage: LogItem[], headers: HeadersInit) {
 export async function GET() {
   try {
     const headers = await getBackendAuthHeadersCached();
-    const firstPage = await fetchLogsPage(0, headers);
+    const firstPage = await fetchLogsPage(headers);
     const csv = createCsvStream(firstPage, headers);
 
     return new Response(csv, {

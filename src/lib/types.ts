@@ -448,8 +448,14 @@ export interface LogItem {
   isStreaming: boolean;
 }
 
+export interface LogsCursor {
+  createdAt: string;
+  id: string;
+}
+
 export interface LogsListResponse {
   items: LogItem[];
+  nextCursor?: LogsCursor | null;
 }
 
 export interface BillingLedgerItem {

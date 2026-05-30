@@ -23,8 +23,22 @@ export function usageApiPath(timeZone?: string | null, days?: number | null) {
   return `${API_PATHS.usage}?${qs}`;
 }
 
-export function logsListApiPath(limit: number, offset: number) {
-  return `/api/logs?limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`;
+interface LogsListApiPathOptions {
+  offset?: number;
+  before?: string | null;
+  beforeId?: string | null;
+}
+
+export function logsListApiPath(limit: number, options: LogsListApiPathOptions = {}) {
+  const params = new URLSearchParams();
+  params.set("limit", String(Math.trunc(limit)));
+  if (options.before && options.beforeId) {
+    params.set("before", options.before);
+    params.set("beforeId", options.beforeId);
+  } else {
+    params.set("offset", String(Math.trunc(options.offset ?? 0)));
+  }
+  return `/api/logs?${params.toString()}`;
 }
 
 export function logsExportApiPath() {
