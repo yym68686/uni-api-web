@@ -2,7 +2,6 @@ import { NextResponse, type NextRequest } from "next/server";
 
 const LOCALE_COOKIE_NAME = "uai_locale";
 const SUPPORTED_DOCS_LOCALES = new Set(["zh-CN", "en"]);
-const SUPPORTED_LANDING_LOCALES = new Set(["zh-CN", "en"]);
 
 type Locale = "zh-CN" | "en";
 
@@ -68,22 +67,12 @@ export function middleware(request: NextRequest) {
     const locale = preferredLocale(request);
     const url = request.nextUrl.clone();
     url.pathname = locale === "zh-CN" ? "/zh-CN" : "/en";
-    return responseWithLocaleCookie(request, NextResponse.redirect(url), locale);
+    return NextResponse.redirect(url);
   }
 
   if (isPrefetchRequest(request)) return NextResponse.next();
 
   const segments = pathname.split("/").filter(Boolean);
-  const landingLocale = normalizeLocale(segments[0]);
-
-  if (
-    segments.length === 1 &&
-    landingLocale &&
-    SUPPORTED_LANDING_LOCALES.has(landingLocale)
-  ) {
-    return responseWithLocaleCookie(request, NextResponse.next(), landingLocale);
-  }
-
   const docsLocale = normalizeLocale(segments[1]);
 
   if (!docsLocale || !SUPPORTED_DOCS_LOCALES.has(docsLocale)) return NextResponse.next();
@@ -92,5 +81,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/", "/en", "/zh-CN", "/docs/:path*"]
+  matcher: ["/", "/docs/:path*"]
 };
