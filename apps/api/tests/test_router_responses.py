@@ -8,11 +8,13 @@ from starlette.requests import ClientDisconnect
 import app.api.router as router_module
 from app.api.router import (
     _SseLineBuffer,
+    _build_llm_upstream_url,
     _extract_usage_tokens_from_sse_line,
     _parse_proxy_request,
     _read_request_body_or_499,
     image_edits,
     image_generations,
+    messages,
     responses,
     responses_compact,
     router,
@@ -29,6 +31,7 @@ class ResponsesRoutesTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("/responses", post_paths)
         self.assertIn("/responses/compact", post_paths)
+        self.assertIn("/messages", post_paths)
         self.assertIn("/images/generations", post_paths)
         self.assertIn("/images/edits", post_paths)
 
@@ -41,6 +44,15 @@ class ResponsesRoutesTests(unittest.IsolatedAsyncioTestCase):
             await _read_request_body_or_499(DisconnectedRequest())  # type: ignore[arg-type]
 
         self.assertEqual(ctx.exception.status_code, 499)
+
+    def test_build_llm_upstream_url_preserves_query_string(self) -> None:
+        upstream_url = _build_llm_upstream_url(
+            upstream_base_url="https://upstream.example/v1",
+            upstream_path="/messages",
+            query="beta=true",
+        )
+
+        self.assertEqual(upstream_url, "https://upstream.example/v1/messages?beta=true")
 
     async def test_responses_uses_standard_upstream_path(self) -> None:
         request = object()
@@ -57,6 +69,26 @@ class ResponsesRoutesTests(unittest.IsolatedAsyncioTestCase):
         router_module._proxy_responses_request = fake_proxy
         try:
             result = await responses(request, session)  # type: ignore[arg-type]
+        finally:
+            router_module._proxy_responses_request = original
+
+        self.assertIs(result, sentinel)
+
+    async def test_messages_uses_messages_upstream_path(self) -> None:
+        request = object()
+        session = object()
+        sentinel = object()
+        original = router_module._proxy_responses_request
+
+        async def fake_proxy(request_arg: object, session_arg: object, *, upstream_path: str) -> object:
+            self.assertIs(request_arg, request)
+            self.assertIs(session_arg, session)
+            self.assertEqual(upstream_path, "/messages")
+            return sentinel
+
+        router_module._proxy_responses_request = fake_proxy
+        try:
+            result = await messages(request, session)  # type: ignore[arg-type]
         finally:
             router_module._proxy_responses_request = original
 
@@ -176,6 +208,22 @@ class ResponsesRoutesTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(_extract_usage_tokens_from_sse_line(chat_line), (10, 2, 4, 14))
         self.assertEqual(_extract_usage_tokens_from_sse_line(responses_line), (8, 1, 3, 11))
+
+    def test_extract_usage_tokens_from_sse_line_supports_anthropic_messages_cache_usage(self) -> None:
+        message_start_line = (
+            b'data: {"type":"message_start","message":{"usage":{"input_tokens":1454,'
+            b'"cache_read_input_tokens":0,"output_tokens":2,'
+            b'"cache_creation":{"ephemeral_5m_input_tokens":29314,"ephemeral_1h_input_tokens":0}}}}\n'
+        )
+        messages_line = (
+            b'data: {"type":"message_delta","usage":{"input_tokens":1454,'
+            b'"cache_creation_input_tokens":29314,"cache_read_input_tokens":7,'
+            b'"output_tokens":117,"output_tokens_details":{"thinking_tokens":114},'
+            b'"cache_creation":{"ephemeral_5m_input_tokens":29314}}}\n'
+        )
+
+        self.assertEqual(_extract_usage_tokens_from_sse_line(message_start_line), (30768, 0, 2, 30770))
+        self.assertEqual(_extract_usage_tokens_from_sse_line(messages_line), (30775, 7, 117, 30892))
 
 
 if __name__ == "__main__":

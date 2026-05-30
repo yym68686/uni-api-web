@@ -192,6 +192,13 @@ def _safe_int(value: object) -> int:
         return 0
 
 
+def _sum_usage_token_fields(usage: dict, fields: tuple[str, ...]) -> int:
+    total = 0
+    for field in fields:
+        total += max(_safe_int(usage.get(field) or 0), 0)
+    return total
+
+
 def _normalize_public_url(raw: str) -> str:
     value = (raw or "").strip()
     if value == "":
@@ -587,6 +594,11 @@ def _request_endpoint(request: Request) -> str | None:
     return path[:255] if path else None
 
 
+def _build_llm_upstream_url(*, upstream_base_url: str, upstream_path: str, query: str) -> str:
+    url = f"{upstream_base_url}{upstream_path}"
+    return f"{url}?{query}" if query else url
+
+
 async def _read_request_body_or_499(request: Request) -> bytes:
     try:
         return await request.body()
@@ -596,6 +608,10 @@ async def _read_request_body_or_499(request: Request) -> bytes:
 
 def _extract_usage_tokens(obj: dict) -> tuple[int, int, int, int] | None:
     usage = obj.get("usage")
+    if not isinstance(usage, dict):
+        message = obj.get("message")
+        if isinstance(message, dict):
+            usage = message.get("usage")
     if not isinstance(usage, dict):
         response = obj.get("response")
         if isinstance(response, dict):
@@ -621,8 +637,8 @@ def _extract_usage_tokens(obj: dict) -> tuple[int, int, int, int] | None:
 
     # OpenAI responses usage
     if "input_tokens" in usage or "output_tokens" in usage:
-        input_tokens = _safe_int(usage.get("input_tokens") or 0)
-        output_tokens = _safe_int(usage.get("output_tokens") or 0)
+        input_tokens = max(_safe_int(usage.get("input_tokens") or 0), 0)
+        output_tokens = max(_safe_int(usage.get("output_tokens") or 0), 0)
         total_raw = usage.get("total_tokens")
         total_tokens = _safe_int(total_raw) if total_raw is not None else 0
         details = usage.get("input_tokens_details")
@@ -630,9 +646,28 @@ def _extract_usage_tokens(obj: dict) -> tuple[int, int, int, int] | None:
         if isinstance(details, dict):
             cached = _safe_int(details.get("cached_tokens") or 0)
 
+        # Anthropic Messages usage. Claude reports cache reads/creations outside
+        # input_tokens, while this service records one input bucket plus cached.
+        anthropic_cache_read = max(_safe_int(usage.get("cache_read_input_tokens") or 0), 0)
+        anthropic_cache_creation = max(_safe_int(usage.get("cache_creation_input_tokens") or 0), 0)
+        cache_creation = usage.get("cache_creation")
+        if anthropic_cache_creation <= 0 and isinstance(cache_creation, dict):
+            anthropic_cache_creation = _sum_usage_token_fields(
+                cache_creation,
+                ("ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens"),
+            )
+        has_anthropic_cache_usage = (
+            "cache_read_input_tokens" in usage
+            or "cache_creation_input_tokens" in usage
+            or isinstance(cache_creation, dict)
+        )
+        if has_anthropic_cache_usage:
+            input_tokens += anthropic_cache_read + anthropic_cache_creation
+            cached = anthropic_cache_read
+
         if output_tokens <= 0 and total_tokens > 0:
             output_tokens = max(total_tokens - input_tokens, 0)
-        if total_tokens <= 0:
+        if has_anthropic_cache_usage or total_tokens <= 0:
             total_tokens = input_tokens + output_tokens
 
         cached_tokens = min(max(cached, 0), max(input_tokens, 0))
@@ -2272,7 +2307,11 @@ async def _proxy_responses_request(
     context = await _resolve_llm_proxy_context(request, session, model_id=parsed.model_id)
     _log_llm_request_received(request, context=context, stream=parsed.stream)
 
-    upstream_url = f"{context.upstream_base_url}{upstream_path}"
+    upstream_url = _build_llm_upstream_url(
+        upstream_base_url=context.upstream_base_url,
+        upstream_path=upstream_path,
+        query=request.url.query,
+    )
     headers = _build_upstream_headers(request, upstream_api_key=context.upstream_api_key)
 
     timeout = _llm_upstream_timeout()
@@ -2472,6 +2511,11 @@ async def responses(request: Request, session: AsyncSession = Depends(get_db_ses
 @router.post("/responses/compact")
 async def responses_compact(request: Request, session: AsyncSession = Depends(get_db_session)):
     return await _proxy_responses_request(request, session, upstream_path="/responses/compact")
+
+
+@router.post("/messages")
+async def messages(request: Request, session: AsyncSession = Depends(get_db_session)):
+    return await _proxy_responses_request(request, session, upstream_path="/messages")
 
 
 @router.post("/images/generations")

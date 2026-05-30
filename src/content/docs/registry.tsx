@@ -97,6 +97,31 @@ const CHAT_COMPLETIONS_CURL: Record<Locale, string> = {
   ].join("\n")
 };
 
+const MESSAGES_CURL: Record<Locale, string> = {
+  en: [
+    "curl \"$UNI_API_BASE_URL/messages?beta=true\" \\",
+    "  -H \"Authorization: Bearer $UNI_API_KEY\" \\",
+    "  -H \"Content-Type: application/json\" \\",
+    "  -H \"anthropic-version: 2023-06-01\" \\",
+    "  -d '{",
+    "    \"model\": \"claude-sonnet-4-6\",",
+    "    \"max_tokens\": 128,",
+    "    \"messages\": [{\"role\":\"user\",\"content\":\"Hello\"}]",
+    "  }'"
+  ].join("\n"),
+  "zh-CN": [
+    "curl \"$UNI_API_BASE_URL/messages?beta=true\" \\",
+    "  -H \"Authorization: Bearer $UNI_API_KEY\" \\",
+    "  -H \"Content-Type: application/json\" \\",
+    "  -H \"anthropic-version: 2023-06-01\" \\",
+    "  -d '{",
+    "    \"model\": \"claude-sonnet-4-6\",",
+    "    \"max_tokens\": 128,",
+    "    \"messages\": [{\"role\":\"user\",\"content\":\"你好\"}]",
+    "  }'"
+  ].join("\n")
+};
+
 const IMAGE_EDITS_CURL: Record<Locale, string> = {
   en: [
     "curl -X POST \"$UNI_API_BASE_URL/images/edits\" \\",
@@ -156,6 +181,14 @@ const API_REFERENCE_CURL_EXAMPLES: Record<Locale, readonly ApiReferenceCurlExamp
       title: "Create a chat completion",
       description: "OpenAI-compatible chat generation with normal and streaming responses.",
       code: CHAT_COMPLETIONS_CURL.en
+    },
+    {
+      id: "messages",
+      method: "POST",
+      path: "/v1/messages",
+      title: "Create a message",
+      description: "Passes an Anthropic Messages request upstream while Uni API records usage and latency.",
+      code: MESSAGES_CURL.en
     },
     {
       id: "responses",
@@ -246,6 +279,14 @@ const API_REFERENCE_CURL_EXAMPLES: Record<Locale, readonly ApiReferenceCurlExamp
       title: "创建 Chat Completion",
       description: "OpenAI 兼容的对话生成接口，支持普通与流式响应。",
       code: CHAT_COMPLETIONS_CURL["zh-CN"]
+    },
+    {
+      id: "messages",
+      method: "POST",
+      path: "/v1/messages",
+      title: "创建 Message",
+      description: "透传 Anthropic Messages 请求到上游，同时由 Uni API 记录 usage 与延迟。",
+      code: MESSAGES_CURL["zh-CN"]
     },
     {
       id: "responses",
@@ -343,7 +384,7 @@ const DOCS_GROUPS: readonly DocsNavGroupDefinition[] = [
   {
     id: "api",
     title: { en: "API", "zh-CN": "API" },
-    pageIds: ["api-reference", "auth", "chat-completions", "responses", "image-generations", "image-edits"]
+    pageIds: ["api-reference", "auth", "chat-completions", "messages", "responses", "image-generations", "image-edits"]
   },
   {
     id: "console",
@@ -821,6 +862,128 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
                   </div>
                 </div>
               </>
+            )
+          }
+        ]
+      }
+    }
+  },
+  {
+    id: "messages",
+    slug: ["api", "messages"],
+    groupId: "api",
+    content: {
+      en: {
+        title: "Messages (v1/messages)",
+        description: "Pass-through endpoint for Anthropic Messages API requests.",
+        sections: [
+          {
+            id: "endpoint",
+            title: "Endpoint",
+            content: (
+              <CodeBlock
+                lang="http"
+                code={["POST /v1/messages", "Content-Type: application/json"].join("\n")}
+              />
+            )
+          },
+          {
+            id: "request",
+            title: "Request example",
+            content: <CodeBlock lang="bash" code={MESSAGES_CURL.en} />
+          },
+          {
+            id: "pass-through",
+            title: "Pass-through behavior",
+            content: (
+              <p>
+                Uni API forwards the request body, compatible headers, and query string upstream, then returns the
+                upstream response body unchanged. The gateway still authenticates your Uni API key and records usage.
+              </p>
+            )
+          },
+          {
+            id: "usage",
+            title: "Usage accounting",
+            content: (
+              <ul className="list-disc pl-5">
+                <li>
+                  Claude{" "}
+                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">input_tokens</code>,{" "}
+                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">
+                    cache_creation_input_tokens
+                  </code>
+                  , and{" "}
+                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">
+                    cache_read_input_tokens
+                  </code>{" "}
+                  are counted as input tokens.
+                </li>
+                <li>
+                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">
+                    cache_read_input_tokens
+                  </code>{" "}
+                  are recorded as cached tokens.
+                </li>
+              </ul>
+            )
+          }
+        ]
+      },
+      "zh-CN": {
+        title: "Messages（v1/messages）",
+        description: "面向 Anthropic Messages API 请求的透传端点。",
+        sections: [
+          {
+            id: "endpoint",
+            title: "端点",
+            content: (
+              <CodeBlock
+                lang="http"
+                code={["POST /v1/messages", "Content-Type: application/json"].join("\n")}
+              />
+            )
+          },
+          {
+            id: "request",
+            title: "请求示例",
+            content: <CodeBlock lang="bash" code={MESSAGES_CURL["zh-CN"]} />
+          },
+          {
+            id: "pass-through",
+            title: "透传行为",
+            content: (
+              <p>
+                Uni API 会将请求 body、兼容 headers 与 query string 转发到上游，并原样返回上游响应 body。网关仍会执行
+                Uni API key 鉴权并记录 usage。
+              </p>
+            )
+          },
+          {
+            id: "usage",
+            title: "Usage 计费",
+            content: (
+              <ul className="list-disc pl-5">
+                <li>
+                  Claude 的{" "}
+                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">input_tokens</code>{" "}
+                  、{" "}
+                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">
+                    cache_creation_input_tokens
+                  </code>{" "}
+                  和{" "}
+                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">
+                    cache_read_input_tokens
+                  </code>{" "}
+                  会计入输入 tokens。
+                </li>
+                <li>
+                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">
+                    cache_read_input_tokens
+                  </code>{" "}
+                  会记录为 cached tokens。
+                </li>
+              </ul>
             )
           }
         ]
