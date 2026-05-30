@@ -28,7 +28,7 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next ./.next
 
 RUN npm prune --omit=dev
-RUN mkdir -p .next/cache && chown -R app:app .next/cache
+RUN chown -R app:app .next
 
 ENV NODE_ENV=production
 ENV PORT=3000
