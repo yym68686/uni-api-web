@@ -31,6 +31,9 @@ const LOCALE_INIT_SCRIPT = `
     }
     if (locale) {
       document.documentElement.lang = locale;
+      try {
+        window.sessionStorage.setItem("uai_locale_hint", locale);
+      } catch (e) {}
     }
   } catch (e) {}
 })();

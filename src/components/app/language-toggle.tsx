@@ -5,7 +5,7 @@ import { Check, Languages } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import { LOCALE_COOKIE_NAME, type LocaleMode } from "@/lib/i18n/messages";
-import { useI18n } from "@/components/i18n/i18n-provider";
+import { rememberClientLocaleHint, useI18n } from "@/components/i18n/i18n-provider";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -43,8 +43,13 @@ export function LanguageToggle({ className, initialMode }: LanguageToggleProps) 
 
   function apply(next: LocaleMode) {
     setMode(next);
-    if (next === "auto") deleteCookie(LOCALE_COOKIE_NAME);
-    else setCookie(LOCALE_COOKIE_NAME, next);
+    if (next === "auto") {
+      deleteCookie(LOCALE_COOKIE_NAME);
+      rememberClientLocaleHint(null);
+    } else {
+      setCookie(LOCALE_COOKIE_NAME, next);
+      rememberClientLocaleHint(next);
+    }
     queueMicrotask(() => router.refresh());
   }
 
