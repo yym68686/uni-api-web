@@ -1,6 +1,12 @@
 @import "tailwindcss";
 @config "../../tailwind.config.ts";
 
+@property --uai-vt-r {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
 @layer base {
   :root {
     --background: 99% 0.004 250;
@@ -106,12 +112,6 @@
     background: oklch(var(--background));
     color: oklch(var(--foreground));
     font-feature-settings: "rlig" 1, "calt" 1;
-  }
-
-  @property --uai-vt-r {
-    syntax: "<length>";
-    inherits: true;
-    initial-value: 0px;
   }
 
   ::view-transition-group(root) {
