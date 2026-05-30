@@ -39,6 +39,9 @@ Endpoints:
 - `POST /v1/responses/compact`
 - `POST /v1/images/generations`
 - `POST /v1/images/edits`
+- `POST /v1/contents/generations/tasks`
+- `GET /v1/contents/generations/tasks/{task_id}`
+- `DELETE /v1/contents/generations/tasks/{task_id}`
 - `POST /v1/admin/announcements`
 
 Notes:

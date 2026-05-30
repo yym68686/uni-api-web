@@ -53,7 +53,7 @@ interface DocsNavGroupDefinition {
 
 interface ApiReferenceCurlExample {
   id: string;
-  method: "GET" | "POST";
+  method: "DELETE" | "GET" | "POST";
   path: string;
   title: string;
   description: string;
@@ -136,6 +136,71 @@ const IMAGE_EDITS_CURL: Record<Locale, string> = {
     "  -F model=gpt-image-2 \\",
     "  -F prompt=\"把产品渲染图调亮\" \\",
     "  -F image=@input.png"
+  ].join("\n")
+};
+
+const VIDEO_TASK_CREATE_CURL: Record<Locale, string> = {
+  en: [
+    "curl -X POST \"$UNI_API_BASE_URL/contents/generations/tasks\" \\",
+    "  -H \"Authorization: Bearer $UNI_API_KEY\" \\",
+    "  -H \"Content-Type: application/json\" \\",
+    "  -d '{",
+    "    \"model\": \"seedance-2-0\",",
+    "    \"content\": [",
+    "      {",
+    "        \"type\": \"text\",",
+    "        \"text\": \"A ginger cat sunbathes by a window, slow dolly-in, warm natural light, cinematic detail\"",
+    "      }",
+    "    ],",
+    "    \"ratio\": \"16:9\",",
+    "    \"duration\": 5,",
+    "    \"resolution\": \"720p\",",
+    "    \"generate_audio\": false,",
+    "    \"watermark\": false,",
+    "    \"seed\": -1",
+    "  }'"
+  ].join("\n"),
+  "zh-CN": [
+    "curl -X POST \"$UNI_API_BASE_URL/contents/generations/tasks\" \\",
+    "  -H \"Authorization: Bearer $UNI_API_KEY\" \\",
+    "  -H \"Content-Type: application/json\" \\",
+    "  -d '{",
+    "    \"model\": \"seedance-2-0\",",
+    "    \"content\": [",
+    "      {",
+    "        \"type\": \"text\",",
+    "        \"text\": \"一只橘猫在窗边晒太阳，镜头缓慢推进，温暖自然光，电影感，细节清晰\"",
+    "      }",
+    "    ],",
+    "    \"ratio\": \"16:9\",",
+    "    \"duration\": 5,",
+    "    \"resolution\": \"720p\",",
+    "    \"generate_audio\": false,",
+    "    \"watermark\": false,",
+    "    \"seed\": -1",
+    "  }'"
+  ].join("\n")
+};
+
+const VIDEO_TASK_GET_CURL: Record<Locale, string> = {
+  en: [
+    "curl \"$UNI_API_BASE_URL/contents/generations/tasks/cgt-your-task-id\" \\",
+    "  -H \"Authorization: Bearer $UNI_API_KEY\""
+  ].join("\n"),
+  "zh-CN": [
+    "curl \"$UNI_API_BASE_URL/contents/generations/tasks/cgt-your-task-id\" \\",
+    "  -H \"Authorization: Bearer $UNI_API_KEY\""
+  ].join("\n")
+};
+
+const VIDEO_TASK_DELETE_CURL: Record<Locale, string> = {
+  en: [
+    "curl -X DELETE \"$UNI_API_BASE_URL/contents/generations/tasks/cgt-your-task-id\" \\",
+    "  -H \"Authorization: Bearer $UNI_API_KEY\""
+  ].join("\n"),
+  "zh-CN": [
+    "curl -X DELETE \"$UNI_API_BASE_URL/contents/generations/tasks/cgt-your-task-id\" \\",
+    "  -H \"Authorization: Bearer $UNI_API_KEY\""
   ].join("\n")
 };
 
@@ -247,6 +312,30 @@ const API_REFERENCE_CURL_EXAMPLES: Record<Locale, readonly ApiReferenceCurlExamp
       title: "Edit an image",
       description: "Multipart image editing request; JSON and multipart bodies are forwarded upstream.",
       code: IMAGE_EDITS_CURL.en
+    },
+    {
+      id: "video-task-create",
+      method: "POST",
+      path: "/v1/contents/generations/tasks",
+      title: "Create a video task",
+      description: "Starts an asynchronous upstream video generation task.",
+      code: VIDEO_TASK_CREATE_CURL.en
+    },
+    {
+      id: "video-task-get",
+      method: "GET",
+      path: "/v1/contents/generations/tasks/{task_id}",
+      title: "Retrieve a video task",
+      description: "Polls a task until it succeeds, fails, or remains in progress.",
+      code: VIDEO_TASK_GET_CURL.en
+    },
+    {
+      id: "video-task-delete",
+      method: "DELETE",
+      path: "/v1/contents/generations/tasks/{task_id}",
+      title: "Delete a video task",
+      description: "Forwards cancellation or deletion to the same upstream task route.",
+      code: VIDEO_TASK_DELETE_CURL.en
     }
   ],
   "zh-CN": [
@@ -345,6 +434,30 @@ const API_REFERENCE_CURL_EXAMPLES: Record<Locale, readonly ApiReferenceCurlExamp
       title: "编辑图片",
       description: "Multipart 图片编辑请求；JSON 与 multipart body 都会转发到上游。",
       code: IMAGE_EDITS_CURL["zh-CN"]
+    },
+    {
+      id: "video-task-create",
+      method: "POST",
+      path: "/v1/contents/generations/tasks",
+      title: "创建视频任务",
+      description: "启动一个异步的上游视频生成任务。",
+      code: VIDEO_TASK_CREATE_CURL["zh-CN"]
+    },
+    {
+      id: "video-task-get",
+      method: "GET",
+      path: "/v1/contents/generations/tasks/{task_id}",
+      title: "查询视频任务",
+      description: "轮询任务，直到成功、失败或继续处理中。",
+      code: VIDEO_TASK_GET_CURL["zh-CN"]
+    },
+    {
+      id: "video-task-delete",
+      method: "DELETE",
+      path: "/v1/contents/generations/tasks/{task_id}",
+      title: "删除视频任务",
+      description: "把取消或删除请求转发到同一个上游任务路由。",
+      code: VIDEO_TASK_DELETE_CURL["zh-CN"]
     }
   ]
 };
@@ -384,7 +497,16 @@ const DOCS_GROUPS: readonly DocsNavGroupDefinition[] = [
   {
     id: "api",
     title: { en: "API", "zh-CN": "API" },
-    pageIds: ["api-reference", "auth", "chat-completions", "messages", "responses", "image-generations", "image-edits"]
+    pageIds: [
+      "api-reference",
+      "auth",
+      "chat-completions",
+      "messages",
+      "responses",
+      "image-generations",
+      "image-edits",
+      "video-generations"
+    ]
   },
   {
     id: "console",
@@ -1226,6 +1348,208 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
                 Uni API 会把原始请求 body 与兼容 headers 转发到上游，并返回上游状态码、body 与响应类型；支持 JSON 和
                 multipart form-data 请求。
               </p>
+            )
+          }
+        ]
+      }
+    }
+  },
+  {
+    id: "video-generations",
+    slug: ["api", "video-generations"],
+    groupId: "api",
+    content: {
+      en: {
+        title: "Video Generations",
+        description: "Asynchronous pass-through API for upstream video generation tasks.",
+        sections: [
+          {
+            id: "endpoints",
+            title: "Endpoints",
+            content: (
+              <CodeBlock
+                lang="http"
+                code={[
+                  "POST /v1/contents/generations/tasks",
+                  "GET /v1/contents/generations/tasks/{task_id}",
+                  "DELETE /v1/contents/generations/tasks/{task_id}",
+                  "Content-Type: application/json"
+                ].join("\n")}
+              />
+            )
+          },
+          {
+            id: "create",
+            title: "Create a task",
+            content: (
+              <>
+                <p>
+                  Send the upstream video request body as JSON. The{" "}
+                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">model</code> must be
+                  enabled for your workspace and routed to a channel that supports video task generation.
+                </p>
+                <CodeBlock lang="bash" code={VIDEO_TASK_CREATE_CURL.en} />
+              </>
+            )
+          },
+          {
+            id: "poll",
+            title: "Poll for the result",
+            content: (
+              <>
+                <p>
+                  The create response returns a task id. Poll that id until the upstream response reaches a terminal
+                  state. A successful response usually includes a video URL and a{" "}
+                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">usage</code> object.
+                </p>
+                <CodeBlock lang="bash" code={VIDEO_TASK_GET_CURL.en} />
+                <CodeBlock
+                  lang="json"
+                  className="mt-4"
+                  code={JSON.stringify(
+                    {
+                      id: "cgt-your-task-id",
+                      status: "succeeded",
+                      content: {
+                        video_url: "https://example.com/generated-video.mp4"
+                      },
+                      usage: {
+                        completion_tokens: 108900,
+                        total_tokens: 108900
+                      }
+                    },
+                    null,
+                    2
+                  )}
+                />
+              </>
+            )
+          },
+          {
+            id: "delete",
+            title: "Cancel or delete",
+            content: (
+              <>
+                <p>Use the delete route when the upstream provider supports task cancellation or deletion.</p>
+                <CodeBlock lang="bash" code={VIDEO_TASK_DELETE_CURL.en} />
+              </>
+            )
+          },
+          {
+            id: "pass-through",
+            title: "Pass-through and billing",
+            content: (
+              <ul className="list-disc pl-5">
+                <li>Uni API forwards the request body, compatible headers, and query string upstream.</li>
+                <li>Response status, body, and response type are returned from the upstream provider.</li>
+                <li>
+                  When a poll response returns{" "}
+                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">status: succeeded</code>{" "}
+                  with usage tokens, Uni API records the token usage once for billing and logs.
+                </li>
+                <li>
+                  If you query a task that was not created through this Uni API deployment, add{" "}
+                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">?model=...</code> so
+                  the gateway can route the poll request to the right upstream channel.
+                </li>
+              </ul>
+            )
+          }
+        ]
+      },
+      "zh-CN": {
+        title: "Video Generations",
+        description: "面向上游视频生成任务的异步透传 API。",
+        sections: [
+          {
+            id: "endpoints",
+            title: "端点",
+            content: (
+              <CodeBlock
+                lang="http"
+                code={[
+                  "POST /v1/contents/generations/tasks",
+                  "GET /v1/contents/generations/tasks/{task_id}",
+                  "DELETE /v1/contents/generations/tasks/{task_id}",
+                  "Content-Type: application/json"
+                ].join("\n")}
+              />
+            )
+          },
+          {
+            id: "create",
+            title: "创建任务",
+            content: (
+              <>
+                <p>
+                  直接用 JSON 发送上游视频请求体。{" "}
+                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">model</code>{" "}
+                  需要在当前工作区启用，并路由到支持视频任务生成的渠道。
+                </p>
+                <CodeBlock lang="bash" code={VIDEO_TASK_CREATE_CURL["zh-CN"]} />
+              </>
+            )
+          },
+          {
+            id: "poll",
+            title: "轮询结果",
+            content: (
+              <>
+                <p>
+                  创建接口会返回任务 id。用这个 id 轮询，直到上游返回终态。成功响应通常会包含视频 URL 和{" "}
+                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">usage</code> 对象。
+                </p>
+                <CodeBlock lang="bash" code={VIDEO_TASK_GET_CURL["zh-CN"]} />
+                <CodeBlock
+                  lang="json"
+                  className="mt-4"
+                  code={JSON.stringify(
+                    {
+                      id: "cgt-your-task-id",
+                      status: "succeeded",
+                      content: {
+                        video_url: "https://example.com/generated-video.mp4"
+                      },
+                      usage: {
+                        completion_tokens: 108900,
+                        total_tokens: 108900
+                      }
+                    },
+                    null,
+                    2
+                  )}
+                />
+              </>
+            )
+          },
+          {
+            id: "delete",
+            title: "取消或删除",
+            content: (
+              <>
+                <p>当上游提供方支持取消或删除任务时，使用 delete 路由转发请求。</p>
+                <CodeBlock lang="bash" code={VIDEO_TASK_DELETE_CURL["zh-CN"]} />
+              </>
+            )
+          },
+          {
+            id: "pass-through",
+            title: "透传与计费",
+            content: (
+              <ul className="list-disc pl-5">
+                <li>Uni API 会将请求 body、兼容 headers 与 query string 转发到上游。</li>
+                <li>响应状态码、body 与响应类型来自上游提供方。</li>
+                <li>
+                  当轮询响应返回{" "}
+                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">status: succeeded</code>{" "}
+                  且包含 usage tokens 时，Uni API 会为计费与日志记录一次 token 用量。
+                </li>
+                <li>
+                  如果查询的任务不是通过当前 Uni API 部署创建的，请附加{" "}
+                  <code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-foreground">?model=...</code>{" "}
+                  ，让网关能把轮询请求路由到正确的上游渠道。
+                </li>
+              </ul>
             )
           }
         ]
