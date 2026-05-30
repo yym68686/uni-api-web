@@ -2,6 +2,9 @@ import { NextResponse, type NextRequest } from "next/server";
 
 const LOCALE_COOKIE_NAME = "uai_locale";
 const SUPPORTED_DOCS_LOCALES = new Set(["zh-CN", "en"]);
+const SUPPORTED_LANDING_LOCALES = new Set(["zh-CN", "en"]);
+
+type Locale = "zh-CN" | "en";
 
 function isPrefetchRequest(request: NextRequest) {
   const headers = request.headers;
@@ -15,19 +18,41 @@ function isPrefetchRequest(request: NextRequest) {
   return false;
 }
 
-export function middleware(request: NextRequest) {
-  if (isPrefetchRequest(request)) return NextResponse.next();
+function normalizeLocale(value: string | null | undefined): Locale | null {
+  if (!value) return null;
+  const v = value.trim().toLowerCase();
+  if (v === "en" || v.startsWith("en-")) return "en";
+  if (v === "zh" || v.startsWith("zh-")) return "zh-CN";
+  return null;
+}
 
-  const pathname = request.nextUrl.pathname;
-  const segments = pathname.split("/").filter(Boolean);
-  const locale = segments[1];
+function detectLocaleFromAcceptLanguage(acceptLanguage: string | null | undefined): Locale {
+  const raw = (acceptLanguage ?? "").trim();
+  if (!raw) return "en";
 
-  if (!locale || !SUPPORTED_DOCS_LOCALES.has(locale)) return NextResponse.next();
+  for (const part of raw.split(",")) {
+    const tag = part.split(";")[0]?.trim();
+    const locale = normalizeLocale(tag);
+    if (locale) return locale;
+  }
 
-  const current = request.cookies.get(LOCALE_COOKIE_NAME)?.value;
-  if (current === locale) return NextResponse.next();
+  return "en";
+}
 
-  const response = NextResponse.next();
+function preferredLocale(request: NextRequest): Locale {
+  return (
+    normalizeLocale(request.cookies.get(LOCALE_COOKIE_NAME)?.value) ??
+    detectLocaleFromAcceptLanguage(request.headers.get("accept-language"))
+  );
+}
+
+function responseWithLocaleCookie(
+  request: NextRequest,
+  response: NextResponse,
+  locale: Locale
+) {
+  if (request.cookies.get(LOCALE_COOKIE_NAME)?.value === locale) return response;
+
   response.cookies.set(LOCALE_COOKIE_NAME, locale, {
     path: "/",
     sameSite: "lax",
@@ -36,6 +61,36 @@ export function middleware(request: NextRequest) {
   return response;
 }
 
+export function middleware(request: NextRequest) {
+  const pathname = request.nextUrl.pathname;
+
+  if (pathname === "/") {
+    const locale = preferredLocale(request);
+    const url = request.nextUrl.clone();
+    url.pathname = locale === "zh-CN" ? "/zh-CN" : "/en";
+    return responseWithLocaleCookie(request, NextResponse.redirect(url), locale);
+  }
+
+  if (isPrefetchRequest(request)) return NextResponse.next();
+
+  const segments = pathname.split("/").filter(Boolean);
+  const landingLocale = normalizeLocale(segments[0]);
+
+  if (
+    segments.length === 1 &&
+    landingLocale &&
+    SUPPORTED_LANDING_LOCALES.has(landingLocale)
+  ) {
+    return responseWithLocaleCookie(request, NextResponse.next(), landingLocale);
+  }
+
+  const docsLocale = normalizeLocale(segments[1]);
+
+  if (!docsLocale || !SUPPORTED_DOCS_LOCALES.has(docsLocale)) return NextResponse.next();
+
+  return responseWithLocaleCookie(request, NextResponse.next(), docsLocale);
+}
+
 export const config = {
-  matcher: ["/docs/:path*"]
+  matcher: ["/", "/en", "/zh-CN", "/docs/:path*"]
 };

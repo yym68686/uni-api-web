@@ -19,6 +19,23 @@ import { I18nProvider } from "@/components/i18n/i18n-provider";
 import { DataOceanTracker } from "@/components/analytics/dataocean-tracker";
 import { CurrencyProvider } from "@/components/currency/currency-provider";
 
+const LOCALE_INIT_SCRIPT = `
+(function () {
+  try {
+    var path = window.location.pathname || "/";
+    var locale = "";
+    if (path === "/zh-CN" || path.indexOf("/zh-CN/") === 0 || path.indexOf("/docs/zh-CN") === 0) {
+      locale = "zh-CN";
+    } else if (path === "/en" || path.indexOf("/en/") === 0 || path.indexOf("/docs/en") === 0) {
+      locale = "en";
+    }
+    if (locale) {
+      document.documentElement.lang = locale;
+    }
+  } catch (e) {}
+})();
+`.trim();
+
 const THEME_INIT_SCRIPT = `
 (function () {
   try {
@@ -44,6 +61,8 @@ const THEME_INIT_SCRIPT = `
   } catch (e) {}
 })();
 `.trim();
+
+const DOCUMENT_INIT_SCRIPT = `${LOCALE_INIT_SCRIPT}\n${THEME_INIT_SCRIPT}`;
 
 export function generateMetadata(): Metadata {
   const appName = getAppName();
@@ -79,7 +98,7 @@ export default async function RootLayout({ children }: RootLayoutProps) {
     >
       <head>
         <script
-          dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }}
+          dangerouslySetInnerHTML={{ __html: DOCUMENT_INIT_SCRIPT }}
         />
       </head>
       <body
