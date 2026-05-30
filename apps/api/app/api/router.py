@@ -27,6 +27,8 @@ from app.api.upstream_headers import _build_upstream_headers, _filter_upstream_r
 from app.auth import get_current_membership, get_current_user, require_admin
 from app.constants import ACCOUNT_TEMPORARILY_LIMITED_DETAIL
 from app.models.api_key import ApiKey
+from app.models.llm_channel import LlmChannel
+from app.models.llm_content_generation_task import LlmContentGenerationTask
 from app.models.membership import Membership
 from app.models.oauth_identity import OAuthIdentity
 from app.models.user import User
@@ -676,6 +678,155 @@ def _extract_usage_tokens(obj: dict) -> tuple[int, int, int, int] | None:
     return None
 
 
+def _parse_json_object(raw: bytes) -> dict | None:
+    try:
+        parsed = json.loads(raw.decode("utf-8"))
+    except Exception:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _extract_content_generation_task_id(raw: bytes) -> str | None:
+    obj = _parse_json_object(raw)
+    task_id = obj.get("id") if obj else None
+    if isinstance(task_id, str) and task_id.strip():
+        return task_id.strip()
+    return None
+
+
+def _extract_content_generation_status_and_usage(
+    raw: bytes,
+) -> tuple[str | None, tuple[int, int, int, int] | None]:
+    obj = _parse_json_object(raw)
+    if not obj:
+        return None, None
+    raw_status = obj.get("status")
+    status = raw_status.strip().lower() if isinstance(raw_status, str) and raw_status.strip() else None
+    return status, _extract_usage_tokens(obj)
+
+
+async def _remember_content_generation_task(
+    *,
+    task_id: str,
+    context: LlmProxyContext,
+    status: str | None = None,
+) -> None:
+    if not task_id:
+        return
+    try:
+        async with SessionLocal() as s:
+            row = await s.get(LlmContentGenerationTask, task_id)
+            now = dt.datetime.now(dt.timezone.utc)
+            if row is None:
+                row = LlmContentGenerationTask(
+                    upstream_task_id=task_id,
+                    org_id=context.org_id,
+                    user_id=context.user_id,
+                    api_key_id=context.api_key_id,
+                    channel_id=context.channel_id,
+                    model_id=context.model_id,
+                    status=status,
+                    created_at=now,
+                    updated_at=now,
+                )
+                s.add(row)
+            else:
+                row.updated_at = now
+                row.status = status or row.status
+                row.channel_id = context.channel_id or row.channel_id
+                row.api_key_id = row.api_key_id or context.api_key_id
+            await s.commit()
+    except Exception:
+        logger.exception("content generation task: remember failed")
+
+
+async def _record_content_generation_usage_once(
+    *,
+    task_id: str,
+    context: LlmProxyContext,
+    status: str | None,
+    usage_tokens: tuple[int, int, int, int] | None,
+    status_code: int,
+    total_duration_ms: int,
+    ttft_ms: int,
+    request_endpoint: str | None,
+) -> tuple[int, int, int, int, int]:
+    if status != "succeeded" or not usage_tokens:
+        return 0, 0, 0, 0, 0
+
+    input_tokens, cached_tokens, output_tokens, total_tokens = usage_tokens
+    if total_tokens <= 0:
+        return 0, 0, 0, 0, 0
+
+    cost_micros = estimate_cost_usd_micros(
+        pricing=context.pricing,
+        input_tokens=input_tokens,
+        cached_tokens=cached_tokens,
+        output_tokens=output_tokens,
+    )
+    now = dt.datetime.now(dt.timezone.utc)
+
+    try:
+        async with SessionLocal() as s:
+            row = (
+                await s.execute(
+                    select(LlmContentGenerationTask)
+                    .where(LlmContentGenerationTask.upstream_task_id == task_id)
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                row = LlmContentGenerationTask(
+                    upstream_task_id=task_id,
+                    org_id=context.org_id,
+                    user_id=context.user_id,
+                    api_key_id=context.api_key_id,
+                    channel_id=context.channel_id,
+                    model_id=context.model_id,
+                    created_at=now,
+                    updated_at=now,
+                )
+                s.add(row)
+
+            row.status = status
+            row.updated_at = now
+            if row.billed_at is not None:
+                await s.commit()
+                return 0, 0, 0, 0, 0
+
+            api_key_id = row.api_key_id or context.api_key_id
+            row.billed_at = now
+            row.billed_input_tokens = input_tokens
+            row.billed_cached_tokens = cached_tokens
+            row.billed_output_tokens = output_tokens
+            row.billed_total_tokens = total_tokens
+            row.billed_cost_usd_micros = cost_micros
+
+            await record_usage_event(
+                s,
+                org_id=context.org_id,
+                user_id=context.user_id,
+                api_key_id=api_key_id,
+                model_id=context.model_id,
+                ok=True,
+                status_code=status_code,
+                input_tokens=input_tokens,
+                cached_tokens=cached_tokens,
+                output_tokens=output_tokens,
+                total_tokens=total_tokens,
+                cost_usd_micros=cost_micros,
+                total_duration_ms=total_duration_ms,
+                ttft_ms=ttft_ms,
+                source_ip=context.source_ip,
+                request_endpoint=request_endpoint,
+                is_streaming=False,
+            )
+            return input_tokens, cached_tokens, output_tokens, total_tokens, cost_micros
+    except Exception:
+        logger.exception("content generation task: usage record failed")
+        return 0, 0, 0, 0, 0
+
+
 class _SseLineBuffer:
     def __init__(self) -> None:
         self._buffer = bytearray()
@@ -970,10 +1121,76 @@ async def _resolve_llm_proxy_context(
         upstream_base_url=str(channel.base_url).rstrip("/"),
         upstream_api_key=str(channel.api_key),
         pricing=await _resolve_usage_pricing(session, org_id=membership.org_id, cfg=cfg, model_id=model_id),
+        channel_id=getattr(channel, "id", None),
     )
 
     # Streaming responses can stay open for a long time; release the request-scoped
     # SQLAlchemy session before any upstream I/O so we do not pin a DB transaction.
+    await session.close()
+    return context
+
+
+async def _resolve_content_generation_task_context(
+    request: Request,
+    session: AsyncSession,
+    *,
+    task_id: str,
+    fallback_model_id: str | None = None,
+) -> LlmProxyContext:
+    auth = request.headers.get("authorization")
+    try:
+        api_key, user = await authenticate_api_key(session, authorization=auth)
+    except ValueError as e:
+        detail = str(e) or "unauthorized"
+        raise HTTPException(status_code=_auth_error_status(detail), detail=detail) from e
+
+    from app.storage.balance_math import remaining_usd_micros
+
+    credits_cents = int(getattr(user, "balance", 0) or 0)
+    spend_micros_total = int(getattr(user, "spend_usd_micros_total", 0) or 0)
+    if remaining_usd_micros(credits_usd_cents=credits_cents, spend_usd_micros_total=spend_micros_total) <= 0:
+        raise HTTPException(status_code=402, detail="insufficient balance")
+
+    membership = await _require_default_membership(session, user_id=user.id)
+    row = await session.get(LlmContentGenerationTask, task_id)
+    if row is not None:
+        if row.org_id != membership.org_id or row.user_id != user.id:
+            raise HTTPException(status_code=404, detail="content generation task not found")
+        model_id = str(row.model_id)
+    else:
+        model_id = (fallback_model_id or "").strip()
+        if not model_id:
+            raise HTTPException(status_code=404, detail="content generation task not found")
+
+    cfg = await get_model_config(session, org_id=membership.org_id, model_id=model_id)
+    if cfg and not cfg.enabled:
+        raise HTTPException(status_code=403, detail="model disabled")
+
+    channel = None
+    if row is not None and row.channel_id is not None:
+        channel = await session.get(LlmChannel, row.channel_id)
+        if channel is not None and channel.org_id != membership.org_id:
+            channel = None
+        if channel is None:
+            raise HTTPException(status_code=503, detail="task channel unavailable")
+    else:
+        channel = await pick_channel_for_group(session, org_id=membership.org_id, group_name=user.group_name)
+        if not channel:
+            raise HTTPException(status_code=503, detail="no channel configured")
+
+    context = LlmProxyContext(
+        api_key_id=api_key.id,
+        user_id=user.id,
+        user_email=str(user.email),
+        org_id=membership.org_id,
+        model_id=model_id,
+        source_ip=_extract_source_ip(request),
+        upstream_base_url=str(channel.base_url).rstrip("/"),
+        upstream_api_key=str(channel.api_key),
+        pricing=await _resolve_usage_pricing(session, org_id=membership.org_id, cfg=cfg, model_id=model_id),
+        channel_id=getattr(channel, "id", None),
+    )
+
     await session.close()
     return context
 
@@ -2503,6 +2720,123 @@ async def _proxy_responses_request(
     )
 
 
+async def _proxy_content_generation_task_request(
+    request: Request,
+    session: AsyncSession,
+    *,
+    method: str,
+    upstream_path: str,
+    task_id: str | None = None,
+):
+    method_upper = method.upper()
+    raw = await _read_request_body_or_499(request)
+
+    if method_upper == "POST":
+        parsed = _parse_llm_request(raw)
+        context = await _resolve_llm_proxy_context(request, session, model_id=parsed.model_id)
+    else:
+        fallback_model_id = request.query_params.get("model")
+        context = await _resolve_content_generation_task_context(
+            request,
+            session,
+            task_id=(task_id or "").strip(),
+            fallback_model_id=fallback_model_id,
+        )
+
+    _log_llm_request_received(request, context=context, stream=False)
+
+    upstream_url = _build_llm_upstream_url(
+        upstream_base_url=context.upstream_base_url,
+        upstream_path=upstream_path,
+        query=request.url.query,
+    )
+    headers = _build_upstream_headers(request, upstream_api_key=context.upstream_api_key)
+    timeout = _llm_upstream_timeout()
+
+    started = time.perf_counter()
+    ttft_ms = 0
+    total_ms = 0
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            async with client.stream(method_upper, upstream_url, headers=headers, content=raw) as res:
+                content_type = res.headers.get("content-type") or "application/json"
+                ok = res.status_code < 400
+
+                body_bytes = bytearray()
+                first = None
+                async for chunk in res.aiter_bytes():
+                    if first is None:
+                        first = time.perf_counter()
+                        ttft_ms = int((first - started) * 1000)
+                    body_bytes.extend(chunk)
+                total_ms = int((time.perf_counter() - started) * 1000)
+                upstream_headers = _filter_upstream_response_headers(dict(res.headers))
+    except httpx.HTTPError as exc:
+        error = await _record_upstream_http_error_usage(
+            request=request,
+            context=context,
+            exc=exc,
+            started=started,
+            is_streaming=False,
+        )
+        raise error from exc
+
+    body = bytes(body_bytes)
+    recorded_tokens = (0, 0, 0, 0, 0)
+    response_task_id = _extract_content_generation_task_id(body) if content_type.startswith("application/json") else None
+    effective_task_id = response_task_id or task_id
+
+    if ok and method_upper == "POST" and response_task_id:
+        await _remember_content_generation_task(task_id=response_task_id, context=context)
+    elif ok and method_upper == "DELETE" and effective_task_id:
+        await _remember_content_generation_task(task_id=effective_task_id, context=context, status="deleted")
+
+    if ok and method_upper == "GET" and effective_task_id and content_type.startswith("application/json"):
+        status, usage_tokens = _extract_content_generation_status_and_usage(body)
+        if status is not None:
+            await _remember_content_generation_task(task_id=effective_task_id, context=context, status=status)
+        recorded_tokens = await _record_content_generation_usage_once(
+            task_id=effective_task_id,
+            context=context,
+            status=status,
+            usage_tokens=usage_tokens,
+            status_code=int(res.status_code),
+            total_duration_ms=total_ms,
+            ttft_ms=ttft_ms,
+            request_endpoint=_request_endpoint(request),
+        )
+
+    if recorded_tokens == (0, 0, 0, 0, 0):
+        await _record_usage_event_best_effort(
+            org_id=context.org_id,
+            user_id=context.user_id,
+            api_key_id=context.api_key_id,
+            model_id=context.model_id,
+            ok=ok,
+            status_code=int(res.status_code),
+            input_tokens=0,
+            cached_tokens=0,
+            output_tokens=0,
+            total_tokens=0,
+            cost_usd_micros=0,
+            total_duration_ms=total_ms,
+            ttft_ms=ttft_ms,
+            source_ip=context.source_ip,
+            request_endpoint=_request_endpoint(request),
+            is_streaming=False,
+            recompute_cost=False,
+        )
+
+    upstream_headers.setdefault("cache-control", "no-cache")
+    return Response(
+        content=body,
+        status_code=int(res.status_code),
+        media_type=content_type,
+        headers=upstream_headers,
+    )
+
+
 @router.post("/responses")
 async def responses(request: Request, session: AsyncSession = Depends(get_db_session)):
     return await _proxy_responses_request(request, session, upstream_path="/responses")
@@ -2530,6 +2864,52 @@ async def image_edits(request: Request, session: AsyncSession = Depends(get_db_s
         session,
         upstream_path="/images/edits",
         allow_multipart=True,
+    )
+
+
+@router.post("/contents/generations/tasks")
+async def content_generation_tasks_create(request: Request, session: AsyncSession = Depends(get_db_session)):
+    return await _proxy_content_generation_task_request(
+        request,
+        session,
+        method="POST",
+        upstream_path="/contents/generations/tasks",
+    )
+
+
+@router.get("/contents/generations/tasks/{task_id}")
+async def content_generation_tasks_get(
+    task_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
+    safe_task_id = task_id.strip()
+    if not safe_task_id or len(safe_task_id) > 128:
+        raise HTTPException(status_code=400, detail="invalid task id")
+    return await _proxy_content_generation_task_request(
+        request,
+        session,
+        method="GET",
+        upstream_path=f"/contents/generations/tasks/{safe_task_id}",
+        task_id=safe_task_id,
+    )
+
+
+@router.delete("/contents/generations/tasks/{task_id}")
+async def content_generation_tasks_delete(
+    task_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+):
+    safe_task_id = task_id.strip()
+    if not safe_task_id or len(safe_task_id) > 128:
+        raise HTTPException(status_code=400, detail="invalid task id")
+    return await _proxy_content_generation_task_request(
+        request,
+        session,
+        method="DELETE",
+        upstream_path=f"/contents/generations/tasks/{safe_task_id}",
+        task_id=safe_task_id,
     )
 
 

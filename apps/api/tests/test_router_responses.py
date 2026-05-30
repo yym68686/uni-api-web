@@ -9,9 +9,14 @@ import app.api.router as router_module
 from app.api.router import (
     _SseLineBuffer,
     _build_llm_upstream_url,
+    _extract_content_generation_status_and_usage,
+    _extract_content_generation_task_id,
     _extract_usage_tokens_from_sse_line,
     _parse_proxy_request,
     _read_request_body_or_499,
+    content_generation_tasks_create,
+    content_generation_tasks_delete,
+    content_generation_tasks_get,
     image_edits,
     image_generations,
     messages,
@@ -28,12 +33,25 @@ class ResponsesRoutesTests(unittest.IsolatedAsyncioTestCase):
             for route in router.routes
             if "POST" in getattr(route, "methods", set())
         }
+        get_paths = {
+            route.path
+            for route in router.routes
+            if "GET" in getattr(route, "methods", set())
+        }
+        delete_paths = {
+            route.path
+            for route in router.routes
+            if "DELETE" in getattr(route, "methods", set())
+        }
 
         self.assertIn("/responses", post_paths)
         self.assertIn("/responses/compact", post_paths)
         self.assertIn("/messages", post_paths)
         self.assertIn("/images/generations", post_paths)
         self.assertIn("/images/edits", post_paths)
+        self.assertIn("/contents/generations/tasks", post_paths)
+        self.assertIn("/contents/generations/tasks/{task_id}", get_paths)
+        self.assertIn("/contents/generations/tasks/{task_id}", delete_paths)
 
     async def test_read_request_body_maps_client_disconnect_to_499(self) -> None:
         class DisconnectedRequest:
@@ -160,6 +178,102 @@ class ResponsesRoutesTests(unittest.IsolatedAsyncioTestCase):
             router_module._proxy_responses_request = original
 
         self.assertIs(result, sentinel)
+
+    async def test_content_generation_create_uses_task_upstream_path(self) -> None:
+        request = object()
+        session = object()
+        sentinel = object()
+        original = router_module._proxy_content_generation_task_request
+
+        async def fake_proxy(
+            request_arg: object,
+            session_arg: object,
+            *,
+            method: str,
+            upstream_path: str,
+            task_id: str | None = None,
+        ) -> object:
+            self.assertIs(request_arg, request)
+            self.assertIs(session_arg, session)
+            self.assertEqual(method, "POST")
+            self.assertEqual(upstream_path, "/contents/generations/tasks")
+            self.assertIsNone(task_id)
+            return sentinel
+
+        router_module._proxy_content_generation_task_request = fake_proxy
+        try:
+            result = await content_generation_tasks_create(request, session)  # type: ignore[arg-type]
+        finally:
+            router_module._proxy_content_generation_task_request = original
+
+        self.assertIs(result, sentinel)
+
+    async def test_content_generation_get_uses_task_upstream_path(self) -> None:
+        request = object()
+        session = object()
+        sentinel = object()
+        original = router_module._proxy_content_generation_task_request
+
+        async def fake_proxy(
+            request_arg: object,
+            session_arg: object,
+            *,
+            method: str,
+            upstream_path: str,
+            task_id: str | None = None,
+        ) -> object:
+            self.assertIs(request_arg, request)
+            self.assertIs(session_arg, session)
+            self.assertEqual(method, "GET")
+            self.assertEqual(upstream_path, "/contents/generations/tasks/cgt-test")
+            self.assertEqual(task_id, "cgt-test")
+            return sentinel
+
+        router_module._proxy_content_generation_task_request = fake_proxy
+        try:
+            result = await content_generation_tasks_get("cgt-test", request, session)  # type: ignore[arg-type]
+        finally:
+            router_module._proxy_content_generation_task_request = original
+
+        self.assertIs(result, sentinel)
+
+    async def test_content_generation_delete_uses_task_upstream_path(self) -> None:
+        request = object()
+        session = object()
+        sentinel = object()
+        original = router_module._proxy_content_generation_task_request
+
+        async def fake_proxy(
+            request_arg: object,
+            session_arg: object,
+            *,
+            method: str,
+            upstream_path: str,
+            task_id: str | None = None,
+        ) -> object:
+            self.assertIs(request_arg, request)
+            self.assertIs(session_arg, session)
+            self.assertEqual(method, "DELETE")
+            self.assertEqual(upstream_path, "/contents/generations/tasks/cgt-test")
+            self.assertEqual(task_id, "cgt-test")
+            return sentinel
+
+        router_module._proxy_content_generation_task_request = fake_proxy
+        try:
+            result = await content_generation_tasks_delete("cgt-test", request, session)  # type: ignore[arg-type]
+        finally:
+            router_module._proxy_content_generation_task_request = original
+
+        self.assertIs(result, sentinel)
+
+    def test_extract_content_generation_task_response_usage(self) -> None:
+        raw = (
+            b'{"id":"cgt-test","status":"succeeded",'
+            b'"usage":{"completion_tokens":108900,"total_tokens":108900}}'
+        )
+
+        self.assertEqual(_extract_content_generation_task_id(raw), "cgt-test")
+        self.assertEqual(_extract_content_generation_status_and_usage(raw), ("succeeded", (0, 0, 108900, 108900)))
 
     def test_parse_proxy_request_reads_multipart_model_without_rewriting_body(self) -> None:
         boundary = "----uni-api-test-boundary"

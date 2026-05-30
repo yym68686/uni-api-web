@@ -630,6 +630,37 @@ def create_app() -> FastAPI:
                 "CREATE INDEX IF NOT EXISTS ix_llm_usage_events_org_model_created_at "
                 "ON llm_usage_events(org_id, model_id, created_at)"
             )
+            await conn.exec_driver_sql(
+                "CREATE TABLE IF NOT EXISTS llm_content_generation_tasks ("
+                "  upstream_task_id varchar(128) PRIMARY KEY,"
+                "  org_id uuid NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,"
+                "  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,"
+                "  api_key_id uuid REFERENCES api_keys(id) ON DELETE SET NULL,"
+                "  channel_id uuid REFERENCES llm_channels(id) ON DELETE SET NULL,"
+                "  model_id varchar(200) NOT NULL,"
+                "  status varchar(32),"
+                "  created_at timestamptz NOT NULL DEFAULT now(),"
+                "  updated_at timestamptz NOT NULL DEFAULT now(),"
+                "  billed_at timestamptz,"
+                "  billed_input_tokens integer NOT NULL DEFAULT 0,"
+                "  billed_cached_tokens integer NOT NULL DEFAULT 0,"
+                "  billed_output_tokens integer NOT NULL DEFAULT 0,"
+                "  billed_total_tokens integer NOT NULL DEFAULT 0,"
+                "  billed_cost_usd_micros integer NOT NULL DEFAULT 0"
+                ")"
+            )
+            await conn.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_llm_content_generation_tasks_org_created_at "
+                "ON llm_content_generation_tasks(org_id, created_at)"
+            )
+            await conn.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_llm_content_generation_tasks_user_created_at "
+                "ON llm_content_generation_tasks(user_id, created_at)"
+            )
+            await conn.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_llm_content_generation_tasks_billed_at "
+                "ON llm_content_generation_tasks(billed_at)"
+            )
 
             await conn.exec_driver_sql(
                 "ALTER TABLE IF EXISTS email_verification_codes "

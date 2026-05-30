@@ -21,6 +21,7 @@ class LlmProxyContext:
     upstream_base_url: str
     upstream_api_key: str
     pricing: UsagePricing
+    channel_id: uuid.UUID | None = None
 
 
 def estimate_cost_usd_micros(

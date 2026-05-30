@@ -8,6 +8,7 @@ from app.models.email_verification_code import EmailVerificationCode as EmailVer
 from app.models.invite_visit import InviteVisit as InviteVisit
 from app.models.llm_channel import LlmChannel as LlmChannel
 from app.models.llm_channel_group import LlmChannelGroup as LlmChannelGroup
+from app.models.llm_content_generation_task import LlmContentGenerationTask as LlmContentGenerationTask
 from app.models.llm_model_config import LlmModelConfig as LlmModelConfig
 from app.models.llm_model_pricing_rule import LlmModelPricingRule as LlmModelPricingRule
 from app.models.llm_usage_event import LlmUsageEvent as LlmUsageEvent
