@@ -28,6 +28,9 @@ import { getRequestLocale } from "@/lib/i18n/server";
 
 const landingModelPricing = getLandingModelPricingEntries();
 
+export const dynamic = "force-static";
+export const revalidate = 60;
+
 function formatUsdPerM(value: string | null) {
   if (!value) return "—";
   return `$${value}`;
