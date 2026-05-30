@@ -1,7 +1,8 @@
 import Link from "next/link";
 
-import { CodeBlock } from "@/components/docs/code-block";
+import { CodeBlock as ClientCodeBlock } from "@/components/docs/code-block";
 import { Badge } from "@/components/ui/badge";
+import { getPublicApiBaseUrl } from "@/lib/app-config";
 import { type Locale, LOCALES } from "@/lib/i18n/messages";
 import { cn } from "@/lib/utils";
 
@@ -64,6 +65,22 @@ interface ApiReferenceCurlExamplesProps {
   examples: readonly ApiReferenceCurlExample[];
 }
 
+interface DocsCodeBlockProps {
+  code: string;
+  lang?: string;
+  className?: string;
+}
+
+function resolveDocsCode(code: string) {
+  const publicApiBaseUrl = getPublicApiBaseUrl();
+  if (!publicApiBaseUrl) return code;
+  return code.replace(/\$\{BASE_URL\}|\$BASE_URL/g, publicApiBaseUrl);
+}
+
+function CodeBlock({ code, lang, className }: DocsCodeBlockProps) {
+  return <ClientCodeBlock code={resolveDocsCode(code)} lang={lang} className={className} />;
+}
+
 function docsHref(locale: Locale, slug: readonly string[]) {
   const rest = slug.length > 0 ? `/${slug.join("/")}` : "";
   return `/docs/${locale}${rest}`;
@@ -78,8 +95,8 @@ export function parseDocsLocale(value: string): Locale | null {
 
 const CHAT_COMPLETIONS_CURL: Record<Locale, string> = {
   en: [
-    "curl \"$UNI_API_BASE_URL/chat/completions\" \\",
-    "  -H \"Authorization: Bearer $UNI_API_KEY\" \\",
+    "curl \"$BASE_URL/chat/completions\" \\",
+    "  -H \"Authorization: Bearer $API_KEY\" \\",
     "  -H \"Content-Type: application/json\" \\",
     "  -d '{",
     "    \"model\": \"gpt-5.5\",",
@@ -87,8 +104,8 @@ const CHAT_COMPLETIONS_CURL: Record<Locale, string> = {
     "  }'"
   ].join("\n"),
   "zh-CN": [
-    "curl \"$UNI_API_BASE_URL/chat/completions\" \\",
-    "  -H \"Authorization: Bearer $UNI_API_KEY\" \\",
+    "curl \"$BASE_URL/chat/completions\" \\",
+    "  -H \"Authorization: Bearer $API_KEY\" \\",
     "  -H \"Content-Type: application/json\" \\",
     "  -d '{",
     "    \"model\": \"gpt-5.5\",",
@@ -99,8 +116,8 @@ const CHAT_COMPLETIONS_CURL: Record<Locale, string> = {
 
 const MESSAGES_CURL: Record<Locale, string> = {
   en: [
-    "curl \"$UNI_API_BASE_URL/messages?beta=true\" \\",
-    "  -H \"Authorization: Bearer $UNI_API_KEY\" \\",
+    "curl \"$BASE_URL/messages?beta=true\" \\",
+    "  -H \"Authorization: Bearer $API_KEY\" \\",
     "  -H \"Content-Type: application/json\" \\",
     "  -H \"anthropic-version: 2023-06-01\" \\",
     "  -d '{",
@@ -110,8 +127,8 @@ const MESSAGES_CURL: Record<Locale, string> = {
     "  }'"
   ].join("\n"),
   "zh-CN": [
-    "curl \"$UNI_API_BASE_URL/messages?beta=true\" \\",
-    "  -H \"Authorization: Bearer $UNI_API_KEY\" \\",
+    "curl \"$BASE_URL/messages?beta=true\" \\",
+    "  -H \"Authorization: Bearer $API_KEY\" \\",
     "  -H \"Content-Type: application/json\" \\",
     "  -H \"anthropic-version: 2023-06-01\" \\",
     "  -d '{",
@@ -124,15 +141,15 @@ const MESSAGES_CURL: Record<Locale, string> = {
 
 const IMAGE_EDITS_CURL: Record<Locale, string> = {
   en: [
-    "curl -X POST \"$UNI_API_BASE_URL/images/edits\" \\",
-    "  -H \"Authorization: Bearer $UNI_API_KEY\" \\",
+    "curl -X POST \"$BASE_URL/images/edits\" \\",
+    "  -H \"Authorization: Bearer $API_KEY\" \\",
     "  -F model=gpt-image-2 \\",
     "  -F prompt=\"Make the product render brighter\" \\",
     "  -F image=@input.png"
   ].join("\n"),
   "zh-CN": [
-    "curl -X POST \"$UNI_API_BASE_URL/images/edits\" \\",
-    "  -H \"Authorization: Bearer $UNI_API_KEY\" \\",
+    "curl -X POST \"$BASE_URL/images/edits\" \\",
+    "  -H \"Authorization: Bearer $API_KEY\" \\",
     "  -F model=gpt-image-2 \\",
     "  -F prompt=\"把产品渲染图调亮\" \\",
     "  -F image=@input.png"
@@ -141,8 +158,8 @@ const IMAGE_EDITS_CURL: Record<Locale, string> = {
 
 const VIDEO_TASK_CREATE_CURL: Record<Locale, string> = {
   en: [
-    "curl -X POST \"$UNI_API_BASE_URL/contents/generations/tasks\" \\",
-    "  -H \"Authorization: Bearer $UNI_API_KEY\" \\",
+    "curl -X POST \"$BASE_URL/contents/generations/tasks\" \\",
+    "  -H \"Authorization: Bearer $API_KEY\" \\",
     "  -H \"Content-Type: application/json\" \\",
     "  -d '{",
     "    \"model\": \"seedance-2-0\",",
@@ -161,8 +178,8 @@ const VIDEO_TASK_CREATE_CURL: Record<Locale, string> = {
     "  }'"
   ].join("\n"),
   "zh-CN": [
-    "curl -X POST \"$UNI_API_BASE_URL/contents/generations/tasks\" \\",
-    "  -H \"Authorization: Bearer $UNI_API_KEY\" \\",
+    "curl -X POST \"$BASE_URL/contents/generations/tasks\" \\",
+    "  -H \"Authorization: Bearer $API_KEY\" \\",
     "  -H \"Content-Type: application/json\" \\",
     "  -d '{",
     "    \"model\": \"seedance-2-0\",",
@@ -184,34 +201,34 @@ const VIDEO_TASK_CREATE_CURL: Record<Locale, string> = {
 
 const VIDEO_TASK_GET_CURL: Record<Locale, string> = {
   en: [
-    "curl \"$UNI_API_BASE_URL/contents/generations/tasks/cgt-your-task-id\" \\",
-    "  -H \"Authorization: Bearer $UNI_API_KEY\""
+    "curl \"$BASE_URL/contents/generations/tasks/cgt-your-task-id\" \\",
+    "  -H \"Authorization: Bearer $API_KEY\""
   ].join("\n"),
   "zh-CN": [
-    "curl \"$UNI_API_BASE_URL/contents/generations/tasks/cgt-your-task-id\" \\",
-    "  -H \"Authorization: Bearer $UNI_API_KEY\""
+    "curl \"$BASE_URL/contents/generations/tasks/cgt-your-task-id\" \\",
+    "  -H \"Authorization: Bearer $API_KEY\""
   ].join("\n")
 };
 
 const VIDEO_TASK_DELETE_CURL: Record<Locale, string> = {
   en: [
-    "curl -X DELETE \"$UNI_API_BASE_URL/contents/generations/tasks/cgt-your-task-id\" \\",
-    "  -H \"Authorization: Bearer $UNI_API_KEY\""
+    "curl -X DELETE \"$BASE_URL/contents/generations/tasks/cgt-your-task-id\" \\",
+    "  -H \"Authorization: Bearer $API_KEY\""
   ].join("\n"),
   "zh-CN": [
-    "curl -X DELETE \"$UNI_API_BASE_URL/contents/generations/tasks/cgt-your-task-id\" \\",
-    "  -H \"Authorization: Bearer $UNI_API_KEY\""
+    "curl -X DELETE \"$BASE_URL/contents/generations/tasks/cgt-your-task-id\" \\",
+    "  -H \"Authorization: Bearer $API_KEY\""
   ].join("\n")
 };
 
 const API_REFERENCE_ENV_CURL: Record<Locale, string> = {
   en: [
-    "export UNI_API_BASE_URL=\"https://api.0-0.pro/v1\"",
-    "export UNI_API_KEY=\"<YOUR_API_KEY>\""
+    "export BASE_URL=\"$BASE_URL\"",
+    "export API_KEY=\"<YOUR_API_KEY>\""
   ].join("\n"),
   "zh-CN": [
-    "export UNI_API_BASE_URL=\"https://api.0-0.pro/v1\"",
-    "export UNI_API_KEY=\"<YOUR_API_KEY>\""
+    "export BASE_URL=\"$BASE_URL\"",
+    "export API_KEY=\"<YOUR_API_KEY>\""
   ].join("\n")
 };
 
@@ -224,8 +241,8 @@ const API_REFERENCE_CURL_EXAMPLES: Record<Locale, readonly ApiReferenceCurlExamp
       title: "List enabled models",
       description: "Returns the OpenAI-compatible model list available to your API key.",
       code: [
-        "curl \"$UNI_API_BASE_URL/models\" \\",
-        "  -H \"Authorization: Bearer $UNI_API_KEY\""
+        "curl \"$BASE_URL/models\" \\",
+        "  -H \"Authorization: Bearer $API_KEY\""
       ].join("\n")
     },
     {
@@ -235,8 +252,8 @@ const API_REFERENCE_CURL_EXAMPLES: Record<Locale, readonly ApiReferenceCurlExamp
       title: "Retrieve a model",
       description: "Checks whether a single model is available for the current workspace and group.",
       code: [
-        "curl \"$UNI_API_BASE_URL/models/gpt-5.5\" \\",
-        "  -H \"Authorization: Bearer $UNI_API_KEY\""
+        "curl \"$BASE_URL/models/gpt-5.5\" \\",
+        "  -H \"Authorization: Bearer $API_KEY\""
       ].join("\n")
     },
     {
@@ -262,8 +279,8 @@ const API_REFERENCE_CURL_EXAMPLES: Record<Locale, readonly ApiReferenceCurlExamp
       title: "Create a response",
       description: "Passes a Responses API request upstream while Uni API records usage and latency.",
       code: [
-        "curl \"$UNI_API_BASE_URL/responses\" \\",
-        "  -H \"Authorization: Bearer $UNI_API_KEY\" \\",
+        "curl \"$BASE_URL/responses\" \\",
+        "  -H \"Authorization: Bearer $API_KEY\" \\",
         "  -H \"Content-Type: application/json\" \\",
         "  -d '{",
         "    \"model\": \"gpt-5.5\",",
@@ -278,8 +295,8 @@ const API_REFERENCE_CURL_EXAMPLES: Record<Locale, readonly ApiReferenceCurlExamp
       title: "Compact a response context",
       description: "Pass-through endpoint for upstream context compaction flows.",
       code: [
-        "curl \"$UNI_API_BASE_URL/responses/compact\" \\",
-        "  -H \"Authorization: Bearer $UNI_API_KEY\" \\",
+        "curl \"$BASE_URL/responses/compact\" \\",
+        "  -H \"Authorization: Bearer $API_KEY\" \\",
         "  -H \"Content-Type: application/json\" \\",
         "  -d '{",
         "    \"model\": \"gpt-5.5\",",
@@ -294,8 +311,8 @@ const API_REFERENCE_CURL_EXAMPLES: Record<Locale, readonly ApiReferenceCurlExamp
       title: "Generate an image",
       description: "Forwards an image generation request to the selected upstream model.",
       code: [
-        "curl \"$UNI_API_BASE_URL/images/generations\" \\",
-        "  -H \"Authorization: Bearer $UNI_API_KEY\" \\",
+        "curl \"$BASE_URL/images/generations\" \\",
+        "  -H \"Authorization: Bearer $API_KEY\" \\",
         "  -H \"Content-Type: application/json\" \\",
         "  -d '{",
         "    \"model\": \"gpt-image-2\",",
@@ -346,8 +363,8 @@ const API_REFERENCE_CURL_EXAMPLES: Record<Locale, readonly ApiReferenceCurlExamp
       title: "列出可用模型",
       description: "返回当前 API Key 可用的 OpenAI 兼容模型列表。",
       code: [
-        "curl \"$UNI_API_BASE_URL/models\" \\",
-        "  -H \"Authorization: Bearer $UNI_API_KEY\""
+        "curl \"$BASE_URL/models\" \\",
+        "  -H \"Authorization: Bearer $API_KEY\""
       ].join("\n")
     },
     {
@@ -357,8 +374,8 @@ const API_REFERENCE_CURL_EXAMPLES: Record<Locale, readonly ApiReferenceCurlExamp
       title: "获取单个模型",
       description: "检查某个模型是否对当前工作区与分组可用。",
       code: [
-        "curl \"$UNI_API_BASE_URL/models/gpt-5.5\" \\",
-        "  -H \"Authorization: Bearer $UNI_API_KEY\""
+        "curl \"$BASE_URL/models/gpt-5.5\" \\",
+        "  -H \"Authorization: Bearer $API_KEY\""
       ].join("\n")
     },
     {
@@ -384,8 +401,8 @@ const API_REFERENCE_CURL_EXAMPLES: Record<Locale, readonly ApiReferenceCurlExamp
       title: "创建 Response",
       description: "透传 Responses API 请求到上游，同时由 Uni API 记录 usage 与延迟。",
       code: [
-        "curl \"$UNI_API_BASE_URL/responses\" \\",
-        "  -H \"Authorization: Bearer $UNI_API_KEY\" \\",
+        "curl \"$BASE_URL/responses\" \\",
+        "  -H \"Authorization: Bearer $API_KEY\" \\",
         "  -H \"Content-Type: application/json\" \\",
         "  -d '{",
         "    \"model\": \"gpt-5.5\",",
@@ -400,8 +417,8 @@ const API_REFERENCE_CURL_EXAMPLES: Record<Locale, readonly ApiReferenceCurlExamp
       title: "压缩 Response 上下文",
       description: "面向上游上下文压缩流程的透传端点。",
       code: [
-        "curl \"$UNI_API_BASE_URL/responses/compact\" \\",
-        "  -H \"Authorization: Bearer $UNI_API_KEY\" \\",
+        "curl \"$BASE_URL/responses/compact\" \\",
+        "  -H \"Authorization: Bearer $API_KEY\" \\",
         "  -H \"Content-Type: application/json\" \\",
         "  -d '{",
         "    \"model\": \"gpt-5.5\",",
@@ -416,8 +433,8 @@ const API_REFERENCE_CURL_EXAMPLES: Record<Locale, readonly ApiReferenceCurlExamp
       title: "生成图片",
       description: "把图片生成请求转发到指定上游模型。",
       code: [
-        "curl \"$UNI_API_BASE_URL/images/generations\" \\",
-        "  -H \"Authorization: Bearer $UNI_API_KEY\" \\",
+        "curl \"$BASE_URL/images/generations\" \\",
+        "  -H \"Authorization: Bearer $API_KEY\" \\",
         "  -H \"Content-Type: application/json\" \\",
         "  -d '{",
         "    \"model\": \"gpt-image-2\",",
@@ -1757,7 +1774,7 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
                     "",
                     "[model_providers.OpenAI]",
                     'name = "OpenAI"',
-                    'base_url = "https://api.0-0.pro/v1"',
+                    'base_url = "$BASE_URL"',
                     'wire_api = "responses"',
                     "requires_openai_auth = true",
                     "# End added block"
@@ -1775,7 +1792,7 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
                     "",
                     "[model_providers.OpenAI]",
                     'name = "OpenAI"',
-                    'base_url = "https://api.0-0.pro/v1"',
+                    'base_url = "$BASE_URL"',
                     'wire_api = "responses"',
                     "requires_openai_auth = true"
                   ].join("\n")}
@@ -1925,7 +1942,7 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
                     "",
                     "[model_providers.OpenAI]",
                     'name = "OpenAI"',
-                    'base_url = "https://api.0-0.pro/v1"',
+                    'base_url = "$BASE_URL"',
                     'wire_api = "responses"',
                     "requires_openai_auth = true",
                     "# 新增结束"
@@ -1942,7 +1959,7 @@ const DOCS_PAGES: readonly DocsPageDefinition[] = [
                     "",
                     "[model_providers.OpenAI]",
                     'name = "OpenAI"',
-                    'base_url = "https://api.0-0.pro/v1"',
+                    'base_url = "$BASE_URL"',
                     'wire_api = "responses"',
                     "requires_openai_auth = true"
                   ].join("\n")}
