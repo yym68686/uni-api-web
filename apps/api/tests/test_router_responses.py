@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+import uuid
 
 from fastapi import HTTPException
 from starlette.requests import ClientDisconnect
@@ -12,7 +13,9 @@ from app.api.router import (
     _extract_content_generation_status_and_usage,
     _extract_content_generation_task_id,
     _extract_usage_tokens_from_sse_line,
+    _parse_content_generation_task_id_timestamp,
     _parse_proxy_request,
+    _proxy_content_generation_task_request,
     _read_request_body_or_499,
     content_generation_tasks_create,
     content_generation_tasks_delete,
@@ -274,6 +277,117 @@ class ResponsesRoutesTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(_extract_content_generation_task_id(raw), "cgt-test")
         self.assertEqual(_extract_content_generation_status_and_usage(raw), ("succeeded", (0, 0, 108900, 108900)))
+
+    def test_parse_content_generation_task_id_timestamp_as_beijing_time(self) -> None:
+        parsed = _parse_content_generation_task_id_timestamp("cgt-20260530233354-fmfxq")
+
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed.isoformat(), "2026-05-30T15:33:54+00:00")
+
+    async def test_content_generation_create_remembers_text_plain_json_task_response(self) -> None:
+        class DummyHeaders:
+            raw = [(b"content-type", b"application/json")]
+
+            def get(self, name: str, default: str | None = None) -> str | None:
+                return {"content-type": "application/json"}.get(name.lower(), default)
+
+        class DummyUrl:
+            path = "/v1/contents/generations/tasks"
+            query = ""
+
+        class DummyRequest:
+            method = "POST"
+            headers = DummyHeaders()
+            url = DummyUrl()
+
+            async def body(self) -> bytes:
+                return b'{"model":"seedance-2-0","content":[{"type":"text","text":"cat"}]}'
+
+        class DummyStreamResponse:
+            status_code = 200
+            headers = {"content-type": "text/plain; charset=utf-8"}
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb) -> None:
+                return None
+
+            async def aiter_bytes(self):
+                yield b'{"id":"cgt-text-plain"}'
+
+        class DummyClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb) -> None:
+                return None
+
+            def stream(self, method, url, headers, content):
+                self.method = method
+                self.url = url
+                self.headers = headers
+                self.content = content
+                return DummyStreamResponse()
+
+        class DummyAsyncClientFactory:
+            last_client: DummyClient | None = None
+
+            def __call__(self, *, timeout):
+                _ = timeout
+                self.last_client = DummyClient()
+                return self.last_client
+
+        context = router_module.LlmProxyContext(
+            api_key_id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+            user_email="user@example.com",
+            org_id=uuid.uuid4(),
+            model_id="seedance-2-0",
+            source_ip="127.0.0.1",
+            upstream_base_url="https://upstream.example/v1",
+            upstream_api_key="upstream-key",
+            pricing=router_module.UsagePricing(None, None),
+            channel_id=uuid.uuid4(),
+        )
+        remembered: list[str] = []
+        factory = DummyAsyncClientFactory()
+        original_resolve = router_module._resolve_llm_proxy_context
+        original_remember = router_module._remember_content_generation_task
+        original_record = router_module._record_usage_event_best_effort
+        original_async_client = router_module.httpx.AsyncClient
+
+        async def fake_resolve(request, session, *, model_id: str):
+            self.assertEqual(model_id, "seedance-2-0")
+            return context
+
+        async def fake_remember(*, task_id: str, context: object, status: str | None = None) -> None:
+            _ = context, status
+            remembered.append(task_id)
+
+        async def fake_record(**kwargs) -> None:
+            _ = kwargs
+
+        router_module._resolve_llm_proxy_context = fake_resolve
+        router_module._remember_content_generation_task = fake_remember
+        router_module._record_usage_event_best_effort = fake_record
+        router_module.httpx.AsyncClient = factory  # type: ignore[assignment]
+        try:
+            response = await _proxy_content_generation_task_request(
+                DummyRequest(),  # type: ignore[arg-type]
+                object(),  # type: ignore[arg-type]
+                method="POST",
+                upstream_path="/contents/generations/tasks",
+            )
+        finally:
+            router_module._resolve_llm_proxy_context = original_resolve
+            router_module._remember_content_generation_task = original_remember
+            router_module._record_usage_event_best_effort = original_record
+            router_module.httpx.AsyncClient = original_async_client
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.body, b'{"id":"cgt-text-plain"}')
+        self.assertEqual(remembered, ["cgt-text-plain"])
 
     def test_parse_proxy_request_reads_multipart_model_without_rewriting_body(self) -> None:
         boundary = "----uni-api-test-boundary"

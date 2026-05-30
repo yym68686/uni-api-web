@@ -29,6 +29,7 @@ from app.constants import ACCOUNT_TEMPORARILY_LIMITED_DETAIL
 from app.models.api_key import ApiKey
 from app.models.llm_channel import LlmChannel
 from app.models.llm_content_generation_task import LlmContentGenerationTask
+from app.models.llm_usage_event import LlmUsageEvent
 from app.models.membership import Membership
 from app.models.oauth_identity import OAuthIdentity
 from app.models.user import User
@@ -705,6 +706,22 @@ def _extract_content_generation_status_and_usage(
     return status, _extract_usage_tokens(obj)
 
 
+def _parse_content_generation_task_id_timestamp(task_id: str) -> dt.datetime | None:
+    raw = (task_id or "").strip()
+    if len(raw) < 18 or not raw.startswith("cgt-"):
+        return None
+    timestamp = raw[4:18]
+    if not timestamp.isdigit():
+        return None
+    try:
+        # Upstream cgt-* ids use Beijing time in the embedded timestamp.
+        local_created_at = dt.datetime.strptime(timestamp, "%Y%m%d%H%M%S")
+    except ValueError:
+        return None
+    china_tz = dt.timezone(dt.timedelta(hours=8))
+    return local_created_at.replace(tzinfo=china_tz).astimezone(dt.timezone.utc)
+
+
 async def _remember_content_generation_task(
     *,
     task_id: str,
@@ -738,6 +755,47 @@ async def _remember_content_generation_task(
             await s.commit()
     except Exception:
         logger.exception("content generation task: remember failed")
+
+
+async def _infer_content_generation_task_model_id(
+    session: AsyncSession,
+    *,
+    task_id: str,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+    api_key_id: uuid.UUID | None,
+) -> str | None:
+    created_at = _parse_content_generation_task_id_timestamp(task_id)
+    if created_at is None:
+        return None
+
+    conditions = [
+        LlmUsageEvent.org_id == org_id,
+        LlmUsageEvent.user_id == user_id,
+        LlmUsageEvent.request_endpoint == "/v1/contents/generations/tasks",
+        LlmUsageEvent.ok.is_(True),
+        LlmUsageEvent.status_code >= 200,
+        LlmUsageEvent.status_code < 300,
+        LlmUsageEvent.created_at >= created_at - dt.timedelta(seconds=1),
+        LlmUsageEvent.created_at < created_at + dt.timedelta(seconds=5),
+    ]
+    if api_key_id is None:
+        conditions.append(LlmUsageEvent.api_key_id.is_(None))
+    else:
+        conditions.append(LlmUsageEvent.api_key_id == api_key_id)
+
+    rows = (
+        await session.execute(
+            select(LlmUsageEvent.model_id)
+            .where(*conditions)
+            .order_by(LlmUsageEvent.created_at.asc())
+            .limit(5)
+        )
+    ).scalars().all()
+    model_ids = {str(model_id).strip() for model_id in rows if str(model_id).strip()}
+    if len(model_ids) == 1:
+        return next(iter(model_ids))
+    return None
 
 
 async def _record_content_generation_usage_once(
@@ -1159,6 +1217,17 @@ async def _resolve_content_generation_task_context(
         model_id = str(row.model_id)
     else:
         model_id = (fallback_model_id or "").strip()
+        if not model_id:
+            model_id = (
+                await _infer_content_generation_task_model_id(
+                    session,
+                    task_id=task_id,
+                    org_id=membership.org_id,
+                    user_id=user.id,
+                    api_key_id=getattr(api_key, "id", None),
+                )
+                or ""
+            )
         if not model_id:
             raise HTTPException(status_code=404, detail="content generation task not found")
 
@@ -2795,7 +2864,7 @@ async def _proxy_content_generation_task_request(
 
     body = bytes(body_bytes)
     recorded_tokens = (0, 0, 0, 0, 0)
-    response_task_id = _extract_content_generation_task_id(body) if content_type.startswith("application/json") else None
+    response_task_id = _extract_content_generation_task_id(body)
     effective_task_id = response_task_id or task_id
 
     if ok and method_upper == "POST" and response_task_id:
@@ -2803,7 +2872,7 @@ async def _proxy_content_generation_task_request(
     elif ok and method_upper == "DELETE" and effective_task_id:
         await _remember_content_generation_task(task_id=effective_task_id, context=context, status="deleted")
 
-    if ok and method_upper == "GET" and effective_task_id and content_type.startswith("application/json"):
+    if ok and method_upper == "GET" and effective_task_id:
         status, usage_tokens = _extract_content_generation_status_and_usage(body)
         if status is not None:
             await _remember_content_generation_task(task_id=effective_task_id, context=context, status=status)
