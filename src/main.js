@@ -57,6 +57,13 @@ document.addEventListener('DOMContentLoaded', function () {
     const connectButton = document.getElementById('connect-button');
     const apiConfigArea = document.getElementById('api-config-area');
     const content = document.getElementById('content');
+    const review00EnabledInput = document.getElementById('review00-enabled');
+    const review00BaseUrlInput = document.getElementById('review00-base-url');
+    const review00ApiKeyInput = document.getElementById('review00-api-key');
+    const review00Form = document.getElementById('request-review-form');
+    const review00SaveButton = document.getElementById('review00-save-button');
+    const review00TestButton = document.getElementById('review00-test-button');
+    const review00Status = document.getElementById('review00-status');
 
     // 初始化主题切换
     initThemeToggle();
@@ -160,9 +167,11 @@ document.addEventListener('DOMContentLoaded', function () {
                     apiCardsContainer.appendChild(apiCard.createCard());
                 });
             }
+            hydrateRequestReviewSettings(data.api_config || {});
 
             setupAddButton();
             setupSaveButton();
+            setupRequestReviewForm();
             setupCardExpansion(); // 初始化卡片折叠功能
 
             // 添加窗口大小变化监听，更新卡片显示状态
@@ -195,7 +204,8 @@ document.addEventListener('DOMContentLoaded', function () {
     // 设置保存按钮
     function setupSaveButton() {
         const saveButton = document.getElementById('save-config-button');
-        if (saveButton) {
+        if (saveButton && saveButton.dataset.initialized !== 'true') {
+            saveButton.dataset.initialized = 'true';
             saveButton.addEventListener('click', async () => {
                 const configData = collectApiConfigData();
                 saveButton.disabled = true;
@@ -225,6 +235,95 @@ document.addEventListener('DOMContentLoaded', function () {
                 }
             });
         }
+    }
+
+    function hydrateRequestReviewSettings(apiConfigData) {
+        const preferences = apiConfigData.preferences || {};
+        const requestReview = preferences.request_review || preferences.review00 || {};
+        review00EnabledInput.checked = requestReview.enabled !== false && Boolean(requestReview.base_url && requestReview.api_key);
+        review00BaseUrlInput.value = requestReview.base_url || '';
+        review00ApiKeyInput.value = requestReview.api_key || '';
+        review00ApiKeyInput.dataset.configured = requestReview.api_key ? 'true' : '';
+        setReview00Status(requestReview.base_url && requestReview.api_key ? '已配置 review00 投递。' : '未配置 review00。', 'neutral');
+    }
+
+    function collectRequestReviewSettings() {
+        return {
+            preferences: {
+                request_review: {
+                    enabled: review00EnabledInput.checked,
+                    base_url: review00BaseUrlInput.value.trim()
+                }
+            }
+        };
+    }
+
+    function setReview00Status(message, tone = 'neutral') {
+        if (!review00Status) return;
+        review00Status.textContent = message || '';
+        review00Status.className = `request-review-status ${tone}`;
+    }
+
+    function setupRequestReviewForm() {
+        if (!review00Form || review00Form.dataset.initialized === 'true') return;
+        review00Form.dataset.initialized = 'true';
+
+        review00Form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const configData = collectRequestReviewSettings();
+            const reviewConfig = configData.preferences.request_review;
+            const apiKey = review00ApiKeyInput.value.trim();
+            if (apiKey) {
+                reviewConfig.api_key = apiKey;
+            }
+
+            if (reviewConfig.enabled && (!reviewConfig.base_url || (!apiKey && !review00ApiKeyInput.dataset.configured))) {
+                setReview00Status('启用审查前需要填写 Base URL 和 API Key。', 'error');
+                return;
+            }
+
+            review00SaveButton.disabled = true;
+            setReview00Status('保存中...', 'neutral');
+            try {
+                await apiConfig.saveConfig(configData);
+                setReview00Status('审查设置已保存。', 'success');
+            } catch (error) {
+                console.error('保存审查设置失败:', error);
+                setReview00Status(`保存失败: ${error.message}`, 'error');
+            } finally {
+                review00SaveButton.disabled = false;
+            }
+        });
+
+        review00TestButton.addEventListener('click', async () => {
+            const configData = collectRequestReviewSettings();
+            const reviewConfig = configData.preferences.request_review;
+            const apiKey = review00ApiKeyInput.value.trim();
+            if (!reviewConfig.base_url || !apiKey) {
+                setReview00Status('测试连接前需要填写 Base URL 和 API Key。', 'error');
+                return;
+            }
+
+            review00TestButton.disabled = true;
+            setReview00Status('测试连接中...', 'neutral');
+            try {
+                const response = await apiConfig.testRequestReview({
+                    preferences: {
+                        request_review: {
+                            enabled: review00EnabledInput.checked,
+                            base_url: reviewConfig.base_url,
+                            api_key: apiKey
+                        }
+                    }
+                });
+                setReview00Status(`review00 测试已排队：${response.message || 'ok'}`, 'success');
+            } catch (error) {
+                console.error('测试 review00 失败:', error);
+                setReview00Status(`连接失败: ${error.message}`, 'error');
+            } finally {
+                review00TestButton.disabled = false;
+            }
+        });
     }
 
     // 初始化卡片折叠功能

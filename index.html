@@ -98,6 +98,38 @@
                     <!-- 修改API配置区域，最初隐藏 -->
                     <div id="api-config-area" style="display: none;">
                         <h2>提供商配置</h2>
+                        <section class="request-review-settings" id="request-review-settings">
+                            <div class="section-header">
+                                <div>
+                                    <h3>请求审查</h3>
+                                    <p>将完整请求体异步投递到 review00。</p>
+                                </div>
+                            </div>
+                            <form id="request-review-form" class="request-review-form">
+                                <div class="form-grid">
+                                    <div class="form-group">
+                                        <label for="review00-enabled">启用审查</label>
+                                        <label class="switch">
+                                            <input type="checkbox" id="review00-enabled">
+                                            <span class="switch-slider"></span>
+                                        </label>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="review00-base-url">review00 Base URL</label>
+                                        <input type="text" id="review00-base-url" placeholder="http://review00.internal:8000">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="review00-api-key">review00 API Key</label>
+                                        <input type="password" id="review00-api-key" placeholder="仅在更新密钥时填写">
+                                    </div>
+                                </div>
+                                <div class="form-actions">
+                                    <button type="button" id="review00-test-button" class="secondary-button">测试连接</button>
+                                    <button type="submit" id="review00-save-button" class="save-config-button">保存审查设置</button>
+                                </div>
+                                <div id="review00-status" class="request-review-status"></div>
+                            </form>
+                        </section>
                         <div id="api-cards-container" class="api-cards-container">
                             <!-- API卡片将在这里动态添加 -->
                         </div>

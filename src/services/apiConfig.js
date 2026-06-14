@@ -42,4 +42,23 @@ export class ApiConfigService {
 
         return await response.json();
     }
+
+    async testRequestReview(configData) {
+        const baseUrl = this.apiConnection.normalizeUrl(this.apiConnection.connection.url);
+
+        const response = await fetch(`${baseUrl}/v1/api_config/request_review/test`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${this.apiConnection.connection.key}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(configData)
+        });
+
+        if (!response.ok) {
+            throw new Error(`测试失败: HTTP ${response.status}`);
+        }
+
+        return await response.json();
+    }
 }
