@@ -1,131 +1,85 @@
-# uni-api-web
+# uni-api console
 
-[English](README.md) | [简体中文](README_CN.md)
+A new React + TypeScript workspace for observing uni-api model channels. This
+repository's previous frontend has been replaced; historical versions remain in
+Git history.
 
-## Project Overview
+## Run locally
 
-uni-api-web is the web interface for [uni-api](https://github.com/yym68686/uni-api), providing a user-friendly UI to manage and configure uni-api. Through uni-api-web, you can easily manage configurations for multiple AI model providers, including API key management and model access settings.
+```sh
+npm ci
+npm run dev
+```
+
+Open http://127.0.0.1:4173 and enter your uni-api public endpoint and the first
+configured key (or an admin key). The backend must provide the platform APIs
+listed below and allow the browser origin through CORS. HTTPS deployments require
+an HTTPS backend endpoint. Keys are kept only in page memory and are cleared on
+disconnect/reload. Only the theme preference is saved locally.
 
 ## Features
 
-- **Visual Configuration Management**
-  - Manage uni-api configuration through web interface
-  - Real-time YAML configuration preview and editing
-  - Import/export configuration files
+- Separate connection page, responsive workspace, light and dark themes.
+- Provider configuration order by default; API key selection keeps its configured
+  channel set and order. Search, model/status/balance filters, explicit sorting
+  and pagination compose without changing routing.
+- Channel success rate, completed attempt count, request-to-dispatch p50 and first
+  output p50/p95. Detailed drawers show upstream model, exact latest timing,
+  samples, last success and balance details.
+- Balance view with independent loading, three concurrent reads, five-minute
+  cache and explicit unsupported/error/unknown states. Shared balances are never
+  summed. An exhausted channel requires all upstream keys to be known and empty.
+- Optional one-minute traffic buckets from the timeseries API; no synthetic charts.
+- Optional 30-second metric refresh, paused while the page is in the background.
+- Motion entrance/tab transitions, Radix accessible dialogs/tooltips, reduced
+  motion support, keyboard navigation and a mobile navigation drawer.
 
-- **Multi-provider Management**
-  - Support all providers supported by uni-api
-  - OpenAI, Anthropic, Gemini, Vertex AI, etc.
-  - API key and model configuration management
+## Metric scope
 
-- **Advanced Settings**
-  - Load balancing strategy configuration
-  - Timeout and retry mechanism settings
-  - Proxy configuration
-  - Model alias settings
+The current workspace covers `/v1/responses` with `stream=true`. Attempts are not
+user requests: retries count separately. Overall success rate is weighted by
+completed attempts, never averaged from row percentages. API key selection
+filters channel configuration; statistics still include all requests to those
+channels. p50/p95 are histogram upper-bound estimates and must not be added
+between stages. Metrics are held in backend instance memory; restarts produce a
+partially covered window until new samples accumulate. Error responses never
+turn into a fake zero balance or success rate.
 
-- **User-friendly Design**
-  - Responsive layout for mobile devices
-  - Dark theme
-  - Multi-language support
+## Platform endpoints
 
-## Deployment
+- `GET /v1/api-keys`
+- `GET /v1/model-channels`
+- `GET /v1/channel-metrics`
+- `GET /v1/channel-metrics/timeseries`
+- `GET /v1/channel-balances?provider=...`
 
-### Vercel One-click Deploy
+Only masked key metadata is returned. Requests use an Authorization header;
+credentials never enter URL parameters, query-cache keys or the static build.
+The deployed frontend is static and does not proxy or store these credentials.
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fyym68686%2Funi-api-web)
+## Build and verify
 
-### Cloudflare Pages
-
-```bash
-# Install Wrangler CLI
-npm install -g wrangler
-
-# Login to Cloudflare
-wrangler login
-
-# Deploy to Cloudflare Pages
-wrangler pages deploy . --project-name uni-api-web --branch main
+```sh
+npm test
+npm run build
+npm run preview
 ```
 
-### GitHub Pages
+Vite creates `dist/`. The Dockerfile builds with Node 24 and serves static files
+with Nginx. `/healthz` returns a JSON health signal. GitHub Actions tests and builds
+on push and pull requests. Dependencies are pinned through `package-lock.json`.
 
-1. Fork this repository
-2. Enable GitHub Pages in repository settings
-3. Select deployment branch and directory
+## Fugue source deployment
 
-### Local Deployment
-
-1. Clone the repository:
-```bash
-git clone https://github.com/yym68686/uni-api-web.git
-cd uni-api-web
+```sh
+fugue --account yym68686@gmail.com --project uni-api-console \
+  app create uni-api-console --github https://github.com/yym68686/uni-api-web \
+  --branch main --build dockerfile --dockerfile Dockerfile --port 80
+fugue --account yym68686@gmail.com --project uni-api-console app build uni-api-console
+fugue --account yym68686@gmail.com --project uni-api-console app deploy uni-api-console
+fugue --account yym68686@gmail.com --project uni-api-console app source sync resume uni-api-console
 ```
 
-2. Start local server:
-```bash
-python3 -m http.server 8001
-```
-
-3. Visit `http://127.0.0.1:8001`
-
-## Configuration Guide
-
-uni-api-web generates YAML configuration files required by uni-api through its visual interface. Main configuration items include:
-
-### Basic Settings
-- Provider name and API keys
-- Base URL configuration
-- Model configuration and aliases
-
-### Advanced Settings
-- Load balancing strategies
-- Timeout and retry settings
-- Proxy configuration
-- Permission control
-
-For detailed configuration instructions, please refer to [uni-api documentation](https://github.com/yym68686/uni-api).
-
-## Development Guide
-
-### Project Structure
-
-```
-uni-api-web/
-├── index.html          # Main page
-├── styles.css          # Style definitions
-├── src/
-│   ├── main.js        # Main program logic
-│   ├── services/      # Service layer
-│   └── components/    # UI components
-├── README.md          # English documentation
-└── README_CN.md       # Chinese documentation
-```
-
-### Custom Development
-
-1. Modify `index.html` to add new UI elements
-2. Add styles in `styles.css`
-3. Implement functionality in JavaScript files
-
-## Contributing
-
-Pull Requests and Issues are welcome!
-
-1. Fork this repository
-2. Create your feature branch
-3. Submit your changes
-4. Create Pull Request
-
-## License
-
-This project is licensed under the MIT License
-
-## Contact
-
-- Project Issues
-- Telegram Group: [uni_api](https://t.me/uni_api)
-
----
-
-Thank you for using uni-api-web!
+Fugue keeps `yym68686/uni-api-web` `main` as the durable source and automatically
+builds/deploys changes. It is a separate app from the existing 0-0 product frontend.
+No model service settings or production routing are changed by this application.
