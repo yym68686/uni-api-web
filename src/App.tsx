@@ -81,6 +81,7 @@ import type {
   Distribution,
   KeyInfo,
   Metrics,
+  ModelPrice,
 } from "./types";
 import { Brand, Empty, Spinner, Tip } from "./ui";
 
@@ -89,7 +90,28 @@ type Keys = {
   snapshot_revision: string;
   can_inspect_all: boolean;
 };
-type View = "channels" | "balances";
+type View = "channels" | "balances" | "overview" | "prices";
+
+function Overview({ metrics, rows }: { metrics?: Metrics; rows: Channel[] }) {
+  const total = metrics?.total as Record<string, any> | undefined;
+  const models = (metrics as any)?.models || [];
+  return <motion.section {...reveal} className="overview-grid">
+    <MetricCard label="请求数量" value={count(total?.requests || 0)} sub="所选时间范围" icon={<Activity size={17} />} />
+    <MetricCard label="渠道尝试" value={count(total?.attempts || 0)} sub="包含重试与失败尝试" icon={<Radio size={17} />} accent />
+    <MetricCard label="Token 数量" value={count((total?.input_tokens || 0) + (total?.output_tokens || 0))} sub="输入 + 输出" icon={<Layers3 size={17} />} />
+    <MetricCard label="估算消费" value={total?.estimated_cost_usd == null ? "—" : `$${Number(total.estimated_cost_usd).toFixed(4)}`} sub="依据当前模型价格" icon={<Wallet size={17} />} />
+    <div className="data-panel overview-panel"><div className="data-title"><Gauge size={18} /><h2>模型消费</h2></div><div className="overview-list">{models.length ? models.map((item: any) => <div className="overview-row" key={item.model}><strong>{item.model}</strong><span>{count((item.input_tokens || 0) + (item.output_tokens || 0))} tokens</span><b>{item.estimated_cost_usd == null ? "—" : `$${Number(item.estimated_cost_usd).toFixed(4)}`}</b></div>) : <Empty title="暂无模型事实" icon={<Activity size={22} />}>等待 S3 事实导入。</Empty>}</div></div>
+    <div className="data-panel overview-panel"><div className="data-title"><Radio size={18} /><h2>当前渠道</h2></div><div className="overview-list">{rows.slice(0, 12).map(row => <div className="overview-row" key={rowId(row)}><strong>{row.provider}</strong><span>{row.model}</span><b>{row.stats?.inflight || 0} 并发</b></div>)}</div></div>
+  </motion.section>;
+}
+
+function PriceSettings({ prices, loading, connection, onSaved }: { prices: ModelPrice[]; loading: boolean; connection: Connection; onSaved: () => void }) {
+  const [draft, setDraft] = useState<ModelPrice[]>(prices);
+  useEffect(() => setDraft(prices), [prices]);
+  function update(index: number, key: keyof ModelPrice, value: string) { setDraft(items => items.map((item, i) => i === index ? { ...item, [key]: key === "model" ? value : Number(value) } : item)); }
+  async function save(item: ModelPrice) { await analyticsRequest(connection, `/analytics/v1/prices/${encodeURIComponent(item.model)}`, undefined, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(item) }); onSaved(); }
+  return <section className="data-panel prices-panel"><div className="data-heading"><div className="data-title"><SlidersHorizontal size={19} /><h2>模型价格</h2></div>{loading && <Spinner small />}</div><p className="field-note">单位：美元 / 每百万 token。只有已验证价格会计入消费估算。</p><div className="price-list">{draft.map((item, index) => <div className="price-row" key={`${item.model}-${index}`}><input aria-label="模型名称" value={item.model} onChange={e => update(index, "model", e.target.value)} /><input aria-label="输入价格" type="number" min="0" step="any" value={item.input} onChange={e => update(index, "input", e.target.value)} /><input aria-label="输出价格" type="number" min="0" step="any" value={item.output} onChange={e => update(index, "output", e.target.value)} /><button className="button small" onClick={() => void save(item)}>保存</button></div>)}</div></section>;
+}
 const endpointChoices = [
   "/v1/responses",
   "/v1/responses/compact",
@@ -864,6 +886,12 @@ function Dashboard({
       request<Catalog>(connection, "/v1/model-channels?" + params, signal),
     enabled: keysLoaded && !keyRemoved,
   });
+  const prices = useQuery({
+    queryKey: ["prices", connection.session],
+    queryFn: ({ signal }) => analyticsRequest<{ data: ModelPrice[] }>(connection, "/analytics/v1/prices", signal),
+    enabled: keysLoaded && view === "prices",
+    staleTime: 60_000,
+  });
   const metrics = useQuery({
     queryKey: ["metrics", connection.session, keyId, window, endpoint, stream],
     queryFn: ({ signal }) =>
@@ -1014,12 +1042,18 @@ function Dashboard({
       <Brand />
       <div className="workspace-label">WORKSPACE</div>
       <nav aria-label="主导航">
+        <button className={view === "overview" ? "active" : ""} onClick={() => selectView("overview")}>
+          <Gauge size={18} /> 总览
+        </button>
         <button
           className={view === "channels" ? "active" : ""}
           onClick={() => selectView("channels")}
         >
           <LayoutDashboard size={18} />
           渠道观测<span className="nav-shortcut">⌘ 1</span>
+        </button>
+        <button className={view === "prices" ? "active" : ""} onClick={() => selectView("prices")}>
+          <SlidersHorizontal size={18} /> 价格设置
         </button>
         <button
           className={view === "balances" ? "active" : ""}
@@ -1114,7 +1148,7 @@ function Dashboard({
             </button>
             <span>工作空间</span>
             <ChevronRight size={13} />
-            <strong>{view === "channels" ? "渠道观测" : "余额管理"}</strong>
+            <strong>{view === "channels" ? "渠道观测" : view === "balances" ? "余额管理" : view === "overview" ? "总览" : "价格设置"}</strong>
           </div>
           <div className="topbar-actions">
             <span className="topbar-service">
@@ -1144,12 +1178,12 @@ function Dashboard({
               <h1>
                 {view === "channels"
                   ? "每条渠道，尽在视野。"
-                  : "余额有数，调用有底。"}
+                  : view === "balances" ? "余额有数，调用有底。" : view === "overview" ? "全局请求，一眼掌握。" : "模型价格，按你的口径计算。"}
               </h1>
               <p>
                 {view === "channels"
                   ? "从可用性到首输出，了解模型请求的每一步。"
-                  : "独立查看每个渠道的上游余额与额度。"}
+                  : view === "balances" ? "独立查看每个渠道的上游余额与额度。" : view === "overview" ? "消费、请求、token 与缓存率来自 S3 事实聚合。" : "价格按每百万 token 计，保存后用于后续估算。"}
               </p>
             </div>
             <button
@@ -1161,7 +1195,11 @@ function Dashboard({
               刷新数据
             </button>
           </motion.div>
-          <motion.section
+          {view === "prices" ? (
+            <PriceSettings prices={prices.data?.data || []} loading={prices.isPending} connection={connection} onSaved={() => void prices.refetch()} />
+          ) : view === "overview" ? (
+            <Overview metrics={metrics.data} rows={rows} />
+          ) : <motion.section
             {...reveal}
             transition={{ delay: 0.04 }}
             className="metric-grid"
@@ -1199,8 +1237,8 @@ function Dashboard({
               }
               icon={<Wallet size={17} />}
             />
-          </motion.section>
-          <section className="data-panel">
+          </motion.section>}
+          {view === "channels" || view === "balances" ? <section className="data-panel">
             <div className="data-heading">
               <div className="data-title">
                 <span className="section-icon">
@@ -1642,7 +1680,7 @@ function Dashboard({
                 </button>
               </div>
             </div>
-          </section>
+          </section> : null}
           <AnimatePresence>
             {showTrend && view === "channels" && !error && (
               <Trend

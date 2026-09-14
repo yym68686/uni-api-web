@@ -59,6 +59,18 @@ export interface Metrics extends Catalog {
   collection_started_at: number;
   order: string;
   statistics_scope: string;
+  total?: Record<string, any>;
+  models?: Record<string, any>[];
+}
+export interface ModelPrice {
+  model: string;
+  input: number;
+  output: number;
+  cache_read: number;
+  cache_write: number;
+  cache_write_1h: number;
+  source?: string;
+  verified?: boolean;
 }
 export interface BalanceKey {
   status: string;
