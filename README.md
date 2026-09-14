@@ -14,8 +14,13 @@ npm run dev
 Open http://127.0.0.1:4173 and enter your uni-api public endpoint and the first
 configured key (or an admin key). The backend must provide the platform APIs
 listed below and allow the browser origin through CORS. HTTPS deployments require
-an HTTPS backend endpoint. Keys are kept only in page memory and are cleared on
-disconnect/reload. Theme and filter preferences are saved locally. Filters are
+an HTTPS backend endpoint. Verified connections are saved in the current tab's
+`sessionStorage`, allowing reloads to restore the connection without another login.
+The platform key is revalidated before any channel queries. Authentication rejection
+clears the saved connection; a temporary network failure keeps it available for retry.
+Disconnect clears the credential and query cache. Credentials are never written to
+`localStorage`; normal tab closure ends their session (browser session restore may
+retain session storage). Theme and filter preferences are saved locally. Filters are
 stored separately for each normalized service address and restored after reconnecting.
 Only the selected filter key's opaque ID is stored, never the access credential.
 
@@ -60,7 +65,7 @@ turn into a fake zero balance or success rate.
 
 Only masked key metadata is returned. Requests use an Authorization header;
 credentials never enter URL parameters, query-cache keys or the static build.
-The deployed frontend is static and does not proxy or store these credentials.
+The deployed frontend is static; its server does not proxy or store credentials.
 
 ## Build and verify
 

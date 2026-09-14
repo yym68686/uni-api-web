@@ -1,4 +1,11 @@
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { FormEvent, ReactNode } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, m as motion } from "motion/react";
@@ -41,7 +48,14 @@ import {
   X,
   TriangleAlert,
 } from "lucide-react";
-import { channelParams, cleanBase, makeLimiter, request } from "./api";
+import {
+  ApiError,
+  channelParams,
+  cleanBase,
+  makeLimiter,
+  request,
+} from "./api";
+import { clearConnection, loadConnection, saveConnection } from "./session";
 import { defaultFilters, loadFilters, saveFilters } from "./preferences";
 import type { Filters } from "./preferences";
 import {
@@ -75,6 +89,17 @@ type Keys = {
   can_inspect_all: boolean;
 };
 type View = "channels" | "balances";
+async function readKeys(connection: Connection, signal: AbortSignal) {
+  const keys = await request<Keys>(connection, "/v1/api-keys", signal);
+  if (!Array.isArray(keys.data))
+    throw new Error("服务未提供平台目录，请检查 uni-api 版本与权限。");
+  if (!keys.can_inspect_all)
+    throw new ApiError(
+      "密钥没有平台查看权限，请使用配置中的第一个密钥或管理员密钥。",
+      403,
+    );
+  return keys;
+}
 const reveal = {
   initial: { opacity: 0, y: 12 },
   animate: { opacity: 1, y: 0 },
@@ -85,16 +110,18 @@ function ConnectionForm({
   onConnect,
   initialBase = "",
   compact = false,
+  initialError = "",
 }: {
   onConnect: (connection: Connection, keys: Keys) => void;
   initialBase?: string;
   compact?: boolean;
+  initialError?: string;
 }) {
   const [base, setBase] = useState(initialBase),
     [key, setKey] = useState(""),
     [visible, setVisible] = useState(false);
   const [pending, setPending] = useState(false),
-    [error, setError] = useState("");
+    [error, setError] = useState(initialError);
   const attempt = useRef<AbortController | null>(null);
   useEffect(() => () => attempt.current?.abort(), []);
   async function connect(event: FormEvent) {
@@ -111,10 +138,8 @@ function ConnectionForm({
         session: crypto.randomUUID(),
       };
       if (!connection.key) throw new Error("请输入平台访问密钥。");
-      const keys = await request<Keys>(connection, "/v1/api-keys", run.signal);
+      const keys = await readKeys(connection, run.signal);
       if (run.signal.aborted) return;
-      if (!Array.isArray(keys.data) || !keys.can_inspect_all)
-        throw new Error("服务未提供平台目录，请检查 uni-api 版本与权限。");
       onConnect(connection, keys);
       setKey("");
     } catch (e) {
@@ -173,7 +198,7 @@ function ConnectionForm({
       </div>
       <p className="field-note">
         <ShieldCheck size={14} />
-        密钥仅保存在当前页面内存中。
+        密钥保存在当前标签页会话中，断开连接时清除。
       </p>
       {error && (
         <div role="alert" className="error-banner">
@@ -199,8 +224,10 @@ function ConnectionForm({
 
 function Welcome({
   onConnect,
+  error,
 }: {
   onConnect: (connection: Connection, keys: Keys) => void;
+  error: string;
 }) {
   return (
     <div className="welcome">
@@ -281,7 +308,7 @@ function Welcome({
           </div>
           <h2>连接你的 uni-api</h2>
           <p>只需服务地址与平台密钥，即刻开始观测。</p>
-          <ConnectionForm onConnect={onConnect} />
+          <ConnectionForm onConnect={onConnect} initialError={error} />
           <div className="connect-card-footer">
             <span className="tiny-dot" /> 浏览器直连 · 无需额外账户
           </div>
@@ -726,7 +753,7 @@ function Dashboard({
   changeConnection,
 }: {
   connection: Connection;
-  disconnect: () => void;
+  disconnect: (reason?: string) => void;
   changeConnection: () => void;
 }) {
   const [filters, setFilters] = useState(() => loadFilters(connection.base));
@@ -764,8 +791,15 @@ function Dashboard({
   const deferredSearch = useDeferredValue(search);
   const keys = useQuery({
     queryKey: ["keys", connection.session],
-    queryFn: ({ signal }) => request<Keys>(connection, "/v1/api-keys", signal),
+    queryFn: ({ signal }) => readKeys(connection, signal),
   });
+  useEffect(() => {
+    if (
+      keys.error instanceof ApiError &&
+      [401, 403].includes(keys.error.status)
+    )
+      disconnect(keys.error.message);
+  }, [keys.error, disconnect]);
   const keyRemoved =
     !!keyId &&
     !!keys.data &&
@@ -806,7 +840,7 @@ function Dashboard({
     ? "所选 API key 已移除，请重新选择。"
     : modelRemoved
       ? "当前 API key 未配置所选模型，请重新选择模型。"
-      : metrics.error?.message || catalog.error?.message;
+      : keys.error?.message || metrics.error?.message || catalog.error?.message;
   const rows = useMemo(
     () =>
       error
@@ -898,8 +932,10 @@ function Dashboard({
   }
   function reload() {
     void keys.refetch();
-    void catalog.refetch();
-    void metrics.refetch();
+    if (keysLoaded && !keyRemoved) {
+      void catalog.refetch();
+      void metrics.refetch();
+    }
     for (const query of balanceQueries) void query.refetch();
     setRefresh((x) => x + 1);
   }
@@ -1517,7 +1553,7 @@ function Dashboard({
           <footer className="workspace-footer">
             <span>
               <ShieldCheck size={13} />
-              只读观测 · 密钥仅保留在本页
+              只读观测 · 当前标签页会话
             </span>
             <button onClick={() => setGuide(true)}>
               了解统计口径 <ArrowUpRight size={13} />
@@ -1536,7 +1572,7 @@ function Dashboard({
             <Server size={14} />
             {connection.base}
           </span>
-          <button onClick={disconnect}>
+          <button onClick={() => disconnect()}>
             <LogOut size={14} />
             断开连接
           </button>
@@ -1553,22 +1589,33 @@ function Dashboard({
 }
 
 export default function App() {
-  const [connection, setConnection] = useState<Connection | null>(null),
-    [change, setChange] = useState(false);
+  const [connection, setConnection] = useState<Connection | null>(
+      loadConnection,
+    ),
+    [change, setChange] = useState(false),
+    [connectionError, setConnectionError] = useState("");
   const client = useQueryClient();
   function connected(next: Connection, keys: Keys) {
     void client.cancelQueries();
     client.clear();
     client.setQueryData(["keys", next.session], keys);
+    saveConnection(next);
     setConnection(next);
     setChange(false);
+    setConnectionError("");
   }
-  function disconnect() {
-    void client.cancelQueries();
-    client.clear();
-    setConnection(null);
-    document.documentElement.dataset.theme = "light";
-  }
+  const disconnect = useCallback(
+    (reason = "") => {
+      void client.cancelQueries();
+      client.clear();
+      setConnection(null);
+      clearConnection();
+      setChange(false);
+      setConnectionError(reason);
+      document.documentElement.dataset.theme = "light";
+    },
+    [client],
+  );
   return (
     <>
       <AnimatePresence mode="wait">
@@ -1587,7 +1634,11 @@ export default function App() {
             />
           </motion.div>
         ) : (
-          <Welcome key="welcome" onConnect={connected} />
+          <Welcome
+            key="welcome"
+            onConnect={connected}
+            error={connectionError}
+          />
         )}
       </AnimatePresence>
       <Dialog.Root open={change} onOpenChange={setChange}>

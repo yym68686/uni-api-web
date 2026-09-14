@@ -6,6 +6,7 @@ import * as Tooltip from "@radix-ui/react-tooltip";
 import { MotionConfig, LazyMotion, domAnimation } from "motion/react";
 import App from "./App";
 import { defaultFilters, saveFilters } from "./preferences";
+import { loadConnection, saveConnection } from "./session";
 const rows = ["first", "second", "third"].map((provider, i) => ({
   provider,
   model: "model-a",
@@ -28,7 +29,13 @@ const rows = ["first", "second", "third"].map((provider, i) => ({
     },
   },
 }));
-function setup() {
+function setup(
+  options: {
+    keyStatus?: number;
+    keyNetworkError?: boolean;
+    denyPlatform?: boolean;
+  } = {},
+) {
   const calls: string[] = [];
   const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
     calls.push(input);
@@ -37,11 +44,16 @@ function setup() {
       "Bearer platform-secret",
     );
     const url = new URL(input);
+    if (url.pathname.endsWith("api-keys")) {
+      if (options.keyNetworkError) throw new TypeError("Failed to fetch");
+      if (options.keyStatus)
+        return new Response("{}", { status: options.keyStatus });
+    }
     const selected = url.searchParams.has("api_key_id");
     const data = selected ? [rows[2], rows[0]] : rows;
     const result = url.pathname.endsWith("api-keys")
       ? {
-          can_inspect_all: true,
+          can_inspect_all: !options.denyPlatform,
           data: [
             { position: 1, key_id: "key-first", prefix: "••••" },
             { position: 2, key_id: "key-second", prefix: "••••" },
@@ -131,6 +143,7 @@ describe("dashboard workflows", () => {
       "platform-secret",
     );
     expect(JSON.stringify(localStorage)).not.toContain("platform-secret");
+    expect(JSON.stringify(sessionStorage)).not.toContain("platform-secret");
   });
   it("shows auth error without entering a dashboard", async () => {
     const { user } = setup();
@@ -166,7 +179,9 @@ describe("dashboard workflows", () => {
     app.unmount();
 
     app = setup();
-    await connect(app.user, "https://mock.example/");
+    await screen.findByRole("table");
+    expect(screen.queryByLabelText(/访问密钥/)).not.toBeInTheDocument();
+    expect(app.calls[0]).toBe("https://mock.example/v1/api-keys");
     expect(screen.getByLabelText("API key 筛选")).toHaveValue("key-second");
     expect(screen.getByLabelText("模型筛选")).toHaveValue("model-a");
     expect(screen.getByRole("button", { name: "1 小时" })).toHaveAttribute(
@@ -195,6 +210,8 @@ describe("dashboard workflows", () => {
     expect(screen.getByLabelText("模型筛选")).toHaveValue("");
     expect(screen.getByLabelText("搜索渠道或模型")).toHaveValue("");
     expect(screen.getAllByRole("row")).toHaveLength(4);
+    await app.user.click(screen.getByRole("button", { name: "断开连接" }));
+    await screen.findByRole("button", { name: /进入控制台/ });
     app.unmount();
 
     app = setup();
@@ -204,7 +221,7 @@ describe("dashboard workflows", () => {
     await waitFor(() => expect(screen.getAllByRole("row")).toHaveLength(4));
     app.unmount();
     app = setup();
-    await connect(app.user);
+    await screen.findByRole("table");
     expect(screen.getByLabelText("API key 筛选")).toHaveValue("");
     expect(screen.getByLabelText("模型筛选")).toHaveValue("");
     expect(screen.getByLabelText("搜索渠道或模型")).toHaveValue("");
@@ -236,5 +253,57 @@ describe("dashboard workflows", () => {
     expect(calls).toHaveLength(1);
     await user.click(screen.getByRole("button", { name: "重置筛选" }));
     await screen.findByRole("table");
+  });
+  it.each([401, 403])(
+    "clears a restored credential rejected with HTTP %s and returns to login",
+    async (keyStatus) => {
+      saveConnection({
+        base: "https://mock.example",
+        key: "platform-secret",
+        session: "previous-page",
+      });
+      const { calls } = setup({ keyStatus });
+      await screen.findByRole("button", { name: /进入控制台/ });
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "密钥没有平台查看权限",
+      );
+      expect(screen.getByLabelText(/访问密钥/)).toHaveValue("");
+      expect(loadConnection()).toBeNull();
+      expect(calls).toEqual(["https://mock.example/v1/api-keys"]);
+    },
+  );
+  it("requires platform permission before restoring channel queries", async () => {
+    saveConnection({
+      base: "https://mock.example",
+      key: "platform-secret",
+      session: "previous-page",
+    });
+    const { calls } = setup({ denyPlatform: true });
+    await screen.findByRole("button", { name: /进入控制台/ });
+    expect(loadConnection()).toBeNull();
+    expect(calls).toHaveLength(1);
+  });
+  it("keeps a restored session on network failure and retries authentication before channels", async () => {
+    saveConnection({
+      base: "https://mock.example",
+      key: "platform-secret",
+      session: "previous-page",
+    });
+    const options = { keyNetworkError: true };
+    const { user, calls } = setup(options);
+    expect(await screen.findByRole("alert")).toHaveTextContent("无法连接服务");
+    expect(screen.queryByLabelText(/访问密钥/)).not.toBeInTheDocument();
+    expect(loadConnection()?.base).toBe("https://mock.example");
+    expect(calls).toHaveLength(1);
+    options.keyNetworkError = false;
+    await user.click(screen.getByRole("button", { name: "重新读取" }));
+    await screen.findByRole("table");
+    expect(calls.slice(0, 2)).toEqual([
+      "https://mock.example/v1/api-keys",
+      "https://mock.example/v1/api-keys",
+    ]);
+    await user.click(screen.getByRole("button", { name: "断开连接" }));
+    await screen.findByRole("button", { name: /进入控制台/ });
+    expect(loadConnection()).toBeNull();
   });
 });
