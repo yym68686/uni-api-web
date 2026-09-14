@@ -135,6 +135,8 @@ type AnalyticChannel struct {
 	Provider      string         `json:"provider"`
 	Model         string         `json:"model"`
 	UpstreamModel string         `json:"upstream_model"`
+	Endpoint      string         `json:"endpoint"`
+	Stream        *bool          `json:"stream"`
 	Stats         map[string]any `json:"stats"`
 }
 type QueryResult struct {
@@ -184,7 +186,7 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 		where = append(where, "stream=?")
 		args = append(args, f.Stream == "true")
 	}
-	q := `SELECT kind,provider,model,upstream_model,outcome,sum(n)::BIGINT,sum(input_tokens)::BIGINT,sum(output_tokens)::BIGINT,sum(cache_read_tokens)::BIGINT,sum(cache_write_tokens)::BIGINT,sum(cache_write_1h_tokens)::BIGINT,sum(usage_samples)::BIGINT,sum(cache_samples)::BIGINT,sum(actual_cost_usd),sum(actual_cost_samples)::BIGINT,to_json(` + mergeHistogramSQL("first_bins") + `),to_json(` + mergeHistogramSQL("dispatch_bins") + `),sum(first_count)::BIGINT,sum(dispatch_count)::BIGINT,sum(first_sum),sum(dispatch_sum),max(last_ms),arg_max(last_first,last_ms),arg_max(last_dispatch,last_ms) FROM rollups WHERE ` + strings.Join(where, " AND ") + ` GROUP BY kind,provider,model,upstream_model,outcome`
+	q := `SELECT kind,provider,model,upstream_model,endpoint,stream,outcome,sum(n)::BIGINT,sum(input_tokens)::BIGINT,sum(output_tokens)::BIGINT,sum(cache_read_tokens)::BIGINT,sum(cache_write_tokens)::BIGINT,sum(cache_write_1h_tokens)::BIGINT,sum(usage_samples)::BIGINT,sum(cache_samples)::BIGINT,sum(actual_cost_usd),sum(actual_cost_samples)::BIGINT,to_json(` + mergeHistogramSQL("first_bins") + `),to_json(` + mergeHistogramSQL("dispatch_bins") + `),sum(first_count)::BIGINT,sum(dispatch_count)::BIGINT,sum(first_sum),sum(dispatch_sum),max(last_ms),arg_max(last_first,last_ms),arg_max(last_dispatch,last_ms) FROM rollups WHERE ` + strings.Join(where, " AND ") + ` GROUP BY kind,provider,model,upstream_model,endpoint,stream,outcome`
 	rows, err := e.DB.QueryContext(ctx, q, args...)
 	if err != nil {
 		return QueryResult{}, err
@@ -203,11 +205,12 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 	models := map[string]*Summary{}
 	var total Summary
 	for rows.Next() {
-		var kind, provider, model, upstream, outcome string
+		var kind, provider, model, upstream, endpoint, outcome string
+		var stream bool
 		var firstValue, dispatchValue any
 		var n int64
 		var s Summary
-		if err = rows.Scan(&kind, &provider, &model, &upstream, &outcome, &n, &s.Input, &s.Output, &s.CacheRead, &s.CacheWrite, &s.CacheWrite1h, &s.UsageSamples, &s.CacheSamples, &s.ActualUSD, &s.ActualSamples, &firstValue, &dispatchValue, &s.FirstCount, &s.DispatchCount, &s.FirstSum, &s.DispatchSum, &s.LastMS, &s.LastFirst, &s.LastDispatch); err != nil {
+		if err = rows.Scan(&kind, &provider, &model, &upstream, &endpoint, &stream, &outcome, &n, &s.Input, &s.Output, &s.CacheRead, &s.CacheWrite, &s.CacheWrite1h, &s.UsageSamples, &s.CacheSamples, &s.ActualUSD, &s.ActualSamples, &firstValue, &dispatchValue, &s.FirstCount, &s.DispatchCount, &s.FirstSum, &s.DispatchSum, &s.LastMS, &s.LastFirst, &s.LastDispatch); err != nil {
 			return QueryResult{}, err
 		}
 		s.FirstBins = histogramValues(firstValue)
@@ -227,10 +230,10 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 			models[model].merge(s)
 			continue
 		}
-		key := provider + "\x00" + model + "\x00" + upstream
+		key := provider + "\x00" + model + "\x00" + upstream + "\x00" + endpoint + "\x00" + fmt.Sprint(stream)
 		if channels[key] == nil {
 			channels[key] = &Summary{}
-			identities[key] = [3]string{provider, model, upstream}
+			identities[key] = [3]string{provider, model, upstream + "\x00" + endpoint + "\x00" + fmt.Sprint(stream)}
 		}
 		if kind == "attempt" {
 			switch outcome {
@@ -261,7 +264,20 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 	var attempts Summary
 	for _, k := range keys {
 		id := identities[k]
-		out.Data = append(out.Data, AnalyticChannel{Provider: id[0], Model: id[1], UpstreamModel: id[2], Stats: channels[k].JSON()})
+		parts := strings.Split(id[2], "\x00")
+		var channelStream bool
+		if len(parts) > 2 {
+			channelStream = parts[2] == "true"
+		}
+		upstream := id[2]
+		endpoint := ""
+		if len(parts) > 0 {
+			upstream = parts[0]
+		}
+		if len(parts) > 1 {
+			endpoint = parts[1]
+		}
+		out.Data = append(out.Data, AnalyticChannel{Provider: id[0], Model: id[1], UpstreamModel: upstream, Endpoint: endpoint, Stream: &channelStream, Stats: channels[k].JSON()})
 		attempts.merge(*channels[k])
 	}
 	// Usage totals represent client requests; channel attempt totals separately
