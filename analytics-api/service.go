@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -66,6 +67,7 @@ func (s *Service) analytics(w http.ResponseWriter, r *http.Request) {
 		body := append([]byte(nil), item.body...)
 		s.cacheMu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 		_, _ = w.Write(body)
 		return
 	}
@@ -90,6 +92,7 @@ func (s *Service) analytics(w http.ResponseWriter, r *http.Request) {
 	}
 	s.cacheMu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 	_, _ = w.Write(body)
 }
 func (s *Service) prices(w http.ResponseWriter, r *http.Request) {
