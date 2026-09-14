@@ -132,3 +132,11 @@ export function makeLimiter(limit: number) {
     }
   };
 }
+
+export async function analyticsRequest<T>(connection: Connection,path: string,signal?: AbortSignal): Promise<T> {
+  if (typeof window === "undefined") throw new Error("analytics API requires a browser session");
+  const timeout=AbortSignal.timeout(20_000); const response=await fetch(window.location.origin+path,{headers:{Authorization:`Bearer ${connection.key}`,Accept:"application/json"},cache:"no-store",credentials:"omit",redirect:"error",signal:signal?AbortSignal.any([signal,timeout]):timeout});
+  if(response.status===401||response.status===403) throw new ApiError("分析服务未接受平台密钥，请检查控制台后端配置。",response.status);
+  if(!response.ok) throw new ApiError(`分析服务暂时无法响应（HTTP ${response.status}）。`,response.status);
+  return await response.json() as T;
+}

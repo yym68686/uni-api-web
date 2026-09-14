@@ -54,6 +54,7 @@ import {
   cleanBase,
   makeLimiter,
   request,
+  analyticsRequest,
 } from "./api";
 import { clearConnection, loadConnection, saveConnection } from "./session";
 import { defaultFilters, loadFilters, saveFilters } from "./preferences";
@@ -104,23 +105,16 @@ const endpointChoices = [
 ];
 const streamLabel = (stream: string) =>
   stream === "true" ? "流式" : stream === "false" ? "非流式" : "全部请求";
-async function readMetrics(
-  connection: Connection,
-  path: string,
-  signal: AbortSignal,
-  endpoint: string,
-  stream: string,
-) {
-  const metrics = await request<Metrics>(connection, path, signal);
-  if (
-    (endpoint === "all" || stream === "all") &&
-    (metrics.filters?.endpoint !== endpoint ||
-      metrics.filters?.stream !== stream)
-  )
-    throw new Error(
-      "当前后端尚未支持全部范围统计，请更新 uni-api，或选择具体端点及流式状态。",
-    );
-  return metrics;
+async function readMetrics(connection: Connection, path: string, signal: AbortSignal, endpoint: string, stream: string) {
+ const source=new URLSearchParams(path.split("?")[1]||"");
+ const range=source.get("window")||"15m";
+ if (["5m","15m","1h"].includes(range)) { const metrics=await request<Metrics>(connection,path,signal); if((endpoint==="all"||stream==="all")&&(metrics.filters?.endpoint!==endpoint||metrics.filters?.stream!==stream)) throw new Error("当前后端尚未支持全部范围统计，请更新 uni-api，或选择具体端点及流式状态。"); return metrics; }
+ const keyId=source.get("api_key_id")||"";
+ source.delete("window"); source.set("range",range); source.delete("api_key_id");
+ if(keyId)source.set("key_id",keyId);
+ source.set("endpoint",endpoint); source.set("stream",stream);
+ const result=await analyticsRequest<Metrics>(connection,"/analytics/v1/analytics?"+source.toString(),signal);
+ return {...result,window_minutes: range==="24h"?1440:range==="7d"?10080:range==="30d"?43200:range==="today"?1440:range==="week"?10080:range==="month"?43200:range==="year"?525600:0,coverage:result.coverage||"complete_for_instance",statistics_scope:"s3"};
 }
 async function readKeys(connection: Connection, signal: AbortSignal) {
   const keys = await request<Keys>(connection, "/v1/api-keys", signal);
