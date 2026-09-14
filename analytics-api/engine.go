@@ -179,7 +179,7 @@ func mergeHistogramSQL(column string) string {
 	return "[" + strings.Join(parts, ",") + "]"
 }
 func (e *Engine) Prices(ctx context.Context) ([]Price, error) {
-	rows, err := e.DB.QueryContext(ctx, "SELECT model,input,output,cache_read,cache_write,cache_write_1h,source,verified,effective_at FROM prices ORDER BY model")
+	rows, err := e.DB.QueryContext(ctx, `SELECT model,input,output,cache_read,cache_write,cache_write_1h,source,verified,effective_at FROM prices UNION ALL SELECT DISTINCT model,0,0,0,0,0,'fact-discovered',false,current_timestamp FROM facts WHERE model <> '' AND model NOT IN (SELECT model FROM prices) ORDER BY model`)
 	if err != nil {
 		return nil, err
 	}
