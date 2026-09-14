@@ -1,0 +1,51 @@
+export const defaultFilters = {
+  keyId: "",
+  model: "",
+  window: "15m",
+  balanceFilter: "",
+  statusFilter: "",
+  search: "",
+  sort: "config",
+};
+
+export type Filters = typeof defaultFilters;
+
+const storageKey = (base: string) => `uni-console-filters:v1:${base}`;
+
+function validate(value: unknown): Filters {
+  const saved = value && typeof value === "object" ? value : {};
+  const field = (name: keyof Filters, options?: string[]) => {
+    const value = (saved as Record<string, unknown>)[name];
+    return typeof value === "string" && (!options || options.includes(value))
+      ? value
+      : defaultFilters[name];
+  };
+  // Only persist the filter key's opaque ID, never the connection credential.
+  return {
+    keyId: field("keyId"),
+    model: field("model"),
+    window: field("window", ["5m", "15m", "1h"]),
+    balanceFilter: field("balanceFilter", ["", "low"]),
+    statusFilter: field("statusFilter", ["", "eligible", "unavailable"]),
+    search: field("search"),
+    sort: field("sort", ["config", "success", "latency", "wait"]),
+  };
+}
+
+export function loadFilters(base: string): Filters {
+  try {
+    return validate(
+      JSON.parse(localStorage.getItem(storageKey(base)) || "null"),
+    );
+  } catch {
+    return { ...defaultFilters };
+  }
+}
+
+export function saveFilters(base: string, filters: Filters) {
+  try {
+    localStorage.setItem(storageKey(base), JSON.stringify(validate(filters)));
+  } catch {
+    // Browsers can disable storage or exhaust its quota; filtering still works.
+  }
+}

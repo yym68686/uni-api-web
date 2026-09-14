@@ -42,6 +42,8 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { channelParams, cleanBase, makeLimiter, request } from "./api";
+import { defaultFilters, loadFilters, saveFilters } from "./preferences";
+import type { Filters } from "./preferences";
 import {
   balanceIsLow,
   balanceKind,
@@ -727,15 +729,17 @@ function Dashboard({
   disconnect: () => void;
   changeConnection: () => void;
 }) {
+  const [filters, setFilters] = useState(() => loadFilters(connection.base));
+  const { keyId, model, window, balanceFilter, statusFilter, search, sort } =
+    filters;
   const [view, setView] = useState<View>("channels"),
-    [keyId, setKeyId] = useState(""),
-    [model, setModel] = useState(""),
-    [window, setWindow] = useState("15m");
-  const [balanceFilter, setBalanceFilter] = useState(""),
-    [statusFilter, setStatusFilter] = useState(""),
-    [search, setSearch] = useState(""),
-    [sort, setSort] = useState("config"),
     [page, setPage] = useState(0);
+  useEffect(() => {
+    saveFilters(connection.base, filters);
+  }, [connection.base, filters]);
+  const hasFilters = (Object.keys(defaultFilters) as (keyof Filters)[]).some(
+    (key) => filters[key] !== defaultFilters[key],
+  );
   const [detailId, setDetailId] = useState<string | null>(null),
     [showTrend, setShowTrend] = useState(false),
     [guide, setGuide] = useState(false),
@@ -766,18 +770,19 @@ function Dashboard({
     !!keyId &&
     !!keys.data &&
     !keys.data.data.some((item) => item.key_id === keyId);
+  const keysLoaded = !!keys.data;
   const params = channelParams(keyId, window);
   const catalog = useQuery({
     queryKey: ["catalog", connection.session, keyId],
     queryFn: ({ signal }) =>
       request<Catalog>(connection, "/v1/model-channels?" + params, signal),
-    enabled: !keyRemoved,
+    enabled: keysLoaded && !keyRemoved,
   });
   const metrics = useQuery({
     queryKey: ["metrics", connection.session, keyId, window],
     queryFn: ({ signal }) =>
       request<Metrics>(connection, "/v1/channel-metrics?" + params, signal),
-    enabled: !keyRemoved,
+    enabled: keysLoaded && !keyRemoved,
     refetchInterval: auto ? 30_000 : false,
     refetchIntervalInBackground: false,
   });
@@ -887,9 +892,9 @@ function Dashboard({
     );
   const detail = rows.find((row) => rowId(row) === detailId) || null;
   const busy = metrics.isFetching || catalog.isFetching || keys.isFetching;
-  function applyFilter(action: () => void) {
+  function setFilter(name: keyof Filters, value: string) {
     setPage(0);
-    action();
+    setFilters((current) => ({ ...current, [name]: value }));
   }
   function reload() {
     void keys.refetch();
@@ -1134,12 +1139,12 @@ function Dashboard({
                   aria-label="搜索渠道或模型"
                   placeholder="搜索渠道、模型…"
                   value={search}
-                  onChange={(e) => applyFilter(() => setSearch(e.target.value))}
+                  onChange={(e) => setFilter("search", e.target.value)}
                 />
                 {search && (
                   <button
                     className="icon-button"
-                    onClick={() => setSearch("")}
+                    onClick={() => setFilter("search", "")}
                     aria-label="清除搜索"
                   >
                     <X size={14} />
@@ -1151,7 +1156,7 @@ function Dashboard({
                 <select
                   aria-label="API key 筛选"
                   value={keyId}
-                  onChange={(e) => applyFilter(() => setKeyId(e.target.value))}
+                  onChange={(e) => setFilter("keyId", e.target.value)}
                 >
                   <option value="">全部渠道 · 配置顺序</option>
                   {keyRemoved && (
@@ -1170,7 +1175,7 @@ function Dashboard({
                 <select
                   aria-label="模型筛选"
                   value={model}
-                  onChange={(e) => applyFilter(() => setModel(e.target.value))}
+                  onChange={(e) => setFilter("model", e.target.value)}
                 >
                   <option value="">全部模型</option>
                   {modelRemoved && (
@@ -1192,7 +1197,7 @@ function Dashboard({
                     key={value}
                     aria-pressed={window === value}
                     className={window === value ? "active" : ""}
-                    onClick={() => applyFilter(() => setWindow(value))}
+                    onClick={() => setFilter("window", value)}
                   >
                     {window === value && (
                       <motion.span
@@ -1216,9 +1221,7 @@ function Dashboard({
                   className={`filter-chip ${balanceFilter ? "active" : ""}`}
                   aria-pressed={!!balanceFilter}
                   onClick={() =>
-                    applyFilter(() =>
-                      setBalanceFilter(balanceFilter ? "" : "low"),
-                    )
+                    setFilter("balanceFilter", balanceFilter ? "" : "low")
                   }
                 >
                   <Wallet size={13} />
@@ -1229,9 +1232,7 @@ function Dashboard({
                   <select
                     aria-label="渠道状态筛选"
                     value={statusFilter}
-                    onChange={(e) =>
-                      applyFilter(() => setStatusFilter(e.target.value))
-                    }
+                    onChange={(e) => setFilter("statusFilter", e.target.value)}
                   >
                     <option value="">全部状态</option>
                     <option value="eligible">可用渠道</option>
@@ -1244,7 +1245,7 @@ function Dashboard({
                   <select
                     aria-label="排序"
                     value={sort}
-                    onChange={(e) => applyFilter(() => setSort(e.target.value))}
+                    onChange={(e) => setFilter("sort", e.target.value)}
                   >
                     <option value="config">
                       {keyId ? "API key 顺序" : "Provider 顺序"}
@@ -1255,6 +1256,17 @@ function Dashboard({
                   </select>
                   <ChevronDown size={12} />
                 </div>
+                {hasFilters && (
+                  <button
+                    className="filter-chip"
+                    onClick={() => {
+                      setFilters({ ...defaultFilters });
+                      setPage(0);
+                    }}
+                  >
+                    <X size={12} /> 重置筛选
+                  </button>
+                )}
               </div>
               <span className="scope-label">
                 <span className="tiny-dot" /> Responses · 流式请求{" "}

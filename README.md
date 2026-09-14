@@ -15,7 +15,9 @@ Open http://127.0.0.1:4173 and enter your uni-api public endpoint and the first
 configured key (or an admin key). The backend must provide the platform APIs
 listed below and allow the browser origin through CORS. HTTPS deployments require
 an HTTPS backend endpoint. Keys are kept only in page memory and are cleared on
-disconnect/reload. Only the theme preference is saved locally.
+disconnect/reload. Theme and filter preferences are saved locally. Filters are
+stored separately for each normalized service address and restored after reconnecting.
+Only the selected filter key's opaque ID is stored, never the access credential.
 
 ## Features
 
@@ -23,6 +25,9 @@ disconnect/reload. Only the theme preference is saved locally.
 - Provider configuration order by default; API key selection keeps its configured
   channel set and order. Search, model/status/balance filters, explicit sorting
   and pagination compose without changing routing.
+- Remember API key, model, time window, search, status, balance and sort filters
+  across reloads. Reset filters in one click; deleted keys/models require an
+  explicit new selection. Reopening starts on the first page.
 - Channel success rate, completed attempt count, request-to-dispatch p50 and first
   output p50/p95. Detailed drawers show upstream model, exact latest timing,
   samples, last success and balance details.
