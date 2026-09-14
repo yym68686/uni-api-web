@@ -130,12 +130,15 @@ const streamLabel = (stream: string) =>
 async function readMetrics(connection: Connection, path: string, signal: AbortSignal, endpoint: string, stream: string) {
  const source=new URLSearchParams(path.split("?")[1]||"");
  const range=source.get("window")||"15m";
- if (["5m","15m","1h"].includes(range)) { const metrics=await request<Metrics>(connection,path,signal); if((endpoint==="all"||stream==="all")&&(metrics.filters?.endpoint!==endpoint||metrics.filters?.stream!==stream)) throw new Error("当前后端尚未支持全部范围统计，请更新 uni-api，或选择具体端点及流式状态。"); return metrics; }
+ const legacy = async () => { const metrics=await request<Metrics>(connection,path,signal); if((endpoint==="all"||stream==="all")&&(metrics.filters?.endpoint!==endpoint||metrics.filters?.stream!==stream)) throw new Error("当前后端尚未支持全部范围统计，请更新 uni-api，或选择具体端点及流式状态。"); return metrics; };
  const keyId=source.get("api_key_id")||"";
  source.delete("window"); source.set("range",range); source.delete("api_key_id");
  if(keyId)source.set("key_id",keyId);
  source.set("endpoint",endpoint); source.set("stream",stream);
- const result=await analyticsRequest<Metrics>(connection,"/analytics/v1/analytics?"+source.toString(),signal);
+ let result: Metrics;
+ try { result=await analyticsRequest<Metrics>(connection,"/analytics/v1/analytics?"+source.toString(),signal); }
+ catch (error) { if (["5m","15m","1h"].includes(range)) return legacy(); throw error; }
+ if (!result || !result.total || !Array.isArray((result as any).data)) return legacy();
  return {...result,window_minutes: range==="24h"?1440:range==="7d"?10080:range==="30d"?43200:range==="today"?1440:range==="week"?10080:range==="month"?43200:range==="year"?525600:0,coverage:result.coverage||"complete_for_instance",statistics_scope:"s3"};
 }
 async function readKeys(connection: Connection, signal: AbortSignal) {
@@ -529,15 +532,17 @@ function Trend({
       endpoint,
       stream,
     ],
-    queryFn: ({ signal }) =>
-      readMetrics(
+    queryFn: async ({ signal }) => {
+      const analytic = await readMetrics(
         connection,
         "/v1/channel-metrics/timeseries?" +
           channelParams(keyId, window, model, endpoint, stream),
         signal,
         endpoint,
         stream,
-      ),
+      );
+      return analytic;
+    },
   });
   const points = useMemo(() => {
     const buckets = new Map<
@@ -894,15 +899,18 @@ function Dashboard({
   });
   const metrics = useQuery({
     queryKey: ["metrics", connection.session, keyId, window, endpoint, stream],
-    queryFn: ({ signal }) =>
-      readMetrics(
+    queryFn: async ({ signal }) => {
+      const analytic = await readMetrics(
         connection,
         "/v1/channel-metrics?" + params,
         signal,
         endpoint,
         stream,
-      ),
-    enabled: keysLoaded && !keyRemoved,
+      );
+      const byId = new Map((analytic.data || []).map((item: any) => [JSON.stringify([item.provider,item.model,item.upstream_model,item.endpoint,item.stream]), item.stats]));
+      return { ...analytic, snapshot_revision: catalog.data?.snapshot_revision || analytic.snapshot_revision, data: (catalog.data?.data || analytic.data || []).map((row: any) => ({ ...row, stats: byId.get(JSON.stringify([row.provider,row.model,row.upstream_model,row.endpoint,row.stream])) || row.stats })) } as Metrics;
+    },
+    enabled: keysLoaded && !keyRemoved && !!catalog.data,
     refetchInterval: auto ? 30_000 : false,
     refetchIntervalInBackground: false,
   });
