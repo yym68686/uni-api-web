@@ -18,16 +18,14 @@ services:
       DATA_DIR: /data
       # The upstream address is explicit configuration and may point at any
       # compatible uni-api gateway. The request key remains browser supplied.
-      UNI_API_URL: ${UNI_API_URL:?set UNI_API_URL}
+      UNI_API_URL: ${UNI_API_URL:-}
       ANALYTICS_TIMEZONE: ${ANALYTICS_TIMEZONE:-Asia/Shanghai}
       SOURCE_ID: ${SOURCE_ID:-uni-api-console}
-      S3_ENDPOINT: ${S3_ENDPOINT:?set S3_ENDPOINT}
-      S3_BUCKET: ${S3_BUCKET:?set S3_BUCKET}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_BUCKET: ${S3_BUCKET:-}
       S3_PREFIX: ${S3_PREFIX:-uni-api-facts/v1/}
-      INGEST_TOKEN: ${INGEST_TOKEN:?set INGEST_TOKEN}
-      ADMIN_TOKEN: ${ADMIN_TOKEN:?set ADMIN_TOKEN}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:?set AWS_ACCESS_KEY_ID}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:?set AWS_SECRET_ACCESS_KEY}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
       AWS_REGION: ${AWS_REGION:-auto}
     volumes:
       - ./analytics-data:/data
