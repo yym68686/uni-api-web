@@ -1086,6 +1086,7 @@ nav > button.active > svg {
 }
 .filter-chips {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 9px;
 }
@@ -1116,6 +1117,7 @@ nav > button.active > svg {
   height: 25px;
 }
 .inline-select select {
+  max-width: min(235px, 60vw);
   color: var(--muted);
   font-size: 9px;
   padding-right: 14px;

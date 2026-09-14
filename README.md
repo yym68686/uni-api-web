@@ -30,7 +30,7 @@ Only the selected filter key's opaque ID is stored, never the access credential.
 - Provider configuration order by default; API key selection keeps its configured
   channel set and order. Search, model/status/balance filters, explicit sorting
   and pagination compose without changing routing.
-- Remember API key, model, time window, search, status, balance and sort filters
+- Remember API key, model, endpoint, streaming mode, time window, search, status, balance and sort filters
   across reloads. Reset filters in one click; deleted keys/models require an
   explicit new selection. Reopening starts on the first page.
 - Channel success rate, completed attempt count, request-to-dispatch p50 and first
@@ -46,7 +46,9 @@ Only the selected filter key's opaque ID is stored, never the access credential.
 
 ## Metric scope
 
-The current workspace covers `/v1/responses` with `stream=true`. Attempts are not
+The workspace defaults to `endpoint=all&stream=all`; endpoint and streaming mode
+can be filtered independently. Aggregate latency quantiles are calculated by the
+backend from merged histograms, never by averaging group p50/p95 values. Attempts are not
 user requests: retries count separately. Overall success rate is weighted by
 completed attempts, never averaged from row percentages. API key selection
 filters channel configuration; statistics still include all requests to those

@@ -34,6 +34,7 @@ function setup(
     keyStatus?: number;
     keyNetworkError?: boolean;
     denyPlatform?: boolean;
+    legacyMetrics?: boolean;
   } = {},
 ) {
   const calls: string[] = [];
@@ -79,6 +80,17 @@ function setup(
           }
         : {
             data,
+            filters: options.legacyMetrics
+              ? undefined
+              : {
+                  endpoint: url.searchParams.get("endpoint"),
+                  stream: url.searchParams.get("stream"),
+                },
+            available_endpoints: [
+              "/v1/messages",
+              "/v1/chat/completions",
+              "/v1/responses",
+            ],
             snapshot_revision: "v1",
             coverage: "complete_for_instance",
             generated_at: 1000,
@@ -174,6 +186,11 @@ describe("dashboard workflows", () => {
       "unavailable",
     );
     await app.user.selectOptions(screen.getByLabelText("排序"), "latency");
+    await app.user.selectOptions(
+      screen.getByLabelText("端点筛选"),
+      "/v1/messages",
+    );
+    await app.user.selectOptions(screen.getByLabelText("流式状态筛选"), "true");
     await app.user.click(screen.getByRole("button", { name: /^余额不足$/ }));
     await waitFor(() => expect(screen.getAllByRole("row")).toHaveLength(2));
     app.unmount();
@@ -191,6 +208,8 @@ describe("dashboard workflows", () => {
     expect(screen.getByLabelText("搜索渠道或模型")).toHaveValue("third");
     expect(screen.getByLabelText("渠道状态筛选")).toHaveValue("unavailable");
     expect(screen.getByLabelText("排序")).toHaveValue("latency");
+    expect(screen.getByLabelText("端点筛选")).toHaveValue("/v1/messages");
+    expect(screen.getByLabelText("流式状态筛选")).toHaveValue("true");
     expect(screen.getByRole("button", { name: /^余额不足$/ })).toHaveAttribute(
       "aria-pressed",
       "true",
@@ -201,6 +220,8 @@ describe("dashboard workflows", () => {
     );
     expect(firstMetrics.searchParams.get("api_key_id")).toBe("key-second");
     expect(firstMetrics.searchParams.get("window")).toBe("1h");
+    expect(firstMetrics.searchParams.get("endpoint")).toBe("/v1/messages");
+    expect(firstMetrics.searchParams.get("stream")).toBe("true");
     expect(JSON.stringify(localStorage)).not.toContain("platform-secret");
 
     await app.user.click(screen.getByRole("button", { name: "断开连接" }));
@@ -226,6 +247,8 @@ describe("dashboard workflows", () => {
     expect(screen.getByLabelText("模型筛选")).toHaveValue("");
     expect(screen.getByLabelText("搜索渠道或模型")).toHaveValue("");
     expect(screen.getByLabelText("排序")).toHaveValue("config");
+    expect(screen.getByLabelText("端点筛选")).toHaveValue("all");
+    expect(screen.getByLabelText("流式状态筛选")).toHaveValue("all");
     expect(screen.getByLabelText("渠道状态筛选")).toHaveValue("");
     expect(screen.getByRole("button", { name: "15 分钟" })).toHaveAttribute(
       "aria-pressed",
@@ -252,6 +275,57 @@ describe("dashboard workflows", () => {
     expect(screen.getByLabelText("API key 筛选")).toHaveValue("key-removed");
     expect(calls).toHaveLength(1);
     await user.click(screen.getByRole("button", { name: "重置筛选" }));
+    await screen.findByRole("table");
+  });
+  it("defaults to both aggregate dimensions and scopes catalog, metrics and trend queries independently", async () => {
+    const { user, calls } = setup();
+    await connect(user);
+    const first = new URL(
+      calls.find((url) => url.includes("channel-metrics"))!,
+    );
+    expect(first.searchParams.get("endpoint")).toBe("all");
+    expect(first.searchParams.get("stream")).toBe("all");
+    await user.selectOptions(screen.getByLabelText("端点筛选"), "/v1/messages");
+    await user.selectOptions(screen.getByLabelText("流式状态筛选"), "false");
+    await user.click(screen.getByRole("button", { name: "查看趋势" }));
+    await waitFor(() =>
+      expect(calls.some((url) => url.includes("timeseries"))).toBe(true),
+    );
+    for (const path of [
+      "model-channels",
+      "channel-metrics",
+      "channel-metrics/timeseries",
+    ]) {
+      const query = new URL(
+        calls.filter((url) => new URL(url).pathname === `/v1/${path}`).at(-1)!,
+      );
+      expect(query.searchParams.get("endpoint")).toBe("/v1/messages");
+      expect(query.searchParams.get("stream")).toBe("false");
+    }
+    await user.selectOptions(screen.getByLabelText("端点筛选"), "all");
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (url) =>
+            url.includes("timeseries") &&
+            new URL(url).searchParams.get("endpoint") === "all" &&
+            new URL(url).searchParams.get("stream") === "false",
+        ),
+      ).toBe(true),
+    );
+  });
+  it("does not turn unsupported aggregate queries on an old backend into fake zeros", async () => {
+    const { user } = setup({ legacyMetrics: true });
+    await connect(user, "https://mock.example", false);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "尚未支持全部范围统计",
+    );
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    await user.selectOptions(
+      screen.getByLabelText("端点筛选"),
+      "/v1/responses",
+    );
+    await user.selectOptions(screen.getByLabelText("流式状态筛选"), "true");
     await screen.findByRole("table");
   });
   it.each([401, 403])(

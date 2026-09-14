@@ -89,6 +89,39 @@ type Keys = {
   can_inspect_all: boolean;
 };
 type View = "channels" | "balances";
+const endpointChoices = [
+  "/v1/responses",
+  "/v1/responses/compact",
+  "/v1/chat/completions",
+  "/v1/messages",
+  "/v1/embeddings",
+  "/v1/images/generations",
+  "/v1/images/edits",
+  "/v1/audio/speech",
+  "/v1/audio/transcriptions",
+  "/v1/audio/translations",
+  "/v1/moderations",
+];
+const streamLabel = (stream: string) =>
+  stream === "true" ? "流式" : stream === "false" ? "非流式" : "全部请求";
+async function readMetrics(
+  connection: Connection,
+  path: string,
+  signal: AbortSignal,
+  endpoint: string,
+  stream: string,
+) {
+  const metrics = await request<Metrics>(connection, path, signal);
+  if (
+    (endpoint === "all" || stream === "all") &&
+    (metrics.filters?.endpoint !== endpoint ||
+      metrics.filters?.stream !== stream)
+  )
+    throw new Error(
+      "当前后端尚未支持全部范围统计，请更新 uni-api，或选择具体端点及流式状态。",
+    );
+  return metrics;
+}
 async function readKeys(connection: Connection, signal: AbortSignal) {
   const keys = await request<Keys>(connection, "/v1/api-keys", signal);
   if (!Array.isArray(keys.data))
@@ -458,20 +491,36 @@ function Trend({
   window,
   model,
   refresh,
+  endpoint,
+  stream,
 }: {
   connection: Connection;
   keyId: string;
   window: string;
   model: string;
   refresh: number;
+  endpoint: string;
+  stream: string;
 }) {
   const series = useQuery({
-    queryKey: ["trend", connection.session, keyId, window, model, refresh],
+    queryKey: [
+      "trend",
+      connection.session,
+      keyId,
+      window,
+      model,
+      refresh,
+      endpoint,
+      stream,
+    ],
     queryFn: ({ signal }) =>
-      request<Metrics>(
+      readMetrics(
         connection,
-        "/v1/channel-metrics/timeseries?" + channelParams(keyId, window, model),
+        "/v1/channel-metrics/timeseries?" +
+          channelParams(keyId, window, model, endpoint, stream),
         signal,
+        endpoint,
+        stream,
       ),
   });
   const points = useMemo(() => {
@@ -732,7 +781,7 @@ function Guide({ open, onClose }: { open: boolean; onClose: () => void }) {
               ],
               [
                 "范围与保留",
-                "当前视图是 /v1/responses 流式请求。默认按 provider 配置顺序；选择 API key 后按该 key 配置顺序。筛选不将渠道整体统计变为 key 私有用量。指标在内存保留 1 小时，实例重启后重新积累。",
+                "默认统计全部端点和全部流式状态，可分别筛选。跨组延迟由后端合并直方图后计算。默认按 provider 配置顺序；选择 API key 后按该 key 配置顺序，仍是渠道整体统计而非 key 私有用量。指标在内存保留 1 小时，实例重启后重新积累。",
               ],
             ].map(([title, text]) => (
               <section key={title}>
@@ -757,8 +806,17 @@ function Dashboard({
   changeConnection: () => void;
 }) {
   const [filters, setFilters] = useState(() => loadFilters(connection.base));
-  const { keyId, model, window, balanceFilter, statusFilter, search, sort } =
-    filters;
+  const {
+    keyId,
+    model,
+    window,
+    balanceFilter,
+    statusFilter,
+    search,
+    sort,
+    endpoint,
+    stream,
+  } = filters;
   const [view, setView] = useState<View>("channels"),
     [page, setPage] = useState(0);
   useEffect(() => {
@@ -805,17 +863,23 @@ function Dashboard({
     !!keys.data &&
     !keys.data.data.some((item) => item.key_id === keyId);
   const keysLoaded = !!keys.data;
-  const params = channelParams(keyId, window);
+  const params = channelParams(keyId, window, "", endpoint, stream);
   const catalog = useQuery({
-    queryKey: ["catalog", connection.session, keyId],
+    queryKey: ["catalog", connection.session, keyId, endpoint, stream],
     queryFn: ({ signal }) =>
       request<Catalog>(connection, "/v1/model-channels?" + params, signal),
     enabled: keysLoaded && !keyRemoved,
   });
   const metrics = useQuery({
-    queryKey: ["metrics", connection.session, keyId, window],
+    queryKey: ["metrics", connection.session, keyId, window, endpoint, stream],
     queryFn: ({ signal }) =>
-      request<Metrics>(connection, "/v1/channel-metrics?" + params, signal),
+      readMetrics(
+        connection,
+        "/v1/channel-metrics?" + params,
+        signal,
+        endpoint,
+        stream,
+      ),
     enabled: keysLoaded && !keyRemoved,
     refetchInterval: auto ? 30_000 : false,
     refetchIntervalInBackground: false,
@@ -835,6 +899,13 @@ function Dashboard({
     () => [...new Set(catalog.data?.data.map((row) => row.model) || [])].sort(),
     [catalog.data],
   );
+  const endpoints = [
+    ...new Set([
+      ...endpointChoices,
+      ...(metrics.data?.available_endpoints || []),
+      ...(endpoint === "all" ? [] : [endpoint]),
+    ]),
+  ].sort();
   const modelRemoved = !!model && !!catalog.data && !models.includes(model);
   const error = keyRemoved
     ? "所选 API key 已移除，请重新选择。"
@@ -1110,7 +1181,11 @@ function Dashboard({
             <MetricCard
               label="可用渠道"
               value={`${stats.eligible} / ${stats.providers}`}
-              sub="至少一个模型当前可路由"
+              sub={
+                endpoint === "all"
+                  ? "按渠道整体冷却与凭据状态"
+                  : "至少一个模型当前可路由"
+              }
               icon={<Radio size={17} />}
               accent
             />
@@ -1253,6 +1328,35 @@ function Dashboard({
             </div>
             <div className="filter-secondary">
               <div className="filter-chips">
+                <div className="inline-select">
+                  <Globe2 size={13} />
+                  <select
+                    aria-label="端点筛选"
+                    value={endpoint}
+                    onChange={(e) => setFilter("endpoint", e.target.value)}
+                  >
+                    <option value="all">全部端点</option>
+                    {endpoints.map((path) => (
+                      <option key={path} value={path}>
+                        {path}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={12} />
+                </div>
+                <div className="inline-select">
+                  <Radio size={13} />
+                  <select
+                    aria-label="流式状态筛选"
+                    value={stream}
+                    onChange={(e) => setFilter("stream", e.target.value)}
+                  >
+                    <option value="all">全部流式状态</option>
+                    <option value="true">流式</option>
+                    <option value="false">非流式</option>
+                  </select>
+                  <ChevronDown size={12} />
+                </div>
                 <button
                   className={`filter-chip ${balanceFilter ? "active" : ""}`}
                   aria-pressed={!!balanceFilter}
@@ -1305,8 +1409,10 @@ function Dashboard({
                 )}
               </div>
               <span className="scope-label">
-                <span className="tiny-dot" /> Responses · 流式请求{" "}
-                <Tip text="当前统计 /v1/responses 且 stream=true 的渠道整体尝试，不代表全部接口或所选 key 的独立用量。">
+                <span className="tiny-dot" />{" "}
+                {endpoint === "all" ? "全部端点" : endpoint} ·{" "}
+                {streamLabel(stream)}{" "}
+                <Tip text="统计所选端点与流式范围内的渠道整体尝试。API key 筛选决定渠道集合与顺序，不是该 key 的独立用量。全部端点的可用状态表示渠道整体冷却和凭据状态。">
                   <CircleHelp size={13} />
                 </Tip>
               </span>
@@ -1541,12 +1647,14 @@ function Dashboard({
           <AnimatePresence>
             {showTrend && view === "channels" && !error && (
               <Trend
-                key={`${keyId}-${window}-${model}`}
+                key={`${keyId}-${window}-${model}-${endpoint}-${stream}`}
                 connection={connection}
                 keyId={keyId}
                 window={window}
                 model={model}
                 refresh={refresh}
+                endpoint={endpoint}
+                stream={stream}
               />
             )}
           </AnimatePresence>

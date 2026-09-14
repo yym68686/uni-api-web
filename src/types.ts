@@ -37,7 +37,7 @@ export interface Channel {
   upstream_model: string;
   engine: string;
   endpoint: string;
-  stream: boolean;
+  stream: boolean | null;
   eligible: boolean;
   reason: string;
   stats: Stats;
@@ -48,6 +48,8 @@ export interface Catalog {
   snapshot_revision: string;
 }
 export interface Metrics extends Catalog {
+  filters?: { endpoint: string; stream: string };
+  available_endpoints?: string[];
   generated_at: number;
   from: number;
   to: number;

@@ -77,10 +77,16 @@ export async function request<T>(
     throw new Error("服务返回了无效数据，请检查地址和后端状态。");
   }
 }
-export function channelParams(keyId: string, window = "15m", model = "") {
+export function channelParams(
+  keyId: string,
+  window = "15m",
+  model = "",
+  endpoint = "all",
+  stream = "all",
+) {
   const params = new URLSearchParams({
-    endpoint: "/v1/responses",
-    stream: "true",
+    endpoint,
+    stream,
     window,
   });
   if (keyId) params.set("api_key_id", keyId);

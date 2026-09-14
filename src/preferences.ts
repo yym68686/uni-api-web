@@ -6,6 +6,8 @@ export const defaultFilters = {
   statusFilter: "",
   search: "",
   sort: "config",
+  endpoint: "all",
+  stream: "all",
 };
 
 export type Filters = typeof defaultFilters;
@@ -29,6 +31,12 @@ function validate(value: unknown): Filters {
     statusFilter: field("statusFilter", ["", "eligible", "unavailable"]),
     search: field("search"),
     sort: field("sort", ["config", "success", "latency", "wait"]),
+    endpoint:
+      field("endpoint") === "all" ||
+      /^\/[^?#\s]{1,500}$/.test(field("endpoint"))
+        ? field("endpoint")
+        : "all",
+    stream: field("stream", ["all", "true", "false"]),
   };
 }
 
