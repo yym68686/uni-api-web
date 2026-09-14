@@ -78,9 +78,25 @@ func (s *Service) importObject(ctx context.Context, key, etag string, body io.Re
 
 func (s *Service) maybeImport(ctx context.Context) {
 	if err := s.importS3(ctx); err != nil {
-		fmt.Printf("analytics S3 import failed: %T\n", err)
+		// Keep credentials, bucket names and object keys out of logs while still
+		// making retryable import failures observable.
+		fmt.Printf("analytics S3 import failed: %s\n", importErrorClass(err))
 	} else {
 		s.lastCollect.Store(time.Now().UnixMilli())
+	}
+}
+
+func importErrorClass(err error) string {
+	if err == nil {
+		return "unknown"
+	}
+	switch {
+	case strings.Contains(err.Error(), "AccessDenied"), strings.Contains(err.Error(), "Forbidden"):
+		return "access_denied"
+	case strings.Contains(err.Error(), "timeout"), strings.Contains(err.Error(), "deadline"):
+		return "timeout"
+	default:
+		return "unavailable"
 	}
 }
 func (s *Service) startImportLoop(ctx context.Context) {
