@@ -203,18 +203,15 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 	models := map[string]*Summary{}
 	var total Summary
 	for rows.Next() {
-		var kind, provider, model, upstream, outcome, first, dispatch string
+		var kind, provider, model, upstream, outcome string
+		var firstValue, dispatchValue any
 		var n int64
 		var s Summary
-		if err = rows.Scan(&kind, &provider, &model, &upstream, &outcome, &n, &s.Input, &s.Output, &s.CacheRead, &s.CacheWrite, &s.CacheWrite1h, &s.UsageSamples, &s.CacheSamples, &s.ActualUSD, &s.ActualSamples, &first, &dispatch, &s.FirstCount, &s.DispatchCount, &s.FirstSum, &s.DispatchSum, &s.LastMS, &s.LastFirst, &s.LastDispatch); err != nil {
+		if err = rows.Scan(&kind, &provider, &model, &upstream, &outcome, &n, &s.Input, &s.Output, &s.CacheRead, &s.CacheWrite, &s.CacheWrite1h, &s.UsageSamples, &s.CacheSamples, &s.ActualUSD, &s.ActualSamples, &firstValue, &dispatchValue, &s.FirstCount, &s.DispatchCount, &s.FirstSum, &s.DispatchSum, &s.LastMS, &s.LastFirst, &s.LastDispatch); err != nil {
 			return QueryResult{}, err
 		}
-		if err = json.Unmarshal([]byte(first), &s.FirstBins); err != nil {
-			return QueryResult{}, err
-		}
-		if err = json.Unmarshal([]byte(dispatch), &s.DispatchBins); err != nil {
-			return QueryResult{}, err
-		}
+		s.FirstBins = histogramValues(firstValue)
+		s.DispatchBins = histogramValues(dispatchValue)
 		if p, ok := priceMap[model]; ok && p.Verified && s.UsageSamples > 0 {
 			ordinary := max(0, s.Input-s.CacheRead-s.CacheWrite)
 			write5 := max(0, s.CacheWrite-s.CacheWrite1h)
@@ -293,4 +290,26 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 	}
 	out.DurationMS = float64(time.Since(began).Microseconds()) / 1000
 	return out, nil
+}
+
+func histogramValues(value any) []int64 {
+	var out []int64
+	switch values := value.(type) {
+	case []int64:
+		return values
+	case []interface{}:
+		for _, item := range values {
+			switch n := item.(type) {
+			case int64:
+				out = append(out, n)
+			case int32:
+				out = append(out, int64(n))
+			case float64:
+				out = append(out, int64(n))
+			}
+		}
+	case string:
+		_ = json.Unmarshal([]byte(values), &out)
+	}
+	return out
 }

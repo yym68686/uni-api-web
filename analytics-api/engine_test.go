@@ -47,3 +47,25 @@ func TestRangeStartUsesLocalCalendarBoundaries(t *testing.T) {
 		t.Fatal(start, err)
 	}
 }
+
+func TestQueryImportedFacts(t *testing.T) {
+	e, err := OpenEngine(filepath.Join(t.TempDir(), "query.duckdb"), Config{Timezone: "UTC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	f := Fact{Schema: 1, EventID: "request-1", Kind: "request", AtMS: time.Now().Add(-time.Second).UnixMilli(), Provider: "p", Model: "m", UpstreamModel: "m", Outcome: "success"}
+	a := f
+	a.EventID = "attempt-1"
+	a.Kind = "attempt"
+	if err = e.Import(context.Background(), "test.jsonl", "etag", []Fact{f, a}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := e.Query(context.Background(), QueryFilter{Range: "all"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Total["requests"] != float64(1) || len(result.Data) != 1 {
+		t.Fatalf("unexpected totals %+v", result)
+	}
+}
