@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -15,6 +16,14 @@ type Service struct {
 	cfg         Config
 	active      atomic.Int64
 	lastCollect atomic.Int64
+	cacheMu     sync.Mutex
+	cache       map[string]cachedAnalytics
+}
+
+type cachedAnalytics struct {
+	expires  time.Time
+	revision uint64
+	body     []byte
 }
 
 func NewService(e *Engine, cfg Config) (*Service, error) {
@@ -25,7 +34,7 @@ func NewService(e *Engine, cfg Config) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Service{engine: e, cfg: cfg, auth: auth}, nil
+	return &Service{engine: e, cfg: cfg, auth: auth, cache: make(map[string]cachedAnalytics)}, nil
 }
 func (s *Service) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -49,12 +58,39 @@ func (s *Service) analytics(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		name = "15m"
 	}
-	result, err := s.engine.Query(r.Context(), QueryFilter{Range: name, Model: q.Get("model"), Provider: q.Get("provider"), Endpoint: q.Get("endpoint"), Stream: q.Get("stream")})
+	key := q.Encode()
+	rev := s.engine.Revision.Load()
+	now := time.Now()
+	s.cacheMu.Lock()
+	if item, ok := s.cache[key]; ok && item.revision == rev && now.Before(item.expires) {
+		body := append([]byte(nil), item.body...)
+		s.cacheMu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
+		return
+	}
+	s.cacheMu.Unlock()
+	result, err := s.engine.Query(r.Context(), QueryFilter{Range: name, Model: q.Get("model"), Provider: q.Get("provider"), Endpoint: q.Get("endpoint"), Stream: q.Get("stream"), KeyID: q.Get("key_id")})
 	if err != nil {
 		writeJSON(w, 503, map[string]string{"error": "analytics unavailable"})
 		return
 	}
-	writeJSON(w, 200, result)
+	body, err := json.Marshal(result)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": "analytics unavailable"})
+		return
+	}
+	s.cacheMu.Lock()
+	s.cache[key] = cachedAnalytics{expires: now.Add(2 * time.Second), revision: rev, body: append([]byte(nil), body...)}
+	if len(s.cache) > 256 {
+		for k := range s.cache {
+			delete(s.cache, k)
+			break
+		}
+	}
+	s.cacheMu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(body)
 }
 func (s *Service) prices(w http.ResponseWriter, r *http.Request) {
 	out, err := s.engine.Prices(r.Context())

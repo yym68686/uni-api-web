@@ -26,7 +26,7 @@ function validate(value: unknown): Filters {
   return {
     keyId: field("keyId"),
     model: field("model"),
-    window: field("window", ["5m", "15m", "1h"]),
+    window: field("window", ["5m", "15m", "1h", "24h", "7d", "30d", "today", "week", "month", "year", "all"]),
     balanceFilter: field("balanceFilter", ["", "low"]),
     statusFilter: field("statusFilter", ["", "eligible", "unavailable"]),
     search: field("search"),
