@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -67,5 +68,86 @@ func TestQueryImportedFacts(t *testing.T) {
 	}
 	if result.Total["requests"] != float64(1) || len(result.Data) != 1 {
 		t.Fatalf("unexpected totals %+v", result)
+	}
+}
+
+func TestBatchImportAtomicAndDimensionAggregation(t *testing.T) {
+	e, err := OpenEngine(filepath.Join(t.TempDir(), "batch.duckdb"), Config{Timezone: "UTC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	ctx := context.Background()
+	at := time.Now().Add(-time.Minute).UnixMilli()
+	objects := []FactObject{}
+	for i := 0; i < 4; i++ {
+		f := Fact{Schema: 1, Kind: "attempt", EventID: fmt.Sprint(i), AtMS: at, Provider: "route", Model: "model", UpstreamModel: "upstream", Endpoint: []string{"/v1/messages", "/v1/responses"}[i%2], Stream: i < 2, Outcome: "success"}
+		objects = append(objects, FactObject{Key: fmt.Sprint(i), ETag: "a", Facts: []Fact{f}})
+	}
+	if err = e.ImportBatch(ctx, objects); err != nil {
+		t.Fatal(err)
+	}
+	if err = e.ImportBatch(ctx, objects); err != nil {
+		t.Fatal(err)
+	}
+	all, err := e.Query(ctx, QueryFilter{Range: "1h", Endpoint: "all", Stream: "all"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all.Data) != 1 || all.Data[0].Stats["success"] != float64(4) || all.Data[0].Stream != nil || all.Data[0].Endpoint != "all" {
+		t.Fatalf("bad aggregate %+v", all.Data)
+	}
+	filtered, err := e.Query(ctx, QueryFilter{Range: "1h", Endpoint: "/v1/messages", Stream: "true"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(filtered.Data) != 1 || filtered.Data[0].Stats["success"] != float64(1) {
+		t.Fatalf("bad filter %+v", filtered.Data)
+	}
+	bad := objects[0]
+	bad.Key = "new"
+	bad.Facts = []Fact{{Schema: 0, EventID: "bad", AtMS: at}}
+	fresh := objects[0]
+	fresh.Key = "fresh"
+	fresh.Facts = []Fact{objects[0].Facts[0]}
+	fresh.Facts[0].EventID = "fresh"
+	if err = e.ImportBatch(ctx, []FactObject{fresh, bad}); err == nil {
+		t.Fatal("invalid batch committed")
+	}
+	known, err := e.ImportedObjects(ctx)
+	if err != nil || len(known) != 4 {
+		t.Fatalf("checkpoint changed on failed batch: %v %v", known, err)
+	}
+}
+
+func BenchmarkObjectImports(b *testing.B) {
+	for _, batched := range []bool{false, true} {
+		b.Run(fmt.Sprint("batch=", batched), func(b *testing.B) {
+			for n := 0; n < b.N; n++ {
+				e, err := OpenEngine(filepath.Join(b.TempDir(), "bench.duckdb"), Config{Timezone: "UTC"})
+				if err != nil {
+					b.Fatal(err)
+				}
+				objects := []FactObject{}
+				for i := 0; i < 64; i++ {
+					objects = append(objects, FactObject{Key: fmt.Sprint(i), ETag: "a", Facts: []Fact{{Schema: 1, EventID: fmt.Sprint(i), Kind: "attempt", AtMS: time.Now().Add(-time.Minute).UnixMilli(), Provider: "route", Model: "m", Outcome: "success"}}})
+				}
+				start := time.Now()
+				if batched {
+					err = e.ImportBatch(context.Background(), objects)
+				} else {
+					for _, o := range objects {
+						if err = e.Import(context.Background(), o.Key, o.ETag, o.Facts); err != nil {
+							break
+						}
+					}
+				}
+				if err != nil {
+					b.Fatal(err)
+				}
+				b.ReportMetric(float64(time.Since(start).Milliseconds()), "import_ms")
+				e.Close()
+			}
+		})
 	}
 }

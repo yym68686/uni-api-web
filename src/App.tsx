@@ -84,6 +84,8 @@ import type {
   ModelPrice,
 } from "./types";
 import { Brand, Empty, Spinner, Tip } from "./ui";
+import { PriceSettings } from "./PriceSettings";
+import { catalogMetrics, ranges, usd } from "./analytics";
 
 type Keys = {
   data: KeyInfo[];
@@ -105,15 +107,6 @@ function Overview({ metrics, rows, live }: { metrics?: Metrics; rows: Channel[];
   </motion.section>;
 }
 
-function PriceSettings({ prices, loading, connection, onSaved }: { prices: ModelPrice[]; loading: boolean; connection: Connection; onSaved: () => void }) {
-  const [draft, setDraft] = useState<ModelPrice[]>(prices);
-  const [newModel, setNewModel] = useState("");
-  useEffect(() => setDraft(prices), [prices]);
-  function update(index: number, key: keyof ModelPrice, value: string) { setDraft(items => items.map((item, i) => i === index ? { ...item, [key]: key === "model" ? value : Number(value) } : item)); }
-  async function save(item: ModelPrice) { await analyticsRequest(connection, `/analytics/v1/prices/${encodeURIComponent(item.model)}`, undefined, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(item) }); onSaved(); }
-  function addModel() { const model = newModel.trim(); if (!model || draft.some(item => item.model === model)) return; setDraft(items => [...items, { model, input: 0, output: 0, cache_read: 0, cache_write: 0, cache_write_1h: 0, source: "manual", verified: false }]); setNewModel(""); }
-  return <section className="data-panel prices-panel"><div className="data-heading"><div className="data-title"><SlidersHorizontal size={19} /><h2>模型价格</h2></div>{loading && <Spinner small />}</div><p className="field-note">单位：美元 / 每百万 token。只有已验证价格会计入消费估算。</p><div className="price-add"><input aria-label="新增模型名称" placeholder="新增模型名称" value={newModel} onChange={e => setNewModel(e.target.value)} /><button className="button small" onClick={addModel}>新增模型</button></div><div className="price-list">{draft.map((item, index) => <div className="price-row" key={`${item.model}-${index}`}><input aria-label="模型名称" value={item.model} onChange={e => update(index, "model", e.target.value)} /><input aria-label="输入价格" type="number" min="0" step="any" value={item.input} onChange={e => update(index, "input", e.target.value)} /><input aria-label="输出价格" type="number" min="0" step="any" value={item.output} onChange={e => update(index, "output", e.target.value)} /><button className="button small" onClick={() => void save(item)}>保存</button></div>)}</div></section>;
-}
 const endpointChoices = [
   "/v1/responses",
   "/v1/responses/compact",
@@ -132,16 +125,12 @@ const streamLabel = (stream: string) =>
 async function readMetrics(connection: Connection, path: string, signal: AbortSignal, endpoint: string, stream: string) {
  const source=new URLSearchParams(path.split("?")[1]||"");
  const range=source.get("window")||"15m";
- const legacy = async () => { const metrics=await request<Metrics>(connection,path,signal); if((endpoint==="all"||stream==="all")&&(metrics.filters?.endpoint!==endpoint||metrics.filters?.stream!==stream)) throw new Error("当前后端尚未支持全部范围统计，请更新 uni-api，或选择具体端点及流式状态。"); return metrics; };
- const keyId=source.get("api_key_id")||"";
  source.delete("window"); source.set("range",range); source.delete("api_key_id");
- if(keyId)source.set("key_id",keyId);
  source.set("endpoint",endpoint); source.set("stream",stream);
- let result: Metrics;
- try { result=await analyticsRequest<Metrics>(connection,"/analytics/v1/analytics?"+source.toString(),signal); }
- catch (error) { if (["5m","15m","1h"].includes(range)) return legacy(); throw error; }
- if (!result || !result.total || !Array.isArray((result as any).data)) return legacy();
- return {...result,window_minutes: range==="24h"?1440:range==="7d"?10080:range==="30d"?43200:range==="today"?1440:range==="week"?10080:range==="month"?43200:range==="year"?525600:0,coverage:result.coverage||"complete_for_instance",statistics_scope:"s3"};
+ if (path.includes("timeseries")) source.set("timeseries","true");
+ const result=await analyticsRequest<Metrics>(connection,"/analytics/v1/analytics?"+source.toString(),signal);
+ if (!result || !result.total || !Array.isArray(result.data)) throw new Error("分析服务返回了无效统计数据。");
+ return {...result,window_minutes: range==="24h"?1440:range==="7d"?10080:range==="30d"?43200:range==="today"?1440:range==="week"?10080:range==="month"?43200:range==="year"?525600:0,coverage:result.coverage||"partial",statistics_scope:"s3"};
 }
 async function readKeys(connection: Connection, signal: AbortSignal) {
   const keys = await request<Keys>(connection, "/v1/api-keys", signal);
@@ -901,17 +890,8 @@ function Dashboard({
   });
   const metrics = useQuery({
     queryKey: ["metrics", connection.session, keyId, window, endpoint, stream],
-    queryFn: async ({ signal }) => {
-      const analytic = await readMetrics(
-        connection,
-        "/v1/channel-metrics?" + params,
-        signal,
-        endpoint,
-        stream,
-      );
-      const byId = new Map((analytic.data || []).map((item: any) => [JSON.stringify([item.provider,item.model,item.upstream_model,item.endpoint,item.stream]), item.stats]));
-      return { ...analytic, snapshot_revision: catalog.data?.snapshot_revision || analytic.snapshot_revision, data: (catalog.data?.data || analytic.data || []).map((row: any) => ({ ...row, stats: byId.get(JSON.stringify([row.provider,row.model,row.upstream_model,row.endpoint,row.stream])) || { started: 0, success: 0, failed: 0, success_rate_denominator: 0, success_rate: null, inflight: null, skipped: 0, client_cancelled: 0, hedge_cancelled: 0 } })) } as Metrics;
-    },
+    queryFn: ({ signal }) => readMetrics(connection,"/v1/channel-metrics?" + params,signal,endpoint,stream),
+    staleTime: 30_000,
     enabled: keysLoaded && !keyRemoved && !!catalog.data,
     refetchInterval: auto ? 30_000 : false,
     refetchIntervalInBackground: false,
@@ -919,7 +899,7 @@ function Dashboard({
   const liveMetrics = useQuery({
     queryKey: ["live-metrics", connection.session, keyId, endpoint, stream],
     queryFn: ({ signal }) => request<Metrics>(connection, "/v1/channel-metrics?" + channelParams(keyId, "1m", "", endpoint, stream), signal),
-    enabled: keysLoaded && !keyRemoved && !!catalog.data && view === "overview",
+    enabled: keysLoaded && !keyRemoved && !!catalog.data && (view === "overview" || view === "channels"),
     staleTime: 2_000,
     refetchInterval: auto ? 5_000 : false,
     refetchIntervalInBackground: false,
@@ -928,10 +908,10 @@ function Dashboard({
   const queryClient = useQueryClient();
   useEffect(() => {
     if (!keysLoaded || keyRemoved || !catalog.data || view !== "channels") return;
-    const ranges = ["5m", "15m", "1h", "24h", "7d", "30d", "today", "week", "month", "year", "all"];
+    const windows = ranges.map(([value]) => value);
     const controller = new AbortController();
     void (async () => {
-      for (const next of ranges) {
+      for (const next of windows) {
         if (next === window) continue;
         if (controller.signal.aborted) return;
         const key = ["metrics", connection.session, keyId, next, endpoint, stream];
@@ -945,17 +925,6 @@ function Dashboard({
     })();
     return () => controller.abort();
   }, [keysLoaded, keyRemoved, catalog.data, view, connection, keyId, endpoint, stream, window, queryClient]);
-  useEffect(() => {
-    if (
-      metrics.data &&
-      catalog.data &&
-      metrics.data.snapshot_revision !== catalog.data.snapshot_revision &&
-      !catalog.isFetching
-    ) {
-      void catalog.refetch();
-      void keys.refetch();
-    }
-  }, [metrics.data?.snapshot_revision, catalog.data?.snapshot_revision]);
   const models = useMemo(
     () => [...new Set(catalog.data?.data.map((row) => row.model) || [])].sort(),
     [catalog.data],
@@ -977,10 +946,10 @@ function Dashboard({
     () =>
       error
         ? []
-        : (metrics.data?.data || []).filter(
+        : catalogMetrics(catalog.data, metrics.data).filter(
             (row) => !model || row.model === model,
           ),
-    [metrics.data, model, error],
+    [catalog.data, metrics.data, model, error],
   );
   const rowRanks = useMemo(
     () => new Map(rows.map((row, i) => [rowId(row), i + 1])),
@@ -1064,6 +1033,7 @@ function Dashboard({
   }
   function reload() {
     void keys.refetch();
+    void liveMetrics.refetch();
     if (keysLoaded && !keyRemoved) {
       void catalog.refetch();
       void metrics.refetch();
@@ -1235,7 +1205,7 @@ function Dashboard({
             </button>
           </motion.div>
           {view === "prices" ? (
-            <PriceSettings prices={prices.data?.data || []} loading={prices.isPending} connection={connection} onSaved={() => void prices.refetch()} />
+            <PriceSettings prices={prices.data?.data || []} loading={prices.isPending} error={prices.error?.message} connection={connection} onSaved={() => void prices.refetch()} />
           ) : view === "overview" ? (
             <Overview metrics={metrics.data} rows={rows} live={liveMap} />
           ) : <motion.section
@@ -1370,16 +1340,7 @@ function Dashboard({
                 <ChevronDown size={13} />
               </div>
               <div className="window-tabs" aria-label="统计窗口">
-                {[
-                  ["5m", "5 分钟"],
-                  ["15m", "15 分钟"],
-                  ["1h", "1 小时"],
-                  ["24h", "24 小时"],
-                  ["7d", "本周"],
-                  ["30d", "本月"],
-                  ["year", "今年"],
-                  ["all", "全部"],
-                ].map(([value, label]) => (
+                {ranges.map(([value, label]) => (
                   <button
                     key={value}
                     aria-pressed={window === value}
@@ -1493,6 +1454,7 @@ function Dashboard({
                 </Tip>
               </span>
             </div>
+            {metrics.data?.import && !metrics.data.import.caught_up && <div className="coverage-note" role="status"><Clock3 size={14} />{metrics.data.import.error_class ? `采集异常：${metrics.data.import.error_class}` : `正在同步历史事实，剩余 ${count(metrics.data.import.remaining_objects || 0)} 个对象；当前统计尚不完整。`}</div>}
             {metrics.data?.coverage === "partial" && (
               <div className="coverage-note">
                 <Clock3 size={14} />
@@ -1553,6 +1515,8 @@ function Dashboard({
                       <th>
                         首输出 <small>p50 / p95</small>
                       </th>
+                      <th>Token / 缓存率</th>
+                      <th>估算消费</th>
                       <th>余额 / 额度</th>
                       <th aria-label="详情" />
                     </tr>
@@ -1622,6 +1586,8 @@ function Dashboard({
                               </span>
                             </div>
                           </td>
+                          <td className="mono">{row.stats?.usage_samples ? count((row.stats.input_tokens || 0) + (row.stats.output_tokens || 0)) : "—"}<small className="usage-cache">{rate(row.stats?.cache_rate)}</small></td>
+                          <td className="mono">{usd(row.stats?.estimated_cost_usd)}</td>
                           <td>
                             <BalanceValue
                               balance={balance?.data}

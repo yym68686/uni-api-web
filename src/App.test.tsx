@@ -80,6 +80,8 @@ function setup(
           }
         : {
             data,
+            total: options.legacyMetrics ? undefined : { requests: 4 },
+            models: [],
             filters: options.legacyMetrics
               ? undefined
               : {
@@ -216,10 +218,10 @@ describe("dashboard workflows", () => {
     );
     expect(screen.getAllByRole("row")).toHaveLength(2);
     const firstMetrics = new URL(
-      app.calls.find((url) => url.includes("channel-metrics"))!,
+      app.calls.find((url) => url.includes("/analytics/v1/analytics"))!,
     );
-    expect(firstMetrics.searchParams.get("api_key_id")).toBe("key-second");
-    expect(firstMetrics.searchParams.get("window")).toBe("1h");
+    expect(firstMetrics.searchParams.has("key_id")).toBe(false);
+    expect(firstMetrics.searchParams.get("range")).toBe("1h");
     expect(firstMetrics.searchParams.get("endpoint")).toBe("/v1/messages");
     expect(firstMetrics.searchParams.get("stream")).toBe("true");
     expect(JSON.stringify(localStorage)).not.toContain("platform-secret");
@@ -281,7 +283,7 @@ describe("dashboard workflows", () => {
     const { user, calls } = setup();
     await connect(user);
     const first = new URL(
-      calls.find((url) => url.includes("channel-metrics"))!,
+      calls.find((url) => url.includes("/analytics/v1/analytics"))!,
     );
     expect(first.searchParams.get("endpoint")).toBe("all");
     expect(first.searchParams.get("stream")).toBe("all");
@@ -289,15 +291,14 @@ describe("dashboard workflows", () => {
     await user.selectOptions(screen.getByLabelText("流式状态筛选"), "false");
     await user.click(screen.getByRole("button", { name: "查看趋势" }));
     await waitFor(() =>
-      expect(calls.some((url) => url.includes("timeseries"))).toBe(true),
+      expect(calls.some((url) => new URL(url).searchParams.has("timeseries"))).toBe(true),
     );
     for (const path of [
-      "model-channels",
-      "channel-metrics",
-      "channel-metrics/timeseries",
+      "/v1/model-channels",
+      "/analytics/v1/analytics",
     ]) {
       const query = new URL(
-        calls.filter((url) => new URL(url).pathname === `/v1/${path}`).at(-1)!,
+        calls.filter((url) => new URL(url).pathname === path).at(-1)!,
       );
       expect(query.searchParams.get("endpoint")).toBe("/v1/messages");
       expect(query.searchParams.get("stream")).toBe("false");
@@ -307,25 +308,24 @@ describe("dashboard workflows", () => {
       expect(
         calls.some(
           (url) =>
-            url.includes("timeseries") &&
+            new URL(url).searchParams.has("timeseries") &&
             new URL(url).searchParams.get("endpoint") === "all" &&
             new URL(url).searchParams.get("stream") === "false",
         ),
       ).toBe(true),
     );
   });
-  it("does not turn unsupported aggregate queries on an old backend into fake zeros", async () => {
-    const { user } = setup({ legacyMetrics: true });
+  it("shows invalid analytics as an error without falling back to volatile statistics", async () => {
+    const options = { legacyMetrics: true };
+    const { user, calls } = setup(options);
     await connect(user, "https://mock.example", false);
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "尚未支持全部范围统计",
+      "无效统计数据",
     );
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
-    await user.selectOptions(
-      screen.getByLabelText("端点筛选"),
-      "/v1/responses",
-    );
-    await user.selectOptions(screen.getByLabelText("流式状态筛选"), "true");
+    expect(calls.some(url => new URL(url).pathname === "/v1/channel-metrics" && new URL(url).searchParams.get("window") !== "1m")).toBe(false);
+    options.legacyMetrics = false;
+    await user.click(screen.getByRole("button", {name:"重新读取"}));
     await screen.findByRole("table");
   });
   it.each([401, 403])(

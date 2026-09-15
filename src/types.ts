@@ -18,6 +18,11 @@ export interface Distribution {
   p95_ms: number | null;
 }
 export interface Stats {
+  input_tokens?: number;
+  output_tokens?: number;
+  usage_samples?: number;
+  cache_rate?: number | null;
+  estimated_cost_usd?: number | null;
   started: number;
   success: number;
   failed: number;
@@ -59,6 +64,7 @@ export interface Metrics extends Catalog {
   collection_started_at: number;
   order: string;
   statistics_scope: string;
+  import?: { caught_up: boolean; remaining_objects: number; error_class?: string; last_scan_ms?: number };
   total?: Record<string, any>;
   models?: Record<string, any>[];
 }
