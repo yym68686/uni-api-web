@@ -137,28 +137,56 @@ func (e *Engine) ImportBatch(ctx context.Context, objects []FactObject) error {
 	if len(pending) == 0 {
 		return nil
 	}
+	// A single JSON scan avoids retaining a separate INSERT execution state
+	// for every event in the transaction (large batches exhausted DuckDB's
+	// memory budget even when the event payload itself was small).
+	file, err := os.CreateTemp(e.cfg.DataDir, "fact-batch-*.jsonl")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(file.Name())
+	encoder := json.NewEncoder(file)
+	var factCount int
+	for _, obj := range pending {
+		for _, fact := range obj.Facts {
+			if err = encoder.Encode(fact); err != nil {
+				file.Close()
+				return err
+			}
+			factCount++
+		}
+	}
+	if err = file.Close(); err != nil {
+		return err
+	}
 	tx, err := e.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	stmt, err := tx.PrepareContext(ctx, `INSERT INTO facts VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`)
-	if err != nil {
-		return err
+	if factCount > 0 {
+		_, err = tx.ExecContext(ctx, `INSERT INTO facts SELECT event_id,kind,instance_id,request_id,attempt_id,at_ms,started_ms,key_id,provider,model,upstream_model,endpoint,stream,outcome,status,duration_ms,dispatch_ms,first_output_ms,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,cache_write_1h_tokens,actual_cost_usd FROM read_json(?,format='newline_delimited',columns={schema:'INTEGER',event_id:'VARCHAR',kind:'VARCHAR',instance_id:'VARCHAR',request_id:'VARCHAR',attempt_id:'VARCHAR',at_ms:'BIGINT',started_ms:'BIGINT',key_id:'VARCHAR',provider:'VARCHAR',model:'VARCHAR',upstream_model:'VARCHAR',endpoint:'VARCHAR',stream:'BOOLEAN',outcome:'VARCHAR',status:'INTEGER',duration_ms:'DOUBLE',dispatch_ms:'DOUBLE',first_output_ms:'DOUBLE',input_tokens:'BIGINT',output_tokens:'BIGINT',cache_read_tokens:'BIGINT',cache_write_tokens:'BIGINT',cache_write_1h_tokens:'BIGINT',actual_cost_usd:'DOUBLE'}) ON CONFLICT DO NOTHING`, file.Name())
+		if err != nil {
+			return err
+		}
 	}
-	defer stmt.Close()
 	minutes, days := map[int64]bool{}, map[int64]bool{}
 	for _, obj := range pending {
 		for _, f := range obj.Facts {
-			_, err = stmt.ExecContext(ctx, f.EventID, f.Kind, f.InstanceID, f.RequestID, f.AttemptID, f.AtMS, f.StartedMS, f.KeyID, f.Provider, f.Model, f.UpstreamModel, f.Endpoint, f.Stream, f.Outcome, f.Status, f.DurationMS, f.DispatchMS, f.FirstOutputMS, f.InputTokens, f.OutputTokens, f.CacheReadTokens, f.CacheWriteTokens, f.CacheWrite1hTokens, f.ActualCostUSD)
-			if err != nil {
-				return err
-			}
 			minutes[f.AtMS/60000*60000] = true
 			local := time.UnixMilli(f.AtMS).In(e.Location)
 			days[time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, e.Location).UnixMilli()] = true
 		}
-		if _, err = tx.ExecContext(ctx, "INSERT INTO imported_objects(object_key,etag,events) VALUES(?,?,?)", obj.Key, obj.ETag, len(obj.Facts)); err != nil {
+	}
+	for start := 0; start < len(pending); start += 256 {
+		end := min(start+256, len(pending))
+		values := make([]string, 0, end-start)
+		args := make([]any, 0, 3*(end-start))
+		for _, obj := range pending[start:end] {
+			values = append(values, "(?,?,?)")
+			args = append(args, obj.Key, obj.ETag, len(obj.Facts))
+		}
+		if _, err = tx.ExecContext(ctx, "INSERT INTO imported_objects(object_key,etag,events) VALUES "+strings.Join(values, ","), args...); err != nil {
 			return err
 		}
 	}
@@ -273,7 +301,7 @@ func (e *Engine) seedDefaultPrices() error {
 	}
 	return nil
 }
-func (e *Engine) SavePrice(ctx context.Context, p Price) error {
+func validatePrice(p Price) error {
 	if p.Model == "" || len(p.Model) > 512 {
 		return errors.New("model required")
 	}
@@ -281,6 +309,15 @@ func (e *Engine) SavePrice(ctx context.Context, p Price) error {
 		if v < 0 || math.IsNaN(v) || math.IsInf(v, 0) || v > 1e9 {
 			return errors.New("invalid price")
 		}
+	}
+	if len(p.Source) > 2048 {
+		return errors.New("price source too long")
+	}
+	return nil
+}
+func (e *Engine) SavePrice(ctx context.Context, p Price) error {
+	if err := validatePrice(p); err != nil {
+		return err
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()

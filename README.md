@@ -41,6 +41,8 @@ Only the selected filter key's opaque ID is stored, never the access credential.
   summed. An exhausted channel requires all upstream keys to be known and empty.
 - Optional one-minute traffic buckets from the timeseries API; no synthetic charts.
 - Optional 30-second metric refresh, paused while the page is in the background.
+- S3-backed history across today/week/month/year/all ranges, usage and estimated
+  cost dashboards, live channel concurrency, cache rates and editable model prices.
 - Motion entrance/tab transitions, Radix accessible dialogs/tooltips, reduced
   motion support, keyboard navigation and a mobile navigation drawer.
 
@@ -53,9 +55,9 @@ user requests: retries count separately. Overall success rate is weighted by
 completed attempts, never averaged from row percentages. API key selection
 filters channel configuration; statistics still include all requests to those
 channels. p50/p95 are histogram upper-bound estimates and must not be added
-between stages. Metrics are held in backend instance memory; restarts produce a
-partially covered window until new samples accumulate. Error responses never
-turn into a fake zero balance or success rate.
+between stages. Historical facts are retained in S3 and queried through DuckDB
+minute/day aggregates. Only current concurrency remains a live instance metric.
+Error responses never turn into a fake zero balance or success rate.
 
 ## Platform endpoints
 
@@ -64,10 +66,35 @@ turn into a fake zero balance or success rate.
 - `GET /v1/channel-metrics`
 - `GET /v1/channel-metrics/timeseries`
 - `GET /v1/channel-balances?provider=...`
+- `GET /analytics/v1/analytics?range=...` (analysis service)
+- `GET /analytics/v1/status` (analysis service)
+- `GET /analytics/v1/prices` and `PUT /analytics/v1/prices/{model}`
 
 Only masked key metadata is returned. Requests use an Authorization header;
 credentials never enter URL parameters, query-cache keys or the static build.
-The deployed frontend is static; its server does not proxy or store credentials.
+Nginx serves the static frontend and proxies `/analytics/` to the analysis service.
+The analysis service validates the supplied administrator key against its configured
+uni-api gateway. Neither service persists the supplied gateway credential.
+
+## Rebuildable analysis service
+
+`docker-compose.yml` contains the frontend and the Go analysis API. Provide the
+fact bucket through `S3_ENDPOINT`, `S3_BUCKET`, `S3_PREFIX` and a read-only AWS
+credential. Provide a separate private state bucket through `STATE_S3_ENDPOINT`,
+`STATE_S3_BUCKET`, `STATE_S3_PREFIX` and the `STATE_AWS_*` read-write credential.
+Both buckets belong to the same project; credentials are not included in the repo.
+
+Operator prices live in a conditional S3 document. Concurrent changes return a
+conflict instead of overwriting a newer version. Every replica refreshes its price
+cache. The state bucket also holds one atomically replaced, checksummed Parquet
+checkpoint of facts, aggregates and import checkpoints. Settings are kept separate
+so restoring an older query cache cannot revert an operator edit.
+
+Each API container uses its own `/data` directory, with no shared volume. At startup
+it restores a compatible checkpoint, replays unimported immutable facts and becomes
+healthy after the initial scan. A missing or invalid checkpoint triggers a rebuild
+from the raw facts. Existing replicas continue serving while replacements warm up.
+Query checkpoints are derived caches; the fact and state buckets are authoritative.
 
 ## Build and verify
 

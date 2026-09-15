@@ -62,5 +62,7 @@ type Price struct {
 }
 type Config struct {
 	Address, DataDir, Upstream, SourceID, Timezone, S3Endpoint, S3Bucket, S3Prefix string
+	StateEndpoint, StateBucket, StatePrefix, StateAccessKey, StateSecretKey        string
+	RequireInitialImport                                                           bool
 	Poll                                                                           time.Duration
 }

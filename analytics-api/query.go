@@ -328,12 +328,12 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 	if out.CollectedFrom != nil && *out.CollectedFrom <= out.From {
 		out.Coverage = "available_history"
 	}
-	out.DurationMS = float64(time.Since(began).Microseconds()) / 1000
 	if f.Timeseries {
 		if err := e.attachTimeseries(ctx, &out, f, startMS, now.UnixMilli()); err != nil {
 			return QueryResult{}, err
 		}
 	}
+	out.DurationMS = float64(time.Since(began).Microseconds()) / 1000
 	return out, nil
 }
 

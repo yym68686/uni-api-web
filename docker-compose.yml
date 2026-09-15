@@ -29,8 +29,16 @@ services:
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
       AWS_REGION: ${AWS_REGION:-auto}
-    volumes:
-      - ./analytics-data:/data
+      # Facts remain read-only. Settings and the rebuildable query checkpoint
+      # use a separate bucket and a separate application credential.
+      STATE_S3_ENDPOINT: ${STATE_S3_ENDPOINT:-}
+      STATE_S3_BUCKET: ${STATE_S3_BUCKET:-}
+      STATE_S3_PREFIX: ${STATE_S3_PREFIX:-analytics/v1}
+      STATE_AWS_ACCESS_KEY_ID: ${STATE_AWS_ACCESS_KEY_ID:-}
+      STATE_AWS_SECRET_ACCESS_KEY: ${STATE_AWS_SECRET_ACCESS_KEY:-}
+      REQUIRE_INITIAL_IMPORT: "true"
+    # /data is a per-container query cache. Sharing one DuckDB file across old
+    # and new replicas would prevent safe rolling updates.
     ports:
       - "8080"
     healthcheck:

@@ -7,14 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
@@ -26,11 +24,14 @@ func (s *Service) importS3(ctx context.Context) error {
 	if s.cfg.S3Bucket == "" || s.cfg.S3Endpoint == "" {
 		return errors.New("storage_not_configured")
 	}
-	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion("auto"), config.WithHTTPClient(&http.Client{Timeout: 20 * time.Second}))
-	if err != nil {
-		return err
+	client := s.factClient
+	var err error
+	if client == nil {
+		client, err = newS3Client(ctx, s.cfg)
+		if err != nil {
+			return err
+		}
 	}
-	client := s3.NewFromConfig(cfg, func(o *s3.Options) { o.BaseEndpoint = aws.String(s.cfg.S3Endpoint); o.UsePathStyle = true })
 	known, err := s.engine.ImportedObjects(ctx)
 	if err != nil {
 		return err
@@ -63,13 +64,22 @@ func (s *Service) importS3(ctx context.Context) error {
 	})
 	s.remaining.Store(int64(len(pending)))
 	var failures []error
-	for start := 0; start < len(pending); start += 32 {
-		end := min(start+32, len(pending))
+	for start := 0; start < len(pending); {
+		end := start
+		var groupBytes int64
+		for end < len(pending) && end-start < 256 {
+			size := aws.ToInt64(pending[end].Size)
+			if end > start && groupBytes+size > 16<<20 {
+				break
+			}
+			groupBytes += size
+			end++
+		}
 		group := pending[start:end]
 		objects := make([]FactObject, len(group))
 		errs := make([]error, len(group))
 		var wg sync.WaitGroup
-		slots := make(chan struct{}, 6)
+		slots := make(chan struct{}, 16)
 		for i, obj := range group {
 			wg.Add(1)
 			go func(i int, obj types.Object) {
@@ -114,6 +124,7 @@ func (s *Service) importS3(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		start = end
 	}
 	if len(failures) > 0 {
 		return failures[0]
@@ -170,6 +181,7 @@ func (s *Service) maybeImport(ctx context.Context) {
 	} else {
 		s.importError.Store("")
 		s.lastCollect.Store(time.Now().UnixMilli())
+		s.maybeCheckpoint(ctx)
 	}
 }
 func importErrorClass(err error) string {

@@ -12,19 +12,29 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
 type Service struct {
-	auth           *authorizer
-	engine         *Engine
-	cfg            Config
-	active         atomic.Int64
-	lastCollect    atomic.Int64
-	remaining      atomic.Int64
-	importFailures atomic.Uint64
-	importError    atomic.Value
-	cacheMu        sync.Mutex
-	cache          map[string]cachedAnalytics
+	auth             *authorizer
+	engine           *Engine
+	cfg              Config
+	active           atomic.Int64
+	lastCollect      atomic.Int64
+	remaining        atomic.Int64
+	importFailures   atomic.Uint64
+	importError      atomic.Value
+	cacheMu          sync.Mutex
+	cache            map[string]cachedAnalytics
+	state            *stateStore
+	stateReady       atomic.Bool
+	stateError       atomic.Value
+	checkpoints      *checkpointStore
+	checkpointActive atomic.Bool
+	lastCheckpoint   atomic.Int64
+	checkpointError  atomic.Value
+	factClient       *s3.Client
 }
 
 type cachedAnalytics struct {
@@ -54,10 +64,15 @@ func (s *Service) Handler() http.Handler {
 	return s.authenticate(mux)
 }
 func (s *Service) health(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"status": "ok", "revision": s.engine.Revision.Load(), "last_collect_ms": s.lastCollect.Load()})
+	ready := !s.cfg.RequireInitialImport || (s.lastCollect.Load() > 0 && (s.state == nil || s.stateReady.Load()))
+	status, code := "ok", http.StatusOK
+	if !ready {
+		status, code = "initializing", http.StatusServiceUnavailable
+	}
+	writeJSON(w, code, map[string]any{"status": status, "revision": s.engine.Revision.Load(), "last_collect_ms": s.lastCollect.Load(), "state_ready": s.state == nil || s.stateReady.Load()})
 }
 func (s *Service) status(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"status": "ok", "revision": s.engine.Revision.Load(), "active_ingest": s.active.Load(), "last_collect_ms": s.lastCollect.Load(), "remaining_objects": s.remaining.Load(), "import_failures": s.importFailures.Load(), "import_error": s.importError.Load()})
+	writeJSON(w, 200, map[string]any{"status": "ok", "revision": s.engine.Revision.Load(), "active_ingest": s.active.Load(), "last_collect_ms": s.lastCollect.Load(), "remaining_objects": s.remaining.Load(), "import_failures": s.importFailures.Load(), "import_error": s.importError.Load(), "state_ready": s.state == nil || s.stateReady.Load(), "state_error": s.stateError.Load(), "checkpoint_active": s.checkpointActive.Load(), "checkpoint_error": s.checkpointError.Load()})
 }
 func (s *Service) analytics(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
@@ -130,8 +145,26 @@ func (s *Service) savePrice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p.Model = r.PathValue("model")
-	if err := s.engine.SavePrice(r.Context(), p); err != nil {
+	if err := validatePrice(p); err != nil {
 		http.Error(w, "invalid price", 400)
+		return
+	}
+	var err error
+	if s.state != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+		defer cancel()
+		err = s.state.save(ctx, s.engine, p)
+	} else {
+		err = s.engine.SavePrice(r.Context(), p)
+	}
+	if err != nil {
+		status := http.StatusServiceUnavailable
+		message := "price storage unavailable; refresh before retrying"
+		if errors.Is(err, errPriceConflict) {
+			status = http.StatusConflict
+			message = err.Error()
+		}
+		writeJSON(w, status, map[string]string{"error": message})
 		return
 	}
 	writeJSON(w, 200, map[string]any{"price": p})

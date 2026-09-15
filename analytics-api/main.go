@@ -20,6 +20,12 @@ func env(name, fallback string) string {
 }
 func main() {
 	cfg := Config{Address: env("LISTEN_ADDR", ":8080"), DataDir: env("DATA_DIR", "./data"), Upstream: strings.TrimRight(env("UNI_API_URL", ""), "/"), SourceID: env("SOURCE_ID", "primary"), Timezone: env("ANALYTICS_TIMEZONE", "Asia/Shanghai"), S3Endpoint: env("S3_ENDPOINT", ""), S3Bucket: env("S3_BUCKET", ""), S3Prefix: env("S3_PREFIX", "uni-api-facts/v1/"), Poll: 5 * time.Second}
+	cfg.StateBucket, cfg.StateEndpoint, cfg.StatePrefix = env("STATE_S3_BUCKET", ""), env("STATE_S3_ENDPOINT", cfg.S3Endpoint), env("STATE_S3_PREFIX", "analytics/v1")
+	cfg.StateAccessKey, cfg.StateSecretKey = env("STATE_AWS_ACCESS_KEY_ID", ""), env("STATE_AWS_SECRET_ACCESS_KEY", "")
+	cfg.RequireInitialImport = env("REQUIRE_INITIAL_IMPORT", "false") == "true"
+	if cfg.RequireInitialImport && (cfg.StateBucket == "" || cfg.StateEndpoint == "" || cfg.S3Bucket == "" || cfg.S3Endpoint == "") {
+		log.Fatal("rebuildable analytics requires configured fact and state storage")
+	}
 	if cfg.Upstream == "" {
 		log.Fatal("UNI_API_URL is required")
 	}
@@ -36,6 +42,29 @@ func main() {
 	service, err := NewService(engine, cfg)
 	if err != nil {
 		log.Fatal(err)
+	}
+	if cfg.S3Endpoint != "" && cfg.S3Bucket != "" {
+		service.factClient, err = newS3Client(ctx, cfg)
+		if err != nil {
+			log.Fatal("initialize analytics fact client")
+		}
+	}
+	if cfg.StateBucket != "" {
+		client, err := newObjectClient(ctx, cfg.StateEndpoint, cfg.StateAccessKey, cfg.StateSecretKey, 2*time.Minute)
+		if err != nil {
+			log.Fatal("initialize analytics state client")
+		}
+		service.state = newStateStore(client, cfg)
+		service.checkpoints = newCheckpointStore(client, cfg)
+		restoreCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		restored, restoreErr := service.checkpoints.restore(restoreCtx, engine)
+		cancel()
+		if restoreErr != nil {
+			log.Print("analytics checkpoint unavailable; rebuilding from raw facts")
+		} else if restored {
+			log.Print("analytics query cache restored from S3 checkpoint")
+		}
+		go service.syncStateLoop(ctx)
 	}
 	go service.startImportLoop(ctx)
 	server := &http.Server{Addr: cfg.Address, Handler: service.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 25 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
