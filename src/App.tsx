@@ -557,7 +557,13 @@ function Trend({
         b.covered &&= p.covered;
         buckets.set(p.timestamp, b);
       }
-    return [...buckets].sort(([a], [b]) => a - b);
+    const sorted = [...buckets].sort(([a], [b]) => a - b);
+    // Keep the chart responsive for broad windows while retaining the exact
+    // aggregate query for the table and dashboard totals.
+    const maxPoints = 120;
+    if (sorted.length <= maxPoints) return sorted;
+    const stride = Math.ceil(sorted.length / maxPoints);
+    return sorted.filter((_, index) => index % stride === 0).slice(0, maxPoints);
   }, [series.data]);
   const max = Math.max(1, ...points.map(([, p]) => p.success + p.failed));
   return (

@@ -379,6 +379,9 @@ func (e *Engine) attachTimeseries(ctx context.Context, result *QueryResult, f Qu
 			point = map[string]any{"timestamp": period / 1000, "success": int64(0), "failed": int64(0), "covered": true}
 			points[key][period] = point
 		}
+		if outcome == "cancelled" || outcome == "client_cancelled" || outcome == "hedge_cancelled" || outcome == "skipped" {
+			continue
+		}
 		if outcome == "success" || outcome == "completed" || outcome == "incomplete" {
 			point["success"] = point["success"].(int64) + n
 		} else {
