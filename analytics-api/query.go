@@ -223,6 +223,16 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 		}
 		if kind == "request" {
 			s.Requests = n
+			// A request fact is attributed to the winning channel. Keep it on the
+			// channel row so token, cache and cost fields remain actionable while
+			// attempts continue to count retries independently.
+			key := provider + "\x00" + model + "\x00" + upstream + "\x00" + endpoint + "\x00" + fmt.Sprint(stream)
+			if channels[key] == nil {
+				channels[key] = &Summary{}
+				identities[key] = [3]string{provider, model, upstream + "\x00" + endpoint + "\x00" + fmt.Sprint(stream)}
+			}
+			channelSummary := Summary{Requests: n, Input: s.Input, Output: s.Output, CacheRead: s.CacheRead, CacheWrite: s.CacheWrite, CacheWrite1h: s.CacheWrite1h, UsageSamples: s.UsageSamples, CacheSamples: s.CacheSamples, ActualUSD: s.ActualUSD, ActualSamples: s.ActualSamples, KnownEstimatedUSD: s.KnownEstimatedUSD, PricedSamples: s.PricedSamples}
+			channels[key].merge(channelSummary)
 			total.merge(s)
 			if models[model] == nil {
 				models[model] = &Summary{}
