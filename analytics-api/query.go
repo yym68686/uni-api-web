@@ -391,16 +391,30 @@ func (e *Engine) attachTimeseries(ctx context.Context, result *QueryResult, f Qu
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	for i := range result.Data {
-		key := result.Data[i].Provider + "\x00" + result.Data[i].Model + "\x00" + result.Data[i].UpstreamModel
-		buckets := points[key]
-		periods := make([]int64, 0, len(buckets))
-		for period := range buckets {
+	// The console trend is a cross-channel chart. Returning the same bucket
+	// series on every channel multiplies the response by the channel count and
+	// makes broad-window clicks slow. Keep the channel rows intact for the table,
+	// but attach one aggregate series to the first row for the chart consumer.
+	aggregate := map[int64]map[string]any{}
+	for _, buckets := range points {
+		for period, point := range buckets {
+			total := aggregate[period]
+			if total == nil {
+				total = map[string]any{"timestamp": period / 1000, "success": int64(0), "failed": int64(0), "covered": true}
+				aggregate[period] = total
+			}
+			total["success"] = total["success"].(int64) + point["success"].(int64)
+			total["failed"] = total["failed"].(int64) + point["failed"].(int64)
+		}
+	}
+	if len(result.Data) > 0 {
+		periods := make([]int64, 0, len(aggregate))
+		for period := range aggregate {
 			periods = append(periods, period)
 		}
 		sort.Slice(periods, func(i, j int) bool { return periods[i] < periods[j] })
 		for _, period := range periods {
-			result.Data[i].Points = append(result.Data[i].Points, buckets[period])
+			result.Data[0].Points = append(result.Data[0].Points, aggregate[period])
 		}
 	}
 	return nil
