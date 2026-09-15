@@ -916,6 +916,26 @@ function Dashboard({
     refetchInterval: auto ? 30_000 : false,
     refetchIntervalInBackground: false,
   });
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (!keysLoaded || keyRemoved || !catalog.data || view !== "channels") return;
+    const ranges = ["5m", "15m", "1h", "24h", "7d", "30d", "today", "week", "month", "year", "all"];
+    const controller = new AbortController();
+    void (async () => {
+      for (const next of ranges) {
+        if (next === window) continue;
+        if (controller.signal.aborted) return;
+        const key = ["metrics", connection.session, keyId, next, endpoint, stream];
+        if (queryClient.getQueryData(key)) continue;
+        await queryClient.prefetchQuery({
+          queryKey: key,
+          queryFn: ({ signal }) => readMetrics(connection, "/v1/channel-metrics?" + channelParams(keyId, next, "", endpoint, stream), signal, endpoint, stream),
+          staleTime: 30_000,
+        });
+      }
+    })();
+    return () => controller.abort();
+  }, [keysLoaded, keyRemoved, catalog.data, view, connection, keyId, endpoint, stream, window, queryClient]);
   useEffect(() => {
     if (
       metrics.data &&
