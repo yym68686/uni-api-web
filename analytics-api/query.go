@@ -223,6 +223,14 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 		}
 		if kind == "request" {
 			s.Requests = n
+			s.Success = 0
+			s.Failed = 0
+			switch outcome {
+			case "success", "completed", "incomplete":
+				s.Success = n
+			default:
+				s.Failed = n
+			}
 			// A request fact is attributed to the winning channel. Keep it on the
 			// channel row so token, cache and cost fields remain actionable while
 			// attempts continue to count retries independently.
