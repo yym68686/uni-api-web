@@ -33,6 +33,37 @@ func TestImportIsIdempotentAndRejectsChangedImmutableObject(t *testing.T) {
 		t.Fatalf("facts=%d err=%v", count, err)
 	}
 }
+
+func TestOpenEngineSeedsPublishedReferencePricesWithoutOverwritingEdits(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "prices.duckdb")
+	e, err := OpenEngine(path, Config{Timezone: "UTC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var input, output float64
+	var verified bool
+	if err = e.DB.QueryRow("SELECT input,output,verified FROM prices WHERE model='gpt-5.4'").Scan(&input, &output, &verified); err != nil {
+		t.Fatal(err)
+	}
+	if input != 2.5 || output != 15 || !verified {
+		t.Fatalf("unexpected seeded price: %v %v %v", input, output, verified)
+	}
+	if err = e.SavePrice(context.Background(), Price{Model: "gpt-5.4", Input: 9, Output: 8, Verified: true}); err != nil {
+		t.Fatal(err)
+	}
+	e.Close()
+	e, err = OpenEngine(path, Config{Timezone: "UTC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	if err = e.DB.QueryRow("SELECT input,output FROM prices WHERE model='gpt-5.4'").Scan(&input, &output); err != nil {
+		t.Fatal(err)
+	}
+	if input != 9 || output != 8 {
+		t.Fatalf("operator price overwritten: %v %v", input, output)
+	}
+}
 func TestRangeStartUsesLocalCalendarBoundaries(t *testing.T) {
 	loc, _ := time.LoadLocation("Asia/Shanghai")
 	now := time.Date(2026, 9, 15, 1, 2, 3, 0, loc)

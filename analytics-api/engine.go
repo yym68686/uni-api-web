@@ -50,6 +50,10 @@ func OpenEngine(path string, cfg Config) (*Engine, error) {
 		db.Close()
 		return nil, err
 	}
+	if err := e.seedDefaultPrices(); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return e, nil
 }
 func (e *Engine) Close() error { return e.DB.Close() }
@@ -239,6 +243,35 @@ func (e *Engine) Prices(ctx context.Context) ([]Price, error) {
 		out = append(out, p)
 	}
 	return out, rows.Err()
+}
+
+// These are editable reference prices in USD per million tokens. They are
+// seeded once for models whose published rate is known; provider-specific or
+// synthetic model names remain unpriced until an operator confirms a value.
+var defaultPrices = map[string]Price{
+	"gpt-6-astra":   {Input: 10, Output: 50, CacheRead: 1, Source: "OpenAI ChatGPT rate card", Verified: true},
+	"gpt-5.6-sol":   {Input: 4, Output: 20, CacheRead: 0.4, Source: "OpenAI ChatGPT rate card", Verified: true},
+	"gpt-5.6-terra": {Input: 2, Output: 12, CacheRead: 0.2, Source: "OpenAI ChatGPT rate card", Verified: true},
+	"gpt-5.6-luna":  {Input: 0.2, Output: 1.2, CacheRead: 0.02, Source: "OpenAI ChatGPT rate card", Verified: true},
+	"gpt-5.5":       {Input: 5, Output: 30, CacheRead: 0.5, Source: "OpenAI ChatGPT rate card", Verified: true},
+	"gpt-5.4":       {Input: 2.5, Output: 15, CacheRead: 0.25, Source: "OpenAI API model page", Verified: true},
+	"gpt-5.4-mini":  {Input: 0.75, Output: 4.5, CacheRead: 0.075, Source: "OpenAI API model page", Verified: true},
+}
+
+func (e *Engine) seedDefaultPrices() error {
+	for model, price := range defaultPrices {
+		var exists bool
+		if err := e.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM prices WHERE model=?)", model).Scan(&exists); err != nil {
+			return err
+		}
+		if exists {
+			continue
+		}
+		if _, err := e.DB.Exec("INSERT INTO prices(model,input,output,cache_read,cache_write,cache_write_1h,source,verified,effective_at) VALUES(?,?,?,?,?,?,?,?,current_timestamp)", model, price.Input, price.Output, price.CacheRead, price.CacheWrite, price.CacheWrite1h, price.Source, price.Verified); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 func (e *Engine) SavePrice(ctx context.Context, p Price) error {
 	if p.Model == "" || len(p.Model) > 512 {
