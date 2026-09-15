@@ -101,7 +101,7 @@ function Overview({ metrics, rows }: { metrics?: Metrics; rows: Channel[] }) {
     <MetricCard label="Token 数量" value={count((total?.input_tokens || 0) + (total?.output_tokens || 0))} sub="输入 + 输出" icon={<Layers3 size={17} />} />
     <MetricCard label="估算消费" value={total?.estimated_cost_usd == null ? "—" : `$${Number(total.estimated_cost_usd).toFixed(4)}`} sub="依据当前模型价格" icon={<Wallet size={17} />} />
     <div className="data-panel overview-panel"><div className="data-title"><Gauge size={18} /><h2>模型消费</h2></div><div className="overview-list">{models.length ? models.map((item: any) => <div className="overview-row" key={item.model}><strong>{item.model}</strong><span>{count((item.input_tokens || 0) + (item.output_tokens || 0))} tokens</span><b>{item.estimated_cost_usd == null ? "—" : `$${Number(item.estimated_cost_usd).toFixed(4)}`}</b></div>) : <Empty title="暂无模型事实" icon={<Activity size={22} />}>等待 S3 事实导入。</Empty>}</div></div>
-    <div className="data-panel overview-panel"><div className="data-title"><Radio size={18} /><h2>当前渠道</h2></div><div className="overview-list">{rows.slice(0, 12).map(row => <div className="overview-row" key={rowId(row)}><strong>{row.provider}</strong><span>{row.model}</span><b>{row.stats?.inflight || 0} 并发</b></div>)}</div></div>
+    <div className="data-panel overview-panel"><div className="data-title"><Radio size={18} /><h2>当前渠道</h2></div><div className="overview-list">{rows.slice(0, 12).map(row => <div className="overview-row" key={rowId(row)}><strong>{row.provider}</strong><span>{row.model}</span><b>{row.stats?.inflight == null ? "—" : `${row.stats.inflight} 并发`}</b></div>)}</div></div>
   </motion.section>;
 }
 
@@ -910,7 +910,7 @@ function Dashboard({
         stream,
       );
       const byId = new Map((analytic.data || []).map((item: any) => [JSON.stringify([item.provider,item.model,item.upstream_model,item.endpoint,item.stream]), item.stats]));
-      return { ...analytic, snapshot_revision: catalog.data?.snapshot_revision || analytic.snapshot_revision, data: (catalog.data?.data || analytic.data || []).map((row: any) => ({ ...row, stats: byId.get(JSON.stringify([row.provider,row.model,row.upstream_model,row.endpoint,row.stream])) || row.stats })) } as Metrics;
+      return { ...analytic, snapshot_revision: catalog.data?.snapshot_revision || analytic.snapshot_revision, data: (catalog.data?.data || analytic.data || []).map((row: any) => ({ ...row, stats: byId.get(JSON.stringify([row.provider,row.model,row.upstream_model,row.endpoint,row.stream])) || { started: 0, success: 0, failed: 0, success_rate_denominator: 0, success_rate: null, inflight: null, skipped: 0, client_cancelled: 0, hedge_cancelled: 0 } })) } as Metrics;
     },
     enabled: keysLoaded && !keyRemoved && !!catalog.data,
     refetchInterval: auto ? 30_000 : false,

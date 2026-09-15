@@ -23,7 +23,7 @@ export interface Stats {
   failed: number;
   success_rate_denominator: number;
   success_rate: number | null;
-  inflight: number;
+  inflight: number | null;
   skipped: number;
   client_cancelled: number;
   hedge_cancelled: number;
