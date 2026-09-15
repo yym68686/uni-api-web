@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -66,9 +69,7 @@ func (s *Service) analytics(w http.ResponseWriter, r *http.Request) {
 	if item, ok := s.cache[key]; ok && item.revision == rev && now.Before(item.expires) {
 		body := append([]byte(nil), item.body...)
 		s.cacheMu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
-		_, _ = w.Write(body)
+		s.writeAnalyticsBody(w, r, body)
 		return
 	}
 	s.cacheMu.Unlock()
@@ -91,6 +92,21 @@ func (s *Service) analytics(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.cacheMu.Unlock()
+	s.writeAnalyticsBody(w, r, body)
+}
+func (s *Service) writeAnalyticsBody(w http.ResponseWriter, r *http.Request, body []byte) {
+	if len(body) > 1024 && strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+		var compressed bytes.Buffer
+		gz := gzip.NewWriter(&compressed)
+		_, _ = gz.Write(body)
+		_ = gz.Close()
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Add("Vary", "Accept-Encoding")
+		w.Header().Set("Content-Length", strconv.Itoa(compressed.Len()))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(compressed.Bytes())
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 	_, _ = w.Write(body)
