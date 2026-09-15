@@ -21,6 +21,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleHelp,
+  Database,
   Clock3,
   Command,
   ExternalLink,
@@ -97,11 +98,15 @@ type View = "channels" | "balances" | "overview" | "prices";
 function Overview({ metrics, rows, live }: { metrics?: Metrics; rows: Channel[]; live?: Map<string, number | null | undefined> }) {
   const total = metrics?.total as Record<string, any> | undefined;
   const models = (metrics as any)?.models || [];
+  const currentConcurrency = live ? [...live.values()].reduce<number>((sum, value) => sum + (value || 0), 0) : null;
+  const cacheRate = total?.cache_rate ?? (total && total.input_tokens > 0 ? (total.cache_read_tokens || 0) / total.input_tokens : null);
   return <motion.section {...reveal} className="overview-grid">
     <MetricCard label="请求数量" value={count(total?.requests || 0)} sub="所选时间范围" icon={<Activity size={17} />} />
     <MetricCard label="渠道尝试" value={count(total?.attempts || 0)} sub="包含重试与失败尝试" icon={<Radio size={17} />} accent />
     <MetricCard label="Token 数量" value={count((total?.input_tokens || 0) + (total?.output_tokens || 0))} sub="输入 + 输出" icon={<Layers3 size={17} />} />
     <MetricCard label="估算消费" value={total?.estimated_cost_usd == null ? "—" : `$${Number(total.estimated_cost_usd).toFixed(4)}`} sub="依据当前模型价格" icon={<Wallet size={17} />} />
+    <MetricCard label="当前并发" value={currentConcurrency == null ? "—" : count(currentConcurrency)} sub="实时渠道请求" icon={<Gauge size={17} />} />
+    <MetricCard label="缓存率" value={rate(cacheRate)} sub="缓存读取 / 输入 token" icon={<Database size={17} />} />
     <div className="data-panel overview-panel"><div className="data-title"><Gauge size={18} /><h2>模型消费</h2></div><div className="overview-list">{models.length ? models.map((item: any) => <div className="overview-row" key={item.model}><strong>{item.model}</strong><span>{count((item.input_tokens || 0) + (item.output_tokens || 0))} tokens</span><b>{item.estimated_cost_usd == null ? "—" : `$${Number(item.estimated_cost_usd).toFixed(4)}`}</b></div>) : <Empty title="暂无模型事实" icon={<Activity size={22} />}>等待 S3 事实导入。</Empty>}</div></div>
     <div className="data-panel overview-panel"><div className="data-title"><Radio size={18} /><h2>当前渠道</h2></div><div className="overview-list">{rows.slice(0, 12).map(row => <div className="overview-row" key={rowId(row)}><strong>{row.provider}</strong><span>{row.model}</span><b>{live?.get(rowId(row)) == null ? "—" : `${live.get(rowId(row))} 并发`}</b></div>)}</div></div>
   </motion.section>;
