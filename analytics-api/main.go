@@ -83,6 +83,11 @@ func main() {
 		if ctx.Err() != nil {
 			return
 		}
+		log.Print("analytics warming range query caches")
+		service.warmAnalytics(ctx)
+		if ctx.Err() != nil {
+			return
+		}
 	}
 	go service.startImportLoop(ctx)
 	server := &http.Server{Addr: cfg.Address, Handler: service.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 25 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}

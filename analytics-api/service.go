@@ -169,6 +169,19 @@ func (s *Service) savePrice(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]any{"price": p})
 }
+
+// Warm DuckDB before the TCP readiness probe is exposed. This makes the first
+// console click use the same hot page and plan caches as subsequent clicks.
+func (s *Service) warmAnalytics(ctx context.Context) {
+	for _, name := range []string{"5m", "15m", "1h", "24h", "7d", "30d", "today", "week", "month", "year", "all"} {
+		callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		_, _ = s.engine.Query(callCtx, QueryFilter{Range: name, Timeseries: true})
+		cancel()
+		if ctx.Err() != nil {
+			return
+		}
+	}
+}
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
