@@ -92,7 +92,7 @@ type Keys = {
 };
 type View = "channels" | "balances" | "overview" | "prices";
 
-function Overview({ metrics, rows }: { metrics?: Metrics; rows: Channel[] }) {
+function Overview({ metrics, rows, live }: { metrics?: Metrics; rows: Channel[]; live?: Map<string, number | null | undefined> }) {
   const total = metrics?.total as Record<string, any> | undefined;
   const models = (metrics as any)?.models || [];
   return <motion.section {...reveal} className="overview-grid">
@@ -101,7 +101,7 @@ function Overview({ metrics, rows }: { metrics?: Metrics; rows: Channel[] }) {
     <MetricCard label="Token 数量" value={count((total?.input_tokens || 0) + (total?.output_tokens || 0))} sub="输入 + 输出" icon={<Layers3 size={17} />} />
     <MetricCard label="估算消费" value={total?.estimated_cost_usd == null ? "—" : `$${Number(total.estimated_cost_usd).toFixed(4)}`} sub="依据当前模型价格" icon={<Wallet size={17} />} />
     <div className="data-panel overview-panel"><div className="data-title"><Gauge size={18} /><h2>模型消费</h2></div><div className="overview-list">{models.length ? models.map((item: any) => <div className="overview-row" key={item.model}><strong>{item.model}</strong><span>{count((item.input_tokens || 0) + (item.output_tokens || 0))} tokens</span><b>{item.estimated_cost_usd == null ? "—" : `$${Number(item.estimated_cost_usd).toFixed(4)}`}</b></div>) : <Empty title="暂无模型事实" icon={<Activity size={22} />}>等待 S3 事实导入。</Empty>}</div></div>
-    <div className="data-panel overview-panel"><div className="data-title"><Radio size={18} /><h2>当前渠道</h2></div><div className="overview-list">{rows.slice(0, 12).map(row => <div className="overview-row" key={rowId(row)}><strong>{row.provider}</strong><span>{row.model}</span><b>{row.stats?.inflight == null ? "—" : `${row.stats.inflight} 并发`}</b></div>)}</div></div>
+    <div className="data-panel overview-panel"><div className="data-title"><Radio size={18} /><h2>当前渠道</h2></div><div className="overview-list">{rows.slice(0, 12).map(row => <div className="overview-row" key={rowId(row)}><strong>{row.provider}</strong><span>{row.model}</span><b>{live?.get(rowId(row)) == null ? "—" : `${live.get(rowId(row))} 并发`}</b></div>)}</div></div>
   </motion.section>;
 }
 
@@ -916,6 +916,15 @@ function Dashboard({
     refetchInterval: auto ? 30_000 : false,
     refetchIntervalInBackground: false,
   });
+  const liveMetrics = useQuery({
+    queryKey: ["live-metrics", connection.session, keyId, endpoint, stream],
+    queryFn: ({ signal }) => request<Metrics>(connection, "/v1/channel-metrics?" + channelParams(keyId, "1m", "", endpoint, stream), signal),
+    enabled: keysLoaded && !keyRemoved && !!catalog.data && view === "overview",
+    staleTime: 2_000,
+    refetchInterval: auto ? 5_000 : false,
+    refetchIntervalInBackground: false,
+  });
+  const liveMap = useMemo(() => new Map((liveMetrics.data?.data || []).map(row => [rowId(row), row.stats?.inflight])), [liveMetrics.data]);
   const queryClient = useQueryClient();
   useEffect(() => {
     if (!keysLoaded || keyRemoved || !catalog.data || view !== "channels") return;
@@ -1228,7 +1237,7 @@ function Dashboard({
           {view === "prices" ? (
             <PriceSettings prices={prices.data?.data || []} loading={prices.isPending} connection={connection} onSaved={() => void prices.refetch()} />
           ) : view === "overview" ? (
-            <Overview metrics={metrics.data} rows={rows} />
+            <Overview metrics={metrics.data} rows={rows} live={liveMap} />
           ) : <motion.section
             {...reveal}
             transition={{ delay: 0.04 }}
