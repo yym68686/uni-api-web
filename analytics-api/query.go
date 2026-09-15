@@ -234,10 +234,10 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 			// A request fact is attributed to the winning channel. Keep it on the
 			// channel row so token, cache and cost fields remain actionable while
 			// attempts continue to count retries independently.
-			key := provider + "\x00" + model + "\x00" + upstream + "\x00" + endpoint + "\x00" + fmt.Sprint(stream)
+			key := provider + "\x00" + model + "\x00" + upstream
 			if channels[key] == nil {
 				channels[key] = &Summary{}
-				identities[key] = [3]string{provider, model, upstream + "\x00" + endpoint + "\x00" + fmt.Sprint(stream)}
+				identities[key] = [3]string{provider, model, upstream}
 			}
 			channelSummary := Summary{Requests: n, Input: s.Input, Output: s.Output, CacheRead: s.CacheRead, CacheWrite: s.CacheWrite, CacheWrite1h: s.CacheWrite1h, UsageSamples: s.UsageSamples, CacheSamples: s.CacheSamples, ActualUSD: s.ActualUSD, ActualSamples: s.ActualSamples, KnownEstimatedUSD: s.KnownEstimatedUSD, PricedSamples: s.PricedSamples}
 			channels[key].merge(channelSummary)
@@ -248,10 +248,10 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 			models[model].merge(s)
 			continue
 		}
-		key := provider + "\x00" + model + "\x00" + upstream + "\x00" + endpoint + "\x00" + fmt.Sprint(stream)
+		key := provider + "\x00" + model + "\x00" + upstream
 		if channels[key] == nil {
 			channels[key] = &Summary{}
-			identities[key] = [3]string{provider, model, upstream + "\x00" + endpoint + "\x00" + fmt.Sprint(stream)}
+			identities[key] = [3]string{provider, model, upstream}
 		}
 		if kind == "attempt" {
 			switch outcome {
@@ -282,20 +282,16 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 	var attempts Summary
 	for _, k := range keys {
 		id := identities[k]
-		parts := strings.Split(id[2], "\x00")
-		var channelStream bool
-		if len(parts) > 2 {
-			channelStream = parts[2] == "true"
+		var channelStream *bool
+		if f.Stream == "true" || f.Stream == "false" {
+			value := f.Stream == "true"
+			channelStream = &value
 		}
-		upstream := id[2]
-		endpoint := ""
-		if len(parts) > 0 {
-			upstream = parts[0]
+		endpoint := f.Endpoint
+		if endpoint == "" {
+			endpoint = "all"
 		}
-		if len(parts) > 1 {
-			endpoint = parts[1]
-		}
-		out.Data = append(out.Data, AnalyticChannel{Provider: id[0], Model: id[1], UpstreamModel: upstream, Endpoint: endpoint, Stream: &channelStream, Stats: channels[k].JSON()})
+		out.Data = append(out.Data, AnalyticChannel{Provider: id[0], Model: id[1], UpstreamModel: id[2], Endpoint: endpoint, Stream: channelStream, Stats: channels[k].JSON()})
 		attempts.merge(*channels[k])
 	}
 	// Usage totals represent client requests; channel attempt totals separately
