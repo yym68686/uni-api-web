@@ -87,6 +87,7 @@ import type {
 import { Brand, Empty, Spinner, Tip } from "./ui";
 import { PriceSettings } from "./PriceSettings";
 import { catalogMetrics, ranges, usd } from "./analytics";
+import { actualCostRange } from "./actualCost";
 
 type Keys = {
   data: KeyInfo[];
@@ -973,6 +974,7 @@ function Dashboard({
     () => [...new Set(rows.map((row) => row.provider))],
     [rows],
   );
+  const actualRange = useMemo(() => actualCostRange(window), [window]);
   const limit = useMemo(() => makeLimiter(3), []);
   const balanceQueries = useQueries({
     queries: providers.map((provider) => ({
@@ -981,13 +983,20 @@ function Dashboard({
         connection.session,
         metrics.data?.snapshot_revision,
         provider,
+        model,
+        window,
       ],
       queryFn: ({ signal }: { signal: AbortSignal }) =>
         limit(
           () =>
             request<Balance>(
               connection,
-              "/v1/channel-balances?" + new URLSearchParams({ provider }),
+              "/v1/channel-balances?" + new URLSearchParams({
+                provider,
+                ...(model ? { model } : {}),
+                ...(actualRange.startDate ? { start_date: actualRange.startDate } : {}),
+                ...(actualRange.endDate ? { end_date: actualRange.endDate } : {}),
+              }),
               signal,
             ),
           signal,
@@ -1531,6 +1540,11 @@ function Dashboard({
                       </th>
                       <th>Token / 缓存率</th>
                       <th>估算消费</th>
+                      <th>
+                        <Tip text="来自上游 sub2api 的 actual_cost，按日历日统计；充值增加不会计入消费。5 分钟、15 分钟和 1 小时窗口没有可验证的上游小时账单。">
+                          实际消费 <CircleHelp size={12} />
+                        </Tip>
+                      </th>
                       <th>余额 / 额度</th>
                       <th aria-label="详情" />
                     </tr>
@@ -1602,6 +1616,15 @@ function Dashboard({
                           </td>
                           <td className="mono">{row.stats?.usage_samples ? count((row.stats.input_tokens || 0) + (row.stats.output_tokens || 0)) : "—"}<small className="usage-cache">{rate(row.stats?.cache_rate)}</small></td>
                           <td className="mono">{usd(row.stats?.estimated_cost_usd)}</td>
+                          <td className="mono">
+                            {!actualRange.supported
+                              ? <Tip text="sub2api 只提供按日聚合的 actual_cost，当前滚动窗口不显示整日金额。"><span className="muted">按日</span></Tip>
+                              : balance?.isPending && !balance.data
+                                ? <span className="muted">查询中</span>
+                                : balance?.data?.actual_cost_usd == null
+                                  ? <span className="muted">—</span>
+                                  : usd(balance.data.actual_cost_usd)}
+                          </td>
                           <td>
                             <BalanceValue
                               balance={balance?.data}

@@ -87,6 +87,9 @@ export interface BalanceKey {
   checked_at?: number;
   position: number;
   windows?: { window: string; remaining: number }[];
+  actual_cost_usd?: number | null;
+  actual_cost_samples?: number;
+  actual_cost_source?: string;
 }
 export interface Balance {
   provider: string;
@@ -94,4 +97,7 @@ export interface Balance {
   key_count?: number;
   omitted_keys?: number;
   keys?: BalanceKey[];
+  actual_cost_usd?: number | null;
+  actual_cost_samples?: number;
+  actual_cost_source?: string;
 }
