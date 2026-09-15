@@ -66,9 +66,29 @@ func main() {
 		}
 		go service.syncStateLoop(ctx)
 	}
+	// The platform may use a TCP readiness probe. Do not expose a listening
+	// socket until the replacement replica can answer from a complete cache.
+	if cfg.RequireInitialImport {
+		log.Print("analytics warming query cache before accepting traffic")
+		for ctx.Err() == nil {
+			service.maybeImport(ctx)
+			if service.lastCollect.Load() > 0 && (service.state == nil || service.stateReady.Load()) {
+				break
+			}
+			select {
+			case <-ctx.Done():
+			case <-time.After(5 * time.Second):
+			}
+		}
+		if ctx.Err() != nil {
+			return
+		}
+	}
 	go service.startImportLoop(ctx)
 	server := &http.Server{Addr: cfg.Address, Handler: service.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 25 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
+	shutdownDone := make(chan struct{})
 	go func() {
+		defer close(shutdownDone)
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
@@ -78,4 +98,6 @@ func main() {
 	if err = server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
+	// Keep the database open until in-flight HTTP queries have drained.
+	<-shutdownDone
 }

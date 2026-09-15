@@ -63,6 +63,10 @@ func (s *Service) importS3(ctx context.Context) error {
 		return aws.ToTime(pending[i].LastModified).After(aws.ToTime(pending[j].LastModified))
 	})
 	s.remaining.Store(int64(len(pending)))
+	if len(pending) > 0 {
+		fmt.Printf("analytics import pending_objects=%d\n", len(pending))
+	}
+	lastProgress := time.Now()
 	var failures []error
 	for start := 0; start < len(pending); {
 		end := start
@@ -123,6 +127,10 @@ func (s *Service) importS3(ctx context.Context) error {
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		if time.Since(lastProgress) >= 10*time.Second {
+			fmt.Printf("analytics import remaining_objects=%d\n", s.remaining.Load())
+			lastProgress = time.Now()
 		}
 		start = end
 	}
@@ -207,7 +215,9 @@ func importErrorClass(err error) string {
 	return "unavailable"
 }
 func (s *Service) startImportLoop(ctx context.Context) {
-	s.maybeImport(ctx)
+	if s.lastCollect.Load() == 0 {
+		s.maybeImport(ctx)
+	}
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	for {
