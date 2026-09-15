@@ -922,17 +922,20 @@ function Dashboard({
     const windows = ranges.map(([value]) => value);
     const controller = new AbortController();
     void (async () => {
-      for (const next of windows) {
-        if (next === window) continue;
+      // Prefetch ranges concurrently. Sequential prefetch made the last
+      // windows wait behind every earlier range, so switching to month/year/all
+      // could miss the one-second interaction target even though each DuckDB
+      // query itself was fast.
+      await Promise.all(windows.filter((next) => next !== window).map(async (next) => {
         if (controller.signal.aborted) return;
         const key = ["metrics", connection.session, keyId, next, endpoint, stream];
-        if (queryClient.getQueryData(key)) continue;
+        if (queryClient.getQueryData(key)) return;
         await queryClient.prefetchQuery({
           queryKey: key,
           queryFn: ({ signal }) => readMetrics(connection, "/v1/channel-metrics?" + channelParams(keyId, next, "", endpoint, stream), signal, endpoint, stream),
           staleTime: 30_000,
         });
-      }
+      }));
     })();
     return () => controller.abort();
   }, [keysLoaded, keyRemoved, catalog.data, view, connection, keyId, endpoint, stream, window, queryClient]);
