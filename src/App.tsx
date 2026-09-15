@@ -1538,6 +1538,7 @@ function Dashboard({
                       <th className="rank">#</th>
                       <th>渠道 / 模型</th>
                       <th>状态</th>
+                      <th>当前并发</th>
                       <th>
                         <Tip text="成功与失败的渠道尝试分别计数，重试不是新的用户请求。">
                           成功率 <CircleHelp size={12} />
@@ -1581,6 +1582,9 @@ function Dashboard({
                           </td>
                           <td>
                             <Status row={row} />
+                          </td>
+                          <td className="mono">
+                            {liveMap.get(rowId(row)) == null ? "—" : liveMap.get(rowId(row))}
                           </td>
                           <td>
                             <div className="success-cell">
