@@ -140,6 +140,8 @@ type AnalyticChannel struct {
 	Stats         map[string]any `json:"stats"`
 }
 type QueryResult struct {
+	Import        map[string]any    `json:"import"`
+	Coverage      string            `json:"coverage"`
 	From          int64             `json:"from"`
 	To            int64             `json:"to"`
 	Range         string            `json:"range"`
@@ -187,15 +189,15 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 		args = append(args, f.Stream == "true")
 	}
 	q := `SELECT kind,provider,model,upstream_model,endpoint,stream,outcome,sum(n)::BIGINT,sum(input_tokens)::BIGINT,sum(output_tokens)::BIGINT,sum(cache_read_tokens)::BIGINT,sum(cache_write_tokens)::BIGINT,sum(cache_write_1h_tokens)::BIGINT,sum(usage_samples)::BIGINT,sum(cache_samples)::BIGINT,sum(actual_cost_usd),sum(actual_cost_samples)::BIGINT,to_json(` + mergeHistogramSQL("first_bins") + `),to_json(` + mergeHistogramSQL("dispatch_bins") + `),sum(first_count)::BIGINT,sum(dispatch_count)::BIGINT,sum(first_sum),sum(dispatch_sum),max(last_ms),arg_max(last_first,last_ms),arg_max(last_dispatch,last_ms) FROM rollups WHERE ` + strings.Join(where, " AND ") + ` GROUP BY kind,provider,model,upstream_model,endpoint,stream,outcome`
+	prices, err := e.Prices(ctx)
+	if err != nil {
+		return QueryResult{}, err
+	}
 	rows, err := e.DB.QueryContext(ctx, q, args...)
 	if err != nil {
 		return QueryResult{}, err
 	}
 	defer rows.Close()
-	prices, err := e.Prices(ctx)
-	if err != nil {
-		return QueryResult{}, err
-	}
 	priceMap := map[string]Price{}
 	for _, p := range prices {
 		priceMap[p.Model] = p
@@ -317,6 +319,10 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 	if firstMS != nil {
 		seconds := *firstMS / 1000
 		out.CollectedFrom = &seconds
+	}
+	out.Coverage = "partial"
+	if out.CollectedFrom != nil && *out.CollectedFrom <= out.From {
+		out.Coverage = "available_history"
 	}
 	out.DurationMS = float64(time.Since(began).Microseconds()) / 1000
 	return out, nil

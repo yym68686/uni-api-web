@@ -15,13 +15,16 @@ import (
 )
 
 type Service struct {
-	auth        *authorizer
-	engine      *Engine
-	cfg         Config
-	active      atomic.Int64
-	lastCollect atomic.Int64
-	cacheMu     sync.Mutex
-	cache       map[string]cachedAnalytics
+	auth           *authorizer
+	engine         *Engine
+	cfg            Config
+	active         atomic.Int64
+	lastCollect    atomic.Int64
+	remaining      atomic.Int64
+	importFailures atomic.Uint64
+	importError    atomic.Value
+	cacheMu        sync.Mutex
+	cache          map[string]cachedAnalytics
 }
 
 type cachedAnalytics struct {
@@ -54,7 +57,7 @@ func (s *Service) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"status": "ok", "revision": s.engine.Revision.Load(), "last_collect_ms": s.lastCollect.Load()})
 }
 func (s *Service) status(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"status": "ok", "revision": s.engine.Revision.Load(), "active_ingest": s.active.Load(), "last_collect_ms": s.lastCollect.Load()})
+	writeJSON(w, 200, map[string]any{"status": "ok", "revision": s.engine.Revision.Load(), "active_ingest": s.active.Load(), "last_collect_ms": s.lastCollect.Load(), "remaining_objects": s.remaining.Load(), "import_failures": s.importFailures.Load(), "import_error": s.importError.Load()})
 }
 func (s *Service) analytics(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
@@ -78,6 +81,7 @@ func (s *Service) analytics(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 503, map[string]string{"error": "analytics unavailable"})
 		return
 	}
+	result.Import = map[string]any{"last_scan_ms": s.lastCollect.Load(), "remaining_objects": s.remaining.Load(), "errors": s.importFailures.Load(), "error_class": s.importError.Load(), "caught_up": s.lastCollect.Load() > 0 && s.remaining.Load() == 0 && (s.importError.Load() == nil || s.importError.Load() == "")}
 	body, err := json.Marshal(result)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": "analytics unavailable"})

@@ -91,17 +91,47 @@ func (e *Engine) Imported(ctx context.Context, key, etag string) (bool, error) {
 	}
 	return true, nil
 }
+
+type FactObject struct {
+	Key, ETag string
+	Facts     []Fact
+}
+
 func (e *Engine) Import(ctx context.Context, key, etag string, facts []Fact) error {
+	return e.ImportBatch(ctx, []FactObject{{Key: key, ETag: etag, Facts: facts}})
+}
+
+// Validate every object before the transaction. Commit facts, affected rollups
+// and object checkpoints atomically, so replay after a crash is idempotent.
+func (e *Engine) ImportBatch(ctx context.Context, objects []FactObject) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	imported, err := e.Imported(ctx, key, etag)
-	if err != nil || imported {
-		return err
-	}
-	for _, f := range facts {
-		if err = validFact(f); err != nil {
+	pending := make([]FactObject, 0, len(objects))
+	seen := map[string]string{}
+	for _, obj := range objects {
+		if etag, ok := seen[obj.Key]; ok {
+			if etag != obj.ETag {
+				return errors.New("immutable object changed")
+			}
+			continue
+		}
+		seen[obj.Key] = obj.ETag
+		imported, err := e.Imported(ctx, obj.Key, obj.ETag)
+		if err != nil {
 			return err
 		}
+		if imported {
+			continue
+		}
+		for _, f := range obj.Facts {
+			if err := validFact(f); err != nil {
+				return err
+			}
+		}
+		pending = append(pending, obj)
+	}
+	if len(pending) == 0 {
+		return nil
 	}
 	tx, err := e.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -113,16 +143,20 @@ func (e *Engine) Import(ctx context.Context, key, etag string, facts []Fact) err
 		return err
 	}
 	defer stmt.Close()
-	minutes := map[int64]bool{}
-	days := map[int64]bool{}
-	for _, f := range facts {
-		_, err = stmt.ExecContext(ctx, f.EventID, f.Kind, f.InstanceID, f.RequestID, f.AttemptID, f.AtMS, f.StartedMS, f.KeyID, f.Provider, f.Model, f.UpstreamModel, f.Endpoint, f.Stream, f.Outcome, f.Status, f.DurationMS, f.DispatchMS, f.FirstOutputMS, f.InputTokens, f.OutputTokens, f.CacheReadTokens, f.CacheWriteTokens, f.CacheWrite1hTokens, f.ActualCostUSD)
-		if err != nil {
+	minutes, days := map[int64]bool{}, map[int64]bool{}
+	for _, obj := range pending {
+		for _, f := range obj.Facts {
+			_, err = stmt.ExecContext(ctx, f.EventID, f.Kind, f.InstanceID, f.RequestID, f.AttemptID, f.AtMS, f.StartedMS, f.KeyID, f.Provider, f.Model, f.UpstreamModel, f.Endpoint, f.Stream, f.Outcome, f.Status, f.DurationMS, f.DispatchMS, f.FirstOutputMS, f.InputTokens, f.OutputTokens, f.CacheReadTokens, f.CacheWriteTokens, f.CacheWrite1hTokens, f.ActualCostUSD)
+			if err != nil {
+				return err
+			}
+			minutes[f.AtMS/60000*60000] = true
+			local := time.UnixMilli(f.AtMS).In(e.Location)
+			days[time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, e.Location).UnixMilli()] = true
+		}
+		if _, err = tx.ExecContext(ctx, "INSERT INTO imported_objects(object_key,etag,events) VALUES(?,?,?)", obj.Key, obj.ETag, len(obj.Facts)); err != nil {
 			return err
 		}
-		minutes[f.AtMS/60000*60000] = true
-		local := time.UnixMilli(f.AtMS).In(e.Location)
-		days[time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, e.Location).UnixMilli()] = true
 	}
 	for minute := range minutes {
 		if err = e.rebuildRollup(ctx, tx, "minute", minute, minute+60000); err != nil {
@@ -130,19 +164,31 @@ func (e *Engine) Import(ctx context.Context, key, etag string, facts []Fact) err
 		}
 	}
 	for day := range days {
-		end := time.UnixMilli(day).In(e.Location).AddDate(0, 0, 1).UnixMilli()
-		if err = e.rebuildRollup(ctx, tx, "day", day, end); err != nil {
+		if err = e.rebuildRollup(ctx, tx, "day", day, time.UnixMilli(day).In(e.Location).AddDate(0, 0, 1).UnixMilli()); err != nil {
 			return err
 		}
-	}
-	if _, err = tx.ExecContext(ctx, "INSERT INTO imported_objects(object_key,etag,events) VALUES(?,?,?)", key, etag, len(facts)); err != nil {
-		return err
 	}
 	if err = tx.Commit(); err != nil {
 		return err
 	}
 	e.Revision.Add(1)
 	return nil
+}
+func (e *Engine) ImportedObjects(ctx context.Context) (map[string]string, error) {
+	rows, err := e.DB.QueryContext(ctx, "SELECT object_key,etag FROM imported_objects")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := map[string]string{}
+	for rows.Next() {
+		var key, etag string
+		if err = rows.Scan(&key, &etag); err != nil {
+			return nil, err
+		}
+		result[key] = etag
+	}
+	return result, rows.Err()
 }
 func histogramSQL(column string) string {
 	parts := make([]string, len(histogramBounds))
@@ -179,7 +225,7 @@ func mergeHistogramSQL(column string) string {
 	return "[" + strings.Join(parts, ",") + "]"
 }
 func (e *Engine) Prices(ctx context.Context) ([]Price, error) {
-	rows, err := e.DB.QueryContext(ctx, `SELECT model,input,output,cache_read,cache_write,cache_write_1h,source,verified,effective_at FROM prices UNION ALL SELECT DISTINCT model,0,0,0,0,0,'fact-discovered',false,current_timestamp FROM facts WHERE model <> '' AND model NOT IN (SELECT model FROM prices) ORDER BY model`)
+	rows, err := e.DB.QueryContext(ctx, `SELECT model,input,output,cache_read,cache_write,cache_write_1h,source,verified,effective_at FROM prices UNION ALL SELECT DISTINCT model,0,0,0,0,0,'fact-discovered',false,current_timestamp FROM rollups WHERE model <> '' AND model NOT IN (SELECT model FROM prices) ORDER BY model`)
 	if err != nil {
 		return nil, err
 	}
