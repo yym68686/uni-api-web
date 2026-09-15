@@ -10,7 +10,10 @@ import (
 	"time"
 )
 
-type QueryFilter struct{ Range, Model, Provider, Endpoint, Stream, KeyID string }
+type QueryFilter struct {
+	Range, Model, Provider, Endpoint, Stream, KeyID string
+	Timeseries                                      bool
+}
 type Summary struct {
 	Attempts                  int64    `json:"attempts"`
 	Requests                  int64    `json:"requests"`
@@ -132,12 +135,13 @@ func (s Summary) JSON() map[string]any {
 }
 
 type AnalyticChannel struct {
-	Provider      string         `json:"provider"`
-	Model         string         `json:"model"`
-	UpstreamModel string         `json:"upstream_model"`
-	Endpoint      string         `json:"endpoint"`
-	Stream        *bool          `json:"stream"`
-	Stats         map[string]any `json:"stats"`
+	Provider      string           `json:"provider"`
+	Model         string           `json:"model"`
+	UpstreamModel string           `json:"upstream_model"`
+	Endpoint      string           `json:"endpoint"`
+	Stream        *bool            `json:"stream"`
+	Stats         map[string]any   `json:"stats"`
+	Points        []map[string]any `json:"points,omitempty"`
 }
 type QueryResult struct {
 	Import        map[string]any    `json:"import"`
@@ -325,7 +329,78 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 		out.Coverage = "available_history"
 	}
 	out.DurationMS = float64(time.Since(began).Microseconds()) / 1000
+	if f.Timeseries {
+		if err := e.attachTimeseries(ctx, &out, f, startMS, now.UnixMilli()); err != nil {
+			return QueryResult{}, err
+		}
+	}
 	return out, nil
+}
+
+// attachTimeseries reads pre-aggregated rollups only. Short windows use minute
+// buckets; longer windows use daily buckets so chart requests remain bounded
+// even when the fact table spans a year or more.
+func (e *Engine) attachTimeseries(ctx context.Context, result *QueryResult, f QueryFilter, startMS, endMS int64) error {
+	level := "minute"
+	if endMS-startMS > 48*60*60*1000 {
+		level = "day"
+	}
+	where := []string{"level=?", "period_ms>=?", "period_ms<=?", "kind='attempt'"}
+	args := []any{level, startMS / 60000 * 60000, endMS}
+	for _, entry := range [][2]string{{"provider", f.Provider}, {"model", f.Model}, {"endpoint", f.Endpoint}, {"key_id", f.KeyID}} {
+		if entry[1] != "" && entry[1] != "all" {
+			where = append(where, entry[0]+"=?")
+			args = append(args, entry[1])
+		}
+	}
+	if f.Stream == "true" || f.Stream == "false" {
+		where = append(where, "stream=?")
+		args = append(args, f.Stream == "true")
+	}
+	rows, err := e.DB.QueryContext(ctx, `SELECT period_ms,provider,model,upstream_model,outcome,sum(n)::BIGINT FROM rollups WHERE `+strings.Join(where, " AND ")+` GROUP BY period_ms,provider,model,upstream_model,outcome ORDER BY period_ms`, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	points := map[string]map[int64]map[string]any{}
+	for rows.Next() {
+		var period int64
+		var provider, model, upstream, outcome string
+		var n int64
+		if err := rows.Scan(&period, &provider, &model, &upstream, &outcome, &n); err != nil {
+			return err
+		}
+		key := provider + "\x00" + model + "\x00" + upstream
+		if points[key] == nil {
+			points[key] = map[int64]map[string]any{}
+		}
+		point := points[key][period]
+		if point == nil {
+			point = map[string]any{"timestamp": period / 1000, "success": int64(0), "failed": int64(0), "covered": true}
+			points[key][period] = point
+		}
+		if outcome == "success" || outcome == "completed" || outcome == "incomplete" {
+			point["success"] = point["success"].(int64) + n
+		} else {
+			point["failed"] = point["failed"].(int64) + n
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for i := range result.Data {
+		key := result.Data[i].Provider + "\x00" + result.Data[i].Model + "\x00" + result.Data[i].UpstreamModel
+		buckets := points[key]
+		periods := make([]int64, 0, len(buckets))
+		for period := range buckets {
+			periods = append(periods, period)
+		}
+		sort.Slice(periods, func(i, j int) bool { return periods[i] < periods[j] })
+		for _, period := range periods {
+			result.Data[i].Points = append(result.Data[i].Points, buckets[period])
+		}
+	}
+	return nil
 }
 
 func histogramValues(value any) []int64 {

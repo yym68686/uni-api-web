@@ -76,7 +76,7 @@ func (s *Service) analytics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.cacheMu.Unlock()
-	result, err := s.engine.Query(r.Context(), QueryFilter{Range: name, Model: q.Get("model"), Provider: q.Get("provider"), Endpoint: q.Get("endpoint"), Stream: q.Get("stream"), KeyID: q.Get("key_id")})
+	result, err := s.engine.Query(r.Context(), QueryFilter{Range: name, Model: q.Get("model"), Provider: q.Get("provider"), Endpoint: q.Get("endpoint"), Stream: q.Get("stream"), KeyID: q.Get("key_id"), Timeseries: q.Get("timeseries") == "true"})
 	if err != nil {
 		writeJSON(w, 503, map[string]string{"error": "analytics unavailable"})
 		return

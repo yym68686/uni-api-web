@@ -71,6 +71,63 @@ func TestQueryImportedFacts(t *testing.T) {
 	}
 }
 
+func TestQueryTimeseriesUsesPreaggregatedBuckets(t *testing.T) {
+	e, err := OpenEngine(filepath.Join(t.TempDir(), "trend.duckdb"), Config{Timezone: "UTC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	at := time.Now().UTC().Add(-2 * time.Minute).UnixMilli()
+	facts := []Fact{
+		{Schema: 1, EventID: "trend-success", Kind: "attempt", AtMS: at, Provider: "p", Model: "m", UpstreamModel: "u", Endpoint: "/v1/responses", Outcome: "success"},
+		{Schema: 1, EventID: "trend-failed", Kind: "attempt", AtMS: at, Provider: "p", Model: "m", UpstreamModel: "u", Endpoint: "/v1/responses", Outcome: "failed"},
+	}
+	if err = e.Import(context.Background(), "trend.jsonl", "etag", facts); err != nil {
+		t.Fatal(err)
+	}
+	result, err := e.Query(context.Background(), QueryFilter{Range: "1h", Endpoint: "/v1/responses", Stream: "all", Timeseries: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Data) != 1 || len(result.Data[0].Points) != 1 {
+		t.Fatalf("unexpected points: %+v", result.Data)
+	}
+	point := result.Data[0].Points[0]
+	if point["success"] != int64(1) || point["failed"] != int64(1) {
+		t.Fatalf("unexpected point: %+v", point)
+	}
+}
+
+func TestQueryRangesRemainBoundedWithHistoricalRollups(t *testing.T) {
+	e, err := OpenEngine(filepath.Join(t.TempDir(), "range-performance.duckdb"), Config{Timezone: "UTC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	now := time.Now().UTC()
+	objects := make([]FactObject, 0, 120)
+	for day := 0; day < 120; day++ {
+		at := now.Add(-time.Duration(day) * 24 * time.Hour).UnixMilli()
+		objects = append(objects, FactObject{Key: fmt.Sprintf("range/%03d.jsonl", day), ETag: fmt.Sprintf("etag-%d", day), Facts: []Fact{{Schema: 1, EventID: fmt.Sprintf("range-%d", day), Kind: "attempt", AtMS: at, Provider: "provider", Model: "model", UpstreamModel: "upstream", Endpoint: "/v1/responses", Outcome: "success"}}})
+	}
+	if err = e.ImportBatch(context.Background(), objects); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"today", "week", "month", "year", "all"} {
+		started := time.Now()
+		result, queryErr := e.Query(context.Background(), QueryFilter{Range: name, Timeseries: true})
+		if queryErr != nil {
+			t.Fatalf("range %s: %v", name, queryErr)
+		}
+		if elapsed := time.Since(started); elapsed >= time.Second {
+			t.Fatalf("range %s exceeded 1s: %s (reported %.1fms)", name, elapsed, result.DurationMS)
+		}
+		if len(result.Data) != 1 || len(result.Data[0].Points) == 0 {
+			t.Fatalf("range %s missing bounded points: %+v", name, result.Data)
+		}
+	}
+}
+
 func TestBatchImportAtomicAndDimensionAggregation(t *testing.T) {
 	e, err := OpenEngine(filepath.Join(t.TempDir(), "batch.duckdb"), Config{Timezone: "UTC"})
 	if err != nil {
