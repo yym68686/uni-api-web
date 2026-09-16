@@ -94,6 +94,7 @@ type Keys = {
   snapshot_revision: string;
   can_inspect_all: boolean;
 };
+type ConsoleSource = { id: string; name: string; base: string; created_at: number };
 type View = "channels" | "balances" | "overview" | "prices";
 
 function Overview({ metrics, rows, live }: { metrics?: Metrics; rows: Channel[]; live?: Map<string, number | null | undefined> }) {
@@ -148,6 +149,41 @@ async function readKeys(connection: Connection, signal: AbortSignal) {
       403,
     );
   return keys;
+}
+
+function AccountForm({ onConnect }: { onConnect: (connection: Connection, keys: Keys) => void }) {
+  const [username, setUsername] = useState(""), [password, setPassword] = useState("");
+  const [pending, setPending] = useState(false), [error, setError] = useState(""), [setup, setSetup] = useState(false), [needsSource, setNeedsSource] = useState(false);
+  useEffect(() => { void fetch("/analytics/v1/auth/me", { credentials: "include" }).then(response => response.ok ? response.json() as Promise<{setup_required?: boolean}> : null).then(body => setSetup(Boolean(body?.setup_required))).catch(() => undefined); }, []);
+  async function submit(event: FormEvent) {
+    event.preventDefault(); if (pending) return; setPending(true); setError("");
+    try {
+      const response = await fetch(`/analytics/v1/auth/${setup ? "setup" : "login"}`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ username, password }) });
+      if (!response.ok) throw new Error(response.status === 401 ? "用户名或密码错误。" : setup ? "初始化账户失败，密码至少 12 位。" : "账户服务暂不可用，请确认分析 API 已启用账户模式。");
+      const body = await response.json() as { sources?: ConsoleSource[] };
+      const source = body.sources?.[0];
+      if (!source) { setNeedsSource(true); return; }
+      const connection: Connection = { base: window.location.origin, key: "", sourceId: source.id, session: crypto.randomUUID() };
+      const keys = await readKeys(connection, new AbortController().signal); onConnect(connection, keys);
+    } catch (e) { setError(e instanceof Error ? e.message : "登录失败，请重试。"); } finally { setPending(false); }
+  }
+  return <form className="connection-form account-form" onSubmit={submit}>
+    <label htmlFor="console-username">用户名 <span>ACCOUNT</span></label>
+    <div className="input-wrap"><KeyRound size={18} /><input id="console-username" value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" required disabled={pending} /></div>
+    <label htmlFor="console-password">密码 <span>CONSOLE PASSWORD</span></label>
+    <div className="input-wrap"><ShieldCheck size={18} /><input id="console-password" type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" required disabled={pending} /></div>
+    {error && <div role="alert" className="error-banner"><TriangleAlert size={17} /><span>{error}</span></div>}
+    <button className="button primary connect-button" disabled={pending}>{pending ? <><Spinner small /> {setup ? "正在初始化" : "正在登录"}</> : <>{setup ? "创建管理员账户" : "账户登录"} <ArrowRight size={17} /></>}</button>
+    <button type="button" className="text-link account-mode" onClick={() => setSetup(!setup)}>{setup ? "已有账户？登录" : "首次使用？创建账户"}</button>
+    {needsSource && <SourceForm onAdded={async () => { const body = await fetch("/analytics/v1/sources", { credentials: "include" }).then(response => response.json()) as {data?: ConsoleSource[]}; const source = body.data?.[0]; if (source) onConnect({ base: window.location.origin, key: "", sourceId: source.id, session: crypto.randomUUID() }, await readKeys({ base: window.location.origin, key: "", sourceId: source.id, session: crypto.randomUUID() }, new AbortController().signal)); }} />}
+    <p className="connection-help">登录后可管理多个 uni-api 来源，来源密钥只保存在分析 API。</p>
+  </form>;
+}
+
+function SourceForm({ onAdded }: { onAdded: () => void }) {
+  const [name,setName]=useState(""),[base,setBase]=useState(""),[key,setKey]=useState(""),[error,setError]=useState(""),[pending,setPending]=useState(false);
+  async function submit(event: FormEvent) { event.preventDefault(); setPending(true); setError(""); try { const response=await fetch("/analytics/v1/sources",{method:"POST",credentials:"include",headers:{"Content-Type":"application/json","Accept":"application/json"},body:JSON.stringify({name,base,key})}); if(!response.ok) throw new Error("添加来源失败，请检查地址和平台密钥。"); setName("");setBase("");setKey("");onAdded(); } catch(e){setError(e instanceof Error?e.message:"添加失败")} finally{setPending(false)} }
+  return <form className="source-form" onSubmit={submit}><h3>添加 uni-api 来源</h3><input aria-label="来源名称" placeholder="来源名称，例如 DigitalOcean" value={name} onChange={e=>setName(e.target.value)} required/><input aria-label="来源地址" type="url" placeholder="https://uni-api.example.com" value={base} onChange={e=>setBase(e.target.value)} required/><input aria-label="来源平台密钥" type="password" placeholder="第一个平台密钥" value={key} onChange={e=>setKey(e.target.value)} required minLength={8}/>{error&&<div role="alert" className="error-banner"><TriangleAlert size={16}/>{error}</div>}<button className="button primary" disabled={pending}>{pending?<><Spinner small/> 保存中</>:<>保存来源 <Check size={16}/></>}</button></form>;
 }
 const reveal = {
   initial: { opacity: 0, y: 12 },
@@ -355,9 +391,12 @@ function Welcome({
           <div className="connect-icon">
             <Link2 size={23} />
           </div>
-          <h2>连接你的 uni-api</h2>
-          <p>只需服务地址与平台密钥，即刻开始观测。</p>
+          <h2>登录 uni-api console</h2>
+          <p>使用账户管理多个 uni-api 来源，数据统一呈现。</p>
+          <AccountForm onConnect={onConnect} />
+          <details className="legacy-connect"><summary>兼容：直接连接单个 uni-api</summary>
           <ConnectionForm onConnect={onConnect} initialError={error} />
+          </details>
           <div className="connect-card-footer">
             <span className="tiny-dot" /> 浏览器直连 · 无需额外账户
           </div>
@@ -821,7 +860,7 @@ function Guide({ open, onClose }: { open: boolean; onClose: () => void }) {
 }
 
 function Dashboard({
-  connection,
+  connection: baseConnection,
   disconnect,
   changeConnection,
 }: {
@@ -829,7 +868,10 @@ function Dashboard({
   disconnect: (reason?: string) => void;
   changeConnection: () => void;
 }) {
-  const [filters, setFilters] = useState(() => loadFilters(connection.base));
+  const [sourceList, setSourceList] = useState<ConsoleSource[]>([]);
+  const [selectedSourceId, setSelectedSourceId] = useState("");
+  const connection = useMemo(() => ({ ...baseConnection, sourceId: selectedSourceId || undefined }), [baseConnection, selectedSourceId]);
+  const [filters, setFilters] = useState(() => loadFilters(baseConnection.base));
   const {
     keyId,
     model,
@@ -854,6 +896,7 @@ function Dashboard({
     [guide, setGuide] = useState(false),
     [menu, setMenu] = useState(false),
     [refresh, setRefresh] = useState(0);
+  useEffect(() => { if (!baseConnection.sourceId) return; void analyticsRequest<{data: ConsoleSource[]}>(baseConnection, "/analytics/v1/sources").then(body => setSourceList(body.data || [])).catch(() => setSourceList([])); }, [baseConnection]);
   const [auto, setAuto] = useState(false),
     [theme, setTheme] = useState(() => {
       try {
@@ -1183,6 +1226,7 @@ function Dashboard({
             <strong>{view === "channels" ? "渠道观测" : view === "balances" ? "余额管理" : view === "overview" ? "总览" : "价格设置"}</strong>
           </div>
           <div className="topbar-actions">
+            {sourceList.length > 0 && <label className="source-switcher"><Server size={14} /><select aria-label="uni-api 来源" value={selectedSourceId} onChange={e => { setSelectedSourceId(e.target.value); setFilter("keyId", ""); }}><option value="">全部来源</option>{sourceList.map(source => <option value={source.id} key={source.id}>{source.name}</option>)}</select></label>}
             <span className="topbar-service">
               <span className="tiny-dot" />
               {new URL(connection.base).hostname}
@@ -1228,7 +1272,7 @@ function Dashboard({
             </button>
           </motion.div>
           {view === "prices" ? (
-            <PriceSettings prices={prices.data?.data || []} loading={prices.isPending} error={prices.error?.message} connection={connection} onSaved={() => void prices.refetch()} />
+            <><SourceForm onAdded={() => void analyticsRequest<{data: ConsoleSource[]}>(connection, "/analytics/v1/sources").then(body => setSourceList(body.data || []))} /><PriceSettings prices={prices.data?.data || []} loading={prices.isPending} error={prices.error?.message} connection={connection} onSaved={() => void prices.refetch()} /></>
           ) : view === "overview" ? (
             <Overview metrics={metrics.data} rows={rows} live={liveMap} />
           ) : <motion.section

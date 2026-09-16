@@ -2492,3 +2492,7 @@ nav > button.active > svg {
 .usage-cache {display:block;font-size:11px;color:var(--muted);margin-top:4px;}
 .window-tabs { flex-wrap:wrap; }
 @media(max-width:800px){.price-inputs{grid-template-columns:repeat(2,minmax(0,1fr));}}
+.source-switcher{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:12px}
+.source-switcher select{border:1px solid var(--line);background:var(--panel);color:var(--text);border-radius:9px;padding:7px 10px;font:inherit;max-width:170px}
+.source-form{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:14px 16px;margin-bottom:14px;border:1px solid var(--line);border-radius:14px;background:var(--panel)}
+.source-form h3{width:100%;margin:0;font-size:14px}.source-form input{min-width:180px;flex:1;border:1px solid var(--line);background:var(--input);color:var(--text);border-radius:9px;padding:9px 11px;font:inherit}.source-form .error-banner{width:100%;margin:0}

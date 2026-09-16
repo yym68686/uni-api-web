@@ -10,11 +10,12 @@ export function loadConnection(): Connection | null {
       saved &&
       typeof saved.base === "string" &&
       typeof saved.key === "string" &&
-      saved.key.trim()
+      (saved.key.trim() || typeof saved.sourceId === "string")
     )
       return {
         base: cleanBase(saved.base),
         key: saved.key.trim(),
+        sourceId: typeof saved.sourceId === "string" ? saved.sourceId : undefined,
         session: crypto.randomUUID(),
       };
   } catch {
@@ -27,7 +28,7 @@ export function saveConnection(connection: Connection) {
   try {
     sessionStorage.setItem(
       storageKey,
-      JSON.stringify({ base: connection.base, key: connection.key }),
+      JSON.stringify({ base: connection.base, key: connection.key, sourceId: connection.sourceId }),
     );
   } catch {
     // The connection still works for the current page lifetime.

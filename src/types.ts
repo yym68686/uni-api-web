@@ -2,6 +2,7 @@ export interface Connection {
   base: string;
   key: string;
   session: string;
+  sourceId?: string;
 }
 export interface KeyInfo {
   key_id: string;

@@ -37,14 +37,17 @@ export async function request<T>(
 ): Promise<T> {
   const timeout = AbortSignal.timeout(20_000);
   let response: Response;
+  const target = connection.base === (typeof window !== "undefined" ? window.location.origin : "")
+    ? `/analytics/v1/sources/${encodeURIComponent(connection.sourceId || "all")}/proxy${path}`
+    : connection.base + path;
   try {
-    response = await fetch(connection.base + path, {
+    response = await fetch(target, {
       headers: {
         Authorization: `Bearer ${connection.key}`,
         Accept: "application/json",
       },
       cache: "no-store",
-      credentials: "omit",
+      credentials: connection.base === (typeof window !== "undefined" ? window.location.origin : "") ? "include" : "omit",
       redirect: "error",
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     });
@@ -135,7 +138,7 @@ export function makeLimiter(limit: number) {
 
 export async function analyticsRequest<T>(connection: Connection,path: string,signal?: AbortSignal, init: RequestInit = {}): Promise<T> {
   if (typeof window === "undefined") throw new Error("analytics API requires a browser session");
-  const timeout=AbortSignal.timeout(20_000); const response=await fetch(window.location.origin+path,{...init,headers:{Authorization:`Bearer ${connection.key}`,Accept:"application/json",...(init.headers||{})},cache:"no-store",credentials:"omit",redirect:"error",signal:signal?AbortSignal.any([signal,timeout]):timeout});
+  const timeout=AbortSignal.timeout(20_000); const response=await fetch(window.location.origin+path,{...init,headers:{...(connection.key?{Authorization:`Bearer ${connection.key}`}:{ }),Accept:"application/json",...(init.headers||{})},cache:"no-store",credentials:"include",redirect:"error",signal:signal?AbortSignal.any([signal,timeout]):timeout});
   if(response.status===401||response.status===403) throw new ApiError("分析服务未接受平台密钥，请检查控制台后端配置。",response.status);
   if(!response.ok) throw new ApiError(`分析服务暂时无法响应（HTTP ${response.status}）。`,response.status);
   return await response.json() as T;

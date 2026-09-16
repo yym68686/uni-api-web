@@ -35,6 +35,7 @@ type Service struct {
 	lastCheckpoint   atomic.Int64
 	checkpointError  atomic.Value
 	factClient       *s3.Client
+	control          controlPlane
 }
 
 type cachedAnalytics struct {
@@ -56,6 +57,10 @@ func NewService(e *Engine, cfg Config) (*Service, error) {
 func (s *Service) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.health)
+	control := s.controlHandler()
+	mux.Handle("/v1/auth/", control)
+	mux.Handle("/v1/sources", control)
+	mux.Handle("/v1/sources/", control)
 
 	mux.HandleFunc("GET /v1/analytics", s.analytics)
 	mux.HandleFunc("GET /v1/prices", s.prices)

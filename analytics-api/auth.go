@@ -86,6 +86,15 @@ func (s *Service) authenticate(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		if strings.HasPrefix(r.URL.Path, "/v1/auth/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if s.controlSession(r) {
+			w.Header().Set("Cache-Control", "no-store")
+			next.ServeHTTP(w, r)
+			return
+		}
 		_, status, err := s.auth.verify(r.Context(), r.Header.Get("Authorization"))
 		if err != nil {
 			writeJSON(w, status, map[string]string{"error": err.Error()})
