@@ -895,7 +895,7 @@ function Dashboard({
     [guide, setGuide] = useState(false),
     [menu, setMenu] = useState(false),
     [refresh, setRefresh] = useState(0);
-  useEffect(() => { if (!baseConnection.sourceId || baseConnection.base !== window.location.origin) return; void analyticsRequest<{data: ConsoleSource[]}>(baseConnection, "/analytics/v1/sources").then(body => setSourceList(body.data || [])).catch(() => setSourceList([])); }, [baseConnection]);
+  useEffect(() => { if (!baseConnection.sourceId || baseConnection.base !== globalThis.location.origin) return; void analyticsRequest<{data: ConsoleSource[]}>(baseConnection, "/analytics/v1/sources").then(body => setSourceList(body.data || [])).catch(() => setSourceList([])); }, [baseConnection]);
   const [auto, setAuto] = useState(false),
     [theme, setTheme] = useState(() => {
       try {
