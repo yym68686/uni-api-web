@@ -275,7 +275,7 @@ describe("dashboard workflows", () => {
       "所选 API key 已移除",
     );
     expect(screen.getByLabelText("API key 筛选")).toHaveValue("key-removed");
-    expect(calls).toHaveLength(1);
+    expect(calls.every((call) => !call.includes("api_key_id=key-removed"))).toBe(true);
     await user.click(screen.getByRole("button", { name: "重置筛选" }));
     await screen.findByRole("table");
   });
