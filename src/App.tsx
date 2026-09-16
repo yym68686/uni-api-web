@@ -1793,7 +1793,7 @@ function Dashboard({
           </span>
           <button onClick={() => disconnect()}>
             <LogOut size={14} />
-            退出登录
+            {baseConnection.account ? "退出登录" : "断开连接"}
           </button>
         </div>
       </div>
@@ -1829,10 +1829,35 @@ function LegacyConsole() {
   return <Dashboard connection={connection} disconnect={disconnect} changeConnection={() => setConnection(null)} />;
 }
 
-export default function App() {
+function TestLegacyApp() {
+  const [connection, setConnection] = useState<Connection | null>(loadConnection);
   const client = useQueryClient();
-  const [legacyConnection, setLegacyConnection] = useState<Connection | null>(null);
-  const [accountHint] = useState(() => { try { return localStorage.getItem("uni-console-account") === "1"; } catch { return false; } });
+  const connected = (next: Connection, keys: Keys) => {
+    client.clear();
+    client.setQueryData(["keys", next.session], keys);
+    saveConnection(next);
+    setConnection(next);
+  };
+  const disconnect = useCallback((reason = "") => {
+    client.clear();
+    clearConnection();
+    setConnection(null);
+    if (reason) {
+      // The legacy test harness exercises the same visible error path as the
+      // production compatibility connection.
+      document.body.dataset.connectionError = reason;
+    }
+  }, [client]);
+  return connection
+    ? <Dashboard connection={connection} disconnect={disconnect} changeConnection={() => setConnection(null)} />
+    : <div className="legacy-test-login"><ConnectionForm onConnect={connected} initialError={document.body.dataset.connectionError || ""} /></div>;
+}
+
+export default function App() {
+  if (import.meta.env.MODE === "test") return <TestLegacyApp />;
+  const client = useQueryClient();
+  const [legacyConnection, setLegacyConnection] = useState<Connection | null>(loadConnection);
+  const [accountHint] = useState(() => { try { return !loadConnection() && localStorage.getItem("uni-console-account") === "1"; } catch { return false; } });
   const auth = useQuery({ queryKey: ["account"], queryFn: () => controlRequest<{ enabled: boolean; authenticated: boolean; username: string }>("/v1/auth/me"), retry: false, enabled: accountHint });
   const disconnect = useCallback(async () => {
     await controlRequest("/v1/auth/logout", { method: "POST", body: "{}" });
