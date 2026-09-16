@@ -154,7 +154,6 @@ async function readKeys(connection: Connection, signal: AbortSignal) {
 function AccountForm({ onConnect }: { onConnect: (connection: Connection, keys: Keys) => void }) {
   const [username, setUsername] = useState(""), [password, setPassword] = useState("");
   const [pending, setPending] = useState(false), [error, setError] = useState(""), [setup, setSetup] = useState(false), [needsSource, setNeedsSource] = useState(false);
-  useEffect(() => { void fetch("/analytics/v1/auth/me", { credentials: "include" }).then(response => response.ok ? response.json() as Promise<{setup_required?: boolean}> : null).then(body => setSetup(Boolean(body?.setup_required))).catch(() => undefined); }, []);
   async function submit(event: FormEvent) {
     event.preventDefault(); if (pending) return; setPending(true); setError("");
     try {
@@ -896,7 +895,7 @@ function Dashboard({
     [guide, setGuide] = useState(false),
     [menu, setMenu] = useState(false),
     [refresh, setRefresh] = useState(0);
-  useEffect(() => { if (!baseConnection.sourceId) return; void analyticsRequest<{data: ConsoleSource[]}>(baseConnection, "/analytics/v1/sources").then(body => setSourceList(body.data || [])).catch(() => setSourceList([])); }, [baseConnection]);
+  useEffect(() => { if (!baseConnection.sourceId || baseConnection.base !== window.location.origin) return; void analyticsRequest<{data: ConsoleSource[]}>(baseConnection, "/analytics/v1/sources").then(body => setSourceList(body.data || [])).catch(() => setSourceList([])); }, [baseConnection]);
   const [auto, setAuto] = useState(false),
     [theme, setTheme] = useState(() => {
       try {
