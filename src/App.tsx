@@ -44,21 +44,24 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Sun,
+  TriangleAlert,
   Unplug,
   Wallet,
   X,
-  TriangleAlert,
 } from "lucide-react";
 import {
   ApiError,
   channelParams,
-  cleanBase,
   makeLimiter,
   request,
   analyticsRequest,
+  controlRequest,
+  cleanBase,
 } from "./api";
-import { clearConnection, loadConnection, saveConnection } from "./session";
+import { SourceSettings } from "./SourceSettings";
+import type { ConsoleSource } from "./SourceSettings";
 import { defaultFilters, loadFilters, saveFilters } from "./preferences";
+import { loadConnection, saveConnection, clearConnection } from "./session";
 import type { Filters } from "./preferences";
 import {
   balanceIsLow,
@@ -71,6 +74,7 @@ import {
   rate,
   reasonLabel,
   rowId,
+  providerId,
   summarize,
   time,
 } from "./format";
@@ -94,8 +98,8 @@ type Keys = {
   snapshot_revision: string;
   can_inspect_all: boolean;
 };
-type ConsoleSource = { id: string; name: string; base: string; created_at: number };
-type View = "channels" | "balances" | "overview" | "prices";
+
+type View = "channels" | "balances" | "overview" | "prices" | "sources";
 
 function Overview({ metrics, rows, live }: { metrics?: Metrics; rows: Channel[]; live?: Map<string, number | null | undefined> }) {
   const total = metrics?.total as Record<string, any> | undefined;
@@ -110,7 +114,7 @@ function Overview({ metrics, rows, live }: { metrics?: Metrics; rows: Channel[];
     <MetricCard label="当前并发" value={currentConcurrency == null ? "—" : count(currentConcurrency)} sub="实时渠道请求" icon={<Gauge size={17} />} />
     <MetricCard label="缓存率" value={rate(cacheRate)} sub="缓存读取 / 输入 token" icon={<Database size={17} />} />
     <div className="data-panel overview-panel"><div className="data-title"><Gauge size={18} /><h2>模型消费</h2></div><div className="overview-list">{models.length ? models.map((item: any) => <div className="overview-row" key={item.model}><strong>{item.model}</strong><span>{count((item.input_tokens || 0) + (item.output_tokens || 0))} tokens</span><b>{item.estimated_cost_usd == null ? "—" : `$${Number(item.estimated_cost_usd).toFixed(4)}`}</b></div>) : <Empty title="暂无模型事实" icon={<Activity size={22} />}>等待 S3 事实导入。</Empty>}</div></div>
-    <div className="data-panel overview-panel"><div className="data-title"><Radio size={18} /><h2>当前渠道</h2></div><div className="overview-list">{rows.slice(0, 12).map(row => <div className="overview-row" key={rowId(row)}><strong>{row.provider}</strong><span>{row.model}</span><b>{live?.get(rowId(row)) == null ? "—" : `${live.get(rowId(row))} 并发`}</b></div>)}</div></div>
+    <div className="data-panel overview-panel"><div className="data-title"><Radio size={18} /><h2>当前渠道</h2></div><div className="overview-list">{rows.slice(0, 12).map(row => <div className="overview-row" key={rowId(row)}><strong>{row.provider}</strong>{row.source_name&&<small className="source-label">{row.source_name}</small>}<span>{row.model}</span><b>{live?.get(rowId(row)) == null ? "—" : `${live.get(rowId(row))} 并发`}</b></div>)}</div></div>
   </motion.section>;
 }
 
@@ -132,6 +136,8 @@ const streamLabel = (stream: string) =>
 async function readMetrics(connection: Connection, path: string, signal: AbortSignal, endpoint: string, stream: string) {
  const source=new URLSearchParams(path.split("?")[1]||"");
  const range=source.get("window")||"15m";
+ const keySource=source.get("api_key_id")?.split("::");
+ if(connection.sourceId)source.set("source_id",connection.sourceId);else if(keySource && keySource.length>1)source.set("source_id",keySource[0]);
  source.delete("window"); source.set("range",range); source.delete("api_key_id");
  source.set("endpoint",endpoint); source.set("stream",stream);
  if (path.includes("timeseries")) source.set("timeseries","true");
@@ -151,45 +157,11 @@ async function readKeys(connection: Connection, signal: AbortSignal) {
   return keys;
 }
 
-function AccountForm({ onConnect }: { onConnect: (connection: Connection, keys: Keys) => void }) {
-  const [username, setUsername] = useState(""), [password, setPassword] = useState("");
-  const [pending, setPending] = useState(false), [error, setError] = useState(""), [setup, setSetup] = useState(false), [needsSource, setNeedsSource] = useState(false);
-  async function submit(event: FormEvent) {
-    event.preventDefault(); if (pending) return; setPending(true); setError("");
-    try {
-      const response = await fetch(`/analytics/v1/auth/${setup ? "setup" : "login"}`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ username, password }) });
-      if (!response.ok) throw new Error(response.status === 401 ? "用户名或密码错误。" : setup ? "初始化账户失败，密码至少 12 位。" : "账户服务暂不可用，请确认分析 API 已启用账户模式。");
-      const body = await response.json() as { sources?: ConsoleSource[] };
-      const source = body.sources?.[0];
-      if (!source) { setNeedsSource(true); return; }
-      const connection: Connection = { base: window.location.origin, key: "", sourceId: source.id, session: crypto.randomUUID() };
-      const keys = await readKeys(connection, new AbortController().signal); onConnect(connection, keys);
-    } catch (e) { setError(e instanceof Error ? e.message : "登录失败，请重试。"); } finally { setPending(false); }
-  }
-  return <form className="connection-form account-form" onSubmit={submit}>
-    <label htmlFor="console-username">用户名 <span>ACCOUNT</span></label>
-    <div className="input-wrap"><KeyRound size={18} /><input id="console-username" value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" required disabled={pending} /></div>
-    <label htmlFor="console-password">密码 <span>CONSOLE PASSWORD</span></label>
-    <div className="input-wrap"><ShieldCheck size={18} /><input id="console-password" type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" required disabled={pending} /></div>
-    {error && <div role="alert" className="error-banner"><TriangleAlert size={17} /><span>{error}</span></div>}
-    <button className="button primary connect-button" disabled={pending}>{pending ? <><Spinner small /> {setup ? "正在初始化" : "正在登录"}</> : <>{setup ? "创建管理员账户" : "账户登录"} <ArrowRight size={17} /></>}</button>
-    <button type="button" className="text-link account-mode" onClick={() => setSetup(!setup)}>{setup ? "已有账户？登录" : "首次使用？创建账户"}</button>
-    {needsSource && <SourceForm onAdded={async () => { const body = await fetch("/analytics/v1/sources", { credentials: "include" }).then(response => response.json()) as {data?: ConsoleSource[]}; const source = body.data?.[0]; if (source) onConnect({ base: window.location.origin, key: "", sourceId: source.id, session: crypto.randomUUID() }, await readKeys({ base: window.location.origin, key: "", sourceId: source.id, session: crypto.randomUUID() }, new AbortController().signal)); }} />}
-    <p className="connection-help">登录后可管理多个 uni-api 来源，来源密钥只保存在分析 API。</p>
-  </form>;
+function AccountForm({ onConnect }: { onConnect: () => void }) {
+ const [username,setUsername]=useState(""),[password,setPassword]=useState(""),[pending,setPending]=useState(false),[error,setError]=useState("");
+ async function submit(e:FormEvent){e.preventDefault();setPending(true);setError("");try{await controlRequest("/v1/auth/login",{method:"POST",body:JSON.stringify({username,password})});setPassword("");onConnect()}catch(e){setError(e instanceof ApiError && e.status===401?"用户名或密码错误。":e instanceof Error?e.message:"登录失败")}finally{setPending(false)}}
+ return <form className="connection-form" onSubmit={submit}><label htmlFor="console-username">用户名</label><div className="input-wrap"><KeyRound size={18}/><input id="console-username" value={username} onChange={e=>setUsername(e.target.value)} autoComplete="username" required disabled={pending}/></div><label htmlFor="console-password">密码</label><div className="input-wrap"><ShieldCheck size={18}/><input id="console-password" type="password" value={password} onChange={e=>setPassword(e.target.value)} autoComplete="current-password" required disabled={pending}/></div>{error&&<div role="alert" className="error-banner">{error}</div>}<button className="button primary connect-button" disabled={pending}>{pending?<Spinner small/>:<>登录 <ArrowRight size={17}/></>}</button><p className="connection-help">账户会话保留 30 天。uni-api 密钥由服务端加密保存。</p></form>;
 }
-
-function SourceForm({ onAdded }: { onAdded: () => void }) {
-  const [name,setName]=useState(""),[base,setBase]=useState(""),[key,setKey]=useState(""),[error,setError]=useState(""),[pending,setPending]=useState(false);
-  async function submit(event: FormEvent) { event.preventDefault(); setPending(true); setError(""); try { const response=await fetch("/analytics/v1/sources",{method:"POST",credentials:"include",headers:{"Content-Type":"application/json","Accept":"application/json"},body:JSON.stringify({name,base,key})}); if(!response.ok) throw new Error("添加来源失败，请检查地址和平台密钥。"); setName("");setBase("");setKey("");onAdded(); } catch(e){setError(e instanceof Error?e.message:"添加失败")} finally{setPending(false)} }
-  return <form className="source-form" onSubmit={submit}><h3>添加 uni-api 来源</h3><input aria-label="来源名称" placeholder="来源名称，例如 DigitalOcean" value={name} onChange={e=>setName(e.target.value)} required/><input aria-label="来源地址" type="url" placeholder="https://uni-api.example.com" value={base} onChange={e=>setBase(e.target.value)} required/><input aria-label="来源平台密钥" type="password" placeholder="第一个平台密钥" value={key} onChange={e=>setKey(e.target.value)} required minLength={8}/>{error&&<div role="alert" className="error-banner"><TriangleAlert size={16}/>{error}</div>}<button className="button primary" disabled={pending}>{pending?<><Spinner small/> 保存中</>:<>保存来源 <Check size={16}/></>}</button></form>;
-}
-const reveal = {
-  initial: { opacity: 0, y: 12 },
-  animate: { opacity: 1, y: 0 },
-  transition: { duration: 0.32 },
-};
-
 function ConnectionForm({
   onConnect,
   initialBase = "",
@@ -306,12 +278,21 @@ function ConnectionForm({
   );
 }
 
+
+const reveal = {
+  initial: { opacity: 0, y: 12 },
+  animate: { opacity: 1, y: 0 },
+  transition: { duration: 0.32 },
+};
+
 function Welcome({
   onConnect,
   error,
+  onLegacyConnect,
 }: {
-  onConnect: (connection: Connection, keys: Keys) => void;
+  onConnect: () => void;
   error: string;
+  onLegacyConnect?: (connection: Connection, keys: Keys) => void;
 }) {
   return (
     <div className="welcome">
@@ -378,7 +359,7 @@ function Welcome({
             </span>
             <span>
               <ShieldCheck size={17} />
-              直接连接你的服务
+              安全连接你的服务
             </span>
           </div>
         </motion.section>
@@ -393,11 +374,10 @@ function Welcome({
           <h2>登录 uni-api console</h2>
           <p>使用账户管理多个 uni-api 来源，数据统一呈现。</p>
           <AccountForm onConnect={onConnect} />
-          <details className="legacy-connect"><summary>兼容：直接连接单个 uni-api</summary>
-          <ConnectionForm onConnect={onConnect} initialError={error} />
-          </details>
+          {onLegacyConnect && <details className="legacy-connect" open><summary>没有账户服务？使用单来源兼容连接</summary><p>仅用于旧版或尚未启用控制面的 uni-api。</p><ConnectionForm onConnect={onLegacyConnect} /></details>}
+          {error && <p role="alert" className="error-banner">{error}</p>}
           <div className="connect-card-footer">
-            <span className="tiny-dot" /> 浏览器直连 · 无需额外账户
+            <span className="tiny-dot" /> 多来源分析 · 安全账户会话
           </div>
         </motion.section>
       </main>
@@ -843,7 +823,7 @@ function Guide({ open, onClose }: { open: boolean; onClose: () => void }) {
               ],
               [
                 "范围与保留",
-                "默认统计全部端点和全部流式状态，可分别筛选。跨组延迟由后端合并直方图后计算。默认按 provider 配置顺序；选择 API key 后按该 key 配置顺序，仍是渠道整体统计而非 key 私有用量。指标在内存保留 1 小时，实例重启后重新积累。",
+                "默认统计全部端点和全部流式状态，可分别筛选。跨组延迟由后端合并直方图后计算。默认按 provider 配置顺序；选择 API key 后按该 key 配置顺序，仍是渠道整体统计而非 key 私有用量。历史事实存储于 S3，由 DuckDB 聚合；采集开始之前的流量无法补回。",
               ],
             ].map(([title, text]) => (
               <section key={title}>
@@ -861,16 +841,16 @@ function Guide({ open, onClose }: { open: boolean; onClose: () => void }) {
 function Dashboard({
   connection: baseConnection,
   disconnect,
-  changeConnection,
 }: {
   connection: Connection;
   disconnect: (reason?: string) => void;
   changeConnection: () => void;
 }) {
-  const [sourceList, setSourceList] = useState<ConsoleSource[]>([]);
-  const [selectedSourceId, setSelectedSourceId] = useState("");
-  const connection = useMemo(() => ({ ...baseConnection, sourceId: selectedSourceId || undefined }), [baseConnection, selectedSourceId]);
-  const [filters, setFilters] = useState(() => loadFilters(baseConnection.base));
+  const [filters,setFilters]=useState(()=>loadFilters(baseConnection.base));
+ const sourceQuery=useQuery({queryKey:["sources",baseConnection.session],queryFn:()=>controlRequest<{data:ConsoleSource[]}>("/v1/sources"),enabled:!!baseConnection.account});
+ const sourceList=sourceQuery.data?.data||[];
+ const selectedSourceId=filters.sourceId;
+ const connection=useMemo(()=>({...baseConnection,sourceId:selectedSourceId||undefined,session:baseConnection.session+":"+(selectedSourceId||"all")}),[baseConnection,selectedSourceId]);
   const {
     keyId,
     model,
@@ -885,7 +865,7 @@ function Dashboard({
   const [view, setView] = useState<View>("channels"),
     [page, setPage] = useState(0);
   useEffect(() => {
-    saveFilters(connection.base, filters);
+    saveFilters(baseConnection.base, filters);
   }, [connection.base, filters]);
   const hasFilters = (Object.keys(defaultFilters) as (keyof Filters)[]).some(
     (key) => filters[key] !== defaultFilters[key],
@@ -895,7 +875,7 @@ function Dashboard({
     [guide, setGuide] = useState(false),
     [menu, setMenu] = useState(false),
     [refresh, setRefresh] = useState(0);
-  useEffect(() => { if (!baseConnection.sourceId || baseConnection.base !== globalThis.location.origin) return; void analyticsRequest<{data: ConsoleSource[]}>(baseConnection, "/analytics/v1/sources").then(body => setSourceList(body.data || [])).catch(() => setSourceList([])); }, [baseConnection]);
+
   const [auto, setAuto] = useState(false),
     [theme, setTheme] = useState(() => {
       try {
@@ -914,6 +894,7 @@ function Dashboard({
   }, [theme]);
   const deferredSearch = useDeferredValue(search);
   const keys = useQuery({
+    enabled: !baseConnection.account || !!sourceQuery.data,
     queryKey: ["keys", connection.session],
     queryFn: ({ signal }) => readKeys(connection, signal),
   });
@@ -934,7 +915,7 @@ function Dashboard({
     queryKey: ["catalog", connection.session, keyId, endpoint, stream],
     queryFn: ({ signal }) =>
       request<Catalog>(connection, "/v1/model-channels?" + params, signal),
-    enabled: keysLoaded && !keyRemoved,
+    enabled: keysLoaded && !keyRemoved && (!baseConnection.account || sourceList.length>0),
   });
   const prices = useQuery({
     queryKey: ["prices", connection.session],
@@ -1013,7 +994,7 @@ function Dashboard({
     [rows],
   );
   const providers = useMemo(
-    () => [...new Set(rows.map((row) => row.provider))],
+    () => [...new Set(rows.map(providerId))],
     [rows],
   );
   const actualRange = useMemo(() => actualCostRange(window), [window]);
@@ -1032,9 +1013,9 @@ function Dashboard({
         limit(
           () =>
             request<Balance>(
-              connection,
+              {...connection,sourceId:JSON.parse(provider)[0]||connection.sourceId},
               "/v1/channel-balances?" + new URLSearchParams({
-                provider,
+                provider:JSON.parse(provider)[1],
                 ...(model ? { model } : {}),
                 ...(actualRange.startDate ? { start_date: actualRange.startDate } : {}),
                 ...(actualRange.endDate ? { end_date: actualRange.endDate } : {}),
@@ -1065,7 +1046,7 @@ function Dashboard({
         `${row.provider} ${row.model} ${row.upstream_model}`
           .toLowerCase()
           .includes(deferredSearch.toLowerCase())) &&
-      (!balanceFilter || balanceIsLow(balanceMap.get(row.provider)?.data)) &&
+      (!balanceFilter || balanceIsLow(balanceMap.get(providerId(row))?.data)) &&
       (!statusFilter ||
         (statusFilter === "eligible" ? row.eligible : !row.eligible)),
   );
@@ -1081,7 +1062,7 @@ function Dashboard({
             : row.stats?.request_to_dispatch?.p50_ms;
       return (values(a) ?? Infinity) - (values(b) ?? Infinity);
     });
-  const balanceProviders = [...new Set(filtered.map((row) => row.provider))];
+  const balanceProviders = [...new Set(filtered.map(providerId))];
   const total = view === "channels" ? filtered.length : balanceProviders.length;
   const pageCount = Math.max(1, Math.ceil(total / 25)),
     currentPage = Math.min(page, pageCount - 1);
@@ -1137,6 +1118,7 @@ function Dashboard({
           余额管理
           {lowCount > 0 && <span className="nav-count">{lowCount}</span>}
         </button>
+        <button className={view === "sources" ? "active" : ""} onClick={()=>selectView("sources")}><Server size={18}/>来源设置</button>
       </nav>
       <div className="sidebar-insight">
         <div className="insight-icon">
@@ -1222,10 +1204,10 @@ function Dashboard({
             </button>
             <span>工作空间</span>
             <ChevronRight size={13} />
-            <strong>{view === "channels" ? "渠道观测" : view === "balances" ? "余额管理" : view === "overview" ? "总览" : "价格设置"}</strong>
+            <strong>{view === "channels" ? "渠道观测" : view === "balances" ? "余额管理" : view === "overview" ? "总览" : view === "sources" ? "来源设置" : "价格设置"}</strong>
           </div>
           <div className="topbar-actions">
-            {sourceList.length > 0 && <label className="source-switcher"><Server size={14} /><select aria-label="uni-api 来源" value={selectedSourceId} onChange={e => { setSelectedSourceId(e.target.value); setFilter("keyId", ""); }}><option value="">全部来源</option>{sourceList.map(source => <option value={source.id} key={source.id}>{source.name}</option>)}</select></label>}
+            {sourceList.length > 0 && <label className="source-switcher"><Server size={14} /><select aria-label="uni-api 来源" value={selectedSourceId} onChange={e => { setFilter("sourceId", e.target.value); setFilter("keyId", ""); }}><option value="">全部来源</option>{sourceList.map(source => <option value={source.id} key={source.id}>{source.name}</option>)}</select></label>}
             <span className="topbar-service">
               <span className="tiny-dot" />
               {new URL(connection.base).hostname}
@@ -1239,7 +1221,7 @@ function Dashboard({
             </button>
             <button
               className="avatar"
-              onClick={changeConnection}
+              onClick={()=>setView("sources")}
               aria-label="管理服务连接"
             >
               U
@@ -1247,13 +1229,14 @@ function Dashboard({
           </div>
         </header>
         <main className="workspace">
+          {!!catalog.data?.unavailable_sources?.length && <div role="alert" className="error-banner">来源暂不可用：{catalog.data.unavailable_sources.join("、")}。当前结果不完整。</div>}
           <motion.div {...reveal} className="page-heading">
             <div>
               <span className="eyebrow">OBSERVE. UNDERSTAND. OPTIMIZE.</span>
               <h1>
                 {view === "channels"
                   ? "每条渠道，尽在视野。"
-                  : view === "balances" ? "余额有数，调用有底。" : view === "overview" ? "全局请求，一眼掌握。" : "模型价格，按你的口径计算。"}
+                  : view === "balances" ? "余额有数，调用有底。" : view === "overview" ? "全局请求，一眼掌握。" : view === "sources" ? "多个来源，一个工作台。" : "模型价格，按你的口径计算。"}
               </h1>
               <p>
                 {view === "channels"
@@ -1270,8 +1253,8 @@ function Dashboard({
               刷新数据
             </button>
           </motion.div>
-          {view === "prices" ? (
-            <><SourceForm onAdded={() => void analyticsRequest<{data: ConsoleSource[]}>(connection, "/analytics/v1/sources").then(body => setSourceList(body.data || []))} /><PriceSettings prices={prices.data?.data || []} loading={prices.isPending} error={prices.error?.message} connection={connection} onSaved={() => void prices.refetch()} /></>
+          {baseConnection.account && (view === "sources" || sourceList.length===0) ? (<SourceSettings sources={sourceList} onSaved={()=>{void sourceQuery.refetch();void queryClient.invalidateQueries({queryKey:["keys"]})}}/>) : view === "prices" ? (
+            <PriceSettings prices={prices.data?.data || []} loading={prices.isPending} error={prices.error?.message} connection={connection} onSaved={() => void prices.refetch()} />
           ) : view === "overview" ? (
             <Overview metrics={metrics.data} rows={rows} live={liveMap} />
           ) : <motion.section
@@ -1382,7 +1365,7 @@ function Dashboard({
                   )}
                   {keys.data?.data.map((key) => (
                     <option key={key.key_id} value={key.key_id}>
-                      Key {key.position} · {key.prefix}
+                      {key.source_name ? `${key.source_name} · ` : ""}Key {key.position} · {key.prefix}
                     </option>
                   ))}
                 </select>
@@ -1594,7 +1577,7 @@ function Dashboard({
                   </thead>
                   <tbody>
                     {pageRows.map((row) => {
-                      const balance = balanceMap.get(row.provider);
+                      const balance = balanceMap.get(providerId(row));
                       const success = row.stats?.success_rate;
                       return (
                         <tr key={rowId(row)}>
@@ -1610,7 +1593,7 @@ function Dashboard({
                                 {row.provider.slice(0, 1).toUpperCase()}
                               </span>
                               <span>
-                                <strong>{row.provider}</strong>
+                                <strong>{row.provider}</strong>{row.source_name&&<small className="source-label">{row.source_name}</small>}
                                 <small>{row.model}</small>
                               </span>
                             </button>
@@ -1694,6 +1677,8 @@ function Dashboard({
               <div className="balance-grid">
                 {pageProviders.map((provider) => {
                   const balance = balanceMap.get(provider);
+                  const providerName=JSON.parse(provider)[1];
+                  const sourceName=rows.find(row=>providerId(row)===provider)?.source_name;
                   return (
                     <article
                       className={`balance-card ${balanceIsLow(balance?.data) ? "low-balance" : ""}`}
@@ -1701,13 +1686,13 @@ function Dashboard({
                     >
                       <div className="balance-card-top">
                         <span className="provider-avatar">
-                          {provider[0].toUpperCase()}
+                          {providerName[0].toUpperCase()}
                         </span>
                         <span>
-                          <strong>{provider}</strong>
+                          <strong>{providerName}</strong><small>{sourceName}</small>
                           <small>
                             {
-                              rows.filter((row) => row.provider === provider)
+                              rows.filter((row) => providerId(row) === provider)
                                 .length
                             }{" "}
                             个模型
@@ -1787,7 +1772,7 @@ function Dashboard({
           <footer className="workspace-footer">
             <span>
               <ShieldCheck size={13} />
-              只读观测 · 当前标签页会话
+              多来源观测 · 安全会话
             </span>
             <button onClick={() => setGuide(true)}>
               了解统计口径 <ArrowUpRight size={13} />
@@ -1808,95 +1793,57 @@ function Dashboard({
           </span>
           <button onClick={() => disconnect()}>
             <LogOut size={14} />
-            断开连接
+            退出登录
           </button>
         </div>
       </div>
       <Detail
         row={detail}
         onClose={() => setDetailId(null)}
-        balance={detail ? balanceMap.get(detail.provider)?.data : undefined}
+        balance={detail ? balanceMap.get(providerId(detail))?.data : undefined}
       />
       <Guide open={guide} onClose={() => setGuide(false)} />
     </div>
   );
 }
 
-export default function App() {
-  const [connection, setConnection] = useState<Connection | null>(
-      loadConnection,
-    ),
-    [change, setChange] = useState(false),
-    [connectionError, setConnectionError] = useState("");
+function LegacyConsole() {
+  const [connection, setConnection] = useState<Connection | null>(loadConnection);
+  const [error, setError] = useState("");
   const client = useQueryClient();
-  function connected(next: Connection, keys: Keys) {
-    void client.cancelQueries();
+  const connected = (next: Connection, keys: Keys) => {
     client.clear();
     client.setQueryData(["keys", next.session], keys);
     saveConnection(next);
     setConnection(next);
-    setChange(false);
-    setConnectionError("");
-  }
-  const disconnect = useCallback(
-    (reason = "") => {
-      void client.cancelQueries();
-      client.clear();
-      setConnection(null);
-      clearConnection();
-      setChange(false);
-      setConnectionError(reason);
-      document.documentElement.dataset.theme = "light";
-    },
-    [client],
-  );
-  return (
-    <>
-      <AnimatePresence mode="wait">
-        {connection ? (
-          <motion.div
-            key={connection.session}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
-          >
-            <Dashboard
-              connection={connection}
-              disconnect={disconnect}
-              changeConnection={() => setChange(true)}
-            />
-          </motion.div>
-        ) : (
-          <Welcome
-            key="welcome"
-            onConnect={connected}
-            error={connectionError}
-          />
-        )}
-      </AnimatePresence>
-      <Dialog.Root open={change} onOpenChange={setChange}>
-        <Dialog.Portal>
-          <Dialog.Overlay className="dialog-overlay" />
-          <Dialog.Content className="connection-dialog">
-            <Dialog.Close
-              className="icon-button detail-close"
-              aria-label="关闭连接设置"
-            >
-              <X size={20} />
-            </Dialog.Close>
-            <Dialog.Title>切换服务连接</Dialog.Title>
-            <Dialog.Description>
-              验证成功后才会切换，原连接会话随之清除。
-            </Dialog.Description>
-            <ConnectionForm
-              compact
-              initialBase={connection?.base}
-              onConnect={connected}
-            />
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
-    </>
-  );
+    setError("");
+  };
+  const disconnect = useCallback((reason = "") => {
+    client.clear();
+    clearConnection();
+    setConnection(null);
+    setError(reason);
+    document.documentElement.dataset.theme = "light";
+  }, [client]);
+  if (!connection) return <ConnectionForm onConnect={connected} initialError={error} />;
+  return <Dashboard connection={connection} disconnect={disconnect} changeConnection={() => setConnection(null)} />;
+}
+
+export default function App() {
+  const client = useQueryClient();
+  const [legacyConnection, setLegacyConnection] = useState<Connection | null>(null);
+  const [accountHint] = useState(() => { try { return localStorage.getItem("uni-console-account") === "1"; } catch { return false; } });
+  const auth = useQuery({ queryKey: ["account"], queryFn: () => controlRequest<{ enabled: boolean; authenticated: boolean; username: string }>("/v1/auth/me"), retry: false, enabled: accountHint });
+  const disconnect = useCallback(async () => {
+    await controlRequest("/v1/auth/logout", { method: "POST", body: "{}" });
+    try { localStorage.removeItem("uni-console-account"); } catch { /* optional */ }
+    client.clear();
+    void auth.refetch();
+  }, [client, auth.refetch]);
+  const connection = useMemo<Connection>(() => ({ base: globalThis.location.origin, key: "", session: auth.data?.username || "account", account: true }), [auth.data?.username]);
+  if (legacyConnection) return <Dashboard connection={legacyConnection} disconnect={() => { clearConnection(); setLegacyConnection(null); }} changeConnection={() => setLegacyConnection(null)} />;
+  if (auth.isPending && accountHint) return <div className="auth-loading"><Spinner /> 正在恢复会话…</div>;
+  if (auth.isError) return <LegacyConsole />;
+  if (!auth.data?.authenticated) return <Welcome onConnect={() => { try { localStorage.setItem("uni-console-account", "1"); } catch { /* optional */ } client.clear(); void auth.refetch(); }} onLegacyConnect={(connection, keys) => { client.setQueryData(["keys", connection.session], keys); setLegacyConnection(connection); }} error={!auth.data?.enabled ? "" : ""} />;
+  return <Dashboard connection={connection} disconnect={() => void disconnect()} changeConnection={() => {}} />;
 }

@@ -1,5 +1,6 @@
 export const defaultFilters = {
   keyId: "",
+  sourceId: "",
   model: "",
   window: "15m",
   balanceFilter: "",
@@ -25,6 +26,7 @@ function validate(value: unknown): Filters {
   // Only persist the filter key's opaque ID, never the connection credential.
   return {
     keyId: field("keyId"),
+    sourceId: field("sourceId"),
     model: field("model"),
     window: field("window", ["5m", "15m", "1h", "24h", "7d", "30d", "today", "week", "month", "year", "all"]),
     balanceFilter: field("balanceFilter", ["", "low"]),

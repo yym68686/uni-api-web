@@ -28,14 +28,15 @@ type checkpointClient interface {
 	HeadObject(context.Context, *s3.HeadObjectInput, ...func(*s3.Options)) (*s3.HeadObjectOutput, error)
 }
 type checkpointStore struct {
-	client              checkpointClient
-	bucket, key, source string
+	client                  checkpointClient
+	bucket, key, source     string
+	legacyKey, legacySource string
 }
 
 func newCheckpointStore(client checkpointClient, cfg Config) *checkpointStore {
 	sum := sha256.Sum256([]byte(strings.Join([]string{cfg.S3Endpoint, cfg.S3Bucket, cfg.S3Prefix, cfg.Timezone}, "\x00")))
 	id := hex.EncodeToString(sum[:])
-	return &checkpointStore{client: client, bucket: cfg.StateBucket, key: strings.Trim(cfg.StatePrefix, "/") + "/cache-" + id + ".tar.gz", source: id}
+	return &checkpointStore{client: client, bucket: cfg.StateBucket, key: strings.Trim(cfg.StatePrefix, "/") + "/cache-v2-" + id + ".tar.gz", source: "v2-" + id, legacyKey: strings.Trim(cfg.StatePrefix, "/") + "/cache-" + id + ".tar.gz", legacySource: id}
 }
 
 func sqlPath(path string) string { return "'" + strings.ReplaceAll(path, "'", "''") + "'" }
@@ -230,7 +231,12 @@ func (s *checkpointStore) restore(ctx context.Context, e *Engine) (bool, error) 
 	if current > 0 {
 		return false, nil
 	}
+	expectedSource := s.source
 	out, err := s.client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(s.key)})
+	if err != nil && (storageErrorCode(err) == "NoSuchKey" || storageErrorCode(err) == "NotFound") && s.legacyKey != "" {
+		out, err = s.client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(s.legacyKey)})
+		expectedSource = s.legacySource
+	}
 	if err != nil {
 		if code := storageErrorCode(err); code == "NoSuchKey" || code == "NotFound" {
 			return false, nil
@@ -238,7 +244,7 @@ func (s *checkpointStore) restore(ctx context.Context, e *Engine) (bool, error) 
 		return false, err
 	}
 	defer out.Body.Close()
-	if out.Metadata["schema"] != "1" || out.Metadata["source"] != s.source || len(out.Metadata["sha256"]) != 64 || aws.ToInt64(out.ContentLength) > maxCheckpointBytes {
+	if out.Metadata["schema"] != "1" || out.Metadata["source"] != expectedSource || len(out.Metadata["sha256"]) != 64 || aws.ToInt64(out.ContentLength) > maxCheckpointBytes {
 		return false, errors.New("incompatible checkpoint")
 	}
 	expected, err := strconv.ParseInt(out.Metadata["objects"], 10, 64)
@@ -281,7 +287,7 @@ func (s *checkpointStore) restore(ctx context.Context, e *Engine) (bool, error) 
 		if _, err = tx.ExecContext(ctx, "DELETE FROM "+table); err != nil {
 			return false, err
 		}
-		if _, err = tx.ExecContext(ctx, "COPY "+table+" FROM "+sqlPath(filepath.Join(dir, table+".parquet"))+" (FORMAT PARQUET)"); err != nil {
+		if _, err = tx.ExecContext(ctx, "INSERT INTO "+table+" BY NAME SELECT * FROM read_parquet("+sqlPath(filepath.Join(dir, table+".parquet"))+")"); err != nil {
 			return false, err
 		}
 	}

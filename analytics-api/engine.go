@@ -40,13 +40,13 @@ func OpenEngine(path string, cfg Config) (*Engine, error) {
 	db.SetMaxIdleConns(4)
 	e := &Engine{DB: db, cfg: cfg, Location: location}
 	if _, err = db.Exec(`SET memory_limit='512MB'; SET threads=2;
- CREATE TABLE IF NOT EXISTS facts(event_id VARCHAR PRIMARY KEY,kind VARCHAR NOT NULL,instance_id VARCHAR,request_id VARCHAR,attempt_id VARCHAR,at_ms BIGINT,started_ms BIGINT,key_id VARCHAR,provider VARCHAR,model VARCHAR,upstream_model VARCHAR,endpoint VARCHAR,stream BOOLEAN,outcome VARCHAR,status INTEGER,duration_ms DOUBLE,dispatch_ms DOUBLE,first_output_ms DOUBLE,input_tokens BIGINT,output_tokens BIGINT,cache_read_tokens BIGINT,cache_write_tokens BIGINT,cache_write_1h_tokens BIGINT,actual_cost_usd DOUBLE);
+ CREATE TABLE IF NOT EXISTS facts(event_id VARCHAR PRIMARY KEY,kind VARCHAR NOT NULL,source_id VARCHAR DEFAULT 'primary',instance_id VARCHAR,request_id VARCHAR,attempt_id VARCHAR,at_ms BIGINT,started_ms BIGINT,key_id VARCHAR,provider VARCHAR,model VARCHAR,upstream_model VARCHAR,endpoint VARCHAR,stream BOOLEAN,outcome VARCHAR,status INTEGER,duration_ms DOUBLE,dispatch_ms DOUBLE,first_output_ms DOUBLE,input_tokens BIGINT,output_tokens BIGINT,cache_read_tokens BIGINT,cache_write_tokens BIGINT,cache_write_1h_tokens BIGINT,actual_cost_usd DOUBLE);
  CREATE TABLE IF NOT EXISTS imported_objects(object_key VARCHAR PRIMARY KEY,etag VARCHAR,imported_at TIMESTAMP DEFAULT current_timestamp,events BIGINT);
  CREATE TABLE IF NOT EXISTS prices(model VARCHAR PRIMARY KEY,input DOUBLE,output DOUBLE,cache_read DOUBLE,cache_write DOUBLE,cache_write_1h DOUBLE,source VARCHAR,verified BOOLEAN,effective_at TIMESTAMP);
  CREATE TABLE IF NOT EXISTS price_history(model VARCHAR,document VARCHAR,updated_at TIMESTAMP DEFAULT current_timestamp);
  CREATE TABLE IF NOT EXISTS meta(name VARCHAR PRIMARY KEY,value VARCHAR);
- CREATE TABLE IF NOT EXISTS rollups(period_ms BIGINT,level VARCHAR,kind VARCHAR,key_id VARCHAR,provider VARCHAR,model VARCHAR,upstream_model VARCHAR,endpoint VARCHAR,stream BOOLEAN,outcome VARCHAR,n BIGINT,input_tokens HUGEINT,output_tokens HUGEINT,cache_read_tokens HUGEINT,cache_write_tokens HUGEINT,cache_write_1h_tokens HUGEINT,usage_samples BIGINT,cache_samples BIGINT,actual_cost_usd DOUBLE,actual_cost_samples BIGINT,first_bins BIGINT[],dispatch_bins BIGINT[],first_count BIGINT,dispatch_count BIGINT,first_sum DOUBLE,dispatch_sum DOUBLE,last_ms BIGINT,last_first DOUBLE,last_dispatch DOUBLE);
- CREATE INDEX IF NOT EXISTS facts_at ON facts(at_ms);`); err != nil {
+ CREATE TABLE IF NOT EXISTS rollups(period_ms BIGINT,level VARCHAR,kind VARCHAR,source_id VARCHAR DEFAULT 'primary',key_id VARCHAR,provider VARCHAR,model VARCHAR,upstream_model VARCHAR,endpoint VARCHAR,stream BOOLEAN,outcome VARCHAR,n BIGINT,input_tokens HUGEINT,output_tokens HUGEINT,cache_read_tokens HUGEINT,cache_write_tokens HUGEINT,cache_write_1h_tokens HUGEINT,usage_samples BIGINT,cache_samples BIGINT,actual_cost_usd DOUBLE,actual_cost_samples BIGINT,first_bins BIGINT[],dispatch_bins BIGINT[],first_count BIGINT,dispatch_count BIGINT,first_sum DOUBLE,dispatch_sum DOUBLE,last_ms BIGINT,last_first DOUBLE,last_dispatch DOUBLE);
+ ALTER TABLE facts ADD COLUMN IF NOT EXISTS source_id VARCHAR DEFAULT 'primary'; ALTER TABLE rollups ADD COLUMN IF NOT EXISTS source_id VARCHAR DEFAULT 'primary'; CREATE INDEX IF NOT EXISTS facts_at ON facts(at_ms);`); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -128,6 +128,12 @@ func (e *Engine) ImportBatch(ctx context.Context, objects []FactObject) error {
 			continue
 		}
 		for _, f := range obj.Facts {
+			if f.SourceID == "" {
+				f.SourceID = e.cfg.SourceID
+				if f.SourceID == "" {
+					f.SourceID = "primary"
+				}
+			}
 			if err := validFact(f); err != nil {
 				return err
 			}
@@ -149,6 +155,12 @@ func (e *Engine) ImportBatch(ctx context.Context, objects []FactObject) error {
 	var factCount int
 	for _, obj := range pending {
 		for _, fact := range obj.Facts {
+			if fact.SourceID == "" {
+				fact.SourceID = e.cfg.SourceID
+				if fact.SourceID == "" {
+					fact.SourceID = "primary"
+				}
+			}
 			if err = encoder.Encode(fact); err != nil {
 				file.Close()
 				return err
@@ -165,7 +177,7 @@ func (e *Engine) ImportBatch(ctx context.Context, objects []FactObject) error {
 	}
 	defer tx.Rollback()
 	if factCount > 0 {
-		_, err = tx.ExecContext(ctx, `INSERT INTO facts SELECT event_id,kind,instance_id,request_id,attempt_id,at_ms,started_ms,key_id,provider,model,upstream_model,endpoint,stream,outcome,status,duration_ms,dispatch_ms,first_output_ms,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,cache_write_1h_tokens,actual_cost_usd FROM read_json(?,format='newline_delimited',columns={schema:'INTEGER',event_id:'VARCHAR',kind:'VARCHAR',instance_id:'VARCHAR',request_id:'VARCHAR',attempt_id:'VARCHAR',at_ms:'BIGINT',started_ms:'BIGINT',key_id:'VARCHAR',provider:'VARCHAR',model:'VARCHAR',upstream_model:'VARCHAR',endpoint:'VARCHAR',stream:'BOOLEAN',outcome:'VARCHAR',status:'INTEGER',duration_ms:'DOUBLE',dispatch_ms:'DOUBLE',first_output_ms:'DOUBLE',input_tokens:'BIGINT',output_tokens:'BIGINT',cache_read_tokens:'BIGINT',cache_write_tokens:'BIGINT',cache_write_1h_tokens:'BIGINT',actual_cost_usd:'DOUBLE'}) ON CONFLICT DO NOTHING`, file.Name())
+		_, err = tx.ExecContext(ctx, `INSERT INTO facts BY NAME SELECT event_id,kind,source_id,instance_id,request_id,attempt_id,at_ms,started_ms,key_id,provider,model,upstream_model,endpoint,stream,outcome,status,duration_ms,dispatch_ms,first_output_ms,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,cache_write_1h_tokens,actual_cost_usd FROM read_json(?,format='newline_delimited',columns={schema:'INTEGER',event_id:'VARCHAR',kind:'VARCHAR',source_id:'VARCHAR',instance_id:'VARCHAR',request_id:'VARCHAR',attempt_id:'VARCHAR',at_ms:'BIGINT',started_ms:'BIGINT',key_id:'VARCHAR',provider:'VARCHAR',model:'VARCHAR',upstream_model:'VARCHAR',endpoint:'VARCHAR',stream:'BOOLEAN',outcome:'VARCHAR',status:'INTEGER',duration_ms:'DOUBLE',dispatch_ms:'DOUBLE',first_output_ms:'DOUBLE',input_tokens:'BIGINT',output_tokens:'BIGINT',cache_read_tokens:'BIGINT',cache_write_tokens:'BIGINT',cache_write_1h_tokens:'BIGINT',actual_cost_usd:'DOUBLE'}) ON CONFLICT DO NOTHING`, file.Name())
 		if err != nil {
 			return err
 		}
@@ -243,10 +255,10 @@ func (e *Engine) rebuildRollup(ctx context.Context, tx *sql.Tx, level string, st
 	// Only partitions receiving new data are rebuilt. Daily rows combine minute
 	// aggregates, so long windows never scan request-level records.
 	if level == "day" {
-		_, err := tx.ExecContext(ctx, `INSERT INTO rollups SELECT ?, 'day',kind,key_id,provider,model,upstream_model,endpoint,stream,outcome,sum(n),sum(input_tokens),sum(output_tokens),sum(cache_read_tokens),sum(cache_write_tokens),sum(cache_write_1h_tokens),sum(usage_samples),sum(cache_samples),sum(actual_cost_usd),sum(actual_cost_samples),`+mergeHistogramSQL("first_bins")+`,`+mergeHistogramSQL("dispatch_bins")+`,sum(first_count),sum(dispatch_count),sum(first_sum),sum(dispatch_sum),max(last_ms),arg_max(last_first,last_ms),arg_max(last_dispatch,last_ms) FROM rollups WHERE level='minute' AND period_ms>=? AND period_ms<? GROUP BY kind,key_id,provider,model,upstream_model,endpoint,stream,outcome`, start, start, end)
+		_, err := tx.ExecContext(ctx, `INSERT INTO rollups(period_ms,level,kind,source_id,key_id,provider,model,upstream_model,endpoint,stream,outcome,n,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,cache_write_1h_tokens,usage_samples,cache_samples,actual_cost_usd,actual_cost_samples,first_bins,dispatch_bins,first_count,dispatch_count,first_sum,dispatch_sum,last_ms,last_first,last_dispatch) SELECT ?, 'day',kind,source_id,key_id,provider,model,upstream_model,endpoint,stream,outcome,sum(n),sum(input_tokens),sum(output_tokens),sum(cache_read_tokens),sum(cache_write_tokens),sum(cache_write_1h_tokens),sum(usage_samples),sum(cache_samples),sum(actual_cost_usd),sum(actual_cost_samples),`+mergeHistogramSQL("first_bins")+`,`+mergeHistogramSQL("dispatch_bins")+`,sum(first_count),sum(dispatch_count),sum(first_sum),sum(dispatch_sum),max(last_ms),arg_max(last_first,last_ms),arg_max(last_dispatch,last_ms) FROM rollups WHERE level='minute' AND period_ms>=? AND period_ms<? GROUP BY kind,source_id,key_id,provider,model,upstream_model,endpoint,stream,outcome`, start, start, end)
 		return err
 	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO rollups SELECT ?, 'minute',kind,key_id,provider,model,upstream_model,endpoint,stream,outcome,count(*),sum(coalesce(input_tokens,0)),sum(coalesce(output_tokens,0)),sum(coalesce(cache_read_tokens,0)),sum(coalesce(cache_write_tokens,0)),sum(coalesce(cache_write_1h_tokens,0)),count(input_tokens),count(cache_read_tokens),sum(coalesce(actual_cost_usd,0)),count(actual_cost_usd),`+histogramSQL("first_output_ms")+`,`+histogramSQL("dispatch_ms")+`,count(first_output_ms),count(dispatch_ms),sum(coalesce(first_output_ms,0)),sum(coalesce(dispatch_ms,0)),max(at_ms),arg_max(first_output_ms,at_ms),arg_max(dispatch_ms,at_ms) FROM facts WHERE at_ms>=? AND at_ms<? GROUP BY kind,key_id,provider,model,upstream_model,endpoint,stream,outcome`, start, start, end)
+	_, err := tx.ExecContext(ctx, `INSERT INTO rollups(period_ms,level,kind,source_id,key_id,provider,model,upstream_model,endpoint,stream,outcome,n,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,cache_write_1h_tokens,usage_samples,cache_samples,actual_cost_usd,actual_cost_samples,first_bins,dispatch_bins,first_count,dispatch_count,first_sum,dispatch_sum,last_ms,last_first,last_dispatch) SELECT ?, 'minute',kind,source_id,key_id,provider,model,upstream_model,endpoint,stream,outcome,count(*),sum(coalesce(input_tokens,0)),sum(coalesce(output_tokens,0)),sum(coalesce(cache_read_tokens,0)),sum(coalesce(cache_write_tokens,0)),sum(coalesce(cache_write_1h_tokens,0)),count(input_tokens),count(cache_read_tokens),sum(coalesce(actual_cost_usd,0)),count(actual_cost_usd),`+histogramSQL("first_output_ms")+`,`+histogramSQL("dispatch_ms")+`,count(first_output_ms),count(dispatch_ms),sum(coalesce(first_output_ms,0)),sum(coalesce(dispatch_ms,0)),max(at_ms),arg_max(first_output_ms,at_ms),arg_max(dispatch_ms,at_ms) FROM facts WHERE at_ms>=? AND at_ms<? GROUP BY kind,source_id,key_id,provider,model,upstream_model,endpoint,stream,outcome`, start, start, end)
 	return err
 }
 func mergeHistogramSQL(column string) string {

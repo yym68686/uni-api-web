@@ -25,6 +25,9 @@ type Service struct {
 	remaining        atomic.Int64
 	importFailures   atomic.Uint64
 	importError      atomic.Value
+	loginMu          sync.Mutex
+	loginWindow      time.Time
+	loginAttempts    int
 	cacheMu          sync.Mutex
 	cache            map[string]cachedAnalytics
 	state            *stateStore
@@ -35,7 +38,7 @@ type Service struct {
 	lastCheckpoint   atomic.Int64
 	checkpointError  atomic.Value
 	factClient       *s3.Client
-	control          controlPlane
+	control          *controlStore
 }
 
 type cachedAnalytics struct {
@@ -85,7 +88,12 @@ func (s *Service) analytics(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		name = "15m"
 	}
-	key := q.Encode()
+	allowed, sourceErr := s.analyticsSources(r)
+	if sourceErr != nil {
+		http.Error(w, "source unavailable", 404)
+		return
+	}
+	key := q.Encode() + "|" + strings.Join(allowed, ",")
 	rev := s.engine.Revision.Load()
 	now := time.Now()
 	s.cacheMu.Lock()
@@ -96,7 +104,7 @@ func (s *Service) analytics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.cacheMu.Unlock()
-	result, err := s.engine.Query(r.Context(), QueryFilter{Range: name, Model: q.Get("model"), Provider: q.Get("provider"), Endpoint: q.Get("endpoint"), Stream: q.Get("stream"), KeyID: q.Get("key_id"), Timeseries: q.Get("timeseries") == "true"})
+	result, err := s.engine.Query(r.Context(), QueryFilter{SourceIDs: allowed, SourceID: q.Get("source_id"), Range: name, Model: q.Get("model"), Provider: q.Get("provider"), Endpoint: q.Get("endpoint"), Stream: q.Get("stream"), KeyID: q.Get("key_id"), Timeseries: q.Get("timeseries") == "true"})
 	if err != nil {
 		writeJSON(w, 503, map[string]string{"error": "analytics unavailable"})
 		return

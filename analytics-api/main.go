@@ -22,7 +22,9 @@ func main() {
 	cfg := Config{Address: env("LISTEN_ADDR", ":8080"), DataDir: env("DATA_DIR", "./data"), Upstream: strings.TrimRight(env("UNI_API_URL", ""), "/"), SourceID: env("SOURCE_ID", "primary"), Timezone: env("ANALYTICS_TIMEZONE", "Asia/Shanghai"), S3Endpoint: env("S3_ENDPOINT", ""), S3Bucket: env("S3_BUCKET", ""), S3Prefix: env("S3_PREFIX", "uni-api-facts/v1/"), Poll: 5 * time.Second}
 	cfg.StateBucket, cfg.StateEndpoint, cfg.StatePrefix = env("STATE_S3_BUCKET", ""), env("STATE_S3_ENDPOINT", cfg.S3Endpoint), env("STATE_S3_PREFIX", "analytics/v1")
 	cfg.StateAccessKey, cfg.StateSecretKey = env("STATE_AWS_ACCESS_KEY_ID", ""), env("STATE_AWS_SECRET_ACCESS_KEY", "")
-	cfg.ControlDatabaseURL, cfg.ControlStatePath, cfg.ControlMasterKey = env("CONTROL_DATABASE_URL", env("DATABASE_URL", "")), env("CONTROL_STATE_PATH", filepath.Join(cfg.DataDir, "control.json")), env("CONTROL_MASTER_KEY", "")
+	cfg.ControlDatabaseURL, cfg.ControlMasterKey = env("CONTROL_DATABASE_URL", env("DATABASE_URL", "")), env("CONTROL_MASTER_KEY", "")
+	cfg.BootstrapSources = env("BOOTSTRAP_SOURCES", "")
+	cfg.InsecureCookie = env("INSECURE_COOKIE", "false") == "true"
 	cfg.AdminUsername, cfg.AdminPassword = env("ADMIN_USERNAME", ""), env("ADMIN_PASSWORD", "")
 	cfg.RequireInitialImport = env("REQUIRE_INITIAL_IMPORT", "false") == "true"
 	if cfg.RequireInitialImport && (cfg.StateBucket == "" || cfg.StateEndpoint == "" || cfg.S3Bucket == "" || cfg.S3Endpoint == "") {
@@ -49,6 +51,9 @@ func main() {
 		if cfg.ControlDatabaseURL == "" {
 			log.Fatal("CONTROL_DATABASE_URL is required when CONTROL_MASTER_KEY is set")
 		}
+		if cfg.ControlDatabaseURL == "" {
+			log.Fatal("CONTROL_DATABASE_URL is required when account mode is enabled")
+		}
 		service.control, err = newControlStore(cfg.ControlDatabaseURL, cfg.ControlMasterKey)
 		if err != nil {
 			log.Fatal("initialize control store")
@@ -57,6 +62,9 @@ func main() {
 			log.Fatal("initialize administrator")
 		}
 		defer service.control.Close()
+		if err = service.bootstrapSources(ctx); err != nil {
+			log.Fatal("initialize source configuration: ", err)
+		}
 	}
 	if cfg.S3Endpoint != "" && cfg.S3Bucket != "" {
 		service.factClient, err = newS3Client(ctx, cfg)

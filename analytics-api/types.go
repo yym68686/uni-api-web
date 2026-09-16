@@ -6,6 +6,7 @@ import "time"
 // Millisecond timestamps are UTC. Token input includes cache read/write tokens.
 type Fact struct {
 	Schema             int      `json:"schema"`
+	SourceID           string   `json:"source_id"`
 	EventID            string   `json:"event_id"`
 	Kind               string   `json:"kind"`
 	InstanceID         string   `json:"instance_id"`
@@ -63,7 +64,8 @@ type Price struct {
 type Config struct {
 	Address, DataDir, Upstream, SourceID, Timezone, S3Endpoint, S3Bucket, S3Prefix       string
 	StateEndpoint, StateBucket, StatePrefix, StateAccessKey, StateSecretKey              string
-	ControlDatabaseURL, ControlStatePath, ControlMasterKey, AdminUsername, AdminPassword string
+	ControlDatabaseURL, ControlMasterKey, AdminUsername, AdminPassword, BootstrapSources string
+	InsecureCookie                                                                       bool
 	RequireInitialImport                                                                 bool
 	Poll                                                                                 time.Duration
 }

@@ -15,6 +15,7 @@ export const time = (value?: number | null) =>
     : "暂无";
 export const rowId = (row: Channel) =>
   JSON.stringify([
+    row.source_id || "",
     row.provider,
     row.model,
     row.upstream_model,
@@ -98,3 +99,5 @@ export function summarize(rows: Channel[]) {
     successRate: completed ? success / completed : null,
   };
 }
+
+export const providerId = (row: Pick<Channel,"source_id"|"provider">) => JSON.stringify([row.source_id || "",row.provider]);

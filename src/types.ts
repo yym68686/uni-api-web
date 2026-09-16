@@ -3,8 +3,11 @@ export interface Connection {
   key: string;
   session: string;
   sourceId?: string;
+  account?: boolean;
 }
 export interface KeyInfo {
+ source_id?: string;
+ source_name?: string;
   key_id: string;
   prefix: string;
   position: number;
@@ -38,6 +41,8 @@ export interface Stats {
   last_success_at: number | null;
 }
 export interface Channel {
+ source_id?: string;
+ source_name?: string;
   provider: string;
   model: string;
   upstream_model: string;
@@ -50,6 +55,7 @@ export interface Channel {
   points?: (Stats & { timestamp: number; covered: boolean })[];
 }
 export interface Catalog {
+ unavailable_sources?: string[];
   data: Channel[];
   snapshot_revision: string;
 }

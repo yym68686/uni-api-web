@@ -37,17 +37,17 @@ export async function request<T>(
 ): Promise<T> {
   const timeout = AbortSignal.timeout(20_000);
   let response: Response;
-  const target = connection.base === (typeof window !== "undefined" ? window.location.origin : "")
+  const target = connection.account
     ? `/analytics/v1/sources/${encodeURIComponent(connection.sourceId || "all")}/proxy${path}`
     : connection.base + path;
   try {
     response = await fetch(target, {
       headers: {
-        Authorization: `Bearer ${connection.key}`,
+        ...(connection.account?{}:{Authorization: `Bearer ${connection.key}`}),
         Accept: "application/json",
       },
       cache: "no-store",
-      credentials: connection.base === (typeof window !== "undefined" ? window.location.origin : "") ? "include" : "omit",
+      credentials: connection.account ? "include" : "omit",
       redirect: "error",
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     });
@@ -61,7 +61,7 @@ export async function request<T>(
   }
   if (response.status === 401 || response.status === 403)
     throw new ApiError(
-      "密钥没有平台查看权限，请使用配置中的第一个密钥或管理员密钥。",
+      connection.account ? "登录已过期，请重新登录。" : "密钥没有平台查看权限，请使用配置中的第一个密钥或管理员密钥。",
       response.status,
     );
   if (response.status === 404)
@@ -142,4 +142,10 @@ export async function analyticsRequest<T>(connection: Connection,path: string,si
   if(response.status===401||response.status===403) throw new ApiError("分析服务未接受平台密钥，请检查控制台后端配置。",response.status);
   if(!response.ok) throw new ApiError(`分析服务暂时无法响应（HTTP ${response.status}）。`,response.status);
   return await response.json() as T;
+}
+
+export async function controlRequest<T>(path:string,init:RequestInit={}):Promise<T>{
+ const response=await fetch(globalThis.location.origin+"/analytics"+path,{...init,headers:{Accept:"application/json","Content-Type":"application/json",...init.headers},credentials:"same-origin",cache:"no-store",signal:init.signal||AbortSignal.timeout(25000)});
+ if(!response.ok){const message=await response.text();throw new ApiError(message||`HTTP ${response.status}`,response.status)}
+ return await response.json() as T;
 }

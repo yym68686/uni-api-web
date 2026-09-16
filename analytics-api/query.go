@@ -11,8 +11,9 @@ import (
 )
 
 type QueryFilter struct {
-	Range, Model, Provider, Endpoint, Stream, KeyID string
-	Timeseries                                      bool
+	SourceIDs                                                 []string
+	Range, Model, Provider, Endpoint, Stream, KeyID, SourceID string
+	Timeseries                                                bool
 }
 type Summary struct {
 	Attempts                  int64    `json:"attempts"`
@@ -135,6 +136,7 @@ func (s Summary) JSON() map[string]any {
 }
 
 type AnalyticChannel struct {
+	SourceID      string           `json:"source_id,omitempty"`
 	Provider      string           `json:"provider"`
 	Model         string           `json:"model"`
 	UpstreamModel string           `json:"upstream_model"`
@@ -192,7 +194,8 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 		where = append(where, "stream=?")
 		args = append(args, f.Stream == "true")
 	}
-	q := `SELECT kind,provider,model,upstream_model,endpoint,stream,outcome,sum(n)::BIGINT,sum(input_tokens)::BIGINT,sum(output_tokens)::BIGINT,sum(cache_read_tokens)::BIGINT,sum(cache_write_tokens)::BIGINT,sum(cache_write_1h_tokens)::BIGINT,sum(usage_samples)::BIGINT,sum(cache_samples)::BIGINT,sum(actual_cost_usd),sum(actual_cost_samples)::BIGINT,to_json(` + mergeHistogramSQL("first_bins") + `),to_json(` + mergeHistogramSQL("dispatch_bins") + `),sum(first_count)::BIGINT,sum(dispatch_count)::BIGINT,sum(first_sum),sum(dispatch_sum),max(last_ms),arg_max(last_first,last_ms),arg_max(last_dispatch,last_ms) FROM rollups WHERE ` + strings.Join(where, " AND ") + ` GROUP BY kind,provider,model,upstream_model,endpoint,stream,outcome`
+	where, args = sourceWhere(where, args, f)
+	q := `SELECT source_id,kind,provider,model,upstream_model,endpoint,stream,outcome,sum(n)::BIGINT,sum(input_tokens)::BIGINT,sum(output_tokens)::BIGINT,sum(cache_read_tokens)::BIGINT,sum(cache_write_tokens)::BIGINT,sum(cache_write_1h_tokens)::BIGINT,sum(usage_samples)::BIGINT,sum(cache_samples)::BIGINT,sum(actual_cost_usd),sum(actual_cost_samples)::BIGINT,to_json(` + mergeHistogramSQL("first_bins") + `),to_json(` + mergeHistogramSQL("dispatch_bins") + `),sum(first_count)::BIGINT,sum(dispatch_count)::BIGINT,sum(first_sum),sum(dispatch_sum),max(last_ms),arg_max(last_first,last_ms),arg_max(last_dispatch,last_ms) FROM rollups WHERE ` + strings.Join(where, " AND ") + ` GROUP BY source_id,kind,provider,model,upstream_model,endpoint,stream,outcome`
 	prices, err := e.Prices(ctx)
 	if err != nil {
 		return QueryResult{}, err
@@ -207,16 +210,16 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 		priceMap[p.Model] = p
 	}
 	channels := map[string]*Summary{}
-	identities := map[string][3]string{}
+	identities := map[string][4]string{}
 	models := map[string]*Summary{}
 	var total Summary
 	for rows.Next() {
-		var kind, provider, model, upstream, endpoint, outcome string
+		var sourceID, kind, provider, model, upstream, endpoint, outcome string
 		var stream bool
 		var firstValue, dispatchValue any
 		var n int64
 		var s Summary
-		if err = rows.Scan(&kind, &provider, &model, &upstream, &endpoint, &stream, &outcome, &n, &s.Input, &s.Output, &s.CacheRead, &s.CacheWrite, &s.CacheWrite1h, &s.UsageSamples, &s.CacheSamples, &s.ActualUSD, &s.ActualSamples, &firstValue, &dispatchValue, &s.FirstCount, &s.DispatchCount, &s.FirstSum, &s.DispatchSum, &s.LastMS, &s.LastFirst, &s.LastDispatch); err != nil {
+		if err = rows.Scan(&sourceID, &kind, &provider, &model, &upstream, &endpoint, &stream, &outcome, &n, &s.Input, &s.Output, &s.CacheRead, &s.CacheWrite, &s.CacheWrite1h, &s.UsageSamples, &s.CacheSamples, &s.ActualUSD, &s.ActualSamples, &firstValue, &dispatchValue, &s.FirstCount, &s.DispatchCount, &s.FirstSum, &s.DispatchSum, &s.LastMS, &s.LastFirst, &s.LastDispatch); err != nil {
 			return QueryResult{}, err
 		}
 		s.FirstBins = histogramValues(firstValue)
@@ -240,10 +243,10 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 			// A request fact is attributed to the winning channel. Keep it on the
 			// channel row so token, cache and cost fields remain actionable while
 			// attempts continue to count retries independently.
-			key := provider + "\x00" + model + "\x00" + upstream
+			key := sourceID + "\x00" + provider + "\x00" + model + "\x00" + upstream
 			if channels[key] == nil {
 				channels[key] = &Summary{}
-				identities[key] = [3]string{provider, model, upstream}
+				identities[key] = [4]string{sourceID, provider, model, upstream}
 			}
 			channelSummary := Summary{Requests: n, Input: s.Input, Output: s.Output, CacheRead: s.CacheRead, CacheWrite: s.CacheWrite, CacheWrite1h: s.CacheWrite1h, UsageSamples: s.UsageSamples, CacheSamples: s.CacheSamples, ActualUSD: s.ActualUSD, ActualSamples: s.ActualSamples, KnownEstimatedUSD: s.KnownEstimatedUSD, PricedSamples: s.PricedSamples}
 			channels[key].merge(channelSummary)
@@ -254,10 +257,10 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 			models[model].merge(s)
 			continue
 		}
-		key := provider + "\x00" + model + "\x00" + upstream
+		key := sourceID + "\x00" + provider + "\x00" + model + "\x00" + upstream
 		if channels[key] == nil {
 			channels[key] = &Summary{}
-			identities[key] = [3]string{provider, model, upstream}
+			identities[key] = [4]string{sourceID, provider, model, upstream}
 		}
 		if kind == "attempt" {
 			switch outcome {
@@ -297,7 +300,7 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 		if endpoint == "" {
 			endpoint = "all"
 		}
-		out.Data = append(out.Data, AnalyticChannel{Provider: id[0], Model: id[1], UpstreamModel: id[2], Endpoint: endpoint, Stream: channelStream, Stats: channels[k].JSON()})
+		out.Data = append(out.Data, AnalyticChannel{SourceID: id[0], Provider: id[1], Model: id[2], UpstreamModel: id[3], Endpoint: endpoint, Stream: channelStream, Stats: channels[k].JSON()})
 		attempts.merge(*channels[k])
 	}
 	// Usage totals represent client requests; channel attempt totals separately
@@ -317,7 +320,8 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 		out.Models = append(out.Models, s)
 	}
 	var firstMS *int64
-	if err = e.DB.QueryRowContext(ctx, "SELECT min(at_ms) FROM facts").Scan(&firstMS); err != nil {
+	coverageWhere, coverageArgs := sourceWhere([]string{"true"}, nil, f)
+	if err = e.DB.QueryRowContext(ctx, "SELECT min(at_ms) FROM facts WHERE "+strings.Join(coverageWhere, " AND "), coverageArgs...).Scan(&firstMS); err != nil {
 		return QueryResult{}, fmt.Errorf("read coverage: %w", err)
 	}
 	if firstMS != nil {
@@ -357,6 +361,7 @@ func (e *Engine) attachTimeseries(ctx context.Context, result *QueryResult, f Qu
 		where = append(where, "stream=?")
 		args = append(args, f.Stream == "true")
 	}
+	where, args = sourceWhere(where, args, f)
 	rows, err := e.DB.QueryContext(ctx, `SELECT period_ms,provider,model,upstream_model,outcome,sum(n)::BIGINT FROM rollups WHERE `+strings.Join(where, " AND ")+` GROUP BY period_ms,provider,model,upstream_model,outcome ORDER BY period_ms`, args...)
 	if err != nil {
 		return err
@@ -440,4 +445,24 @@ func histogramValues(value any) []int64 {
 		_ = json.Unmarshal([]byte(values), &out)
 	}
 	return out
+}
+
+func sourceWhere(where []string, args []any, f QueryFilter) ([]string, []any) {
+	if f.SourceID != "" && f.SourceID != "all" {
+		where = append(where, "source_id=?")
+		args = append(args, f.SourceID)
+	}
+	if f.SourceIDs != nil {
+		if len(f.SourceIDs) == 0 {
+			where = append(where, "false")
+		} else {
+			marks := make([]string, len(f.SourceIDs))
+			for i, id := range f.SourceIDs {
+				marks[i] = "?"
+				args = append(args, id)
+			}
+			where = append(where, "source_id IN ("+strings.Join(marks, ",")+")")
+		}
+	}
+	return where, args
 }

@@ -82,7 +82,37 @@ func (a *authorizer) verify(ctx context.Context, header string) (json.RawMessage
 }
 func (s *Service) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
 		if r.URL.Path == "/healthz" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if s.control != nil {
+			if r.Method != "GET" && r.Method != "HEAD" {
+				if r.Header.Get("Sec-Fetch-Site") == "cross-site" {
+					http.Error(w, "cross-site request rejected", 403)
+					return
+				}
+				if origin := r.Header.Get("Origin"); origin != "" {
+					u, e := url.Parse(origin)
+					host := r.Host
+					if forwarded := r.Header.Get("X-Forwarded-Host"); forwarded != "" {
+						host = forwarded
+					}
+					if e != nil || u.Host != host {
+						http.Error(w, "cross-site request rejected", 403)
+						return
+					}
+				}
+			}
+			if r.URL.Path == "/v1/auth/me" || r.URL.Path == "/v1/auth/login" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if !s.controlSession(r) {
+				http.Error(w, "login required", 401)
+				return
+			}
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -90,9 +120,8 @@ func (s *Service) authenticate(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if s.controlSession(r) {
-			w.Header().Set("Cache-Control", "no-store")
-			next.ServeHTTP(w, r)
+		if strings.HasPrefix(r.URL.Path, "/v1/sources") {
+			http.Error(w, "account service unavailable", 503)
 			return
 		}
 		_, status, err := s.auth.verify(r.Context(), r.Header.Get("Authorization"))
@@ -100,7 +129,6 @@ func (s *Service) authenticate(next http.Handler) http.Handler {
 			writeJSON(w, status, map[string]string{"error": err.Error()})
 			return
 		}
-		w.Header().Set("Cache-Control", "no-store")
 		next.ServeHTTP(w, r)
 	})
 }

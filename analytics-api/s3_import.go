@@ -20,7 +20,7 @@ import (
 
 const maxObjectBytes = 32 << 20
 
-func (s *Service) importS3(ctx context.Context) error {
+func (s *Service) importSingleS3(ctx context.Context) error {
 	if s.cfg.S3Bucket == "" || s.cfg.S3Endpoint == "" {
 		return errors.New("storage_not_configured")
 	}
@@ -48,7 +48,7 @@ func (s *Service) importS3(ctx context.Context) error {
 			if !strings.HasSuffix(key, ".jsonl") {
 				continue
 			}
-			if etag, ok := known[key]; ok {
+			if etag, ok := known[sourceObjectKey(s.cfg.SourceID, key)]; ok {
 				if etag != aws.ToString(obj.ETag) {
 					return errors.New("immutable object changed")
 				}
@@ -107,7 +107,17 @@ func (s *Service) importS3(ctx context.Context) error {
 				defer response.Body.Close()
 				facts, e := decodeFacts(response.Body)
 				errs[i] = e
-				objects[i] = FactObject{Key: aws.ToString(obj.Key), ETag: aws.ToString(obj.ETag), Facts: facts}
+				sourceID := s.cfg.SourceID
+				if sourceID == "" {
+					sourceID = "primary"
+				}
+				for j := range facts {
+					facts[j].SourceID = sourceID
+					if sourceID != "primary" {
+						facts[j].EventID = sourceID + "::" + facts[j].EventID
+					}
+				}
+				objects[i] = FactObject{Key: sourceObjectKey(sourceID, aws.ToString(obj.Key)), ETag: aws.ToString(obj.ETag), Facts: facts}
 			}(i, obj)
 		}
 		wg.Wait()
@@ -228,4 +238,52 @@ func (s *Service) startImportLoop(ctx context.Context) {
 			s.maybeImport(ctx)
 		}
 	}
+}
+
+func sourceObjectKey(source, key string) string {
+	if source == "" || source == "primary" {
+		return key
+	}
+	return source + "::" + key
+}
+func (s *Service) importS3(ctx context.Context) error {
+	var failures []error
+	if s.cfg.S3Bucket != "" {
+		if e := s.importSingleS3(ctx); e != nil {
+			failures = append(failures, e)
+		}
+	}
+	remaining := s.remaining.Load()
+	if s.control != nil {
+		sources, e := s.control.listSources(ctx)
+		if e != nil {
+			return e
+		}
+		for _, v := range sources {
+			if v.ID == s.cfg.SourceID || !v.HasStorage {
+				continue
+			}
+			src, e := s.control.source(ctx, v.ID)
+			if e != nil {
+				failures = append(failures, e)
+				continue
+			}
+			cfg := s.cfg
+			cfg.SourceID = src.ID
+			cfg.S3Endpoint = src.Storage.Endpoint
+			cfg.S3Bucket = src.Storage.Bucket
+			cfg.S3Prefix = src.Storage.Prefix
+			client, e := newObjectClient(ctx, src.Storage.Endpoint, src.Storage.AccessKey, src.Storage.SecretKey, 20*time.Second)
+			child := &Service{engine: s.engine, cfg: cfg, factClient: client}
+			if e == nil {
+				e = child.importSingleS3(ctx)
+			}
+			remaining += child.remaining.Load()
+			if e != nil {
+				failures = append(failures, e)
+			}
+		}
+	}
+	s.remaining.Store(remaining)
+	return errors.Join(failures...)
 }
