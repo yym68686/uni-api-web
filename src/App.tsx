@@ -5,8 +5,6 @@ import {
   useMemo,
   useRef,
   useState,
-  lazy,
-  Suspense,
 } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -67,11 +65,7 @@ import {
   checkTargets,
   useChannelChecks,
 } from "./ChannelChecks";
-const ChannelControls = lazy(() =>
-  import("./ChannelControls").then((module) => ({
-    default: module.ChannelControls,
-  })),
-);
+import { useChannelControls, ChannelControlCell } from "./ChannelControls";
 import { SourceSettings } from "./SourceSettings";
 import type { ConsoleSource } from "./SourceSettings";
 import { defaultFilters, loadFilters, saveFilters } from "./preferences";
@@ -964,6 +958,7 @@ function Dashboard({
   } = filters;
   const [view, setView] = useState<View>("channels"),
     [page, setPage] = useState(0);
+  const channelView = view === "channels" || view === "controls";
   useEffect(() => {
     saveFilters(baseConnection.base, filters);
   }, [connection.base, filters]);
@@ -1059,7 +1054,7 @@ function Dashboard({
       keysLoaded &&
       !keyRemoved &&
       !!catalog.data &&
-      (view === "overview" || view === "channels"),
+      (view === "overview" || channelView),
     staleTime: 2_000,
     refetchInterval: auto ? 5_000 : false,
     refetchIntervalInBackground: false,
@@ -1083,8 +1078,7 @@ function Dashboard({
   );
   const queryClient = useQueryClient();
   useEffect(() => {
-    if (!keysLoaded || keyRemoved || !catalog.data || view !== "channels")
-      return;
+    if (!keysLoaded || keyRemoved || !catalog.data || !channelView) return;
     const windows = ranges.map(([value]) => value);
     const controller = new AbortController();
     void (async () => {
@@ -1170,9 +1164,18 @@ function Dashboard({
           ),
     [catalog.data, metrics.data, model, error],
   );
+  const controls = useChannelControls({
+    connection: baseConnection,
+    rows,
+    keyId,
+    model,
+    enabled: !!baseConnection.account && view === "controls",
+  });
+  const tableRows =
+    view === "controls" && sort === "config" ? controls.arrange(rows) : rows;
   const rowRanks = useMemo(
-    () => new Map(rows.map((row, i) => [rowId(row), i + 1])),
-    [rows],
+    () => new Map(tableRows.map((row, i) => [rowId(row), i + 1])),
+    [tableRows],
   );
   const providers = useMemo(() => [...new Set(rows.map(providerId))], [rows]);
   const actualRange = useMemo(() => actualCostRange(window), [window]);
@@ -1226,7 +1229,7 @@ function Dashboard({
     balanceIsLow(query.data),
   ).length;
   const stats = summarize(rows);
-  const filtered = rows.filter(
+  const filtered = tableRows.filter(
     (row) =>
       (!deferredSearch ||
         `${row.provider} ${row.model} ${row.upstream_model}`
@@ -1250,7 +1253,7 @@ function Dashboard({
     });
   const balanceProviders = [...new Set(filtered.map(providerId))];
   const detectionRows = checkTargets(filtered);
-  const total = view === "channels" ? filtered.length : balanceProviders.length;
+  const total = channelView ? filtered.length : balanceProviders.length;
   const pageCount = Math.max(1, Math.ceil(total / 25)),
     currentPage = Math.min(page, pageCount - 1);
   const pageRows = filtered.slice(currentPage * 25, (currentPage + 1) * 25),
@@ -1265,6 +1268,10 @@ function Dashboard({
     setFilters((current) => ({ ...current, [name]: value }));
   }
   function reload() {
+    if (view === "controls") {
+      void queryClient.invalidateQueries({ queryKey: ["channel-controls"] });
+      void queryClient.invalidateQueries({ queryKey: ["control-catalog"] });
+    }
     if (baseConnection.account) void checks.refetch();
     void keys.refetch();
     void liveMetrics.refetch();
@@ -1523,31 +1530,6 @@ function Dashboard({
                 void queryClient.invalidateQueries({ queryKey: ["metrics"] });
               }}
             />
-          ) : view === "controls" ? (
-            <Suspense
-              fallback={
-                <div className="control-intro">
-                  <Spinner small />
-                  正在载入渠道控制…
-                </div>
-              }
-            >
-              <ChannelControls
-                connection={connection}
-                sources={sourceList}
-                initialKey={keyId}
-                initialModel={model}
-                onApplied={() => {
-                  void queryClient.invalidateQueries({ queryKey: ["catalog"] });
-                  void queryClient.invalidateQueries({
-                    queryKey: ["live-metrics"],
-                  });
-                  void queryClient.invalidateQueries({
-                    queryKey: ["control-catalog"],
-                  });
-                }}
-              />
-            </Suspense>
           ) : view === "prices" ? (
             <PriceSettings
               prices={prices.data?.data || []}
@@ -1599,14 +1581,14 @@ function Dashboard({
               />
             </motion.section>
           )}
-          {view === "channels" || view === "balances" || view === "checks" ? (
+          {channelView || view === "balances" || view === "checks" ? (
             <section className="data-panel">
               <div className="data-heading">
                 <div className="data-title">
                   <span className="section-icon">
                     {view === "checks" ? (
                       <ScanLine size={19} />
-                    ) : view === "channels" ? (
+                    ) : channelView ? (
                       <Activity size={19} />
                     ) : (
                       <Wallet size={19} />
@@ -1615,7 +1597,7 @@ function Dashboard({
                   <h2>
                     {view === "checks"
                       ? "渠道检测"
-                      : view === "channels"
+                      : channelView
                         ? "渠道表现"
                         : "渠道余额"}
                   </h2>
@@ -1652,7 +1634,7 @@ function Dashboard({
                       }
                     />
                   )}
-                  {view === "channels" && (
+                  {channelView && (
                     <button
                       className={`button small ghost ${showTrend ? "selected" : ""}`}
                       onClick={() => setShowTrend(!showTrend)}
@@ -1911,7 +1893,7 @@ function Dashboard({
                   checks={checks}
                   disabled={!baseConnection.account}
                 />
-              ) : view === "channels" ? (
+              ) : channelView ? (
                 <div className="table-scroll">
                   <table className="channel-table">
                     <thead>
@@ -1919,6 +1901,13 @@ function Dashboard({
                         <th className="rank">#</th>
                         <th>渠道 / 模型</th>
                         <ChannelMetricHeaders />
+                        {view === "controls" && (
+                          <th>
+                            <Tip text="修改作用于本行来源、当前选择的 API key 和模型（未选择则为全部），对所有端点和流式状态生效。无到期时间，uni-api 重启清空；应用会保存此范围内的所有草稿。">
+                              临时控制 <CircleHelp size={12} />
+                            </Tip>
+                          </th>
+                        )}
                         <th aria-label="详情" />
                       </tr>
                     </thead>
@@ -1959,6 +1948,14 @@ function Dashboard({
                               actualRange={actualRange}
                               stale={staleSources.has(row.source_id || "")}
                             />
+                            {view === "controls" && (
+                              <ChannelControlCell
+                                row={row}
+                                controls={controls}
+                                visible={filtered}
+                                configOrder={sort === "config"}
+                              />
+                            )}
                             <td>
                               <button
                                 className="row-arrow icon-button"
@@ -2030,7 +2027,7 @@ function Dashboard({
                 <span>
                   {error
                     ? "数据不可用"
-                    : `显示 ${total ? currentPage * 25 + 1 : 0}–${Math.min((currentPage + 1) * 25, total)}，共 ${count(total)} ${view === "channels" ? "个模型 / 渠道组合" : "个渠道"}`}
+                    : `显示 ${total ? currentPage * 25 + 1 : 0}–${Math.min((currentPage + 1) * 25, total)}，共 ${count(total)} ${channelView ? "个模型 / 渠道组合" : "个渠道"}`}
                   {pendingBalances > 0 && (
                     <span className="footer-pending">
                       <Spinner small />
@@ -2065,7 +2062,7 @@ function Dashboard({
             </section>
           ) : null}
           <AnimatePresence>
-            {showTrend && view === "channels" && !error && (
+            {showTrend && channelView && !error && (
               <Trend
                 key={`${keyId}-${window}-${model}-${endpoint}-${stream}`}
                 connection={connection}
