@@ -5,6 +5,8 @@ import {
   useMemo,
   useRef,
   useState,
+  lazy,
+  Suspense,
 } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -65,6 +67,11 @@ import {
   checkTargets,
   useChannelChecks,
 } from "./ChannelChecks";
+const ChannelControls = lazy(() =>
+  import("./ChannelControls").then((module) => ({
+    default: module.ChannelControls,
+  })),
+);
 import { SourceSettings } from "./SourceSettings";
 import type { ConsoleSource } from "./SourceSettings";
 import { defaultFilters, loadFilters, saveFilters } from "./preferences";
@@ -107,7 +114,13 @@ type Keys = {
 };
 
 type View =
-  "checks" | "channels" | "balances" | "overview" | "prices" | "sources";
+  | "controls"
+  | "checks"
+  | "channels"
+  | "balances"
+  | "overview"
+  | "prices"
+  | "sources";
 
 function Overview({
   metrics,
@@ -1451,6 +1464,15 @@ function Dashboard({
         >
           <ScanLine size={18} /> 渠道检测
         </button>
+        {baseConnection.account && (
+          <button
+            className={view === "controls" ? "active" : ""}
+            onClick={() => selectView("controls")}
+          >
+            <SlidersHorizontal size={18} />
+            渠道控制
+          </button>
+        )}
         <button
           className={view === "prices" ? "active" : ""}
           onClick={() => selectView("prices")}
@@ -1560,17 +1582,19 @@ function Dashboard({
             <span>工作空间</span>
             <ChevronRight size={13} />
             <strong>
-              {view === "checks"
-                ? "渠道检测"
-                : view === "channels"
-                  ? "渠道观测"
-                  : view === "balances"
-                    ? "余额管理"
-                    : view === "overview"
-                      ? "总览"
-                      : view === "sources"
-                        ? "来源设置"
-                        : "价格设置"}
+              {view === "controls"
+                ? "渠道控制"
+                : view === "checks"
+                  ? "渠道检测"
+                  : view === "channels"
+                    ? "渠道观测"
+                    : view === "balances"
+                      ? "余额管理"
+                      : view === "overview"
+                        ? "总览"
+                        : view === "sources"
+                          ? "来源设置"
+                          : "价格设置"}
             </strong>
           </div>
           <div className="topbar-actions">
@@ -1607,28 +1631,32 @@ function Dashboard({
             <div>
               <span className="eyebrow">OBSERVE. UNDERSTAND. OPTIMIZE.</span>
               <h1>
-                {view === "checks"
-                  ? "逐条检测，让结果说话。"
-                  : view === "channels"
-                    ? "每条渠道，尽在视野。"
-                    : view === "balances"
-                      ? "余额有数，调用有底。"
-                      : view === "overview"
-                        ? "全局请求，一眼掌握。"
-                        : view === "sources"
-                          ? "多个来源，一个工作台。"
-                          : "模型价格，按你的口径计算。"}
+                {view === "controls"
+                  ? "灵活调度，随时恢复。"
+                  : view === "checks"
+                    ? "逐条检测，让结果说话。"
+                    : view === "channels"
+                      ? "每条渠道，尽在视野。"
+                      : view === "balances"
+                        ? "余额有数，调用有底。"
+                        : view === "overview"
+                          ? "全局请求，一眼掌握。"
+                          : view === "sources"
+                            ? "多个来源，一个工作台。"
+                            : "模型价格，按你的口径计算。"}
               </h1>
               <p>
-                {view === "checks"
-                  ? "固定使用 gpt-6-astra，按知识截止时间回复检测渠道。"
-                  : view === "channels"
-                    ? "从可用性到首输出，了解模型请求的每一步。"
-                    : view === "balances"
-                      ? "独立查看每个渠道的上游余额与额度。"
-                      : view === "overview"
-                        ? "消费、请求、token 与缓存率来自 S3 事实聚合。"
-                        : "价格按每百万 token 计，保存后用于后续估算。"}
+                {view === "controls"
+                  ? "临时调整渠道顺序与开关，无需修改配置文件。"
+                  : view === "checks"
+                    ? "固定使用 gpt-6-astra，按知识截止时间回复检测渠道。"
+                    : view === "channels"
+                      ? "从可用性到首输出，了解模型请求的每一步。"
+                      : view === "balances"
+                        ? "独立查看每个渠道的上游余额与额度。"
+                        : view === "overview"
+                          ? "消费、请求、token 与缓存率来自 S3 事实聚合。"
+                          : "价格按每百万 token 计，保存后用于后续估算。"}
               </p>
             </div>
             <button
@@ -1651,6 +1679,31 @@ function Dashboard({
                 void queryClient.invalidateQueries({ queryKey: ["metrics"] });
               }}
             />
+          ) : view === "controls" ? (
+            <Suspense
+              fallback={
+                <div className="control-intro">
+                  <Spinner small />
+                  正在载入渠道控制…
+                </div>
+              }
+            >
+              <ChannelControls
+                connection={connection}
+                sources={sourceList}
+                initialKey={keyId}
+                initialModel={model}
+                onApplied={() => {
+                  void queryClient.invalidateQueries({ queryKey: ["catalog"] });
+                  void queryClient.invalidateQueries({
+                    queryKey: ["live-metrics"],
+                  });
+                  void queryClient.invalidateQueries({
+                    queryKey: ["control-catalog"],
+                  });
+                }}
+              />
+            </Suspense>
           ) : view === "prices" ? (
             <PriceSettings
               prices={prices.data?.data || []}

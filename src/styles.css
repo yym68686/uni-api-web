@@ -2463,3 +2463,24 @@ nav > button.active > svg {
 .check-source { display: block; color: var(--muted); margin-top: 5px; }
 .check-table .check-answer { max-width: 360px; min-width: 150px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .check-table { min-width: 860px; }
+
+.control-intro { padding: 0 22px 18px; color: var(--muted); line-height: 1.8; font-size: 12px; }
+.control-selectors { display: flex; flex-wrap: wrap; gap: 14px; padding: 0 22px 22px; }
+.control-selectors label { flex: 1; min-width: 180px; font-size: 12px; color: var(--muted); }
+.control-selectors select { display: block; width: 100%; height: 38px; margin-top: 7px; padding: 0 10px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); background: var(--surface); }
+.control-editor { border-top: 1px solid var(--line); padding: 20px 22px; }
+.control-editor-heading,.control-editor-footer { display: flex; align-items: center; justify-content: space-between; gap: 14px; font-size: 12px; }
+.control-editor-heading label,.control-channel label,.control-notice { display: flex; align-items: center; gap: 8px; }
+.control-editor input { accent-color: var(--green); }
+.control-channel-list { margin: 16px 0; }
+.control-channel { display: grid; grid-template-columns: 28px minmax(120px,1fr) auto 30px 30px; gap: 10px; align-items: center; padding: 13px 4px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.control-channel strong { overflow-wrap: anywhere; }
+.control-channel.disabled { color: var(--danger); }
+.control-rules { border-top: 1px solid var(--line); padding: 20px 22px; }
+.control-rules h3 { margin: 0 0 12px; font-size: 14px; }
+.control-rule { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
+.control-rule small { display: block; margin-top: 7px; color: var(--muted); overflow-wrap: anywhere; }
+.control-rules p { font-size: 11px; line-height: 1.8; }
+.control-notice { margin: 0 22px 18px; color: var(--green); font-size: 12px; }
+.control-panel > .error-banner { margin: 0 22px 18px; }
+@media(max-width:600px){.control-editor-heading,.control-editor-footer,.control-rule{flex-wrap:wrap}.control-channel{grid-template-columns:20px minmax(0,1fr) 28px 28px;gap:6px}.control-channel label{grid-column:2;grid-row:auto}.control-channel strong{grid-column:2/5}.control-selectors label{min-width:100%}.control-editor-footer .button{width:100%}}

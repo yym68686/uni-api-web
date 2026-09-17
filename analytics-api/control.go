@@ -266,6 +266,8 @@ func (s *Service) controlHandler() http.Handler {
 	mux.HandleFunc("PUT /v1/sources/{id}", s.saveSource)
 	mux.HandleFunc("DELETE /v1/sources/{id}", s.deleteSource)
 	mux.HandleFunc("GET /v1/sources/{id}/proxy/{path...}", s.proxySource)
+	mux.HandleFunc("GET /v1/sources/{id}/channel-controls", s.channelControls)
+	mux.HandleFunc("POST /v1/sources/{id}/channel-controls", s.channelControls)
 	mux.HandleFunc("GET /v1/sources/{id}/channel-checks", s.channelChecks)
 	mux.HandleFunc("POST /v1/sources/{id}/channel-checks", s.checkChannel)
 	return mux

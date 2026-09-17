@@ -79,6 +79,7 @@ export const balanceKind: Record<string, string> = {
 export const reasonLabel: Record<string, string> = {
   eligible: "可用",
   channel_cooldown: "冷却中",
+  temporarily_disabled: "临时停用",
   no_provider_key: "无密钥",
 };
 export function summarize(rows: Channel[]) {
