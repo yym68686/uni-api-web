@@ -42,13 +42,13 @@ func (s *Service) channelControls(w http.ResponseWriter, r *http.Request) {
 		}
 		body, _ = json.Marshal(input)
 	}
-	unlock, lockErr := s.control.lockControls(r.Context(), src.ID)
-	if lockErr != nil {
-		http.Error(w, lockErr.Error(), 409)
-		return
-	}
-	defer unlock()
 	if r.Method == http.MethodPost {
+		unlock, lockErr := s.control.lockControls(r.Context(), src.ID)
+		if lockErr != nil {
+			http.Error(w, lockErr.Error(), 409)
+			return
+		}
+		defer unlock()
 		if _, e := s.reconcileControls(r.Context(), src); e != nil {
 			http.Error(w, e.Error(), 409)
 			return
