@@ -42,3 +42,23 @@ export function importModelLabel(check: SubModelCheck): string {
     return "可用";
   return "未检测";
 }
+
+export const modelMatchLabels = {
+  match: "匹配",
+  mismatch: "不匹配",
+  missing: "未返回",
+  invalid: "格式无效",
+  unavailable: "无法判定",
+  legacy: "待补测",
+  untested: "未检测",
+} as const;
+
+export function modelMatchStatus(
+  check: SubModelCheck,
+): keyof typeof modelMatchLabels {
+  if (!check.result) return "untested";
+  const status = check.result.availability.model_match;
+  if (!status) return "legacy";
+  if (check.result.availability.status !== "success") return "unavailable";
+  return status;
+}

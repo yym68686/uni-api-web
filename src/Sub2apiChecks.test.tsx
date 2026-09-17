@@ -604,3 +604,95 @@ it("all-model batch spans all filtered pages and includes failed and untested si
   for (const target of writes[0].targets)
     expect(target.models).toEqual([...SUB_MODELS]);
 });
+
+it("shows model matching separately from availability, including missing and historical metadata", async () => {
+  const data = fixtures().slice(0, 1),
+    target = data[0].targets[0];
+  const statuses = [
+    "match",
+    "mismatch",
+    "missing",
+    "invalid",
+    undefined,
+    "unavailable",
+  ] as const;
+  target.models = SUB_MODELS.map((model, index) => ({
+    model,
+    state: "done",
+    message: "",
+    result: {
+      ...target.result!,
+      model,
+      availability: {
+        ...target.result!.availability,
+        status: index === 5 ? "error" : "success",
+        requested_model: model,
+        response_model: index === 0 ? model : index === 1 ? "gpt-5.6-luna" : "",
+        model_match: statuses[index],
+      },
+    },
+  }));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string) => {
+      if (new URL(input).pathname.endsWith("/sources"))
+        return new Response('{"data":[]}');
+      return new Response(JSON.stringify({ data }));
+    }),
+  );
+  const user = userEvent.setup();
+  mount();
+  const table = await screen.findByRole("table");
+  const headers = within(table).getAllByRole("columnheader");
+  const column = headers.findIndex((h) => h.textContent?.includes("模型匹配"));
+  expect(column).toBeGreaterThan(0);
+  const summary = table.querySelector("tbody tr")!.children[column];
+  expect(summary).toHaveTextContent("1/6 匹配");
+  for (const label of ["不匹配", "未返回", "格式无效", "待补测", "无法判定"])
+    expect(summary).toHaveTextContent(label);
+  const expected = [
+    "匹配",
+    "不匹配",
+    "未返回",
+    "格式无效",
+    "待补测",
+    "无法判定",
+  ];
+  for (let i = 0; i < SUB_MODELS.length; i++) {
+    await user.selectOptions(
+      screen.getByLabelText("检测模型筛选"),
+      SUB_MODELS[i],
+    );
+    const currentHeaders = within(table).getAllByRole("columnheader");
+    const currentColumn = currentHeaders.findIndex((h) =>
+      h.textContent?.includes("模型匹配"),
+    );
+    const cell = table.querySelector("tbody tr")!.children[currentColumn];
+    expect(
+      within(cell as HTMLElement).getByText(expected[i], { exact: true }),
+    ).toBeVisible();
+  }
+  await user.selectOptions(
+    screen.getByLabelText("检测模型筛选"),
+    "gpt-5.6-sol",
+  );
+  const row = table.querySelector("tbody tr")!;
+  const matchCell =
+    row.children[
+      within(table)
+        .getAllByRole("columnheader")
+        .findIndex((h) => h.textContent?.includes("模型匹配"))
+    ];
+  expect(within(matchCell as HTMLElement).getByText("不匹配")).toHaveClass(
+    "fail",
+  );
+  await user.click(screen.getByText("检测详情"));
+  expect(table).toHaveTextContent("请求模型：gpt-5.6-sol");
+  expect(table).toHaveTextContent("返回模型：gpt-5.6-luna");
+  await user.click(screen.getByRole("button", { name: "添加到渠道" }));
+  expect(
+    within(screen.getByRole("dialog")).getByRole("checkbox", {
+      name: "gpt-5.6-sol",
+    }),
+  ).toBeChecked();
+});

@@ -19,11 +19,19 @@ import { LatencyBadge } from "./LatencyBadge";
 import { Empty, Spinner, Tip } from "./ui";
 import { Sub2apiImport } from "./Sub2apiImport";
 import { SUB_MODELS } from "./sub2apiModels";
-import { modelChecks, availabilityCounts } from "./sub2apiResults";
+import {
+  modelChecks,
+  availabilityCounts,
+  modelMatchStatus,
+  modelMatchLabels,
+} from "./sub2apiResults";
 import type { SubModelCheck } from "./sub2apiResults";
 import { time } from "./format";
 
 interface Probe {
+  requested_model?: string;
+  response_model?: string;
+  model_match?: "match" | "mismatch" | "missing" | "invalid" | "unavailable";
   status: string;
   text: string;
   message?: string;
@@ -357,12 +365,73 @@ function GroupAvailability({ checks }: { checks: SubModelCheck[] }) {
   );
 }
 
+function ModelMatch({ check }: { check: SubModelCheck }) {
+  const status = modelMatchStatus(check);
+  const label = modelMatchLabels[status];
+  const probe = check.result?.availability;
+  return (
+    <span
+      className={`check-status ${status === "match" ? "pass" : status === "mismatch" ? "fail" : "inconclusive"}`}
+      title={`请求模型：${probe?.requested_model || check.model}\n返回模型：${probe?.response_model || "—"}`}
+    >
+      {status === "match" ? (
+        <Check size={15} />
+      ) : status === "mismatch" ? (
+        <X size={15} />
+      ) : (
+        <CircleHelp size={15} />
+      )}
+      {label}
+    </span>
+  );
+}
+
+function GroupModelMatch({ checks }: { checks: SubModelCheck[] }) {
+  const statuses = checks.map(modelMatchStatus);
+  const matches = statuses.filter((s) => s === "match").length;
+  return (
+    <div className="sub-model-match-summary">
+      <span className={`check-status ${matches ? "pass" : "inconclusive"}`}>
+        {matches}/{checks.length} 匹配
+      </span>
+      {(
+        [
+          "mismatch",
+          "missing",
+          "invalid",
+          "unavailable",
+          "legacy",
+          "untested",
+        ] as const
+      ).map((status) => {
+        const count = statuses.filter((s) => s === status).length;
+        return count ? (
+          <small
+            className={`check-source ${status === "mismatch" ? "negative" : ""}`}
+            key={status}
+          >
+            {count} 个{modelMatchLabels[status]}
+          </small>
+        ) : null;
+      })}
+    </div>
+  );
+}
+
 function ProbeDetails({ check }: { check: SubModelCheck }) {
   return (
     <>
       {check.message && <div>{check.message}</div>}
       {check.result && (
         <>
+          <div>
+            请求模型：{check.result.availability.requested_model || check.model}
+          </div>
+          <div>返回模型：{check.result.availability.response_model || "—"}</div>
+          <div>
+            模型匹配：
+            <ModelMatch check={check} />
+          </div>
           <div>可用性回复：{check.result.availability.text || "—"}</div>
           {check.result.availability.message && (
             <div>{check.result.availability.message}</div>
@@ -396,6 +465,7 @@ function ModelResults({ checks }: { checks: SubModelCheck[] }) {
           <strong>{check.model}</strong>
           <div className="sub-model-result-status">
             <AvailabilityStatus check={check} />
+            <ModelMatch check={check} />
             <LatencyBadge value={check.result?.availability.ttft_ms} />
           </div>
           <ProbeDetails check={check} />
@@ -862,6 +932,11 @@ export function Sub2apiChecks() {
                     <th>倍率</th>
                     <th>可用性</th>
                     <th>首字延迟</th>
+                    <th>
+                      <Tip text="比较 say test 请求的模型名与流式完成事件中的 response.model，完全一致才算匹配。旧记录需重新检测。">
+                        模型匹配 <CircleHelp size={12} />
+                      </Tip>
+                    </th>
                     <th>Astra 降智</th>
                     <th>回复 / 诊断</th>
                     <th>最近检测</th>
@@ -914,6 +989,13 @@ export function Sub2apiChecks() {
                           <LatencyBadge
                             value={selected?.result?.availability.ttft_ms}
                           />
+                        </td>
+                        <td>
+                          {selected ? (
+                            <ModelMatch check={selected} />
+                          ) : (
+                            <GroupModelMatch checks={checks} />
+                          )}
                         </td>
                         <td>
                           <Verdict result={astra.result} />

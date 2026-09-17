@@ -2546,3 +2546,5 @@ nav > button.active > svg {
 .sub-model-result:last-child { border-bottom: 0; }
 .sub-model-result > strong { display: block; color: var(--ink); font-weight: 550; }
 .sub-model-result-status { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 6px 0; }
+
+.sub-model-match-summary { min-width: 90px; }

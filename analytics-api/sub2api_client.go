@@ -166,12 +166,15 @@ type subRemoteKey struct {
 }
 
 type subProbe struct {
-	Status     string `json:"status"`
-	Text       string `json:"text"`
-	Message    string `json:"message,omitempty"`
-	TTFT       *int64 `json:"ttft_ms"`
-	Duration   int64  `json:"duration_ms"`
-	HTTPStatus int    `json:"http_status,omitempty"`
+	RequestedModel string `json:"requested_model,omitempty"`
+	ResponseModel  string `json:"response_model,omitempty"`
+	ModelMatch     string `json:"model_match,omitempty"`
+	Status         string `json:"status"`
+	Text           string `json:"text"`
+	Message        string `json:"message,omitempty"`
+	TTFT           *int64 `json:"ttft_ms"`
+	Duration       int64  `json:"duration_ms"`
+	HTTPStatus     int    `json:"http_status,omitempty"`
 }
 type subResult struct {
 	Model        string   `json:"model"`
@@ -191,6 +194,8 @@ func subProbeStream(ctx context.Context, client *http.Client, base, key, prompt 
 	if len(models) > 0 {
 		model = models[0]
 	}
+	out.RequestedModel = model
+	out.ModelMatch = "unavailable"
 	body, _ := json.Marshal(map[string]any{"model": model, "input": []map[string]string{{"role": "user", "content": prompt}}, "stream": true})
 	req, _ := http.NewRequestWithContext(ctx, "POST", base+"/v1/responses", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+key)
@@ -227,6 +232,7 @@ func subProbeStream(ctx context.Context, client *http.Client, base, key, prompt 
 			Type     string `json:"type"`
 			Delta    string `json:"delta"`
 			Response struct {
+				Model  json.RawMessage `json:"model"`
 				Status string          `json:"status"`
 				Error  json.RawMessage `json:"error"`
 				Output []struct {
@@ -288,6 +294,11 @@ func subProbeStream(ctx context.Context, client *http.Client, base, key, prompt 
 				out.Message = "响应完成，但缺少文本增量，无法测量首字延迟"
 			}
 			out.Status = "success"
+			out.ResponseModel, out.ModelMatch = subCompareModel(model, event.Response.Model)
+			// An untrusted endpoint may echo the credential into any string field.
+			if key != "" {
+				out.ResponseModel = strings.ReplaceAll(out.ResponseModel, key, "[redacted]")
+			}
 			return true
 		}
 		return false
@@ -317,6 +328,26 @@ func subProbeStream(ctx context.Context, client *http.Client, base, key, prompt 
 	}
 	out.Message = "流式连接中断或缺少完成事件"
 	return
+}
+
+// A completed Responses object is the authoritative response body. Never use
+// the requested model as a fallback or infer identity from output/reasoning text.
+// Malformed model metadata does not erase a valid availability/latency result.
+func subCompareModel(requested string, raw json.RawMessage) (string, string) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", "missing"
+	}
+	var returned string
+	if json.Unmarshal(raw, &returned) != nil || len(returned) > 512 {
+		return "", "invalid"
+	}
+	if strings.TrimSpace(returned) == "" {
+		return "", "missing"
+	}
+	if returned == requested {
+		return returned, "match"
+	}
+	return returned, "mismatch"
 }
 
 var subModels = []string{"gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "codex-auto-review"}

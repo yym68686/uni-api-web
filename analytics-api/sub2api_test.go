@@ -16,12 +16,16 @@ import (
 	"time"
 )
 
-func subSSE(w http.ResponseWriter, answer string) {
+func subSSE(w http.ResponseWriter, answer string, models ...string) {
+	model := checkModel
+	if len(models) > 0 {
+		model = models[0]
+	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	fmt.Fprint(w, "event: response.created\ndata: {\"type\":\"response.created\"}\n\n")
 	w.(http.Flusher).Flush()
 	fmt.Fprintf(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":%q}\n\n", answer)
-	fmt.Fprintf(w, "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":%q}]}]}}\n\n", answer)
+	fmt.Fprintf(w, "data: {\"type\":\"response.completed\",\"response\":{\"model\":%q,\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":%q}]}]}}\n\n", model, answer)
 }
 func TestSubProbeStreamMeasuresTextAndRequiresCompletion(t *testing.T) {
 	for _, tc := range []struct {
@@ -332,7 +336,7 @@ func TestSubAccountLifecycleIsolationAndIdempotency(t *testing.T) {
 		if target.Billing == nil || target.Billing.Rate == nil || *target.Billing.Rate != 0.01 {
 			t.Fatal("wrong effective multiplier", target.Billing)
 		}
-		if target.Result == nil || target.Result.Verdict != "pass" || target.State != "done" {
+		if target.Result == nil || target.Result.Verdict != "pass" || target.State != "done" || target.Result.Availability.ModelMatch != "match" || target.Result.Availability.ResponseModel != checkModel {
 			t.Fatal(target)
 		}
 	}
@@ -524,12 +528,12 @@ func TestSubSixModelsStreamAndOnlyAstraQuality(t *testing.T) {
 			t.Error("probe is not streaming")
 		}
 		calls[b.Model] = append(calls[b.Model], b.Input[0].Content)
-		subSSE(w, "未知")
+		subSSE(w, "未知", b.Model)
 	}))
 	defer upstream.Close()
 	for _, model := range subModels {
 		out := subRunProbes(context.Background(), upstream.Client(), upstream.URL, "key", model)
-		if out.Model != model || out.Availability.Status != "success" {
+		if out.Model != model || out.Availability.Status != "success" || out.Availability.ModelMatch != "match" || out.Availability.RequestedModel != model || out.Availability.ResponseModel != model {
 			t.Fatal(out)
 		}
 		if model != checkModel && (out.Verdict != "not_applicable" || len(calls[model]) != 1) {
@@ -538,5 +542,70 @@ func TestSubSixModelsStreamAndOnlyAstraQuality(t *testing.T) {
 	}
 	if len(calls) != 6 || len(calls[checkModel]) != 2 || calls[checkModel][1] != checkPrompt {
 		t.Fatal(calls)
+	}
+}
+
+func TestSubProbeModelMatchUsesCompletedResponseBody(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw, want, returned string
+		failed                    bool
+	}{
+		{name: "identical", raw: `"gpt-5.6-sol"`, want: "match", returned: "gpt-5.6-sol"},
+		{name: "different model", raw: `"gpt-5.6-luna"`, want: "mismatch", returned: "gpt-5.6-luna"},
+		{name: "version suffix differs", raw: `"gpt-5.6-sol-2026-09-18"`, want: "mismatch", returned: "gpt-5.6-sol-2026-09-18"},
+		{name: "case differs", raw: `"GPT-5.6-SOL"`, want: "mismatch", returned: "GPT-5.6-SOL"},
+		{name: "whitespace differs", raw: `"gpt-5.6-sol "`, want: "mismatch", returned: "gpt-5.6-sol "},
+		{name: "missing", want: "missing"},
+		{name: "null", raw: `null`, want: "missing"},
+		{name: "empty", raw: `""`, want: "missing"},
+		{name: "blank", raw: `"   "`, want: "missing"},
+		{name: "numeric", raw: `42`, want: "invalid"},
+		{name: "object", raw: `{"name":"gpt-5.6-sol"}`, want: "invalid"},
+		{name: "too long", raw: `"` + strings.Repeat("x", 513) + `"`, want: "invalid"},
+		{name: "credential echo redacted", raw: `"test-secret-model"`, want: "mismatch", returned: "[redacted]-model"},
+		{name: "failed is not a match", raw: `"gpt-5.6-sol"`, want: "unavailable", failed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				// Early metadata and output text must never substitute for the final model.
+				fmt.Fprint(w, `data: {"type":"response.created","response":{"model":"gpt-5.6-sol"}}`+"\n\n")
+				fmt.Fprint(w, `data: {"type":"response.output_text.delta","model":"gpt-5.6-sol","delta":"gpt-5.6-sol"}`+"\n\n")
+				status, event := "completed", "response.completed"
+				if tc.failed {
+					status, event = "failed", "response.failed"
+				}
+				response := map[string]any{"status": status, "output": []any{map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]string{"type": "output_text", "text": "gpt-5.6-sol"}}}}}
+				if tc.raw != "" {
+					response["model"] = json.RawMessage(tc.raw)
+				}
+				raw, _ := json.Marshal(map[string]any{"type": event, "model": "gpt-5.6-sol", "response": response})
+				fmt.Fprintf(w, "data: %s\n\n", raw)
+			}))
+			defer upstream.Close()
+			out := subProbeStream(context.Background(), upstream.Client(), upstream.URL, "test-secret", "say test", "gpt-5.6-sol")
+			if out.ModelMatch != tc.want || out.RequestedModel != "gpt-5.6-sol" || out.ResponseModel != tc.returned {
+				t.Fatalf("wrong model comparison: %+v", out)
+			}
+			if !tc.failed && (out.Status != "success" || out.TTFT == nil) {
+				t.Fatalf("metadata affected availability: %+v", out)
+			}
+		})
+	}
+}
+func TestSubAstraAvailabilityMatchDoesNotUseQualityResponse(t *testing.T) {
+	calls := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			subSSE(w, "test", "gpt-5.6-luna")
+		} else {
+			subSSE(w, "未知", checkModel)
+		}
+	}))
+	defer upstream.Close()
+	out := subRunProbes(context.Background(), upstream.Client(), upstream.URL, "key", checkModel)
+	if calls != 2 || out.Availability.ModelMatch != "mismatch" || out.Availability.ResponseModel != "gpt-5.6-luna" || out.Quality.ModelMatch != "match" || out.Verdict != "pass" {
+		t.Fatalf("probe results conflated: %+v calls=%d", out, calls)
 	}
 }
