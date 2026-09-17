@@ -99,7 +99,13 @@ func (s *Service) authenticate(next http.Handler) http.Handler {
 					if forwarded := r.Header.Get("X-Forwarded-Host"); forwarded != "" {
 						host = forwarded
 					}
-					if e != nil || u.Host != host {
+					if s.cfg.PublicOrigin != "" {
+						expected, err := url.Parse(s.cfg.PublicOrigin)
+						if err != nil || e != nil || u.Scheme != expected.Scheme || u.Host != expected.Host {
+							http.Error(w, "cross-site request rejected", 403)
+							return
+						}
+					} else if e != nil || u.Host != host {
 						http.Error(w, "cross-site request rejected", 403)
 						return
 					}

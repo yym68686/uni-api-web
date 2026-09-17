@@ -82,7 +82,7 @@ scopes catalog, API keys, concurrency, balances and historical analytics. Same-n
 providers are separate rows. Shared upstream wallet totals must not be added across
 sources: these are account-level charges, not source-attributable request costs.
 
-Nginx proxies `/analytics/` including the original host for same-origin checks.
+Set `PUBLIC_ORIGIN` to the browser-facing console origin when a hosting proxy rewrites Host. Same-origin checks use this explicit origin; they never trust a client to choose it. Nginx also forwards its received host for simple local compose deployments.
 The API supports `/v1/auth/me`, `/login`, `/logout`, `/password` under `/v1/auth`,
 source CRUD under `/v1/sources`, and authenticated source observation proxies.
 When account mode is disabled, a legacy direct-key connection remains available.

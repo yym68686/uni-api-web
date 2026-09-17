@@ -129,6 +129,25 @@ func TestControlPostgresSessionAndSources(t *testing.T) {
 		t.Fatal("insecure cookie")
 	}
 
+	t.Run("public origin survives proxy host rewriting", func(t *testing.T) {
+		s.cfg.PublicOrigin = "https://console.example"
+		defer func() { s.cfg.PublicOrigin = "" }()
+		for _, origin := range []string{"https://console.example", "https://evil.example", "http://console.example"} {
+			r := httptest.NewRequest("POST", "http://internal-service/v1/auth/login", strings.NewReader(`{"username":"admin","password":"a-long-test-password"}`))
+			r.Header.Set("Content-Type", "application/json")
+			r.Header.Set("Origin", origin)
+			r.Header.Set("X-Forwarded-Host", "internal-proxy")
+			w := httptest.NewRecorder()
+			s.Handler().ServeHTTP(w, r)
+			want := 403
+			if origin == s.cfg.PublicOrigin {
+				want = 200
+			}
+			if w.Code != want {
+				t.Fatalf("origin %s got %d want %d", origin, w.Code, want)
+			}
+		}
+	})
 	t.Run("source proxies preserve gateway identity and key scope", func(t *testing.T) {
 		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Header.Get("Authorization") != "Bearer platform-secret" {

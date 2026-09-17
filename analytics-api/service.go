@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -50,6 +51,12 @@ type cachedAnalytics struct {
 func NewService(e *Engine, cfg Config) (*Service, error) {
 	if e == nil {
 		return nil, errors.New("engine required")
+	}
+	if cfg.PublicOrigin != "" {
+		u, err := url.Parse(cfg.PublicOrigin)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
+			return nil, errors.New("PUBLIC_ORIGIN must be an HTTP(S) origin")
+		}
 	}
 	upstream := cfg.Upstream
 	if upstream == "" && cfg.ControlMasterKey != "" {

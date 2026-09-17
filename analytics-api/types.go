@@ -65,6 +65,7 @@ type Config struct {
 	Address, DataDir, Upstream, SourceID, Timezone, S3Endpoint, S3Bucket, S3Prefix       string
 	StateEndpoint, StateBucket, StatePrefix, StateAccessKey, StateSecretKey              string
 	ControlDatabaseURL, ControlMasterKey, AdminUsername, AdminPassword, BootstrapSources string
+	PublicOrigin                                                                         string
 	InsecureCookie                                                                       bool
 	RequireInitialImport                                                                 bool
 	Poll                                                                                 time.Duration

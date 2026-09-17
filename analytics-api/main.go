@@ -24,6 +24,7 @@ func main() {
 	cfg.StateAccessKey, cfg.StateSecretKey = env("STATE_AWS_ACCESS_KEY_ID", ""), env("STATE_AWS_SECRET_ACCESS_KEY", "")
 	cfg.ControlDatabaseURL, cfg.ControlMasterKey = env("CONTROL_DATABASE_URL", env("DATABASE_URL", "")), env("CONTROL_MASTER_KEY", "")
 	cfg.BootstrapSources = env("BOOTSTRAP_SOURCES", "")
+	cfg.PublicOrigin = env("PUBLIC_ORIGIN", "")
 	cfg.InsecureCookie = env("INSECURE_COOKIE", "false") == "true"
 	cfg.AdminUsername, cfg.AdminPassword = env("ADMIN_USERNAME", ""), env("ADMIN_PASSWORD", "")
 	cfg.RequireInitialImport = env("REQUIRE_INITIAL_IMPORT", "false") == "true"
