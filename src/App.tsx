@@ -1633,6 +1633,13 @@ function Dashboard({
                       </button>
                     )}
                   </div>
+                  {view === "controls" && (
+                    <ChannelControlReset
+                      controls={controls}
+                      sources={sourceList}
+                      keys={keys.data?.data || []}
+                    />
+                  )}
                   {view === "checks" && (
                     <CheckActions
                       checks={checks}
@@ -1822,13 +1829,6 @@ function Dashboard({
                   </button>
                 )}
               </div>
-              {view === "controls" && (
-                <ChannelControlReset
-                  controls={controls}
-                  sources={sourceList}
-                  keys={keys.data?.data || []}
-                />
-              )}
               {view === "checks" && (
                 <div className="check-explanation">
                   <p>

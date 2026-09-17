@@ -1,6 +1,13 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueries, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Check, RotateCcw, X } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  Check,
+  ChevronDown,
+  RotateCcw,
+  X,
+} from "lucide-react";
 import { channelParams, controlRequest, request } from "./api";
 import type { Catalog, Channel, Connection, KeyInfo } from "./types";
 import type { ConsoleSource } from "./SourceSettings";
@@ -416,69 +423,99 @@ export function ChannelControlReset({
   sources: ConsoleSource[];
   keys: KeyInfo[];
 }) {
-  const scopes = controls.scopes.filter((scope) => !!scope.current);
+  const menu = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const close = (event: PointerEvent) => {
+      if (menu.current && !menu.current.contains(event.target as Node))
+        menu.current.open = false;
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && menu.current?.open) {
+        menu.current.open = false;
+        menu.current.querySelector("summary")?.focus();
+      }
+    };
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", escape);
+    };
+  }, []);
+  const scopes = controls.scopes
+    .filter((scope) => !!scope.current)
+    .map((scope) => {
+      const rule = scope.current!;
+      const sourceName =
+        sources.find((source) => source.id === scope.source)?.name ||
+        scope.source;
+      const key = keys.find(
+        (key) =>
+          key.key_id === `${scope.source}::${rule.api_key_id}` ||
+          (key.source_id === scope.source && key.key_id === rule.api_key_id),
+      );
+      const keyName = rule.api_key_id
+        ? key
+          ? `Key ${key.position} · ${key.prefix}`
+          : "指定 API key（已不在目录）"
+        : "全部 API key";
+      const label = `${sourceName} / ${keyName} / ${rule.model || "全部模型"}`;
+      const disabled = scope.pending || !!scope.draft || scope.state.isError;
+      const hint = scope.draft
+        ? "有未应用修改，请先应用或放弃草稿。"
+        : `撤销 ${label} 的渠道顺序和临时停用，包含被表格筛选隐藏的渠道。其他范围规则保留。`;
+      return { scope, label, disabled, hint };
+    });
   if (!scopes.length) return null;
-  return (
-    <section className="control-reset-panel" aria-label="当前范围的临时修改">
-      <p className="control-reset-explanation">
-        撤销会清除此范围的渠道排序和临时停用，包含表格中被筛选隐藏的渠道。其他范围的规则保留。
-      </p>
-      {scopes.map((scope) => {
-        const rule = scope.current!;
-        const sourceName =
-          sources.find((source) => source.id === scope.source)?.name ||
-          scope.source;
-        const key = keys.find(
-          (key) =>
-            key.key_id === `${scope.source}::${rule.api_key_id}` ||
-            (key.source_id === scope.source && key.key_id === rule.api_key_id),
-        );
-        const keyName = rule.api_key_id
-          ? key
-            ? `Key ${key.position} · ${key.prefix}`
-            : "指定 API key（已不在目录）"
-          : "全部 API key";
-        const modelName = rule.model || "全部模型";
-        const label = `${sourceName} / ${keyName} / ${modelName}`;
-        return (
-          <article
-            className="control-reset-scope"
-            aria-label={label}
-            key={scope.id}
+  const reset = (source: string) => {
+    if (menu.current) menu.current.open = false;
+    void controls.save({ source_id: source, provider: "" }, true);
+  };
+  if (scopes.length === 1) {
+    const { scope, label, disabled, hint } = scopes[0];
+    return (
+      <div className="control-reset-action">
+        <Tip text={hint}>
+          <button
+            className="button small"
+            aria-label={RESET_SCOPE_LABEL}
+            disabled={disabled}
+            onClick={() => reset(scope.source)}
+            data-reset-scope={label}
           >
-            <div className="control-reset-summary">
-              <strong>{sourceName}</strong>
-              <span>API key：{keyName}</span>
-              <span>模型：{modelName}</span>
-              <small>
-                {rule.order.length
-                  ? `已调整 ${rule.order.length} 个渠道的顺序`
-                  : "使用配置顺序"}{" "}
-                · 临时停用 {rule.disabled.length} 个渠道
-              </small>
-              {scope.draft && <small>有未应用修改，请先应用或放弃草稿。</small>}
-              {scope.error && (
-                <small className="negative" role="alert">
-                  {scope.error}
-                </small>
-              )}
-            </div>
-            <button
-              className="button small"
-              disabled={scope.pending || !!scope.draft || scope.state.isError}
-              onClick={() =>
-                void controls.save(
-                  { source_id: scope.source, provider: "" },
-                  true,
-                )
-              }
-            >
-              {scope.pending ? <Spinner small /> : <RotateCcw size={14} />}{" "}
-              {RESET_SCOPE_LABEL}
-            </button>
-          </article>
-        );
-      })}
-    </section>
+            {scope.pending ? <Spinner small /> : <RotateCcw size={14} />}
+            <span>{RESET_SCOPE_LABEL}</span>
+          </button>
+        </Tip>
+      </div>
+    );
+  }
+  return (
+    <div className="control-reset-action">
+      <details ref={menu}>
+        <summary className="button small" role="button">
+          <RotateCcw size={14} />
+          <span>{RESET_SCOPE_LABEL}</span>
+          <ChevronDown size={12} />
+        </summary>
+        <div
+          className="control-reset-menu"
+          role="menu"
+          aria-label="选择要撤销的范围"
+        >
+          {scopes.map(({ scope, label, disabled, hint }) => (
+            <Tip key={scope.id} text={hint}>
+              <button
+                role="menuitem"
+                disabled={disabled}
+                onClick={() => reset(scope.source)}
+              >
+                {label}
+              </button>
+            </Tip>
+          ))}
+        </div>
+      </details>
+    </div>
   );
 }

@@ -264,12 +264,16 @@ it("stages source-specific controls inline, retains hidden channels and drafts a
       name: RESET_SCOPE_LABEL,
     }),
   ).not.toBeInTheDocument();
-  const scope = screen.getByRole("article", {
-    name: "One / 全部 API key / 全部模型",
-  });
+  expect(reset).toHaveAttribute(
+    "data-reset-scope",
+    "One / 全部 API key / 全部模型",
+  );
+  expect(reset.closest(".data-actions")).toBe(
+    screen.getByLabelText("搜索渠道或模型").closest(".data-actions"),
+  );
   expect(
-    within(scope).getByText("已调整 3 个渠道的顺序 · 临时停用 1 个渠道"),
-  ).toBeInTheDocument();
+    screen.queryByRole("region", { name: "当前范围的临时修改" }),
+  ).not.toBeInTheDocument();
   await app.user.click(reset);
   await waitFor(() => expect(app.writes).toHaveLength(2));
   expect(app.states.one.rules).toHaveLength(0);
@@ -299,7 +303,7 @@ it("keeps the observation table visible when a source control endpoint is unavai
   app.client.clear();
 });
 
-it("shows one reset per exact source/key/model scope above the table and retains hidden scope access", async () => {
+it("keeps a single reset beside search with scope details in the menu and tooltip only", async () => {
   const app = setup();
   app.states.one.rules = [
     {
@@ -315,34 +319,35 @@ it("shows one reset per exact source/key/model scope above the table and retains
   ];
   await screen.findByRole("table");
   await app.user.click(screen.getByRole("button", { name: "渠道控制" }));
-  await waitFor(() =>
-    expect(
-      screen.getAllByRole("button", { name: RESET_SCOPE_LABEL }),
-    ).toHaveLength(2),
+  const reset = await screen.findByRole("button", { name: RESET_SCOPE_LABEL });
+  expect(
+    screen.getAllByRole("button", { name: RESET_SCOPE_LABEL }),
+  ).toHaveLength(1);
+  expect(reset.closest(".data-actions")).toBe(
+    screen.getByLabelText("搜索渠道或模型").closest(".data-actions"),
   );
-  const one = screen.getByRole("article", {
-      name: "One / 全部 API key / 全部模型",
-    }),
-    two = screen.getByRole("article", {
-      name: "Two / 全部 API key / 全部模型",
-    });
-  expect(within(one).getByText(/已调整 3 个渠道/)).toBeInTheDocument();
-  expect(within(two).getByText(/临时停用 1 个渠道/)).toBeInTheDocument();
+  expect(
+    screen.queryByRole("region", { name: "当前范围的临时修改" }),
+  ).not.toBeInTheDocument();
   expect(
     within(screen.getByRole("table")).queryByRole("button", {
       name: RESET_SCOPE_LABEL,
     }),
   ).not.toBeInTheDocument();
+  await app.user.click(reset);
+  expect(reset.closest("details")).toHaveAttribute("open");
+  expect(
+    screen.getByRole("menuitem", { name: "One / 全部 API key / 全部模型" }),
+  ).toBeInTheDocument();
   await app.user.type(
     screen.getByLabelText("搜索渠道或模型"),
     "no-matching-channel",
   );
   await screen.findByText("没有匹配的渠道");
-  expect(
-    screen.getAllByRole("button", { name: RESET_SCOPE_LABEL }),
-  ).toHaveLength(2);
+  expect(reset.closest("details")).not.toHaveAttribute("open");
+  await app.user.click(reset);
   await app.user.click(
-    within(two).getByRole("button", { name: RESET_SCOPE_LABEL }),
+    screen.getByRole("menuitem", { name: "Two / 全部 API key / 全部模型" }),
   );
   await waitFor(() => expect(app.writes).toHaveLength(1));
   expect(app.writes[0].source).toBe("two");
@@ -354,16 +359,12 @@ it("shows one reset per exact source/key/model scope above the table and retains
     "one::key",
   );
   await app.user.selectOptions(screen.getByLabelText("模型筛选"), "m");
-  const scoped = await screen.findByRole("article", {
-    name: "One / Key 1 · masked / m",
-  });
-  expect(within(scoped).getByText("模型：m")).toBeInTheDocument();
-  expect(
-    screen.getAllByRole("button", { name: RESET_SCOPE_LABEL }),
-  ).toHaveLength(1);
-  await app.user.click(
-    within(scoped).getByRole("button", { name: RESET_SCOPE_LABEL }),
+  const scoped = await screen.findByRole("button", { name: RESET_SCOPE_LABEL });
+  expect(scoped).toHaveAttribute(
+    "data-reset-scope",
+    "One / Key 1 · masked / m",
   );
+  await app.user.click(scoped);
   await waitFor(() => expect(app.writes).toHaveLength(2));
   expect(app.writes[1].body.api_key_id).toBe("key");
   expect(app.writes[1].body.model).toBe("m");

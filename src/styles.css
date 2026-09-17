@@ -2471,12 +2471,14 @@ nav > button.active > svg {
 .control-row-actions input { accent-color:var(--green); }
 .control-actions-cell > small { display:block; margin-top:5px; line-height:1.6; }
 
-.control-reset-panel { border-top:1px solid var(--line); padding:14px 21px; background:var(--subtle); }
-.control-reset-explanation { color:var(--muted);font-size:11px;line-height:1.7;margin-bottom:10px; }
-.control-reset-scope { display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px 0; }
-.control-reset-scope + .control-reset-scope { border-top:1px solid var(--line); }
-.control-reset-summary { display:flex;align-items:baseline;gap:8px 16px;flex-wrap:wrap;min-width:0;font-size:12px; }
-.control-reset-summary > span { color:var(--muted);overflow-wrap:anywhere; }
-.control-reset-summary > small { flex-basis:100%;color:var(--muted);font-size:11px;line-height:1.6; }
-.control-reset-scope > .button { flex-shrink:0; }
-@media(max-width:780px){.control-reset-panel{padding:12px 15px}.control-reset-scope{align-items:flex-start;flex-direction:column;gap:10px}.control-reset-scope>.button{white-space:normal;text-align:left}.control-reset-summary{gap:6px 12px}}
+.control-reset-action { position:relative;flex-shrink:0; }
+.control-reset-action > .tip-target { display:flex; }
+.control-reset-action summary { list-style:none;cursor:pointer; }
+.control-reset-action summary::-webkit-details-marker { display:none; }
+.control-reset-action .button > svg { flex-shrink:0; }
+.control-reset-menu { position:absolute;top:calc(100% + 8px);right:0;z-index:10;display:flex;flex-direction:column;gap:4px;width:max-content;max-width:min(440px,calc(100vw - 64px));padding:6px;background:var(--surface);border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow); }
+.control-reset-menu .tip-target { display:block; }
+.control-reset-menu button { width:100%;border:0;border-radius:5px;background:transparent;color:var(--ink);padding:10px 12px;text-align:left;font-size:12px;line-height:1.6;overflow-wrap:anywhere; }
+.control-reset-menu button:hover:not(:disabled) { background:var(--subtle); }
+@media(max-width:780px){.control-reset-action{flex:0 1 130px;min-width:100px}.control-reset-action .button{white-space:normal;padding:6px 8px;gap:4px;font-size:10px}.control-reset-action>.tip-target,.control-reset-action details,.control-reset-action .button{width:100%}}
+.data-actions:has(.control-reset-action) { flex-wrap:wrap; }
