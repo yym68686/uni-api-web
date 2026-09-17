@@ -2560,5 +2560,7 @@ nav > button.active > svg {
 @media(max-width:700px){.control-persistence{margin-left:0;flex-basis:100%;max-width:none}}
 .control-persistence [role=switch] { width:32px;height:18px;border-radius:12px;padding:2px;background:var(--line);border:0;display:inline-flex;align-items:center;flex:none; }
 .control-persistence [role=switch] span{width:14px;height:14px;border-radius:50%;background:white;transition:transform .15s}
-.control-persistence [role=switch].on{background:var(--accent)}
+.control-persistence [role=switch].on{background:var(--green)}
 .control-persistence [role=switch].on span{transform:translateX(14px)}
+
+@media(max-width:700px){.source-item{flex-wrap:wrap}.source-item>.control-persistence{flex-basis:100%}}
