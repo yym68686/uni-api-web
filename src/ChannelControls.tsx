@@ -2,7 +2,8 @@ import { useRef, useState } from "react";
 import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Check, RotateCcw, X } from "lucide-react";
 import { channelParams, controlRequest, request } from "./api";
-import type { Catalog, Channel, Connection } from "./types";
+import type { Catalog, Channel, Connection, KeyInfo } from "./types";
+import type { ConsoleSource } from "./SourceSettings";
 import { Spinner, Tip } from "./ui";
 
 export interface ControlRule {
@@ -16,6 +17,7 @@ export interface ControlState {
   instance_id: string;
   rules: ControlRule[];
 }
+type ControlTarget = Pick<Channel, "source_id" | "provider">;
 interface Draft {
   revision: string;
   rule: ControlRule;
@@ -43,18 +45,20 @@ export function inheritedDisabled(
 export function useChannelControls({
   connection,
   rows,
+  sourceIds: selectedSourceIds,
   keyId,
   model,
   enabled,
 }: {
   connection: Connection;
   rows: Channel[];
+  sourceIds?: string[];
   keyId: string;
   model: string;
   enabled: boolean;
 }) {
   const client = useQueryClient();
-  const sourceIds = [
+  const sourceIds = selectedSourceIds || [
     ...new Set(rows.map((r) => r.source_id).filter((id): id is string => !!id)),
   ];
   const rawKey = keyId.includes("::") ? keyId.split("::")[1] : keyId;
@@ -103,7 +107,7 @@ export function useChannelControls({
   const [errors, setErrors] = useState<Map<string, string>>(new Map());
   const [pending, setPending] = useState<Set<string>>(new Set());
   const locks = useRef(new Set<string>());
-  function info(row: Channel) {
+  function info(row: ControlTarget) {
     const source = row.source_id || "",
       id = scope(source),
       index = sourceIds.indexOf(source);
@@ -203,7 +207,7 @@ export function useChannelControls({
       return { ...rule, order: next };
     });
   }
-  function discard(row: Channel) {
+  function discard(row: ControlTarget) {
     const id = scope(row.source_id || "");
     setDrafts((old) => {
       const next = new Map(old);
@@ -216,10 +220,12 @@ export function useChannelControls({
       return next;
     });
   }
-  async function save(row: Channel, reset = false) {
+  async function save(row: ControlTarget, reset = false) {
     const i = info(row);
     if (
-      !i.ready ||
+      (reset
+        ? !i.state?.data || i.state.isError || !i.current || !!i.draft
+        : !i.ready) ||
       i.stale ||
       locks.current.has(i.source) ||
       (!reset && !i.draft)
@@ -284,7 +290,10 @@ export function useChannelControls({
       return groups.get(src)![index];
     });
   }
-  return { info, toggle, neighbor, move, discard, save, arrange };
+  const scopes = sourceIds.map((source) =>
+    info({ source_id: source, provider: "" }),
+  );
+  return { info, toggle, neighbor, move, discard, save, arrange, scopes };
 }
 export type ChannelControls = ReturnType<typeof useChannelControls>;
 export function ChannelControlCell({
@@ -384,16 +393,6 @@ export function ChannelControlCell({
             放弃
           </button>
         </div>
-      ) : i.current ? (
-        <button
-          className="button small ghost"
-          aria-label={`恢复此范围 ${label}`}
-          disabled={i.pending}
-          onClick={() => void controls.save(row, true)}
-        >
-          <RotateCcw size={13} />
-          恢复此范围
-        </button>
       ) : null}
       {i.stale && (
         <small className="negative">规则已变化，请放弃草稿后重新编辑。</small>
@@ -404,5 +403,82 @@ export function ChannelControlCell({
         </small>
       )}
     </td>
+  );
+}
+
+export const RESET_SCOPE_LABEL = "撤销当前范围的全部临时修改";
+export function ChannelControlReset({
+  controls,
+  sources,
+  keys,
+}: {
+  controls: ChannelControls;
+  sources: ConsoleSource[];
+  keys: KeyInfo[];
+}) {
+  const scopes = controls.scopes.filter((scope) => !!scope.current);
+  if (!scopes.length) return null;
+  return (
+    <section className="control-reset-panel" aria-label="当前范围的临时修改">
+      <p className="control-reset-explanation">
+        撤销会清除此范围的渠道排序和临时停用，包含表格中被筛选隐藏的渠道。其他范围的规则保留。
+      </p>
+      {scopes.map((scope) => {
+        const rule = scope.current!;
+        const sourceName =
+          sources.find((source) => source.id === scope.source)?.name ||
+          scope.source;
+        const key = keys.find(
+          (key) =>
+            key.key_id === `${scope.source}::${rule.api_key_id}` ||
+            (key.source_id === scope.source && key.key_id === rule.api_key_id),
+        );
+        const keyName = rule.api_key_id
+          ? key
+            ? `Key ${key.position} · ${key.prefix}`
+            : "指定 API key（已不在目录）"
+          : "全部 API key";
+        const modelName = rule.model || "全部模型";
+        const label = `${sourceName} / ${keyName} / ${modelName}`;
+        return (
+          <article
+            className="control-reset-scope"
+            aria-label={label}
+            key={scope.id}
+          >
+            <div className="control-reset-summary">
+              <strong>{sourceName}</strong>
+              <span>API key：{keyName}</span>
+              <span>模型：{modelName}</span>
+              <small>
+                {rule.order.length
+                  ? `已调整 ${rule.order.length} 个渠道的顺序`
+                  : "使用配置顺序"}{" "}
+                · 临时停用 {rule.disabled.length} 个渠道
+              </small>
+              {scope.draft && <small>有未应用修改，请先应用或放弃草稿。</small>}
+              {scope.error && (
+                <small className="negative" role="alert">
+                  {scope.error}
+                </small>
+              )}
+            </div>
+            <button
+              className="button small"
+              disabled={scope.pending || !!scope.draft || scope.state.isError}
+              onClick={() =>
+                void controls.save(
+                  { source_id: scope.source, provider: "" },
+                  true,
+                )
+              }
+            >
+              {scope.pending ? <Spinner small /> : <RotateCcw size={14} />}{" "}
+              {RESET_SCOPE_LABEL}
+            </button>
+          </article>
+        );
+      })}
+    </section>
   );
 }

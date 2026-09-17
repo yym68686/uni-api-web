@@ -6,7 +6,7 @@ import * as Tooltip from "@radix-ui/react-tooltip";
 import { MotionConfig, LazyMotion, domAnimation } from "motion/react";
 import App from "./App";
 import { emptyStats } from "./analytics";
-import { inheritedDisabled } from "./ChannelControls";
+import { inheritedDisabled, RESET_SCOPE_LABEL } from "./ChannelControls";
 import type { ControlState } from "./ChannelControls";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -80,8 +80,12 @@ function setup(controlUnavailable = false) {
           states[source] = {
             ...states[source],
             revision: source + ":" + writes.length,
-            rules:
-              v.action === "reset"
+            rules: [
+              ...states[source].rules.filter(
+                (rule) =>
+                  rule.api_key_id !== v.api_key_id || rule.model !== v.model,
+              ),
+              ...(v.action === "reset"
                 ? []
                 : [
                     {
@@ -90,7 +94,8 @@ function setup(controlUnavailable = false) {
                       order: v.order,
                       disabled: v.disabled,
                     },
-                  ],
+                  ]),
+            ],
           };
         }
         body = states[source];
@@ -253,8 +258,19 @@ it("stages source-specific controls inline, retains hidden channels and drafts a
       disabled: ["visible-first"],
     },
   });
-  await screen.findByLabelText("恢复此范围 One visible-first m");
-  await app.user.click(screen.getByLabelText("恢复此范围 One visible-first m"));
+  const reset = await screen.findByRole("button", { name: RESET_SCOPE_LABEL });
+  expect(
+    within(screen.getByRole("table")).queryByRole("button", {
+      name: RESET_SCOPE_LABEL,
+    }),
+  ).not.toBeInTheDocument();
+  const scope = screen.getByRole("article", {
+    name: "One / 全部 API key / 全部模型",
+  });
+  expect(
+    within(scope).getByText("已调整 3 个渠道的顺序 · 临时停用 1 个渠道"),
+  ).toBeInTheDocument();
+  await app.user.click(reset);
   await waitFor(() => expect(app.writes).toHaveLength(2));
   expect(app.states.one.rules).toHaveLength(0);
   expect(app.states.two.rules).toHaveLength(0);
@@ -279,6 +295,80 @@ it("keeps the observation table visible when a source control endpoint is unavai
   expect(screen.getByRole("table")).toBe(table);
   expect(within(table).getAllByRole("row")).toHaveLength(7);
   expect(screen.getByLabelText("uni-api 来源")).toHaveValue("");
+  app.unmount();
+  app.client.clear();
+});
+
+it("shows one reset per exact source/key/model scope above the table and retains hidden scope access", async () => {
+  const app = setup();
+  app.states.one.rules = [
+    {
+      api_key_id: "",
+      model: "",
+      order: ["visible-second", "hidden", "visible-first"],
+      disabled: ["hidden"],
+    },
+    { api_key_id: "key", model: "m", order: [], disabled: ["visible-first"] },
+  ];
+  app.states.two.rules = [
+    { api_key_id: "", model: "", order: [], disabled: ["visible-second"] },
+  ];
+  await screen.findByRole("table");
+  await app.user.click(screen.getByRole("button", { name: "渠道控制" }));
+  await waitFor(() =>
+    expect(
+      screen.getAllByRole("button", { name: RESET_SCOPE_LABEL }),
+    ).toHaveLength(2),
+  );
+  const one = screen.getByRole("article", {
+      name: "One / 全部 API key / 全部模型",
+    }),
+    two = screen.getByRole("article", {
+      name: "Two / 全部 API key / 全部模型",
+    });
+  expect(within(one).getByText(/已调整 3 个渠道/)).toBeInTheDocument();
+  expect(within(two).getByText(/临时停用 1 个渠道/)).toBeInTheDocument();
+  expect(
+    within(screen.getByRole("table")).queryByRole("button", {
+      name: RESET_SCOPE_LABEL,
+    }),
+  ).not.toBeInTheDocument();
+  await app.user.type(
+    screen.getByLabelText("搜索渠道或模型"),
+    "no-matching-channel",
+  );
+  await screen.findByText("没有匹配的渠道");
+  expect(
+    screen.getAllByRole("button", { name: RESET_SCOPE_LABEL }),
+  ).toHaveLength(2);
+  await app.user.click(
+    within(two).getByRole("button", { name: RESET_SCOPE_LABEL }),
+  );
+  await waitFor(() => expect(app.writes).toHaveLength(1));
+  expect(app.writes[0].source).toBe("two");
+  expect(app.states.one.rules).toHaveLength(2);
+  await app.user.clear(screen.getByLabelText("搜索渠道或模型"));
+  await app.user.selectOptions(screen.getByLabelText("uni-api 来源"), "one");
+  await app.user.selectOptions(
+    screen.getByLabelText("API key 筛选"),
+    "one::key",
+  );
+  await app.user.selectOptions(screen.getByLabelText("模型筛选"), "m");
+  const scoped = await screen.findByRole("article", {
+    name: "One / Key 1 · masked / m",
+  });
+  expect(within(scoped).getByText("模型：m")).toBeInTheDocument();
+  expect(
+    screen.getAllByRole("button", { name: RESET_SCOPE_LABEL }),
+  ).toHaveLength(1);
+  await app.user.click(
+    within(scoped).getByRole("button", { name: RESET_SCOPE_LABEL }),
+  );
+  await waitFor(() => expect(app.writes).toHaveLength(2));
+  expect(app.writes[1].body.api_key_id).toBe("key");
+  expect(app.writes[1].body.model).toBe("m");
+  expect(app.states.one.rules).toHaveLength(1);
+  expect(app.states.one.rules[0].api_key_id).toBe("");
   app.unmount();
   app.client.clear();
 });

@@ -65,7 +65,11 @@ import {
   checkTargets,
   useChannelChecks,
 } from "./ChannelChecks";
-import { useChannelControls, ChannelControlCell } from "./ChannelControls";
+import {
+  useChannelControls,
+  ChannelControlCell,
+  ChannelControlReset,
+} from "./ChannelControls";
 import { SourceSettings } from "./SourceSettings";
 import type { ConsoleSource } from "./SourceSettings";
 import { defaultFilters, loadFilters, saveFilters } from "./preferences";
@@ -1167,6 +1171,13 @@ function Dashboard({
   const controls = useChannelControls({
     connection: baseConnection,
     rows,
+    sourceIds: sourceList
+      .filter(
+        (source) =>
+          (!selectedSourceId || source.id === selectedSourceId) &&
+          (!keyId.includes("::") || source.id === keyId.split("::")[0]),
+      )
+      .map((source) => source.id),
     keyId,
     model,
     enabled: !!baseConnection.account && view === "controls",
@@ -1811,6 +1822,13 @@ function Dashboard({
                   </button>
                 )}
               </div>
+              {view === "controls" && (
+                <ChannelControlReset
+                  controls={controls}
+                  sources={sourceList}
+                  keys={keys.data?.data || []}
+                />
+              )}
               {view === "checks" && (
                 <div className="check-explanation">
                   <p>

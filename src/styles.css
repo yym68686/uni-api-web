@@ -2470,3 +2470,13 @@ nav > button.active > svg {
 .control-row-actions label { display:flex; align-items:center; gap:6px; white-space:nowrap; font-size:11px; }
 .control-row-actions input { accent-color:var(--green); }
 .control-actions-cell > small { display:block; margin-top:5px; line-height:1.6; }
+
+.control-reset-panel { border-top:1px solid var(--line); padding:14px 21px; background:var(--subtle); }
+.control-reset-explanation { color:var(--muted);font-size:11px;line-height:1.7;margin-bottom:10px; }
+.control-reset-scope { display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px 0; }
+.control-reset-scope + .control-reset-scope { border-top:1px solid var(--line); }
+.control-reset-summary { display:flex;align-items:baseline;gap:8px 16px;flex-wrap:wrap;min-width:0;font-size:12px; }
+.control-reset-summary > span { color:var(--muted);overflow-wrap:anywhere; }
+.control-reset-summary > small { flex-basis:100%;color:var(--muted);font-size:11px;line-height:1.6; }
+.control-reset-scope > .button { flex-shrink:0; }
+@media(max-width:780px){.control-reset-panel{padding:12px 15px}.control-reset-scope{align-items:flex-start;flex-direction:column;gap:10px}.control-reset-scope>.button{white-space:normal;text-align:left}.control-reset-summary{gap:6px 12px}}
