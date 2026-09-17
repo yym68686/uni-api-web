@@ -71,6 +71,8 @@ import {
   ChannelControlReset,
 } from "./ChannelControls";
 import { SourceSettings } from "./SourceSettings";
+import { LatencyBadge } from "./LatencyBadge";
+import { Sub2apiChecks } from "./Sub2apiChecks";
 import type { ConsoleSource } from "./SourceSettings";
 import { defaultFilters, loadFilters, saveFilters } from "./preferences";
 import { loadConnection, saveConnection, clearConnection } from "./session";
@@ -113,6 +115,7 @@ type Keys = {
 };
 
 type View =
+  | "sub2api"
   | "controls"
   | "checks"
   | "channels"
@@ -790,7 +793,9 @@ function Detail({
                   <div>
                     <span className="track-dot end" />
                     <small>收到首输出</small>
-                    <strong>+ {ms(row.stats?.first_output?.p50_ms)}</strong>
+                    <strong>
+                      + <LatencyBadge value={row.stats?.first_output?.p50_ms} />
+                    </strong>
                     <span>渠道首输出 p50</span>
                   </div>
                 </div>
@@ -1279,6 +1284,10 @@ function Dashboard({
     setFilters((current) => ({ ...current, [name]: value }));
   }
   function reload() {
+    if (view === "sub2api") {
+      void queryClient.invalidateQueries({ queryKey: ["sub2api"] });
+      return;
+    }
     if (view === "controls") {
       void queryClient.invalidateQueries({ queryKey: ["channel-controls"] });
       void queryClient.invalidateQueries({ queryKey: ["control-catalog"] });
@@ -1326,6 +1335,15 @@ function Dashboard({
         >
           <ScanLine size={18} /> 渠道检测
         </button>
+        {baseConnection.account && (
+          <button
+            className={view === "sub2api" ? "active" : ""}
+            onClick={() => selectView("sub2api")}
+          >
+            <ScanLine size={18} />
+            sub2api检测
+          </button>
+        )}
         {baseConnection.account && (
           <button
             className={view === "controls" ? "active" : ""}
@@ -1444,19 +1462,21 @@ function Dashboard({
             <span>工作空间</span>
             <ChevronRight size={13} />
             <strong>
-              {view === "controls"
-                ? "渠道控制"
-                : view === "checks"
-                  ? "渠道检测"
-                  : view === "channels"
-                    ? "渠道观测"
-                    : view === "balances"
-                      ? "余额管理"
-                      : view === "overview"
-                        ? "总览"
-                        : view === "sources"
-                          ? "来源设置"
-                          : "价格设置"}
+              {view === "sub2api"
+                ? "sub2api检测"
+                : view === "controls"
+                  ? "渠道控制"
+                  : view === "checks"
+                    ? "渠道检测"
+                    : view === "channels"
+                      ? "渠道观测"
+                      : view === "balances"
+                        ? "余额管理"
+                        : view === "overview"
+                          ? "总览"
+                          : view === "sources"
+                            ? "来源设置"
+                            : "价格设置"}
             </strong>
           </div>
           <div className="topbar-actions">
@@ -1493,32 +1513,36 @@ function Dashboard({
             <div>
               <span className="eyebrow">OBSERVE. UNDERSTAND. OPTIMIZE.</span>
               <h1>
-                {view === "controls"
-                  ? "灵活调度，随时恢复。"
-                  : view === "checks"
-                    ? "逐条检测，让结果说话。"
-                    : view === "channels"
-                      ? "每条渠道，尽在视野。"
-                      : view === "balances"
-                        ? "余额有数，调用有底。"
-                        : view === "overview"
-                          ? "全局请求，一眼掌握。"
-                          : view === "sources"
-                            ? "多个来源，一个工作台。"
-                            : "模型价格，按你的口径计算。"}
+                {view === "sub2api"
+                  ? "接入账号，逐组验证。"
+                  : view === "controls"
+                    ? "灵活调度，随时恢复。"
+                    : view === "checks"
+                      ? "逐条检测，让结果说话。"
+                      : view === "channels"
+                        ? "每条渠道，尽在视野。"
+                        : view === "balances"
+                          ? "余额有数，调用有底。"
+                          : view === "overview"
+                            ? "全局请求，一眼掌握。"
+                            : view === "sources"
+                              ? "多个来源，一个工作台。"
+                              : "模型价格，按你的口径计算。"}
               </h1>
               <p>
-                {view === "controls"
-                  ? "临时调整渠道顺序与开关，无需修改配置文件。"
-                  : view === "checks"
-                    ? "固定使用 gpt-6-astra，按知识截止时间回复检测渠道。"
-                    : view === "channels"
-                      ? "从可用性到首输出，了解模型请求的每一步。"
-                      : view === "balances"
-                        ? "独立查看每个渠道的上游余额与额度。"
-                        : view === "overview"
-                          ? "消费、请求、token 与缓存率来自 S3 事实聚合。"
-                          : "价格按每百万 token 计，保存后用于后续估算。"}
+                {view === "sub2api"
+                  ? "自动发现可用分组，检测可用性、首字延迟与模型回复。"
+                  : view === "controls"
+                    ? "临时调整渠道顺序与开关，无需修改配置文件。"
+                    : view === "checks"
+                      ? "固定使用 gpt-6-astra，按知识截止时间回复检测渠道。"
+                      : view === "channels"
+                        ? "从可用性到首输出，了解模型请求的每一步。"
+                        : view === "balances"
+                          ? "独立查看每个渠道的上游余额与额度。"
+                          : view === "overview"
+                            ? "消费、请求、token 与缓存率来自 S3 事实聚合。"
+                            : "价格按每百万 token 计，保存后用于后续估算。"}
               </p>
             </div>
             <button
@@ -1530,8 +1554,10 @@ function Dashboard({
               刷新数据
             </button>
           </motion.div>
-          {baseConnection.account &&
-          (view === "sources" || sourceList.length === 0) ? (
+          {view === "sub2api" && baseConnection.account ? (
+            <Sub2apiChecks />
+          ) : baseConnection.account &&
+            (view === "sources" || sourceList.length === 0) ? (
             <SourceSettings
               sources={sourceList}
               onSaved={() => {

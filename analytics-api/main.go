@@ -111,6 +111,11 @@ func main() {
 		}
 	}
 	go service.startImportLoop(ctx)
+	if service.control != nil {
+		subDone := make(chan struct{})
+		go func() { defer close(subDone); service.subWorkerLoop(ctx) }()
+		defer func() { stop(); <-subDone }()
+	}
 	server := &http.Server{Addr: cfg.Address, Handler: service.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 25 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
 	shutdownDone := make(chan struct{})
 	go func() {

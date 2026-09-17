@@ -74,6 +74,10 @@ func newControlStore(dsn, master string) (*controlStore, error) {
 		db.Close()
 		return nil, err
 	}
+	if _, err = db.ExecContext(ctx, subSchema); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return &controlStore{db: db, key: sum[:]}, nil
 }
 func (s *controlStore) Close() { _ = s.db.Close() }
@@ -270,6 +274,12 @@ func (s *Service) controlHandler() http.Handler {
 	mux.HandleFunc("POST /v1/sources/{id}/channel-controls", s.channelControls)
 	mux.HandleFunc("GET /v1/sources/{id}/channel-checks", s.channelChecks)
 	mux.HandleFunc("POST /v1/sources/{id}/channel-checks", s.checkChannel)
+	mux.HandleFunc("GET /v1/sub2api/accounts", s.subAccounts)
+	mux.HandleFunc("POST /v1/sub2api/accounts", s.subAddAccount)
+	mux.HandleFunc("DELETE /v1/sub2api/accounts/{id}", s.subDelete)
+	mux.HandleFunc("POST /v1/sub2api/accounts/{id}/sync", s.subSync)
+	mux.HandleFunc("POST /v1/sub2api/accounts/{id}/stop", s.subStop)
+	mux.HandleFunc("POST /v1/sub2api/checks", s.subCheck)
 	return mux
 }
 

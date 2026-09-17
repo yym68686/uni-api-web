@@ -1,3 +1,4 @@
+import { LatencyBadge } from "./LatencyBadge";
 import { CircleHelp } from "lucide-react";
 import type { Balance, Channel, Distribution } from "./types";
 import { Tip, Spinner } from "./ui";
@@ -107,9 +108,15 @@ export function Timing({
         </>
       }
     >
-      <span className={`metric-value ${value?.p50_ms == null ? "muted" : ""}`}>
-        {ms(value?.p50_ms)}
-      </span>
+      {wait ? (
+        <span
+          className={`metric-value ${value?.p50_ms == null ? "muted" : ""}`}
+        >
+          {ms(value?.p50_ms)}
+        </span>
+      ) : (
+        <LatencyBadge value={value?.p50_ms} />
+      )}
     </Tip>
   );
 }

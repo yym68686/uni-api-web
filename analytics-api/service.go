@@ -75,6 +75,7 @@ func (s *Service) Handler() http.Handler {
 	mux.Handle("/v1/auth/", control)
 	mux.Handle("/v1/sources", control)
 	mux.Handle("/v1/sources/", control)
+	mux.Handle("/v1/sub2api/", control)
 
 	mux.HandleFunc("GET /v1/analytics", s.analytics)
 	mux.HandleFunc("GET /v1/prices", s.prices)
