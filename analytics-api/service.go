@@ -18,6 +18,7 @@ import (
 )
 
 type Service struct {
+	checkSlots       chan struct{}
 	auth             *authorizer
 	engine           *Engine
 	cfg              Config
@@ -66,7 +67,7 @@ func NewService(e *Engine, cfg Config) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Service{engine: e, cfg: cfg, auth: auth, cache: make(map[string]cachedAnalytics)}, nil
+	return &Service{engine: e, cfg: cfg, auth: auth, cache: make(map[string]cachedAnalytics), checkSlots: make(chan struct{}, 2)}, nil
 }
 func (s *Service) Handler() http.Handler {
 	mux := http.NewServeMux()

@@ -40,6 +40,7 @@ import {
   Radio,
   RefreshCw,
   Search,
+  ScanLine,
   Server,
   ShieldCheck,
   SlidersHorizontal,
@@ -58,6 +59,12 @@ import {
   controlRequest,
   cleanBase,
 } from "./api";
+import {
+  CheckActions,
+  CheckTable,
+  checkTargets,
+  useChannelChecks,
+} from "./ChannelChecks";
 import { SourceSettings } from "./SourceSettings";
 import type { ConsoleSource } from "./SourceSettings";
 import { defaultFilters, loadFilters, saveFilters } from "./preferences";
@@ -99,7 +106,8 @@ type Keys = {
   can_inspect_all: boolean;
 };
 
-type View = "channels" | "balances" | "overview" | "prices" | "sources";
+type View =
+  "checks" | "channels" | "balances" | "overview" | "prices" | "sources";
 
 function Overview({
   metrics,
@@ -1072,6 +1080,10 @@ function Dashboard({
     enabled: !!baseConnection.account,
   });
   const sourceList = sourceQuery.data?.data || [];
+  const checks = useChannelChecks(
+    baseConnection.session,
+    !!baseConnection.account,
+  );
   const selectedSourceId = filters.sourceId;
   const connection = useMemo(
     () => ({
@@ -1381,6 +1393,7 @@ function Dashboard({
       return (values(a) ?? Infinity) - (values(b) ?? Infinity);
     });
   const balanceProviders = [...new Set(filtered.map(providerId))];
+  const detectionRows = checkTargets(filtered);
   const total = view === "channels" ? filtered.length : balanceProviders.length;
   const pageCount = Math.max(1, Math.ceil(total / 25)),
     currentPage = Math.min(page, pageCount - 1);
@@ -1396,6 +1409,7 @@ function Dashboard({
     setFilters((current) => ({ ...current, [name]: value }));
   }
   function reload() {
+    if (baseConnection.account) void checks.refetch();
     void keys.refetch();
     void liveMetrics.refetch();
     if (
@@ -1431,6 +1445,12 @@ function Dashboard({
         >
           <LayoutDashboard size={18} />
           渠道观测<span className="nav-shortcut">⌘ 1</span>
+        </button>
+        <button
+          className={view === "checks" ? "active" : ""}
+          onClick={() => selectView("checks")}
+        >
+          <ScanLine size={18} /> 渠道检测
         </button>
         <button
           className={view === "prices" ? "active" : ""}
@@ -1541,15 +1561,17 @@ function Dashboard({
             <span>工作空间</span>
             <ChevronRight size={13} />
             <strong>
-              {view === "channels"
-                ? "渠道观测"
-                : view === "balances"
-                  ? "余额管理"
-                  : view === "overview"
-                    ? "总览"
-                    : view === "sources"
-                      ? "来源设置"
-                      : "价格设置"}
+              {view === "checks"
+                ? "渠道检测"
+                : view === "channels"
+                  ? "渠道观测"
+                  : view === "balances"
+                    ? "余额管理"
+                    : view === "overview"
+                      ? "总览"
+                      : view === "sources"
+                        ? "来源设置"
+                        : "价格设置"}
             </strong>
           </div>
           <div className="topbar-actions">
@@ -1586,24 +1608,28 @@ function Dashboard({
             <div>
               <span className="eyebrow">OBSERVE. UNDERSTAND. OPTIMIZE.</span>
               <h1>
-                {view === "channels"
-                  ? "每条渠道，尽在视野。"
-                  : view === "balances"
-                    ? "余额有数，调用有底。"
-                    : view === "overview"
-                      ? "全局请求，一眼掌握。"
-                      : view === "sources"
-                        ? "多个来源，一个工作台。"
-                        : "模型价格，按你的口径计算。"}
+                {view === "checks"
+                  ? "逐条检测，让结果说话。"
+                  : view === "channels"
+                    ? "每条渠道，尽在视野。"
+                    : view === "balances"
+                      ? "余额有数，调用有底。"
+                      : view === "overview"
+                        ? "全局请求，一眼掌握。"
+                        : view === "sources"
+                          ? "多个来源，一个工作台。"
+                          : "模型价格，按你的口径计算。"}
               </h1>
               <p>
-                {view === "channels"
-                  ? "从可用性到首输出，了解模型请求的每一步。"
-                  : view === "balances"
-                    ? "独立查看每个渠道的上游余额与额度。"
-                    : view === "overview"
-                      ? "消费、请求、token 与缓存率来自 S3 事实聚合。"
-                      : "价格按每百万 token 计，保存后用于后续估算。"}
+                {view === "checks"
+                  ? "固定使用 gpt-6-astra，按知识截止时间回复检测渠道。"
+                  : view === "channels"
+                    ? "从可用性到首输出，了解模型请求的每一步。"
+                    : view === "balances"
+                      ? "独立查看每个渠道的上游余额与额度。"
+                      : view === "overview"
+                        ? "消费、请求、token 与缓存率来自 S3 事实聚合。"
+                        : "价格按每百万 token 计，保存后用于后续估算。"}
               </p>
             </div>
             <button
@@ -1677,21 +1703,41 @@ function Dashboard({
               />
             </motion.section>
           )}
-          {view === "channels" || view === "balances" ? (
+          {view === "channels" || view === "balances" || view === "checks" ? (
             <section className="data-panel">
               <div className="data-heading">
                 <div className="data-title">
                   <span className="section-icon">
-                    {view === "channels" ? (
+                    {view === "checks" ? (
+                      <ScanLine size={19} />
+                    ) : view === "channels" ? (
                       <Activity size={19} />
                     ) : (
                       <Wallet size={19} />
                     )}
                   </span>
-                  <h2>{view === "channels" ? "渠道表现" : "渠道余额"}</h2>
+                  <h2>
+                    {view === "checks"
+                      ? "渠道检测"
+                      : view === "channels"
+                        ? "渠道表现"
+                        : "渠道余额"}
+                  </h2>
                   <span className="count-badge">{count(total)}</span>
                 </div>
                 <div className="data-actions">
+                  {view === "checks" && (
+                    <CheckActions
+                      checks={checks}
+                      rows={detectionRows}
+                      disabled={
+                        !baseConnection.account ||
+                        busy ||
+                        !!error ||
+                        !!(balanceFilter && pendingBalances)
+                      }
+                    />
+                  )}
                   {view === "channels" && (
                     <button
                       className={`button small ghost ${showTrend ? "selected" : ""}`}
@@ -1909,6 +1955,26 @@ function Dashboard({
                   </Tip>
                 </span>
               </div>
+              {view === "checks" && (
+                <div className="check-explanation">
+                  <p>
+                    检测发送至指定渠道的 Responses 端点，模型固定为{" "}
+                    <strong>gpt-6-astra</strong>
+                    ，不会切换其他渠道。上方筛选只决定渠道集合；一键检测覆盖所有匹配页，同一来源的渠道只测一次。
+                  </p>
+                  <p>
+                    回复包含「未知」显示绿勾，包含「2024-06」显示红叉；同时包含或均不包含则无法判定。仅按该规则提供参考，每次检测会产生少量模型用量。
+                  </p>
+                  {!baseConnection.account && (
+                    <p role="alert">请使用账户登录后检测。</p>
+                  )}
+                  {checks.error && (
+                    <p role="alert">
+                      历史检测结果读取失败：{checks.error.message}
+                    </p>
+                  )}
+                </div>
+              )}
               {staleSources.size > 0 && (
                 <div className="coverage-note" role="alert">
                   <Clock3 size={14} />
@@ -1962,6 +2028,15 @@ function Dashboard({
                     ? `还有 ${pendingBalances} 个渠道正在查询，结果到达后会自动显示。`
                     : "尝试调整模型、余额状态，或清除搜索条件。"}
                 </Empty>
+              ) : view === "checks" ? (
+                <CheckTable
+                  rows={detectionRows.slice(
+                    currentPage * 25,
+                    (currentPage + 1) * 25,
+                  )}
+                  checks={checks}
+                  disabled={!baseConnection.account}
+                />
               ) : view === "channels" ? (
                 <div className="table-scroll">
                   <table className="channel-table">

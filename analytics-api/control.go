@@ -66,6 +66,7 @@ func newControlStore(dsn, master string) (*controlStore, error) {
  CREATE TABLE IF NOT EXISTS console_sources(id TEXT PRIMARY KEY,name TEXT NOT NULL,base TEXT NOT NULL,encrypted_key TEXT NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT now());
  ALTER TABLE console_sources ADD COLUMN IF NOT EXISTS encrypted_storage TEXT NOT NULL DEFAULT '';
  ALTER TABLE console_sources ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT true;
+ CREATE TABLE IF NOT EXISTS console_channel_checks(source_id TEXT NOT NULL REFERENCES console_sources(id),provider TEXT NOT NULL,result JSONB NOT NULL,PRIMARY KEY(source_id,provider));
  CREATE TABLE IF NOT EXISTS console_sessions(token_hash TEXT PRIMARY KEY,username TEXT NOT NULL,expires_at TIMESTAMPTZ NOT NULL);
  CREATE INDEX IF NOT EXISTS console_sessions_expiry ON console_sessions(expires_at);`)
 	if err != nil {
@@ -264,6 +265,8 @@ func (s *Service) controlHandler() http.Handler {
 	mux.HandleFunc("PUT /v1/sources/{id}", s.saveSource)
 	mux.HandleFunc("DELETE /v1/sources/{id}", s.deleteSource)
 	mux.HandleFunc("GET /v1/sources/{id}/proxy/{path...}", s.proxySource)
+	mux.HandleFunc("GET /v1/sources/{id}/channel-checks", s.channelChecks)
+	mux.HandleFunc("POST /v1/sources/{id}/channel-checks", s.checkChannel)
 	return mux
 }
 
