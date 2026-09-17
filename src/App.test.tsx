@@ -181,7 +181,7 @@ describe("dashboard workflows", () => {
       "key-second",
     );
     await app.user.selectOptions(screen.getByLabelText("模型筛选"), "model-a");
-    await app.user.click(screen.getByRole("button", { name: "1 小时" }));
+    await app.user.selectOptions(screen.getByLabelText("时间范围筛选"), "1h");
     await app.user.type(screen.getByLabelText("搜索渠道或模型"), "third");
     await app.user.selectOptions(
       screen.getByLabelText("渠道状态筛选"),
@@ -203,10 +203,7 @@ describe("dashboard workflows", () => {
     expect(app.calls[0]).toBe("https://mock.example/v1/api-keys");
     expect(screen.getByLabelText("API key 筛选")).toHaveValue("key-second");
     expect(screen.getByLabelText("模型筛选")).toHaveValue("model-a");
-    expect(screen.getByRole("button", { name: "1 小时" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(screen.getByLabelText("时间范围筛选")).toHaveValue("1h");
     expect(screen.getByLabelText("搜索渠道或模型")).toHaveValue("third");
     expect(screen.getByLabelText("渠道状态筛选")).toHaveValue("unavailable");
     expect(screen.getByLabelText("排序")).toHaveValue("latency");
@@ -252,10 +249,7 @@ describe("dashboard workflows", () => {
     expect(screen.getByLabelText("端点筛选")).toHaveValue("all");
     expect(screen.getByLabelText("流式状态筛选")).toHaveValue("all");
     expect(screen.getByLabelText("渠道状态筛选")).toHaveValue("");
-    expect(screen.getByRole("button", { name: "15 分钟" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(screen.getByLabelText("时间范围筛选")).toHaveValue("15m");
     expect(screen.getByRole("button", { name: /^余额不足$/ })).toHaveAttribute(
       "aria-pressed",
       "false",

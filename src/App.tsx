@@ -1780,6 +1780,21 @@ function Dashboard({
                     </button>
                   )}
                 </div>
+                <div className="select-field time-select">
+                  <Clock3 size={15} />
+                  <select
+                    aria-label="时间范围筛选"
+                    value={window}
+                    onChange={(e) => setFilter("window", e.target.value)}
+                  >
+                    {ranges.map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={13} />
+                </div>
                 {sourceList.length > 0 && (
                   <label className="select-field source-select">
                     <Server size={15} />
@@ -1837,29 +1852,6 @@ function Dashboard({
                     ))}
                   </select>
                   <ChevronDown size={13} />
-                </div>
-                <div className="window-tabs" aria-label="统计窗口">
-                  {ranges.map(([value, label]) => (
-                    <button
-                      key={value}
-                      aria-pressed={window === value}
-                      className={window === value ? "active" : ""}
-                      onClick={() => setFilter("window", value)}
-                    >
-                      {window === value && (
-                        <motion.span
-                          className="window-highlight"
-                          layoutId="window-tab"
-                          transition={{
-                            type: "spring",
-                            stiffness: 500,
-                            damping: 38,
-                          }}
-                        />
-                      )}
-                      <span>{label}</span>
-                    </button>
-                  ))}
                 </div>
               </div>
               <div className="filter-secondary">

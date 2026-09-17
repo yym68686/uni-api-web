@@ -1042,39 +1042,12 @@ nav > button.active > svg {
 .model-select {
   max-width: 210px;
 }
-.window-tabs {
-  display: flex;
-  background: var(--subtle);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 3px;
-  gap: 2px;
-  height: 35px;
+.time-select {
+  flex: 0 0 112px;
+  min-width: 112px;
 }
-.window-tabs > button {
-  position: relative;
-  font-size: 10px;
-  padding: 3px 10px;
-  min-width: 54px;
-  border: 0;
-  background: transparent;
-  border-radius: 4px;
-  color: var(--muted);
-}
-.window-tabs > button > span:last-child {
-  position: relative;
-  z-index: 1;
-}
-.window-tabs > button.active {
-  color: var(--ink);
-}
-.window-highlight {
-  position: absolute;
-  inset: 0;
-  background: var(--surface);
-  box-shadow: 0 1px 3px #17302512;
-  border: 1px solid var(--line);
-  border-radius: 4px;
+.time-select select {
+  width: 100%;
 }
 .filter-secondary {
   display: flex;
@@ -2229,15 +2202,17 @@ nav > button.active > svg {
     font-size: 9px;
   }
   .search-field {
-    flex-basis: 100%;
+    flex-basis: calc(100% - 121px);
+    min-width: 0;
   }
   .select-field {
     flex: 1;
     max-width: none;
     min-width: 145px;
   }
-  .window-tabs {
-    margin-left: auto;
+  .select-field.time-select {
+    flex: 0 0 112px;
+    min-width: 112px;
   }
   .filter-secondary {
     gap: 10px;
@@ -2398,13 +2373,6 @@ nav > button.active > svg {
   .select-field {
     min-width: 120px;
   }
-  .window-tabs {
-    width: 100%;
-    justify-content: space-between;
-  }
-  .window-tabs button {
-    flex: 1;
-  }
 }
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -2490,7 +2458,6 @@ nav > button.active > svg {
 .price-inputs input,.price-search { display:block;width:100%;border:1px solid var(--border);background:var(--surface);color:var(--text);padding:10px;border-radius:6px;margin-top:8px; }
 .price-verified {display:flex;align-items:center;gap:8px;font-size:13px;}
 .usage-cache {display:block;font-size:11px;color:var(--muted);margin-top:4px;}
-.window-tabs { flex-wrap:wrap; }
 @media(max-width:800px){.price-inputs{grid-template-columns:repeat(2,minmax(0,1fr));}}
 .source-form{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:14px 16px;margin-bottom:14px;border:1px solid var(--line);border-radius:14px;background:var(--panel)}
 .source-form h3{width:100%;margin:0;font-size:14px}.source-form input{min-width:180px;flex:1;border:1px solid var(--line);background:var(--input);color:var(--text);border-radius:9px;padding:9px 11px;font:inherit}.source-form .error-banner{width:100%;margin:0}
