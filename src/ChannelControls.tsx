@@ -413,7 +413,7 @@ export function ChannelControlCell({
   );
 }
 
-export const RESET_SCOPE_LABEL = "撤销当前范围的全部临时修改";
+export const RESET_SCOPE_LABEL = "撤销更改";
 export function ChannelControlReset({
   controls,
   sources,
