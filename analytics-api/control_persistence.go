@@ -155,7 +155,7 @@ func (s *Service) captureControls(ctx context.Context, src controlSource, live r
 			return e
 		}
 	}
-	snapshot := retainedSnapshot{Version: 1, Rules: live.Rules, Channels: []retainedChannel{}}
+	snapshot := retainedSnapshot{Version: 1, Rules: append([]retainedRule{}, live.Rules...), Channels: []retainedChannel{}}
 	for _, p := range live.Channels {
 		saved, ok := known[p.Provider]
 		if !ok || saved.KeyID != p.KeyID {
