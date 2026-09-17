@@ -128,6 +128,57 @@ func TestControlPostgresSessionAndSources(t *testing.T) {
 	if !cookie.HttpOnly || !cookie.Secure || cookie.SameSite != http.SameSiteStrictMode {
 		t.Fatal("insecure cookie")
 	}
+
+	t.Run("source proxies preserve gateway identity and key scope", func(t *testing.T) {
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Authorization") != "Bearer platform-secret" {
+				t.Error("missing server credential")
+			}
+			if r.URL.Path == "/v1/api-keys" {
+				writeJSON(w, 200, map[string]any{"can_inspect_all": true, "data": []map[string]any{{"key_id": "same-key"}}})
+				return
+			}
+			if k := r.URL.Query().Get("api_key_id"); k != "" && k != "same-key" {
+				t.Error("namespaced key escaped upstream", k)
+			}
+			writeJSON(w, 200, map[string]any{"data": []map[string]any{{"provider": "same", "model": "same"}}})
+		}))
+		defer upstream.Close()
+		for _, id := range []string{"primary", "secondary"} {
+			_, e := store.saveSource(context.Background(), controlSource{sourceView: sourceView{ID: id, Name: id, Base: upstream.URL}, Key: "platform-secret"}, false)
+			if e != nil {
+				t.Fatal(e)
+			}
+		}
+		call := func(path string) map[string]any {
+			t.Helper()
+			rq := httptest.NewRequest("GET", path, nil)
+			rq.AddCookie(cookie)
+			rw := httptest.NewRecorder()
+			s.Handler().ServeHTTP(rw, rq)
+			if rw.Code != 200 {
+				t.Fatalf("proxy %d", rw.Code)
+			}
+			var d map[string]any
+			json.Unmarshal(rw.Body.Bytes(), &d)
+			return d
+		}
+		keys := call("/v1/sources/all/proxy/v1/api-keys")["data"].([]any)
+		if len(keys) != 2 || keys[0].(map[string]any)["key_id"] == keys[1].(map[string]any)["key_id"] {
+			t.Fatal("key namespace collision")
+		}
+		channels := call("/v1/sources/all/proxy/v1/model-channels?api_key_id=secondary%3A%3Asame-key")["data"].([]any)
+		if len(channels) != 1 || channels[0].(map[string]any)["source_id"] != "secondary" {
+			t.Fatal("key leaked to another source")
+		}
+		store.deleteSource(context.Background(), "secondary")
+		if _, err := store.saveSource(context.Background(), controlSource{sourceView: sourceView{ID: "secondary", Name: "secondary", Base: upstream.URL}, Key: "platform-secret"}, true); err != nil {
+			t.Fatal("bootstrap should not fail or revive a disabled source", err)
+		}
+		if _, err := store.source(context.Background(), "secondary"); err == nil {
+			t.Fatal("bootstrap revived removed source")
+		}
+	})
 	req = httptest.NewRequest("POST", "/v1/sources", strings.NewReader(`{}`))
 	req.AddCookie(cookie)
 	req.Header.Set("Origin", "https://evil.example")

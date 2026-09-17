@@ -242,6 +242,9 @@ func (s *controlStore) saveSource(ctx context.Context, x controlSource, bootstra
 	if err != nil {
 		return sourceView{}, err
 	}
+	if bootstrap {
+		return x.sourceView, nil
+	}
 	out, err := s.source(ctx, x.ID)
 	return out.sourceView, err
 }
