@@ -30,7 +30,7 @@ func main() {
 	if cfg.RequireInitialImport && (cfg.StateBucket == "" || cfg.StateEndpoint == "" || cfg.S3Bucket == "" || cfg.S3Endpoint == "") {
 		log.Fatal("rebuildable analytics requires configured fact and state storage")
 	}
-	if cfg.Upstream == "" {
+	if cfg.Upstream == "" && cfg.ControlMasterKey == "" {
 		log.Fatal("UNI_API_URL is required")
 	}
 	if err := os.MkdirAll(cfg.DataDir, 0700); err != nil {
@@ -50,9 +50,6 @@ func main() {
 	if cfg.ControlMasterKey != "" {
 		if cfg.ControlDatabaseURL == "" {
 			log.Fatal("CONTROL_DATABASE_URL is required when CONTROL_MASTER_KEY is set")
-		}
-		if cfg.ControlDatabaseURL == "" {
-			log.Fatal("CONTROL_DATABASE_URL is required when account mode is enabled")
 		}
 		service.control, err = newControlStore(cfg.ControlDatabaseURL, cfg.ControlMasterKey)
 		if err != nil {

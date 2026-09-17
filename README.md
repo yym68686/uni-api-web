@@ -70,19 +70,33 @@ Error responses never turn into a fake zero balance or success rate.
 - `GET /analytics/v1/status` (analysis service)
 - `GET /analytics/v1/prices` and `PUT /analytics/v1/prices/{model}`
 
-Only masked key metadata is returned. Requests use an Authorization header;
-credentials never enter URL parameters, query-cache keys or the static build.
-Nginx serves the static frontend and proxies `/analytics/` to the analysis service.
-The analysis service validates the supplied administrator key against its configured
-uni-api gateway. Neither service persists the supplied gateway credential.
+Users sign in with a console username and password. The API stores bcrypt password
+hashes and hashed, revocable 30-day sessions in PostgreSQL. Cookies are HttpOnly,
+Secure and SameSite=Strict. The frontend never stores a source credential.
+
+Under Sources, add a name, uni-api URL and platform administrator key. Optional
+S3 read credentials connect that source's historical facts. The backend encrypts
+credentials with `CONTROL_MASTER_KEY`, validates platform access and proxies only
+observation endpoints. The default view combines sources; selecting a source
+scopes catalog, API keys, concurrency, balances and historical analytics. Same-name
+providers are separate rows. Shared upstream wallet totals must not be added across
+sources: these are account-level charges, not source-attributable request costs.
+
+Nginx proxies `/analytics/` including the original host for same-origin checks.
+The API supports `/v1/auth/me`, `/login`, `/logout`, `/password` under `/v1/auth`,
+source CRUD under `/v1/sources`, and authenticated source observation proxies.
+When account mode is disabled, a legacy direct-key connection remains available.
+Network failure never downgrades an enabled account service to legacy mode.
 
 ## Rebuildable analysis service
 
-`docker-compose.yml` contains the frontend and the Go analysis API. Provide the
+`docker-compose.yml` contains the frontend, Go analysis API and a private PostgreSQL service. Set `POSTGRES_PASSWORD`, a random `CONTROL_MASTER_KEY` (at least 32 characters), and initial `ADMIN_USERNAME` / `ADMIN_PASSWORD` (12–72 bytes). Bootstrap only creates the first administrator; change the password under Sources after signing in. Fugue may supply an independent managed PostgreSQL via `CONTROL_DATABASE_URL` instead of the compose database. Back up this database and the master key together. DuckDB remains a disposable local query cache.
+
+Provide the
 fact bucket through `S3_ENDPOINT`, `S3_BUCKET`, `S3_PREFIX` and a read-only AWS
 credential. Provide a separate private state bucket through `STATE_S3_ENDPOINT`,
 `STATE_S3_BUCKET`, `STATE_S3_PREFIX` and the `STATE_AWS_*` read-write credential.
-Both buckets belong to the same project; credentials are not included in the repo.
+Sources can use separate fact buckets/prefixes; credentials are not included in the repo.
 
 Operator prices live in a conditional S3 document. Concurrent changes return a
 conflict instead of overwriting a newer version. Every replica refreshes its price

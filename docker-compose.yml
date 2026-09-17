@@ -18,11 +18,15 @@ services:
     environment:
       LISTEN_ADDR: ":8080"
       DATA_DIR: /data
-      # The upstream address is explicit configuration and may point at any
-      # compatible uni-api gateway. The request key remains browser supplied.
+      # Used only by the legacy single-source mode. Account mode manages
+      # encrypted source credentials in PostgreSQL.
       UNI_API_URL: ${UNI_API_URL:-}
       ANALYTICS_TIMEZONE: ${ANALYTICS_TIMEZONE:-Asia/Shanghai}
-      SOURCE_ID: ${SOURCE_ID:-uni-api-console}
+      SOURCE_ID: ${SOURCE_ID:-primary}
+      CONTROL_DATABASE_URL: postgres://console:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/console?sslmode=disable
+      CONTROL_MASTER_KEY: ${CONTROL_MASTER_KEY:?set CONTROL_MASTER_KEY}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD}
       S3_ENDPOINT: ${S3_ENDPOINT:-}
       S3_BUCKET: ${S3_BUCKET:-}
       S3_PREFIX: ${S3_PREFIX:-uni-api-facts/v1/}
@@ -36,7 +40,10 @@ services:
       STATE_S3_PREFIX: ${STATE_S3_PREFIX:-analytics/v1}
       STATE_AWS_ACCESS_KEY_ID: ${STATE_AWS_ACCESS_KEY_ID:-}
       STATE_AWS_SECRET_ACCESS_KEY: ${STATE_AWS_SECRET_ACCESS_KEY:-}
-      REQUIRE_INITIAL_IMPORT: "true"
+      REQUIRE_INITIAL_IMPORT: ${REQUIRE_INITIAL_IMPORT:-false}
+    depends_on:
+      postgres:
+        condition: service_healthy
     # /data is a per-container query cache. Sharing one DuckDB file across old
     # and new replicas would prevent safe rolling updates.
     ports:
@@ -46,3 +53,20 @@ services:
       interval: 20s
       timeout: 3s
       retries: 5
+
+  postgres:
+    image: postgres:16-bookworm
+    environment:
+      POSTGRES_DB: console
+      POSTGRES_USER: console
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - console-control:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U console -d console"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+volumes:
+  console-control:

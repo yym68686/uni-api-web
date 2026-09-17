@@ -251,6 +251,7 @@ func (s *Service) proxySource(w http.ResponseWriter, r *http.Request) {
 					}
 					row["source_id"] = view.ID
 					row["source_name"] = view.Name
+					row["history_configured"] = view.HasStorage
 					if path == "/v1/api-keys" {
 						row["key_id"] = view.ID + "::" + fmt.Sprint(row["key_id"])
 					}

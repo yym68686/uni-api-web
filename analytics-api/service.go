@@ -51,7 +51,11 @@ func NewService(e *Engine, cfg Config) (*Service, error) {
 	if e == nil {
 		return nil, errors.New("engine required")
 	}
-	auth, err := newAuthorizer(cfg.Upstream)
+	upstream := cfg.Upstream
+	if upstream == "" && cfg.ControlMasterKey != "" {
+		upstream = "http://localhost"
+	}
+	auth, err := newAuthorizer(upstream)
 	if err != nil {
 		return nil, err
 	}

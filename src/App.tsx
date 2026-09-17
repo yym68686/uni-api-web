@@ -101,21 +101,120 @@ type Keys = {
 
 type View = "channels" | "balances" | "overview" | "prices" | "sources";
 
-function Overview({ metrics, rows, live }: { metrics?: Metrics; rows: Channel[]; live?: Map<string, number | null | undefined> }) {
+function Overview({
+  metrics,
+  rows,
+  live,
+}: {
+  metrics?: Metrics;
+  rows: Channel[];
+  live?: Map<string, number | null | undefined>;
+}) {
   const total = metrics?.total as Record<string, any> | undefined;
   const models = (metrics as any)?.models || [];
-  const currentConcurrency = live ? [...live.values()].reduce<number>((sum, value) => sum + (value || 0), 0) : null;
-  const cacheRate = total?.cache_rate ?? (total && total.input_tokens > 0 ? (total.cache_read_tokens || 0) / total.input_tokens : null);
-  return <motion.section {...reveal} className="overview-grid">
-    <MetricCard label="请求数量" value={count(total?.requests || 0)} sub="所选时间范围" icon={<Activity size={17} />} />
-    <MetricCard label="渠道尝试" value={count(total?.attempts || 0)} sub="包含重试与失败尝试" icon={<Radio size={17} />} accent />
-    <MetricCard label="Token 数量" value={count((total?.input_tokens || 0) + (total?.output_tokens || 0))} sub="输入 + 输出" icon={<Layers3 size={17} />} />
-    <MetricCard label="估算消费" value={total?.estimated_cost_usd == null ? "—" : `$${Number(total.estimated_cost_usd).toFixed(4)}`} sub="依据当前模型价格" icon={<Wallet size={17} />} />
-    <MetricCard label="当前并发" value={currentConcurrency == null ? "—" : count(currentConcurrency)} sub="实时渠道请求" icon={<Gauge size={17} />} />
-    <MetricCard label="缓存率" value={rate(cacheRate)} sub="缓存读取 / 输入 token" icon={<Database size={17} />} />
-    <div className="data-panel overview-panel"><div className="data-title"><Gauge size={18} /><h2>模型消费</h2></div><div className="overview-list">{models.length ? models.map((item: any) => <div className="overview-row" key={item.model}><strong>{item.model}</strong><span>{count((item.input_tokens || 0) + (item.output_tokens || 0))} tokens</span><b>{item.estimated_cost_usd == null ? "—" : `$${Number(item.estimated_cost_usd).toFixed(4)}`}</b></div>) : <Empty title="暂无模型事实" icon={<Activity size={22} />}>等待 S3 事实导入。</Empty>}</div></div>
-    <div className="data-panel overview-panel"><div className="data-title"><Radio size={18} /><h2>当前渠道</h2></div><div className="overview-list">{rows.slice(0, 12).map(row => <div className="overview-row" key={rowId(row)}><strong>{row.provider}</strong>{row.source_name&&<small className="source-label">{row.source_name}</small>}<span>{row.model}</span><b>{live?.get(rowId(row)) == null ? "—" : `${live.get(rowId(row))} 并发`}</b></div>)}</div></div>
-  </motion.section>;
+  const currentConcurrency = live
+    ? [...live.values()].reduce<number>((sum, value) => sum + (value || 0), 0)
+    : null;
+  const cacheRate =
+    total?.cache_rate ??
+    (total && total.input_tokens > 0
+      ? (total.cache_read_tokens || 0) / total.input_tokens
+      : null);
+  return (
+    <motion.section {...reveal} className="overview-grid">
+      <MetricCard
+        label="请求数量"
+        value={count(total?.requests || 0)}
+        sub="所选时间范围"
+        icon={<Activity size={17} />}
+      />
+      <MetricCard
+        label="渠道尝试"
+        value={count(total?.attempts || 0)}
+        sub="包含重试与失败尝试"
+        icon={<Radio size={17} />}
+        accent
+      />
+      <MetricCard
+        label="Token 数量"
+        value={count((total?.input_tokens || 0) + (total?.output_tokens || 0))}
+        sub="输入 + 输出"
+        icon={<Layers3 size={17} />}
+      />
+      <MetricCard
+        label="估算消费"
+        value={
+          total?.estimated_cost_usd == null
+            ? "—"
+            : `$${Number(total.estimated_cost_usd).toFixed(4)}`
+        }
+        sub="依据当前模型价格"
+        icon={<Wallet size={17} />}
+      />
+      <MetricCard
+        label="当前并发"
+        value={currentConcurrency == null ? "—" : count(currentConcurrency)}
+        sub="实时渠道请求"
+        icon={<Gauge size={17} />}
+      />
+      <MetricCard
+        label="缓存率"
+        value={rate(cacheRate)}
+        sub="缓存读取 / 输入 token"
+        icon={<Database size={17} />}
+      />
+      <div className="data-panel overview-panel">
+        <div className="data-title">
+          <Gauge size={18} />
+          <h2>模型消费</h2>
+        </div>
+        <div className="overview-list">
+          {models.length ? (
+            models.map((item: any) => (
+              <div className="overview-row" key={item.model}>
+                <strong>{item.model}</strong>
+                <span>
+                  {count((item.input_tokens || 0) + (item.output_tokens || 0))}{" "}
+                  tokens
+                </span>
+                <b>
+                  {item.estimated_cost_usd == null
+                    ? "—"
+                    : `$${Number(item.estimated_cost_usd).toFixed(4)}`}
+                </b>
+              </div>
+            ))
+          ) : (
+            <Empty title="暂无模型事实" icon={<Activity size={22} />}>
+              等待 S3 事实导入。
+            </Empty>
+          )}
+        </div>
+      </div>
+      <div className="data-panel overview-panel">
+        <div className="data-title">
+          <Radio size={18} />
+          <h2>当前渠道</h2>
+        </div>
+        <div className="overview-list">
+          {rows.slice(0, 12).map((row) => (
+            <div className="overview-row" key={rowId(row)}>
+              <strong>{row.provider}</strong>
+              {row.source_name && (
+                <small className="source-label">{row.source_name}</small>
+              )}
+              <span>{row.model}</span>
+              <b>
+                {live?.get(rowId(row)) == null
+                  ? "—"
+                  : `${live.get(rowId(row))} 并发`}
+              </b>
+            </div>
+          ))}
+        </div>
+      </div>
+    </motion.section>
+  );
 }
 
 const endpointChoices = [
@@ -133,17 +232,55 @@ const endpointChoices = [
 ];
 const streamLabel = (stream: string) =>
   stream === "true" ? "流式" : stream === "false" ? "非流式" : "全部请求";
-async function readMetrics(connection: Connection, path: string, signal: AbortSignal, endpoint: string, stream: string) {
- const source=new URLSearchParams(path.split("?")[1]||"");
- const range=source.get("window")||"15m";
- const keySource=source.get("api_key_id")?.split("::");
- if(connection.sourceId)source.set("source_id",connection.sourceId);else if(keySource && keySource.length>1)source.set("source_id",keySource[0]);
- source.delete("window"); source.set("range",range); source.delete("api_key_id");
- source.set("endpoint",endpoint); source.set("stream",stream);
- if (path.includes("timeseries")) source.set("timeseries","true");
- const result=await analyticsRequest<Metrics>(connection,"/analytics/v1/analytics?"+source.toString(),signal);
- if (!result || !result.total || !Array.isArray(result.data)) throw new Error("分析服务返回了无效统计数据。");
- return {...result,window_minutes: range==="24h"?1440:range==="7d"?10080:range==="30d"?43200:range==="today"?1440:range==="week"?10080:range==="month"?43200:range==="year"?525600:0,coverage:result.coverage||"partial",statistics_scope:"s3"};
+async function readMetrics(
+  connection: Connection,
+  path: string,
+  signal: AbortSignal,
+  endpoint: string,
+  stream: string,
+) {
+  const source = new URLSearchParams(path.split("?")[1] || "");
+  const range = source.get("window") || "15m";
+  const keySource = source.get("api_key_id")?.split("::");
+  if (connection.sourceId) source.set("source_id", connection.sourceId);
+  else if (keySource && keySource.length > 1)
+    source.set("source_id", keySource[0]);
+  source.delete("window");
+  source.set("range", range);
+  source.delete("api_key_id");
+  source.set("endpoint", endpoint);
+  source.set("stream", stream);
+  if (path.includes("timeseries")) source.set("timeseries", "true");
+  const result = await analyticsRequest<Metrics>(
+    connection,
+    "/analytics/v1/analytics?" + source.toString(),
+    signal,
+  );
+  if (!result || !result.total || !Array.isArray(result.data))
+    throw new Error("分析服务返回了无效统计数据。");
+  if (!connection.account)
+    result.data = result.data.map((row) => ({ ...row, source_id: undefined }));
+  return {
+    ...result,
+    window_minutes:
+      range === "24h"
+        ? 1440
+        : range === "7d"
+          ? 10080
+          : range === "30d"
+            ? 43200
+            : range === "today"
+              ? 1440
+              : range === "week"
+                ? 10080
+                : range === "month"
+                  ? 43200
+                  : range === "year"
+                    ? 525600
+                    : 0,
+    coverage: result.coverage || "partial",
+    statistics_scope: "s3",
+  };
 }
 async function readKeys(connection: Connection, signal: AbortSignal) {
   const keys = await request<Keys>(connection, "/v1/api-keys", signal);
@@ -158,9 +295,79 @@ async function readKeys(connection: Connection, signal: AbortSignal) {
 }
 
 function AccountForm({ onConnect }: { onConnect: () => void }) {
- const [username,setUsername]=useState(""),[password,setPassword]=useState(""),[pending,setPending]=useState(false),[error,setError]=useState("");
- async function submit(e:FormEvent){e.preventDefault();setPending(true);setError("");try{await controlRequest("/v1/auth/login",{method:"POST",body:JSON.stringify({username,password})});setPassword("");onConnect()}catch(e){setError(e instanceof ApiError && e.status===401?"用户名或密码错误。":e instanceof Error?e.message:"登录失败")}finally{setPending(false)}}
- return <form className="connection-form" onSubmit={submit}><label htmlFor="console-username">用户名</label><div className="input-wrap"><KeyRound size={18}/><input id="console-username" value={username} onChange={e=>setUsername(e.target.value)} autoComplete="username" required disabled={pending}/></div><label htmlFor="console-password">密码</label><div className="input-wrap"><ShieldCheck size={18}/><input id="console-password" type="password" value={password} onChange={e=>setPassword(e.target.value)} autoComplete="current-password" required disabled={pending}/></div>{error&&<div role="alert" className="error-banner">{error}</div>}<button className="button primary connect-button" disabled={pending}>{pending?<Spinner small/>:<>登录 <ArrowRight size={17}/></>}</button><p className="connection-help">账户会话保留 30 天。uni-api 密钥由服务端加密保存。</p></form>;
+  const [username, setUsername] = useState(""),
+    [password, setPassword] = useState(""),
+    [pending, setPending] = useState(false),
+    [error, setError] = useState("");
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setPending(true);
+    setError("");
+    try {
+      await controlRequest("/v1/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ username, password }),
+      });
+      setPassword("");
+      onConnect();
+    } catch (e) {
+      setError(
+        e instanceof ApiError && e.status === 401
+          ? "用户名或密码错误。"
+          : e instanceof Error
+            ? e.message
+            : "登录失败",
+      );
+    } finally {
+      setPending(false);
+    }
+  }
+  return (
+    <form className="connection-form" onSubmit={submit}>
+      <label htmlFor="console-username">用户名</label>
+      <div className="input-wrap">
+        <KeyRound size={18} />
+        <input
+          id="console-username"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          autoComplete="username"
+          required
+          disabled={pending}
+        />
+      </div>
+      <label htmlFor="console-password">密码</label>
+      <div className="input-wrap">
+        <ShieldCheck size={18} />
+        <input
+          id="console-password"
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          autoComplete="current-password"
+          required
+          disabled={pending}
+        />
+      </div>
+      {error && (
+        <div role="alert" className="error-banner">
+          {error}
+        </div>
+      )}
+      <button className="button primary connect-button" disabled={pending}>
+        {pending ? (
+          <Spinner small />
+        ) : (
+          <>
+            登录 <ArrowRight size={17} />
+          </>
+        )}
+      </button>
+      <p className="connection-help">
+        账户会话保留 30 天。uni-api 密钥由服务端加密保存。
+      </p>
+    </form>
+  );
 }
 function ConnectionForm({
   onConnect,
@@ -278,7 +485,6 @@ function ConnectionForm({
   );
 }
 
-
 const reveal = {
   initial: { opacity: 0, y: 12 },
   animate: { opacity: 1, y: 0 },
@@ -288,11 +494,11 @@ const reveal = {
 function Welcome({
   onConnect,
   error,
-  onLegacyConnect,
+  legacyForm,
 }: {
   onConnect: () => void;
   error: string;
-  onLegacyConnect?: (connection: Connection, keys: Keys) => void;
+  legacyForm?: ReactNode;
 }) {
   return (
     <div className="welcome">
@@ -373,9 +579,12 @@ function Welcome({
           </div>
           <h2>登录 uni-api console</h2>
           <p>使用账户管理多个 uni-api 来源，数据统一呈现。</p>
-          <AccountForm onConnect={onConnect} />
-          {onLegacyConnect && <details className="legacy-connect" open><summary>没有账户服务？使用单来源兼容连接</summary><p>仅用于旧版或尚未启用控制面的 uni-api。</p><ConnectionForm onConnect={onLegacyConnect} /></details>}
-          {error && <p role="alert" className="error-banner">{error}</p>}
+          {legacyForm || <AccountForm onConnect={onConnect} />}
+          {error && (
+            <p role="alert" className="error-banner">
+              {error}
+            </p>
+          )}
           <div className="connect-card-footer">
             <span className="tiny-dot" /> 多来源分析 · 安全账户会话
           </div>
@@ -582,7 +791,9 @@ function Trend({
     const maxPoints = 120;
     if (sorted.length <= maxPoints) return sorted;
     const stride = Math.ceil(sorted.length / maxPoints);
-    return sorted.filter((_, index) => index % stride === 0).slice(0, maxPoints);
+    return sorted
+      .filter((_, index) => index % stride === 0)
+      .slice(0, maxPoints);
   }, [series.data]);
   const max = Math.max(1, ...points.map(([, p]) => p.success + p.failed));
   return (
@@ -841,16 +1052,32 @@ function Guide({ open, onClose }: { open: boolean; onClose: () => void }) {
 function Dashboard({
   connection: baseConnection,
   disconnect,
+  changeConnection,
 }: {
   connection: Connection;
   disconnect: (reason?: string) => void;
   changeConnection: () => void;
 }) {
-  const [filters,setFilters]=useState(()=>loadFilters(baseConnection.base));
- const sourceQuery=useQuery({queryKey:["sources",baseConnection.session],queryFn:()=>controlRequest<{data:ConsoleSource[]}>("/v1/sources"),enabled:!!baseConnection.account});
- const sourceList=sourceQuery.data?.data||[];
- const selectedSourceId=filters.sourceId;
- const connection=useMemo(()=>({...baseConnection,sourceId:selectedSourceId||undefined,session:baseConnection.session+":"+(selectedSourceId||"all")}),[baseConnection,selectedSourceId]);
+  const [filters, setFilters] = useState(() =>
+    loadFilters(baseConnection.base),
+  );
+  const sourceQuery = useQuery({
+    queryKey: ["sources", baseConnection.session],
+    queryFn: () => controlRequest<{ data: ConsoleSource[] }>("/v1/sources"),
+    enabled: !!baseConnection.account,
+  });
+  const sourceList = sourceQuery.data?.data || [];
+  const selectedSourceId = filters.sourceId;
+  const connection = useMemo(
+    () => ({
+      ...baseConnection,
+      sourceId: selectedSourceId || undefined,
+      session: baseConnection.account
+        ? baseConnection.session + ":" + (selectedSourceId || "all")
+        : baseConnection.session,
+    }),
+    [baseConnection, selectedSourceId],
+  );
   const {
     keyId,
     model,
@@ -915,17 +1142,32 @@ function Dashboard({
     queryKey: ["catalog", connection.session, keyId, endpoint, stream],
     queryFn: ({ signal }) =>
       request<Catalog>(connection, "/v1/model-channels?" + params, signal),
-    enabled: keysLoaded && !keyRemoved && (!baseConnection.account || sourceList.length>0),
+    enabled:
+      keysLoaded &&
+      !keyRemoved &&
+      (!baseConnection.account || sourceList.length > 0),
   });
   const prices = useQuery({
     queryKey: ["prices", connection.session],
-    queryFn: ({ signal }) => analyticsRequest<{ data: ModelPrice[] }>(connection, "/analytics/v1/prices", signal),
+    queryFn: ({ signal }) =>
+      analyticsRequest<{ data: ModelPrice[] }>(
+        connection,
+        "/analytics/v1/prices",
+        signal,
+      ),
     enabled: keysLoaded && view === "prices",
     staleTime: 60_000,
   });
   const metrics = useQuery({
     queryKey: ["metrics", connection.session, keyId, window, endpoint, stream],
-    queryFn: ({ signal }) => readMetrics(connection,"/v1/channel-metrics?" + params,signal,endpoint,stream),
+    queryFn: ({ signal }) =>
+      readMetrics(
+        connection,
+        "/v1/channel-metrics?" + params,
+        signal,
+        endpoint,
+        stream,
+      ),
     staleTime: 30_000,
     enabled: keysLoaded && !keyRemoved && !!catalog.data,
     refetchInterval: auto ? 30_000 : false,
@@ -933,16 +1175,36 @@ function Dashboard({
   });
   const liveMetrics = useQuery({
     queryKey: ["live-metrics", connection.session, keyId, endpoint, stream],
-    queryFn: ({ signal }) => request<Metrics>(connection, "/v1/channel-metrics?" + channelParams(keyId, "1m", "", endpoint, stream), signal),
-    enabled: keysLoaded && !keyRemoved && !!catalog.data && (view === "overview" || view === "channels"),
+    queryFn: ({ signal }) =>
+      request<Metrics>(
+        connection,
+        "/v1/channel-metrics?" +
+          channelParams(keyId, "1m", "", endpoint, stream),
+        signal,
+      ),
+    enabled:
+      keysLoaded &&
+      !keyRemoved &&
+      !!catalog.data &&
+      (view === "overview" || view === "channels"),
     staleTime: 2_000,
     refetchInterval: auto ? 5_000 : false,
     refetchIntervalInBackground: false,
   });
-  const liveMap = useMemo(() => new Map((liveMetrics.data?.data || []).map(row => [rowId(row), row.stats?.inflight])), [liveMetrics.data]);
+  const liveMap = useMemo(
+    () =>
+      new Map(
+        (liveMetrics.data?.data || []).map((row) => [
+          rowId(row),
+          row.stats?.inflight,
+        ]),
+      ),
+    [liveMetrics.data],
+  );
   const queryClient = useQueryClient();
   useEffect(() => {
-    if (!keysLoaded || keyRemoved || !catalog.data || view !== "channels") return;
+    if (!keysLoaded || keyRemoved || !catalog.data || view !== "channels")
+      return;
     const windows = ranges.map(([value]) => value);
     const controller = new AbortController();
     void (async () => {
@@ -950,19 +1212,49 @@ function Dashboard({
       // windows wait behind every earlier range, so switching to month/year/all
       // could miss the one-second interaction target even though each DuckDB
       // query itself was fast.
-      await Promise.all(windows.filter((next) => next !== window).map(async (next) => {
-        if (controller.signal.aborted) return;
-        const key = ["metrics", connection.session, keyId, next, endpoint, stream];
-        if (queryClient.getQueryData(key)) return;
-        await queryClient.prefetchQuery({
-          queryKey: key,
-          queryFn: ({ signal }) => readMetrics(connection, "/v1/channel-metrics?" + channelParams(keyId, next, "", endpoint, stream), signal, endpoint, stream),
-          staleTime: 30_000,
-        });
-      }));
+      await Promise.all(
+        windows
+          .filter((next) => next !== window)
+          .map(async (next) => {
+            if (controller.signal.aborted) return;
+            const key = [
+              "metrics",
+              connection.session,
+              keyId,
+              next,
+              endpoint,
+              stream,
+            ];
+            if (queryClient.getQueryData(key)) return;
+            await queryClient.prefetchQuery({
+              queryKey: key,
+              queryFn: ({ signal }) =>
+                readMetrics(
+                  connection,
+                  "/v1/channel-metrics?" +
+                    channelParams(keyId, next, "", endpoint, stream),
+                  signal,
+                  endpoint,
+                  stream,
+                ),
+              staleTime: 30_000,
+            });
+          }),
+      );
     })();
     return () => controller.abort();
-  }, [keysLoaded, keyRemoved, catalog.data, view, connection, keyId, endpoint, stream, window, queryClient]);
+  }, [
+    keysLoaded,
+    keyRemoved,
+    catalog.data,
+    view,
+    connection,
+    keyId,
+    endpoint,
+    stream,
+    window,
+    queryClient,
+  ]);
   const models = useMemo(
     () => [...new Set(catalog.data?.data.map((row) => row.model) || [])].sort(),
     [catalog.data],
@@ -975,11 +1267,20 @@ function Dashboard({
     ]),
   ].sort();
   const modelRemoved = !!model && !!catalog.data && !models.includes(model);
-  const error = keyRemoved
-    ? "所选 API key 已移除，请重新选择。"
-    : modelRemoved
-      ? "当前 API key 未配置所选模型，请重新选择模型。"
-      : keys.error?.message || metrics.error?.message || catalog.error?.message;
+  const sourceRemoved =
+    !!selectedSourceId &&
+    !!sourceQuery.data &&
+    !sourceList.some((source) => source.id === selectedSourceId);
+  const error =
+    sourceQuery.error?.message ||
+    (sourceRemoved ? "所选来源已移除，请重新选择。" : "") ||
+    (keyRemoved
+      ? "所选 API key 已移除，请重新选择。"
+      : modelRemoved
+        ? "当前 API key 未配置所选模型，请重新选择模型。"
+        : keys.error?.message ||
+          metrics.error?.message ||
+          catalog.error?.message);
   const rows = useMemo(
     () =>
       error
@@ -993,10 +1294,7 @@ function Dashboard({
     () => new Map(rows.map((row, i) => [rowId(row), i + 1])),
     [rows],
   );
-  const providers = useMemo(
-    () => [...new Set(rows.map(providerId))],
-    [rows],
-  );
+  const providers = useMemo(() => [...new Set(rows.map(providerId))], [rows]);
   const actualRange = useMemo(() => actualCostRange(window), [window]);
   const limit = useMemo(() => makeLimiter(3), []);
   const balanceQueries = useQueries({
@@ -1013,13 +1311,21 @@ function Dashboard({
         limit(
           () =>
             request<Balance>(
-              {...connection,sourceId:JSON.parse(provider)[0]||connection.sourceId},
-              "/v1/channel-balances?" + new URLSearchParams({
-                provider:JSON.parse(provider)[1],
-                ...(model ? { model } : {}),
-                ...(actualRange.startDate ? { start_date: actualRange.startDate } : {}),
-                ...(actualRange.endDate ? { end_date: actualRange.endDate } : {}),
-              }),
+              {
+                ...connection,
+                sourceId: JSON.parse(provider)[0] || connection.sourceId,
+              },
+              "/v1/channel-balances?" +
+                new URLSearchParams({
+                  provider: JSON.parse(provider)[1],
+                  ...(model ? { model } : {}),
+                  ...(actualRange.startDate
+                    ? { start_date: actualRange.startDate }
+                    : {}),
+                  ...(actualRange.endDate
+                    ? { end_date: actualRange.endDate }
+                    : {}),
+                }),
               signal,
             ),
           signal,
@@ -1080,7 +1386,11 @@ function Dashboard({
   function reload() {
     void keys.refetch();
     void liveMetrics.refetch();
-    if (keysLoaded && !keyRemoved) {
+    if (
+      keysLoaded &&
+      !keyRemoved &&
+      (!connection.account || sourceList.length > 0)
+    ) {
       void catalog.refetch();
       void metrics.refetch();
     }
@@ -1097,7 +1407,10 @@ function Dashboard({
       <Brand />
       <div className="workspace-label">WORKSPACE</div>
       <nav aria-label="主导航">
-        <button className={view === "overview" ? "active" : ""} onClick={() => selectView("overview")}>
+        <button
+          className={view === "overview" ? "active" : ""}
+          onClick={() => selectView("overview")}
+        >
           <Gauge size={18} /> 总览
         </button>
         <button
@@ -1107,7 +1420,10 @@ function Dashboard({
           <LayoutDashboard size={18} />
           渠道观测<span className="nav-shortcut">⌘ 1</span>
         </button>
-        <button className={view === "prices" ? "active" : ""} onClick={() => selectView("prices")}>
+        <button
+          className={view === "prices" ? "active" : ""}
+          onClick={() => selectView("prices")}
+        >
           <SlidersHorizontal size={18} /> 价格设置
         </button>
         <button
@@ -1118,7 +1434,15 @@ function Dashboard({
           余额管理
           {lowCount > 0 && <span className="nav-count">{lowCount}</span>}
         </button>
-        <button className={view === "sources" ? "active" : ""} onClick={()=>selectView("sources")}><Server size={18}/>来源设置</button>
+        {baseConnection.account && (
+          <button
+            className={view === "sources" ? "active" : ""}
+            onClick={() => selectView("sources")}
+          >
+            <Server size={18} />
+            来源设置
+          </button>
+        )}
       </nav>
       <div className="sidebar-insight">
         <div className="insight-icon">
@@ -1204,10 +1528,39 @@ function Dashboard({
             </button>
             <span>工作空间</span>
             <ChevronRight size={13} />
-            <strong>{view === "channels" ? "渠道观测" : view === "balances" ? "余额管理" : view === "overview" ? "总览" : view === "sources" ? "来源设置" : "价格设置"}</strong>
+            <strong>
+              {view === "channels"
+                ? "渠道观测"
+                : view === "balances"
+                  ? "余额管理"
+                  : view === "overview"
+                    ? "总览"
+                    : view === "sources"
+                      ? "来源设置"
+                      : "价格设置"}
+            </strong>
           </div>
           <div className="topbar-actions">
-            {sourceList.length > 0 && <label className="source-switcher"><Server size={14} /><select aria-label="uni-api 来源" value={selectedSourceId} onChange={e => { setFilter("sourceId", e.target.value); setFilter("keyId", ""); }}><option value="">全部来源</option>{sourceList.map(source => <option value={source.id} key={source.id}>{source.name}</option>)}</select></label>}
+            {sourceList.length > 0 && (
+              <label className="source-switcher">
+                <Server size={14} />
+                <select
+                  aria-label="uni-api 来源"
+                  value={selectedSourceId}
+                  onChange={(e) => {
+                    setFilter("sourceId", e.target.value);
+                    setFilter("keyId", "");
+                  }}
+                >
+                  <option value="">全部来源</option>
+                  {sourceList.map((source) => (
+                    <option value={source.id} key={source.id}>
+                      {source.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <span className="topbar-service">
               <span className="tiny-dot" />
               {new URL(connection.base).hostname}
@@ -1221,7 +1574,9 @@ function Dashboard({
             </button>
             <button
               className="avatar"
-              onClick={()=>setView("sources")}
+              onClick={() =>
+                baseConnection.account ? setView("sources") : changeConnection()
+              }
               aria-label="管理服务连接"
             >
               U
@@ -1229,19 +1584,34 @@ function Dashboard({
           </div>
         </header>
         <main className="workspace">
-          {!!catalog.data?.unavailable_sources?.length && <div role="alert" className="error-banner">来源暂不可用：{catalog.data.unavailable_sources.join("、")}。当前结果不完整。</div>}
+          {!!catalog.data?.unavailable_sources?.length && (
+            <div role="alert" className="error-banner">
+              来源暂不可用：{catalog.data.unavailable_sources.join("、")}
+              。当前结果不完整。
+            </div>
+          )}
           <motion.div {...reveal} className="page-heading">
             <div>
               <span className="eyebrow">OBSERVE. UNDERSTAND. OPTIMIZE.</span>
               <h1>
                 {view === "channels"
                   ? "每条渠道，尽在视野。"
-                  : view === "balances" ? "余额有数，调用有底。" : view === "overview" ? "全局请求，一眼掌握。" : view === "sources" ? "多个来源，一个工作台。" : "模型价格，按你的口径计算。"}
+                  : view === "balances"
+                    ? "余额有数，调用有底。"
+                    : view === "overview"
+                      ? "全局请求，一眼掌握。"
+                      : view === "sources"
+                        ? "多个来源，一个工作台。"
+                        : "模型价格，按你的口径计算。"}
               </h1>
               <p>
                 {view === "channels"
                   ? "从可用性到首输出，了解模型请求的每一步。"
-                  : view === "balances" ? "独立查看每个渠道的上游余额与额度。" : view === "overview" ? "消费、请求、token 与缓存率来自 S3 事实聚合。" : "价格按每百万 token 计，保存后用于后续估算。"}
+                  : view === "balances"
+                    ? "独立查看每个渠道的上游余额与额度。"
+                    : view === "overview"
+                      ? "消费、请求、token 与缓存率来自 S3 事实聚合。"
+                      : "价格按每百万 token 计，保存后用于后续估算。"}
               </p>
             </div>
             <button
@@ -1253,508 +1623,578 @@ function Dashboard({
               刷新数据
             </button>
           </motion.div>
-          {baseConnection.account && (view === "sources" || sourceList.length===0) ? (<SourceSettings sources={sourceList} onSaved={()=>{void sourceQuery.refetch();void queryClient.invalidateQueries({queryKey:["keys"]})}}/>) : view === "prices" ? (
-            <PriceSettings prices={prices.data?.data || []} loading={prices.isPending} error={prices.error?.message} connection={connection} onSaved={() => void prices.refetch()} />
+          {baseConnection.account &&
+          (view === "sources" || sourceList.length === 0) ? (
+            <SourceSettings
+              sources={sourceList}
+              onSaved={() => {
+                void sourceQuery.refetch();
+                void queryClient.invalidateQueries({ queryKey: ["keys"] });
+                void queryClient.invalidateQueries({ queryKey: ["catalog"] });
+                void queryClient.invalidateQueries({ queryKey: ["metrics"] });
+              }}
+            />
+          ) : view === "prices" ? (
+            <PriceSettings
+              prices={prices.data?.data || []}
+              loading={prices.isPending}
+              error={prices.error?.message}
+              connection={connection}
+              onSaved={() => void prices.refetch()}
+            />
           ) : view === "overview" ? (
             <Overview metrics={metrics.data} rows={rows} live={liveMap} />
-          ) : <motion.section
-            {...reveal}
-            transition={{ delay: 0.04 }}
-            className="metric-grid"
-          >
-            <MetricCard
-              label="观测渠道"
-              value={count(stats.providers)}
-              sub={`${count(new Set(rows.map((r) => r.model)).size)} 个模型 · 当前筛选范围`}
-              icon={<Layers3 size={17} />}
-            />
-            <MetricCard
-              label="可用渠道"
-              value={`${stats.eligible} / ${stats.providers}`}
-              sub={
-                endpoint === "all"
-                  ? "按渠道整体冷却与凭据状态"
-                  : "至少一个模型当前可路由"
-              }
-              icon={<Radio size={17} />}
-              accent
-            />
-            <MetricCard
-              label="渠道成功率"
-              value={rate(stats.successRate)}
-              sub={`${count(stats.success)} 成功 / ${count(stats.completed)} 次已完成尝试`}
-              icon={<CheckCheck size={17} />}
-            />
-            <MetricCard
-              label="余额不足"
-              value={count(lowCount)}
-              sub={
-                pendingBalances
-                  ? `${pendingBalances} 个渠道余额查询中`
-                  : "全部密钥均确认余额或额度不足"
-              }
-              icon={<Wallet size={17} />}
-            />
-          </motion.section>}
-          {view === "channels" || view === "balances" ? <section className="data-panel">
-            <div className="data-heading">
-              <div className="data-title">
-                <span className="section-icon">
-                  {view === "channels" ? (
-                    <Activity size={19} />
-                  ) : (
-                    <Wallet size={19} />
-                  )}
-                </span>
-                <h2>{view === "channels" ? "渠道表现" : "渠道余额"}</h2>
-                <span className="count-badge">{count(total)}</span>
-              </div>
-              <div className="data-actions">
-                {view === "channels" && (
-                  <button
-                    className={`button small ghost ${showTrend ? "selected" : ""}`}
-                    onClick={() => setShowTrend(!showTrend)}
-                  >
-                    <Activity size={15} />
-                    {showTrend ? "收起趋势" : "查看趋势"}
-                  </button>
-                )}
-                <label className="auto-refresh">
-                  <input
-                    type="checkbox"
-                    checked={auto}
-                    onChange={(e) => setAuto(e.target.checked)}
-                  />
-                  <span />
-                  自动刷新
-                </label>
-                <Tip text="每 30 秒刷新渠道指标；余额最多缓存 5 分钟。页面后台暂停自动刷新。">
-                  <CircleHelp size={14} className="muted" />
-                </Tip>
-              </div>
-            </div>
-            <div className="filters">
-              <div className="search-field">
-                <Search size={17} />
-                <input
-                  aria-label="搜索渠道或模型"
-                  placeholder="搜索渠道、模型…"
-                  value={search}
-                  onChange={(e) => setFilter("search", e.target.value)}
-                />
-                {search && (
-                  <button
-                    className="icon-button"
-                    onClick={() => setFilter("search", "")}
-                    aria-label="清除搜索"
-                  >
-                    <X size={14} />
-                  </button>
-                )}
-              </div>
-              <div className="select-field">
-                <KeyRound size={15} />
-                <select
-                  aria-label="API key 筛选"
-                  value={keyId}
-                  onChange={(e) => setFilter("keyId", e.target.value)}
-                >
-                  <option value="">全部渠道 · 配置顺序</option>
-                  {keyRemoved && (
-                    <option value={keyId}>已移除的 API key</option>
-                  )}
-                  {keys.data?.data.map((key) => (
-                    <option key={key.key_id} value={key.key_id}>
-                      {key.source_name ? `${key.source_name} · ` : ""}Key {key.position} · {key.prefix}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown size={13} />
-              </div>
-              <div className="select-field model-select">
-                <Layers3 size={15} />
-                <select
-                  aria-label="模型筛选"
-                  value={model}
-                  onChange={(e) => setFilter("model", e.target.value)}
-                >
-                  <option value="">全部模型</option>
-                  {modelRemoved && (
-                    <option value={model}>{model} · 未配置</option>
-                  )}
-                  {models.map((name) => (
-                    <option key={name}>{name}</option>
-                  ))}
-                </select>
-                <ChevronDown size={13} />
-              </div>
-              <div className="window-tabs" aria-label="统计窗口">
-                {ranges.map(([value, label]) => (
-                  <button
-                    key={value}
-                    aria-pressed={window === value}
-                    className={window === value ? "active" : ""}
-                    onClick={() => setFilter("window", value)}
-                  >
-                    {window === value && (
-                      <motion.span
-                        className="window-highlight"
-                        layoutId="window-tab"
-                        transition={{
-                          type: "spring",
-                          stiffness: 500,
-                          damping: 38,
-                        }}
-                      />
+          ) : (
+            <motion.section
+              {...reveal}
+              transition={{ delay: 0.04 }}
+              className="metric-grid"
+            >
+              <MetricCard
+                label="观测渠道"
+                value={count(stats.providers)}
+                sub={`${count(new Set(rows.map((r) => r.model)).size)} 个模型 · 当前筛选范围`}
+                icon={<Layers3 size={17} />}
+              />
+              <MetricCard
+                label="可用渠道"
+                value={`${stats.eligible} / ${stats.providers}`}
+                sub={
+                  endpoint === "all"
+                    ? "按渠道整体冷却与凭据状态"
+                    : "至少一个模型当前可路由"
+                }
+                icon={<Radio size={17} />}
+                accent
+              />
+              <MetricCard
+                label="渠道成功率"
+                value={rate(stats.successRate)}
+                sub={`${count(stats.success)} 成功 / ${count(stats.completed)} 次已完成尝试`}
+                icon={<CheckCheck size={17} />}
+              />
+              <MetricCard
+                label="余额不足"
+                value={count(lowCount)}
+                sub={
+                  pendingBalances
+                    ? `${pendingBalances} 个渠道余额查询中`
+                    : "全部密钥均确认余额或额度不足"
+                }
+                icon={<Wallet size={17} />}
+              />
+            </motion.section>
+          )}
+          {view === "channels" || view === "balances" ? (
+            <section className="data-panel">
+              <div className="data-heading">
+                <div className="data-title">
+                  <span className="section-icon">
+                    {view === "channels" ? (
+                      <Activity size={19} />
+                    ) : (
+                      <Wallet size={19} />
                     )}
-                    <span>{label}</span>
-                  </button>
-                ))}
+                  </span>
+                  <h2>{view === "channels" ? "渠道表现" : "渠道余额"}</h2>
+                  <span className="count-badge">{count(total)}</span>
+                </div>
+                <div className="data-actions">
+                  {view === "channels" && (
+                    <button
+                      className={`button small ghost ${showTrend ? "selected" : ""}`}
+                      onClick={() => setShowTrend(!showTrend)}
+                    >
+                      <Activity size={15} />
+                      {showTrend ? "收起趋势" : "查看趋势"}
+                    </button>
+                  )}
+                  <label className="auto-refresh">
+                    <input
+                      type="checkbox"
+                      checked={auto}
+                      onChange={(e) => setAuto(e.target.checked)}
+                    />
+                    <span />
+                    自动刷新
+                  </label>
+                  <Tip text="每 30 秒刷新渠道指标；余额最多缓存 5 分钟。页面后台暂停自动刷新。">
+                    <CircleHelp size={14} className="muted" />
+                  </Tip>
+                </div>
               </div>
-            </div>
-            <div className="filter-secondary">
-              <div className="filter-chips">
-                <div className="inline-select">
-                  <Globe2 size={13} />
+              <div className="filters">
+                <div className="search-field">
+                  <Search size={17} />
+                  <input
+                    aria-label="搜索渠道或模型"
+                    placeholder="搜索渠道、模型…"
+                    value={search}
+                    onChange={(e) => setFilter("search", e.target.value)}
+                  />
+                  {search && (
+                    <button
+                      className="icon-button"
+                      onClick={() => setFilter("search", "")}
+                      aria-label="清除搜索"
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+                <div className="select-field">
+                  <KeyRound size={15} />
                   <select
-                    aria-label="端点筛选"
-                    value={endpoint}
-                    onChange={(e) => setFilter("endpoint", e.target.value)}
+                    aria-label="API key 筛选"
+                    value={keyId}
+                    onChange={(e) => setFilter("keyId", e.target.value)}
                   >
-                    <option value="all">全部端点</option>
-                    {endpoints.map((path) => (
-                      <option key={path} value={path}>
-                        {path}
+                    <option value="">全部渠道 · 配置顺序</option>
+                    {keyRemoved && (
+                      <option value={keyId}>已移除的 API key</option>
+                    )}
+                    {keys.data?.data.map((key) => (
+                      <option key={key.key_id} value={key.key_id}>
+                        {key.source_name ? `${key.source_name} · ` : ""}Key{" "}
+                        {key.position} · {key.prefix}
                       </option>
                     ))}
                   </select>
-                  <ChevronDown size={12} />
+                  <ChevronDown size={13} />
                 </div>
-                <div className="inline-select">
-                  <Radio size={13} />
+                <div className="select-field model-select">
+                  <Layers3 size={15} />
                   <select
-                    aria-label="流式状态筛选"
-                    value={stream}
-                    onChange={(e) => setFilter("stream", e.target.value)}
+                    aria-label="模型筛选"
+                    value={model}
+                    onChange={(e) => setFilter("model", e.target.value)}
                   >
-                    <option value="all">全部流式状态</option>
-                    <option value="true">流式</option>
-                    <option value="false">非流式</option>
+                    <option value="">全部模型</option>
+                    {modelRemoved && (
+                      <option value={model}>{model} · 未配置</option>
+                    )}
+                    {models.map((name) => (
+                      <option key={name}>{name}</option>
+                    ))}
                   </select>
-                  <ChevronDown size={12} />
+                  <ChevronDown size={13} />
                 </div>
-                <button
-                  className={`filter-chip ${balanceFilter ? "active" : ""}`}
-                  aria-pressed={!!balanceFilter}
-                  onClick={() =>
-                    setFilter("balanceFilter", balanceFilter ? "" : "low")
-                  }
-                >
-                  <Wallet size={13} />
-                  余额不足{balanceFilter && <X size={12} />}
-                </button>
-                <div className="inline-select">
-                  <Filter size={13} />
-                  <select
-                    aria-label="渠道状态筛选"
-                    value={statusFilter}
-                    onChange={(e) => setFilter("statusFilter", e.target.value)}
-                  >
-                    <option value="">全部状态</option>
-                    <option value="eligible">可用渠道</option>
-                    <option value="unavailable">不可用渠道</option>
-                  </select>
-                  <ChevronDown size={12} />
-                </div>
-                <div className="inline-select">
-                  <SlidersHorizontal size={13} />
-                  <select
-                    aria-label="排序"
-                    value={sort}
-                    onChange={(e) => setFilter("sort", e.target.value)}
-                  >
-                    <option value="config">
-                      {keyId ? "API key 顺序" : "Provider 顺序"}
-                    </option>
-                    <option value="success">成功率从高到低</option>
-                    <option value="latency">首输出从低到高</option>
-                    <option value="wait">请求前等待从低到高</option>
-                  </select>
-                  <ChevronDown size={12} />
-                </div>
-                {hasFilters && (
-                  <button
-                    className="filter-chip"
-                    onClick={() => {
-                      setFilters({ ...defaultFilters });
-                      setPage(0);
-                    }}
-                  >
-                    <X size={12} /> 重置筛选
-                  </button>
-                )}
-              </div>
-              <span className="scope-label">
-                <span className="tiny-dot" />{" "}
-                {endpoint === "all" ? "全部端点" : endpoint} ·{" "}
-                {streamLabel(stream)}{" "}
-                <Tip text="统计所选端点与流式范围内的渠道整体尝试。API key 筛选决定渠道集合与顺序，不是该 key 的独立用量。全部端点的可用状态表示渠道整体冷却和凭据状态。">
-                  <CircleHelp size={13} />
-                </Tip>
-              </span>
-            </div>
-            {metrics.data?.import && !metrics.data.import.caught_up && <div className="coverage-note" role="status"><Clock3 size={14} />{metrics.data.import.error_class ? `采集异常：${metrics.data.import.error_class}` : `正在同步历史事实，剩余 ${count(metrics.data.import.remaining_objects || 0)} 个对象；当前统计尚不完整。`}</div>}
-            {metrics.data?.coverage === "partial" && (
-              <div className="coverage-note">
-                <Clock3 size={14} />
-                {metrics.data.dropped
-                  ? "部分指标因容量限制未收集，请结合日志核对。"
-                  : `实例于 ${time(metrics.data.collection_started_at)} 开始采集，当前窗口覆盖尚不完整。`}
-              </div>
-            )}
-            {error ? (
-              <div role="alert" className="table-error">
-                <Unplug size={26} />
-                <h3>暂时无法读取渠道</h3>
-                <p>{error}</p>
-                <button className="button" onClick={reload}>
-                  重新读取
-                </button>
-              </div>
-            ) : metrics.isPending ? (
-              <div className="table-skeleton" aria-label="加载渠道">
-                <div className="skeleton skeleton-header" />
-                {Array.from({ length: 7 }, (_, i) => (
-                  <div className="skeleton skeleton-row" key={i} />
-                ))}
-              </div>
-            ) : total === 0 ? (
-              <Empty
-                title={
-                  pendingBalances && balanceFilter
-                    ? "正在确认渠道余额"
-                    : "没有匹配的渠道"
-                }
-                icon={<Search size={26} />}
-              >
-                {pendingBalances && balanceFilter
-                  ? `还有 ${pendingBalances} 个渠道正在查询，结果到达后会自动显示。`
-                  : "尝试调整模型、余额状态，或清除搜索条件。"}
-              </Empty>
-            ) : view === "channels" ? (
-              <div className="table-scroll">
-                <table className="channel-table">
-                  <thead>
-                    <tr>
-                      <th className="rank">#</th>
-                      <th>渠道 / 模型</th>
-                      <th>状态</th>
-                      <th>当前并发</th>
-                      <th>
-                        <Tip text="成功与失败的渠道尝试分别计数，重试不是新的用户请求。">
-                          成功率 <CircleHelp size={12} />
-                        </Tip>
-                      </th>
-                      <th>尝试数</th>
-                      <th>
-                        <Tip text="请求进入 uni-api → 渠道 HTTP 发起前。包含前序重试耗时，悬停或展开查看详情。">
-                          请求前等待 <small>p50</small>
-                        </Tip>
-                      </th>
-                      <th>
-                        首输出 <small>p50 / p95</small>
-                      </th>
-                      <th>Token / 缓存率</th>
-                      <th>估算消费</th>
-                      <th>
-                        <Tip text="来自上游 sub2api 的 actual_cost，按日历日统计；充值增加不会计入消费。5 分钟、15 分钟和 1 小时窗口没有可验证的上游小时账单。">
-                          实际消费 <CircleHelp size={12} />
-                        </Tip>
-                      </th>
-                      <th>余额 / 额度</th>
-                      <th aria-label="详情" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pageRows.map((row) => {
-                      const balance = balanceMap.get(providerId(row));
-                      const success = row.stats?.success_rate;
-                      return (
-                        <tr key={rowId(row)}>
-                          <td className="rank mono">
-                            {String(rowRanks.get(rowId(row))).padStart(2, "0")}
-                          </td>
-                          <td>
-                            <button
-                              className="channel-link"
-                              onClick={() => setDetailId(rowId(row))}
-                            >
-                              <span className="provider-avatar">
-                                {row.provider.slice(0, 1).toUpperCase()}
-                              </span>
-                              <span>
-                                <strong>{row.provider}</strong>{row.source_name&&<small className="source-label">{row.source_name}</small>}
-                                <small>{row.model}</small>
-                              </span>
-                            </button>
-                          </td>
-                          <td>
-                            <Status row={row} />
-                          </td>
-                          <td className="mono">
-                            {liveMap.get(rowId(row)) == null ? "—" : liveMap.get(rowId(row))}
-                          </td>
-                          <td>
-                            <div className="success-cell">
-                              <span
-                                className={`mono ${success == null ? "muted" : success < 0.5 ? "negative" : ""}`}
-                              >
-                                {rate(success)}
-                              </span>
-                              <span className="rate-track">
-                                <i
-                                  className={
-                                    success != null && success < 0.5
-                                      ? "low"
-                                      : ""
-                                  }
-                                  style={{ width: `${(success || 0) * 100}%` }}
-                                />
-                              </span>
-                            </div>
-                          </td>
-                          <td className="mono">
-                            {count(row.stats?.success_rate_denominator || 0)}
-                          </td>
-                          <td>
-                            <Timing
-                              value={row.stats?.request_to_dispatch}
-                              wait
-                            />
-                          </td>
-                          <td>
-                            <div className="dual-metric">
-                              <Timing value={row.stats?.first_output} />
-                              <span className="muted mono">
-                                {ms(row.stats?.first_output?.p95_ms)}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="mono">{row.stats?.usage_samples ? count((row.stats.input_tokens || 0) + (row.stats.output_tokens || 0)) : "—"}<small className="usage-cache">{rate(row.stats?.cache_rate)}</small></td>
-                          <td className="mono">{usd(row.stats?.estimated_cost_usd)}</td>
-                          <td className="mono">
-                            {!actualRange.supported
-                              ? <Tip text="sub2api 只提供按日聚合的 actual_cost，当前滚动窗口不显示整日金额。"><span className="muted">按日</span></Tip>
-                              : balance?.isPending && !balance.data
-                                ? <span className="muted">查询中</span>
-                                : balance?.data?.actual_cost_usd == null
-                                  ? <span className="muted">—</span>
-                                  : usd(balance.data.actual_cost_usd)}
-                          </td>
-                          <td>
-                            <BalanceValue
-                              balance={balance?.data}
-                              loading={balance?.isPending}
-                              failed={balance?.isError}
-                            />
-                          </td>
-                          <td>
-                            <button
-                              className="row-arrow icon-button"
-                              onClick={() => setDetailId(rowId(row))}
-                              aria-label={`查看 ${row.provider} ${row.model} 详情`}
-                            >
-                              <ArrowUpRight size={16} />
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div className="balance-grid">
-                {pageProviders.map((provider) => {
-                  const balance = balanceMap.get(provider);
-                  const providerName=JSON.parse(provider)[1];
-                  const sourceName=rows.find(row=>providerId(row)===provider)?.source_name;
-                  return (
-                    <article
-                      className={`balance-card ${balanceIsLow(balance?.data) ? "low-balance" : ""}`}
-                      key={provider}
+                <div className="window-tabs" aria-label="统计窗口">
+                  {ranges.map(([value, label]) => (
+                    <button
+                      key={value}
+                      aria-pressed={window === value}
+                      className={window === value ? "active" : ""}
+                      onClick={() => setFilter("window", value)}
                     >
-                      <div className="balance-card-top">
-                        <span className="provider-avatar">
-                          {providerName[0].toUpperCase()}
-                        </span>
-                        <span>
-                          <strong>{providerName}</strong><small>{sourceName}</small>
-                          <small>
-                            {
-                              rows.filter((row) => providerId(row) === provider)
-                                .length
-                            }{" "}
-                            个模型
-                          </small>
-                        </span>
-                        {balanceIsLow(balance?.data) && (
-                          <span className="status-pill cooling">余额不足</span>
-                        )}
-                      </div>
-                      <BalanceValue
-                        balance={balance?.data}
-                        loading={balance?.isPending}
-                        failed={balance?.isError}
-                        detail
-                      />
-                      <div className="balance-card-footer">
-                        <Clock3 size={12} />
-                        {balance?.data?.keys?.[0]?.checked_at
-                          ? `查询于 ${time(balance.data.keys[0].checked_at)}`
-                          : "等待有效余额数据"}
-                      </div>
-                    </article>
-                  );
-                })}
+                      {window === value && (
+                        <motion.span
+                          className="window-highlight"
+                          layoutId="window-tab"
+                          transition={{
+                            type: "spring",
+                            stiffness: 500,
+                            damping: 38,
+                          }}
+                        />
+                      )}
+                      <span>{label}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
-            )}
-            <div className="table-footer">
-              <span>
-                {error
-                  ? "数据不可用"
-                  : `显示 ${total ? currentPage * 25 + 1 : 0}–${Math.min((currentPage + 1) * 25, total)}，共 ${count(total)} ${view === "channels" ? "个模型 / 渠道组合" : "个渠道"}`}
-                {pendingBalances > 0 && (
-                  <span className="footer-pending">
-                    <Spinner small />
-                    余额查询 {providers.length - pendingBalances}/
-                    {providers.length}
-                  </span>
-                )}
-              </span>
-              <div className="pagination">
-                <button
-                  className="icon-button"
-                  disabled={currentPage === 0}
-                  onClick={() => setPage(currentPage - 1)}
-                  aria-label="上一页"
-                >
-                  <ChevronLeft size={16} />
-                </button>
-                <span>
-                  {currentPage + 1} <span className="muted">/ {pageCount}</span>
+              <div className="filter-secondary">
+                <div className="filter-chips">
+                  <div className="inline-select">
+                    <Globe2 size={13} />
+                    <select
+                      aria-label="端点筛选"
+                      value={endpoint}
+                      onChange={(e) => setFilter("endpoint", e.target.value)}
+                    >
+                      <option value="all">全部端点</option>
+                      {endpoints.map((path) => (
+                        <option key={path} value={path}>
+                          {path}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown size={12} />
+                  </div>
+                  <div className="inline-select">
+                    <Radio size={13} />
+                    <select
+                      aria-label="流式状态筛选"
+                      value={stream}
+                      onChange={(e) => setFilter("stream", e.target.value)}
+                    >
+                      <option value="all">全部流式状态</option>
+                      <option value="true">流式</option>
+                      <option value="false">非流式</option>
+                    </select>
+                    <ChevronDown size={12} />
+                  </div>
+                  <button
+                    className={`filter-chip ${balanceFilter ? "active" : ""}`}
+                    aria-pressed={!!balanceFilter}
+                    onClick={() =>
+                      setFilter("balanceFilter", balanceFilter ? "" : "low")
+                    }
+                  >
+                    <Wallet size={13} />
+                    余额不足{balanceFilter && <X size={12} />}
+                  </button>
+                  <div className="inline-select">
+                    <Filter size={13} />
+                    <select
+                      aria-label="渠道状态筛选"
+                      value={statusFilter}
+                      onChange={(e) =>
+                        setFilter("statusFilter", e.target.value)
+                      }
+                    >
+                      <option value="">全部状态</option>
+                      <option value="eligible">可用渠道</option>
+                      <option value="unavailable">不可用渠道</option>
+                    </select>
+                    <ChevronDown size={12} />
+                  </div>
+                  <div className="inline-select">
+                    <SlidersHorizontal size={13} />
+                    <select
+                      aria-label="排序"
+                      value={sort}
+                      onChange={(e) => setFilter("sort", e.target.value)}
+                    >
+                      <option value="config">
+                        {keyId ? "API key 顺序" : "Provider 顺序"}
+                      </option>
+                      <option value="success">成功率从高到低</option>
+                      <option value="latency">首输出从低到高</option>
+                      <option value="wait">请求前等待从低到高</option>
+                    </select>
+                    <ChevronDown size={12} />
+                  </div>
+                  {hasFilters && (
+                    <button
+                      className="filter-chip"
+                      onClick={() => {
+                        setFilters({ ...defaultFilters });
+                        setPage(0);
+                      }}
+                    >
+                      <X size={12} /> 重置筛选
+                    </button>
+                  )}
+                </div>
+                <span className="scope-label">
+                  <span className="tiny-dot" />{" "}
+                  {endpoint === "all" ? "全部端点" : endpoint} ·{" "}
+                  {streamLabel(stream)}{" "}
+                  <Tip text="统计所选端点与流式范围内的渠道整体尝试。API key 筛选决定渠道集合与顺序，不是该 key 的独立用量。全部端点的可用状态表示渠道整体冷却和凭据状态。">
+                    <CircleHelp size={13} />
+                  </Tip>
                 </span>
-                <button
-                  className="icon-button"
-                  disabled={currentPage + 1 >= pageCount}
-                  onClick={() => setPage(currentPage + 1)}
-                  aria-label="下一页"
-                >
-                  <ChevronRight size={16} />
-                </button>
               </div>
-            </div>
-          </section> : null}
+              {metrics.data?.import && !metrics.data.import.caught_up && (
+                <div className="coverage-note" role="status">
+                  <Clock3 size={14} />
+                  {metrics.data.import.error_class
+                    ? `采集异常：${metrics.data.import.error_class}`
+                    : `正在同步历史事实，剩余 ${count(metrics.data.import.remaining_objects || 0)} 个对象；当前统计尚不完整。`}
+                </div>
+              )}
+              {metrics.data?.coverage === "partial" && (
+                <div className="coverage-note">
+                  <Clock3 size={14} />
+                  {metrics.data.dropped
+                    ? "部分指标因容量限制未收集，请结合日志核对。"
+                    : `实例于 ${time(metrics.data.collection_started_at)} 开始采集，当前窗口覆盖尚不完整。`}
+                </div>
+              )}
+              {error ? (
+                <div role="alert" className="table-error">
+                  <Unplug size={26} />
+                  <h3>暂时无法读取渠道</h3>
+                  <p>{error}</p>
+                  <button className="button" onClick={reload}>
+                    重新读取
+                  </button>
+                </div>
+              ) : metrics.isPending ? (
+                <div className="table-skeleton" aria-label="加载渠道">
+                  <div className="skeleton skeleton-header" />
+                  {Array.from({ length: 7 }, (_, i) => (
+                    <div className="skeleton skeleton-row" key={i} />
+                  ))}
+                </div>
+              ) : total === 0 ? (
+                <Empty
+                  title={
+                    pendingBalances && balanceFilter
+                      ? "正在确认渠道余额"
+                      : "没有匹配的渠道"
+                  }
+                  icon={<Search size={26} />}
+                >
+                  {pendingBalances && balanceFilter
+                    ? `还有 ${pendingBalances} 个渠道正在查询，结果到达后会自动显示。`
+                    : "尝试调整模型、余额状态，或清除搜索条件。"}
+                </Empty>
+              ) : view === "channels" ? (
+                <div className="table-scroll">
+                  <table className="channel-table">
+                    <thead>
+                      <tr>
+                        <th className="rank">#</th>
+                        <th>渠道 / 模型</th>
+                        <th>状态</th>
+                        <th>当前并发</th>
+                        <th>
+                          <Tip text="成功与失败的渠道尝试分别计数，重试不是新的用户请求。">
+                            成功率 <CircleHelp size={12} />
+                          </Tip>
+                        </th>
+                        <th>尝试数</th>
+                        <th>
+                          <Tip text="请求进入 uni-api → 渠道 HTTP 发起前。包含前序重试耗时，悬停或展开查看详情。">
+                            请求前等待 <small>p50</small>
+                          </Tip>
+                        </th>
+                        <th>
+                          首输出 <small>p50 / p95</small>
+                        </th>
+                        <th>Token / 缓存率</th>
+                        <th>估算消费</th>
+                        <th>
+                          <Tip text="来自上游 sub2api 的 actual_cost，按日历日统计；充值增加不会计入消费。5 分钟、15 分钟和 1 小时窗口没有可验证的上游小时账单。">
+                            实际消费 <CircleHelp size={12} />
+                          </Tip>
+                        </th>
+                        <th>余额 / 额度</th>
+                        <th aria-label="详情" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pageRows.map((row) => {
+                        const balance = balanceMap.get(providerId(row));
+                        const success = row.stats?.success_rate;
+                        return (
+                          <tr key={rowId(row)}>
+                            <td className="rank mono">
+                              {String(rowRanks.get(rowId(row))).padStart(
+                                2,
+                                "0",
+                              )}
+                            </td>
+                            <td>
+                              <button
+                                className="channel-link"
+                                onClick={() => setDetailId(rowId(row))}
+                              >
+                                <span className="provider-avatar">
+                                  {row.provider.slice(0, 1).toUpperCase()}
+                                </span>
+                                <span>
+                                  <strong>{row.provider}</strong>
+                                  {row.source_name && (
+                                    <small className="source-label">
+                                      {row.source_name}
+                                    </small>
+                                  )}
+                                  <small>{row.model}</small>
+                                </span>
+                              </button>
+                            </td>
+                            <td>
+                              <Status row={row} />
+                            </td>
+                            <td className="mono">
+                              {liveMap.get(rowId(row)) == null
+                                ? "—"
+                                : liveMap.get(rowId(row))}
+                            </td>
+                            <td>
+                              <div className="success-cell">
+                                <span
+                                  className={`mono ${success == null ? "muted" : success < 0.5 ? "negative" : ""}`}
+                                >
+                                  {rate(success)}
+                                </span>
+                                <span className="rate-track">
+                                  <i
+                                    className={
+                                      success != null && success < 0.5
+                                        ? "low"
+                                        : ""
+                                    }
+                                    style={{
+                                      width: `${(success || 0) * 100}%`,
+                                    }}
+                                  />
+                                </span>
+                              </div>
+                            </td>
+                            <td className="mono">
+                              {row.history_configured === false
+                                ? "未接入"
+                                : count(
+                                    row.stats?.success_rate_denominator || 0,
+                                  )}
+                            </td>
+                            <td>
+                              <Timing
+                                value={row.stats?.request_to_dispatch}
+                                wait
+                              />
+                            </td>
+                            <td>
+                              <div className="dual-metric">
+                                <Timing value={row.stats?.first_output} />
+                                <span className="muted mono">
+                                  {ms(row.stats?.first_output?.p95_ms)}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="mono">
+                              {row.stats?.usage_samples
+                                ? count(
+                                    (row.stats.input_tokens || 0) +
+                                      (row.stats.output_tokens || 0),
+                                  )
+                                : "—"}
+                              <small className="usage-cache">
+                                {rate(row.stats?.cache_rate)}
+                              </small>
+                            </td>
+                            <td className="mono">
+                              {usd(row.stats?.estimated_cost_usd)}
+                            </td>
+                            <td className="mono">
+                              {!actualRange.supported ? (
+                                <Tip text="sub2api 只提供按日聚合的 actual_cost，当前滚动窗口不显示整日金额。">
+                                  <span className="muted">按日</span>
+                                </Tip>
+                              ) : balance?.isPending && !balance.data ? (
+                                <span className="muted">查询中</span>
+                              ) : balance?.data?.actual_cost_usd == null ? (
+                                <span className="muted">—</span>
+                              ) : (
+                                usd(balance.data.actual_cost_usd)
+                              )}
+                            </td>
+                            <td>
+                              <BalanceValue
+                                balance={balance?.data}
+                                loading={balance?.isPending}
+                                failed={balance?.isError}
+                              />
+                            </td>
+                            <td>
+                              <button
+                                className="row-arrow icon-button"
+                                onClick={() => setDetailId(rowId(row))}
+                                aria-label={`查看 ${row.provider} ${row.model} 详情`}
+                              >
+                                <ArrowUpRight size={16} />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="balance-grid">
+                  {pageProviders.map((provider) => {
+                    const balance = balanceMap.get(provider);
+                    const providerName = JSON.parse(provider)[1];
+                    const sourceName = rows.find(
+                      (row) => providerId(row) === provider,
+                    )?.source_name;
+                    return (
+                      <article
+                        className={`balance-card ${balanceIsLow(balance?.data) ? "low-balance" : ""}`}
+                        key={provider}
+                      >
+                        <div className="balance-card-top">
+                          <span className="provider-avatar">
+                            {providerName[0].toUpperCase()}
+                          </span>
+                          <span>
+                            <strong>{providerName}</strong>
+                            <small>{sourceName}</small>
+                            <small>
+                              {
+                                rows.filter(
+                                  (row) => providerId(row) === provider,
+                                ).length
+                              }{" "}
+                              个模型
+                            </small>
+                          </span>
+                          {balanceIsLow(balance?.data) && (
+                            <span className="status-pill cooling">
+                              余额不足
+                            </span>
+                          )}
+                        </div>
+                        <BalanceValue
+                          balance={balance?.data}
+                          loading={balance?.isPending}
+                          failed={balance?.isError}
+                          detail
+                        />
+                        <div className="balance-card-footer">
+                          <Clock3 size={12} />
+                          {balance?.data?.keys?.[0]?.checked_at
+                            ? `查询于 ${time(balance.data.keys[0].checked_at)}`
+                            : "等待有效余额数据"}
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+              <div className="table-footer">
+                <span>
+                  {error
+                    ? "数据不可用"
+                    : `显示 ${total ? currentPage * 25 + 1 : 0}–${Math.min((currentPage + 1) * 25, total)}，共 ${count(total)} ${view === "channels" ? "个模型 / 渠道组合" : "个渠道"}`}
+                  {pendingBalances > 0 && (
+                    <span className="footer-pending">
+                      <Spinner small />
+                      余额查询 {providers.length - pendingBalances}/
+                      {providers.length}
+                    </span>
+                  )}
+                </span>
+                <div className="pagination">
+                  <button
+                    className="icon-button"
+                    disabled={currentPage === 0}
+                    onClick={() => setPage(currentPage - 1)}
+                    aria-label="上一页"
+                  >
+                    <ChevronLeft size={16} />
+                  </button>
+                  <span>
+                    {currentPage + 1}{" "}
+                    <span className="muted">/ {pageCount}</span>
+                  </span>
+                  <button
+                    className="icon-button"
+                    disabled={currentPage + 1 >= pageCount}
+                    onClick={() => setPage(currentPage + 1)}
+                    aria-label="下一页"
+                  >
+                    <ChevronRight size={16} />
+                  </button>
+                </div>
+              </div>
+            </section>
+          ) : null}
           <AnimatePresence>
             {showTrend && view === "channels" && !error && (
               <Trend
@@ -1807,9 +2247,12 @@ function Dashboard({
   );
 }
 
-function LegacyConsole() {
-  const [connection, setConnection] = useState<Connection | null>(loadConnection);
+export function LegacyConsole() {
+  const [connection, setConnection] = useState<Connection | null>(
+    loadConnection,
+  );
   const [error, setError] = useState("");
+  const [change, setChange] = useState(false);
   const client = useQueryClient();
   const connected = (next: Connection, keys: Keys) => {
     client.clear();
@@ -1817,58 +2260,141 @@ function LegacyConsole() {
     saveConnection(next);
     setConnection(next);
     setError("");
+    setChange(false);
   };
-  const disconnect = useCallback((reason = "") => {
-    client.clear();
-    clearConnection();
-    setConnection(null);
-    setError(reason);
-    document.documentElement.dataset.theme = "light";
-  }, [client]);
-  if (!connection) return <ConnectionForm onConnect={connected} initialError={error} />;
-  return <Dashboard connection={connection} disconnect={disconnect} changeConnection={() => setConnection(null)} />;
+  const disconnect = useCallback(
+    (reason = "") => {
+      client.clear();
+      clearConnection();
+      setConnection(null);
+      setError(reason);
+      setChange(false);
+      document.documentElement.dataset.theme = "light";
+    },
+    [client],
+  );
+  return (
+    <>
+      {connection ? (
+        <Dashboard
+          connection={connection}
+          disconnect={disconnect}
+          changeConnection={() => setChange(true)}
+        />
+      ) : (
+        <Welcome
+          onConnect={() => {}}
+          error={error}
+          legacyForm={<ConnectionForm onConnect={connected} />}
+        />
+      )}
+      <Dialog.Root open={change} onOpenChange={setChange}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="dialog-overlay" />
+          <Dialog.Content className="connection-dialog">
+            <Dialog.Title>切换服务连接</Dialog.Title>
+            <Dialog.Description>验证成功后切换连接。</Dialog.Description>
+            <ConnectionForm
+              compact
+              initialBase={connection?.base}
+              onConnect={connected}
+            />
+            <Dialog.Close className="button">取消</Dialog.Close>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+    </>
+  );
 }
 
-function TestLegacyApp() {
-  const [connection, setConnection] = useState<Connection | null>(loadConnection);
-  const client = useQueryClient();
-  const connected = (next: Connection, keys: Keys) => {
-    client.clear();
-    client.setQueryData(["keys", next.session], keys);
-    saveConnection(next);
-    setConnection(next);
-  };
-  const disconnect = useCallback((reason = "") => {
-    client.clear();
-    clearConnection();
-    setConnection(null);
-    if (reason) {
-      // The legacy test harness exercises the same visible error path as the
-      // production compatibility connection.
-      document.body.dataset.connectionError = reason;
-    }
-  }, [client]);
-  return connection
-    ? <Dashboard connection={connection} disconnect={disconnect} changeConnection={() => setConnection(null)} />
-    : <div className="legacy-test-login"><ConnectionForm onConnect={connected} initialError={document.body.dataset.connectionError || ""} /></div>;
-}
-
+type AccountSession = {
+  enabled: boolean;
+  authenticated: boolean;
+  username: string;
+};
 export default function App() {
-  if (import.meta.env.MODE === "test") return <TestLegacyApp />;
   const client = useQueryClient();
-  const [legacyConnection, setLegacyConnection] = useState<Connection | null>(loadConnection);
-  const [accountHint] = useState(() => { try { return !loadConnection() && localStorage.getItem("uni-console-account") === "1"; } catch { return false; } });
-  const auth = useQuery({ queryKey: ["account"], queryFn: () => controlRequest<{ enabled: boolean; authenticated: boolean; username: string }>("/v1/auth/me"), retry: false, enabled: accountHint });
-  const disconnect = useCallback(async () => {
-    await controlRequest("/v1/auth/logout", { method: "POST", body: "{}" });
-    try { localStorage.removeItem("uni-console-account"); } catch { /* optional */ }
-    client.clear();
-    void auth.refetch();
-  }, [client, auth.refetch]);
-  const connection = useMemo<Connection>(() => ({ base: globalThis.location.origin, key: "", session: auth.data?.username || "account", account: true }), [auth.data?.username]);
-  if (legacyConnection) return <Dashboard connection={legacyConnection} disconnect={() => { clearConnection(); setLegacyConnection(null); }} changeConnection={() => setLegacyConnection(null)} />;
-  if (auth.isPending && accountHint) return <div className="auth-loading"><Spinner /> 正在恢复会话…</div>;
-  if (auth.isError) return <LegacyConsole />;
-  if (!auth.data?.authenticated) return <Welcome onConnect={() => { try { localStorage.setItem("uni-console-account", "1"); } catch { /* optional */ } client.clear(); void auth.refetch(); }} onLegacyConnect={(connection, keys) => { client.setQueryData(["keys", connection.session], keys); setLegacyConnection(connection); }} error={!auth.data?.enabled ? "" : ""} />;
-  return <Dashboard connection={connection} disconnect={() => void disconnect()} changeConnection={() => {}} />;
+  const [error, setError] = useState("");
+  const auth = useQuery({
+    queryKey: ["account"],
+    queryFn: () => controlRequest<AccountSession>("/v1/auth/me"),
+    retry: false,
+    staleTime: 30_000,
+  });
+  const connection = useMemo<Connection>(
+    () => ({
+      base: globalThis.location.origin,
+      key: "",
+      session: auth.data?.username || "account",
+      account: true,
+    }),
+    [auth.data?.username],
+  );
+  const disconnect = useCallback(
+    async (reason = "") => {
+      try {
+        await controlRequest("/v1/auth/logout", { method: "POST", body: "{}" });
+      } catch (e) {
+        if (!(e instanceof ApiError && e.status === 401)) {
+          setError("退出失败，请重试。服务端会话尚未撤销。");
+          return;
+        }
+      }
+      await client.cancelQueries();
+      client.removeQueries({
+        predicate: (query) => query.queryKey[0] !== "account",
+      });
+      client.setQueryData<AccountSession>(["account"], {
+        enabled: true,
+        authenticated: false,
+        username: "",
+      });
+      setError(reason);
+    },
+    [client],
+  );
+  useEffect(() => {
+    if (auth.data?.enabled) clearConnection();
+  }, [auth.data?.enabled]);
+  if (auth.isPending)
+    return (
+      <div className="auth-loading">
+        <Spinner /> 正在恢复会话…
+      </div>
+    );
+  if (auth.isError)
+    return (
+      <div className="auth-loading" role="alert">
+        账户服务暂不可用。
+        <button className="button" onClick={() => void auth.refetch()}>
+          重试
+        </button>
+      </div>
+    );
+  if (!auth.data.enabled) return <LegacyConsole />;
+  if (!auth.data.authenticated)
+    return (
+      <Welcome
+        onConnect={() => {
+          setError("");
+          void auth.refetch();
+        }}
+        error={error}
+      />
+    );
+  return (
+    <>
+      {error && (
+        <div role="alert" className="error-banner">
+          {error}
+          <button onClick={() => void disconnect()}>重试退出</button>
+        </div>
+      )}
+      <Dashboard
+        connection={connection}
+        disconnect={(reason) => void disconnect(reason)}
+        changeConnection={() => {}}
+      />
+    </>
+  );
 }

@@ -82,10 +82,8 @@ export const reasonLabel: Record<string, string> = {
   no_provider_key: "无密钥",
 };
 export function summarize(rows: Channel[]) {
-  const providers = new Set(rows.map((row) => row.provider));
-  const eligible = new Set(
-    rows.filter((row) => row.eligible).map((row) => row.provider),
-  );
+  const providers = new Set(rows.map(providerId));
+  const eligible = new Set(rows.filter((row) => row.eligible).map(providerId));
   const completed = rows.reduce(
     (sum, row) => sum + (row.stats?.success_rate_denominator || 0),
     0,
@@ -100,4 +98,5 @@ export function summarize(rows: Channel[]) {
   };
 }
 
-export const providerId = (row: Pick<Channel,"source_id"|"provider">) => JSON.stringify([row.source_id || "",row.provider]);
+export const providerId = (row: Pick<Channel, "source_id" | "provider">) =>
+  JSON.stringify([row.source_id || "", row.provider]);

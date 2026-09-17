@@ -6,8 +6,8 @@ export interface Connection {
   account?: boolean;
 }
 export interface KeyInfo {
- source_id?: string;
- source_name?: string;
+  source_id?: string;
+  source_name?: string;
   key_id: string;
   prefix: string;
   position: number;
@@ -41,8 +41,9 @@ export interface Stats {
   last_success_at: number | null;
 }
 export interface Channel {
- source_id?: string;
- source_name?: string;
+  history_configured?: boolean;
+  source_id?: string;
+  source_name?: string;
   provider: string;
   model: string;
   upstream_model: string;
@@ -55,7 +56,7 @@ export interface Channel {
   points?: (Stats & { timestamp: number; covered: boolean })[];
 }
 export interface Catalog {
- unavailable_sources?: string[];
+  unavailable_sources?: string[];
   data: Channel[];
   snapshot_revision: string;
 }
@@ -71,7 +72,12 @@ export interface Metrics extends Catalog {
   collection_started_at: number;
   order: string;
   statistics_scope: string;
-  import?: { caught_up: boolean; remaining_objects: number; error_class?: string; last_scan_ms?: number };
+  import?: {
+    caught_up: boolean;
+    remaining_objects: number;
+    error_class?: string;
+    last_scan_ms?: number;
+  };
   total?: Record<string, any>;
   models?: Record<string, any>[];
 }

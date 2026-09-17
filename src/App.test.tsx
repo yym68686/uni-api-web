@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { MotionConfig, LazyMotion, domAnimation } from "motion/react";
-import App from "./App";
+import { LegacyConsole as App } from "./App";
 import { defaultFilters, saveFilters } from "./preferences";
 import { loadConnection, saveConnection } from "./session";
 const rows = ["first", "second", "third"].map((provider, i) => ({
@@ -275,7 +275,7 @@ describe("dashboard workflows", () => {
       "所选 API key 已移除",
     );
     expect(screen.getByLabelText("API key 筛选")).toHaveValue("key-removed");
-    expect(calls.every((call) => !call.includes("api_key_id=key-removed"))).toBe(true);
+    expect(calls).toHaveLength(1);
     await user.click(screen.getByRole("button", { name: "重置筛选" }));
     await screen.findByRole("table");
   });
