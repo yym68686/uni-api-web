@@ -3,12 +3,15 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestChannelCheckTargetsAndVerdicts(t *testing.T) {
@@ -123,15 +126,82 @@ func TestChannelCheckPersistenceAndAuthorization(t *testing.T) {
 			t.Fatal(w.Code, w.Body.String())
 		}
 	}
-	tx, err := store.db.Begin()
+	if _, err = store.db.Exec(`INSERT INTO console_channel_check_runs(source_id,provider,run_id,expires_at) VALUES('check-a','same-name','busy',now()+interval '70 seconds')`); err != nil {
+		t.Fatal(err)
+	}
+	defer store.db.Exec(`DELETE FROM console_channel_check_runs WHERE source_id='check-a'`)
+	if w := request("POST", "/v1/sources/check-a/channel-checks", true); w.Code != 409 {
+		t.Fatal("duplicate check not rejected", w.Code)
+	}
+}
+
+func TestChannelChecksRunAllConcurrentlyWithoutHoldingDBConnections(t *testing.T) {
+	dsn := os.Getenv("TEST_CONTROL_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("local PostgreSQL required")
+	}
+	store, err := newControlStore(dsn, strings.Repeat("m", 32))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer tx.Rollback()
-	if _, err = tx.Exec(`SELECT pg_advisory_xact_lock(hashtextextended($1,91701))`, "check-a\x1fsame-name"); err != nil {
+	defer store.Close()
+	const count = 12
+	started := make(chan struct{}, count)
+	release := make(chan struct{})
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	defer unblock()
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			writeJSON(w, 200, map[string]any{"capabilities": map[string]bool{"targeted_responses": true}})
+			return
+		}
+		started <- struct{}{}
+		select {
+		case <-release:
+		case <-r.Context().Done():
+			return
+		}
+		writeJSON(w, 200, map[string]any{"status": "completed", "output": []any{map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "未知"}}}}})
+	}))
+	defer upstream.Close()
+	defer unblock()
+	_, err = store.saveSource(context.Background(), controlSource{sourceView: sourceView{ID: "concurrent", Name: "concurrent", Base: upstream.URL}, Key: "test-secret"}, false)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if w := request("POST", "/v1/sources/check-a/channel-checks", true); w.Code != 409 {
-		t.Fatal("duplicate check not rejected", w.Code)
+	service, _ := NewService(stateTestEngine(t), Config{Upstream: upstream.URL})
+	service.control = store
+	token, err := store.newSession(context.Background(), "checker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := make(chan int, count)
+	for i := 0; i < count; i++ {
+		go func(i int) {
+			r := httptest.NewRequest("POST", "/v1/sources/concurrent/channel-checks", strings.NewReader(fmt.Sprintf(`{"provider":"channel-%d"}`, i)))
+			r.Header.Set("Content-Type", "application/json")
+			r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
+			w := httptest.NewRecorder()
+			service.Handler().ServeHTTP(w, r)
+			results <- w.Code
+		}(i)
+	}
+	deadline := time.After(10 * time.Second)
+	for i := 0; i < count; i++ {
+		select {
+		case <-started:
+		case <-deadline:
+			t.Fatalf("only %d of %d channels started together", i, count)
+		}
+	}
+	if store.db.Stats().InUse != 0 {
+		t.Error("database connections held during upstream checks")
+	}
+	unblock()
+	for i := 0; i < count; i++ {
+		if status := <-results; status != 200 {
+			t.Errorf("status %d", status)
+		}
 	}
 }

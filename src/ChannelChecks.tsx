@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, X, CircleHelp, Play, ScanLine, Square } from "lucide-react";
-import { controlRequest, makeLimiter } from "./api";
+import { controlRequest } from "./api";
 import { providerId, time } from "./format";
 import type { Channel } from "./types";
 import { Spinner } from "./ui";
@@ -40,16 +40,17 @@ export function useChannelChecks(session: string, enabled: boolean) {
   );
   const active = useRef(new Set<string>());
   const controller = useRef(new AbortController());
-  const limit = useRef(makeLimiter(2));
-  const stopQueue = useRef(false);
+  const batchController = useRef<AbortController | null>(null);
   useEffect(() => {
     const abort = new AbortController();
     controller.current = abort;
     return () => abort.abort();
   }, [session]);
-  async function run(row: Channel) {
+  async function run(row: Channel, batchSignal?: AbortSignal) {
     const id = providerId(row),
-      signal = controller.current.signal;
+      signal = batchSignal
+        ? AbortSignal.any([controller.current.signal, batchSignal])
+        : controller.current.signal;
     if (active.current.has(id) || !row.source_id || !enabled || signal.aborted)
       return;
     active.current.add(id);
@@ -61,17 +62,14 @@ export function useChannelChecks(session: string, enabled: boolean) {
     });
     try {
       await client.cancelQueries({ queryKey });
-      const result = await limit.current(
-        () =>
-          controlRequest<ChannelCheck>(
-            `/v1/sources/${encodeURIComponent(row.source_id!)}/channel-checks`,
-            {
-              method: "POST",
-              body: JSON.stringify({ provider: row.provider }),
-              signal: AbortSignal.any([signal, AbortSignal.timeout(60_000)]),
-            },
-          ),
-        signal,
+      signal.throwIfAborted();
+      const result = await controlRequest<ChannelCheck>(
+        `/v1/sources/${encodeURIComponent(row.source_id!)}/channel-checks`,
+        {
+          method: "POST",
+          body: JSON.stringify({ provider: row.provider }),
+          signal: AbortSignal.any([signal, AbortSignal.timeout(60_000)]),
+        },
       );
       client.setQueryData<{ data: ChannelCheck[] }>(queryKey, (previous) => ({
         data: [
@@ -95,32 +93,30 @@ export function useChannelChecks(session: string, enabled: boolean) {
         );
     } finally {
       active.current.delete(id);
-      if (!signal.aborted) setPending(new Set(active.current));
+      if (!controller.current.signal.aborted)
+        setPending(new Set(active.current));
     }
   }
   async function runAll(rows: Channel[]) {
-    if (batch || active.current.size || !enabled) return;
+    if (batchController.current || active.current.size || !enabled) return;
     const queue = checkTargets(rows);
-    let next = 0,
-      done = 0;
-    stopQueue.current = false;
+    const abort = new AbortController();
+    batchController.current = abort;
+    let done = 0;
     setBatch({ done, total: queue.length });
-    await Promise.all(
-      Array.from({ length: 2 }, async () => {
-        while (
-          next < queue.length &&
-          !controller.current.signal.aborted &&
-          !stopQueue.current
-        ) {
-          const row = queue[next++];
-          await run(row);
+    try {
+      await Promise.all(
+        queue.map(async (row) => {
+          await run(row, abort.signal);
           done++;
           if (!controller.current.signal.aborted)
             setBatch({ done, total: queue.length });
-        }
-      }),
-    );
-    if (!controller.current.signal.aborted) setBatch(null);
+        }),
+      );
+    } finally {
+      batchController.current = null;
+      if (!controller.current.signal.aborted) setBatch(null);
+    }
   }
   const results = new Map(
     (query.data?.data || []).map((item) => [providerId(item), item]),
@@ -133,7 +129,7 @@ export function useChannelChecks(session: string, enabled: boolean) {
     run,
     runAll,
     stop: () => {
-      stopQueue.current = true;
+      batchController.current?.abort();
     },
     error: query.error,
     refetch: query.refetch,
@@ -159,7 +155,7 @@ export function CheckActions({
       {checks.batch ? (
         <button className="button small" onClick={checks.stop}>
           <Square size={14} />
-          停止后续检测
+          停止检测
         </button>
       ) : (
         <button

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -172,13 +173,6 @@ func (s *Service) checkChannel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "无效渠道", 400)
 		return
 	}
-	select {
-	case s.checkSlots <- struct{}{}:
-		defer func() { <-s.checkSlots }()
-	default:
-		http.Error(w, "已有检测进行中，请稍后重试", 429)
-		return
-	}
 	ctx, cancel := context.WithTimeout(r.Context(), 50*time.Second)
 	defer cancel()
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(55 * time.Second))
@@ -187,29 +181,32 @@ func (s *Service) checkChannel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "来源不存在", 404)
 		return
 	}
-	tx, err := s.control.db.BeginTx(ctx, nil)
+	// A short-lived database lease prevents duplicate checks across replicas
+	// without holding a database connection during the upstream request.
+	runID := randomID()
+	var claimed string
+	err = s.control.db.QueryRowContext(ctx, `INSERT INTO console_channel_check_runs(source_id,provider,run_id,expires_at) VALUES($1,$2,$3,now()+interval '70 seconds') ON CONFLICT(source_id,provider) DO UPDATE SET run_id=excluded.run_id,expires_at=excluded.expires_at WHERE console_channel_check_runs.expires_at < now() RETURNING run_id`, src.ID, in.Provider, runID).Scan(&claimed)
+	if err == sql.ErrNoRows {
+		http.Error(w, "该渠道已有检测进行中", 409)
+		return
+	}
 	if err != nil {
 		http.Error(w, "检测记录暂不可用", 503)
 		return
 	}
-	defer tx.Rollback()
-	var locked bool
-	if err = tx.QueryRowContext(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended($1,91701))`, src.ID+"\x1f"+in.Provider).Scan(&locked); err != nil {
-		http.Error(w, "检测记录暂不可用", 503)
-		return
-	}
-	if !locked {
-		http.Error(w, "该渠道已有检测进行中", 409)
-		return
-	}
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_, _ = s.control.db.ExecContext(cleanup, `DELETE FROM console_channel_check_runs WHERE source_id=$1 AND provider=$2 AND run_id=$3`, src.ID, in.Provider, runID)
+	}()
 	result := runChannelCheck(ctx, src, in.Provider)
 	if ctx.Err() != nil {
 		http.Error(w, "检测超时或取消", 504)
 		return
 	}
 	raw, _ := json.Marshal(result)
-	_, err = tx.ExecContext(ctx, `INSERT INTO console_channel_checks(source_id,provider,result) VALUES($1,$2,$3) ON CONFLICT(source_id,provider) DO UPDATE SET result=excluded.result`, src.ID, in.Provider, string(raw))
-	if err != nil || tx.Commit() != nil {
+	_, err = s.control.db.ExecContext(ctx, `INSERT INTO console_channel_checks(source_id,provider,result) VALUES($1,$2,$3) ON CONFLICT(source_id,provider) DO UPDATE SET result=excluded.result`, src.ID, in.Provider, string(raw))
+	if err != nil {
 		http.Error(w, "保存检测结果失败", 503)
 		return
 	}

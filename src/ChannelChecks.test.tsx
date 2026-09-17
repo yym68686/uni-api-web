@@ -22,7 +22,7 @@ it("deduplicates providers across models, preserving source isolation and filter
     ["fugue", "second"],
   ]);
 });
-it("detects all filtered pages with bounded concurrency, without retrying failures", async () => {
+it("detects all filtered pages concurrently, without retrying failures", async () => {
   let active = 0,
     max = 0;
   const calls: string[] = [];
@@ -68,7 +68,7 @@ it("detects all filtered pages with bounded concurrency, without retrying failur
   });
   expect(calls).toHaveLength(27);
   expect(new Set(calls).size).toBe(27);
-  expect(max).toBe(2);
+  expect(max).toBe(27);
   expect(result.current.results.size).toBe(27);
   expect(
     [...result.current.results.values()].find((r) => r.provider === "p2")
@@ -81,6 +81,58 @@ it("detects all filtered pages with bounded concurrency, without retrying failur
       result.current.results.get(JSON.stringify(["do", "p0"]))?.verdict,
     ).toBe("pass"),
   );
+  unmount();
+  client.clear();
+});
+
+it("stops every in-flight batch request and clears pending state", async () => {
+  let started = 0,
+    aborted = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((_input: string, init?: RequestInit) => {
+      if (init?.method !== "POST")
+        return Promise.resolve(new Response(JSON.stringify({ data: [] })));
+      started++;
+      return new Promise<Response>((_resolve, reject) => {
+        init.signal!.addEventListener(
+          "abort",
+          () => {
+            aborted++;
+            reject(new DOMException("Aborted", "AbortError"));
+          },
+          { once: true },
+        );
+      });
+    }),
+  );
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+  const { result, unmount } = renderHook(
+    () => useChannelChecks("cancel-test", true),
+    { wrapper },
+  );
+  let batch: Promise<void>;
+  act(() => {
+    batch = result.current.runAll([
+      row("do", "a"),
+      row("do", "b"),
+      row("do", "c"),
+    ]);
+  });
+  await waitFor(() => expect(started).toBe(3));
+  await act(async () => {
+    result.current.stop();
+    await batch!;
+  });
+  expect(aborted).toBe(3);
+  expect(result.current.pending.size).toBe(0);
+  expect(result.current.batch).toBeNull();
+  expect(result.current.results.size).toBe(0);
   unmount();
   client.clear();
 });

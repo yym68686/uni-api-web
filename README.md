@@ -144,8 +144,8 @@ No model service settings or production routing are changed by this application.
 
 ## 渠道检测
 
-侧边栏「渠道检测」共享渠道观测的来源、API key、模型、搜索、状态、余额、排序等筛选。筛选只决定渠道集合；检测固定请求 `gpt-6-astra` 的非流式 `/v1/responses`，提问「你的知识截止到哪年哪月？只答 YYYY-MM；不确定答未知。」每个来源的渠道去重后检测一次，一键检测覆盖全部匹配页，最多并发两条，可停止后续任务。
+侧边栏「渠道检测」共享渠道观测的来源、API key、模型、搜索、状态、余额、排序等筛选。筛选只决定渠道集合；检测固定请求 `gpt-6-astra` 的非流式 `/v1/responses`，提问「你的知识截止到哪年哪月？只答 YYYY-MM；不确定答未知。」每个来源的渠道去重后检测一次，一键检测覆盖全部匹配页，所有筛选渠道同时发起，可取消仍在进行的检测。
 
 只读取成功、完整 Responses 的 assistant output_text：「未知」为绿勾「不降智」，「2024-06」为红叉「降智」，同时命中或均未命中为「无法判定」。这是用户指定的回复规则，不是完整能力评测；请求失败另列。检测消耗正常模型用量。
 
-控制台使用登录会话调用 `GET/POST /v1/sources/{id}/channel-checks`，凭据只留在服务端。最近一次结果、原始文本、时间、耗时与请求 ID 保存在 PostgreSQL 的 `console_channel_checks`，按来源与渠道隔离，重启后仍在。跨进程锁避免同一渠道重复检测。uni-api 须支持 `capabilities.targeted_responses`；旧版本不会发送检测请求。使用管理员渠道定向头，不会回退、重试或发起竞速请求，不改动现有路由配置。
+控制台使用登录会话调用 `GET/POST /v1/sources/{id}/channel-checks`，凭据只留在服务端。最近一次结果、原始文本、时间、耗时与请求 ID 保存在 PostgreSQL 的 `console_channel_checks`，按来源与渠道隔离，重启后仍在。数据库短期租约避免同一渠道重复检测，请求期间不占用数据库连接。uni-api 须支持 `capabilities.targeted_responses`；旧版本不会发送检测请求。使用管理员渠道定向头，不会回退、重试或发起竞速请求，不改动现有路由配置。
