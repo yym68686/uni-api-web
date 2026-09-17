@@ -10,7 +10,7 @@ import { Timing } from "./ChannelMetrics";
 import { SUB_MODELS } from "./sub2apiModels";
 
 afterEach(() => vi.unstubAllGlobals());
-function mount() {
+function mount(user = "account") {
   return render(
     <QueryClientProvider
       client={
@@ -18,7 +18,7 @@ function mount() {
       }
     >
       <Tooltip.Provider>
-        <Sub2apiChecks />
+        <Sub2apiChecks user={user} />
       </Tooltip.Provider>
     </QueryClientProvider>,
   );
@@ -106,7 +106,9 @@ it("shows multipliers as numbers, filters all-page batch targets, and restores p
   );
   first.unmount();
   mount();
-  expect(await screen.findByText("不降智", { selector: "span" })).toBeVisible();
+  expect(await screen.findByText("降智", { selector: "span" })).toBeVisible();
+  expect(screen.getByLabelText("sub2api 账号筛选")).toHaveValue("two");
+  expect(screen.getByLabelText("检测模型筛选")).toHaveValue("gpt-6-astra");
   expect(writes).toHaveLength(1);
 });
 it("creates an account without storing its password and supports the 2FA step", async () => {
@@ -695,4 +697,182 @@ it("shows model matching separately from availability, including missing and his
       name: "gpt-5.6-sol",
     }),
   ).toBeChecked();
+});
+
+it("persists every filter per user and derives platform options from other filters", async () => {
+  const data = fixtures();
+  data[1].targets[0].platform = "anthropic";
+  data[1].targets[0].billing!.rate = 0.2;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      async (input: string) =>
+        new Response(
+          JSON.stringify(
+            input.includes("/channels")
+              ? { data: [], labels: {}, unavailable_sources: [] }
+              : { data },
+          ),
+        ),
+    ),
+  );
+  const user = userEvent.setup();
+  let view = mount("alice");
+  const platforms = await screen.findByLabelText("平台筛选");
+  await waitFor(() =>
+    expect(within(platforms).getAllByRole("option")).toHaveLength(3),
+  );
+  await user.selectOptions(screen.getByLabelText("倍率上限筛选"), "0.01");
+  expect(
+    within(platforms).queryByRole("option", { name: "anthropic" }),
+  ).toBeNull();
+  await user.selectOptions(platforms, "openai");
+  await user.type(screen.getByLabelText("搜索 sub2api 分组"), "one");
+  await user.selectOptions(screen.getByLabelText("sub2api 账号筛选"), "one");
+  await user.selectOptions(
+    screen.getByLabelText("检测模型筛选"),
+    "gpt-6-astra",
+  );
+  await user.selectOptions(screen.getByLabelText("倍率排序"), "desc");
+  await user.selectOptions(screen.getByLabelText("可用性筛选"), "success");
+  await user.selectOptions(screen.getByLabelText("降智筛选"), "pass");
+  view.unmount();
+  view = mount("alice");
+  await screen.findByText("不降智", { selector: "span" });
+  for (const [label, value] of [
+    ["搜索 sub2api 分组", "one"],
+    ["sub2api 账号筛选", "one"],
+    ["检测模型筛选", "gpt-6-astra"],
+    ["倍率上限筛选", "0.01"],
+    ["倍率排序", "desc"],
+    ["可用性筛选", "success"],
+    ["降智筛选", "pass"],
+    ["平台筛选", "openai"],
+  ])
+    expect(screen.getByLabelText(label)).toHaveValue(value);
+  view.unmount();
+  mount("bob");
+  expect(screen.getByLabelText("平台筛选")).toHaveValue("");
+  expect(screen.getByLabelText("搜索 sub2api 分组")).toHaveValue("");
+});
+
+it("lists imported keys, replaces exact models and deletes only the chosen binding", async () => {
+  const data = fixtures().slice(0, 1);
+  const writes: any[] = [];
+  let installed = [
+    {
+      account_id: "one",
+      group_id: 1,
+      source_id: "source",
+      source_name: "Gateway",
+      api_key_id: "key1",
+      key_position: 1,
+      key_prefix: "masked-one",
+      provider: "sub2api-test1",
+      name: "one-0.01",
+      models: ["gpt-6-astra", "gpt-5.6-sol"],
+      positions: { "gpt-6-astra": 1, "gpt-5.6-sol": 1 },
+      revision: "boot:1",
+      manageable: true,
+    },
+    {
+      account_id: "one",
+      group_id: 1,
+      source_id: "source",
+      source_name: "Gateway",
+      api_key_id: "key2",
+      key_position: 2,
+      key_prefix: "masked-two",
+      provider: "sub2api-test2",
+      name: "one-0.01",
+      models: ["gpt-6-astra"],
+      positions: { "gpt-6-astra": 2 },
+      revision: "boot:1",
+      manageable: true,
+    },
+  ];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string, init?: RequestInit) => {
+      let reply: unknown = { data };
+      if (input.includes("channel-options"))
+        reply = {
+          provider: "sub2api-test1",
+          supported: true,
+          manageable: true,
+          revision: installed[0]?.revision || "boot:3",
+          keys: [
+            { key_id: "key1", position: 1, prefix: "masked-one" },
+            { key_id: "key2", position: 2, prefix: "masked-two" },
+          ],
+          channels: [],
+        };
+      else if (input.endsWith("/v1/sources"))
+        reply = { data: [{ id: "source", name: "Gateway" }] };
+      else if (input.endsWith("/v1/sub2api/channels")) {
+        if (init?.method === "PATCH") {
+          const body = JSON.parse(init.body as string);
+          writes.push(body);
+          installed = installed
+            .filter(
+              (i) =>
+                body.action !== "delete" || i.api_key_id !== body.api_key_id,
+            )
+            .map((i) => ({
+              ...i,
+              revision: `boot:${writes.length + 1}`,
+              models: i.api_key_id === body.api_key_id ? body.models : i.models,
+            }));
+          reply = { message: "已保存" };
+        } else reply = { data: installed, labels: {}, unavailable_sources: [] };
+      }
+      return new Response(JSON.stringify(reply));
+    }),
+  );
+  mount();
+  const user = userEvent.setup();
+  await user.click(
+    await screen.findByRole("button", { name: "已添加 · 2 个 key" }),
+  );
+  let dialog = screen.getByRole("dialog");
+  expect(within(dialog).getByText(/masked-one/)).toBeVisible();
+  expect(within(dialog).getByText(/masked-two/)).toBeVisible();
+  await user.click(within(dialog).getAllByRole("button", { name: "编辑" })[0]);
+  await waitFor(() =>
+    expect(
+      within(dialog).getByRole("button", { name: "保存更改" }),
+    ).toBeEnabled(),
+  );
+  await user.click(
+    within(dialog).getByRole("checkbox", { name: /gpt-5.6-sol/ }),
+  );
+  await user.click(within(dialog).getByRole("button", { name: "保存更改" }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).toMatchObject({
+    action: "replace",
+    api_key_id: "key1",
+    models: ["gpt-6-astra"],
+    revision: "boot:1",
+  });
+  await waitFor(() =>
+    expect(
+      within(dialog).getAllByRole("button", { name: "删除" })[0],
+    ).toBeEnabled(),
+  );
+  await user.click(within(dialog).getAllByRole("button", { name: "删除" })[0]);
+  await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
+  await waitFor(() => expect(writes).toHaveLength(2));
+  expect(writes[1]).toMatchObject({
+    action: "delete",
+    api_key_id: "key1",
+    revision: "boot:2",
+  });
+  await waitFor(() =>
+    expect(within(dialog).queryByText(/masked-one/)).toBeNull(),
+  );
+  expect(within(dialog).getByText(/masked-two/)).toBeVisible();
+  await user.click(
+    within(dialog).getByRole("button", { name: "添加到其他 API key" }),
+  );
+  expect(within(dialog).getByLabelText("添加到 API key")).toHaveValue("");
 });

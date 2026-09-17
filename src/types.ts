@@ -41,6 +41,7 @@ export interface Stats {
   last_success_at: number | null;
 }
 export interface Channel {
+  provider_name?: string;
   history_configured?: boolean;
   source_id?: string;
   source_name?: string;

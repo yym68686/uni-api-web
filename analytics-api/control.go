@@ -282,6 +282,8 @@ func (s *Service) controlHandler() http.Handler {
 	mux.HandleFunc("POST /v1/sub2api/checks", s.subCheck)
 	mux.HandleFunc("GET /v1/sub2api/channel-options", s.subChannelOptions)
 	mux.HandleFunc("POST /v1/sub2api/channels", s.subImportChannel)
+	mux.HandleFunc("GET /v1/sub2api/channels", s.subInstalledChannels)
+	mux.HandleFunc("PATCH /v1/sub2api/channels", s.subManageChannel)
 	return mux
 }
 

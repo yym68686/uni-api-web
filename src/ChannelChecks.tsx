@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, X, CircleHelp, Play, ScanLine, Square } from "lucide-react";
 import { controlRequest } from "./api";
-import { providerId, time } from "./format";
+import { providerId, time, channelName } from "./format";
 import type { Channel } from "./types";
 import { Spinner } from "./ui";
 
@@ -200,7 +200,7 @@ export function CheckTable({
             return (
               <tr key={id}>
                 <td>
-                  <strong>{row.provider}</strong>
+                  <strong>{channelName(row)}</strong>
                   <small className="check-source">{row.source_name}</small>
                 </td>
                 <td className="mono">gpt-6-astra</td>
@@ -243,7 +243,7 @@ export function CheckTable({
                     className="button small"
                     disabled={disabled || pending || !!checks.batch}
                     onClick={() => void checks.run(row)}
-                    aria-label={`检测 ${row.source_name || ""} ${row.provider}`}
+                    aria-label={`检测 ${row.source_name || ""} ${channelName(row)}`}
                   >
                     <Play size={13} />
                     {result ? "重新检测" : "检测"}

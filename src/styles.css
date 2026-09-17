@@ -2548,3 +2548,9 @@ nav > button.active > svg {
 .sub-model-result-status { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 6px 0; }
 
 .sub-model-match-summary { min-width: 90px; }
+.sub-installed { margin-top: 24px; }
+.sub-installed h3, .sub-import-dialog form > h3 { font-size: 14px; margin-top: 22px; }
+.sub-installed article { border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin: 12px 0; font-size: 13px; line-height: 1.8; overflow-wrap: anywhere; }
+.sub-installed article > div, .sub-installed small { color: var(--muted); }
+.sub-installed ul { padding-left: 18px; }
+.sub-installed-actions { display: flex; gap: 8px; }

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -17,6 +17,8 @@ import {
 import { controlRequest } from "./api";
 import { LatencyBadge } from "./LatencyBadge";
 import { Empty, Spinner, Tip } from "./ui";
+import { loadSubFilters, saveSubFilters } from "./sub2apiPreferences";
+import { useSubImports } from "./sub2apiImports";
 import { Sub2apiImport } from "./Sub2apiImport";
 import { SUB_MODELS } from "./sub2apiModels";
 import {
@@ -481,7 +483,7 @@ function ModelResults({ checks }: { checks: SubModelCheck[] }) {
   );
 }
 
-export function Sub2apiChecks() {
+export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   const client = useQueryClient();
   const query = useQuery({
     queryKey: ["sub2api"],
@@ -495,17 +497,36 @@ export function Sub2apiChecks() {
   });
   const accounts = query.data?.data || [];
   const [form, setForm] = useState<{ account: SubAccount | null } | null>(null);
-  const [search, setSearch] = useState("");
-  const [accountId, setAccountId] = useState("");
-  const [model, setModel] = useState("");
-  const [maxRate, setMaxRate] = useState("");
-  const [sort, setSort] = useState("");
+  const [filters, setFilters] = useState(() => loadSubFilters(user));
+  const {
+    search,
+    accountId,
+    model,
+    maxRate,
+    sort,
+    availability,
+    quality,
+    platform,
+  } = filters;
+  useEffect(() => saveSubFilters(user, filters), [user, filters]);
+  const setSearch = (search: string) => setFilters((v) => ({ ...v, search }));
+  const setAccountId = (accountId: string) =>
+    setFilters((v) => ({ ...v, accountId }));
+  const setModel = (model: string) => setFilters((v) => ({ ...v, model }));
+  const setMaxRate = (maxRate: string) =>
+    setFilters((v) => ({ ...v, maxRate }));
+  const setSort = (sort: string) => setFilters((v) => ({ ...v, sort }));
+  const setAvailability = (availability: string) =>
+    setFilters((v) => ({ ...v, availability }));
+  const setQuality = (quality: string) =>
+    setFilters((v) => ({ ...v, quality }));
+  const setPlatform = (platform: string) =>
+    setFilters((v) => ({ ...v, platform }));
+  const imports = useSubImports();
   const [importing, setImporting] = useState<{
     account: SubAccount;
     target: SubTarget;
   } | null>(null);
-  const [availability, setAvailability] = useState("");
-  const [quality, setQuality] = useState("");
   const [error, setError] = useState("");
   const [action, setAction] = useState("");
   const [removing, setRemoving] = useState<string | null>(null);
@@ -544,18 +565,28 @@ export function Sub2apiChecks() {
   const rates = [
     ...new Set(
       candidateRows
+        .filter(({ target }) => !platform || target.platform === platform)
         .map(({ target }) => target.billing?.rate)
         .filter((v): v is number => v != null && Number.isFinite(v)),
     ),
   ].sort((a, b) => a - b);
-  const effectiveMaxRate = rates.some((v) => String(v) === maxRate)
-    ? maxRate
-    : "";
+  const effectiveMaxRate = maxRate;
+  if (maxRate && !rates.includes(Number(maxRate))) rates.push(Number(maxRate));
+  rates.sort((a, b) => a - b);
+  const withinRate = ({ target }: (typeof candidateRows)[number]) =>
+    !effectiveMaxRate ||
+    (target.billing?.rate != null &&
+      target.billing.rate <= Number(effectiveMaxRate));
+  const platforms = [
+    ...new Set(
+      candidateRows
+        .filter(withinRate)
+        .map(({ target }) => target.platform)
+        .filter(Boolean),
+    ),
+  ].sort();
   const rows = candidateRows.filter(
-    ({ target }) =>
-      !effectiveMaxRate ||
-      (target.billing?.rate != null &&
-        target.billing.rate <= Number(effectiveMaxRate)),
+    (row) => withinRate(row) && (!platform || row.target.platform === platform),
   );
   if (sort)
     rows.sort((a, b) => {
@@ -817,6 +848,9 @@ export function Sub2apiChecks() {
               }}
             >
               <option value="">全部账号</option>
+              {accountId && !accounts.some((a) => a.id === accountId) && (
+                <option value={accountId}>已选账号（当前不可用）</option>
+              )}
               {accounts.map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.name} · {a.email}
@@ -838,6 +872,29 @@ export function Sub2apiChecks() {
               {SUB_MODELS.map((m) => (
                 <option key={m} value={m}>
                   {m}
+                </option>
+              ))}
+            </select>
+            <ChevronDown size={13} />
+          </label>
+          <label className="select-field">
+            <select
+              aria-label="平台筛选"
+              value={platform}
+              onChange={(e) => {
+                setPlatform(e.target.value);
+                setPage(0);
+              }}
+            >
+              <option value="">全部平台</option>
+              {platform && !platforms.includes(platform) && (
+                <option value={platform} disabled>
+                  {platform}（当前无匹配）
+                </option>
+              )}
+              {platforms.map((p) => (
+                <option key={p} value={p}>
+                  {p}
                 </option>
               ))}
             </select>
@@ -1067,7 +1124,6 @@ export function Sub2apiChecks() {
                           </button>
                           <button
                             className="button small"
-                            disabled={pending(account.state) || !t.active}
                             onClick={() =>
                               setImporting({
                                 account,
@@ -1076,7 +1132,17 @@ export function Sub2apiChecks() {
                             }
                           >
                             <Plus size={13} />
-                            添加到渠道
+                            {(() => {
+                              const count =
+                                imports.data?.data.filter(
+                                  (i) =>
+                                    i.account_id === account.id &&
+                                    i.group_id === t.group_id,
+                                ).length || 0;
+                              return count
+                                ? `已添加 · ${count} 个 key`
+                                : "添加到渠道";
+                            })()}
                           </button>
                         </td>
                       </tr>
@@ -1113,6 +1179,7 @@ export function Sub2apiChecks() {
       </section>
       {importing && (
         <Sub2apiImport
+          imports={imports}
           account={importing.account}
           target={importing.target}
           close={() => setImporting(null)}

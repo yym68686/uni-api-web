@@ -72,6 +72,8 @@ import {
 } from "./ChannelControls";
 import { SourceSettings } from "./SourceSettings";
 import { LatencyBadge } from "./LatencyBadge";
+import { useSubImports } from "./sub2apiImports";
+import { channelName } from "./format";
 import { Sub2apiChecks } from "./Sub2apiChecks";
 import type { ConsoleSource } from "./SourceSettings";
 import { defaultFilters, loadFilters, saveFilters } from "./preferences";
@@ -222,7 +224,7 @@ function Overview({
         <div className="overview-list">
           {rows.slice(0, 12).map((row) => (
             <div className="overview-row" key={rowId(row)}>
-              <strong>{row.provider}</strong>
+              <strong>{channelName(row)}</strong>
               {row.source_name && (
                 <small className="source-label">{row.source_name}</small>
               )}
@@ -766,7 +768,7 @@ function Detail({
             <X size={20} />
           </Dialog.Close>
           <span className="eyebrow">CHANNEL INSIGHTS</span>
-          <Dialog.Title>{row?.provider}</Dialog.Title>
+          <Dialog.Title>{row ? channelName(row) : ""}</Dialog.Title>
           <Dialog.Description className="detail-description">
             {row?.model} <ArrowRight size={13} /> {row?.upstream_model}
           </Dialog.Description>
@@ -939,6 +941,7 @@ function Dashboard({
     enabled: !!baseConnection.account,
   });
   const sourceList = sourceQuery.data?.data || [];
+  const imported = useSubImports(!!baseConnection.account);
   const checks = useChannelChecks(
     baseConnection.session,
     !!baseConnection.account,
@@ -1168,10 +1171,14 @@ function Dashboard({
     () =>
       error
         ? []
-        : catalogMetrics(catalog.data, metrics.data).filter(
-            (row) => !model || row.model === model,
-          ),
-    [catalog.data, metrics.data, model, error],
+        : catalogMetrics(catalog.data, metrics.data)
+            .filter((row) => !model || row.model === model)
+            .map((row) => ({
+              ...row,
+              provider_name:
+                imported.data?.labels?.[row.source_id || ""]?.[row.provider],
+            })),
+    [catalog.data, metrics.data, model, error, imported.data],
   );
   const controls = useChannelControls({
     connection: baseConnection,
@@ -1248,7 +1255,7 @@ function Dashboard({
   const filtered = tableRows.filter(
     (row) =>
       (!deferredSearch ||
-        `${row.provider} ${row.model} ${row.upstream_model}`
+        `${channelName(row)} ${row.provider} ${row.model} ${row.upstream_model}`
           .toLowerCase()
           .includes(deferredSearch.toLowerCase())) &&
       (!balanceFilter || balanceIsLow(balanceMap.get(providerId(row))?.data)) &&
@@ -1555,7 +1562,10 @@ function Dashboard({
             </button>
           </motion.div>
           {view === "sub2api" && baseConnection.account ? (
-            <Sub2apiChecks />
+            <Sub2apiChecks
+              key={baseConnection.session}
+              user={baseConnection.session}
+            />
           ) : baseConnection.account &&
             (view === "sources" || sourceList.length === 0) ? (
             <SourceSettings
@@ -1972,10 +1982,10 @@ function Dashboard({
                                 onClick={() => setDetailId(rowId(row))}
                               >
                                 <span className="provider-avatar">
-                                  {row.provider.slice(0, 1).toUpperCase()}
+                                  {channelName(row).slice(0, 1).toUpperCase()}
                                 </span>
                                 <span>
-                                  <strong>{row.provider}</strong>
+                                  <strong>{channelName(row)}</strong>
                                   {row.source_name && (
                                     <small className="source-label">
                                       {row.source_name}
@@ -2004,7 +2014,7 @@ function Dashboard({
                               <button
                                 className="row-arrow icon-button"
                                 onClick={() => setDetailId(rowId(row))}
-                                aria-label={`查看 ${row.provider} ${row.model} 详情`}
+                                aria-label={`查看 ${channelName(row)} ${row.model} 详情`}
                               >
                                 <ArrowUpRight size={16} />
                               </button>
@@ -2019,7 +2029,12 @@ function Dashboard({
                 <div className="balance-grid">
                   {pageProviders.map((provider) => {
                     const balance = balanceMap.get(provider);
-                    const providerName = JSON.parse(provider)[1];
+                    const providerName = filtered.find(
+                      (row) => providerId(row) === provider,
+                    );
+                    const displayName = providerName
+                      ? channelName(providerName)
+                      : JSON.parse(provider)[1];
                     const sourceName = rows.find(
                       (row) => providerId(row) === provider,
                     )?.source_name;
@@ -2030,10 +2045,10 @@ function Dashboard({
                       >
                         <div className="balance-card-top">
                           <span className="provider-avatar">
-                            {providerName[0].toUpperCase()}
+                            {displayName[0].toUpperCase()}
                           </span>
                           <span>
-                            <strong>{providerName}</strong>
+                            <strong>{displayName}</strong>
                             <small>{sourceName}</small>
                             <small>
                               {

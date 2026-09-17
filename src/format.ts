@@ -101,3 +101,6 @@ export function summarize(rows: Channel[]) {
 
 export const providerId = (row: Pick<Channel, "source_id" | "provider">) =>
   JSON.stringify([row.source_id || "", row.provider]);
+
+export const channelName = (row: Pick<Channel, "provider" | "provider_name">) =>
+  row.provider_name || row.provider;

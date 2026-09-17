@@ -11,6 +11,7 @@ import {
 import { channelParams, controlRequest, request } from "./api";
 import type { Catalog, Channel, Connection, KeyInfo } from "./types";
 import type { ConsoleSource } from "./SourceSettings";
+import { channelName } from "./format";
 import { Spinner, Tip } from "./ui";
 
 export interface ControlRule {
@@ -315,7 +316,7 @@ export function ChannelControlCell({
   configOrder: boolean;
 }) {
   const i = controls.info(row),
-    label = `${row.source_name || row.source_id || ""} ${row.provider} ${row.model}`;
+    label = `${row.source_name || row.source_id || ""} ${channelName(row)} ${row.model}`;
   if (!i.ready)
     return (
       <td className="control-actions-cell">

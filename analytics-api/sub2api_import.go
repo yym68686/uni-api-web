@@ -15,6 +15,7 @@ import (
 )
 
 type subImportInput struct {
+	Action    string   `json:"action"`
 	AccountID string   `json:"account_id"`
 	GroupID   int64    `json:"group_id"`
 	SourceID  string   `json:"source_id"`
@@ -108,7 +109,7 @@ func (s *Service) subChannelOptions(w http.ResponseWriter, r *http.Request) {
 			channels = data
 		}
 	}
-	writeJSON(w, 200, map[string]any{"revision": state["revision"], "supported": state["temporary_channel_import"] == true, "keys": keys["data"], "channels": channels, "provider": subProviderName(r.URL.Query().Get("account_id"), int64Param(r.URL.Query().Get("group_id")), strings.TrimPrefix(r.URL.Query().Get("api_key_id"), src.ID+"::"))})
+	writeJSON(w, 200, map[string]any{"revision": state["revision"], "supported": state["temporary_channel_import"] == true, "manageable": state["temporary_channel_management"] == true, "keys": keys["data"], "channels": channels, "provider": subProviderName(r.URL.Query().Get("account_id"), int64Param(r.URL.Query().Get("group_id")), strings.TrimPrefix(r.URL.Query().Get("api_key_id"), src.ID+"::"))})
 }
 func (s *Service) subImportChannel(w http.ResponseWriter, r *http.Request) {
 	var in subImportInput
