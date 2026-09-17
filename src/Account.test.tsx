@@ -136,3 +136,138 @@ it("does not downgrade authentication on a network error", async () => {
   );
   expect(screen.queryByLabelText(/访问密钥/)).toBeNull();
 });
+
+it("shows zero attempts for an idle selected key while shared channels have traffic from another key", async () => {
+  const calls: URL[] = [];
+  const channel = (provider: string) => ({
+    source_id: "primary",
+    source_name: "Fugue",
+    provider,
+    model: "gpt-6-astra",
+    upstream_model: "gpt-6-astra",
+    endpoint: "all",
+    stream: null,
+    eligible: true,
+    reason: "eligible",
+    stats: emptyStats(),
+  });
+  const catalog = [channel("self-channel"), channel("business-channel")];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string) => {
+      const url = new URL(input, location.origin);
+      calls.push(url);
+      let body: unknown;
+      if (url.pathname.endsWith("/auth/me"))
+        body = { enabled: true, authenticated: true, username: "admin" };
+      else if (url.pathname.endsWith("/sources"))
+        body = {
+          data: [
+            {
+              id: "primary",
+              name: "Fugue",
+              base: "https://gateway.example",
+              has_storage: true,
+            },
+          ],
+        };
+      else if (url.pathname.endsWith("/api-keys"))
+        body = {
+          can_inspect_all: true,
+          data: [
+            {
+              key_id: "primary::key-business",
+              position: 1,
+              prefix: "business",
+            },
+            { key_id: "primary::key-2b", position: 2, prefix: "2b" },
+          ],
+        };
+      else if (url.pathname.endsWith("/model-channels"))
+        body = { data: catalog, snapshot_revision: "1" };
+      else if (url.pathname.endsWith("/channel-metrics"))
+        body = {
+          data: catalog.map((row) => ({
+            ...row,
+            stats: { ...emptyStats(), inflight: 9 },
+          })),
+          generated_at: 1800000000,
+        };
+      else if (url.pathname.endsWith("/analytics")) {
+        const idle = url.searchParams.get("key_id") === "key-2b";
+        body = {
+          data: idle
+            ? []
+            : [
+                {
+                  ...catalog[1],
+                  stats: {
+                    ...emptyStats(),
+                    success: 7,
+                    success_rate_denominator: 7,
+                    success_rate: 1,
+                    input_tokens: 100,
+                    output_tokens: 20,
+                    usage_samples: 7,
+                    estimated_cost_usd: 5,
+                  },
+                },
+              ],
+          total: { requests: idle ? 0 : 7, attempts: idle ? 0 : 7 },
+          models: [],
+          coverage: "available_history",
+        };
+      } else if (url.pathname.endsWith("/channel-balances"))
+        body = { status: "unsupported" };
+      else body = { data: [], labels: {}, unavailable_sources: [] };
+      return new Response(JSON.stringify(body));
+    }),
+  );
+  mount();
+  const user = userEvent.setup();
+  const business = () =>
+    screen.getByText("business-channel", { selector: "strong" }).closest("tr")!;
+  await screen.findByText("business-channel");
+  await waitFor(() =>
+    expect(within(business()).getAllByRole("cell")[5]).toHaveTextContent(/^7$/),
+  );
+  await user.selectOptions(
+    screen.getByLabelText("API key 筛选"),
+    "primary::key-2b",
+  );
+  await waitFor(() =>
+    expect(within(business()).getAllByRole("cell")[5]).toHaveTextContent(/^0$/),
+  );
+  const cells = within(business()).getAllByRole("cell");
+  expect(cells[4]).toHaveTextContent("—");
+  expect(cells[8]).not.toHaveTextContent("120");
+  expect(cells[9]).not.toHaveTextContent("5.00");
+  expect(
+    screen.getByRole("columnheader", { name: "渠道总并发" }),
+  ).toBeVisible();
+  expect(
+    screen.getByRole("columnheader", { name: "渠道实际消费" }),
+  ).toBeVisible();
+  expect(
+    calls.some(
+      (u) =>
+        u.pathname.endsWith("/analytics") &&
+        u.searchParams.get("source_id") === "primary" &&
+        u.searchParams.get("key_id") === "key-2b",
+    ),
+  ).toBe(true);
+  await user.click(screen.getByRole("button", { name: "查看趋势" }));
+  await waitFor(() =>
+    expect(
+      calls.some(
+        (u) =>
+          u.searchParams.get("timeseries") === "true" &&
+          u.searchParams.get("key_id") === "key-2b",
+      ),
+    ).toBe(true),
+  );
+  await user.selectOptions(screen.getByLabelText("API key 筛选"), "");
+  await waitFor(() =>
+    expect(within(business()).getAllByRole("cell")[5]).toHaveTextContent(/^7$/),
+  );
+});

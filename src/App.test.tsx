@@ -217,7 +217,7 @@ describe("dashboard workflows", () => {
     const firstMetrics = new URL(
       app.calls.find((url) => url.includes("/analytics/v1/analytics"))!,
     );
-    expect(firstMetrics.searchParams.has("key_id")).toBe(false);
+    expect(firstMetrics.searchParams.get("key_id")).toBe("key-second");
     expect(firstMetrics.searchParams.get("range")).toBe("1h");
     expect(firstMetrics.searchParams.get("endpoint")).toBe("/v1/messages");
     expect(firstMetrics.searchParams.get("stream")).toBe("true");

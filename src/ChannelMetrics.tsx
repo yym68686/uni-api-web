@@ -128,11 +128,19 @@ export function Status({ row }: { row: Channel }) {
     </span>
   );
 }
-export function ChannelMetricHeaders() {
+export function ChannelMetricHeaders({
+  keySelected = false,
+}: {
+  keySelected?: boolean;
+}) {
   return (
     <>
       <th>状态</th>
-      <th>当前并发</th>
+      <th>
+        <Tip text="当前正在请求此渠道的全部 API key 的尝试数，不受历史时间窗口或 API key 用量筛选影响。">
+          {keySelected ? "渠道总并发" : "当前并发"} <CircleHelp size={12} />
+        </Tip>
+      </th>
       <th>
         <Tip text="成功与失败的渠道尝试分别计数，重试不是新的用户请求。">
           成功率 <CircleHelp size={12} />
@@ -150,8 +158,8 @@ export function ChannelMetricHeaders() {
       <th>Token / 缓存率</th>
       <th>估算消费</th>
       <th>
-        <Tip text="来自上游 sub2api 的 actual_cost，按日历日统计；充值增加不会计入消费。同一上游账号可能被多个 uni-api 共用，这一金额不按来源拆分，不可跨来源相加。5 分钟、15 分钟和 1 小时窗口没有可验证的上游小时账单。">
-          实际消费 <CircleHelp size={12} />
+        <Tip text="来自上游 sub2api 的 actual_cost，按日历日统计；充值增加不会计入消费。同一上游账号可能被多个 uni-api 共用，这一金额不按 uni-api 的调用 API key、来源或模型拆分，不可跨来源相加。5 分钟、15 分钟和 1 小时窗口没有可验证的上游小时账单。">
+          {keySelected ? "渠道实际消费" : "实际消费"} <CircleHelp size={12} />
         </Tip>
       </th>
       <th>余额 / 额度</th>

@@ -9,10 +9,22 @@ export async function readMetrics(
 ) {
   const source = new URLSearchParams(path.split("?")[1] || "");
   const range = source.get("window") || "15m";
-  const keySource = source.get("api_key_id")?.split("::");
-  if (connection.sourceId) source.set("source_id", connection.sourceId);
-  else if (keySource && keySource.length > 1)
-    source.set("source_id", keySource[0]);
+  const selectedKey = source.get("api_key_id") || "";
+  const separator = selectedKey.indexOf("::");
+  const keySource = separator < 0 ? "" : selectedKey.slice(0, separator);
+  const keyId = separator < 0 ? selectedKey : selectedKey.slice(separator + 2);
+  const selectedSource =
+    connection.sourceId === "all" ? "" : connection.sourceId;
+  if (keySource && selectedSource && keySource !== selectedSource)
+    throw new Error("所选 API key 不属于当前来源，请重新选择。");
+  if (separator >= 0 && (!keySource || !keyId))
+    throw new Error("API key 筛选无效，请重新选择。");
+  if (keySource || selectedSource)
+    source.set("source_id", keySource || selectedSource!);
+  // The catalog API uses api_key_id; analytics stores the same fingerprint
+  // under key_id. Preserve both the owning source and the caller identity.
+  if (keyId) source.set("key_id", keyId);
+  else source.delete("key_id");
   source.delete("window");
   source.set("range", range);
   source.delete("api_key_id");

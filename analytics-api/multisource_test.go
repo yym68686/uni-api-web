@@ -233,3 +233,36 @@ func TestSourceFreshnessSurvivesEmptyWindowAndHonorsSourceScope(t *testing.T) {
 		t.Fatal("source freshness leaked outside allowed scope")
 	}
 }
+
+func TestKeyScopedTotalsUsageAndTrendsExcludeOtherKeysAndSources(t *testing.T) {
+	e := stateTestEngine(t)
+	ctx := context.Background()
+	now := time.Now().Add(-time.Minute).UnixMilli()
+	input, output, cache := int64(100), int64(20), int64(30)
+	first, dispatch := float64(3000), float64(50)
+	facts := []Fact{}
+	for _, entry := range [][2]string{{"primary", "business"}, {"secondary", "idle"}} {
+		for _, kind := range []string{"request", "attempt"} {
+			facts = append(facts, Fact{Schema: 1, EventID: entry[0] + kind, Kind: kind, AtMS: now, SourceID: entry[0], KeyID: entry[1], Provider: "shared", Model: "gpt-6-astra", UpstreamModel: "gpt-6-astra", Endpoint: "/v1/responses", Stream: true, Outcome: "success", InputTokens: &input, OutputTokens: &output, CacheReadTokens: &cache, FirstOutputMS: &first, DispatchMS: &dispatch})
+		}
+	}
+	if err := e.Import(ctx, "keys.jsonl", "etag", facts); err != nil {
+		t.Fatal(err)
+	}
+	for _, window := range []string{"1h", "all"} {
+		result, err := e.Query(ctx, QueryFilter{Range: window, SourceID: "primary", KeyID: "idle", Endpoint: "all", Stream: "all", Timeseries: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(result.Data) != 0 || len(result.Models) != 0 || result.Total["requests"] != float64(0) || result.Total["attempts"] != int64(0) || result.Total["input_tokens"] != float64(0) {
+			t.Fatalf("idle key mixed unrelated usage: %+v", result)
+		}
+		result, err = e.Query(ctx, QueryFilter{Range: window, SourceID: "primary", KeyID: "business", Endpoint: "all", Stream: "all", Timeseries: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(result.Data) != 1 || result.Total["requests"] != float64(1) || result.Total["input_tokens"] != float64(100) || len(result.Data[0].Points) != 1 || result.Data[0].Points[0]["success"] != int64(1) {
+			t.Fatalf("business key statistics lost: %+v", result)
+		}
+	}
+}

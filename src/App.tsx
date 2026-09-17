@@ -177,9 +177,9 @@ function Overview({
         icon={<Wallet size={17} />}
       />
       <MetricCard
-        label="当前并发"
+        label="渠道总并发"
         value={currentConcurrency == null ? "—" : count(currentConcurrency)}
-        sub="实时渠道请求"
+        sub="所列渠道的全部 API key · 实时尝试"
         icon={<Gauge size={17} />}
       />
       <MetricCard
@@ -908,7 +908,7 @@ function Guide({ open, onClose }: { open: boolean; onClose: () => void }) {
               ],
               [
                 "范围与保留",
-                "默认统计全部端点和全部流式状态，可分别筛选。跨组延迟由后端合并直方图后计算。默认按 provider 配置顺序；选择 API key 后按该 key 配置顺序，仍是渠道整体统计而非 key 私有用量。历史事实存储于 S3，由 DuckDB 聚合；采集开始之前的流量无法补回。",
+                "默认统计全部端点和全部流式状态，可分别筛选。跨组延迟由后端合并直方图后计算。默认按 provider 配置顺序；选择 API key 后按该 key 配置顺序，历史请求、尝试、延迟、Token 和估算消费仅统计该 key 发起的请求。渠道状态、总并发、余额及上游实际消费为渠道整体数据。历史事实存储于 S3，由 DuckDB 聚合；采集开始之前的流量无法补回。",
               ],
             ].map(([title, text]) => (
               <section key={title}>
@@ -1954,7 +1954,7 @@ function Dashboard({
                       <tr>
                         <th className="rank">#</th>
                         <th>渠道 / 模型</th>
-                        <ChannelMetricHeaders />
+                        <ChannelMetricHeaders keySelected={!!keyId} />
                         {view === "controls" && (
                           <th>
                             <Tip text="修改作用于本行来源、当前选择的 API key 和模型（未选择则为全部），对所有端点和流式状态生效。无到期时间，uni-api 重启清空；应用会保存此范围内的所有草稿。">
