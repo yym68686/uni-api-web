@@ -74,6 +74,10 @@ func newControlStore(dsn, master string) (*controlStore, error) {
 		db.Close()
 		return nil, err
 	}
+	if _, err = db.ExecContext(ctx, controlPersistenceSchema); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if _, err = db.ExecContext(ctx, subSchema); err != nil {
 		db.Close()
 		return nil, err
@@ -270,6 +274,8 @@ func (s *Service) controlHandler() http.Handler {
 	mux.HandleFunc("PUT /v1/sources/{id}", s.saveSource)
 	mux.HandleFunc("DELETE /v1/sources/{id}", s.deleteSource)
 	mux.HandleFunc("GET /v1/sources/{id}/proxy/{path...}", s.proxySource)
+	mux.HandleFunc("GET /v1/sources/{id}/control-persistence", s.controlPersistence)
+	mux.HandleFunc("PUT /v1/sources/{id}/control-persistence", s.controlPersistence)
 	mux.HandleFunc("GET /v1/sources/{id}/channel-controls", s.channelControls)
 	mux.HandleFunc("POST /v1/sources/{id}/channel-controls", s.channelControls)
 	mux.HandleFunc("GET /v1/sources/{id}/channel-checks", s.channelChecks)

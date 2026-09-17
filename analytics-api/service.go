@@ -71,6 +71,7 @@ func NewService(e *Engine, cfg Config) (*Service, error) {
 func (s *Service) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.health)
+	mux.HandleFunc("GET /v1/runtime-restore/{id}", s.bootstrapControls)
 	control := s.controlHandler()
 	mux.Handle("/v1/auth/", control)
 	mux.Handle("/v1/sources", control)

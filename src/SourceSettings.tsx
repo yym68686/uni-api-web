@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { Plus, Server, Trash2, Pencil, Check, X } from "lucide-react";
 import { controlRequest } from "./api";
 import { Spinner } from "./ui";
+import { ControlPersistence } from "./ControlPersistence";
 export interface ConsoleSource {
   id: string;
   name: string;
@@ -102,7 +103,7 @@ export function SourceSettings({
       </div>
       <p className="settings-note">
         每个来源独立采集与统计。平台密钥和 S3
-        只读凭据加密保存在服务端，浏览器不会保留。
+        只读凭据加密保存在服务端。默认保留已应用的临时渠道、顺序和停用规则，来源重启后自动恢复。
       </p>
       {error && (
         <p role="alert" className="error-banner">
@@ -121,6 +122,7 @@ export function SourceSettings({
                 : "仅实时目录 · 添加 S3 只读凭据以采集历史请求"}
             </small>
           </div>
+          <ControlPersistence source={src.id} name={src.name} />
           <button
             className="icon-button"
             aria-label={`编辑 ${src.name}`}

@@ -27,12 +27,13 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 	other := "key-" + strings.Repeat("c", 64)
 	defer store.db.Exec(`DELETE FROM console_sub_accounts WHERE id=$1`, account)
 	defer store.db.Exec(`DELETE FROM console_sources WHERE id=$1`, source)
+	routeSecret, _ := store.encrypt("routing-secret")
 	auth, _ := store.encrypt(`{"access_token":"panel-secret"}`)
 	_, e = store.db.Exec(`INSERT INTO console_sub_accounts(id,owner,name,base,email,encrypted_auth) VALUES($1,$2,'My Site','https://example.com','test@example.com',$3)`, account, owner, auth)
 	if e != nil {
 		t.Fatal(e)
 	}
-	_, e = store.db.Exec(`INSERT INTO console_sub_targets(account_id,group_id,name,platform,billing) VALUES($1,7,'Group','openai','{"rate":0.18}')`, account)
+	_, e = store.db.Exec(`INSERT INTO console_sub_targets(account_id,group_id,name,platform,billing,encrypted_routing_key) VALUES($1,7,'Group','openai','{"rate":0.18}',$2)`, account, routeSecret)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -55,7 +56,7 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 			if !deleted {
 				temporary = append(temporary, map[string]any{"provider": provider, "api_key_id": key, "models": models})
 			}
-			writeJSON(w, 200, map[string]any{"revision": revision, "temporary_channel_management": true, "temporary_channels": temporary, "rules": []any{map[string]any{"api_key_id": key, "model": checkModel, "order": []string{"existing", provider}}}})
+			writeJSON(w, 200, map[string]any{"instance_id": "boot", "revision": revision, "temporary_channel_management": true, "temporary_channels": temporary, "rules": []any{map[string]any{"api_key_id": key, "model": checkModel, "order": []string{"existing", provider}}}})
 		case "/v1/temporary-channels":
 			writes++
 			json.NewDecoder(r.Body).Decode(&last)
@@ -70,7 +71,7 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 				json.Unmarshal(raw, &models)
 			}
 			revision = "boot:" + string(rune('1'+writes))
-			writeJSON(w, 200, map[string]any{"revision": revision})
+			writeJSON(w, 200, map[string]any{"instance_id": "boot", "revision": revision})
 		default:
 			http.NotFound(w, r)
 		}

@@ -83,7 +83,7 @@ func (a *authorizer) verify(ctx context.Context, header string) (json.RawMessage
 func (s *Service) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
-		if r.URL.Path == "/healthz" {
+		if r.URL.Path == "/healthz" || (r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/runtime-restore/")) {
 			next.ServeHTTP(w, r)
 			return
 		}

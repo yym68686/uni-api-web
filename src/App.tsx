@@ -1957,7 +1957,7 @@ function Dashboard({
                         <ChannelMetricHeaders keySelected={!!keyId} />
                         {view === "controls" && (
                           <th>
-                            <Tip text="修改作用于本行来源、当前选择的 API key 和模型（未选择则为全部），对所有端点和流式状态生效。无到期时间，uni-api 重启清空；应用会保存此范围内的所有草稿。">
+                            <Tip text="修改作用于本行来源、当前选择的 API key 和模型（未选择则为全部），对所有端点和流式状态生效。无到期时间；来源设置开启“保留临时配置”时，重启后自动恢复已应用的更改。">
                               临时控制 <CircleHelp size={12} />
                             </Tip>
                           </th>

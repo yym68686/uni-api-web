@@ -399,7 +399,8 @@ export function Sub2apiImport({
                 </select>
               </label>
               <p className="sub-import-note">
-                仅对所选 key 和模型生效，uni-api 重启后清除。
+                仅对所选 key
+                和模型生效。开启“保留临时配置”时，来源重启后自动恢复。
               </p>
               {source && options.data && !options.data.supported && (
                 <div role="alert" className="error-banner">

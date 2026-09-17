@@ -227,7 +227,14 @@ func (s *Service) subManageChannel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "来源不存在", 404)
 		return
 	}
-	stateMap, status, e := subGateway(r.Context(), src, "GET", "/v1/channel-controls", nil)
+	unlock, e := s.control.lockControls(r.Context(), src.ID)
+	if e != nil {
+		http.Error(w, e.Error(), 409)
+		return
+	}
+	defer unlock()
+	stateMap, e := s.reconcileControls(r.Context(), src)
+	status := 409
 	if e != nil {
 		http.Error(w, e.Error(), status)
 		return
@@ -286,9 +293,13 @@ func (s *Service) subManageChannel(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	_, status, e = subGateway(r.Context(), src, "POST", "/v1/temporary-channels", map[string]any{"action": in.Action, "revision": in.Revision, "api_key_id": key, "provider": provider, "models": in.Models, "position": in.Position})
+	applied, status, e := subGateway(r.Context(), src, "POST", "/v1/temporary-channels", map[string]any{"action": in.Action, "revision": in.Revision, "api_key_id": key, "provider": provider, "models": in.Models, "position": in.Position})
 	if e != nil {
 		http.Error(w, e.Error(), status)
+		return
+	}
+	if err := s.saveLiveControls(r.Context(), src, applied); err != nil {
+		retentionFailure(w, err)
 		return
 	}
 	message := "临时渠道已删除"

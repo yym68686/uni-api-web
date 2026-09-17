@@ -42,6 +42,18 @@ func (s *Service) channelControls(w http.ResponseWriter, r *http.Request) {
 		}
 		body, _ = json.Marshal(input)
 	}
+	unlock, lockErr := s.control.lockControls(r.Context(), src.ID)
+	if lockErr != nil {
+		http.Error(w, lockErr.Error(), 409)
+		return
+	}
+	defer unlock()
+	if r.Method == http.MethodPost {
+		if _, e := s.reconcileControls(r.Context(), src); e != nil {
+			http.Error(w, e.Error(), 409)
+			return
+		}
+	}
 	req, err := http.NewRequestWithContext(r.Context(), r.Method, src.Base+"/v1/channel-controls", bytes.NewReader(body))
 	if err != nil {
 		http.Error(w, "来源地址无效", 502)
@@ -75,6 +87,15 @@ func (s *Service) channelControls(w http.ResponseWriter, r *http.Request) {
 	if err != nil || len(raw) > 1<<20 || !json.Valid(raw) {
 		http.Error(w, "来源返回无效状态，请刷新后核对", 502)
 		return
+	}
+	var observed map[string]any
+	if json.Unmarshal(raw, &observed) == nil {
+		if r.Method == http.MethodPost {
+			if e := s.saveLiveControls(r.Context(), src, observed); e != nil {
+				retentionFailure(w, e)
+				return
+			}
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)

@@ -142,7 +142,14 @@ func (s *Service) subImportChannel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "来源不存在", 404)
 		return
 	}
-	state, status, err := subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
+	unlock, err := s.control.lockControls(ctx, src.ID)
+	if err != nil {
+		http.Error(w, err.Error(), 409)
+		return
+	}
+	defer unlock()
+	state, err := s.reconcileControls(ctx, src)
+	status := 409
 	if err != nil {
 		http.Error(w, err.Error(), status)
 		return
@@ -257,9 +264,13 @@ func (s *Service) subImportChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	provider := subProviderName(in.AccountID, in.GroupID, key)
-	_, status, err = subGateway(ctx, src, "POST", "/v1/temporary-channels", map[string]any{"revision": in.Revision, "api_key_id": key, "provider": provider, "base_url": base + "/v1/responses", "api_key": routeKey.Key, "models": in.Models, "position": in.Position})
+	applied, status, err := subGateway(ctx, src, "POST", "/v1/temporary-channels", map[string]any{"revision": in.Revision, "api_key_id": key, "provider": provider, "base_url": base + "/v1/responses", "api_key": routeKey.Key, "models": in.Models, "position": in.Position})
 	if err != nil {
 		http.Error(w, err.Error(), status)
+		return
+	}
+	if e := s.saveLiveControls(ctx, src, applied); e != nil {
+		retentionFailure(w, e)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"provider": provider, "models": in.Models, "position": in.Position, "message": fmt.Sprintf("已临时添加至第 %d 位", in.Position)})

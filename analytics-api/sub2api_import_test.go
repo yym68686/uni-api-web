@@ -70,7 +70,7 @@ func TestSubImportUsesBusinessKeyAndFencesModelsOwnerAndRevision(t *testing.T) {
 		}
 		switch r.URL.Path {
 		case "/v1/channel-controls":
-			writeJSON(w, 200, map[string]any{"revision": revision, "temporary_channel_import": true})
+			writeJSON(w, 200, map[string]any{"instance_id": "boot", "revision": revision, "temporary_channel_import": true})
 		case "/v1/temporary-channels":
 			imports++
 			json.NewDecoder(r.Body).Decode(&last)
@@ -79,7 +79,7 @@ func TestSubImportUsesBusinessKeyAndFencesModelsOwnerAndRevision(t *testing.T) {
 				return
 			}
 			revision = "boot:2"
-			writeJSON(w, 200, map[string]any{"revision": revision})
+			writeJSON(w, 200, map[string]any{"instance_id": "boot", "revision": revision})
 		default:
 			http.NotFound(w, r)
 		}

@@ -64,6 +64,11 @@ func main() {
 			log.Fatal("initialize source configuration: ", err)
 		}
 	}
+	if service.control != nil {
+		recoveryDone := make(chan struct{})
+		go func() { defer close(recoveryDone); service.controlRecoveryLoop(ctx) }()
+		defer func() { stop(); <-recoveryDone }()
+	}
 	if cfg.S3Endpoint != "" && cfg.S3Bucket != "" {
 		service.factClient, err = newS3Client(ctx, cfg)
 		if err != nil {

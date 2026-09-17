@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-func TestChannelControlsProxyIsScopedAndDoesNotPersistIntent(t *testing.T) {
+func TestChannelControlsProxyIsScopedAndPersistsRuntimeIntent(t *testing.T) {
 	dsn := os.Getenv("TEST_CONTROL_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("local PostgreSQL required")
@@ -38,7 +38,7 @@ func TestChannelControlsProxyIsScopedAndDoesNotPersistIntent(t *testing.T) {
 			http.Error(w, "control-test-secret upstream detail", upstreamStatus)
 			return
 		}
-		writeJSON(w, 200, map[string]any{"revision": "process:1", "rules": []any{}, "reset_on_restart": true})
+		writeJSON(w, 200, map[string]any{"instance_id": "process", "revision": "process:1", "rules": []any{}, "reset_on_restart": true})
 	}))
 	defer upstream.Close()
 	_, err = store.saveSource(context.Background(), controlSource{sourceView: sourceView{ID: "control-test", Name: "control", Base: upstream.URL}, Key: "control-test-secret"}, false)
