@@ -2501,7 +2501,8 @@ nav > button.active > svg {
 .check-explanation p { margin: 3px 0; }
 .check-status { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
 .check-status.pass { color: var(--green); }
-.check-status.fail { color: var(--danger); }
+.check-status.fail { color: #c73545; }
+:root[data-theme="dark"] .check-status.fail { color: #ff929d; }
 .check-status.inconclusive, .check-status.error { color: var(--muted); }
 .check-source { display: block; color: var(--muted); margin-top: 5px; }
 .check-table .check-answer { max-width: 360px; min-width: 150px; white-space: pre-wrap; overflow-wrap: anywhere; }
