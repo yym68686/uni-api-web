@@ -159,3 +159,5 @@ No model service settings or production routing are changed by this application.
 顺序优先级为 key＋模型、key、模型、全局；停用规则取所有适用范围的并集，局部启用无法覆盖更广范围的停用。原有 key 权限、模型映射、端点限制、冷却和限流继续生效。已经进入的请求使用原候选列表，不强制中断。全部匹配渠道都停用时，新请求返回 503。
 
 接口：控制台 `GET/POST /analytics/v1/sources/{id}/channel-controls`，uni-api `GET/POST /v1/channel-controls`。仅接受已登录控制台会话和来源的首个配置密钥或管理员密钥。普通业务 key 无管理权限。修改写入 uni-api 审计日志，密钥仅以不可逆 ID 标识。
+
+渠道控制页也展示渠道观测的完整指标表，支持 11 个时间范围和自动刷新。统计按渠道＋模型展示、跨端点与流式状态汇总；当前并发单独从实时接口读取。余额与实际消费复用渠道观测的查询口径，短窗口不冒充整日账单。分页和切换时间不会清除未应用的顺序、停用草稿，时间筛选不会触发路由修改。

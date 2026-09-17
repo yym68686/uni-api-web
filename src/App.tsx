@@ -79,14 +79,9 @@ import { loadConnection, saveConnection, clearConnection } from "./session";
 import type { Filters } from "./preferences";
 import {
   balanceIsLow,
-  balanceKind,
-  balanceLabel,
-  balanceStatus,
   count,
-  keyIsLow,
   ms,
   rate,
-  reasonLabel,
   rowId,
   providerId,
   summarize,
@@ -97,14 +92,20 @@ import type {
   Catalog,
   Channel,
   Connection,
-  Distribution,
   KeyInfo,
   Metrics,
   ModelPrice,
 } from "./types";
 import { Brand, Empty, Spinner, Tip } from "./ui";
 import { PriceSettings } from "./PriceSettings";
-import { catalogMetrics, ranges, usd, staleHistorySources } from "./analytics";
+import { catalogMetrics, ranges, staleHistorySources } from "./analytics";
+import { readMetrics } from "./metricsApi";
+import {
+  BalanceValue,
+  Status,
+  ChannelMetricHeaders,
+  ChannelMetricCells,
+} from "./ChannelMetrics";
 import { actualCostRange } from "./actualCost";
 
 type Keys = {
@@ -252,61 +253,6 @@ const endpointChoices = [
   "/v1/moderations",
 ];
 
-async function readMetrics(
-  connection: Connection,
-  path: string,
-  signal: AbortSignal,
-  endpoint: string,
-  stream: string,
-) {
-  const source = new URLSearchParams(path.split("?")[1] || "");
-  const range = source.get("window") || "15m";
-  const keySource = source.get("api_key_id")?.split("::");
-  if (connection.sourceId) source.set("source_id", connection.sourceId);
-  else if (keySource && keySource.length > 1)
-    source.set("source_id", keySource[0]);
-  source.delete("window");
-  source.set("range", range);
-  source.delete("api_key_id");
-  source.set("endpoint", endpoint);
-  source.set("stream", stream);
-  if (path.includes("timeseries")) source.set("timeseries", "true");
-  const result = await analyticsRequest<Metrics>(
-    connection,
-    "/analytics/v1/analytics?" + source.toString(),
-    signal,
-  );
-  if (!result || !result.total || !Array.isArray(result.data))
-    throw new Error("分析服务返回了无效统计数据。");
-  if (!connection.account) {
-    result.data = result.data.map((row) => ({ ...row, source_id: undefined }));
-    result.source_freshness = result.source_freshness?.map((item) => ({
-      ...item,
-      source_id: "",
-    }));
-  }
-  return {
-    ...result,
-    window_minutes:
-      range === "24h"
-        ? 1440
-        : range === "7d"
-          ? 10080
-          : range === "30d"
-            ? 43200
-            : range === "today"
-              ? 1440
-              : range === "week"
-                ? 10080
-                : range === "month"
-                  ? 43200
-                  : range === "year"
-                    ? 525600
-                    : 0,
-    coverage: result.coverage || "partial",
-    statistics_scope: "s3",
-  };
-}
 async function readKeys(connection: Connection, signal: AbortSignal) {
   const keys = await request<Keys>(connection, "/v1/api-keys", signal);
   if (!Array.isArray(keys.data))
@@ -626,108 +572,6 @@ function Welcome({
   );
 }
 
-function BalanceValue({
-  balance,
-  loading,
-  failed,
-  detail = false,
-}: {
-  balance?: Balance;
-  loading?: boolean;
-  failed?: boolean;
-  detail?: boolean;
-}) {
-  if (loading && !balance)
-    return (
-      <span className="loading-text">
-        <Spinner small />
-        查询中
-      </span>
-    );
-  if (!balance || failed) return <span className="muted">查询失败</span>;
-  if (!balance.keys?.length)
-    return (
-      <span className="muted">
-        {balanceStatus[balance.status] || "暂无数据"}
-      </span>
-    );
-  return (
-    <div className={`balance-values ${detail ? "expanded" : ""}`}>
-      {balance.keys.map((item) => (
-        <Tip
-          key={item.position}
-          text={
-            <>
-              <strong>{balanceKind[item.kind || ""] || "余额查询"}</strong>
-              <br />
-              {item.checked_at
-                ? `查询时间 ${time(item.checked_at)} · 最多缓存 5 分钟`
-                : "上游尚未提供金额"}
-              <br />
-              同一账户的多个渠道余额可能共享，不可相加。
-            </>
-          }
-        >
-          <span className={keyIsLow(item) ? "amount negative" : "amount"}>
-            {balance.keys!.length > 1 && <small>Key {item.position} </small>}
-            {balanceLabel(item)}
-            {detail && (
-              <small className="balance-kind">
-                {balanceKind[item.kind || ""]}
-              </small>
-            )}
-          </span>
-        </Tip>
-      ))}
-      {!!balance.omitted_keys && (
-        <small>另 {balance.omitted_keys} 个密钥未查询</small>
-      )}
-    </div>
-  );
-}
-function Timing({
-  value,
-  wait = false,
-}: {
-  value?: Distribution;
-  wait?: boolean;
-}) {
-  return (
-    <Tip
-      text={
-        <>
-          <strong>
-            {wait
-              ? "请求进入 uni-api → 渠道 HTTP 发起前"
-              : "渠道请求发起 → 首次语义输出"}
-          </strong>
-          <br />
-          p95 {ms(value?.p95_ms)} · 最近 {ms(value?.last_ms)}
-          <br />
-          {count(value?.sample_count || 0)} 次样本 · 分位值为直方图上界估计
-          {wait && (
-            <>
-              <br />
-              包含读包、排队与前序重试；不包含入口前耗时。
-            </>
-          )}
-        </>
-      }
-    >
-      <span className={`metric-value ${value?.p50_ms == null ? "muted" : ""}`}>
-        {ms(value?.p50_ms)}
-      </span>
-    </Tip>
-  );
-}
-function Status({ row }: { row: Channel }) {
-  return (
-    <span className={`status-pill ${row.eligible ? "healthy" : "cooling"}`}>
-      <span className="tiny-dot" />
-      {reasonLabel[row.reason] || (row.eligible ? "可用" : "不可用")}
-    </span>
-  );
-}
 function MetricCard({
   label,
   value,
@@ -2074,37 +1918,13 @@ function Dashboard({
                       <tr>
                         <th className="rank">#</th>
                         <th>渠道 / 模型</th>
-                        <th>状态</th>
-                        <th>当前并发</th>
-                        <th>
-                          <Tip text="成功与失败的渠道尝试分别计数，重试不是新的用户请求。">
-                            成功率 <CircleHelp size={12} />
-                          </Tip>
-                        </th>
-                        <th>尝试数</th>
-                        <th>
-                          <Tip text="请求进入 uni-api → 渠道 HTTP 发起前。包含前序重试耗时，悬停或展开查看详情。">
-                            请求前等待 <small>p50</small>
-                          </Tip>
-                        </th>
-                        <th>
-                          首输出 <small>p50 / p95</small>
-                        </th>
-                        <th>Token / 缓存率</th>
-                        <th>估算消费</th>
-                        <th>
-                          <Tip text="来自上游 sub2api 的 actual_cost，按日历日统计；充值增加不会计入消费。同一上游账号可能被多个 uni-api 共用，这一金额不按来源拆分，不可跨来源相加。5 分钟、15 分钟和 1 小时窗口没有可验证的上游小时账单。">
-                            实际消费 <CircleHelp size={12} />
-                          </Tip>
-                        </th>
-                        <th>余额 / 额度</th>
+                        <ChannelMetricHeaders />
                         <th aria-label="详情" />
                       </tr>
                     </thead>
                     <tbody>
                       {pageRows.map((row) => {
                         const balance = balanceMap.get(providerId(row));
-                        const success = row.stats?.success_rate;
                         return (
                           <tr key={rowId(row)}>
                             <td className="rank mono">
@@ -2132,93 +1952,13 @@ function Dashboard({
                                 </span>
                               </button>
                             </td>
-                            <td>
-                              <Status row={row} />
-                            </td>
-                            <td className="mono">
-                              {liveMap.get(rowId(row)) == null
-                                ? "—"
-                                : liveMap.get(rowId(row))}
-                            </td>
-                            <td>
-                              <div className="success-cell">
-                                <span
-                                  className={`mono ${success == null ? "muted" : success < 0.5 ? "negative" : ""}`}
-                                >
-                                  {rate(success)}
-                                </span>
-                                <span className="rate-track">
-                                  <i
-                                    className={
-                                      success != null && success < 0.5
-                                        ? "low"
-                                        : ""
-                                    }
-                                    style={{
-                                      width: `${(success || 0) * 100}%`,
-                                    }}
-                                  />
-                                </span>
-                              </div>
-                            </td>
-                            <td className="mono">
-                              {row.history_configured === false
-                                ? "未接入"
-                                : staleSources.has(row.source_id || "") &&
-                                    !row.stats?.success_rate_denominator
-                                  ? "未同步"
-                                  : count(
-                                      row.stats?.success_rate_denominator || 0,
-                                    )}
-                            </td>
-                            <td>
-                              <Timing
-                                value={row.stats?.request_to_dispatch}
-                                wait
-                              />
-                            </td>
-                            <td>
-                              <div className="dual-metric">
-                                <Timing value={row.stats?.first_output} />
-                                <span className="muted mono">
-                                  {ms(row.stats?.first_output?.p95_ms)}
-                                </span>
-                              </div>
-                            </td>
-                            <td className="mono">
-                              {row.stats?.usage_samples
-                                ? count(
-                                    (row.stats.input_tokens || 0) +
-                                      (row.stats.output_tokens || 0),
-                                  )
-                                : "—"}
-                              <small className="usage-cache">
-                                {rate(row.stats?.cache_rate)}
-                              </small>
-                            </td>
-                            <td className="mono">
-                              {usd(row.stats?.estimated_cost_usd)}
-                            </td>
-                            <td className="mono">
-                              {!actualRange.supported ? (
-                                <Tip text="sub2api 只提供按日聚合的 actual_cost，当前滚动窗口不显示整日金额。">
-                                  <span className="muted">按日</span>
-                                </Tip>
-                              ) : balance?.isPending && !balance.data ? (
-                                <span className="muted">查询中</span>
-                              ) : balance?.data?.actual_cost_usd == null ? (
-                                <span className="muted">—</span>
-                              ) : (
-                                usd(balance.data.actual_cost_usd)
-                              )}
-                            </td>
-                            <td>
-                              <BalanceValue
-                                balance={balance?.data}
-                                loading={balance?.isPending}
-                                failed={balance?.isError}
-                              />
-                            </td>
+                            <ChannelMetricCells
+                              row={row}
+                              inflight={liveMap.get(rowId(row))}
+                              balance={balance}
+                              actualRange={actualRange}
+                              stale={staleSources.has(row.source_id || "")}
+                            />
                             <td>
                               <button
                                 className="row-arrow icon-button"
