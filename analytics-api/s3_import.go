@@ -248,40 +248,46 @@ func sourceObjectKey(source, key string) string {
 }
 func (s *Service) importS3(ctx context.Context) error {
 	var failures []error
-	if s.cfg.S3Bucket != "" {
+	var sources []sourceView
+	primaryEnabled := s.control == nil
+	if s.control != nil {
+		var err error
+		sources, err = s.control.listSources(ctx)
+		if err != nil {
+			return err
+		}
+		for _, v := range sources {
+			if v.ID == s.cfg.SourceID {
+				primaryEnabled = true
+			}
+		}
+	}
+	var remaining int64
+	if primaryEnabled && s.cfg.S3Bucket != "" {
 		if e := s.importSingleS3(ctx); e != nil {
 			failures = append(failures, e)
 		}
+		remaining = s.remaining.Load()
 	}
-	remaining := s.remaining.Load()
-	if s.control != nil {
-		sources, e := s.control.listSources(ctx)
-		if e != nil {
-			return e
+	for _, v := range sources {
+		if v.ID == s.cfg.SourceID || !v.HasStorage {
+			continue
 		}
-		for _, v := range sources {
-			if v.ID == s.cfg.SourceID || !v.HasStorage {
-				continue
-			}
-			src, e := s.control.source(ctx, v.ID)
-			if e != nil {
-				failures = append(failures, e)
-				continue
-			}
-			cfg := s.cfg
-			cfg.SourceID = src.ID
-			cfg.S3Endpoint = src.Storage.Endpoint
-			cfg.S3Bucket = src.Storage.Bucket
-			cfg.S3Prefix = src.Storage.Prefix
-			client, e := newObjectClient(ctx, src.Storage.Endpoint, src.Storage.AccessKey, src.Storage.SecretKey, 20*time.Second)
-			child := &Service{engine: s.engine, cfg: cfg, factClient: client}
-			if e == nil {
-				e = child.importSingleS3(ctx)
-			}
-			remaining += child.remaining.Load()
-			if e != nil {
-				failures = append(failures, e)
-			}
+		src, e := s.control.source(ctx, v.ID)
+		if e != nil {
+			failures = append(failures, e)
+			continue
+		}
+		cfg := s.cfg
+		cfg.SourceID, cfg.S3Endpoint, cfg.S3Bucket, cfg.S3Prefix = src.ID, src.Storage.Endpoint, src.Storage.Bucket, src.Storage.Prefix
+		client, e := newObjectClient(ctx, src.Storage.Endpoint, src.Storage.AccessKey, src.Storage.SecretKey, 20*time.Second)
+		child := &Service{engine: s.engine, cfg: cfg, factClient: client}
+		if e == nil {
+			e = child.importSingleS3(ctx)
+		}
+		remaining += child.remaining.Load()
+		if e != nil {
+			failures = append(failures, e)
 		}
 	}
 	s.remaining.Store(remaining)
