@@ -19,6 +19,8 @@ import { LatencyBadge } from "./LatencyBadge";
 import { Empty, Spinner, Tip } from "./ui";
 import { Sub2apiImport } from "./Sub2apiImport";
 import { SUB_MODELS } from "./sub2apiModels";
+import { modelChecks, availabilityCounts } from "./sub2apiResults";
+import type { SubModelCheck } from "./sub2apiResults";
 import { time } from "./format";
 
 interface Probe {
@@ -43,7 +45,6 @@ export interface SubTarget {
     message: string;
     result: Result | null;
   }[];
-  model?: string;
   group_id: number;
   name: string;
   platform: string;
@@ -302,6 +303,114 @@ function Verdict({ result }: { result: Result | null }) {
   );
 }
 
+function AvailabilityStatus({ check }: { check: SubModelCheck }) {
+  if (pending(check.state))
+    return (
+      <span className="check-status">
+        <Spinner small />
+        {check.state === "queued" ? "排队中" : "检测中"}
+      </span>
+    );
+  if (check.state === "interrupted" || check.state === "error")
+    return (
+      <span className="check-status error">
+        {check.state === "interrupted" ? "已中断" : "检测失败"}
+      </span>
+    );
+  if (!check.result) return <span className="muted">未检测</span>;
+  const success = check.result.availability.status === "success";
+  return (
+    <span className={`check-status ${success ? "pass" : "fail"}`}>
+      {success ? <Check size={15} /> : <X size={15} />}
+      {success ? "可用" : "检测失败"}
+    </span>
+  );
+}
+
+function GroupAvailability({ checks }: { checks: SubModelCheck[] }) {
+  const counts = availabilityCounts(checks);
+  return (
+    <div className="sub-availability-summary">
+      <span
+        className={`check-status ${counts.success ? "pass" : "inconclusive"}`}
+      >
+        {counts.success}/{checks.length} 可用
+      </span>
+      <small className="check-source">
+        {[
+          counts.failed ? `${counts.failed} 个失败` : "",
+          counts.untested ? `${counts.untested} 个未检测` : "",
+        ]
+          .filter(Boolean)
+          .join(" · ")}
+      </small>
+      {counts.pending > 0 && (
+        <small className="check-status">
+          <Spinner small />
+          {counts.pending} 个排队 / 检测中
+        </small>
+      )}
+      {counts.interrupted > 0 && (
+        <small className="check-source">{counts.interrupted} 个中断</small>
+      )}
+    </div>
+  );
+}
+
+function ProbeDetails({ check }: { check: SubModelCheck }) {
+  return (
+    <>
+      {check.message && <div>{check.message}</div>}
+      {check.result && (
+        <>
+          <div>可用性回复：{check.result.availability.text || "—"}</div>
+          {check.result.availability.message && (
+            <div>{check.result.availability.message}</div>
+          )}
+          <div>
+            可用性耗时：{latency(check.result.availability.duration_ms)}
+          </div>
+          {check.model === "gpt-6-astra" && (
+            <>
+              <div>降智回复：{check.result.quality.text || "—"}</div>
+              <div>
+                降智检测耗时：{latency(check.result.quality.duration_ms)}
+              </div>
+              {check.result.quality.message && (
+                <div>{check.result.quality.message}</div>
+              )}
+            </>
+          )}
+        </>
+      )}
+    </>
+  );
+}
+
+function ModelResults({ checks }: { checks: SubModelCheck[] }) {
+  return (
+    <details className="sub-model-results">
+      <summary>各模型结果</summary>
+      {checks.map((check) => (
+        <div className="sub-model-result" key={check.model}>
+          <strong>{check.model}</strong>
+          <div className="sub-model-result-status">
+            <AvailabilityStatus check={check} />
+            <LatencyBadge value={check.result?.availability.ttft_ms} />
+          </div>
+          <ProbeDetails check={check} />
+          {check.result && (
+            <small>
+              最近检测 {time(check.result.checked_at)}
+              {pending(check.state) && " · 上次结果"}
+            </small>
+          )}
+        </div>
+      ))}
+    </details>
+  );
+}
+
 export function Sub2apiChecks() {
   const client = useQueryClient();
   const query = useQuery({
@@ -335,36 +444,30 @@ export function Sub2apiChecks() {
     () =>
       accounts
         .flatMap((account) =>
-          account.targets.flatMap((target) =>
-            SUB_MODELS.map((model) => {
-              const status = target.models?.find((m) => m.model === model);
-              return {
-                account,
-                target: {
-                  ...target,
-                  model,
-                  result:
-                    status?.result ||
-                    (model === "gpt-6-astra" ? target.result : null),
-                  state: status?.state || target.state,
-                  message: status?.message || target.message,
-                },
-              };
-            }),
-          ),
+          account.targets.map((target) => {
+            const checks = modelChecks(target);
+            return {
+              account,
+              target,
+              checks,
+              selected: checks.find((c) => c.model === model),
+              astra: checks[0],
+            };
+          }),
         )
         .filter(
-          ({ account, target }) =>
+          ({ account, target, checks, selected, astra }) =>
             (!accountId || account.id === accountId) &&
-            (!model || target.model === model) &&
             `${account.name} ${account.email} ${target.name} ${target.channel} ${target.platform}`
               .toLowerCase()
               .includes(search.toLowerCase()) &&
             (!availability ||
-              (availability === "untested"
-                ? !target.result
-                : target.result?.availability.status === availability)) &&
-            (!quality || target.result?.verdict === quality),
+              (selected ? [selected] : checks).some((check) =>
+                availability === "untested"
+                  ? !check.result
+                  : check.result?.availability.status === availability,
+              )) &&
+            (!quality || astra.result?.verdict === quality),
         ),
     [accounts, search, accountId, availability, quality, model],
   );
@@ -426,23 +529,14 @@ export function Sub2apiChecks() {
     }
   }
   const check = (selection: typeof rows) => {
-    const targets = new Map<
-      string,
-      { account_id: string; group_id: number; models: string[] }
-    >();
-    for (const { account, target } of selection) {
-      const id = account.id + ":" + target.group_id;
-      const item = targets.get(id) || {
+    // Filters select groups; only the explicit model selector chooses the probe
+    // scope. Historical success/quality must not exclude untested sibling models.
+    return mutate("check", "/v1/sub2api/checks", {
+      targets: selection.map(({ account, target }) => ({
         account_id: account.id,
         group_id: target.group_id,
-        models: [],
-      };
-      if (target.model && !item.models.includes(target.model))
-        item.models.push(target.model);
-      targets.set(id, item);
-    }
-    return mutate("check", "/v1/sub2api/checks", {
-      targets: [...targets.values()],
+        models: model ? [model] : [...SUB_MODELS],
+      })),
     });
   };
   return (
@@ -632,17 +726,12 @@ export function Sub2apiChecks() {
             </button>
             <button
               className="button primary small"
-              disabled={
-                !eligible.length ||
-                !!action ||
-                new Set(
-                  eligible.map((r) => r.account.id + ":" + r.target.group_id),
-                ).size > 500
-              }
+              disabled={!eligible.length || !!action || eligible.length > 500}
               onClick={() => void check(eligible)}
             >
               <ScanLine size={15} />
-              一键检测 · {eligible.length}
+              {model ? "检测所选模型" : "检测全部模型"} · {eligible.length}{" "}
+              个渠道
             </button>
           </div>
         </div>
@@ -727,9 +816,15 @@ export function Sub2apiChecks() {
               }}
             >
               <option value="">全部可用性</option>
-              <option value="success">可用</option>
-              <option value="error">检测失败</option>
-              <option value="untested">未检测</option>
+              <option value="success">
+                {model ? "可用" : "至少一个模型可用"}
+              </option>
+              <option value="error">
+                {model ? "检测失败" : "有模型检测失败"}
+              </option>
+              <option value="untested">
+                {model ? "未检测" : "有模型未检测"}
+              </option>
             </select>
             <ChevronDown size={13} />
           </label>
@@ -742,7 +837,7 @@ export function Sub2apiChecks() {
                 setPage(0);
               }}
             >
-              <option value="">全部降智结果</option>
+              <option value="">全部 Astra 降智结果</option>
               <option value="pass">不降智</option>
               <option value="fail">降智</option>
               <option value="inconclusive">无法判定</option>
@@ -762,12 +857,12 @@ export function Sub2apiChecks() {
                 <thead>
                   <tr>
                     <th>站点 / 分组</th>
-                    <th>模型</th>
+                    {model && <th>模型</th>}
                     <th>平台 / key</th>
                     <th>倍率</th>
                     <th>可用性</th>
                     <th>首字延迟</th>
-                    <th>降智</th>
+                    <th>Astra 降智</th>
                     <th>回复 / 诊断</th>
                     <th>最近检测</th>
                     <th>操作</th>
@@ -776,8 +871,8 @@ export function Sub2apiChecks() {
                 <tbody>
                   {rows
                     .slice(currentPage * 25, (currentPage + 1) * 25)
-                    .map(({ account, target: t }) => (
-                      <tr key={`${account.id}:${t.group_id}:${t.model}`}>
+                    .map(({ account, target: t, checks, selected, astra }) => (
+                      <tr key={`${account.id}:${t.group_id}`}>
                         <td>
                           <strong>{t.name}</strong>
                           <small className="check-source">
@@ -789,7 +884,7 @@ export function Sub2apiChecks() {
                             {!t.active && " · 已不可用"}
                           </small>
                         </td>
-                        <td className="mono">{t.model}</td>
+                        {model && <td className="mono">{model}</td>}
                         <td>
                           {t.platform}
                           <small className="check-source">
@@ -807,75 +902,66 @@ export function Sub2apiChecks() {
                           {t.billing?.rate != null ? t.billing.rate : "—"}
                         </td>
                         <td>
-                          {pending(t.state) ? (
-                            <span className="check-status">
-                              <Spinner small />
-                              {t.state === "queued" ? "排队中" : "检测中"}
-                            </span>
-                          ) : t.state === "error" ||
-                            t.state === "interrupted" ? (
-                            <span className="check-status error">
-                              {t.state === "error" ? "同步失败" : "已中断"}
-                            </span>
-                          ) : t.result ? (
-                            <span
-                              className={`check-status ${t.result.availability.status === "success" ? "pass" : "fail"}`}
-                            >
-                              {t.result.availability.status === "success" ? (
-                                <Check size={15} />
-                              ) : (
-                                <X size={15} />
-                              )}
-                              {t.result.availability.status === "success"
-                                ? "可用"
-                                : "检测失败"}
-                            </span>
+                          {t.state === "error" ? (
+                            <span className="check-status error">同步失败</span>
+                          ) : selected ? (
+                            <AvailabilityStatus check={selected} />
                           ) : (
-                            <span className="muted">未检测</span>
+                            <GroupAvailability checks={checks} />
                           )}
                         </td>
                         <td className="mono">
                           <LatencyBadge
-                            value={t.result?.availability.ttft_ms}
+                            value={selected?.result?.availability.ttft_ms}
                           />
                         </td>
                         <td>
-                          <Verdict result={t.result} />
+                          <Verdict result={astra.result} />
                         </td>
                         <td className="check-answer">
-                          {t.message ||
-                            t.result?.availability.message ||
-                            t.result?.quality.message ||
-                            t.result?.quality.text ||
-                            "—"}
-                          {t.result && (
-                            <details>
-                              <summary>检测详情</summary>
-                              <div>
-                                可用性回复：{t.result.availability.text || "—"}
-                              </div>
-                              <div>
-                                降智回复：{t.result.quality.text || "—"}
-                              </div>
-                              <div>
-                                可用性耗时：
-                                {latency(t.result.availability.duration_ms)}
-                              </div>
-                              <div>
-                                降智检测耗时：
-                                {latency(t.result.quality.duration_ms)}
-                              </div>
-                              {t.result.quality.message && (
-                                <div>{t.result.quality.message}</div>
+                          {selected ? (
+                            <>
+                              {t.message ||
+                                selected.message ||
+                                selected.result?.availability.message ||
+                                (model === "gpt-6-astra"
+                                  ? selected.result?.quality.message ||
+                                    selected.result?.quality.text
+                                  : selected.result?.availability.text) ||
+                                "—"}
+                              {selected.result && (
+                                <details>
+                                  <summary>检测详情</summary>
+                                  <ProbeDetails check={selected} />
+                                </details>
                               )}
-                            </details>
+                            </>
+                          ) : (
+                            <>
+                              {t.message && <div>{t.message}</div>}
+                              <ModelResults checks={checks} />
+                            </>
                           )}
                         </td>
                         <td className="mono">
-                          {t.result ? time(t.result.checked_at) : "—"}
-                          {pending(t.state) && t.result && (
-                            <small className="check-source">上次结果</small>
-                          )}
+                          {(() => {
+                            const at =
+                              selected?.result?.checked_at ??
+                              (selected
+                                ? 0
+                                : Math.max(
+                                    0,
+                                    ...checks.map(
+                                      (c) => c.result?.checked_at || 0,
+                                    ),
+                                  ));
+                            return at ? time(at) : "—";
+                          })()}
+                          {selected &&
+                            pending(selected.state) &&
+                            selected.result && (
+                              <small className="check-source">上次结果</small>
+                            )}
                         </td>
                         <td>
                           <button
@@ -888,10 +974,14 @@ export function Sub2apiChecks() {
                               !t.key_id ||
                               t.state === "error"
                             }
-                            onClick={() => void check([{ account, target: t }])}
+                            onClick={() =>
+                              void check([
+                                { account, target: t, checks, selected, astra },
+                              ])
+                            }
                           >
                             <ScanLine size={13} />
-                            重新检测
+                            {model ? "检测此模型" : "检测全部模型"}
                           </button>
                           <button
                             className="button small"
@@ -899,10 +989,7 @@ export function Sub2apiChecks() {
                             onClick={() =>
                               setImporting({
                                 account,
-                                target: account.targets.find(
-                                  (original) =>
-                                    original.group_id === t.group_id,
-                                )!,
+                                target: t,
                               })
                             }
                           >
@@ -917,8 +1004,7 @@ export function Sub2apiChecks() {
             </div>
             <div className="table-footer">
               <span>
-                共 {rows.length} 个模型 / 分组组合 · {eligible.length}{" "}
-                个可发起检测
+                共 {rows.length} 个渠道 · {eligible.length} 个可发起检测
               </span>
               <div className="sub-pagination">
                 <button

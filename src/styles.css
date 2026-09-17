@@ -2538,3 +2538,11 @@ nav > button.active > svg {
 .sub-import-note { font-size:12px; line-height:1.7; color:var(--muted); }
 .sub-table td:last-child .button + .button { margin-left:6px; }
 @media(max-width:540px){ .sub-model-options { grid-template-columns:1fr; } }
+
+.sub-availability-summary { min-width: 115px; }
+.sub-availability-summary .check-source:empty { display: none; }
+.sub-model-results { min-width: 135px; }
+.sub-model-result { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.sub-model-result:last-child { border-bottom: 0; }
+.sub-model-result > strong { display: block; color: var(--ink); font-weight: 550; }
+.sub-model-result-status { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 6px 0; }

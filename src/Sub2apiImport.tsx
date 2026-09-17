@@ -7,7 +7,7 @@ import { Spinner } from "./ui";
 import type { ConsoleSource } from "./SourceSettings";
 import type { KeyInfo } from "./types";
 import type { SubAccount, SubTarget } from "./Sub2apiChecks";
-import { SUB_MODELS } from "./sub2apiModels";
+import { modelChecks, importModelLabel } from "./sub2apiResults";
 interface Options {
   provider?: string;
   supported: boolean;
@@ -25,21 +25,16 @@ export function Sub2apiImport({
   close: () => void;
 }) {
   const client = useQueryClient();
+  const checks = useMemo(() => modelChecks(target), [target]);
   const available = useMemo(
     () =>
-      SUB_MODELS.filter(
-        (model) =>
-          target.models?.some(
-            (m) =>
-              m.model === model &&
-              m.state === "done" &&
-              m.result?.availability.status === "success",
-          ) ||
-          (model === "gpt-6-astra" &&
-            !target.models?.length &&
-            target.result?.availability.status === "success"),
-      ),
-    [target],
+      checks
+        .filter(
+          (c) =>
+            c.state === "done" && c.result?.availability.status === "success",
+        )
+        .map((c) => c.model),
+    [checks],
   );
   const [models, setModels] = useState<string[]>(available),
     [source, setSource] = useState(""),
@@ -166,26 +161,29 @@ export function Sub2apiImport({
               <fieldset disabled={busy}>
                 <legend>模型</legend>
                 <div className="sub-model-options">
-                  {SUB_MODELS.map((model) => (
-                    <label key={model}>
-                      <input
-                        type="checkbox"
-                        checked={models.includes(model)}
-                        disabled={!available.includes(model)}
-                        onChange={(e) =>
-                          setModels((old) =>
-                            e.target.checked
-                              ? [...old, model]
-                              : old.filter((m) => m !== model),
-                          )
-                        }
-                      />
-                      <span>{model}</span>
-                      {!available.includes(model) && (
-                        <small>尚未检测可用</small>
-                      )}
-                    </label>
-                  ))}
+                  {checks.map((check) => {
+                    const model = check.model;
+                    return (
+                      <label key={model}>
+                        <input
+                          type="checkbox"
+                          checked={models.includes(model)}
+                          disabled={!available.includes(model)}
+                          onChange={(e) =>
+                            setModels((old) =>
+                              e.target.checked
+                                ? [...old, model]
+                                : old.filter((m) => m !== model),
+                            )
+                          }
+                        />
+                        <span>{model}</span>
+                        {!available.includes(model) && (
+                          <small>{importModelLabel(check)}</small>
+                        )}
+                      </label>
+                    );
+                  })}
                 </div>
               </fieldset>
               <label className="sub-import-field">

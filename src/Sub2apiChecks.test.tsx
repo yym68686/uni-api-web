@@ -7,6 +7,7 @@ import { Sub2apiChecks } from "./Sub2apiChecks";
 import type { SubAccount } from "./Sub2apiChecks";
 import { LatencyBadge } from "./LatencyBadge";
 import { Timing } from "./ChannelMetrics";
+import { SUB_MODELS } from "./sub2apiModels";
 
 afterEach(() => vi.unstubAllGlobals());
 function mount() {
@@ -93,7 +94,9 @@ it("shows multipliers as numbers, filters all-page batch targets, and restores p
   expect(table.querySelectorAll(".latency-badge.fast")).toHaveLength(1);
   expect(table.querySelectorAll(".latency-badge.medium")).toHaveLength(1);
   await user.selectOptions(screen.getByLabelText("sub2api 账号筛选"), "two");
-  await user.click(screen.getByRole("button", { name: "一键检测 · 1" }));
+  await user.click(
+    screen.getByRole("button", { name: "检测所选模型 · 1 个渠道" }),
+  );
   await waitFor(() =>
     expect(writes).toEqual([
       {
@@ -166,7 +169,9 @@ it("keeps busy accounts from duplicate checks and removes only after explicit se
     name: "检测 one same-group",
   });
   expect(one).toBeDisabled();
-  expect(screen.getByRole("button", { name: "一键检测 · 1" })).toBeEnabled();
+  expect(
+    screen.getByRole("button", { name: "检测所选模型 · 1 个渠道" }),
+  ).toBeEnabled();
   await user.click(screen.getByRole("button", { name: "移除账号 two" }));
   expect(methods).toHaveLength(0);
   await user.click(screen.getByRole("button", { name: "确认移除" }));
@@ -291,7 +296,10 @@ it("filters models, derives rate options from other filters, applies inclusive c
     1,
   );
   expect(screen.getByRole("table")).toHaveTextContent("three");
-  expect(screen.getByRole("table")).toHaveTextContent("不适用");
+  expect(screen.getByRole("table")).toHaveTextContent("降智");
+  expect(
+    screen.getByRole("columnheader", { name: "Astra 降智" }),
+  ).toBeVisible();
   expect(screen.queryByText(/每个分组独立测试/)).not.toBeInTheDocument();
   expect(screen.queryByText("gpt-6-astra · Responses")).not.toBeInTheDocument();
 });
@@ -407,4 +415,192 @@ it("preselects successful models and imports into the selected source key at the
   });
   expect(JSON.stringify(writes)).not.toContain("secret");
   await screen.findByText("已临时添加至第 2 位");
+});
+
+it("all-models groups channels and probes all six despite available/pass filters", async () => {
+  const data = fixtures();
+  const writes: any[] = [];
+  data[0].targets[0].billing = { rate: 0.18, source: "key", checked_at: 1 };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (_input: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        writes.push(JSON.parse(init.body as string));
+        return new Response('{"queued":true}');
+      }
+      return new Response(JSON.stringify({ data }));
+    }),
+  );
+  const user = userEvent.setup();
+  mount();
+  await screen.findByRole("table");
+  expect(
+    screen.queryByRole("columnheader", { name: "模型" }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByRole("table").querySelectorAll("tbody tr")).toHaveLength(
+    2,
+  );
+  await user.selectOptions(screen.getByLabelText("可用性筛选"), "success");
+  await user.selectOptions(screen.getByLabelText("降智筛选"), "pass");
+  await user.selectOptions(screen.getByLabelText("倍率上限筛选"), "0.18");
+  const table = screen.getByRole("table");
+  expect(table.querySelectorAll("tbody tr")).toHaveLength(1);
+  expect(table).toHaveTextContent("1/6 可用");
+  expect(table).toHaveTextContent("5 个未检测");
+  const latencyIndex = within(table)
+    .getAllByRole("columnheader")
+    .findIndex((h) => h.textContent === "首字延迟");
+  expect(
+    table.querySelector("tbody tr")?.children[latencyIndex],
+  ).toHaveTextContent("—");
+  await user.click(
+    screen.getByRole("button", { name: "检测全部模型 · 1 个渠道" }),
+  );
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).toEqual({
+    targets: [{ account_id: "one", group_id: 1, models: [...SUB_MODELS] }],
+  });
+  await user.click(screen.getByRole("button", { name: "检测 one same-group" }));
+  await waitFor(() => expect(writes).toHaveLength(2));
+  expect(writes[1]).toEqual(writes[0]);
+  await user.click(screen.getByText("各模型结果"));
+  const details = table.querySelector("details")!;
+  expect(details.open).toBe(true);
+  for (const model of SUB_MODELS) expect(details).toHaveTextContent(model);
+  expect(details.querySelectorAll(".latency-badge")).toHaveLength(1);
+  await user.click(screen.getByRole("button", { name: "添加到渠道" }));
+  const dialog = screen.getByRole("dialog");
+  expect(
+    within(dialog).getByRole("checkbox", { name: "gpt-6-astra" }),
+  ).toBeChecked();
+  expect(
+    within(dialog).getByRole("checkbox", { name: /gpt-5\.6-sol.*未检测/ }),
+  ).toBeDisabled();
+});
+
+it("specific model uses Astra group quality and only tests the selected model", async () => {
+  const data = fixtures();
+  const writes: any[] = [];
+  data.forEach((a) => {
+    a.targets[0].models = [
+      {
+        model: "gpt-6-astra",
+        state: "done",
+        message: "",
+        result: a.targets[0].result,
+      },
+      {
+        model: "gpt-5.6-sol",
+        state: "done",
+        message: "",
+        result: {
+          ...a.targets[0].result!,
+          model: "gpt-5.6-sol",
+          verdict: "not_applicable",
+          quality: {
+            status: "not_applicable",
+            text: "",
+            ttft_ms: null,
+            duration_ms: 0,
+          },
+        },
+      },
+    ];
+  });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (_input: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        writes.push(JSON.parse(init.body as string));
+        return new Response('{"queued":true}');
+      }
+      return new Response(JSON.stringify({ data }));
+    }),
+  );
+  const user = userEvent.setup();
+  mount();
+  await screen.findByRole("table");
+  await user.selectOptions(
+    screen.getByLabelText("检测模型筛选"),
+    "gpt-5.6-sol",
+  );
+  await user.selectOptions(screen.getByLabelText("降智筛选"), "pass");
+  await user.selectOptions(screen.getByLabelText("可用性筛选"), "success");
+  const table = screen.getByRole("table");
+  expect(table.querySelectorAll("tbody tr")).toHaveLength(1);
+  expect(table).toHaveTextContent("one");
+  expect(table).toHaveTextContent("gpt-5.6-sol");
+  expect(table).toHaveTextContent("不降智");
+  await user.click(
+    screen.getByRole("button", { name: "检测所选模型 · 1 个渠道" }),
+  );
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0].targets).toEqual([
+    { account_id: "one", group_id: 1, models: ["gpt-5.6-sol"] },
+  ]);
+  await user.selectOptions(screen.getByLabelText("检测模型筛选"), "");
+  expect(screen.getByRole("table")).toHaveTextContent("2/6 可用");
+  await user.click(
+    screen.getByRole("button", { name: "检测全部模型 · 1 个渠道" }),
+  );
+  await waitFor(() => expect(writes).toHaveLength(2));
+  expect(writes[1].targets[0].models).toEqual([...SUB_MODELS]);
+});
+
+it("all-model batch spans all filtered pages and includes failed and untested siblings", async () => {
+  const data = fixtures().slice(0, 1);
+  const first = data[0].targets[0];
+  data[0].targets = Array.from({ length: 28 }, (_, i) => ({
+    ...first,
+    group_id: i + 1,
+    name: "group-" + (i + 1),
+    models: [
+      {
+        model: "gpt-6-astra",
+        state: "done",
+        message: "",
+        result: first.result,
+      },
+      {
+        model: "gpt-5.5",
+        state: "done",
+        message: "",
+        result: {
+          ...first.result!,
+          model: "gpt-5.5",
+          availability: { ...first.result!.availability, status: "error" },
+        },
+      },
+    ],
+  }));
+  const writes: any[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (_input: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        writes.push(JSON.parse(init.body as string));
+        return new Response('{"queued":true}');
+      }
+      return new Response(JSON.stringify({ data }));
+    }),
+  );
+  const user = userEvent.setup();
+  mount();
+  await screen.findByRole("table");
+  await user.selectOptions(screen.getByLabelText("可用性筛选"), "error");
+  expect(screen.getByRole("table").querySelectorAll("tbody tr")).toHaveLength(
+    25,
+  );
+  expect(screen.getAllByText(/1 个失败/).length).toBeGreaterThan(0);
+  await user.click(screen.getByRole("button", { name: "下一页" }));
+  expect(screen.getByRole("table").querySelectorAll("tbody tr")).toHaveLength(
+    3,
+  );
+  await user.click(
+    screen.getByRole("button", { name: "检测全部模型 · 28 个渠道" }),
+  );
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0].targets).toHaveLength(28);
+  for (const target of writes[0].targets)
+    expect(target.models).toEqual([...SUB_MODELS]);
 });
