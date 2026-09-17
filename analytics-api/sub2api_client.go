@@ -183,11 +183,15 @@ type subResult struct {
 
 // Only output_text deltas are first text. A stream must end with a successful
 // response.completed event and final assistant text; EOF/[DONE] alone is not success.
-func subProbeStream(ctx context.Context, client *http.Client, base, key, prompt string) (out subProbe) {
+func subProbeStream(ctx context.Context, client *http.Client, base, key, prompt string, models ...string) (out subProbe) {
 	start := time.Now()
 	out.Status = "error"
 	defer func() { out.Duration = time.Since(start).Milliseconds() }()
-	body, _ := json.Marshal(map[string]any{"model": checkModel, "input": []map[string]string{{"role": "user", "content": prompt}}, "stream": true})
+	model := checkModel
+	if len(models) > 0 {
+		model = models[0]
+	}
+	body, _ := json.Marshal(map[string]any{"model": model, "input": []map[string]string{{"role": "user", "content": prompt}}, "stream": true})
 	req, _ := http.NewRequestWithContext(ctx, "POST", base+"/v1/responses", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+key)
 	req.Header.Set("Content-Type", "application/json")
@@ -315,9 +319,29 @@ func subProbeStream(ctx context.Context, client *http.Client, base, key, prompt 
 	return
 }
 
-func subRunProbes(ctx context.Context, client *http.Client, base, key string) subResult {
-	out := subResult{Model: checkModel, Verdict: "error", Quality: subProbe{Status: "skipped", Message: "可用性检测未通过"}}
-	out.Availability = subProbeStream(ctx, client, base, key, "say test")
+var subModels = []string{"gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "codex-auto-review"}
+
+func subModelAllowed(model string) bool {
+	for _, m := range subModels {
+		if m == model {
+			return true
+		}
+	}
+	return false
+}
+func subRunProbes(ctx context.Context, client *http.Client, base, key string, models ...string) subResult {
+	model := checkModel
+	if len(models) > 0 {
+		model = models[0]
+	}
+	out := subResult{Model: model, Verdict: "error", Quality: subProbe{Status: "skipped", Message: "可用性检测未通过"}}
+	out.Availability = subProbeStream(ctx, client, base, key, "say test", model)
+	if model != checkModel {
+		out.Verdict = "not_applicable"
+		out.Quality = subProbe{Status: "not_applicable", Message: "该模型不执行降智检测"}
+		out.CheckedAt = time.Now().Unix()
+		return out
+	}
 	if out.Availability.Status == "success" && ctx.Err() == nil {
 		out.Quality = subProbeStream(ctx, client, base, key, checkPrompt)
 		if out.Quality.Status == "success" {

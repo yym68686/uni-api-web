@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as Tooltip from "@radix-ui/react-tooltip";
@@ -82,6 +82,10 @@ it("shows multipliers as numbers, filters all-page batch targets, and restores p
   expect(
     await screen.findByRole("columnheader", { name: "倍率" }),
   ).toBeVisible();
+  await user.selectOptions(
+    screen.getByLabelText("检测模型筛选"),
+    "gpt-6-astra",
+  );
   expect(await screen.findAllByText("0.01")).toHaveLength(2);
   expect(screen.getByText("不降智", { selector: "span" })).toBeVisible();
   expect(screen.getByText("降智", { selector: "span" })).toBeVisible();
@@ -91,7 +95,11 @@ it("shows multipliers as numbers, filters all-page batch targets, and restores p
   await user.selectOptions(screen.getByLabelText("sub2api 账号筛选"), "two");
   await user.click(screen.getByRole("button", { name: "一键检测 · 1" }));
   await waitFor(() =>
-    expect(writes).toEqual([{ targets: [{ account_id: "two", group_id: 1 }] }]),
+    expect(writes).toEqual([
+      {
+        targets: [{ account_id: "two", group_id: 1, models: ["gpt-6-astra"] }],
+      },
+    ]),
   );
   first.unmount();
   mount();
@@ -149,6 +157,11 @@ it("keeps busy accounts from duplicate checks and removes only after explicit se
   );
   const user = userEvent.setup();
   mount();
+  await screen.findByLabelText("检测模型筛选");
+  await user.selectOptions(
+    screen.getByLabelText("检测模型筛选"),
+    "gpt-6-astra",
+  );
   const one = await screen.findByRole("button", {
     name: "检测 one same-group",
   });
@@ -201,4 +214,197 @@ it("colors only first-output p50 with exact 5s and 10s boundaries", () => {
     screen.getByTestId("first").querySelectorAll(".latency-badge"),
   ).toHaveLength(1);
   expect(container).not.toHaveTextContent("NaN");
+});
+
+it("filters models, derives rate options from other filters, applies inclusive caps and both sorts", async () => {
+  const data = fixtures();
+  data.push({
+    ...data[1],
+    id: "three",
+    name: "three",
+    email: "three@test.com",
+  });
+  data.forEach((a, i) => {
+    a.targets = [
+      {
+        ...a.targets[0],
+        billing: { rate: [0.2, 0.07, 0.1][i], source: "key", checked_at: 1 },
+        models: [
+          {
+            model: "gpt-6-astra",
+            state: "done",
+            message: "",
+            result: a.targets[0].result,
+          },
+          {
+            model: "gpt-5.6-sol",
+            state: "done",
+            message: "",
+            result: {
+              ...a.targets[0].result!,
+              model: "gpt-5.6-sol",
+              verdict: "not_applicable",
+              availability: {
+                ...a.targets[0].result!.availability,
+                status: i === 1 ? "error" : "success",
+              },
+              quality: {
+                status: "not_applicable",
+                text: "",
+                ttft_ms: null,
+                duration_ms: 0,
+              },
+            },
+          },
+        ],
+      },
+    ];
+  });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response(JSON.stringify({ data }))),
+  );
+  const user = userEvent.setup();
+  mount();
+  await screen.findByRole("table");
+  await user.selectOptions(
+    screen.getByLabelText("检测模型筛选"),
+    "gpt-5.6-sol",
+  );
+  await user.selectOptions(screen.getByLabelText("可用性筛选"), "success");
+  const cap = screen.getByLabelText("倍率上限筛选");
+  expect([...cap.querySelectorAll("option")].map((o) => o.value)).toEqual([
+    "",
+    "0.1",
+    "0.2",
+  ]);
+  await user.selectOptions(screen.getByLabelText("倍率排序"), "asc");
+  expect(
+    screen.getByRole("table").querySelector("tbody tr")?.textContent,
+  ).toContain("three");
+  await user.selectOptions(screen.getByLabelText("倍率排序"), "desc");
+  expect(
+    screen.getByRole("table").querySelector("tbody tr")?.textContent,
+  ).toContain("one");
+  await user.selectOptions(cap, "0.1");
+  expect(screen.getByRole("table").querySelectorAll("tbody tr")).toHaveLength(
+    1,
+  );
+  expect(screen.getByRole("table")).toHaveTextContent("three");
+  expect(screen.getByRole("table")).toHaveTextContent("不适用");
+  expect(screen.queryByText(/每个分组独立测试/)).not.toBeInTheDocument();
+  expect(screen.queryByText("gpt-6-astra · Responses")).not.toBeInTheDocument();
+});
+
+it("preselects successful models and imports into the selected source key at the selected position", async () => {
+  const data = fixtures().slice(0, 1),
+    writes: any[] = [];
+  data[0].targets[0].models = [
+    {
+      model: "gpt-6-astra",
+      state: "done",
+      message: "",
+      result: data[0].targets[0].result,
+    },
+    {
+      model: "gpt-5.6-sol",
+      state: "done",
+      message: "",
+      result: {
+        ...data[0].targets[0].result!,
+        model: "gpt-5.6-sol",
+        verdict: "not_applicable",
+      },
+    },
+    {
+      model: "gpt-5.5",
+      state: "done",
+      message: "",
+      result: {
+        ...data[0].targets[0].result!,
+        model: "gpt-5.5",
+        availability: {
+          ...data[0].targets[0].result!.availability,
+          status: "error",
+        },
+      },
+    },
+  ];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string, init?: RequestInit) => {
+      const u = new URL(input);
+      if (u.pathname.endsWith("/sub2api/channels")) {
+        writes.push(JSON.parse(init?.body as string));
+        return new Response(JSON.stringify({ message: "已临时添加至第 2 位" }));
+      }
+      if (u.pathname.endsWith("/sources"))
+        return new Response(
+          JSON.stringify({
+            data: [
+              { id: "source", name: "DigitalOcean", base: "https://do.test" },
+            ],
+          }),
+        );
+      if (u.pathname.endsWith("/channel-options"))
+        return new Response(
+          JSON.stringify({
+            supported: true,
+            revision: "revision-1",
+            keys: [{ key_id: "key-target", position: 2, prefix: "masked" }],
+            channels: [
+              { provider: "existing", model: "gpt-6-astra" },
+              { provider: "existing", model: "gpt-5.6-sol" },
+            ],
+          }),
+        );
+      return new Response(JSON.stringify({ data }));
+    }),
+  );
+  const user = userEvent.setup();
+  mount();
+  await screen.findByRole("table");
+  await user.selectOptions(
+    screen.getByLabelText("检测模型筛选"),
+    "gpt-6-astra",
+  );
+  await user.click(screen.getByRole("button", { name: "添加到渠道" }));
+  const dialog = screen.getByRole("dialog");
+  expect(
+    within(dialog).getByRole("checkbox", { name: "gpt-6-astra" }),
+  ).toBeChecked();
+  expect(
+    within(dialog).getByRole("checkbox", { name: "gpt-5.6-sol" }),
+  ).toBeChecked();
+  expect(
+    within(dialog).getByRole("checkbox", { name: /gpt-5.5/ }),
+  ).toBeDisabled();
+  await user.selectOptions(
+    within(dialog).getByLabelText("添加到 uni-api 来源"),
+    "source",
+  );
+  await waitFor(() =>
+    expect(within(dialog).getByLabelText("添加到 API key")).toBeEnabled(),
+  );
+  await user.selectOptions(
+    within(dialog).getByLabelText("添加到 API key"),
+    "key-target",
+  );
+  await waitFor(() =>
+    expect(within(dialog).getByLabelText("渠道添加位置")).toBeEnabled(),
+  );
+  await user.selectOptions(within(dialog).getByLabelText("渠道添加位置"), "2");
+  await user.click(within(dialog).getByRole("button", { name: "添加到渠道" }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).toEqual({
+    account_id: "one",
+    group_id: 1,
+    source_id: "source",
+    api_key_id: "key-target",
+    models: ["gpt-6-astra", "gpt-5.6-sol"],
+    position: 2,
+    revision: "revision-1",
+  });
+  expect(JSON.stringify(writes)).not.toContain("secret");
+  await screen.findByText("已临时添加至第 2 位");
 });

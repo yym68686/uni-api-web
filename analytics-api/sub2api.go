@@ -29,20 +29,34 @@ CREATE TABLE IF NOT EXISTS console_sub_targets(
  remote_key_id BIGINT NOT NULL DEFAULT 0, encrypted_key TEXT NOT NULL DEFAULT '', active BOOLEAN NOT NULL DEFAULT true,
  state TEXT NOT NULL DEFAULT 'idle', message TEXT NOT NULL DEFAULT '', result JSONB,
  PRIMARY KEY(account_id,group_id));
-ALTER TABLE console_sub_targets ADD COLUMN IF NOT EXISTS billing JSONB;`
+ALTER TABLE console_sub_targets ADD COLUMN IF NOT EXISTS billing JSONB;
+ALTER TABLE console_sub_targets ADD COLUMN IF NOT EXISTS encrypted_routing_key TEXT NOT NULL DEFAULT '';
+ALTER TABLE console_sub_targets ADD COLUMN IF NOT EXISTS routing_key_id BIGINT NOT NULL DEFAULT 0;
+CREATE TABLE IF NOT EXISTS console_sub_models(
+ account_id TEXT NOT NULL,group_id BIGINT NOT NULL,model TEXT NOT NULL,state TEXT NOT NULL DEFAULT 'idle',message TEXT NOT NULL DEFAULT '',result JSONB,
+ PRIMARY KEY(account_id,group_id,model),FOREIGN KEY(account_id,group_id) REFERENCES console_sub_targets(account_id,group_id) ON DELETE CASCADE);
+INSERT INTO console_sub_models(account_id,group_id,model,state,result)
+ SELECT account_id,group_id,'gpt-6-astra','done',result FROM console_sub_targets WHERE result IS NOT NULL ON CONFLICT DO NOTHING;`
 
+type subModelResult struct {
+	Model   string     `json:"model"`
+	State   string     `json:"state"`
+	Message string     `json:"message"`
+	Result  *subResult `json:"result"`
+}
 type subTarget struct {
-	GroupID  int64       `json:"group_id"`
-	Name     string      `json:"name"`
-	Platform string      `json:"platform"`
-	Channel  string      `json:"channel"`
-	Rate     float64     `json:"rate"`
-	KeyID    int64       `json:"key_id"`
-	Active   bool        `json:"active"`
-	State    string      `json:"state"`
-	Message  string      `json:"message"`
-	Result   *subResult  `json:"result"`
-	Billing  *subBilling `json:"billing"`
+	Models   []subModelResult `json:"models"`
+	GroupID  int64            `json:"group_id"`
+	Name     string           `json:"name"`
+	Platform string           `json:"platform"`
+	Channel  string           `json:"channel"`
+	Rate     float64          `json:"rate"`
+	KeyID    int64            `json:"key_id"`
+	Active   bool             `json:"active"`
+	State    string           `json:"state"`
+	Message  string           `json:"message"`
+	Result   *subResult       `json:"result"`
+	Billing  *subBilling      `json:"billing"`
 }
 type subAccount struct {
 	ID       string      `json:"id"`
@@ -85,7 +99,7 @@ func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "账号列表读取失败", 503)
 		return
 	}
-	rows, err = s.control.db.QueryContext(r.Context(), `SELECT t.account_id,t.group_id,t.name,t.platform,t.channel,t.rate,t.remote_key_id,t.active,t.state,t.message,t.result,t.billing FROM console_sub_targets t JOIN console_sub_accounts a ON a.id=t.account_id WHERE a.owner=$1 ORDER BY t.group_id`, owner)
+	rows, err = s.control.db.QueryContext(r.Context(), `SELECT t.account_id,t.group_id,t.name,t.platform,t.channel,t.rate,t.remote_key_id,t.active,t.state,t.message,t.result,t.billing,COALESCE((SELECT jsonb_agg(jsonb_build_object('model',m.model,'state',m.state,'message',m.message,'result',m.result) ORDER BY m.model) FROM console_sub_models m WHERE m.account_id=t.account_id AND m.group_id=t.group_id),'[]'::jsonb) FROM console_sub_targets t JOIN console_sub_accounts a ON a.id=t.account_id WHERE a.owner=$1 ORDER BY t.group_id`, owner)
 	if err != nil {
 		http.Error(w, "检测结果暂不可用", 503)
 		return
@@ -94,8 +108,11 @@ func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var id string
 		var t subTarget
-		var raw, billingRaw []byte
-		if err = rows.Scan(&id, &t.GroupID, &t.Name, &t.Platform, &t.Channel, &t.Rate, &t.KeyID, &t.Active, &t.State, &t.Message, &raw, &billingRaw); err != nil {
+		var raw, billingRaw, modelsRaw []byte
+		if err = rows.Scan(&id, &t.GroupID, &t.Name, &t.Platform, &t.Channel, &t.Rate, &t.KeyID, &t.Active, &t.State, &t.Message, &raw, &billingRaw, &modelsRaw); err != nil {
+			break
+		}
+		if err = json.Unmarshal(modelsRaw, &t.Models); err != nil {
 			break
 		}
 		if len(billingRaw) > 0 {
@@ -283,7 +300,7 @@ func (s *Service) subStop(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "账号不存在", 404)
 		return
 	}
-	_, err = tx.ExecContext(r.Context(), `UPDATE console_sub_targets SET state='interrupted',message='检测已停止，已有结果保留' WHERE account_id=$1 AND state IN ('queued','running')`, id)
+	_, err = tx.ExecContext(r.Context(), `WITH stopped AS (UPDATE console_sub_targets SET state='interrupted',message='检测已停止，已有结果保留' WHERE account_id=$1 AND state IN ('queued','running') RETURNING group_id) UPDATE console_sub_models SET state='interrupted',message='检测已停止' WHERE account_id=$1 AND state IN ('queued','running')`, id)
 	if err != nil || tx.Commit() != nil {
 		http.Error(w, "停止失败", 503)
 		return
@@ -292,8 +309,9 @@ func (s *Service) subStop(w http.ResponseWriter, r *http.Request) {
 }
 
 type subSelection struct {
-	AccountID string `json:"account_id"`
-	GroupID   int64  `json:"group_id"`
+	AccountID string   `json:"account_id"`
+	GroupID   int64    `json:"group_id"`
+	Models    []string `json:"models"`
 }
 
 func (s *Service) subCheck(w http.ResponseWriter, r *http.Request) {
@@ -338,6 +356,20 @@ func (s *Service) subCheck(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "分组不可用或尚未创建 key，请先同步", 400)
 			return
 		}
+		models := target.Models
+		if len(models) == 0 {
+			models = subModels
+		}
+		for _, model := range models {
+			if !subModelAllowed(model) {
+				http.Error(w, "不支持的检测模型", 400)
+				return
+			}
+			if _, e = tx.ExecContext(r.Context(), `INSERT INTO console_sub_models(account_id,group_id,model,state) VALUES($1,$2,$3,'queued') ON CONFLICT(account_id,group_id,model) DO UPDATE SET state='queued',message=''`, target.AccountID, target.GroupID, model); e != nil {
+				http.Error(w, "模型任务创建失败", 503)
+				return
+			}
+		}
 	}
 	if tx.Commit() != nil {
 		http.Error(w, "任务创建失败", 503)
@@ -371,7 +403,7 @@ func (s *Service) subWorkOne(parent context.Context) bool {
 	ctx, cancel := context.WithTimeout(parent, 30*time.Minute)
 	defer cancel()
 	// Expiry means the previous worker cannot report safely. Preserve old results.
-	_, err := s.control.db.ExecContext(ctx, `WITH expired AS (UPDATE console_sub_accounts SET state='interrupted',message='服务重启或任务中断，请手动重新检测',job_kind='',job_id='',lease_until=NULL WHERE state='running' AND lease_until<now() RETURNING id) UPDATE console_sub_targets SET state='interrupted',message='上次检测中断' WHERE account_id IN (SELECT id FROM expired) AND state IN ('running','queued')`)
+	_, err := s.control.db.ExecContext(ctx, `WITH expired AS (UPDATE console_sub_accounts SET state='interrupted',message='服务重启或任务中断，请手动重新检测',job_kind='',job_id='',lease_until=NULL WHERE state='running' AND lease_until<now() RETURNING id), targets AS (UPDATE console_sub_targets SET state='interrupted',message='上次检测中断' WHERE account_id IN (SELECT id FROM expired) AND state IN ('running','queued') RETURNING account_id) UPDATE console_sub_models SET state='interrupted',message='上次检测中断' WHERE account_id IN (SELECT id FROM expired) AND state IN ('running','queued')`)
 	if err != nil {
 		return false
 	}
@@ -421,18 +453,18 @@ func (s *Service) subWorkOne(parent context.Context) bool {
 		state, message = "interrupted", "任务中断，请手动重试；未自动重发检测请求"
 	}
 	// Fence all late completions against stop/re-login/new worker operations.
-	_, _ = s.control.db.ExecContext(finishCtx, `WITH finished AS (UPDATE console_sub_accounts SET state=$3,message=CASE WHEN $3='idle' THEN message ELSE $4 END,job_kind='',job_id='',lease_until=NULL WHERE id=$1 AND job_id=$2 RETURNING id) UPDATE console_sub_targets SET state='interrupted',message='任务未完成，请重试' WHERE account_id IN (SELECT id FROM finished) AND state IN ('queued','running')`, id, job, state, message)
+	_, _ = s.control.db.ExecContext(finishCtx, `WITH finished AS (UPDATE console_sub_accounts SET state=$3,message=CASE WHEN $3='idle' THEN message ELSE $4 END,job_kind='',job_id='',lease_until=NULL WHERE id=$1 AND job_id=$2 RETURNING id), targets AS (UPDATE console_sub_targets SET state='interrupted',message='任务未完成，请重试' WHERE account_id IN (SELECT id FROM finished) AND state IN ('queued','running') RETURNING account_id) UPDATE console_sub_models SET state='interrupted',message='任务未完成，请重试' WHERE account_id IN (SELECT id FROM finished) AND state IN ('queued','running')`, id, job, state, message)
 	return true
 }
 
-func (s *Service) subSynchronize(ctx context.Context, id, base, job, encrypted string) error {
+func (s *Service) subPanel(ctx context.Context, id, base, job, encrypted string) (func(string, string, any, any, string) error, []subRemoteGroup, error) {
 	plain, err := s.control.decrypt(encrypted)
 	if err != nil {
-		return errors.New("账号凭据无法解密，请重新登录")
+		return nil, nil, errors.New("账号凭据无法解密，请重新登录")
 	}
 	var auth subAuth
 	if json.Unmarshal([]byte(plain), &auth) != nil {
-		return errors.New("账号凭据无效，请重新登录")
+		return nil, nil, errors.New("账号凭据无效，请重新登录")
 	}
 	call := func(method, path string, body, out any, idem string) error {
 		return subJSON(ctx, subHTTP, base, method, path, auth.Access, body, out, idem)
@@ -443,28 +475,36 @@ func (s *Service) subSynchronize(ctx context.Context, id, base, job, encrypted s
 	if errors.As(err, &remoteErr) && remoteErr.Status == 401 && auth.Refresh != "" {
 		var next subAuth
 		if err = subJSON(ctx, subHTTP, base, "POST", "/api/v1/auth/refresh", "", map[string]string{"refresh_token": auth.Refresh}, &next, ""); err != nil {
-			return err
+			return nil, nil, err
 		}
 		if next.Access == "" || next.Refresh == "" {
-			return errors.New("刷新凭据失败，请重新登录")
+			return nil, nil, errors.New("刷新凭据失败，请重新登录")
 		}
 		next.ExpiresAt = time.Now().Add(time.Duration(next.ExpiresIn) * time.Second).Unix()
 		auth = next
 		raw, _ := json.Marshal(auth)
 		enc, e := s.control.encrypt(string(raw))
 		if e != nil {
-			return errors.New("凭据保存失败")
+			return nil, nil, errors.New("凭据保存失败")
 		}
 		result, e := s.control.db.ExecContext(ctx, `UPDATE console_sub_accounts SET encrypted_auth=$3 WHERE id=$1 AND job_id=$2`, id, job, enc)
 		if e != nil {
-			return errors.New("凭据保存失败")
+			return nil, nil, errors.New("凭据保存失败")
 		}
 		n, _ := result.RowsAffected()
 		if n != 1 {
-			return context.Canceled
+			return nil, nil, context.Canceled
 		}
 		err = call("GET", "/api/v1/groups/available", nil, &groups, "")
 	}
+	if err != nil {
+		return nil, nil, err
+	}
+	return call, groups, nil
+}
+
+func (s *Service) subSynchronize(ctx context.Context, id, base, job, encrypted string) error {
+	call, groups, err := s.subPanel(ctx, id, base, job, encrypted)
 	if err != nil {
 		return err
 	}
@@ -535,6 +575,13 @@ func (s *Service) subSynchronize(ctx context.Context, id, base, job, encrypted s
 			return errors.New("分组保存失败")
 		}
 	}
+	for _, g := range groups {
+		for _, model := range subModels {
+			if _, err = tx.ExecContext(ctx, `INSERT INTO console_sub_models(account_id,group_id,model,state) VALUES($1,$2,$3,'queued') ON CONFLICT(account_id,group_id,model) DO UPDATE SET state='queued',message=''`, id, g.ID, model); err != nil {
+				return errors.New("模型保存失败")
+			}
+		}
+	}
 	if err = tx.Commit(); err != nil {
 		return errors.New("分组保存失败")
 	}
@@ -593,18 +640,18 @@ func (s *Service) subSynchronize(ctx context.Context, id, base, job, encrypted s
 }
 
 func (s *Service) subTestTargets(ctx context.Context, id, base, job string) error {
-	rows, err := s.control.db.QueryContext(ctx, `SELECT group_id,encrypted_key FROM console_sub_targets WHERE account_id=$1 AND active AND state='queued' AND encrypted_key<>'' ORDER BY group_id`, id)
+	rows, err := s.control.db.QueryContext(ctx, `SELECT m.group_id,m.model,t.encrypted_key FROM console_sub_models m JOIN console_sub_targets t USING(account_id,group_id) WHERE m.account_id=$1 AND t.active AND t.state<>'error' AND m.state='queued' AND t.encrypted_key<>'' ORDER BY m.group_id,m.model`, id)
 	if err != nil {
 		return errors.New("测试 key 读取失败")
 	}
 	type target struct {
-		id  int64
-		key string
+		id         int64
+		model, key string
 	}
 	targets := []target{}
 	for rows.Next() {
 		var t target
-		if err = rows.Scan(&t.id, &t.key); err != nil {
+		if err = rows.Scan(&t.id, &t.model, &t.key); err != nil {
 			break
 		}
 		targets = append(targets, t)
@@ -627,7 +674,7 @@ func (s *Service) subTestTargets(ctx context.Context, id, base, job string) erro
 				if ctx.Err() != nil {
 					return
 				}
-				res, e := s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET state='running',message='' WHERE account_id=$1 AND group_id=$2 AND state='queued' AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$3)`, id, t.id, job)
+				res, e := s.control.db.ExecContext(ctx, `UPDATE console_sub_models SET state='running',message='' WHERE account_id=$1 AND group_id=$2 AND model=$3 AND state='queued' AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$4)`, id, t.id, t.model, job)
 				if e != nil {
 					errs <- errors.New("检测进度保存失败")
 					continue
@@ -642,18 +689,25 @@ func (s *Service) subTestTargets(ctx context.Context, id, base, job string) erro
 					continue
 				}
 				probeCtx, cancel := context.WithTimeout(ctx, 125*time.Second)
-				result := subRunProbes(probeCtx, subHTTP, base, key)
+				result := subRunProbes(probeCtx, subHTTP, base, key, t.model)
 				cancel()
-				// Do not let an upstream echo the credential into the browser.
 				result.Availability.Text = strings.ReplaceAll(result.Availability.Text, key, "[redacted]")
 				result.Quality.Text = strings.ReplaceAll(result.Quality.Text, key, "[redacted]")
 				if ctx.Err() != nil {
 					return
 				}
 				raw, _ := json.Marshal(result)
-				_, e = s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET state='done',result=$3,message='' WHERE account_id=$1 AND group_id=$2 AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$4)`, id, t.id, string(raw), job)
+				_, e = s.control.db.ExecContext(ctx, `UPDATE console_sub_models SET state='done',result=$4,message='' WHERE account_id=$1 AND group_id=$2 AND model=$3 AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$5)`, id, t.id, t.model, string(raw), job)
 				if e != nil {
 					errs <- errors.New("检测结果保存失败")
+					continue
+				}
+				// Preserve the legacy Astra projection for older clients during rollout.
+				if t.model == checkModel {
+					_, e = s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET result=$3 WHERE account_id=$1 AND group_id=$2 AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$4)`, id, t.id, string(raw), job)
+					if e != nil {
+						errs <- errors.New("检测结果保存失败")
+					}
 				}
 			}
 		}()
@@ -673,6 +727,10 @@ send:
 		if e != nil {
 			return e
 		}
+	}
+	_, err = s.control.db.ExecContext(ctx, `UPDATE console_sub_targets t SET state='done',message='' WHERE account_id=$1 AND state<>'error' AND active AND NOT EXISTS(SELECT 1 FROM console_sub_models m WHERE m.account_id=t.account_id AND m.group_id=t.group_id AND m.state IN ('queued','running')) AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$2)`, id, job)
+	if err != nil {
+		return errors.New("分组状态保存失败")
 	}
 	return ctx.Err()
 }

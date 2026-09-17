@@ -17,6 +17,8 @@ import {
 import { controlRequest } from "./api";
 import { LatencyBadge } from "./LatencyBadge";
 import { Empty, Spinner, Tip } from "./ui";
+import { Sub2apiImport } from "./Sub2apiImport";
+import { SUB_MODELS } from "./sub2apiModels";
 import { time } from "./format";
 
 interface Probe {
@@ -35,6 +37,13 @@ interface Result {
   verdict: string;
 }
 export interface SubTarget {
+  models?: {
+    model: string;
+    state: string;
+    message: string;
+    result: Result | null;
+  }[];
+  model?: string;
   group_id: number;
   name: string;
   platform: string;
@@ -264,6 +273,8 @@ function AccountForm({
 }
 
 function Verdict({ result }: { result: Result | null }) {
+  if (result?.verdict === "not_applicable")
+    return <span className="muted">不适用</span>;
   if (!result) return <span className="muted">未检测</span>;
   const pass = result.verdict === "pass",
     fail = result.verdict === "fail";
@@ -307,21 +318,45 @@ export function Sub2apiChecks() {
   const [form, setForm] = useState<{ account: SubAccount | null } | null>(null);
   const [search, setSearch] = useState("");
   const [accountId, setAccountId] = useState("");
+  const [model, setModel] = useState("");
+  const [maxRate, setMaxRate] = useState("");
+  const [sort, setSort] = useState("");
+  const [importing, setImporting] = useState<{
+    account: SubAccount;
+    target: SubTarget;
+  } | null>(null);
   const [availability, setAvailability] = useState("");
   const [quality, setQuality] = useState("");
   const [error, setError] = useState("");
   const [action, setAction] = useState("");
   const [removing, setRemoving] = useState<string | null>(null);
   const [page, setPage] = useState(0);
-  const rows = useMemo(
+  const candidateRows = useMemo(
     () =>
       accounts
         .flatMap((account) =>
-          account.targets.map((target) => ({ account, target })),
+          account.targets.flatMap((target) =>
+            SUB_MODELS.map((model) => {
+              const status = target.models?.find((m) => m.model === model);
+              return {
+                account,
+                target: {
+                  ...target,
+                  model,
+                  result:
+                    status?.result ||
+                    (model === "gpt-6-astra" ? target.result : null),
+                  state: status?.state || target.state,
+                  message: status?.message || target.message,
+                },
+              };
+            }),
+          ),
         )
         .filter(
           ({ account, target }) =>
             (!accountId || account.id === accountId) &&
+            (!model || target.model === model) &&
             `${account.name} ${account.email} ${target.name} ${target.channel} ${target.platform}`
               .toLowerCase()
               .includes(search.toLowerCase()) &&
@@ -331,8 +366,32 @@ export function Sub2apiChecks() {
                 : target.result?.availability.status === availability)) &&
             (!quality || target.result?.verdict === quality),
         ),
-    [accounts, search, accountId, availability, quality],
+    [accounts, search, accountId, availability, quality, model],
   );
+  const rates = [
+    ...new Set(
+      candidateRows
+        .map(({ target }) => target.billing?.rate)
+        .filter((v): v is number => v != null && Number.isFinite(v)),
+    ),
+  ].sort((a, b) => a - b);
+  const effectiveMaxRate = rates.some((v) => String(v) === maxRate)
+    ? maxRate
+    : "";
+  const rows = candidateRows.filter(
+    ({ target }) =>
+      !effectiveMaxRate ||
+      (target.billing?.rate != null &&
+        target.billing.rate <= Number(effectiveMaxRate)),
+  );
+  if (sort)
+    rows.sort((a, b) => {
+      const x = a.target.billing?.rate,
+        y = b.target.billing?.rate;
+      if (x == null) return y == null ? 0 : 1;
+      if (y == null) return -1;
+      return sort === "asc" ? x - y : y - x;
+    });
   const currentPage = Math.min(
     page,
     Math.max(0, Math.ceil(rows.length / 25) - 1),
@@ -344,7 +403,6 @@ export function Sub2apiChecks() {
       !pending(account.state) &&
       target.state !== "error",
   );
-  const busyAccounts = accounts.filter((a) => pending(a.state));
   async function mutate(
     key: string,
     path: string,
@@ -367,13 +425,26 @@ export function Sub2apiChecks() {
       setAction("");
     }
   }
-  const check = (selection: typeof rows) =>
-    mutate("check", "/v1/sub2api/checks", {
-      targets: selection.map(({ account, target }) => ({
+  const check = (selection: typeof rows) => {
+    const targets = new Map<
+      string,
+      { account_id: string; group_id: number; models: string[] }
+    >();
+    for (const { account, target } of selection) {
+      const id = account.id + ":" + target.group_id;
+      const item = targets.get(id) || {
         account_id: account.id,
         group_id: target.group_id,
-      })),
+        models: [],
+      };
+      if (target.model && !item.models.includes(target.model))
+        item.models.push(target.model);
+      targets.set(id, item);
+    }
+    return mutate("check", "/v1/sub2api/checks", {
+      targets: [...targets.values()],
     });
+  };
   return (
     <div className="sub2api-page">
       <section className="data-panel sub-accounts">
@@ -420,7 +491,7 @@ export function Sub2apiChecks() {
           </div>
         ) : accounts.length === 0 ? (
           <Empty title="添加第一个 sub2api 账号" icon={<Globe2 size={25} />}>
-            填入站点地址与账号密码，自动发现可用分组并检测 gpt-6-astra。
+            填入站点地址与账号密码，自动发现可用分组并检测六个模型。
           </Empty>
         ) : (
           <div className="sub-account-list">
@@ -536,7 +607,7 @@ export function Sub2apiChecks() {
         <div className="data-heading">
           <div className="data-title">
             <ScanLine size={19} />
-            <h2>分组检测</h2>
+            <h2>模型检测</h2>
             <span className="count-badge">{rows.length}</span>
           </div>
           <div className="data-actions">
@@ -561,7 +632,13 @@ export function Sub2apiChecks() {
             </button>
             <button
               className="button primary small"
-              disabled={!eligible.length || !!action || eligible.length > 500}
+              disabled={
+                !eligible.length ||
+                !!action ||
+                new Set(
+                  eligible.map((r) => r.account.id + ":" + r.target.group_id),
+                ).size > 500
+              }
               onClick={() => void check(eligible)}
             >
               <ScanLine size={15} />
@@ -586,6 +663,57 @@ export function Sub2apiChecks() {
                   {a.name} · {a.email}
                 </option>
               ))}
+            </select>
+            <ChevronDown size={13} />
+          </label>
+          <label className="select-field">
+            <select
+              aria-label="检测模型筛选"
+              value={model}
+              onChange={(e) => {
+                setModel(e.target.value);
+                setPage(0);
+              }}
+            >
+              <option value="">全部模型</option>
+              {SUB_MODELS.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+            <ChevronDown size={13} />
+          </label>
+          <label className="select-field">
+            <select
+              aria-label="倍率上限筛选"
+              value={effectiveMaxRate}
+              onChange={(e) => {
+                setMaxRate(e.target.value);
+                setPage(0);
+              }}
+            >
+              <option value="">全部倍率</option>
+              {rates.map((rate) => (
+                <option key={rate} value={rate}>
+                  ≤ {rate}
+                </option>
+              ))}
+            </select>
+            <ChevronDown size={13} />
+          </label>
+          <label className="select-field">
+            <select
+              aria-label="倍率排序"
+              value={sort}
+              onChange={(e) => {
+                setSort(e.target.value);
+                setPage(0);
+              }}
+            >
+              <option value="">默认顺序</option>
+              <option value="asc">倍率从低到高</option>
+              <option value="desc">倍率从高到低</option>
             </select>
             <ChevronDown size={13} />
           </label>
@@ -622,18 +750,6 @@ export function Sub2apiChecks() {
             </select>
             <ChevronDown size={13} />
           </label>
-          <span className="sub-model">gpt-6-astra · Responses</span>
-        </div>
-        <div className="check-explanation">
-          <p>
-            每个分组独立测试：流式「say
-            test」测可用性与首字延迟，成功后再测知识截止时间。首字延迟从检测服务发出请求计至首个文本增量。检测会消耗上游额度。
-          </p>
-          <p>
-            回复包含「未知」显示绿勾，包含「2024-06」显示红叉；同时包含或均不包含则无法判定。此规则仅供参考，结果代表分组，不代表内部全部上游账号。
-            {busyAccounts.length > 0 &&
-              " 任务在后台运行，刷新或切换页面后可继续查看。"}
-          </p>
         </div>
         {rows.length === 0 ? (
           <Empty title={accounts.length ? "没有匹配的分组" : "尚无检测结果"}>
@@ -646,6 +762,7 @@ export function Sub2apiChecks() {
                 <thead>
                   <tr>
                     <th>站点 / 分组</th>
+                    <th>模型</th>
                     <th>平台 / key</th>
                     <th>倍率</th>
                     <th>可用性</th>
@@ -660,7 +777,7 @@ export function Sub2apiChecks() {
                   {rows
                     .slice(currentPage * 25, (currentPage + 1) * 25)
                     .map(({ account, target: t }) => (
-                      <tr key={`${account.id}:${t.group_id}`}>
+                      <tr key={`${account.id}:${t.group_id}:${t.model}`}>
                         <td>
                           <strong>{t.name}</strong>
                           <small className="check-source">
@@ -672,6 +789,7 @@ export function Sub2apiChecks() {
                             {!t.active && " · 已不可用"}
                           </small>
                         </td>
+                        <td className="mono">{t.model}</td>
                         <td>
                           {t.platform}
                           <small className="check-source">
@@ -775,6 +893,22 @@ export function Sub2apiChecks() {
                             <ScanLine size={13} />
                             重新检测
                           </button>
+                          <button
+                            className="button small"
+                            disabled={pending(account.state) || !t.active}
+                            onClick={() =>
+                              setImporting({
+                                account,
+                                target: account.targets.find(
+                                  (original) =>
+                                    original.group_id === t.group_id,
+                                )!,
+                              })
+                            }
+                          >
+                            <Plus size={13} />
+                            添加到渠道
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -783,7 +917,8 @@ export function Sub2apiChecks() {
             </div>
             <div className="table-footer">
               <span>
-                共 {rows.length} 个分组 · {eligible.length} 个可发起检测
+                共 {rows.length} 个模型 / 分组组合 · {eligible.length}{" "}
+                个可发起检测
               </span>
               <div className="sub-pagination">
                 <button
@@ -808,6 +943,13 @@ export function Sub2apiChecks() {
           </>
         )}
       </section>
+      {importing && (
+        <Sub2apiImport
+          account={importing.account}
+          target={importing.target}
+          close={() => setImporting(null)}
+        />
+      )}
       <p className="settings-note">
         密码仅用于本次登录；登录会话和测试 key 加密保存。重新同步复用专用
         key，不修改已有业务 key。

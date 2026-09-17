@@ -2525,3 +2525,16 @@ nav > button.active > svg {
 :root[data-theme="dark"] .latency-badge.fast { color: #a7f3bd; background: #20452f; }
 :root[data-theme="dark"] .latency-badge.medium { color: #fde68a; background: #463b1d; }
 :root[data-theme="dark"] .latency-badge.slow { color: #fca5a5; background: #4d292c; }
+
+.sub-import-dialog { width: min(560px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); overflow-y: auto; }
+.sub-import-dialog fieldset { border: 0; padding: 0; margin: 24px 0; }
+.sub-import-dialog legend { font-size: 13px; font-weight: 600; margin-bottom: 12px; }
+.sub-model-options { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.sub-model-options label { display:flex; align-items:center; flex-wrap:wrap; gap:6px; font-size:12px; }
+.sub-model-options small { color:var(--muted); font-size:10px; }
+.sub-import-field { display:flex; flex-direction:column; gap:8px; margin:16px 0; font-size:12px; }
+.sub-import-field select { padding:10px; width:100%; border:1px solid var(--line); background:var(--surface); color:var(--ink); border-radius:8px; }
+.sub-import-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:22px; }
+.sub-import-note { font-size:12px; line-height:1.7; color:var(--muted); }
+.sub-table td:last-child .button + .button { margin-left:6px; }
+@media(max-width:540px){ .sub-model-options { grid-template-columns:1fr; } }
