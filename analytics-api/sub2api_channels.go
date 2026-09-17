@@ -147,7 +147,6 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 				for _, ref := range refs {
 					provider := subProviderName(ref.Account, ref.Group, key.ID)
 					lookup[provider] = ref
-					labels[provider] = ref.Name
 				}
 			}
 			results[i].Labels = labels
@@ -156,6 +155,7 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 				if !ok {
 					continue
 				}
+				labels[p.Provider] = ref.Name
 				positions := map[string]int{}
 				for _, model := range p.Models {
 					for _, scope := range [][2]string{{p.KeyID, model}, {p.KeyID, ""}, {"", model}, {"", ""}} {

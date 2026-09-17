@@ -153,8 +153,8 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 	if len(listing.Data) != 1 || listing.Data[0].Provider != otherProvider {
 		t.Fatal("other binding lost", w.Body.String())
 	}
-	if listing.Labels[source][provider] != "My Site-0.18" {
-		t.Fatal("historical label lost")
+	if _, exists := listing.Labels[source][provider]; exists {
+		t.Fatal("deleted channel unnecessarily expanded label response")
 	}
 	if w = request("PATCH", session, in); w.Code != 409 {
 		t.Fatal("old delete revision accepted")
