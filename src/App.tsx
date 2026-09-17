@@ -1967,7 +1967,7 @@ function Dashboard({
                         <th>Token / 缓存率</th>
                         <th>估算消费</th>
                         <th>
-                          <Tip text="来自上游 sub2api 的 actual_cost，按日历日统计；充值增加不会计入消费。5 分钟、15 分钟和 1 小时窗口没有可验证的上游小时账单。">
+                          <Tip text="来自上游 sub2api 的 actual_cost，按日历日统计；充值增加不会计入消费。同一上游账号可能被多个 uni-api 共用，这一金额不按来源拆分，不可跨来源相加。5 分钟、15 分钟和 1 小时窗口没有可验证的上游小时账单。">
                             实际消费 <CircleHelp size={12} />
                           </Tip>
                         </th>
