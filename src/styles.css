@@ -920,8 +920,15 @@ nav > button.active > svg {
 }
 .data-actions {
   display: flex;
+  flex: 1;
+  min-width: 0;
   align-items: center;
+  justify-content: flex-end;
   gap: 10px;
+}
+.data-heading .search-field {
+  max-width: 420px;
+  margin-left: auto;
 }
 .auto-refresh {
   display: flex;
@@ -969,9 +976,23 @@ nav > button.active > svg {
 }
 .filters {
   display: flex;
+  align-items: center;
   gap: 9px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
   padding: 0 21px 13px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+.filters > * {
+  flex-shrink: 0;
+}
+.filters .select-field {
+  flex: 0 1 auto;
+  min-width: 95px;
+}
+.filters .filter-chip {
+  white-space: nowrap;
 }
 .search-field {
   display: flex;
@@ -1049,20 +1070,6 @@ nav > button.active > svg {
 .time-select select {
   width: 100%;
 }
-.filter-secondary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 0 21px 14px;
-  flex-wrap: wrap;
-}
-.filter-chips {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 9px;
-}
 .filter-chip {
   display: flex;
   align-items: center;
@@ -1099,19 +1106,6 @@ nav > button.active > svg {
   position: absolute;
   right: 0;
   pointer-events: none;
-}
-.scope-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
-  font-size: 9px;
-  white-space: nowrap;
-}
-.scope-label .tiny-dot {
-  color: #83a090;
-  width: 4px;
-  height: 4px;
 }
 .coverage-note {
   display: flex;
@@ -2075,8 +2069,7 @@ nav > button.active > svg {
   .search-field {
     min-width: 200px;
   }
-  .data-heading,
-  .filter-secondary {
+  .data-heading {
     padding-left: 15px;
     padding-right: 15px;
   }
@@ -2195,15 +2188,22 @@ nav > button.active > svg {
   .data-title h2 {
     font-size: 13px;
   }
+  .data-title {
+    width: 100%;
+  }
   .data-actions {
+    flex-basis: 100%;
+    flex-wrap: wrap;
     gap: 6px;
+  }
+  .data-heading .search-field {
+    flex: 1 1 120px;
+    min-width: 120px;
+    max-width: none;
+    margin-left: 0;
   }
   .auto-refresh {
     font-size: 9px;
-  }
-  .search-field {
-    flex-basis: calc(100% - 121px);
-    min-width: 0;
   }
   .select-field {
     flex: 1;
@@ -2213,12 +2213,6 @@ nav > button.active > svg {
   .select-field.time-select {
     flex: 0 0 112px;
     min-width: 112px;
-  }
-  .filter-secondary {
-    gap: 10px;
-  }
-  .scope-label {
-    font-size: 8px;
   }
   .channel-table {
     min-width: 960px;
@@ -2346,10 +2340,6 @@ nav > button.active > svg {
   .page-heading .button {
     padding: 7px 8px;
   }
-  .filter-chips {
-    gap: 7px;
-    flex-wrap: wrap;
-  }
   .data-actions .button {
     font-size: 9px;
   }
@@ -2411,7 +2401,6 @@ nav > button.active > svg {
 .metric-card p {
   font-size: 10px;
 }
-.scope-label,
 .filter-chip,
 .inline-select select,
 .table-footer,

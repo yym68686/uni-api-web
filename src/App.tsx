@@ -238,8 +238,7 @@ const endpointChoices = [
   "/v1/audio/translations",
   "/v1/moderations",
 ];
-const streamLabel = (stream: string) =>
-  stream === "true" ? "流式" : stream === "false" ? "非流式" : "全部请求";
+
 async function readMetrics(
   connection: Connection,
   path: string,
@@ -1726,6 +1725,24 @@ function Dashboard({
                   <span className="count-badge">{count(total)}</span>
                 </div>
                 <div className="data-actions">
+                  <div className="search-field">
+                    <Search size={17} />
+                    <input
+                      aria-label="搜索渠道或模型"
+                      placeholder="搜索渠道、模型…"
+                      value={search}
+                      onChange={(e) => setFilter("search", e.target.value)}
+                    />
+                    {search && (
+                      <button
+                        className="icon-button"
+                        onClick={() => setFilter("search", "")}
+                        aria-label="清除搜索"
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
                   {view === "checks" && (
                     <CheckActions
                       checks={checks}
@@ -1762,24 +1779,6 @@ function Dashboard({
                 </div>
               </div>
               <div className="filters">
-                <div className="search-field">
-                  <Search size={17} />
-                  <input
-                    aria-label="搜索渠道或模型"
-                    placeholder="搜索渠道、模型…"
-                    value={search}
-                    onChange={(e) => setFilter("search", e.target.value)}
-                  />
-                  {search && (
-                    <button
-                      className="icon-button"
-                      onClick={() => setFilter("search", "")}
-                      aria-label="清除搜索"
-                    >
-                      <X size={14} />
-                    </button>
-                  )}
-                </div>
                 <div className="select-field time-select">
                   <Clock3 size={15} />
                   <select
@@ -1853,99 +1852,85 @@ function Dashboard({
                   </select>
                   <ChevronDown size={13} />
                 </div>
-              </div>
-              <div className="filter-secondary">
-                <div className="filter-chips">
-                  <div className="inline-select">
-                    <Globe2 size={13} />
-                    <select
-                      aria-label="端点筛选"
-                      value={endpoint}
-                      onChange={(e) => setFilter("endpoint", e.target.value)}
-                    >
-                      <option value="all">全部端点</option>
-                      {endpoints.map((path) => (
-                        <option key={path} value={path}>
-                          {path}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown size={12} />
-                  </div>
-                  <div className="inline-select">
-                    <Radio size={13} />
-                    <select
-                      aria-label="流式状态筛选"
-                      value={stream}
-                      onChange={(e) => setFilter("stream", e.target.value)}
-                    >
-                      <option value="all">全部流式状态</option>
-                      <option value="true">流式</option>
-                      <option value="false">非流式</option>
-                    </select>
-                    <ChevronDown size={12} />
-                  </div>
-                  <button
-                    className={`filter-chip ${balanceFilter ? "active" : ""}`}
-                    aria-pressed={!!balanceFilter}
-                    onClick={() =>
-                      setFilter("balanceFilter", balanceFilter ? "" : "low")
-                    }
+                <div className="inline-select">
+                  <Globe2 size={13} />
+                  <select
+                    aria-label="端点筛选"
+                    value={endpoint}
+                    onChange={(e) => setFilter("endpoint", e.target.value)}
                   >
-                    <Wallet size={13} />
-                    余额不足{balanceFilter && <X size={12} />}
-                  </button>
-                  <div className="inline-select">
-                    <Filter size={13} />
-                    <select
-                      aria-label="渠道状态筛选"
-                      value={statusFilter}
-                      onChange={(e) =>
-                        setFilter("statusFilter", e.target.value)
-                      }
-                    >
-                      <option value="">全部状态</option>
-                      <option value="eligible">可用渠道</option>
-                      <option value="unavailable">不可用渠道</option>
-                    </select>
-                    <ChevronDown size={12} />
-                  </div>
-                  <div className="inline-select">
-                    <SlidersHorizontal size={13} />
-                    <select
-                      aria-label="排序"
-                      value={sort}
-                      onChange={(e) => setFilter("sort", e.target.value)}
-                    >
-                      <option value="config">
-                        {keyId ? "API key 顺序" : "Provider 顺序"}
+                    <option value="all">全部端点</option>
+                    {endpoints.map((path) => (
+                      <option key={path} value={path}>
+                        {path}
                       </option>
-                      <option value="success">成功率从高到低</option>
-                      <option value="latency">首输出从低到高</option>
-                      <option value="wait">请求前等待从低到高</option>
-                    </select>
-                    <ChevronDown size={12} />
-                  </div>
-                  {hasFilters && (
-                    <button
-                      className="filter-chip"
-                      onClick={() => {
-                        setFilters({ ...defaultFilters });
-                        setPage(0);
-                      }}
-                    >
-                      <X size={12} /> 重置筛选
-                    </button>
-                  )}
+                    ))}
+                  </select>
+                  <ChevronDown size={12} />
                 </div>
-                <span className="scope-label">
-                  <span className="tiny-dot" />{" "}
-                  {endpoint === "all" ? "全部端点" : endpoint} ·{" "}
-                  {streamLabel(stream)}{" "}
-                  <Tip text="统计所选端点与流式范围内的渠道整体尝试。API key 筛选决定渠道集合与顺序，不是该 key 的独立用量。全部端点的可用状态表示渠道整体冷却和凭据状态。">
-                    <CircleHelp size={13} />
-                  </Tip>
-                </span>
+                <div className="inline-select">
+                  <Radio size={13} />
+                  <select
+                    aria-label="流式状态筛选"
+                    value={stream}
+                    onChange={(e) => setFilter("stream", e.target.value)}
+                  >
+                    <option value="all">全部流式状态</option>
+                    <option value="true">流式</option>
+                    <option value="false">非流式</option>
+                  </select>
+                  <ChevronDown size={12} />
+                </div>
+                <button
+                  className={`filter-chip ${balanceFilter ? "active" : ""}`}
+                  aria-pressed={!!balanceFilter}
+                  onClick={() =>
+                    setFilter("balanceFilter", balanceFilter ? "" : "low")
+                  }
+                >
+                  <Wallet size={13} />
+                  余额不足{balanceFilter && <X size={12} />}
+                </button>
+                <div className="inline-select">
+                  <Filter size={13} />
+                  <select
+                    aria-label="渠道状态筛选"
+                    value={statusFilter}
+                    onChange={(e) => setFilter("statusFilter", e.target.value)}
+                  >
+                    <option value="">全部状态</option>
+                    <option value="eligible">可用渠道</option>
+                    <option value="unavailable">不可用渠道</option>
+                  </select>
+                  <ChevronDown size={12} />
+                </div>
+                <div className="inline-select">
+                  <SlidersHorizontal size={13} />
+                  <select
+                    aria-label="排序"
+                    value={sort}
+                    onChange={(e) => setFilter("sort", e.target.value)}
+                  >
+                    <option value="config">
+                      {keyId ? "API key 顺序" : "Provider 顺序"}
+                    </option>
+                    <option value="success">成功率从高到低</option>
+                    <option value="latency">首输出从低到高</option>
+                    <option value="wait">请求前等待从低到高</option>
+                  </select>
+                  <ChevronDown size={12} />
+                </div>
+                {hasFilters && (
+                  <button
+                    className="filter-chip"
+                    onClick={() => {
+                      setFilters({ ...defaultFilters });
+                      setPage(0);
+                    }}
+                  >
+                    <X size={12} /> 重置筛选
+                  </button>
+                )}
               </div>
               {view === "checks" && (
                 <div className="check-explanation">
