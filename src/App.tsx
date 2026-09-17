@@ -90,7 +90,7 @@ import type {
 } from "./types";
 import { Brand, Empty, Spinner, Tip } from "./ui";
 import { PriceSettings } from "./PriceSettings";
-import { catalogMetrics, ranges, usd } from "./analytics";
+import { catalogMetrics, ranges, usd, staleHistorySources } from "./analytics";
 import { actualCostRange } from "./actualCost";
 
 type Keys = {
@@ -258,8 +258,13 @@ async function readMetrics(
   );
   if (!result || !result.total || !Array.isArray(result.data))
     throw new Error("分析服务返回了无效统计数据。");
-  if (!connection.account)
+  if (!connection.account) {
     result.data = result.data.map((row) => ({ ...row, source_id: undefined }));
+    result.source_freshness = result.source_freshness?.map((item) => ({
+      ...item,
+      source_id: "",
+    }));
+  }
   return {
     ...result,
     window_minutes:
@@ -1191,6 +1196,13 @@ function Dashboard({
     refetchInterval: auto ? 5_000 : false,
     refetchIntervalInBackground: false,
   });
+  const staleSources = useMemo(
+    () => staleHistorySources(metrics.data, liveMetrics.data),
+    [metrics.data, liveMetrics.data],
+  );
+  const staleSourceNames = sourceList
+    .filter((source) => staleSources.has(source.id))
+    .map((source) => source.name);
   const liveMap = useMemo(
     () =>
       new Map(
@@ -1897,6 +1909,14 @@ function Dashboard({
                   </Tip>
                 </span>
               </div>
+              {staleSources.size > 0 && (
+                <div className="coverage-note" role="alert">
+                  <Clock3 size={14} />
+                  {staleSourceNames.join("、") || "当前来源"}{" "}
+                  仍有请求完成，但历史事实至少 2 分钟未更新。请检查来源的 S3
+                  导出配置；当前统计可能遗漏请求，不能视为零流量。
+                </div>
+              )}
               {metrics.data?.import && !metrics.data.import.caught_up && (
                 <div className="coverage-note" role="status">
                   <Clock3 size={14} />
@@ -2039,9 +2059,12 @@ function Dashboard({
                             <td className="mono">
                               {row.history_configured === false
                                 ? "未接入"
-                                : count(
-                                    row.stats?.success_rate_denominator || 0,
-                                  )}
+                                : staleSources.has(row.source_id || "") &&
+                                    !row.stats?.success_rate_denominator
+                                  ? "未同步"
+                                  : count(
+                                      row.stats?.success_rate_denominator || 0,
+                                    )}
                             </td>
                             <td>
                               <Timing

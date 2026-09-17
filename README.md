@@ -57,7 +57,12 @@ filters channel configuration; statistics still include all requests to those
 channels. p50/p95 are histogram upper-bound estimates and must not be added
 between stages. Historical facts are retained in S3 and queried through DuckDB
 minute/day aggregates. Only current concurrency remains a live instance metric.
-Error responses never turn into a fake zero balance or success rate.
+Error responses never turn into a fake zero balance or success rate. The analytics API
+reports each source's latest persisted fact separately from the last successful S3
+scan. If a source has recent completed live traffic but no persisted fact for over
+two minutes, the console warns of missing history and labels zero attempt counts
+as unsynchronized. An idle source or an in-flight request alone does not trigger
+this warning.
 
 ## Platform endpoints
 

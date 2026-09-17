@@ -61,6 +61,7 @@ export interface Catalog {
   snapshot_revision: string;
 }
 export interface Metrics extends Catalog {
+  source_freshness?: { source_id: string; latest_fact_at: number }[];
   filters?: { endpoint: string; stream: string };
   available_endpoints?: string[];
   generated_at: number;

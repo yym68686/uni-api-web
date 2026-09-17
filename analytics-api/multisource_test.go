@@ -207,3 +207,29 @@ func TestControlPostgresSessionAndSources(t *testing.T) {
 		t.Fatal("CSRF accepted")
 	}
 }
+
+func TestSourceFreshnessSurvivesEmptyWindowAndHonorsSourceScope(t *testing.T) {
+	e := stateTestEngine(t)
+	ctx := context.Background()
+	now := time.Now().UnixMilli()
+	old := now - 3600_000
+	fresh := now - 10_000
+	err := e.ImportBatch(ctx, []FactObject{{Key: "old", ETag: "1", Facts: []Fact{{Schema: 1, EventID: "old", SourceID: "old", Kind: "request", AtMS: old}}}, {Key: "fresh", ETag: "1", Facts: []Fact{{Schema: 1, EventID: "fresh", SourceID: "fresh", Kind: "request", AtMS: fresh}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := e.Query(ctx, QueryFilter{Range: "5m", SourceID: "old"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Total["requests"] != float64(0) || len(result.SourceFreshness) != 1 || result.SourceFreshness[0].SourceID != "old" || result.SourceFreshness[0].LatestFactAt != old/1000 {
+		t.Fatalf("empty window hid freshness: %+v", result)
+	}
+	result, err = e.Query(ctx, QueryFilter{Range: "5m", SourceIDs: []string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.SourceFreshness) != 0 {
+		t.Fatal("source freshness leaked outside allowed scope")
+	}
+}

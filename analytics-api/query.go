@@ -145,20 +145,26 @@ type AnalyticChannel struct {
 	Stats         map[string]any   `json:"stats"`
 	Points        []map[string]any `json:"points,omitempty"`
 }
+type SourceFreshness struct {
+	SourceID     string `json:"source_id"`
+	LatestFactAt int64  `json:"latest_fact_at"`
+}
+
 type QueryResult struct {
-	Import        map[string]any    `json:"import"`
-	Coverage      string            `json:"coverage"`
-	From          int64             `json:"from"`
-	To            int64             `json:"to"`
-	Range         string            `json:"range"`
-	Timezone      string            `json:"timezone"`
-	Data          []AnalyticChannel `json:"data"`
-	Total         map[string]any    `json:"total"`
-	Models        []map[string]any  `json:"models"`
-	CollectedFrom *int64            `json:"collection_started_at"`
-	GeneratedAt   int64             `json:"generated_at"`
-	Revision      uint64            `json:"revision"`
-	DurationMS    float64           `json:"query_ms"`
+	SourceFreshness []SourceFreshness `json:"source_freshness"`
+	Import          map[string]any    `json:"import"`
+	Coverage        string            `json:"coverage"`
+	From            int64             `json:"from"`
+	To              int64             `json:"to"`
+	Range           string            `json:"range"`
+	Timezone        string            `json:"timezone"`
+	Data            []AnalyticChannel `json:"data"`
+	Total           map[string]any    `json:"total"`
+	Models          []map[string]any  `json:"models"`
+	CollectedFrom   *int64            `json:"collection_started_at"`
+	GeneratedAt     int64             `json:"generated_at"`
+	Revision        uint64            `json:"revision"`
+	DurationMS      float64           `json:"query_ms"`
 }
 
 func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) {
@@ -319,14 +325,31 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 		s["model"] = m
 		out.Models = append(out.Models, s)
 	}
-	var firstMS *int64
+	// A successful S3 scan does not prove that a source is still exporting.
+	// Expose actual event freshness separately, including when this window is empty.
+	out.SourceFreshness = []SourceFreshness{}
 	coverageWhere, coverageArgs := sourceWhere([]string{"true"}, nil, f)
-	if err = e.DB.QueryRowContext(ctx, "SELECT min(at_ms) FROM facts WHERE "+strings.Join(coverageWhere, " AND "), coverageArgs...).Scan(&firstMS); err != nil {
-		return QueryResult{}, fmt.Errorf("read coverage: %w", err)
+	coverageRows, err := e.DB.QueryContext(ctx, "SELECT source_id,min(at_ms),max(at_ms) FROM facts WHERE "+strings.Join(coverageWhere, " AND ")+" GROUP BY source_id", coverageArgs...)
+	if err != nil {
+		return QueryResult{}, fmt.Errorf("read source coverage: %w", err)
 	}
-	if firstMS != nil {
-		seconds := *firstMS / 1000
-		out.CollectedFrom = &seconds
+	for coverageRows.Next() {
+		var source string
+		var first, last int64
+		if err = coverageRows.Scan(&source, &first, &last); err != nil {
+			coverageRows.Close()
+			return QueryResult{}, err
+		}
+		seconds := first / 1000
+		if out.CollectedFrom == nil || seconds < *out.CollectedFrom {
+			out.CollectedFrom = &seconds
+		}
+		out.SourceFreshness = append(out.SourceFreshness, SourceFreshness{SourceID: source, LatestFactAt: last / 1000})
+	}
+	err = coverageRows.Err()
+	coverageRows.Close()
+	if err != nil {
+		return QueryResult{}, err
 	}
 	out.Coverage = "partial"
 	if out.CollectedFrom != nil && *out.CollectedFrom <= out.From {
