@@ -1541,26 +1541,6 @@ function Dashboard({
             </strong>
           </div>
           <div className="topbar-actions">
-            {sourceList.length > 0 && (
-              <label className="source-switcher">
-                <Server size={14} />
-                <select
-                  aria-label="uni-api 来源"
-                  value={selectedSourceId}
-                  onChange={(e) => {
-                    setFilter("sourceId", e.target.value);
-                    setFilter("keyId", "");
-                  }}
-                >
-                  <option value="">全部来源</option>
-                  {sourceList.map((source) => (
-                    <option value={source.id} key={source.id}>
-                      {source.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
             <span className="topbar-service">
               <span className="tiny-dot" />
               {new URL(connection.base).hostname}
@@ -1742,6 +1722,27 @@ function Dashboard({
                     </button>
                   )}
                 </div>
+                {sourceList.length > 0 && (
+                  <label className="select-field source-select">
+                    <Server size={15} />
+                    <select
+                      aria-label="uni-api 来源"
+                      value={selectedSourceId}
+                      onChange={(e) => {
+                        setFilter("sourceId", e.target.value);
+                        setFilter("keyId", "");
+                      }}
+                    >
+                      <option value="">全部来源</option>
+                      {sourceList.map((source) => (
+                        <option value={source.id} key={source.id}>
+                          {source.name}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown size={13} />
+                  </label>
+                )}
                 <div className="select-field">
                   <KeyRound size={15} />
                   <select
