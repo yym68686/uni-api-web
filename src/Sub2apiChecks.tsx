@@ -822,8 +822,10 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
               className="button small"
               aria-label="刷新 sub2api 检测"
               onClick={() => void query.refetch()}
+              disabled={query.isFetching}
             >
-              <RefreshCw size={15} />
+              <RefreshCw size={15} className={query.isFetching ? "spin" : ""} />
+              刷新数据
             </button>
             <button
               className="button primary small"

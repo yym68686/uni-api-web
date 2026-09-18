@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { Plus, Save, SlidersHorizontal } from "lucide-react";
 import { analyticsRequest } from "./api";
 import type { Connection, ModelPrice } from "./types";
@@ -35,7 +36,7 @@ function PriceRow({ price, connection, onSaved }: { price: ModelPrice; connectio
   </article>;
 }
 
-export function PriceSettings({ prices, loading, error, connection, onSaved }: { prices: ModelPrice[]; loading: boolean; error?: string; connection: Connection; onSaved: () => void }) {
+export function PriceSettings({ prices, loading, error, connection, onSaved, refreshAction }: { prices: ModelPrice[]; loading: boolean; error?: string; connection: Connection; onSaved: () => void; refreshAction?: ReactNode }) {
   const [added, setAdded] = useState<ModelPrice[]>([]);
   const [name, setName] = useState("");
   const [filter, setFilter] = useState("");
@@ -47,7 +48,7 @@ export function PriceSettings({ prices, loading, error, connection, onSaved }: {
     <div className="data-heading"><div className="data-title"><SlidersHorizontal size={19} /><h2>模型价格</h2></div>{loading && <Spinner small />}</div>
     <p className="field-note">美元 / 百万 token。确认价格后用于当前价格估算，实际渠道扣费以渠道账单为准。未定价模型显示暂无费用。</p>
     <form className="price-add" onSubmit={event => { event.preventDefault(); add(); }}><input aria-label="新增模型名称" placeholder="输入模型名称" value={name} maxLength={512} onChange={event => setName(event.target.value)} /><button className="button small" disabled={!trimmed || all.some(price => price.model === trimmed)}><Plus size={14} />新增模型</button></form>
-    <input className="price-search" aria-label="搜索模型价格" placeholder="搜索模型价格…" value={filter} onChange={event => setFilter(event.target.value)} />
+    <div className="data-actions price-toolbar"><input className="price-search" aria-label="搜索模型价格" placeholder="搜索模型价格…" value={filter} onChange={event => setFilter(event.target.value)} />{refreshAction}</div>
     {error && <p role="alert" className="negative">{error}</p>}
     <div className="price-list">{all.filter(price => price.model.toLowerCase().includes(filter.toLowerCase())).map(price => <PriceRow key={price.model} price={price} connection={connection} onSaved={onSaved} />)}</div>
     {!loading && !error && !all.length && <p className="muted">还没有模型价格，可以新增模型，或等待请求事实导入后自动发现模型。</p>}

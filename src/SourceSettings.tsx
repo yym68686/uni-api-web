@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { FormEvent } from "react";
+import type { FormEvent, ReactNode } from "react";
 import { Plus, Server, Trash2, Pencil, Check, X } from "lucide-react";
 import { controlRequest } from "./api";
 import { Spinner } from "./ui";
@@ -14,9 +14,11 @@ export interface ConsoleSource {
 export function SourceSettings({
   sources,
   onSaved,
+  refreshAction,
 }: {
   sources: ConsoleSource[];
   onSaved: () => void;
+  refreshAction?: ReactNode;
 }) {
   const [editing, setEditing] = useState<ConsoleSource | null>(null),
     [open, setOpen] = useState(false),
@@ -96,10 +98,13 @@ export function SourceSettings({
           <Server size={20} />
           <h2>uni-api 来源</h2>
         </div>
-        <button className="button" onClick={() => edit(null)}>
-          <Plus size={16} />
-          添加来源
-        </button>
+        <div className="data-actions">
+          {refreshAction}
+          <button className="button small" onClick={() => edit(null)}>
+            <Plus size={16} />
+            添加来源
+          </button>
+        </div>
       </div>
       <p className="settings-note">
         每个来源独立采集与统计。平台密钥和 S3

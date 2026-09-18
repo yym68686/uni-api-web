@@ -4,7 +4,7 @@ import { Check, X, CircleHelp, Play, ScanLine, Square } from "lucide-react";
 import { controlRequest } from "./api";
 import { providerId, time, channelName } from "./format";
 import type { Channel } from "./types";
-import { Spinner } from "./ui";
+import { Spinner, Tip } from "./ui";
 
 export interface ChannelCheck {
   source_id: string;
@@ -121,7 +121,10 @@ export function useChannelChecks(session: string, enabled: boolean) {
   const results = new Map(
     (query.data?.data || []).map((item) => [providerId(item), item]),
   );
-  for (const [id, item] of errors) results.set(id, item);
+  for (const [id, item] of errors) {
+    if (item.checked_at > (results.get(id)?.checked_at || 0))
+      results.set(id, item);
+  }
   return {
     results,
     pending,
@@ -132,10 +135,83 @@ export function useChannelChecks(session: string, enabled: boolean) {
       batchController.current?.abort();
     },
     error: query.error,
+    loading: query.isPending,
     refetch: query.refetch,
   };
 }
 export type Checks = ReturnType<typeof useChannelChecks>;
+export function CheckVerdict({ result }: { result: ChannelCheck }) {
+  return (
+    <span className={`check-status ${result.verdict}`}>
+      {result.verdict === "pass" ? (
+        <Check size={18} />
+      ) : result.verdict === "fail" ? (
+        <X size={18} />
+      ) : (
+        <CircleHelp size={17} />
+      )}
+      {
+        {
+          pass: "不降智",
+          fail: "降智",
+          inconclusive: "无法判定",
+          error: "检测失败",
+        }[result.verdict]
+      }
+    </span>
+  );
+}
+export function LatestChannelCheck({
+  row,
+  checks,
+}: {
+  row: Channel;
+  checks: Checks;
+}) {
+  const id = providerId(row),
+    result = checks.results.get(id),
+    pending = checks.pending.has(id);
+  return (
+    <td className="latest-channel-check">
+      {result ? (
+        <>
+          <Tip
+            text={
+              <>
+                <div>
+                  最近检测：
+                  {new Date(result.checked_at * 1000).toLocaleString("zh-CN", {
+                    hour12: false,
+                  })}
+                </div>
+                <div>检测模型：{result.model}</div>
+                <div>{result.text || result.message || "未返回有效回复"}</div>
+              </>
+            }
+          >
+            <CheckVerdict result={result} />
+          </Tip>
+          <small className="muted">{time(result.checked_at)}</small>
+        </>
+      ) : (
+        !pending && (
+          <span className="muted">
+            {checks.loading ? "读取中…" : checks.error ? "读取失败" : "未检测"}
+          </span>
+        )
+      )}
+      {pending && (
+        <small className="check-status muted">
+          <Spinner small />
+          检测中{result ? " · 上次结果" : ""}
+        </small>
+      )}
+      {result && checks.error && (
+        <small className="negative">更新失败 · 上次结果</small>
+      )}
+    </td>
+  );
+}
 export function CheckActions({
   checks,
   rows,
@@ -213,23 +289,7 @@ export function CheckTable({
                   ) : !result ? (
                     <span className="muted">未检测</span>
                   ) : (
-                    <span className={`check-status ${result.verdict}`}>
-                      {result.verdict === "pass" ? (
-                        <Check size={18} />
-                      ) : result.verdict === "fail" ? (
-                        <X size={18} />
-                      ) : (
-                        <CircleHelp size={17} />
-                      )}
-                      {
-                        {
-                          pass: "不降智",
-                          fail: "降智",
-                          inconclusive: "无法判定",
-                          error: "检测失败",
-                        }[result.verdict]
-                      }
-                    </span>
+                    <CheckVerdict result={result} />
                   )}
                 </td>
                 <td className="check-answer">

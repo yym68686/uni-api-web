@@ -6,6 +6,7 @@ import {
   Check,
   ChevronDown,
   RotateCcw,
+  SlidersHorizontal,
   X,
 } from "lucide-react";
 import { channelParams, controlRequest, request } from "./api";
@@ -479,12 +480,34 @@ export function ChannelControlActions(props: {
   controls: ChannelControls;
   sources: ConsoleSource[];
   keys: KeyInfo[];
+  editing: boolean;
+  onEditingChange: (editing: boolean) => void;
 }) {
-  const { controls, sources } = props;
+  const { controls, sources, editing, onEditingChange } = props;
   return (
     <div className="control-toolbar-actions">
-      <ChannelControlReset {...props} />
-      {controls.drafts.size > 0 && (
+      <Tip
+        text={
+          editing
+            ? "取消调整并放弃全部未保存修改，已应用规则保留。"
+            : "显示临时控制，调整渠道顺序和停用状态。"
+        }
+      >
+        <button
+          className="button small"
+          aria-pressed={editing}
+          disabled={controls.pending}
+          onClick={() => {
+            if (editing) controls.discardAll();
+            onEditingChange(!editing);
+          }}
+        >
+          {editing ? <X size={14} /> : <SlidersHorizontal size={14} />}
+          {editing ? "取消调整" : "调整顺序"}
+        </button>
+      </Tip>
+      {editing && <ChannelControlReset {...props} />}
+      {editing && controls.drafts.size > 0 && (
         <>
           <Tip text="应用全部未保存修改，包括筛选隐藏的来源、API key 和模型范围。">
             <button
@@ -510,7 +533,7 @@ export function ChannelControlActions(props: {
           </Tip>
         </>
       )}
-      {!controls.pending && controls.draftIssues.length > 0 && (
+      {editing && !controls.pending && controls.draftIssues.length > 0 && (
         <small className="control-draft-error negative" role="alert">
           未应用的修改已保留：
           {[

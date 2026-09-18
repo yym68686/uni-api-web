@@ -62,6 +62,7 @@ import {
 import {
   CheckActions,
   CheckTable,
+  LatestChannelCheck,
   checkTargets,
   useChannelChecks,
 } from "./ChannelChecks";
@@ -118,7 +119,6 @@ type Keys = {
 
 type View =
   | "sub2api"
-  | "controls"
   | "checks"
   | "channels"
   | "balances"
@@ -130,10 +130,12 @@ function Overview({
   metrics,
   rows,
   live,
+  refreshAction,
 }: {
   metrics?: Metrics;
   rows: Channel[];
   live?: Map<string, number | null | undefined>;
+  refreshAction: ReactNode;
 }) {
   const total = metrics?.total as Record<string, any> | undefined;
   const models = (metrics as any)?.models || [];
@@ -189,9 +191,12 @@ function Overview({
         icon={<Database size={17} />}
       />
       <div className="data-panel overview-panel">
-        <div className="data-title">
-          <Gauge size={18} />
-          <h2>模型消费</h2>
+        <div className="data-heading overview-heading">
+          <div className="data-title">
+            <Gauge size={18} />
+            <h2>模型消费</h2>
+          </div>
+          {refreshAction}
         </div>
         <div className="overview-list">
           {models.length ? (
@@ -969,8 +974,9 @@ function Dashboard({
     stream,
   } = filters;
   const [view, setView] = useState<View>("channels"),
-    [page, setPage] = useState(0);
-  const channelView = view === "channels" || view === "controls";
+    [page, setPage] = useState(0),
+    [adjustingChannels, setAdjustingChannels] = useState(false);
+  const channelView = view === "channels";
   useEffect(() => {
     saveFilters(baseConnection.base, filters);
   }, [connection.base, filters]);
@@ -1192,10 +1198,10 @@ function Dashboard({
       .map((source) => source.id),
     keyId,
     model,
-    enabled: !!baseConnection.account && view === "controls",
+    enabled: !!baseConnection.account && channelView,
   });
   const tableRows =
-    view === "controls" && sort === "config" ? controls.arrange(rows) : rows;
+    channelView && sort === "config" ? controls.arrange(rows) : rows;
   const rowRanks = useMemo(
     () => new Map(tableRows.map((row, i) => [rowId(row), i + 1])),
     [tableRows],
@@ -1291,11 +1297,23 @@ function Dashboard({
     setFilters((current) => ({ ...current, [name]: value }));
   }
   function reload() {
+    if (
+      baseConnection.account &&
+      (view === "sources" || sourceList.length === 0)
+    ) {
+      void sourceQuery.refetch();
+      void queryClient.invalidateQueries({ queryKey: ["control-persistence"] });
+      return;
+    }
+    if (view === "prices") {
+      void prices.refetch();
+      return;
+    }
     if (view === "sub2api") {
       void queryClient.invalidateQueries({ queryKey: ["sub2api"] });
       return;
     }
-    if (view === "controls") {
+    if (channelView && baseConnection.account && !controls.pending) {
       void queryClient.invalidateQueries({ queryKey: ["channel-controls"] });
       void queryClient.invalidateQueries({ queryKey: ["control-catalog"] });
     }
@@ -1313,6 +1331,22 @@ function Dashboard({
     for (const query of balanceQueries) void query.refetch();
     setRefresh((x) => x + 1);
   }
+  const refreshBusy =
+    baseConnection.account && (view === "sources" || sourceList.length === 0)
+      ? sourceQuery.isFetching
+      : view === "prices"
+        ? prices.isFetching
+        : busy;
+  const refreshButton = (
+    <button
+      className={`button small ${refreshBusy ? "refreshing" : ""}`}
+      onClick={reload}
+      disabled={refreshBusy}
+    >
+      <RefreshCw size={15} className={refreshBusy ? "spin" : ""} />
+      刷新数据
+    </button>
+  );
   function selectView(next: View) {
     setView(next);
     setPage(0);
@@ -1351,15 +1385,6 @@ function Dashboard({
             sub2api检测
           </button>
         )}
-        {baseConnection.account && (
-          <button
-            className={view === "controls" ? "active" : ""}
-            onClick={() => selectView("controls")}
-          >
-            <SlidersHorizontal size={18} />
-            渠道控制
-          </button>
-        )}
         <button
           className={view === "prices" ? "active" : ""}
           onClick={() => selectView("prices")}
@@ -1384,21 +1409,6 @@ function Dashboard({
           </button>
         )}
       </nav>
-      <div className="sidebar-insight">
-        <div className="insight-icon">
-          <Radio size={20} />
-        </div>
-        <h3>把复杂，留给路由。</h3>
-        <p>把清晰，留给你。</p>
-        <div className="signal-bars">
-          {[
-            7, 13, 9, 20, 15, 29, 22, 34, 18, 27, 36, 23, 30, 17, 28, 38, 25,
-            33,
-          ].map((height, i) => (
-            <i key={i} style={{ height }} />
-          ))}
-        </div>
-      </div>
       <div className="sidebar-bottom">
         <button
           onClick={() => {
@@ -1471,19 +1481,17 @@ function Dashboard({
             <strong>
               {view === "sub2api"
                 ? "sub2api检测"
-                : view === "controls"
-                  ? "渠道控制"
-                  : view === "checks"
-                    ? "渠道检测"
-                    : view === "channels"
-                      ? "渠道观测"
-                      : view === "balances"
-                        ? "余额管理"
-                        : view === "overview"
-                          ? "总览"
-                          : view === "sources"
-                            ? "来源设置"
-                            : "价格设置"}
+                : view === "checks"
+                  ? "渠道检测"
+                  : view === "channels"
+                    ? "渠道观测"
+                    : view === "balances"
+                      ? "余额管理"
+                      : view === "overview"
+                        ? "总览"
+                        : view === "sources"
+                          ? "来源设置"
+                          : "价格设置"}
             </strong>
           </div>
           <div className="topbar-actions">
@@ -1516,51 +1524,6 @@ function Dashboard({
               。当前结果不完整。
             </div>
           )}
-          <motion.div {...reveal} className="page-heading">
-            <div>
-              <span className="eyebrow">OBSERVE. UNDERSTAND. OPTIMIZE.</span>
-              <h1>
-                {view === "sub2api"
-                  ? "接入账号，逐组验证。"
-                  : view === "controls"
-                    ? "灵活调度，随时恢复。"
-                    : view === "checks"
-                      ? "逐条检测，让结果说话。"
-                      : view === "channels"
-                        ? "每条渠道，尽在视野。"
-                        : view === "balances"
-                          ? "余额有数，调用有底。"
-                          : view === "overview"
-                            ? "全局请求，一眼掌握。"
-                            : view === "sources"
-                              ? "多个来源，一个工作台。"
-                              : "模型价格，按你的口径计算。"}
-              </h1>
-              <p>
-                {view === "sub2api"
-                  ? "自动发现可用分组，检测可用性、首字延迟与模型回复。"
-                  : view === "controls"
-                    ? "临时调整渠道顺序与开关，无需修改配置文件。"
-                    : view === "checks"
-                      ? "固定使用 gpt-6-astra，按知识截止时间回复检测渠道。"
-                      : view === "channels"
-                        ? "从可用性到首输出，了解模型请求的每一步。"
-                        : view === "balances"
-                          ? "独立查看每个渠道的上游余额与额度。"
-                          : view === "overview"
-                            ? "消费、请求、token 与缓存率来自 S3 事实聚合。"
-                            : "价格按每百万 token 计，保存后用于后续估算。"}
-              </p>
-            </div>
-            <button
-              className={`button ${busy ? "refreshing" : ""}`}
-              onClick={reload}
-              disabled={busy}
-            >
-              <RefreshCw size={16} className={busy ? "spin" : ""} />
-              刷新数据
-            </button>
-          </motion.div>
           {view === "sub2api" && baseConnection.account ? (
             <Sub2apiChecks
               key={baseConnection.session}
@@ -1570,6 +1533,7 @@ function Dashboard({
             (view === "sources" || sourceList.length === 0) ? (
             <SourceSettings
               sources={sourceList}
+              refreshAction={refreshButton}
               onSaved={() => {
                 void sourceQuery.refetch();
                 void queryClient.invalidateQueries({ queryKey: ["keys"] });
@@ -1580,13 +1544,19 @@ function Dashboard({
           ) : view === "prices" ? (
             <PriceSettings
               prices={prices.data?.data || []}
+              refreshAction={refreshButton}
               loading={prices.isPending}
               error={prices.error?.message}
               connection={connection}
               onSaved={() => void prices.refetch()}
             />
           ) : view === "overview" ? (
-            <Overview metrics={metrics.data} rows={rows} live={liveMap} />
+            <Overview
+              metrics={metrics.data}
+              rows={rows}
+              live={liveMap}
+              refreshAction={refreshButton}
+            />
           ) : (
             <motion.section
               {...reveal}
@@ -1669,11 +1639,13 @@ function Dashboard({
                       </button>
                     )}
                   </div>
-                  {view === "controls" && (
+                  {channelView && baseConnection.account && (
                     <ChannelControlActions
                       controls={controls}
                       sources={sourceList}
                       keys={keys.data?.data || []}
+                      editing={adjustingChannels}
+                      onEditingChange={setAdjustingChannels}
                     />
                   )}
                   {view === "checks" && (
@@ -1688,6 +1660,7 @@ function Dashboard({
                       }
                     />
                   )}
+                  {refreshButton}
                   {channelView && (
                     <button
                       className={`button small ghost ${showTrend ? "selected" : ""}`}
@@ -1865,24 +1838,22 @@ function Dashboard({
                   </button>
                 )}
               </div>
-              {view === "checks" && (
-                <div className="check-explanation">
-                  <p>
-                    检测发送至指定渠道的 Responses 端点，模型固定为{" "}
-                    <strong>gpt-6-astra</strong>
-                    ，不会切换其他渠道。上方筛选只决定渠道集合；一键检测覆盖所有匹配页，同一来源的渠道只测一次。
-                  </p>
-                  <p>
-                    回复包含「未知」显示绿勾，包含「2024-06」显示红叉；同时包含或均不包含则无法判定。仅按该规则提供参考，每次检测会产生少量模型用量。
-                  </p>
-                  {!baseConnection.account && (
-                    <p role="alert">请使用账户登录后检测。</p>
-                  )}
-                  {checks.error && (
-                    <p role="alert">
-                      历史检测结果读取失败：{checks.error.message}
-                    </p>
-                  )}
+              {view === "checks" &&
+                (!baseConnection.account || checks.error) && (
+                  <div className="check-explanation">
+                    {!baseConnection.account && (
+                      <p role="alert">请使用账户登录后检测。</p>
+                    )}
+                    {checks.error && (
+                      <p role="alert">
+                        历史检测结果读取失败：{checks.error.message}
+                      </p>
+                    )}
+                  </div>
+                )}
+              {channelView && checks.error && (
+                <div className="coverage-note" role="alert">
+                  最近检测结果读取失败：{checks.error.message}
                 </div>
               )}
               {staleSources.size > 0 && (
@@ -1954,8 +1925,15 @@ function Dashboard({
                       <tr>
                         <th className="rank">#</th>
                         <th>渠道 / 模型</th>
+                        {baseConnection.account && (
+                          <th>
+                            <Tip text="显示此来源、此渠道最近一次 gpt-6-astra 检测结果，与当前指标时间范围无关；不代表表中每个模型都已单独检测。">
+                              是否降智 <CircleHelp size={12} />
+                            </Tip>
+                          </th>
+                        )}
                         <ChannelMetricHeaders keySelected={!!keyId} />
-                        {view === "controls" && (
+                        {adjustingChannels && (
                           <th>
                             <Tip text="修改作用于本行来源、当前选择的 API key 和模型（未选择则为全部），对所有端点和流式状态生效。无到期时间；来源设置开启“保留临时配置”时，重启后自动恢复已应用的更改。">
                               临时控制 <CircleHelp size={12} />
@@ -1995,6 +1973,9 @@ function Dashboard({
                                 </span>
                               </button>
                             </td>
+                            {baseConnection.account && (
+                              <LatestChannelCheck row={row} checks={checks} />
+                            )}
                             <ChannelMetricCells
                               row={row}
                               inflight={liveMap.get(rowId(row))}
@@ -2002,7 +1983,7 @@ function Dashboard({
                               actualRange={actualRange}
                               stale={staleSources.has(row.source_id || "")}
                             />
-                            {view === "controls" && (
+                            {adjustingChannels && (
                               <ChannelControlCell
                                 row={row}
                                 controls={controls}

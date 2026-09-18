@@ -136,3 +136,47 @@ it("stops every in-flight batch request and clears pending state", async () => {
   unmount();
   client.clear();
 });
+
+it("replaces an older local check error when newer persisted history arrives", async () => {
+  let persisted: unknown[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (_input: string, init?: RequestInit) =>
+      init?.method === "POST"
+        ? new Response("fixture failure", { status: 502 })
+        : new Response(JSON.stringify({ data: persisted })),
+    ),
+  );
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+  const { result, unmount } = renderHook(
+    () => useChannelChecks("latest-test", true),
+    { wrapper },
+  );
+  await act(async () => {
+    await result.current.run(row("one", "shared"));
+  });
+  const id = JSON.stringify(["one", "shared"]);
+  const failed = result.current.results.get(id)!;
+  expect(failed.verdict).toBe("error");
+  persisted = [
+    {
+      ...failed,
+      verdict: "pass",
+      text: "未知",
+      checked_at: failed.checked_at + 1,
+    },
+  ];
+  await act(async () => {
+    await result.current.refetch();
+  });
+  await waitFor(() =>
+    expect(result.current.results.get(id)?.verdict).toBe("pass"),
+  );
+  unmount();
+  client.clear();
+});

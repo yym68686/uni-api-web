@@ -85,6 +85,7 @@ it("uses account login, restores a cookie session and scopes same-name channels 
             },
           ],
         };
+      else if (url.pathname.endsWith("channel-checks")) body = { data: [] };
       else if (url.pathname.endsWith("api-keys"))
         body = { can_inspect_all: true, data: [] };
       else if (url.pathname.endsWith("channel-balances"))
@@ -229,19 +230,19 @@ it("shows zero attempts for an idle selected key while shared channels have traf
     screen.getByText("business-channel", { selector: "strong" }).closest("tr")!;
   await screen.findByText("business-channel");
   await waitFor(() =>
-    expect(within(business()).getAllByRole("cell")[5]).toHaveTextContent(/^7$/),
+    expect(within(business()).getAllByRole("cell")[6]).toHaveTextContent(/^7$/),
   );
   await user.selectOptions(
     screen.getByLabelText("API key 筛选"),
     "primary::key-2b",
   );
   await waitFor(() =>
-    expect(within(business()).getAllByRole("cell")[5]).toHaveTextContent(/^0$/),
+    expect(within(business()).getAllByRole("cell")[6]).toHaveTextContent(/^0$/),
   );
   const cells = within(business()).getAllByRole("cell");
-  expect(cells[4]).toHaveTextContent("—");
-  expect(cells[8]).not.toHaveTextContent("120");
-  expect(cells[9]).not.toHaveTextContent("5.00");
+  expect(cells[5]).toHaveTextContent("—");
+  expect(cells[9]).not.toHaveTextContent("120");
+  expect(cells[10]).not.toHaveTextContent("5.00");
   expect(
     screen.getByRole("columnheader", { name: "渠道总并发" }),
   ).toBeVisible();
@@ -268,6 +269,6 @@ it("shows zero attempts for an idle selected key while shared channels have traf
   );
   await user.selectOptions(screen.getByLabelText("API key 筛选"), "");
   await waitFor(() =>
-    expect(within(business()).getAllByRole("cell")[5]).toHaveTextContent(/^7$/),
+    expect(within(business()).getAllByRole("cell")[6]).toHaveTextContent(/^7$/),
   );
 });
