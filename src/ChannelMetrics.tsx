@@ -17,6 +17,7 @@ import { usd } from "./analytics";
 import type { ActualCostRange } from "./actualCost";
 import { SubChannelSpendValue } from "./SubChannelSpend";
 import type { SubChannelSpendResult } from "./SubChannelSpend";
+import { ChannelProfit } from "./ChannelProfit";
 export interface BalanceResult {
   data?: Balance;
   isPending?: boolean;
@@ -196,6 +197,11 @@ export function ChannelMetricHeaders({
           {keySelected ? "渠道实际消费" : "实际消费"} <CircleHelp size={12} />
         </Tip>
       </th>
+      <th>
+        <Tip text="利润（人民币）= 估算消费 × 2.5% × 6.9 − 渠道实际消费，仅取数值计算。利润率 = 利润 ÷（估算消费 × 2.5% × 6.9）。">
+          利润 <CircleHelp size={12} />
+        </Tip>
+      </th>
       <th>余额 / 额度</th>
     </>
   );
@@ -220,6 +226,9 @@ export function ChannelMetricCells({
   metricsUnavailable?: boolean;
 }) {
   const success = row.stats?.success_rate;
+  const actualCost = spend || importedChannel
+    ? spend?.data?.status === "complete" ? spend.data.actual_cost_usd : null
+    : actualRange.supported ? balance?.data?.actual_cost_usd : null;
   return (
     <>
       <td>
@@ -289,6 +298,9 @@ export function ChannelMetricCells({
         ) : (
           usd(balance.data.actual_cost_usd)
         )}
+      </td>
+      <td>
+        <ChannelProfit estimated={row.stats?.estimated_cost_usd} actual={actualCost} />
       </td>
       <td>
         <BalanceValue

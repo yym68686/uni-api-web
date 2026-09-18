@@ -2532,3 +2532,13 @@ nav > button.active > svg {
 }
 .sub-price-status > small { font-style: normal; }
 .sub-price-group { display: grid; gap: 10px; }
+
+.channel-profit {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  white-space: nowrap;
+}
+.channel-profit > small { font-size: 11px; font-style: normal; }
+.profit-positive { color: var(--green); }
