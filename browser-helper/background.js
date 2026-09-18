@@ -2,24 +2,11 @@ import { loginPageStep } from "./login-page.js";
 const consoleOrigin = "https://uni-api-console.fugue.pro";
 let active = null;
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
-  if (
-    message.type === "permission-granted" &&
-    sender.id === chrome.runtime.id &&
-    sender.url?.startsWith(chrome.runtime.getURL("permission.html"))
-  ) {
-    if (active?.id === message.id && active.permissionTab === sender.tab?.id)
-      active.permissionGranted?.();
-    reply({ ok: true });
-    return;
-  }
   if (sender.origin !== consoleOrigin || sender.frameId !== 0) return;
   if (message.type === "cancel") {
     if (active?.id === message.id && active.owner === sender.tab.id) {
       active.cancelled = true;
       if (active.tabId) void chrome.tabs.remove(active.tabId).catch(() => {});
-      if (active.permissionTab)
-        void chrome.tabs.remove(active.permissionTab).catch(() => {});
-      active.permissionGranted?.();
     }
     return;
   }
@@ -63,35 +50,6 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   (async () => {
     let tab;
     try {
-      if (
-        !(await chrome.permissions.contains({ origins: [site.origin + "/*"] }))
-      ) {
-        let resolvePermission;
-        const waitPermission = new Promise((resolve) => {
-          resolvePermission = resolve;
-        });
-        job.permissionGranted = resolvePermission;
-        const permissionTab = await chrome.tabs.create({
-          url:
-            chrome.runtime.getURL("permission.html") +
-            "?" +
-            new URLSearchParams({ origin: site.origin, id: job.id }),
-          active: true,
-        });
-        job.permissionTab = permissionTab.id;
-        const permissionTimer = setTimeout(resolvePermission, 120000);
-        await waitPermission;
-        clearTimeout(permissionTimer);
-        await chrome.tabs.remove(permissionTab.id).catch(() => {});
-        job.permissionTab = null;
-        if (job.cancelled) throw new Error("登录已取消");
-        if (
-          !(await chrome.permissions.contains({
-            origins: [site.origin + "/*"],
-          }))
-        )
-          throw new Error("未授予该站点登录权限");
-      }
       if (job.cancelled) throw new Error("登录已取消");
       tab = await chrome.tabs.create({
         url: input.base.replace(/\/$/, "") + "/login",
@@ -111,7 +69,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
                 base: input.base.replace(/\/$/, ""),
                 email: input.email,
                 password: input.password,
-                agreed: input.agreed === true,
+                agreed: true,
               },
             ],
           });
@@ -120,6 +78,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           if (current.url && new URL(current.url).origin !== site.origin)
             throw new Error("站点跳转到其他域名，已停止登录");
         }
+        if (job.cancelled) throw new Error("登录已取消");
         const state = results?.[0]?.result;
         if (state?.filled) input.password = "";
         if (state?.error) throw new Error(state.error);

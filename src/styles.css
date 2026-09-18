@@ -2384,9 +2384,6 @@ nav > button.active > svg {
 .sub-remove button { margin: 8px 6px 0 0; }
 .sub-account-form { background: var(--surface); color: var(--ink); }
 .sub-account-form input { background: var(--surface); color: var(--ink); }
-.sub-form-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; }
-.sub-form-footer > span { font-size: 12px; color: var(--muted); line-height: 1.7; }
-.sub-form-footer > div { display: flex; gap: 8px; flex-shrink: 0; }
 .sub-loading { padding: 30px; display: flex; align-items: center; gap: 10px; }
 .sub-filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; padding: 0 24px 20px; }
 .sub-model { font-size: 12px; color: var(--muted); margin-left: auto; }
@@ -2398,7 +2395,6 @@ nav > button.active > svg {
 @media(max-width:780px) {
  .sub-account-list { padding: 0 16px 16px; }
  .sub-account-actions { width: 100%; }
- .sub-form-footer { align-items: stretch; flex-direction: column; }
  .sub-filters { padding: 0 16px 16px; }
  .sub-model { margin-left: 0; }
  .sub2api-page .data-actions { flex-wrap: wrap; }
@@ -2471,11 +2467,17 @@ nav > button.active > svg {
   .startup-screen .skeleton { animation: none; }
 }
 
-.sub-login-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
-.sub-browser-login { margin-top: 16px; font-size: 12px; }
-.sub-browser-login details { margin: 8px 0; }
-.sub-browser-login summary { cursor: pointer; }
-.sub-browser-login p { max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; color: var(--muted); }
-.sub-browser-login label { display: flex; align-items: center; gap: 8px; }
-.sub-browser-login input[type=checkbox] { width: auto; }
-.sub-browser-login a { color: var(--green); text-decoration: underline; }
+.sub-account-dialog { width: min(510px, calc(100vw - 32px)); }
+.sub-account-dialog .source-form { display: flex; flex-direction: column; align-items: stretch; gap: 20px; margin: 24px 0 0; padding: 0; border: 0; border-radius: 0; }
+.sub-login-fields { display: grid; gap: 18px; border: 0; padding: 0; margin: 0; min-width: 0; width: 100%; }
+.sub-account-dialog label { min-width: 0; }
+.sub-account-dialog-actions { display: flex; gap: 8px; justify-content: flex-end; padding-top: 6px; }
+.sub-login-status { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); }
+
+.balance-warning { color: #9a7208; }
+.balance-positive { color: var(--green); }
+:root[data-theme="dark"] .balance-warning { color: #e9cc70; }
+.sub-account-balance { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; margin-top: 12px; font-size: 12px; }
+.sub-account-balance > span:first-child { color: var(--muted); }
+.sub-account-balance .amount { font-family: "Geist Mono Variable", monospace; font-size: 16px; font-weight: 500; }
+.sub-account-balance small { flex-basis: 100%; margin-top: 0; font-size: 11px; }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { balanceIsLow, balanceLabel, summarize } from "./format";
+import { balanceIsLow, balanceLabel, balanceTone, summarize } from "./format";
 import { cleanBase, makeLimiter, request } from "./api";
 import type { Balance, BalanceKey, Channel } from "./types";
 const key = (amount: number | null): BalanceKey => ({
@@ -123,3 +123,18 @@ describe("metric meaning", () => {
     }
   });
 });
+
+it.each([
+  [-1, "negative"],
+  [-0.0001, "negative"],
+  [0, "balance-warning"],
+  [10, "balance-warning"],
+  [50, "balance-warning"],
+  [50.0001, "balance-positive"],
+  [null, "muted"],
+  [undefined, "muted"],
+  [NaN, "muted"],
+  [Infinity, "muted"],
+] as const)("colors balance %s as %s", (amount, tone) =>
+  expect(balanceTone(amount)).toBe(tone),
+);

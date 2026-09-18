@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-func TestSubLoginOffersBrowserAndSiteAgreementWithoutSavingPassword(t *testing.T) {
+func TestSubLoginOffersBrowserWithoutFetchingAgreementOrSavingPassword(t *testing.T) {
 	dsn := os.Getenv("TEST_CONTROL_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("local PostgreSQL required")
@@ -28,7 +28,7 @@ func TestSubLoginOffersBrowserAndSiteAgreementWithoutSavingPassword(t *testing.T
 		case "/api/v1/auth/login":
 			writeJSON(w, 400, map[string]any{"code": 400, "reason": "TURNSTILE_VERIFICATION_FAILED", "message": "do not forward private-password"})
 		case "/api/v1/settings/public":
-			writeJSON(w, 200, map[string]any{"code": 0, "data": map[string]any{"login_agreement_enabled": true, "login_agreement_revision": "r1", "login_agreement_documents": []map[string]string{{"id": "terms", "title": "条款", "content_md": "条款正文"}}}})
+			t.Error("unnecessary agreement request")
 		default:
 			http.NotFound(w, r)
 		}
@@ -44,15 +44,16 @@ func TestSubLoginOffersBrowserAndSiteAgreementWithoutSavingPassword(t *testing.T
 	w := httptest.NewRecorder()
 	(&Service{control: store}).Handler().ServeHTTP(w, r)
 	var result struct {
-		Required  bool `json:"requires_browser"`
-		Agreement struct {
-			Required bool   `json:"required"`
-			Revision string `json:"revision"`
-		} `json:"agreement"`
+		Required bool   `json:"requires_browser"`
+		Base     string `json:"browser_base"`
 	}
-	if json.Unmarshal(w.Body.Bytes(), &result) != nil || w.Code != 200 || !result.Required || !result.Agreement.Required || result.Agreement.Revision != "r1" {
+	if json.Unmarshal(w.Body.Bytes(), &result) != nil || w.Code != 200 || !result.Required || result.Base != "https://site.example" {
 		t.Fatal(w.Code, w.Body.String())
 	}
+	if strings.Contains(w.Body.String(), "agreement") {
+		t.Fatal("obsolete agreement response")
+	}
+
 	if strings.Contains(w.Body.String(), "private-password") {
 		t.Fatal("credentials echoed")
 	}

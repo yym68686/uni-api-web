@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS console_sub_accounts(
  job_kind TEXT NOT NULL DEFAULT '', job_id TEXT NOT NULL DEFAULT '', lease_until TIMESTAMPTZ,
  synced_at BIGINT NOT NULL DEFAULT 0, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
  UNIQUE(owner,base,email));
+ALTER TABLE console_sub_accounts ADD COLUMN IF NOT EXISTS balance JSONB;
 CREATE INDEX IF NOT EXISTS console_sub_accounts_owner ON console_sub_accounts(owner);
 CREATE TABLE IF NOT EXISTS console_sub_targets(
  account_id TEXT NOT NULL REFERENCES console_sub_accounts(id) ON DELETE CASCADE, group_id BIGINT NOT NULL,
@@ -59,14 +60,15 @@ type subTarget struct {
 	Billing  *subBilling      `json:"billing"`
 }
 type subAccount struct {
-	ID       string      `json:"id"`
-	Name     string      `json:"name"`
-	Base     string      `json:"base"`
-	Email    string      `json:"email"`
-	State    string      `json:"state"`
-	Message  string      `json:"message"`
-	SyncedAt int64       `json:"synced_at"`
-	Targets  []subTarget `json:"targets"`
+	ID       string             `json:"id"`
+	Name     string             `json:"name"`
+	Base     string             `json:"base"`
+	Email    string             `json:"email"`
+	State    string             `json:"state"`
+	Message  string             `json:"message"`
+	SyncedAt int64              `json:"synced_at"`
+	Targets  []subTarget        `json:"targets"`
+	Balance  *subAccountBalance `json:"balance"`
 }
 type subChallenge struct {
 	Owner, Base, Email, Name, Temp string
@@ -75,7 +77,7 @@ type subChallenge struct {
 
 func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 	owner, _ := s.controlUser(r)
-	rows, err := s.control.db.QueryContext(r.Context(), `SELECT id,name,base,email,state,message,synced_at FROM console_sub_accounts WHERE owner=$1 ORDER BY created_at,id`, owner)
+	rows, err := s.control.db.QueryContext(r.Context(), `SELECT id,name,base,email,state,message,synced_at,balance FROM console_sub_accounts WHERE owner=$1 ORDER BY created_at,id`, owner)
 	if err != nil {
 		http.Error(w, "账号列表暂不可用", 503)
 		return
@@ -84,8 +86,14 @@ func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 	index := map[string]int{}
 	for rows.Next() {
 		var a subAccount
-		if err = rows.Scan(&a.ID, &a.Name, &a.Base, &a.Email, &a.State, &a.Message, &a.SyncedAt); err != nil {
+		var balanceRaw []byte
+		if err = rows.Scan(&a.ID, &a.Name, &a.Base, &a.Email, &a.State, &a.Message, &a.SyncedAt, &balanceRaw); err != nil {
 			break
+		}
+		if len(balanceRaw) > 0 {
+			if err = json.Unmarshal(balanceRaw, &a.Balance); err != nil {
+				break
+			}
 		}
 		a.Targets = []subTarget{}
 		index[a.ID] = len(accounts)
@@ -205,18 +213,7 @@ func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var remote *subRemoteError
 		if errors.As(err, &remote) && (strings.Contains(strings.ToUpper(remote.Reason), "TURNSTILE") || strings.Contains(strings.ToUpper(remote.Reason), "CAPTCHA")) {
-			var settings struct {
-				Enabled   bool   `json:"login_agreement_enabled"`
-				Revision  string `json:"login_agreement_revision"`
-				Documents []struct {
-					ID      string `json:"id"`
-					Title   string `json:"title"`
-					Content string `json:"content_md"`
-				} `json:"login_agreement_documents"`
-			}
-			// This is public metadata, fetched through the same SSRF-safe client.
-			_ = subJSON(ctx, subHTTP, in.Base, "GET", "/api/v1/settings/public", "", nil, &settings, "")
-			writeJSON(w, 200, map[string]any{"requires_browser": true, "browser_base": in.Base, "agreement": map[string]any{"required": settings.Enabled, "revision": settings.Revision, "documents": settings.Documents}})
+			writeJSON(w, 200, map[string]any{"requires_browser": true, "browser_base": in.Base})
 			return
 		}
 		http.Error(w, err.Error(), 400)
@@ -507,6 +504,16 @@ func (s *Service) subWorkOne(parent context.Context) bool {
 }
 
 func (s *Service) subPanel(ctx context.Context, id, base, job, encrypted string) (func(string, string, any, any, string) error, []subRemoteGroup, error) {
+	authCtx, authCancel := context.WithTimeout(ctx, 15*time.Second)
+	defer authCancel()
+	unlock, lockErr := s.subLockAuth(authCtx, id)
+	if lockErr != nil {
+		return nil, nil, errors.New("账号会话正在更新，请稍后重试")
+	}
+	defer unlock()
+	if err := s.control.db.QueryRowContext(authCtx, `SELECT encrypted_auth FROM console_sub_accounts WHERE id=$1 AND job_id=$2`, id, job).Scan(&encrypted); err != nil {
+		return nil, nil, context.Canceled
+	}
 	plain, err := s.control.decrypt(encrypted)
 	if err != nil {
 		return nil, nil, errors.New("账号凭据无法解密，请重新登录")
@@ -519,11 +526,11 @@ func (s *Service) subPanel(ctx context.Context, id, base, job, encrypted string)
 		return subJSON(ctx, subHTTP, base, method, path, auth.Access, body, out, idem)
 	}
 	var groups []subRemoteGroup
-	err = call("GET", "/api/v1/groups/available", nil, &groups, "")
+	err = subJSON(authCtx, subHTTP, base, "GET", "/api/v1/groups/available", auth.Access, nil, &groups, "")
 	var remoteErr *subRemoteError
 	if errors.As(err, &remoteErr) && remoteErr.Status == 401 && auth.Refresh != "" {
 		var next subAuth
-		if err = subJSON(ctx, subHTTP, base, "POST", "/api/v1/auth/refresh", "", map[string]string{"refresh_token": auth.Refresh}, &next, ""); err != nil {
+		if err = subJSON(authCtx, subHTTP, base, "POST", "/api/v1/auth/refresh", "", map[string]string{"refresh_token": auth.Refresh}, &next, ""); err != nil {
 			return nil, nil, err
 		}
 		if next.Access == "" || next.Refresh == "" {
@@ -544,7 +551,7 @@ func (s *Service) subPanel(ctx context.Context, id, base, job, encrypted string)
 		if n != 1 {
 			return nil, nil, context.Canceled
 		}
-		err = call("GET", "/api/v1/groups/available", nil, &groups, "")
+		err = subJSON(authCtx, subHTTP, base, "GET", "/api/v1/groups/available", auth.Access, nil, &groups, "")
 	}
 	if err != nil {
 		return nil, nil, err

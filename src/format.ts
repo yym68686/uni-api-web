@@ -39,6 +39,15 @@ export const balanceStatus: Record<string, string> = {
 };
 const nonPositive = (value: unknown) =>
   typeof value === "number" && Number.isFinite(value) && value <= 0;
+// Color thresholds are independent from the exhausted-quota filter (<= 0).
+export function balanceTone(value?: number | null) {
+  if (value == null || !Number.isFinite(value)) return "muted";
+  return value < 0
+    ? "negative"
+    : value <= 50
+      ? "balance-warning"
+      : "balance-positive";
+}
 export function keyIsLow(key: BalanceKey) {
   return (
     key.status === "ok" &&

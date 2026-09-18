@@ -1168,6 +1168,7 @@ it("offers the browser helper for Turnstile and saves only its returned session"
   const onMessage = (event: MessageEvent) => {
     const { channel, id, type } = event.data || {};
     if (channel !== "uni-api-browser-login-v1") return;
+    if (type === "login") expect(event.data.input.agreed).toBe(true);
     const data =
       type === "ping"
         ? { channel, id, type: "ready" }
@@ -1232,10 +1233,11 @@ it("offers the browser helper for Turnstile and saves only its returned session"
     const browserButton = await screen.findByRole("button", {
       name: "使用浏览器登录",
     });
-    expect(browserButton).toBeDisabled();
-    await user.click(
-      screen.getByRole("checkbox", { name: "我已阅读并同意以上站点登录协议" }),
-    );
+    expect(screen.queryByText("原站协议")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("站点要求验证码？使用已登录会话接入"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
     await waitFor(() => expect(browserButton).toBeEnabled());
     await user.click(browserButton);
     await waitFor(() => expect(writes).toHaveLength(2));
@@ -1252,4 +1254,72 @@ it("offers the browser helper for Turnstile and saves only its returned session"
   } finally {
     window.removeEventListener("message", onMessage);
   }
+});
+
+it("opens account forms in a modal and restores focus when closed", async () => {
+  const data = fixtures();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response(JSON.stringify({ data }))),
+  );
+  const user = userEvent.setup();
+  mount();
+  const opener = screen.getByRole("button", { name: "添加账号" });
+  await user.click(opener);
+  const dialog = screen.getByRole("dialog", { name: "添加 sub2api 账号" });
+  expect(within(dialog).getByLabelText("站点地址")).toBeVisible();
+  expect(document.querySelector(".sub-accounts .sub-account-form")).toBeNull();
+  await user.keyboard("{Escape}");
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(opener).toHaveFocus();
+  await user.click(screen.getAllByRole("button", { name: "重新登录" })[0]);
+  const login = screen.getByRole("dialog", { name: "重新登录站点账号" });
+  expect(within(login).getByLabelText("站点地址")).toHaveValue(
+    "https://one.test",
+  );
+  expect(within(login).getByLabelText("账号密码")).toHaveValue("");
+  await user.click(within(login).getByRole("button", { name: "关闭账号窗口" }));
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+});
+
+it("shows account wallet balances using the shared thresholds", async () => {
+  const amounts = [-0.01, 0, 50, 50.01, null];
+  const data = amounts.map((_, index) => ({
+    ...fixtures()[0],
+    id: String(index),
+    name: `site-${index}`,
+    targets: [],
+  }));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string) => {
+      const path = new URL(input, location.origin).pathname;
+      const match = path.match(/accounts\/(\d+)\/balance$/);
+      return new Response(
+        JSON.stringify(
+          match
+            ? { amount: amounts[Number(match[1])], status: "ok", checked_at: 1 }
+            : { data },
+        ),
+      );
+    }),
+  );
+  mount();
+  for (const [index, tone] of [
+    "negative",
+    "balance-warning",
+    "balance-warning",
+    "balance-positive",
+    "muted",
+  ].entries()) {
+    const name = await screen.findByText(`site-${index}`, {
+      selector: "strong",
+    });
+    await waitFor(() =>
+      expect(
+        name.closest("article")?.querySelector(".sub-account-balance .amount"),
+      ).toHaveClass(tone),
+    );
+  }
+  expect(screen.getByText("$0.00")).toHaveClass("balance-warning");
 });

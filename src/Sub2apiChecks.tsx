@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Check,
   ChevronDown,
@@ -15,7 +15,8 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { controlRequest } from "./api";
+import { controlRequest, makeLimiter } from "./api";
+import { BalanceAmount } from "./BalanceAmount";
 import { browserHelperAvailable, loginWithBrowser } from "./sub2apiBrowser";
 import { ResponseLatency } from "./LatencyBadge";
 import { Empty, Spinner, Tip } from "./ui";
@@ -79,6 +80,7 @@ export interface SubAccount {
   state: string;
   message: string;
   synced_at: number;
+  balance?: SubAccountBalance | null;
   targets: SubTarget[];
 }
 const pending = (state: string) => state === "queued" || state === "running";
@@ -97,6 +99,51 @@ const latency = (value: number | null) =>
       ? `${value} ms`
       : `${(value / 1000).toFixed(2)} s`;
 
+interface SubAccountBalance {
+  amount: number | null;
+  checked_at: number;
+  status: string;
+}
+const limitAccountBalance = makeLimiter(3);
+function AccountBalance({ account }: { account: SubAccount }) {
+  const query = useQuery({
+    queryKey: ["sub2api-balance", account.id, account.synced_at],
+    queryFn: ({ signal }) =>
+      limitAccountBalance(
+        () =>
+          controlRequest<SubAccountBalance>(
+            `/v1/sub2api/accounts/${account.id}/balance`,
+            { signal },
+          ),
+        signal,
+      ),
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+    retry: false,
+  });
+  const balance = query.data || account.balance;
+  return (
+    <div
+      className="sub-account-balance"
+      title={
+        balance?.checked_at
+          ? `余额查询于 ${time(balance.checked_at)}${query.isError || balance.status === "error" ? " · 更新失败，上次结果" : ""}`
+          : "尚无余额数据"
+      }
+    >
+      <span>余额</span>
+      <BalanceAmount value={balance?.amount} />
+      {query.isPending && !balance && <Spinner small />}
+      {(query.isError ||
+        (balance &&
+          balance.status !== "ok" &&
+          balance.status !== "missing")) && (
+        <small>更新失败{balance?.amount != null && " · 上次结果"}</small>
+      )}
+    </div>
+  );
+}
+
 function AccountForm({
   initial,
   close,
@@ -112,14 +159,13 @@ function AccountForm({
   const [password, setPassword] = useState("");
   const [browserNeeded, setBrowserNeeded] = useState(false);
   const [helperReady, setHelperReady] = useState(false);
-  const [agreement, setAgreement] = useState<{
-    required: boolean;
-    revision: string;
-    documents: { id: string; title: string; content_md: string }[];
-  }>();
-  const [agreed, setAgreed] = useState(false);
   const [browserBusy, setBrowserBusy] = useState(false);
+  const [challenge, setChallenge] = useState("");
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
   const browserAbort = useRef<AbortController | null>(null);
+  const opener = useRef(document.activeElement);
   useEffect(() => {
     let active = true;
     void browserHelperAvailable().then((ready) => {
@@ -130,16 +176,24 @@ function AccountForm({
       browserAbort.current?.abort();
     };
   }, []);
+  function dismiss() {
+    if (busy) return;
+    browserAbort.current?.abort();
+    close();
+  }
   async function browserLogin() {
-    if (busy || browserBusy || !helperReady || (agreement?.required && !agreed))
+    if (busy || browserBusy) return;
+    if (!helperReady) {
+      setError("登录助手未连接，请重新加载扩展和控制台后重试。");
       return;
+    }
     setBrowserBusy(true);
     setError("");
     const abort = new AbortController();
     browserAbort.current = abort;
     try {
       const auth = await loginWithBrowser(
-        { base, email, password, agreed },
+        { base, email, password, agreed: true },
         abort.signal,
       );
       setPassword("");
@@ -157,17 +211,10 @@ function AccountForm({
       browserAbort.current = null;
     }
   }
-  const [advanced, setAdvanced] = useState(false);
-  const [access, setAccess] = useState("");
-  const [refresh, setRefresh] = useState("");
-  const [challenge, setChallenge] = useState("");
-  const [code, setCode] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (busy || browserBusy) return;
-    if (browserNeeded && !advanced && !challenge) {
+    if (browserNeeded && !challenge) {
       void browserLogin();
       return;
     }
@@ -179,41 +226,23 @@ function AccountForm({
         challenge?: string;
         requires_browser?: boolean;
         browser_base?: string;
-        agreement?: {
-          required: boolean;
-          revision: string;
-          documents: { id: string; title: string; content_md: string }[];
-        };
       }>("/v1/sub2api/accounts", {
         method: "POST",
         body: JSON.stringify(
           challenge
             ? { challenge, totp_code: code }
-            : {
-                name,
-                base,
-                email,
-                ...(advanced
-                  ? { access_token: access, refresh_token: refresh }
-                  : { password }),
-              },
+            : { name, base, email, password },
         ),
       });
       if (result.requires_browser) {
         setBrowserNeeded(true);
         if (result.browser_base) setBase(result.browser_base);
-        setAgreement(result.agreement);
-        setAgreed(false);
         setHelperReady(await browserHelperAvailable());
       } else if (result.requires_2fa && result.challenge) {
         setChallenge(result.challenge);
         setPassword("");
-        setAccess("");
-        setRefresh("");
       } else {
         setPassword("");
-        setAccess("");
-        setRefresh("");
         saved();
       }
     } catch (e) {
@@ -223,202 +252,163 @@ function AccountForm({
     }
   }
   return (
-    <form className="source-form sub-account-form" onSubmit={submit}>
-      <h3>
-        {challenge
-          ? "完成双因素验证"
-          : initial
-            ? "重新登录站点账号"
-            : "添加 sub2api 账号"}
-      </h3>
-      <fieldset className="sub-login-fields" disabled={busy || browserBusy}>
-        {challenge ? (
-          <label>
-            六位验证码
-            <input
-              autoFocus
-              aria-label="六位验证码"
-              autoComplete="one-time-code"
-              inputMode="numeric"
-              pattern="[0-9]{6}"
-              maxLength={6}
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              required
-            />
-          </label>
-        ) : (
-          <>
-            <label>
-              站点名称
-              <input
-                placeholder="例如：我的上游"
-                maxLength={120}
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-            </label>
-            <label>
-              站点地址
-              <input
-                type="url"
-                placeholder="https://api.example.com"
-                value={base}
-                onChange={(e) => {
-                  setBase(e.target.value);
-                  setBrowserNeeded(false);
-                  setAgreement(undefined);
-                  setAgreed(false);
-                }}
-                readOnly={!!initial}
-                required
-              />
-            </label>
-            <label>
-              账号邮箱
-              <input
-                type="email"
-                autoComplete="username"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                readOnly={!!initial}
-                required
-              />
-            </label>
-            {!advanced && (
-              <label>
-                账号密码
-                <input
-                  type="password"
-                  autoComplete="current-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                />
-              </label>
-            )}
-            <details onToggle={(e) => setAdvanced(e.currentTarget.open)}>
-              <summary>站点要求验证码？使用已登录会话接入</summary>
-              <p>
-                在 sub2api 站点完成登录后，填入该账号的
-                access_token；refresh_token 可选。这里需要登录会话令牌，不是模型
-                API key。
-              </p>
-              <div className="source-storage-fields">
-                <label>
-                  访问令牌
-                  <input
-                    type="password"
-                    autoComplete="off"
-                    value={access}
-                    onChange={(e) => setAccess(e.target.value)}
-                    required={advanced}
-                  />
-                </label>
-                <label>
-                  刷新令牌（可选）
-                  <input
-                    type="password"
-                    autoComplete="off"
-                    value={refresh}
-                    onChange={(e) => setRefresh(e.target.value)}
-                  />
-                </label>
-              </div>
-            </details>
-          </>
-        )}
-        {browserNeeded && !advanced && !challenge && (
-          <div className="sub-browser-login">
-            {agreement?.required && (
-              <>
-                {agreement.documents?.map((doc) => (
-                  <details key={doc.id}>
-                    <summary>{doc.title}</summary>
-                    <p>{doc.content_md}</p>
-                  </details>
-                ))}
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={agreed}
-                    onChange={(event) => setAgreed(event.target.checked)}
-                  />
-                  我已阅读并同意以上站点登录协议
-                </label>
-              </>
-            )}
-            {helperReady ? (
-              <p>
-                将打开原站完成登录；如需人机验证或验证码，请在原站完成，成功后自动同步。
-              </p>
-            ) : (
-              <p>
-                此站点需要在浏览器中登录。
-                <a href="/uni-api-browser-helper.zip" download>
-                  下载登录助手
-                </a>
-                ，安装后刷新此页面。
-              </p>
-            )}
-          </div>
-        )}
-      </fieldset>
-      {browserBusy && (
-        <p role="status">
-          <Spinner small />
-          正在等待原站登录，成功后自动同步…
-        </p>
-      )}
-      {error && (
-        <div role="alert" className="error-banner">
-          {error}
-        </div>
-      )}
-      <div className="sub-form-footer">
-        <span>
-          连接后为所有可用分组创建或复用专用 key，并自动检测。每个新 key
-          的累计额度为 $1。
-        </span>
-        <div>
+    <Dialog.Root
+      open
+      onOpenChange={(open) => {
+        if (!open) dismiss();
+      }}
+    >
+      <Dialog.Portal>
+        <Dialog.Overlay className="dialog-overlay" />
+        <Dialog.Content
+          className="guide-dialog sub-account-dialog"
+          onPointerDownOutside={(event) => {
+            if (busy || browserBusy) event.preventDefault();
+          }}
+          onEscapeKeyDown={(event) => {
+            if (busy) event.preventDefault();
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            if (
+              opener.current instanceof HTMLElement &&
+              opener.current.isConnected
+            )
+              opener.current.focus();
+          }}
+        >
+          <Dialog.Title>
+            {challenge
+              ? "完成双因素验证"
+              : initial
+                ? "重新登录站点账号"
+                : "添加 sub2api 账号"}
+          </Dialog.Title>
+          <Dialog.Description>
+            连接后自动同步可用分组并检测，每个新测试 key 的累计额度为 $1。
+          </Dialog.Description>
           <button
-            className="button small"
             type="button"
-            onClick={() => {
-              browserAbort.current?.abort();
-              close();
-            }}
+            className="icon-button detail-close"
+            aria-label="关闭账号窗口"
             disabled={busy}
+            onClick={dismiss}
           >
-            取消
+            <X size={18} />
           </button>
-          {browserNeeded && !advanced && !challenge ? (
-            <button
-              type="button"
-              className="button primary small"
-              onClick={() => void browserLogin()}
-              disabled={
-                busy ||
-                browserBusy ||
-                !helperReady ||
-                (!!agreement?.required && !agreed)
-              }
-            >
-              {browserBusy ? <Spinner small /> : <Globe2 size={14} />}
-              使用浏览器登录
-            </button>
-          ) : (
-            <button
-              className="button primary small"
+          <form className="source-form sub-account-form" onSubmit={submit}>
+            <fieldset
+              className="sub-login-fields"
               disabled={busy || browserBusy}
             >
-              {busy ? <Spinner small /> : <Plus size={14} />}
-              {challenge ? "验证并检测" : "连接并检测"}
-            </button>
-          )}
-        </div>
-      </div>
-    </form>
+              {challenge ? (
+                <label>
+                  六位验证码
+                  <input
+                    autoFocus
+                    aria-label="六位验证码"
+                    autoComplete="one-time-code"
+                    inputMode="numeric"
+                    pattern="[0-9]{6}"
+                    maxLength={6}
+                    value={code}
+                    onChange={(event) => setCode(event.target.value)}
+                    required
+                  />
+                </label>
+              ) : (
+                <>
+                  <label>
+                    站点名称
+                    <input
+                      placeholder="例如：我的上游"
+                      maxLength={120}
+                      value={name}
+                      onChange={(event) => setName(event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    站点地址
+                    <input
+                      type="url"
+                      placeholder="https://api.example.com"
+                      value={base}
+                      onChange={(event) => {
+                        setBase(event.target.value);
+                        setBrowserNeeded(false);
+                        setError("");
+                      }}
+                      readOnly={!!initial}
+                      required
+                    />
+                  </label>
+                  <label>
+                    账号邮箱
+                    <input
+                      type="email"
+                      autoComplete="username"
+                      value={email}
+                      onChange={(event) => setEmail(event.target.value)}
+                      readOnly={!!initial}
+                      required
+                    />
+                  </label>
+                  <label>
+                    账号密码
+                    <input
+                      type="password"
+                      autoComplete="current-password"
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                      required
+                    />
+                  </label>
+                </>
+              )}
+            </fieldset>
+            {browserBusy && (
+              <p className="sub-login-status" role="status">
+                <Spinner small />
+                正在等待原站登录，成功后自动同步…
+              </p>
+            )}
+            {error && (
+              <div role="alert" className="error-banner">
+                {error}
+              </div>
+            )}
+            <div className="sub-account-dialog-actions">
+              <button
+                type="button"
+                className="button small"
+                disabled={busy}
+                onClick={dismiss}
+              >
+                取消
+              </button>
+              <button
+                type="submit"
+                className="button primary small"
+                disabled={busy || browserBusy}
+              >
+                {busy || browserBusy ? (
+                  <Spinner small />
+                ) : browserNeeded && !challenge ? (
+                  <Globe2 size={14} />
+                ) : (
+                  <Plus size={14} />
+                )}
+                {challenge
+                  ? "验证并检测"
+                  : browserNeeded
+                    ? "使用浏览器登录"
+                    : "连接并检测"}
+              </button>
+            </div>
+          </form>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 
@@ -1008,6 +998,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                         !pending(a.state) &&
                         ` · ${time(a.synced_at)}`}
                     </span>
+                    <AccountBalance account={a} />
                     {a.message && (
                       <small className="sub-account-message">{a.message}</small>
                     )}

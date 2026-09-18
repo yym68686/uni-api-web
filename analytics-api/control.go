@@ -281,6 +281,7 @@ func (s *Service) controlHandler() http.Handler {
 	mux.HandleFunc("GET /v1/sources/{id}/channel-checks", s.channelChecks)
 	mux.HandleFunc("POST /v1/sources/{id}/channel-checks", s.checkChannel)
 	mux.HandleFunc("GET /v1/sub2api/accounts", s.subAccounts)
+	mux.HandleFunc("GET /v1/sub2api/accounts/{id}/balance", s.subAccountBalance)
 	mux.HandleFunc("POST /v1/sub2api/accounts", s.subAddAccount)
 	mux.HandleFunc("POST /v1/sub2api/accounts/sync", s.subSyncAll)
 	mux.HandleFunc("DELETE /v1/sub2api/accounts/{id}", s.subDelete)

@@ -1,3 +1,4 @@
+import { BalanceAmount } from "./BalanceAmount";
 import { LatencyBadge } from "./LatencyBadge";
 import { CircleHelp } from "lucide-react";
 import type { Balance, Channel, Distribution } from "./types";
@@ -6,7 +7,6 @@ import {
   balanceKind,
   balanceLabel,
   balanceStatus,
-  keyIsLow,
   time,
   ms,
   count,
@@ -62,9 +62,30 @@ export function BalanceValue({
             </>
           }
         >
-          <span className={keyIsLow(item) ? "amount negative" : "amount"}>
+          <span className="amount">
             {balance.keys!.length > 1 && <small>Key {item.position} </small>}
-            {balanceLabel(item)}
+            {item.status !== "ok" || item.unlimited ? (
+              balanceLabel(item)
+            ) : typeof item.amount === "number" &&
+              Number.isFinite(item.amount) ? (
+              <BalanceAmount
+                value={item.amount}
+                currency={item.currency || "USD"}
+              />
+            ) : item.windows?.length ? (
+              item.windows.map((window, index) => (
+                <span key={window.window}>
+                  {index > 0 && " / "}
+                  {window.window} ·{" "}
+                  <BalanceAmount
+                    value={window.remaining}
+                    currency={item.currency || "USD"}
+                  />
+                </span>
+              ))
+            ) : (
+              <span className="muted">{balanceLabel(item)}</span>
+            )}
             {detail && (
               <small className="balance-kind">
                 {balanceKind[item.kind || ""]}

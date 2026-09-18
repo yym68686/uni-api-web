@@ -74,7 +74,7 @@ export function loginWithBrowser(
           new Error(typeof error === "string" ? error : "浏览器未返回登录会话"),
         );
     };
-    const timer = setTimeout(abort, 310000);
+    const timer = setTimeout(abort, 190000);
     if (signal.aborted) {
       abort();
       return;

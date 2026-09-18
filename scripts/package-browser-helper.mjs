@@ -6,8 +6,6 @@ const files = [
   "bridge.js",
   "login-page.js",
   "README.md",
-  "permission.html",
-  "permission.js",
 ];
 const archive = Object.fromEntries(
   files.map((name) => [
