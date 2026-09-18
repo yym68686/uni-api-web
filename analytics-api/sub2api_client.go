@@ -178,6 +178,8 @@ type subProbe struct {
 	Message           string    `json:"message,omitempty"`
 	TTFT              *int64    `json:"ttft_ms"`
 	ResponseCreatedMS *int64    `json:"response_created_ms"`
+	FirstResponseMS   *int64    `json:"first_response_ms,omitempty"`
+	Protocol          string    `json:"protocol,omitempty"`
 	Duration          int64     `json:"duration_ms"`
 	HTTPStatus        int       `json:"http_status,omitempty"`
 }
@@ -197,6 +199,7 @@ func subProbeStream(ctx context.Context, client *http.Client, base, key, prompt 
 	out.StartedAt = start.Unix()
 	out.RequestIDs = []string{out.ID, "local:" + out.ID}
 	out.Status = "error"
+	out.Protocol = "responses"
 	defer func() { out.Duration = time.Since(start).Milliseconds() }()
 	model := checkModel
 	if len(models) > 0 {
@@ -372,7 +375,23 @@ func subCompareModel(requested string, raw json.RawMessage) (string, string) {
 	return returned, "mismatch"
 }
 
-var subModels = []string{"gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "codex-auto-review"}
+var subModels = []string{
+	"gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "codex-auto-review",
+	"glm-5.3", "glm-5.3-flash", "kimi-k3", "deepseek-4.1-flash", "deepseek-4-pro", "grok-4.6",
+	"gemini-3.1-pro", "gemini-3.8-flash",
+	"claude-fable-5", "claude-fable-5-1", "claude-opus-5", "claude-sonnet-5", "claude-opus-4-8",
+	"claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5-20251001",
+}
+
+func subModelProtocol(model string) string {
+	if model == "gemini-3.1-pro" || model == "gemini-3.8-flash" {
+		return "gemini"
+	}
+	if strings.HasPrefix(model, "claude-") {
+		return "messages"
+	}
+	return "responses"
+}
 
 func subModelAllowed(model string) bool {
 	for _, m := range subModels {
@@ -388,7 +407,11 @@ func subRunProbes(ctx context.Context, client *http.Client, base, key string, mo
 		model = models[0]
 	}
 	out := subResult{Model: model, Verdict: "error", Quality: subProbe{Status: "skipped", Message: "可用性检测未通过"}}
-	out.Availability = subProbeStream(ctx, client, base, key, "say test", model)
+	if subModelProtocol(model) == "responses" {
+		out.Availability = subProbeStream(ctx, client, base, key, "say test", model)
+	} else {
+		out.Availability = subProbeNative(ctx, client, base, key, model)
+	}
 	if model != checkModel {
 		out.Verdict = "not_applicable"
 		out.Quality = subProbe{Status: "not_applicable", Message: "该模型不执行降智检测"}

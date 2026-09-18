@@ -387,12 +387,19 @@ func (s *Service) subQueueChecks(w http.ResponseWriter, r *http.Request, quality
 	var in struct {
 		Targets []subSelection `json:"targets"`
 	}
-	if !decodeControl(w, r, &in) {
+	// Up to 500 groups can each carry all 22 selected model names.
+	if !decodeControlLimit(w, r, &in, 512<<10) {
 		return
 	}
 	if len(in.Targets) == 0 || len(in.Targets) > 500 {
 		http.Error(w, "每次请选择 1–500 个分组", 400)
 		return
+	}
+	for _, target := range in.Targets {
+		if len(target.Models) > len(subModels) {
+			http.Error(w, "检测模型数量超出限制", 400)
+			return
+		}
 	}
 	tx, err := s.control.db.BeginTx(r.Context(), nil)
 	if err != nil {

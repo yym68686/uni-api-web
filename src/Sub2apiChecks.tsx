@@ -24,7 +24,8 @@ import { loadSubFilters, saveSubFilters } from "./sub2apiPreferences";
 import { useSubImports } from "./sub2apiImports";
 import { useSubAccounts } from "./sub2apiAccounts";
 import { Sub2apiImport } from "./Sub2apiImport";
-import { SUB_MODELS } from "./sub2apiModels";
+import { SUB_MODELS, loadSubModels, saveSubModels } from "./sub2apiModels";
+import { SubModelSettings } from "./SubModelSettings";
 import {
   modelChecks,
   availabilityCounts,
@@ -53,6 +54,8 @@ export interface Probe {
   message?: string;
   ttft_ms: number | null;
   response_created_ms?: number | null;
+  first_response_ms?: number | null;
+  protocol?: "responses" | "gemini" | "messages";
   duration_ms: number;
   http_status?: number;
 }
@@ -655,12 +658,14 @@ function CheckDetails({
                 <ResponseLatency
                   created={probe?.response_created_ms}
                   text={probe?.ttft_ms}
+                  protocol={probe?.protocol}
+                  firstResponse={probe?.first_response_ms}
                 />
               </DetailRow>
               <DetailRow label="首个文本延迟">
                 {latency(probe?.ttft_ms ?? null)}
                 <small className="check-source">
-                  首个 response.output_text.delta
+                  {probe?.protocol === "gemini" ? "首个 Gemini 非思考文本片段" : probe?.protocol === "messages" ? "首个 Messages 文本片段" : "首个 response.output_text.delta"}
                 </small>
               </DetailRow>
               <DetailRow label="可用性耗时">
@@ -731,6 +736,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   const accounts = query.data?.data || [];
   const [form, setForm] = useState<{ account: SubAccount | null } | null>(null);
   const [filters, setFilters] = useState(() => loadSubFilters(user));
+  const [detectionModels, setDetectionModels] = useState(() => loadSubModels(user));
   const {
     search,
     accountId,
@@ -742,6 +748,8 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
     minQuality,
     platform,
   } = filters;
+  const modelsToCheck = detectionModels.filter((item) => !model || item === model);
+  const allModelsSelected = detectionModels.length === SUB_MODELS.length;
   useEffect(() => saveSubFilters(user, filters), [user, filters]);
   const setSearch = (search: string) => setFilters((v) => ({ ...v, search }));
   const setAccountId = (accountId: string) =>
@@ -889,13 +897,14 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
     }
   }
   const check = (selection: typeof rows) => {
-    // Filters select groups; only the explicit model selector chooses the probe
-    // scope. Historical success/quality must not exclude untested sibling models.
+    if (!modelsToCheck.length) return;
+    // Result filters select groups; settings and the explicit model selector
+    // choose probes, including untested/failed models within that scope.
     return mutate("check", "/v1/sub2api/checks", {
       targets: selection.map(({ account, target }) => ({
         account_id: account.id,
         group_id: target.group_id,
-        models: model ? [model] : [...SUB_MODELS],
+        models: modelsToCheck,
       })),
     });
   };
@@ -982,7 +991,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
           </div>
         ) : accounts.length === 0 ? (
           <Empty title="添加第一个 sub2api 账号" icon={<Globe2 size={25} />}>
-            填入站点地址与账号密码，自动发现可用分组并检测六个模型。
+            填入站点地址与账号密码，自动发现可用分组并检测模型。
           </Empty>
         ) : (
           <div className="sub-account-list">
@@ -1139,13 +1148,18 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
             </button>
             <button
               className="button primary small"
-              disabled={!eligible.length || !!action || eligible.length > 500}
+              disabled={!eligible.length || !!action || eligible.length > 500 || !modelsToCheck.length}
+              title={!modelsToCheck.length ? "当前筛选模型未勾选，请在设置中启用" : undefined}
               onClick={() => void check(eligible)}
             >
               <ScanLine size={15} />
-              {model ? "检测所选模型" : "检测全部模型"} · {eligible.length}{" "}
+              {model ? "检测所选模型" : allModelsSelected ? "检测全部模型" : `检测已选 ${detectionModels.length} 个模型`} · {eligible.length}{" "}
               个渠道
             </button>
+            <SubModelSettings models={detectionModels} onSave={(models) => {
+              setDetectionModels(models);
+              saveSubModels(user, models);
+            }} />
           </div>
         </div>
         <div className="filters sub-filters">
@@ -1373,6 +1387,8 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                         </td>
                         <td className="mono">
                           <ResponseLatency
+                            protocol={selected?.result?.availability.protocol}
+                            firstResponse={selected?.result?.availability.first_response_ms}
                             created={
                               selected?.result?.availability.response_created_ms
                             }
@@ -1426,6 +1442,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                             aria-label={`检测 ${account.name} ${t.name}`}
                             disabled={
                               !!action ||
+                              !modelsToCheck.length ||
                               pending(account.state) ||
                               !t.active ||
                               !t.key_id ||
@@ -1438,7 +1455,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                             }
                           >
                             <ScanLine size={13} />
-                            {model ? "检测此模型" : "检测全部模型"}
+                            {model ? "检测此模型" : allModelsSelected ? "检测全部模型" : `检测已选 ${detectionModels.length} 个模型`}
                           </button>
                           <button
                             className="button small"

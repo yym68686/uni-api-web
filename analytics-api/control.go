@@ -342,11 +342,14 @@ func (s *Service) authMe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"enabled": s.control != nil, "authenticated": e == nil, "username": user})
 }
 func decodeControl(w http.ResponseWriter, r *http.Request, v any) bool {
+	return decodeControlLimit(w, r, v, 32<<10)
+}
+func decodeControlLimit(w http.ResponseWriter, r *http.Request, v any, limit int64) bool {
 	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 		http.Error(w, "JSON required", 415)
 		return false
 	}
-	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10)).Decode(v) != nil {
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, limit)).Decode(v) != nil {
 		http.Error(w, "invalid input", 400)
 		return false
 	}

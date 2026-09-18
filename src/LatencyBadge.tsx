@@ -10,22 +10,39 @@ export function LatencyBadge({ value }: { value?: number | null }) {
 export function ResponseLatency({
   created,
   text,
+  protocol,
+  firstResponse,
 }: {
   created?: number | null;
   text?: number | null;
+  protocol?: string;
+  firstResponse?: number | null;
 }) {
+  const native = protocol === "gemini" || protocol === "messages";
+  const responseLabel =
+    protocol === "gemini"
+      ? "首个 Gemini 响应事件"
+      : protocol === "messages"
+        ? "首个 message_start"
+        : "首个 response.created";
+  const textLabel =
+    protocol === "gemini"
+      ? "首个 Gemini 非思考文本片段"
+      : protocol === "messages"
+        ? "首个 Messages 文本片段"
+        : "首个 response.output_text.delta";
   return (
     <Tip
       text={
         <>
-          首个 response.created：{ms(created)}
+          {responseLabel}：{ms(native ? firstResponse : created)}
           <br />
-          首个 response.output_text.delta：{ms(text)}
+          {textLabel}：{ms(text)}
         </>
       }
     >
       <span>
-        <LatencyBadge value={created} />
+        <LatencyBadge value={native ? firstResponse : created} />
       </span>
     </Tip>
   );

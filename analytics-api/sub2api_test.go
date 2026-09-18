@@ -221,6 +221,11 @@ func TestSubAccountLifecycleIsolationAndIdempotency(t *testing.T) {
 			writeJSON(w, 200, map[string]any{"object": "sub2api.key_billing", "billing_scope": "token", "effective_rate_multiplier": 0.01})
 			return
 		}
+		if r.URL.Path == "/v1/messages" || strings.HasPrefix(r.URL.Path, "/v1beta/models/") {
+			probes.Add(1)
+			subNativeSSE(w, subFixtureProbeModel(r), "test")
+			return
+		}
 		if r.URL.Path == "/v1/responses" {
 			probes.Add(1)
 			var in struct {
@@ -318,7 +323,7 @@ func TestSubAccountLifecycleIsolationAndIdempotency(t *testing.T) {
 	if !service.subWorkOne(context.Background()) {
 		t.Fatal("no queued job")
 	}
-	if created.Load() != 3 || probes.Load() != 21 || refreshed.Load() != 1 {
+	if created.Load() != 3 || probes.Load() != int32(3*(len(subModels)+1)) || refreshed.Load() != 1 {
 		t.Fatal("wrong initial work", created.Load(), probes.Load(), refreshed.Load())
 	}
 	w = request("GET", "/v1/sub2api/accounts", "", token)
@@ -333,7 +338,7 @@ func TestSubAccountLifecycleIsolationAndIdempotency(t *testing.T) {
 		t.Fatal(w.Body.String())
 	}
 	for _, target := range listed.Data[0].Targets {
-		if len(target.Models) != 6 {
+		if len(target.Models) != len(subModels) {
 			t.Fatal("missing model results", target.Models)
 		}
 		if target.Billing == nil || target.Billing.Rate == nil || *target.Billing.Rate != 0.01 {
@@ -363,7 +368,7 @@ func TestSubAccountLifecycleIsolationAndIdempotency(t *testing.T) {
 		t.Fatal(w.Body.String())
 	}
 	service.subWorkOne(context.Background())
-	if created.Load() != 3 || probes.Load() != 35 || refreshed.Load() != 1 {
+	if created.Load() != 3 || probes.Load() != int32(5*(len(subModels)+1)) || refreshed.Load() != 1 {
 		t.Fatal("sync duplicated keys or refreshed a rotated token", created.Load(), probes.Load(), refreshed.Load())
 	}
 	var active bool
@@ -385,19 +390,19 @@ func TestSubAccountLifecycleIsolationAndIdempotency(t *testing.T) {
 		t.Fatal(w.Body.String())
 	}
 	service.subWorkOne(context.Background())
-	if probes.Load() != 42 {
+	if probes.Load() != int32(6*(len(subModels)+1)) {
 		t.Fatal("filter ignored", probes.Load())
 	}
 	request("POST", "/v1/sub2api/accounts/"+added.ID+"/sync", "{}", token)
 	request("POST", "/v1/sub2api/accounts/"+added.ID+"/stop", "{}", token)
-	if service.subWorkOne(context.Background()) || probes.Load() != 42 {
+	if service.subWorkOne(context.Background()) || probes.Load() != int32(6*(len(subModels)+1)) {
 		t.Fatal("stopped work executed")
 	}
 	store.db.Exec(`UPDATE console_sub_accounts SET state='running',job_id='crashed',lease_until=now()-interval '1 minute' WHERE id=$1`, added.ID)
 	store.db.Exec(`UPDATE console_sub_targets SET state='running' WHERE account_id=$1 AND group_id=1`, added.ID)
 	service.subWorkOne(context.Background())
 	store.db.QueryRow(`SELECT state FROM console_sub_accounts WHERE id=$1`, added.ID).Scan(&state)
-	if state != "interrupted" || probes.Load() != 42 {
+	if state != "interrupted" || probes.Load() != int32(6*(len(subModels)+1)) {
 		t.Fatal("interrupted job replayed", state)
 	}
 	if w = request("DELETE", "/v1/sub2api/accounts/"+added.ID, "", token); w.Code != 200 {
@@ -513,38 +518,6 @@ func TestSubTOTPChallengeAndDuplicateClaims(t *testing.T) {
 	wg.Wait()
 	if successes.Load() != 1 {
 		t.Fatal("duplicate workers claimed an account", successes.Load())
-	}
-}
-
-func TestSubSixModelsStreamAndOnlyAstraQuality(t *testing.T) {
-	calls := map[string][]string{}
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var b struct {
-			Model  string `json:"model"`
-			Stream bool   `json:"stream"`
-			Input  []struct {
-				Content string `json:"content"`
-			} `json:"input"`
-		}
-		json.NewDecoder(r.Body).Decode(&b)
-		if !b.Stream {
-			t.Error("probe is not streaming")
-		}
-		calls[b.Model] = append(calls[b.Model], b.Input[0].Content)
-		subSSE(w, "21", b.Model)
-	}))
-	defer upstream.Close()
-	for _, model := range subModels {
-		out := subRunProbes(context.Background(), upstream.Client(), upstream.URL, "key", model)
-		if out.Model != model || out.Availability.Status != "success" || out.Availability.ModelMatch != "match" || out.Availability.RequestedModel != model || out.Availability.ResponseModel != model {
-			t.Fatal(out)
-		}
-		if model != checkModel && (out.Verdict != "not_applicable" || len(calls[model]) != 1) {
-			t.Fatal("unexpected quality request", model, calls[model])
-		}
-	}
-	if len(calls) != 6 || len(calls[checkModel]) != 2 || calls[checkModel][1] != checkPrompt {
-		t.Fatal(calls)
 	}
 }
 

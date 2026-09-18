@@ -598,7 +598,7 @@ it("preselects successful models and imports into the selected source key at the
   await screen.findByText("已临时添加至第 2 位");
 });
 
-it("all-models groups channels and probes all six despite available/pass filters", async () => {
+it("all-models groups channels and probes all supported models despite available/pass filters", async () => {
   const data = fixtures();
   const writes: any[] = [];
   data[0].targets[0].billing = { rate: 0.18, source: "key", checked_at: 1 };
@@ -626,8 +626,8 @@ it("all-models groups channels and probes all six despite available/pass filters
   await user.selectOptions(screen.getByLabelText("倍率上限筛选"), "0.18");
   const table = screen.getByRole("table");
   expect(table.querySelectorAll("tbody tr")).toHaveLength(1);
-  expect(table).toHaveTextContent("1/6 可用");
-  expect(table).toHaveTextContent("5 个未检测");
+  expect(table).toHaveTextContent(`1/${SUB_MODELS.length} 可用`);
+  expect(table).toHaveTextContent(`${SUB_MODELS.length - 1} 个未检测`);
   const latencyIndex = within(table)
     .getAllByRole("columnheader")
     .findIndex((h) => h.textContent === "首字延迟");
@@ -729,7 +729,7 @@ it("specific model uses Astra group quality and only tests the selected model", 
     { account_id: "one", group_id: 1, models: ["gpt-5.6-sol"] },
   ]);
   await user.selectOptions(screen.getByLabelText("检测模型筛选"), "");
-  expect(screen.getByRole("table")).toHaveTextContent("2/6 可用");
+  expect(screen.getByRole("table")).toHaveTextContent(`2/${SUB_MODELS.length} 可用`);
   await user.click(
     screen.getByRole("button", { name: "检测全部模型 · 1 个渠道" }),
   );
@@ -837,7 +837,7 @@ it("shows model matching separately from availability, including missing and his
   const column = headers.findIndex((h) => h.textContent?.includes("模型匹配"));
   expect(column).toBeGreaterThan(0);
   const summary = table.querySelector("tbody tr")!.children[column];
-  expect(summary).toHaveTextContent("1/6 匹配");
+  expect(summary).toHaveTextContent(`1/${SUB_MODELS.length} 匹配`);
   for (const label of ["不匹配", "未返回", "格式无效", "待补测", "无法判定"])
     expect(summary).toHaveTextContent(label);
   const expected = [
@@ -859,7 +859,7 @@ it("shows model matching separately from availability, including missing and his
     );
     const cell = table.querySelector("tbody tr")!.children[currentColumn];
     expect(
-      within(cell as HTMLElement).getByText(expected[i], { exact: true }),
+      within(cell as HTMLElement).getByText(expected[i] || "待补测", { exact: true }),
     ).toBeVisible();
   }
   await user.selectOptions(
@@ -1422,4 +1422,80 @@ it("shows per-request charges and pre-multiplier anomalies, and leaves anomalous
   expect(within(dialog).getByRole("checkbox", { name: "gpt-5.6-sol" })).toBeChecked();
   await user.click(abnormal);
   expect(abnormal).toBeChecked();
+});
+
+it("remembers model settings per user and uses them for batch and row probes", async () => {
+  const writes: any[] = [];
+  const data = fixtures().slice(0, 1);
+  vi.stubGlobal("fetch", vi.fn(async (_input: string, init?: RequestInit) => {
+    if (init?.method === "POST") {
+      writes.push(JSON.parse(init.body as string));
+      return new Response('{"queued":true}');
+    }
+    return new Response(JSON.stringify({ data }));
+  }));
+  const user = userEvent.setup();
+  let view = mount("model-owner");
+  await screen.findByRole("table");
+  await user.click(screen.getByRole("button", { name: "检测模型设置" }));
+  let dialog = within(screen.getByRole("dialog"));
+  expect(dialog.getAllByRole("checkbox")).toHaveLength(22);
+  for (const box of dialog.getAllByRole("checkbox")) expect(box).toBeChecked();
+  await user.click(dialog.getByRole("button", { name: "清空" }));
+  expect(dialog.getByRole("button", { name: "保存设置" })).toBeDisabled();
+  for (const model of ["glm-5.3", "gemini-3.1-pro", "claude-opus-5"])
+    await user.click(dialog.getByRole("checkbox", { name: model }));
+  await user.click(dialog.getByRole("button", { name: "保存设置" }));
+  const buttonName = "检测已选 3 个模型 · 1 个渠道";
+  await user.click(screen.getByRole("button", { name: buttonName }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).toEqual({ targets: [{ account_id: "one", group_id: 1, models: ["glm-5.3", "gemini-3.1-pro", "claude-opus-5"] }] });
+  await user.click(screen.getByRole("button", { name: "检测 one same-group" }));
+  await waitFor(() => expect(writes).toHaveLength(2));
+  expect(writes[1]).toEqual(writes[0]);
+  view.unmount();
+  view = mount("model-owner");
+  await screen.findByRole("table");
+  expect(screen.getByRole("button", { name: buttonName })).toBeEnabled();
+  await user.click(screen.getByRole("button", { name: "检测模型设置" }));
+  dialog = within(screen.getByRole("dialog"));
+  expect(dialog.getAllByRole("checkbox").filter(box => (box as HTMLInputElement).checked)).toHaveLength(3);
+  await user.click(dialog.getByRole("button", { name: "全选" }));
+  await user.click(dialog.getByRole("button", { name: "取消" }));
+  expect(screen.getByRole("button", { name: buttonName })).toBeEnabled();
+  await user.selectOptions(screen.getByLabelText("检测模型筛选"), "gpt-6-astra");
+  expect(screen.getByRole("button", { name: "检测所选模型 · 1 个渠道" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "检测 one same-group" })).toBeDisabled();
+  await user.selectOptions(screen.getByLabelText("检测模型筛选"), "claude-opus-5");
+  await user.click(screen.getByRole("button", { name: "检测所选模型 · 1 个渠道" }));
+  await waitFor(() => expect(writes).toHaveLength(3));
+  expect(writes[2].targets[0].models).toEqual(["claude-opus-5"]);
+  view.unmount();
+  mount("different-owner");
+  await screen.findByRole("table");
+  await user.click(screen.getByRole("button", { name: "检测模型设置" }));
+  for (const box of within(screen.getByRole("dialog")).getAllByRole("checkbox")) expect(box).toBeChecked();
+});
+
+it("displays native first-response latency without inventing response.created events", async () => {
+  const data = fixtures().slice(0, 1);
+  const target = data[0].targets[0];
+  target.models = ["gemini-3.1-pro", "claude-opus-5"].map((model) => ({
+    model, state: "done", message: "", result: { ...target.result!, model,
+      availability: { ...target.result!.availability, protocol: model.startsWith("gemini") ? "gemini" as const : "messages" as const, response_created_ms: null, first_response_ms: 120, ttft_ms: 450 },
+    },
+  }));
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ data }))));
+  const user = userEvent.setup();
+  mount("native-latency");
+  await screen.findByRole("table");
+  for (const model of ["gemini-3.1-pro", "claude-opus-5"]) {
+    await user.selectOptions(screen.getByLabelText("检测模型筛选"), model);
+    await user.click(screen.getByRole("button", { name: "查看 one same-group 的回复与诊断" }));
+    const dialog = within(screen.getByRole("dialog"));
+    expect(dialog.getByRole("row", { name: /首字延迟/ })).toHaveTextContent("120 ms");
+    expect(dialog.getByRole("row", { name: /首个文本延迟/ })).toHaveTextContent("450 ms");
+    expect(dialog.getByRole("row", { name: /首个文本延迟/ })).not.toHaveTextContent("response.output_text.delta");
+    await user.click(dialog.getByRole("button", { name: "关闭检测详情" }));
+  }
 });

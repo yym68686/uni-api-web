@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -44,7 +43,7 @@ func testSubConcurrentAccounts(t *testing.T, interrupt bool) {
 		}
 	}
 	panelStarted := make(chan string, count*2)
-	probesStarted := make(chan string, count*8)
+	probesStarted := make(chan string, count*(len(subModels)+1))
 	releasePanel, releaseProbes := make(chan struct{}), make(chan struct{})
 	var releasePanelOnce, releaseProbesOnce sync.Once
 	unblockPanel := func() { releasePanelOnce.Do(func() { close(releasePanel) }) }
@@ -53,6 +52,12 @@ func testSubConcurrentAccounts(t *testing.T, interrupt bool) {
 	active, peak, calls := map[string]int{}, map[string]int{}, map[string]int{}
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if id == "" {
+			id = r.Header.Get("x-api-key")
+		}
+		if id == "" {
+			id = r.Header.Get("x-goog-api-key")
+		}
 		ok := func(value any) { writeJSON(w, 200, map[string]any{"code": 0, "data": value}) }
 		switch r.URL.Path {
 		case "/api/v1/groups/available":
@@ -76,7 +81,7 @@ func testSubConcurrentAccounts(t *testing.T, interrupt bool) {
 			ok(map[string]any{"items": []subRemoteKey{{ID: 1, Name: subKeyName(id, 1), Key: id, GroupID: 1, Status: "active"}}, "total": 1, "pages": 1})
 		case "/v1/sub2api/billing":
 			writeJSON(w, 200, map[string]any{"object": "sub2api.key_billing", "billing_scope": "token", "effective_rate_multiplier": 1})
-		case "/v1/responses":
+		case "/v1/responses", "/v1/messages", "/v1beta/models/gemini-3.1-pro:streamGenerateContent", "/v1beta/models/gemini-3.8-flash:streamGenerateContent":
 			mu.Lock()
 			active[id]++
 			peak[id] = max(peak[id], active[id])
@@ -89,14 +94,12 @@ func testSubConcurrentAccounts(t *testing.T, interrupt bool) {
 			case <-r.Context().Done():
 				return
 			}
-			var payload struct {
-				Model string `json:"model"`
+			model := subFixtureProbeModel(r)
+			if r.URL.Path == "/v1/responses" {
+				subSSE(w, "21", model)
+			} else {
+				subNativeSSE(w, model, "test")
 			}
-			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-				t.Error(err)
-				return
-			}
-			subSSE(w, "21", payload.Model)
 		default:
 			t.Error("unexpected path", r.URL.Path)
 			http.NotFound(w, r)
