@@ -2307,7 +2307,6 @@ nav > button.active > svg {
 @media(max-width:800px){.price-inputs{grid-template-columns:repeat(2,minmax(0,1fr));}}
 .source-form{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:14px 16px;margin-bottom:14px;border:1px solid var(--line);border-radius:14px;background:var(--panel)}
 .source-form h3{width:100%;margin:0;font-size:14px}.source-form input{min-width:180px;flex:1;border:1px solid var(--line);background:var(--input);color:var(--text);border-radius:9px;padding:9px 11px;font:inherit}.source-form .error-banner{width:100%;margin:0}
-.auth-loading{min-height:100vh;display:flex;align-items:center;justify-content:center;gap:16px;background:var(--bg);color:var(--text)}
 .sources-settings{padding-bottom:16px}.settings-note{padding:0 24px;color:var(--muted);font-size:13px;line-height:1.8}.source-item{display:flex;align-items:center;gap:16px;padding:20px 24px;border-top:1px solid var(--line)}.source-item>div{flex:1;min-width:0}.source-item small{display:block;color:var(--muted);margin-top:6px;overflow-wrap:anywhere}.source-form{margin:20px 24px}.source-form label{flex:1;min-width:220px;font-size:12px;color:var(--muted)}.source-form input{display:block;width:100%;margin-top:7px;min-width:0}.source-form details{width:100%;padding:12px 0;font-size:13px}.source-form summary{cursor:pointer}.source-form details p{color:var(--muted);line-height:1.7}.source-storage-fields{display:flex;flex-wrap:wrap;gap:16px;margin:16px 0}.source-label{color:var(--accent)!important;font-size:11px!important}
 
 .check-toolbar-actions { display:flex;align-items:center;flex-wrap:wrap;gap:6px; }
@@ -2424,3 +2423,15 @@ nav > button.active > svg {
 .control-persistence [role=switch].on span{transform:translateX(14px)}
 
 @media(max-width:700px){.source-item{flex-wrap:wrap}.source-item>.control-persistence{flex-basis:100%}}
+
+/* Match the console layout while the session is restored. */
+.startup-screen button:disabled { opacity: 1; }
+.startup-content { display: grid; gap: 20px; }
+.startup-content .metric-grid { margin-bottom: 6px; }
+.startup-label { width: 40%; height: 12px; }
+.startup-value { width: 55%; height: 31px; margin-top: 20px; }
+.startup-note { width: 75%; height: 12px; margin-top: 15px; }
+.startup-search { width: min(45%, 360px); height: 34px; }
+@media (prefers-reduced-motion: reduce) {
+  .startup-screen .skeleton { animation: none; }
+}

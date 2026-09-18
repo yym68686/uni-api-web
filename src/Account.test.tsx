@@ -6,6 +6,7 @@ import * as Tooltip from "@radix-ui/react-tooltip";
 import { MotionConfig, LazyMotion, domAnimation } from "motion/react";
 import App from "./App";
 import { emptyStats } from "./analytics";
+import { saveView } from "./preferences";
 function mount() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -23,6 +24,103 @@ function mount() {
   );
   return { ...app, client };
 }
+
+it.each([
+  ["overview", "总览", "dark"],
+  ["channels", "渠道观测", "light"],
+  ["sub2api", "sub2api检测", "dark"],
+  ["prices", "价格设置", "light"],
+  ["balances", "余额管理", "dark"],
+  ["sources", "来源设置", "light"],
+] as const)(
+  "restores the %s shell and saved theme while authentication is pending",
+  async (view, label, theme) => {
+    saveView(location.origin, view);
+    localStorage.setItem("uni-console-theme", theme);
+    document.documentElement.dataset.theme =
+      theme === "dark" ? "light" : "dark";
+    let resolveAuth!: (response: Response) => void;
+    const auth = new Promise<Response>((resolve) => {
+      resolveAuth = resolve;
+    });
+    const fetchMock = vi.fn(async (input: string) => {
+      const { pathname } = new URL(input, location.origin);
+      if (pathname.endsWith("/auth/me")) return auth;
+      const body = pathname.endsWith("/sources")
+        ? {
+            data: [
+              {
+                id: "one",
+                name: "One",
+                base: "https://one.test",
+                has_storage: true,
+              },
+            ],
+          }
+        : { data: [], labels: {}, can_inspect_all: true };
+      return new Response(JSON.stringify(body));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const app = mount();
+    expect(screen.getByRole("status")).toHaveTextContent("正在恢复会话");
+    expect(document.documentElement).toHaveAttribute("data-theme", theme);
+    expect(
+      app.container.querySelector(".startup-screen .sidebar .active"),
+    ).toHaveTextContent(label);
+    expect(
+      app.container.querySelector(".startup-screen .topbar strong"),
+    ).toHaveTextContent(label);
+    expect(
+      app.container.querySelector(".startup-screen .workspace .skeleton"),
+    ).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toContain("/auth/me");
+    expect(screen.queryByRole("navigation")).not.toBeInTheDocument();
+    await act(async () => {
+      resolveAuth(
+        new Response(
+          JSON.stringify({
+            enabled: true,
+            authenticated: true,
+            username: "admin",
+          }),
+        ),
+      );
+    });
+    const navigation = within(await screen.findByRole("navigation"));
+    expect(
+      navigation.getByRole("button", { name: new RegExp(`^${label}`) }),
+    ).toHaveClass("active");
+    expect(document.documentElement).toHaveAttribute("data-theme", theme);
+    expect(
+      app.container.querySelector(".startup-screen"),
+    ).not.toBeInTheDocument();
+  },
+);
+
+it("leaves the loading shell for login when the restored session has expired", async () => {
+  saveView(location.origin, "sources");
+  let resolveAuth!: (response: Response) => void;
+  const auth = new Promise<Response>((resolve) => {
+    resolveAuth = resolve;
+  });
+  const fetchMock = vi.fn(() => auth);
+  vi.stubGlobal("fetch", fetchMock);
+  const app = mount();
+  expect(screen.getByRole("status")).toBeInTheDocument();
+  await act(async () => {
+    resolveAuth(
+      new Response(
+        JSON.stringify({ enabled: true, authenticated: false, username: "" }),
+      ),
+    );
+  });
+  await waitFor(() => expect(screen.getByLabelText("用户名")).toBeVisible());
+  expect(
+    app.container.querySelector(".startup-screen"),
+  ).not.toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
 
 it.each([
   ["总览", "请求数量"],

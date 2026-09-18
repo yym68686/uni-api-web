@@ -14,7 +14,6 @@ import {
   Activity,
   ArrowRight,
   ArrowUpRight,
-  BookOpen,
   Check,
   CheckCheck,
   ChevronDown,
@@ -24,7 +23,6 @@ import {
   Database,
   Clock3,
   Command,
-  ExternalLink,
   Eye,
   EyeOff,
   Filter,
@@ -32,19 +30,14 @@ import {
   Globe2,
   KeyRound,
   Layers3,
-  LayoutDashboard,
   Link2,
   LogOut,
-  Menu,
-  Moon,
   Radio,
   RefreshCw,
   Search,
-  ScanLine,
   Server,
   ShieldCheck,
   SlidersHorizontal,
-  Sun,
   TriangleAlert,
   Unplug,
   Wallet,
@@ -116,6 +109,9 @@ import {
   ChannelMetricCells,
 } from "./ChannelMetrics";
 import { actualCostRange } from "./actualCost";
+import { ConsoleHeader, ConsoleNavigation } from "./ConsoleChrome";
+import { StartupScreen } from "./StartupScreen";
+import { useTheme } from "./theme";
 
 type Keys = {
   data: KeyInfo[];
@@ -992,22 +988,8 @@ function Dashboard({
     [menu, setMenu] = useState(false),
     [refresh, setRefresh] = useState(0);
 
-  const [auto, setAuto] = useState(false),
-    [theme, setTheme] = useState(() => {
-      try {
-        return localStorage.getItem("uni-console-theme") || "light";
-      } catch {
-        return "light";
-      }
-    });
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    try {
-      localStorage.setItem("uni-console-theme", theme);
-    } catch {
-      /* theme persistence is optional */
-    }
-  }, [theme]);
+  const [auto, setAuto] = useState(false);
+  const [theme, setTheme] = useTheme();
   const deferredSearch = useDeferredValue(search);
   const keys = useQuery({
     enabled: !baseConnection.account || !!sourceQuery.data,
@@ -1356,81 +1338,16 @@ function Dashboard({
     setMenu(false);
   }
   const nav = (
-    <>
-      <Brand />
-      <div className="workspace-label">WORKSPACE</div>
-      <nav aria-label="主导航">
-        <button
-          className={view === "overview" ? "active" : ""}
-          onClick={() => selectView("overview")}
-        >
-          <Gauge size={18} /> 总览
-        </button>
-        <button
-          className={view === "channels" ? "active" : ""}
-          onClick={() => selectView("channels")}
-        >
-          <LayoutDashboard size={18} />
-          渠道观测<span className="nav-shortcut">⌘ 1</span>
-        </button>
-        {baseConnection.account && (
-          <button
-            className={view === "sub2api" ? "active" : ""}
-            onClick={() => selectView("sub2api")}
-          >
-            <ScanLine size={18} />
-            sub2api检测
-          </button>
-        )}
-        <button
-          className={view === "prices" ? "active" : ""}
-          onClick={() => selectView("prices")}
-        >
-          <SlidersHorizontal size={18} /> 价格设置
-        </button>
-        <button
-          className={view === "balances" ? "active" : ""}
-          onClick={() => selectView("balances")}
-        >
-          <Wallet size={18} />
-          余额管理
-          {lowCount > 0 && <span className="nav-count">{lowCount}</span>}
-        </button>
-        {baseConnection.account && (
-          <button
-            className={view === "sources" ? "active" : ""}
-            onClick={() => selectView("sources")}
-          >
-            <Server size={18} />
-            来源设置
-          </button>
-        )}
-      </nav>
-      <div className="sidebar-bottom">
-        <button
-          onClick={() => {
-            setGuide(true);
-            setMenu(false);
-          }}
-        >
-          <CircleHelp size={18} />
-          指标说明
-          <ArrowUpRight size={15} />
-        </button>
-        <a
-          href="https://github.com/yym68686/uni-api-web"
-          target="_blank"
-          rel="noreferrer"
-        >
-          <BookOpen size={18} />
-          开源项目
-          <ExternalLink size={14} />
-        </a>
-        <div className="sidebar-version">
-          <span className="tiny-dot" /> uni-api console <small>2.0</small>
-        </div>
-      </div>
-    </>
+    <ConsoleNavigation
+      view={view}
+      account={!!baseConnection.account}
+      lowCount={lowCount}
+      onSelect={selectView}
+      onGuide={() => {
+        setGuide(true);
+        setMenu(false);
+      }}
+    />
   );
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -1464,50 +1381,15 @@ function Dashboard({
         </Dialog.Portal>
       </Dialog.Root>
       <div className="main-shell">
-        <header className="topbar">
-          <div className="breadcrumb">
-            <button
-              className="icon-button menu-toggle"
-              onClick={() => setMenu(true)}
-              aria-label="打开菜单"
-            >
-              <Menu size={20} />
-            </button>
-            <span>工作空间</span>
-            <ChevronRight size={13} />
-            <strong>
-              {view === "sub2api"
-                ? "sub2api检测"
-                : view === "channels"
-                  ? "渠道观测"
-                  : view === "balances"
-                    ? "余额管理"
-                    : view === "overview"
-                      ? "总览"
-                      : view === "sources"
-                        ? "来源设置"
-                        : "价格设置"}
-            </strong>
-          </div>
-          <div className="topbar-actions">
-            <button
-              className="icon-button"
-              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-              aria-label={theme === "dark" ? "切换浅色模式" : "切换深色模式"}
-            >
-              {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
-            </button>
-            <button
-              className="avatar"
-              onClick={() =>
-                baseConnection.account ? setView("sources") : changeConnection()
-              }
-              aria-label="管理服务连接"
-            >
-              U
-            </button>
-          </div>
-        </header>
+        <ConsoleHeader
+          view={view}
+          theme={theme}
+          onMenu={() => setMenu(true)}
+          onTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
+          onConnection={() =>
+            baseConnection.account ? selectView("sources") : changeConnection()
+          }
+        />
         <main className="workspace">
           {!!catalog.data?.unavailable_sources?.length && (
             <div role="alert" className="error-banner">
@@ -2210,21 +2092,9 @@ export default function App() {
   useEffect(() => {
     if (auth.data?.enabled) clearConnection();
   }, [auth.data?.enabled]);
-  if (auth.isPending)
-    return (
-      <div className="auth-loading">
-        <Spinner /> 正在恢复会话…
-      </div>
-    );
+  if (auth.isPending) return <StartupScreen />;
   if (auth.isError)
-    return (
-      <div className="auth-loading" role="alert">
-        账户服务暂不可用。
-        <button className="button" onClick={() => void auth.refetch()}>
-          重试
-        </button>
-      </div>
-    );
+    return <StartupScreen onRetry={() => void auth.refetch()} />;
   if (!auth.data.enabled) return <LegacyConsole />;
   if (!auth.data.authenticated)
     return (

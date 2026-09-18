@@ -5,6 +5,28 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f6f7f8" />
+    <script>
+      (() => {
+        let theme = "light";
+        try {
+          if (localStorage.getItem("uni-console-theme") === "dark")
+            theme = "dark";
+        } catch {}
+        document.documentElement.dataset.theme = theme;
+        document.querySelector('meta[name="theme-color"]').content =
+          theme === "dark" ? "#101916" : "#f6f7f8";
+      })();
+    </script>
+    <style>
+      html {
+        background: #f6f7f8;
+        color-scheme: light;
+      }
+      html[data-theme="dark"] {
+        background: #101916;
+        color-scheme: dark;
+      }
+    </style>
     <meta
       name="description"
       content="uni-api 控制台 — 从渠道可用性、请求等待到上游余额，让每次模型路由清晰可见。"
