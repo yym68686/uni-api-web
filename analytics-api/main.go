@@ -64,11 +64,6 @@ func main() {
 			log.Fatal("initialize source configuration: ", err)
 		}
 	}
-	if service.control != nil {
-		recoveryDone := make(chan struct{})
-		go func() { defer close(recoveryDone); service.controlRecoveryLoop(ctx) }()
-		defer func() { stop(); <-recoveryDone }()
-	}
 	if cfg.S3Endpoint != "" && cfg.S3Bucket != "" {
 		service.factClient, err = newS3Client(ctx, cfg)
 		if err != nil {
@@ -76,51 +71,15 @@ func main() {
 		}
 	}
 	if cfg.StateBucket != "" {
-		client, err := newObjectClient(ctx, cfg.StateEndpoint, cfg.StateAccessKey, cfg.StateSecretKey, 2*time.Minute)
+		client, err := newObjectClient(ctx, cfg.StateEndpoint, cfg.StateAccessKey, cfg.StateSecretKey, defaultCheckpointRestorePolicy.timeout)
 		if err != nil {
 			log.Fatal("initialize analytics state client")
 		}
 		service.state = newStateStore(client, cfg)
 		service.checkpoints = newCheckpointStore(client, cfg)
-		restoreCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-		restored, restoreErr := service.checkpoints.restore(restoreCtx, engine)
-		cancel()
-		if restoreErr != nil {
-			log.Print("analytics checkpoint unavailable; rebuilding from raw facts")
-		} else if restored {
-			log.Print("analytics query cache restored from S3 checkpoint")
-		}
-		go service.syncStateLoop(ctx)
 	}
-	// The platform may use a TCP readiness probe. Do not expose a listening
-	// socket until the replacement replica can answer from a complete cache.
-	if cfg.RequireInitialImport {
-		log.Print("analytics warming query cache before accepting traffic")
-		for ctx.Err() == nil {
-			service.maybeImport(ctx)
-			if service.lastCollect.Load() > 0 && (service.state == nil || service.stateReady.Load()) {
-				break
-			}
-			select {
-			case <-ctx.Done():
-			case <-time.After(5 * time.Second):
-			}
-		}
-		if ctx.Err() != nil {
-			return
-		}
-		log.Print("analytics warming range query caches")
-		service.warmAnalytics(ctx)
-		if ctx.Err() != nil {
-			return
-		}
-	}
-	go service.startImportLoop(ctx)
-	if service.control != nil {
-		subDone := make(chan struct{})
-		go func() { defer close(subDone); service.subWorkerLoop(ctx) }()
-		defer func() { stop(); <-subDone }()
-	}
+	backgroundDone := service.startBackground(ctx)
+	defer func() { stop(); <-backgroundDone }()
 	server := &http.Server{Addr: cfg.Address, Handler: service.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 25 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
 	shutdownDone := make(chan struct{})
 	go func() {
@@ -132,7 +91,8 @@ func main() {
 	}()
 	log.Printf("analytics API listening on %s", cfg.Address)
 	if err = server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatal(err)
+		log.Print(err)
+		stop()
 	}
 	// Keep the database open until in-flight HTTP queries have drained.
 	<-shutdownDone

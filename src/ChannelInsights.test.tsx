@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as Tooltip from "@radix-ui/react-tooltip";
@@ -90,5 +90,29 @@ it("keeps dashboard links safe and persists every hourly filter", () => {
     expect(ranges.some(([range]) => range === value)).toBe(true);
     saveFilters("hourly-fixture", { ...defaultFilters, window: value });
     expect(loadFilters("hourly-fixture").window).toBe(value);
+  }
+});
+
+
+it("automatically recovers cache history after initialization without displaying empty history", async () => {
+  vi.useFakeTimers();
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ code: "analytics_initializing" }), { status: 503 }))
+    .mockResolvedValue(new Response(JSON.stringify({ total: { cache_rate: .75 }, from: 100, to: 200, data: [{ ...row, points: [{ timestamp: 120, cache_rate: .75 }] }] })));
+  vi.stubGlobal("fetch", fetchMock);
+  const app = setup(<CacheTrend row={row} connection={{ base: "", key: "", session: "starting", account: true }} keyId="" window="1h" endpoint="all" stream="all" refresh={0} />);
+  try {
+    await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+    expect(screen.getByRole("status")).toHaveTextContent("历史数据正在初始化");
+    expect(screen.queryByText("此时间范围暂无缓存用量数据。")).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(5050); });
+    expect(screen.getByText("所选范围缓存率")).toBeVisible();
+    expect(screen.queryByText(/历史数据正在初始化/)).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  } finally {
+    app.unmount();
+    vi.useRealTimers();
   }
 });

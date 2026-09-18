@@ -6,6 +6,16 @@ export class ApiError extends Error {
     this.status = status;
   }
 }
+export class AnalyticsInitializingError extends ApiError {
+  constructor() {
+    super("历史数据正在初始化，完成后将自动更新。", 503);
+  }
+}
+// Initialization recovery must work even when live auto-refresh is disabled.
+export function initializationRetryInterval(query: { state: { error: Error | null } }): 5000 | false {
+  return query.state.error instanceof AnalyticsInitializingError ? 5000 : false;
+}
+
 export function cleanBase(value: string) {
   let url: URL;
   try {
@@ -140,7 +150,13 @@ export async function analyticsRequest<T>(connection: Connection,path: string,si
   if (typeof window === "undefined") throw new Error("analytics API requires a browser session");
   const timeout=AbortSignal.timeout(20_000); const response=await fetch(window.location.origin+path,{...init,headers:{...(connection.key?{Authorization:`Bearer ${connection.key}`}:{ }),Accept:"application/json",...(init.headers||{})},cache:"no-store",credentials:"include",redirect:"error",signal:signal?AbortSignal.any([signal,timeout]):timeout});
   if(response.status===401||response.status===403) throw new ApiError("分析服务未接受平台密钥，请检查控制台后端配置。",response.status);
-  if(!response.ok) throw new ApiError(`分析服务暂时无法响应（HTTP ${response.status}）。`,response.status);
+  if (!response.ok) {
+    if (response.status === 503) {
+      const problem = await response.json().catch(() => null);
+      if (problem?.code === "analytics_initializing") throw new AnalyticsInitializingError();
+    }
+    throw new ApiError(`分析服务暂时无法响应（HTTP ${response.status}）。`, response.status);
+  }
   return await response.json() as T;
 }
 

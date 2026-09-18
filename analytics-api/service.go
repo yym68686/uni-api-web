@@ -18,28 +18,31 @@ import (
 )
 
 type Service struct {
-	auth             *authorizer
-	engine           *Engine
-	cfg              Config
-	active           atomic.Int64
-	lastCollect      atomic.Int64
-	remaining        atomic.Int64
-	importFailures   atomic.Uint64
-	importError      atomic.Value
-	loginMu          sync.Mutex
-	loginWindow      time.Time
-	loginAttempts    int
-	cacheMu          sync.Mutex
-	cache            map[string]cachedAnalytics
-	state            *stateStore
-	stateReady       atomic.Bool
-	stateError       atomic.Value
-	checkpoints      *checkpointStore
-	checkpointActive atomic.Bool
-	lastCheckpoint   atomic.Int64
-	checkpointError  atomic.Value
-	factClient       *s3.Client
-	control          *controlStore
+	auth              *authorizer
+	engine            *Engine
+	cfg               Config
+	active            atomic.Int64
+	lastCollect       atomic.Int64
+	remaining         atomic.Int64
+	importFailures    atomic.Uint64
+	importError       atomic.Value
+	loginMu           sync.Mutex
+	loginWindow       time.Time
+	loginAttempts     int
+	cacheMu           sync.Mutex
+	cache             map[string]cachedAnalytics
+	state             *stateStore
+	stateReady        atomic.Bool
+	stateError        atomic.Value
+	checkpoints       *checkpointStore
+	checkpointWorkers sync.WaitGroup
+	historyLoading    atomic.Bool
+	startup           atomic.Pointer[analyticsStartup]
+	checkpointActive  atomic.Bool
+	lastCheckpoint    atomic.Int64
+	checkpointError   atomic.Value
+	factClient        *s3.Client
+	control           *controlStore
 }
 
 type cachedAnalytics struct {
@@ -71,6 +74,7 @@ func NewService(e *Engine, cfg Config) (*Service, error) {
 func (s *Service) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.health)
+	mux.HandleFunc("GET /readyz", s.ready)
 	mux.HandleFunc("GET /v1/runtime-restore/{id}", s.bootstrapControls)
 	control := s.controlHandler()
 	mux.Handle("/v1/auth/", control)
@@ -86,17 +90,30 @@ func (s *Service) Handler() http.Handler {
 	return s.authenticate(mux)
 }
 func (s *Service) health(w http.ResponseWriter, r *http.Request) {
-	ready := !s.cfg.RequireInitialImport || (s.lastCollect.Load() > 0 && (s.state == nil || s.stateReady.Load()))
-	status, code := "ok", http.StatusOK
-	if !ready {
-		status, code = "initializing", http.StatusServiceUnavailable
+	writeJSON(w, 200, map[string]any{"status": "ok", "revision": s.engine.Revision.Load(), "last_collect_ms": s.lastCollect.Load(), "state_ready": s.state == nil || s.stateReady.Load(), "analytics_ready": s.analyticsReady()})
+}
+func (s *Service) ready(w http.ResponseWriter, r *http.Request) {
+	if !s.analyticsReady() {
+		s.initializing(w)
+		return
 	}
-	writeJSON(w, code, map[string]any{"status": status, "revision": s.engine.Revision.Load(), "last_collect_ms": s.lastCollect.Load(), "state_ready": s.state == nil || s.stateReady.Load()})
+	s.health(w, r)
+}
+func (s *Service) analyticsReady() bool {
+	return !s.historyLoading.Load() && (!s.cfg.RequireInitialImport || s.lastCollect.Load() > 0) && (s.state == nil || s.stateReady.Load())
+}
+func (s *Service) initializing(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", "5")
+	writeJSON(w, http.StatusServiceUnavailable, map[string]any{"code": "analytics_initializing", "error": "historical analytics initializing; retry shortly"})
 }
 func (s *Service) status(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"status": "ok", "revision": s.engine.Revision.Load(), "active_ingest": s.active.Load(), "last_collect_ms": s.lastCollect.Load(), "remaining_objects": s.remaining.Load(), "import_failures": s.importFailures.Load(), "import_error": s.importError.Load(), "state_ready": s.state == nil || s.stateReady.Load(), "state_error": s.stateError.Load(), "checkpoint_active": s.checkpointActive.Load(), "checkpoint_error": s.checkpointError.Load()})
+	writeJSON(w, 200, map[string]any{"status": "ok", "revision": s.engine.Revision.Load(), "active_ingest": s.active.Load(), "last_collect_ms": s.lastCollect.Load(), "remaining_objects": s.remaining.Load(), "import_failures": s.importFailures.Load(), "import_error": s.importError.Load(), "state_ready": s.state == nil || s.stateReady.Load(), "state_error": s.stateError.Load(), "checkpoint_active": s.checkpointActive.Load(), "checkpoint_error": s.checkpointError.Load(), "analytics_ready": s.analyticsReady(), "startup": s.startup.Load()})
 }
 func (s *Service) analytics(w http.ResponseWriter, r *http.Request) {
+	if !s.analyticsReady() {
+		s.initializing(w)
+		return
+	}
 	q := r.URL.Query()
 	name := q.Get("range")
 	if name == "" {
@@ -158,6 +175,10 @@ func (s *Service) writeAnalyticsBody(w http.ResponseWriter, r *http.Request, bod
 	_, _ = w.Write(body)
 }
 func (s *Service) prices(w http.ResponseWriter, r *http.Request) {
+	if s.state != nil && !s.stateReady.Load() {
+		s.initializing(w)
+		return
+	}
 	out, err := s.engine.Prices(r.Context())
 	if err != nil {
 		http.Error(w, "prices unavailable", 503)
@@ -197,8 +218,8 @@ func (s *Service) savePrice(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"price": p})
 }
 
-// Warm DuckDB before the TCP readiness probe is exposed. This makes the first
-// console click use the same hot page and plan caches as subsequent clicks.
+// Optional query warming follows the first complete import; it never gates
+// the HTTP listener, configuration recovery, detection workers or readiness.
 func (s *Service) warmAnalytics(ctx context.Context) {
 	for _, name := range []string{"5m", "15m", "1h", "24h", "7d", "30d", "today", "week", "month", "year", "all"} {
 		callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)

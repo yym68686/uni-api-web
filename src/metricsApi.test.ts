@@ -1,4 +1,5 @@
 import { expect, it, vi } from "vitest";
+import { AnalyticsInitializingError } from "./api";
 import { readMetrics } from "./metricsApi";
 import type { Connection } from "./types";
 const connection: Connection = {
@@ -70,4 +71,14 @@ it("rejects keys belonging to another source before querying statistics", async 
     ),
   ).rejects.toThrow("不属于当前来源");
   expect(fetch).not.toHaveBeenCalled();
+});
+
+it("distinguishes incomplete analytics from other service failures", async () => {
+  const fetch = vi.fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ code: "analytics_initializing" }), { status: 503 }))
+    .mockResolvedValueOnce(new Response("proxy offline", { status: 503 }));
+  vi.stubGlobal("fetch", fetch);
+  const read = () => readMetrics(connection, "/v1/channel-metrics", new AbortController().signal, "all", "all");
+  await expect(read()).rejects.toBeInstanceOf(AnalyticsInitializingError);
+  await expect(read()).rejects.toThrow("分析服务暂时无法响应（HTTP 503）");
 });

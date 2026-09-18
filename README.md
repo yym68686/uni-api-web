@@ -109,10 +109,28 @@ cache. The state bucket also holds one atomically replaced, checksummed Parquet
 checkpoint of facts, aggregates and import checkpoints. Settings are kept separate
 so restoring an older query cache cannot revert an operator edit.
 
-Each API container uses its own `/data` directory, with no shared volume. At startup
-it restores a compatible checkpoint, replays unimported immutable facts and becomes
-healthy after the initial scan. A missing or invalid checkpoint triggers a rebuild
-from the raw facts. Existing replicas continue serving while replacements warm up.
+Each API container uses its own `/data` directory, with no shared volume. The HTTP
+listener, configuration recovery and sub2api workers start independently of history
+restoration. `/healthz` indicates process availability; `/readyz` indicates complete
+historical analytics readiness. Use `/healthz` (or TCP) for the whole service so a
+slow history rebuild does not block login, configuration recovery or detection.
+
+History initialization restores a compatible checkpoint, then completes a scan of
+immutable facts and price synchronization. Until then, `/v1/analytics` returns 503
+with `code: analytics_initializing` and `Retry-After: 5`, never partial statistics.
+The console automatically retries initialization even with auto-refresh disabled.
+`/v1/prices` waits only for price synchronization. Query warming is optional and
+does not gate either readiness or task startup.
+
+Checkpoint restoration retries transient storage, timeout and interrupted-download
+failures at most three times, with a five-minute deadline per attempt and backoff
+of two then four seconds. Missing, incompatible, corrupt or access-denied snapshots
+fall back directly to raw facts. Restoration applies all history tables atomically;
+failed attempts preserve the existing cache and never restore operator settings.
+Logs report operation, stage, error class, attempt, duration and retry decision,
+without raw SDK errors, URLs or credentials. `/v1/status` exposes analytics readiness,
+startup phase and the last restore failure. Shutdown cancels restoration/backoff
+and drains import, checkpoint and worker goroutines before closing databases.
 Query checkpoints are derived caches; the fact and state buckets are authoritative.
 
 ## Build and verify

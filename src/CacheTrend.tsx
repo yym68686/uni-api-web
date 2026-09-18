@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { channelParams } from "./api";
+import { AnalyticsInitializingError, channelParams, initializationRetryInterval } from "./api";
 import { readMetrics } from "./metricsApi";
 import { count, rate } from "./format";
 import { ranges } from "./analytics";
@@ -27,6 +27,7 @@ export function CacheTrend({ row, connection, keyId, window, endpoint, stream, r
       return readMetrics({ ...connection, sourceId: row.source_id || connection.sourceId }, "/v1/channel-metrics/timeseries?" + params, signal, endpoint, stream);
     },
     retry: false,
+    refetchInterval: initializationRetryInterval,
     staleTime: 15000,
   });
   const data = query.data;
@@ -50,7 +51,7 @@ export function CacheTrend({ row, connection, keyId, window, endpoint, stream, r
   return <section className="detail-section cache-trend" aria-label="历史缓存率">
     <h3>缓存率曲线 <span className="muted">{ranges.find(([value]) => value === window)?.[1] || window}</span></h3>
     <p className="muted">当前渠道与模型 · 跟随时间、API key、端点和流式筛选</p>
-    {query.isPending ? <p role="status"><Spinner small /> 正在读取缓存历史…</p> : query.isError ? <p role="alert">缓存历史读取失败 <button className="button small" onClick={() => void query.refetch()}>重试</button></p> : !known.length ? <p className="muted">此时间范围暂无缓存用量数据。</p> : <>
+    {query.isPending ? <p role="status"><Spinner small /> 正在读取缓存历史…</p> : query.error instanceof AnalyticsInitializingError ? <p role="status"><Spinner small /> {query.error.message}</p> : query.isError ? <p role="alert">缓存历史读取失败 <button className="button small" onClick={() => void query.refetch()}>重试</button></p> : !known.length ? <p className="muted">此时间范围暂无缓存用量数据。</p> : <>
       <div className="cache-trend-summary"><strong>{rate(data?.total?.cache_rate)}</strong><span className="muted">所选范围缓存率</span></div>
       <svg viewBox="0 0 410 185" role="group" aria-label="缓存率随时间变化，聚焦数据点查看详情">
         {[0, .5, 1].map((value) => <g key={value}><line x1="38" x2="394" y1={y(value)} y2={y(value)} /><text x="30" y={y(value) + 4} textAnchor="end">{value * 100}%</text></g>)}

@@ -65,6 +65,10 @@ func (e *Engine) checkpoint(ctx context.Context, dir string) (int64, error) {
 }
 
 func packCheckpoint(dir string) (string, string, error) {
+	return packCheckpointContext(context.Background(), dir)
+}
+
+func packCheckpointContext(ctx context.Context, dir string) (string, string, error) {
 	path := filepath.Join(dir, "checkpoint.tar.gz")
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
@@ -91,7 +95,7 @@ func packCheckpoint(dir string) (string, string, error) {
 			return fail(err)
 		}
 		if err = archive.WriteHeader(&tar.Header{Name: name, Mode: 0600, Size: st.Size(), Typeflag: tar.TypeReg}); err == nil {
-			_, err = io.Copy(archive, part)
+			_, err = io.Copy(archive, contextReader{ctx, part})
 		}
 		part.Close()
 		if err != nil {
@@ -111,12 +115,16 @@ func packCheckpoint(dir string) (string, string, error) {
 }
 
 func unpackCheckpoint(path, dir string) error {
+	return unpackCheckpointContext(context.Background(), path, dir)
+}
+
+func unpackCheckpointContext(ctx context.Context, path, dir string) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	gz, err := gzip.NewReader(f)
+	gz, err := gzip.NewReader(contextReader{ctx, f})
 	if err != nil {
 		return err
 	}
@@ -165,7 +173,9 @@ func unpackCheckpoint(path, dir string) error {
 	return nil
 }
 
-func (s *checkpointStore) save(ctx context.Context, e *Engine) error {
+func (s *checkpointStore) save(ctx context.Context, e *Engine) (err error) {
+	stage := "read_metadata"
+	defer func() { err = checkpointStageError(stage, err) }()
 	head, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(s.key)})
 	var etag string
 	var previous int64 = -1
@@ -190,11 +200,13 @@ func (s *checkpointStore) save(ctx context.Context, e *Engine) error {
 		return err
 	}
 	defer os.RemoveAll(dir)
+	stage = "export"
 	n, err := e.checkpoint(ctx, dir)
 	if err != nil {
 		return err
 	}
-	path, digest, err := packCheckpoint(dir)
+	stage = "pack"
+	path, digest, err := packCheckpointContext(ctx, dir)
 	if err != nil {
 		return err
 	}
@@ -216,6 +228,7 @@ func (s *checkpointStore) save(ctx context.Context, e *Engine) error {
 	} else {
 		req.IfMatch = aws.String(etag)
 	}
+	stage = "upload"
 	_, err = s.client.PutObject(ctx, req)
 	if code := storageErrorCode(err); code == "PreconditionFailed" || code == "ConditionalRequestConflict" {
 		return nil
@@ -223,7 +236,9 @@ func (s *checkpointStore) save(ctx context.Context, e *Engine) error {
 	return err
 }
 
-func (s *checkpointStore) restore(ctx context.Context, e *Engine) (bool, error) {
+func (s *checkpointStore) restore(ctx context.Context, e *Engine) (restored bool, err error) {
+	stage := "inspect_cache"
+	defer func() { err = checkpointStageError(stage, err) }()
 	var current int64
 	if err := e.DB.QueryRowContext(ctx, "SELECT count(*) FROM imported_objects").Scan(&current); err != nil {
 		return false, err
@@ -231,6 +246,7 @@ func (s *checkpointStore) restore(ctx context.Context, e *Engine) (bool, error) 
 	if current > 0 {
 		return false, nil
 	}
+	stage = "download"
 	expectedSource := s.source
 	out, err := s.client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(s.key)})
 	if err != nil && (storageErrorCode(err) == "NoSuchKey" || storageErrorCode(err) == "NotFound") && s.legacyKey != "" {
@@ -244,6 +260,7 @@ func (s *checkpointStore) restore(ctx context.Context, e *Engine) (bool, error) 
 		return false, err
 	}
 	defer out.Body.Close()
+	stage = "metadata"
 	if out.Metadata["schema"] != "1" || out.Metadata["source"] != expectedSource || len(out.Metadata["sha256"]) != 64 || aws.ToInt64(out.ContentLength) > maxCheckpointBytes {
 		return false, errors.New("incompatible checkpoint")
 	}
@@ -251,6 +268,7 @@ func (s *checkpointStore) restore(ctx context.Context, e *Engine) (bool, error) 
 	if err != nil || expected < 0 {
 		return false, errors.New("invalid checkpoint count")
 	}
+	stage = "local_storage"
 	dir, err := os.MkdirTemp(e.cfg.DataDir, "restore-")
 	if err != nil {
 		return false, err
@@ -262,20 +280,28 @@ func (s *checkpointStore) restore(ctx context.Context, e *Engine) (bool, error) 
 		return false, err
 	}
 	hash := sha256.New()
-	n, err := io.Copy(io.MultiWriter(f, hash), io.LimitReader(out.Body, maxCheckpointBytes+1))
+	stage = "download"
+	n, err := io.Copy(io.MultiWriter(f, hash), io.LimitReader(contextReader{ctx, out.Body}, maxCheckpointBytes+1))
 	closeErr := f.Close()
 	if err != nil {
 		return false, err
 	}
 	if closeErr != nil {
+		stage = "local_storage"
 		return false, closeErr
 	}
+	if out.ContentLength != nil && n < *out.ContentLength {
+		return false, io.ErrUnexpectedEOF
+	}
+	stage = "integrity"
 	if n > maxCheckpointBytes || hex.EncodeToString(hash.Sum(nil)) != out.Metadata["sha256"] {
 		return false, errors.New("checkpoint integrity mismatch")
 	}
-	if err = unpackCheckpoint(path, dir); err != nil {
+	stage = "unpack"
+	if err = unpackCheckpointContext(ctx, path, dir); err != nil {
 		return false, err
 	}
+	stage = "apply"
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	tx, err := e.DB.BeginTx(ctx, nil)
@@ -309,12 +335,17 @@ func (s *Service) maybeCheckpoint(ctx context.Context) {
 		return
 	}
 	s.lastCheckpoint.Store(time.Now().Unix())
+	s.checkpointWorkers.Add(1)
 	go func() {
+		defer s.checkpointWorkers.Done()
 		defer s.checkpointActive.Store(false)
-		callCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		started := time.Now()
+		callCtx, cancel := context.WithTimeout(ctx, defaultCheckpointRestorePolicy.timeout)
 		defer cancel()
 		if err := s.checkpoints.save(callCtx, s.engine); err != nil {
-			s.checkpointError.Store("checkpoint_unavailable")
+			detail := checkpointFailure(err)
+			s.checkpointError.Store(detail.Stage + ":" + detail.Class)
+			logCheckpoint("save", 1, 1, started, detail, false)
 		} else {
 			s.checkpointError.Store("")
 		}

@@ -45,6 +45,8 @@ import {
 } from "lucide-react";
 import {
   ApiError,
+  AnalyticsInitializingError,
+  initializationRetryInterval,
   channelParams,
   makeLimiter,
   request,
@@ -156,20 +158,20 @@ function Overview({
     <motion.section {...reveal} className="overview-grid">
       <MetricCard
         label="请求数量"
-        value={count(total?.requests || 0)}
+        value={total ? count(total.requests || 0) : "—"}
         sub="所选时间范围"
         icon={<Activity size={17} />}
       />
       <MetricCard
         label="渠道尝试"
-        value={count(total?.attempts || 0)}
+        value={total ? count(total.attempts || 0) : "—"}
         sub="包含重试与失败尝试"
         icon={<Radio size={17} />}
         accent
       />
       <MetricCard
         label="Token 数量"
-        value={count((total?.input_tokens || 0) + (total?.output_tokens || 0))}
+        value={total ? count((total.input_tokens || 0) + (total.output_tokens || 0)) : "—"}
         sub="输入 + 输出"
         icon={<Layers3 size={17} />}
       />
@@ -649,6 +651,7 @@ function Trend({
       );
       return analytic;
     },
+    refetchInterval: initializationRetryInterval,
   });
   const points = useMemo(() => {
     const buckets = new Map<
@@ -699,6 +702,8 @@ function Trend({
       </div>
       {series.isPending ? (
         <div className="chart-skeleton skeleton" />
+      ) : series.error instanceof AnalyticsInitializingError ? (
+        <p role="status"><Spinner small /> {series.error.message}</p>
       ) : series.isError ? (
         <div className="inline-error">
           趋势暂时不可用。
@@ -1062,6 +1067,7 @@ function Dashboard({
         signal,
       ),
     enabled: keysLoaded && view === "prices",
+    refetchInterval: initializationRetryInterval,
     staleTime: 60_000,
   });
   const metrics = useQuery({
@@ -1076,7 +1082,7 @@ function Dashboard({
       ),
     staleTime: 30_000,
     enabled: keysLoaded && !keyRemoved && !!catalog.data,
-    refetchInterval: auto ? 30_000 : false,
+    refetchInterval: (query) => initializationRetryInterval(query) || (auto ? 30_000 : false),
     refetchIntervalInBackground: false,
   });
   const liveMetrics = useQuery({
@@ -1116,7 +1122,7 @@ function Dashboard({
   );
   const queryClient = useQueryClient();
   useEffect(() => {
-    if (!keysLoaded || keyRemoved || !catalog.data || !channelView) return;
+    if (!keysLoaded || keyRemoved || !catalog.data || !channelView || !metrics.isSuccess) return;
     const windows = ranges.map(([value]) => value);
     const controller = new AbortController();
     void (async () => {
@@ -1159,6 +1165,7 @@ function Dashboard({
     keysLoaded,
     keyRemoved,
     catalog.data,
+    metrics.isSuccess,
     view,
     connection,
     keyId,
@@ -1183,6 +1190,7 @@ function Dashboard({
     !!selectedSourceId &&
     !!sourceQuery.data &&
     !sourceList.some((source) => source.id === selectedSourceId);
+  const historyInitializing = metrics.error instanceof AnalyticsInitializingError;
   const error =
     sourceQuery.error?.message ||
     (sourceRemoved ? "所选来源已移除，请重新选择。" : "") ||
@@ -1459,6 +1467,11 @@ function Dashboard({
               connection={connection}
               onSaved={() => void prices.refetch()}
             />
+          ) : historyInitializing ? (
+            <div className="coverage-note" role="status">
+              <Spinner small />
+              {metrics.error?.message}
+            </div>
           ) : view === "overview" ? (
             <Overview
               metrics={metrics.data}
@@ -1770,7 +1783,7 @@ function Dashboard({
                     : `实例于 ${time(metrics.data.collection_started_at)} 开始采集，当前窗口覆盖尚不完整。`}
                 </div>
               )}
-              {error ? (
+              {error && !historyInitializing ? (
                 <div role="alert" className="table-error">
                   <Unplug size={26} />
                   <h3>暂时无法读取渠道</h3>
@@ -1779,7 +1792,7 @@ function Dashboard({
                     重新读取
                   </button>
                 </div>
-              ) : metrics.isPending ? (
+              ) : metrics.isPending || historyInitializing ? (
                 <div className="table-skeleton" aria-label="加载渠道">
                   <div className="skeleton skeleton-header" />
                   {Array.from({ length: 7 }, (_, i) => (

@@ -190,12 +190,13 @@ func (s *Service) importObject(ctx context.Context, key, etag string, body io.Re
 	return s.engine.Import(ctx, key, etag, facts)
 }
 func (s *Service) maybeImport(ctx context.Context) {
+	started := time.Now()
 	s.active.Store(1)
 	defer s.active.Store(0)
 	if err := s.importS3(ctx); err != nil {
 		s.importFailures.Add(1)
 		s.importError.Store(importErrorClass(err))
-		fmt.Printf("analytics import failed class=%s\n", importErrorClass(err))
+		fmt.Printf("analytics import failed stage=import_facts class=%s duration_ms=%d remaining_objects=%d\n", importErrorClass(err), time.Since(started).Milliseconds(), s.remaining.Load())
 	} else {
 		s.importError.Store("")
 		s.lastCollect.Store(time.Now().UnixMilli())
@@ -213,6 +214,9 @@ func importErrorClass(err error) string {
 		default:
 			return "storage_api_error"
 		}
+	}
+	if errors.Is(err, context.Canceled) {
+		return "canceled"
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return "timeout"
