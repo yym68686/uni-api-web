@@ -640,6 +640,13 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
       })),
     });
   };
+  const checkQuality = () =>
+    mutate("quality-check", "/v1/sub2api/quality-checks", {
+      targets: eligible.map(({ account, target }) => ({
+        account_id: account.id,
+        group_id: target.group_id,
+      })),
+    });
   return (
     <div className="sub2api-page">
       <section className="data-panel sub-accounts">
@@ -820,6 +827,19 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
             </label>
             <button
               className="button small"
+              aria-label={`降智检测 · ${eligible.length} 个渠道`}
+              disabled={!eligible.length || !!action || eligible.length > 500}
+              onClick={() => void checkQuality()}
+            >
+              {action === "quality-check" ? (
+                <Spinner small />
+              ) : (
+                <ScanLine size={15} />
+              )}
+              降智检测 · {eligible.length} 个渠道
+            </button>
+            <button
+              className="button small"
               aria-label="刷新 sub2api 检测"
               onClick={() => void query.refetch()}
               disabled={query.isFetching}
@@ -992,7 +1012,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                     <th>可用性</th>
                     <th>首字延迟</th>
                     <th>
-                      <Tip text="比较 say test 请求的模型名与流式完成事件中的 response.model，完全一致才算匹配。旧记录需重新检测。">
+                      <Tip text="比较检测请求的模型名与流式完成事件中的 response.model，完全一致才算匹配。独立降智检测同时更新 Astra 可用性和模型匹配，不额外发起请求。">
                         模型匹配 <CircleHelp size={12} />
                       </Tip>
                     </th>

@@ -65,6 +65,169 @@ function fixtures(): SubAccount[] {
     ],
   }));
 }
+
+it("runs standalone Astra quality checks for every filtered page regardless of the selected model", async () => {
+  const data = fixtures();
+  const first = data[0].targets[0];
+  data[0].targets = Array.from({ length: 30 }, (_, i) => ({
+    ...first,
+    group_id: i + 1,
+    name: `selected-${i + 1}`,
+    models: [
+      {
+        model: "gpt-6-astra",
+        state: "done",
+        message: "",
+        result: first.result,
+      },
+      {
+        model: "gpt-5.6-sol",
+        state: "done",
+        message: "",
+        result: { ...first.result!, model: "gpt-5.6-sol" },
+      },
+    ],
+  }));
+  data[0].targets[28].platform = "anthropic";
+  data[0].targets[29].billing = { rate: 2, source: "key", checked_at: 1 };
+  const writes: { path: string; body: unknown }[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string, init?: RequestInit) => {
+      const { pathname } = new URL(input, location.origin);
+      if (init?.method === "POST") {
+        writes.push({ path: pathname, body: JSON.parse(init.body as string) });
+        return new Response('{"queued":true}', { status: 202 });
+      }
+      return new Response(
+        JSON.stringify(
+          pathname.endsWith("/channels") ? { data: [], labels: {} } : { data },
+        ),
+      );
+    }),
+  );
+  const user = userEvent.setup();
+  mount();
+  await screen.findByRole("table");
+  await user.type(screen.getByLabelText("搜索 sub2api 分组"), "selected");
+  await user.selectOptions(screen.getByLabelText("sub2api 账号筛选"), "one");
+  await user.selectOptions(
+    screen.getByLabelText("检测模型筛选"),
+    "gpt-5.6-sol",
+  );
+  await user.selectOptions(screen.getByLabelText("平台筛选"), "openai");
+  await user.selectOptions(screen.getByLabelText("倍率上限筛选"), "0.01");
+  await user.selectOptions(screen.getByLabelText("可用性筛选"), "success");
+  await user.selectOptions(screen.getByLabelText("降智筛选"), "pass");
+  await user.click(screen.getByRole("button", { name: "下一页" }));
+  expect(screen.getByRole("table").querySelectorAll("tbody tr")).toHaveLength(
+    3,
+  );
+  await user.click(
+    screen.getByRole("button", { name: "降智检测 · 28 个渠道" }),
+  );
+  await waitFor(() =>
+    expect(writes).toEqual([
+      {
+        path: "/analytics/v1/sub2api/quality-checks",
+        body: {
+          targets: Array.from({ length: 28 }, (_, i) => ({
+            account_id: "one",
+            group_id: i + 1,
+          })),
+        },
+      },
+    ]),
+  );
+});
+
+it("refreshes Astra availability and model match from quality results without changing sibling models", async () => {
+  const data = fixtures().slice(0, 1);
+  const target = data[0].targets[0];
+  const oldAstra = {
+    ...target.result!,
+    verdict: "fail",
+    availability: {
+      ...target.result!.availability,
+      status: "error",
+      ttft_ms: null,
+    },
+  };
+  const sibling = {
+    ...target.result!,
+    model: "gpt-5.6-sol",
+    availability: {
+      ...target.result!.availability,
+      ttft_ms: 6500,
+      requested_model: "gpt-5.6-sol",
+      response_model: "gpt-5.6-sol",
+      model_match: "match" as const,
+    },
+  };
+  target.models = [
+    { model: "gpt-6-astra", state: "done", message: "", result: oldAstra },
+    { model: "gpt-5.6-sol", state: "done", message: "", result: sibling },
+  ];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string, init?: RequestInit) => {
+      const { pathname } = new URL(input, location.origin);
+      if (pathname.endsWith("/quality-checks") && init?.method === "POST") {
+        const probe = {
+          status: "success",
+          text: "未知",
+          ttft_ms: 200,
+          duration_ms: 800,
+          requested_model: "gpt-6-astra",
+          response_model: "gpt-5.6-sol",
+          model_match: "mismatch" as const,
+        };
+        target.models![0].result = {
+          model: "gpt-6-astra",
+          checked_at: 1800000000,
+          verdict: "pass",
+          availability: probe,
+          quality: probe,
+        };
+        return new Response('{"queued":true}', { status: 202 });
+      }
+      return new Response(
+        JSON.stringify(
+          pathname.endsWith("/channels") ? { data: [], labels: {} } : { data },
+        ),
+      );
+    }),
+  );
+  const user = userEvent.setup();
+  const first = mount();
+  await screen.findByRole("table");
+  await user.selectOptions(
+    screen.getByLabelText("检测模型筛选"),
+    "gpt-5.6-sol",
+  );
+  expect(screen.getByRole("table")).toHaveTextContent("6.50 s");
+  await user.click(screen.getByRole("button", { name: "降智检测 · 1 个渠道" }));
+  expect(await screen.findByText("不降智", { selector: "span" })).toBeVisible();
+  expect(screen.getByRole("table")).toHaveTextContent("6.50 s");
+  await user.selectOptions(
+    screen.getByLabelText("检测模型筛选"),
+    "gpt-6-astra",
+  );
+  const table = screen.getByRole("table");
+  expect(within(table).getByText("可用", { exact: true })).toBeVisible();
+  expect(
+    within(table).getByRole("cell", { name: /^不匹配$/ }),
+  ).toBeVisible();
+  expect(table).toHaveTextContent("200 ms");
+  await user.click(screen.getByText("检测详情"));
+  expect(table).toHaveTextContent("返回模型：gpt-5.6-sol");
+  first.unmount();
+  mount();
+  expect(
+    await screen.findByRole("cell", { name: /^不匹配$/ }),
+  ).toBeVisible();
+});
+
 it("shows multipliers as numbers, filters all-page batch targets, and restores persisted results", async () => {
   const data = fixtures();
   const writes: any[] = [];
@@ -174,6 +337,14 @@ it("keeps busy accounts from duplicate checks and removes only after explicit se
   expect(
     screen.getByRole("button", { name: "检测所选模型 · 1 个渠道" }),
   ).toBeEnabled();
+  expect(
+    screen.getByRole("button", { name: "降智检测 · 1 个渠道" }),
+  ).toBeEnabled();
+  await user.selectOptions(screen.getByLabelText("sub2api 账号筛选"), "one");
+  expect(
+    screen.getByRole("button", { name: "降智检测 · 0 个渠道" }),
+  ).toBeDisabled();
+  await user.selectOptions(screen.getByLabelText("sub2api 账号筛选"), "");
   await user.click(screen.getByRole("button", { name: "移除账号 two" }));
   expect(methods).toHaveLength(0);
   await user.click(screen.getByRole("button", { name: "确认移除" }));
