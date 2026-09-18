@@ -9,6 +9,7 @@ export interface ConsoleSource {
   name: string;
   base: string;
   has_storage: boolean;
+  has_config_key?: boolean;
   created_at: number;
 }
 export function SourceSettings({
@@ -26,7 +27,8 @@ export function SourceSettings({
     [busy, setBusy] = useState(false);
   const [name, setName] = useState(""),
     [base, setBase] = useState(""),
-    [key, setKey] = useState("");
+    [key, setKey] = useState(""),
+    [configKey, setConfigKey] = useState("");
   const [endpoint, setEndpoint] = useState(""),
     [bucket, setBucket] = useState(""),
     [prefix, setPrefix] = useState("uni-api-facts/v1/"),
@@ -38,6 +40,7 @@ export function SourceSettings({
     setName(source?.name || "");
     setBase(source?.base || "");
     setKey("");
+    setConfigKey("");
     setEndpoint("");
     setBucket("");
     setAccess("");
@@ -57,6 +60,7 @@ export function SourceSettings({
           name,
           base,
           key,
+          config_key: configKey,
           storage: bucket
             ? {
                 endpoint,
@@ -70,6 +74,7 @@ export function SourceSettings({
       });
       setOpen(false);
       setKey("");
+      setConfigKey("");
       setAccess("");
       setSecret("");
       onSaved();
@@ -201,6 +206,20 @@ export function SourceSettings({
               required={!editing}
             />
           </label>
+          <details>
+            <summary>渠道密钥读取 {editing?.has_config_key ? "（已配置）" : ""}</summary>
+            <label>
+              配置读取管理员密钥（可选）
+              <input
+                type="password"
+                autoComplete="new-password"
+                placeholder={editing?.has_config_key ? "留空保留原密钥" : "平台密钥无配置读取权限时填写"}
+                value={configKey}
+                onChange={(e) => setConfigKey(e.target.value)}
+                maxLength={4096}
+              />
+            </label>
+          </details>
           <details>
             <summary>
               S3 历史事实存储 {editing ? "（留空保留原配置）" : ""}

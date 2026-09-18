@@ -16,6 +16,14 @@ type configuredProvider struct {
 }
 
 func configuredProviders(ctx context.Context, src controlSource) ([]configuredProvider, error) {
+	if src.configKeyError != nil {
+		return nil, src.configKeyError
+	}
+	// Configuration access needs an explicit administrator on gateways where
+	// the first key only grants catalog inspection and temporary controls.
+	if src.ConfigKey != "" {
+		src.Key = src.ConfigKey
+	}
 	raw, _, err := subGateway(ctx, src, "GET", "/v1/api_config", nil)
 	if err != nil {
 		return nil, err
@@ -186,7 +194,7 @@ func (s *Service) channelInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	providers, err := configuredProviders(ctx, src)
 	if err != nil {
-		http.Error(w, "无法读取渠道配置，请确认来源使用管理员密钥", 503)
+		http.Error(w, "无法读取渠道配置，请在来源设置中配置有效的配置读取管理员密钥", 503)
 		return
 	}
 	for _, p := range providers {

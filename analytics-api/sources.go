@@ -105,6 +105,12 @@ func (s *Service) saveSource(w http.ResponseWriter, r *http.Request) {
 	if !decodeControl(w, r, &in) {
 		return
 	}
+	base, e := validateSourceURL(in.Base)
+	if e != nil {
+		http.Error(w, e.Error(), 400)
+		return
+	}
+	in.Base = base
 	in.ID = r.PathValue("id")
 	if in.ID != "" {
 		old, e := s.control.source(r.Context(), in.ID)
@@ -118,21 +124,34 @@ func (s *Service) saveSource(w http.ResponseWriter, r *http.Request) {
 		if in.Storage.Bucket == "" {
 			in.Storage = old.Storage
 		}
+		// Keep optional configuration access on the same origin only. It is
+		// independent of the observation/bootstrap credential and target hash.
+		if in.ConfigKey == "" && in.Base == old.Base {
+			if old.configKeyError != nil {
+				http.Error(w, "配置读取密钥不可用，请重新填写", 400)
+				return
+			}
+			in.ConfigKey = old.ConfigKey
+		}
 	}
 	if len(in.Name) < 1 || len(in.Name) > 100 || len(in.Key) < 8 || len(in.Key) > 4096 {
 		http.Error(w, "invalid source name or platform key", 400)
 		return
 	}
-	base, e := validateSourceURL(in.Base)
-	if e != nil {
-		http.Error(w, e.Error(), 400)
-		return
-	}
-	in.Base = base
 	body, _, e := fetchSource(r.Context(), in, "/v1/api-keys", nil)
 	if e != nil || body["can_inspect_all"] != true {
 		http.Error(w, "source requires a valid platform administrator key", 400)
 		return
+	}
+	if in.ConfigKey != "" {
+		if len(in.ConfigKey) < 8 || len(in.ConfigKey) > 4096 {
+			http.Error(w, "配置读取密钥长度无效", 400)
+			return
+		}
+		if _, err := configuredProviders(r.Context(), in); err != nil {
+			http.Error(w, "配置读取密钥验证失败，请使用此来源已有的管理员密钥", 400)
+			return
+		}
 	}
 	if in.Storage.Bucket != "" {
 		if in.Storage.AccessKey == "" || in.Storage.SecretKey == "" {

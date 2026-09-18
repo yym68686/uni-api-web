@@ -26,11 +26,12 @@ type controlStore struct {
 	key []byte
 }
 type sourceView struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Base       string `json:"base"`
-	CreatedAt  int64  `json:"created_at"`
-	HasStorage bool   `json:"has_storage"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Base         string `json:"base"`
+	CreatedAt    int64  `json:"created_at"`
+	HasStorage   bool   `json:"has_storage"`
+	HasConfigKey bool   `json:"has_config_key"`
 }
 type sourceStorage struct {
 	Endpoint  string `json:"endpoint"`
@@ -41,8 +42,10 @@ type sourceStorage struct {
 }
 type controlSource struct {
 	sourceView
-	Key     string        `json:"key"`
-	Storage sourceStorage `json:"storage"`
+	Key            string `json:"key"`
+	ConfigKey      string `json:"config_key,omitempty"`
+	configKeyError error
+	Storage        sourceStorage `json:"storage"`
 }
 
 func newControlStore(dsn, master string) (*controlStore, error) {
@@ -65,6 +68,7 @@ func newControlStore(dsn, master string) (*controlStore, error) {
 	_, err = db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS console_users(username TEXT PRIMARY KEY,password_hash TEXT NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT now());
  CREATE TABLE IF NOT EXISTS console_sources(id TEXT PRIMARY KEY,name TEXT NOT NULL,base TEXT NOT NULL,encrypted_key TEXT NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT now());
  ALTER TABLE console_sources ADD COLUMN IF NOT EXISTS encrypted_storage TEXT NOT NULL DEFAULT '';
+ ALTER TABLE console_sources ADD COLUMN IF NOT EXISTS encrypted_config_key TEXT NOT NULL DEFAULT '';
  ALTER TABLE console_sources ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT true;
  CREATE TABLE IF NOT EXISTS console_channel_checks(source_id TEXT NOT NULL REFERENCES console_sources(id),provider TEXT NOT NULL,result JSONB NOT NULL,PRIMARY KEY(source_id,provider));
  CREATE TABLE IF NOT EXISTS console_channel_check_runs(source_id TEXT NOT NULL REFERENCES console_sources(id),provider TEXT NOT NULL,run_id TEXT NOT NULL,expires_at TIMESTAMPTZ NOT NULL,PRIMARY KEY(source_id,provider));
@@ -196,7 +200,7 @@ func (s *controlStore) decrypt(v string) (string, error) {
 	return string(p), err
 }
 func (s *controlStore) listSources(ctx context.Context) ([]sourceView, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,name,base,extract(epoch FROM created_at)::bigint,(encrypted_storage<>'' OR id='primary') FROM console_sources WHERE enabled ORDER BY created_at,id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,name,base,extract(epoch FROM created_at)::bigint,(encrypted_storage<>'' OR id='primary'),encrypted_config_key<>'' FROM console_sources WHERE enabled ORDER BY created_at,id`)
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +208,7 @@ func (s *controlStore) listSources(ctx context.Context) ([]sourceView, error) {
 	out := []sourceView{}
 	for rows.Next() {
 		var v sourceView
-		if err = rows.Scan(&v.ID, &v.Name, &v.Base, &v.CreatedAt, &v.HasStorage); err != nil {
+		if err = rows.Scan(&v.ID, &v.Name, &v.Base, &v.CreatedAt, &v.HasStorage, &v.HasConfigKey); err != nil {
 			return nil, err
 		}
 		out = append(out, v)
@@ -213,8 +217,8 @@ func (s *controlStore) listSources(ctx context.Context) ([]sourceView, error) {
 }
 func (s *controlStore) source(ctx context.Context, id string) (controlSource, error) {
 	var x controlSource
-	var key, storage string
-	err := s.db.QueryRowContext(ctx, `SELECT id,name,base,encrypted_key,encrypted_storage,extract(epoch FROM created_at)::bigint FROM console_sources WHERE id=$1 AND enabled`, id).Scan(&x.ID, &x.Name, &x.Base, &key, &storage, &x.CreatedAt)
+	var key, storage, configKey string
+	err := s.db.QueryRowContext(ctx, `SELECT id,name,base,encrypted_key,encrypted_storage,extract(epoch FROM created_at)::bigint,encrypted_config_key FROM console_sources WHERE id=$1 AND enabled`, id).Scan(&x.ID, &x.Name, &x.Base, &key, &storage, &x.CreatedAt, &configKey)
 	if err != nil {
 		return x, err
 	}
@@ -230,6 +234,12 @@ func (s *controlStore) source(ctx context.Context, id string) (controlSource, er
 		err = json.Unmarshal([]byte(raw), &x.Storage)
 	}
 	x.HasStorage = storage != "" || id == "primary"
+	x.HasConfigKey = configKey != ""
+	if x.HasConfigKey {
+		// Optional UI access must not block facts, routing controls or boot
+		// recovery when its stored credential needs to be replaced.
+		x.ConfigKey, x.configKeyError = s.decrypt(configKey)
+	}
 	return x, err
 }
 func (s *controlStore) saveSource(ctx context.Context, x controlSource, bootstrap bool) (sourceView, error) {
@@ -238,6 +248,13 @@ func (s *controlStore) saveSource(ctx context.Context, x controlSource, bootstra
 		return sourceView{}, err
 	}
 	storage := ""
+	configKey := ""
+	if x.ConfigKey != "" {
+		configKey, err = s.encrypt(x.ConfigKey)
+		if err != nil {
+			return sourceView{}, err
+		}
+	}
 	if x.Storage.Bucket != "" {
 		raw, _ := json.Marshal(x.Storage)
 		storage, err = s.encrypt(string(raw))
@@ -248,11 +265,11 @@ func (s *controlStore) saveSource(ctx context.Context, x controlSource, bootstra
 	if x.ID == "" {
 		x.ID = "src_" + randomID()[:16]
 	}
-	conflict := `DO UPDATE SET name=EXCLUDED.name,base=EXCLUDED.base,encrypted_key=EXCLUDED.encrypted_key,encrypted_storage=EXCLUDED.encrypted_storage`
+	conflict := `DO UPDATE SET name=EXCLUDED.name,base=EXCLUDED.base,encrypted_key=EXCLUDED.encrypted_key,encrypted_storage=EXCLUDED.encrypted_storage,encrypted_config_key=EXCLUDED.encrypted_config_key`
 	if bootstrap {
 		conflict = `DO NOTHING`
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO console_sources(id,name,base,encrypted_key,encrypted_storage) VALUES($1,$2,$3,$4,$5) ON CONFLICT(id) `+conflict, x.ID, x.Name, strings.TrimRight(x.Base, "/"), enc, storage)
+	_, err = s.db.ExecContext(ctx, `INSERT INTO console_sources(id,name,base,encrypted_key,encrypted_storage,encrypted_config_key) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(id) `+conflict, x.ID, x.Name, strings.TrimRight(x.Base, "/"), enc, storage, configKey)
 	if err != nil {
 		return sourceView{}, err
 	}

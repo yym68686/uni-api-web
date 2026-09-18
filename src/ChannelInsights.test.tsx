@@ -55,6 +55,9 @@ it("loads secrets only on demand and removes the exact imported binding after co
   expect(fetchMock).not.toHaveBeenCalled();
   await app.user.click(screen.getByRole("button", { name: "显示" }));
   expect(await screen.findByText("fixture-business-key")).toBeVisible();
+  await app.user.click(screen.getByRole("button", { name: "复制" }));
+  expect(await navigator.clipboard.readText()).toBe("fixture-business-key");
+  expect(screen.getByRole("button", { name: "已复制" })).toBeVisible();
   await app.user.click(screen.getByRole("button", { name: "隐藏" }));
   expect(screen.queryByText("fixture-business-key")).not.toBeInTheDocument();
   await app.user.click(screen.getByRole("button", { name: "从此 API key 移除" }));
