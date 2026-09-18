@@ -15,6 +15,8 @@ import {
 } from "./format";
 import { usd } from "./analytics";
 import type { ActualCostRange } from "./actualCost";
+import { SubChannelSpendValue } from "./SubChannelSpend";
+import type { SubChannelSpendResult } from "./SubChannelSpend";
 export interface BalanceResult {
   data?: Balance;
   isPending?: boolean;
@@ -190,7 +192,7 @@ export function ChannelMetricHeaders({
       <th>Token / 缓存率</th>
       <th>估算消费</th>
       <th>
-        <Tip text="来自上游 sub2api 的 actual_cost，按日历日统计；充值增加不会计入消费。同一上游账号可能被多个 uni-api 共用，这一金额不按 uni-api 的调用 API key、来源或模型拆分，不可跨来源相加。5 分钟、15 分钟和 1 小时窗口没有可验证的上游小时账单。">
+        <Tip text="通过 sub2api 检测添加的渠道按独立业务 Key 的逐条 actual_cost 和请求时间统计，跟随所选时间范围。金额为业务 Key 整体消费，不按 uni-api 调用 Key、来源、模型、端点或流式状态拆分；共享业务 Key 的多个渠道不能重复相加。其他渠道沿用上游按日汇总。">
           {keySelected ? "渠道实际消费" : "实际消费"} <CircleHelp size={12} />
         </Tip>
       </th>
@@ -203,6 +205,8 @@ export function ChannelMetricCells({
   inflight,
   balance,
   actualRange,
+  spend,
+  importedChannel = false,
   stale = false,
   metricsUnavailable = false,
 }: {
@@ -210,6 +214,8 @@ export function ChannelMetricCells({
   inflight?: number | null;
   balance?: BalanceResult;
   actualRange: ActualCostRange;
+  spend?: SubChannelSpendResult;
+  importedChannel?: boolean;
   stale?: boolean;
   metricsUnavailable?: boolean;
 }) {
@@ -270,8 +276,10 @@ export function ChannelMetricCells({
       </td>
       <td className="mono">{usd(row.stats?.estimated_cost_usd)}</td>
       <td className="mono">
-        {!actualRange.supported ? (
-          <Tip text="sub2api 只提供按日聚合的 actual_cost，当前滚动窗口不显示整日金额。">
+        {spend || importedChannel ? (
+          <SubChannelSpendValue query={spend} />
+        ) : !actualRange.supported ? (
+          <Tip text="此渠道未关联 sub2api 账号的业务 Key，只能读取上游按日汇总；当前滚动窗口不显示整日金额。">
             <span className="muted">按日</span>
           </Tip>
         ) : balance?.isPending && !balance.data ? (

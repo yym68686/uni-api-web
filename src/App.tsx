@@ -123,6 +123,7 @@ import {
   ChannelMetricCells,
 } from "./ChannelMetrics";
 import { actualCostRange } from "./actualCost";
+import { useSubChannelSpend } from "./SubChannelSpend";
 import { ConsoleHeader, ConsoleNavigation } from "./ConsoleChrome";
 import { StartupScreen } from "./StartupScreen";
 import { useTheme } from "./theme";
@@ -1236,6 +1237,7 @@ function Dashboard({
   );
   const providers = useMemo(() => [...new Set(rows.map(providerId))], [rows]);
   const actualRange = useMemo(() => actualCostRange(window), [window]);
+  const channelSpend = useSubChannelSpend({ providers, imports: imported.data?.data || [], session: connection.session, window, to: metrics.data?.to, refresh, auto, enabled: channelView && !!baseConnection.account });
   const limit = useMemo(() => makeLimiter(3), []);
   const balanceQueries = useQueries({
     queries: providers.map((provider) => ({
@@ -1879,6 +1881,8 @@ function Dashboard({
                               inflight={liveMap.get(rowId(row))}
                               balance={balance}
                               actualRange={actualRange}
+                              spend={channelSpend.get(providerId(row))}
+                              importedChannel={!!baseConnection.account && row.provider.startsWith("sub2api-")}
                               stale={staleSources.has(row.source_id || "")}
                             />
                             {adjustingChannels && (
