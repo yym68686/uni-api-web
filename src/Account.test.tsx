@@ -1,5 +1,5 @@
 import { it, expect, vi } from "vitest";
-import { render, screen, within, waitFor } from "@testing-library/react";
+import { act, render, screen, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as Tooltip from "@radix-ui/react-tooltip";
@@ -23,6 +23,91 @@ function mount() {
     </QueryClientProvider>,
   );
 }
+it.each(["configured", "empty", "failed"] as const)(
+  "keeps observation visible while sources load, then handles a %s response",
+  async (result) => {
+    let resolveSources!: (response: Response) => void;
+    const sources = new Promise<Response>((resolve) => {
+      resolveSources = resolve;
+    });
+    const row = {
+      source_id: "one",
+      source_name: "One",
+      provider: "channel-one",
+      model: "model-a",
+      upstream_model: "model-a",
+      endpoint: "all",
+      stream: null,
+      eligible: true,
+      reason: "eligible",
+      stats: emptyStats(),
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string) => {
+        const { pathname } = new URL(input, location.origin);
+        if (pathname.endsWith("/sources")) return sources;
+        const body = pathname.endsWith("/auth/me")
+          ? { enabled: true, authenticated: true, username: "admin" }
+          : pathname.endsWith("/api-keys")
+            ? { can_inspect_all: true, data: [] }
+            : /\/(model-channels|channel-metrics|analytics)$/.test(pathname)
+              ? { data: [row], snapshot_revision: "1", total: { requests: 0 } }
+              : { data: [], labels: {}, status: "unsupported" };
+        return new Response(JSON.stringify(body));
+      }),
+    );
+    mount();
+    await screen.findByLabelText("加载渠道");
+    expect(screen.getByRole("heading", { name: "渠道表现" })).toBeVisible();
+    expect(
+      screen.queryByRole("heading", { name: "uni-api 来源" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/还没有来源/)).not.toBeInTheDocument();
+
+    await act(async () => {
+      resolveSources(
+        result === "failed"
+          ? new Response("来源服务暂不可用", { status: 503 })
+          : new Response(
+              JSON.stringify({
+                data:
+                  result === "empty"
+                    ? []
+                    : [
+                        {
+                          id: "one",
+                          name: "One",
+                          base: "https://one.test",
+                          has_storage: true,
+                        },
+                      ],
+              }),
+            ),
+      );
+    });
+    if (result === "empty") {
+      expect(await screen.findByText(/还没有来源/)).toBeVisible();
+      expect(screen.getByRole("button", { name: "添加来源" })).toBeEnabled();
+    } else {
+      if (result === "configured") {
+        expect(await screen.findByRole("table")).toBeVisible();
+        expect(screen.getByText("channel-one")).toBeVisible();
+        expect(screen.queryByLabelText("加载渠道")).not.toBeInTheDocument();
+      } else {
+        expect(await screen.findByRole("alert")).toHaveTextContent(
+          "暂时无法读取渠道",
+        );
+        expect(screen.getByRole("button", { name: "重新读取" })).toBeEnabled();
+      }
+      expect(
+        screen.queryByRole("heading", { name: "uni-api 来源" }),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByText(/还没有来源/)).not.toBeInTheDocument();
+    }
+  },
+);
+
 it("uses account login, restores a cookie session and scopes same-name channels by source", async () => {
   let logged = false;
   const calls: string[] = [];

@@ -1513,7 +1513,8 @@ function Dashboard({
               user={baseConnection.session}
             />
           ) : baseConnection.account &&
-            (view === "sources" || sourceList.length === 0) ? (
+            (view === "sources" ||
+              (sourceQuery.isSuccess && sourceList.length === 0)) ? (
             <SourceSettings
               sources={sourceList}
               refreshAction={refreshButton}
