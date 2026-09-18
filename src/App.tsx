@@ -61,7 +61,7 @@ import {
 } from "./api";
 import {
   CheckActions,
-  CheckTable,
+  ChannelCheckAction,
   LatestChannelCheck,
   checkTargets,
   useChannelChecks,
@@ -118,13 +118,7 @@ type Keys = {
 };
 
 type View =
-  | "sub2api"
-  | "checks"
-  | "channels"
-  | "balances"
-  | "overview"
-  | "prices"
-  | "sources";
+  "sub2api" | "channels" | "balances" | "overview" | "prices" | "sources";
 
 function Overview({
   metrics,
@@ -975,7 +969,8 @@ function Dashboard({
   } = filters;
   const [view, setView] = useState<View>("channels"),
     [page, setPage] = useState(0),
-    [adjustingChannels, setAdjustingChannels] = useState(false);
+    [adjustingChannels, setAdjustingChannels] = useState(false),
+    [checkingChannels, setCheckingChannels] = useState(false);
   const channelView = view === "channels";
   useEffect(() => {
     saveFilters(baseConnection.base, filters);
@@ -1370,12 +1365,6 @@ function Dashboard({
           <LayoutDashboard size={18} />
           渠道观测<span className="nav-shortcut">⌘ 1</span>
         </button>
-        <button
-          className={view === "checks" ? "active" : ""}
-          onClick={() => selectView("checks")}
-        >
-          <ScanLine size={18} /> 渠道检测
-        </button>
         {baseConnection.account && (
           <button
             className={view === "sub2api" ? "active" : ""}
@@ -1481,17 +1470,15 @@ function Dashboard({
             <strong>
               {view === "sub2api"
                 ? "sub2api检测"
-                : view === "checks"
-                  ? "渠道检测"
-                  : view === "channels"
-                    ? "渠道观测"
-                    : view === "balances"
-                      ? "余额管理"
-                      : view === "overview"
-                        ? "总览"
-                        : view === "sources"
-                          ? "来源设置"
-                          : "价格设置"}
+                : view === "channels"
+                  ? "渠道观测"
+                  : view === "balances"
+                    ? "余额管理"
+                    : view === "overview"
+                      ? "总览"
+                      : view === "sources"
+                        ? "来源设置"
+                        : "价格设置"}
             </strong>
           </div>
           <div className="topbar-actions">
@@ -1598,26 +1585,18 @@ function Dashboard({
               />
             </motion.section>
           )}
-          {channelView || view === "balances" || view === "checks" ? (
+          {channelView || view === "balances" ? (
             <section className="data-panel">
               <div className="data-heading">
                 <div className="data-title">
                   <span className="section-icon">
-                    {view === "checks" ? (
-                      <ScanLine size={19} />
-                    ) : channelView ? (
+                    {channelView ? (
                       <Activity size={19} />
                     ) : (
                       <Wallet size={19} />
                     )}
                   </span>
-                  <h2>
-                    {view === "checks"
-                      ? "渠道检测"
-                      : channelView
-                        ? "渠道表现"
-                        : "渠道余额"}
-                  </h2>
+                  <h2>{channelView ? "渠道表现" : "渠道余额"}</h2>
                   <span className="count-badge">{count(total)}</span>
                 </div>
                 <div className="data-actions">
@@ -1648,10 +1627,12 @@ function Dashboard({
                       onEditingChange={setAdjustingChannels}
                     />
                   )}
-                  {view === "checks" && (
+                  {channelView && baseConnection.account && (
                     <CheckActions
                       checks={checks}
                       rows={detectionRows}
+                      expanded={checkingChannels}
+                      onExpandedChange={setCheckingChannels}
                       disabled={
                         !baseConnection.account ||
                         busy ||
@@ -1838,19 +1819,6 @@ function Dashboard({
                   </button>
                 )}
               </div>
-              {view === "checks" &&
-                (!baseConnection.account || checks.error) && (
-                  <div className="check-explanation">
-                    {!baseConnection.account && (
-                      <p role="alert">请使用账户登录后检测。</p>
-                    )}
-                    {checks.error && (
-                      <p role="alert">
-                        历史检测结果读取失败：{checks.error.message}
-                      </p>
-                    )}
-                  </div>
-                )}
               {channelView && checks.error && (
                 <div className="coverage-note" role="alert">
                   最近检测结果读取失败：{checks.error.message}
@@ -1909,15 +1877,6 @@ function Dashboard({
                     ? `还有 ${pendingBalances} 个渠道正在查询，结果到达后会自动显示。`
                     : "尝试调整模型、余额状态，或清除搜索条件。"}
                 </Empty>
-              ) : view === "checks" ? (
-                <CheckTable
-                  rows={detectionRows.slice(
-                    currentPage * 25,
-                    (currentPage + 1) * 25,
-                  )}
-                  checks={checks}
-                  disabled={!baseConnection.account}
-                />
               ) : channelView ? (
                 <div className="table-scroll">
                   <table className="channel-table">
@@ -1932,6 +1891,7 @@ function Dashboard({
                             </Tip>
                           </th>
                         )}
+                        {checkingChannels && <th>检测操作</th>}
                         <ChannelMetricHeaders keySelected={!!keyId} />
                         {adjustingChannels && (
                           <th>
@@ -1975,6 +1935,9 @@ function Dashboard({
                             </td>
                             {baseConnection.account && (
                               <LatestChannelCheck row={row} checks={checks} />
+                            )}
+                            {checkingChannels && (
+                              <ChannelCheckAction row={row} checks={checks} />
                             )}
                             <ChannelMetricCells
                               row={row}

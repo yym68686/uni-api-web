@@ -15,7 +15,11 @@ afterEach(() => vi.unstubAllGlobals());
 interface CheckFixture {
   data: ChannelCheck[];
   readError?: string;
-  run?: (source: string, provider: string) => Promise<ChannelCheck>;
+  run?: (
+    source: string,
+    provider: string,
+    signal: AbortSignal,
+  ) => Promise<ChannelCheck>;
 }
 function setup(
   controlUnavailable = false,
@@ -24,6 +28,7 @@ function setup(
     body: any,
   ) => Promise<Response | undefined> | Response | undefined,
   checkFixture: CheckFixture = { data: [] },
+  catalogFixture: { providers?: string[]; models?: string[] } = {},
 ) {
   const states: Record<string, ControlState> = {
     one: { revision: "one:0", instance_id: "one", rules: [] },
@@ -43,28 +48,36 @@ function setup(
       const ids =
         source !== "all" ? [source] : keySource ? [keySource] : ["one", "two"];
       const rows = ids.flatMap((id) =>
-        ["visible-first", "hidden", "visible-second"].map((provider) => ({
-          source_id: id,
-          source_name: id === "one" ? "One" : "Two",
-          provider,
-          model: "m",
-          upstream_model: "m",
-          endpoint: u.searchParams.get("endpoint") || "all",
-          stream: u.searchParams.get("stream") === "true" ? true : null,
-          eligible: true,
-          reason: "eligible",
-          stats: {
-            ...emptyStats(),
-            success: 7,
-            success_rate_denominator: 7,
-            success_rate: 1,
-            inflight: 2,
-            usage_samples: 7,
-            input_tokens: 1000,
-            output_tokens: 100,
-            estimated_cost_usd: 2.5,
-          },
-        })),
+        (
+          catalogFixture.providers || [
+            "visible-first",
+            "hidden",
+            "visible-second",
+          ]
+        ).flatMap((provider) =>
+          (catalogFixture.models || ["m"]).map((model) => ({
+            source_id: id,
+            source_name: id === "one" ? "One" : "Two",
+            provider,
+            model,
+            upstream_model: model,
+            endpoint: u.searchParams.get("endpoint") || "all",
+            stream: u.searchParams.get("stream") === "true" ? true : null,
+            eligible: true,
+            reason: "eligible",
+            stats: {
+              ...emptyStats(),
+              success: 7,
+              success_rate_denominator: 7,
+              success_rate: 1,
+              inflight: 2,
+              usage_samples: 7,
+              input_tokens: 1000,
+              output_tokens: 100,
+              estimated_cost_usd: 2.5,
+            },
+          })),
+        ),
       );
       let body: any;
       if (u.pathname.endsWith("/auth/me"))
@@ -138,7 +151,7 @@ function setup(
           const { provider } = JSON.parse(init.body as string);
           checkWrites.push({ source, provider });
           const result = checkFixture.run
-            ? await checkFixture.run(source, provider)
+            ? await checkFixture.run(source, provider, init.signal!)
             : {
                 source_id: source,
                 provider,
@@ -148,6 +161,7 @@ function setup(
                 checked_at: Date.now() / 1000,
                 duration_ms: 1234,
               };
+          init.signal?.throwIfAborted();
           checkFixture.data = [
             ...checkFixture.data.filter(
               (item) => item.source_id !== source || item.provider !== provider,
@@ -267,7 +281,7 @@ it("toggles adjustment inside observation with the same table, filters and metri
   const values = labels.map(
     (label) => (screen.getByLabelText(label) as HTMLInputElement).value,
   );
-  for (const view of ["渠道检测", "渠道观测"]) {
+  for (const view of ["余额管理", "渠道观测"]) {
     await app.user.click(
       screen.getByRole("button", { name: new RegExp("^" + view) }),
     );
@@ -301,7 +315,7 @@ it("stages source-specific controls inline, retains hidden channels and drafts a
   await app.user.click(screen.getByLabelText("上移 One visible-second m"));
   await app.user.click(screen.getByLabelText("临时停用 One visible-first m"));
   await app.user.selectOptions(screen.getByLabelText("时间范围筛选"), "today");
-  await app.user.click(screen.getByRole("button", { name: "渠道检测" }));
+  await app.user.click(screen.getByRole("button", { name: "余额管理" }));
   await app.user.click(screen.getByRole("button", { name: /^渠道观测/ }));
   expect(screen.getByLabelText("临时停用 One visible-first m")).toBeChecked();
   expect(
@@ -778,8 +792,8 @@ it("keeps the last check while retesting, updates observation immediately, and r
   };
   let app = setup(false, undefined, fixture);
   await screen.findByRole("table");
-  await app.user.click(screen.getByRole("button", { name: "渠道检测" }));
-  await app.user.click(screen.getByLabelText("检测 One visible-first"));
+  await app.user.click(screen.getByRole("button", { name: "降智检测" }));
+  await app.user.click(screen.getByLabelText("重新检测 One visible-first m"));
   await waitFor(() => expect(app.checkWrites).toHaveLength(1));
   await app.user.click(screen.getByRole("button", { name: /^渠道观测/ }));
   expect(observedCheck("One", "visible-first")).toHaveTextContent("不降智");
@@ -823,6 +837,165 @@ it("distinguishes unavailable check history from untested channels and keeps met
   expect(within(table).getAllByRole("row")).toHaveLength(7);
   await app.user.click(screen.getByRole("button", { name: "调整顺序" }));
   expect(screen.getByLabelText("临时停用 One visible-first m")).toBeEnabled();
+  app.unmount();
+  app.client.clear();
+});
+
+it("opens detection controls inside observation without sending probes or changing filters, metrics and adjustment drafts", async () => {
+  const app = setup();
+  const table = await screen.findByRole("table");
+  expect(
+    screen.queryByRole("button", { name: "渠道检测" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("columnheader", { name: "检测操作" }),
+  ).not.toBeInTheDocument();
+  const enter = screen.getByRole("button", { name: "降智检测" });
+  expect(enter.closest(".data-actions")).toBe(
+    screen.getByLabelText("搜索渠道或模型").closest(".data-actions"),
+  );
+  await app.user.click(screen.getByRole("button", { name: "调整顺序" }));
+  await app.user.click(screen.getByLabelText("临时停用 One visible-first m"));
+  await app.user.type(screen.getByLabelText("搜索渠道或模型"), "visible");
+  const metrics = () =>
+    within(table)
+      .getAllByRole("row")
+      .slice(1)
+      .map((row) => row.querySelector(".channel-link")?.textContent);
+  const before = metrics();
+  await app.user.click(enter);
+  expect(screen.getByRole("table")).toBe(table);
+  expect(
+    screen.queryByRole("button", { name: "降智检测" }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "一键检测 · 4" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "取消检测" })).toBeEnabled();
+  expect(screen.getAllByRole("button", { name: /^重新检测 / })).toHaveLength(4);
+  expect(
+    screen.getByLabelText("重新检测 One visible-first m"),
+  ).toHaveTextContent("重新检测");
+  expect(screen.getByLabelText("搜索渠道或模型")).toHaveValue("visible");
+  expect(metrics()).toEqual(before);
+  expect(app.checkWrites).toHaveLength(0);
+  await app.user.click(screen.getByRole("button", { name: "取消检测" }));
+  expect(screen.getByRole("table")).toBe(table);
+  expect(
+    screen.queryByRole("columnheader", { name: "检测操作" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: /^重新检测 / }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getByRole("columnheader", { name: "是否降智" }),
+  ).toBeInTheDocument();
+  expect(screen.getByLabelText("临时停用 One visible-first m")).toBeChecked();
+  expect(screen.getByLabelText("应用全部临时修改")).toBeEnabled();
+  expect(app.checkWrites).toHaveLength(0);
+  expect(app.writes).toHaveLength(0);
+  app.unmount();
+  app.client.clear();
+});
+
+it("runs one check per matching provider across all observation pages and models", async () => {
+  const providers = Array.from({ length: 27 }, (_, i) => `visible-${i}`);
+  const app = setup(
+    false,
+    undefined,
+    { data: [] },
+    { providers: [...providers, "hidden"], models: ["m", "other"] },
+  );
+  await screen.findByRole("table");
+  await app.user.selectOptions(screen.getByLabelText("uni-api 来源"), "one");
+  await app.user.type(screen.getByLabelText("搜索渠道或模型"), "visible");
+  await app.user.click(screen.getByRole("button", { name: "降智检测" }));
+  expect(screen.getAllByRole("button", { name: /^重新检测 / })).toHaveLength(
+    25,
+  );
+  await app.user.click(screen.getByRole("button", { name: "一键检测 · 27" }));
+  await waitFor(() => expect(app.checkWrites).toHaveLength(27));
+  expect(app.checkWrites.every((write) => write.source === "one")).toBe(true);
+  expect(new Set(app.checkWrites.map((write) => write.provider))).toEqual(
+    new Set(providers),
+  );
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "一键检测 · 27" })).toBeEnabled(),
+  );
+  expect(screen.getByRole("button", { name: "取消检测" })).toBeEnabled();
+  expect(observedCheck("One", "visible-0")).toHaveTextContent("不降智");
+  app.unmount();
+  app.client.clear();
+});
+
+it("cancels individual in-flight checks, hides their actions, and retains the last result", async () => {
+  const signals: AbortSignal[] = [];
+  const fixture: CheckFixture = {
+    data: [storedCheck("one", "visible-first", "pass")],
+    run: (_source, _provider, signal) =>
+      new Promise((_resolve, reject) => {
+        signals.push(signal);
+        signal.addEventListener(
+          "abort",
+          () => reject(new DOMException("Aborted", "AbortError")),
+          { once: true },
+        );
+      }),
+  };
+  const app = setup(false, undefined, fixture);
+  await screen.findByRole("table");
+  await app.user.click(screen.getByRole("button", { name: "降智检测" }));
+  await app.user.click(screen.getByLabelText("重新检测 One visible-first m"));
+  await app.user.click(screen.getByLabelText("重新检测 Two visible-first m"));
+  await waitFor(() => expect(signals).toHaveLength(2));
+  expect(screen.getByLabelText("重新检测 One visible-first m")).toBeDisabled();
+  expect(screen.getByRole("button", { name: "一键检测 · 6" })).toBeDisabled();
+  await app.user.click(screen.getByRole("button", { name: "取消检测" }));
+  expect(signals.every((signal) => signal.aborted)).toBe(true);
+  expect(screen.getByRole("button", { name: "降智检测" })).toBeEnabled();
+  expect(observedCheck("One", "visible-first")).toHaveTextContent("不降智");
+  expect(observedCheck("One", "visible-first")).not.toHaveTextContent("检测中");
+  expect(observedCheck("Two", "visible-first")).toHaveTextContent("未检测");
+  await app.user.click(screen.getByRole("button", { name: "降智检测" }));
+  expect(screen.getByLabelText("重新检测 One visible-first m")).toBeEnabled();
+  expect(screen.getByRole("button", { name: "一键检测 · 6" })).toBeEnabled();
+  app.unmount();
+  app.client.clear();
+});
+
+it("keeps both batch buttons visible while running and preserves completed results when canceled", async () => {
+  const signals: AbortSignal[] = [];
+  const fixture: CheckFixture = {
+    data: [],
+    run: (source, provider, signal) =>
+      source === "one" && provider === "visible-first"
+        ? Promise.resolve(storedCheck(source, provider, "pass"))
+        : new Promise((_resolve, reject) => {
+            signals.push(signal);
+            signal.addEventListener(
+              "abort",
+              () => reject(new DOMException("Aborted", "AbortError")),
+              { once: true },
+            );
+          }),
+  };
+  const app = setup(false, undefined, fixture);
+  await screen.findByRole("table");
+  await app.user.click(screen.getByRole("button", { name: "降智检测" }));
+  await app.user.click(screen.getByRole("button", { name: "一键检测 · 6" }));
+  await waitFor(() => expect(app.checkWrites).toHaveLength(6));
+  await waitFor(() =>
+    expect(observedCheck("One", "visible-first")).toHaveTextContent("不降智"),
+  );
+  expect(screen.getByRole("button", { name: "一键检测 · 6" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "取消检测" })).toBeEnabled();
+  await app.user.click(screen.getByRole("button", { name: "取消检测" }));
+  expect(signals).toHaveLength(5);
+  expect(signals.every((signal) => signal.aborted)).toBe(true);
+  expect(
+    screen.queryByRole("columnheader", { name: "检测操作" }),
+  ).not.toBeInTheDocument();
+  expect(observedCheck("One", "visible-first")).toHaveTextContent("不降智");
+  expect(observedCheck("Two", "visible-first")).toHaveTextContent("未检测");
+  expect(app.checkWrites).toHaveLength(6);
   app.unmount();
   app.client.clear();
 });

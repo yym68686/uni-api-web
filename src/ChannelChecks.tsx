@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, X, CircleHelp, Play, ScanLine, Square } from "lucide-react";
+import { Check, X, CircleHelp, Play, ScanLine } from "lucide-react";
 import { controlRequest } from "./api";
 import { providerId, time, channelName } from "./format";
 import type { Channel } from "./types";
@@ -38,7 +38,7 @@ export function useChannelChecks(session: string, enabled: boolean) {
   const [batch, setBatch] = useState<{ done: number; total: number } | null>(
     null,
   );
-  const active = useRef(new Set<string>());
+  const active = useRef(new Map<string, AbortController>());
   const controller = useRef(new AbortController());
   const batchController = useRef<AbortController | null>(null);
   useEffect(() => {
@@ -48,13 +48,16 @@ export function useChannelChecks(session: string, enabled: boolean) {
   }, [session]);
   async function run(row: Channel, batchSignal?: AbortSignal) {
     const id = providerId(row),
-      signal = batchSignal
-        ? AbortSignal.any([controller.current.signal, batchSignal])
-        : controller.current.signal;
+      abort = new AbortController(),
+      signal = AbortSignal.any([
+        controller.current.signal,
+        abort.signal,
+        ...(batchSignal ? [batchSignal] : []),
+      ]);
     if (active.current.has(id) || !row.source_id || !enabled || signal.aborted)
       return;
-    active.current.add(id);
-    setPending(new Set(active.current));
+    active.current.set(id, abort);
+    setPending(new Set(active.current.keys()));
     setErrors((old) => {
       const next = new Map(old);
       next.delete(id);
@@ -71,6 +74,7 @@ export function useChannelChecks(session: string, enabled: boolean) {
           signal: AbortSignal.any([signal, AbortSignal.timeout(60_000)]),
         },
       );
+      signal.throwIfAborted();
       client.setQueryData<{ data: ChannelCheck[] }>(queryKey, (previous) => ({
         data: [
           ...(previous?.data || []).filter((item) => providerId(item) !== id),
@@ -92,9 +96,12 @@ export function useChannelChecks(session: string, enabled: boolean) {
           }),
         );
     } finally {
-      active.current.delete(id);
-      if (!controller.current.signal.aborted)
-        setPending(new Set(active.current));
+      // A canceled request may settle after another check of this channel starts.
+      if (active.current.get(id) === abort) {
+        active.current.delete(id);
+        if (!controller.current.signal.aborted)
+          setPending(new Set(active.current.keys()));
+      }
     }
   }
   async function runAll(rows: Channel[]) {
@@ -109,13 +116,19 @@ export function useChannelChecks(session: string, enabled: boolean) {
         queue.map(async (row) => {
           await run(row, abort.signal);
           done++;
-          if (!controller.current.signal.aborted)
+          if (
+            batchController.current === abort &&
+            !abort.signal.aborted &&
+            !controller.current.signal.aborted
+          )
             setBatch({ done, total: queue.length });
         }),
       );
     } finally {
-      batchController.current = null;
-      if (!controller.current.signal.aborted) setBatch(null);
+      if (batchController.current === abort) {
+        batchController.current = null;
+        if (!controller.current.signal.aborted) setBatch(null);
+      }
     }
   }
   const results = new Map(
@@ -133,6 +146,11 @@ export function useChannelChecks(session: string, enabled: boolean) {
     runAll,
     stop: () => {
       batchController.current?.abort();
+      batchController.current = null;
+      for (const abort of active.current.values()) abort.abort();
+      active.current.clear();
+      setPending(new Set());
+      setBatch(null);
     },
     error: query.error,
     loading: query.isPending,
@@ -216,104 +234,73 @@ export function CheckActions({
   checks,
   rows,
   disabled,
+  expanded,
+  onExpandedChange,
 }: {
   checks: Checks;
   rows: Channel[];
   disabled: boolean;
+  expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
 }) {
+  if (!expanded)
+    return (
+      <button className="button small" onClick={() => onExpandedChange(true)}>
+        <ScanLine size={15} />
+        降智检测
+      </button>
+    );
   return (
-    <>
+    <div className="check-toolbar-actions">
       {checks.batch && (
         <span className="muted" role="status">
           {checks.batch.done} / {checks.batch.total}
         </span>
       )}
-      {checks.batch ? (
-        <button className="button small" onClick={checks.stop}>
-          <Square size={14} />
-          停止检测
-        </button>
-      ) : (
-        <button
-          className="button primary small"
-          disabled={disabled || checks.pending.size > 0 || !rows.length}
-          onClick={() => void checks.runAll(rows)}
-        >
-          <ScanLine size={16} />
-          一键检测 · {rows.length}
-        </button>
-      )}
-    </>
+      <button
+        className="button primary small"
+        aria-label={`一键检测 · ${rows.length}`}
+        aria-busy={!!checks.batch}
+        disabled={
+          disabled || !!checks.batch || checks.pending.size > 0 || !rows.length
+        }
+        onClick={() => void checks.runAll(rows)}
+      >
+        {checks.batch ? <Spinner small /> : <ScanLine size={16} />}
+        一键检测 · {rows.length}
+      </button>
+      <button
+        className="button small"
+        onClick={() => {
+          checks.stop();
+          onExpandedChange(false);
+        }}
+      >
+        <X size={14} />
+        取消检测
+      </button>
+    </div>
   );
 }
-export function CheckTable({
-  rows,
+export function ChannelCheckAction({
+  row,
   checks,
-  disabled,
 }: {
-  rows: Channel[];
+  row: Channel;
   checks: Checks;
-  disabled: boolean;
 }) {
+  const pending = checks.pending.has(providerId(row));
   return (
-    <div className="table-scroll">
-      <table className="channel-table check-table">
-        <thead>
-          <tr>
-            <th>渠道 / 来源</th>
-            <th>检测模型</th>
-            <th>降智</th>
-            <th>模型回复</th>
-            <th>最近检测</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => {
-            const id = providerId(row),
-              result = checks.results.get(id),
-              pending = checks.pending.has(id);
-            return (
-              <tr key={id}>
-                <td>
-                  <strong>{channelName(row)}</strong>
-                  <small className="check-source">{row.source_name}</small>
-                </td>
-                <td className="mono">gpt-6-astra</td>
-                <td>
-                  {pending ? (
-                    <span className="check-status">
-                      <Spinner small />
-                      检测中
-                    </span>
-                  ) : !result ? (
-                    <span className="muted">未检测</span>
-                  ) : (
-                    <CheckVerdict result={result} />
-                  )}
-                </td>
-                <td className="check-answer">
-                  {result?.text || result?.message || "—"}
-                </td>
-                <td className="mono">
-                  {result ? time(result.checked_at) : "—"}
-                </td>
-                <td>
-                  <button
-                    className="button small"
-                    disabled={disabled || pending || !!checks.batch}
-                    onClick={() => void checks.run(row)}
-                    aria-label={`检测 ${row.source_name || ""} ${channelName(row)}`}
-                  >
-                    <Play size={13} />
-                    {result ? "重新检测" : "检测"}
-                  </button>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+    <td>
+      <button
+        className="button small"
+        disabled={!row.source_id || pending || !!checks.batch}
+        onClick={() => void checks.run(row)}
+        aria-label={`重新检测 ${row.source_name || row.source_id || ""} ${channelName(row)} ${row.model}`}
+      >
+        {pending ? <Spinner small /> : <Play size={13} />}
+        {pending ? "检测中…" : "重新检测"}
+      </button>
+    </td>
   );
 }

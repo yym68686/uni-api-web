@@ -180,3 +180,82 @@ it("replaces an older local check error when newer persisted history arrives", a
   unmount();
   client.clear();
 });
+
+it("keeps a restarted batch pending when canceled responses arrive late", async () => {
+  const requests: {
+    signal: AbortSignal;
+    provider: string;
+    finish: (value: Response) => void;
+  }[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((_input: string, init?: RequestInit) => {
+      if (init?.method !== "POST")
+        return Promise.resolve(new Response(JSON.stringify({ data: [] })));
+      return new Promise<Response>((finish) =>
+        requests.push({
+          signal: init.signal!,
+          provider: JSON.parse(init.body as string).provider,
+          finish,
+        }),
+      );
+    }),
+  );
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+  const { result, unmount } = renderHook(
+    () => useChannelChecks("restart-test", true),
+    { wrapper },
+  );
+  let oldBatch!: Promise<void>, newBatch!: Promise<void>;
+  act(() => {
+    oldBatch = result.current.runAll([row("one", "a"), row("one", "b")]);
+  });
+  await waitFor(() => expect(requests).toHaveLength(2));
+  act(() => {
+    result.current.stop();
+    newBatch = result.current.runAll([row("one", "a")]);
+  });
+  await waitFor(() => expect(requests).toHaveLength(3));
+  expect(requests.slice(0, 2).every((request) => request.signal.aborted)).toBe(
+    true,
+  );
+  expect(requests[2].signal.aborted).toBe(false);
+  const response = (provider: string, verdict: string) =>
+    new Response(
+      JSON.stringify({
+        source_id: "one",
+        provider,
+        model: "gpt-6-astra",
+        verdict,
+        text: verdict === "pass" ? "未知" : "2024-06",
+        checked_at: 1,
+        duration_ms: 10,
+      }),
+    );
+  await act(async () => {
+    requests[0].finish(response("a", "pass"));
+    requests[1].finish(response("b", "pass"));
+    await oldBatch;
+  });
+  expect(result.current.results.size).toBe(0);
+  expect(result.current.batch).toEqual({ done: 0, total: 1 });
+  expect(result.current.pending).toEqual(
+    new Set([JSON.stringify(["one", "a"])]),
+  );
+  await act(async () => {
+    requests[2].finish(response("a", "fail"));
+    await newBatch;
+  });
+  expect(
+    result.current.results.get(JSON.stringify(["one", "a"]))?.verdict,
+  ).toBe("fail");
+  expect(result.current.pending.size).toBe(0);
+  expect(result.current.batch).toBeNull();
+  unmount();
+  client.clear();
+});
