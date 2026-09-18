@@ -315,6 +315,14 @@ type subSelection struct {
 }
 
 func (s *Service) subCheck(w http.ResponseWriter, r *http.Request) {
+	s.subQueueChecks(w, r, false)
+}
+
+func (s *Service) subQualityCheck(w http.ResponseWriter, r *http.Request) {
+	s.subQueueChecks(w, r, true)
+}
+
+func (s *Service) subQueueChecks(w http.ResponseWriter, r *http.Request, qualityOnly bool) {
 	owner, _ := s.controlUser(r)
 	var in struct {
 		Targets []subSelection `json:"targets"`
@@ -336,10 +344,14 @@ func (s *Service) subCheck(w http.ResponseWriter, r *http.Request) {
 	sort.Slice(in.Targets, func(i, j int) bool { return in.Targets[i].AccountID < in.Targets[j].AccountID })
 	// One transaction: an invalid/busy/foreign target cannot partially queue a batch.
 	accounts := map[string]bool{}
+	kind := "check"
+	if qualityOnly {
+		kind = "quality"
+	}
 	for _, target := range in.Targets {
 		if !accounts[target.AccountID] {
 			var id string
-			err = tx.QueryRowContext(r.Context(), `UPDATE console_sub_accounts SET state='queued',job_kind='check',job_id='',message='',lease_until=NULL WHERE id=$1 AND owner=$2 AND state NOT IN ('queued','running') RETURNING id`, target.AccountID, owner).Scan(&id)
+			err = tx.QueryRowContext(r.Context(), `UPDATE console_sub_accounts SET state='queued',job_kind=$3,job_id='',message='',lease_until=NULL WHERE id=$1 AND owner=$2 AND state NOT IN ('queued','running') RETURNING id`, target.AccountID, owner, kind).Scan(&id)
 			if err != nil {
 				http.Error(w, "所选账号不存在或正在检测，请刷新后重试", 409)
 				return
@@ -357,7 +369,9 @@ func (s *Service) subCheck(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		models := target.Models
-		if len(models) == 0 {
+		if qualityOnly {
+			models = []string{checkModel}
+		} else if len(models) == 0 {
 			models = subModels
 		}
 		for _, model := range models {
@@ -441,7 +455,7 @@ func (s *Service) subWorkOne(parent context.Context) bool {
 		err = s.subSynchronize(ctx, id, base, job, encrypted)
 	}
 	if err == nil && ctx.Err() == nil {
-		err = s.subTestTargets(ctx, id, base, job)
+		err = s.subTestTargets(ctx, id, base, job, kind == "quality")
 	}
 	finishCtx, finishCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer finishCancel()
@@ -639,8 +653,8 @@ func (s *Service) subSynchronize(ctx context.Context, id, base, job, encrypted s
 	return nil
 }
 
-func (s *Service) subTestTargets(ctx context.Context, id, base, job string) error {
-	rows, err := s.control.db.QueryContext(ctx, `SELECT m.group_id,m.model,t.encrypted_key FROM console_sub_models m JOIN console_sub_targets t USING(account_id,group_id) WHERE m.account_id=$1 AND t.active AND t.state<>'error' AND m.state='queued' AND t.encrypted_key<>'' ORDER BY m.group_id,m.model`, id)
+func (s *Service) subTestTargets(ctx context.Context, id, base, job string, qualityOnly bool) error {
+	rows, err := s.control.db.QueryContext(ctx, `SELECT m.group_id,m.model,t.encrypted_key FROM console_sub_models m JOIN console_sub_targets t USING(account_id,group_id) WHERE m.account_id=$1 AND t.active AND t.state<>'error' AND m.state='queued' AND t.encrypted_key<>'' AND (NOT $2 OR m.model=$3) ORDER BY m.group_id,m.model`, id, qualityOnly, checkModel)
 	if err != nil {
 		return errors.New("测试 key 读取失败")
 	}
@@ -689,7 +703,12 @@ func (s *Service) subTestTargets(ctx context.Context, id, base, job string) erro
 					continue
 				}
 				probeCtx, cancel := context.WithTimeout(ctx, 125*time.Second)
-				result := subRunProbes(probeCtx, subHTTP, base, key, t.model)
+				var result subResult
+				if qualityOnly {
+					result = subRunQualityProbe(probeCtx, subHTTP, base, key)
+				} else {
+					result = subRunProbes(probeCtx, subHTTP, base, key, t.model)
+				}
 				cancel()
 				result.Availability.Text = strings.ReplaceAll(result.Availability.Text, key, "[redacted]")
 				result.Quality.Text = strings.ReplaceAll(result.Quality.Text, key, "[redacted]")

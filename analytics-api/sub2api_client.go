@@ -383,6 +383,17 @@ func subRunProbes(ctx context.Context, client *http.Client, base, key string, mo
 	return out
 }
 
+// The quality response also measures Astra availability, latency and model
+// identity. All fields come from the same request; no say-test probe is sent.
+func subRunQualityProbe(ctx context.Context, client *http.Client, base, key string) subResult {
+	probe := subProbeStream(ctx, client, base, key, checkPrompt, checkModel)
+	out := subResult{Model: checkModel, CheckedAt: time.Now().Unix(), Availability: probe, Quality: probe, Verdict: "error"}
+	if probe.Status == "success" {
+		out.Verdict = checkVerdict(probe.Text)
+	}
+	return out
+}
+
 func subKeyName(accountID string, groupID int64) string {
 	return "uni-console-check-" + accountID + "-" + strconv.FormatInt(groupID, 10)
 }
