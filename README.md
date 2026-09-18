@@ -125,6 +125,16 @@ last successful data for the same query and labeling it as previous data. It nev
 substitutes another key/range's cached result. Initialization does not display an
 unrelated S3 export-configuration warning. `/v1/prices` waits only for price sync.
 
+After initialization, each source polls independently, with at most four scans
+and sixteen object downloads in flight across the service. Newly discovered
+objects are imported before the next listing page; every page is still scanned
+so late arrivals cannot be skipped. Fact/object checkpoints remain atomic and
+idempotent. A large source archive does not delay another source's next poll.
+Analytics import diagnostics are scoped to the selected source and include
+`scanning`, scan start/completion, pages, listed objects and known pending objects.
+An active scan with zero discovered pending objects is not reported as caught up.
+Freshness warnings describe import lag without asserting an S3 export failure.
+
 Checkpoint restoration retries transient storage, timeout and interrupted-download
 failures at most three times, with a five-minute deadline per attempt and backoff
 of two then four seconds. Missing, incompatible, corrupt or access-denied snapshots

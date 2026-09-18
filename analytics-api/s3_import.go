@@ -37,12 +37,19 @@ func (s *Service) importSingleS3(ctx context.Context) error {
 		return err
 	}
 	pager := s3.NewListObjectsV2Paginator(client, &s3.ListObjectsV2Input{Bucket: aws.String(s.cfg.S3Bucket), Prefix: aws.String(strings.Trim(s.cfg.S3Prefix, "/") + "/")})
-	var pending []types.Object
+	var failures []error
+	var pages, listed int
+	listStarted := time.Now()
 	for pager.HasMorePages() {
 		page, err := pager.NextPage(ctx)
 		if err != nil {
 			return err
 		}
+		pages++
+		listed += len(page.Contents)
+		s.listPages.Store(int64(pages))
+		s.listedObjects.Store(int64(listed))
+		var pending []types.Object
 		for _, obj := range page.Contents {
 			key := aws.ToString(obj.Key)
 			if !strings.HasSuffix(key, ".jsonl") {
@@ -56,15 +63,29 @@ func (s *Service) importSingleS3(ctx context.Context) error {
 			}
 			pending = append(pending, obj)
 		}
+		// Hash-addressed objects have no chronological cursor. Import discoveries
+		// before asking for the next page, and still scan every page for late data.
+		if err = s.importListedObjects(ctx, client, pending); err != nil {
+			failures = append(failures, err)
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 	}
+	fmt.Printf("analytics source_scan source=%s pages=%d objects=%d duration_ms=%d failures=%d\n", s.cfg.SourceID, pages, listed, time.Since(listStarted).Milliseconds(), len(failures))
+	return errors.Join(failures...)
+}
+
+func (s *Service) importListedObjects(ctx context.Context, client *s3.Client, pending []types.Object) error {
+	var err error
 	// Catch up with live traffic before replaying older objects. Checkpoints still
 	// cover the complete listing; no high-water mark can hide a late arrival.
 	sort.Slice(pending, func(i, j int) bool {
 		return aws.ToTime(pending[i].LastModified).After(aws.ToTime(pending[j].LastModified))
 	})
-	s.remaining.Store(int64(len(pending)))
+	s.remaining.Add(int64(len(pending)))
 	if len(pending) > 0 {
-		fmt.Printf("analytics import pending_objects=%d\n", len(pending))
+		fmt.Printf("analytics import source=%s pending_objects=%d\n", s.cfg.SourceID, len(pending))
 	}
 	lastProgress := time.Now()
 	var failures []error
@@ -83,7 +104,10 @@ func (s *Service) importSingleS3(ctx context.Context) error {
 		objects := make([]FactObject, len(group))
 		errs := make([]error, len(group))
 		var wg sync.WaitGroup
-		slots := make(chan struct{}, 16)
+		slots := s.factDownloadSlots
+		if slots == nil {
+			slots = make(chan struct{}, 16)
+		}
 		for i, obj := range group {
 			wg.Add(1)
 			go func(i int, obj types.Object) {
@@ -139,7 +163,7 @@ func (s *Service) importSingleS3(ctx context.Context) error {
 			return ctx.Err()
 		}
 		if time.Since(lastProgress) >= 10*time.Second {
-			fmt.Printf("analytics import remaining_objects=%d\n", s.remaining.Load())
+			fmt.Printf("analytics import source=%s remaining_objects=%d\n", s.cfg.SourceID, s.remaining.Load())
 			lastProgress = time.Now()
 		}
 		start = end
@@ -228,72 +252,10 @@ func importErrorClass(err error) string {
 	}
 	return "unavailable"
 }
-func (s *Service) startImportLoop(ctx context.Context) {
-	if s.lastCollect.Load() == 0 {
-		s.maybeImport(ctx)
-	}
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			s.maybeImport(ctx)
-		}
-	}
-}
 
 func sourceObjectKey(source, key string) string {
 	if source == "" || source == "primary" {
 		return key
 	}
 	return source + "::" + key
-}
-func (s *Service) importS3(ctx context.Context) error {
-	var failures []error
-	var sources []sourceView
-	primaryEnabled := s.control == nil
-	if s.control != nil {
-		var err error
-		sources, err = s.control.listSources(ctx)
-		if err != nil {
-			return err
-		}
-		for _, v := range sources {
-			if v.ID == s.cfg.SourceID {
-				primaryEnabled = true
-			}
-		}
-	}
-	var remaining int64
-	if primaryEnabled && s.cfg.S3Bucket != "" {
-		if e := s.importSingleS3(ctx); e != nil {
-			failures = append(failures, e)
-		}
-		remaining = s.remaining.Load()
-	}
-	for _, v := range sources {
-		if v.ID == s.cfg.SourceID || !v.HasStorage {
-			continue
-		}
-		src, e := s.control.source(ctx, v.ID)
-		if e != nil {
-			failures = append(failures, e)
-			continue
-		}
-		cfg := s.cfg
-		cfg.SourceID, cfg.S3Endpoint, cfg.S3Bucket, cfg.S3Prefix = src.ID, src.Storage.Endpoint, src.Storage.Bucket, src.Storage.Prefix
-		client, e := newObjectClient(ctx, src.Storage.Endpoint, src.Storage.AccessKey, src.Storage.SecretKey, 20*time.Second)
-		child := &Service{engine: s.engine, cfg: cfg, factClient: client}
-		if e == nil {
-			e = child.importSingleS3(ctx)
-		}
-		remaining += child.remaining.Load()
-		if e != nil {
-			failures = append(failures, e)
-		}
-	}
-	s.remaining.Store(remaining)
-	return errors.Join(failures...)
 }

@@ -42,6 +42,12 @@ type Service struct {
 	lastCheckpoint    atomic.Int64
 	checkpointError   atomic.Value
 	factClient        *s3.Client
+	factDownloadSlots chan struct{}
+	importMu          sync.Mutex
+	sourceImports     map[string]*Service
+	listPages         atomic.Int64
+	listedObjects     atomic.Int64
+	scanStarted       atomic.Int64
 	control           *controlStore
 }
 
@@ -140,7 +146,7 @@ func (s *Service) analytics(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 503, map[string]string{"error": "analytics unavailable"})
 		return
 	}
-	result.Import = map[string]any{"last_scan_ms": s.lastCollect.Load(), "remaining_objects": s.remaining.Load(), "errors": s.importFailures.Load(), "error_class": s.importError.Load(), "caught_up": s.lastCollect.Load() > 0 && s.remaining.Load() == 0 && (s.importError.Load() == nil || s.importError.Load() == "")}
+	result.Import = s.importStatus(allowed)
 	body, err := json.Marshal(result)
 	if err != nil {
 		writeJSON(w, 500, map[string]string{"error": "analytics unavailable"})

@@ -1768,11 +1768,11 @@ function Dashboard({
                 <div className="coverage-note" role="alert">
                   <Clock3 size={14} />
                   {staleSourceNames.join("、") || "当前来源"}{" "}
-                  仍有请求完成，但历史事实至少 2 分钟未更新。请检查来源的 S3
-                  导出配置；当前统计可能遗漏请求，不能视为零流量。
+                  仍有请求完成，但历史数据同步已滞后超过 2 分钟；当前统计可能遗漏请求，不能视为零流量。
                 </div>
               )}
-              {metrics.data?.import && !metrics.data.import.caught_up && (
+              {metrics.data?.import && !metrics.data.import.caught_up &&
+                (!metrics.data.import.scanning || !!metrics.data.import.error_class || metrics.data.import.remaining_objects > 0) && (
                 <div className="coverage-note" role="status">
                   <Clock3 size={14} />
                   {metrics.data.import.error_class

@@ -81,6 +81,7 @@ export interface Metrics extends Catalog {
   statistics_scope: string;
   import?: {
     caught_up: boolean;
+    scanning?: boolean;
     remaining_objects: number;
     error_class?: string;
     last_scan_ms?: number;
