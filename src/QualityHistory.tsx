@@ -9,13 +9,25 @@ export interface QualitySummary {
   successful: number;
   passed: number;
 }
-export function QualityProbability({ history }: { history?: QualitySummary }) {
+export function QualityProbability({
+  history,
+  checkedAt,
+  origin,
+}: {
+  history?: QualitySummary;
+  checkedAt?: number;
+  origin?: string;
+}) {
   if (!history || history.total === 0) return null;
+  const checked = checkedAt
+    ? new Date(checkedAt * 1000).toLocaleString("zh-CN", { hour12: false })
+    : "";
   return (
-    <Tip text={`不降智次数 ÷ 成功检测次数。累计 ${history.total} 次记录；失败、超时、取消及未执行的检测不计入分母。`}>
+    <Tip
+      text={`不降智次数 ÷ 成功检测次数：${history.passed} / ${history.successful}。累计 ${history.total} 次记录；失败、超时、取消及未执行的检测不计入分母。${checked ? ` 最近检测：${checked}${origin ? ` · ${origin}` : ""}` : ""}`}
+    >
       <small className="quality-probability">
-        不降智概率 {rate(history.successful ? history.passed / history.successful : null)}
-        <span className="mono">{history.passed}/{history.successful}</span>
+        {rate(history.successful ? history.passed / history.successful : null)}
       </small>
     </Tip>
   );

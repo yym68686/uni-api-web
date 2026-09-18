@@ -30,8 +30,8 @@ it("combines successful detection counts once and keeps the latest outcome acros
   expect(result.verdict).toBe("error");
   expect(result.history).toEqual({ passed: 3, successful: 4, total: 6 });
   setup(<QualityProbability history={result.history} />);
-  expect(screen.getByText(/不降智概率 75.0%/)).toBeVisible();
-  expect(screen.getByText("3/4")).toBeVisible();
+  expect(screen.getByText("75.0%")).toBeVisible();
+  expect(screen.queryByText("3/4")).not.toBeInTheDocument();
 });
 
 it("scopes cache history to source, key, model, upstream, endpoint and streaming without inventing missing cache samples", async () => {
@@ -72,7 +72,7 @@ it("pages quality history only when expanded and keeps unsuccessful attempts vis
   expect(await screen.findByText("检测失败")).toBeVisible();
   await app.user.click(screen.getByRole("button", { name: "加载更早记录" }));
   expect(await screen.findByText("不降智")).toBeVisible();
-  expect(screen.getByText(/不降智概率 100.0%/)).toBeVisible();
+  expect(screen.getByText("100.0%")).toBeVisible();
 });
 
 it("keeps dashboard links safe and persists every hourly filter", () => {

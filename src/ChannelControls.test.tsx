@@ -9,7 +9,6 @@ import { emptyStats } from "./analytics";
 import { inheritedDisabled, RESET_SCOPE_LABEL } from "./ChannelControls";
 import type { ControlState } from "./ChannelControls";
 import type { ChannelCheck } from "./ChannelChecks";
-import { time } from "./format";
 
 afterEach(() => vi.unstubAllGlobals());
 interface CheckFixture {
@@ -764,9 +763,7 @@ it("shows persisted latest check verdicts by source and provider, independent of
   expect(observedCheck("One", "visible-second")).toHaveTextContent("无法判定");
   expect(observedCheck("Two", "visible-first")).toHaveTextContent("检测失败");
   expect(observedCheck("Two", "hidden")).toHaveTextContent("未检测");
-  expect(observedCheck("One", "visible-first")).toHaveTextContent(
-    time(1800000000),
-  );
+  expect(observedCheck("One", "visible-first")).not.toHaveTextContent("16:00:00");
   await app.user.selectOptions(
     screen.getByLabelText("API key 筛选"),
     "one::key",
@@ -809,9 +806,7 @@ it("keeps the last check while retesting, updates observation immediately, and r
     ),
   );
   expect(observedCheck("One", "visible-first")).toHaveTextContent("降智");
-  expect(observedCheck("One", "visible-first")).toHaveTextContent(
-    time(1800000100),
-  );
+  expect(observedCheck("One", "visible-first")).not.toHaveTextContent("16:01:40");
   expect(observedCheck("One", "visible-first")).not.toHaveTextContent("检测中");
   expect(observedCheck("Two", "visible-first")).toHaveTextContent("未检测");
   app.unmount();

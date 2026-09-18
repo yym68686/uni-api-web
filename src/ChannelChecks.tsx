@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, X, CircleHelp, Play, ScanLine } from "lucide-react";
 import { controlRequest } from "./api";
-import { providerId, time, channelName } from "./format";
+import { providerId, channelName } from "./format";
 import type { Channel } from "./types";
 import type { InstalledChannel } from "./sub2apiImports";
 import { Spinner, Tip } from "./ui";
@@ -242,8 +242,11 @@ export function LatestChannelCheck({
           >
             <CheckVerdict result={result} />
           </Tip>
-          <small className="muted">{time(result.checked_at)}</small>
-          <QualityProbability history={result.history} />
+          <QualityProbability
+            history={result.history}
+            checkedAt={result.checked_at}
+            origin={result.origin}
+          />
         </>
       ) : (
         !pending && (

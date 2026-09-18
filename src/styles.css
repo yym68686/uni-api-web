@@ -2485,7 +2485,7 @@ nav > button.active > svg {
 .site-link { color: inherit; display: inline-flex; align-items: center; gap: 5px; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 4px; overflow-wrap: anywhere; }
 .site-link:hover { color: var(--green); text-decoration-color: currentColor; }
 .site-link svg { flex-shrink: 0; }
-.quality-probability { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; margin-top: 7px; }
+.quality-probability { display: inline-block; color: var(--muted); font-size: 11px; font-style: normal; font-weight: 500; line-height: 1.4; margin-top: 7px; white-space: nowrap; }
 .quality-history { margin-top: 16px; }
 .quality-history-scroll { overflow: auto; max-height: 420px; margin: 12px 0; border: 1px solid var(--line); border-radius: 10px; }
 .quality-history-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 12px; }
