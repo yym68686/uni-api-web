@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -252,5 +253,61 @@ func TestHistoryReadinessNeverReturnsPartialStatistics(t *testing.T) {
 	service.analytics(w, httptest.NewRequest(http.MethodGet, "/v1/analytics?range=all", nil))
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"requests":1`) {
 		t.Fatal("restored history not available", w.Code, w.Body.String())
+	}
+}
+
+func TestProductionTCPReadinessWaitsForCompleteHistory(t *testing.T) {
+	s, err := NewService(stateTestEngine(t), Config{Upstream: "https://fixture.example", RequireInitialImport: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.historyLoading.Store(true)
+	// Reserve an ephemeral address, then close it: only the real application
+	// serving path can reopen the socket and satisfy a platform TCP probe.
+	reservation, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := reservation.Addr().String()
+	reservation.Close()
+	server := &http.Server{Addr: address, Handler: s.Handler()}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- s.listenAndServe(ctx, server) }()
+	defer func() { cancel(); server.Close(); <-done }()
+	for range 3 {
+		conn, err := net.DialTimeout("tcp", address, 50*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			t.Fatal("replacement accepted traffic while history was incomplete")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	s.lastCollect.Store(time.Now().UnixMilli())
+	s.historyLoading.Store(false)
+	client := &http.Client{Timeout: time.Second}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		resp, err := client.Get("http://" + address + "/readyz")
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode != 200 {
+				t.Fatal("socket opened before analytics readiness", resp.StatusCode)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("ready replacement never listened", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestTrafficGateCancelsWithoutPublishingUnreadyReplica(t *testing.T) {
+	s := &Service{cfg: Config{RequireInitialImport: true}}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := s.listenAndServe(ctx, &http.Server{Addr: "127.0.0.1:0"}); !errors.Is(err, context.Canceled) {
+		t.Fatal("canceled initialization activated listener", err)
 	}
 }

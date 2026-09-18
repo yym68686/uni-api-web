@@ -109,18 +109,21 @@ cache. The state bucket also holds one atomically replaced, checksummed Parquet
 checkpoint of facts, aggregates and import checkpoints. Settings are kept separate
 so restoring an older query cache cannot revert an operator edit.
 
-Each API container uses its own `/data` directory, with no shared volume. The HTTP
-listener, configuration recovery and sub2api workers start independently of history
-restoration. `/healthz` indicates process availability; `/readyz` indicates complete
-historical analytics readiness. Use `/healthz` (or TCP) for the whole service so a
-slow history rebuild does not block login, configuration recovery or detection.
+Each API container uses its own `/data` directory, with no shared volume.
+Configuration recovery, detection and billing workers start before history
+restoration. Production uses `REQUIRE_INITIAL_IMPORT=true`: the replacement does
+not bind its HTTP port until a complete initial fact scan and price sync finish.
+With Fugue's TCP readiness and `maxUnavailable=0`, the old replica continues
+serving login, control and analytics until the replacement is ready. This traffic
+gate does not delay background workers or optional query warming.
 
-History initialization restores a compatible checkpoint, then completes a scan of
-immutable facts and price synchronization. Until then, `/v1/analytics` returns 503
-with `code: analytics_initializing` and `Retry-After: 5`, never partial statistics.
-The console automatically retries initialization even with auto-refresh disabled.
-`/v1/prices` waits only for price synchronization. Query warming is optional and
-does not gate either readiness or task startup.
+`/healthz` reports process health once listening; `/readyz` reports complete
+historical analytics readiness. In immediate-listen/development mode, incomplete
+analytics returns 503 with `code: analytics_initializing` and `Retry-After: 5`.
+The console retries automatically even with auto-refresh disabled, retaining the
+last successful data for the same query and labeling it as previous data. It never
+substitutes another key/range's cached result. Initialization does not display an
+unrelated S3 export-configuration warning. `/v1/prices` waits only for price sync.
 
 Checkpoint restoration retries transient storage, timeout and interrupted-download
 failures at most three times, with a five-minute deadline per attempt and backoff

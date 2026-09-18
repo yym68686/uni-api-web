@@ -89,11 +89,23 @@ func main() {
 		defer cancel()
 		_ = server.Shutdown(shutdown)
 	}()
-	log.Printf("analytics API listening on %s", cfg.Address)
-	if err = server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	if err = service.listenAndServe(ctx, server); err != nil && err != http.ErrServerClosed && ctx.Err() == nil {
 		log.Print(err)
 		stop()
 	}
 	// Keep the database open until in-flight HTTP queries have drained.
 	<-shutdownDone
+}
+
+func (s *Service) listenAndServe(ctx context.Context, server *http.Server) error {
+	// Fugue uses TCP readiness. Keep the previous ready replica serving until
+	// this replacement can answer analytics; background workers already run.
+	if s.cfg.RequireInitialImport {
+		log.Print("analytics traffic waiting for complete history; background workers active")
+		if err := s.waitForTraffic(ctx); err != nil {
+			return err
+		}
+	}
+	log.Printf("analytics API listening on %s", server.Addr)
+	return server.ListenAndServe()
 }

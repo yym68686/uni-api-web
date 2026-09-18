@@ -36,6 +36,7 @@ function setup(
     keyNetworkError?: boolean;
     denyPlatform?: boolean;
     legacyMetrics?: boolean;
+    historyInitializing?: boolean;
   } = {},
 ) {
   const calls: string[] = [];
@@ -51,6 +52,7 @@ function setup(
       if (options.keyStatus)
         return new Response("{}", { status: options.keyStatus });
     }
+    if (url.pathname.endsWith("/analytics") && options.historyInitializing) return new Response(JSON.stringify({ code: "analytics_initializing" }), { status: 503 });
     const selected = url.searchParams.has("api_key_id");
     const data = selected ? [rows[2], rows[0]] : rows;
     const result = url.pathname.endsWith("api-keys")
@@ -375,4 +377,25 @@ describe("dashboard workflows", () => {
     await screen.findByRole("button", { name: /进入控制台/ });
     expect(loadConnection()).toBeNull();
   });
+});
+
+it("retains last successful rows during warmup but never reuses them for a different API key", async () => {
+  const options = { historyInitializing: false };
+  const { user } = setup(options);
+  await connect(user);
+  expect(within(screen.getByRole("table")).getByText("first")).toBeVisible();
+  options.historyInitializing = true;
+  await user.click(screen.getByRole("button", { name: "刷新数据" }));
+  await screen.findByText(/历史数据正在初始化/);
+  expect(within(screen.getByRole("table")).getByText("first")).toBeVisible();
+  expect(screen.getByText(/暂显示上次成功读取的数据/)).toBeVisible();
+  expect(screen.queryByText(/请检查来源的 S3 导出配置/)).not.toBeInTheDocument();
+  await user.selectOptions(screen.getByLabelText("API key 筛选"), "key-second");
+  await screen.findByLabelText("加载渠道");
+  expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  expect(screen.queryByText(/暂显示上次成功读取的数据/)).not.toBeInTheDocument();
+  options.historyInitializing = false;
+  await user.click(screen.getByRole("button", { name: "刷新数据" }));
+  await screen.findByRole("table");
+  expect(screen.queryByText(/历史数据正在初始化/)).not.toBeInTheDocument();
 });

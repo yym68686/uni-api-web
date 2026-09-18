@@ -1200,7 +1200,7 @@ function Dashboard({
       : modelRemoved
         ? "当前 API key 未配置所选模型，请重新选择模型。"
         : keys.error?.message ||
-          metrics.error?.message ||
+          (historyInitializing ? undefined : metrics.error?.message) ||
           catalog.error?.message);
   const rows = useMemo(
     () =>
@@ -1442,6 +1442,14 @@ function Dashboard({
               。当前结果不完整。
             </div>
           )}
+          {historyInitializing && (channelView || view === "overview") && (
+            <div className="coverage-note" role="status">
+              <Spinner small />
+              {metrics.data
+                ? `历史数据正在初始化，暂显示上次成功读取的数据（${time(metrics.data.generated_at)}），完成后将自动更新。`
+                : metrics.error?.message}
+            </div>
+          )}
           {view === "sub2api" && baseConnection.account ? (
             <Sub2apiChecks
               key={baseConnection.session}
@@ -1469,12 +1477,7 @@ function Dashboard({
               connection={connection}
               onSaved={() => void prices.refetch()}
             />
-          ) : historyInitializing ? (
-            <div className="coverage-note" role="status">
-              <Spinner small />
-              {metrics.error?.message}
-            </div>
-          ) : view === "overview" ? (
+          ) : historyInitializing && !metrics.data ? null : view === "overview" ? (
             <Overview
               metrics={metrics.data}
               rows={rows}
@@ -1761,7 +1764,7 @@ function Dashboard({
                   最近检测结果读取失败：{checks.error.message}
                 </div>
               )}
-              {staleSources.size > 0 && (
+              {!historyInitializing && staleSources.size > 0 && (
                 <div className="coverage-note" role="alert">
                   <Clock3 size={14} />
                   {staleSourceNames.join("、") || "当前来源"}{" "}
@@ -1785,7 +1788,7 @@ function Dashboard({
                     : `实例于 ${time(metrics.data.collection_started_at)} 开始采集，当前窗口覆盖尚不完整。`}
                 </div>
               )}
-              {error && !historyInitializing ? (
+              {error ? (
                 <div role="alert" className="table-error">
                   <Unplug size={26} />
                   <h3>暂时无法读取渠道</h3>
@@ -1794,7 +1797,7 @@ function Dashboard({
                     重新读取
                   </button>
                 </div>
-              ) : metrics.isPending || historyInitializing ? (
+              ) : metrics.isPending || (historyInitializing && !metrics.data) ? (
                 <div className="table-skeleton" aria-label="加载渠道">
                   <div className="skeleton skeleton-header" />
                   {Array.from({ length: 7 }, (_, i) => (

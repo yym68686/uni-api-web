@@ -171,8 +171,9 @@ func waitStartup(ctx context.Context, delay time.Duration) bool {
 	}
 }
 
-// Start control recovery and detection independently of analytics. History is
-// gated at its own endpoints until one complete import and price sync succeed.
+// Start control recovery and detection independently of analytics. Production
+// traffic activation waits separately; direct callers still get a readiness
+// guard until one complete import and price sync succeed.
 // Only this history goroutine may restore/import, preventing a late restore
 // from overwriting freshly imported rows. Shutdown drains all writers before
 // either database is closed.
@@ -200,6 +201,18 @@ func (s *Service) startBackground(ctx context.Context) <-chan struct{} {
 		close(done)
 	}()
 	return done
+}
+
+// This only gates a replacement's listening socket, never its background
+// workers. With maxUnavailable=0 the old replica remains in service while the
+// new one prepares, including when preparation fails and must retry.
+func (s *Service) waitForTraffic(ctx context.Context) error {
+	for !s.analyticsReady() {
+		if !waitStartup(ctx, 100*time.Millisecond) {
+			return ctx.Err()
+		}
+	}
+	return ctx.Err()
 }
 
 func (s *Service) initializeAnalytics(ctx context.Context) {
