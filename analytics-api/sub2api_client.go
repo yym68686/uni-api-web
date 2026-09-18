@@ -166,16 +166,20 @@ type subRemoteKey struct {
 }
 
 type subProbe struct {
-	RequestedModel    string `json:"requested_model,omitempty"`
-	ResponseModel     string `json:"response_model,omitempty"`
-	ModelMatch        string `json:"model_match,omitempty"`
-	Status            string `json:"status"`
-	Text              string `json:"text"`
-	Message           string `json:"message,omitempty"`
-	TTFT              *int64 `json:"ttft_ms"`
-	ResponseCreatedMS *int64 `json:"response_created_ms"`
-	Duration          int64  `json:"duration_ms"`
-	HTTPStatus        int    `json:"http_status,omitempty"`
+	ID                string    `json:"id,omitempty"`
+	StartedAt         int64     `json:"started_at,omitempty"`
+	RequestIDs        []string  `json:"request_ids,omitempty"`
+	Usage             *subUsage `json:"usage,omitempty"`
+	RequestedModel    string    `json:"requested_model,omitempty"`
+	ResponseModel     string    `json:"response_model,omitempty"`
+	ModelMatch        string    `json:"model_match,omitempty"`
+	Status            string    `json:"status"`
+	Text              string    `json:"text"`
+	Message           string    `json:"message,omitempty"`
+	TTFT              *int64    `json:"ttft_ms"`
+	ResponseCreatedMS *int64    `json:"response_created_ms"`
+	Duration          int64     `json:"duration_ms"`
+	HTTPStatus        int       `json:"http_status,omitempty"`
 }
 type subResult struct {
 	Model        string   `json:"model"`
@@ -189,6 +193,9 @@ type subResult struct {
 // response.completed event and final assistant text; EOF/[DONE] alone is not success.
 func subProbeStream(ctx context.Context, client *http.Client, base, key, prompt string, models ...string) (out subProbe) {
 	start := time.Now()
+	out.ID = "subcheck-" + randomID()
+	out.StartedAt = start.Unix()
+	out.RequestIDs = []string{out.ID, "local:" + out.ID}
 	out.Status = "error"
 	defer func() { out.Duration = time.Since(start).Milliseconds() }()
 	model := checkModel
@@ -202,7 +209,7 @@ func subProbeStream(ctx context.Context, client *http.Client, base, key, prompt 
 	req.Header.Set("Authorization", "Bearer "+key)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("X-Request-ID", "subcheck-"+randomID())
+	req.Header.Set("X-Request-ID", out.ID)
 	resp, err := client.Do(req)
 	if err != nil {
 		out.Message = "连接失败或检测超时"
@@ -210,6 +217,11 @@ func subProbeStream(ctx context.Context, client *http.Client, base, key, prompt 
 	}
 	defer resp.Body.Close()
 	out.HTTPStatus = resp.StatusCode
+	for _, header := range []string{"X-Client-Request-ID", "X-Request-ID", "Request-ID"} {
+		if value := subSafeRequestID(resp.Header.Get(header), key); value != "" {
+			out.addRequestIDs(value, "client:"+value, "local:"+value)
+		}
+	}
 	if resp.StatusCode != 200 {
 		out.Message = fmt.Sprintf("检测请求返回 HTTP %d", resp.StatusCode)
 		return
@@ -233,6 +245,7 @@ func subProbeStream(ctx context.Context, client *http.Client, base, key, prompt 
 			Type     string `json:"type"`
 			Delta    string `json:"delta"`
 			Response struct {
+				ID     string          `json:"id"`
 				Model  json.RawMessage `json:"model"`
 				Status string          `json:"status"`
 				Error  json.RawMessage `json:"error"`
@@ -254,6 +267,9 @@ func subProbeStream(ctx context.Context, client *http.Client, base, key, prompt 
 			event.Type = eventName
 		}
 		eventName = ""
+		if value := subSafeRequestID(event.Response.ID, key); value != "" && (event.Type == "response.created" || event.Type == "response.completed") {
+			out.addRequestIDs(value)
+		}
 		switch event.Type {
 		case "error", "response.failed", "response.incomplete":
 			out.Message = "模型响应失败或未完成"

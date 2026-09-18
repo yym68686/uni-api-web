@@ -2522,3 +2522,13 @@ nav > button.active > svg {
 .channel-secret code + code { margin-top: 8px; }
 .channel-access-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 .channel-remove { margin-top: 18px; }
+
+.sub-price-status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  white-space: nowrap;
+}
+.sub-price-status > small { font-style: normal; }
+.sub-price-group { display: grid; gap: 10px; }

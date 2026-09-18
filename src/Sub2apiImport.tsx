@@ -5,7 +5,8 @@ import { Plus, Pencil, Trash2, X } from "lucide-react";
 import { controlRequest } from "./api";
 import { Spinner } from "./ui";
 import type { ConsoleSource } from "./SourceSettings";
-import type { KeyInfo } from "./types";
+import { assessPrice } from "./sub2apiPriceCheck";
+import type { KeyInfo, ModelPrice } from "./types";
 import type { SubAccount, SubTarget } from "./Sub2apiChecks";
 import type { InstalledChannel, SubImportsQuery } from "./sub2apiImports";
 import {
@@ -25,11 +26,13 @@ export function Sub2apiImport({
   account,
   target,
   imports,
+  prices,
   close,
 }: {
   account: SubAccount;
   target: SubTarget;
   imports: SubImportsQuery;
+  prices?: ModelPrice[];
   close: () => void;
 }) {
   const client = useQueryClient();
@@ -41,7 +44,8 @@ export function Sub2apiImport({
   const [editing, setEditing] = useState<InstalledChannel | null>(null);
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<InstalledChannel | null>(null);
-  const [models, setModels] = useState<string[]>(available);
+  const [modelChoices, setModelChoices] = useState<Record<string, boolean>>({});
+  const models = checks.filter(check => modelChoices[check.model] ?? (available.includes(check.model) && assessPrice(check, prices).status !== "abnormal")).map(check => check.model);
   const [source, setSource] = useState("");
   const [key, setKey] = useState("");
   const [position, setPosition] = useState(1);
@@ -98,7 +102,7 @@ export function Sub2apiImport({
     setRemoving(null);
     setSource(item.source_id);
     setKey(item.api_key_id);
-    setModels([...item.models]);
+    setModelChoices(Object.fromEntries(checks.map(check => [check.model, item.models.includes(check.model)])));
     setPosition(Math.min(...item.models.map((m) => item.positions[m] || 1)));
     setError("");
     setSuccess("");
@@ -110,7 +114,7 @@ export function Sub2apiImport({
     setRemoving(null);
     setSource("");
     setKey("");
-    setModels(available);
+    setModelChoices({});
     setPosition(1);
     setError("");
     setSuccess("");
@@ -316,14 +320,11 @@ export function Sub2apiImport({
                           !editing?.models.includes(check.model)
                         }
                         onChange={(e) =>
-                          setModels((old) =>
-                            e.target.checked
-                              ? [...old, check.model]
-                              : old.filter((m) => m !== check.model),
-                          )
+                          setModelChoices((old) => ({ ...old, [check.model]: e.target.checked }))
                         }
                       />
                       <span>{check.model}</span>
+                      {assessPrice(check, prices).status === "abnormal" && <small className="negative">单价异常</small>}
                       {!available.includes(check.model) && (
                         <small>
                           {editing?.models.includes(check.model)

@@ -23,6 +23,14 @@ CREATE TABLE IF NOT EXISTS console_sub_accounts(
  synced_at BIGINT NOT NULL DEFAULT 0, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
  UNIQUE(owner,base,email));
 ALTER TABLE console_sub_accounts ADD COLUMN IF NOT EXISTS balance JSONB;
+ALTER TABLE console_sub_accounts ADD COLUMN IF NOT EXISTS usage_lease_token TEXT NOT NULL DEFAULT '';
+ALTER TABLE console_sub_accounts ADD COLUMN IF NOT EXISTS usage_lease_until TIMESTAMPTZ;
+CREATE TABLE IF NOT EXISTS console_sub_usage(
+ id TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES console_sub_accounts(id) ON DELETE CASCADE,
+ group_id BIGINT NOT NULL, key_id BIGINT NOT NULL, model TEXT NOT NULL, started_at BIGINT NOT NULL,
+ request_ids JSONB NOT NULL, status TEXT NOT NULL DEFAULT 'pending', result JSONB,
+ attempts INT NOT NULL DEFAULT 0, next_attempt TIMESTAMPTZ NOT NULL DEFAULT now());
+CREATE INDEX IF NOT EXISTS console_sub_usage_pending ON console_sub_usage(account_id,next_attempt,key_id) WHERE status='pending';
 CREATE INDEX IF NOT EXISTS console_sub_accounts_owner ON console_sub_accounts(owner);
 CREATE TABLE IF NOT EXISTS console_sub_auth_locks(
  account_id TEXT PRIMARY KEY REFERENCES console_sub_accounts(id) ON DELETE CASCADE,
@@ -145,6 +153,7 @@ func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "检测结果读取失败", 503)
 		return
 	}
+	s.subAttachUsage(r.Context(), owner, accounts)
 	writeJSON(w, 200, map[string]any{"data": accounts})
 }
 
@@ -728,18 +737,18 @@ func (s *Service) subSynchronize(ctx context.Context, id, base, job, encrypted s
 }
 
 func (s *Service) subTestTargets(ctx context.Context, id, base, job string, qualityOnly bool) error {
-	rows, err := s.control.db.QueryContext(ctx, `SELECT m.group_id,m.model,t.encrypted_key FROM console_sub_models m JOIN console_sub_targets t USING(account_id,group_id) WHERE m.account_id=$1 AND t.active AND t.state<>'error' AND m.state='queued' AND t.encrypted_key<>'' AND (NOT $2 OR m.model=$3) ORDER BY m.group_id,m.model`, id, qualityOnly, checkModel)
+	rows, err := s.control.db.QueryContext(ctx, `SELECT m.group_id,m.model,t.encrypted_key,t.remote_key_id FROM console_sub_models m JOIN console_sub_targets t USING(account_id,group_id) WHERE m.account_id=$1 AND t.active AND t.state<>'error' AND m.state='queued' AND t.encrypted_key<>'' AND (NOT $2 OR m.model=$3) ORDER BY m.group_id,m.model`, id, qualityOnly, checkModel)
 	if err != nil {
 		return errors.New("测试 key 读取失败")
 	}
 	type target struct {
-		id         int64
+		id, keyID  int64
 		model, key string
 	}
 	targets := []target{}
 	for rows.Next() {
 		var t target
-		if err = rows.Scan(&t.id, &t.model, &t.key); err != nil {
+		if err = rows.Scan(&t.id, &t.model, &t.key, &t.keyID); err != nil {
 			break
 		}
 		targets = append(targets, t)
@@ -791,6 +800,13 @@ func (s *Service) subTestTargets(ctx context.Context, id, base, job string, qual
 					result = subRunProbes(probeCtx, subHTTP, base, key, t.model)
 				}
 				cancel()
+				if e = s.subQueueUsage(ctx, id, t.id, t.keyID, &result); e != nil {
+					for _, probe := range []*subProbe{&result.Availability, &result.Quality} {
+						if probe.ID != "" {
+							probe.Usage = &subUsage{Status: "unavailable", Message: "账单核验任务保存失败"}
+						}
+					}
+				}
 				result.Availability.Text = strings.ReplaceAll(result.Availability.Text, key, "[redacted]")
 				result.Quality.Text = strings.ReplaceAll(result.Quality.Text, key, "[redacted]")
 				if t.model == checkModel {

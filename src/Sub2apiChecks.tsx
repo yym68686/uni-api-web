@@ -36,8 +36,15 @@ import { time } from "./format";
 import { QualityHistory, QualityProbability, qualityTooltip } from "./QualityHistory";
 import type { QualitySummary } from "./QualityHistory";
 import { SiteLink } from "./ChannelSite";
+import { useSubPrices, PriceStatus, GroupPriceStatus, UsageDetailRows } from "./Sub2apiPricing";
+import type { SubUsage } from "./sub2apiPriceCheck";
+import type { ModelPrice } from "./types";
 
-interface Probe {
+export interface Probe {
+  id?: string;
+  started_at?: number;
+  request_ids?: string[];
+  usage?: SubUsage;
   requested_model?: string;
   response_model?: string;
   model_match?: "match" | "mismatch" | "missing" | "invalid" | "unavailable";
@@ -558,11 +565,13 @@ function CheckDetails({
   target,
   checks,
   selected,
+  prices,
 }: {
   account: SubAccount;
   target: SubTarget;
   checks: SubModelCheck[];
   selected?: SubModelCheck;
+  prices?: ModelPrice[];
 }) {
   const [detailModel, setDetailModel] = useState(checks[0].model);
   const check =
@@ -634,6 +643,10 @@ function CheckDetails({
               <DetailRow label="模型匹配">
                 <ModelMatch check={check} />
               </DetailRow>
+              <DetailRow label="单价核验">
+                <PriceStatus check={check} prices={prices} />
+              </DetailRow>
+              <UsageDetailRows probe={probe} label="可用性" prices={prices} model={check.model} />
               <DetailRow label="最近检测">
                 {result ? time(result.checked_at) : "未检测"}
                 {result && pending(check.state) && " · 上次结果"}
@@ -669,6 +682,9 @@ function CheckDetails({
                   <DetailRow label="Astra 降智">
                     <div className="quality-status-stack"><Verdict result={result} history={target.history} /><QualityProbability history={target.history} checkedAt={result?.checked_at} /></div>
                   </DetailRow>
+                  {result?.quality.id && result.quality.id === probe?.id ? (
+                    <DetailRow label="降智扣费">与可用性为同一次请求，扣费见上方</DetailRow>
+                  ) : <UsageDetailRows probe={result?.quality} label="降智" prices={prices} model={check.model} />}
                   <DetailRow label="降智检测耗时">
                     {latency(result?.quality.duration_ms ?? null)}
                   </DetailRow>
@@ -711,6 +727,7 @@ function CheckDetails({
 export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   const client = useQueryClient();
   const query = useSubAccounts();
+  const prices = useSubPrices(user);
   const accounts = query.data?.data || [];
   const [form, setForm] = useState<{ account: SubAccount | null } | null>(null);
   const [filters, setFilters] = useState(() => loadSubFilters(user));
@@ -1305,6 +1322,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                         模型匹配 <CircleHelp size={12} />
                       </Tip>
                     </th>
+                    <th><Tip text="按站点请求账单的倍率前输入／输出单价与价格设置比较；单位为美元／百万 token。缺少账单或 token 样本时不判为正常。">单价异常 <CircleHelp size={12} /></Tip></th>
                     <th>Astra 降智</th>
                     <th>回复 / 诊断</th>
                     <th>最近检测</th>
@@ -1368,6 +1386,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                             <GroupModelMatch checks={checks} />
                           )}
                         </td>
+                        <td>{selected ? <PriceStatus check={selected} prices={prices.data?.data} /> : <GroupPriceStatus checks={checks} prices={prices.data?.data} />}</td>
                         <td>
                           <div className="quality-status-stack"><Verdict result={astra.result} history={t.history} /><QualityProbability history={t.history} checkedAt={astra.result?.checked_at} /></div>
                         </td>
@@ -1378,6 +1397,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                             target={t}
                             checks={checks}
                             selected={selected}
+                            prices={prices.data?.data}
                           />
                         </td>
                         <td className="mono">
@@ -1479,7 +1499,8 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
         <Sub2apiImport
           imports={imports}
           account={importing.account}
-          target={importing.target}
+          target={accounts.find(a => a.id === importing.account.id)?.targets.find(t => t.group_id === importing.target.group_id) || importing.target}
+          prices={prices.data?.data}
           close={() => setImporting(null)}
         />
       )}

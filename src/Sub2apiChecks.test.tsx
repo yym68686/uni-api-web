@@ -1372,3 +1372,54 @@ it("shows account wallet balances using the shared thresholds", async () => {
   }
   expect(screen.getByText("$0.00")).toHaveClass("balance-warning");
 });
+
+it("shows per-request charges and pre-multiplier anomalies, and leaves anomalous imports unchecked", async () => {
+  const data = fixtures().slice(0, 1);
+  const target = data[0].targets[0];
+  const usage = {
+    status: "matched" as const, log_id: 101, request_id: "client:site-receipt", actual_cost: .00008,
+    total_cost: .0008, rate_multiplier: .1, input_tokens: 100, output_tokens: 10,
+    cache_read_tokens: 0, cache_creation_tokens: 0, input_price: 5, output_price: 30,
+    cache_read_price: null, cache_write_price: null, paid_input_price: .5, paid_output_price: 3,
+    duration_ms: 8000, first_token_ms: 200,
+  };
+  target.result!.availability = { ...target.result!.availability, id: "probe-say-test", usage };
+  target.result!.quality = { ...target.result!.quality, id: "probe-quality", usage: { ...usage, log_id: 102, actual_cost: .0007 } };
+  target.models = [
+    { model: "gpt-6-astra", state: "done", message: "", result: target.result },
+    { model: "gpt-5.6-sol", state: "done", message: "", result: { ...target.result!, model: "gpt-5.6-sol", availability: { ...target.result!.availability, usage: { ...usage, input_price: 4, output_price: 20 } } } },
+  ];
+  const prices = [
+    { model: "gpt-6-astra", input: 10, output: 50, verified: true },
+    { model: "gpt-5.6-sol", input: 4, output: 20, verified: true },
+  ];
+  vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+    const path = new URL(input).pathname;
+    if (path.endsWith("/prices")) return new Response(JSON.stringify({ data: prices }));
+    if (path.endsWith("/sub2api/channels")) return new Response(JSON.stringify({ data: [], labels: {}, unavailable_sources: [] }));
+    return new Response(JSON.stringify({ data }));
+  }));
+  const user = userEvent.setup();
+  mount();
+  await screen.findByRole("table");
+  await user.selectOptions(screen.getByLabelText("检测模型筛选"), "gpt-6-astra");
+  const table = screen.getByRole("table");
+  expect(await within(table).findByText("异常", { exact: true })).toBeVisible();
+  expect(within(table).getByText("$5/$30")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "查看 one same-group 的回复与诊断" }));
+  const detail = screen.getByRole("dialog");
+  expect(within(detail).getByRole("row", { name: /^可用性实际扣费/ })).toHaveTextContent("$0.00008");
+  expect(within(detail).getByRole("row", { name: /^降智实际扣费/ })).toHaveTextContent("$0.0007");
+  expect(within(detail).getByRole("row", { name: /^可用性倍率前单价/ })).toHaveTextContent("$5/$30");
+  expect(within(detail).getByRole("row", { name: /^可用性实付单价/ })).toHaveTextContent("$0.5/$3");
+  expect(within(detail).getByRole("row", { name: /^可用性价格设置/ })).toHaveTextContent("$10/$50");
+  await user.click(within(detail).getByRole("button", { name: "关闭检测详情" }));
+  await user.click(screen.getByRole("button", { name: "添加到渠道" }));
+  const dialog = screen.getByRole("dialog");
+  const abnormal = within(dialog).getByRole("checkbox", { name: /gpt-6-astra/ });
+  expect(abnormal).not.toBeChecked();
+  expect(abnormal).toBeEnabled();
+  expect(within(dialog).getByRole("checkbox", { name: "gpt-5.6-sol" })).toBeChecked();
+  await user.click(abnormal);
+  expect(abnormal).toBeChecked();
+});

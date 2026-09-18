@@ -188,6 +188,7 @@ func (s *Service) startBackground(ctx context.Context) <-chan struct{} {
 	if s.control != nil {
 		start(s.controlRecoveryLoop)
 		start(s.subWorkerLoop)
+		start(s.subUsageLoop)
 	}
 	start(s.syncStateLoop)
 	start(s.initializeAnalytics)
