@@ -20,13 +20,14 @@ func TestChannelCheckTargetsAndVerdicts(t *testing.T) {
 		capability                    bool
 		httpStatus                    int
 	}{
-		{"unknown", "未知", "completed", "pass", true, 200},
-		{"old", "我的知识截止到2024-06。", "completed", "fail", true, 200},
-		{"ambiguous", "未知，或2024-06", "completed", "inconclusive", true, 200},
-		{"other", "2025-01", "completed", "inconclusive", true, 200},
-		{"incomplete", "未知", "incomplete", "error", true, 200},
-		{"error text", "未知", "completed", "error", true, 500},
-		{"old gateway", "未知", "completed", "error", false, 200},
+		{"correct number", "21", "completed", "pass", true, 200},
+		{"number within answer", "最少需要取出 **21** 个糖果。", "completed", "pass", true, 200},
+		{"incorrect number", "最少需要 20 个糖果。", "completed", "fail", true, 200},
+		{"old answer", "未知，或2024-06", "completed", "fail", true, 200},
+		{"no answer", "无法确定", "completed", "fail", true, 200},
+		{"incomplete", "21", "incomplete", "error", true, 200},
+		{"error text", "21", "completed", "error", true, 500},
+		{"old gateway", "21", "completed", "error", false, 200},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var calls int
@@ -47,7 +48,7 @@ func TestChannelCheckTargetsAndVerdicts(t *testing.T) {
 				if len(body) != 2 || body["model"] != checkModel || body["input"].([]any)[0].(map[string]any)["content"] != checkPrompt {
 					t.Error("incorrect fixed payload", body)
 				}
-				writeJSON(w, tc.httpStatus, map[string]any{"status": tc.status, "output": []any{map[string]any{"type": "reasoning", "content": []any{map[string]any{"type": "output_text", "text": "2024-06"}}}, map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": tc.answer}}}}})
+				writeJSON(w, tc.httpStatus, map[string]any{"status": tc.status, "output": []any{map[string]any{"type": "reasoning", "content": []any{map[string]any{"type": "output_text", "text": "21"}}}, map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": tc.answer}}}}})
 			}))
 			defer upstream.Close()
 			result := runChannelCheck(context.Background(), controlSource{sourceView: sourceView{ID: "do", Base: upstream.URL}, Key: "test-secret"}, "selected-channel")
@@ -80,7 +81,7 @@ func TestChannelCheckPersistenceAndAuthorization(t *testing.T) {
 			return
 		}
 		hits.Add(1)
-		writeJSON(w, 200, map[string]any{"status": "completed", "output": []any{map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "未知"}}}}})
+		writeJSON(w, 200, map[string]any{"status": "completed", "output": []any{map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "21"}}}}})
 	}))
 	defer upstream.Close()
 	for _, id := range []string{"check-a", "check-b"} {
@@ -162,7 +163,7 @@ func TestChannelChecksRunAllConcurrentlyWithoutHoldingDBConnections(t *testing.T
 		case <-r.Context().Done():
 			return
 		}
-		writeJSON(w, 200, map[string]any{"status": "completed", "output": []any{map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "未知"}}}}})
+		writeJSON(w, 200, map[string]any{"status": "completed", "output": []any{map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "21"}}}}})
 	}))
 	defer upstream.Close()
 	defer unblock()

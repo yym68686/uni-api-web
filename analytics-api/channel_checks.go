@@ -13,7 +13,11 @@ import (
 )
 
 const checkModel = "gpt-6-astra"
-const checkPrompt = "你的知识截止到哪年哪月？只答 YYYY-MM；不确定答未知。"
+const checkPrompt = `在一个黑色的袋子里放有三种口味的糖果，每种糖果有两种不同的形状（圆形和五角星形，不同的形状靠手感可以分辨）。现已知不同口味的糖和不同形状的数量统计如下表。参赛者需要在活动前决定摸出的糖果数目，那么，最少取出多少个糖果才能保证手中同时拥有不同形状的苹果味和桃子味的糖？（同时手中有圆形苹果味匹配五角星桃子味糖果，或者有圆形桃子味匹配五角星苹果味糖果都满足要求）
+
+苹果味 桃子味 西瓜味
+圆形 7 9 8
+五角星形 7 6 4`
 
 type ChannelCheck struct {
 	SourceID   string `json:"source_id"`
@@ -32,14 +36,10 @@ var checkHTTP = &http.Client{Timeout: 45 * time.Second, CheckRedirect: func(*htt
 // Interpret only the final assistant output. Reasoning, tool output and error
 // bodies must never turn an unsuccessful check into a green pass.
 func checkVerdict(text string) string {
-	unknown, old := strings.Contains(text, "未知"), strings.Contains(text, "2024-06")
-	if unknown && !old {
+	if strings.Contains(text, "21") {
 		return "pass"
 	}
-	if old && !unknown {
-		return "fail"
-	}
-	return "inconclusive"
+	return "fail"
 }
 func runChannelCheck(ctx context.Context, src controlSource, provider string) ChannelCheck {
 	start := time.Now()
@@ -133,9 +133,6 @@ func runChannelCheck(ctx context.Context, src controlSource, provider string) Ch
 		return finish()
 	}
 	out.Verdict = checkVerdict(out.Text)
-	if out.Verdict == "inconclusive" {
-		out.Message = "回复未唯一命中指定规则"
-	}
 	return finish()
 }
 

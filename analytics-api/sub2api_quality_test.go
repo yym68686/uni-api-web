@@ -22,7 +22,7 @@ func TestSubProbeRecordsFirstCreatedSeparatelyFromFirstText(t *testing.T) {
 		w.(http.Flusher).Flush()
 		time.Sleep(60 * time.Millisecond)
 		// subSSE sends another created event; it must not replace the first clock.
-		subSSE(w, "未知")
+		subSSE(w, "21")
 	}))
 	defer upstream.Close()
 	result := subRunQualityProbe(context.Background(), upstream.Client(), upstream.URL, "key")
@@ -54,7 +54,7 @@ func TestSubQualityProbeUsesOneResponseForAvailabilityAndModelMatch(t *testing.T
 					http.Error(w, "unavailable", status)
 					return
 				}
-				subSSE(w, "未知", "gpt-5.6-sol")
+				subSSE(w, "21", "gpt-5.6-sol")
 			}))
 			defer upstream.Close()
 			result := subRunQualityProbe(context.Background(), upstream.Client(), upstream.URL, "key")
@@ -124,7 +124,7 @@ func TestSubQualityQueueScopesPersistsAndStops(t *testing.T) {
 		if !in.Stream || in.Model != checkModel || len(in.Input) != 1 || in.Input[0].Content != checkPrompt {
 			t.Errorf("extra probe: %+v", in)
 		}
-		subSSE(w, "未知", "gpt-5.6-sol")
+		subSSE(w, "21", "gpt-5.6-sol")
 	}))
 	defer upstream.Close()
 	previousHTTP := subHTTP

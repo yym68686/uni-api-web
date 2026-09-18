@@ -101,7 +101,10 @@ func TestSubProbeStreamMeasuresTextAndRequiresCompletion(t *testing.T) {
 	}
 }
 func TestSubProbeQualityAndFailureSeparation(t *testing.T) {
-	for _, answer := range []string{"未知", "2024-06", "未知或2024-06", "2025-01"} {
+	for _, tc := range []struct{ answer, verdict string }{
+		{"21", "pass"}, {"答案是 21 个。", "pass"}, {"20", "fail"}, {"未知", "fail"},
+	} {
+		answer := tc.answer
 		var calls int
 		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			calls++
@@ -121,7 +124,7 @@ func TestSubProbeQualityAndFailureSeparation(t *testing.T) {
 		}))
 		out := subRunProbes(context.Background(), upstream.Client(), upstream.URL, "key")
 		upstream.Close()
-		if calls != 2 || out.Verdict != checkVerdict(answer) || out.Availability.Status != "success" {
+		if calls != 2 || out.Verdict != tc.verdict || out.Availability.Status != "success" {
 			t.Fatalf("%+v", out)
 		}
 	}
@@ -228,7 +231,7 @@ func TestSubAccountLifecycleIsolationAndIdempotency(t *testing.T) {
 			json.NewDecoder(r.Body).Decode(&in)
 			answer := "test"
 			if in.Input[0].Content == checkPrompt {
-				answer = "未知"
+				answer = "21"
 			}
 			subSSE(w, answer)
 			return
@@ -528,7 +531,7 @@ func TestSubSixModelsStreamAndOnlyAstraQuality(t *testing.T) {
 			t.Error("probe is not streaming")
 		}
 		calls[b.Model] = append(calls[b.Model], b.Input[0].Content)
-		subSSE(w, "未知", b.Model)
+		subSSE(w, "21", b.Model)
 	}))
 	defer upstream.Close()
 	for _, model := range subModels {
@@ -600,7 +603,7 @@ func TestSubAstraAvailabilityMatchDoesNotUseQualityResponse(t *testing.T) {
 		if calls == 1 {
 			subSSE(w, "test", "gpt-5.6-luna")
 		} else {
-			subSSE(w, "未知", checkModel)
+			subSSE(w, "21", checkModel)
 		}
 	}))
 	defer upstream.Close()
