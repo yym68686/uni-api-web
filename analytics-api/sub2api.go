@@ -24,6 +24,9 @@ CREATE TABLE IF NOT EXISTS console_sub_accounts(
  UNIQUE(owner,base,email));
 ALTER TABLE console_sub_accounts ADD COLUMN IF NOT EXISTS balance JSONB;
 CREATE INDEX IF NOT EXISTS console_sub_accounts_owner ON console_sub_accounts(owner);
+CREATE TABLE IF NOT EXISTS console_sub_auth_locks(
+ account_id TEXT PRIMARY KEY REFERENCES console_sub_accounts(id) ON DELETE CASCADE,
+ token TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL);
 CREATE TABLE IF NOT EXISTS console_sub_targets(
  account_id TEXT NOT NULL REFERENCES console_sub_accounts(id) ON DELETE CASCADE, group_id BIGINT NOT NULL,
  name TEXT NOT NULL, platform TEXT NOT NULL, channel TEXT NOT NULL DEFAULT '', rate DOUBLE PRECISION NOT NULL DEFAULT 1,
@@ -427,39 +430,68 @@ func (s *Service) subQueueChecks(w http.ResponseWriter, r *http.Request, quality
 
 // Durable queue with leases: page reloads do not cancel work. Interrupted paid
 // requests are never automatically replayed after a process crash.
+type subJob struct {
+	id, base, kind, encrypted, token string
+}
+
 func (s *Service) subWorkerLoop(ctx context.Context) {
 	var wg sync.WaitGroup
-	for range 2 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	defer wg.Wait()
+	for ctx.Err() == nil {
+		if s.subExpireJobs(ctx) == nil {
+			// Claim before launching: every queued account gets its own worker, while
+			// the database lease still prevents duplicate work across replicas.
 			for ctx.Err() == nil {
-				if !s.subWorkOne(ctx) {
-					select {
-					case <-ctx.Done():
-						return
-					case <-time.After(time.Second):
-					}
+				job, err := s.subClaimJob(ctx)
+				if err != nil {
+					break
 				}
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					s.subRunJob(ctx, job)
+				}()
 			}
-		}()
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Second):
+		}
 	}
-	wg.Wait()
 }
-func (s *Service) subWorkOne(parent context.Context) bool {
-	ctx, cancel := context.WithTimeout(parent, 30*time.Minute)
-	defer cancel()
+
+func (s *Service) subExpireJobs(ctx context.Context) error {
 	// Expiry means the previous worker cannot report safely. Preserve old results.
 	_, err := s.control.db.ExecContext(ctx, `WITH expired AS (UPDATE console_sub_accounts SET state='interrupted',message='服务重启或任务中断，请手动重新检测',job_kind='',job_id='',lease_until=NULL WHERE state='running' AND lease_until<now() RETURNING id), targets AS (UPDATE console_sub_targets SET state='interrupted',message='上次检测中断' WHERE account_id IN (SELECT id FROM expired) AND state IN ('running','queued') RETURNING account_id) UPDATE console_sub_models SET state='interrupted',message='上次检测中断' WHERE account_id IN (SELECT id FROM expired) AND state IN ('running','queued')`)
+	return err
+}
+
+func (s *Service) subClaimJob(ctx context.Context) (subJob, error) {
+	job := subJob{token: randomID()}
+	err := s.control.db.QueryRowContext(ctx, `UPDATE console_sub_accounts SET state='running',job_id=$1,lease_until=now()+interval '30 seconds' WHERE id=(SELECT id FROM console_sub_accounts WHERE state='queued' ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING id,base,job_kind,encrypted_auth`, job.token).Scan(&job.id, &job.base, &job.kind, &job.encrypted)
+	return job, err
+}
+
+// Synchronous queue execution is useful for a caller processing a single job.
+func (s *Service) subWorkOne(ctx context.Context) bool {
+	if s.subExpireJobs(ctx) != nil {
+		return false
+	}
+	job, err := s.subClaimJob(ctx)
 	if err != nil {
 		return false
 	}
-	var id, base, kind, encrypted string
-	job := randomID()
-	err = s.control.db.QueryRowContext(ctx, `UPDATE console_sub_accounts SET state='running',job_id=$1,lease_until=now()+interval '30 seconds' WHERE id=(SELECT id FROM console_sub_accounts WHERE state='queued' ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING id,base,job_kind,encrypted_auth`, job).Scan(&id, &base, &kind, &encrypted)
-	if err != nil {
-		return false
-	}
+	s.subRunJob(ctx, job)
+	return true
+}
+
+func (s *Service) subRunJob(parent context.Context, claimed subJob) {
+	ctx, cancel := context.WithTimeout(parent, 30*time.Minute)
+	defer cancel()
+	id, base, kind, encrypted, job := claimed.id, claimed.base, claimed.kind, claimed.encrypted, claimed.token
+	var err error
+
 	heartbeatDone := make(chan struct{})
 	go func() {
 		defer close(heartbeatDone)
@@ -501,7 +533,6 @@ func (s *Service) subWorkOne(parent context.Context) bool {
 	}
 	// Fence all late completions against stop/re-login/new worker operations.
 	_, _ = s.control.db.ExecContext(finishCtx, `WITH finished AS (UPDATE console_sub_accounts SET state=$3,message=CASE WHEN $3='idle' THEN message ELSE $4 END,job_kind='',job_id='',lease_until=NULL WHERE id=$1 AND job_id=$2 RETURNING id), targets AS (UPDATE console_sub_targets SET state='interrupted',message='任务未完成，请重试' WHERE account_id IN (SELECT id FROM finished) AND state IN ('queued','running') RETURNING account_id) UPDATE console_sub_models SET state='interrupted',message='任务未完成，请重试' WHERE account_id IN (SELECT id FROM finished) AND state IN ('queued','running')`, id, job, state, message)
-	return true
 }
 
 func (s *Service) subPanel(ctx context.Context, id, base, job, encrypted string) (func(string, string, any, any, string) error, []subRemoteGroup, error) {
@@ -544,7 +575,7 @@ func (s *Service) subPanel(ctx context.Context, id, base, job, encrypted string)
 		if e != nil {
 			return nil, nil, errors.New("凭据保存失败")
 		}
-		result, e := s.control.db.ExecContext(ctx, `UPDATE console_sub_accounts SET encrypted_auth=$3 WHERE id=$1 AND job_id=$2`, id, job, enc)
+		result, e := s.control.db.ExecContext(authCtx, `UPDATE console_sub_accounts SET encrypted_auth=$3 WHERE id=$1 AND job_id=$2`, id, job, enc)
 		if e != nil {
 			return nil, nil, errors.New("凭据保存失败")
 		}

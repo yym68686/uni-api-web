@@ -18,10 +18,27 @@ type subAccountBalance struct {
 
 // Serialize token rotation with sync/import jobs, across API replicas.
 func (s *Service) subLockAuth(ctx context.Context, id string) (func(), error) {
+	// Both callers bound auth work to 15 seconds. A short lease preserves the
+	// same per-account exclusion without pinning a pool connection while a
+	// remote site responds. Otherwise simultaneous sites could exhaust the pool
+	// before their post-lock reads and heartbeat updates can run.
+	token := randomID()
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return nil, errors.New("account authentication lock requires a deadline")
+	}
 	for {
-		unlock, err := s.control.lockControls(ctx, "sub-account-auth:"+id)
+		var claimed string
+		err := s.control.db.QueryRowContext(ctx, `INSERT INTO console_sub_auth_locks(account_id,token,expires_at) VALUES($1,$2,now()+$3*interval '1 millisecond') ON CONFLICT(account_id) DO UPDATE SET token=excluded.token,expires_at=excluded.expires_at WHERE console_sub_auth_locks.expires_at<now() RETURNING token`, id, token, time.Until(deadline).Milliseconds()+5000).Scan(&claimed)
 		if err == nil {
-			return unlock, nil
+			return func() {
+				cleanup, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer cancel()
+				_, _ = s.control.db.ExecContext(cleanup, `DELETE FROM console_sub_auth_locks WHERE account_id=$1 AND token=$2`, id, token)
+			}, nil
+		}
+		if err != sql.ErrNoRows {
+			return nil, err
 		}
 		select {
 		case <-ctx.Done():
