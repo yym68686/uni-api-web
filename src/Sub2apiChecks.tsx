@@ -33,7 +33,7 @@ import {
 } from "./sub2apiResults";
 import type { SubModelCheck } from "./sub2apiResults";
 import { time } from "./format";
-import { QualityHistory, QualityProbability } from "./QualityHistory";
+import { QualityHistory, QualityProbability, qualityTooltip } from "./QualityHistory";
 import type { QualitySummary } from "./QualityHistory";
 import { SiteLink } from "./ChannelSite";
 
@@ -416,34 +416,19 @@ function AccountForm({
   );
 }
 
-function Verdict({ result }: { result: Result | null }) {
+function Verdict({ result, history }: { result: Result | null; history?: QualitySummary }) {
   if (result?.verdict === "not_applicable")
     return <span className="muted">不适用</span>;
   if (!result) return <span className="muted">未检测</span>;
   const pass = result.verdict === "pass",
     fail = result.verdict === "fail";
-  return (
-    <span
-      className={`check-status ${pass ? "pass" : fail ? "fail" : "inconclusive"}`}
-    >
-      {pass ? (
-        <Check size={16} />
-      ) : fail ? (
-        <X size={16} />
-      ) : (
-        <CircleHelp size={16} />
-      )}
-      {pass
-        ? "不降智"
-        : fail
-          ? "降智"
-          : result.quality.status === "skipped"
-            ? "未检测"
-            : result.quality.status === "error"
-              ? "检测失败"
-              : "无法判定"}
+  const status = (
+    <span className={`check-status ${pass ? "pass" : fail ? "fail" : "inconclusive"}`}>
+      {pass ? <Check size={16} /> : fail ? <X size={16} /> : <CircleHelp size={16} />}
+      {pass ? "不降智" : fail ? "降智" : result.quality.status === "skipped" ? "未检测" : result.quality.status === "error" ? "检测失败" : "无法判定"}
     </span>
   );
+  return history && history.total > 0 ? <Tip text={qualityTooltip(history, result.checked_at)}>{status}</Tip> : status;
 }
 
 function AvailabilityStatus({ check }: { check: SubModelCheck }) {
@@ -682,7 +667,7 @@ function CheckDetails({
               {check.model === "gpt-6-astra" && (
                 <>
                   <DetailRow label="Astra 降智">
-                    <Verdict result={result} />
+                    <div className="quality-status-stack"><Verdict result={result} history={target.history} /><QualityProbability history={target.history} checkedAt={result?.checked_at} /></div>
                   </DetailRow>
                   <DetailRow label="降智检测耗时">
                     {latency(result?.quality.duration_ms ?? null)}
@@ -737,6 +722,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
     sort,
     availability,
     quality,
+    minQuality,
     platform,
   } = filters;
   useEffect(() => saveSubFilters(user, filters), [user, filters]);
@@ -793,9 +779,12 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                   ? !check.result
                   : check.result?.availability.status === availability,
               )) &&
-            (!quality || astra.result?.verdict === quality),
+            (!quality || astra.result?.verdict === quality) &&
+            (minQuality === "" ||
+              (!!target.history?.successful &&
+                target.history.passed * 100 >= Number(minQuality) * target.history.successful)),
         ),
-    [accounts, search, accountId, availability, quality, model],
+    [accounts, search, accountId, availability, quality, minQuality, model],
   );
   const rates = [
     ...new Set(
@@ -1278,6 +1267,22 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
             </select>
             <ChevronDown size={13} />
           </label>
+          <label className="select-field">
+            <select
+              aria-label="不降智概率筛选"
+              value={minQuality}
+              onChange={(e) => {
+                setFilters((v) => ({ ...v, minQuality: e.target.value }));
+                setPage(0);
+              }}
+            >
+              <option value="">全部不降智概率</option>
+              {Array.from({ length: 11 }, (_, i) => i * 10).map((percent) => (
+                <option key={percent} value={percent}>不降智 ≥ {percent}%</option>
+              ))}
+            </select>
+            <ChevronDown size={13} />
+          </label>
         </div>
         {rows.length === 0 ? (
           <Empty title={accounts.length ? "没有匹配的分组" : "尚无检测结果"}>
@@ -1364,8 +1369,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                           )}
                         </td>
                         <td>
-                          <Verdict result={astra.result} />
-                          <QualityProbability history={t.history} />
+                          <div className="quality-status-stack"><Verdict result={astra.result} history={t.history} /><QualityProbability history={t.history} checkedAt={astra.result?.checked_at} /></div>
                         </td>
                         <td>
                           <CheckDetails

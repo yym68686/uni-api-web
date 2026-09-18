@@ -6,7 +6,7 @@ import { providerId, channelName } from "./format";
 import type { Channel } from "./types";
 import type { InstalledChannel } from "./sub2apiImports";
 import { Spinner, Tip } from "./ui";
-import { QualityProbability } from "./QualityHistory";
+import { QualityProbability, qualityTooltip } from "./QualityHistory";
 import type { QualitySummary } from "./QualityHistory";
 
 export interface ChannelCheck {
@@ -226,9 +226,10 @@ export function LatestChannelCheck({
     <td className="latest-channel-check">
       {result ? (
         <>
-          <Tip
-            text={
-              <>
+          <div className="quality-status-stack">
+            <Tip
+              text={
+                <>
                 <div>
                   最近检测：
                   {new Date(result.checked_at * 1000).toLocaleString("zh-CN", {
@@ -236,17 +237,15 @@ export function LatestChannelCheck({
                   })}
                 </div>
                 <div>检测模型：{result.model}{result.origin ? ` · ${result.origin}` : ""}</div>
+                {result.history && result.history.total > 0 && <div>{qualityTooltip(result.history, result.checked_at, result.origin)}</div>}
                 <div>{result.text || result.message || "未返回有效回复"}</div>
-              </>
-            }
-          >
-            <CheckVerdict result={result} />
-          </Tip>
-          <QualityProbability
-            history={result.history}
-            checkedAt={result.checked_at}
-            origin={result.origin}
-          />
+                </>
+              }
+            >
+              <CheckVerdict result={result} />
+            </Tip>
+            <QualityProbability history={result.history} checkedAt={result.checked_at} origin={result.origin} />
+          </div>
         </>
       ) : (
         !pending && (

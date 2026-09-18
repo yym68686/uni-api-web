@@ -295,7 +295,14 @@ func (s *Service) subManageChannel(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	applied, status, e := subGateway(r.Context(), src, "POST", "/v1/temporary-channels", map[string]any{"action": in.Action, "revision": in.Revision, "api_key_id": key, "provider": provider, "models": in.Models, "position": in.Position})
+	mutation := map[string]any{"action": in.Action, "revision": in.Revision, "api_key_id": key, "provider": provider}
+	// Delete has no model/position payload. A nil Go slice becomes JSON null,
+	// which the gateway rejects when decoding its Vec<String> before dispatch.
+	if in.Action == "replace" {
+		mutation["models"] = in.Models
+		mutation["position"] = in.Position
+	}
+	applied, status, e := subGateway(r.Context(), src, "POST", "/v1/temporary-channels", mutation)
 	if e != nil {
 		http.Error(w, e.Error(), status)
 		return

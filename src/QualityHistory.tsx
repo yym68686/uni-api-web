@@ -9,6 +9,19 @@ export interface QualitySummary {
   successful: number;
   passed: number;
 }
+export function qualityTooltip(
+  history: QualitySummary,
+  checkedAt?: number,
+  origin?: string,
+) {
+  const probability = rate(
+    history.successful ? history.passed / history.successful : null,
+  );
+  const checked = checkedAt
+    ? new Date(checkedAt * 1000).toLocaleString("zh-CN", { hour12: false })
+    : "";
+  return `不降智概率：${probability}。不降智次数 ÷ 成功检测次数：${history.passed} / ${history.successful}。累计 ${history.total} 次记录；失败、超时、取消及未执行的检测不计入分母。${checked ? ` 最近检测：${checked}${origin ? ` · ${origin}` : ""}` : ""}`;
+}
 export function QualityProbability({
   history,
   checkedAt,
@@ -19,15 +32,15 @@ export function QualityProbability({
   origin?: string;
 }) {
   if (!history || history.total === 0) return null;
-  const checked = checkedAt
-    ? new Date(checkedAt * 1000).toLocaleString("zh-CN", { hour12: false })
-    : "";
+  const probability = history.successful
+    ? history.passed / history.successful
+    : null;
   return (
-    <Tip
-      text={`不降智次数 ÷ 成功检测次数：${history.passed} / ${history.successful}。累计 ${history.total} 次记录；失败、超时、取消及未执行的检测不计入分母。${checked ? ` 最近检测：${checked}${origin ? ` · ${origin}` : ""}` : ""}`}
-    >
-      <small className="quality-probability">
-        {rate(history.successful ? history.passed / history.successful : null)}
+    <Tip text={qualityTooltip(history, checkedAt, origin)}>
+      <small
+        className={`quality-probability ${probability === null ? "quality-unknown" : probability === 1 ? "quality-perfect" : probability >= 0.9 ? "quality-partial" : "quality-poor"}`}
+      >
+        {rate(probability)}
       </small>
     </Tip>
   );
@@ -68,7 +81,6 @@ export function QualityHistory({ path, revision, title = "降智检测历史" }:
     <section className="quality-history">
       <button className="button small" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? "收起" : "查看"}{title}</button>
       {expanded && <>
-        {query.data && <QualityProbability history={query.data.pages[0].summary} />}
         {query.isPending ? <p className="muted"><Spinner small /> 正在读取历史…</p> : query.isError ? <p role="alert">历史读取失败 <button className="button small" onClick={() => void query.refetch()}>重试</button></p> : !entries.length ? <p className="muted">暂无检测记录。</p> : (
           <div className="quality-history-scroll">
             <table className="quality-history-table" aria-label={title}>

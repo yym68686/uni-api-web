@@ -77,7 +77,7 @@ import { SiteLink, useChannelSites, dashboardURL } from "./ChannelSite";
 import { ChannelAccess } from "./ChannelAccess";
 import { CacheTrend } from "./CacheTrend";
 import type { CacheTrendProps } from "./CacheTrend";
-import { QualityHistory, QualityProbability } from "./QualityHistory";
+import { QualityHistory, QualityProbability, qualityTooltip } from "./QualityHistory";
 import type { ChannelCheck } from "./ChannelChecks";
 import { channelName } from "./format";
 import { Sub2apiChecks } from "./Sub2apiChecks";
@@ -800,7 +800,7 @@ function Detail({
               <CacheTrend key={`${providerId(row)}:${row.model}`} row={row} {...trend} />
               {row.source_id && trend.connection.account && <section className="detail-section">
                 <h3>降智检测</h3>
-                {check ? <><CheckVerdict result={check} /><QualityProbability history={check.history} checkedAt={check.checked_at} origin={check.origin} /></> : <p className="muted">暂无检测结果。</p>}
+                {check ? <div className="quality-status-stack"><Tip text={check.history && check.history.total > 0 ? qualityTooltip(check.history, check.checked_at, check.origin) : `最近检测：${new Date(check.checked_at * 1000).toLocaleString("zh-CN", { hour12: false })}`}><CheckVerdict result={check} /></Tip><QualityProbability history={check.history} checkedAt={check.checked_at} origin={check.origin} /></div> : <p className="muted">暂无检测结果。</p>}
                 <QualityHistory key={providerId(row)} path={`/v1/sources/${encodeURIComponent(row.source_id)}/channel-checks/history?${new URLSearchParams({ provider: row.provider })}`} revision={`${check?.checked_at}:${check?.history?.total}:${check?.history?.successful}`} title="渠道检测记录" />
                 {installed && <QualityHistory key={`${installed.account_id}:${installed.group_id}`} path={`/v1/sub2api/accounts/${encodeURIComponent(installed.account_id)}/groups/${installed.group_id}/quality-history`} revision={`${check?.checked_at}:${check?.history?.total}:${check?.history?.successful}`} title="sub2api 检测记录" />}
               </section>}

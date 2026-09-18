@@ -7,6 +7,7 @@ export const subFilterDefaults = {
   sort: "",
   availability: "",
   quality: "",
+  minQuality: "",
   platform: "",
 };
 export type SubFilters = typeof subFilterDefaults;
@@ -33,6 +34,7 @@ function validate(raw: unknown): SubFilters {
     sort: field("sort", ["", "asc", "desc"]),
     availability: field("availability", ["", "success", "error", "untested"]),
     quality: field("quality", ["", "pass", "fail", "inconclusive", "error"]),
+    minQuality: field("minQuality", ["", ...Array.from({ length: 11 }, (_, i) => String(i * 10))]),
   };
 }
 export function loadSubFilters(user: string): SubFilters {

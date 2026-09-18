@@ -897,6 +897,55 @@ it("shows model matching separately from availability, including missing and his
   ).toBeChecked();
 });
 
+it("filters quality thresholds from successful history and applies the selection to batch checks", async () => {
+  const data = fixtures().slice(0, 1);
+  const template = data[0].targets[0];
+  data[0].targets = [0, 89, 90, 95, 100].map((passed, i) => ({
+    ...template,
+    group_id: i + 1,
+    name: `probability-${passed}`,
+    // Failed requests increase total, never the probability denominator.
+    history: { passed, successful: 100, total: 120 },
+  }));
+  data[0].targets.push({ ...template, group_id: 6, name: "no-success", history: { passed: 0, successful: 0, total: 3 } });
+  const writes: { body: { targets: { group_id: number }[] } }[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+    if (init?.method === "POST") {
+      writes.push({ body: JSON.parse(String(init.body)) });
+      return new Response("{}", { status: 202 });
+    }
+    return new Response(JSON.stringify(input.endsWith("/accounts") ? { data } : { data: [], labels: {}, unavailable_sources: [] }));
+  }));
+  const user = userEvent.setup();
+  let view = mount("quality-threshold");
+  await screen.findByText("probability-100");
+  const filter = screen.getByLabelText("不降智概率筛选");
+  expect(within(filter).getAllByRole("option")).toHaveLength(12);
+  expect(screen.getByText("100.0%")).toHaveClass("quality-perfect");
+  expect(screen.getByText("90.0%")).toHaveClass("quality-partial");
+  expect(screen.getByText("95.0%")).toHaveClass("quality-partial");
+  expect(screen.getByText("89.0%")).toHaveClass("quality-poor");
+  expect(screen.getByText("0.0%")).toHaveClass("quality-poor");
+  await user.selectOptions(filter, "0");
+  expect(screen.queryByText("no-success")).not.toBeInTheDocument();
+  expect(screen.getByText("probability-0")).toBeVisible();
+  await user.selectOptions(filter, "90");
+  expect(screen.queryByText("probability-89")).not.toBeInTheDocument();
+  expect(screen.getByText("probability-90")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "降智检测 · 3 个渠道" }));
+  expect(writes[0].body.targets.map((target) => target.group_id)).toEqual([3, 4, 5]);
+  await user.selectOptions(filter, "100");
+  expect(screen.queryByText("probability-95")).not.toBeInTheDocument();
+  expect(screen.getByText("probability-100")).toBeVisible();
+  view.unmount();
+  view = mount("quality-threshold");
+  expect(screen.getByLabelText("不降智概率筛选")).toHaveValue("100");
+  await screen.findByText("probability-100");
+  view.unmount();
+  mount("quality-other");
+  expect(screen.getByLabelText("不降智概率筛选")).toHaveValue("");
+});
+
 it("persists every filter per user and derives platform options from other filters", async () => {
   const data = fixtures();
   data[1].targets[0].platform = "anthropic";

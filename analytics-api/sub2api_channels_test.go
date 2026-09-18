@@ -39,6 +39,14 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 	}
 	provider := subProviderName(account, 7, key)
 	otherProvider := subProviderName(account, 7, other)
+	// A second group was inserted at position 1 on the same caller key,
+	// shifting the first group down. Deleting the first must preserve this one.
+	_, e = store.db.Exec(`INSERT INTO console_sub_targets(account_id,group_id,name,platform,encrypted_routing_key) VALUES($1,8,'Second group','openai',$2)`, account, routeSecret)
+	if e != nil {
+		t.Fatal(e)
+	}
+	newFirst := subProviderName(account, 8, key)
+	order := []string{newFirst, provider, "existing"}
 	revision := "boot:1"
 	models := []string{checkModel, "gpt-5.6-sol"}
 	deleted := false
@@ -52,23 +60,34 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 		case "/v1/api-keys":
 			writeJSON(w, 200, map[string]any{"data": []any{map[string]any{"key_id": key, "prefix": "masked-one", "position": 1}, map[string]any{"key_id": other, "prefix": "masked-two", "position": 2}}})
 		case "/v1/channel-controls":
-			temporary := []any{map[string]any{"provider": otherProvider, "api_key_id": other, "models": []string{checkModel}}}
+			temporary := []any{map[string]any{"provider": otherProvider, "api_key_id": other, "models": []string{checkModel}}, map[string]any{"provider": newFirst, "api_key_id": key, "models": []string{checkModel}}}
 			if !deleted {
 				temporary = append(temporary, map[string]any{"provider": provider, "api_key_id": key, "models": models})
 			}
-			writeJSON(w, 200, map[string]any{"instance_id": "boot", "revision": revision, "temporary_channel_management": true, "temporary_channels": temporary, "rules": []any{map[string]any{"api_key_id": key, "model": checkModel, "order": []string{"existing", provider}}}})
+			writeJSON(w, 200, map[string]any{"instance_id": "boot", "revision": revision, "temporary_channel_management": true, "temporary_channels": temporary, "rules": []any{map[string]any{"api_key_id": key, "model": checkModel, "order": order}}})
 		case "/v1/temporary-channels":
-			writes++
+			last = nil
 			json.NewDecoder(r.Body).Decode(&last)
+			// Match the Rust gateway's Vec<String> decoding: absent defaults
+			// to [], but null is rejected before the action can run.
+			if models, present := last["models"]; present {
+				if _, ok := models.([]any); !ok {
+					http.Error(w, "invalid type: null, expected a sequence", 400)
+					return
+				}
+			}
 			if last["revision"] != revision {
 				http.Error(w, "conflict", 409)
 				return
 			}
+			writes++
 			if last["action"] == "delete" {
 				deleted = true
+				order = []string{newFirst, "existing"}
 			} else {
 				raw, _ := json.Marshal(last["models"])
 				json.Unmarshal(raw, &models)
+				order = []string{provider, newFirst, "existing"}
 			}
 			revision = "boot:" + string(rune('1'+writes))
 			writeJSON(w, 200, map[string]any{"instance_id": "boot", "revision": revision})
@@ -106,7 +125,7 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 		Labels map[string]map[string]string `json:"labels"`
 	}
 	json.Unmarshal(w.Body.Bytes(), &listing)
-	if len(listing.Data) != 2 || listing.Labels[source][provider] != "My Site-0.18" {
+	if len(listing.Data) != 3 || listing.Labels[source][provider] != "My Site-0.18" {
 		t.Fatal("missing live association", w.Body.String())
 	}
 	for _, v := range listing.Data {
@@ -170,13 +189,27 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 	if w = request("PATCH", session, in); w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}
+	if _, ok := last["models"]; ok {
+		t.Fatal("delete must not send replacement models")
+	}
+	if _, ok := last["position"]; ok {
+		t.Fatal("delete must not send a position")
+	}
 	if w := readInfo(session, "true"); w.Code != 404 {
 		t.Fatal("deleted channel still exposes credential", w.Code)
 	}
 	w = request("GET", session, nil)
 	json.Unmarshal(w.Body.Bytes(), &listing)
-	if len(listing.Data) != 1 || listing.Data[0].Provider != otherProvider {
+	if len(listing.Data) != 2 {
 		t.Fatal("other binding lost", w.Body.String())
+	}
+	for _, item := range listing.Data {
+		if item.Provider == newFirst && (item.KeyID != key || item.Positions[checkModel] != 1) {
+			t.Fatal("the other group lost first priority", item)
+		}
+		if item.Provider != newFirst && item.Provider != otherProvider {
+			t.Fatal("wrong channel survived deletion", item.Provider)
+		}
 	}
 	if _, exists := listing.Labels[source][provider]; exists {
 		t.Fatal("deleted channel unnecessarily expanded label response")
