@@ -15,7 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { controlRequest } from "./api";
-import { LatencyBadge } from "./LatencyBadge";
+import { ResponseLatency } from "./LatencyBadge";
 import { Empty, Spinner, Tip } from "./ui";
 import { loadSubFilters, saveSubFilters } from "./sub2apiPreferences";
 import { useSubImports } from "./sub2apiImports";
@@ -38,6 +38,7 @@ interface Probe {
   text: string;
   message?: string;
   ttft_ms: number | null;
+  response_created_ms?: number | null;
   duration_ms: number;
   http_status?: number;
 }
@@ -468,7 +469,10 @@ function ModelResults({ checks }: { checks: SubModelCheck[] }) {
           <div className="sub-model-result-status">
             <AvailabilityStatus check={check} />
             <ModelMatch check={check} />
-            <LatencyBadge value={check.result?.availability.ttft_ms} />
+            <ResponseLatency
+              created={check.result?.availability.response_created_ms}
+              text={check.result?.availability.ttft_ms}
+            />
           </div>
           <ProbeDetails check={check} />
           {check.result && (
@@ -1065,8 +1069,11 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                           )}
                         </td>
                         <td className="mono">
-                          <LatencyBadge
-                            value={selected?.result?.availability.ttft_ms}
+                          <ResponseLatency
+                            created={
+                              selected?.result?.availability.response_created_ms
+                            }
+                            text={selected?.result?.availability.ttft_ms}
                           />
                         </td>
                         <td>

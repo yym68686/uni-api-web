@@ -166,15 +166,16 @@ type subRemoteKey struct {
 }
 
 type subProbe struct {
-	RequestedModel string `json:"requested_model,omitempty"`
-	ResponseModel  string `json:"response_model,omitempty"`
-	ModelMatch     string `json:"model_match,omitempty"`
-	Status         string `json:"status"`
-	Text           string `json:"text"`
-	Message        string `json:"message,omitempty"`
-	TTFT           *int64 `json:"ttft_ms"`
-	Duration       int64  `json:"duration_ms"`
-	HTTPStatus     int    `json:"http_status,omitempty"`
+	RequestedModel    string `json:"requested_model,omitempty"`
+	ResponseModel     string `json:"response_model,omitempty"`
+	ModelMatch        string `json:"model_match,omitempty"`
+	Status            string `json:"status"`
+	Text              string `json:"text"`
+	Message           string `json:"message,omitempty"`
+	TTFT              *int64 `json:"ttft_ms"`
+	ResponseCreatedMS *int64 `json:"response_created_ms"`
+	Duration          int64  `json:"duration_ms"`
+	HTTPStatus        int    `json:"http_status,omitempty"`
 }
 type subResult struct {
 	Model        string   `json:"model"`
@@ -257,6 +258,11 @@ func subProbeStream(ctx context.Context, client *http.Client, base, key, prompt 
 		case "error", "response.failed", "response.incomplete":
 			out.Message = "模型响应失败或未完成"
 			return true
+		case "response.created":
+			if out.ResponseCreatedMS == nil {
+				ms := time.Since(start).Milliseconds()
+				out.ResponseCreatedMS = &ms
+			}
 		case "response.output_text.delta":
 			if event.Delta != "" {
 				if out.TTFT == nil {

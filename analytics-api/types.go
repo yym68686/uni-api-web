@@ -25,6 +25,8 @@ type Fact struct {
 	DurationMS         *float64 `json:"duration_ms"`
 	DispatchMS         *float64 `json:"dispatch_ms"`
 	FirstOutputMS      *float64 `json:"first_output_ms"`
+	ResponseCreatedMS  *float64 `json:"response_created_ms"`
+	FirstTextMS        *float64 `json:"first_text_ms"`
 	InputTokens        *int64   `json:"input_tokens"`
 	OutputTokens       *int64   `json:"output_tokens"`
 	CacheReadTokens    *int64   `json:"cache_read_tokens"`

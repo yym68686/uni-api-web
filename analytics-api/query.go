@@ -39,6 +39,11 @@ type Summary struct {
 	FirstSum, DispatchSum     float64  `json:"-"`
 	LastMS                    int64    `json:"-"`
 	LastFirst, LastDispatch   *float64 `json:"-"`
+	CreatedBins, TextBins     []int64  `json:"-"`
+	CreatedCount, TextCount   int64    `json:"-"`
+	CreatedSum, TextSum       float64  `json:"-"`
+	LastCreated, LastText     *float64 `json:"-"`
+	LastCreatedMS, LastTextMS int64    `json:"-"`
 }
 
 func (s *Summary) merge(x Summary) {
@@ -63,6 +68,10 @@ func (s *Summary) merge(x Summary) {
 	s.DispatchCount += x.DispatchCount
 	s.FirstSum += x.FirstSum
 	s.DispatchSum += x.DispatchSum
+	s.CreatedCount += x.CreatedCount
+	s.TextCount += x.TextCount
+	s.CreatedSum += x.CreatedSum
+	s.TextSum += x.TextSum
 	mergeBins := func(dst *[]int64, src []int64) {
 		if len(*dst) == 0 {
 			*dst = make([]int64, len(histogramBounds))
@@ -75,6 +84,16 @@ func (s *Summary) merge(x Summary) {
 	}
 	mergeBins(&s.FirstBins, x.FirstBins)
 	mergeBins(&s.DispatchBins, x.DispatchBins)
+	mergeBins(&s.CreatedBins, x.CreatedBins)
+	mergeBins(&s.TextBins, x.TextBins)
+	if x.LastCreated != nil && x.LastCreatedMS > s.LastCreatedMS {
+		s.LastCreated = x.LastCreated
+		s.LastCreatedMS = x.LastCreatedMS
+	}
+	if x.LastText != nil && x.LastTextMS > s.LastTextMS {
+		s.LastText = x.LastText
+		s.LastTextMS = x.LastTextMS
+	}
 	if x.LastMS > s.LastMS {
 		s.LastMS = x.LastMS
 		s.LastFirst = x.LastFirst
@@ -127,6 +146,8 @@ func (s Summary) JSON() map[string]any {
 	out["estimated_cost_usd"] = estimate
 	out["cost_basis"] = "current_model_prices"
 	out["first_output"] = distribution(s.FirstBins, s.FirstCount, s.FirstSum, s.LastFirst)
+	out["response_created"] = distribution(s.CreatedBins, s.CreatedCount, s.CreatedSum, s.LastCreated)
+	out["first_text"] = distribution(s.TextBins, s.TextCount, s.TextSum, s.LastText)
 	out["request_to_dispatch"] = distribution(s.DispatchBins, s.DispatchCount, s.DispatchSum, s.LastDispatch)
 	out["last_success_at"] = nil
 	out["inflight"] = nil
@@ -201,7 +222,7 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 		args = append(args, f.Stream == "true")
 	}
 	where, args = sourceWhere(where, args, f)
-	q := `SELECT source_id,kind,provider,model,upstream_model,endpoint,stream,outcome,sum(n)::BIGINT,sum(input_tokens)::BIGINT,sum(output_tokens)::BIGINT,sum(cache_read_tokens)::BIGINT,sum(cache_write_tokens)::BIGINT,sum(cache_write_1h_tokens)::BIGINT,sum(usage_samples)::BIGINT,sum(cache_samples)::BIGINT,sum(actual_cost_usd),sum(actual_cost_samples)::BIGINT,to_json(` + mergeHistogramSQL("first_bins") + `),to_json(` + mergeHistogramSQL("dispatch_bins") + `),sum(first_count)::BIGINT,sum(dispatch_count)::BIGINT,sum(first_sum),sum(dispatch_sum),max(last_ms),arg_max(last_first,last_ms),arg_max(last_dispatch,last_ms) FROM rollups WHERE ` + strings.Join(where, " AND ") + ` GROUP BY source_id,kind,provider,model,upstream_model,endpoint,stream,outcome`
+	q := `SELECT source_id,kind,provider,model,upstream_model,endpoint,stream,outcome,sum(n)::BIGINT,sum(input_tokens)::BIGINT,sum(output_tokens)::BIGINT,sum(cache_read_tokens)::BIGINT,sum(cache_write_tokens)::BIGINT,sum(cache_write_1h_tokens)::BIGINT,sum(usage_samples)::BIGINT,sum(cache_samples)::BIGINT,sum(actual_cost_usd),sum(actual_cost_samples)::BIGINT,to_json(` + mergeHistogramSQL("first_bins") + `),to_json(` + mergeHistogramSQL("dispatch_bins") + `),sum(first_count)::BIGINT,sum(dispatch_count)::BIGINT,sum(first_sum),sum(dispatch_sum),max(last_ms),arg_max(last_first,last_ms),arg_max(last_dispatch,last_ms),to_json(` + mergeHistogramSQL("created_bins") + `),coalesce(sum(created_count),0)::BIGINT,coalesce(sum(created_sum),0),arg_max(last_created,last_ms),to_json(` + mergeHistogramSQL("text_bins") + `),coalesce(sum(text_count),0)::BIGINT,coalesce(sum(text_sum),0),arg_max(last_text,last_ms),coalesce(max(last_ms) FILTER (WHERE last_created IS NOT NULL),0),coalesce(max(last_ms) FILTER (WHERE last_text IS NOT NULL),0) FROM rollups WHERE ` + strings.Join(where, " AND ") + ` GROUP BY source_id,kind,provider,model,upstream_model,endpoint,stream,outcome`
 	prices, err := e.Prices(ctx)
 	if err != nil {
 		return QueryResult{}, err
@@ -222,14 +243,16 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 	for rows.Next() {
 		var sourceID, kind, provider, model, upstream, endpoint, outcome string
 		var stream bool
-		var firstValue, dispatchValue any
+		var firstValue, dispatchValue, createdValue, textValue any
 		var n int64
 		var s Summary
-		if err = rows.Scan(&sourceID, &kind, &provider, &model, &upstream, &endpoint, &stream, &outcome, &n, &s.Input, &s.Output, &s.CacheRead, &s.CacheWrite, &s.CacheWrite1h, &s.UsageSamples, &s.CacheSamples, &s.ActualUSD, &s.ActualSamples, &firstValue, &dispatchValue, &s.FirstCount, &s.DispatchCount, &s.FirstSum, &s.DispatchSum, &s.LastMS, &s.LastFirst, &s.LastDispatch); err != nil {
+		if err = rows.Scan(&sourceID, &kind, &provider, &model, &upstream, &endpoint, &stream, &outcome, &n, &s.Input, &s.Output, &s.CacheRead, &s.CacheWrite, &s.CacheWrite1h, &s.UsageSamples, &s.CacheSamples, &s.ActualUSD, &s.ActualSamples, &firstValue, &dispatchValue, &s.FirstCount, &s.DispatchCount, &s.FirstSum, &s.DispatchSum, &s.LastMS, &s.LastFirst, &s.LastDispatch, &createdValue, &s.CreatedCount, &s.CreatedSum, &s.LastCreated, &textValue, &s.TextCount, &s.TextSum, &s.LastText, &s.LastCreatedMS, &s.LastTextMS); err != nil {
 			return QueryResult{}, err
 		}
 		s.FirstBins = histogramValues(firstValue)
 		s.DispatchBins = histogramValues(dispatchValue)
+		s.CreatedBins = histogramValues(createdValue)
+		s.TextBins = histogramValues(textValue)
 		if p, ok := priceMap[model]; ok && p.Verified && s.UsageSamples > 0 {
 			ordinary := max(0, s.Input-s.CacheRead-s.CacheWrite)
 			write5 := max(0, s.CacheWrite-s.CacheWrite1h)

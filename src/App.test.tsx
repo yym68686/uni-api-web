@@ -20,7 +20,8 @@ const rows = ["first", "second", "third"].map((provider, i) => ({
     failed: i === 0 ? 1 : 0,
     success_rate_denominator: i === 0 ? 4 : 0,
     success_rate: i === 0 ? 0.75 : null,
-    first_output: { p50_ms: 1500, p95_ms: 3000, sample_count: 4 },
+    response_created: { p50_ms: 1500, p95_ms: 3000, sample_count: 4 },
+    first_text: { p50_ms: 5500, p95_ms: 9000, sample_count: 4 },
     request_to_dispatch: {
       p50_ms: 50,
       p95_ms: 100,

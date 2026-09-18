@@ -81,9 +81,11 @@ export function BalanceValue({
 }
 export function Timing({
   value,
+  text,
   wait = false,
 }: {
   value?: Distribution;
+  text?: Distribution;
   wait?: boolean;
 }) {
   return (
@@ -93,12 +95,21 @@ export function Timing({
           <strong>
             {wait
               ? "请求进入 uni-api → 渠道 HTTP 发起前"
-              : "渠道请求发起 → 首次语义输出"}
+              : "渠道请求发起 → 首个 response.created"}
           </strong>
           <br />
           p95 {ms(value?.p95_ms)} · 最近 {ms(value?.last_ms)}
           <br />
           {count(value?.sample_count || 0)} 次样本 · 分位值为直方图上界估计
+          {!wait && (
+            <>
+              <br />
+              首个 response.output_text.delta：p50 {ms(text?.p50_ms)} · p95{" "}
+              {ms(text?.p95_ms)} · 最近 {ms(text?.last_ms)}
+              <br />
+              {count(text?.sample_count || 0)} 次正文首字样本
+            </>
+          )}
           {wait && (
             <>
               <br />
@@ -153,7 +164,7 @@ export function ChannelMetricHeaders({
         </Tip>
       </th>
       <th>
-        首输出 <small>p50 / p95</small>
+        首字延迟 <small>p50 / p95</small>
       </th>
       <th>Token / 缓存率</th>
       <th>估算消费</th>
@@ -219,9 +230,12 @@ export function ChannelMetricCells({
       </td>
       <td>
         <div className="dual-metric">
-          <Timing value={row.stats?.first_output} />
+          <Timing
+            value={row.stats?.response_created}
+            text={row.stats?.first_text}
+          />
           <span className="muted mono">
-            {ms(row.stats?.first_output?.p95_ms)}
+            {ms(row.stats?.response_created?.p95_ms)}
           </span>
         </div>
       </td>

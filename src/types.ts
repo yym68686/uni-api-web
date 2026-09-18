@@ -37,6 +37,8 @@ export interface Stats {
   client_cancelled: number;
   hedge_cancelled: number;
   first_output?: Distribution;
+  response_created?: Distribution;
+  first_text?: Distribution;
   request_to_dispatch?: Distribution;
   last_success_at: number | null;
 }

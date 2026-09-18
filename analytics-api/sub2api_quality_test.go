@@ -12,7 +12,24 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
+
+func TestSubProbeRecordsFirstCreatedSeparatelyFromFirstText(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"type\":\"response.created\",\"response\":{}}\n\n")
+		w.(http.Flusher).Flush()
+		time.Sleep(60 * time.Millisecond)
+		// subSSE sends another created event; it must not replace the first clock.
+		subSSE(w, "未知")
+	}))
+	defer upstream.Close()
+	result := subRunQualityProbe(context.Background(), upstream.Client(), upstream.URL, "key")
+	if result.Availability.ResponseCreatedMS == nil || result.Availability.TTFT == nil || *result.Availability.TTFT-*result.Availability.ResponseCreatedMS < 40 {
+		t.Fatalf("created and first text clocks were conflated: %+v", result)
+	}
+}
 
 func TestSubQualityProbeUsesOneResponseForAvailabilityAndModelMatch(t *testing.T) {
 	for _, status := range []int{200, 503} {

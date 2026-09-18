@@ -65,7 +65,7 @@ import {
   ChannelControlActions,
 } from "./ChannelControls";
 import { SourceSettings } from "./SourceSettings";
-import { LatencyBadge } from "./LatencyBadge";
+import { ResponseLatency } from "./LatencyBadge";
 import { useSubImports } from "./sub2apiImports";
 import { channelName } from "./format";
 import { Sub2apiChecks } from "./Sub2apiChecks";
@@ -514,7 +514,7 @@ function Welcome({
               <small>路由观测</small>
             </div>
             <div className="route-destinations">
-              {["首输出延迟", "请求前等待", "渠道余额"].map((label, i) => (
+              {["首字延迟", "请求前等待", "渠道余额"].map((label, i) => (
                 <div className="route-node destination" key={label}>
                   <span className={`node-dot tone-${i}`} />
                   {label}
@@ -792,11 +792,11 @@ function Detail({
                   </div>
                   <div>
                     <span className="track-dot end" />
-                    <small>收到首输出</small>
+                    <small>响应已创建</small>
                     <strong>
-                      + <LatencyBadge value={row.stats?.first_output?.p50_ms} />
+                      + <ResponseLatency created={row.stats?.response_created?.p50_ms} text={row.stats?.first_text?.p50_ms} />
                     </strong>
-                    <span>渠道首输出 p50</span>
+                    <span>渠道首字 p50</span>
                   </div>
                 </div>
                 <dl className="detail-stats">
@@ -819,12 +819,12 @@ function Detail({
                     <dd>{time(row.stats?.last_success_at)}</dd>
                   </div>
                   <div>
-                    <dt>首输出 p95</dt>
-                    <dd>{ms(row.stats?.first_output?.p95_ms)}</dd>
+                    <dt>首字延迟 p95</dt>
+                    <dd>{ms(row.stats?.response_created?.p95_ms)}</dd>
                   </div>
                   <div>
-                    <dt>最近一次首输出</dt>
-                    <dd>{ms(row.stats?.first_output?.last_ms)}</dd>
+                    <dt>最近一次首字延迟</dt>
+                    <dd>{ms(row.stats?.response_created?.last_ms)}</dd>
                   </div>
                 </dl>
               </div>
@@ -897,8 +897,8 @@ function Guide({ open, onClose }: { open: boolean; onClose: () => void }) {
                 "从请求进入 uni-api，到发起当前渠道 HTTP 请求前。包含请求体读取、排队和前序重试；p50 反映窗口内的典型等待。",
               ],
               [
-                "首输出延迟",
-                "当前渠道请求开始到首次语义输出的耗时。与请求前等待分别聚合，分位值不可直接相加。p50 / p95 是直方图上界估计。",
+                "首字延迟",
+                "当前渠道请求开始到首个 response.created 的耗时；tooltip 另列首个 response.output_text.delta 的延迟。未采集创建事件的历史或非流式请求显示缺失，与请求前等待分别聚合，分位值不可直接相加。p50 / p95 是直方图上界估计。",
               ],
               [
                 "余额不足",
@@ -1261,7 +1261,7 @@ function Dashboard({
             ? null
             : -row.stats.success_rate
           : sort === "latency"
-            ? row.stats?.first_output?.p50_ms
+            ? row.stats?.response_created?.p50_ms
             : row.stats?.request_to_dispatch?.p50_ms;
       return (values(a) ?? Infinity) - (values(b) ?? Infinity);
     });
@@ -1689,7 +1689,7 @@ function Dashboard({
                       {keyId ? "API key 顺序" : "Provider 顺序"}
                     </option>
                     <option value="success">成功率从高到低</option>
-                    <option value="latency">首输出从低到高</option>
+                    <option value="latency">首字延迟从低到高</option>
                     <option value="wait">请求前等待从低到高</option>
                   </select>
                   <ChevronDown size={12} />

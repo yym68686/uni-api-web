@@ -52,12 +52,14 @@ function fixtures(): SubAccount[] {
             status: "success",
             text: "test",
             ttft_ms: id === "one" ? 1000 : 6500,
+            response_created_ms: id === "one" ? 1000 : 6500,
             duration_ms: 8000,
           },
           quality: {
             status: "success",
             text: id === "one" ? "未知" : "2024-06",
             ttft_ms: 123,
+            response_created_ms: 123,
             duration_ms: 456,
           },
         },
@@ -151,6 +153,7 @@ it("refreshes Astra availability and model match from quality results without ch
       ...target.result!.availability,
       status: "error",
       ttft_ms: null,
+      response_created_ms: null,
     },
   };
   const sibling = {
@@ -159,6 +162,7 @@ it("refreshes Astra availability and model match from quality results without ch
     availability: {
       ...target.result!.availability,
       ttft_ms: 6500,
+      response_created_ms: 6500,
       requested_model: "gpt-5.6-sol",
       response_model: "gpt-5.6-sol",
       model_match: "match" as const,
@@ -177,6 +181,7 @@ it("refreshes Astra availability and model match from quality results without ch
           status: "success",
           text: "未知",
           ttft_ms: 200,
+          response_created_ms: 200,
           duration_ms: 800,
           requested_model: "gpt-6-astra",
           response_model: "gpt-5.6-sol",
@@ -215,17 +220,13 @@ it("refreshes Astra availability and model match from quality results without ch
   );
   const table = screen.getByRole("table");
   expect(within(table).getByText("可用", { exact: true })).toBeVisible();
-  expect(
-    within(table).getByRole("cell", { name: /^不匹配$/ }),
-  ).toBeVisible();
+  expect(within(table).getByRole("cell", { name: /^不匹配$/ })).toBeVisible();
   expect(table).toHaveTextContent("200 ms");
   await user.click(screen.getByText("检测详情"));
   expect(table).toHaveTextContent("返回模型：gpt-5.6-sol");
   first.unmount();
   mount();
-  expect(
-    await screen.findByRole("cell", { name: /^不匹配$/ }),
-  ).toBeVisible();
+  expect(await screen.findByRole("cell", { name: /^不匹配$/ })).toBeVisible();
 });
 
 it("shows multipliers as numbers, filters all-page batch targets, and restores persisted results", async () => {
@@ -430,6 +431,7 @@ it("filters models, derives rate options from other filters, applies inclusive c
                 status: "not_applicable",
                 text: "",
                 ttft_ms: null,
+                response_created_ms: null,
                 duration_ms: 0,
               },
             },
@@ -674,6 +676,7 @@ it("specific model uses Astra group quality and only tests the selected model", 
             status: "not_applicable",
             text: "",
             ttft_ms: null,
+            response_created_ms: null,
             duration_ms: 0,
           },
         },
