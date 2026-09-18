@@ -67,6 +67,8 @@ import {
 import { SourceSettings } from "./SourceSettings";
 import { ResponseLatency } from "./LatencyBadge";
 import { useSubImports } from "./sub2apiImports";
+import type { SubImportsQuery } from "./sub2apiImports";
+import { ChannelModels } from "./ChannelModels";
 import { channelName } from "./format";
 import { Sub2apiChecks } from "./Sub2apiChecks";
 import type { ConsoleSource } from "./SourceSettings";
@@ -744,10 +746,14 @@ function Detail({
   row,
   onClose,
   balance,
+  imports,
+  catalog,
 }: {
   row: Channel | null;
   onClose: () => void;
   balance?: Balance;
+  imports?: SubImportsQuery;
+  catalog: Channel[];
 }) {
   return (
     <Dialog.Root
@@ -773,6 +779,7 @@ function Detail({
           {row && (
             <>
               <Status row={row} />
+              {imports && <ChannelModels row={row} imports={imports} catalog={catalog} />}
               <div className="detail-section">
                 <h3>请求时间线</h3>
                 <p className="muted">两个指标分别统计，分位值不能直接相加。</p>
@@ -1975,6 +1982,8 @@ function Dashboard({
       </div>
       <Detail
         row={detail}
+        catalog={catalog.data?.data || []}
+        imports={baseConnection.account ? imported : undefined}
         onClose={() => setDetailId(null)}
         balance={detail ? balanceMap.get(providerId(detail))?.data : undefined}
       />

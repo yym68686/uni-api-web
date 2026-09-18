@@ -8,7 +8,11 @@ import type { ConsoleSource } from "./SourceSettings";
 import type { KeyInfo } from "./types";
 import type { SubAccount, SubTarget } from "./Sub2apiChecks";
 import type { InstalledChannel, SubImportsQuery } from "./sub2apiImports";
-import { modelChecks, importModelLabel } from "./sub2apiResults";
+import {
+  modelChecks,
+  availableModelChecks,
+  importModelLabel,
+} from "./sub2apiResults";
 interface Options {
   provider?: string;
   supported: boolean;
@@ -30,11 +34,7 @@ export function Sub2apiImport({
 }) {
   const client = useQueryClient();
   const checks = useMemo(() => modelChecks(target), [target]);
-  const available = checks
-    .filter(
-      (c) => c.state === "done" && c.result?.availability.status === "success",
-    )
-    .map((c) => c.model);
+  const available = availableModelChecks(target).map((check) => check.model);
   const installed = (imports.data?.data || []).filter(
     (i) => i.account_id === account.id && i.group_id === target.group_id,
   );

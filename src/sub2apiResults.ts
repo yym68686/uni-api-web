@@ -19,6 +19,13 @@ export function modelChecks(target: SubTarget): SubModelCheck[] {
   });
 }
 
+export function availableModelChecks(target: SubTarget): SubModelCheck[] {
+  return modelChecks(target).filter(
+    (check) =>
+      check.state === "done" && check.result?.availability.status === "success",
+  );
+}
+
 export function availabilityCounts(checks: SubModelCheck[]) {
   return {
     success: checks.filter((c) => c.result?.availability.status === "success")

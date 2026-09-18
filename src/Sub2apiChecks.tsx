@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Check,
   ChevronDown,
@@ -19,6 +19,7 @@ import { ResponseLatency } from "./LatencyBadge";
 import { Empty, Spinner, Tip } from "./ui";
 import { loadSubFilters, saveSubFilters } from "./sub2apiPreferences";
 import { useSubImports } from "./sub2apiImports";
+import { useSubAccounts } from "./sub2apiAccounts";
 import { Sub2apiImport } from "./Sub2apiImport";
 import { SUB_MODELS } from "./sub2apiModels";
 import {
@@ -489,16 +490,7 @@ function ModelResults({ checks }: { checks: SubModelCheck[] }) {
 
 export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   const client = useQueryClient();
-  const query = useQuery({
-    queryKey: ["sub2api"],
-    queryFn: ({ signal }) =>
-      controlRequest<{ data: SubAccount[] }>("/v1/sub2api/accounts", {
-        signal,
-      }),
-    retry: false,
-    refetchInterval: (q) =>
-      q.state.data?.data.some((a) => pending(a.state)) ? 1500 : 15000,
-  });
+  const query = useSubAccounts();
   const accounts = query.data?.data || [];
   const [form, setForm] = useState<{ account: SubAccount | null } | null>(null);
   const [filters, setFilters] = useState(() => loadSubFilters(user));
