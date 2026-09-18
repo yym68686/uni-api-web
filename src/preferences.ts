@@ -13,6 +13,40 @@ export const defaultFilters = {
 
 export type Filters = typeof defaultFilters;
 
+const views = [
+  "sub2api",
+  "channels",
+  "balances",
+  "overview",
+  "prices",
+  "sources",
+] as const;
+export type View = (typeof views)[number];
+const viewStorageKey = (base: string) => `uni-console-view:v1:${base}`;
+
+export function loadView(base: string, account: boolean): View {
+  try {
+    const saved = localStorage.getItem(viewStorageKey(base));
+    return (
+      views.find(
+        (view) =>
+          view === saved &&
+          (account || (view !== "sub2api" && view !== "sources")),
+      ) || "channels"
+    );
+  } catch {
+    return "channels";
+  }
+}
+
+export function saveView(base: string, view: View) {
+  try {
+    localStorage.setItem(viewStorageKey(base), view);
+  } catch {
+    // Navigation still works when browser storage is unavailable.
+  }
+}
+
 const storageKey = (base: string) => `uni-console-filters:v1:${base}`;
 
 function validate(value: unknown): Filters {

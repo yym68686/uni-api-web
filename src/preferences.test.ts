@@ -1,5 +1,39 @@
 import { describe, expect, it, vi } from "vitest";
-import { defaultFilters, loadFilters, saveFilters } from "./preferences";
+import {
+  defaultFilters,
+  loadFilters,
+  saveFilters,
+  loadView,
+  saveView,
+} from "./preferences";
+
+describe("page preferences", () => {
+  const base = "https://mock.example";
+  it("ignores unknown and removed pages, and restricts account pages to account mode", () => {
+    for (const value of ["invalid", "checks", "controls"]) {
+      localStorage.setItem(`uni-console-view:v1:${base}`, value);
+      expect(loadView(base, true)).toBe("channels");
+    }
+    for (const view of ["sources", "sub2api"] as const) {
+      saveView(base, view);
+      expect(loadView(base, true)).toBe(view);
+      expect(loadView(base, false)).toBe("channels");
+    }
+    saveView(base, "balances");
+    expect(loadView(base, false)).toBe("balances");
+    expect(loadView("https://other.example", true)).toBe("channels");
+  });
+  it("keeps navigation usable when browser storage is blocked", () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("quota exceeded");
+    });
+    expect(loadView(base, true)).toBe("channels");
+    expect(() => saveView(base, "prices")).not.toThrow();
+  });
+});
 
 describe("filter preferences", () => {
   const base = "https://mock.example";

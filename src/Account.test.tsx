@@ -7,12 +7,11 @@ import { MotionConfig, LazyMotion, domAnimation } from "motion/react";
 import App from "./App";
 import { emptyStats } from "./analytics";
 function mount() {
-  return render(
-    <QueryClientProvider
-      client={
-        new QueryClient({ defaultOptions: { queries: { retry: false } } })
-      }
-    >
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const app = render(
+    <QueryClientProvider client={client}>
       <MotionConfig reducedMotion="always">
         <LazyMotion features={domAnimation}>
           <Tooltip.Provider>
@@ -22,7 +21,82 @@ function mount() {
       </MotionConfig>
     </QueryClientProvider>,
   );
+  return { ...app, client };
 }
+
+it.each([
+  ["总览", "请求数量"],
+  ["渠道观测", "渠道表现"],
+  ["sub2api检测", "站点账号"],
+  ["价格设置", "模型价格"],
+  ["余额管理", "渠道余额"],
+  ["来源设置", "uni-api 来源"],
+])(
+  "restores %s on refresh before the source request finishes",
+  async (label, content) => {
+    const sourceData = {
+      data: [
+        { id: "one", name: "One", base: "https://one.test", has_storage: true },
+      ],
+    };
+    let sourceResponse = Promise.resolve(
+      new Response(JSON.stringify(sourceData)),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string) => {
+        const { pathname } = new URL(input, location.origin);
+        if (pathname.endsWith("/sources"))
+          return (await sourceResponse).clone();
+        const body = pathname.endsWith("/auth/me")
+          ? { enabled: true, authenticated: true, username: "admin" }
+          : { data: [], labels: {}, can_inspect_all: true };
+        return new Response(JSON.stringify(body));
+      }),
+    );
+    const user = userEvent.setup();
+    const first = mount();
+    await screen.findByRole("heading", { name: "渠道表现" });
+    const navigation = within(screen.getByRole("navigation"));
+    await user.click(navigation.getByRole("button", { name: /^总览/ }));
+    await user.click(
+      navigation.getByRole("button", { name: new RegExp(`^${label}`) }),
+    );
+    expect(
+      within(screen.getByRole("main")).getByText(content),
+    ).toBeInTheDocument();
+    first.unmount();
+
+    let resolveSources!: (response: Response) => void;
+    sourceResponse = new Promise((resolve) => {
+      resolveSources = resolve;
+    });
+    const restored = mount();
+    const restoredNavigation = within(await screen.findByRole("navigation"));
+    expect(
+      restoredNavigation.getByRole("button", { name: new RegExp(`^${label}`) }),
+    ).toHaveClass("active");
+    expect(within(screen.getByRole("banner")).getByText(label)).toBeVisible();
+    expect(
+      within(screen.getByRole("main")).getByText(content),
+    ).toBeInTheDocument();
+    await act(async () => {
+      resolveSources(new Response(JSON.stringify(sourceData)));
+    });
+    await waitFor(() =>
+      expect(restored.client.getQueryState(["sources", "admin"])?.status).toBe(
+        "success",
+      ),
+    );
+    expect(
+      restoredNavigation.getByRole("button", { name: new RegExp(`^${label}`) }),
+    ).toHaveClass("active");
+    await waitFor(() =>
+      expect(within(screen.getByRole("main")).getByText(content)).toBeVisible(),
+    );
+  },
+);
+
 it.each(["configured", "empty", "failed"] as const)(
   "keeps observation visible while sources load, then handles a %s response",
   async (result) => {

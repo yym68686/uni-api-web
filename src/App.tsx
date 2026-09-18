@@ -77,9 +77,15 @@ import { useSubImports } from "./sub2apiImports";
 import { channelName } from "./format";
 import { Sub2apiChecks } from "./Sub2apiChecks";
 import type { ConsoleSource } from "./SourceSettings";
-import { defaultFilters, loadFilters, saveFilters } from "./preferences";
+import {
+  defaultFilters,
+  loadFilters,
+  saveFilters,
+  loadView,
+  saveView,
+} from "./preferences";
 import { loadConnection, saveConnection, clearConnection } from "./session";
-import type { Filters } from "./preferences";
+import type { Filters, View } from "./preferences";
 import {
   balanceIsLow,
   count,
@@ -116,9 +122,6 @@ type Keys = {
   snapshot_revision: string;
   can_inspect_all: boolean;
 };
-
-type View =
-  "sub2api" | "channels" | "balances" | "overview" | "prices" | "sources";
 
 function Overview({
   metrics,
@@ -967,11 +970,16 @@ function Dashboard({
     endpoint,
     stream,
   } = filters;
-  const [view, setView] = useState<View>("channels"),
+  const [view, setView] = useState<View>(() =>
+      loadView(baseConnection.base, !!baseConnection.account),
+    ),
     [page, setPage] = useState(0),
     [adjustingChannels, setAdjustingChannels] = useState(false),
     [checkingChannels, setCheckingChannels] = useState(false);
   const channelView = view === "channels";
+  useEffect(() => {
+    saveView(baseConnection.base, view);
+  }, [baseConnection.base, view]);
   useEffect(() => {
     saveFilters(baseConnection.base, filters);
   }, [connection.base, filters]);
