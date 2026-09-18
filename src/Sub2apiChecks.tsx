@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import type { FormEvent } from "react";
+import type { FormEvent, ReactNode } from "react";
+import * as Dialog from "@radix-ui/react-dialog";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Check,
@@ -422,69 +423,172 @@ function GroupModelMatch({ checks }: { checks: SubModelCheck[] }) {
   );
 }
 
-function ProbeDetails({ check }: { check: SubModelCheck }) {
+function DetailRow({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
   return (
-    <>
-      {check.message && <div>{check.message}</div>}
-      {check.result && (
-        <>
-          <div>
-            请求模型：{check.result.availability.requested_model || check.model}
-          </div>
-          <div>返回模型：{check.result.availability.response_model || "—"}</div>
-          <div>
-            模型匹配：
-            <ModelMatch check={check} />
-          </div>
-          <div>可用性回复：{check.result.availability.text || "—"}</div>
-          {check.result.availability.message && (
-            <div>{check.result.availability.message}</div>
-          )}
-          <div>
-            可用性耗时：{latency(check.result.availability.duration_ms)}
-          </div>
-          {check.model === "gpt-6-astra" && (
-            <>
-              <div>降智回复：{check.result.quality.text || "—"}</div>
-              <div>
-                降智检测耗时：{latency(check.result.quality.duration_ms)}
-              </div>
-              {check.result.quality.message && (
-                <div>{check.result.quality.message}</div>
-              )}
-            </>
-          )}
-        </>
-      )}
-    </>
+    <tr>
+      <th scope="row">{label}</th>
+      <td>{children}</td>
+    </tr>
   );
 }
 
-function ModelResults({ checks }: { checks: SubModelCheck[] }) {
+function CheckDetails({
+  account,
+  target,
+  checks,
+  selected,
+}: {
+  account: SubAccount;
+  target: SubTarget;
+  checks: SubModelCheck[];
+  selected?: SubModelCheck;
+}) {
+  const [detailModel, setDetailModel] = useState(checks[0].model);
+  const check =
+    selected || checks.find((item) => item.model === detailModel) || checks[0];
+  const result = check.result;
+  const probe = result?.availability;
   return (
-    <details className="sub-model-results">
-      <summary>各模型结果</summary>
-      {checks.map((check) => (
-        <div className="sub-model-result" key={check.model}>
-          <strong>{check.model}</strong>
-          <div className="sub-model-result-status">
-            <AvailabilityStatus check={check} />
-            <ModelMatch check={check} />
-            <ResponseLatency
-              created={check.result?.availability.response_created_ms}
-              text={check.result?.availability.ttft_ms}
-            />
-          </div>
-          <ProbeDetails check={check} />
-          {check.result && (
-            <small>
-              最近检测 {time(check.result.checked_at)}
-              {pending(check.state) && " · 上次结果"}
-            </small>
+    <Dialog.Root>
+      <Dialog.Trigger asChild>
+        <button
+          className="button small"
+          aria-label={`查看 ${account.name} ${target.name} 的回复与诊断`}
+        >
+          查看详情
+        </button>
+      </Dialog.Trigger>
+      <Dialog.Portal>
+        <Dialog.Overlay className="dialog-overlay" />
+        <Dialog.Content className="guide-dialog sub-check-dialog">
+          <Dialog.Title>回复 / 诊断</Dialog.Title>
+          <Dialog.Description>
+            {account.name} / {target.name} · 分组 #{target.group_id}
+          </Dialog.Description>
+          <Dialog.Close asChild>
+            <button
+              className="icon-button detail-close"
+              aria-label="关闭检测详情"
+            >
+              <X size={18} />
+            </button>
+          </Dialog.Close>
+          {!selected && (
+            <label className="sub-import-field">
+              查看模型
+              <select
+                value={detailModel}
+                onChange={(e) => setDetailModel(e.target.value)}
+              >
+                {checks.map((item) => (
+                  <option key={item.model} value={item.model}>
+                    {item.model}
+                  </option>
+                ))}
+              </select>
+            </label>
           )}
-        </div>
-      ))}
-    </details>
+          <table
+            className="sub-check-details-table"
+            aria-label={`${check.model} 检测详情`}
+          >
+            <thead>
+              <tr>
+                <th scope="col">字段</th>
+                <th scope="col">检测结果</th>
+              </tr>
+            </thead>
+            <tbody>
+              <DetailRow label="请求模型">
+                <span className="mono">
+                  {probe?.requested_model || check.model}
+                </span>
+              </DetailRow>
+              <DetailRow label="返回模型">
+                <span className="mono">{probe?.response_model || "—"}</span>
+              </DetailRow>
+              <DetailRow label="可用性">
+                <AvailabilityStatus check={check} />
+              </DetailRow>
+              <DetailRow label="模型匹配">
+                <ModelMatch check={check} />
+              </DetailRow>
+              <DetailRow label="最近检测">
+                {result ? time(result.checked_at) : "未检测"}
+                {result && pending(check.state) && " · 上次结果"}
+              </DetailRow>
+              <DetailRow label="首字延迟">
+                <ResponseLatency
+                  created={probe?.response_created_ms}
+                  text={probe?.ttft_ms}
+                />
+              </DetailRow>
+              <DetailRow label="首个文本延迟">
+                {latency(probe?.ttft_ms ?? null)}
+                <small className="check-source">
+                  首个 response.output_text.delta
+                </small>
+              </DetailRow>
+              <DetailRow label="可用性耗时">
+                {latency(probe?.duration_ms ?? null)}
+              </DetailRow>
+              <DetailRow label="HTTP 状态">
+                {probe?.http_status || "—"}
+              </DetailRow>
+              <DetailRow label="可用性回复">
+                <div className="sub-check-reply">{probe?.text || "—"}</div>
+              </DetailRow>
+              {probe?.message && (
+                <DetailRow label="可用性诊断">
+                  <div className="sub-check-reply">{probe.message}</div>
+                </DetailRow>
+              )}
+              {check.model === "gpt-6-astra" && (
+                <>
+                  <DetailRow label="Astra 降智">
+                    <Verdict result={result} />
+                  </DetailRow>
+                  <DetailRow label="降智检测耗时">
+                    {latency(result?.quality.duration_ms ?? null)}
+                  </DetailRow>
+                  <DetailRow label="降智 HTTP 状态">
+                    {result?.quality.http_status || "—"}
+                  </DetailRow>
+                  <DetailRow label="降智回复">
+                    <div className="sub-check-reply">
+                      {result?.quality.text || "—"}
+                    </div>
+                  </DetailRow>
+                  {result?.quality.message && (
+                    <DetailRow label="降智诊断">
+                      <div className="sub-check-reply">
+                        {result.quality.message}
+                      </div>
+                    </DetailRow>
+                  )}
+                </>
+              )}
+              {check.message && (
+                <DetailRow label="检测诊断">
+                  <div className="sub-check-reply">{check.message}</div>
+                </DetailRow>
+              )}
+              {target.message && (
+                <DetailRow label="同步诊断">
+                  <div className="sub-check-reply">{target.message}</div>
+                </DetailRow>
+              )}
+            </tbody>
+          </table>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 
@@ -525,6 +629,10 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   } | null>(null);
   const [error, setError] = useState("");
   const [action, setAction] = useState("");
+  const [syncSubmitted, setSyncSubmitted] = useState<number | null>(null);
+  const syncableAccounts = accounts.filter(
+    (account) => !pending(account.state),
+  );
   const [removing, setRemoving] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const candidateRows = useMemo(
@@ -625,6 +733,24 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
       setAction("");
     }
   }
+  async function syncAll() {
+    if (action || !syncableAccounts.length) return;
+    setAction("sync-all");
+    setError("");
+    setSyncSubmitted(null);
+    try {
+      const result = await controlRequest<{ queued: number }>(
+        "/v1/sub2api/accounts/sync",
+        { method: "POST" },
+      );
+      setSyncSubmitted(result.queued);
+      await client.invalidateQueries({ queryKey: ["sub2api"] });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "批量同步失败");
+    } finally {
+      setAction("");
+    }
+  }
   const check = (selection: typeof rows) => {
     // Filters select groups; only the explicit model selector chooses the probe
     // scope. Historical success/quality must not exclude untested sibling models.
@@ -652,14 +778,44 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
             <h2>站点账号</h2>
             <span className="count-badge">{accounts.length}</span>
           </div>
-          <button
-            className="button primary small"
-            onClick={() => setForm({ account: null })}
-          >
-            <Plus size={15} />
-            添加账号
-          </button>
+          <div className="sub-account-actions">
+            <button
+              className="button small"
+              aria-label="一键同步并检测"
+              aria-busy={action === "sync-all"}
+              disabled={
+                !syncableAccounts.length ||
+                !!action ||
+                query.isPending ||
+                query.isError
+              }
+              onClick={() => void syncAll()}
+            >
+              {action === "sync-all" ? (
+                <Spinner small />
+              ) : (
+                <RefreshCw size={15} />
+              )}
+              {action === "sync-all"
+                ? "正在提交…"
+                : `一键同步并检测 · ${syncableAccounts.length} 个账号`}
+            </button>
+            <button
+              className="button primary small"
+              onClick={() => setForm({ account: null })}
+            >
+              <Plus size={15} />
+              添加账号
+            </button>
+          </div>
         </div>
+        {syncSubmitted !== null && (
+          <p className="settings-note" role="status">
+            {syncSubmitted
+              ? `已提交 ${syncSubmitted} 个账号，正在后台同步并检测。`
+              : "暂无可同步账号，已有任务会继续执行。"}
+          </p>
+        )}
         {form && (
           <AccountForm
             key={form.account?.id || "new"}
@@ -1078,30 +1234,14 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                         <td>
                           <Verdict result={astra.result} />
                         </td>
-                        <td className="check-answer">
-                          {selected ? (
-                            <>
-                              {t.message ||
-                                selected.message ||
-                                selected.result?.availability.message ||
-                                (model === "gpt-6-astra"
-                                  ? selected.result?.quality.message ||
-                                    selected.result?.quality.text
-                                  : selected.result?.availability.text) ||
-                                "—"}
-                              {selected.result && (
-                                <details>
-                                  <summary>检测详情</summary>
-                                  <ProbeDetails check={selected} />
-                                </details>
-                              )}
-                            </>
-                          ) : (
-                            <>
-                              {t.message && <div>{t.message}</div>}
-                              <ModelResults checks={checks} />
-                            </>
-                          )}
+                        <td>
+                          <CheckDetails
+                            key={model || "all"}
+                            account={account}
+                            target={t}
+                            checks={checks}
+                            selected={selected}
+                          />
                         </td>
                         <td className="mono">
                           {(() => {

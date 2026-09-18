@@ -222,8 +222,14 @@ it("refreshes Astra availability and model match from quality results without ch
   expect(within(table).getByText("可用", { exact: true })).toBeVisible();
   expect(within(table).getByRole("cell", { name: /^不匹配$/ })).toBeVisible();
   expect(table).toHaveTextContent("200 ms");
-  await user.click(screen.getByText("检测详情"));
-  expect(table).toHaveTextContent("返回模型：gpt-5.6-sol");
+  await user.click(
+    screen.getByRole("button", { name: "查看 one same-group 的回复与诊断" }),
+  );
+  expect(
+    within(screen.getByRole("dialog")).getByRole("row", {
+      name: "返回模型 gpt-5.6-sol",
+    }),
+  ).toBeVisible();
   first.unmount();
   mount();
   expect(await screen.findByRole("cell", { name: /^不匹配$/ })).toBeVisible();
@@ -638,11 +644,19 @@ it("all-models groups channels and probes all six despite available/pass filters
   await user.click(screen.getByRole("button", { name: "检测 one same-group" }));
   await waitFor(() => expect(writes).toHaveLength(2));
   expect(writes[1]).toEqual(writes[0]);
-  await user.click(screen.getByText("各模型结果"));
-  const details = table.querySelector("details")!;
-  expect(details.open).toBe(true);
-  for (const model of SUB_MODELS) expect(details).toHaveTextContent(model);
-  expect(details.querySelectorAll(".latency-badge")).toHaveLength(1);
+  await user.click(
+    screen.getByRole("button", { name: "查看 one same-group 的回复与诊断" }),
+  );
+  const details = screen.getByRole("dialog");
+  for (const model of SUB_MODELS) {
+    await user.selectOptions(within(details).getByLabelText("查看模型"), model);
+    expect(
+      within(details).getByRole("table", { name: `${model} 检测详情` }),
+    ).toBeVisible();
+  }
+  await user.click(
+    within(details).getByRole("button", { name: "关闭检测详情" }),
+  );
   await user.click(screen.getByRole("button", { name: "添加到渠道" }));
   const dialog = screen.getByRole("dialog");
   expect(
@@ -862,9 +876,19 @@ it("shows model matching separately from availability, including missing and his
   expect(within(matchCell as HTMLElement).getByText("不匹配")).toHaveClass(
     "fail",
   );
-  await user.click(screen.getByText("检测详情"));
-  expect(table).toHaveTextContent("请求模型：gpt-5.6-sol");
-  expect(table).toHaveTextContent("返回模型：gpt-5.6-luna");
+  await user.click(
+    screen.getByRole("button", { name: "查看 one same-group 的回复与诊断" }),
+  );
+  const details = screen.getByRole("dialog");
+  expect(
+    within(details).getByRole("row", { name: "请求模型 gpt-5.6-sol" }),
+  ).toBeVisible();
+  expect(
+    within(details).getByRole("row", { name: "返回模型 gpt-5.6-luna" }),
+  ).toBeVisible();
+  await user.click(
+    within(details).getByRole("button", { name: "关闭检测详情" }),
+  );
   await user.click(screen.getByRole("button", { name: "添加到渠道" }));
   expect(
     within(screen.getByRole("dialog")).getByRole("checkbox", {
@@ -1049,4 +1073,92 @@ it("lists imported keys, replaces exact models and deletes only the chosen bindi
     within(dialog).getByRole("button", { name: "添加到其他 API key" }),
   );
   expect(within(dialog).getByLabelText("添加到 API key")).toHaveValue("");
+});
+
+it("keeps long replies out of the channel list and shows full fields in a dismissible dialog", async () => {
+  const data = fixtures().slice(0, 1);
+  const target = data[0].targets[0];
+  const reply = "至少需要 21 个糖果。\n".repeat(100);
+  target.result!.quality.text = reply;
+  target.result!.quality.message = "完整降智诊断";
+  target.result!.availability.response_created_ms = 200;
+  target.message = "同步诊断信息";
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response(JSON.stringify({ data }))),
+  );
+  const user = userEvent.setup();
+  mount();
+  const list = await screen.findByRole("table");
+  expect(list).not.toHaveTextContent("至少需要 21 个糖果");
+  expect(list).not.toHaveTextContent("同步诊断信息");
+  const trigger = screen.getByRole("button", {
+    name: "查看 one same-group 的回复与诊断",
+  });
+  await user.click(trigger);
+  const dialog = screen.getByRole("dialog");
+  const result = within(dialog).getByRole("table");
+  const replyRow = within(result).getByRole("row", { name: /^降智回复/ });
+  expect(within(replyRow).getByRole("cell").textContent).toBe(reply);
+  expect(result).toHaveTextContent("完整降智诊断");
+  expect(result).toHaveTextContent("同步诊断信息");
+  expect(
+    within(result).getByRole("row", { name: /^首字延迟/ }),
+  ).toHaveTextContent("200 ms");
+  expect(
+    within(result).getByRole("row", { name: /^首个文本延迟/ }),
+  ).toHaveTextContent("1.00 s");
+  await user.selectOptions(
+    within(dialog).getByLabelText("查看模型"),
+    "gpt-5.6-sol",
+  );
+  expect(
+    within(result).getByRole("row", { name: "最近检测 未检测" }),
+  ).toBeVisible();
+  expect(result).not.toHaveTextContent("至少需要 21 个糖果");
+  await user.keyboard("{Escape}");
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(trigger).toHaveFocus();
+});
+
+it("syncs all idle accounts independently of channel filters and prevents repeat submissions", async () => {
+  const data = fixtures();
+  data.push({
+    ...data[0],
+    id: "busy",
+    name: "busy",
+    state: "running",
+    targets: [],
+  });
+  const writes: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string, init?: RequestInit) => {
+      const { pathname } = new URL(input, location.origin);
+      if (init?.method === "POST") {
+        writes.push(pathname);
+        data.forEach((account) => {
+          if (account.state === "idle") account.state = "queued";
+        });
+        return new Response('{"queued":2}', { status: 202 });
+      }
+      return new Response(
+        JSON.stringify(
+          pathname.endsWith("/channels") ? { data: [], labels: {} } : { data },
+        ),
+      );
+    }),
+  );
+  const user = userEvent.setup();
+  mount();
+  await screen.findByRole("table");
+  await user.selectOptions(screen.getByLabelText("sub2api 账号筛选"), "one");
+  const button = screen.getByRole("button", { name: "一键同步并检测" });
+  expect(button).toHaveTextContent("2 个账号");
+  await user.click(button);
+  await waitFor(() => expect(button).toBeDisabled());
+  expect(writes).toEqual(["/analytics/v1/sub2api/accounts/sync"]);
+  expect(
+    screen.getByText("已提交 2 个账号，正在后台同步并检测。"),
+  ).toBeVisible();
 });

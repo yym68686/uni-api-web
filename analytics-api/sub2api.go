@@ -271,6 +271,25 @@ func (s *Service) subSync(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 202, map[string]bool{"queued": true})
 }
+
+func (s *Service) subSyncAll(w http.ResponseWriter, r *http.Request) {
+	owner, _ := s.controlUser(r)
+	var queued int
+	// Lock in the same order as grouped checks. One atomic update prevents
+	// partial submission and re-queuing accounts claimed by another request.
+	err := s.control.db.QueryRowContext(r.Context(), `WITH candidates AS (
+		SELECT id FROM console_sub_accounts WHERE owner=$1 AND state NOT IN ('queued','running') ORDER BY id FOR UPDATE
+	), queued AS (
+		UPDATE console_sub_accounts a SET state='queued',job_kind='sync',job_id='',lease_until=NULL,message=''
+		FROM candidates c WHERE a.id=c.id AND a.state NOT IN ('queued','running') RETURNING a.id
+	) SELECT count(*) FROM queued`, owner).Scan(&queued)
+	if err != nil {
+		http.Error(w, "无法批量同步账号", 503)
+		return
+	}
+	writeJSON(w, 202, map[string]int{"queued": queued})
+}
+
 func (s *Service) subDelete(w http.ResponseWriter, r *http.Request) {
 	owner, _ := s.controlUser(r)
 	result, err := s.control.db.ExecContext(r.Context(), `DELETE FROM console_sub_accounts WHERE id=$1 AND owner=$2 AND state NOT IN ('running','queued')`, r.PathValue("id"), owner)
