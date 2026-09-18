@@ -1482,10 +1482,6 @@ function Dashboard({
             </strong>
           </div>
           <div className="topbar-actions">
-            <span className="topbar-service">
-              <span className="tiny-dot" />
-              {new URL(connection.base).hostname}
-            </span>
             <button
               className="icon-button"
               onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
@@ -2078,28 +2074,8 @@ function Dashboard({
               />
             )}
           </AnimatePresence>
-          <footer className="workspace-footer">
-            <span>
-              <ShieldCheck size={13} />
-              多来源观测 · 安全会话
-            </span>
-            <button onClick={() => setGuide(true)}>
-              了解统计口径 <ArrowUpRight size={13} />
-            </button>
-            <span className="last-update">
-              {busy
-                ? "正在同步…"
-                : metrics.data
-                  ? `数据更新于 ${time(metrics.data.generated_at)}`
-                  : "尚未取得数据"}
-            </span>
-          </footer>
         </main>
         <div className="connection-bottom">
-          <span>
-            <Server size={14} />
-            {connection.base}
-          </span>
           <button onClick={() => disconnect()}>
             <LogOut size={14} />
             {baseConnection.account ? "退出登录" : "断开连接"}

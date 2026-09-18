@@ -747,18 +747,6 @@ nav > button.active > svg {
   align-items: center;
   gap: 13px;
 }
-.topbar-service {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 10px;
-  color: var(--muted);
-}
-.topbar-service .tiny-dot {
-  color: #3e9b70;
-  width: 5px;
-  height: 5px;
-}
 .avatar {
   border: 1px solid #cedace;
   background: #e6efdf;
@@ -1313,56 +1301,20 @@ nav > button.active > svg {
   border: 1px solid var(--line);
   border-radius: 5px;
 }
-.workspace-footer {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  padding: 19px 1px;
-  font-size: 9px;
-  color: var(--muted);
-  flex-wrap: wrap;
-}
-.workspace-footer > span,
-.workspace-footer button {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-.workspace-footer button {
-  background: none;
-  border: 0;
-  font-size: 9px;
-  color: var(--muted);
-  padding: 0;
-}
-.workspace-footer button:hover {
-  color: var(--green);
-}
-.last-update {
-  margin-left: auto;
-  font-family: "Geist Mono Variable", monospace;
-  font-size: 9px;
-}
 .connection-bottom {
   padding: 12px 34px;
   border-top: 1px solid var(--line);
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   font-size: 9px;
   color: var(--muted);
   gap: 14px;
 }
-.connection-bottom span,
 .connection-bottom button {
   display: flex;
   align-items: center;
   gap: 7px;
-}
-.connection-bottom span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .connection-bottom button {
   background: none;
@@ -2077,9 +2029,6 @@ nav > button.active > svg {
     height: 58px;
     padding: 0 18px;
   }
-  .topbar-service {
-    display: none;
-  }
   .topbar-actions {
     gap: 8px;
   }
@@ -2171,13 +2120,6 @@ nav > button.active > svg {
   .table-footer {
     padding: 10px 14px;
     font-size: 8px;
-  }
-  .workspace-footer {
-    gap: 10px;
-  }
-  .last-update {
-    width: 100%;
-    margin: 0;
   }
   .connection-bottom {
     padding: 12px 18px;
@@ -2323,7 +2265,6 @@ nav > button.active > svg {
 .filter-chip,
 .inline-select select,
 .table-footer,
-.workspace-footer,
 .connection-bottom {
   font-size: 10px;
 }

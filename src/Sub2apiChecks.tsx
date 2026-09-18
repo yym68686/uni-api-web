@@ -1187,15 +1187,6 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
           close={() => setImporting(null)}
         />
       )}
-      <p className="settings-note">
-        密码仅用于本次登录；登录会话和测试 key 加密保存。重新同步复用专用
-        key，不修改已有业务 key。
-        <Tip text="专用 key 的 $1 是站点记账单位的累计消费上限。达到上限后需在上游调整额度，再重新同步；不会自动补充额度。">
-          <span>
-            测试额度说明 <CircleHelp size={12} />
-          </span>
-        </Tip>
-      </p>
     </div>
   );
 }
