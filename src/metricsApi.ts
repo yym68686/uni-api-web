@@ -48,8 +48,8 @@ export async function readMetrics(
   return {
     ...result,
     window_minutes:
-      range === "24h"
-        ? 1440
+      /^(?:[1-9]|1[0-9]|2[0-4])h$/.test(range)
+        ? Number.parseInt(range) * 60
         : range === "7d"
           ? 10080
           : range === "30d"

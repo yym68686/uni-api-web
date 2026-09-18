@@ -4,9 +4,14 @@ import { Check, X, CircleHelp, Play, ScanLine } from "lucide-react";
 import { controlRequest } from "./api";
 import { providerId, time, channelName } from "./format";
 import type { Channel } from "./types";
+import type { InstalledChannel } from "./sub2apiImports";
 import { Spinner, Tip } from "./ui";
+import { QualityProbability } from "./QualityHistory";
+import type { QualitySummary } from "./QualityHistory";
 
 export interface ChannelCheck {
+  history?: QualitySummary;
+  origin?: string;
   source_id: string;
   provider: string;
   model: string;
@@ -96,6 +101,7 @@ export function useChannelChecks(session: string, enabled: boolean) {
           }),
         );
     } finally {
+      void client.invalidateQueries({ queryKey: ["quality-history"] });
       // A canceled request may settle after another check of this channel starts.
       if (active.current.get(id) === abort) {
         active.current.delete(id);
@@ -136,7 +142,7 @@ export function useChannelChecks(session: string, enabled: boolean) {
   );
   for (const [id, item] of errors) {
     if (item.checked_at > (results.get(id)?.checked_at || 0))
-      results.set(id, item);
+      results.set(id, { ...item, history: results.get(id)?.history });
   }
   return {
     results,
@@ -158,6 +164,33 @@ export function useChannelChecks(session: string, enabled: boolean) {
   };
 }
 export type Checks = ReturnType<typeof useChannelChecks>;
+// A sub2api group may be installed into several caller keys. Its checks are
+// counted once per channel view, alongside checks sent through this gateway.
+interface SubQuality { account_id: string; group_id: number; check: ChannelCheck; history: QualitySummary }
+export function useSubQualitySummary(enabled: boolean) {
+  return useQuery({ queryKey: ["sub-quality-summary"], queryFn: ({ signal }) => controlRequest<{ data: SubQuality[] }>("/v1/sub2api/quality-summary", { signal }), enabled, retry: false, refetchInterval: enabled ? 15000 : false });
+}
+export function withSubQuality(checks: Checks, installed: InstalledChannel[], summaries: SubQuality[]): Checks {
+  const results = new Map(checks.results);
+  const targets = new Map(summaries.map((item) => [`${item.account_id}:${item.group_id}`, item]));
+  for (const channel of installed) {
+    const target = targets.get(`${channel.account_id}:${channel.group_id}`);
+    if (!target) continue;
+    const sub = target.check;
+    const id = providerId(channel);
+    const direct = checks.results.get(id);
+    const h = target.history;
+    const history = {
+      total: (direct?.history?.total || 0) + (h?.total || 0),
+      successful: (direct?.history?.successful || 0) + (h?.successful || 0),
+      passed: (direct?.history?.passed || 0) + (h?.passed || 0),
+    };
+    if (sub && sub.checked_at > (direct?.checked_at || 0)) {
+      results.set(id, { source_id: channel.source_id, provider: channel.provider, model: "gpt-6-astra", checked_at: sub.checked_at, verdict: ["pass", "fail", "inconclusive"].includes(sub.verdict) ? sub.verdict as ChannelCheck["verdict"] : "error", text: sub.text, message: sub.message, duration_ms: sub.duration_ms, origin: "sub2api", history });
+    } else if (direct) results.set(id, { ...direct, history });
+  }
+  return { ...checks, results };
+}
 export function CheckVerdict({ result }: { result: ChannelCheck }) {
   return (
     <span className={`check-status ${result.verdict}`}>
@@ -202,7 +235,7 @@ export function LatestChannelCheck({
                     hour12: false,
                   })}
                 </div>
-                <div>检测模型：{result.model}</div>
+                <div>检测模型：{result.model}{result.origin ? ` · ${result.origin}` : ""}</div>
                 <div>{result.text || result.message || "未返回有效回复"}</div>
               </>
             }
@@ -210,6 +243,7 @@ export function LatestChannelCheck({
             <CheckVerdict result={result} />
           </Tip>
           <small className="muted">{time(result.checked_at)}</small>
+          <QualityProbability history={result.history} />
         </>
       ) : (
         !pending && (

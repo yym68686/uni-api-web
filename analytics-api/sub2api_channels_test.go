@@ -122,6 +122,27 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 	if len(listing.Data) != 0 {
 		t.Fatal("foreign owner bindings exposed")
 	}
+	readInfo := func(cookie, reveal string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", "/v1/sources/"+source+"/channel-info?provider="+provider+"&reveal="+reveal, nil)
+		if cookie != "" {
+			r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: cookie})
+		}
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		return w
+	}
+	if w := readInfo("", "true"); w.Code != 401 {
+		t.Fatal("anonymous secret read", w.Code)
+	}
+	if w := readInfo(foreign, "true"); w.Code != 404 {
+		t.Fatal("foreign secret read", w.Code)
+	}
+	if w := readInfo(session, "false"); w.Code != 200 || strings.Contains(w.Body.String(), "routing-secret") || !strings.Contains(w.Body.String(), "https://example.com/dashboard") {
+		t.Fatal("unrequested key exposed or bad URL", w.Code)
+	}
+	if w := readInfo(session, "true"); w.Code != 200 || !strings.Contains(w.Body.String(), "routing-secret") || strings.Contains(w.Body.String(), "panel-secret") || w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("wrong scoped credential", w.Code)
+	}
 	in := subImportInput{Action: "replace", AccountID: account, GroupID: 7, SourceID: source, KeyID: key, Revision: "boot:1", Models: []string{checkModel}, Position: 1}
 	if w = request("PATCH", foreign, in); w.Code != 404 {
 		t.Fatal("foreign mutation allowed", w.Code)
@@ -148,6 +169,9 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 	in.Models = nil
 	if w = request("PATCH", session, in); w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
+	}
+	if w := readInfo(session, "true"); w.Code != 404 {
+		t.Fatal("deleted channel still exposes credential", w.Code)
 	}
 	w = request("GET", session, nil)
 	json.Unmarshal(w.Body.Bytes(), &listing)

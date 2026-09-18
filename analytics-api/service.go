@@ -77,6 +77,7 @@ func (s *Service) Handler() http.Handler {
 	mux.Handle("/v1/sources", control)
 	mux.Handle("/v1/sources/", control)
 	mux.Handle("/v1/sub2api/", control)
+	mux.Handle("/v1/channel-sites", control)
 
 	mux.HandleFunc("GET /v1/analytics", s.analytics)
 	mux.HandleFunc("GET /v1/prices", s.prices)
@@ -117,7 +118,7 @@ func (s *Service) analytics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.cacheMu.Unlock()
-	result, err := s.engine.Query(r.Context(), QueryFilter{SourceIDs: allowed, SourceID: q.Get("source_id"), Range: name, Model: q.Get("model"), Provider: q.Get("provider"), Endpoint: q.Get("endpoint"), Stream: q.Get("stream"), KeyID: q.Get("key_id"), Timeseries: q.Get("timeseries") == "true"})
+	result, err := s.engine.Query(r.Context(), QueryFilter{SourceIDs: allowed, SourceID: q.Get("source_id"), Range: name, Model: q.Get("model"), UpstreamModel: q.Get("upstream_model"), Provider: q.Get("provider"), Endpoint: q.Get("endpoint"), Stream: q.Get("stream"), KeyID: q.Get("key_id"), Timeseries: q.Get("timeseries") == "true"})
 	if err != nil {
 		writeJSON(w, 503, map[string]string{"error": "analytics unavailable"})
 		return

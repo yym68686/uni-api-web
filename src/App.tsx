@@ -58,6 +58,9 @@ import {
   LatestChannelCheck,
   checkTargets,
   useChannelChecks,
+  CheckVerdict,
+  withSubQuality,
+  useSubQualitySummary,
 } from "./ChannelChecks";
 import {
   useChannelControls,
@@ -69,6 +72,13 @@ import { ResponseLatency } from "./LatencyBadge";
 import { useSubImports } from "./sub2apiImports";
 import type { SubImportsQuery } from "./sub2apiImports";
 import { ChannelModels } from "./ChannelModels";
+
+import { SiteLink, useChannelSites, dashboardURL } from "./ChannelSite";
+import { ChannelAccess } from "./ChannelAccess";
+import { CacheTrend } from "./CacheTrend";
+import type { CacheTrendProps } from "./CacheTrend";
+import { QualityHistory, QualityProbability } from "./QualityHistory";
+import type { ChannelCheck } from "./ChannelChecks";
 import { channelName } from "./format";
 import { Sub2apiChecks } from "./Sub2apiChecks";
 import type { ConsoleSource } from "./SourceSettings";
@@ -748,13 +758,20 @@ function Detail({
   balance,
   imports,
   catalog,
+  site,
+  check,
+  trend,
 }: {
+  site?: string;
+  check?: ChannelCheck;
+  trend: Omit<CacheTrendProps, "row">;
   row: Channel | null;
   onClose: () => void;
   balance?: Balance;
   imports?: SubImportsQuery;
   catalog: Channel[];
 }) {
+  const installed = imports?.data?.data.find((item) => item.source_id === row?.source_id && item.provider === row?.provider);
   return (
     <Dialog.Root
       open={!!row}
@@ -772,13 +789,21 @@ function Detail({
             <X size={20} />
           </Dialog.Close>
           <span className="eyebrow">CHANNEL INSIGHTS</span>
-          <Dialog.Title>{row ? channelName(row) : ""}</Dialog.Title>
+          <Dialog.Title><SiteLink base={site}>{row ? channelName(row) : ""}</SiteLink></Dialog.Title>
           <Dialog.Description className="detail-description">
             {row?.model} <ArrowRight size={13} /> {row?.upstream_model}
           </Dialog.Description>
           {row && (
             <>
               <Status row={row} />
+              {trend.connection.account && <ChannelAccess key={providerId(row)} row={row} imports={imports} onRemoved={onClose} />}
+              <CacheTrend key={`${providerId(row)}:${row.model}`} row={row} {...trend} />
+              {row.source_id && trend.connection.account && <section className="detail-section">
+                <h3>降智检测</h3>
+                {check ? <><CheckVerdict result={check} /><small className="check-source">最近检测 {new Date(check.checked_at * 1000).toLocaleString("zh-CN", { hour12: false })}{check.origin ? ` · ${check.origin}` : ""}</small><QualityProbability history={check.history} /></> : <p className="muted">暂无检测结果。</p>}
+                <QualityHistory key={providerId(row)} path={`/v1/sources/${encodeURIComponent(row.source_id)}/channel-checks/history?${new URLSearchParams({ provider: row.provider })}`} revision={`${check?.checked_at}:${check?.history?.total}:${check?.history?.successful}`} title="渠道检测记录" />
+                {installed && <QualityHistory key={`${installed.account_id}:${installed.group_id}`} path={`/v1/sub2api/accounts/${encodeURIComponent(installed.account_id)}/groups/${installed.group_id}/quality-history`} revision={`${check?.checked_at}:${check?.history?.total}:${check?.history?.successful}`} title="sub2api 检测记录" />}
+              </section>}
               {imports && <ChannelModels row={row} imports={imports} catalog={catalog} />}
               <div className="detail-section">
                 <h3>请求时间线</h3>
@@ -947,10 +972,13 @@ function Dashboard({
   });
   const sourceList = sourceQuery.data?.data || [];
   const imported = useSubImports(!!baseConnection.account);
-  const checks = useChannelChecks(
+  const rawChecks = useChannelChecks(
     baseConnection.session,
     !!baseConnection.account,
   );
+  const subQuality = useSubQualitySummary(!!baseConnection.account);
+  const checks = withSubQuality(rawChecks, imported.data?.data || [], subQuality.data?.data || []);
+  const siteFor = useChannelSites(baseConnection, imported.data?.data || []);
   const selectedSourceId = filters.sourceId;
   const connection = useMemo(
     () => ({
@@ -1309,7 +1337,7 @@ function Dashboard({
       void queryClient.invalidateQueries({ queryKey: ["channel-controls"] });
       void queryClient.invalidateQueries({ queryKey: ["control-catalog"] });
     }
-    if (baseConnection.account) void checks.refetch();
+    if (baseConnection.account) { void checks.refetch(); void subQuality.refetch(); }
     void keys.refetch();
     void liveMetrics.refetch();
     if (
@@ -1873,9 +1901,9 @@ function Dashboard({
                     const displayName = providerName
                       ? channelName(providerName)
                       : JSON.parse(provider)[1];
-                    const sourceName = rows.find(
-                      (row) => providerId(row) === provider,
-                    )?.source_name;
+                    const sourceRow = rows.find((row) => providerId(row) === provider);
+                    const sourceName = sourceRow?.source_name;
+                    const sourceLink = siteFor(sourceRow) || dashboardURL(sourceList.find((source) => source.id === sourceRow?.source_id)?.base);
                     return (
                       <article
                         className={`balance-card ${balanceIsLow(balance?.data) ? "low-balance" : ""}`}
@@ -1886,7 +1914,7 @@ function Dashboard({
                             {displayName[0].toUpperCase()}
                           </span>
                           <span>
-                            <strong>{displayName}</strong>
+                            <strong><SiteLink base={sourceLink}>{displayName}</SiteLink></strong>
                             <small>{sourceName}</small>
                             <small>
                               {
@@ -1982,6 +2010,9 @@ function Dashboard({
       </div>
       <Detail
         row={detail}
+        site={siteFor(detail) || dashboardURL(sourceList.find((source) => source.id === detail?.source_id)?.base)}
+        check={detail ? checks.results.get(providerId(detail)) : undefined}
+        trend={{ connection, keyId, window, endpoint, stream, refresh }}
         catalog={catalog.data?.data || []}
         imports={baseConnection.account ? imported : undefined}
         onClose={() => setDetailId(null)}

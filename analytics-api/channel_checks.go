@@ -20,15 +20,16 @@ const checkPrompt = `在一个黑色的袋子里放有三种口味的糖果，�
 五角星形 7 6 4`
 
 type ChannelCheck struct {
-	SourceID   string `json:"source_id"`
-	Provider   string `json:"provider"`
-	Model      string `json:"model"`
-	Verdict    string `json:"verdict"`
-	Text       string `json:"text"`
-	Message    string `json:"message,omitempty"`
-	CheckedAt  int64  `json:"checked_at"`
-	DurationMS int64  `json:"duration_ms"`
-	RequestID  string `json:"request_id,omitempty"`
+	History    *qualitySummary `json:"history,omitempty"`
+	SourceID   string          `json:"source_id"`
+	Provider   string          `json:"provider"`
+	Model      string          `json:"model"`
+	Verdict    string          `json:"verdict"`
+	Text       string          `json:"text"`
+	Message    string          `json:"message,omitempty"`
+	CheckedAt  int64           `json:"checked_at"`
+	DurationMS int64           `json:"duration_ms"`
+	RequestID  string          `json:"request_id,omitempty"`
 }
 
 var checkHTTP = &http.Client{Timeout: 45 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
@@ -138,7 +139,7 @@ func runChannelCheck(ctx context.Context, src controlSource, provider string) Ch
 
 func (s *Service) channelChecks(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	rows, err := s.control.db.QueryContext(r.Context(), `SELECT c.result FROM console_channel_checks c JOIN console_sources s ON s.id=c.source_id WHERE s.enabled AND ($1='all' OR c.source_id=$1) ORDER BY c.source_id,c.provider`, id)
+	rows, err := s.control.db.QueryContext(r.Context(), `SELECT c.result || jsonb_build_object('history',jsonb_build_object('total',COALESCE(h.total,0),'successful',COALESCE(h.successful,0),'passed',COALESCE(h.passed,0))) FROM console_channel_checks c JOIN console_sources s ON s.id=c.source_id LEFT JOIN console_quality_totals h ON h.source_id=c.source_id AND h.provider=c.provider WHERE s.enabled AND ($1='all' OR c.source_id=$1) ORDER BY c.source_id,c.provider`, id)
 	if err != nil {
 		http.Error(w, "检测记录暂不可用", 503)
 		return
@@ -196,7 +197,20 @@ func (s *Service) checkChannel(w http.ResponseWriter, r *http.Request) {
 		defer cancel()
 		_, _ = s.control.db.ExecContext(cleanup, `DELETE FROM console_channel_check_runs WHERE source_id=$1 AND provider=$2 AND run_id=$3`, src.ID, in.Provider, runID)
 	}()
+	scope := qualityScope{Source: src.ID, Provider: in.Provider}
+	if err = s.control.beginQuality(ctx, runID, scope, 70*time.Second); err != nil {
+		http.Error(w, "检测历史保存失败", 503)
+		return
+	}
 	result := runChannelCheck(ctx, src, in.Provider)
+	historyVerdict := result.Verdict
+	if ctx.Err() == context.Canceled && result.Verdict == "error" {
+		historyVerdict = "cancelled"
+	}
+	if err = s.control.finishQuality(runID, historyVerdict, result.Verdict == "pass" || result.Verdict == "fail", result.CheckedAt, result); err != nil {
+		http.Error(w, "检测历史保存失败", 503)
+		return
+	}
 	if ctx.Err() != nil {
 		http.Error(w, "检测超时或取消", 504)
 		return
@@ -207,5 +221,11 @@ func (s *Service) checkChannel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "保存检测结果失败", 503)
 		return
 	}
+	summary, err := s.control.qualitySummary(ctx, scope)
+	if err != nil {
+		http.Error(w, "检测统计读取失败", 503)
+		return
+	}
+	result.History = &summary
 	writeJSON(w, 200, result)
 }

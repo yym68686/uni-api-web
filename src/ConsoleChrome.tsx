@@ -1,8 +1,6 @@
 import {
-  ArrowUpRight,
   BookOpen,
   ChevronRight,
-  CircleHelp,
   ExternalLink,
   Gauge,
   LayoutDashboard,
@@ -32,7 +30,6 @@ export function ConsoleNavigation({
   account,
   lowCount = 0,
   onSelect,
-  onGuide,
 }: {
   view: View;
   account: boolean;
@@ -66,11 +63,6 @@ export function ConsoleNavigation({
           ))}
       </nav>
       <div className="sidebar-bottom">
-        <button disabled={!onGuide} onClick={onGuide}>
-          <CircleHelp size={18} />
-          指标说明
-          <ArrowUpRight size={15} />
-        </button>
         <a
           href="https://github.com/yym68686/uni-api-web"
           target="_blank"

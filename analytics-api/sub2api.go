@@ -46,6 +46,7 @@ type subModelResult struct {
 	Result  *subResult `json:"result"`
 }
 type subTarget struct {
+	History  qualitySummary   `json:"history"`
 	Models   []subModelResult `json:"models"`
 	GroupID  int64            `json:"group_id"`
 	Name     string           `json:"name"`
@@ -107,7 +108,7 @@ func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "账号列表读取失败", 503)
 		return
 	}
-	rows, err = s.control.db.QueryContext(r.Context(), `SELECT t.account_id,t.group_id,t.name,t.platform,t.channel,t.rate,t.remote_key_id,t.active,t.state,t.message,t.result,t.billing,COALESCE((SELECT jsonb_agg(jsonb_build_object('model',m.model,'state',m.state,'message',m.message,'result',m.result) ORDER BY m.model) FROM console_sub_models m WHERE m.account_id=t.account_id AND m.group_id=t.group_id),'[]'::jsonb) FROM console_sub_targets t JOIN console_sub_accounts a ON a.id=t.account_id WHERE a.owner=$1 ORDER BY t.group_id`, owner)
+	rows, err = s.control.db.QueryContext(r.Context(), `SELECT t.account_id,t.group_id,t.name,t.platform,t.channel,t.rate,t.remote_key_id,t.active,t.state,t.message,t.result,t.billing,COALESCE((SELECT jsonb_agg(jsonb_build_object('model',m.model,'state',m.state,'message',m.message,'result',m.result) ORDER BY m.model) FROM console_sub_models m WHERE m.account_id=t.account_id AND m.group_id=t.group_id),'[]'::jsonb),COALESCE(h.total,0),COALESCE(h.successful,0),COALESCE(h.passed,0) FROM console_sub_targets t JOIN console_sub_accounts a ON a.id=t.account_id LEFT JOIN console_quality_totals h ON h.account_id=t.account_id AND h.group_id=t.group_id WHERE a.owner=$1 ORDER BY t.group_id`, owner)
 	if err != nil {
 		http.Error(w, "检测结果暂不可用", 503)
 		return
@@ -117,7 +118,7 @@ func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 		var id string
 		var t subTarget
 		var raw, billingRaw, modelsRaw []byte
-		if err = rows.Scan(&id, &t.GroupID, &t.Name, &t.Platform, &t.Channel, &t.Rate, &t.KeyID, &t.Active, &t.State, &t.Message, &raw, &billingRaw, &modelsRaw); err != nil {
+		if err = rows.Scan(&id, &t.GroupID, &t.Name, &t.Platform, &t.Channel, &t.Rate, &t.KeyID, &t.Active, &t.State, &t.Message, &raw, &billingRaw, &modelsRaw, &t.History.Total, &t.History.Successful, &t.History.Passed); err != nil {
 			break
 		}
 		if err = json.Unmarshal(modelsRaw, &t.Models); err != nil {
@@ -744,6 +745,13 @@ func (s *Service) subTestTargets(ctx context.Context, id, base, job string, qual
 					errs <- errors.New("测试 key 无法解密")
 					continue
 				}
+				historyID := "sub:" + job + ":" + strconv.FormatInt(t.id, 10)
+				if t.model == checkModel {
+					if e = s.control.beginQuality(ctx, historyID, qualityScope{Account: id, Group: t.id}, 140*time.Second); e != nil {
+						errs <- errors.New("检测历史保存失败")
+						continue
+					}
+				}
 				probeCtx, cancel := context.WithTimeout(ctx, 125*time.Second)
 				var result subResult
 				if qualityOnly {
@@ -754,6 +762,19 @@ func (s *Service) subTestTargets(ctx context.Context, id, base, job string, qual
 				cancel()
 				result.Availability.Text = strings.ReplaceAll(result.Availability.Text, key, "[redacted]")
 				result.Quality.Text = strings.ReplaceAll(result.Quality.Text, key, "[redacted]")
+				if t.model == checkModel {
+					verdict := result.Verdict
+					if result.Quality.Status == "skipped" {
+						verdict = "skipped"
+					}
+					if ctx.Err() == context.Canceled && result.Quality.Status != "success" {
+						verdict = "cancelled"
+					}
+					if e = s.control.finishQuality(historyID, verdict, result.Quality.Status == "success", result.CheckedAt, result); e != nil {
+						errs <- errors.New("检测历史保存失败")
+						continue
+					}
+				}
 				if ctx.Err() != nil {
 					return
 				}

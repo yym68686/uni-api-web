@@ -33,6 +33,9 @@ import {
 } from "./sub2apiResults";
 import type { SubModelCheck } from "./sub2apiResults";
 import { time } from "./format";
+import { QualityHistory, QualityProbability } from "./QualityHistory";
+import type { QualitySummary } from "./QualityHistory";
+import { SiteLink } from "./ChannelSite";
 
 interface Probe {
   requested_model?: string;
@@ -54,6 +57,7 @@ interface Result {
   verdict: string;
 }
 export interface SubTarget {
+  history?: QualitySummary;
   models?: {
     model: string;
     state: string;
@@ -712,6 +716,7 @@ function CheckDetails({
               )}
             </tbody>
           </table>
+          {check.model === "gpt-6-astra" && <QualityHistory path={`/v1/sub2api/accounts/${encodeURIComponent(account.id)}/groups/${target.group_id}/quality-history`} revision={`${result?.checked_at}:${target.history?.total}:${target.history?.successful}`} />}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
@@ -985,7 +990,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                   <div className="sub-account-identity">
                     <strong>{a.name}</strong>
                     <small>
-                      {a.email} · {new URL(a.base).host}
+                      {a.email} · <SiteLink base={a.base}>{new URL(a.base).host}</SiteLink>
                     </small>
                     <span
                       className="sub-account-progress"
@@ -1360,6 +1365,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                         </td>
                         <td>
                           <Verdict result={astra.result} />
+                          <QualityProbability history={t.history} />
                         </td>
                         <td>
                           <CheckDetails

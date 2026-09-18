@@ -2,8 +2,7 @@ import type { Catalog, Channel, Metrics, Stats } from "./types";
 export const ranges = [
   ["5m", "5 分钟"],
   ["15m", "15 分钟"],
-  ["1h", "1 小时"],
-  ["24h", "24 小时"],
+  ...Array.from({ length: 24 }, (_, index) => [`${index + 1}h`, `${index + 1} 小时`] as const),
   ["7d", "近 7 天"],
   ["30d", "近 30 天"],
   ["today", "今天"],

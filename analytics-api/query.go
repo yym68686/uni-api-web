@@ -11,9 +11,9 @@ import (
 )
 
 type QueryFilter struct {
-	SourceIDs                                                 []string
-	Range, Model, Provider, Endpoint, Stream, KeyID, SourceID string
-	Timeseries                                                bool
+	SourceIDs                                                                []string
+	Range, Model, UpstreamModel, Provider, Endpoint, Stream, KeyID, SourceID string
+	Timeseries                                                               bool
 }
 type Summary struct {
 	Attempts                  int64    `json:"attempts"`
@@ -186,6 +186,7 @@ type QueryResult struct {
 	GeneratedAt     int64             `json:"generated_at"`
 	Revision        uint64            `json:"revision"`
 	DurationMS      float64           `json:"query_ms"`
+	BucketSeconds   int64             `json:"bucket_seconds,omitempty"`
 }
 
 func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) {
@@ -211,7 +212,7 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 	}
 	where := []string{`((level='day' AND period_ms>=? AND period_ms<?) OR (level='minute' AND period_ms>=? AND period_ms<=? AND NOT(period_ms>=? AND period_ms<?)))`}
 	args := []any{lo, hi, startMS, now.UnixMilli(), lo, hi}
-	for _, entry := range [][2]string{{"provider", f.Provider}, {"model", f.Model}, {"endpoint", f.Endpoint}, {"key_id", f.KeyID}} {
+	for _, entry := range [][2]string{{"provider", f.Provider}, {"model", f.Model}, {"upstream_model", f.UpstreamModel}, {"endpoint", f.Endpoint}, {"key_id", f.KeyID}} {
 		if entry[1] != "" && entry[1] != "all" {
 			where = append(where, entry[0]+"=?")
 			args = append(args, entry[1])
@@ -387,17 +388,47 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 	return out, nil
 }
 
-// attachTimeseries reads pre-aggregated rollups only. Short windows use minute
-// buckets; longer windows use daily buckets so chart requests remain bounded
-// even when the fact table spans a year or more.
+// attachTimeseries uses daily rollups for complete days and minute rollups
+// on the boundaries. Usage belongs to request facts, never retried attempts.
 func (e *Engine) attachTimeseries(ctx context.Context, result *QueryResult, f QueryFilter, startMS, endMS int64) error {
-	level := "minute"
-	if endMS-startMS > 48*60*60*1000 {
-		level = "day"
+	// Use observed coverage for an all-history window rather than empty years.
+	chartStart := startMS
+	if result.CollectedFrom != nil {
+		chartStart = max(chartStart, *result.CollectedFrom*1000/60000*60000)
 	}
-	where := []string{"level=?", "period_ms>=?", "period_ms<=?", "kind='attempt'"}
-	args := []any{level, startMS / 60000 * 60000, endMS}
-	for _, entry := range [][2]string{{"provider", f.Provider}, {"model", f.Model}, {"endpoint", f.Endpoint}, {"key_id", f.KeyID}} {
+	bucket := int64(60000)
+	span := max(int64(1), endMS-chartStart)
+	for _, size := range []int64{60000, 300000, 900000, 3600000, 21600000, 86400000, 604800000, 2592000000} {
+		bucket = size
+		if span/size <= 180 {
+			break
+		}
+	}
+	if span/bucket > 180 {
+		bucket = ((span/180 + 86399999) / 86400000) * 86400000
+	}
+	result.BucketSeconds = bucket / 1000
+	where := []string{"level='minute'", "period_ms>=?", "period_ms<=?"}
+	args := []any{startMS, endMS}
+	if endMS-startMS > 48*60*60*1000 {
+		localStart := time.UnixMilli(startMS).In(e.Location)
+		firstDay := time.Date(localStart.Year(), localStart.Month(), localStart.Day(), 0, 0, 0, 0, e.Location)
+		if firstDay.UnixMilli() < startMS {
+			firstDay = firstDay.AddDate(0, 0, 1)
+		}
+		localEnd := time.UnixMilli(endMS).In(e.Location)
+		lastDay := time.Date(localEnd.Year(), localEnd.Month(), localEnd.Day(), 0, 0, 0, 0, e.Location)
+		lo, hi := firstDay.UnixMilli(), lastDay.UnixMilli()
+		if hi < lo {
+			hi = lo
+		}
+		where = []string{`((level='day' AND period_ms>=? AND period_ms<?) OR (level='minute' AND period_ms>=? AND period_ms<=? AND NOT(period_ms>=? AND period_ms<?)))`}
+		args = []any{lo, hi, startMS, endMS, lo, hi}
+		// Daily rollups cannot be split into sub-day chart buckets.
+		bucket = max(bucket, 86400000)
+		result.BucketSeconds = bucket / 1000
+	}
+	for _, entry := range [][2]string{{"provider", f.Provider}, {"model", f.Model}, {"upstream_model", f.UpstreamModel}, {"endpoint", f.Endpoint}, {"key_id", f.KeyID}} {
 		if entry[1] != "" && entry[1] != "all" {
 			where = append(where, entry[0]+"=?")
 			args = append(args, entry[1])
@@ -408,67 +439,37 @@ func (e *Engine) attachTimeseries(ctx context.Context, result *QueryResult, f Qu
 		args = append(args, f.Stream == "true")
 	}
 	where, args = sourceWhere(where, args, f)
-	rows, err := e.DB.QueryContext(ctx, `SELECT period_ms,provider,model,upstream_model,outcome,sum(n)::BIGINT FROM rollups WHERE `+strings.Join(where, " AND ")+` GROUP BY period_ms,provider,model,upstream_model,outcome ORDER BY period_ms`, args...)
+	// Offset the buckets to local midnight, matching the stored daily rollups.
+	_, offset := time.UnixMilli(endMS).In(e.Location).Zone()
+	bucketSQL := fmt.Sprintf("(floor((period_ms+%d)::DOUBLE/%d)*%d-%d)::BIGINT", int64(offset)*1000, bucket, bucket, int64(offset)*1000)
+	rows, err := e.DB.QueryContext(ctx, `SELECT `+bucketSQL+` AS bucket,
+      coalesce(sum(CASE WHEN kind='attempt' AND outcome IN ('success','completed','incomplete') THEN n ELSE 0 END),0)::BIGINT,
+      coalesce(sum(CASE WHEN kind='attempt' AND outcome NOT IN ('success','completed','incomplete','cancelled','client_cancelled','hedge_cancelled','skipped') THEN n ELSE 0 END),0)::BIGINT,
+      coalesce(sum(CASE WHEN kind='request' THEN input_tokens ELSE 0 END),0)::BIGINT,
+      coalesce(sum(CASE WHEN kind='request' THEN cache_read_tokens ELSE 0 END),0)::BIGINT,
+      coalesce(sum(CASE WHEN kind='request' THEN cache_samples ELSE 0 END),0)::BIGINT
+      FROM rollups WHERE `+strings.Join(where, " AND ")+` GROUP BY bucket ORDER BY bucket`, args...)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
-	points := map[string]map[int64]map[string]any{}
 	for rows.Next() {
-		var period int64
-		var provider, model, upstream, outcome string
-		var n int64
-		if err := rows.Scan(&period, &provider, &model, &upstream, &outcome, &n); err != nil {
+		var period, success, failed, input, cached, samples int64
+		if err = rows.Scan(&period, &success, &failed, &input, &cached, &samples); err != nil {
 			return err
 		}
-		key := provider + "\x00" + model + "\x00" + upstream
-		if points[key] == nil {
-			points[key] = map[int64]map[string]any{}
+		var rate any
+		if samples > 0 && input > 0 {
+			rate = float64(cached) / float64(input)
 		}
-		point := points[key][period]
-		if point == nil {
-			point = map[string]any{"timestamp": period / 1000, "success": int64(0), "failed": int64(0), "covered": true}
-			points[key][period] = point
-		}
-		if outcome == "cancelled" || outcome == "client_cancelled" || outcome == "hedge_cancelled" || outcome == "skipped" {
-			continue
-		}
-		if outcome == "success" || outcome == "completed" || outcome == "incomplete" {
-			point["success"] = point["success"].(int64) + n
-		} else {
-			point["failed"] = point["failed"].(int64) + n
+		point := map[string]any{"timestamp": max(period, startMS) / 1000, "bucket_start": period / 1000, "bucket_end": min(period+bucket, endMS) / 1000, "success": success, "failed": failed, "input_tokens": input, "cache_read_tokens": cached, "cache_samples": samples, "cache_rate": rate, "covered": true}
+		// The existing overview chart consumes one aggregate series. Drawer
+		// queries explicitly scope this same series to the clicked channel.
+		if len(result.Data) > 0 {
+			result.Data[0].Points = append(result.Data[0].Points, point)
 		}
 	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	// The console trend is a cross-channel chart. Returning the same bucket
-	// series on every channel multiplies the response by the channel count and
-	// makes broad-window clicks slow. Keep the channel rows intact for the table,
-	// but attach one aggregate series to the first row for the chart consumer.
-	aggregate := map[int64]map[string]any{}
-	for _, buckets := range points {
-		for period, point := range buckets {
-			total := aggregate[period]
-			if total == nil {
-				total = map[string]any{"timestamp": period / 1000, "success": int64(0), "failed": int64(0), "covered": true}
-				aggregate[period] = total
-			}
-			total["success"] = total["success"].(int64) + point["success"].(int64)
-			total["failed"] = total["failed"].(int64) + point["failed"].(int64)
-		}
-	}
-	if len(result.Data) > 0 {
-		periods := make([]int64, 0, len(aggregate))
-		for period := range aggregate {
-			periods = append(periods, period)
-		}
-		sort.Slice(periods, func(i, j int) bool { return periods[i] < periods[j] })
-		for _, period := range periods {
-			result.Data[0].Points = append(result.Data[0].Points, aggregate[period])
-		}
-	}
-	return nil
+	return rows.Err()
 }
 
 func histogramValues(value any) []int64 {

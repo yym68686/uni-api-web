@@ -1,3 +1,4 @@
+import { ranges } from "./analytics";
 export const defaultFilters = {
   keyId: "",
   sourceId: "",
@@ -62,7 +63,7 @@ function validate(value: unknown): Filters {
     keyId: field("keyId"),
     sourceId: field("sourceId"),
     model: field("model"),
-    window: field("window", ["5m", "15m", "1h", "24h", "7d", "30d", "today", "week", "month", "year", "all"]),
+    window: field("window", ranges.map(([value]) => value)),
     balanceFilter: field("balanceFilter", ["", "low"]),
     statusFilter: field("statusFilter", ["", "eligible", "unavailable"]),
     search: field("search"),

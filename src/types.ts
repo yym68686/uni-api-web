@@ -26,6 +26,8 @@ export interface Stats {
   output_tokens?: number;
   usage_samples?: number;
   cache_rate?: number | null;
+  cache_read_tokens?: number;
+  cache_samples?: number;
   estimated_cost_usd?: number | null;
   started: number;
   success: number;
@@ -56,7 +58,7 @@ export interface Channel {
   eligible: boolean;
   reason: string;
   stats: Stats;
-  points?: (Stats & { timestamp: number; covered: boolean })[];
+  points?: (Stats & { timestamp: number; bucket_start?: number; bucket_end?: number; covered: boolean })[];
 }
 export interface Catalog {
   unavailable_sources?: string[];
@@ -64,6 +66,7 @@ export interface Catalog {
   snapshot_revision: string;
 }
 export interface Metrics extends Catalog {
+  bucket_seconds?: number;
   source_freshness?: { source_id: string; latest_fact_at: number }[];
   filters?: { endpoint: string; stream: string };
   available_endpoints?: string[];

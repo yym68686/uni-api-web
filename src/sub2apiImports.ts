@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { controlRequest } from "./api";
 export interface InstalledChannel {
+  base?: string;
   account_id: string;
   group_id: number;
   source_id: string;

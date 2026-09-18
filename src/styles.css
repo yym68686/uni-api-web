@@ -2481,3 +2481,37 @@ nav > button.active > svg {
 .sub-account-balance > span:first-child { color: var(--muted); }
 .sub-account-balance .amount { font-family: "Geist Mono Variable", monospace; font-size: 16px; font-weight: 500; }
 .sub-account-balance small { flex-basis: 100%; margin-top: 0; font-size: 11px; }
+
+.site-link { color: inherit; display: inline-flex; align-items: center; gap: 5px; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 4px; overflow-wrap: anywhere; }
+.site-link:hover { color: var(--green); text-decoration-color: currentColor; }
+.site-link svg { flex-shrink: 0; }
+.quality-probability { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; margin-top: 7px; }
+.quality-history { margin-top: 16px; }
+.quality-history-scroll { overflow: auto; max-height: 420px; margin: 12px 0; border: 1px solid var(--line); border-radius: 10px; }
+.quality-history-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 12px; }
+.quality-history-table th, .quality-history-table td { padding: 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.quality-history-table th { color: var(--muted); background: var(--subtle); position: sticky; top: 0; }
+.quality-history-table td small { display: block; margin-top: 5px; }
+.quality-history-table details summary { color: var(--green); cursor: pointer; }
+.quality-history-table details[open] { min-width: 0; }
+.quality-history-table dl { margin: 8px 0 0; }
+.quality-history-table dd { margin: 3px 0 10px; }
+.quality-history-table .check-status { white-space: normal; }
+.cache-trend h3 { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.cache-trend h3 span { font-size: 12px; font-weight: 400; }
+.cache-trend-summary { display: flex; align-items: baseline; gap: 12px; margin: 18px 0; }
+.cache-trend-summary strong { font-family: "Geist Mono Variable", monospace; font-size: 26px; color: var(--green); }
+.cache-trend-summary span { font-size: 12px; }
+.cache-trend svg { width: 100%; overflow: visible; }
+.cache-trend svg line { stroke: var(--line); stroke-dasharray: 3 4; }
+.cache-trend svg text { fill: var(--muted); font-size: 10px; }
+.cache-trend-line { fill: none; stroke: var(--green); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.cache-trend svg circle { fill: var(--green); cursor: pointer; outline: none; }
+.cache-trend svg circle:focus { stroke: var(--ink); stroke-width: 2; }
+.cache-trend-point { min-height: 68px; padding: 12px; border-radius: 8px; background: var(--subtle); display: grid; grid-template-columns: 1fr auto; gap: 8px; font-size: 12px; }
+.cache-trend-point small { grid-column: 1 / -1; color: var(--muted); }
+.channel-secret { padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--subtle); }
+.channel-secret code { display: block; overflow-wrap: anywhere; font-size: 12px; user-select: all; }
+.channel-secret code + code { margin-top: 8px; }
+.channel-access-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.channel-remove { margin-top: 18px; }

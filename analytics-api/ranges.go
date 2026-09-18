@@ -2,12 +2,17 @@ package main
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 )
 
 var rangeNames = []string{"5m", "15m", "1h", "24h", "7d", "30d", "today", "week", "month", "year", "all"}
 
 func rangeStart(name string, now time.Time, zone *time.Location) (time.Time, error) {
+	if hours, err := strconv.Atoi(strings.TrimSuffix(name, "h")); err == nil && hours >= 1 && hours <= 24 && name == fmt.Sprintf("%dh", hours) {
+		return now.Add(-time.Duration(hours) * time.Hour), nil
+	}
 	local := now.In(zone)
 	midnight := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, zone)
 	switch name {

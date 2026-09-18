@@ -190,6 +190,12 @@ func TestSubQualityQueueScopesPersistsAndStops(t *testing.T) {
 			t.Fatal("legacy result projection differs")
 		}
 	}
+	for group := int64(1); group <= 2; group++ {
+		summary, err := store.qualitySummary(context.Background(), qualityScope{Account: account, Group: group})
+		if err != nil || summary != (qualitySummary{Total: 1, Successful: 1, Passed: 1}) {
+			t.Fatal("quality-only probe not recorded exactly once", summary, err)
+		}
+	}
 	var sibling []byte
 	store.db.QueryRow(`SELECT result FROM console_sub_models WHERE account_id=$1 AND group_id=1 AND model='gpt-5.6-sol'`, account).Scan(&sibling)
 	var siblingResult subResult

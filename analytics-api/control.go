@@ -82,6 +82,10 @@ func newControlStore(dsn, master string) (*controlStore, error) {
 		db.Close()
 		return nil, err
 	}
+	if _, err = db.ExecContext(ctx, qualityHistorySchema); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return &controlStore{db: db, key: sum[:]}, nil
 }
 func (s *controlStore) Close() { _ = s.db.Close() }
@@ -279,7 +283,12 @@ func (s *Service) controlHandler() http.Handler {
 	mux.HandleFunc("GET /v1/sources/{id}/channel-controls", s.channelControls)
 	mux.HandleFunc("POST /v1/sources/{id}/channel-controls", s.channelControls)
 	mux.HandleFunc("GET /v1/sources/{id}/channel-checks", s.channelChecks)
+	mux.HandleFunc("GET /v1/sources/{id}/channel-checks/history", s.qualityHistory)
+	mux.HandleFunc("GET /v1/sub2api/accounts/{id}/groups/{group}/quality-history", s.qualityHistory)
 	mux.HandleFunc("POST /v1/sources/{id}/channel-checks", s.checkChannel)
+	mux.HandleFunc("GET /v1/channel-sites", s.channelSites)
+	mux.HandleFunc("GET /v1/sources/{id}/channel-info", s.channelInfo)
+	mux.HandleFunc("GET /v1/sub2api/quality-summary", s.subQualitySummary)
 	mux.HandleFunc("GET /v1/sub2api/accounts", s.subAccounts)
 	mux.HandleFunc("GET /v1/sub2api/accounts/{id}/balance", s.subAccountBalance)
 	mux.HandleFunc("POST /v1/sub2api/accounts", s.subAddAccount)

@@ -13,8 +13,10 @@ type subChannelRef struct {
 	Account string
 	Group   int64
 	Name    string
+	Base    string
 }
 type subInstalledChannel struct {
+	Base        string         `json:"base"`
 	AccountID   string         `json:"account_id"`
 	GroupID     int64          `json:"group_id"`
 	SourceID    string         `json:"source_id"`
@@ -52,7 +54,7 @@ func decodeMap(value any, out any) error {
 	return json.Unmarshal(raw, out)
 }
 func (s *controlStore) subChannelRefs(ctx context.Context, owner string) ([]subChannelRef, error) {
-	rows, e := s.db.QueryContext(ctx, `SELECT a.id,t.group_id,a.name,t.billing FROM console_sub_accounts a JOIN console_sub_targets t ON t.account_id=a.id WHERE a.owner=$1 ORDER BY a.created_at,t.group_id`, owner)
+	rows, e := s.db.QueryContext(ctx, `SELECT a.id,t.group_id,a.name,t.billing,a.base FROM console_sub_accounts a JOIN console_sub_targets t ON t.account_id=a.id WHERE a.owner=$1 ORDER BY a.created_at,t.group_id`, owner)
 	if e != nil {
 		return nil, e
 	}
@@ -61,7 +63,7 @@ func (s *controlStore) subChannelRefs(ctx context.Context, owner string) ([]subC
 	for rows.Next() {
 		var ref subChannelRef
 		var billing []byte
-		if e = rows.Scan(&ref.Account, &ref.Group, &ref.Name, &billing); e != nil {
+		if e = rows.Scan(&ref.Account, &ref.Group, &ref.Name, &billing, &ref.Base); e != nil {
 			return nil, e
 		}
 		var b subBilling
@@ -177,7 +179,7 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 				kl := keyLabels[p.KeyID]
-				results[i].Data = append(results[i].Data, subInstalledChannel{AccountID: ref.Account, GroupID: ref.Group, SourceID: src.ID, SourceName: src.Name, KeyID: p.KeyID, KeyPosition: kl.Position, KeyPrefix: kl.Prefix, Provider: p.Provider, Name: ref.Name, Models: p.Models, Positions: positions, Revision: state.Revision, Manageable: state.Manageable})
+				results[i].Data = append(results[i].Data, subInstalledChannel{Base: ref.Base, AccountID: ref.Account, GroupID: ref.Group, SourceID: src.ID, SourceName: src.Name, KeyID: p.KeyID, KeyPosition: kl.Position, KeyPrefix: kl.Prefix, Provider: p.Provider, Name: ref.Name, Models: p.Models, Positions: positions, Revision: state.Revision, Manageable: state.Manageable})
 			}
 		}(i, source)
 	}
