@@ -68,7 +68,7 @@ import {
 import {
   useChannelControls,
   ChannelControlCell,
-  ChannelControlReset,
+  ChannelControlActions,
 } from "./ChannelControls";
 import { SourceSettings } from "./SourceSettings";
 import { LatencyBadge } from "./LatencyBadge";
@@ -1670,7 +1670,7 @@ function Dashboard({
                     )}
                   </div>
                   {view === "controls" && (
-                    <ChannelControlReset
+                    <ChannelControlActions
                       controls={controls}
                       sources={sourceList}
                       keys={keys.data?.data || []}

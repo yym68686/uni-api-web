@@ -27,9 +27,11 @@ export interface ControlState {
 }
 type ControlTarget = Pick<Channel, "source_id" | "provider">;
 interface Draft {
+  source: string;
   revision: string;
   rule: ControlRule;
 }
+const STALE_DRAFT = "规则已变化，请放弃草稿后重新编辑。";
 export function orderedProviders(providers: string[], order: string[]) {
   return [
     ...order.filter((p) => providers.includes(p)),
@@ -66,8 +68,15 @@ export function useChannelControls({
   enabled: boolean;
 }) {
   const client = useQueryClient();
+  const [drafts, setDrafts] = useState<Map<string, Draft>>(new Map());
+  const [errors, setErrors] = useState<Map<string, string>>(new Map());
+  const [pending, setPending] = useState(false);
+  const locked = useRef(false);
   const sourceIds = selectedSourceIds || [
     ...new Set(rows.map((r) => r.source_id).filter((id): id is string => !!id)),
+  ];
+  const controlSourceIds = [
+    ...new Set([...sourceIds, ...[...drafts.values()].map((d) => d.source)]),
   ];
   const rawKey = keyId.includes("::") ? keyId.split("::")[1] : keyId;
   const scope = (source: string) => JSON.stringify([source, rawKey, model]);
@@ -77,9 +86,9 @@ export function useChannelControls({
     source,
   ];
   const states = useQueries({
-    queries: sourceIds.map((source) => ({
+    queries: controlSourceIds.map((source) => ({
       queryKey: stateKey(source),
-      enabled,
+      enabled: enabled && !pending,
       queryFn: async ({ signal }: { signal: AbortSignal }) => {
         const data = await controlRequest<ControlState>(
           `/v1/sources/${encodeURIComponent(source)}/channel-controls`,
@@ -91,7 +100,7 @@ export function useChannelControls({
       },
       retry: false,
       staleTime: 5000,
-      refetchInterval: enabled ? 5000 : false,
+      refetchInterval: enabled && !pending ? 5000 : false,
       refetchIntervalInBackground: false,
     })),
   });
@@ -111,15 +120,11 @@ export function useChannelControls({
       staleTime: 30000,
     })),
   });
-  const [drafts, setDrafts] = useState<Map<string, Draft>>(new Map());
-  const [errors, setErrors] = useState<Map<string, string>>(new Map());
-  const [pending, setPending] = useState<Set<string>>(new Set());
-  const locks = useRef(new Set<string>());
   function info(row: ControlTarget) {
     const source = row.source_id || "",
       id = scope(source),
       index = sourceIds.indexOf(source);
-    const state = states[index],
+    const state = states[controlSourceIds.indexOf(source)],
       catalog = catalogs[index];
     const current = state?.data?.rules.find(
       (r) => r.api_key_id === rawKey && r.model === model,
@@ -160,7 +165,7 @@ export function useChannelControls({
         !catalog.isError &&
         providers.includes(row.provider),
       error: errors.get(id) || state?.error?.message || catalog?.error?.message,
-      pending: pending.has(source),
+      pending,
     };
   }
   function edit(
@@ -168,13 +173,14 @@ export function useChannelControls({
     update: (rule: ControlRule, order: string[]) => ControlRule,
   ) {
     const i = info(row);
-    if (!i.ready || i.stale || i.pending) return;
+    if (!i.ready || i.stale || locked.current) return;
     const next = update(
       { ...i.rule, order: [...i.rule.order], disabled: [...i.rule.disabled] },
       i.order,
     );
     setDrafts((old) =>
       new Map(old).set(i.id, {
+        source: i.source,
         revision: i.draft?.revision || i.state.data!.revision,
         rule: next,
       }),
@@ -215,62 +221,119 @@ export function useChannelControls({
       return { ...rule, order: next };
     });
   }
-  function discard(row: ControlTarget) {
-    const id = scope(row.source_id || "");
-    setDrafts((old) => {
-      const next = new Map(old);
-      next.delete(id);
-      return next;
-    });
-    setErrors((old) => {
-      const next = new Map(old);
-      next.delete(id);
-      return next;
-    });
+  function discardAll() {
+    if (locked.current) return;
+    setDrafts(new Map());
+    setErrors(new Map());
   }
-  async function save(row: ControlTarget, reset = false) {
-    const i = info(row);
-    if (
-      (reset
-        ? !i.state?.data || i.state.isError || !i.current || !!i.draft
-        : !i.ready) ||
-      i.stale ||
-      locks.current.has(i.source) ||
-      (!reset && !i.draft)
-    )
-      return;
-    locks.current.add(i.source);
-    setPending(new Set(locks.current));
+  async function commit(changes: [string, Draft][], action: "set" | "reset") {
+    if (locked.current || !changes.length) return;
+    locked.current = true;
+    setPending(true);
+    const groups = new Map<string, [string, Draft][]>();
+    for (const entry of changes) {
+      const group = groups.get(entry[1].source) || [];
+      group.push(entry);
+      groups.set(entry[1].source, group);
+    }
     try {
-      const result = await controlRequest<ControlState>(
-        `/v1/sources/${encodeURIComponent(i.source)}/channel-controls`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            ...i.rule,
-            action: reset ? "reset" : "set",
-            revision: i.draft?.revision || i.state.data!.revision,
-          }),
-        },
+      await Promise.all(
+        [...groups].map(async ([source, entries]) => {
+          const remaining = new Set(entries.map(([id]) => id));
+          try {
+            // An older poll must not overwrite the state acknowledged by a write.
+            await client.cancelQueries({ queryKey: stateKey(source) });
+            let revision = client.getQueryData<ControlState>(
+              stateKey(source),
+            )?.revision;
+            if (
+              !revision ||
+              entries.some(([, draft]) => draft.revision !== revision)
+            )
+              throw new Error(STALE_DRAFT);
+            for (const [id, draft] of entries) {
+              const result: ControlState = await controlRequest<ControlState>(
+                `/v1/sources/${encodeURIComponent(source)}/channel-controls`,
+                {
+                  method: "POST",
+                  body: JSON.stringify({ ...draft.rule, action, revision }),
+                },
+              );
+              if (!result.revision || !Array.isArray(result.rules))
+                throw new Error("来源返回无效状态，请刷新后核对");
+              const previousRevision = revision;
+              revision = result.revision;
+              client.setQueryData(stateKey(source), result);
+              setDrafts((old) => {
+                const next = new Map(old);
+                next.delete(id);
+                // Only advance drafts based on our own acknowledged change.
+                // External revisions continue to require an explicit new edit.
+                for (const [otherId, other] of next) {
+                  if (
+                    other.source === source &&
+                    other.revision === previousRevision
+                  )
+                    next.set(otherId, { ...other, revision: result.revision });
+                }
+                return next;
+              });
+              setErrors((old) => {
+                const next = new Map(old);
+                next.delete(id);
+                return next;
+              });
+              remaining.delete(id);
+            }
+          } catch (e) {
+            setErrors((old) => {
+              const next = new Map(old);
+              for (const id of remaining)
+                next.set(
+                  id,
+                  e instanceof Error ? e.message : "修改失败，请刷新核对",
+                );
+              return next;
+            });
+          }
+        }),
       );
-      client.setQueryData(stateKey(i.source), result);
-      discard(row);
-      await Promise.all([
+    } finally {
+      locked.current = false;
+      setPending(false);
+      void Promise.all([
         client.invalidateQueries({ queryKey: ["catalog"] }),
         client.invalidateQueries({ queryKey: ["live-metrics"] }),
         client.invalidateQueries({ queryKey: ["control-catalog"] }),
+        client.invalidateQueries({ queryKey: ["control-persistence"] }),
       ]);
-    } catch (e) {
-      setErrors((old) =>
-        new Map(old).set(
-          i.id,
-          e instanceof Error ? e.message : "修改失败，请刷新核对",
-        ),
-      );
-    } finally {
-      locks.current.delete(i.source);
-      setPending(new Set(locks.current));
     }
+  }
+  function applyAll() {
+    return commit([...drafts], "set");
+  }
+  function reset(row: ControlTarget) {
+    const i = info(row);
+    if (
+      !i.state?.data ||
+      i.state.isError ||
+      !i.current ||
+      [...drafts.values()].some((draft) => draft.source === i.source)
+    )
+      return;
+    return commit(
+      [
+        [
+          i.id,
+          {
+            source: i.source,
+            revision: i.state.data.revision,
+            rule: i.current,
+          },
+        ],
+      ],
+      "reset",
+    );
   }
   function arrange(input: Channel[]) {
     const groups = new Map<string, Channel[]>();
@@ -282,7 +345,7 @@ export function useChannelControls({
     }
     for (const group of groups.values()) {
       const i = info(group[0]);
-      if (!i.draft?.rule.order.length) continue;
+      if (!i.rule.order.length) continue;
       const ranks = new Map(i.order.map((p, n) => [p, n]));
       group.sort(
         (a, b) =>
@@ -301,7 +364,28 @@ export function useChannelControls({
   const scopes = sourceIds.map((source) =>
     info({ source_id: source, provider: "" }),
   );
-  return { info, toggle, neighbor, move, discard, save, arrange, scopes };
+  const draftIssues = [...drafts].flatMap(([id, draft]) => {
+    const state = states[controlSourceIds.indexOf(draft.source)];
+    const message =
+      errors.get(id) ||
+      state?.error?.message ||
+      (state?.data?.revision !== draft.revision ? STALE_DRAFT : "");
+    return message ? [{ id, source: draft.source, message }] : [];
+  });
+  return {
+    info,
+    toggle,
+    neighbor,
+    move,
+    discardAll,
+    applyAll,
+    reset,
+    arrange,
+    scopes,
+    drafts,
+    draftIssues,
+    pending,
+  };
 }
 export type ChannelControls = ReturnType<typeof useChannelControls>;
 export function ChannelControlCell({
@@ -380,31 +464,7 @@ export function ChannelControlCell({
           </span>
         </Tip>
       </div>
-      {i.draft ? (
-        <div className="control-row-actions">
-          <button
-            className="button small primary"
-            aria-label={`应用临时修改 ${label}`}
-            disabled={i.pending || i.stale}
-            onClick={() => void controls.save(row)}
-          >
-            <Check size={13} />
-            应用
-          </button>
-          <button
-            className="button small"
-            aria-label={`放弃临时修改 ${label}`}
-            disabled={i.pending}
-            onClick={() => controls.discard(row)}
-          >
-            <X size={13} />
-            放弃
-          </button>
-        </div>
-      ) : null}
-      {i.stale && (
-        <small className="negative">规则已变化，请放弃草稿后重新编辑。</small>
-      )}
+      {i.stale && <small className="negative">{STALE_DRAFT}</small>}
       {i.error && (
         <small className="negative" role="alert">
           {i.error}
@@ -415,6 +475,57 @@ export function ChannelControlCell({
 }
 
 export const RESET_SCOPE_LABEL = "撤销更改";
+export function ChannelControlActions(props: {
+  controls: ChannelControls;
+  sources: ConsoleSource[];
+  keys: KeyInfo[];
+}) {
+  const { controls, sources } = props;
+  return (
+    <div className="control-toolbar-actions">
+      <ChannelControlReset {...props} />
+      {controls.drafts.size > 0 && (
+        <>
+          <Tip text="应用全部未保存修改，包括筛选隐藏的来源、API key 和模型范围。">
+            <button
+              className="button small primary"
+              aria-label="应用全部临时修改"
+              disabled={controls.pending}
+              onClick={() => void controls.applyAll()}
+            >
+              {controls.pending ? <Spinner small /> : <Check size={13} />}
+              {controls.pending ? "应用中…" : "应用"}
+            </button>
+          </Tip>
+          <Tip text="放弃全部未保存修改，保留已生效规则。">
+            <button
+              className="button small"
+              aria-label="放弃全部临时修改"
+              disabled={controls.pending}
+              onClick={controls.discardAll}
+            >
+              <X size={13} />
+              放弃
+            </button>
+          </Tip>
+        </>
+      )}
+      {!controls.pending && controls.draftIssues.length > 0 && (
+        <small className="control-draft-error negative" role="alert">
+          未应用的修改已保留：
+          {[
+            ...new Set(
+              controls.draftIssues.map(
+                (issue) =>
+                  `${sources.find((source) => source.id === issue.source)?.name || issue.source}：${issue.message}`,
+              ),
+            ),
+          ].join("；")}
+        </small>
+      )}
+    </div>
+  );
+}
 export function ChannelControlReset({
   controls,
   sources,
@@ -461,8 +572,11 @@ export function ChannelControlReset({
           : "指定 API key（已不在目录）"
         : "全部 API key";
       const label = `${sourceName} / ${keyName} / ${rule.model || "全部模型"}`;
-      const disabled = scope.pending || !!scope.draft || scope.state.isError;
-      const hint = scope.draft
+      const hasDraft = [...controls.drafts.values()].some(
+        (draft) => draft.source === scope.source,
+      );
+      const disabled = scope.pending || hasDraft || scope.state.isError;
+      const hint = hasDraft
         ? "有未应用修改，请先应用或放弃草稿。"
         : `撤销 ${label} 的渠道顺序和临时停用，包含被表格筛选隐藏的渠道。其他范围规则保留。`;
       return { scope, label, disabled, hint };
@@ -470,7 +584,7 @@ export function ChannelControlReset({
   if (!scopes.length) return null;
   const reset = (source: string) => {
     if (menu.current) menu.current.open = false;
-    void controls.save({ source_id: source, provider: "" }, true);
+    void controls.reset({ source_id: source, provider: "" });
   };
   if (scopes.length === 1) {
     const { scope, label, disabled, hint } = scopes[0];

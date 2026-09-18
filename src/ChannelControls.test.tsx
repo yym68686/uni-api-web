@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as Tooltip from "@radix-ui/react-tooltip";
@@ -10,7 +10,13 @@ import { inheritedDisabled, RESET_SCOPE_LABEL } from "./ChannelControls";
 import type { ControlState } from "./ChannelControls";
 
 afterEach(() => vi.unstubAllGlobals());
-function setup(controlUnavailable = false) {
+function setup(
+  controlUnavailable = false,
+  beforeWrite?: (
+    source: string,
+    body: any,
+  ) => Promise<Response | undefined> | Response | undefined,
+) {
   const states: Record<string, ControlState> = {
     one: { revision: "one:0", instance_id: "one", rules: [] },
     two: { revision: "two:0", instance_id: "two", rules: [] },
@@ -77,6 +83,10 @@ function setup(controlUnavailable = false) {
         if (init?.method === "POST") {
           const v = JSON.parse(init.body as string);
           writes.push({ source, body: v });
+          const failure = await beforeWrite?.(source, v);
+          if (failure) return failure;
+          if (v.revision !== states[source].revision)
+            return new Response("规则版本冲突，请刷新核对", { status: 409 });
           states[source] = {
             ...states[source],
             revision: source + ":" + writes.length,
@@ -243,9 +253,7 @@ it("stages source-specific controls inline, retains hidden channels and drafts a
     screen.getByLabelText("临时停用 Two visible-first m"),
   ).not.toBeChecked();
   expect(app.writes).toHaveLength(0);
-  await app.user.click(
-    screen.getByLabelText("应用临时修改 One visible-first m"),
-  );
+  await app.user.click(screen.getByLabelText("应用全部临时修改"));
   await waitFor(() => expect(app.writes).toHaveLength(1));
   expect(app.writes[0]).toEqual({
     source: "one",
@@ -370,6 +378,225 @@ it("keeps a single reset beside search with scope details in the menu and toolti
   expect(app.writes[1].body.model).toBe("m");
   expect(app.states.one.rules).toHaveLength(1);
   expect(app.states.one.rules[0].api_key_id).toBe("");
+  app.unmount();
+  app.client.clear();
+});
+
+function providerOrder(source: string) {
+  return within(screen.getByRole("table"))
+    .getAllByRole("row")
+    .slice(1)
+    .filter((row) => row.querySelector(".source-label")?.textContent === source)
+    .map((row) => row.querySelector(".channel-link strong")?.textContent);
+}
+async function openControls(app: ReturnType<typeof setup>) {
+  await screen.findByRole("table");
+  await app.user.click(screen.getByRole("button", { name: "渠道控制" }));
+  await waitFor(() =>
+    expect(screen.getByLabelText("临时停用 One visible-first m")).toBeEnabled(),
+  );
+  await screen.findByLabelText("临时停用 Two visible-first m");
+}
+
+it("applies moves from both sources with one toolbar action and keeps acknowledged ordering when catalog data lags", async () => {
+  const app = setup();
+  await openControls(app);
+  await app.user.type(screen.getByLabelText("搜索渠道或模型"), "visible");
+  await app.user.click(screen.getByLabelText("上移 One visible-second m"));
+  await app.user.click(screen.getByLabelText("上移 Two visible-second m"));
+  const apply = screen.getByRole("button", { name: "应用全部临时修改" });
+  expect(
+    screen.getAllByRole("button", { name: "应用全部临时修改" }),
+  ).toHaveLength(1);
+  expect(
+    screen.getAllByRole("button", { name: "放弃全部临时修改" }),
+  ).toHaveLength(1);
+  expect(
+    within(screen.getByRole("table")).queryByRole("button", {
+      name: /应用|放弃/,
+    }),
+  ).not.toBeInTheDocument();
+  expect(app.writes).toHaveLength(0);
+  await app.user.click(apply);
+  await waitFor(() => expect(app.writes).toHaveLength(2));
+  await waitFor(() =>
+    expect(screen.queryByLabelText("应用全部临时修改")).not.toBeInTheDocument(),
+  );
+  expect(app.writes.map((write) => write.source).sort()).toEqual([
+    "one",
+    "two",
+  ]);
+  for (const source of ["one", "two"])
+    expect(app.states[source].rules[0].order).toEqual([
+      "visible-second",
+      "hidden",
+      "visible-first",
+    ]);
+  expect(providerOrder("One")).toEqual(["visible-second", "visible-first"]);
+  expect(providerOrder("Two")).toEqual(["visible-second", "visible-first"]);
+  await app.user.click(screen.getByLabelText("临时停用 One visible-first m"));
+  const reset = screen.getByRole("button", { name: RESET_SCOPE_LABEL });
+  expect(
+    screen
+      .getByLabelText("应用全部临时修改")
+      .closest(".control-toolbar-actions"),
+  ).toBe(reset.closest(".control-toolbar-actions"));
+  expect(
+    screen
+      .getByLabelText("放弃全部临时修改")
+      .closest(".control-toolbar-actions"),
+  ).toBe(reset.closest(".control-toolbar-actions"));
+  app.unmount();
+  app.client.clear();
+});
+
+it("discards all drafts even when search hides every modified channel, preserving applied rules", async () => {
+  const app = setup();
+  app.states.one.rules = [
+    {
+      api_key_id: "",
+      model: "",
+      order: ["visible-second", "hidden", "visible-first"],
+      disabled: [],
+    },
+  ];
+  await openControls(app);
+  await app.user.click(screen.getByLabelText("临时停用 One visible-first m"));
+  await app.user.click(screen.getByLabelText("上移 Two visible-second m"));
+  await app.user.type(screen.getByLabelText("搜索渠道或模型"), "no-match");
+  await screen.findByText("没有匹配的渠道");
+  await app.user.click(screen.getByLabelText("放弃全部临时修改"));
+  expect(app.writes).toHaveLength(0);
+  await app.user.clear(screen.getByLabelText("搜索渠道或模型"));
+  expect(
+    screen.getByLabelText("临时停用 One visible-first m"),
+  ).not.toBeChecked();
+  expect(providerOrder("One")).toEqual([
+    "visible-second",
+    "hidden",
+    "visible-first",
+  ]);
+  expect(providerOrder("Two")).toEqual([
+    "visible-first",
+    "hidden",
+    "visible-second",
+  ]);
+  expect(screen.queryByLabelText("应用全部临时修改")).not.toBeInTheDocument();
+  app.unmount();
+  app.client.clear();
+});
+
+it("applies drafts hidden by source and model selection and chains revisions for multiple scopes in one source", async () => {
+  const app = setup();
+  await openControls(app);
+  await app.user.click(screen.getByLabelText("下移 One visible-first m"));
+  await app.user.click(screen.getByLabelText("临时停用 Two visible-first m"));
+  await app.user.selectOptions(screen.getByLabelText("uni-api 来源"), "one");
+  await app.user.selectOptions(
+    screen.getByLabelText("API key 筛选"),
+    "one::key",
+  );
+  await app.user.selectOptions(screen.getByLabelText("模型筛选"), "m");
+  await waitFor(() =>
+    expect(screen.getByLabelText("临时停用 One visible-first m")).toBeEnabled(),
+  );
+  await app.user.click(screen.getByLabelText("临时停用 One visible-first m"));
+  await app.user.click(screen.getByLabelText("应用全部临时修改"));
+  await waitFor(() =>
+    expect(screen.queryByLabelText("应用全部临时修改")).not.toBeInTheDocument(),
+  );
+  expect(app.writes).toHaveLength(3);
+  const one = app.writes.filter((write) => write.source === "one");
+  expect(one[0].body).toMatchObject({
+    revision: "one:0",
+    api_key_id: "",
+    model: "",
+  });
+  expect(one[1].body.revision).not.toBe("one:0");
+  expect(one[1].body).toMatchObject({
+    api_key_id: "key",
+    model: "m",
+    disabled: ["visible-first"],
+  });
+  expect(app.states.one.rules).toHaveLength(2);
+  expect(app.states.two.rules[0].disabled).toEqual(["visible-first"]);
+  app.unmount();
+  app.client.clear();
+});
+
+it("locks all draft actions during a batch and retains only failed changes for an explicit retry", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let fail = true;
+  const app = setup(false, async (source) => {
+    await gate;
+    if (source === "two" && fail)
+      return new Response("来源暂不可用", { status: 503 });
+  });
+  await openControls(app);
+  await app.user.click(screen.getByLabelText("临时停用 One visible-first m"));
+  await app.user.click(screen.getByLabelText("临时停用 Two visible-first m"));
+  const apply = screen.getByLabelText("应用全部临时修改");
+  await app.user.dblClick(apply);
+  await waitFor(() => expect(app.writes).toHaveLength(2));
+  expect(apply).toBeDisabled();
+  expect(screen.getByLabelText("放弃全部临时修改")).toBeDisabled();
+  expect(screen.getByLabelText("临时停用 One visible-second m")).toBeDisabled();
+  expect(screen.getByLabelText("上移 Two visible-second m")).toBeDisabled();
+  await act(async () => {
+    release();
+  });
+  await waitFor(() => expect(apply).toBeEnabled());
+  expect(app.states.one.rules).toHaveLength(1);
+  expect(app.states.two.rules).toHaveLength(0);
+  expect(screen.getByText(/未应用的修改已保留：Two/)).toHaveTextContent(
+    "来源暂不可用",
+  );
+  fail = false;
+  await app.user.click(apply);
+  await waitFor(() =>
+    expect(screen.queryByLabelText("应用全部临时修改")).not.toBeInTheDocument(),
+  );
+  expect(app.writes.map((write) => write.source)).toEqual([
+    "one",
+    "two",
+    "two",
+  ]);
+  expect(app.states.two.rules[0].disabled).toEqual(["visible-first"]);
+  app.unmount();
+  app.client.clear();
+});
+
+it("does not overwrite an external revision when applying other valid drafts", async () => {
+  const app = setup();
+  await openControls(app);
+  await app.user.click(screen.getByLabelText("临时停用 One visible-first m"));
+  await app.user.click(screen.getByLabelText("临时停用 Two visible-first m"));
+  app.states.one = {
+    ...app.states.one,
+    revision: "one:external",
+    rules: [{ api_key_id: "", model: "", order: [], disabled: ["hidden"] }],
+  };
+  await act(async () => {
+    await app.client.invalidateQueries({ queryKey: ["channel-controls"] });
+  });
+  await app.user.click(screen.getByLabelText("应用全部临时修改"));
+  await waitFor(() => expect(app.writes).toHaveLength(1));
+  await waitFor(() =>
+    expect(screen.getByLabelText("应用全部临时修改")).toBeEnabled(),
+  );
+  expect(app.writes[0].source).toBe("two");
+  expect(app.states.one.rules[0].disabled).toEqual(["hidden"]);
+  expect(screen.getByText(/未应用的修改已保留：One/)).toHaveTextContent(
+    "规则已变化",
+  );
+  await app.user.click(screen.getByLabelText("放弃全部临时修改"));
+  expect(screen.getByLabelText("临时停用 One hidden m")).toBeChecked();
+  expect(
+    screen.getByLabelText("临时停用 One visible-first m"),
+  ).not.toBeChecked();
   app.unmount();
   app.client.clear();
 });
