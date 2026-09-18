@@ -203,6 +203,22 @@ func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err != nil {
+		var remote *subRemoteError
+		if errors.As(err, &remote) && (strings.Contains(strings.ToUpper(remote.Reason), "TURNSTILE") || strings.Contains(strings.ToUpper(remote.Reason), "CAPTCHA")) {
+			var settings struct {
+				Enabled   bool   `json:"login_agreement_enabled"`
+				Revision  string `json:"login_agreement_revision"`
+				Documents []struct {
+					ID      string `json:"id"`
+					Title   string `json:"title"`
+					Content string `json:"content_md"`
+				} `json:"login_agreement_documents"`
+			}
+			// This is public metadata, fetched through the same SSRF-safe client.
+			_ = subJSON(ctx, subHTTP, in.Base, "GET", "/api/v1/settings/public", "", nil, &settings, "")
+			writeJSON(w, 200, map[string]any{"requires_browser": true, "browser_base": in.Base, "agreement": map[string]any{"required": settings.Enabled, "revision": settings.Revision, "documents": settings.Documents}})
+			return
+		}
 		http.Error(w, err.Error(), 400)
 		return
 	}

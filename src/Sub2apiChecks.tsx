@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useQueryClient } from "@tanstack/react-query";
@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { controlRequest } from "./api";
+import { browserHelperAvailable, loginWithBrowser } from "./sub2apiBrowser";
 import { ResponseLatency } from "./LatencyBadge";
 import { Empty, Spinner, Tip } from "./ui";
 import { loadSubFilters, saveSubFilters } from "./sub2apiPreferences";
@@ -109,6 +110,53 @@ function AccountForm({
   const [base, setBase] = useState(initial?.base || "");
   const [email, setEmail] = useState(initial?.email || "");
   const [password, setPassword] = useState("");
+  const [browserNeeded, setBrowserNeeded] = useState(false);
+  const [helperReady, setHelperReady] = useState(false);
+  const [agreement, setAgreement] = useState<{
+    required: boolean;
+    revision: string;
+    documents: { id: string; title: string; content_md: string }[];
+  }>();
+  const [agreed, setAgreed] = useState(false);
+  const [browserBusy, setBrowserBusy] = useState(false);
+  const browserAbort = useRef<AbortController | null>(null);
+  useEffect(() => {
+    let active = true;
+    void browserHelperAvailable().then((ready) => {
+      if (active) setHelperReady(ready);
+    });
+    return () => {
+      active = false;
+      browserAbort.current?.abort();
+    };
+  }, []);
+  async function browserLogin() {
+    if (busy || browserBusy || !helperReady || (agreement?.required && !agreed))
+      return;
+    setBrowserBusy(true);
+    setError("");
+    const abort = new AbortController();
+    browserAbort.current = abort;
+    try {
+      const auth = await loginWithBrowser(
+        { base, email, password, agreed },
+        abort.signal,
+      );
+      setPassword("");
+      await controlRequest("/v1/sub2api/accounts", {
+        method: "POST",
+        body: JSON.stringify({ name, base, email, ...auth }),
+        signal: abort.signal,
+      });
+      saved();
+    } catch (e) {
+      if (!abort.signal.aborted)
+        setError(e instanceof Error ? e.message : "浏览器登录失败");
+    } finally {
+      setBrowserBusy(false);
+      browserAbort.current = null;
+    }
+  }
   const [advanced, setAdvanced] = useState(false);
   const [access, setAccess] = useState("");
   const [refresh, setRefresh] = useState("");
@@ -118,13 +166,24 @@ function AccountForm({
   const [error, setError] = useState("");
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (busy) return;
+    if (busy || browserBusy) return;
+    if (browserNeeded && !advanced && !challenge) {
+      void browserLogin();
+      return;
+    }
     setBusy(true);
     setError("");
     try {
       const result = await controlRequest<{
         requires_2fa?: boolean;
         challenge?: string;
+        requires_browser?: boolean;
+        browser_base?: string;
+        agreement?: {
+          required: boolean;
+          revision: string;
+          documents: { id: string; title: string; content_md: string }[];
+        };
       }>("/v1/sub2api/accounts", {
         method: "POST",
         body: JSON.stringify(
@@ -140,7 +199,13 @@ function AccountForm({
               },
         ),
       });
-      if (result.requires_2fa && result.challenge) {
+      if (result.requires_browser) {
+        setBrowserNeeded(true);
+        if (result.browser_base) setBase(result.browser_base);
+        setAgreement(result.agreement);
+        setAgreed(false);
+        setHelperReady(await browserHelperAvailable());
+      } else if (result.requires_2fa && result.challenge) {
         setChallenge(result.challenge);
         setPassword("");
         setAccess("");
@@ -166,96 +231,144 @@ function AccountForm({
             ? "重新登录站点账号"
             : "添加 sub2api 账号"}
       </h3>
-      {challenge ? (
-        <label>
-          六位验证码
-          <input
-            autoFocus
-            aria-label="六位验证码"
-            autoComplete="one-time-code"
-            inputMode="numeric"
-            pattern="[0-9]{6}"
-            maxLength={6}
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-            required
-          />
-        </label>
-      ) : (
-        <>
+      <fieldset className="sub-login-fields" disabled={busy || browserBusy}>
+        {challenge ? (
           <label>
-            站点名称
+            六位验证码
             <input
-              placeholder="例如：我的上游"
-              maxLength={120}
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-          </label>
-          <label>
-            站点地址
-            <input
-              type="url"
-              placeholder="https://api.example.com"
-              value={base}
-              onChange={(e) => setBase(e.target.value)}
-              readOnly={!!initial}
+              autoFocus
+              aria-label="六位验证码"
+              autoComplete="one-time-code"
+              inputMode="numeric"
+              pattern="[0-9]{6}"
+              maxLength={6}
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
               required
             />
           </label>
-          <label>
-            账号邮箱
-            <input
-              type="email"
-              autoComplete="username"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              readOnly={!!initial}
-              required
-            />
-          </label>
-          {!advanced && (
+        ) : (
+          <>
             <label>
-              账号密码
+              站点名称
               <input
-                type="password"
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                placeholder="例如：我的上游"
+                maxLength={120}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </label>
+            <label>
+              站点地址
+              <input
+                type="url"
+                placeholder="https://api.example.com"
+                value={base}
+                onChange={(e) => {
+                  setBase(e.target.value);
+                  setBrowserNeeded(false);
+                  setAgreement(undefined);
+                  setAgreed(false);
+                }}
+                readOnly={!!initial}
                 required
               />
             </label>
-          )}
-          <details onToggle={(e) => setAdvanced(e.currentTarget.open)}>
-            <summary>站点要求验证码？使用已登录会话接入</summary>
-            <p>
-              在 sub2api 站点完成登录后，填入该账号的
-              access_token；refresh_token 可选。这里需要登录会话令牌，不是模型
-              API key。
-            </p>
-            <div className="source-storage-fields">
+            <label>
+              账号邮箱
+              <input
+                type="email"
+                autoComplete="username"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                readOnly={!!initial}
+                required
+              />
+            </label>
+            {!advanced && (
               <label>
-                访问令牌
+                账号密码
                 <input
                   type="password"
-                  autoComplete="off"
-                  value={access}
-                  onChange={(e) => setAccess(e.target.value)}
-                  required={advanced}
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
                 />
               </label>
-              <label>
-                刷新令牌（可选）
-                <input
-                  type="password"
-                  autoComplete="off"
-                  value={refresh}
-                  onChange={(e) => setRefresh(e.target.value)}
-                />
-              </label>
-            </div>
-          </details>
-        </>
+            )}
+            <details onToggle={(e) => setAdvanced(e.currentTarget.open)}>
+              <summary>站点要求验证码？使用已登录会话接入</summary>
+              <p>
+                在 sub2api 站点完成登录后，填入该账号的
+                access_token；refresh_token 可选。这里需要登录会话令牌，不是模型
+                API key。
+              </p>
+              <div className="source-storage-fields">
+                <label>
+                  访问令牌
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    value={access}
+                    onChange={(e) => setAccess(e.target.value)}
+                    required={advanced}
+                  />
+                </label>
+                <label>
+                  刷新令牌（可选）
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    value={refresh}
+                    onChange={(e) => setRefresh(e.target.value)}
+                  />
+                </label>
+              </div>
+            </details>
+          </>
+        )}
+        {browserNeeded && !advanced && !challenge && (
+          <div className="sub-browser-login">
+            {agreement?.required && (
+              <>
+                {agreement.documents?.map((doc) => (
+                  <details key={doc.id}>
+                    <summary>{doc.title}</summary>
+                    <p>{doc.content_md}</p>
+                  </details>
+                ))}
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={agreed}
+                    onChange={(event) => setAgreed(event.target.checked)}
+                  />
+                  我已阅读并同意以上站点登录协议
+                </label>
+              </>
+            )}
+            {helperReady ? (
+              <p>
+                将打开原站完成登录；如需人机验证或验证码，请在原站完成，成功后自动同步。
+              </p>
+            ) : (
+              <p>
+                此站点需要在浏览器中登录。
+                <a href="/uni-api-browser-helper.zip" download>
+                  下载登录助手
+                </a>
+                ，安装后刷新此页面。
+              </p>
+            )}
+          </div>
+        )}
+      </fieldset>
+      {browserBusy && (
+        <p role="status">
+          <Spinner small />
+          正在等待原站登录，成功后自动同步…
+        </p>
       )}
       {error && (
         <div role="alert" className="error-banner">
@@ -271,15 +384,38 @@ function AccountForm({
           <button
             className="button small"
             type="button"
-            onClick={close}
+            onClick={() => {
+              browserAbort.current?.abort();
+              close();
+            }}
             disabled={busy}
           >
             取消
           </button>
-          <button className="button primary small" disabled={busy}>
-            {busy ? <Spinner small /> : <Plus size={14} />}
-            {challenge ? "验证并检测" : "连接并检测"}
-          </button>
+          {browserNeeded && !advanced && !challenge ? (
+            <button
+              type="button"
+              className="button primary small"
+              onClick={() => void browserLogin()}
+              disabled={
+                busy ||
+                browserBusy ||
+                !helperReady ||
+                (!!agreement?.required && !agreed)
+              }
+            >
+              {browserBusy ? <Spinner small /> : <Globe2 size={14} />}
+              使用浏览器登录
+            </button>
+          ) : (
+            <button
+              className="button primary small"
+              disabled={busy || browserBusy}
+            >
+              {busy ? <Spinner small /> : <Plus size={14} />}
+              {challenge ? "验证并检测" : "连接并检测"}
+            </button>
+          )}
         </div>
       </div>
     </form>

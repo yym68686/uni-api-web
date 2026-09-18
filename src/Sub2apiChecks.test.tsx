@@ -1162,3 +1162,94 @@ it("syncs all idle accounts independently of channel filters and prevents repeat
     screen.getByText("已提交 2 个账号，正在后台同步并检测。"),
   ).toBeVisible();
 });
+
+it("offers the browser helper for Turnstile and saves only its returned session", async () => {
+  const writes: any[] = [];
+  const onMessage = (event: MessageEvent) => {
+    const { channel, id, type } = event.data || {};
+    if (channel !== "uni-api-browser-login-v1") return;
+    const data =
+      type === "ping"
+        ? { channel, id, type: "ready" }
+        : type === "login"
+          ? {
+              channel,
+              id,
+              type: "result",
+              auth: {
+                access_token: "browser-session",
+                refresh_token: "browser-refresh",
+              },
+            }
+          : null;
+    if (data)
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          data,
+          origin: location.origin,
+          source: window,
+        }),
+      );
+  };
+  window.addEventListener("message", onMessage);
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (_input: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        writes.push(JSON.parse(init.body as string));
+        return new Response(
+          JSON.stringify(
+            writes.length === 1
+              ? {
+                  requires_browser: true,
+                  agreement: {
+                    required: true,
+                    revision: "r1",
+                    documents: [
+                      {
+                        id: "terms",
+                        title: "原站协议",
+                        content_md: "原站协议正文",
+                      },
+                    ],
+                  },
+                }
+              : { id: "new", queued: true },
+          ),
+        );
+      }
+      return new Response('{"data":[]}');
+    }),
+  );
+  try {
+    const user = userEvent.setup();
+    mount();
+    await user.click(await screen.findByRole("button", { name: "添加账号" }));
+    await user.type(screen.getByLabelText("站点地址"), "https://site.example");
+    await user.type(screen.getByLabelText("账号邮箱"), "me@example.com");
+    await user.type(screen.getByLabelText("账号密码"), "private-password");
+    await user.click(screen.getByRole("button", { name: "连接并检测" }));
+    const browserButton = await screen.findByRole("button", {
+      name: "使用浏览器登录",
+    });
+    expect(browserButton).toBeDisabled();
+    await user.click(
+      screen.getByRole("checkbox", { name: "我已阅读并同意以上站点登录协议" }),
+    );
+    await waitFor(() => expect(browserButton).toBeEnabled());
+    await user.click(browserButton);
+    await waitFor(() => expect(writes).toHaveLength(2));
+    expect(writes[1]).toEqual({
+      name: "",
+      base: "https://site.example",
+      email: "me@example.com",
+      access_token: "browser-session",
+      refresh_token: "browser-refresh",
+    });
+    await waitFor(() =>
+      expect(screen.queryByLabelText("账号密码")).not.toBeInTheDocument(),
+    );
+  } finally {
+    window.removeEventListener("message", onMessage);
+  }
+});

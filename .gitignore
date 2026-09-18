@@ -6,3 +6,5 @@ dist/
 *.tsbuildinfo
 .DS_Store
 coverage/
+
+/public/uni-api-browser-helper.zip

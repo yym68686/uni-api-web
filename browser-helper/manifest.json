@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "uni-api 登录助手",
+  "version": "1.0.0",
+  "description": "在你授权的 sub2api 站点完成登录，并将会话交回 uni-api 控制台。",
+  "permissions": ["scripting"],
+  "optional_host_permissions": ["https://*/*"],
+  "background": {"service_worker": "background.js", "type": "module"},
+  "content_scripts": [{"matches": ["https://uni-api-console.fugue.pro/*"], "js": ["bridge.js"], "run_at": "document_start"}],
+  "action": {"default_title": "uni-api 登录助手"}
+}

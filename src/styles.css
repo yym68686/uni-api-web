@@ -2470,3 +2470,12 @@ nav > button.active > svg {
 @media (prefers-reduced-motion: reduce) {
   .startup-screen .skeleton { animation: none; }
 }
+
+.sub-login-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
+.sub-browser-login { margin-top: 16px; font-size: 12px; }
+.sub-browser-login details { margin: 8px 0; }
+.sub-browser-login summary { cursor: pointer; }
+.sub-browser-login p { max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; color: var(--muted); }
+.sub-browser-login label { display: flex; align-items: center; gap: 8px; }
+.sub-browser-login input[type=checkbox] { width: auto; }
+.sub-browser-login a { color: var(--green); text-decoration: underline; }
