@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"log"
@@ -38,6 +39,9 @@ type attributedSpend struct {
 	HeaderMissing   int            `json:"missing_response_identifiers"`
 	Unbound         int            `json:"unbound_attempts"`
 	Pending         int            `json:"pending_attempts"`
+	AbsentReceipts  int            `json:"absent_receipt_attempts"`
+	AbsentStatuses  map[string]int `json:"absent_receipt_statuses,omitempty"`
+	CheckedAt       int64          `json:"checked_at"`
 	Refreshing      bool           `json:"refreshing"`
 	SyncError       bool           `json:"sync_error"`
 	MissingStatuses map[string]int `json:"missing_response_statuses,omitempty"`
@@ -279,6 +283,13 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 		ID   int64
 		Cost string
 	}
+	// Read coverage and cached rows from the same snapshot. Otherwise a scan
+	// completing between the two reads can falsely label a newly saved bill absent.
+	ledger, err := s.control.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer ledger.Rollback()
 	logs := map[string][]bill{}
 	if len(ids) > 0 {
 		requestIDs := make([]string, 0, len(ids))
@@ -289,7 +300,7 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 		for id := range accounts {
 			accountIDs = append(accountIDs, id)
 		}
-		rows, err = s.control.db.QueryContext(ctx, `SELECT account_id,key_id,log_id,request_id,actual_cost::text FROM console_sub_spend_logs WHERE account_id=ANY($1) AND request_id=ANY($2)`, accountIDs, requestIDs)
+		rows, err = ledger.QueryContext(ctx, `SELECT account_id,key_id,log_id,request_id,actual_cost::text FROM console_sub_spend_logs WHERE account_id=ANY($1) AND request_id=ANY($2)`, accountIDs, requestIDs)
 		if err != nil {
 			return nil, err
 		}
@@ -309,13 +320,21 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 			return nil, err
 		}
 	}
-	syncErrors := map[string]bool{}
+	type ledgerCoverage struct {
+		From, To sql.NullInt64
+		Checked  int64
+		Failed   bool
+	}
+	coverage := map[string]ledgerCoverage{}
 	for account := range accounts {
-		var failed bool
-		if err = s.control.db.QueryRowContext(ctx, `SELECT error<>'' FROM console_sub_account_spend_cache WHERE account_id=$1`, account).Scan(&failed); err != nil {
+		var state ledgerCoverage
+		if err = ledger.QueryRowContext(ctx, `SELECT covered_from,covered_to,checked_at,error<>'' FROM console_sub_account_spend_cache WHERE account_id=$1`, account).Scan(&state.From, &state.To, &state.Checked, &state.Failed); err != nil {
 			return nil, err
 		}
-		syncErrors[account] = failed
+		coverage[account] = state
+	}
+	if err = ledger.Commit(); err != nil {
+		return nil, err
 	}
 	rowErrors := map[string]bool{}
 	claimed := map[string]string{}
@@ -325,6 +344,10 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 			continue
 		}
 		item := ensure(b.Source, b.Provider, b.Model, b.Upstream)
+		state := coverage[scope.Account]
+		if state.Checked > 0 && (item.CheckedAt == 0 || state.Checked/1000 < item.CheckedAt) {
+			item.CheckedAt = state.Checked / 1000
+		}
 		found := map[int64]bill{}
 		ambiguous := false
 		for _, id := range b.IDs {
@@ -340,8 +363,16 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 			continue
 		}
 		if len(found) == 0 {
-			if syncErrors[scope.Account] {
+			if state.Failed {
 				rowErrors[billingRowID(b.Source, b.Provider, b.Model, b.Upstream)] = true
+			} else if state.From.Valid && state.To.Valid && state.From.Int64 <= min(b.Started, b.At) && state.To.Int64 > b.At && state.Checked >= b.At {
+				// This only proves that the last complete scan found no receipt.
+				// It does not prove zero cost or that a delayed bill cannot appear.
+				item.AbsentReceipts++
+				if item.AbsentStatuses == nil {
+					item.AbsentStatuses = map[string]int{}
+				}
+				item.AbsentStatuses[strconv.Itoa(b.Status)]++
 			}
 			continue
 		}
@@ -364,7 +395,7 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 	for id, item := range totals {
 		amount, _ := sums[id].Float64()
 		item.MatchedAmount = amount
-		item.Pending = max(0, item.Total-item.Matched-item.Missing-item.Ambiguous)
+		item.Pending = max(0, item.Total-item.Matched-item.Missing-item.Ambiguous-item.AbsentReceipts)
 		item.Refreshing = item.Pending > 0
 		item.SyncError = rowErrors[id]
 		switch {
@@ -377,6 +408,9 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 		case rowErrors[id]:
 			item.Status = "error"
 			item.Message = "站点账单查询失败，后台会自动重试；未匹配金额不按零处理"
+		case item.Pending == 0 && item.AbsentReceipts > 0:
+			item.Status = "unmatched"
+			item.Message = "账单日志已同步，但仍未找到部分请求的账单；金额未知，不按零消费处理"
 		case item.Matched < item.Total:
 			item.Status = "pending"
 			item.Message = "正在逐请求同步账单；尚未匹配的请求不按零消费处理"

@@ -350,3 +350,90 @@ func TestAttributedSpendMatchesSearchReceiptsFromExistingCheckpoints(t *testing.
 		t.Fatal("unknown path silently removed")
 	}
 }
+
+func TestAttributedSpendSeparatesAbsentReceiptFromIncompleteDownload(t *testing.T) {
+	s, account, owner := attributionFixture(t)
+	now := time.Now().Truncate(time.Second)
+	paid := attributedFact("paid", "caller", now.Add(-20*time.Minute))
+	rejected := attributedFact("rate-limited", "caller", now.Add(-19*time.Minute))
+	rejected.Status = 429
+	timedOut := attributedFact("timeout", "caller", now.Add(-18*time.Minute))
+	timedOut.Status = 524
+	timedOut.BillingRequestIDs = nil
+	if e := s.engine.Import(context.Background(), "mixed-download", "v1", []Fact{paid, rejected, timedOut}); e != nil {
+		t.Fatal(e)
+	}
+	storeAttributedLog(t, s, account, "paid", "1.25", 1)
+	read := func() attributedSpend {
+		rs, e := s.attributedChannelSpend(context.Background(), owner, QueryFilter{KeyID: "caller"}, now.Add(-time.Hour).Unix(), now.Unix())
+		if e != nil || len(rs) != 1 {
+			t.Fatal(rs, e)
+		}
+		return rs[0]
+	}
+	if row := read(); row.Pending != 1 || row.AbsentReceipts != 0 || !row.Refreshing {
+		t.Fatal("unsynced receipt misclassified", row)
+	}
+	// Full scan includes the request start and completion, but no matching bill.
+	if _, e := s.control.db.Exec(`UPDATE console_sub_account_spend_cache SET covered_from=$2,covered_to=$3,checked_at=$3,requested=false WHERE account_id=$1`, account, now.Add(-time.Hour).UnixMilli(), now.UnixMilli()); e != nil {
+		t.Fatal(e)
+	}
+	row := read()
+	if row.Pending != 0 || row.AbsentReceipts != 1 || row.AbsentStatuses["429"] != 1 || row.HeaderMissing != 1 || row.Refreshing || row.Amount != nil || row.MatchedAmount != 1.25 {
+		t.Fatal("absence treated as free or still downloading", row)
+	}
+	// A posted/amended bill must still be picked up; absence is not a final zero.
+	storeAttributedLog(t, s, account, "rate-limited", "0.05", 2)
+	row = read()
+	if row.AbsentReceipts != 0 || row.Matched != 2 || row.MatchedAmount != 1.30 || row.Amount != nil || row.HeaderMissing != 1 {
+		t.Fatal("late bill ignored", row)
+	}
+}
+
+func TestAttributedSpendCoverageMustIncludeAttemptBeforeReportingAbsent(t *testing.T) {
+	for _, mode := range []string{"covers", "before_start", "before_end", "query_failed"} {
+		t.Run(mode, func(t *testing.T) {
+			s, account, owner := attributionFixture(t)
+			now := time.Now().Truncate(time.Second)
+			fact := attributedFact("unknown-bill", "caller", now.Add(-time.Minute))
+			fact.Status = 400
+			if e := s.engine.Import(context.Background(), "fact", "v1", []Fact{fact}); e != nil {
+				t.Fatal(e)
+			}
+			f := QueryFilter{KeyID: "caller"}
+			from, to := now.Add(-time.Hour).Unix(), now.Unix()
+			if _, e := s.attributedChannelSpend(context.Background(), owner, f, from, to); e != nil {
+				t.Fatal(e)
+			}
+			lower, upper := now.Add(-time.Hour).UnixMilli(), now.UnixMilli()
+			failure := ""
+			if mode == "before_start" {
+				lower = fact.StartedMS + 1
+			}
+			if mode == "before_end" {
+				upper = fact.AtMS
+			}
+			if mode == "query_failed" {
+				failure = "request failed"
+			}
+			if _, e := s.control.db.Exec(`UPDATE console_sub_account_spend_cache SET covered_from=$2,covered_to=$3,checked_at=$4,error=$5,requested=false WHERE account_id=$1`, account, lower, upper, now.UnixMilli(), failure); e != nil {
+				t.Fatal(e)
+			}
+			rs, e := s.attributedChannelSpend(context.Background(), owner, f, from, to)
+			if e != nil || len(rs) != 1 {
+				t.Fatal(rs, e)
+			}
+			row := rs[0]
+			if row.Amount != nil {
+				t.Fatal("unmatched request declared free", row)
+			}
+			if mode == "covers" {
+				if row.Pending != 0 || row.AbsentReceipts != 1 || row.Status != "unmatched" {
+					t.Fatal(row)
+				}
+			} else if row.Pending != 1 || row.AbsentReceipts != 0 {
+				t.Fatal(row)
+			}
+		})
+	}
+}

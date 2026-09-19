@@ -24,6 +24,8 @@ export interface SubChannelSpend {
   key_id?: number;
   scope: "sub2api_business_key" | "matched_requests";
   pending_attempts?: number;
+  absent_receipt_attempts?: number;
+  absent_receipt_statuses?: Record<string, number>;
   missing_correlation_attempts?: number;
   missing_response_identifiers?: number;
   missing_response_statuses?: Record<string, number>;
@@ -113,11 +115,13 @@ export function useScopedChannelSpend({
                   (r.total_attempts || 0) -
                     (r.matched_attempts || 0) -
                     (r.missing_identifiers || 0) -
-                    (r.ambiguous_attempts || 0),
+                    (r.ambiguous_attempts || 0) -
+                    (r.absent_receipt_attempts || 0),
                 )) > 0),
         )
       )
         return 5000;
+      if (data.some((r) => (r.absent_receipt_attempts || 0) > 0)) return 60000;
       return auto ? 30000 : false;
     },
   });
@@ -356,14 +360,25 @@ export function SubChannelSpendValue({
           data.ambiguous_attempts
             ? `关联冲突 ${data.ambiguous_attempts} 次`
             : "",
-          data.pending_attempts ? `账单待核对 ${data.pending_attempts} 次` : "",
+          data.pending_attempts
+            ? `账单同步尚未覆盖 ${data.pending_attempts} 次`
+            : "",
+          data.absent_receipt_attempts
+            ? `已完成相应时间段的账单同步，但未找到 ${data.absent_receipt_attempts} 次请求的账单${
+                data.absent_receipt_statuses
+                  ? `（${Object.entries(data.absent_receipt_statuses)
+                      .map(([status, n]) => `HTTP ${status}：${n}`)
+                      .join("、")}）`
+                  : ""
+              }；会低频复查，不能据此认定免费`
+            : "",
         ]
           .filter(Boolean)
           .join("；")
       : "";
   const explanation =
     data?.scope === "matched_requests"
-      ? `${date(data.from)} 至 ${date(data.to)}。按当前来源、调用 Key、渠道、模型、端点及流式范围逐请求关联。已核对 ${data.matched_attempts ?? 0}/${data.total_attempts ?? 0} 次上游尝试。${missing ? missing + "。" : data.message || ""}${data.sync_error ? "站点账单查询失败，后台会重试。" : ""}${partial ? `至少 ${money(data.matched_cost_usd!)}；这是已核对部分，不是完整消费。完整金额确认前不计算利润。` : ""}${query?.isError ? "本次刷新失败，当前为上次核对结果。" : ""}`
+      ? `${date(data.from)} 至 ${date(data.to)}。按当前来源、调用 Key、渠道、模型、端点及流式范围逐请求关联。已核对 ${data.matched_attempts ?? 0}/${data.total_attempts ?? 0} 次上游尝试。${missing ? missing + "。" : data.message || ""}${data.checked_at ? `上次完整账单同步：${date(data.checked_at)}。` : ""}${(data.missing_response_identifiers || 0) > 0 ? "响应缺少关联标识，继续等待同步不能补回这些标识。" : ""}${data.sync_error ? "站点账单查询失败，后台会重试。" : ""}${partial ? `至少 ${money(data.matched_cost_usd!)}；这是已核对部分，不是完整消费。完整金额确认前不计算利润。` : ""}${query?.isError ? "本次刷新失败，当前为上次核对结果。" : ""}`
       : data
         ? `${data.scope_label || `sub2api 业务 Key #${data.key_id}`} · ${date(data.from)} 至 ${date(data.to)}。${known ? `${data.requests ?? 0} 条账单；` : ""}按该业务 Key 整体统计，包含所有模型和调用来源，共用 Key 的渠道不可重复相加。${data.checked_at ? `账单更新于 ${date(data.checked_at)}。` : ""}${query?.isError ? "更新失败，显示上次完整统计。" : data.message || ""}`
         : query?.isError
@@ -383,6 +398,7 @@ export function SubChannelSpendValue({
   else if (data?.missing_correlation_attempts) label = "历史未关联";
   else if (data?.unbound_attempts) label = "未关联账号";
   else if (data?.missing_response_identifiers) label = "缺少响应标识";
+  else if (data?.absent_receipt_attempts) label = "未找到账单";
   else if (data?.status === "unmatched") label = "无法归属";
   return (
     <Tip text={explanation}>

@@ -363,3 +363,107 @@ it("explains exact missing categories and distinguishes verified partial spend f
   expect(screen.queryByText("$0.00")).toBeNull();
   expect(screen.getByText("—")).toBeVisible();
 });
+
+it("distinguishes completed ledger scans from downloads and rechecks absent bills slowly", async () => {
+  const { useScopedChannelSpend } = await import("./SubChannelSpend");
+  const { rowId } = await import("./format");
+  const row = {
+    source_id: "s",
+    provider: "p",
+    model: "m",
+    upstream_model: "m",
+    endpoint: "all",
+    stream: null,
+  } as import("./types").Channel;
+  const absent = {
+    ...row,
+    scope: "matched_requests",
+    status: "unmatched",
+    actual_cost_usd: null,
+    matched_cost_usd: 1,
+    total_attempts: 2,
+    matched_attempts: 1,
+    missing_identifiers: 0,
+    absent_receipt_attempts: 1,
+    absent_receipt_statuses: { "429": 1 },
+    pending_attempts: 0,
+    refreshing: false,
+    from: 100,
+    to: 200,
+    checked_at: 300,
+  };
+  const complete = {
+    ...absent,
+    status: "complete",
+    actual_cost_usd: 1.1,
+    matched_cost_usd: 1.1,
+    matched_attempts: 2,
+    absent_receipt_attempts: 0,
+  };
+  vi.useFakeTimers();
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ data: [absent] })))
+    .mockImplementation(
+      async () => new Response(JSON.stringify({ data: [complete] })),
+    );
+  vi.stubGlobal("fetch", fetch);
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  function Fixture() {
+    const result = useScopedChannelSpend({
+      rows: [row],
+      session: "absent",
+      sourceId: "s",
+      keyId: "caller",
+      model: "m",
+      endpoint: "all",
+      stream: "all",
+      from: 100,
+      to: 200,
+      refresh: 0,
+      auto: false,
+      enabled: true,
+    });
+    return <SubChannelSpendValue query={result.get(rowId(row))} />;
+  }
+  const app = render(
+    <QueryClientProvider client={client}>
+      <Tooltip.Provider>
+        <Fixture />
+      </Tooltip.Provider>
+    </QueryClientProvider>,
+  );
+  try {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(50);
+    });
+    const amount = screen.getByText("≥$1.00");
+    fireEvent.focus(amount.closest(".tip-target")!);
+    expect(screen.getByRole("tooltip")).toHaveTextContent(
+      "已完成相应时间段的账单同步，但未找到 1 次请求的账单",
+    );
+    expect(screen.getByRole("tooltip")).toHaveTextContent("HTTP 429：1");
+    expect(screen.getByRole("tooltip")).not.toHaveTextContent(
+      "账单同步尚未覆盖",
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15000);
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(46000);
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("$1.10")).toBeVisible();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60000);
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  } finally {
+    app.unmount();
+    client.clear();
+    vi.useRealTimers();
+  }
+});
