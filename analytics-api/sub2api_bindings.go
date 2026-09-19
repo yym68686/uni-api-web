@@ -85,7 +85,7 @@ func (s *Service) saveConfiguredInventory(ctx context.Context, src controlSource
 		}
 		raw, _ := json.Marshal(hashes)
 		fingerprint := tokenHash(controlTarget(src) + "\n" + p.Provider + "\n" + site + "\n" + string(raw))
-		_, err = tx.ExecContext(ctx, `INSERT INTO console_configured_channels(source_id,provider,base,site,key_hashes,fingerprint,checked_at) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(source_id,provider) DO UPDATE SET base=excluded.base,site=excluded.site,key_hashes=excluded.key_hashes,fingerprint=excluded.fingerprint,active=true,checked_at=excluded.checked_at`, src.ID, p.Provider, p.Base, site, string(raw), fingerprint, time.Now().Unix())
+		_, err = tx.ExecContext(ctx, `INSERT INTO console_configured_channels(source_id,provider,base,site,key_hashes,fingerprint,checked_at) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(source_id,provider) DO UPDATE SET base=excluded.base,site=excluded.site,key_hashes=excluded.key_hashes,fingerprint=excluded.fingerprint,active=true,checked_at=excluded.checked_at`, src.ID, p.Provider, site, site, string(raw), fingerprint, time.Now().Unix())
 		if err != nil {
 			return err
 		}

@@ -68,7 +68,7 @@ func TestConfiguredBindingsPersistAcrossRefreshAndReplicasAndInvalidateOnChange(
 	subHTTP = up.Client()
 	defer func() { subHTTP = previous }()
 	s, a, src := bindingFixture(t, up.URL)
-	providers := []configuredProvider{{Provider: "original", Base: up.URL + "/v1/responses", API: []any{"existing-private-key", "existing-private-key", "second-private-key"}}, {Provider: "shared", Base: up.URL + "/v1/messages", API: "existing-private-key"}, {Provider: "different-site", Base: "https://other-site.example/v1", API: "existing-private-key"}}
+	providers := []configuredProvider{{Provider: "original", Base: up.URL + "/v1/responses", API: []any{"existing-private-key", "existing-private-key", "second-private-key"}}, {Provider: "shared", Base: up.URL + "/v1/messages?token=must-hide", API: "existing-private-key"}, {Provider: "different-site", Base: "https://other-site.example/v1", API: "existing-private-key"}}
 	if err := s.saveConfiguredInventory(context.Background(), src, providers); err != nil {
 		t.Fatal(err)
 	}
@@ -86,6 +86,10 @@ func TestConfiguredBindingsPersistAcrossRefreshAndReplicasAndInvalidateOnChange(
 		t.Fatal(binding)
 	}
 	assertConfiguredBinding(t, s, a, src.ID, "different-site", "no_account")
+	shared := assertConfiguredBinding(t, s, a, src.ID, "shared", "matched")
+	if strings.Contains(shared.Base, "?") {
+		t.Fatal("query credential exposed in site link")
+	}
 	raw, _ := json.Marshal(binding)
 	if strings.Contains(string(raw), "private-key") || strings.Contains(string(raw), tokenHash("existing-private-key")) {
 		t.Fatal("credential leaked")
