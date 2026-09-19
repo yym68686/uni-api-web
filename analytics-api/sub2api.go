@@ -34,6 +34,11 @@ CREATE TABLE IF NOT EXISTS console_sub_spend_logs(
  account_id TEXT NOT NULL REFERENCES console_sub_accounts(id) ON DELETE CASCADE,
  key_id BIGINT NOT NULL, log_id BIGINT NOT NULL, at_ms BIGINT NOT NULL,
  actual_cost NUMERIC(20,10) NOT NULL, PRIMARY KEY(account_id,key_id,log_id));
+ALTER TABLE console_sub_spend_logs ADD COLUMN IF NOT EXISTS request_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE console_sub_spend_logs ADD COLUMN IF NOT EXISTS model TEXT NOT NULL DEFAULT '';
+ALTER TABLE console_sub_spend_logs ADD COLUMN IF NOT EXISTS stream BOOLEAN;
+ALTER TABLE console_sub_spend_logs ADD COLUMN IF NOT EXISTS inbound_endpoint TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS console_sub_spend_request ON console_sub_spend_logs(account_id,key_id,request_id);
 CREATE INDEX IF NOT EXISTS console_sub_spend_time ON console_sub_spend_logs(account_id,key_id,at_ms);
 CREATE TABLE IF NOT EXISTS console_sub_spend_cache(
  account_id TEXT NOT NULL REFERENCES console_sub_accounts(id) ON DELETE CASCADE,

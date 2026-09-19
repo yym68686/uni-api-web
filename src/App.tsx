@@ -123,7 +123,7 @@ import {
   ChannelMetricCells,
 } from "./ChannelMetrics";
 import { actualCostRange } from "./actualCost";
-import { useSubChannelSpend } from "./SubChannelSpend";
+import { useScopedChannelSpend } from "./SubChannelSpend";
 import { useChannelAccountBalances } from "./ChannelAccountBalances";
 import { ConsoleHeader, ConsoleNavigation } from "./ConsoleChrome";
 import { StartupScreen } from "./StartupScreen";
@@ -1239,7 +1239,7 @@ function Dashboard({
   );
   const providers = useMemo(() => [...new Set(rows.map(providerId))], [rows]);
   const actualRange = useMemo(() => actualCostRange(window), [window]);
-  const channelSpend = useSubChannelSpend({ providers, imports: imported.data?.data || [], session: connection.session, window, to: metrics.data?.to, refresh, auto, enabled: channelView && !!baseConnection.account });
+  const channelSpend = useScopedChannelSpend({ rows, session: connection.session, sourceId: selectedSourceId, keyId, model, endpoint, stream, from: metrics.data?.from, to: metrics.data?.to, refresh, auto, enabled: channelView && !!baseConnection.account });
   const limit = useMemo(() => makeLimiter(3), []);
   const accountBalances = useChannelAccountBalances(providers, imported.data?.data || [], connection.session, !!baseConnection.account, auto);
   const rawBalanceQueries = useQueries({
@@ -1894,7 +1894,7 @@ function Dashboard({
                               inflight={liveMap.get(rowId(row))}
                               balance={balance}
                               actualRange={actualRange}
-                              spend={channelSpend.get(providerId(row))}
+                              spend={baseConnection.account ? channelSpend.get(rowId(row)) : undefined}
                               importedChannel={!!baseConnection.account && row.provider.startsWith("sub2api-")}
                               stale={staleSources.has(row.source_id || "")}
                             />

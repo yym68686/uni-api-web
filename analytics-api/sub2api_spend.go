@@ -166,11 +166,15 @@ type subSpendTask struct {
 	page, attempts         int
 }
 type subSpendLog struct {
-	ID      int64        `json:"id"`
-	KeyID   int64        `json:"api_key_id"`
-	GroupID *int64       `json:"group_id"`
-	At      string       `json:"created_at"`
-	Cost    *json.Number `json:"actual_cost"`
+	RequestID string       `json:"request_id"`
+	Model     string       `json:"model"`
+	Stream    *bool        `json:"stream"`
+	Endpoint  string       `json:"inbound_endpoint"`
+	ID        int64        `json:"id"`
+	KeyID     int64        `json:"api_key_id"`
+	GroupID   *int64       `json:"group_id"`
+	At        string       `json:"created_at"`
+	Cost      *json.Number `json:"actual_cost"`
 }
 type subSpendPage struct {
 	Items    []subSpendLog `json:"items"`
@@ -320,7 +324,7 @@ func (s *Service) subStoreSpendPage(ctx context.Context, task subSpendTask, page
 		if at.UnixMilli() < task.from || at.UnixMilli() >= task.to {
 			continue
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO console_sub_spend_logs(account_id,key_id,log_id,at_ms,actual_cost) VALUES($1,$2,$3,$4,$5::numeric) ON CONFLICT(account_id,key_id,log_id) DO UPDATE SET at_ms=excluded.at_ms,actual_cost=excluded.actual_cost`, task.account, task.key, log.ID, at.UnixMilli(), log.Cost.String())
+		_, err = tx.ExecContext(ctx, `INSERT INTO console_sub_spend_logs(account_id,key_id,log_id,at_ms,actual_cost,request_id,model,stream,inbound_endpoint) VALUES($1,$2,$3,$4,$5::numeric,$6,$7,$8,$9) ON CONFLICT(account_id,key_id,log_id) DO UPDATE SET at_ms=excluded.at_ms,actual_cost=excluded.actual_cost,request_id=excluded.request_id,model=excluded.model,stream=excluded.stream,inbound_endpoint=excluded.inbound_endpoint`, task.account, task.key, log.ID, at.UnixMilli(), log.Cost.String(), log.RequestID, log.Model, log.Stream, log.Endpoint)
 		if err != nil {
 			return err
 		}

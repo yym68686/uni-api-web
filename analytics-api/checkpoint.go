@@ -36,7 +36,7 @@ type checkpointStore struct {
 func newCheckpointStore(client checkpointClient, cfg Config) *checkpointStore {
 	sum := sha256.Sum256([]byte(strings.Join([]string{cfg.S3Endpoint, cfg.S3Bucket, cfg.S3Prefix, cfg.Timezone}, "\x00")))
 	id := hex.EncodeToString(sum[:])
-	return &checkpointStore{client: client, bucket: cfg.StateBucket, key: strings.Trim(cfg.StatePrefix, "/") + "/cache-v2-" + id + ".tar.gz", source: "v2-" + id, legacyKey: strings.Trim(cfg.StatePrefix, "/") + "/cache-" + id + ".tar.gz", legacySource: id}
+	return &checkpointStore{client: client, bucket: cfg.StateBucket, key: strings.Trim(cfg.StatePrefix, "/") + "/cache-v3-" + id + ".tar.gz", source: "v3-" + id, legacyKey: strings.Trim(cfg.StatePrefix, "/") + "/cache-v2-" + id + ".tar.gz", legacySource: "v2-" + id}
 }
 
 func sqlPath(path string) string { return "'" + strings.ReplaceAll(path, "'", "''") + "'" }

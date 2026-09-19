@@ -33,6 +33,9 @@ type Fact struct {
 	CacheWriteTokens   *int64   `json:"cache_write_tokens"`
 	CacheWrite1hTokens *int64   `json:"cache_write_1h_tokens"`
 	ActualCostUSD      *float64 `json:"actual_cost_usd"`
+	UpstreamBase       string   `json:"upstream_base,omitempty"`
+	UpstreamKeyHash    string   `json:"upstream_key_hash,omitempty"`
+	BillingRequestIDs  []string `json:"billing_request_ids,omitempty"`
 }
 type LiveInstance struct {
 	InstanceID   string        `json:"instance_id"`
