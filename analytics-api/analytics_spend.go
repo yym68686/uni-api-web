@@ -44,7 +44,11 @@ func (s *Service) analyticsWithSpend(w http.ResponseWriter, r *http.Request, all
 	go func() {
 		defer wg.Done()
 		t := time.Now()
-		spend, spendErr = s.attributedChannelSpend(ctx, owner, f, start.UnixMilli()/60000*60, cutoff.Unix())
+		spendFilter := f
+		if q.Has("spend_model") {
+			spendFilter.Model = q.Get("spend_model")
+		}
+		spend, spendErr = s.attributedChannelSpend(ctx, owner, spendFilter, start.UnixMilli()/60000*60, cutoff.Unix())
 		spendMS = float64(time.Since(t).Microseconds()) / 1000
 	}()
 	wg.Wait()

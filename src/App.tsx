@@ -1074,11 +1074,11 @@ function Dashboard({
     staleTime: 60_000,
   });
   const metrics = useQuery({
-    queryKey: ["metrics", connection.session, keyId, window, endpoint, stream, channelView && !!baseConnection.account],
+    queryKey: ["metrics", connection.session, keyId, window, endpoint, stream, channelView && !!baseConnection.account, channelView ? model : ""],
     queryFn: ({ signal }) =>
       readMetrics(
         connection,
-        "/v1/channel-metrics?" + params,
+        "/v1/channel-metrics?" + params + "&spend_model=" + encodeURIComponent(model),
         signal,
         endpoint,
         stream,

@@ -294,17 +294,27 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 			ids[id] = true
 		}
 	}
-	for account, window := range windows {
-		if err = s.queueAccountSpendWindow(ctx, account, window[0], window[1]); err != nil {
-			return nil, err
-		}
+	if err = s.queueAccountSpendWindows(ctx, windows); err != nil {
+		return nil, err
 	}
 	// Look for competing claims across ALL sources and caller keys, not just the
 	// currently selected row. A duplicated ID must never charge two different keys.
 	ownership := map[string]int{}
 	if len(ids) > 0 {
-		claimsSQL := alignment + `, target AS (SELECT DISTINCT ` + billingSiteSQL + ` AS upstream_base,upstream_key_hash,unnest(billing_request_ids) AS rid FROM aligned_billing WHERE kind='billing' AND ` + where + `), claims AS (SELECT event_id,` + billingSiteSQL + ` AS upstream_base,upstream_key_hash,unnest(billing_request_ids) AS rid FROM facts WHERE kind='billing') SELECT t.upstream_base,t.upstream_key_hash,t.rid,count(DISTINCT c.event_id) FROM target t JOIN claims c ON c.upstream_base=t.upstream_base AND c.upstream_key_hash=t.upstream_key_hash AND c.rid=t.rid GROUP BY t.upstream_base,t.upstream_key_hash,t.rid`
-		rows, err = s.engine.DB.QueryContext(ctx, claimsSQL, alignedArgs...)
+		// Candidate facts are already aligned and filtered. Reuse those exact
+		// identities instead of grouping completion history a second time.
+		targets := []map[string]string{}
+		for _, b := range facts {
+			for _, id := range b.IDs {
+				targets = append(targets, map[string]string{"base": b.Base, "hash": b.Hash, "id": id})
+			}
+		}
+		targetJSON, e := json.Marshal(targets)
+		if e != nil {
+			return nil, e
+		}
+		claimsSQL := `WITH target AS (SELECT DISTINCT value->>'base' AS upstream_base,value->>'hash' AS upstream_key_hash,value->>'id' AS rid FROM json_each(?)), claims AS (SELECT event_id,` + billingSiteSQL + ` AS upstream_base,upstream_key_hash,unnest(billing_request_ids) AS rid FROM facts WHERE kind='billing') SELECT t.upstream_base,t.upstream_key_hash,t.rid,count(DISTINCT c.event_id) FROM target t JOIN claims c ON c.upstream_base=t.upstream_base AND c.upstream_key_hash=t.upstream_key_hash AND c.rid=t.rid GROUP BY t.upstream_base,t.upstream_key_hash,t.rid`
+		rows, err = s.engine.DB.QueryContext(ctx, claimsSQL, string(targetJSON))
 		if err != nil {
 			return nil, err
 		}
@@ -370,12 +380,32 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 		Failed   bool
 	}
 	coverage := map[string]ledgerCoverage{}
-	for account := range accounts {
-		var state ledgerCoverage
-		if err = ledger.QueryRowContext(ctx, `SELECT covered_from,covered_to,checked_at,error<>'' FROM console_sub_account_spend_cache WHERE account_id=$1`, account).Scan(&state.From, &state.To, &state.Checked, &state.Failed); err != nil {
+	if len(accounts) > 0 {
+		accountIDs := make([]string, 0, len(accounts))
+		for account := range accounts {
+			accountIDs = append(accountIDs, account)
+		}
+		rows, err = ledger.QueryContext(ctx, `SELECT account_id,covered_from,covered_to,checked_at,error<>'' FROM console_sub_account_spend_cache WHERE account_id=ANY($1)`, accountIDs)
+		if err != nil {
 			return nil, err
 		}
-		coverage[account] = state
+		for rows.Next() {
+			var account string
+			var state ledgerCoverage
+			if err = rows.Scan(&account, &state.From, &state.To, &state.Checked, &state.Failed); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			coverage[account] = state
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
+		if len(coverage) != len(accounts) {
+			return nil, sql.ErrNoRows
+		}
 	}
 	if err = ledger.Commit(); err != nil {
 		return nil, err

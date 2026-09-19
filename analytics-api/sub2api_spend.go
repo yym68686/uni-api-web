@@ -369,8 +369,24 @@ func (s *Service) subStoreSpendPage(ctx context.Context, task subSpendTask, page
 }
 
 func (s *Service) queueAccountSpendWindow(ctx context.Context, account string, from, to int64) error {
-	_, err := s.control.db.ExecContext(ctx, `INSERT INTO console_sub_account_spend_cache(account_id,wanted_from,wanted_to) VALUES($1,$2,$3)
+	return s.queueAccountSpendWindows(ctx, map[string][2]int64{account: {from, to}})
+}
+
+func (s *Service) queueAccountSpendWindows(ctx context.Context, windows map[string][2]int64) error {
+	if len(windows) == 0 {
+		return nil
+	}
+	entries := make([]map[string]any, 0, len(windows))
+	for account, w := range windows {
+		entries = append(entries, map[string]any{"account_id": account, "wanted_from": w[0], "wanted_to": w[1]})
+	}
+	raw, err := json.Marshal(entries)
+	if err != nil {
+		return err
+	}
+	_, err = s.control.db.ExecContext(ctx, `INSERT INTO console_sub_account_spend_cache(account_id,wanted_from,wanted_to)
+ SELECT account_id,wanted_from,wanted_to FROM jsonb_to_recordset($1::jsonb) AS w(account_id text,wanted_from bigint,wanted_to bigint) ORDER BY account_id
  ON CONFLICT(account_id) DO UPDATE SET wanted_from=least(console_sub_account_spend_cache.wanted_from,excluded.wanted_from),wanted_to=greatest(console_sub_account_spend_cache.wanted_to,excluded.wanted_to),
- requested=console_sub_account_spend_cache.requested OR console_sub_account_spend_cache.covered_from IS NULL OR console_sub_account_spend_cache.covered_from>excluded.wanted_from OR console_sub_account_spend_cache.covered_to<excluded.wanted_to OR console_sub_account_spend_cache.checked_at<$4`, account, from, to, time.Now().Add(-time.Minute).UnixMilli())
+ requested=console_sub_account_spend_cache.requested OR console_sub_account_spend_cache.covered_from IS NULL OR console_sub_account_spend_cache.covered_from>excluded.wanted_from OR console_sub_account_spend_cache.covered_to<excluded.wanted_to OR console_sub_account_spend_cache.checked_at<$2`, string(raw), time.Now().Add(-time.Minute).UnixMilli())
 	return err
 }

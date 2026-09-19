@@ -22,7 +22,7 @@ func TestCombinedAnalyticsKeepsBillingCutoffAndOwner(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		r := httptest.NewRequest("GET", "/v1/analytics?source_id=source&key_id=caller&model="+checkModel, nil)
+		r := httptest.NewRequest("GET", "/v1/analytics?source_id=source&key_id=caller&spend_model="+checkModel, nil)
 		r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: cookie})
 		w := httptest.NewRecorder()
 		s.analyticsWithSpend(w, r, []string{"source"}, "1h")
