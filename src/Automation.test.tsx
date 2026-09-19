@@ -65,6 +65,9 @@ it("saves explicit scope and parameters, pauses with revision, and displays audi
   render(<Automation sources={sources} models={["gpt-6-astra"]} />);
   const user = userEvent.setup();
   await user.click(screen.getAllByRole("button", { name: /新建任务/ })[0]);
+  expect(
+    screen.getByRole("dialog", { name: "新建自动化任务" }),
+  ).toBeInTheDocument();
   await user.type(screen.getByLabelText("任务名称"), "调序");
   await screen.findByRole("option", { name: /Key 1/ });
   await user.selectOptions(screen.getByLabelText("API key"), "key-fixture");
@@ -77,6 +80,7 @@ it("saves explicit scope and parameters, pauses with revision, and displays audi
   expect(screen.getByLabelText("启用任务")).not.toBeChecked();
   await user.click(screen.getByRole("button", { name: "保存任务" }));
   await screen.findByRole("button", { name: "查看详情" });
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   const post = requests.find((r) => r.init?.method === "POST");
   const body = JSON.parse(String(post?.init?.body));
   expect(body.key_id).toBe("key-fixture");
@@ -96,6 +100,14 @@ it("saves explicit scope and parameters, pauses with revision, and displays audi
   );
   expect(put.revision).toBe(1);
   expect(put.enabled).toBe(true);
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: /^调序\s*主来源/ }));
+  expect(
+    screen.getByRole("dialog", { name: "编辑自动化任务" }),
+  ).toBeInTheDocument();
+  expect(screen.getByLabelText("成功率最小样本")).toHaveValue(120);
+  await user.keyboard("{Escape}");
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });
 it("provides independent quality tasks and refreshes task and audit data", async () => {
   const requests = mockAPI();
