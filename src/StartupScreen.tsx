@@ -11,6 +11,7 @@ const panelTitles: Record<Exclude<View, "overview">, string> = {
   sub2api: "站点账号",
   prices: "模型价格",
   sources: "uni-api 来源",
+  automations: "自动化",
 };
 
 function SkeletonPanel({ title }: { title: string }) {

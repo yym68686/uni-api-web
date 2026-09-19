@@ -21,6 +21,7 @@ const views = [
   "overview",
   "prices",
   "sources",
+  "automations",
 ] as const;
 export type View = (typeof views)[number];
 const viewStorageKey = (base: string) => `uni-console-view:v1:${base}`;

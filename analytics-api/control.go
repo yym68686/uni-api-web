@@ -94,6 +94,10 @@ func newControlStore(dsn, master string) (*controlStore, error) {
 		db.Close()
 		return nil, err
 	}
+	if _, err = db.ExecContext(ctx, automationSchema); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return &controlStore{db: db, key: sum[:]}, nil
 }
 func (s *controlStore) Close() { _ = s.db.Close() }
@@ -325,6 +329,11 @@ func (s *Service) controlHandler() http.Handler {
 	mux.HandleFunc("POST /v1/sub2api/channels", s.subImportChannel)
 	mux.HandleFunc("GET /v1/sub2api/channels", s.subInstalledChannels)
 	mux.HandleFunc("PATCH /v1/sub2api/channels", s.subManageChannel)
+	mux.HandleFunc("GET /v1/automations", s.automations)
+	mux.HandleFunc("POST /v1/automations", s.automations)
+	mux.HandleFunc("GET /v1/automations/{id}", s.automations)
+	mux.HandleFunc("PUT /v1/automations/{id}", s.automations)
+	mux.HandleFunc("DELETE /v1/automations/{id}", s.deleteAutomation)
 	return mux
 }
 

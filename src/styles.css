@@ -2557,3 +2557,30 @@ nav > button.active > svg {
 .price-cache-toggle { margin-top:14px; }
 .price-inputs { grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); }
 @media(max-width:560px){.price-editor header,.price-editor footer{align-items:flex-start;flex-wrap:wrap;}}
+
+.automation-page { display:grid; gap:16px; }
+.automation-layout { display:grid; grid-template-columns:minmax(260px, .8fr) minmax(0, 1.8fr); gap:16px; align-items:start; }
+.automation-list,.automation-editor,.automation-audit { padding:20px; }
+.automation-list h3,.automation-editor h3,.automation-audit h3 { margin:0; }
+.automation-card { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:10px; align-items:center; padding:13px 0; border-top:1px solid var(--line); cursor:pointer; }
+.automation-card.selected { color:var(--green); }
+.automation-card p { margin:5px 0 0; color:var(--muted); font-size:12px; }
+.automation-state { font-size:12px; color:var(--muted); }
+.automation-state.on { color:var(--green); }
+.automation-form { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:13px; margin:16px 0; }
+.automation-form label { display:grid; gap:7px; color:var(--muted); font-size:12px; }
+.automation-form input,.automation-form select { width:100%; border:1px solid var(--border); background:var(--surface); color:var(--text); padding:10px; border-radius:6px; }
+.automation-editor h4 { margin:20px 0 10px; }
+.automation-grid { margin-top:10px; }
+.automation-metrics { display:flex; flex-wrap:wrap; gap:12px 18px; }
+.automation-metrics label,.automation-check { display:flex!important; align-items:center; gap:7px; color:var(--text)!important; font-size:13px!important; }
+.automation-editor-actions { display:flex; gap:10px; margin-top:20px; }
+.automation-empty { min-height:360px; display:grid; place-content:center; justify-items:center; gap:10px; text-align:center; color:var(--muted); }
+.automation-empty h3 { color:var(--text); }
+.automation-audit-list { display:grid; gap:10px; }
+.automation-audit-list article { border-top:1px solid var(--line); padding:12px 0; }
+.automation-audit-list article > div { display:flex; gap:12px; justify-content:space-between; }
+.automation-audit-list article p { margin:6px 0; color:var(--muted); font-size:13px; }
+.automation-audit-list article small { color:var(--green); }
+@media(max-width:860px){.automation-layout{grid-template-columns:1fr;}}
+@media(max-width:560px){.automation-form{grid-template-columns:1fr;}.automation-list,.automation-editor,.automation-audit{padding:15px;}}

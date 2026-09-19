@@ -128,6 +128,7 @@ import { useChannelAccountBalances } from "./ChannelAccountBalances";
 import { ConsoleHeader, ConsoleNavigation } from "./ConsoleChrome";
 import { StartupScreen } from "./StartupScreen";
 import { useTheme } from "./theme";
+import { Automation } from "./Automation";
 
 type Keys = {
   data: KeyInfo[];
@@ -1472,6 +1473,8 @@ function Dashboard({
                 void queryClient.invalidateQueries({ queryKey: ["metrics"] });
               }}
             />
+          ) : view === "automations" && baseConnection.account ? (
+            <Automation sources={sourceList} models={models} refreshAction={refreshButton} />
           ) : view === "prices" ? (
             <PriceSettings
               prices={prices.data?.data || []}
