@@ -80,6 +80,7 @@ export function balanceLabel(key: BalanceKey) {
   return "上游未提供";
 }
 export const balanceKind: Record<string, string> = {
+  account_wallet: "站点账号余额",
   wallet: "钱包余额",
   key_quota: "Key 配额",
   key_rate_limits: "周期额度",

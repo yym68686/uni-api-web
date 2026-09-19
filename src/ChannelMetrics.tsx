@@ -66,7 +66,7 @@ export function BalanceValue({
           }
         >
           <span className="amount">
-            {balance.keys!.length > 1 && <small>Key {item.position} </small>}
+            {item.label ? <small>{item.label} </small> : balance.keys!.length > 1 && <small>Key {item.position} </small>}
             {item.status !== "ok" || item.unlimited ? (
               balanceLabel(item)
             ) : typeof item.amount === "number" &&
@@ -193,7 +193,7 @@ export function ChannelMetricHeaders({
       <th>Token / 缓存率</th>
       <th>估算消费</th>
       <th>
-        <Tip text="通过 sub2api 检测添加的渠道按独立业务 Key 的逐条 actual_cost 和请求时间统计，跟随所选时间范围。金额为业务 Key 整体消费，不按 uni-api 调用 Key、来源、模型、端点或流式状态拆分；共享业务 Key 的多个渠道不能重复相加。其他渠道沿用上游按日汇总。">
+        <Tip text="已关联 sub2api 账号的渠道按实际业务 Key 的逐条 actual_cost 和请求时间统计，跟随所选时间范围。金额为业务 Key 整体消费，不按 uni-api 调用 Key、来源、模型、端点或流式状态拆分；共享业务 Key 的多个渠道不能重复相加。其他渠道沿用上游按日汇总。">
           {keySelected ? "渠道实际消费" : "实际消费"} <CircleHelp size={12} />
         </Tip>
       </th>

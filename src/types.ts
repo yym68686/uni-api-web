@@ -100,6 +100,7 @@ export interface ModelPrice {
   verified?: boolean;
 }
 export interface BalanceKey {
+  label?: string;
   status: string;
   kind?: string;
   amount?: number | null;

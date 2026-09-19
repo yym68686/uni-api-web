@@ -37,7 +37,12 @@ export function ChannelAccess({ row, imports, onRemoved }: { row: Channel; impor
       <button className="button small" disabled={busy} onClick={() => void read(true)}><Copy size={14} />{copied ? "已复制" : "复制"}</button>
     </div>
     {error && <p className="negative" role="alert">{error}</p>}
-    {installed && <RemoveChannel item={installed} onRemoved={onRemoved} />}
+    {installed?.kind === "configured" && <div className="channel-remove">
+      <h4>站点账号关联</h4>
+      <p className="muted">{({matched: "已自动关联，使用账号查询账单与余额", partial: "部分 API key 尚未匹配，暂不汇总账号消费", ambiguous: "同一 API key 匹配到多个账号，暂不自动关联", unmatched: "已保存的站点账号中未找到完全匹配的 API key", no_account: "尚未保存此站点的 sub2api 账号"})[installed.binding_status || "unmatched"]}</p>
+      {(installed.bound_keys || []).map(key => <p className="muted" key={`${key.account_id}:${key.remote_key_id}`}>{key.account_name} · Key #{key.remote_key_id}{key.group_id > 0 && ` · 分组 #${key.group_id}`}</p>)}
+    </div>}
+    {installed && installed.kind !== "configured" && <RemoveChannel item={installed} onRemoved={onRemoved} />}
   </section>;
 }
 function RemoveChannel({ item, onRemoved }: { item: InstalledChannel; onRemoved: () => void }) {

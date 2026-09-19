@@ -39,6 +39,49 @@ func (s *Service) subChannelSpend(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "渠道不存在", 404)
 		return
 	}
+	s.subSpendForKey(w, r, account, group, key, created)
+}
+
+func (s *Service) subAccountKeySpend(w http.ResponseWriter, r *http.Request) {
+	owner, _ := s.controlUser(r)
+	account, key := r.PathValue("id"), int64Param(r.PathValue("key"))
+	bindings, err := s.configuredBindings(r.Context(), owner)
+	if err != nil {
+		http.Error(w, "渠道关联暂不可用", 503)
+		return
+	}
+	allowed := false
+	for _, binding := range bindings {
+		if binding.BindingStatus != "matched" {
+			continue
+		}
+		for _, bound := range binding.BoundKeys {
+			if bound.AccountID == account && bound.RemoteKeyID == key {
+				allowed = true
+			}
+		}
+	}
+	if !allowed {
+		http.Error(w, "密钥未关联到当前账号的配置渠道", 404)
+		return
+	}
+	var created sql.NullTime
+	err = s.control.db.QueryRowContext(r.Context(), `SELECT key_created_at FROM console_sub_key_index WHERE account_id=$1 AND remote_key_id=$2 LIMIT 1`, account, key).Scan(&created)
+	if err != nil {
+		http.Error(w, "密钥关联不存在", 404)
+		return
+	}
+	// Existing keys can predate their console account. Never clamp their history
+	// to the date the operator saved the login in this console.
+	since := time.Unix(0, 0)
+	if created.Valid {
+		since = created.Time
+	}
+	s.subSpendForKey(w, r, account, 0, key, since)
+}
+
+func (s *Service) subSpendForKey(w http.ResponseWriter, r *http.Request, account string, group, key int64, created time.Time) {
+	ctx := r.Context()
 	to := time.Now().UTC().Truncate(time.Second)
 	if raw := r.URL.Query().Get("to"); raw != "" {
 		value, err := strconv.ParseInt(raw, 10, 64)
@@ -65,8 +108,8 @@ func (s *Service) subChannelSpend(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, out)
 		return
 	}
-	// Route keys are created with this console account's unique ID. They cannot
-	// predate the account; this avoids scanning decades of empty days for 'all'.
+	// Only clamp to a proven creation date: imported route keys use the console
+	// account date; existing configured keys use their own upstream creation date.
 	wantedFrom := max(from.UnixMilli(), created.UnixMilli())
 	wantedTo := to.UnixMilli()
 	if wantedFrom >= wantedTo {
@@ -263,7 +306,7 @@ func (s *Service) subStoreSpendPage(ctx context.Context, task subSpendTask, page
 		if log.KeyID != task.key {
 			continue
 		}
-		if log.GroupID != nil && *log.GroupID != task.group {
+		if task.group > 0 && log.GroupID != nil && *log.GroupID != task.group {
 			continue
 		}
 		at, parseErr := time.Parse(time.RFC3339Nano, log.At)

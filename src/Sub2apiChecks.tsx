@@ -1471,6 +1471,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                               const count =
                                 imports.data?.data.filter(
                                   (i) =>
+                                    i.kind !== "configured" &&
                                     i.account_id === account.id &&
                                     i.group_id === t.group_id,
                                 ).length || 0;

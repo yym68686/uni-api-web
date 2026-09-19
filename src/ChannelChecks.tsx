@@ -5,6 +5,7 @@ import { controlRequest } from "./api";
 import { providerId, channelName } from "./format";
 import type { Channel } from "./types";
 import type { InstalledChannel } from "./sub2apiImports";
+import { boundGroups } from "./sub2apiImports";
 import { Spinner, Tip } from "./ui";
 import { QualityProbability, qualityTooltip } from "./QualityHistory";
 import type { QualitySummary } from "./QualityHistory";
@@ -174,12 +175,15 @@ export function withSubQuality(checks: Checks, installed: InstalledChannel[], su
   const results = new Map(checks.results);
   const targets = new Map(summaries.map((item) => [`${item.account_id}:${item.group_id}`, item]));
   for (const channel of installed) {
-    const target = targets.get(`${channel.account_id}:${channel.group_id}`);
-    if (!target) continue;
-    const sub = target.check;
+    const groups = boundGroups(channel).flatMap(group => {
+      const target = targets.get(`${group.account_id}:${group.group_id}`);
+      return target ? [target] : [];
+    });
+    if (!groups.length) continue;
+    const sub = groups.map(group => group.check).filter(Boolean).sort((a,b) => b.checked_at-a.checked_at)[0];
     const id = providerId(channel);
     const direct = checks.results.get(id);
-    const h = target.history;
+    const h = groups.reduce((sum, group) => ({ total: sum.total + group.history.total, successful: sum.successful + group.history.successful, passed: sum.passed + group.history.passed }), { total: 0, successful: 0, passed: 0 });
     const history = {
       total: (direct?.history?.total || 0) + (h?.total || 0),
       successful: (direct?.history?.successful || 0) + (h?.successful || 0),

@@ -157,6 +157,7 @@ type subRemoteGroup struct {
 	Peak     bool    `json:"peak_rate_enabled"`
 }
 type subRemoteKey struct {
+	CreatedAt *time.Time `json:"created_at"`
 	ID        int64      `json:"id"`
 	Key       string     `json:"key"`
 	Name      string     `json:"name"`

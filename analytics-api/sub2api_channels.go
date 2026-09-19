@@ -16,20 +16,24 @@ type subChannelRef struct {
 	Base    string
 }
 type subInstalledChannel struct {
-	Base        string         `json:"base"`
-	AccountID   string         `json:"account_id"`
-	GroupID     int64          `json:"group_id"`
-	SourceID    string         `json:"source_id"`
-	SourceName  string         `json:"source_name"`
-	KeyID       string         `json:"api_key_id"`
-	KeyPosition int            `json:"key_position"`
-	KeyPrefix   string         `json:"key_prefix"`
-	Provider    string         `json:"provider"`
-	Name        string         `json:"name"`
-	Models      []string       `json:"models"`
-	Positions   map[string]int `json:"positions"`
-	Revision    string         `json:"revision"`
-	Manageable  bool           `json:"manageable"`
+	Kind             string         `json:"kind,omitempty"`
+	BindingStatus    string         `json:"binding_status,omitempty"`
+	BindingCheckedAt int64          `json:"binding_checked_at,omitempty"`
+	BoundKeys        []subBoundKey  `json:"bound_keys,omitempty"`
+	Base             string         `json:"base"`
+	AccountID        string         `json:"account_id"`
+	GroupID          int64          `json:"group_id"`
+	SourceID         string         `json:"source_id"`
+	SourceName       string         `json:"source_name"`
+	KeyID            string         `json:"api_key_id"`
+	KeyPosition      int            `json:"key_position"`
+	KeyPrefix        string         `json:"key_prefix"`
+	Provider         string         `json:"provider"`
+	Name             string         `json:"name"`
+	Models           []string       `json:"models"`
+	Positions        map[string]int `json:"positions"`
+	Revision         string         `json:"revision"`
+	Manageable       bool           `json:"manageable"`
 }
 type subGatewayControls struct {
 	Revision   string `json:"revision"`
@@ -196,6 +200,12 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 			labels[sources[i].ID] = result.Labels
 		}
 	}
+	configured, bindingErr := s.configuredBindings(r.Context(), owner)
+	if bindingErr != nil {
+		http.Error(w, "配置渠道关联读取失败", 503)
+		return
+	}
+	data = append(data, configured...)
 	sort.Slice(data, func(i, j int) bool {
 		if data[i].SourceID != data[j].SourceID {
 			return data[i].SourceID < data[j].SourceID

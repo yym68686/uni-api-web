@@ -191,6 +191,7 @@ func (s *Service) startBackground(ctx context.Context) <-chan struct{} {
 		start(s.subWorkerLoop)
 		start(s.subUsageLoop)
 		start(s.subSpendLoop)
+		start(s.subBindingLoop)
 	}
 	start(s.syncStateLoop)
 	start(s.initializeAnalytics)

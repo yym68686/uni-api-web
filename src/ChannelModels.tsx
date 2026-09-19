@@ -2,9 +2,11 @@ import { Check } from "lucide-react";
 import { useSubAccounts } from "./sub2apiAccounts";
 import { availableModelChecks } from "./sub2apiResults";
 import type { SubImportsQuery } from "./sub2apiImports";
+import { boundGroups } from "./sub2apiImports";
 import type { Channel } from "./types";
 import { Spinner } from "./ui";
 import { time } from "./format";
+import { pricePair } from "./sub2apiPriceCheck";
 
 export function ChannelModels({
   row,
@@ -20,13 +22,11 @@ export function ChannelModels({
       channel.source_id === row.source_id && channel.provider === row.provider,
   );
   const accounts = useSubAccounts(!!installed);
-  const account = accounts.data?.data.find(
-    (item) => item.id === installed?.account_id,
-  );
-  const target = account?.targets.find(
-    (item) => item.group_id === installed?.group_id,
-  );
-  const models = target ? availableModelChecks(target) : [];
+  const groups = boundGroups(installed);
+  const targets = groups.flatMap(group => accounts.data?.data.find(a => a.id === group.account_id)?.targets.filter(t => t.group_id === group.group_id) || []);
+  const target = targets[0];
+  const models = [...new Map(targets.flatMap(availableModelChecks).sort((a,b) => (a.result?.checked_at || 0) - (b.result?.checked_at || 0)).map(check => [check.model, check])).values()];
+  const checking = groups.some(group => accounts.data?.data.some(a => a.id === group.account_id && ["queued", "running"].includes(a.state)));
   const sourceUnavailable = imports.data?.unavailable_sources?.some(
     (source) => source === row.source_id || source === row.source_name,
   );
@@ -43,7 +43,7 @@ export function ChannelModels({
     ),
   ];
   if (
-    !installed &&
+    (!installed || (installed.kind === "configured" && installed.binding_status !== "matched")) &&
     !imports.isPending &&
     !imports.isError &&
     !sourceUnavailable
@@ -83,7 +83,7 @@ export function ChannelModels({
         )}
       </h3>
       {!loading && !error && target && (
-        <p className="muted">sub2api 检测通过</p>
+        <p className="muted">sub2api 检测通过{installed?.kind === "configured" && " · 关联分组"}</p>
       )}
       {error ? (
         <div className="detail-models-message" role="alert">
@@ -124,22 +124,27 @@ export function ChannelModels({
                 >
                   最近检测 {time(check.result?.checked_at)}
                 </small>
+                {installed?.kind === "configured" && groups.length === 1 && check.result?.availability.usage?.status === "matched" && (
+                  <small title="关联分组最近一次检测的倍率前单价，美元／百万 token">
+                    检测单价 {pricePair(check.result.availability.usage.input_price, check.result.availability.usage.output_price)}
+                  </small>
+                )}
               </div>
               <span
                 className={
-                  installed?.models.includes(check.model)
+                  (installed?.kind === "configured" ? configured.includes(check.model) : installed?.models.includes(check.model))
                     ? "detail-model-added"
                     : "muted"
                 }
               >
-                {installed?.models.includes(check.model) ? "已添加" : "未添加"}
+                {installed?.kind === "configured" ? configured.includes(check.model) ? "已配置" : "未配置" : installed?.models.includes(check.model) ? "已添加" : "未添加"}
               </span>
             </li>
           ))}
         </ul>
       ) : (
         <p className="muted">
-          {account && ["queued", "running"].includes(account.state)
+          {checking
             ? "检测进行中，完成后会显示可用模型。"
             : "暂无检测通过的模型。"}
         </p>

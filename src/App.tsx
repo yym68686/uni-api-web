@@ -71,7 +71,7 @@ import {
 } from "./ChannelControls";
 import { SourceSettings } from "./SourceSettings";
 import { ResponseLatency } from "./LatencyBadge";
-import { useSubImports } from "./sub2apiImports";
+import { useSubImports, boundGroups } from "./sub2apiImports";
 import type { SubImportsQuery } from "./sub2apiImports";
 import { ChannelModels } from "./ChannelModels";
 
@@ -124,6 +124,7 @@ import {
 } from "./ChannelMetrics";
 import { actualCostRange } from "./actualCost";
 import { useSubChannelSpend } from "./SubChannelSpend";
+import { useChannelAccountBalances } from "./ChannelAccountBalances";
 import { ConsoleHeader, ConsoleNavigation } from "./ConsoleChrome";
 import { StartupScreen } from "./StartupScreen";
 import { useTheme } from "./theme";
@@ -808,7 +809,7 @@ function Detail({
                 <h3>降智检测</h3>
                 {check ? <div className="quality-status-stack"><Tip text={check.history && check.history.total > 0 ? qualityTooltip(check.history, check.checked_at, check.origin) : `最近检测：${new Date(check.checked_at * 1000).toLocaleString("zh-CN", { hour12: false })}`}><CheckVerdict result={check} /></Tip><QualityProbability history={check.history} checkedAt={check.checked_at} origin={check.origin} /></div> : <p className="muted">暂无检测结果。</p>}
                 <QualityHistory key={providerId(row)} path={`/v1/sources/${encodeURIComponent(row.source_id)}/channel-checks/history?${new URLSearchParams({ provider: row.provider })}`} revision={`${check?.checked_at}:${check?.history?.total}:${check?.history?.successful}`} title="渠道检测记录" />
-                {installed && <QualityHistory key={`${installed.account_id}:${installed.group_id}`} path={`/v1/sub2api/accounts/${encodeURIComponent(installed.account_id)}/groups/${installed.group_id}/quality-history`} revision={`${check?.checked_at}:${check?.history?.total}:${check?.history?.successful}`} title="sub2api 检测记录" />}
+                {boundGroups(installed).map(group => <QualityHistory key={`${group.account_id}:${group.group_id}`} path={`/v1/sub2api/accounts/${encodeURIComponent(group.account_id)}/groups/${group.group_id}/quality-history`} revision={`${check?.checked_at}:${check?.history?.total}:${check?.history?.successful}`} title={`sub2api 检测记录 · 分组 #${group.group_id}`} />)}
               </section>}
               {imports && <ChannelModels row={row} imports={imports} catalog={catalog} />}
               <div className="detail-section">
@@ -1239,7 +1240,8 @@ function Dashboard({
   const actualRange = useMemo(() => actualCostRange(window), [window]);
   const channelSpend = useSubChannelSpend({ providers, imports: imported.data?.data || [], session: connection.session, window, to: metrics.data?.to, refresh, auto, enabled: channelView && !!baseConnection.account });
   const limit = useMemo(() => makeLimiter(3), []);
-  const balanceQueries = useQueries({
+  const accountBalances = useChannelAccountBalances(providers, imported.data?.data || [], connection.session, !!baseConnection.account, auto);
+  const rawBalanceQueries = useQueries({
     queries: providers.map((provider) => ({
       queryKey: [
         "balance",
@@ -1273,11 +1275,13 @@ function Dashboard({
           signal,
         ),
       staleTime: 300_000,
+      enabled: !accountBalances.has(provider),
       refetchInterval: auto ? 300_000 : false,
       refetchIntervalInBackground: false,
       retry: false,
     })),
   });
+  const balanceQueries = providers.map((provider,i) => accountBalances.get(provider) || rawBalanceQueries[i]);
   const balanceMap = new Map(
     providers.map((provider, i) => [provider, balanceQueries[i]]),
   );

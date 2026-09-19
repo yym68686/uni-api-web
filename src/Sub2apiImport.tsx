@@ -39,7 +39,7 @@ export function Sub2apiImport({
   const checks = useMemo(() => modelChecks(target), [target]);
   const available = availableModelChecks(target).map((check) => check.model);
   const installed = (imports.data?.data || []).filter(
-    (i) => i.account_id === account.id && i.group_id === target.group_id,
+    (i) => i.kind !== "configured" && i.account_id === account.id && i.group_id === target.group_id,
   );
   const [editing, setEditing] = useState<InstalledChannel | null>(null);
   const [adding, setAdding] = useState(false);
