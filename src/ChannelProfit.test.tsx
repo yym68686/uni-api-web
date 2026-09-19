@@ -116,6 +116,22 @@ it("uses the displayed channel spending source and never falls back to a whole-d
     }),
   );
   expect(profitCell()).not.toHaveTextContent("¥");
+  app.rerender(
+    ui(true, true, {
+      ...receipt,
+      data: {
+        ...receipt.data!,
+        status: "unmatched",
+        actual_cost_usd: null,
+        matched_cost_usd: 5,
+        total_attempts: 10,
+        matched_attempts: 9,
+        missing_identifiers: 1,
+      },
+    }),
+  );
+  expect(screen.getByText("≥$5.00")).toBeVisible();
+  expect(profitCell()).not.toHaveTextContent("¥");
   app.rerender(ui(true, true));
   expect(profitCell()).not.toHaveTextContent("¥");
   app.rerender(ui(false, false));

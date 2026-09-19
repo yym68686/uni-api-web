@@ -264,3 +264,39 @@ func TestAttributedSpendSurfacesLedgerFailure(t *testing.T) {
 		t.Fatal(rows, e)
 	}
 }
+
+func TestAttributedSpendMixedMissingAndPendingBillsKeepsRefreshing(t *testing.T) {
+	s, account, owner := attributionFixture(t)
+	now := time.Now().Truncate(time.Second)
+	legacy := attributedFact("legacy", "caller", now.Add(-time.Hour))
+	legacy.Kind = "attempt"
+	legacy.BillingRequestIDs = nil
+	noHeader := attributedFact("timeout", "caller", now.Add(-time.Minute))
+	noHeader.Status = 524
+	noHeader.BillingRequestIDs = nil
+	unbound := attributedFact("unbound", "caller", now.Add(-time.Minute))
+	unbound.UpstreamKeyHash = tokenHash("unbound-secret")
+	paid := attributedFact("paid", "caller", now.Add(-time.Minute))
+	delayed := attributedFact("delayed", "caller", now.Add(-time.Minute))
+	if err := s.engine.Import(context.Background(), "mixed", "v1", []Fact{legacy, noHeader, unbound, paid, delayed}); err != nil {
+		t.Fatal(err)
+	}
+	storeAttributedLog(t, s, account, "paid", "0.25", 1)
+	f := QueryFilter{SourceID: "source", KeyID: "caller", Model: checkModel}
+	read := func() attributedSpend {
+		rows, e := s.attributedChannelSpend(context.Background(), owner, f, now.Add(-2*time.Hour).Unix(), now.Unix())
+		if e != nil || len(rows) != 1 {
+			t.Fatal(rows, e)
+		}
+		return rows[0]
+	}
+	row := read()
+	if row.Amount != nil || row.MatchedAmount != .25 || row.Total != 5 || row.Matched != 1 || row.Missing != 3 || row.Pending != 1 || !row.Refreshing || row.LegacyMissing != 1 || row.HeaderMissing != 1 || row.Unbound != 1 || row.MissingStatuses["524"] != 1 {
+		t.Fatal(row)
+	}
+	storeAttributedLog(t, s, account, "delayed", "0.75", 2)
+	row = read()
+	if row.Amount != nil || row.MatchedAmount != 1 || row.Matched != 2 || row.Pending != 0 || row.Refreshing || row.Missing != 3 {
+		t.Fatal(row)
+	}
+}

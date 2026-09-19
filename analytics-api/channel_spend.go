@@ -15,21 +15,28 @@ import (
 const maxBillingFacts = 50000
 
 type attributedSpend struct {
-	Source        string   `json:"source_id"`
-	Provider      string   `json:"provider"`
-	Model         string   `json:"model"`
-	UpstreamModel string   `json:"upstream_model"`
-	Status        string   `json:"status"`
-	Amount        *float64 `json:"actual_cost_usd"`
-	MatchedAmount float64  `json:"matched_cost_usd"`
-	Total         int      `json:"total_attempts"`
-	Matched       int      `json:"matched_attempts"`
-	Missing       int      `json:"missing_identifiers"`
-	Ambiguous     int      `json:"ambiguous_attempts"`
-	From          int64    `json:"from"`
-	To            int64    `json:"to"`
-	Scope         string   `json:"scope"`
-	Message       string   `json:"message"`
+	Source          string         `json:"source_id"`
+	Provider        string         `json:"provider"`
+	Model           string         `json:"model"`
+	UpstreamModel   string         `json:"upstream_model"`
+	Status          string         `json:"status"`
+	Amount          *float64       `json:"actual_cost_usd"`
+	MatchedAmount   float64        `json:"matched_cost_usd"`
+	Total           int            `json:"total_attempts"`
+	Matched         int            `json:"matched_attempts"`
+	Missing         int            `json:"missing_identifiers"`
+	Ambiguous       int            `json:"ambiguous_attempts"`
+	From            int64          `json:"from"`
+	To              int64          `json:"to"`
+	Scope           string         `json:"scope"`
+	LegacyMissing   int            `json:"missing_correlation_attempts"`
+	HeaderMissing   int            `json:"missing_response_identifiers"`
+	Unbound         int            `json:"unbound_attempts"`
+	Pending         int            `json:"pending_attempts"`
+	Refreshing      bool           `json:"refreshing"`
+	SyncError       bool           `json:"sync_error"`
+	MissingStatuses map[string]int `json:"missing_response_statuses,omitempty"`
+	Message         string         `json:"message"`
 }
 type receiptScope struct {
 	Account, Site string
@@ -40,6 +47,7 @@ type billingFact struct {
 	At, Started                                                                           int64
 	IDs                                                                                   []string
 	Completions                                                                           int
+	Status                                                                                int
 }
 
 func billingRowID(source, provider, model, upstream string) string {
@@ -126,7 +134,7 @@ const billingAlignedSQL = `WITH aligned_billing AS (
 
 func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f QueryFilter, from, to int64) ([]attributedSpend, error) {
 	where, args := billingWhere(f, from, to)
-	rows, err := s.engine.DB.QueryContext(ctx, billingAlignedSQL+`SELECT event_id,source_id,COALESCE(instance_id,''),COALESCE(request_id,''),COALESCE(attempt_id,''),provider,model,upstream_model,key_id,at_ms,COALESCE(started_ms,at_ms),COALESCE(upstream_base,''),COALESCE(upstream_key_hash,''),CAST(COALESCE(to_json(billing_request_ids),'[]') AS VARCHAR),completions FROM aligned_billing WHERE kind='billing' AND `+where+` ORDER BY at_ms,event_id LIMIT 50001`, args...)
+	rows, err := s.engine.DB.QueryContext(ctx, billingAlignedSQL+`SELECT event_id,source_id,COALESCE(instance_id,''),COALESCE(request_id,''),COALESCE(attempt_id,''),provider,model,upstream_model,key_id,at_ms,COALESCE(started_ms,at_ms),COALESCE(upstream_base,''),COALESCE(upstream_key_hash,''),CAST(COALESCE(to_json(billing_request_ids),'[]') AS VARCHAR),completions,COALESCE(status,0) FROM aligned_billing WHERE kind='billing' AND `+where+` ORDER BY at_ms,event_id LIMIT 50001`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +142,7 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 	for rows.Next() {
 		var b billingFact
 		var ids []byte
-		if err = rows.Scan(&b.Event, &b.Source, &b.Instance, &b.Request, &b.Attempt, &b.Provider, &b.Model, &b.Upstream, &b.Key, &b.At, &b.Started, &b.Base, &b.Hash, &ids, &b.Completions); err != nil {
+		if err = rows.Scan(&b.Event, &b.Source, &b.Instance, &b.Request, &b.Attempt, &b.Provider, &b.Model, &b.Upstream, &b.Key, &b.At, &b.Started, &b.Base, &b.Hash, &ids, &b.Completions, &b.Status); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -180,6 +188,7 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 		item := ensure(source, provider, model, upstream)
 		item.Total += count
 		item.Missing += count
+		item.LegacyMissing += count
 	}
 	err = rows.Err()
 	rows.Close()
@@ -202,9 +211,19 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 			item.Ambiguous++
 			continue
 		}
-		matches := bindings[subBindingSite(b.Base)+"\n"+b.Hash]
-		if len(matches) != 1 || len(b.IDs) == 0 || b.Hash == "" || b.Base == "" {
+		if len(b.IDs) == 0 {
 			item.Missing++
+			item.HeaderMissing++
+			if item.MissingStatuses == nil {
+				item.MissingStatuses = map[string]int{}
+			}
+			item.MissingStatuses[strconv.Itoa(b.Status)]++
+			continue
+		}
+		matches := bindings[subBindingSite(b.Base)+"\n"+b.Hash]
+		if len(matches) != 1 || b.Hash == "" || b.Base == "" {
+			item.Missing++
+			item.Unbound++
 			continue
 		}
 		scope := matches[0]
@@ -343,6 +362,9 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 	for id, item := range totals {
 		amount, _ := sums[id].Float64()
 		item.MatchedAmount = amount
+		item.Pending = max(0, item.Total-item.Matched-item.Missing-item.Ambiguous)
+		item.Refreshing = item.Pending > 0
+		item.SyncError = rowErrors[id]
 		switch {
 		case item.Ambiguous > 0:
 			item.Status = "ambiguous"

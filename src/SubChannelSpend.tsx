@@ -14,7 +14,8 @@ export interface SubChannelSpend {
     | "error"
     | "unsupported"
     | "unmatched"
-    | "ambiguous";
+    | "ambiguous"
+    | "no_records";
   actual_cost_usd: number | null;
   requests?: number | null;
   from: number;
@@ -22,6 +23,12 @@ export interface SubChannelSpend {
   checked_at?: number;
   key_id?: number;
   scope: "sub2api_business_key" | "matched_requests";
+  pending_attempts?: number;
+  missing_correlation_attempts?: number;
+  missing_response_identifiers?: number;
+  missing_response_statuses?: Record<string, number>;
+  unbound_attempts?: number;
+  sync_error?: boolean;
   total_attempts?: number;
   matched_attempts?: number;
   missing_identifiers?: number;
@@ -89,14 +96,30 @@ export function useScopedChannelSpend({
     enabled: enabled && from != null && to != null,
     staleTime: 15000,
     retry: false,
-    refetchInterval: (query) =>
-      query.state.data?.data.some((r) => r.status === "pending")
-        ? 5000
-        : query.state.data?.data.some((r) => r.status === "error")
-          ? 15000
-          : auto
-            ? 30000
-            : false,
+    refetchInterval: (query) => {
+      const data = query.state.data?.data || [];
+      if (data.some((r) => r.sync_error || r.status === "error")) return 15000;
+      // Missing old observations must not mask receipts that are still syncing.
+      // The fallback also works during a rolling update of the backend.
+      if (
+        data.some(
+          (r) =>
+            r.refreshing ||
+            r.status === "pending" ||
+            (r.status !== "complete" &&
+              (r.pending_attempts ??
+                Math.max(
+                  0,
+                  (r.total_attempts || 0) -
+                    (r.matched_attempts || 0) -
+                    (r.missing_identifiers || 0) -
+                    (r.ambiguous_attempts || 0),
+                )) > 0),
+        )
+      )
+        return 5000;
+      return auto ? 30000 : false;
+    },
   });
   const identity = (
     item: Pick<Channel, "source_id" | "provider" | "model" | "upstream_model">,
@@ -118,7 +141,7 @@ export function useScopedChannelSpend({
           found.get(identity(row)) ||
           (query.data
             ? {
-                status: "unmatched" as const,
+                status: "no_records" as const,
                 actual_cost_usd: null,
                 requests: null,
                 from: from || 0,
@@ -126,7 +149,7 @@ export function useScopedChannelSpend({
                 checked_at: 0,
                 key_id: 0,
                 scope: "matched_requests" as const,
-                message: "当前范围没有可关联的请求账单，不能按零消费处理",
+                message: "当前范围暂无账单关联记录，不能确认消费金额",
               }
             : undefined),
         isPending: query.isPending,
@@ -298,11 +321,49 @@ export function SubChannelSpendValue({
     data?.status === "complete" &&
     data.actual_cost_usd != null &&
     Number.isFinite(data.actual_cost_usd);
+  const partial =
+    !known &&
+    data?.scope === "matched_requests" &&
+    (data.matched_attempts || 0) > 0 &&
+    typeof data.matched_cost_usd === "number" &&
+    Number.isFinite(data.matched_cost_usd) &&
+    data.matched_cost_usd >= 0;
   const date = (value: number) =>
     new Date(value * 1000).toLocaleString("zh-CN", { hour12: false });
+  const money = (value: number) =>
+    `$${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 10 })}`;
+  const missing =
+    data?.scope === "matched_requests"
+      ? [
+          data.missing_correlation_attempts
+            ? `缺少关联事实 ${data.missing_correlation_attempts} 次（旧版历史无法补回）`
+            : "",
+          data.missing_response_identifiers
+            ? `上游未返回账单标识 ${data.missing_response_identifiers} 次${
+                data.missing_response_statuses
+                  ? `（${Object.entries(data.missing_response_statuses)
+                      .map(
+                        ([status, n]) =>
+                          `${status === "0" ? "未取得响应头" : `HTTP ${status}`}：${n}`,
+                      )
+                      .join("、")}）`
+                  : ""
+              }`
+            : "",
+          data.unbound_attempts
+            ? `账号关联未确认 ${data.unbound_attempts} 次`
+            : "",
+          data.ambiguous_attempts
+            ? `关联冲突 ${data.ambiguous_attempts} 次`
+            : "",
+          data.pending_attempts ? `账单待核对 ${data.pending_attempts} 次` : "",
+        ]
+          .filter(Boolean)
+          .join("；")
+      : "";
   const explanation =
     data?.scope === "matched_requests"
-      ? `${date(data.from)} 至 ${date(data.to)}。按当前来源、调用 Key、渠道、模型、端点及流式范围逐请求关联。已匹配 ${data.matched_attempts ?? 0}/${data.total_attempts ?? 0} 次上游尝试。${data.message || ""}${data.status !== "complete" && data.matched_cost_usd != null ? `已关联部分为 $${data.matched_cost_usd}，完整金额确认前不计算利润。` : ""}`
+      ? `${date(data.from)} 至 ${date(data.to)}。按当前来源、调用 Key、渠道、模型、端点及流式范围逐请求关联。已核对 ${data.matched_attempts ?? 0}/${data.total_attempts ?? 0} 次上游尝试。${missing ? missing + "。" : data.message || ""}${data.sync_error ? "站点账单查询失败，后台会重试。" : ""}${partial ? `至少 ${money(data.matched_cost_usd!)}；这是已核对部分，不是完整消费。完整金额确认前不计算利润。` : ""}${query?.isError ? "本次刷新失败，当前为上次核对结果。" : ""}`
       : data
         ? `${data.scope_label || `sub2api 业务 Key #${data.key_id}`} · ${date(data.from)} 至 ${date(data.to)}。${known ? `${data.requests ?? 0} 条账单；` : ""}按该业务 Key 整体统计，包含所有模型和调用来源，共用 Key 的渠道不可重复相加。${data.checked_at ? `账单更新于 ${date(data.checked_at)}。` : ""}${query?.isError ? "更新失败，显示上次完整统计。" : data.message || ""}`
         : query?.isError
@@ -311,15 +372,28 @@ export function SubChannelSpendValue({
             ? "正在读取所选时间范围的站点账单。"
             : "尚未确认此渠道的 sub2api 账号关联。";
   let label = "未确认";
-  if (known)
-    label = `$${data.actual_cost_usd!.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 10 })}`;
-  else if (query?.isPending || data?.status === "pending") label = "同步账单";
-  else if (query?.isError || data?.status === "error") label = "查询失败";
+  if (known) label = money(data.actual_cost_usd!);
+  else if (partial) label = `≥${money(data.matched_cost_usd!)}`;
+  else if (query?.isPending || data?.status === "pending" || data?.refreshing)
+    label = "同步账单";
+  else if (query?.isError || data?.status === "error" || data?.sync_error)
+    label = "查询失败";
   else if (data?.status === "ambiguous") label = "关联冲突";
+  else if (data?.status === "no_records") label = "—";
+  else if (data?.missing_correlation_attempts) label = "历史未关联";
+  else if (data?.unbound_attempts) label = "未关联账号";
+  else if (data?.missing_response_identifiers) label = "缺少响应标识";
   else if (data?.status === "unmatched") label = "无法归属";
   return (
     <Tip text={explanation}>
-      <span className={known ? "mono" : "muted"}>{label}</span>
+      <span className={`channel-spend ${known || partial ? "mono" : "muted"}`}>
+        <span>{label}</span>
+        {partial && (
+          <small className="muted">
+            部分 · {data.matched_attempts}/{data.total_attempts}
+          </small>
+        )}
+      </span>
     </Tip>
   );
 }

@@ -1,5 +1,11 @@
 import { expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { SubChannelSpendValue, useSubChannelSpend } from "./SubChannelSpend";
@@ -216,4 +222,144 @@ it("attributes by caller and all analytic filters, without leaking a cached tota
   app.rerender(ui("caller-old"));
   expect(await screen.findByText("无法归属")).toBeVisible();
   expect(screen.queryByText("$0.00")).toBeNull();
+});
+
+it("continues polling delayed receipts alongside missing history with auto refresh disabled", async () => {
+  const { useScopedChannelSpend } = await import("./SubChannelSpend");
+  const { rowId } = await import("./format");
+  const row = {
+    source_id: "s",
+    provider: "p",
+    model: "m",
+    upstream_model: "m",
+    endpoint: "all",
+    stream: null,
+  } as import("./types").Channel;
+  const initial = {
+    ...row,
+    scope: "matched_requests",
+    status: "unmatched",
+    actual_cost_usd: null,
+    matched_cost_usd: 0.25,
+    total_attempts: 3,
+    matched_attempts: 1,
+    missing_identifiers: 1,
+    from: 100,
+    to: 200,
+  };
+  const done = {
+    ...initial,
+    matched_cost_usd: 1,
+    matched_attempts: 2,
+    pending_attempts: 0,
+    refreshing: false,
+  };
+  vi.useFakeTimers();
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(new Response(JSON.stringify({ data: [initial] })))
+    .mockImplementation(
+      async () => new Response(JSON.stringify({ data: [done] })),
+    );
+  vi.stubGlobal("fetch", fetch);
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  function Fixture() {
+    const result = useScopedChannelSpend({
+      rows: [row],
+      session: "mixed",
+      sourceId: "s",
+      keyId: "caller",
+      model: "m",
+      endpoint: "all",
+      stream: "all",
+      from: 100,
+      to: 200,
+      refresh: 0,
+      auto: false,
+      enabled: true,
+    });
+    return <SubChannelSpendValue query={result.get(rowId(row))} />;
+  }
+  const app = render(
+    <QueryClientProvider client={client}>
+      <Tooltip.Provider>
+        <Fixture />
+      </Tooltip.Provider>
+    </QueryClientProvider>,
+  );
+  try {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(50);
+    });
+    expect(screen.getByText("≥$0.25")).toBeVisible();
+    expect(screen.getByText("部分 · 1/3")).toBeVisible();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5050);
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("≥$1.00")).toBeVisible();
+    expect(screen.getByText("部分 · 2/3")).toBeVisible();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10000);
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText("$1.00")).toBeNull();
+  } finally {
+    app.unmount();
+    client.clear();
+    vi.useRealTimers();
+  }
+});
+
+it("explains exact missing categories and distinguishes verified partial spend from the total", async () => {
+  const data: SubChannelSpend = {
+    ...receipt,
+    scope: "matched_requests",
+    status: "unmatched",
+    actual_cost_usd: null,
+    matched_cost_usd: 1.25,
+    total_attempts: 10,
+    matched_attempts: 3,
+    missing_correlation_attempts: 4,
+    missing_response_identifiers: 2,
+    missing_response_statuses: { "524": 2 },
+    unbound_attempts: 1,
+    pending_attempts: 0,
+  };
+  const app = render(
+    <Tooltip.Provider>
+      <SubChannelSpendValue
+        query={{ data, isPending: false, isError: false }}
+      />
+    </Tooltip.Provider>,
+  );
+  const amount = screen.getByText("≥$1.25");
+  fireEvent.focus(amount.closest(".tip-target")!);
+  expect(await screen.findByRole("tooltip")).toHaveTextContent(
+    "缺少关联事实 4 次",
+  );
+  expect(screen.getByRole("tooltip")).toHaveTextContent("HTTP 524：2");
+  expect(screen.getByRole("tooltip")).toHaveTextContent("账号关联未确认 1 次");
+  expect(screen.getByRole("tooltip")).toHaveTextContent("不是完整消费");
+  app.rerender(
+    <Tooltip.Provider>
+      <SubChannelSpendValue
+        query={{
+          data: {
+            ...data,
+            status: "no_records",
+            matched_attempts: 0,
+            total_attempts: 0,
+          },
+          isPending: false,
+          isError: false,
+        }}
+      />
+    </Tooltip.Provider>,
+  );
+  expect(screen.queryByText("无法归属")).toBeNull();
+  expect(screen.queryByText("$0.00")).toBeNull();
+  expect(screen.getByText("—")).toBeVisible();
 });
