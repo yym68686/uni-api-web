@@ -254,7 +254,7 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 		s.DispatchBins = histogramValues(dispatchValue)
 		s.CreatedBins = histogramValues(createdValue)
 		s.TextBins = histogramValues(textValue)
-		if p, ok := priceMap[model]; ok && p.Verified && s.UsageSamples > 0 {
+		if p, ok := priceMap[canonicalPriceModel(model)]; ok && p.Verified && s.UsageSamples > 0 {
 			ordinary := max(0, s.Input-s.CacheRead-s.CacheWrite)
 			write5 := max(0, s.CacheWrite-s.CacheWrite1h)
 			s.KnownEstimatedUSD = (float64(ordinary)*p.Input + float64(s.Output)*p.Output + float64(s.CacheRead)*p.CacheRead + float64(write5)*p.CacheWrite + float64(s.CacheWrite1h)*p.CacheWrite1h) / 1e6

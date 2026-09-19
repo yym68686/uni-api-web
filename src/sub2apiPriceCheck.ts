@@ -1,3 +1,4 @@
+import { canonicalPriceModel } from "./modelPrices";
 import type { SubModelCheck } from "./sub2apiResults";
 import type { ModelPrice } from "./types";
 
@@ -27,7 +28,7 @@ export interface SubUsage {
 
 const known = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0;
 export function referencePrice(model: string, prices?: ModelPrice[]) {
-  return prices?.find(price => price.model === model && price.verified && known(price.input) && known(price.output));
+  return prices?.find(price => price.model === canonicalPriceModel(model) && price.verified && known(price.input) && known(price.output));
 }
 export function assessPrice(check: SubModelCheck, prices?: ModelPrice[]) {
   const usage = check.result?.availability.usage;

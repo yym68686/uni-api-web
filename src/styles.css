@@ -2550,3 +2550,9 @@ nav > button.active > svg {
 }
 .channel-profit > small { font-size: 11px; font-style: normal; }
 .profit-positive { color: var(--green); }
+
+.price-source { display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:12px; }
+.price-source a { display:inline-flex;align-items:center;gap:4px;color:var(--green); }
+.price-editor .price-basis { margin:10px 0 0; }
+.price-inputs { grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); }
+@media(max-width:560px){.price-editor header,.price-editor footer{align-items:flex-start;flex-wrap:wrap;}}
