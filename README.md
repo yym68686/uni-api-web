@@ -97,6 +97,11 @@ Network failure never downgrades an enabled account service to legacy mode.
 
 `docker-compose.yml` contains the frontend, Go analysis API and a private PostgreSQL service. Set `POSTGRES_PASSWORD`, a random `CONTROL_MASTER_KEY` (at least 32 characters), and initial `ADMIN_USERNAME` / `ADMIN_PASSWORD` (12–72 bytes). Bootstrap only creates the first administrator; change the password under Sources after signing in. Fugue may supply an independent managed PostgreSQL via `CONTROL_DATABASE_URL` instead of the compose database. Back up this database and the master key together. DuckDB remains a disposable local query cache.
 
+The frontend keeps up to 16 idle analysis connections per nginx worker. Its startup
+hook derives the connection pool from `ANALYTICS_UPSTREAM` while preserving the
+configured HTTP(S) scheme, authority and base path. Requests retain the original
+Host and HTTPS SNI; connection reuse does not cache analytics responses.
+
 Provide the
 fact bucket through `S3_ENDPOINT`, `S3_BUCKET`, `S3_PREFIX` and a read-only AWS
 credential. Provide a separate private state bucket through `STATE_S3_ENDPOINT`,

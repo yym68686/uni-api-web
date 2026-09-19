@@ -1,0 +1,20 @@
+#!/bin/sh
+# Sourced by the nginx entrypoint before 20-envsubst-on-templates.sh.
+# Keep one configured URL while using an explicit upstream connection pool.
+case "$ANALYTICS_UPSTREAM" in
+    http://*|https://*) ;;
+    *) echo 'ANALYTICS_UPSTREAM must be an HTTP(S) URL' >&2; exit 1 ;;
+esac
+ANALYTICS_UPSTREAM_SCHEME=${ANALYTICS_UPSTREAM%%://*}
+analytics_authority_path=${ANALYTICS_UPSTREAM#*://}
+ANALYTICS_UPSTREAM_ADDRESS=${analytics_authority_path%%/*}
+ANALYTICS_UPSTREAM_PATH=${analytics_authority_path#"$ANALYTICS_UPSTREAM_ADDRESS"}
+# Reject nginx configuration delimiters and URL userinfo/query/fragment.
+case "$ANALYTICS_UPSTREAM_ADDRESS" in
+    ''|*[!a-zA-Z0-9._:\[\]-]*) echo 'Invalid analytics upstream address' >&2; exit 1 ;;
+esac
+case "$ANALYTICS_UPSTREAM_PATH" in
+    *[!a-zA-Z0-9/_.~%-]*) echo 'Invalid analytics upstream path' >&2; exit 1 ;;
+esac
+export ANALYTICS_UPSTREAM_SCHEME ANALYTICS_UPSTREAM_ADDRESS ANALYTICS_UPSTREAM_PATH
+unset analytics_authority_path
