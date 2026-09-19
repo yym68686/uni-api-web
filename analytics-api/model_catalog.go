@@ -46,6 +46,14 @@ func canonicalPriceModel(model string) string {
 	return model
 }
 
+// A missing setting is a legacy/default value, not an explicit opt-out.
+func (p Price) chargesCacheWrite() bool {
+	if p.ChargeCacheWrite != nil {
+		return *p.ChargeCacheWrite
+	}
+	return !strings.HasPrefix(strings.ToLower(p.Model), "gpt-")
+}
+
 func withCatalogPrices(prices []Price) []Price {
 	indices := make(map[string]int, len(prices))
 	for i, p := range prices {
@@ -55,11 +63,16 @@ func withCatalogPrices(prices []Price) []Price {
 		if i, found := indices[p.Model]; found {
 			old := prices[i]
 			if old.Source == "fact-discovered" && !old.Verified && old.Input == 0 && old.Output == 0 && old.CacheRead == 0 && old.CacheWrite == 0 && old.CacheWrite1h == 0 {
+				p.ChargeCacheWrite = old.ChargeCacheWrite
 				prices[i] = p
 			}
 		} else {
 			prices = append(prices, p)
 		}
+	}
+	for i := range prices {
+		enabled := prices[i].chargesCacheWrite()
+		prices[i].ChargeCacheWrite = &enabled
 	}
 	return prices
 }

@@ -96,6 +96,7 @@ export interface ModelPrice {
   cache_read: number;
   cache_write: number;
   cache_write_1h: number;
+  charge_cache_write?: boolean;
   source?: string;
   verified?: boolean;
 }

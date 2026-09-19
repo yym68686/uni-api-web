@@ -4,6 +4,10 @@ import type { ModelPrice } from "./types";
 export const MODEL_PRICE_CATALOG = catalog;
 const baseModels = catalog.map(price => price.model).sort((a, b) => b.length - a.length);
 
+export function chargesCacheWrite(price: ModelPrice): boolean {
+  return price.charge_cache_write ?? !price.model.toLowerCase().startsWith("gpt-");
+}
+
 export function canonicalPriceModel(model: string): string {
   return baseModels.find(base => model === base || model.startsWith(`${base}-`)) || model;
 }
@@ -14,6 +18,6 @@ export function displayedModelPrices(prices: ModelPrice[]): ModelPrice[] {
     const price = byModel.get(reference.model);
     const placeholder = price?.source === "fact-discovered" && !price.verified &&
       [price.input, price.output, price.cache_read, price.cache_write, price.cache_write_1h].every(value => value === 0);
-    return price && !placeholder ? price : reference;
+    return price && !placeholder ? price : { ...reference, charge_cache_write: price?.charge_cache_write };
   });
 }

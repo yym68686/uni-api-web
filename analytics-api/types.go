@@ -53,15 +53,16 @@ type LiveChannel struct {
 	Count    int64  `json:"count"`
 }
 type Price struct {
-	Model        string    `json:"model"`
-	Input        float64   `json:"input"`
-	Output       float64   `json:"output"`
-	CacheRead    float64   `json:"cache_read"`
-	CacheWrite   float64   `json:"cache_write"`
-	CacheWrite1h float64   `json:"cache_write_1h"`
-	Source       string    `json:"source"`
-	Verified     bool      `json:"verified"`
-	EffectiveAt  time.Time `json:"effective_at"`
+	Model            string    `json:"model"`
+	Input            float64   `json:"input"`
+	Output           float64   `json:"output"`
+	CacheRead        float64   `json:"cache_read"`
+	CacheWrite       float64   `json:"cache_write"`
+	CacheWrite1h     float64   `json:"cache_write_1h"`
+	ChargeCacheWrite *bool     `json:"charge_cache_write,omitempty"`
+	Source           string    `json:"source"`
+	Verified         bool      `json:"verified"`
+	EffectiveAt      time.Time `json:"effective_at"`
 }
 type Config struct {
 	Address, DataDir, Upstream, SourceID, Timezone, S3Endpoint, S3Bucket, S3Prefix       string

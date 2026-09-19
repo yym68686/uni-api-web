@@ -52,6 +52,7 @@ func OpenEngine(path string, cfg Config) (*Engine, error) {
 	}
 	// New clocks are additive: old facts and cached rollups have no samples.
 	if _, err = db.Exec(`
+      ALTER TABLE prices ADD COLUMN IF NOT EXISTS charge_cache_write BOOLEAN;
       ALTER TABLE facts ADD COLUMN IF NOT EXISTS response_created_ms DOUBLE;
       ALTER TABLE facts ADD COLUMN IF NOT EXISTS first_text_ms DOUBLE;
       ALTER TABLE rollups ADD COLUMN IF NOT EXISTS created_bins BIGINT[];
@@ -285,7 +286,7 @@ func mergeHistogramSQL(column string) string {
 	return "[" + strings.Join(parts, ",") + "]"
 }
 func (e *Engine) Prices(ctx context.Context) ([]Price, error) {
-	rows, err := e.DB.QueryContext(ctx, `SELECT model,input,output,cache_read,cache_write,cache_write_1h,source,verified,effective_at FROM prices UNION ALL SELECT DISTINCT model,0,0,0,0,0,'fact-discovered',false,current_timestamp FROM rollups WHERE model <> '' AND model NOT IN (SELECT model FROM prices) ORDER BY model`)
+	rows, err := e.DB.QueryContext(ctx, `SELECT model,input,output,cache_read,cache_write,cache_write_1h,source,verified,effective_at,charge_cache_write FROM prices UNION ALL SELECT DISTINCT model,0,0,0,0,0,'fact-discovered',false,current_timestamp,NULL::BOOLEAN FROM rollups WHERE model <> '' AND model NOT IN (SELECT model FROM prices) ORDER BY model`)
 	if err != nil {
 		return nil, err
 	}
@@ -293,7 +294,7 @@ func (e *Engine) Prices(ctx context.Context) ([]Price, error) {
 	out := []Price{}
 	for rows.Next() {
 		var p Price
-		if err = rows.Scan(&p.Model, &p.Input, &p.Output, &p.CacheRead, &p.CacheWrite, &p.CacheWrite1h, &p.Source, &p.Verified, &p.EffectiveAt); err != nil {
+		if err = rows.Scan(&p.Model, &p.Input, &p.Output, &p.CacheRead, &p.CacheWrite, &p.CacheWrite1h, &p.Source, &p.Verified, &p.EffectiveAt, &p.ChargeCacheWrite); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
@@ -359,7 +360,7 @@ func (e *Engine) SavePrice(ctx context.Context, p Price) error {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err = tx.ExecContext(ctx, `INSERT OR REPLACE INTO prices VALUES(?,?,?,?,?,?,?,?,?)`, p.Model, p.Input, p.Output, p.CacheRead, p.CacheWrite, p.CacheWrite1h, p.Source, p.Verified, p.EffectiveAt); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT OR REPLACE INTO prices(model,input,output,cache_read,cache_write,cache_write_1h,source,verified,effective_at,charge_cache_write) VALUES(?,?,?,?,?,?,?,?,?,?)`, p.Model, p.Input, p.Output, p.CacheRead, p.CacheWrite, p.CacheWrite1h, p.Source, p.Verified, p.EffectiveAt, p.ChargeCacheWrite); err != nil {
 		return err
 	}
 	if _, err = tx.ExecContext(ctx, "INSERT INTO price_history(model,document) VALUES(?,?)", p.Model, string(raw)); err != nil {
