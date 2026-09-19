@@ -1125,59 +1125,6 @@ function Dashboard({
     [liveMetrics.data],
   );
   const queryClient = useQueryClient();
-  useEffect(() => {
-    if (!keysLoaded || keyRemoved || !catalog.data || !channelView || !metrics.isSuccess) return;
-    const windows = ranges.map(([value]) => value);
-    const controller = new AbortController();
-    void (async () => {
-      // Prefetch ranges concurrently. Sequential prefetch made the last
-      // windows wait behind every earlier range, so switching to month/year/all
-      // could miss the one-second interaction target even though each DuckDB
-      // query itself was fast.
-      await Promise.all(
-        windows
-          .filter((next) => next !== window)
-          .map(async (next) => {
-            if (controller.signal.aborted) return;
-            const key = [
-              "metrics",
-              connection.session,
-              keyId,
-              next,
-              endpoint,
-              stream,
-            ];
-            if (queryClient.getQueryData(key)) return;
-            await queryClient.prefetchQuery({
-              queryKey: key,
-              queryFn: ({ signal }) =>
-                readMetrics(
-                  connection,
-                  "/v1/channel-metrics?" +
-                    channelParams(keyId, next, "", endpoint, stream),
-                  signal,
-                  endpoint,
-                  stream,
-                ),
-              staleTime: 30_000,
-            });
-          }),
-      );
-    })();
-    return () => controller.abort();
-  }, [
-    keysLoaded,
-    keyRemoved,
-    catalog.data,
-    metrics.isSuccess,
-    view,
-    connection,
-    keyId,
-    endpoint,
-    stream,
-    window,
-    queryClient,
-  ]);
   const models = useMemo(
     () => [...new Set(catalog.data?.data.map((row) => row.model) || [])].sort(),
     [catalog.data],

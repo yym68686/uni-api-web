@@ -312,6 +312,17 @@ describe("dashboard workflows", () => {
       ).toBe(true),
     );
   });
+  it("queries only the selected history range on entry and refresh", async () => {
+    const { user, calls } = setup();
+    await connect(user);
+    await user.selectOptions(screen.getByLabelText("时间范围筛选"), "4h");
+    await waitFor(() => expect(screen.getByRole("button", { name: "刷新数据" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "刷新数据" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "刷新数据" })).toBeEnabled());
+    const history = calls.map(url => new URL(url)).filter(url => url.pathname.endsWith("/analytics"));
+    expect(history.length).toBeGreaterThanOrEqual(3);
+    expect([...new Set(history.map(url => url.searchParams.get("range")))].sort()).toEqual(["15m", "4h"]);
+  });
   it("shows invalid analytics as an error without falling back to volatile statistics", async () => {
     const options = { legacyMetrics: true };
     const { user, calls } = setup(options);
