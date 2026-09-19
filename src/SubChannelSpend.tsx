@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { controlRequest, makeLimiter } from "./api";
-import type { Channel } from "./types";
+import type { Channel, Metrics } from "./types";
 import type { InstalledChannel } from "./sub2apiImports";
 import { providerId, rowId } from "./format";
 import { Tip } from "./ui";
@@ -40,6 +40,14 @@ export interface SubChannelSpend {
   scope_label?: string;
   message?: string;
   refreshing?: boolean;
+  unresolved_samples?: {
+    request_id: string;
+    attempt_id: string;
+    endpoint: string;
+    status: number;
+    at: number;
+    reason: string;
+  }[];
 }
 export type SubChannelSpendResult = Pick<
   UseQueryResult<SubChannelSpend>,
@@ -61,7 +69,13 @@ export function useScopedChannelSpend({
   refresh,
   auto,
   enabled,
+  snapshot,
+  snapshotError = false,
+  snapshotUpdatedAt,
 }: {
+  snapshot?: Metrics;
+  snapshotError?: boolean;
+  snapshotUpdatedAt?: number;
   rows: Channel[];
   session: string;
   sourceId: string;
@@ -85,6 +99,8 @@ export function useScopedChannelSpend({
     from: String(from || 0),
     to: String(to || 0),
   });
+  const combined =
+    snapshot?.channel_spend !== undefined || !!snapshot?.channel_spend_error;
   const query = useQuery({
     queryKey: ["channel-spend", session, params.toString(), refresh],
     queryFn: ({ signal }) =>
@@ -96,7 +112,17 @@ export function useScopedChannelSpend({
           upstream_model: string;
         })[];
       }>("/v1/channel-spend?" + params, { signal }),
-    enabled: enabled && from != null && to != null,
+    initialData: snapshot?.channel_spend
+      ? {
+          data: snapshot.channel_spend.map((item) => ({
+            ...item,
+            source_id: item.source_id || "",
+          })),
+        }
+      : undefined,
+    initialDataUpdatedAt: snapshotUpdatedAt,
+    enabled:
+      enabled && !snapshot?.channel_spend_error && from != null && to != null,
     staleTime: 15000,
     retry: false,
     refetchInterval: (query) => {
@@ -137,7 +163,13 @@ export function useScopedChannelSpend({
       item.upstream_model,
     ]);
   const found = new Map(
-    (query.data?.data || []).map((item) => [identity(item), item]),
+    (snapshot?.channel_spend_error
+      ? []
+      : snapshot?.channel_spend &&
+          (snapshotUpdatedAt ?? Infinity) >= query.dataUpdatedAt
+        ? snapshot.channel_spend
+        : query.data?.data || []
+    ).map((item) => [identity(item), item]),
   );
   return new Map(
     rows.map((row) => [
@@ -145,7 +177,7 @@ export function useScopedChannelSpend({
       {
         data:
           found.get(identity(row)) ||
-          (query.data
+          ((combined ? snapshot?.channel_spend : query.data)
             ? {
                 status: "no_records" as const,
                 actual_cost_usd: null,
@@ -158,8 +190,10 @@ export function useScopedChannelSpend({
                 message: "当前范围暂无账单关联记录，不能确认消费金额",
               }
             : undefined),
-        isPending: query.isPending,
-        isError: query.isError,
+        isPending: combined ? false : query.isPending,
+        isError: combined
+          ? !!snapshot?.channel_spend_error || snapshotError
+          : query.isError,
       },
     ]),
   );
@@ -375,6 +409,15 @@ export function SubChannelSpendValue({
                       .join("、")}）`
                   : ""
               }；会低频复查，不能据此认定免费`
+            : "",
+          data.unresolved_samples?.length
+            ? `未核对示例：${data.unresolved_samples
+                .slice(0, 3)
+                .map(
+                  (item) =>
+                    `${date(item.at)} ${item.endpoint} HTTP ${item.status || "无响应"} · ${item.attempt_id}`,
+                )
+                .join("；")}`
             : "",
         ]
           .filter(Boolean)

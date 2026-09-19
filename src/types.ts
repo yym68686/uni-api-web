@@ -59,7 +59,12 @@ export interface Channel {
   eligible: boolean;
   reason: string;
   stats: Stats;
-  points?: (Stats & { timestamp: number; bucket_start?: number; bucket_end?: number; covered: boolean })[];
+  points?: (Stats & {
+    timestamp: number;
+    bucket_start?: number;
+    bucket_end?: number;
+    covered: boolean;
+  })[];
 }
 export interface Catalog {
   unavailable_sources?: string[];
@@ -67,6 +72,9 @@ export interface Catalog {
   snapshot_revision: string;
 }
 export interface Metrics extends Catalog {
+  channel_spend?: (import("./SubChannelSpend").SubChannelSpend &
+    Pick<Channel, "source_id" | "provider" | "model" | "upstream_model">)[];
+  channel_spend_error?: string;
   bucket_seconds?: number;
   source_freshness?: { source_id: string; latest_fact_at: number }[];
   filters?: { endpoint: string; stream: string };

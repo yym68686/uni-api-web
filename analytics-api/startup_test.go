@@ -84,6 +84,7 @@ func TestCheckpointRestoreStopsAtBoundAndDoesNotRetryPermanentFailures(t *testin
 		t.Run(failure, func(t *testing.T) {
 			store, objects := checkpointFixture(t)
 			store.legacyKey = ""
+			store.olderKey = ""
 			calls := 0
 			store.client = &restoreTestObjects{objects, func(ctx context.Context, req *s3.GetObjectInput) (*s3.GetObjectOutput, error) {
 				calls++

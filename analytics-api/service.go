@@ -133,6 +133,10 @@ func (s *Service) analytics(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "source unavailable", 404)
 		return
 	}
+	if q.Get("include_spend") == "true" {
+		s.analyticsWithSpend(w, r, allowed, name)
+		return
+	}
 	key := q.Encode() + "|" + strings.Join(allowed, ",")
 	rev := s.engine.Revision.Load()
 	now := time.Now()

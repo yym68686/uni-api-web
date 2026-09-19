@@ -89,6 +89,72 @@ function Fixture({
     </>
   );
 }
+it("uses the current combined snapshot without a second billing request", async () => {
+  const { useScopedChannelSpend } = await import("./SubChannelSpend");
+  const fetch = vi.fn();
+  vi.stubGlobal("fetch", fetch);
+  const row = {
+    source_id: "source-a",
+    provider: "shared",
+    model: "gpt-6-astra",
+    upstream_model: "gpt-6-astra",
+  } as import("./types").Channel;
+  const base = {
+    from: 1,
+    to: 100,
+    channel_spend: [
+      { ...receipt, scope: "matched_requests", ...row, actual_cost_usd: 2 },
+    ],
+  } as unknown as import("./types").Metrics;
+  function Combined({ snapshot }: { snapshot: import("./types").Metrics }) {
+    const queries = useScopedChannelSpend({
+      rows: [row],
+      session: "fixture",
+      sourceId: "source-a",
+      keyId: "key-a",
+      model: row.model,
+      endpoint: "all",
+      stream: "all",
+      from: snapshot.from,
+      to: snapshot.to,
+      snapshot,
+      refresh: 0,
+      auto: false,
+      enabled: true,
+    });
+    return <SubChannelSpendValue query={[...queries.values()][0]} />;
+  }
+  const client = new QueryClient();
+  const ui = (snapshot: import("./types").Metrics) => (
+    <QueryClientProvider client={client}>
+      <Tooltip.Provider>
+        <Combined snapshot={snapshot} />
+      </Tooltip.Provider>
+    </QueryClientProvider>
+  );
+  const app = render(ui(base));
+  expect(screen.getByText("$2.00")).toBeVisible();
+  app.rerender(
+    ui({
+      ...base,
+      to: 101,
+      channel_spend: [
+        { ...base.channel_spend![0], to: 101, actual_cost_usd: 3 },
+      ],
+    }),
+  );
+  expect(screen.getByText("$3.00")).toBeVisible();
+  expect(screen.queryByText("$2.00")).not.toBeInTheDocument();
+  app.rerender(
+    ui({
+      ...base,
+      channel_spend: undefined,
+      channel_spend_error: "unavailable",
+    }),
+  );
+  expect(screen.getByText("查询失败")).toBeVisible();
+  expect(fetch).not.toHaveBeenCalled();
+});
 it("shares one business-key query across imported bindings and scopes each time selection", async () => {
   const fetch = vi.fn(async (input: string) => {
     const url = new URL(input);

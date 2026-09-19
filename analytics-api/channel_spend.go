@@ -21,33 +21,49 @@ const maxBillingFacts = 50000
 const billingSiteSQL = `regexp_replace(COALESCE(upstream_base,''), '/v1/alpha/search/?$', '')`
 
 type attributedSpend struct {
-	Source            string         `json:"source_id"`
-	Provider          string         `json:"provider"`
-	Model             string         `json:"model"`
-	UpstreamModel     string         `json:"upstream_model"`
-	Status            string         `json:"status"`
-	Amount            *float64       `json:"actual_cost_usd"`
-	MatchedAmount     float64        `json:"matched_cost_usd"`
-	Total             int            `json:"total_attempts"`
-	Matched           int            `json:"matched_attempts"`
-	ConfirmedUnbilled int            `json:"confirmed_unbilled_attempts"`
-	Missing           int            `json:"missing_identifiers"`
-	Ambiguous         int            `json:"ambiguous_attempts"`
-	From              int64          `json:"from"`
-	To                int64          `json:"to"`
-	Scope             string         `json:"scope"`
-	LegacyMissing     int            `json:"missing_correlation_attempts"`
-	HeaderMissing     int            `json:"missing_response_identifiers"`
-	Unbound           int            `json:"unbound_attempts"`
-	Pending           int            `json:"pending_attempts"`
-	AbsentReceipts    int            `json:"absent_receipt_attempts"`
-	AbsentStatuses    map[string]int `json:"absent_receipt_statuses,omitempty"`
-	CheckedAt         int64          `json:"checked_at"`
-	Refreshing        bool           `json:"refreshing"`
-	SyncError         bool           `json:"sync_error"`
-	MissingStatuses   map[string]int `json:"missing_response_statuses,omitempty"`
-	Message           string         `json:"message"`
+	Source            string                   `json:"source_id"`
+	Provider          string                   `json:"provider"`
+	Model             string                   `json:"model"`
+	UpstreamModel     string                   `json:"upstream_model"`
+	Status            string                   `json:"status"`
+	Amount            *float64                 `json:"actual_cost_usd"`
+	MatchedAmount     float64                  `json:"matched_cost_usd"`
+	Total             int                      `json:"total_attempts"`
+	Matched           int                      `json:"matched_attempts"`
+	ConfirmedUnbilled int                      `json:"confirmed_unbilled_attempts"`
+	Missing           int                      `json:"missing_identifiers"`
+	Ambiguous         int                      `json:"ambiguous_attempts"`
+	From              int64                    `json:"from"`
+	To                int64                    `json:"to"`
+	Scope             string                   `json:"scope"`
+	LegacyMissing     int                      `json:"missing_correlation_attempts"`
+	HeaderMissing     int                      `json:"missing_response_identifiers"`
+	Unbound           int                      `json:"unbound_attempts"`
+	Pending           int                      `json:"pending_attempts"`
+	AbsentReceipts    int                      `json:"absent_receipt_attempts"`
+	AbsentStatuses    map[string]int           `json:"absent_receipt_statuses,omitempty"`
+	CheckedAt         int64                    `json:"checked_at"`
+	Refreshing        bool                     `json:"refreshing"`
+	SyncError         bool                     `json:"sync_error"`
+	MissingStatuses   map[string]int           `json:"missing_response_statuses,omitempty"`
+	Message           string                   `json:"message"`
+	UnresolvedSamples []unresolvedSpendAttempt `json:"unresolved_samples,omitempty"`
 }
+type unresolvedSpendAttempt struct {
+	RequestID string `json:"request_id"`
+	AttemptID string `json:"attempt_id"`
+	Endpoint  string `json:"endpoint"`
+	Status    int    `json:"status"`
+	At        int64  `json:"at"`
+	Reason    string `json:"reason"`
+}
+
+func (s *attributedSpend) unresolved(b billingFact, reason string) {
+	if len(s.UnresolvedSamples) < 8 {
+		s.UnresolvedSamples = append(s.UnresolvedSamples, unresolvedSpendAttempt{b.Request, b.Attempt, b.Endpoint, b.Status, b.At / 1000, reason})
+	}
+}
+
 type receiptScope struct {
 	Account, Site string
 	Key, Group    int64
@@ -55,6 +71,7 @@ type receiptScope struct {
 type billingFact struct {
 	Event, Source, Instance, Request, Attempt, Provider, Model, Upstream, Key, Base, Hash string
 	ErrorSHA256                                                                           string
+	Endpoint                                                                              string
 	At, Started                                                                           int64
 	IDs                                                                                   []string
 	Completions                                                                           int
@@ -142,9 +159,30 @@ const billingAlignedSQL = `WITH aligned_billing AS (
  WHERE b.kind='billing'
 ) `
 
+const billingIdentityColumns = "source_id,instance_id,request_id,attempt_id,provider,key_id,model,upstream_model,endpoint,stream"
+
+// Join only candidate identities before grouping completions. Do not restrict
+// their time: responses can start outside the window or finish after it, and
+// reused caller IDs must retain every completion for ambiguity checks.
+func scopedBillingAlignment(f QueryFilter) (string, []any) {
+	where, args := billingWhere(f, 0, 1)
+	where = strings.TrimPrefix(strings.TrimPrefix(where, "at_ms>=? AND at_ms<?"), " AND ")
+	if where == "" {
+		where = "true"
+	}
+	return `WITH candidate_billing AS MATERIALIZED (SELECT * FROM facts WHERE kind='billing' AND ` + where + `),
+ completion_keys AS (SELECT DISTINCT ` + billingIdentityColumns + ` FROM candidate_billing),
+ completions AS (SELECT ` + "a." + strings.ReplaceAll(billingIdentityColumns, ",", ",a.") + `,max(a.at_ms) AS completed_at,count(*) AS n
+ FROM facts a JOIN completion_keys k USING(` + billingIdentityColumns + `) WHERE a.kind='attempt' GROUP BY ALL),
+ aligned_billing AS (SELECT b.* EXCLUDE(at_ms),coalesce(a.completed_at,b.at_ms) AS at_ms,coalesce(a.n,0) AS completions
+ FROM candidate_billing b LEFT JOIN completions a USING(` + billingIdentityColumns + `)) `, args[2:]
+}
+
 func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f QueryFilter, from, to int64) ([]attributedSpend, error) {
 	where, args := billingWhere(f, from, to)
-	rows, err := s.engine.DB.QueryContext(ctx, billingAlignedSQL+`SELECT event_id,source_id,COALESCE(instance_id,''),COALESCE(request_id,''),COALESCE(attempt_id,''),provider,model,upstream_model,key_id,at_ms,COALESCE(started_ms,at_ms),`+billingSiteSQL+`,COALESCE(upstream_key_hash,''),CAST(COALESCE(to_json(billing_request_ids),'[]') AS VARCHAR),completions,COALESCE(status,0),COALESCE(upstream_error_sha256,'') FROM aligned_billing WHERE kind='billing' AND `+where+` ORDER BY at_ms,event_id LIMIT 50001`, args...)
+	alignment, scopeArgs := scopedBillingAlignment(f)
+	alignedArgs := append(append([]any{}, scopeArgs...), args...)
+	rows, err := s.engine.DB.QueryContext(ctx, alignment+`SELECT event_id,source_id,COALESCE(instance_id,''),COALESCE(request_id,''),COALESCE(attempt_id,''),provider,model,upstream_model,key_id,at_ms,COALESCE(started_ms,at_ms),`+billingSiteSQL+`,COALESCE(upstream_key_hash,''),CAST(COALESCE(to_json(billing_request_ids),'[]') AS VARCHAR),completions,COALESCE(status,0),COALESCE(upstream_error_sha256,''),COALESCE(endpoint,'') FROM aligned_billing WHERE kind='billing' AND `+where+` ORDER BY at_ms,event_id LIMIT 50001`, alignedArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +190,7 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 	for rows.Next() {
 		var b billingFact
 		var ids []byte
-		if err = rows.Scan(&b.Event, &b.Source, &b.Instance, &b.Request, &b.Attempt, &b.Provider, &b.Model, &b.Upstream, &b.Key, &b.At, &b.Started, &b.Base, &b.Hash, &ids, &b.Completions, &b.Status, &b.ErrorSHA256); err != nil {
+		if err = rows.Scan(&b.Event, &b.Source, &b.Instance, &b.Request, &b.Attempt, &b.Provider, &b.Model, &b.Upstream, &b.Key, &b.At, &b.Started, &b.Base, &b.Hash, &ids, &b.Completions, &b.Status, &b.ErrorSHA256, &b.Endpoint); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -230,6 +268,7 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 				item.MissingStatuses = map[string]int{}
 			}
 			item.MissingStatuses[strconv.Itoa(b.Status)]++
+			item.unresolved(b, "missing_response_identifier")
 			continue
 		}
 		matches := bindings[subBindingSite(b.Base)+"\n"+b.Hash]
@@ -264,8 +303,8 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 	// currently selected row. A duplicated ID must never charge two different keys.
 	ownership := map[string]int{}
 	if len(ids) > 0 {
-		claimsSQL := billingAlignedSQL + `, target AS (SELECT DISTINCT ` + billingSiteSQL + ` AS upstream_base,upstream_key_hash,unnest(billing_request_ids) AS rid FROM aligned_billing WHERE kind='billing' AND ` + where + `), claims AS (SELECT event_id,` + billingSiteSQL + ` AS upstream_base,upstream_key_hash,unnest(billing_request_ids) AS rid FROM facts WHERE kind='billing') SELECT t.upstream_base,t.upstream_key_hash,t.rid,count(DISTINCT c.event_id) FROM target t JOIN claims c ON c.upstream_base=t.upstream_base AND c.upstream_key_hash=t.upstream_key_hash AND c.rid=t.rid GROUP BY t.upstream_base,t.upstream_key_hash,t.rid`
-		rows, err = s.engine.DB.QueryContext(ctx, claimsSQL, args...)
+		claimsSQL := alignment + `, target AS (SELECT DISTINCT ` + billingSiteSQL + ` AS upstream_base,upstream_key_hash,unnest(billing_request_ids) AS rid FROM aligned_billing WHERE kind='billing' AND ` + where + `), claims AS (SELECT event_id,` + billingSiteSQL + ` AS upstream_base,upstream_key_hash,unnest(billing_request_ids) AS rid FROM facts WHERE kind='billing') SELECT t.upstream_base,t.upstream_key_hash,t.rid,count(DISTINCT c.event_id) FROM target t JOIN claims c ON c.upstream_base=t.upstream_base AND c.upstream_key_hash=t.upstream_key_hash AND c.rid=t.rid GROUP BY t.upstream_base,t.upstream_key_hash,t.rid`
+		rows, err = s.engine.DB.QueryContext(ctx, claimsSQL, alignedArgs...)
 		if err != nil {
 			return nil, err
 		}
@@ -385,6 +424,7 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 					item.AbsentStatuses = map[string]int{}
 				}
 				item.AbsentStatuses[strconv.Itoa(b.Status)]++
+				item.unresolved(b, "receipt_absent_after_sync")
 			}
 			continue
 		}

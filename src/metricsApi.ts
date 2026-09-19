@@ -6,6 +6,7 @@ export async function readMetrics(
   signal: AbortSignal,
   endpoint: string,
   stream: string,
+  includeSpend = false,
 ) {
   const source = new URLSearchParams(path.split("?")[1] || "");
   const range = source.get("window") || "15m";
@@ -31,6 +32,7 @@ export async function readMetrics(
   source.set("endpoint", endpoint);
   source.set("stream", stream);
   if (path.includes("timeseries")) source.set("timeseries", "true");
+  if (includeSpend && connection.account) source.set("include_spend", "true");
   const result = await analyticsRequest<Metrics>(
     connection,
     "/analytics/v1/analytics?" + source.toString(),
@@ -47,22 +49,21 @@ export async function readMetrics(
   }
   return {
     ...result,
-    window_minutes:
-      /^(?:[1-9]|1[0-9]|2[0-4])h$/.test(range)
-        ? Number.parseInt(range) * 60
-        : range === "7d"
-          ? 10080
-          : range === "30d"
-            ? 43200
-            : range === "today"
-              ? 1440
-              : range === "week"
-                ? 10080
-                : range === "month"
-                  ? 43200
-                  : range === "year"
-                    ? 525600
-                    : 0,
+    window_minutes: /^(?:[1-9]|1[0-9]|2[0-4])h$/.test(range)
+      ? Number.parseInt(range) * 60
+      : range === "7d"
+        ? 10080
+        : range === "30d"
+          ? 43200
+          : range === "today"
+            ? 1440
+            : range === "week"
+              ? 10080
+              : range === "month"
+                ? 43200
+                : range === "year"
+                  ? 525600
+                  : 0,
     coverage: result.coverage || "partial",
     statistics_scope: "s3",
   };

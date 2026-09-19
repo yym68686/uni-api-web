@@ -1074,7 +1074,7 @@ function Dashboard({
     staleTime: 60_000,
   });
   const metrics = useQuery({
-    queryKey: ["metrics", connection.session, keyId, window, endpoint, stream],
+    queryKey: ["metrics", connection.session, keyId, window, endpoint, stream, channelView && !!baseConnection.account],
     queryFn: ({ signal }) =>
       readMetrics(
         connection,
@@ -1082,6 +1082,7 @@ function Dashboard({
         signal,
         endpoint,
         stream,
+        channelView && !!baseConnection.account,
       ),
     staleTime: 30_000,
     enabled: keysLoaded && !keyRemoved && !!catalog.data,
@@ -1239,7 +1240,7 @@ function Dashboard({
   );
   const providers = useMemo(() => [...new Set(rows.map(providerId))], [rows]);
   const actualRange = useMemo(() => actualCostRange(window), [window]);
-  const channelSpend = useScopedChannelSpend({ rows, session: connection.session, sourceId: selectedSourceId, keyId, model, endpoint, stream, from: metrics.data?.from, to: metrics.data?.to, refresh, auto, enabled: channelView && !!baseConnection.account });
+  const channelSpend = useScopedChannelSpend({ rows, session: connection.session, sourceId: selectedSourceId, keyId, model, endpoint, stream, from: metrics.data?.from, to: metrics.data?.to, snapshot: metrics.data, snapshotError: metrics.isError, snapshotUpdatedAt: metrics.dataUpdatedAt, refresh, auto, enabled: channelView && !!baseConnection.account });
   const limit = useMemo(() => makeLimiter(3), []);
   const accountBalances = useChannelAccountBalances(providers, imported.data?.data || [], connection.session, !!baseConnection.account, auto);
   const rawBalanceQueries = useQueries({

@@ -14,6 +14,7 @@ type QueryFilter struct {
 	SourceIDs                                                                []string
 	Range, Model, UpstreamModel, Provider, Endpoint, Stream, KeyID, SourceID string
 	Timeseries                                                               bool
+	To                                                                       int64
 }
 type Summary struct {
 	Attempts                  int64    `json:"attempts"`
@@ -172,26 +173,31 @@ type SourceFreshness struct {
 }
 
 type QueryResult struct {
-	SourceFreshness []SourceFreshness `json:"source_freshness"`
-	Import          map[string]any    `json:"import"`
-	Coverage        string            `json:"coverage"`
-	From            int64             `json:"from"`
-	To              int64             `json:"to"`
-	Range           string            `json:"range"`
-	Timezone        string            `json:"timezone"`
-	Data            []AnalyticChannel `json:"data"`
-	Total           map[string]any    `json:"total"`
-	Models          []map[string]any  `json:"models"`
-	CollectedFrom   *int64            `json:"collection_started_at"`
-	GeneratedAt     int64             `json:"generated_at"`
-	Revision        uint64            `json:"revision"`
-	DurationMS      float64           `json:"query_ms"`
-	BucketSeconds   int64             `json:"bucket_seconds,omitempty"`
+	SourceFreshness   []SourceFreshness  `json:"source_freshness"`
+	Import            map[string]any     `json:"import"`
+	Coverage          string             `json:"coverage"`
+	From              int64              `json:"from"`
+	To                int64              `json:"to"`
+	Range             string             `json:"range"`
+	Timezone          string             `json:"timezone"`
+	Data              []AnalyticChannel  `json:"data"`
+	Total             map[string]any     `json:"total"`
+	Models            []map[string]any   `json:"models"`
+	CollectedFrom     *int64             `json:"collection_started_at"`
+	GeneratedAt       int64              `json:"generated_at"`
+	Revision          uint64             `json:"revision"`
+	DurationMS        float64            `json:"query_ms"`
+	BucketSeconds     int64              `json:"bucket_seconds,omitempty"`
+	ChannelSpend      *[]attributedSpend `json:"channel_spend,omitempty"`
+	ChannelSpendError string             `json:"channel_spend_error,omitempty"`
 }
 
 func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) {
 	began := time.Now()
 	now := time.Now().UTC()
+	if f.To > 0 {
+		now = time.Unix(f.To, 0).UTC()
+	}
 	start, err := rangeStart(f.Range, now, e.Location)
 	if err != nil {
 		return QueryResult{}, err

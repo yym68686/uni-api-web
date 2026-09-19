@@ -18,6 +18,31 @@ function mockAnalytics() {
   vi.stubGlobal("fetch", fetch);
   return fetch;
 }
+it("requests one response containing metrics and account billing", async () => {
+  const fetch = mockAnalytics();
+  await readMetrics(
+    connection,
+    "/v1/channel-metrics?window=1h",
+    new AbortController().signal,
+    "all",
+    "all",
+    true,
+  );
+  expect(
+    new URL(String(fetch.mock.calls[0][0])).searchParams.get("include_spend"),
+  ).toBe("true");
+  await readMetrics(
+    { ...connection, account: false },
+    "/v1/channel-metrics?window=1h",
+    new AbortController().signal,
+    "all",
+    "all",
+    true,
+  );
+  expect(
+    new URL(String(fetch.mock.calls[1][0])).searchParams.has("include_spend"),
+  ).toBe(false);
+});
 it.each(["/v1/channel-metrics", "/v1/channel-metrics/timeseries"])(
   "scopes %s to the selected source and key",
   async (path) => {
@@ -74,11 +99,23 @@ it("rejects keys belonging to another source before querying statistics", async 
 });
 
 it("distinguishes incomplete analytics from other service failures", async () => {
-  const fetch = vi.fn()
-    .mockResolvedValueOnce(new Response(JSON.stringify({ code: "analytics_initializing" }), { status: 503 }))
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ code: "analytics_initializing" }), {
+        status: 503,
+      }),
+    )
     .mockResolvedValueOnce(new Response("proxy offline", { status: 503 }));
   vi.stubGlobal("fetch", fetch);
-  const read = () => readMetrics(connection, "/v1/channel-metrics", new AbortController().signal, "all", "all");
+  const read = () =>
+    readMetrics(
+      connection,
+      "/v1/channel-metrics",
+      new AbortController().signal,
+      "all",
+      "all",
+    );
   await expect(read()).rejects.toBeInstanceOf(AnalyticsInitializingError);
   await expect(read()).rejects.toThrow("分析服务暂时无法响应（HTTP 503）");
 });
