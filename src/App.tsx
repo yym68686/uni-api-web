@@ -1482,7 +1482,10 @@ function Dashboard({
               loading={prices.isPending}
               error={prices.error?.message}
               connection={connection}
-              onSaved={() => void prices.refetch()}
+              onSaved={() => {
+                void prices.refetch();
+                void queryClient.invalidateQueries({ queryKey: ["metrics"] });
+              }}
             />
           ) : historyInitializing && !metrics.data ? null : view === "overview" ? (
             <Overview

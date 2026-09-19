@@ -60,6 +60,7 @@ type Price struct {
 	CacheWrite       float64   `json:"cache_write"`
 	CacheWrite1h     float64   `json:"cache_write_1h"`
 	ChargeCacheWrite *bool     `json:"charge_cache_write,omitempty"`
+	SalePercent      *float64  `json:"sale_percent,omitempty"`
 	Source           string    `json:"source"`
 	Verified         bool      `json:"verified"`
 	EffectiveAt      time.Time `json:"effective_at"`

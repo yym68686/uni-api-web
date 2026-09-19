@@ -194,6 +194,9 @@ func (s *stateStore) save(ctx context.Context, e *Engine, p Price) error {
 	replaced := false
 	for i := range doc.Prices {
 		if doc.Prices[i].Model == p.Model {
+			if p.SalePercent == nil {
+				p.SalePercent = doc.Prices[i].SalePercent
+			}
 			doc.Prices[i] = p
 			replaced = true
 			break
@@ -230,7 +233,7 @@ func (e *Engine) applyPrices(ctx context.Context, prices []Price) error {
 		return err
 	}
 	for _, p := range prices {
-		if _, err = tx.ExecContext(ctx, "INSERT INTO prices(model,input,output,cache_read,cache_write,cache_write_1h,source,verified,effective_at,charge_cache_write) VALUES(?,?,?,?,?,?,?,?,?,?)", p.Model, p.Input, p.Output, p.CacheRead, p.CacheWrite, p.CacheWrite1h, p.Source, p.Verified, p.EffectiveAt, p.ChargeCacheWrite); err != nil {
+		if _, err = tx.ExecContext(ctx, "INSERT INTO prices(model,input,output,cache_read,cache_write,cache_write_1h,source,verified,effective_at,charge_cache_write,sale_percent) VALUES(?,?,?,?,?,?,?,?,?,?,?)", p.Model, p.Input, p.Output, p.CacheRead, p.CacheWrite, p.CacheWrite1h, p.Source, p.Verified, p.EffectiveAt, p.ChargeCacheWrite, p.SalePercent); err != nil {
 			return err
 		}
 	}

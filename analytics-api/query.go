@@ -336,7 +336,13 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 		if endpoint == "" {
 			endpoint = "all"
 		}
-		out.Data = append(out.Data, AnalyticChannel{SourceID: id[0], Provider: id[1], Model: id[2], UpstreamModel: id[3], Endpoint: endpoint, Stream: channelStream, Stats: channels[k].JSON()})
+		stats := channels[k].JSON()
+		price, found := priceMap[canonicalPriceModel(id[2])]
+		if !found {
+			price = Price{Model: id[2]}
+		}
+		stats["sale_percent"] = price.salePercent()
+		out.Data = append(out.Data, AnalyticChannel{SourceID: id[0], Provider: id[1], Model: id[2], UpstreamModel: id[3], Endpoint: endpoint, Stream: channelStream, Stats: stats})
 		attempts.merge(*channels[k])
 	}
 	// Usage totals represent client requests; channel attempt totals separately

@@ -29,6 +29,7 @@ export interface Stats {
   cache_read_tokens?: number;
   cache_samples?: number;
   estimated_cost_usd?: number | null;
+  sale_percent?: number;
   started: number;
   success: number;
   failed: number;
@@ -97,6 +98,7 @@ export interface ModelPrice {
   cache_write: number;
   cache_write_1h: number;
   charge_cache_write?: boolean;
+  sale_percent?: number;
   source?: string;
   verified?: boolean;
 }

@@ -54,6 +54,18 @@ func (p Price) chargesCacheWrite() bool {
 	return !strings.HasPrefix(strings.ToLower(p.Model), "gpt-")
 }
 
+// Percent of the reference API price, independently configurable per model.
+func (p Price) salePercent() float64 {
+	if p.SalePercent != nil {
+		return *p.SalePercent
+	}
+	model := strings.ToLower(p.Model)
+	if strings.HasPrefix(model, "claude-") || strings.HasPrefix(model, "gemini-") {
+		return 15
+	}
+	return 2.5
+}
+
 func withCatalogPrices(prices []Price) []Price {
 	indices := make(map[string]int, len(prices))
 	for i, p := range prices {
@@ -64,6 +76,7 @@ func withCatalogPrices(prices []Price) []Price {
 			old := prices[i]
 			if old.Source == "fact-discovered" && !old.Verified && old.Input == 0 && old.Output == 0 && old.CacheRead == 0 && old.CacheWrite == 0 && old.CacheWrite1h == 0 {
 				p.ChargeCacheWrite = old.ChargeCacheWrite
+				p.SalePercent = old.SalePercent
 				prices[i] = p
 			}
 		} else {
@@ -73,6 +86,8 @@ func withCatalogPrices(prices []Price) []Price {
 	for i := range prices {
 		enabled := prices[i].chargesCacheWrite()
 		prices[i].ChargeCacheWrite = &enabled
+		percent := prices[i].salePercent()
+		prices[i].SalePercent = &percent
 	}
 	return prices
 }

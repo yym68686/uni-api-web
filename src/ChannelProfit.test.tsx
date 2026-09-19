@@ -50,3 +50,21 @@ it("uses the displayed channel spending source and never falls back to a whole-d
   app.rerender(ui(false, true));
   expect(profitCell()).toHaveTextContent("¥-2.75");
 });
+
+it("uses each model's sale percentage, including explicit free pricing", () => {
+  expect(channelProfit(100, 5, 15)).toEqual({ amount: 98.5, margin: 98.5 / 103.5 });
+  expect(channelProfit(100, 5, 0)).toEqual({ amount: -5, margin: null });
+  expect(channelProfit(100, 5, -1)).toBeNull();
+  expect(channelProfit(100, 5, Number.NaN)).toBeNull();
+  const row = { provider: "p", model: "gemini-3.1-pro-search", eligible: true, stats: { ...emptyStats(), estimated_cost_usd: 100 } } as Channel;
+  const ui = () => <Tooltip.Provider><table><tbody><tr><ChannelMetricCells row={row} actualRange={{supported:true}} balance={{data:{provider:"p",status:"complete",actual_cost_usd:5}}} /></tr></tbody></table></Tooltip.Provider>;
+  const view = render(ui());
+  expect(screen.getByText("¥98.50")).toBeVisible();
+  row.stats.sale_percent = 10;
+  view.rerender(ui());
+  expect(screen.getByText("¥64.00")).toBeVisible();
+  row.stats.sale_percent = 0;
+  view.rerender(ui());
+  expect(screen.getByText("¥-5.00")).toBeVisible();
+  expect(screen.getByLabelText("利润率 —")).toBeVisible();
+});

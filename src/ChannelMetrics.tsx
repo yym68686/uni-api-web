@@ -17,6 +17,7 @@ import { usd } from "./analytics";
 import type { ActualCostRange } from "./actualCost";
 import { SubChannelSpendValue } from "./SubChannelSpend";
 import type { SubChannelSpendResult } from "./SubChannelSpend";
+import { salePercent } from "./modelPrices";
 import { ChannelProfit } from "./ChannelProfit";
 export interface BalanceResult {
   data?: Balance;
@@ -198,7 +199,7 @@ export function ChannelMetricHeaders({
         </Tip>
       </th>
       <th>
-        <Tip text="利润（人民币）= 估算消费 × 2.5% × 6.9 − 渠道实际消费，仅取数值计算。利润率 = 利润 ÷（估算消费 × 2.5% × 6.9）。">
+        <Tip text="利润（人民币）= 估算消费 × 对应模型售卖百分比 ÷ 100 × 6.9 − 渠道实际消费，仅取数值计算。利润率 = 利润 ÷（估算消费 × 对应模型售卖百分比 ÷ 100 × 6.9）。">
           利润 <CircleHelp size={12} />
         </Tip>
       </th>
@@ -300,7 +301,7 @@ export function ChannelMetricCells({
         )}
       </td>
       <td>
-        <ChannelProfit estimated={row.stats?.estimated_cost_usd} actual={actualCost} />
+        <ChannelProfit estimated={row.stats?.estimated_cost_usd} actual={actualCost} salePercent={salePercent({ model: row.model, sale_percent: row.stats?.sale_percent })} />
       </td>
       <td>
         <BalanceValue

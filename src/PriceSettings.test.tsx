@@ -30,3 +30,25 @@ it("defaults GPT write billing off and other models on, saves explicit choices w
   expect(screen.getByRole("checkbox", { name: "gpt-6-astra 计算缓存写入费用" })).toBeChecked();
   expect(screen.getByRole("checkbox", { name: "claude-fable-5 计算缓存写入费用" })).not.toBeChecked();
 });
+
+it("offers independent sales percentages with family defaults and persists decimal and zero values", async () => {
+  const saved: ModelPrice[]=[];
+  vi.stubGlobal("fetch",vi.fn(async (_url,options)=>{saved.push(JSON.parse(options.body));return Response.json({price:saved.at(-1)})}));
+  const props={prices:[] as ModelPrice[],loading:false,connection:{base:"",key:"",session:"test",account:true},onSaved:vi.fn()};
+  const view=render(<PriceSettings {...props}/>);
+  expect(screen.getByLabelText("gpt-6-astra 售卖价格百分比")).toHaveValue(2.5);
+  expect(screen.getByLabelText("claude-fable-5 售卖价格百分比")).toHaveValue(15);
+  expect(screen.getByLabelText("gemini-3.1-pro 售卖价格百分比")).toHaveValue(15);
+  const user=userEvent.setup();
+  for(const [model,value] of [["gpt-6-astra","0"],["claude-fable-5","18.75"],["gemini-3.1-pro","9"]]){
+   const input=screen.getByLabelText(`${model} 售卖价格百分比`);await user.clear(input);
+   expect(within(input.closest("article")!).getByRole("button",{name:"保存价格"})).toBeDisabled();
+   await user.type(input,value);await user.click(within(input.closest("article")!).getByRole("button",{name:"保存价格"}));
+  }
+  await waitFor(()=>expect(props.onSaved).toHaveBeenCalledTimes(3));
+  expect(saved.map(p=>p.sale_percent)).toEqual([0,18.75,9]);
+  view.unmount();render(<PriceSettings {...props} prices={saved}/>);
+  expect(screen.getByLabelText("gpt-6-astra 售卖价格百分比")).toHaveValue(0);
+  expect(screen.getByLabelText("claude-fable-5 售卖价格百分比")).toHaveValue(18.75);
+  expect(screen.getByLabelText("gemini-3.1-pro 售卖价格百分比")).toHaveValue(9);
+});
