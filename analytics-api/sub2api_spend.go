@@ -286,6 +286,13 @@ func (s *Service) subScanSpend(parent context.Context, task subSpendTask) {
 		err = s.subStoreSpendPage(ctx, task, page, complete)
 		if err == nil {
 			log.Printf("event=sub_account_spend_page account_id=%s page=%d page_size=%d rows=%d complete=%t", task.account, task.page, task.pageSize, len(page.Items), complete)
+			if task.page == 1 && page.Pages > 5 && !complete {
+				// A long ascending scan must not put today's newest receipts
+				// behind every old page. This independent first descending page
+				// adds exact receipts only; it never advances scan coverage/cursor.
+				// Keep the ascending traversal and its durable resume unchanged.
+				s.subReadRecentSpend(ctx, task, q)
+			}
 		}
 		if err != nil || complete {
 			break
@@ -310,6 +317,30 @@ func (s *Service) subScanSpend(parent context.Context, task subSpendTask) {
 }
 
 func (s *Service) subStoreSpendPage(ctx context.Context, task subSpendTask, page subSpendPage, complete bool) error {
+	return s.subStoreSpendReceipts(ctx, task, page, complete, true)
+}
+
+func (s *Service) subReadRecentSpend(parent context.Context, task subSpendTask, query url.Values) {
+	ctx, cancel := context.WithTimeout(parent, 3*time.Second)
+	defer cancel()
+	query.Set("sort_order", "desc")
+	query.Set("page", "1")
+	query.Set("page_size", strconv.Itoa(task.pageSize))
+	var recent subSpendPage
+	began := time.Now()
+	err := s.subUsageGET(ctx, task.account, task.base, "/api/v1/usage?"+query.Encode(), &recent)
+	if err == nil {
+		if recent.Items == nil || (recent.Page != 0 && recent.Page != 1) {
+			err = errors.New("invalid recent page")
+		} else {
+			err = s.subStoreSpendReceipts(ctx, task, recent, false, false)
+		}
+	}
+	// Unsupported/failed acceleration never interrupts the full ledger scan.
+	log.Printf("event=sub_account_spend_recent account_id=%s rows=%d duration_ms=%d success=%t", task.account, len(recent.Items), time.Since(began).Milliseconds(), err == nil)
+}
+
+func (s *Service) subStoreSpendReceipts(ctx context.Context, task subSpendTask, page subSpendPage, complete, advance bool) error {
 	tx, err := s.control.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -356,6 +387,9 @@ func (s *Service) subStoreSpendPage(ctx context.Context, task subSpendTask, page
  ON CONFLICT(account_id,key_id,log_id) DO UPDATE SET at_ms=excluded.at_ms,actual_cost=excluded.actual_cost,request_id=excluded.request_id,model=excluded.model,stream=excluded.stream,inbound_endpoint=excluded.inbound_endpoint`, task.account, string(raw))
 	if err != nil {
 		return err
+	}
+	if !advance {
+		return tx.Commit()
 	}
 	if complete {
 		_, err = tx.ExecContext(ctx, `UPDATE console_sub_account_spend_cache SET covered_from=least(coalesce(covered_from,$2),$2),covered_to=greatest(coalesce(covered_to,$3),$3),scan_from=0,scan_to=0,page=1,checked_at=$4,error='',attempts=0,next_attempt=now(),requested=wanted_from<least(coalesce(covered_from,$2),$2) OR wanted_to>greatest(coalesce(covered_to,$3),$3),page_size=$5 WHERE account_id=$1`, task.account, task.from, task.to, time.Now().UnixMilli(), task.pageSize)

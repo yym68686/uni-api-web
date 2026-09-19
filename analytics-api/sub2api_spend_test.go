@@ -339,6 +339,84 @@ func TestAccountSpendMigrationKeepsReceiptsButNeverClaimsAccountCoverage(t *test
 	}
 }
 
+func TestRecentReceiptsDoNotAdvanceHistoricalCoverageOrBreakResume(t *testing.T) {
+	for _, recentMode := range []string{"ok", "unsupported", "invalid"} {
+		t.Run(recentMode, func(t *testing.T) {
+			s, account, owner := attributionFixture(t)
+			now := time.Now().Truncate(time.Second)
+			from, to := now.Add(-time.Hour).Unix(), now.Unix()
+			fact := attributedFact("recent", "caller", now.Add(-time.Minute))
+			if err := s.engine.Import(context.Background(), "recent", "1", []Fact{fact}); err != nil {
+				t.Fatal(err)
+			}
+			read := func() attributedSpend {
+				rows, err := s.attributedChannelSpend(context.Background(), owner, QueryFilter{KeyID: "caller"}, from, to)
+				if err != nil || len(rows) != 1 {
+					t.Fatalf("rows=%+v err=%v", rows, err)
+				}
+				return rows[0]
+			}
+			read()
+			recentCalls := 0
+			withSpendUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				q := r.URL.Query()
+				page, _ := strconv.Atoi(q.Get("page"))
+				log := spendLog(901, now.Add(-time.Minute), "0.3")
+				log.RequestID = "client:recent"
+				if q.Get("sort_order") == "desc" {
+					recentCalls++
+					if page != 1 || q.Get("page_size") != "100" || q.Has("api_key_id") {
+						t.Error("wrong recent account query", q)
+					}
+					if recentMode == "unsupported" {
+						http.Error(w, "unsupported", 404)
+						return
+					}
+					if recentMode == "invalid" {
+						log.Cost = nil
+					}
+					writeJSON(w, 200, map[string]any{"data": subSpendPage{Items: []subSpendLog{log}, Page: 1, Pages: 7, PageSize: 100}})
+					return
+				}
+				if q.Get("sort_order") != "asc" {
+					t.Error("changed durable traversal", q)
+				}
+				items := []subSpendLog{spendLog(int64(page), now.Add(-30*time.Minute), "10")}
+				if page == 7 {
+					items = append(items, log)
+				}
+				writeJSON(w, 200, map[string]any{"data": subSpendPage{Items: items, Page: page, Pages: 7, PageSize: 100}})
+			}))
+			runSpendBatch(t, s, account)
+			first := read()
+			if recentMode == "ok" {
+				if first.Status != "complete" || first.Amount == nil || *first.Amount != .3 {
+					t.Fatal("latest exact receipt waits for old pages", first)
+				}
+			} else if first.Status != "pending" || first.Amount != nil {
+				t.Fatal("failed recent read fabricated coverage", first)
+			}
+			var page int
+			var noCoverage bool
+			var message string
+			err := s.control.db.QueryRow(`SELECT page,covered_to IS NULL,error FROM console_sub_account_spend_cache WHERE account_id=$1`, account).Scan(&page, &noCoverage, &message)
+			if err != nil || page != 6 || !noCoverage || message != "" {
+				t.Fatal("recent read changed full scan state", page, noCoverage, message, err)
+			}
+			runSpendBatch(t, s, account)
+			last := read()
+			if last.Status != "complete" || last.Amount == nil || *last.Amount != .3 || recentCalls != 1 {
+				t.Fatal("resume/receipt dedup failed", last, recentCalls)
+			}
+			var count int
+			s.control.db.QueryRow(`SELECT count(*) FROM console_sub_spend_logs WHERE account_id=$1 AND log_id=901`, account).Scan(&count)
+			if count != 1 {
+				t.Fatal("receipt stored twice", count)
+			}
+		})
+	}
+}
+
 func TestAccountSpendClampedPageSizeAndExpandedWindowSurviveResume(t *testing.T) {
 	s, account, _, request := spendTestService(t)
 	to := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
@@ -370,7 +448,7 @@ func TestAccountSpendClampedPageSizeAndExpandedWindowSurviveResume(t *testing.T)
 	if out.Status == "complete" {
 		t.Fatal("window extension lost", out)
 	}
-	if calls != 6 {
+	if calls != 7 { // six durable pages plus one optional recent page
 		t.Fatal("did not resume", calls)
 	}
 	runSpendBatch(t, s, account)
