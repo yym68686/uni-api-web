@@ -55,7 +55,9 @@ func TestControlPostgresSessionAndSources(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	store.db.Exec(`TRUNCATE console_quality_history,console_control_snapshots,console_users,console_sessions,console_channel_check_runs,console_channel_checks,console_sources`)
+	if _, err = store.db.Exec(`TRUNCATE console_sources,console_users,console_sessions CASCADE`); err != nil {
+		t.Fatal(err)
+	}
 	if err = store.ensureBootstrap("admin", "a-long-test-password"); err != nil {
 		t.Fatal(err)
 	}

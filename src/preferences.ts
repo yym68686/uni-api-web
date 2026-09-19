@@ -33,7 +33,10 @@ export function loadView(base: string, account: boolean): View {
       views.find(
         (view) =>
           view === saved &&
-          (account || (view !== "sub2api" && view !== "sources")),
+          (account ||
+            (view !== "sub2api" &&
+              view !== "sources" &&
+              view !== "automations")),
       ) || "channels"
     );
   } catch {
@@ -64,7 +67,10 @@ function validate(value: unknown): Filters {
     keyId: field("keyId"),
     sourceId: field("sourceId"),
     model: field("model"),
-    window: field("window", ranges.map(([value]) => value)),
+    window: field(
+      "window",
+      ranges.map(([value]) => value),
+    ),
     balanceFilter: field("balanceFilter", ["", "low"]),
     statusFilter: field("statusFilter", ["", "eligible", "unavailable"]),
     search: field("search"),

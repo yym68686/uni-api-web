@@ -126,7 +126,7 @@ func (s *Service) authenticate(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if strings.HasPrefix(r.URL.Path, "/v1/sources") || strings.HasPrefix(r.URL.Path, "/v1/sub2api/") {
+		if strings.HasPrefix(r.URL.Path, "/v1/sources") || strings.HasPrefix(r.URL.Path, "/v1/sub2api/") || strings.HasPrefix(r.URL.Path, "/v1/automations") {
 			http.Error(w, "account service unavailable", 503)
 			return
 		}

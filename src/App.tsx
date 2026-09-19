@@ -1474,7 +1474,7 @@ function Dashboard({
               }}
             />
           ) : view === "automations" && baseConnection.account ? (
-            <Automation sources={sourceList} models={models} refreshAction={refreshButton} />
+            <Automation sources={sourceList} models={models} />
           ) : view === "prices" ? (
             <PriceSettings
               prices={prices.data?.data || []}
