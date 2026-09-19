@@ -50,6 +50,19 @@ CREATE TABLE IF NOT EXISTS console_sub_spend_cache(
  error TEXT NOT NULL DEFAULT '',attempts INT NOT NULL DEFAULT 0,next_attempt TIMESTAMPTZ NOT NULL DEFAULT now(),
  PRIMARY KEY(account_id,key_id));
 CREATE INDEX IF NOT EXISTS console_sub_spend_due ON console_sub_spend_cache(account_id,next_attempt) WHERE requested;
+-- A new account cursor must scan all keys. Per-key coverage is not proof of
+-- account coverage. Keep the old table intact for rolling upgrade/rollback.
+CREATE TABLE IF NOT EXISTS console_sub_account_spend_cache(
+ account_id TEXT PRIMARY KEY REFERENCES console_sub_accounts(id) ON DELETE CASCADE,
+ wanted_from BIGINT NOT NULL,wanted_to BIGINT NOT NULL,covered_from BIGINT,covered_to BIGINT,
+ scan_from BIGINT NOT NULL DEFAULT 0,scan_to BIGINT NOT NULL DEFAULT 0,page INT NOT NULL DEFAULT 1,
+ requested BOOLEAN NOT NULL DEFAULT true,checked_at BIGINT NOT NULL DEFAULT 0,
+ error TEXT NOT NULL DEFAULT '',attempts INT NOT NULL DEFAULT 0,next_attempt TIMESTAMPTZ NOT NULL DEFAULT now());
+ALTER TABLE console_sub_account_spend_cache ADD COLUMN IF NOT EXISTS page_size INT NOT NULL DEFAULT 1000;
+CREATE INDEX IF NOT EXISTS console_sub_account_spend_due ON console_sub_account_spend_cache(next_attempt) WHERE requested;
+INSERT INTO console_sub_account_spend_cache(account_id,wanted_from,wanted_to)
+ SELECT account_id,min(wanted_from),max(wanted_to) FROM console_sub_spend_cache GROUP BY account_id
+ ON CONFLICT(account_id) DO NOTHING;
 CREATE INDEX IF NOT EXISTS console_sub_usage_pending ON console_sub_usage(account_id,next_attempt,key_id) WHERE status='pending';
 CREATE INDEX IF NOT EXISTS console_sub_accounts_owner ON console_sub_accounts(owner);
 CREATE TABLE IF NOT EXISTS console_sub_auth_locks(

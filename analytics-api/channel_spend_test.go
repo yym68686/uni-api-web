@@ -128,7 +128,7 @@ func TestAttributedSpendFetchesMissingReceiptWithoutAnyInferenceCall(t *testing.
 	}
 	old := subHTTP
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "GET" || r.URL.Path != "/api/v1/usage" || r.URL.Query().Get("api_key_id") != "42" {
+		if r.Method != "GET" || r.URL.Path != "/api/v1/usage" || r.URL.Query().Get("api_key_id") != "" {
 			t.Error("unexpected or billable request", r.Method, r.URL.Path)
 		}
 		log := spendLog(1, now.Add(-30*time.Second), "0.37")
@@ -256,7 +256,7 @@ func TestAttributedSpendSurfacesLedgerFailure(t *testing.T) {
 	if _, e := s.attributedChannelSpend(context.Background(), owner, f, now.Add(-time.Hour).Unix(), now.Unix()); e != nil {
 		t.Fatal(e)
 	}
-	if _, e := s.control.db.Exec(`UPDATE console_sub_spend_cache SET error='not available' WHERE account_id=$1`, account); e != nil {
+	if _, e := s.control.db.Exec(`UPDATE console_sub_account_spend_cache SET error='not available' WHERE account_id=$1`, account); e != nil {
 		t.Fatal(e)
 	}
 	rows, e := s.attributedChannelSpend(context.Background(), owner, f, now.Add(-time.Hour).Unix(), now.Unix())

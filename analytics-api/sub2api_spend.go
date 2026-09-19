@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log"
 	"math"
 	"net/http"
 	"net/url"
@@ -39,7 +40,7 @@ func (s *Service) subChannelSpend(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "渠道不存在", 404)
 		return
 	}
-	s.subSpendForKey(w, r, account, group, key, created)
+	s.subSpendForKey(w, r, account, key, created)
 }
 
 func (s *Service) subAccountKeySpend(w http.ResponseWriter, r *http.Request) {
@@ -77,10 +78,10 @@ func (s *Service) subAccountKeySpend(w http.ResponseWriter, r *http.Request) {
 	if created.Valid {
 		since = created.Time
 	}
-	s.subSpendForKey(w, r, account, 0, key, since)
+	s.subSpendForKey(w, r, account, key, since)
 }
 
-func (s *Service) subSpendForKey(w http.ResponseWriter, r *http.Request, account string, group, key int64, created time.Time) {
+func (s *Service) subSpendForKey(w http.ResponseWriter, r *http.Request, account string, key int64, created time.Time) {
 	ctx := r.Context()
 	to := time.Now().UTC().Truncate(time.Second)
 	if raw := r.URL.Query().Get("to"); raw != "" {
@@ -118,9 +119,7 @@ func (s *Service) subSpendForKey(w http.ResponseWriter, r *http.Request, account
 		writeJSON(w, 200, out)
 		return
 	}
-	_, err = s.control.db.ExecContext(ctx, `INSERT INTO console_sub_spend_cache(account_id,key_id,group_id,wanted_from,wanted_to) VALUES($1,$2,$3,$4,$5)
- ON CONFLICT(account_id,key_id) DO UPDATE SET wanted_from=least(console_sub_spend_cache.wanted_from,excluded.wanted_from),wanted_to=greatest(console_sub_spend_cache.wanted_to,excluded.wanted_to),
- requested=console_sub_spend_cache.requested OR console_sub_spend_cache.covered_from IS NULL OR console_sub_spend_cache.covered_from>excluded.wanted_from OR console_sub_spend_cache.covered_to<excluded.wanted_to OR console_sub_spend_cache.checked_at<$6`, account, key, group, wantedFrom, wantedTo, time.Now().Add(-time.Minute).UnixMilli())
+	err = s.queueAccountSpendWindow(ctx, account, wantedFrom, wantedTo)
 	if err != nil {
 		http.Error(w, "账单查询暂不可用", 503)
 		return
@@ -129,7 +128,7 @@ func (s *Service) subSpendForKey(w http.ResponseWriter, r *http.Request, account
 	var checked int64
 	var message string
 	var requested bool
-	err = s.control.db.QueryRowContext(ctx, `SELECT covered_from,covered_to,checked_at,error,requested FROM console_sub_spend_cache WHERE account_id=$1 AND key_id=$2`, account, key).Scan(&coveredFrom, &coveredTo, &checked, &message, &requested)
+	err = s.control.db.QueryRowContext(ctx, `SELECT covered_from,covered_to,checked_at,error,requested FROM console_sub_account_spend_cache WHERE account_id=$1`, account).Scan(&coveredFrom, &coveredTo, &checked, &message, &requested)
 	if err != nil {
 		http.Error(w, "账单状态暂不可用", 503)
 		return
@@ -158,12 +157,11 @@ func (s *Service) subSpendForKey(w http.ResponseWriter, r *http.Request, account
 }
 
 type subSpendTask struct {
-	account, base, lease   string
-	key, group             int64
-	wantedFrom, wantedTo   int64
-	coveredFrom, coveredTo sql.NullInt64
-	from, to               int64
-	page, attempts         int
+	account, base, lease     string
+	wantedFrom, wantedTo     int64
+	coveredFrom, coveredTo   sql.NullInt64
+	from, to                 int64
+	page, attempts, pageSize int
 }
 type subSpendLog struct {
 	RequestID string       `json:"request_id"`
@@ -205,7 +203,7 @@ func (s *Service) subClaimSpend(ctx context.Context) (task subSpendTask, err err
 	task.lease = randomID()
 	// Share the account read lease with probe receipt lookups: one ledger reader
 	// per site account, regardless of replicas, keys or simultaneous UI ranges.
-	err = s.control.db.QueryRowContext(ctx, `UPDATE console_sub_accounts SET usage_lease_token=$1,usage_lease_until=now()+interval '30 seconds' WHERE id=(SELECT a.id FROM console_sub_accounts a WHERE (a.usage_lease_until IS NULL OR a.usage_lease_until<now()) AND EXISTS(SELECT 1 FROM console_sub_spend_cache c WHERE c.account_id=a.id AND c.requested AND c.next_attempt<=now()) ORDER BY a.created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING id,base`, task.lease).Scan(&task.account, &task.base)
+	err = s.control.db.QueryRowContext(ctx, `UPDATE console_sub_accounts SET usage_lease_token=$1,usage_lease_until=now()+interval '30 seconds' WHERE id=(SELECT a.id FROM console_sub_accounts a WHERE (a.usage_lease_until IS NULL OR a.usage_lease_until<now()) AND EXISTS(SELECT 1 FROM console_sub_account_spend_cache c WHERE c.account_id=a.id AND c.requested AND c.next_attempt<=now()) ORDER BY a.created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING id,base`, task.lease).Scan(&task.account, &task.base)
 	return
 }
 
@@ -233,7 +231,7 @@ func (s *Service) subScanSpend(parent context.Context, task subSpendTask) {
 		defer stop()
 		_, _ = s.control.db.ExecContext(cleanup, `UPDATE console_sub_accounts SET usage_lease_token='',usage_lease_until=NULL WHERE id=$1 AND usage_lease_token=$2`, task.account, task.lease)
 	}()
-	err := s.control.db.QueryRowContext(ctx, `SELECT key_id,group_id,wanted_from,wanted_to,covered_from,covered_to,scan_from,scan_to,page,attempts FROM console_sub_spend_cache WHERE account_id=$1 AND requested AND next_attempt<=now() ORDER BY next_attempt,key_id LIMIT 1`, task.account).Scan(&task.key, &task.group, &task.wantedFrom, &task.wantedTo, &task.coveredFrom, &task.coveredTo, &task.from, &task.to, &task.page, &task.attempts)
+	err := s.control.db.QueryRowContext(ctx, `SELECT wanted_from,wanted_to,covered_from,covered_to,scan_from,scan_to,page,attempts,page_size FROM console_sub_account_spend_cache WHERE account_id=$1 AND requested AND next_attempt<=now()`, task.account).Scan(&task.wantedFrom, &task.wantedTo, &task.coveredFrom, &task.coveredTo, &task.from, &task.to, &task.page, &task.attempts, &task.pageSize)
 	if err != nil {
 		return
 	}
@@ -244,7 +242,7 @@ func (s *Service) subScanSpend(parent context.Context, task subSpendTask) {
 			// amended costs. ON CONFLICT replaces a receipt; it never adds it twice.
 			task.from = max(task.wantedFrom, task.coveredTo.Int64-int64(24*time.Hour/time.Millisecond))
 		}
-		_, err = s.control.db.ExecContext(ctx, `UPDATE console_sub_spend_cache SET scan_from=$3,scan_to=$4,page=1 WHERE account_id=$1 AND key_id=$2 AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND usage_lease_token=$5)`, task.account, task.key, task.from, task.to, task.lease)
+		_, err = s.control.db.ExecContext(ctx, `UPDATE console_sub_account_spend_cache SET scan_from=$2,scan_to=$3,page=1 WHERE account_id=$1 AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND usage_lease_token=$4)`, task.account, task.from, task.to, task.lease)
 		if err != nil {
 			return
 		}
@@ -252,25 +250,43 @@ func (s *Service) subScanSpend(parent context.Context, task subSpendTask) {
 	// Small durable batches bound memory, response time and shutdown latency.
 	// Larger histories resume on the next turn instead of returning partial sums.
 	for range 5 {
-		q := url.Values{"api_key_id": {strconv.FormatInt(task.key, 10)}, "start_date": {time.UnixMilli(task.from).UTC().Format("2006-01-02")}, "end_date": {time.UnixMilli(task.to - 1).UTC().Format("2006-01-02")}, "timezone": {"UTC"}, "sort_by": {"created_at"}, "sort_order": {"asc"}, "page_size": {"100"}, "page": {strconv.Itoa(task.page)}}
+		q := url.Values{"start_date": {time.UnixMilli(task.from).UTC().Format("2006-01-02")}, "end_date": {time.UnixMilli(task.to - 1).UTC().Format("2006-01-02")}, "timezone": {"UTC"}, "sort_by": {"created_at"}, "sort_order": {"asc"}, "page_size": {strconv.Itoa(task.pageSize)}, "page": {strconv.Itoa(task.page)}}
 		var page subSpendPage
 		err = s.subUsageGET(ctx, task.account, task.base, "/api/v1/usage?"+q.Encode(), &page)
 		if err != nil {
+			var remote *subRemoteError
+			if task.pageSize > 100 && (errors.Is(err, errSubResponseTooLarge) || (errors.As(err, &remote) && remote.Status == 400)) {
+				// Restart this scan with smaller pages; never reuse an offset
+				// from a different page size. Existing cached receipts dedup.
+				_, _ = s.control.db.ExecContext(ctx, `UPDATE console_sub_account_spend_cache SET page=1,page_size=100,error='',next_attempt=now()+interval '2 seconds' WHERE account_id=$1 AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND usage_lease_token=$2)`, task.account, task.lease)
+				log.Printf("event=sub_account_spend_page_size_fallback account_id=%s page_size=100", task.account)
+				return
+			}
 			break
 		}
-		if page.Items == nil || (page.Page != 0 && page.Page != task.page) {
+		if page.Items == nil || (page.Page != 0 && page.Page != task.page) || (page.Pages == 0 && page.PageSize <= 0 && len(page.Items) > 0) {
 			err = errors.New("invalid pagination")
 			break
 		}
 		complete := len(page.Items) == 0 || (page.Pages > 0 && task.page >= page.Pages)
 		if page.Pages == 0 {
-			pageSize := 100
+			pageSize := task.pageSize
 			if page.PageSize > 0 {
 				pageSize = page.PageSize
 			}
 			complete = len(page.Items) < pageSize
 		}
+		if page.PageSize > 0 && page.PageSize != task.pageSize {
+			if task.page != 1 {
+				err = errors.New("invalid pagination")
+				break
+			}
+			task.pageSize = page.PageSize
+		}
 		err = s.subStoreSpendPage(ctx, task, page, complete)
+		if err == nil {
+			log.Printf("event=sub_account_spend_page account_id=%s page=%d page_size=%d rows=%d complete=%t", task.account, task.page, task.pageSize, len(page.Items), complete)
+		}
 		if err != nil || complete {
 			break
 		}
@@ -280,7 +296,7 @@ func (s *Service) subScanSpend(parent context.Context, task subSpendTask) {
 		message := "站点账单暂不可用，稍后自动重试"
 		var remote *subRemoteError
 		if errors.As(err, &remote) && (remote.Status == 403 || remote.Status == 404) {
-			message = "站点未开放业务 Key 的账单查询"
+			message = "站点未开放账号账单查询"
 		}
 		if err.Error() == "incomplete receipt" || err.Error() == "invalid pagination" {
 			message = "站点账单缺少有效时间、金额或分页信息，无法确认消费"
@@ -288,7 +304,8 @@ func (s *Service) subScanSpend(parent context.Context, task subSpendTask) {
 		saveCtx, stop := context.WithTimeout(parent, 3*time.Second)
 		defer stop()
 		delay := min(300, 5*(1<<min(task.attempts, 6)))
-		_, _ = s.control.db.ExecContext(saveCtx, `UPDATE console_sub_spend_cache SET error=$3,attempts=attempts+1,next_attempt=now()+$4*interval '1 second' WHERE account_id=$1 AND key_id=$2 AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND usage_lease_token=$5)`, task.account, task.key, message, delay, task.lease)
+		_, _ = s.control.db.ExecContext(saveCtx, `UPDATE console_sub_account_spend_cache SET error=$2,attempts=attempts+1,next_attempt=now()+$3*interval '1 second' WHERE account_id=$1 AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND usage_lease_token=$4)`, task.account, message, delay, task.lease)
+		log.Printf("event=sub_account_spend_retry account_id=%s page=%d delay_seconds=%d reason=%q", task.account, task.page, delay, message)
 	}
 }
 
@@ -305,37 +322,55 @@ func (s *Service) subStoreSpendPage(ctx context.Context, task subSpendTask, page
 	if !valid {
 		return context.Canceled
 	}
-	for _, log := range page.Items {
-		// Never accept an account-wide total when a site ignores the key filter.
-		if log.KeyID != task.key {
-			continue
-		}
-		if task.group > 0 && log.GroupID != nil && *log.GroupID != task.group {
-			continue
-		}
-		at, parseErr := time.Parse(time.RFC3339Nano, log.At)
-		if parseErr != nil || log.ID <= 0 || log.Cost == nil {
+	// Preserve each record's key so one account download serves every channel.
+	// This is the same immutable row identity used by the earlier per-key cache.
+	unique := map[string]map[string]any{}
+	for _, record := range page.Items {
+		at, parseErr := time.Parse(time.RFC3339Nano, record.At)
+		if parseErr != nil || record.ID <= 0 || record.KeyID <= 0 || record.Cost == nil {
 			return errors.New("incomplete receipt")
 		}
-		cost, parseErr := log.Cost.Float64()
+		cost, parseErr := record.Cost.Float64()
 		if parseErr != nil || math.IsNaN(cost) || math.IsInf(cost, 0) || cost < 0 {
 			return errors.New("incomplete receipt")
 		}
 		if at.UnixMilli() < task.from || at.UnixMilli() >= task.to {
 			continue
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO console_sub_spend_logs(account_id,key_id,log_id,at_ms,actual_cost,request_id,model,stream,inbound_endpoint) VALUES($1,$2,$3,$4,$5::numeric,$6,$7,$8,$9) ON CONFLICT(account_id,key_id,log_id) DO UPDATE SET at_ms=excluded.at_ms,actual_cost=excluded.actual_cost,request_id=excluded.request_id,model=excluded.model,stream=excluded.stream,inbound_endpoint=excluded.inbound_endpoint`, task.account, task.key, log.ID, at.UnixMilli(), log.Cost.String(), log.RequestID, log.Model, log.Stream, log.Endpoint)
-		if err != nil {
-			return err
+		unique[strconv.FormatInt(record.KeyID, 10)+":"+strconv.FormatInt(record.ID, 10)] = map[string]any{
+			"key_id": record.KeyID, "log_id": record.ID, "at_ms": at.UnixMilli(), "actual_cost": record.Cost.String(),
+			"request_id": record.RequestID, "model": record.Model, "stream": record.Stream, "inbound_endpoint": record.Endpoint,
 		}
 	}
+	entries := make([]map[string]any, 0, len(unique))
+	for _, entry := range unique {
+		entries = append(entries, entry)
+	}
+	raw, err := json.Marshal(entries)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO console_sub_spend_logs(account_id,key_id,log_id,at_ms,actual_cost,request_id,model,stream,inbound_endpoint)
+ SELECT $1,r.key_id,r.log_id,r.at_ms,r.actual_cost,r.request_id,r.model,r.stream,r.inbound_endpoint
+ FROM jsonb_to_recordset($2::jsonb) AS r(key_id bigint,log_id bigint,at_ms bigint,actual_cost numeric,request_id text,model text,stream boolean,inbound_endpoint text)
+ ON CONFLICT(account_id,key_id,log_id) DO UPDATE SET at_ms=excluded.at_ms,actual_cost=excluded.actual_cost,request_id=excluded.request_id,model=excluded.model,stream=excluded.stream,inbound_endpoint=excluded.inbound_endpoint`, task.account, string(raw))
+	if err != nil {
+		return err
+	}
 	if complete {
-		_, err = tx.ExecContext(ctx, `UPDATE console_sub_spend_cache SET covered_from=least(coalesce(covered_from,$3),$3),covered_to=greatest(coalesce(covered_to,$4),$4),scan_from=0,scan_to=0,page=1,checked_at=$5,error='',attempts=0,next_attempt=now(),requested=wanted_from<least(coalesce(covered_from,$3),$3) OR wanted_to>greatest(coalesce(covered_to,$4),$4) WHERE account_id=$1 AND key_id=$2`, task.account, task.key, task.from, task.to, time.Now().UnixMilli())
+		_, err = tx.ExecContext(ctx, `UPDATE console_sub_account_spend_cache SET covered_from=least(coalesce(covered_from,$2),$2),covered_to=greatest(coalesce(covered_to,$3),$3),scan_from=0,scan_to=0,page=1,checked_at=$4,error='',attempts=0,next_attempt=now(),requested=wanted_from<least(coalesce(covered_from,$2),$2) OR wanted_to>greatest(coalesce(covered_to,$3),$3),page_size=$5 WHERE account_id=$1`, task.account, task.from, task.to, time.Now().UnixMilli(), task.pageSize)
 	} else {
-		_, err = tx.ExecContext(ctx, `UPDATE console_sub_spend_cache SET page=$3,error='',attempts=0,next_attempt=now()+interval '2 seconds' WHERE account_id=$1 AND key_id=$2`, task.account, task.key, task.page+1)
+		_, err = tx.ExecContext(ctx, `UPDATE console_sub_account_spend_cache SET page=$2,page_size=$3,error='',attempts=0,next_attempt=now()+interval '2 seconds' WHERE account_id=$1`, task.account, task.page+1, task.pageSize)
 	}
 	if err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+func (s *Service) queueAccountSpendWindow(ctx context.Context, account string, from, to int64) error {
+	_, err := s.control.db.ExecContext(ctx, `INSERT INTO console_sub_account_spend_cache(account_id,wanted_from,wanted_to) VALUES($1,$2,$3)
+ ON CONFLICT(account_id) DO UPDATE SET wanted_from=least(console_sub_account_spend_cache.wanted_from,excluded.wanted_from),wanted_to=greatest(console_sub_account_spend_cache.wanted_to,excluded.wanted_to),
+ requested=console_sub_account_spend_cache.requested OR console_sub_account_spend_cache.covered_from IS NULL OR console_sub_account_spend_cache.covered_from>excluded.wanted_from OR console_sub_account_spend_cache.covered_to<excluded.wanted_to OR console_sub_account_spend_cache.checked_at<$4`, account, from, to, time.Now().Add(-time.Minute).UnixMilli())
+	return err
 }

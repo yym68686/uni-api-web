@@ -92,6 +92,8 @@ func (e *subRemoteError) Error() string {
 	}
 }
 
+var errSubResponseTooLarge = errors.New("站点响应过大或读取失败")
+
 // Never forward upstream error messages: they may echo passwords or API keys.
 func subJSON(ctx context.Context, client *http.Client, base, method, path, token string, body any, out any, idempotency string) error {
 	var buf io.Reader
@@ -120,8 +122,11 @@ func subJSON(ctx context.Context, client *http.Client, base, method, path, token
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, (4<<20)+1))
-	if err != nil || len(raw) > 4<<20 {
+	if err != nil {
 		return errors.New("站点响应过大或读取失败")
+	}
+	if len(raw) > 4<<20 {
+		return errSubResponseTooLarge
 	}
 	var envelope struct {
 		Code   int             `json:"code"`

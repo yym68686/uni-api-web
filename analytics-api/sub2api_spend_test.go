@@ -63,7 +63,7 @@ func withSpendUpstream(t *testing.T, h http.Handler) {
 func runSpendBatch(t *testing.T, s *Service, account string) {
 	t.Helper()
 	// Advance the bounded batch backoff without sleeping in tests.
-	s.control.db.Exec(`UPDATE console_sub_spend_cache SET next_attempt=now() WHERE account_id=$1`, account)
+	s.control.db.Exec(`UPDATE console_sub_account_spend_cache SET next_attempt=now() WHERE account_id=$1`, account)
 	task, err := s.subClaimSpend(context.Background())
 	if err != nil || task.account != account {
 		t.Fatal(task.account, err)
@@ -83,7 +83,7 @@ func TestSubSpendUsesBusinessKeyExactWindowAndDecimalTotals(t *testing.T) {
 	logs[4].KeyID = 99 // the probe key must never enter business consumption
 	withSpendUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
-		if r.URL.Path != "/api/v1/usage" || r.URL.Query().Get("api_key_id") != "42" || r.URL.Query().Get("timezone") != "UTC" {
+		if r.URL.Path != "/api/v1/usage" || r.URL.Query().Get("api_key_id") != "" || r.URL.Query().Get("timezone") != "UTC" {
 			t.Error("wrong bill scope", r.URL.Path, r.URL.RawQuery)
 		}
 		writeJSON(w, 200, map[string]any{"code": 0, "data": subSpendPage{Items: logs, Page: 1, Pages: 1, PageSize: 100}})
@@ -115,7 +115,7 @@ func TestSubSpendUsesBusinessKeyExactWindowAndDecimalTotals(t *testing.T) {
 	// Corrections replace the existing receipt, including when re-reading a
 	// complete interval after a refresh; they do not add a second copy.
 	logs[2] = spendLog(3, from.Add(20*time.Minute), "0.4")
-	s.control.db.Exec(`UPDATE console_sub_spend_cache SET checked_at=0 WHERE account_id=$1`, account)
+	s.control.db.Exec(`UPDATE console_sub_account_spend_cache SET checked_at=0 WHERE account_id=$1`, account)
 	if out = request("1h", to); out.Status != "complete" || !out.Refreshing {
 		t.Fatal(out)
 	}
@@ -149,7 +149,7 @@ func TestSubSpendResumesLargeHistoryWithoutPublishingPartialSums(t *testing.T) {
 		t.Fatal("partial money exposed", out)
 	}
 	var next int
-	s.control.db.QueryRow(`SELECT page FROM console_sub_spend_cache WHERE account_id=$1`, account).Scan(&next)
+	s.control.db.QueryRow(`SELECT page FROM console_sub_account_spend_cache WHERE account_id=$1`, account).Scan(&next)
 	if next != 3 {
 		t.Fatal("failed page checkpoint lost", next)
 	}
@@ -164,7 +164,7 @@ func TestSubSpendResumesLargeHistoryWithoutPublishingPartialSums(t *testing.T) {
 }
 
 func TestSubSpendRejectsIncompleteLedgersAndForeignOwners(t *testing.T) {
-	for _, kind := range []string{"missing_items", "missing_cost", "bad_time"} {
+	for _, kind := range []string{"missing_items", "missing_cost", "bad_time", "missing_key", "missing_pagination"} {
 		t.Run(kind, func(t *testing.T) {
 			s, account, owner, request := spendTestService(t)
 			to := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
@@ -177,6 +177,11 @@ func TestSubSpendRejectsIncompleteLedgersAndForeignOwners(t *testing.T) {
 					body.Items[0].Cost = nil
 				case "bad_time":
 					body.Items[0].At = "not-a-date"
+				case "missing_key":
+					body.Items[0].KeyID = 0
+				case "missing_pagination":
+					body.Pages = 0
+					body.PageSize = 0
 				}
 				writeJSON(w, 200, map[string]any{"code": 0, "data": body})
 			}))
@@ -244,5 +249,159 @@ func TestSubSpendAndReceiptReadersShareAccountLease(t *testing.T) {
 	s.control.db.Exec(`UPDATE console_sub_accounts SET usage_lease_token='',usage_lease_until=NULL WHERE id=$1 AND usage_lease_token=$2`, account, lease)
 	if _, _, _, err = s.subClaimUsage(ctx); err == nil {
 		t.Fatal("stale worker unlocked replacement")
+	}
+}
+
+func TestAccountSpendOneDownloadServesMultipleKeysAndPreciseAttribution(t *testing.T) {
+	s, account, owner := attributionFixture(t)
+	now := time.Now().Truncate(time.Second)
+	from, to := now.Add(-time.Hour).Unix(), now.Unix()
+	_, err := s.control.db.Exec(`INSERT INTO console_sub_key_index(account_id,key_hash,remote_key_id,group_id) VALUES($1,$2,43,8)`, account, tokenHash("second-secret"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := attributedFact("one", "caller-a", now.Add(-time.Minute))
+	b := attributedFact("two", "caller-b", now.Add(-time.Minute))
+	b.UpstreamKeyHash = tokenHash("second-secret")
+	if err = s.engine.Import(context.Background(), "multi-key", "v1", []Fact{a, b}); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"caller-a", "caller-b"} {
+		if _, err = s.attributedChannelSpend(context.Background(), owner, QueryFilter{KeyID: key}, from, to); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var count int
+	s.control.db.QueryRow(`SELECT count(*) FROM console_sub_account_spend_cache WHERE account_id=$1`, account).Scan(&count)
+	if count != 1 {
+		t.Fatal("per-key cursors remain", count)
+	}
+	calls := 0
+	withSpendUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		q := r.URL.Query()
+		if q.Has("api_key_id") || q.Has("group_id") || q.Get("page_size") != "1000" {
+			t.Error("not an account download", r.URL.RawQuery)
+		}
+		first := spendLog(1, now.Add(-time.Minute), "0.1")
+		first.RequestID = "client:one"
+		second := spendLog(2, now.Add(-time.Minute), "0.2")
+		second.KeyID = 43
+		second.GroupID = usageInt(8)
+		second.RequestID = "client:two"
+		// Other caller's logs are cached but not assigned to our two requests.
+		other := spendLog(3, now.Add(-time.Minute), "900")
+		other.KeyID = 99
+		other.RequestID = "client:unrelated"
+		writeJSON(w, 200, map[string]any{"code": 0, "data": subSpendPage{Items: []subSpendLog{first, second, other}, Page: 1, Pages: 1, PageSize: 1000}})
+	}))
+	runSpendBatch(t, s, account)
+	for key, want := range map[string]float64{"caller-a": .1, "caller-b": .2} {
+		rs, e := s.attributedChannelSpend(context.Background(), owner, QueryFilter{KeyID: key}, from, to)
+		if e != nil || len(rs) != 1 || rs[0].Amount == nil || *rs[0].Amount != want {
+			t.Fatal(key, rs, e)
+		}
+	}
+	if calls != 1 {
+		t.Fatal("same account downloaded for each caller", calls)
+	}
+	if _, e := s.subClaimSpend(context.Background()); e == nil {
+		t.Fatal("complete shared cache unnecessarily queued")
+	}
+	s.control.db.QueryRow(`SELECT count(*) FROM console_sub_spend_logs WHERE account_id=$1`, account).Scan(&count)
+	if count != 3 {
+		t.Fatal("did not retain other account keys", count)
+	}
+}
+
+func TestAccountSpendMigrationKeepsReceiptsButNeverClaimsAccountCoverage(t *testing.T) {
+	s, account, _ := subUsageTestService(t)
+	_, err := s.control.db.Exec(`INSERT INTO console_sub_spend_cache(account_id,key_id,group_id,wanted_from,wanted_to,covered_from,covered_to,requested,checked_at) VALUES($1,42,7,100,200,100,200,false,200),($1,43,8,50,300,50,300,false,300)`, account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.control.db.Exec(subSchema); err != nil {
+		t.Fatal(err)
+	}
+	var from, to int64
+	var covered bool
+	if err = s.control.db.QueryRow(`SELECT wanted_from,wanted_to,covered_from IS NOT NULL OR covered_to IS NOT NULL FROM console_sub_account_spend_cache WHERE account_id=$1`, account).Scan(&from, &to, &covered); err != nil || from != 50 || to != 300 || covered {
+		t.Fatal(from, to, covered, err)
+	}
+	s.control.db.Exec(`UPDATE console_sub_account_spend_cache SET page=6,scan_from=50,scan_to=300 WHERE account_id=$1`, account)
+	if _, err = s.control.db.Exec(subSchema); err != nil {
+		t.Fatal(err)
+	}
+	var page int
+	s.control.db.QueryRow(`SELECT page FROM console_sub_account_spend_cache WHERE account_id=$1`, account).Scan(&page)
+	if page != 6 {
+		t.Fatal("restart reset cursor", page)
+	}
+}
+
+func TestAccountSpendClampedPageSizeAndExpandedWindowSurviveResume(t *testing.T) {
+	s, account, _, request := spendTestService(t)
+	to := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
+	calls := 0
+	withSpendUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		page, _ := strconv.Atoi(q.Get("page"))
+		calls++
+		if page > 1 && q.Get("page_size") != "100" {
+			t.Error("changed offset after server clamp", q)
+		}
+		if page == 1 {
+			if err := s.queueAccountSpendWindow(context.Background(), account, to.Add(-2*time.Hour).UnixMilli(), to.UnixMilli()); err != nil {
+				t.Error(err)
+			}
+		}
+		item := spendLog(int64(page), to.Add(-time.Minute), "0.1")
+		writeJSON(w, 200, map[string]any{"code": 0, "data": subSpendPage{Items: []subSpendLog{item}, Page: page, Pages: 6, PageSize: 100}})
+	}))
+	request("1h", to)
+	runSpendBatch(t, s, account)
+	var next, size int
+	s.control.db.QueryRow(`SELECT page,page_size FROM console_sub_account_spend_cache WHERE account_id=$1`, account).Scan(&next, &size)
+	if next != 6 || size != 100 {
+		t.Fatal(next, size)
+	}
+	runSpendBatch(t, &Service{control: s.control}, account)
+	out := request("2h", to)
+	if out.Status == "complete" {
+		t.Fatal("window extension lost", out)
+	}
+	if calls != 6 {
+		t.Fatal("did not resume", calls)
+	}
+	runSpendBatch(t, s, account)
+	runSpendBatch(t, s, account)
+	if out = request("2h", to); out.Status != "complete" || out.Amount == nil || math.Abs(*out.Amount-.6) > 1e-9 {
+		t.Fatal(out)
+	}
+}
+
+func TestAccountSpendLargeResponseFallsBackWithoutSkippingOffsets(t *testing.T) {
+	s, account, _, request := spendTestService(t)
+	to := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
+	withSpendUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("page_size") == "1000" {
+			w.Write([]byte(strings.Repeat("x", (4<<20)+1)))
+			return
+		}
+		if r.URL.Query().Get("page") != "1" || r.URL.Query().Get("page_size") != "100" {
+			t.Error(r.URL.RawQuery)
+		}
+		writeJSON(w, 200, map[string]any{"code": 0, "data": subSpendPage{Items: []subSpendLog{spendLog(1, to.Add(-time.Minute), "0.4")}, Page: 1, Pages: 1, PageSize: 100}})
+	}))
+	request("1h", to)
+	runSpendBatch(t, s, account)
+	var page, size int
+	s.control.db.QueryRow(`SELECT page,page_size FROM console_sub_account_spend_cache WHERE account_id=$1`, account).Scan(&page, &size)
+	if page != 1 || size != 100 {
+		t.Fatal(page, size)
+	}
+	runSpendBatch(t, &Service{control: s.control}, account)
+	if out := request("1h", to); out.Status != "complete" || out.Amount == nil || *out.Amount != .4 {
+		t.Fatal(out)
 	}
 }

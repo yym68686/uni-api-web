@@ -58,7 +58,6 @@ type billingFact struct {
 func billingRowID(source, provider, model, upstream string) string {
 	return mustJSON([]string{source, provider, model, upstream})
 }
-func receiptScopeID(s receiptScope) string { return s.Account + ":" + strconv.FormatInt(s.Key, 10) }
 func receiptIdentity(account string, key int64, id string) string {
 	return account + ":" + strconv.FormatInt(key, 10) + ":" + id
 }
@@ -204,7 +203,6 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 	if err != nil {
 		return nil, err
 	}
-	scopes := map[string]receiptScope{}
 	windows := map[string][2]int64{}
 	selectedBindings := map[string]receiptScope{}
 	ids := map[string]bool{}
@@ -233,8 +231,7 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 		}
 		scope := matches[0]
 		selectedBindings[b.Event] = scope
-		key := receiptScopeID(scope)
-		scopes[key] = scope
+		key := scope.Account
 		accounts[scope.Account] = true
 		window, exists := windows[key]
 		lo := min(b.Started, b.At) - 60000
@@ -242,15 +239,15 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 			window = [2]int64{max(0, lo), min(time.Now().UnixMilli(), max(to*1000, b.At+60000))}
 		} else {
 			window[0] = min(window[0], max(0, lo))
+			window[1] = max(window[1], min(time.Now().UnixMilli(), max(to*1000, b.At+60000)))
 		}
 		windows[key] = window
 		for _, id := range b.IDs {
 			ids[id] = true
 		}
 	}
-	for key, scope := range scopes {
-		window := windows[key]
-		if err = s.queueReceiptWindow(ctx, scope, window[0], window[1]); err != nil {
+	for account, window := range windows {
+		if err = s.queueAccountSpendWindow(ctx, account, window[0], window[1]); err != nil {
 			return nil, err
 		}
 	}
@@ -313,12 +310,12 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 		}
 	}
 	syncErrors := map[string]bool{}
-	for key, scope := range scopes {
+	for account := range accounts {
 		var failed bool
-		if err = s.control.db.QueryRowContext(ctx, `SELECT error<>'' FROM console_sub_spend_cache WHERE account_id=$1 AND key_id=$2`, scope.Account, scope.Key).Scan(&failed); err != nil {
+		if err = s.control.db.QueryRowContext(ctx, `SELECT error<>'' FROM console_sub_account_spend_cache WHERE account_id=$1`, account).Scan(&failed); err != nil {
 			return nil, err
 		}
-		syncErrors[key] = failed
+		syncErrors[account] = failed
 	}
 	rowErrors := map[string]bool{}
 	claimed := map[string]string{}
@@ -343,7 +340,7 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 			continue
 		}
 		if len(found) == 0 {
-			if syncErrors[receiptScopeID(scope)] {
+			if syncErrors[scope.Account] {
 				rowErrors[billingRowID(b.Source, b.Provider, b.Model, b.Upstream)] = true
 			}
 			continue
@@ -445,8 +442,4 @@ func (s *Service) receiptBindings(ctx context.Context, owner string) (map[string
 		add(base, tokenHash(secret), receiptScope{Account: account, Key: key, Group: group})
 	}
 	return out, rows.Err()
-}
-func (s *Service) queueReceiptWindow(ctx context.Context, scope receiptScope, from, to int64) error {
-	_, err := s.control.db.ExecContext(ctx, `INSERT INTO console_sub_spend_cache(account_id,key_id,group_id,wanted_from,wanted_to) VALUES($1,$2,$3,$4,$5) ON CONFLICT(account_id,key_id) DO UPDATE SET wanted_from=least(console_sub_spend_cache.wanted_from,excluded.wanted_from),wanted_to=greatest(console_sub_spend_cache.wanted_to,excluded.wanted_to),requested=console_sub_spend_cache.requested OR console_sub_spend_cache.covered_from IS NULL OR console_sub_spend_cache.covered_from>excluded.wanted_from OR console_sub_spend_cache.covered_to<excluded.wanted_to OR console_sub_spend_cache.checked_at<$6`, scope.Account, scope.Key, scope.Group, from, to, time.Now().Add(-time.Minute).UnixMilli())
-	return err
 }

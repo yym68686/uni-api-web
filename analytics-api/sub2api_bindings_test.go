@@ -206,12 +206,12 @@ func TestConfiguredSpendUsesActualExistingKeyAndIncludesPreConsoleHistory(t *tes
 		t.Fatal(w.Code, w.Body.String())
 	}
 	var from int64
-	s.control.db.QueryRow(`SELECT wanted_from FROM console_sub_spend_cache WHERE account_id=$1 AND key_id=42`, account).Scan(&from)
+	s.control.db.QueryRow(`SELECT wanted_from FROM console_sub_account_spend_cache WHERE account_id=$1`, account).Scan(&from)
 	if from != time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC).UnixMilli() {
 		t.Fatal("existing key history truncated", from)
 	}
 	withSpendUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/usage" || r.URL.Query().Get("api_key_id") != "42" {
+		if r.URL.Path != "/api/v1/usage" || r.URL.Query().Get("api_key_id") != "" {
 			t.Error("wrong account key", r.URL.Path)
 		}
 		record := spendLog(123, to.Add(-24*time.Hour), "1.25")
