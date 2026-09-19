@@ -57,6 +57,7 @@ func OpenEngine(path string, cfg Config) (*Engine, error) {
       ALTER TABLE facts ADD COLUMN IF NOT EXISTS upstream_base VARCHAR;
       ALTER TABLE facts ADD COLUMN IF NOT EXISTS upstream_key_hash VARCHAR;
       ALTER TABLE facts ADD COLUMN IF NOT EXISTS billing_request_ids VARCHAR[];
+      ALTER TABLE facts ADD COLUMN IF NOT EXISTS upstream_error_sha256 VARCHAR;
       ALTER TABLE facts ADD COLUMN IF NOT EXISTS response_created_ms DOUBLE;
       ALTER TABLE facts ADD COLUMN IF NOT EXISTS first_text_ms DOUBLE;
       ALTER TABLE rollups ADD COLUMN IF NOT EXISTS created_bins BIGINT[];
@@ -97,6 +98,9 @@ func validFact(f Fact) error {
 		if id == "" || len(id) > 256 {
 			return errors.New("invalid receipt identifier")
 		}
+	}
+	if f.UpstreamErrorSHA256 != "" && !validErrorDigest(f.UpstreamErrorSHA256) {
+		return errors.New("invalid upstream error digest")
 	}
 	for _, v := range []*int64{f.InputTokens, f.OutputTokens, f.CacheReadTokens, f.CacheWriteTokens, f.CacheWrite1hTokens} {
 		if v != nil && *v < 0 {
@@ -209,7 +213,7 @@ func (e *Engine) ImportBatch(ctx context.Context, objects []FactObject) error {
 	}
 	defer tx.Rollback()
 	if factCount > 0 {
-		_, err = tx.ExecContext(ctx, `INSERT INTO facts BY NAME SELECT event_id,kind,source_id,instance_id,request_id,attempt_id,at_ms,started_ms,key_id,provider,model,upstream_model,endpoint,stream,outcome,status,duration_ms,dispatch_ms,first_output_ms,response_created_ms,first_text_ms,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,cache_write_1h_tokens,actual_cost_usd,upstream_base,upstream_key_hash,billing_request_ids FROM read_json(?,format='newline_delimited',columns={schema:'INTEGER',event_id:'VARCHAR',kind:'VARCHAR',source_id:'VARCHAR',instance_id:'VARCHAR',request_id:'VARCHAR',attempt_id:'VARCHAR',at_ms:'BIGINT',started_ms:'BIGINT',key_id:'VARCHAR',provider:'VARCHAR',model:'VARCHAR',upstream_model:'VARCHAR',endpoint:'VARCHAR',stream:'BOOLEAN',outcome:'VARCHAR',status:'INTEGER',duration_ms:'DOUBLE',dispatch_ms:'DOUBLE',first_output_ms:'DOUBLE',response_created_ms:'DOUBLE',first_text_ms:'DOUBLE',input_tokens:'BIGINT',output_tokens:'BIGINT',cache_read_tokens:'BIGINT',cache_write_tokens:'BIGINT',cache_write_1h_tokens:'BIGINT',actual_cost_usd:'DOUBLE',upstream_base:'VARCHAR',upstream_key_hash:'VARCHAR',billing_request_ids:'VARCHAR[]'}) ON CONFLICT DO NOTHING`, file.Name())
+		_, err = tx.ExecContext(ctx, `INSERT INTO facts BY NAME SELECT event_id,kind,source_id,instance_id,request_id,attempt_id,at_ms,started_ms,key_id,provider,model,upstream_model,endpoint,stream,outcome,status,duration_ms,dispatch_ms,first_output_ms,response_created_ms,first_text_ms,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,cache_write_1h_tokens,actual_cost_usd,upstream_base,upstream_key_hash,billing_request_ids,upstream_error_sha256 FROM read_json(?,format='newline_delimited',columns={schema:'INTEGER',event_id:'VARCHAR',kind:'VARCHAR',source_id:'VARCHAR',instance_id:'VARCHAR',request_id:'VARCHAR',attempt_id:'VARCHAR',at_ms:'BIGINT',started_ms:'BIGINT',key_id:'VARCHAR',provider:'VARCHAR',model:'VARCHAR',upstream_model:'VARCHAR',endpoint:'VARCHAR',stream:'BOOLEAN',outcome:'VARCHAR',status:'INTEGER',duration_ms:'DOUBLE',dispatch_ms:'DOUBLE',first_output_ms:'DOUBLE',response_created_ms:'DOUBLE',first_text_ms:'DOUBLE',input_tokens:'BIGINT',output_tokens:'BIGINT',cache_read_tokens:'BIGINT',cache_write_tokens:'BIGINT',cache_write_1h_tokens:'BIGINT',actual_cost_usd:'DOUBLE',upstream_base:'VARCHAR',upstream_key_hash:'VARCHAR',billing_request_ids:'VARCHAR[]',upstream_error_sha256:'VARCHAR'}) ON CONFLICT DO NOTHING`, file.Name())
 		if err != nil {
 			return err
 		}

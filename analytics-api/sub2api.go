@@ -40,6 +40,13 @@ ALTER TABLE console_sub_spend_logs ADD COLUMN IF NOT EXISTS stream BOOLEAN;
 ALTER TABLE console_sub_spend_logs ADD COLUMN IF NOT EXISTS inbound_endpoint TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS console_sub_spend_request ON console_sub_spend_logs(account_id,key_id,request_id);
 CREATE INDEX IF NOT EXISTS console_sub_spend_time ON console_sub_spend_logs(account_id,key_id,at_ms);
+-- An audited supplement for old immutable facts recovered from retained gateway
+-- logs. No inferred amounts or raw error bodies are stored here.
+CREATE TABLE IF NOT EXISTS console_billing_error_evidence(
+ source_id TEXT NOT NULL,event_id TEXT NOT NULL,request_id TEXT NOT NULL,attempt_id TEXT NOT NULL,
+ provider TEXT NOT NULL,status INT NOT NULL,error_sha256 TEXT NOT NULL CHECK(error_sha256 ~ '^[0-9a-f]{64}$'),
+ log_sha256 TEXT NOT NULL CHECK(log_sha256 ~ '^[0-9a-f]{64}$'),
+ provenance TEXT NOT NULL,recorded_at TIMESTAMPTZ NOT NULL DEFAULT now(),PRIMARY KEY(source_id,event_id));
 CREATE TABLE IF NOT EXISTS console_sub_spend_cache(
  account_id TEXT NOT NULL REFERENCES console_sub_accounts(id) ON DELETE CASCADE,
  key_id BIGINT NOT NULL, group_id BIGINT NOT NULL,

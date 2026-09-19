@@ -36,6 +36,32 @@ const receipt: SubChannelSpend = {
   key_id: 42,
   scope: "sub2api_business_key",
 };
+it("counts proven balance rejections as reconciled without inventing a bill", async () => {
+  const data: SubChannelSpend = {
+    ...receipt,
+    scope: "matched_requests",
+    status: "complete",
+    actual_cost_usd: 1.25,
+    total_attempts: 40,
+    matched_attempts: 1,
+    confirmed_unbilled_attempts: 39,
+  };
+  render(
+    <Tooltip.Provider>
+      <SubChannelSpendValue
+        query={{ data, isPending: false, isError: false }}
+      />
+    </Tooltip.Provider>,
+  );
+  const amount = screen.getByText("$1.25");
+  expect(screen.queryByText(/部分/)).not.toBeInTheDocument();
+  fireEvent.focus(amount.closest(".tip-target")!);
+  const tip = await screen.findByRole("tooltip");
+  expect(tip).toHaveTextContent("已核对 40/40");
+  expect(tip).toHaveTextContent(
+    "39 次经错误响应确认在模型调用前因余额不足被拒绝，消费为零",
+  );
+});
 function Fixture({
   window,
   cutoff = 1800000000,

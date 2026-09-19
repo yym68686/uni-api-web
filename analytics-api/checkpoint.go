@@ -31,12 +31,13 @@ type checkpointStore struct {
 	client                  checkpointClient
 	bucket, key, source     string
 	legacyKey, legacySource string
+	olderKey, olderSource   string
 }
 
 func newCheckpointStore(client checkpointClient, cfg Config) *checkpointStore {
 	sum := sha256.Sum256([]byte(strings.Join([]string{cfg.S3Endpoint, cfg.S3Bucket, cfg.S3Prefix, cfg.Timezone}, "\x00")))
 	id := hex.EncodeToString(sum[:])
-	return &checkpointStore{client: client, bucket: cfg.StateBucket, key: strings.Trim(cfg.StatePrefix, "/") + "/cache-v3-" + id + ".tar.gz", source: "v3-" + id, legacyKey: strings.Trim(cfg.StatePrefix, "/") + "/cache-v2-" + id + ".tar.gz", legacySource: "v2-" + id}
+	return &checkpointStore{client: client, bucket: cfg.StateBucket, key: strings.Trim(cfg.StatePrefix, "/") + "/cache-v4-" + id + ".tar.gz", source: "v4-" + id, legacyKey: strings.Trim(cfg.StatePrefix, "/") + "/cache-v3-" + id + ".tar.gz", legacySource: "v3-" + id, olderKey: strings.Trim(cfg.StatePrefix, "/") + "/cache-v2-" + id + ".tar.gz", olderSource: "v2-" + id}
 }
 
 func sqlPath(path string) string { return "'" + strings.ReplaceAll(path, "'", "''") + "'" }
@@ -252,6 +253,10 @@ func (s *checkpointStore) restore(ctx context.Context, e *Engine) (restored bool
 	if err != nil && (storageErrorCode(err) == "NoSuchKey" || storageErrorCode(err) == "NotFound") && s.legacyKey != "" {
 		out, err = s.client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(s.legacyKey)})
 		expectedSource = s.legacySource
+	}
+	if err != nil && (storageErrorCode(err) == "NoSuchKey" || storageErrorCode(err) == "NotFound") && s.olderKey != "" {
+		out, err = s.client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(s.olderKey)})
+		expectedSource = s.olderSource
 	}
 	if err != nil {
 		if code := storageErrorCode(err); code == "NoSuchKey" || code == "NotFound" {

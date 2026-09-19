@@ -8,7 +8,55 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/smithy-go"
 )
+
+func TestErrorEvidenceCheckpointRestoresPreviousVersionsWithoutReplayingHistory(t *testing.T) {
+	for _, version := range []string{"v3", "v2"} {
+		t.Run(version, func(t *testing.T) {
+			ctx := context.Background()
+			source := stateTestEngine(t)
+			f := Fact{Schema: 1, EventID: "old-rejection", Kind: "billing", AtMS: time.Now().UnixMilli(), Status: 403}
+			if err := source.Import(ctx, "already-imported", "etag", []Fact{f}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := source.DB.Exec(`CREATE TABLE previous_facts AS SELECT * EXCLUDE(upstream_error_sha256) FROM facts; DROP TABLE facts; ALTER TABLE previous_facts RENAME TO facts`); err != nil {
+				t.Fatal(err)
+			}
+			objects := &fakeStateObjects{}
+			store := newCheckpointStore(objects, Config{StateBucket: "state"})
+			old := *store
+			old.key, old.source = store.legacyKey, store.legacySource
+			if version == "v2" {
+				old.key, old.source = store.olderKey, store.olderSource
+			}
+			if err := old.save(ctx, source); err != nil {
+				t.Fatal(err)
+			}
+			store.client = &restoreTestObjects{objects, func(ctx context.Context, req *s3.GetObjectInput) (*s3.GetObjectOutput, error) {
+				if aws.ToString(req.Key) != old.key {
+					return nil, &smithy.GenericAPIError{Code: "NoSuchKey"}
+				}
+				return objects.GetObject(ctx, req)
+			}}
+			target := stateTestEngine(t)
+			if ok, err := store.restore(ctx, target); err != nil || !ok {
+				t.Fatal(ok, err)
+			}
+			var n int
+			var digest string
+			if err := target.DB.QueryRow(`SELECT count(*) FROM imported_objects`).Scan(&n); err != nil || n != 1 {
+				t.Fatal(n, err)
+			}
+			if err := target.DB.QueryRow(`SELECT coalesce(upstream_error_sha256,'') FROM facts`).Scan(&digest); err != nil || digest != "" {
+				t.Fatal(digest, err)
+			}
+		})
+	}
+}
 
 func TestCheckpointRestoresAggregatesAndReplayStateWithoutRevertingSettings(t *testing.T) {
 	ctx := context.Background()
