@@ -42,7 +42,7 @@ func subBindingSite(base string) string {
 	u.Fragment = ""
 	u.RawPath = ""
 	u.Path = strings.TrimRight(u.Path, "/")
-	for _, suffix := range []string{"/v1/chat/completions", "/v1/responses", "/v1/messages", "/v1beta/models", "/api/v1", "/v1beta", "/v1"} {
+	for _, suffix := range []string{"/v1/alpha/search", "/v1/chat/completions", "/v1/responses", "/v1/messages", "/v1beta/models", "/api/v1", "/v1beta", "/v1"} {
 		if strings.HasSuffix(u.Path, suffix) {
 			u.Path = strings.TrimSuffix(u.Path, suffix)
 			break

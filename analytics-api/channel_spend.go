@@ -14,6 +14,11 @@ import (
 
 const maxBillingFacts = 50000
 
+// Old v3 checkpoints kept this tool endpoint in upstream_base. Normalize at
+// query time as well as import so existing receipts become attributable without
+// rewriting immutable facts or restarting/replaying gateway requests.
+const billingSiteSQL = `regexp_replace(COALESCE(upstream_base,''), '/v1/alpha/search/?$', '')`
+
 type attributedSpend struct {
 	Source          string         `json:"source_id"`
 	Provider        string         `json:"provider"`
@@ -134,7 +139,7 @@ const billingAlignedSQL = `WITH aligned_billing AS (
 
 func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f QueryFilter, from, to int64) ([]attributedSpend, error) {
 	where, args := billingWhere(f, from, to)
-	rows, err := s.engine.DB.QueryContext(ctx, billingAlignedSQL+`SELECT event_id,source_id,COALESCE(instance_id,''),COALESCE(request_id,''),COALESCE(attempt_id,''),provider,model,upstream_model,key_id,at_ms,COALESCE(started_ms,at_ms),COALESCE(upstream_base,''),COALESCE(upstream_key_hash,''),CAST(COALESCE(to_json(billing_request_ids),'[]') AS VARCHAR),completions,COALESCE(status,0) FROM aligned_billing WHERE kind='billing' AND `+where+` ORDER BY at_ms,event_id LIMIT 50001`, args...)
+	rows, err := s.engine.DB.QueryContext(ctx, billingAlignedSQL+`SELECT event_id,source_id,COALESCE(instance_id,''),COALESCE(request_id,''),COALESCE(attempt_id,''),provider,model,upstream_model,key_id,at_ms,COALESCE(started_ms,at_ms),`+billingSiteSQL+`,COALESCE(upstream_key_hash,''),CAST(COALESCE(to_json(billing_request_ids),'[]') AS VARCHAR),completions,COALESCE(status,0) FROM aligned_billing WHERE kind='billing' AND `+where+` ORDER BY at_ms,event_id LIMIT 50001`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -253,7 +258,7 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 	// currently selected row. A duplicated ID must never charge two different keys.
 	ownership := map[string]int{}
 	if len(ids) > 0 {
-		claimsSQL := billingAlignedSQL + `, target AS (SELECT DISTINCT upstream_base,upstream_key_hash,unnest(billing_request_ids) AS rid FROM aligned_billing WHERE kind='billing' AND ` + where + `), claims AS (SELECT event_id,upstream_base,upstream_key_hash,unnest(billing_request_ids) AS rid FROM facts WHERE kind='billing') SELECT t.upstream_base,t.upstream_key_hash,t.rid,count(DISTINCT c.event_id) FROM target t JOIN claims c ON c.upstream_base=t.upstream_base AND c.upstream_key_hash=t.upstream_key_hash AND c.rid=t.rid GROUP BY t.upstream_base,t.upstream_key_hash,t.rid`
+		claimsSQL := billingAlignedSQL + `, target AS (SELECT DISTINCT ` + billingSiteSQL + ` AS upstream_base,upstream_key_hash,unnest(billing_request_ids) AS rid FROM aligned_billing WHERE kind='billing' AND ` + where + `), claims AS (SELECT event_id,` + billingSiteSQL + ` AS upstream_base,upstream_key_hash,unnest(billing_request_ids) AS rid FROM facts WHERE kind='billing') SELECT t.upstream_base,t.upstream_key_hash,t.rid,count(DISTINCT c.event_id) FROM target t JOIN claims c ON c.upstream_base=t.upstream_base AND c.upstream_key_hash=t.upstream_key_hash AND c.rid=t.rid GROUP BY t.upstream_base,t.upstream_key_hash,t.rid`
 		rows, err = s.engine.DB.QueryContext(ctx, claimsSQL, args...)
 		if err != nil {
 			return nil, err

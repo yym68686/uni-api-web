@@ -300,3 +300,53 @@ func TestAttributedSpendMixedMissingAndPendingBillsKeepsRefreshing(t *testing.T)
 		t.Fatal(row)
 	}
 }
+
+func TestAttributedSpendMatchesSearchReceiptsFromExistingCheckpoints(t *testing.T) {
+	s, account, owner := attributionFixture(t)
+	now := time.Now().Truncate(time.Second)
+	fact := attributedFact("search", "caller", now.Add(-time.Minute))
+	fact.Endpoint = "/v1/alpha/search"
+	fact.UpstreamBase = "https://usage.example/v1/alpha/search"
+	if err := s.engine.Import(context.Background(), "search", "v1", []Fact{fact}); err != nil {
+		t.Fatal(err)
+	}
+	var normalized string
+	if err := s.engine.DB.QueryRow(`SELECT upstream_base FROM facts WHERE event_id='search'`).Scan(&normalized); err != nil || normalized != "https://usage.example" {
+		t.Fatal(normalized, err)
+	}
+	// Reproduce the existing on-disk shape, which must also work without reimport.
+	if _, err := s.engine.DB.Exec(`UPDATE facts SET upstream_base='https://usage.example/v1/alpha/search' WHERE event_id='search'`); err != nil {
+		t.Fatal(err)
+	}
+	storeAttributedLog(t, s, account, "search", "0.0012", 1)
+	f := QueryFilter{SourceID: "source", KeyID: "caller", Model: checkModel, Endpoint: "/v1/alpha/search"}
+	read := func() attributedSpend {
+		rs, e := s.attributedChannelSpend(context.Background(), owner, f, now.Add(-time.Hour).Unix(), now.Unix())
+		if e != nil || len(rs) != 1 {
+			t.Fatal(rs, e)
+		}
+		return rs[0]
+	}
+	row := read()
+	if row.Status != "complete" || row.Amount == nil || *row.Amount != .0012 || row.Unbound != 0 {
+		t.Fatal(row)
+	}
+	duplicate := fact
+	duplicate.EventID = "duplicate"
+	duplicate.KeyID = "other-caller"
+	duplicate.SourceID = "other-source"
+	duplicate.UpstreamBase = "https://usage.example"
+	if err := s.engine.Import(context.Background(), "duplicate", "v1", []Fact{duplicate}); err != nil {
+		t.Fatal(err)
+	}
+	row = read()
+	if row.Status != "ambiguous" || row.Amount != nil {
+		t.Fatal("canonical site allowed duplicate receipt claims", row)
+	}
+	if subBindingSite("https://usage.example/tenant/v1/alpha/search") != "https://usage.example/tenant" {
+		t.Fatal("tenant prefix lost")
+	}
+	if subBindingSite("https://usage.example/tenant/unknown/search") != "https://usage.example/tenant/unknown/search" {
+		t.Fatal("unknown path silently removed")
+	}
+}
