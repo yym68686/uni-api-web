@@ -67,6 +67,7 @@ interface Result {
   verdict: string;
 }
 export interface SubTarget {
+  quality_check?: import("./ChannelChecks").ChannelCheck & { quality_probe?: Probe };
   history?: QualitySummary;
   models?: {
     model: string;
@@ -85,6 +86,21 @@ export interface SubTarget {
   state: string;
   message: string;
   result: Result | null;
+}
+// Shared quality is separate from model availability and its billing details.
+export function groupQualityResult(target: SubTarget): Result | null {
+  const saved = modelChecks(target).find(c => c.model === "gpt-6-astra")?.result || null;
+  const check = target.quality_check;
+  if (!check) return saved;
+  // Receipt lookups enrich the saved native probe after history was recorded.
+  // Keep that newer billing detail when both refer to the same native check.
+  if (check.quality_probe && saved?.checked_at === check.checked_at &&
+      saved.quality.id === check.quality_probe.id) return saved;
+  const unavailable: Probe = { status: "skipped", text: "", ttft_ms: null, duration_ms: 0 };
+  return { model: "gpt-6-astra", checked_at: check.checked_at, verdict: check.verdict,
+    availability: saved?.availability || unavailable,
+    quality: check.quality_probe || { status: check.verdict === "error" ? "error" : "success", text: check.text, message: check.message, ttft_ms: null, duration_ms: check.duration_ms },
+  };
 }
 export interface SubAccount {
   id: string;
@@ -581,6 +597,7 @@ function CheckDetails({
     selected || checks.find((item) => item.model === detailModel) || checks[0];
   const result = check.result;
   const probe = result?.availability;
+  const qualityResult = groupQualityResult(target);
   return (
     <Dialog.Root>
       <Dialog.Trigger asChild>
@@ -685,26 +702,26 @@ function CheckDetails({
               {check.model === "gpt-6-astra" && (
                 <>
                   <DetailRow label="Astra 降智">
-                    <div className="quality-status-stack"><Verdict result={result} history={target.history} /><QualityProbability history={target.history} checkedAt={result?.checked_at} /></div>
+                    <div className="quality-status-stack"><Verdict result={qualityResult} history={target.history} /><QualityProbability history={target.history} checkedAt={qualityResult?.checked_at} /></div>
                   </DetailRow>
-                  {result?.quality.id && result.quality.id === probe?.id ? (
+                  {qualityResult?.quality.id && qualityResult.quality.id === probe?.id ? (
                     <DetailRow label="降智扣费">与可用性为同一次请求，扣费见上方</DetailRow>
-                  ) : <UsageDetailRows probe={result?.quality} label="降智" prices={prices} model={check.model} />}
+                  ) : <UsageDetailRows probe={qualityResult?.quality} label="降智" prices={prices} model={check.model} />}
                   <DetailRow label="降智检测耗时">
-                    {latency(result?.quality.duration_ms ?? null)}
+                    {latency(qualityResult?.quality.duration_ms ?? null)}
                   </DetailRow>
                   <DetailRow label="降智 HTTP 状态">
-                    {result?.quality.http_status || "—"}
+                    {qualityResult?.quality.http_status || "—"}
                   </DetailRow>
                   <DetailRow label="降智回复">
                     <div className="sub-check-reply">
-                      {result?.quality.text || "—"}
+                      {qualityResult?.quality.text || "—"}
                     </div>
                   </DetailRow>
-                  {result?.quality.message && (
+                  {qualityResult?.quality.message && (
                     <DetailRow label="降智诊断">
                       <div className="sub-check-reply">
-                        {result.quality.message}
+                        {qualityResult.quality.message}
                       </div>
                     </DetailRow>
                   )}
@@ -722,7 +739,7 @@ function CheckDetails({
               )}
             </tbody>
           </table>
-          {check.model === "gpt-6-astra" && <QualityHistory path={`/v1/sub2api/accounts/${encodeURIComponent(account.id)}/groups/${target.group_id}/quality-history`} revision={`${result?.checked_at}:${target.history?.total}:${target.history?.successful}`} />}
+          {check.model === "gpt-6-astra" && <QualityHistory path={`/v1/sub2api/accounts/${encodeURIComponent(account.id)}/groups/${target.group_id}/quality-history`} revision={`${qualityResult?.checked_at}:${target.history?.total}:${target.history?.successful}`} />}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
@@ -793,7 +810,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
           }),
         )
         .filter(
-          ({ account, target, checks, selected, astra }) =>
+          ({ account, target, checks, selected }) =>
             (!accountId || account.id === accountId) &&
             `${account.name} ${account.email} ${target.name} ${target.channel} ${target.platform}`
               .toLowerCase()
@@ -804,7 +821,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                   ? !check.result
                   : check.result?.availability.status === availability,
               )) &&
-            (!quality || astra.result?.verdict === quality) &&
+            (!quality || groupQualityResult(target)?.verdict === quality) &&
             (minQuality === "" ||
               (!!target.history?.successful &&
                 target.history.passed * 100 >= Number(minQuality) * target.history.successful)),
@@ -1404,7 +1421,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                         </td>
                         <td>{selected ? <PriceStatus check={selected} prices={prices.data?.data} /> : <GroupPriceStatus checks={checks} prices={prices.data?.data} />}</td>
                         <td>
-                          <div className="quality-status-stack"><Verdict result={astra.result} history={t.history} /><QualityProbability history={t.history} checkedAt={astra.result?.checked_at} /></div>
+                          <div className="quality-status-stack"><Verdict result={groupQualityResult(t)} history={t.history} /><QualityProbability history={t.history} checkedAt={groupQualityResult(t)?.checked_at} /></div>
                         </td>
                         <td>
                           <CheckDetails

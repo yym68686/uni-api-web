@@ -35,6 +35,19 @@ it("combines successful detection counts once and keeps the latest outcome acros
   expect(qualityTooltip(result.history!)).toContain("75.0%");
   expect(qualityTooltip(result.history!)).toContain("3 / 4");
 });
+it("does not add shared server totals again for duplicate bindings or installed keys", () => {
+  const history = { passed: 5, successful: 7, total: 9 };
+  const shared = { ...row, source_id: row.source_id!, history_scope: "account_group" as const, verdict: "pass" as const, checked_at: 100, text: "21", duration_ms: 10, history };
+  const checks = { results: new Map([[providerId(row), shared]]) } as unknown as Checks;
+  const summaries = [{ account_id: "account", group_id: 7, check: shared, history }];
+  const result = withSubQuality(checks, [installed, installed], summaries).results.get(providerId(row))!;
+  expect(result.history).toEqual(history);
+  const fallback = withSubQuality({ results: new Map() } as Checks, [installed, installed], summaries).results.get(providerId(row))!;
+  expect(fallback.history).toEqual(history);
+  const newerHistory = { passed: 6, successful: 8, total: 10 };
+  const newer = [{ ...summaries[0], history: newerHistory, check: { ...shared, checked_at: 101 } }];
+  expect(withSubQuality(checks, [installed], newer).results.get(providerId(row))?.history).toEqual(newerHistory);
+});
 
 it("scopes cache history to source, key, model, upstream, endpoint and streaming without inventing missing cache samples", async () => {
   const fetchMock = vi.fn(async () => new Response(JSON.stringify({ total: { cache_rate: .1 }, from: 100, to: 300, bucket_seconds: 60, data: [{ ...row, points: [{ timestamp: 120, bucket_end: 180, cache_rate: .1, input_tokens: 1000, cache_read_tokens: 100, cache_samples: 2 }, { timestamp: 180, bucket_end: 240, cache_rate: null }, { timestamp: 240, bucket_end: 300, cache_rate: 0, input_tokens: 100, cache_read_tokens: 0, cache_samples: 1 }] }] })));

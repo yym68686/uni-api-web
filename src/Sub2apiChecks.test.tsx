@@ -3,7 +3,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as Tooltip from "@radix-ui/react-tooltip";
-import { Sub2apiChecks } from "./Sub2apiChecks";
+import { Sub2apiChecks, groupQualityResult } from "./Sub2apiChecks";
 import type { SubAccount } from "./Sub2apiChecks";
 import { LatencyBadge } from "./LatencyBadge";
 import { Timing } from "./ChannelMetrics";
@@ -67,6 +67,27 @@ function fixtures(): SubAccount[] {
     ],
   }));
 }
+
+it("shows shared channel quality and filters it without changing the model availability result", async () => {
+  const data = fixtures().slice(0, 1);
+  const target = data[0].targets[0];
+  target.history = { total: 4, successful: 4, passed: 2 };
+  target.quality_check = { history_scope: "account_group", source_id: "source", provider: "p", model: "gpt-6-astra", verdict: "fail", text: "shared answer 20", checked_at: 200, duration_ms: 99 };
+  const availability = target.result!.availability;
+  expect(groupQualityResult(target)?.availability).toBe(availability);
+  expect(target.result!.verdict).toBe("pass");
+  vi.stubGlobal("fetch", vi.fn(async (input: string) => new Response(JSON.stringify({ data: input.includes("/accounts") ? data : [] }))));
+  mount("shared-quality-fixture");
+  const user = userEvent.setup();
+  await screen.findByRole("button", {name:/查看 one same-group 的回复与诊断/});
+  const table = screen.getAllByRole("table").find(t => t.textContent?.includes("Astra 降智"))!;
+  expect(table).toHaveTextContent("50.0%");
+  expect(table).toHaveTextContent("降智");
+  expect(table).toHaveTextContent("可用");
+  await user.click(screen.getByRole("button", {name:/查看 one same-group 的回复与诊断/}));
+  expect(await screen.findByText("shared answer 20")).toBeVisible();
+  expect(screen.getByRole("dialog")).toHaveTextContent("test");
+});
 
 it("runs standalone Astra quality checks for every filtered page regardless of the selected model", async () => {
   const data = fixtures();

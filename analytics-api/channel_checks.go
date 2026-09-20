@@ -20,16 +20,19 @@ const checkPrompt = `在一个黑色的袋子里放有三种口味的糖果，�
 五角星形 7 6 4`
 
 type ChannelCheck struct {
-	History    *qualitySummary `json:"history,omitempty"`
-	SourceID   string          `json:"source_id"`
-	Provider   string          `json:"provider"`
-	Model      string          `json:"model"`
-	Verdict    string          `json:"verdict"`
-	Text       string          `json:"text"`
-	Message    string          `json:"message,omitempty"`
-	CheckedAt  int64           `json:"checked_at"`
-	DurationMS int64           `json:"duration_ms"`
-	RequestID  string          `json:"request_id,omitempty"`
+	QualityProbe *subProbe       `json:"quality_probe,omitempty"`
+	HistoryScope string          `json:"history_scope,omitempty"`
+	Origin       string          `json:"origin,omitempty"`
+	History      *qualitySummary `json:"history,omitempty"`
+	SourceID     string          `json:"source_id"`
+	Provider     string          `json:"provider"`
+	Model        string          `json:"model"`
+	Verdict      string          `json:"verdict"`
+	Text         string          `json:"text"`
+	Message      string          `json:"message,omitempty"`
+	CheckedAt    int64           `json:"checked_at"`
+	DurationMS   int64           `json:"duration_ms"`
+	RequestID    string          `json:"request_id,omitempty"`
 }
 
 var checkHTTP = &http.Client{Timeout: 45 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
@@ -144,19 +147,51 @@ func (s *Service) channelChecks(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "检测记录暂不可用", 503)
 		return
 	}
-	defer rows.Close()
-	data := []json.RawMessage{}
+	data := []ChannelCheck{}
 	for rows.Next() {
 		var raw []byte
 		if err = rows.Scan(&raw); err != nil {
+			rows.Close()
 			http.Error(w, "检测记录暂不可用", 503)
 			return
 		}
-		data = append(data, json.RawMessage(raw))
+		var check ChannelCheck
+		if err = json.Unmarshal(raw, &check); err != nil {
+			rows.Close()
+			http.Error(w, "检测记录暂不可用", 503)
+			return
+		}
+		data = append(data, check)
 	}
 	if rows.Err() != nil {
+		rows.Close()
 		http.Error(w, "检测记录暂不可用", 503)
 		return
+	}
+	rows.Close()
+	owner, _ := s.controlUser(r)
+	shared, err := s.sharedQuality(r.Context(), owner)
+	if err != nil {
+		http.Error(w, "共享检测记录暂不可用", 503)
+		return
+	}
+	positions := map[string]int{}
+	for i, c := range data {
+		positions[qualityChannelID(c.SourceID, c.Provider)] = i
+	}
+	for _, b := range shared.Bindings {
+		if id != "all" && b.Source != id {
+			continue
+		}
+		c := shared.channel(b.Source, b.Provider)
+		if c == nil {
+			continue
+		}
+		if i, ok := positions[qualityChannelID(b.Source, b.Provider)]; ok {
+			data[i] = *c
+		} else {
+			data = append(data, *c)
+		}
 	}
 	writeJSON(w, 200, map[string]any{"data": data})
 }
@@ -202,6 +237,12 @@ func (s *Service) checkChannel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "检测历史保存失败", 503)
 		return
 	}
+	owner, _ := s.controlUser(r)
+	if _, err = s.sharedQuality(ctx, owner); err != nil {
+		_ = s.control.finishQuality(runID, "error", false, time.Now().Unix(), ChannelCheck{SourceID: src.ID, Provider: in.Provider, Model: checkModel, Verdict: "error", CheckedAt: time.Now().Unix(), Message: "共享检测历史关联失败，未发起请求"})
+		http.Error(w, "共享检测历史关联失败，未发起请求", 503)
+		return
+	}
 	result := runChannelCheck(ctx, src, in.Provider)
 	historyVerdict := result.Verdict
 	if ctx.Err() == context.Canceled && result.Verdict == "error" {
@@ -227,5 +268,13 @@ func (s *Service) checkChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result.History = &summary
+	shared, e := s.sharedQuality(ctx, owner)
+	if e != nil {
+		http.Error(w, "共享检测记录暂不可用", 503)
+		return
+	}
+	if merged := shared.channel(src.ID, in.Provider); merged != nil {
+		result = *merged
+	}
 	writeJSON(w, 200, result)
 }

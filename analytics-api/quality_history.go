@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -44,7 +45,18 @@ CREATE OR REPLACE VIEW console_quality_totals AS
  SELECT source_id,provider,account_id,group_id,count(*) AS total,
  count(*) FILTER(WHERE successful) AS successful,
  count(*) FILTER(WHERE successful AND verdict='pass') AS passed
- FROM console_quality_history GROUP BY source_id,provider,account_id,group_id;`
+ FROM console_quality_history GROUP BY source_id,provider,account_id,group_id;
+CREATE TABLE IF NOT EXISTS console_quality_group_links(
+ check_id TEXT PRIMARY KEY REFERENCES console_quality_history(check_id) ON DELETE CASCADE,
+ account_id TEXT NOT NULL, group_id BIGINT NOT NULL,
+ linked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ FOREIGN KEY(account_id,group_id) REFERENCES console_sub_targets(account_id,group_id) ON DELETE CASCADE);
+CREATE INDEX IF NOT EXISTS console_quality_group_links_scope ON console_quality_group_links(account_id,group_id);
+CREATE OR REPLACE VIEW console_quality_group_history AS
+ SELECT h.id,h.check_id,h.model,h.rule,h.checked_at,h.deadline,h.verdict,h.successful,h.result,h.source_id,h.provider,
+ COALESCE(h.account_id,l.account_id) AS account_id,COALESCE(h.group_id,l.group_id) AS group_id
+ FROM console_quality_history h LEFT JOIN console_quality_group_links l USING(check_id)
+ WHERE h.account_id IS NOT NULL OR l.account_id IS NOT NULL;`
 
 type qualitySummary struct {
 	Total      int64 `json:"total"`
@@ -134,14 +146,33 @@ func (s *Service) qualityHistory(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	summary, err := s.control.qualitySummary(r.Context(), q)
+	owner, _ := s.controlUser(r)
+	shared, err := s.sharedQuality(r.Context(), owner)
 	if err != nil {
 		http.Error(w, "检测历史暂不可用", 503)
 		return
 	}
+	table := "console_quality_history"
+	if q.Account != "" {
+		table = "console_quality_group_history"
+	} else {
+		for _, binding := range shared.Bindings {
+			if binding.Source == q.Source && binding.Provider == q.Provider {
+				q = qualityScope{Account: binding.Account, Group: binding.Group}
+				table = "console_quality_group_history"
+				break
+			}
+		}
+	}
 	where, args := q.where()
+	var summary qualitySummary
+	err = s.control.db.QueryRowContext(r.Context(), `SELECT count(*),count(*) FILTER(WHERE successful),count(*) FILTER(WHERE successful AND verdict='pass') FROM `+table+` WHERE `+where, args...).Scan(&summary.Total, &summary.Successful, &summary.Passed)
+	if err != nil {
+		http.Error(w, "检测历史暂不可用", 503)
+		return
+	}
 	args = append(args, before)
-	rows, err := s.control.db.QueryContext(r.Context(), `SELECT id,model,rule,checked_at,CASE WHEN verdict='running' AND deadline<now() THEN 'interrupted' ELSE verdict END,successful,result FROM console_quality_history WHERE `+where+` AND ($3::BIGINT=0 OR id<$3) ORDER BY id DESC LIMIT 31`, args...)
+	rows, err := s.control.db.QueryContext(r.Context(), `SELECT id,model,rule,checked_at,CASE WHEN verdict='running' AND deadline<now() THEN 'interrupted' ELSE verdict END,successful,result FROM `+table+` WHERE `+where+` AND ($3::BIGINT=0 OR id<$3) ORDER BY id DESC LIMIT 31`, args...)
 	if err != nil {
 		http.Error(w, "检测历史暂不可用", 503)
 		return
@@ -180,35 +211,25 @@ func (s *Service) qualityHistory(w http.ResponseWriter, r *http.Request) {
 // replies for every other model merely to display quality probabilities.
 func (s *Service) subQualitySummary(w http.ResponseWriter, r *http.Request) {
 	owner, _ := s.controlUser(r)
-	rows, err := s.control.db.QueryContext(r.Context(), `SELECT m.account_id,m.group_id,m.result,COALESCE(h.total,0),COALESCE(h.successful,0),COALESCE(h.passed,0) FROM console_sub_models m JOIN console_sub_accounts a ON a.id=m.account_id LEFT JOIN console_quality_totals h ON h.account_id=m.account_id AND h.group_id=m.group_id WHERE a.owner=$1 AND m.model=$2 AND m.result IS NOT NULL`, owner, checkModel)
+	shared, err := s.sharedQuality(r.Context(), owner)
 	if err != nil {
 		http.Error(w, "检测统计暂不可用", 503)
 		return
 	}
-	defer rows.Close()
 	type item struct {
 		Account string         `json:"account_id"`
 		Group   int64          `json:"group_id"`
-		Check   ChannelCheck   `json:"check"`
+		Check   *ChannelCheck  `json:"check"`
 		History qualitySummary `json:"history"`
 	}
 	data := []item{}
-	for rows.Next() {
-		var out item
-		var raw []byte
-		var result subResult
-		if err = rows.Scan(&out.Account, &out.Group, &raw, &out.History.Total, &out.History.Successful, &out.History.Passed); err != nil {
-			break
+	for key, p := range shared.Groups {
+		if p.Check == nil {
+			continue
 		}
-		if err = json.Unmarshal(raw, &result); err != nil {
-			break
-		}
-		out.Check = ChannelCheck{Model: checkModel, Verdict: result.Verdict, CheckedAt: result.CheckedAt, Text: result.Quality.Text, Message: result.Quality.Message, DurationMS: result.Quality.Duration}
-		data = append(data, out)
-	}
-	if err != nil || rows.Err() != nil {
-		http.Error(w, "检测统计读取失败", 503)
-		return
+		pos := strings.LastIndex(key, ":")
+		group, _ := strconv.ParseInt(key[pos+1:], 10, 64)
+		data = append(data, item{key[:pos], group, p.Check, p.History})
 	}
 	writeJSON(w, 200, map[string]any{"data": data})
 }

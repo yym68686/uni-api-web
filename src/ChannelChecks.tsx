@@ -11,6 +11,7 @@ import { QualityProbability, qualityTooltip } from "./QualityHistory";
 import type { QualitySummary } from "./QualityHistory";
 
 export interface ChannelCheck {
+	 history_scope?: "account_group";
   history?: QualitySummary;
   origin?: string;
   source_id: string;
@@ -37,6 +38,7 @@ export function useChannelChecks(session: string, enabled: boolean) {
       ),
     enabled,
     staleTime: 30_000,
+    refetchInterval: enabled ? 15000 : false,
     retry: false,
   });
   const [pending, setPending] = useState<Set<string>>(new Set());
@@ -103,6 +105,8 @@ export function useChannelChecks(session: string, enabled: boolean) {
         );
     } finally {
       void client.invalidateQueries({ queryKey: ["quality-history"] });
+      void client.invalidateQueries({ queryKey: ["sub-quality-summary"] });
+      void client.invalidateQueries({ queryKey: ["sub2api"] });
       // A canceled request may settle after another check of this channel starts.
       if (active.current.get(id) === abort) {
         active.current.delete(id);
@@ -143,7 +147,7 @@ export function useChannelChecks(session: string, enabled: boolean) {
   );
   for (const [id, item] of errors) {
     if (item.checked_at > (results.get(id)?.checked_at || 0))
-      results.set(id, { ...item, history: results.get(id)?.history });
+      results.set(id, { ...item, history: results.get(id)?.history, history_scope: results.get(id)?.history_scope });
   }
   return {
     results,
@@ -183,6 +187,19 @@ export function withSubQuality(checks: Checks, installed: InstalledChannel[], su
     const sub = groups.map(group => group.check).filter(Boolean).sort((a,b) => b.checked_at-a.checked_at)[0];
     const id = providerId(channel);
     const direct = checks.results.get(id);
+    // New servers already return the shared, deduplicated group history. Keep
+    // the legacy one-way fallback only for old responses during rolling release.
+    if (direct?.history_scope === "account_group") {
+      if (groups.length === 1 && sub?.history_scope === "account_group" &&
+          (sub.checked_at > direct.checked_at ||
+            (sub.checked_at === direct.checked_at && groups[0].history.total > (direct.history?.total || 0))))
+        results.set(id, { ...sub, source_id: channel.source_id, provider: channel.provider, history: groups[0].history });
+      continue;
+    }
+    if (groups.length === 1 && sub?.history_scope === "account_group") {
+      results.set(id, { ...sub, source_id: channel.source_id, provider: channel.provider, history: groups[0].history });
+      continue;
+    }
     const h = groups.reduce((sum, group) => ({ total: sum.total + group.history.total, successful: sum.successful + group.history.successful, passed: sum.passed + group.history.passed }), { total: 0, successful: 0, passed: 0 });
     const history = {
       total: (direct?.history?.total || 0) + (h?.total || 0),

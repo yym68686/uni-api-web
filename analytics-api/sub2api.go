@@ -97,19 +97,20 @@ type subModelResult struct {
 	Result  *subResult `json:"result"`
 }
 type subTarget struct {
-	History  qualitySummary   `json:"history"`
-	Models   []subModelResult `json:"models"`
-	GroupID  int64            `json:"group_id"`
-	Name     string           `json:"name"`
-	Platform string           `json:"platform"`
-	Channel  string           `json:"channel"`
-	Rate     float64          `json:"rate"`
-	KeyID    int64            `json:"key_id"`
-	Active   bool             `json:"active"`
-	State    string           `json:"state"`
-	Message  string           `json:"message"`
-	Result   *subResult       `json:"result"`
-	Billing  *subBilling      `json:"billing"`
+	QualityCheck *ChannelCheck    `json:"quality_check,omitempty"`
+	History      qualitySummary   `json:"history"`
+	Models       []subModelResult `json:"models"`
+	GroupID      int64            `json:"group_id"`
+	Name         string           `json:"name"`
+	Platform     string           `json:"platform"`
+	Channel      string           `json:"channel"`
+	Rate         float64          `json:"rate"`
+	KeyID        int64            `json:"key_id"`
+	Active       bool             `json:"active"`
+	State        string           `json:"state"`
+	Message      string           `json:"message"`
+	Result       *subResult       `json:"result"`
+	Billing      *subBilling      `json:"billing"`
 }
 type subAccount struct {
 	ID       string             `json:"id"`
@@ -129,6 +130,11 @@ type subChallenge struct {
 
 func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 	owner, _ := s.controlUser(r)
+	shared, sharedErr := s.sharedQuality(r.Context(), owner)
+	if sharedErr != nil {
+		http.Error(w, "共享检测记录暂不可用", 503)
+		return
+	}
 	rows, err := s.control.db.QueryContext(r.Context(), `SELECT id,name,base,email,state,message,synced_at,balance FROM console_sub_accounts WHERE owner=$1 ORDER BY created_at,id`, owner)
 	if err != nil {
 		http.Error(w, "账号列表暂不可用", 503)
@@ -186,6 +192,10 @@ func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if i, ok := index[id]; ok {
+			if projection, exists := shared.Groups[qualityGroupID(id, t.GroupID)]; exists {
+				t.History = projection.History
+				t.QualityCheck = projection.Check
+			}
 			accounts[i].Targets = append(accounts[i].Targets, t)
 		}
 	}
