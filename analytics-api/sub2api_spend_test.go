@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -13,6 +14,55 @@ import (
 	"testing"
 	"time"
 )
+
+func TestSlowSpendPagesHaveIndependentDeadlinesAndRenewLease(t *testing.T) {
+	s, account, _, request := spendTestService(t)
+	to := time.Now().Truncate(time.Second)
+	calls := 0
+	withSpendUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		var leaseSeconds float64
+		if err := s.control.db.QueryRow(`SELECT extract(epoch FROM usage_lease_until-now()) FROM console_sub_accounts WHERE id=$1`, account).Scan(&leaseSeconds); err != nil || leaseSeconds < 25 {
+			t.Error("page did not renew account lease", leaseSeconds, err)
+		}
+		select {
+		case <-r.Context().Done():
+			return
+		case <-time.After(4200 * time.Millisecond):
+		}
+		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		writeJSON(w, 200, map[string]any{"data": subSpendPage{Items: []subSpendLog{spendLog(int64(page), to.Add(-time.Minute), "0.1")}, Page: page, Pages: 5, PageSize: 1000}})
+	}))
+	request("1h", to)
+	runSpendBatch(t, s, account)
+	if out := request("1h", to); calls != 5 || out.Status != "complete" || out.Amount == nil || *out.Amount != .5 {
+		t.Fatal("successful slow pages exhausted a shared batch deadline", calls, out)
+	}
+}
+
+func TestSpendPageCannotRenewReplacedOrExpiredLease(t *testing.T) {
+	s, account, _, request := spendTestService(t)
+	request("1h", time.Now().Truncate(time.Second))
+	task, err := s.subClaimSpend(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	withSpendUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Error("stale reader reached upstream") }))
+	for _, expired := range []bool{false, true} {
+		if expired {
+			_, err = s.control.db.Exec(`UPDATE console_sub_accounts SET usage_lease_token=$2,usage_lease_until=now()-interval '1 second' WHERE id=$1`, account, task.lease)
+		} else {
+			_, err = s.control.db.Exec(`UPDATE console_sub_accounts SET usage_lease_token='replacement' WHERE id=$1`, account)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		var page subSpendPage
+		if err = s.subSpendPageGET(context.Background(), task, url.Values{}, &page); !errors.Is(err, context.Canceled) {
+			t.Fatal("stale reader regained lease", err)
+		}
+	}
+}
 
 func spendLog(id int64, at time.Time, cost string) subSpendLog {
 	amount := json.Number(cost)
@@ -340,7 +390,7 @@ func TestAccountSpendMigrationKeepsReceiptsButNeverClaimsAccountCoverage(t *test
 }
 
 func TestRecentReceiptsDoNotAdvanceHistoricalCoverageOrBreakResume(t *testing.T) {
-	for _, recentMode := range []string{"ok", "unsupported", "invalid"} {
+	for _, recentMode := range []string{"ok", "slow", "unsupported", "invalid"} {
 		t.Run(recentMode, func(t *testing.T) {
 			s, account, owner := attributionFixture(t)
 			now := time.Now().Truncate(time.Second)
@@ -365,6 +415,9 @@ func TestRecentReceiptsDoNotAdvanceHistoricalCoverageOrBreakResume(t *testing.T)
 				log.RequestID = "client:recent"
 				if q.Get("sort_order") == "desc" {
 					recentCalls++
+					if recentMode == "slow" {
+						time.Sleep(3200 * time.Millisecond)
+					}
 					if page != 1 || q.Get("page_size") != "100" || q.Has("api_key_id") {
 						t.Error("wrong recent account query", q)
 					}
@@ -389,7 +442,7 @@ func TestRecentReceiptsDoNotAdvanceHistoricalCoverageOrBreakResume(t *testing.T)
 			}))
 			runSpendBatch(t, s, account)
 			first := read()
-			if recentMode == "ok" {
+			if recentMode == "ok" || recentMode == "slow" {
 				if first.Status != "complete" || first.Amount == nil || *first.Amount != .3 {
 					t.Fatal("latest exact receipt waits for old pages", first)
 				}

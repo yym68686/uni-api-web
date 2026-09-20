@@ -436,10 +436,10 @@ export function SubChannelSpendValue({
   let label = "未确认";
   if (known) label = money(data.actual_cost_usd!);
   else if (partial) label = `≥${money(data.matched_cost_usd!)}`;
-  else if (query?.isPending || data?.status === "pending" || data?.refreshing)
-    label = "同步账单";
   else if (query?.isError || data?.status === "error" || data?.sync_error)
     label = "查询失败";
+  else if (query?.isPending || data?.status === "pending" || data?.refreshing)
+    label = "同步账单";
   else if (data?.status === "ambiguous") label = "关联冲突";
   else if (data?.status === "no_records") label = "—";
   else if (data?.missing_correlation_attempts) label = "历史未关联";

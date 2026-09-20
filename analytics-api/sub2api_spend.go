@@ -224,7 +224,9 @@ func (s *Service) subUsageGET(ctx context.Context, account, base, path string, o
 }
 
 func (s *Service) subScanSpend(parent context.Context, task subSpendTask) {
-	ctx, cancel := context.WithTimeout(parent, 20*time.Second)
+	// Each page has its own bounded deadline. Five slow but successful bodies
+	// must not consume one shared 20-second deadline and fail the next page.
+	ctx, cancel := context.WithTimeout(parent, 2*time.Minute)
 	defer cancel()
 	defer func() {
 		cleanup, stop := context.WithTimeout(context.Background(), 3*time.Second)
@@ -250,9 +252,15 @@ func (s *Service) subScanSpend(parent context.Context, task subSpendTask) {
 	// Small durable batches bound memory, response time and shutdown latency.
 	// Larger histories resume on the next turn instead of returning partial sums.
 	for range 5 {
+		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < 21*time.Second {
+			// The previous page already persisted its next cursor. Resume in
+			// another batch instead of starting a request we cannot finish.
+			return
+		}
 		q := url.Values{"start_date": {time.UnixMilli(task.from).UTC().Format("2006-01-02")}, "end_date": {time.UnixMilli(task.to - 1).UTC().Format("2006-01-02")}, "timezone": {"UTC"}, "sort_by": {"created_at"}, "sort_order": {"asc"}, "page_size": {strconv.Itoa(task.pageSize)}, "page": {strconv.Itoa(task.page)}}
 		var page subSpendPage
-		err = s.subUsageGET(ctx, task.account, task.base, "/api/v1/usage?"+q.Encode(), &page)
+		began := time.Now()
+		err = s.subSpendPageGET(ctx, task, q, &page)
 		if err != nil {
 			var remote *subRemoteError
 			if task.pageSize > 100 && (errors.Is(err, errSubResponseTooLarge) || (errors.As(err, &remote) && remote.Status == 400)) {
@@ -285,7 +293,7 @@ func (s *Service) subScanSpend(parent context.Context, task subSpendTask) {
 		}
 		err = s.subStoreSpendPage(ctx, task, page, complete)
 		if err == nil {
-			log.Printf("event=sub_account_spend_page account_id=%s page=%d page_size=%d rows=%d complete=%t", task.account, task.page, task.pageSize, len(page.Items), complete)
+			log.Printf("event=sub_account_spend_page account_id=%s page=%d page_size=%d rows=%d duration_ms=%d complete=%t", task.account, task.page, task.pageSize, len(page.Items), time.Since(began).Milliseconds(), complete)
 			if task.page == 1 && page.Pages > 5 && !complete {
 				// A long ascending scan must not put today's newest receipts
 				// behind every old page. This independent first descending page
@@ -312,7 +320,42 @@ func (s *Service) subScanSpend(parent context.Context, task subSpendTask) {
 		defer stop()
 		delay := min(300, 5*(1<<min(task.attempts, 6)))
 		_, _ = s.control.db.ExecContext(saveCtx, `UPDATE console_sub_account_spend_cache SET error=$2,attempts=attempts+1,next_attempt=now()+$3*interval '1 second' WHERE account_id=$1 AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND usage_lease_token=$4)`, task.account, message, delay, task.lease)
-		log.Printf("event=sub_account_spend_retry account_id=%s page=%d delay_seconds=%d reason=%q", task.account, task.page, delay, message)
+		log.Printf("event=sub_account_spend_retry account_id=%s page=%d delay_seconds=%d cause=%s reason=%q", task.account, task.page, delay, subSpendErrorCode(err), message)
+	}
+}
+
+// Renew only our unexpired lease before starting a bounded page. Never reclaim
+// a replaced/expired lease or overlap the account's other billing readers.
+func (s *Service) subSpendPageGET(parent context.Context, task subSpendTask, query url.Values, page *subSpendPage) error {
+	ctx, cancel := context.WithTimeout(parent, 20*time.Second)
+	defer cancel()
+	result, err := s.control.db.ExecContext(ctx, `UPDATE console_sub_accounts SET usage_lease_until=now()+interval '30 seconds' WHERE id=$1 AND usage_lease_token=$2 AND usage_lease_until>now()`, task.account, task.lease)
+	if err != nil {
+		return err
+	}
+	if count, err := result.RowsAffected(); err != nil {
+		return err
+	} else if count != 1 {
+		return context.Canceled
+	}
+	return s.subUsageGET(ctx, task.account, task.base, "/api/v1/usage?"+query.Encode(), page)
+}
+
+func subSpendErrorCode(err error) string {
+	var remote *subRemoteError
+	switch {
+	case err == nil:
+		return "none"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline"
+	case errors.Is(err, context.Canceled):
+		return "cancelled"
+	case errors.As(err, &remote):
+		return "http_" + strconv.Itoa(remote.Status)
+	case errors.Is(err, errSubResponseTooLarge):
+		return "response_too_large"
+	default:
+		return "request_or_receipt_error"
 	}
 }
 
@@ -321,14 +364,17 @@ func (s *Service) subStoreSpendPage(ctx context.Context, task subSpendTask, page
 }
 
 func (s *Service) subReadRecentSpend(parent context.Context, task subSpendTask, query url.Values) {
-	ctx, cancel := context.WithTimeout(parent, 3*time.Second)
+	if deadline, ok := parent.Deadline(); ok && time.Until(deadline) < 21*time.Second {
+		return
+	}
+	ctx, cancel := context.WithTimeout(parent, 20*time.Second)
 	defer cancel()
 	query.Set("sort_order", "desc")
 	query.Set("page", "1")
 	query.Set("page_size", strconv.Itoa(task.pageSize))
 	var recent subSpendPage
 	began := time.Now()
-	err := s.subUsageGET(ctx, task.account, task.base, "/api/v1/usage?"+query.Encode(), &recent)
+	err := s.subSpendPageGET(ctx, task, query, &recent)
 	if err == nil {
 		if recent.Items == nil || (recent.Page != 0 && recent.Page != 1) {
 			err = errors.New("invalid recent page")
@@ -337,7 +383,7 @@ func (s *Service) subReadRecentSpend(parent context.Context, task subSpendTask, 
 		}
 	}
 	// Unsupported/failed acceleration never interrupts the full ledger scan.
-	log.Printf("event=sub_account_spend_recent account_id=%s rows=%d duration_ms=%d success=%t", task.account, len(recent.Items), time.Since(began).Milliseconds(), err == nil)
+	log.Printf("event=sub_account_spend_recent account_id=%s rows=%d duration_ms=%d success=%t cause=%s", task.account, len(recent.Items), time.Since(began).Milliseconds(), err == nil, subSpendErrorCode(err))
 }
 
 func (s *Service) subStoreSpendReceipts(ctx context.Context, task subSpendTask, page subSpendPage, complete, advance bool) error {

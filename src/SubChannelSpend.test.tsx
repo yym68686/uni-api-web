@@ -62,6 +62,20 @@ it("counts proven balance rejections as reconciled without inventing a bill", as
     "39 次经错误响应确认在模型调用前因余额不足被拒绝，消费为零",
   );
 });
+it("shows a failed sync as an error even while unmatched requests remain pending", () => {
+  render(
+    <Tooltip.Provider>
+      <SubChannelSpendValue query={{
+        isPending: false, isError: false,
+        data: { ...receipt, scope: "matched_requests", status: "error", actual_cost_usd: null,
+          total_attempts: 11, matched_attempts: 0, pending_attempts: 11, refreshing: true, sync_error: true },
+      }} />
+    </Tooltip.Provider>,
+  );
+  expect(screen.getByText("查询失败")).toBeVisible();
+  expect(screen.queryByText("同步账单")).not.toBeInTheDocument();
+  expect(screen.queryByText("$0.00")).not.toBeInTheDocument();
+});
 function Fixture({
   window,
   cutoff = 1800000000,

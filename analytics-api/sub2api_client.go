@@ -118,11 +118,17 @@ func subJSON(ctx context.Context, client *http.Client, base, method, path, token
 	}
 	resp, err := client.Do(req)
 	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		return errors.New("无法连接站点或请求超时")
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, (4<<20)+1))
 	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		return errors.New("站点响应过大或读取失败")
 	}
 	if len(raw) > 4<<20 {
