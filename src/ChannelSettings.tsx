@@ -143,14 +143,13 @@ function JSONField({
   value: unknown;
   onChange: (value: unknown) => void;
 }) {
-  const [text, setText] = useState(() =>
-    value === undefined ? "" : JSON.stringify(value, null, 2),
-  );
+  const serialized = value === undefined ? "" : JSON.stringify(value, null, 2);
+  const [text, setText] = useState(serialized);
   const [error, setError] = useState("");
   useEffect(() => {
-    setText(value === undefined ? "" : JSON.stringify(value, null, 2));
+    setText(serialized);
     setError("");
-  }, [value]);
+  }, [serialized]);
   return (
     <label className="setting-json">
       {label}
