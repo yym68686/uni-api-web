@@ -77,6 +77,7 @@ import { ChannelModels } from "./ChannelModels";
 
 import { SiteLink, useChannelSites, dashboardURL } from "./ChannelSite";
 import { ChannelAccess } from "./ChannelAccess";
+import { ChannelSettings } from "./ChannelSettings";
 import { CacheTrend } from "./CacheTrend";
 import type { CacheTrendProps } from "./CacheTrend";
 import { QualityHistory, QualityProbability, qualityTooltip } from "./QualityHistory";
@@ -803,7 +804,7 @@ function Detail({
           </Dialog.Description>
           {row && (
             <>
-              <Status row={row} />
+              <div className="detail-channel-actions"><Status row={row} />{trend.connection.account&&<ChannelSettings row={row}/>}</div>
               {trend.connection.account && <ChannelAccess key={providerId(row)} row={row} imports={imports} onRemoved={onClose} />}
               <CacheTrend key={`${providerId(row)}:${row.model}`} row={row} {...trend} />
               {row.source_id && trend.connection.account && <section className="detail-section">
