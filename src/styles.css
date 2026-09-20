@@ -2612,7 +2612,8 @@ nav > button.active > svg {
 .channel-spend { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 4px; white-space: nowrap; }
 .channel-spend > small { font-size: 11px; font-style: normal; }
 
-.channel-settings-dialog { position:fixed;z-index:80;left:50%;top:50%;transform:translate(-50%,-50%);width:min(1080px,94vw);max-height:92vh;display:flex;flex-direction:column;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:18px;padding:24px;box-shadow:0 24px 90px #0005; }
+.channel-settings-overlay {z-index:85}
+.channel-settings-dialog { position:fixed;z-index:90;left:50%;top:50%;transform:translate(-50%,-50%);width:min(1080px,94vw);max-height:92vh;display:flex;flex-direction:column;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:18px;padding:24px;box-shadow:0 24px 90px #0005; }
 .channel-settings-dialog > h2 {margin:0 0 8px}.channel-settings-dialog > p {margin:6px 0 12px}
 .settings-scope {display:flex;gap:16px;align-items:center;flex-wrap:wrap;padding:12px 0}.settings-scope small {color:var(--muted)}
 .settings-tabs {display:flex;gap:6px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding:8px 0}.settings-tabs button {border:0;background:transparent;color:var(--muted);padding:9px 11px;border-radius:7px}.settings-tabs button.active {background:var(--green-bg);color:var(--ink)}

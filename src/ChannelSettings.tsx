@@ -356,7 +356,7 @@ export function ChannelSettings({ row }: { row: Channel }) {
         </button>
       </Dialog.Trigger>
       <Dialog.Portal>
-        <Dialog.Overlay className="dialog-overlay" />
+        <Dialog.Overlay className="dialog-overlay channel-settings-overlay" />
         <Dialog.Content className="channel-settings-dialog">
           <Dialog.Title>
             渠道设置 · {row.provider_name || row.provider}
