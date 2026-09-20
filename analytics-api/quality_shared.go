@@ -52,6 +52,25 @@ func (s *Service) qualityBindings(ctx context.Context, owner string) ([]qualityB
 			return nil, e
 		}
 		for _, c := range snapshot.Channels {
+			var setting struct {
+				Set    map[string]any `json:"set"`
+				Remove []string       `json:"remove"`
+			}
+			_ = json.Unmarshal(snapshot.Settings[c.Provider], &setting)
+			changed := false
+			for path := range setting.Set {
+				if path == "/api" || path == "/base_url" {
+					changed = true
+				}
+			}
+			for _, path := range setting.Remove {
+				if path == "/api" || path == "/base_url" {
+					changed = true
+				}
+			}
+			if changed {
+				continue
+			}
 			for _, ref := range refs {
 				if c.Provider == subProviderName(ref.Account, ref.Group, c.KeyID) && subBindingSite(c.Base) == subBindingSite(ref.Base) {
 					bindings[qualityChannelID(source, c.Provider)] = qualityBinding{source, c.Provider, ref.Account, ref.Group}

@@ -32,23 +32,29 @@ type retainedRule struct {
 	Disabled []string `json:"disabled"`
 }
 type retainedChannel struct {
-	Provider string   `json:"provider"`
-	KeyID    string   `json:"api_key_id"`
-	Base     string   `json:"base_url"`
-	Key      string   `json:"api_key"`
-	Models   []string `json:"models"`
+	Definition json.RawMessage `json:"definition,omitempty"`
+	Provider   string          `json:"provider"`
+	KeyID      string          `json:"api_key_id"`
+	Base       string          `json:"base_url"`
+	Key        string          `json:"api_key"`
+	Models     []string        `json:"models"`
 }
 type retainedSnapshot struct {
-	Version  int               `json:"version"`
-	Rules    []retainedRule    `json:"rules"`
-	Channels []retainedChannel `json:"temporary_channels"`
+	Settings map[string]json.RawMessage `json:"channel_settings,omitempty"`
+	Version  int                        `json:"version"`
+	Rules    []retainedRule             `json:"rules"`
+	Channels []retainedChannel          `json:"temporary_channels"`
 }
 type retainedLive struct {
-	Instance string            `json:"instance_id"`
-	Revision string            `json:"revision"`
-	Atomic   bool              `json:"temporary_channel_restore"`
-	Rules    []retainedRule    `json:"rules"`
-	Channels []retainedChannel `json:"temporary_channels"`
+	DefinitionsDigest string            `json:"channel_definitions_digest"`
+	CustomDefinitions bool              `json:"channel_definitions"`
+	SettingsSupported bool              `json:"channel_settings"`
+	SettingsDigest    string            `json:"channel_settings_digest"`
+	Instance          string            `json:"instance_id"`
+	Revision          string            `json:"revision"`
+	Atomic            bool              `json:"temporary_channel_restore"`
+	Rules             []retainedRule    `json:"rules"`
+	Channels          []retainedChannel `json:"temporary_channels"`
 }
 type retainedRecord struct {
 	Enabled                                                           bool
@@ -104,7 +110,7 @@ func (s *controlStore) retainedSnapshot(r retainedRecord) (retainedSnapshot, err
 		return v, e
 	}
 	e = json.Unmarshal([]byte(raw), &v)
-	if e == nil && v.Version != 1 {
+	if e == nil && v.Version != 1 && v.Version != 2 {
 		e = errors.New("unsupported snapshot")
 	}
 	return v, e
@@ -155,9 +161,60 @@ func (s *Service) captureControls(ctx context.Context, src controlSource, live r
 			return e
 		}
 	}
+	definitions := map[string]json.RawMessage{}
 	snapshot := retainedSnapshot{Version: 1, Rules: append([]retainedRule{}, live.Rules...), Channels: []retainedChannel{}}
+	if live.SettingsSupported && (live.SettingsDigest != tokenHash("{}") || live.CustomDefinitions) {
+		admin := src
+		if admin.ConfigKey != "" {
+			admin.Key = admin.ConfigKey
+		}
+		exported, _, err := s.settingsGateway(ctx, admin, "GET", "/v1/channel-settings/export", nil)
+		if err != nil {
+			return err
+		}
+		if exported["revision"] != live.Revision {
+			return errors.New("设置读取期间版本变化，请刷新后核对")
+		}
+		if err = decodeMap(exported["temporary_definitions"], &definitions); err != nil {
+			return err
+		}
+		if err = decodeMap(exported["channel_settings"], &snapshot.Settings); err != nil {
+			return err
+		}
+		if len(snapshot.Settings) > 0 {
+			snapshot.Version = 2
+		}
+	} else if !live.SettingsSupported && old.Encrypted != "" {
+		previous, err := s.control.retainedSnapshot(old)
+		if err != nil {
+			return err
+		}
+		if len(previous.Settings) > 0 {
+			return errors.New("来源不支持已保存的高级设置，保留原版本")
+		}
+	}
+
 	for _, p := range live.Channels {
 		saved, ok := known[p.Provider]
+		if raw, exists := definitions[p.Provider]; exists {
+			var doc struct {
+				Base string `json:"base_url"`
+				API  any    `json:"api"`
+			}
+			if json.Unmarshal(raw, &doc) != nil {
+				return errors.New("渠道定义无效")
+			}
+			keys := providerKeys(doc.API)
+			// The complete definition can authenticate with cloud credentials
+			// instead of api. This compatibility field only constructs a
+			// prototype; the gateway then compiles the original definition.
+			if len(keys) == 0 {
+				keys = []string{"__full_definition__"}
+			}
+			saved = retainedChannel{Provider: p.Provider, KeyID: p.KeyID, Base: doc.Base, Key: keys[0], Definition: raw}
+			ok = true
+			snapshot.Version = 2
+		}
 		if !ok || saved.KeyID != p.KeyID {
 			ok = false
 			for _, c := range credentials {
@@ -186,10 +243,30 @@ func (s *Service) captureControls(ctx context.Context, src controlSource, live r
 	return e
 }
 func controlEquivalent(live retainedLive, saved retainedSnapshot) bool {
+	if len(saved.Settings) > 0 {
+		if live.SettingsDigest != tokenHash(canonicalSettings(saved.Settings)) {
+			return false
+		}
+	} else if live.SettingsDigest != "" && live.SettingsDigest != tokenHash("{}") {
+		return false
+	}
+	definitions := map[string]json.RawMessage{}
+	for _, c := range saved.Channels {
+		if len(c.Definition) > 0 {
+			definitions[c.Provider] = c.Definition
+		}
+	}
+	if len(definitions) > 0 && live.DefinitionsDigest != tokenHash(canonicalSettings(definitions)) {
+		return false
+	}
+	saved.Settings = nil
+	saved.Version = 1
+
 	scrub := func(v retainedSnapshot) string {
 		for i := range v.Channels {
 			v.Channels[i].Key = ""
 			v.Channels[i].Base = ""
+			v.Channels[i].Definition = nil
 			v.Channels[i].Models = append([]string{}, v.Channels[i].Models...)
 			sort.Strings(v.Channels[i].Models)
 		}
@@ -259,7 +336,7 @@ func (s *Service) reconcileControls(ctx context.Context, src controlSource) (map
 		return raw, e
 	}
 	continuing := record.Restoring == live.Instance && record.RestoreRevision == live.Revision
-	if !continuing && (len(live.Rules) > 0 || len(live.Channels) > 0) {
+	if !continuing && (len(live.Rules) > 0 || len(live.Channels) > 0 || (live.SettingsDigest != "" && live.SettingsDigest != tokenHash("{}"))) {
 		return nil, errors.New("新实例已有不同的临时修改，自动恢复已暂停以避免覆盖")
 	}
 	_, e = s.control.db.ExecContext(ctx, `UPDATE console_control_snapshots SET restoring_instance=$2,restore_revision=$3,status='restoring',message='',checked_at=now() WHERE source_id=$1`, src.ID, live.Instance, live.Revision)
@@ -268,7 +345,11 @@ func (s *Service) reconcileControls(ctx context.Context, src controlSource) (map
 	}
 	apply := func(path string, body map[string]any) error {
 		body["revision"] = live.Revision
-		next, _, err := subGateway(ctx, src, "POST", path, body)
+		restoreSource := src
+		if saved.Version == 2 && restoreSource.ConfigKey != "" {
+			restoreSource.Key = restoreSource.ConfigKey
+		}
+		next, _, err := subGateway(ctx, restoreSource, "POST", path, body)
 		if err != nil {
 			return err
 		}
@@ -473,6 +554,10 @@ func (s *Service) bootstrapControls(w http.ResponseWriter, r *http.Request) {
 	saved, e := s.control.retainedSnapshot(record)
 	if e != nil {
 		http.Error(w, "configuration snapshot unavailable", 503)
+		return
+	}
+	if saved.Version > 1 && r.Header.Get("X-Uni-Channel-Settings-Version") != "1" {
+		http.Error(w, "saved channel settings require a compatible gateway", 409)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"enabled": true, "snapshot": saved})

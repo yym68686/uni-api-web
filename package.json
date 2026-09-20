@@ -23,7 +23,8 @@
     "lucide-react": "1.46.0",
     "motion": "13.2.0",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "7.0.1",

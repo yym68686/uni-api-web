@@ -94,6 +94,10 @@ func newControlStore(dsn, master string) (*controlStore, error) {
 		db.Close()
 		return nil, err
 	}
+	if _, err = db.ExecContext(ctx, channelSettingsSchema); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if _, err = db.ExecContext(ctx, automationSchema); err != nil {
 		db.Close()
 		return nil, err
@@ -314,6 +318,16 @@ func (s *Service) controlHandler() http.Handler {
 	mux.HandleFunc("GET /v1/channel-sites", s.channelSites)
 	mux.HandleFunc("GET /v1/channel-spend", s.channelSpend)
 	mux.HandleFunc("GET /v1/sources/{id}/channel-info", s.channelInfo)
+	mux.HandleFunc("GET /v1/sources/{id}/channel-settings", s.channelSettings)
+	mux.HandleFunc("POST /v1/sources/{id}/channel-settings/validate", s.channelSettingsValidate)
+	mux.HandleFunc("POST /v1/sources/{id}/channel-settings/discover", s.channelSettingsDiscover)
+	mux.HandleFunc("PATCH /v1/sources/{id}/channel-settings", s.channelSettingsApply)
+	mux.HandleFunc("GET /v1/sources/{id}/channel-settings/operations", s.channelSettingsOperations)
+	mux.HandleFunc("GET /v1/sources/{id}/channel-settings/operations/{operation}", s.channelSettingsOperation)
+	mux.HandleFunc("POST /v1/sources/{id}/channel-settings/rollback", s.channelSettingsRollback)
+	mux.HandleFunc("GET /v1/channel-setting-templates", s.channelSettingsTemplates)
+	mux.HandleFunc("POST /v1/channel-setting-templates", s.channelSettingsTemplates)
+
 	mux.HandleFunc("GET /v1/sub2api/quality-summary", s.subQualitySummary)
 	mux.HandleFunc("GET /v1/sub2api/accounts", s.subAccounts)
 	mux.HandleFunc("GET /v1/sub2api/accounts/{id}/balance", s.subAccountBalance)

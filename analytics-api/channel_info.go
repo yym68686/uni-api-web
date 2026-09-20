@@ -10,9 +10,11 @@ import (
 )
 
 type configuredProvider struct {
-	Provider string `json:"provider"`
-	Base     string `json:"base_url"`
-	API      any    `json:"api"`
+	Temporary       bool   `json:"temporary,omitempty"`
+	IdentityChanged bool   `json:"identity_changed,omitempty"`
+	Provider        string `json:"provider"`
+	Base            string `json:"base_url"`
+	API             any    `json:"api"`
 }
 
 func configuredProviders(ctx context.Context, src controlSource) ([]configuredProvider, error) {
@@ -23,6 +25,25 @@ func configuredProviders(ctx context.Context, src controlSource) ([]configuredPr
 	// the first key only grants catalog inspection and temporary controls.
 	if src.ConfigKey != "" {
 		src.Key = src.ConfigKey
+	}
+	effective, code, e := subGateway(ctx, src, "GET", "/v1/channel-settings/providers", nil)
+	if e == nil {
+		if _, ok := effective["providers"]; ok {
+			var providers []configuredProvider
+			if e = decodeMap(effective["providers"], &providers); e == nil {
+				filtered := providers[:0]
+				for _, p := range providers {
+					if !p.Temporary || p.IdentityChanged {
+						filtered = append(filtered, p)
+					}
+				}
+				return filtered, nil
+			}
+			return nil, e
+		}
+	}
+	if e != nil && code != 404 {
+		return nil, e
 	}
 	raw, _, err := subGateway(ctx, src, "GET", "/v1/api_config", nil)
 	if err != nil {
@@ -137,6 +158,21 @@ func (s *Service) channelInfo(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, out)
 	}
 	if strings.HasPrefix(provider, "sub2api-") {
+		admin := src
+		if admin.ConfigKey != "" {
+			admin.Key = admin.ConfigKey
+		}
+		if raw, _, e := subGateway(ctx, admin, "GET", "/v1/channel-settings/providers", nil); e == nil {
+			var providers []configuredProvider
+			if decodeMap(raw["providers"], &providers) == nil {
+				for _, p := range providers {
+					if p.Provider == provider {
+						respond(p.Base, providerKeys(p.API))
+						return
+					}
+				}
+			}
+		}
 		owner, _ := s.controlUser(r)
 		refs, e := s.control.subChannelRefs(ctx, owner)
 		if e != nil {

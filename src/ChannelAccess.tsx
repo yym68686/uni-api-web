@@ -1,3 +1,4 @@
+import { ChannelSettings } from "./ChannelSettings";
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Copy, Eye, EyeOff, Trash2 } from "lucide-react";
@@ -30,7 +31,7 @@ export function ChannelAccess({ row, imports, onRemoved }: { row: Channel; impor
     finally { if (!controller.current.signal.aborted) setBusy(false); }
   }
   return <section className="detail-section channel-access" aria-label="渠道 API key">
-    <h3>渠道 API key</h3>
+    <div className="channel-access-actions"><h3>渠道 API key</h3><ChannelSettings row={row}/></div>
     <div className="channel-secret">{keys ? keys.map((key, i) => <code key={i}>{key}</code>) : <code aria-label="API key 已隐藏">••••••••••••••••••••••••</code>}</div>
     <div className="channel-access-actions">
       <button className="button small" disabled={busy} onClick={() => keys ? setKeys(null) : void read(false)}>{busy ? <Spinner small /> : keys ? <EyeOff size={14} /> : <Eye size={14} />}{keys ? "隐藏" : "显示"}</button>

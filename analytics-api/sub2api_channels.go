@@ -39,9 +39,10 @@ type subGatewayControls struct {
 	Revision   string `json:"revision"`
 	Manageable bool   `json:"temporary_channel_management"`
 	Temporary  []struct {
-		Provider string   `json:"provider"`
-		KeyID    string   `json:"api_key_id"`
-		Models   []string `json:"models"`
+		Provider        string   `json:"provider"`
+		IdentityChanged bool     `json:"identity_changed"`
+		KeyID           string   `json:"api_key_id"`
+		Models          []string `json:"models"`
 	} `json:"temporary_channels"`
 	Rules []struct {
 		KeyID string   `json:"api_key_id"`
@@ -157,6 +158,9 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 			}
 			results[i].Labels = labels
 			for _, p := range state.Temporary {
+				if p.IdentityChanged {
+					continue
+				}
 				ref, ok := lookup[p.Provider]
 				if !ok {
 					continue
@@ -205,7 +209,15 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "配置渠道关联读取失败", 503)
 		return
 	}
-	data = append(data, configured...)
+	seen := map[string]bool{}
+	for _, c := range data {
+		seen[c.SourceID+"\n"+c.Provider] = true
+	}
+	for _, c := range configured {
+		if !seen[c.SourceID+"\n"+c.Provider] {
+			data = append(data, c)
+		}
+	}
 	sort.Slice(data, func(i, j int) bool {
 		if data[i].SourceID != data[j].SourceID {
 			return data[i].SourceID < data[j].SourceID
