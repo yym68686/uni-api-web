@@ -2550,6 +2550,9 @@ nav > button.active > svg {
 }
 .channel-profit > small { font-size: 11px; font-style: normal; }
 .profit-positive { color: var(--green); }
+.profit-upper-bound { color: #9a7208; }
+:root[data-theme="dark"] .profit-upper-bound { color: #e9cc70; }
+.profit-bound-label { margin-left: 6px; font-size: 10px; font-style: normal; font-family: var(--font-sans, sans-serif); }
 
 .price-source { display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:12px; }
 .price-source a { display:inline-flex;align-items:center;gap:4px;color:var(--green); }

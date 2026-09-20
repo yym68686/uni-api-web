@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import * as Tooltip from "@radix-ui/react-tooltip";
-import { channelProfit, ChannelProfit } from "./ChannelProfit";
+import { channelProfit, channelProfitCost, ChannelProfit } from "./ChannelProfit";
 import { ChannelMetricCells, ChannelMetricHeaders } from "./ChannelMetrics";
 import { emptyStats } from "./analytics";
 import type { Channel } from "./types";
@@ -131,7 +131,11 @@ it("uses the displayed channel spending source and never falls back to a whole-d
     }),
   );
   expect(screen.getByText("≥$5.00")).toBeVisible();
-  expect(profitCell()).not.toHaveTextContent("¥");
+  expect(profitCell()).toHaveTextContent("≤¥12.25上限≤71.01%");
+  app.rerender(ui(true, true, receipt));
+  expect(profitCell()).toHaveTextContent("¥12.25");
+  expect(profitCell()).not.toHaveTextContent("≤");
+  expect(profitCell()).not.toHaveTextContent("上限");
   app.rerender(ui(true, true));
   expect(profitCell()).not.toHaveTextContent("¥");
   app.rerender(ui(false, false));
@@ -145,6 +149,42 @@ it("uses the displayed channel spending source and never falls back to a whole-d
     }),
   );
   expect(profitCell()).not.toHaveTextContent("¥");
+});
+
+it("shows the screenshot profit upper bound and explains its uncertainty", async () => {
+  render(<Tooltip.Provider><ChannelProfit estimated={105.6885} actual={7.6924857} upperBound /></Tooltip.Provider>);
+  const amount = screen.getByText("≤¥10.538781");
+  expect(amount).toBeVisible();
+  expect(screen.getByText("上限")).toBeVisible();
+  expect(screen.getByLabelText("利润率上限 ≤57.81%")).toBeVisible();
+  expect(amount.closest(".channel-profit")).toHaveClass("profit-upper-bound");
+  expect(amount.closest(".channel-profit")).not.toHaveClass("profit-positive");
+  fireEvent.focus(amount.closest(".tip-target")!);
+  expect(await screen.findByRole("tooltip")).toHaveTextContent("实际利润及利润率可能更低");
+});
+
+it("keeps negative upper bounds and zero-revenue bounds explicit", () => {
+  const view = render(<Tooltip.Provider><ChannelProfit estimated={100} actual={20} upperBound /></Tooltip.Provider>);
+  expect(screen.getByText("≤¥-2.75").closest(".channel-profit")).toHaveClass("negative");
+  expect(screen.getByLabelText("利润率上限 ≤-15.94%")).toBeVisible();
+  view.rerender(<Tooltip.Provider><ChannelProfit estimated={100} actual={0} salePercent={0} upperBound /></Tooltip.Provider>);
+  expect(screen.getByText("≤¥0.00")).toBeVisible();
+  expect(screen.getByLabelText("利润率上限 —")).toBeVisible();
+});
+
+it("uses only reconciled per-request costs for an upper bound, never missing or shared totals", () => {
+  const spend: NonNullable<SubChannelSpendResult["data"]> = {
+    status: "unmatched", scope: "matched_requests", actual_cost_usd: null,
+    from: 1, to: 2, matched_cost_usd: 5, matched_attempts: 9, total_attempts: 10,
+  };
+  expect(channelProfitCost(spend)).toEqual({ actual: 5, upperBound: true });
+  expect(channelProfitCost({ ...spend, status: "error", sync_error: true })).toEqual({ actual: 5, upperBound: true });
+  expect(channelProfitCost({ ...spend, matched_cost_usd: 0, matched_attempts: 0, confirmed_unbilled_attempts: 1 })).toEqual({ actual: 0, upperBound: true });
+  expect(channelProfitCost({ ...spend, matched_cost_usd: 0, matched_attempts: 0 })).toBeUndefined();
+  expect(channelProfitCost({ ...spend, scope: "sub2api_business_key" })).toBeUndefined();
+  for (const value of [undefined, Number.NaN, Infinity, -1])
+    expect(channelProfitCost({ ...spend, matched_cost_usd: value })).toBeUndefined();
+  expect(channelProfitCost({ ...spend, status: "complete", actual_cost_usd: null })).toBeUndefined();
 });
 
 it("uses each model's sale percentage, including explicit free pricing", () => {

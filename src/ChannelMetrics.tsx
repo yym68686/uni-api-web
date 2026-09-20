@@ -18,7 +18,7 @@ import type { ActualCostRange } from "./actualCost";
 import { SubChannelSpendValue } from "./SubChannelSpend";
 import type { SubChannelSpendResult } from "./SubChannelSpend";
 import { salePercent } from "./modelPrices";
-import { ChannelProfit } from "./ChannelProfit";
+import { ChannelProfit, channelProfitCost } from "./ChannelProfit";
 export interface BalanceResult {
   data?: Balance;
   isPending?: boolean;
@@ -198,12 +198,12 @@ export function ChannelMetricHeaders({
       <th>Token / 缓存率</th>
       <th>估算消费</th>
       <th>
-        <Tip text="已关联账单按上游响应标识逐请求归属，跟随来源、调用 API key、渠道、模型、时间、端点和流式筛选。重试单独关联且每条账单只计一次；历史请求缺少标识、账单未完整匹配时不显示完整消费或利润。未接入关联的渠道按日金额仅作参考。">
+        <Tip text="已关联账单按上游响应标识逐请求归属，跟随来源、调用 API key、渠道、模型、时间、端点和流式筛选。重试单独关联且每条账单只计一次；账单未完整匹配时显示已核对消费下界及利润上限。未接入关联的渠道按日金额仅作参考。">
           {keySelected ? "渠道实际消费" : "实际消费"} <CircleHelp size={12} />
         </Tip>
       </th>
       <th>
-        <Tip text="利润（人民币）= 估算消费 × 对应模型售卖百分比 ÷ 100 × 6.9 − 渠道实际消费，仅取数值计算。利润率 = 利润 ÷（估算消费 × 对应模型售卖百分比 ÷ 100 × 6.9）。">
+        <Tip text="利润（人民币）= 估算消费 × 对应模型售卖百分比 ÷ 100 × 6.9 − 渠道实际消费，仅取数值计算。利润率 = 利润 ÷（估算消费 × 对应模型售卖百分比 ÷ 100 × 6.9）。账单未齐但已有核对费用时，显示带 ≤ 的利润上限及利润率上限；实际结果可能更低。">
           利润 <CircleHelp size={12} />
         </Tip>
       </th>
@@ -231,13 +231,7 @@ export function ChannelMetricCells({
   metricsUnavailable?: boolean;
 }) {
   const success = row.stats?.success_rate;
-  const actualCost =
-    spend || importedChannel
-      ? spend?.data?.status === "complete" &&
-        spend.data.scope === "matched_requests"
-        ? spend.data.actual_cost_usd
-        : null
-      : null;
+  const profitCost = channelProfitCost(spend?.data);
   return (
     <>
       <td>
@@ -311,7 +305,8 @@ export function ChannelMetricCells({
       <td>
         <ChannelProfit
           estimated={row.stats?.estimated_cost_usd}
-          actual={actualCost}
+          actual={profitCost?.actual}
+          upperBound={profitCost?.upperBound}
           salePercent={salePercent({
             model: row.model,
             sale_percent: row.stats?.sale_percent,
