@@ -7,16 +7,19 @@ const baseModels = catalog
   .sort((a, b) => b.length - a.length);
 
 export function chargesCacheWrite(price: ModelPrice): boolean {
-  return (
-    price.charge_cache_write ?? !price.model.toLowerCase().startsWith("gpt-")
-  );
+  return price.charge_cache_write ?? !/^(gpt|jev)-/i.test(price.model);
 }
 
 export function salePercent(
   price: Pick<ModelPrice, "model" | "sale_percent">,
 ): number {
   return (
-    price.sale_percent ?? (/^(claude|gemini)-/i.test(price.model) ? 15 : 2.5)
+    price.sale_percent ??
+    (/^jev-/i.test(price.model)
+      ? 100
+      : /^(claude|gemini)-/i.test(price.model)
+        ? 15
+        : 2.5)
   );
 }
 

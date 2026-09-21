@@ -66,6 +66,23 @@ this warning.
 
 ## Platform endpoints
 
+### TypeSafe / Jev
+
+In account mode, use **添加 Jev 渠道** to select a source and calling API key,
+enter a TypeSafe key, and choose the JEV models. The gateway must advertise
+`create_typesafe` in `/v1/channel-settings/schema`. Creation uses validated,
+key-scoped channel settings and the existing encrypted retention workflow.
+An interrupted save is reconciled by operation ID before another write.
+
+JEV uses `POST /v1/systemone` with `model`, `state`, and `questions`; it supports
+Choice, Noul, Score, and multiple questions in one request. It is not a chat or
+Responses model. `GET /v1/models` also exposes the TypeSafe SDK's `models` shape.
+The reference input price is USD 0.042 per million tokens, with free output,
+according to [TypeSafe's model documentation](https://docs.typesafe.ai/models).
+These models are excluded from sub2api chat probes.
+
+### Observation APIs
+
 - `GET /v1/api-keys`
 - `GET /v1/model-channels`
 - `GET /v1/channel-metrics`

@@ -39,7 +39,7 @@ func TestCatalogFallbackPreservesPersistedOperatorSettings(t *testing.T) {
 	if p := byModel["codex-auto-review"]; p.Verified {
 		t.Fatal("unknown price marked verified")
 	}
-	if len(byModel) != len(subModels) {
+	if len(byModel) != len(modelCatalog) {
 		t.Fatal("missing catalog entries", len(byModel))
 	}
 	var persisted float64
@@ -92,5 +92,46 @@ func TestPricePrefixBoundaries(t *testing.T) {
 		if got := canonicalPriceModel(input); got != want {
 			t.Errorf("%s: got %s want %s", input, got, want)
 		}
+	}
+}
+
+func TestJevInputOnlyPriceAndNativeProtocol(t *testing.T) {
+	for _, model := range []string{"jev-latest", "jev-preview", "jev-1.13.0"} {
+		var found bool
+		for _, price := range withCatalogPrices(nil) {
+			if price.Model != model {
+				continue
+			}
+			found = true
+			if price.Input != .042 || price.Output != 0 || price.chargesCacheWrite() || price.salePercent() != 100 || !price.Verified {
+				t.Fatalf("wrong Jev price: %+v", price)
+			}
+		}
+		if !found {
+			t.Fatalf("missing %s", model)
+		}
+		for _, detector := range subModels {
+			if detector == model {
+				t.Fatal("Jev must not use the sub2api chat detector")
+			}
+		}
+	}
+	e, err := OpenEngine(filepath.Join(t.TempDir(), "jev.duckdb"), Config{Timezone: "UTC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	input, output := int64(1_000_000), int64(999_999)
+	ctx := context.Background()
+	if err = e.Import(ctx, "jev.jsonl", "etag", []Fact{{Schema: 1, EventID: "jev-cost", Kind: "request", AtMS: time.Now().Add(-time.Second).UnixMilli(), Provider: "typesafe-jev", Model: "jev-latest", UpstreamModel: "jev-1.13.0", Outcome: "success", InputTokens: &input, OutputTokens: &output}}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := e.Query(ctx, QueryFilter{Range: "all"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cost, ok := result.Total["estimated_cost_usd"].(float64)
+	if !ok || math.Abs(cost-.042) > 1e-9 {
+		t.Fatalf("output tokens charged or price wrong: %v", result.Total)
 	}
 }

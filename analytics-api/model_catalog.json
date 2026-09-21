@@ -262,5 +262,47 @@
     "verified": true,
     "cache_write_kind": "ttl",
     "note": "Claude API 标准全球价格，缓存写入按 5 分钟 / 1 小时区分。"
+  },
+  {
+    "model": "jev-1.13.0",
+    "input": 0.042,
+    "output": 0,
+    "cache_read": 0,
+    "cache_write": 0,
+    "cache_write_1h": 0,
+    "charge_cache_write": false,
+    "sale_percent": 100,
+    "source": "https://docs.typesafe.ai/models",
+    "verified": true,
+    "cache_write_kind": "flat",
+    "note": "TypeSafe Jev：按输入 token 计费，输出免费；别名当前指向 jev-1.13.0。"
+  },
+  {
+    "model": "jev-latest",
+    "input": 0.042,
+    "output": 0,
+    "cache_read": 0,
+    "cache_write": 0,
+    "cache_write_1h": 0,
+    "charge_cache_write": false,
+    "sale_percent": 100,
+    "source": "https://docs.typesafe.ai/models",
+    "verified": true,
+    "cache_write_kind": "flat",
+    "note": "TypeSafe Jev：按输入 token 计费，输出免费；别名当前指向 jev-1.13.0。"
+  },
+  {
+    "model": "jev-preview",
+    "input": 0.042,
+    "output": 0,
+    "cache_read": 0,
+    "cache_write": 0,
+    "cache_write_1h": 0,
+    "charge_cache_write": false,
+    "sale_percent": 100,
+    "source": "https://docs.typesafe.ai/models",
+    "verified": true,
+    "cache_write_kind": "flat",
+    "note": "TypeSafe Jev：按输入 token 计费，输出免费；别名当前指向 jev-1.13.0。"
   }
 ]

@@ -78,6 +78,7 @@ import { ChannelModels } from "./ChannelModels";
 import { SiteLink, useChannelSites, dashboardURL } from "./ChannelSite";
 import { ChannelAccess } from "./ChannelAccess";
 import { ChannelSettings } from "./ChannelSettings";
+import { TypeSafeChannel } from "./TypeSafeChannel";
 import { CacheTrend } from "./CacheTrend";
 import type { CacheTrendProps } from "./CacheTrend";
 import { QualityHistory, QualityProbability, qualityTooltip } from "./QualityHistory";
@@ -259,6 +260,7 @@ function Overview({
 }
 
 const endpointChoices = [
+  "/v1/systemone",
   "/v1/responses",
   "/v1/responses/compact",
   "/v1/chat/completions",
@@ -1517,6 +1519,9 @@ function Dashboard({
                       </button>
                     )}
                   </div>
+                  {channelView && baseConnection.account && (
+                    <TypeSafeChannel sources={sourceList} keys={keys.data?.data || []} sourceId={selectedSourceId} keyId={keyId} />
+                  )}
                   {channelView && baseConnection.account && (
                     <ChannelControlActions
                       controls={controls}

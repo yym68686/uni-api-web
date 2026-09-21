@@ -22,12 +22,13 @@ const channelSettingsSchema = `CREATE TABLE IF NOT EXISTS console_channel_settin
  CREATE TABLE IF NOT EXISTS console_channel_setting_templates(id TEXT PRIMARY KEY,owner TEXT NOT NULL,name TEXT NOT NULL,patch JSONB NOT NULL,updated_at TIMESTAMPTZ NOT NULL DEFAULT now());`
 
 type channelSettingChange struct {
-	DeleteCopy bool           `json:"delete_copy,omitempty"`
-	CopyToKey  string         `json:"copy_to_key,omitempty"`
-	Provider   string         `json:"provider"`
-	Set        map[string]any `json:"set,omitempty"`
-	Remove     []string       `json:"remove,omitempty"`
-	Reset      bool           `json:"reset"`
+	DeleteCopy  bool           `json:"delete_copy,omitempty"`
+	CopyToKey   string         `json:"copy_to_key,omitempty"`
+	CreateToKey string         `json:"create_to_key,omitempty"`
+	Provider    string         `json:"provider"`
+	Set         map[string]any `json:"set,omitempty"`
+	Remove      []string       `json:"remove,omitempty"`
+	Reset       bool           `json:"reset"`
 }
 type channelSettingMutation struct {
 	Revision  string                 `json:"revision"`
@@ -99,6 +100,19 @@ func (s *Service) channelSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	path := "/v1/channel-settings?" + url.Values{"provider": {r.URL.Query().Get("provider")}}.Encode()
 	value, status, err := s.settingsGateway(r.Context(), src, "GET", path, nil)
+	if err != nil {
+		http.Error(w, err.Error(), status)
+		return
+	}
+	writeJSON(w, 200, value)
+}
+func (s *Service) channelSettingsSchema(w http.ResponseWriter, r *http.Request) {
+	src, err := s.settingsSource(r)
+	if err != nil {
+		http.Error(w, "来源不存在", 404)
+		return
+	}
+	value, status, err := s.settingsGateway(r.Context(), src, "GET", "/v1/channel-settings/schema", nil)
 	if err != nil {
 		http.Error(w, err.Error(), status)
 		return

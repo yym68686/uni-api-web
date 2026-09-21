@@ -14,7 +14,7 @@ it("defaults GPT write billing off and other models on, saves explicit choices w
   const props = { prices: [] as ModelPrice[], loading: false, connection: { base: "", key: "", session: "test", account: true }, onSaved: vi.fn() };
   const view = render(<PriceSettings {...props} />);
   for (const price of MODEL_PRICE_CATALOG) {
-    expect(screen.getByRole("checkbox", { name: `${price.model} 计算缓存写入费用` })).toHaveProperty("checked", !price.model.startsWith("gpt-"));
+    expect(screen.getByRole("checkbox", { name: `${price.model} 计算缓存写入费用` })).toHaveProperty("checked", !/^(gpt|jev)-/.test(price.model));
   }
   const user = userEvent.setup();
   for (const model of ["gpt-6-astra", "claude-fable-5"]) {

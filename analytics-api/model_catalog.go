@@ -26,16 +26,20 @@ var modelCatalog = func() []Price {
 }()
 
 var subModels = func() []string {
-	models := make([]string, len(modelCatalog))
-	for i, price := range modelCatalog {
-		models[i] = price.Model
+	models := make([]string, 0, len(modelCatalog))
+	for _, price := range modelCatalog {
+		// System One models use their native endpoint, not the sub2api chat probes.
+		if !strings.HasPrefix(price.Model, "jev-") {
+			models = append(models, price.Model)
+		}
 	}
 	return models
 }()
 
 func canonicalPriceModel(model string) string {
 	best := ""
-	for _, base := range subModels {
+	for _, price := range modelCatalog {
+		base := price.Model
 		if len(base) > len(best) && (model == base || strings.HasPrefix(model, base+"-")) {
 			best = base
 		}
@@ -51,7 +55,8 @@ func (p Price) chargesCacheWrite() bool {
 	if p.ChargeCacheWrite != nil {
 		return *p.ChargeCacheWrite
 	}
-	return !strings.HasPrefix(strings.ToLower(p.Model), "gpt-")
+	model := strings.ToLower(p.Model)
+	return !strings.HasPrefix(model, "gpt-") && !strings.HasPrefix(model, "jev-")
 }
 
 // Percent of the reference API price, independently configurable per model.
@@ -60,6 +65,9 @@ func (p Price) salePercent() float64 {
 		return *p.SalePercent
 	}
 	model := strings.ToLower(p.Model)
+	if strings.HasPrefix(model, "jev-") {
+		return 100
+	}
 	if strings.HasPrefix(model, "claude-") || strings.HasPrefix(model, "gemini-") {
 		return 15
 	}

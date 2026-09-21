@@ -1,6 +1,8 @@
 import modelCatalog from "../analytics-api/model_catalog.json";
 
-export const SUB_MODELS = modelCatalog.map(entry => entry.model);
+export const SUB_MODELS = modelCatalog
+  .filter((entry) => !entry.model.startsWith("jev-"))
+  .map((entry) => entry.model);
 export type SubModel = (typeof SUB_MODELS)[number];
 export const isGeminiModel = (model: string) =>
   model === "gemini-3.1-pro" || model === "gemini-3.8-flash";
