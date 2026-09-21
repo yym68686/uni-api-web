@@ -66,11 +66,21 @@ this warning.
 
 ## Platform endpoints
 
+### 添加渠道
+
+渠道观测的 **添加渠道** 打开通用模态框：选择 uni-api 来源与调用 API key，
+填写渠道名称、来源支持的引擎、完整上游地址、一个或多个密钥及模型映射。
+AWS / Vertex 支持平台凭据；高级模式可直接填写单渠道 JSON / YAML，包含请求
+改写、超时、冷却等来源声明支持的配置。未知字段会报错，不会静默丢弃。
+新渠道仅属于所选调用 Key，使用原有校验、操作编号、加密保留和审计流程；
+连接中断后核对原操作，不重复创建。校验不会发送模型请求。网关必须在
+`/v1/channel-settings/schema` 声明 `create_provider`，旧来源需更新 uni-api。
+
 ### TypeSafe / Jev
 
-In account mode, use **添加 Jev 渠道** to select a source and calling API key,
-enter a TypeSafe key, and choose the JEV models. The gateway must advertise
-`create_typesafe` in `/v1/channel-settings/schema`. Creation uses validated,
+In account mode, use **添加渠道**, select the `typesafe` engine, set
+`https://api.typesafe.ai/v1/systemone`, enter a TypeSafe key and the JEV models.
+The gateway must advertise `create_provider` in `/v1/channel-settings/schema`. Creation uses validated,
 key-scoped channel settings and the existing encrypted retention workflow.
 An interrupted save is reconciled by operation ID before another write.
 

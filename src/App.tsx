@@ -78,7 +78,7 @@ import { ChannelModels } from "./ChannelModels";
 import { SiteLink, useChannelSites, dashboardURL } from "./ChannelSite";
 import { ChannelAccess } from "./ChannelAccess";
 import { ChannelSettings } from "./ChannelSettings";
-import { TypeSafeChannel } from "./TypeSafeChannel";
+import { CreateChannel } from "./CreateChannel";
 import { CacheTrend } from "./CacheTrend";
 import type { CacheTrendProps } from "./CacheTrend";
 import { QualityHistory, QualityProbability, qualityTooltip } from "./QualityHistory";
@@ -1520,7 +1520,7 @@ function Dashboard({
                     )}
                   </div>
                   {channelView && baseConnection.account && (
-                    <TypeSafeChannel sources={sourceList} keys={keys.data?.data || []} sourceId={selectedSourceId} keyId={keyId} />
+                    <CreateChannel sources={sourceList} keys={keys.data?.data || []} sourceId={selectedSourceId} keyId={keyId} />
                   )}
                   {channelView && baseConnection.account && (
                     <ChannelControlActions

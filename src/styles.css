@@ -2794,9 +2794,18 @@ nav > button.active > svg {
 .settings-key-row input[type=text] {font-family:"Geist Mono Variable",monospace;}
 @media(max-width:600px){.settings-key-toolbar{align-items:flex-start;gap:8px;flex-wrap:wrap}.settings-key-toolbar .button{margin-left:auto}.settings-key-row:has(.settings-copy-key){flex-wrap:wrap;justify-content:flex-end}.settings-key-row:has(.settings-copy-key) label{flex-basis:100%}.settings-key-row:has(.settings-copy-key) .settings-icon-button{height:32px;width:32px}}
 
-.typesafe-dialog { position: fixed; z-index: 90; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(520px, calc(100vw - 32px)); max-height: 90svh; overflow: auto; padding: 28px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); color: var(--ink); box-shadow: 0 24px 80px #0003; }
-.typesafe-dialog h2 { margin: 0 0 12px; font-size: 22px; }
-.typesafe-dialog .settings-note { padding: 0; }
-.typesafe-dialog fieldset > label { display: grid; gap: 8px; font-size: 13px; }
-.typesafe-dialog input:not([type=checkbox]), .typesafe-dialog select { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink); background: var(--input); font: inherit; }
-.typesafe-dialog .dialog-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
+.create-channel-dialog {position:fixed;z-index:90;left:50%;top:50%;transform:translate(-50%,-50%);display:flex;flex-direction:column;width:min(760px,calc(100vw - 40px));max-height:92svh;overflow:hidden;border:1px solid var(--line);border-radius:18px;background:var(--surface);color:var(--ink);box-shadow:0 28px 100px #0005;}
+.create-channel-body {padding:24px 30px;overflow:auto;min-height:0;overscroll-behavior:contain;}
+.create-channel-body fieldset {display:grid;gap:20px;border:0;padding:0;margin:0;min-width:0;}
+.create-channel-body label {display:grid;align-content:start;gap:8px;font-size:12px;min-width:0;}
+.create-channel-body input,.create-channel-body select,.create-channel-body textarea {width:100%;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:8px;color:var(--ink);background:var(--bg);font:inherit;line-height:1.6;}
+.create-channel-body input:focus,.create-channel-body select:focus,.create-channel-body textarea:focus {outline:2px solid color-mix(in srgb,var(--green) 30%,transparent);outline-offset:1px;border-color:var(--green);}
+.create-channel-body textarea {resize:vertical;font-family:"Geist Mono Variable",monospace;font-size:12px;}
+.create-channel-body .create-channel-raw {min-height:360px;}
+.create-channel-body small {font-size:11px;line-height:1.7;color:var(--muted);}
+.create-channel-grid {display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+.create-channel-mode {display:flex;gap:6px;border-bottom:1px solid var(--line);padding-bottom:12px;}
+.create-channel-mode button {display:flex;align-items:center;gap:8px;padding:9px 12px;border:0;border-radius:8px;background:transparent;color:var(--muted);font-size:12px;}
+.create-channel-mode button[aria-pressed=true] {background:var(--green-bg);color:var(--green);}
+.create-channel-dialog .settings-footer > .settings-help {margin:0;}
+@media(max-width:600px){.create-channel-dialog{width:calc(100vw - 20px);max-height:94svh;}.create-channel-body{padding:20px 16px;}.create-channel-grid{grid-template-columns:1fr;}.create-channel-dialog .settings-footer{flex-wrap:wrap;}.create-channel-dialog .settings-footer-primary{margin-left:auto;}}

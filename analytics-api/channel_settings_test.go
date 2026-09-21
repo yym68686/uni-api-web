@@ -173,10 +173,37 @@ func TestSettingsNativeGatewayRetention(t *testing.T) {
 	if strings.Contains(w.Body.String(), "changed-test-key") {
 		t.Fatal("secret exposed")
 	}
+	var applied map[string]any
+	if err = json.Unmarshal(w.Body.Bytes(), &applied); err != nil {
+		t.Fatal(err)
+	}
+	// Generic creation must survive the Go persistence / Rust restoration boundary,
+	// including names without legacy prefixes and cloud auth without an api field.
+	keys, _, err := svc.settingsGateway(context.Background(), src, "GET", "/v1/api-keys", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyID := keys["data"].([]any)[0].(map[string]any)["key_id"].(string)
+	creation := channelSettingMutation{Operation: id + "-create", Revision: applied["revision"].(string), Changes: []channelSettingChange{{Provider: "custom-cloud.1", CreateToKey: keyID, Set: map[string]any{
+		"/engine": "aws", "/base_url": "https://bedrock.example", "/aws_access_key": "fixture-access", "/aws_secret_key": "fixture-secret", "/model": []any{map[string]string{"vendor/model": "public-cloud"}},
+	}}}}
+	req = httptest.NewRequest("PATCH", "/v1/sources/"+id+"/channel-settings", strings.NewReader(mustJSON(creation)))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	svc.controlHandler().ServeHTTP(w, req)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"status":"applied"`) {
+		t.Fatalf("creation %d %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "fixture-secret") {
+		t.Fatal("created secret exposed")
+	}
 	record, _ := store.retainedRecord(context.Background(), id)
 	saved, err := store.retainedSnapshot(record)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(saved.Channels) != 1 || saved.Channels[0].Provider != "custom-cloud.1" || !strings.Contains(string(saved.Channels[0].Definition), "fixture-secret") {
+		t.Fatal("full generic definition not retained")
 	}
 	raw, _, err := svc.settingsGateway(context.Background(), src, "GET", "/v1/channel-controls", nil)
 	if err != nil {
