@@ -6,6 +6,7 @@ export const subFilterDefaults = {
   maxRate: "",
   sort: "",
   availability: "",
+  priceStatus: "",
   quality: "",
   minQuality: "",
   platform: "",
@@ -33,6 +34,7 @@ function validate(raw: unknown): SubFilters {
         : "",
     sort: field("sort", ["", "asc", "desc"]),
     availability: field("availability", ["", "success", "error", "untested"]),
+    priceStatus: field("priceStatus", ["", "normal", "abnormal", "unconfirmed"]),
     quality: field("quality", ["", "pass", "fail", "inconclusive", "error"]),
     minQuality: field("minQuality", ["", ...Array.from({ length: 11 }, (_, i) => String(i * 10))]),
   };

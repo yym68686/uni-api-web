@@ -8,6 +8,7 @@ import type { SubAccount } from "./Sub2apiChecks";
 import { LatencyBadge } from "./LatencyBadge";
 import { Timing } from "./ChannelMetrics";
 import { SUB_MODELS } from "./sub2apiModels";
+import type { SubUsage } from "./sub2apiPriceCheck";
 
 afterEach(() => vi.unstubAllGlobals());
 function mount(user = "account") {
@@ -67,6 +68,85 @@ function fixtures(): SubAccount[] {
     ],
   }));
 }
+
+it("filters unit prices across pages and models, persists selection, and scopes both batch checks", async () => {
+  const data = fixtures().slice(0, 1);
+  const template = data[0].targets[0];
+  const usage: SubUsage = {
+    status: "matched", actual_cost: .01, total_cost: .1, rate_multiplier: .1,
+    input_tokens: 100, output_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0,
+    input_price: 5, output_price: 30, cache_read_price: null, cache_write_price: null,
+    paid_input_price: .5, paid_output_price: 3, duration_ms: 10, first_token_ms: 1,
+  };
+  const checks = SUB_MODELS.map(model => ({
+    model, state: "done", message: "",
+    result: { ...template.result!, model, availability: { ...template.result!.availability, usage } },
+  }));
+  data[0].targets = Array.from({ length: 27 }, (_, i) => ({
+    ...template, group_id: i + 1, name: `abnormal-${i + 1}`,
+    models: checks.map(check => check.model === "gpt-6-astra" ? {
+      ...check, result: { ...check.result, availability: {
+        ...check.result.availability, usage: { ...usage, input_price: 6 },
+      } },
+    } : check),
+  }));
+  data[0].targets.push(
+    { ...template, group_id: 28, name: "all-normal", models: checks },
+    { ...template, group_id: 29, name: "partial-normal", models: [checks[0]], result: null },
+    { ...template, group_id: 30, name: "not-checked", models: [], result: null },
+    { ...template, group_id: 31, name: "pending-price", models: checks.map(check => ({
+      ...check, result: { ...check.result, availability: {
+        ...check.result.availability, usage: { ...usage, status: "pending" },
+      } },
+    })) },
+  );
+  const prices = SUB_MODELS.map(model => ({ model, input: 5, output: 30, verified: true }));
+  const writes: { path: string; targets: { group_id: number; models?: string[] }[] }[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+    if (init?.method === "POST") {
+      writes.push({ path: new URL(input, location.origin).pathname, ...JSON.parse(String(init.body)) });
+      return new Response("{}", { status: 202 });
+    }
+    return new Response(JSON.stringify({ data: input.endsWith("/prices") ? prices : input.endsWith("/accounts") ? data : [] }));
+  }));
+  const user = userEvent.setup();
+  let view = mount("price-filter-fixture");
+  const filter = await screen.findByLabelText("单价是否异常筛选");
+  await user.selectOptions(filter, "abnormal");
+  await screen.findByText("abnormal-1");
+  expect(screen.queryByText("all-normal")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "下一页" }));
+  expect(screen.getByRole("table").querySelectorAll("tbody tr")).toHaveLength(2);
+  await user.click(screen.getByRole("button", { name: "检测全部模型 · 27 个渠道" }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0].targets.map(t => t.group_id)).toEqual(Array.from({ length: 27 }, (_, i) => i + 1));
+  expect(writes[0].targets[0].models).toEqual(SUB_MODELS);
+  await user.click(screen.getByRole("button", { name: "降智检测 · 27 个渠道" }));
+  await waitFor(() => expect(writes).toHaveLength(2));
+  expect(writes[1].targets.map(t => t.group_id)).toEqual(writes[0].targets.map(t => t.group_id));
+  await user.selectOptions(filter, "normal");
+  expect(screen.getByText("all-normal")).toBeVisible();
+  expect(screen.queryByText("partial-normal")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "上一页" })).toBeDisabled();
+  await user.selectOptions(filter, "unconfirmed");
+  expect(screen.getByText("partial-normal")).toBeVisible();
+  expect(screen.getByText("pending-price")).toBeVisible();
+  expect(screen.getByText("not-checked")).toBeVisible();
+  expect(screen.queryByText("abnormal-1")).not.toBeInTheDocument();
+  await user.selectOptions(screen.getByLabelText("检测模型筛选"), "gpt-6-astra");
+  await user.selectOptions(filter, "normal");
+  expect(screen.getByText("partial-normal")).toBeVisible();
+  await user.selectOptions(screen.getByLabelText("检测模型筛选"), "gpt-5.6-sol");
+  expect(screen.getByText("abnormal-1")).toBeVisible();
+  expect(screen.queryByText("partial-normal")).not.toBeInTheDocument();
+  view.unmount();
+  view = mount("price-filter-fixture");
+  expect(screen.getByLabelText("单价是否异常筛选")).toHaveValue("normal");
+  expect(screen.getByLabelText("检测模型筛选")).toHaveValue("gpt-5.6-sol");
+  view.unmount();
+  mount("price-other-user");
+  expect(screen.getByLabelText("单价是否异常筛选")).toHaveValue("");
+});
 
 it("shows shared channel quality and filters it without changing the model availability result", async () => {
   const data = fixtures().slice(0, 1);

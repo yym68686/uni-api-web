@@ -39,6 +39,7 @@ import type { QualitySummary } from "./QualityHistory";
 import { SiteLink } from "./ChannelSite";
 import { useSubPrices, PriceStatus, GroupPriceStatus, UsageDetailRows } from "./Sub2apiPricing";
 import type { SubUsage } from "./sub2apiPriceCheck";
+import { priceFilterStatus } from "./sub2apiPriceCheck";
 import type { ModelPrice } from "./types";
 
 export interface Probe {
@@ -761,6 +762,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
     maxRate,
     sort,
     availability,
+    priceStatus,
     quality,
     minQuality,
     platform,
@@ -821,12 +823,14 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                   ? !check.result
                   : check.result?.availability.status === availability,
               )) &&
+            (!priceStatus ||
+              priceFilterStatus(selected ? [selected] : checks, prices.data?.data) === priceStatus) &&
             (!quality || groupQualityResult(target)?.verdict === quality) &&
             (minQuality === "" ||
               (!!target.history?.successful &&
                 target.history.passed * 100 >= Number(minQuality) * target.history.successful)),
         ),
-    [accounts, search, accountId, availability, quality, minQuality, model],
+    [accounts, search, accountId, availability, priceStatus, prices.data, quality, minQuality, model],
   );
   const rates = [
     ...new Set(
@@ -1295,6 +1299,23 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
               <option value="untested">
                 {model ? "未检测" : "有模型未检测"}
               </option>
+            </select>
+            <ChevronDown size={13} />
+          </label>
+          <label className="select-field">
+            <select
+              aria-label="单价是否异常筛选"
+              title={model ? "按所选模型的倍率前单价与价格设置比较" : "任一模型异常则为异常；全部模型确认正常才为正常；其余为未确认"}
+              value={priceStatus}
+              onChange={(e) => {
+                setFilters((v) => ({ ...v, priceStatus: e.target.value }));
+                setPage(0);
+              }}
+            >
+              <option value="">全部单价</option>
+              <option value="abnormal">单价异常</option>
+              <option value="normal">单价正常</option>
+              <option value="unconfirmed">单价未确认</option>
             </select>
             <ChevronDown size={13} />
           </label>

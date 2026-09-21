@@ -47,6 +47,13 @@ export function assessPrice(check: SubModelCheck, prices?: ModelPrice[]) {
   return { status: "normal", label: "正常", usage, expected } as const;
 }
 
+export function priceFilterStatus(checks: SubModelCheck[], prices?: ModelPrice[]) {
+  const statuses = checks.map(check => assessPrice(check, prices).status);
+  if (statuses.includes("abnormal")) return "abnormal";
+  if (statuses.length && statuses.every(status => status === "normal")) return "normal";
+  return "unconfirmed";
+}
+
 export function dollars(value: number | null | undefined, digits = 10) {
   return known(value) ? `$${value.toLocaleString("en-US", { maximumFractionDigits: digits })}` : "—";
 }
