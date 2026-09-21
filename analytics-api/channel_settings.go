@@ -105,6 +105,31 @@ func (s *Service) channelSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, value)
 }
+func (s *Service) channelSettingsSecrets(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	provider, revision := r.URL.Query().Get("provider"), r.URL.Query().Get("revision")
+	if provider == "" || revision == "" {
+		http.Error(w, "请选择渠道并刷新设置", 400)
+		return
+	}
+	src, err := s.settingsSource(r)
+	if err != nil {
+		http.Error(w, "来源管理员配置不可用", 403)
+		return
+	}
+	path := "/v1/channel-settings/secrets?" + url.Values{"provider": {provider}, "revision": {revision}}.Encode()
+	value, status, err := s.settingsGateway(r.Context(), src, "GET", path, nil)
+	if err != nil {
+		http.Error(w, err.Error(), status)
+		return
+	}
+	// Explicit projection keeps the reveal response out of mutation/audit paths.
+	if value["provider"] != provider || value["revision"] != revision {
+		http.Error(w, "密钥版本不一致，请刷新设置", 409)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"keys": value["keys"]})
+}
 func settingsInput(w http.ResponseWriter, r *http.Request) (channelSettingMutation, bool) {
 	var in channelSettingMutation
 	if !decodeControlLimit(w, r, &in, 2<<20) {

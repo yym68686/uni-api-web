@@ -319,6 +319,7 @@ func (s *Service) controlHandler() http.Handler {
 	mux.HandleFunc("GET /v1/channel-spend", s.channelSpend)
 	mux.HandleFunc("GET /v1/sources/{id}/channel-info", s.channelInfo)
 	mux.HandleFunc("GET /v1/sources/{id}/channel-settings", s.channelSettings)
+	mux.HandleFunc("GET /v1/sources/{id}/channel-settings/secrets", s.channelSettingsSecrets)
 	mux.HandleFunc("POST /v1/sources/{id}/channel-settings/validate", s.channelSettingsValidate)
 	mux.HandleFunc("POST /v1/sources/{id}/channel-settings/discover", s.channelSettingsDiscover)
 	mux.HandleFunc("PATCH /v1/sources/{id}/channel-settings", s.channelSettingsApply)

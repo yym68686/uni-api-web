@@ -2786,3 +2786,10 @@ nav > button.active > svg {
   .settings-feedback {padding:9px 16px;}
   .detail-panel {padding:40px 22px;}
 }
+
+.settings-key-toolbar {display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:18px;}
+.settings-key-toolbar p {font-size:11px;line-height:1.8;color:var(--muted);margin:0;}
+.settings-key-toolbar .button {flex-shrink:0;}
+.settings-keys .settings-key-error {font-size:11px;line-height:1.8;margin:0 0 14px;}
+.settings-key-row input[type=text] {font-family:"Geist Mono Variable",monospace;}
+@media(max-width:600px){.settings-key-toolbar{align-items:flex-start;gap:8px;flex-wrap:wrap}.settings-key-toolbar .button{margin-left:auto}.settings-key-row:has(.settings-copy-key){flex-wrap:wrap;justify-content:flex-end}.settings-key-row:has(.settings-copy-key) label{flex-basis:100%}.settings-key-row:has(.settings-copy-key) .settings-icon-button{height:32px;width:32px}}

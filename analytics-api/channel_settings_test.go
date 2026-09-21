@@ -200,3 +200,82 @@ func TestSettingsNativeGatewayRetention(t *testing.T) {
 		t.Fatal("recovery changed exact settings")
 	}
 }
+
+func TestSettingsRevealRequiresSessionAdminAndReturnsOnlyRequestedKeys(t *testing.T) {
+	dsn := os.Getenv("TEST_CONTROL_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("PostgreSQL required")
+	}
+	store, err := newControlStore(dsn, strings.Repeat("m", 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	id := "reveal-" + randomID()[:8]
+	user := id
+	defer func() {
+		store.db.Exec(`DELETE FROM console_sources WHERE id=$1`, id)
+		store.db.Exec(`DELETE FROM console_sessions WHERE username=$1`, user)
+		store.db.Exec(`DELETE FROM console_users WHERE username=$1`, user)
+	}()
+	_, err = store.db.Exec(`INSERT INTO console_users(username,password_hash)VALUES($1,'fixture')`, user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := store.newSession(context.Background(), user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	reject := false
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.Method != "GET" || r.URL.Path != "/v1/channel-settings/secrets" || r.URL.Query().Get("provider") != "one" || r.URL.Query().Get("revision") != "revision-one" {
+			t.Error("incorrect reveal request")
+		}
+		if r.Header.Get("Authorization") != "Bearer admin-secret" {
+			t.Error("reveal did not use admin credential")
+		}
+		if reject {
+			http.Error(w, "denied", 403)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"provider": "one", "revision": "revision-one", "keys": map[string]string{"reference-one": "fixture-private-key"}, "unrelated": "must-not-forward"})
+	}))
+	defer up.Close()
+	src := controlSource{sourceView: sourceView{ID: id, Name: id, Base: up.URL}, Key: "catalog-key", ConfigKey: "admin-secret"}
+	if _, err = store.saveSource(context.Background(), src, false); err != nil {
+		t.Fatal(err)
+	}
+	svc := &Service{control: store}
+	handler := svc.Handler()
+	call := func(auth bool) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", "/v1/sources/"+id+"/channel-settings/secrets?provider=one&revision=revision-one", nil)
+		if auth {
+			r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: session})
+		}
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		return w
+	}
+	if w := call(false); w.Code != 401 || calls != 0 {
+		t.Fatal("unauthenticated reveal reached gateway")
+	}
+	w := call(true)
+	if w.Code != 200 || w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("reveal or cache policy failed", w.Code)
+	}
+	var payload map[string]any
+	if json.Unmarshal(w.Body.Bytes(), &payload) != nil || len(payload) != 1 || payload["keys"].(map[string]any)["reference-one"] != "fixture-private-key" {
+		t.Fatal("incorrect reveal projection")
+	}
+	reject = true
+	if w = call(true); w.Code != 403 || strings.Contains(w.Body.String(), "fixture-private-key") {
+		t.Fatal("admin denial not preserved")
+	}
+	var auditCount int
+	store.db.QueryRow(`SELECT count(*) FROM console_channel_settings_operations WHERE source_id=$1`, id).Scan(&auditCount)
+	if auditCount != 0 {
+		t.Fatal("read created audit/mutation state")
+	}
+}

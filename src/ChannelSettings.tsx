@@ -1,7 +1,11 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, useRef, type ReactNode } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Eye,
+  EyeOff,
+  Copy,
+  Check,
   Settings2,
   Plus,
   Trash2,
@@ -231,39 +235,127 @@ function JSONField({
 function Keys({
   value,
   onChange,
+  secretsPath,
 }: {
   value: unknown;
   onChange: (v: unknown) => void;
+  secretsPath: string;
 }) {
+  const [revealed, setRevealed] = useState<Record<string, string> | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [copied, setCopied] = useState<number>();
+  const request = useRef<AbortController | null>(null);
+  useEffect(
+    () => () => {
+      request.current?.abort();
+    },
+    [],
+  );
+  const reference = (value: unknown) =>
+    value && typeof value === "object" && "$secret" in value
+      ? String(value.$secret)
+      : undefined;
+  const text = (value: unknown) =>
+    typeof value === "string"
+      ? value
+      : revealed?.[reference(value) || ""] || "";
+  async function reveal() {
+    if (revealed !== null) {
+      setRevealed(null);
+      setCopied(undefined);
+      setError("");
+      return;
+    }
+    setLoading(true);
+    setError("");
+    const abort = new AbortController();
+    request.current = abort;
+    try {
+      const result = await controlRequest<{ keys: Record<string, string> }>(
+        secretsPath,
+        { signal: abort.signal, cache: "no-store" },
+      );
+      if (!abort.signal.aborted) setRevealed(result.keys);
+    } catch (e) {
+      if (!abort.signal.aborted)
+        setError(e instanceof Error ? e.message : "密钥读取失败");
+    } finally {
+      if (!abort.signal.aborted) setLoading(false);
+    }
+  }
+  async function copy(value: unknown, index: number) {
+    try {
+      await navigator.clipboard.writeText(text(value));
+      setCopied(index);
+      setError("");
+    } catch {
+      setError("复制失败，请选中密钥后复制");
+    }
+  }
+
   const rows = Array.isArray(value)
     ? value
     : value === undefined
       ? []
       : [value];
-  const save = (next: unknown[]) =>
+  const save = (next: unknown[]) => {
+    setCopied(undefined);
     onChange(!Array.isArray(value) && next.length === 1 ? next[0] : next);
+  };
   return (
     <div className="settings-keys">
-      <p className="muted">
-        已保存的密钥不会回传。填写可替换，箭头可调整密钥顺序。
-      </p>
+      <div className="settings-key-toolbar">
+        <p className="muted">可查看、复制或替换密钥，箭头可调整调用顺序。</p>
+        <button
+          className="button small ghost"
+          disabled={loading}
+          onClick={() => void reveal()}
+        >
+          {loading ? (
+            <Spinner small />
+          ) : revealed !== null ? (
+            <EyeOff size={15} />
+          ) : (
+            <Eye size={15} />
+          )}{" "}
+          {loading ? "正在读取…" : revealed !== null ? "隐藏密钥" : "显示密钥"}
+        </button>
+      </div>
+      {error && (
+        <p className="settings-key-error negative" role="alert">
+          {error}
+        </p>
+      )}
       {rows.map((key, i) => (
         <div className="settings-key-row" key={i}>
           <label>
             密钥 {i + 1}
             <input
               aria-label={`上游密钥 ${i + 1}`}
-              type="password"
+              type={revealed !== null ? "text" : "password"}
               autoComplete="new-password"
+              spellCheck={false}
               placeholder={
                 typeof key === "object" ? "已保存 · 填写以替换" : "粘贴密钥"
               }
-              value={typeof key === "string" ? key : ""}
+              value={text(key)}
               onChange={(e) =>
                 save(rows.map((v, n) => (n === i ? e.target.value : v)))
               }
             />
           </label>
+          {revealed !== null && (
+            <button
+              className="settings-icon-button settings-copy-key"
+              title={copied === i ? "已复制" : "复制密钥"}
+              aria-label={`复制密钥 ${i + 1}`}
+              disabled={!text(key)}
+              onClick={() => void copy(key, i)}
+            >
+              {copied === i ? <Check size={15} /> : <Copy size={15} />}
+            </button>
+          )}
           <button
             className="settings-icon-button"
             title="上移"
@@ -845,6 +937,15 @@ function Editor({ row, onClose }: { row: Channel; onClose: () => void }) {
                   <div className="settings-field-control">
                     {f.type === "keys" ? (
                       <Keys
+                        key={view.revision}
+                        secretsPath={
+                          path +
+                          "/secrets?" +
+                          new URLSearchParams({
+                            provider: row.provider,
+                            revision: view.revision,
+                          })
+                        }
                         value={value}
                         onChange={(v) => edit(set(draft, f.path, v))}
                       />
