@@ -172,7 +172,7 @@ it("equivalent reordered advanced JSON preserves unknown fields and credential r
 
 it("reveals saved keys on demand and keeps references intact through reorder, copy and hide", async () => {
   const user = await mount();
-  await user.click(screen.getByRole("button", { name: "密钥", exact: true }));
+  await user.click(screen.getByRole("button", { name: "密钥" }));
   const input = () => screen.getByLabelText("上游密钥 1");
   expect(input()).toHaveValue("");
   expect(input()).toHaveAttribute("type", "password");
@@ -182,9 +182,7 @@ it("reveals saved keys on demand and keeps references intact through reorder, co
       .mock.calls.filter(([url]) => String(url).includes("/secrets?"));
   expect(reveals()).toHaveLength(0);
   await user.click(screen.getByRole("button", { name: "下移密钥 1" }));
-  await user.click(
-    screen.getByRole("button", { name: "显示密钥", exact: true }),
-  );
+  await user.click(screen.getByRole("button", { name: "显示密钥" }));
   await waitFor(() => expect(input()).toHaveValue("upstream-secret-two"));
   expect(input()).toHaveAttribute("type", "text");
   expect(reveals()).toHaveLength(1);
@@ -200,9 +198,7 @@ it("reveals saved keys on demand and keeps references intact through reorder, co
   await user.click(screen.getByRole("button", { name: "隐藏密钥" }));
   expect(input()).toHaveValue("");
   expect(input()).toHaveAttribute("type", "password");
-  await user.click(
-    screen.getByRole("button", { name: "显示密钥", exact: true }),
-  );
+  await user.click(screen.getByRole("button", { name: "显示密钥" }));
   await waitFor(() => expect(input()).toHaveValue("upstream-secret-two"));
   fireEvent.change(input(), { target: { value: "edited-key" } });
   await user.click(screen.getByRole("button", { name: "校验与预览" }));
@@ -211,24 +207,18 @@ it("reveals saved keys on demand and keeps references intact through reorder, co
     "/api": ["edited-key", { $secret: "opaque-1" }],
   });
   await user.click(screen.getByRole("button", { name: "关闭渠道设置" }));
-  await user.click(
-    screen.getByRole("button", { name: "渠道设置", exact: true }),
-  );
-  await user.click(
-    await screen.findByRole("button", { name: "密钥", exact: true }),
-  );
+  await user.click(screen.getByRole("button", { name: "渠道设置" }));
+  await user.click(await screen.findByRole("button", { name: "密钥" }));
   expect(input()).toHaveValue("");
   expect(input()).toHaveAttribute("type", "password");
 });
 it("keeps keys hidden after an unsuccessful reveal", async () => {
   const user = await mount();
-  await user.click(screen.getByRole("button", { name: "密钥", exact: true }));
+  await user.click(screen.getByRole("button", { name: "密钥" }));
   vi.mocked(fetch).mockResolvedValueOnce(
     new Response("配置版本已变化", { status: 409 }),
   );
-  await user.click(
-    screen.getByRole("button", { name: "显示密钥", exact: true }),
-  );
+  await user.click(screen.getByRole("button", { name: "显示密钥" }));
   await screen.findByRole("alert");
   expect(screen.getByLabelText("上游密钥 1")).toHaveValue("");
   expect(screen.getByLabelText("上游密钥 1")).toHaveAttribute(
