@@ -24,6 +24,7 @@ import { loadSubFilters, saveSubFilters } from "./sub2apiPreferences";
 import { useSubImports } from "./sub2apiImports";
 import { useSubAccounts } from "./sub2apiAccounts";
 import { Sub2apiImport } from "./Sub2apiImport";
+import { useConsoleSources } from "./consoleSources";
 import { SUB_MODELS, loadSubModels, saveSubModels } from "./sub2apiModels";
 import { SubModelSettings } from "./SubModelSettings";
 import {
@@ -749,6 +750,7 @@ function CheckDetails({
 
 export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   const client = useQueryClient();
+  const sources = useConsoleSources(user);
   const query = useSubAccounts();
   const prices = useSubPrices(user);
   const accounts = query.data?.data || [];
@@ -1553,6 +1555,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
       </section>
       {importing && (
         <Sub2apiImport
+          sources={sources}
           imports={imports}
           account={importing.account}
           target={accounts.find(a => a.id === importing.account.id)?.targets.find(t => t.group_id === importing.target.group_id) || importing.target}

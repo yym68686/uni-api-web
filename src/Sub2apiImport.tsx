@@ -4,7 +4,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { Plus, Pencil, Trash2, X } from "lucide-react";
 import { controlRequest } from "./api";
 import { Spinner } from "./ui";
-import type { ConsoleSource } from "./SourceSettings";
+import type { ConsoleSourcesQuery } from "./consoleSources";
 import { assessPrice } from "./sub2apiPriceCheck";
 import type { KeyInfo, ModelPrice } from "./types";
 import type { SubAccount, SubTarget } from "./Sub2apiChecks";
@@ -26,12 +26,14 @@ export function Sub2apiImport({
   account,
   target,
   imports,
+  sources,
   prices,
   close,
 }: {
   account: SubAccount;
   target: SubTarget;
   imports: SubImportsQuery;
+  sources: ConsoleSourcesQuery;
   prices?: ModelPrice[];
   close: () => void;
 }) {
@@ -52,12 +54,6 @@ export function Sub2apiImport({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  const sources = useQuery({
-    queryKey: ["sub-import-sources"],
-    queryFn: ({ signal }) =>
-      controlRequest<{ data: ConsoleSource[] }>("/v1/sources", { signal }),
-    retry: false,
-  });
   const options = useQuery({
     queryKey: ["sub-import-options", source, key, account.id, target.group_id],
     queryFn: ({ signal }) =>
@@ -296,6 +292,11 @@ export function Sub2apiImport({
           {(error || sources.error || options.error) && (
             <div role="alert" className="error-banner">
               {error || sources.error?.message || options.error?.message}
+              {sources.isError && (
+                <button type="button" className="button small" disabled={busy || sources.isFetching} onClick={() => void sources.refetch()}>
+                  重新读取来源
+                </button>
+              )}
             </div>
           )}
           {(editing || adding || (!installed.length && !imports.isPending)) && (
@@ -342,7 +343,7 @@ export function Sub2apiImport({
                   aria-label="添加到 uni-api 来源"
                   required
                   value={source}
-                  disabled={busy || !!editing}
+                  disabled={busy || !!editing || !sources.data?.data.length}
                   onChange={(e) => {
                     setSource(e.target.value);
                     setKey("");
@@ -350,7 +351,9 @@ export function Sub2apiImport({
                     setError("");
                   }}
                 >
-                  <option value="">选择来源</option>
+                  <option value="">
+                    {sources.data?.data.length ? "选择来源" : sources.isPending ? "正在读取来源…" : sources.isError ? "来源加载失败" : "暂无 uni-api 来源"}
+                  </option>
                   {sources.data?.data.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.name}
@@ -358,6 +361,7 @@ export function Sub2apiImport({
                   ))}
                 </select>
               </label>
+              {sources.isPending && <p role="status"><Spinner small /> 正在读取 uni-api 来源…</p>}
               <label className="sub-import-field">
                 API key
                 <select

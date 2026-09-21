@@ -85,7 +85,7 @@ import { QualityHistory, QualityProbability, qualityTooltip } from "./QualityHis
 import type { ChannelCheck } from "./ChannelChecks";
 import { channelName } from "./format";
 import { Sub2apiChecks } from "./Sub2apiChecks";
-import type { ConsoleSource } from "./SourceSettings";
+import { useConsoleSources } from "./consoleSources";
 import {
   defaultFilters,
   loadFilters,
@@ -976,11 +976,7 @@ function Dashboard({
   const [filters, setFilters] = useState(() =>
     loadFilters(baseConnection.base),
   );
-  const sourceQuery = useQuery({
-    queryKey: ["sources", baseConnection.session],
-    queryFn: () => controlRequest<{ data: ConsoleSource[] }>("/v1/sources"),
-    enabled: !!baseConnection.account,
-  });
+  const sourceQuery = useConsoleSources(baseConnection.session, !!baseConnection.account);
   const sourceList = sourceQuery.data?.data || [];
   const imported = useSubImports(!!baseConnection.account);
   const rawChecks = useChannelChecks(

@@ -11,13 +11,9 @@ import { SUB_MODELS } from "./sub2apiModels";
 import type { SubUsage } from "./sub2apiPriceCheck";
 
 afterEach(() => vi.unstubAllGlobals());
-function mount(user = "account") {
+function mount(user = "account", client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
   return render(
-    <QueryClientProvider
-      client={
-        new QueryClient({ defaultOptions: { queries: { retry: false } } })
-      }
-    >
+    <QueryClientProvider client={client}>
       <Tooltip.Provider>
         <Sub2apiChecks user={user} />
       </Tooltip.Provider>
@@ -68,6 +64,61 @@ function fixtures(): SubAccount[] {
     ],
   }));
 }
+
+it("opens the import dialog with the dashboard sources while a background refresh is still pending", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const sources = [
+    { id: "primary", name: "Fugue" },
+    { id: "digitalocean", name: "DigitalOcean" },
+  ];
+  client.setQueryData(["sources", "cached-sources"], { data: sources }, { updatedAt: 1 });
+  let finishSources!: (response: Response) => void;
+  const fetcher = vi.fn(async (input: string) => {
+    if (input.endsWith("/v1/sources")) return new Promise<Response>(resolve => { finishSources = resolve; });
+    if (input.includes("/channel-options")) return new Response(JSON.stringify({ supported: true, revision: "r1", keys: [{ key_id: "target-key", position: 1, prefix: "masked" }], channels: [] }));
+    return new Response(JSON.stringify({ data: input.endsWith("/accounts") ? fixtures().slice(0, 1) : [] }));
+  });
+  vi.stubGlobal("fetch", fetcher);
+  const user = userEvent.setup();
+  const view = mount("cached-sources", client);
+  await user.click(await screen.findByRole("button", { name: "添加到渠道" }));
+  const dialog = within(screen.getByRole("dialog"));
+  expect(dialog.getByRole("option", { name: "Fugue" })).toBeInTheDocument();
+  expect(dialog.getByRole("option", { name: "DigitalOcean" })).toBeInTheDocument();
+  expect(dialog.getByLabelText("添加到 uni-api 来源")).toBeEnabled();
+  await user.selectOptions(dialog.getByLabelText("添加到 uni-api 来源"), "digitalocean");
+  await waitFor(() => expect(dialog.getByLabelText("添加到 API key")).toBeEnabled());
+  expect(dialog.getByRole("option", { name: "Key 1 · masked" })).toBeInTheDocument();
+  expect(fetcher.mock.calls.filter(([input]) => input.endsWith("/v1/sources"))).toHaveLength(1);
+  finishSources(new Response(JSON.stringify({ data: sources })));
+  await waitFor(() => expect(client.isFetching({ queryKey: ["sources"] })).toBe(0));
+  view.unmount();
+  client.clear();
+});
+
+it("loads sources before opening the dialog and offers retry when the initial request fails", async () => {
+  let finishSources!: (response: Response) => void;
+  const fetcher = vi.fn(async (input: string) => {
+    if (input.endsWith("/v1/sources")) return new Promise<Response>(resolve => { finishSources = resolve; });
+    return new Response(JSON.stringify({ data: input.endsWith("/accounts") ? fixtures().slice(0, 1) : [] }));
+  });
+  vi.stubGlobal("fetch", fetcher);
+  const user = userEvent.setup();
+  mount("initial-sources");
+  const add = await screen.findByRole("button", { name: "添加到渠道" });
+  expect(fetcher.mock.calls.filter(([input]) => input.endsWith("/v1/sources"))).toHaveLength(1);
+  await user.click(add);
+  const dialog = within(screen.getByRole("dialog"));
+  expect(dialog.getByLabelText("添加到 uni-api 来源")).toBeDisabled();
+  expect(dialog.getByRole("status")).toHaveTextContent("正在读取 uni-api 来源");
+  finishSources(new Response("来源服务暂不可用", { status: 503 }));
+  await user.click(await dialog.findByRole("button", { name: "重新读取来源" }));
+  expect(fetcher.mock.calls.filter(([input]) => input.endsWith("/v1/sources"))).toHaveLength(2);
+  finishSources(new Response(JSON.stringify({ data: [{ id: "primary", name: "Fugue" }, { id: "digitalocean", name: "DigitalOcean" }] })));
+  await waitFor(() => expect(dialog.getByLabelText("添加到 uni-api 来源")).toBeEnabled());
+  expect(dialog.getByRole("option", { name: "Fugue" })).toBeInTheDocument();
+  expect(dialog.getByRole("option", { name: "DigitalOcean" })).toBeInTheDocument();
+});
 
 it("filters unit prices across pages and models, persists selection, and scopes both batch checks", async () => {
   const data = fixtures().slice(0, 1);
