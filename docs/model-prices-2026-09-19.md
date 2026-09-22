@@ -1,10 +1,16 @@
 # 检测模型参考价格（2026-09-19）
 
-单位：美元 / 百万 token。价格设置与检测设置共用 `analytics-api/model_catalog.json`，共 22 项。以下为标准文本请求的基准价格；来源和适用条件随每个模型记录。
+2026-09-23 补充：`claude-opus-5-5` 已加入共用检测与价格清单，使用 `/v1/messages`。按用户提供截图及 [Claude 官方价格表](https://platform.claude.com/docs/en/about-claude/pricing) 核对，标准价格为输入 $4、输出 $20、缓存读取 $0.20、5 分钟缓存写入 $5、1 小时缓存写入 $8 / 百万 token。默认计算缓存写入，售卖比例沿用 Claude 的 15%。Fast 模式输入 / 输出 $8 / $40 不作为标准估算价。
+
+同日补充：`gpt-6-sol`、`gpt-6-luna` 使用 `/v1/responses` 检测。按 [OpenAI 官方价格表](https://developers.openai.com/api/docs/pricing) 的 Standard 短上下文价格，Sol 输入 / 输出 / 缓存读取 / 缓存写入为 $2 / $10 / $0.20 / $2.50，Luna 为 $0.10 / $0.50 / $0.01 / $0.125（均为每百万 token）；默认不计算缓存写入，售卖比例 2.5%。
+
+单位：美元 / 百万 token。价格设置与检测设置共用 `analytics-api/model_catalog.json`，检测共 25 项，另有 3 项 Jev 价格。以下为标准文本请求的基准价格；来源和适用条件随每个模型记录。
 
 | 模型 | 输入 | 输出 | 缓存读取 | 官方来源 |
 | --- | ---: | ---: | ---: | --- |
 | gpt-6-astra | 10 | 50 | 1 | [官方文档](https://developers.openai.com/api/docs/pricing) |
+| gpt-6-sol | 2 | 10 | 0.2 | [官方文档](https://developers.openai.com/api/docs/pricing) |
+| gpt-6-luna | 0.1 | 0.5 | 0.01 | [官方文档](https://developers.openai.com/api/docs/pricing) |
 | gpt-5.6-sol | 4 | 20 | 0.4 | [官方文档](https://developers.openai.com/api/docs/pricing) |
 | gpt-5.6-terra | 2 | 12 | 0.2 | [官方文档](https://developers.openai.com/api/docs/pricing) |
 | gpt-5.6-luna | 0.2 | 1.2 | 0.02 | [官方文档](https://developers.openai.com/api/docs/pricing) |
@@ -21,6 +27,7 @@
 | claude-fable-5 | 10 | 50 | 1 | [官方文档](https://platform.claude.com/docs/en/about-claude/pricing) |
 | claude-fable-5-1 | 10 | 50 | 0.25 | [官方文档](https://platform.claude.com/docs/en/about-claude/pricing) |
 | claude-opus-5 | 5 | 25 | 0.5 | [官方文档](https://platform.claude.com/docs/en/about-claude/pricing) |
+| claude-opus-5-5 | 4 | 20 | 0.2 | [官方文档](https://platform.claude.com/docs/en/about-claude/pricing) |
 | claude-sonnet-5 | 2 | 10 | 0.2 | [官方文档](https://platform.claude.com/docs/en/about-claude/pricing) |
 | claude-opus-4-8 | 5 | 25 | 0.5 | [官方文档](https://platform.claude.com/docs/en/about-claude/pricing) |
 | claude-opus-4-6 | 5 | 25 | 0.5 | [官方文档](https://platform.claude.com/docs/en/about-claude/pricing) |

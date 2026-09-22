@@ -1199,7 +1199,9 @@ it("shows model matching separately from availability, including missing and his
     undefined,
     "unavailable",
   ] as const;
-  target.models = SUB_MODELS.map((model, index) => ({
+  const fixtureModels = ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "codex-auto-review"];
+  fixtureModels.push(...SUB_MODELS.filter(model => !fixtureModels.includes(model)));
+  target.models = fixtureModels.map((model, index) => ({
     model,
     state: "done",
     message: "",
@@ -1244,7 +1246,7 @@ it("shows model matching separately from availability, including missing and his
   for (let i = 0; i < SUB_MODELS.length; i++) {
     await user.selectOptions(
       screen.getByLabelText("检测模型筛选"),
-      SUB_MODELS[i],
+      fixtureModels[i],
     );
     const currentHeaders = within(table).getAllByRole("columnheader");
     const currentColumn = currentHeaders.findIndex((h) =>
@@ -1836,7 +1838,7 @@ it("remembers model settings per user and uses them for batch and row probes", a
   await screen.findByRole("table");
   await user.click(screen.getByRole("button", { name: "检测模型设置" }));
   let dialog = within(screen.getByRole("dialog"));
-  expect(dialog.getAllByRole("checkbox")).toHaveLength(22);
+  expect(dialog.getAllByRole("checkbox")).toHaveLength(SUB_MODELS.length);
   for (const box of dialog.getAllByRole("checkbox")) expect(box).toBeChecked();
   await user.click(dialog.getByRole("button", { name: "清空" }));
   expect(dialog.getByRole("button", { name: "保存设置" })).toBeDisabled();
