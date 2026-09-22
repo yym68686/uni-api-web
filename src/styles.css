@@ -2499,6 +2499,62 @@ nav > button.active > svg {
 .configured-source { margin: 20px 0; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
 .configured-source-settings { display: flex; align-items: center; justify-content: space-between; gap: 16px; color: var(--muted); font-size: 12px; }
 .configured-source-address { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.guide-dialog.route-workspace { width: min(1000px, calc(100vw - 40px)); max-height: calc(100dvh - 48px); padding: 0; display: flex; flex-direction: column; overflow: hidden; }
+.route-dialog-header { padding: 24px 28px 20px; flex-shrink: 0; }
+.route-dialog-header h2 { margin: 0 40px 8px 0; font-size: 21px; }
+.route-dialog-header p { margin: 0; padding-right: 32px; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.route-mode-tabs { display: flex; gap: 24px; padding: 0 28px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
+.route-mode-tabs button { display: flex; align-items: center; gap: 6px; border: 0; border-bottom: 2px solid transparent; background: none; padding: 12px 0; color: var(--muted); font-size: 13px; white-space: nowrap; }
+.route-mode-tabs button[aria-pressed="true"] { border-bottom-color: var(--green); color: var(--green); font-weight: 600; }
+.route-dialog-body { padding: 24px 28px; overflow-y: auto; min-height: 0; }
+.route-destination-grid { display: grid; grid-template-columns: 1fr 1.3fr 1fr; gap: 16px; padding: 18px; background: var(--subtle); border: 1px solid var(--line); border-radius: 10px; margin-bottom: 24px; }
+.route-destination-grid .sub-import-field { margin: 0; min-width: 0; font-weight: 500; }
+.route-destination-grid select { height: 40px; text-overflow: ellipsis; font-weight: 400; }
+.route-browse-selectors { grid-template-columns: 1fr 1.5fr; }
+.route-section-heading, .route-binding-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.route-section-heading { margin-bottom: 16px; }
+.route-workspace h3 { font-size: 14px; margin: 0 0 16px; }
+.route-workspace form > h3 { margin: 0 0 16px; }
+.route-section-heading h3 { margin: 0; }
+.route-workspace .configured-source { margin: 0; padding: 0; border: 0; }
+.route-workspace .sub-installed { margin: 0; }
+.route-workspace .sub-installed article { padding: 0; margin: 0; overflow: hidden; }
+.route-binding-heading { padding: 14px 18px; background: var(--subtle); }
+.route-binding-heading strong { color: var(--ink); font-size: 13px; }
+.route-binding-heading small { display: block; font-size: 11px; }
+.route-model-table { overflow: auto; max-height: 380px; }
+.route-workspace .route-model-table { color: var(--ink); }
+.route-model-table table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.route-model-table th, .route-model-table td { text-align: left; padding: 12px 18px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.route-model-table th { color: var(--muted); font-weight: 500; background: var(--surface); position: sticky; top: 0; }
+.route-model-table th:last-child, .route-model-table td:last-child { text-align: right; white-space: nowrap; width: 108px; }
+.route-model-table tr:last-child td { border-bottom: 0; }
+.route-workspace .sub-remove { padding: 12px 18px; border-top: 1px solid var(--line); background: var(--danger-bg); }
+.route-workspace fieldset { margin: 0 0 24px; }
+.route-workspace .sub-model-options { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.route-workspace .sub-model-options label { padding: 10px; border: 1px solid var(--line); border-radius: 7px; cursor: pointer; align-content: center; min-height: 40px; }
+.route-workspace .sub-model-options label:has(input:checked) { background: var(--green-bg); border-color: color-mix(in srgb, var(--green) 35%, var(--line)); }
+.route-workspace .sub-model-options label:has(input:disabled) { opacity: .6; cursor: default; }
+.route-workspace .sub-model-options label > span { overflow-wrap: anywhere; }
+.route-workspace input[type="checkbox"] { accent-color: var(--green); }
+.route-workspace .model-position-list { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 24px; }
+.route-workspace .model-position-list > label { padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.route-workspace .model-position-list select { color: var(--ink); background: var(--surface); }
+.route-workspace .sub-import-actions { position: sticky; bottom: -24px; margin: 24px -28px -24px; padding: 16px 28px; background: var(--surface); border-top: 1px solid var(--line); z-index: 2; }
+.route-workspace .sub-import-success { margin: 0 0 18px; color: var(--green); font-size: 13px; }
+.route-workspace .model-aliases p, .route-workspace form > .muted { font-size: 12px; line-height: 1.7; }
+.route-empty { color: var(--muted); font-size: 13px; padding: 20px 0; }
+@media(max-width:700px) {
+ .guide-dialog.route-workspace { width: calc(100vw - 24px); max-height: calc(100dvh - 24px); }
+ .route-dialog-header, .route-dialog-body { padding: 20px; }
+ .route-mode-tabs { padding: 0 20px; }
+ .route-destination-grid, .route-workspace .model-position-list { grid-template-columns: 1fr; }
+ .route-workspace .sub-model-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+ .route-workspace .sub-import-actions { bottom: -20px; margin: 20px -20px -20px; padding: 14px 20px; }
+ .route-binding-heading { align-items: flex-start; flex-wrap: wrap; }
+ .route-model-table table { min-width: 440px; }
+}
+@media(max-width:420px) { .route-workspace .sub-model-options { grid-template-columns: 1fr; } }
 .control-persistence { margin-left: auto; max-width: 380px; font-size: 13px; }
 .control-persistence label { display:flex; align-items:center; gap:8px; }
 .control-persistence small { display:block; color:var(--muted); line-height:1.6; margin-top:6px; }

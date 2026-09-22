@@ -255,9 +255,7 @@ it.each([false, true])(
     expect(
       await screen.findByRole("heading", { name: "已添加到 1 个 API key" }),
     ).toBeVisible();
-    await user.click(
-      screen.getByRole("button", { name: "添加到 API key / 模型重命名" }),
-    );
+    await user.click(screen.getByRole("button", { name: "新增接入" }));
     await user.click(screen.getByRole("button", { name: "添加重命名" }));
     expect(
       screen.getByRole("checkbox", { name: "codex-auto-review" }),
@@ -374,6 +372,7 @@ it("edits and adds through the selected source in a merged channel dialog", asyn
     </QueryClientProvider>,
   );
   const user = userEvent.setup();
+  await user.selectOptions(screen.getByLabelText("查看 uni-api 来源"), "do");
   const region = within(
     screen.getByRole("region", { name: "DigitalOcean 接入情况" }),
   );
@@ -404,9 +403,7 @@ it("edits and adds through the selected source in a merged channel dialog", asyn
       positions: { "only-do": 1 },
     },
   });
-  await user.click(
-    screen.getByRole("button", { name: "添加到 API key / 模型重命名" }),
-  );
+  await user.click(screen.getByRole("button", { name: "新增接入" }));
   await user.selectOptions(screen.getByLabelText("添加到 uni-api 来源"), "do");
   expect(screen.getByRole("checkbox", { name: "only-do" })).toBeChecked();
   expect(
@@ -530,5 +527,93 @@ it("loads model selection for each selected caller key and saves uniform plus pe
     models: ["sol", "astra"],
     position: 2,
     positions: { astra: 2, sol: 1 },
+  });
+});
+
+it("opens unbound channels directly in the destination form and resets the key when switching sources", async () => {
+  const writes: any[] = [];
+  const members = ["fugue", "do"].map((source_id) => ({
+    source_id,
+    source_name: source_id === "fugue" ? "Fugue" : "DigitalOcean",
+    provider: "native",
+    name: "native",
+    models: [`model-${source_id}`],
+  })) as ManagedChannel[];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        writes.push(JSON.parse(String(init.body)));
+        return Response.json({ message: "已添加" });
+      }
+      if (input.includes("channel-options")) {
+        const source = new URL(input, location.origin).searchParams.get(
+          "source_id",
+        );
+        return Response.json({
+          revision: `${source}-revision`,
+          keys: [
+            {
+              key_id: `${source}-key`,
+              position: 1,
+              prefix: `masked-${source}`,
+            },
+          ],
+          channels: [{ provider: "peer", model: `model-${source}` }],
+        });
+      }
+      return Response.json({ data: [], unavailable_keys: [] });
+    }),
+  );
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <ConfiguredChannelDialog
+        item={{ ...members[0], members }}
+        close={() => {}}
+      />
+    </QueryClientProvider>,
+  );
+  const user = userEvent.setup();
+  await waitFor(() =>
+    expect(screen.getByLabelText("添加到 API key")).toBeEnabled(),
+  );
+  expect(
+    screen.queryByText("尚未配置到任何 API key。"),
+  ).not.toBeInTheDocument();
+  expect(screen.getByLabelText("添加到 uni-api 来源")).toHaveValue("fugue");
+  await user.selectOptions(
+    screen.getByLabelText("添加到 API key"),
+    "fugue-key",
+  );
+  await user.selectOptions(screen.getByLabelText("渠道添加位置"), "2");
+  await user.selectOptions(screen.getByLabelText("添加到 uni-api 来源"), "do");
+  expect(screen.getByLabelText("添加到 API key")).toHaveValue("");
+  expect(
+    screen.getByRole("button", { name: "添加到渠道" }),
+  ).toBeDisabled();
+  expect(
+    screen.queryByRole("checkbox", { name: "model-fugue" }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByRole("checkbox", { name: "model-do" })).toBeChecked();
+  await waitFor(() =>
+    expect(screen.getByLabelText("添加到 API key")).toBeEnabled(),
+  );
+  await user.selectOptions(screen.getByLabelText("添加到 API key"), "do-key");
+  await waitFor(() =>
+    expect(screen.getByLabelText("渠道添加位置")).toBeEnabled(),
+  );
+  expect(screen.getByLabelText("渠道添加位置")).toHaveValue("1");
+  await user.selectOptions(screen.getByLabelText("渠道添加位置"), "2");
+  await user.click(
+    screen.getByRole("button", { name: "添加到渠道" }),
+  );
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).toMatchObject({
+    source_id: "do",
+    api_key_id: "do-key",
+    revision: "do-revision",
+    models: ["model-do"],
+    position: 2,
+    positions: { "model-do": 2 },
   });
 });

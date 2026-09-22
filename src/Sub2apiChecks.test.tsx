@@ -124,9 +124,10 @@ it("manages initial channels with account/unassigned filters and shows every cal
   await user.click(within(boundRow).getByRole("button",{name:"已添加 · 2 个 key"}));
   const dialog=within(screen.getByRole("dialog"));
   expect(await dialog.findByText("第 2 位")).toBeVisible();
+  await user.selectOptions(dialog.getByLabelText("查看 API key"), "key-2");
   expect(dialog.getByText("第 5 位")).toBeVisible();
-  expect(dialog.getByText("masked-one")).toBeVisible();
-  expect(dialog.getByText("masked-two")).toBeVisible();
+  expect(dialog.getByRole("option", {name:"Key 1 · masked-one"})).toBeInTheDocument();
+  expect(dialog.getByRole("option", {name:"Key 2 · masked-two"})).toBeInTheDocument();
   await user.click(dialog.getByRole("button",{name:"关闭添加渠道"}));
   await user.selectOptions(accountFilter,"__unassigned__");
   expect(screen.getByText("initial-unassigned",{selector:"strong"})).toBeVisible();
@@ -163,6 +164,8 @@ it("merges the same native channel across sources in the list and import dialog"
   const dialog=within(screen.getByRole("dialog"));
   expect(await dialog.findByRole("heading", {name:/已添加到 2 个 API key/})).toBeVisible();
   expect(within(dialog.getByRole("region", {name:"Fugue 接入情况"})).getByText("第 1 位")).toBeVisible();
+  expect(dialog.queryByRole("region", {name:"DigitalOcean 接入情况"})).not.toBeInTheDocument();
+  await user.selectOptions(dialog.getByLabelText("查看 uni-api 来源"), "do");
   expect(within(dialog.getByRole("region", {name:"DigitalOcean 接入情况"})).getByText("第 3 位")).toBeVisible();
 });
 
@@ -1518,7 +1521,7 @@ it("lists imported keys, replaces exact models and deletes only the chosen bindi
   );
   expect(within(dialog).getByText(/masked-two/)).toBeVisible();
   await user.click(
-    within(dialog).getByRole("button", { name: "添加到其他 API key" }),
+    within(dialog).getByRole("button", { name: "新增接入" }),
   );
   expect(within(dialog).getByLabelText("添加到 API key")).toHaveValue("");
 });
