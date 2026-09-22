@@ -22,9 +22,8 @@ export function SubModelSettings({
       }}
     >
       <Dialog.Trigger asChild>
-        <button className="button small" aria-label="检测模型设置">
+        <button className="button small sub-check-icon" aria-label="检测模型设置" title="检测模型设置">
           <Settings2 size={15} />
-          设置
         </button>
       </Dialog.Trigger>
       <Dialog.Portal>

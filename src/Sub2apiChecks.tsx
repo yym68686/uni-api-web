@@ -1174,13 +1174,16 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
         </div>
       )}
       <section className="data-panel">
-        <div className="data-heading">
-          <div className="data-title">
-            <ScanLine size={19} />
-            <h2>模型检测</h2>
-            <span className="count-badge">{rows.length}</span>
+        <div className="data-heading sub-detection-heading">
+          <div className="sub-detection-title">
+            <div className="data-title">
+              <ScanLine size={19} />
+              <h2>模型检测</h2>
+              <span className="count-badge">{rows.length}</span>
+            </div>
+            <span className="sub-detection-scope">{eligible.length} 个渠道可检测</span>
           </div>
-          <div className="data-actions">
+          <div className="sub-detection-controls" role="region" aria-label="模型检测操作" tabIndex={0}>
             <label className="search-field">
               <Search size={16} />
               <input
@@ -1193,57 +1196,64 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                 }}
               />
             </label>
+            <div className="sub-check-group" role="group" aria-label="专项检测">
+              <button
+                className="button small"
+                aria-label={`降智检测 · ${eligible.length} 个渠道`}
+                disabled={!eligible.length || !!action || eligible.length > 500}
+                onClick={() => void checkQuality()}
+              >
+                {action === "quality-check" ? (
+                  <Spinner small />
+                ) : (
+                  <ScanLine size={15} />
+                )}
+                降智检测
+              </button>
+              <button className="button small" disabled={!eligible.length || !!action || eligible.length > 500}
+                aria-label={`压缩检测 · ${eligible.length} 个渠道`}
+                onClick={() => void checkCompaction()}>
+                {action === "compaction-check" ? <Spinner small /> : <ScanLine size={15} />} 压缩检测
+              </button>
+              <button className="button small" disabled={!eligible.length || !!action || eligible.length > 500}
+                aria-label={`Tool use 检测 · ${eligible.length} 个渠道`}
+                onClick={() => void checkToolUse()} title={toolUseDescription}>
+                {action === "tool-use-check" ? <Spinner small /> : <ScanLine size={15} />} Tool use
+              </button>
+            </div>
             <button
-              className="button small"
-              aria-label={`降智检测 · ${eligible.length} 个渠道`}
-              disabled={!eligible.length || !!action || eligible.length > 500}
-              onClick={() => void checkQuality()}
-            >
-              {action === "quality-check" ? (
-                <Spinner small />
-              ) : (
-                <ScanLine size={15} />
-              )}
-              降智检测 · {eligible.length} 个渠道
-            </button>
-            <button className="button small" disabled={!eligible.length || !!action || eligible.length > 500}
-              onClick={() => void checkCompaction()}>
-              <ScanLine size={15} /> 压缩检测 · {eligible.length} 个渠道
-            </button>
-            <button className="button small" disabled={!eligible.length || !!action || eligible.length > 500}
-              onClick={() => void checkToolUse()} title={toolUseDescription}>
-              <ScanLine size={15} /> Tool use 检测 · {eligible.length} 个渠道
-            </button>
-            <button
-              className="button small"
+              className="button small sub-check-icon"
               aria-label="刷新 sub2api 检测"
+              title="刷新数据"
               onClick={() => void query.refetch()}
               disabled={query.isFetching}
             >
               <RefreshCw size={15} className={query.isFetching ? "spin" : ""} />
-              刷新数据
             </button>
-            <button
-              className="button primary small"
-              disabled={!eligible.length || !!action || eligible.length > 500 || !modelsToCheck.length}
-              title={!modelsToCheck.length ? "当前筛选模型未勾选，请在设置中启用" : undefined}
-              onClick={() => void check(eligible)}
-            >
-              <ScanLine size={15} />
-              {model ? "检测所选模型" : allModelsSelected ? "检测全部模型" : `检测已选 ${detectionModels.length} 个模型`} · {eligible.length}{" "}
-              个渠道
-            </button>
-            <SubModelSettings models={detectionModels} onSave={(models) => {
-              setDetectionModels(models);
-              saveSubModels(user, models);
-            }} />
+            <div className="sub-model-check-group" role="group" aria-label="模型检测与设置">
+              <button
+                className="button primary small"
+                aria-label={`${model ? "检测所选模型" : allModelsSelected ? "检测全部模型" : `检测已选 ${detectionModels.length} 个模型`} · ${eligible.length} 个渠道`}
+                disabled={!eligible.length || !!action || eligible.length > 500 || !modelsToCheck.length}
+                title={!modelsToCheck.length ? "当前筛选模型未勾选，请在设置中启用" : `检测 ${eligible.length} 个渠道，${modelsToCheck.length} 个模型`}
+                onClick={() => void check(eligible)}
+              >
+                <ScanLine size={15} />
+                {model ? "检测所选模型" : allModelsSelected ? "检测全部模型" : "检测已选模型"}
+              </button>
+              <SubModelSettings models={detectionModels} onSave={(models) => {
+                setDetectionModels(models);
+                saveSubModels(user, models);
+              }} />
+            </div>
           </div>
         </div>
-        <div className="filters sub-filters">
+        <div className="filters sub-filters" role="region" aria-label="模型检测筛选" tabIndex={0}>
           <label className="select-field">
             <Globe2 size={15} />
             <select
               aria-label="sub2api 账号筛选"
+              title={accounts.find(a => a.id === accountId)?.name || "全部账号"}
               value={accountId}
               onChange={(e) => {
                 setAccountId(e.target.value);
@@ -1265,6 +1275,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
           <label className="select-field">
             <select
               aria-label="检测模型筛选"
+              title={model || "全部模型"}
               value={model}
               onChange={(e) => {
                 setModel(e.target.value);
@@ -1331,8 +1342,8 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
               }}
             >
               <option value="">默认顺序</option>
-              <option value="asc">倍率从低到高</option>
-              <option value="desc">倍率从高到低</option>
+              <option value="asc">倍率 ↑</option>
+              <option value="desc">倍率 ↓</option>
             </select>
             <ChevronDown size={13} />
           </label>
@@ -1383,7 +1394,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
           </label>
           <label className="select-field">
             <select aria-label="Tool use 是否支持筛选" value={toolUse} onChange={e => {setFilters(v => ({...v, toolUse: e.target.value})); setPage(0);}}>
-              <option value="">全部 Tool use 能力</option>
+              <option value="">Tool use 能力</option>
               {Object.entries(toolUseLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select><ChevronDown size={13} />
           </label>
@@ -1396,7 +1407,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                 setPage(0);
               }}
             >
-              <option value="">全部 Astra 降智结果</option>
+              <option value="">Astra 降智</option>
               <option value="pass">不降智</option>
               <option value="fail">降智</option>
               <option value="inconclusive">无法判定</option>

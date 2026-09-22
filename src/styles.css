@@ -2373,6 +2373,31 @@ nav > button.active > svg {
 .sub2api-page { display: flex; flex-direction: column; gap: 22px; }
 .sub2api-page .data-title h2 { margin: 0; font-size: 16px; }
 .sub2api-page .count-badge { font-size: 12px; color: var(--muted); }
+.sub2api-page .sub-detection-heading { flex-wrap:nowrap; gap:24px; align-items:center; }
+.sub-detection-title { flex:0 0 auto; }
+.sub-detection-title .data-title { width:auto; }
+.sub-detection-scope { display:block; margin:6px 0 0 28px; font-size:11px; color:var(--muted); white-space:nowrap; }
+.sub-detection-controls { display:flex; flex:1; align-items:center; gap:10px; min-width:0; overflow-x:auto; padding:5px 2px 8px; scrollbar-width:thin; scrollbar-color:var(--line) transparent; }
+.sub-detection-controls:focus-visible { outline:2px solid var(--green); outline-offset:2px; border-radius:8px; }
+.sub-detection-controls > .search-field { flex:1 0 160px; min-width:160px; max-width:360px; margin-left:auto; }
+.sub-detection-controls .button { flex:0 0 auto; height:36px; white-space:nowrap; }
+.sub-detection-controls svg { flex-shrink:0; }
+.sub-check-group, .sub-model-check-group { display:flex; flex:0 0 auto; flex-wrap:nowrap; align-items:center; }
+.sub-check-group { border:1px solid var(--line); border-radius:8px; overflow:hidden; background:var(--subtle); }
+.sub-check-group .button { height:34px; border:0; border-radius:0; background:transparent; box-shadow:none; }
+.sub-check-group .button + .button { border-left:1px solid var(--line); }
+.sub-check-group .button:hover:not(:disabled) { background:var(--surface); }
+.sub-model-check-group { gap:0; }
+.sub-model-check-group > .button:first-child { border-radius:8px 0 0 8px; }
+.sub-model-check-group > .button:last-child { border-radius:0 8px 8px 0; border-left:0; }
+.sub-check-icon { width:36px; min-width:36px; padding:0; justify-content:center; }
+@media(max-width:1100px) {
+ .sub2api-page .sub-detection-heading { flex-direction:column; align-items:stretch; gap:10px; }
+ .sub-detection-title { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+ .sub-detection-scope { margin:0; }
+ .sub-detection-controls { flex:none; width:100%; }
+ .sub-detection-controls > .search-field { margin-left:0; max-width:none; }
+}
 .sub-account-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 390px), 1fr)); gap: 12px; padding: 0 24px 24px; }
 .sub-account { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; border: 1px solid var(--line); border-radius: 10px; padding: 16px; min-width: 0; }
 .sub-account-identity { flex: 1; min-width: 0; }
@@ -2385,7 +2410,14 @@ nav > button.active > svg {
 .sub-account-form { background: var(--surface); color: var(--ink); }
 .sub-account-form input { background: var(--surface); color: var(--ink); }
 .sub-loading { padding: 30px; display: flex; align-items: center; gap: 10px; }
-.sub-filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; padding: 0 24px 20px; }
+.sub-filters { display:flex; gap:8px; flex-wrap:nowrap; align-items:center; margin:0 21px 16px; padding:10px 0; border-top:1px solid var(--line); overflow-x:auto; overscroll-behavior-x:contain; }
+.sub-filters:focus-visible { outline:2px solid var(--green); outline-offset:2px; border-radius:6px; }
+.sub-filters .select-field { flex:0 0 auto; width:104px; min-width:0; max-width:none; height:35px; white-space:nowrap; }
+.sub-filters .select-field:first-child { width:150px; }
+.sub-filters .select-field:nth-child(2) { width:164px; }
+.sub-filters .select-field:nth-last-child(3), .sub-filters .select-field:last-child { width:128px; }
+.sub-filters .select-field select { width:100%; min-width:0; text-overflow:ellipsis; white-space:nowrap; }
+.sub-filters .select-field svg { flex-shrink:0; }
 .sub-model { font-size: 12px; color: var(--muted); margin-left: auto; }
 .sub-table { min-width: 1080px; }
 .sub-table details { font-size: 11px; line-height: 1.7; margin-top: 8px; color: var(--muted); }
@@ -2395,7 +2427,7 @@ nav > button.active > svg {
 @media(max-width:780px) {
  .sub-account-list { padding: 0 16px 16px; }
  .sub-account-actions { width: 100%; }
- .sub-filters { padding: 0 16px 16px; }
+ .sub-filters { margin:0 15px 12px; padding:10px 0; }
  .sub-model { margin-left: 0; }
  .sub2api-page .data-actions { flex-wrap: wrap; }
  .sub2api-page .table-footer { gap: 12px; flex-wrap: wrap; }
