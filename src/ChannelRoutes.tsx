@@ -95,39 +95,40 @@ export function ChannelRoutes({
                   ))}
                 </ul>
                 <div className="sub-installed-actions">
-                  <button
-                    className="button small"
-                    aria-label={`编辑 Key ${first.key_position}`}
-                    onClick={() => setEditingRoutes(models)}
-                  >
-                    <Pencil size={13} />
-                    编辑
-                  </button>
-                  {onEditModels &&
-                    [
-                      ...new Set(
-                        models
-                          .filter(
-                            (r) =>
-                              r.origin_provider ||
-                              r.provider.startsWith("sub2api-copy-"),
-                          )
-                          .map((r) => r.provider),
+                  {onEditModels ? (
+                    [...new Set(models.map((r) => r.provider))].map(
+                      (provider, i, providers) => (
+                        <button
+                          key={provider}
+                          className="button small"
+                          aria-label={
+                            providers.length === 1
+                              ? `编辑 Key ${first.key_position}`
+                              : `编辑 Key ${first.key_position} 的模型 ${provider}`
+                          }
+                          onClick={() =>
+                            onEditModels(
+                              models.filter((r) => r.provider === provider),
+                            )
+                          }
+                        >
+                          <Pencil size={13} />
+                          {providers.length === 1
+                            ? "编辑"
+                            : `编辑配置 ${i + 1}`}
+                        </button>
                       ),
-                    ].map((provider) => (
-                      <button
-                        key={provider}
-                        className="button small"
-                        aria-label={`编辑 Key ${first.key_position} 的模型 ${provider}`}
-                        onClick={() =>
-                          onEditModels(
-                            models.filter((r) => r.provider === provider),
-                          )
-                        }
-                      >
-                        编辑模型与重命名
-                      </button>
-                    ))}
+                    )
+                  ) : (
+                    <button
+                      className="button small"
+                      aria-label={`编辑 Key ${first.key_position}`}
+                      onClick={() => setEditingRoutes(models)}
+                    >
+                      <Pencil size={13} />
+                      编辑
+                    </button>
+                  )}
                 </div>
               </article>
             );
@@ -174,12 +175,50 @@ export function ConfiguredChannelDialog({
   ];
   const [key, setKey] = useState("");
   const [position, setPosition] = useState(1);
+  const [uniformApplied, setUniformApplied] = useState(true);
   const [modelPositions, setModelPositions] = useState<Record<string, number>>(
     {},
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  function beginEdit(member: ManagedChannel, rows: ChannelRoute[]) {
+    setMemberId(member.source_id);
+    initializedEdit.current = "";
+    setEditingProvider(rows[0].provider);
+    setAdding(true);
+    setKey(rows[0].api_key_id);
+    setPosition(1);
+    setUniformApplied(false);
+    setModelPositions(
+      Object.fromEntries(rows.map((r) => [r.model, r.position])),
+    );
+    const originals: string[] = [],
+      renamed: ModelAlias[] = [];
+    for (const row of rows) {
+      const upstream = row.upstream_model || row.model;
+      if (
+        member.models.includes(row.model) &&
+        (member.model_mappings?.[row.model] || row.model) === upstream
+      )
+        originals.push(row.model);
+      else
+        renamed.push({
+          public: row.model,
+          upstream:
+            member.models.find(
+              (m) => (member.model_mappings?.[m] || m) === upstream,
+            ) || upstream,
+        });
+    }
+    setSelected(originals);
+    setAliases(renamed);
+    setError("");
+    setSuccess("");
+    void client.invalidateQueries({
+      queryKey: ["configured-import-options", member.source_id],
+    });
+  }
   const options = useQuery({
     queryKey: ["configured-import-options", item.source_id, key],
     queryFn: ({ signal }) =>
@@ -206,7 +245,7 @@ export function ConfiguredChannelDialog({
       !editingProvider ||
       !options.data ||
       options.isFetching ||
-      initializedEdit.current === editingProvider
+      initializedEdit.current === `${item.source_id}:${key}:${editingProvider}`
     )
       return;
     const originals: string[] = [],
@@ -240,8 +279,8 @@ export function ConfiguredChannelDialog({
     setSelected(originals);
     setAliases(renamed);
     setModelPositions(positions);
-    initializedEdit.current = editingProvider;
-  }, [editingProvider, options.data, options.isFetching, item]);
+    initializedEdit.current = `${item.source_id}:${key}:${editingProvider}`;
+  }, [editingProvider, options.data, options.isFetching, item, key]);
   const positions = mapping.models.length
     ? Math.min(
         ...mapping.models.map(
@@ -305,7 +344,8 @@ export function ConfiguredChannelDialog({
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : "添加失败");
-      void options.refetch();
+      // Keep the failed revision until the user explicitly reloads, so retrying
+      // cannot silently overwrite a concurrent configuration change.
     } finally {
       setBusy(false);
     }
@@ -359,50 +399,7 @@ export function ConfiguredChannelDialog({
                       members.length > 1 ? member.source_name : undefined
                     }
                     providers={[member.provider]}
-                    onEditModels={(rows) => {
-                      setMemberId(member.source_id);
-                      initializedEdit.current = "";
-                      setEditingProvider(rows[0].provider);
-                      setAdding(true);
-                      setKey(rows[0].api_key_id);
-                      setPosition(1);
-                      setModelPositions(
-                        Object.fromEntries(
-                          rows.map((r) => [r.model, r.position]),
-                        ),
-                      );
-                      const originals: string[] = [],
-                        renamed: ModelAlias[] = [];
-                      for (const row of rows) {
-                        const upstream = row.upstream_model || row.model;
-                        if (
-                          member.models.includes(row.model) &&
-                          (member.model_mappings?.[row.model] || row.model) ===
-                            upstream
-                        )
-                          originals.push(row.model);
-                        else
-                          renamed.push({
-                            public: row.model,
-                            upstream:
-                              member.models.find(
-                                (m) =>
-                                  (member.model_mappings?.[m] || m) ===
-                                  upstream,
-                              ) || upstream,
-                          });
-                      }
-                      setSelected(originals);
-                      setAliases(renamed);
-                      setError("");
-                      setSuccess("");
-                      void client.invalidateQueries({
-                        queryKey: [
-                          "configured-import-options",
-                          member.source_id,
-                        ],
-                      });
-                    }}
+                    onEditModels={(rows) => beginEdit(member, rows)}
                   />
                   <div className="configured-source-settings">
                     <span>{member.source_name}</span>
@@ -428,6 +425,17 @@ export function ConfiguredChannelDialog({
           {(error || options.error) && (
             <p role="alert" className="negative">
               {error || options.error?.message}
+              <button
+                className="button small"
+                disabled={busy || options.isFetching}
+                onClick={() => {
+                  initializedEdit.current = "";
+                  setError("");
+                  void options.refetch();
+                }}
+              >
+                重新读取配置
+              </button>
             </p>
           )}
           {!adding && (
@@ -436,6 +444,7 @@ export function ConfiguredChannelDialog({
               onClick={() => {
                 setAdding(true);
                 setEditingProvider("");
+                setUniformApplied(true);
                 setModelPositions({});
                 setSelected(item.models);
                 setAliases([]);
@@ -523,32 +532,66 @@ export function ConfiguredChannelDialog({
                 <select
                   aria-label="添加到 API key"
                   value={key}
-                  disabled={busy || options.isFetching || !!editingProvider}
+                  disabled={busy || options.isFetching}
                   onChange={(e) => {
-                    setKey(e.target.value);
-                    setPosition(1);
-                    setModelPositions({});
+                    if (editingProvider) {
+                      const candidates = providerRoutes(
+                        routes[sources.indexOf(item.source_id)]?.data?.data ||
+                          [],
+                        [item.provider],
+                      ).filter((r) => r.api_key_id === e.target.value);
+                      const provider =
+                        candidates.find((r) => r.origin_provider)?.provider ||
+                        candidates[0]?.provider;
+                      if (provider)
+                        beginEdit(
+                          item,
+                          candidates.filter((r) => r.provider === provider),
+                        );
+                    } else {
+                      setKey(e.target.value);
+                      setPosition(1);
+                      setModelPositions({});
+                    }
                   }}
                 >
-                  <option value="">选择 API key</option>
-                  {options.data?.keys.map((k) => (
-                    <option key={k.key_id} value={k.key_id}>
-                      Key {k.position} · {k.prefix}
-                    </option>
-                  ))}
+                  {!editingProvider && <option value="">选择 API key</option>}
+                  {options.data?.keys
+                    .filter(
+                      (k) =>
+                        !editingProvider ||
+                        providerRoutes(
+                          routes[sources.indexOf(item.source_id)]?.data?.data ||
+                            [],
+                          [item.provider],
+                        ).some((r) => r.api_key_id === k.key_id),
+                    )
+                    .map((k) => (
+                      <option key={k.key_id} value={k.key_id}>
+                        Key {k.position} · {k.prefix}
+                      </option>
+                    ))}
                 </select>
               </label>
               <label className="sub-import-field">
-                添加位置
+                统一位置
                 <select
                   aria-label="渠道添加位置"
-                  value={Math.min(position, positions)}
+                  value={
+                    editingProvider && !uniformApplied
+                      ? ""
+                      : Math.min(position, positions)
+                  }
                   onChange={(e) => {
                     setPosition(Number(e.target.value));
+                    setUniformApplied(true);
                     setModelPositions({});
                   }}
                   disabled={busy || options.isFetching || !key}
                 >
+                  {editingProvider && !uniformApplied && (
+                    <option value="">保持各模型当前位置</option>
+                  )}
                   {Array.from({ length: positions }, (_, i) => (
                     <option key={i} value={i + 1}>
                       第 {i + 1} 位
@@ -566,8 +609,9 @@ export function ConfiguredChannelDialog({
                 disabled={busy || options.isFetching || !key}
               />
               <p className="muted">
-                保存为此 API key
-                专用渠道；只开放勾选的原模型和填写的对外模型名。已有基础渠道路由保持独立。
+                {editingProvider
+                  ? "只修改当前选中的 API key；切换 API key 会载入该 Key 已保存的模型和位置。"
+                  : "只对所选 API key 开放勾选的原模型和填写的对外模型名。"}
               </p>
               <div className="dialog-actions">
                 <button

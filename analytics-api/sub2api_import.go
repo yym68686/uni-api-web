@@ -109,7 +109,14 @@ func (s *Service) subChannelOptions(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if data, ok := catalog["data"].([]any); ok {
-			channels = data
+			replaced := configuredReplacements(state, key)
+			for _, row := range data {
+				item, _ := row.(map[string]any)
+				provider, _ := item["provider"].(string)
+				if !replaced[provider] {
+					channels = append(channels, row)
+				}
+			}
 		}
 	}
 	writeJSON(w, 200, map[string]any{"revision": state["revision"], "supported": state["temporary_channel_import"] == true, "manageable": state["temporary_channel_management"] == true, "keys": keys["data"], "channels": channels, "provider": subProviderName(r.URL.Query().Get("account_id"), int64Param(r.URL.Query().Get("group_id")), strings.TrimPrefix(r.URL.Query().Get("api_key_id"), src.ID+"::"))})
@@ -381,9 +388,15 @@ func (s *Service) importSnapshot(ctx context.Context, src controlSource, state m
 	return snapshot, 200, nil
 }
 
-func (s *Service) applyImportSnapshot(ctx context.Context, src controlSource, snapshot retainedSnapshot, revision string, channel retainedChannel, position int, positions map[string]int) (map[string]any, int, error) {
+func (s *Service) applyImportSnapshot(ctx context.Context, src controlSource, snapshot retainedSnapshot, revision string, channel retainedChannel, position int, positions map[string]int, suppress ...string) (map[string]any, int, error) {
 	if err := validateModelPositions(channel.Models, positions); err != nil {
 		return nil, 400, err
+	}
+	replaced := snapshotReplacements(snapshot.Rules, snapshot.Channels, channel.KeyID)
+	for _, provider := range suppress {
+		if provider != "" {
+			replaced[provider] = true
+		}
 	}
 	// Prune only models no longer offered by this copy. Keep disabled policies
 	// and broader ordering scopes for models that remain in service.
@@ -425,7 +438,7 @@ func (s *Service) applyImportSnapshot(ctx context.Context, src controlSource, sn
 		order := []string{}
 		seen := map[string]bool{}
 		for _, c := range channels {
-			if c.Model == model && c.Provider != channel.Provider && !seen[c.Provider] {
+			if c.Model == model && c.Provider != channel.Provider && !replaced[c.Provider] && !seen[c.Provider] {
 				order = append(order, c.Provider)
 				seen[c.Provider] = true
 			}

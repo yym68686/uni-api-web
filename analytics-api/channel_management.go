@@ -59,14 +59,19 @@ func (s *Service) channelManagement(w http.ResponseWriter, r *http.Request) {
 			src, e := s.control.source(ctx, id)
 			var catalog map[string]any
 			var providers []configuredProvider
+			var controls map[string]any
 			if e == nil {
 				var readers sync.WaitGroup
-				readers.Add(2)
+				readers.Add(3)
 				go func() {
 					defer readers.Done()
 					catalog, _, e = fetchSource(ctx, src, "/v1/model-channels", url.Values{"endpoint": {"all"}, "stream": {"all"}})
 				}()
 				go func() { defer readers.Done(); providers, _ = configuredProviders(ctx, src) }()
+				go func() {
+					defer readers.Done()
+					controls, _, _ = subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
+				}()
 				readers.Wait()
 			}
 			var rows []struct {
@@ -89,7 +94,21 @@ func (s *Service) channelManagement(w http.ResponseWriter, r *http.Request) {
 			for _, p := range providers {
 				liveProviders[p.Provider] = p
 			}
+			var live retainedLive
+			_ = decodeMap(controls, &live)
+			copies := map[string]bool{}
+			for _, c := range live.Channels {
+				for _, p := range providers {
+					if c.Provider == configuredImportName(p.Provider, c.KeyID) {
+						copies[c.Provider] = true
+						break
+					}
+				}
+			}
 			for _, row := range rows {
+				if copies[row.Provider] {
+					continue
+				}
 				item := grouped[row.Provider]
 				if item == nil {
 					binding, found := lookup[id+"\n"+row.Provider]
@@ -190,6 +209,11 @@ func (s *Service) channelRoutes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data := []channelRoute{}
+	state, _, stateErr := subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
+	if stateErr != nil {
+		http.Error(w, "渠道配置读取失败", 503)
+		return
+	}
 	unavailable := []string{}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -224,7 +248,11 @@ func (s *Service) channelRoutes(w http.ResponseWriter, r *http.Request) {
 			}
 			positions := map[string]int{}
 			seen := map[string]bool{}
+			replaced := configuredReplacements(state, key.ID)
 			for _, row := range rows {
+				if replaced[row.Provider] {
+					continue
+				}
 				unique := row.Provider + "\n" + row.Model
 				if seen[unique] {
 					continue

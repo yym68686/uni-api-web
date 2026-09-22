@@ -25,6 +25,8 @@ func TestChannelManagementUsesConfiguredInventoryAndEffectiveKeyRoutes(t *testin
 			return
 		}
 		switch r.URL.Path {
+		case "/v1/channel-controls":
+			writeJSON(w, 200, map[string]any{"rules": []any{}, "temporary_channels": []any{}})
 		case "/v1/channel-settings/providers":
 			live := append([]configuredProvider{}, providers...)
 			if changedKey.Load() {

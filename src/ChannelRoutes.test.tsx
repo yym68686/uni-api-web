@@ -13,7 +13,7 @@ it("edits one native caller key with independent model positions and refuses sta
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string, init?: RequestInit) => {
-      if (init?.method === "PATCH") {
+      if (init?.method === "POST") {
         writes.push(JSON.parse(String(init.body)));
         return stale
           ? new Response("版本已变化", { status: 409 })
@@ -22,6 +22,10 @@ it("edits one native caller key with independent model positions and refuses sta
       if (input.includes("channel-options"))
         return Response.json({
           revision: "fresh-r2",
+          keys: [
+            { key_id: "key1", position: 1, prefix: "masked-one" },
+            { key_id: "key2", position: 2, prefix: "masked-two" },
+          ],
           channels: [
             { provider: "other", model: "astra" },
             { provider: "native", model: "astra" },
@@ -78,36 +82,30 @@ it("edits one native caller key with independent model positions and refuses sta
   );
   const user = userEvent.setup();
   await user.click(await screen.findByRole("button", { name: "编辑 Key 1" }));
-  const dialog = within(
-    screen.getByRole("dialog", { name: "编辑 API key · Key 1" }),
-  );
-  expect(await dialog.findByLabelText("native astra 的路由位置")).toHaveValue(
-    "2",
-  );
-  expect(dialog.getByLabelText("native sol 的路由位置")).toHaveValue("1");
-  await user.selectOptions(
-    dialog.getByLabelText("native astra 的路由位置"),
-    "1",
-  );
-  await user.selectOptions(dialog.getByLabelText("native sol 的路由位置"), "2");
+  const dialog = within(screen.getByRole("dialog", { name: "添加到渠道" }));
+  expect(await dialog.findByLabelText("astra 的路由位置")).toHaveValue("2");
+  expect(dialog.getByLabelText("sol 的路由位置")).toHaveValue("1");
+  await user.selectOptions(dialog.getByLabelText("astra 的路由位置"), "1");
+  await user.selectOptions(dialog.getByLabelText("sol 的路由位置"), "2");
   stale = true;
   await user.click(dialog.getByRole("button", { name: "保存更改" }));
   expect(await dialog.findByRole("alert")).toHaveTextContent("版本已变化");
-  expect(writes).toEqual([
-    {
-      api_key_id: "key1",
-      revision: "fresh-r2",
-      moves: [
-        { provider: "native", model: "astra", position: 1 },
-        { provider: "native", model: "sol", position: 2 },
-      ],
-    },
-  ]);
-  await user.click(dialog.getByRole("button", { name: "重新读取路由" }));
+  expect(writes[0]).toMatchObject({
+    source_id: "source",
+    provider: "native",
+    edit_provider: "native",
+    api_key_id: "key1",
+    revision: "fresh-r2",
+    models: ["astra", "sol"],
+    positions: { astra: 1, sol: 2 },
+  });
+  expect(dialog.getByRole("checkbox", { name: "astra" })).toBeChecked();
+  expect(dialog.getByLabelText("添加到 API key")).toBeEnabled();
+  expect(dialog.getByLabelText("渠道添加位置")).toBeEnabled();
+  await user.click(dialog.getByRole("button", { name: "重新读取配置" }));
   await waitFor(() =>
-    expect(dialog.getByLabelText("native astra 的路由位置")).toHaveValue("2"),
+    expect(dialog.getByLabelText("astra 的路由位置")).toHaveValue("2"),
   );
-  expect(dialog.getByRole("button", { name: "保存更改" })).toBeDisabled();
 });
 
 it("opens an existing native copy with its aliases and preserves different positions", async () => {
@@ -177,7 +175,7 @@ it("opens an existing native copy with its aliases and preserves different posit
   const user = userEvent.setup();
   await user.click(
     await screen.findByRole("button", {
-      name: `编辑 Key 1 的模型 ${provider}`,
+      name: "编辑 Key 1",
     }),
   );
   expect(screen.getByLabelText("重命名 1 对外模型名")).toHaveValue("alias");
@@ -380,26 +378,30 @@ it("edits and adds through the selected source in a merged channel dialog", asyn
     screen.getByRole("region", { name: "DigitalOcean 接入情况" }),
   );
   await user.click(await region.findByRole("button", { name: "编辑 Key 1" }));
-  const editor = within(
-    screen.getByRole("dialog", { name: "编辑 API key · Key 1" }),
-  );
-  expect(editor.getByText(/DigitalOcean · masked/)).toBeVisible();
+  const editor = within(screen.getByRole("dialog", { name: "添加到渠道" }));
+  expect(editor.getByLabelText("添加到 uni-api 来源")).toHaveValue("do");
   await user.selectOptions(
-    await editor.findByLabelText("native only-do 的路由位置"),
+    await editor.findByLabelText("only-do 的路由位置"),
     "1",
   );
   await user.click(editor.getByRole("button", { name: "保存更改" }));
   await waitFor(() =>
     expect(
-      screen.queryByRole("dialog", { name: "编辑 API key · Key 1" }),
+      screen.queryByRole("button", { name: "保存更改" }),
     ).not.toBeInTheDocument(),
   );
   expect(writes[0]).toEqual({
-    path: expect.stringContaining("/v1/sources/do/channel-routes"),
+    path: expect.stringContaining("/v1/channel-management"),
     body: {
+      source_id: "do",
+      provider: "native",
+      edit_provider: "native",
       api_key_id: "same-key",
       revision: "do-revision",
-      moves: [{ provider: "native", model: "only-do", position: 1 }],
+      models: ["only-do"],
+      model_mappings: {},
+      position: 1,
+      positions: { "only-do": 1 },
     },
   });
   await user.click(
@@ -426,5 +428,107 @@ it("edits and adds through the selected source in a merged channel dialog", asyn
     models: ["only-do"],
     model_mappings: { "public-alias": "only-do" },
     positions: { "only-do": 2, "public-alias": 1 },
+  });
+});
+
+it("loads model selection for each selected caller key and saves uniform plus per-model positions", async () => {
+  const writes: any[] = [];
+  const rows = [
+    {
+      provider: "native",
+      model: "astra",
+      api_key_id: "key1",
+      key_position: 1,
+      key_prefix: "masked1",
+      position: 1,
+    },
+    {
+      provider: "native",
+      model: "sol",
+      api_key_id: "key1",
+      key_position: 1,
+      key_prefix: "masked1",
+      position: 2,
+    },
+    {
+      provider: "native",
+      model: "sol",
+      api_key_id: "key2",
+      key_position: 2,
+      key_prefix: "masked2",
+      position: 1,
+    },
+  ];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        writes.push(JSON.parse(String(init.body)));
+        return Response.json({ message: "已保存" });
+      }
+      if (input.includes("channel-options")) {
+        const key = new URL(input, location.origin).searchParams.get(
+          "api_key_id",
+        );
+        return Response.json({
+          revision: `revision-${key}`,
+          keys: [
+            { key_id: "key1", position: 1, prefix: "masked1" },
+            { key_id: "key2", position: 2, prefix: "masked2" },
+          ],
+          channels: [
+            ...rows.filter((r) => r.api_key_id === key),
+            { provider: "peer", model: "astra" },
+            { provider: "peer", model: "sol" },
+          ],
+        });
+      }
+      return Response.json({ data: rows, unavailable_keys: [] });
+    }),
+  );
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <ConfiguredChannelDialog
+        item={
+          {
+            source_id: "s",
+            source_name: "Fugue",
+            provider: "native",
+            name: "native",
+            models: ["astra", "sol"],
+          } as ManagedChannel
+        }
+        close={() => {}}
+      />
+    </QueryClientProvider>,
+  );
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "编辑 Key 1" }));
+  await waitFor(() =>
+    expect(screen.getByLabelText("添加到 API key")).toBeEnabled(),
+  );
+  expect(screen.getByRole("checkbox", { name: "astra" })).toBeChecked();
+  await user.click(screen.getByRole("checkbox", { name: "sol" }));
+  await user.selectOptions(screen.getByLabelText("添加到 API key"), "key2");
+  await waitFor(() =>
+    expect(screen.getByLabelText("添加到 API key")).toBeEnabled(),
+  );
+  expect(screen.getByRole("checkbox", { name: "sol" })).toBeChecked();
+  expect(screen.getByRole("checkbox", { name: "astra" })).not.toBeChecked();
+  await user.click(screen.getByRole("checkbox", { name: "astra" }));
+  await user.selectOptions(screen.getByLabelText("渠道添加位置"), "2");
+  expect(screen.getByLabelText("astra 的路由位置")).toHaveValue("2");
+  expect(screen.getByLabelText("sol 的路由位置")).toHaveValue("2");
+  await user.selectOptions(screen.getByLabelText("sol 的路由位置"), "1");
+  await user.click(screen.getByRole("button", { name: "保存更改" }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).toMatchObject({
+    source_id: "s",
+    api_key_id: "key2",
+    edit_provider: "native",
+    revision: "revision-key2",
+    models: ["sol", "astra"],
+    position: 2,
+    positions: { astra: 2, sol: 1 },
   });
 });

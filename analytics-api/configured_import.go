@@ -15,6 +15,34 @@ func configuredImportName(provider, key string) string {
 	return "sub2api-copy-" + tokenHash("channel-import\n" + provider + "\n" + key)[:20]
 }
 
+// A native channel edited for one caller is replaced by a key-owned copy.
+// The native definition remains available to all other callers. Both changes
+// live in the same atomic gateway snapshot and survive retention/restore.
+func configuredReplacements(state map[string]any, key string) map[string]bool {
+	var live retainedLive
+	_ = decodeMap(state, &live)
+	return snapshotReplacements(live.Rules, live.Channels, key)
+}
+func snapshotReplacements(rules []retainedRule, channels []retainedChannel, key string) map[string]bool {
+	copies := map[string]bool{}
+	for _, c := range channels {
+		if c.KeyID == key {
+			copies[c.Provider] = true
+		}
+	}
+	replaced := map[string]bool{}
+	for _, r := range rules {
+		if r.KeyID == key && r.Model == "" {
+			for _, provider := range r.Disabled {
+				if copies[configuredImportName(provider, key)] {
+					replaced[provider] = true
+				}
+			}
+		}
+	}
+	return replaced
+}
+
 // Reconstruct the effective provider on the server. Full credentials are never
 // sent to the browser; aliases preserve engine, headers, limits and other rules.
 func (s *Service) importProviderDocument(ctx context.Context, src controlSource, snapshot retainedSnapshot, provider, revision string) (map[string]any, int, error) {
@@ -170,6 +198,7 @@ func (s *Service) configuredImport(w http.ResponseWriter, r *http.Request) {
 	}
 	provider := configuredImportName(in.Provider, key)
 	documentProvider := in.Provider
+	editingNative := false
 	if in.EditProvider != "" {
 		if in.EditProvider != provider && in.EditProvider != in.Provider {
 			http.Error(w, "编辑渠道不属于所选来源", 400)
@@ -181,12 +210,35 @@ func (s *Service) configuredImport(w http.ResponseWriter, r *http.Request) {
 				found = true
 			}
 		}
-		if !found {
+		if !found && in.EditProvider == in.Provider {
+			catalog, _, e := fetchSource(ctx, src, "/v1/model-channels", url.Values{"api_key_id": {key}, "endpoint": {"all"}, "stream": {"all"}})
+			var rows []struct {
+				Provider string `json:"provider"`
+			}
+			if e != nil || decodeMap(catalog["data"], &rows) != nil {
+				http.Error(w, "当前 API key 路由读取失败", 503)
+				return
+			}
+			for _, row := range rows {
+				if row.Provider == in.Provider {
+					editingNative = true
+				}
+			}
+			for _, c := range snapshot.Channels {
+				if c.Provider == provider {
+					http.Error(w, "此 API key 已有独立模型配置，请刷新后编辑该配置", 409)
+					return
+				}
+			}
+		}
+		if !found && !editingNative {
 			http.Error(w, "该 API key 的专用渠道已变化，请刷新后编辑", 409)
 			return
 		}
-		provider = in.EditProvider
-		documentProvider = provider
+		if found {
+			provider = in.EditProvider
+			documentProvider = provider
+		}
 	}
 	document, code, err := s.importProviderDocument(ctx, src, snapshot, documentProvider, in.Revision)
 	if err != nil {
@@ -249,7 +301,24 @@ func (s *Service) configuredImport(w http.ResponseWriter, r *http.Request) {
 	if keys := providerKeys(document["api"]); len(keys) > 0 {
 		secret = keys[0]
 	}
-	applied, code, err := s.applyImportSnapshot(ctx, src, snapshot, in.Revision, retainedChannel{Provider: provider, KeyID: key, Base: base, Key: secret, Models: public, Definition: raw}, in.Position, in.Positions)
+	if editingNative {
+		found := false
+		for i := range snapshot.Rules {
+			rule := &snapshot.Rules[i]
+			if rule.KeyID == key && rule.Model == "" {
+				rule.Disabled = append(withoutProvider(rule.Disabled, in.Provider), in.Provider)
+				found = true
+			}
+		}
+		if !found {
+			snapshot.Rules = append(snapshot.Rules, retainedRule{KeyID: key, Order: []string{}, Disabled: []string{in.Provider}})
+		}
+	}
+	suppressed := ""
+	if editingNative {
+		suppressed = in.Provider
+	}
+	applied, code, err := s.applyImportSnapshot(ctx, src, snapshot, in.Revision, retainedChannel{Provider: provider, KeyID: key, Base: base, Key: secret, Models: public, Definition: raw}, in.Position, in.Positions, suppressed)
 	if err != nil {
 		http.Error(w, err.Error(), code)
 		return

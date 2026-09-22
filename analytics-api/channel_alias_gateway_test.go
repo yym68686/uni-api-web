@@ -316,4 +316,111 @@ func TestModelAliasesServeBothNamesWithRealGateway(t *testing.T) {
 	}
 	probe("caller-a", "review-alias")
 
+	// Base-config edits replace only this caller's route with an owned copy.
+	nativeEdit := func(models []string, mappings map[string]string, editProvider string, revision string, want int) {
+		t.Helper()
+		body := map[string]any{"source_id": src.ID, "provider": "fugue-codex", "edit_provider": editProvider, "api_key_id": adminKey, "revision": revision, "models": models, "model_mappings": mappings, "position": 1}
+		req := httptest.NewRequest("POST", "/v1/channel-management", strings.NewReader(mustJSON(body)))
+		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
+		res := httptest.NewRecorder()
+		service.Handler().ServeHTTP(res, req)
+		if res.Code != want {
+			t.Fatalf("native edit %d: %s", res.Code, res.Body.String())
+		}
+	}
+	state, _, _ = subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
+	oldRevision := state["revision"].(string)
+	nativeEdit([]string{}, map[string]string{"native-alias": "codex-auto-review"}, "fugue-codex", oldRevision, 200)
+	nativeEdit([]string{"codex-auto-review"}, nil, "fugue-codex", oldRevision, 409)
+	probe("admin-fixture", "native-alias")
+	blockedReq, _ := http.NewRequestWithContext(ctx, "POST", src.Base+"/v1/responses", strings.NewReader(`{"model":"codex-auto-review","input":"say test","stream":true}`))
+	blockedReq.Header.Set("Authorization", "Bearer admin-fixture")
+	blockedReq.Header.Set("Content-Type", "application/json")
+	blockedResp, e := http.DefaultClient.Do(blockedReq)
+	if e != nil {
+		t.Fatal(e)
+	}
+	io.Copy(io.Discard, blockedResp.Body)
+	blockedResp.Body.Close()
+	if blockedResp.StatusCode == 200 {
+		t.Fatal("unchecked native model still served")
+	}
+	select {
+	case <-hits:
+		t.Fatal("unchecked model reached upstream")
+	default:
+	}
+	assertCatalog(keyB, "codex-auto-review", "gpt-5.6-luna")
+	state, _, _ = subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
+	var nativeState retainedLive
+	decodeMap(state, &nativeState)
+	if !configuredReplacements(state, adminKey)["fugue-codex"] || configuredReplacements(state, keyB)["fugue-codex"] {
+		t.Fatal("replacement scope leaked")
+	}
+	for _, rule := range nativeState.Rules {
+		if rule.KeyID == adminKey && rule.Model == "codex-auto-review" && mustJSON(rule.Disabled) != `["peer"]` {
+			t.Fatal("peer disable policy changed", rule)
+		}
+	}
+	read := func(path string) map[string]any {
+		t.Helper()
+		req := httptest.NewRequest("GET", path, nil)
+		req.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
+		res := httptest.NewRecorder()
+		service.Handler().ServeHTTP(res, req)
+		if res.Code != 200 {
+			t.Fatal(res.Code, res.Body.String())
+		}
+		var data map[string]any
+		json.Unmarshal(res.Body.Bytes(), &data)
+		return data
+	}
+	routeList := read("/v1/sources/" + src.ID + "/channel-routes")
+	var listed []channelRoute
+	decodeMap(routeList["data"], &listed)
+	foundCopy := false
+	for _, r := range listed {
+		if r.KeyID != adminKey {
+			continue
+		}
+		if r.Provider == "fugue-codex" {
+			t.Fatal("replaced native still listed", r)
+		}
+		if r.Provider == configuredImportName("fugue-codex", adminKey) {
+			foundCopy = true
+			if r.Model != "native-alias" || r.OriginProvider != "fugue-codex" || r.Position != 1 {
+				t.Fatal("wrong edited membership", r)
+			}
+		}
+	}
+	if !foundCopy {
+		t.Fatal("replacement missing")
+	}
+	opts := read("/v1/sub2api/channel-options?source_id=" + src.ID + "&api_key_id=" + adminKey)
+	var optionRows []channelRoute
+	decodeMap(opts["channels"], &optionRows)
+	for _, r := range optionRows {
+		if r.Provider == "fugue-codex" {
+			t.Fatal("replaced model included in position options")
+		}
+	}
+	nativeEdit([]string{"codex-auto-review"}, map[string]string{"native-alias": "codex-auto-review"}, configuredImportName("fugue-codex", adminKey), state["revision"].(string), 200)
+	probe("admin-fixture", "codex-auto-review")
+	probe("admin-fixture", "native-alias")
+	record, e = store.retainedRecord(ctx, src.ID)
+	if e != nil {
+		t.Fatal(e)
+	}
+	snapshot, e = store.retainedSnapshot(record)
+	if e != nil {
+		t.Fatal(e)
+	}
+	state, _, _ = subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
+	if _, _, e = subGateway(ctx, src, "POST", "/v1/channel-controls/restore", map[string]any{"revision": state["revision"], "snapshot": snapshot}); e != nil {
+		t.Fatal(e)
+	}
+	probe("admin-fixture", "native-alias")
+	assertCatalog(keyB, "codex-auto-review", "gpt-5.6-luna")
+
 }
