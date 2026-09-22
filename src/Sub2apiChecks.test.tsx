@@ -145,7 +145,7 @@ it("manages initial channels with account/unassigned filters and shows every cal
 it("merges the same native channel across sources in the list and import dialog", async () => {
   const channels = ["fugue", "do"].map((source_id, i) => ({
     kind: "configured", source_id, source_name: i ? "DigitalOcean" : "Fugue",
-    provider: "fugue-codex", name: "fugue-codex", base: "https://same.test", engine: "gpt",
+    provider: "fugue-codex", name: "fugue-codex", base: i ? "https://public.test" : "http://gateway.cluster.local:8000", engine: "gpt",
     models: i ? ["codex-auto-review", "gpt-6-astra"] : ["codex-auto-review"], account_ids: [],
   }));
   vi.stubGlobal("fetch", vi.fn(async (input: string) => {

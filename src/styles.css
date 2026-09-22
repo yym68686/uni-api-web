@@ -2488,6 +2488,7 @@ nav > button.active > svg {
 .configured-route-summary small { color: var(--muted); font-size: 12px; font-weight: 400; }
 .configured-source { margin: 20px 0; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
 .configured-source-settings { display: flex; align-items: center; justify-content: space-between; gap: 16px; color: var(--muted); font-size: 12px; }
+.configured-source-address { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .control-persistence { margin-left: auto; max-width: 380px; font-size: 13px; }
 .control-persistence label { display:flex; align-items:center; gap:8px; }
 .control-persistence small { display:block; color:var(--muted); line-height:1.6; margin-top:6px; }

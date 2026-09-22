@@ -24,12 +24,12 @@ const channel = (overrides: Partial<ManagedChannel> = {}): ManagedChannel => ({
   ...overrides,
 });
 
-it("merges sources by provider, normalized site and engine while retaining independent model definitions", () => {
+it("merges public and private addresses for the same provider while retaining source definitions", () => {
   const first = channel(),
     second = channel({
       source_id: "do",
       source_name: "DigitalOcean",
-      base: "https://upstream.test/",
+      base: "http://gateway.cluster.local:8000",
       models: ["alias"],
       model_mappings: { alias: "real" },
       account_ids: ["account"],
@@ -50,16 +50,14 @@ it("merges sources by provider, normalized site and engine while retaining indep
   expect(second.model_mappings).toEqual({ alias: "real" });
 });
 
-it("does not merge different upstreams, tenant paths, engines or unknown addresses", () => {
-  const channels = [
-    channel(),
-    channel({ source_id: "a", base: "https://other.test" }),
-    channel({ source_id: "b", base: "https://upstream.test/tenant" }),
-    channel({ source_id: "c", engine: "claude" }),
-    channel({ source_id: "d", base: "" }),
-    channel({ source_id: "e", base: "" }),
-  ];
-  expect(groupManagedChannels(channels)).toHaveLength(6);
+it("does not merge distinct provider identifiers or engines even when display names match", () => {
+  expect(
+    groupManagedChannels([
+      channel(),
+      channel({ source_id: "a", provider: "other", name: "native" }),
+      channel({ source_id: "b", engine: "claude" }),
+    ]),
+  ).toHaveLength(3);
 });
 
 it("counts a caller key separately in each source and marks failed or pending sources incomplete", () => {

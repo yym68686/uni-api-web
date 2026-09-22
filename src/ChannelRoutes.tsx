@@ -347,6 +347,12 @@ export function ConfiguredChannelDialog({
                   className="configured-source"
                   aria-label={`${member.source_name} 接入情况`}
                 >
+                  {members.length > 1 &&
+                    new Set(members.map((m) => m.base)).size > 1 && (
+                      <p className="configured-source-address">
+                        {member.source_name} · {member.base || "未提供上游地址"}
+                      </p>
+                    )}
                   <ChannelRoutes
                     sourceId={member.source_id}
                     sourceName={

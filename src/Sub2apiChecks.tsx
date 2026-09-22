@@ -858,7 +858,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
           ({ account, target, checks, selected, accountIds, configured }) =>
             (!accountId || (accountId === UNASSIGNED_ACCOUNT ? !accountIds.length : accountIds.includes(accountId))) &&
             (!configured || !model || configured.models.includes(model)) &&
-            `${account.name} ${account.email} ${target.name} ${target.channel} ${target.platform} ${configured?.source_name || ""} ${configured?.base || ""}`
+            `${account.name} ${account.email} ${target.name} ${target.channel} ${target.platform} ${configured?.source_name || ""} ${configured?.members?.map(m=>m.base || "").join(" ") || configured?.base || ""}`
               .toLowerCase()
               .includes(search.toLowerCase()) &&
             (!availability ||

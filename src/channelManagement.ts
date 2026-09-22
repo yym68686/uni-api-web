@@ -17,13 +17,10 @@ export function groupManagedChannels(
 ): ManagedChannel[] {
   const groups = new Map<string, ManagedChannel[]>();
   for (const item of channels) {
-    // The API normalizes known inference URL suffixes. Never combine unrelated
-    // upstreams or unknown addresses merely because their display names match.
-    const id = JSON.stringify(
-      item.base
-        ? [item.provider, item.base.replace(/\/+$/, ""), item.engine]
-        : [item.provider, null, item.source_id],
-    );
+    // The same configured provider may use a public URL on one gateway and a
+    // private URL on another. Group its presentation by configured name/engine;
+    // keep addresses, credentials, model definitions and writes source-scoped.
+    const id = JSON.stringify([item.provider, item.engine]);
     const members = groups.get(id) || [];
     members.push(item);
     groups.set(id, members);
