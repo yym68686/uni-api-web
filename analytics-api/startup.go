@@ -88,6 +88,9 @@ func checkpointFailure(err error) checkpointErrorDetail {
 			}
 		}
 	}
+	if class := databaseErrorClass(err); class != "" {
+		d.Class = class
+	}
 	return d
 }
 

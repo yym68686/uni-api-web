@@ -155,6 +155,9 @@ func (s *Service) importListedObjects(ctx context.Context, client *s3.Client, pe
 		}
 		if len(good) > 0 {
 			if err = s.engine.ImportBatch(ctx, good); err != nil {
+				if start == 0 {
+					fmt.Printf("analytics import_batch source=%s class=%s objects=%d\n", s.cfg.SourceID, importErrorClass(err), len(good))
+				}
 				return err
 			}
 			s.remaining.Add(-int64(len(good)))
@@ -228,6 +231,9 @@ func (s *Service) maybeImport(ctx context.Context) {
 	}
 }
 func importErrorClass(err error) string {
+	if class := databaseErrorClass(err); class != "" {
+		return class
+	}
 	var api smithy.APIError
 	if errors.As(err, &api) {
 		switch api.ErrorCode() {
