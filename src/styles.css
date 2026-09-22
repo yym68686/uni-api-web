@@ -2858,3 +2858,11 @@ nav > button.active > svg {
 .sub-installed li { display:flex; align-items:baseline; justify-content:space-between; gap:16px; }
 .sub-installed li > span { overflow-wrap:anywhere; }
 .sub-installed li > small { white-space:nowrap; }
+
+.model-positions { border-top:1px solid var(--line); margin:20px 0; padding-top:16px; }
+.model-position-list { display:grid; gap:10px; margin:14px 0; }
+.model-position-list > label { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.model-position-list > label > span { min-width:0; overflow-wrap:anywhere; font-size:13px; }
+.model-position-list select { flex:0 0 110px; max-width:50%; padding:9px 10px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--text); }
+.route-edit-overlay { z-index: 85; }
+.route-edit-dialog { z-index: 90; }

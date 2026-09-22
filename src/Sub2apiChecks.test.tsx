@@ -877,6 +877,7 @@ it("preselects successful models and imports into the selected source key at the
     compaction_enabled: false,
     models: ["gpt-6-astra", "gpt-5.6-sol"],
     position: 2,
+    positions: {"gpt-6-astra":2,"gpt-5.6-sol":2},
     revision: "revision-1",
   });
   expect(JSON.stringify(writes)).not.toContain("secret");
@@ -1386,7 +1387,7 @@ it("lists imported keys, replaces exact models and deletes only the chosen bindi
       provider: "sub2api-test1",
       name: "one-0.01",
       models: ["gpt-6-astra", "gpt-5.6-sol"],
-      positions: { "gpt-6-astra": 1, "gpt-5.6-sol": 1 },
+      positions: { "gpt-6-astra": 2, "gpt-5.6-sol": 1 },
       revision: "boot:1",
       manageable: true,
     },
@@ -1420,7 +1421,7 @@ it("lists imported keys, replaces exact models and deletes only the chosen bindi
             { key_id: "key1", position: 1, prefix: "masked-one" },
             { key_id: "key2", position: 2, prefix: "masked-two" },
           ],
-          channels: [],
+          channels: [{provider:"other",model:"gpt-6-astra"},{provider:"sub2api-test1",model:"gpt-6-astra"},{provider:"sub2api-test1",model:"gpt-5.6-sol"},{provider:"other",model:"gpt-5.6-sol"}],
         };
       else if (input.endsWith("/v1/sources"))
         reply = { data: [{ id: "source", name: "Gateway" }] };
@@ -1458,6 +1459,9 @@ it("lists imported keys, replaces exact models and deletes only the chosen bindi
       within(dialog).getByRole("button", { name: "保存更改" }),
     ).toBeEnabled(),
   );
+  expect(within(dialog).getByLabelText("gpt-6-astra 的路由位置")).toHaveValue("2");
+  expect(within(dialog).getByLabelText("gpt-5.6-sol 的路由位置")).toHaveValue("1");
+  await user.selectOptions(within(dialog).getByLabelText("gpt-6-astra 的路由位置"),"1");
   await user.click(
     within(dialog).getByRole("checkbox", { name: /gpt-5.6-sol/ }),
   );
@@ -1467,6 +1471,7 @@ it("lists imported keys, replaces exact models and deletes only the chosen bindi
     action: "replace",
     api_key_id: "key1",
     models: ["gpt-6-astra"],
+    positions: {"gpt-6-astra":1},
     revision: "boot:1",
   });
   await waitFor(() =>

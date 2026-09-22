@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Plus, Pencil, Trash2, X } from "lucide-react";
@@ -15,6 +15,7 @@ import { ChannelRoutes } from "./ChannelRoutes";
 import { ChannelSettings } from "./ChannelSettings";
 import { ModelAliases, aliasMappings } from "./ModelAliases";
 import type { ModelAlias } from "./ModelAliases";
+import { ModelPositions, selectedModelPositions, modelPositionLimit } from "./ModelPositions";
 import type { ManagedChannel } from "./channelManagement";
 import {
   modelChecks,
@@ -67,6 +68,8 @@ export function Sub2apiImport({
   const [source, setSource] = useState("");
   const [key, setKey] = useState("");
   const [position, setPosition] = useState(1);
+  const [modelPositions, setModelPositions] = useState<Record<string,number>>({});
+  const initializedPositions = useRef("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -87,8 +90,16 @@ export function Sub2apiImport({
       ),
     enabled: !!source,
     retry: false,
+    staleTime: 0,
     refetchOnWindowFocus: false,
   });
+  useEffect(()=>{
+    if(!editing || !options.data || options.isFetching || editing.revision!==options.data.revision)return;
+    const id=`${editing.provider}:${editing.revision}`;if(initializedPositions.current===id)return;
+    const counts:Record<string,number>={},current:Record<string,number>={...editing.positions};
+    for(const c of options.data.channels){counts[c.model]=(counts[c.model]||0)+1;if(c.provider===editing.provider)current[c.model]=counts[c.model];}
+    setModelPositions(current);initializedPositions.current=id;
+  },[editing,options.data,options.isFetching]);
   const positions = models.length
     ? Math.min(
         ...models.map(
@@ -111,6 +122,7 @@ export function Sub2apiImport({
   const stale =
     !!editing && !!options.data && editing.revision !== options.data.revision;
   function edit(item: InstalledChannel) {
+    initializedPositions.current="";
     setEditing(item);
     setAdding(false);
     setRemoving(null);
@@ -118,7 +130,8 @@ export function Sub2apiImport({
     setKey(item.api_key_id);
     setModelChoices(Object.fromEntries(checks.map(check => [check.model, item.models.includes(check.model) && !item.model_mappings?.[check.model]])));
     setAliases(Object.entries(item.model_mappings || {}).map(([publicName,upstream])=>({public:publicName,upstream})));
-    setPosition(Math.min(...item.models.map((m) => item.positions[m] || 1)));
+    setPosition(1);
+    setModelPositions({...item.positions});
     setError("");
     setSuccess("");
     void client.invalidateQueries({ queryKey: ["sub-import-options"] });
@@ -133,6 +146,7 @@ export function Sub2apiImport({
     setModelChoices({});
     setAliases([]);
     setPosition(1);
+    setModelPositions({});
     setError("");
     setSuccess("");
   }
@@ -170,7 +184,7 @@ export function Sub2apiImport({
             group_id: target.group_id,
             source_id: item?.source_id || source,
             api_key_id: item?.api_key_id || key,
-            ...(action !== "delete" ? { models: originals, ...(aliases.length || action === "replace" ? { model_mappings: mapping.mappings } : {}), position: validPosition } : {}),
+            ...(action !== "delete" ? { models: originals, ...(aliases.length || action === "replace" ? { model_mappings: mapping.mappings } : {}), position: validPosition, positions: selectedModelPositions(models, modelPositions, validPosition) } : {}),
             ...(action === "add" ? { compaction_enabled: compactionEnabled } : {}),
             revision: item?.revision || options.data?.revision,
           }),
@@ -384,6 +398,7 @@ export function Sub2apiImport({
                     setSource(e.target.value);
                     setKey("");
                     setPosition(1);
+                    setModelPositions({});
                     setError("");
                   }}
                 >
@@ -414,6 +429,7 @@ export function Sub2apiImport({
                   onChange={(e) => {
                     setKey(e.target.value);
                     setPosition(1);
+                    setModelPositions({});
                   }}
                 >
                   <option value="">选择 API key</option>
@@ -430,7 +446,7 @@ export function Sub2apiImport({
                   aria-label="渠道添加位置"
                   value={validPosition}
                   disabled={!key || options.isFetching || busy}
-                  onChange={(e) => setPosition(Number(e.target.value))}
+                  onChange={(e) => { setPosition(Number(e.target.value)); setModelPositions({}); }}
                 >
                   {Array.from({ length: positions }, (_, i) => (
                     <option key={i} value={i + 1}>
@@ -439,6 +455,7 @@ export function Sub2apiImport({
                   ))}
                 </select>
               </label>
+              <ModelPositions models={models} channels={options.data?.channels || []} provider={options.data?.provider} positions={modelPositions} defaultPosition={validPosition} onChange={setModelPositions} disabled={!key || options.isFetching || busy} />
               <p className="sub-import-note">
                 仅对所选 key
                 和模型生效。开启“保留临时配置”时，来源重启后自动恢复。
@@ -502,6 +519,7 @@ export function Sub2apiImport({
                     !options.data?.supported ||
                     options.isFetching ||
                     options.isError ||
+                    models.some(m => (modelPositions[m] ?? validPosition) > modelPositionLimit(m, options.data?.channels || [], options.data?.provider)) ||
                     stale ||
                     (!editing && !!duplicate) ||
                     (!!editing && !options.data?.manageable)

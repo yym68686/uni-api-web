@@ -129,13 +129,14 @@ func setImportPath(document map[string]any, path string, value any, remove bool)
 func (s *Service) configuredImport(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		subImportInput
-		Provider string `json:"provider"`
+		Provider     string `json:"provider"`
+		EditProvider string `json:"edit_provider"`
 	}
 	if !decodeControlLimit(w, r, &in, 512<<10) {
 		return
 	}
 	public, err := importPublicModels(in.Models, in.ModelMappings)
-	if err != nil || in.Provider == "" || in.Position < 1 || in.Position > 1025 {
+	if err != nil || validateModelPositions(public, in.Positions) != nil || in.Provider == "" || in.Position < 1 || in.Position > 1025 {
 		http.Error(w, "请选择模型、对外名称及有效位置", 400)
 		return
 	}
@@ -167,7 +168,27 @@ func (s *Service) configuredImport(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), code)
 		return
 	}
-	document, code, err := s.importProviderDocument(ctx, src, snapshot, in.Provider, in.Revision)
+	provider := configuredImportName(in.Provider, key)
+	documentProvider := in.Provider
+	if in.EditProvider != "" {
+		if in.EditProvider != provider && in.EditProvider != in.Provider {
+			http.Error(w, "编辑渠道不属于所选来源", 400)
+			return
+		}
+		found := false
+		for _, c := range snapshot.Channels {
+			if c.Provider == in.EditProvider && c.KeyID == key {
+				found = true
+			}
+		}
+		if !found {
+			http.Error(w, "该 API key 的专用渠道已变化，请刷新后编辑", 409)
+			return
+		}
+		provider = in.EditProvider
+		documentProvider = provider
+	}
+	document, code, err := s.importProviderDocument(ctx, src, snapshot, documentProvider, in.Revision)
 	if err != nil {
 		http.Error(w, err.Error(), code)
 		return
@@ -192,6 +213,19 @@ func (s *Service) configuredImport(w http.ResponseWriter, r *http.Request) {
 			available[row.Model] = up
 		}
 	}
+	if in.EditProvider != "" {
+		for _, row := range rows {
+			if row.Provider == in.EditProvider {
+				up := row.Upstream
+				if up == "" {
+					up = row.Model
+				}
+				if _, ok := available[up]; !ok {
+					available[up] = up
+				}
+			}
+		}
+	}
 	for _, model := range importUpstreamModels(in.Models, in.ModelMappings) {
 		if _, ok := available[model]; !ok {
 			http.Error(w, "所选上游模型已不存在，请刷新重试", 400)
@@ -207,7 +241,6 @@ func (s *Service) configuredImport(w http.ResponseWriter, r *http.Request) {
 	for alias, m := range in.ModelMappings {
 		resolved[alias] = available[m]
 	}
-	provider := configuredImportName(in.Provider, key)
 	document["provider"] = provider
 	document["model"] = importModelDefinition(nil, resolved)
 	raw, _ := json.Marshal(document)
@@ -216,7 +249,7 @@ func (s *Service) configuredImport(w http.ResponseWriter, r *http.Request) {
 	if keys := providerKeys(document["api"]); len(keys) > 0 {
 		secret = keys[0]
 	}
-	applied, code, err := s.applyImportSnapshot(ctx, src, snapshot, in.Revision, retainedChannel{Provider: provider, KeyID: key, Base: base, Key: secret, Models: public, Definition: raw}, in.Position)
+	applied, code, err := s.applyImportSnapshot(ctx, src, snapshot, in.Revision, retainedChannel{Provider: provider, KeyID: key, Base: base, Key: secret, Models: public, Definition: raw}, in.Position, in.Positions)
 	if err != nil {
 		http.Error(w, err.Error(), code)
 		return
@@ -225,5 +258,9 @@ func (s *Service) configuredImport(w http.ResponseWriter, r *http.Request) {
 		retentionFailure(w, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"provider": provider, "message": "模型映射已添加到所选 API key"})
+	message := "模型映射已添加到所选 API key"
+	if in.EditProvider != "" {
+		message = "模型与各自路由位置已更新"
+	}
+	writeJSON(w, 200, map[string]any{"provider": provider, "message": message})
 }

@@ -348,7 +348,7 @@ func (s *Service) subManageChannel(w http.ResponseWriter, r *http.Request) {
 		mutation["position"] = in.Position
 	}
 	var applied map[string]any
-	if in.Action == "replace" && in.ModelMappings != nil {
+	if in.Action == "replace" && (in.ModelMappings != nil || len(in.Positions) > 0) {
 		var snapshot retainedSnapshot
 		snapshot, status, e = s.importSnapshot(r.Context(), src, stateMap, in.Revision)
 		if e == nil {
@@ -364,7 +364,7 @@ func (s *Service) subManageChannel(w http.ResponseWriter, r *http.Request) {
 					if old.Provider == provider {
 						old.Definition = raw
 						old.Models = public
-						applied, status, e = s.applyImportSnapshot(r.Context(), src, snapshot, in.Revision, old, in.Position)
+						applied, status, e = s.applyImportSnapshot(r.Context(), src, snapshot, in.Revision, old, in.Position, in.Positions)
 						break
 					}
 				}

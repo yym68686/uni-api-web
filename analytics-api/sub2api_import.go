@@ -15,6 +15,7 @@ import (
 )
 
 type subImportInput struct {
+	Positions         map[string]int    `json:"positions,omitempty"`
 	ModelMappings     map[string]string `json:"model_mappings,omitempty"`
 	CompactionEnabled *bool             `json:"compaction_enabled,omitempty"`
 	Action            string            `json:"action"`
@@ -120,7 +121,7 @@ func (s *Service) subImportChannel(w http.ResponseWriter, r *http.Request) {
 	}
 	owner, _ := s.controlUser(r)
 	publicModels, modelErr := importPublicModels(in.Models, in.ModelMappings)
-	if modelErr != nil || in.Position < 1 || in.Position > 1025 || len(in.Revision) > 256 {
+	if modelErr != nil || validateModelPositions(publicModels, in.Positions) != nil || in.Position < 1 || in.Position > 1025 || len(in.Revision) > 256 {
 		http.Error(w, "请选择模型和有效位置", 400)
 		return
 	}
@@ -268,7 +269,7 @@ func (s *Service) subImportChannel(w http.ResponseWriter, r *http.Request) {
 	}
 	provider := subProviderName(in.AccountID, in.GroupID, key)
 	var applied map[string]any
-	if in.CompactionEnabled != nil || len(in.ModelMappings) > 0 {
+	if in.CompactionEnabled != nil || len(in.ModelMappings) > 0 || len(in.Positions) > 0 {
 		applied, status, err = s.subImportCompactionChannel(ctx, src, state, in, key, provider, base, routeKey.Key)
 	} else {
 		applied, status, err = subGateway(ctx, src, "POST", "/v1/temporary-channels", map[string]any{"revision": in.Revision, "api_key_id": key, "provider": provider, "base_url": base + "/v1/responses", "api_key": routeKey.Key, "models": in.Models, "position": in.Position})
@@ -309,7 +310,7 @@ func (s *Service) subImportCompactionChannel(ctx context.Context, src controlSou
 		excluded = append(excluded, "compaction")
 	}
 	definition, _ := json.Marshal(map[string]any{"provider": provider, "base_url": base + "/v1/responses", "engine": "gpt", "api": []string{upstreamKey}, "model": importModelDefinition(in.Models, in.ModelMappings), "exclude_request_types": excluded})
-	return s.applyImportSnapshot(ctx, src, snapshot, in.Revision, retainedChannel{Provider: provider, KeyID: key, Base: base + "/v1/responses", Key: upstreamKey, Models: public, Definition: definition}, in.Position)
+	return s.applyImportSnapshot(ctx, src, snapshot, in.Revision, retainedChannel{Provider: provider, KeyID: key, Base: base + "/v1/responses", Key: upstreamKey, Models: public, Definition: definition}, in.Position, in.Positions)
 }
 
 func (s *Service) importSnapshot(ctx context.Context, src controlSource, state map[string]any, revision string) (retainedSnapshot, int, error) {
@@ -380,12 +381,22 @@ func (s *Service) importSnapshot(ctx context.Context, src controlSource, state m
 	return snapshot, 200, nil
 }
 
-func (s *Service) applyImportSnapshot(ctx context.Context, src controlSource, snapshot retainedSnapshot, revision string, channel retainedChannel, position int) (map[string]any, int, error) {
-	// Remove references to the replaced channel, preserving every other route.
+func (s *Service) applyImportSnapshot(ctx context.Context, src controlSource, snapshot retainedSnapshot, revision string, channel retainedChannel, position int, positions map[string]int) (map[string]any, int, error) {
+	if err := validateModelPositions(channel.Models, positions); err != nil {
+		return nil, 400, err
+	}
+	// Prune only models no longer offered by this copy. Keep disabled policies
+	// and broader ordering scopes for models that remain in service.
+	kept := map[string]bool{}
+	for _, model := range channel.Models {
+		kept[model] = true
+	}
 	for i := range snapshot.Rules {
 		r := &snapshot.Rules[i]
-		r.Order = withoutProvider(r.Order, channel.Provider)
-		r.Disabled = withoutProvider(r.Disabled, channel.Provider)
+		if r.Model != "" && !kept[r.Model] {
+			r.Order = withoutProvider(r.Order, channel.Provider)
+			r.Disabled = withoutProvider(r.Disabled, channel.Provider)
+		}
 	}
 	next := snapshot.Channels[:0]
 	for _, old := range snapshot.Channels {
@@ -407,6 +418,10 @@ func (s *Service) applyImportSnapshot(ctx context.Context, src controlSource, sn
 		return nil, 502, errors.New("渠道顺序无效")
 	}
 	for _, model := range channel.Models {
+		modelPosition := position
+		if p, ok := positions[model]; ok {
+			modelPosition = p
+		}
 		order := []string{}
 		seen := map[string]bool{}
 		for _, c := range channels {
@@ -415,12 +430,12 @@ func (s *Service) applyImportSnapshot(ctx context.Context, src controlSource, sn
 				seen[c.Provider] = true
 			}
 		}
-		if position > len(order)+1 {
+		if modelPosition < 1 || modelPosition > len(order)+1 {
 			return nil, 400, errors.New("添加位置已失效，请刷新后重试")
 		}
 		order = append(order, "")
-		copy(order[position:], order[position-1:])
-		order[position-1] = channel.Provider
+		copy(order[modelPosition:], order[modelPosition-1:])
+		order[modelPosition-1] = channel.Provider
 		found := false
 		for i := range snapshot.Rules {
 			r := &snapshot.Rules[i]

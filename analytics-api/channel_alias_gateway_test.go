@@ -42,6 +42,7 @@ func TestModelAliasesServeBothNamesWithRealGateway(t *testing.T) {
 	port := strings.Split(listener.Addr().String(), ":")[1]
 	listener.Close()
 	config := map[string]any{"providers": []any{map[string]any{"provider": "fugue-codex", "engine": "gpt", "base_url": upstream.URL + "/v1/responses", "api": "fixture-upstream-key", "model": []any{"codex-auto-review", map[string]string{"codex-auto-review": "old-alias"}}, "preferences": map[string]any{"headers": map[string]string{"X-Fixture": "kept"}}}}, "api_keys": []any{map[string]any{"api": "admin-fixture", "role": "admin", "model": []string{"all"}}, map[string]any{"api": "caller-a", "model": []string{"unconfigured-model"}}, map[string]any{"api": "caller-b", "model": []string{"unconfigured-model"}}}, "preferences": map[string]any{"AUTO_RETRY": false}}
+	config["providers"] = append(config["providers"].([]any), map[string]any{"provider": "peer", "engine": "gpt", "base_url": upstream.URL + "/v1/responses", "api": "peer-fixture-key", "model": []any{"codex-auto-review", map[string]string{"codex-auto-review": "old-alias"}}, "preferences": map[string]any{"headers": map[string]string{"X-Fixture": "kept"}}})
 	path := filepath.Join(dir, "api.json")
 	if err = os.WriteFile(path, []byte(mustJSON(config)), 0600); err != nil {
 		t.Fatal(err)
@@ -206,7 +207,7 @@ func TestModelAliasesServeBothNamesWithRealGateway(t *testing.T) {
 	// The same alias document path used by sub2api imports serves both names too.
 	state, _, _ = subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
 	enabled := false
-	in := subImportInput{Revision: state["revision"].(string), Models: []string{"codex-auto-review"}, ModelMappings: map[string]string{"review-alias": "codex-auto-review"}, Position: 1, CompactionEnabled: &enabled}
+	in := subImportInput{Revision: state["revision"].(string), Models: []string{"codex-auto-review"}, ModelMappings: map[string]string{"review-alias": "codex-auto-review"}, Position: 1, Positions: map[string]int{"codex-auto-review": 2, "review-alias": 1}, CompactionEnabled: &enabled}
 	applied, _, e := service.subImportCompactionChannel(ctx, src, state, in, key, "sub2api-alias-fixture", upstream.URL, "fixture-upstream-key")
 	if e != nil {
 		t.Fatal(e)
@@ -218,4 +219,101 @@ func TestModelAliasesServeBothNamesWithRealGateway(t *testing.T) {
 	if !strings.Contains(mustJSON(catalog), "review-alias") {
 		t.Fatal("sub alias absent")
 	}
+	var siteRows []struct {
+		Provider string `json:"provider"`
+		Model    string `json:"model"`
+	}
+	decodeMap(catalog["data"], &siteRows)
+	siteRanks := map[string]int{}
+	for _, row := range siteRows {
+		siteRanks[row.Model]++
+		if row.Provider == "sub2api-alias-fixture" {
+			want := 1
+			if row.Model == "codex-auto-review" {
+				want = 2
+			}
+			if siteRanks[row.Model] != want {
+				t.Fatal("site import ignored per-model position", siteRows)
+			}
+		}
+	}
+	// Edit a native channel's positions only on the selected caller key.
+	adminKey := keys["data"].([]any)[0].(map[string]any)["key_id"].(string)
+	state, _, _ = subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
+	state, _, e = subGateway(ctx, src, "POST", "/v1/channel-controls", map[string]any{"revision": state["revision"], "action": "set", "api_key_id": adminKey, "model": "codex-auto-review", "order": []string{"fugue-codex", "peer"}, "disabled": []string{"peer"}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	patchRoutes := func(revision string, want int) {
+		t.Helper()
+		body := map[string]any{"api_key_id": adminKey, "revision": revision, "moves": []routeMove{{Provider: "fugue-codex", Model: "codex-auto-review", Position: 2}, {Provider: "fugue-codex", Model: "old-alias", Position: 1}}}
+		req := httptest.NewRequest("PATCH", "/v1/sources/"+src.ID+"/channel-routes", strings.NewReader(mustJSON(body)))
+		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
+		w := httptest.NewRecorder()
+		service.Handler().ServeHTTP(w, req)
+		if w.Code != want {
+			t.Fatal(w.Code, w.Body.String())
+		}
+	}
+	staleRevision := state["revision"].(string)
+	patchRoutes(staleRevision, 200)
+	patchRoutes(staleRevision, 409)
+	state, _, _ = subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
+	var edited retainedLive
+	decodeMap(state, &edited)
+	for _, rule := range edited.Rules {
+		if rule.KeyID == adminKey && rule.Model == "codex-auto-review" {
+			if mustJSON(rule.Order) != `["peer","fugue-codex"]` || mustJSON(rule.Disabled) != `["peer"]` {
+				t.Fatal("native edit changed policy", rule)
+			}
+		}
+	}
+	assertCatalog(keyB, "codex-auto-review", "gpt-5.6-luna")
+	// Updating an existing API-key copy uses its own definition and independent
+	// model positions, without creating a second copy or changing caller-b.
+	copyProvider := configuredImportName("fugue-codex", key)
+	editedBody := map[string]any{"source_id": src.ID, "provider": "fugue-codex", "edit_provider": copyProvider, "api_key_id": key, "revision": state["revision"], "models": []string{"codex-auto-review"}, "model_mappings": map[string]string{"review-alias": "codex-auto-review"}, "position": 1, "positions": map[string]int{"codex-auto-review": 2, "review-alias": 1}}
+	reqEdit := httptest.NewRequest("POST", "/v1/channel-management", strings.NewReader(mustJSON(editedBody)))
+	reqEdit.Header.Set("Content-Type", "application/json")
+	reqEdit.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
+	resEdit := httptest.NewRecorder()
+	service.Handler().ServeHTTP(resEdit, reqEdit)
+	if resEdit.Code != 200 {
+		t.Fatal(resEdit.Code, resEdit.Body.String())
+	}
+	catalog, _, _ = fetchSource(ctx, src, "/v1/model-channels", url.Values{"api_key_id": {key}, "endpoint": {"all"}, "stream": {"all"}})
+	var ordered []struct {
+		Provider string `json:"provider"`
+		Model    string `json:"model"`
+	}
+	decodeMap(catalog["data"], &ordered)
+	counts := map[string]int{}
+	for _, row := range ordered {
+		counts[row.Model]++
+		if row.Provider == copyProvider {
+			want := 1
+			if row.Model == "codex-auto-review" {
+				want = 2
+			}
+			if counts[row.Model] != want {
+				t.Fatal("models did not retain individual positions", ordered)
+			}
+		}
+	}
+	assertCatalog(keyB, "codex-auto-review", "gpt-5.6-luna")
+	record, e = store.retainedRecord(ctx, src.ID)
+	if e != nil {
+		t.Fatal(e)
+	}
+	snapshot, e = store.retainedSnapshot(record)
+	if e != nil {
+		t.Fatal(e)
+	}
+	state, _, _ = subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
+	if _, _, e = subGateway(ctx, src, "POST", "/v1/channel-controls/restore", map[string]any{"revision": state["revision"], "snapshot": snapshot}); e != nil {
+		t.Fatal(e)
+	}
+	probe("caller-a", "review-alias")
+
 }

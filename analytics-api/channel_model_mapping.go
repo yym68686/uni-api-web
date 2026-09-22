@@ -77,3 +77,16 @@ func withoutProvider(input []string, provider string) []string {
 	}
 	return out
 }
+
+func validateModelPositions(models []string, positions map[string]int) error {
+	allowed := map[string]bool{}
+	for _, model := range models {
+		allowed[model] = true
+	}
+	for model, position := range positions {
+		if !allowed[model] || position < 1 || position > 1025 {
+			return errors.New("模型位置无效，请刷新后重试")
+		}
+	}
+	return nil
+}
