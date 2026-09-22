@@ -2398,14 +2398,24 @@ nav > button.active > svg {
  .sub-detection-controls { flex:none; width:100%; }
  .sub-detection-controls > .search-field { margin-left:0; max-width:none; }
 }
-.sub-account-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 390px), 1fr)); gap: 12px; padding: 0 24px 24px; }
-.sub-account { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; border: 1px solid var(--line); border-radius: 10px; padding: 16px; min-width: 0; }
-.sub-account-identity { flex: 1; min-width: 0; }
-.sub-account-identity strong { font-size: 14px; overflow-wrap: anywhere; }
-.sub-account-identity small { display: block; margin-top: 7px; color: var(--muted); overflow-wrap: anywhere; }
-.sub-account-progress { display: flex; align-items: center; gap: 7px; margin-top: 12px; font-size: 11px; color: var(--muted); }
+.sub-account-list { max-height: 440px; overflow: auto; border-top: 1px solid var(--line); scrollbar-width: thin; overscroll-behavior-x: contain; }
+.sub-account-header, .sub-account { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(230px, 1.2fr) minmax(130px, .65fr) minmax(190px, 1fr) 236px; gap: 16px; align-items: center; min-width: 1080px; padding: 12px 21px; }
+.sub-account-header { position: sticky; top: 0; z-index: 1; background: var(--subtle); color: var(--muted); font-size: 11px; border-bottom: 1px solid var(--line); }
+.sub-account-header > :last-child { text-align: right; }
+.sub-account { min-height: 68px; border-bottom: 1px solid var(--line); }
+.sub-account:last-child { border-bottom: 0; }
+.sub-account:hover { background: var(--subtle); }
+.sub-account > div { min-width: 0; }
+.sub-account-identity strong { display: block; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sub-account-identity .site-link { max-width: 100%; margin-top: 4px; font-size: 11px; color: var(--muted); }
+.sub-account-identity .site-link > span, .sub-account-email, .sub-account-status small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sub-account-email { color: var(--muted); font-size: 12px; }
+.sub-account-progress { display: flex; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; }
+.sub-account-status small { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
 .sub-account-actions, .sub-pagination { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
-.sub-remove { flex-basis: 100%; font-size: 12px; color: var(--muted); line-height: 1.8; }
+.sub-account .sub-account-actions { flex-wrap: nowrap; justify-content: flex-end; width: auto; }
+.sub-account .sub-account-actions > * { flex-shrink: 0; white-space: nowrap; }
+.sub-remove { grid-column: 1 / -1; font-size: 12px; color: var(--muted); line-height: 1.8; }
 .sub-remove button { margin: 8px 6px 0 0; }
 .sub-account-form { background: var(--surface); color: var(--ink); }
 .sub-account-form input { background: var(--surface); color: var(--ink); }
@@ -2425,8 +2435,8 @@ nav > button.active > svg {
 .sub-table td { vertical-align: middle; }
 .sub2api-page .settings-note svg { vertical-align: middle; }
 @media(max-width:780px) {
- .sub-account-list { padding: 0 16px 16px; }
- .sub-account-actions { width: 100%; }
+ .sub-accounts > .data-heading .sub-account-actions { flex-wrap: nowrap; overflow-x: auto; max-width: 100%; }
+ .sub-accounts > .data-heading .sub-account-actions > .button { flex-shrink: 0; white-space: nowrap; }
  .sub-filters { margin:0 15px 12px; padding:10px 0; }
  .sub-model { margin-left: 0; }
  .sub2api-page .data-actions { flex-wrap: wrap; }
@@ -2522,10 +2532,9 @@ nav > button.active > svg {
 .balance-warning { color: #9a7208; }
 .balance-positive { color: var(--green); }
 :root[data-theme="dark"] .balance-warning { color: #e9cc70; }
-.sub-account-balance { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; margin-top: 12px; font-size: 12px; }
-.sub-account-balance > span:first-child { color: var(--muted); }
-.sub-account-balance .amount { font-family: "Geist Mono Variable", monospace; font-size: 16px; font-weight: 500; }
-.sub-account-balance small { flex-basis: 100%; margin-top: 0; font-size: 11px; }
+.sub-account-balance { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px; font-size: 12px; }
+.sub-account-balance .amount { font-family: "Geist Mono Variable", monospace; font-size: 13px; font-weight: 500; white-space: nowrap; }
+.sub-account-balance small { flex-basis: 100%; color: var(--muted); font-size: 11px; }
 
 .site-link { color: inherit; display: inline-flex; align-items: center; gap: 5px; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 4px; overflow-wrap: anywhere; }
 .site-link:hover { color: var(--green); text-decoration-color: currentColor; }

@@ -171,13 +171,13 @@ function AccountBalance({ account }: { account: SubAccount }) {
   return (
     <div
       className="sub-account-balance"
+      aria-label="账号余额"
       title={
         balance?.checked_at
           ? `余额查询于 ${time(balance.checked_at)}${query.isError || balance.status === "error" ? " · 更新失败，上次结果" : ""}`
           : "尚无余额数据"
       }
     >
-      <span>余额</span>
       <BalanceAmount value={balance?.amount} />
       {query.isPending && !balance && <Spinner small />}
       {(query.isError ||
@@ -1090,108 +1090,118 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
             填入站点地址与账号密码，自动发现可用分组并检测模型。
           </Empty>
         ) : (
-          <div className="sub-account-list">
-            {accounts.map((a) => {
-              const completed = a.targets.filter(
-                  (t) => t.active && t.state === "done",
-                ).length,
-                total = a.targets.filter((t) => t.active).length;
-              return (
-                <article className="sub-account" key={a.id}>
-                  <div className="sub-account-identity">
-                    <strong>{a.name}</strong>
-                    <small>
-                      {a.email} · <SiteLink base={a.base}>{new URL(a.base).host}</SiteLink>
-                    </small>
-                    <span
-                      className="sub-account-progress"
-                      role={pending(a.state) ? "status" : undefined}
-                    >
-                      {pending(a.state) && <Spinner small />}
-                      {stateLabel[a.state] || a.state}
-                      {total > 0 && ` · ${completed}/${total} 个分组`}
-                      {a.synced_at > 0 &&
-                        !pending(a.state) &&
-                        ` · ${time(a.synced_at)}`}
-                    </span>
+          <div className="sub-account-list" role="region" aria-label="站点账号列表" tabIndex={0}>
+            <div className="sub-account-header" aria-hidden="true">
+              <span>站点 / 网址</span>
+              <span>账号</span>
+              <span>余额</span>
+              <span>同步状态</span>
+              <span>操作</span>
+            </div>
+            <div className="sub-account-rows" role="list">
+              {accounts.map((a) => {
+                const completed = a.targets.filter(
+                    (t) => t.active && t.state === "done",
+                  ).length,
+                  total = a.targets.filter((t) => t.active).length;
+                return (
+                  <article className="sub-account" key={a.id} role="listitem" aria-label={a.name}>
+                    <div className="sub-account-identity">
+                      <strong title={a.name}>{a.name}</strong>
+                      <SiteLink base={a.base}><span title={a.base}>{new URL(a.base).host}</span></SiteLink>
+                    </div>
+                    <div className="sub-account-email" title={a.email}>{a.email}</div>
                     <AccountBalance account={a} />
-                    {a.message && (
-                      <small className="sub-account-message">{a.message}</small>
-                    )}
-                  </div>
-                  <div className="sub-account-actions">
-                    {pending(a.state) ? (
-                      <button
-                        className="button small"
-                        disabled={!!action}
-                        onClick={() =>
-                          void mutate(a.id, `/v1/sub2api/accounts/${a.id}/stop`)
-                        }
+                    <div className="sub-account-status">
+                      <span
+                        className="sub-account-progress"
+                        role={pending(a.state) ? "status" : undefined}
                       >
-                        <Square size={13} />
-                        停止
-                      </button>
-                    ) : (
-                      <>
+                        {pending(a.state) && <Spinner small />}
+                        {stateLabel[a.state] || a.state}
+                        {total > 0 && ` · ${completed}/${total} 个分组`}
+                      </span>
+                      {a.synced_at > 0 && !pending(a.state) && (
+                        <small>上次同步 {time(a.synced_at)}</small>
+                      )}
+                      {a.message && (
+                        <small className="sub-account-message" title={a.message}>{a.message}</small>
+                      )}
+                    </div>
+                    <div className="sub-account-actions">
+                      {pending(a.state) ? (
+                        <button
+                          className="button small"
+                          disabled={!!action}
+                          onClick={() =>
+                            void mutate(a.id, `/v1/sub2api/accounts/${a.id}/stop`)
+                          }
+                        >
+                          <Square size={13} />
+                          停止
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            className="button small"
+                            disabled={!!action}
+                            onClick={() =>
+                              void mutate(
+                                a.id,
+                                `/v1/sub2api/accounts/${a.id}/sync`,
+                              )
+                            }
+                          >
+                            <RefreshCw size={13} />
+                            同步并检测
+                          </button>
+                          <button
+                            className="button ghost small"
+                            onClick={() => setForm({ account: a })}
+                          >
+                            重新登录
+                          </button>
+                          <button
+                            className="icon-button"
+                            aria-label={`移除账号 ${a.name}`}
+                            disabled={!!action}
+                            onClick={() => setRemoving(a.id)}
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                    {removing === a.id && (
+                      <div className="sub-remove" role="alert">
+                        移除后删除本地凭据和检测记录；上游测试 key
+                        保留，可在站点密钥页面撤销。
                         <button
                           className="button small"
                           disabled={!!action}
                           onClick={() =>
                             void mutate(
                               a.id,
-                              `/v1/sub2api/accounts/${a.id}/sync`,
+                              `/v1/sub2api/accounts/${a.id}`,
+                              undefined,
+                              "DELETE",
                             )
                           }
                         >
-                          <RefreshCw size={13} />
-                          同步并检测
+                          确认移除
                         </button>
                         <button
-                          className="button ghost small"
-                          onClick={() => setForm({ account: a })}
+                          className="button small"
+                          onClick={() => setRemoving(null)}
                         >
-                          重新登录
+                          取消
                         </button>
-                        <button
-                          className="icon-button"
-                          aria-label={`移除账号 ${a.name}`}
-                          disabled={!!action}
-                          onClick={() => setRemoving(a.id)}
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      </>
+                      </div>
                     )}
-                  </div>
-                  {removing === a.id && (
-                    <div className="sub-remove" role="alert">
-                      移除后删除本地凭据和检测记录；上游测试 key
-                      保留，可在站点密钥页面撤销。
-                      <button
-                        className="button small"
-                        disabled={!!action}
-                        onClick={() =>
-                          void mutate(
-                            a.id,
-                            `/v1/sub2api/accounts/${a.id}`,
-                            undefined,
-                            "DELETE",
-                          )
-                        }
-                      >
-                        确认移除
-                      </button>
-                      <button
-                        className="button small"
-                        onClick={() => setRemoving(null)}
-                      >
-                        取消
-                      </button>
-                    </div>
-                  )}
-                </article>
-              );
-            })}
+                  </article>
+                );
+              })}
+            </div>
           </div>
         )}
       </section>
