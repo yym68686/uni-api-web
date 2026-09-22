@@ -2841,3 +2841,8 @@ nav > button.active > svg {
 .create-channel-mode button[aria-pressed=true] {background:var(--green-bg);color:var(--green);}
 .create-channel-dialog .settings-footer > .settings-help {margin:0;}
 @media(max-width:600px){.create-channel-dialog{width:calc(100vw - 20px);max-height:94svh;}.create-channel-body{padding:20px 16px;}.create-channel-grid{grid-template-columns:1fr;}.create-channel-dialog .settings-footer{flex-wrap:wrap;}.create-channel-dialog .settings-footer-primary{margin-left:auto;}}
+
+.sub-route-table { overflow-x: auto; margin: 16px 0; }
+.sub-route-table table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.sub-route-table th, .sub-route-table td { padding: 12px; text-align: left; border-bottom: 1px solid var(--line); }
+.sub-route-table th { color: var(--muted); white-space: nowrap; font-weight: 500; }

@@ -316,6 +316,8 @@ func (s *Service) controlHandler() http.Handler {
 	mux.HandleFunc("GET /v1/sub2api/accounts/{id}/groups/{group}/quality-history", s.qualityHistory)
 	mux.HandleFunc("POST /v1/sources/{id}/channel-checks", s.checkChannel)
 	mux.HandleFunc("GET /v1/channel-sites", s.channelSites)
+	mux.HandleFunc("GET /v1/channel-management", s.channelManagement)
+	mux.HandleFunc("GET /v1/sources/{id}/channel-routes", s.channelRoutes)
 	mux.HandleFunc("GET /v1/channel-spend", s.channelSpend)
 	mux.HandleFunc("GET /v1/sources/{id}/channel-info", s.channelInfo)
 	mux.HandleFunc("GET /v1/sources/{id}/channel-settings", s.channelSettings)

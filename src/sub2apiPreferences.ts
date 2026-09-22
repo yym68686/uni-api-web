@@ -1,4 +1,3 @@
-import { SUB_MODELS } from "./sub2apiModels";
 export const subFilterDefaults = {
   search: "",
   accountId: "",
@@ -29,7 +28,7 @@ function validate(raw: unknown): SubFilters {
     platform: field("platform"),
     search: field("search"),
     accountId: field("accountId"),
-    model: field("model", ["", ...SUB_MODELS]),
+    model: field("model").slice(0, 512),
     maxRate:
       maxRate !== "" && Number.isFinite(Number(maxRate)) && Number(maxRate) >= 0
         ? maxRate

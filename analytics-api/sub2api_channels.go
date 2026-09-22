@@ -16,6 +16,7 @@ type subChannelRef struct {
 	Base    string
 }
 type subInstalledChannel struct {
+	Fingerprint      string         `json:"-"`
 	Kind             string         `json:"kind,omitempty"`
 	BindingStatus    string         `json:"binding_status,omitempty"`
 	BindingCheckedAt int64          `json:"binding_checked_at,omitempty"`

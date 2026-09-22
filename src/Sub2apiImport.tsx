@@ -10,6 +10,10 @@ import { assessPrice } from "./sub2apiPriceCheck";
 import type { KeyInfo, ModelPrice } from "./types";
 import type { SubAccount, SubTarget } from "./Sub2apiChecks";
 import type { InstalledChannel, SubImportsQuery } from "./sub2apiImports";
+import { boundGroups } from "./sub2apiImports";
+import { ChannelRoutes } from "./ChannelRoutes";
+import { ChannelSettings } from "./ChannelSettings";
+import type { ManagedChannel } from "./channelManagement";
 import {
   modelChecks,
   availableModelChecks,
@@ -29,6 +33,7 @@ export function Sub2apiImport({
   imports,
   sources,
   prices,
+  configured,
   close,
 }: {
   account: SubAccount;
@@ -36,6 +41,7 @@ export function Sub2apiImport({
   imports: SubImportsQuery;
   sources: ConsoleSourcesQuery;
   prices?: ModelPrice[];
+  configured?: ManagedChannel;
   close: () => void;
 }) {
   const client = useQueryClient();
@@ -44,6 +50,10 @@ export function Sub2apiImport({
   const installed = (imports.data?.data || []).filter(
     (i) => i.kind !== "configured" && i.account_id === account.id && i.group_id === target.group_id,
   );
+  const configuredChannels = (imports.data?.data || []).filter(i => i.kind === "configured" &&
+    boundGroups(i).some(g => g.account_id === account.id && g.group_id === target.group_id));
+  if (configured && !configuredChannels.some(i => i.source_id === configured.source_id && i.provider === configured.provider)) configuredChannels.push(configured);
+  const configuredSources = [...new Set(configuredChannels.map(i => i.source_id))];
   const [editing, setEditing] = useState<InstalledChannel | null>(null);
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<InstalledChannel | null>(null);
@@ -128,6 +138,8 @@ export function Sub2apiImport({
         "control-catalog",
         "sub2api",
         "sub-import-options",
+        "channel-routes",
+        "channel-management",
       ].map((name) => client.invalidateQueries({ queryKey: [name] })),
     );
   }
@@ -289,6 +301,11 @@ export function Sub2apiImport({
               </button>
             </section>
           )}
+          {configuredSources.map(source => <section className="sub-installed" key={source}>
+            <h3>已有渠道 · {configuredChannels.find(i => i.source_id === source)?.source_name}</h3>
+            <ChannelRoutes sourceId={source} providers={configuredChannels.filter(i => i.source_id === source).map(i => i.provider)} />
+            {configuredChannels.filter(i => i.source_id === source).map(item => <div className="sub-installed-actions" key={item.provider}><span>{item.name}</span><ChannelSettings row={{provider:item.provider, provider_name:item.name, source_id:item.source_id, source_name:item.source_name, model:item.models[0] || target.result?.model || ""}} /></div>)}
+          </section>)}
           {success && (
             <p role="status" className="sub-import-success">
               {success}

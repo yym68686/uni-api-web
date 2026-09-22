@@ -107,14 +107,14 @@ export function creationSettings(document: Document, schema: Schema): Document {
 
 export function CreateChannel({
   sources,
-  keys,
-  sourceId,
-  keyId,
+  keys = [],
+  sourceId = "",
+  keyId = "",
 }: {
   sources: ConsoleSource[];
-  keys: KeyInfo[];
-  sourceId: string;
-  keyId: string;
+  keys?: KeyInfo[];
+  sourceId?: string;
+  keyId?: string;
 }) {
   const cache = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -139,9 +139,14 @@ export function CreateChannel({
     staleTime: 0,
     retry: false,
   });
-  const available = keys.filter(
+  const remoteKeys = useQuery({
+    queryKey: ["create-channel-keys", source],
+    queryFn: ({ signal }) => controlRequest<{ data: KeyInfo[] }>(`/v1/sources/${encodeURIComponent(source)}/proxy/v1/api-keys`, { signal }),
+    enabled: open && !!source && !keys.length, retry: false,
+  });
+  const available = keys.length ? keys.filter(
     (k) => k.source_id === source || (!k.source_id && sources.length === 1),
-  );
+  ) : remoteKeys.data?.data || [];
   const edit = (field: string, value: unknown) => {
     setDraft((old) => ({ ...old, [field]: value }));
     setMessage("");
@@ -229,6 +234,9 @@ export function CreateChannel({
         "channel-controls",
         "metrics",
         "imported-channels",
+        "channel-management",
+        "channel-routes",
+        "sub2api-imports",
         "channel-sites",
         "channel-info",
         "channel-settings-audit",
@@ -385,7 +393,7 @@ export function CreateChannel({
                 </label>
                 <label>
                   调用 API key
-                  <select value={key} onChange={(e) => setKey(e.target.value)}>
+                  <select value={key} disabled={remoteKeys.isFetching} onChange={(e) => setKey(e.target.value)}>
                     <option value="">选择 API key</option>
                     {available.map((k) => (
                       <option key={k.key_id} value={k.key_id}>
@@ -395,6 +403,7 @@ export function CreateChannel({
                   </select>
                 </label>
               </div>
+              {remoteKeys.error && <p role="alert" className="negative">{remoteKeys.error.message}<button type="button" className="button small" onClick={() => void remoteKeys.refetch()}>重新读取 API key</button></p>}
               {schema.isFetching && (
                 <p className="settings-help">正在读取来源支持的渠道类型…</p>
               )}

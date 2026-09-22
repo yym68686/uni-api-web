@@ -501,7 +501,8 @@ function Models({
     </div>
   );
 }
-export function ChannelSettings({ row }: { row: Channel }) {
+type SettingsChannel = Pick<Channel, "provider" | "provider_name" | "source_id" | "source_name" | "model">;
+export function ChannelSettings({ row }: { row: SettingsChannel }) {
   const [open, setOpen] = useState(false);
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>
@@ -539,7 +540,7 @@ export function ChannelSettings({ row }: { row: Channel }) {
     </Dialog.Root>
   );
 }
-function Editor({ row, onClose }: { row: Channel; onClose: () => void }) {
+function Editor({ row, onClose }: { row: SettingsChannel; onClose: () => void }) {
   const client = useQueryClient();
   const path = `/v1/sources/${encodeURIComponent(row.source_id!)}/channel-settings`;
   const query = useQuery({
@@ -653,6 +654,8 @@ function Editor({ row, onClose }: { row: Channel; onClose: () => void }) {
         "sub2api-imports",
         "metrics",
         "channel-info",
+        "channel-management",
+        "channel-routes",
       ].map((name) => client.invalidateQueries({ queryKey: [name] })),
     ]);
   }

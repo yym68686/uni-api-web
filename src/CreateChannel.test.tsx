@@ -97,6 +97,19 @@ async function mount() {
   await waitFor(() => expect(screen.getByLabelText("渠道引擎")).toBeEnabled());
   return user;
 }
+
+it("loads caller keys inside channel management without depending on observation filters", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+    if (url.endsWith("/api-keys")) return Response.json({ data: [{ key_id: "caller-key", position: 2, prefix: "masked-caller" }] });
+    return Response.json({ create_provider: true, engines: ["gpt"], fields: [] });
+  }));
+  render(<QueryClientProvider client={new QueryClient()}><CreateChannel sources={[{ id:"primary", name:"Fugue", base:"https://gateway.test", has_storage:true, created_at:0 }]} /></QueryClientProvider>);
+  const user=userEvent.setup();
+  await user.click(screen.getByRole("button",{name:"添加渠道"}));
+  expect(await screen.findByRole("option",{name:"#2 · masked-caller"})).toBeInTheDocument();
+  await user.selectOptions(screen.getByLabelText("调用 API key"),"caller-key");
+  expect(screen.getByLabelText("调用 API key")).toHaveValue("caller-key");
+});
 async function fill(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText("渠道名称"), "my-channel.1");
   await user.selectOptions(screen.getByLabelText("渠道引擎"), "claude");

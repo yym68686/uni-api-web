@@ -331,7 +331,7 @@ func (s *Service) configuredBindings(ctx context.Context, owner string) ([]subIn
 	if err != nil {
 		return nil, err
 	}
-	rows, err = s.control.db.QueryContext(ctx, `SELECT c.source_id,s.name,c.provider,c.base,c.site,c.key_hashes,c.checked_at FROM console_configured_channels c JOIN console_sources s ON s.id=c.source_id WHERE c.active AND s.enabled ORDER BY c.source_id,c.provider`)
+	rows, err = s.control.db.QueryContext(ctx, `SELECT c.source_id,s.name,c.provider,c.base,c.site,c.key_hashes,c.checked_at,c.fingerprint FROM console_configured_channels c JOIN console_sources s ON s.id=c.source_id WHERE c.active AND s.enabled ORDER BY c.source_id,c.provider`)
 	if err != nil {
 		return nil, err
 	}
@@ -341,7 +341,7 @@ func (s *Service) configuredBindings(ctx context.Context, owner string) ([]subIn
 		item := subInstalledChannel{Kind: "configured", Models: []string{}, Positions: map[string]int{}, BoundKeys: []subBoundKey{}}
 		var site string
 		var raw []byte
-		if err = rows.Scan(&item.SourceID, &item.SourceName, &item.Provider, &item.Base, &site, &raw, &item.BindingCheckedAt); err != nil {
+		if err = rows.Scan(&item.SourceID, &item.SourceName, &item.Provider, &item.Base, &site, &raw, &item.BindingCheckedAt, &item.Fingerprint); err != nil {
 			return nil, err
 		}
 		var hashes []string

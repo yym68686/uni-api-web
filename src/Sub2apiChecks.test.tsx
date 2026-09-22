@@ -65,6 +65,56 @@ function fixtures(): SubAccount[] {
   }));
 }
 
+it("manages initial channels with account/unassigned filters and shows every caller key route", async () => {
+  const accounts = fixtures().slice(0, 1);
+  const base = { kind: "configured", source_id: "primary", source_name: "Fugue", api_key_id: "", key_position: 0, key_prefix: "", positions: {}, revision: "", manageable: false };
+  const configured = [
+    { ...base, provider: "initial-bound", name: "initial-bound", account_id: "one", group_id: 1, account_ids: ["one"], engine: "gpt", models: ["gpt-6-astra"], binding_status: "matched", bound_keys: [{ account_id: "one", group_id: 1 }], base: "https://one.test" },
+    { ...base, provider: "initial-unassigned", name: "initial-unassigned", account_id: "", group_id: 0, account_ids: [], engine: "claude", models: ["custom-model"], base: "https://unassigned.test" },
+  ];
+  const writes: any[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+    if (init?.method === "POST") { writes.push(JSON.parse(String(init.body))); return new Response("{}", { status: 202 }); }
+    const data = input.endsWith("/channel-management") ? configured : input.endsWith("/accounts") ? accounts : input.endsWith("/channels") ? configured : input.endsWith("/sources") ? [{id:"primary",name:"Fugue"},{id:"do",name:"DigitalOcean"}] : input.endsWith("/channel-routes") ? [
+      { provider:"initial-bound", model:"gpt-6-astra", api_key_id:"key-1", key_prefix:"masked-one", key_position:1, position:2 },
+      { provider:"initial-bound", model:"gpt-6-astra", api_key_id:"key-2", key_prefix:"masked-two", key_position:2, position:5 },
+      { provider:"initial-unassigned", model:"custom-model", api_key_id:"key-2", key_prefix:"masked-two", key_position:2, position:3 },
+    ] : [];
+    return new Response(JSON.stringify({ data, labels:{}, unavailable_sources:[], unavailable_keys:[] }));
+  }));
+  const user=userEvent.setup();
+  const view=mount("management-fixture");
+  await screen.findByText("initial-bound", { selector:"strong" });
+  expect(screen.getByRole("heading",{name:"渠道管理"})).toBeVisible();
+  expect(screen.getByRole("button",{name:"添加渠道"})).toBeVisible();
+  const accountFilter=screen.getByLabelText("sub2api 账号筛选");
+  await user.selectOptions(accountFilter,"one");
+  expect(screen.getByText("initial-bound", {selector:"strong"})).toBeVisible();
+  expect(screen.queryByText("initial-unassigned", {selector:"strong"})).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button",{name:"检测全部模型 · 1 个渠道"}));
+  expect(writes[0].targets).toHaveLength(1);
+  const boundRow=screen.getByText("initial-bound", {selector:"strong"}).closest("tr")!;
+  await user.click(within(boundRow).getByRole("button",{name:"添加到渠道"}));
+  const dialog=within(screen.getByRole("dialog"));
+  expect(await dialog.findByText("第 2 位")).toBeVisible();
+  expect(dialog.getByText("第 5 位")).toBeVisible();
+  expect(dialog.getByText("masked-one")).toBeVisible();
+  expect(dialog.getByText("masked-two")).toBeVisible();
+  await user.click(dialog.getByRole("button",{name:"关闭添加渠道"}));
+  await user.selectOptions(accountFilter,"__unassigned__");
+  expect(screen.getByText("initial-unassigned",{selector:"strong"})).toBeVisible();
+  expect(screen.queryByText("initial-bound",{selector:"strong"})).not.toBeInTheDocument();
+  await user.selectOptions(screen.getByLabelText("检测模型筛选"),"custom-model");
+  expect(screen.getByText("initial-unassigned",{selector:"strong"})).toBeVisible();
+  await user.click(screen.getByRole("button",{name:"添加到渠道"}));
+  expect(await within(screen.getByRole("dialog")).findByText("第 3 位")).toBeVisible();
+  await user.click(screen.getByRole("button",{name:"关闭添加渠道"}));
+  view.unmount();
+  mount("management-fixture");
+  expect(await screen.findByLabelText("sub2api 账号筛选")).toHaveValue("__unassigned__");
+  expect(screen.getByLabelText("检测模型筛选")).toHaveValue("custom-model");
+});
+
 it("opens the import dialog with the dashboard sources while a background refresh is still pending", async () => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const sources = [

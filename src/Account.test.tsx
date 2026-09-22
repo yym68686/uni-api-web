@@ -28,7 +28,7 @@ function mount() {
 it.each([
   ["overview", "总览", "dark"],
   ["channels", "渠道观测", "light"],
-  ["sub2api", "sub2api检测", "dark"],
+  ["sub2api", "渠道管理", "dark"],
   ["prices", "价格设置", "light"],
   ["balances", "余额管理", "dark"],
   ["sources", "来源设置", "light"],
@@ -125,7 +125,7 @@ it("leaves the loading shell for login when the restored session has expired", a
 it.each([
   ["总览", "请求数量"],
   ["渠道观测", "渠道表现"],
-  ["sub2api检测", "站点账号"],
+  ["渠道管理", "站点账号"],
   ["价格设置", "模型价格"],
   ["余额管理", "渠道余额"],
   ["来源设置", "uni-api 来源"],
