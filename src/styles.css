@@ -2484,6 +2484,10 @@ nav > button.active > svg {
 .sub-installed article > div, .sub-installed small { color: var(--muted); }
 .sub-installed ul { padding-left: 18px; }
 .sub-installed-actions { display: flex; gap: 8px; }
+.configured-route-summary { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-top: 24px; font-size: 15px; }
+.configured-route-summary small { color: var(--muted); font-size: 12px; font-weight: 400; }
+.configured-source { margin: 20px 0; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
+.configured-source-settings { display: flex; align-items: center; justify-content: space-between; gap: 16px; color: var(--muted); font-size: 12px; }
 .control-persistence { margin-left: auto; max-width: 380px; font-size: 13px; }
 .control-persistence label { display:flex; align-items:center; gap:8px; }
 .control-persistence small { display:block; color:var(--muted); line-height:1.6; margin-top:6px; }

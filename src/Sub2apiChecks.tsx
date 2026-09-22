@@ -28,7 +28,7 @@ import { CreateChannel } from "./CreateChannel";
 import { managementRows, UNASSIGNED_ACCOUNT, useChannelManagement } from "./channelManagement";
 import type { ManagedChannel } from "./channelManagement";
 import { ConfiguredChannelDialog } from "./ChannelRoutes";
-import { providerRoutes, routeKeyCount, useAllChannelRoutes } from "./channelRouteData";
+import { managedRouteCount, useAllChannelRoutes } from "./channelRouteData";
 import { useConsoleSources } from "./consoleSources";
 import { CompactionStatus, compactionStatus, compactionLabels } from "./SubCompaction";
 import type { CompactionResult } from "./SubCompaction";
@@ -829,12 +829,10 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
     setFilters((v) => ({ ...v, platform }));
   const imports = useSubImports();
   const management = useChannelManagement();
-  const routeSources = [...new Set((sources.data?.data || []).map(s=>s.id))];
+  const routeSources = [...new Set([...(sources.data?.data || []).map(s=>s.id), ...(management.data?.data || []).map(c=>c.source_id)])];
   const routeQueries = useAllChannelRoutes(routeSources);
   function configuredCount(item: ManagedChannel) {
-    const query = routeQueries[routeSources.indexOf(item.source_id)];
-    if (!query?.data) return null;
-    return { count: routeKeyCount(providerRoutes(query.data.data,[item.provider])), partial: !!query.data.unavailable_keys?.length };
+    return managedRouteCount(item, routeSources, routeQueries);
   }
   const filterModels = [...new Set([...SUB_MODELS, ...(management.data?.data || []).flatMap(item => item.models || []), ...(model ? [model] : [])])];
   const [configuredDialog, setConfiguredDialog] = useState<ManagedChannel | null>(null);

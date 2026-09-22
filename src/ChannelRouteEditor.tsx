@@ -13,10 +13,12 @@ interface CatalogRow {
 }
 export function ChannelRouteEditor({
   sourceId,
+  sourceName,
   rows,
   close,
 }: {
   sourceId: string;
+  sourceName?: string;
   rows: ChannelRoute[];
   close: () => void;
 }) {
@@ -124,6 +126,7 @@ export function ChannelRouteEditor({
         <Dialog.Content className="guide-dialog sub-import-dialog route-edit-dialog">
           <Dialog.Title>编辑 API key · Key {rows[0].key_position}</Dialog.Title>
           <Dialog.Description>
+            {sourceName && `${sourceName} · `}
             {rows[0].key_prefix} · 分别调整每个模型的路由位置
           </Dialog.Description>
           <button

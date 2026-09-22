@@ -142,6 +142,30 @@ it("manages initial channels with account/unassigned filters and shows every cal
   expect(screen.getByLabelText("检测模型筛选")).toHaveValue("custom-model");
 });
 
+it("merges the same native channel across sources in the list and import dialog", async () => {
+  const channels = ["fugue", "do"].map((source_id, i) => ({
+    kind: "configured", source_id, source_name: i ? "DigitalOcean" : "Fugue",
+    provider: "fugue-codex", name: "fugue-codex", base: "https://same.test", engine: "gpt",
+    models: i ? ["codex-auto-review", "gpt-6-astra"] : ["codex-auto-review"], account_ids: [],
+  }));
+  vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+    if (input.endsWith("/channel-routes")) return Response.json({data:[{
+      provider:"fugue-codex", model:"codex-auto-review", api_key_id:"same-key-id", key_prefix:"masked", key_position:1, position:input.includes("/do/") ? 3 : 1,
+    }],unavailable_keys:[]});
+    return Response.json({data:input.endsWith("/channel-management") ? channels : input.endsWith("/sources") ? [{id:"fugue",name:"Fugue"},{id:"do",name:"DigitalOcean"}] : [], unavailable_sources:[]});
+  }));
+  const user=userEvent.setup(); mount("cross-source-native");
+  await screen.findByRole("button", {name:"已添加 · 2 个 key"});
+  expect(screen.getAllByText("fugue-codex", {selector:"strong"})).toHaveLength(1);
+  await user.selectOptions(screen.getByLabelText("sub2api 账号筛选"), "__unassigned__");
+  await user.selectOptions(screen.getByLabelText("检测模型筛选"), "gpt-6-astra");
+  await user.click(screen.getByRole("button", {name:"已添加 · 2 个 key"}));
+  const dialog=within(screen.getByRole("dialog"));
+  expect(await dialog.findByRole("heading", {name:/已添加到 2 个 API key/})).toBeVisible();
+  expect(within(dialog.getByRole("region", {name:"Fugue 接入情况"})).getByText("第 1 位")).toBeVisible();
+  expect(within(dialog.getByRole("region", {name:"DigitalOcean 接入情况"})).getByText("第 3 位")).toBeVisible();
+});
+
 it("opens the import dialog with the dashboard sources while a background refresh is still pending", async () => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const sources = [

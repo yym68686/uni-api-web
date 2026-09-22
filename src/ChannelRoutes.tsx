@@ -6,7 +6,13 @@ import { controlRequest } from "./api";
 import { Spinner } from "./ui";
 import { ChannelSettings } from "./ChannelSettings";
 import type { ManagedChannel } from "./channelManagement";
-import { providerRoutes, useChannelRoutes } from "./channelRouteData";
+import { channelMembers } from "./channelManagement";
+import {
+  managedRouteCount,
+  providerRoutes,
+  useAllChannelRoutes,
+  useChannelRoutes,
+} from "./channelRouteData";
 import { ModelAliases, aliasMappings } from "./ModelAliases";
 import type { ModelAlias } from "./ModelAliases";
 import type { KeyInfo } from "./types";
@@ -20,10 +26,12 @@ import {
 
 export function ChannelRoutes({
   sourceId,
+  sourceName,
   providers,
   onEditModels,
 }: {
   sourceId: string;
+  sourceName?: string;
   providers: string[];
   onEditModels?: (rows: ChannelRoute[]) => void;
 }) {
@@ -55,7 +63,11 @@ export function ChannelRoutes({
       )}
       {rows.length > 0 && (
         <section className="sub-installed">
-          <h3>已添加到 {keys.length} 个 API key</h3>
+          <h3>
+            {sourceName
+              ? `${sourceName} · ${keys.length} 个 API key`
+              : `已添加到 ${keys.length} 个 API key`}
+          </h3>
           {keys.map((key) => {
             const models = rows.filter((row) => row.api_key_id === key);
             const first = models[0];
@@ -128,6 +140,7 @@ export function ChannelRoutes({
       {editingRoutes && (
         <ChannelRouteEditor
           sourceId={sourceId}
+          sourceName={sourceName}
           rows={editingRoutes}
           close={() => setEditingRoutes(null)}
         />
@@ -137,13 +150,19 @@ export function ChannelRoutes({
 }
 
 export function ConfiguredChannelDialog({
-  item,
+  item: group,
   close,
 }: {
   item: ManagedChannel;
   close: () => void;
 }) {
   const client = useQueryClient();
+  const members = channelMembers(group);
+  const [memberId, setMemberId] = useState(members[0].source_id);
+  const item = members.find((m) => m.source_id === memberId) || members[0];
+  const sources = members.map((m) => m.source_id);
+  const routes = useAllChannelRoutes(sources);
+  const counts = managedRouteCount(group, sources, routes);
   const [adding, setAdding] = useState(false);
   const [editingProvider, setEditingProvider] = useState("");
   const initializedEdit = useRef("");
@@ -303,7 +322,7 @@ export function ConfiguredChannelDialog({
         <Dialog.Content className="guide-dialog sub-import-dialog">
           <Dialog.Title>添加到渠道</Dialog.Title>
           <Dialog.Description>
-            {item.name} · {item.source_name}
+            {group.name} · {group.source_name}
           </Dialog.Description>
           <Dialog.Close
             className="icon-button detail-close"
@@ -313,45 +332,87 @@ export function ConfiguredChannelDialog({
           </Dialog.Close>
 
           {!adding && (
-            <ChannelRoutes
-              sourceId={item.source_id}
-              providers={[item.provider]}
-              onEditModels={(rows) => {
-                initializedEdit.current = "";
-                setEditingProvider(rows[0].provider);
-                setAdding(true);
-                setKey(rows[0].api_key_id);
-                setPosition(1);
-                setModelPositions(
-                  Object.fromEntries(rows.map((r) => [r.model, r.position])),
-                );
-                const originals: string[] = [],
-                  renamed: ModelAlias[] = [];
-                for (const row of rows) {
-                  const upstream = row.upstream_model || row.model;
-                  if (
-                    item.models.includes(row.model) &&
-                    (item.model_mappings?.[row.model] || row.model) === upstream
-                  )
-                    originals.push(row.model);
-                  else
-                    renamed.push({
-                      public: row.model,
-                      upstream:
-                        item.models.find(
-                          (m) => (item.model_mappings?.[m] || m) === upstream,
-                        ) || upstream,
-                    });
-                }
-                setSelected(originals);
-                setAliases(renamed);
-                setError("");
-                setSuccess("");
-                void client.invalidateQueries({
-                  queryKey: ["configured-import-options", item.source_id],
-                });
-              }}
-            />
+            <>
+              {members.length > 1 && (
+                <h3 className="configured-route-summary">
+                  {counts
+                    ? `已添加到 ${counts.partial ? "至少 " : ""}${counts.count} 个 API key`
+                    : "正在读取接入状态…"}
+                  <small>{members.length} 个 uni-api 来源</small>
+                </h3>
+              )}
+              {members.map((member) => (
+                <section
+                  key={member.source_id}
+                  className="configured-source"
+                  aria-label={`${member.source_name} 接入情况`}
+                >
+                  <ChannelRoutes
+                    sourceId={member.source_id}
+                    sourceName={
+                      members.length > 1 ? member.source_name : undefined
+                    }
+                    providers={[member.provider]}
+                    onEditModels={(rows) => {
+                      setMemberId(member.source_id);
+                      initializedEdit.current = "";
+                      setEditingProvider(rows[0].provider);
+                      setAdding(true);
+                      setKey(rows[0].api_key_id);
+                      setPosition(1);
+                      setModelPositions(
+                        Object.fromEntries(
+                          rows.map((r) => [r.model, r.position]),
+                        ),
+                      );
+                      const originals: string[] = [],
+                        renamed: ModelAlias[] = [];
+                      for (const row of rows) {
+                        const upstream = row.upstream_model || row.model;
+                        if (
+                          member.models.includes(row.model) &&
+                          (member.model_mappings?.[row.model] || row.model) ===
+                            upstream
+                        )
+                          originals.push(row.model);
+                        else
+                          renamed.push({
+                            public: row.model,
+                            upstream:
+                              member.models.find(
+                                (m) =>
+                                  (member.model_mappings?.[m] || m) ===
+                                  upstream,
+                              ) || upstream,
+                          });
+                      }
+                      setSelected(originals);
+                      setAliases(renamed);
+                      setError("");
+                      setSuccess("");
+                      void client.invalidateQueries({
+                        queryKey: [
+                          "configured-import-options",
+                          member.source_id,
+                        ],
+                      });
+                    }}
+                  />
+                  <div className="configured-source-settings">
+                    <span>{member.source_name}</span>
+                    <ChannelSettings
+                      row={{
+                        provider: member.provider,
+                        provider_name: member.name,
+                        source_id: member.source_id,
+                        source_name: member.source_name,
+                        model: member.models[0] || "",
+                      }}
+                    />
+                  </div>
+                </section>
+              ))}
+            </>
           )}
           {success && (
             <p role="status" className="sub-import-success">
@@ -393,6 +454,32 @@ export function ConfiguredChannelDialog({
                   ? "编辑此 API key 的模型"
                   : "添加模型到 API key"}
               </h3>
+              <label className="sub-import-field">
+                uni-api 来源
+                <select
+                  aria-label="添加到 uni-api 来源"
+                  value={item.source_id}
+                  disabled={busy || !!editingProvider}
+                  onChange={(e) => {
+                    const next = members.find(
+                      (m) => m.source_id === e.target.value,
+                    )!;
+                    setMemberId(next.source_id);
+                    setSelected(next.models);
+                    setAliases([]);
+                    setKey("");
+                    setPosition(1);
+                    setModelPositions({});
+                    setError("");
+                  }}
+                >
+                  {members.map((m) => (
+                    <option key={m.source_id} value={m.source_id}>
+                      {m.source_name}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <fieldset disabled={busy || options.isFetching}>
                 <legend>原模型</legend>
                 <div className="sub-model-options">
@@ -511,17 +598,6 @@ export function ConfiguredChannelDialog({
               </div>
             </form>
           )}
-          <div className="sub-installed-actions">
-            <ChannelSettings
-              row={{
-                provider: item.provider,
-                provider_name: item.name,
-                source_id: item.source_id,
-                source_name: item.source_name,
-                model: item.models[0] || "",
-              }}
-            />
-          </div>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

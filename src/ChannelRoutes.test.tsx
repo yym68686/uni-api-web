@@ -305,3 +305,126 @@ it.each([false, true])(
     ]);
   },
 );
+
+it("edits and adds through the selected source in a merged channel dialog", async () => {
+  const writes: { path: string; body: any }[] = [];
+  const members = [
+    {
+      source_id: "fugue",
+      source_name: "Fugue",
+      provider: "native",
+      name: "native",
+      models: ["only-fugue"],
+    },
+    {
+      source_id: "do",
+      source_name: "DigitalOcean",
+      provider: "native",
+      name: "native",
+      models: ["only-do"],
+      model_mappings: { "only-do": "upstream-do" },
+    },
+  ] as ManagedChannel[];
+  const group = {
+    ...members[0],
+    source_name: "Fugue / DigitalOcean",
+    members,
+    models: ["only-fugue", "only-do"],
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string, init?: RequestInit) => {
+      if (init?.method === "PATCH" || init?.method === "POST") {
+        writes.push({ path: input, body: JSON.parse(String(init.body)) });
+        return Response.json({ message: "已保存" });
+      }
+      const isDo =
+        input.includes("/do/") ||
+        new URL(input, location.origin).searchParams.get("source_id") === "do";
+      const model = isDo ? "only-do" : "only-fugue";
+      if (input.includes("channel-options"))
+        return Response.json({
+          revision: isDo ? "do-revision" : "fugue-revision",
+          keys: [{ key_id: "same-key", position: 1, prefix: "masked" }],
+          channels: [
+            { provider: "other", model },
+            {
+              provider: "native",
+              model,
+              upstream_model: isDo ? "upstream-do" : model,
+            },
+          ],
+        });
+      return Response.json({
+        data: [
+          {
+            provider: "native",
+            model,
+            api_key_id: "same-key",
+            key_position: 1,
+            key_prefix: "masked",
+            position: 2,
+          },
+        ],
+        unavailable_keys: [],
+      });
+    }),
+  );
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <ConfiguredChannelDialog item={group} close={() => {}} />
+    </QueryClientProvider>,
+  );
+  const user = userEvent.setup();
+  const region = within(
+    screen.getByRole("region", { name: "DigitalOcean 接入情况" }),
+  );
+  await user.click(await region.findByRole("button", { name: "编辑 Key 1" }));
+  const editor = within(
+    screen.getByRole("dialog", { name: "编辑 API key · Key 1" }),
+  );
+  expect(editor.getByText(/DigitalOcean · masked/)).toBeVisible();
+  await user.selectOptions(
+    await editor.findByLabelText("native only-do 的路由位置"),
+    "1",
+  );
+  await user.click(editor.getByRole("button", { name: "保存更改" }));
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("dialog", { name: "编辑 API key · Key 1" }),
+    ).not.toBeInTheDocument(),
+  );
+  expect(writes[0]).toEqual({
+    path: expect.stringContaining("/v1/sources/do/channel-routes"),
+    body: {
+      api_key_id: "same-key",
+      revision: "do-revision",
+      moves: [{ provider: "native", model: "only-do", position: 1 }],
+    },
+  });
+  await user.click(
+    screen.getByRole("button", { name: "添加到 API key / 模型重命名" }),
+  );
+  await user.selectOptions(screen.getByLabelText("添加到 uni-api 来源"), "do");
+  expect(screen.getByRole("checkbox", { name: "only-do" })).toBeChecked();
+  expect(
+    screen.queryByRole("checkbox", { name: "only-fugue" }),
+  ).not.toBeInTheDocument();
+  await waitFor(() =>
+    expect(screen.getByLabelText("添加到 API key")).toBeEnabled(),
+  );
+  await user.selectOptions(screen.getByLabelText("添加到 API key"), "same-key");
+  await user.click(screen.getByRole("button", { name: "添加重命名" }));
+  await user.type(screen.getByLabelText("重命名 1 对外模型名"), "public-alias");
+  await user.selectOptions(screen.getByLabelText("only-do 的路由位置"), "2");
+  await user.click(screen.getByRole("button", { name: "添加到渠道" }));
+  await waitFor(() => expect(writes).toHaveLength(2));
+  expect(writes[1].body).toMatchObject({
+    source_id: "do",
+    provider: "native",
+    revision: "do-revision",
+    models: ["only-do"],
+    model_mappings: { "public-alias": "only-do" },
+    positions: { "only-do": 2, "public-alias": 1 },
+  });
+});
