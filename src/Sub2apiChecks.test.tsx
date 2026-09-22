@@ -65,6 +65,33 @@ function fixtures(): SubAccount[] {
   }));
 }
 
+it.each([false,true])("imports sub2api aliases independently of originals (keep %s)", async keep => {
+  const data=fixtures().slice(0,1),target=data[0].targets[0];
+  target.models=[{model:"codex-auto-review",state:"done",message:"",result:{...target.result!,model:"codex-auto-review"}}];
+  target.result=null;
+  const writes:any[]=[];
+  vi.stubGlobal("fetch",vi.fn(async(input:string,init?:RequestInit)=>{
+    if(init?.method==="POST"){writes.push(JSON.parse(String(init.body)));return Response.json({message:"已添加"});}
+    if(input.includes("channel-options"))return Response.json({revision:"r1",supported:true,keys:[{key_id:"k1",position:1,prefix:"masked"}],channels:[]});
+    return Response.json({data:input.endsWith("/accounts")?data:input.endsWith("/sources")?[{id:"primary",name:"Fugue"}]:[],labels:{},unavailable_keys:[],unavailable_sources:[]});
+  }));
+  const user=userEvent.setup();mount(`sub-alias-${keep}`);
+  await user.click(await screen.findByRole("button",{name:"添加到渠道"}));
+  const d=within(screen.getByRole("dialog"));
+  await user.click(d.getByRole("button",{name:"添加重命名"}));
+  expect(d.getByRole("checkbox",{name:"codex-auto-review"})).toBeChecked();
+  await user.type(d.getByLabelText("重命名 1 对外模型名"),"gpt-5.6-luna");
+  if(!keep)await user.click(d.getByRole("checkbox",{name:"codex-auto-review"}));
+  await user.selectOptions(d.getByLabelText("添加到 uni-api 来源"),"primary");
+  await waitFor(()=>expect(d.getByLabelText("添加到 API key")).toBeEnabled());
+  await user.selectOptions(d.getByLabelText("添加到 API key"),"k1");
+  await waitFor(()=>expect(d.getByRole("button",{name:"添加到渠道"})).toBeEnabled());
+  await user.click(d.getByRole("button",{name:"添加到渠道"}));
+  await waitFor(()=>expect(writes).toHaveLength(1));
+  expect(writes[0].models).toEqual(keep?["codex-auto-review"]:[]);
+  expect(writes[0].model_mappings).toEqual({"gpt-5.6-luna":"codex-auto-review"});
+});
+
 it("manages initial channels with account/unassigned filters and shows every caller key route", async () => {
   const accounts = fixtures().slice(0, 1);
   const base = { kind: "configured", source_id: "primary", source_name: "Fugue", api_key_id: "", key_position: 0, key_prefix: "", positions: {}, revision: "", manageable: false };
@@ -94,7 +121,7 @@ it("manages initial channels with account/unassigned filters and shows every cal
   await user.click(screen.getByRole("button",{name:"检测全部模型 · 1 个渠道"}));
   expect(writes[0].targets).toHaveLength(1);
   const boundRow=screen.getByText("initial-bound", {selector:"strong"}).closest("tr")!;
-  await user.click(within(boundRow).getByRole("button",{name:"添加到渠道"}));
+  await user.click(within(boundRow).getByRole("button",{name:"已添加 · 2 个 key"}));
   const dialog=within(screen.getByRole("dialog"));
   expect(await dialog.findByText("第 2 位")).toBeVisible();
   expect(dialog.getByText("第 5 位")).toBeVisible();
@@ -106,7 +133,7 @@ it("manages initial channels with account/unassigned filters and shows every cal
   expect(screen.queryByText("initial-bound",{selector:"strong"})).not.toBeInTheDocument();
   await user.selectOptions(screen.getByLabelText("检测模型筛选"),"custom-model");
   expect(screen.getByText("initial-unassigned",{selector:"strong"})).toBeVisible();
-  await user.click(screen.getByRole("button",{name:"添加到渠道"}));
+  await user.click(screen.getByRole("button",{name:"已添加 · 1 个 key"}));
   expect(await within(screen.getByRole("dialog")).findByText("第 3 位")).toBeVisible();
   await user.click(screen.getByRole("button",{name:"关闭添加渠道"}));
   view.unmount();

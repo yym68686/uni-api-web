@@ -801,7 +801,7 @@ function Detail({
           <span className="eyebrow">CHANNEL INSIGHTS</span>
           <Dialog.Title><SiteLink base={site}>{row ? channelName(row) : ""}</SiteLink></Dialog.Title>
           <Dialog.Description className="detail-description">
-            {row?.model} <ArrowRight size={13} /> {row?.upstream_model}
+            {row?.upstream_model} <ArrowRight size={13} /> {row?.model}
           </Dialog.Description>
           {row && (
             <>

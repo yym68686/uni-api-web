@@ -28,6 +28,7 @@ import { CreateChannel } from "./CreateChannel";
 import { managementRows, UNASSIGNED_ACCOUNT, useChannelManagement } from "./channelManagement";
 import type { ManagedChannel } from "./channelManagement";
 import { ConfiguredChannelDialog } from "./ChannelRoutes";
+import { providerRoutes, routeKeyCount, useAllChannelRoutes } from "./channelRouteData";
 import { useConsoleSources } from "./consoleSources";
 import { CompactionStatus, compactionStatus, compactionLabels } from "./SubCompaction";
 import type { CompactionResult } from "./SubCompaction";
@@ -828,6 +829,13 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
     setFilters((v) => ({ ...v, platform }));
   const imports = useSubImports();
   const management = useChannelManagement();
+  const routeSources = [...new Set((sources.data?.data || []).map(s=>s.id))];
+  const routeQueries = useAllChannelRoutes(routeSources);
+  function configuredCount(item: ManagedChannel) {
+    const query = routeQueries[routeSources.indexOf(item.source_id)];
+    if (!query?.data) return null;
+    return { count: routeKeyCount(providerRoutes(query.data.data,[item.provider])), partial: !!query.data.unavailable_keys?.length };
+  }
   const filterModels = [...new Set([...SUB_MODELS, ...(management.data?.data || []).flatMap(item => item.models || []), ...(model ? [model] : [])])];
   const [configuredDialog, setConfiguredDialog] = useState<ManagedChannel | null>(null);
   const [importing, setImporting] = useState<{
@@ -1251,7 +1259,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
               className="button small sub-check-icon"
               aria-label="刷新渠道管理"
               title="刷新数据"
-              onClick={() => { void query.refetch(); void management.refetch(); void imports.refetch(); }}
+              onClick={() => { void query.refetch(); void management.refetch(); void imports.refetch(); void client.invalidateQueries({queryKey:["channel-routes"]}); }}
               disabled={query.isFetching || management.isFetching}
             >
               <RefreshCw size={15} className={query.isFetching ? "spin" : ""} />
@@ -1604,7 +1612,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                           <button
                             className="button small"
                             onClick={() =>
-                              configured && !account.id ? setConfiguredDialog(configured) : setImporting({
+                              configured ? setConfiguredDialog(configured) : setImporting({
                                 account,
                                 target: t,
                                 configured,
@@ -1613,7 +1621,11 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                           >
                             <Plus size={13} />
                             {(() => {
-                              if (configured) return "添加到渠道";
+                              if (configured) {
+                                const counts=configuredCount(configured);
+                                if (!counts) return "查看接入状态";
+                                return counts.count ? `已添加 · ${counts.partial ? "至少 " : ""}${counts.count} 个 key` : counts.partial ? "查看接入状态" : "添加到渠道";
+                              }
                               if (imports.data?.data.some(i => i.kind === "configured" && boundGroups(i).some(g => g.account_id === account.id && g.group_id === t.group_id))) return "已配置 · 查看路由";
                               const count =
                                 imports.data?.data.filter(

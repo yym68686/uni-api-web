@@ -13,6 +13,8 @@ import type { InstalledChannel, SubImportsQuery } from "./sub2apiImports";
 import { boundGroups } from "./sub2apiImports";
 import { ChannelRoutes } from "./ChannelRoutes";
 import { ChannelSettings } from "./ChannelSettings";
+import { ModelAliases, aliasMappings } from "./ModelAliases";
+import type { ModelAlias } from "./ModelAliases";
 import type { ManagedChannel } from "./channelManagement";
 import {
   modelChecks,
@@ -58,7 +60,10 @@ export function Sub2apiImport({
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<InstalledChannel | null>(null);
   const [modelChoices, setModelChoices] = useState<Record<string, boolean>>({});
-  const models = checks.filter(check => modelChoices[check.model] ?? (available.includes(check.model) && assessPrice(check, prices).status !== "abnormal")).map(check => check.model);
+  const originals = checks.filter(check => modelChoices[check.model] ?? (available.includes(check.model) && assessPrice(check, prices).status !== "abnormal")).map(check => check.model);
+  const [aliases, setAliases] = useState<ModelAlias[]>([]);
+  const mapping = aliasMappings(aliases, originals);
+  const models = mapping.models;
   const [source, setSource] = useState("");
   const [key, setKey] = useState("");
   const [position, setPosition] = useState(1);
@@ -111,7 +116,8 @@ export function Sub2apiImport({
     setRemoving(null);
     setSource(item.source_id);
     setKey(item.api_key_id);
-    setModelChoices(Object.fromEntries(checks.map(check => [check.model, item.models.includes(check.model)])));
+    setModelChoices(Object.fromEntries(checks.map(check => [check.model, item.models.includes(check.model) && !item.model_mappings?.[check.model]])));
+    setAliases(Object.entries(item.model_mappings || {}).map(([publicName,upstream])=>({public:publicName,upstream})));
     setPosition(Math.min(...item.models.map((m) => item.positions[m] || 1)));
     setError("");
     setSuccess("");
@@ -125,6 +131,7 @@ export function Sub2apiImport({
     setSource("");
     setKey("");
     setModelChoices({});
+    setAliases([]);
     setPosition(1);
     setError("");
     setSuccess("");
@@ -147,7 +154,7 @@ export function Sub2apiImport({
     action: "add" | "replace" | "delete",
     item?: InstalledChannel,
   ) {
-    if (busy) return;
+    if (busy || (action !== "delete" && mapping.error)) return;
     setBusy(true);
     setError("");
     setSuccess("");
@@ -163,7 +170,7 @@ export function Sub2apiImport({
             group_id: target.group_id,
             source_id: item?.source_id || source,
             api_key_id: item?.api_key_id || key,
-            ...(action !== "delete" ? { models, position: validPosition } : {}),
+            ...(action !== "delete" ? { models: originals, ...(aliases.length || action === "replace" ? { model_mappings: mapping.mappings } : {}), position: validPosition } : {}),
             ...(action === "add" ? { compaction_enabled: compactionEnabled } : {}),
             revision: item?.revision || options.data?.revision,
           }),
@@ -240,7 +247,7 @@ export function Sub2apiImport({
                   <ul>
                     {item.models.map((m) => (
                       <li key={m}>
-                        {m}{" "}
+                        {item.model_mappings?.[m] ? <>{item.model_mappings[m]}<small> → </small>{m}</> : m}{" "}
                         <small>
                           {item.positions[m]
                             ? `第 ${item.positions[m]} 位`
@@ -337,7 +344,7 @@ export function Sub2apiImport({
                     <label key={check.model}>
                       <input
                         type="checkbox"
-                        checked={models.includes(check.model)}
+                        checked={originals.includes(check.model)}
                         disabled={
                           !available.includes(check.model) &&
                           !editing?.models.includes(check.model)
@@ -359,6 +366,8 @@ export function Sub2apiImport({
                   ))}
                 </div>
               </fieldset>
+              <ModelAliases models={[...new Set([...available,...Object.values(editing?.model_mappings || {})])]} aliases={aliases} onChange={setAliases} disabled={busy} />
+              {mapping.error && <p role="alert" className="negative">{mapping.error}</p>}
               {!editing && <div className="sub-import-field">
                 <label className="settings-check"><input type="checkbox" checked={compactionEnabled} disabled={busy} onChange={e => setCompactionChoice(e.target.checked)} />开启远程压缩</label>
                 <CompactionStatus target={target} />
@@ -489,7 +498,7 @@ export function Sub2apiImport({
                     busy ||
                     !source ||
                     !key ||
-                    !models.length ||
+                    !!mapping.error || !models.length ||
                     !options.data?.supported ||
                     options.isFetching ||
                     options.isError ||

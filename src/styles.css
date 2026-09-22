@@ -2846,3 +2846,15 @@ nav > button.active > svg {
 .sub-route-table table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .sub-route-table th, .sub-route-table td { padding: 12px; text-align: left; border-bottom: 1px solid var(--line); }
 .sub-route-table th { color: var(--muted); white-space: nowrap; font-weight: 500; }
+
+.model-aliases { margin: 20px 0; border-top: 1px solid var(--line); padding-top: 16px; }
+.model-alias-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.model-alias-heading h4 { margin:0; }
+.model-aliases p { font-size:12px; line-height:1.6; }
+.model-alias-row { display:grid; grid-template-columns:minmax(0,1fr) 16px minmax(0,1fr) 30px; align-items:end; gap:8px; margin-top:12px; }
+.model-alias-row label { display:grid; gap:6px; font-size:12px; color:var(--muted); }
+.model-alias-row select,.model-alias-row input { min-width:0; width:100%; padding:10px; border:1px solid var(--line); border-radius:8px; color:var(--text); background:var(--bg); }
+.model-alias-row > span { align-self:center; padding-top:20px; }
+.sub-installed li { display:flex; align-items:baseline; justify-content:space-between; gap:16px; }
+.sub-installed li > span { overflow-wrap:anywhere; }
+.sub-installed li > small { white-space:nowrap; }

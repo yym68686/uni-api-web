@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"sync"
@@ -16,25 +18,26 @@ type subChannelRef struct {
 	Base    string
 }
 type subInstalledChannel struct {
-	Fingerprint      string         `json:"-"`
-	Kind             string         `json:"kind,omitempty"`
-	BindingStatus    string         `json:"binding_status,omitempty"`
-	BindingCheckedAt int64          `json:"binding_checked_at,omitempty"`
-	BoundKeys        []subBoundKey  `json:"bound_keys,omitempty"`
-	Base             string         `json:"base"`
-	AccountID        string         `json:"account_id"`
-	GroupID          int64          `json:"group_id"`
-	SourceID         string         `json:"source_id"`
-	SourceName       string         `json:"source_name"`
-	KeyID            string         `json:"api_key_id"`
-	KeyPosition      int            `json:"key_position"`
-	KeyPrefix        string         `json:"key_prefix"`
-	Provider         string         `json:"provider"`
-	Name             string         `json:"name"`
-	Models           []string       `json:"models"`
-	Positions        map[string]int `json:"positions"`
-	Revision         string         `json:"revision"`
-	Manageable       bool           `json:"manageable"`
+	ModelMappings    map[string]string `json:"model_mappings,omitempty"`
+	Fingerprint      string            `json:"-"`
+	Kind             string            `json:"kind,omitempty"`
+	BindingStatus    string            `json:"binding_status,omitempty"`
+	BindingCheckedAt int64             `json:"binding_checked_at,omitempty"`
+	BoundKeys        []subBoundKey     `json:"bound_keys,omitempty"`
+	Base             string            `json:"base"`
+	AccountID        string            `json:"account_id"`
+	GroupID          int64             `json:"group_id"`
+	SourceID         string            `json:"source_id"`
+	SourceName       string            `json:"source_name"`
+	KeyID            string            `json:"api_key_id"`
+	KeyPosition      int               `json:"key_position"`
+	KeyPrefix        string            `json:"key_prefix"`
+	Provider         string            `json:"provider"`
+	Name             string            `json:"name"`
+	Models           []string          `json:"models"`
+	Positions        map[string]int    `json:"positions"`
+	Revision         string            `json:"revision"`
+	Manageable       bool              `json:"manageable"`
 }
 type subGatewayControls struct {
 	Revision   string `json:"revision"`
@@ -117,15 +120,19 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 				results[i].Error = source.Name
 				return
 			}
-			var stateMap, keysMap map[string]any
+			var stateMap, keysMap, catalogMap map[string]any
 			var stateErr, keysErr error
 			var readers sync.WaitGroup
-			readers.Add(2)
+			readers.Add(3)
 			go func() {
 				defer readers.Done()
 				stateMap, _, stateErr = subGateway(r.Context(), src, "GET", "/v1/channel-controls", nil)
 			}()
 			go func() { defer readers.Done(); keysMap, _, keysErr = fetchSource(r.Context(), src, "/v1/api-keys", nil) }()
+			go func() {
+				defer readers.Done()
+				catalogMap, _, _ = fetchSource(r.Context(), src, "/v1/model-channels", url.Values{"endpoint": {"all"}, "stream": {"all"}})
+			}()
 			readers.Wait()
 			if stateErr != nil || keysErr != nil {
 				results[i].Error = source.Name
@@ -140,6 +147,21 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 			if decodeMap(stateMap, &state) != nil || decodeMap(keysMap["data"], &keys) != nil {
 				results[i].Error = source.Name
 				return
+			}
+			var modelRows []struct {
+				Provider string `json:"provider"`
+				Model    string `json:"model"`
+				Upstream string `json:"upstream_model"`
+			}
+			_ = decodeMap(catalogMap["data"], &modelRows)
+			mappings := map[string]map[string]string{}
+			for _, row := range modelRows {
+				if row.Upstream != "" && row.Upstream != row.Model {
+					if mappings[row.Provider] == nil {
+						mappings[row.Provider] = map[string]string{}
+					}
+					mappings[row.Provider][row.Model] = row.Upstream
+				}
 			}
 			labels := map[string]string{}
 			lookup := map[string]subChannelRef{}
@@ -188,7 +210,7 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 				kl := keyLabels[p.KeyID]
-				results[i].Data = append(results[i].Data, subInstalledChannel{Base: ref.Base, AccountID: ref.Account, GroupID: ref.Group, SourceID: src.ID, SourceName: src.Name, KeyID: p.KeyID, KeyPosition: kl.Position, KeyPrefix: kl.Prefix, Provider: p.Provider, Name: ref.Name, Models: p.Models, Positions: positions, Revision: state.Revision, Manageable: state.Manageable})
+				results[i].Data = append(results[i].Data, subInstalledChannel{ModelMappings: mappings[p.Provider], Base: ref.Base, AccountID: ref.Account, GroupID: ref.Group, SourceID: src.ID, SourceName: src.Name, KeyID: p.KeyID, KeyPosition: kl.Position, KeyPrefix: kl.Prefix, Provider: p.Provider, Name: ref.Name, Models: p.Models, Positions: positions, Revision: state.Revision, Manageable: state.Manageable})
 			}
 		}(i, source)
 	}
@@ -290,12 +312,12 @@ func (s *Service) subManageChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if in.Action == "replace" {
-		if len(in.Models) == 0 || len(in.Models) > len(subModels) || in.Position < 1 || in.Position > 1025 {
+		if _, err := importPublicModels(in.Models, in.ModelMappings); err != nil || in.Position < 1 || in.Position > 1025 {
 			http.Error(w, "请选择模型和有效位置", 400)
 			return
 		}
 		seen := map[string]bool{}
-		for _, m := range in.Models {
+		for _, m := range importUpstreamModels(in.Models, in.ModelMappings) {
 			if !subModelAllowed(m) || seen[m] {
 				http.Error(w, "模型无效或重复", 400)
 				return
@@ -325,7 +347,32 @@ func (s *Service) subManageChannel(w http.ResponseWriter, r *http.Request) {
 		mutation["models"] = in.Models
 		mutation["position"] = in.Position
 	}
-	applied, status, e := subGateway(r.Context(), src, "POST", "/v1/temporary-channels", mutation)
+	var applied map[string]any
+	if in.Action == "replace" && in.ModelMappings != nil {
+		var snapshot retainedSnapshot
+		snapshot, status, e = s.importSnapshot(r.Context(), src, stateMap, in.Revision)
+		if e == nil {
+			var document map[string]any
+			document, status, e = s.importProviderDocument(r.Context(), src, snapshot, provider, in.Revision)
+			if e == nil {
+				document["model"] = importModelDefinition(in.Models, in.ModelMappings)
+				raw, _ := json.Marshal(document)
+				public, _ := importPublicModels(in.Models, in.ModelMappings)
+				e = errors.New("渠道定义已变化，请刷新重试")
+				status = 409
+				for _, old := range snapshot.Channels {
+					if old.Provider == provider {
+						old.Definition = raw
+						old.Models = public
+						applied, status, e = s.applyImportSnapshot(r.Context(), src, snapshot, in.Revision, old, in.Position)
+						break
+					}
+				}
+			}
+		}
+	} else {
+		applied, status, e = subGateway(r.Context(), src, "POST", "/v1/temporary-channels", mutation)
+	}
 	if e != nil {
 		http.Error(w, e.Error(), status)
 		return

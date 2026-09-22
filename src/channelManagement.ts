@@ -30,7 +30,7 @@ export interface ManagementRow {
 export function managementRows(accounts: SubAccount[], channels: ManagedChannel[], installed: InstalledChannel[], model: string): ManagementRow[] {
   const row = (account: SubAccount, target: SubTarget, id: string, accountIds: string[], configured?: ManagedChannel): ManagementRow => {
     const saved = modelChecks(target);
-    const checks = configured ? configured.models.map(model => saved.find(c => c.model === model) || { model, state: "idle", message: "", result: null }) : saved;
+    const checks = configured ? configured.models.map(model => ({ ...(saved.find(c => c.model === (configured.model_mappings?.[model] || model)) || { state: "idle", message: "", result: null }), model })) : saved;
     return { id, account, target, accountIds, configured, checks, selected: checks.find(c => c.model === model) };
   };
   const result = accounts.flatMap(account => account.targets.map(target => row(account, target, `${account.id}:${target.group_id}`, [account.id])));

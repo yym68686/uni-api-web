@@ -123,7 +123,7 @@ async function fill(user: ReturnType<typeof userEvent.setup>) {
   );
   await user.type(
     screen.getByLabelText("模型与映射"),
-    "public-model = vendor/upstream-model\nsecond-model",
+    "vendor/upstream-model = public-model\nsecond-model",
   );
 }
 it("creates an arbitrary provider with multiple keys and model aliases only in the selected calling key", async () => {

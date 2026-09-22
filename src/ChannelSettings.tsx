@@ -446,8 +446,8 @@ function Models({
         <table className="setting-models">
           <thead>
             <tr>
-              <th>公开模型名</th>
-              <th>上游模型名</th>
+              <th>原来的名字</th>
+              <th>重命名后的名字</th>
               <th />
             </tr>
           </thead>
@@ -456,12 +456,12 @@ function Models({
               <tr key={i}>
                 <td>
                   <input
-                    aria-label={`公开模型 ${i + 1}`}
-                    value={r.public}
+                    aria-label={`上游模型 ${i + 1}`}
+                    value={r.upstream}
                     onChange={(e) =>
                       save(
                         rows.map((v, n) =>
-                          n === i ? { ...v, public: e.target.value } : v,
+                          n === i ? { ...v, upstream: e.target.value } : v,
                         ),
                       )
                     }
@@ -469,12 +469,12 @@ function Models({
                 </td>
                 <td>
                   <input
-                    aria-label={`上游模型 ${i + 1}`}
-                    value={r.upstream}
+                    aria-label={`公开模型 ${i + 1}`}
+                    value={r.public}
                     onChange={(e) =>
                       save(
                         rows.map((v, n) =>
-                          n === i ? { ...v, upstream: e.target.value } : v,
+                          n === i ? { ...v, public: e.target.value } : v,
                         ),
                       )
                     }
@@ -496,7 +496,7 @@ function Models({
         </table>
       </div>
       <p className="settings-help">
-        左侧是调用时使用的模型名，右侧是上游模型名。
+        左侧是原来的上游模型名，右侧是重命名后对外提供的模型名。
       </p>
     </div>
   );

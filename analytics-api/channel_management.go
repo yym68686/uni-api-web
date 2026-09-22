@@ -72,6 +72,7 @@ func (s *Service) channelManagement(w http.ResponseWriter, r *http.Request) {
 			var rows []struct {
 				Provider string `json:"provider"`
 				Model    string `json:"model"`
+				Upstream string `json:"upstream_model"`
 				Engine   string `json:"engine"`
 			}
 			if e == nil {
@@ -137,6 +138,12 @@ func (s *Service) channelManagement(w http.ResponseWriter, r *http.Request) {
 				if !found {
 					item.Models = append(item.Models, row.Model)
 				}
+				if row.Upstream != "" && row.Upstream != row.Model {
+					if item.ModelMappings == nil {
+						item.ModelMappings = map[string]string{}
+					}
+					item.ModelMappings[row.Model] = row.Upstream
+				}
 			}
 			for _, item := range grouped {
 				sort.Strings(item.Models)
@@ -152,12 +159,14 @@ func (s *Service) channelManagement(w http.ResponseWriter, r *http.Request) {
 }
 
 type channelRoute struct {
-	Provider    string `json:"provider"`
-	Model       string `json:"model"`
-	KeyID       string `json:"api_key_id"`
-	KeyPrefix   string `json:"key_prefix"`
-	KeyPosition int    `json:"key_position"`
-	Position    int    `json:"position"`
+	OriginProvider string `json:"origin_provider,omitempty"`
+	Upstream       string `json:"upstream_model"`
+	Provider       string `json:"provider"`
+	Model          string `json:"model"`
+	KeyID          string `json:"api_key_id"`
+	KeyPrefix      string `json:"key_prefix"`
+	KeyPosition    int    `json:"key_position"`
+	Position       int    `json:"position"`
 }
 
 // The catalog already expands wildcards/nested keys and applies temporary
@@ -202,6 +211,7 @@ func (s *Service) channelRoutes(w http.ResponseWriter, r *http.Request) {
 			var rows []struct {
 				Provider string `json:"provider"`
 				Model    string `json:"model"`
+				Upstream string `json:"upstream_model"`
 			}
 			if e == nil {
 				e = decodeMap(catalog["data"], &rows)
@@ -221,11 +231,36 @@ func (s *Service) channelRoutes(w http.ResponseWriter, r *http.Request) {
 				}
 				seen[unique] = true
 				positions[row.Model]++
-				data = append(data, channelRoute{row.Provider, row.Model, key.ID, key.Prefix, key.Position, positions[row.Model]})
+				data = append(data, channelRoute{Provider: row.Provider, Model: row.Model, Upstream: row.Upstream, KeyID: key.ID, KeyPrefix: key.Prefix, KeyPosition: key.Position, Position: positions[row.Model]})
 			}
 		}()
 	}
 	wg.Wait()
+	providers := map[string]bool{}
+	for _, route := range data {
+		providers[route.Provider] = true
+	}
+	// A source channel can currently belong to no caller key while its imported
+	// copy does. Include the unfiltered catalog when resolving copy origins.
+	if catalog, _, err := fetchSource(ctx, src, "/v1/model-channels", url.Values{"endpoint": {"all"}, "stream": {"all"}}); err == nil {
+		var channels []struct {
+			Provider string `json:"provider"`
+		}
+		if decodeMap(catalog["data"], &channels) == nil {
+			for _, channel := range channels {
+				providers[channel.Provider] = true
+			}
+		}
+	}
+	origins := map[string]string{}
+	for provider := range providers {
+		for _, key := range keys {
+			origins[configuredImportName(provider, key.ID)] = provider
+		}
+	}
+	for i := range data {
+		data[i].OriginProvider = origins[data[i].Provider]
+	}
 	sort.Slice(data, func(i, j int) bool {
 		a, b := data[i], data[j]
 		if a.KeyPosition != b.KeyPosition {

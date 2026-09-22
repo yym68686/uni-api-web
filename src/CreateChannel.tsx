@@ -159,10 +159,10 @@ export function CreateChannel({
       .map((line) => {
         const index = line.indexOf("=");
         if (index < 0) return line;
-        const alias = line.slice(0, index).trim(),
-          upstream = line.slice(index + 1).trim();
+        const upstream = line.slice(0, index).trim(),
+          alias = line.slice(index + 1).trim();
         if (!alias || !upstream)
-          throw Error("模型映射请填写：公开模型名 = 上游模型名。");
+          throw Error("模型映射请填写：原来的名字 = 重命名后的名字。");
         return { [upstream]: alias };
       });
     const secrets = keyText
@@ -194,7 +194,7 @@ export function CreateChannel({
               typeof m === "string"
                 ? [m]
                 : isObject(m)
-                  ? Object.entries(m).map(([up, alias]) => `${alias} = ${up}`)
+                  ? Object.entries(m).map(([up, alias]) => `${up} = ${alias}`)
                   : [],
             )
             .join("\n"),
@@ -548,10 +548,10 @@ export function CreateChannel({
                       onChange={(e) => setModelText(e.target.value)}
                       spellCheck={false}
                       rows={4}
-                      placeholder={"每行一个模型\n公开模型名 = 上游模型名"}
+                      placeholder={"每行一个模型\n原来的名字 = 重命名后的名字"}
                     />
                     <small>
-                      名称相同时只填模型名；映射时左侧为调用名称，右侧为上游模型名称。
+                      名称相同时只填模型名；映射时左侧为原来的名字，右侧为重命名后的对外模型名。
                     </small>
                   </label>
                 </>
