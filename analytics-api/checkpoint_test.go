@@ -23,7 +23,7 @@ func TestErrorEvidenceCheckpointRestoresPreviousVersionsWithoutReplayingHistory(
 			if err := source.Import(ctx, "already-imported", "etag", []Fact{f}); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := source.DB.Exec(`CREATE TABLE previous_facts AS SELECT * EXCLUDE(upstream_error_sha256) FROM facts; DROP TABLE facts; ALTER TABLE previous_facts RENAME TO facts`); err != nil {
+			if _, err := source.DB.Exec(`CREATE TABLE history.previous_facts AS SELECT * EXCLUDE(upstream_error_sha256) FROM facts; DROP TABLE facts; ALTER TABLE history.previous_facts RENAME TO facts`); err != nil {
 				t.Fatal(err)
 			}
 			objects := &fakeStateObjects{}
@@ -33,7 +33,7 @@ func TestErrorEvidenceCheckpointRestoresPreviousVersionsWithoutReplayingHistory(
 			if version == "v2" {
 				old.key, old.source = store.olderKey, store.olderSource
 			}
-			if err := old.save(ctx, source); err != nil {
+			if err := old.saveParquet(ctx, source); err != nil {
 				t.Fatal(err)
 			}
 			store.client = &restoreTestObjects{objects, func(ctx context.Context, req *s3.GetObjectInput) (*s3.GetObjectOutput, error) {

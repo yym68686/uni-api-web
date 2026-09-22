@@ -109,6 +109,9 @@ func TestCheckpointRestoreStopsAtBoundAndDoesNotRetryPermanentFailures(t *testin
 			if failure == "missing" {
 				wantOutcome = "not_needed"
 			}
+			if failure == "missing" || failure == "corrupt" {
+				wantCalls = 2
+			}
 			if calls != wantCalls || outcome != wantOutcome {
 				t.Fatal(calls, outcome)
 			}
@@ -129,7 +132,7 @@ func TestCheckpointFailedApplyRollsBackAllHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	objects.metadata["objects"] = "2"
-	if restored, err := store.restore(ctx, target); restored || err == nil || checkpointFailure(err).Stage != "apply" {
+	if restored, err := store.restore(ctx, target); restored || err == nil || checkpointFailure(err).Stage != "metadata" {
 		t.Fatal(restored, err)
 	}
 	var id string

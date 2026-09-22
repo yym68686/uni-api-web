@@ -64,7 +64,7 @@ func TestCombinedAnalyticsDoesNotHideBillingFailureOrCachePreviousAmount(t *test
 		t.Fatal(err)
 	}
 	// Break only the billing schema in this isolated engine. Metrics still work.
-	if _, err = s.engine.DB.Exec(`CREATE TABLE previous_facts AS SELECT * EXCLUDE(upstream_key_hash) FROM facts; DROP TABLE facts; ALTER TABLE previous_facts RENAME TO facts`); err != nil {
+	if _, err = s.engine.DB.Exec(`CREATE TABLE history.previous_facts AS SELECT * EXCLUDE(upstream_key_hash) FROM facts; DROP TABLE facts; ALTER TABLE history.previous_facts RENAME TO facts`); err != nil {
 		t.Fatal(err)
 	}
 	r := httptest.NewRequest("GET", "/v1/analytics?source_id=source&key_id=caller", nil)

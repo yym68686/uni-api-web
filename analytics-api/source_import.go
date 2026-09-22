@@ -29,7 +29,7 @@ func (s *Service) factSources(ctx context.Context) ([]*Service, error) {
 	}
 	s.importMu.Lock()
 	if s.factDownloadSlots == nil {
-		s.factDownloadSlots = make(chan struct{}, 16)
+		s.factDownloadSlots = make(chan struct{}, factDownloadConcurrency)
 	}
 	slots := s.factDownloadSlots
 	s.importMu.Unlock()

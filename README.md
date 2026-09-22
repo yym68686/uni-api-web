@@ -137,11 +137,19 @@ Sources can use separate fact buckets/prefixes; credentials are not included in 
 
 Operator prices live in a conditional S3 document. Concurrent changes return a
 conflict instead of overwriting a newer version. Every replica refreshes its price
-cache. The state bucket also holds one atomically replaced, checksummed Parquet
-checkpoint of facts, aggregates and import checkpoints. Settings are kept separate
+cache. The state bucket also holds one atomically replaced, checksummed DuckDB
+physical checkpoint of facts, aggregates and import checkpoints. Settings are kept separate
 so restoring an older query cache cannot revert an operator edit.
 
-Each API container uses its own `/data` directory, with no shared volume.
+Each API container uses its own `/data` directory, with no shared volume. Historical
+tables live in `analytics.duckdb`; prices and configuration cache live in the separate
+`analytics.duckdb.settings` catalog. Existing combined databases migrate settings
+without dropping operator edits. A v5 checkpoint flushes the history WAL and copies
+the file under the history write lock, then compresses/uploads outside that lock.
+Restore streams into a staging file, validates hashes, schema/constraints, engine
+version and row counts, then atomically replaces only the attached history file.
+Legacy v4/v3/v2 Parquet snapshots remain readable for migration/recovery. A failed
+download or validation preserves the existing cache and current prices.
 Configuration recovery, detection and billing workers start before history
 restoration. Production uses `REQUIRE_INITIAL_IMPORT=true`: the replacement does
 not bind its HTTP port until a complete initial fact scan and price sync finish.
@@ -165,7 +173,11 @@ substitutes another key/range's cached result. Initialization does not display a
 unrelated S3 export-configuration warning. `/v1/prices` waits only for price sync.
 
 After initialization, each source polls independently, with at most four scans
-and sixteen object downloads in flight across the service. Newly discovered
+and four object downloads in flight across the service. Replay checks query only
+the current S3 listing page (up to 1,000 object keys), avoiding one full-history Go
+map per source. Decoded batches contain at most 64 objects / 4MiB of source data
+(one larger object may exceed that byte target, subject to the 32MiB object limit).
+These are bounded batches, not a 50MiB memory cap for the entire service. Newly discovered
 objects are imported before the next listing page; every page is still scanned
 so late arrivals cannot be skipped. Fact/object checkpoints remain atomic and
 idempotent. A large source archive does not delay another source's next poll.
@@ -294,7 +306,7 @@ sub2api 检测的「模型匹配」比较请求模型与成功流式 `response.c
 
 价格设置可为每个模型保存 `sale_percent`（原价的百分比）。GPT 默认 2.5%，Claude / Gemini 默认 15%，其他模型默认 2.5%；支持小数、0% 和高于 100% 的比例。后缀模型沿用最长匹配的基础模型设置。原价估算消费保持原口径，利润和利润率使用该模型的当前售卖比例；保存后会刷新渠道统计。配置与现有价格一起保存至 S3，旧价格文档省略此字段时使用默认值；旧客户端省略该字段更新价格时保留已保存比例。
 
-发布顺序：先更新 analytics-api 消费者以支持 additive `billing` 事实，再更新网关生产者。账单事实不进入请求/尝试/token 汇总；DuckDB 快照使用 cache-v4，兼容读取 cache-v3/cache-v2，避免旧消费者恢复新列快照。升级前历史缺少上游标识，无法事后精确拆分。
+发布顺序：先更新 analytics-api 消费者以支持 additive `billing` 事实，再更新网关生产者。账单事实不进入请求/尝试/token 汇总；DuckDB 快照使用 cache-v5 物理文件，兼容读取 cache-v4/cache-v3/cache-v2 Parquet 快照。物理文件校验引擎版本及 schema，避免不兼容恢复。升级前历史缺少上游标识，无法事后精确拆分。
 
 账号级账单同步状态存入 `console_sub_account_spend_cache`，多个 Key/渠道/筛选窗口共用覆盖范围。升级只从旧 Key 游标合并需要同步的时间范围，不能把任一 Key 的完整覆盖当成账号完整覆盖；旧明细及游标表保留以兼容滚动更新。后台 `sub_account_spend_page` 日志记录账号、分页大小、返回行数及完成状态，不记录令牌或请求内容。
 

@@ -202,7 +202,7 @@ func TestBatchImportAtomicAndDimensionAggregation(t *testing.T) {
 	if err = e.ImportBatch(ctx, []FactObject{fresh, bad}); err == nil {
 		t.Fatal("invalid batch committed")
 	}
-	known, err := e.ImportedObjects(ctx)
+	known, err := e.ImportedObjectPage(ctx, []string{"0", "1", "2", "3", "fresh", "new"})
 	if err != nil || len(known) != 4 {
 		t.Fatalf("checkpoint changed on failed batch: %v %v", known, err)
 	}

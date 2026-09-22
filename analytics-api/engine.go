@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,17 +15,18 @@ import (
 	"sync/atomic"
 	"time"
 
-	_ "github.com/duckdb/duckdb-go/v2"
+	duckdb "github.com/duckdb/duckdb-go/v2"
 )
 
 var histogramBounds = []float64{1, 2, 5, 10, 20, 50, 100, 200, 300, 500, 750, 1000, 1500, 2000, 3000, 5000, 7500, 10000, 15000, 20000, 30000, 45000, 60000, 90000, 120000, 180000, 300000, 600000, 1200000, math.Inf(1)}
 
 type Engine struct {
-	DB       *sql.DB
-	cfg      Config
-	mu       sync.Mutex
-	Revision atomic.Uint64
-	Location *time.Location
+	DB          *sql.DB
+	historyPath string
+	cfg         Config
+	mu          sync.Mutex
+	Revision    atomic.Uint64
+	Location    *time.Location
 }
 
 func OpenEngine(path string, cfg Config) (*Engine, error) {
@@ -32,13 +34,34 @@ func OpenEngine(path string, cfg Config) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("duckdb", path)
+	path, err = filepath.Abs(path)
 	if err != nil {
 		return nil, err
 	}
+	var attached atomic.Bool
+	connector, err := duckdb.NewConnector("", func(conn driver.ExecerContext) error {
+		if !attached.Load() {
+			return nil
+		}
+		_, err := conn.ExecContext(context.Background(), "SET search_path='settings,history'", nil)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	db := sql.OpenDB(connector)
 	db.SetMaxOpenConns(4)
 	db.SetMaxIdleConns(4)
-	e := &Engine{DB: db, cfg: cfg, Location: location}
+	if _, err = db.Exec("ATTACH " + sqlPath(path+".settings") + " AS settings; ATTACH " + sqlPath(path) + " AS history; SET search_path='settings,history'"); err != nil {
+		db.Close()
+		return nil, err
+	}
+	attached.Store(true)
+	e := &Engine{DB: db, cfg: cfg, Location: location, historyPath: path}
+	if err = e.migrateSettings(); err != nil {
+		db.Close()
+		return nil, err
+	}
 	memoryMB := cfg.DatabaseMemoryLimitMB
 	if memoryMB == 0 {
 		memoryMB = 512
@@ -48,13 +71,13 @@ func OpenEngine(path string, cfg Config) (*Engine, error) {
 		return nil, errors.New("database memory limit must be at least 64 MiB")
 	}
 	if _, err = db.Exec(fmt.Sprintf("SET memory_limit='%dMiB';", memoryMB) + ` SET threads=2;
- CREATE TABLE IF NOT EXISTS facts(event_id VARCHAR PRIMARY KEY,kind VARCHAR NOT NULL,source_id VARCHAR DEFAULT 'primary',instance_id VARCHAR,request_id VARCHAR,attempt_id VARCHAR,at_ms BIGINT,started_ms BIGINT,key_id VARCHAR,provider VARCHAR,model VARCHAR,upstream_model VARCHAR,endpoint VARCHAR,stream BOOLEAN,outcome VARCHAR,status INTEGER,duration_ms DOUBLE,dispatch_ms DOUBLE,first_output_ms DOUBLE,input_tokens BIGINT,output_tokens BIGINT,cache_read_tokens BIGINT,cache_write_tokens BIGINT,cache_write_1h_tokens BIGINT,actual_cost_usd DOUBLE);
- CREATE TABLE IF NOT EXISTS imported_objects(object_key VARCHAR PRIMARY KEY,etag VARCHAR,imported_at TIMESTAMP DEFAULT current_timestamp,events BIGINT);
+ CREATE TABLE IF NOT EXISTS history.facts(event_id VARCHAR PRIMARY KEY,kind VARCHAR NOT NULL,source_id VARCHAR DEFAULT 'primary',instance_id VARCHAR,request_id VARCHAR,attempt_id VARCHAR,at_ms BIGINT,started_ms BIGINT,key_id VARCHAR,provider VARCHAR,model VARCHAR,upstream_model VARCHAR,endpoint VARCHAR,stream BOOLEAN,outcome VARCHAR,status INTEGER,duration_ms DOUBLE,dispatch_ms DOUBLE,first_output_ms DOUBLE,input_tokens BIGINT,output_tokens BIGINT,cache_read_tokens BIGINT,cache_write_tokens BIGINT,cache_write_1h_tokens BIGINT,actual_cost_usd DOUBLE);
+ CREATE TABLE IF NOT EXISTS history.imported_objects(object_key VARCHAR PRIMARY KEY,etag VARCHAR,imported_at TIMESTAMP DEFAULT current_timestamp,events BIGINT);
  CREATE TABLE IF NOT EXISTS prices(model VARCHAR PRIMARY KEY,input DOUBLE,output DOUBLE,cache_read DOUBLE,cache_write DOUBLE,cache_write_1h DOUBLE,source VARCHAR,verified BOOLEAN,effective_at TIMESTAMP);
  CREATE TABLE IF NOT EXISTS price_history(model VARCHAR,document VARCHAR,updated_at TIMESTAMP DEFAULT current_timestamp);
  CREATE TABLE IF NOT EXISTS meta(name VARCHAR PRIMARY KEY,value VARCHAR);
- CREATE TABLE IF NOT EXISTS rollups(period_ms BIGINT,level VARCHAR,kind VARCHAR,source_id VARCHAR DEFAULT 'primary',key_id VARCHAR,provider VARCHAR,model VARCHAR,upstream_model VARCHAR,endpoint VARCHAR,stream BOOLEAN,outcome VARCHAR,n BIGINT,input_tokens HUGEINT,output_tokens HUGEINT,cache_read_tokens HUGEINT,cache_write_tokens HUGEINT,cache_write_1h_tokens HUGEINT,usage_samples BIGINT,cache_samples BIGINT,actual_cost_usd DOUBLE,actual_cost_samples BIGINT,first_bins BIGINT[],dispatch_bins BIGINT[],first_count BIGINT,dispatch_count BIGINT,first_sum DOUBLE,dispatch_sum DOUBLE,last_ms BIGINT,last_first DOUBLE,last_dispatch DOUBLE);
- ALTER TABLE facts ADD COLUMN IF NOT EXISTS source_id VARCHAR DEFAULT 'primary'; ALTER TABLE rollups ADD COLUMN IF NOT EXISTS source_id VARCHAR DEFAULT 'primary'; CREATE INDEX IF NOT EXISTS facts_at ON facts(at_ms);`); err != nil {
+ CREATE TABLE IF NOT EXISTS history.rollups(period_ms BIGINT,level VARCHAR,kind VARCHAR,source_id VARCHAR DEFAULT 'primary',key_id VARCHAR,provider VARCHAR,model VARCHAR,upstream_model VARCHAR,endpoint VARCHAR,stream BOOLEAN,outcome VARCHAR,n BIGINT,input_tokens HUGEINT,output_tokens HUGEINT,cache_read_tokens HUGEINT,cache_write_tokens HUGEINT,cache_write_1h_tokens HUGEINT,usage_samples BIGINT,cache_samples BIGINT,actual_cost_usd DOUBLE,actual_cost_samples BIGINT,first_bins BIGINT[],dispatch_bins BIGINT[],first_count BIGINT,dispatch_count BIGINT,first_sum DOUBLE,dispatch_sum DOUBLE,last_ms BIGINT,last_first DOUBLE,last_dispatch DOUBLE);
+ ALTER TABLE history.facts ADD COLUMN IF NOT EXISTS source_id VARCHAR DEFAULT 'primary'; ALTER TABLE history.rollups ADD COLUMN IF NOT EXISTS source_id VARCHAR DEFAULT 'primary'; CREATE INDEX IF NOT EXISTS facts_at ON history.facts(at_ms);`); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -62,20 +85,20 @@ func OpenEngine(path string, cfg Config) (*Engine, error) {
 	if _, err = db.Exec(`
       ALTER TABLE prices ADD COLUMN IF NOT EXISTS charge_cache_write BOOLEAN;
       ALTER TABLE prices ADD COLUMN IF NOT EXISTS sale_percent DOUBLE;
-      ALTER TABLE facts ADD COLUMN IF NOT EXISTS upstream_base VARCHAR;
-      ALTER TABLE facts ADD COLUMN IF NOT EXISTS upstream_key_hash VARCHAR;
-      ALTER TABLE facts ADD COLUMN IF NOT EXISTS billing_request_ids VARCHAR[];
-      ALTER TABLE facts ADD COLUMN IF NOT EXISTS upstream_error_sha256 VARCHAR;
-      ALTER TABLE facts ADD COLUMN IF NOT EXISTS response_created_ms DOUBLE;
-      ALTER TABLE facts ADD COLUMN IF NOT EXISTS first_text_ms DOUBLE;
-      ALTER TABLE rollups ADD COLUMN IF NOT EXISTS created_bins BIGINT[];
-      ALTER TABLE rollups ADD COLUMN IF NOT EXISTS created_count BIGINT DEFAULT 0;
-      ALTER TABLE rollups ADD COLUMN IF NOT EXISTS created_sum DOUBLE DEFAULT 0;
-      ALTER TABLE rollups ADD COLUMN IF NOT EXISTS last_created DOUBLE;
-      ALTER TABLE rollups ADD COLUMN IF NOT EXISTS text_bins BIGINT[];
-      ALTER TABLE rollups ADD COLUMN IF NOT EXISTS text_count BIGINT DEFAULT 0;
-      ALTER TABLE rollups ADD COLUMN IF NOT EXISTS text_sum DOUBLE DEFAULT 0;
-      ALTER TABLE rollups ADD COLUMN IF NOT EXISTS last_text DOUBLE;
+      ALTER TABLE history.facts ADD COLUMN IF NOT EXISTS upstream_base VARCHAR;
+      ALTER TABLE history.facts ADD COLUMN IF NOT EXISTS upstream_key_hash VARCHAR;
+      ALTER TABLE history.facts ADD COLUMN IF NOT EXISTS billing_request_ids VARCHAR[];
+      ALTER TABLE history.facts ADD COLUMN IF NOT EXISTS upstream_error_sha256 VARCHAR;
+      ALTER TABLE history.facts ADD COLUMN IF NOT EXISTS response_created_ms DOUBLE;
+      ALTER TABLE history.facts ADD COLUMN IF NOT EXISTS first_text_ms DOUBLE;
+      ALTER TABLE history.rollups ADD COLUMN IF NOT EXISTS created_bins BIGINT[];
+      ALTER TABLE history.rollups ADD COLUMN IF NOT EXISTS created_count BIGINT DEFAULT 0;
+      ALTER TABLE history.rollups ADD COLUMN IF NOT EXISTS created_sum DOUBLE DEFAULT 0;
+      ALTER TABLE history.rollups ADD COLUMN IF NOT EXISTS last_created DOUBLE;
+      ALTER TABLE history.rollups ADD COLUMN IF NOT EXISTS text_bins BIGINT[];
+      ALTER TABLE history.rollups ADD COLUMN IF NOT EXISTS text_count BIGINT DEFAULT 0;
+      ALTER TABLE history.rollups ADD COLUMN IF NOT EXISTS text_sum DOUBLE DEFAULT 0;
+      ALTER TABLE history.rollups ADD COLUMN IF NOT EXISTS last_text DOUBLE;
     `); err != nil {
 		db.Close()
 		return nil, err
@@ -262,22 +285,38 @@ func (e *Engine) ImportBatch(ctx context.Context, objects []FactObject) error {
 	e.Revision.Add(1)
 	return nil
 }
-func (e *Engine) ImportedObjects(ctx context.Context) (map[string]string, error) {
-	rows, err := e.DB.QueryContext(ctx, "SELECT object_key,etag FROM imported_objects")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	result := map[string]string{}
-	for rows.Next() {
-		var key, etag string
-		if err = rows.Scan(&key, &etag); err != nil {
+
+// ImportedObjectPage bounds memory to the current listing page. Source-prefixed
+// keys preserve the existing cross-source and late-arrival identity semantics.
+func (e *Engine) ImportedObjectPage(ctx context.Context, keys []string) (map[string]string, error) {
+	result := make(map[string]string, len(keys))
+	for start := 0; start < len(keys); start += 1000 {
+		end := min(start+1000, len(keys))
+		args := make([]any, 0, end-start)
+		for _, key := range keys[start:end] {
+			args = append(args, key)
+		}
+		rows, err := e.DB.QueryContext(ctx, "SELECT object_key,etag FROM imported_objects WHERE object_key IN ("+strings.TrimRight(strings.Repeat("?,", len(args)), ",")+")", args...)
+		if err != nil {
 			return nil, err
 		}
-		result[key] = etag
+		for rows.Next() {
+			var key, etag string
+			if err = rows.Scan(&key, &etag); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			result[key] = etag
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
 	}
-	return result, rows.Err()
+	return result, nil
 }
+
 func histogramSQL(column string) string {
 	parts := make([]string, len(histogramBounds))
 	for i, b := range histogramBounds {
@@ -313,6 +352,8 @@ func mergeHistogramSQL(column string) string {
 	return "[" + strings.Join(parts, ",") + "]"
 }
 func (e *Engine) Prices(ctx context.Context) ([]Price, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	rows, err := e.DB.QueryContext(ctx, `SELECT model,input,output,cache_read,cache_write,cache_write_1h,source,verified,effective_at,charge_cache_write,sale_percent FROM prices UNION ALL SELECT DISTINCT model,0,0,0,0,0,'fact-discovered',false,current_timestamp,NULL::BOOLEAN,NULL::DOUBLE FROM rollups WHERE model <> '' AND model NOT IN (SELECT model FROM prices) ORDER BY model`)
 	if err != nil {
 		return nil, err

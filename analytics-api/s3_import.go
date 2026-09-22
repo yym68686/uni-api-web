@@ -19,6 +19,9 @@ import (
 )
 
 const maxObjectBytes = 32 << 20
+const factDownloadConcurrency = 4
+const factBatchObjects = 64
+const factBatchBytes = 4 << 20
 
 func (s *Service) importSingleS3(ctx context.Context) error {
 	if s.cfg.S3Bucket == "" || s.cfg.S3Endpoint == "" {
@@ -31,10 +34,6 @@ func (s *Service) importSingleS3(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-	}
-	known, err := s.engine.ImportedObjects(ctx)
-	if err != nil {
-		return err
 	}
 	pager := s3.NewListObjectsV2Paginator(client, &s3.ListObjectsV2Input{Bucket: aws.String(s.cfg.S3Bucket), Prefix: aws.String(strings.Trim(s.cfg.S3Prefix, "/") + "/")})
 	var failures []error
@@ -49,6 +48,16 @@ func (s *Service) importSingleS3(ctx context.Context) error {
 		listed += len(page.Contents)
 		s.listPages.Store(int64(pages))
 		s.listedObjects.Store(int64(listed))
+		keys := make([]string, 0, len(page.Contents))
+		for _, obj := range page.Contents {
+			if strings.HasSuffix(aws.ToString(obj.Key), ".jsonl") {
+				keys = append(keys, sourceObjectKey(s.cfg.SourceID, aws.ToString(obj.Key)))
+			}
+		}
+		known, err := s.engine.ImportedObjectPage(ctx, keys)
+		if err != nil {
+			return err
+		}
 		var pending []types.Object
 		for _, obj := range page.Contents {
 			key := aws.ToString(obj.Key)
@@ -92,9 +101,9 @@ func (s *Service) importListedObjects(ctx context.Context, client *s3.Client, pe
 	for start := 0; start < len(pending); {
 		end := start
 		var groupBytes int64
-		for end < len(pending) && end-start < 256 {
+		for end < len(pending) && end-start < factBatchObjects {
 			size := aws.ToInt64(pending[end].Size)
-			if end > start && groupBytes+size > 16<<20 {
+			if end > start && groupBytes+size > factBatchBytes {
 				break
 			}
 			groupBytes += size
@@ -106,7 +115,7 @@ func (s *Service) importListedObjects(ctx context.Context, client *s3.Client, pe
 		var wg sync.WaitGroup
 		slots := s.factDownloadSlots
 		if slots == nil {
-			slots = make(chan struct{}, 16)
+			slots = make(chan struct{}, factDownloadConcurrency)
 		}
 		for i, obj := range group {
 			wg.Add(1)

@@ -28,16 +28,17 @@ type checkpointClient interface {
 	HeadObject(context.Context, *s3.HeadObjectInput, ...func(*s3.Options)) (*s3.HeadObjectOutput, error)
 }
 type checkpointStore struct {
-	client                  checkpointClient
-	bucket, key, source     string
-	legacyKey, legacySource string
-	olderKey, olderSource   string
+	client                      checkpointClient
+	bucket, key, source         string
+	physicalKey, physicalSource string
+	legacyKey, legacySource     string
+	olderKey, olderSource       string
 }
 
 func newCheckpointStore(client checkpointClient, cfg Config) *checkpointStore {
 	sum := sha256.Sum256([]byte(strings.Join([]string{cfg.S3Endpoint, cfg.S3Bucket, cfg.S3Prefix, cfg.Timezone}, "\x00")))
 	id := hex.EncodeToString(sum[:])
-	return &checkpointStore{client: client, bucket: cfg.StateBucket, key: strings.Trim(cfg.StatePrefix, "/") + "/cache-v4-" + id + ".tar.gz", source: "v4-" + id, legacyKey: strings.Trim(cfg.StatePrefix, "/") + "/cache-v3-" + id + ".tar.gz", legacySource: "v3-" + id, olderKey: strings.Trim(cfg.StatePrefix, "/") + "/cache-v2-" + id + ".tar.gz", olderSource: "v2-" + id}
+	return &checkpointStore{physicalKey: strings.Trim(cfg.StatePrefix, "/") + "/cache-v5-" + id + ".duckdb.gz", physicalSource: "v5-" + id, client: client, bucket: cfg.StateBucket, key: strings.Trim(cfg.StatePrefix, "/") + "/cache-v4-" + id + ".tar.gz", source: "v4-" + id, legacyKey: strings.Trim(cfg.StatePrefix, "/") + "/cache-v3-" + id + ".tar.gz", legacySource: "v3-" + id, olderKey: strings.Trim(cfg.StatePrefix, "/") + "/cache-v2-" + id + ".tar.gz", olderSource: "v2-" + id}
 }
 
 func sqlPath(path string) string { return "'" + strings.ReplaceAll(path, "'", "''") + "'" }
@@ -174,7 +175,7 @@ func unpackCheckpointContext(ctx context.Context, path, dir string) error {
 	return nil
 }
 
-func (s *checkpointStore) save(ctx context.Context, e *Engine) (err error) {
+func (s *checkpointStore) saveParquet(ctx context.Context, e *Engine) (err error) {
 	stage := "read_metadata"
 	defer func() { err = checkpointStageError(stage, err) }()
 	head, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(s.key)})
@@ -237,7 +238,7 @@ func (s *checkpointStore) save(ctx context.Context, e *Engine) (err error) {
 	return err
 }
 
-func (s *checkpointStore) restore(ctx context.Context, e *Engine) (restored bool, err error) {
+func (s *checkpointStore) restoreParquet(ctx context.Context, e *Engine) (restored bool, err error) {
 	stage := "inspect_cache"
 	defer func() { err = checkpointStageError(stage, err) }()
 	var current int64

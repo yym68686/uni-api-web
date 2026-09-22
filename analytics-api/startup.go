@@ -78,7 +78,7 @@ func checkpointFailure(err error) checkpointErrorDetail {
 				d.Class, d.Retryable = "storage_http", status == 408 || status == 429 || status >= 500
 			} else {
 				switch d.Stage {
-				case "metadata", "integrity", "unpack":
+				case "metadata", "integrity", "unpack", "validate":
 					d.Class = "invalid_checkpoint"
 				case "inspect_cache", "apply", "export":
 					d.Class = "database"
