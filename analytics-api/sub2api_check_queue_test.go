@@ -92,6 +92,11 @@ func TestSubChecksQueueBehindActiveWorkWithoutReplacingLease(t *testing.T) {
 					t.Fatalf("%s: %d %s", kind, w.Code, w.Body.String())
 				}
 			}
+			// An earlier failed worker left capability phases queued on another
+			// group. Starting this request must not revive those old phases.
+			if _, err = store.db.Exec(`UPDATE console_sub_targets SET compaction_state='queued',tool_use_state='running' WHERE account_id=$1 AND group_id=3`, id); err != nil {
+				t.Fatal(err)
+			}
 			queue("compaction", id, 1, 202)
 			done := make(chan bool, 1)
 			go func() { done <- s.subWorkOne(context.Background()) }()

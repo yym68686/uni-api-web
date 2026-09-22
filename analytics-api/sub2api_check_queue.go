@@ -58,6 +58,16 @@ func (s *Service) subPromoteAccountChecks(ctx context.Context, tx *sql.Tx, id st
 	if err != nil {
 		return err
 	}
+	// The previous job may have failed before reaching its capability stages.
+	// Clear those stale states before promoting the explicitly requested work;
+	// durable waiting tasks live in the separate queue and are unaffected.
+	_, err = tx.ExecContext(ctx, `UPDATE console_sub_targets SET
+	 compaction_state=CASE WHEN compaction_state IN ('queued','running') THEN 'interrupted' ELSE compaction_state END,
+	 tool_use_state=CASE WHEN tool_use_state IN ('queued','running') THEN 'interrupted' ELSE tool_use_state END
+	 WHERE account_id=$1 AND (compaction_state IN ('queued','running') OR tool_use_state IN ('queued','running'))`, id)
+	if err != nil {
+		return err
+	}
 	_, err = tx.ExecContext(ctx, `UPDATE console_sub_accounts SET state='queued',job_kind=$2,job_id='',message='',lease_until=NULL WHERE id=$1`, id, kind)
 	if err != nil {
 		return err
