@@ -742,12 +742,48 @@ it("preselects successful models and imports into the selected source key at the
     group_id: 1,
     source_id: "source",
     api_key_id: "key-target",
+    compaction_enabled: false,
     models: ["gpt-6-astra", "gpt-5.6-sol"],
     position: 2,
     revision: "revision-1",
   });
   expect(JSON.stringify(writes)).not.toContain("secret");
   await screen.findByText("已临时添加至第 2 位");
+});
+
+it("filters compaction across all pages, queues groups independently of the selected model, and defaults imports from evidence", async () => {
+  const data = fixtures().slice(0, 1);
+  const template = data[0].targets[0];
+  data[0].targets = Array.from({ length: 27 }, (_, i) => ({ ...template, group_id: i + 1, name: `compact-${i + 1}`,
+    compaction: { status: "supported", model: "gpt-5.6-sol", checked_at: 10, attempts: [] } }));
+  data[0].targets.push({ ...template, group_id: 28, name: "no-compact", compaction: { status: "unsupported", checked_at: 10, attempts: [] } },
+    { ...template, group_id: 29, name: "unknown-compact" });
+  const writes: { targets: {group_id: number; models?: string[]}[] }[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+    if (init?.method === "POST") { writes.push(JSON.parse(String(init.body))); return new Response("{}", {status:202}); }
+    return new Response(JSON.stringify({ data: input.endsWith("/accounts") ? data : [] }));
+  }));
+  const user = userEvent.setup();
+  const view = mount("compaction-filter");
+  const filter = await screen.findByLabelText("是否支持压缩筛选");
+  await user.selectOptions(screen.getByLabelText("检测模型筛选"), "gpt-6-astra");
+  await user.selectOptions(filter, "supported");
+  await screen.findByText("compact-1");
+  expect(screen.queryByText("no-compact")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", {name:"压缩检测 · 27 个渠道"}));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0].targets.map(t => t.group_id)).toEqual(Array.from({length:27}, (_,i)=>i+1));
+  expect(writes[0].targets.every(t => !t.models)).toBe(true);
+  await user.click(screen.getAllByRole("button", {name:"添加到渠道"})[0]);
+  expect(within(screen.getByRole("dialog")).getByRole("checkbox", {name:"开启远程压缩"})).toBeChecked();
+  await user.click(screen.getByRole("button", {name:"关闭添加渠道"}));
+  await user.selectOptions(filter,"unsupported");
+  await user.click(screen.getByRole("button", {name:"添加到渠道"}));
+  expect(within(screen.getByRole("dialog")).getByRole("checkbox", {name:"开启远程压缩"})).not.toBeChecked();
+  await user.click(screen.getByRole("button", {name:"关闭添加渠道"}));
+  view.unmount();
+  mount("compaction-filter");
+  expect(screen.getByLabelText("是否支持压缩筛选")).toHaveValue("unsupported");
 });
 
 it("all-models groups channels and probes all supported models despite available/pass filters", async () => {

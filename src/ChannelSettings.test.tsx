@@ -74,6 +74,8 @@ beforeEach(() => {
               { path: "/base_url", type: "string", group: "基本与模型" },
               { path: "/model", type: "models", group: "基本与模型" },
               { path: "/api", type: "keys", group: "密钥" },
+              { path: "/only_request_types", type: "json", group: "请求规则" },
+              { path: "/exclude_request_types", type: "json", group: "请求规则" },
               { path: "/preferences/headers", type: "json", group: "请求改写" },
               {
                 path: "/preferences/cooldown_period",
@@ -124,6 +126,19 @@ it("sends only changed fields, preserves zero, and refreshes the draft after app
   expect(input).toHaveValue(0);
   expect(reads).toBeGreaterThan(1);
   expect(JSON.stringify(writes)).not.toContain("opaque-");
+});
+it("edits compaction request types without allowing contradictory checkboxes", async () => {
+  const user = await mount();
+  await user.click(screen.getByRole("button", { name: "请求规则" }));
+  await user.click(screen.getByRole("checkbox", { name: "排除压缩请求" }));
+  await user.click(screen.getByRole("button", { name: "校验与预览" }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect((writes[0].changes as {set:object}[])[0].set).toEqual({"/exclude_request_types":["compaction"]});
+  await user.click(screen.getByRole("checkbox", { name: "仅允许压缩请求" }));
+  expect(screen.getByRole("checkbox", { name: "排除压缩请求" })).not.toBeChecked();
+  await user.click(screen.getByRole("button", { name: "校验与预览" }));
+  await waitFor(() => expect(writes).toHaveLength(2));
+  expect((writes[1].changes as {set:object}[])[0].set).toEqual({"/exclude_request_types":[],"/only_request_types":["compaction"]});
 });
 it("reset then edit applies the edited value over the base and never discards edits silently", async () => {
   const user = await mount();

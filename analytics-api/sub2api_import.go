@@ -15,14 +15,15 @@ import (
 )
 
 type subImportInput struct {
-	Action    string   `json:"action"`
-	AccountID string   `json:"account_id"`
-	GroupID   int64    `json:"group_id"`
-	SourceID  string   `json:"source_id"`
-	KeyID     string   `json:"api_key_id"`
-	Revision  string   `json:"revision"`
-	Models    []string `json:"models"`
-	Position  int      `json:"position"`
+	CompactionEnabled *bool    `json:"compaction_enabled,omitempty"`
+	Action            string   `json:"action"`
+	AccountID         string   `json:"account_id"`
+	GroupID           int64    `json:"group_id"`
+	SourceID          string   `json:"source_id"`
+	KeyID             string   `json:"api_key_id"`
+	Revision          string   `json:"revision"`
+	Models            []string `json:"models"`
+	Position          int      `json:"position"`
 }
 
 func subProviderName(account string, group int64, key string) string {
@@ -264,7 +265,12 @@ func (s *Service) subImportChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	provider := subProviderName(in.AccountID, in.GroupID, key)
-	applied, status, err := subGateway(ctx, src, "POST", "/v1/temporary-channels", map[string]any{"revision": in.Revision, "api_key_id": key, "provider": provider, "base_url": base + "/v1/responses", "api_key": routeKey.Key, "models": in.Models, "position": in.Position})
+	var applied map[string]any
+	if in.CompactionEnabled != nil {
+		applied, status, err = s.subImportCompactionChannel(ctx, src, state, in, key, provider, base, routeKey.Key)
+	} else {
+		applied, status, err = subGateway(ctx, src, "POST", "/v1/temporary-channels", map[string]any{"revision": in.Revision, "api_key_id": key, "provider": provider, "base_url": base + "/v1/responses", "api_key": routeKey.Key, "models": in.Models, "position": in.Position})
+	}
 	if err != nil {
 		http.Error(w, err.Error(), status)
 		return
@@ -277,3 +283,123 @@ func (s *Service) subImportChannel(w http.ResponseWriter, r *http.Request) {
 }
 
 func int64Param(v string) int64 { n, _ := strconv.ParseInt(v, 10, 64); return n }
+
+// The existing atomic snapshot API installs the new channel, request-type
+// policy and priority together. Never briefly expose a channel before its
+// compaction exclusion is applied. The caller holds the source lock; both
+// export and final apply must match the same revision.
+func (s *Service) subImportCompactionChannel(ctx context.Context, src controlSource, state map[string]any, in subImportInput, key, provider, base, upstreamKey string) (map[string]any, int, error) {
+	if state["temporary_channel_restore"] != true || state["channel_settings"] != true {
+		return nil, 400, errors.New("来源尚不支持带请求规则的渠道添加，请更新 uni-api")
+	}
+	admin := src
+	if src.ConfigKey != "" {
+		admin.Key = src.ConfigKey
+	}
+	exported, code, err := s.settingsGateway(ctx, admin, "GET", "/v1/channel-settings/export", nil)
+	if err != nil {
+		return nil, code, err
+	}
+	if exported["revision"] != in.Revision {
+		return nil, 409, errors.New("渠道配置已变化，请刷新后重试")
+	}
+	var live retainedLive
+	var definitions map[string]json.RawMessage
+	snapshot := retainedSnapshot{Version: 2, Channels: []retainedChannel{}}
+	if decodeMap(state, &live) != nil || decodeMap(exported["temporary_definitions"], &definitions) != nil || definitions == nil || decodeMap(exported["channel_settings"], &snapshot.Settings) != nil || snapshot.Settings == nil {
+		return nil, 502, errors.New("来源配置快照无效")
+	}
+	snapshot.Rules = append([]retainedRule{}, live.Rules...)
+	// Legacy temporary channels without advanced settings are intentionally
+	// absent from the gateway's definition export. Reuse only a retained snapshot
+	// proven to describe this exact live revision and source credential.
+	var retained map[string]retainedChannel
+	for _, p := range live.Channels {
+		if p.Provider == provider {
+			return nil, 409, errors.New("渠道已存在，请使用编辑")
+		}
+		raw, ok := definitions[p.Provider]
+		if !ok {
+			if retained == nil {
+				record, e := s.control.retainedRecord(ctx, src.ID)
+				if e != nil || record.Revision != in.Revision || record.Target != controlTarget(src) {
+					return nil, 409, errors.New("请先启用并同步保留临时配置，再添加带压缩规则的渠道")
+				}
+				saved, e := s.control.retainedSnapshot(record)
+				if e != nil {
+					return nil, 503, errors.New("已保存的渠道配置暂不可用")
+				}
+				retained = map[string]retainedChannel{}
+				for _, c := range saved.Channels {
+					retained[c.Provider] = c
+				}
+			}
+			c, exists := retained[p.Provider]
+			if !exists || c.KeyID != p.KeyID || c.Key == "" {
+				return nil, 502, errors.New("来源未提供完整渠道定义，未添加")
+			}
+			c.Models = p.Models
+			snapshot.Channels = append(snapshot.Channels, c)
+			continue
+		}
+		var doc struct {
+			Base string `json:"base_url"`
+			API  any    `json:"api"`
+		}
+		if json.Unmarshal(raw, &doc) != nil {
+			return nil, 502, errors.New("来源渠道定义无效")
+		}
+		keys := providerKeys(doc.API)
+		secret := "__full_definition__"
+		if len(keys) > 0 {
+			secret = keys[0]
+		}
+		snapshot.Channels = append(snapshot.Channels, retainedChannel{Provider: p.Provider, KeyID: p.KeyID, Base: doc.Base, Key: secret, Models: p.Models, Definition: raw})
+	}
+	catalog, code, err := fetchSource(ctx, src, "/v1/model-channels", url.Values{"api_key_id": {key}, "endpoint": {"all"}, "stream": {"all"}})
+	if err != nil {
+		return nil, code, err
+	}
+	var channels []struct {
+		Provider string `json:"provider"`
+		Model    string `json:"model"`
+	}
+	if decodeMap(catalog["data"], &channels) != nil {
+		return nil, 502, errors.New("渠道顺序无效")
+	}
+	for _, model := range in.Models {
+		order := []string{}
+		seen := map[string]bool{}
+		for _, c := range channels {
+			if c.Model == model && c.Provider != provider && !seen[c.Provider] {
+				order = append(order, c.Provider)
+				seen[c.Provider] = true
+			}
+		}
+		if in.Position > len(order)+1 {
+			return nil, 400, errors.New("添加位置已失效，请刷新后重试")
+		}
+		order = append(order, "")
+		copy(order[in.Position:], order[in.Position-1:])
+		order[in.Position-1] = provider
+		found := false
+		for i := range snapshot.Rules {
+			r := &snapshot.Rules[i]
+			if r.KeyID == key && r.Model == model {
+				r.Order = order
+				found = true
+				break
+			}
+		}
+		if !found {
+			snapshot.Rules = append(snapshot.Rules, retainedRule{KeyID: key, Model: model, Order: order, Disabled: []string{}})
+		}
+	}
+	excluded := []string{}
+	if !*in.CompactionEnabled {
+		excluded = append(excluded, "compaction")
+	}
+	definition, _ := json.Marshal(map[string]any{"provider": provider, "base_url": base + "/v1/responses", "engine": "gpt", "api": []string{upstreamKey}, "model": in.Models, "exclude_request_types": excluded})
+	snapshot.Channels = append(snapshot.Channels, retainedChannel{Provider: provider, KeyID: key, Base: base + "/v1/responses", Key: upstreamKey, Models: in.Models, Definition: definition})
+	return subGateway(ctx, admin, "POST", "/v1/channel-controls/restore", map[string]any{"revision": in.Revision, "snapshot": snapshot})
+}

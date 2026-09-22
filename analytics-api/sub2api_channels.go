@@ -289,7 +289,7 @@ func (s *Service) subManageChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if in.Action == "replace" {
-		if len(in.Models) == 0 || len(in.Models) > 6 || in.Position < 1 || in.Position > 1025 {
+		if len(in.Models) == 0 || len(in.Models) > len(subModels) || in.Position < 1 || in.Position > 1025 {
 			http.Error(w, "请选择模型和有效位置", 400)
 			return
 		}

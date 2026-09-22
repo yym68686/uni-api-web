@@ -5,6 +5,7 @@ import { Plus, Pencil, Trash2, X } from "lucide-react";
 import { controlRequest } from "./api";
 import { Spinner } from "./ui";
 import type { ConsoleSourcesQuery } from "./consoleSources";
+import { CompactionStatus } from "./SubCompaction";
 import { assessPrice } from "./sub2apiPriceCheck";
 import type { KeyInfo, ModelPrice } from "./types";
 import type { SubAccount, SubTarget } from "./Sub2apiChecks";
@@ -54,6 +55,8 @@ export function Sub2apiImport({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [compactionChoice, setCompactionChoice] = useState<boolean | null>(null);
+  const compactionEnabled = compactionChoice ?? target.compaction?.status === "supported";
   const options = useQuery({
     queryKey: ["sub-import-options", source, key, account.id, target.group_id],
     queryFn: ({ signal }) =>
@@ -105,6 +108,7 @@ export function Sub2apiImport({
     void client.invalidateQueries({ queryKey: ["sub-import-options"] });
   }
   function add() {
+    setCompactionChoice(null);
     setEditing(null);
     setAdding(true);
     setRemoving(null);
@@ -148,6 +152,7 @@ export function Sub2apiImport({
             source_id: item?.source_id || source,
             api_key_id: item?.api_key_id || key,
             ...(action !== "delete" ? { models, position: validPosition } : {}),
+            ...(action === "add" ? { compaction_enabled: compactionEnabled } : {}),
             revision: item?.revision || options.data?.revision,
           }),
         },
@@ -337,6 +342,11 @@ export function Sub2apiImport({
                   ))}
                 </div>
               </fieldset>
+              {!editing && <div className="sub-import-field">
+                <label className="settings-check"><input type="checkbox" checked={compactionEnabled} disabled={busy} onChange={e => setCompactionChoice(e.target.checked)} />开启远程压缩</label>
+                <CompactionStatus target={target} />
+                <small className="muted">关闭后此渠道跳过 compaction 请求，普通请求照常转发。{target.compaction?.model && ` 已验证模型：${target.compaction.model}。`}</small>
+              </div>}
               <label className="sub-import-field">
                 uni-api 来源
                 <select

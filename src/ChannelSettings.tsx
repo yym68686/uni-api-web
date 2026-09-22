@@ -144,6 +144,7 @@ const categories: Record<
   },
 };
 const keyOf = (path: string) => path.split("/").at(-1)!;
+const requestTypes = (value: unknown): string[] => Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : typeof value === "string" ? [value] : [];
 const get = (doc: Document, path: string): unknown =>
   path
     .slice(1)
@@ -984,6 +985,25 @@ function Editor({ row, onClose }: { row: Channel; onClose: () => void }) {
                           </button>
                         }
                       />
+                    ) : ["/only_request_types", "/exclude_request_types"].includes(f.path) ? (
+                      <div>
+                        <label className="settings-check">
+                          <input type="checkbox" checked={requestTypes(value).some(v => v.toLowerCase() === "compaction")}
+                            onChange={e => {
+                              const values = requestTypes(value).filter(v => v.toLowerCase() !== "compaction");
+                              let next = set(draft, f.path, e.target.checked ? [...values, "compaction"] : values);
+                              if (e.target.checked) {
+                                const other = f.path === "/only_request_types" ? "/exclude_request_types" : "/only_request_types";
+                                const previous = requestTypes(get(next, other));
+                                if (previous.some(v => v.toLowerCase() === "compaction")) next = set(next, other, previous.filter(v => v.toLowerCase() !== "compaction"));
+                              }
+                              edit(next);
+                            }} />
+                          {f.path === "/only_request_types" ? "仅允许压缩请求" : "排除压缩请求"}
+                        </label>
+                        <p className="muted">{f.path === "/only_request_types" ? "开启后仅接收 compaction 请求，普通请求跳过此渠道。" : "开启后跳过 compaction 请求，普通请求仍可使用此渠道。"}适用于 /v1/responses/compact 和包含 compaction_trigger 的 Responses 请求。</p>
+                        <details><summary>编辑请求类型列表</summary><JSONField label={label} value={value} onChange={v => edit(set(draft, f.path, v))} /></details>
+                      </div>
                     ) : f.type === "json" ||
                       (value && typeof value === "object") ? (
                       <JSONField

@@ -25,6 +25,8 @@ import { useSubImports } from "./sub2apiImports";
 import { useSubAccounts } from "./sub2apiAccounts";
 import { Sub2apiImport } from "./Sub2apiImport";
 import { useConsoleSources } from "./consoleSources";
+import { CompactionStatus, compactionStatus, compactionLabels } from "./SubCompaction";
+import type { CompactionResult } from "./SubCompaction";
 import { SUB_MODELS, loadSubModels, saveSubModels } from "./sub2apiModels";
 import { SubModelSettings } from "./SubModelSettings";
 import {
@@ -69,6 +71,8 @@ interface Result {
   verdict: string;
 }
 export interface SubTarget {
+  compaction?: CompactionResult;
+  compaction_state?: string;
   quality_check?: import("./ChannelChecks").ChannelCheck & { quality_probe?: Probe };
   history?: QualitySummary;
   models?: {
@@ -651,6 +655,19 @@ function CheckDetails({
               </tr>
             </thead>
             <tbody>
+              <DetailRow label="远程压缩"><CompactionStatus target={target} /></DetailRow>
+              {target.compaction?.model && <DetailRow label="压缩支持模型">{target.compaction.model}</DetailRow>}
+              {target.compaction?.message && <DetailRow label="压缩诊断">{target.compaction.message}</DetailRow>}
+              {!!target.compaction?.attempts.length && <DetailRow label="压缩检测请求">
+                <table className="sub-check-details-table"><thead><tr><th>模型</th><th>结果 / HTTP</th><th>诊断</th><th>实际扣费</th></tr></thead><tbody>
+                  {target.compaction.attempts.map((attempt, i) => <tr key={attempt.id || i}>
+                    <td>{attempt.requested_model}</td>
+                    <td>{compactionLabels[attempt.status as keyof typeof compactionLabels] || "检测失败"} · {attempt.http_status || "—"}</td>
+                    <td>{attempt.message}</td>
+                    <td>{attempt.usage?.actual_cost != null ? `$${attempt.usage.actual_cost}` : "—"}</td>
+                  </tr>)}
+                </tbody></table>
+              </DetailRow>}
               <DetailRow label="请求模型">
                 <span className="mono">
                   {probe?.requested_model || check.model}
@@ -765,6 +782,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
     sort,
     availability,
     priceStatus,
+    compaction,
     quality,
     minQuality,
     platform,
@@ -827,12 +845,13 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
               )) &&
             (!priceStatus ||
               priceFilterStatus(selected ? [selected] : checks, prices.data?.data) === priceStatus) &&
+            (!compaction || compactionStatus(target) === compaction) &&
             (!quality || groupQualityResult(target)?.verdict === quality) &&
             (minQuality === "" ||
               (!!target.history?.successful &&
                 target.history.passed * 100 >= Number(minQuality) * target.history.successful)),
         ),
-    [accounts, search, accountId, availability, priceStatus, prices.data, quality, minQuality, model],
+    [accounts, search, accountId, availability, priceStatus, prices.data, quality, minQuality, model, compaction],
   );
   const rates = [
     ...new Set(
@@ -937,6 +956,10 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
         account_id: account.id,
         group_id: target.group_id,
       })),
+    });
+  const checkCompaction = (selection = eligible) =>
+    mutate("compaction-check", "/v1/sub2api/compaction-checks", {
+      targets: selection.map(({ account, target }) => ({ account_id: account.id, group_id: target.group_id })),
     });
   return (
     <div className="sub2api-page">
@@ -1160,6 +1183,10 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
               )}
               降智检测 · {eligible.length} 个渠道
             </button>
+            <button className="button small" disabled={!eligible.length || !!action || eligible.length > 500}
+              onClick={() => void checkCompaction()}>
+              <ScanLine size={15} /> 压缩检测 · {eligible.length} 个渠道
+            </button>
             <button
               className="button small"
               aria-label="刷新 sub2api 检测"
@@ -1322,6 +1349,12 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
             <ChevronDown size={13} />
           </label>
           <label className="select-field">
+            <select aria-label="是否支持压缩筛选" value={compaction} onChange={e => {setFilters(v => ({...v, compaction: e.target.value})); setPage(0);}}>
+              <option value="">全部压缩能力</option>
+              {Object.entries(compactionLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select><ChevronDown size={13} />
+          </label>
+          <label className="select-field">
             <select
               aria-label="降智筛选"
               value={quality}
@@ -1378,6 +1411,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                     </th>
                     <th><Tip text="按站点请求账单的倍率前输入／输出单价与价格设置比较；单位为美元／百万 token。缺少账单或 token 样本时不判为正常。">单价异常 <CircleHelp size={12} /></Tip></th>
                     <th>Astra 降智</th>
+                    <th>远程压缩</th>
                     <th>回复 / 诊断</th>
                     <th>最近检测</th>
                     <th>操作</th>
@@ -1446,6 +1480,8 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                         <td>
                           <div className="quality-status-stack"><Verdict result={groupQualityResult(t)} history={t.history} /><QualityProbability history={t.history} checkedAt={groupQualityResult(t)?.checked_at} /></div>
                         </td>
+                        <td><div className="quality-status-stack"><CompactionStatus target={t} /><button className="button small ghost" disabled={pending(account.state) || !t.active || !t.key_id || !!action}
+                          aria-label={`检测 ${account.name} ${t.name} 的远程压缩`} onClick={() => void checkCompaction([{account, target:t, checks, selected, astra}])}>重新检测</button></div></td>
                         <td>
                           <CheckDetails
                             key={model || "all"}
