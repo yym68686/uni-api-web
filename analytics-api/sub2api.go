@@ -91,6 +91,10 @@ ALTER TABLE console_sub_targets ADD COLUMN IF NOT EXISTS routing_key_id BIGINT N
 CREATE TABLE IF NOT EXISTS console_sub_models(
  account_id TEXT NOT NULL,group_id BIGINT NOT NULL,model TEXT NOT NULL,state TEXT NOT NULL DEFAULT 'idle',message TEXT NOT NULL DEFAULT '',result JSONB,
  PRIMARY KEY(account_id,group_id,model),FOREIGN KEY(account_id,group_id) REFERENCES console_sub_targets(account_id,group_id) ON DELETE CASCADE);
+CREATE TABLE IF NOT EXISTS console_sub_check_queue(
+ account_id TEXT NOT NULL,group_id BIGINT NOT NULL,kind TEXT NOT NULL,model TEXT NOT NULL DEFAULT '',
+ created_at TIMESTAMPTZ NOT NULL DEFAULT now(),PRIMARY KEY(account_id,group_id,kind,model),
+ FOREIGN KEY(account_id,group_id) REFERENCES console_sub_targets(account_id,group_id) ON DELETE CASCADE);
 INSERT INTO console_sub_models(account_id,group_id,model,state,result)
  SELECT account_id,group_id,'gpt-6-astra','done',result FROM console_sub_targets WHERE result IS NOT NULL ON CONFLICT DO NOTHING;`
 
@@ -126,6 +130,7 @@ type subAccount struct {
 	Base     string             `json:"base"`
 	Email    string             `json:"email"`
 	State    string             `json:"state"`
+	JobKind  string             `json:"job_kind"`
 	Message  string             `json:"message"`
 	SyncedAt int64              `json:"synced_at"`
 	Targets  []subTarget        `json:"targets"`
@@ -143,7 +148,7 @@ func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "共享检测记录暂不可用", 503)
 		return
 	}
-	rows, err := s.control.db.QueryContext(r.Context(), `SELECT id,name,base,email,state,message,synced_at,balance FROM console_sub_accounts WHERE owner=$1 ORDER BY created_at,id`, owner)
+	rows, err := s.control.db.QueryContext(r.Context(), `SELECT id,name,base,email,state,message,synced_at,balance,job_kind FROM console_sub_accounts WHERE owner=$1 ORDER BY created_at,id`, owner)
 	if err != nil {
 		http.Error(w, "账号列表暂不可用", 503)
 		return
@@ -153,7 +158,7 @@ func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var a subAccount
 		var balanceRaw []byte
-		if err = rows.Scan(&a.ID, &a.Name, &a.Base, &a.Email, &a.State, &a.Message, &a.SyncedAt, &balanceRaw); err != nil {
+		if err = rows.Scan(&a.ID, &a.Name, &a.Base, &a.Email, &a.State, &a.Message, &a.SyncedAt, &balanceRaw, &a.JobKind); err != nil {
 			break
 		}
 		if len(balanceRaw) > 0 {
@@ -219,6 +224,11 @@ func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil || rows.Err() != nil {
 		http.Error(w, "检测结果读取失败", 503)
+		return
+	}
+	rows.Close()
+	if err := s.subAttachQueuedChecks(r.Context(), owner, accounts); err != nil {
+		http.Error(w, "排队任务读取失败", 503)
 		return
 	}
 	s.subAttachUsage(r.Context(), owner, accounts)
@@ -420,6 +430,9 @@ func (s *Service) subStop(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		_, err = tx.ExecContext(r.Context(), `UPDATE console_sub_targets SET tool_use_state='interrupted' WHERE account_id=$1 AND tool_use_state IN ('queued','running')`, id)
 	}
+	if err == nil {
+		_, err = tx.ExecContext(r.Context(), `DELETE FROM console_sub_check_queue WHERE account_id=$1`, id)
+	}
 	if err != nil || tx.Commit() != nil {
 		http.Error(w, "停止失败", 503)
 		return
@@ -476,64 +489,43 @@ func (s *Service) subQueueChecksKind(w http.ResponseWriter, r *http.Request, kin
 	defer tx.Rollback()
 	// Consistent account lock order also prevents overlapping batches from deadlocking.
 	sort.Slice(in.Targets, func(i, j int) bool { return in.Targets[i].AccountID < in.Targets[j].AccountID })
-	// One transaction: an invalid/busy/foreign target cannot partially queue a batch.
-	accounts := map[string]bool{}
+	// Lock each account once. Active work keeps its lease and original job kind;
+	// unrelated checks are saved separately until that worker has finished.
+	busy := map[string]bool{}
+	seen := map[string]bool{}
 	for _, target := range in.Targets {
-		if !accounts[target.AccountID] {
-			var id string
-			err = tx.QueryRowContext(r.Context(), `UPDATE console_sub_accounts SET state='queued',job_kind=$3,job_id='',message='',lease_until=NULL WHERE id=$1 AND owner=$2 AND state NOT IN ('queued','running') RETURNING id`, target.AccountID, owner, kind).Scan(&id)
-			if err != nil {
-				http.Error(w, "所选账号不存在或正在检测，请刷新后重试", 409)
+		if _, ok := busy[target.AccountID]; !ok {
+			var state, jobKind string
+			err = tx.QueryRowContext(r.Context(), `SELECT state,job_kind FROM console_sub_accounts WHERE id=$1 AND owner=$2 FOR UPDATE`, target.AccountID, owner).Scan(&state, &jobKind)
+			if err != nil || ((state == "queued" || state == "running") && jobKind == "sync") {
+				http.Error(w, "所选账号不存在或正在同步，请稍后重试", 409)
 				return
 			}
-			accounts[target.AccountID] = true
-			if _, err = tx.ExecContext(r.Context(), `UPDATE console_sub_targets SET tool_use_state='interrupted' WHERE account_id=$1 AND tool_use_state IN ('queued','running')`, target.AccountID); err != nil {
-				http.Error(w, "旧工具检测任务清理失败", 503)
-				return
-			}
-			if _, err = tx.ExecContext(r.Context(), `UPDATE console_sub_targets SET compaction_state='interrupted' WHERE account_id=$1 AND compaction_state IN ('queued','running')`, target.AccountID); err != nil {
-				http.Error(w, "旧压缩任务清理失败", 503)
-				return
-			}
+			busy[target.AccountID] = state == "queued" || state == "running"
 		}
-		result, e := tx.ExecContext(r.Context(), `UPDATE console_sub_targets SET state='queued',message='' WHERE account_id=$1 AND group_id=$2 AND active AND encrypted_key<>''`, target.AccountID, target.GroupID)
-		if e != nil {
-			http.Error(w, "任务创建失败", 503)
-			return
-		}
-		n, _ := result.RowsAffected()
-		if n == 0 {
-			http.Error(w, "分组不可用或尚未创建 key，请先同步", 400)
-			return
-		}
-		models := target.Models
-		if kind == "tool_use" || kind == "check" {
-			if _, e = tx.ExecContext(r.Context(), `UPDATE console_sub_targets SET tool_use_state='queued' WHERE account_id=$1 AND group_id=$2`, target.AccountID, target.GroupID); e != nil {
-				http.Error(w, "工具检测任务创建失败", 503)
-				return
-			}
-		}
-		if kind == "compaction" || kind == "check" {
-			if _, e = tx.ExecContext(r.Context(), `UPDATE console_sub_targets SET compaction_state='queued' WHERE account_id=$1 AND group_id=$2`, target.AccountID, target.GroupID); e != nil {
-				http.Error(w, "压缩任务创建失败", 503)
-				return
-			}
-		}
-		if kind == "compaction" || kind == "tool_use" {
-			continue
-		}
-		if kind == "quality" {
-			models = []string{checkModel}
-		} else if len(models) == 0 {
-			models = subModels
-		}
+		models := subSelectionModels(target, kind)
 		for _, model := range models {
-			if !subModelAllowed(model) {
+			if model != "" && !subModelAllowed(model) {
 				http.Error(w, "不支持的检测模型", 400)
 				return
 			}
-			if _, e = tx.ExecContext(r.Context(), `INSERT INTO console_sub_models(account_id,group_id,model,state) VALUES($1,$2,$3,'queued') ON CONFLICT(account_id,group_id,model) DO UPDATE SET state='queued',message=''`, target.AccountID, target.GroupID, model); e != nil {
-				http.Error(w, "模型任务创建失败", 503)
+			key := target.AccountID + ":" + strconv.FormatInt(target.GroupID, 10) + ":" + model
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			code, e := s.subEnqueueCheck(r.Context(), tx, target, kind, model)
+			if e != nil {
+				http.Error(w, e.Error(), code)
+				return
+			}
+		}
+	}
+	// Start idle accounts immediately; busy accounts retain their current work.
+	for id, active := range busy {
+		if !active {
+			if err = s.subPromoteAccountChecks(r.Context(), tx, id); err != nil {
+				http.Error(w, "任务创建失败", 503)
 				return
 			}
 		}
@@ -593,6 +585,9 @@ func (s *Service) subExpireJobs(ctx context.Context) error {
 
 func (s *Service) subClaimJob(ctx context.Context) (subJob, error) {
 	job := subJob{token: randomID()}
+	if err := s.subPromoteChecks(ctx); err != nil {
+		return job, err
+	}
 	err := s.control.db.QueryRowContext(ctx, `UPDATE console_sub_accounts SET state='running',job_id=$1,lease_until=now()+interval '30 seconds' WHERE id=(SELECT id FROM console_sub_accounts WHERE state='queued' ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING id,base,job_kind,encrypted_auth`, job.token).Scan(&job.id, &job.base, &job.kind, &job.encrypted)
 	return job, err
 }

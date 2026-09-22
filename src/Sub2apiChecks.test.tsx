@@ -509,6 +509,61 @@ it("keeps busy accounts from duplicate checks and removes only after explicit se
   await user.click(screen.getByRole("button", { name: "确认移除" }));
   await waitFor(() => expect(methods).toEqual(["DELETE"]));
 });
+it("isolates row submissions by account, group and check kind, including out-of-order failures", async () => {
+  const data = fixtures();
+  data[0].targets.push({ ...data[0].targets[0], group_id: 2, name: "second-group" });
+  const requests: { path: string; body: any; finish: (response: Response) => void }[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+    if (init?.method === "POST") return new Promise<Response>(finish => {
+      requests.push({ path: input, body: JSON.parse(String(init.body)), finish });
+    });
+    return new Response(JSON.stringify({ data: input.endsWith("/accounts") ? data : [] }));
+  }));
+  const user = userEvent.setup();
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = mount("scoped-checks", client);
+  const compact = await screen.findByRole("button", { name: "检测 one same-group 的远程压缩" });
+  const tools = screen.getByRole("button", { name: "检测 one same-group 的 Tool use" });
+  const sibling = screen.getByRole("button", { name: "检测 one second-group 的远程压缩" });
+  const other = screen.getByRole("button", { name: "检测 two same-group" });
+  await user.click(compact);
+  expect(compact).toBeDisabled();
+  expect(tools).toBeEnabled();
+  expect(sibling).toBeEnabled();
+  expect(other).toBeEnabled();
+  expect(screen.getByRole("button", { name: "检测 one same-group" })).toBeEnabled();
+  await user.click(tools);
+  await user.click(other);
+  expect(requests).toHaveLength(3);
+  expect(tools).toBeDisabled();
+  expect(other).toBeDisabled();
+  await user.click(compact);
+  expect(requests).toHaveLength(3);
+  expect(requests[0].body.targets).toEqual([{ account_id: "one", group_id: 1 }]);
+  expect(requests[1].path).toMatch(/tool-use-checks$/);
+  requests[1].finish(new Response("检测提交失败", { status: 503 }));
+  await waitFor(() => expect(tools).toBeEnabled());
+  expect(compact).toBeDisabled();
+  expect(other).toBeDisabled();
+  data[0].state = "running";
+  data[0].job_kind = "compaction";
+  data[0].targets[0].state = "queued";
+  data[0].targets[0].compaction_state = "running";
+  requests[0].finish(new Response("{}", { status: 202 }));
+  requests[2].finish(new Response("{}", { status: 202 }));
+  await waitFor(() => expect(other).toBeEnabled());
+  expect(compact).toBeDisabled();
+  expect(tools).toBeEnabled();
+  expect(sibling).toBeEnabled();
+  expect(screen.getByRole("button", { name: "检测 one same-group" })).toBeEnabled();
+  await user.click(sibling);
+  expect(requests).toHaveLength(4);
+  expect(requests[3].body.targets).toEqual([{ account_id: "one", group_id: 2 }]);
+  requests[3].finish(new Response("{}", { status: 202 }));
+  await waitFor(() => expect(sibling).toBeEnabled());
+  view.unmount();
+  client.clear();
+});
 it("colors only first-output p50 with exact 5s and 10s boundaries", () => {
   const { container } = render(
     <Tooltip.Provider>

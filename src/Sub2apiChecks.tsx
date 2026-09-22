@@ -118,6 +118,7 @@ export interface SubAccount {
   base: string;
   email: string;
   state: string;
+  job_kind?: string;
   message: string;
   synced_at: number;
   balance?: SubAccountBalance | null;
@@ -828,6 +829,8 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   } | null>(null);
   const [error, setError] = useState("");
   const [action, setAction] = useState("");
+  const checksInFlight = useRef(new Set<string>());
+  const [submittingChecks, setSubmittingChecks] = useState(new Set<string>());
   const [syncSubmitted, setSyncSubmitted] = useState<number | null>(null);
   const syncableAccounts = accounts.filter(
     (account) => !pending(account.state),
@@ -957,33 +960,53 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
       setAction("");
     }
   }
-  const check = (selection: typeof rows) => {
-    if (!modelsToCheck.length) return;
-    // Result filters select groups; settings and the explicit model selector
-    // choose probes, including untested/failed models within that scope.
-    return mutate("check", "/v1/sub2api/checks", {
-      targets: selection.map(({ account, target }) => ({
-        account_id: account.id,
-        group_id: target.group_id,
-        models: modelsToCheck,
-      })),
-    });
+  type CheckKind = "check" | "quality" | "compaction" | "tool-use";
+  const checkKeys = (account: SubAccount, target: SubTarget, kind: CheckKind) =>
+    (kind === "check" ? modelsToCheck : kind === "quality" ? ["gpt-6-astra"] : [kind])
+      .map(item => `${account.id}:${target.group_id}:${item}`);
+  const checkBusy = (account: SubAccount, target: SubTarget, kind: CheckKind) => {
+    if (pending(account.state) && account.job_kind === "sync") return true;
+    if (checkKeys(account, target, kind).some(key => submittingChecks.has(key))) return true;
+    if (kind === "compaction") return pending(target.compaction_state || "");
+    if (kind === "tool-use") return pending(target.tool_use_state || "");
+    const models = kind === "quality" ? ["gpt-6-astra"] : modelsToCheck;
+    return modelChecks(target).some(c => models.includes(c.model) && pending(c.state)) ||
+      (!target.models && pending(target.state) && !pending(target.compaction_state || "") && !pending(target.tool_use_state || ""));
   };
-  const checkQuality = () =>
-    mutate("quality-check", "/v1/sub2api/quality-checks", {
-      targets: eligible.map(({ account, target }) => ({
-        account_id: account.id,
-        group_id: target.group_id,
-      })),
-    });
-  const checkCompaction = (selection = eligible) =>
-    mutate("compaction-check", "/v1/sub2api/compaction-checks", {
-      targets: selection.map(({ account, target }) => ({ account_id: account.id, group_id: target.group_id })),
-    });
-  const checkToolUse = (selection = eligible) =>
-    mutate("tool-use-check", "/v1/sub2api/tool-use-checks", {
-      targets: selection.map(({ account, target }) => ({ account_id: account.id, group_id: target.group_id })),
-    });
+  const canCheck = (account: SubAccount, target: SubTarget, kind: CheckKind) =>
+    target.active && !!target.key_id && target.state !== "error" &&
+    !(kind === "check" && !modelsToCheck.length) && !checkBusy(account, target, kind);
+  async function queueChecks(kind: CheckKind, selection: typeof rows) {
+    const targets = selection.filter(({ account, target }) => canCheck(account, target, kind));
+    const keys = targets.flatMap(({account, target}) => checkKeys(account, target, kind));
+    if (!targets.length || keys.some(key => checksInFlight.current.has(key))) return;
+    keys.forEach(key => checksInFlight.current.add(key));
+    setSubmittingChecks(new Set(checksInFlight.current));
+    setError("");
+    try {
+      await controlRequest(`/v1/sub2api/${kind === "check" ? "checks" : `${kind}-checks`}`, {
+        method: "POST",
+        body: JSON.stringify({ targets: targets.map(({account, target}) => ({
+          account_id: account.id, group_id: target.group_id,
+          ...(kind === "check" ? { models: modelsToCheck } : {}),
+        })) }),
+      });
+      await client.invalidateQueries({ queryKey: ["sub2api"] });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "检测提交失败");
+    } finally {
+      keys.forEach(key => checksInFlight.current.delete(key));
+      setSubmittingChecks(new Set(checksInFlight.current));
+    }
+  }
+  const batchBusy = (kind: CheckKind) => eligible.some(({account, target}) =>
+    checkKeys(account, target, kind).some(key => submittingChecks.has(key)));
+  const batchDisabled = (kind: CheckKind) => eligible.length > 500 ||
+    !eligible.some(({account, target}) => canCheck(account, target, kind));
+  const check = (selection: typeof rows) => queueChecks("check", selection);
+  const checkQuality = () => queueChecks("quality", eligible);
+  const checkCompaction = (selection = eligible) => queueChecks("compaction", selection);
+  const checkToolUse = (selection = eligible) => queueChecks("tool-use", selection);
   return (
     <div className="sub2api-page">
       <section className="data-panel sub-accounts">
@@ -1200,25 +1223,25 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
               <button
                 className="button small"
                 aria-label={`降智检测 · ${eligible.length} 个渠道`}
-                disabled={!eligible.length || !!action || eligible.length > 500}
+                disabled={batchDisabled("quality")}
                 onClick={() => void checkQuality()}
               >
-                {action === "quality-check" ? (
+                {batchBusy("quality") ? (
                   <Spinner small />
                 ) : (
                   <ScanLine size={15} />
                 )}
                 降智检测
               </button>
-              <button className="button small" disabled={!eligible.length || !!action || eligible.length > 500}
+              <button className="button small" disabled={batchDisabled("compaction")}
                 aria-label={`压缩检测 · ${eligible.length} 个渠道`}
                 onClick={() => void checkCompaction()}>
-                {action === "compaction-check" ? <Spinner small /> : <ScanLine size={15} />} 压缩检测
+                {batchBusy("compaction") ? <Spinner small /> : <ScanLine size={15} />} 压缩检测
               </button>
-              <button className="button small" disabled={!eligible.length || !!action || eligible.length > 500}
+              <button className="button small" disabled={batchDisabled("tool-use")}
                 aria-label={`Tool use 检测 · ${eligible.length} 个渠道`}
                 onClick={() => void checkToolUse()} title={toolUseDescription}>
-                {action === "tool-use-check" ? <Spinner small /> : <ScanLine size={15} />} Tool use
+                {batchBusy("tool-use") ? <Spinner small /> : <ScanLine size={15} />} Tool use
               </button>
             </div>
             <button
@@ -1234,7 +1257,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
               <button
                 className="button primary small"
                 aria-label={`${model ? "检测所选模型" : allModelsSelected ? "检测全部模型" : `检测已选 ${detectionModels.length} 个模型`} · ${eligible.length} 个渠道`}
-                disabled={!eligible.length || !!action || eligible.length > 500 || !modelsToCheck.length}
+                disabled={batchDisabled("check")}
                 title={!modelsToCheck.length ? "当前筛选模型未勾选，请在设置中启用" : `检测 ${eligible.length} 个渠道，${modelsToCheck.length} 个模型`}
                 onClick={() => void check(eligible)}
               >
@@ -1525,10 +1548,10 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                         <td>
                           <div className="quality-status-stack"><Verdict result={groupQualityResult(t)} history={t.history} /><QualityProbability history={t.history} checkedAt={groupQualityResult(t)?.checked_at} /></div>
                         </td>
-                        <td><div className="quality-status-stack"><CompactionStatus target={t} /><button className="button small ghost" disabled={pending(account.state) || !t.active || !t.key_id || !!action}
-                          aria-label={`检测 ${account.name} ${t.name} 的远程压缩`} onClick={() => void checkCompaction([{account, target:t, checks, selected, astra}])}>重新检测</button></div></td>
-                        <td><div className="quality-status-stack"><ToolUseStatus target={t} /><button className="button small ghost" disabled={pending(account.state) || !t.active || !t.key_id || !!action}
-                          aria-label={`检测 ${account.name} ${t.name} 的 Tool use`} onClick={() => void checkToolUse([{account, target:t, checks, selected, astra}])}>重新检测</button></div></td>
+                        <td><div className="quality-status-stack"><CompactionStatus target={t} /><button className="button small ghost" disabled={!canCheck(account, t, "compaction")} aria-busy={checkBusy(account, t, "compaction")}
+                          aria-label={`检测 ${account.name} ${t.name} 的远程压缩`} onClick={() => void checkCompaction([{account, target:t, checks, selected, astra}])}>{checkBusy(account, t, "compaction") && <Spinner small />}重新检测</button></div></td>
+                        <td><div className="quality-status-stack"><ToolUseStatus target={t} /><button className="button small ghost" disabled={!canCheck(account, t, "tool-use")} aria-busy={checkBusy(account, t, "tool-use")}
+                          aria-label={`检测 ${account.name} ${t.name} 的 Tool use`} onClick={() => void checkToolUse([{account, target:t, checks, selected, astra}])}>{checkBusy(account, t, "tool-use") && <Spinner small />}重新检测</button></div></td>
                         <td>
                           <CheckDetails
                             key={model || "all"}
@@ -1563,21 +1586,15 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                           <button
                             className="button small"
                             aria-label={`检测 ${account.name} ${t.name}`}
-                            disabled={
-                              !!action ||
-                              !modelsToCheck.length ||
-                              pending(account.state) ||
-                              !t.active ||
-                              !t.key_id ||
-                              t.state === "error"
-                            }
+                            disabled={!canCheck(account, t, "check")}
+                            aria-busy={checkBusy(account, t, "check")}
                             onClick={() =>
                               void check([
                                 { account, target: t, checks, selected, astra },
                               ])
                             }
                           >
-                            <ScanLine size={13} />
+                            {checkBusy(account, t, "check") ? <Spinner small /> : <ScanLine size={13} />}
                             {model ? "检测此模型" : allModelsSelected ? "检测全部模型" : `检测已选 ${detectionModels.length} 个模型`}
                           </button>
                           <button
