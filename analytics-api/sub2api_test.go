@@ -327,7 +327,7 @@ func TestSubAccountLifecycleIsolationAndIdempotency(t *testing.T) {
 	if !service.subWorkOne(context.Background()) {
 		t.Fatal("no queued job")
 	}
-	if created.Load() != 3 || probes.Load() != int32(3*(len(subModels)+2)) || refreshed.Load() != 1 {
+	if created.Load() != 3 || probes.Load() != int32(3*(len(subModels)+3)) || refreshed.Load() != 1 {
 		t.Fatal("wrong initial work", created.Load(), probes.Load(), refreshed.Load())
 	}
 	w = request("GET", "/v1/sub2api/accounts", "", token)
@@ -372,7 +372,7 @@ func TestSubAccountLifecycleIsolationAndIdempotency(t *testing.T) {
 		t.Fatal(w.Body.String())
 	}
 	service.subWorkOne(context.Background())
-	if created.Load() != 3 || probes.Load() != int32(5*(len(subModels)+2)) || refreshed.Load() != 1 {
+	if created.Load() != 3 || probes.Load() != int32(5*(len(subModels)+3)) || refreshed.Load() != 1 {
 		t.Fatal("sync duplicated keys or refreshed a rotated token", created.Load(), probes.Load(), refreshed.Load())
 	}
 	var active bool
@@ -394,19 +394,19 @@ func TestSubAccountLifecycleIsolationAndIdempotency(t *testing.T) {
 		t.Fatal(w.Body.String())
 	}
 	service.subWorkOne(context.Background())
-	if probes.Load() != int32(6*(len(subModels)+2)) {
+	if probes.Load() != int32(6*(len(subModels)+3)) {
 		t.Fatal("filter ignored", probes.Load())
 	}
 	request("POST", "/v1/sub2api/accounts/"+added.ID+"/sync", "{}", token)
 	request("POST", "/v1/sub2api/accounts/"+added.ID+"/stop", "{}", token)
-	if service.subWorkOne(context.Background()) || probes.Load() != int32(6*(len(subModels)+2)) {
+	if service.subWorkOne(context.Background()) || probes.Load() != int32(6*(len(subModels)+3)) {
 		t.Fatal("stopped work executed")
 	}
 	store.db.Exec(`UPDATE console_sub_accounts SET state='running',job_id='crashed',lease_until=now()-interval '1 minute' WHERE id=$1`, added.ID)
 	store.db.Exec(`UPDATE console_sub_targets SET state='running' WHERE account_id=$1 AND group_id=1`, added.ID)
 	service.subWorkOne(context.Background())
 	store.db.QueryRow(`SELECT state FROM console_sub_accounts WHERE id=$1`, added.ID).Scan(&state)
-	if state != "interrupted" || probes.Load() != int32(6*(len(subModels)+2)) {
+	if state != "interrupted" || probes.Load() != int32(6*(len(subModels)+3)) {
 		t.Fatal("interrupted job replayed", state)
 	}
 	if w = request("DELETE", "/v1/sub2api/accounts/"+added.ID, "", token); w.Code != 200 {

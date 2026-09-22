@@ -786,6 +786,54 @@ it("filters compaction across all pages, queues groups independently of the sele
   expect(screen.getByLabelText("是否支持压缩筛选")).toHaveValue("unsupported");
 });
 
+it("filters Tool use across pages, remembers the filter, and queues only selected groups without prescribing a model", async () => {
+  const data = fixtures().slice(0, 1);
+  const template = data[0].targets[0];
+  data[0].targets = Array.from({ length: 27 }, (_, i) => ({ ...template, group_id: i + 1, name: `tool-${i + 1}`,
+    tool_use: { status: "supported", model: "gpt-5.6-sol", checked_at: 10, attempts: [] } }));
+  data[0].targets.push(
+    { ...template, group_id: 28, name: "no-tools", tool_use: { status: "unsupported", model: "gpt-5.6-sol", checked_at: 11,
+      message: "已提供 exec，但响应返回 NO_EXEC", attempts: [{status:"unsupported", text:"NO_EXEC", requested_model:"gpt-5.6-sol", http_status:200, duration_ms:300, ttft_ms:null}] } },
+    { ...template, group_id: 29, name: "tool-error", tool_use: { status: "error", checked_at: 10, attempts: [] } },
+    { ...template, group_id: 30, name: "tool-unknown" },
+  );
+  const writes: {path:string; targets: {group_id:number;models?:string[]}[]}[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+    if (init?.method === "POST") {writes.push({path:new URL(input).pathname,...JSON.parse(String(init.body))});return new Response("{}",{status:202});}
+    return new Response(JSON.stringify({ data: input.endsWith("/accounts") ? data : [] }));
+  }));
+  const user=userEvent.setup();
+  const view=mount("tool-filter");
+  const filter=await screen.findByLabelText("Tool use 是否支持筛选");
+  await user.selectOptions(screen.getByLabelText("检测模型筛选"),"gpt-6-astra");
+  await user.selectOptions(filter,"supported");
+  await screen.findByText("tool-1");
+  expect(screen.queryByText("no-tools")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button",{name:"下一页"}));
+  expect(screen.getByRole("table").querySelectorAll("tbody tr")).toHaveLength(2);
+  await user.click(screen.getByRole("button",{name:"Tool use 检测 · 27 个渠道"}));
+  await waitFor(()=>expect(writes).toHaveLength(1));
+  expect(writes[0].path).toBe("/analytics/v1/sub2api/tool-use-checks");
+  expect(writes[0].targets.map(t=>t.group_id)).toEqual(Array.from({length:27},(_,i)=>i+1));
+  expect(writes[0].targets.every(t=>!t.models)).toBe(true);
+  await user.selectOptions(filter,"unsupported");
+  expect(screen.getByText("no-tools")).toBeVisible();
+  expect(screen.getByRole("button",{name:"上一页"})).toBeDisabled();
+  await user.click(screen.getByRole("button",{name:"查看 one no-tools 的回复与诊断"}));
+  const dialog=within(screen.getByRole("dialog"));
+  expect(dialog.getByText("已提供 exec，但响应返回 NO_EXEC")).toBeVisible();
+  expect(dialog.getByText("NO_EXEC")).toBeVisible();
+  expect(dialog.getAllByText("gpt-5.6-sol").length).toBeGreaterThan(0);
+  await user.click(screen.getByRole("button",{name:"关闭检测详情"}));
+  await user.click(screen.getByRole("button",{name:"检测 one no-tools 的 Tool use"}));
+  await waitFor(()=>expect(writes).toHaveLength(2));
+  expect(writes[1].targets).toEqual([{account_id:"one",group_id:28}]);
+  await user.selectOptions(filter,"error");expect(screen.getByText("tool-error")).toBeVisible();
+  await user.selectOptions(filter,"untested");expect(screen.getByText("tool-unknown")).toBeVisible();
+  view.unmount();mount("tool-filter");
+  expect(screen.getByLabelText("Tool use 是否支持筛选")).toHaveValue("untested");
+});
+
 it("all-models groups channels and probes all supported models despite available/pass filters", async () => {
   const data = fixtures();
   const writes: any[] = [];

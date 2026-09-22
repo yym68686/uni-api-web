@@ -233,6 +233,10 @@ No model service settings or production routing are changed by this application.
 
 ### sub2api 检测
 
+Tool use 检测复用 Codex 的 `additional_tools` / namespace / custom `exec` 探针，通过 `/v1/responses` 请求恰好一次 `text("TOOL_PROBE_OK");` 工具调用。每个分组从最近检测可用的模型中选择一个，只发一次请求；常规模型检测完成后自动执行，也可按当前筛选范围独立批量检测或逐行重测。结果保存到 PostgreSQL，支持“支持工具调用 / 不支持工具调用 / 检测失败 / 未检测”筛选，详情展示检测模型、HTTP 状态、诊断及请求账单。
+
+支持判定同时读取 `response.output_item.done` 和 `response.completed.output` 并去重：成功完成、恰好一个有效 `custom_tool_call`、名称 `functions.exec`（或 `namespace=functions,name=exec` / 未带 namespace 的 `exec`）、非空 `call_id`、输入为指定文本时通过。末尾 output 为空但前面已返回完整工具调用仍通过。`NO_EXEC`、普通文本、错误工具或参数、缺少调用 ID 均未通过；超时、限流、余额不足、鉴权失败和流中断保留为“检测失败”。仅明确拒绝工具协议的 HTTP 400/422 判不支持，其他 HTTP 错误不推断工具兼容性。只保存诊断，不执行返回的代码；单次结果不能证明渠道内部删除了工具，也不保证其他模型或所有工具协议可用。该检测不修改渠道路由及其他检测结果。
+
 账户登录后，侧边栏「sub2api检测」支持添加多个 HTTPS 站点账号。邮箱、密码用于登录，不保存密码；访问令牌、刷新令牌与测试 key 使用现有控制面主密钥加密，按控制台用户隔离。支持 TOTP 二次验证。要求 Turnstile 等人机验证的站点会显示「使用浏览器登录」；一次性安装 [浏览器登录助手](browser-helper/README.md) 后，在控制台填写网址、邮箱和密码，助手在正常浏览器打开原站、填写表单并接回会话，服务端复核邮箱后继续同步。添加和重新登录在模态框内完成，按用户默认授权自动勾选原站登录协议，强制人工验证和 2FA 在原站完成，无需复制 token。密码不保存到扩展存储，验证机制不被修改。登录助手安装时授予 HTTPS 站点访问权限，点击浏览器登录直接进入目标站点。
 
 添加后自动读取有权限的全部分组，为每组创建并复用 `uni-console-check-*` 专用 key（累计额度为站点记账单位 $1），不修改业务 key。重复同步通过专用名称、分组校验与 Idempotency-Key 避免重复创建。可用渠道接口关闭时继续按分组运行。移除账号只删除控制台凭据与结果，上游测试 key 保留，由用户在上游撤销。

@@ -1,0 +1,83 @@
+{
+  "model": "gpt-6-astra",
+  "instructions": "This is a harmless tool protocol compatibility test. Do not run real commands. Produce exactly one tool call. Do not answer with prose.",
+  "input": [
+    {
+      "type": "additional_tools",
+      "role": "developer",
+      "tools": [
+        {
+          "type": "namespace",
+          "name": "functions",
+          "description": "Tools for code execution, local commands, file editing and task reading.",
+          "tools": [
+            {
+              "type": "custom",
+              "name": "exec",
+              "description": "Run JavaScript to compose tool calls. text(value) emits output. The host exposes tools.exec_command, tools.apply_patch and tools.mcp__codex_app__read_thread. For this protocol test, call text(\"TOOL_PROBE_OK\"); only. No actual commands are executed.",
+              "format": {
+                "type": "grammar",
+                "syntax": "lark",
+                "definition": "start: pragma_source | plain_source\npragma_source: PRAGMA_LINE NEWLINE SOURCE\nplain_source: SOURCE\nPRAGMA_LINE: /[ \\t]*\\/\\/ @exec:[^\\r\\n]*/\nNEWLINE: /\\r?\\n/\nSOURCE: /[\\s\\S]+/\n"
+              }
+            },
+            {
+              "type": "function",
+              "name": "probe_json",
+              "description": "Protocol test: echo a marker.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "marker": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "marker"
+                ],
+                "additionalProperties": false
+              },
+              "strict": true
+            }
+          ]
+        },
+        {
+          "type": "namespace",
+          "name": "mcp__cua_repl",
+          "description": "Fallback interface.",
+          "tools": [
+            {
+              "type": "function",
+              "name": "js",
+              "description": "Fallback protocol probe. Use only if the exec tool is unavailable.",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code"
+                ],
+                "additionalProperties": false
+              },
+              "strict": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": "Call functions.exec with the exact JavaScript text(\"TOOL_PROBE_OK\");. If exec is absent from the available callable tools, call mcp__cua_repl.js with code NO_EXEC. Do not choose probe_json."
+    }
+  ],
+  "stream": true,
+  "store": false,
+  "reasoning": {
+    "effort": "low"
+  },
+  "parallel_tool_calls": false,
+  "tool_choice": "auto"
+}

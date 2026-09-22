@@ -15,13 +15,15 @@ import (
 	"time"
 )
 
-type subCompaction struct {
+type subCapabilityResult struct {
 	Status    string     `json:"status"`
 	Model     string     `json:"model,omitempty"`
 	CheckedAt int64      `json:"checked_at"`
 	Message   string     `json:"message,omitempty"`
 	Attempts  []subProbe `json:"attempts"`
 }
+
+type subCompaction = subCapabilityResult
 
 func compactionBody(model string) map[string]any {
 	session, installation, thread, turn := randomID(), randomID(), randomID(), randomID()
@@ -225,7 +227,18 @@ func (s *Service) subCompactionCheck(w http.ResponseWriter, r *http.Request) {
 // Account leases and the same two workers as ordinary checks bound concurrency.
 // A standalone compaction job never overwrites say-test/quality results.
 func (s *Service) subTestCompactions(ctx context.Context, id, base, job string) error {
-	rows, err := s.control.db.QueryContext(ctx, `SELECT group_id,encrypted_key,remote_key_id,COALESCE((SELECT jsonb_agg(jsonb_build_object('model',m.model,'state',m.state,'result',m.result)) FROM console_sub_models m WHERE m.account_id=t.account_id AND m.group_id=t.group_id),'[]'::jsonb) FROM console_sub_targets t WHERE account_id=$1 AND active AND compaction_state='queued'`, id)
+	return s.subTestCapability(ctx, id, base, job, "compaction")
+}
+
+func (s *Service) subTestCapability(ctx context.Context, id, base, job, kind string) error {
+	// SQL identifiers come only from this allowlist, never request data.
+	column, label, probeFn := "compaction", "压缩", subProbeCompaction
+	if kind == "tool_use" {
+		column, label, probeFn = "tool_use", "Tool use", subProbeToolUse
+	} else if kind != "compaction" {
+		return errors.New("无效能力检测类型")
+	}
+	rows, err := s.control.db.QueryContext(ctx, `SELECT group_id,encrypted_key,remote_key_id,COALESCE((SELECT jsonb_agg(jsonb_build_object('model',m.model,'state',m.state,'result',m.result)) FROM console_sub_models m WHERE m.account_id=t.account_id AND m.group_id=t.group_id),'[]'::jsonb) FROM console_sub_targets t WHERE account_id=$1 AND active AND `+column+`_state='queued'`, id)
 	if err != nil {
 		return err
 	}
@@ -258,7 +271,7 @@ func (s *Service) subTestCompactions(ctx context.Context, id, base, job string) 
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		res, e := s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET compaction_state='running' WHERE account_id=$1 AND group_id=$2 AND compaction_state='queued' AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$3 AND state='running')`, id, t.group, job)
+		res, e := s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET `+column+`_state='running' WHERE account_id=$1 AND group_id=$2 AND `+column+`_state='queued' AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$3 AND state='running')`, id, t.group, job)
 		if e != nil {
 			return e
 		}
@@ -268,17 +281,20 @@ func (s *Service) subTestCompactions(ctx context.Context, id, base, job string) 
 		}
 		key, e := s.control.decrypt(t.key)
 		if e != nil {
-			return errors.New("压缩检测 key 无法解密")
+			return errors.New(label + " 检测 key 无法解密")
 		}
 		result := subCompaction{Status: "unsupported", Attempts: []subProbe{}}
 		models := subCompactionModels(t.models)
+		if kind == "tool_use" && len(models) > 1 {
+			models = models[:1]
+		}
 		if len(models) == 0 {
 			result.Status = "error"
 			result.Message = "没有已检测可用的模型，请先运行模型检测"
 		}
 		for _, model := range models {
 			probeCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
-			probe := subProbeCompaction(probeCtx, subHTTP, base, key, model)
+			probe := probeFn(probeCtx, subHTTP, base, key, model)
 			cancel()
 			usageResult := subResult{Model: model, Availability: probe}
 			if s.subQueueUsage(ctx, id, t.group, t.keyID, &usageResult) == nil {
@@ -287,6 +303,12 @@ func (s *Service) subTestCompactions(ctx context.Context, id, base, job string) 
 			result.Attempts = append(result.Attempts, probe)
 			if ctx.Err() != nil {
 				return ctx.Err()
+			}
+			if kind == "tool_use" {
+				result.Status = probe.Status
+				result.Model = model
+				result.Message = probe.Message
+				break
 			}
 			if probe.Status == "supported" {
 				result.Status = "supported"
@@ -306,7 +328,7 @@ func (s *Service) subTestCompactions(ctx context.Context, id, base, job string) 
 			}
 		}
 		result.CheckedAt = time.Now().Unix()
-		_, e = s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET compaction_state='done',compaction=$4,state=CASE WHEN state IN ('queued','running') THEN 'done' ELSE state END WHERE account_id=$1 AND group_id=$2 AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$3 AND state='running')`, id, t.group, job, mustJSON(result))
+		_, e = s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET `+column+`_state='done',`+column+`=$4,state=CASE WHEN state IN ('queued','running') THEN 'done' ELSE state END WHERE account_id=$1 AND group_id=$2 AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$3 AND state='running')`, id, t.group, job, mustJSON(result))
 		if e != nil {
 			return e
 		}

@@ -84,6 +84,8 @@ CREATE TABLE IF NOT EXISTS console_sub_targets(
 ALTER TABLE console_sub_targets ADD COLUMN IF NOT EXISTS billing JSONB;
 ALTER TABLE console_sub_targets ADD COLUMN IF NOT EXISTS compaction JSONB;
 ALTER TABLE console_sub_targets ADD COLUMN IF NOT EXISTS compaction_state TEXT NOT NULL DEFAULT 'idle';
+ALTER TABLE console_sub_targets ADD COLUMN IF NOT EXISTS tool_use JSONB;
+ALTER TABLE console_sub_targets ADD COLUMN IF NOT EXISTS tool_use_state TEXT NOT NULL DEFAULT 'idle';
 ALTER TABLE console_sub_targets ADD COLUMN IF NOT EXISTS encrypted_routing_key TEXT NOT NULL DEFAULT '';
 ALTER TABLE console_sub_targets ADD COLUMN IF NOT EXISTS routing_key_id BIGINT NOT NULL DEFAULT 0;
 CREATE TABLE IF NOT EXISTS console_sub_models(
@@ -99,22 +101,24 @@ type subModelResult struct {
 	Result  *subResult `json:"result"`
 }
 type subTarget struct {
-	Compaction      *subCompaction   `json:"compaction,omitempty"`
-	CompactionState string           `json:"compaction_state"`
-	QualityCheck    *ChannelCheck    `json:"quality_check,omitempty"`
-	History         qualitySummary   `json:"history"`
-	Models          []subModelResult `json:"models"`
-	GroupID         int64            `json:"group_id"`
-	Name            string           `json:"name"`
-	Platform        string           `json:"platform"`
-	Channel         string           `json:"channel"`
-	Rate            float64          `json:"rate"`
-	KeyID           int64            `json:"key_id"`
-	Active          bool             `json:"active"`
-	State           string           `json:"state"`
-	Message         string           `json:"message"`
-	Result          *subResult       `json:"result"`
-	Billing         *subBilling      `json:"billing"`
+	ToolUse         *subCapabilityResult `json:"tool_use,omitempty"`
+	ToolUseState    string               `json:"tool_use_state"`
+	Compaction      *subCompaction       `json:"compaction,omitempty"`
+	CompactionState string               `json:"compaction_state"`
+	QualityCheck    *ChannelCheck        `json:"quality_check,omitempty"`
+	History         qualitySummary       `json:"history"`
+	Models          []subModelResult     `json:"models"`
+	GroupID         int64                `json:"group_id"`
+	Name            string               `json:"name"`
+	Platform        string               `json:"platform"`
+	Channel         string               `json:"channel"`
+	Rate            float64              `json:"rate"`
+	KeyID           int64                `json:"key_id"`
+	Active          bool                 `json:"active"`
+	State           string               `json:"state"`
+	Message         string               `json:"message"`
+	Result          *subResult           `json:"result"`
+	Billing         *subBilling          `json:"billing"`
 }
 type subAccount struct {
 	ID       string             `json:"id"`
@@ -169,7 +173,7 @@ func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "账号列表读取失败", 503)
 		return
 	}
-	rows, err = s.control.db.QueryContext(r.Context(), `SELECT t.account_id,t.group_id,t.name,t.platform,t.channel,t.rate,t.remote_key_id,t.active,t.state,t.message,t.result,t.billing,COALESCE((SELECT jsonb_agg(jsonb_build_object('model',m.model,'state',m.state,'message',m.message,'result',m.result) ORDER BY m.model) FROM console_sub_models m WHERE m.account_id=t.account_id AND m.group_id=t.group_id),'[]'::jsonb),COALESCE(h.total,0),COALESCE(h.successful,0),COALESCE(h.passed,0),t.compaction,t.compaction_state FROM console_sub_targets t JOIN console_sub_accounts a ON a.id=t.account_id LEFT JOIN console_quality_totals h ON h.account_id=t.account_id AND h.group_id=t.group_id WHERE a.owner=$1 ORDER BY t.group_id`, owner)
+	rows, err = s.control.db.QueryContext(r.Context(), `SELECT t.account_id,t.group_id,t.name,t.platform,t.channel,t.rate,t.remote_key_id,t.active,t.state,t.message,t.result,t.billing,COALESCE((SELECT jsonb_agg(jsonb_build_object('model',m.model,'state',m.state,'message',m.message,'result',m.result) ORDER BY m.model) FROM console_sub_models m WHERE m.account_id=t.account_id AND m.group_id=t.group_id),'[]'::jsonb),COALESCE(h.total,0),COALESCE(h.successful,0),COALESCE(h.passed,0),t.compaction,t.compaction_state,t.tool_use,t.tool_use_state FROM console_sub_targets t JOIN console_sub_accounts a ON a.id=t.account_id LEFT JOIN console_quality_totals h ON h.account_id=t.account_id AND h.group_id=t.group_id WHERE a.owner=$1 ORDER BY t.group_id`, owner)
 	if err != nil {
 		http.Error(w, "检测结果暂不可用", 503)
 		return
@@ -178,9 +182,14 @@ func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var id string
 		var t subTarget
-		var raw, billingRaw, modelsRaw, compactionRaw []byte
-		if err = rows.Scan(&id, &t.GroupID, &t.Name, &t.Platform, &t.Channel, &t.Rate, &t.KeyID, &t.Active, &t.State, &t.Message, &raw, &billingRaw, &modelsRaw, &t.History.Total, &t.History.Successful, &t.History.Passed, &compactionRaw, &t.CompactionState); err != nil {
+		var raw, billingRaw, modelsRaw, compactionRaw, toolUseRaw []byte
+		if err = rows.Scan(&id, &t.GroupID, &t.Name, &t.Platform, &t.Channel, &t.Rate, &t.KeyID, &t.Active, &t.State, &t.Message, &raw, &billingRaw, &modelsRaw, &t.History.Total, &t.History.Successful, &t.History.Passed, &compactionRaw, &t.CompactionState, &toolUseRaw, &t.ToolUseState); err != nil {
 			break
+		}
+		if len(toolUseRaw) > 0 {
+			if err = json.Unmarshal(toolUseRaw, &t.ToolUse); err != nil {
+				break
+			}
 		}
 		if len(compactionRaw) > 0 {
 			if err = json.Unmarshal(compactionRaw, &t.Compaction); err != nil {
@@ -408,6 +417,9 @@ func (s *Service) subStop(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		_, err = tx.ExecContext(r.Context(), `UPDATE console_sub_targets SET compaction_state='interrupted' WHERE account_id=$1 AND compaction_state IN ('queued','running')`, id)
 	}
+	if err == nil {
+		_, err = tx.ExecContext(r.Context(), `UPDATE console_sub_targets SET tool_use_state='interrupted' WHERE account_id=$1 AND tool_use_state IN ('queued','running')`, id)
+	}
 	if err != nil || tx.Commit() != nil {
 		http.Error(w, "停止失败", 503)
 		return
@@ -475,6 +487,10 @@ func (s *Service) subQueueChecksKind(w http.ResponseWriter, r *http.Request, kin
 				return
 			}
 			accounts[target.AccountID] = true
+			if _, err = tx.ExecContext(r.Context(), `UPDATE console_sub_targets SET tool_use_state='interrupted' WHERE account_id=$1 AND tool_use_state IN ('queued','running')`, target.AccountID); err != nil {
+				http.Error(w, "旧工具检测任务清理失败", 503)
+				return
+			}
 			if _, err = tx.ExecContext(r.Context(), `UPDATE console_sub_targets SET compaction_state='interrupted' WHERE account_id=$1 AND compaction_state IN ('queued','running')`, target.AccountID); err != nil {
 				http.Error(w, "旧压缩任务清理失败", 503)
 				return
@@ -491,13 +507,19 @@ func (s *Service) subQueueChecksKind(w http.ResponseWriter, r *http.Request, kin
 			return
 		}
 		models := target.Models
-		if kind != "quality" {
+		if kind == "tool_use" || kind == "check" {
+			if _, e = tx.ExecContext(r.Context(), `UPDATE console_sub_targets SET tool_use_state='queued' WHERE account_id=$1 AND group_id=$2`, target.AccountID, target.GroupID); e != nil {
+				http.Error(w, "工具检测任务创建失败", 503)
+				return
+			}
+		}
+		if kind == "compaction" || kind == "check" {
 			if _, e = tx.ExecContext(r.Context(), `UPDATE console_sub_targets SET compaction_state='queued' WHERE account_id=$1 AND group_id=$2`, target.AccountID, target.GroupID); e != nil {
 				http.Error(w, "压缩任务创建失败", 503)
 				return
 			}
 		}
-		if kind == "compaction" {
+		if kind == "compaction" || kind == "tool_use" {
 			continue
 		}
 		if kind == "quality" {
@@ -563,6 +585,9 @@ func (s *Service) subExpireJobs(ctx context.Context) error {
 		return err
 	}
 	_, err = s.control.db.ExecContext(ctx, `UPDATE console_sub_targets t SET compaction_state='interrupted' WHERE compaction_state IN ('queued','running') AND NOT EXISTS(SELECT 1 FROM console_sub_accounts a WHERE a.id=t.account_id AND a.state IN ('queued','running'))`)
+	if err == nil {
+		_, err = s.control.db.ExecContext(ctx, `UPDATE console_sub_targets t SET tool_use_state='interrupted' WHERE tool_use_state IN ('queued','running') AND NOT EXISTS(SELECT 1 FROM console_sub_accounts a WHERE a.id=t.account_id AND a.state IN ('queued','running'))`)
+	}
 	return err
 }
 
@@ -616,20 +641,31 @@ func (s *Service) subRunJob(parent context.Context, claimed subJob) {
 	}()
 	defer func() { cancel(); <-heartbeatDone }()
 	if kind == "sync" {
-		_, err = s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET compaction_state='interrupted' WHERE account_id=$1 AND compaction_state IN ('queued','running')`, id)
+		_, err = s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET tool_use_state='interrupted' WHERE account_id=$1 AND tool_use_state IN ('queued','running')`, id)
+		if err == nil {
+			_, err = s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET compaction_state='interrupted' WHERE account_id=$1 AND compaction_state IN ('queued','running')`, id)
+		}
 		if err == nil {
 			err = s.subSynchronize(ctx, id, base, job, encrypted)
 		}
 	}
-	if err == nil && ctx.Err() == nil && kind != "compaction" {
+	if err == nil && ctx.Err() == nil && (kind == "check" || kind == "sync" || kind == "quality") {
 		err = s.subTestTargets(ctx, id, base, job, kind == "quality")
 	}
-	if err == nil && ctx.Err() == nil && kind != "quality" {
+	if err == nil && ctx.Err() == nil && (kind == "check" || kind == "sync" || kind == "compaction") {
 		if kind == "sync" {
 			_, err = s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET compaction_state='queued' WHERE account_id=$1 AND active AND state='done'`, id)
 		}
 		if err == nil {
 			err = s.subTestCompactions(ctx, id, base, job)
+		}
+	}
+	if err == nil && ctx.Err() == nil && (kind == "check" || kind == "sync" || kind == "tool_use") {
+		if kind == "sync" {
+			_, err = s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET tool_use_state='queued' WHERE account_id=$1 AND active AND state='done'`, id)
+		}
+		if err == nil {
+			err = s.subTestCapability(ctx, id, base, job, "tool_use")
 		}
 	}
 	finishCtx, finishCancel := context.WithTimeout(context.Background(), 5*time.Second)

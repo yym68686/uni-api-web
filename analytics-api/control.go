@@ -343,6 +343,7 @@ func (s *Service) controlHandler() http.Handler {
 	mux.HandleFunc("POST /v1/sub2api/checks", s.subCheck)
 	mux.HandleFunc("POST /v1/sub2api/quality-checks", s.subQualityCheck)
 	mux.HandleFunc("POST /v1/sub2api/compaction-checks", s.subCompactionCheck)
+	mux.HandleFunc("POST /v1/sub2api/tool-use-checks", s.subToolUseCheck)
 	mux.HandleFunc("GET /v1/sub2api/channel-options", s.subChannelOptions)
 	mux.HandleFunc("POST /v1/sub2api/channels", s.subImportChannel)
 	mux.HandleFunc("GET /v1/sub2api/channels", s.subInstalledChannels)

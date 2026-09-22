@@ -27,6 +27,8 @@ import { Sub2apiImport } from "./Sub2apiImport";
 import { useConsoleSources } from "./consoleSources";
 import { CompactionStatus, compactionStatus, compactionLabels } from "./SubCompaction";
 import type { CompactionResult } from "./SubCompaction";
+import { ToolUseStatus, toolUseStatus, toolUseLabels, toolUseDescription } from "./SubToolUse";
+import type { ToolUseResult } from "./SubToolUse";
 import { SUB_MODELS, loadSubModels, saveSubModels } from "./sub2apiModels";
 import { SubModelSettings } from "./SubModelSettings";
 import {
@@ -71,6 +73,8 @@ interface Result {
   verdict: string;
 }
 export interface SubTarget {
+  tool_use?: ToolUseResult;
+  tool_use_state?: string;
   compaction?: CompactionResult;
   compaction_state?: string;
   quality_check?: import("./ChannelChecks").ChannelCheck & { quality_probe?: Probe };
@@ -655,6 +659,19 @@ function CheckDetails({
               </tr>
             </thead>
             <tbody>
+              <DetailRow label="Tool use"><ToolUseStatus target={target} /></DetailRow>
+              {target.tool_use?.model && <DetailRow label="工具检测模型">{target.tool_use.model}</DetailRow>}
+              {target.tool_use?.message && <DetailRow label="工具检测诊断">{target.tool_use.message}</DetailRow>}
+              {target.tool_use?.attempts.map((attempt, i) => <DetailRow key={attempt.id || i} label="工具检测请求">
+                <table className="sub-check-details-table"><tbody>
+                  <tr><th>请求模型</th><td>{attempt.requested_model}</td></tr>
+                  <tr><th>返回模型</th><td>{attempt.response_model || "—"}</td></tr>
+                  <tr><th>HTTP 状态</th><td>{attempt.http_status || "—"}</td></tr>
+                  <tr><th>工具调用结果</th><td>{attempt.text || attempt.message || "—"}</td></tr>
+                  <tr><th>耗时</th><td>{latency(attempt.duration_ms)}</td></tr>
+                  <UsageDetailRows probe={attempt} label="工具检测" prices={prices} model={attempt.requested_model || target.tool_use?.model || ""} />
+                </tbody></table>
+              </DetailRow>)}
               <DetailRow label="远程压缩"><CompactionStatus target={target} /></DetailRow>
               {target.compaction?.model && <DetailRow label="压缩支持模型">{target.compaction.model}</DetailRow>}
               {target.compaction?.message && <DetailRow label="压缩诊断">{target.compaction.message}</DetailRow>}
@@ -783,6 +800,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
     availability,
     priceStatus,
     compaction,
+    toolUse,
     quality,
     minQuality,
     platform,
@@ -846,12 +864,13 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
             (!priceStatus ||
               priceFilterStatus(selected ? [selected] : checks, prices.data?.data) === priceStatus) &&
             (!compaction || compactionStatus(target) === compaction) &&
+            (!toolUse || toolUseStatus(target) === toolUse) &&
             (!quality || groupQualityResult(target)?.verdict === quality) &&
             (minQuality === "" ||
               (!!target.history?.successful &&
                 target.history.passed * 100 >= Number(minQuality) * target.history.successful)),
         ),
-    [accounts, search, accountId, availability, priceStatus, prices.data, quality, minQuality, model, compaction],
+    [accounts, search, accountId, availability, priceStatus, prices.data, quality, minQuality, model, compaction, toolUse],
   );
   const rates = [
     ...new Set(
@@ -959,6 +978,10 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
     });
   const checkCompaction = (selection = eligible) =>
     mutate("compaction-check", "/v1/sub2api/compaction-checks", {
+      targets: selection.map(({ account, target }) => ({ account_id: account.id, group_id: target.group_id })),
+    });
+  const checkToolUse = (selection = eligible) =>
+    mutate("tool-use-check", "/v1/sub2api/tool-use-checks", {
       targets: selection.map(({ account, target }) => ({ account_id: account.id, group_id: target.group_id })),
     });
   return (
@@ -1187,6 +1210,10 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
               onClick={() => void checkCompaction()}>
               <ScanLine size={15} /> 压缩检测 · {eligible.length} 个渠道
             </button>
+            <button className="button small" disabled={!eligible.length || !!action || eligible.length > 500}
+              onClick={() => void checkToolUse()} title={toolUseDescription}>
+              <ScanLine size={15} /> Tool use 检测 · {eligible.length} 个渠道
+            </button>
             <button
               className="button small"
               aria-label="刷新 sub2api 检测"
@@ -1355,6 +1382,12 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
             </select><ChevronDown size={13} />
           </label>
           <label className="select-field">
+            <select aria-label="Tool use 是否支持筛选" value={toolUse} onChange={e => {setFilters(v => ({...v, toolUse: e.target.value})); setPage(0);}}>
+              <option value="">全部 Tool use 能力</option>
+              {Object.entries(toolUseLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select><ChevronDown size={13} />
+          </label>
+          <label className="select-field">
             <select
               aria-label="降智筛选"
               value={quality}
@@ -1412,6 +1445,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                     <th><Tip text="按站点请求账单的倍率前输入／输出单价与价格设置比较；单位为美元／百万 token。缺少账单或 token 样本时不判为正常。">单价异常 <CircleHelp size={12} /></Tip></th>
                     <th>Astra 降智</th>
                     <th>远程压缩</th>
+                    <th><Tip text={toolUseDescription}>Tool use <CircleHelp size={12} /></Tip></th>
                     <th>回复 / 诊断</th>
                     <th>最近检测</th>
                     <th>操作</th>
@@ -1482,6 +1516,8 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                         </td>
                         <td><div className="quality-status-stack"><CompactionStatus target={t} /><button className="button small ghost" disabled={pending(account.state) || !t.active || !t.key_id || !!action}
                           aria-label={`检测 ${account.name} ${t.name} 的远程压缩`} onClick={() => void checkCompaction([{account, target:t, checks, selected, astra}])}>重新检测</button></div></td>
+                        <td><div className="quality-status-stack"><ToolUseStatus target={t} /><button className="button small ghost" disabled={pending(account.state) || !t.active || !t.key_id || !!action}
+                          aria-label={`检测 ${account.name} ${t.name} 的 Tool use`} onClick={() => void checkToolUse([{account, target:t, checks, selected, astra}])}>重新检测</button></div></td>
                         <td>
                           <CheckDetails
                             key={model || "all"}
