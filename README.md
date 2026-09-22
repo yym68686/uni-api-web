@@ -149,6 +149,13 @@ With Fugue's TCP readiness and `maxUnavailable=0`, the old replica continues
 serving login, control and analytics until the replacement is ready. This traffic
 gate does not delay background workers or optional query warming.
 
+`ANALYTICS_DB_MEMORY_LIMIT_MB` configures DuckDB's budget in MiB (default 1024,
+minimum 64). Keep container memory above this budget for Go workers and downloads.
+The former fixed 512MB budget exhausted memory while committing a production
+checkpoint; replay of that same checkpoint succeeds with 1GiB. Database failures
+are logged by safe driver category, including commit-time buffer exhaustion,
+without SQL, request contents or credentials.
+
 `/healthz` reports process health once listening; `/readyz` reports complete
 historical analytics readiness. In immediate-listen/development mode, incomplete
 analytics returns 503 with `code: analytics_initializing` and `Retry-After: 5`.

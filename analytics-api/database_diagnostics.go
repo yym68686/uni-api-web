@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	duckdb "github.com/duckdb/duckdb-go/v2"
 )
@@ -13,6 +14,10 @@ func databaseErrorClass(err error) string {
 	var dbErr *duckdb.Error
 	if !errors.As(err, &dbErr) {
 		return ""
+	}
+	// A commit can wrap buffer exhaustion as TransactionContext rather than OOM.
+	if dbErr.Type == duckdb.ErrorTypeTransaction && strings.Contains(dbErr.Msg, "failed to pin block of size") {
+		return "database_out_of_memory"
 	}
 	switch dbErr.Type {
 	case duckdb.ErrorTypeOutOfMemory:

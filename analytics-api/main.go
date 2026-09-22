@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -28,6 +29,11 @@ func main() {
 	cfg.InsecureCookie = env("INSECURE_COOKIE", "false") == "true"
 	cfg.AdminUsername, cfg.AdminPassword = env("ADMIN_USERNAME", ""), env("ADMIN_PASSWORD", "")
 	cfg.RequireInitialImport = env("REQUIRE_INITIAL_IMPORT", "false") == "true"
+	var memoryErr error
+	cfg.DatabaseMemoryLimitMB, memoryErr = strconv.Atoi(env("ANALYTICS_DB_MEMORY_LIMIT_MB", "1024"))
+	if memoryErr != nil || cfg.DatabaseMemoryLimitMB < 64 {
+		log.Fatal("ANALYTICS_DB_MEMORY_LIMIT_MB must be an integer of at least 64")
+	}
 	if cfg.RequireInitialImport && (cfg.StateBucket == "" || cfg.StateEndpoint == "" || cfg.S3Bucket == "" || cfg.S3Endpoint == "") {
 		log.Fatal("rebuildable analytics requires configured fact and state storage")
 	}

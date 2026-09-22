@@ -39,7 +39,15 @@ func OpenEngine(path string, cfg Config) (*Engine, error) {
 	db.SetMaxOpenConns(4)
 	db.SetMaxIdleConns(4)
 	e := &Engine{DB: db, cfg: cfg, Location: location}
-	if _, err = db.Exec(`SET memory_limit='512MB'; SET threads=2;
+	memoryMB := cfg.DatabaseMemoryLimitMB
+	if memoryMB == 0 {
+		memoryMB = 512
+	} // Small embedded/test engines retain their existing default.
+	if memoryMB < 64 {
+		db.Close()
+		return nil, errors.New("database memory limit must be at least 64 MiB")
+	}
+	if _, err = db.Exec(fmt.Sprintf("SET memory_limit='%dMiB';", memoryMB) + ` SET threads=2;
  CREATE TABLE IF NOT EXISTS facts(event_id VARCHAR PRIMARY KEY,kind VARCHAR NOT NULL,source_id VARCHAR DEFAULT 'primary',instance_id VARCHAR,request_id VARCHAR,attempt_id VARCHAR,at_ms BIGINT,started_ms BIGINT,key_id VARCHAR,provider VARCHAR,model VARCHAR,upstream_model VARCHAR,endpoint VARCHAR,stream BOOLEAN,outcome VARCHAR,status INTEGER,duration_ms DOUBLE,dispatch_ms DOUBLE,first_output_ms DOUBLE,input_tokens BIGINT,output_tokens BIGINT,cache_read_tokens BIGINT,cache_write_tokens BIGINT,cache_write_1h_tokens BIGINT,actual_cost_usd DOUBLE);
  CREATE TABLE IF NOT EXISTS imported_objects(object_key VARCHAR PRIMARY KEY,etag VARCHAR,imported_at TIMESTAMP DEFAULT current_timestamp,events BIGINT);
  CREATE TABLE IF NOT EXISTS prices(model VARCHAR PRIMARY KEY,input DOUBLE,output DOUBLE,cache_read DOUBLE,cache_write DOUBLE,cache_write_1h DOUBLE,source VARCHAR,verified BOOLEAN,effective_at TIMESTAMP);
