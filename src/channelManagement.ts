@@ -60,6 +60,7 @@ export function managementRows(
   channels: ManagedChannel[],
   installed: InstalledChannel[],
   model: string,
+  accountFilter = "",
 ): ManagementRow[] {
   const row = (
     account: SubAccount,
@@ -112,13 +113,15 @@ export function managementRows(
         target: account?.targets.find((t) => t.group_id === member.group_id),
       };
     });
+    const visibleBindings =
+      accountFilter && accountFilter !== UNASSIGNED_ACCOUNT
+        ? bindings.filter((b) => b.account?.id === accountFilter)
+        : bindings;
     const preferred =
-      bindings.find(
+      visibleBindings.find(
         (b) => b.target && (!model || b.member.models.includes(model)),
-      ) ||
-      bindings.find((b) => b.target) ||
-      bindings[0];
-    const { account, target: bound } = preferred;
+      ) || visibleBindings.find((b) => b.target);
+    const { account, target: bound } = preferred || {};
     const displayAccount = account || {
       id: "",
       name:
@@ -157,7 +160,7 @@ export function managementRows(
       item,
     );
     entry.checks = item.models.map((name) => {
-      const candidates = bindings
+      const candidates = visibleBindings
         .filter((b) => b.member.models.includes(name))
         .flatMap((b) =>
           b.target

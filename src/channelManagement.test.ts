@@ -102,3 +102,55 @@ it("counts a caller key separately in each source and marks failed or pending so
   ).toEqual({ count: 2, partial: true });
   expect(managedRouteCount(group, ["fugue", "do"], [{}, {}])).toBeNull();
 });
+
+it("uses the selected account's probe target when grouped sources have different account bindings", () => {
+  const accounts = ["a", "b"].map((id) => ({
+    id,
+    name: id,
+    base: `https://${id}.test`,
+    email: "",
+    state: "idle",
+    message: "",
+    synced_at: 0,
+    targets: [
+      {
+        group_id: 1,
+        name: id,
+        channel: "native",
+        platform: "openai",
+        rate: 1,
+        key_id: 1,
+        active: true,
+        state: "idle",
+        message: "",
+        result: null,
+      },
+    ],
+  }));
+  const channels = [
+    channel({ account_id: "a", group_id: 1, account_ids: ["a"] }),
+    channel({
+      source_id: "do",
+      account_id: "b",
+      group_id: 1,
+      account_ids: ["b"],
+    }),
+  ];
+  const configured = managementRows(
+    accounts,
+    channels,
+    [],
+    "original",
+    "b",
+  ).find((r) => r.configured)!;
+  expect(configured.account.id).toBe("b");
+  expect(configured.target.group_id).toBe(1);
+  expect(configured.configured?.members).toHaveLength(2);
+  // Matching a site by URL alone cannot borrow the other account's probe target.
+  channels[1] = { ...channels[1], account_id: "", group_id: 0 };
+  const unbound = managementRows(accounts, channels, [], "original", "b").find(
+    (r) => r.configured,
+  )!;
+  expect(unbound.account.id).toBe("");
+  expect(unbound.target.active).toBe(false);
+});

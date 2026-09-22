@@ -853,7 +853,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   const [page, setPage] = useState(0);
   const candidateRows = useMemo(
     () =>
-      managementRows(accounts, management.data?.data || [], imports.data?.data || [], model)
+      managementRows(accounts, management.data?.data || [], imports.data?.data || [], model, accountId)
         .filter(
           ({ account, target, checks, selected, accountIds, configured }) =>
             (!accountId || (accountId === UNASSIGNED_ACCOUNT ? !accountIds.length : accountIds.includes(accountId))) &&
