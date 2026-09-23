@@ -3,6 +3,8 @@ import { controlRequest } from "./api";
 import type { SubAccount, SubTarget } from "./Sub2apiChecks";
 import type { InstalledChannel } from "./sub2apiImports";
 import { SUB_MODELS } from "./sub2apiModels";
+import {toolUseModels} from "./toolUse";
+import type {ToolUseResult,ToolUseModel} from "./toolUse";
 import { modelChecks } from "./sub2apiResults";
 
 export const UNASSIGNED_ACCOUNT = "__unassigned__";
@@ -21,8 +23,31 @@ export interface ConfiguredCheck {
   fingerprint: string;
   state: string;
   message: string;
-  result: NonNullable<SubTarget["result"]> | SubTarget["compaction"] | null;
+  result: NonNullable<SubTarget["result"]> | ToolUseResult | null;
   history: SubTarget["history"];
+}
+
+// Import defaults use the selected source and the exact public-to-upstream
+// mapping, never the green summary of a different model/source.
+export function configuredToolUseResult(member:ManagedChannel,accounts:SubAccount[],checks:ConfiguredCheck[]):ToolUseResult {
+  const bound=accounts.find(a=>a.id===member.account_id)?.targets?.find(t=>t.group_id===member.group_id);
+  const native=checks.filter(c=>c.kind==="tool-use" && c.source_id===member.source_id && c.provider===member.provider &&
+    (!c.fingerprint || !member.probe_fingerprint || c.fingerprint===member.probe_fingerprint));
+  const dispatcher=native.find(c=>!c.model);
+  const legacy=toolUseModels(dispatcher?.result as ToolUseResult|undefined);
+  const entries=new Map<string,ToolUseModel>();
+  for(const name of member.models){
+    const saved=toolUseModels(bound?.tool_use).find(m=>m.model===(member.model_mappings?.[name]||name));
+    if(saved)entries.set(name,{...saved,model:name});
+  }
+  for(const entry of legacy)entries.set(entry.model,entry);
+  for(const c of native.filter(c=>!!c.model)){
+    const current=entries.get(c.model);
+    if(!current?.result || (c.result?.checked_at||0)>=(current.result.checked_at||0)){
+      entries.set(c.model,{model:c.model,state:c.state,result:c.result as ToolUseResult || (c.message ? {status:"error",model:c.model,message:c.message,checked_at:0,attempts:[]} : undefined)});
+    }
+  }
+  return {status:"error",checked_at:Math.max(0,...[...entries.values()].map(m=>m.result?.checked_at||0)),attempts:[],models:[...entries.values()]};
 }
 export function useConfiguredChecks() {
   return useQuery({
@@ -181,13 +206,24 @@ export function managementRows(
     const latestCapability = (kind: ConfiguredCheck["kind"]) => native.filter(c => c.kind === kind).sort((a,b) =>
       Number(["queued","running"].includes(b.state)) - Number(["queued","running"].includes(a.state)) ||
       (b.result?.checked_at || 0) - (a.result?.checked_at || 0))[0];
-    for (const [kind, field] of [["compaction","compaction"],["tool-use","tool_use"]] as const) {
+    for (const [kind, field] of [["compaction","compaction"]] as const) {
       const c = latestCapability(kind);
       if (c && (!bound || (c.result?.checked_at || 0) >= (target[field]?.checked_at || 0))) {
         target[`${field}_state`] = c.state;
         target[field] = c.result as SubTarget[typeof field] || (c.message ? {status:"error",checked_at:0,message:c.message,attempts:[]} : undefined);
       }
     }
+    const toolEntries=new Map<string,ToolUseModel>();
+    for(const member of members){
+      for(const c of configuredToolUseResult(member,accounts,configuredChecks).models||[]){
+        const previous=toolEntries.get(c.model);
+        if(!previous || (c.result?.checked_at||0)>(previous.result?.checked_at||0))toolEntries.set(c.model,c);
+      }
+    }
+    target.tool_use={status:"error",checked_at:Math.max(0,...[...toolEntries.values()].map(m=>m.result?.checked_at||0)),models:[...toolEntries.values()],attempts:[]};
+    const toolPending=native.some(c=>c.kind==="tool-use" && ["queued","running"].includes(c.state));
+    if(toolPending)target.tool_use_state="running";
+    else if(!bound)target.tool_use_state="done";
     const entry = row(
       displayAccount,
       target,

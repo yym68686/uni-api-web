@@ -47,7 +47,12 @@ func TestConfiguredChecksWithoutAccountPersistAllKinds(t *testing.T) {
 				fmt.Fprint(w, "event: response.completed\ndata: {\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"compaction\",\"encrypted_content\":\"opaque\"}]}}\n\n")
 			} else if strings.Contains(raw, "TOOL_PROBE_OK") {
 				w.Header().Set("Content-Type", "text/event-stream")
-				fmt.Fprint(w, strings.ReplaceAll(strings.ReplaceAll(toolUseSSE(nil, []toolUseItem{validToolUseItem()}), `data: {"response":{"id":"tool-response"}}`, `data: {"type":"response.created","response":{"id":"tool-response"}}`), `data: {"response":{"id":"tool-response","model"`, `data: {"type":"response.completed","response":{"id":"tool-response","model"`))
+				fmt.Fprint(w, strings.ReplaceAll(strings.ReplaceAll(toolUseSSE(nil, func() []toolUseItem {
+					if body["model"] == "custom-model" {
+						return []toolUseItem{{Type: "function_call", Name: "js", Namespace: "mcp__cua_repl", CallID: "noexec", Arguments: `{"code":"NO_EXEC"}`}}
+					}
+					return []toolUseItem{validToolUseItem()}
+				}()), `data: {"response":{"id":"tool-response"}}`, `data: {"type":"response.created","response":{"id":"tool-response"}}`), `data: {"response":{"id":"tool-response","model"`, `data: {"type":"response.completed","response":{"id":"tool-response","model"`))
 			} else {
 				subSSE(w, "21", body["model"].(string))
 			}
@@ -105,6 +110,16 @@ func TestConfiguredChecksWithoutAccountPersistAllKinds(t *testing.T) {
 			t.Fatal(kind)
 		}
 	}
+	for range 2 {
+		if !s.configuredCheckOne(context.Background()) {
+			t.Fatal("missing model tool job")
+		}
+	}
+	var childCount int
+	s.control.db.QueryRow(`SELECT count(*) FROM console_configured_checks WHERE source_id=$1 AND kind='tool-use' AND model<>''`, src.ID).Scan(&childCount)
+	if childCount != 2 {
+		t.Fatal("missing model tool results", childCount)
+	}
 	w := request("GET", nil, token)
 	if w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
@@ -136,12 +151,22 @@ func TestConfiguredChecksWithoutAccountPersistAllKinds(t *testing.T) {
 		} else {
 			var result subCapabilityResult
 			json.Unmarshal(c.Result, &result)
-			if result.Status != "supported" {
+			if c.Kind == "tool-use" && c.Model == "" {
+				if len(result.Models) != 2 {
+					t.Fatal("missing fanout", result)
+				}
+				continue
+			}
+			want := "supported"
+			if c.Kind == "tool-use" && c.Model == "custom-model" {
+				want = "unsupported"
+			}
+			if result.Status != want {
 				t.Fatal(c.Kind, result)
 			}
 		}
 	}
-	if native != 4 {
+	if native != 6 {
 		t.Fatal(native)
 	}
 	if strings.Contains(w.Body.String(), "gateway-secret") || strings.Contains(w.Body.String(), "private-upstream") {
@@ -276,7 +301,7 @@ func TestConfiguredChecksThroughRealGatewayWithoutClientRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, test := range []struct{ provider, kind, model, want string }{
-		{"native", "model", checkModel, "success"}, {"native", "model", "new-unconfigured-model", "success"}, {"native", "compaction", "", "supported"}, {"native", "tool-use", "", "supported"}, {"claude", "model", "claude-fixture", "success"}, {"claude", "model", "claude-new-unconfigured", "success"}, {"gemini", "model", "gemini-fixture", "success"}, {"gemini", "model", "gemini-new-unconfigured", "success"}, {"fail", "model", "custom-model", "error"},
+		{"native", "model", checkModel, "success"}, {"native", "model", "new-unconfigured-model", "success"}, {"native", "compaction", "", "supported"}, {"native", "tool-use", checkModel, "supported"}, {"claude", "model", "claude-fixture", "success"}, {"claude", "model", "claude-new-unconfigured", "success"}, {"gemini", "model", "gemini-fixture", "success"}, {"gemini", "model", "gemini-new-unconfigured", "success"}, {"fail", "model", "custom-model", "error"},
 	} {
 		c := configuredCheck{Source: src.ID, Provider: test.provider, Kind: test.kind, Model: test.model}
 		var result any
@@ -289,6 +314,12 @@ func TestConfiguredChecksThroughRealGatewayWithoutClientRoutes(t *testing.T) {
 			status = r.Availability.Status
 		case subCapabilityResult:
 			status = r.Status
+		}
+		if c.Kind == "model" && status == "success" {
+			_, e := s.control.db.Exec(`INSERT INTO console_configured_checks(source_id,provider,kind,model,source_target,fingerprint,state,result) VALUES($1,$2,'model',$3,$4,$5,'done',$6) ON CONFLICT(source_id,provider,kind,model) DO UPDATE SET result=excluded.result`, src.ID, c.Provider, c.Model, controlTarget(src), c.Fingerprint, mustJSON(result))
+			if e != nil {
+				t.Fatal(e)
+			}
 		}
 		if status != test.want {
 			t.Fatalf("%+v: %+v", test, result)

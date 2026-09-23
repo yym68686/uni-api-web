@@ -43,7 +43,7 @@ func testSubConcurrentAccounts(t *testing.T, interrupt bool) {
 		}
 	}
 	panelStarted := make(chan string, count*2)
-	probesStarted := make(chan string, count*(len(subModels)+3))
+	probesStarted := make(chan string, count*(2*len(subModels)+2))
 	releasePanel, releaseProbes := make(chan struct{}), make(chan struct{})
 	var releasePanelOnce, releaseProbesOnce sync.Once
 	unblockPanel := func() { releasePanelOnce.Do(func() { close(releasePanel) }) }
@@ -233,7 +233,7 @@ func testSubConcurrentAccounts(t *testing.T, interrupt bool) {
 	mu.Lock()
 	defer mu.Unlock()
 	for _, id := range accounts {
-		if peak[id] != 2 || calls[id] != len(subModels)+3 {
+		if peak[id] != 2 || calls[id] != 2*len(subModels)+2 {
 			t.Fatal("per-account probes changed or duplicated", id, peak[id], calls[id])
 		}
 	}

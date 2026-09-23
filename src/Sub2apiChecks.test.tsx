@@ -1005,7 +1005,7 @@ it("filters Tool use across pages, remembers the filter, and queues only selecte
   data[0].targets.push(
     { ...template, group_id: 28, name: "no-tools", tool_use: { status: "unsupported", model: "gpt-5.6-sol", checked_at: 11,
       message: "已提供 exec，但响应返回 NO_EXEC", attempts: [{status:"unsupported", text:"NO_EXEC", requested_model:"gpt-5.6-sol", http_status:200, duration_ms:300, ttft_ms:null}] } },
-    { ...template, group_id: 29, name: "tool-error", tool_use: { status: "error", checked_at: 10, attempts: [] } },
+    { ...template, group_id: 29, name: "tool-error", tool_use: { status: "error", model:"gpt-5.6-sol", checked_at: 10, attempts: [] } },
     { ...template, group_id: 30, name: "tool-unknown" },
   );
   const writes: {path:string; targets: {group_id:number;models?:string[]}[]}[] = [];
@@ -1016,7 +1016,7 @@ it("filters Tool use across pages, remembers the filter, and queues only selecte
   const user=userEvent.setup();
   const view=mount("tool-filter");
   const filter=await screen.findByLabelText("Tool use 是否支持筛选");
-  await user.selectOptions(screen.getByLabelText("检测模型筛选"),"gpt-6-astra");
+  await user.selectOptions(screen.getByLabelText("检测模型筛选"),"gpt-5.6-sol");
   await user.selectOptions(filter,"supported");
   await screen.findByText("tool-1");
   expect(screen.queryByText("no-tools")).not.toBeInTheDocument();
@@ -2038,4 +2038,44 @@ it("shows scoped extra models and submits exactly the checked models to native a
  await user.selectOptions(screen.getByLabelText('sub2api 账号筛选'),'one');
  await user.click(screen.getByRole('button',{name:'检测模型设置'}));d=within(screen.getByRole('dialog'));
  expect(d.queryByRole('checkbox',{name:'custom-model'})).not.toBeInTheDocument();
+});
+
+it("shows model-scoped Tool use and leaves failed models unchecked when importing", async () => {
+ const data=fixtures().slice(0,1),t=data[0].targets[0];
+ t.models=['gpt-5.5','gpt-6-sol','gpt-6-astra','gpt-6-luna'].map(model=>({model,state:'done',message:'',result:{...t.result!,model}}));
+ t.result=null;
+ t.tool_use={status:'unsupported',checked_at:10,attempts:[],models:[
+  {model:'gpt-5.5',state:'done',result:{status:'supported',model:'gpt-5.5',checked_at:10,attempts:[]}},
+  {model:'gpt-6-sol',state:'done',result:{status:'unsupported',model:'gpt-6-sol',message:'NO_EXEC',checked_at:10,attempts:[]}},
+  {model:'gpt-6-astra',state:'done',result:{status:'error',model:'gpt-6-astra',message:'timeout',checked_at:10,attempts:[]}},
+ ]};
+ const writes:any[]=[];
+ vi.stubGlobal('fetch',vi.fn(async(input:string,init?:RequestInit)=>{
+  if(init?.method==='POST'){writes.push(JSON.parse(String(init.body)));return Response.json({message:'已添加'});}
+  if(input.includes('channel-options'))return Response.json({revision:'r1',supported:true,keys:[{key_id:'k1',position:1,prefix:'masked'}],channels:[]});
+  return Response.json({data:input.endsWith('/accounts')?data:input.endsWith('/sources')?[{id:'primary',name:'Fugue'}]:[],labels:{},unavailable_keys:[],unavailable_sources:[]});
+ }));
+ const user=userEvent.setup();mount('tool-per-model');
+ await user.selectOptions(screen.getByLabelText('检测模型筛选'),'gpt-6-sol');
+ expect(await screen.findByText('不支持工具调用',{selector:'span'})).toBeVisible();
+ await user.selectOptions(screen.getByLabelText('Tool use 是否支持筛选'),'supported');
+ expect(screen.queryByText('same-group',{selector:'strong'})).not.toBeInTheDocument();
+ await user.selectOptions(screen.getByLabelText('检测模型筛选'),'gpt-5.5');
+ expect(await screen.findByText('same-group',{selector:'strong'})).toBeVisible();
+ await user.click(screen.getByRole('button',{name:'添加到渠道'}));
+ const d=within(screen.getByRole('dialog'));
+ expect(d.getByRole('checkbox',{name:'gpt-5.5'})).toBeChecked();
+ expect(d.getByRole('checkbox',{name:/^gpt-6-sol/})).not.toBeChecked();
+ expect(d.getByRole('checkbox',{name:/^gpt-6-astra/})).not.toBeChecked();
+ expect(d.getByRole('checkbox',{name:'gpt-6-luna'})).toBeChecked();
+ expect(d.getByText('Tool use · 不支持工具调用')).toBeVisible();
+ await user.click(d.getByRole('checkbox',{name:/^gpt-6-sol/}));
+ expect(d.getByRole('checkbox',{name:/^gpt-6-sol/})).toBeChecked();
+ await user.selectOptions(d.getByLabelText('添加到 uni-api 来源'),'primary');
+ await waitFor(()=>expect(d.getByLabelText('添加到 API key')).toBeEnabled());
+ await user.selectOptions(d.getByLabelText('添加到 API key'),'k1');
+ await user.click(d.getByRole('button',{name:'添加到渠道'}));
+ await waitFor(()=>expect(writes).toHaveLength(1));
+ expect(writes[0].models).toEqual(expect.arrayContaining(['gpt-5.5','gpt-6-sol','gpt-6-luna']));
+ expect(writes[0].models).not.toContain('gpt-6-astra');
 });

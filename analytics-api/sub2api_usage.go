@@ -183,6 +183,17 @@ func (s *Service) subAttachUsage(ctx context.Context, owner string, accounts []s
 		for j := range accounts[i].Targets {
 			t := &accounts[i].Targets[j]
 			if t.ToolUse != nil {
+				for _, model := range t.ToolUse.Models {
+					if model.Result == nil {
+						continue
+					}
+					for k := range model.Result.Attempts {
+						p := &model.Result.Attempts[k]
+						if p.ID != "" {
+							probes[p.ID] = append(probes[p.ID], p)
+						}
+					}
+				}
 				for k := range t.ToolUse.Attempts {
 					p := &t.ToolUse.Attempts[k]
 					if p.ID != "" {

@@ -131,6 +131,18 @@ func (s *Service) queueConfiguredChecks(w http.ResponseWriter, r *http.Request) 
 		} else {
 			models = []string{""}
 		}
+		if kind == "tool-use" {
+			// The dispatcher waits for availability checks, then creates one bounded
+			// job per successful model. Ignore duplicate clicks while children run.
+			var active bool
+			if e := tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM console_configured_checks WHERE source_id=$1 AND provider=$2 AND kind='tool-use' AND model<>'' AND state IN ('queued','running') AND (deadline IS NULL OR deadline>now()))`, t.Source, t.Provider).Scan(&active); e != nil {
+				http.Error(w, "检测状态读取失败", 503)
+				return
+			}
+			if active {
+				continue
+			}
+		}
 		for _, m := range models {
 			res, e := tx.ExecContext(r.Context(), `INSERT INTO console_configured_checks(source_id,provider,kind,model,source_target,quality_only)
  VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(source_id,provider,kind,model) DO UPDATE SET
@@ -342,15 +354,12 @@ func (s *Service) runConfiguredCheck(ctx context.Context, c *configuredCheck, ta
 		return nil
 	}
 	probeFn := subProbeCompaction
-	if c.Kind == "tool-use" {
-		probeFn = subProbeToolUse
-	}
 	out := subCapabilityResult{Status: "error", Attempts: []subProbe{}, Message: "没有可用模型完成检测，请查看模型检测结果"}
 	// Prefer previously successful models, but a first capability check must also
 	// work before model checks have ever run. Try configured models serially.
 	uncertain := false
 	availableModels := map[string]bool{}
-	savedRows, e := s.control.db.QueryContext(ctx, `SELECT model FROM console_configured_checks WHERE source_id=$1 AND provider=$2 AND kind='model' AND fingerprint=$3 AND result->'availability'->>'status'='success'`, c.Source, c.Provider, c.Fingerprint)
+	savedRows, e := s.control.db.QueryContext(ctx, `SELECT model FROM console_configured_checks WHERE source_id=$1 AND provider=$2 AND kind='model' AND state='done' AND fingerprint=$3 AND result->'availability'->>'status'='success'`, c.Source, c.Provider, c.Fingerprint)
 	if e != nil {
 		return errors.New("模型检测记录读取失败")
 	}
@@ -368,6 +377,19 @@ func (s *Service) runConfiguredCheck(ctx context.Context, c *configuredCheck, ta
 	if e != nil {
 		return errors.New("模型检测记录读取失败")
 	}
+	if c.Kind == "tool-use" {
+		if c.Model == "" {
+			return s.expandConfiguredToolChecks(ctx, c, target, run, availableModels, result)
+		}
+		if !availableModels[c.Model] {
+			return errors.New("该模型当前没有可用性检测成功记录，请先检测模型")
+		}
+		probe := subProbeToolUse(ctx, client, src.Base, src.Key, c.Model)
+		out := subCapabilityResult{Model: c.Model, Status: probe.Status, Message: probe.Message, CheckedAt: time.Now().Unix(), Attempts: []subProbe{probe}}
+		redact(&out)
+		*result = out
+		return nil
+	}
 	sort.SliceStable(candidates, func(i, j int) bool { return availableModels[candidates[i]] && !availableModels[candidates[j]] })
 	for _, model := range candidates {
 		if ctx.Err() != nil {
@@ -375,21 +397,13 @@ func (s *Service) runConfiguredCheck(ctx context.Context, c *configuredCheck, ta
 		}
 		// A compaction-only provider may intentionally reject ordinary text
 		// requests. The actual compaction probe is its availability check.
-		if c.Kind == "tool-use" && !availableModels[model] {
-			available := subProbeStream(ctx, client, src.Base, src.Key, "say test", model)
-			if available.Status != "success" {
-				uncertain = true
-				out.Attempts = append(out.Attempts, available)
-				continue
-			}
-		}
 		probe := probeFn(ctx, client, src.Base, src.Key, model)
 		out.Attempts = append(out.Attempts, probe)
 		if probe.Status == "error" {
 			uncertain = true
 		}
 		out.Status, out.Model, out.Message = probe.Status, model, probe.Message
-		if probe.Status == "supported" || c.Kind == "tool-use" {
+		if probe.Status == "supported" {
 			break
 		}
 	}
@@ -399,6 +413,40 @@ func (s *Service) runConfiguredCheck(ctx context.Context, c *configuredCheck, ta
 	}
 	out.CheckedAt = time.Now().Unix()
 	redact(&out)
+	*result = out
+	return nil
+}
+
+func (s *Service) expandConfiguredToolChecks(ctx context.Context, c *configuredCheck, target, run string, available map[string]bool, result *any) error {
+	models := []subToolUseModel{}
+	for model := range available {
+		models = append(models, subToolUseModel{Model: model, State: "queued"})
+	}
+	sort.Slice(models, func(i, j int) bool { return models[i].Model < models[j].Model })
+	tx, err := s.control.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// Fence against cancellation/expiry and serialize a duplicate dispatch.
+	var claimed string
+	err = tx.QueryRowContext(ctx, `SELECT run_id FROM console_configured_checks WHERE source_id=$1 AND provider=$2 AND kind='tool-use' AND model='' AND state='running' AND run_id=$3 FOR UPDATE`, c.Source, c.Provider, run).Scan(&claimed)
+	if err != nil {
+		return errors.New("检测任务已变化，请重新检测")
+	}
+	for _, m := range models {
+		_, err = tx.ExecContext(ctx, `INSERT INTO console_configured_checks(source_id,provider,kind,model,source_target,fingerprint) VALUES($1,$2,'tool-use',$3,$4,$5)
+ ON CONFLICT(source_id,provider,kind,model) DO UPDATE SET state='queued',message='',source_target=excluded.source_target,
+ result=CASE WHEN console_configured_checks.fingerprint=excluded.fingerprint THEN console_configured_checks.result ELSE NULL END,
+ fingerprint=excluded.fingerprint,deadline=NULL,updated_at=now() WHERE console_configured_checks.state NOT IN ('queued','running') OR console_configured_checks.deadline<now()`, c.Source, c.Provider, m.Model, target, c.Fingerprint)
+		if err != nil {
+			return err
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	out := summarizeToolUse(models)
 	*result = out
 	return nil
 }

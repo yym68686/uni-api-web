@@ -32,8 +32,9 @@ import { managedRouteCount, useAllChannelRoutes } from "./channelRouteData";
 import { useConsoleSources } from "./consoleSources";
 import { CompactionStatus, compactionStatus, compactionLabels } from "./SubCompaction";
 import type { CompactionResult } from "./SubCompaction";
-import { ToolUseStatus, toolUseStatus, toolUseLabels, toolUseDescription } from "./SubToolUse";
+import { ToolUseStatus, toolUseLabels, toolUseDescription } from "./SubToolUse";
 import type { ToolUseResult } from "./SubToolUse";
+import {modelToolUse,toolUseMatches} from "./toolUse";
 import { SUB_MODELS, loadSubModels, saveSubModels } from "./sub2apiModels";
 import { SubModelSettings } from "./SubModelSettings";
 import {
@@ -617,6 +618,7 @@ function CheckDetails({
   const result = check.result;
   const probe = result?.availability;
   const qualityResult = groupQualityResult(target);
+  const toolResult = modelToolUse(target,check.model);
   return (
     <Dialog.Root>
       <Dialog.Trigger asChild>
@@ -669,17 +671,17 @@ function CheckDetails({
             </thead>
             <tbody>
               {check.source_name && <DetailRow label="检测来源">{check.source_name}</DetailRow>}
-              <DetailRow label="Tool use"><ToolUseStatus target={target} /></DetailRow>
-              {target.tool_use?.model && <DetailRow label="工具检测模型">{target.tool_use.model}</DetailRow>}
-              {target.tool_use?.message && <DetailRow label="工具检测诊断">{target.tool_use.message}</DetailRow>}
-              {target.tool_use?.attempts.map((attempt, i) => <DetailRow key={attempt.id || i} label="工具检测请求">
+              <DetailRow label="Tool use"><ToolUseStatus target={target} model={check.model} /></DetailRow>
+              {toolResult?.model && <DetailRow label="工具检测模型">{toolResult.model}</DetailRow>}
+              {toolResult?.message && <DetailRow label="工具检测诊断">{toolResult.message}</DetailRow>}
+              {toolResult?.attempts.map((attempt, i) => <DetailRow key={attempt.id || i} label="工具检测请求">
                 <table className="sub-check-details-table"><tbody>
                   <tr><th>请求模型</th><td>{attempt.requested_model}</td></tr>
                   <tr><th>返回模型</th><td>{attempt.response_model || "—"}</td></tr>
                   <tr><th>HTTP 状态</th><td>{attempt.http_status || "—"}</td></tr>
                   <tr><th>工具调用结果</th><td>{attempt.text || attempt.message || "—"}</td></tr>
                   <tr><th>耗时</th><td>{latency(attempt.duration_ms)}</td></tr>
-                  <UsageDetailRows probe={attempt} label="工具检测" prices={prices} model={attempt.requested_model || target.tool_use?.model || ""} />
+                  <UsageDetailRows probe={attempt} label="工具检测" prices={prices} model={attempt.requested_model || toolResult?.model || ""} />
                 </tbody></table>
               </DetailRow>)}
               <DetailRow label="远程压缩"><CompactionStatus target={target} /></DetailRow>
@@ -872,7 +874,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
               )) &&
             matchesPriceFilter(priceStatus, selected ? [selected] : checks, prices.data?.data) &&
             (!compaction || compactionStatus(target) === compaction) &&
-            (!toolUse || toolUseStatus(target) === toolUse) &&
+            toolUseMatches(target,toolUse,model) &&
             (!quality || groupQualityResult(target)?.verdict === quality) &&
             (minQuality === "" ||
               (!!target.history?.successful &&
@@ -1005,7 +1007,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
         // Probe every selected model once. Prefer an existing mapping; use the
         // first source for models not yet configured on any member.
         const models = kind === "check" ? requestedModels() : kind === "quality" ? ["gpt-6-astra"] : [];
-        if (!models.length) return [{source_id:members[0].source_id,provider:members[0].provider,models:[]}];
+        if (!models.length) return (kind === "tool-use" ? members : [members[0]]).map(m=>({source_id:m.source_id,provider:m.provider,models:[]}));
         const grouped = new Map<string, {source_id:string;provider:string;models:string[]}>();
         for (const model of models) {
           const member = members.find(m => m.models.includes(model)) || members[0];
@@ -1601,7 +1603,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                         </td>
                         <td><div className="quality-status-stack"><CompactionStatus target={t} /><button className="button small ghost" disabled={!canCheck(account, t, "compaction", configured)} aria-busy={checkBusy(account, t, "compaction", configured)}
                           aria-label={`检测 ${account.name} ${t.name} 的远程压缩`} onClick={() => void checkCompaction([{account, target:t, configured}])}>{checkBusy(account, t, "compaction", configured) && <Spinner small />}重新检测</button></div></td>
-                        <td><div className="quality-status-stack"><ToolUseStatus target={t} /><button className="button small ghost" disabled={!canCheck(account, t, "tool-use", configured)} aria-busy={checkBusy(account, t, "tool-use", configured)}
+                        <td><div className="quality-status-stack"><ToolUseStatus target={t} model={model || undefined} /><button className="button small ghost" disabled={!canCheck(account, t, "tool-use", configured)} aria-busy={checkBusy(account, t, "tool-use", configured)}
                           aria-label={`检测 ${account.name} ${t.name} 的 Tool use`} onClick={() => void checkToolUse([{account, target:t, configured}])}>{checkBusy(account, t, "tool-use", configured) && <Spinner small />}重新检测</button></div></td>
                         <td>
                           {<CheckDetails

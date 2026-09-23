@@ -627,3 +627,23 @@ it("opens unbound channels directly in the destination form and resets the key w
     positions: { "model-do": 2 },
   });
 });
+
+it("native import defaults are source/model specific and can be overridden manually", async()=>{
+ const checks=[{source_id:'a',provider:'native',kind:'tool-use',model:'gpt-6-sol',state:'done',fingerprint:'',result:{status:'unsupported',model:'gpt-6-sol',checked_at:1,attempts:[]}},{source_id:'b',provider:'native',kind:'tool-use',model:'gpt-6-sol',state:'done',fingerprint:'',result:{status:'supported',model:'gpt-6-sol',checked_at:1,attempts:[]}}];
+ const base={provider:'native',name:'native',models:['gpt-6-sol','gpt-5.5'],account_ids:[],engine:'gpt',account_id:'',group_id:0,api_key_id:'',key_position:0,key_prefix:'',positions:{},revision:'r1',manageable:true};
+ const members=[{...base,source_id:'a',source_name:'Fugue'},{...base,source_id:'b',source_name:'DigitalOcean'}];
+ vi.stubGlobal('fetch',vi.fn(async(input:string)=>{
+  if(input.includes('channel-options'))return Response.json({revision:'r1',keys:[{key_id:'key',position:1,prefix:'masked'}],channels:[]});
+  return Response.json({data:input.endsWith('/channel-management/checks')?checks:[],labels:{},unavailable_keys:[],unavailable_sources:[]});
+ }));
+ render(<QueryClientProvider client={new QueryClient()}><ConfiguredChannelDialog item={{...members[0],members} as ManagedChannel} close={()=>{}}/></QueryClientProvider>);
+ const user=userEvent.setup();
+ const sol=await screen.findByRole('checkbox',{name:/^gpt-6-sol/});
+ await waitFor(()=>expect(sol).toBeEnabled());expect(sol).not.toBeChecked();
+ expect(screen.getByRole('checkbox',{name:'gpt-5.5'})).toBeChecked();
+ await user.click(sol);expect(sol).toBeChecked();
+ await user.selectOptions(screen.getByLabelText('添加到 uni-api 来源'),'b');
+ expect(screen.getByRole('checkbox',{name:'gpt-6-sol'})).toBeChecked();
+ await user.selectOptions(screen.getByLabelText('添加到 uni-api 来源'),'a');
+ expect(screen.getByRole('checkbox',{name:/^gpt-6-sol/})).not.toBeChecked();
+});

@@ -10,7 +10,9 @@ import {
   RemoveConfiguredBinding,
 } from "./ChannelBindingActions";
 import type { ManagedChannel } from "./channelManagement";
-import { channelMembers } from "./channelManagement";
+import { channelMembers,configuredToolUseResult,useConfiguredChecks } from "./channelManagement";
+import {useSubAccounts} from "./sub2apiAccounts";
+import {toolUseFailed,modelToolUse,toolUseLabels} from "./toolUse";
 import {
   managedRouteCount,
   providerRoutes,
@@ -205,6 +207,8 @@ export function ConfiguredChannelDialog({
 }) {
   const client = useQueryClient();
   const members = channelMembers(group);
+  const toolChecks = useConfiguredChecks();
+  const accounts = useSubAccounts();
   const [memberId, setMemberId] = useState(members[0].source_id);
   const item = members.find((m) => m.source_id === memberId) || members[0];
   const sources = members.map((m) => m.source_id);
@@ -219,8 +223,12 @@ export function ConfiguredChannelDialog({
     }
   }, [counts]);
   const [editingProvider, setEditingProvider] = useState("");
+  const toolDefaultsPending=!editingProvider && (toolChecks.isPending || accounts.isPending);
+  const toolDefaultsError=!editingProvider && (toolChecks.isError || accounts.isError);
   const initializedEdit = useRef("");
-  const [selected, setSelected] = useState<string[]>(item.models);
+  const toolTarget={tool_use:configuredToolUseResult(item,accounts.data?.data||[],toolChecks.data?.data||[])};
+  const [selectedOverride, setSelected] = useState<string[]|null>(null);
+  const selected=selectedOverride ?? item.models.filter(model=>!toolUseFailed(toolTarget,model));
   const [aliases, setAliases] = useState<ModelAlias[]>([]);
   const mapping = aliasMappings(aliases, selected);
   const modelOptions = [
@@ -357,6 +365,7 @@ export function ConfiguredChannelDialog({
   async function save() {
     if (
       busy ||
+      toolDefaultsPending || toolDefaultsError ||
       mapping.error ||
       !key ||
       !mapping.models.length ||
@@ -470,7 +479,7 @@ export function ConfiguredChannelDialog({
                 setEditingProvider("");
                 setPerModel(false);
                 setModelPositions({});
-                setSelected(item.models);
+                setSelected(null);
                 setAliases([]);
                 setKey("");
                 setPosition(1);
@@ -554,6 +563,8 @@ export function ConfiguredChannelDialog({
                     ? "编辑此 API key 的模型"
                     : "添加模型到 API key"}
                 </h3>
+                {toolDefaultsPending && <p role="status"><Spinner small /> 正在读取各模型的 Tool use 检测结果…</p>}
+                {toolDefaultsError && <div className="error-banner" role="alert">Tool use 检测记录读取失败。<button type="button" className="button small" onClick={()=>{void toolChecks.refetch();void accounts.refetch();}}>重试</button></div>}
                 <div className="route-destination-grid">
                   <label className="sub-import-field">
                     uni-api 来源
@@ -566,7 +577,7 @@ export function ConfiguredChannelDialog({
                           (m) => m.source_id === e.target.value,
                         )!;
                         setMemberId(next.source_id);
-                        setSelected(next.models);
+                        setSelected(null);
                         setAliases([]);
                         setKey("");
                         setPosition(1);
@@ -658,7 +669,7 @@ export function ConfiguredChannelDialog({
                     </select>
                   </label>
                 </div>
-                <fieldset disabled={busy || options.isFetching}>
+                <fieldset disabled={busy || options.isFetching || toolDefaultsPending || toolDefaultsError}>
                   <legend>原模型</legend>
                   <div className="sub-model-options">
                     {item.models.map((model) => (
@@ -667,14 +678,17 @@ export function ConfiguredChannelDialog({
                           type="checkbox"
                           checked={selected.includes(model)}
                           onChange={(e) =>
-                            setSelected((old) =>
+                            setSelected((previous) => {
+                              const old=previous ?? selected;
+                              return (
                               e.target.checked
                                 ? [...old, model]
-                                : old.filter((m) => m !== model),
-                            )
+                                : old.filter((m) => m !== model));
+                            })
                           }
                         />
                         <span>{model}</span>
+                        {toolUseFailed(toolTarget,model) && <small className="negative">Tool use · {toolUseLabels[modelToolUse(toolTarget,model)!.status]}</small>}
                       </label>
                     ))}
                   </div>
@@ -718,6 +732,7 @@ export function ConfiguredChannelDialog({
                     className="button primary"
                     disabled={
                       busy ||
+                      toolDefaultsPending || toolDefaultsError ||
                       options.isFetching ||
                       options.isError ||
                       mapping.models.some(

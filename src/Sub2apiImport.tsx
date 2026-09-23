@@ -5,6 +5,7 @@ import { Plus, Trash2, X } from "lucide-react";
 import { controlRequest } from "./api";
 import { Spinner } from "./ui";
 import type { ConsoleSourcesQuery } from "./consoleSources";
+import {toolUseFailed,modelToolUse,toolUseLabels} from "./toolUse";
 import { CompactionStatus } from "./SubCompaction";
 import { assessPrice } from "./sub2apiPriceCheck";
 import type { KeyInfo, ModelPrice } from "./types";
@@ -164,7 +165,7 @@ export function Sub2apiImport({
       (check) =>
         modelChoices[check.model] ??
         (available.includes(check.model) &&
-          assessPrice(check, prices).status !== "abnormal"),
+          assessPrice(check, prices).status !== "abnormal" && !toolUseFailed(target,check.model)),
     )
     .map((check) => check.model);
   const [aliases, setAliases] = useState<ModelAlias[]>([]);
@@ -801,6 +802,7 @@ export function Sub2apiImport({
                           }
                         />
                         <span>{check.model}</span>
+                        {toolUseFailed(target,check.model) && <small className="negative">Tool use · {toolUseLabels[modelToolUse(target,check.model)!.status]}</small>}
                         {assessPrice(check, prices).status === "abnormal" && (
                           <small className="negative">单价异常</small>
                         )}

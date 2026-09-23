@@ -135,7 +135,7 @@ func TestToolUseHTTPFailureClassification(t *testing.T) {
 	}
 }
 
-func TestToolUseQueueRunsOneAvailableModelAndPreservesOtherChecks(t *testing.T) {
+func TestToolUseQueueRunsEveryAvailableModelAndPreservesOtherChecks(t *testing.T) {
 	dsn := os.Getenv("TEST_CONTROL_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("PostgreSQL required")
@@ -154,11 +154,19 @@ func TestToolUseQueueRunsOneAvailableModelAndPreservesOtherChecks(t *testing.T) 
 			Model string `json:"model"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		if body.Model != "gpt-5.6-sol" {
+		if body.Model != "gpt-5.6-sol" && body.Model != checkModel && body.Model != "gpt-6-sol" {
 			t.Error("selected unavailable or wrong model", body.Model)
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprint(w, toolUseSSE([]toolUseItem{{Type: "function_call", Name: "js", Namespace: "mcp__cua_repl", CallID: "fallback", Arguments: `{"code":"NO_EXEC"}`}}, nil))
+		if body.Model == "gpt-6-sol" {
+			w.WriteHeader(503)
+			return
+		}
+		if body.Model == "gpt-5.6-sol" {
+			fmt.Fprint(w, toolUseSSE([]toolUseItem{validToolUseItem()}, nil))
+		} else {
+			fmt.Fprint(w, toolUseSSE([]toolUseItem{{Type: "function_call", Name: "js", Namespace: "mcp__cua_repl", CallID: "fallback", Arguments: `{"code":"NO_EXEC"}`}}, nil))
+		}
 	}))
 	defer server.Close()
 	previous := subHTTP
@@ -173,7 +181,7 @@ func TestToolUseQueueRunsOneAvailableModelAndPreservesOtherChecks(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, model := range []string{"gpt-5.6-terra", "gpt-5.6-sol", "gpt-6-astra"} {
+	for _, model := range []string{"gpt-5.6-terra", "gpt-5.6-sol", "gpt-6-astra", "gpt-6-sol"} {
 		status := "success"
 		if model == "gpt-5.6-terra" {
 			status = "error"
@@ -207,15 +215,18 @@ func TestToolUseQueueRunsOneAvailableModelAndPreservesOtherChecks(t *testing.T) 
 			t.Fatal(w.Code, w.Body.String())
 		}
 	}
-	if !service.subWorkOne(context.Background()) || calls.Load() != 1 {
-		t.Fatal("did not use exactly one request", calls.Load())
+	if !service.subWorkOne(context.Background()) || calls.Load() != 3 {
+		t.Fatal("did not test all three available models", calls.Load())
 	}
 	var state, raw string
 	store.db.QueryRow(`SELECT tool_use_state,tool_use::text FROM console_sub_targets WHERE account_id=$1 AND group_id=1`, id).Scan(&state, &raw)
 	var result subCapabilityResult
 	_ = json.Unmarshal([]byte(raw), &result)
-	if state != "done" || result.Status != "unsupported" || result.Model != "gpt-5.6-sol" || len(result.Attempts) != 1 || result.Attempts[0].Text != "NO_EXEC" {
+	if state != "done" || result.Status != "unsupported" || len(result.Models) != 3 || len(result.Attempts) != 3 || result.Attempts[1].Text != "NO_EXEC" {
 		t.Fatal(raw)
+	}
+	if result.Models[0].Result.Status != "supported" || result.Models[1].Result.Status != "unsupported" || result.Models[2].Result.Status != "error" {
+		t.Fatal("model results conflated", raw)
 	}
 	var after string
 	store.db.QueryRow(`SELECT jsonb_agg(result ORDER BY model)::text FROM console_sub_models WHERE account_id=$1`, id).Scan(&after)
@@ -246,7 +257,7 @@ func TestToolUseQueueRunsOneAvailableModelAndPreservesOtherChecks(t *testing.T) 
 	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &listed) != nil {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	if len(listed.Data) != 1 || listed.Data[0].Targets[0].ToolUse.Attempts[0].Usage.Status != "matched" {
+	if len(listed.Data) != 1 || listed.Data[0].Targets[0].ToolUse.Models[0].Result.Attempts[0].Usage.Status != "matched" {
 		t.Fatal("tool usage missing from accounts")
 	}
 	w = request("GET", "/v1/sub2api/accounts", "", foreign)
@@ -260,7 +271,66 @@ func TestToolUseQueueRunsOneAvailableModelAndPreservesOtherChecks(t *testing.T) 
 		t.Fatal(w.Code)
 	}
 	store.db.QueryRow(`SELECT tool_use_state FROM console_sub_targets WHERE account_id=$1 AND group_id=1`, id).Scan(&state)
-	if state != "interrupted" || service.subWorkOne(context.Background()) || calls.Load() != 1 {
+	if state != "interrupted" || service.subWorkOne(context.Background()) || calls.Load() != 3 {
 		t.Fatal("cancelled probes replayed")
+	}
+}
+
+func TestToolUseCompletedModelsSurviveInterruption(t *testing.T) {
+	dsn := os.Getenv("TEST_CONTROL_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("PostgreSQL required")
+	}
+	store, err := newControlStore(dsn, strings.Repeat("t", 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	id, job := "tools-progress-"+randomID()[:12], randomID()
+	defer store.db.Exec(`DELETE FROM console_sub_accounts WHERE id=$1`, id)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 2 {
+			// The first completed result must already be durable while the next
+			// request is still in flight, including when that request is cancelled.
+			var status string
+			if e := store.db.QueryRow(`SELECT tool_use->'models'->0->'result'->>'status' FROM console_sub_targets WHERE account_id=$1 AND group_id=1`, id).Scan(&status); e != nil || status != "supported" {
+				t.Errorf("first result not persisted before next probe: %q %v", status, e)
+			}
+			cancel()
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, toolUseSSE([]toolUseItem{validToolUseItem()}, nil))
+	}))
+	defer server.Close()
+	previous := subHTTP
+	subHTTP = server.Client()
+	defer func() { subHTTP = previous }()
+	key, _ := store.encrypt("probe-secret")
+	if _, err = store.db.Exec(`INSERT INTO console_sub_accounts(id,owner,name,base,email,encrypted_auth,state,job_id) VALUES($1,$1,'Fixture',$2,'fixture@example.com','','running',$3)`, id, server.URL, job); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.db.Exec(`INSERT INTO console_sub_targets(account_id,group_id,name,platform,encrypted_key,remote_key_id,tool_use_state) VALUES($1,1,'available','openai',$2,42,'queued')`, id, key); err != nil {
+		t.Fatal(err)
+	}
+	for _, model := range []string{"gpt-5.6-sol", "gpt-6-astra", "gpt-6-sol"} {
+		if _, err = store.db.Exec(`INSERT INTO console_sub_models(account_id,group_id,model,state,result) VALUES($1,1,$2,'done',$3)`, id, model, mustJSON(subResult{Model: model, Availability: subProbe{Status: "success"}})); err != nil {
+			t.Fatal(err)
+		}
+	}
+	service := &Service{control: store}
+	if service.subTestAllModelTools(ctx, id, server.URL, job) == nil || calls.Load() != 2 {
+		t.Fatal("interrupted job continued probing", calls.Load())
+	}
+	var raw []byte
+	if err = store.db.QueryRow(`SELECT tool_use FROM console_sub_targets WHERE account_id=$1 AND group_id=1`, id).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var result subCapabilityResult
+	if json.Unmarshal(raw, &result) != nil || len(result.Models) != 3 || result.Models[0].State != "done" || result.Models[0].Result.Status != "supported" || result.Models[1].State != "running" || result.Models[2].State != "queued" {
+		t.Fatal("partial results lost or unfinished models marked passed", string(raw))
 	}
 }

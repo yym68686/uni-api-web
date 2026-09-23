@@ -252,7 +252,9 @@ No model service settings or production routing are changed by this application.
 
 ### sub2api 检测
 
-Tool use 检测复用 Codex 的 `additional_tools` / namespace / custom `exec` 探针，通过 `/v1/responses` 请求恰好一次 `text("TOOL_PROBE_OK");` 工具调用。每个分组从最近检测可用的模型中选择一个，只发一次请求；常规模型检测完成后自动执行，也可按当前筛选范围独立批量检测或逐行重测。结果保存到 PostgreSQL，支持“支持工具调用 / 不支持工具调用 / 检测失败 / 未检测”筛选，详情展示检测模型、HTTP 状态、诊断及请求账单。
+Tool use 检测复用 Codex 的 `additional_tools` / namespace / custom `exec` 探针，通过 `/v1/responses` 请求恰好一次 `text("TOOL_PROBE_OK");` 工具调用。逐个检测渠道全部已验证可用的模型，每个模型独立保存结果；某个模型通过不会提前结束，失败不会阻止后续模型，中断保留已完成结果。站点渠道在常规模型检测完成后自动执行，也可按当前渠道筛选范围独立批量检测或逐行重测。原生配置渠道通过来源定向检测，每个可用模型独立排队，沿用现有并发限制。
+
+结果保存到 PostgreSQL，按模型支持“支持工具调用 / 不支持工具调用 / 检测失败 / 未检测”筛选，详情展示对应模型、HTTP 状态、诊断及请求账单。全部模型视图显示支持数量，只有全部可用模型通过才归为支持；旧记录只对当时实际检测的模型有效，其他模型须重新检测。添加站点或原生渠道时，不支持或检测失败的模型默认不勾选，并显示原因；可以手动勾选，编辑已有接入保留原选择。
 
 支持判定同时读取 `response.output_item.done` 和 `response.completed.output` 并去重：成功完成、恰好一个有效 `custom_tool_call`、名称 `functions.exec`（或 `namespace=functions,name=exec` / 未带 namespace 的 `exec`）、非空 `call_id`、输入为指定文本时通过。末尾 output 为空但前面已返回完整工具调用仍通过。`NO_EXEC`、普通文本、错误工具或参数、缺少调用 ID 均未通过；超时、限流、余额不足、鉴权失败和流中断保留为“检测失败”。仅明确拒绝工具协议的 HTTP 400/422 判不支持，其他 HTTP 错误不推断工具兼容性。只保存诊断，不执行返回的代码；单次结果不能证明渠道内部删除了工具，也不保证其他模型或所有工具协议可用。该检测不修改渠道路由及其他检测结果。
 

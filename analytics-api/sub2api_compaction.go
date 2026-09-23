@@ -16,11 +16,18 @@ import (
 )
 
 type subCapabilityResult struct {
-	Status    string     `json:"status"`
-	Model     string     `json:"model,omitempty"`
-	CheckedAt int64      `json:"checked_at"`
-	Message   string     `json:"message,omitempty"`
-	Attempts  []subProbe `json:"attempts"`
+	Models    []subToolUseModel `json:"models,omitempty"`
+	Status    string            `json:"status"`
+	Model     string            `json:"model,omitempty"`
+	CheckedAt int64             `json:"checked_at"`
+	Message   string            `json:"message,omitempty"`
+	Attempts  []subProbe        `json:"attempts"`
+}
+
+type subToolUseModel struct {
+	Model  string               `json:"model"`
+	State  string               `json:"state"`
+	Result *subCapabilityResult `json:"result,omitempty"`
 }
 
 type subCompaction = subCapabilityResult
@@ -231,11 +238,12 @@ func (s *Service) subTestCompactions(ctx context.Context, id, base, job string) 
 }
 
 func (s *Service) subTestCapability(ctx context.Context, id, base, job, kind string) error {
+	if kind == "tool_use" {
+		return s.subTestAllModelTools(ctx, id, base, job)
+	}
 	// SQL identifiers come only from this allowlist, never request data.
 	column, label, probeFn := "compaction", "压缩", subProbeCompaction
-	if kind == "tool_use" {
-		column, label, probeFn = "tool_use", "Tool use", subProbeToolUse
-	} else if kind != "compaction" {
+	if kind != "compaction" {
 		return errors.New("无效能力检测类型")
 	}
 	rows, err := s.control.db.QueryContext(ctx, `SELECT group_id,encrypted_key,remote_key_id,COALESCE((SELECT jsonb_agg(jsonb_build_object('model',m.model,'state',m.state,'result',m.result)) FROM console_sub_models m WHERE m.account_id=t.account_id AND m.group_id=t.group_id),'[]'::jsonb) FROM console_sub_targets t WHERE account_id=$1 AND active AND `+column+`_state='queued'`, id)
@@ -285,9 +293,6 @@ func (s *Service) subTestCapability(ctx context.Context, id, base, job, kind str
 		}
 		result := subCompaction{Status: "unsupported", Attempts: []subProbe{}}
 		models := subCompactionModels(t.models)
-		if kind == "tool_use" && len(models) > 1 {
-			models = models[:1]
-		}
 		if len(models) == 0 {
 			result.Status = "error"
 			result.Message = "没有已检测可用的模型，请先运行模型检测"
@@ -303,12 +308,6 @@ func (s *Service) subTestCapability(ctx context.Context, id, base, job, kind str
 			result.Attempts = append(result.Attempts, probe)
 			if ctx.Err() != nil {
 				return ctx.Err()
-			}
-			if kind == "tool_use" {
-				result.Status = probe.Status
-				result.Model = model
-				result.Message = probe.Message
-				break
 			}
 			if probe.Status == "supported" {
 				result.Status = "supported"
