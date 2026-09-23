@@ -32,6 +32,7 @@ export function ModelPositions({
   defaultPosition,
   onChange,
   disabled,
+  uniform = false,
 }: {
   models: string[];
   channels: PositionChannel[];
@@ -40,10 +41,16 @@ export function ModelPositions({
   defaultPosition: number;
   onChange: (positions: Record<string, number>) => void;
   disabled?: boolean;
+  uniform?: boolean;
 }) {
   return (
     <section className="model-positions">
-      <h4>逐模型调整位置</h4>
+      <h4>{uniform ? "各模型路由位置" : "逐模型微调"}</h4>
+      {uniform && (
+        <p className="sub-import-note">
+          当前使用统一位置。如需分别调整，请在上方位置选项中选择“逐模型微调”。
+        </p>
+      )}
       <div className="model-position-list">
         {models.map((model) => {
           const max = modelPositionLimit(model, channels, provider),

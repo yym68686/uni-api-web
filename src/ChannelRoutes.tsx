@@ -226,10 +226,11 @@ export function ConfiguredChannelDialog({
   ];
   const [key, setKey] = useState("");
   const [position, setPosition] = useState(1);
-  const [uniformApplied, setUniformApplied] = useState(true);
+  const [perModel, setPerModel] = useState(false);
   const [modelPositions, setModelPositions] = useState<Record<string, number>>(
     {},
   );
+  const activePositions = perModel ? modelPositions : {};
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -241,7 +242,7 @@ export function ConfiguredChannelDialog({
     setAdding(true);
     setKey(rows[0].api_key_id);
     setPosition(1);
-    setUniformApplied(false);
+    setPerModel(true);
     setModelPositions(
       Object.fromEntries(rows.map((r) => [r.model, r.position])),
     );
@@ -376,7 +377,7 @@ export function ConfiguredChannelDialog({
             position: Math.min(position, positions),
             positions: selectedModelPositions(
               mapping.models,
-              modelPositions,
+              activePositions,
               Math.min(position, positions),
             ),
           }),
@@ -458,7 +459,7 @@ export function ConfiguredChannelDialog({
                 modeChosen.current = true;
                 setAdding(true);
                 setEditingProvider("");
-                setUniformApplied(true);
+                setPerModel(false);
                 setModelPositions({});
                 setSelected(item.models);
                 setAliases([]);
@@ -569,6 +570,7 @@ export function ConfiguredChannelDialog({
                         setAliases([]);
                         setKey("");
                         setPosition(1);
+                        setPerModel(false);
                         setModelPositions({});
                         setError("");
                       }}
@@ -604,6 +606,7 @@ export function ConfiguredChannelDialog({
                         } else {
                           setKey(e.target.value);
                           setPosition(1);
+                          setPerModel(false);
                           setModelPositions({});
                         }
                       }}
@@ -629,24 +632,24 @@ export function ConfiguredChannelDialog({
                     </select>
                   </label>
                   <label className="sub-import-field">
-                    统一位置
+                    调整位置
                     <select
                       aria-label="渠道添加位置"
                       value={
-                        editingProvider && !uniformApplied
-                          ? ""
-                          : Math.min(position, positions)
+                        perModel ? "per-model" : Math.min(position, positions)
                       }
                       onChange={(e) => {
-                        setPosition(Number(e.target.value));
-                        setUniformApplied(true);
-                        setModelPositions({});
+                        if (e.target.value === "per-model") {
+                          setPerModel(true);
+                        } else {
+                          setPosition(Number(e.target.value));
+                          setPerModel(false);
+                          setModelPositions({});
+                        }
                       }}
                       disabled={busy || options.isFetching || !key}
                     >
-                      {editingProvider && !uniformApplied && (
-                        <option value="">保持各模型当前位置</option>
-                      )}
+                      <option value="per-model">逐模型微调</option>
                       {Array.from({ length: positions }, (_, i) => (
                         <option key={i} value={i + 1}>
                           第 {i + 1} 位
@@ -691,10 +694,11 @@ export function ConfiguredChannelDialog({
                   models={mapping.models}
                   channels={options.data?.channels || []}
                   provider={editingProvider}
-                  positions={modelPositions}
+                  positions={activePositions}
                   defaultPosition={Math.min(position, positions)}
                   onChange={setModelPositions}
-                  disabled={busy || options.isFetching || !key}
+                  disabled={busy || options.isFetching || !key || !perModel}
+                  uniform={!perModel}
                 />
                 <p className="muted">
                   {editingProvider
@@ -718,7 +722,8 @@ export function ConfiguredChannelDialog({
                       options.isError ||
                       mapping.models.some(
                         (m) =>
-                          (modelPositions[m] ?? Math.min(position, positions)) >
+                          (activePositions[m] ??
+                            Math.min(position, positions)) >
                           modelPositionLimit(
                             m,
                             options.data?.channels || [],

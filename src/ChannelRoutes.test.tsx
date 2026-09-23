@@ -84,6 +84,7 @@ it("edits one native caller key with independent model positions and refuses sta
   await user.click(await screen.findByRole("button", { name: "编辑 Key 1" }));
   const dialog = within(screen.getByRole("dialog", { name: "添加到渠道" }));
   expect(await dialog.findByLabelText("astra 的路由位置")).toHaveValue("2");
+  expect(dialog.getByLabelText("渠道添加位置")).toHaveValue("per-model");
   expect(dialog.getByLabelText("sol 的路由位置")).toHaveValue("1");
   await user.selectOptions(dialog.getByLabelText("astra 的路由位置"), "1");
   await user.selectOptions(dialog.getByLabelText("sol 的路由位置"), "2");
@@ -415,6 +416,7 @@ it("edits and adds through the selected source in a merged channel dialog", asyn
   await user.selectOptions(screen.getByLabelText("添加到 API key"), "same-key");
   await user.click(screen.getByRole("button", { name: "添加重命名" }));
   await user.type(screen.getByLabelText("重命名 1 对外模型名"), "public-alias");
+  await user.selectOptions(screen.getByLabelText("渠道添加位置"), "per-model");
   await user.selectOptions(screen.getByLabelText("only-do 的路由位置"), "2");
   await user.click(screen.getByRole("button", { name: "添加到渠道" }));
   await waitFor(() => expect(writes).toHaveLength(2));
@@ -516,6 +518,12 @@ it("loads model selection for each selected caller key and saves uniform plus pe
   await user.selectOptions(screen.getByLabelText("渠道添加位置"), "2");
   expect(screen.getByLabelText("astra 的路由位置")).toHaveValue("2");
   expect(screen.getByLabelText("sol 的路由位置")).toHaveValue("2");
+  expect(screen.getByLabelText("astra 的路由位置")).toBeDisabled();
+  expect(screen.getByLabelText("sol 的路由位置")).toBeDisabled();
+  await user.selectOptions(screen.getByLabelText("渠道添加位置"), "per-model");
+  expect(screen.getByLabelText("astra 的路由位置")).toBeEnabled();
+  expect(screen.getByLabelText("sol 的路由位置")).toBeEnabled();
+  expect(screen.getByLabelText("astra 的路由位置")).toHaveValue("2");
   await user.selectOptions(screen.getByLabelText("sol 的路由位置"), "1");
   await user.click(screen.getByRole("button", { name: "保存更改" }));
   await waitFor(() => expect(writes).toHaveLength(1));
@@ -588,9 +596,7 @@ it("opens unbound channels directly in the destination form and resets the key w
   await user.selectOptions(screen.getByLabelText("渠道添加位置"), "2");
   await user.selectOptions(screen.getByLabelText("添加到 uni-api 来源"), "do");
   expect(screen.getByLabelText("添加到 API key")).toHaveValue("");
-  expect(
-    screen.getByRole("button", { name: "添加到渠道" }),
-  ).toBeDisabled();
+  expect(screen.getByRole("button", { name: "添加到渠道" })).toBeDisabled();
   expect(
     screen.queryByRole("checkbox", { name: "model-fugue" }),
   ).not.toBeInTheDocument();
@@ -603,10 +609,14 @@ it("opens unbound channels directly in the destination form and resets the key w
     expect(screen.getByLabelText("渠道添加位置")).toBeEnabled(),
   );
   expect(screen.getByLabelText("渠道添加位置")).toHaveValue("1");
+  expect(screen.getByLabelText("model-do 的路由位置")).toBeDisabled();
+  await user.selectOptions(screen.getByLabelText("渠道添加位置"), "per-model");
+  expect(screen.getByLabelText("model-do 的路由位置")).toBeEnabled();
+  await user.selectOptions(screen.getByLabelText("model-do 的路由位置"), "1");
   await user.selectOptions(screen.getByLabelText("渠道添加位置"), "2");
-  await user.click(
-    screen.getByRole("button", { name: "添加到渠道" }),
-  );
+  expect(screen.getByLabelText("model-do 的路由位置")).toBeDisabled();
+  expect(screen.getByLabelText("model-do 的路由位置")).toHaveValue("2");
+  await user.click(screen.getByRole("button", { name: "添加到渠道" }));
   await waitFor(() => expect(writes).toHaveLength(1));
   expect(writes[0]).toMatchObject({
     source_id: "do",

@@ -143,9 +143,11 @@ export function Sub2apiImport({
   const [source, setSource] = useState("");
   const [key, setKey] = useState("");
   const [position, setPosition] = useState(1);
+  const [perModel, setPerModel] = useState(false);
   const [modelPositions, setModelPositions] = useState<Record<string, number>>(
     {},
   );
+  const activePositions = perModel ? modelPositions : {};
   const initializedPositions = useRef("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -235,6 +237,7 @@ export function Sub2apiImport({
       ),
     );
     setPosition(1);
+    setPerModel(true);
     setModelPositions({ ...item.positions });
     setError("");
     setSuccess("");
@@ -250,6 +253,7 @@ export function Sub2apiImport({
     setModelChoices({});
     setAliases([]);
     setPosition(1);
+    setPerModel(false);
     setModelPositions({});
     setError("");
     setSuccess("");
@@ -297,7 +301,7 @@ export function Sub2apiImport({
                   position: validPosition,
                   positions: selectedModelPositions(
                     models,
-                    modelPositions,
+                    activePositions,
                     validPosition,
                   ),
                 }
@@ -606,6 +610,7 @@ export function Sub2apiImport({
                         setSource(e.target.value);
                         setKey("");
                         setPosition(1);
+                        setPerModel(false);
                         setModelPositions({});
                         setError("");
                       }}
@@ -642,6 +647,7 @@ export function Sub2apiImport({
                       onChange={(e) => {
                         setKey(e.target.value);
                         setPosition(1);
+                        setPerModel(false);
                         setModelPositions({});
                       }}
                     >
@@ -657,13 +663,19 @@ export function Sub2apiImport({
                     {editing ? "调整位置" : "添加位置"}
                     <select
                       aria-label="渠道添加位置"
-                      value={validPosition}
+                      value={perModel ? "per-model" : validPosition}
                       disabled={!key || options.isFetching || busy}
                       onChange={(e) => {
-                        setPosition(Number(e.target.value));
-                        setModelPositions({});
+                        if (e.target.value === "per-model") {
+                          setPerModel(true);
+                        } else {
+                          setPosition(Number(e.target.value));
+                          setPerModel(false);
+                          setModelPositions({});
+                        }
                       }}
                     >
+                      <option value="per-model">逐模型微调</option>
                       {Array.from({ length: positions }, (_, i) => (
                         <option key={i} value={i + 1}>
                           第 {i + 1} 位{i === 0 ? " · 优先请求" : ""}
@@ -750,10 +762,11 @@ export function Sub2apiImport({
                   models={models}
                   channels={options.data?.channels || []}
                   provider={options.data?.provider}
-                  positions={modelPositions}
+                  positions={activePositions}
                   defaultPosition={validPosition}
                   onChange={setModelPositions}
-                  disabled={!key || options.isFetching || busy}
+                  disabled={!key || options.isFetching || busy || !perModel}
+                  uniform={!perModel}
                 />
                 <p className="sub-import-note">
                   仅对所选 key
@@ -821,7 +834,7 @@ export function Sub2apiImport({
                       options.isError ||
                       models.some(
                         (m) =>
-                          (modelPositions[m] ?? validPosition) >
+                          (activePositions[m] ?? validPosition) >
                           modelPositionLimit(
                             m,
                             options.data?.channels || [],

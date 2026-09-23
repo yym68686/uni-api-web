@@ -2934,5 +2934,6 @@ nav > button.active > svg {
 .model-position-list > label { display:flex; align-items:center; justify-content:space-between; gap:16px; }
 .model-position-list > label > span { min-width:0; overflow-wrap:anywhere; font-size:13px; }
 .model-position-list select { flex:0 0 110px; max-width:50%; padding:9px 10px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--text); }
+.model-position-list select:disabled { opacity: .5; cursor: not-allowed; }
 .route-edit-overlay { z-index: 85; }
 .route-edit-dialog { z-index: 90; }

@@ -894,6 +894,14 @@ it("preselects successful models and imports into the selected source key at the
     expect(within(dialog).getByLabelText("渠道添加位置")).toBeEnabled(),
   );
   await user.selectOptions(within(dialog).getByLabelText("渠道添加位置"), "2");
+  expect(within(dialog).getByLabelText("gpt-6-astra 的路由位置")).toBeDisabled();
+  expect(within(dialog).getByLabelText("gpt-5.6-sol 的路由位置")).toHaveValue("2");
+  await user.selectOptions(within(dialog).getByLabelText("渠道添加位置"), "per-model");
+  expect(within(dialog).getByLabelText("gpt-6-astra 的路由位置")).toBeEnabled();
+  await user.selectOptions(within(dialog).getByLabelText("gpt-6-astra 的路由位置"), "1");
+  await user.selectOptions(within(dialog).getByLabelText("渠道添加位置"), "2");
+  expect(within(dialog).getByLabelText("gpt-6-astra 的路由位置")).toHaveValue("2");
+  expect(within(dialog).getByLabelText("gpt-6-astra 的路由位置")).toBeDisabled();
   await user.click(within(dialog).getByRole("button", { name: "添加到渠道" }));
   await waitFor(() => expect(writes).toHaveLength(1));
   expect(writes[0]).toEqual({
@@ -1490,6 +1498,8 @@ it("lists imported keys, replaces exact models and deletes only the chosen bindi
   );
   expect(within(dialog).getByLabelText("gpt-6-astra 的路由位置")).toHaveValue("2");
   expect(within(dialog).getByLabelText("gpt-5.6-sol 的路由位置")).toHaveValue("1");
+  expect(within(dialog).getByLabelText("渠道添加位置")).toHaveValue("per-model");
+  expect(within(dialog).getByLabelText("gpt-6-astra 的路由位置")).toBeEnabled();
   await user.selectOptions(within(dialog).getByLabelText("gpt-6-astra 的路由位置"),"1");
   await user.click(
     within(dialog).getByRole("checkbox", { name: /gpt-5.6-sol/ }),
