@@ -11,7 +11,10 @@ import type { KeyInfo, ModelPrice } from "./types";
 import type { SubAccount, SubTarget } from "./Sub2apiChecks";
 import type { InstalledChannel, SubImportsQuery } from "./sub2apiImports";
 import { boundGroups } from "./sub2apiImports";
-import { ChannelRoutes, RouteModelTable } from "./ChannelRoutes";
+import { RouteModelTable } from "./ChannelRoutes";
+import { ChannelRouteEditor } from "./ChannelRouteEditor";
+import { channelBindingView } from "./channelBindingView";
+import type { ChannelRoute } from "./channelRouteData";
 import { providerRoutes, useAllChannelRoutes } from "./channelRouteData";
 import { ChannelSettings } from "./ChannelSettings";
 import { ModelAliases, aliasMappings } from "./ModelAliases";
@@ -117,9 +120,35 @@ export function Sub2apiImport({
     ? viewSource
     : viewSources[0]?.[0] || "";
   const sourceBindings = installed.filter((i) => i.source_id === activeSource);
-  const activeKey = sourceBindings.some((i) => i.api_key_id === viewKey)
+  const sourceRoutes =
+    configuredRoutes[configuredSources.indexOf(activeSource)];
+  const nativeRows = providerRoutes(
+    sourceRoutes?.data?.data || [],
+    configuredChannels
+      .filter((i) => i.source_id === activeSource)
+      .map((i) => i.provider),
+  );
+  const keyOptions = [
+    ...new Map(
+      [...sourceBindings, ...nativeRows].map((item) => [item.api_key_id, item]),
+    ).values(),
+  ].sort((a, b) => a.key_position - b.key_position);
+  const activeKey = keyOptions.some((i) => i.api_key_id === viewKey)
     ? viewKey
-    : sourceBindings[0]?.api_key_id || "";
+    : keyOptions[0]?.api_key_id || "";
+  const selectedKey = keyOptions.find((i) => i.api_key_id === activeKey);
+  const bindings = channelBindingView(
+    activeSource,
+    activeKey,
+    installed,
+    configuredChannels,
+    nativeRows,
+  );
+  const [editingRoutes, setEditingRoutes] = useState<{
+    source: string;
+    name: string;
+    rows: ChannelRoute[];
+  } | null>(null);
   const showForm =
     !!editing ||
     view === "new" ||
@@ -428,138 +457,199 @@ export function Sub2apiImport({
                       ))}
                     </select>
                   </label>
-                  {!!sourceBindings.length && (
-                    <label className="sub-import-field">
-                      API key
-                      <select
-                        aria-label="查看 API key"
-                        value={activeKey}
-                        onChange={(e) => {
-                          setViewKey(e.target.value);
-                          setRemoving(null);
-                        }}
-                      >
-                        {sourceBindings.map((item) => (
-                          <option key={item.api_key_id} value={item.api_key_id}>
-                            Key {item.key_position} · {item.key_prefix}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  )}
+                  <label className="sub-import-field">
+                    API key
+                    <select
+                      aria-label="查看 API key"
+                      value={activeKey}
+                      disabled={!keyOptions.length}
+                      onChange={(e) => {
+                        setViewKey(e.target.value);
+                        setRemoving(null);
+                      }}
+                    >
+                      {!keyOptions.length && (
+                        <option value="">
+                          {sourceRoutes?.isPending
+                            ? "正在读取路由…"
+                            : "暂无已接入的 API key"}
+                        </option>
+                      )}
+                      {keyOptions.map((item) => (
+                        <option key={item.api_key_id} value={item.api_key_id}>
+                          Key {item.key_position} · {item.key_prefix}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                 </div>
-                {installed.length > 0 && (
+                {sourceRoutes?.isPending && (
+                  <p role="status">
+                    <Spinner small />
+                    正在读取路由位置…
+                  </p>
+                )}
+                {(sourceRoutes?.error ||
+                  !!sourceRoutes?.data?.unavailable_keys?.length) && (
+                  <div role="alert" className="error-banner">
+                    {sourceRoutes.error?.message ||
+                      "部分 API key 路由暂不可用，当前列表不完整。"}
+                    <button
+                      type="button"
+                      className="button small"
+                      disabled={sourceRoutes.isFetching}
+                      onClick={() => void sourceRoutes.refetch()}
+                    >
+                      重新读取路由
+                    </button>
+                  </div>
+                )}
+                {!!bindings.length && selectedKey && (
                   <section className="sub-installed route-selected-binding">
-                    {sourceBindings
-                      .filter((item) => item.api_key_id === activeKey)
-                      .map((item) => (
-                        <article key={item.source_id + item.provider}>
-                          <div className="route-binding-heading">
+                    <article>
+                      <div className="route-binding-heading">
+                        <div>
+                          <strong>
+                            {
+                              viewSources.find(
+                                ([id]) => id === activeSource,
+                              )?.[1]
+                            }{" "}
+                            · Key {selectedKey.key_position}
+                          </strong>
+                          <small>
+                            {bindings.length} 个渠道 ·{" "}
+                            {bindings.reduce((n, b) => n + b.rows.length, 0)}{" "}
+                            条模型路由
+                          </small>
+                        </div>
+                      </div>
+                      <div className="route-binding-providers">
+                        {bindings.map((binding) => (
+                          <div
+                            className="route-binding-provider"
+                            key={binding.provider}
+                          >
                             <div>
-                              <strong>
-                                {item.source_name} · Key {item.key_position}
-                              </strong>
-                              <small>{item.models.length} 个模型</small>
+                              <strong>{binding.name}</strong>
+                              <small>
+                                {binding.installed ? "站点接入" : "配置渠道"} ·{" "}
+                                {binding.rows.length} 个模型
+                              </small>
                             </div>
                             <div className="sub-installed-actions">
-                              <button
-                                className="button small"
-                                disabled={busy || !item.manageable}
-                                onClick={() => edit(item)}
-                              >
-                                <Pencil size={13} />
-                                编辑
-                              </button>
-                              <button
-                                className="button small"
-                                disabled={busy || !item.manageable}
-                                onClick={() => {
-                                  setRemoving(item);
-                                  setError("");
-                                }}
-                              >
-                                <Trash2 size={13} />
-                                删除
-                              </button>
+                              {binding.installed ? (
+                                <>
+                                  <button
+                                    className="button small"
+                                    disabled={
+                                      busy || !binding.installed.manageable
+                                    }
+                                    onClick={() => edit(binding.installed!)}
+                                  >
+                                    <Pencil size={13} />
+                                    编辑
+                                  </button>
+                                  <button
+                                    className="button small"
+                                    disabled={
+                                      busy || !binding.installed.manageable
+                                    }
+                                    onClick={() => {
+                                      setRemoving(binding.installed!);
+                                      setError("");
+                                    }}
+                                  >
+                                    <Trash2 size={13} />
+                                    删除
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <button
+                                    className="button small"
+                                    aria-label={`编辑 ${binding.name} 的路由`}
+                                    onClick={() =>
+                                      setEditingRoutes({
+                                        source: activeSource,
+                                        name:
+                                          viewSources.find(
+                                            ([id]) => id === activeSource,
+                                          )?.[1] || "",
+                                        rows: binding.rows,
+                                      })
+                                    }
+                                  >
+                                    <Pencil size={13} />
+                                    编辑路由
+                                  </button>
+                                  <ChannelSettings
+                                    row={{
+                                      provider: binding.provider,
+                                      provider_name: binding.name,
+                                      source_id: activeSource,
+                                      source_name:
+                                        binding.configured?.source_name,
+                                      model: binding.rows[0]?.model || "",
+                                    }}
+                                  />
+                                </>
+                              )}
                             </div>
-                          </div>
-                          <RouteModelTable
-                            rows={item.models.map((model) => ({
-                              model,
-                              upstream_model: item.model_mappings?.[model],
-                              position: item.positions[model],
-                            }))}
-                          />
-                          {!item.manageable && (
-                            <small>
-                              此来源需要更新 uni-api 后才能编辑和删除。
-                            </small>
-                          )}
-                          {removing?.provider === item.provider &&
-                            removing?.source_id === item.source_id && (
-                              <div className="sub-remove" role="alert">
-                                从此 API key 移除此临时渠道？
-                                <button
-                                  className="button small"
-                                  disabled={busy}
-                                  onClick={() =>
-                                    void mutate("delete", removing)
-                                  }
-                                >
-                                  确认删除
-                                </button>
-                                <button
-                                  className="button small"
-                                  disabled={busy}
-                                  onClick={() => setRemoving(null)}
-                                >
-                                  取消
-                                </button>
-                              </div>
-                            )}
-                        </article>
-                      ))}
-                  </section>
-                )}
-                {configuredSources
-                  .filter((source) => source === activeSource)
-                  .map((source) => (
-                    <section className="sub-installed" key={source}>
-                      <h3>
-                        已有渠道 ·{" "}
-                        {
-                          configuredChannels.find((i) => i.source_id === source)
-                            ?.source_name
-                        }
-                      </h3>
-                      <ChannelRoutes
-                        sourceId={source}
-                        providers={configuredChannels
-                          .filter((i) => i.source_id === source)
-                          .map((i) => i.provider)}
-                      />
-                      {configuredChannels
-                        .filter((i) => i.source_id === source)
-                        .map((item) => (
-                          <div
-                            className="sub-installed-actions"
-                            key={item.provider}
-                          >
-                            <span>{item.name}</span>
-                            <ChannelSettings
-                              row={{
-                                provider: item.provider,
-                                provider_name: item.name,
-                                source_id: item.source_id,
-                                source_name: item.source_name,
-                                model:
-                                  item.models[0] || target.result?.model || "",
-                              }}
-                            />
+                            {binding.installed &&
+                              !binding.installed.manageable && (
+                                <small className="route-binding-notice">
+                                  此来源需要更新 uni-api 后才能编辑和删除。
+                                </small>
+                              )}
                           </div>
                         ))}
-                    </section>
-                  ))}
+                      </div>
+                      <RouteModelTable
+                        showChannel={bindings.length > 1}
+                        rows={bindings
+                          .flatMap((binding) =>
+                            binding.rows.map((row) => ({
+                              ...row,
+                              channel: binding.name,
+                            })),
+                          )
+                          .sort(
+                            (a, b) =>
+                              a.model.localeCompare(b.model) ||
+                              (a.position || 0) - (b.position || 0),
+                          )}
+                      />
+                      {removing &&
+                        removing.source_id === activeSource &&
+                        removing.api_key_id === activeKey && (
+                          <div className="sub-remove" role="alert">
+                            从此 API key 移除 {removing.name} 临时渠道？
+                            <button
+                              className="button small"
+                              disabled={busy}
+                              onClick={() => void mutate("delete", removing)}
+                            >
+                              确认删除
+                            </button>
+                            <button
+                              className="button small"
+                              disabled={busy}
+                              onClick={() => setRemoving(null)}
+                            >
+                              取消
+                            </button>
+                          </div>
+                        )}
+                    </article>
+                  </section>
+                )}
+                {!bindings.length &&
+                  !!viewSources.length &&
+                  !sourceRoutes?.isPending &&
+                  !sourceRoutes?.error && (
+                    <p className="route-empty">此来源暂无已接入的路由。</p>
+                  )}
                 {!installed.length &&
                   !configuredChannels.length &&
                   !imports.isPending && (
@@ -853,6 +943,14 @@ export function Sub2apiImport({
               </form>
             )}
           </div>
+          {editingRoutes && (
+            <ChannelRouteEditor
+              sourceId={editingRoutes.source}
+              sourceName={editingRoutes.name}
+              rows={editingRoutes.rows}
+              close={() => setEditingRoutes(null)}
+            />
+          )}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

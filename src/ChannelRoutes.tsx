@@ -167,14 +167,22 @@ export function ChannelRoutes({
 
 export function RouteModelTable({
   rows,
+  showChannel = false,
 }: {
-  rows: { model: string; upstream_model?: string; position?: number }[];
+  rows: {
+    model: string;
+    upstream_model?: string;
+    position?: number;
+    channel?: string;
+  }[];
+  showChannel?: boolean;
 }) {
   return (
     <div className="route-model-table">
       <table aria-label="当前模型路由">
         <thead>
           <tr>
+            {showChannel && <th>渠道</th>}
             <th>原来的名字</th>
             <th>重命名后的名字</th>
             <th>路由位置</th>
@@ -183,6 +191,7 @@ export function RouteModelTable({
         <tbody>
           {rows.map((row, i) => (
             <tr key={`${row.model}:${i}`}>
+              {showChannel && <td>{row.channel}</td>}
               <td>{row.upstream_model || row.model}</td>
               <td>{row.model}</td>
               <td>{row.position ? `第 ${row.position} 位` : "默认顺序"}</td>

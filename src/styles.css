@@ -2523,6 +2523,12 @@ nav > button.active > svg {
 .route-binding-heading { padding: 14px 18px; background: var(--subtle); }
 .route-binding-heading strong { color: var(--ink); font-size: 13px; }
 .route-binding-heading small { display: block; font-size: 11px; }
+.route-binding-providers { padding: 0 18px; }
+.route-binding-provider { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.route-binding-provider strong { color: var(--ink); font-size: 12px; }
+.route-binding-provider small { display: block; font-size: 11px; }
+.route-binding-provider .route-binding-notice { flex-basis: 100%; }
+.route-binding-provider .sub-installed-actions { flex-wrap: wrap; }
 .route-model-table { overflow: auto; max-height: 380px; }
 .route-workspace .route-model-table { color: var(--ink); }
 .route-model-table table { width: 100%; border-collapse: collapse; font-size: 12px; }
