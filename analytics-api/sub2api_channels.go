@@ -385,5 +385,5 @@ func (s *Service) subManageChannel(w http.ResponseWriter, r *http.Request) {
 	if in.Action == "replace" {
 		message = "临时渠道已更新"
 	}
-	writeJSON(w, 200, map[string]string{"message": message})
+	writeJSON(w, 200, map[string]any{"message": message, "revision": applied["revision"]})
 }

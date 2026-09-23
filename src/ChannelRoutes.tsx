@@ -5,6 +5,8 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { Plus, X } from "lucide-react";
 import { controlRequest } from "./api";
 import { Spinner } from "./ui";
+import { ChannelBatchApply } from "./ChannelBatchApply";
+import type { BatchPart, BatchDraft, BatchScope } from "./channelBatch";
 import {
   ChannelBindingActions,
   RemoveConfiguredBinding,
@@ -200,10 +202,12 @@ export function ConfiguredChannelDialog({
   item: group,
   close,
   initialEdit,
+  batchScope,
 }: {
   item: ManagedChannel;
   close: () => void;
   initialEdit?: ChannelRoute[];
+  batchScope?: BatchScope;
 }) {
   const client = useQueryClient();
   const members = channelMembers(group);
@@ -362,6 +366,18 @@ export function ConfiguredChannelDialog({
         ),
       )
     : 1;
+  function batchDraft(part:BatchPart):BatchDraft {
+    const resolve=(m:string)=>item.model_mappings?.[m]||m;
+    const originals=Object.fromEntries(selected.map(m=>[m,resolve(m)]));
+    const renamed=Object.fromEntries(Object.entries(mapping.mappings).map(([name,m])=>[name,resolve(m)]));
+    return {part,name:group.name,scope:batchScope||{kind:"configured",source:item.source_id,provider:item.provider},originals,aliases:renamed,models:{...originals,...renamed},positions:selectedModelPositions(mapping.models,activePositions,Math.min(position,positions)),anchor:{source:item.source_id,key,provider:editingProvider,revision:options.data?.revision||""}};
+  }
+  function batchButton(part:BatchPart,section?:string) {
+    if(!editingProvider)return undefined;
+    return <ChannelBatchApply section={section} draft={()=>batchDraft(part)}
+      disabled={busy||options.isFetching||options.isError||!options.data||!key||(part!=="models"&&!!mapping.error)||((part==="all"||part==="positions")&&!mapping.models.length)}
+      onApplied={()=>{setSuccess("批量操作结果已更新，请核对各来源接入状态。");setAdding(false);if(initialEdit)close();}}/>;
+  }
   async function save() {
     if (
       busy ||
@@ -503,6 +519,8 @@ export function ConfiguredChannelDialog({
                       ? `已添加到 ${counts.partial ? "至少 " : ""}${counts.count} 个 API key`
                       : "正在读取接入状态…"}
                   </h3>
+                  <ChannelBatchApply remove draft={()=>batchDraft("delete")} disabled={busy||!counts?.count||counts.partial}
+                    onApplied={()=>{setSuccess("批量删除结果已更新，请核对各来源接入状态。");if(initialEdit)close();}}/>
                 </div>
                 <ChannelRoutes
                   key={item.source_id}
@@ -670,7 +688,7 @@ export function ConfiguredChannelDialog({
                   </label>
                 </div>
                 <fieldset disabled={busy || options.isFetching || toolDefaultsPending || toolDefaultsError}>
-                  <legend>原模型</legend>
+                  <legend className="model-alias-heading batch-model-heading"><span>原模型</span>{batchButton("models","模型勾选")}</legend>
                   <div className="sub-model-options">
                     {item.models.map((model) => (
                       <label key={model}>
@@ -694,6 +712,7 @@ export function ConfiguredChannelDialog({
                   </div>
                 </fieldset>
                 <ModelAliases
+                  actions={batchButton("aliases","模型重命名")}
                   models={modelOptions}
                   aliases={aliases}
                   onChange={setAliases}
@@ -705,6 +724,7 @@ export function ConfiguredChannelDialog({
                   </p>
                 )}
                 <ModelPositions
+                  actions={batchButton("positions","路由位置")}
                   models={mapping.models}
                   channels={options.data?.channels || []}
                   provider={editingProvider}
@@ -716,10 +736,11 @@ export function ConfiguredChannelDialog({
                 />
                 <p className="muted">
                   {editingProvider
-                    ? "只修改当前选中的 API key；切换 API key 会载入该 Key 已保存的模型和位置。"
+                    ? "保存更改仅更新当前 API key；各项“应用此项于所有”只同步对应设置，底部按钮可同步全部设置。"
                     : "只对所选 API key 开放勾选的原模型和填写的对外模型名。"}
                 </p>
                 <div className="sub-import-actions">
+                  {batchButton("all")}
                   <button
                     type="button"
                     className="button"

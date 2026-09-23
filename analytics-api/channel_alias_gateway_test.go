@@ -255,6 +255,15 @@ func TestModelAliasesServeBothNamesWithRealGateway(t *testing.T) {
 		if w.Code != want {
 			t.Fatal(w.Code, w.Body.String())
 		}
+		if want == 200 {
+			var result struct {
+				Revision string `json:"revision"`
+			}
+			state, _, _ := subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
+			if json.Unmarshal(w.Body.Bytes(), &result) != nil || result.Revision == "" || result.Revision != state["revision"] {
+				t.Fatal("missing route mutation revision", w.Body.String())
+			}
+		}
 	}
 	staleRevision := state["revision"].(string)
 	patchRoutes(staleRevision, 200)
@@ -281,6 +290,13 @@ func TestModelAliasesServeBothNamesWithRealGateway(t *testing.T) {
 	service.Handler().ServeHTTP(resEdit, reqEdit)
 	if resEdit.Code != 200 {
 		t.Fatal(resEdit.Code, resEdit.Body.String())
+	}
+	var editResult struct {
+		Revision string `json:"revision"`
+	}
+	currentState, _, _ := subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
+	if json.Unmarshal(resEdit.Body.Bytes(), &editResult) != nil || editResult.Revision == "" || editResult.Revision != currentState["revision"] {
+		t.Fatal("missing applied edit revision", resEdit.Body.String())
 	}
 	catalog, _, _ = fetchSource(ctx, src, "/v1/model-channels", url.Values{"api_key_id": {key}, "endpoint": {"all"}, "stream": {"all"}})
 	var ordered []struct {
@@ -436,6 +452,15 @@ func TestModelAliasesServeBothNamesWithRealGateway(t *testing.T) {
 		service.Handler().ServeHTTP(res, req)
 		if res.Code != want {
 			t.Fatalf("remove %s: %d %s", provider, res.Code, res.Body.String())
+		}
+		if want == 200 {
+			var result struct {
+				Revision string `json:"revision"`
+			}
+			state, _, _ := subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
+			if json.Unmarshal(res.Body.Bytes(), &result) != nil || result.Revision == "" || result.Revision != state["revision"] {
+				t.Fatal("missing deletion revision", res.Body.String())
+			}
 		}
 	}
 	state, _, _ = subGateway(ctx, src, "GET", "/v1/channel-controls", nil)

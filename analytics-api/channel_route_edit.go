@@ -135,6 +135,17 @@ func (s *Service) editChannelRoutes(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "路由读取失败", 503)
 		return
 	}
+	// Use the same effective catalog as channel-options/channel-routes. A
+	// key-owned copy suppresses its native provider; that hidden provider must
+	// not consume a position when applying the reviewed visible order.
+	excluded := configuredExcluded(state, key)
+	visible := catalog[:0]
+	for _, row := range catalog {
+		if !excluded[row.Provider] {
+			visible = append(visible, row)
+		}
+	}
+	catalog = visible
 	if err = applyRouteMoves(&snapshot, key, catalog, in.Moves); err != nil {
 		http.Error(w, err.Error(), 409)
 		return
@@ -152,5 +163,5 @@ func (s *Service) editChannelRoutes(w http.ResponseWriter, r *http.Request) {
 		retentionFailure(w, err)
 		return
 	}
-	writeJSON(w, 200, map[string]string{"message": "各模型路由位置已保存"})
+	writeJSON(w, 200, map[string]any{"message": "各模型路由位置已保存", "revision": applied["revision"]})
 }

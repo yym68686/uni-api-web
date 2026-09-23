@@ -174,6 +174,12 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 	if w = request("PATCH", session, in); w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}
+	var savedRevision struct {
+		Revision string `json:"revision"`
+	}
+	if json.Unmarshal(w.Body.Bytes(), &savedRevision) != nil || savedRevision.Revision != revision {
+		t.Fatal("missing exact applied revision", w.Body.String())
+	}
 	if len(models) != 1 || last["provider"] != provider || last["action"] != "replace" {
 		t.Fatal("wrong replacement", last)
 	}
@@ -188,6 +194,9 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 	in.Models = nil
 	if w = request("PATCH", session, in); w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
+	}
+	if json.Unmarshal(w.Body.Bytes(), &savedRevision) != nil || savedRevision.Revision != revision {
+		t.Fatal("missing deletion revision", w.Body.String())
 	}
 	if _, ok := last["models"]; ok {
 		t.Fatal("delete must not send replacement models")

@@ -133,5 +133,5 @@ func (s *Service) removeConfiguredBinding(w http.ResponseWriter, r *http.Request
 		retentionFailure(w, err)
 		return
 	}
-	writeJSON(w, 200, map[string]string{"message": "已从当前 API key 移除渠道"})
+	writeJSON(w, 200, map[string]any{"message": "已从当前 API key 移除渠道", "revision": applied["revision"]})
 }

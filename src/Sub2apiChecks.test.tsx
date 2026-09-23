@@ -1542,6 +1542,10 @@ it("lists imported keys, replaces exact models and deletes only the chosen bindi
   expect(within(dialog).getByLabelText("gpt-6-astra 的路由位置")).toHaveValue("2");
   expect(within(dialog).getByLabelText("gpt-5.6-sol 的路由位置")).toHaveValue("1");
   expect(within(dialog).getByLabelText("渠道添加位置")).toHaveValue("per-model");
+  for (const section of ["模型勾选", "模型重命名", "路由位置"]) {
+    expect(within(dialog).getByRole("button", { name: `将${section}应用于所有已保存渠道` })).toBeEnabled();
+  }
+  expect(within(dialog).getByRole("button", { name: "应用全部于所有已保存渠道" })).toBeEnabled();
   expect(within(dialog).getByLabelText("gpt-6-astra 的路由位置")).toBeEnabled();
   await user.selectOptions(within(dialog).getByLabelText("gpt-6-astra 的路由位置"),"1");
   await user.click(

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 export interface PositionChannel {
   provider: string;
   model: string;
@@ -33,6 +34,7 @@ export function ModelPositions({
   onChange,
   disabled,
   uniform = false,
+  actions,
 }: {
   models: string[];
   channels: PositionChannel[];
@@ -42,10 +44,14 @@ export function ModelPositions({
   onChange: (positions: Record<string, number>) => void;
   disabled?: boolean;
   uniform?: boolean;
+  actions?: ReactNode;
 }) {
   return (
     <section className="model-positions">
-      <h4>{uniform ? "各模型路由位置" : "逐模型微调"}</h4>
+      <div className="model-alias-heading">
+        <h4>{uniform ? "各模型路由位置" : "逐模型微调"}</h4>
+        {actions}
+      </div>
       {uniform && (
         <p className="sub-import-note">
           当前使用统一位置。如需分别调整，请在上方位置选项中选择“逐模型微调”。

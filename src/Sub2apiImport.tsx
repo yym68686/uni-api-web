@@ -4,6 +4,8 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { Plus, Trash2, X } from "lucide-react";
 import { controlRequest } from "./api";
 import { Spinner } from "./ui";
+import { ChannelBatchApply } from "./ChannelBatchApply";
+import type { BatchPart, BatchDraft } from "./channelBatch";
 import type { ConsoleSourcesQuery } from "./consoleSources";
 import {toolUseFailed,modelToolUse,toolUseLabels} from "./toolUse";
 import { CompactionStatus } from "./SubCompaction";
@@ -252,6 +254,16 @@ export function Sub2apiImport({
   );
   const stale =
     !!editing && !!options.data && editing.revision !== options.data.revision;
+  function batchDraft(part:BatchPart):BatchDraft {
+    const originalModels=Object.fromEntries(originals.map(m=>[m,m]));
+    return {part,name:`${account.name} / ${target.name}`,scope:{kind:"site",account:account.id,group:target.group_id},originals:originalModels,aliases:mapping.mappings,models:{...originalModels,...mapping.mappings},positions:selectedModelPositions(models,activePositions,validPosition),anchor:{source:editing?.source_id||activeSource,key:editing?.api_key_id||activeKey,provider:editing?.provider||"",revision:editing?.revision||""}};
+  }
+  function batchButton(part:BatchPart,section?:string) {
+    if(!editing)return undefined;
+    return <ChannelBatchApply section={section} draft={()=>batchDraft(part)}
+      disabled={busy||stale||options.isFetching||options.isError||!options.data?.manageable||!source||!key||(part!=="models"&&!!mapping.error)||((part==="all"||part==="positions")&&!models.length)}
+      onApplied={()=>{setEditing(null);setView("existing");setSuccess("批量操作结果已更新，请核对各来源接入状态。");}}/>;
+  }
   function edit(item: InstalledChannel) {
     initializedPositions.current = "";
     setEditing(item);
@@ -442,6 +454,11 @@ export function Sub2apiImport({
             )}
             {!showForm && (
               <>
+                <div className="route-section-heading">
+                  <h3>已保存接入</h3>
+                  <ChannelBatchApply remove onPreview={()=>setView("existing")} draft={()=>batchDraft("delete")} disabled={busy||partialBindings||!boundKeys.size}
+                    onApplied={()=>{setEditing(null);setView("existing");setSuccess("批量删除结果已更新，请核对各来源接入状态。");}}/>
+                </div>
                 <div className="route-destination-grid route-browse-selectors">
                   <label className="sub-import-field">
                     uni-api 来源
@@ -786,7 +803,7 @@ export function Sub2apiImport({
                   </p>
                 )}
                 <fieldset disabled={busy}>
-                  <legend>模型</legend>
+                  <legend className="model-alias-heading batch-model-heading"><span>模型</span>{batchButton("models","模型勾选")}</legend>
                   <div className="sub-model-options">
                     {checks.map((check) => (
                       <label key={check.model}>
@@ -821,6 +838,7 @@ export function Sub2apiImport({
                   </div>
                 </fieldset>
                 <ModelAliases
+                  actions={batchButton("aliases","模型重命名")}
                   models={[
                     ...new Set([
                       ...available,
@@ -856,6 +874,7 @@ export function Sub2apiImport({
                   </div>
                 )}
                 <ModelPositions
+                  actions={batchButton("positions","路由位置")}
                   models={models}
                   channels={options.data?.channels || []}
                   provider={options.data?.provider}
@@ -866,8 +885,7 @@ export function Sub2apiImport({
                   uniform={!perModel}
                 />
                 <p className="sub-import-note">
-                  仅对所选 key
-                  和模型生效。开启“保留临时配置”时，来源重启后自动恢复。
+                  {editing ? "保存更改仅更新当前 API key；分项按钮只同步对应设置，底部按钮可同步全部设置。" : "仅对所选 key 和模型生效。"}开启“保留临时配置”时，来源重启后自动恢复。
                 </p>
                 {source && options.data && !options.data.supported && (
                   <div role="alert" className="error-banner">
@@ -905,6 +923,7 @@ export function Sub2apiImport({
                   </div>
                 )}
                 <div className="sub-import-actions">
+                  {batchButton("all")}
                   <button
                     className="button"
                     type="button"
@@ -953,6 +972,7 @@ export function Sub2apiImport({
           {editingNative && (
             <ConfiguredChannelDialog
               item={editingNative.item}
+              batchScope={{kind:"site",account:account.id,group:target.group_id}}
               initialEdit={editingNative.rows}
               close={() => setEditingNative(null)}
             />

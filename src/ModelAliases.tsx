@@ -1,4 +1,5 @@
 import { Plus, Trash2 } from "lucide-react";
+import type { ReactNode } from "react";
 
 export interface ModelAlias {
   upstream: string;
@@ -32,27 +33,32 @@ export function ModelAliases({
   aliases,
   onChange,
   disabled = false,
+  actions,
 }: {
   models: string[];
   aliases: ModelAlias[];
   onChange: (aliases: ModelAlias[]) => void;
   disabled?: boolean;
+  actions?: ReactNode;
 }) {
   return (
     <section className="model-aliases">
       <div className="model-alias-heading">
         <h4>模型重命名</h4>
-        <button
-          type="button"
-          className="button small"
-          disabled={disabled || !models.length}
-          onClick={() =>
-            onChange([...aliases, { upstream: models[0], public: "" }])
-          }
-        >
-          <Plus size={13} />
-          添加重命名
-        </button>
+        <div className="model-section-actions">
+          {actions}
+          <button
+            type="button"
+            className="button small"
+            disabled={disabled || !models.length}
+            onClick={() =>
+              onChange([...aliases, { upstream: models[0], public: "" }])
+            }
+          >
+            <Plus size={13} />
+            添加重命名
+          </button>
+        </div>
       </div>
       <p className="muted">
         对外模型名用于客户端请求和模型筛选。原模型仍可在上方单独勾选。

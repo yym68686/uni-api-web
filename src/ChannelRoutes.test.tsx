@@ -86,6 +86,10 @@ it("edits one native caller key with independent model positions and refuses sta
   expect(await dialog.findByLabelText("astra 的路由位置")).toHaveValue("2");
   expect(dialog.getByLabelText("渠道添加位置")).toHaveValue("per-model");
   expect(dialog.getByLabelText("sol 的路由位置")).toHaveValue("1");
+  for (const section of ["模型勾选", "模型重命名", "路由位置"]) {
+    expect(dialog.getByRole("button", {name:`将${section}应用于所有已保存渠道`})).toBeEnabled();
+  }
+  expect(dialog.getByRole("button", {name:"应用全部于所有已保存渠道"})).toBeEnabled();
   await user.selectOptions(dialog.getByLabelText("astra 的路由位置"), "1");
   await user.selectOptions(dialog.getByLabelText("sol 的路由位置"), "2");
   stale = true;

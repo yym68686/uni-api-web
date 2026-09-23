@@ -331,5 +331,5 @@ func (s *Service) configuredImport(w http.ResponseWriter, r *http.Request) {
 	if in.EditProvider != "" {
 		message = "模型与各自路由位置已更新"
 	}
-	writeJSON(w, 200, map[string]any{"provider": provider, "message": message})
+	writeJSON(w, 200, map[string]any{"provider": provider, "message": message, "revision": applied["revision"]})
 }
