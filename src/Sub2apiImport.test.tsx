@@ -210,6 +210,13 @@ it("uses one source/key selector and one table for native and imported routes, p
   expect(screen.getByRole("table")).toHaveTextContent("do-only");
   expect(screen.getByRole("table")).not.toHaveTextContent("native-only");
   await user.click(screen.getAllByRole("button", { name: "删除" })[0]);
+  let confirmation = within(screen.getByRole("dialog", { name: "删除渠道接入" }));
+  expect(confirmation.getByText("DigitalOcean · Key 1")).toBeVisible();
+  expect(confirmation.getByText("站点接入-do")).toBeVisible();
+  await user.click(confirmation.getByRole("button", { name: "取消" }));
+  expect(writes).toHaveLength(1);
+  expect(screen.queryByRole("dialog", { name: "删除渠道接入" })).not.toBeInTheDocument();
+  await user.click(screen.getAllByRole("button", { name: "删除" })[0]);
   await user.click(screen.getByRole("button", { name: "确认删除" }));
   await waitFor(() => expect(writes).toHaveLength(2));
   expect(writes[1].body).toMatchObject({
