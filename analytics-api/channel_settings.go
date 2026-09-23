@@ -232,6 +232,20 @@ func (s *Service) applyChannelSettings(w http.ResponseWriter, r *http.Request, i
 		http.Error(w, "请在来源设置启用保留临时配置，确保渠道设置可以重启恢复", 409)
 		return
 	}
+	original, err := s.control.source(ctx, src.ID)
+	if err != nil {
+		http.Error(w, "来源读取失败", 503)
+		return
+	}
+	state, err := s.reconcileControls(ctx, original)
+	if err != nil {
+		http.Error(w, err.Error(), 409)
+		return
+	}
+	if state["revision"] != in.Revision {
+		http.Error(w, "配置已更新或已完成重启恢复，请刷新后重新编辑；本次修改尚未发送", 409)
+		return
+	}
 	// Prepare and persist recoverable intent before touching the gateway.
 	preview, code, err := s.settingsGateway(ctx, src, "POST", "/v1/channel-settings/validate", in)
 	if err != nil {

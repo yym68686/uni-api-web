@@ -34,7 +34,7 @@ func TestSettingsApplyRetainsEncryptedIntentAndRecoversLostACK(t *testing.T) {
 	candidate := map[string]any{"one": map[string]any{"set": map[string]any{"/api": "new-private-key", "/preferences/post_body_parameter_overrides/instructions": "<hello> 中文"}, "remove": []string{}}}
 	intent := map[string]any{"settings": candidate, "temporary_definitions": map[string]any{}}
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer admin-secret" {
+		if r.Header.Get("Authorization") != "Bearer admin-secret" && !(r.URL.Path == "/v1/channel-controls" && r.Header.Get("Authorization") == "Bearer catalog-key") {
 			t.Error("configuration did not use the dedicated admin key")
 		}
 		switch r.URL.Path {
@@ -69,6 +69,15 @@ func TestSettingsApplyRetainsEncryptedIntentAndRecoversLostACK(t *testing.T) {
 	defer upstream.Close()
 	src := controlSource{sourceView: sourceView{ID: id, Name: "settings", Base: upstream.URL}, Key: "catalog-key", ConfigKey: "admin-secret"}
 	if _, err = store.saveSource(ctx, src, false); err != nil {
+		t.Fatal(err)
+	}
+	// Settings edits must adopt an equivalent replacement before mutating it.
+	// Otherwise saving the successful edit is rejected as a different instance.
+	beforeBoot, _ := store.encrypt(`{"version":1,"rules":[],"temporary_channels":[]}`)
+	if _, err = store.retainedRecord(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.db.Exec(`UPDATE console_control_snapshots SET encrypted_snapshot=$2,target_hash=$3,instance_id='boot-1',revision='old:1' WHERE source_id=$1`, id, beforeBoot, controlTarget(src)); err != nil {
 		t.Fatal(err)
 	}
 	svc := &Service{control: store}
