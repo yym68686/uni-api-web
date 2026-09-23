@@ -20,7 +20,7 @@ export function PriceStatus({ check, prices }: { check: SubModelCheck; prices?: 
   const result = assessPrice(check, prices);
   const actual = result.usage;
   return <div className="sub-price-status">
-    <Tip text={result.expected ? `价格设置：${pricePair(result.expected.input, result.expected.output)} · 倍率前 · 美元／百万 token${actual?.message ? ` · ${actual.message}` : ""}` : actual?.message || "尚无可确认的请求账单和参考价格"}>
+    <Tip text={result.expected ? `价格设置：${pricePair(result.expected.input, result.expected.output)}${!result.expected.verified ? "（参考价未确认）" : ""} · 倍率前 · 美元／百万 token${result.comparison === "match" ? " · 与定价匹配" : result.comparison === "mismatch" ? " · 与定价不匹配" : " · 样本不足，无法比较"}${actual?.message ? ` · ${actual.message}` : ""}` : actual?.message || "尚无可确认的请求账单和参考价格"}>
       <span className={`check-status ${result.status === "abnormal" ? "fail" : result.status === "normal" ? "pass" : "inconclusive"}`}>
         {result.status === "pending" && <Spinner small />}{result.label}
       </span>

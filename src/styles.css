@@ -2424,6 +2424,7 @@ nav > button.active > svg {
 .sub-filters:focus-visible { outline:2px solid var(--green); outline-offset:2px; border-radius:6px; }
 .sub-filters .select-field { flex:0 0 auto; width:104px; min-width:0; max-width:none; height:35px; white-space:nowrap; }
 .sub-filters .select-field:first-child { width:150px; }
+.sub-filters .select-field.sub-price-filter { width: 168px; }
 .sub-filters .select-field:nth-child(2) { width:164px; }
 .sub-filters .select-field:nth-last-child(3), .sub-filters .select-field:last-child { width:128px; }
 .sub-filters .select-field select { width:100%; min-width:0; text-overflow:ellipsis; white-space:nowrap; }

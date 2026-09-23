@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { assessPrice, pricePair } from "./sub2apiPriceCheck";
+import { assessPrice, matchesPriceFilter, pricePair } from "./sub2apiPriceCheck";
 import type { SubUsage } from "./sub2apiPriceCheck";
 import type { SubModelCheck } from "./sub2apiResults";
 import type { ModelPrice } from "./types";
@@ -27,4 +27,32 @@ it("does not call missing, pending, zero-token or unverified samples normal", ()
 it("allows only the cost rounding quantum for very short probes", () => {
   expect(assessPrice(check({ output_tokens: 3, output_price: 30 + .00001 }), [price]).status).toBe("normal");
   expect(assessPrice(check({ output_tokens: 3, output_price: 30 + .001 }), [price]).status).toBe("abnormal");
+});
+
+it("compares unverified reference prices without confirming them or treating missing data as a match", () => {
+  const unverified = [{ ...price, verified: false }];
+  const same = check({}), different = check({ input_price: 4 });
+  expect(assessPrice(same, unverified)).toMatchObject({ status: "unpriced", comparison: "match" });
+  expect(assessPrice(different, unverified)).toMatchObject({ status: "unpriced", comparison: "mismatch" });
+  expect(matchesPriceFilter("unconfirmed_match", [same], unverified)).toBe(true);
+  expect(matchesPriceFilter("unconfirmed_mismatch", [different], unverified)).toBe(true);
+  expect(matchesPriceFilter("unconfirmed", [same, different], unverified)).toBe(true);
+  expect(matchesPriceFilter("normal", [same], unverified)).toBe(false);
+  expect(matchesPriceFilter("abnormal", [different], unverified)).toBe(false);
+  expect(matchesPriceFilter("unconfirmed_match", [same], [price])).toBe(false);
+  expect(matchesPriceFilter("unconfirmed_mismatch", [different], [price])).toBe(false);
+  // All-model views include a channel if any unconfirmed model qualifies.
+  expect(matchesPriceFilter("unconfirmed_match", [same, different], unverified)).toBe(true);
+  expect(matchesPriceFilter("unconfirmed_mismatch", [same, different], unverified)).toBe(true);
+  for (const data of [{ status: "pending" as const }, { status: "missing" as const }, { input_price: null }, { output_price: NaN }]) {
+    expect(matchesPriceFilter("unconfirmed_match", [check(data)], unverified)).toBe(false);
+    expect(matchesPriceFilter("unconfirmed_mismatch", [check(data)], unverified)).toBe(false);
+  }
+  expect(matchesPriceFilter("unconfirmed_match", [same], [])).toBe(false);
+  expect(matchesPriceFilter("unconfirmed_mismatch", [same], [{ ...price, input: 0, output: 0, verified: false, source: "fact-discovered" }])).toBe(false);
+  expect(matchesPriceFilter("unconfirmed_mismatch", [same], [{ ...price, input: 0, output: 0, verified: false, source: "official" }])).toBe(false);
+  expect(matchesPriceFilter("unconfirmed_match", [check({input_price: 0, output_price: 0})], [{ ...price, input: 0, output: 0, verified: false, source: "manual" }])).toBe(true);
+  expect(matchesPriceFilter("unconfirmed_match", [check({output_tokens: 3, output_price: 30.00001})], unverified)).toBe(true);
+  expect(matchesPriceFilter("unconfirmed_mismatch", [check({input_price: null, output_price: 35})], unverified)).toBe(true);
+  expect(matchesPriceFilter("unconfirmed_match", [{...same, model: "gpt-6-astra-search"}], unverified)).toBe(true);
 });

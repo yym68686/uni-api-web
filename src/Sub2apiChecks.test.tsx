@@ -303,6 +303,49 @@ it("filters unit prices across pages and models, persists selection, and scopes 
   expect(screen.getByLabelText("单价是否异常筛选")).toHaveValue("");
 });
 
+it("filters unconfirmed prices by numerical agreement and remembers the new selection", async () => {
+  const data = fixtures().slice(0, 1), template = data[0].targets[0];
+  const models = ["codex-auto-review", "gpt-6-astra"];
+  const usage = {status:"matched", input_price:.2, output_price:1.2, input_tokens:100, output_tokens:10} as SubUsage;
+  data[0].targets = ["same-price", "different-price", "no-price", "pending-price"].map((name,i) => ({
+    ...template, group_id:i+1, name, result:null,
+    models:models.map(model => ({model,state:"done",message:"",result:{...template.result!,model,availability:{...template.result!.availability,usage:{...usage,
+      ...(i===1 && model==="codex-auto-review" ? {input_price:5,output_price:30}:{}),
+      ...(i===2 ? {input_price:null,output_price:null}:{}),
+      ...(i===3 ? {status:"pending" as const}:{})
+    }}}})),
+  }));
+  const writes: any[] = [];
+  vi.stubGlobal("fetch",vi.fn(async(input:string,init?:RequestInit) => {
+    if(init?.method==="POST") {writes.push(JSON.parse(String(init.body)));return Response.json({});}
+    return Response.json({data:input.endsWith("/accounts")?data:input.endsWith("/prices")?models.map(model=>({model,input:.2,output:1.2,verified:false})):[]});
+  }));
+  const user=userEvent.setup();let view=mount("unconfirmed-price-filter");
+  const filter=await screen.findByLabelText("单价是否异常筛选");
+  await user.selectOptions(screen.getByLabelText("检测模型筛选"),"codex-auto-review");
+  await user.selectOptions(filter,"unconfirmed_match");
+  expect(await screen.findByText("same-price")).toBeVisible();
+  expect(screen.queryByText("different-price")).not.toBeInTheDocument();
+  expect(screen.queryByText("no-price")).not.toBeInTheDocument();
+  expect(screen.queryByText("pending-price")).not.toBeInTheDocument();
+  expect(screen.getByText("参考价未确认")).toBeVisible();
+  await user.selectOptions(filter,"unconfirmed_mismatch");
+  expect(screen.getByText("different-price")).toBeVisible();
+  expect(screen.queryByText("same-price")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button",{name:"检测所选模型 · 1 个渠道"}));
+  expect(writes[0].targets).toEqual([{account_id:"one",group_id:2,models:["codex-auto-review"]}]);
+  await user.selectOptions(screen.getByLabelText("检测模型筛选"),"gpt-6-astra");
+  expect(screen.queryByText("different-price")).not.toBeInTheDocument();
+  await user.selectOptions(screen.getByLabelText("检测模型筛选"),"codex-auto-review");
+  view.unmount(); view=mount("unconfirmed-price-filter");
+  expect(screen.getByLabelText("单价是否异常筛选")).toHaveValue("unconfirmed_mismatch");
+  expect(await screen.findByText("different-price")).toBeVisible();
+  await user.selectOptions(screen.getByLabelText("单价是否异常筛选"),"unconfirmed_match");
+  view.unmount(); mount("unconfirmed-price-filter");
+  expect(screen.getByLabelText("单价是否异常筛选")).toHaveValue("unconfirmed_match");
+  expect(await screen.findByText("same-price")).toBeVisible();
+});
+
 it("shows shared channel quality and filters it without changing the model availability result", async () => {
   const data = fixtures().slice(0, 1);
   const target = data[0].targets[0];

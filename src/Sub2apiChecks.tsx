@@ -49,7 +49,7 @@ import type { QualitySummary } from "./QualityHistory";
 import { SiteLink } from "./ChannelSite";
 import { useSubPrices, PriceStatus, GroupPriceStatus, UsageDetailRows } from "./Sub2apiPricing";
 import type { SubUsage } from "./sub2apiPriceCheck";
-import { priceFilterStatus } from "./sub2apiPriceCheck";
+import { matchesPriceFilter } from "./sub2apiPriceCheck";
 import type { ModelPrice } from "./types";
 
 export interface Probe {
@@ -867,8 +867,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                   ? !check.result
                   : check.result?.availability.status === availability,
               )) &&
-            (!priceStatus ||
-              priceFilterStatus(selected ? [selected] : checks, prices.data?.data) === priceStatus) &&
+            matchesPriceFilter(priceStatus, selected ? [selected] : checks, prices.data?.data) &&
             (!compaction || compactionStatus(target) === compaction) &&
             (!toolUse || toolUseStatus(target) === toolUse) &&
             (!quality || groupQualityResult(target)?.verdict === quality) &&
@@ -1412,10 +1411,10 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
             </select>
             <ChevronDown size={13} />
           </label>
-          <label className="select-field">
+          <label className="select-field sub-price-filter">
             <select
               aria-label="单价是否异常筛选"
-              title={model ? "按所选模型的倍率前单价与价格设置比较" : "任一模型异常则为异常；全部模型确认正常才为正常；其余为未确认"}
+              title={model ? "按所选模型的倍率前单价与价格设置比较；参考价未确认时也可按数值是否匹配筛选" : "任一模型异常则为异常；全部模型确认正常才为正常。未确认匹配／不匹配：包含至少一个符合条件的未确认模型；缺少单价或定价不算匹配"}
               value={priceStatus}
               onChange={(e) => {
                 setFilters((v) => ({ ...v, priceStatus: e.target.value }));
@@ -1426,6 +1425,8 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
               <option value="abnormal">单价异常</option>
               <option value="normal">单价正常</option>
               <option value="unconfirmed">单价未确认</option>
+              <option value="unconfirmed_match">未确认 · 定价匹配</option>
+              <option value="unconfirmed_mismatch">未确认 · 定价不匹配</option>
             </select>
             <ChevronDown size={13} />
           </label>
