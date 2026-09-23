@@ -2,10 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Dialog from "@radix-ui/react-dialog";
-import { Plus, Pencil, X } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import { controlRequest } from "./api";
 import { Spinner } from "./ui";
-import { ChannelSettings } from "./ChannelSettings";
+import {
+  ChannelBindingActions,
+  RemoveConfiguredBinding,
+} from "./ChannelBindingActions";
 import type { ManagedChannel } from "./channelManagement";
 import { channelMembers } from "./channelManagement";
 import {
@@ -18,7 +21,6 @@ import { ModelAliases, aliasMappings } from "./ModelAliases";
 import type { ModelAlias } from "./ModelAliases";
 import type { KeyInfo } from "./types";
 import type { ChannelRoute } from "./channelRouteData";
-import { ChannelRouteEditor } from "./ChannelRouteEditor";
 import {
   ModelPositions,
   selectedModelPositions,
@@ -36,14 +38,11 @@ export function ChannelRoutes({
   sourceId: string;
   sourceName?: string;
   providers: string[];
-  onEditModels?: (rows: ChannelRoute[]) => void;
+  onEditModels: (rows: ChannelRoute[]) => void;
   sourcePicker?: ReactNode;
   initialKey?: string;
 }) {
   const query = useChannelRoutes(sourceId);
-  const [editingRoutes, setEditingRoutes] = useState<ChannelRoute[] | null>(
-    null,
-  );
   const rows = providerRoutes(query.data?.data || [], providers);
   const keys = [...new Set(rows.map((row) => row.api_key_id))];
   const [chosenKey, setChosenKey] = useState(initialKey);
@@ -107,40 +106,40 @@ export function ChannelRoutes({
                       </strong>
                       <small>{models.length} 个模型</small>
                     </div>
-                    <div className="sub-installed-actions">
-                      {onEditModels ? (
-                        [...new Set(models.map((r) => r.provider))].map(
-                          (provider, i, providers) => (
-                            <button
+                    <div className="route-key-actions">
+                      {[...new Set(models.map((r) => r.provider))].map(
+                        (provider) => {
+                          const providerRows = models.filter(
+                            (r) => r.provider === provider,
+                          );
+                          const target = {
+                            source_id: sourceId,
+                            source_name: sourceName,
+                            provider,
+                            name: provider,
+                            model: providerRows[0].model,
+                          };
+                          return (
+                            <ChannelBindingActions
                               key={provider}
-                              className="button small"
-                              aria-label={
-                                providers.length === 1
+                              target={target}
+                              editLabel={
+                                new Set(models.map((r) => r.provider)).size ===
+                                1
                                   ? `编辑 Key ${first.key_position}`
                                   : `编辑 Key ${first.key_position} 的模型 ${provider}`
                               }
-                              onClick={() =>
-                                onEditModels(
-                                  models.filter((r) => r.provider === provider),
-                                )
+                              onEdit={() => onEditModels(providerRows)}
+                              remove={
+                                <RemoveConfiguredBinding
+                                  target={target}
+                                  keyId={key}
+                                  keyPosition={first.key_position}
+                                />
                               }
-                            >
-                              <Pencil size={13} />
-                              {providers.length === 1
-                                ? "编辑接入"
-                                : `编辑配置 ${i + 1}`}
-                            </button>
-                          ),
-                        )
-                      ) : (
-                        <button
-                          className="button small"
-                          aria-label={`编辑 Key ${first.key_position}`}
-                          onClick={() => setEditingRoutes(models)}
-                        >
-                          <Pencil size={13} />
-                          编辑接入
-                        </button>
+                            />
+                          );
+                        },
                       )}
                     </div>
                   </div>
@@ -153,14 +152,6 @@ export function ChannelRoutes({
       {query.isSuccess &&
         !query.data.unavailable_keys?.length &&
         !rows.length && <p className="muted">尚未配置到任何 API key。</p>}
-      {editingRoutes && (
-        <ChannelRouteEditor
-          sourceId={sourceId}
-          sourceName={sourceName}
-          rows={editingRoutes}
-          close={() => setEditingRoutes(null)}
-        />
-      )}
     </>
   );
 }
@@ -206,9 +197,11 @@ export function RouteModelTable({
 export function ConfiguredChannelDialog({
   item: group,
   close,
+  initialEdit,
 }: {
   item: ManagedChannel;
   close: () => void;
+  initialEdit?: ChannelRoute[];
 }) {
   const client = useQueryClient();
   const members = channelMembers(group);
@@ -281,6 +274,10 @@ export function ConfiguredChannelDialog({
       queryKey: ["configured-import-options", member.source_id],
     });
   }
+  useEffect(() => {
+    if (initialEdit?.length) beginEdit(item, initialEdit);
+    // A supplied edit is the initial state of this dialog, never replayed on refetch.
+  }, []);
   const options = useQuery({
     queryKey: ["configured-import-options", item.source_id, key],
     queryFn: ({ signal }) =>
@@ -404,6 +401,7 @@ export function ConfiguredChannelDialog({
           "channel-controls",
         ].map((name) => client.invalidateQueries({ queryKey: [name] })),
       );
+      if (initialEdit) close();
     } catch (e) {
       setError(e instanceof Error ? e.message : "添加失败");
       // Keep the failed revision until the user explicitly reloads, so retrying
@@ -420,9 +418,11 @@ export function ConfiguredChannelDialog({
       }}
     >
       <Dialog.Portal>
-        <Dialog.Overlay className="dialog-overlay" />
+        <Dialog.Overlay
+          className={`dialog-overlay${initialEdit ? " route-edit-overlay" : ""}`}
+        />
         <Dialog.Content
-          className="guide-dialog sub-import-dialog route-workspace"
+          className={`guide-dialog sub-import-dialog route-workspace${initialEdit ? " route-edit-dialog" : ""}`}
           onEscapeKeyDown={(e) => {
             if (busy) e.preventDefault();
           }}
@@ -494,15 +494,6 @@ export function ConfiguredChannelDialog({
                       ? `已添加到 ${counts.partial ? "至少 " : ""}${counts.count} 个 API key`
                       : "正在读取接入状态…"}
                   </h3>
-                  <ChannelSettings
-                    row={{
-                      provider: item.provider,
-                      provider_name: item.name,
-                      source_id: item.source_id,
-                      source_name: item.source_name,
-                      model: item.models[0] || "",
-                    }}
-                  />
                 </div>
                 <ChannelRoutes
                   key={item.source_id}
@@ -719,7 +710,7 @@ export function ConfiguredChannelDialog({
                     type="button"
                     className="button"
                     disabled={busy}
-                    onClick={() => setAdding(false)}
+                    onClick={() => (initialEdit ? close() : setAdding(false))}
                   >
                     取消
                   </button>

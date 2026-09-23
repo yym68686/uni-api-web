@@ -38,6 +38,7 @@ const imported = (source: string): InstalledChannel => ({
 });
 const configured = (source: string): InstalledChannel => ({
   ...imported(source),
+  models: ["claude-opus-5-5", "native-only", "do-only"],
   kind: "configured",
   provider: "native",
   name: `原生-${source}`,
@@ -113,13 +114,17 @@ it("uses one source/key selector and one table for native and imported routes, p
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string, init?: RequestInit) => {
-      if (init?.method === "PATCH") {
+      if (init?.method === "PATCH" || init?.method === "POST") {
         writes.push({ path: input, body: JSON.parse(String(init.body)) });
         return Response.json({});
       }
       if (input.includes("channel-options"))
         return Response.json({
           revision: "fresh",
+          keys: [
+            { key_id: "key1", position: 1, prefix: "masked-one" },
+            { key_id: "key2", position: 2, prefix: "masked-two" },
+          ],
           channels: [
             { provider: "peer", model: "native-only" },
             { provider: "native", model: "native-only" },
@@ -147,6 +152,13 @@ it("uses one source/key selector and one table for native and imported routes, p
   expect(screen.getAllByLabelText("查看 uni-api 来源")).toHaveLength(1);
   expect(screen.getAllByLabelText("查看 API key")).toHaveLength(1);
   expect(screen.queryByText(/已有渠道 ·/)).not.toBeInTheDocument();
+  for (const row of document.querySelectorAll(".route-binding-provider")) {
+    expect(
+      within(row as HTMLElement)
+        .getAllByRole("button")
+        .map((b) => b.textContent),
+    ).toEqual(["编辑", "渠道设置", "删除"]);
+  }
   const table = screen.getByRole("table", { name: "当前模型路由" });
   expect(within(table).getAllByRole("row")).toHaveLength(3);
   expect(table).toHaveTextContent("站点接入-primary");
@@ -160,42 +172,44 @@ it("uses one source/key selector and one table for native and imported routes, p
   await user.selectOptions(screen.getByLabelText("查看 API key"), "key2");
   expect(screen.getByRole("table")).toHaveTextContent("native-only");
   expect(screen.getByRole("table")).not.toHaveTextContent("claude-opus-5-5");
-  expect(
-    screen.queryByRole("button", { name: "删除" }),
-  ).not.toBeInTheDocument();
-  await user.click(
-    screen.getByRole("button", { name: "编辑 原生-primary 的路由" }),
-  );
-  const edit = within(
-    screen.getByRole("dialog", { name: "编辑 API key · Key 2" }),
-  );
+  expect(screen.getByRole("button", { name: "删除" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "渠道设置" })).toBeEnabled();
+  await user.click(screen.getByRole("button", { name: "编辑" }));
+  const edit = within(screen.getByRole("dialog", { name: "添加到渠道" }));
   await waitFor(() =>
-    expect(edit.getByLabelText("native native-only 的路由位置")).toBeEnabled(),
+    expect(edit.getByLabelText("native-only 的路由位置")).toBeEnabled(),
   );
-  await user.selectOptions(
-    edit.getByLabelText("native native-only 的路由位置"),
-    "1",
-  );
+  expect(edit.getByRole("checkbox", { name: "native-only" })).toBeChecked();
+  expect(edit.getByRole("button", { name: "添加重命名" })).toBeVisible();
+  expect(edit.getByLabelText("添加到 API key")).toHaveValue("key2");
+  expect(edit.getByLabelText("渠道添加位置")).toHaveValue("per-model");
+  await user.selectOptions(edit.getByLabelText("native-only 的路由位置"), "1");
   await user.click(edit.getByRole("button", { name: "保存更改" }));
   await waitFor(() => expect(writes).toHaveLength(1));
   expect(writes[0]).toEqual({
-    path: expect.stringContaining("/v1/sources/primary/channel-routes"),
+    path: expect.stringContaining("/v1/channel-management"),
     body: {
+      source_id: "primary",
+      provider: "native",
+      edit_provider: "native",
       api_key_id: "key2",
       revision: "fresh",
-      moves: [{ provider: "native", model: "native-only", position: 1 }],
+      models: ["native-only"],
+      model_mappings: {},
+      position: 1,
+      positions: { "native-only": 1 },
     },
   });
   await waitFor(() =>
     expect(
-      screen.queryByRole("dialog", { name: "编辑 API key · Key 2" }),
+      screen.queryByRole("button", { name: "保存更改" }),
     ).not.toBeInTheDocument(),
   );
   await user.selectOptions(screen.getByLabelText("查看 uni-api 来源"), "do");
   expect(screen.getByLabelText("查看 API key")).toHaveValue("key1");
   expect(screen.getByRole("table")).toHaveTextContent("do-only");
   expect(screen.getByRole("table")).not.toHaveTextContent("native-only");
-  await user.click(screen.getByRole("button", { name: "删除" }));
+  await user.click(screen.getAllByRole("button", { name: "删除" })[0]);
   await user.click(screen.getByRole("button", { name: "确认删除" }));
   await waitFor(() => expect(writes).toHaveLength(2));
   expect(writes[1].body).toMatchObject({

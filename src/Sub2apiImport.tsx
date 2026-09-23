@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Dialog from "@radix-ui/react-dialog";
-import { Plus, Pencil, Trash2, X } from "lucide-react";
+import { Plus, Trash2, X } from "lucide-react";
 import { controlRequest } from "./api";
 import { Spinner } from "./ui";
 import type { ConsoleSourcesQuery } from "./consoleSources";
@@ -11,12 +11,14 @@ import type { KeyInfo, ModelPrice } from "./types";
 import type { SubAccount, SubTarget } from "./Sub2apiChecks";
 import type { InstalledChannel, SubImportsQuery } from "./sub2apiImports";
 import { boundGroups } from "./sub2apiImports";
-import { RouteModelTable } from "./ChannelRoutes";
-import { ChannelRouteEditor } from "./ChannelRouteEditor";
+import { ConfiguredChannelDialog, RouteModelTable } from "./ChannelRoutes";
+import {
+  ChannelBindingActions,
+  RemoveConfiguredBinding,
+} from "./ChannelBindingActions";
 import { channelBindingView } from "./channelBindingView";
 import type { ChannelRoute } from "./channelRouteData";
 import { providerRoutes, useAllChannelRoutes } from "./channelRouteData";
-import { ChannelSettings } from "./ChannelSettings";
 import { ModelAliases, aliasMappings } from "./ModelAliases";
 import type { ModelAlias } from "./ModelAliases";
 import {
@@ -144,9 +146,8 @@ export function Sub2apiImport({
     configuredChannels,
     nativeRows,
   );
-  const [editingRoutes, setEditingRoutes] = useState<{
-    source: string;
-    name: string;
+  const [editingNative, setEditingNative] = useState<{
+    item: ManagedChannel;
     rows: ChannelRoute[];
   } | null>(null);
   const showForm =
@@ -537,20 +538,37 @@ export function Sub2apiImport({
                                 {binding.rows.length} 个模型
                               </small>
                             </div>
-                            <div className="sub-installed-actions">
-                              {binding.installed ? (
-                                <>
+                            <ChannelBindingActions
+                              target={{
+                                provider: binding.provider,
+                                name: binding.name,
+                                source_id: activeSource,
+                                source_name: viewSources.find(
+                                  ([id]) => id === activeSource,
+                                )?.[1],
+                                model: binding.rows[0]?.model || "",
+                              }}
+                              disabled={
+                                busy ||
+                                (!!binding.installed &&
+                                  !binding.installed.manageable)
+                              }
+                              onEdit={() => {
+                                if (binding.installed) edit(binding.installed);
+                                else if (binding.configured)
+                                  setEditingNative({
+                                    item: {
+                                      ...binding.configured,
+                                      engine: "",
+                                      account_ids: [account.id],
+                                    },
+                                    rows: binding.rows,
+                                  });
+                              }}
+                              remove={
+                                binding.installed ? (
                                   <button
-                                    className="button small"
-                                    disabled={
-                                      busy || !binding.installed.manageable
-                                    }
-                                    onClick={() => edit(binding.installed!)}
-                                  >
-                                    <Pencil size={13} />
-                                    编辑
-                                  </button>
-                                  <button
+                                    type="button"
                                     className="button small"
                                     disabled={
                                       busy || !binding.installed.manageable
@@ -563,39 +581,23 @@ export function Sub2apiImport({
                                     <Trash2 size={13} />
                                     删除
                                   </button>
-                                </>
-                              ) : (
-                                <>
-                                  <button
-                                    className="button small"
-                                    aria-label={`编辑 ${binding.name} 的路由`}
-                                    onClick={() =>
-                                      setEditingRoutes({
-                                        source: activeSource,
-                                        name:
-                                          viewSources.find(
-                                            ([id]) => id === activeSource,
-                                          )?.[1] || "",
-                                        rows: binding.rows,
-                                      })
-                                    }
-                                  >
-                                    <Pencil size={13} />
-                                    编辑路由
-                                  </button>
-                                  <ChannelSettings
-                                    row={{
+                                ) : (
+                                  <RemoveConfiguredBinding
+                                    target={{
                                       provider: binding.provider,
-                                      provider_name: binding.name,
+                                      name: binding.name,
                                       source_id: activeSource,
-                                      source_name:
-                                        binding.configured?.source_name,
+                                      source_name: viewSources.find(
+                                        ([id]) => id === activeSource,
+                                      )?.[1],
                                       model: binding.rows[0]?.model || "",
                                     }}
+                                    keyId={activeKey}
+                                    keyPosition={selectedKey.key_position}
                                   />
-                                </>
-                              )}
-                            </div>
+                                )
+                              }
+                            />
                             {binding.installed &&
                               !binding.installed.manageable && (
                                 <small className="route-binding-notice">
@@ -943,12 +945,11 @@ export function Sub2apiImport({
               </form>
             )}
           </div>
-          {editingRoutes && (
-            <ChannelRouteEditor
-              sourceId={editingRoutes.source}
-              sourceName={editingRoutes.name}
-              rows={editingRoutes.rows}
-              close={() => setEditingRoutes(null)}
+          {editingNative && (
+            <ConfiguredChannelDialog
+              item={editingNative.item}
+              initialEdit={editingNative.rows}
+              close={() => setEditingNative(null)}
             />
           )}
         </Dialog.Content>

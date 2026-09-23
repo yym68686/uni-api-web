@@ -109,7 +109,7 @@ func (s *Service) subChannelOptions(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if data, ok := catalog["data"].([]any); ok {
-			replaced := configuredReplacements(state, key)
+			replaced := configuredExcluded(state, key)
 			for _, row := range data {
 				item, _ := row.(map[string]any)
 				provider, _ := item["provider"].(string)
@@ -392,7 +392,7 @@ func (s *Service) applyImportSnapshot(ctx context.Context, src controlSource, sn
 	if err := validateModelPositions(channel.Models, positions); err != nil {
 		return nil, 400, err
 	}
-	replaced := snapshotReplacements(snapshot.Rules, snapshot.Channels, channel.KeyID)
+	replaced := snapshotExcluded(snapshot.Rules, snapshot.Channels, channel.KeyID)
 	for _, provider := range suppress {
 		if provider != "" {
 			replaced[provider] = true

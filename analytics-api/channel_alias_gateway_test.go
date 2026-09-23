@@ -423,4 +423,85 @@ func TestModelAliasesServeBothNamesWithRealGateway(t *testing.T) {
 	probe("admin-fixture", "native-alias")
 	assertCatalog(keyB, "codex-auto-review", "gpt-5.6-luna")
 
+	// Removing a native route is key-scoped; removing its owned copy cannot
+	// resurrect the original provider suppressed during the edit.
+	removeBinding := func(provider, caller, revision string, want int, authenticated bool) {
+		t.Helper()
+		req := httptest.NewRequest("DELETE", "/v1/channel-management", strings.NewReader(mustJSON(map[string]any{"source_id": src.ID, "provider": provider, "api_key_id": caller, "revision": revision})))
+		req.Header.Set("Content-Type", "application/json")
+		if authenticated {
+			req.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
+		}
+		res := httptest.NewRecorder()
+		service.Handler().ServeHTTP(res, req)
+		if res.Code != want {
+			t.Fatalf("remove %s: %d %s", provider, res.Code, res.Body.String())
+		}
+	}
+	state, _, _ = subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
+	rev := state["revision"].(string)
+	removeBinding("peer", adminKey, rev, 401, false)
+	removeBinding("peer", adminKey, "stale", 409, true)
+	removeBinding(configuredImportName("fugue-codex", keyB), adminKey, rev, 409, true)
+	removeBinding("peer", adminKey, rev, 200, true)
+	routeList = read("/v1/sources/" + src.ID + "/channel-routes")
+	decodeMap(routeList["data"], &listed)
+	for _, row := range listed {
+		if row.KeyID == adminKey && row.Provider == "peer" {
+			t.Fatal("removed native still listed", row)
+		}
+	}
+	state, _, _ = subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
+	removeBinding(configuredImportName("fugue-codex", adminKey), adminKey, state["revision"].(string), 200, true)
+	record, e = store.retainedRecord(ctx, src.ID)
+	if e != nil {
+		t.Fatal(e)
+	}
+	snapshot, e = store.retainedSnapshot(record)
+	if e != nil {
+		t.Fatal(e)
+	}
+	state, _, _ = subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
+	if _, _, e = subGateway(ctx, src, "POST", "/v1/channel-controls/restore", map[string]any{"revision": state["revision"], "snapshot": snapshot}); e != nil {
+		t.Fatal(e)
+	}
+	routeList = read("/v1/sources/" + src.ID + "/channel-routes")
+	decodeMap(routeList["data"], &listed)
+	for _, row := range listed {
+		if row.KeyID == adminKey {
+			t.Fatal("deleted routes revived after restore", row)
+		}
+	}
+	for _, model := range []string{"codex-auto-review", "native-alias"} {
+		req, _ := http.NewRequestWithContext(ctx, "POST", src.Base+"/v1/responses", strings.NewReader(mustJSON(map[string]any{"model": model, "input": "say test", "stream": true})))
+		req.Header.Set("Authorization", "Bearer admin-fixture")
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode == 200 {
+			t.Fatal("removed route still serves", model)
+		}
+		select {
+		case <-hits:
+			t.Fatal("removed route reached upstream")
+		default:
+		}
+	}
+	assertCatalog(keyB, "codex-auto-review", "gpt-5.6-luna")
+	probe("caller-b", "codex-auto-review")
+	raw, _, e := subGateway(ctx, src, "GET", "/v1/api_config", nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if !strings.Contains(mustJSON(raw["api_config"]), "fugue-codex") || !strings.Contains(mustJSON(raw["api_config"]), "peer") {
+		t.Fatal("base config was deleted")
+	}
+	state, _, _ = subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
+	nativeEdit([]string{"codex-auto-review"}, nil, "", state["revision"].(string), 200)
+	probe("admin-fixture", "codex-auto-review")
+
 }

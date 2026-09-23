@@ -248,7 +248,7 @@ func (s *Service) channelRoutes(w http.ResponseWriter, r *http.Request) {
 			}
 			positions := map[string]int{}
 			seen := map[string]bool{}
-			replaced := configuredReplacements(state, key.ID)
+			replaced := configuredExcluded(state, key.ID)
 			for _, row := range rows {
 				if replaced[row.Provider] {
 					continue

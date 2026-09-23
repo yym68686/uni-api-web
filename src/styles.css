@@ -2529,6 +2529,8 @@ nav > button.active > svg {
 .route-binding-provider small { display: block; font-size: 11px; }
 .route-binding-provider .route-binding-notice { flex-basis: 100%; }
 .route-binding-provider .sub-installed-actions { flex-wrap: wrap; }
+.binding-actions > .button { min-height: 32px; padding: 7px 11px; font-size: 12px; gap: 6px; white-space: nowrap; }
+.binding-actions > .button svg { width: 13px; height: 13px; }
 .route-model-table { overflow: auto; max-height: 380px; }
 .route-workspace .route-model-table { color: var(--ink); }
 .route-model-table table { width: 100%; border-collapse: collapse; font-size: 12px; }
