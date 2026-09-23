@@ -169,25 +169,49 @@ function fixture(configured = false, missing = false) {
       });
     if (url.pathname.endsWith("/channel-routes"))
       return Response.json({
-        data: ["k1", "k2"].flatMap((key) => [
-          {
-            provider: key === "k1" ? "native" : "copy",
-            origin_provider: key === "k1" ? undefined : "native",
-            api_key_id: key,
-            key_position: key === "k1" ? 1 : 2,
-            model: "old",
-            upstream_model: "old",
-            position: 2,
-          },
-          {
-            provider: "unrelated",
-            api_key_id: key,
-            key_position: 1,
-            model: "old",
-            upstream_model: "old",
-            position: 1,
-          },
-        ]),
+        revision: revisions[source],
+        manageable: true,
+        batch_revisions: true,
+        snapshot_consistent: true,
+        data: ["k1", "k2"].flatMap((key) => {
+          const provider = configured
+            ? key === "k1"
+              ? "native"
+              : "copy"
+            : `site-${key}`;
+          return [
+            {
+              provider: "peer",
+              api_key_id: key,
+              key_position: key === "k1" ? 1 : 2,
+              model: "old",
+              upstream_model: "old",
+              position: 1,
+            },
+            {
+              provider,
+              origin_provider:
+                configured && key !== "k1" ? "native" : undefined,
+              api_key_id: key,
+              key_position: key === "k1" ? 1 : 2,
+              model: "old",
+              upstream_model: "old",
+              position: 2,
+            },
+            ...(configured
+              ? []
+              : [
+                  {
+                    provider,
+                    api_key_id: key,
+                    key_position: key === "k1" ? 1 : 2,
+                    model: "alias",
+                    upstream_model: "old",
+                    position: 1,
+                  },
+                ]),
+          ];
+        }),
         unavailable_keys: [],
       });
     if (url.pathname.endsWith("/channel-options")) {
@@ -218,6 +242,12 @@ function fixture(configured = false, missing = false) {
 it("discovers all site keys across sources but excludes other account groups; chains exact returned revisions", async () => {
   const f = fixture();
   const plan = await prepareChannelBatch(draft(), new AbortController().signal);
+  expect(
+    f.fetch.mock.calls.filter(([url]) => url.includes("channel-options")),
+  ).toHaveLength(0);
+  expect(
+    f.fetch.mock.calls.filter(([url]) => url.includes("channel-routes")),
+  ).toHaveLength(2);
   expect(plan.targets.map((t) => [t.source, t.key])).toEqual([
     ["a", "k1"],
     ["a", "k2"],
@@ -275,7 +305,7 @@ it("refuses mixed-version backends before making any batch mutation", async () =
     original = f.fetch.getMockImplementation()!;
   f.fetch.mockImplementation(async (input, init) => {
     const response = await original(input, init);
-    if (input.includes("channel-options")) {
+    if (input.includes("channel-routes")) {
       const data = await response.json();
       delete data.batch_revisions;
       return Response.json(data);

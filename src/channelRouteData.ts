@@ -15,6 +15,11 @@ export interface ChannelRoute {
 export interface Routes {
   data: ChannelRoute[];
   unavailable_keys: string[];
+  revision?: string;
+  snapshot_consistent?: boolean;
+  manageable?: boolean;
+  batch_revisions?: boolean;
+  checked_at?: number;
 }
 export const routeOptions = (source: string) => ({
   queryKey: ["channel-routes", source],

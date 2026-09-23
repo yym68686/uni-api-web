@@ -303,5 +303,16 @@ func (s *Service) channelRoutes(w http.ResponseWriter, r *http.Request) {
 		}
 		return a.Position < b.Position
 	})
-	writeJSON(w, 200, map[string]any{"data": data, "unavailable_keys": unavailable})
+	// A preview can reuse this full per-source catalog instead of fetching
+	// channel-options separately for every caller key. Fence the parallel reads
+	// with the same live revision; an inconsistent read is display-only.
+	endState, _, endErr := subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
+	revision, _ := state["revision"].(string)
+	consistent := endErr == nil && revision != "" && endState["revision"] == revision
+	writeJSON(w, 200, map[string]any{
+		"data": data, "unavailable_keys": unavailable,
+		"revision": revision, "snapshot_consistent": consistent,
+		"manageable":      state["temporary_channel_management"] == true,
+		"batch_revisions": true, "checked_at": time.Now().UnixMilli(),
+	})
 }

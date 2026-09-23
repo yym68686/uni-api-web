@@ -2953,8 +2953,8 @@ nav > button.active > svg {
 .batch-apply-actions .button.danger { background: var(--danger-bg); color: var(--danger); border-color: var(--danger); }
 .batch-apply-actions .button.danger:hover:not(:disabled) { background: var(--danger); color: var(--bg); }
 .sub-import-actions > .batch-apply-trigger { margin-right: auto; }
-.batch-apply-overlay { z-index: 100; }
-.guide-dialog.batch-apply-dialog { z-index: 105; }
+.batch-apply-overlay { z-index: 100; animation: none; }
+.guide-dialog.batch-apply-dialog { z-index: 105; animation: none; }
 .batch-apply-summary { font-size: 14px; font-weight: 600; margin: 0 0 12px; }
 .batch-draft-models { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0; }
 .batch-draft-models > span { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 12px; overflow-wrap: anywhere; }

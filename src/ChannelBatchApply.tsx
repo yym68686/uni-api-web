@@ -7,7 +7,9 @@ import {
   prepareChannelBatch,
   applyChannelBatch,
   batchPartLabels,
+  sameBatchPlan,
 } from "./channelBatch";
+import { cachedChannelBatch, rememberBatchSnapshot } from "./channelBatchCache";
 import type { BatchDraft, BatchPlan, BatchProgress } from "./channelBatch";
 
 export function ChannelBatchApply({
@@ -25,7 +27,9 @@ export function ChannelBatchApply({
   remove?: boolean;
   onPreview?: () => void;
 }) {
+  const client = useQueryClient();
   const [snapshot, setSnapshot] = useState<BatchDraft | null>(null);
+  const [initialPlan, setInitialPlan] = useState<BatchPlan | null>(null);
   const [busy, setBusy] = useState(false);
   return (
     <Dialog.Root
@@ -33,7 +37,11 @@ export function ChannelBatchApply({
       onOpenChange={(open) => {
         if (busy) return;
         if (open) onPreview?.();
-        setSnapshot(open ? structuredClone(draft()) : null);
+        if (open) {
+          const next = structuredClone(draft());
+          setInitialPlan(cachedChannelBatch(client, next));
+          setSnapshot(next);
+        } else setSnapshot(null);
       }}
     >
       <Dialog.Trigger asChild>
@@ -54,6 +62,7 @@ export function ChannelBatchApply({
       {snapshot && (
         <BatchDialog
           draft={snapshot}
+          initialPlan={initialPlan}
           busy={busy}
           setBusy={setBusy}
           close={() => setSnapshot(null)}
@@ -66,12 +75,14 @@ export function ChannelBatchApply({
 
 function BatchDialog({
   draft,
+  initialPlan,
   busy,
   setBusy,
   close,
   onApplied,
 }: {
   draft: BatchDraft;
+  initialPlan: BatchPlan | null;
   busy: boolean;
   setBusy: (b: boolean) => void;
   close: () => void;
@@ -80,9 +91,10 @@ function BatchDialog({
   const client = useQueryClient();
   const deleting = draft.part === "delete",
     verb = deleting ? "删除" : "应用";
-  const [plan, setPlan] = useState<BatchPlan | null>(null);
+  const [plan, setPlan] = useState<BatchPlan | null>(initialPlan);
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initialPlan);
+  const [validating, setValidating] = useState(false);
   const [reload, setReload] = useState(0);
   const [progress, setProgress] = useState<Record<string, BatchProgress>>({});
   const [finished, setFinished] = useState(false);
@@ -97,11 +109,14 @@ function BatchDialog({
     [],
   );
   useEffect(() => {
+    if (initialPlan && reload === 0) return;
     const controller = new AbortController();
     setLoading(true);
     setError("");
     setPlan(null);
-    void prepareChannelBatch(draft, controller.signal)
+    void prepareChannelBatch(draft, controller.signal, (s) =>
+      rememberBatchSnapshot(client, s),
+    )
       .then((value) => {
         if (!controller.signal.aborted) setPlan(value);
       })
@@ -113,7 +128,7 @@ function BatchDialog({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [draft, reload]);
+  }, [draft, reload, initialPlan, client]);
   const done = Object.values(progress).filter((p) => p.state === "done").length;
   const failed = Object.values(progress).some((p) => p.state === "error");
   const skipped = plan?.targets.filter((t) => t.skip).length || 0;
@@ -121,14 +136,39 @@ function BatchDialog({
     if (!plan || busy || finished) return;
     setBusy(true);
     stop.current = false;
+    setValidating(true);
+    setError("");
     try {
+      const current = await prepareChannelBatch(
+        draft,
+        new AbortController().signal,
+        (s) => {
+          if (!stop.current) rememberBatchSnapshot(client, s);
+        },
+        false,
+      );
+      if (stop.current) return;
+      if (!sameBatchPlan(plan, current)) {
+        setPlan(current);
+        setError(
+          "接入范围或配置版本已变化，预览已更新。请核对后再次确认；尚未执行任何修改。",
+        );
+        return;
+      }
+      setValidating(false);
       await applyChannelBatch(
-        plan,
+        current,
         (p) => setProgress((old) => ({ ...old, [p.id]: p })),
         () => stop.current,
       );
       setFinished(true);
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : "无法核对最新配置，尚未执行任何修改。",
+      );
     } finally {
+      setValidating(false);
+      setStopping(false);
       await Promise.all(
         [
           "channel-management",
@@ -198,6 +238,15 @@ function BatchDialog({
           )}
           {plan && (
             <>
+              <p className="sub-import-note">
+                根据管理页已加载的完整快照生成预览，确认时会重新核对全部来源及配置版本。
+              </p>
+              {validating && (
+                <p role="status">
+                  <Spinner small />
+                  正在核对最新接入范围，尚未执行修改…
+                </p>
+              )}
               <p className="batch-apply-summary">
                 将{deleting ? "删除" : "更新"}{" "}
                 {new Set(plan.targets.map((t) => t.source)).size} 个来源、
@@ -370,9 +419,7 @@ function BatchDialog({
                 <button
                   type="button"
                   className={`button ${deleting ? "danger" : "primary"}`}
-                  disabled={
-                    loading || !!error || !plan?.targets.some((t) => !t.skip)
-                  }
+                  disabled={loading || !plan?.targets.some((t) => !t.skip)}
                   onClick={() => void apply()}
                 >
                   确认{verb} {(plan?.targets.length || 0) - skipped} 个接入

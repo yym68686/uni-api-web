@@ -1,19 +1,30 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { render, screen, within, waitFor } from "@testing-library/react";
+import {
+  render,
+  screen,
+  within,
+  waitFor,
+  fireEvent,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ChannelBatchApply } from "./ChannelBatchApply";
 import type { BatchDraft } from "./channelBatch";
+import type { BatchSnapshot } from "./channelBatch";
+import { rememberBatchSnapshot } from "./channelBatchCache";
 
 afterEach(() => vi.unstubAllGlobals());
-function setup(remove = false, failSecond = false) {
+function setup(remove = false, failSecond = false, preload = false) {
   const revisions: Record<string, string> = { a: "r1", b: "r1" },
     writes: any[] = [];
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string, init?: RequestInit) => {
       const url = new URL(input),
-        src = url.searchParams.get("source_id") || "a";
+        src =
+          url.searchParams.get("source_id") ||
+          url.pathname.split("/")[4] ||
+          "a";
       if (init?.method === "PATCH") {
         const body = JSON.parse(String(init.body));
         writes.push(body);
@@ -43,6 +54,24 @@ function setup(remove = false, failSecond = false) {
           })),
           unavailable_sources: [],
         });
+      if (url.pathname.endsWith("/channel-routes"))
+        return Response.json({
+          revision: revisions[src],
+          manageable: true,
+          batch_revisions: true,
+          snapshot_consistent: true,
+          unavailable_keys: [],
+          data: [
+            {
+              provider: "site",
+              model: "old",
+              upstream_model: "old",
+              api_key_id: "key",
+              key_position: 1,
+              position: 1,
+            },
+          ],
+        });
       if (url.pathname.endsWith("/channel-options"))
         return Response.json({
           revision: revisions[src],
@@ -64,12 +93,59 @@ function setup(remove = false, failSecond = false) {
     anchor: { source: "a", key: "key", provider: "site", revision: "r1" },
   };
   const onApplied = vi.fn();
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  if (preload) {
+    const cached: BatchSnapshot = {
+      inventory: { data: [], unavailable_sources: [] },
+      imports: {
+        data: ["a", "b"].map((source) => ({
+          source_id: source,
+          source_name: source === "a" ? "Fugue" : "DigitalOcean",
+          api_key_id: "key",
+          key_position: 1,
+          key_prefix: "masked",
+          provider: "site",
+          name: "测试渠道",
+          account_id: "account",
+          group_id: 1,
+          models: ["old"],
+          positions: { old: 1 },
+          manageable: true,
+          revision: "r1",
+        })),
+        labels: {},
+        unavailable_sources: [],
+      },
+      routes: Object.fromEntries(
+        ["a", "b"].map((source) => [
+          source,
+          {
+            revision: "r1",
+            manageable: true,
+            batch_revisions: true,
+            snapshot_consistent: true,
+            unavailable_keys: [],
+            data: [
+              {
+                provider: "site",
+                model: "old",
+                upstream_model: "old",
+                api_key_id: "key",
+                key_position: 1,
+                key_prefix: "masked",
+                position: 1,
+              },
+            ],
+          },
+        ]),
+      ),
+    };
+    rememberBatchSnapshot(client, cached);
+  }
   render(
-    <QueryClientProvider
-      client={
-        new QueryClient({ defaultOptions: { queries: { retry: false } } })
-      }
-    >
+    <QueryClientProvider client={client}>
       <ChannelBatchApply
         remove={remove}
         draft={() => draft}
@@ -77,8 +153,47 @@ function setup(remove = false, failSecond = false) {
       />
     </QueryClientProvider>,
   );
-  return { writes, onApplied, draft, user: userEvent.setup() };
+  return {
+    writes,
+    onApplied,
+    draft,
+    client,
+    revisions,
+    user: userEvent.setup(),
+  };
 }
+it("renders the complete cached preview synchronously with no network reads on click", () => {
+  setup(false, false, true);
+  const fetch = vi.mocked(globalThis.fetch);
+  fetch.mockClear();
+  fireEvent.click(
+    screen.getByRole("button", { name: "应用全部于所有已保存渠道" }),
+  );
+  const d = within(screen.getByRole("dialog"));
+  expect(d.getByRole("table")).toHaveTextContent("DigitalOcean");
+  expect(d.getByRole("table")).toHaveTextContent("Fugue");
+  expect(d.getByRole("button", { name: "确认应用 2 个接入" })).toBeEnabled();
+  expect(d.queryByText(/正在读取全部来源/)).not.toBeInTheDocument();
+  expect(fetch).not.toHaveBeenCalled();
+});
+it("revalidates a cached preview on confirmation and requires a second confirmation after revision changes", async () => {
+  const { user, writes, revisions } = setup(false, false, true);
+  revisions.a = "r2";
+  await user.click(
+    screen.getByRole("button", { name: "应用全部于所有已保存渠道" }),
+  );
+  const d = within(screen.getByRole("dialog"));
+  await user.click(d.getByRole("button", { name: "确认应用 2 个接入" }));
+  expect(await d.findByRole("alert")).toHaveTextContent("预览已更新");
+  expect(writes).toHaveLength(0);
+  await waitFor(() =>
+    expect(d.getByRole("button", { name: "确认应用 2 个接入" })).toBeEnabled(),
+  );
+  await user.click(d.getByRole("button", { name: "确认应用 2 个接入" }));
+  await d.findByText(/全部应用完成/);
+  expect(writes[0].revision).toBe("r2");
+  expect(writes).toHaveLength(2);
+});
 it("previews both sources without writing, freezes the draft, and applies only after confirmation", async () => {
   const { user, writes, onApplied, draft } = setup();
   await user.click(

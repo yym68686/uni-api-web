@@ -145,25 +145,20 @@ export function batchTargetSettings(
   };
 }
 
-// Keep discovery separate from writes. Any missing source/key makes the preview
-// incomplete, so it cannot be described or submitted as an all-bindings update.
-export async function prepareChannelBatch(
-  draft: BatchDraft,
-  signal: AbortSignal,
-): Promise<BatchPlan> {
-  if (draft.part !== "delete" && !draft.anchor.revision)
-    throw new Error("请先读取当前配置。");
-  if (draft.part === "all" && !Object.keys(draft.models).length)
-    throw new Error("请至少保留一个模型。");
-  if (draft.part === "positions" && !Object.keys(draft.positions).length)
-    throw new Error("请先选择需要调整位置的模型。");
-  const [inventory, imports] = await Promise.all([
-    read<{ data: ManagedChannel[]; unavailable_sources: string[] }>(
-      "/v1/channel-management",
-      signal,
-    ),
-    read<SubImports>("/v1/sub2api/channels", signal),
-  ]);
+export interface BatchInventory {
+  data: ManagedChannel[];
+  unavailable_sources: string[];
+}
+export interface BatchSnapshot {
+  inventory: BatchInventory;
+  imports: SubImports;
+  routes: Record<string, Routes>;
+}
+function batchMembers(
+  scope: BatchScope,
+  inventory: BatchInventory,
+  imports: SubImports,
+) {
   const missing = [
     ...new Set([
       ...inventory.unavailable_sources,
@@ -174,7 +169,6 @@ export async function prepareChannelBatch(
     throw new Error(
       `无法读取全部来源（${missing.join("、")}），请恢复连接后重试。`,
     );
-  const scope = draft.scope;
   let native: ManagedChannel[], installed: InstalledChannel[];
   if (scope.kind === "configured") {
     const anchor = inventory.data.find(
@@ -209,6 +203,44 @@ export async function prepareChannelBatch(
       matched.has(JSON.stringify([c.source_id, c.provider])),
     );
   }
+  return { native, installed };
+}
+
+// The page already loads these catalogs for its channel counts and selectors.
+// Preview generation is synchronous and contains no network calls.
+export function buildChannelBatch(
+  draft: BatchDraft,
+  snapshot: BatchSnapshot,
+  strictAnchor = true,
+): BatchPlan {
+  if (draft.part !== "delete" && !draft.anchor.revision)
+    throw new Error("请先读取当前配置。");
+  if (draft.part === "all" && !Object.keys(draft.models).length)
+    throw new Error("请至少保留一个模型。");
+  if (draft.part === "positions" && !Object.keys(draft.positions).length)
+    throw new Error("请先选择需要调整位置的模型。");
+  const { native, installed } = batchMembers(
+    draft.scope,
+    snapshot.inventory,
+    snapshot.imports,
+  );
+  const nativeBySource = new Map<string, Map<string, ManagedChannel>>();
+  for (const member of native) {
+    const providers =
+      nativeBySource.get(member.source_id) || new Map<string, ManagedChannel>();
+    providers.set(member.provider, member);
+    nativeBySource.set(member.source_id, providers);
+  }
+  const catalogs = new Map<string, Options["channels"]>();
+  // Index the full catalog once instead of scanning it for each target key.
+  for (const [source, routes] of Object.entries(snapshot.routes)) {
+    for (const row of routes.data) {
+      const key = JSON.stringify([source, row.api_key_id]);
+      const entries = catalogs.get(key) || [];
+      entries.push(row);
+      catalogs.set(key, entries);
+    }
+  }
   const bindings = new Map<string, BatchBinding>();
   for (const c of installed) {
     if (!c.manageable) throw new Error(`${c.source_name} 尚不支持编辑此渠道。`);
@@ -228,20 +260,16 @@ export async function prepareChannelBatch(
     });
   }
   for (const source of [...new Set(native.map((c) => c.source_id))]) {
-    const routes = await read<Routes>(
-      `/v1/sources/${encodeURIComponent(source)}/channel-routes`,
-      signal,
-    );
+    const routes = snapshot.routes[source];
+    if (!routes) throw new Error("来源路由尚未加载完整，请重新读取。");
     if (routes.unavailable_keys.length)
       throw new Error(
         `${native.find((c) => c.source_id === source)?.source_name} 的部分 API key 路由读取失败。`,
       );
     for (const row of routes.data) {
-      const member = native.find(
-        (c) =>
-          c.source_id === source &&
-          (c.provider === row.provider || c.provider === row.origin_provider),
-      );
+      const member =
+        nativeBySource.get(source)?.get(row.provider) ||
+        nativeBySource.get(source)?.get(row.origin_provider || "");
       if (!member) continue;
       const id = idOf(source, row.api_key_id, row.provider);
       const existing = bindings.get(id);
@@ -269,7 +297,7 @@ export async function prepareChannelBatch(
   if (draft.part !== "delete" && !bindings.has(anchorId))
     throw new Error("正在编辑的接入已不存在，请刷新后重新编辑。");
   const revisions = new Map<string, string>();
-  const catalogs = new Map<string, Options["channels"]>();
+  const usedCatalogs = new Map<string, Options["channels"]>();
   const targets: BatchTarget[] = [];
   for (const t of [...bindings.values()].sort(
     (a, b) =>
@@ -277,12 +305,30 @@ export async function prepareChannelBatch(
       a.keyPosition - b.keyPosition ||
       a.provider.localeCompare(b.provider),
   )) {
-    const options = await read<Options>(optionsPath(t), signal);
+    const sourceRoutes = snapshot.routes[t.source];
+    if (
+      !sourceRoutes ||
+      !sourceRoutes.snapshot_consistent ||
+      !sourceRoutes.revision
+    )
+      throw new Error(
+        `${t.sourceName} 的路由快照尚未就绪或已变化，请重新读取。`,
+      );
+    if (sourceRoutes.unavailable_keys.length)
+      throw new Error(`${t.sourceName} 的部分 API key 路由读取失败。`);
+    const catalogKey = JSON.stringify([t.source, t.key]);
+    const keyCatalog = catalogs.get(catalogKey) || [];
+    const options: Options = {
+      revision: sourceRoutes.revision,
+      batch_revisions: sourceRoutes.batch_revisions,
+      manageable: !!sourceRoutes.manageable,
+      channels: keyCatalog,
+    };
     if (!options.batch_revisions)
       throw new Error(
         "后端正在更新批量操作能力，请稍后重新读取；尚未修改任何接入。",
       );
-    catalogs.set(JSON.stringify([t.source, t.key]), options.channels);
+    usedCatalogs.set(catalogKey, options.channels);
     if (!options.revision || !options.manageable)
       throw new Error(`${t.sourceName} 尚不支持批量编辑所需的配置校验。`);
     const revision = revisions.get(t.source);
@@ -290,6 +336,7 @@ export async function prepareChannelBatch(
       throw new Error(`${t.sourceName} 的配置在读取期间发生变化，请重新预览。`);
     revisions.set(t.source, options.revision);
     if (
+      strictAnchor &&
       draft.part !== "delete" &&
       t.source === draft.anchor.source &&
       options.revision !== draft.anchor.revision
@@ -336,8 +383,68 @@ export async function prepareChannelBatch(
     }
     targets.push({ ...t, revision: options.revision, mappings, ...settings });
   }
-  projectBatchPositions(draft, targets, catalogs);
+  projectBatchPositions(draft, targets, usedCatalogs);
   return { draft, targets };
+}
+
+// Cold reads are one catalog per source, in bounded parallelism. Never one
+// channel-options request per binding. Also used for fresh pre-submit validation.
+export async function prepareChannelBatch(
+  draft: BatchDraft,
+  signal: AbortSignal,
+  onRead?: (snapshot: BatchSnapshot) => void,
+  strictAnchor = true,
+): Promise<BatchPlan> {
+  const [inventory, imports] = await Promise.all([
+    read<BatchInventory>("/v1/channel-management", signal),
+    read<SubImports>("/v1/sub2api/channels", signal),
+  ]);
+  const { native, installed } = batchMembers(draft.scope, inventory, imports);
+  const sources = [
+    ...new Set([
+      ...native.map((c) => c.source_id),
+      ...installed.map((c) => c.source_id),
+    ]),
+  ];
+  const routes: Record<string, Routes> = {};
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(4, sources.length) }, async () => {
+      while (next < sources.length) {
+        const source = sources[next++];
+        routes[source] = await read<Routes>(
+          `/v1/sources/${encodeURIComponent(source)}/channel-routes`,
+          signal,
+        );
+      }
+    }),
+  );
+  const snapshot = { inventory, imports, routes };
+  if (signal.aborted) throw signal.reason;
+  const plan = buildChannelBatch(draft, snapshot, strictAnchor);
+  onRead?.(snapshot);
+  return plan;
+}
+
+// Reconfirm changes in membership, revision, or the previewed model/position
+// outcome. Object property order alone must not change the comparison.
+export function sameBatchPlan(a: BatchPlan, b: BatchPlan) {
+  const record = (v: Record<string, unknown>) =>
+    Object.entries(v).sort(([a], [b]) => a.localeCompare(b));
+  const signature = (p: BatchPlan) =>
+    p.targets
+      .map((t) => ({
+        id: t.id,
+        revision: t.revision,
+        current: record(t.current),
+        models: record(t.models),
+        mappings: record(t.mappings),
+        positions: record(t.positions),
+        finalPositions: record(t.finalPositions || {}),
+        skip: t.skip,
+      }))
+      .sort((a, b) => a.id.localeCompare(b.id));
+  return JSON.stringify(signature(a)) === JSON.stringify(signature(b));
 }
 
 // A site may have two related providers on the same caller key. Project their

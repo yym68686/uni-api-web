@@ -13,6 +13,8 @@ import (
 func TestChannelManagementUsesConfiguredInventoryAndEffectiveKeyRoutes(t *testing.T) {
 	var failKey atomic.Bool
 	var changedKey atomic.Bool
+	var revisionChanges atomic.Bool
+	var controlReads atomic.Int32
 	providers := []configuredProvider{
 		{Provider: "bound", Base: "https://account.test/v1/responses", API: "private-upstream-key"},
 		{Provider: "site-only", Base: "https://account.test/v1/responses", API: "different-key"},
@@ -26,7 +28,12 @@ func TestChannelManagementUsesConfiguredInventoryAndEffectiveKeyRoutes(t *testin
 		}
 		switch r.URL.Path {
 		case "/v1/channel-controls":
-			writeJSON(w, 200, map[string]any{"rules": []any{}, "temporary_channels": []any{}})
+			n := controlReads.Add(1)
+			revision := "r1"
+			if revisionChanges.Load() && n%2 == 0 {
+				revision = "r2"
+			}
+			writeJSON(w, 200, map[string]any{"rules": []any{}, "temporary_channels": []any{}, "revision": revision, "temporary_channel_management": true})
 		case "/v1/channel-settings/providers":
 			live := append([]configuredProvider{}, providers...)
 			if changedKey.Load() {
@@ -124,14 +131,21 @@ func TestChannelManagementUsesConfiguredInventoryAndEffectiveKeyRoutes(t *testin
 	path := "/v1/sources/" + src.ID + "/channel-routes"
 	w = request(path, token)
 	var routes struct {
-		Data        []channelRoute `json:"data"`
-		Unavailable []string       `json:"unavailable_keys"`
+		Data           []channelRoute `json:"data"`
+		Unavailable    []string       `json:"unavailable_keys"`
+		Revision       string         `json:"revision"`
+		Consistent     bool           `json:"snapshot_consistent"`
+		Manageable     bool           `json:"manageable"`
+		BatchRevisions bool           `json:"batch_revisions"`
 	}
 	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &routes) != nil {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	if len(routes.Data) != 5 {
 		t.Fatal("duplicate or missing route", w.Body.String())
+	}
+	if !routes.Consistent || routes.Revision != "r1" || !routes.Manageable || !routes.BatchRevisions {
+		t.Fatal("missing consistent preview metadata", w.Body.String())
 	}
 	for _, route := range routes.Data {
 		if route.Provider == "bound" {
@@ -149,5 +163,12 @@ func TestChannelManagementUsesConfiguredInventoryAndEffectiveKeyRoutes(t *testin
 	json.Unmarshal(w.Body.Bytes(), &routes)
 	if len(routes.Unavailable) != 1 || len(routes.Data) != 3 {
 		t.Fatal("partial fetch reported complete", w.Body.String())
+	}
+	failKey.Store(false)
+	controlReads.Store(0)
+	revisionChanges.Store(true)
+	w = request(path, token)
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &routes) != nil || routes.Consistent {
+		t.Fatal("changing revision advertised a safe snapshot", w.Body.String())
 	}
 }
