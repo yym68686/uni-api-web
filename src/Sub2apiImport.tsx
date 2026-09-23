@@ -15,6 +15,7 @@ import { boundGroups } from "./sub2apiImports";
 import { ConfiguredChannelDialog, RouteModelTable } from "./ChannelRoutes";
 import {
   ChannelBindingActions,
+  BindingRemoveDialog,
   RemoveConfiguredBinding,
 } from "./ChannelBindingActions";
 import { channelBindingView } from "./channelBindingView";
@@ -159,6 +160,11 @@ export function Sub2apiImport({
       !configuredChannels.length &&
       !imports.isPending);
   const [removing, setRemoving] = useState<InstalledChannel | null>(null);
+  const isRemoving = (item: InstalledChannel) =>
+    !!removing &&
+    removing.source_id === item.source_id &&
+    removing.api_key_id === item.api_key_id &&
+    removing.provider === item.provider;
   const [modelChoices, setModelChoices] = useState<Record<string, boolean>>({});
   const originals = checks
     .filter(
@@ -568,20 +574,38 @@ export function Sub2apiImport({
                               }}
                               remove={
                                 binding.installed ? (
-                                  <button
-                                    type="button"
-                                    className="button small"
-                                    disabled={
-                                      busy || !binding.installed.manageable
-                                    }
-                                    onClick={() => {
-                                      setRemoving(binding.installed!);
+                                  <Dialog.Root
+                                    open={isRemoving(binding.installed)}
+                                    onOpenChange={(open) => {
+                                      if (busy) return;
+                                      setRemoving(open ? binding.installed! : null);
                                       setError("");
                                     }}
                                   >
-                                    <Trash2 size={13} />
-                                    删除
-                                  </button>
+                                    <Dialog.Trigger asChild>
+                                      <button
+                                        type="button"
+                                        className="button small"
+                                        disabled={busy || !binding.installed.manageable}
+                                      >
+                                        <Trash2 size={13} />
+                                        删除
+                                      </button>
+                                    </Dialog.Trigger>
+                                    {isRemoving(binding.installed) && (
+                                      <BindingRemoveDialog
+                                        target={binding.installed}
+                                        keyPosition={binding.installed.key_position}
+                                        busy={busy}
+                                        close={() => setRemoving(null)}
+                                        onConfirm={() => void mutate("delete", removing!)}
+                                      >
+                                        {error && (
+                                          <div role="alert" className="error-banner">{error}</div>
+                                        )}
+                                      </BindingRemoveDialog>
+                                    )}
+                                  </Dialog.Root>
                                 ) : (
                                   <RemoveConfiguredBinding
                                     target={{
@@ -623,27 +647,6 @@ export function Sub2apiImport({
                               (a.position || 0) - (b.position || 0),
                           )}
                       />
-                      {removing &&
-                        removing.source_id === activeSource &&
-                        removing.api_key_id === activeKey && (
-                          <div className="sub-remove" role="alert">
-                            从此 API key 移除 {removing.name} 临时渠道？
-                            <button
-                              className="button small"
-                              disabled={busy}
-                              onClick={() => void mutate("delete", removing)}
-                            >
-                              确认删除
-                            </button>
-                            <button
-                              className="button small"
-                              disabled={busy}
-                              onClick={() => setRemoving(null)}
-                            >
-                              取消
-                            </button>
-                          </div>
-                        )}
                     </article>
                   </section>
                 )}

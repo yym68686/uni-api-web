@@ -1562,7 +1562,7 @@ it("lists imported keys, replaces exact models and deletes only the chosen bindi
     ).toBeEnabled(),
   );
   await user.click(within(dialog).getAllByRole("button", { name: "删除" })[0]);
-  await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
+  await user.click(within(screen.getByRole("dialog", { name: "删除渠道接入" })).getByRole("button", { name: "确认删除" }));
   await waitFor(() => expect(writes).toHaveLength(2));
   expect(writes[1]).toMatchObject({
     action: "delete",

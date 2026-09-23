@@ -155,10 +155,65 @@ function RemoveDialog({
     }
   }
   return (
+    <BindingRemoveDialog
+      target={target}
+      keyPosition={keyPosition}
+      busy={busy}
+      confirmDisabled={query.isFetching || query.isError || !exists}
+      close={close}
+      onConfirm={() => void remove()}
+    >
+      {query.isFetching && (
+        <p role="status">
+          <Spinner small />
+          正在核对当前接入…
+        </p>
+      )}
+      {(error || query.error) && (
+        <div role="alert" className="error-banner">
+          {error || query.error?.message}
+          <button
+            type="button"
+            className="button small"
+            disabled={busy || query.isFetching}
+            onClick={() => {
+              setError("");
+              void query.refetch();
+            }}
+          >
+            重新读取配置
+          </button>
+        </div>
+      )}
+      {query.isSuccess && !exists && (
+        <p role="alert">该渠道已不在此 API key 中，请刷新后核对。</p>
+      )}
+    </BindingRemoveDialog>
+  );
+}
+
+export function BindingRemoveDialog({
+  target,
+  keyPosition,
+  busy,
+  confirmDisabled = false,
+  close,
+  onConfirm,
+  children,
+}: {
+  target: Pick<BindingTarget, "source_id" | "source_name" | "name">;
+  keyPosition: number;
+  busy: boolean;
+  confirmDisabled?: boolean;
+  close: () => void;
+  onConfirm: () => void;
+  children?: ReactNode;
+}) {
+  return (
     <Dialog.Portal>
       <Dialog.Overlay className="dialog-overlay route-edit-overlay" />
       <Dialog.Content
-        className="guide-dialog route-edit-dialog"
+        className="guide-dialog route-edit-dialog binding-remove-dialog"
         onEscapeKeyDown={(e) => {
           if (busy) e.preventDefault();
         }}
@@ -166,10 +221,15 @@ function RemoveDialog({
           if (busy) e.preventDefault();
         }}
       >
-        <Dialog.Title>删除渠道接入</Dialog.Title>
+        <div className="binding-remove-heading">
+          <span className="binding-remove-icon">
+            <Trash2 size={20} />
+          </span>
+          <Dialog.Title>删除渠道接入</Dialog.Title>
+        </div>
         <Dialog.Description>
-          从 {target.source_name} · Key {keyPosition} 移除 {target.name}{" "}
-          及其全部模型路由？其他 API key 和基础渠道配置保留。
+          将从此 API key 移除以下渠道及其全部模型路由，其他 API key
+          的接入不受影响。
         </Dialog.Description>
         <button
           className="icon-button detail-close"
@@ -179,39 +239,34 @@ function RemoveDialog({
         >
           <X size={18} />
         </button>
-        {query.isFetching && (
-          <p role="status">
-            <Spinner small />
-            正在核对当前接入…
-          </p>
-        )}
-        {(error || query.error) && (
-          <div role="alert" className="error-banner">
-            {error || query.error?.message}
-            <button
-              type="button"
-              className="button small"
-              disabled={busy || query.isFetching}
-              onClick={() => {
-                setError("");
-                void query.refetch();
-              }}
-            >
-              重新读取配置
-            </button>
+        <dl className="binding-remove-scope">
+          <div>
+            <dt>接入位置</dt>
+            <dd>
+              {target.source_name || target.source_id} · Key {keyPosition}
+            </dd>
           </div>
-        )}
-        {query.isSuccess && !exists && (
-          <p role="alert">该渠道已不在此 API key 中，请刷新后核对。</p>
-        )}
-        <div className="dialog-actions">
-          <button className="button" disabled={busy} onClick={close}>
+          <div>
+            <dt>渠道</dt>
+            <dd>{target.name}</dd>
+          </div>
+        </dl>
+        {children}
+        <div className="binding-remove-actions">
+          <button
+            type="button"
+            className="button"
+            disabled={busy}
+            onClick={close}
+            autoFocus
+          >
             取消
           </button>
           <button
+            type="button"
             className="button danger"
-            disabled={busy || query.isFetching || query.isError || !exists}
-            onClick={() => void remove()}
+            disabled={busy || confirmDisabled}
+            onClick={onConfirm}
           >
             {busy && <Spinner small />}确认删除
           </button>

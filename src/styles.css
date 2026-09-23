@@ -2539,7 +2539,6 @@ nav > button.active > svg {
 .route-model-table th { color: var(--muted); font-weight: 500; background: var(--surface); position: sticky; top: 0; }
 .route-model-table th:last-child, .route-model-table td:last-child { text-align: right; white-space: nowrap; width: 108px; }
 .route-model-table tr:last-child td { border-bottom: 0; }
-.route-workspace .sub-remove { padding: 12px 18px; border-top: 1px solid var(--line); background: var(--danger-bg); }
 .route-workspace fieldset { margin: 0 0 24px; }
 .route-workspace .sub-model-options { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .route-workspace .sub-model-options label { padding: 10px; border: 1px solid var(--line); border-radius: 7px; cursor: pointer; align-content: center; min-height: 40px; }
@@ -2947,3 +2946,16 @@ nav > button.active > svg {
 .model-position-list select:disabled { opacity: .5; cursor: not-allowed; }
 .route-edit-overlay { z-index: 85; }
 .route-edit-dialog { z-index: 90; }
+.guide-dialog.binding-remove-dialog { width: min(500px, calc(100vw - 32px)); padding: 28px; }
+.binding-remove-heading { display: flex; align-items: center; gap: 12px; padding-right: 24px; }
+.binding-remove-heading h2 { margin: 0; font-size: 20px; }
+.binding-remove-icon { display: flex; align-items: center; justify-content: center; flex: 0 0 40px; height: 40px; border-radius: 12px; background: var(--danger-bg); color: var(--danger); }
+.binding-remove-dialog > p { margin: 16px 0; }
+.binding-remove-scope { margin: 20px 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); display: grid; gap: 10px; font-size: 13px; }
+.binding-remove-scope > div { display: grid; grid-template-columns: 68px minmax(0, 1fr); gap: 12px; line-height: 1.6; }
+.binding-remove-scope dt { color: var(--muted); }
+.binding-remove-scope dd { margin: 0; overflow-wrap: anywhere; }
+.binding-remove-actions { display: flex; justify-content: flex-end; gap: 10px; padding-top: 20px; margin-top: 24px; border-top: 1px solid var(--line); }
+.binding-remove-actions .button { min-width: 88px; white-space: nowrap; }
+.binding-remove-actions .button.danger { background: var(--danger-bg); color: var(--danger); border-color: var(--danger); }
+.binding-remove-actions .button.danger:hover:not(:disabled) { background: var(--danger); color: var(--bg); }
