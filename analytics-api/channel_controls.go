@@ -17,6 +17,7 @@ func (s *Service) channelControls(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body []byte
+	var revision string
 	if r.Method == http.MethodPost {
 		var input struct {
 			Revision string   `json:"revision"`
@@ -41,6 +42,7 @@ func (s *Service) channelControls(w http.ResponseWriter, r *http.Request) {
 			input.KeyID = parts[1]
 		}
 		body, _ = json.Marshal(input)
+		revision = input.Revision
 	}
 	if r.Method == http.MethodPost {
 		unlock, lockErr := s.control.lockControls(r.Context(), src.ID)
@@ -49,8 +51,13 @@ func (s *Service) channelControls(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer unlock()
-		if _, e := s.reconcileControls(r.Context(), src); e != nil {
+		state, e := s.reconcileControls(r.Context(), src)
+		if e != nil {
 			http.Error(w, e.Error(), 409)
+			return
+		}
+		if state["revision"] != revision {
+			http.Error(w, "当前规则已更新或已完成重启恢复，请刷新规则后重新应用；本次修改尚未发送", 409)
 			return
 		}
 	}

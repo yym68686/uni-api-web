@@ -21,6 +21,8 @@ func TestChannelControlsProxyIsScopedAndPersistsRuntimeIntent(t *testing.T) {
 	}
 	defer store.Close()
 	calls := 0
+	posts := 0
+	revision := "process:1"
 	upstreamStatus := 200
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
@@ -28,6 +30,7 @@ func TestChannelControlsProxyIsScopedAndPersistsRuntimeIntent(t *testing.T) {
 			t.Error("wrong destination or auth")
 		}
 		if r.Method == "POST" {
+			posts++
 			var v map[string]any
 			json.NewDecoder(r.Body).Decode(&v)
 			if v["api_key_id"] != "key-one" {
@@ -52,7 +55,7 @@ func TestChannelControlsProxyIsScopedAndPersistsRuntimeIntent(t *testing.T) {
 		t.Fatal(err)
 	}
 	call := func(method, origin, key string, auth bool) *httptest.ResponseRecorder {
-		r := httptest.NewRequest(method, "https://console.test/v1/sources/control-test/channel-controls", strings.NewReader(`{"revision":"process:0","action":"set","api_key_id":"`+key+`","order":["a"],"disabled":[]}`))
+		r := httptest.NewRequest(method, "https://console.test/v1/sources/control-test/channel-controls", strings.NewReader(`{"revision":"`+revision+`","action":"set","api_key_id":"`+key+`","order":["a"],"disabled":[]}`))
 		r.Header.Set("Content-Type", "application/json")
 		if origin != "" {
 			r.Header.Set("Origin", origin)
@@ -82,6 +85,11 @@ func TestChannelControlsProxyIsScopedAndPersistsRuntimeIntent(t *testing.T) {
 	if w := call("POST", "https://console.test", "control-test::key-one", true); w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}
+	revision = "process:0"
+	if w := call("POST", "https://console.test", "control-test::key-one", true); w.Code != 409 || posts != 1 {
+		t.Fatal("stale draft forwarded after reconcile", w.Code, posts)
+	}
+	revision = "process:1"
 	upstreamStatus = 409
 	if w := call("POST", "https://console.test", "control-test::key-one", true); w.Code != 409 || strings.Contains(w.Body.String(), "control-test-secret") {
 		t.Fatal(w.Code, w.Body.String())

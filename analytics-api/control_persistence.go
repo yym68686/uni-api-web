@@ -23,7 +23,16 @@ const controlPersistenceSchema = `CREATE TABLE IF NOT EXISTS console_control_sna
  restoring_instance TEXT NOT NULL DEFAULT '', restore_revision TEXT NOT NULL DEFAULT '',
  status TEXT NOT NULL DEFAULT 'pending', message TEXT NOT NULL DEFAULT '',
  saved_at TIMESTAMPTZ, restored_at TIMESTAMPTZ, checked_at TIMESTAMPTZ,
- rule_count INTEGER NOT NULL DEFAULT 0, channel_count INTEGER NOT NULL DEFAULT 0);`
+ rule_count INTEGER NOT NULL DEFAULT 0, channel_count INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS console_control_bootstraps (
+ source_id TEXT NOT NULL REFERENCES console_sources(id) ON DELETE CASCADE,
+ target_hash TEXT NOT NULL, snapshot_id TEXT NOT NULL, encrypted_snapshot TEXT NOT NULL,
+ instance_id TEXT NOT NULL, revision TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ PRIMARY KEY(source_id,target_hash,snapshot_id));
+CREATE TABLE IF NOT EXISTS console_control_retired_instances (
+ source_id TEXT NOT NULL REFERENCES console_sources(id) ON DELETE CASCADE,
+ target_hash TEXT NOT NULL, instance_id TEXT NOT NULL, superseded_by TEXT NOT NULL,
+ retired_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY(source_id,target_hash,instance_id));`
 
 type retainedRule struct {
 	KeyID    string   `json:"api_key_id"`
@@ -46,6 +55,7 @@ type retainedSnapshot struct {
 	Channels []retainedChannel          `json:"temporary_channels"`
 }
 type retainedLive struct {
+	Bootstrap         *bootstrapReceipt `json:"bootstrap_restore,omitempty"`
 	DefinitionsDigest string            `json:"channel_definitions_digest"`
 	CustomDefinitions bool              `json:"channel_definitions"`
 	SettingsSupported bool              `json:"channel_settings"`
@@ -55,6 +65,11 @@ type retainedLive struct {
 	Atomic            bool              `json:"temporary_channel_restore"`
 	Rules             []retainedRule    `json:"rules"`
 	Channels          []retainedChannel `json:"temporary_channels"`
+}
+type bootstrapReceipt struct {
+	SnapshotID      string `json:"snapshot_id"`
+	AppliedRevision string `json:"applied_revision"`
+	Unchanged       bool   `json:"unchanged"`
 }
 type retainedRecord struct {
 	Enabled                                                           bool
@@ -118,6 +133,12 @@ func (s *controlStore) retainedSnapshot(r retainedRecord) (retainedSnapshot, err
 func (s *Service) captureControls(ctx context.Context, src controlSource, live retainedLive, old retainedRecord) error {
 	if !old.Enabled {
 		return nil
+	}
+	if err := s.control.checkControlInstance(ctx, src, live.Instance); err != nil {
+		return err
+	}
+	if old.Encrypted != "" && old.Target == controlTarget(src) && old.Instance != live.Instance {
+		return errors.New("来源实例已变化，必须先核对恢复状态；已保存配置未覆盖")
 	}
 	known := map[string]retainedChannel{}
 	if old.Encrypted != "" && old.Target == controlTarget(src) {
@@ -319,6 +340,9 @@ func (s *Service) reconcileControls(ctx context.Context, src controlSource) (map
 	if e != nil {
 		return nil, e
 	}
+	if e = s.control.checkControlInstance(ctx, src, live.Instance); e != nil {
+		return nil, e
+	}
 	if record.Encrypted == "" || record.Target != controlTarget(src) || record.Instance == live.Instance && record.Restoring == "" {
 		if record.Revision != live.Revision || record.Target != controlTarget(src) {
 			e = s.captureControls(ctx, src, live, record)
@@ -332,12 +356,14 @@ func (s *Service) reconcileControls(ctx context.Context, src controlSource) (map
 		return nil, e
 	}
 	if controlEquivalent(live, saved) {
-		_, e = s.control.db.ExecContext(ctx, `UPDATE console_control_snapshots SET instance_id=$2,revision=$3,restoring_instance='',restore_revision='',status='saved',message='',restored_at=now(),checked_at=now() WHERE source_id=$1`, src.ID, live.Instance, live.Revision)
+		e = s.control.adoptControlInstance(ctx, src, record, live)
 		return raw, e
 	}
 	continuing := record.Restoring == live.Instance && record.RestoreRevision == live.Revision
-	if !continuing && (len(live.Rules) > 0 || len(live.Channels) > 0 || (live.SettingsDigest != "" && live.SettingsDigest != tokenHash("{}"))) {
-		return nil, errors.New("新实例已有不同的临时修改，自动恢复已暂停以避免覆盖")
+	if !continuing && (live.Bootstrap != nil || len(live.Rules) > 0 || len(live.Channels) > 0 || (live.SettingsDigest != "" && live.SettingsDigest != tokenHash("{}"))) {
+		if e = s.control.verifyBootstrap(ctx, src, live); e != nil {
+			return nil, e
+		}
 	}
 	_, e = s.control.db.ExecContext(ctx, `UPDATE console_control_snapshots SET restoring_instance=$2,restore_revision=$3,status='restoring',message='',checked_at=now() WHERE source_id=$1`, src.ID, live.Instance, live.Revision)
 	if e != nil {
@@ -400,7 +426,7 @@ func (s *Service) reconcileControls(ctx context.Context, src controlSource) (map
 	if !controlEquivalent(live, saved) {
 		return nil, errors.New("恢复后的配置校验不一致，保留备份并暂停")
 	}
-	_, e = s.control.db.ExecContext(ctx, `UPDATE console_control_snapshots SET instance_id=$2,revision=$3,restoring_instance='',restore_revision='',status='saved',message='',restored_at=now(),checked_at=now() WHERE source_id=$1`, src.ID, live.Instance, live.Revision)
+	e = s.control.adoptControlInstance(ctx, src, record, live)
 	return raw, e
 }
 func (s *Service) controlRecoveryLoop(ctx context.Context) {
@@ -483,10 +509,10 @@ func (s *Service) controlPersistence(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var enabled bool
-	var status, message string
+	var status, message, instance, revision, encrypted string
 	var rules, channels int
 	var saved, restored, checked sql.NullInt64
-	e = s.control.db.QueryRowContext(r.Context(), `SELECT enabled,status,message,rule_count,channel_count,extract(epoch FROM saved_at)::bigint,extract(epoch FROM restored_at)::bigint,extract(epoch FROM checked_at)::bigint FROM console_control_snapshots WHERE source_id=$1`, src.ID).Scan(&enabled, &status, &message, &rules, &channels, &saved, &restored, &checked)
+	e = s.control.db.QueryRowContext(r.Context(), `SELECT enabled,status,message,rule_count,channel_count,extract(epoch FROM saved_at)::bigint,extract(epoch FROM restored_at)::bigint,extract(epoch FROM checked_at)::bigint,instance_id,revision,encrypted_snapshot FROM console_control_snapshots WHERE source_id=$1`, src.ID).Scan(&enabled, &status, &message, &rules, &channels, &saved, &restored, &checked, &instance, &revision, &encrypted)
 	if e != nil {
 		http.Error(w, "状态读取失败", 503)
 		return
@@ -497,7 +523,11 @@ func (s *Service) controlPersistence(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil
 	}
-	writeJSON(w, 200, map[string]any{"enabled": enabled, "status": status, "message": message, "rules": rules, "channels": channels, "saved_at": stamp(saved), "restored_at": stamp(restored), "checked_at": stamp(checked)})
+	snapshotID := ""
+	if encrypted != "" {
+		snapshotID = tokenHash(encrypted)
+	}
+	writeJSON(w, 200, map[string]any{"enabled": enabled, "status": status, "message": message, "rules": rules, "channels": channels, "saved_at": stamp(saved), "restored_at": stamp(restored), "checked_at": stamp(checked), "saved_instance_id": instance, "saved_revision": revision, "snapshot_id": snapshotID})
 }
 func (s *Service) saveLiveControls(ctx context.Context, src controlSource, raw map[string]any) error {
 	r, e := s.control.retainedRecord(ctx, src.ID)
@@ -560,5 +590,13 @@ func (s *Service) bootstrapControls(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "saved channel settings require a compatible gateway", 409)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"enabled": true, "snapshot": saved})
+	// Keep the exact encrypted version issued at boot. A later saved edit must
+	// not erase the evidence needed to recognize an unchanged older bootstrap.
+	id := tokenHash(record.Encrypted)
+	_, e = s.control.db.ExecContext(r.Context(), `INSERT INTO console_control_bootstraps(source_id,target_hash,snapshot_id,encrypted_snapshot,instance_id,revision) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`, src.ID, record.Target, id, record.Encrypted, record.Instance, record.Revision)
+	if e != nil {
+		http.Error(w, "configuration receipt unavailable", 503)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"enabled": true, "snapshot_id": id, "snapshot": saved})
 }
