@@ -1954,3 +1954,49 @@ it("displays native first-response latency without inventing response.created ev
     await user.click(dialog.getByRole("button", { name: "关闭检测详情" }));
   }
 });
+
+it("detects unassigned configured channels without site keys and isolates busy states", async () => {
+  const base = {kind:"configured",source_id:"fugue",source_name:"Fugue",api_key_id:"",key_position:0,key_prefix:"",positions:{},revision:"",manageable:false,account_id:"",group_id:0,account_ids:[],engine:"gpt",probe_fingerprint:"same"};
+  const channels = [
+    {...base,provider:"native-one",name:"native-one",models:["gpt-6-astra","custom-model"]},
+    {...base,provider:"native-one",name:"native-one",source_id:"do",source_name:"DigitalOcean",models:["gpt-6-astra","custom-model"]},
+    {...base,provider:"native-two",name:"native-two",models:["custom-model"]},
+  ];
+  const writes:any[]=[];
+  let states:any[]=[];
+  let release: (()=>void)|undefined;
+  vi.stubGlobal("fetch",vi.fn(async(input:string,init?:RequestInit)=>{
+    if(init?.method === "POST") {
+      expect(input).toContain("/channel-management/checks");
+      const body=JSON.parse(String(init.body));writes.push(body);
+      if(body.kind === "tool-use") await new Promise<void>(resolve=>{release=resolve});
+      if(body.kind === "check") states=body.targets.flatMap((t:any)=>t.models.map((m:string)=>({source_id:t.source_id,provider:t.provider,model:m,kind:"model",fingerprint:"same",state:"done",message:"",history:{total:1,successful:1,passed:1},result:{model:m,checked_at:42,availability:{status:"success",text:"test",ttft_ms:10,duration_ms:15},quality:{status:"success",text:"21",duration_ms:15,ttft_ms:10},verdict:"pass"}})));
+      return Response.json({queued:body.targets.length});
+    }
+    return Response.json({data:input.endsWith("/channel-management/checks")?states:input.endsWith("/channel-management")?channels:input.endsWith("/sources")?[{id:"fugue",name:"Fugue"},{id:"do",name:"DigitalOcean"}]:[],labels:{},unavailable_sources:[],unavailable_keys:[]});
+  }));
+  const user=userEvent.setup();mount("unassigned-detection");
+  await user.selectOptions(screen.getByLabelText("sub2api 账号筛选"),"__unassigned__");
+  const first=within((await screen.findByText("native-one",{selector:"strong"})).closest("tr")!);
+  const second=within(screen.getByText("native-two",{selector:"strong"}).closest("tr")!);
+  await user.click(first.getByRole("button",{name:"检测 未归属渠道 native-one 的 Tool use"}));
+  await waitFor(()=>expect(release).toBeDefined());
+  expect(first.getByRole("button",{name:"检测 未归属渠道 native-one 的 Tool use"})).toBeDisabled();
+  expect(first.getByRole("button",{name:"检测 未归属渠道 native-one 的远程压缩"})).toBeEnabled();
+  expect(second.getByRole("button",{name:"检测 未归属渠道 native-two 的 Tool use"})).toBeEnabled();
+  expect(first.getByRole("button",{name:"检测 未归属渠道 native-one"})).toBeEnabled();
+  release!();
+  await waitFor(()=>expect(first.getByRole("button",{name:"检测 未归属渠道 native-one 的 Tool use"})).toBeEnabled());
+  await user.click(screen.getByRole("button",{name:"降智检测 · 2 个渠道"}));
+  expect(writes.at(-1)).toEqual({kind:"quality",targets:[{source_id:"fugue",provider:"native-one",models:["gpt-6-astra"]}]});
+  await user.click(screen.getByRole("button",{name:"压缩检测 · 2 个渠道"}));
+  expect(writes.at(-1).targets).toHaveLength(2);
+  await user.click(screen.getByRole("button",{name:"检测全部模型 · 2 个渠道"}));
+  expect(writes.at(-1)).toEqual({kind:"check",targets:[{source_id:"fugue",provider:"native-one",models:["gpt-6-astra","custom-model"]},{source_id:"fugue",provider:"native-two",models:["custom-model"]}]});
+  await user.selectOptions(screen.getByLabelText("检测模型筛选"),"custom-model");
+  await waitFor(()=>expect(first.getByText("可用")).toBeVisible());
+  await user.click(first.getByRole("button",{name:"查看 未归属渠道 native-one 的回复与诊断"}));
+  const dialog=within(screen.getByRole("dialog"));
+  expect(dialog.getByRole("heading",{name:"回复 / 诊断"})).toBeVisible();
+  expect(dialog.getByText("test")).toBeVisible();
+});

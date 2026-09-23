@@ -12,8 +12,9 @@ import (
 
 type managementChannel struct {
 	subInstalledChannel
-	Engine     string   `json:"engine"`
-	AccountIDs []string `json:"account_ids"`
+	Engine           string   `json:"engine"`
+	AccountIDs       []string `json:"account_ids"`
+	ProbeFingerprint string   `json:"probe_fingerprint"`
 }
 
 // Read the gateway catalog, not historical traffic: unused configured channels
@@ -128,6 +129,9 @@ func (s *Service) channelManagement(w http.ResponseWriter, r *http.Request) {
 						binding.Base = subBindingSite(live.Base)
 					}
 					item = &managementChannel{subInstalledChannel: binding, Engine: row.Engine, AccountIDs: []string{}}
+					if live, ok := liveProviders[row.Provider]; ok {
+						item.ProbeFingerprint = configuredProbeFingerprint(src, live)
+					}
 					ids := map[string]bool{}
 					for _, key := range binding.BoundKeys {
 						ids[key.AccountID] = true

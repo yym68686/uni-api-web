@@ -25,7 +25,7 @@ import { useSubImports, boundGroups } from "./sub2apiImports";
 import { useSubAccounts } from "./sub2apiAccounts";
 import { Sub2apiImport } from "./Sub2apiImport";
 import { CreateChannel } from "./CreateChannel";
-import { managementRows, UNASSIGNED_ACCOUNT, useChannelManagement } from "./channelManagement";
+import { channelMembers, managementRows, UNASSIGNED_ACCOUNT, useChannelManagement, useConfiguredChecks } from "./channelManagement";
 import type { ManagedChannel } from "./channelManagement";
 import { ConfiguredChannelDialog } from "./ChannelRoutes";
 import { managedRouteCount, useAllChannelRoutes } from "./channelRouteData";
@@ -78,6 +78,7 @@ interface Result {
   verdict: string;
 }
 export interface SubTarget {
+  check_source_id?: string;
   tool_use?: ToolUseResult;
   tool_use_state?: string;
   compaction?: CompactionResult;
@@ -86,6 +87,7 @@ export interface SubTarget {
   history?: QualitySummary;
   models?: {
     model: string;
+    source_name?: string;
     state: string;
     message: string;
     result: Result | null;
@@ -608,7 +610,8 @@ function CheckDetails({
   selected?: SubModelCheck;
   prices?: ModelPrice[];
 }) {
-  const [detailModel, setDetailModel] = useState(checks[0].model);
+  const [detailModel, setDetailModel] = useState(checks[0]?.model || "");
+  if (!checks.length) return <span>暂无模型</span>;
   const check =
     selected || checks.find((item) => item.model === detailModel) || checks[0];
   const result = check.result;
@@ -629,7 +632,7 @@ function CheckDetails({
         <Dialog.Content className="guide-dialog sub-check-dialog">
           <Dialog.Title>回复 / 诊断</Dialog.Title>
           <Dialog.Description>
-            {account.name} / {target.name} · 分组 #{target.group_id}
+            {account.name} / {target.name}{account.id ? ` · 分组 #${target.group_id}` : " · uni-api 渠道定向检测"}
           </Dialog.Description>
           <Dialog.Close asChild>
             <button
@@ -665,6 +668,7 @@ function CheckDetails({
               </tr>
             </thead>
             <tbody>
+              {check.source_name && <DetailRow label="检测来源">{check.source_name}</DetailRow>}
               <DetailRow label="Tool use"><ToolUseStatus target={target} /></DetailRow>
               {target.tool_use?.model && <DetailRow label="工具检测模型">{target.tool_use.model}</DetailRow>}
               {target.tool_use?.message && <DetailRow label="工具检测诊断">{target.tool_use.message}</DetailRow>}
@@ -781,7 +785,7 @@ function CheckDetails({
               )}
             </tbody>
           </table>
-          {check.model === "gpt-6-astra" && <QualityHistory path={`/v1/sub2api/accounts/${encodeURIComponent(account.id)}/groups/${target.group_id}/quality-history`} revision={`${qualityResult?.checked_at}:${target.history?.total}:${target.history?.successful}`} />}
+          {check.model === "gpt-6-astra" && (account.id || target.check_source_id) && <QualityHistory path={target.check_source_id ? `/v1/sources/${encodeURIComponent(target.check_source_id)}/channel-checks/history?provider=${encodeURIComponent(target.channel)}` : `/v1/sub2api/accounts/${encodeURIComponent(account.id)}/groups/${target.group_id}/quality-history`} revision={`${qualityResult?.checked_at}:${target.history?.total}:${target.history?.successful}`} />}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
@@ -829,6 +833,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
     setFilters((v) => ({ ...v, platform }));
   const imports = useSubImports();
   const management = useChannelManagement();
+  const configuredChecks = useConfiguredChecks();
   const routeSources = [...new Set([...(sources.data?.data || []).map(s=>s.id), ...(management.data?.data || []).map(c=>c.source_id)])];
   const routeQueries = useAllChannelRoutes(routeSources);
   function configuredCount(item: ManagedChannel) {
@@ -853,7 +858,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   const [page, setPage] = useState(0);
   const candidateRows = useMemo(
     () =>
-      managementRows(accounts, management.data?.data || [], imports.data?.data || [], model, accountId)
+      managementRows(accounts, management.data?.data || [], imports.data?.data || [], model, accountId, configuredChecks.data?.data || [])
         .filter(
           ({ account, target, checks, selected, accountIds, configured }) =>
             (!accountId || (accountId === UNASSIGNED_ACCOUNT ? !accountIds.length : accountIds.includes(accountId))) &&
@@ -875,7 +880,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
               (!!target.history?.successful &&
                 target.history.passed * 100 >= Number(minQuality) * target.history.successful)),
         ),
-    [accounts, management.data, imports.data, search, accountId, availability, priceStatus, prices.data, quality, minQuality, model, compaction, toolUse],
+    [accounts, management.data, configuredChecks.data, imports.data, search, accountId, availability, priceStatus, prices.data, quality, minQuality, model, compaction, toolUse],
   );
   const rates = [
     ...new Set(
@@ -915,13 +920,12 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
     page,
     Math.max(0, Math.ceil(rows.length / 25) - 1),
   );
+  const selectionID = (account: SubAccount, target: SubTarget, configured?: ManagedChannel) =>
+    !account.id && configured ? `configured:${configured.provider}:${configured.engine}` : `${account.id}:${target.group_id}`;
   const eligible = rows.filter(
-    ({ account, target }) =>
-      target.active &&
-      target.key_id > 0 &&
-      !pending(account.state) &&
-      target.state !== "error",
-  ).filter((row, index, all) => all.findIndex(other => other.account.id === row.account.id && other.target.group_id === row.target.group_id) === index);
+    ({ account, target, configured }) =>
+      (!account.id && configured) || (target.active && target.key_id > 0 && !pending(account.state) && target.state !== "error"),
+  ).filter((row, index, all) => all.findIndex(other => selectionID(other.account, other.target, other.configured) === selectionID(row.account, row.target, row.configured)) === index);
   async function mutate(
     key: string,
     path: string,
@@ -963,38 +967,58 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
     }
   }
   type CheckKind = "check" | "quality" | "compaction" | "tool-use";
-  const checkKeys = (account: SubAccount, target: SubTarget, kind: CheckKind) =>
-    (kind === "check" ? modelsToCheck : kind === "quality" ? ["gpt-6-astra"] : [kind])
-      .map(item => `${account.id}:${target.group_id}:${item}`);
-  const checkBusy = (account: SubAccount, target: SubTarget, kind: CheckKind) => {
+  const requestedModels = (configured?: ManagedChannel) => configured
+    ? configured.models.filter(m => model ? m === model : allModelsSelected || detectionModels.includes(m)) : modelsToCheck;
+  const checkKeys = (account: SubAccount, target: SubTarget, kind: CheckKind, configured?: ManagedChannel) =>
+    (kind === "check" ? requestedModels(!account.id ? configured : undefined) : kind === "quality" ? ["gpt-6-astra"] : [kind])
+      .map(item => `${selectionID(account, target, configured)}:${item}`);
+  const checkBusy = (account: SubAccount, target: SubTarget, kind: CheckKind, configured?: ManagedChannel) => {
     if (pending(account.state) && account.job_kind === "sync") return true;
-    if (checkKeys(account, target, kind).some(key => submittingChecks.has(key))) return true;
+    if (checkKeys(account, target, kind, configured).some(key => submittingChecks.has(key))) return true;
     if (kind === "compaction") return pending(target.compaction_state || "");
     if (kind === "tool-use") return pending(target.tool_use_state || "");
-    const models = kind === "quality" ? ["gpt-6-astra"] : modelsToCheck;
-    return modelChecks(target).some(c => models.includes(c.model) && pending(c.state)) ||
+    const models = kind === "quality" ? ["gpt-6-astra"] : requestedModels(!account.id ? configured : undefined);
+    return (target.models || modelChecks(target)).some(c => models.includes(c.model) && pending(c.state)) ||
       (!target.models && pending(target.state) && !pending(target.compaction_state || "") && !pending(target.tool_use_state || ""));
   };
-  const canCheck = (account: SubAccount, target: SubTarget, kind: CheckKind) =>
-    target.active && !!target.key_id && target.state !== "error" &&
-    !(kind === "check" && !modelsToCheck.length) && !checkBusy(account, target, kind);
-  type CheckSelection = { account: SubAccount; target: SubTarget }[];
+  const canCheck = (account: SubAccount, target: SubTarget, kind: CheckKind, configured?: ManagedChannel) => {
+    const native = !account.id && configured;
+    if (native ? !configured.models.length || (kind === "quality" && !configured.models.includes("gpt-6-astra"))
+      : !target.active || !target.key_id || target.state === "error") return false;
+    return !(kind === "check" && !requestedModels(native ? configured : undefined).length) && !checkBusy(account, target, kind, configured);
+  };
+  type CheckSelection = { account: SubAccount; target: SubTarget; configured?: ManagedChannel }[];
   async function queueChecks(kind: CheckKind, selection: CheckSelection) {
-    const targets = selection.filter(({ account, target }) => canCheck(account, target, kind));
-    const keys = targets.flatMap(({account, target}) => checkKeys(account, target, kind));
+    const targets = selection.filter(({ account, target, configured }) => canCheck(account, target, kind, configured));
+    const keys = targets.flatMap(({account, target, configured}) => checkKeys(account, target, kind, configured));
     if (!targets.length || keys.some(key => checksInFlight.current.has(key))) return;
     keys.forEach(key => checksInFlight.current.add(key));
     setSubmittingChecks(new Set(checksInFlight.current));
     setError("");
     try {
-      await controlRequest(`/v1/sub2api/${kind === "check" ? "checks" : `${kind}-checks`}`, {
-        method: "POST",
-        body: JSON.stringify({ targets: targets.map(({account, target}) => ({
-          account_id: account.id, group_id: target.group_id,
-          ...(kind === "check" ? { models: modelsToCheck } : {}),
-        })) }),
+      const site = targets.filter(t => !!t.account.id);
+      const native = targets.filter(t => !t.account.id && t.configured).flatMap(({configured}) => {
+        const members = channelMembers(configured!);
+        // A merged row probes each model once, using a member that actually
+        // defines it. Results retain that member's source identity.
+        const models = kind === "check" ? requestedModels(configured) : kind === "quality" ? ["gpt-6-astra"] : [];
+        if (!models.length) return [{source_id:members[0].source_id,provider:members[0].provider,models:[]}];
+        const remaining = new Set(models);
+        return members.flatMap(m => {
+          const selected = m.models.filter(model => remaining.has(model));
+          selected.forEach(model => remaining.delete(model));
+          return selected.length ? [{source_id:m.source_id,provider:m.provider,models:selected}] : [];
+        });
       });
-      await client.invalidateQueries({ queryKey: ["sub2api"] });
+      const requests: Promise<unknown>[] = [];
+      if (site.length) requests.push(controlRequest(`/v1/sub2api/${kind === "check" ? "checks" : `${kind}-checks`}`, {
+        method:"POST", body:JSON.stringify({targets:site.map(({account,target}) => ({account_id:account.id,group_id:target.group_id,...(kind === "check" ? {models:modelsToCheck} : {})}))}),
+      }));
+      if (native.length) requests.push(controlRequest("/v1/channel-management/checks", {method:"POST",body:JSON.stringify({kind,targets:native})}));
+      const results = await Promise.allSettled(requests);
+      await Promise.all([client.invalidateQueries({queryKey:["sub2api"]}),client.invalidateQueries({queryKey:["configured-checks"]})]);
+      const failed = results.find(r => r.status === "rejected");
+      if (failed?.status === "rejected") throw failed.reason;
     } catch (e) {
       setError(e instanceof Error ? e.message : "检测提交失败");
     } finally {
@@ -1002,10 +1026,10 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
       setSubmittingChecks(new Set(checksInFlight.current));
     }
   }
-  const batchBusy = (kind: CheckKind) => eligible.some(({account, target}) =>
-    checkKeys(account, target, kind).some(key => submittingChecks.has(key)));
+  const batchBusy = (kind: CheckKind) => eligible.some(({account, target, configured}) =>
+    checkKeys(account, target, kind, configured).some(key => submittingChecks.has(key)));
   const batchDisabled = (kind: CheckKind) => eligible.length > 500 ||
-    !eligible.some(({account, target}) => canCheck(account, target, kind));
+    !eligible.some(({account, target, configured}) => canCheck(account, target, kind, configured));
   const check = (selection: CheckSelection) => queueChecks("check", selection);
   const checkQuality = () => queueChecks("quality", eligible);
   const checkCompaction = (selection: CheckSelection = eligible) => queueChecks("compaction", selection);
@@ -1209,6 +1233,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
           {error}
         </div>
       )}
+      {configuredChecks.isError && <div role="alert" className="error-banner">已有渠道检测记录读取失败。<button className="button small" onClick={() => void configuredChecks.refetch()}>重试</button></div>}
       {(management.error || !!management.data?.unavailable_sources?.length) && <div className="error-banner" role="alert">
         {management.error?.message || `渠道列表暂不完整：${management.data?.unavailable_sources.join("、")}`}
         <button className="button small" onClick={() => void management.refetch()}>重试</button>
@@ -1266,7 +1291,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
               className="button small sub-check-icon"
               aria-label="刷新渠道管理"
               title="刷新数据"
-              onClick={() => { void query.refetch(); void management.refetch(); void imports.refetch(); void client.invalidateQueries({queryKey:["channel-routes"]}); }}
+              onClick={() => { void query.refetch(); void management.refetch(); void configuredChecks.refetch(); void imports.refetch(); void client.invalidateQueries({queryKey:["channel-routes"]}); }}
               disabled={query.isFetching || management.isFetching}
             >
               <RefreshCw size={15} className={query.isFetching ? "spin" : ""} />
@@ -1276,7 +1301,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                 className="button primary small"
                 aria-label={`${model ? "检测所选模型" : allModelsSelected ? "检测全部模型" : `检测已选 ${detectionModels.length} 个模型`} · ${eligible.length} 个渠道`}
                 disabled={batchDisabled("check")}
-                title={!modelsToCheck.length ? "当前筛选模型未勾选，请在设置中启用" : `检测 ${eligible.length} 个渠道，${modelsToCheck.length} 个模型`}
+                title={`检测 ${eligible.length} 个渠道；已有渠道按其配置模型检测`}
                 onClick={() => void check(eligible)}
               >
                 <ScanLine size={15} />
@@ -1569,12 +1594,12 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                         <td>
                           <div className="quality-status-stack"><Verdict result={groupQualityResult(t)} history={t.history} /><QualityProbability history={t.history} checkedAt={groupQualityResult(t)?.checked_at} /></div>
                         </td>
-                        <td><div className="quality-status-stack"><CompactionStatus target={t} /><button className="button small ghost" disabled={!canCheck(account, t, "compaction")} aria-busy={checkBusy(account, t, "compaction")}
-                          aria-label={`检测 ${account.name} ${t.name} 的远程压缩`} onClick={() => void checkCompaction([{account, target:t}])}>{checkBusy(account, t, "compaction") && <Spinner small />}重新检测</button></div></td>
-                        <td><div className="quality-status-stack"><ToolUseStatus target={t} /><button className="button small ghost" disabled={!canCheck(account, t, "tool-use")} aria-busy={checkBusy(account, t, "tool-use")}
-                          aria-label={`检测 ${account.name} ${t.name} 的 Tool use`} onClick={() => void checkToolUse([{account, target:t}])}>{checkBusy(account, t, "tool-use") && <Spinner small />}重新检测</button></div></td>
+                        <td><div className="quality-status-stack"><CompactionStatus target={t} /><button className="button small ghost" disabled={!canCheck(account, t, "compaction", configured)} aria-busy={checkBusy(account, t, "compaction", configured)}
+                          aria-label={`检测 ${account.name} ${t.name} 的远程压缩`} onClick={() => void checkCompaction([{account, target:t, configured}])}>{checkBusy(account, t, "compaction", configured) && <Spinner small />}重新检测</button></div></td>
+                        <td><div className="quality-status-stack"><ToolUseStatus target={t} /><button className="button small ghost" disabled={!canCheck(account, t, "tool-use", configured)} aria-busy={checkBusy(account, t, "tool-use", configured)}
+                          aria-label={`检测 ${account.name} ${t.name} 的 Tool use`} onClick={() => void checkToolUse([{account, target:t, configured}])}>{checkBusy(account, t, "tool-use", configured) && <Spinner small />}重新检测</button></div></td>
                         <td>
-                          {configured && !account.id ? <button className="button small" onClick={() => setConfiguredDialog(configured)}>查看详情</button> : <CheckDetails
+                          {<CheckDetails
                             key={model || "all"}
                             account={account}
                             target={t}
@@ -1607,15 +1632,15 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                           <button
                             className="button small"
                             aria-label={`检测 ${account.name} ${t.name}`}
-                            disabled={!canCheck(account, t, "check")}
-                            aria-busy={checkBusy(account, t, "check")}
+                            disabled={!canCheck(account, t, "check", configured)}
+                            aria-busy={checkBusy(account, t, "check", configured)}
                             onClick={() =>
                               void check([
-                                { account, target: t },
+                                { account, target: t, configured },
                               ])
                             }
                           >
-                            {checkBusy(account, t, "check") ? <Spinner small /> : <ScanLine size={13} />}
+                            {checkBusy(account, t, "check", configured) ? <Spinner small /> : <ScanLine size={13} />}
                             {model ? "检测此模型" : allModelsSelected ? "检测全部模型" : `检测已选 ${detectionModels.length} 个模型`}
                           </button>
                           <button

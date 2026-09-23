@@ -8,8 +8,28 @@ export const UNASSIGNED_ACCOUNT = "__unassigned__";
 export interface ManagedChannel extends InstalledChannel {
   engine: string;
   account_ids: string[];
+  probe_fingerprint?: string;
   // Grouping is presentation-only. Mutations must use an individual member.
   members?: ManagedChannel[];
+}
+export interface ConfiguredCheck {
+  source_id: string;
+  provider: string;
+  kind: "model" | "compaction" | "tool-use";
+  model: string;
+  fingerprint: string;
+  state: string;
+  message: string;
+  result: NonNullable<SubTarget["result"]> | SubTarget["compaction"] | null;
+  history: SubTarget["history"];
+}
+export function useConfiguredChecks() {
+  return useQuery({
+    queryKey: ["configured-checks"],
+    queryFn: ({ signal }) => controlRequest<{ data: ConfiguredCheck[] }>("/v1/channel-management/checks", { signal }),
+    refetchInterval: query => query.state.data?.data.some(c => ["queued", "running"].includes(c.state)) ? 1500 : 15000,
+    retry: false,
+  });
 }
 export const channelMembers = (item: ManagedChannel) => item.members || [item];
 export function groupManagedChannels(
@@ -61,6 +81,7 @@ export function managementRows(
   installed: InstalledChannel[],
   model: string,
   accountFilter = "",
+  configuredChecks: ConfiguredCheck[] = [],
 ): ManagementRow[] {
   const row = (
     account: SubAccount,
@@ -152,6 +173,20 @@ export function managementRows(
           message: "",
           result: null,
         };
+    // Results belong to a source/provider credential fingerprint. Never reuse
+    // another source's result after its configured credential has changed.
+    const native = configuredChecks.filter(c => members.some(m => m.source_id === c.source_id && m.provider === c.provider &&
+      (!c.fingerprint || !m.probe_fingerprint || c.fingerprint === m.probe_fingerprint)));
+    const latestCapability = (kind: ConfiguredCheck["kind"]) => native.filter(c => c.kind === kind).sort((a,b) =>
+      Number(["queued","running"].includes(b.state)) - Number(["queued","running"].includes(a.state)) ||
+      (b.result?.checked_at || 0) - (a.result?.checked_at || 0))[0];
+    for (const [kind, field] of [["compaction","compaction"],["tool-use","tool_use"]] as const) {
+      const c = latestCapability(kind);
+      if (c && (!bound || (c.result?.checked_at || 0) >= (target[field]?.checked_at || 0))) {
+        target[`${field}_state`] = c.state;
+        target[field] = c.result as SubTarget[typeof field] || (c.message ? {status:"error",checked_at:0,message:c.message,attempts:[]} : undefined);
+      }
+    }
     const entry = row(
       displayAccount,
       target,
@@ -169,14 +204,25 @@ export function managementRows(
               )
             : [],
         );
+      for (const c of native.filter(c => c.kind === "model" && c.model === name)) {
+        candidates.push({ model:name, source_name:members.find(m => m.source_id === c.source_id)?.source_name, state:c.state, message:c.message, result:c.result as SubTarget["result"] });
+      }
       const check = candidates.sort(
-        (a, b) => (b.result?.checked_at || 0) - (a.result?.checked_at || 0),
+        (a, b) => Number(["queued","running"].includes(b.state)) - Number(["queued","running"].includes(a.state)) || (b.result?.checked_at || 0) - (a.result?.checked_at || 0),
       )[0];
       return {
         ...(check || { state: "idle", message: "", result: null }),
         model: name,
       };
     });
+    if (!bound) {
+      target.models = entry.checks;
+      const quality = native.filter(c => c.kind === "model" && c.model === "gpt-6-astra").sort((a,b) => (b.result?.checked_at || 0) - (a.result?.checked_at || 0))[0];
+      if (quality) {
+        target.history = quality.history;
+        target.check_source_id = quality.source_id;
+      }
+    }
     entry.selected = entry.checks.find((c) => c.model === model);
     result.push(entry);
   }

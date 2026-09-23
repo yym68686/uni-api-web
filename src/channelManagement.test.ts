@@ -154,3 +154,20 @@ it("uses the selected account's probe target when grouped sources have different
   expect(unbound.account.id).toBe("");
   expect(unbound.target.active).toBe(false);
 });
+
+it("keeps configured check progress and custom model results source and credential scoped", () => {
+  const data=[channel({models:["custom"],probe_fingerprint:"current"}),channel({source_id:"do",source_name:"DigitalOcean",models:["custom"],probe_fingerprint:"do-current"})];
+  const probe={status:"success",text:"test",ttft_ms:1,duration_ms:2};
+  const states: import("./channelManagement").ConfiguredCheck[]=[
+    {source_id:"fugue",provider:"native",kind:"model",model:"custom",fingerprint:"current",state:"done",message:"",result:{model:"custom",checked_at:1,availability:probe,quality:probe,verdict:"not_applicable"},history:{total:0,successful:0,passed:0}},
+    {source_id:"do",provider:"native",kind:"compaction",model:"",fingerprint:"do-current",state:"running",message:"",result:null,history:{total:0,successful:0,passed:0}},
+  ];
+  let row=managementRows([],data,[],"custom","",states)[0];
+  expect(row.selected).toMatchObject({state:"done",source_name:"Fugue",result:{availability:{text:"test"}}});
+  expect(row.target.models?.[0].model).toBe("custom");
+  expect(row.target.compaction_state).toBe("running");
+  data[0].probe_fingerprint="replaced";
+  row=managementRows([],data,[],"custom","",states)[0];
+  expect(row.selected?.result).toBeNull();
+  expect(row.target.compaction_state).toBe("running");
+});
