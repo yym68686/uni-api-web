@@ -405,6 +405,12 @@ func subModelAllowed(model string) bool {
 	}
 	return false
 }
+
+// Detection settings can include models discovered in configured channels.
+// They are names sent in a fixed protocol payload, never URLs or route changes.
+func validProbeModel(model string) bool {
+	return strings.TrimSpace(model) == model && model != "" && len(model) <= 256 && !strings.ContainsAny(model, "\r\n\x00")
+}
 func subRunProbes(ctx context.Context, client *http.Client, base, key string, models ...string) subResult {
 	model := checkModel
 	if len(models) > 0 {

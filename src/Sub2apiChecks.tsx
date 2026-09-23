@@ -800,7 +800,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   const accounts = query.data?.data || [];
   const [form, setForm] = useState<{ account: SubAccount | null } | null>(null);
   const [filters, setFilters] = useState(() => loadSubFilters(user));
-  const [detectionModels, setDetectionModels] = useState(() => loadSubModels(user));
+  const [modelSelectionRevision, setModelSelectionRevision] = useState(0);
   const {
     search,
     accountId,
@@ -815,8 +815,6 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
     minQuality,
     platform,
   } = filters;
-  const modelsToCheck = detectionModels.filter((item) => !model || item === model);
-  const allModelsSelected = detectionModels.length === SUB_MODELS.length;
   useEffect(() => saveSubFilters(user, filters), [user, filters]);
   const setSearch = (search: string) => setFilters((v) => ({ ...v, search }));
   const setAccountId = (accountId: string) =>
@@ -839,7 +837,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   function configuredCount(item: ManagedChannel) {
     return managedRouteCount(item, routeSources, routeQueries);
   }
-  const filterModels = [...new Set([...SUB_MODELS, ...(management.data?.data || []).flatMap(item => item.models || []), ...(model ? [model] : [])])];
+  const filterModels = [...new Set([...SUB_MODELS, ...(management.data?.data || []).flatMap(item => item.models || []), ...(configuredChecks.data?.data || []).filter(c => c.kind === "model").map(c => c.model), ...accounts.flatMap(a => a.targets.flatMap(t => (t.models || []).map(c => c.model))), ...(model ? [model] : [])])];
   const [configuredDialog, setConfiguredDialog] = useState<ManagedChannel | null>(null);
   const [importing, setImporting] = useState<{
     account: SubAccount;
@@ -862,7 +860,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
         .filter(
           ({ account, target, checks, selected, accountIds, configured }) =>
             (!accountId || (accountId === UNASSIGNED_ACCOUNT ? !accountIds.length : accountIds.includes(accountId))) &&
-            (!configured || !model || configured.models.includes(model)) &&
+            (!configured || !account.id || !model || checks.some(c => c.model === model)) &&
             `${account.name} ${account.email} ${target.name} ${target.channel} ${target.platform} ${configured?.source_name || ""} ${configured?.members?.map(m=>m.base || "").join(" ") || configured?.base || ""}`
               .toLowerCase()
               .includes(search.toLowerCase()) &&
@@ -916,6 +914,12 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
       if (y == null) return -1;
       return sort === "asc" ? x - y : y - x;
     });
+  const extraModels = [...new Set(rows.filter(r => !r.account.id && r.configured).flatMap(r => r.checks.map(c => c.model)).filter(m => !SUB_MODELS.includes(m)))].sort();
+  const availableModels = [...SUB_MODELS, ...extraModels];
+  const modelSelectionKey = JSON.stringify(availableModels);
+  const detectionModels = useMemo(() => loadSubModels(user, JSON.parse(modelSelectionKey)), [user, modelSelectionKey, modelSelectionRevision]);
+  const modelsToCheck = detectionModels.filter(item => !model || item === model);
+  const allModelsSelected = detectionModels.length === availableModels.length;
   const currentPage = Math.min(
     page,
     Math.max(0, Math.ceil(rows.length / 25) - 1),
@@ -967,25 +971,24 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
     }
   }
   type CheckKind = "check" | "quality" | "compaction" | "tool-use";
-  const requestedModels = (configured?: ManagedChannel) => configured
-    ? configured.models.filter(m => model ? m === model : allModelsSelected || detectionModels.includes(m)) : modelsToCheck;
+  const requestedModels = () => modelsToCheck;
   const checkKeys = (account: SubAccount, target: SubTarget, kind: CheckKind, configured?: ManagedChannel) =>
-    (kind === "check" ? requestedModels(!account.id ? configured : undefined) : kind === "quality" ? ["gpt-6-astra"] : [kind])
+    (kind === "check" ? requestedModels() : kind === "quality" ? ["gpt-6-astra"] : [kind])
       .map(item => `${selectionID(account, target, configured)}:${item}`);
   const checkBusy = (account: SubAccount, target: SubTarget, kind: CheckKind, configured?: ManagedChannel) => {
     if (pending(account.state) && account.job_kind === "sync") return true;
     if (checkKeys(account, target, kind, configured).some(key => submittingChecks.has(key))) return true;
     if (kind === "compaction") return pending(target.compaction_state || "");
     if (kind === "tool-use") return pending(target.tool_use_state || "");
-    const models = kind === "quality" ? ["gpt-6-astra"] : requestedModels(!account.id ? configured : undefined);
+    const models = kind === "quality" ? ["gpt-6-astra"] : requestedModels();
     return (target.models || modelChecks(target)).some(c => models.includes(c.model) && pending(c.state)) ||
       (!target.models && pending(target.state) && !pending(target.compaction_state || "") && !pending(target.tool_use_state || ""));
   };
   const canCheck = (account: SubAccount, target: SubTarget, kind: CheckKind, configured?: ManagedChannel) => {
     const native = !account.id && configured;
-    if (native ? !configured.models.length || (kind === "quality" && !configured.models.includes("gpt-6-astra"))
+    if (native ? !channelMembers(configured).length
       : !target.active || !target.key_id || target.state === "error") return false;
-    return !(kind === "check" && !requestedModels(native ? configured : undefined).length) && !checkBusy(account, target, kind, configured);
+    return !(kind === "check" && !requestedModels().length) && !checkBusy(account, target, kind, configured);
   };
   type CheckSelection = { account: SubAccount; target: SubTarget; configured?: ManagedChannel }[];
   async function queueChecks(kind: CheckKind, selection: CheckSelection) {
@@ -999,16 +1002,18 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
       const site = targets.filter(t => !!t.account.id);
       const native = targets.filter(t => !t.account.id && t.configured).flatMap(({configured}) => {
         const members = channelMembers(configured!);
-        // A merged row probes each model once, using a member that actually
-        // defines it. Results retain that member's source identity.
-        const models = kind === "check" ? requestedModels(configured) : kind === "quality" ? ["gpt-6-astra"] : [];
+        // Probe every selected model once. Prefer an existing mapping; use the
+        // first source for models not yet configured on any member.
+        const models = kind === "check" ? requestedModels() : kind === "quality" ? ["gpt-6-astra"] : [];
         if (!models.length) return [{source_id:members[0].source_id,provider:members[0].provider,models:[]}];
-        const remaining = new Set(models);
-        return members.flatMap(m => {
-          const selected = m.models.filter(model => remaining.has(model));
-          selected.forEach(model => remaining.delete(model));
-          return selected.length ? [{source_id:m.source_id,provider:m.provider,models:selected}] : [];
-        });
+        const grouped = new Map<string, {source_id:string;provider:string;models:string[]}>();
+        for (const model of models) {
+          const member = members.find(m => m.models.includes(model)) || members[0];
+          const key = `${member.source_id}:${member.provider}`;
+          const target = grouped.get(key) || {source_id:member.source_id,provider:member.provider,models:[]};
+          target.models.push(model);grouped.set(key,target);
+        }
+        return [...grouped.values()];
       });
       const requests: Promise<unknown>[] = [];
       if (site.length) requests.push(controlRequest(`/v1/sub2api/${kind === "check" ? "checks" : `${kind}-checks`}`, {
@@ -1301,15 +1306,15 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                 className="button primary small"
                 aria-label={`${model ? "检测所选模型" : allModelsSelected ? "检测全部模型" : `检测已选 ${detectionModels.length} 个模型`} · ${eligible.length} 个渠道`}
                 disabled={batchDisabled("check")}
-                title={`检测 ${eligible.length} 个渠道；已有渠道按其配置模型检测`}
+                title={!modelsToCheck.length ? "当前筛选模型未勾选，请在设置中启用" : `检测 ${eligible.length} 个渠道，${modelsToCheck.length} 个模型`}
                 onClick={() => void check(eligible)}
               >
                 <ScanLine size={15} />
                 {model ? "检测所选模型" : allModelsSelected ? "检测全部模型" : "检测已选模型"}
               </button>
-              <SubModelSettings models={detectionModels} onSave={(models) => {
-                setDetectionModels(models);
-                saveSubModels(user, models);
+              <SubModelSettings models={detectionModels} extraModels={extraModels} onSave={(models) => {
+                saveSubModels(user, models, availableModels);
+                setModelSelectionRevision(v => v + 1);
               }} />
             </div>
           </div>

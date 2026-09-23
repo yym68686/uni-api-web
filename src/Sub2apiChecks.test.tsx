@@ -1988,15 +1988,54 @@ it("detects unassigned configured channels without site keys and isolates busy s
   release!();
   await waitFor(()=>expect(first.getByRole("button",{name:"检测 未归属渠道 native-one 的 Tool use"})).toBeEnabled());
   await user.click(screen.getByRole("button",{name:"降智检测 · 2 个渠道"}));
-  expect(writes.at(-1)).toEqual({kind:"quality",targets:[{source_id:"fugue",provider:"native-one",models:["gpt-6-astra"]}]});
+  expect(writes.at(-1)).toEqual({kind:"quality",targets:[{source_id:"fugue",provider:"native-one",models:["gpt-6-astra"]},{source_id:"fugue",provider:"native-two",models:["gpt-6-astra"]}]});
   await user.click(screen.getByRole("button",{name:"压缩检测 · 2 个渠道"}));
   expect(writes.at(-1).targets).toHaveLength(2);
   await user.click(screen.getByRole("button",{name:"检测全部模型 · 2 个渠道"}));
-  expect(writes.at(-1)).toEqual({kind:"check",targets:[{source_id:"fugue",provider:"native-one",models:["gpt-6-astra","custom-model"]},{source_id:"fugue",provider:"native-two",models:["custom-model"]}]});
+  expect(writes.at(-1)).toEqual({kind:"check",targets:[{source_id:"fugue",provider:"native-one",models:[...SUB_MODELS,"custom-model"]},{source_id:"fugue",provider:"native-two",models:[...SUB_MODELS,"custom-model"]}]});
   await user.selectOptions(screen.getByLabelText("检测模型筛选"),"custom-model");
   await waitFor(()=>expect(first.getByText("可用")).toBeVisible());
   await user.click(first.getByRole("button",{name:"查看 未归属渠道 native-one 的回复与诊断"}));
   const dialog=within(screen.getByRole("dialog"));
   expect(dialog.getByRole("heading",{name:"回复 / 诊断"})).toBeVisible();
   expect(dialog.getByText("test")).toBeVisible();
+});
+
+it("shows scoped extra models and submits exactly the checked models to native and site channels", async () => {
+ const accounts=fixtures().slice(0,1),writes:any[]=[];
+ const base={kind:"configured",source_id:"fugue",source_name:"Fugue",api_key_id:"",key_position:0,key_prefix:"",positions:{},revision:"",manageable:false,account_id:"",group_id:0,account_ids:[],engine:"gpt",probe_fingerprint:"same"};
+ const channels=[{...base,provider:"native",name:"native",models:["custom-model"]},{...base,source_id:"do",source_name:"DigitalOcean",provider:"native",name:"native",models:["second-model"]}];
+ vi.stubGlobal("fetch",vi.fn(async(input:string,init?:RequestInit)=>{
+  if(init?.method === "POST"){writes.push({path:input,...JSON.parse(String(init.body))});return Response.json({queued:1});}
+  return Response.json({data:input.endsWith("/channel-management")?channels:input.endsWith("/accounts")?accounts:[],labels:{},unavailable_sources:[],unavailable_keys:[]});
+ }));
+ const user=userEvent.setup();let view=mount('consistent-selection');
+ await screen.findByText('native',{selector:'strong'});
+ await user.click(screen.getByRole('button',{name:'检测模型设置'}));
+ let d=within(screen.getByRole('dialog'));
+ expect(d.getByText('当前筛选渠道的额外模型 · 2')).toBeVisible();
+ expect(d.getByRole('checkbox',{name:'custom-model'})).toBeChecked();
+ await user.click(d.getByRole('button',{name:'清空'}));
+ for(const m of ['gpt-6-sol','second-model'])await user.click(d.getByRole('checkbox',{name:m}));
+ await user.click(d.getByRole('button',{name:'保存设置'}));
+ await user.click(screen.getByRole('button',{name:'检测已选 2 个模型 · 2 个渠道'}));
+ expect(writes.find(w=>w.path.endsWith('/sub2api/checks')).targets[0].models).toEqual(['gpt-6-sol','second-model']);
+ expect(writes.find(w=>w.path.endsWith('/channel-management/checks')).targets).toEqual([{source_id:'fugue',provider:'native',models:['gpt-6-sol']},{source_id:'do',provider:'native',models:['second-model']}]);
+ await user.selectOptions(screen.getByLabelText('sub2api 账号筛选'),'__unassigned__');
+ await user.selectOptions(screen.getByLabelText('检测模型筛选'),'gpt-6-sol');
+ expect(screen.getByText('native',{selector:'strong'})).toBeVisible();
+ await user.click(screen.getByRole('button',{name:'检测 未归属渠道 native'}));
+ expect(writes.at(-1).targets).toEqual([{source_id:'fugue',provider:'native',models:['gpt-6-sol']}]);
+ await user.selectOptions(screen.getByLabelText('检测模型筛选'),'custom-model');
+ expect(screen.getByRole('button',{name:'检测 未归属渠道 native'})).toBeDisabled();
+ view.unmount();view=mount('consistent-selection');
+ await screen.findByText('native',{selector:'strong'});
+ await user.click(screen.getByRole('button',{name:'检测模型设置'}));d=within(screen.getByRole('dialog'));
+ expect(d.getByRole('checkbox',{name:'custom-model'})).not.toBeChecked();
+ expect(d.getByRole('checkbox',{name:'second-model'})).toBeChecked();
+ await user.click(d.getByRole('button',{name:'取消'}));
+ await user.selectOptions(screen.getByLabelText('检测模型筛选'),'');
+ await user.selectOptions(screen.getByLabelText('sub2api 账号筛选'),'one');
+ await user.click(screen.getByRole('button',{name:'检测模型设置'}));d=within(screen.getByRole('dialog'));
+ expect(d.queryByRole('checkbox',{name:'custom-model'})).not.toBeInTheDocument();
 });

@@ -6,7 +6,7 @@ export type SubModelCheck = NonNullable<SubTarget["models"]>[number];
 // Each result belongs to one model. Only Astra had a legacy group-level result;
 // an absent sibling entry must stay untested instead of inheriting that result.
 export function modelChecks(target: SubTarget): SubModelCheck[] {
-  return SUB_MODELS.map((model) => {
+  return [...new Set([...SUB_MODELS, ...(target.models || []).map(c => c.model)])].map((model) => {
     const saved = target.models?.find((item) => item.model === model);
     if (saved) return saved;
     const result = model === "gpt-6-astra" ? target.result : null;

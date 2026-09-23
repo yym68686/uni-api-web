@@ -67,4 +67,16 @@ func TestSubSelectedModelsQueueLargeBatchWithoutChangingOtherResults(t *testing.
 	if queued != 3 || untouched != 500*len(subModels)-3 {
 		t.Fatal("unchecked model changed", queued, untouched)
 	}
+	if w := request([]string{"custom-channel-model"}, 1); w.Code != 202 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	var extra int
+	store.db.QueryRow(`SELECT count(*) FROM console_sub_check_queue WHERE account_id=$1 AND model='custom-channel-model'`, id).Scan(&extra)
+	if extra != 1 {
+		t.Fatal("extra model not queued", extra)
+	}
+	if w := request([]string{"bad\nmodel"}, 1); w.Code != 400 {
+		t.Fatal("invalid model accepted", w.Code)
+	}
+
 }

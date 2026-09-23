@@ -476,7 +476,7 @@ func (s *Service) subQueueChecksKind(w http.ResponseWriter, r *http.Request, kin
 		return
 	}
 	for _, target := range in.Targets {
-		if len(target.Models) > len(subModels) {
+		if len(target.Models) > 100 {
 			http.Error(w, "检测模型数量超出限制", 400)
 			return
 		}
@@ -505,7 +505,7 @@ func (s *Service) subQueueChecksKind(w http.ResponseWriter, r *http.Request, kin
 		}
 		models := subSelectionModels(target, kind)
 		for _, model := range models {
-			if model != "" && !subModelAllowed(model) {
+			if model != "" && !validProbeModel(model) {
 				http.Error(w, "不支持的检测模型", 400)
 				return
 			}

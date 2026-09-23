@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { controlRequest } from "./api";
 import type { SubAccount, SubTarget } from "./Sub2apiChecks";
 import type { InstalledChannel } from "./sub2apiImports";
+import { SUB_MODELS } from "./sub2apiModels";
 import { modelChecks } from "./sub2apiResults";
 
 export const UNASSIGNED_ACCOUNT = "__unassigned__";
@@ -194,7 +195,8 @@ export function managementRows(
       item.account_ids || [],
       item,
     );
-    entry.checks = item.models.map((name) => {
+    const checkModels = [...new Set([...item.models, ...(!bound ? SUB_MODELS : []), ...native.filter(c => c.kind === "model").map(c => c.model)])];
+    entry.checks = checkModels.map((name) => {
       const candidates = visibleBindings
         .filter((b) => b.member.models.includes(name))
         .flatMap((b) =>

@@ -6,11 +6,14 @@ import type { SubModel } from "./sub2apiModels";
 
 export function SubModelSettings({
   models,
+  extraModels = [],
   onSave,
 }: {
   models: SubModel[];
+  extraModels?: string[];
   onSave: (models: SubModel[]) => void;
 }) {
+  const available = [...new Set([...SUB_MODELS, ...extraModels])];
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(models);
   return (
@@ -31,7 +34,7 @@ export function SubModelSettings({
         <Dialog.Content className="guide-dialog sub-model-settings">
           <Dialog.Title>检测模型设置</Dialog.Title>
           <Dialog.Description>
-            选择模型检测区域要检测的模型，选择会自动记住。筛选单个模型时，仅检测已勾选的该模型。
+            勾选的模型均会检测，包括渠道尚未配置的模型。额外模型来自当前筛选中的渠道，选择会自动记住。筛选单个模型时，仅检测已勾选的该模型。
           </Dialog.Description>
           <Dialog.Close asChild>
             <button
@@ -43,11 +46,11 @@ export function SubModelSettings({
           </Dialog.Close>
           <div className="sub-model-settings-actions">
             <span>
-              已选 {draft.length} / {SUB_MODELS.length}
+              已选 {draft.length} / {available.length}
             </span>
             <button
               className="button small"
-              onClick={() => setDraft([...SUB_MODELS])}
+              onClick={() => setDraft([...available])}
             >
               全选
             </button>
@@ -56,7 +59,9 @@ export function SubModelSettings({
             </button>
           </div>
           <div className="sub-model-settings-options">
-            {SUB_MODELS.map((model) => (
+            {available.map((model, index) => (
+              <div key={model} style={{display:"contents"}}>
+              {index === SUB_MODELS.length && <p className="sub-model-settings-extra">当前筛选渠道的额外模型 · {extraModels.length}</p>}
               <label key={model}>
                 <input
                   type="checkbox"
@@ -65,7 +70,7 @@ export function SubModelSettings({
                   onChange={(event) => {
                     setDraft(
                       event.target.checked
-                        ? SUB_MODELS.filter(
+                        ? available.filter(
                             (item) => item === model || draft.includes(item),
                           )
                         : draft.filter((item) => item !== model),
@@ -74,9 +79,10 @@ export function SubModelSettings({
                 />
                 <span>
                   {model}
-                  <small>{subModelProtocolLabel(model)}</small>
+                  <small>{SUB_MODELS.includes(model) ? subModelProtocolLabel(model) : "渠道额外模型"}</small>
                 </span>
               </label>
+              </div>
             ))}
           </div>
           {!draft.length && <p role="status">请至少选择一个模型。</p>}

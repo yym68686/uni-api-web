@@ -276,7 +276,7 @@ func TestConfiguredChecksThroughRealGatewayWithoutClientRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, test := range []struct{ provider, kind, model, want string }{
-		{"native", "model", checkModel, "success"}, {"native", "compaction", "", "supported"}, {"native", "tool-use", "", "supported"}, {"claude", "model", "claude-fixture", "success"}, {"gemini", "model", "gemini-fixture", "success"}, {"fail", "model", "custom-model", "error"},
+		{"native", "model", checkModel, "success"}, {"native", "model", "new-unconfigured-model", "success"}, {"native", "compaction", "", "supported"}, {"native", "tool-use", "", "supported"}, {"claude", "model", "claude-fixture", "success"}, {"claude", "model", "claude-new-unconfigured", "success"}, {"gemini", "model", "gemini-fixture", "success"}, {"gemini", "model", "gemini-new-unconfigured", "success"}, {"fail", "model", "custom-model", "error"},
 	} {
 		c := configuredCheck{Source: src.ID, Provider: test.provider, Kind: test.kind, Model: test.model}
 		var result any

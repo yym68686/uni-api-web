@@ -154,13 +154,17 @@ func (s *Service) queueConfiguredChecks(w http.ResponseWriter, r *http.Request) 
 // The wrapper is private to one job, not a mutation of the shared HTTP client.
 // Older gateways must pass the capability check before any billable request.
 type configuredProbeTransport struct {
-	base     http.RoundTripper
-	provider string
+	base              http.RoundTripper
+	provider          string
+	allowUnconfigured bool
 }
 
 func (t configuredProbeTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	r = r.Clone(r.Context())
 	r.Header.Set("X-Uni-API-Provider", t.provider)
+	if t.allowUnconfigured {
+		r.Header.Set("X-Uni-API-Probe-Unconfigured-Model", "true")
+	}
 	return t.base.RoundTrip(r)
 }
 
@@ -241,7 +245,8 @@ func (s *Service) runConfiguredCheck(ctx context.Context, c *configuredCheck, ta
 	defer cancel()
 	runtime, _, err := subGateway(preflight, src, "GET", "/v1/observability/runtime", nil)
 	var caps struct {
-		Targeted bool `json:"targeted_responses"`
+		Targeted     bool `json:"targeted_responses"`
+		Unconfigured bool `json:"targeted_unconfigured_models"`
 	}
 	if err != nil || decodeMap(runtime["capabilities"], &caps) != nil || !caps.Targeted {
 		return errors.New("来源不支持渠道定向检测，请更新 uni-api 或检查来源权限")
@@ -288,7 +293,7 @@ func (s *Service) runConfiguredCheck(ctx context.Context, c *configuredCheck, ta
 		}
 	}
 	candidates := subCompactionModels(models)
-	client := &http.Client{Timeout: 60 * time.Second, Transport: configuredProbeTransport{http.DefaultTransport, c.Provider}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	client := &http.Client{Timeout: 60 * time.Second, Transport: configuredProbeTransport{base: http.DefaultTransport, provider: c.Provider, allowUnconfigured: caps.Unconfigured}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	if c.Kind == "model" {
 		valid := false
 		for _, m := range candidates {
@@ -297,8 +302,8 @@ func (s *Service) runConfiguredCheck(ctx context.Context, c *configuredCheck, ta
 				break
 			}
 		}
-		if !valid {
-			return errors.New("该渠道未配置此模型")
+		if !valid && !caps.Unconfigured {
+			return errors.New("来源版本不支持探测未配置模型，请更新 uni-api；该模型尚未发起上游检测")
 		}
 		if c.Model == checkModel {
 			if err = s.control.beginQuality(ctx, run, qualityScope{Source: c.Source, Provider: c.Provider}, 210*time.Second); err != nil {

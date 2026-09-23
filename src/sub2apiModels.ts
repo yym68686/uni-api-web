@@ -14,34 +14,27 @@ export const subModelProtocolLabel = (model: string) =>
       : "Responses";
 
 const selectionKey = (user: string) => `uni-console-sub2api-models:v1:${user}`;
-const selectionCache = new Map<string, SubModel[]>();
-export function loadSubModels(user: string): SubModel[] {
+const selectionCache = new Map<string, string[]>();
+function disabledModels(user: string): string[] {
   try {
     const raw = localStorage.getItem(selectionKey(user));
-    if (!raw) return selectionCache.get(user) || [...SUB_MODELS];
-    const saved = JSON.parse(raw);
-    if (Array.isArray(saved?.disabled)) {
-      // Newly supported models start selected without undoing previous choices.
-      const selected = SUB_MODELS.filter(
-        (model) => !saved.disabled.includes(model),
-      );
-      if (selected.length) return selected;
-    }
-  } catch {
-    return selectionCache.get(user) || [...SUB_MODELS];
-  }
-  return [...SUB_MODELS];
+    const saved = raw ? JSON.parse(raw) : null;
+    if (Array.isArray(saved?.disabled)) return saved.disabled.filter((m: unknown): m is string => typeof m === "string");
+  } catch { /* Use the session copy if storage is unavailable. */ }
+  return selectionCache.get(user) || [];
 }
-export function saveSubModels(user: string, models: SubModel[]) {
-  selectionCache.set(user, [...models]);
+export function loadSubModels(user: string, available: string[] = SUB_MODELS): SubModel[] {
+  const disabled = new Set(disabledModels(user));
+  return available.filter(model => !disabled.has(model));
+}
+export function saveSubModels(user: string, models: SubModel[], available: string[] = SUB_MODELS) {
+  // Changing filters must not reset selections for models outside this view.
+  const disabled = [...new Set([
+    ...disabledModels(user).filter(model => !available.includes(model)),
+    ...available.filter(model => !models.includes(model)),
+  ])];
+  selectionCache.set(user, disabled);
   try {
-    localStorage.setItem(
-      selectionKey(user),
-      JSON.stringify({
-        disabled: SUB_MODELS.filter((model) => !models.includes(model)),
-      }),
-    );
-  } catch {
-    /* Keep the selection for this session when storage is unavailable. */
-  }
+    localStorage.setItem(selectionKey(user), JSON.stringify({ disabled }));
+  } catch { /* Keep choices for this session when storage is unavailable. */ }
 }
