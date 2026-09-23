@@ -318,7 +318,7 @@ func (s *Service) subManageChannel(w http.ResponseWriter, r *http.Request) {
 		}
 		seen := map[string]bool{}
 		for _, m := range importUpstreamModels(in.Models, in.ModelMappings) {
-			if !subModelAllowed(m) || seen[m] {
+			if (!subModelAllowed(m) && !(in.AllowUnverifiedModels && validPublicModel(m) && validProbeModel(m))) || seen[m] {
 				http.Error(w, "模型无效或重复", 400)
 				return
 			}
@@ -329,7 +329,7 @@ func (s *Service) subManageChannel(w http.ResponseWriter, r *http.Request) {
 					old = true
 				}
 			}
-			if old {
+			if old || in.AllowUnverifiedModels {
 				continue
 			}
 			var success bool

@@ -12,7 +12,9 @@ import {
   RemoveConfiguredBinding,
 } from "./ChannelBindingActions";
 import type { ManagedChannel } from "./channelManagement";
-import { channelMembers,configuredToolUseResult,useConfiguredChecks } from "./channelManagement";
+import { channelMembers,configuredToolUseResult,useConfiguredChecks,useChannelManagement } from "./channelManagement";
+import { ChannelModelSelection, splitChannelModels } from "./ChannelModelSelection";
+import { SUB_MODELS } from "./sub2apiModels";
 import {useSubAccounts} from "./sub2apiAccounts";
 import {toolUseFailed,modelToolUse,toolUseLabels} from "./toolUse";
 import {
@@ -213,8 +215,13 @@ export function ConfiguredChannelDialog({
   const members = channelMembers(group);
   const toolChecks = useConfiguredChecks();
   const accounts = useSubAccounts();
+  const inventory = useChannelManagement();
   const [memberId, setMemberId] = useState(members[0].source_id);
-  const item = members.find((m) => m.source_id === memberId) || members[0];
+  const member = members.find((m) => m.source_id === memberId) || members[0];
+  // A site binding carries identity only and may have an empty model list.
+  // Hydrate from the already-loaded live inventory instead of treating it as
+  // the channel definition or allowing it to hide the saved routes.
+  const item = inventory.data?.data.find(m=>m.source_id===member.source_id&&m.provider===member.provider) || member;
   const sources = members.map((m) => m.source_id);
   const routes = useAllChannelRoutes(sources);
   const counts = managedRouteCount(group, sources, routes);
@@ -236,7 +243,9 @@ export function ConfiguredChannelDialog({
   const [aliases, setAliases] = useState<ModelAlias[]>([]);
   const mapping = aliasMappings(aliases, selected);
   const modelOptions = [
-    ...new Set([...item.models, ...aliases.map((a) => a.upstream)]),
+    ...new Set([...item.models, ...selected, ...aliases.map(a=>a.upstream), ...SUB_MODELS,
+      ...providerRoutes(routes[sources.indexOf(item.source_id)]?.data?.data||[],[item.provider]).flatMap(r=>[r.model,r.upstream_model||r.model]),
+      ...(toolChecks.data?.data||[]).filter(c=>c.source_id===item.source_id&&c.provider===item.provider&&c.kind==="model").map(c=>c.model)]),
   ];
   const [key, setKey] = useState("");
   const [position, setPosition] = useState(1);
@@ -260,24 +269,7 @@ export function ConfiguredChannelDialog({
     setModelPositions(
       Object.fromEntries(rows.map((r) => [r.model, r.position])),
     );
-    const originals: string[] = [],
-      renamed: ModelAlias[] = [];
-    for (const row of rows) {
-      const upstream = row.upstream_model || row.model;
-      if (
-        member.models.includes(row.model) &&
-        (member.model_mappings?.[row.model] || row.model) === upstream
-      )
-        originals.push(row.model);
-      else
-        renamed.push({
-          public: row.model,
-          upstream:
-            member.models.find(
-              (m) => (member.model_mappings?.[m] || m) === upstream,
-            ) || upstream,
-        });
-    }
+    const {originals,aliases:renamed}=splitChannelModels(rows,member);
     setSelected(originals);
     setAliases(renamed);
     setError("");
@@ -314,35 +306,20 @@ export function ConfiguredChannelDialog({
   useEffect(() => {
     if (
       !editingProvider ||
+      inventory.isPending ||
       !options.data ||
       options.isFetching ||
       initializedEdit.current === `${item.source_id}:${key}:${editingProvider}`
     )
       return;
-    const originals: string[] = [],
-      renamed: ModelAlias[] = [],
-      positions: Record<string, number> = {},
+    const positions: Record<string, number> = {},
       counts: Record<string, number> = {};
     for (const row of options.data.channels) {
       counts[row.model] = (counts[row.model] || 0) + 1;
       if (row.provider !== editingProvider) continue;
       positions[row.model] = counts[row.model];
-      const upstream =
-        row.upstream_model || item.model_mappings?.[row.model] || row.model;
-      if (
-        item.models.includes(row.model) &&
-        (item.model_mappings?.[row.model] || row.model) === upstream
-      )
-        originals.push(row.model);
-      else
-        renamed.push({
-          public: row.model,
-          upstream:
-            item.models.find(
-              (m) => (item.model_mappings?.[m] || m) === upstream,
-            ) || upstream,
-        });
     }
+    const {originals,aliases:renamed}=splitChannelModels(options.data.channels.filter(r=>r.provider===editingProvider),item);
     if (!originals.length && !renamed.length) {
       setError("此 API key 的渠道已变化，请重新打开编辑。");
       return;
@@ -351,7 +328,7 @@ export function ConfiguredChannelDialog({
     setAliases(renamed);
     setModelPositions(positions);
     initializedEdit.current = `${item.source_id}:${key}:${editingProvider}`;
-  }, [editingProvider, options.data, options.isFetching, item, key]);
+  }, [editingProvider, options.data, options.isFetching, item, key, inventory.isPending]);
   const positions = mapping.models.length
     ? Math.min(
         ...mapping.models.map(
@@ -370,17 +347,18 @@ export function ConfiguredChannelDialog({
     const resolve=(m:string)=>item.model_mappings?.[m]||m;
     const originals=Object.fromEntries(selected.map(m=>[m,resolve(m)]));
     const renamed=Object.fromEntries(Object.entries(mapping.mappings).map(([name,m])=>[name,resolve(m)]));
-    return {part,name:group.name,scope:batchScope||{kind:"configured",source:item.source_id,provider:item.provider},originals,aliases:renamed,models:{...originals,...renamed},positions:selectedModelPositions(mapping.models,activePositions,Math.min(position,positions)),anchor:{source:item.source_id,key,provider:editingProvider,revision:options.data?.revision||""}};
+    return {part,name:group.name,allowUnverifiedModels:true,scope:batchScope||{kind:"configured",source:item.source_id,provider:item.provider},originals,aliases:renamed,models:{...originals,...renamed},positions:selectedModelPositions(mapping.models,activePositions,Math.min(position,positions)),anchor:{source:item.source_id,key,provider:editingProvider,revision:options.data?.revision||""}};
   }
   function batchButton(part:BatchPart,section?:string) {
     if(!editingProvider)return undefined;
     return <ChannelBatchApply section={section} draft={()=>batchDraft(part)}
-      disabled={busy||options.isFetching||options.isError||!options.data||!key||(part!=="models"&&!!mapping.error)||((part==="all"||part==="positions")&&!mapping.models.length)}
+      disabled={busy||inventory.isPending||options.isFetching||options.isError||!options.data||!key||(part!=="models"&&!!mapping.error)||((part==="all"||part==="positions")&&!mapping.models.length)}
       onApplied={()=>{setSuccess("批量操作结果已更新，请核对各来源接入状态。");setAdding(false);if(initialEdit)close();}}/>;
   }
   async function save() {
     if (
       busy ||
+      inventory.isPending ||
       toolDefaultsPending || toolDefaultsError ||
       mapping.error ||
       !key ||
@@ -400,7 +378,7 @@ export function ConfiguredChannelDialog({
           body: JSON.stringify({
             source_id: item.source_id,
             provider: item.provider,
-            ...(editingProvider ? { edit_provider: editingProvider } : {}),
+            ...(editingProvider ? { edit_provider: editingProvider, allow_unverified_models: true } : {}),
             api_key_id: key,
             revision: options.data.revision,
             models: selected,
@@ -558,7 +536,7 @@ export function ConfiguredChannelDialog({
                 {error || options.error?.message}
                 <button
                   className="button small"
-                  disabled={busy || options.isFetching}
+                  disabled={busy || options.isFetching || inventory.isPending}
                   onClick={() => {
                     initializedEdit.current = "";
                     setError("");
@@ -687,30 +665,13 @@ export function ConfiguredChannelDialog({
                     </select>
                   </label>
                 </div>
-                <fieldset disabled={busy || options.isFetching || toolDefaultsPending || toolDefaultsError}>
-                  <legend className="model-alias-heading batch-model-heading"><span>原模型</span>{batchButton("models","模型勾选")}</legend>
-                  <div className="sub-model-options">
-                    {item.models.map((model) => (
-                      <label key={model}>
-                        <input
-                          type="checkbox"
-                          checked={selected.includes(model)}
-                          onChange={(e) =>
-                            setSelected((previous) => {
-                              const old=previous ?? selected;
-                              return (
-                              e.target.checked
-                                ? [...old, model]
-                                : old.filter((m) => m !== model));
-                            })
-                          }
-                        />
-                        <span>{model}</span>
-                        {toolUseFailed(toolTarget,model) && <small className="negative">Tool use · {toolUseLabels[modelToolUse(toolTarget,model)!.status]}</small>}
-                      </label>
-                    ))}
-                  </div>
-                </fieldset>
+                <ChannelModelSelection
+                  models={editingProvider?modelOptions:item.models}
+                  selected={selected} onChange={setSelected} editing={!!editingProvider}
+                  disabled={busy || options.isFetching || inventory.isPending || toolDefaultsPending || toolDefaultsError}
+                  actions={batchButton("models","模型勾选")}
+                  status={model=>toolUseFailed(toolTarget,model)?<small className="negative">Tool use · {toolUseLabels[modelToolUse(toolTarget,model)!.status]}</small>:undefined}
+                />
                 <ModelAliases
                   actions={batchButton("aliases","模型重命名")}
                   models={modelOptions}
@@ -753,6 +714,7 @@ export function ConfiguredChannelDialog({
                     className="button primary"
                     disabled={
                       busy ||
+                      inventory.isPending ||
                       toolDefaultsPending || toolDefaultsError ||
                       options.isFetching ||
                       options.isError ||

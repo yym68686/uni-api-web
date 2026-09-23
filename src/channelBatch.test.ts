@@ -433,3 +433,17 @@ it("projects final positions when multiple related channels share a key and mode
     finalPositions: { new: 1 },
   });
 });
+
+it("keeps self mappings in original selection during section-only batch edits",()=>{
+ const t={...binding,current:{old:'old'},installed:{...binding.installed!,models:['old'],model_mappings:{old:'old'}}};
+ expect(batchTargetSettings({...draft('aliases'),aliases:{renamed:'old'}},t,options).models).toEqual({old:'old',renamed:'old'});
+ expect(batchTargetSettings({...draft('models'),originals:{new:'new'}},t,options).models).toEqual({new:'new'});
+});
+it("explicit editor choices extend unconfigured models in every existing native binding",async()=>{
+ const f=fixture(true);
+ const plan=await prepareChannelBatch({...draft('all',true),allowUnverifiedModels:true,originals:{'extra-model':'extra-model'},aliases:{},models:{'extra-model':'extra-model'},positions:{'extra-model':1}},new AbortController().signal);
+ await applyChannelBatch(plan,()=>{});
+ expect(f.writes).toHaveLength(4);
+ expect(f.writes.every(w=>w.body.allow_unverified_models===true)).toBe(true);
+ expect(f.writes[0].body.model_mappings).toEqual({'extra-model':'extra-model'});
+});

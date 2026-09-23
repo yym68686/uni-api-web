@@ -15,17 +15,18 @@ import (
 )
 
 type subImportInput struct {
-	Positions         map[string]int    `json:"positions,omitempty"`
-	ModelMappings     map[string]string `json:"model_mappings,omitempty"`
-	CompactionEnabled *bool             `json:"compaction_enabled,omitempty"`
-	Action            string            `json:"action"`
-	AccountID         string            `json:"account_id"`
-	GroupID           int64             `json:"group_id"`
-	SourceID          string            `json:"source_id"`
-	KeyID             string            `json:"api_key_id"`
-	Revision          string            `json:"revision"`
-	Models            []string          `json:"models"`
-	Position          int               `json:"position"`
+	AllowUnverifiedModels bool              `json:"allow_unverified_models,omitempty"`
+	Positions             map[string]int    `json:"positions,omitempty"`
+	ModelMappings         map[string]string `json:"model_mappings,omitempty"`
+	CompactionEnabled     *bool             `json:"compaction_enabled,omitempty"`
+	Action                string            `json:"action"`
+	AccountID             string            `json:"account_id"`
+	GroupID               int64             `json:"group_id"`
+	SourceID              string            `json:"source_id"`
+	KeyID                 string            `json:"api_key_id"`
+	Revision              string            `json:"revision"`
+	Models                []string          `json:"models"`
+	Position              int               `json:"position"`
 }
 
 func subProviderName(account string, group int64, key string) string {

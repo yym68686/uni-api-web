@@ -192,6 +192,7 @@ it("uses one source/key selector and one table for native and imported routes, p
       source_id: "primary",
       provider: "native",
       edit_provider: "native",
+      allow_unverified_models: true,
       api_key_id: "key2",
       revision: "fresh",
       models: ["native-only"],
@@ -252,4 +253,24 @@ it("keeps imported bindings visible when native routes fail and can retry the sh
   await screen.findByRole("option", { name: "Key 2 · masked-two" });
   await user.selectOptions(screen.getByLabelText("查看 API key"), "key2");
   expect(screen.getByRole("table")).toHaveTextContent("native-only");
+});
+
+it("keeps saved site models checked and allows selecting untested models in edit mode",async()=>{
+ const writes:any[]=[];
+ vi.stubGlobal('fetch',vi.fn(async(input:string,init?:RequestInit)=>{
+  if(init?.method==='PATCH'){writes.push(JSON.parse(String(init.body)));return Response.json({message:'已更新'});}
+  if(input.includes('channel-options'))return Response.json({revision:'r1',supported:true,manageable:true,provider:'temp',keys:[{key_id:'key1',position:1,prefix:'masked'}],channels:[{provider:'temp',model:'claude-opus-5-5'}]});
+  return Response.json({data:[],unavailable_keys:[],unavailable_sources:[]});
+ }));
+ mount();const user=userEvent.setup();
+ await user.click(await screen.findByRole('button',{name:'编辑'}));
+ const saved=await screen.findByRole('checkbox',{name:/^claude-opus-5-5/});
+ expect(saved).toBeChecked();
+ const added=screen.getByRole('checkbox',{name:/^gpt-6-sol/});
+ expect(added).toBeEnabled();expect(added).not.toBeChecked();
+ await user.click(added);
+ await waitFor(()=>expect(screen.getByRole('button',{name:'保存更改'})).toBeEnabled());
+ await user.click(screen.getByRole('button',{name:'保存更改'}));
+ await waitFor(()=>expect(writes).toHaveLength(1));
+ expect(writes[0]).toMatchObject({action:'replace',allow_unverified_models:true,models:expect.arrayContaining(['gpt-6-sol','claude-opus-5-5'])});
 });

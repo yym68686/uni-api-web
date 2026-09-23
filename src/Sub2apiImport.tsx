@@ -24,6 +24,7 @@ import { channelBindingView } from "./channelBindingView";
 import type { ChannelRoute } from "./channelRouteData";
 import { providerRoutes, useAllChannelRoutes } from "./channelRouteData";
 import { ModelAliases, aliasMappings } from "./ModelAliases";
+import { ChannelModelSelection, splitChannelModels } from "./ChannelModelSelection";
 import type { ModelAlias } from "./ModelAliases";
 import {
   ModelPositions,
@@ -168,11 +169,15 @@ export function Sub2apiImport({
     removing.api_key_id === item.api_key_id &&
     removing.provider === item.provider;
   const [modelChoices, setModelChoices] = useState<Record<string, boolean>>({});
-  const originals = checks
+  const editChecks = [...checks];
+  for(const model of [...installed.flatMap(i=>[...i.models,...Object.values(i.model_mappings||{})]),...(editing?.models||[]),...Object.values(editing?.model_mappings||{})]) {
+    if(!editChecks.some(c=>c.model===model))editChecks.push({model,state:"idle",message:"",result:null});
+  }
+  const originals = editChecks
     .filter(
       (check) =>
         modelChoices[check.model] ??
-        (available.includes(check.model) &&
+        (editing ? editing.models.includes(check.model)&&(!editing.model_mappings?.[check.model]||editing.model_mappings[check.model]===check.model) : available.includes(check.model) &&
           assessPrice(check, prices).status !== "abnormal" && !toolUseFailed(target,check.model)),
     )
     .map((check) => check.model);
@@ -256,7 +261,7 @@ export function Sub2apiImport({
     !!editing && !!options.data && editing.revision !== options.data.revision;
   function batchDraft(part:BatchPart):BatchDraft {
     const originalModels=Object.fromEntries(originals.map(m=>[m,m]));
-    return {part,name:`${account.name} / ${target.name}`,scope:{kind:"site",account:account.id,group:target.group_id},originals:originalModels,aliases:mapping.mappings,models:{...originalModels,...mapping.mappings},positions:selectedModelPositions(models,activePositions,validPosition),anchor:{source:editing?.source_id||activeSource,key:editing?.api_key_id||activeKey,provider:editing?.provider||"",revision:editing?.revision||""}};
+    return {part,name:`${account.name} / ${target.name}`,allowUnverifiedModels:true,scope:{kind:"site",account:account.id,group:target.group_id},originals:originalModels,aliases:mapping.mappings,models:{...originalModels,...mapping.mappings},positions:selectedModelPositions(models,activePositions,validPosition),anchor:{source:editing?.source_id||activeSource,key:editing?.api_key_id||activeKey,provider:editing?.provider||"",revision:editing?.revision||""}};
   }
   function batchButton(part:BatchPart,section?:string) {
     if(!editing)return undefined;
@@ -271,20 +276,9 @@ export function Sub2apiImport({
     setRemoving(null);
     setSource(item.source_id);
     setKey(item.api_key_id);
-    setModelChoices(
-      Object.fromEntries(
-        checks.map((check) => [
-          check.model,
-          item.models.includes(check.model) &&
-            !item.model_mappings?.[check.model],
-        ]),
-      ),
-    );
-    setAliases(
-      Object.entries(item.model_mappings || {}).map(
-        ([publicName, upstream]) => ({ public: publicName, upstream }),
-      ),
-    );
+    const saved=splitChannelModels(item.models.map(model=>({model,upstream_model:item.model_mappings?.[model]})));
+    setModelChoices(Object.fromEntries([...new Set([...checks.map(c=>c.model),...item.models])].map(model=>[model,saved.originals.includes(model)])));
+    setAliases(saved.aliases);
     setPosition(1);
     setPerModel(true);
     setModelPositions({ ...item.positions });
@@ -337,6 +331,7 @@ export function Sub2apiImport({
           signal: AbortSignal.timeout(60000),
           body: JSON.stringify({
             ...(action !== "add" ? { action } : {}),
+            ...(action === "replace" ? {allow_unverified_models:true} : {}),
             account_id: account.id,
             group_id: target.group_id,
             source_id: item?.source_id || source,
@@ -802,46 +797,25 @@ export function Sub2apiImport({
                     <Spinner small /> 正在读取 uni-api 来源…
                   </p>
                 )}
-                <fieldset disabled={busy}>
-                  <legend className="model-alias-heading batch-model-heading"><span>模型</span>{batchButton("models","模型勾选")}</legend>
-                  <div className="sub-model-options">
-                    {checks.map((check) => (
-                      <label key={check.model}>
-                        <input
-                          type="checkbox"
-                          checked={originals.includes(check.model)}
-                          disabled={
-                            !available.includes(check.model) &&
-                            !editing?.models.includes(check.model)
-                          }
-                          onChange={(e) =>
-                            setModelChoices((old) => ({
-                              ...old,
-                              [check.model]: e.target.checked,
-                            }))
-                          }
-                        />
-                        <span>{check.model}</span>
-                        {toolUseFailed(target,check.model) && <small className="negative">Tool use · {toolUseLabels[modelToolUse(target,check.model)!.status]}</small>}
-                        {assessPrice(check, prices).status === "abnormal" && (
-                          <small className="negative">单价异常</small>
-                        )}
-                        {!available.includes(check.model) && (
-                          <small>
-                            {editing?.models.includes(check.model)
-                              ? "已添加"
-                              : importModelLabel(check)}
-                          </small>
-                        )}
-                      </label>
-                    ))}
-                  </div>
-                </fieldset>
+                <ChannelModelSelection
+                  models={editChecks.map(c=>c.model)} selected={originals} editing={!!editing}
+                  disabled={busy} actions={batchButton("models","模型勾选")}
+                  canSelect={model=>!!editing||available.includes(model)}
+                  onChange={selected=>setModelChoices(Object.fromEntries(editChecks.map(c=>[c.model,selected.includes(c.model)])))}
+                  status={model=>{
+                    const check=editChecks.find(c=>c.model===model)!;
+                    return <>
+                      {toolUseFailed(target,model) && <small className="negative">Tool use · {toolUseLabels[modelToolUse(target,model)!.status]}</small>}
+                      {assessPrice(check,prices).status==="abnormal" && <small className="negative">单价异常</small>}
+                      {!available.includes(model) && <small>{editing?.models.includes(model)?"已添加":importModelLabel(check)}</small>}
+                    </>;
+                  }}
+                />
                 <ModelAliases
                   actions={batchButton("aliases","模型重命名")}
                   models={[
                     ...new Set([
-                      ...available,
+                      ...(editing?editChecks.map(c=>c.model):available),
                       ...Object.values(editing?.model_mappings || {}),
                     ]),
                   ]}

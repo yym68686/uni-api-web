@@ -400,6 +400,7 @@ it("edits and adds through the selected source in a merged channel dialog", asyn
       source_id: "do",
       provider: "native",
       edit_provider: "native",
+      allow_unverified_models: true,
       api_key_id: "same-key",
       revision: "do-revision",
       models: ["only-do"],
@@ -650,4 +651,46 @@ it("native import defaults are source/model specific and can be overridden manua
  expect(screen.getByRole('checkbox',{name:'gpt-6-sol'})).toBeChecked();
  await user.selectOptions(screen.getByLabelText('添加到 uni-api 来源'),'a');
  expect(screen.getByRole('checkbox',{name:/^gpt-6-sol/})).not.toBeChecked();
+});
+
+it("recovers checkbox models from an empty site binding and can add an unconfigured model while keeping saved aliases", async()=>{
+ const item={source_id:'do',source_name:'DigitalOcean',provider:'ccttt990085',name:'ccttt990085',models:[]} as unknown as ManagedChannel;
+ const rows=[{provider:item.provider,model:'gpt-5.4',upstream_model:'gpt-5.5',api_key_id:'k1',key_position:1,key_prefix:'masked',position:1},{provider:item.provider,model:'gpt-5.5',upstream_model:'gpt-5.5',api_key_id:'k1',key_position:1,key_prefix:'masked',position:1},{provider:item.provider,model:'custom-existing',upstream_model:'custom-existing',api_key_id:'k1',key_position:1,key_prefix:'masked',position:1}];
+ const writes:any[]=[];
+ vi.stubGlobal('fetch',vi.fn(async(input:string,init?:RequestInit)=>{
+  if(init?.method==='POST'){writes.push(JSON.parse(String(init.body)));return Response.json({message:'已更新'});}
+  if(input.endsWith('/channel-management'))return Response.json({data:[],unavailable_sources:[]});
+  if(input.includes('channel-options'))return Response.json({revision:'r1',keys:[{key_id:'k1',position:1,prefix:'masked'}],channels:rows});
+  return Response.json({data:input.endsWith('/channel-routes')?rows:[],unavailable_keys:[]});
+ }));
+ render(<QueryClientProvider client={new QueryClient()}><ConfiguredChannelDialog item={item} initialEdit={rows} close={()=>{}}/></QueryClientProvider>);
+ const user=userEvent.setup();
+ const existing=await screen.findByRole('checkbox',{name:'gpt-5.5'});
+ await waitFor(()=>expect(existing).toBeEnabled());expect(existing).toBeChecked();
+ expect(screen.getByRole('checkbox',{name:'custom-existing'})).toBeChecked();
+ expect(screen.getByRole('checkbox',{name:'gpt-6-sol'})).not.toBeChecked();
+ expect(screen.getByRole('checkbox',{name:'gpt-6-sol'})).toBeEnabled();
+ expect(screen.getAllByLabelText(/对外模型名$/)).toHaveLength(1);
+ expect(screen.getByLabelText('重命名 1 对外模型名')).toHaveValue('gpt-5.4');
+ await user.click(screen.getByRole('checkbox',{name:'gpt-6-sol'}));
+ await user.click(screen.getByRole('button',{name:'保存更改'}));
+ await waitFor(()=>expect(writes).toHaveLength(1));
+ expect(writes[0]).toMatchObject({models:['gpt-5.5','custom-existing','gpt-6-sol'],model_mappings:{'gpt-5.4':'gpt-5.5'},allow_unverified_models:true});
+});
+
+it("hydrates binding-only model choices from the channel inventory",async()=>{
+ const item={source_id:'do',source_name:'DigitalOcean',provider:'native',name:'native',models:[]} as unknown as ManagedChannel;
+ const rows=[{provider:'native',model:'gpt-5.4',upstream_model:'gpt-5.5',api_key_id:'k1',key_position:1,key_prefix:'masked',position:1},{provider:'native',model:'gpt-5.5',upstream_model:'gpt-5.5',api_key_id:'k1',key_position:1,key_prefix:'masked',position:1}];
+ vi.stubGlobal('fetch',vi.fn(async(input:string)=>{
+  if(input.endsWith('/channel-management'))return Response.json({data:[{...item,models:['gpt-5.4','gpt-5.5','custom-choice'],model_mappings:{'gpt-5.4':'gpt-5.5'}}],unavailable_sources:[]});
+  if(input.includes('channel-options'))return Response.json({revision:'r1',keys:[{key_id:'k1',position:1,prefix:'masked'}],channels:rows});
+  return Response.json({data:input.endsWith('/channel-routes')?rows:[],unavailable_keys:[]});
+ }));
+ render(<QueryClientProvider client={new QueryClient()}><ConfiguredChannelDialog item={item} initialEdit={rows} close={()=>{}}/></QueryClientProvider>);
+ const checkbox=await screen.findByRole('checkbox',{name:'gpt-5.4'});
+ await waitFor(()=>expect(checkbox).toBeChecked());
+ expect(screen.getByRole('checkbox',{name:'gpt-5.5'})).toBeChecked();
+ expect(screen.getByRole('checkbox',{name:'custom-choice'})).not.toBeChecked();
+ expect(screen.getByRole('checkbox',{name:'custom-choice'})).toBeEnabled();
+ expect(screen.queryByLabelText('重命名 1 对外模型名')).not.toBeInTheDocument();
 });

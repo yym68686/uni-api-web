@@ -280,6 +280,12 @@ func (s *Service) configuredImport(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, model := range importUpstreamModels(in.Models, in.ModelMappings) {
 		if _, ok := available[model]; !ok {
+			// Explicit editor selection may extend this key-owned copy without
+			// changing the shared provider or pretending the model was probed.
+			if in.EditProvider != "" && in.AllowUnverifiedModels && validPublicModel(model) && validProbeModel(model) {
+				available[model] = model
+				continue
+			}
 			http.Error(w, "所选上游模型已不存在，请刷新重试", 400)
 			return
 		}

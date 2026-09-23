@@ -529,4 +529,44 @@ func TestModelAliasesServeBothNamesWithRealGateway(t *testing.T) {
 	nativeEdit([]string{"codex-auto-review"}, nil, "", state["revision"].(string), 200)
 	probe("admin-fixture", "codex-auto-review")
 
+	// Explicit editor selection adds an unconfigured model only to this caller's
+	// copy. Existing aliases, headers, base config and other caller keys survive.
+	state, _, _ = subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
+	manualBody := map[string]any{"source_id": src.ID, "provider": "fugue-codex", "edit_provider": configuredImportName("fugue-codex", adminKey), "api_key_id": adminKey, "revision": state["revision"], "models": []string{"codex-auto-review", "gpt-6-sol"}, "model_mappings": map[string]string{"new-sol-alias": "gpt-6-sol"}, "position": 1, "allow_unverified_models": true}
+	manualReq := httptest.NewRequest("POST", "/v1/channel-management", strings.NewReader(mustJSON(manualBody)))
+	manualReq.Header.Set("Content-Type", "application/json")
+	manualReq.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
+	manualRes := httptest.NewRecorder()
+	service.Handler().ServeHTTP(manualRes, manualReq)
+	if manualRes.Code != 200 {
+		t.Fatal("explicit unconfigured model edit failed", manualRes.Code, manualRes.Body.String())
+	}
+	for _, public := range []string{"gpt-6-sol", "new-sol-alias"} {
+		manualCall, _ := http.NewRequestWithContext(ctx, "POST", src.Base+"/v1/responses", strings.NewReader(mustJSON(map[string]any{"model": public, "input": "say test", "stream": true})))
+		manualCall.Header.Set("Authorization", "Bearer admin-fixture")
+		manualCall.Header.Set("Content-Type", "application/json")
+		manualResp, err := http.DefaultClient.Do(manualCall)
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, manualResp.Body)
+		manualResp.Body.Close()
+		if manualResp.StatusCode != 200 {
+			t.Fatal("new model unavailable", public, manualResp.StatusCode)
+		}
+		select {
+		case model := <-hits:
+			if model != "gpt-6-sol" {
+				t.Fatal("wrong manual upstream", model)
+			}
+		case <-ctx.Done():
+			t.Fatal("no new-model request")
+		}
+	}
+	assertCatalog(keyB, "codex-auto-review", "gpt-5.6-luna")
+	raw, _, _ = subGateway(ctx, src, "GET", "/v1/api_config", nil)
+	if strings.Contains(mustJSON(raw["api_config"]), "gpt-6-sol") {
+		t.Fatal("manual model modified shared base configuration")
+	}
+
 }

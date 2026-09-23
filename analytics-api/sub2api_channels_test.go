@@ -189,6 +189,25 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 	if writes != 1 {
 		t.Fatal("rejected request mutated gateway", writes)
 	}
+	// An explicit model selection in the editor can extend this binding even
+	// before probing, while the legacy/default import validation stays strict.
+	in.Revision = revision
+	in.AllowUnverifiedModels = true
+	in.Models = []string{checkModel, "gpt-6-sol"}
+	if w = request("PATCH", foreign, in); w.Code != 404 {
+		t.Fatal("explicit edit bypassed owner", w.Code)
+	}
+	if w = request("PATCH", session, in); w.Code != 200 {
+		t.Fatal("explicit model selection rejected", w.Code, w.Body.String())
+	}
+	if len(models) != 2 || writes != 2 {
+		t.Fatal("manual model was not saved", models, writes)
+	}
+	in.Revision = revision
+	in.Models = []string{"bad\nmodel"}
+	if w = request("PATCH", session, in); w.Code != 400 || writes != 2 {
+		t.Fatal("invalid explicit model changed config", w.Code)
+	}
 	in.Action = "delete"
 	in.Revision = revision
 	in.Models = nil

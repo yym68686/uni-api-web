@@ -17,6 +17,7 @@ export const batchPartLabels = {
   delete: "删除所有已保存接入",
 };
 export interface BatchDraft {
+  allowUnverifiedModels?: boolean;
   scope: BatchScope;
   name: string;
   // Canonical upstream names: never reinterpret an alias through another source.
@@ -84,10 +85,12 @@ export function batchTargetSettings(
   const currentOriginals: Record<string, string> = {},
     currentAliases: Record<string, string> = {};
   for (const [name, up] of Object.entries(t.current)) {
-    const original = t.native
-      ? t.native.models.includes(name) &&
-        (t.native.model_mappings?.[name] || name) === up
-      : !t.installed?.model_mappings?.[name];
+    const original =
+      name === up ||
+      (t.native
+        ? t.native.models.includes(name) &&
+          (t.native.model_mappings?.[name] || name) === up
+        : !t.installed?.model_mappings?.[name]);
     (original ? currentOriginals : currentAliases)[name] = up;
   }
   const originals =
@@ -375,7 +378,11 @@ export function buildChannelBatch(
           (m) => (member.model_mappings?.[m] || m) === upstream,
         );
       // The edit API also accepts real upstream names from this key's existing copy.
-      if (!input && !Object.values(actual).includes(upstream))
+      if (
+        !input &&
+        !Object.values(actual).includes(upstream) &&
+        !draft.allowUnverifiedModels
+      )
         throw new Error(
           `${t.sourceName} 的 ${t.name} 未配置上游模型 ${upstream}，请调整模型后重试。`,
         );
@@ -561,6 +568,9 @@ export async function applyChannelBatch(
                         model_mappings: t.mappings,
                         position: 1,
                         positions: t.positions,
+                        ...(plan.draft.allowUnverifiedModels
+                          ? { allow_unverified_models: true }
+                          : {}),
                       }
                     : {}),
                   ...(t.installed
