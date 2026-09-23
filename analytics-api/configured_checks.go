@@ -81,7 +81,7 @@ func (s *Service) queueConfiguredChecks(w http.ResponseWriter, r *http.Request) 
 			Models   []string `json:"models"`
 		} `json:"targets"`
 	}
-	if !decodeControl(w, r, &in) {
+	if !decodeControlLimit(w, r, &in, checkBatchBodyLimit) {
 		return
 	}
 	if (in.Kind != "check" && in.Kind != "quality" && in.Kind != "compaction" && in.Kind != "tool-use") || len(in.Targets) == 0 || len(in.Targets) > 500 {

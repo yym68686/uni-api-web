@@ -467,8 +467,7 @@ func (s *Service) subQueueChecksKind(w http.ResponseWriter, r *http.Request, kin
 	var in struct {
 		Targets []subSelection `json:"targets"`
 	}
-	// Up to 500 groups can each carry all 22 selected model names.
-	if !decodeControlLimit(w, r, &in, 512<<10) {
+	if !decodeControlLimit(w, r, &in, checkBatchBodyLimit) {
 		return
 	}
 	if len(in.Targets) == 0 || len(in.Targets) > 500 {
