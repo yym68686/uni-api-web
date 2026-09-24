@@ -30,6 +30,7 @@ export interface BatchDraft {
 }
 interface Options {
   batch_revisions?: boolean;
+  atomic_batch?: boolean;
   revision: string;
   manageable: boolean;
   channels: { provider: string; model: string; upstream_model?: string }[];
@@ -52,6 +53,7 @@ export interface BatchTarget extends BatchBinding {
   mappings: Record<string, string>;
   positions: Record<string, number>;
   finalPositions?: Record<string, number>;
+  currentPositions?: Record<string, number>;
   clamped: boolean;
   skip?: string;
 }
@@ -71,9 +73,9 @@ const read = <T>(path: string, signal: AbortSignal) =>
   controlRequest<T>(path, {
     signal: AbortSignal.any([signal, AbortSignal.timeout(30000)]),
   });
-const optionsPath = (t: { source: string; key: string }) =>
-  "/v1/sub2api/channel-options?" +
-  new URLSearchParams({ source_id: t.source, api_key_id: t.key });
+const sameModels = (a: Record<string, string>, b: Record<string, string>) =>
+  Object.keys(a).length === Object.keys(b).length &&
+  Object.entries(a).every(([name, upstream]) => b[name] === upstream);
 
 export function batchTargetSettings(
   draft: BatchDraft,
@@ -139,6 +141,7 @@ export function batchTargetSettings(
   return {
     models,
     positions,
+    currentPositions,
     clamped,
     skip:
       draft.part === "positions" &&
@@ -297,7 +300,16 @@ export function buildChannelBatch(
     draft.anchor.key,
     draft.anchor.provider,
   );
-  if (draft.part !== "delete" && !bindings.has(anchorId))
+  if (
+    draft.part !== "delete" &&
+    !bindings.has(anchorId) &&
+    ![...bindings.values()].some(
+      (t) =>
+        t.source === draft.anchor.source &&
+        t.key === draft.anchor.key &&
+        t.native?.provider === draft.anchor.provider,
+    )
+  )
     throw new Error("正在编辑的接入已不存在，请刷新后重新编辑。");
   const revisions = new Map<string, string>();
   const usedCatalogs = new Map<string, Options["channels"]>();
@@ -306,7 +318,9 @@ export function buildChannelBatch(
     (a, b) =>
       a.source.localeCompare(b.source) ||
       a.keyPosition - b.keyPosition ||
-      a.provider.localeCompare(b.provider),
+      (a.native?.provider || a.provider).localeCompare(
+        b.native?.provider || b.provider,
+      ),
   )) {
     const sourceRoutes = snapshot.routes[t.source];
     if (
@@ -324,10 +338,11 @@ export function buildChannelBatch(
     const options: Options = {
       revision: sourceRoutes.revision,
       batch_revisions: sourceRoutes.batch_revisions,
+      atomic_batch: sourceRoutes.atomic_batch,
       manageable: !!sourceRoutes.manageable,
       channels: keyCatalog,
     };
-    if (!options.batch_revisions)
+    if (!options.batch_revisions || !options.atomic_batch)
       throw new Error(
         "后端正在更新批量操作能力，请稍后重新读取；尚未修改任何接入。",
       );
@@ -391,6 +406,15 @@ export function buildChannelBatch(
     targets.push({ ...t, revision: options.revision, mappings, ...settings });
   }
   projectBatchPositions(draft, targets, usedCatalogs);
+  for (const t of targets) {
+    if (t.skip || draft.part === "delete" || !sameModels(t.current, t.models))
+      continue;
+    const positionsMatch = Object.entries(t.finalPositions || {}).every(
+      ([model, position]) => t.currentPositions?.[model] === position,
+    );
+    if (draft.part === "models" || draft.part === "aliases" || positionsMatch)
+      t.skip = "已一致，无需重复应用";
+  }
   return { draft, targets };
 }
 
@@ -472,17 +496,51 @@ export function projectBatchPositions(
       if (!row.includes(c.provider)) row.push(c.provider);
       orders.set(c.model, row);
     }
+    // Establish final membership first, so clamping is stable when multiple
+    // related providers introduce/remove the same model in this atomic batch.
+    for (const t of group) {
+      if (t.skip || draft.part === "positions") continue;
+      for (const model of new Set([
+        ...Object.keys(t.current),
+        ...Object.keys(t.models),
+      ])) {
+        const order = orders.get(model) || [];
+        orders.set(
+          model,
+          model in t.models
+            ? order.includes(t.provider)
+              ? order
+              : [...order, t.provider]
+            : order.filter((p) => p !== t.provider),
+        );
+      }
+    }
     for (const t of group) {
       if (t.skip) continue;
+      if (draft.part === "all" || draft.part === "positions") t.clamped = false;
       const affected =
         draft.part === "positions"
           ? Object.keys(t.models).filter((m) => m in draft.positions)
           : [...new Set([...Object.keys(t.current), ...Object.keys(t.models)])];
       for (const model of affected) {
+        // Section-only edits retain existing model order. Re-inserting an
+        // unchanged route can otherwise undo an earlier target's position.
+        if (
+          (draft.part === "models" || draft.part === "aliases") &&
+          model in t.current &&
+          model in t.models
+        )
+          continue;
         const order = (orders.get(model) || []).filter((p) => p !== t.provider);
         if (model in t.models) {
-          const pos = Math.min(t.positions[model], order.length + 1);
-          t.clamped ||= pos !== t.positions[model];
+          const requested =
+            draft.part === "all"
+              ? draft.positions[model] || 1
+              : draft.part === "positions"
+                ? (draft.positions[model] ?? t.positions[model])
+                : t.positions[model];
+          const pos = Math.min(requested, order.length + 1);
+          t.clamped ||= pos !== requested;
           t.positions[model] = pos;
           order.splice(pos - 1, 0, t.provider);
         }
@@ -504,104 +562,78 @@ export async function applyChannelBatch(
   onProgress: (p: BatchProgress) => void,
   stopped: () => boolean = () => false,
 ) {
-  const revisions = new Map(plan.targets.map((t) => [t.source, t.revision]));
-  for (const t of plan.targets) {
-    if (stopped()) return;
-    if (t.skip) continue;
-    onProgress({ id: t.id, state: "running" });
-    try {
-      const revision = revisions.get(t.source)!;
-      // Never adopt a freshly read revision: only chain the exact revision returned
-      // by our preceding successful write, so unrelated edits stop this batch.
-      const options = await controlRequest<Options>(optionsPath(t));
-      if (!options.batch_revisions)
-        throw new Error("后端暂不支持批量版本校验，已停止后续操作。");
-      if (options.revision !== revision)
-        throw new Error("配置已变化，已停止后续应用。请核对后重新预览。");
-      if (!options.channels.some((c) => c.provider === t.provider))
-        throw new Error("渠道接入已变化，已停止后续应用。");
-      if (
-        Object.keys(t.positions).some(
-          (m) =>
-            t.positions[m] >
-            modelPositionLimit(m, options.channels, t.provider),
-        )
-      )
-        throw new Error("路由数量已变化，预览位置失效，请重新预览。");
+  const bySource = new Map<string, BatchTarget[]>();
+  for (const target of plan.targets) {
+    if (target.skip) continue;
+    const group = bySource.get(target.source) || [];
+    group.push(target);
+    bySource.set(target.source, group);
+  }
+  // Each source owns a single revision/lock. Commit all of its keys atomically;
+  // independent sources run concurrently without racing full snapshot writes.
+  await Promise.all(
+    [...bySource].map(async ([source, targets]) => {
       if (stopped()) return;
-      const deleting = plan.draft.part === "delete";
-      const positionsOnly = plan.draft.part === "positions";
-      const result = await controlRequest<{ revision: string }>(
-        positionsOnly
-          ? `/v1/sources/${encodeURIComponent(t.source)}/channel-routes`
-          : t.installed
-            ? "/v1/sub2api/channels"
-            : "/v1/channel-management",
-        {
-          method:
-            positionsOnly || t.installed
-              ? "PATCH"
-              : deleting
-                ? "DELETE"
-                : "POST",
-          signal: AbortSignal.timeout(60000),
-          body: JSON.stringify(
-            positionsOnly
-              ? {
+      for (const t of targets) onProgress({ id: t.id, state: "running" });
+      try {
+        const result = await controlRequest<{ revision: string }>(
+          `/v1/sources/${encodeURIComponent(source)}/channel-batch`,
+          {
+            method: "POST",
+            signal: AbortSignal.timeout(120000),
+            body: JSON.stringify({
+              revision: targets[0].revision,
+              part: plan.draft.part,
+              allow_unverified_models: !!plan.draft.allowUnverifiedModels,
+              targets: plan.targets
+                .filter(
+                  (t) =>
+                    t.source === source &&
+                    (!t.skip ||
+                      ((plan.draft.part === "all" ||
+                        plan.draft.part === "positions") &&
+                        t.skip === "已一致，无需重复应用")),
+                )
+                .map((t) => ({
                   api_key_id: t.key,
-                  revision,
-                  moves: Object.keys(t.models)
-                    .filter((m) => m in plan.draft.positions)
-                    .map((model) => ({
-                      provider: t.provider,
-                      model,
-                      position: t.positions[model],
-                    })),
-                }
-              : {
-                  source_id: t.source,
-                  api_key_id: t.key,
-                  revision,
-                  ...(!deleting
-                    ? {
-                        models: [],
-                        model_mappings: t.mappings,
-                        position: 1,
-                        positions: t.positions,
-                        ...(plan.draft.allowUnverifiedModels
-                          ? { allow_unverified_models: true }
-                          : {}),
-                      }
-                    : {}),
+                  provider: t.provider,
                   ...(t.installed
                     ? {
-                        action: deleting ? "delete" : "replace",
                         account_id: t.installed.account_id,
                         group_id: t.installed.group_id,
                       }
-                    : deleting
-                      ? { provider: t.provider }
-                      : {
-                          provider: t.native!.provider,
-                          edit_provider: t.provider,
-                        }),
-                },
-          ),
-        },
-      );
-      if (!result.revision)
-        throw new Error(
-          "请求已返回，但未取得应用版本；请刷新核对，未继续提交其他接入。",
+                    : { origin_provider: t.native!.provider }),
+                  current: t.current,
+                  ...(plan.draft.part === "delete"
+                    ? {}
+                    : {
+                        models: t.models,
+                        positions: Object.fromEntries(
+                          Object.entries(
+                            t.finalPositions || t.positions,
+                          ).filter(
+                            ([model]) =>
+                              plan.draft.part !== "positions" ||
+                              model in plan.draft.positions,
+                          ),
+                        ),
+                      }),
+                })),
+            }),
+          },
         );
-      revisions.set(t.source, result.revision);
-      onProgress({ id: t.id, state: "done" });
-    } catch (e) {
-      onProgress({
-        id: t.id,
-        state: "error",
-        message: e instanceof Error ? e.message : "无法确认结果，请刷新核对",
-      });
-      return;
-    }
-  }
+        if (!result.revision)
+          throw new Error("未取得应用版本，请核对实际配置后继续。");
+        for (const t of targets) onProgress({ id: t.id, state: "done" });
+      } catch (e) {
+        for (const t of targets)
+          onProgress({
+            id: t.id,
+            state: "error",
+            message:
+              e instanceof Error ? e.message : "无法确认结果，请核对后继续",
+          });
+      }
+    }),
+  );
 }

@@ -9,11 +9,13 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -68,7 +70,17 @@ func TestModelAliasesServeBothNamesWithRealGateway(t *testing.T) {
 			t.Log(string(raw))
 		}
 	}()
-	src := controlSource{sourceView: sourceView{Base: "http://127.0.0.1:" + port}, Key: "admin-fixture"}
+	backendURL, _ := url.Parse("http://127.0.0.1:" + port)
+	proxy := httputil.NewSingleHostReverseProxy(backendURL)
+	var restores atomic.Int64
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" && r.URL.Path == "/v1/channel-controls/restore" {
+			restores.Add(1)
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	defer gateway.Close()
+	src := controlSource{sourceView: sourceView{Base: gateway.URL}, Key: "admin-fixture"}
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	var state map[string]any
@@ -567,6 +579,91 @@ func TestModelAliasesServeBothNamesWithRealGateway(t *testing.T) {
 	raw, _, _ = subGateway(ctx, src, "GET", "/v1/api_config", nil)
 	if strings.Contains(mustJSON(raw["api_config"]), "gpt-6-sol") {
 		t.Fatal("manual model modified shared base configuration")
+	}
+
+	// The batch endpoint changes two caller copies in one restore and accepts
+	// an exact-state retry as a no-op, including after losing the first response.
+	batchTargets := []channelBatchTarget{}
+	for _, caller := range []string{adminKey, keyB} {
+		catalog, _, e := fetchSource(ctx, src, "/v1/model-channels", url.Values{"api_key_id": {caller}, "endpoint": {"all"}, "stream": {"all"}})
+		if e != nil {
+			t.Fatal(e)
+		}
+		var rows []batchCatalogRow
+		_ = decodeMap(catalog["data"], &rows)
+		provider := configuredImportName("fugue-codex", caller)
+		current := map[string]string{}
+		for _, row := range rows {
+			if row.Provider == provider {
+				up := row.Upstream
+				if up == "" {
+					up = row.Model
+				}
+				current[row.Model] = up
+			}
+		}
+		batchTargets = append(batchTargets, channelBatchTarget{Key: caller, Provider: provider, Origin: "fugue-codex", Current: current, Models: map[string]string{"batch-alias": "codex-auto-review"}, Positions: map[string]int{"batch-alias": 1}})
+	}
+	batchCall := func(input channelBatchInput, want int) map[string]any {
+		t.Helper()
+		req := httptest.NewRequest("POST", "/v1/sources/"+src.ID+"/channel-batch", strings.NewReader(mustJSON(input)))
+		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
+		w := httptest.NewRecorder()
+		service.Handler().ServeHTTP(w, req)
+		if w.Code != want {
+			t.Fatal("batch", w.Code, w.Body.String())
+		}
+		if strings.Contains(w.Body.String(), "fixture-upstream-key") {
+			t.Fatal("secret leaked")
+		}
+		var result map[string]any
+		_ = json.Unmarshal(w.Body.Bytes(), &result)
+		return result
+	}
+	state, _, _ = subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
+	input := channelBatchInput{Part: "all", Revision: state["revision"].(string), Targets: batchTargets}
+	beforeBatch := restores.Load()
+	// Invalid target prevents the entire batch, including the valid first key.
+	bad := input
+	bad.Targets = append([]channelBatchTarget{}, input.Targets...)
+	bad.Targets[1].Current = map[string]string{"wrong": "wrong"}
+	batchCall(bad, 409)
+	unchanged, _, _ := subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
+	if unchanged["revision"] != input.Revision {
+		t.Fatal("failed batch partially committed")
+	}
+	result := batchCall(input, 200)
+	if result["changed"] != true {
+		t.Fatal(result)
+	}
+	if restores.Load() != beforeBatch+1 {
+		t.Fatal("expected one restore for both keys", restores.Load()-beforeBatch)
+	}
+	probe("admin-fixture", "batch-alias")
+	probe("caller-b", "batch-alias")
+	// Stale retries cannot blindly overwrite newer state.
+	batchCall(input, 409)
+	input.Revision = result["revision"].(string)
+	for i := range input.Targets {
+		input.Targets[i].Current = input.Targets[i].Models
+	}
+	result = batchCall(input, 200)
+	if result["changed"] != false || result["revision"] != input.Revision {
+		t.Fatal("matching retry performed a write", result)
+	}
+	if restores.Load() != beforeBatch+1 {
+		t.Fatal("no-op retry sent another restore")
+	}
+	input.Part = "delete"
+	batchCall(input, 200)
+	list := read("/v1/sources/" + src.ID + "/channel-routes")
+	var after []channelRoute
+	_ = decodeMap(list["data"], &after)
+	for _, row := range after {
+		if row.KeyID == adminKey || row.KeyID == keyB {
+			t.Fatal("batch delete left a route", row)
+		}
 	}
 
 }

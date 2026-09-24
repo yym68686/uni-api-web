@@ -327,6 +327,7 @@ func (s *Service) controlHandler() http.Handler {
 	mux.HandleFunc("DELETE /v1/channel-management", s.removeConfiguredBinding)
 	mux.HandleFunc("GET /v1/sources/{id}/channel-routes", s.channelRoutes)
 	mux.HandleFunc("PATCH /v1/sources/{id}/channel-routes", s.editChannelRoutes)
+	mux.HandleFunc("POST /v1/sources/{id}/channel-batch", s.applyChannelBatch)
 	mux.HandleFunc("GET /v1/channel-spend", s.channelSpend)
 	mux.HandleFunc("GET /v1/sources/{id}/channel-info", s.channelInfo)
 	mux.HandleFunc("GET /v1/sources/{id}/channel-settings", s.channelSettings)

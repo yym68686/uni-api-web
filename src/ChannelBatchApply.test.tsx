@@ -17,6 +17,8 @@ afterEach(() => vi.unstubAllGlobals());
 function setup(remove = false, failSecond = false, preload = false) {
   const revisions: Record<string, string> = { a: "r1", b: "r1" },
     writes: any[] = [];
+  const completed = new Set<string>();
+  const failures = new Set(failSecond ? ["b"] : []);
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string, init?: RequestInit) => {
@@ -25,12 +27,13 @@ function setup(remove = false, failSecond = false, preload = false) {
           url.searchParams.get("source_id") ||
           url.pathname.split("/")[4] ||
           "a";
-      if (init?.method === "PATCH") {
+      if (init?.method === "POST") {
         const body = JSON.parse(String(init.body));
-        writes.push(body);
-        if (failSecond && body.source_id === "b")
+        writes.push({ ...body, source_id: src });
+        if (failures.has(src))
           return new Response("来源断开，请核对结果", { status: 502 });
-        revisions[body.source_id] = "r2";
+        revisions[src] = "r2";
+        completed.add(src);
         return Response.json({ revision: "r2" });
       }
       if (url.pathname.endsWith("/channel-management"))
@@ -46,10 +49,11 @@ function setup(remove = false, failSecond = false, preload = false) {
             name: "测试渠道",
             account_id: "account",
             group_id: 1,
-            models: ["old"],
+            models: completed.has(source) ? ["new"] : ["old"],
             positions: { old: 1 },
             manageable: true,
             batch_revisions: true,
+            atomic_batch: true,
             revision: "r1",
           })),
           unavailable_sources: [],
@@ -59,13 +63,14 @@ function setup(remove = false, failSecond = false, preload = false) {
           revision: revisions[src],
           manageable: true,
           batch_revisions: true,
+          atomic_batch: true,
           snapshot_consistent: true,
           unavailable_keys: [],
           data: [
             {
               provider: "site",
-              model: "old",
-              upstream_model: "old",
+              model: completed.has(src) ? "new" : "old",
+              upstream_model: completed.has(src) ? "new" : "old",
               api_key_id: "key",
               key_position: 1,
               position: 1,
@@ -77,6 +82,7 @@ function setup(remove = false, failSecond = false, preload = false) {
           revision: revisions[src],
           manageable: true,
           batch_revisions: true,
+          atomic_batch: true,
           channels: [{ provider: "site", model: "old" }],
         });
       throw new Error(url.pathname);
@@ -110,7 +116,7 @@ function setup(remove = false, failSecond = false, preload = false) {
           name: "测试渠道",
           account_id: "account",
           group_id: 1,
-          models: ["old"],
+          models: completed.has(source) ? ["new"] : ["old"],
           positions: { old: 1 },
           manageable: true,
           revision: "r1",
@@ -125,6 +131,7 @@ function setup(remove = false, failSecond = false, preload = false) {
             revision: "r1",
             manageable: true,
             batch_revisions: true,
+            atomic_batch: true,
             snapshot_consistent: true,
             unavailable_keys: [],
             data: [
@@ -155,6 +162,7 @@ function setup(remove = false, failSecond = false, preload = false) {
   );
   return {
     writes,
+    failures,
     onApplied,
     draft,
     client,
@@ -211,7 +219,7 @@ it("previews both sources without writing, freezes the draft, and applies only a
   await user.click(d.getByRole("button", { name: "确认应用 2 个接入" }));
   await d.findByText(/全部应用完成/);
   expect(writes).toHaveLength(2);
-  expect(writes[0].model_mappings).toEqual({ new: "new" });
+  expect(writes[0].targets[0].models).toEqual({ new: "new" });
   await user.click(d.getByRole("button", { name: "完成" }));
   expect(onApplied).toHaveBeenCalledOnce();
 });
@@ -232,12 +240,12 @@ it("deletion lists the full scope, cancel writes nothing, and confirmation delet
   );
   await user.click(d.getByRole("button", { name: "确认删除 2 个接入" }));
   await d.findByText(/全部删除完成/);
-  expect(writes.map((w) => w.action)).toEqual(["delete", "delete"]);
+  expect(writes.map((w) => w.part)).toEqual(["delete", "delete"]);
   expect(writes.every((w) => !("models" in w) && !("positions" in w))).toBe(
     true,
   );
 });
-it("shows a partial result and never offers an automatic retry for an ambiguous failure", async () => {
+it("shows a partial result and offers fresh reconciliation without automatic write retry", async () => {
   const { user, writes } = setup(false, true);
   await user.click(
     screen.getByRole("button", { name: "应用全部于所有已保存渠道" }),
@@ -251,4 +259,26 @@ it("shows a partial result and never offers an automatic retry for an ambiguous 
   expect(d.getByText("来源断开，请核对结果")).toBeVisible();
   expect(d.queryByRole("button", { name: /确认应用/ })).not.toBeInTheDocument();
   expect(writes).toHaveLength(2);
+});
+
+it("reconciles partial success and retries only the still-pending source in the same dialog", async () => {
+  const { user, writes, failures } = setup(false, true);
+  await user.click(
+    screen.getByRole("button", { name: "应用全部于所有已保存渠道" }),
+  );
+  const d = within(screen.getByRole("dialog"));
+  await waitFor(() =>
+    expect(d.getByRole("button", { name: "确认应用 2 个接入" })).toBeEnabled(),
+  );
+  await user.click(d.getByRole("button", { name: "确认应用 2 个接入" }));
+  await d.findByText(/已确认应用 1\/2/);
+  failures.clear();
+  await user.click(d.getByRole("button", { name: "核对剩余接入" }));
+  await waitFor(() =>
+    expect(d.getByRole("button", { name: "确认应用 1 个接入" })).toBeEnabled(),
+  );
+  expect(d.getByText("已一致，无需重复应用")).toBeVisible();
+  await user.click(d.getByRole("button", { name: "确认应用 1 个接入" }));
+  await d.findByText(/全部应用完成/);
+  expect(writes.map((w) => w.source_id)).toEqual(["a", "b", "b"]);
 });

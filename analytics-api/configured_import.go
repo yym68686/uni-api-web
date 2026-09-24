@@ -45,7 +45,7 @@ func snapshotReplacements(rules []retainedRule, channels []retainedChannel, key 
 
 // Reconstruct the effective provider on the server. Full credentials are never
 // sent to the browser; aliases preserve engine, headers, limits and other rules.
-func (s *Service) importProviderDocument(ctx context.Context, src controlSource, snapshot retainedSnapshot, provider, revision string) (map[string]any, int, error) {
+func (s *Service) importProviderDocument(ctx context.Context, src controlSource, snapshot retainedSnapshot, provider, revision string, baseDocuments ...map[string]map[string]any) (map[string]any, int, error) {
 	admin := src
 	if src.ConfigKey != "" {
 		admin.Key = src.ConfigKey
@@ -61,6 +61,14 @@ func (s *Service) importProviderDocument(ctx context.Context, src controlSource,
 				document = map[string]any{"provider": provider, "base_url": channel.Base, "api": channel.Key, "engine": "gpt", "model": channel.Models}
 			}
 			break
+		}
+	}
+	if document == nil && len(baseDocuments) > 0 {
+		// Clone before applying key-specific settings/model changes.
+		raw, _ := json.Marshal(baseDocuments[0][provider])
+		_ = json.Unmarshal(raw, &document)
+		if document == nil {
+			return nil, 404, errors.New("渠道已不存在")
 		}
 	}
 	if document == nil {

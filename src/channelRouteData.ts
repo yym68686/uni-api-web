@@ -19,6 +19,7 @@ export interface Routes {
   snapshot_consistent?: boolean;
   manageable?: boolean;
   batch_revisions?: boolean;
+  atomic_batch?: boolean;
   checked_at?: number;
 }
 export const routeOptions = (source: string) => ({

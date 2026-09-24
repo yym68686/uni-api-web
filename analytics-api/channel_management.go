@@ -313,6 +313,6 @@ func (s *Service) channelRoutes(w http.ResponseWriter, r *http.Request) {
 		"data": data, "unavailable_keys": unavailable,
 		"revision": revision, "snapshot_consistent": consistent,
 		"manageable":      state["temporary_channel_management"] == true,
-		"batch_revisions": true, "checked_at": time.Now().UnixMilli(),
+		"batch_revisions": true, "atomic_batch": true, "checked_at": time.Now().UnixMilli(),
 	})
 }

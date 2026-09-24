@@ -114,8 +114,13 @@ function BatchDialog({
     setLoading(true);
     setError("");
     setPlan(null);
-    void prepareChannelBatch(draft, controller.signal, (s) =>
-      rememberBatchSnapshot(client, s),
+    setProgress({});
+    setFinished(false);
+    void prepareChannelBatch(
+      draft,
+      controller.signal,
+      (s) => rememberBatchSnapshot(client, s),
+      false,
     )
       .then((value) => {
         if (!controller.signal.aborted) setPlan(value);
@@ -155,6 +160,8 @@ function BatchDialog({
         );
         return;
       }
+      setPlan(current);
+      setProgress({});
       setValidating(false);
       await applyChannelBatch(
         current,
@@ -186,7 +193,7 @@ function BatchDialog({
   }
   function finish() {
     close();
-    if (done) onApplied();
+    if (finished) onApplied();
   }
   return (
     <Dialog.Portal>
@@ -239,7 +246,7 @@ function BatchDialog({
           {plan && (
             <>
               <p className="sub-import-note">
-                根据管理页已加载的完整快照生成预览，确认时会重新核对全部来源及配置版本。
+                确认时核对实际配置，自动跳过已一致的接入；各来源同时提交，同一来源的所有接入一次原子应用。
               </p>
               {validating && (
                 <p role="status">
@@ -383,9 +390,10 @@ function BatchDialog({
               {(busy || finished) && (
                 <p role="status" className="batch-apply-summary">
                   已确认{verb} {done}/{plan.targets.length - skipped} 个接入。
-                  {skipped > 0 && `跳过 ${skipped} 个无对应模型的接入。`}
+                  {skipped > 0 &&
+                    `跳过 ${skipped} 个已一致或无对应模型的接入。`}
                   {failed
-                    ? "遇到错误，已停止后续操作。请核对未确认项后重新打开预览。"
+                    ? "部分来源结果未确认，其他来源独立完成。核对实际配置后只继续未完成项。"
                     : finished && done + skipped < plan.targets.length
                       ? "已停止，尚未执行的接入保持原配置。"
                       : finished
@@ -415,6 +423,16 @@ function BatchDialog({
               <button type="button" className="button" onClick={finish}>
                 {finished ? "完成" : "取消"}
               </button>
+              {finished &&
+                (failed || done + skipped < (plan?.targets.length || 0)) && (
+                  <button
+                    type="button"
+                    className="button primary"
+                    onClick={() => setReload((n) => n + 1)}
+                  >
+                    核对剩余接入
+                  </button>
+                )}
               {!finished && (
                 <button
                   type="button"
