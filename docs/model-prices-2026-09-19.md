@@ -4,7 +4,9 @@
 
 同日补充：`gpt-6-sol`、`gpt-6-luna` 使用 `/v1/responses` 检测。按 [OpenAI 官方价格表](https://developers.openai.com/api/docs/pricing) 的 Standard 短上下文价格，Sol 输入 / 输出 / 缓存读取 / 缓存写入为 $2 / $10 / $0.20 / $2.50，Luna 为 $0.10 / $0.50 / $0.01 / $0.125（均为每百万 token）；默认不计算缓存写入，售卖比例 2.5%。
 
-单位：美元 / 百万 token。价格设置与检测设置共用 `analytics-api/model_catalog.json`，检测共 25 项，另有 3 项 Jev 价格。以下为标准文本请求的基准价格；来源和适用条件随每个模型记录。
+2026-09-24 补充：`grok-4.7` 已加入共用检测与价格清单，使用 `/v1/responses`。按 [xAI 官方价格表](https://docs.x.ai/developers/pricing) 核对，标准短上下文价格为输入 $2、输出 $6、缓存读取 $0.50 / 百万 token；输入上下文 ≥200K 时，整次请求输入 / 输出 / 缓存读取分别为 $4 / $12 / $1。价格设置沿用短上下文基准，未单列的缓存写入按普通输入 $2 估算，说明中标注长上下文及附加费用边界。
+
+单位：美元 / 百万 token。价格设置与检测设置共用 `analytics-api/model_catalog.json`，检测共 26 项，另有 3 项 Jev 价格。以下为标准文本请求的基准价格；来源和适用条件随每个模型记录。
 
 | 模型 | 输入 | 输出 | 缓存读取 | 官方来源 |
 | --- | ---: | ---: | ---: | --- |
@@ -22,6 +24,7 @@
 | deepseek-4.1-flash | 0.3 | 1.2 | 0.006 | [官方文档](https://api-docs.deepseek.com/quick_start/pricing/) |
 | deepseek-4-pro | 1.32 | 3.96 | 0.044 | [官方文档](https://api-docs.deepseek.com/quick_start/pricing/) |
 | grok-4.6 | 2 | 6 | 0.5 | [官方文档](https://docs.x.ai/developers/pricing) |
+| grok-4.7 | 2 | 6 | 0.5 | [官方文档](https://docs.x.ai/developers/pricing) |
 | gemini-3.1-pro | 2 | 12 | 0.2 | [官方文档](https://ai.google.dev/gemini-api/docs/pricing) |
 | gemini-3.8-flash | 0.75 | 3.75 | 0.075 | [官方文档](https://ai.google.dev/gemini-api/docs/pricing) |
 | claude-fable-5 | 10 | 50 | 1 | [官方文档](https://platform.claude.com/docs/en/about-claude/pricing) |

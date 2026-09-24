@@ -270,7 +270,7 @@ Tool use 检测复用 Codex 的 `additional_tools` / namespace / custom `exec` �
 
 添加后自动读取有权限的全部分组，为每组创建并复用 `uni-console-check-*` 专用 key，创建时不设置额度上限，检测费用由站点账号承担，不修改业务 key。同步时，对名称、分组、已保存 ID 和密钥均匹配的旧版 $1 测试 key，读取上游最新状态后将 `quota` 更新为 `0`（不限额）并回读核验，不清零累计用量；停用、过期或自定义额度的 key 保留原设置。额度耗尽、停用、过期、额度更新失败与创建失败分别提示。重复同步通过专用名称、分组校验与 Idempotency-Key 避免重复创建。可用渠道接口关闭时继续按分组运行。移除账号只删除控制台凭据与结果，上游测试 key 保留，由用户在上游撤销。
 
-支持 22 个检测模型：`gpt-6-astra`、`gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna`、`gpt-5.5`、`codex-auto-review`、`glm-5.3`、`glm-5.3-flash`、`kimi-k3`、`deepseek-4.1-flash`、`deepseek-4-pro`、`grok-4.6`、`gemini-3.1-pro`、`gemini-3.8-flash`、`claude-fable-5`、`claude-fable-5-1`、`claude-opus-5`、`claude-sonnet-5`、`claude-opus-4-8`、`claude-opus-4-6`、`claude-sonnet-4-6`、`claude-haiku-4-5-20251001`。
+支持 26 个检测模型：`gpt-6-astra`、`gpt-6-sol`、`gpt-6-luna`、`gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna`、`gpt-5.5`、`codex-auto-review`、`glm-5.3`、`glm-5.3-flash`、`kimi-k3`、`deepseek-4.1-flash`、`deepseek-4-pro`、`grok-4.7`、`grok-4.6`、`gemini-3.1-pro`、`gemini-3.8-flash`、`claude-fable-5`、`claude-fable-5-1`、`claude-opus-5-5`、`claude-opus-5`、`claude-sonnet-5`、`claude-opus-4-8`、`claude-opus-4-6`、`claude-sonnet-4-6`、`claude-haiku-4-5-20251001`。
 
 每个模型发送流式 `say test`。Claude 使用 `/v1/messages` 和 `x-api-key`，两个 Gemini 使用 `/v1beta/models/{model}:streamGenerateContent?alt=sse` 和 `x-goog-api-key`，其他使用 `/v1/responses`。不尝试切换协议或回退模型。Responses 默认延迟记录首个 `response.created`，Claude 记录首个 `message_start`，Gemini 记录首个原生响应事件；tooltip 同时列出首个非思考文本片段的延迟，原生事件不会伪装为 `response.created`。模型匹配使用原生返回的 `model` / `modelVersion`，缺失时不拿请求模型补全。请求 ID 继续用于账单核验。完整 Responses、正常结束的 Messages、以 STOP 完成的 Gemini 且有可见文本才判可用；思考内容、HTTP 200 和截断流不算成功。仅 `gpt-6-astra` 可用性成功后再次发送糖果推理题，回复含 `21` 判不降智，否则判降智；其他模型只发送 `say test`。
 

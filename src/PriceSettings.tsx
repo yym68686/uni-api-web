@@ -230,8 +230,7 @@ export function PriceSettings({
         {loading && <Spinner small />}
       </div>
       <p className="field-note">
-        美元 / 百万 token · 官方参考价核对于
-        2026-09-19。模型列表与检测设置一致；带后缀的模型自动沿用基础模型价格，例如
+        美元 / 百万 token · 官方参考价来源与适用条件见各模型说明。模型列表与检测设置一致；带后缀的模型自动沿用基础模型价格，例如
         gemini-3.1-pro-search → gemini-3.1-pro。
       </p>
       <p className="field-note">

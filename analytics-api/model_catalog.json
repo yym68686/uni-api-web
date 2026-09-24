@@ -156,6 +156,18 @@
     "note": "对应 DeepSeek-V4-Pro（deepseek-v4-pro）；采用高峰价，非高峰为半价。高峰：周一至周五 UTC 01–04、06–10。"
   },
   {
+    "model": "grok-4.7",
+    "input": 2,
+    "output": 6,
+    "cache_read": 0.5,
+    "cache_write": 2,
+    "cache_write_1h": 2,
+    "source": "https://docs.x.ai/developers/pricing",
+    "verified": true,
+    "cache_write_kind": "input",
+    "note": "2026-09-24 核对：标准请求 <200K 上下文；≥200K 时输入 $4、输出 $12、缓存读取 $1 / 百万 token。未单列缓存写入费，按普通输入估算；不含工具、优先处理和区域附加费。"
+  },
+  {
     "model": "grok-4.6",
     "input": 2,
     "output": 6,
