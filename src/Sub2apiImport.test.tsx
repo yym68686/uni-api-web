@@ -56,7 +56,7 @@ const configured = (source: string): InstalledChannel => ({
     },
   ],
 });
-function mount() {
+function mount(checkedTarget: SubTarget = target) {
   const data = [
     imported("primary"),
     imported("do"),
@@ -72,7 +72,7 @@ function mount() {
       <Tooltip.Provider>
         <Sub2apiImport
           account={account}
-          target={target}
+          target={checkedTarget}
           imports={
             {
               data: { data, labels: {}, unavailable_sources: [] },
@@ -192,7 +192,6 @@ it("uses one source/key selector and one table for native and imported routes, p
       source_id: "primary",
       provider: "native",
       edit_provider: "native",
-      allow_unverified_models: true,
       api_key_id: "key2",
       revision: "fresh",
       models: ["native-only"],
@@ -255,7 +254,7 @@ it("keeps imported bindings visible when native routes fail and can retry the sh
   expect(screen.getByRole("table")).toHaveTextContent("native-only");
 });
 
-it("keeps saved site models checked and allows selecting untested models in edit mode",async()=>{
+it("keeps saved site models checked but blocks untested models in edit mode",async()=>{
  const writes:any[]=[];
  vi.stubGlobal('fetch',vi.fn(async(input:string,init?:RequestInit)=>{
   if(init?.method==='PATCH'){writes.push(JSON.parse(String(init.body)));return Response.json({message:'已更新'});}
@@ -267,10 +266,36 @@ it("keeps saved site models checked and allows selecting untested models in edit
  const saved=await screen.findByRole('checkbox',{name:/^claude-opus-5-5/});
  expect(saved).toBeChecked();
  const added=screen.getByRole('checkbox',{name:/^gpt-6-sol/});
- expect(added).toBeEnabled();expect(added).not.toBeChecked();
+ expect(added).toBeDisabled();expect(added).not.toBeChecked();
  await user.click(added);
  await waitFor(()=>expect(screen.getByRole('button',{name:'保存更改'})).toBeEnabled());
  await user.click(screen.getByRole('button',{name:'保存更改'}));
  await waitFor(()=>expect(writes).toHaveLength(1));
- expect(writes[0]).toMatchObject({action:'replace',allow_unverified_models:true,models:expect.arrayContaining(['gpt-6-sol','claude-opus-5-5'])});
+ expect(writes[0]).toMatchObject({action:'replace',models:['claude-opus-5-5']});
+});
+
+it("uses the same availability restrictions for site edits and aliases",async()=>{
+ const writes:any[]=[];
+ vi.stubGlobal('fetch',vi.fn(async(input:string,init?:RequestInit)=>{
+  if(init?.method==='PATCH'){writes.push(JSON.parse(String(init.body)));return Response.json({message:'已更新'});}
+  if(input.includes('channel-options'))return Response.json({revision:'r1',supported:true,manageable:true,provider:'temp',keys:[{key_id:'key1',position:1,prefix:'masked'}],channels:[{provider:'temp',model:'claude-opus-5-5'}]});
+  return Response.json({data:[],unavailable_keys:[],unavailable_sources:[]});
+ }));
+ const models=[['claude-opus-5-5','error'],['gpt-6-sol','error'],['gpt-5.5','success']].map(([model,status])=>({model,state:'done',message:'',result:{model,availability:{status}}}));
+ mount({...target,models} as SubTarget);
+ const user=userEvent.setup();
+ await user.click(await screen.findByRole('button',{name:'编辑'}));
+ await waitFor(()=>expect(screen.getByRole('button',{name:'保存更改'})).toBeEnabled());
+ const saved=screen.getByRole('checkbox',{name:'claude-opus-5-5'});
+ expect(saved).toBeChecked();expect(saved).toBeEnabled();
+ const failed=screen.getByRole('checkbox',{name:'gpt-6-sol'});
+ expect(failed).toBeDisabled();expect(failed.closest('label')).toHaveTextContent('检测失败');
+ await user.click(screen.getByRole('checkbox',{name:'gpt-5.5'}));
+ await user.click(screen.getByRole('button',{name:'添加重命名'}));
+ expect(within(screen.getByLabelText('重命名 1 上游模型')).getByRole('option',{name:'gpt-6-sol'})).toBeDisabled();
+ await user.click(screen.getByRole('button',{name:'删除重命名 1'}));
+ await user.click(saved);expect(saved).toBeDisabled();
+ await user.click(screen.getByRole('button',{name:'保存更改'}));
+ await waitFor(()=>expect(writes).toHaveLength(1));
+ expect(writes[0].models).toEqual(['gpt-5.5']);
 });

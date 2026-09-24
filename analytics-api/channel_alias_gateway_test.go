@@ -118,6 +118,19 @@ func TestModelAliasesServeBothNamesWithRealGateway(t *testing.T) {
 	defer store.db.Exec(`DELETE FROM console_sources WHERE id=$1`, src.ID)
 	service := &Service{control: store}
 	token, _ := store.newSession(ctx, "alias-owner")
+	verified, err := configuredProviders(ctx, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.db.Exec(`DELETE FROM console_configured_checks WHERE source_id=$1`, src.ID)
+	for _, p := range verified {
+		for _, model := range []string{"codex-auto-review", "old-alias", "gpt-6-sol"} {
+			_, e := store.db.Exec(`INSERT INTO console_configured_checks(source_id,provider,kind,model,source_target,fingerprint,state,result) VALUES($1,$2,'model',$3,$4,$5,'done',$6)`, src.ID, p.Provider, model, controlTarget(src), configuredProbeFingerprint(src, p), mustJSON(subResult{Model: model, CheckedAt: 1, Availability: subProbe{Status: "success"}}))
+			if e != nil {
+				t.Fatal(e)
+			}
+		}
+	}
 	submit := func(key string, models []string, mappings map[string]string, want int) {
 		t.Helper()
 		state, _, err = subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
@@ -545,6 +558,23 @@ func TestModelAliasesServeBothNamesWithRealGateway(t *testing.T) {
 	// copy. Existing aliases, headers, base config and other caller keys survive.
 	state, _, _ = subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
 	manualBody := map[string]any{"source_id": src.ID, "provider": "fugue-codex", "edit_provider": configuredImportName("fugue-codex", adminKey), "api_key_id": adminKey, "revision": state["revision"], "models": []string{"codex-auto-review", "gpt-6-sol"}, "model_mappings": map[string]string{"new-sol-alias": "gpt-6-sol"}, "position": 1, "allow_unverified_models": true}
+	_, e = store.db.Exec(`UPDATE console_configured_checks SET state='error' WHERE source_id=$1 AND model='gpt-6-sol'`, src.ID)
+	if e != nil {
+		t.Fatal(e)
+	}
+	failedReq := httptest.NewRequest("POST", "/v1/channel-management", strings.NewReader(mustJSON(manualBody)))
+	failedReq.Header.Set("Content-Type", "application/json")
+	failedReq.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
+	failedRes := httptest.NewRecorder()
+	beforeFailure := restores.Load()
+	service.Handler().ServeHTTP(failedRes, failedReq)
+	if failedRes.Code != 400 || restores.Load() != beforeFailure {
+		t.Fatal("failed native model bypassed validation", failedRes.Code)
+	}
+	_, e = store.db.Exec(`UPDATE console_configured_checks SET state='done' WHERE source_id=$1 AND model='gpt-6-sol'`, src.ID)
+	if e != nil {
+		t.Fatal(e)
+	}
 	manualReq := httptest.NewRequest("POST", "/v1/channel-management", strings.NewReader(mustJSON(manualBody)))
 	manualReq.Header.Set("Content-Type", "application/json")
 	manualReq.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
@@ -624,6 +654,22 @@ func TestModelAliasesServeBothNamesWithRealGateway(t *testing.T) {
 	state, _, _ = subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
 	input := channelBatchInput{Part: "all", Revision: state["revision"].(string), Targets: batchTargets}
 	beforeBatch := restores.Load()
+	// Failure of one model rejects the whole source before any gateway write,
+	// even when a legacy caller requests the former unverified override.
+	blocked := input
+	blocked.AllowUnverified = true
+	_, e = store.db.Exec(`UPDATE console_configured_checks SET state='error' WHERE source_id=$1 AND model IN ('codex-auto-review','old-alias')`, src.ID)
+	if e != nil {
+		t.Fatal(e)
+	}
+	batchCall(blocked, 400)
+	if restores.Load() != beforeBatch {
+		t.Fatal("failed availability partially committed batch")
+	}
+	_, e = store.db.Exec(`UPDATE console_configured_checks SET state='done' WHERE source_id=$1 AND model IN ('codex-auto-review','old-alias')`, src.ID)
+	if e != nil {
+		t.Fatal(e)
+	}
 	// Invalid target prevents the entire batch, including the valid first key.
 	bad := input
 	bad.Targets = append([]channelBatchTarget{}, input.Targets...)

@@ -12,8 +12,9 @@ import {
   RemoveConfiguredBinding,
 } from "./ChannelBindingActions";
 import type { ManagedChannel } from "./channelManagement";
-import { channelMembers,configuredToolUseResult,useConfiguredChecks,useChannelManagement } from "./channelManagement";
-import { ChannelModelSelection, splitChannelModels } from "./ChannelModelSelection";
+import { channelMembers,configuredModelChecks,configuredToolUseResult,useConfiguredChecks,useChannelManagement } from "./channelManagement";
+import { ChannelModelSelection, splitChannelModels, modelIsAvailable, unavailableModelChanges } from "./ChannelModelSelection";
+import { importModelLabel } from "./sub2apiResults";
 import { SUB_MODELS } from "./sub2apiModels";
 import {useSubAccounts} from "./sub2apiAccounts";
 import {toolUseFailed,modelToolUse,toolUseLabels} from "./toolUse";
@@ -234,19 +235,21 @@ export function ConfiguredChannelDialog({
     }
   }, [counts]);
   const [editingProvider, setEditingProvider] = useState("");
-  const toolDefaultsPending=!editingProvider && (toolChecks.isPending || accounts.isPending);
-  const toolDefaultsError=!editingProvider && (toolChecks.isError || accounts.isError);
+  const toolDefaultsPending=toolChecks.isPending || accounts.isPending;
+  const toolDefaultsError=toolChecks.isError || accounts.isError;
   const initializedEdit = useRef("");
   const toolTarget={tool_use:configuredToolUseResult(item,accounts.data?.data||[],toolChecks.data?.data||[])};
   const [selectedOverride, setSelected] = useState<string[]|null>(null);
-  const selected=selectedOverride ?? item.models.filter(model=>!toolUseFailed(toolTarget,model));
   const [aliases, setAliases] = useState<ModelAlias[]>([]);
-  const mapping = aliasMappings(aliases, selected);
   const modelOptions = [
-    ...new Set([...item.models, ...selected, ...aliases.map(a=>a.upstream), ...SUB_MODELS,
+    ...new Set([...item.models, ...(selectedOverride||[]), ...aliases.map(a=>a.upstream), ...SUB_MODELS,
       ...providerRoutes(routes[sources.indexOf(item.source_id)]?.data?.data||[],[item.provider]).flatMap(r=>[r.model,r.upstream_model||r.model]),
       ...(toolChecks.data?.data||[]).filter(c=>c.source_id===item.source_id&&c.provider===item.provider&&c.kind==="model").map(c=>c.model)]),
   ];
+  const allChecks=configuredModelChecks(item,accounts.data?.data||[],toolChecks.data?.data||[],modelOptions);
+  const canSelectModel=(model:string)=>!toolDefaultsPending&&!toolDefaultsError&&modelIsAvailable(allChecks.find(c=>c.model===model));
+  const selected=selectedOverride ?? item.models.filter(model=>canSelectModel(model)&&!toolUseFailed(toolTarget,model));
+  const mapping = aliasMappings(aliases, selected);
   const [key, setKey] = useState("");
   const [position, setPosition] = useState(1);
   const [perModel, setPerModel] = useState(false);
@@ -303,6 +306,9 @@ export function ConfiguredChannelDialog({
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   });
+  const savedModels=Object.fromEntries((options.data?.channels||[]).filter(r=>!!editingProvider&&r.provider===editingProvider).map(r=>[r.model,r.upstream_model||item.model_mappings?.[r.model]||r.model]));
+  const desiredModels=Object.fromEntries([...selected.map(m=>[m,item.model_mappings?.[m]||m]),...Object.entries(mapping.mappings).map(([name,m])=>[name,item.model_mappings?.[m]||m])]);
+  const invalidModels=unavailableModelChanges(desiredModels,savedModels,upstream=>allChecks.some(c=>(item.model_mappings?.[c.model]||c.model)===upstream&&canSelectModel(c.model)));
   useEffect(() => {
     if (
       !editingProvider ||
@@ -347,12 +353,12 @@ export function ConfiguredChannelDialog({
     const resolve=(m:string)=>item.model_mappings?.[m]||m;
     const originals=Object.fromEntries(selected.map(m=>[m,resolve(m)]));
     const renamed=Object.fromEntries(Object.entries(mapping.mappings).map(([name,m])=>[name,resolve(m)]));
-    return {part,name:group.name,allowUnverifiedModels:true,scope:batchScope||{kind:"configured",source:item.source_id,provider:item.provider},originals,aliases:renamed,models:{...originals,...renamed},positions:selectedModelPositions(mapping.models,activePositions,Math.min(position,positions)),anchor:{source:item.source_id,key,provider:editingProvider,revision:options.data?.revision||""}};
+    return {part,name:group.name,scope:batchScope||{kind:"configured",source:item.source_id,provider:item.provider},originals,aliases:renamed,models:{...originals,...renamed},positions:selectedModelPositions(mapping.models,activePositions,Math.min(position,positions)),anchor:{source:item.source_id,key,provider:editingProvider,revision:options.data?.revision||""}};
   }
   function batchButton(part:BatchPart,section?:string) {
     if(!editingProvider)return undefined;
     return <ChannelBatchApply section={section} draft={()=>batchDraft(part)}
-      disabled={busy||inventory.isPending||options.isFetching||options.isError||!options.data||!key||(part!=="models"&&!!mapping.error)||((part==="all"||part==="positions")&&!mapping.models.length)}
+      disabled={busy||invalidModels.length>0||toolDefaultsPending||toolDefaultsError||inventory.isPending||options.isFetching||options.isError||!options.data||!key||(part!=="models"&&!!mapping.error)||((part==="all"||part==="positions")&&!mapping.models.length)}
       onApplied={()=>{setSuccess("批量操作结果已更新，请核对各来源接入状态。");setAdding(false);if(initialEdit)close();}}/>;
   }
   async function save() {
@@ -360,7 +366,7 @@ export function ConfiguredChannelDialog({
       busy ||
       inventory.isPending ||
       toolDefaultsPending || toolDefaultsError ||
-      mapping.error ||
+      mapping.error || invalidModels.length>0 ||
       !key ||
       !mapping.models.length ||
       !options.data
@@ -378,7 +384,7 @@ export function ConfiguredChannelDialog({
           body: JSON.stringify({
             source_id: item.source_id,
             provider: item.provider,
-            ...(editingProvider ? { edit_provider: editingProvider, allow_unverified_models: true } : {}),
+            ...(editingProvider ? { edit_provider: editingProvider } : {}),
             api_key_id: key,
             revision: options.data.revision,
             models: selected,
@@ -559,8 +565,8 @@ export function ConfiguredChannelDialog({
                     ? "编辑此 API key 的模型"
                     : "添加模型到 API key"}
                 </h3>
-                {toolDefaultsPending && <p role="status"><Spinner small /> 正在读取各模型的 Tool use 检测结果…</p>}
-                {toolDefaultsError && <div className="error-banner" role="alert">Tool use 检测记录读取失败。<button type="button" className="button small" onClick={()=>{void toolChecks.refetch();void accounts.refetch();}}>重试</button></div>}
+                {toolDefaultsPending && <p role="status"><Spinner small /> 正在读取各模型的可用性和 Tool use 检测结果…</p>}
+                {toolDefaultsError && <div className="error-banner" role="alert">模型检测记录读取失败。<button type="button" className="button small" onClick={()=>{void toolChecks.refetch();void accounts.refetch();}}>重试</button></div>}
                 <div className="route-destination-grid">
                   <label className="sub-import-field">
                     uni-api 来源
@@ -666,19 +672,25 @@ export function ConfiguredChannelDialog({
                   </label>
                 </div>
                 <ChannelModelSelection
-                  models={editingProvider?modelOptions:item.models}
+                  models={modelOptions}
+                  canSelect={canSelectModel}
                   selected={selected} onChange={setSelected} editing={!!editingProvider}
                   disabled={busy || options.isFetching || inventory.isPending || toolDefaultsPending || toolDefaultsError}
                   actions={batchButton("models","模型勾选")}
-                  status={model=>toolUseFailed(toolTarget,model)?<small className="negative">Tool use · {toolUseLabels[modelToolUse(toolTarget,model)!.status]}</small>:undefined}
+                  status={model=><>
+                    {!canSelectModel(model)&&<small>{importModelLabel(allChecks.find(c=>c.model===model)||{model,state:"idle",message:"",result:null})}</small>}
+                    {toolUseFailed(toolTarget,model)&&<small className="negative">Tool use · {toolUseLabels[modelToolUse(toolTarget,model)!.status]}</small>}
+                  </>}
                 />
                 <ModelAliases
                   actions={batchButton("aliases","模型重命名")}
                   models={modelOptions}
+                  canSelect={canSelectModel}
                   aliases={aliases}
                   onChange={setAliases}
                   disabled={busy || options.isFetching}
                 />
+                {!!invalidModels.length && <p role="alert" className="negative">新增模型须检测可用：{invalidModels.join("、")}</p>}
                 {mapping.error && (
                   <p role="alert" className="negative">
                     {mapping.error}
@@ -728,7 +740,7 @@ export function ConfiguredChannelDialog({
                             editingProvider,
                           ),
                       ) ||
-                      !!mapping.error ||
+                      !!mapping.error || invalidModels.length>0 ||
                       !key ||
                       !mapping.models.length
                     }

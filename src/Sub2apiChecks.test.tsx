@@ -1110,8 +1110,9 @@ it("all-models groups channels and probes all supported models despite available
     within(dialog).getByRole("checkbox", { name: "gpt-6-astra" }),
   ).toBeChecked();
   expect(
-    within(dialog).getByRole("checkbox", { name: /gpt-5\.6-sol.*未检测/ }),
+    within(dialog).getByRole("checkbox", { name: "gpt-5.6-sol" }),
   ).toBeDisabled();
+  expect(within(dialog).getByRole("checkbox", {name:"gpt-5.6-sol"}).closest("label")).toHaveTextContent("未检测");
 });
 
 it("specific model uses Astra group quality and only tests the selected model", async () => {

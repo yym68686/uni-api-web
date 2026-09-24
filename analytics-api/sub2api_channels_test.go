@@ -59,6 +59,14 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 		switch r.URL.Path {
 		case "/v1/api-keys":
 			writeJSON(w, 200, map[string]any{"data": []any{map[string]any{"key_id": key, "prefix": "masked-one", "position": 1}, map[string]any{"key_id": other, "prefix": "masked-two", "position": 2}}})
+		case "/v1/model-channels":
+			catalog := []batchCatalogRow{}
+			if !deleted {
+				for _, model := range models {
+					catalog = append(catalog, batchCatalogRow{Provider: provider, Model: model, Upstream: model})
+				}
+			}
+			writeJSON(w, 200, map[string]any{"data": catalog})
 		case "/v1/channel-controls":
 			temporary := []any{map[string]any{"provider": otherProvider, "api_key_id": other, "models": []string{checkModel}}, map[string]any{"provider": newFirst, "api_key_id": key, "models": []string{checkModel}}}
 			if !deleted {
@@ -189,16 +197,29 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 	if writes != 1 {
 		t.Fatal("rejected request mutated gateway", writes)
 	}
-	// An explicit model selection in the editor can extend this binding even
-	// before probing, while the legacy/default import validation stays strict.
+	// Old clients cannot bypass availability validation with the former override.
 	in.Revision = revision
 	in.AllowUnverifiedModels = true
 	in.Models = []string{checkModel, "gpt-6-sol"}
 	if w = request("PATCH", foreign, in); w.Code != 404 {
 		t.Fatal("explicit edit bypassed owner", w.Code)
 	}
+	if w = request("PATCH", session, in); w.Code != 400 || writes != 1 {
+		t.Fatal("untested explicit selection changed routes", w.Code, w.Body.String())
+	}
+	_, e = store.db.Exec(`INSERT INTO console_sub_models(account_id,group_id,model,state,result) VALUES($1,7,'gpt-6-sol','done',$2)`, account, mustJSON(subResult{Model: "gpt-6-sol", Availability: subProbe{Status: "error"}}))
+	if e != nil {
+		t.Fatal(e)
+	}
+	if w = request("PATCH", session, in); w.Code != 400 || writes != 1 {
+		t.Fatal("failed model changed routes", w.Code, w.Body.String())
+	}
+	_, e = store.db.Exec(`UPDATE console_sub_models SET result=$2 WHERE account_id=$1 AND model='gpt-6-sol'`, account, mustJSON(subResult{Model: "gpt-6-sol", Availability: subProbe{Status: "success"}}))
+	if e != nil {
+		t.Fatal(e)
+	}
 	if w = request("PATCH", session, in); w.Code != 200 {
-		t.Fatal("explicit model selection rejected", w.Code, w.Body.String())
+		t.Fatal("verified extra model rejected", w.Code, w.Body.String())
 	}
 	if len(models) != 2 || writes != 2 {
 		t.Fatal("manual model was not saved", models, writes)

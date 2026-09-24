@@ -34,13 +34,16 @@ export function ModelAliases({
   onChange,
   disabled = false,
   actions,
+  canSelect,
 }: {
   models: string[];
   aliases: ModelAlias[];
   onChange: (aliases: ModelAlias[]) => void;
   disabled?: boolean;
   actions?: ReactNode;
+  canSelect?: (model: string) => boolean;
 }) {
+  const available = models.filter(model => !canSelect || canSelect(model));
   return (
     <section className="model-aliases">
       <div className="model-alias-heading">
@@ -50,9 +53,9 @@ export function ModelAliases({
           <button
             type="button"
             className="button small"
-            disabled={disabled || !models.length}
+            disabled={disabled || !available.length}
             onClick={() =>
-              onChange([...aliases, { upstream: models[0], public: "" }])
+              onChange([...aliases, { upstream: available[0], public: "" }])
             }
           >
             <Plus size={13} />
@@ -79,8 +82,8 @@ export function ModelAliases({
                 )
               }
             >
-              {models.map((m) => (
-                <option key={m}>{m}</option>
+              {[...new Set([...models, alias.upstream])].map((m) => (
+                <option key={m} disabled={!!canSelect && !canSelect(m)}>{m}</option>
               ))}
             </select>
           </label>
@@ -89,7 +92,7 @@ export function ModelAliases({
             重命名后的名字
             <input
               aria-label={`重命名 ${index + 1} 对外模型名`}
-              disabled={disabled}
+              disabled={disabled || (!!canSelect && !canSelect(alias.upstream))}
               value={alias.public}
               placeholder="例如 gpt-5.6-luna"
               onChange={(e) =>

@@ -1,5 +1,8 @@
 import { expect, it } from "vitest";
-import { groupManagedChannels, managementRows } from "./channelManagement";
+import { groupManagedChannels, managementRows, configuredModelChecks } from "./channelManagement";
+import type { ConfiguredCheck } from "./channelManagement";
+import type { SubAccount } from "./Sub2apiChecks";
+import { modelIsAvailable } from "./ChannelModelSelection";
 import type { ManagedChannel } from "./channelManagement";
 import { managedRouteCount } from "./channelRouteData";
 
@@ -22,6 +25,24 @@ const channel = (overrides: Partial<ManagedChannel> = {}): ManagedChannel => ({
   revision: "",
   manageable: false,
   ...overrides,
+});
+
+it("never borrows availability from another source, changed credential, or incomplete bound group",()=>{
+  const model="actual";
+  const probe=(status:string,checked_at:number)=>({model,checked_at,availability:{status},quality:{status:"success"}});
+  const entry=(overrides:Partial<ConfiguredCheck>):ConfiguredCheck=>({source_id:"fugue",provider:"native",kind:"model",model:"public",fingerprint:"current",state:"done",message:"",result:probe("success",10),...overrides} as ConfiguredCheck);
+  const member=channel({models:["public"],model_mappings:{public:model},probe_fingerprint:"current"});
+  const result=(checks:ConfiguredCheck[],accounts:SubAccount[]=[])=>configuredModelChecks(member,accounts,checks,["public",model]);
+  expect(result([entry({source_id:"do"}),entry({fingerprint:"old"})]).every(c=>!modelIsAvailable(c))).toBe(true);
+  expect(result([entry({})]).every(modelIsAvailable)).toBe(true);
+  expect(result([entry({}),entry({model,state:"running"})]).every(c=>!modelIsAvailable(c))).toBe(true);
+  member.binding_status="matched";
+  member.bound_keys=[1,2].map(group_id=>({account_id:"a",account_name:"a",base:"https://site.test",group_id,remote_key_id:group_id}));
+  const accounts=[{id:"a",targets:[1,2].map(group_id=>({group_id,models:[{model,state:"done",result:probe(group_id===1?"success":"error",group_id===1?30:20)}]}))}] as unknown as SubAccount[];
+  expect(result([],accounts).every(c=>!modelIsAvailable(c))).toBe(true);
+  expect(result([entry({})],accounts).every(c=>!modelIsAvailable(c))).toBe(true);
+  // A fresh native probe tests this exact configured provider after the failure.
+  expect(result([entry({result:probe("success",40) as ConfiguredCheck["result"]})],accounts).every(modelIsAvailable)).toBe(true);
 });
 
 it("merges public and private addresses for the same provider while retaining source definitions", () => {

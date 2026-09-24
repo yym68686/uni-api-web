@@ -6,6 +6,39 @@ import { SUB_MODELS } from "./sub2apiModels";
 import {toolUseModels} from "./toolUse";
 import type {ToolUseResult,ToolUseModel} from "./toolUse";
 import { modelChecks } from "./sub2apiResults";
+import type { SubModelCheck } from "./sub2apiResults";
+import { boundGroups } from "./sub2apiImports";
+
+// Editing always uses the selected member's evidence, not another source's
+// merged summary. Credentials changed since detection invalidate old checks.
+export function configuredModelChecks(member:ManagedChannel, accounts:SubAccount[], checks:ConfiguredCheck[], models:string[]): SubModelCheck[] {
+  const groups=boundGroups(member);
+  const native=checks.filter(c=>c.kind==="model" && c.source_id===member.source_id && c.provider===member.provider &&
+    (c.fingerprint||"")===(member.probe_fingerprint||""));
+  const available=(c:SubModelCheck)=>c.state==="done"&&c.result?.availability.status==="success";
+  const recent=(items:SubModelCheck[])=>items.sort((a,b)=>
+    Number(["queued","running"].includes(b.state))-Number(["queued","running"].includes(a.state)) ||
+    (b.result?.checked_at||0)-(a.result?.checked_at||0) || Number(available(a))-Number(available(b)))[0];
+  return models.map(model=>{
+    const upstream=member.model_mappings?.[model]||model;
+    const missing:SubModelCheck={model,state:"idle",message:"",result:null};
+    const candidates:SubModelCheck[]=[];
+    const site=groups.map(g=>{
+      const target=accounts.find(a=>a.id===g.account_id)?.targets.find(t=>t.group_id===g.group_id);
+      const check=target && modelChecks(target).find(c=>c.model===upstream);
+      return check?{...check,model}:missing;
+    });
+    if(site.length){
+      // A multi-key provider can reuse site evidence only when every bound
+      // group passed. A single group's success cannot clear a sibling failure.
+      const failed=site.filter(c=>!available(c));
+      candidates.push(recent(failed.length?failed:site));
+    }
+    for(const check of native.filter(c=>(member.model_mappings?.[c.model]||c.model)===upstream))
+      candidates.push({model,state:check.state,message:check.message,result:check.result as SubTarget["result"]});
+    return recent(candidates) || missing;
+  });
+}
 
 export const UNASSIGNED_ACCOUNT = "__unassigned__";
 export interface ManagedChannel extends InstalledChannel {

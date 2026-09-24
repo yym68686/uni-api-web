@@ -192,6 +192,12 @@ func (s *Service) applyChannelBatch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	documents := map[string]map[string]any{}
+	type validationScope struct {
+		account  string
+		group    int64
+		provider string
+	}
+	neededByScope := map[validationScope]map[string]string{}
 	for _, t := range in.Targets {
 		if in.Part == "positions" || in.Part == "delete" {
 			continue
@@ -202,33 +208,25 @@ func (s *Service) applyChannelBatch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		documents[t.Key+"\n"+t.Provider] = doc
-		known := map[string]bool{}
-		for _, up := range t.Current {
-			known[up] = true
+		scope := validationScope{t.Account, t.Group, t.Origin}
+		for model := range newChannelModels(t.Current, t.Models) {
+			if neededByScope[scope] == nil {
+				neededByScope[scope] = map[string]string{}
+			}
+			neededByScope[scope][model] = model
 		}
-		// Native definitions may offer more models than this key currently uses.
-		for up := range batchDocumentModels(doc) {
-			known[up] = true
+	}
+	// Validate each provider/group once, not once per caller key. This retains
+	// the batched write path's bounded I/O when a channel has many bindings.
+	for scope, models := range neededByScope {
+		if scope.account != "" {
+			err = s.validateSiteModelChanges(ctx, scope.account, scope.group, nil, models)
+		} else {
+			err = s.validateConfiguredModelChanges(ctx, src, scope.provider, owner, nil, models)
 		}
-		if t.Account == "" {
-			base, status, e := s.importProviderDocument(ctx, src, snapshot, t.Origin, in.Revision, baseDocuments)
-			if e != nil {
-				http.Error(w, e.Error(), status)
-				return
-			}
-			for up := range batchDocumentModels(base) {
-				known[up] = true
-			}
-		}
-		for _, up := range t.Models {
-			if known[up] || (in.AllowUnverified && validPublicModel(up) && validProbeModel(up)) {
-				continue
-			}
-			var success bool
-			if t.Account == "" || !validProbeModel(up) || s.control.db.QueryRowContext(ctx, `SELECT state='done' AND result->'availability'->>'status'='success' FROM console_sub_models WHERE account_id=$1 AND group_id=$2 AND model=$3`, t.Account, t.Group, up).Scan(&success) != nil || !success {
-				http.Error(w, "新增模型尚未验证，请重新选择模型", 400)
-				return
-			}
+		if err != nil {
+			http.Error(w, err.Error(), 400)
+			return
 		}
 	}
 	changed, err := buildBatchSnapshot(&snapshot, in, catalogs, documents)
@@ -253,27 +251,6 @@ func (s *Service) applyChannelBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"revision": applied["revision"], "changed": changed})
-}
-
-func batchDocumentModels(document map[string]any) map[string]bool {
-	models := map[string]bool{}
-	if document == nil {
-		return models
-	}
-	raw, _ := json.Marshal(document["model"])
-	var entries []any
-	_ = json.Unmarshal(raw, &entries)
-	for _, entry := range entries {
-		switch value := entry.(type) {
-		case string:
-			models[value] = true
-		case map[string]any:
-			for upstream := range value {
-				models[upstream] = true
-			}
-		}
-	}
-	return models
 }
 
 // Models are canonical upstream names, not names to resolve through another

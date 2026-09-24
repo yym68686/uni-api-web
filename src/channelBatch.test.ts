@@ -475,12 +475,11 @@ it("keeps self mappings in original selection during section-only batch edits", 
     ).models,
   ).toEqual({ new: "new" });
 });
-it("explicit editor choices extend unconfigured models in every existing native binding", async () => {
+it("sends canonical extra models for server-side availability validation without an override", async () => {
   const f = fixture(true);
   const plan = await prepareChannelBatch(
     {
       ...draft("all", true),
-      allowUnverifiedModels: true,
       originals: { "extra-model": "extra-model" },
       aliases: {},
       models: { "extra-model": "extra-model" },
@@ -490,7 +489,7 @@ it("explicit editor choices extend unconfigured models in every existing native 
   );
   await applyChannelBatch(plan, () => {});
   expect(f.writes).toHaveLength(2);
-  expect(f.writes.every((w) => w.body.allow_unverified_models === true)).toBe(
+  expect(f.writes.every((w) => !("allow_unverified_models" in w.body))).toBe(
     true,
   );
   expect(f.writes[0].body.targets[0].models).toEqual({

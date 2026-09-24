@@ -24,7 +24,7 @@ import { channelBindingView } from "./channelBindingView";
 import type { ChannelRoute } from "./channelRouteData";
 import { providerRoutes, useAllChannelRoutes } from "./channelRouteData";
 import { ModelAliases, aliasMappings } from "./ModelAliases";
-import { ChannelModelSelection, splitChannelModels } from "./ChannelModelSelection";
+import { ChannelModelSelection, splitChannelModels, unavailableModelChanges } from "./ChannelModelSelection";
 import type { ModelAlias } from "./ModelAliases";
 import {
   ModelPositions,
@@ -184,6 +184,11 @@ export function Sub2apiImport({
   const [aliases, setAliases] = useState<ModelAlias[]>([]);
   const mapping = aliasMappings(aliases, originals);
   const models = mapping.models;
+  const invalidModels = unavailableModelChanges(
+    {...Object.fromEntries(originals.map(m=>[m,m])),...mapping.mappings},
+    Object.fromEntries((editing?.models||[]).map(m=>[m,editing?.model_mappings?.[m]||m])),
+    model=>available.includes(model),
+  );
   const [source, setSource] = useState("");
   const [key, setKey] = useState("");
   const [position, setPosition] = useState(1);
@@ -261,12 +266,12 @@ export function Sub2apiImport({
     !!editing && !!options.data && editing.revision !== options.data.revision;
   function batchDraft(part:BatchPart):BatchDraft {
     const originalModels=Object.fromEntries(originals.map(m=>[m,m]));
-    return {part,name:`${account.name} / ${target.name}`,allowUnverifiedModels:true,scope:{kind:"site",account:account.id,group:target.group_id},originals:originalModels,aliases:mapping.mappings,models:{...originalModels,...mapping.mappings},positions:selectedModelPositions(models,activePositions,validPosition),anchor:{source:editing?.source_id||activeSource,key:editing?.api_key_id||activeKey,provider:editing?.provider||"",revision:editing?.revision||""}};
+    return {part,name:`${account.name} / ${target.name}`,scope:{kind:"site",account:account.id,group:target.group_id},originals:originalModels,aliases:mapping.mappings,models:{...originalModels,...mapping.mappings},positions:selectedModelPositions(models,activePositions,validPosition),anchor:{source:editing?.source_id||activeSource,key:editing?.api_key_id||activeKey,provider:editing?.provider||"",revision:editing?.revision||""}};
   }
   function batchButton(part:BatchPart,section?:string) {
     if(!editing)return undefined;
     return <ChannelBatchApply section={section} draft={()=>batchDraft(part)}
-      disabled={busy||stale||options.isFetching||options.isError||!options.data?.manageable||!source||!key||(part!=="models"&&!!mapping.error)||((part==="all"||part==="positions")&&!models.length)}
+      disabled={busy||invalidModels.length>0||stale||options.isFetching||options.isError||!options.data?.manageable||!source||!key||(part!=="models"&&!!mapping.error)||((part==="all"||part==="positions")&&!models.length)}
       onApplied={()=>{setEditing(null);setView("existing");setSuccess("批量操作结果已更新，请核对各来源接入状态。");}}/>;
   }
   function edit(item: InstalledChannel) {
@@ -319,7 +324,7 @@ export function Sub2apiImport({
     action: "add" | "replace" | "delete",
     item?: InstalledChannel,
   ) {
-    if (busy || (action !== "delete" && mapping.error)) return;
+    if (busy || (action !== "delete" && (mapping.error || invalidModels.length))) return;
     setBusy(true);
     setError("");
     setSuccess("");
@@ -331,7 +336,6 @@ export function Sub2apiImport({
           signal: AbortSignal.timeout(60000),
           body: JSON.stringify({
             ...(action !== "add" ? { action } : {}),
-            ...(action === "replace" ? {allow_unverified_models:true} : {}),
             account_id: account.id,
             group_id: target.group_id,
             source_id: item?.source_id || source,
@@ -800,19 +804,20 @@ export function Sub2apiImport({
                 <ChannelModelSelection
                   models={editChecks.map(c=>c.model)} selected={originals} editing={!!editing}
                   disabled={busy} actions={batchButton("models","模型勾选")}
-                  canSelect={model=>!!editing||available.includes(model)}
+                  canSelect={model=>available.includes(model)}
                   onChange={selected=>setModelChoices(Object.fromEntries(editChecks.map(c=>[c.model,selected.includes(c.model)])))}
                   status={model=>{
                     const check=editChecks.find(c=>c.model===model)!;
                     return <>
                       {toolUseFailed(target,model) && <small className="negative">Tool use · {toolUseLabels[modelToolUse(target,model)!.status]}</small>}
                       {assessPrice(check,prices).status==="abnormal" && <small className="negative">单价异常</small>}
-                      {!available.includes(model) && <small>{editing?.models.includes(model)?"已添加":importModelLabel(check)}</small>}
+                      {!available.includes(model) && <small>{importModelLabel(check)}</small>}
                     </>;
                   }}
                 />
                 <ModelAliases
                   actions={batchButton("aliases","模型重命名")}
+                  canSelect={model=>available.includes(model)}
                   models={[
                     ...new Set([
                       ...(editing?editChecks.map(c=>c.model):available),
@@ -823,6 +828,7 @@ export function Sub2apiImport({
                   onChange={setAliases}
                   disabled={busy}
                 />
+                {!!invalidModels.length && <p role="alert" className="negative">新增模型须检测可用：{invalidModels.join("、")}</p>}
                 {mapping.error && (
                   <p role="alert" className="negative">
                     {mapping.error}
@@ -917,7 +923,7 @@ export function Sub2apiImport({
                       busy ||
                       !source ||
                       !key ||
-                      !!mapping.error ||
+                      !!mapping.error || invalidModels.length>0 ||
                       !models.length ||
                       !options.data?.supported ||
                       options.isFetching ||

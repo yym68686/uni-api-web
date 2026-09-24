@@ -316,28 +316,25 @@ func (s *Service) subManageChannel(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "请选择模型和有效位置", 400)
 			return
 		}
-		seen := map[string]bool{}
-		for _, m := range importUpstreamModels(in.Models, in.ModelMappings) {
-			if !validPublicModel(m) || !validProbeModel(m) || seen[m] {
-				http.Error(w, "模型无效或重复", 400)
-				return
-			}
-			seen[m] = true
-			old := false
-			for _, v := range existing {
-				if v == m {
-					old = true
+		var actual []batchCatalogRow
+		catalog, _, readErr := fetchSource(r.Context(), src, "/v1/model-channels", url.Values{"api_key_id": {key}, "endpoint": {"all"}, "stream": {"all"}})
+		if readErr != nil || decodeMap(catalog["data"], &actual) != nil {
+			http.Error(w, "当前路由读取失败", 503)
+			return
+		}
+		current := map[string]string{}
+		for _, row := range actual {
+			if row.Provider == provider {
+				up := row.Upstream
+				if up == "" {
+					up = row.Model
 				}
+				current[row.Model] = up
 			}
-			if old || in.AllowUnverifiedModels {
-				continue
-			}
-			var success bool
-			e = s.control.db.QueryRowContext(r.Context(), `SELECT state='done' AND result->'availability'->>'status'='success' FROM console_sub_models WHERE account_id=$1 AND group_id=$2 AND model=$3`, in.AccountID, in.GroupID, m).Scan(&success)
-			if e != nil || !success {
-				http.Error(w, "新增模型必须检测可用", 400)
-				return
-			}
+		}
+		if e = s.validateSiteModelChanges(r.Context(), in.AccountID, in.GroupID, current, publicChannelModels(in.Models, in.ModelMappings)); e != nil {
+			http.Error(w, e.Error(), 400)
+			return
 		}
 	}
 	mutation := map[string]any{"action": in.Action, "revision": in.Revision, "api_key_id": key, "provider": provider}

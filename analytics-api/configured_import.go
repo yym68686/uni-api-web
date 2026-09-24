@@ -288,9 +288,9 @@ func (s *Service) configuredImport(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, model := range importUpstreamModels(in.Models, in.ModelMappings) {
 		if _, ok := available[model]; !ok {
-			// Explicit editor selection may extend this key-owned copy without
-			// changing the shared provider or pretending the model was probed.
-			if in.EditProvider != "" && in.AllowUnverifiedModels && validPublicModel(model) && validProbeModel(model) {
+			// A successful probe may cover a model absent from the initial
+			// configuration. Validate its evidence below before extending the copy.
+			if validPublicModel(model) && validProbeModel(model) {
 				available[model] = model
 				continue
 			}
@@ -306,6 +306,29 @@ func (s *Service) configuredImport(w http.ResponseWriter, r *http.Request) {
 	}
 	for alias, m := range in.ModelMappings {
 		resolved[alias] = available[m]
+	}
+	current := map[string]string{}
+	if in.EditProvider != "" {
+		keyCatalog, _, e := fetchSource(ctx, src, "/v1/model-channels", url.Values{"api_key_id": {key}, "endpoint": {"all"}, "stream": {"all"}})
+		var existing []batchCatalogRow
+		if e != nil || decodeMap(keyCatalog["data"], &existing) != nil {
+			http.Error(w, "当前路由读取失败", 503)
+			return
+		}
+		for _, row := range existing {
+			if row.Provider == in.EditProvider {
+				up := row.Upstream
+				if up == "" {
+					up = row.Model
+				}
+				current[row.Model] = up
+			}
+		}
+	}
+	owner, _ := s.controlUser(r)
+	if err = s.validateConfiguredModelChanges(ctx, src, in.Provider, owner, current, resolved); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
 	}
 	document["provider"] = provider
 	document["model"] = importModelDefinition(nil, resolved)

@@ -17,7 +17,6 @@ export const batchPartLabels = {
   delete: "删除所有已保存接入",
 };
 export interface BatchDraft {
-  allowUnverifiedModels?: boolean;
   scope: BatchScope;
   name: string;
   // Canonical upstream names: never reinterpret an alias through another source.
@@ -392,15 +391,8 @@ export function buildChannelBatch(
         member.models.find(
           (m) => (member.model_mappings?.[m] || m) === upstream,
         );
-      // The edit API also accepts real upstream names from this key's existing copy.
-      if (
-        !input &&
-        !Object.values(actual).includes(upstream) &&
-        !draft.allowUnverifiedModels
-      )
-        throw new Error(
-          `${t.sourceName} 的 ${t.name} 未配置上游模型 ${upstream}，请调整模型后重试。`,
-        );
+      // The server validates actual per-source probe evidence, including
+      // successfully tested models absent from the original definition.
       mappings[name] = input || upstream;
     }
     targets.push({ ...t, revision: options.revision, mappings, ...settings });
@@ -584,7 +576,6 @@ export async function applyChannelBatch(
             body: JSON.stringify({
               revision: targets[0].revision,
               part: plan.draft.part,
-              allow_unverified_models: !!plan.draft.allowUnverifiedModels,
               targets: plan.targets
                 .filter(
                   (t) =>

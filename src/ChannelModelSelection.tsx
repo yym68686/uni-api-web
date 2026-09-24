@@ -1,5 +1,21 @@
 import type { ReactNode } from "react";
 import type { ModelAlias } from "./ModelAliases";
+import type { SubModelCheck } from "./sub2apiResults";
+
+export const modelIsAvailable = (check?: SubModelCheck) =>
+  check?.state === "done" && check.result?.availability.status === "success";
+
+// Existing routes may be retained verbatim even after a failed retest. Only
+// new public/upstream pairs require a successful availability check.
+export function unavailableModelChanges(
+  desired: Record<string, string>,
+  saved: Record<string, string>,
+  available: (model: string) => boolean,
+) {
+  return Object.entries(desired)
+    .filter(([name, upstream]) => saved[name] !== upstream && !available(upstream))
+    .map(([name]) => name);
+}
 
 // A self mapping is an ordinary selected model, even if it was serialized in
 // model_mappings by a previous batch edit. Genuine aliases remain independent.
@@ -59,7 +75,7 @@ export function ChannelModelSelection({
       </legend>
       {editing && (
         <p className="sub-import-note">
-          已接入的原模型默认勾选；可手动添加其他模型。未检测或检测失败的模型不代表上游可用，保存不会自动发起检测。
+          已接入的原模型默认勾选，可取消；新增勾选或重命名仅限检测可用的模型。检测失败、未检测或检测中的模型需检测通过后再添加。
         </p>
       )}
       <div className="sub-model-options">
@@ -68,7 +84,8 @@ export function ChannelModelSelection({
             <input
               type="checkbox"
               checked={selected.includes(model)}
-              disabled={canSelect ? !canSelect(model) : false}
+              aria-label={model}
+              disabled={!selected.includes(model) && !!canSelect && !canSelect(model)}
               onChange={(e) =>
                 onChange(
                   e.target.checked

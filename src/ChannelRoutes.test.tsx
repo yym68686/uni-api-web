@@ -6,6 +6,37 @@ import { ConfiguredChannelDialog } from "./ChannelRoutes";
 import type { ManagedChannel } from "./channelManagement";
 
 afterEach(() => vi.unstubAllGlobals());
+const passedModels=(source_id:string,provider:string,models:string[])=>models.map(model=>({source_id,provider,kind:"model",model,fingerprint:"",state:"done",message:"",history:{},result:{model,checked_at:1,availability:{status:"success"}}}));
+
+it("disables all 21 failed native models while preserving saved routes and allowing verified additions",async()=>{
+ const models=Array.from({length:26},(_,i)=>`fixture-model-${i}`);
+ const item={kind:"configured",source_id:"do",source_name:"DigitalOcean",provider:"xchai",name:"xchai",models,probe_fingerprint:"current"} as ManagedChannel;
+ const checks=passedModels("do","xchai",models).map((c,i)=>({...c,fingerprint:"current",result:{...c.result,availability:{status:i<5?"success":"error"}}}));
+ const rows=models.slice(0,4).map(model=>({provider:"xchai",model,upstream_model:model,api_key_id:"k1",key_position:1,key_prefix:"masked",position:1}));
+ const writes:any[]=[];
+ vi.stubGlobal("fetch",vi.fn(async(input:string,init?:RequestInit)=>{
+  if(init?.method==="POST"){writes.push(JSON.parse(String(init.body)));return Response.json({message:"已更新"});}
+  if(input.includes("channel-options"))return Response.json({revision:"r1",keys:[{key_id:"k1",position:1,prefix:"masked"}],channels:rows});
+  return Response.json({data:input.endsWith("/channel-management/checks")?checks:input.endsWith("/channel-routes")?rows:[],unavailable_keys:[],unavailable_sources:[]});
+ }));
+ render(<QueryClientProvider client={new QueryClient()}><ConfiguredChannelDialog item={item} initialEdit={rows} close={()=>{}}/></QueryClientProvider>);
+ await waitFor(()=>expect(screen.getByRole("checkbox",{name:models[4]})).toBeEnabled());
+ for(const model of models.slice(0,4))expect(screen.getByRole("checkbox",{name:model})).toBeChecked();
+ for(const model of models.slice(5)){
+  const box=screen.getByRole("checkbox",{name:model});
+  expect(box).toBeDisabled();expect(box).not.toBeChecked();
+  expect(box.closest("label")).toHaveTextContent("检测失败");
+ }
+ const user=userEvent.setup();
+ await user.click(screen.getByRole("checkbox",{name:models[4]}));
+ await user.click(screen.getByRole("button",{name:"添加重命名"}));
+ expect(within(screen.getByLabelText("重命名 1 上游模型")).getByRole("option",{name:models[5]})).toBeDisabled();
+ await user.click(screen.getByRole("button",{name:"删除重命名 1"}));
+ await user.click(screen.getByRole("button",{name:"保存更改"}));
+ await waitFor(()=>expect(writes).toHaveLength(1));
+ expect(writes[0].models).toEqual(models.slice(0,5));
+ expect(writes[0]).not.toHaveProperty("allow_unverified_models");
+});
 
 it("edits one native caller key with independent model positions and refuses stale writes", async () => {
   const writes: any[] = [];
@@ -211,6 +242,7 @@ it.each([false, true])(
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: string, init?: RequestInit) => {
+      if(input.endsWith("/channel-management/checks"))return Response.json({data:passedModels("primary","fugue-codex",["codex-auto-review","gpt-5.6-luna"])});
         if (init?.method === "POST") {
           writes.push(JSON.parse(String(init.body)));
           return Response.json({ message: "已添加" });
@@ -335,6 +367,7 @@ it("edits and adds through the selected source in a merged channel dialog", asyn
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string, init?: RequestInit) => {
+      if(input.endsWith("/channel-management/checks"))return Response.json({data:[...passedModels("fugue","native",["only-fugue"]),...passedModels("do","native",["only-do"])]});
       if (init?.method === "PATCH" || init?.method === "POST") {
         writes.push({ path: input, body: JSON.parse(String(init.body)) });
         return Response.json({ message: "已保存" });
@@ -400,7 +433,6 @@ it("edits and adds through the selected source in a merged channel dialog", asyn
       source_id: "do",
       provider: "native",
       edit_provider: "native",
-      allow_unverified_models: true,
       api_key_id: "same-key",
       revision: "do-revision",
       models: ["only-do"],
@@ -466,6 +498,7 @@ it("loads model selection for each selected caller key and saves uniform plus pe
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string, init?: RequestInit) => {
+      if(input.endsWith("/channel-management/checks"))return Response.json({data:passedModels("s","native",["astra","sol"])});
       if (init?.method === "POST") {
         writes.push(JSON.parse(String(init.body)));
         return Response.json({ message: "已保存" });
@@ -555,6 +588,7 @@ it("opens unbound channels directly in the destination form and resets the key w
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string, init?: RequestInit) => {
+      if(input.endsWith("/channel-management/checks"))return Response.json({data:[...passedModels("fugue","native",["model-fugue"]),...passedModels("do","native",["model-do"])]});
       if (init?.method === "POST") {
         writes.push(JSON.parse(String(init.body)));
         return Response.json({ message: "已添加" });
@@ -634,7 +668,7 @@ it("opens unbound channels directly in the destination form and resets the key w
 });
 
 it("native import defaults are source/model specific and can be overridden manually", async()=>{
- const checks=[{source_id:'a',provider:'native',kind:'tool-use',model:'gpt-6-sol',state:'done',fingerprint:'',result:{status:'unsupported',model:'gpt-6-sol',checked_at:1,attempts:[]}},{source_id:'b',provider:'native',kind:'tool-use',model:'gpt-6-sol',state:'done',fingerprint:'',result:{status:'supported',model:'gpt-6-sol',checked_at:1,attempts:[]}}];
+ const checks=[...passedModels('a','native',['gpt-6-sol','gpt-5.5']),...passedModels('b','native',['gpt-6-sol','gpt-5.5']),{source_id:'a',provider:'native',kind:'tool-use',model:'gpt-6-sol',state:'done',fingerprint:'',result:{status:'unsupported',model:'gpt-6-sol',checked_at:1,attempts:[]}},{source_id:'b',provider:'native',kind:'tool-use',model:'gpt-6-sol',state:'done',fingerprint:'',result:{status:'supported',model:'gpt-6-sol',checked_at:1,attempts:[]}}];
  const base={provider:'native',name:'native',models:['gpt-6-sol','gpt-5.5'],account_ids:[],engine:'gpt',account_id:'',group_id:0,api_key_id:'',key_position:0,key_prefix:'',positions:{},revision:'r1',manageable:true};
  const members=[{...base,source_id:'a',source_name:'Fugue'},{...base,source_id:'b',source_name:'DigitalOcean'}];
  vi.stubGlobal('fetch',vi.fn(async(input:string)=>{
@@ -653,7 +687,7 @@ it("native import defaults are source/model specific and can be overridden manua
  expect(screen.getByRole('checkbox',{name:/^gpt-6-sol/})).not.toBeChecked();
 });
 
-it("recovers checkbox models from an empty site binding and can add an unconfigured model while keeping saved aliases", async()=>{
+it("recovers saved models and aliases but blocks untested additions", async()=>{
  const item={source_id:'do',source_name:'DigitalOcean',provider:'ccttt990085',name:'ccttt990085',models:[]} as unknown as ManagedChannel;
  const rows=[{provider:item.provider,model:'gpt-5.4',upstream_model:'gpt-5.5',api_key_id:'k1',key_position:1,key_prefix:'masked',position:1},{provider:item.provider,model:'gpt-5.5',upstream_model:'gpt-5.5',api_key_id:'k1',key_position:1,key_prefix:'masked',position:1},{provider:item.provider,model:'custom-existing',upstream_model:'custom-existing',api_key_id:'k1',key_position:1,key_prefix:'masked',position:1}];
  const writes:any[]=[];
@@ -669,13 +703,13 @@ it("recovers checkbox models from an empty site binding and can add an unconfigu
  await waitFor(()=>expect(existing).toBeEnabled());expect(existing).toBeChecked();
  expect(screen.getByRole('checkbox',{name:'custom-existing'})).toBeChecked();
  expect(screen.getByRole('checkbox',{name:'gpt-6-sol'})).not.toBeChecked();
- expect(screen.getByRole('checkbox',{name:'gpt-6-sol'})).toBeEnabled();
+ expect(screen.getByRole('checkbox',{name:'gpt-6-sol'})).toBeDisabled();
  expect(screen.getAllByLabelText(/对外模型名$/)).toHaveLength(1);
  expect(screen.getByLabelText('重命名 1 对外模型名')).toHaveValue('gpt-5.4');
  await user.click(screen.getByRole('checkbox',{name:'gpt-6-sol'}));
  await user.click(screen.getByRole('button',{name:'保存更改'}));
  await waitFor(()=>expect(writes).toHaveLength(1));
- expect(writes[0]).toMatchObject({models:['gpt-5.5','custom-existing','gpt-6-sol'],model_mappings:{'gpt-5.4':'gpt-5.5'},allow_unverified_models:true});
+ expect(writes[0]).toMatchObject({models:['gpt-5.5','custom-existing'],model_mappings:{'gpt-5.4':'gpt-5.5'}});
 });
 
 it("hydrates binding-only model choices from the channel inventory",async()=>{
@@ -691,6 +725,6 @@ it("hydrates binding-only model choices from the channel inventory",async()=>{
  await waitFor(()=>expect(checkbox).toBeChecked());
  expect(screen.getByRole('checkbox',{name:'gpt-5.5'})).toBeChecked();
  expect(screen.getByRole('checkbox',{name:'custom-choice'})).not.toBeChecked();
- expect(screen.getByRole('checkbox',{name:'custom-choice'})).toBeEnabled();
+ expect(screen.getByRole('checkbox',{name:'custom-choice'})).toBeDisabled();
  expect(screen.queryByLabelText('重命名 1 对外模型名')).not.toBeInTheDocument();
 });
