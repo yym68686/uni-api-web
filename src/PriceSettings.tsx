@@ -1,6 +1,15 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { ExternalLink, Save, SlidersHorizontal } from "lucide-react";
+import * as Dialog from "@radix-ui/react-dialog";
+import {
+  Check,
+  ExternalLink,
+  Info,
+  Save,
+  Search,
+  SlidersHorizontal,
+  X,
+} from "lucide-react";
 import { analyticsRequest } from "./api";
 import type { Connection, ModelPrice } from "./types";
 import { Spinner } from "./ui";
@@ -18,6 +27,57 @@ const fields = [
   ["cache_write", "缓存写入 · 5 分钟"],
   ["cache_write_1h", "缓存写入 · 1 小时"],
 ] as const;
+
+function PriceDetails({ model }: { model: string }) {
+  const reference = MODEL_PRICE_CATALOG.find((entry) => entry.model === model)!;
+  return (
+    <Dialog.Root>
+      <Dialog.Trigger asChild>
+        <button
+          className="icon-button price-info"
+          aria-label={`查看 ${model} 价格说明`}
+          title="价格说明与来源"
+        >
+          <Info size={14} />
+        </button>
+      </Dialog.Trigger>
+      <Dialog.Portal>
+        <Dialog.Overlay className="dialog-overlay" />
+        <Dialog.Content className="guide-dialog price-details">
+          <Dialog.Title>{model}</Dialog.Title>
+          <Dialog.Description>价格说明 · 美元 / 百万 token</Dialog.Description>
+          <p className="price-details-note">{reference.note}</p>
+          <p>
+            {reference.cache_write_kind === "input"
+              ? "缓存写入按输入价格计算。修改输入价格后，两个缓存写入价格会同步更新。"
+              : reference.cache_write_kind === "flat"
+                ? "缓存写入使用统一价格，不按缓存时长分档。"
+                : "缓存写入分别使用 5 分钟与 1 小时价格。"}
+            关闭写入计费后不计该项费用，价格设置仍保留。
+          </p>
+          {reference.verified && (
+            <a
+              className="price-reference-link"
+              href={reference.source}
+              target="_blank"
+              rel="noreferrer"
+            >
+              查看官方价格来源 <ExternalLink size={14} />
+            </a>
+          )}
+          <Dialog.Close asChild>
+            <button
+              className="icon-button detail-close"
+              aria-label="关闭价格说明"
+            >
+              <X size={18} />
+            </button>
+          </Dialog.Close>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
 
 function PriceRow({
   price,
@@ -90,62 +150,65 @@ function PriceRow({
     }
   }
   return (
-    <article className="price-editor">
-      <header role="generic">
-        <strong>{price.model}</strong>
-        <span className="price-source muted">
-          {price.source === "manual"
-            ? "自定义价格"
-            : reference.verified
-              ? "官方参考价"
-              : "未定价"}
-          {reference.verified && (
-            <a href={reference.source} target="_blank" rel="noreferrer">
-              官方来源 <ExternalLink size={12} />
-            </a>
-          )}
-        </span>
-      </header>
-      <p className="field-note price-basis">{reference.note}</p>
-      <label className="price-verified price-cache-toggle">
-        <input
-          type="checkbox"
-          aria-label={`${price.model} 计算缓存写入费用`}
-          checked={chargesCacheWrite(draft)}
-          disabled={pending}
-          onChange={(event) =>
-            change({ charge_cache_write: event.target.checked })
-          }
-        />
-        计算缓存写入费用
-      </label>
-      <div className="price-inputs">
-        {visibleFields.map(([field, label]) => (
-          <label key={field}>
-            {field === "cache_write" && reference.cache_write_kind === "flat"
-              ? "缓存写入"
-              : label}
-            <input
-              aria-label={`${price.model} ${label}价格`}
-              type="number"
-              min="0"
-              max="1000000000"
-              step="any"
-              required
-              value={
-                unpriced || !Number.isFinite(draft[field]) ? "" : draft[field]
-              }
-              placeholder={unpriced ? "未公布" : ""}
-              disabled={pending}
-              onChange={(event) =>
-                change({ [field]: event.target.valueAsNumber })
-              }
-            />
-          </label>
+    <Fragment>
+      <tr
+        className="price-table-row"
+        data-dirty={(dirty && !saved) || undefined}
+        aria-busy={pending || undefined}
+      >
+        <th scope="row" className="price-model-cell">
+          <div className="price-model-name">
+            <strong title={price.model}>{price.model}</strong>
+            <PriceDetails model={price.model} />
+          </div>
+          <div className="price-model-meta">
+            <span>
+              {price.source === "manual" || saved
+                ? "自定义价格"
+                : reference.verified
+                  ? "官方参考价"
+                  : "未定价"}
+            </span>
+            {dirty && !saved && <span className="price-unsaved">未保存</span>}
+          </div>
+        </th>
+        {fields.map(([field, label]) => (
+          <td key={field} className="price-number-cell">
+            {visibleFields.some(([visible]) => visible === field) ? (
+              <input
+                className="price-number-input"
+                aria-label={`${price.model} ${label}价格`}
+                type="number"
+                min="0"
+                max="1000000000"
+                step="any"
+                required
+                value={
+                  unpriced || !Number.isFinite(draft[field]) ? "" : draft[field]
+                }
+                placeholder={unpriced ? "未公布" : ""}
+                disabled={pending}
+                onChange={(event) =>
+                  change({ [field]: event.target.valueAsNumber })
+                }
+              />
+            ) : (
+              <span
+                className="price-derived"
+                title={
+                  reference.cache_write_kind === "input"
+                    ? "随输入价格自动更新"
+                    : "与默认缓存写入价格一致"
+                }
+              >
+                {reference.cache_write_kind === "input" ? "同输入" : "同默认"}
+              </span>
+            )}
+          </td>
         ))}
-        <label>
-          售卖价格（原价 %）
+        <td className="price-number-cell">
           <input
+            className="price-number-input"
             aria-label={`${price.model} 售卖价格百分比`}
             type="number"
             min="0"
@@ -160,42 +223,69 @@ function PriceRow({
               change({ sale_percent: event.target.valueAsNumber })
             }
           />
-        </label>
-      </div>
-      <footer>
-        <label className="price-verified">
-          <input
-            type="checkbox"
-            checked={!!draft.verified}
-            disabled={pending}
-            onChange={(event) => change({ verified: event.target.checked })}
-          />
-          确认价格并用于估算
-        </label>
-        <button
-          className="button small"
-          disabled={
-            pending ||
-            unpriced ||
-            !Number.isFinite(salePercent(draft)) ||
-            salePercent(draft) < 0 ||
-            salePercent(draft) > 1000000 ||
-            visibleFields.some(
-              ([field]) => !Number.isFinite(draft[field]) || draft[field] < 0,
-            )
-          }
-          onClick={() => void save()}
-        >
-          {pending ? <Spinner small /> : <Save size={14} />}{" "}
-          {saved ? "已保存" : "保存价格"}
-        </button>
-      </footer>
+        </td>
+        <td className="price-toggle-cell">
+          <label className="price-table-toggle">
+            <input
+              type="checkbox"
+              aria-label={`${price.model} 计算缓存写入费用`}
+              checked={chargesCacheWrite(draft)}
+              disabled={pending}
+              onChange={(event) =>
+                change({ charge_cache_write: event.target.checked })
+              }
+            />
+            <span aria-hidden="true" />
+          </label>
+        </td>
+        <td className="price-toggle-cell">
+          <label className="price-table-toggle">
+            <input
+              type="checkbox"
+              aria-label={`${price.model} 确认价格并用于估算`}
+              checked={!!draft.verified}
+              disabled={pending}
+              onChange={(event) => change({ verified: event.target.checked })}
+            />
+            <span aria-hidden="true" />
+          </label>
+        </td>
+        <td className="price-save-cell">
+          <button
+            className="button small"
+            disabled={
+              pending ||
+              unpriced ||
+              !Number.isFinite(salePercent(draft)) ||
+              salePercent(draft) < 0 ||
+              salePercent(draft) > 1000000 ||
+              visibleFields.some(
+                ([field]) => !Number.isFinite(draft[field]) || draft[field] < 0,
+              )
+            }
+            onClick={() => void save()}
+          >
+            {pending ? (
+              <Spinner small />
+            ) : saved ? (
+              <Check size={14} />
+            ) : (
+              <Save size={14} />
+            )}{" "}
+            {pending ? "保存中" : saved ? "已保存" : "保存价格"}
+          </button>
+        </td>
+      </tr>
       {error && (
-        <p role="alert" className="negative">
-          {error}
-        </p>
+        <tr className="price-error-row">
+          <td colSpan={10}>
+            <p role="alert">
+              {price.model}：{error}
+            </p>
+          </td>
+        </tr>
       )}
-    </article>
+    </Fragment>
   );
 }
 
@@ -221,53 +311,123 @@ export function PriceSettings({
   );
   return (
     <section className="data-panel prices-panel">
-      <div className="data-heading">
+      <div className="data-heading price-heading">
         <div className="data-title">
           <SlidersHorizontal size={19} />
           <h2>模型价格</h2>
           <span className="count-badge">{all.length}</span>
         </div>
-        {loading && <Spinner small />}
+        <div className="data-actions price-toolbar">
+          {loading && <Spinner small />}
+          <label className="price-search-field">
+            <Search size={15} aria-hidden="true" />
+            <input
+              className="price-search"
+              aria-label="搜索模型价格"
+              placeholder="搜索模型价格…"
+              value={filter}
+              onChange={(event) => setFilter(event.target.value)}
+            />
+          </label>
+          {refreshAction}
+        </div>
       </div>
-      <p className="field-note">
-        美元 / 百万 token · 官方参考价来源与适用条件见各模型说明。模型列表与检测设置一致；带后缀的模型自动沿用基础模型价格，例如
-        gemini-3.1-pro-search → gemini-3.1-pro。
-      </p>
-      <p className="field-note">
-        GPT
-        默认不计缓存写入费用，其他模型默认计费；可逐项修改并保存。开启时，未单列的缓存写入按普通输入计价。不含搜索、缓存存储等额外费用，实际扣费以站点账单为准。
-      </p>
-      <p className="field-note">
-        售卖价格填写原价的百分比，例如填 2.5 表示按原价的 2.5% 售卖。GPT 默认
-        2.5%，Claude / Gemini 默认 15%，其他模型默认 2.5%。利润 = 估算消费 ×
-        售卖百分比 ÷ 100 × 6.9 − 渠道实际消费。
-      </p>
-      <div className="data-actions price-toolbar">
-        <input
-          className="price-search"
-          aria-label="搜索模型价格"
-          placeholder="搜索模型价格…"
-          value={filter}
-          onChange={(event) => setFilter(event.target.value)}
-        />
-        {refreshAction}
+      <div className="price-table-intro">
+        <p>
+          美元 / 百万 token
+          <span>每行独立保存 · 模型旁 ⓘ 查看来源与适用条件</span>
+        </p>
+        <details className="price-help">
+          <summary>计费说明</summary>
+          <div>
+            <p>
+              模型列表与检测设置一致；带后缀的模型自动沿用基础模型价格，例如
+              gemini-3.1-pro-search → gemini-3.1-pro。
+            </p>
+            <p>
+              GPT
+              默认不计缓存写入费用，其他模型默认计费，可逐项修改。“同输入”随输入价格自动更新，“同默认”使用默认缓存写入价格。关闭写入计费后保留原有价格。价格确认后才参与估算，未公布价格不表示免费。
+            </p>
+            <p>
+              售卖比例为原价的百分比，填 2.5 表示按原价的 2.5% 售卖。GPT
+              及其他模型默认 2.5%，Claude / Gemini 默认 15%。利润 = 估算消费 ×
+              售卖百分比 ÷ 100 × 6.9 − 渠道实际消费。
+            </p>
+            <p>不含搜索、缓存存储等额外费用，实际扣费以站点账单为准。</p>
+          </div>
+        </details>
       </div>
       {error && (
-        <p role="alert" className="negative">
+        <p role="alert" className="price-load-error negative">
           {error}
         </p>
       )}
-      <div className="price-list">
-        {visible.map((price) => (
-          <PriceRow
-            key={price.model}
-            price={price}
-            connection={connection}
-            onSaved={onSaved}
-          />
-        ))}
+      <div
+        className="price-table-scroll"
+        role="region"
+        aria-label="模型价格表，可横向滚动"
+        tabIndex={0}
+      >
+        <table className="price-table" aria-label="模型价格">
+          <colgroup>
+            <col className="price-model-col" />
+            {fields.map(([field]) => (
+              <col className="price-number-col" key={field} />
+            ))}
+            <col className="price-number-col" />
+            <col className="price-toggle-col" />
+            <col className="price-toggle-col" />
+            <col className="price-save-col" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th scope="col" className="price-model-cell">
+                模型
+              </th>
+              <th scope="col">输入</th>
+              <th scope="col">输出</th>
+              <th scope="col">缓存读取</th>
+              <th scope="col">
+                缓存写入<small>默认 / 5 分钟</small>
+              </th>
+              <th scope="col">
+                缓存写入<small>1 小时</small>
+              </th>
+              <th scope="col">
+                售卖比例<small>原价 %</small>
+              </th>
+              <th scope="col">写入计费</th>
+              <th scope="col">参与估算</th>
+              <th scope="col">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visible.map((price) => (
+              <PriceRow
+                key={price.model}
+                price={price}
+                connection={connection}
+                onSaved={onSaved}
+              />
+            ))}
+            {!visible.length && (
+              <tr>
+                <td colSpan={10} className="price-empty">
+                  没有匹配的检测模型。
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
-      {!visible.length && <p className="muted">没有匹配的检测模型。</p>}
+      <div className="price-table-footer">
+        <span>
+          {filter
+            ? `显示 ${visible.length} / ${all.length} 个模型`
+            : `共 ${all.length} 个模型`}
+        </span>
+        <span>窄屏可横向滚动，模型列固定</span>
+      </div>
     </section>
   );
 }
