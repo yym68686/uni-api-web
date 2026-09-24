@@ -27,7 +27,7 @@ type subSpend struct {
 	Refreshing bool     `json:"refreshing"`
 }
 
-// The dedicated business key is authoritative. Never use the quota-limited
+// The dedicated business key is authoritative. Never use the dedicated
 // probe key, a wallet balance delta, or the caller's uni-api key for this total.
 func (s *Service) subChannelSpend(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()

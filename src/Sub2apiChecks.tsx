@@ -334,7 +334,7 @@ function AccountForm({
                 : "添加 sub2api 账号"}
           </Dialog.Title>
           <Dialog.Description>
-            连接后自动同步可用分组并检测，每个新测试 key 的累计额度为 $1。
+            连接后自动同步可用分组并检测，专用测试 key 不设置额度上限，检测费用由站点账号承担。
           </Dialog.Description>
           <button
             type="button"

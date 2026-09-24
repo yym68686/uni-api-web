@@ -202,7 +202,7 @@ func (s *Service) subImportChannel(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// A separate business key avoids exhausting the $1 test key in live traffic.
+	// A separate business key keeps production traffic and detection usage isolated.
 	call, groups, err := s.subPanel(ctx, in.AccountID, base, job, auth)
 	if err != nil {
 		http.Error(w, err.Error(), 400)

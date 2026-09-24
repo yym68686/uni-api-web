@@ -175,6 +175,8 @@ type subRemoteKey struct {
 	GroupID   int64      `json:"group_id"`
 	Status    string     `json:"status"`
 	ExpiresAt *time.Time `json:"expires_at"`
+	Quota     *float64   `json:"quota,omitempty"`
+	QuotaUsed *float64   `json:"quota_used,omitempty"`
 }
 
 type subProbe struct {

@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/url"
 	"sort"
@@ -813,25 +812,30 @@ func (s *Service) subSynchronize(ctx context.Context, id, base, job, encrypted s
 	if err = tx.Commit(); err != nil {
 		return errors.New("分组保存失败")
 	}
-	failed := 0
+	failures := map[string]int{}
 	for _, g := range groups {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		name := subKeyName(id, g.ID)
 		key, found := keys[name]
-		var e error
-		if !found {
-			e = call("POST", "/api/v1/keys", map[string]any{"name": name, "group_id": g.ID, "quota": 1}, &key, "subcheck-"+id+"-"+strconv.FormatInt(g.ID, 10))
+		var storedID int64
+		var storedEncrypted, storedKey string
+		if found && key.Quota != nil && *key.Quota == 1 {
+			if err := s.control.db.QueryRowContext(ctx, `SELECT remote_key_id,encrypted_key FROM console_sub_targets WHERE account_id=$1 AND group_id=$2`, id, g.ID).Scan(&storedID, &storedEncrypted); err != nil {
+				return errors.New("测试 key 读取失败")
+			}
+			if storedEncrypted != "" {
+				var err error
+				storedKey, err = s.control.decrypt(storedEncrypted)
+				if err != nil {
+					return errors.New("测试 key 无法解密")
+				}
+			}
 		}
-		if e == nil && (key.GroupID != g.ID || key.Key == "" || key.ID <= 0) {
-			e = errors.New("站点返回的 key 与分组不匹配")
-		}
-		if e == nil && (key.Status != "active" || (key.ExpiresAt != nil && key.ExpiresAt.Before(time.Now()))) {
-			e = errors.New("专用测试 key 已停用或过期，请在上游恢复后同步")
-		}
+		key, e := subPrepareTestKey(call, id, g.ID, key, found, storedID, storedKey)
 		if e != nil {
-			failed++
+			failures[subTestKeyFailureKind(e)]++
 			_, _ = s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET state='error',message=$3 WHERE account_id=$1 AND group_id=$2 AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$4)`, id, g.ID, e.Error(), job)
 			continue
 		}
@@ -856,10 +860,7 @@ func (s *Service) subSynchronize(ctx context.Context, id, base, job, encrypted s
 			return errors.New("测试 key 保存失败")
 		}
 	}
-	message := ""
-	if failed > 0 {
-		message = fmt.Sprintf("%d 个分组创建 key 失败，详情见表格", failed)
-	}
+	message := subTestKeyFailureSummary(failures)
 	_, err = s.control.db.ExecContext(ctx, `UPDATE console_sub_accounts SET synced_at=$3,message=$4 WHERE id=$1 AND job_id=$2`, id, job, time.Now().Unix(), message)
 	if err != nil {
 		return errors.New("同步结果保存失败")

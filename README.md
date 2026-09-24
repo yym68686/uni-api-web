@@ -268,7 +268,7 @@ Tool use 检测复用 Codex 的 `additional_tools` / namespace / custom `exec` �
 
 账户登录后，侧边栏「sub2api检测」支持添加多个 HTTPS 站点账号。邮箱、密码用于登录，不保存密码；访问令牌、刷新令牌与测试 key 使用现有控制面主密钥加密，按控制台用户隔离。支持 TOTP 二次验证。要求 Turnstile 等人机验证的站点会显示「使用浏览器登录」；一次性安装 [浏览器登录助手](browser-helper/README.md) 后，在控制台填写网址、邮箱和密码，助手在正常浏览器打开原站、填写表单并接回会话，服务端复核邮箱后继续同步。添加和重新登录在模态框内完成，按用户默认授权自动勾选原站登录协议，强制人工验证和 2FA 在原站完成，无需复制 token。密码不保存到扩展存储，验证机制不被修改。登录助手安装时授予 HTTPS 站点访问权限，点击浏览器登录直接进入目标站点。
 
-添加后自动读取有权限的全部分组，为每组创建并复用 `uni-console-check-*` 专用 key（累计额度为站点记账单位 $1），不修改业务 key。重复同步通过专用名称、分组校验与 Idempotency-Key 避免重复创建。可用渠道接口关闭时继续按分组运行。移除账号只删除控制台凭据与结果，上游测试 key 保留，由用户在上游撤销。
+添加后自动读取有权限的全部分组，为每组创建并复用 `uni-console-check-*` 专用 key，创建时不设置额度上限，检测费用由站点账号承担，不修改业务 key。同步时，对名称、分组、已保存 ID 和密钥均匹配的旧版 $1 测试 key，读取上游最新状态后将 `quota` 更新为 `0`（不限额）并回读核验，不清零累计用量；停用、过期或自定义额度的 key 保留原设置。额度耗尽、停用、过期、额度更新失败与创建失败分别提示。重复同步通过专用名称、分组校验与 Idempotency-Key 避免重复创建。可用渠道接口关闭时继续按分组运行。移除账号只删除控制台凭据与结果，上游测试 key 保留，由用户在上游撤销。
 
 支持 22 个检测模型：`gpt-6-astra`、`gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna`、`gpt-5.5`、`codex-auto-review`、`glm-5.3`、`glm-5.3-flash`、`kimi-k3`、`deepseek-4.1-flash`、`deepseek-4-pro`、`grok-4.6`、`gemini-3.1-pro`、`gemini-3.8-flash`、`claude-fable-5`、`claude-fable-5-1`、`claude-opus-5`、`claude-sonnet-5`、`claude-opus-4-8`、`claude-opus-4-6`、`claude-sonnet-4-6`、`claude-haiku-4-5-20251001`。
 

@@ -275,13 +275,13 @@ func TestSubAccountLifecycleIsolationAndIdempotency(t *testing.T) {
 				return
 			}
 			var in struct {
-				Name  string  `json:"name"`
-				Group int64   `json:"group_id"`
-				Quota float64 `json:"quota"`
+				Name  string   `json:"name"`
+				Group int64    `json:"group_id"`
+				Quota *float64 `json:"quota"`
 			}
 			json.NewDecoder(r.Body).Decode(&in)
-			if in.Quota != 1 || r.Header.Get("Idempotency-Key") == "" {
-				t.Error("missing budget/idempotency")
+			if in.Quota != nil || r.Header.Get("Idempotency-Key") == "" {
+				t.Error("test keys must omit quota and retain idempotency")
 			}
 			if _, exists := keys[in.Name]; exists {
 				t.Error("duplicate creation")
