@@ -199,6 +199,10 @@ func TestSubAccountLifecycleIsolationAndIdempotency(t *testing.T) {
 	groupCount.Store(3)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		success := func(v any) { writeJSON(w, 200, map[string]any{"code": 0, "data": v}) }
+		if r.URL.Path == "/api/status" {
+			http.NotFound(w, r)
+			return
+		}
 		if r.URL.Path == "/api/v1/auth/login" {
 			var in map[string]string
 			json.NewDecoder(r.Body).Decode(&in)

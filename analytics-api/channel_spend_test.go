@@ -437,3 +437,26 @@ func TestAttributedSpendCoverageMustIncludeAttemptBeforeReportingAbsent(t *testi
 		})
 	}
 }
+
+func TestAttributedSpendSelectsReceiptNamespaceFromBoundSite(t *testing.T) {
+	s, account, owner := attributionFixture(t)
+	ctx := context.Background()
+	now := time.Now().Truncate(time.Second)
+	if _, e := s.control.db.Exec(`UPDATE console_sub_accounts SET provider_kind='newapi' WHERE id=$1`, account); e != nil {
+		t.Fatal(e)
+	}
+	fact := attributedFact("newapi-attempt", "caller", now.Add(-time.Minute))
+	fact.BillingRequestIDs = []string{"client:upstream-other", "newapi:direct"}
+	if e := s.engine.Import(ctx, "newapi-receipt", "v1", []Fact{fact}); e != nil {
+		t.Fatal(e)
+	}
+	for i, item := range []struct{ id, cost string }{{"client:upstream-other", "99"}, {"newapi:direct", "0.25"}} {
+		if _, e := s.control.db.Exec(`INSERT INTO console_sub_spend_logs(account_id,key_id,log_id,at_ms,actual_cost,request_id,model) VALUES($1,42,$2,$3,$4::numeric,$5,$6)`, account, i+1, now.UnixMilli(), item.cost, item.id, checkModel); e != nil {
+			t.Fatal(e)
+		}
+	}
+	rows, e := s.attributedChannelSpend(ctx, owner, QueryFilter{SourceID: "source", KeyID: "caller", Model: checkModel}, now.Add(-time.Hour).Unix(), now.Unix())
+	if e != nil || len(rows) != 1 || rows[0].Amount == nil || *rows[0].Amount != 0.25 || rows[0].Matched != 1 {
+		t.Fatal("mixed receipt namespaces", rows, e)
+	}
+}

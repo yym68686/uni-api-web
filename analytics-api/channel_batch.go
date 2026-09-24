@@ -225,7 +225,7 @@ func (s *Service) applyChannelBatch(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			var success bool
-			if t.Account == "" || !subModelAllowed(up) || s.control.db.QueryRowContext(ctx, `SELECT state='done' AND result->'availability'->>'status'='success' FROM console_sub_models WHERE account_id=$1 AND group_id=$2 AND model=$3`, t.Account, t.Group, up).Scan(&success) != nil || !success {
+			if t.Account == "" || !validProbeModel(up) || s.control.db.QueryRowContext(ctx, `SELECT state='done' AND result->'availability'->>'status'='success' FROM console_sub_models WHERE account_id=$1 AND group_id=$2 AND model=$3`, t.Account, t.Group, up).Scan(&success) != nil || !success {
 				http.Error(w, "新增模型尚未验证，请重新选择模型", 400)
 				return
 			}

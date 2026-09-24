@@ -135,7 +135,7 @@ func (s *Service) subImportChannel(w http.ResponseWriter, r *http.Request) {
 	}
 	seen := map[string]bool{}
 	for _, model := range importUpstreamModels(in.Models, in.ModelMappings) {
-		if !subModelAllowed(model) || seen[model] {
+		if !validProbeModel(model) || seen[model] {
 			http.Error(w, "模型无效或重复", 400)
 			return
 		}

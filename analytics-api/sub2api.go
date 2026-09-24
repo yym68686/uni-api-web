@@ -22,6 +22,18 @@ CREATE TABLE IF NOT EXISTS console_sub_accounts(
  synced_at BIGINT NOT NULL DEFAULT 0, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
  UNIQUE(owner,base,email));
 ALTER TABLE console_sub_accounts ADD COLUMN IF NOT EXISTS balance JSONB;
+ALTER TABLE console_sub_accounts ADD COLUMN IF NOT EXISTS provider_kind TEXT NOT NULL DEFAULT 'sub2api';
+ALTER TABLE console_sub_accounts ADD COLUMN IF NOT EXISTS login_name TEXT NOT NULL DEFAULT '';
+CREATE TABLE IF NOT EXISTS console_site_groups(
+ id BIGSERIAL PRIMARY KEY, account_id TEXT NOT NULL REFERENCES console_sub_accounts(id) ON DELETE CASCADE,
+ remote_key TEXT NOT NULL, UNIQUE(account_id,remote_key));
+CREATE TABLE IF NOT EXISTS console_site_key_creates(
+ account_id TEXT NOT NULL REFERENCES console_sub_accounts(id) ON DELETE CASCADE,name TEXT NOT NULL,
+ created_at TIMESTAMPTZ NOT NULL DEFAULT now(),PRIMARY KEY(account_id,name));
+CREATE TABLE IF NOT EXISTS console_site_receipt_ids(
+ id BIGSERIAL PRIMARY KEY,account_id TEXT NOT NULL REFERENCES console_sub_accounts(id) ON DELETE CASCADE,
+ request_id TEXT NOT NULL,event_type INT NOT NULL,key_id BIGINT NOT NULL,
+ UNIQUE(account_id,request_id,event_type,key_id));
 ALTER TABLE console_sub_accounts ADD COLUMN IF NOT EXISTS usage_lease_token TEXT NOT NULL DEFAULT '';
 ALTER TABLE console_sub_accounts ADD COLUMN IF NOT EXISTS usage_lease_until TIMESTAMPTZ;
 CREATE TABLE IF NOT EXISTS console_sub_usage(
@@ -124,16 +136,18 @@ type subTarget struct {
 	Billing         *subBilling          `json:"billing"`
 }
 type subAccount struct {
-	ID       string             `json:"id"`
-	Name     string             `json:"name"`
-	Base     string             `json:"base"`
-	Email    string             `json:"email"`
-	State    string             `json:"state"`
-	JobKind  string             `json:"job_kind"`
-	Message  string             `json:"message"`
-	SyncedAt int64              `json:"synced_at"`
-	Targets  []subTarget        `json:"targets"`
-	Balance  *subAccountBalance `json:"balance"`
+	ProviderKind string             `json:"provider_kind"`
+	LoginName    string             `json:"login_name"`
+	ID           string             `json:"id"`
+	Name         string             `json:"name"`
+	Base         string             `json:"base"`
+	Email        string             `json:"email"`
+	State        string             `json:"state"`
+	JobKind      string             `json:"job_kind"`
+	Message      string             `json:"message"`
+	SyncedAt     int64              `json:"synced_at"`
+	Targets      []subTarget        `json:"targets"`
+	Balance      *subAccountBalance `json:"balance"`
 }
 type subChallenge struct {
 	Owner, Base, Email, Name, Temp string
@@ -147,7 +161,7 @@ func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "共享检测记录暂不可用", 503)
 		return
 	}
-	rows, err := s.control.db.QueryContext(r.Context(), `SELECT id,name,base,email,state,message,synced_at,balance,job_kind FROM console_sub_accounts WHERE owner=$1 ORDER BY created_at,id`, owner)
+	rows, err := s.control.db.QueryContext(r.Context(), `SELECT id,name,base,email,state,message,synced_at,balance,job_kind,provider_kind,login_name FROM console_sub_accounts WHERE owner=$1 ORDER BY created_at,id`, owner)
 	if err != nil {
 		http.Error(w, "账号列表暂不可用", 503)
 		return
@@ -157,7 +171,7 @@ func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var a subAccount
 		var balanceRaw []byte
-		if err = rows.Scan(&a.ID, &a.Name, &a.Base, &a.Email, &a.State, &a.Message, &a.SyncedAt, &balanceRaw, &a.JobKind); err != nil {
+		if err = rows.Scan(&a.ID, &a.Name, &a.Base, &a.Email, &a.State, &a.Message, &a.SyncedAt, &balanceRaw, &a.JobKind, &a.ProviderKind, &a.LoginName); err != nil {
 			break
 		}
 		if len(balanceRaw) > 0 {
@@ -237,6 +251,7 @@ func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 	owner, _ := s.controlUser(r)
 	var in struct {
+		Username  string `json:"username"`
 		Name      string `json:"name"`
 		Base      string `json:"base"`
 		Email     string `json:"email"`
@@ -249,6 +264,9 @@ func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 	if !decodeControl(w, r, &in) {
 		return
 	}
+	if in.Username != "" {
+		in.Email = in.Username
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 	var auth subAuth
@@ -258,6 +276,10 @@ func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 		var challenge subChallenge
 		if e != nil || json.Unmarshal([]byte(plain), &challenge) != nil || challenge.Owner != owner || challenge.Until < time.Now().Unix() {
 			http.Error(w, "验证会话已失效，请重新登录", 400)
+			return
+		}
+		if strings.HasPrefix(challenge.Temp, "newapi:") {
+			s.newAPIAddAccount(w, r, challenge.Base, challenge.Email, challenge.Name, "", strings.TrimPrefix(challenge.Temp, "newapi:"), in.Code)
 			return
 		}
 		in.Base, in.Email, in.Name = challenge.Base, challenge.Email, challenge.Name
@@ -281,6 +303,17 @@ func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 		if in.Name == "" {
 			u, _ := url.Parse(in.Base)
 			in.Name = u.Hostname()
+		}
+		if in.Access == "" {
+			kind, e := detectSite(ctx, in.Base)
+			if e != nil {
+				http.Error(w, e.Error(), 400)
+				return
+			}
+			if kind == "newapi" {
+				s.newAPIAddAccount(w, r, in.Base, in.Email, in.Name, in.Password, "", "")
+				return
+			}
 		}
 		if in.Access != "" {
 			auth = subAuth{Access: strings.TrimSpace(in.Access), Refresh: strings.TrimSpace(in.Refresh)}
@@ -675,6 +708,13 @@ func (s *Service) subRunJob(parent context.Context, claimed subJob) {
 }
 
 func (s *Service) subPanel(ctx context.Context, id, base, job, encrypted string) (func(string, string, any, any, string) error, []subRemoteGroup, error) {
+	var kind string
+	if err := s.control.db.QueryRowContext(ctx, `SELECT provider_kind FROM console_sub_accounts WHERE id=$1 AND job_id=$2`, id, job).Scan(&kind); err != nil {
+		return nil, nil, context.Canceled
+	}
+	if kind == "newapi" {
+		return s.newAPIPanel(ctx, id, base)
+	}
 	authCtx, authCancel := context.WithTimeout(ctx, 15*time.Second)
 	defer authCancel()
 	unlock, lockErr := s.subLockAuth(authCtx, id)
@@ -737,6 +777,29 @@ func (s *Service) subSynchronize(ctx context.Context, id, base, job, encrypted s
 	}
 	if len(groups) > 500 {
 		return errors.New("分组数量超过单账号 500 个的检测上限")
+	}
+	newAPI := s.isNewAPI(ctx, id)
+	groupModels := map[int64][]string{}
+	if newAPI {
+		for _, g := range groups {
+			var remote string
+			if err = s.control.db.QueryRowContext(ctx, `SELECT remote_key FROM console_site_groups WHERE account_id=$1 AND id=$2`, id, g.ID).Scan(&remote); err != nil {
+				return err
+			}
+			var models []string
+			if err = s.newAPICall(ctx, id, base, "GET", "/api/user/models?group="+url.QueryEscape(remote), nil, &models); err != nil {
+				return err
+			}
+			if len(models) > 1000 {
+				return errors.New("站点模型列表过大")
+			}
+			for _, model := range models {
+				if !validProbeModel(model) {
+					return errors.New("站点模型名称无效")
+				}
+			}
+			groupModels[g.ID] = models
+		}
 	}
 	var userRates map[string]float64
 	ratesKnown := call("GET", "/api/v1/groups/rates", nil, &userRates, "") == nil
@@ -803,7 +866,12 @@ func (s *Service) subSynchronize(ctx context.Context, id, base, job, encrypted s
 		}
 	}
 	for _, g := range groups {
-		for _, model := range subModels {
+		seenModels := map[string]bool{}
+		for _, model := range append(append([]string{}, subModels...), groupModels[g.ID]...) {
+			if seenModels[model] {
+				continue
+			}
+			seenModels[model] = true
 			if _, err = tx.ExecContext(ctx, `INSERT INTO console_sub_models(account_id,group_id,model,state) VALUES($1,$2,$3,'queued') ON CONFLICT(account_id,group_id,model) DO UPDATE SET state='queued',message=''`, id, g.ID, model); err != nil {
 				return errors.New("模型保存失败")
 			}
@@ -849,7 +917,10 @@ func (s *Service) subSynchronize(ctx context.Context, id, base, job, encrypted s
 				fallback = subBilling{Rate: &rate, Source: "panel", CheckedAt: time.Now().Unix()}
 			}
 		}
-		billing := subKeyBilling(ctx, subHTTP, base, key.Key, fallback)
+		billing := fallback
+		if !newAPI {
+			billing = subKeyBilling(ctx, subHTTP, base, key.Key, fallback)
+		}
 		billingRaw, _ := json.Marshal(billing)
 		enc, e := s.control.encrypt(key.Key)
 		if e != nil {

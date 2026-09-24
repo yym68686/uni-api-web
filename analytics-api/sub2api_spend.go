@@ -208,6 +208,9 @@ func (s *Service) subClaimSpend(ctx context.Context) (task subSpendTask, err err
 }
 
 func (s *Service) subUsageGET(ctx context.Context, account, base, path string, out any) error {
+	if s.isNewAPI(ctx, account) {
+		return s.newAPIAdapterCall(ctx, account, base, "GET", path, nil, out)
+	}
 	token, err := s.subUsageAuth(ctx, account, base, "")
 	if err != nil {
 		return err
@@ -337,6 +340,10 @@ func (s *Service) subSpendPageGET(parent context.Context, task subSpendTask, que
 		return err
 	} else if count != 1 {
 		return context.Canceled
+	}
+	if s.isNewAPI(ctx, task.account) {
+		query.Set("start_timestamp", strconv.FormatInt(task.from/1000, 10))
+		query.Set("end_timestamp", strconv.FormatInt((task.to-1)/1000, 10))
 	}
 	return s.subUsageGET(ctx, task.account, task.base, "/api/v1/usage?"+query.Encode(), page)
 }

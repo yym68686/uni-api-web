@@ -65,8 +65,8 @@ func (s *attributedSpend) unresolved(b billingFact, reason string) {
 }
 
 type receiptScope struct {
-	Account, Site string
-	Key, Group    int64
+	Account, Site, Kind string
+	Key, Group          int64
 }
 type billingFact struct {
 	Event, Source, Instance, Request, Attempt, Provider, Model, Upstream, Key, Base, Hash string
@@ -80,6 +80,15 @@ type billingFact struct {
 
 func billingRowID(source, provider, model, upstream string) string {
 	return mustJSON([]string{source, provider, model, upstream})
+}
+func siteReceiptIDs(ids []string, kind string) []string {
+	out := []string{}
+	for _, id := range ids {
+		if (kind == "newapi") == strings.HasPrefix(id, "newapi:") {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 func receiptIdentity(account string, key int64, id string) string {
 	return account + ":" + strconv.FormatInt(key, 10) + ":" + id
@@ -290,7 +299,7 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 			window[1] = max(window[1], min(time.Now().UnixMilli(), max(to*1000, b.At+60000)))
 		}
 		windows[key] = window
-		for _, id := range b.IDs {
+		for _, id := range siteReceiptIDs(b.IDs, scope.Kind) {
 			ids[id] = true
 		}
 	}
@@ -424,7 +433,7 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 		}
 		found := map[int64]bill{}
 		ambiguous := false
-		for _, id := range b.IDs {
+		for _, id := range siteReceiptIDs(b.IDs, scope.Kind) {
 			if ownership[receiptOwnerKey(b.Base, b.Hash, id)] > 1 {
 				ambiguous = true
 			}
@@ -520,18 +529,18 @@ func (s *Service) receiptBindings(ctx context.Context, owner string) (map[string
 		}
 		out[k] = append(out[k], scope)
 	}
-	rows, err := s.control.db.QueryContext(ctx, `SELECT a.id,a.base,i.key_hash,i.remote_key_id,i.group_id FROM console_sub_key_index i JOIN console_sub_accounts a ON a.id=i.account_id WHERE a.owner=$1`, owner)
+	rows, err := s.control.db.QueryContext(ctx, `SELECT a.id,a.base,i.key_hash,i.remote_key_id,i.group_id,a.provider_kind FROM console_sub_key_index i JOIN console_sub_accounts a ON a.id=i.account_id WHERE a.owner=$1`, owner)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
-		var account, base, hash string
+		var account, base, hash, kind string
 		var key, group int64
-		if err = rows.Scan(&account, &base, &hash, &key, &group); err != nil {
+		if err = rows.Scan(&account, &base, &hash, &key, &group, &kind); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		add(base, hash, receiptScope{Account: account, Key: key, Group: group})
+		add(base, hash, receiptScope{Account: account, Key: key, Group: group, Kind: kind})
 	}
 	err = rows.Err()
 	rows.Close()
@@ -540,22 +549,22 @@ func (s *Service) receiptBindings(ctx context.Context, owner string) (map[string
 	}
 	// Imported business keys are available immediately, without waiting for the
 	// account-wide key index to refresh. Decrypted values never leave this method.
-	rows, err = s.control.db.QueryContext(ctx, `SELECT a.id,a.base,t.routing_key_id,t.group_id,t.encrypted_routing_key FROM console_sub_accounts a JOIN console_sub_targets t ON t.account_id=a.id WHERE a.owner=$1 AND t.routing_key_id>0 AND t.encrypted_routing_key<>''`, owner)
+	rows, err = s.control.db.QueryContext(ctx, `SELECT a.id,a.base,t.routing_key_id,t.group_id,t.encrypted_routing_key,a.provider_kind FROM console_sub_accounts a JOIN console_sub_targets t ON t.account_id=a.id WHERE a.owner=$1 AND t.routing_key_id>0 AND t.encrypted_routing_key<>''`, owner)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var account, base, encrypted string
+		var account, base, encrypted, kind string
 		var key, group int64
-		if err = rows.Scan(&account, &base, &key, &group, &encrypted); err != nil {
+		if err = rows.Scan(&account, &base, &key, &group, &encrypted, &kind); err != nil {
 			return nil, err
 		}
 		secret, e := s.control.decrypt(encrypted)
 		if e != nil {
 			continue
 		}
-		add(base, tokenHash(secret), receiptScope{Account: account, Key: key, Group: group})
+		add(base, tokenHash(secret), receiptScope{Account: account, Key: key, Group: group, Kind: kind})
 	}
 	return out, rows.Err()
 }

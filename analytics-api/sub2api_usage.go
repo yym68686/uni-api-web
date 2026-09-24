@@ -138,6 +138,9 @@ func subUsageReceipt(log subUsageLog) *subUsage {
 	}
 	if log.BillingMode != "" && log.BillingMode != "token" {
 		out.Message = "此请求不是按 token 计费，无法比较输入／输出单价"
+		if log.BillingMode == "newapi_unconfirmed" {
+			out.Message = "实际扣费已核对，计费规则或用量不足以可靠分解单价"
+		}
 		return out
 	}
 	if log.ImageInputTokens == 0 {
@@ -392,7 +395,6 @@ func (s *Service) subReadUsage(parent context.Context, account, base, lease stri
 	if err != nil || readErr != nil || len(tasks) == 0 {
 		return
 	}
-	token, err := s.subUsageAuth(ctx, account, base, "")
 	var logs []subUsageLog
 	start, end := tasks[0].started, tasks[0].started
 	for _, t := range tasks {
@@ -406,14 +408,7 @@ func (s *Service) subReadUsage(parent context.Context, account, base, lease stri
 			Pages int           `json:"pages"`
 		}
 		path := "/api/v1/usage?" + q.Encode()
-		err = subJSON(ctx, subHTTP, base, "GET", path, token, nil, &listing, "")
-		var remote *subRemoteError
-		if errors.As(err, &remote) && remote.Status == 401 {
-			token, err = s.subUsageAuth(ctx, account, base, token)
-			if err == nil {
-				err = subJSON(ctx, subHTTP, base, "GET", path, token, nil, &listing, "")
-			}
-		}
+		err = s.subUsageGET(ctx, account, base, path, &listing)
 		if err != nil {
 			break
 		}

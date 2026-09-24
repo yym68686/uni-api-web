@@ -603,7 +603,7 @@ it("creates an account without storing its password and supports the 2FA step", 
   mount();
   await user.click(screen.getByRole("button", { name: "添加账号" }));
   await user.type(screen.getByLabelText("站点地址"), "https://example.com");
-  await user.type(screen.getByLabelText("账号邮箱"), "me@example.com");
+  await user.type(screen.getByLabelText("用户名 / 邮箱"), "me@example.com");
   await user.type(screen.getByLabelText("账号密码"), "private-password");
   await user.click(screen.getByRole("button", { name: "连接并检测" }));
   await user.type(await screen.findByLabelText("六位验证码"), "123456");
@@ -1735,7 +1735,7 @@ it("offers the browser helper for Turnstile and saves only its returned session"
     mount();
     await user.click(await screen.findByRole("button", { name: "添加账号" }));
     await user.type(screen.getByLabelText("站点地址"), "https://site.example");
-    await user.type(screen.getByLabelText("账号邮箱"), "me@example.com");
+    await user.type(screen.getByLabelText("用户名 / 邮箱"), "me@example.com");
     await user.type(screen.getByLabelText("账号密码"), "private-password");
     await user.click(screen.getByRole("button", { name: "连接并检测" }));
     const browserButton = await screen.findByRole("button", {
@@ -1774,7 +1774,7 @@ it("opens account forms in a modal and restores focus when closed", async () => 
   mount();
   const opener = screen.getByRole("button", { name: "添加账号" });
   await user.click(opener);
-  const dialog = screen.getByRole("dialog", { name: "添加 sub2api 账号" });
+  const dialog = screen.getByRole("dialog", { name: "添加站点账号" });
   expect(within(dialog).getByLabelText("站点地址")).toBeVisible();
   expect(document.querySelector(".sub-accounts .sub-account-form")).toBeNull();
   await user.keyboard("{Escape}");
@@ -2082,4 +2082,23 @@ it("shows model-scoped Tool use and leaves failed models unchecked when importin
  await waitFor(()=>expect(writes).toHaveLength(1));
  expect(writes[0].models).toEqual(expect.arrayContaining(['gpt-5.5','gpt-6-sol','gpt-6-luna']));
  expect(writes[0].models).not.toContain('gpt-6-astra');
+});
+
+it("accepts a username without requiring a site type or email-shaped login", async()=>{
+ const writes:any[]=[];
+ vi.stubGlobal('fetch',vi.fn(async(_input:string,init?:RequestInit)=>{
+  if(init?.method==='POST'){writes.push(JSON.parse(String(init.body)));return Response.json({queued:true});}
+  return Response.json({data:[]});
+ }));
+ const user=userEvent.setup();mount();
+ await user.click(await screen.findByRole('button',{name:'添加账号'}));
+ const dialog=screen.getByRole('dialog',{name:'添加站点账号'});
+ expect(within(dialog).queryByRole('combobox')).not.toBeInTheDocument();
+ await user.type(within(dialog).getByLabelText('站点地址'),'https://newapi.example');
+ await user.type(within(dialog).getByLabelText('用户名 / 邮箱'),'fixture-user');
+ await user.type(within(dialog).getByLabelText('账号密码'),'private-password');
+ await user.click(within(dialog).getByRole('button',{name:'连接并检测'}));
+ await waitFor(()=>expect(writes).toHaveLength(1));
+ expect(writes[0].email).toBe('fixture-user');
+ expect(writes[0]).not.toHaveProperty('provider_kind');
 });

@@ -76,6 +76,11 @@ func subProbeCompaction(ctx context.Context, client *http.Client, base, key, mod
 	}
 	defer resp.Body.Close()
 	out.HTTPStatus = resp.StatusCode
+	if values := resp.Header.Values("X-Oneapi-Request-Id"); len(values) == 1 {
+		if id := subSafeRequestID(values[0], key); id != "" {
+			out.addRequestIDs("newapi:" + id)
+		}
+	}
 	for _, h := range []string{"X-Client-Request-ID", "X-Request-ID", "Request-ID"} {
 		if id := subSafeRequestID(resp.Header.Get(h), key); id != "" {
 			out.addRequestIDs(id, "client:"+id, "local:"+id)

@@ -68,6 +68,29 @@ func (s *Service) subAccountBalance(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, cached)
 		return
 	}
+	if s.isNewAPI(ctx, id) {
+		var profile struct {
+			Email   string   `json:"email"`
+			Balance *float64 `json:"balance"`
+		}
+		if err := s.newAPIAdapterCall(ctx, id, base, "GET", "/api/v1/auth/me", nil, &profile); err != nil || !strings.EqualFold(profile.Email, email) {
+			cached.Status = "error"
+			writeJSON(w, 200, cached)
+			return
+		}
+		fresh := subAccountBalance{Amount: profile.Balance, CheckedAt: time.Now().Unix(), Status: "ok"}
+		if fresh.Amount == nil {
+			fresh.Status = "missing"
+		}
+		encoded, _ := json.Marshal(fresh)
+		if _, err := s.control.db.ExecContext(ctx, `UPDATE console_sub_accounts SET balance=$2 WHERE id=$1 AND owner=$3`, id, string(encoded), owner); err != nil {
+			cached.Status = "error"
+			writeJSON(w, 200, cached)
+			return
+		}
+		writeJSON(w, 200, fresh)
+		return
+	}
 	unlock, err := s.subLockAuth(ctx, id)
 	if err != nil {
 		cached.Status = "error"

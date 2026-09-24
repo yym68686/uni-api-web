@@ -153,12 +153,18 @@ func subJSON(ctx context.Context, client *http.Client, base, method, path, token
 }
 
 type subAuth struct {
-	Access      string `json:"access_token"`
-	Refresh     string `json:"refresh_token"`
-	ExpiresIn   int    `json:"expires_in"`
-	ExpiresAt   int64  `json:"expires_at"`
-	Requires2FA bool   `json:"requires_2fa"`
-	Temp        string `json:"temp_token"`
+	Kind         string            `json:"kind,omitempty"`
+	UserID       int64             `json:"user_id,omitempty"`
+	Username     string            `json:"username,omitempty"`
+	Cookies      map[string]string `json:"cookies,omitempty"`
+	SessionID    string            `json:"session_id,omitempty"`
+	QuotaPerUnit float64           `json:"quota_per_unit,omitempty"`
+	Access       string            `json:"access_token"`
+	Refresh      string            `json:"refresh_token"`
+	ExpiresIn    int               `json:"expires_in"`
+	ExpiresAt    int64             `json:"expires_at"`
+	Requires2FA  bool              `json:"requires_2fa"`
+	Temp         string            `json:"temp_token"`
 }
 type subRemoteGroup struct {
 	ID       int64   `json:"id"`
@@ -234,6 +240,11 @@ func subProbeStream(ctx context.Context, client *http.Client, base, key, prompt 
 	}
 	defer resp.Body.Close()
 	out.HTTPStatus = resp.StatusCode
+	if values := resp.Header.Values("X-Oneapi-Request-Id"); len(values) == 1 {
+		if id := subSafeRequestID(values[0], key); id != "" {
+			out.addRequestIDs("newapi:" + id)
+		}
+	}
 	for _, header := range []string{"X-Client-Request-ID", "X-Request-ID", "Request-ID"} {
 		if value := subSafeRequestID(resp.Header.Get(header), key); value != "" {
 			out.addRequestIDs(value, "client:"+value, "local:"+value)

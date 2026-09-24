@@ -125,6 +125,8 @@ export interface SubAccount {
   name: string;
   base: string;
   email: string;
+  login_name?: string;
+  provider_kind?: string;
   state: string;
   job_kind?: string;
   message: string;
@@ -204,7 +206,7 @@ function AccountForm({
 }) {
   const [name, setName] = useState(initial?.name || "");
   const [base, setBase] = useState(initial?.base || "");
-  const [email, setEmail] = useState(initial?.email || "");
+  const [email, setEmail] = useState(initial?.login_name || initial?.email || "");
   const [password, setPassword] = useState("");
   const [browserNeeded, setBrowserNeeded] = useState(false);
   const [helperReady, setHelperReady] = useState(false);
@@ -331,10 +333,10 @@ function AccountForm({
               ? "完成双因素验证"
               : initial
                 ? "重新登录站点账号"
-                : "添加 sub2api 账号"}
+                : "添加站点账号"}
           </Dialog.Title>
           <Dialog.Description>
-            连接后自动同步可用分组并检测，专用测试 key 不设置额度上限，检测费用由站点账号承担。
+            自动识别站点类型，连接后同步可用分组并检测，专用测试 key 不设置额度上限，检测费用由站点账号承担。
           </Dialog.Description>
           <button
             type="button"
@@ -392,9 +394,9 @@ function AccountForm({
                     />
                   </label>
                   <label>
-                    账号邮箱
+                    用户名 / 邮箱
                     <input
-                      type="email"
+                      type="text"
                       autoComplete="username"
                       value={email}
                       onChange={(event) => setEmail(event.target.value)}
@@ -916,7 +918,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
       if (y == null) return -1;
       return sort === "asc" ? x - y : y - x;
     });
-  const extraModels = [...new Set(rows.filter(r => !r.account.id && r.configured).flatMap(r => r.checks.map(c => c.model)).filter(m => !SUB_MODELS.includes(m)))].sort();
+  const extraModels = [...new Set(rows.flatMap(r => r.checks.map(c => c.model)).filter(m => !SUB_MODELS.includes(m)))].sort();
   const availableModels = [...SUB_MODELS, ...extraModels];
   const modelSelectionKey = JSON.stringify(availableModels);
   const detectionModels = useMemo(() => loadSubModels(user, JSON.parse(modelSelectionKey)), [user, modelSelectionKey, modelSelectionRevision]);
@@ -1116,7 +1118,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
             正在读取账号
           </div>
         ) : accounts.length === 0 ? (
-          <Empty title="添加第一个 sub2api 账号" icon={<Globe2 size={25} />}>
+          <Empty title="添加第一个站点账号" icon={<Globe2 size={25} />}>
             填入站点地址与账号密码，自动发现可用分组并检测模型。
           </Empty>
         ) : (
@@ -1140,7 +1142,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                       <strong title={a.name}>{a.name}</strong>
                       <SiteLink base={a.base}><span title={a.base}>{new URL(a.base).host}</span></SiteLink>
                     </div>
-                    <div className="sub-account-email" title={a.email}>{a.email}</div>
+                    <div className="sub-account-email" title={a.login_name || a.email}>{a.login_name || a.email}</div>
                     <AccountBalance account={a} />
                     <div className="sub-account-status">
                       <span

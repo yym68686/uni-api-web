@@ -54,6 +54,11 @@ func subProbeNative(ctx context.Context, client *http.Client, base, key, model s
 	}
 	defer resp.Body.Close()
 	out.HTTPStatus = resp.StatusCode
+	if values := resp.Header.Values("X-Oneapi-Request-Id"); len(values) == 1 {
+		if id := subSafeRequestID(values[0], key); id != "" {
+			out.addRequestIDs("newapi:" + id)
+		}
+	}
 	for _, header := range []string{"X-Client-Request-ID", "X-Request-ID", "Request-ID"} {
 		if value := subSafeRequestID(resp.Header.Get(header), key); value != "" {
 			out.addRequestIDs(value, "client:"+value, "local:"+value)
