@@ -30,7 +30,6 @@ import type { ManagedChannel } from "./channelManagement";
 import { ConfiguredChannelDialog } from "./ChannelRoutes";
 import { managedRouteCount, useAllChannelRoutes } from "./channelRouteData";
 import { useConsoleSources } from "./consoleSources";
-import { useChannelImportKeys } from "./channelImportKeys";
 import { CompactionStatus, compactionStatus, compactionLabels } from "./SubCompaction";
 import type { CompactionResult } from "./SubCompaction";
 import { ToolUseStatus, toolUseLabels, toolUseDescription } from "./SubToolUse";
@@ -800,7 +799,6 @@ function CheckDetails({
 export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   const client = useQueryClient();
   const sources = useConsoleSources(user);
-  useChannelImportKeys((sources.data?.data || []).map(source => source.id));
   const query = useSubAccounts();
   const prices = useSubPrices(user);
   const accounts = query.data?.data || [];
@@ -838,7 +836,9 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   const imports = useSubImports();
   const management = useChannelManagement();
   const configuredChecks = useConfiguredChecks();
-  const routeSources = [...new Set([...(sources.data?.data || []).map(s=>s.id), ...(management.data?.data || []).map(c=>c.source_id)])];
+  const routeSources = query.data && management.data
+    ? [...new Set([...(sources.data?.data || []).map(s=>s.id), ...management.data.data.map(c=>c.source_id)])]
+    : [];
   const routeQueries = useAllChannelRoutes(routeSources);
   function configuredCount(item: ManagedChannel) {
     return managedRouteCount(item, routeSources, routeQueries);
@@ -1052,7 +1052,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
           <div className="data-title">
             <Globe2 size={19} />
             <h2>站点账号</h2>
-            <span className="count-badge">{accounts.length}</span>
+            <span className="count-badge">{query.isPending ? "…" : accounts.length}</span>
           </div>
           <div className="sub-account-actions">
             <button
@@ -1255,9 +1255,9 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
             <div className="data-title">
               <ScanLine size={19} />
               <h2>渠道管理</h2>
-              <span className="count-badge">{rows.length}</span>
+              <span className="count-badge">{query.isPending || management.isPending ? "…" : rows.length}</span>
             </div>
-            <span className="sub-detection-scope">{eligible.length} 个渠道可检测</span>
+            <span className="sub-detection-scope">{query.isPending || management.isPending ? "正在读取渠道" : `${eligible.length} 个渠道可检测`}</span>
           </div>
           <div className="sub-detection-controls" role="region" aria-label="渠道管理操作" tabIndex={0}>
             <CreateChannel sources={sources.data?.data || []} />
@@ -1512,8 +1512,10 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
             <ChevronDown size={13} />
           </label>
         </div>
-        {rows.length === 0 ? (
-          <Empty title={management.isPending ? "正在读取渠道" : "没有匹配的渠道"}>
+        {query.isPending || management.isPending ? (
+          <div className="sub-loading" role="status"><Spinner />正在读取渠道</div>
+        ) : rows.length === 0 ? (
+          <Empty title="没有匹配的渠道">
             添加渠道、同步站点账号或调整筛选后查看。
           </Empty>
         ) : (

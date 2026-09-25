@@ -25,7 +25,13 @@ CREATE TABLE IF NOT EXISTS console_sub_key_scans(
 CREATE TABLE IF NOT EXISTS console_sub_key_index(
  account_id TEXT NOT NULL REFERENCES console_sub_accounts(id) ON DELETE CASCADE,
  key_hash TEXT NOT NULL, remote_key_id BIGINT NOT NULL, group_id BIGINT NOT NULL,
- key_created_at TIMESTAMPTZ, PRIMARY KEY(account_id,key_hash));`
+ key_created_at TIMESTAMPTZ, PRIMARY KEY(account_id,key_hash));
+CREATE TABLE IF NOT EXISTS console_channel_management_snapshots(
+ source_id TEXT PRIMARY KEY REFERENCES console_sources(id) ON DELETE CASCADE,
+ catalog JSONB NOT NULL, checked_at BIGINT NOT NULL);
+CREATE TABLE IF NOT EXISTS console_channel_import_key_snapshots(
+ source_id TEXT PRIMARY KEY REFERENCES console_sources(id) ON DELETE CASCADE,
+ identity TEXT NOT NULL, directory JSONB NOT NULL, checked_at BIGINT NOT NULL);`
 
 // Retain a deployment path (multi-tenant origins may share a hostname) while
 // removing known inference suffixes. Never send a credential to a guessed host.
@@ -128,21 +134,51 @@ func (s *Service) refreshConfiguredBindings(ctx context.Context) {
 		return
 	}
 	// Configuration reads only. Existing gateway credentials and routes never change.
+	var sourceWG sync.WaitGroup
+	sourceSlots := make(chan struct{}, 4)
 	for _, v := range sources {
-		scanCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-		src, e := s.control.source(scanCtx, v.ID)
-		if e == nil {
-			var providers []configuredProvider
-			providers, e = configuredProviders(scanCtx, src)
+		select {
+		case sourceSlots <- struct{}{}:
+		case <-ctx.Done():
+			sourceWG.Wait()
+			return
+		}
+		sourceWG.Add(1)
+		go func(id string) {
+			defer sourceWG.Done()
+			defer func() { <-sourceSlots }()
+			scanCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+			defer cancel()
+			src, e := s.control.source(scanCtx, id)
 			if e == nil {
-				e = s.saveConfiguredInventory(scanCtx, src, providers)
+				var providers []configuredProvider
+				var catalog managementSnapshot
+				var catalogErr error
+				var catalogWG sync.WaitGroup
+				catalogWG.Add(2)
+				go func() {
+					defer catalogWG.Done()
+					catalog, catalogErr = loadManagementSnapshot(scanCtx, src)
+				}()
+				go func() {
+					defer catalogWG.Done()
+					_, _, _ = s.channelImportKeys(scanCtx, src)
+				}()
+				providers, e = configuredProviders(scanCtx, src)
+				if e == nil {
+					e = s.saveConfiguredInventory(scanCtx, src, providers)
+				}
+				catalogWG.Wait()
+				if catalogErr == nil {
+					_ = s.saveManagementSnapshot(scanCtx, src.ID, catalog)
+				}
 			}
-		}
-		if e != nil && ctx.Err() == nil {
-			fmt.Printf("sub2api binding_inventory source=%s status=unavailable\n", v.ID)
-		}
-		cancel()
+			if e != nil && ctx.Err() == nil {
+				fmt.Printf("sub2api binding_inventory source=%s status=unavailable\n", id)
+			}
+		}(v.ID)
 	}
+	sourceWG.Wait()
 	accounts, err := s.bindingAccounts(ctx)
 	if err != nil {
 		return

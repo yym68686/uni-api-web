@@ -196,9 +196,7 @@ export function ChannelDetailChecks({ row }: { row: Channel }) {
                 className="button small"
                 aria-label={label}
                 aria-busy={busy}
-                disabled={
-                  busy || query.isPending || query.isError || !row.source_id
-                }
+                disabled={busy || !row.source_id}
                 onClick={() => void run(kind)}
               >
                 {busy ? <Spinner small /> : <Play size={13} />} {label}

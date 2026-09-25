@@ -8,7 +8,75 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
+
+func TestChannelManagementUsesSavedCatalogWithoutGatewayRead(t *testing.T) {
+	var gatewayReads atomic.Int32
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gatewayReads.Add(1)
+		http.Error(w, "slow gateway", 503)
+	}))
+	defer gateway.Close()
+	s, account, src := bindingFixture(t, "https://account.test")
+	src.Base = gateway.URL
+	if _, err := s.control.saveSource(context.Background(), src, false); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := managementSnapshot{
+		Rows:      []managementModel{{Provider: "native", Model: "gpt-6-sol", Engine: "gpt"}},
+		Providers: map[string]managementProvider{},
+		Copies:    map[string]bool{},
+		CheckedAt: time.Now().Unix(),
+		Identity:  controlTarget(src),
+	}
+	if err := s.saveManagementSnapshot(context.Background(), src.ID, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	token, _ := s.control.newSession(context.Background(), account.Owner)
+	request := func() struct {
+		Data        []managementChannel `json:"data"`
+		Unavailable []string            `json:"unavailable_sources"`
+	} {
+		t.Helper()
+		r := httptest.NewRequest("GET", "/v1/channel-management", nil)
+		r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		if w.Code != 200 {
+			t.Fatal(w.Code, w.Body.String())
+		}
+		var result struct {
+			Data        []managementChannel `json:"data"`
+			Unavailable []string            `json:"unavailable_sources"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	start := time.Now()
+	result := request()
+	if time.Since(start) > time.Second || len(result.Data) != 1 || result.Data[0].Models[0] != "gpt-6-sol" || gatewayReads.Load() != 0 {
+		t.Fatal("saved catalog was not served directly", result, gatewayReads.Load())
+	}
+	snapshot.CheckedAt = time.Now().Add(-6 * time.Minute).Unix()
+	if err := s.saveManagementSnapshot(context.Background(), src.ID, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	result = request()
+	if len(result.Data) != 1 || len(result.Unavailable) != 1 || gatewayReads.Load() != 0 {
+		t.Fatal("stale catalog should stay visible with a warning", result, gatewayReads.Load())
+	}
+	src.Key = "rotated-gateway-key"
+	if _, err := s.control.saveSource(context.Background(), src, false); err != nil {
+		t.Fatal(err)
+	}
+	result = request()
+	if len(result.Data) != 0 || len(result.Unavailable) != 1 || gatewayReads.Load() == 0 {
+		t.Fatal("changed source reused an old catalog", result, gatewayReads.Load())
+	}
+}
 
 func TestChannelManagementUsesConfiguredInventoryAndEffectiveKeyRoutes(t *testing.T) {
 	var failKey atomic.Bool

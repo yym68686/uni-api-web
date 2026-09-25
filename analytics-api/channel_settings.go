@@ -287,6 +287,9 @@ func (s *Service) applyChannelSettings(w http.ResponseWriter, r *http.Request, i
 	s.finishSettingsOperation(w, r, src, in.Operation, applied)
 }
 func (s *Service) finishSettingsOperation(w http.ResponseWriter, r *http.Request, admin controlSource, id string, applied map[string]any) {
+	// A successful settings write changes the catalog. Never show the saved
+	// pre-write inventory while the periodic reader catches up.
+	_, _ = s.control.db.ExecContext(r.Context(), `DELETE FROM console_channel_management_snapshots WHERE source_id=$1`, admin.ID)
 	original, err := s.control.source(r.Context(), admin.ID)
 	if err == nil {
 		var live map[string]any

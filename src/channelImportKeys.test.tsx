@@ -12,6 +12,7 @@ import { expect, it, vi } from "vitest";
 import { Sub2apiImport } from "./Sub2apiImport";
 import { ConfiguredChannelDialog } from "./ChannelRoutes";
 import { useChannelImportKeys } from "./channelImportKeys";
+import { ChannelImportKeyFeedback } from "./ChannelImportKeyFeedback";
 import type { ManagedChannel } from "./channelManagement";
 import type { SubAccount, SubTarget } from "./Sub2apiChecks";
 import type { SubImportsQuery } from "./sub2apiImports";
@@ -67,6 +68,7 @@ it.each(["site", "native"])(
       resolve: (response: Response) => void;
     }[] = [];
     const writes: unknown[] = [];
+    const keyReads: ((response: Response | PromiseLike<Response>) => void)[] = [];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: string, init?: RequestInit) => {
@@ -77,7 +79,7 @@ it.each(["site", "native"])(
         }
         if (u.pathname.endsWith("/channel-options")) {
           if (u.searchParams.has("keys_only"))
-            return new Promise<Response>(() => {});
+            return new Promise<Response>((resolve) => keyReads.push(resolve));
           return new Promise<Response>((resolve) =>
             pending.push({
               source: u.searchParams.get("source_id")!,
@@ -160,6 +162,13 @@ it.each(["site", "native"])(
     expect(
       within(key).getByRole("option", { name: "Key 1 · do-masked-1" }),
     ).toBeInTheDocument();
+    await act(async () => {
+      for (const resolve of keyReads) resolve(Promise.reject(new DOMException("signal timed out", "TimeoutError")));
+    });
+    await screen.findByText("暂时无法更新 API key，已保留上次列表；保存前会核对最新配置。");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText("signal timed out")).not.toBeInTheDocument();
+    expect(key).toBeEnabled();
     expect(
       within(key).queryByRole("option", { name: /fugue-masked/ }),
     ).not.toBeInTheDocument();
@@ -206,13 +215,13 @@ it.each(["site", "native"])(
 function Directory() {
   const [query] = useChannelImportKeys(["do"]);
   return (
-    <select aria-label="directory" disabled={!query.data?.keys.length}>
+    <><select aria-label="directory" disabled={!query.data?.keys.length}>
       {query.data?.keys.map((key) => (
         <option key={key.key_id} value={key.key_id}>
           {key.prefix}
         </option>
       ))}
-    </select>
+    </select><ChannelImportKeyFeedback directory={query} /></>
   );
 }
 
@@ -238,6 +247,33 @@ it("reuses a complete login-scoped directory, normalizes source prefixes and pre
     screen.getAllByRole("option").map((o) => (o as HTMLOptionElement).value),
   ).toEqual(["do-key-1", "do-key-2"]);
   expect(fetch).not.toHaveBeenCalled();
+});
+
+it("shows a recoverable cold timeout and revokes cached keys after explicit permission failure", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const fetch = vi.fn().mockRejectedValueOnce(new DOMException("signal timed out", "TimeoutError"))
+    .mockResolvedValueOnce(Response.json({keys:keys("do")}))
+    .mockResolvedValueOnce(new Response("来源密钥无管理权限，请检查来源设置",{status:403}));
+  vi.stubGlobal("fetch",fetch);
+  render(<QueryClientProvider client={client}><Directory /></QueryClientProvider>);
+  expect(await screen.findByRole("alert")).toHaveTextContent("API key 列表暂时无法更新，请稍后重试。");
+  expect(screen.getByLabelText("directory")).toBeDisabled();
+  fireEvent.click(screen.getByRole("button",{name:"重新读取 API key"}));
+  await waitFor(()=>expect(screen.getByLabelText("directory")).toBeEnabled());
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  await act(async()=>{await client.invalidateQueries({queryKey:["channel-import-keys","do"]});});
+  await waitFor(()=>expect(screen.getByLabelText("directory")).toBeDisabled());
+  expect(screen.getByRole("alert")).toHaveTextContent("来源密钥无管理权限");
+  expect(screen.queryByRole("option")).not.toBeInTheDocument();
+});
+
+it("keeps a server-cached directory selectable and explains background refresh failure", async () => {
+  vi.stubGlobal("fetch",vi.fn(async()=>Response.json({keys:keys("do"),stale:true,refresh_failed:true})));
+  render(<QueryClientProvider client={new QueryClient()}><Directory /></QueryClientProvider>);
+  await waitFor(()=>expect(screen.getByLabelText("directory")).toBeEnabled());
+  expect(screen.getByRole("status")).toHaveTextContent("已保留上次列表");
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(screen.getByRole("button",{name:"重新读取 API key"})).toBeEnabled();
 });
 
 it("does not seed partial directories and stops displaying revoked keys on successful refresh", async () => {

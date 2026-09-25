@@ -124,10 +124,12 @@ func (s *Service) sharedQuality(ctx context.Context, owner string) (sharedQualit
 		}
 	}
 	rows, err := s.control.db.QueryContext(ctx, `WITH owned AS MATERIALIZED (
- SELECT h.* FROM console_quality_group_history h JOIN console_sub_accounts a ON a.id=h.account_id WHERE a.owner=$1
+ SELECT h.id,h.account_id,h.group_id,h.successful,h.verdict,h.checked_at
+ FROM console_quality_group_history h JOIN console_sub_accounts a ON a.id=h.account_id WHERE a.owner=$1
  ), totals AS (SELECT account_id,group_id,count(*) AS total,count(*) FILTER(WHERE successful) AS successful,count(*) FILTER(WHERE successful AND verdict='pass') AS passed FROM owned GROUP BY account_id,group_id),
- latest AS (SELECT DISTINCT ON(account_id,group_id) account_id,group_id,result,source_id,verdict,checked_at FROM owned WHERE verdict<>'running' ORDER BY account_id,group_id,checked_at DESC,id DESC)
- SELECT t.account_id,t.group_id,t.total,t.successful,t.passed,l.result,COALESCE(l.source_id,''),COALESCE(l.verdict,''),COALESCE(l.checked_at,0) FROM totals t LEFT JOIN latest l USING(account_id,group_id)`, owner)
+ latest AS (SELECT DISTINCT ON(account_id,group_id) account_id,group_id,id FROM owned WHERE verdict<>'running' ORDER BY account_id,group_id,checked_at DESC,id DESC)
+ SELECT t.account_id,t.group_id,t.total,t.successful,t.passed,h.result,COALESCE(h.source_id,''),COALESCE(h.verdict,''),COALESCE(h.checked_at,0)
+ FROM totals t LEFT JOIN latest l USING(account_id,group_id) LEFT JOIN console_quality_history h ON h.id=l.id`, owner)
 	if err != nil {
 		return out, err
 	}

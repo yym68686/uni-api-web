@@ -143,6 +143,23 @@ export function managementRows(
   accountFilter = "",
   configuredChecks: ConfiguredCheck[] = [],
 ): ManagementRow[] {
+  const accountById = new Map(accounts.map(account => [account.id, account]));
+  const checksByChannel = new Map<string, ConfiguredCheck[]>();
+  for (const check of configuredChecks) {
+    const key = JSON.stringify([check.source_id, check.provider]);
+    const scoped = checksByChannel.get(key) || [];
+    scoped.push(check);
+    checksByChannel.set(key, scoped);
+  }
+  const modelChecksByTarget = new WeakMap<SubTarget, ReturnType<typeof modelChecks>>();
+  const savedChecks = (target: SubTarget) => {
+    let checks = modelChecksByTarget.get(target);
+    if (!checks) {
+      checks = modelChecks(target);
+      modelChecksByTarget.set(target, checks);
+    }
+    return checks;
+  };
   const row = (
     account: SubAccount,
     target: SubTarget,
@@ -150,7 +167,7 @@ export function managementRows(
     accountIds: string[],
     configured?: ManagedChannel,
   ): ManagementRow => {
-    const saved = modelChecks(target);
+    const saved = savedChecks(target);
     const checks = configured
       ? configured.models.map((model) => ({
           ...(saved.find(
@@ -187,7 +204,7 @@ export function managementRows(
   )) {
     const members = channelMembers(item);
     const bindings = members.map((member) => {
-      const account = accounts.find((a) => a.id === member.account_id);
+      const account = accountById.get(member.account_id);
       return {
         member,
         account,
@@ -207,7 +224,7 @@ export function managementRows(
       id: "",
       name:
         item.account_ids
-          ?.map((id) => accounts.find((a) => a.id === id)?.name)
+          ?.map((id) => accountById.get(id)?.name)
           .filter(Boolean)
           .join("、") || "未归属渠道",
       base: item.base || "",
@@ -235,8 +252,8 @@ export function managementRows(
         };
     // Results belong to a source/provider credential fingerprint. Never reuse
     // another source's result after its configured credential has changed.
-    const native = configuredChecks.filter(c => members.some(m => m.source_id === c.source_id && m.provider === c.provider &&
-      (!c.fingerprint || !m.probe_fingerprint || c.fingerprint === m.probe_fingerprint)));
+    const native = members.flatMap(m => (checksByChannel.get(JSON.stringify([m.source_id, m.provider])) || [])
+      .filter(c => !c.fingerprint || !m.probe_fingerprint || c.fingerprint === m.probe_fingerprint));
     const latestCapability = (kind: ConfiguredCheck["kind"]) => native.filter(c => c.kind === kind).sort((a,b) =>
       Number(["queued","running"].includes(b.state)) - Number(["queued","running"].includes(a.state)) ||
       (b.result?.checked_at || 0) - (a.result?.checked_at || 0))[0];
@@ -249,7 +266,7 @@ export function managementRows(
     }
     const toolEntries=new Map<string,ToolUseModel>();
     for(const member of members){
-      for(const c of configuredToolUseResult(member,accounts,configuredChecks).models||[]){
+      for(const c of configuredToolUseResult(member,accounts,checksByChannel.get(JSON.stringify([member.source_id, member.provider])) || []).models||[]){
         const previous=toolEntries.get(c.model);
         if(!previous || (c.result?.checked_at||0)>(previous.result?.checked_at||0))toolEntries.set(c.model,c);
       }
@@ -271,7 +288,7 @@ export function managementRows(
         .filter((b) => b.member.models.includes(name))
         .flatMap((b) =>
           b.target
-            ? modelChecks(b.target).filter(
+            ? savedChecks(b.target).filter(
                 (c) => c.model === (b.member.model_mappings?.[name] || name),
               )
             : [],

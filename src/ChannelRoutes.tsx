@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useChannelImportKeys } from "./channelImportKeys";
+import { ChannelImportKeyFeedback } from "./ChannelImportKeyFeedback";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Plus, X } from "lucide-react";
 import { controlRequest } from "./api";
@@ -548,9 +549,9 @@ export function ConfiguredChannelDialog({
                 {success}
               </p>
             )}
-            {(error || options.error || keyDirectory?.error) && (
+            {(error || options.error) && (
               <p role="alert" className="negative">
-                {error || options.error?.message || keyDirectory?.error?.message}
+                {error || options.error?.message}
                 <button
                   className="button small"
                   disabled={busy || options.isFetching || inventory.isPending}
@@ -565,6 +566,7 @@ export function ConfiguredChannelDialog({
                 </button>
               </p>
             )}
+            {adding && <ChannelImportKeyFeedback directory={keyDirectory} />}
             {adding && (
               <form
                 onSubmit={(e) => {

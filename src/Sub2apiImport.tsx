@@ -4,6 +4,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { Plus, Trash2, X } from "lucide-react";
 import { controlRequest } from "./api";
 import { useChannelImportKeys } from "./channelImportKeys";
+import { ChannelImportKeyFeedback } from "./ChannelImportKeyFeedback";
 import { Spinner } from "./ui";
 import { ChannelBatchApply } from "./ChannelBatchApply";
 import type { BatchPart, BatchDraft } from "./channelBatch";
@@ -709,10 +710,9 @@ export function Sub2apiImport({
                 {success}
               </p>
             )}
-            {(error || sources.error || options.error || keyDirectory?.error) && (
+            {(error || sources.error || options.error) && (
               <div role="alert" className="error-banner">
-                {error || sources.error?.message || options.error?.message || keyDirectory?.error?.message}
-                {keyDirectory?.isError && <button type="button" className="button small" onClick={() => void keyDirectory.refetch()}>重新读取 API key</button>}
+                {error || sources.error?.message || options.error?.message}
                 {sources.isError && (
                   <button
                     type="button"
@@ -725,6 +725,7 @@ export function Sub2apiImport({
                 )}
               </div>
             )}
+            {showForm && <ChannelImportKeyFeedback directory={keyDirectory} />}
             {showForm && (
               <form
                 onSubmit={(e) => {
@@ -819,7 +820,6 @@ export function Sub2apiImport({
                     </select>
                   </label>
                 </div>
-                {!!source && keyDirectory?.isError && !!keyDirectory.data && <p className="muted">API key 更新失败，显示上次列表；保存前仍会校验最新配置。</p>}
                 {!!key && options.isFetching && <p role="status"><Spinner small /> 正在读取所选 API key 的路由位置…</p>}
                 {sources.isPending && (
                   <p role="status">

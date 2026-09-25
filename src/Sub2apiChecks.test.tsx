@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as Tooltip from "@radix-ui/react-tooltip";
@@ -64,6 +64,29 @@ function fixtures(): SubAccount[] {
     ],
   }));
 }
+
+it("keeps channel loading honest and does not read every source key directory on entry", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(["sources", "quick-entry"], { data: [{ id: "do", name: "DigitalOcean" }] });
+  const replies: Record<string, (response: Response) => void> = {};
+  const fetcher = vi.fn(async (input: string) => {
+    if (input.endsWith("/accounts") || input.endsWith("/channel-management"))
+      return new Promise<Response>(resolve => { replies[input.endsWith("/accounts") ? "accounts" : "management"] = resolve; });
+    return Response.json({ data: [], unavailable_sources: [] });
+  });
+  vi.stubGlobal("fetch", fetcher);
+  mount("quick-entry", client);
+  expect(screen.getByRole("heading", { name: "站点账号" }).parentElement).toHaveTextContent("…");
+  expect(screen.getByRole("status", { name: "" })).toHaveTextContent("正在读取渠道");
+  expect(screen.queryByText("没有匹配的渠道")).not.toBeInTheDocument();
+  expect(fetcher.mock.calls.some(([input]) => input.includes("keys_only"))).toBe(false);
+  await act(async () => {
+    replies.accounts(Response.json({ data: fixtures() }));
+    replies.management(Response.json({ data: [], unavailable_sources: [] }));
+  });
+  await waitFor(() => expect(screen.getByRole("heading", { name: "站点账号" }).parentElement).toHaveTextContent("2"));
+  expect(screen.getAllByText("same-group", { selector: "strong" })).toHaveLength(2);
+});
 
 it.each([false,true])("imports sub2api aliases independently of originals (keep %s)", async keep => {
   const data=fixtures().slice(0,1),target=data[0].targets[0];

@@ -17,6 +17,102 @@ type managementChannel struct {
 	ProbeFingerprint string   `json:"probe_fingerprint"`
 }
 
+type managementModel struct {
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+	Upstream string `json:"upstream_model"`
+	Engine   string `json:"engine"`
+}
+type managementProvider struct {
+	Base             string `json:"base"`
+	Fingerprint      string `json:"fingerprint"`
+	ProbeFingerprint string `json:"probe_fingerprint"`
+}
+type managementSnapshot struct {
+	Rows      []managementModel             `json:"rows"`
+	Providers map[string]managementProvider `json:"providers"`
+	Copies    map[string]bool               `json:"copies"`
+	CheckedAt int64                         `json:"checked_at"`
+	Identity  string                        `json:"identity"`
+}
+
+func loadManagementSnapshot(ctx context.Context, src controlSource) (managementSnapshot, error) {
+	var catalog map[string]any
+	var providers []configuredProvider
+	var controls map[string]any
+	var catalogErr error
+	var readers sync.WaitGroup
+	readers.Add(3)
+	go func() {
+		defer readers.Done()
+		catalog, _, catalogErr = fetchSource(ctx, src, "/v1/model-channels", url.Values{"endpoint": {"all"}, "stream": {"all"}})
+	}()
+	go func() { defer readers.Done(); providers, _ = configuredProviders(ctx, src) }()
+	go func() {
+		defer readers.Done()
+		controls, _, _ = subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
+	}()
+	readers.Wait()
+	result := managementSnapshot{Rows: []managementModel{}, Providers: map[string]managementProvider{}, Copies: map[string]bool{}, CheckedAt: time.Now().Unix(), Identity: controlTarget(src)}
+	if catalogErr != nil {
+		return result, catalogErr
+	}
+	if err := decodeMap(catalog["data"], &result.Rows); err != nil {
+		return result, err
+	}
+	for _, p := range providers {
+		hashes, _ := json.Marshal(configuredKeyHashes(p))
+		result.Providers[p.Provider] = managementProvider{
+			Base:             subBindingSite(p.Base),
+			Fingerprint:      tokenHash(controlTarget(src) + "\n" + p.Provider + "\n" + subBindingSite(p.Base) + "\n" + string(hashes)),
+			ProbeFingerprint: configuredProbeFingerprint(src, p),
+		}
+	}
+	var live retainedLive
+	_ = decodeMap(controls, &live)
+	for _, c := range live.Channels {
+		for _, p := range providers {
+			if c.Provider == configuredImportName(p.Provider, c.KeyID) {
+				result.Copies[c.Provider] = true
+				break
+			}
+		}
+	}
+	return result, nil
+}
+
+func (s *Service) saveManagementSnapshot(ctx context.Context, source string, snapshot managementSnapshot) error {
+	raw, err := json.Marshal(snapshot)
+	if err != nil {
+		return err
+	}
+	_, err = s.control.db.ExecContext(ctx, `INSERT INTO console_channel_management_snapshots(source_id,catalog,checked_at) VALUES($1,$2,$3)
+ ON CONFLICT(source_id) DO UPDATE SET catalog=excluded.catalog,checked_at=excluded.checked_at`, source, string(raw), snapshot.CheckedAt)
+	return err
+}
+
+func (s *Service) managementSnapshots(ctx context.Context) (map[string]managementSnapshot, error) {
+	rows, err := s.control.db.QueryContext(ctx, `SELECT source_id,catalog FROM console_channel_management_snapshots`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]managementSnapshot{}
+	for rows.Next() {
+		var source string
+		var raw []byte
+		if err = rows.Scan(&source, &raw); err != nil {
+			return nil, err
+		}
+		var snapshot managementSnapshot
+		if err = json.Unmarshal(raw, &snapshot); err != nil {
+			return nil, err
+		}
+		out[source] = snapshot
+	}
+	return out, rows.Err()
+}
+
 // Read the gateway catalog, not historical traffic: unused configured channels
 // must be manageable too. Account enrichment uses the durable key bindings.
 func (s *Service) channelManagement(w http.ResponseWriter, r *http.Request) {
@@ -34,6 +130,11 @@ func (s *Service) channelManagement(w http.ResponseWriter, r *http.Request) {
 	sources, err := s.control.listSources(r.Context())
 	if err != nil {
 		http.Error(w, "来源读取失败", 503)
+		return
+	}
+	snapshots, err := s.managementSnapshots(r.Context())
+	if err != nil {
+		http.Error(w, "渠道目录读取失败", 503)
 		return
 	}
 	lookup := map[string]subInstalledChannel{}
@@ -58,31 +159,10 @@ func (s *Service) channelManagement(w http.ResponseWriter, r *http.Request) {
 			ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 			defer cancel()
 			src, e := s.control.source(ctx, id)
-			var catalog map[string]any
-			var providers []configuredProvider
-			var controls map[string]any
-			if e == nil {
-				var readers sync.WaitGroup
-				readers.Add(3)
-				go func() {
-					defer readers.Done()
-					catalog, _, e = fetchSource(ctx, src, "/v1/model-channels", url.Values{"endpoint": {"all"}, "stream": {"all"}})
-				}()
-				go func() { defer readers.Done(); providers, _ = configuredProviders(ctx, src) }()
-				go func() {
-					defer readers.Done()
-					controls, _, _ = subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
-				}()
-				readers.Wait()
-			}
-			var rows []struct {
-				Provider string `json:"provider"`
-				Model    string `json:"model"`
-				Upstream string `json:"upstream_model"`
-				Engine   string `json:"engine"`
-			}
-			if e == nil {
-				e = decodeMap(catalog["data"], &rows)
+			snapshot, cached := snapshots[id]
+			cached = cached && snapshot.Identity == controlTarget(src)
+			if e == nil && !cached {
+				snapshot, e = loadManagementSnapshot(ctx, src)
 			}
 			mu.Lock()
 			defer mu.Unlock()
@@ -90,24 +170,12 @@ func (s *Service) channelManagement(w http.ResponseWriter, r *http.Request) {
 				unavailable = append(unavailable, source.Name)
 				return
 			}
+			if cached && time.Since(time.Unix(snapshot.CheckedAt, 0)) > 5*time.Minute {
+				unavailable = append(unavailable, source.Name)
+			}
 			grouped := map[string]*managementChannel{}
-			liveProviders := map[string]configuredProvider{}
-			for _, p := range providers {
-				liveProviders[p.Provider] = p
-			}
-			var live retainedLive
-			_ = decodeMap(controls, &live)
-			copies := map[string]bool{}
-			for _, c := range live.Channels {
-				for _, p := range providers {
-					if c.Provider == configuredImportName(p.Provider, c.KeyID) {
-						copies[c.Provider] = true
-						break
-					}
-				}
-			}
-			for _, row := range rows {
-				if copies[row.Provider] {
+			for _, row := range snapshot.Rows {
+				if snapshot.Copies[row.Provider] {
 					continue
 				}
 				item := grouped[row.Provider]
@@ -116,21 +184,19 @@ func (s *Service) channelManagement(w http.ResponseWriter, r *http.Request) {
 					if !found {
 						binding = subInstalledChannel{Kind: "configured", SourceID: id, SourceName: src.Name, Provider: row.Provider, Name: row.Provider, Models: []string{}, Positions: map[string]int{}}
 					}
-					if live, ok := liveProviders[row.Provider]; ok {
+					if live, ok := snapshot.Providers[row.Provider]; ok {
 						// An edited credential must not inherit the previous account's
 						// results while the durable binding worker catches up.
-						hashes, _ := json.Marshal(configuredKeyHashes(live))
-						fingerprint := tokenHash(controlTarget(src) + "\n" + live.Provider + "\n" + subBindingSite(live.Base) + "\n" + string(hashes))
-						if found && fingerprint != binding.Fingerprint {
+						if found && live.Fingerprint != binding.Fingerprint {
 							binding.AccountID = ""
 							binding.GroupID = 0
 							binding.BoundKeys = nil
 						}
-						binding.Base = subBindingSite(live.Base)
+						binding.Base = live.Base
 					}
 					item = &managementChannel{subInstalledChannel: binding, Engine: row.Engine, AccountIDs: []string{}}
-					if live, ok := liveProviders[row.Provider]; ok {
-						item.ProbeFingerprint = configuredProbeFingerprint(src, live)
+					if live, ok := snapshot.Providers[row.Provider]; ok {
+						item.ProbeFingerprint = live.ProbeFingerprint
 					}
 					ids := map[string]bool{}
 					for _, key := range binding.BoundKeys {

@@ -80,6 +80,26 @@ it("independently queues each probe against the exact source, installed channel 
   ]);
   await act(async () => finish());
 });
+it("allows probes before history finishes loading, even if that read fails", async () => {
+  const writes: any[] = [];
+  let finish!: (response: Response) => void;
+  vi.stubGlobal("fetch", vi.fn(async (_path: string, init?: RequestInit) => {
+    if (init?.method === "POST") {
+      writes.push(JSON.parse(String(init.body)));
+      return Response.json({ queued: 1 });
+    }
+    return new Promise<Response>((resolve) => { finish = resolve; });
+  }));
+  mount();
+  const user = userEvent.setup();
+  const button = screen.getByRole("button", { name: "可用性检测" });
+  expect(button).toBeEnabled();
+  await user.click(button);
+  expect(writes).toHaveLength(1);
+  await act(async () => finish(new Response("读取失败", { status: 503 })));
+  await waitFor(() => expect(screen.getByText(/检测状态读取失败/)).toBeVisible());
+  expect(screen.getByRole("button", { name: "降智检测" })).toBeEnabled();
+});
 it("keeps queued work disabled across reads and shows the corresponding completed result", async () => {
   const result = {
     status: "unsupported",
