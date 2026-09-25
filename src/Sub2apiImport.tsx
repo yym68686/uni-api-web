@@ -53,6 +53,8 @@ export function Sub2apiImport({
   sources,
   prices,
   configured,
+  initialEdit,
+  nested = false,
   close,
 }: {
   account: SubAccount;
@@ -61,6 +63,8 @@ export function Sub2apiImport({
   sources: ConsoleSourcesQuery;
   prices?: ModelPrice[];
   configured?: ManagedChannel;
+  initialEdit?: InstalledChannel;
+  nested?: boolean;
   close: () => void;
 }) {
   const client = useQueryClient();
@@ -312,6 +316,15 @@ export function Sub2apiImport({
     setError("");
     setSuccess("");
   }
+  useEffect(() => {
+    if (initialEdit) {
+      edit(initialEdit);
+      setViewSource(initialEdit.source_id);
+      setViewKey(initialEdit.api_key_id);
+    }
+    // The drawer's selected binding seeds the form once; refetches must not
+    // overwrite model/alias changes that the user is already editing.
+  }, []);
   async function refresh() {
     await Promise.all(
       [
@@ -395,9 +408,9 @@ export function Sub2apiImport({
       }}
     >
       <Dialog.Portal>
-        <Dialog.Overlay className="dialog-overlay" />
+        <Dialog.Overlay className={`dialog-overlay${nested ? " route-edit-overlay" : ""}`} />
         <Dialog.Content
-          className="guide-dialog sub-import-dialog route-workspace"
+          className={`guide-dialog sub-import-dialog route-workspace${nested ? " route-edit-dialog" : ""}`}
           onEscapeKeyDown={(e) => {
             if (busy) e.preventDefault();
           }}

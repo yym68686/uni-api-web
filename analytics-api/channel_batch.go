@@ -25,6 +25,7 @@ type channelBatchInput struct {
 	Revision        string               `json:"revision"`
 	Part            string               `json:"part"`
 	AllowUnverified bool                 `json:"allow_unverified_models"`
+	EvidenceSource  string               `json:"evidence_source_id"`
 	Targets         []channelBatchTarget `json:"targets"`
 }
 type batchCatalogRow struct {
@@ -228,7 +229,7 @@ func (s *Service) applyChannelBatch(w http.ResponseWriter, r *http.Request) {
 		if scope.account != "" {
 			err = s.validateSiteModelChanges(ctx, scope.account, scope.group, nil, models)
 		} else {
-			err = s.validateConfiguredModelChanges(ctx, src, scope.provider, owner, nil, models)
+			err = s.validateConfiguredModelChanges(ctx, src, scope.provider, owner, nil, models, in.EvidenceSource)
 		}
 		if err != nil {
 			http.Error(w, err.Error(), 400)
@@ -388,6 +389,7 @@ func buildBatchSnapshot(snapshot *retainedSnapshot, in channelBatchInput, catalo
 	}
 	for key, ms := range moves {
 		if !changedKeys[key] {
+			delete(moves, key)
 			continue
 		}
 		rows := []routeMove{}
@@ -397,6 +399,9 @@ func buildBatchSnapshot(snapshot *retainedSnapshot, in channelBatchInput, catalo
 		if err := applyRouteMoves(snapshot, key, rows, ms); err != nil {
 			return false, err
 		}
+	}
+	if len(snapshot.Rules) > 128 {
+		compactBatchRouteRules(snapshot, catalogs, moves)
 	}
 	return changed, nil
 }

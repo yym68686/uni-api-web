@@ -112,7 +112,7 @@ export function groupManagedChannels(
     account_ids: [...new Set(members.flatMap((m) => m.account_ids || []))],
   }));
 }
-export function useChannelManagement() {
+export function useChannelManagement(enabled = true) {
   return useQuery({
     queryKey: ["channel-management"],
     queryFn: ({ signal }) =>
@@ -120,8 +120,9 @@ export function useChannelManagement() {
         "/v1/channel-management",
         { signal },
       ),
+    enabled,
     staleTime: 15000,
-    refetchInterval: 30000,
+    refetchInterval: enabled ? 30000 : false,
     retry: false,
   });
 }

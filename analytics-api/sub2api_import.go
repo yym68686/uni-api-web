@@ -70,6 +70,21 @@ func subGateway(ctx context.Context, src controlSource, method, path string, bod
 		case 401, 403:
 			return nil, 403, errors.New("来源密钥无管理权限")
 		case 400:
+			// Gateway diagnostics are allowlisted; never echo an upstream body
+			// that might contain credentials or provider configuration.
+			raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			var problem struct {
+				Error struct {
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			_ = json.Unmarshal(raw, &problem)
+			switch problem.Error.Message {
+			case "Invalid retained configuration", "Too many temporary scopes", "Too many temporary channels":
+				return nil, 400, errors.New("来源拒绝配置快照，可能已达到路由规则或临时渠道数量上限；未提交本来源修改，请核对配置容量")
+			case "Retained rule references an unavailable channel":
+				return nil, 400, errors.New("来源路由引用的渠道或模型已变化；未提交本来源修改，请重新核对")
+			}
 			return nil, 400, errors.New("所选 key、模型或位置已失效，请刷新弹窗后重试")
 		}
 		return nil, 502, errors.New("来源未完成添加，请刷新后核对")

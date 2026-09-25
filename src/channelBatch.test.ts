@@ -284,6 +284,7 @@ it("discovers native and key-owned copies on every matching source, preserving p
     ["b", "k2", "copy"],
   ]);
   await applyChannelBatch(plan, () => {});
+  expect(f.writes.every(w => w.body.evidence_source_id === plan.draft.anchor.source)).toBe(true);
   expect(f.writes[0].body.targets[1]).toMatchObject({
     origin_provider: "native",
     provider: "copy",

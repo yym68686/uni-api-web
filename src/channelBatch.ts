@@ -592,6 +592,9 @@ export async function applyChannelBatch(
             body: JSON.stringify({
               revision: targets[0].revision,
               part: plan.draft.part,
+              ...(plan.draft.scope.kind === "configured"
+                ? { evidence_source_id: plan.draft.scope.source }
+                : {}),
               targets: plan.targets
                 .filter(
                   (t) =>

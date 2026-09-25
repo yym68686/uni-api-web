@@ -206,11 +206,15 @@ export function ConfiguredChannelDialog({
   item: group,
   close,
   initialEdit,
+  initialSourceId,
+  nested = false,
   batchScope,
 }: {
   item: ManagedChannel;
   close: () => void;
   initialEdit?: ChannelRoute[];
+  initialSourceId?: string;
+  nested?: boolean;
   batchScope?: BatchScope;
 }) {
   const client = useQueryClient();
@@ -218,7 +222,7 @@ export function ConfiguredChannelDialog({
   const toolChecks = useConfiguredChecks();
   const accounts = useSubAccounts();
   const inventory = useChannelManagement();
-  const [memberId, setMemberId] = useState(members[0].source_id);
+  const [memberId, setMemberId] = useState(members.some(m => m.source_id === initialSourceId) ? initialSourceId! : members[0].source_id);
   const member = members.find((m) => m.source_id === memberId) || members[0];
   // A site binding carries identity only and may have an empty model list.
   // Hydrate from the already-loaded live inventory instead of treating it as
@@ -435,10 +439,10 @@ export function ConfiguredChannelDialog({
     >
       <Dialog.Portal>
         <Dialog.Overlay
-          className={`dialog-overlay${initialEdit ? " route-edit-overlay" : ""}`}
+          className={`dialog-overlay${initialEdit || nested ? " route-edit-overlay" : ""}`}
         />
         <Dialog.Content
-          className={`guide-dialog sub-import-dialog route-workspace${initialEdit ? " route-edit-dialog" : ""}`}
+          className={`guide-dialog sub-import-dialog route-workspace${initialEdit || nested ? " route-edit-dialog" : ""}`}
           onEscapeKeyDown={(e) => {
             if (busy) e.preventDefault();
           }}

@@ -1452,6 +1452,7 @@ nav > button.active > svg {
   align-items: center;
   gap: 8px;
 }
+.detail-models .detail-model-edit { margin-left: auto; white-space: nowrap; font-weight: 400; }
 .detail-model-list {
   display: grid;
   gap: 8px;

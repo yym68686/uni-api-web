@@ -75,7 +75,7 @@ func newestModelEvidence(a, b modelEvidence) modelEvidence {
 	}
 	return a
 }
-func (s *Service) validateConfiguredModelChanges(ctx context.Context, src controlSource, provider, owner string, current, desired map[string]string) error {
+func (s *Service) validateConfiguredModelChanges(ctx context.Context, src controlSource, provider, owner string, current, desired map[string]string, evidenceSource ...string) error {
 	needed := newChannelModels(current, desired)
 	if len(needed) == 0 {
 		return nil
@@ -219,6 +219,23 @@ func (s *Service) validateConfiguredModelChanges(ctx context.Context, src contro
 		}
 	}
 	unavailable := []string{}
+	// Cross-source bulk edits carry the source the user actually verified.
+	// Missing evidence can be shared only after comparing complete effective
+	// upstream definitions. Local failed/pending evidence is never overridden.
+	if len(evidenceSource) > 0 && evidenceSource[0] != "" && evidenceSource[0] != src.ID {
+		missing := map[string]bool{}
+		for model := range needed {
+			if _, exists := evidence[model]; !exists {
+				missing[model] = true
+			}
+		}
+		if len(missing) > 0 {
+			shared := s.sharedConfiguredEvidence(ctx, src, provider, selected, evidenceSource[0], missing)
+			for model, v := range shared {
+				evidence[model] = v
+			}
+		}
+	}
 	for model := range needed {
 		if !evidence[model].available() {
 			unavailable = append(unavailable, model)

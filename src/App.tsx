@@ -773,7 +773,9 @@ function Detail({
   site,
   check,
   trend,
+  session,
 }: {
+  session: string;
   site?: string;
   check?: ChannelCheck;
   trend: Omit<CacheTrendProps, "row">;
@@ -818,7 +820,7 @@ function Detail({
                 <QualityHistory key={providerId(row)} path={`/v1/sources/${encodeURIComponent(row.source_id)}/channel-checks/history?${new URLSearchParams({ provider: row.provider })}`} revision={`${check?.checked_at}:${check?.history?.total}:${check?.history?.successful}`} title={check?.history_scope === "account_group" ? "共享检测记录" : "渠道检测记录"} />
                 {check?.history_scope !== "account_group" && boundGroups(installed).map(group => <QualityHistory key={`${group.account_id}:${group.group_id}`} path={`/v1/sub2api/accounts/${encodeURIComponent(group.account_id)}/groups/${group.group_id}/quality-history`} revision={`${check?.checked_at}:${check?.history?.total}:${check?.history?.successful}`} title={`sub2api 检测记录 · 分组 #${group.group_id}`} />)}
               </section>}
-              {imports && <ChannelModels row={row} imports={imports} catalog={catalog} />}
+              {imports && <ChannelModels key={providerId(row)} row={row} imports={imports} catalog={catalog} keyId={trend.keyId} session={session} />}
               <div className="detail-section">
                 <h3>请求时间线</h3>
                 <p className="muted">两个指标分别统计，分位值不能直接相加。</p>
@@ -1992,6 +1994,7 @@ function Dashboard({
         </div>
       </div>
       <Detail
+        session={baseConnection.session}
         row={detail}
         site={siteFor(detail) || dashboardURL(sourceList.find((source) => source.id === detail?.source_id)?.base)}
         check={detail ? checks.results.get(providerId(detail)) : undefined}

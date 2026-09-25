@@ -1,4 +1,6 @@
-import { Check } from "lucide-react";
+import { useState } from "react";
+import { Check, Pencil } from "lucide-react";
+import { ChannelModelEditor } from "./ChannelModelEditor";
 import { useSubAccounts } from "./sub2apiAccounts";
 import { availableModelChecks } from "./sub2apiResults";
 import type { SubImportsQuery } from "./sub2apiImports";
@@ -12,11 +14,20 @@ export function ChannelModels({
   row,
   imports,
   catalog,
+  keyId = "",
+  session = "account",
 }: {
   row: Channel;
   imports: SubImportsQuery;
   catalog: Channel[];
+  keyId?: string;
+  session?: string;
 }) {
+  const [editing, setEditing] = useState(false);
+  const editButton = row.source_id && <button className="button small detail-model-edit" onClick={() => setEditing(true)} aria-haspopup="dialog">
+    <Pencil size={13} /> 编辑可用模型
+  </button>;
+  const editor = editing && <ChannelModelEditor row={row} imports={imports} keyId={keyId} session={session} close={() => setEditing(false)} />;
   const installed = imports.data?.data.find(
     (channel) =>
       channel.source_id === row.source_id && channel.provider === row.provider,
@@ -52,7 +63,9 @@ export function ChannelModels({
       <section className="detail-section detail-models" aria-label="可用模型">
         <h3>
           可用模型<span className="count-badge">{configured.length}</span>
+          {editButton}
         </h3>
+        {editor}
         <p className="muted">渠道配置</p>
         {configured.length ? (
           <ul className="detail-model-list">
@@ -81,7 +94,9 @@ export function ChannelModels({
         {!loading && !error && target && (
           <span className="count-badge">{models.length}</span>
         )}
+        {editButton}
       </h3>
+      {editor}
       {!loading && !error && target && (
         <p className="muted">sub2api 检测通过{installed?.kind === "configured" && " · 关联分组"}</p>
       )}
