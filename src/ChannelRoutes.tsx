@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useChannelImportKeys } from "./channelImportKeys";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Plus, X } from "lucide-react";
 import { controlRequest } from "./api";
@@ -224,6 +225,8 @@ export function ConfiguredChannelDialog({
   // the channel definition or allowing it to hide the saved routes.
   const item = inventory.data?.data.find(m=>m.source_id===member.source_id&&m.provider===member.provider) || member;
   const sources = members.map((m) => m.source_id);
+  const keyDirectories = useChannelImportKeys(sources);
+  const keyDirectory = keyDirectories[sources.indexOf(item.source_id)];
   const routes = useAllChannelRoutes(sources);
   const counts = managedRouteCount(group, sources, routes);
   const [adding, setAdding] = useState(false);
@@ -301,7 +304,7 @@ export function ConfiguredChannelDialog({
           new URLSearchParams({ source_id: item.source_id, api_key_id: key }),
         { signal },
       ),
-    enabled: adding,
+    enabled: adding && !!key,
     retry: false,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
@@ -368,6 +371,9 @@ export function ConfiguredChannelDialog({
       toolDefaultsPending || toolDefaultsError ||
       mapping.error || invalidModels.length>0 ||
       !key ||
+      options.isFetching || options.isError ||
+      !keyDirectory?.data?.keys.some(k => k.key_id === key) ||
+      !options.data?.keys.some(k => k.key_id === key) ||
       !mapping.models.length ||
       !options.data
     )
@@ -537,9 +543,9 @@ export function ConfiguredChannelDialog({
                 {success}
               </p>
             )}
-            {(error || options.error) && (
+            {(error || options.error || keyDirectory?.error) && (
               <p role="alert" className="negative">
-                {error || options.error?.message}
+                {error || options.error?.message || keyDirectory?.error?.message}
                 <button
                   className="button small"
                   disabled={busy || options.isFetching || inventory.isPending}
@@ -547,6 +553,7 @@ export function ConfiguredChannelDialog({
                     initializedEdit.current = "";
                     setError("");
                     void options.refetch();
+                    void keyDirectory?.refetch();
                   }}
                 >
                   重新读取配置
@@ -600,7 +607,7 @@ export function ConfiguredChannelDialog({
                     <select
                       aria-label="添加到 API key"
                       value={key}
-                      disabled={busy || options.isFetching}
+                      disabled={busy || !keyDirectory?.data?.keys.length}
                       onChange={(e) => {
                         if (editingProvider) {
                           const candidates = providerRoutes(
@@ -625,9 +632,9 @@ export function ConfiguredChannelDialog({
                       }}
                     >
                       {!editingProvider && (
-                        <option value="">选择 API key</option>
+                        <option value="">{keyDirectory?.data ? keyDirectory.data.keys.length ? "选择 API key" : "暂无 API key" : keyDirectory?.isError ? "API key 加载失败" : "正在读取 API key…"}</option>
                       )}
-                      {options.data?.keys
+                      {keyDirectory?.data?.keys
                         .filter(
                           (k) =>
                             !editingProvider ||
@@ -660,7 +667,7 @@ export function ConfiguredChannelDialog({
                           setModelPositions({});
                         }
                       }}
-                      disabled={busy || options.isFetching || !key}
+                      disabled={busy || !options.data || options.isFetching || options.isError || !key}
                     >
                       <option value="per-model">逐模型微调</option>
                       {Array.from({ length: positions }, (_, i) => (
@@ -671,6 +678,7 @@ export function ConfiguredChannelDialog({
                     </select>
                   </label>
                 </div>
+                {!!key && options.isFetching && <p role="status"><Spinner small /> 正在读取所选 API key 的路由位置…</p>}
                 <ChannelModelSelection
                   models={modelOptions}
                   canSelect={canSelectModel}
@@ -730,6 +738,9 @@ export function ConfiguredChannelDialog({
                       toolDefaultsPending || toolDefaultsError ||
                       options.isFetching ||
                       options.isError ||
+                      !options.data ||
+                      !keyDirectory?.data?.keys.some(k => k.key_id === key) ||
+                      !options.data?.keys.some(k => k.key_id === key) ||
                       mapping.models.some(
                         (m) =>
                           (activePositions[m] ??

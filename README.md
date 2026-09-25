@@ -46,6 +46,11 @@ Only the selected filter key's opaque ID is stored, never the access credential.
   target the selected source/provider through the gateway, including key-owned
   temporary channels, without changing routes. Availability-only checks do not
   run the quality probe.
+- Add-to-channel editors preload per-source API key directories independently
+  of route configuration. Cached selectors remain usable during refreshes;
+  live revision, key membership and route checks still gate saving. The key
+  directory stays in the login's query cache and is discarded on logout or a
+  source credential change.
 - Optional 30-second metric refresh, paused while the page is in the background.
 - S3-backed history across today/week/month/year/all ranges, usage and estimated
   cost dashboards, live channel concurrency, cache rates and editable model prices.

@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Plus, Trash2, X } from "lucide-react";
 import { controlRequest } from "./api";
+import { useChannelImportKeys } from "./channelImportKeys";
 import { Spinner } from "./ui";
 import { ChannelBatchApply } from "./ChannelBatchApply";
 import type { BatchPart, BatchDraft } from "./channelBatch";
@@ -63,6 +64,8 @@ export function Sub2apiImport({
   close: () => void;
 }) {
   const client = useQueryClient();
+  const destinationSources = (sources.data?.data || []).map(source => source.id);
+  const keyDirectories = useChannelImportKeys(destinationSources);
   const checks = useMemo(() => modelChecks(target), [target]);
   const available = availableModelChecks(target).map((check) => check.model);
   const installed = (imports.data?.data || []).filter(
@@ -191,6 +194,7 @@ export function Sub2apiImport({
   );
   const [source, setSource] = useState("");
   const [key, setKey] = useState("");
+  const keyDirectory = keyDirectories[destinationSources.indexOf(source)];
   const [position, setPosition] = useState(1);
   const [perModel, setPerModel] = useState(false);
   const [modelPositions, setModelPositions] = useState<Record<string, number>>(
@@ -219,7 +223,7 @@ export function Sub2apiImport({
           }),
         { signal },
       ),
-    enabled: !!source,
+    enabled: !!source && !!key,
     retry: false,
     staleTime: 0,
     refetchOnWindowFocus: false,
@@ -324,7 +328,11 @@ export function Sub2apiImport({
     action: "add" | "replace" | "delete",
     item?: InstalledChannel,
   ) {
-    if (busy || (action !== "delete" && (mapping.error || invalidModels.length))) return;
+    if (busy || (action !== "delete" && (
+      mapping.error || invalidModels.length || options.isFetching || options.isError ||
+      !options.data?.keys.some(k => k.key_id === key) ||
+      !keyDirectory?.data?.keys.some(k => k.key_id === key)
+    ))) return;
     setBusy(true);
     setError("");
     setSuccess("");
@@ -686,9 +694,10 @@ export function Sub2apiImport({
                 {success}
               </p>
             )}
-            {(error || sources.error || options.error) && (
+            {(error || sources.error || options.error || keyDirectory?.error) && (
               <div role="alert" className="error-banner">
-                {error || sources.error?.message || options.error?.message}
+                {error || sources.error?.message || options.error?.message || keyDirectory?.error?.message}
+                {keyDirectory?.isError && <button type="button" className="button small" onClick={() => void keyDirectory.refetch()}>重新读取 API key</button>}
                 {sources.isError && (
                   <button
                     type="button"
@@ -751,10 +760,9 @@ export function Sub2apiImport({
                       value={key}
                       disabled={
                         !source ||
-                        options.isFetching ||
                         busy ||
                         !!editing ||
-                        !options.data?.supported
+                        !keyDirectory?.data?.keys.length
                       }
                       onChange={(e) => {
                         setKey(e.target.value);
@@ -763,8 +771,8 @@ export function Sub2apiImport({
                         setModelPositions({});
                       }}
                     >
-                      <option value="">选择 API key</option>
-                      {options.data?.keys.map((k) => (
+                      <option value="">{!source ? "请先选择来源" : keyDirectory?.data ? keyDirectory.data.keys.length ? "选择 API key" : "暂无 API key" : keyDirectory?.isError ? "API key 加载失败" : "正在读取 API key…"}</option>
+                      {keyDirectory?.data?.keys.map((k) => (
                         <option key={k.key_id} value={k.key_id}>
                           Key {k.position} · {k.prefix}
                         </option>
@@ -776,7 +784,7 @@ export function Sub2apiImport({
                     <select
                       aria-label="渠道添加位置"
                       value={perModel ? "per-model" : validPosition}
-                      disabled={!key || options.isFetching || busy}
+                      disabled={!key || !options.data || options.isFetching || options.isError || busy}
                       onChange={(e) => {
                         if (e.target.value === "per-model") {
                           setPerModel(true);
@@ -796,6 +804,8 @@ export function Sub2apiImport({
                     </select>
                   </label>
                 </div>
+                {!!source && keyDirectory?.isError && !!keyDirectory.data && <p className="muted">API key 更新失败，显示上次列表；保存前仍会校验最新配置。</p>}
+                {!!key && options.isFetching && <p role="status"><Spinner small /> 正在读取所选 API key 的路由位置…</p>}
                 {sources.isPending && (
                   <p role="status">
                     <Spinner small /> 正在读取 uni-api 来源…
@@ -861,7 +871,7 @@ export function Sub2apiImport({
                   positions={activePositions}
                   defaultPosition={validPosition}
                   onChange={setModelPositions}
-                  disabled={!key || options.isFetching || busy || !perModel}
+                  disabled={!key || !options.data || options.isFetching || options.isError || busy || !perModel}
                   uniform={!perModel}
                 />
                 <p className="sub-import-note">
@@ -923,6 +933,8 @@ export function Sub2apiImport({
                       busy ||
                       !source ||
                       !key ||
+                      !keyDirectory?.data?.keys.some(k => k.key_id === key) ||
+                      !options.data?.keys.some(k => k.key_id === key) ||
                       !!mapping.error || invalidModels.length>0 ||
                       !models.length ||
                       !options.data?.supported ||

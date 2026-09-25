@@ -1417,6 +1417,9 @@ function Dashboard({
               sources={sourceList}
               refreshAction={refreshButton}
               onSaved={() => {
+                queryClient.removeQueries({ queryKey: ["channel-import-keys"] });
+                queryClient.removeQueries({ queryKey: ["sub-import-options"] });
+                queryClient.removeQueries({ queryKey: ["configured-import-options"] });
                 void sourceQuery.refetch();
                 void queryClient.invalidateQueries({ queryKey: ["keys"] });
                 void queryClient.invalidateQueries({ queryKey: ["catalog"] });

@@ -87,6 +87,27 @@ func (s *Service) subChannelOptions(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "请选择 uni-api 来源", 404)
 		return
 	}
+	// The destination selector needs only opaque caller IDs and masked labels.
+	// Never make it wait for channel-controls or a key's model catalog; those
+	// live reads still fence every subsequent route edit with a revision.
+	if r.URL.Query().Get("keys_only") == "true" {
+		keys, status, err := fetchSource(r.Context(), src, "/v1/api-keys", nil)
+		if err != nil {
+			http.Error(w, "无法读取来源 API key", status)
+			return
+		}
+		if keys["can_inspect_all"] != true {
+			http.Error(w, "来源密钥无管理权限", http.StatusForbidden)
+			return
+		}
+		data, ok := keys["data"].([]any)
+		if !ok {
+			http.Error(w, "来源返回了无效的 API key 列表", http.StatusBadGateway)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"keys": data})
+		return
+	}
 	state, status, err := subGateway(r.Context(), src, "GET", "/v1/channel-controls", nil)
 	if err != nil {
 		http.Error(w, err.Error(), status)

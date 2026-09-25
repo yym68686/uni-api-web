@@ -30,6 +30,7 @@ import type { ManagedChannel } from "./channelManagement";
 import { ConfiguredChannelDialog } from "./ChannelRoutes";
 import { managedRouteCount, useAllChannelRoutes } from "./channelRouteData";
 import { useConsoleSources } from "./consoleSources";
+import { useChannelImportKeys } from "./channelImportKeys";
 import { CompactionStatus, compactionStatus, compactionLabels } from "./SubCompaction";
 import type { CompactionResult } from "./SubCompaction";
 import { ToolUseStatus, toolUseLabels, toolUseDescription } from "./SubToolUse";
@@ -799,6 +800,7 @@ function CheckDetails({
 export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   const client = useQueryClient();
   const sources = useConsoleSources(user);
+  useChannelImportKeys((sources.data?.data || []).map(source => source.id));
   const query = useSubAccounts();
   const prices = useSubPrices(user);
   const accounts = query.data?.data || [];
