@@ -1,35 +1,15 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { AnalyticsInitializingError, channelParams, initializationRetryInterval } from "./api";
-import { readMetrics } from "./metricsApi";
+import { AnalyticsInitializingError } from "./api";
+import { useChannelTimeseries } from "./channelTimeseries";
+import type { ChannelTimeseriesProps } from "./channelTimeseries";
 import { count, rate } from "./format";
 import { ranges } from "./analytics";
 import { Spinner } from "./ui";
-import type { Channel, Connection } from "./types";
 
-export interface CacheTrendProps {
-  row: Channel;
-  connection: Connection;
-  keyId: string;
-  window: string;
-  endpoint: string;
-  stream: string;
-  refresh: number;
-}
+export type CacheTrendProps = ChannelTimeseriesProps;
 export function CacheTrend({ row, connection, keyId, window, endpoint, stream, refresh }: CacheTrendProps) {
   const [active, setActive] = useState<number | null>(null);
-  const query = useQuery({
-    queryKey: ["cache-trend", connection.session, row.source_id, row.provider, row.model, row.upstream_model, keyId, window, endpoint, stream, refresh],
-    queryFn: ({ signal }) => {
-      const params = channelParams(keyId, window, row.model, endpoint, stream);
-      params.set("provider", row.provider);
-      params.set("upstream_model", row.upstream_model);
-      return readMetrics({ ...connection, sourceId: row.source_id || connection.sourceId }, "/v1/channel-metrics/timeseries?" + params, signal, endpoint, stream);
-    },
-    retry: false,
-    refetchInterval: initializationRetryInterval,
-    staleTime: 15000,
-  });
+  const query = useChannelTimeseries({ row, connection, keyId, window, endpoint, stream, refresh });
   const data = query.data;
   const points = data?.data.flatMap((channel) => channel.points || []) || [];
   const known = points.filter((p) => p.cache_rate != null);

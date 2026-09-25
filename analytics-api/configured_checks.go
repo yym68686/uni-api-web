@@ -84,7 +84,7 @@ func (s *Service) queueConfiguredChecks(w http.ResponseWriter, r *http.Request) 
 	if !decodeControlLimit(w, r, &in, checkBatchBodyLimit) {
 		return
 	}
-	if (in.Kind != "check" && in.Kind != "quality" && in.Kind != "compaction" && in.Kind != "tool-use") || len(in.Targets) == 0 || len(in.Targets) > 500 {
+	if (in.Kind != "check" && in.Kind != "availability" && in.Kind != "quality" && in.Kind != "compaction" && in.Kind != "tool-use") || len(in.Targets) == 0 || len(in.Targets) > 500 {
 		http.Error(w, "无效检测任务", 400)
 		return
 	}
@@ -110,7 +110,7 @@ func (s *Service) queueConfiguredChecks(w http.ResponseWriter, r *http.Request) 
 			}
 			sources[t.Source] = src
 		}
-		if in.Kind == "check" && len(t.Models) == 0 {
+		if (in.Kind == "check" || in.Kind == "availability") && len(t.Models) == 0 {
 			http.Error(w, "请选择检测模型", 400)
 			return
 		}
@@ -128,10 +128,10 @@ func (s *Service) queueConfiguredChecks(w http.ResponseWriter, r *http.Request) 
 			kind, models = "model", []string{checkModel}
 		} else if kind == "check" {
 			kind = "model"
-		} else {
+		} else if kind == "compaction" || (kind == "tool-use" && len(models) == 0) {
 			models = []string{""}
 		}
-		if kind == "tool-use" {
+		if kind == "tool-use" && len(t.Models) == 0 {
 			// The dispatcher waits for availability checks, then creates one bounded
 			// job per successful model. Ignore duplicate clicks while children run.
 			var active bool
@@ -211,7 +211,7 @@ func (s *Service) configuredCheckOne(parent context.Context) bool {
 	run = randomID()
 	err := s.control.db.QueryRowContext(parent, `WITH job AS (
  SELECT source_id,provider,kind,model FROM console_configured_checks c WHERE state='queued'
- AND (kind='model' OR NOT EXISTS(SELECT 1 FROM console_configured_checks m WHERE m.source_id=c.source_id AND m.provider=c.provider AND m.kind='model' AND m.state IN ('queued','running')))
+	AND (kind IN ('model','availability') OR NOT EXISTS(SELECT 1 FROM console_configured_checks m WHERE m.source_id=c.source_id AND m.provider=c.provider AND m.kind IN ('model','availability') AND m.state IN ('queued','running')))
  ORDER BY updated_at,source_id,provider,model FOR UPDATE SKIP LOCKED LIMIT 1)
  UPDATE console_configured_checks c SET state='running',run_id=$1,deadline=now()+interval '210 seconds'
  FROM job j WHERE c.source_id=j.source_id AND c.provider=j.provider AND c.kind=j.kind AND c.model=j.model
@@ -263,7 +263,7 @@ func (s *Service) runConfiguredCheck(ctx context.Context, c *configuredCheck, ta
 	if err != nil || decodeMap(runtime["capabilities"], &caps) != nil || !caps.Targeted {
 		return errors.New("来源不支持渠道定向检测，请更新 uni-api 或检查来源权限")
 	}
-	providers, err := configuredProviders(preflight, src)
+	providers, err := effectiveProviders(preflight, src, true)
 	if err != nil {
 		return errors.New("无法确认当前渠道配置，请检查来源配置读取权限")
 	}
@@ -306,7 +306,7 @@ func (s *Service) runConfiguredCheck(ctx context.Context, c *configuredCheck, ta
 	}
 	candidates := subCompactionModels(models)
 	client := &http.Client{Timeout: 60 * time.Second, Transport: configuredProbeTransport{base: http.DefaultTransport, provider: c.Provider, allowUnconfigured: caps.Unconfigured}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	if c.Kind == "model" {
+	if c.Kind == "model" || c.Kind == "availability" {
 		valid := false
 		for _, m := range candidates {
 			if m == c.Model {
@@ -317,7 +317,8 @@ func (s *Service) runConfiguredCheck(ctx context.Context, c *configuredCheck, ta
 		if !valid && !caps.Unconfigured {
 			return errors.New("来源版本不支持探测未配置模型，请更新 uni-api；该模型尚未发起上游检测")
 		}
-		if c.Model == checkModel {
+		withQuality := c.Kind == "model" && c.Model == checkModel
+		if withQuality {
 			if err = s.control.beginQuality(ctx, run, qualityScope{Source: c.Source, Provider: c.Provider}, 210*time.Second); err != nil {
 				return errors.New("检测历史保存失败，未发起请求")
 			}
@@ -327,7 +328,7 @@ func (s *Service) runConfiguredCheck(ctx context.Context, c *configuredCheck, ta
 			out = subRunQualityProbe(ctx, client, src.Base, src.Key)
 		} else {
 			out.Availability = subProbeStream(ctx, client, src.Base, src.Key, "say test", c.Model)
-			if c.Model == checkModel {
+			if withQuality {
 				out.Verdict = "error"
 				out.Quality = subProbe{Status: "skipped", Message: "可用性检测未通过"}
 				if out.Availability.Status == "success" && ctx.Err() == nil {
@@ -341,7 +342,7 @@ func (s *Service) runConfiguredCheck(ctx context.Context, c *configuredCheck, ta
 		out.CheckedAt = time.Now().Unix()
 		redact(&out)
 		*result = out
-		if c.Model == checkModel {
+		if withQuality {
 			check := ChannelCheck{SourceID: c.Source, Provider: c.Provider, Model: checkModel, Verdict: out.Verdict, Text: out.Quality.Text, Message: out.Quality.Message, CheckedAt: out.CheckedAt, DurationMS: out.Quality.Duration, QualityProbe: &out.Quality}
 			if err = s.control.finishQuality(run, out.Verdict, out.Quality.Status == "success", out.CheckedAt, check); err != nil {
 				return errors.New("检测历史保存失败")
@@ -359,7 +360,7 @@ func (s *Service) runConfiguredCheck(ctx context.Context, c *configuredCheck, ta
 	// work before model checks have ever run. Try configured models serially.
 	uncertain := false
 	availableModels := map[string]bool{}
-	savedRows, e := s.control.db.QueryContext(ctx, `SELECT model FROM console_configured_checks WHERE source_id=$1 AND provider=$2 AND kind='model' AND state='done' AND fingerprint=$3 AND result->'availability'->>'status'='success'`, c.Source, c.Provider, c.Fingerprint)
+	savedRows, e := s.control.db.QueryContext(ctx, `SELECT model FROM (SELECT DISTINCT ON (model) model,state,result FROM console_configured_checks WHERE source_id=$1 AND provider=$2 AND kind IN ('model','availability') AND fingerprint=$3 ORDER BY model,updated_at DESC) latest WHERE state='done' AND result->'availability'->>'status'='success'`, c.Source, c.Provider, c.Fingerprint)
 	if e != nil {
 		return errors.New("模型检测记录读取失败")
 	}
@@ -381,7 +382,11 @@ func (s *Service) runConfiguredCheck(ctx context.Context, c *configuredCheck, ta
 		if c.Model == "" {
 			return s.expandConfiguredToolChecks(ctx, c, target, run, availableModels, result)
 		}
-		if !availableModels[c.Model] {
+		configured := false
+		for _, model := range candidates {
+			configured = configured || model == c.Model
+		}
+		if !availableModels[c.Model] && !configured {
 			return errors.New("该模型当前没有可用性检测成功记录，请先检测模型")
 		}
 		probe := subProbeToolUse(ctx, client, src.Base, src.Key, c.Model)

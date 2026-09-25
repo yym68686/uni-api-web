@@ -107,7 +107,7 @@ func (s *Service) validateConfiguredModelChanges(ctx context.Context, src contro
 		}
 	}
 	evidence := map[string]modelEvidence{}
-	rows, err := s.control.db.QueryContext(ctx, `SELECT model,state,result FROM console_configured_checks WHERE source_id=$1 AND provider=$2 AND source_target=$3 AND fingerprint=$4 AND kind='model'`, src.ID, provider, controlTarget(src), fingerprint)
+	rows, err := s.control.db.QueryContext(ctx, `SELECT model,state,result FROM console_configured_checks WHERE source_id=$1 AND provider=$2 AND source_target=$3 AND fingerprint=$4 AND kind IN ('model','availability')`, src.ID, provider, controlTarget(src), fingerprint)
 	if err != nil {
 		return err
 	}

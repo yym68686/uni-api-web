@@ -300,7 +300,19 @@ func TestConfiguredChecksThroughRealGatewayWithoutClientRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A drawer may point to a key-owned temporary channel rather than the
+	// base-config provider. Its diagnostics must use that exact effective copy.
+	keys, _, err := fetchSource(ctx, src, "/v1/api-keys", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := keys["data"].([]any)[0].(map[string]any)["key_id"].(string)
+	before, _, err = subGateway(ctx, src, "POST", "/v1/temporary-channels", map[string]any{"revision": before["revision"], "api_key_id": key, "provider": "sub2api-drawer", "base_url": upstream.URL + "/native/v1/responses", "api_key": "fixture-key", "models": []string{checkModel, "custom-model"}, "position": 1})
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, test := range []struct{ provider, kind, model, want string }{
+		{"sub2api-drawer", "availability", checkModel, "success"}, {"sub2api-drawer", "tool-use", "custom-model", "supported"}, {"sub2api-drawer", "compaction", "", "supported"},
 		{"native", "model", checkModel, "success"}, {"native", "model", "new-unconfigured-model", "success"}, {"native", "compaction", "", "supported"}, {"native", "tool-use", checkModel, "supported"}, {"claude", "model", "claude-fixture", "success"}, {"claude", "model", "claude-new-unconfigured", "success"}, {"gemini", "model", "gemini-fixture", "success"}, {"gemini", "model", "gemini-new-unconfigured", "success"}, {"fail", "model", "custom-model", "error"},
 	} {
 		c := configuredCheck{Source: src.ID, Provider: test.provider, Kind: test.kind, Model: test.model}

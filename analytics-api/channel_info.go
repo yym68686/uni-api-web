@@ -18,6 +18,12 @@ type configuredProvider struct {
 }
 
 func configuredProviders(ctx context.Context, src controlSource) ([]configuredProvider, error) {
+	return effectiveProviders(ctx, src, false)
+}
+
+// Diagnostics must target the actual installed channel, including temporary
+// key-owned copies. Inventory/binding discovery keeps its original filtering.
+func effectiveProviders(ctx context.Context, src controlSource, includeTemporary bool) ([]configuredProvider, error) {
 	if src.configKeyError != nil {
 		return nil, src.configKeyError
 	}
@@ -33,7 +39,7 @@ func configuredProviders(ctx context.Context, src controlSource) ([]configuredPr
 			if e = decodeMap(effective["providers"], &providers); e == nil {
 				filtered := providers[:0]
 				for _, p := range providers {
-					if !p.Temporary || p.IdentityChanged {
+					if includeTemporary || !p.Temporary || p.IdentityChanged {
 						filtered = append(filtered, p)
 					}
 				}

@@ -465,7 +465,15 @@ func (e *Engine) attachTimeseries(ctx context.Context, result *QueryResult, f Qu
       coalesce(sum(CASE WHEN kind='attempt' AND outcome NOT IN ('success','completed','incomplete','cancelled','client_cancelled','hedge_cancelled','skipped') THEN n ELSE 0 END),0)::BIGINT,
       coalesce(sum(CASE WHEN kind='request' THEN input_tokens ELSE 0 END),0)::BIGINT,
       coalesce(sum(CASE WHEN kind='request' THEN cache_read_tokens ELSE 0 END),0)::BIGINT,
-      coalesce(sum(CASE WHEN kind='request' THEN cache_samples ELSE 0 END),0)::BIGINT
+      coalesce(sum(CASE WHEN kind='request' THEN cache_samples ELSE 0 END),0)::BIGINT,
+      to_json(`+mergeHistogramSQL("(CASE WHEN kind='attempt' THEN created_bins ELSE []::BIGINT[] END)")+`),
+      coalesce(sum(created_count) FILTER (WHERE kind='attempt'),0)::BIGINT,
+      coalesce(sum(created_sum) FILTER (WHERE kind='attempt'),0),
+      arg_max(last_created,last_ms) FILTER (WHERE kind='attempt'),
+      to_json(`+mergeHistogramSQL("(CASE WHEN kind='attempt' THEN text_bins ELSE []::BIGINT[] END)")+`),
+      coalesce(sum(text_count) FILTER (WHERE kind='attempt'),0)::BIGINT,
+      coalesce(sum(text_sum) FILTER (WHERE kind='attempt'),0),
+      arg_max(last_text,last_ms) FILTER (WHERE kind='attempt')
       FROM rollups WHERE `+strings.Join(where, " AND ")+` GROUP BY bucket ORDER BY bucket`, args...)
 	if err != nil {
 		return err
@@ -473,7 +481,9 @@ func (e *Engine) attachTimeseries(ctx context.Context, result *QueryResult, f Qu
 	defer rows.Close()
 	for rows.Next() {
 		var period, success, failed, input, cached, samples int64
-		if err = rows.Scan(&period, &success, &failed, &input, &cached, &samples); err != nil {
+		var latency Summary
+		var createdBins, textBins any
+		if err = rows.Scan(&period, &success, &failed, &input, &cached, &samples, &createdBins, &latency.CreatedCount, &latency.CreatedSum, &latency.LastCreated, &textBins, &latency.TextCount, &latency.TextSum, &latency.LastText); err != nil {
 			return err
 		}
 		var rate any
@@ -481,6 +491,15 @@ func (e *Engine) attachTimeseries(ctx context.Context, result *QueryResult, f Qu
 			rate = float64(cached) / float64(input)
 		}
 		point := map[string]any{"timestamp": max(period, startMS) / 1000, "bucket_start": period / 1000, "bucket_end": min(period+bucket, endMS) / 1000, "success": success, "failed": failed, "input_tokens": input, "cache_read_tokens": cached, "cache_samples": samples, "cache_rate": rate, "covered": true}
+		// Merge the stored histograms before computing percentiles; never average
+		// p50/p95 or count the winning request's copy of an attempt a second time.
+		point["response_created"] = distribution(histogramValues(createdBins), latency.CreatedCount, latency.CreatedSum, latency.LastCreated)
+		point["first_text"] = distribution(histogramValues(textBins), latency.TextCount, latency.TextSum, latency.LastText)
+		point["success_rate_denominator"] = success + failed
+		point["success_rate"] = nil
+		if success+failed > 0 {
+			point["success_rate"] = float64(success) / float64(success+failed)
+		}
 		// The existing overview chart consumes one aggregate series. Drawer
 		// queries explicitly scope this same series to the clicked channel.
 		if len(result.Data) > 0 {

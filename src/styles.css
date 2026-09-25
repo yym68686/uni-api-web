@@ -3029,3 +3029,28 @@ nav > button.active > svg {
 .binding-remove-actions .button { min-width: 88px; white-space: nowrap; }
 .binding-remove-actions .button.danger { background: var(--danger-bg); color: var(--danger); border-color: var(--danger); }
 .binding-remove-actions .button.danger:hover:not(:disabled) { background: var(--danger); color: var(--bg); }
+
+/* Channel drawer: charts use the same compact surface as the existing cache curve. */
+.channel-detail-trends h3 { display:flex;align-items:center;justify-content:space-between;gap:12px; }
+.channel-detail-trends h3 > span {font-size:12px;font-weight:400;}
+.detail-curve {margin:18px 0;padding:14px 12px;background:var(--subtle);border:1px solid var(--line);border-radius:10px;}
+.detail-curve-heading {display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;}
+.detail-curve-heading h4 {margin:0;font-size:13px;}
+.detail-curve-legend {display:flex;gap:12px;font-size:11px;color:var(--muted);}
+.detail-curve-legend span {display:flex;gap:5px;align-items:center;}
+.detail-curve-legend i {width:10px;height:3px;border-radius:2px;}
+.detail-curve svg {display:block;width:100%;overflow:visible;}
+.detail-curve svg line {stroke:var(--line);stroke-dasharray:3 4;}
+.detail-curve svg text {fill:var(--muted);font-size:10px;}
+.detail-curve-line {fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;}
+.detail-curve svg circle {fill:currentColor;}
+.detail-curve-hit {fill:transparent;cursor:crosshair;outline:none;}
+.detail-curve-hit:focus {stroke:var(--ink);stroke-dasharray:3 3;}
+.detail-curve-value {display:flex;flex-wrap:wrap;gap:5px 12px;justify-content:space-between;margin-top:10px;font-size:11px;}
+.detail-curve-value small {width:100%;color:var(--muted);}
+.detail-check-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;}
+.detail-check-item {display:flex;flex-direction:column;gap:7px;padding:12px;border:1px solid var(--line);border-radius:10px;min-width:0;}
+.detail-check-item .button {justify-content:center;white-space:nowrap;}
+.detail-check-item > small,.detail-check-item > span,.detail-check-item > p {font-size:11px;overflow-wrap:anywhere;}
+.detail-check-item > small {color:var(--muted);}
+@media(max-width:420px){.detail-check-grid{grid-template-columns:1fr;}}

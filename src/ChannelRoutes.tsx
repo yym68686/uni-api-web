@@ -244,7 +244,7 @@ export function ConfiguredChannelDialog({
   const modelOptions = [
     ...new Set([...item.models, ...(selectedOverride||[]), ...aliases.map(a=>a.upstream), ...SUB_MODELS,
       ...providerRoutes(routes[sources.indexOf(item.source_id)]?.data?.data||[],[item.provider]).flatMap(r=>[r.model,r.upstream_model||r.model]),
-      ...(toolChecks.data?.data||[]).filter(c=>c.source_id===item.source_id&&c.provider===item.provider&&c.kind==="model").map(c=>c.model)]),
+      ...(toolChecks.data?.data||[]).filter(c=>c.source_id===item.source_id&&c.provider===item.provider&&(c.kind==="model"||c.kind==="availability")).map(c=>c.model)]),
   ];
   const allChecks=configuredModelChecks(item,accounts.data?.data||[],toolChecks.data?.data||[],modelOptions);
   const canSelectModel=(model:string)=>!toolDefaultsPending&&!toolDefaultsError&&modelIsAvailable(allChecks.find(c=>c.model===model));

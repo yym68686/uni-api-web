@@ -13,7 +13,7 @@ import { boundGroups } from "./sub2apiImports";
 // merged summary. Credentials changed since detection invalidate old checks.
 export function configuredModelChecks(member:ManagedChannel, accounts:SubAccount[], checks:ConfiguredCheck[], models:string[]): SubModelCheck[] {
   const groups=boundGroups(member);
-  const native=checks.filter(c=>c.kind==="model" && c.source_id===member.source_id && c.provider===member.provider &&
+  const native=checks.filter(c=>(c.kind==="model"||c.kind==="availability") && c.source_id===member.source_id && c.provider===member.provider &&
     (c.fingerprint||"")===(member.probe_fingerprint||""));
   const available=(c:SubModelCheck)=>c.state==="done"&&c.result?.availability.status==="success";
   const recent=(items:SubModelCheck[])=>items.sort((a,b)=>
@@ -51,7 +51,7 @@ export interface ManagedChannel extends InstalledChannel {
 export interface ConfiguredCheck {
   source_id: string;
   provider: string;
-  kind: "model" | "compaction" | "tool-use";
+  kind: "model" | "availability" | "compaction" | "tool-use";
   model: string;
   fingerprint: string;
   state: string;
@@ -264,7 +264,7 @@ export function managementRows(
       item.account_ids || [],
       item,
     );
-    const checkModels = [...new Set([...item.models, ...(!bound ? SUB_MODELS : []), ...native.filter(c => c.kind === "model").map(c => c.model)])];
+    const checkModels = [...new Set([...item.models, ...(!bound ? SUB_MODELS : []), ...native.filter(c => (c.kind === "model" || c.kind === "availability")).map(c => c.model)])];
     entry.checks = checkModels.map((name) => {
       const candidates = visibleBindings
         .filter((b) => b.member.models.includes(name))
@@ -275,7 +275,7 @@ export function managementRows(
               )
             : [],
         );
-      for (const c of native.filter(c => c.kind === "model" && c.model === name)) {
+      for (const c of native.filter(c => (c.kind === "model" || c.kind === "availability") && c.model === name)) {
         candidates.push({ model:name, source_name:members.find(m => m.source_id === c.source_id)?.source_name, state:c.state, message:c.message, result:c.result as SubTarget["result"] });
       }
       const check = candidates.sort(
@@ -292,6 +292,8 @@ export function managementRows(
       if (quality) {
         target.history = quality.history;
         target.check_source_id = quality.source_id;
+        const result=quality.result as SubTarget["result"];
+        if(result)target.quality_check={source_id:quality.source_id,provider:quality.provider,model:"gpt-6-astra",checked_at:result.checked_at,verdict:result.verdict as NonNullable<SubTarget["quality_check"]>["verdict"],text:result.quality.text,message:result.quality.message,duration_ms:result.quality.duration_ms,quality_probe:result.quality};
       }
     }
     entry.selected = entry.checks.find((c) => c.model === model);

@@ -79,6 +79,8 @@ import { SiteLink, useChannelSites, dashboardURL } from "./ChannelSite";
 import { ChannelAccess } from "./ChannelAccess";
 import { ChannelSettings } from "./ChannelSettings";
 import { CacheTrend } from "./CacheTrend";
+import { ChannelDetailTrends } from "./ChannelDetailTrends";
+import { ChannelDetailChecks } from "./ChannelDetailChecks";
 import type { CacheTrendProps } from "./CacheTrend";
 import { QualityHistory, QualityProbability, qualityTooltip } from "./QualityHistory";
 import type { ChannelCheck } from "./ChannelChecks";
@@ -807,6 +809,8 @@ function Detail({
             <>
               <div className="detail-channel-actions"><Status row={row} />{trend.connection.account&&<ChannelSettings row={row}/>}</div>
               {trend.connection.account && <ChannelAccess key={providerId(row)} row={row} imports={imports} onRemoved={onClose} />}
+              {row.source_id && trend.connection.account && <ChannelDetailChecks key={`${providerId(row)}:${row.model}:checks`} row={row} />}
+              <ChannelDetailTrends key={`${providerId(row)}:${row.model}:trends`} row={row} {...trend} />
               <CacheTrend key={`${providerId(row)}:${row.model}`} row={row} {...trend} />
               {row.source_id && trend.connection.account && <section className="detail-section">
                 <h3>降智检测</h3>

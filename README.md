@@ -40,6 +40,12 @@ Only the selected filter key's opaque ID is stored, never the access credential.
   cache and explicit unsupported/error/unknown states. Shared balances are never
   summed. An exhausted channel requires all upstream keys to be known and empty.
 - Optional one-minute traffic buckets from the timeseries API; no synthetic charts.
+- Channel drawers share one scoped history request for response-created p50/p95,
+  success-rate and cache-rate curves. Gaps stay empty. Independent availability,
+  current-model Tool use, Astra quality and automatic-model compaction checks
+  target the selected source/provider through the gateway, including key-owned
+  temporary channels, without changing routes. Availability-only checks do not
+  run the quality probe.
 - Optional 30-second metric refresh, paused while the page is in the background.
 - S3-backed history across today/week/month/year/all ranges, usage and estimated
   cost dashboards, live channel concurrency, cache rates and editable model prices.
