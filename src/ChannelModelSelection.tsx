@@ -13,8 +13,25 @@ export function unavailableModelChanges(
   available: (model: string) => boolean,
 ) {
   return Object.entries(desired)
-    .filter(([name, upstream]) => saved[name] !== upstream && !available(upstream))
+    .filter(
+      ([name, upstream]) => saved[name] !== upstream && !available(upstream),
+    )
     .map(([name]) => name);
+}
+
+// Failed/unknown pairs that are already serving may be retained in place. A
+// batch edit must not turn that retention exception into permission to add
+// the pair to every other caller key.
+export function retainedOnlyModels(
+  desired: Record<string, string>,
+  saved: Record<string, string>,
+  available: (model: string) => boolean,
+) {
+  return Object.fromEntries(
+    Object.entries(desired).filter(
+      ([name, upstream]) => saved[name] === upstream && !available(upstream),
+    ),
+  );
 }
 
 // A self mapping is an ordinary selected model, even if it was serialized in
@@ -85,7 +102,9 @@ export function ChannelModelSelection({
               type="checkbox"
               checked={selected.includes(model)}
               aria-label={model}
-              disabled={!selected.includes(model) && !!canSelect && !canSelect(model)}
+              disabled={
+                !selected.includes(model) && !!canSelect && !canSelect(model)
+              }
               onChange={(e) =>
                 onChange(
                   e.target.checked

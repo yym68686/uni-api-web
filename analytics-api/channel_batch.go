@@ -92,9 +92,15 @@ func (s *Service) applyChannelBatch(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	unlock, err := s.control.lockControls(ctx, src.ID)
+	lockCtx, stopWaiting := context.WithTimeout(ctx, 15*time.Second)
+	unlock, err := s.control.waitControls(lockCtx, src.ID)
+	stopWaiting()
 	if err != nil {
-		http.Error(w, err.Error(), 409)
+		if errors.Is(err, context.DeadlineExceeded) {
+			http.Error(w, "渠道配置仍在同步，等待超时；尚未提交修改，请稍后重试", 409)
+		} else {
+			http.Error(w, "无法取得渠道配置锁；尚未提交修改，请稍后重试", 503)
+		}
 		return
 	}
 	defer unlock()

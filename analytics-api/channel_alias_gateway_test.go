@@ -679,6 +679,13 @@ func TestModelAliasesServeBothNamesWithRealGateway(t *testing.T) {
 	if unchanged["revision"] != input.Revision {
 		t.Fatal("failed batch partially committed")
 	}
+	// A short background recovery lock must delay this batch rather than fail
+	// all of its caller keys. State/revision checks still happen after waiting.
+	releaseLock, lockErr := store.lockControls(ctx, src.ID)
+	if lockErr != nil {
+		t.Fatal(lockErr)
+	}
+	go func() { time.Sleep(150 * time.Millisecond); releaseLock() }()
 	result := batchCall(input, 200)
 	if result["changed"] != true {
 		t.Fatal(result)

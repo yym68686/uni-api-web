@@ -2,7 +2,12 @@ import { expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
-import { ChannelModelSelection, splitChannelModels, unavailableModelChanges } from "./ChannelModelSelection";
+import {
+  ChannelModelSelection,
+  splitChannelModels,
+  unavailableModelChanges,
+  retainedOnlyModels,
+} from "./ChannelModelSelection";
 it("classifies saved identity models as checked originals even with no model inventory", () => {
   expect(
     splitChannelModels([
@@ -18,27 +23,52 @@ it("classifies saved identity models as checked originals even with no model inv
 
 it("permits removal of a saved failed model without allowing it to be added back", async () => {
   function Editor() {
-    const [selected,setSelected]=useState(["saved-failed"]);
-    return <ChannelModelSelection models={["saved-failed","new-failed","passed"]} selected={selected} onChange={setSelected} canSelect={m=>m==="passed"} editing/>;
+    const [selected, setSelected] = useState(["saved-failed"]);
+    return (
+      <ChannelModelSelection
+        models={["saved-failed", "new-failed", "passed"]}
+        selected={selected}
+        onChange={setSelected}
+        canSelect={(m) => m === "passed"}
+        editing
+      />
+    );
   }
-  render(<Editor/>);
-  const user=userEvent.setup();
-  const saved=screen.getByRole("checkbox",{name:"saved-failed"});
+  render(<Editor />);
+  const user = userEvent.setup();
+  const saved = screen.getByRole("checkbox", { name: "saved-failed" });
   expect(saved).toBeChecked();
   expect(saved).toBeEnabled();
-  expect(screen.getByRole("checkbox",{name:"new-failed"})).toBeDisabled();
+  expect(screen.getByRole("checkbox", { name: "new-failed" })).toBeDisabled();
   await user.click(saved);
   expect(saved).not.toBeChecked();
   expect(saved).toBeDisabled();
-  await user.click(screen.getByRole("checkbox",{name:"passed"}));
-  expect(screen.getByRole("checkbox",{name:"passed"})).toBeChecked();
+  await user.click(screen.getByRole("checkbox", { name: "passed" }));
+  expect(screen.getByRole("checkbox", { name: "passed" })).toBeChecked();
 });
 
-it("preserves exact saved pairs but requires passing evidence for new aliases and changed upstreams",()=>{
-  expect(unavailableModelChanges(
-    {saved:"failed",alias:"failed",changed:"failed",good:"passed"},
-    {saved:"failed",changed:"previous"},m=>m==="passed",
-  )).toEqual(["alias","changed"]);
+it("preserves exact saved pairs but requires passing evidence for new aliases and changed upstreams", () => {
+  expect(
+    unavailableModelChanges(
+      { saved: "failed", alias: "failed", changed: "failed", good: "passed" },
+      { saved: "failed", changed: "previous" },
+      (m) => m === "passed",
+    ),
+  ).toEqual(["alias", "changed"]);
+});
+it("marks only exact saved failed pairs as retain-only for batch edits", () => {
+  expect(
+    retainedOnlyModels(
+      {
+        "gpt-6-sol": "gpt-6-sol",
+        "gpt-6-luna": "gpt-6-luna",
+        alias: "failed",
+        changed: "failed",
+      },
+      { "gpt-6-luna": "gpt-6-luna", changed: "previous" },
+      (m) => m === "gpt-6-sol",
+    ),
+  ).toEqual({ "gpt-6-luna": "gpt-6-luna" });
 });
 it("preserves configured public model semantics and separates independent aliases", () => {
   expect(

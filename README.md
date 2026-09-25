@@ -51,6 +51,12 @@ Only the selected filter key's opaque ID is stored, never the access credential.
   live revision, key membership and route checks still gate saving. The key
   directory stays in the login's query cache and is discarded on logout or a
   source credential change.
+- Batch model edits retain previously saved unverified model mappings only on
+  the keys already serving that exact mapping; the preview names mappings that
+  will not be added elsewhere. Other verified additions proceed normally.
+  Batch writes wait briefly for background configuration recovery, then reread
+  and check the original revision before modifying any routes. Model-validation
+  failures identify the actual unverified upstream names.
 - Optional 30-second metric refresh, paused while the page is in the background.
 - S3-backed history across today/week/month/year/all ranges, usage and estimated
   cost dashboards, live channel concurrency, cache rates and editable model prices.

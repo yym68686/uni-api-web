@@ -184,6 +184,20 @@ it("renders the complete cached preview synchronously with no network reads on c
   expect(d.queryByText(/正在读取全部来源/)).not.toBeInTheDocument();
   expect(fetch).not.toHaveBeenCalled();
 });
+
+it("explains saved failed models that will not be copied to other keys",async()=>{
+  const {user,draft,writes}=setup(false,false,true);
+  draft.originals={new:"new","gpt-6-luna":"gpt-6-luna"};
+  draft.models={...draft.originals};
+  draft.retainedOnly={"gpt-6-luna":"gpt-6-luna"};
+  await user.click(screen.getByRole("button",{name:"应用全部于所有已保存渠道"}));
+  const d=within(screen.getByRole("dialog"));
+  expect(d.getByRole("note")).toHaveTextContent("不会添加到其他 API key：gpt-6-luna");
+  expect(d.getAllByText("不新增未通过模型：gpt-6-luna")).toHaveLength(2);
+  await user.click(d.getByRole("button",{name:"确认应用 2 个接入"}));
+  await waitFor(()=>expect(writes).toHaveLength(2));
+  expect(writes.every(w=>!('gpt-6-luna' in w.targets[0].models))).toBe(true);
+});
 it("revalidates a cached preview on confirmation and requires a second confirmation after revision changes", async () => {
   const { user, writes, revisions } = setup(false, false, true);
   revisions.a = "r2";

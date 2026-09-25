@@ -14,7 +14,7 @@ import {
 } from "./ChannelBindingActions";
 import type { ManagedChannel } from "./channelManagement";
 import { channelMembers,configuredModelChecks,configuredToolUseResult,useConfiguredChecks,useChannelManagement } from "./channelManagement";
-import { ChannelModelSelection, splitChannelModels, modelIsAvailable, unavailableModelChanges } from "./ChannelModelSelection";
+import { ChannelModelSelection, splitChannelModels, modelIsAvailable, unavailableModelChanges, retainedOnlyModels } from "./ChannelModelSelection";
 import { importModelLabel } from "./sub2apiResults";
 import { SUB_MODELS } from "./sub2apiModels";
 import {useSubAccounts} from "./sub2apiAccounts";
@@ -356,7 +356,8 @@ export function ConfiguredChannelDialog({
     const resolve=(m:string)=>item.model_mappings?.[m]||m;
     const originals=Object.fromEntries(selected.map(m=>[m,resolve(m)]));
     const renamed=Object.fromEntries(Object.entries(mapping.mappings).map(([name,m])=>[name,resolve(m)]));
-    return {part,name:group.name,scope:batchScope||{kind:"configured",source:item.source_id,provider:item.provider},originals,aliases:renamed,models:{...originals,...renamed},positions:selectedModelPositions(mapping.models,activePositions,Math.min(position,positions)),anchor:{source:item.source_id,key,provider:editingProvider,revision:options.data?.revision||""}};
+    const desired={...originals,...renamed};
+    return {part,name:group.name,scope:batchScope||{kind:"configured",source:item.source_id,provider:item.provider},originals,aliases:renamed,models:desired,retainedOnly:retainedOnlyModels(desired,savedModels,up=>allChecks.some(c=>resolve(c.model)===up&&canSelectModel(c.model))),positions:selectedModelPositions(mapping.models,activePositions,Math.min(position,positions)),anchor:{source:item.source_id,key,provider:editingProvider,revision:options.data?.revision||""}};
   }
   function batchButton(part:BatchPart,section?:string) {
     if(!editingProvider)return undefined;

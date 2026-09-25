@@ -25,7 +25,7 @@ import { channelBindingView } from "./channelBindingView";
 import type { ChannelRoute } from "./channelRouteData";
 import { providerRoutes, useAllChannelRoutes } from "./channelRouteData";
 import { ModelAliases, aliasMappings } from "./ModelAliases";
-import { ChannelModelSelection, splitChannelModels, unavailableModelChanges } from "./ChannelModelSelection";
+import { ChannelModelSelection, splitChannelModels, unavailableModelChanges, retainedOnlyModels } from "./ChannelModelSelection";
 import type { ModelAlias } from "./ModelAliases";
 import {
   ModelPositions,
@@ -270,7 +270,9 @@ export function Sub2apiImport({
     !!editing && !!options.data && editing.revision !== options.data.revision;
   function batchDraft(part:BatchPart):BatchDraft {
     const originalModels=Object.fromEntries(originals.map(m=>[m,m]));
-    return {part,name:`${account.name} / ${target.name}`,scope:{kind:"site",account:account.id,group:target.group_id},originals:originalModels,aliases:mapping.mappings,models:{...originalModels,...mapping.mappings},positions:selectedModelPositions(models,activePositions,validPosition),anchor:{source:editing?.source_id||activeSource,key:editing?.api_key_id||activeKey,provider:editing?.provider||"",revision:editing?.revision||""}};
+    const desired={...originalModels,...mapping.mappings};
+    const saved=Object.fromEntries((editing?.models||[]).map(m=>[m,editing?.model_mappings?.[m]||m]));
+    return {part,name:`${account.name} / ${target.name}`,scope:{kind:"site",account:account.id,group:target.group_id},originals:originalModels,aliases:mapping.mappings,models:desired,retainedOnly:retainedOnlyModels(desired,saved,m=>available.includes(m)),positions:selectedModelPositions(models,activePositions,validPosition),anchor:{source:editing?.source_id||activeSource,key:editing?.api_key_id||activeKey,provider:editing?.provider||"",revision:editing?.revision||""}};
   }
   function batchButton(part:BatchPart,section?:string) {
     if(!editing)return undefined;

@@ -23,6 +23,9 @@ export interface BatchDraft {
   models: Record<string, string>;
   originals: Record<string, string>;
   aliases: Record<string, string>;
+  // Exact public/upstream pairs allowed only where already saved. This is
+  // preview policy, never server-side authorization to bypass verification.
+  retainedOnly?: Record<string, string>;
   part: BatchPart;
   positions: Record<string, number>;
   anchor: { source: string; key: string; provider: string; revision: string };
@@ -55,6 +58,7 @@ export interface BatchTarget extends BatchBinding {
   currentPositions?: Record<string, number>;
   clamped: boolean;
   skip?: string;
+  omitted?: string[];
 }
 export interface BatchPlan {
   draft: BatchDraft;
@@ -108,6 +112,16 @@ export function batchTargetSettings(
       `${t.sourceName} · Key ${t.keyPosition} 的 ${collision} 与保留的模型名称冲突。请调整重命名，或使用全部设置应用。`,
     );
   const models = { ...originals, ...aliases };
+  const omitted: string[] = [];
+  if (draft.part !== "positions") {
+    for (const [name, up] of Object.entries(draft.retainedOnly || {})) {
+      if (models[name] === up && t.current[name] !== up) {
+        if (name in t.current) models[name] = t.current[name];
+        else delete models[name];
+        omitted.push(name);
+      }
+    }
+  }
   if (!Object.keys(models).length)
     throw new Error(
       `${t.sourceName} · Key ${t.keyPosition} 将没有任何模型，请保留至少一个模型。`,
@@ -142,6 +156,7 @@ export function batchTargetSettings(
     positions,
     currentPositions,
     clamped,
+    omitted,
     skip:
       draft.part === "positions" &&
       !Object.keys(models).some((m) => m in draft.positions)
@@ -465,6 +480,7 @@ export function sameBatchPlan(a: BatchPlan, b: BatchPlan) {
         positions: record(t.positions),
         finalPositions: record(t.finalPositions || {}),
         skip: t.skip,
+        omitted: [...(t.omitted || [])].sort(),
       }))
       .sort((a, b) => a.id.localeCompare(b.id));
   return JSON.stringify(signature(a)) === JSON.stringify(signature(b));

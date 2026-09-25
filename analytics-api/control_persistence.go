@@ -78,6 +78,8 @@ type retainedRecord struct {
 
 // One session lock per source serializes UI writes and recovery across replicas.
 // Model-serving traffic never uses this lock or this PostgreSQL connection.
+var errControlsBusy = errors.New("渠道配置正在同步，请稍后重试")
+
 func (s *controlStore) lockControls(ctx context.Context, source string) (func(), error) {
 	c, e := s.db.Conn(ctx)
 	if e != nil {
@@ -86,9 +88,13 @@ func (s *controlStore) lockControls(ctx context.Context, source string) (func(),
 	sum := sha256.Sum256([]byte("console-controls:" + source))
 	id := int64(binary.BigEndian.Uint64(sum[:8]))
 	var ok bool
-	if e = c.QueryRowContext(ctx, `SELECT pg_try_advisory_lock($1)`, id).Scan(&ok); e != nil || !ok {
+	if e = c.QueryRowContext(ctx, `SELECT pg_try_advisory_lock($1)`, id).Scan(&ok); e != nil {
 		c.Close()
-		return nil, errors.New("渠道配置正在同步，请稍后重试")
+		return nil, e
+	}
+	if !ok {
+		c.Close()
+		return nil, errControlsBusy
 	}
 	return func() {
 		cleanup, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -99,6 +105,24 @@ func (s *controlStore) lockControls(ctx context.Context, source string) (func(),
 		}
 		c.Close()
 	}, nil
+}
+
+// Wait only before any write, then reconcile and recheck the caller's revision.
+// Release the pool connection between attempts so a burst of waiting UI jobs
+// cannot starve the recovery worker that owns the lock.
+func (s *controlStore) waitControls(ctx context.Context, source string) (func(), error) {
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		unlock, err := s.lockControls(ctx, source)
+		if !errors.Is(err, errControlsBusy) {
+			return unlock, err
+		}
+		if !waitStartup(ctx, 100*time.Millisecond) {
+			return nil, ctx.Err()
+		}
+	}
 }
 func (s *controlStore) retainedRecord(ctx context.Context, source string) (retainedRecord, error) {
 	var r retainedRecord

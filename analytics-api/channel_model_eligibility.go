@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
+	"sort"
+	"strings"
 )
 
 // Retaining an exact saved public/upstream pair is not a new selection. Never
@@ -30,12 +33,17 @@ func publicChannelModels(models []string, mappings map[string]string) map[string
 	return result
 }
 func (s *Service) validateSiteModelChanges(ctx context.Context, account string, group int64, current, desired map[string]string) error {
+	unavailable := []string{}
 	for model := range newChannelModels(current, desired) {
 		var available bool
 		err := s.control.db.QueryRowContext(ctx, `SELECT state='done' AND result->'availability'->>'status'='success' FROM console_sub_models WHERE account_id=$1 AND group_id=$2 AND model=$3`, account, group, model).Scan(&available)
 		if err != nil || !available {
-			return errors.New("新增或重命名模型必须检测可用，请先完成检测")
+			unavailable = append(unavailable, model)
 		}
+	}
+	if len(unavailable) > 0 {
+		sort.Strings(unavailable)
+		return fmt.Errorf("新增或重命名模型必须检测可用，请先完成检测；未通过：%s", strings.Join(unavailable, "、"))
 	}
 	return nil
 }
@@ -210,10 +218,15 @@ func (s *Service) validateConfiguredModelChanges(ctx context.Context, src contro
 			}
 		}
 	}
+	unavailable := []string{}
 	for model := range needed {
 		if !evidence[model].available() {
-			return errors.New("新增或重命名模型必须在当前渠道检测可用，请先完成检测")
+			unavailable = append(unavailable, model)
 		}
+	}
+	if len(unavailable) > 0 {
+		sort.Strings(unavailable)
+		return fmt.Errorf("新增或重命名模型必须在当前渠道检测可用，请先完成检测；未通过：%s", strings.Join(unavailable, "、"))
 	}
 	return nil
 }

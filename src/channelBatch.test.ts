@@ -497,6 +497,93 @@ it("sends canonical extra models for server-side availability validation without
   });
 });
 
+it.each(["models", "all"] as const)(
+  "%s batch retains the failed saved Luna pair only in its existing key and adds passing Sol elsewhere",
+  async (part) => {
+    const snapshot = resumeSnapshot(true);
+    snapshot.routes.a.data.push({
+      ...snapshot.routes.a.data[1],
+      model: "gpt-6-luna",
+      upstream_model: "gpt-6-luna",
+      position: 1,
+    });
+    const models = {
+      old: "old",
+      "gpt-6-sol": "gpt-6-sol",
+      "gpt-6-luna": "gpt-6-luna",
+    };
+    const d = {
+      ...draft(part, true),
+      originals: models,
+      aliases: {},
+      models,
+      retainedOnly: { "gpt-6-luna": "gpt-6-luna" },
+      positions: { old: 2, "gpt-6-sol": 1, "gpt-6-luna": 1 },
+    };
+    const plan = buildChannelBatch(d, snapshot, false);
+    expect(plan.targets[0].models).toEqual(models);
+    expect(plan.targets[0].omitted).toEqual([]);
+    expect(plan.targets[1].models).toEqual({
+      old: "old",
+      "gpt-6-sol": "gpt-6-sol",
+    });
+    expect(plan.targets[1].omitted).toEqual(["gpt-6-luna"]);
+    expect(plan.targets[1].finalPositions).not.toHaveProperty("gpt-6-luna");
+    const writes: any[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_path: string, init?: RequestInit) => {
+        writes.push(JSON.parse(String(init?.body)));
+        return Response.json({ revision: "r3" });
+      }),
+    );
+    await applyChannelBatch(plan, () => {});
+    expect(writes).toHaveLength(2);
+    expect(writes[0].targets[0].models).toHaveProperty("gpt-6-luna");
+    expect(writes[1].targets[0].models).not.toHaveProperty("gpt-6-luna");
+    expect(writes.every((w) => !w.allow_unverified_models)).toBe(true);
+  },
+);
+
+it("alias batches retain a failed saved alias only where the exact upstream is already present", () => {
+  const d = {
+    ...draft("aliases"),
+    aliases: { legacy: "failed", renamed: "new" },
+    retainedOnly: { legacy: "failed" },
+  };
+  const saved = { ...binding, installed: {...binding.installed!, model_mappings:{legacy:"failed"}}, current: { old: "old", legacy: "failed" } };
+  expect(batchTargetSettings(d, saved, options).models).toEqual({
+    old: "old",
+    legacy: "failed",
+    renamed: "new",
+  });
+  const other = batchTargetSettings(d, binding, options);
+  expect(other.models).toEqual({ old: "old", renamed: "new" });
+  expect(other.omitted).toEqual(["legacy"]);
+});
+
+it("does not overwrite a different saved upstream with an unverified batch alias", () => {
+  const d = {
+    ...draft("aliases"),
+    aliases: { alias: "failed" },
+    retainedOnly: { alias: "failed" },
+  };
+  const next = batchTargetSettings(d, binding, options);
+  expect(next.models).toEqual(binding.current);
+  expect(next.omitted).toEqual(["alias"]);
+});
+
+it("route-only batches preserve every model regardless of the retention-only list", () => {
+  const d = {
+    ...draft("positions"),
+    positions: { old: 1 },
+    retainedOnly: { old: "old" },
+  };
+  expect(batchTargetSettings(d, binding, options).models).toEqual(
+    binding.current,
+  );
+});
+
 function resumeSnapshot(configured = false): BatchSnapshot {
   return {
     inventory: {

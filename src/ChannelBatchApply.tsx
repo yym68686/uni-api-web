@@ -271,6 +271,12 @@ function BatchDialog({
                 </p>
               ) : (
                 <>
+                  {draft.part !== "positions" && !!Object.keys(draft.retainedOnly || {}).length && (
+                    <p className="sub-import-note" role="note">
+                      已保存但未检测通过的模型仅在原有接入保留，不会添加到其他 API key：
+                      {Object.keys(draft.retainedOnly!).join("、")}。其他已验证模型正常应用。
+                    </p>
+                  )}
                   <p className="sub-import-note">
                     {draft.part === "all"
                       ? "以当前编辑内容替换模型勾选、重命名和路由位置。"
@@ -330,6 +336,7 @@ function BatchDialog({
                                 ? `移除全部 ${Object.keys(t.current).length} 个模型`
                                 : `${Object.keys(t.current).length} → ${Object.keys(t.models).length} 个模型`}
                             </span>
+                            {!!t.omitted?.length && <small>不新增未通过模型：{t.omitted.join("、")}</small>}
                             <details>
                               <summary>
                                 {deleting
