@@ -464,28 +464,6 @@ export async function prepareChannelBatch(
   return plan;
 }
 
-// Reconfirm changes in membership, revision, or the previewed model/position
-// outcome. Object property order alone must not change the comparison.
-export function sameBatchPlan(a: BatchPlan, b: BatchPlan) {
-  const record = (v: Record<string, unknown>) =>
-    Object.entries(v).sort(([a], [b]) => a.localeCompare(b));
-  const signature = (p: BatchPlan) =>
-    p.targets
-      .map((t) => ({
-        id: t.id,
-        revision: t.revision,
-        current: record(t.current),
-        models: record(t.models),
-        mappings: record(t.mappings),
-        positions: record(t.positions),
-        finalPositions: record(t.finalPositions || {}),
-        skip: t.skip,
-        omitted: [...(t.omitted || [])].sort(),
-      }))
-      .sort((a, b) => a.id.localeCompare(b.id));
-  return JSON.stringify(signature(a)) === JSON.stringify(signature(b));
-}
-
 // A site may have two related providers on the same caller key. Project their
 // sequential edits together so the preview shows final positions, not two
 // providers both claiming the same slot. The write positions remain explicit.

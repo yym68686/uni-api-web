@@ -30,6 +30,8 @@ function setup(remove = false, failSecond = false, preload = false) {
       if (init?.method === "POST") {
         const body = JSON.parse(String(init.body));
         writes.push({ ...body, source_id: src });
+        if (body.revision !== revisions[src])
+          return new Response("配置已变化，请核对后继续", { status: 409 });
         if (failures.has(src))
           return new Response("来源断开，请核对结果", { status: 502 });
         revisions[src] = "r2";
@@ -198,7 +200,7 @@ it("explains saved failed models that will not be copied to other keys",async()=
   await waitFor(()=>expect(writes).toHaveLength(2));
   expect(writes.every(w=>!('gpt-6-luna' in w.targets[0].models))).toBe(true);
 });
-it("revalidates a cached preview on confirmation and requires a second confirmation after revision changes", async () => {
+it("submits immediately, then reconciles a source rejected for a changed revision", async () => {
   const { user, writes, revisions } = setup(false, false, true);
   revisions.a = "r2";
   await user.click(
@@ -206,15 +208,27 @@ it("revalidates a cached preview on confirmation and requires a second confirmat
   );
   const d = within(screen.getByRole("dialog"));
   await user.click(d.getByRole("button", { name: "确认应用 2 个接入" }));
-  expect(await d.findByRole("alert")).toHaveTextContent("预览已更新");
-  expect(writes).toHaveLength(0);
-  await waitFor(() =>
-    expect(d.getByRole("button", { name: "确认应用 2 个接入" })).toBeEnabled(),
-  );
-  await user.click(d.getByRole("button", { name: "确认应用 2 个接入" }));
-  await d.findByText(/全部应用完成/);
-  expect(writes[0].revision).toBe("r2");
+  await d.findByText(/已确认应用 1\/2/);
+  expect(d.getByText("配置已变化，请核对后继续")).toBeVisible();
   expect(writes).toHaveLength(2);
+  await user.click(d.getByRole("button", { name: "核对剩余接入" }));
+  await waitFor(() =>
+    expect(d.getByRole("button", { name: "确认应用 1 个接入" })).toBeEnabled(),
+  );
+  await user.click(d.getByRole("button", { name: "确认应用 1 个接入" }));
+  await d.findByText(/全部应用完成/);
+  expect(writes[2].revision).toBe("r2");
+  expect(writes).toHaveLength(3);
+});
+
+it("does not re-read every source before submitting a cached preview", async () => {
+  const { writes } = setup(false, false, true);
+  const fetcher = vi.mocked(globalThis.fetch);
+  fireEvent.click(screen.getByRole("button", { name: "应用全部于所有已保存渠道" }));
+  fetcher.mockClear();
+  fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "确认应用 2 个接入" }));
+  await waitFor(() => expect(writes).toHaveLength(2));
+  expect(fetcher.mock.calls.every(([, init]) => init?.method === "POST")).toBe(true);
 });
 it("previews both sources without writing, freezes the draft, and applies only after confirmation", async () => {
   const { user, writes, onApplied, draft } = setup();

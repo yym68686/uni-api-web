@@ -7,7 +7,6 @@ import {
   prepareChannelBatch,
   applyChannelBatch,
   batchPartLabels,
-  sameBatchPlan,
 } from "./channelBatch";
 import { cachedChannelBatch, rememberBatchSnapshot } from "./channelBatchCache";
 import type { BatchDraft, BatchPlan, BatchProgress } from "./channelBatch";
@@ -94,7 +93,6 @@ function BatchDialog({
   const [plan, setPlan] = useState<BatchPlan | null>(initialPlan);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(!initialPlan);
-  const [validating, setValidating] = useState(false);
   const [reload, setReload] = useState(0);
   const [progress, setProgress] = useState<Record<string, BatchProgress>>({});
   const [finished, setFinished] = useState(false);
@@ -141,42 +139,22 @@ function BatchDialog({
     if (!plan || busy || finished) return;
     setBusy(true);
     stop.current = false;
-    setValidating(true);
     setError("");
+    setProgress({});
     try {
-      const current = await prepareChannelBatch(
-        draft,
-        new AbortController().signal,
-        (s) => {
-          if (!stop.current) rememberBatchSnapshot(client, s);
-        },
-        false,
-      );
-      if (stop.current) return;
-      if (!sameBatchPlan(plan, current)) {
-        setPlan(current);
-        setError(
-          "接入范围或配置版本已变化，预览已更新。请核对后再次确认；尚未执行任何修改。",
-        );
-        return;
-      }
-      setPlan(current);
-      setProgress({});
-      setValidating(false);
+      // The batch endpoint checks the live revision and every target before
+      // writing. Re-reading all route catalogs here delays the first POST.
       await applyChannelBatch(
-        current,
+        plan,
         (p) => setProgress((old) => ({ ...old, [p.id]: p })),
         () => stop.current,
       );
       setFinished(true);
     } catch (e) {
-      setError(
-        e instanceof Error ? e.message : "无法核对最新配置，尚未执行任何修改。",
-      );
+      setError(e instanceof Error ? e.message : "批量操作未完成，请核对结果。");
     } finally {
-      setValidating(false);
       setStopping(false);
-      await Promise.all(
+      void Promise.all(
         [
           "channel-management",
           "channel-routes",
@@ -246,14 +224,8 @@ function BatchDialog({
           {plan && (
             <>
               <p className="sub-import-note">
-                确认时核对实际配置，自动跳过已一致的接入；各来源同时提交，同一来源的所有接入一次原子应用。
+                来源提交前核对实际配置，自动跳过已一致的接入；各来源同时提交，同一来源的所有接入一次原子应用。
               </p>
-              {validating && (
-                <p role="status">
-                  <Spinner small />
-                  正在核对最新接入范围，尚未执行修改…
-                </p>
-              )}
               <p className="batch-apply-summary">
                 将{deleting ? "删除" : "更新"}{" "}
                 {new Set(plan.targets.map((t) => t.source)).size} 个来源、
