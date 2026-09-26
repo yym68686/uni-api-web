@@ -98,6 +98,7 @@ import { loadConnection, saveConnection, clearConnection } from "./session";
 import type { Filters, View } from "./preferences";
 import {
   balanceIsLow,
+  balanceStatus,
   count,
   ms,
   rate,
@@ -128,6 +129,7 @@ import {
 import { actualCostRange } from "./actualCost";
 import { useScopedChannelSpend } from "./SubChannelSpend";
 import { useChannelAccountBalances } from "./ChannelAccountBalances";
+import { balanceBelowThreshold, rankBalanceProviders } from "./balanceFilters";
 import { ConsoleHeader, ConsoleNavigation } from "./ConsoleChrome";
 import { StartupScreen } from "./StartupScreen";
 import { useTheme } from "./theme";
@@ -1007,6 +1009,8 @@ function Dashboard({
     model,
     window,
     balanceFilter,
+    balanceTopN,
+    balanceThreshold,
     statusFilter,
     search,
     sort,
@@ -1027,7 +1031,10 @@ function Dashboard({
     saveFilters(baseConnection.base, filters);
   }, [connection.base, filters]);
   const hasFilters = (Object.keys(defaultFilters) as (keyof Filters)[]).some(
-    (key) => filters[key] !== defaultFilters[key],
+    (key) =>
+      ((channelView || view === "balances") &&
+        ["keyId", "sourceId", "model", "search", "balanceTopN", "balanceThreshold"].includes(key)) &&
+      filters[key] !== defaultFilters[key],
   );
   const [detailId, setDetailId] = useState<string | null>(null),
     [showTrend, setShowTrend] = useState(false),
@@ -1055,9 +1062,18 @@ function Dashboard({
     !!keys.data &&
     !keys.data.data.some((item) => item.key_id === keyId);
   const keysLoaded = !!keys.data;
-  const params = channelParams(keyId, window, "", endpoint, stream);
+  const effectiveWindow = view === "balances" ? "15m" : window;
+  const effectiveEndpoint = view === "balances" ? "all" : endpoint;
+  const effectiveStream = view === "balances" ? "all" : stream;
+  const params = channelParams(
+    keyId,
+    effectiveWindow,
+    "",
+    effectiveEndpoint,
+    effectiveStream,
+  );
   const catalog = useQuery({
-    queryKey: ["catalog", connection.session, keyId, endpoint, stream],
+    queryKey: ["catalog", connection.session, keyId, effectiveEndpoint, effectiveStream],
     queryFn: ({ signal }) =>
       request<Catalog>(connection, "/v1/model-channels?" + params, signal),
     enabled:
@@ -1078,14 +1094,14 @@ function Dashboard({
     staleTime: 60_000,
   });
   const metrics = useQuery({
-    queryKey: ["metrics", connection.session, keyId, window, endpoint, stream, channelView && !!baseConnection.account, channelView ? model : ""],
+    queryKey: ["metrics", connection.session, keyId, effectiveWindow, effectiveEndpoint, effectiveStream, channelView && !!baseConnection.account, channelView || view === "balances" ? model : ""],
     queryFn: ({ signal }) =>
       readMetrics(
         connection,
         "/v1/channel-metrics?" + params + "&spend_model=" + encodeURIComponent(model),
         signal,
-        endpoint,
-        stream,
+        effectiveEndpoint,
+        effectiveStream,
         channelView && !!baseConnection.account,
       ),
     staleTime: 30_000,
@@ -1094,12 +1110,12 @@ function Dashboard({
     refetchIntervalInBackground: false,
   });
   const liveMetrics = useQuery({
-    queryKey: ["live-metrics", connection.session, keyId, endpoint, stream],
+    queryKey: ["live-metrics", connection.session, keyId, effectiveEndpoint, effectiveStream],
     queryFn: ({ signal }) =>
       request<Metrics>(
         connection,
         "/v1/channel-metrics?" +
-          channelParams(keyId, "1m", "", endpoint, stream),
+          channelParams(keyId, "1m", "", effectiveEndpoint, effectiveStream),
         signal,
       ),
     enabled:
@@ -1190,7 +1206,13 @@ function Dashboard({
     [tableRows],
   );
   const providers = useMemo(() => [...new Set(rows.map(providerId))], [rows]);
-  const actualRange = useMemo(() => actualCostRange(window), [window]);
+  const actualRange = useMemo(
+    () =>
+      view === "balances"
+        ? { supported: false }
+        : actualCostRange(window),
+    [view, window],
+  );
   const channelSpend = useScopedChannelSpend({ rows, session: connection.session, sourceId: selectedSourceId, keyId, model, endpoint, stream, from: metrics.data?.from, to: metrics.data?.to, snapshot: metrics.data, snapshotError: metrics.isError, snapshotUpdatedAt: metrics.dataUpdatedAt, refresh, auto, enabled: channelView && !!baseConnection.account });
   const limit = useMemo(() => makeLimiter(3), []);
   const accountBalances = useChannelAccountBalances(providers, imported.data?.data || [], connection.session, !!baseConnection.account, auto);
@@ -1202,7 +1224,7 @@ function Dashboard({
         metrics.data?.snapshot_revision,
         provider,
         model,
-        window,
+        effectiveWindow,
       ],
       queryFn: ({ signal }: { signal: AbortSignal }) =>
         limit(
@@ -1216,10 +1238,10 @@ function Dashboard({
                 new URLSearchParams({
                   provider: JSON.parse(provider)[1],
                   ...(model ? { model } : {}),
-                  ...(actualRange.startDate
+                  ...(channelView && actualRange.startDate
                     ? { start_date: actualRange.startDate }
                     : {}),
-                  ...(actualRange.endDate
+                  ...(channelView && actualRange.endDate
                     ? { end_date: actualRange.endDate }
                     : {}),
                 }),
@@ -1251,11 +1273,11 @@ function Dashboard({
         `${channelName(row)} ${row.provider} ${row.model} ${row.upstream_model}`
           .toLowerCase()
           .includes(deferredSearch.toLowerCase())) &&
-      (!balanceFilter || balanceIsLow(balanceMap.get(providerId(row))?.data)) &&
-      (!statusFilter ||
+      (!channelView || !balanceFilter || balanceIsLow(balanceMap.get(providerId(row))?.data)) &&
+      (!channelView || !statusFilter ||
         (statusFilter === "eligible" ? row.eligible : !row.eligible)),
   );
-  if (sort !== "config")
+  if (channelView && sort !== "config")
     filtered.sort((a, b) => {
       const values = (row: Channel) =>
         sort === "success"
@@ -1267,7 +1289,18 @@ function Dashboard({
             : row.stats?.request_to_dispatch?.p50_ms;
       return (values(a) ?? Infinity) - (values(b) ?? Infinity);
     });
-  const balanceProviders = [...new Set(filtered.map(providerId))];
+  const balanceRanks = rankBalanceProviders(
+    filtered,
+    channelView ? "" : balanceTopN,
+  );
+  const balanceProviders = channelView
+    ? [...new Set(filtered.map(providerId))]
+    : balanceRanks.providers.filter((provider) =>
+        balanceBelowThreshold(
+          balanceMap.get(provider)?.data,
+          balanceThreshold,
+        ),
+      );
   const detectionRows = checkTargets(filtered);
   const total = channelView ? filtered.length : balanceProviders.length;
   const pageCount = Math.max(1, Math.ceil(total / 25)),
@@ -1571,21 +1604,23 @@ function Dashboard({
                 </div>
               </div>
               <div className="filters">
-                <div className="select-field time-select">
-                  <Clock3 size={15} />
-                  <select
-                    aria-label="时间范围筛选"
-                    value={window}
-                    onChange={(e) => setFilter("window", e.target.value)}
-                  >
-                    {ranges.map(([value, label]) => (
-                      <option key={value} value={value}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown size={13} />
-                </div>
+                {channelView && (
+                  <div className="select-field time-select">
+                    <Clock3 size={15} />
+                    <select
+                      aria-label="时间范围筛选"
+                      value={window}
+                      onChange={(e) => setFilter("window", e.target.value)}
+                    >
+                      {ranges.map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown size={13} />
+                  </div>
+                )}
                 {sourceList.length > 0 && (
                   <label className="select-field source-select">
                     <Server size={15} />
@@ -1614,7 +1649,9 @@ function Dashboard({
                     value={keyId}
                     onChange={(e) => setFilter("keyId", e.target.value)}
                   >
-                    <option value="">全部渠道 · 配置顺序</option>
+                    <option value="">
+                      {channelView ? "全部渠道 · 配置顺序" : "全部 API key"}
+                    </option>
                     {keyRemoved && (
                       <option value={keyId}>已移除的 API key</option>
                     )}
@@ -1644,74 +1681,121 @@ function Dashboard({
                   </select>
                   <ChevronDown size={13} />
                 </div>
-                <div className="inline-select">
-                  <Globe2 size={13} />
-                  <select
-                    aria-label="端点筛选"
-                    value={endpoint}
-                    onChange={(e) => setFilter("endpoint", e.target.value)}
-                  >
-                    <option value="all">全部端点</option>
-                    {endpoints.map((path) => (
-                      <option key={path} value={path}>
-                        {path}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown size={12} />
-                </div>
-                <div className="inline-select">
-                  <Radio size={13} />
-                  <select
-                    aria-label="流式状态筛选"
-                    value={stream}
-                    onChange={(e) => setFilter("stream", e.target.value)}
-                  >
-                    <option value="all">全部流式状态</option>
-                    <option value="true">流式</option>
-                    <option value="false">非流式</option>
-                  </select>
-                  <ChevronDown size={12} />
-                </div>
-                <button
-                  className={`filter-chip ${balanceFilter ? "active" : ""}`}
-                  aria-pressed={!!balanceFilter}
-                  onClick={() =>
-                    setFilter("balanceFilter", balanceFilter ? "" : "low")
-                  }
-                >
-                  <Wallet size={13} />
-                  余额不足{balanceFilter && <X size={12} />}
-                </button>
-                <div className="inline-select">
-                  <Filter size={13} />
-                  <select
-                    aria-label="渠道状态筛选"
-                    value={statusFilter}
-                    onChange={(e) => setFilter("statusFilter", e.target.value)}
-                  >
-                    <option value="">全部状态</option>
-                    <option value="eligible">可用渠道</option>
-                    <option value="unavailable">不可用渠道</option>
-                  </select>
-                  <ChevronDown size={12} />
-                </div>
-                <div className="inline-select">
-                  <SlidersHorizontal size={13} />
-                  <select
-                    aria-label="排序"
-                    value={sort}
-                    onChange={(e) => setFilter("sort", e.target.value)}
-                  >
-                    <option value="config">
-                      {keyId ? "API key 顺序" : "Provider 顺序"}
-                    </option>
-                    <option value="success">成功率从高到低</option>
-                    <option value="latency">首字延迟从低到高</option>
-                    <option value="wait">请求前等待从低到高</option>
-                  </select>
-                  <ChevronDown size={12} />
-                </div>
+                {view === "balances" && (
+                  <>
+                    <div className="inline-select">
+                      <Layers3 size={13} />
+                      <select
+                        aria-label="模型优先级筛选"
+                        value={balanceTopN}
+                        onChange={(e) => setFilter("balanceTopN", e.target.value)}
+                      >
+                        <option value="">全部优先级</option>
+                        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 50, 100].map((rank) => (
+                          <option key={rank} value={rank}>
+                            前 {rank} 名渠道
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown size={12} />
+                    </div>
+                    <label className="balance-threshold">
+                      <Wallet size={13} />
+                      <span>余额低于 $</span>
+                      <input
+                        aria-label="余额低于美元"
+                        type="number"
+                        min="0"
+                        step="10"
+                        placeholder="不限"
+                        value={balanceThreshold}
+                        onChange={(e) => setFilter("balanceThreshold", e.target.value)}
+                        onBlur={(e) => {
+                          const value = Number(e.currentTarget.value);
+                          if (e.currentTarget.value && value < 0)
+                            setFilter("balanceThreshold", "0");
+                          else if (e.currentTarget.value && value % 10 !== 0)
+                            setFilter(
+                              "balanceThreshold",
+                              String(Math.round(value / 10) * 10),
+                            );
+                        }}
+                      />
+                    </label>
+                  </>
+                )}
+                {channelView && (
+                  <>
+                    <div className="inline-select">
+                      <Globe2 size={13} />
+                      <select
+                        aria-label="端点筛选"
+                        value={endpoint}
+                        onChange={(e) => setFilter("endpoint", e.target.value)}
+                      >
+                        <option value="all">全部端点</option>
+                        {endpoints.map((path) => (
+                          <option key={path} value={path}>
+                            {path}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown size={12} />
+                    </div>
+                    <div className="inline-select">
+                      <Radio size={13} />
+                      <select
+                        aria-label="流式状态筛选"
+                        value={stream}
+                        onChange={(e) => setFilter("stream", e.target.value)}
+                      >
+                        <option value="all">全部流式状态</option>
+                        <option value="true">流式</option>
+                        <option value="false">非流式</option>
+                      </select>
+                      <ChevronDown size={12} />
+                    </div>
+                    <button
+                      className={`filter-chip ${balanceFilter ? "active" : ""}`}
+                      aria-pressed={!!balanceFilter}
+                      onClick={() =>
+                        setFilter("balanceFilter", balanceFilter ? "" : "low")
+                      }
+                    >
+                      <Wallet size={13} />
+                      余额不足{balanceFilter && <X size={12} />}
+                    </button>
+                    <div className="inline-select">
+                      <Filter size={13} />
+                      <select
+                        aria-label="渠道状态筛选"
+                        value={statusFilter}
+                        onChange={(e) => setFilter("statusFilter", e.target.value)}
+                      >
+                        <option value="">全部状态</option>
+                        <option value="eligible">可用渠道</option>
+                        <option value="unavailable">不可用渠道</option>
+                      </select>
+                      <ChevronDown size={12} />
+                    </div>
+                    <div className="inline-select">
+                      <SlidersHorizontal size={13} />
+                      <select
+                        aria-label="排序"
+                        value={sort}
+                        onChange={(e) => setFilter("sort", e.target.value)}
+                      >
+                        <option value="config">
+                          {keyId ? "API key 顺序" : "Provider 顺序"}
+                        </option>
+                        <option value="success">成功率从高到低</option>
+                        <option value="latency">首字延迟从低到高</option>
+                        <option value="wait">请求前等待从低到高</option>
+                      </select>
+                      <ChevronDown size={12} />
+                    </div>
+                  </>
+                )}
                 {hasFilters && (
                   <button
                     className="filter-chip"
@@ -1772,15 +1856,17 @@ function Dashboard({
               ) : total === 0 ? (
                 <Empty
                   title={
-                    pendingBalances && balanceFilter
+                    pendingBalances &&
+                    (channelView ? balanceFilter : balanceThreshold)
                       ? "正在确认渠道余额"
                       : "没有匹配的渠道"
                   }
                   icon={<Search size={26} />}
                 >
-                  {pendingBalances && balanceFilter
+                  {pendingBalances &&
+                  (channelView ? balanceFilter : balanceThreshold)
                     ? `还有 ${pendingBalances} 个渠道正在查询，结果到达后会自动显示。`
-                    : "尝试调整模型、余额状态，或清除搜索条件。"}
+                    : "尝试调整模型、优先级或余额条件，或清除搜索条件。"}
                 </Empty>
               ) : channelView ? (
                 <div className="table-scroll">
@@ -1877,8 +1963,20 @@ function Dashboard({
                   </table>
                 </div>
               ) : (
-                <div className="balance-grid">
-                  {pageProviders.map((provider) => {
+                <div className="table-scroll">
+                  <table className="channel-table balance-table">
+                    <thead>
+                      <tr>
+                        <th className="rank">#</th>
+                        <th>渠道</th>
+                        <th>模型 / 优先级</th>
+                        <th>余额</th>
+                        <th>状态</th>
+                        <th>最近查询</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pageProviders.map((provider, index) => {
                     const balance = balanceMap.get(provider);
                     const providerName = filtered.find(
                       (row) => providerId(row) === provider,
@@ -1889,48 +1987,78 @@ function Dashboard({
                     const sourceRow = rows.find((row) => providerId(row) === provider);
                     const sourceName = sourceRow?.source_name;
                     const sourceLink = siteFor(sourceRow) || dashboardURL(sourceList.find((source) => source.id === sourceRow?.source_id)?.base);
+                    const modelRanks = balanceRanks.ranks.get(provider) || [];
+                    const visibleModelRanks = modelRanks.slice(0, 3);
+                    const checkedAt = Math.max(
+                      0,
+                      ...(balance?.data?.keys || []).map((key) => key.checked_at || 0),
+                    );
                     return (
-                      <article
-                        className={`balance-card ${balanceIsLow(balance?.data) ? "low-balance" : ""}`}
-                        key={provider}
-                      >
-                        <div className="balance-card-top">
-                          <span className="provider-avatar">
-                            {displayName[0].toUpperCase()}
-                          </span>
-                          <span>
-                            <strong><SiteLink base={sourceLink}>{displayName}</SiteLink></strong>
-                            <small>{sourceName}</small>
-                            <small>
-                              {
-                                rows.filter(
-                                  (row) => providerId(row) === provider,
-                                ).length
-                              }{" "}
-                              个模型
-                            </small>
-                          </span>
-                          {balanceIsLow(balance?.data) && (
-                            <span className="status-pill cooling">
-                              余额不足
+                      <tr key={provider}>
+                        <td className="rank mono">
+                          {String(currentPage * 25 + index + 1).padStart(2, "0")}
+                        </td>
+                        <td>
+                          <div className="balance-channel">
+                            <span className="provider-avatar">
+                              {displayName[0].toUpperCase()}
+                            </span>
+                            <span>
+                              <strong><SiteLink base={sourceLink}>{displayName}</SiteLink></strong>
+                              <small>{sourceName || "uni-api"}</small>
+                            </span>
+                          </div>
+                        </td>
+                        <td>
+                          <div className="balance-model-ranks">
+                            {visibleModelRanks.map(({ model: modelName, rank }) => (
+                              <span key={modelName}>
+                                {modelName}<small>第 {rank} 位</small>
+                              </span>
+                            ))}
+                            {modelRanks.length > visibleModelRanks.length && (
+                              <small
+                                className="more"
+                                title={modelRanks
+                                  .slice(3)
+                                  .map(({ model: modelName, rank }) => `${modelName} · 第 ${rank} 位`)
+                                  .join("\n")}
+                              >
+                                另有 {modelRanks.length - visibleModelRanks.length} 个模型
+                              </small>
+                            )}
+                          </div>
+                        </td>
+                        <td>
+                          <BalanceValue
+                            balance={balance?.data}
+                            loading={balance?.isPending}
+                            failed={balance?.isError}
+                          />
+                        </td>
+                        <td>
+                          {balanceIsLow(balance?.data) ? (
+                            <span className="status-pill cooling">余额不足</span>
+                          ) : balance?.isPending ? (
+                            <span className="muted">查询中</span>
+                          ) : balance?.isError ? (
+                            <span className="status-pill cooling">查询失败</span>
+                          ) : balance?.data?.status === "complete" && balance.data.keys?.length ? (
+                            <span className="status-pill healthy">已查询</span>
+                          ) : (
+                            <span className="muted">
+                              {balanceStatus[balance?.data?.status || ""] || "暂无数据"}
                             </span>
                           )}
-                        </div>
-                        <BalanceValue
-                          balance={balance?.data}
-                          loading={balance?.isPending}
-                          failed={balance?.isError}
-                          detail
-                        />
-                        <div className="balance-card-footer">
-                          <Clock3 size={12} />
-                          {balance?.data?.keys?.[0]?.checked_at
-                            ? `查询于 ${time(balance.data.keys[0].checked_at)}`
-                            : "等待有效余额数据"}
-                        </div>
-                      </article>
+                        </td>
+                        <td className="muted">
+                          {checkedAt ? time(checkedAt) : "暂无"}
+                        </td>
+                      </tr>
                     );
                   })}
+                    </tbody>
+                  </table>
                 </div>
               )}
               <div className="table-footer">

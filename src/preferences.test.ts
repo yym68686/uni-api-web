@@ -49,6 +49,8 @@ describe("filter preferences", () => {
         sort: null,
         search: [],
         balanceFilter: "unknown",
+        balanceTopN: "11",
+        balanceThreshold: "15",
       }),
     );
     expect(loadFilters(base)).toEqual({ ...defaultFilters, model: "model-a" });

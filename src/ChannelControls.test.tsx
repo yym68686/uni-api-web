@@ -280,16 +280,28 @@ it("toggles adjustment inside observation with the same table, filters and metri
   const values = labels.map(
     (label) => (screen.getByLabelText(label) as HTMLInputElement).value,
   );
-  for (const view of ["余额管理", "渠道观测"]) {
-    await app.user.click(
-      screen.getByRole("button", { name: new RegExp("^" + view) }),
-    );
-    expect(
-      labels.map(
-        (label) => (screen.getByLabelText(label) as HTMLInputElement).value,
-      ),
-    ).toEqual(values);
+  await app.user.click(screen.getByRole("button", { name: /^余额管理/ }));
+  expect(screen.getByLabelText("uni-api 来源")).toHaveValue("one");
+  expect(screen.getByLabelText("API key 筛选")).toHaveValue("one::key");
+  expect(screen.getByLabelText("模型筛选")).toHaveValue("m");
+  expect(screen.getByLabelText("搜索渠道或模型")).toHaveValue("visible");
+  expect(screen.getByLabelText("模型优先级筛选")).toHaveValue("");
+  expect(screen.getByLabelText("余额低于美元")).toHaveValue(null);
+  for (const label of [
+    "时间范围筛选",
+    "端点筛选",
+    "流式状态筛选",
+    "渠道状态筛选",
+    "排序",
+  ]) {
+    expect(screen.queryByLabelText(label)).not.toBeInTheDocument();
   }
+  await app.user.click(screen.getByRole("button", { name: /^渠道观测/ }));
+  expect(
+    labels.map(
+      (label) => (screen.getByLabelText(label) as HTMLInputElement).value,
+    ),
+  ).toEqual(values);
   expect(app.writes).toHaveLength(0);
   const tableBeforeCancel = screen.getByRole("table");
   await app.user.click(screen.getByRole("button", { name: "取消调整" }));

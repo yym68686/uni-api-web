@@ -162,6 +162,53 @@ describe("dashboard workflows", () => {
     expect(JSON.stringify(localStorage)).not.toContain("platform-secret");
     expect(JSON.stringify(sessionStorage)).not.toContain("platform-secret");
   });
+  it("filters balance rows by per-model priority and exclusive USD threshold", async () => {
+    const { user, calls } = setup();
+    await connect(user);
+    await user.click(screen.getByRole("button", { name: /^余额管理/ }));
+    const table = await screen.findByRole("table");
+    await waitFor(() => expect(within(table).getByText("third")).toBeInTheDocument());
+
+    for (const label of [
+      "时间范围筛选",
+      "端点筛选",
+      "流式状态筛选",
+      "渠道状态筛选",
+      "排序",
+    ]) {
+      expect(screen.queryByLabelText(label)).not.toBeInTheDocument();
+    }
+    await user.selectOptions(screen.getByLabelText("模型筛选"), "model-a");
+    await user.selectOptions(
+      screen.getByLabelText("模型优先级筛选"),
+      "1",
+    );
+    await waitFor(() => {
+      expect(screen.getAllByRole("row")).toHaveLength(2);
+      expect(within(screen.getAllByRole("row")[1]).getByText("first")).toBeInTheDocument();
+    });
+
+    const threshold = screen.getByLabelText("余额低于美元");
+    await user.clear(threshold);
+    await user.type(threshold, "0");
+    await waitFor(() => {
+      expect(screen.getByText("没有匹配的渠道")).toBeInTheDocument();
+    });
+    await user.selectOptions(
+      screen.getByLabelText("模型优先级筛选"),
+      "",
+    );
+    await waitFor(() => {
+      expect(screen.getAllByRole("row")).toHaveLength(2);
+      expect(within(screen.getAllByRole("row")[1]).getByText("third")).toBeInTheDocument();
+    });
+    const balanceCatalog = calls
+      .filter((url) => new URL(url).pathname.endsWith("/v1/model-channels"))
+      .map((url) => new URL(url))
+      .at(-1)!;
+    expect(balanceCatalog.searchParams.get("endpoint")).toBe("all");
+    expect(balanceCatalog.searchParams.get("stream")).toBe("all");
+  });
   it("shows auth error without entering a dashboard", async () => {
     const { user } = setup();
     vi.stubGlobal(

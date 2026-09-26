@@ -5,6 +5,8 @@ export const defaultFilters = {
   model: "",
   window: "15m",
   balanceFilter: "",
+  balanceTopN: "",
+  balanceThreshold: "",
   statusFilter: "",
   search: "",
   sort: "config",
@@ -72,6 +74,21 @@ function validate(value: unknown): Filters {
       ranges.map(([value]) => value),
     ),
     balanceFilter: field("balanceFilter", ["", "low"]),
+    balanceTopN: field("balanceTopN", [
+      "",
+      ...Array.from({ length: 10 }, (_, i) => String(i + 1)),
+      "20",
+      "50",
+      "100",
+    ]),
+    balanceThreshold: (() => {
+      const value = field("balanceThreshold");
+      if (!value) return "";
+      const amount = Number(value);
+      return Number.isFinite(amount) && amount >= 0 && amount % 10 === 0
+        ? value
+        : "";
+    })(),
     statusFilter: field("statusFilter", ["", "eligible", "unavailable"]),
     search: field("search"),
     sort: field("sort", ["config", "success", "latency", "wait"]),

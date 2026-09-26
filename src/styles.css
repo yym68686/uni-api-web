@@ -1044,6 +1044,29 @@ nav > button.active > svg {
   right: 0;
   pointer-events: none;
 }
+.balance-threshold {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 25px;
+  color: var(--muted);
+  font-size: 9px;
+  white-space: nowrap;
+}
+.balance-threshold input {
+  width: 64px;
+  height: 25px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+.balance-threshold input:focus {
+  outline: 2px solid #42ad8180;
+  outline-offset: 1px;
+}
 .coverage-note {
   display: flex;
   align-items: center;
@@ -1754,63 +1777,63 @@ nav > button.active > svg {
   border: 0;
   font-size: 12px;
 }
-.balance-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 15px;
-  padding: 6px 21px 22px;
+.balance-table {
+  min-width: 760px;
 }
-.balance-card {
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  padding: 17px;
-  background: var(--surface);
+.balance-table th:last-child,
+.balance-table td:last-child {
+  width: auto;
+  padding: 11px 14px;
 }
-.balance-card.low-balance {
-  border-color: #ecded4;
+.balance-table td {
+  height: 58px;
+  vertical-align: middle;
 }
-.balance-card-top {
+.balance-channel {
   display: flex;
   align-items: center;
   gap: 9px;
+  min-width: 180px;
 }
-.balance-card-top > span:nth-child(2) {
-  min-width: 0;
-  flex: 1;
-}
-.balance-card-top strong {
+.balance-channel strong {
+  display: block;
   font-size: 11px;
   font-weight: 550;
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
-.balance-card-top small {
+.balance-channel small,
+.balance-model-ranks small {
   display: block;
-  font-size: 9px;
-  color: var(--muted);
   margin-top: 4px;
+  color: var(--muted);
+  font-size: 9px;
 }
-.balance-card-top .status-pill {
-  font-size: 8px;
-  padding: 3px 4px;
+.balance-model-ranks {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 190px;
 }
-.balance-card .expanded {
-  min-height: 60px;
-  margin-top: 22px;
-}
-.balance-card .expanded .amount {
-  font-size: 22px;
-  letter-spacing: -0.7px;
-}
-.balance-card-footer {
+.balance-model-ranks > span {
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
-  font-size: 8px;
-  color: var(--muted);
+  gap: 10px;
+  white-space: nowrap;
+  font-size: 10px;
+}
+.balance-model-ranks > span small {
+  display: inline;
+  margin: 0;
+}
+.balance-model-ranks > .more {
+  margin-top: 0;
+}
+.balance-table .balance-values {
+  min-width: 100px;
+}
+.balance-table .balance-values .amount {
+  display: block;
+  font-size: 13px;
+  white-space: nowrap;
 }
 @keyframes overlay-in {
   from {
@@ -1948,9 +1971,6 @@ nav > button.active > svg {
   }
   .welcome-main {
     gap: 6%;
-  }
-  .balance-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .nav-shortcut {
     display: none;
@@ -2151,19 +2171,6 @@ nav > button.active > svg {
   .connection-bottom {
     padding: 12px 18px;
   }
-  .balance-grid {
-    padding: 4px 15px 17px;
-    gap: 10px;
-  }
-  .balance-card {
-    padding: 13px;
-  }
-  .balance-card .expanded .amount {
-    font-size: 20px;
-  }
-  .balance-card-top .status-pill {
-    display: none;
-  }
   .trend-panel {
     padding: 18px;
   }
@@ -2234,9 +2241,6 @@ nav > button.active > svg {
   .data-actions {
     width: 100%;
     justify-content: flex-end;
-  }
-  .balance-grid {
-    grid-template-columns: 1fr;
   }
   .welcome-intro h1 {
     font-size: 32px;
