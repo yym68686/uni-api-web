@@ -28,6 +28,8 @@ const rows = ["first", "second", "third"].map((provider, i) => ({
       last_ms: 42,
       sample_count: 4,
     },
+    estimated_cost_usd: i === 0 ? 10 : 5,
+    sale_percent: 2.5,
   },
 }));
 function setup(
@@ -68,6 +70,7 @@ function setup(
             provider: url.searchParams.get("provider"),
             status: "complete",
             key_count: 1,
+            actual_cost_usd: url.searchParams.get("provider") === "first" ? 2 : 1,
             keys: [
               {
                 position: 1,
@@ -170,7 +173,6 @@ describe("dashboard workflows", () => {
     await waitFor(() => expect(within(table).getByText("third")).toBeInTheDocument());
 
     for (const label of [
-      "时间范围筛选",
       "端点筛选",
       "流式状态筛选",
       "渠道状态筛选",
@@ -178,6 +180,22 @@ describe("dashboard workflows", () => {
     ]) {
       expect(screen.queryByLabelText(label)).not.toBeInTheDocument();
     }
+    expect(screen.getByLabelText("时间范围筛选")).toHaveValue("15m");
+    for (const header of ["估算消费", "渠道实际消费", "利润"]) {
+      expect(screen.getByRole("columnheader", { name: header })).toBeVisible();
+    }
+    await user.selectOptions(screen.getByLabelText("时间范围筛选"), "today");
+    await waitFor(() => {
+      const history = calls
+        .filter((url) => new URL(url).pathname.endsWith("/analytics"))
+        .map((url) => new URL(url));
+      expect(history.at(-1)?.searchParams.get("range")).toBe("today");
+    });
+    await waitFor(() => {
+      expect(screen.getByText("$10.00")).toBeInTheDocument();
+      expect(screen.getByText("$2.00")).toBeInTheDocument();
+      expect(within(screen.getAllByRole("row")[1]).getByText(/¥/)).toHaveTextContent("¥");
+    });
     await user.selectOptions(screen.getByLabelText("模型筛选"), "model-a");
     await user.selectOptions(
       screen.getByLabelText("模型优先级筛选"),

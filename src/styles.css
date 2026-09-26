@@ -1835,6 +1835,10 @@ nav > button.active > svg {
   font-size: 13px;
   white-space: nowrap;
 }
+.balance-finance {
+  white-space: nowrap;
+  font-size: 11px;
+}
 @keyframes overlay-in {
   from {
     opacity: 0;

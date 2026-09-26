@@ -118,7 +118,7 @@ import type {
 } from "./types";
 import { Brand, Empty, Spinner, Tip } from "./ui";
 import { PriceSettings } from "./PriceSettings";
-import { catalogMetrics, ranges, staleHistorySources } from "./analytics";
+import { catalogMetrics, ranges, staleHistorySources, usd } from "./analytics";
 import { readMetrics } from "./metricsApi";
 import {
   BalanceValue,
@@ -128,8 +128,10 @@ import {
 } from "./ChannelMetrics";
 import { actualCostRange } from "./actualCost";
 import { useScopedChannelSpend } from "./SubChannelSpend";
+import type { SubChannelSpend } from "./SubChannelSpend";
 import { useChannelAccountBalances } from "./ChannelAccountBalances";
 import { balanceBelowThreshold, rankBalanceProviders } from "./balanceFilters";
+import { salePercent } from "./modelPrices";
 import { ConsoleHeader, ConsoleNavigation } from "./ConsoleChrome";
 import { StartupScreen } from "./StartupScreen";
 import { useTheme } from "./theme";
@@ -1033,7 +1035,7 @@ function Dashboard({
   const hasFilters = (Object.keys(defaultFilters) as (keyof Filters)[]).some(
     (key) =>
       ((channelView || view === "balances") &&
-        ["keyId", "sourceId", "model", "search", "balanceTopN", "balanceThreshold"].includes(key)) &&
+        ["keyId", "sourceId", "model", "window", "search", "balanceTopN", "balanceThreshold"].includes(key)) &&
       filters[key] !== defaultFilters[key],
   );
   const [detailId, setDetailId] = useState<string | null>(null),
@@ -1062,7 +1064,7 @@ function Dashboard({
     !!keys.data &&
     !keys.data.data.some((item) => item.key_id === keyId);
   const keysLoaded = !!keys.data;
-  const effectiveWindow = view === "balances" ? "15m" : window;
+  const effectiveWindow = window;
   const effectiveEndpoint = view === "balances" ? "all" : endpoint;
   const effectiveStream = view === "balances" ? "all" : stream;
   const params = channelParams(
@@ -1206,14 +1208,8 @@ function Dashboard({
     [tableRows],
   );
   const providers = useMemo(() => [...new Set(rows.map(providerId))], [rows]);
-  const actualRange = useMemo(
-    () =>
-      view === "balances"
-        ? { supported: false }
-        : actualCostRange(window),
-    [view, window],
-  );
-  const channelSpend = useScopedChannelSpend({ rows, session: connection.session, sourceId: selectedSourceId, keyId, model, endpoint, stream, from: metrics.data?.from, to: metrics.data?.to, snapshot: metrics.data, snapshotError: metrics.isError, snapshotUpdatedAt: metrics.dataUpdatedAt, refresh, auto, enabled: channelView && !!baseConnection.account });
+  const actualRange = useMemo(() => actualCostRange(window), [window]);
+  const channelSpend = useScopedChannelSpend({ rows, session: connection.session, sourceId: selectedSourceId, keyId, model, endpoint: effectiveEndpoint, stream: effectiveStream, from: metrics.data?.from, to: metrics.data?.to, snapshot: metrics.data, snapshotError: metrics.isError, snapshotUpdatedAt: metrics.dataUpdatedAt, refresh, auto, enabled: (channelView || view === "balances") && !!baseConnection.account });
   const limit = useMemo(() => makeLimiter(3), []);
   const accountBalances = useChannelAccountBalances(providers, imported.data?.data || [], connection.session, !!baseConnection.account, auto);
   const rawBalanceQueries = useQueries({
@@ -1238,10 +1234,10 @@ function Dashboard({
                 new URLSearchParams({
                   provider: JSON.parse(provider)[1],
                   ...(model ? { model } : {}),
-                  ...(channelView && actualRange.startDate
+                  ...((channelView || view === "balances") && actualRange.startDate
                     ? { start_date: actualRange.startDate }
                     : {}),
-                  ...(channelView && actualRange.endDate
+                  ...((channelView || view === "balances") && actualRange.endDate
                     ? { end_date: actualRange.endDate }
                     : {}),
                 }),
@@ -1301,6 +1297,70 @@ function Dashboard({
           balanceThreshold,
         ),
       );
+  const balanceFinance = useMemo(() => {
+    const result = new Map<
+      string,
+      {
+        estimated: number | null;
+        actual: number | null;
+        profit: number | null;
+        actualUpperBound: boolean;
+      }
+    >();
+    for (const provider of balanceRanks.providers) {
+      const providerRows = filtered.filter((row) => providerId(row) === provider);
+      const estimatedValues = providerRows
+        .map((row) => row.stats?.estimated_cost_usd)
+        .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+      const estimated = estimatedValues.length
+        ? estimatedValues.reduce((sum, value) => sum + value, 0)
+        : null;
+      const spends = providerRows.map((row) => channelSpend.get(rowId(row)));
+      const spendCosts = spends.map((query) => {
+        const data = query?.data as SubChannelSpend | undefined;
+        if (data?.scope !== "matched_requests") return undefined;
+        if (data.status === "complete" && typeof data.actual_cost_usd === "number" && Number.isFinite(data.actual_cost_usd))
+          return { amount: data.actual_cost_usd, upperBound: false };
+        const matched = (data.matched_attempts || 0) + (data.confirmed_unbilled_attempts || 0);
+        if (matched > 0 && typeof data.matched_cost_usd === "number" && Number.isFinite(data.matched_cost_usd))
+          return { amount: data.matched_cost_usd, upperBound: true };
+        return undefined;
+      });
+      const balance = balanceMap.get(provider)?.data;
+      const fallbackActual =
+        !baseConnection.account && actualRange.supported &&
+        typeof balance?.actual_cost_usd === "number" && Number.isFinite(balance.actual_cost_usd)
+          ? { amount: balance.actual_cost_usd, upperBound: false }
+          : undefined;
+      const costs = baseConnection.account ? spendCosts : [];
+      const actual = baseConnection.account
+        ? costs.length === providerRows.length && costs.every(Boolean)
+          ? costs.reduce((sum, item) => sum + item!.amount, 0)
+          : null
+        : fallbackActual?.amount ?? null;
+      const actualUpperBound = baseConnection.account
+        ? costs.some((item) => item?.upperBound) || false
+        : Boolean(fallbackActual?.upperBound);
+      const revenue = estimated == null
+        ? null
+        : providerRows.reduce((sum, row) => {
+            const value = row.stats?.estimated_cost_usd;
+            return typeof value === "number" && Number.isFinite(value)
+              ? sum + value * (salePercent({
+                  model: row.model,
+                  sale_percent: row.stats?.sale_percent,
+                }) / 100) * 6.9
+              : sum;
+          }, 0);
+      result.set(provider, {
+        estimated,
+        actual,
+        profit: revenue != null && actual != null ? revenue - actual : null,
+        actualUpperBound,
+      });
+    }
+    return result;
+  }, [balanceMap, balanceRanks.providers, baseConnection.account, channelSpend, filtered, actualRange.supported]);
   const detectionRows = checkTargets(filtered);
   const total = channelView ? filtered.length : balanceProviders.length;
   const pageCount = Math.max(1, Math.ceil(total / 25)),
@@ -1604,7 +1664,7 @@ function Dashboard({
                 </div>
               </div>
               <div className="filters">
-                {channelView && (
+                {(channelView || view === "balances") && (
                   <div className="select-field time-select">
                     <Clock3 size={15} />
                     <select
@@ -1970,6 +2030,9 @@ function Dashboard({
                         <th className="rank">#</th>
                         <th>渠道</th>
                         <th>模型 / 优先级</th>
+                        <th>估算消费</th>
+                        <th>渠道实际消费</th>
+                        <th>利润</th>
                         <th>余额</th>
                         <th>状态</th>
                         <th>最近查询</th>
@@ -1993,6 +2056,7 @@ function Dashboard({
                       0,
                       ...(balance?.data?.keys || []).map((key) => key.checked_at || 0),
                     );
+                    const finance = balanceFinance.get(provider);
                     return (
                       <tr key={provider}>
                         <td className="rank mono">
@@ -2028,6 +2092,21 @@ function Dashboard({
                               </small>
                             )}
                           </div>
+                        </td>
+                        <td>
+                          <span className={`mono balance-finance ${finance?.estimated == null ? "muted" : ""}`}>
+                            {finance?.estimated == null ? "—" : usd(finance.estimated)}
+                          </span>
+                        </td>
+                        <td>
+                          <span className={`mono balance-finance ${finance?.actual == null ? "muted" : ""}`}>
+                            {finance?.actual == null ? "—" : usd(finance.actual)}
+                          </span>
+                        </td>
+                        <td>
+                          <span className={`mono balance-finance ${finance?.profit == null ? "muted" : finance.profit < 0 ? "negative" : "profit-positive"}`}>
+                            {finance?.profit == null ? "—" : `${finance.actualUpperBound ? "≤" : ""}¥${finance.profit.toFixed(2)}`}
+                          </span>
                         </td>
                         <td>
                           <BalanceValue

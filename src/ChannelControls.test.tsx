@@ -288,7 +288,6 @@ it("toggles adjustment inside observation with the same table, filters and metri
   expect(screen.getByLabelText("模型优先级筛选")).toHaveValue("");
   expect(screen.getByLabelText("余额低于美元")).toHaveValue(null);
   for (const label of [
-    "时间范围筛选",
     "端点筛选",
     "流式状态筛选",
     "渠道状态筛选",
