@@ -423,3 +423,41 @@ func TestNewAPISynchronizationReusesExistingDetectionQueue(t *testing.T) {
 		t.Fatal("detector models not unified", count)
 	}
 }
+
+func TestNewAPIReloginUpdatesSessionWithoutSynchronizing(t *testing.T) {
+	s, account, owner := newAPITestService(t)
+	token, _ := s.control.newSession(context.Background(), owner)
+	withSpendUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/user/login/encryption-key":
+			http.NotFound(w, r)
+		case "/api/user/login":
+			var in map[string]string
+			json.NewDecoder(r.Body).Decode(&in)
+			if in["username"] != "fixture" || in["password"] != "correct" {
+				t.Error("incorrect login identity")
+			}
+			http.SetCookie(w, &http.Cookie{Name: "new_api_refresh", Value: "new-refresh", HttpOnly: true})
+			newAPIOK(w, map[string]any{"access_token": "new-access", "user": map[string]any{"id": 7, "username": "fixture"}})
+		case "/api/user/self":
+			newAPIOK(w, map[string]any{"id": 7, "username": "fixture"})
+		case "/api/status":
+			newAPIOK(w, map[string]any{"quota_per_unit": 500000})
+		default:
+			t.Error("re-login unexpectedly synchronized", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	r := httptest.NewRequest("POST", "/v1/sub2api/accounts/"+account+"/login", strings.NewReader(`{"password":"correct"}`))
+	r.Header.Set("Content-Type", "application/json")
+	r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"queued":false`) {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	auth, _, err := s.newAPIAuth(context.Background(), account)
+	if err != nil || auth.Access != "new-access" || auth.Cookies["new_api_refresh"] != "new-refresh" {
+		t.Fatal("new session not saved")
+	}
+}

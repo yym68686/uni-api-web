@@ -2581,6 +2581,8 @@ nav > button.active > svg {
 }
 
 .sub-account-dialog { width: min(510px, calc(100vw - 32px)); }
+.site-reauth-overlay { z-index: 110; }
+.guide-dialog.site-reauth-dialog { z-index: 115; }
 .sub-account-dialog .source-form { display: flex; flex-direction: column; align-items: stretch; gap: 20px; margin: 24px 0 0; padding: 0; border: 0; border-radius: 0; }
 .sub-login-fields { display: grid; gap: 18px; border: 0; padding: 0; margin: 0; min-width: 0; width: 100%; }
 .sub-account-dialog label { min-width: 0; }

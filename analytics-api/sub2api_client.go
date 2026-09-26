@@ -76,12 +76,17 @@ type subRemoteError struct {
 	Reason string
 }
 
+const subSessionExpiredMessage = "站点保存的登录会话已失效，请重新登录站点后继续"
+
 func (e *subRemoteError) Error() string {
 	if strings.Contains(e.Reason, "CAPTCHA") || strings.Contains(e.Reason, "TURNSTILE") {
 		return "站点要求人机验证；请在该站点完成登录后，使用会话令牌接入"
 	}
 	switch e.Status {
 	case 401:
+		if e.Reason == "SITE_SESSION_EXPIRED" || e.Reason == "TOKEN_EXPIRED" || strings.HasPrefix(e.Reason, "REFRESH_TOKEN_") {
+			return subSessionExpiredMessage
+		}
 		return "站点登录已失效或账号密码不正确，请重新登录"
 	case 403:
 		return "站点拒绝访问，请检查账号权限、验证要求或站点防护"
@@ -135,15 +140,30 @@ func subJSON(ctx context.Context, client *http.Client, base, method, path, token
 		return errSubResponseTooLarge
 	}
 	var envelope struct {
-		Code   int             `json:"code"`
+		Code   json.RawMessage `json:"code"`
 		Reason string          `json:"reason"`
 		Data   json.RawMessage `json:"data"`
 	}
 	parseErr := json.Unmarshal(raw, &envelope)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		// sub2api forks use both numeric and string error codes. Keep only the
+		// code for classification, never the upstream message or response body.
+		if envelope.Reason == "" {
+			_ = json.Unmarshal(envelope.Code, &envelope.Reason)
+		}
+		if resp.StatusCode == 401 {
+			if strings.HasPrefix(path, "/api/v1/auth/login") {
+				// Login failures are credential errors; all other 401s are
+				// failures of the saved site session.
+				envelope.Reason = "INVALID_CREDENTIALS"
+			} else {
+				envelope.Reason = "SITE_SESSION_EXPIRED"
+			}
+		}
 		return &subRemoteError{resp.StatusCode, envelope.Reason}
 	}
-	if parseErr != nil || envelope.Code != 0 || len(envelope.Data) == 0 {
+	var code int
+	if parseErr != nil || (len(envelope.Code) > 0 && json.Unmarshal(envelope.Code, &code) != nil) || code != 0 || len(envelope.Data) == 0 {
 		return errors.New("站点返回了不兼容的 sub2api 数据")
 	}
 	if out != nil && json.Unmarshal(envelope.Data, out) != nil {
@@ -166,6 +186,7 @@ type subAuth struct {
 	Requires2FA  bool              `json:"requires_2fa"`
 	Temp         string            `json:"temp_token"`
 }
+
 type subRemoteGroup struct {
 	ID       int64   `json:"id"`
 	Name     string  `json:"name"`

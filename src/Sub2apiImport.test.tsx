@@ -13,6 +13,7 @@ const account = {
   id: "account",
   name: "站点",
   base: "https://site.test",
+  email: "fixture@example.com",
   targets: [],
 } as unknown as SubAccount;
 const target = {
@@ -298,4 +299,74 @@ it("uses the same availability restrictions for site edits and aliases",async()=
  await user.click(screen.getByRole('button',{name:'保存更改'}));
  await waitFor(()=>expect(writes).toHaveLength(1));
  expect(writes[0].models).toEqual(['gpt-5.5']);
+});
+
+it("recovers an expired site session in place without slow refetches or losing the import draft", async () => {
+  const writes: { path: string; body: any }[] = [];
+  let importAttempts = 0;
+  let postFailureReads = 0;
+  vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+    if (init?.method === "POST") {
+      writes.push({ path: input, body: JSON.parse(String(init.body)) });
+      if (input.endsWith("/accounts/account/login")) return Response.json({ authenticated: true, queued: false });
+      importAttempts++;
+      return importAttempts === 1
+        ? new Response("站点保存的登录会话已失效，请重新登录站点后继续", { status: 400 })
+        : Response.json({ message: "添加成功" });
+    }
+    if (input.includes("channel-options")) return Response.json({
+      revision: "r1", supported: true, manageable: true,
+      keys: [{ key_id: "key2", position: 2, prefix: "masked-two" }],
+      channels: [{ provider: "peer", model: "gpt-6-sol" }, { provider: "peer", model: "public-alias" }],
+    });
+    if (importAttempts > 0) {
+      postFailureReads++;
+      // Unrelated source reads may stay pending. Authentication recovery must
+      // never wait for them or unnecessarily start them after a rejected add.
+      return new Promise<Response>(() => {});
+    }
+    return Response.json({ data: [], unavailable_keys: [], unavailable_sources: [] });
+  }));
+  const models = ["gpt-6-sol", "gpt-5.5"].map(model => ({
+    model, state: "done", message: "", result: { model, availability: { status: "success" } },
+  }));
+  mount({ ...target, models } as SubTarget);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: /新增接入/ }));
+  await user.selectOptions(screen.getByLabelText("添加到 uni-api 来源"), "primary");
+  await user.selectOptions(screen.getByLabelText("添加到 API key"), "key2");
+  await waitFor(() => expect(screen.getByRole("button", { name: "添加到渠道" })).toBeEnabled());
+  await user.click(screen.getByRole("checkbox", { name: "gpt-5.5" }));
+  await user.click(screen.getByRole("button", { name: "添加重命名" }));
+  await user.selectOptions(screen.getByLabelText("重命名 1 上游模型"), "gpt-6-sol");
+  await user.type(screen.getByLabelText("重命名 1 对外模型名"), "public-alias");
+  await user.selectOptions(screen.getByLabelText("渠道添加位置"), "per-model");
+  await user.selectOptions(screen.getByLabelText("gpt-6-sol 的路由位置"), "2");
+  await user.click(screen.getByRole("button", { name: "添加到渠道" }));
+  const recover = await screen.findByRole("button", { name: "重新登录站点" });
+  expect(recover).toBeEnabled();
+  expect(screen.getByRole("button", { name: "关闭添加渠道" })).toBeEnabled();
+  expect(postFailureReads).toBe(0);
+  await user.click(recover);
+  let login = screen.getByRole("dialog", { name: "重新登录站点账号" });
+  await user.click(within(login).getByRole("button", { name: "取消" }));
+  expect(screen.getByLabelText("重命名 1 对外模型名")).toHaveValue("public-alias");
+  await user.click(screen.getByRole("button", { name: "重新登录站点" }));
+  login = screen.getByRole("dialog", { name: "重新登录站点账号" });
+  await user.type(within(login).getByLabelText("账号密码"), "fixture-password");
+  await user.click(within(login).getByRole("button", { name: "登录并返回" }));
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "重新登录站点账号" })).not.toBeInTheDocument());
+  expect(screen.getByLabelText("添加到 uni-api 来源")).toHaveValue("primary");
+  expect(screen.getByLabelText("添加到 API key")).toHaveValue("key2");
+  expect(screen.getByRole("checkbox", { name: "gpt-6-sol" })).toBeChecked();
+  expect(screen.getByRole("checkbox", { name: "gpt-5.5" })).not.toBeChecked();
+  expect(screen.getByLabelText("重命名 1 对外模型名")).toHaveValue("public-alias");
+  expect(screen.getByLabelText("gpt-6-sol 的路由位置")).toHaveValue("2");
+  expect(postFailureReads).toBe(0);
+  expect(writes[1].path).toMatch(/\/accounts\/account\/login$/);
+  await user.click(screen.getByRole("button", { name: "添加到渠道" }));
+  await waitFor(() => expect(importAttempts).toBe(2));
+  expect(writes[2].body).toEqual(writes[0].body);
+  expect(JSON.stringify(localStorage)).not.toContain("fixture-password");
+  expect(JSON.stringify(sessionStorage)).not.toContain("fixture-password");
 });

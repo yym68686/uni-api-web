@@ -6,6 +6,7 @@ import { controlRequest } from "./api";
 import { useChannelImportKeys } from "./channelImportKeys";
 import { ChannelImportKeyFeedback } from "./ChannelImportKeyFeedback";
 import { Spinner } from "./ui";
+import { AccountForm } from "./SiteAccountForm";
 import { ChannelBatchApply } from "./ChannelBatchApply";
 import type { BatchPart, BatchDraft } from "./channelBatch";
 import type { ConsoleSourcesQuery } from "./consoleSources";
@@ -47,6 +48,7 @@ interface Options {
   keys: KeyInfo[];
   channels: { provider: string; model: string }[];
 }
+const siteLoginRequired = (message: string) => /站点登录|站点会话|登录会话|重新登录|刷新凭据/.test(message);
 export function Sub2apiImport({
   account,
   target,
@@ -209,6 +211,7 @@ export function Sub2apiImport({
   const initializedPositions = useRef("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [relogin, setRelogin] = useState(false);
   const [success, setSuccess] = useState("");
   const [compactionChoice, setCompactionChoice] = useState<boolean | null>(
     null,
@@ -233,6 +236,7 @@ export function Sub2apiImport({
     staleTime: 0,
     refetchOnWindowFocus: false,
   });
+  const visibleError = error || sources.error?.message || options.error?.message || "";
   useEffect(() => {
     if (
       !editing ||
@@ -395,8 +399,13 @@ export function Sub2apiImport({
       setKey("");
       await refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "操作失败");
-      await refresh();
+      const message = e instanceof Error ? e.message : "操作失败";
+      setError(message);
+      // A failed request must release the editor immediately. These reads can
+      // take a minute when a source is slow; they must not keep recovery locked.
+      // Site authentication fails before a destination write, so no route
+      // refresh is needed in that case.
+      if (!siteLoginRequired(message)) void refresh();
     } finally {
       setBusy(false);
     }
@@ -710,9 +719,20 @@ export function Sub2apiImport({
                 {success}
               </p>
             )}
-            {(error || sources.error || options.error) && (
+            {visibleError && (
               <div role="alert" className="error-banner">
-                {error || sources.error?.message || options.error?.message}
+                {visibleError}
+                {!!account.id &&
+                  siteLoginRequired(visibleError) && (
+                    <button
+                      type="button"
+                      className="button small"
+                      disabled={busy}
+                      onClick={() => setRelogin(true)}
+                    >
+                      重新登录站点
+                    </button>
+                  )}
                 {sources.isError && (
                   <button
                     type="button"
@@ -976,6 +996,20 @@ export function Sub2apiImport({
               </form>
             )}
           </div>
+          {relogin && (
+            <AccountForm
+              initial={account}
+              sessionOnly
+              close={() => setRelogin(false)}
+              saved={() => {
+                setRelogin(false);
+                setError("");
+                setSuccess("站点登录已更新，已保留当前选择，请继续添加到渠道。");
+                void options.refetch();
+                void client.invalidateQueries({ queryKey: ["sub2api"], refetchType: "none" });
+              }}
+            />
+          )}
           {editingNative && (
             <ConfiguredChannelDialog
               item={editingNative.item}

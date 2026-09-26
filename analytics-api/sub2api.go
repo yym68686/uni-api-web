@@ -151,6 +151,7 @@ type subAccount struct {
 }
 type subChallenge struct {
 	Owner, Base, Email, Name, Temp string
+	AccountID                      string
 	Until                          int64
 }
 
@@ -271,10 +272,26 @@ func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	var auth subAuth
 	var err error
+	accountID := r.PathValue("id")
+	var savedKind string
+	if accountID != "" {
+		// The re-login endpoint is bound to the existing account. Client input
+		// cannot redirect its credentials or create/replace another account.
+		var state string
+		err = s.control.db.QueryRowContext(ctx, `SELECT base,email,name,provider_kind,state FROM console_sub_accounts WHERE id=$1 AND owner=$2`, accountID, owner).Scan(&in.Base, &in.Email, &in.Name, &savedKind, &state)
+		if err != nil {
+			http.Error(w, "账号不存在", 404)
+			return
+		}
+		if state == "queued" || state == "running" {
+			http.Error(w, "该账号已有任务进行中，请等待完成", 409)
+			return
+		}
+	}
 	if in.Challenge != "" {
 		plain, e := s.control.decrypt(in.Challenge)
 		var challenge subChallenge
-		if e != nil || json.Unmarshal([]byte(plain), &challenge) != nil || challenge.Owner != owner || challenge.Until < time.Now().Unix() {
+		if e != nil || json.Unmarshal([]byte(plain), &challenge) != nil || challenge.Owner != owner || challenge.AccountID != accountID || challenge.Until < time.Now().Unix() || (accountID != "" && (challenge.Base != in.Base || challenge.Email != in.Email)) {
 			http.Error(w, "验证会话已失效，请重新登录", 400)
 			return
 		}
@@ -305,7 +322,10 @@ func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 			in.Name = u.Hostname()
 		}
 		if in.Access == "" {
-			kind, e := detectSite(ctx, in.Base)
+			kind, e := savedKind, error(nil)
+			if kind == "" {
+				kind, e = detectSite(ctx, in.Base)
+			}
 			if e != nil {
 				http.Error(w, e.Error(), 400)
 				return
@@ -343,7 +363,7 @@ func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if auth.Requires2FA {
-		raw, _ := json.Marshal(subChallenge{Owner: owner, Base: in.Base, Email: in.Email, Name: in.Name, Temp: auth.Temp, Until: time.Now().Add(5 * time.Minute).Unix()})
+		raw, _ := json.Marshal(subChallenge{Owner: owner, Base: in.Base, Email: in.Email, Name: in.Name, Temp: auth.Temp, AccountID: accountID, Until: time.Now().Add(5 * time.Minute).Unix()})
 		challenge, e := s.control.encrypt(string(raw))
 		if e != nil {
 			http.Error(w, "验证会话创建失败", 503)
@@ -380,6 +400,10 @@ func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "凭据保存失败", 503)
 		return
 	}
+	if accountID != "" {
+		s.subSaveLogin(w, r, in.Base, in.Email, "sub2api", encrypted)
+		return
+	}
 	var id string
 	err = s.control.db.QueryRowContext(ctx, `INSERT INTO console_sub_accounts(id,owner,name,base,email,encrypted_auth,state,job_kind) VALUES($1,$2,$3,$4,$5,$6,'queued','sync') ON CONFLICT(owner,base,email) DO UPDATE SET name=excluded.name,encrypted_auth=excluded.encrypted_auth,state='queued',job_kind='sync',job_id='',message='',lease_until=NULL WHERE console_sub_accounts.state NOT IN ('queued','running') RETURNING id`, "sub_"+randomID()[:16], owner, in.Name, in.Base, in.Email, encrypted).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -391,6 +415,31 @@ func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 202, map[string]any{"id": id, "queued": true})
+}
+
+// Reauthenticate without a sync job, model probes, or route changes. Existing
+// checks and the caller's edit draft remain usable after the session is saved.
+func (s *Service) subSaveLogin(w http.ResponseWriter, r *http.Request, base, login, kind, encrypted string) {
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	owner, _ := s.controlUser(r)
+	id := r.PathValue("id")
+	unlock, err := s.subLockAuth(ctx, id)
+	if err != nil {
+		http.Error(w, "账号会话正在更新，请稍后重试", 409)
+		return
+	}
+	defer unlock()
+	result, err := s.control.db.ExecContext(ctx, `UPDATE console_sub_accounts SET encrypted_auth=$3,state='idle',message='' WHERE id=$1 AND owner=$2 AND base=$4 AND lower(email)=lower($5) AND provider_kind=$6 AND state NOT IN ('queued','running')`, id, owner, encrypted, base, login, kind)
+	if err != nil {
+		http.Error(w, "凭据保存失败", 503)
+		return
+	}
+	if n, _ := result.RowsAffected(); n != 1 {
+		http.Error(w, "账号已变化或有任务进行中，请重试", 409)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"id": id, "authenticated": true, "queued": false})
 }
 
 func (s *Service) subSync(w http.ResponseWriter, r *http.Request) {

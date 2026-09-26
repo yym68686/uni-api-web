@@ -292,7 +292,7 @@ func (s *Service) newAPIAddAccount(w http.ResponseWriter, r *http.Request, base,
 			raw, _ := json.Marshal(auth)
 			flow = "cookie:" + base64.RawURLEncoding.EncodeToString(raw)
 		}
-		raw, _ := json.Marshal(subChallenge{Owner: owner, Base: base, Email: username, Name: name, Temp: "newapi:" + flow, Until: time.Now().Add(5 * time.Minute).Unix()})
+		raw, _ := json.Marshal(subChallenge{Owner: owner, Base: base, Email: username, Name: name, Temp: "newapi:" + flow, AccountID: r.PathValue("id"), Until: time.Now().Add(5 * time.Minute).Unix()})
 		encrypted, e := s.control.encrypt(string(raw))
 		if e != nil {
 			http.Error(w, "验证会话创建失败", 503)
@@ -325,6 +325,10 @@ func (s *Service) newAPIAddAccount(w http.ResponseWriter, r *http.Request, base,
 	encrypted, err := s.control.encrypt(string(raw))
 	if err != nil {
 		http.Error(w, "凭据保存失败", 503)
+		return
+	}
+	if r.PathValue("id") != "" {
+		s.subSaveLogin(w, r, base, user.Username, "newapi", encrypted)
 		return
 	}
 	// email remains the legacy unique identity column, while login_name is the
