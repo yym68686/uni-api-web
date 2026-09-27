@@ -18,6 +18,16 @@ import (
 // Exercise the same atomic restore contract as production with synthetic
 // credentials and an isolated local gateway. No model requests are sent.
 func TestSingleChannelSaveAtCapacityWithRealGateway(t *testing.T) {
+	for _, newChannel := range []bool{false, true} {
+		name := "edit-multiple-models"
+		if newChannel {
+			name = "add-single-model"
+		}
+		t.Run(name, func(t *testing.T) { testSingleChannelSaveAtCapacity(t, newChannel) })
+	}
+}
+
+func testSingleChannelSaveAtCapacity(t *testing.T, newChannel bool) {
 	binary := os.Getenv("TEST_UNI_API_BINARY")
 	if binary == "" {
 		t.Skip("local uni-api binary required")
@@ -119,7 +129,13 @@ func TestSingleChannelSaveAtCapacityWithRealGateway(t *testing.T) {
 		t.Fatal("did not reproduce capacity rejection", code, e)
 	}
 	channel.Models = append(append([]string{}, channel.Models...), "deepseek-v4.1-flash")
-	applied, code, err := (&Service{}).applyImportSnapshot(ctx, src, snapshot, state["revision"].(string), channel, 1, map[string]int{"glm-5.3": 2, "glm-5.3-flash": 2, "deepseek-v4.1-flash": 1})
+	positions := map[string]int{"glm-5.3": 2, "glm-5.3-flash": 2, "deepseek-v4.1-flash": 1}
+	if newChannel {
+		channel.Provider = "sub2api-new-single"
+		channel.Models = []string{"deepseek-v4.1-flash"}
+		positions = map[string]int{"deepseek-v4.1-flash": 1}
+	}
+	applied, code, err := (&Service{}).applyImportSnapshot(ctx, src, snapshot, state["revision"].(string), channel, 1, positions)
 	if err != nil || code != 200 {
 		t.Fatal("single save", code, err)
 	}

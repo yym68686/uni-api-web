@@ -153,3 +153,54 @@ func TestBatchCompactionRetainsConflictingAndDisabledModelRules(t *testing.T) {
 		}
 	}
 }
+
+func TestSingleModelCompactionRequiresSafeExistingKeyScope(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		wildcard, conflicting bool
+	}{
+		{"existing-key-order", true, false},
+		{"no-key-order", false, false},
+		{"conflicting-order", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			snapshot := retainedSnapshot{Rules: []retainedRule{
+				{KeyID: "k", Model: "other-model", Disabled: []string{"b"}},
+				{KeyID: "other-key", Model: "selected", Order: []string{"b", "a"}},
+			}}
+			if tc.wildcard {
+				snapshot.Rules = append(snapshot.Rules, retainedRule{KeyID: "k", Order: []string{"a", "b"}, Disabled: []string{"a"}})
+			}
+			order := []string{"new", "a", "b"}
+			if tc.conflicting {
+				order = []string{"new", "b", "a"}
+			}
+			snapshot.Rules = append(snapshot.Rules, retainedRule{KeyID: "k", Model: "selected", Order: order})
+			before := mustJSON(snapshot)
+			count := len(snapshot.Rules)
+			catalog := map[string][]batchCatalogRow{"k": {
+				{Provider: "a", Model: "selected"}, {Provider: "b", Model: "selected"}, {Provider: "new", Model: "selected"},
+				{Provider: "a", Model: "other-model"}, {Provider: "b", Model: "other-model"},
+			}}
+			compactBatchRouteRules(&snapshot, catalog, map[string][]routeMove{"k": {{Model: "selected"}}})
+			if !tc.wildcard || tc.conflicting {
+				if mustJSON(snapshot) != before {
+					t.Fatal("unsafe or non-saving compaction changed the snapshot")
+				}
+				return
+			}
+			if len(snapshot.Rules) != count-1 {
+				t.Fatal("single model did not release a scope")
+			}
+			if !reflect.DeepEqual(snapshot.Rules[0].Disabled, []string{"b"}) || !reflect.DeepEqual(snapshot.Rules[1].Order, []string{"b", "a"}) || !reflect.DeepEqual(snapshot.Rules[2].Disabled, []string{"a"}) {
+				t.Fatal("disabled policy or other key changed")
+			}
+			if !reflect.DeepEqual(snapshot.Rules[2].Order, []string{"new", "a", "b"}) {
+				t.Fatal("requested model order changed")
+			}
+			if !reflect.DeepEqual(projectedRouteOrder([]string{"a", "b"}, snapshot.Rules[2].Order), []string{"a", "b"}) {
+				t.Fatal("other model order changed")
+			}
+		})
+	}
+}
