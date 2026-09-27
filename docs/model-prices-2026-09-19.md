@@ -21,8 +21,8 @@
 | glm-5.3 | 1.4 | 4.4 | 0.26 | [官方文档](https://docs.z.ai/guides/overview/pricing) |
 | glm-5.3-flash | 0.15 | 0.5 | 0.03 | [官方文档](https://docs.z.ai/guides/overview/pricing) |
 | kimi-k3 | 3 | 15 | 0.3 | [官方文档](https://forum.moonshot.ai/t/kimi-k3-is-here-our-most-capable-model/480) |
-| deepseek-4.1-flash | 0.3 | 1.2 | 0.006 | [官方文档](https://api-docs.deepseek.com/quick_start/pricing/) |
-| deepseek-4-pro | 1.32 | 3.96 | 0.044 | [官方文档](https://api-docs.deepseek.com/quick_start/pricing/) |
+| deepseek-v4.1-flash | 0.3 | 1.2 | 0.006 | [官方文档](https://api-docs.deepseek.com/quick_start/pricing/) |
+| deepseek-v4-pro | 1.32 | 3.96 | 0.044 | [官方文档](https://api-docs.deepseek.com/quick_start/pricing/) |
 | grok-4.6 | 2 | 6 | 0.5 | [官方文档](https://docs.x.ai/developers/pricing) |
 | grok-4.7 | 2 | 6 | 0.5 | [官方文档](https://docs.x.ai/developers/pricing) |
 | gemini-3.1-pro | 2 | 12 | 0.2 | [官方文档](https://ai.google.dev/gemini-api/docs/pricing) |
@@ -41,7 +41,7 @@
 
 - OpenAI 使用 Standard 短上下文；GPT-5.6 Sol、Gemini 3.8 Flash 使用核对当日生效的优惠价。优惠期截止及长上下文差异记录在各模型说明，当前估算不自动按请求长度或日期切换价档。
 - DeepSeek 使用当前官方高峰价。官方更新说明明确 V4 Pro 在 9 月 14 日后继续服务、计费不变；未采用已被更新说明更正的降价转路由公告。非高峰价为表中一半。
-- Gemini 3.1 Pro 采用官方 `gemini-3.1-pro-preview` 价目；DeepSeek 检测名称分别对应官方 `deepseek-flash`（V4.1 Flash）、`deepseek-v4-pro`。
+- Gemini 3.1 Pro 采用官方 `gemini-3.1-pro-preview` 价目；DeepSeek 检测名称为 `deepseek-v4.1-flash`（V4.1 Flash）和 `deepseek-v4-pro`。
 - Claude 记录官方 5 分钟及 1 小时缓存写入单价；OpenAI 新型号记录通用缓存写入单价。未单列缓存写入费的模型，写入 token 按普通输入估算。缓存存储、搜索工具、图片/音频额外计费不在 token 基准估算内。
 - `codex-auto-review` 未找到公开官方价格。保留未确认状态，界面显示未公布，不能作为零价格使用。
 - 最长完整模型前缀优先，只匹配模型本身或后接 `-` 的派生名称。`gemini-3.1-pro-search` 使用基础价格，`glm-5.3-flash-*` 不会误用 `glm-5.3`。已有后缀独立价格不覆盖基础价格。
