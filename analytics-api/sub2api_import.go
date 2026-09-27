@@ -491,6 +491,23 @@ func (s *Service) applyImportSnapshot(ctx context.Context, src controlSource, sn
 		}
 	}
 	snapshot.Channels = append(snapshot.Channels, channel)
+	if len(snapshot.Rules) > 128 {
+		// Single-channel saves need the same scope-budget handling as batch
+		// edits. Validate equivalent ordering against the resulting catalog,
+		// including newly added models and excluding removed/suppressed rows.
+		rows := []batchCatalogRow{}
+		for _, row := range channels {
+			if row.Provider != channel.Provider && !replaced[row.Provider] {
+				rows = append(rows, batchCatalogRow{Provider: row.Provider, Model: row.Model})
+			}
+		}
+		moves := []routeMove{}
+		for _, model := range channel.Models {
+			rows = append(rows, batchCatalogRow{Provider: channel.Provider, Model: model})
+			moves = append(moves, routeMove{Provider: channel.Provider, Model: model})
+		}
+		compactBatchRouteRules(&snapshot, map[string][]batchCatalogRow{channel.KeyID: rows}, map[string][]routeMove{channel.KeyID: moves})
+	}
 	admin := src
 	if src.ConfigKey != "" {
 		admin.Key = src.ConfigKey
