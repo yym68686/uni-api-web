@@ -53,9 +53,9 @@ func (s *Service) subAccountBalance(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	owner, _ := s.controlUser(r)
 	id := r.PathValue("id")
-	var base, email, encrypted string
+	var base, email, encrypted, encryptedPassword string
 	var raw []byte
-	err := s.control.db.QueryRowContext(ctx, `SELECT base,email,encrypted_auth,balance FROM console_sub_accounts WHERE id=$1 AND owner=$2`, id, owner).Scan(&base, &email, &encrypted, &raw)
+	err := s.control.db.QueryRowContext(ctx, `SELECT base,email,encrypted_auth,encrypted_login_password,balance FROM console_sub_accounts WHERE id=$1 AND owner=$2`, id, owner).Scan(&base, &email, &encrypted, &encryptedPassword, &raw)
 	if err != nil {
 		http.Error(w, "账号不存在", 404)
 		return
@@ -99,7 +99,7 @@ func (s *Service) subAccountBalance(w http.ResponseWriter, r *http.Request) {
 	}
 	defer unlock()
 	// Re-read after obtaining the lock so concurrent requests reuse this result.
-	err = s.control.db.QueryRowContext(ctx, `SELECT encrypted_auth,balance FROM console_sub_accounts WHERE id=$1 AND owner=$2`, id, owner).Scan(&encrypted, &raw)
+	err = s.control.db.QueryRowContext(ctx, `SELECT encrypted_auth,encrypted_login_password,balance FROM console_sub_accounts WHERE id=$1 AND owner=$2`, id, owner).Scan(&encrypted, &encryptedPassword, &raw)
 	if err != nil {
 		http.Error(w, "账号不存在", 404)
 		return
@@ -123,11 +123,41 @@ func (s *Service) subAccountBalance(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		err = subJSON(ctx, subHTTP, base, "GET", "/api/v1/auth/me", auth.Access, nil, &profile, "")
 		var remote *subRemoteError
-		if errors.As(err, &remote) && remote.Status == 401 && auth.Refresh != "" {
+		if errors.As(err, &remote) && remote.Status == 401 {
 			var next subAuth
-			err = subJSON(ctx, subHTTP, base, "POST", "/api/v1/auth/refresh", "", map[string]string{"refresh_token": auth.Refresh}, &next, "")
-			if err == nil && (next.Access == "" || next.Refresh == "") {
-				err = errors.New("invalid session")
+			if auth.Refresh != "" {
+				err = subJSON(ctx, subHTTP, base, "POST", "/api/v1/auth/refresh", "", map[string]string{"refresh_token": auth.Refresh}, &next, "")
+				if err == nil && (next.Access == "" || next.Refresh == "") {
+					err = errors.New("invalid session")
+				}
+			}
+			if err != nil || next.Access == "" {
+				password, decryptErr := "", error(nil)
+				if encryptedPassword != "" {
+					password, decryptErr = s.control.decrypt(encryptedPassword)
+				}
+				if decryptErr != nil || password == "" {
+					if encryptedPassword == "" {
+						err = errors.New("站点登录已失效，请重新登录")
+					} else {
+						err = errors.New("自动登录凭据无法解密，请重新登录")
+					}
+				} else {
+					next = subAuth{}
+					err = subJSON(ctx, subHTTP, base, "POST", "/api/v1/auth/login", "", map[string]string{"email": email, "password": password}, &next, "")
+					if err == nil && (next.Requires2FA || next.Access == "") {
+						err = errors.New("站点需要二次验证，请手动完成登录")
+					}
+					if err == nil {
+						var loginProfile struct {
+							Email string `json:"email"`
+						}
+						err = subJSON(ctx, subHTTP, base, "GET", "/api/v1/auth/me", next.Access, nil, &loginProfile, "")
+						if err == nil && !strings.EqualFold(loginProfile.Email, email) {
+							err = errors.New("自动登录账号身份不匹配")
+						}
+					}
+				}
 			}
 			if err == nil {
 				next.ExpiresAt = time.Now().Add(time.Duration(next.ExpiresIn) * time.Second).Unix()

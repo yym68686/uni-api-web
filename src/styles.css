@@ -2775,6 +2775,18 @@ nav > button.active > svg {
 
 /* Channel management: one action hierarchy shared by drawer and settings. */
 .detail-panel { width:min(520px,94vw); }
+.sub-management-row { cursor: pointer; }
+.sub-management-row:hover,
+.sub-management-row:focus-visible { background: var(--subtle); }
+.sub-management-row:focus-visible { outline: 2px solid #42ad8180; outline-offset: -2px; }
+.sub-management-drawer .detail-description { gap: 6px; }
+.sub-management-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); padding-top: 8px; }
+.sub-management-stats dd { overflow-wrap: anywhere; }
+.sub-management-message { margin-top: 12px; overflow-wrap: anywhere; }
+.sub-management-capabilities { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.sub-management-capabilities > div { display: flex; flex-direction: column; gap: 6px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--subtle); }
+.sub-management-capabilities span { color: var(--muted); font-size: 10px; }
+.sub-management-capabilities strong { font-size: 11px; font-weight: 500; }
 .detail-channel-actions {display:flex;align-items:center;justify-content:space-between;gap:16px;margin:24px 0 4px;}
 .detail-channel-actions .channel-settings-trigger {min-height:38px;padding:8px 13px;background:var(--green-bg);border-color:transparent;color:var(--green);}
 .channel-access-heading {display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:12px;}

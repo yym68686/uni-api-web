@@ -150,3 +150,66 @@ func TestSubReloginChallengeCannotChangeAccountOrStartSync(t *testing.T) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 }
+
+func TestSubPanelAutomaticallyReloginsAfterExpiredSession(t *testing.T) {
+	s, account, _ := subUsageTestService(t)
+	password, err := s.control.encrypt("correct")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.control.db.Exec(`UPDATE console_sub_accounts SET encrypted_login_password=$2,job_id='panel-job',state='running' WHERE id=$1`, account, password); err != nil {
+		t.Fatal(err)
+	}
+	var groupReads, logins, refreshes int
+	withSpendUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/groups/available":
+			groupReads++
+			if r.Header.Get("Authorization") == "Bearer expired-access" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			if r.Header.Get("Authorization") != "Bearer fresh-access" {
+				t.Errorf("wrong group token: %q", r.Header.Get("Authorization"))
+			}
+			writeJSON(w, 200, map[string]any{"code": 0, "data": []subRemoteGroup{}})
+		case "/api/v1/auth/refresh":
+			refreshes++
+			w.WriteHeader(http.StatusUnauthorized)
+		case "/api/v1/auth/login":
+			logins++
+			var in map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in["email"] != "fixture@example.com" || in["password"] != "correct" {
+				t.Errorf("wrong automatic login payload: %#v", in)
+			}
+			writeJSON(w, 200, map[string]any{"code": 0, "data": subAuth{Access: "fresh-access", Refresh: "fresh-refresh", ExpiresIn: 3600}})
+		case "/api/v1/auth/me":
+			if r.Header.Get("Authorization") != "Bearer fresh-access" {
+				t.Errorf("wrong profile token: %q", r.Header.Get("Authorization"))
+			}
+			writeJSON(w, 200, map[string]any{"code": 0, "data": map[string]string{"email": "fixture@example.com"}})
+		default:
+			t.Errorf("unexpected automatic login request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	call, groups, err := s.subPanel(context.Background(), account, "https://usage.example", "panel-job", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if call == nil || len(groups) != 0 || groupReads != 2 || refreshes != 1 || logins != 1 {
+		t.Fatalf("automatic login did not retry exactly once: groups=%d refreshes=%d logins=%d", groupReads, refreshes, logins)
+	}
+	var encrypted string
+	if err = s.control.db.QueryRow(`SELECT encrypted_auth FROM console_sub_accounts WHERE id=$1`, account).Scan(&encrypted); err != nil {
+		t.Fatal(err)
+	}
+	plain, err := s.control.decrypt(encrypted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var auth subAuth
+	if err = json.Unmarshal([]byte(plain), &auth); err != nil || auth.Access != "fresh-access" || auth.Refresh != "fresh-refresh" {
+		t.Fatalf("renewed session was not persisted: %v %#v", err, auth)
+	}
+}

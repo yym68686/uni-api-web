@@ -17,13 +17,14 @@ import (
 const subSchema = `
 CREATE TABLE IF NOT EXISTS console_sub_accounts(
  id TEXT PRIMARY KEY, owner TEXT NOT NULL, name TEXT NOT NULL, base TEXT NOT NULL, email TEXT NOT NULL,
- encrypted_auth TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'idle', message TEXT NOT NULL DEFAULT '',
+ encrypted_auth TEXT NOT NULL, encrypted_login_password TEXT NOT NULL DEFAULT '', state TEXT NOT NULL DEFAULT 'idle', message TEXT NOT NULL DEFAULT '',
  job_kind TEXT NOT NULL DEFAULT '', job_id TEXT NOT NULL DEFAULT '', lease_until TIMESTAMPTZ,
  synced_at BIGINT NOT NULL DEFAULT 0, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
  UNIQUE(owner,base,email));
 ALTER TABLE console_sub_accounts ADD COLUMN IF NOT EXISTS balance JSONB;
 ALTER TABLE console_sub_accounts ADD COLUMN IF NOT EXISTS provider_kind TEXT NOT NULL DEFAULT 'sub2api';
 ALTER TABLE console_sub_accounts ADD COLUMN IF NOT EXISTS login_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE console_sub_accounts ADD COLUMN IF NOT EXISTS encrypted_login_password TEXT NOT NULL DEFAULT '';
 CREATE TABLE IF NOT EXISTS console_site_groups(
  id BIGSERIAL PRIMARY KEY, account_id TEXT NOT NULL REFERENCES console_sub_accounts(id) ON DELETE CASCADE,
  remote_key TEXT NOT NULL, UNIQUE(account_id,remote_key));
@@ -151,6 +152,7 @@ type subAccount struct {
 }
 type subChallenge struct {
 	Owner, Base, Email, Name, Temp string
+	Password                       string
 	AccountID                      string
 	Until                          int64
 }
@@ -296,10 +298,11 @@ func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if strings.HasPrefix(challenge.Temp, "newapi:") {
-			s.newAPIAddAccount(w, r, challenge.Base, challenge.Email, challenge.Name, "", strings.TrimPrefix(challenge.Temp, "newapi:"), in.Code)
+			s.newAPIAddAccount(w, r, challenge.Base, challenge.Email, challenge.Name, challenge.Password, strings.TrimPrefix(challenge.Temp, "newapi:"), in.Code)
 			return
 		}
 		in.Base, in.Email, in.Name = challenge.Base, challenge.Email, challenge.Name
+		in.Password = challenge.Password
 		if len(in.Code) != 6 {
 			http.Error(w, "请输入六位验证码", 400)
 			return
@@ -363,7 +366,7 @@ func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if auth.Requires2FA {
-		raw, _ := json.Marshal(subChallenge{Owner: owner, Base: in.Base, Email: in.Email, Name: in.Name, Temp: auth.Temp, AccountID: accountID, Until: time.Now().Add(5 * time.Minute).Unix()})
+		raw, _ := json.Marshal(subChallenge{Owner: owner, Base: in.Base, Email: in.Email, Name: in.Name, Password: in.Password, Temp: auth.Temp, AccountID: accountID, Until: time.Now().Add(5 * time.Minute).Unix()})
 		challenge, e := s.control.encrypt(string(raw))
 		if e != nil {
 			http.Error(w, "验证会话创建失败", 503)
@@ -400,12 +403,20 @@ func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "凭据保存失败", 503)
 		return
 	}
+	encryptedPassword := ""
+	if in.Password != "" {
+		encryptedPassword, err = s.control.encrypt(in.Password)
+		if err != nil {
+			http.Error(w, "凭据保存失败", 503)
+			return
+		}
+	}
 	if accountID != "" {
-		s.subSaveLogin(w, r, in.Base, in.Email, "sub2api", encrypted)
+		s.subSaveLogin(w, r, in.Base, in.Email, "sub2api", encrypted, encryptedPassword)
 		return
 	}
 	var id string
-	err = s.control.db.QueryRowContext(ctx, `INSERT INTO console_sub_accounts(id,owner,name,base,email,encrypted_auth,state,job_kind) VALUES($1,$2,$3,$4,$5,$6,'queued','sync') ON CONFLICT(owner,base,email) DO UPDATE SET name=excluded.name,encrypted_auth=excluded.encrypted_auth,state='queued',job_kind='sync',job_id='',message='',lease_until=NULL WHERE console_sub_accounts.state NOT IN ('queued','running') RETURNING id`, "sub_"+randomID()[:16], owner, in.Name, in.Base, in.Email, encrypted).Scan(&id)
+	err = s.control.db.QueryRowContext(ctx, `INSERT INTO console_sub_accounts(id,owner,name,base,email,encrypted_auth,encrypted_login_password,state,job_kind) VALUES($1,$2,$3,$4,$5,$6,$7,'queued','sync') ON CONFLICT(owner,base,email) DO UPDATE SET name=excluded.name,encrypted_auth=excluded.encrypted_auth,encrypted_login_password=CASE WHEN excluded.encrypted_login_password<>'' THEN excluded.encrypted_login_password ELSE console_sub_accounts.encrypted_login_password END,state='queued',job_kind='sync',job_id='',message='',lease_until=NULL WHERE console_sub_accounts.state NOT IN ('queued','running') RETURNING id`, "sub_"+randomID()[:16], owner, in.Name, in.Base, in.Email, encrypted, encryptedPassword).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		http.Error(w, "该账号已有任务进行中，请等待完成", 409)
 		return
@@ -419,7 +430,7 @@ func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 
 // Reauthenticate without a sync job, model probes, or route changes. Existing
 // checks and the caller's edit draft remain usable after the session is saved.
-func (s *Service) subSaveLogin(w http.ResponseWriter, r *http.Request, base, login, kind, encrypted string) {
+func (s *Service) subSaveLogin(w http.ResponseWriter, r *http.Request, base, login, kind, encrypted, encryptedPassword string) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 	owner, _ := s.controlUser(r)
@@ -430,7 +441,7 @@ func (s *Service) subSaveLogin(w http.ResponseWriter, r *http.Request, base, log
 		return
 	}
 	defer unlock()
-	result, err := s.control.db.ExecContext(ctx, `UPDATE console_sub_accounts SET encrypted_auth=$3,state='idle',message='' WHERE id=$1 AND owner=$2 AND base=$4 AND lower(email)=lower($5) AND provider_kind=$6 AND state NOT IN ('queued','running')`, id, owner, encrypted, base, login, kind)
+	result, err := s.control.db.ExecContext(ctx, `UPDATE console_sub_accounts SET encrypted_auth=$3,encrypted_login_password=CASE WHEN $7<>'' THEN $7 ELSE encrypted_login_password END,state='idle',message='' WHERE id=$1 AND owner=$2 AND base=$4 AND lower(email)=lower($5) AND provider_kind=$6 AND state NOT IN ('queued','running')`, id, owner, encrypted, base, login, kind, encryptedPassword)
 	if err != nil {
 		http.Error(w, "凭据保存失败", 503)
 		return
@@ -770,49 +781,128 @@ func (s *Service) subPanel(ctx context.Context, id, base, job, encrypted string)
 	if lockErr != nil {
 		return nil, nil, errors.New("账号会话正在更新，请稍后重试")
 	}
-	defer unlock()
-	if err := s.control.db.QueryRowContext(authCtx, `SELECT encrypted_auth FROM console_sub_accounts WHERE id=$1 AND job_id=$2`, id, job).Scan(&encrypted); err != nil {
+	var email, encryptedPassword string
+	if err := s.control.db.QueryRowContext(authCtx, `SELECT encrypted_auth,email,encrypted_login_password FROM console_sub_accounts WHERE id=$1 AND job_id=$2`, id, job).Scan(&encrypted, &email, &encryptedPassword); err != nil {
+		unlock()
 		return nil, nil, context.Canceled
 	}
 	plain, err := s.control.decrypt(encrypted)
 	if err != nil {
+		unlock()
 		return nil, nil, errors.New("账号凭据无法解密，请重新登录")
 	}
 	var auth subAuth
 	if json.Unmarshal([]byte(plain), &auth) != nil {
+		unlock()
 		return nil, nil, errors.New("账号凭据无效，请重新登录")
 	}
-	call := func(method, path string, body, out any, idem string) error {
-		return subJSON(ctx, subHTTP, base, method, path, auth.Access, body, out, idem)
+	password := ""
+	if encryptedPassword != "" {
+		password, err = s.control.decrypt(encryptedPassword)
+		if err != nil {
+			unlock()
+			return nil, nil, errors.New("自动登录凭据无法解密，请重新登录")
+		}
 	}
-	var groups []subRemoteGroup
-	err = subJSON(authCtx, subHTTP, base, "GET", "/api/v1/groups/available", auth.Access, nil, &groups, "")
-	var remoteErr *subRemoteError
-	if errors.As(err, &remoteErr) && remoteErr.Status == 401 && auth.Refresh != "" {
+	// The lock protects the credential snapshot only. Remote requests, including
+	// renewal after a 401, must run outside it so renewal can acquire the lock.
+	unlock()
+	renew := func() error {
+		renewCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+		unlock, e := s.subLockAuth(renewCtx, id)
+		if e != nil {
+			return errors.New("账号会话正在更新，请稍后重试")
+		}
+		defer unlock()
+		var currentEncrypted, currentPassword string
+		if e = s.control.db.QueryRowContext(renewCtx, `SELECT encrypted_auth,encrypted_login_password FROM console_sub_accounts WHERE id=$1 AND job_id=$2`, id, job).Scan(&currentEncrypted, &currentPassword); e != nil {
+			return context.Canceled
+		}
+		if currentEncrypted != encrypted {
+			// Another request renewed this account while this job was waiting.
+			currentPlain, decodeErr := s.control.decrypt(currentEncrypted)
+			if decodeErr != nil || json.Unmarshal([]byte(currentPlain), &auth) != nil {
+				return errors.New("账号凭据无法解密，请重新登录")
+			}
+			encrypted = currentEncrypted
+			if currentPassword != "" {
+				password, _ = s.control.decrypt(currentPassword)
+			}
+			return nil
+		}
 		var next subAuth
-		if err = subJSON(authCtx, subHTTP, base, "POST", "/api/v1/auth/refresh", "", map[string]string{"refresh_token": auth.Refresh}, &next, ""); err != nil {
-			return nil, nil, err
+		var lastErr error
+		if auth.Refresh != "" {
+			lastErr = subJSON(renewCtx, subHTTP, base, "POST", "/api/v1/auth/refresh", "", map[string]string{"refresh_token": auth.Refresh}, &next, "")
+			if lastErr == nil && next.Access != "" {
+				if next.Refresh == "" {
+					next.Refresh = auth.Refresh
+				}
+				next.ExpiresAt = time.Now().Add(time.Duration(next.ExpiresIn) * time.Second).Unix()
+			}
 		}
-		if next.Access == "" || next.Refresh == "" {
-			return nil, nil, errors.New("刷新凭据失败，请重新登录")
+		if lastErr != nil || next.Access == "" {
+			if password == "" && currentPassword != "" {
+				password, _ = s.control.decrypt(currentPassword)
+			}
+			if password == "" {
+				if lastErr != nil {
+					return lastErr
+				}
+				return errors.New("站点会话已失效，请重新登录")
+			}
+			next = subAuth{}
+			lastErr = subJSON(renewCtx, subHTTP, base, "POST", "/api/v1/auth/login", "", map[string]string{"email": email, "password": password}, &next, "")
+			if lastErr == nil && next.Requires2FA {
+				return errors.New("站点需要二次验证，请手动完成登录")
+			}
+			if lastErr == nil && next.Access != "" {
+				var profile struct {
+					Email string `json:"email"`
+				}
+				lastErr = subJSON(renewCtx, subHTTP, base, "GET", "/api/v1/auth/me", next.Access, nil, &profile, "")
+				if lastErr == nil && !strings.EqualFold(profile.Email, email) {
+					lastErr = errors.New("自动登录账号身份不匹配")
+				}
+			}
+			if lastErr != nil || next.Access == "" {
+				if lastErr != nil {
+					return lastErr
+				}
+				return errors.New("自动登录失败，请重新登录")
+			}
+			next.ExpiresAt = time.Now().Add(time.Duration(next.ExpiresIn) * time.Second).Unix()
 		}
-		next.ExpiresAt = time.Now().Add(time.Duration(next.ExpiresIn) * time.Second).Unix()
 		auth = next
 		raw, _ := json.Marshal(auth)
-		enc, e := s.control.encrypt(string(raw))
+		encoded, e := s.control.encrypt(string(raw))
 		if e != nil {
-			return nil, nil, errors.New("凭据保存失败")
+			return errors.New("凭据保存失败")
 		}
-		result, e := s.control.db.ExecContext(authCtx, `UPDATE console_sub_accounts SET encrypted_auth=$3 WHERE id=$1 AND job_id=$2`, id, job, enc)
+		result, e := s.control.db.ExecContext(renewCtx, `UPDATE console_sub_accounts SET encrypted_auth=$3 WHERE id=$1 AND job_id=$2 AND encrypted_auth=$4`, id, job, encoded, encrypted)
 		if e != nil {
-			return nil, nil, errors.New("凭据保存失败")
+			return errors.New("凭据保存失败")
 		}
-		n, _ := result.RowsAffected()
-		if n != 1 {
-			return nil, nil, context.Canceled
+		if n, _ := result.RowsAffected(); n != 1 {
+			return context.Canceled
 		}
-		err = subJSON(authCtx, subHTTP, base, "GET", "/api/v1/groups/available", auth.Access, nil, &groups, "")
+		encrypted = encoded
+		return nil
 	}
+	call := func(method, path string, body, out any, idem string) error {
+		err := subJSON(ctx, subHTTP, base, method, path, auth.Access, body, out, idem)
+		var remoteErr *subRemoteError
+		if errors.As(err, &remoteErr) && remoteErr.Status == 401 && (method == "GET" || idem != "") {
+			if renewErr := renew(); renewErr != nil {
+				return renewErr
+			}
+			return subJSON(ctx, subHTTP, base, method, path, auth.Access, body, out, idem)
+		}
+		return err
+	}
+	var groups []subRemoteGroup
+	err = call("GET", "/api/v1/groups/available", nil, &groups, "")
 	if err != nil {
 		return nil, nil, err
 	}

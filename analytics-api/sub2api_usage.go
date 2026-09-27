@@ -284,9 +284,10 @@ func (s *Service) subClaimUsage(ctx context.Context) (id, base, token string, er
 
 func (s *Service) subUsageAuth(ctx context.Context, account, base, rejected string) (string, error) {
 	var encrypted string
+	var email, encryptedPassword string
 	read := func() (subAuth, error) {
 		var auth subAuth
-		err := s.control.db.QueryRowContext(ctx, `SELECT encrypted_auth FROM console_sub_accounts WHERE id=$1`, account).Scan(&encrypted)
+		err := s.control.db.QueryRowContext(ctx, `SELECT encrypted_auth,email,encrypted_login_password FROM console_sub_accounts WHERE id=$1`, account).Scan(&encrypted, &email, &encryptedPassword)
 		if err != nil {
 			return auth, err
 		}
@@ -318,15 +319,41 @@ func (s *Service) subUsageAuth(ctx context.Context, account, base, rejected stri
 	if auth.Access != rejected {
 		return auth.Access, nil
 	}
-	if auth.Refresh == "" {
-		return "", errors.New("站点登录已失效，请重新登录")
-	}
 	var next subAuth
-	if err = subJSON(ctx, subHTTP, base, "POST", "/api/v1/auth/refresh", "", map[string]string{"refresh_token": auth.Refresh}, &next, ""); err != nil {
-		return "", err
+	var renewErr error
+	if auth.Refresh != "" {
+		renewErr = subJSON(ctx, subHTTP, base, "POST", "/api/v1/auth/refresh", "", map[string]string{"refresh_token": auth.Refresh}, &next, "")
+		if renewErr == nil && (next.Access == "" || next.Refresh == "") {
+			renewErr = errors.New("刷新站点会话失败")
+		}
 	}
-	if next.Access == "" || next.Refresh == "" {
-		return "", errors.New("刷新站点会话失败")
+	if renewErr != nil || next.Access == "" {
+		if encryptedPassword == "" {
+			if renewErr != nil {
+				return "", renewErr
+			}
+			return "", errors.New("站点登录已失效，请重新登录")
+		}
+		password, decryptErr := s.control.decrypt(encryptedPassword)
+		if decryptErr != nil || password == "" {
+			return "", errors.New("自动登录凭据无法解密，请重新登录")
+		}
+		next = subAuth{}
+		if renewErr = subJSON(ctx, subHTTP, base, "POST", "/api/v1/auth/login", "", map[string]string{"email": email, "password": password}, &next, ""); renewErr != nil {
+			return "", renewErr
+		}
+		if next.Requires2FA || next.Access == "" {
+			return "", errors.New("站点需要二次验证，请手动完成登录")
+		}
+		var profile struct {
+			Email string `json:"email"`
+		}
+		if renewErr = subJSON(ctx, subHTTP, base, "GET", "/api/v1/auth/me", next.Access, nil, &profile, ""); renewErr != nil {
+			return "", renewErr
+		}
+		if !strings.EqualFold(profile.Email, email) {
+			return "", errors.New("自动登录账号身份不匹配")
+		}
 	}
 	next.ExpiresAt = time.Now().Add(time.Duration(next.ExpiresIn) * time.Second).Unix()
 	raw, _ := json.Marshal(next)

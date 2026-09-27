@@ -292,7 +292,7 @@ func (s *Service) newAPIAddAccount(w http.ResponseWriter, r *http.Request, base,
 			raw, _ := json.Marshal(auth)
 			flow = "cookie:" + base64.RawURLEncoding.EncodeToString(raw)
 		}
-		raw, _ := json.Marshal(subChallenge{Owner: owner, Base: base, Email: username, Name: name, Temp: "newapi:" + flow, AccountID: r.PathValue("id"), Until: time.Now().Add(5 * time.Minute).Unix()})
+		raw, _ := json.Marshal(subChallenge{Owner: owner, Base: base, Email: username, Name: name, Password: password, Temp: "newapi:" + flow, AccountID: r.PathValue("id"), Until: time.Now().Add(5 * time.Minute).Unix()})
 		encrypted, e := s.control.encrypt(string(raw))
 		if e != nil {
 			http.Error(w, "验证会话创建失败", 503)
@@ -328,13 +328,31 @@ func (s *Service) newAPIAddAccount(w http.ResponseWriter, r *http.Request, base,
 		return
 	}
 	if r.PathValue("id") != "" {
-		s.subSaveLogin(w, r, base, user.Username, "newapi", encrypted)
+		encryptedPassword := ""
+		if password != "" {
+			encryptedPassword, err = s.control.encrypt(password)
+			if err != nil {
+				http.Error(w, "凭据保存失败", 503)
+				return
+			}
+		}
+		s.subSaveLogin(w, r, base, user.Username, "newapi", encrypted, encryptedPassword)
 		return
 	}
 	// email remains the legacy unique identity column, while login_name is the
-	// explicit username used by new accounts and the UI. Never store passwords.
+	// explicit username used by new accounts and the UI. The password is stored
+	// separately through the console encryption key so expired sessions can be
+	// renewed without asking the operator to re-enter it.
+	encryptedPassword := ""
+	if password != "" {
+		encryptedPassword, err = s.control.encrypt(password)
+		if err != nil {
+			http.Error(w, "凭据保存失败", 503)
+			return
+		}
+	}
 	var id string
-	err = s.control.db.QueryRowContext(ctx, `INSERT INTO console_sub_accounts(id,owner,name,base,email,login_name,provider_kind,encrypted_auth,state,job_kind) VALUES($1,$2,$3,$4,$5,$5,'newapi',$6,'queued','sync') ON CONFLICT(owner,base,email) DO UPDATE SET name=excluded.name,login_name=excluded.login_name,provider_kind=excluded.provider_kind,encrypted_auth=excluded.encrypted_auth,state='queued',job_kind='sync',job_id='',message='',lease_until=NULL WHERE console_sub_accounts.state NOT IN ('queued','running') RETURNING id`, "sub_"+randomID()[:16], owner, name, base, user.Username, encrypted).Scan(&id)
+	err = s.control.db.QueryRowContext(ctx, `INSERT INTO console_sub_accounts(id,owner,name,base,email,login_name,provider_kind,encrypted_auth,encrypted_login_password,state,job_kind) VALUES($1,$2,$3,$4,$5,$5,'newapi',$6,$7,'queued','sync') ON CONFLICT(owner,base,email) DO UPDATE SET name=excluded.name,login_name=excluded.login_name,provider_kind=excluded.provider_kind,encrypted_auth=excluded.encrypted_auth,encrypted_login_password=CASE WHEN excluded.encrypted_login_password<>'' THEN excluded.encrypted_login_password ELSE console_sub_accounts.encrypted_login_password END,state='queued',job_kind='sync',job_id='',message='',lease_until=NULL WHERE console_sub_accounts.state NOT IN ('queued','running') RETURNING id`, "sub_"+randomID()[:16], owner, name, base, user.Username, encrypted, encryptedPassword).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		http.Error(w, "该账号已有任务进行中，请等待完成", 409)
 		return
@@ -392,17 +410,50 @@ func (s *Service) newAPICall(ctx context.Context, account, base, method, path st
 		return e
 	}
 	if current == encrypted {
-		if next.Cookies["new_api_refresh"] == "" {
-			return errors.New("站点会话已失效，请重新登录")
-		}
-		var login newAPILogin
-		if e = newAPIJSON(lockCtx, base, "POST", "/api/user/auth/refresh", &next, nil, &login); e != nil {
+		var encryptedPassword string
+		if e = s.control.db.QueryRowContext(lockCtx, `SELECT encrypted_login_password FROM console_sub_accounts WHERE id=$1`, account).Scan(&encryptedPassword); e != nil {
 			return e
 		}
-		if login.Access == "" || login.User.ID != next.UserID {
-			return errors.New("刷新会话身份不匹配，请重新登录")
+		var password string
+		if encryptedPassword != "" {
+			password, e = s.control.decrypt(encryptedPassword)
+			if e != nil {
+				return errors.New("自动登录凭据无法解密，请重新登录")
+			}
 		}
-		newAPIApplyLogin(&next, login)
+		var login newAPILogin
+		refreshErr := error(nil)
+		if next.Cookies["new_api_refresh"] != "" {
+			refreshErr = newAPIJSON(lockCtx, base, "POST", "/api/user/auth/refresh", &next, nil, &login)
+			if refreshErr == nil && (login.Access == "" || login.User.ID != next.UserID) {
+				refreshErr = errors.New("刷新会话身份不匹配")
+			}
+		}
+		if refreshErr != nil || login.Access == "" {
+			if password == "" {
+				if refreshErr != nil {
+					return errors.New("站点会话已失效，请重新登录")
+				}
+				return errors.New("自动登录凭据缺失，请重新登录")
+			}
+			var loginResult newAPILogin
+			next, loginResult, e = newAPILoginSession(lockCtx, base, next.Username, password, "", "")
+			if e != nil {
+				return e
+			}
+			if loginResult.Verification || loginResult.TwoFA || next.Access == "" {
+				return errors.New("站点需要二次验证，请手动完成登录")
+			}
+			var user newAPIUser
+			if e = newAPIJSON(lockCtx, base, "GET", "/api/user/self", &next, nil, &user); e != nil {
+				return e
+			}
+			if user.ID <= 0 || user.ID != next.UserID {
+				return errors.New("自动登录账号身份不匹配")
+			}
+		} else {
+			newAPIApplyLogin(&next, login)
+		}
 		raw, _ := json.Marshal(next)
 		encoded, e := s.control.encrypt(string(raw))
 		if e != nil {

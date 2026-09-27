@@ -26,7 +26,7 @@ import { useSubAccounts } from "./sub2apiAccounts";
 import { Sub2apiImport } from "./Sub2apiImport";
 import { CreateChannel } from "./CreateChannel";
 import { channelMembers, managementRows, UNASSIGNED_ACCOUNT, useChannelManagement, useConfiguredChecks } from "./channelManagement";
-import type { ManagedChannel } from "./channelManagement";
+import type { ManagedChannel, ManagementRow } from "./channelManagement";
 import { ConfiguredChannelDialog } from "./ChannelRoutes";
 import { managedRouteCount, useAllChannelRoutes } from "./channelRouteData";
 import { useConsoleSources } from "./consoleSources";
@@ -529,6 +529,156 @@ function CheckDetails({
   );
 }
 
+function ManagementChannelDrawer({
+  row,
+  prices,
+  close,
+  onOpenChannel,
+}: {
+  row: ManagementRow;
+  prices?: ModelPrice[];
+  close: () => void;
+  onOpenChannel: () => void;
+}) {
+  const { account, target, checks, selected, configured } = row;
+  const current = selected || checks[0];
+  const quality = groupQualityResult(target);
+  const modelCount = checks.length;
+  const availableCount = checks.filter(
+    (check) => check.result?.availability.status === "success",
+  ).length;
+  return (
+    <Dialog.Root
+      open
+      onOpenChange={(open) => {
+        if (!open) close();
+      }}
+    >
+      <Dialog.Portal>
+        <Dialog.Overlay className="dialog-overlay" />
+        <Dialog.Content className="detail-panel sub-management-drawer">
+          <Dialog.Close
+            className="icon-button detail-close"
+            aria-label="关闭渠道详情"
+          >
+            <X size={20} />
+          </Dialog.Close>
+          <span className="eyebrow">CHANNEL MANAGEMENT</span>
+          <Dialog.Title>{target.name}</Dialog.Title>
+          <Dialog.Description className="detail-description">
+            <span>{account.name}</span>
+            <span>·</span>
+            <span>{target.channel || target.platform}</span>
+            {target.group_id > 0 && <span>· 分组 #{target.group_id}</span>}
+          </Dialog.Description>
+          <div className="detail-channel-actions">
+            <span className={`check-status ${target.state === "error" ? "fail" : "pass"}`}>
+              {target.state === "error" ? <X size={15} /> : <Check size={15} />}
+              {target.state === "error" ? "同步失败" : target.active ? "可检测" : "未激活"}
+            </span>
+            <button className="button small primary" onClick={onOpenChannel}>
+              {configured ? "查看接入配置" : "添加到渠道"}
+            </button>
+          </div>
+          <section className="detail-section" aria-label="渠道概览">
+            <h3>渠道概览</h3>
+            <dl className="detail-stats sub-management-stats">
+              <div>
+                <dt>平台</dt>
+                <dd>{target.platform || "—"}</dd>
+              </div>
+              <div>
+                <dt>倍率</dt>
+                <dd>{target.billing?.rate ?? "—"}</dd>
+              </div>
+              <div>
+                <dt>可用模型</dt>
+                <dd>{modelCount ? `${availableCount} / ${modelCount}` : "—"}</dd>
+              </div>
+              <div>
+                <dt>API key</dt>
+                <dd>{target.key_id ? `#${target.key_id}` : configured ? "配置密钥" : "尚未创建"}</dd>
+              </div>
+            </dl>
+            {target.message && <p className="negative sub-management-message">{target.message}</p>}
+          </section>
+          <section className="detail-section detail-models" aria-label="模型检测结果">
+            <h3>模型检测结果 <span className="count-badge">{modelCount}</span></h3>
+            {checks.length ? (
+              <ul className="detail-model-list">
+                {checks.map((check) => {
+                  const available = check.result?.availability.status === "success";
+                  return (
+                    <li key={check.model}>
+                      {available ? <Check size={15} className="detail-model-check" /> : <CircleHelp size={15} />}
+                      <div>
+                        <strong>{check.model}</strong>
+                        <small>{check.result ? `最近检测 ${time(check.result.checked_at)}` : "尚未检测"}</small>
+                      </div>
+                      <span className={available ? "detail-model-added" : "muted"}>
+                        {check.result ? (available ? "可用" : "检测失败") : "未检测"}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="muted">暂无模型检测记录。</p>
+            )}
+          </section>
+          <section className="detail-section detail-checks" aria-label="渠道能力">
+            <h3>渠道能力</h3>
+            <div className="sub-management-capabilities">
+              <div>
+                <span>降智检测</span>
+                <strong><Verdict result={quality} history={target.history} /></strong>
+              </div>
+              <div>
+                <span>远程压缩</span>
+                <strong><CompactionStatus target={target} /></strong>
+              </div>
+              <div>
+                <span>Tool use</span>
+                <strong><ToolUseStatus target={target} model={current?.model} /></strong>
+              </div>
+              <div>
+                <span>模型匹配</span>
+                <strong>{current ? <ModelMatch check={current} /> : "—"}</strong>
+              </div>
+            </div>
+          </section>
+          {current && (
+            <section className="detail-section" aria-label="最近检测">
+              <h3>最近检测 · {current.model}</h3>
+              <dl className="detail-stats sub-management-stats">
+                <div>
+                  <dt>可用性</dt>
+                  <dd><AvailabilityStatus check={current} /></dd>
+                </div>
+                <div>
+                  <dt>首字延迟</dt>
+                  <dd><ResponseLatency protocol={current.result?.availability.protocol} firstResponse={current.result?.availability.first_response_ms} created={current.result?.availability.response_created_ms} text={current.result?.availability.ttft_ms} /></dd>
+                </div>
+                <div>
+                  <dt>单价核验</dt>
+                  <dd><PriceStatus check={current} prices={prices} /></dd>
+                </div>
+                <div>
+                  <dt>最近检测</dt>
+                  <dd>{current.result ? time(current.result.checked_at) : "未检测"}</dd>
+                </div>
+              </dl>
+              {(current.result?.availability.message || current.message) && (
+                <p className="sub-management-message">{current.result?.availability.message || current.message}</p>
+              )}
+            </section>
+          )}
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
 export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   const client = useQueryClient();
   const sources = useConsoleSources(user);
@@ -578,6 +728,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   }
   const filterModels = [...new Set([...SUB_MODELS, ...(management.data?.data || []).flatMap(item => item.models || []), ...(configuredChecks.data?.data || []).filter(c => c.kind === "model").map(c => c.model), ...accounts.flatMap(a => a.targets.flatMap(t => (t.models || []).map(c => c.model))), ...(model ? [model] : [])])];
   const [configuredDialog, setConfiguredDialog] = useState<ManagedChannel | null>(null);
+  const [managementDetail, setManagementDetail] = useState<ManagementRow | null>(null);
   const [importing, setImporting] = useState<{
     account: SubAccount;
     target: SubTarget;
@@ -1280,8 +1431,27 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                 <tbody>
                   {rows
                     .slice(currentPage * 25, (currentPage + 1) * 25)
-                    .map(({ id, account, target: t, checks, selected, configured }) => (
-                      <tr key={id}>
+                    .map((managementRow) => {
+                      const { id, account, target: t, checks, selected, configured } = managementRow;
+                      const openDrawer = () => setManagementDetail(managementRow);
+                      return (
+                      <tr
+                        key={id}
+                        className="sub-management-row"
+                        tabIndex={0}
+                        onClick={(event) => {
+                          const element = event.target as HTMLElement;
+                          if (element.closest("button, a, input, select")) return;
+                          openDrawer();
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            openDrawer();
+                          }
+                        }}
+                        aria-label={`查看 ${account.name} ${t.name} 渠道详情`}
+                      >
                         <td>
                           <strong>{t.name}</strong>
                           <small className="check-source">
@@ -1419,7 +1589,8 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                           </button>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                 </tbody>
               </table>
             </div>
@@ -1462,6 +1633,26 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
         />
       )}
       {configuredDialog && <ConfiguredChannelDialog item={configuredDialog} close={() => setConfiguredDialog(null)} />}
+      {managementDetail && (
+        <ManagementChannelDrawer
+          row={managementDetail}
+          prices={prices.data?.data}
+          close={() => setManagementDetail(null)}
+          onOpenChannel={() => {
+            const ready = managementDetail;
+            setManagementDetail(null);
+            if (ready.configured) {
+              setConfiguredDialog(ready.configured);
+            } else {
+              setImporting({
+                account: ready.account,
+                target: ready.target,
+                configured: ready.configured,
+              });
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

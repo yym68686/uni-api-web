@@ -141,9 +141,14 @@ it("manages initial channels with account/unassigned filters and shows every cal
   await user.selectOptions(accountFilter,"one");
   expect(screen.getByText("initial-bound", {selector:"strong"})).toBeVisible();
   expect(screen.queryByText("initial-unassigned", {selector:"strong"})).not.toBeInTheDocument();
+  const boundRow=screen.getByText("initial-bound", {selector:"strong"}).closest("tr")!;
+  await user.click(within(boundRow).getByText("initial-bound", {selector:"strong"}));
+  const managementDrawer=within(screen.getByRole("dialog", {name:"initial-bound"}));
+  expect(managementDrawer.getByText("模型检测结果")).toBeVisible();
+  expect(managementDrawer.getByText("gpt-6-astra")).toBeVisible();
+  await user.click(managementDrawer.getByRole("button", {name:"关闭渠道详情"}));
   await user.click(screen.getByRole("button",{name:"检测全部模型 · 1 个渠道"}));
   expect(writes[0].targets).toHaveLength(1);
-  const boundRow=screen.getByText("initial-bound", {selector:"strong"}).closest("tr")!;
   await user.click(within(boundRow).getByRole("button",{name:"已添加 · 2 个 key"}));
   const dialog=within(screen.getByRole("dialog"));
   expect(await dialog.findByText("第 2 位")).toBeVisible();
