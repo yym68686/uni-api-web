@@ -58,7 +58,34 @@ describe("filter preferences", () => {
       ...defaultFilters,
       connection: { key: "platform-secret" },
     } as typeof defaultFilters);
-    expect(localStorage.getItem(key)).not.toContain("platform-secret");
+    expect(
+      localStorage.getItem(`uni-console-filters:v2:channels:${base}`),
+    ).not.toContain("platform-secret");
+  });
+  it("migrates shared preferences once and isolates page changes, resets and services", () => {
+    const legacy = { ...defaultFilters, model: "model-a", window: "1h" };
+    localStorage.setItem(key, JSON.stringify(legacy));
+    expect(loadFilters(base, "channels")).toEqual(legacy);
+    expect(loadFilters(base, "balances")).toEqual(legacy);
+    saveFilters(base, legacy, "channels");
+    saveFilters(
+      base,
+      { ...legacy, model: "model-b", window: "today", balanceTopN: "3" },
+      "balances",
+    );
+    expect(loadFilters(base, "channels")).toEqual(legacy);
+    expect(loadFilters(base, "balances")).toEqual({
+      ...legacy,
+      model: "model-b",
+      window: "today",
+      balanceTopN: "3",
+    });
+    saveFilters(base, defaultFilters, "channels");
+    expect(loadFilters(base, "channels")).toEqual(defaultFilters);
+    expect(loadFilters(base, "balances").model).toBe("model-b");
+    expect(loadFilters("https://other.example", "balances")).toEqual(
+      defaultFilters,
+    );
   });
   it("continues with in-memory defaults when browser storage is blocked", () => {
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {

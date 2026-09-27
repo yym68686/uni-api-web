@@ -982,9 +982,15 @@ function Dashboard({
   disconnect: (reason?: string) => void;
   changeConnection: () => void;
 }) {
-  const [filters, setFilters] = useState(() =>
-    loadFilters(baseConnection.base),
+  const [pageFilters, setPageFilters] = useState(() => ({
+    channels: loadFilters(baseConnection.base, "channels"),
+    balances: loadFilters(baseConnection.base, "balances"),
+  }));
+  const [view, setView] = useState<View>(() =>
+    loadView(baseConnection.base, !!baseConnection.account),
   );
+  const filterScope = view === "balances" ? "balances" : "channels";
+  const filters = pageFilters[filterScope];
   const sourceQuery = useConsoleSources(baseConnection.session, !!baseConnection.account);
   const sourceList = sourceQuery.data?.data || [];
   const imported = useSubImports(!!baseConnection.account);
@@ -1019,10 +1025,7 @@ function Dashboard({
     endpoint,
     stream,
   } = filters;
-  const [view, setView] = useState<View>(() =>
-      loadView(baseConnection.base, !!baseConnection.account),
-    ),
-    [page, setPage] = useState(0),
+  const [page, setPage] = useState(0),
     [adjustingChannels, setAdjustingChannels] = useState(false),
     [checkingChannels, setCheckingChannels] = useState(false);
   const channelView = view === "channels";
@@ -1030,8 +1033,9 @@ function Dashboard({
     saveView(baseConnection.base, view);
   }, [baseConnection.base, view]);
   useEffect(() => {
-    saveFilters(baseConnection.base, filters);
-  }, [connection.base, filters]);
+    saveFilters(baseConnection.base, pageFilters.channels, "channels");
+    saveFilters(baseConnection.base, pageFilters.balances, "balances");
+  }, [baseConnection.base, pageFilters]);
   const hasFilters = (Object.keys(defaultFilters) as (keyof Filters)[]).some(
     (key) =>
       ((channelView || view === "balances") &&
@@ -1399,7 +1403,10 @@ function Dashboard({
   const busy = metrics.isFetching || catalog.isFetching || keys.isFetching;
   function setFilter(name: keyof Filters, value: string) {
     setPage(0);
-    setFilters((current) => ({ ...current, [name]: value }));
+    setPageFilters((current) => ({
+      ...current,
+      [filterScope]: { ...current[filterScope], [name]: value },
+    }));
   }
   function reload() {
     if (
@@ -1885,7 +1892,10 @@ function Dashboard({
                   <button
                     className="filter-chip"
                     onClick={() => {
-                      setFilters({ ...defaultFilters });
+                      setPageFilters((current) => ({
+                        ...current,
+                        [filterScope]: { ...defaultFilters },
+                      }));
                       setPage(0);
                     }}
                   >

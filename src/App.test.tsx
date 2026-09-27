@@ -244,6 +244,64 @@ describe("dashboard workflows", () => {
     );
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
+  it("persists independent balance and channel filters across reloads and resets only the active page", async () => {
+    let app = setup();
+    await connect(app.user);
+    await app.user.selectOptions(screen.getByLabelText("API key 筛选"), "key-first");
+    await app.user.selectOptions(screen.getByLabelText("模型筛选"), "model-a");
+    await app.user.selectOptions(screen.getByLabelText("时间范围筛选"), "1h");
+    await app.user.type(screen.getByLabelText("搜索渠道或模型"), "first");
+    await app.user.selectOptions(screen.getByLabelText("端点筛选"), "/v1/messages");
+    await app.user.selectOptions(screen.getByLabelText("流式状态筛选"), "true");
+
+    await app.user.click(screen.getByRole("button", { name: /^余额管理/ }));
+    expect(screen.getByLabelText("API key 筛选")).toHaveValue("");
+    expect(screen.getByLabelText("模型筛选")).toHaveValue("");
+    expect(screen.getByLabelText("时间范围筛选")).toHaveValue("15m");
+    expect(screen.getByLabelText("搜索渠道或模型")).toHaveValue("");
+    await app.user.selectOptions(screen.getByLabelText("API key 筛选"), "key-second");
+    await app.user.selectOptions(screen.getByLabelText("时间范围筛选"), "today");
+    await app.user.type(screen.getByLabelText("搜索渠道或模型"), "third");
+    await app.user.selectOptions(screen.getByLabelText("模型优先级筛选"), "3");
+    await app.user.type(screen.getByLabelText("余额低于美元"), "10");
+    await waitFor(() => expect(screen.getAllByRole("row")).toHaveLength(2));
+    app.unmount();
+
+    app = setup();
+    await screen.findByRole("table");
+    expect(screen.getByLabelText("API key 筛选")).toHaveValue("key-second");
+    expect(screen.getByLabelText("模型筛选")).toHaveValue("");
+    expect(screen.getByLabelText("时间范围筛选")).toHaveValue("today");
+    expect(screen.getByLabelText("搜索渠道或模型")).toHaveValue("third");
+    expect(screen.getByLabelText("模型优先级筛选")).toHaveValue("3");
+    expect(screen.getByLabelText("余额低于美元")).toHaveValue(10);
+    const request = new URL(app.calls.find((url) => url.includes("/analytics/v1/analytics"))!);
+    expect(request.searchParams.get("key_id")).toBe("key-second");
+    expect(request.searchParams.get("range")).toBe("today");
+    expect(request.searchParams.get("endpoint")).toBe("all");
+    expect(request.searchParams.get("stream")).toBe("all");
+
+    await app.user.click(screen.getByRole("button", { name: "重置筛选" }));
+    await app.user.click(screen.getByRole("button", { name: /^渠道观测/ }));
+    expect(screen.getByLabelText("API key 筛选")).toHaveValue("key-first");
+    expect(screen.getByLabelText("模型筛选")).toHaveValue("model-a");
+    expect(screen.getByLabelText("时间范围筛选")).toHaveValue("1h");
+    expect(screen.getByLabelText("搜索渠道或模型")).toHaveValue("first");
+    expect(screen.getByLabelText("端点筛选")).toHaveValue("/v1/messages");
+    expect(screen.getByLabelText("流式状态筛选")).toHaveValue("true");
+    app.unmount();
+
+    app = setup();
+    await screen.findByRole("table");
+    expect(screen.getByLabelText("API key 筛选")).toHaveValue("key-first");
+    await app.user.click(screen.getByRole("button", { name: /^余额管理/ }));
+    expect(screen.getByLabelText("API key 筛选")).toHaveValue("");
+    expect(screen.getByLabelText("模型筛选")).toHaveValue("");
+    expect(screen.getByLabelText("时间范围筛选")).toHaveValue("15m");
+    expect(screen.getByLabelText("搜索渠道或模型")).toHaveValue("");
+    expect(screen.getByLabelText("模型优先级筛选")).toHaveValue("");
+    expect(screen.getByLabelText("余额低于美元")).toHaveValue(null);
+  });
   it("restores every filter after a fresh page mount, isolates services and persists reset", async () => {
     let app = setup();
     await connect(app.user);

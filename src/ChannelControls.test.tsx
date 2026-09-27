@@ -281,10 +281,11 @@ it("toggles adjustment inside observation with the same table, filters and metri
     (label) => (screen.getByLabelText(label) as HTMLInputElement).value,
   );
   await app.user.click(screen.getByRole("button", { name: /^余额管理/ }));
-  expect(screen.getByLabelText("uni-api 来源")).toHaveValue("one");
-  expect(screen.getByLabelText("API key 筛选")).toHaveValue("one::key");
-  expect(screen.getByLabelText("模型筛选")).toHaveValue("m");
-  expect(screen.getByLabelText("搜索渠道或模型")).toHaveValue("visible");
+  expect(screen.getByLabelText("uni-api 来源")).toHaveValue("");
+  expect(screen.getByLabelText("API key 筛选")).toHaveValue("");
+  expect(screen.getByLabelText("模型筛选")).toHaveValue("");
+  expect(screen.getByLabelText("时间范围筛选")).toHaveValue("15m");
+  expect(screen.getByLabelText("搜索渠道或模型")).toHaveValue("");
   expect(screen.getByLabelText("模型优先级筛选")).toHaveValue("");
   expect(screen.getByLabelText("余额低于美元")).toHaveValue(null);
   for (const label of [
@@ -295,6 +296,11 @@ it("toggles adjustment inside observation with the same table, filters and metri
   ]) {
     expect(screen.queryByLabelText(label)).not.toBeInTheDocument();
   }
+  await app.user.selectOptions(screen.getByLabelText("uni-api 来源"), "two");
+  await waitFor(() => expect(screen.getByLabelText("API key 筛选")).toContainHTML('value="two::key"'));
+  await app.user.selectOptions(screen.getByLabelText("API key 筛选"), "two::key");
+  await app.user.selectOptions(screen.getByLabelText("时间范围筛选"), "1h");
+  await app.user.type(screen.getByLabelText("搜索渠道或模型"), "second");
   await app.user.click(screen.getByRole("button", { name: /^渠道观测/ }));
   expect(
     labels.map(
@@ -302,6 +308,14 @@ it("toggles adjustment inside observation with the same table, filters and metri
     ),
   ).toEqual(values);
   expect(app.writes).toHaveLength(0);
+  await app.user.click(screen.getByRole("button", { name: /^余额管理/ }));
+  expect(screen.getByLabelText("uni-api 来源")).toHaveValue("two");
+  expect(screen.getByLabelText("API key 筛选")).toHaveValue("two::key");
+  expect(screen.getByLabelText("时间范围筛选")).toHaveValue("1h");
+  expect(screen.getByLabelText("搜索渠道或模型")).toHaveValue("second");
+  await app.user.click(screen.getByRole("button", { name: "重置筛选" }));
+  await app.user.click(screen.getByRole("button", { name: /^渠道观测/ }));
+  expect(labels.map((label) => (screen.getByLabelText(label) as HTMLInputElement).value)).toEqual(values);
   const tableBeforeCancel = screen.getByRole("table");
   await app.user.click(screen.getByRole("button", { name: "取消调整" }));
   expect(

@@ -54,7 +54,10 @@ export function saveView(base: string, view: View) {
   }
 }
 
-const storageKey = (base: string) => `uni-console-filters:v1:${base}`;
+export type FilterScope = "channels" | "balances";
+const storageKey = (base: string, scope: FilterScope) =>
+  `uni-console-filters:v2:${scope}:${base}`;
+const legacyStorageKey = (base: string) => `uni-console-filters:v1:${base}`;
 
 function validate(value: unknown): Filters {
   const saved = value && typeof value === "object" ? value : {};
@@ -101,19 +104,32 @@ function validate(value: unknown): Filters {
   };
 }
 
-export function loadFilters(base: string): Filters {
+export function loadFilters(
+  base: string,
+  scope: FilterScope = "channels",
+): Filters {
   try {
-    return validate(
-      JSON.parse(localStorage.getItem(storageKey(base)) || "null"),
-    );
+    // Keep existing preferences on upgrade. Each page saves its own snapshot
+    // from then on, including an explicit reset to defaults.
+    const saved =
+      localStorage.getItem(storageKey(base, scope)) ??
+      localStorage.getItem(legacyStorageKey(base));
+    return validate(JSON.parse(saved || "null"));
   } catch {
     return { ...defaultFilters };
   }
 }
 
-export function saveFilters(base: string, filters: Filters) {
+export function saveFilters(
+  base: string,
+  filters: Filters,
+  scope: FilterScope = "channels",
+) {
   try {
-    localStorage.setItem(storageKey(base), JSON.stringify(validate(filters)));
+    localStorage.setItem(
+      storageKey(base, scope),
+      JSON.stringify(validate(filters)),
+    );
   } catch {
     // Browsers can disable storage or exhaust its quota; filtering still works.
   }
