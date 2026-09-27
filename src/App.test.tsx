@@ -29,6 +29,8 @@ const rows = ["first", "second", "third"].map((provider, i) => ({
       sample_count: 4,
     },
     estimated_cost_usd: i === 0 ? 10 : 5,
+    actual_cost_usd: i === 0 ? 2 : 1,
+    actual_cost_samples: 1,
     sale_percent: 2.5,
   },
 }));
@@ -171,6 +173,7 @@ describe("dashboard workflows", () => {
     await user.click(screen.getByRole("button", { name: /^余额管理/ }));
     const table = await screen.findByRole("table");
     await waitFor(() => expect(within(table).getByText("third")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("$2.00")).toBeInTheDocument());
 
     for (const label of [
       "端点筛选",

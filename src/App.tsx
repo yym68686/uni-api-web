@@ -1315,6 +1315,31 @@ function Dashboard({
       const estimated = estimatedValues.length
         ? estimatedValues.reduce((sum, value) => sum + value, 0)
         : null;
+      // Analytics already aggregates provider deductions over the selected
+      // window, including rolling ranges such as 1h. Prefer those values over
+      // the calendar-day balance endpoint so the actual and estimated columns
+      // share the same time range.
+      const analyticsCosts = providerRows.map((row) => {
+        const stats = row.stats;
+        const actual = stats?.actual_cost_usd;
+        const samples = stats?.actual_cost_samples;
+        const hasUsage =
+          (typeof stats?.usage_samples === "number" && stats.usage_samples > 0) ||
+          (typeof stats?.estimated_cost_usd === "number" && Number.isFinite(stats.estimated_cost_usd));
+        if (!hasUsage && !(typeof samples === "number" && samples > 0)) return null;
+        const hasSamples =
+          typeof samples === "number" ? samples > 0 : hasUsage && typeof actual === "number";
+        return hasSamples && typeof actual === "number" && Number.isFinite(actual)
+          ? actual
+          : undefined;
+      });
+      const observedAnalyticsCosts = analyticsCosts.filter(
+        (value): value is number | undefined => value !== null,
+      );
+      const analyticsActual =
+        observedAnalyticsCosts.length > 0 && observedAnalyticsCosts.every((value): value is number => value !== undefined)
+          ? observedAnalyticsCosts.reduce((sum, value) => sum + value, 0)
+          : undefined;
       const spends = providerRows.map((row) => channelSpend.get(rowId(row)));
       const spendCosts = spends.map((query) => {
         const data = query?.data as SubChannelSpend | undefined;
@@ -1337,7 +1362,7 @@ function Dashboard({
         ? costs.length === providerRows.length && costs.every(Boolean)
           ? costs.reduce((sum, item) => sum + item!.amount, 0)
           : null
-        : fallbackActual?.amount ?? null;
+        : analyticsActual ?? fallbackActual?.amount ?? null;
       const actualUpperBound = baseConnection.account
         ? costs.some((item) => item?.upperBound) || false
         : Boolean(fallbackActual?.upperBound);

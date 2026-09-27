@@ -29,6 +29,9 @@ export interface Stats {
   cache_read_tokens?: number;
   cache_samples?: number;
   estimated_cost_usd?: number | null;
+  actual_cost_usd?: number | null;
+  actual_cost_samples?: number;
+  actual_cost_source?: string;
   sale_percent?: number;
   started: number;
   success: number;
