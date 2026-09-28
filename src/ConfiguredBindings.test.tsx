@@ -6,11 +6,12 @@ import type { ReactNode } from "react";
 import { ChannelAccess } from "./ChannelAccess";
 import { combineChannelSpend, useSubChannelSpend } from "./SubChannelSpend";
 import type { SubChannelSpendResult } from "./SubChannelSpend";
-import { useChannelAccountBalances } from "./ChannelAccountBalances";
+import { useChannelAccountBalances, withAccountWallet } from "./ChannelAccountBalances";
+import { accountBalanceQuery } from "./accountBalance";
 import { withSubQuality } from "./ChannelChecks";
 import type { Checks } from "./ChannelChecks";
 import type { InstalledChannel, SubImportsQuery } from "./sub2apiImports";
-import type { Channel } from "./types";
+import type { Balance, Channel } from "./types";
 import { providerId, balanceIsLow } from "./format";
 
 const row = {
@@ -169,6 +170,92 @@ it("uses account balances once across shared keys and retains negative balance f
   expect(balance.keys).toHaveLength(1);
   expect(balanceIsLow(balance)).toBe(true);
   expect(fetch).toHaveBeenCalledTimes(1);
+});
+it("shares one wallet and timestamp across configured, copied and imported channels and refreshes them together", async () => {
+  let wallet = { status: "ok", amount: -0.0584, checked_at: 100 };
+  const fetch = vi.fn(async () => new Response(JSON.stringify(wallet)));
+  vi.stubGlobal("fetch", fetch);
+  const imported: InstalledChannel = {
+    ...bound, source_id: "digitalocean", provider: "sub2api-imported",
+    kind: undefined, binding_status: undefined, bound_keys: undefined,
+    base: "https://site.test",
+  };
+  const channels = [bound, { ...bound, provider: "sub2api-copy" }, imported];
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const { result, rerender } = renderHook(
+    ({ providers }) => useChannelAccountBalances(providers, channels, "wallet-user", true, false),
+    { initialProps: { providers: channels.map(providerId) },
+      wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> },
+  );
+  await waitFor(() => expect(result.current.get(providerId(imported))?.data?.keys?.[0]).toMatchObject({
+    amount: -0.0584, checked_at: 100, kind: "account_wallet", label: "站点账号",
+  }));
+  expect(fetch).toHaveBeenCalledTimes(1);
+  wallet = { status: "ok", amount: 99.9416, checked_at: 200 };
+  await result.current.get(providerId(imported))!.refetch();
+  await waitFor(() => {
+    for (const channel of channels) {
+      const balance = result.current.get(providerId(channel))!.data!;
+      expect(balance.keys).toHaveLength(1);
+      expect(balance.keys![0]).toMatchObject({ amount: 99.9416, checked_at: 200 });
+      expect(balanceIsLow(balance)).toBe(false);
+    }
+  });
+  // Changing the source/model view does not create a separate account wallet.
+  rerender({ providers: [providerId(imported)] });
+  expect(result.current.get(providerId(imported))?.data?.keys?.[0].amount).toBe(99.9416);
+  // The account list also consumes the exact same query/cache entry.
+  expect(await client.fetchQuery(accountBalanceQuery("wallet-user", "account", "https://site.test"))).toEqual(wallet);
+  expect(fetch).toHaveBeenCalledTimes(2);
+});
+it("keeps accounts on the same site separate and does not turn partial bindings into account wallets", async () => {
+  const fetch = vi.fn(async (input: string) => new Response(JSON.stringify({
+    status: "ok", amount: input.includes("/other/") ? 10 : 20, checked_at: 200,
+  })));
+  vi.stubGlobal("fetch", fetch);
+  const other: InstalledChannel = { ...bound, provider: "other", kind: undefined, binding_status: undefined, bound_keys: undefined, account_id: "other", base: "https://site.test" };
+  const partial = { ...bound, provider: "partial", binding_status: "partial" as const };
+  const ambiguous = { ...bound, provider: "ambiguous", binding_status: "ambiguous" as const };
+  const channels = [bound, other, partial, ambiguous];
+  const { result } = renderHook(() => useChannelAccountBalances(channels.map(providerId), channels, "separate", true, false), { wrapper });
+  await waitFor(() => expect(result.current.get(providerId(other))?.data?.keys?.[0].amount).toBe(10));
+  expect(result.current.get(providerId(bound))?.data?.keys?.[0].amount).toBe(20);
+  expect(result.current.has(providerId(partial))).toBe(false);
+  expect(result.current.has(providerId(ambiguous))).toBe(false);
+  expect(fetch).toHaveBeenCalledTimes(2);
+});
+it("replaces only gateway wallets and preserves key quotas, subscriptions and receipt totals", async () => {
+  const quota = { position: 2, kind: "key_quota", status: "ok", amount: 2, checked_at: 90 };
+  const subscription = { position: 3, kind: "subscription", status: "ok", amount: 3, checked_at: 90 };
+  const raw = {
+    data: { provider: "imported", status: "complete", actual_cost_usd: 12, keys: [
+      { position: 1, kind: "wallet", status: "ok", amount: -0.0584, checked_at: 90, actual_cost_usd: 4 },
+      quota, subscription,
+    ] } as Balance,
+    isPending: false, isError: false, refetch: vi.fn(async () => {}),
+  };
+  const account = {
+    needsChannelBalance: true,
+    data: { provider: "imported", status: "complete", keys: [
+      { position: 1, kind: "account_wallet", status: "ok", amount: 99.9416, checked_at: 200 },
+    ] } as Balance,
+    isPending: false, isError: false, refetch: vi.fn(async () => {}),
+  };
+  const result = withAccountWallet(raw, account);
+  expect(result.data?.keys?.[0]).toMatchObject({ amount: 99.9416, checked_at: 200, actual_cost_usd: 4 });
+  expect(result.data?.keys?.slice(1)).toEqual([quota, subscription]);
+  expect(result.data?.actual_cost_usd).toBe(12);
+  expect(raw.data.keys?.[0].amount).toBe(-0.0584);
+  await result.refetch();
+  expect(account.refetch).toHaveBeenCalledTimes(1);
+  expect(raw.refetch).toHaveBeenCalledTimes(1);
+  for (const kind of ["key_quota", "subscription", "rate_limits", undefined]) {
+    const other = { ...raw, data: { ...raw.data, keys: [{ ...quota, kind }] } };
+    expect(withAccountWallet(other, account)).toBe(other);
+  }
+  expect(withAccountWallet(raw)).toBe(raw);
+  expect(withAccountWallet(raw, { ...account, data: undefined, isPending: true })).toMatchObject({ data: undefined, isPending: true });
+  expect(withAccountWallet(raw, { ...account, isError: true })).toMatchObject({ data: undefined, isError: true });
 });
 it("scans different account sites concurrently and keeps accounts on the same site serial", async () => {
   const finish = new Map<string, () => void>();

@@ -127,7 +127,7 @@ import {
 import { actualCostRange } from "./actualCost";
 import { useScopedChannelSpend } from "./SubChannelSpend";
 import { balanceSpend } from "./balanceSpend";
-import { useChannelAccountBalances } from "./ChannelAccountBalances";
+import { useChannelAccountBalances, withAccountWallet } from "./ChannelAccountBalances";
 import { balanceSite, scheduleBalance } from "./balanceRequests";
 import { balanceBelowThreshold, rankBalanceProviders } from "./balanceFilters";
 import { salePercent } from "./modelPrices";
@@ -1219,7 +1219,7 @@ function Dashboard({
   const providers = useMemo(() => [...new Set(rows.map(providerId))], [rows]);
   const actualRange = useMemo(() => actualCostRange(window), [window]);
   const channelSpend = useScopedChannelSpend({ rows, session: connection.session, sourceId: selectedSourceId, keyId, model, endpoint: effectiveEndpoint, stream: effectiveStream, from: metrics.data?.from, to: metrics.data?.to, snapshot: metrics.data, snapshotError: metrics.isError, snapshotUpdatedAt: metrics.dataUpdatedAt, refresh, auto, enabled: (channelView || view === "balances") && !!baseConnection.account });
-  const accountBalances = useChannelAccountBalances(providers, imported.data?.data || [], connection.session, !!baseConnection.account && needsChannelData, auto);
+  const accountBalances = useChannelAccountBalances(providers, imported.data?.data || [], baseConnection.session, !!baseConnection.account && needsChannelData, auto);
   const rawBalanceQueries = useQueries({
     queries: providers.map((provider) => ({
       queryKey: [
@@ -1259,15 +1259,15 @@ function Dashboard({
           JSON.parse(provider)[0] || connection.sourceId || connection.base,
         ),
       staleTime: 300_000,
-      // Resolve the site/account first: avoid speculative gateway queries for
-      // balances served by an account, and serialize aliases of the same site.
-      enabled: needsChannelData && !sitesPending && (!baseConnection.account || !imported.isPending) && !accountBalances.has(provider),
+      // Resolve the account first. Imported channels still need their balance
+      // type so key quotas/subscriptions are not mistaken for account wallets.
+      enabled: needsChannelData && !sitesPending && (!baseConnection.account || !imported.isPending) && (!accountBalances.has(provider) || accountBalances.get(provider)!.needsChannelBalance),
       refetchInterval: auto ? 300_000 : false,
       refetchIntervalInBackground: false,
       retry: false,
     })),
   });
-  const balanceQueries = providers.map((provider,i) => accountBalances.get(provider) || rawBalanceQueries[i]);
+  const balanceQueries = providers.map((provider, i) => withAccountWallet(rawBalanceQueries[i], accountBalances.get(provider)));
   const balanceMap = new Map(
     providers.map((provider, i) => [provider, balanceQueries[i]]),
   );

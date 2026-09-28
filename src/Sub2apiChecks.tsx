@@ -16,7 +16,8 @@ import {
   X,
 } from "lucide-react";
 import { controlRequest } from "./api";
-import { balanceSite, scheduleBalance } from "./balanceRequests";
+import { accountBalanceQuery } from "./accountBalance";
+import type { AccountBalance as SubAccountBalance } from "./accountBalance";
 import { BalanceAmount } from "./BalanceAmount";
 import { AccountForm } from "./SiteAccountForm";
 import { ResponseLatency } from "./LatencyBadge";
@@ -152,28 +153,11 @@ const latency = (value: number | null) =>
       ? `${value} ms`
       : `${(value / 1000).toFixed(2)} s`;
 
-interface SubAccountBalance {
-  amount: number | null;
-  checked_at: number;
-  status: string;
-}
-function AccountBalance({ account, enabled }: { account: SubAccount; enabled: boolean }) {
+function AccountBalance({ account, enabled, user }: { account: SubAccount; enabled: boolean; user: string }) {
   const query = useQuery({
-    queryKey: ["sub2api-balance", account.id, account.synced_at],
-    queryFn: ({ signal }) =>
-      scheduleBalance(
-        balanceSite(account.base, `account:${account.id}`),
-        () =>
-          controlRequest<SubAccountBalance>(
-            `/v1/sub2api/accounts/${account.id}/balance`,
-            { signal },
-          ),
-        signal,
-      ),
-    staleTime: 60_000,
+    ...accountBalanceQuery(user, account.id, account.base),
     enabled,
     refetchInterval: enabled ? 60_000 : false,
-    retry: false,
   });
   const balance = query.data || account.balance;
   return (
@@ -1072,7 +1056,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                       <SiteLink base={a.base}><span title={a.base}>{new URL(a.base).host}</span></SiteLink>
                     </div>
                     <div className="sub-account-email" title={a.login_name || a.email}>{a.login_name || a.email}</div>
-                    <AccountBalance account={a} enabled={!!query.data} />
+                    <AccountBalance account={a} enabled={!!query.data} user={user} />
                     <div className="sub-account-status">
                       <span
                         className="sub-account-progress"
