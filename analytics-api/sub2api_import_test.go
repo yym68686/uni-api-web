@@ -34,6 +34,7 @@ func TestSubImportUsesBusinessKeyAndFencesModelsOwnerAndRevision(t *testing.T) {
 	raw, _ := json.Marshal(subResult{Model: checkModel, Availability: subProbe{Status: "success"}})
 	store.db.Exec(`INSERT INTO console_sub_models(account_id,group_id,model,state,result) VALUES($1,7,$2,'done',$3)`, account, checkModel, string(raw))
 	remoteKey := subRemoteKey{}
+	groupMissing := false
 	created := 0
 	imports := 0
 	revision := "boot:1"
@@ -42,6 +43,10 @@ func TestSubImportUsesBusinessKeyAndFencesModelsOwnerAndRevision(t *testing.T) {
 		success := func(data any) { writeJSON(w, 200, map[string]any{"code": 0, "data": data}) }
 		switch r.URL.Path {
 		case "/api/v1/groups/available":
+			if groupMissing {
+				success([]subRemoteGroup{})
+				return
+			}
 			success([]subRemoteGroup{{ID: 7, Name: "group", Platform: "openai"}})
 		case "/api/v1/keys":
 			if r.Method == "GET" {
@@ -56,6 +61,8 @@ func TestSubImportUsesBusinessKeyAndFencesModelsOwnerAndRevision(t *testing.T) {
 			}
 			remoteKey = subRemoteKey{ID: 99, Name: body["name"].(string), GroupID: 7, Key: "business-secret", Status: "active"}
 			success(remoteKey)
+		case "/api/v1/keys/1":
+			success(map[string]any{"group_id": 7, "group": map[string]any{"id": 7, "status": "inactive"}})
 		case "/api/v1/keys/99":
 			success(remoteKey)
 		default:
@@ -132,6 +139,18 @@ func TestSubImportUsesBusinessKeyAndFencesModelsOwnerAndRevision(t *testing.T) {
 	w = request([]string{checkModel}, "boot:2", session)
 	if w.Code != 200 || created != 1 || imports != 2 {
 		t.Fatal("duplicate key created", w.Code, w.Body.String())
+	}
+	groupMissing = true
+	if w = request([]string{checkModel}, "boot:2", session); w.Code != 409 || !strings.Contains(w.Body.String(), "站点已停用") {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if created != 1 || imports != 2 {
+		t.Fatal("unavailable group mutated gateway or key", created, imports)
+	}
+	var active bool
+	store.db.QueryRow(`SELECT active FROM console_sub_targets WHERE account_id=$1 AND group_id=7`, account).Scan(&active)
+	if active {
+		t.Fatal("unavailable group stayed active")
 	}
 	var encrypted string
 	store.db.QueryRow(`SELECT encrypted_routing_key FROM console_sub_targets WHERE account_id=$1 AND group_id=7`, account).Scan(&encrypted)

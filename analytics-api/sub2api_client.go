@@ -189,6 +189,7 @@ type subAuth struct {
 
 type subRemoteGroup struct {
 	ID       int64   `json:"id"`
+	Status   string  `json:"status,omitempty"`
 	Name     string  `json:"name"`
 	Platform string  `json:"platform"`
 	Rate     float64 `json:"rate_multiplier"`

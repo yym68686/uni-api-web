@@ -236,6 +236,21 @@ export function Sub2apiImport({
     staleTime: 0,
     refetchOnWindowFocus: false,
   });
+  const groupAccess = useQuery({
+    queryKey: ["sub-group-access", account.id, target.group_id],
+    queryFn: ({ signal }) => controlRequest<{ available: boolean; status: string; message?: string }>(
+      `/v1/sub2api/accounts/${encodeURIComponent(account.id)}/groups/${target.group_id}/access`, { signal },
+    ),
+    enabled: showForm && !editing,
+    retry: false,
+    staleTime: 0,
+    refetchOnWindowFocus: false,
+  });
+  const groupUnavailable = groupAccess.data?.available === false ||
+    (!groupAccess.data && target.active === false);
+  const groupAccessMessage = groupUnavailable
+    ? groupAccess.data?.message || target.message || "站点当前未开放该分组，请重新检查分组状态。"
+    : groupAccess.error ? "暂时无法核对站点分组状态，请重新检查。" : "";
   const visibleError = error || sources.error?.message || options.error?.message || "";
   useEffect(() => {
     if (
@@ -348,7 +363,7 @@ export function Sub2apiImport({
     action: "add" | "replace" | "delete",
     item?: InstalledChannel,
   ) {
-    if (busy || (action !== "delete" && (
+    if (busy || (action === "add" && groupUnavailable) || (action !== "delete" && (
       mapping.error || invalidModels.length || options.isFetching || options.isError ||
       !options.data?.keys.some(k => k.key_id === key) ||
       !keyDirectory?.data?.keys.some(k => k.key_id === key)
@@ -406,6 +421,7 @@ export function Sub2apiImport({
       // Site authentication fails before a destination write, so no route
       // refresh is needed in that case.
       if (!siteLoginRequired(message)) void refresh();
+      if (action === "add" && message.includes("分组")) void groupAccess.refetch();
     } finally {
       setBusy(false);
     }
@@ -745,6 +761,15 @@ export function Sub2apiImport({
                 )}
               </div>
             )}
+            {showForm && !editing && groupAccessMessage && (
+              <div role="alert" className="error-banner">
+                {groupAccessMessage}
+                <button type="button" className="button small" disabled={groupAccess.isFetching || busy}
+                  onClick={() => { setError(""); void groupAccess.refetch(); }}>
+                  重新检查分组状态
+                </button>
+              </div>
+            )}
             {showForm && <ChannelImportKeyFeedback directory={keyDirectory} />}
             {showForm && (
               <form
@@ -848,7 +873,7 @@ export function Sub2apiImport({
                 )}
                 <ChannelModelSelection
                   models={editChecks.map(c=>c.model)} selected={originals} editing={!!editing}
-                  disabled={busy} actions={batchButton("models","模型勾选")}
+                  disabled={busy || (!editing && groupUnavailable)} actions={batchButton("models","模型勾选")}
                   canSelect={model=>available.includes(model)}
                   onChange={selected=>setModelChoices(Object.fromEntries(editChecks.map(c=>[c.model,selected.includes(c.model)])))}
                   status={model=>{
@@ -966,6 +991,7 @@ export function Sub2apiImport({
                     className="button primary"
                     disabled={
                       busy ||
+                      (!editing && groupUnavailable) ||
                       !source ||
                       !key ||
                       !keyDirectory?.data?.keys.some(k => k.key_id === key) ||

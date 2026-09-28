@@ -204,7 +204,8 @@ func (s *Service) subImportChannel(w http.ResponseWriter, r *http.Request) {
 	// Claim account to serialize refresh-token rotation, key creation and stop.
 	job := randomID()
 	var base, auth string
-	err = s.control.db.QueryRowContext(ctx, `UPDATE console_sub_accounts SET state='running',job_id=$3,job_kind='import',lease_until=now()+interval '90 seconds',message='' WHERE id=$1 AND owner=$2 AND state NOT IN ('running','queued') RETURNING base,encrypted_auth`, in.AccountID, owner, job).Scan(&base, &auth)
+	var synced int64
+	err = s.control.db.QueryRowContext(ctx, `UPDATE console_sub_accounts SET state='running',job_id=$3,job_kind='import',lease_until=now()+interval '90 seconds',message='' WHERE id=$1 AND owner=$2 AND state NOT IN ('running','queued') RETURNING base,encrypted_auth,synced_at`, in.AccountID, owner, job).Scan(&base, &auth, &synced)
 	if err != nil {
 		http.Error(w, "账号不存在或有任务进行中", 409)
 		return
@@ -216,7 +217,8 @@ func (s *Service) subImportChannel(w http.ResponseWriter, r *http.Request) {
 	}()
 	var active bool
 	var storedKey string
-	err = s.control.db.QueryRowContext(ctx, `SELECT active,encrypted_routing_key FROM console_sub_targets WHERE account_id=$1 AND group_id=$2`, in.AccountID, in.GroupID).Scan(&active, &storedKey)
+	var testKey int64
+	err = s.control.db.QueryRowContext(ctx, `SELECT active,encrypted_routing_key,remote_key_id FROM console_sub_targets WHERE account_id=$1 AND group_id=$2`, in.AccountID, in.GroupID).Scan(&active, &storedKey, &testKey)
 	if err != nil || !active {
 		http.Error(w, "分组不可用，请同步后重试", 400)
 		return
@@ -235,14 +237,17 @@ func (s *Service) subImportChannel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	allowed := false
-	for _, g := range groups {
-		if g.ID == in.GroupID {
-			allowed = true
-		}
+	access, err := readSubGroupAccess(groups, in.GroupID, testKey, func(path string, out any) error { return call("GET", path, nil, out, "") })
+	if err != nil {
+		http.Error(w, err.Error(), 502)
+		return
 	}
-	if !allowed {
-		http.Error(w, "该账号已无分组权限", 400)
+	if !access.Available {
+		if err := s.saveSubGroupAccess(ctx, in.AccountID, in.GroupID, job, synced, access); err != nil {
+			http.Error(w, "无法保存最新分组状态，请稍后重新检查", 503)
+			return
+		}
+		http.Error(w, access.Message, 409)
 		return
 	}
 	routeName := "uni-console-route-" + in.AccountID + "-" + strconv.FormatInt(in.GroupID, 10)

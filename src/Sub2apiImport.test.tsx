@@ -370,3 +370,40 @@ it("recovers an expired site session in place without slow refetches or losing t
   expect(JSON.stringify(localStorage)).not.toContain("fixture-password");
   expect(JSON.stringify(sessionStorage)).not.toContain("fixture-password");
 });
+
+it("checks live group state without blocking source selection and disables stale successful models", async () => {
+  let resolveAccess!: (response: Response) => void;
+  let recovered = false;
+  const writes: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+    if (init?.method === "POST") { writes.push(input); return Response.json({}); }
+    if (input.endsWith("/groups/1/access")) {
+      if (recovered) return Response.json({ available: true, status: "available" });
+      return new Promise<Response>(resolve => { resolveAccess = resolve; });
+    }
+    if (input.includes("channel-options")) return Response.json({
+      revision: "r1", supported: true, manageable: true,
+      keys: [{ key_id: "key2", position: 2, prefix: "masked-two" }],
+      channels: [],
+    });
+    return Response.json({ data: [], unavailable_keys: [], unavailable_sources: [] });
+  }));
+  const models = [{ model: "gpt-6-sol", state: "done", message: "", result: { model: "gpt-6-sol", availability: { status: "success" } } }];
+  mount({ ...target, active: true, models } as SubTarget);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: /新增接入/ }));
+  await user.selectOptions(screen.getByLabelText("添加到 uni-api 来源"), "primary");
+  await user.selectOptions(screen.getByLabelText("添加到 API key"), "key2");
+  expect(screen.getByLabelText("添加到 API key")).toBeEnabled();
+  resolveAccess(Response.json({ available: false, status: "disabled", message: "站点已停用该分组，无法新增接入。" }));
+  await screen.findByText("站点已停用该分组，无法新增接入。");
+  expect(screen.getByRole("button", { name: "添加到渠道" })).toBeDisabled();
+  expect(screen.getByRole("checkbox", { name: "gpt-6-sol" })).toBeDisabled();
+  expect(writes).toHaveLength(0);
+  recovered = true;
+  await user.click(screen.getByRole("button", { name: "重新检查分组状态" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "添加到渠道" })).toBeEnabled());
+  expect(screen.getByRole("checkbox", { name: "gpt-6-sol" })).toBeChecked();
+  expect(screen.getByLabelText("添加到 API key")).toHaveValue("key2");
+  expect(writes).toHaveLength(0);
+});
