@@ -170,6 +170,25 @@ it("uses account balances once across shared keys and retains negative balance f
   expect(balanceIsLow(balance)).toBe(true);
   expect(fetch).toHaveBeenCalledTimes(1);
 });
+it("scans different account sites concurrently and keeps accounts on the same site serial", async () => {
+  const finish = new Map<string, () => void>();
+  const fetch = vi.fn((input: string) => new Promise<Response>((resolve) => {
+    const id = input.split("/accounts/")[1].split("/")[0];
+    finish.set(id, () => resolve(new Response(JSON.stringify({ status: "ok", amount: 1, checked_at: 200 }))));
+  }));
+  vi.stubGlobal("fetch", fetch);
+  const channels = ["a", "a-other", "b", "c", "d", "e"].map((id) => ({
+    ...bound, provider: id,
+    bound_keys: [{ ...bound.bound_keys![0], account_id: id, base: `https://${id.startsWith("a") ? "a" : id}.test/v1` }],
+  }));
+  const { result } = renderHook(() => useChannelAccountBalances(channels.map(providerId), channels, "parallel", true, false), { wrapper });
+  await waitFor(() => expect([...finish.keys()]).toEqual(["a", "b", "c", "d", "e"]));
+  finish.get("a")!();
+  await waitFor(() => expect(finish.has("a-other")).toBe(true));
+  for (const done of finish.values()) done();
+  await waitFor(() => expect([...result.current.values()].every((query) => !query.isPending)).toBe(true));
+  expect(fetch).toHaveBeenCalledTimes(6);
+});
 it("shows persistent account associations without offering temporary-channel removal", () => {
   render(
     <ChannelAccess

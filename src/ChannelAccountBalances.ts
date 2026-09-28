@@ -1,6 +1,6 @@
-import { useMemo } from "react";
 import { useQueries } from "@tanstack/react-query";
-import { controlRequest, makeLimiter } from "./api";
+import { controlRequest } from "./api";
+import { balanceSite, scheduleBalance } from "./balanceRequests";
 import type { InstalledChannel } from "./sub2apiImports";
 import type { Balance } from "./types";
 import { providerId } from "./format";
@@ -17,7 +17,6 @@ export function useChannelAccountBalances(
   enabled: boolean,
   auto: boolean,
 ) {
-  const limit = useMemo(() => makeLimiter(3), []);
   const related = channels.filter(
     (item) =>
       providers.includes(providerId(item)) &&
@@ -35,7 +34,8 @@ export function useChannelAccountBalances(
     queries: accounts.map((account) => ({
       queryKey: ["bound-account-balance", session, account.account_id],
       queryFn: ({ signal }: { signal: AbortSignal }) =>
-        limit(
+        scheduleBalance(
+          balanceSite(account.base, `account:${account.account_id}`),
           () =>
             controlRequest<AccountBalance>(
               `/v1/sub2api/accounts/${encodeURIComponent(account.account_id)}/balance`,

@@ -15,7 +15,8 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { controlRequest, makeLimiter } from "./api";
+import { controlRequest } from "./api";
+import { balanceSite, scheduleBalance } from "./balanceRequests";
 import { BalanceAmount } from "./BalanceAmount";
 import { AccountForm } from "./SiteAccountForm";
 import { ResponseLatency } from "./LatencyBadge";
@@ -156,12 +157,12 @@ interface SubAccountBalance {
   checked_at: number;
   status: string;
 }
-const limitAccountBalance = makeLimiter(3);
 function AccountBalance({ account, enabled }: { account: SubAccount; enabled: boolean }) {
   const query = useQuery({
     queryKey: ["sub2api-balance", account.id, account.synced_at],
     queryFn: ({ signal }) =>
-      limitAccountBalance(
+      scheduleBalance(
+        balanceSite(account.base, `account:${account.id}`),
         () =>
           controlRequest<SubAccountBalance>(
             `/v1/sub2api/accounts/${account.id}/balance`,

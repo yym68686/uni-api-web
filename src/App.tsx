@@ -50,7 +50,6 @@ import {
   AnalyticsInitializingError,
   initializationRetryInterval,
   channelParams,
-  makeLimiter,
   request,
   analyticsRequest,
   controlRequest,
@@ -129,6 +128,7 @@ import { actualCostRange } from "./actualCost";
 import { useScopedChannelSpend } from "./SubChannelSpend";
 import { balanceSpend } from "./balanceSpend";
 import { useChannelAccountBalances } from "./ChannelAccountBalances";
+import { balanceSite, scheduleBalance } from "./balanceRequests";
 import { balanceBelowThreshold, rankBalanceProviders } from "./balanceFilters";
 import { salePercent } from "./modelPrices";
 import { ConsoleHeader, ConsoleNavigation } from "./ConsoleChrome";
@@ -1004,7 +1004,7 @@ function Dashboard({
   );
   const subQuality = useSubQualitySummary(!!baseConnection.account && needsChannelData);
   const checks = withSubQuality(rawChecks, imported.data?.data || [], subQuality.data?.data || []);
-  const siteFor = useChannelSites(baseConnection, imported.data?.data || [], needsChannelData);
+  const { siteFor, isPending: sitesPending } = useChannelSites(baseConnection, imported.data?.data || [], needsChannelData);
   const selectedSourceId = filters.sourceId;
   const connection = useMemo(
     () => ({
@@ -1219,7 +1219,6 @@ function Dashboard({
   const providers = useMemo(() => [...new Set(rows.map(providerId))], [rows]);
   const actualRange = useMemo(() => actualCostRange(window), [window]);
   const channelSpend = useScopedChannelSpend({ rows, session: connection.session, sourceId: selectedSourceId, keyId, model, endpoint: effectiveEndpoint, stream: effectiveStream, from: metrics.data?.from, to: metrics.data?.to, snapshot: metrics.data, snapshotError: metrics.isError, snapshotUpdatedAt: metrics.dataUpdatedAt, refresh, auto, enabled: (channelView || view === "balances") && !!baseConnection.account });
-  const limit = useMemo(() => makeLimiter(3), []);
   const accountBalances = useChannelAccountBalances(providers, imported.data?.data || [], connection.session, !!baseConnection.account && needsChannelData, auto);
   const rawBalanceQueries = useQueries({
     queries: providers.map((provider) => ({
@@ -1232,7 +1231,11 @@ function Dashboard({
         effectiveWindow,
       ],
       queryFn: ({ signal }: { signal: AbortSignal }) =>
-        limit(
+        scheduleBalance(
+          balanceSite(
+            siteFor({ source_id: JSON.parse(provider)[0], provider: JSON.parse(provider)[1] }),
+            JSON.parse(provider)[0] || connection.base,
+          ),
           () =>
             request<Balance>(
               {
@@ -1253,9 +1256,12 @@ function Dashboard({
               signal,
             ),
           signal,
+          JSON.parse(provider)[0] || connection.sourceId || connection.base,
         ),
       staleTime: 300_000,
-      enabled: needsChannelData && !accountBalances.has(provider),
+      // Resolve the site/account first: avoid speculative gateway queries for
+      // balances served by an account, and serialize aliases of the same site.
+      enabled: needsChannelData && !sitesPending && (!baseConnection.account || !imported.isPending) && !accountBalances.has(provider),
       refetchInterval: auto ? 300_000 : false,
       refetchIntervalInBackground: false,
       retry: false,

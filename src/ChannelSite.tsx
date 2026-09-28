@@ -29,5 +29,8 @@ export function useChannelSites(connection: Connection, installed: InstalledChan
   const sites = new Map<string, string>();
   for (const item of query.data?.data || []) sites.set(providerId(item), item.dashboard_url);
   for (const item of installed) if (item.base) sites.set(providerId(item), item.base);
-  return (row?: Pick<Channel, "source_id" | "provider"> | null) => row ? sites.get(providerId(row)) : undefined;
+  return {
+    siteFor: (row?: Pick<Channel, "source_id" | "provider"> | null) => row ? sites.get(providerId(row)) : undefined,
+    isPending: !!connection.account && query.isPending,
+  };
 }
