@@ -3,10 +3,10 @@ import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MotionConfig, LazyMotion, domAnimation } from "motion/react";
 import * as Tooltip from "@radix-ui/react-tooltip";
-import "@fontsource-variable/geist/wght.css";
-import "@fontsource-variable/geist-mono/wght.css";
+// System fonts keep cold navigation independent of additional font downloads.
 import "./styles.css";
 import App from "./App";
+import { PageBoundary } from "./PageBoundary";
 const client = new QueryClient({
   defaultOptions: {
     queries: {
@@ -23,7 +23,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
       <MotionConfig reducedMotion="user">
         <LazyMotion features={domAnimation}>
           <Tooltip.Provider delayDuration={180}>
-            <App />
+            <PageBoundary><App /></PageBoundary>
           </Tooltip.Provider>
         </LazyMotion>
       </MotionConfig>

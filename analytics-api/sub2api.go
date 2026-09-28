@@ -159,12 +159,8 @@ type subChallenge struct {
 
 func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 	owner, _ := s.controlUser(r)
-	shared, sharedErr := s.sharedQuality(r.Context(), owner)
-	if sharedErr != nil {
-		http.Error(w, "共享检测记录暂不可用", 503)
-		return
-	}
-	rows, err := s.control.db.QueryContext(r.Context(), `SELECT id,name,base,email,state,message,synced_at,balance,job_kind,provider_kind,login_name FROM console_sub_accounts WHERE owner=$1 ORDER BY created_at,id`, owner)
+	accountID, groupID := r.PathValue("id"), int64Param(r.PathValue("group"))
+	rows, err := s.control.db.QueryContext(r.Context(), `SELECT id,name,base,email,state,message,synced_at,balance,job_kind,provider_kind,login_name FROM console_sub_accounts WHERE owner=$1 AND ($2='' OR id=$2) ORDER BY created_at,id`, owner, accountID)
 	if err != nil {
 		http.Error(w, "账号列表暂不可用", 503)
 		return
@@ -194,7 +190,20 @@ func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "账号列表读取失败", 503)
 		return
 	}
-	rows, err = s.control.db.QueryContext(r.Context(), `SELECT t.account_id,t.group_id,t.name,t.platform,t.channel,t.rate,t.remote_key_id,t.active,t.state,t.message,t.result,t.billing,COALESCE((SELECT jsonb_agg(jsonb_build_object('model',m.model,'state',m.state,'message',m.message,'result',m.result) ORDER BY m.model) FROM console_sub_models m WHERE m.account_id=t.account_id AND m.group_id=t.group_id),'[]'::jsonb),COALESCE(h.total,0),COALESCE(h.successful,0),COALESCE(h.passed,0),t.compaction,t.compaction_state,t.tool_use,t.tool_use_state FROM console_sub_targets t JOIN console_sub_accounts a ON a.id=t.account_id LEFT JOIN console_quality_totals h ON h.account_id=t.account_id AND h.group_id=t.group_id WHERE a.owner=$1 ORDER BY t.group_id`, owner)
+	if accountID != "" && len(accounts) == 0 {
+		http.Error(w, "分组不存在", 404)
+		return
+	}
+	if summaryView(r) == "accounts" {
+		s.writeAccountSummary(w, r, accounts)
+		return
+	}
+	shared, sharedErr := s.sharedQuality(r.Context(), owner)
+	if sharedErr != nil {
+		http.Error(w, "共享检测记录暂不可用", 503)
+		return
+	}
+	rows, err = s.control.db.QueryContext(r.Context(), `SELECT t.account_id,t.group_id,t.name,t.platform,t.channel,t.rate,t.remote_key_id,t.active,t.state,t.message,t.result,t.billing,COALESCE((SELECT jsonb_agg(jsonb_build_object('model',m.model,'state',m.state,'message',m.message,'result',m.result) ORDER BY m.model) FROM console_sub_models m WHERE m.account_id=t.account_id AND m.group_id=t.group_id AND ($4='' OR m.model=$4 OR m.model='gpt-6-astra')),'[]'::jsonb),COALESCE(h.total,0),COALESCE(h.successful,0),COALESCE(h.passed,0),t.compaction,t.compaction_state,t.tool_use,t.tool_use_state FROM console_sub_targets t JOIN console_sub_accounts a ON a.id=t.account_id LEFT JOIN console_quality_totals h ON h.account_id=t.account_id AND h.group_id=t.group_id WHERE a.owner=$1 AND ($2='' OR a.id=$2) AND ($3=0 OR t.group_id=$3) ORDER BY t.group_id`, owner, accountID, groupID, r.URL.Query().Get("model"))
 	if err != nil {
 		http.Error(w, "检测结果暂不可用", 503)
 		return
@@ -248,6 +257,14 @@ func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.subAttachUsage(r.Context(), owner, accounts)
+	if accountID != "" && (len(accounts) != 1 || len(accounts[0].Targets) != 1) {
+		http.Error(w, "分组不存在", 404)
+		return
+	}
+	if summaryView(r) == "summary" {
+		s.writeAccountSummary(w, r, accounts)
+		return
+	}
 	writeJSON(w, 200, map[string]any{"data": accounts})
 }
 

@@ -69,9 +69,9 @@ it("keeps channel loading honest and does not read every source key directory on
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(["sources", "quick-entry"], { data: [{ id: "do", name: "DigitalOcean" }] });
   const replies: Record<string, (response: Response) => void> = {};
-  const fetcher = vi.fn(async (input: string) => {
+  const fetcher = vi.fn(async (input: string, init?: RequestInit) => {
     if (input.endsWith("/accounts") || input.endsWith("/channel-management"))
-      return new Promise<Response>(resolve => { replies[input.endsWith("/accounts") ? "accounts" : "management"] = resolve; });
+      return new Promise<Response>(resolve => { replies[input.endsWith("/accounts") ? new Headers(init?.headers).get("X-Console-View") === "accounts" ? "headers" : "accounts" : "management"] = resolve; });
     return Response.json({ data: [], unavailable_sources: [] });
   });
   vi.stubGlobal("fetch", fetcher);
@@ -80,6 +80,9 @@ it("keeps channel loading honest and does not read every source key directory on
   expect(screen.getByRole("status", { name: "" })).toHaveTextContent("正在读取渠道");
   expect(screen.queryByText("没有匹配的渠道")).not.toBeInTheDocument();
   expect(fetcher.mock.calls.some(([input]) => input.includes("keys_only"))).toBe(false);
+  await act(async () => { replies.headers(Response.json({data:fixtures().map(a=>({...a,targets:[]}))})); });
+  await waitFor(() => expect(screen.getByRole("heading", { name: "站点账号" }).parentElement).toHaveTextContent("2"));
+  expect(screen.getByRole("status", {name:""})).toHaveTextContent("正在读取渠道");
   await act(async () => {
     replies.accounts(Response.json({ data: fixtures() }));
     replies.management(Response.json({ data: [], unavailable_sources: [] }));
@@ -2130,4 +2133,31 @@ it("accepts a username without requiring a site type or email-shaped login", asy
  await waitFor(()=>expect(writes).toHaveLength(1));
  expect(writes[0].email).toBe('fixture-user');
  expect(writes[0]).not.toHaveProperty('provider_kind');
+});
+
+it("loads original diagnostics only when opened and keeps all model choices", async () => {
+  const accounts=fixtures().slice(0,1);
+  const target=accounts[0].targets[0];
+  target.models=[{model:"gpt-6-astra",state:"done",message:"",result:target.result!},{model:"custom-other",state:"done",message:"",result:{...target.result!,model:"custom-other"}}];
+  const fetcher=vi.fn(async (input:string,init?:RequestInit)=>{
+    if(input.includes("/details?")){
+      const model=new URL(input).searchParams.get("model")!;
+      return Response.json({data:[{...accounts[0],targets:[{...target,models:target.models!.filter(m=>m.model===model).map(m=>({...m,result:{...m.result,availability:{...m.result!.availability,text:`Original reply for ${model}`}}}))}]}]});
+    }
+    if(input.endsWith("/accounts")){
+      if(new Headers(init?.headers).get("X-Console-View")==="accounts")return Response.json({data:accounts.map(a=>({...a,targets:[]}))});
+      return Response.json({format:"summary-v1",version:"v1",base_version:"",data:[{id:"one",value:{account:{...accounts[0],targets:[]},position:0}},{id:"one:1",value:{account_id:"one",target:{...target,result:null,models:target.models!.map(m=>({...m,result:{...m.result,availability:{...m.result!.availability,text:undefined}}}))},position:0}}],removed:[],order:["one","one:1"]});
+    }
+    return Response.json({data:[],labels:{},unavailable_keys:[],unavailable_sources:[]});
+  });
+  vi.stubGlobal("fetch",fetcher);
+  mount("compact-detail");
+  const user=userEvent.setup();
+  await user.click(await screen.findByRole("button",{name:"查看 one same-group 的回复与诊断"}));
+  const dialog=within(screen.getByRole("dialog",{name:"回复 / 诊断"}));
+  await dialog.findByText("Original reply for gpt-6-astra");
+  await user.selectOptions(dialog.getByRole("combobox"),"custom-other");
+  await dialog.findByText("Original reply for custom-other");
+  expect(dialog.getByRole("option",{name:"gpt-6-astra"})).toBeInTheDocument();
+  expect(fetcher.mock.calls.filter(([url])=>url.includes("/details?")).length).toBe(2);
 });

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -65,7 +66,7 @@ func TestChannelManagementUsesSavedCatalogWithoutGatewayRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	result = request()
-	if len(result.Data) != 1 || len(result.Unavailable) != 1 || gatewayReads.Load() != 0 {
+	if len(result.Data) != 1 || !slices.Contains(result.Unavailable, src.Name) || gatewayReads.Load() != 0 {
 		t.Fatal("stale catalog should stay visible with a warning", result, gatewayReads.Load())
 	}
 	src.Key = "rotated-gateway-key"
@@ -73,7 +74,7 @@ func TestChannelManagementUsesSavedCatalogWithoutGatewayRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	result = request()
-	if len(result.Data) != 0 || len(result.Unavailable) != 1 || gatewayReads.Load() == 0 {
+	if len(result.Data) != 0 || !slices.Contains(result.Unavailable, src.Name) || gatewayReads.Load() == 0 {
 		t.Fatal("changed source reused an old catalog", result, gatewayReads.Load())
 	}
 }

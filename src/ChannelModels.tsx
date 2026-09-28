@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { Check, Pencil } from "lucide-react";
-import { ChannelModelEditor } from "./ChannelModelEditor";
+const ChannelModelEditor = lazy(() => import("./ChannelModelEditor").then(m=>({default:m.ChannelModelEditor})));
 import { useSubAccounts } from "./sub2apiAccounts";
 import { availableModelChecks } from "./sub2apiResults";
 import type { SubImportsQuery } from "./sub2apiImports";
@@ -27,7 +27,7 @@ export function ChannelModels({
   const editButton = row.source_id && <button className="button small detail-model-edit" onClick={() => setEditing(true)} aria-haspopup="dialog">
     <Pencil size={13} /> 编辑可用模型
   </button>;
-  const editor = editing && <ChannelModelEditor row={row} imports={imports} keyId={keyId} session={session} close={() => setEditing(false)} />;
+  const editor = editing && <Suspense fallback={<div role="status"><Spinner />正在读取模型编辑器…</div>}><ChannelModelEditor row={row} imports={imports} keyId={keyId} session={session} close={() => setEditing(false)} /></Suspense>;
   const installed = imports.data?.data.find(
     (channel) =>
       channel.source_id === row.source_id && channel.provider === row.provider,

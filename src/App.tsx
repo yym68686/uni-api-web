@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useDeferredValue,
   useEffect,
@@ -69,7 +71,6 @@ import {
   ChannelControlCell,
   ChannelControlActions,
 } from "./ChannelControls";
-import { SourceSettings } from "./SourceSettings";
 import { ResponseLatency } from "./LatencyBadge";
 import { useSubImports, boundGroups } from "./sub2apiImports";
 import type { SubImportsQuery } from "./sub2apiImports";
@@ -85,7 +86,6 @@ import type { CacheTrendProps } from "./CacheTrend";
 import { QualityHistory, QualityProbability, qualityTooltip } from "./QualityHistory";
 import type { ChannelCheck } from "./ChannelChecks";
 import { channelName } from "./format";
-import { Sub2apiChecks } from "./Sub2apiChecks";
 import { useConsoleSources } from "./consoleSources";
 import {
   defaultFilters,
@@ -117,7 +117,6 @@ import type {
   ModelPrice,
 } from "./types";
 import { Brand, Empty, Spinner, Tip } from "./ui";
-import { PriceSettings } from "./PriceSettings";
 import { catalogMetrics, ranges, staleHistorySources, usd } from "./analytics";
 import { readMetrics } from "./metricsApi";
 import {
@@ -134,8 +133,12 @@ import { balanceBelowThreshold, rankBalanceProviders } from "./balanceFilters";
 import { salePercent } from "./modelPrices";
 import { ConsoleHeader, ConsoleNavigation } from "./ConsoleChrome";
 import { StartupScreen } from "./StartupScreen";
+import { clearSummaryCache } from "./summaryCache";
 import { useTheme } from "./theme";
-import { Automation } from "./Automation";
+const SourceSettings = lazy(() => import("./SourceSettings").then(m => ({default:m.SourceSettings})));
+const Sub2apiChecks = lazy(() => import("./Sub2apiChecks").then(m => ({default:m.Sub2apiChecks})));
+const PriceSettings = lazy(() => import("./PriceSettings").then(m => ({default:m.PriceSettings})));
+const Automation = lazy(() => import("./Automation").then(m => ({default:m.Automation})));
 
 type Keys = {
   data: KeyInfo[];
@@ -990,17 +993,18 @@ function Dashboard({
     loadView(baseConnection.base, !!baseConnection.account),
   );
   const filterScope = view === "balances" ? "balances" : "channels";
+  const needsChannelData = ["channels", "balances", "overview", "automations"].includes(view);
   const filters = pageFilters[filterScope];
   const sourceQuery = useConsoleSources(baseConnection.session, !!baseConnection.account);
   const sourceList = sourceQuery.data?.data || [];
-  const imported = useSubImports(!!baseConnection.account);
+  const imported = useSubImports(!!baseConnection.account && needsChannelData);
   const rawChecks = useChannelChecks(
     baseConnection.session,
-    !!baseConnection.account,
+    !!baseConnection.account && needsChannelData,
   );
-  const subQuality = useSubQualitySummary(!!baseConnection.account);
+  const subQuality = useSubQualitySummary(!!baseConnection.account && needsChannelData);
   const checks = withSubQuality(rawChecks, imported.data?.data || [], subQuality.data?.data || []);
-  const siteFor = useChannelSites(baseConnection, imported.data?.data || []);
+  const siteFor = useChannelSites(baseConnection, imported.data?.data || [], needsChannelData);
   const selectedSourceId = filters.sourceId;
   const connection = useMemo(
     () => ({
@@ -1052,7 +1056,7 @@ function Dashboard({
   const [theme, setTheme] = useTheme();
   const deferredSearch = useDeferredValue(search);
   const keys = useQuery({
-    enabled: !baseConnection.account || !!sourceQuery.data,
+    enabled: (needsChannelData || view === "prices") && (!baseConnection.account || !!sourceQuery.data),
     queryKey: ["keys", connection.session],
     queryFn: ({ signal }) => readKeys(connection, signal),
   });
@@ -1083,6 +1087,7 @@ function Dashboard({
     queryFn: ({ signal }) =>
       request<Catalog>(connection, "/v1/model-channels?" + params, signal),
     enabled:
+      needsChannelData &&
       keysLoaded &&
       !keyRemoved &&
       (!baseConnection.account || sourceList.length > 0),
@@ -1111,7 +1116,7 @@ function Dashboard({
         channelView && !!baseConnection.account,
       ),
     staleTime: 30_000,
-    enabled: keysLoaded && !keyRemoved && !!catalog.data,
+    enabled: needsChannelData && keysLoaded && !keyRemoved && !!catalog.data,
     refetchInterval: (query) => initializationRetryInterval(query) || (auto ? 30_000 : false),
     refetchIntervalInBackground: false,
   });
@@ -1215,7 +1220,7 @@ function Dashboard({
   const actualRange = useMemo(() => actualCostRange(window), [window]);
   const channelSpend = useScopedChannelSpend({ rows, session: connection.session, sourceId: selectedSourceId, keyId, model, endpoint: effectiveEndpoint, stream: effectiveStream, from: metrics.data?.from, to: metrics.data?.to, snapshot: metrics.data, snapshotError: metrics.isError, snapshotUpdatedAt: metrics.dataUpdatedAt, refresh, auto, enabled: (channelView || view === "balances") && !!baseConnection.account });
   const limit = useMemo(() => makeLimiter(3), []);
-  const accountBalances = useChannelAccountBalances(providers, imported.data?.data || [], connection.session, !!baseConnection.account, auto);
+  const accountBalances = useChannelAccountBalances(providers, imported.data?.data || [], connection.session, !!baseConnection.account && needsChannelData, auto);
   const rawBalanceQueries = useQueries({
     queries: providers.map((provider) => ({
       queryKey: [
@@ -1250,7 +1255,7 @@ function Dashboard({
           signal,
         ),
       staleTime: 300_000,
-      enabled: !accountBalances.has(provider),
+      enabled: needsChannelData && !accountBalances.has(provider),
       refetchInterval: auto ? 300_000 : false,
       refetchIntervalInBackground: false,
       retry: false,
@@ -1517,7 +1522,7 @@ function Dashboard({
             baseConnection.account ? selectView("sources") : changeConnection()
           }
         />
-        <main className="workspace">
+        <main className="workspace"><Suspense fallback={<div role="status" className="data-panel"><Spinner />正在读取页面…</div>}>
           {!!catalog.data?.unavailable_sources?.length && (
             <div role="alert" className="error-banner">
               来源暂不可用：{catalog.data.unavailable_sources.join("、")}
@@ -2227,7 +2232,7 @@ function Dashboard({
               />
             )}
           </AnimatePresence>
-        </main>
+        </Suspense></main>
         <div className="connection-bottom">
           <button onClick={() => disconnect()}>
             <LogOut size={14} />
@@ -2345,6 +2350,7 @@ export default function App() {
         }
       }
       await client.cancelQueries();
+      await clearSummaryCache();
       client.removeQueries({
         predicate: (query) => query.queryKey[0] !== "account",
       });
@@ -2359,7 +2365,8 @@ export default function App() {
   );
   useEffect(() => {
     if (auth.data?.enabled) clearConnection();
-  }, [auth.data?.enabled]);
+    if (auth.data?.enabled && !auth.data.authenticated) void clearSummaryCache();
+  }, [auth.data?.enabled, auth.data?.authenticated]);
   if (auth.isPending) return <StartupScreen />;
   if (auth.isError)
     return <StartupScreen onRetry={() => void auth.refetch()} />;

@@ -47,7 +47,9 @@ func (s *Service) configuredChecks(w http.ResponseWriter, r *http.Request) {
  CASE WHEN c.state='running' AND c.deadline<now() THEN 'interrupted' ELSE c.state END,c.message,c.result,
  COALESCE(h.total,0),COALESCE(h.successful,0),COALESCE(h.passed,0)
  FROM console_configured_checks c JOIN console_sources s ON s.id=c.source_id
- LEFT JOIN console_quality_totals h ON h.source_id=c.source_id AND h.provider=c.provider WHERE s.enabled`)
+ LEFT JOIN console_quality_totals h ON h.source_id=c.source_id AND h.provider=c.provider WHERE s.enabled
+ AND ($1='' OR c.source_id=$1) AND ($2='' OR c.provider=$2)
+ AND ($3='' OR c.model=$3 OR c.model='' OR c.model='gpt-6-astra')`, r.URL.Query().Get("source_id"), r.URL.Query().Get("provider"), r.URL.Query().Get("model"))
 	if err != nil {
 		log.Printf("configured_checks read: %v", err)
 		http.Error(w, "检测记录读取失败", 503)
@@ -67,6 +69,14 @@ func (s *Service) configuredChecks(w http.ResponseWriter, r *http.Request) {
 	if err != nil || rows.Err() != nil {
 		log.Printf("configured_checks scan: %v rows: %v", err, rows.Err())
 		http.Error(w, "检测记录读取失败", 503)
+		return
+	}
+	if summaryView(r) == "summary" {
+		rows := []summaryRow{}
+		for _, c := range data {
+			rows = append(rows, summaryRow{ID: mustJSON([]string{c.Source, c.Provider, c.Kind, c.Model}), Value: compactSummary(c)})
+		}
+		s.writeSummary(w, r, rows)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"data": data})

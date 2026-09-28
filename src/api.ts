@@ -161,7 +161,9 @@ export async function analyticsRequest<T>(connection: Connection,path: string,si
 }
 
 export async function controlRequest<T>(path:string,init:RequestInit={}):Promise<T>{
- const response=await fetch(globalThis.location.origin+"/analytics"+path,{...init,headers:{Accept:"application/json","Content-Type":"application/json",...init.headers},credentials:"same-origin",cache:"no-store",signal:init.signal||AbortSignal.timeout(25000)});
+ const read=!init.method || init.method.toUpperCase()==="GET";
+ const timeout=AbortSignal.timeout(read ? 30_000 : 120_000);
+ const response=await fetch(globalThis.location.origin+"/analytics"+path,{...init,headers:{Accept:"application/json","Content-Type":"application/json",...init.headers},credentials:"same-origin",cache:"no-store",signal:init.signal?AbortSignal.any([init.signal,timeout]):timeout});
  if(!response.ok){const message=await response.text();throw new ApiError(message||`HTTP ${response.status}`,response.status)}
  return await response.json() as T;
 }

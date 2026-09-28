@@ -79,6 +79,7 @@ interface Result {
   verdict: string;
 }
 export interface SubTarget {
+  details_omitted?: boolean;
   check_source_id?: string;
   tool_use?: ToolUseResult;
   tool_use_state?: string;
@@ -156,7 +157,7 @@ interface SubAccountBalance {
   status: string;
 }
 const limitAccountBalance = makeLimiter(3);
-function AccountBalance({ account }: { account: SubAccount }) {
+function AccountBalance({ account, enabled }: { account: SubAccount; enabled: boolean }) {
   const query = useQuery({
     queryKey: ["sub2api-balance", account.id, account.synced_at],
     queryFn: ({ signal }) =>
@@ -169,7 +170,8 @@ function AccountBalance({ account }: { account: SubAccount }) {
         signal,
       ),
     staleTime: 60_000,
-    refetchInterval: 60_000,
+    enabled,
+    refetchInterval: enabled ? 60_000 : false,
     retry: false,
   });
   const balance = query.data || account.balance;
@@ -339,15 +341,53 @@ function CheckDetails({
   checks,
   selected,
   prices,
+  configured,
 }: {
   account: SubAccount;
   target: SubTarget;
   checks: SubModelCheck[];
   selected?: SubModelCheck;
   prices?: ModelPrice[];
+  configured?: ManagedChannel;
 }) {
+  const [open, setOpen] = useState(false);
   const [detailModel, setDetailModel] = useState(checks[0]?.model || "");
+  const model = selected?.model || detailModel;
+  const needsDetails = target.details_omitted;
+  const modelOptions = checks;
+  const fixedModel = !!selected;
+  const details = useQuery({
+    queryKey: ["sub-check-detail", account.id, target.group_id, configured?.source_id, configured?.provider, model, selected?.result?.checked_at],
+    enabled: open && !!needsDetails,
+    queryFn: async ({ signal }) => {
+      if (configured) {
+        const members = channelMembers(configured);
+        const paths = [...new Set(members.flatMap(member => boundGroups(member).map(group =>
+          `/v1/sub2api/accounts/${encodeURIComponent(group.account_id)}/groups/${group.group_id}/details?model=${encodeURIComponent(member.model_mappings?.[model] || model)}`)))];
+        const [bound, native] = await Promise.all([
+          Promise.all(paths.map(path => controlRequest<{data:SubAccount[]}>(path, {signal}))),
+          Promise.all(members.map(m => controlRequest<{data: import("./channelManagement").ConfiguredCheck[]}>(`/v1/channel-management/checks?source_id=${encodeURIComponent(m.source_id)}&provider=${encodeURIComponent(m.provider)}&model=${encodeURIComponent(model)}`, {signal}))),
+        ]);
+        const accounts = new Map<string, SubAccount>();
+        for (const item of bound.flatMap(r=>r.data)) {
+          const previous = accounts.get(item.id);
+          accounts.set(item.id, {...item, targets:[...(previous?.targets || []), ...item.targets]});
+        }
+        const full = managementRows([...accounts.values()], [configured], [], model, "", native.flatMap(n=>n.data)).find(row=>row.configured);
+        if (!full) throw Error("检测详情暂不可用");
+        return full;
+      }
+      const data = await controlRequest<{data:SubAccount[]}>(`/v1/sub2api/accounts/${encodeURIComponent(account.id)}/groups/${target.group_id}/details?model=${encodeURIComponent(model)}`, {signal});
+      const fullTarget = data.data[0]?.targets[0];
+      if (!fullTarget) throw Error("检测详情暂不可用");
+      const fullChecks = modelChecks(fullTarget);
+      return {target:fullTarget,checks:fullChecks,selected:fullChecks.find(c=>c.model===model)};
+    },
+    retry: false,
+    staleTime: 30_000,
+  });
   if (!checks.length) return <span>暂无模型</span>;
+  if (details.data) { target = details.data.target; checks = details.data.checks; selected = details.data.selected; }
   const check =
     selected || checks.find((item) => item.model === detailModel) || checks[0];
   const result = check.result;
@@ -355,7 +395,7 @@ function CheckDetails({
   const qualityResult = groupQualityResult(target);
   const toolResult = modelToolUse(target,check.model);
   return (
-    <Dialog.Root>
+    <Dialog.Root open={open} onOpenChange={setOpen}>
       <Dialog.Trigger asChild>
         <button
           className="button small"
@@ -379,14 +419,14 @@ function CheckDetails({
               <X size={18} />
             </button>
           </Dialog.Close>
-          {!selected && (
+          {!fixedModel && (
             <label className="sub-import-field">
               查看模型
               <select
                 value={detailModel}
                 onChange={(e) => setDetailModel(e.target.value)}
               >
-                {checks.map((item) => (
+                {modelOptions.map((item) => (
                   <option key={item.model} value={item.model}>
                     {item.model}
                   </option>
@@ -394,7 +434,7 @@ function CheckDetails({
               </select>
             </label>
           )}
-          <table
+          {needsDetails && details.isPending ? <div role="status"><Spinner />正在读取完整检测详情…</div> : details.isError ? <div role="alert">{details.error.message}<button className="button" onClick={()=>void details.refetch()}>重试</button></div> : <table
             className="sub-check-details-table"
             aria-label={`${check.model} 检测详情`}
           >
@@ -521,7 +561,7 @@ function CheckDetails({
                 </DetailRow>
               )}
             </tbody>
-          </table>
+          </table>}
           {check.model === "gpt-6-astra" && (account.id || target.check_source_id) && <QualityHistory path={target.check_source_id ? `/v1/sources/${encodeURIComponent(target.check_source_id)}/channel-checks/history?provider=${encodeURIComponent(target.channel)}` : `/v1/sub2api/accounts/${encodeURIComponent(account.id)}/groups/${target.group_id}/quality-history`} revision={`${qualityResult?.checked_at}:${target.history?.total}:${target.history?.successful}`} />}
         </Dialog.Content>
       </Dialog.Portal>
@@ -683,8 +723,9 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   const client = useQueryClient();
   const sources = useConsoleSources(user);
   const query = useSubAccounts();
+  const accountHeaders = useSubAccounts(!query.data, true);
   const prices = useSubPrices(user);
-  const accounts = query.data?.data || [];
+  const accounts = query.data?.data || accountHeaders.data?.data || [];
   const [form, setForm] = useState<{ account: SubAccount | null } | null>(null);
   const [filters, setFilters] = useState(() => loadSubFilters(user));
   const [modelSelectionRevision, setModelSelectionRevision] = useState(0);
@@ -936,7 +977,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
           <div className="data-title">
             <Globe2 size={19} />
             <h2>站点账号</h2>
-            <span className="count-badge">{query.isPending ? "…" : accounts.length}</span>
+            <span className="count-badge">{!query.data && !accountHeaders.data ? "…" : accounts.length}</span>
           </div>
           <div className="sub-account-actions">
             <button
@@ -998,7 +1039,8 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
             </button>
           </div>
         )}
-        {query.isPending ? (
+        {query.data && (query.data.cached || query.isError) && <p className="settings-note" role="status">正在显示上次读取的数据；最新数据尚未确认。</p>}
+        {!query.data && !accountHeaders.data ? (
           <div className="sub-loading">
             <Spinner />
             正在读取账号
@@ -1029,7 +1071,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                       <SiteLink base={a.base}><span title={a.base}>{new URL(a.base).host}</span></SiteLink>
                     </div>
                     <div className="sub-account-email" title={a.login_name || a.email}>{a.login_name || a.email}</div>
-                    <AccountBalance account={a} />
+                    <AccountBalance account={a} enabled={!!query.data} />
                     <div className="sub-account-status">
                       <span
                         className="sub-account-progress"
@@ -1522,6 +1564,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                             checks={checks}
                             selected={selected}
                             prices={prices.data?.data}
+                            configured={configured}
                           />}
                         </td>
                         <td className="mono">

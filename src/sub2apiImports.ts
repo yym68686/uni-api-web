@@ -58,7 +58,7 @@ export function useSubImports(enabled = true) {
     enabled,
     retry: false,
     staleTime: 5000,
-    refetchInterval: enabled ? 15000 : false,
+    refetchInterval: enabled ? 60000 : false,
   });
 }
 export type SubImportsQuery = ReturnType<typeof useSubImports>;

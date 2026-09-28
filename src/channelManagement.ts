@@ -1,4 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { readSummary } from "./summaryFeed";
+import type { SummaryState } from "./summaryFeed";
 import { controlRequest } from "./api";
 import type { SubAccount, SubTarget } from "./Sub2apiChecks";
 import type { InstalledChannel } from "./sub2apiImports";
@@ -49,6 +51,7 @@ export interface ManagedChannel extends InstalledChannel {
   members?: ManagedChannel[];
 }
 export interface ConfiguredCheck {
+  details_omitted?: boolean;
   source_id: string;
   provider: string;
   kind: "model" | "availability" | "compaction" | "tool-use";
@@ -83,10 +86,19 @@ export function configuredToolUseResult(member:ManagedChannel,accounts:SubAccoun
   return {status:"error",checked_at:Math.max(0,...[...entries.values()].map(m=>m.result?.checked_at||0)),attempts:[],models:[...entries.values()]};
 }
 export function useConfiguredChecks() {
+  const client=useQueryClient();
+  type Data={data:ConfiguredCheck[];summary?:SummaryState<ConfiguredCheck>};
   return useQuery({
     queryKey: ["configured-checks"],
-    queryFn: ({ signal }) => controlRequest<{ data: ConfiguredCheck[] }>("/v1/channel-management/checks", { signal }),
-    refetchInterval: query => query.state.data?.data.some(c => ["queued", "running"].includes(c.state)) ? 1500 : 15000,
+    queryFn: async ({ signal }):Promise<Data> => {
+      const previous=client.getQueryData<Data>(["configured-checks"]);
+      const {summary,legacy}=await readSummary<ConfiguredCheck,Data>("/v1/channel-management/checks",previous?.summary,signal);
+      if(!summary)return legacy!;
+      if(summary===previous?.summary)return previous;
+      return {data:summary.rows.map(row=>({...row.value,details_omitted:true})),summary};
+    },
+    staleTime:30_000,
+    refetchInterval: query => query.state.data?.data.some(c => ["queued", "running"].includes(c.state)) ? 5000 : 60000,
     retry: false,
   });
 }
@@ -122,7 +134,7 @@ export function useChannelManagement(enabled = true) {
       ),
     enabled,
     staleTime: 15000,
-    refetchInterval: enabled ? 30000 : false,
+    refetchInterval: enabled ? 60000 : false,
     retry: false,
   });
 }
@@ -254,6 +266,7 @@ export function managementRows(
     // another source's result after its configured credential has changed.
     const native = members.flatMap(m => (checksByChannel.get(JSON.stringify([m.source_id, m.provider])) || [])
       .filter(c => !c.fingerprint || !m.probe_fingerprint || c.fingerprint === m.probe_fingerprint));
+    if(native.some(c=>c.details_omitted))target.details_omitted=true;
     const latestCapability = (kind: ConfiguredCheck["kind"]) => native.filter(c => c.kind === kind).sort((a,b) =>
       Number(["queued","running"].includes(b.state)) - Number(["queued","running"].includes(a.state)) ||
       (b.result?.checked_at || 0) - (a.result?.checked_at || 0))[0];

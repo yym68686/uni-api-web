@@ -31,7 +31,7 @@ export const routeOptions = (source: string) => ({
     ),
   staleTime: 15000,
   retry: false,
-  refetchInterval: 30000,
+  refetchInterval: 60000,
 });
 export const useChannelRoutes = (source: string) =>
   useQuery(routeOptions(source));

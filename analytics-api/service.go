@@ -50,6 +50,7 @@ type Service struct {
 	scanStarted       atomic.Int64
 	control           *controlStore
 	keyDirectories    keyDirectoryCache
+	summaries         summaryHistory
 }
 
 type cachedAnalytics struct {

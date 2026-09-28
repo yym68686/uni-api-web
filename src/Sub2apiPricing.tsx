@@ -12,7 +12,8 @@ export function useSubPrices(user: string) {
     queryKey: ["sub2api-prices", user],
     queryFn: ({ signal }) => analyticsRequest<{ data: ModelPrice[] }>({ base: "", key: "", session: user, account: true }, "/analytics/v1/prices", signal),
     retry: false,
-    refetchInterval: query => initializationRetryInterval(query) || 15000,
+    staleTime: 60_000,
+    refetchInterval: query => initializationRetryInterval(query) || 60000,
   });
 }
 

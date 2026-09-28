@@ -18,11 +18,11 @@ export function SiteLink({ base, children }: { base?: string; children: ReactNod
   const url = dashboardURL(base);
   return url ? <a className="site-link" href={url} target="_blank" rel="noopener noreferrer" onClick={(event) => event.stopPropagation()}>{children}<ArrowUpRight size={14} aria-hidden /></a> : <>{children}</>;
 }
-export function useChannelSites(connection: Connection, installed: InstalledChannel[]) {
+export function useChannelSites(connection: Connection, installed: InstalledChannel[], enabled = true) {
   const query = useQuery({
     queryKey: ["channel-sites", connection.session],
     queryFn: ({ signal }) => controlRequest<{ data: { source_id: string; provider: string; dashboard_url: string }[] }>("/v1/channel-sites", { signal }),
-    enabled: !!connection.account,
+    enabled: !!connection.account && enabled,
     staleTime: 60000,
     retry: false,
   });
