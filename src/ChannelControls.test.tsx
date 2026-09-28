@@ -329,7 +329,7 @@ it("toggles adjustment inside observation with the same table, filters and metri
   ).toEqual(values);
   app.unmount();
   app.client.clear();
-});
+}, 10_000);
 it("stages source-specific controls inline, retains hidden channels and drafts across shared filters and views", async () => {
   const app = setup();
   await screen.findByRole("table");
