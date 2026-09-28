@@ -2419,7 +2419,8 @@ nav > button.active > svg {
 .sub-filters .select-field:first-child { width:150px; }
 .sub-filters .select-field.sub-price-filter { width: 168px; }
 .sub-filters .select-field:nth-child(2) { width:164px; }
-.sub-filters .select-field:nth-last-child(3), .sub-filters .select-field:last-child { width:128px; }
+.sub-filters .select-field:nth-last-of-type(3), .sub-filters .select-field:last-of-type { width:128px; }
+.sub-filter-reset { flex-shrink:0; position:sticky; right:0; background:var(--surface); }
 .sub-filters .select-field select { width:100%; min-width:0; text-overflow:ellipsis; white-space:nowrap; }
 .sub-filters .select-field svg { flex-shrink:0; }
 .sub-model { font-size: 12px; color: var(--muted); margin-left: auto; }

@@ -20,7 +20,7 @@ import { BalanceAmount } from "./BalanceAmount";
 import { AccountForm } from "./SiteAccountForm";
 import { ResponseLatency } from "./LatencyBadge";
 import { Empty, Spinner, Tip } from "./ui";
-import { loadSubFilters, saveSubFilters } from "./sub2apiPreferences";
+import { loadSubFilters, saveSubFilters, subFilterDefaults } from "./sub2apiPreferences";
 import { useSubImports, boundGroups } from "./sub2apiImports";
 import { useSubAccounts } from "./sub2apiAccounts";
 import { Sub2apiImport } from "./Sub2apiImport";
@@ -1437,6 +1437,15 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
             </select>
             <ChevronDown size={13} />
           </label>
+          <button
+            className="filter-chip sub-filter-reset"
+            onClick={() => {
+              setFilters({ ...subFilterDefaults });
+              setPage(0);
+            }}
+          >
+            <X size={12} /> 重置筛选
+          </button>
         </div>
         {query.isPending || management.isPending ? (
           <div className="sub-loading" role="status"><Spinner />正在读取渠道</div>
