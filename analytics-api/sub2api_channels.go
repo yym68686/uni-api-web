@@ -262,7 +262,7 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Service) subManageChannel(w http.ResponseWriter, r *http.Request) {
 	var in subImportInput
-	if !decodeControl(w, r, &in) {
+	if !decodeConfiguration(w, r, &in) {
 		return
 	}
 	owner, _ := s.controlUser(r)

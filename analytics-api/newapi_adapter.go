@@ -45,7 +45,7 @@ func (s *Service) newAPIGroups(ctx context.Context, account, base string) ([]sub
 	if err := s.newAPICall(ctx, account, base, "GET", "/api/user/self/groups", nil, &remote); err != nil {
 		return nil, err
 	}
-	if remote == nil || len(remote) > 500 {
+	if remote == nil {
 		return nil, errors.New("站点分组列表无效")
 	}
 	names := make([]string, 0, len(remote))
@@ -200,24 +200,27 @@ func (s *Service) newAPIEnsureKey(ctx context.Context, account, base, name strin
 	}
 	find := func() (subRemoteKey, bool, error) {
 		var found subRemoteKey
-		for page := 1; page <= 100; page++ {
+		progress := keyPageProgress{}
+		for page := 1; ; page++ {
 			list, total, e := s.newAPIKeys(ctx, account, base, name, page)
 			if e != nil {
 				return found, false, e
 			}
+			if e = progress.advance(list); e != nil {
+				return found, false, e
+			}
 			for _, key := range list {
 				if key.Name == name {
-					if key.GroupID != group || found.ID != 0 {
+					if key.GroupID != group || (found.ID != 0 && found.ID != key.ID) {
 						return found, false, errors.New("同名专用 key 的分组不匹配或重复，请在原站核对")
 					}
 					found = key
 				}
 			}
-			if page*100 >= total || len(list) < 100 {
+			if len(list) == 0 || (total > 0 && len(progress) >= total) || (total == 0 && len(list) < 100) {
 				return found, found.ID > 0, nil
 			}
 		}
-		return found, false, errors.New("令牌列表未读取完整")
 	}
 	if key, ok, e := find(); e != nil || ok {
 		return key, e

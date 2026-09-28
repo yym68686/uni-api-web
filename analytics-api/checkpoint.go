@@ -19,8 +19,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
-const maxCheckpointBytes int64 = 1 << 30
-
 var checkpointTables = []string{"facts", "rollups", "imported_objects"}
 
 type checkpointClient interface {
@@ -133,7 +131,6 @@ func unpackCheckpointContext(ctx context.Context, path, dir string) error {
 	defer gz.Close()
 	archive := tar.NewReader(gz)
 	seen := map[string]bool{}
-	var total int64
 	for {
 		h, err := archive.Next()
 		if errors.Is(err, io.EOF) {
@@ -150,10 +147,6 @@ func unpackCheckpointContext(ctx context.Context, path, dir string) error {
 		}
 		if !allowed || seen[h.Name] || h.Typeflag != tar.TypeReg || h.Size < 0 {
 			return errors.New("invalid checkpoint member")
-		}
-		total += h.Size
-		if total > 4*maxCheckpointBytes {
-			return errors.New("checkpoint expands beyond limit")
 		}
 		seen[h.Name] = true
 		part, err := os.OpenFile(filepath.Join(dir, h.Name), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
@@ -217,13 +210,6 @@ func (s *checkpointStore) saveParquet(ctx context.Context, e *Engine) (err error
 		return err
 	}
 	defer f.Close()
-	st, err := f.Stat()
-	if err != nil {
-		return err
-	}
-	if st.Size() > maxCheckpointBytes {
-		return errors.New("checkpoint too large")
-	}
 	req := &s3.PutObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(s.key), Body: f, ContentType: aws.String("application/gzip"), Metadata: map[string]string{"schema": "1", "source": s.source, "objects": strconv.FormatInt(n, 10), "created-ms": strconv.FormatInt(time.Now().UnixMilli(), 10), "sha256": digest}}
 	if etag == "" {
 		req.IfNoneMatch = aws.String("*")
@@ -267,7 +253,7 @@ func (s *checkpointStore) restoreParquet(ctx context.Context, e *Engine) (restor
 	}
 	defer out.Body.Close()
 	stage = "metadata"
-	if out.Metadata["schema"] != "1" || out.Metadata["source"] != expectedSource || len(out.Metadata["sha256"]) != 64 || aws.ToInt64(out.ContentLength) > maxCheckpointBytes {
+	if out.Metadata["schema"] != "1" || out.Metadata["source"] != expectedSource || len(out.Metadata["sha256"]) != 64 {
 		return false, errors.New("incompatible checkpoint")
 	}
 	expected, err := strconv.ParseInt(out.Metadata["objects"], 10, 64)
@@ -287,7 +273,7 @@ func (s *checkpointStore) restoreParquet(ctx context.Context, e *Engine) (restor
 	}
 	hash := sha256.New()
 	stage = "download"
-	n, err := io.Copy(io.MultiWriter(f, hash), io.LimitReader(contextReader{ctx, out.Body}, maxCheckpointBytes+1))
+	n, err := io.Copy(io.MultiWriter(f, hash), contextReader{ctx, out.Body})
 	closeErr := f.Close()
 	if err != nil {
 		return false, err
@@ -300,7 +286,7 @@ func (s *checkpointStore) restoreParquet(ctx context.Context, e *Engine) (restor
 		return false, io.ErrUnexpectedEOF
 	}
 	stage = "integrity"
-	if n > maxCheckpointBytes || hex.EncodeToString(hash.Sum(nil)) != out.Metadata["sha256"] {
+	if hex.EncodeToString(hash.Sum(nil)) != out.Metadata["sha256"] {
 		return false, errors.New("checkpoint integrity mismatch")
 	}
 	stage = "unpack"

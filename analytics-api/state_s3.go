@@ -1,12 +1,12 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -17,8 +17,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/smithy-go"
 )
-
-const maxPriceStateBytes = 4 << 20
 
 var errPriceConflict = errors.New("prices changed concurrently; refresh and retry")
 
@@ -86,18 +84,15 @@ func (s *stateStore) read(ctx context.Context) (priceState, string, bool, error)
 		return priceState{}, "", false, err
 	}
 	defer out.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(out.Body, maxPriceStateBytes+1))
-	if err != nil {
-		return priceState{}, "", false, err
-	}
-	if len(raw) > maxPriceStateBytes {
-		return priceState{}, "", false, errors.New("price state too large")
-	}
 	var doc priceState
-	if err = json.Unmarshal(raw, &doc); err != nil {
+	decoder := json.NewDecoder(out.Body)
+	if err = decoder.Decode(&doc); err != nil {
 		return doc, "", false, errors.New("invalid price state")
 	}
-	if doc.Schema != 1 || len(doc.Prices) > 4096 {
+	if decoder.Decode(new(any)) != io.EOF {
+		return doc, "", false, errors.New("trailing price state data")
+	}
+	if doc.Schema != 1 {
 		return doc, "", false, errors.New("invalid price state schema")
 	}
 	seen := map[string]bool{}
@@ -118,14 +113,20 @@ func (s *stateStore) read(ctx context.Context) (priceState, string, bool, error)
 }
 
 func (s *stateStore) put(ctx context.Context, doc priceState, etag string) (string, error) {
-	raw, err := json.Marshal(doc)
+	file, err := os.CreateTemp("", "uni-price-state-*.json")
 	if err != nil {
 		return "", err
 	}
-	if len(raw) > maxPriceStateBytes || len(doc.Prices) > 4096 {
-		return "", errors.New("price state too large")
+	defer os.Remove(file.Name())
+	defer file.Close()
+	if err = json.NewEncoder(file).Encode(doc); err != nil {
+		return "", err
 	}
-	req := &s3.PutObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(s.key), Body: bytes.NewReader(raw), ContentType: aws.String("application/json")}
+	if _, err = file.Seek(0, io.SeekStart); err != nil {
+		return "", err
+	}
+	req := &s3.PutObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(s.key), Body: file, ContentType: aws.String("application/json")}
+
 	if etag == "" {
 		req.IfNoneMatch = aws.String("*")
 	} else {

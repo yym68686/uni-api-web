@@ -208,7 +208,7 @@ func (s *Service) automations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in := AutomationTask{Kind: "order", Policy: defaultAutomationPolicy()}
-	if !decodeControlLimit(w, r, &in, 64<<10) {
+	if !decodeConfiguration(w, r, &in) {
 		return
 	}
 	in.Name = strings.TrimSpace(in.Name)

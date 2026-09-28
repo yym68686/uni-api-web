@@ -41,10 +41,10 @@ func (s *Service) applyChannelBatch(w http.ResponseWriter, r *http.Request) {
 	// A dropped response after restore is ambiguous, so allow time for retention.
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(115 * time.Second))
 	var in channelBatchInput
-	if !decodeControlLimit(w, r, &in, 2<<20) {
+	if !decodeConfiguration(w, r, &in) {
 		return
 	}
-	if in.Revision == "" || len(in.Targets) == 0 || len(in.Targets) > 1024 {
+	if in.Revision == "" || len(in.Targets) == 0 {
 		http.Error(w, "请选择接入和有效配置版本", 400)
 		return
 	}

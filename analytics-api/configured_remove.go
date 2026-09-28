@@ -65,7 +65,7 @@ func (s *Service) removeConfiguredBinding(w http.ResponseWriter, r *http.Request
 		Provider string `json:"provider"`
 		Revision string `json:"revision"`
 	}
-	if !decodeControl(w, r, &in) {
+	if !decodeConfiguration(w, r, &in) {
 		return
 	}
 	if in.Provider == "" || len(in.Provider) > 256 || in.Revision == "" {

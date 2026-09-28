@@ -13,7 +13,7 @@ func validPublicModel(model string) bool {
 // Explicit aliases are independent of the original-model checkboxes. Public
 // names are unique; multiple public names may refer to the same upstream.
 func importPublicModels(models []string, mappings map[string]string) ([]string, error) {
-	if len(models)+len(mappings) == 0 || len(models)+len(mappings) > 1024 {
+	if len(models)+len(mappings) == 0 {
 		return nil, errors.New("请选择模型或添加模型重命名")
 	}
 	seen := map[string]bool{}
@@ -84,7 +84,7 @@ func validateModelPositions(models []string, positions map[string]int) error {
 		allowed[model] = true
 	}
 	for model, position := range positions {
-		if !allowed[model] || position < 1 || position > 1025 {
+		if !allowed[model] || position < 1 {
 			return errors.New("模型位置无效，请刷新后重试")
 		}
 	}

@@ -66,7 +66,7 @@ func compactBatchRouteRules(snapshot *retainedSnapshot, catalogs map[string][]ba
 		order, ok := mergeRouteOrders(constraints)
 		// Folding one model into an existing key-wide rule saves a scope too.
 		// Without that rule, at least two model orders must merge to save space.
-		if !ok || len(order) > 1024 || len(merged) == 0 || (wildcard < 0 && len(merged) < 2) {
+		if !ok || len(merged) == 0 || (wildcard < 0 && len(merged) < 2) {
 			continue
 		}
 		// Verify the projection for every affected/inheriting model before

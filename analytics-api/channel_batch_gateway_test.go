@@ -159,7 +159,7 @@ func TestLargeBatchRestoresRealGatewayWithoutExceedingScopeBudget(t *testing.T) 
 	if _, err = buildBatchSnapshot(&f.Snapshot, f.Input, f.Catalogs, f.Documents); err != nil {
 		t.Fatal(err)
 	}
-	// Materializing every model again reproduces the original 128-scope failure.
+	// Materializing every model must also succeed beyond the former scope quota.
 	var inflated retainedSnapshot
 	_ = json.Unmarshal([]byte(mustJSON(f.Snapshot)), &inflated)
 	for _, target := range f.Input.Targets {
@@ -178,9 +178,11 @@ func TestLargeBatchRestoresRealGatewayWithoutExceedingScopeBudget(t *testing.T) 
 	if len(inflated.Rules) <= 128 {
 		t.Fatal("fixture did not reproduce old limit")
 	}
-	if _, code, e := subGateway(ctx, src, "POST", "/v1/channel-controls/restore", map[string]any{"revision": state["revision"], "snapshot": inflated}); code != 400 || e == nil || !strings.Contains(e.Error(), "数量上限") {
-		t.Fatal(code, e)
+	state, _, err = subGateway(ctx, src, "POST", "/v1/channel-controls/restore", map[string]any{"revision": state["revision"], "snapshot": inflated})
+	if err != nil {
+		t.Fatal("large snapshot restore", err)
 	}
+
 	state, _, err = subGateway(ctx, src, "POST", "/v1/channel-controls/restore", map[string]any{"revision": state["revision"], "snapshot": f.Snapshot})
 	if err != nil {
 		t.Fatal("compacted restore", err)

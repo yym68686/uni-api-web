@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -397,16 +398,16 @@ func decodeControl(w http.ResponseWriter, r *http.Request, v any) bool {
 	return decodeControlLimit(w, r, v, 32<<10)
 }
 
-// Batch checks accept up to 500 targets, each with 100 model names of up to
-// 256 bytes. The ordinary 32 KiB control-form limit cannot hold that contract.
-const checkBatchBodyLimit = 16 << 20
-
 func decodeControlLimit(w http.ResponseWriter, r *http.Request, v any, limit int64) bool {
 	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 		http.Error(w, "JSON required", 415)
 		return false
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit)).Decode(v); err != nil {
+	body := io.Reader(r.Body)
+	if limit > 0 {
+		body = http.MaxBytesReader(w, r.Body, limit)
+	}
+	if err := json.NewDecoder(body).Decode(v); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
 			http.Error(w, fmt.Sprintf("请求内容超过大小限制（%d KiB），请减少本次选择的渠道或模型数量", limit>>10), http.StatusRequestEntityTooLarge)

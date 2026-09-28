@@ -168,11 +168,11 @@ func (s *Service) configuredImport(w http.ResponseWriter, r *http.Request) {
 		Provider     string `json:"provider"`
 		EditProvider string `json:"edit_provider"`
 	}
-	if !decodeControlLimit(w, r, &in, 512<<10) {
+	if !decodeConfiguration(w, r, &in) {
 		return
 	}
 	public, err := importPublicModels(in.Models, in.ModelMappings)
-	if err != nil || validateModelPositions(public, in.Positions) != nil || in.Provider == "" || in.Position < 1 || in.Position > 1025 {
+	if err != nil || validateModelPositions(public, in.Positions) != nil || in.Provider == "" || in.Position < 1 {
 		http.Error(w, "请选择模型、对外名称及有效位置", 400)
 		return
 	}

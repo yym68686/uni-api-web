@@ -401,73 +401,123 @@ func (s *Service) subReadUsage(parent context.Context, account, base, lease stri
 		defer stop()
 		_, _ = s.control.db.ExecContext(cleanup, `UPDATE console_sub_accounts SET usage_lease_token='',usage_lease_until=NULL WHERE id=$1 AND usage_lease_token=$2`, account, lease)
 	}()
-	rows, err := s.control.db.QueryContext(ctx, `SELECT id,group_id,key_id,model,started_at,request_ids,attempts FROM console_sub_usage WHERE account_id=$1 AND status='pending' AND next_attempt<=now() AND key_id=(SELECT key_id FROM console_sub_usage WHERE account_id=$1 AND status='pending' AND next_attempt<=now() ORDER BY next_attempt LIMIT 1) ORDER BY started_at DESC LIMIT 32`, account)
+
+	// Resume receipts sharing a fixed date/key scope and cursor in one read.
+	// Five pages is a scheduling quantum, not a completeness limit.
+	type pendingReceipt struct {
+		task      subUsageTask
+		candidate *subUsage
+	}
+	tasks := []pendingReceipt{}
+	var page int
+	var previousFingerprint string
+	rows, err := s.control.db.QueryContext(ctx, `WITH first AS (SELECT key_id,started_at/86400 AS day,scan_page,scan_fingerprint FROM console_sub_usage WHERE account_id=$1 AND status='pending' AND next_attempt<=now() ORDER BY next_attempt,id LIMIT 1) SELECT u.id,u.group_id,u.key_id,u.model,u.started_at,u.request_ids,u.attempts,u.scan_page,u.scan_match,u.scan_fingerprint FROM console_sub_usage u CROSS JOIN first f WHERE u.account_id=$1 AND u.status='pending' AND u.next_attempt<=now() AND u.key_id=f.key_id AND u.started_at/86400=f.day AND u.scan_page=f.scan_page AND u.scan_fingerprint=f.scan_fingerprint ORDER BY u.next_attempt,u.id LIMIT 32`, account)
 	if err != nil {
 		return
 	}
-	tasks := []subUsageTask{}
 	for rows.Next() {
-		var t subUsageTask
-		var raw []byte
-		if err = rows.Scan(&t.id, &t.group, &t.key, &t.model, &t.started, &raw, &t.attempts); err != nil {
+		var item pendingReceipt
+		t := &item.task
+		var ids, candidateRaw []byte
+		if err = rows.Scan(&t.id, &t.group, &t.key, &t.model, &t.started, &ids, &t.attempts, &page, &candidateRaw, &previousFingerprint); err != nil {
 			break
 		}
-		if err = json.Unmarshal(raw, &t.ids); err != nil {
+		if err = json.Unmarshal(ids, &t.ids); err != nil {
 			break
 		}
-		tasks = append(tasks, t)
+		if len(candidateRaw) > 0 {
+			if err = json.Unmarshal(candidateRaw, &item.candidate); err != nil {
+				break
+			}
+		}
+		tasks = append(tasks, item)
 	}
-	readErr := rows.Err()
+	if err == nil {
+		err = rows.Err()
+	}
 	rows.Close()
-	if err != nil || readErr != nil || len(tasks) == 0 {
+	if err != nil || len(tasks) == 0 {
 		return
 	}
-	var logs []subUsageLog
-	start, end := tasks[0].started, tasks[0].started
-	for _, t := range tasks {
-		start = min(start, t.started)
-		end = max(end, t.started)
-	}
-	for page := 1; page <= 5 && err == nil; page++ {
-		q := url.Values{"api_key_id": {strconv.FormatInt(tasks[0].key, 10)}, "page": {strconv.Itoa(page)}, "page_size": {"100"}, "sort_by": {"created_at"}, "sort_order": {"desc"}, "timezone": {"UTC"}, "start_date": {time.Unix(start, 0).UTC().Add(-24 * time.Hour).Format("2006-01-02")}, "end_date": {time.Unix(end, 0).UTC().Add(24 * time.Hour).Format("2006-01-02")}}
+	first := tasks[0].task
+	complete := false
+	for quantum := 0; quantum < 5 && ctx.Err() == nil; quantum++ {
+		q := url.Values{"api_key_id": {strconv.FormatInt(first.key, 10)}, "page": {strconv.Itoa(page)}, "page_size": {"100"}, "sort_by": {"created_at"}, "sort_order": {"desc"}, "timezone": {"UTC"}, "start_date": {time.Unix(first.started, 0).UTC().Add(-24 * time.Hour).Format("2006-01-02")}, "end_date": {time.Unix(first.started, 0).UTC().Add(24 * time.Hour).Format("2006-01-02")}}
 		var listing struct {
 			Items []subUsageLog `json:"items"`
 			Pages int           `json:"pages"`
+			Page  int           `json:"page"`
 		}
-		path := "/api/v1/usage?" + q.Encode()
-		err = s.subUsageGET(ctx, account, base, path, &listing)
+		err = s.subUsageGET(ctx, account, base, "/api/v1/usage?"+q.Encode(), &listing)
 		if err != nil {
 			break
 		}
-		logs = append(logs, listing.Items...)
-		if len(listing.Items) < 100 || (listing.Pages > 0 && page >= listing.Pages) {
+		if listing.Items == nil || (listing.Page != 0 && listing.Page != page) {
+			err = errors.New("invalid usage pagination")
+			break
+		}
+		logIDs := make([]int64, 0, len(listing.Items))
+		for _, log := range listing.Items {
+			logIDs = append(logIDs, log.ID)
+		}
+		pageRaw, _ := json.Marshal(logIDs)
+		fingerprint := tokenHash(string(pageRaw))
+		if len(logIDs) > 0 && fingerprint == previousFingerprint {
+			err = errors.New("usage pagination did not advance")
+			break
+		}
+		previousFingerprint = fingerprint
+		for i := range tasks {
+			item := &tasks[i]
+			if match := subMatchUsage(item.task, listing.Items); match != nil {
+				candidate := item.candidate
+				if candidate != nil && (candidate.Status == "ambiguous" || match.Status == "ambiguous" || candidate.LogID != match.LogID) {
+					item.candidate = &subUsage{Status: "ambiguous", Message: "请求标识对应多条账单，无法确认扣费"}
+				} else {
+					item.candidate = match
+				}
+			}
+		}
+
+		page++
+		if len(listing.Items) == 0 || (listing.Pages > 0 && page > listing.Pages) || (listing.Pages == 0 && len(listing.Items) < 100) {
+			complete = true
 			break
 		}
 	}
-	// Shutdown leaves the durable queue pending for the next replica.
 	if parent.Err() != nil {
 		return
 	}
 	saveCtx, stop := context.WithTimeout(parent, 5*time.Second)
 	defer stop()
-	for _, t := range tasks {
-		usage := subMatchUsage(t, logs)
-		attempts := t.attempts + 1
-		if usage == nil {
-			usage = &subUsage{Status: "pending", Message: "等待站点账单入库", CheckedAt: time.Now().Unix()}
-			if err != nil {
-				usage.Message = "站点账单暂不可用，稍后自动重试"
+	for _, item := range tasks {
+		t, candidate := item.task, item.candidate
+		usage := &subUsage{Status: "pending", Message: "正在分页核对站点账单", CheckedAt: time.Now().Unix()}
+		attempts := t.attempts
+		delay := 1
+		if complete {
+			page = 1
+			previousFingerprint = ""
+			if candidate != nil {
+				usage = candidate
+			} else {
+				if attempts < math.MaxInt32 {
+					attempts++
+				}
+				delay = min(120, 5*(1<<min(attempts-1, 5)))
+				usage.Message = "等待站点账单入库，稍后自动重试"
 			}
-			if attempts >= 6 {
-				usage.Status, usage.Message = "missing", "未能取得对应账单，无法确认扣费和单价"
-			}
+			candidate = nil
+		} else if err != nil || ctx.Err() != nil {
+			delay = 120
+			usage.Message = "站点账单暂不可用，稍后从上次进度继续"
 			var remote *subRemoteError
 			if errors.As(err, &remote) && (remote.Status == 403 || remote.Status == 404) {
 				usage.Status, usage.Message = "unsupported", "站点未开放此账号的用量日志查询"
 			}
 		}
 		raw, _ := json.Marshal(usage)
-		delay := min(120, 5*(1<<min(attempts-1, 5)))
-		_, _ = s.control.db.ExecContext(saveCtx, `UPDATE console_sub_usage SET status=$3,result=$4,attempts=$5,next_attempt=now()+$6*interval '1 second' WHERE id=$1 AND account_id=$2 AND status='pending' AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$2 AND usage_lease_token=$7)`, t.id, account, usage.Status, string(raw), attempts, delay, lease)
+		candidateRaw, _ := json.Marshal(candidate)
+		_, _ = s.control.db.ExecContext(saveCtx, `UPDATE console_sub_usage SET status=$3,result=$4,attempts=$5,next_attempt=now()+$6*interval '1 second',scan_page=$8,scan_match=$9,scan_fingerprint=$10 WHERE id=$1 AND account_id=$2 AND status='pending' AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$2 AND usage_lease_token=$7 AND usage_lease_until>now())`, t.id, account, usage.Status, string(raw), attempts, delay, lease, page, string(candidateRaw), previousFingerprint)
 	}
 }

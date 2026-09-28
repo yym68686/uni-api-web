@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -26,7 +27,7 @@ func TestSubSelectedModelsQueueLargeBatchWithoutChangingOtherResults(t *testing.
 	if _, err = store.db.Exec(`INSERT INTO console_sub_accounts(id,owner,name,base,email,encrypted_auth) VALUES($1,$1,'Fixture','https://fixture.test','test@example.com','')`, id); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = store.db.Exec(`INSERT INTO console_sub_targets(account_id,group_id,name,platform,encrypted_key) SELECT $1,n,'Group','openai','fixture' FROM generate_series(1,500) n`, id); err != nil {
+	if _, err = store.db.Exec(`INSERT INTO console_sub_targets(account_id,group_id,name,platform,encrypted_key) SELECT $1,n,'Group','openai','fixture' FROM generate_series(1,501) n`, id); err != nil {
 		t.Fatal(err)
 	}
 	session, _ := store.newSession(context.Background(), id)
@@ -37,7 +38,7 @@ func TestSubSelectedModelsQueueLargeBatchWithoutChangingOtherResults(t *testing.
 			targets = append(targets, subSelection{AccountID: id, GroupID: int64(i), Models: models})
 		}
 		body, _ := json.Marshal(map[string]any{"targets": targets})
-		if count == 500 && len(body) <= 32<<10 {
+		if count == 501 && len(body) <= 32<<10 {
 			t.Fatal("fixture must exercise previous size limit")
 		}
 		req := httptest.NewRequest("POST", "/v1/sub2api/checks", bytes.NewReader(body))
@@ -47,11 +48,11 @@ func TestSubSelectedModelsQueueLargeBatchWithoutChangingOtherResults(t *testing.
 		service.Handler().ServeHTTP(w, req)
 		return w
 	}
-	if w := request(subModels, 500); w.Code != 202 {
+	if w := request(subModels, 501); w.Code != 202 {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	var queued int
-	if err = store.db.QueryRow(`SELECT count(*) FROM console_sub_models WHERE account_id=$1 AND state='queued'`, id).Scan(&queued); err != nil || queued != 500*len(subModels) {
+	if err = store.db.QueryRow(`SELECT count(*) FROM console_sub_models WHERE account_id=$1 AND state='queued'`, id).Scan(&queued); err != nil || queued != 501*len(subModels) {
 		t.Fatal("batch incomplete", queued, err)
 	}
 	// Once results exist, a new selection must leave every unchecked model alone.
@@ -64,7 +65,7 @@ func TestSubSelectedModelsQueueLargeBatchWithoutChangingOtherResults(t *testing.
 	var untouched int
 	store.db.QueryRow(`SELECT count(*) FROM console_sub_models WHERE account_id=$1 AND state='queued'`, id).Scan(&queued)
 	store.db.QueryRow(`SELECT count(*) FROM console_sub_models WHERE account_id=$1 AND state='done' AND result->>'model'='old-result'`, id).Scan(&untouched)
-	if queued != 3 || untouched != 500*len(subModels)-3 {
+	if queued != 3 || untouched != 501*len(subModels)-3 {
 		t.Fatal("unchecked model changed", queued, untouched)
 	}
 	if w := request([]string{"custom-channel-model"}, 1); w.Code != 202 {
@@ -75,6 +76,19 @@ func TestSubSelectedModelsQueueLargeBatchWithoutChangingOtherResults(t *testing.
 	if extra != 1 {
 		t.Fatal("extra model not queued", extra)
 	}
+	many := make([]string, 101)
+	for i := range many {
+		many[i] = fmt.Sprintf("extra-model-%d", i)
+	}
+	if w := request(many, 1); w.Code != 202 {
+		t.Fatal("more than 100 models rejected", w.Code, w.Body.String())
+	}
+	var manyQueued int
+	store.db.QueryRow(`SELECT count(*) FROM console_sub_check_queue WHERE account_id=$1 AND model LIKE 'extra-model-%'`, id).Scan(&manyQueued)
+	if manyQueued != 101 {
+		t.Fatal("model selection truncated", manyQueued)
+	}
+
 	if w := request([]string{"bad\nmodel"}, 1); w.Code != 400 {
 		t.Fatal("invalid model accepted", w.Code)
 	}

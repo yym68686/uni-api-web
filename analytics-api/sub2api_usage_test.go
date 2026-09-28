@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -231,4 +232,79 @@ func TestSubUsageUnsupportedEndpointDoesNotChangeDetection(t *testing.T) {
 	if status != "unsupported" || result.Availability.Status != "success" {
 		t.Fatal(status, result)
 	}
+}
+
+func TestSubUsageResumesPastFivePagesAndSixRetries(t *testing.T) {
+	s, account, _ := subUsageTestService(t)
+	ctx := context.Background()
+	probe := subProbe{ID: "large-" + randomID(), RequestedModel: checkModel, StartedAt: time.Now().Unix(), RequestIDs: []string{"target"}, Status: "success"}
+	result := subResult{Model: checkModel, Availability: probe}
+	if err := s.subQueueUsage(ctx, account, 7, 42, &result); err != nil {
+		t.Fatal(err)
+	}
+	second := result
+	second.Availability.ID = "second-" + randomID()
+	second.Availability.RequestIDs = []string{"target-2"}
+	if err := s.subQueueUsage(ctx, account, 7, 42, &second); err != nil {
+		t.Fatal(err)
+	}
+	ready := false
+	pagesRead := []int{}
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		pagesRead = append(pagesRead, page)
+		items := []subUsageLog{}
+		pages := 1
+		if ready {
+			pages = 8
+			for i := 0; i < 100; i++ {
+				id := int64((page-1)*100 + i + 1)
+				items = append(items, usageFixture(id, fmt.Sprint(id)))
+			}
+			if page == 8 {
+				items[99] = usageFixture(800, "target")
+				items[98] = usageFixture(799, "target-2")
+			}
+		}
+		writeJSON(w, 200, map[string]any{"code": 0, "data": map[string]any{"items": items, "pages": pages, "page": page}})
+	}))
+	defer up.Close()
+	old := subHTTP
+	u, _ := url.Parse(up.URL)
+	subHTTP = &http.Client{Transport: subTestTransport{u, http.DefaultTransport}}
+	defer func() { subHTTP = old }()
+	run := func() {
+		s.control.db.Exec(`UPDATE console_sub_usage SET next_attempt=now() WHERE account_id=$1`, account)
+		id, base, lease, err := s.subClaimUsage(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		(&Service{control: s.control}).subReadUsage(ctx, id, base, lease)
+	}
+	for i := 0; i < 7; i++ {
+		run()
+	}
+	var status string
+	var page int
+	if err := s.control.db.QueryRow(`SELECT status,scan_page FROM console_sub_usage WHERE id=$1`, probe.ID).Scan(&status, &page); err != nil || status != "pending" {
+		t.Fatal(status, err)
+	}
+	ready = true
+	pagesRead = nil
+	run()
+	s.control.db.QueryRow(`SELECT status,scan_page FROM console_sub_usage WHERE id=$1`, probe.ID).Scan(&status, &page)
+	if status != "pending" || page != 6 {
+		t.Fatal("lost pagination progress", status, page)
+	}
+	run()
+	s.control.db.QueryRow(`SELECT status FROM console_sub_usage WHERE id=$1`, probe.ID).Scan(&status)
+	if status != "matched" || fmt.Sprint(pagesRead) != "[1 2 3 4 5 6 7 8]" {
+		t.Fatal(status, pagesRead)
+	}
+	var matched int
+	s.control.db.QueryRow(`SELECT count(*) FROM console_sub_usage WHERE account_id=$1 AND status='matched'`, account).Scan(&matched)
+	if matched != 2 {
+		t.Fatal("shared scan missed second receipt", matched)
+	}
+
 }

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -113,9 +114,6 @@ func (e *Engine) physicalCheckpoint(ctx context.Context, path string) (physicalM
 		err = closeErr
 	}
 	m.SHA256 = hex.EncodeToString(hash.Sum(nil))
-	if m.Bytes > 4*maxCheckpointBytes {
-		return m, errors.New("checkpoint expands beyond limit")
-	}
 	return m, err
 }
 
@@ -187,13 +185,6 @@ func (s *checkpointStore) save(ctx context.Context, e *Engine) (err error) {
 	if closeErr != nil {
 		return closeErr
 	}
-	size, err := compressed.Seek(0, io.SeekCurrent)
-	if err != nil {
-		return err
-	}
-	if size > maxCheckpointBytes {
-		return errors.New("checkpoint too large")
-	}
 	if _, err = compressed.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
@@ -262,7 +253,7 @@ func (s *checkpointStore) restorePhysical(ctx context.Context, e *Engine) (resto
 	found = true
 	stage = "metadata"
 	var manifest physicalManifest
-	if out.Metadata["source"] != s.physicalSource || out.Metadata["schema"] != physicalSchema || len(out.Metadata["sha256"]) != 64 || json.Unmarshal([]byte(out.Metadata["manifest"]), &manifest) != nil || manifest.Bytes < 0 || manifest.Bytes > 4*maxCheckpointBytes || len(manifest.SHA256) != 64 || len(manifest.Rows) != len(checkpointTables) {
+	if out.Metadata["source"] != s.physicalSource || out.Metadata["schema"] != physicalSchema || len(out.Metadata["sha256"]) != 64 || json.Unmarshal([]byte(out.Metadata["manifest"]), &manifest) != nil || manifest.Bytes < 0 || manifest.Bytes == math.MaxInt64 || len(manifest.SHA256) != 64 || len(manifest.Rows) != len(checkpointTables) {
 		return false, true, errors.New("incompatible physical checkpoint")
 	}
 	expected, parseErr := strconv.ParseInt(out.Metadata["objects"], 10, 64)
@@ -296,7 +287,7 @@ func (s *checkpointStore) restorePhysical(ctx context.Context, e *Engine) (resto
 	defer compressed.Close()
 	stage = "download"
 	hash := sha256.New()
-	n, err := io.CopyBuffer(io.MultiWriter(compressed, hash), io.LimitReader(contextReader{ctx, out.Body}, maxCheckpointBytes+1), make([]byte, checkpointBufferSize))
+	n, err := io.CopyBuffer(io.MultiWriter(compressed, hash), contextReader{ctx, out.Body}, make([]byte, checkpointBufferSize))
 	if err != nil {
 		return false, true, err
 	}
@@ -304,7 +295,7 @@ func (s *checkpointStore) restorePhysical(ctx context.Context, e *Engine) (resto
 		return false, true, io.ErrUnexpectedEOF
 	}
 	stage = "integrity"
-	if n > maxCheckpointBytes || hex.EncodeToString(hash.Sum(nil)) != out.Metadata["sha256"] {
+	if hex.EncodeToString(hash.Sum(nil)) != out.Metadata["sha256"] {
 		return false, true, errors.New("checkpoint integrity mismatch")
 	}
 	if _, err = compressed.Seek(0, io.SeekStart); err != nil {

@@ -94,10 +94,10 @@ func (s *Service) editChannelRoutes(w http.ResponseWriter, r *http.Request) {
 		Revision string      `json:"revision"`
 		Moves    []routeMove `json:"moves"`
 	}
-	if !decodeControlLimit(w, r, &in, 512<<10) {
+	if !decodeConfiguration(w, r, &in) {
 		return
 	}
-	if len(in.Moves) == 0 || len(in.Moves) > 1024 {
+	if len(in.Moves) == 0 {
 		http.Error(w, "请选择需要调整的模型", 400)
 		return
 	}

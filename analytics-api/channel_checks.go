@@ -199,7 +199,7 @@ func (s *Service) checkChannel(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Provider string `json:"provider"`
 	}
-	if !decodeControl(w, r, &in) {
+	if !decodeConfiguration(w, r, &in) {
 		return
 	}
 	if in.Provider == "" || len(in.Provider) > 256 || strings.ContainsAny(in.Provider, "\r\n") {

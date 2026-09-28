@@ -949,8 +949,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   }
   const batchBusy = (kind: CheckKind) => eligible.some(({account, target, configured}) =>
     checkKeys(account, target, kind, configured).some(key => submittingChecks.has(key)));
-  const batchDisabled = (kind: CheckKind) => eligible.length > 500 ||
-    !eligible.some(({account, target, configured}) => canCheck(account, target, kind, configured));
+  const batchDisabled = (kind: CheckKind) => !eligible.some(({account, target, configured}) => canCheck(account, target, kind, configured));
   const check = (selection: CheckSelection) => queueChecks("check", selection);
   const checkQuality = () => queueChecks("quality", eligible);
   const checkCompaction = (selection: CheckSelection = eligible) => queueChecks("compaction", selection);

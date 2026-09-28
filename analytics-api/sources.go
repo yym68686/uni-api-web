@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -67,8 +66,8 @@ func fetchSource(ctx context.Context, src controlSource, path string, q url.Valu
 	if resp.StatusCode != 200 {
 		return nil, 502, fmt.Errorf("source returned HTTP %d", resp.StatusCode)
 	}
-	raw, e := io.ReadAll(io.LimitReader(resp.Body, (16<<20)+1))
-	if e != nil || len(raw) > 16<<20 {
+	raw, e := readConfiguration(resp.Body)
+	if e != nil {
 		return nil, 502, errors.New("invalid source response")
 	}
 	var body map[string]any
@@ -102,7 +101,7 @@ func (s *Service) bootstrapSources(ctx context.Context) error {
 }
 func (s *Service) saveSource(w http.ResponseWriter, r *http.Request) {
 	var in controlSource
-	if !decodeControl(w, r, &in) {
+	if !decodeConfiguration(w, r, &in) {
 		return
 	}
 	base, e := validateSourceURL(in.Base)

@@ -26,6 +26,13 @@ CREATE TABLE IF NOT EXISTS console_sub_key_index(
  account_id TEXT NOT NULL REFERENCES console_sub_accounts(id) ON DELETE CASCADE,
  key_hash TEXT NOT NULL, remote_key_id BIGINT NOT NULL, group_id BIGINT NOT NULL,
  key_created_at TIMESTAMPTZ, PRIMARY KEY(account_id,key_hash));
+ALTER TABLE console_sub_key_scans ADD COLUMN IF NOT EXISTS scan_revision TEXT NOT NULL DEFAULT '';
+ALTER TABLE console_sub_key_scans ADD COLUMN IF NOT EXISTS next_page INT NOT NULL DEFAULT 1;
+ALTER TABLE console_sub_key_scans ADD COLUMN IF NOT EXISTS page_fingerprint TEXT NOT NULL DEFAULT '';
+CREATE TABLE IF NOT EXISTS console_sub_key_index_stage(
+ account_id TEXT NOT NULL REFERENCES console_sub_accounts(id) ON DELETE CASCADE,
+ key_hash TEXT NOT NULL, remote_key_id BIGINT NOT NULL, group_id BIGINT NOT NULL,
+ key_created_at TIMESTAMPTZ, PRIMARY KEY(account_id,key_hash));
 CREATE TABLE IF NOT EXISTS console_channel_management_snapshots(
  source_id TEXT PRIMARY KEY REFERENCES console_sources(id) ON DELETE CASCADE,
  catalog JSONB NOT NULL, checked_at BIGINT NOT NULL);
@@ -237,14 +244,22 @@ func (s *Service) refreshAccountKeyIndex(parent context.Context, account subBind
 	if err != nil {
 		return
 	}
-	type indexedKey struct {
-		Hash      string
-		ID, Group int64
-		Created   *time.Time
-	}
-	keys := map[string]indexedKey{}
+
+	// Publish only a complete generation. Persist each page so a slow account
+	// continues after its time slice or a process restart without losing LKG.
 	complete := false
-	for page := 1; page <= 100; page++ {
+	indexed := 0
+	for quantum := 0; quantum < 5 && ctx.Err() == nil; quantum++ {
+		var page int
+		var generation, previousFingerprint string
+		err = s.control.db.QueryRowContext(ctx, `SELECT scan_revision,next_page,page_fingerprint FROM console_sub_key_scans WHERE account_id=$1 AND lease_token=$2`, account.ID, lease).Scan(&generation, &page, &previousFingerprint)
+		if err != nil {
+			break
+		}
+		if generation != revision {
+			page = 1
+			previousFingerprint = ""
+		}
 		var listing struct {
 			Items    []subRemoteKey `json:"items"`
 			Pages    int            `json:"pages"`
@@ -259,69 +274,94 @@ func (s *Service) refreshAccountKeyIndex(parent context.Context, account subBind
 			err = errors.New("invalid key pagination")
 			break
 		}
+		ids := make([]int64, 0, len(listing.Items))
 		for _, key := range listing.Items {
-			if key.ID <= 0 || key.Key == "" || strings.ContainsAny(key.Key, "*•…") {
-				continue
-			}
-			hash := tokenHash(key.Key)
-			if previous, ok := keys[hash]; ok && previous.ID != key.ID {
-				err = errors.New("ambiguous key")
-				break
-			}
-			keys[hash] = indexedKey{hash, key.ID, key.GroupID, key.CreatedAt}
+			ids = append(ids, key.ID)
 		}
-		if err != nil {
+		raw, _ := json.Marshal(ids)
+		fingerprint := tokenHash(string(raw))
+		if len(ids) > 0 && fingerprint == previousFingerprint {
+			err = errors.New("key pagination did not advance")
 			break
 		}
 		size := 100
 		if listing.PageSize > 0 {
 			size = listing.PageSize
 		}
-		if len(listing.Items) == 0 || (listing.Pages > 0 && page >= listing.Pages) || (listing.Pages == 0 && len(listing.Items) < size) {
-			complete = true
+		complete = len(ids) == 0 || (listing.Pages > 0 && page >= listing.Pages) || (listing.Pages == 0 && len(ids) < size)
+		tx, e := s.control.db.BeginTx(ctx, nil)
+		if e != nil {
+			err = e
+			break
+		}
+		e = func() error {
+			defer tx.Rollback()
+			var valid bool
+			if e := tx.QueryRowContext(ctx, `SELECT lease_token=$2 AND lease_until>now() FROM console_sub_key_scans WHERE account_id=$1 FOR UPDATE`, account.ID, lease).Scan(&valid); e != nil {
+				return e
+			}
+			if !valid {
+				return context.Canceled
+			}
+			if generation != revision {
+				if _, e := tx.ExecContext(ctx, `DELETE FROM console_sub_key_index_stage WHERE account_id=$1`, account.ID); e != nil {
+					return e
+				}
+			}
+			for _, key := range listing.Items {
+				if key.ID <= 0 || key.Key == "" || strings.ContainsAny(key.Key, "*•…") {
+					continue
+				}
+				result, e := tx.ExecContext(ctx, `INSERT INTO console_sub_key_index_stage(account_id,key_hash,remote_key_id,group_id,key_created_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT(account_id,key_hash) DO UPDATE SET group_id=excluded.group_id,key_created_at=excluded.key_created_at WHERE console_sub_key_index_stage.remote_key_id=excluded.remote_key_id`, account.ID, tokenHash(key.Key), key.ID, key.GroupID, key.CreatedAt)
+				if e != nil {
+					return e
+				}
+				if n, _ := result.RowsAffected(); n != 1 {
+					return errors.New("ambiguous key")
+				}
+			}
+			if complete {
+				if _, e := tx.ExecContext(ctx, `DELETE FROM console_sub_key_index WHERE account_id=$1`, account.ID); e != nil {
+					return e
+				}
+				result, e := tx.ExecContext(ctx, `INSERT INTO console_sub_key_index SELECT * FROM console_sub_key_index_stage WHERE account_id=$1`, account.ID)
+				if e != nil {
+					return e
+				}
+				n, _ := result.RowsAffected()
+				indexed = int(n)
+				if _, e = tx.ExecContext(ctx, `DELETE FROM console_sub_key_index_stage WHERE account_id=$1`, account.ID); e != nil {
+					return e
+				}
+				_, e = tx.ExecContext(ctx, `UPDATE console_sub_key_scans SET revision=$2,scan_revision='',next_page=1,page_fingerprint='',checked_at=$3,error='',lease_token='',lease_until=NULL,next_attempt=now() WHERE account_id=$1`, account.ID, revision, time.Now().Unix())
+				if e != nil {
+					return e
+				}
+			} else {
+				if _, e := tx.ExecContext(ctx, `UPDATE console_sub_key_scans SET scan_revision=$2,next_page=$3,page_fingerprint=$4 WHERE account_id=$1`, account.ID, revision, page+1, fingerprint); e != nil {
+					return e
+				}
+			}
+			return tx.Commit()
+		}()
+		if e != nil {
+			err = e
+			break
+		}
+		if complete {
 			break
 		}
 	}
-	if err == nil && !complete {
-		err = errors.New("incomplete key listing")
-	}
-	if err == nil {
-		tx, e := s.control.db.BeginTx(ctx, nil)
-		if e == nil {
-			defer tx.Rollback()
-			var valid bool
-			e = tx.QueryRowContext(ctx, `SELECT lease_token=$2 AND lease_until>now() FROM console_sub_key_scans WHERE account_id=$1 FOR UPDATE`, account.ID, lease).Scan(&valid)
-			if e == nil && !valid {
-				e = context.Canceled
-			}
-			if e == nil {
-				_, e = tx.ExecContext(ctx, `DELETE FROM console_sub_key_index WHERE account_id=$1`, account.ID)
-			}
-			for _, key := range keys {
-				if e != nil {
-					break
-				}
-				_, e = tx.ExecContext(ctx, `INSERT INTO console_sub_key_index(account_id,key_hash,remote_key_id,group_id,key_created_at) VALUES($1,$2,$3,$4,$5)`, account.ID, key.Hash, key.ID, key.Group, key.Created)
-			}
-			if e == nil {
-				_, e = tx.ExecContext(ctx, `UPDATE console_sub_key_scans SET revision=$2,checked_at=$3,error='',lease_token='',lease_until=NULL WHERE account_id=$1`, account.ID, revision, time.Now().Unix())
-			}
-			if e == nil {
-				e = tx.Commit()
-			}
-		}
-		err = e
-	}
-	if err != nil {
-		cleanup, stop := context.WithTimeout(context.Background(), 3*time.Second)
-		defer stop()
+	cleanup, stop := context.WithTimeout(context.Background(), 3*time.Second)
+	defer stop()
+	if err != nil || ctx.Err() != nil {
 		_, _ = s.control.db.ExecContext(cleanup, `UPDATE console_sub_key_scans SET error='站点密钥读取暂不可用',lease_token='',lease_until=NULL,next_attempt=now()+interval '5 minutes' WHERE account_id=$1 AND lease_token=$2`, account.ID, lease)
-		if parent.Err() == nil {
-			fmt.Printf("sub2api binding_scan account=%s status=unavailable\n", account.ID)
-		}
+	} else if !complete {
+		_, _ = s.control.db.ExecContext(cleanup, `UPDATE console_sub_key_scans SET error='',lease_token='',lease_until=NULL,next_attempt=now() WHERE account_id=$1 AND lease_token=$2`, account.ID, lease)
 	} else {
-		fmt.Printf("sub2api binding_scan account=%s indexed_keys=%d status=complete\n", account.ID, len(keys))
+		fmt.Printf("sub2api binding_scan account=%s indexed_keys=%d status=complete\n", account.ID, indexed)
 	}
+
 }
 
 type subBoundKey struct {

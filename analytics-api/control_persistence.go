@@ -494,7 +494,7 @@ func (s *Service) controlPersistence(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			Enabled *bool `json:"enabled"`
 		}
-		if !decodeControl(w, r, &in) {
+		if !decodeConfiguration(w, r, &in) {
 			return
 		}
 		if in.Enabled == nil {

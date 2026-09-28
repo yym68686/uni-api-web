@@ -107,67 +107,112 @@ func (s *Service) automationMetrics(ctx context.Context, t AutomationTask, catal
 		return nil, e
 	}
 	p := t.Policy
-	rows, e := s.engine.DB.QueryContext(ctx, `SELECT provider,upstream_model,kind,outcome,at_ms,response_created_ms,input_tokens,cache_read_tokens FROM facts WHERE source_id=? AND key_id=? AND model=? AND endpoint=? AND stream=? AND at_ms>=? AND at_ms<=? ORDER BY at_ms,event_id LIMIT 200001`, t.SourceID, t.KeyID, t.Model, p.Endpoint, p.Stream == "true", start.UnixMilli(), now.UnixMilli())
-	if e != nil {
-		return nil, e
-	}
+
+	// Aggregate in DuckDB, which can spill within its configured memory budget.
+	// Never copy the full fact window or all latency samples into Go memory.
 	type samples struct {
-		m       automationMetric
-		latency []float64
-		blocks  map[int64]cacheBlock
-		success int
+		m            automationMetric
+		blocks       map[int64]cacheBlock
+		success      int
+		latencyValid bool
 	}
 	all := map[string]*samples{}
 	for _, c := range catalog {
 		all[c.Provider] = &samples{m: automationMetric{Provider: c.Provider, Upstream: c.Upstream, Eligible: c.Eligible}, blocks: map[int64]cacheBlock{}}
 	}
-	count := 0
+	tx, e := s.engine.DB.BeginTx(ctx, nil)
+	if e != nil {
+		return nil, e
+	}
+	defer tx.Rollback()
+	scope := ` FROM facts WHERE source_id=? AND key_id=? AND model=? AND endpoint=? AND stream=? AND at_ms>=? AND at_ms<=? `
+	args := []any{t.SourceID, t.KeyID, t.Model, p.Endpoint, p.Stream == "true", start.UnixMilli(), now.UnixMilli()}
+	rows, e := tx.QueryContext(ctx, `SELECT provider,upstream_model,max(at_ms),count(*) FILTER(WHERE kind='attempt' AND outcome NOT IN ('cancelled','client_cancelled','hedge_cancelled','skipped')),count(*) FILTER(WHERE kind='attempt' AND outcome IN ('success','completed','incomplete')),coalesce(max(at_ms) FILTER(WHERE kind='attempt' AND outcome NOT IN ('cancelled','client_cancelled','hedge_cancelled','skipped')),0)`+scope+`GROUP BY provider,upstream_model`, args...)
+	if e != nil {
+		return nil, e
+	}
 	for rows.Next() {
-		count++
-		var provider, upstream, kind, outcome string
-		var at int64
-		var latency sql.NullFloat64
-		var input, cached sql.NullInt64
-		if e = rows.Scan(&provider, &upstream, &kind, &outcome, &at, &latency, &input, &cached); e != nil {
-			rows.Close()
-			return nil, e
+		var provider, upstream string
+		var latest, successLatest int64
+		var n, success int
+		if e = rows.Scan(&provider, &upstream, &latest, &n, &success, &successLatest); e != nil {
+			break
 		}
-		a := all[provider]
-		if a == nil || a.m.Upstream != upstream {
-			continue
-		}
-		a.m.Latest = max(a.m.Latest, at)
-		if kind == "attempt" {
-			switch outcome {
-			case "cancelled", "client_cancelled", "hedge_cancelled", "skipped":
-			default:
-				a.m.SuccessN++
-				a.m.SuccessLatest = max(a.m.SuccessLatest, at)
-				if outcome == "success" || outcome == "completed" || outcome == "incomplete" {
-					a.success++
-				}
-			}
-			if latency.Valid && latency.Float64 >= 0 && !math.IsInf(latency.Float64, 0) && !math.IsNaN(latency.Float64) {
-				a.latency = append(a.latency, latency.Float64)
-				a.m.LatencyLatest = max(a.m.LatencyLatest, at)
-			}
-		}
-		if kind == "request" && input.Valid && cached.Valid && input.Int64 > 0 && cached.Int64 >= 0 && cached.Int64 <= input.Int64 {
-			a.m.CacheN++
-			a.m.CacheLatest = max(a.m.CacheLatest, at)
-			b := a.blocks[at/60000]
-			b.Input += float64(input.Int64)
-			b.Cached += float64(cached.Int64)
-			a.blocks[at/60000] = b
+		if a := all[provider]; a != nil && a.m.Upstream == upstream {
+			a.m.Latest = latest
+			a.m.SuccessN = n
+			a.success = success
+			a.m.SuccessLatest = successLatest
 		}
 	}
-	e = rows.Err()
+	if e == nil {
+		e = rows.Err()
+	}
 	rows.Close()
 	if e != nil {
 		return nil, e
 	}
-	if count > 200000 {
-		return nil, errors.New("所选窗口超过 200000 条事实，请缩短统计范围；未使用截断样本进行调序")
+	z := confidenceZ(p.ConfidenceLevel)
+	// Exact order-statistic ranks, including the original binomial CI endpoints.
+	latencyArgs := append(append([]any{}, args...), p.LatencyQuantile, z)
+	query := `WITH ranked AS (SELECT provider,upstream_model,at_ms,response_created_ms AS latency,row_number() OVER(PARTITION BY provider,upstream_model ORDER BY response_created_ms) AS rank,count(*) OVER(PARTITION BY provider,upstream_model) AS n` + scope + `AND kind='attempt' AND response_created_ms>=0 AND isfinite(response_created_ms)), parameters AS (SELECT ?::DOUBLE AS q,?::DOUBLE AS z), bounds AS (SELECT *,greatest(1,ceil(q*n)) AS mid,floor(q*n-z*sqrt(n*q*(1-q))) AS lo,ceil(q*n+z*sqrt(n*q*(1-q))) AS hi FROM ranked CROSS JOIN parameters) SELECT provider,upstream_model,max(n),max(at_ms),max(latency) FILTER(WHERE rank=mid),max(latency) FILTER(WHERE rank=lo),max(latency) FILTER(WHERE rank=hi) FROM bounds GROUP BY provider,upstream_model`
+	rows, e = tx.QueryContext(ctx, query, latencyArgs...)
+	if e != nil {
+		return nil, e
+	}
+	for rows.Next() {
+		var provider, upstream string
+		var n int
+		var latest int64
+		var v, lo, hi sql.NullFloat64
+		if e = rows.Scan(&provider, &upstream, &n, &latest, &v, &lo, &hi); e != nil {
+			break
+		}
+		if a := all[provider]; a != nil && a.m.Upstream == upstream {
+			a.m.LatencyN = n
+			a.m.LatencyLatest = latest
+			a.m.Latency = v.Float64
+			a.m.LatencyCI = [2]float64{lo.Float64, hi.Float64}
+			a.latencyValid = lo.Valid && hi.Valid
+			if !a.latencyValid {
+				a.m.LatencyCI = [2]float64{}
+			}
+		}
+	}
+	if e == nil {
+		e = rows.Err()
+	}
+	rows.Close()
+	if e != nil {
+		return nil, e
+	}
+	rows, e = tx.QueryContext(ctx, `SELECT provider,upstream_model,at_ms//60000,count(*),max(at_ms),sum(input_tokens::DOUBLE),sum(cache_read_tokens::DOUBLE)`+scope+`AND kind='request' AND input_tokens>0 AND cache_read_tokens>=0 AND cache_read_tokens<=input_tokens GROUP BY provider,upstream_model,at_ms//60000`, args...)
+	if e != nil {
+		return nil, e
+	}
+	for rows.Next() {
+		var provider, upstream string
+		var minute, latest int64
+		var n int
+		var block cacheBlock
+		if e = rows.Scan(&provider, &upstream, &minute, &n, &latest, &block.Input, &block.Cached); e != nil {
+			break
+		}
+		if a := all[provider]; a != nil && a.m.Upstream == upstream {
+			a.m.CacheN += n
+			a.m.CacheLatest = max(a.m.CacheLatest, latest)
+			a.blocks[minute] = block
+		}
+	}
+	if e == nil {
+		e = rows.Err()
+	}
+	rows.Close()
+	if e != nil {
+		return nil, e
+	}
+	if e = tx.Commit(); e != nil {
+		return nil, e
 	}
 	out := map[string]automationMetric{}
 	bindings := map[string]subChannelRef{}
@@ -189,12 +234,9 @@ func (s *Service) automationMetrics(ctx context.Context, t AutomationTask, catal
 			}
 		}
 	}
-	z := confidenceZ(p.ConfidenceLevel)
 	for name, a := range all {
 		m := a.m
-		m.LatencyN = len(a.latency)
-		var valid bool
-		m.Latency, m.LatencyCI, valid = quantileInterval(a.latency, p.LatencyQuantile, z)
+		valid := a.latencyValid
 		if !valid && metricEnabled(p, "latency") {
 			m.Reason = "首字分位数的有效样本不足以计算置信区间"
 		}

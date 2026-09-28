@@ -31,18 +31,19 @@ func TestControlDecodeDistinguishesBodySizeFromMalformedJSON(t *testing.T) {
 	}
 }
 
-func TestCheckBatchDecoderSupportsAdvertisedTargetAndModelBounds(t *testing.T) {
+func TestConfigurationDecoderExceedsFormerBatchAndByteLimits(t *testing.T) {
+	t.Setenv("CONFIGURATION_MAX_BYTES", "0")
 	models := []string{}
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 101; i++ {
 		models = append(models, fmt.Sprintf("%03d", i)+strings.Repeat("m", 253))
 	}
 	targets := []map[string]any{}
-	for i := 0; i < 500; i++ {
+	for i := 0; i < 700; i++ {
 		targets = append(targets, map[string]any{"source_id": "primary", "provider": fmt.Sprintf("%03d", i) + strings.Repeat("p", 253), "models": models})
 	}
 	raw, _ := json.Marshal(map[string]any{"kind": "check", "targets": targets})
-	if len(raw) >= checkBatchBodyLimit {
-		t.Fatal("valid maximum batch exceeds limit", len(raw))
+	if len(raw) <= 16<<20 {
+		t.Fatal("fixture must exceed old byte quota", len(raw))
 	}
 	r := httptest.NewRequest("POST", "/", bytes.NewReader(raw))
 	r.Header.Set("Content-Type", "application/json")
@@ -52,7 +53,7 @@ func TestCheckBatchDecoderSupportsAdvertisedTargetAndModelBounds(t *testing.T) {
 		} `json:"targets"`
 	}
 	w := httptest.NewRecorder()
-	if !decodeControlLimit(w, r, &decoded, checkBatchBodyLimit) || len(decoded.Targets) != 500 || len(decoded.Targets[499].Models) != 100 {
+	if !decodeConfiguration(w, r, &decoded) || len(decoded.Targets) != 700 || len(decoded.Targets[699].Models) != 101 {
 		t.Fatal("maximum batch lost models", w.Code)
 	}
 }

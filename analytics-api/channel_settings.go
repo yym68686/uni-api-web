@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -64,8 +63,8 @@ func (s *Service) settingsGateway(ctx context.Context, src controlSource, method
 		return nil, 502, errors.New("应用结果待确认，请通过操作记录核对")
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, (4<<20)+1))
-	if err != nil || len(raw) > 4<<20 {
+	raw, err := readConfiguration(resp.Body)
+	if err != nil {
 		return nil, 502, errors.New("来源设置响应读取失败")
 	}
 	var value map[string]any
@@ -146,10 +145,10 @@ func (s *Service) channelSettingsSecrets(w http.ResponseWriter, r *http.Request)
 }
 func settingsInput(w http.ResponseWriter, r *http.Request) (channelSettingMutation, bool) {
 	var in channelSettingMutation
-	if !decodeControlLimit(w, r, &in, 2<<20) {
+	if !decodeConfiguration(w, r, &in) {
 		return in, false
 	}
-	if in.Operation == "" || len(in.Operation) > 128 || len(in.Revision) > 256 || len(in.Changes) == 0 || len(in.Changes) > 100 {
+	if in.Operation == "" || len(in.Operation) > 128 || len(in.Revision) > 256 || len(in.Changes) == 0 {
 		http.Error(w, "无效设置请求", 400)
 		return in, false
 	}
@@ -384,7 +383,7 @@ func (s *Service) channelSettingsRollback(w http.ResponseWriter, r *http.Request
 		Revision  string `json:"revision"`
 		Rollback  string `json:"rollback_id"`
 	}
-	if !decodeControl(w, r, &in) {
+	if !decodeConfiguration(w, r, &in) {
 		return
 	}
 	owner, _ := s.controlUser(r)
@@ -444,7 +443,7 @@ func (s *Service) channelSettingsTemplates(w http.ResponseWriter, r *http.Reques
 			Set    map[string]any `json:"set,omitempty"`
 			Remove []string       `json:"remove,omitempty"`
 		}
-		if !decodeControl(w, r, &in) {
+		if !decodeConfiguration(w, r, &in) {
 			return
 		}
 		if strings.TrimSpace(in.Name) == "" || len(in.Name) > 128 {

@@ -96,7 +96,7 @@ func TestPhysicalCheckpointRejectsInvalidFilesWithoutReplacingCache(t *testing.T
 			case "truncated":
 				objects.body = objects.body[:len(objects.body)/2]
 			case "extra_size":
-				m.Bytes = 4*maxCheckpointBytes + 1
+				m.Bytes++
 			}
 			raw, _ := json.Marshal(m)
 			objects.metadata["manifest"] = string(raw)

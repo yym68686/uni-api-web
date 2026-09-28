@@ -91,10 +91,10 @@ func (s *Service) queueConfiguredChecks(w http.ResponseWriter, r *http.Request) 
 			Models   []string `json:"models"`
 		} `json:"targets"`
 	}
-	if !decodeControlLimit(w, r, &in, checkBatchBodyLimit) {
+	if !decodeConfiguration(w, r, &in) {
 		return
 	}
-	if (in.Kind != "check" && in.Kind != "availability" && in.Kind != "quality" && in.Kind != "compaction" && in.Kind != "tool-use") || len(in.Targets) == 0 || len(in.Targets) > 500 {
+	if (in.Kind != "check" && in.Kind != "availability" && in.Kind != "quality" && in.Kind != "compaction" && in.Kind != "tool-use") || len(in.Targets) == 0 {
 		http.Error(w, "无效检测任务", 400)
 		return
 	}
@@ -102,7 +102,7 @@ func (s *Service) queueConfiguredChecks(w http.ResponseWriter, r *http.Request) 
 	// the same pool). All selections are committed together or rejected together.
 	sources := map[string]controlSource{}
 	for _, t := range in.Targets {
-		if t.Provider == "" || len(t.Provider) > 256 || strings.ContainsAny(t.Provider, "\r\n/") || len(t.Models) > 100 {
+		if t.Provider == "" || len(t.Provider) > 256 || strings.ContainsAny(t.Provider, "\r\n/") {
 			http.Error(w, "无效渠道或模型", 400)
 			return
 		}

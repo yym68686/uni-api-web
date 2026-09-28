@@ -304,3 +304,39 @@ func TestConfiguredCopiesUseVerifiedAccountRateInChannelLabels(t *testing.T) {
 		t.Fatal("invented rate for unknown billing", got)
 	}
 }
+
+func TestAccountKeyIndexResumesBeyondHundredPagesAndPublishesAtomically(t *testing.T) {
+	calls := 0
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		writeJSON(w, 200, map[string]any{"code": 0, "data": map[string]any{"items": []subRemoteKey{{ID: int64(page), Key: fmt.Sprintf("key-%d", page), GroupID: 7}}, "pages": 101, "page": page}})
+	}))
+	defer up.Close()
+	old := subHTTP
+	subHTTP = up.Client()
+	defer func() { subHTTP = old }()
+	s, a, src := bindingFixture(t, up.URL)
+	ctx := context.Background()
+	if err := s.saveConfiguredInventory(ctx, src, []configuredProvider{{Provider: "p", Base: up.URL + "/v1", API: "key-101"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.control.db.Exec(`INSERT INTO console_sub_key_index(account_id,key_hash,remote_key_id,group_id) VALUES($1,'old',999,7)`, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	s.refreshAccountKeyIndex(ctx, a)
+	var count, page int
+	s.control.db.QueryRow(`SELECT count(*) FROM console_sub_key_index WHERE account_id=$1`, a.ID).Scan(&count)
+	s.control.db.QueryRow(`SELECT next_page FROM console_sub_key_scans WHERE account_id=$1`, a.ID).Scan(&page)
+	if count != 1 || page != 6 {
+		t.Fatal("partial generation published or cursor lost", count, page)
+	}
+	for i := 0; i < 20; i++ {
+		(&Service{control: s.control}).refreshAccountKeyIndex(ctx, a)
+	}
+	s.control.db.QueryRow(`SELECT count(*) FROM console_sub_key_index WHERE account_id=$1`, a.ID).Scan(&count)
+	if count != 101 || calls != 101 {
+		t.Fatal("incomplete or repeated scan", count, calls)
+	}
+	assertConfiguredBinding(t, s, a, src.ID, "p", "matched")
+}

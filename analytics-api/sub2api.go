@@ -42,6 +42,11 @@ CREATE TABLE IF NOT EXISTS console_sub_usage(
  group_id BIGINT NOT NULL, key_id BIGINT NOT NULL, model TEXT NOT NULL, started_at BIGINT NOT NULL,
  request_ids JSONB NOT NULL, status TEXT NOT NULL DEFAULT 'pending', result JSONB,
  attempts INT NOT NULL DEFAULT 0, next_attempt TIMESTAMPTZ NOT NULL DEFAULT now());
+ALTER TABLE console_sub_usage ADD COLUMN IF NOT EXISTS scan_page INT NOT NULL DEFAULT 1;
+ALTER TABLE console_sub_usage ADD COLUMN IF NOT EXISTS scan_match JSONB;
+ALTER TABLE console_sub_usage ADD COLUMN IF NOT EXISTS scan_fingerprint TEXT NOT NULL DEFAULT '';
+-- Resume receipts abandoned only because the legacy retry count was exhausted.
+UPDATE console_sub_usage SET status='pending',next_attempt=now() WHERE status='missing';
 CREATE TABLE IF NOT EXISTS console_sub_spend_logs(
  account_id TEXT NOT NULL REFERENCES console_sub_accounts(id) ON DELETE CASCADE,
  key_id BIGINT NOT NULL, log_id BIGINT NOT NULL, at_ms BIGINT NOT NULL,
@@ -281,7 +286,7 @@ func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 		Challenge string `json:"challenge"`
 		Code      string `json:"totp_code"`
 	}
-	if !decodeControl(w, r, &in) {
+	if !decodeConfiguration(w, r, &in) {
 		return
 	}
 	if in.Username != "" {
@@ -576,18 +581,12 @@ func (s *Service) subQueueChecksKind(w http.ResponseWriter, r *http.Request, kin
 	var in struct {
 		Targets []subSelection `json:"targets"`
 	}
-	if !decodeControlLimit(w, r, &in, checkBatchBodyLimit) {
+	if !decodeConfiguration(w, r, &in) {
 		return
 	}
-	if len(in.Targets) == 0 || len(in.Targets) > 500 {
-		http.Error(w, "每次请选择 1–500 个分组", 400)
+	if len(in.Targets) == 0 {
+		http.Error(w, "请至少选择一个分组", 400)
 		return
-	}
-	for _, target := range in.Targets {
-		if len(target.Models) > 100 {
-			http.Error(w, "检测模型数量超出限制", 400)
-			return
-		}
 	}
 	tx, err := s.control.db.BeginTx(r.Context(), nil)
 	if err != nil {
@@ -931,9 +930,6 @@ func (s *Service) subSynchronize(ctx context.Context, id, base, job, encrypted s
 	if err != nil {
 		return err
 	}
-	if len(groups) > 500 {
-		return errors.New("分组数量超过单账号 500 个的检测上限")
-	}
 	newAPI := s.isNewAPI(ctx, id)
 	groupModels := map[int64][]string{}
 	if newAPI {
@@ -945,9 +941,6 @@ func (s *Service) subSynchronize(ctx context.Context, id, base, job, encrypted s
 			var models []string
 			if err = s.newAPICall(ctx, id, base, "GET", "/api/user/models?group="+url.QueryEscape(remote), nil, &models); err != nil {
 				return err
-			}
-			if len(models) > 1000 {
-				return errors.New("站点模型列表过大")
 			}
 			for _, model := range models {
 				if !validProbeModel(model) {
@@ -980,7 +973,8 @@ func (s *Service) subSynchronize(ctx context.Context, id, base, job, encrypted s
 	// Only keys with our exact deterministic names are adopted. Existing user keys
 	// are never changed; pagination and idempotency make interrupted creation recoverable.
 	keys := map[string]subRemoteKey{}
-	for page := 1; page <= 100; page++ {
+	progress := keyPageProgress{}
+	for page := 1; ; page++ {
 		var listing struct {
 			Items []subRemoteKey `json:"items"`
 			Total int            `json:"total"`
@@ -990,14 +984,14 @@ func (s *Service) subSynchronize(ctx context.Context, id, base, job, encrypted s
 		if e := call("GET", path, nil, &listing, ""); e != nil {
 			return e
 		}
+		if e := progress.advance(listing.Items); e != nil {
+			return e
+		}
 		for _, key := range listing.Items {
 			keys[key.Name] = key
 		}
-		if len(listing.Items) == 0 || len(listing.Items) < 100 || (listing.Pages > 0 && page >= listing.Pages) {
+		if len(listing.Items) == 0 || (listing.Pages == 0 && len(listing.Items) < 100) || (listing.Pages > 0 && page >= listing.Pages) {
 			break
-		}
-		if page == 100 {
-			return errors.New("测试 key 列表过大，未完成同步")
 		}
 	}
 	tx, err := s.control.db.BeginTx(ctx, nil)

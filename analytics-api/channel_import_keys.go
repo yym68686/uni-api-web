@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -178,12 +177,12 @@ func fetchImportKeys(ctx context.Context, src controlSource) ([]importKey, int, 
 	if response.StatusCode != 200 {
 		return nil, 502, errors.New("来源暂时无法读取 API key，请稍后重试")
 	}
-	data, err := io.ReadAll(io.LimitReader(response.Body, (1<<20)+1))
+	data, err := readConfiguration(response.Body)
 	var result struct {
 		CanInspect bool        `json:"can_inspect_all"`
 		Keys       []importKey `json:"data"`
 	}
-	if err != nil || len(data) > 1<<20 || json.Unmarshal(data, &result) != nil || result.Keys == nil {
+	if err != nil || json.Unmarshal(data, &result) != nil || result.Keys == nil {
 		return nil, 502, errors.New("来源返回了无效的 API key 列表")
 	}
 	if !result.CanInspect {

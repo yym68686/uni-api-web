@@ -120,14 +120,21 @@ func testSingleChannelSaveAtCapacity(t *testing.T, newChannel bool) {
 		}
 		return grouped
 	}
-	// Reproduce the rejected 129-scope snapshot without changing serving state.
+	// The former 129-scope rejection must now succeed; restore the baseline
+	// afterward so the import still verifies preservation of existing routing.
 	var inflated retainedSnapshot
 	_ = json.Unmarshal([]byte(mustJSON(snapshot)), &inflated)
 	inflated.Channels[0].Models = append(append([]string{}, channel.Models...), "deepseek-v4.1-flash")
 	inflated.Rules = append(inflated.Rules, retainedRule{KeyID: key, Model: "deepseek-v4.1-flash", Order: []string{channel.Provider, "first", "last"}, Disabled: []string{}})
-	if _, code, e := subGateway(ctx, src, "POST", "/v1/channel-controls/restore", map[string]any{"revision": state["revision"], "snapshot": inflated}); code != 400 || e == nil {
-		t.Fatal("did not reproduce capacity rejection", code, e)
+	state, code, err := subGateway(ctx, src, "POST", "/v1/channel-controls/restore", map[string]any{"revision": state["revision"], "snapshot": inflated})
+	if code != 200 || err != nil {
+		t.Fatal("large snapshot rejected", code, err)
 	}
+	state, _, err = subGateway(ctx, src, "POST", "/v1/channel-controls/restore", map[string]any{"revision": state["revision"], "snapshot": snapshot})
+	if err != nil {
+		t.Fatal("baseline restoration", err)
+	}
+
 	channel.Models = append(append([]string{}, channel.Models...), "deepseek-v4.1-flash")
 	positions := map[string]int{"glm-5.3": 2, "glm-5.3-flash": 2, "deepseek-v4.1-flash": 1}
 	if newChannel {
@@ -182,5 +189,5 @@ func testSingleChannelSaveAtCapacity(t *testing.T, newChannel bool) {
 			t.Fatal("disabled policy lost")
 		}
 	}
-	t.Logf("old save rejected at 129 scopes; fixed save accepted with %d scopes", len(live.Rules))
+	t.Logf("129 scopes restored; fixed save accepted with %d scopes", len(live.Rules))
 }

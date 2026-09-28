@@ -89,9 +89,9 @@ func subGateway(ctx context.Context, src controlSource, method, path string, bod
 		}
 		return nil, 502, errors.New("来源未完成添加，请刷新后核对")
 	}
-	raw, err = io.ReadAll(io.LimitReader(resp.Body, (2<<20)+1))
+	raw, err = readConfiguration(resp.Body)
 	var data map[string]any
-	if err != nil || len(raw) > 2<<20 || json.Unmarshal(raw, &data) != nil {
+	if err != nil || json.Unmarshal(raw, &data) != nil {
 		return nil, 502, errors.New("来源返回无效状态，请刷新核对")
 	}
 	return data, 200, nil
@@ -151,12 +151,12 @@ func (s *Service) subChannelOptions(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Service) subImportChannel(w http.ResponseWriter, r *http.Request) {
 	var in subImportInput
-	if !decodeControl(w, r, &in) {
+	if !decodeConfiguration(w, r, &in) {
 		return
 	}
 	owner, _ := s.controlUser(r)
 	publicModels, modelErr := importPublicModels(in.Models, in.ModelMappings)
-	if modelErr != nil || validateModelPositions(publicModels, in.Positions) != nil || in.Position < 1 || in.Position > 1025 || len(in.Revision) > 256 {
+	if modelErr != nil || validateModelPositions(publicModels, in.Positions) != nil || in.Position < 1 || len(in.Revision) > 256 {
 		http.Error(w, "请选择模型和有效位置", 400)
 		return
 	}
@@ -253,7 +253,8 @@ func (s *Service) subImportChannel(w http.ResponseWriter, r *http.Request) {
 		s.control.db.QueryRowContext(ctx, `SELECT routing_key_id FROM console_sub_targets WHERE account_id=$1 AND group_id=$2`, in.AccountID, in.GroupID).Scan(&remoteID)
 		err = call("GET", "/api/v1/keys/"+strconv.FormatInt(remoteID, 10), nil, &routeKey, "")
 	} else {
-		for page := 1; page <= 100; page++ {
+		progress := keyPageProgress{}
+		for page := 1; ; page++ {
 			var listing struct {
 				Items []subRemoteKey `json:"items"`
 				Pages int            `json:"pages"`
@@ -262,17 +263,17 @@ func (s *Service) subImportChannel(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				break
 			}
+			if err = progress.advance(listing.Items); err != nil {
+				break
+			}
 			for _, k := range listing.Items {
 				if k.Name == routeName && k.GroupID == in.GroupID {
 					routeKey = k
 					break
 				}
 			}
-			if routeKey.ID > 0 || len(listing.Items) < 100 || (listing.Pages > 0 && page >= listing.Pages) {
+			if routeKey.ID > 0 || len(listing.Items) == 0 || (listing.Pages == 0 && len(listing.Items) < 100) || (listing.Pages > 0 && page >= listing.Pages) {
 				break
-			}
-			if page == 100 {
-				err = errors.New("业务 key 列表未读取完整")
 			}
 		}
 		if err == nil && routeKey.ID == 0 {

@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"io"
 	"net/http"
 	"strings"
 )
@@ -27,10 +26,10 @@ func (s *Service) channelControls(w http.ResponseWriter, r *http.Request) {
 			Order    []string `json:"order"`
 			Disabled []string `json:"disabled"`
 		}
-		if !decodeControl(w, r, &input) {
+		if !decodeConfiguration(w, r, &input) {
 			return
 		}
-		if len(input.Revision) > 256 || len(input.KeyID) > 256 || len(input.Model) > 512 || len(input.Order) > 1024 || len(input.Disabled) > 1024 || (input.Action != "set" && input.Action != "reset" && input.Action != "reset_all") {
+		if len(input.Revision) > 256 || len(input.KeyID) > 256 || len(input.Model) > 512 || (input.Action != "set" && input.Action != "reset" && input.Action != "reset_all") {
 			http.Error(w, "无效的临时控制参数", 400)
 			return
 		}
@@ -90,8 +89,8 @@ func (s *Service) channelControls(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
-	if err != nil || len(raw) > 1<<20 || !json.Valid(raw) {
+	raw, err := readConfiguration(resp.Body)
+	if err != nil || !json.Valid(raw) {
 		http.Error(w, "来源返回无效状态，请刷新后核对", 502)
 		return
 	}
