@@ -127,7 +127,7 @@ import {
 } from "./ChannelMetrics";
 import { actualCostRange } from "./actualCost";
 import { useScopedChannelSpend } from "./SubChannelSpend";
-import type { SubChannelSpend } from "./SubChannelSpend";
+import { balanceSpend } from "./balanceSpend";
 import { useChannelAccountBalances } from "./ChannelAccountBalances";
 import { balanceBelowThreshold, rankBalanceProviders } from "./balanceFilters";
 import { salePercent } from "./modelPrices";
@@ -1314,6 +1314,8 @@ function Dashboard({
         actual: number | null;
         profit: number | null;
         actualUpperBound: boolean;
+        actualLabel: string;
+        actualExplanation: string;
       }
     >();
     for (const provider of balanceRanks.providers) {
@@ -1349,32 +1351,15 @@ function Dashboard({
         observedAnalyticsCosts.length > 0 && observedAnalyticsCosts.every((value): value is number => value !== undefined)
           ? observedAnalyticsCosts.reduce((sum, value) => sum + value, 0)
           : undefined;
-      const spends = providerRows.map((row) => channelSpend.get(rowId(row)));
-      const spendCosts = spends.map((query) => {
-        const data = query?.data as SubChannelSpend | undefined;
-        if (data?.scope !== "matched_requests") return undefined;
-        if (data.status === "complete" && typeof data.actual_cost_usd === "number" && Number.isFinite(data.actual_cost_usd))
-          return { amount: data.actual_cost_usd, upperBound: false };
-        const matched = (data.matched_attempts || 0) + (data.confirmed_unbilled_attempts || 0);
-        if (matched > 0 && typeof data.matched_cost_usd === "number" && Number.isFinite(data.matched_cost_usd))
-          return { amount: data.matched_cost_usd, upperBound: true };
-        return undefined;
-      });
+      const spend = balanceSpend(providerRows.map(row => channelSpend.get(rowId(row))));
       const balance = balanceMap.get(provider)?.data;
       const fallbackActual =
         !baseConnection.account && actualRange.supported &&
         typeof balance?.actual_cost_usd === "number" && Number.isFinite(balance.actual_cost_usd)
           ? { amount: balance.actual_cost_usd, upperBound: false }
           : undefined;
-      const costs = baseConnection.account ? spendCosts : [];
-      const actual = baseConnection.account
-        ? costs.length === providerRows.length && costs.every(Boolean)
-          ? costs.reduce((sum, item) => sum + item!.amount, 0)
-          : null
-        : analyticsActual ?? fallbackActual?.amount ?? null;
-      const actualUpperBound = baseConnection.account
-        ? costs.some((item) => item?.upperBound) || false
-        : Boolean(fallbackActual?.upperBound);
+      const actual = baseConnection.account ? spend.actual : analyticsActual ?? fallbackActual?.amount ?? null;
+      const actualUpperBound = baseConnection.account ? spend.upperBound : Boolean(fallbackActual?.upperBound);
       const revenue = estimated == null
         ? null
         : providerRows.reduce((sum, row) => {
@@ -1391,6 +1376,8 @@ function Dashboard({
         actual,
         profit: revenue != null && actual != null ? revenue - actual : null,
         actualUpperBound,
+        actualLabel: baseConnection.account ? spend.label : "—",
+        actualExplanation: baseConnection.account ? spend.explanation : "",
       });
     }
     return result;
@@ -2139,12 +2126,12 @@ function Dashboard({
                           </span>
                         </td>
                         <td>
-                          <span className={`mono balance-finance ${finance?.actual == null ? "muted" : ""}`}>
-                            {finance?.actual == null ? "—" : usd(finance.actual)}
+                          <span title={finance?.actualExplanation} className={`mono balance-finance ${finance?.actual == null ? "muted" : ""}`}>
+                            {finance?.actual == null ? finance?.actualLabel || "—" : `${finance.actualUpperBound ? "≥" : ""}${usd(finance.actual)}`}
                           </span>
                         </td>
                         <td>
-                          <span className={`mono balance-finance ${finance?.profit == null ? "muted" : finance.profit < 0 ? "negative" : "profit-positive"}`}>
+                          <span title={finance?.actualExplanation} className={`mono balance-finance ${finance?.profit == null ? "muted" : finance.profit < 0 ? "negative" : "profit-positive"}`}>
                             {finance?.profit == null ? "—" : `${finance.actualUpperBound ? "≤" : ""}¥${finance.profit.toFixed(2)}`}
                           </span>
                         </td>

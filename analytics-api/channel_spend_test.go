@@ -460,3 +460,69 @@ func TestAttributedSpendSelectsReceiptNamespaceFromBoundSite(t *testing.T) {
 		t.Fatal("mixed receipt namespaces", rows, e)
 	}
 }
+
+func TestAttributedSpendBatchesMoreThanFiftyThousandFactsWithoutDroppingOrDoubleCharging(t *testing.T) {
+	s, account, owner := attributionFixture(t)
+	ctx := context.Background()
+	now := time.Now().Truncate(time.Second)
+	const count = 50002
+	facts := make([]Fact, 0, count+3)
+	for i := 0; i < count; i++ {
+		fact := attributedFact(fmt.Sprintf("large-%06d", i), "caller", now.Add(-time.Hour))
+		if i >= count/2 {
+			fact.Model = "second-model"
+			fact.UpstreamModel = "second-model"
+		}
+		facts = append(facts, fact)
+	}
+	// Duplicate claims straddle batch boundaries. Both must remain unassigned.
+	facts[0].BillingRequestIDs = []string{"client:duplicate"}
+	facts[5000].BillingRequestIDs = []string{"client:duplicate"}
+	outside := attributedFact("outside-caller", "another-key", now.Add(-time.Hour))
+	outside.BillingRequestIDs = []string{"client:large-010000"}
+	facts = append(facts, outside)
+	// A matched billing observation with a completion outside the requested range
+	// must not enter either the page count or sums.
+	billing := attributedFact("finished-after-cutoff", "caller", now.Add(-time.Hour))
+	completion := billing
+	completion.Kind = "attempt"
+	completion.EventID = "late-completion"
+	completion.AtMS = now.Add(time.Second).UnixMilli()
+	facts = append(facts, billing, completion)
+	if err := s.engine.Import(ctx, "large-billing-facts", "v1", facts); err != nil {
+		t.Fatal(err)
+	}
+	_, err := s.control.db.Exec(`INSERT INTO console_sub_spend_logs(account_id,key_id,log_id,at_ms,actual_cost,request_id,model) SELECT $1,42,n+1,$2,0.01,'client:large-'||lpad(n::text,6,'0'),$3 FROM generate_series(0,$4::int-1) n`, account, now.UnixMilli(), checkModel, count)
+	if err != nil {
+		t.Fatal(err)
+	}
+	storeAttributedLog(t, s, account, "duplicate", "99", count+10)
+	filter := QueryFilter{SourceID: "source", KeyID: "caller"}
+	from, to := now.Add(-24*time.Hour).Unix(), now.Unix()
+	start := time.Now()
+	rows, err := s.attributedChannelSpend(ctx, owner, filter, from, to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	total, matched, ambiguous := 0, 0, 0
+	amount := 0.0
+	for _, row := range rows {
+		total += row.Total
+		matched += row.Matched
+		ambiguous += row.Ambiguous
+		amount += row.MatchedAmount
+	}
+	if total != count || matched != count-3 || ambiguous != 3 || amount != 499.99 {
+		t.Fatalf("incomplete/multiplied total=%d matched=%d ambiguous=%d amount=%.8f", total, matched, ambiguous, amount)
+	}
+	if len(rows) != 2 {
+		t.Fatal("model groups lost", rows)
+	}
+	t.Logf("facts=%d batches=%d duration=%s", count, (count+billingFactBatchSize-1)/billingFactBatchSize, time.Since(start))
+	// The temp relation must be rolled back and reusable, and model scope isolated.
+	filter.Model = "second-model"
+	rows, err = s.attributedChannelSpend(ctx, owner, filter, from, to)
+	if err != nil || len(rows) != 1 || rows[0].Amount == nil || *rows[0].Amount != 250.01 {
+		t.Fatal("model scoped total", rows, err)
+	}
+}

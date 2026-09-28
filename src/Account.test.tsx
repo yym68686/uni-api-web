@@ -529,3 +529,40 @@ it("shows zero attempts for an idle selected key while shared channels have traf
     expect(within(business()).getAllByRole("cell")[6]).toHaveTextContent(/^7$/),
   );
 });
+
+it("shows 24h balance deductions and profit with inactive models, model filtering and query failures", async () => {
+  saveView(location.origin, "balances");
+  const rows=["active-a","active-b","idle"].map(model=>({source_id:"primary",source_name:"Fugue",provider:"balance-test",model,upstream_model:model,endpoint:"all",stream:null,position:1,eligible:true,reason:"eligible",stats:emptyStats()}));
+  let fail=false;
+  const calls:URL[]=[];
+  vi.stubGlobal("fetch",vi.fn(async(input:string)=>{
+    const url=new URL(input,location.origin);calls.push(url);
+    let body:unknown={data:[],labels:{},unavailable_sources:[]};
+    if(url.pathname.endsWith("/auth/me"))body={enabled:true,authenticated:true,username:"balance-admin"};
+    else if(url.pathname.endsWith("/sources"))body={data:[{id:"primary",name:"Fugue",base:"https://fixture.test",has_storage:true}]};
+    else if(url.pathname.endsWith("/api-keys"))body={can_inspect_all:true,data:[{key_id:"primary::business",source_id:"primary",position:1,prefix:"masked"}]};
+    else if(url.pathname.endsWith("/model-channels"))body={data:rows,snapshot_revision:"1"};
+    else if(url.pathname.endsWith("/analytics"))body={data:rows.map((row,i)=>({...row,stats:i===2?emptyStats():{...emptyStats(),success:1,usage_samples:1,estimated_cost_usd:(i+1)*100,sale_percent:2.5}})),total:{requests:2},from:100,to:url.searchParams.get("range")==="24h"?86500:1000,coverage:"full",generated_at:86500};
+    else if(url.pathname.endsWith("/channel-spend")){
+      if(fail)return new Response("账单核对失败",{status:503});
+      const model=url.searchParams.get("model");
+      body={data:rows.slice(0,2).filter(row=>!model||row.model===model).map((row,i)=>({...row,status:"complete",scope:"matched_requests",actual_cost_usd:model==="active-b"?3:i+2,from:100,to:86500}))};
+    }else if(url.pathname.endsWith("/channel-balances"))body={status:"unsupported"};
+    return Response.json(body);
+  }));
+  const {client}=mount();const user=userEvent.setup();
+  await screen.findByRole("link",{name:"balance-test"});
+  await user.selectOptions(screen.getByLabelText("时间范围筛选"),"24h");
+  const cells=()=>within(screen.getByRole("link",{name:"balance-test"}).closest("tr")!).getAllByRole("cell");
+  await waitFor(()=>expect(cells()[4]).toHaveTextContent("$5.00"));
+  expect(cells()[5]).toHaveTextContent("¥46.75");
+  expect(calls.filter(u=>u.pathname.endsWith("/channel-spend")).at(-1)?.searchParams.get("to")).toBe("86500");
+  await user.selectOptions(screen.getByLabelText("模型筛选"),"active-b");
+  await waitFor(()=>expect(cells()[4]).toHaveTextContent("$3.00"));
+  expect(cells()[5]).toHaveTextContent("¥31.50");
+  fail=true;
+  client.removeQueries({queryKey:["channel-spend"]});
+  await user.selectOptions(screen.getByLabelText("模型筛选"),"active-a");
+  await waitFor(()=>expect(cells()[4]).toHaveTextContent("查询失败"));
+  expect(cells()[5]).toHaveTextContent("—");
+});

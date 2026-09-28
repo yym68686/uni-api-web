@@ -126,6 +126,7 @@ export function useScopedChannelSpend({
     staleTime: 15000,
     retry: false,
     refetchInterval: (query) => {
+      if (query.state.error) return 15000;
       const data = query.state.data?.data || [];
       if (data.some((r) => r.sync_error || r.status === "error")) return 15000;
       // Missing old observations must not mask receipts that are still syncing.
