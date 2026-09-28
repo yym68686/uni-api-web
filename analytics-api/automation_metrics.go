@@ -127,7 +127,7 @@ func (s *Service) automationMetrics(ctx context.Context, t AutomationTask, catal
 	defer tx.Rollback()
 	scope := ` FROM facts WHERE source_id=? AND key_id=? AND model=? AND endpoint=? AND stream=? AND at_ms>=? AND at_ms<=? `
 	args := []any{t.SourceID, t.KeyID, t.Model, p.Endpoint, p.Stream == "true", start.UnixMilli(), now.UnixMilli()}
-	rows, e := tx.QueryContext(ctx, `SELECT provider,upstream_model,max(at_ms),count(*) FILTER(WHERE kind='attempt' AND outcome NOT IN ('cancelled','client_cancelled','hedge_cancelled','skipped')),count(*) FILTER(WHERE kind='attempt' AND outcome IN ('success','completed','incomplete')),coalesce(max(at_ms) FILTER(WHERE kind='attempt' AND outcome NOT IN ('cancelled','client_cancelled','hedge_cancelled','skipped')),0)`+scope+`GROUP BY provider,upstream_model`, args...)
+	rows, e := tx.QueryContext(ctx, `SELECT provider,upstream_model,max(at_ms),count(*) FILTER(WHERE kind='attempt' AND outcome NOT IN ('cancelled','client_cancelled','hedge_cancelled','skipped')),count(*) FILTER(WHERE kind='attempt' AND outcome IN ('success','completed')),coalesce(max(at_ms) FILTER(WHERE kind='attempt' AND outcome NOT IN ('cancelled','client_cancelled','hedge_cancelled','skipped')),0)`+scope+`GROUP BY provider,upstream_model`, args...)
 	if e != nil {
 		return nil, e
 	}

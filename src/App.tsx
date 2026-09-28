@@ -1,3 +1,4 @@
+import { successRateHelp } from "./successRate";
 import {
   lazy,
   Suspense,
@@ -607,8 +608,10 @@ function MetricCard({
   sub,
   icon,
   accent = false,
+  help,
 }: {
   label: string;
+  help?: string;
   value: string;
   sub: string;
   icon: ReactNode;
@@ -617,7 +620,7 @@ function MetricCard({
   return (
     <div className={`metric-card ${accent ? "accent" : ""}`}>
       <div className="metric-card-label">
-        {label}
+        {help ? <Tip text={help}>{label} <CircleHelp size={12} /></Tip> : label}
         {icon}
       </div>
       <div className="metric-card-number">{value}</div>
@@ -896,7 +899,7 @@ function Detail({
                   </div>
                   <div>
                     <strong>{rate(row.stats?.success_rate)}</strong>
-                    <span>成功率</span>
+                    <Tip text={successRateHelp}><span>成功率 <CircleHelp size={12} /></span></Tip>
                   </div>
                 </div>
                 <p className="muted">
@@ -945,7 +948,7 @@ function Guide({ open, onClose }: { open: boolean; onClose: () => void }) {
             {[
               [
                 "渠道尝试",
-                "一次用户请求可能依次尝试多个渠道。成功率 = 成功 ÷（成功 + 失败），跳过和取消不计入分母。",
+                successRateHelp,
               ],
               [
                 "请求前等待",
@@ -1597,6 +1600,7 @@ function Dashboard({
               />
               <MetricCard
                 label="渠道成功率"
+                help={successRateHelp}
                 value={rate(stats.successRate)}
                 sub={`${count(stats.success)} 成功 / ${count(stats.completed)} 次已完成尝试`}
                 icon={<CheckCheck size={17} />}

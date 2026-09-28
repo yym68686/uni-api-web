@@ -277,7 +277,7 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 			s.Success = 0
 			s.Failed = 0
 			switch outcome {
-			case "success", "completed", "incomplete":
+			case "success", "completed":
 				s.Success = n
 			default:
 				s.Failed = n
@@ -306,7 +306,7 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 		}
 		if kind == "attempt" {
 			switch outcome {
-			case "success", "completed", "incomplete":
+			case "success", "completed":
 				s.Attempts = n
 				s.Success = n
 			case "skipped":
@@ -461,8 +461,8 @@ func (e *Engine) attachTimeseries(ctx context.Context, result *QueryResult, f Qu
 	_, offset := time.UnixMilli(endMS).In(e.Location).Zone()
 	bucketSQL := fmt.Sprintf("(floor((period_ms+%d)::DOUBLE/%d)*%d-%d)::BIGINT", int64(offset)*1000, bucket, bucket, int64(offset)*1000)
 	rows, err := e.DB.QueryContext(ctx, `SELECT `+bucketSQL+` AS bucket,
-      coalesce(sum(CASE WHEN kind='attempt' AND outcome IN ('success','completed','incomplete') THEN n ELSE 0 END),0)::BIGINT,
-      coalesce(sum(CASE WHEN kind='attempt' AND outcome NOT IN ('success','completed','incomplete','cancelled','client_cancelled','hedge_cancelled','skipped') THEN n ELSE 0 END),0)::BIGINT,
+      coalesce(sum(CASE WHEN kind='attempt' AND outcome IN ('success','completed') THEN n ELSE 0 END),0)::BIGINT,
+      coalesce(sum(CASE WHEN kind='attempt' AND outcome NOT IN ('success','completed','cancelled','client_cancelled','hedge_cancelled','skipped') THEN n ELSE 0 END),0)::BIGINT,
       coalesce(sum(CASE WHEN kind='request' THEN input_tokens ELSE 0 END),0)::BIGINT,
       coalesce(sum(CASE WHEN kind='request' THEN cache_read_tokens ELSE 0 END),0)::BIGINT,
       coalesce(sum(CASE WHEN kind='request' THEN cache_samples ELSE 0 END),0)::BIGINT,

@@ -1,3 +1,4 @@
+import { successRateHelp } from "./successRate";
 import { BalanceAmount } from "./BalanceAmount";
 import { LatencyBadge } from "./LatencyBadge";
 import { CircleHelp } from "lucide-react";
@@ -182,7 +183,7 @@ export function ChannelMetricHeaders({
         </Tip>
       </th>
       <th>
-        <Tip text="成功与失败的渠道尝试分别计数，重试不是新的用户请求。">
+        <Tip text={successRateHelp}>
           成功率 <CircleHelp size={12} />
         </Tip>
       </th>
@@ -239,21 +240,23 @@ export function ChannelMetricCells({
       </td>
       <td className="mono">{inflight == null ? "—" : inflight}</td>
       <td>
-        <div className="success-cell">
-          <span
-            className={`mono ${success == null ? "muted" : success < 0.5 ? "negative" : ""}`}
-          >
-            {rate(success)}
-          </span>
-          <span className="rate-track">
-            <i
-              className={success != null && success < 0.5 ? "low" : ""}
-              style={{
-                width: `${(success || 0) * 100}%`,
-              }}
-            />
-          </span>
-        </div>
+        <Tip text={successRateHelp}>
+          <div className="success-cell">
+            <span
+              className={`mono ${success == null ? "muted" : success < 0.5 ? "negative" : ""}`}
+            >
+              {rate(success)}
+            </span>
+            <span className="rate-track">
+              <i
+                className={success != null && success < 0.5 ? "low" : ""}
+                style={{
+                  width: `${(success || 0) * 100}%`,
+                }}
+              />
+            </span>
+          </div>
+        </Tip>
       </td>
       <td className="mono">
         {metricsUnavailable

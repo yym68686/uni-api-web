@@ -1,3 +1,4 @@
+import { successRateHelp } from "./successRate";
 import { useMemo, useState } from "react";
 import { AnalyticsInitializingError } from "./api";
 import { ranges } from "./analytics";
@@ -246,9 +247,8 @@ export function ChannelDetailTrends(props: ChannelTimeseriesProps) {
             percentage
           />
           <p className="muted">
-            首字延迟沿用列表口径：请求发起至响应创建，p50 / p95
-            为直方图估计。成功率 = 成功 ÷（成功 +
-            失败）；取消和跳过不计入分母，无样本区间留空。
+            首字延迟沿用列表口径：请求发起至响应创建，p50 / p95 为直方图估计。
+            {successRateHelp} 无样本区间留空。
           </p>
         </>
       )}
