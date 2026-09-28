@@ -1,4 +1,4 @@
-import { successRateHelp } from "./successRate";
+import { FailureCounts } from "./FailureCounts";
 import {
   lazy,
   Suspense,
@@ -611,7 +611,7 @@ function MetricCard({
   help,
 }: {
   label: string;
-  help?: string;
+  help?: ReactNode;
   value: string;
   sub: string;
   icon: ReactNode;
@@ -899,12 +899,9 @@ function Detail({
                   </div>
                   <div>
                     <strong>{rate(row.stats?.success_rate)}</strong>
-                    <Tip text={successRateHelp}><span>成功率 <CircleHelp size={12} /></span></Tip>
+                    <Tip text={<FailureCounts channels={[row]} summary />}><span>成功率 <CircleHelp size={12} /></span></Tip>
                   </div>
                 </div>
-                <p className="muted">
-                  成功率分母为已成功或失败的上游尝试，不等同于用户请求数。
-                </p>
               </div>
               <div className="detail-section">
                 <h3>上游余额 / 额度</h3>
@@ -946,10 +943,6 @@ function Guide({ open, onClose }: { open: boolean; onClose: () => void }) {
           </Dialog.Description>
           <div className="guide-items">
             {[
-              [
-                "渠道尝试",
-                successRateHelp,
-              ],
               [
                 "请求前等待",
                 "从请求进入 uni-api，到发起当前渠道 HTTP 请求前。包含请求体读取、排队和前序重试；p50 反映窗口内的典型等待。",
@@ -1600,7 +1593,7 @@ function Dashboard({
               />
               <MetricCard
                 label="渠道成功率"
-                help={successRateHelp}
+                help={<FailureCounts channels={rows} summary />}
                 value={rate(stats.successRate)}
                 sub={`${count(stats.success)} 成功 / ${count(stats.completed)} 次已完成尝试`}
                 icon={<CheckCheck size={17} />}
@@ -1980,7 +1973,7 @@ function Dashboard({
                           </th>
                         )}
                         {checkingChannels && <th>检测操作</th>}
-                        <ChannelMetricHeaders keySelected={!!keyId} />
+                        <ChannelMetricHeaders keySelected={!!keyId} channels={rows} />
                         {adjustingChannels && (
                           <th>
                             <Tip text="修改作用于本行来源、当前选择的 API key 和模型（未选择则为全部），对所有端点和流式状态生效。无到期时间；来源设置开启“保留临时配置”时，重启后自动恢复已应用的更改。">

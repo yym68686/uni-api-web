@@ -1,4 +1,4 @@
-import { successRateHelp } from "./successRate";
+import { FailureCounts } from "./FailureCounts";
 import { BalanceAmount } from "./BalanceAmount";
 import { LatencyBadge } from "./LatencyBadge";
 import { CircleHelp } from "lucide-react";
@@ -171,8 +171,10 @@ export function Status({ row }: { row: Channel }) {
 }
 export function ChannelMetricHeaders({
   keySelected = false,
+  channels = [],
 }: {
   keySelected?: boolean;
+  channels?: Channel[];
 }) {
   return (
     <>
@@ -183,7 +185,7 @@ export function ChannelMetricHeaders({
         </Tip>
       </th>
       <th>
-        <Tip text={successRateHelp}>
+        <Tip text={<FailureCounts channels={channels} summary />}>
           成功率 <CircleHelp size={12} />
         </Tip>
       </th>
@@ -240,7 +242,7 @@ export function ChannelMetricCells({
       </td>
       <td className="mono">{inflight == null ? "—" : inflight}</td>
       <td>
-        <Tip text={successRateHelp}>
+        <Tip text={<FailureCounts channels={[row]} summary />}>
           <div className="success-cell">
             <span
               className={`mono ${success == null ? "muted" : success < 0.5 ? "negative" : ""}`}

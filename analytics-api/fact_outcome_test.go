@@ -37,6 +37,9 @@ func TestResponsesCompletionEvidenceControlsSuccessMetrics(t *testing.T) {
 			for i, c := range cases {
 				for _, kind := range []string{"attempt", "request"} {
 					f := Fact{Schema: 1, SourceID: "test", EventID: fmt.Sprintf("%s-%d", kind, i), Kind: kind, AtMS: at.UnixMilli(), KeyID: "key", Provider: "p", Model: "m", UpstreamModel: "m", Endpoint: "/v1/responses", Stream: true, Status: 200, Outcome: c.outcome, TerminalKind: c.terminal, ResponseCompleted: c.completed}
+					if i == 1 {
+						f.FailureReason = "responses_max_output_tokens"
+					}
 					if i == 2 {
 						f.FirstOutputMS = &text
 						f.FirstTextMS = &text
@@ -68,6 +71,12 @@ func TestResponsesCompletionEvidenceControlsSuccessMetrics(t *testing.T) {
 			}
 			if len(q.Data[0].Points) != 1 {
 				t.Fatal(q.Data[0].Points)
+			}
+			reasons := s["failure_reasons"].(map[string]any)
+			for _, key := range []string{"responses_max_output_tokens", "responses_incomplete", "missing_response_completed", "protocol_error", "unknown"} {
+				if reasons[key] != float64(1) {
+					t.Fatalf("failure counts: %+v", reasons)
+				}
 			}
 			point := q.Data[0].Points[0]
 			if point["success"] != int64(2) || point["failed"] != int64(5) || point["success_rate"] != 2.0/7.0 {

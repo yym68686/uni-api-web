@@ -5,6 +5,7 @@ import "time"
 // Facts never include API secrets, prompts, response text or client addresses.
 // Millisecond timestamps are UTC. Token input includes cache read/write tokens.
 type Fact struct {
+	FailureReason       string   `json:"failure_reason,omitempty"`
 	TerminalKind        string   `json:"terminal_kind,omitempty"`
 	ResponseCompleted   *bool    `json:"response_completed,omitempty"`
 	Schema              int      `json:"schema"`

@@ -219,7 +219,11 @@ func (e *Engine) ImportBatch(ctx context.Context, objects []FactObject) error {
 	var factCount int
 	for _, obj := range pending {
 		for _, fact := range obj.Facts {
+			reason := factFailureReason(fact)
 			fact.Outcome = factMetricOutcome(fact)
+			if reason != "" {
+				fact.Outcome = "failed/" + reason
+			}
 			if fact.Kind == "billing" {
 				fact.UpstreamBase = subBindingSite(fact.UpstreamBase)
 			}

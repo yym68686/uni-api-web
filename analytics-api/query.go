@@ -17,37 +17,44 @@ type QueryFilter struct {
 	To                                                                       int64
 }
 type Summary struct {
-	Attempts                  int64    `json:"attempts"`
-	Requests                  int64    `json:"requests"`
-	Success                   int64    `json:"success"`
-	Failed                    int64    `json:"failed"`
-	Cancelled                 int64    `json:"cancelled"`
-	Skipped                   int64    `json:"skipped"`
-	Input                     int64    `json:"input_tokens"`
-	Output                    int64    `json:"output_tokens"`
-	CacheRead                 int64    `json:"cache_read_tokens"`
-	CacheWrite                int64    `json:"cache_write_tokens"`
-	CacheWrite1h              int64    `json:"cache_write_1h_tokens"`
-	UsageSamples              int64    `json:"usage_samples"`
-	CacheSamples              int64    `json:"cache_samples"`
-	KnownEstimatedUSD         float64  `json:"known_estimated_usd"`
-	PricedSamples             int64    `json:"priced_samples"`
-	ActualUSD                 float64  `json:"actual_cost_usd"`
-	ActualSamples             int64    `json:"actual_cost_samples"`
-	FirstBins                 []int64  `json:"-"`
-	DispatchBins              []int64  `json:"-"`
-	FirstCount, DispatchCount int64    `json:"-"`
-	FirstSum, DispatchSum     float64  `json:"-"`
-	LastMS                    int64    `json:"-"`
-	LastFirst, LastDispatch   *float64 `json:"-"`
-	CreatedBins, TextBins     []int64  `json:"-"`
-	CreatedCount, TextCount   int64    `json:"-"`
-	CreatedSum, TextSum       float64  `json:"-"`
-	LastCreated, LastText     *float64 `json:"-"`
-	LastCreatedMS, LastTextMS int64    `json:"-"`
+	FailureReasons            map[string]int64 `json:"failure_reasons"`
+	Attempts                  int64            `json:"attempts"`
+	Requests                  int64            `json:"requests"`
+	Success                   int64            `json:"success"`
+	Failed                    int64            `json:"failed"`
+	Cancelled                 int64            `json:"cancelled"`
+	Skipped                   int64            `json:"skipped"`
+	Input                     int64            `json:"input_tokens"`
+	Output                    int64            `json:"output_tokens"`
+	CacheRead                 int64            `json:"cache_read_tokens"`
+	CacheWrite                int64            `json:"cache_write_tokens"`
+	CacheWrite1h              int64            `json:"cache_write_1h_tokens"`
+	UsageSamples              int64            `json:"usage_samples"`
+	CacheSamples              int64            `json:"cache_samples"`
+	KnownEstimatedUSD         float64          `json:"known_estimated_usd"`
+	PricedSamples             int64            `json:"priced_samples"`
+	ActualUSD                 float64          `json:"actual_cost_usd"`
+	ActualSamples             int64            `json:"actual_cost_samples"`
+	FirstBins                 []int64          `json:"-"`
+	DispatchBins              []int64          `json:"-"`
+	FirstCount, DispatchCount int64            `json:"-"`
+	FirstSum, DispatchSum     float64          `json:"-"`
+	LastMS                    int64            `json:"-"`
+	LastFirst, LastDispatch   *float64         `json:"-"`
+	CreatedBins, TextBins     []int64          `json:"-"`
+	CreatedCount, TextCount   int64            `json:"-"`
+	CreatedSum, TextSum       float64          `json:"-"`
+	LastCreated, LastText     *float64         `json:"-"`
+	LastCreatedMS, LastTextMS int64            `json:"-"`
 }
 
 func (s *Summary) merge(x Summary) {
+	if len(x.FailureReasons) > 0 && s.FailureReasons == nil {
+		s.FailureReasons = map[string]int64{}
+	}
+	for reason, n := range x.FailureReasons {
+		s.FailureReasons[reason] += n
+	}
 	s.Attempts += x.Attempts
 	s.Requests += x.Requests
 	s.Success += x.Success
@@ -317,6 +324,7 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 			default:
 				s.Attempts = n
 				s.Failed = n
+				s.FailureReasons = map[string]int64{failureReasonKey(outcome): n}
 			}
 		}
 		channels[key].merge(s)

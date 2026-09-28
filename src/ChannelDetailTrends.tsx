@@ -1,4 +1,4 @@
-import { successRateHelp } from "./successRate";
+import { FailureCounts } from "./FailureCounts";
 import { useMemo, useState } from "react";
 import { AnalyticsInitializingError } from "./api";
 import { ranges } from "./analytics";
@@ -246,10 +246,7 @@ export function ChannelDetailTrends(props: ChannelTimeseriesProps) {
             bucket={query.data?.bucket_seconds || 60}
             percentage
           />
-          <p className="muted">
-            首字延迟沿用列表口径：请求发起至响应创建，p50 / p95 为直方图估计。
-            {successRateHelp} 无样本区间留空。
-          </p>
+          <FailureCounts channels={query.data?.data || []} />
         </>
       )}
     </section>
