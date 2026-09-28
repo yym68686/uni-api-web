@@ -246,7 +246,6 @@ export function ConfiguredChannelDialog({
   const toolDefaultsPending=toolChecks.isPending || accounts.isPending;
   const toolDefaultsError=toolChecks.isError || accounts.isError;
   const initializedEdit = useRef("");
-  const toolTarget={tool_use:configuredToolUseResult(item,accounts.data?.data||[],toolChecks.data?.data||[])};
   const [selectedOverride, setSelected] = useState<string[]|null>(null);
   const [aliases, setAliases] = useState<ModelAlias[]>([]);
   const modelOptions = [
@@ -255,6 +254,7 @@ export function ConfiguredChannelDialog({
       ...(toolChecks.data?.data||[]).filter(c=>c.source_id===item.source_id&&c.provider===item.provider&&(c.kind==="model"||c.kind==="availability")).map(c=>c.model)]),
   ];
   const allChecks=configuredModelChecks(item,accounts.data?.data||[],toolChecks.data?.data||[],modelOptions);
+  const toolTarget={tool_use:configuredToolUseResult(item,accounts.data?.data||[],toolChecks.data?.data||[],modelOptions)};
   const canSelectModel=(model:string)=>!toolDefaultsPending&&!toolDefaultsError&&modelIsAvailable(allChecks.find(c=>c.model===model));
   const selected=selectedOverride ?? item.models.filter(model=>canSelectModel(model)&&!toolUseFailed(toolTarget,model));
   const mapping = aliasMappings(aliases, selected);

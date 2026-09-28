@@ -123,3 +123,25 @@ it("native import reads only the selected source and current credentials", () =>
     ).models,
   ).toHaveLength(0);
 });
+
+it("resolves site tool evidence for every editor candidate, including new models and aliases", () => {
+  const member = {
+    source_id: "do", provider: "xrelayai-0.15", account_id: "site", group_id: 5,
+    models: ["gpt-5.5"], model_mappings: { "sol-alias": "gpt-6-sol" },
+  } as unknown as ManagedChannel;
+  const bound = target({ group_id: 5, tool_use: {
+    status: "unsupported", checked_at: 10, attempts: [], models: [
+      { model: "gpt-5.5", state: "done", result: { status: "supported", checked_at: 10, attempts: [] } },
+      { model: "gpt-6-sol", state: "done", result: { status: "unsupported", checked_at: 10, attempts: [] } },
+      { model: "gpt-6-astra", state: "done", result: { status: "error", checked_at: 10, attempts: [] } },
+    ],
+  }});
+  const accounts = [{ id: "site", targets: [bound] }] as import("./Sub2apiChecks").SubAccount[];
+  const tool_use = configuredToolUseResult(member, accounts, [], ["gpt-5.5", "gpt-6-sol", "sol-alias", "gpt-6-astra", "gpt-6-luna"]);
+  expect(modelToolUse({tool_use}, "gpt-6-sol")?.status).toBe("unsupported");
+  expect(modelToolUse({tool_use}, "sol-alias")?.status).toBe("unsupported");
+  expect(modelToolUse({tool_use}, "gpt-6-astra")?.status).toBe("error");
+  expect(toolUseFailed({tool_use}, "gpt-5.5")).toBe(false);
+  expect(modelToolUse({tool_use}, "gpt-6-luna")).toBeUndefined();
+  expect(configuredToolUseResult(member, accounts, []).models?.map(m=>m.model)).toEqual(["gpt-5.5"]);
+});

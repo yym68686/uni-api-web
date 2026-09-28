@@ -728,3 +728,35 @@ it("hydrates binding-only model choices from the channel inventory",async()=>{
  expect(screen.getByRole('checkbox',{name:'custom-choice'})).toBeDisabled();
  expect(screen.queryByLabelText('重命名 1 对外模型名')).not.toBeInTheDocument();
 });
+
+it("shows bound site Tool use failures for candidates absent from the native channel definition", async () => {
+  const item = {
+    kind: "configured", source_id: "do", source_name: "DigitalOcean",
+    provider: "xrelayai-0.15", name: "xrelayai-0.15", models: ["gpt-5.5"],
+    account_id: "site", group_id: 5, account_ids: ["site"], engine: "gpt",
+    binding_status: "matched", bound_keys: [{ account_id: "site", group_id: 5, remote_key_id: 596 }],
+  } as ManagedChannel;
+  const models = ["gpt-5.5", "gpt-6-sol"].map(model => ({ model, state: "done", message: "", result: { model, checked_at: 10, availability: { status: "success" } } }));
+  const accounts = [{ id: "site", name: "xrelayai", targets: [{ group_id: 5, models, tool_use: {
+    status: "unsupported", checked_at: 10, attempts: [], models: [
+      { model: "gpt-5.5", state: "done", result: { status: "supported", checked_at: 10, attempts: [] } },
+      { model: "gpt-6-sol", state: "done", result: { status: "unsupported", checked_at: 10, attempts: [] } },
+    ],
+  } }] }];
+  const rows = [{ provider: item.provider, model: "gpt-5.5", upstream_model: "gpt-5.5", api_key_id: "key2", key_position: 2, key_prefix: "masked", position: 1 }];
+  vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+    expect(init?.method || "GET").toBe("GET");
+    if (input.includes("channel-options")) return Response.json({ revision: "r1", keys: [{ key_id: "key2", position: 2, prefix: "masked" }], channels: rows });
+    return Response.json({ data: input.endsWith("/sub2api/accounts") ? accounts : input.endsWith("/channel-management") ? [item] : input.endsWith("/channel-routes") ? rows : [], unavailable_keys: [], unavailable_sources: [] });
+  }));
+  render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><ConfiguredChannelDialog item={item} initialEdit={rows} close={()=>{}}/></QueryClientProvider>);
+  await waitFor(() => expect(screen.getByRole("checkbox", {name:"gpt-6-sol"})).toBeEnabled());
+  expect(screen.getByRole("checkbox", {name:"gpt-5.5"})).toBeChecked();
+  const sol = screen.getByRole("checkbox", {name:"gpt-6-sol"});
+  expect(sol).not.toBeChecked();
+  expect(sol.closest("label")).toHaveTextContent("Tool use · 不支持工具调用");
+  expect(screen.getByRole("checkbox", {name:"gpt-5.5"}).closest("label")).not.toHaveTextContent("不支持工具调用");
+  await userEvent.setup().click(sol);
+  expect(sol).toBeChecked();
+  expect(sol.closest("label")).toHaveTextContent("Tool use · 不支持工具调用");
+});

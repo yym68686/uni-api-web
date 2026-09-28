@@ -65,14 +65,16 @@ export interface ConfiguredCheck {
 
 // Import defaults use the selected source and the exact public-to-upstream
 // mapping, never the green summary of a different model/source.
-export function configuredToolUseResult(member:ManagedChannel,accounts:SubAccount[],checks:ConfiguredCheck[]):ToolUseResult {
+export function configuredToolUseResult(member:ManagedChannel,accounts:SubAccount[],checks:ConfiguredCheck[],models:string[]=member.models):ToolUseResult {
   const bound=accounts.find(a=>a.id===member.account_id)?.targets?.find(t=>t.group_id===member.group_id);
   const native=checks.filter(c=>c.kind==="tool-use" && c.source_id===member.source_id && c.provider===member.provider &&
     (!c.fingerprint || !member.probe_fingerprint || c.fingerprint===member.probe_fingerprint));
   const dispatcher=native.find(c=>!c.model);
   const legacy=toolUseModels(dispatcher?.result as ToolUseResult|undefined);
   const entries=new Map<string,ToolUseModel>();
-  for(const name of member.models){
+  // Editors also show tested models that have not been saved to this provider.
+  // Their site evidence must be resolved just like existing model mappings.
+  for(const name of models){
     const saved=toolUseModels(bound?.tool_use).find(m=>m.model===(member.model_mappings?.[name]||name));
     if(saved)entries.set(name,{...saved,model:name});
   }
