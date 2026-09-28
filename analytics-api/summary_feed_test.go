@@ -16,11 +16,11 @@ import (
 func TestSummaryPreservesListEvidenceWithoutDetailedReplies(t *testing.T) {
 	price := 2.5
 	tokens := int64(100)
-	probe := subProbe{Status: "success", Text: strings.Repeat("private-reply", 5000), ModelMatch: "match", TTFT: &tokens, Usage: &subUsage{Status: "matched", InputPrice: &price, OutputPrice: &price, InputTokens: &tokens, OutputTokens: &tokens, ActualCost: &price}}
+	probe := subProbe{ID: "unique-probe-identifier", Status: "success", Text: strings.Repeat("private-reply", 5000), ModelMatch: "match", TTFT: &tokens, Usage: &subUsage{Status: "matched", InputPrice: &price, OutputPrice: &price, InputTokens: &tokens, OutputTokens: &tokens, ActualCost: &price}}
 	input := subTarget{GroupID: 1, Models: []subModelResult{{Model: "m", State: "done", Result: &subResult{Model: "m", CheckedAt: 10, Availability: probe, Quality: probe, Verdict: "pass"}}}, ToolUse: &subCapabilityResult{Status: "supported", Models: []subToolUseModel{{Model: "m", State: "done", Result: &subCapabilityResult{Status: "supported", Attempts: []subProbe{probe}}}}}}
 	before := mustJSON(input)
 	compact := mustJSON(compactSummary(input))
-	if strings.Contains(compact, "private-reply") || len(compact) >= len(before)/10 {
+	if strings.Contains(compact, "private-reply") || strings.Contains(compact, "unique-probe-identifier") || len(compact) >= len(before)/10 {
 		t.Fatal("verbose body remained in list")
 	}
 	var output subTarget
