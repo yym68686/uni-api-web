@@ -226,3 +226,81 @@ func TestConfiguredSpendUsesActualExistingKeyAndIncludesPreConsoleHistory(t *tes
 		t.Fatal(w.Code, w.Body.String())
 	}
 }
+
+func TestConfiguredCopiesUseVerifiedAccountRateInChannelLabels(t *testing.T) {
+	s, a, src := bindingFixture(t, "https://hub.ccttt99.test")
+	ctx := context.Background()
+	if _, err := s.control.db.Exec(`UPDATE console_sub_accounts SET name='ccttt99' WHERE id=$1`, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, group := range []int{7, 8} {
+		if _, err := s.control.db.Exec(`INSERT INTO console_sub_targets(account_id,group_id,name,platform,billing) VALUES($1,$2,'stable','openai',$3) ON CONFLICT(account_id,group_id) DO UPDATE SET billing=excluded.billing`, a.ID, group, fmt.Sprintf(`{"rate":%v}`, map[int]float64{7: .08, 8: .9}[group])); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.control.db.Exec(`INSERT INTO console_sub_key_index(account_id,key_hash,remote_key_id,group_id) VALUES($1,$2,$3,$4)`, a.ID, tokenHash(fmt.Sprintf("key-%d", group)), group+100, group); err != nil {
+			t.Fatal(err)
+		}
+	}
+	copyName := configuredImportName("ccttt990085", "caller")
+	mixedName := configuredImportName("mixed", "caller")
+	if err := s.saveConfiguredInventory(ctx, src, []configuredProvider{
+		{Provider: copyName, Base: a.Base, API: "key-7"},
+		{Provider: "my-custom-name", Base: a.Base, API: "key-7"},
+		{Provider: mixedName, Base: a.Base, API: []any{"key-7", "key-8"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	copy := assertConfiguredBinding(t, s, a, src.ID, copyName, "matched")
+	if copy.Name != "ccttt99-0.08" || copy.Provider != copyName || copy.GroupID != 7 {
+		t.Fatal("incorrect copied label or routing identity", copy)
+	}
+	if got := assertConfiguredBinding(t, s, a, src.ID, "my-custom-name", "matched"); got.Name != "my-custom-name" {
+		t.Fatal("custom label overwritten", got)
+	}
+	if got := assertConfiguredBinding(t, s, a, src.ID, mixedName, "matched"); got.Name != mixedName {
+		t.Fatal("mixed group assigned one group's rate", got)
+	}
+	foreign := a
+	foreign.Owner = "unrelated-owner"
+	if got := assertConfiguredBinding(t, s, foreign, src.ID, copyName, "no_account"); got.Name != copyName {
+		t.Fatal("foreign account label exposed", got)
+	}
+	// The observation/balance pages use the labels dictionary, not Data[].Name.
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" {
+			t.Error("display lookup attempted a write")
+		}
+		writeJSON(w, 200, map[string]any{"data": []any{}, "temporary_channels": []any{}, "rules": []any{}})
+	}))
+	defer gateway.Close()
+	src.Base = gateway.URL
+	if _, err := s.control.saveSource(ctx, src, false); err != nil {
+		t.Fatal(err)
+	}
+	token, _ := s.control.newSession(ctx, a.Owner)
+	get := func() map[string]map[string]string {
+		r := httptest.NewRequest("GET", "/v1/sub2api/channels", nil)
+		r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		if w.Code != 200 {
+			t.Fatal(w.Code, w.Body.String())
+		}
+		var result struct {
+			Labels map[string]map[string]string `json:"labels"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		return result.Labels
+	}
+	if got := get()[src.ID][copyName]; got != "ccttt99-0.08" {
+		t.Fatal("copy missing from display labels", got)
+	}
+	if _, err := s.control.db.Exec(`UPDATE console_sub_targets SET billing='{}' WHERE account_id=$1 AND group_id=7`, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := get()[src.ID][copyName]; got != "ccttt99-未知倍率" {
+		t.Fatal("invented rate for unknown billing", got)
+	}
+}

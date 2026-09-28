@@ -62,6 +62,16 @@ func decodeMap(value any, out any) error {
 	}
 	return json.Unmarshal(raw, out)
 }
+
+func subChannelDisplayName(account string, billing []byte) string {
+	var b subBilling
+	rate := "未知倍率"
+	if json.Unmarshal(billing, &b) == nil && b.Rate != nil {
+		rate = strconv.FormatFloat(*b.Rate, 'f', -1, 64)
+	}
+	return account + "-" + rate
+}
+
 func (s *controlStore) subChannelRefs(ctx context.Context, owner string) ([]subChannelRef, error) {
 	rows, e := s.db.QueryContext(ctx, `SELECT a.id,t.group_id,a.name,t.billing,a.base FROM console_sub_accounts a JOIN console_sub_targets t ON t.account_id=a.id WHERE a.owner=$1 ORDER BY a.created_at,t.group_id`, owner)
 	if e != nil {
@@ -75,12 +85,7 @@ func (s *controlStore) subChannelRefs(ctx context.Context, owner string) ([]subC
 		if e = rows.Scan(&ref.Account, &ref.Group, &ref.Name, &billing, &ref.Base); e != nil {
 			return nil, e
 		}
-		var b subBilling
-		rate := "未知倍率"
-		if json.Unmarshal(billing, &b) == nil && b.Rate != nil {
-			rate = strconv.FormatFloat(*b.Rate, 'f', -1, 64)
-		}
-		ref.Name += "-" + rate
+		ref.Name = subChannelDisplayName(ref.Name, billing)
 		refs = append(refs, ref)
 	}
 	return refs, rows.Err()
@@ -239,6 +244,12 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 	for _, c := range configured {
 		if !seen[c.SourceID+"\n"+c.Provider] {
 			data = append(data, c)
+			if c.Name != c.Provider {
+				if labels[c.SourceID] == nil {
+					labels[c.SourceID] = map[string]string{}
+				}
+				labels[c.SourceID][c.Provider] = c.Name
+			}
 		}
 	}
 	sort.Slice(data, func(i, j int) bool {

@@ -345,18 +345,21 @@ func (s *Service) configuredBindings(ctx context.Context, owner string) ([]subIn
 			bySite[subBindingSite(a.Base)] = append(bySite[subBindingSite(a.Base)], a)
 		}
 	}
-	rows, err := s.control.db.QueryContext(ctx, `SELECT i.account_id,i.key_hash,i.remote_key_id,i.group_id FROM console_sub_key_index i JOIN console_sub_accounts a ON a.id=i.account_id WHERE a.owner=$1`, owner)
+	rows, err := s.control.db.QueryContext(ctx, `SELECT i.account_id,i.key_hash,i.remote_key_id,i.group_id,t.billing FROM console_sub_key_index i JOIN console_sub_accounts a ON a.id=i.account_id LEFT JOIN console_sub_targets t ON t.account_id=i.account_id AND t.group_id=i.group_id WHERE a.owner=$1`, owner)
 	if err != nil {
 		return nil, err
 	}
 	index := map[string][]subBoundKey{}
+	groupNames := map[string]string{}
 	for rows.Next() {
 		var account, hash string
 		var key, group int64
-		if err = rows.Scan(&account, &hash, &key, &group); err != nil {
+		var billing []byte
+		if err = rows.Scan(&account, &hash, &key, &group, &billing); err != nil {
 			break
 		}
 		a := byID[account]
+		groupNames[qualityGroupID(account, group)] = subChannelDisplayName(a.Name, billing)
 		lookup := subBindingSite(a.Base) + "\n" + hash
 		index[lookup] = append(index[lookup], subBoundKey{account, a.Name, a.Base, group, key})
 	}
@@ -416,6 +419,11 @@ func (s *Service) configuredBindings(ctx context.Context, owner string) ([]subIn
 			if one {
 				item.AccountID = first.AccountID
 				item.GroupID = first.GroupID
+				// Generated IDs stay stable for routing; only their public label
+				// inherits the verified account/group. Preserve user-named channels.
+				if strings.HasPrefix(item.Provider, "sub2api-copy-") {
+					item.Name = groupNames[qualityGroupID(first.AccountID, first.GroupID)]
+				}
 			}
 		}
 		out = append(out, item)
