@@ -110,6 +110,60 @@ func TestRequestTraceHTTPRequiresAuthAndValidID(t *testing.T) {
 		if w.Code != test.want {
 			t.Fatalf("%+v %d %s", test, w.Code, w.Body.String())
 		}
+		if w.Code == http.StatusOK && !strings.Contains(w.Header().Get("Server-Timing"), "lookup;dur=") {
+			t.Fatal("missing trace lookup timing")
+		}
+	}
+}
+
+func TestRequestTraceScopesSharedIDsAndExpandsTraceAliases(t *testing.T) {
+	e := stateTestEngine(t)
+	ctx := context.Background()
+	// The same search string may be a request ID in one instance and a trace
+	// alias in another. Expand the alias to its complete request, not only the
+	// matching event; never cross an instance or allowed-source boundary.
+	facts := []Fact{
+		{Schema: 1, EventID: "a1", Kind: "dispatch", SourceID: "one", InstanceID: "a", RequestID: "shared", TraceID: "shared", AtMS: 1000},
+		{Schema: 1, EventID: "a2", Kind: "request", SourceID: "one", InstanceID: "a", RequestID: "shared", AtMS: 2000},
+		{Schema: 1, EventID: "b1", Kind: "dispatch", SourceID: "one", InstanceID: "b", RequestID: "actual", AtMS: 1000},
+		{Schema: 1, EventID: "b2", Kind: "request", SourceID: "one", InstanceID: "b", RequestID: "actual", TraceID: "shared", AtMS: 2000},
+		{Schema: 1, EventID: "private", Kind: "request", SourceID: "two", InstanceID: "b", RequestID: "shared", AtMS: 2000},
+		{Schema: 1, EventID: "legacy", Kind: "request", SourceID: "one", RequestID: "shared", AtMS: 2000},
+	}
+	if err := e.Import(ctx, "shared-ids", "v1", facts); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.DB.Exec("UPDATE facts SET instance_id=NULL WHERE event_id='legacy'"); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name, source string
+		instance     []string
+		runs, events int
+	}{
+		{"all owned instances", "", nil, 3, 5},
+		{"matching request", "one", []string{"a"}, 1, 2},
+		{"alias expansion", "one", []string{"b"}, 1, 2},
+		{"legacy instance", "one", []string{""}, 1, 1},
+		{"unknown instance", "one", []string{"missing"}, 0, 0},
+		{"disallowed source", "two", nil, 0, 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := e.RequestTrace(ctx, "shared", []string{"one"}, test.source, test.instance...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			count := 0
+			for _, run := range result.Data {
+				count += len(run.Events)
+				if run.Ambiguous || run.SourceID != "one" {
+					t.Fatal("duplicate events or wrong scope", run)
+				}
+			}
+			if len(result.Data) != test.runs || count != test.events {
+				t.Fatalf("runs=%d events=%d; want %d/%d", len(result.Data), count, test.runs, test.events)
+			}
+		})
 	}
 }
 

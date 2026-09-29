@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -99,14 +101,73 @@ func traceDetails(raw string) map[string]any {
 	return out
 }
 
-func (e *Engine) RequestTrace(ctx context.Context, id string, allowed []string, source string) (RequestTraceResult, error) {
-	where, args := sourceWhere([]string{"(request_id=? OR trace_id=?)"}, []any{id, id}, QueryFilter{SourceIDs: allowed, SourceID: source})
-	rows, err := e.DB.QueryContext(ctx, `WITH matched AS (SELECT DISTINCT source_id,instance_id,request_id FROM facts WHERE `+strings.Join(where, " AND ")+`) SELECT source_id,coalesce(instance_id,''),coalesce(request_id,''),event_id,kind,coalesce(stage,''),at_ms,started_ms,coalesce(attempt_id,''),coalesce(provider,''),coalesce(model,''),coalesce(upstream_model,''),coalesce(endpoint,''),coalesce(stream,false),coalesce(outcome,''),coalesce(status,0),coalesce(terminal_kind,''),coalesce(failure_reason,''),response_completed,duration_ms,dispatch_ms,response_created_ms,first_text_ms,coalesce(trace_detail,'{}'),coalesce(transport_timing,'{}'),coalesce(key_id,'') FROM facts f WHERE EXISTS(SELECT 1 FROM matched m WHERE m.source_id=f.source_id AND m.instance_id IS NOT DISTINCT FROM f.instance_id AND m.request_id IS NOT DISTINCT FROM f.request_id) ORDER BY source_id,instance_id,request_id,at_ms,event_id`, args...)
+const traceEventColumns = `source_id,coalesce(instance_id,'') AS instance_id,coalesce(request_id,'') AS request_id,event_id,kind,coalesce(stage,''),at_ms,started_ms,coalesce(attempt_id,''),coalesce(provider,''),coalesce(model,''),coalesce(upstream_model,''),coalesce(endpoint,''),coalesce(stream,false),coalesce(outcome,''),coalesce(status,0),coalesce(terminal_kind,''),coalesce(failure_reason,''),response_completed,duration_ms,dispatch_ms,response_created_ms,first_text_ms,coalesce(trace_detail,'{}'),coalesce(transport_timing,'{}'),coalesce(key_id,'')`
+
+func (e *Engine) RequestTrace(ctx context.Context, id string, allowed []string, source string, instance ...string) (RequestTraceResult, error) {
+	out := RequestTraceResult{Data: []RequestTrace{}, RequestID: id, GeneratedAt: time.Now().Unix()}
+	// Separate equality probes use facts_request/facts_trace indexes. An OR
+	// across both columns followed by a correlated join scans the whole history.
+	// Materialize the small ID matches before applying source/instance filters:
+	// DuckDB's ART scan only supports a single-column predicate at the scan.
+	where, args := sourceWhere(nil, nil, QueryFilter{SourceIDs: allowed, SourceID: source})
+	if len(instance) > 0 {
+		where = append(where, "coalesce(instance_id,'')=?")
+		args = append(args, instance[0])
+	}
+	scope := ""
+	if len(where) > 0 {
+		scope = " WHERE " + strings.Join(where, " AND ")
+	}
+	// DuckDB does not support sql.TxOptions.ReadOnly; all statements below
+	// are SELECTs and share one snapshot while ingestion continues.
+	tx, err := e.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return RequestTraceResult{}, err
+		return out, err
+	}
+	defer tx.Rollback()
+	lookupArgs := append([]any{id, id}, args...)
+	matched, err := tx.QueryContext(ctx, `WITH candidates AS MATERIALIZED (
+ SELECT source_id,instance_id,request_id FROM facts WHERE request_id=?
+ UNION ALL SELECT source_id,instance_id,request_id FROM facts WHERE trace_id=?
+) SELECT DISTINCT source_id,instance_id,request_id FROM candidates`+scope, lookupArgs...)
+	if err != nil {
+		return out, err
+	}
+	queries := []string{}
+	ctes := []string{}
+	requestArgs := []any{}
+	eventArgs := []any{}
+	for matched.Next() {
+		var sourceID, instanceID, requestID sql.NullString
+		if err = matched.Scan(&sourceID, &instanceID, &requestID); err != nil {
+			matched.Close()
+			return out, err
+		}
+		name := fmt.Sprintf("events_%d", len(ctes))
+		query := name + ` AS MATERIALIZED (SELECT * FROM facts WHERE `
+		if requestID.Valid {
+			query += "request_id=?"
+			requestArgs = append(requestArgs, requestID.String)
+		} else {
+			query += "request_id IS NULL"
+		}
+		ctes = append(ctes, query+")")
+		eventArgs = append(eventArgs, sourceID, instanceID)
+		queries = append(queries, `SELECT `+traceEventColumns+` FROM `+name+` WHERE source_id IS NOT DISTINCT FROM ? AND instance_id IS NOT DISTINCT FROM ?`)
+	}
+	err = matched.Err()
+	matched.Close()
+	if err != nil {
+		return out, err
+	}
+	if len(queries) == 0 {
+		return out, tx.Commit()
+	}
+	rows, err := tx.QueryContext(ctx, "WITH "+strings.Join(ctes, ", ")+" "+strings.Join(queries, " UNION ALL ")+` ORDER BY source_id,instance_id,request_id,at_ms,event_id`, append(requestArgs, eventArgs...)...)
+	if err != nil {
+		return out, err
 	}
 	defer rows.Close()
-	out := RequestTraceResult{Data: []RequestTrace{}, RequestID: id, GeneratedAt: time.Now().Unix()}
 	indices := map[string]int{}
 	finals, starts := map[string]int{}, map[string]int{}
 	for rows.Next() {
@@ -151,7 +212,11 @@ func (e *Engine) RequestTrace(ctx context.Context, id string, allowed []string, 
 			return left.EventID < right.EventID
 		})
 	}
-	return out, rows.Err()
+	if err = rows.Err(); err != nil {
+		return out, err
+	}
+	rows.Close()
+	return out, tx.Commit()
 }
 
 func traceEventSequence(id string) (string, string) {
@@ -172,6 +237,7 @@ func traceEventSequence(id string) (string, string) {
 }
 
 func (s *Service) requestTrace(w http.ResponseWriter, r *http.Request) {
+	began := time.Now()
 	id := strings.TrimSpace(r.URL.Query().Get("request_id"))
 	if id == "" || len(id) > 512 || strings.IndexFunc(id, unicode.IsControl) >= 0 {
 		http.Error(w, "invalid request id", 400)
@@ -186,31 +252,32 @@ func (s *Service) requestTrace(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "source unavailable", 404)
 		return
 	}
-	result, err := s.engine.RequestTrace(r.Context(), id, allowed, r.URL.Query().Get("source_id"))
+	scopeMS := float64(time.Since(began).Microseconds()) / 1000
+	var instance []string
+	if r.URL.Query().Has("instance_id") {
+		instance = []string{r.URL.Query().Get("instance_id")}
+	}
+	lookupStarted := time.Now()
+	result, err := s.engine.RequestTrace(r.Context(), id, allowed, r.URL.Query().Get("source_id"), instance...)
 	if err != nil {
 		writeJSON(w, 503, map[string]string{"error": "request trace unavailable"})
 		return
 	}
 	result.Import = s.importStatus(allowed)
-	if r.URL.Query().Has("instance_id") {
-		filtered := []RequestTrace{}
-		for _, run := range result.Data {
-			if run.InstanceID == r.URL.Query().Get("instance_id") {
-				filtered = append(filtered, run)
-			}
-		}
-		result.Data = filtered
-	}
+	lookupMS := float64(time.Since(lookupStarted).Microseconds()) / 1000
+	metadataStarted := time.Now()
 	// Metadata is optional; its failure must not hide the captured request.
 	if s.control != nil {
 		if owner, err := s.controlUser(r); err == nil {
 			_ = s.enrichTraceChannels(r.Context(), owner, result.Data)
 		}
 	}
+	metadataMS := float64(time.Since(metadataStarted).Microseconds()) / 1000
 	body, err := json.Marshal(result)
 	if err != nil {
 		http.Error(w, "request trace unavailable", 500)
 		return
 	}
+	w.Header().Set("Server-Timing", fmt.Sprintf("scope;dur=%.1f, lookup;dur=%.1f, metadata;dur=%.1f, total;dur=%.1f", scopeMS, lookupMS, metadataMS, float64(time.Since(began).Microseconds())/1000))
 	s.writeAnalyticsBody(w, r, body)
 }
