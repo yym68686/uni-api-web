@@ -28,8 +28,14 @@ func TestLongContextPremiumPerRequestBoundariesAndFilters(t *testing.T) {
 	add("short-b", 200000, 1000, 0, 0, .81, 0)
 	add("boundary", 272000, 1000, 0, 0, 1.098, 0)
 	add("long", 272001, 1000, 0, 0, 1.098004, 1.093004)
-	// Total prompt includes cached tokens, but cache rates are independent.
-	add("cached", 300000, 2000, 200000, 50000, .62, .21)
+	// The threshold includes cached input; every cache rate doubles with input.
+	add("cached", 300000, 2000, 200000, 50000, .62, .61)
+	add("cached-boundary", 272000, 2000, 200000, 50000, .508, 0)
+	add("cached-short", 200000, 2000, 100000, 50000, .57, 0)
+	add("cache-only", 300000, 2000, 300000, 0, .17, .16)
+	add("both-write-tiers", 300000, 2000, 200000, 50000, .74, .73)
+	hour := int64(20000)
+	samples[len(samples)-1].fact.CacheWrite1hTokens = &hour
 	add("day-bucket", 300000, 1000, 0, 0, 1.21, 1.205)
 	samples[len(samples)-1].fact.AtMS = now.Add(-72 * time.Hour).UnixMilli()
 	add("other-source", 300000, 1000, 0, 0, 1.21, 1.205)
@@ -62,7 +68,7 @@ func TestLongContextPremiumPerRequestBoundariesAndFilters(t *testing.T) {
 	}
 	yes, no := true, false
 	for _, model := range []string{"gpt-6-sol", "gpt-6-luna"} {
-		if err := e.SavePrice(ctx, Price{Model: model, Input: 4, Output: 10, CacheRead: .5, CacheWrite: 6, Verified: true, ChargeCacheWrite: &yes}); err != nil {
+		if err := e.SavePrice(ctx, Price{Model: model, Input: 4, Output: 10, CacheRead: .5, CacheWrite: 6, CacheWrite1h: 12, Verified: true, ChargeCacheWrite: &yes}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -71,7 +77,7 @@ func TestLongContextPremiumPerRequestBoundariesAndFilters(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, flag := range []*bool{nil, &yes, &no} {
-		if err := e.SavePrice(ctx, Price{Model: "gpt-6-sol", Input: 4, Output: 10, CacheRead: .5, CacheWrite: 6, Verified: true, ChargeCacheWrite: &yes, LongContextPremium: flag}); err != nil {
+		if err := e.SavePrice(ctx, Price{Model: "gpt-6-sol", Input: 4, Output: 10, CacheRead: .5, CacheWrite: 6, CacheWrite1h: 12, Verified: true, ChargeCacheWrite: &yes, LongContextPremium: flag}); err != nil {
 			t.Fatal(err)
 		}
 		for _, filter := range []QueryFilter{
@@ -216,9 +222,9 @@ func TestLongContextPremiumLegacyDatabaseDefaultsOff(t *testing.T) {
 func TestLongContextPremiumRepricesRestoredFactsAndHonorsCacheWriteToggle(t *testing.T) {
 	ctx := context.Background()
 	source := stateTestEngine(t)
-	input, output, read, write := int64(300000), int64(2000), int64(200000), int64(50000)
+	input, output, read, write, hour := int64(300000), int64(2000), int64(200000), int64(50000), int64(20000)
 	at := time.Now().Add(-48 * time.Hour).UnixMilli()
-	if err := source.Import(ctx, "historical", "v1", []Fact{{Schema: 1, EventID: "cached-long", Kind: "request", AtMS: at, Model: "gpt-6-sol", Provider: "p", Outcome: "success", InputTokens: &input, OutputTokens: &output, CacheReadTokens: &read, CacheWriteTokens: &write}}); err != nil {
+	if err := source.Import(ctx, "historical", "v1", []Fact{{Schema: 1, EventID: "cached-long", Kind: "request", AtMS: at, Model: "gpt-6-sol", Provider: "p", Outcome: "success", InputTokens: &input, OutputTokens: &output, CacheReadTokens: &read, CacheWriteTokens: &write, CacheWrite1hTokens: &hour}}); err != nil {
 		t.Fatal(err)
 	}
 	objects := &fakeStateObjects{}
@@ -231,15 +237,23 @@ func TestLongContextPremiumRepricesRestoredFactsAndHonorsCacheWriteToggle(t *tes
 		t.Fatal(ok, err)
 	}
 	yes, no := true, false
-	if err := restored.SavePrice(ctx, Price{Model: "gpt-6-sol", Input: 4, Output: 10, CacheRead: .5, CacheWrite: 6, Verified: true, LongContextPremium: &yes, ChargeCacheWrite: &no}); err != nil {
-		t.Fatal(err)
-	}
-	result, err := restored.Query(ctx, QueryFilter{Range: "all"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// 50k ordinary input * $8 + 2k output * $15 + 200k cache read * $0.5.
-	if cost, ok := result.Total["estimated_cost_usd"].(float64); !ok || math.Abs(cost-.53) > 1e-9 {
-		t.Fatal("restored history/cache billing incorrect", result.Total)
+	for _, test := range []struct {
+		premium, write *bool
+		want           float64
+	}{
+		{&yes, &no, .63},   // 50k input * $8 + 2k output * $15 + 200k cache read * $1.
+		{&yes, &yes, 1.47}, // Also 30k 5m writes * $12 + 20k 1h writes * $24.
+		{&no, &yes, .74},   // Disabling the premium restores every original rate.
+	} {
+		if err := restored.SavePrice(ctx, Price{Model: "gpt-6-sol", Input: 4, Output: 10, CacheRead: .5, CacheWrite: 6, CacheWrite1h: 12, Verified: true, LongContextPremium: test.premium, ChargeCacheWrite: test.write}); err != nil {
+			t.Fatal(err)
+		}
+		result, err := restored.Query(ctx, QueryFilter{Range: "all"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cost, ok := result.Total["estimated_cost_usd"].(float64); !ok || math.Abs(cost-test.want) > 1e-9 {
+			t.Fatal("restored history/cache billing incorrect", result.Total, test.want)
+		}
 	}
 }

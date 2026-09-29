@@ -20,7 +20,7 @@ func withLongContextUsage(q string, args []any, where []string, startMS, endMS i
 		longArgs = append(longArgs, p.Model, p.Model+"-")
 	}
 	if len(modelFilters) == 0 {
-		return "SELECT b.*,0::BIGINT AS long_input,0::BIGINT AS long_output FROM (" + q + ") b", args
+		return "SELECT b.*,0::BIGINT AS long_input,0::BIGINT AS long_output,0::BIGINT AS long_cache_read,0::BIGINT AS long_cache_write,0::BIGINT AS long_cache_write_1h FROM (" + q + ") b", args
 	}
 	longWhere := []string{"at_ms>=? AND at_ms<?", "kind NOT IN ('billing','trace')", "input_tokens>272000"}
 	longWhere = append(longWhere, where[1:]...)
@@ -33,9 +33,12 @@ func withLongContextUsage(q string, args []any, where []string, startMS, endMS i
 	query := `WITH base AS (` + q + `), long_usage AS (
  SELECT ` + strings.Join(dimensions, ",") + `,
  sum(greatest(0,input_tokens-coalesce(cache_read_tokens,0)-coalesce(cache_write_tokens,0)))::BIGINT AS long_input,
- sum(coalesce(output_tokens,0))::BIGINT AS long_output
+ sum(coalesce(output_tokens,0))::BIGINT AS long_output,
+ sum(coalesce(cache_read_tokens,0))::BIGINT AS long_cache_read,
+ sum(coalesce(cache_write_tokens,0))::BIGINT AS long_cache_write,
+ sum(coalesce(cache_write_1h_tokens,0))::BIGINT AS long_cache_write_1h
  FROM facts WHERE ` + strings.Join(longWhere, " AND ") + ` GROUP BY ` + strings.Join(dimensions, ",") + `)
- SELECT b.*,coalesce(l.long_input,0),coalesce(l.long_output,0)
+ SELECT b.*,coalesce(l.long_input,0),coalesce(l.long_output,0),coalesce(l.long_cache_read,0),coalesce(l.long_cache_write,0),coalesce(l.long_cache_write_1h,0)
  FROM base b LEFT JOIN long_usage l ON ` + strings.Join(join, " AND ")
 	return query, append(args, longArgs...)
 }

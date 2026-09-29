@@ -269,9 +269,9 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 		var stream bool
 		var firstValue, dispatchValue, createdValue, textValue any
 		var n int64
-		var longInput, longOutput int64
+		var longInput, longOutput, longCacheRead, longCacheWrite, longCacheWrite1h int64
 		var s Summary
-		if err = rows.Scan(&sourceID, &kind, &provider, &model, &upstream, &endpoint, &stream, &outcome, &n, &s.Input, &s.Output, &s.CacheRead, &s.CacheWrite, &s.CacheWrite1h, &s.UsageSamples, &s.CacheSamples, &s.ActualUSD, &s.ActualSamples, &firstValue, &dispatchValue, &s.FirstCount, &s.DispatchCount, &s.FirstSum, &s.DispatchSum, &s.LastMS, &s.LastFirst, &s.LastDispatch, &createdValue, &s.CreatedCount, &s.CreatedSum, &s.LastCreated, &textValue, &s.TextCount, &s.TextSum, &s.LastText, &s.LastCreatedMS, &s.LastTextMS, &longInput, &longOutput); err != nil {
+		if err = rows.Scan(&sourceID, &kind, &provider, &model, &upstream, &endpoint, &stream, &outcome, &n, &s.Input, &s.Output, &s.CacheRead, &s.CacheWrite, &s.CacheWrite1h, &s.UsageSamples, &s.CacheSamples, &s.ActualUSD, &s.ActualSamples, &firstValue, &dispatchValue, &s.FirstCount, &s.DispatchCount, &s.FirstSum, &s.DispatchSum, &s.LastMS, &s.LastFirst, &s.LastDispatch, &createdValue, &s.CreatedCount, &s.CreatedSum, &s.LastCreated, &textValue, &s.TextCount, &s.TextSum, &s.LastText, &s.LastCreatedMS, &s.LastTextMS, &longInput, &longOutput, &longCacheRead, &longCacheWrite, &longCacheWrite1h); err != nil {
 			return QueryResult{}, err
 		}
 		s.FirstBins = histogramValues(firstValue)
@@ -289,8 +289,12 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 			// ordinary input. Token counts and cache-read charges are unchanged.
 			s.KnownEstimatedUSD = (float64(ordinary)*p.Input + float64(s.Output)*p.Output + float64(s.CacheRead)*p.CacheRead + writeCost) / 1e6
 			if p.chargesLongContextPremium() {
-				// Add only the premium: base input/output cost is already counted.
-				s.KnownEstimatedUSD += (float64(longInput)*p.Input + float64(longOutput)*p.Output*.5) / 1e6
+				// Add only the premium: all base costs are already counted.
+				longWriteCost := 0.0
+				if p.chargesCacheWrite() {
+					longWriteCost = float64(max(0, longCacheWrite-longCacheWrite1h))*p.CacheWrite + float64(longCacheWrite1h)*p.CacheWrite1h
+				}
+				s.KnownEstimatedUSD += (float64(longInput)*p.Input + float64(longOutput)*p.Output*.5 + float64(longCacheRead)*p.CacheRead + longWriteCost) / 1e6
 			}
 			s.PricedSamples = s.UsageSamples
 		}

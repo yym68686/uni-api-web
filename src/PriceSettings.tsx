@@ -243,7 +243,7 @@ function PriceRow({
           </label>
         </td>
         <td className="price-toggle-cell">
-          <label className="price-table-toggle" title="单次请求输入超过 272,000 token：输入单价 ×2，输出单价 ×1.5">
+          <label className="price-table-toggle" title="单次请求总输入（含缓存）超过 272,000 token：输入、缓存读取和缓存写入单价 ×2，输出单价 ×1.5">
             <input
               type="checkbox"
               aria-label={`${price.model} 超过272k加价`}
@@ -372,8 +372,8 @@ export function PriceSettings({
             <p>不含搜索、缓存存储等额外费用，实际扣费以站点账单为准。</p>
             <p>
               “超过272k加价”默认关闭。开启后，单次请求输入总量（含缓存）严格大于
-              272,000 token 时，该请求的普通输入单价按 2 倍、输出单价按 1.5 倍估算，
-              不是仅计算超出部分；缓存读写单价保持原设置。保存后对所选时间范围内的历史请求同样生效。
+              272,000 token 时，该请求的普通输入、缓存读取和缓存写入分别按各自单价
+              2 倍、输出按输出单价 1.5 倍估算，不是仅计算超出部分。关闭“写入计费”时仍不计缓存写入费用。保存后对所选时间范围内的历史请求同样生效。
             </p>
           </div>
         </details>
@@ -419,7 +419,7 @@ export function PriceSettings({
                 售卖比例<small>原价 %</small>
               </th>
               <th scope="col">写入计费</th>
-              <th scope="col">超过272k<small>输入 ×2 / 输出 ×1.5</small></th>
+              <th scope="col">超过272k<small>输入及缓存 ×2 / 输出 ×1.5</small></th>
               <th scope="col">参与估算</th>
               <th scope="col">操作</th>
             </tr>
