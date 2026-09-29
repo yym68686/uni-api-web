@@ -1,6 +1,6 @@
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { queryOptions, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronDown,
   ChevronLeft,
@@ -142,6 +142,9 @@ export function RequestLogsPage({
   const [cursors, setCursors] = useState<string[]>([""]);
   const [page, setPage] = useState(0);
   const [revision, setRevision] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<Error | null>(null);
+  const refreshToken = useRef(0);
   const [selected, setSelected] = useState<{
     id: string;
     source: string;
@@ -186,35 +189,50 @@ export function RequestLogsPage({
     true,
     auto,
   );
+  const scope = JSON.stringify([
+    base.base,
+    base.session,
+    filters.window,
+    filters.sourceId,
+    filters.keyId,
+    filters.model,
+    filters.endpoint,
+    filters.stream,
+    filters.statusFilter,
+    filters.balanceFilter,
+    filters.sort,
+    deferred,
+  ]);
+  useEffect(() => {
+    refreshToken.current++;
+    setRefreshing(false);
+    setRefreshError(null);
+    return () => {
+      refreshToken.current++;
+    };
+  }, [scope]);
+  const logOptions = (cursor: string, version: number) =>
+    queryOptions({
+      queryKey: ["request-logs", scope, cursor, version],
+      queryFn: ({ signal }) =>
+        analyticsRequest<LogResult>(
+          base,
+          "/analytics/v1/request-logs?" +
+            requestLogParams({ ...filters, search: deferred }, cursor),
+          signal,
+        ),
+      retry: false,
+      // The prepared refresh result is fresh when the view switches to it.
+      staleTime: 1000,
+    });
   const query = useQuery({
-    queryKey: [
-      "request-logs",
-      base.session,
-      filters.window,
-      filters.sourceId,
-      filters.keyId,
-      filters.model,
-      filters.endpoint,
-      filters.stream,
-      filters.statusFilter,
-      filters.balanceFilter,
-      filters.sort,
-      deferred,
-      cursors[page],
-      revision,
-    ],
-    queryFn: ({ signal }) =>
-      analyticsRequest<LogResult>(
-        base,
-        "/analytics/v1/request-logs?" +
-          requestLogParams({ ...filters, search: deferred }, cursors[page]),
-        signal,
-      ),
-    retry: false,
+    ...logOptions(cursors[page], revision),
     refetchInterval: (q) =>
       initializationRetryInterval(q) || (auto && page === 0 ? 30_000 : false),
     refetchIntervalInBackground: false,
   });
+  const busy = query.isFetching || refreshing;
+  const error = refreshError || query.error;
   const data = query.data;
   const models = [
     ...new Set([
@@ -263,11 +281,31 @@ export function RequestLogsPage({
   const hasFilters = Object.keys(defaultFilters).some(
     (k) => filters[k as keyof Filters] !== defaultFilters[k as keyof Filters],
   );
-  function refresh() {
-    setPage(0);
-    setCursors([""]);
-    setRevision((v) => v + 1);
+  async function refresh() {
+    if (refreshing) return;
+    const token = ++refreshToken.current;
+    const nextRevision = revision + 1;
+    setRefreshing(true);
+    setRefreshError(null);
     void stats.refetch();
+    try {
+      // Keep the current page mounted until the latest page is available.
+      await queryClient.fetchQuery({
+        ...logOptions("", nextRevision),
+        staleTime: 0,
+      });
+      if (token !== refreshToken.current) return;
+      setPage(0);
+      setCursors([""]);
+      setRevision(nextRevision);
+    } catch (error) {
+      if (token === refreshToken.current)
+        setRefreshError(
+          error instanceof Error ? error : new Error("刷新请求日志失败"),
+        );
+    } finally {
+      if (token === refreshToken.current) setRefreshing(false);
+    }
   }
   function open(row: RequestLog) {
     if (row.request_id || row.trace_id)
@@ -299,9 +337,7 @@ export function RequestLogsPage({
             className="search-field"
             onSubmit={(e) => {
               e.preventDefault();
-              setPage(0);
-              setCursors([""]);
-              setRevision((v) => v + 1);
+              void refresh();
             }}
           >
             <Search size={17} />
@@ -325,10 +361,12 @@ export function RequestLogsPage({
           </form>
           <button
             className="button small"
-            disabled={query.isFetching}
+            aria-label="刷新日志"
+            aria-busy={busy}
+            disabled={busy}
             onClick={refresh}
           >
-            {query.isFetching ? <Spinner small /> : <RefreshCw size={15} />}
+            {busy ? <Spinner small /> : <RefreshCw size={15} />}
             刷新日志
           </button>
           <label className="auto-refresh">
@@ -503,9 +541,10 @@ export function RequestLogsPage({
           请求记录仍在同步，当前日志可能不完整。刷新可读取最新已同步记录。
         </p>
       )}
-      {query.error && (
+      {error && (
         <p role="alert" className="error-banner">
-          {query.error.message}
+          {refreshError && data ? "刷新失败，保留当前日志。" : ""}
+          {error.message}
         </p>
       )}
       {query.isPending ? (
@@ -627,7 +666,7 @@ export function RequestLogsPage({
               <button
                 className="icon-button"
                 aria-label="上一页"
-                disabled={page === 0 || query.isFetching}
+                disabled={page === 0 || busy}
                 onClick={() => setPage((p) => p - 1)}
               >
                 <ChevronLeft size={16} />
@@ -635,7 +674,7 @@ export function RequestLogsPage({
               <button
                 className="icon-button"
                 aria-label="下一页"
-                disabled={!data.next_cursor || query.isFetching}
+                disabled={!data.next_cursor || busy}
                 onClick={() => {
                   setCursors((current) => [
                     ...current.slice(0, page + 1),

@@ -336,3 +336,162 @@ it("a failed intent prefetch does not prevent an explicit click from retrying", 
   await screen.findByRole("heading", { name: "请求成功" });
   expect(attempts).toBe(2);
 });
+
+it("keeps the visible rows mounted until refresh succeeds and preserves them on failure", async () => {
+  let reads = 0;
+  let finish!: (response: Response) => void;
+  const user = setup(async (input) => {
+    const url = new URL(input, location.origin);
+    const aux = auxiliary(url);
+    if (aux) return aux;
+    if (url.pathname.endsWith("/request-trace"))
+      return Response.json(traceResult());
+    reads++;
+    if (reads > 1)
+      return new Promise<Response>((resolve) => {
+        finish = resolve;
+      });
+    return Response.json({
+      data: [row],
+      models: [row.model],
+      next_cursor: "next",
+      to: row.at_ms,
+    });
+  });
+  const original = await screen.findByRole("button", { name: row.request_id });
+  await user.click(screen.getByRole("button", { name: "刷新日志" }));
+  expect(original).toBeVisible();
+  expect(screen.getByRole("table")).toBeVisible();
+  expect(screen.queryByText("正在读取请求日志…")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "刷新日志" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "下一页" })).toBeDisabled();
+  await act(async () => finish(new Response("unavailable", { status: 503 })));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "刷新失败，保留当前日志",
+  );
+  expect(original).toBeVisible();
+  expect(screen.getByRole("button", { name: "刷新日志" })).toBeEnabled();
+  await user.click(screen.getByRole("button", { name: "刷新日志" }));
+  expect(original).toBeVisible();
+  await act(async () =>
+    finish(
+      Response.json({
+        data: [{ ...row, event_id: "new", request_id: "latest" }],
+        models: [row.model],
+        next_cursor: "",
+        to: row.at_ms + 1000,
+      }),
+    ),
+  );
+  await screen.findByRole("button", { name: "latest" });
+  expect(original).not.toBeInTheDocument();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(reads).toBe(3); // Prepared data does not cause a duplicate request on display.
+});
+
+it("keeps a later page during refresh and only resets pagination after success", async () => {
+  let reads = 0;
+  let finish!: (response: Response) => void;
+  const user = setup(async (input) => {
+    const url = new URL(input, location.origin);
+    const aux = auxiliary(url);
+    if (aux) return aux;
+    reads++;
+    if (reads > 2)
+      return new Promise<Response>((resolve) => {
+        finish = resolve;
+      });
+    const next = url.searchParams.get("cursor") === "next";
+    return Response.json({
+      data: [
+        {
+          ...row,
+          event_id: next ? "two" : "one",
+          request_id: next ? "page-two" : "page-one",
+        },
+      ],
+      models: [row.model],
+      next_cursor: "next",
+      to: row.at_ms,
+    });
+  });
+  await screen.findByRole("button", { name: "page-one" });
+  await user.click(screen.getByRole("button", { name: "下一页" }));
+  await screen.findByRole("button", { name: "page-two" });
+  await user.click(screen.getByRole("button", { name: "刷新日志" }));
+  expect(screen.getByRole("button", { name: "page-two" })).toBeVisible();
+  expect(screen.getByText(/第 2 页/)).toBeVisible();
+  await act(async () => finish(new Response("unavailable", { status: 503 })));
+  await screen.findByRole("alert");
+  expect(screen.getByRole("button", { name: "page-two" })).toBeVisible();
+  expect(screen.getByText(/第 2 页/)).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "刷新日志" }));
+  await act(async () =>
+    finish(
+      Response.json({
+        data: [{ ...row, event_id: "new", request_id: "newest" }],
+        models: [row.model],
+        next_cursor: "new-cursor",
+        to: row.at_ms + 1000,
+      }),
+    ),
+  );
+  await screen.findByRole("button", { name: "newest" });
+  expect(screen.getByText(/第 1 页/)).toBeVisible();
+  expect(screen.getByRole("button", { name: "上一页" })).toBeDisabled();
+  expect(reads).toBe(4);
+});
+
+it("does not apply an older refresh after the user changes filters or pages", async () => {
+  let reads = 0;
+  let finishOld!: (response: Response) => void;
+  const user = setup(async (input) => {
+    const url = new URL(input, location.origin);
+    const aux = auxiliary(url);
+    if (aux) return aux;
+    reads++;
+    if (reads === 2)
+      return new Promise<Response>((resolve) => {
+        finishOld = resolve;
+      });
+    const filtered = url.searchParams.get("model") === row.model;
+    const next = url.searchParams.get("cursor") === "next";
+    return Response.json({
+      data: [
+        {
+          ...row,
+          event_id: `e${reads}`,
+          request_id: filtered
+            ? next
+              ? "filtered-two"
+              : "filtered-one"
+            : "original",
+        },
+      ],
+      models: [row.model],
+      next_cursor: "next",
+      to: row.at_ms,
+    });
+  });
+  await screen.findByRole("button", { name: "original" });
+  await user.click(screen.getByRole("button", { name: "刷新日志" }));
+  await user.selectOptions(screen.getByLabelText("模型筛选"), row.model);
+  await screen.findByRole("button", { name: "filtered-one" });
+  await user.click(screen.getByRole("button", { name: "下一页" }));
+  await screen.findByRole("button", { name: "filtered-two" });
+  await act(async () =>
+    finishOld(
+      Response.json({
+        data: [row],
+        models: [row.model],
+        next_cursor: "",
+        to: row.at_ms + 1000,
+      }),
+    ),
+  );
+  expect(screen.getByRole("button", { name: "filtered-two" })).toBeVisible();
+  expect(screen.getByText(/第 2 页/)).toBeVisible();
+  expect(
+    screen.queryByRole("button", { name: row.request_id }),
+  ).not.toBeInTheDocument();
+});
