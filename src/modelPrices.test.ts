@@ -55,5 +55,10 @@ it("uses the longest complete model prefix, ignoring stale suffix prices and res
   );
   expect(canonicalPriceModel("gpt-5.50")).toBe("gpt-5.50");
   expect(canonicalPriceModel("claude-opus-5-5-thinking")).toBe("claude-opus-5-5");
+  expect(canonicalPriceModel("claude-sonnet-5-5")).toBe("claude-sonnet-5-5");
+  expect(canonicalPriceModel("claude-sonnet-5-5-thinking")).toBe("claude-sonnet-5-5");
+  const sonnet55 = MODEL_PRICE_CATALOG.find(p => p.model === "claude-sonnet-5-5")!;
+  const sonnet5 = { ...sonnet55, model: "claude-sonnet-5", input: 999 };
+  expect(referencePrice("claude-sonnet-5-5-thinking", [sonnet5, sonnet55])).toEqual(sonnet55);
   expect(canonicalPriceModel("gemini-3.1-pro-search")).toBe(base.model);
 });

@@ -252,6 +252,18 @@
     "note": "Claude API 标准全球价格，缓存写入按 5 分钟 / 1 小时区分。"
   },
   {
+    "model": "claude-sonnet-5-5",
+    "input": 2,
+    "output": 10,
+    "cache_read": 0.2,
+    "cache_write": 2.5,
+    "cache_write_1h": 4,
+    "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "verified": true,
+    "cache_write_kind": "ttl",
+    "note": "Claude API 标准全球价格，2026-09-29 核对；输入 $2、输出 $10、缓存读取 $0.20，缓存写入 5 分钟 $2.50 / 1 小时 $4，均为每百万 token。"
+  },
+  {
     "model": "claude-sonnet-5",
     "input": 2,
     "output": 10,
