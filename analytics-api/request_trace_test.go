@@ -153,3 +153,55 @@ func TestRequestTraceRestoresLegacyCheckpointWithoutLosingFacts(t *testing.T) {
 		t.Fatal(result, err)
 	}
 }
+
+func TestTraceChannelNamesUseOwnedGroupsAndSourceScopedBindingsWithoutRemoteCalls(t *testing.T) {
+	s, a, src := bindingFixture(t, "https://site.example")
+	ctx := context.Background()
+	if _, err := s.control.db.Exec(`INSERT INTO console_sub_targets(account_id,group_id,name,platform,billing) VALUES($1,5,'纯Pro号池','openai','{"rate":0.15}')`, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.control.db.Exec(`INSERT INTO console_sub_key_index(account_id,key_hash,remote_key_id,group_id) VALUES($1,$2,42,5)`, a.ID, tokenHash("upstream-key")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.saveConfiguredInventory(ctx, src, []configuredProvider{{Provider: "native", Base: a.Base + "/v1/responses", API: "upstream-key"}}); err != nil {
+		t.Fatal(err)
+	}
+	key := "key-" + strings.Repeat("a", 64)
+	imported := subProviderName(a.ID, 5, key)
+	copied := configuredImportName("native", key)
+	runs := []RequestTrace{
+		{SourceID: src.ID, Events: []RequestTraceEvent{{Provider: imported, KeyID: key}, {Provider: "native", KeyID: key}, {Provider: copied, KeyID: key}, {Provider: "deleted", KeyID: key}}},
+		{SourceID: "another-source", Events: []RequestTraceEvent{{Provider: "native", KeyID: key}}},
+	}
+	if err := s.enrichTraceChannels(ctx, a.Owner, runs); err != nil {
+		t.Fatal(err)
+	}
+	for _, provider := range []string{imported, "native", copied} {
+		c := runs[0].Channels[provider]
+		if c.SiteName != "Account" || c.GroupName != "纯Pro号池" || c.Name != "Account-0.15" || c.Rate == nil || *c.Rate != .15 || c.DashboardURL != "https://site.example/dashboard" {
+			t.Fatal("missing readable metadata", provider, c)
+		}
+	}
+	if _, ok := runs[0].Channels["deleted"]; ok {
+		t.Fatal("invented deleted channel association")
+	}
+	if len(runs[1].Channels) != 0 {
+		t.Fatal("channel labels crossed source scope")
+	}
+	raw, _ := json.Marshal(runs)
+	for _, secret := range []string{key, "upstream-key", a.ID} {
+		if strings.Contains(string(raw), secret) {
+			t.Fatal("private binding data exposed")
+		}
+	}
+	if err := s.enrichTraceChannels(ctx, a.Owner+"-foreign", runs); err != nil {
+		t.Fatal(err)
+	}
+	for _, run := range runs {
+		for _, c := range run.Channels {
+			if c.SiteName != "" || c.GroupName != "" || c.Rate != nil {
+				t.Fatal("foreign account metadata exposed", c)
+			}
+		}
+	}
+}

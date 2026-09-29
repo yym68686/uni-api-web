@@ -26,6 +26,7 @@ func requestTraceSchema(prefix string) string {
 // Diagnostics are separate from metrics: they must not add attempts, cost or
 // success samples. Explicit columns avoid exposing upstream credential hashes.
 type RequestTraceEvent struct {
+	KeyID             string         `json:"-"`
 	EventID           string         `json:"event_id"`
 	Kind              string         `json:"kind"`
 	Stage             string         `json:"stage"`
@@ -50,11 +51,12 @@ type RequestTraceEvent struct {
 	Transport         map[string]any `json:"transport"`
 }
 type RequestTrace struct {
-	SourceID   string              `json:"source_id"`
-	InstanceID string              `json:"instance_id"`
-	RequestID  string              `json:"request_id"`
-	Events     []RequestTraceEvent `json:"events"`
-	Ambiguous  bool                `json:"ambiguous"`
+	Channels   map[string]TraceChannel `json:"channels,omitempty"`
+	SourceID   string                  `json:"source_id"`
+	InstanceID string                  `json:"instance_id"`
+	RequestID  string                  `json:"request_id"`
+	Events     []RequestTraceEvent     `json:"events"`
+	Ambiguous  bool                    `json:"ambiguous"`
 }
 type RequestTraceResult struct {
 	Data        []RequestTrace `json:"data"`
@@ -99,7 +101,7 @@ func traceDetails(raw string) map[string]any {
 
 func (e *Engine) RequestTrace(ctx context.Context, id string, allowed []string, source string) (RequestTraceResult, error) {
 	where, args := sourceWhere([]string{"(request_id=? OR trace_id=?)"}, []any{id, id}, QueryFilter{SourceIDs: allowed, SourceID: source})
-	rows, err := e.DB.QueryContext(ctx, `WITH matched AS (SELECT DISTINCT source_id,instance_id,request_id FROM facts WHERE `+strings.Join(where, " AND ")+`) SELECT source_id,coalesce(instance_id,''),coalesce(request_id,''),event_id,kind,coalesce(stage,''),at_ms,started_ms,coalesce(attempt_id,''),coalesce(provider,''),coalesce(model,''),coalesce(upstream_model,''),coalesce(endpoint,''),coalesce(stream,false),coalesce(outcome,''),coalesce(status,0),coalesce(terminal_kind,''),coalesce(failure_reason,''),response_completed,duration_ms,dispatch_ms,response_created_ms,first_text_ms,coalesce(trace_detail,'{}'),coalesce(transport_timing,'{}') FROM facts f WHERE EXISTS(SELECT 1 FROM matched m WHERE m.source_id=f.source_id AND m.instance_id IS NOT DISTINCT FROM f.instance_id AND m.request_id IS NOT DISTINCT FROM f.request_id) ORDER BY source_id,instance_id,request_id,at_ms,event_id`, args...)
+	rows, err := e.DB.QueryContext(ctx, `WITH matched AS (SELECT DISTINCT source_id,instance_id,request_id FROM facts WHERE `+strings.Join(where, " AND ")+`) SELECT source_id,coalesce(instance_id,''),coalesce(request_id,''),event_id,kind,coalesce(stage,''),at_ms,started_ms,coalesce(attempt_id,''),coalesce(provider,''),coalesce(model,''),coalesce(upstream_model,''),coalesce(endpoint,''),coalesce(stream,false),coalesce(outcome,''),coalesce(status,0),coalesce(terminal_kind,''),coalesce(failure_reason,''),response_completed,duration_ms,dispatch_ms,response_created_ms,first_text_ms,coalesce(trace_detail,'{}'),coalesce(transport_timing,'{}'),coalesce(key_id,'') FROM facts f WHERE EXISTS(SELECT 1 FROM matched m WHERE m.source_id=f.source_id AND m.instance_id IS NOT DISTINCT FROM f.instance_id AND m.request_id IS NOT DISTINCT FROM f.request_id) ORDER BY source_id,instance_id,request_id,at_ms,event_id`, args...)
 	if err != nil {
 		return RequestTraceResult{}, err
 	}
@@ -110,7 +112,7 @@ func (e *Engine) RequestTrace(ctx context.Context, id string, allowed []string, 
 	for rows.Next() {
 		var source, instance, request, detail, transport string
 		var v RequestTraceEvent
-		if err := rows.Scan(&source, &instance, &request, &v.EventID, &v.Kind, &v.Stage, &v.AtMS, &v.StartedMS, &v.AttemptID, &v.Provider, &v.Model, &v.UpstreamModel, &v.Endpoint, &v.Stream, &v.Outcome, &v.Status, &v.TerminalKind, &v.FailureReason, &v.ResponseCompleted, &v.DurationMS, &v.DispatchMS, &v.ResponseCreatedMS, &v.FirstTextMS, &detail, &transport); err != nil {
+		if err := rows.Scan(&source, &instance, &request, &v.EventID, &v.Kind, &v.Stage, &v.AtMS, &v.StartedMS, &v.AttemptID, &v.Provider, &v.Model, &v.UpstreamModel, &v.Endpoint, &v.Stream, &v.Outcome, &v.Status, &v.TerminalKind, &v.FailureReason, &v.ResponseCompleted, &v.DurationMS, &v.DispatchMS, &v.ResponseCreatedMS, &v.FirstTextMS, &detail, &transport, &v.KeyID); err != nil {
 			return out, err
 		}
 		v.Detail, v.Transport = traceDetails(detail), traceDetails(transport)
@@ -190,6 +192,12 @@ func (s *Service) requestTrace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result.Import = s.importStatus(allowed)
+	// Metadata is optional; its failure must not hide the captured request.
+	if s.control != nil {
+		if owner, err := s.controlUser(r); err == nil {
+			_ = s.enrichTraceChannels(r.Context(), owner, result.Data)
+		}
+	}
 	body, err := json.Marshal(result)
 	if err != nil {
 		http.Error(w, "request trace unavailable", 500)

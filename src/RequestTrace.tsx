@@ -1,68 +1,45 @@
 import { useState } from "react";
-import type { FormEvent } from "react";
+import type { FormEvent, CSSProperties } from "react";
+import * as Dialog from "@radix-ui/react-dialog";
 import { useQuery } from "@tanstack/react-query";
-import { Search, RefreshCw } from "lucide-react";
+import {
+  Search,
+  RefreshCw,
+  ArrowUpRight,
+  ArrowDown,
+  Check,
+  X,
+  Clock3,
+  Route,
+  Activity,
+} from "lucide-react";
 import { analyticsRequest, initializationRetryInterval } from "./api";
 import type { Connection, Metrics } from "./types";
 import { Spinner } from "./ui";
+import { SiteLink } from "./ChannelSite";
+import {
+  buildTrace,
+  duration,
+  eventHTTP,
+  eventResult,
+  eventErrors,
+  traceChannel,
+  traceStages,
+} from "./requestTraceModel";
+import type {
+  TraceRun,
+  TraceEvent,
+  TraceAttempt,
+  TraceTone,
+} from "./requestTraceModel";
+export type { TraceRun, TraceEvent } from "./requestTraceModel";
 import "./requestTrace.css";
-
-export interface TraceEvent {
-  event_id: string;
-  kind: string;
-  stage: string;
-  at_ms: number;
-  started_ms: number | null;
-  attempt_id: string;
-  provider: string;
-  model: string;
-  upstream_model: string;
-  endpoint: string;
-  stream: boolean;
-  outcome: string;
-  status: number;
-  terminal_kind: string;
-  failure_reason: string;
-  response_completed: boolean | null;
-  duration_ms: number | null;
-  dispatch_ms: number | null;
-  response_created_ms: number | null;
-  first_text_ms: number | null;
-  detail: Record<string, unknown>;
-  transport: Record<string, unknown>;
-}
-export interface TraceRun {
-  source_id: string;
-  instance_id: string;
-  request_id: string;
-  ambiguous: boolean;
-  events: TraceEvent[];
-}
 interface TraceResult {
   request_id: string;
   data: TraceRun[];
   import?: Metrics["import"];
   generated_at: number;
 }
-const stages: Record<string, string> = {
-  request_received: "请求进入网关",
-  rust_request_spool: "请求体读取 / 资源等待",
-  routing_attempt: "路由选择 / 重试决策",
-  dispatch: "发起渠道请求",
-  billing: "渠道 HTTP 状态 / 收尾",
-  attempt: "渠道尝试结束",
-  upstream_attempt: "渠道尝试结果",
-  request: "最终请求结果",
-  response_headers: "向客户端提交响应头",
-  response_body_finished: "响应体发送结束",
-  response_body_error: "响应体传输错误",
-  downstream_closed: "连接提前关闭 / 处理被取消",
-  gateway_error: "向客户端返回错误",
-  responses_empty_name_repair: "修复空工具名后重试",
-  responses_missing_item_repair: "修复缺失推理项后重试",
-  responses_encrypted_content_repair: "修复加密历史后重试",
-  responses_heartbeat_repair: "修复心跳历史后重试",
-};
 const fields: Record<string, string> = {
   headers_received_ms: "收到上游响应头",
   first_upstream_chunk_ms: "收到上游首块数据",
@@ -96,32 +73,6 @@ function clock(value: number) {
     String(value % 1000).padStart(3, "0")
   );
 }
-function errorText(e: TraceEvent) {
-  const error = e.detail.error as Record<string, unknown> | undefined;
-  return (
-    [
-      error?.error_code,
-      error?.error_message,
-      e.detail.error_code,
-      e.detail.error_message,
-      e.failure_reason,
-      e.detail.skip_reason,
-    ]
-      .filter((v) => typeof v === "string" && v)
-      .join(" · ") || ""
-  );
-}
-function statusText(e: TraceEvent) {
-  const status = e.status || Number(e.detail.attempt_status_code || 0);
-  return (
-    [
-      status ? `HTTP ${status}` : "",
-      e.outcome || e.detail.attempt_outcome || e.terminal_kind,
-    ]
-      .filter(Boolean)
-      .join(" · ") || "已记录"
-  );
-}
 function EventDetails({ event: e }: { event: TraceEvent }) {
   const details = {
     ...e.transport,
@@ -130,11 +81,16 @@ function EventDetails({ event: e }: { event: TraceEvent }) {
   };
   return (
     <details>
-      <summary>阶段时间与详情</summary>
+      <summary>查看阶段详情</summary>
       <dl className="request-trace-details">
-      <dt>绝对时间</dt>
-      <dd>{clock(e.at_ms)}</dd>
-      {typeof e.detail.headers_at_ms === "number" && <><dt>收到上游响应头</dt><dd>{clock(e.detail.headers_at_ms)}</dd></>}
+        <dt>绝对时间</dt>
+        <dd>{clock(e.at_ms)}</dd>
+        {typeof e.detail.headers_at_ms === "number" && (
+          <>
+            <dt>收到上游响应头</dt>
+            <dd>{clock(e.detail.headers_at_ms)}</dd>
+          </>
+        )}
         {e.started_ms != null && e.started_ms > 0 && (
           <>
             <dt>渠道开始时间</dt>
@@ -173,6 +129,17 @@ function EventDetails({ event: e }: { event: TraceEvent }) {
             </div>
           ),
         )}
+        <dt>内部渠道 ID</dt>
+        <dd>{e.provider || "—"}</dd>
+        <dt>原始阶段</dt>
+        <dd>{e.stage || e.kind}</dd>
+        <dt>原始状态</dt>
+        <dd>
+          {e.outcome ||
+            (e.detail.attempt_outcome as string) ||
+            e.terminal_kind ||
+            "未记录"}
+        </dd>
         <dt>尝试 ID</dt>
         <dd>{e.attempt_id || "—"}</dd>
         <dt>上游模型</dt>
@@ -188,6 +155,139 @@ function EventDetails({ event: e }: { event: TraceEvent }) {
   );
 }
 
+function Status({
+  tone,
+  label,
+  status,
+}: {
+  tone: TraceTone;
+  label: string;
+  status?: number;
+}) {
+  return (
+    <span className={`trace-status ${tone}`}>
+      {tone === "success" ? (
+        <Check size={13} />
+      ) : tone === "failure" ? (
+        <X size={13} />
+      ) : (
+        <Clock3 size={13} />
+      )}{" "}
+      {label}
+      {!!status && <span>HTTP {status}</span>}
+    </span>
+  );
+}
+function StageList({
+  events,
+  origin,
+}: {
+  events: TraceEvent[];
+  origin: number;
+}) {
+  return (
+    <ol className="trace-stage-list">
+      {events.map((e) => (
+        <li key={e.event_id}>
+          <span className={`trace-stage-dot ${eventResult(e).tone}`} />
+          <div className="trace-stage-title">
+            <strong>{traceStages[e.stage || e.kind] || "其他阶段"}</strong>
+            <time title={clock(e.at_ms)}>
+              +{duration(Math.max(0, e.at_ms - origin))}
+            </time>
+          </div>
+          {(e.outcome || eventHTTP(e) > 0) && (
+            <Status {...eventResult(e)} status={eventHTTP(e)} />
+          )}
+          {eventErrors(e) && <p className="trace-error">{eventErrors(e)}</p>}
+          <EventDetails event={e} />
+        </li>
+      ))}
+    </ol>
+  );
+}
+function AttemptDrawer({
+  run,
+  attempt,
+  number,
+  origin,
+  onClose,
+}: {
+  run: TraceRun;
+  attempt: TraceAttempt;
+  number: number;
+  origin: number;
+  onClose: () => void;
+}) {
+  const channel = traceChannel(run, attempt.provider);
+  return (
+    <Dialog.Root
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
+      <Dialog.Portal>
+        <Dialog.Overlay className="dialog-overlay" />
+        <Dialog.Content className="detail-panel trace-detail-drawer">
+          <Dialog.Close
+            className="icon-button detail-close"
+            aria-label="关闭尝试详情"
+          >
+            <X size={20} />
+          </Dialog.Close>
+          <span className="eyebrow">
+            CHANNEL ATTEMPT {number.toString().padStart(2, "0")}
+          </span>
+          <Dialog.Title>{channel.name}</Dialog.Title>
+          <Dialog.Description>
+            {channel.group_name || "本次请求的渠道尝试"}
+            {channel.group_id ? ` · 分组 #${channel.group_id}` : ""}
+          </Dialog.Description>
+          <div className="trace-drawer-status">
+            <Status
+              tone={attempt.tone}
+              label={attempt.label}
+              status={attempt.status}
+            />
+            <strong>{duration(attempt.duration)}</strong>
+          </div>
+          {channel.dashboard_url && (
+            <div className="trace-site-link">
+              <SiteLink base={channel.dashboard_url}>打开站点控制台</SiteLink>
+            </div>
+          )}
+          {channel.site_name && (
+            <p className="muted">
+              站点名称与倍率来自当前渠道配置，不代表请求发生时的计费倍率。
+            </p>
+          )}
+          <section className="detail-section">
+            <h3>阶段时间线</h3>
+            <StageList events={attempt.events} origin={origin} />
+          </section>
+          <details className="trace-technical">
+            <summary>技术标识</summary>
+            <dl className="request-trace-details">
+              <dt>来源</dt>
+              <dd>{run.source_id}</dd>
+              <dt>渠道 ID</dt>
+              <dd>{attempt.provider}</dd>
+              <dt>尝试 ID</dt>
+              <dd>
+                {attempt.events.find((e) => e.attempt_id)?.attempt_id ||
+                  "未记录"}
+              </dd>
+              <dt>请求 ID</dt>
+              <dd>{run.request_id}</dd>
+            </dl>
+          </details>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
 export function TraceTimeline({
   run,
   sourceName,
@@ -195,131 +295,270 @@ export function TraceTimeline({
   run: TraceRun;
   sourceName: string;
 }) {
-  const arrival = run.events.find((e) => e.stage === "request_received");
-  const finals = run.events.filter((e) => e.kind === "request");
-  const final = run.ambiguous ? undefined : finals.at(-1);
-  const last = run.events.at(-1)!;
-  const transportFinished = run.events.find(
-    (e) => e.stage === "response_body_finished",
-  );
-  const attempts = new Set(
-    run.events
-      .filter((e) => e.kind === "dispatch" || e.kind === "attempt")
-      .map((e) => e.attempt_id)
-      .filter(Boolean),
-  );
-  const model = final?.model || run.events.find((e) => e.model)?.model;
-  const start = arrival?.at_ms;
+  const trace = buildTrace(run);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [openAttempt, setOpenAttempt] = useState<string | null>(null);
+  const { attempts, arrival, final, completed, origin, span } = trace;
+  const finalState = run.ambiguous
+    ? { label: "无法区分", tone: "warning" as const }
+    : eventResult(final);
+  const model = final?.model || trace.events.find((e) => e.model)?.model;
+  const total = run.ambiguous
+    ? null
+    : (completed?.duration_ms ?? final?.duration_ms);
+  const successes = attempts.filter((a) => a.tone === "success").length;
+  const failures = attempts.filter((a) => a.tone === "failure").length;
+  const chosen = attempts.find((a) => a.id === openAttempt);
+  const hasTimes = !run.ambiguous && trace.events.length > 0;
+  const open = (attempt: TraceAttempt) => {
+    setSelected(attempt.id);
+    setOpenAttempt(attempt.id);
+  };
   return (
     <section className="trace-run">
       <div className="trace-run-heading">
-        <h3>{sourceName}</h3>
-        <span className="mono">{run.request_id}</span>
+        <div>
+          <span className="trace-source">{sourceName}</span>
+          <h3>
+            {run.ambiguous
+              ? "匹配到多个请求"
+              : finalState.tone === "success"
+                ? "请求成功"
+                : finalState.tone === "failure"
+                  ? "请求失败"
+                  : "请求记录"}
+          </h3>
+        </div>
+        <Status {...finalState} status={final ? eventHTTP(final) : undefined} />
       </div>
-      {run.ambiguous && (
-        <p className="error-banner">
-          同一实例重复使用了此请求
-          ID，存在多个请求。以下为全部匹配事件，不能把它们当作一次请求的重试链。
-        </p>
-      )}
       <div className="trace-summary">
         <div>
-          <small>最终状态</small>
-          <strong>
-            {final
-              ? statusText(final)
-              : transportFinished
-                ? `HTTP ${transportFinished.status} · 响应传输结束`
-                : "未记录最终结果"}
-          </strong>
-        </div>
-        <div>
-          <small>模型</small>
+          <small>请求模型</small>
           <strong>{model || "未记录"}</strong>
         </div>
         <div>
-          <small>已记录渠道尝试</small>
-          <strong>{attempts.size}</strong>
+          <small>网关总耗时</small>
+          <strong>{duration(total)}</strong>
         </div>
         <div>
-          <small>网关总耗时</small>
+          <small>{run.ambiguous ? "渠道事件" : "渠道尝试"}</small>
           <strong>
-            {run.ambiguous
-              ? "无法区分"
-              : transportFinished
-                ? ms(transportFinished.duration_ms)
-                : final
-                  ? ms(final.duration_ms)
-                  : "未记录"}
+            {attempts.length}
+            <span>次</span>
+          </strong>
+        </div>
+        <div>
+          <small>尝试结果</small>
+          <strong className="trace-attempt-count">
+            <span className="success">{successes} 成功</span>
+            <span className="failure">{failures} 失败</span>
           </strong>
         </div>
       </div>
-      {!arrival && (
-        <p className="muted">
-          历史记录未保存入口事件；以下仅展示已采集到的事实，不推算缺失的阶段或错误原文。
+      {run.ambiguous && (
+        <p className="trace-notice warning">
+          同一实例重复使用了此请求
+          ID，存在多个请求。各条事件单独展示，无法把它们合并为一次请求的重试链。
+        </p>
+      )}
+      {!arrival && !run.ambiguous && (
+        <p className="trace-notice">
+          历史记录缺少入口时间，时间线以首条记录为起点；缺失阶段和错误原文不作推测。
         </p>
       )}
       {arrival && !final && (
-        <p className="muted">
-          已记录网关入口，但最终业务结果尚未同步或未被采集；HTTP
-          响应头不代表模型处理成功。
+        <p className="trace-notice">
+          最终结果尚未记录。收到 HTTP 响应头或发送结束不代表模型处理成功。
         </p>
       )}
-      <div className="table-scroll">
-        <table className="channel-table request-trace-table">
-          <thead>
-            <tr>
-              <th>时间 / 相对入口</th>
-              <th>行为</th>
-              <th>渠道 / 尝试</th>
-              <th>状态与错误</th>
-              <th>耗时与详情</th>
-            </tr>
-          </thead>
-          <tbody>
-            {run.events.map((e) => (
-              <tr key={e.event_id}>
-                <td>
-                  <time>
-                    {new Date(e.at_ms).toLocaleTimeString("zh-CN", {
-                      hour12: false,
-                    })}
-                    .{String(e.at_ms % 1000).padStart(3, "0")}
-                  </time>
-                  <small>
-                    {start == null || run.ambiguous
-                      ? "相对时间未记录"
-                      : `+${ms(Math.max(0, e.at_ms - start))}`}
-                  </small>
-                </td>
-                <td>
-                  <strong>
-                    {stages[e.stage || e.kind] || e.stage || e.kind}
-                  </strong>
-                </td>
-                <td>
-                  {e.provider || "网关"}
-                  <small className="mono">{e.attempt_id || "—"}</small>
-                </td>
-                <td>
-                  {statusText(e)}
-                  {errorText(e) && (
-                    <small className="trace-error">{errorText(e)}</small>
-                  )}
-                </td>
-                <td>
-                  <EventDetails event={e} />
-                </td>
-              </tr>
+      <div className="trace-visual-section">
+        <div className="trace-section-heading">
+          <h4>
+            <Activity size={16} />
+            渠道耗时分布
+          </h4>
+          <span>
+            {arrival ? "相对网关入口" : "相对首条记录"} · 点击渠道查看详情
+          </span>
+        </div>
+        {hasTimes && attempts.length > 0 ? (
+          <div
+            className="trace-waterfall"
+            role="region"
+            aria-label="渠道请求时间线"
+          >
+            <div className="trace-waterfall-header">
+              <span>渠道 / 尝试</span>
+              <div className="trace-axis">
+                {[0, 25, 50, 75, 100].map((percent) => (
+                  <span key={percent} style={{ left: `${percent}%` }}>
+                    {duration((span * percent) / 100)}
+                  </span>
+                ))}
+              </div>
+              <span>耗时</span>
+            </div>
+            {attempts.map((a, i) => (
+              <div
+                className={`trace-waterfall-row ${selected === a.id ? "selected" : ""}`}
+                key={a.id}
+              >
+                <button
+                  className="trace-channel-link"
+                  onClick={() => open(a)}
+                  title={traceChannel(run, a.provider).group_name}
+                >
+                  <span className="trace-attempt-number">{i + 1}</span>
+                  <span>{traceChannel(run, a.provider).name}</span>
+                  <ArrowUpRight size={13} />
+                </button>
+                <button
+                  className="trace-lane"
+                  aria-label={`查看第 ${i + 1} 次尝试：${traceChannel(run, a.provider).name}，${a.label}，${duration(a.duration)}`}
+                  onClick={() => open(a)}
+                >
+                  <span
+                    className={`trace-duration-bar ${a.tone} ${a.end == null ? "incomplete" : ""}`}
+                    style={
+                      {
+                        "--trace-left": `${Math.max(0, ((a.started - origin) / span) * 100)}%`,
+                        "--trace-width": `${Math.max(0.6, (((a.end ?? a.last) - a.started) / span) * 100)}%`,
+                      } as CSSProperties
+                    }
+                  />
+                </button>
+                <span className="trace-elapsed">{duration(a.duration)}</span>
+              </div>
             ))}
-          </tbody>
-        </table>
+            <div className="trace-legend">
+              <span className="success">成功</span>
+              <span className="failure">失败</span>
+              <span className="warning">跳过 / 取消</span>
+              <span className="neutral">结果未记录</span>
+              <small>重叠时间条表示并发，不将耗时相加</small>
+            </div>
+          </div>
+        ) : (
+          <p className="trace-notice">
+            {run.ambiguous
+              ? "请求 ID 存在歧义，无法绘制单次请求的耗时分布。"
+              : "没有可绘制的渠道尝试记录。"}
+          </p>
+        )}
       </div>
-      <p className="muted trace-footnote">
-        实例：{run.instance_id || "历史记录未提供"} · 最近事件：
-        {clock(last.at_ms)}
-        。渠道阶段时间从各自请求开始计时；并发尝试的耗时不可直接相加。响应体发送结束表示网关完成交付，不证明客户端已接收全部字节。
-      </p>
+      <div className="trace-journey-section">
+        <div className="trace-section-heading">
+          <h4>
+            <Route size={16} />
+            请求过程
+          </h4>
+          <span>每次尝试合并显示派发、结果与错误</span>
+        </div>
+        <ol className="trace-journey">
+          <li className="trace-bookend">
+            <span className="trace-journey-dot" />
+            <div>
+              <strong>{arrival ? "请求进入网关" : "首条可见记录"}</strong>
+              <small>{trace.events.length ? clock(origin) : "未记录"}</small>
+            </div>
+            <span>+0 ms</span>
+          </li>
+          {attempts.map((a, i) => (
+            <li
+              key={a.id}
+              className={`trace-attempt ${a.tone} ${selected === a.id ? "selected" : ""}`}
+            >
+              <span className={`trace-journey-dot ${a.tone}`}>{i + 1}</span>
+              <article>
+                <div className="trace-attempt-heading">
+                  <button
+                    className="trace-channel-link"
+                    onClick={() => open(a)}
+                  >
+                    {traceChannel(run, a.provider).name}
+                    <ArrowUpRight size={14} />
+                  </button>
+                  <Status tone={a.tone} label={a.label} status={a.status} />
+                </div>
+                <div className="trace-attempt-subtitle">
+                  <span>
+                    {traceChannel(run, a.provider).group_name ||
+                      `第 ${i + 1} 次渠道尝试`}
+                  </span>
+                  <span>
+                    {a.hasStart ? "开始" : "记录"} +
+                    {duration(Math.max(0, a.started - origin))}
+                  </span>
+                  <span>耗时 {duration(a.duration)}</span>
+                </div>
+                {!!a.errors.length && (
+                  <div className="trace-error-message">
+                    {a.errors.map((error) => (
+                      <p key={error}>{error}</p>
+                    ))}
+                  </div>
+                )}
+                <details className="trace-event-disclosure">
+                  <summary>展开 {a.events.length} 条阶段记录</summary>
+                  <StageList events={a.events} origin={origin} />
+                </details>
+              </article>
+            </li>
+          ))}
+          <li className={`trace-bookend trace-final ${finalState.tone}`}>
+            <span className={`trace-journey-dot ${finalState.tone}`}>
+              {finalState.tone === "success" ? (
+                <Check size={14} />
+              ) : finalState.tone === "failure" ? (
+                <X size={14} />
+              ) : null}
+            </span>
+            <div>
+              <strong>
+                {final ? `请求最终${finalState.label}` : "最终结果未记录"}
+              </strong>
+              {final && eventErrors(final) && (
+                <small>{eventErrors(final)}</small>
+              )}
+            </div>
+            {final && (
+              <span>+{duration(Math.max(0, final.at_ms - origin))}</span>
+            )}
+          </li>
+        </ol>
+        {!!trace.gateway.length && (
+          <details className="trace-gateway-records">
+            <summary>网关阶段记录 · {trace.gateway.length} 条</summary>
+            <StageList events={trace.gateway} origin={origin} />
+          </details>
+        )}
+      </div>
+      <details className="trace-technical trace-run-technical">
+        <summary>请求标识与记录说明</summary>
+        <dl className="request-trace-details">
+          <dt>Request ID</dt>
+          <dd>{run.request_id}</dd>
+          <dt>实例</dt>
+          <dd>{run.instance_id || "未记录"}</dd>
+          <dt>最近事件</dt>
+          <dd>
+            {trace.events.length ? clock(trace.events.at(-1)!.at_ms) : "未记录"}
+          </dd>
+        </dl>
+        <p>
+          渠道名称与倍率来自当前关联。阶段详情中的渠道耗时从各自请求开始计时；响应发送结束不证明客户端已接收全部字节。
+        </p>
+      </details>
+      {chosen && (
+        <AttemptDrawer
+          key={chosen.id}
+          run={run}
+          attempt={chosen}
+          number={attempts.indexOf(chosen) + 1}
+          origin={origin}
+          onClose={() => setOpenAttempt(null)}
+        />
+      )}
     </section>
   );
 }
@@ -361,8 +600,14 @@ export function RequestTracePage({
   }
   return (
     <section className="data-panel request-trace-panel">
-      <div className="panel-head">
-        <h2>请求追踪</h2>
+      <div className="trace-page-heading">
+        <span className="trace-heading-icon">
+          <Route size={21} />
+        </span>
+        <div>
+          <span className="eyebrow">REQUEST INSIGHTS</span>
+          <h2>请求追踪</h2>
+        </div>
       </div>
       <p className="muted">
         输入 Request ID，查看请求进入 uni-api
@@ -430,6 +675,20 @@ export function RequestTracePage({
         <p className="coverage-note">
           历史事实仍在同步，当前链路可能不完整。稍后可刷新记录。
         </p>
+      )}
+      {!search && (
+        <div className="trace-empty trace-welcome">
+          <Activity size={26} />
+          <h3>每一次重试，都有迹可循</h3>
+          <p>输入请求 ID，查看渠道尝试的先后、耗时和最终结果。</p>
+          <div>
+            <span>进入网关</span>
+            <ArrowDown size={14} />
+            <span>渠道尝试与重试</span>
+            <ArrowDown size={14} />
+            <span>最终结果</span>
+          </div>
+        </div>
       )}
       {query.data?.data.length === 0 && (
         <div className="trace-empty">
