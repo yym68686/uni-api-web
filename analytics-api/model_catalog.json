@@ -12,6 +12,18 @@
     "note": "Standard 短上下文基准；长上下文输入及缓存为 2 倍，输出为 1.5 倍。"
   },
   {
+    "model": "gpt-6.1-sol",
+    "input": 0,
+    "output": 0,
+    "cache_read": 0,
+    "cache_write": 0,
+    "cache_write_1h": 0,
+    "source": "unconfirmed",
+    "verified": false,
+    "cache_write_kind": "flat",
+    "note": "价格待确认，暂不用于费用估算；请填写并确认实际单价。"
+  },
+  {
     "model": "gpt-6-sol",
     "input": 2,
     "output": 10,

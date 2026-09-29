@@ -88,7 +88,7 @@ func TestSuffixCostsFollowCurrentBaseIncludingCacheAndNeverUseStaleOverride(t *t
 }
 
 func TestPricePrefixBoundaries(t *testing.T) {
-	for input, want := range map[string]string{"glm-5.3-flash-thinking": "glm-5.3-flash", "claude-fable-5-1-high": "claude-fable-5-1", "claude-sonnet-5-5": "claude-sonnet-5-5", "claude-sonnet-5-5-thinking": "claude-sonnet-5-5", "gpt-5.50": "gpt-5.50", "gemini-3.1-pro-search": "gemini-3.1-pro"} {
+	for input, want := range map[string]string{"glm-5.3-flash-thinking": "glm-5.3-flash", "claude-fable-5-1-high": "claude-fable-5-1", "claude-sonnet-5-5": "claude-sonnet-5-5", "claude-sonnet-5-5-thinking": "claude-sonnet-5-5", "gpt-5.50": "gpt-5.50", "gpt-6.1-sol-thinking": "gpt-6.1-sol", "gemini-3.1-pro-search": "gemini-3.1-pro"} {
 		if got := canonicalPriceModel(input); got != want {
 			t.Errorf("%s: got %s want %s", input, got, want)
 		}

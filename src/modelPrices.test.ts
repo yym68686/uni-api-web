@@ -22,7 +22,7 @@ it("shows exactly the detection models, preserves manual values and fills old pl
     input: 7,
     verified: false,
   });
-  expect(prices.filter((p) => !p.verified).map(p => p.model)).toEqual(["codex-auto-review", "gemini-3.1-pro"]);
+  expect(prices.filter((p) => !p.verified).map(p => p.model)).toEqual(["gpt-6.1-sol", "codex-auto-review", "gemini-3.1-pro"]);
   const placeholder = {
     ...base,
     input: 0,
@@ -54,6 +54,8 @@ it("uses the longest complete model prefix, ignoring stale suffix prices and res
     "claude-fable-5-1",
   );
   expect(canonicalPriceModel("gpt-5.50")).toBe("gpt-5.50");
+  expect(canonicalPriceModel("gpt-6.1-sol-thinking")).toBe("gpt-6.1-sol");
+  expect(referencePrice("gpt-6.1-sol", MODEL_PRICE_CATALOG)).toBeUndefined();
   expect(canonicalPriceModel("claude-opus-5-5-thinking")).toBe("claude-opus-5-5");
   expect(canonicalPriceModel("claude-sonnet-5-5")).toBe("claude-sonnet-5-5");
   expect(canonicalPriceModel("claude-sonnet-5-5-thinking")).toBe("claude-sonnet-5-5");
