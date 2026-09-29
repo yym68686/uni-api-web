@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -129,7 +130,43 @@ func (e *Engine) RequestTrace(ctx context.Context, id string, allowed []string, 
 		out.Data[i].Events = append(out.Data[i].Events, v)
 		out.Data[i].Ambiguous = finals[key] > 1 || starts[key] > 1
 	}
+	for i := range out.Data {
+		sort.SliceStable(out.Data[i].Events, func(a, b int) bool {
+			left, right := out.Data[i].Events[a], out.Data[i].Events[b]
+			if left.AtMS != right.AtMS {
+				return left.AtMS < right.AtMS
+			}
+			// Gateway event IDs carry a process-local, zero-padded hex sequence.
+			// Sorting by the kind prefix would put dispatch before earlier skips.
+			lp, ls := traceEventSequence(left.EventID)
+			rp, rs := traceEventSequence(right.EventID)
+			if lp != rp {
+				return lp < rp
+			}
+			if lp != "" {
+				return ls < rs
+			}
+			return left.EventID < right.EventID
+		})
+	}
 	return out, rows.Err()
+}
+
+func traceEventSequence(id string) (string, string) {
+	_, tail, ok := strings.Cut(id, "-")
+	if !ok {
+		return "", ""
+	}
+	process, sequence, ok := strings.Cut(tail, "-")
+	if !ok || (len(process) != 32 && len(process) != 64) || len(sequence) != 16 {
+		return "", ""
+	}
+	for _, c := range process + sequence {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return "", ""
+		}
+	}
+	return process, sequence
 }
 
 func (s *Service) requestTrace(w http.ResponseWriter, r *http.Request) {

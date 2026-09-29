@@ -113,6 +113,23 @@ func TestRequestTraceHTTPRequiresAuthAndValidID(t *testing.T) {
 	}
 }
 
+func TestRequestTraceOrdersSameMillisecondByGatewaySequence(t *testing.T) {
+	e := stateTestEngine(t)
+	at := time.Now().Add(-time.Minute).UnixMilli()
+	process := "0123456789abcdef0123456789abcdef"
+	facts := []Fact{
+		{Schema: 1, EventID: "dispatch-" + process + "-0000000000000002", Kind: "dispatch", RequestID: "sequence", AtMS: at},
+		{Schema: 1, EventID: "trace-" + process + "-0000000000000001", Kind: "trace", Stage: "routing_attempt", RequestID: "sequence", AtMS: at},
+	}
+	if err := e.Import(context.Background(), "sequence", "etag", facts); err != nil {
+		t.Fatal(err)
+	}
+	result, err := e.RequestTrace(context.Background(), "sequence", nil, "")
+	if err != nil || result.Data[0].Events[0].Stage != "routing_attempt" {
+		t.Fatal(result, err)
+	}
+}
+
 func TestRequestTraceRestoresLegacyCheckpointWithoutLosingFacts(t *testing.T) {
 	ctx := context.Background()
 	old := stateTestEngine(t)

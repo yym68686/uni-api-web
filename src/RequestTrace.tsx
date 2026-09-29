@@ -49,7 +49,7 @@ const stages: Record<string, string> = {
   rust_request_spool: "请求体读取 / 资源等待",
   routing_attempt: "路由选择 / 重试决策",
   dispatch: "发起渠道请求",
-  billing: "渠道 HTTP 响应",
+  billing: "渠道 HTTP 状态 / 收尾",
   attempt: "渠道尝试结束",
   upstream_attempt: "渠道尝试结果",
   request: "最终请求结果",
@@ -132,8 +132,9 @@ function EventDetails({ event: e }: { event: TraceEvent }) {
     <details>
       <summary>阶段时间与详情</summary>
       <dl className="request-trace-details">
-        <dt>绝对时间</dt>
-        <dd>{clock(e.at_ms)}</dd>
+      <dt>绝对时间</dt>
+      <dd>{clock(e.at_ms)}</dd>
+      {typeof e.detail.headers_at_ms === "number" && <><dt>收到上游响应头</dt><dd>{clock(e.detail.headers_at_ms)}</dd></>}
         {e.started_ms != null && (
           <>
             <dt>渠道开始时间</dt>
