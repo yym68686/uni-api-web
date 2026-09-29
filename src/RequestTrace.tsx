@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { CSSProperties } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { useQuery } from "@tanstack/react-query";
+import { queryOptions, useQuery } from "@tanstack/react-query";
 import {
   RefreshCw,
   ArrowUpRight,
@@ -33,24 +33,16 @@ import type {
 export type { TraceRun, TraceEvent } from "./requestTraceModel";
 import "./requestTrace.css";
 
-export function RequestTraceDialog({
-  connection,
-  sources,
-  requestId,
-  sourceId,
-  instanceId,
-  onClose,
-}: {
-  connection: Connection;
-  sources: { id: string; name: string }[];
-  requestId: string;
-  sourceId: string;
-  instanceId?: string;
-  onClose: () => void;
-}) {
-  const query = useQuery({
+export function requestTraceOptions(
+  connection: Connection,
+  requestId: string,
+  sourceId: string,
+  instanceId?: string,
+) {
+  return queryOptions({
     queryKey: [
       "request-trace",
+      connection.base,
       connection.session,
       sourceId,
       instanceId,
@@ -69,8 +61,35 @@ export function RequestTraceDialog({
       );
     },
     retry: false,
+    // Incomplete imports still revalidate on opening; complete historical
+    // traces can reuse intent prefetches and quick repeat visits.
+    staleTime: (query) =>
+      query.state.data?.data.length &&
+      query.state.data.import?.caught_up !== false
+        ? 30_000
+        : 0,
     refetchInterval: initializationRetryInterval,
   });
+}
+
+export function RequestTraceDialog({
+  connection,
+  sources,
+  requestId,
+  sourceId,
+  instanceId,
+  onClose,
+}: {
+  connection: Connection;
+  sources: { id: string; name: string }[];
+  requestId: string;
+  sourceId: string;
+  instanceId?: string;
+  onClose: () => void;
+}) {
+  const query = useQuery(
+    requestTraceOptions(connection, requestId, sourceId, instanceId),
+  );
   return (
     <Dialog.Root
       open

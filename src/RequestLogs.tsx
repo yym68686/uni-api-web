@@ -1,6 +1,6 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronDown,
   ChevronLeft,
@@ -28,7 +28,7 @@ import type { Filters } from "./preferences";
 import { endpointChoices, readKeys } from "./requestFilters";
 import { useKeyRequestStats } from "./keyRequestStats";
 import { friendlyReason } from "./requestTraceModel";
-import { RequestTraceDialog } from "./RequestTrace";
+import { RequestTraceDialog, requestTraceOptions } from "./RequestTrace";
 import { Spinner } from "./ui";
 import "./requestLogs.css";
 
@@ -133,6 +133,7 @@ export function RequestLogsPage({
   connection: Connection;
   sources: { id: string; name: string }[];
 }) {
+  const queryClient = useQueryClient();
   const storage = `${base.base}:${base.session}`;
   const [filters, setFilters] = useState(() =>
     loadFilters(storage, "requests"),
@@ -274,6 +275,13 @@ export function RequestLogsPage({
         source: row.source_id,
         instance: row.instance_id,
       });
+  }
+  function preload(row: RequestLog) {
+    const id = row.request_id || row.trace_id;
+    if (id)
+      void queryClient.prefetchQuery(
+        requestTraceOptions(base, id, row.source_id, row.instance_id),
+      );
   }
   const traceSource =
     filters.sourceId ||
@@ -532,6 +540,8 @@ export function RequestLogsPage({
                     key={row.event_id}
                     className="request-log-row"
                     onClick={() => open(row)}
+                    onPointerEnter={() => preload(row)}
+                    onFocus={() => preload(row)}
                   >
                     <td>
                       <time dateTime={new Date(row.at_ms).toISOString()}>

@@ -1,5 +1,12 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RequestLogsPage, requestLogParams } from "./RequestLogs";
@@ -86,6 +93,32 @@ function auxiliary(url: URL) {
       import: { caught_up: true },
     });
   return undefined;
+}
+function traceResult() {
+  return {
+    import: { caught_up: true },
+    data: [
+      {
+        source_id: "fugue",
+        instance_id: "instance",
+        request_id: row.request_id,
+        ambiguous: false,
+        events: [
+          {
+            ...row,
+            kind: "request",
+            stage: "",
+            provider: "",
+            upstream_model: "",
+            response_completed: true,
+            attempt_id: "",
+            detail: {},
+            transport: {},
+          },
+        ],
+      },
+    ],
+  };
 }
 it("scopes opaque key IDs by source and keeps log preferences independent", () => {
   const params = requestLogParams(
@@ -184,29 +217,7 @@ it("opens the existing timeline in a scoped modal and returns to the same log pa
     if (aux) return aux;
     calls.push(url);
     if (url.pathname.endsWith("/request-trace"))
-      return Response.json({
-        data: [
-          {
-            source_id: "fugue",
-            instance_id: "instance",
-            request_id: row.request_id,
-            ambiguous: false,
-            events: [
-              {
-                ...row,
-                kind: "request",
-                stage: "",
-                provider: "",
-                upstream_model: "",
-                response_completed: true,
-                attempt_id: "",
-                detail: {},
-                transport: {},
-              },
-            ],
-          },
-        ],
-      });
+      return Response.json(traceResult());
     return Response.json({
       data: [row],
       models: [row.model],
@@ -241,4 +252,87 @@ it("shows logs even when the live key directory fails", async () => {
   });
   await screen.findByRole("button", { name: row.request_id });
   await screen.findByText("API key 目录暂不可用；请求日志仍可浏览。");
+});
+
+it("prefetches only the intended row, shares in-flight work, and reopens instantly", async () => {
+  const traces: URL[] = [];
+  let finish!: (response: Response) => void;
+  const user = setup(async (input) => {
+    const url = new URL(input, location.origin);
+    if (url.pathname.endsWith("/request-trace")) {
+      traces.push(url);
+      return new Promise<Response>((resolve) => {
+        finish = resolve;
+      });
+    }
+    return (
+      auxiliary(url) ||
+      Response.json({
+        data: [
+          row,
+          {
+            ...row,
+            event_id: "e2",
+            request_id: "another",
+            instance_id: "second",
+          },
+        ],
+        models: [row.model],
+        next_cursor: "",
+        to: row.at_ms,
+      })
+    );
+  });
+  const button = await screen.findByRole("button", { name: row.request_id });
+  expect(traces).toHaveLength(0);
+  await user.hover(button);
+  await waitFor(() => expect(traces).toHaveLength(1));
+  await user.click(button);
+  expect(traces).toHaveLength(1);
+  expect(screen.getByText("正在读取请求记录…")).toBeVisible();
+  await act(async () => finish(Response.json(traceResult())));
+  await screen.findByRole("heading", { name: "请求成功" });
+  await user.click(screen.getByRole("button", { name: "关闭请求详情" }));
+  await user.click(button);
+  expect(screen.getByRole("heading", { name: "请求成功" })).toBeVisible();
+  expect(screen.queryByText("正在读取请求记录…")).not.toBeInTheDocument();
+  expect(traces).toHaveLength(1);
+  await user.click(screen.getByRole("button", { name: "刷新记录" }));
+  await waitFor(() => expect(traces).toHaveLength(2));
+  await act(async () => finish(Response.json(traceResult())));
+  await user.click(screen.getByRole("button", { name: "关闭请求详情" }));
+  fireEvent.focus(screen.getByRole("button", { name: "another" }));
+  await waitFor(() => expect(traces).toHaveLength(3));
+  expect(traces[2].searchParams.get("instance_id")).toBe("second");
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  await act(async () => finish(Response.json(traceResult())));
+});
+
+it("a failed intent prefetch does not prevent an explicit click from retrying", async () => {
+  let attempts = 0;
+  const user = setup(async (input) => {
+    const url = new URL(input, location.origin);
+    if (url.pathname.endsWith("/request-trace")) {
+      attempts++;
+      return attempts === 1
+        ? new Response("unavailable", { status: 503 })
+        : Response.json(traceResult());
+    }
+    return (
+      auxiliary(url) ||
+      Response.json({
+        data: [row],
+        models: [row.model],
+        next_cursor: "",
+        to: row.at_ms,
+      })
+    );
+  });
+  const button = await screen.findByRole("button", { name: row.request_id });
+  await user.hover(button);
+  await waitFor(() => expect(attempts).toBe(1));
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  await user.click(button);
+  await screen.findByRole("heading", { name: "请求成功" });
+  expect(attempts).toBe(2);
 });
