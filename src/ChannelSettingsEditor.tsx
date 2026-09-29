@@ -259,9 +259,12 @@ function JSONField({
   const serialized = value === undefined ? "" : JSON.stringify(value, null, 2);
   const [text, setText] = useState(serialized);
   const [error, setError] = useState("");
+  const focused = useRef(false);
   useEffect(() => {
-    setText(serialized);
-    setError("");
+    if (!focused.current) {
+      setText(serialized);
+      setError("");
+    }
   }, [serialized]);
   return (
     <label className="setting-json">
@@ -271,6 +274,13 @@ function JSONField({
         aria-invalid={!!error}
         value={text}
         rows={5}
+        onFocus={() => {
+          focused.current = true;
+        }}
+        onBlur={() => {
+          focused.current = false;
+          if (!error) setText(serialized);
+        }}
         onChange={(e) => {
           const value = e.target.value;
           setText(value);

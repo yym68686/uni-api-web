@@ -38,6 +38,10 @@ it("edits endpoint and stream rules while preserving advanced conditions and exp
   await user.click(screen.getByRole("button", { name: "上移超时规则 2" }));
   expect((current as any).rules[0].match.stream).toBe(false);
   expect((current as any).rules[1].match.engine).toBe("gpt");
+  await user.type(screen.getByLabelText("规则 1 模型"), "gpt-5*, gpt-6*");
+  await user.tab();
+  expect((current as any).rules[0].match.model).toEqual(["gpt-5*", "gpt-6*"]);
+  expect(screen.getByLabelText("规则 1 模型")).toHaveValue("gpt-5*, gpt-6*");
 });
 it("offers the actual hedging toggle and concurrency without changing the winner policy", async () => {
   let current: unknown;

@@ -1,4 +1,5 @@
 import { Plus, Trash2, ArrowUp, ArrowDown } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 type Rule = { match: Record<string, unknown>; timeout: Record<string, number> };
 type Policy = { default?: Record<string, number>; rules?: Rule[] };
@@ -27,6 +28,41 @@ const endpoints = [
   "/v1/images/generations",
   "/v1/systemone",
 ];
+function ConditionInput({
+  value,
+  onChange,
+  ...props
+}: {
+  value: unknown;
+  onChange: (value: unknown) => void;
+  "aria-label": string;
+  placeholder: string;
+  list?: string;
+}) {
+  const serialized = conditionText(value);
+  const [text, setText] = useState(serialized);
+  const focused = useRef(false);
+  useEffect(() => {
+    if (!focused.current) setText(serialized);
+  }, [serialized]);
+  return (
+    <input
+      {...props}
+      value={text}
+      onFocus={() => {
+        focused.current = true;
+      }}
+      onBlur={() => {
+        focused.current = false;
+        setText(serialized);
+      }}
+      onChange={(e) => {
+        setText(e.target.value);
+        onChange(conditionValue(e.target.value));
+      }}
+    />
+  );
+}
 export function TimeoutPolicyField({
   value,
   onChange,
@@ -126,15 +162,14 @@ export function TimeoutPolicyField({
           <div className="timeout-match-grid">
             <label>
               端点
-              <input
+              <ConditionInput
                 aria-label={`规则 ${index + 1} 端点`}
                 list="timeout-endpoints"
                 placeholder="全部端点"
-                value={conditionText(rule.match?.endpoint)}
-                onChange={(e) => {
+                value={rule.match?.endpoint}
+                onChange={(value) => {
                   const match = { ...rule.match };
-                  if (e.target.value)
-                    match.endpoint = conditionValue(e.target.value);
+                  if (value) match.endpoint = value;
                   else delete match.endpoint;
                   update(index, { ...rule, match });
                 }}
@@ -163,14 +198,13 @@ export function TimeoutPolicyField({
             </label>
             <label>
               模型
-              <input
+              <ConditionInput
                 aria-label={`规则 ${index + 1} 模型`}
                 placeholder="全部模型；逗号分隔，支持 * 通配符"
-                value={conditionText(rule.match?.model)}
-                onChange={(e) => {
+                value={rule.match?.model}
+                onChange={(value) => {
                   const match = { ...rule.match };
-                  if (e.target.value)
-                    match.model = conditionValue(e.target.value);
+                  if (value) match.model = value;
                   else delete match.model;
                   update(index, { ...rule, match });
                 }}

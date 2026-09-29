@@ -348,3 +348,46 @@ it("can remove a base channel value to inherit the source global value", async (
     remove: ["/preferences/cooldown_period"],
   });
 });
+
+it("lets a user replace an inherited JSON timeout without resetting partial input", async () => {
+  const original = globalThis.fetch;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string, init?: RequestInit) => {
+      const response = await original(input, init);
+      if (!init?.method && input.includes("/channel-settings?")) {
+        const view = await response.json();
+        view.schema.fields.push({
+          path: "/preferences/model_timeout",
+          type: "json",
+          group: "超时与冷却",
+        });
+        view.resolved_fields = {
+          "/preferences/model_timeout": {
+            value: 100,
+            inherited_value: 100,
+            source: "global",
+            inherited_source: "global",
+            can_inherit: true,
+          },
+        };
+        return Response.json(view);
+      }
+      return response;
+    }),
+  );
+  const user = await mount();
+  await user.click(screen.getByRole("button", { name: "超时与冷却" }));
+  const field = screen.getByLabelText("模型超时（秒）");
+  await user.clear(field);
+  await user.type(field, "180");
+  await user.tab();
+  expect(field).toHaveValue("180");
+  await user.clear(field);
+  await user.type(field, "240");
+  await user.click(screen.getByRole("button", { name: "校验与预览" }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect((writes[0].changes as any[])[0].set).toEqual({
+    "/preferences/model_timeout": 240,
+  });
+});
