@@ -1,0 +1,120 @@
+.request-trace-panel > p,
+.trace-search,
+.trace-run,
+.trace-empty {
+  margin: 18px 24px;
+}
+.trace-search {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+.trace-search label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.trace-search label:first-child {
+  flex: 1;
+  min-width: 240px;
+}
+.trace-search input,
+.trace-search select {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink);
+  min-height: 40px;
+}
+.trace-run {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.trace-run-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 16px 18px;
+  flex-wrap: wrap;
+}
+.trace-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 18px;
+  padding: 16px 18px;
+  background: var(--surface);
+}
+.trace-summary small,
+.request-trace-table td > small {
+  display: block;
+  color: var(--muted);
+  margin: 4px 0;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.trace-summary strong {
+  display: block;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.request-trace-table {
+  min-width: 900px;
+  width: 100%;
+}
+.request-trace-table td {
+  vertical-align: top;
+  white-space: normal;
+  max-width: 360px;
+}
+.request-trace-table summary {
+  cursor: pointer;
+  color: var(--accent);
+  white-space: nowrap;
+}
+.request-trace-details {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 14px;
+  min-width: 250px;
+  font-size: 12px;
+}
+.request-trace-details dt {
+  color: var(--muted);
+}
+.request-trace-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.trace-field {
+  display: contents;
+}
+.trace-error {
+  color: var(--danger) !important;
+}
+.trace-footnote,
+.trace-run > p {
+  padding: 0 18px;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.trace-empty {
+  padding: 24px;
+  background: var(--surface);
+  border-radius: 8px;
+}
+@media (max-width: 800px) {
+  .trace-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .trace-run,
+  .trace-search,
+  .request-trace-panel > p {
+    margin: 12px;
+  }
+}

@@ -205,6 +205,12 @@ Analytics import diagnostics are scoped to the selected source and include
 An active scan with zero discovered pending objects is not reported as caught up.
 Freshness warnings describe import lag without asserting an S3 export failure.
 
+### 请求追踪
+
+“请求追踪”按 Request ID（也接受已采集的 Trace ID）精确查找各来源的网关事实，显示入口、路由选择/跳过、实际渠道派发、重试结果、脱敏错误、上游响应头/首块/首字等阶段时间和最终业务结果。来源、实例及请求 ID 分开关联；同一实例重复使用请求 ID 时明确标记歧义，不拼接成一次请求。无需选择时间范围，也不会用当前渠道成功率代替最终请求状态。
+
+读取接口为管理员认证的 `GET /v1/request-trace?request_id=...&source_id=...`。索引查找与日常统计分离；新增 `trace` 事件不进入次数、成功率、Token 或消费汇总。新网关通过现有异步 S3 队列导出诊断事件，响应体观察保持字节、状态、帧和 trailers；原始请求体、响应正文及凭据不导出。错误仅保留经过筛选脱敏的 code/type/message。控制台保留 `transport_timing`、终止原因等字段，旧版本检查点可恢复，旧事实缺少的入口时间和错误原文不会被伪造或自动补齐。HTTP 200、响应头已提交和响应体传输结束与模型成功分别展示。事实异步采集可能有延迟；没有记录也不能证明请求从未进入网关。
+
 Checkpoint restoration retries transient storage, timeout and interrupted-download
 failures at most three times, with a five-minute deadline per attempt and backoff
 of two then four seconds. Missing, incompatible, corrupt or access-denied snapshots

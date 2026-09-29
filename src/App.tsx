@@ -139,6 +139,7 @@ import { clearSummaryCache } from "./summaryCache";
 import { useTheme } from "./theme";
 const SourceSettings = lazy(() => import("./SourceSettings").then(m => ({default:m.SourceSettings})));
 const Sub2apiChecks = lazy(() => import("./Sub2apiChecks").then(m => ({default:m.Sub2apiChecks})));
+const RequestTracePage = lazy(() => import("./RequestTrace").then(m => ({default:m.RequestTracePage})));
 const PriceSettings = lazy(() => import("./PriceSettings").then(m => ({default:m.PriceSettings})));
 const Automation = lazy(() => import("./Automation").then(m => ({default:m.Automation})));
 
@@ -1531,7 +1532,7 @@ function Dashboard({
                 : metrics.error?.message}
             </div>
           )}
-          {view === "sub2api" && baseConnection.account ? (
+          {view === "requests" ? <RequestTracePage connection={baseConnection} sources={sourceList}/> : view === "sub2api" && baseConnection.account ? (
             <Sub2apiChecks
               key={baseConnection.session}
               user={baseConnection.session}
