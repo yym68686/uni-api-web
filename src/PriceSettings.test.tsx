@@ -57,9 +57,9 @@ it("keeps aligned table columns, searchable models and accessible pricing detail
   const props = { prices: [] as ModelPrice[], loading: false, connection: { base: "", key: "", session: "test", account: true }, onSaved: vi.fn() };
   render(<PriceSettings {...props} />);
   const table = screen.getByRole("table", { name: "模型价格" });
-  expect(within(table).getAllByRole("columnheader")).toHaveLength(10);
+  expect(within(table).getAllByRole("columnheader")).toHaveLength(11);
   expect(within(table).getAllByRole("rowheader")).toHaveLength(MODEL_PRICE_CATALOG.length);
-  for (const row of table.querySelectorAll("tbody tr")) expect(row.children).toHaveLength(10);
+  for (const row of table.querySelectorAll("tbody tr")) expect(row.children).toHaveLength(11);
   const user = userEvent.setup();
   await user.type(screen.getByRole("textbox", { name: "搜索模型价格" }), "grok-4.7");
   expect(within(table).getAllByRole("rowheader")).toHaveLength(1);
@@ -126,4 +126,47 @@ it("keeps a failed save on its own row and leaves other prices editable", async 
   expect(input).toHaveValue(3);
   expect(input).toBeEnabled();
   expect(row).toHaveTextContent("未保存");
+});
+
+
+it("defaults long-context pricing off, persists independent toggles and can turn it off again", async () => {
+  const saved: ModelPrice[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (_url, options) => {
+    saved.push(JSON.parse(options.body));
+    return Response.json({price: saved.at(-1)});
+  }));
+  const props = {prices: [] as ModelPrice[], loading:false, connection:{base:"",key:"",session:"test",account:true},onSaved:vi.fn()};
+  const view=render(<PriceSettings {...props} />);
+  for (const price of MODEL_PRICE_CATALOG)
+    expect(screen.getByRole("checkbox",{name:`${price.model} 超过272k加价`})).not.toBeChecked();
+  const user=userEvent.setup();
+  const toggle=screen.getByRole("checkbox",{name:"gpt-6-sol 超过272k加价"});
+  await user.click(toggle);
+  expect(screen.getByRole("checkbox",{name:"claude-sonnet-5-5 超过272k加价"})).not.toBeChecked();
+  await user.click(within(toggle.closest("tr")!).getByRole("button",{name:"保存价格"}));
+  await waitFor(()=>expect(props.onSaved).toHaveBeenCalledOnce());
+  expect(saved[0]).toMatchObject({model:"gpt-6-sol",long_context_premium:true,input:2,output:10});
+  view.unmount();
+  render(<PriceSettings {...props} prices={saved} />);
+  const reloaded=screen.getByRole("checkbox",{name:"gpt-6-sol 超过272k加价"});
+  expect(reloaded).toBeChecked();
+  await user.click(reloaded);
+  await user.click(within(reloaded.closest("tr")!).getByRole("button",{name:"保存价格"}));
+  await waitFor(()=>expect(saved[1]).toMatchObject({long_context_premium:false}));
+});
+
+it("does not claim long-context settings were saved when the backend omits the field",async()=>{
+  const onSaved=vi.fn();
+  vi.stubGlobal("fetch",vi.fn(async(_url,options)=>{
+    const price=JSON.parse(options.body);delete price.long_context_premium;
+    return Response.json({price});
+  }));
+  render(<PriceSettings prices={[]} loading={false} connection={{base:"",key:"",session:"test",account:true}} onSaved={onSaved}/>);
+  const user=userEvent.setup();
+  const toggle=screen.getByRole("checkbox",{name:"gpt-6-sol 超过272k加价"});
+  await user.click(toggle);
+  await user.click(within(toggle.closest("tr")!).getByRole("button",{name:"保存价格"}));
+  expect(await screen.findByRole("alert")).toHaveTextContent("服务尚未确认长上下文加价设置");
+  expect(onSaved).not.toHaveBeenCalled();
+  expect(toggle).toBeChecked();
 });

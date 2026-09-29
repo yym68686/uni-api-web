@@ -59,6 +59,10 @@ func (p Price) chargesCacheWrite() bool {
 	return !strings.HasPrefix(model, "gpt-") && !strings.HasPrefix(model, "jev-")
 }
 
+func (p Price) chargesLongContextPremium() bool {
+	return p.LongContextPremium != nil && *p.LongContextPremium
+}
+
 // Percent of the reference API price, independently configurable per model.
 func (p Price) salePercent() float64 {
 	if p.SalePercent != nil {
@@ -84,6 +88,7 @@ func withCatalogPrices(prices []Price) []Price {
 			old := prices[i]
 			if old.Source == "fact-discovered" && !old.Verified && old.Input == 0 && old.Output == 0 && old.CacheRead == 0 && old.CacheWrite == 0 && old.CacheWrite1h == 0 {
 				p.ChargeCacheWrite = old.ChargeCacheWrite
+				p.LongContextPremium = old.LongContextPremium
 				p.SalePercent = old.SalePercent
 				prices[i] = p
 			}
@@ -94,6 +99,8 @@ func withCatalogPrices(prices []Price) []Price {
 	for i := range prices {
 		enabled := prices[i].chargesCacheWrite()
 		prices[i].ChargeCacheWrite = &enabled
+		longContext := prices[i].chargesLongContextPremium()
+		prices[i].LongContextPremium = &longContext
 		percent := prices[i].salePercent()
 		prices[i].SalePercent = &percent
 	}

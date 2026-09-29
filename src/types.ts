@@ -111,6 +111,7 @@ export interface ModelPrice {
   cache_write: number;
   cache_write_1h: number;
   charge_cache_write?: boolean;
+  long_context_premium?: boolean;
   sale_percent?: number;
   source?: string;
   verified?: boolean;

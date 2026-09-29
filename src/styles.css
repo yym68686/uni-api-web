@@ -2682,10 +2682,11 @@ nav > button.active > svg {
 .price-help > div { display: grid; gap: 7px; margin-top: 10px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--subtle); }
 .price-load-error { padding: 10px 22px; font-size: 12px; }
 .price-table-scroll { overflow: auto; max-height: 72dvh; scrollbar-width: thin; overscroll-behavior-x: contain; border-top: 1px solid var(--line); }
-.price-table { width: 100%; min-width: 1100px; border-spacing: 0; table-layout: fixed; text-align: left; font-size: 12px; }
+.price-table { width: 100%; min-width: 1210px; border-spacing: 0; table-layout: fixed; text-align: left; font-size: 12px; }
 .price-model-col { width: 250px; }
 .price-number-col { width: 96px; }
 .price-toggle-col { width: 78px; }
+.price-long-context-col { width: 128px; }
 .price-save-col { width: 112px; }
 .price-table th, .price-table td { padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; background: var(--surface); }
 .price-table thead th { position: sticky; top: 0; z-index: 3; height: 52px; background: var(--subtle); color: var(--muted); font-size: 11px; font-weight: 500; white-space: nowrap; }
@@ -2726,7 +2727,7 @@ nav > button.active > svg {
   .price-search-field { width: auto; flex: 1; }
   .price-table-intro { padding: 0 14px 12px; }
   .price-table-intro > p span { display: block; margin-left: 0; }
-  .price-table { min-width: 1040px; }
+  .price-table { min-width: 1150px; }
   .price-model-col { width: 190px; }
   .price-table .price-model-cell { padding-left: 14px; }
   .price-table-footer { padding: 12px 14px; font-size: 10px; }

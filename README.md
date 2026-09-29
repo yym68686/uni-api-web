@@ -405,3 +405,6 @@ price uploads stage on disk and preserve checksum/schema/ETag validation and
 last-known-good state on failure. Available disk, provider object-upload limits,
 HTTP deadlines and deployment resources still apply; removing a count quota
 is not a guarantee of unlimited capacity or completion within one request.
+
+
+价格设置每行提供“超过272k加价”开关，默认关闭，随该行价格独立保存。开启后按单次请求的总输入 token（包括缓存）严格大于 272,000 判断，对该请求全部普通输入按输入单价 ×2、全部输出按输出单价 ×1.5 估算；缓存读写按原价和原写入计费开关计算。后缀模型继承基础模型设置。估算消费及由其计算的利润使用当前设置，适用于已有历史记录；上游实际消费仍使用账单。判断读取过滤范围内的逐请求 token，不使用窗口汇总输入量，多个短请求不会被误加价。设置独立持久化至 S3，旧价格文档默认关闭，旧客户端省略字段时保留已有选择。

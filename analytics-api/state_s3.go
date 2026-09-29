@@ -198,6 +198,9 @@ func (s *stateStore) save(ctx context.Context, e *Engine, p Price) error {
 			if p.SalePercent == nil {
 				p.SalePercent = doc.Prices[i].SalePercent
 			}
+			if p.LongContextPremium == nil {
+				p.LongContextPremium = doc.Prices[i].LongContextPremium
+			}
 			doc.Prices[i] = p
 			replaced = true
 			break
@@ -234,7 +237,7 @@ func (e *Engine) applyPrices(ctx context.Context, prices []Price) error {
 		return err
 	}
 	for _, p := range prices {
-		if _, err = tx.ExecContext(ctx, "INSERT INTO prices(model,input,output,cache_read,cache_write,cache_write_1h,source,verified,effective_at,charge_cache_write,sale_percent) VALUES(?,?,?,?,?,?,?,?,?,?,?)", p.Model, p.Input, p.Output, p.CacheRead, p.CacheWrite, p.CacheWrite1h, p.Source, p.Verified, p.EffectiveAt, p.ChargeCacheWrite, p.SalePercent); err != nil {
+		if _, err = tx.ExecContext(ctx, "INSERT INTO prices(model,input,output,cache_read,cache_write,cache_write_1h,source,verified,effective_at,charge_cache_write,sale_percent,long_context_premium) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", p.Model, p.Input, p.Output, p.CacheRead, p.CacheWrite, p.CacheWrite1h, p.Source, p.Verified, p.EffectiveAt, p.ChargeCacheWrite, p.SalePercent, p.LongContextPremium); err != nil {
 			return err
 		}
 	}

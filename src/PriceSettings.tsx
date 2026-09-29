@@ -121,6 +121,7 @@ function PriceRow({
         ...draft,
         source: "manual",
         charge_cache_write: chargesCacheWrite(draft),
+        long_context_premium: draft.long_context_premium ?? false,
         sale_percent: salePercent(draft),
       };
       if (reference.cache_write_kind === "input")
@@ -139,6 +140,9 @@ function PriceRow({
       );
       if (result.price?.sale_percent !== next.sale_percent) {
         throw new Error("服务尚未确认售卖比例，请刷新后重新保存。");
+      }
+      if (result.price?.long_context_premium !== next.long_context_premium) {
+        throw new Error("服务尚未确认长上下文加价设置，请刷新后重新保存。");
       }
       setDraft(next);
       setSaved(true);
@@ -239,6 +243,18 @@ function PriceRow({
           </label>
         </td>
         <td className="price-toggle-cell">
+          <label className="price-table-toggle" title="单次请求输入超过 272,000 token：输入单价 ×2，输出单价 ×1.5">
+            <input
+              type="checkbox"
+              aria-label={`${price.model} 超过272k加价`}
+              checked={draft.long_context_premium ?? false}
+              disabled={pending}
+              onChange={(event) => change({ long_context_premium: event.target.checked })}
+            />
+            <span aria-hidden="true" />
+          </label>
+        </td>
+        <td className="price-toggle-cell">
           <label className="price-table-toggle">
             <input
               type="checkbox"
@@ -278,7 +294,7 @@ function PriceRow({
       </tr>
       {error && (
         <tr className="price-error-row">
-          <td colSpan={10}>
+          <td colSpan={11}>
             <p role="alert">
               {price.model}：{error}
             </p>
@@ -354,6 +370,11 @@ export function PriceSettings({
               售卖百分比 ÷ 100 × 6.9 − 渠道实际消费。
             </p>
             <p>不含搜索、缓存存储等额外费用，实际扣费以站点账单为准。</p>
+            <p>
+              “超过272k加价”默认关闭。开启后，单次请求输入总量（含缓存）严格大于
+              272,000 token 时，该请求的普通输入单价按 2 倍、输出单价按 1.5 倍估算，
+              不是仅计算超出部分；缓存读写单价保持原设置。保存后对所选时间范围内的历史请求同样生效。
+            </p>
           </div>
         </details>
       </div>
@@ -376,6 +397,7 @@ export function PriceSettings({
             ))}
             <col className="price-number-col" />
             <col className="price-toggle-col" />
+            <col className="price-long-context-col" />
             <col className="price-toggle-col" />
             <col className="price-save-col" />
           </colgroup>
@@ -397,6 +419,7 @@ export function PriceSettings({
                 售卖比例<small>原价 %</small>
               </th>
               <th scope="col">写入计费</th>
+              <th scope="col">超过272k<small>输入 ×2 / 输出 ×1.5</small></th>
               <th scope="col">参与估算</th>
               <th scope="col">操作</th>
             </tr>
@@ -412,7 +435,7 @@ export function PriceSettings({
             ))}
             {!visible.length && (
               <tr>
-                <td colSpan={10} className="price-empty">
+                <td colSpan={11} className="price-empty">
                   没有匹配的检测模型。
                 </td>
               </tr>

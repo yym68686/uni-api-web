@@ -67,17 +67,18 @@ type LiveChannel struct {
 	Count    int64  `json:"count"`
 }
 type Price struct {
-	Model            string    `json:"model"`
-	Input            float64   `json:"input"`
-	Output           float64   `json:"output"`
-	CacheRead        float64   `json:"cache_read"`
-	CacheWrite       float64   `json:"cache_write"`
-	CacheWrite1h     float64   `json:"cache_write_1h"`
-	ChargeCacheWrite *bool     `json:"charge_cache_write,omitempty"`
-	SalePercent      *float64  `json:"sale_percent,omitempty"`
-	Source           string    `json:"source"`
-	Verified         bool      `json:"verified"`
-	EffectiveAt      time.Time `json:"effective_at"`
+	Model              string    `json:"model"`
+	Input              float64   `json:"input"`
+	Output             float64   `json:"output"`
+	CacheRead          float64   `json:"cache_read"`
+	CacheWrite         float64   `json:"cache_write"`
+	CacheWrite1h       float64   `json:"cache_write_1h"`
+	ChargeCacheWrite   *bool     `json:"charge_cache_write,omitempty"`
+	LongContextPremium *bool     `json:"long_context_premium,omitempty"`
+	SalePercent        *float64  `json:"sale_percent,omitempty"`
+	Source             string    `json:"source"`
+	Verified           bool      `json:"verified"`
+	EffectiveAt        time.Time `json:"effective_at"`
 }
 type Config struct {
 	DatabaseMemoryLimitMB                                                                int

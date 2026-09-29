@@ -85,6 +85,7 @@ func OpenEngine(path string, cfg Config) (*Engine, error) {
 	if _, err = db.Exec(`
       ALTER TABLE prices ADD COLUMN IF NOT EXISTS charge_cache_write BOOLEAN;
       ALTER TABLE prices ADD COLUMN IF NOT EXISTS sale_percent DOUBLE;
+      ALTER TABLE prices ADD COLUMN IF NOT EXISTS long_context_premium BOOLEAN;
       ALTER TABLE history.facts ADD COLUMN IF NOT EXISTS upstream_base VARCHAR;
       ALTER TABLE history.facts ADD COLUMN IF NOT EXISTS upstream_key_hash VARCHAR;
       ALTER TABLE history.facts ADD COLUMN IF NOT EXISTS billing_request_ids VARCHAR[];
@@ -363,7 +364,7 @@ func mergeHistogramSQL(column string) string {
 func (e *Engine) Prices(ctx context.Context) ([]Price, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	rows, err := e.DB.QueryContext(ctx, `SELECT model,input,output,cache_read,cache_write,cache_write_1h,source,verified,effective_at,charge_cache_write,sale_percent FROM prices UNION ALL SELECT DISTINCT model,0,0,0,0,0,'fact-discovered',false,current_timestamp,NULL::BOOLEAN,NULL::DOUBLE FROM rollups WHERE model <> '' AND model NOT IN (SELECT model FROM prices) ORDER BY model`)
+	rows, err := e.DB.QueryContext(ctx, `SELECT model,input,output,cache_read,cache_write,cache_write_1h,source,verified,effective_at,charge_cache_write,sale_percent,long_context_premium FROM prices UNION ALL SELECT DISTINCT model,0,0,0,0,0,'fact-discovered',false,current_timestamp,NULL::BOOLEAN,NULL::DOUBLE,NULL::BOOLEAN FROM rollups WHERE model <> '' AND model NOT IN (SELECT model FROM prices) ORDER BY model`)
 	if err != nil {
 		return nil, err
 	}
@@ -371,7 +372,7 @@ func (e *Engine) Prices(ctx context.Context) ([]Price, error) {
 	out := []Price{}
 	for rows.Next() {
 		var p Price
-		if err = rows.Scan(&p.Model, &p.Input, &p.Output, &p.CacheRead, &p.CacheWrite, &p.CacheWrite1h, &p.Source, &p.Verified, &p.EffectiveAt, &p.ChargeCacheWrite, &p.SalePercent); err != nil {
+		if err = rows.Scan(&p.Model, &p.Input, &p.Output, &p.CacheRead, &p.CacheWrite, &p.CacheWrite1h, &p.Source, &p.Verified, &p.EffectiveAt, &p.ChargeCacheWrite, &p.SalePercent, &p.LongContextPremium); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
@@ -440,6 +441,12 @@ func (e *Engine) SavePrice(ctx context.Context, p Price) error {
 			return err
 		}
 	}
+	if p.LongContextPremium == nil {
+		err := e.DB.QueryRowContext(ctx, "SELECT long_context_premium FROM prices WHERE model=?", p.Model).Scan(&p.LongContextPremium)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+	}
 	p.EffectiveAt = time.Now().UTC()
 	raw, _ := json.Marshal(p)
 	tx, err := e.DB.BeginTx(ctx, nil)
@@ -447,7 +454,7 @@ func (e *Engine) SavePrice(ctx context.Context, p Price) error {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err = tx.ExecContext(ctx, `INSERT OR REPLACE INTO prices(model,input,output,cache_read,cache_write,cache_write_1h,source,verified,effective_at,charge_cache_write,sale_percent) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, p.Model, p.Input, p.Output, p.CacheRead, p.CacheWrite, p.CacheWrite1h, p.Source, p.Verified, p.EffectiveAt, p.ChargeCacheWrite, p.SalePercent); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT OR REPLACE INTO prices(model,input,output,cache_read,cache_write,cache_write_1h,source,verified,effective_at,charge_cache_write,sale_percent,long_context_premium) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, p.Model, p.Input, p.Output, p.CacheRead, p.CacheWrite, p.CacheWrite1h, p.Source, p.Verified, p.EffectiveAt, p.ChargeCacheWrite, p.SalePercent, p.LongContextPremium); err != nil {
 		return err
 	}
 	if _, err = tx.ExecContext(ctx, "INSERT INTO price_history(model,document) VALUES(?,?)", p.Model, string(raw)); err != nil {
