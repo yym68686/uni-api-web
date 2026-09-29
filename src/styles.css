@@ -3088,3 +3088,20 @@ nav > button.active > svg {
 .tooltip .failure-counts { margin-top: 0; min-width: 240px; max-height: min(420px, 70vh); overflow-y: auto; }
 .tooltip .failure-counts dt, .tooltip .failure-counts .muted { color: inherit; opacity: .8; }
 .failure-counts .attempt-counts { margin-bottom: 12px; }
+
+.timeout-policy-editor,.hedging-editor { display:grid; gap:16px; }
+.timeout-rule { border-top:1px solid var(--line); padding-top:14px; display:grid; gap:14px; }
+.timeout-rule-heading { display:flex; align-items:center; gap:8px; }
+.timeout-rule-heading strong { margin-right:auto; }
+.timeout-match-grid,.timeout-phase-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+.timeout-policy-editor label,.hedging-editor label { display:grid; gap:7px; color:var(--muted); font-size:12px; }
+.timeout-policy-editor input,.timeout-policy-editor select,.hedging-editor input[type=number] { width:100%; min-width:0; }
+.hedging-editor .settings-check { display:flex; }
+.settings-field-heading { flex-wrap:wrap; }
+.settings-field-heading > div { min-width:120px; flex:1; }
+.settings-field-wide .settings-field-heading > div { display:block; }
+.settings-field-heading small { display:block; margin-top:4px; }
+.settings-field .settings-check input { width:16px; min-height:16px; padding:0; }
+.source-item { flex-wrap:wrap; }
+.source-item > div:first-child { flex-basis:220px; }
+@media(max-width:700px) { .timeout-match-grid,.timeout-phase-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }

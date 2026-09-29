@@ -65,11 +65,11 @@ func (s *Service) settingsGateway(ctx context.Context, src controlSource, method
 	defer resp.Body.Close()
 	raw, err := readConfiguration(resp.Body)
 	if err != nil {
-		return nil, 502, errors.New("来源设置响应读取失败")
+		return nil, 502, errors.New("设置响应读取失败")
 	}
 	var value map[string]any
 	if json.Unmarshal(raw, &value) != nil && resp.StatusCode == 200 {
-		return nil, 502, errors.New("来源设置响应无效")
+		return nil, 502, errors.New("设置响应无效")
 	}
 	if resp.StatusCode != 200 {
 		message := "来源拒绝设置请求"
@@ -82,7 +82,7 @@ func (s *Service) settingsGateway(ctx context.Context, src controlSource, method
 			message = "配置版本已变化，请刷新并核对草稿后重试"
 		case 400:
 			if e, ok := value["error"].(map[string]any); ok {
-				if m, ok := e["message"].(string); ok && strings.HasPrefix(m, "Invalid channel setting:") {
+				if m, ok := e["message"].(string); ok && (strings.HasPrefix(m, "Invalid channel setting:") || strings.HasPrefix(m, "Invalid global") || strings.HasPrefix(m, "Unsupported global") || m == "Invalid hedging settings" || m == "Invalid timeout policy") {
 					message = m
 				}
 			}
@@ -228,7 +228,7 @@ func (s *Service) applyChannelSettings(w http.ResponseWriter, r *http.Request, i
 	}
 	record, err := s.control.retainedRecord(ctx, src.ID)
 	if err != nil || !record.Enabled {
-		http.Error(w, "请在来源设置启用保留临时配置，确保渠道设置可以重启恢复", 409)
+		http.Error(w, "请在设置启用保留临时配置，确保渠道设置可以重启恢复", 409)
 		return
 	}
 	original, err := s.control.source(ctx, src.ID)

@@ -236,7 +236,7 @@ func (s *Service) channelInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	providers, err := configuredProviders(ctx, src)
 	if err != nil {
-		http.Error(w, "无法读取渠道配置，请在来源设置中配置有效的配置读取管理员密钥", 503)
+		http.Error(w, "无法读取渠道配置，请在设置中配置有效的配置读取管理员密钥", 503)
 		return
 	}
 	for _, p := range providers {

@@ -253,7 +253,7 @@ it("shows a recoverable cold timeout and revokes cached keys after explicit perm
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const fetch = vi.fn().mockRejectedValueOnce(new DOMException("signal timed out", "TimeoutError"))
     .mockResolvedValueOnce(Response.json({keys:keys("do")}))
-    .mockResolvedValueOnce(new Response("来源密钥无管理权限，请检查来源设置",{status:403}));
+    .mockResolvedValueOnce(new Response("来源密钥无管理权限，请检查设置",{status:403}));
   vi.stubGlobal("fetch",fetch);
   render(<QueryClientProvider client={client}><Directory /></QueryClientProvider>);
   expect(await screen.findByRole("alert")).toHaveTextContent("API key 列表暂时无法更新，请稍后重试。");

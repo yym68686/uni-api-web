@@ -206,6 +206,20 @@ func TestSettingsNativeGatewayRetention(t *testing.T) {
 	if strings.Contains(w.Body.String(), "fixture-secret") {
 		t.Fatal("created secret exposed")
 	}
+	// Global changes share the same durable intent and rollback contract.
+	globalScope := "__uni_console_global_preferences__"
+	globalView, _, err := svc.settingsGateway(context.Background(), src, "GET", "/v1/channel-settings?provider="+globalScope, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	globalMutation := channelSettingMutation{Operation: id + "-global", Revision: globalView["revision"].(string), Changes: []channelSettingChange{{Provider: globalScope, Set: map[string]any{"/preferences/cooldown_period": 17, "/preferences/hedging": map[string]any{"enabled": true, "max_inflight_attempts": 2}, "/preferences/timeout_policy": map[string]any{"rules": []any{map[string]any{"match": map[string]any{"endpoint": "/v1/responses", "stream": false}, "timeout": map[string]any{"total": 180}}}}}}}}
+	req = httptest.NewRequest("PATCH", "/v1/sources/"+id+"/channel-settings", strings.NewReader(mustJSON(globalMutation)))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	svc.controlHandler().ServeHTTP(w, req)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"status":"applied"`) {
+		t.Fatal("global apply", w.Code, w.Body.String())
+	}
 	record, _ := store.retainedRecord(context.Background(), id)
 	saved, err := store.retainedSnapshot(record)
 	if err != nil {
@@ -235,6 +249,23 @@ func TestSettingsNativeGatewayRetention(t *testing.T) {
 	if !controlEquivalent(after, saved) {
 		t.Fatal("recovery changed exact settings")
 	}
+	globalAfter, _, err := svc.settingsGateway(context.Background(), src, "GET", "/v1/channel-settings?provider="+globalScope, nil)
+	if err != nil || mustJSON(globalAfter["effective"]) == mustJSON(globalView["effective"]) {
+		t.Fatal("global preferences not restored", err)
+	}
+	rollback := map[string]any{"operation_id": id + "-rollback-global", "rollback_id": id + "-global", "revision": restored["revision"]}
+	req = httptest.NewRequest("POST", "/v1/sources/"+id+"/channel-settings/rollback", strings.NewReader(mustJSON(rollback)))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	svc.controlHandler().ServeHTTP(w, req)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"status":"applied"`) {
+		t.Fatal("global rollback", w.Code, w.Body.String())
+	}
+	globalAfter, _, err = svc.settingsGateway(context.Background(), src, "GET", "/v1/channel-settings?provider="+globalScope, nil)
+	if err != nil || canonicalSettings(globalAfter["effective"]) != canonicalSettings(globalView["effective"]) {
+		t.Fatal("global rollback lost base", err)
+	}
+
 }
 
 func TestSettingsRevealRequiresSessionAdminAndReturnsOnlyRequestedKeys(t *testing.T) {

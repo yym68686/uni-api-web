@@ -83,7 +83,7 @@ func (s *Service) channelControls(w http.ResponseWriter, r *http.Request) {
 		case 400:
 			http.Error(w, "所选渠道或 API key 已失效，请刷新后重试", 400)
 		case 401, 403:
-			http.Error(w, "来源密钥没有临时控制权限，请在来源设置中配置首个密钥或管理员密钥", 403)
+			http.Error(w, "来源密钥没有临时控制权限，请在设置中配置首个密钥或管理员密钥", 403)
 		default:
 			http.Error(w, "来源未完成修改，请刷新后核对当前规则", 502)
 		}

@@ -172,7 +172,7 @@ func fetchImportKeys(ctx context.Context, src controlSource) ([]importKey, int, 
 	}
 	defer response.Body.Close()
 	if response.StatusCode == 401 || response.StatusCode == 403 {
-		return nil, 403, errors.New("来源密钥无管理权限，请检查来源设置")
+		return nil, 403, errors.New("来源密钥无管理权限，请检查设置")
 	}
 	if response.StatusCode != 200 {
 		return nil, 502, errors.New("来源暂时无法读取 API key，请稍后重试")
@@ -186,7 +186,7 @@ func fetchImportKeys(ctx context.Context, src controlSource) ([]importKey, int, 
 		return nil, 502, errors.New("来源返回了无效的 API key 列表")
 	}
 	if !result.CanInspect {
-		return nil, 403, errors.New("来源密钥无管理权限，请检查来源设置")
+		return nil, 403, errors.New("来源密钥无管理权限，请检查设置")
 	}
 	seen := map[string]bool{}
 	for _, k := range result.Keys {

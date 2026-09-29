@@ -23,7 +23,7 @@ const pages = [
   { view: "sub2api", label: "渠道管理", icon: ScanLine, account: true },
   { view: "prices", label: "价格设置", icon: SlidersHorizontal },
   { view: "balances", label: "余额管理", icon: Wallet },
-  { view: "sources", label: "来源设置", icon: Server, account: true },
+  { view: "sources", label: "设置", icon: Server, account: true },
   { view: "automations", label: "自动化", icon: Bot, account: true },
 ] as const;
 

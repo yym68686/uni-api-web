@@ -75,7 +75,11 @@ beforeEach(() => {
               { path: "/model", type: "models", group: "基本与模型" },
               { path: "/api", type: "keys", group: "密钥" },
               { path: "/only_request_types", type: "json", group: "请求规则" },
-              { path: "/exclude_request_types", type: "json", group: "请求规则" },
+              {
+                path: "/exclude_request_types",
+                type: "json",
+                group: "请求规则",
+              },
               { path: "/preferences/headers", type: "json", group: "请求改写" },
               {
                 path: "/preferences/cooldown_period",
@@ -133,12 +137,19 @@ it("edits compaction request types without allowing contradictory checkboxes", a
   await user.click(screen.getByRole("checkbox", { name: "排除压缩请求" }));
   await user.click(screen.getByRole("button", { name: "校验与预览" }));
   await waitFor(() => expect(writes).toHaveLength(1));
-  expect((writes[0].changes as {set:object}[])[0].set).toEqual({"/exclude_request_types":["compaction"]});
+  expect((writes[0].changes as { set: object }[])[0].set).toEqual({
+    "/exclude_request_types": ["compaction"],
+  });
   await user.click(screen.getByRole("checkbox", { name: "仅允许压缩请求" }));
-  expect(screen.getByRole("checkbox", { name: "排除压缩请求" })).not.toBeChecked();
+  expect(
+    screen.getByRole("checkbox", { name: "排除压缩请求" }),
+  ).not.toBeChecked();
   await user.click(screen.getByRole("button", { name: "校验与预览" }));
   await waitFor(() => expect(writes).toHaveLength(2));
-  expect((writes[1].changes as {set:object}[])[0].set).toEqual({"/exclude_request_types":[],"/only_request_types":["compaction"]});
+  expect((writes[1].changes as { set: object }[])[0].set).toEqual({
+    "/exclude_request_types": [],
+    "/only_request_types": ["compaction"],
+  });
 });
 it("reset then edit applies the edited value over the base and never discards edits silently", async () => {
   const user = await mount();
@@ -241,4 +252,99 @@ it("keeps keys hidden after an unsuccessful reveal", async () => {
     "password",
   );
   expect(writes).toHaveLength(0);
+});
+
+it("shows inherited current values without writing them back and removes only the channel override", async () => {
+  const original = globalThis.fetch;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string, init?: RequestInit) => {
+      const response = await original(input, init);
+      if (
+        !init?.method &&
+        input.includes("/channel-settings?") &&
+        response.ok
+      ) {
+        const view = await response.json();
+        delete view.effective.preferences.cooldown_period;
+        delete view.base.preferences.cooldown_period;
+        view.resolved_fields = {
+          "/preferences/cooldown_period": {
+            value: 42,
+            source: "global",
+            inherited_value: 42,
+            inherited_source: "global",
+            can_inherit: true,
+          },
+        };
+        return Response.json(view);
+      }
+      return response;
+    }),
+  );
+  const user = await mount();
+  await user.click(screen.getByRole("button", { name: "超时与冷却" }));
+  const field = screen.getByLabelText("渠道冷却（秒）");
+  expect(field).toHaveValue(42);
+  expect(screen.getByText("继承全局设置")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "校验与预览" }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect((writes[0].changes as any[])[0]).toMatchObject({
+    set: {},
+    remove: [],
+  });
+  await user.clear(field);
+  await user.type(field, "7");
+  expect(field).toHaveValue(7);
+  expect(screen.getByText("渠道自定义")).toBeInTheDocument();
+  await user.click(
+    screen.getByRole("button", { name: "渠道冷却（秒）：继承全局设置" }),
+  );
+  expect(field).toHaveValue(42);
+  await user.click(screen.getByRole("button", { name: "校验与预览" }));
+  await waitFor(() => expect(writes).toHaveLength(2));
+  expect((writes[1].changes as any[])[0]).toMatchObject({
+    set: {},
+    remove: [],
+  });
+});
+
+it("can remove a base channel value to inherit the source global value", async () => {
+  const original = globalThis.fetch;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string, init?: RequestInit) => {
+      const response = await original(input, init);
+      if (
+        !init?.method &&
+        input.includes("/channel-settings?") &&
+        response.ok
+      ) {
+        const view = await response.json();
+        view.resolved_fields = {
+          "/preferences/cooldown_period": {
+            value: 90,
+            source: "channel",
+            inherited_value: 12,
+            inherited_source: "global",
+            can_inherit: true,
+          },
+        };
+        return Response.json(view);
+      }
+      return response;
+    }),
+  );
+  const user = await mount();
+  await user.click(screen.getByRole("button", { name: "超时与冷却" }));
+  await user.click(
+    screen.getByRole("button", { name: "渠道冷却（秒）：继承全局设置" }),
+  );
+  expect(screen.getByLabelText("渠道冷却（秒）")).toHaveValue(12);
+  await user.click(screen.getByRole("button", { name: "校验与预览" }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect((writes[0].changes as any[])[0]).toMatchObject({
+    set: {},
+    remove: ["/preferences/cooldown_period"],
+  });
 });

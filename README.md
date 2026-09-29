@@ -99,6 +99,8 @@ In account mode, use **添加渠道**, select the `typesafe` engine, set
 `https://api.typesafe.ai/v1/systemone`, enter a TypeSafe key and the JEV models.
 The gateway must advertise `create_provider` in `/v1/channel-settings/schema`. Creation uses validated,
 key-scoped channel settings and the existing encrypted retention workflow.
+
+“设置”（原“来源设置”）为每个来源提供“全局设置”：模型超时、按端点 / 流式状态 / 模型匹配的超时规则、心跳间隔、渠道与密钥冷却，以及 hedging 开关和并行尝试数。渠道页显示继承值、渠道自定义值和运行时默认值；“继承全局设置”删除渠道覆盖，“恢复基础值”恢复基础配置，两者不会混淆。仅打开编辑器不会将继承值保存为渠道覆盖。设置修改需要先预览，再通过原有加密保留及操作记录流程保存；开启保留时会随来源重启恢复。`AUTO_RETRY` 实际由调用 API key 控制，渠道页会明确提示。需先更新所有来源网关至支持 `schema.global_settings` 的版本；部署本身不会更改现有设置。
 An interrupted save is reconciled by operation ID before another write.
 
 JEV uses `POST /v1/systemone` with `model`, `state`, and `questions`; it supports

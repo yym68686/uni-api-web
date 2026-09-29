@@ -27,6 +27,8 @@ import {
 } from "lucide-react";
 import { parse, stringify } from "yaml";
 import { controlRequest } from "./api";
+import { TimeoutPolicyField, HedgingField } from "./TimeoutPolicyField";
+import { GLOBAL_SETTINGS_SCOPE } from "./ChannelSettings";
 import { Spinner } from "./ui";
 import type { Channel } from "./types";
 
@@ -48,6 +50,18 @@ interface SettingsView {
   api_key_id?: string;
   available_keys: { key_id: string; position: number }[];
   global_preferences: Document;
+  resolved_fields?: Record<
+    string,
+    {
+      value: unknown;
+      source: string;
+      inherited_value: unknown;
+      inherited_source: string;
+      can_inherit?: boolean;
+      read_only?: boolean;
+      note?: string;
+    }
+  >;
   schema: {
     version: number;
     fields: Field[];
@@ -84,6 +98,7 @@ const labels: Record<string, string> = {
   api_key_schedule_algorithm: "多密钥调度",
   api_key_rate_limit: "密钥限额（默认或按模型）",
   model_timeout: "模型超时（秒）",
+  hedging: "Hedging 并行请求",
   timeout_policy: "条件超时策略",
   keepalive_interval: "心跳间隔（秒）",
   cooldown_period: "渠道冷却（秒）",
@@ -121,6 +136,7 @@ const categories: Record<
     description: "设置上游连接与模型映射。",
   },
   密钥: { icon: KeyRound, description: "管理上游密钥、调用顺序与限额。" },
+  并行请求: { icon: Layers, description: "设置较慢请求的并行尝试策略。" },
   超时与冷却: {
     icon: Timer,
     description: "调整请求等待时间与失败后的冷却策略。",
@@ -142,7 +158,12 @@ const categories: Record<
   },
 };
 const keyOf = (path: string) => path.split("/").at(-1)!;
-const requestTypes = (value: unknown): string[] => Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : typeof value === "string" ? [value] : [];
+const requestTypes = (value: unknown): string[] =>
+  Array.isArray(value)
+    ? value.filter((v): v is string => typeof v === "string")
+    : typeof value === "string"
+      ? [value]
+      : [];
 const get = (doc: Document, path: string): unknown =>
   path
     .slice(1)
@@ -186,6 +207,45 @@ export function settingsDiff(view: SettingsView, draft: Document): Change {
     }
   }
   return change;
+}
+function NumberField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: unknown;
+  onChange: (value: unknown) => void;
+}) {
+  const serialized = value === undefined ? "" : String(value);
+  const [text, setText] = useState(serialized);
+  const focused = useRef(false);
+  useEffect(() => {
+    if (!focused.current) setText(serialized);
+  }, [serialized]);
+  return (
+    <label>
+      <span className="sr-only">{label}</span>
+      <input
+        aria-label={label}
+        type="number"
+        min={0}
+        step="any"
+        value={text}
+        onFocus={() => {
+          focused.current = true;
+        }}
+        onBlur={() => {
+          focused.current = false;
+          setText(serialized);
+        }}
+        onChange={(e) => {
+          setText(e.target.value);
+          onChange(e.target.value === "" ? undefined : Number(e.target.value));
+        }}
+      />
+    </label>
+  );
 }
 function JSONField({
   label,
@@ -500,7 +560,13 @@ function Models({
   );
 }
 import type { SettingsChannel } from "./ChannelSettings";
-export function Editor({ row, onClose }: { row: SettingsChannel; onClose: () => void }) {
+export function Editor({
+  row,
+  onClose,
+}: {
+  row: SettingsChannel;
+  onClose: () => void;
+}) {
   const client = useQueryClient();
   const path = `/v1/sources/${encodeURIComponent(row.source_id!)}/channel-settings`;
   const query = useQuery({
@@ -517,7 +583,8 @@ export function Editor({ row, onClose }: { row: SettingsChannel; onClose: () => 
   });
   const [draft, setDraft] = useState<Document>();
   const [resetOverride, setResetOverride] = useState(false);
-  const [tab, setTab] = useState("基本与模型");
+  const isGlobal = row.provider === GLOBAL_SETTINGS_SCOPE;
+  const [tab, setTab] = useState(isGlobal ? "超时与冷却" : "基本与模型");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -624,7 +691,8 @@ export function Editor({ row, onClose }: { row: SettingsChannel; onClose: () => 
       const value = format === "json" ? JSON.parse(raw) : parse(raw);
       if (!value || typeof value !== "object" || Array.isArray(value))
         throw Error("高级配置必须是单渠道对象");
-      if (value.provider !== view?.provider) throw Error("渠道标识不能更改");
+      if (!isGlobal && value.provider !== view?.provider)
+        throw Error("渠道标识不能更改");
       const full = structuredClone(view!.effective);
       for (const f of view!.schema.fields) {
         const patched = set(full, f.path, get(value, f.path));
@@ -773,7 +841,7 @@ export function Editor({ row, onClose }: { row: SettingsChannel; onClose: () => 
   const groups = [
     ...new Set(view.schema.fields.map((f) => f.group)),
     "高级配置",
-    "模板与批量",
+    ...(!isGlobal ? ["模板与批量"] : []),
     "变更记录",
   ];
   const dirty =
@@ -839,9 +907,11 @@ export function Editor({ row, onClose }: { row: SettingsChannel; onClose: () => 
           >
             <ShieldCheck size={17} />
             <strong>
-              {view.kind === "imported"
-                ? "此 API key 专用渠道"
-                : "来源共享渠道"}
+              {view.kind === "global"
+                ? "来源全局设置"
+                : view.kind === "imported"
+                  ? "此 API key 专用渠道"
+                  : "来源共享渠道"}
             </strong>
             <span>
               {view.api_key_id
@@ -864,8 +934,33 @@ export function Editor({ row, onClose }: { row: SettingsChannel; onClose: () => 
           {view.schema.fields
             .filter((f) => f.group === tab)
             .map((f) => {
-              const value = get(draft, f.path),
+              const ownValue = get(draft, f.path),
+                resolved = view.resolved_fields?.[f.path],
+                value =
+                  ownValue === undefined
+                    ? (resolved?.inherited_value ?? resolved?.value)
+                    : ownValue,
                 label = labels[keyOf(f.path)] || keyOf(f.path);
+              const inherited = ownValue === undefined;
+              const sourceLabel = resolved?.read_only
+                ? "调用 API key 设置"
+                : !resolved
+                  ? inherited
+                    ? "未设置"
+                    : view.override_paths.some(
+                          (p) => p === f.path || p.startsWith(f.path + "/"),
+                        )
+                      ? "渠道自定义"
+                      : "基础配置"
+                  : inherited
+                    ? isGlobal
+                      ? "运行时默认值"
+                      : resolved.inherited_source === "global"
+                        ? "继承全局设置"
+                        : "继承全局设置 · 运行时默认值"
+                    : isGlobal
+                      ? "全局自定义"
+                      : "渠道自定义";
               return (
                 <section
                   className={`settings-field ${["keys", "models", "json"].includes(f.type) || (value && typeof value === "object") ? "settings-field-wide" : ""}`}
@@ -874,18 +969,20 @@ export function Editor({ row, onClose }: { row: SettingsChannel; onClose: () => 
                   <header className="settings-field-heading">
                     <div>
                       <h4 title={f.path}>{label}</h4>
-                      <small>
-                        {value === undefined
-                          ? "使用默认值"
-                          : view.override_paths.some(
-                                (p) =>
-                                  p === f.path || p.startsWith(f.path + "/"),
-                              )
-                            ? "已自定义"
-                            : "基础配置"}
-                      </small>
+                      <small>{sourceLabel}</small>
+                      {resolved?.note && <small>{resolved.note}</small>}
                     </div>
-                    {!equal(value, get(view.base, f.path)) && (
+                    {resolved?.can_inherit && !inherited && (
+                      <button
+                        type="button"
+                        className="button small"
+                        aria-label={`${label}：${isGlobal ? "使用运行时默认值" : "继承全局设置"}`}
+                        onClick={() => edit(set(draft, f.path, undefined))}
+                      >
+                        {isGlobal ? "使用运行时默认值" : "继承全局设置"}
+                      </button>
+                    )}
+                    {!equal(ownValue, get(view.base, f.path)) && (
                       <button
                         className="settings-icon-button settings-reset-field"
                         title="恢复基础值"
@@ -899,7 +996,29 @@ export function Editor({ row, onClose }: { row: SettingsChannel; onClose: () => 
                     )}
                   </header>
                   <div className="settings-field-control">
-                    {f.type === "keys" ? (
+                    {resolved?.read_only ? (
+                      <p>{String(resolved.value)}</p>
+                    ) : f.path === "/preferences/timeout_policy" ? (
+                      <>
+                        <TimeoutPolicyField
+                          value={value}
+                          onChange={(v) => edit(set(draft, f.path, v))}
+                        />
+                        <details>
+                          <summary>高级 JSON</summary>
+                          <JSONField
+                            label={label}
+                            value={value}
+                            onChange={(v) => edit(set(draft, f.path, v))}
+                          />
+                        </details>
+                      </>
+                    ) : f.path === "/preferences/hedging" ? (
+                      <HedgingField
+                        value={value}
+                        onChange={(v) => edit(set(draft, f.path, v))}
+                      />
+                    ) : f.type === "keys" ? (
                       <Keys
                         key={view.revision}
                         secretsPath={
@@ -948,24 +1067,69 @@ export function Editor({ row, onClose }: { row: SettingsChannel; onClose: () => 
                           </button>
                         }
                       />
-                    ) : ["/only_request_types", "/exclude_request_types"].includes(f.path) ? (
+                    ) : [
+                        "/only_request_types",
+                        "/exclude_request_types",
+                      ].includes(f.path) ? (
                       <div>
                         <label className="settings-check">
-                          <input type="checkbox" checked={requestTypes(value).some(v => v.toLowerCase() === "compaction")}
-                            onChange={e => {
-                              const values = requestTypes(value).filter(v => v.toLowerCase() !== "compaction");
-                              let next = set(draft, f.path, e.target.checked ? [...values, "compaction"] : values);
+                          <input
+                            type="checkbox"
+                            checked={requestTypes(value).some(
+                              (v) => v.toLowerCase() === "compaction",
+                            )}
+                            onChange={(e) => {
+                              const values = requestTypes(value).filter(
+                                (v) => v.toLowerCase() !== "compaction",
+                              );
+                              let next = set(
+                                draft,
+                                f.path,
+                                e.target.checked
+                                  ? [...values, "compaction"]
+                                  : values,
+                              );
                               if (e.target.checked) {
-                                const other = f.path === "/only_request_types" ? "/exclude_request_types" : "/only_request_types";
+                                const other =
+                                  f.path === "/only_request_types"
+                                    ? "/exclude_request_types"
+                                    : "/only_request_types";
                                 const previous = requestTypes(get(next, other));
-                                if (previous.some(v => v.toLowerCase() === "compaction")) next = set(next, other, previous.filter(v => v.toLowerCase() !== "compaction"));
+                                if (
+                                  previous.some(
+                                    (v) => v.toLowerCase() === "compaction",
+                                  )
+                                )
+                                  next = set(
+                                    next,
+                                    other,
+                                    previous.filter(
+                                      (v) => v.toLowerCase() !== "compaction",
+                                    ),
+                                  );
                               }
                               edit(next);
-                            }} />
-                          {f.path === "/only_request_types" ? "仅允许压缩请求" : "排除压缩请求"}
+                            }}
+                          />
+                          {f.path === "/only_request_types"
+                            ? "仅允许压缩请求"
+                            : "排除压缩请求"}
                         </label>
-                        <p className="muted">{f.path === "/only_request_types" ? "开启后仅接收 compaction 请求，普通请求跳过此渠道。" : "开启后跳过 compaction 请求，普通请求仍可使用此渠道。"}适用于 /v1/responses/compact 和包含 compaction_trigger 的 Responses 请求。</p>
-                        <details><summary>编辑请求类型列表</summary><JSONField label={label} value={value} onChange={v => edit(set(draft, f.path, v))} /></details>
+                        <p className="muted">
+                          {f.path === "/only_request_types"
+                            ? "开启后仅接收 compaction 请求，普通请求跳过此渠道。"
+                            : "开启后跳过 compaction 请求，普通请求仍可使用此渠道。"}
+                          适用于 /v1/responses/compact 和包含 compaction_trigger
+                          的 Responses 请求。
+                        </p>
+                        <details>
+                          <summary>编辑请求类型列表</summary>
+                          <JSONField
+                            label={label}
+                            value={value}
+                            onChange={(v) => edit(set(draft, f.path, v))}
+                          />
+                        </details>
                       </div>
                     ) : f.type === "json" ||
                       (value && typeof value === "object") ? (
@@ -1011,18 +1175,18 @@ export function Editor({ row, onClose }: { row: SettingsChannel; onClose: () => 
                           ))}
                         </select>
                       </label>
+                    ) : f.type === "number" ? (
+                      <NumberField
+                        label={label}
+                        value={value}
+                        onChange={(v) => edit(set(draft, f.path, v))}
+                      />
                     ) : (
                       <label>
                         <span className="sr-only">{label}</span>
                         <input
                           aria-label={label}
-                          type={
-                            f.type === "number"
-                              ? "number"
-                              : f.type === "secret"
-                                ? "password"
-                                : "text"
-                          }
+                          type={f.type === "secret" ? "password" : "text"}
                           value={value === undefined ? "" : String(value)}
                           min={0}
                           onChange={(e) =>

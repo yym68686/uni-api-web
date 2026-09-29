@@ -31,7 +31,7 @@ it.each([
   ["sub2api", "渠道管理", "dark"],
   ["prices", "价格设置", "light"],
   ["balances", "余额管理", "dark"],
-  ["sources", "来源设置", "light"],
+  ["sources", "设置", "light"],
 ] as const)(
   "restores the %s shell and saved theme while authentication is pending",
   async (view, label, theme) => {
@@ -128,7 +128,7 @@ it.each([
   ["渠道管理", "站点账号"],
   ["价格设置", "模型价格"],
   ["余额管理", "渠道余额"],
-  ["来源设置", "uni-api 来源"],
+  ["设置", "uni-api 来源"],
 ])(
   "restores %s on refresh before the source request finishes",
   async (label, content) => {
