@@ -4,6 +4,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { Plus, Trash2, X } from "lucide-react";
 import { controlRequest } from "./api";
 import { useChannelImportKeys } from "./channelImportKeys";
+import { useRouteKeyRequestStats } from "./keyRequestStats";
 import { ChannelImportKeyFeedback } from "./ChannelImportKeyFeedback";
 import { Spinner } from "./ui";
 import { AccountForm } from "./SiteAccountForm";
@@ -173,6 +174,7 @@ export function Sub2apiImport({
       !configuredChannels.length &&
       !imports.isPending);
   const [removing, setRemoving] = useState<InstalledChannel | null>(null);
+  const keyRequestStats = useRouteKeyRequestStats(activeSource, !showForm && keyOptions.length > 0);
   const isRemoving = (item: InstalledChannel) =>
     !!removing &&
     removing.source_id === item.source_id &&
@@ -534,6 +536,7 @@ export function Sub2apiImport({
                     API key
                     <select
                       aria-label="查看 API key"
+                      title="近 24 小时全部模型的最终请求成功率；每个请求经过重试后的最终结果只计一次。"
                       value={activeKey}
                       disabled={!keyOptions.length}
                       onChange={(e) => {
@@ -551,6 +554,7 @@ export function Sub2apiImport({
                       {keyOptions.map((item) => (
                         <option key={item.api_key_id} value={item.api_key_id}>
                           Key {item.key_position} · {item.key_prefix}
+                          {" · 近 24 小时 · "}{keyRequestStats.label({ key_id: item.api_key_id, source_id: activeSource })}
                         </option>
                       ))}
                     </select>

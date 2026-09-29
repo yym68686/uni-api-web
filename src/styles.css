@@ -928,6 +928,15 @@ nav > button.active > svg {
   flex: 0 1 auto;
   min-width: 95px;
 }
+.filters .key-select {
+  flex: 0 0 auto;
+  width: min(430px, calc(100vw - 72px));
+  max-width: none;
+}
+.filters .key-select select {
+  width: 100%;
+  text-overflow: ellipsis;
+}
 .filters .filter-chip {
   white-space: nowrap;
 }

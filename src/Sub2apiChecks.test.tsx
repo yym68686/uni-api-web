@@ -157,8 +157,8 @@ it("manages initial channels with account/unassigned filters and shows every cal
   expect(await dialog.findByText("第 2 位")).toBeVisible();
   await user.selectOptions(dialog.getByLabelText("查看 API key"), "key-2");
   expect(dialog.getByText("第 5 位")).toBeVisible();
-  expect(dialog.getByRole("option", {name:"Key 1 · masked-one"})).toBeInTheDocument();
-  expect(dialog.getByRole("option", {name:"Key 2 · masked-two"})).toBeInTheDocument();
+  expect(dialog.getByRole("option", {name:/^Key 1 · masked-one · 近 24 小时/})).toBeInTheDocument();
+  expect(dialog.getByRole("option", {name:/^Key 2 · masked-two · 近 24 小时/})).toBeInTheDocument();
   await user.click(dialog.getByRole("button",{name:"关闭添加渠道"}));
   await user.selectOptions(accountFilter,"__unassigned__");
   expect(screen.getByText("initial-unassigned",{selector:"strong"})).toBeVisible();

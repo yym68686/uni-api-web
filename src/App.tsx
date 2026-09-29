@@ -1,4 +1,5 @@
 import { FailureCounts } from "./FailureCounts";
+import { useKeyRequestStats } from "./keyRequestStats";
 import {
   lazy,
   Suspense,
@@ -1071,6 +1072,9 @@ function Dashboard({
   const effectiveWindow = window;
   const effectiveEndpoint = view === "balances" ? "all" : endpoint;
   const effectiveStream = view === "balances" ? "all" : stream;
+  const keyRequestStats = useKeyRequestStats(connection, {
+    range: effectiveWindow, model, endpoint: effectiveEndpoint, stream: effectiveStream,
+  }, (channelView || view === "balances") && keysLoaded, auto);
   const params = channelParams(
     keyId,
     effectiveWindow,
@@ -1425,6 +1429,7 @@ function Dashboard({
     }
     if (baseConnection.account) { void checks.refetch(); void subQuality.refetch(); }
     void keys.refetch();
+    void keyRequestStats.refetch();
     void liveMetrics.refetch();
     if (
       keysLoaded &&
@@ -1729,15 +1734,17 @@ function Dashboard({
                     <ChevronDown size={13} />
                   </label>
                 )}
-                <div className="select-field">
+                <div className="select-field key-select">
                   <KeyRound size={15} />
                   <select
                     aria-label="API key 筛选"
+                    title={`${keyRequestStats.label(keyId ? keys.data?.data.find(key => key.key_id === keyId) || { key_id: keyId } : undefined)}。按当前时间、模型、端点和流式筛选统计已采集的请求。一次请求经过全部重试后的最终结果只计一次；进行中的请求不计入。括号内为成功请求数/已完成请求数。`}
                     value={keyId}
                     onChange={(e) => setFilter("keyId", e.target.value)}
                   >
                     <option value="">
                       {channelView ? "全部渠道 · 配置顺序" : "全部 API key"}
+                      {" · "}{keyRequestStats.label()}
                     </option>
                     {keyRemoved && (
                       <option value={keyId}>已移除的 API key</option>
@@ -1746,6 +1753,7 @@ function Dashboard({
                       <option key={key.key_id} value={key.key_id}>
                         {key.source_name ? `${key.source_name} · ` : ""}Key{" "}
                         {key.position} · {key.prefix}
+                        {" · "}{keyRequestStats.label(key)}
                       </option>
                     ))}
                   </select>

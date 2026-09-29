@@ -199,15 +199,15 @@ type QueryResult struct {
 	ChannelSpendError string             `json:"channel_spend_error,omitempty"`
 }
 
-func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) {
-	began := time.Now()
+// Use non-overlapping day/minute buckets for every historical statistic.
+func (e *Engine) rollupWindow(f QueryFilter) (time.Time, int64, []string, []any, error) {
 	now := time.Now().UTC()
 	if f.To > 0 {
 		now = time.Unix(f.To, 0).UTC()
 	}
 	start, err := rangeStart(f.Range, now, e.Location)
 	if err != nil {
-		return QueryResult{}, err
+		return time.Time{}, 0, nil, nil, err
 	}
 	// Windows have one-minute resolution. Use full local-day rollups between the
 	// boundaries and minute rows on partial days, never both for the same period.
@@ -225,6 +225,15 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 	}
 	where := []string{`((level='day' AND period_ms>=? AND period_ms<?) OR (level='minute' AND period_ms>=? AND period_ms<=? AND NOT(period_ms>=? AND period_ms<?)))`}
 	args := []any{lo, hi, startMS, now.UnixMilli(), lo, hi}
+	return now, startMS, where, args, nil
+}
+
+func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) {
+	began := time.Now()
+	now, startMS, where, args, err := e.rollupWindow(f)
+	if err != nil {
+		return QueryResult{}, err
+	}
 	for _, entry := range [][2]string{{"provider", f.Provider}, {"model", f.Model}, {"upstream_model", f.UpstreamModel}, {"endpoint", f.Endpoint}, {"key_id", f.KeyID}} {
 		if entry[1] != "" && entry[1] != "all" {
 			where = append(where, entry[0]+"=?")

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useChannelImportKeys } from "./channelImportKeys";
+import { useRouteKeyRequestStats } from "./keyRequestStats";
 import { ChannelImportKeyFeedback } from "./ChannelImportKeyFeedback";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Plus, X } from "lucide-react";
@@ -54,6 +55,7 @@ export function ChannelRoutes({
   const query = useChannelRoutes(sourceId);
   const rows = providerRoutes(query.data?.data || [], providers);
   const keys = [...new Set(rows.map((row) => row.api_key_id))];
+  const keyRequestStats = useRouteKeyRequestStats(sourceId, keys.length > 0);
   const [chosenKey, setChosenKey] = useState(initialKey);
   const selectedKey = keys.includes(chosenKey) ? chosenKey : keys[0];
   return (
@@ -82,6 +84,7 @@ export function ChannelRoutes({
           API key
           <select
             aria-label="查看 API key"
+            title="近 24 小时全部模型的最终请求成功率；每个请求经过重试后的最终结果只计一次。"
             value={selectedKey || ""}
             disabled={!keys.length}
             onChange={(e) => setChosenKey(e.target.value)}
@@ -92,6 +95,7 @@ export function ChannelRoutes({
               return (
                 <option key={key} value={key}>
                   Key {row.key_position} · {row.key_prefix}
+                  {" · 近 24 小时 · "}{keyRequestStats.label({ key_id: key, source_id: sourceId })}
                 </option>
               );
             })}

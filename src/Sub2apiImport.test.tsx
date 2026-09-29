@@ -250,7 +250,7 @@ it("keeps imported bindings visible when native routes fail and can retry the sh
   expect(screen.getAllByLabelText("查看 API key")).toHaveLength(1);
   failed = false;
   await user.click(screen.getByRole("button", { name: "重新读取路由" }));
-  await screen.findByRole("option", { name: "Key 2 · masked-two" });
+  await screen.findByRole("option", { name: /^Key 2 · masked-two · 近 24 小时/ });
   await user.selectOptions(screen.getByLabelText("查看 API key"), "key2");
   expect(screen.getByRole("table")).toHaveTextContent("native-only");
 });

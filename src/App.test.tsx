@@ -51,6 +51,11 @@ function setup(
       "Bearer platform-secret",
     );
     const url = new URL(input);
+    if (url.pathname.endsWith("/key-request-stats")) {
+      const filtered = !!url.searchParams.get("model");
+      const stats = { requests: filtered ? 3 : 4, success: filtered ? 2 : 3, failed: 1, success_rate: filtered ? 2 / 3 : .75 };
+      return new Response(JSON.stringify({ data: [{ source_id: "primary", key_id: "key-first", ...stats }], total: stats, import: { caught_up: true } }));
+    }
     if (url.pathname.endsWith("api-keys")) {
       if (options.keyNetworkError) throw new TypeError("Failed to fetch");
       if (options.keyStatus)
@@ -136,6 +141,27 @@ async function connect(
   if (expectTable) await screen.findByRole("table");
 }
 describe("dashboard workflows", () => {
+  it("shows final request success rates for every key and follows each page's model and time filters", async () => {
+    const { user, calls } = setup();
+    await connect(user);
+    const selector = () => screen.getByLabelText("API key 筛选");
+    await waitFor(() => expect(within(selector()).getByRole("option", { name: /Key 1/ })).toHaveTextContent("请求成功率 75.0%（3/4）"));
+    expect(within(selector()).getByRole("option", { name: /Key 2/ })).toHaveTextContent("暂无已完成请求");
+    await user.selectOptions(screen.getByLabelText("模型筛选"), "model-a");
+    await waitFor(() => expect(within(selector()).getByRole("option", { name: /Key 1/ })).toHaveTextContent("请求成功率 66.7%（2/3）"));
+    const statsCalls = () => calls.filter(url => url.includes("/key-request-stats"));
+    const before = statsCalls().length;
+    await user.selectOptions(selector(), "key-second");
+    expect(statsCalls()).toHaveLength(before);
+    expect(within(selector()).getByRole("option", { name: /Key 1/ })).toHaveTextContent("66.7%");
+    await user.selectOptions(screen.getByLabelText("时间范围筛选"), "24h");
+    await waitFor(() => expect(new URL(statsCalls().at(-1)!).searchParams.get("range")).toBe("24h"));
+    expect(new URL(statsCalls().at(-1)!).searchParams.has("key_id")).toBe(false);
+    await user.click(screen.getByRole("button", { name: /^余额管理/ }));
+    await waitFor(() => expect(within(selector()).getByRole("option", { name: /Key 1/ })).toHaveTextContent("75.0%"));
+    await user.selectOptions(screen.getByLabelText("模型筛选"), "model-a");
+    await waitFor(() => expect(within(selector()).getByRole("option", { name: /Key 1/ })).toHaveTextContent("66.7%"));
+  });
   it("keeps key routing order, filters exhausted balances, exposes timing and clears credentials on disconnect", async () => {
     const { user, client } = setup();
     await connect(user);
@@ -398,7 +424,7 @@ describe("dashboard workflows", () => {
       "所选 API key 已移除",
     );
     expect(screen.getByLabelText("API key 筛选")).toHaveValue("key-removed");
-    expect(calls).toHaveLength(1);
+    expect(calls.filter(url => !url.includes("/key-request-stats"))).toHaveLength(1);
     await user.click(screen.getByRole("button", { name: "重置筛选" }));
     await screen.findByRole("table");
   });
