@@ -135,7 +135,7 @@ function EventDetails({ event: e }: { event: TraceEvent }) {
       <dt>绝对时间</dt>
       <dd>{clock(e.at_ms)}</dd>
       {typeof e.detail.headers_at_ms === "number" && <><dt>收到上游响应头</dt><dd>{clock(e.detail.headers_at_ms)}</dd></>}
-        {e.started_ms != null && (
+        {e.started_ms != null && e.started_ms > 0 && (
           <>
             <dt>渠道开始时间</dt>
             <dd>{clock(e.started_ms)}</dd>

@@ -61,7 +61,7 @@ const run: TraceRun = {
     kind: "",
     stage: "",
     at_ms: 0,
-    started_ms: null,
+      started_ms: 0,
     attempt_id: "",
     provider: "",
     model: "",
@@ -122,6 +122,7 @@ it("queries only on submit, preserves errors and final success after retry, and 
     screen.getByText(/INSUFFICIENT_BALANCE · Insufficient account balance/),
   ).toBeVisible();
   expect(screen.getAllByText("second").length).toBeGreaterThan(0);
+  expect(screen.queryByText(/1970\/1\/1 08:00:00/)).not.toBeInTheDocument();
   await user.clear(screen.getByLabelText("请求 ID"));
   await user.type(screen.getByLabelText("请求 ID"), "missing");
   await user.click(screen.getByRole("button", { name: "查询请求" }));
