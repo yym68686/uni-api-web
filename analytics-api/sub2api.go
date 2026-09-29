@@ -142,18 +142,19 @@ type subTarget struct {
 	Billing         *subBilling          `json:"billing"`
 }
 type subAccount struct {
-	ProviderKind string             `json:"provider_kind"`
-	LoginName    string             `json:"login_name"`
-	ID           string             `json:"id"`
-	Name         string             `json:"name"`
-	Base         string             `json:"base"`
-	Email        string             `json:"email"`
-	State        string             `json:"state"`
-	JobKind      string             `json:"job_kind"`
-	Message      string             `json:"message"`
-	SyncedAt     int64              `json:"synced_at"`
-	Targets      []subTarget        `json:"targets"`
-	Balance      *subAccountBalance `json:"balance"`
+	HasSavedPassword bool               `json:"has_saved_password"`
+	ProviderKind     string             `json:"provider_kind"`
+	LoginName        string             `json:"login_name"`
+	ID               string             `json:"id"`
+	Name             string             `json:"name"`
+	Base             string             `json:"base"`
+	Email            string             `json:"email"`
+	State            string             `json:"state"`
+	JobKind          string             `json:"job_kind"`
+	Message          string             `json:"message"`
+	SyncedAt         int64              `json:"synced_at"`
+	Targets          []subTarget        `json:"targets"`
+	Balance          *subAccountBalance `json:"balance"`
 }
 type subChallenge struct {
 	Owner, Base, Email, Name, Temp string
@@ -165,7 +166,7 @@ type subChallenge struct {
 func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 	owner, _ := s.controlUser(r)
 	accountID, groupID := r.PathValue("id"), int64Param(r.PathValue("group"))
-	rows, err := s.control.db.QueryContext(r.Context(), `SELECT id,name,base,email,state,message,synced_at,balance,job_kind,provider_kind,login_name FROM console_sub_accounts WHERE owner=$1 AND ($2='' OR id=$2) ORDER BY created_at,id`, owner, accountID)
+	rows, err := s.control.db.QueryContext(r.Context(), `SELECT id,name,base,email,state,message,synced_at,balance,job_kind,provider_kind,login_name,encrypted_login_password<>'' FROM console_sub_accounts WHERE owner=$1 AND ($2='' OR id=$2) ORDER BY created_at,id`, owner, accountID)
 	if err != nil {
 		http.Error(w, "账号列表暂不可用", 503)
 		return
@@ -175,7 +176,7 @@ func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var a subAccount
 		var balanceRaw []byte
-		if err = rows.Scan(&a.ID, &a.Name, &a.Base, &a.Email, &a.State, &a.Message, &a.SyncedAt, &balanceRaw, &a.JobKind, &a.ProviderKind, &a.LoginName); err != nil {
+		if err = rows.Scan(&a.ID, &a.Name, &a.Base, &a.Email, &a.State, &a.Message, &a.SyncedAt, &balanceRaw, &a.JobKind, &a.ProviderKind, &a.LoginName, &a.HasSavedPassword); err != nil {
 			break
 		}
 		if len(balanceRaw) > 0 {
@@ -301,8 +302,8 @@ func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 	if accountID != "" {
 		// The re-login endpoint is bound to the existing account. Client input
 		// cannot redirect its credentials or create/replace another account.
-		var state string
-		err = s.control.db.QueryRowContext(ctx, `SELECT base,email,name,provider_kind,state FROM console_sub_accounts WHERE id=$1 AND owner=$2`, accountID, owner).Scan(&in.Base, &in.Email, &in.Name, &savedKind, &state)
+		var state, encryptedPassword string
+		err = s.control.db.QueryRowContext(ctx, `SELECT base,email,name,provider_kind,state,encrypted_login_password FROM console_sub_accounts WHERE id=$1 AND owner=$2`, accountID, owner).Scan(&in.Base, &in.Email, &in.Name, &savedKind, &state, &encryptedPassword)
 		if err != nil {
 			http.Error(w, "账号不存在", 404)
 			return
@@ -310,6 +311,19 @@ func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 		if state == "queued" || state == "running" {
 			http.Error(w, "该账号已有任务进行中，请等待完成", 409)
 			return
+		}
+		// Reuse credentials only after ownership and the immutable site identity
+		// have been checked. Never return the saved password to the browser.
+		if in.Password == "" && in.Access == "" && in.Challenge == "" {
+			if encryptedPassword == "" {
+				http.Error(w, subMissingLoginPasswordMessage, 400)
+				return
+			}
+			in.Password, err = s.control.decrypt(encryptedPassword)
+			if err != nil || in.Password == "" {
+				http.Error(w, "自动登录凭据无法解密，请重新输入密码", 400)
+				return
+			}
 		}
 	}
 	if in.Challenge != "" {
@@ -863,10 +877,7 @@ func (s *Service) subPanel(ctx context.Context, id, base, job, encrypted string)
 				password, _ = s.control.decrypt(currentPassword)
 			}
 			if password == "" {
-				if lastErr != nil {
-					return lastErr
-				}
-				return errors.New("站点会话已失效，请重新登录")
+				return subMissingLoginPasswordError(lastErr)
 			}
 			next = subAuth{}
 			lastErr = subJSON(renewCtx, subHTTP, base, "POST", "/api/v1/auth/login", "", map[string]string{"email": email, "password": password}, &next, "")

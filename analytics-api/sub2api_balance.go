@@ -138,7 +138,7 @@ func (s *Service) subAccountBalance(w http.ResponseWriter, r *http.Request) {
 				}
 				if decryptErr != nil || password == "" {
 					if encryptedPassword == "" {
-						err = errors.New("站点登录已失效，请重新登录")
+						err = errors.New(subMissingLoginPasswordMessage)
 					} else {
 						err = errors.New("自动登录凭据无法解密，请重新登录")
 					}

@@ -1703,7 +1703,7 @@ it("syncs all idle accounts independently of channel filters and prevents repeat
   ).toBeVisible();
 });
 
-it("offers the browser helper for Turnstile and saves only its returned session", async () => {
+it("retains the password through browser verification for encrypted server storage", async () => {
   const writes: any[] = [];
   const onMessage = (event: MessageEvent) => {
     const { channel, id, type } = event.data || {};
@@ -1785,12 +1785,15 @@ it("offers the browser helper for Turnstile and saves only its returned session"
       name: "",
       base: "https://site.example",
       email: "me@example.com",
+      password: "private-password",
       access_token: "browser-session",
       refresh_token: "browser-refresh",
     });
     await waitFor(() =>
       expect(screen.queryByLabelText("账号密码")).not.toBeInTheDocument(),
     );
+    expect(JSON.stringify(localStorage)).not.toContain("private-password");
+    expect(JSON.stringify(sessionStorage)).not.toContain("private-password");
   } finally {
     window.removeEventListener("message", onMessage);
   }
@@ -1820,6 +1823,65 @@ it("opens account forms in a modal and restores focus when closed", async () => 
   expect(within(login).getByLabelText("账号密码")).toHaveValue("");
   await user.click(within(login).getByRole("button", { name: "关闭账号窗口" }));
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+});
+
+it.each([false, true])("reuses a saved site password without exposing it and retries only a failed sync (%s)", async failSync => {
+  const data = fixtures().slice(0, 1);
+  data[0].has_saved_password = true;
+  const writes: {path: string; body: unknown}[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+    if (init?.method === "POST") {
+      writes.push({path: new URL(input).pathname, body: JSON.parse(String(init.body))});
+      if (failSync && writes.length === 2) return new Response("暂不可用", {status: 503});
+      return Response.json({authenticated: true, queued: false});
+    }
+    return Response.json({data: input.endsWith("/accounts") ? data : []});
+  }));
+  const user = userEvent.setup();
+  mount();
+  await user.click(await screen.findByRole("button", {name: "重新登录"}));
+  const dialog = within(screen.getByRole("dialog", {name: "重新登录站点账号"}));
+  expect(dialog.getByLabelText("账号密码")).not.toBeRequired();
+  expect(dialog.getByLabelText("账号密码")).toHaveValue("");
+  expect(dialog.getByPlaceholderText("已保存密码，留空继续使用")).toBeVisible();
+  await user.click(dialog.getByRole("button", {name: "连接并检测"}));
+  if (failSync) {
+    expect(await screen.findByText(/登录已保存，同步未启动/)).toBeVisible();
+    await user.click(dialog.getByRole("button", {name: "重试同步并检测"}));
+  }
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(writes).toEqual([
+    {path: "/analytics/v1/sub2api/accounts/one/login", body: {name: "one", base: "https://one.test", email: "one@test.com"}},
+    {path: "/analytics/v1/sub2api/accounts/one/sync", body: {}},
+    ...(failSync ? [{path: "/analytics/v1/sub2api/accounts/one/sync", body: {}}] : []),
+  ]);
+});
+
+it("explains missing legacy credentials and requires them once without submitting an empty login", async () => {
+  const data = fixtures().slice(0, 1);
+  data[0].has_saved_password = false;
+  data[0].state = "error";
+  data[0].message = "站点保存的登录会话已失效，请重新登录站点后继续";
+  const writes: unknown[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+    if (init?.method === "POST") writes.push(JSON.parse(String(init.body)));
+    return Response.json({data: input.endsWith("/accounts") ? data : []});
+  }));
+  const user = userEvent.setup();
+  mount();
+  expect(await screen.findByText(/站点会话已失效，且尚未保存登录密码/)).toBeVisible();
+  await user.click(screen.getByRole("button", {name: "重新登录"}));
+  const dialog = within(screen.getByRole("dialog"));
+  expect(dialog.getByLabelText("账号密码")).toBeRequired();
+  expect(dialog.getByText(/此账号尚未保存登录密码，请补填一次/)).toBeVisible();
+  await user.click(dialog.getByRole("button", {name: "连接并检测"}));
+  expect(writes).toEqual([]);
+  await user.type(dialog.getByLabelText("账号密码"), "replacement-password");
+  await user.click(dialog.getByRole("button", {name: "连接并检测"}));
+  await waitFor(() => expect(writes).toHaveLength(2));
+  expect(writes[0]).toMatchObject({password: "replacement-password"});
+  expect(JSON.stringify(localStorage)).not.toContain("replacement-password");
+  expect(JSON.stringify(sessionStorage)).not.toContain("replacement-password");
 });
 
 it("shows account wallet balances using the shared thresholds", async () => {

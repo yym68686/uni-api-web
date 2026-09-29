@@ -18,19 +18,21 @@ export function AccountForm({
   saved: () => void;
   sessionOnly?: boolean;
 }) {
-  const endpoint = sessionOnly && initial
+  const endpoint = initial
     ? `/v1/sub2api/accounts/${encodeURIComponent(initial.id)}/login`
     : "/v1/sub2api/accounts";
   const [name, setName] = useState(initial?.name || "");
   const [base, setBase] = useState(initial?.base || "");
   const [email, setEmail] = useState(initial?.login_name || initial?.email || "");
   const [password, setPassword] = useState("");
+  const hasSavedPassword = initial?.has_saved_password === true;
   const [browserNeeded, setBrowserNeeded] = useState(false);
   const [helperReady, setHelperReady] = useState(false);
   const [browserBusy, setBrowserBusy] = useState(false);
   const [challenge, setChallenge] = useState("");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
+  const [loginSaved, setLoginSaved] = useState(false);
   const [error, setError] = useState("");
   const browserAbort = useRef<AbortController | null>(null);
   const opener = useRef(document.activeElement);
@@ -49,6 +51,22 @@ export function AccountForm({
     browserAbort.current?.abort();
     close();
   }
+  async function finishLogin() {
+    setPassword("");
+    setChallenge("");
+    setCode("");
+    setLoginSaved(true);
+    if (initial && !sessionOnly) {
+      try {
+        await controlRequest(`/v1/sub2api/accounts/${encodeURIComponent(initial.id)}/sync`, {
+          method: "POST", body: "{}",
+        });
+      } catch (e) {
+        throw new Error(`登录已保存，同步未启动：${e instanceof Error ? e.message : "请稍后点击同步并检测"}`);
+      }
+    }
+    saved();
+  }
   async function browserLogin() {
     if (busy || browserBusy) return;
     if (!helperReady) {
@@ -64,13 +82,14 @@ export function AccountForm({
         { base, email, password, agreed: true },
         abort.signal,
       );
-      setPassword("");
       await controlRequest(endpoint, {
         method: "POST",
-        body: JSON.stringify({ name, base, email, ...auth }),
+        // Keep the operator's password through the browser verification step
+        // so the server can encrypt it for future automatic sign-ins.
+        body: JSON.stringify({ name, base, email, ...(password ? { password } : {}), ...auth }),
         signal: abort.signal,
       });
-      saved();
+      await finishLogin();
     } catch (e) {
       if (!abort.signal.aborted)
         setError(e instanceof Error ? e.message : "浏览器登录失败");
@@ -82,13 +101,17 @@ export function AccountForm({
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (busy || browserBusy) return;
-    if (browserNeeded && !challenge) {
+    if (browserNeeded && !challenge && !loginSaved) {
       void browserLogin();
       return;
     }
     setBusy(true);
     setError("");
     try {
+      if (loginSaved) {
+        await finishLogin();
+        return;
+      }
       const result = await controlRequest<{
         requires_2fa?: boolean;
         challenge?: string;
@@ -99,7 +122,7 @@ export function AccountForm({
         body: JSON.stringify(
           challenge
             ? { challenge, totp_code: code }
-            : { name, base, email, password },
+            : { name, base, email, ...(password ? { password } : {}) },
         ),
       });
       if (result.requires_browser) {
@@ -110,8 +133,7 @@ export function AccountForm({
         setChallenge(result.challenge);
         setPassword("");
       } else {
-        setPassword("");
-        saved();
+        await finishLogin();
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "连接失败");
@@ -169,7 +191,7 @@ export function AccountForm({
           <form className="source-form sub-account-form" onSubmit={submit}>
             <fieldset
               className="sub-login-fields"
-              disabled={busy || browserBusy}
+              disabled={busy || browserBusy || loginSaved}
             >
               {challenge ? (
                 <label>
@@ -194,7 +216,7 @@ export function AccountForm({
                       placeholder="例如：我的上游"
                       maxLength={120}
                       value={name}
-                      readOnly={sessionOnly}
+                      readOnly={!!initial}
                       onChange={(event) => setName(event.target.value)}
                     />
                   </label>
@@ -228,13 +250,23 @@ export function AccountForm({
                     账号密码
                     <input
                       type="password"
+                      aria-label="账号密码"
+                      aria-describedby="site-password-note"
+                      placeholder={hasSavedPassword ? "已保存密码，留空继续使用" : "输入账号密码"}
                       autoFocus={sessionOnly}
                       autoComplete="current-password"
                       value={password}
                       onChange={(event) => setPassword(event.target.value)}
-                      required
+                      required={!hasSavedPassword && !browserNeeded}
                     />
                   </label>
+                  <p className="settings-note" id="site-password-note">
+                    {hasSavedPassword
+                      ? "密码已加密保存。留空使用已保存密码，填写新密码可更新；会话失效后自动重新登录。"
+                      : initial
+                        ? "此账号尚未保存登录密码，请补填一次。验证成功后加密保存，会话失效后自动重新登录。"
+                        : "验证成功后，密码将加密保存在服务端，用于会话失效时自动重新登录。"}
+                  </p>
                 </>
               )}
             </fieldset>
@@ -270,7 +302,9 @@ export function AccountForm({
                 ) : (
                   <Plus size={14} />
                 )}
-                {challenge
+                {loginSaved
+                  ? "重试同步并检测"
+                  : challenge
                   ? sessionOnly ? "验证并返回" : "验证并检测"
                   : browserNeeded
                     ? "使用浏览器登录"

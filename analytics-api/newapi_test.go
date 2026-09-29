@@ -426,6 +426,10 @@ func TestNewAPISynchronizationReusesExistingDetectionQueue(t *testing.T) {
 
 func TestNewAPIReloginUpdatesSessionWithoutSynchronizing(t *testing.T) {
 	s, account, owner := newAPITestService(t)
+	encryptedPassword, _ := s.control.encrypt("correct")
+	if _, err := s.control.db.Exec(`UPDATE console_sub_accounts SET encrypted_login_password=$2 WHERE id=$1`, account, encryptedPassword); err != nil {
+		t.Fatal(err)
+	}
 	token, _ := s.control.newSession(context.Background(), owner)
 	withSpendUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -448,7 +452,7 @@ func TestNewAPIReloginUpdatesSessionWithoutSynchronizing(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	r := httptest.NewRequest("POST", "/v1/sub2api/accounts/"+account+"/login", strings.NewReader(`{"password":"correct"}`))
+	r := httptest.NewRequest("POST", "/v1/sub2api/accounts/"+account+"/login", strings.NewReader(`{}`))
 	r.Header.Set("Content-Type", "application/json")
 	r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
 	w := httptest.NewRecorder()
@@ -459,5 +463,74 @@ func TestNewAPIReloginUpdatesSessionWithoutSynchronizing(t *testing.T) {
 	auth, _, err := s.newAPIAuth(context.Background(), account)
 	if err != nil || auth.Access != "new-access" || auth.Cookies["new_api_refresh"] != "new-refresh" {
 		t.Fatal("new session not saved")
+	}
+}
+
+func TestNewAPIAutomaticallyReloginsWithSavedPasswordAndPreservesIdentity(t *testing.T) {
+	for _, mode := range []string{"bearer", "cookie", "foreign"} {
+		t.Run(mode, func(t *testing.T) {
+			s, account, _ := newAPITestService(t)
+			password, _ := s.control.encrypt("correct")
+			if _, err := s.control.db.Exec(`UPDATE console_sub_accounts SET encrypted_login_password=$2 WHERE id=$1`, account, password); err != nil {
+				t.Fatal(err)
+			}
+			var refreshes, logins int
+			withSpendUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/user/auth/refresh":
+					refreshes++
+					w.WriteHeader(401)
+				case "/api/user/login/encryption-key":
+					http.NotFound(w, r)
+				case "/api/user/login":
+					logins++
+					var in map[string]string
+					if json.NewDecoder(r.Body).Decode(&in) != nil || in["password"] != "correct" || in["username"] != "fixture" {
+						t.Error("automatic login did not use saved account credentials")
+					}
+					if mode == "cookie" {
+						http.SetCookie(w, &http.Cookie{Name: "session", Value: "cookie-session"})
+						newAPIOK(w, map[string]any{"id": 7, "username": "fixture"})
+					} else {
+						id, name := 7, "fixture"
+						if mode == "foreign" {
+							id, name = 8, "foreign"
+						}
+						newAPIOK(w, map[string]any{"access_token": "fresh", "user": map[string]any{"id": id, "username": name}})
+					}
+				case "/api/user/self":
+					cookie, _ := r.Cookie("session")
+					if r.Header.Get("Authorization") != "Bearer fresh" && (cookie == nil || cookie.Value != "cookie-session") {
+						w.WriteHeader(401)
+						return
+					}
+					id, name := 7, "fixture"
+					if mode == "foreign" {
+						id, name = 8, "foreign"
+					}
+					newAPIOK(w, map[string]any{"id": id, "username": name})
+				default:
+					t.Error("unexpected auto-login request", r.URL.Path)
+				}
+			}))
+			var profile newAPIUser
+			err := s.newAPICall(context.Background(), account, "https://usage.example", "GET", "/api/user/self", nil, &profile)
+			if refreshes != 1 || logins != 1 {
+				t.Fatal("unexpected recovery attempts", refreshes, logins)
+			}
+			auth, _, _ := s.newAPIAuth(context.Background(), account)
+			if mode == "foreign" {
+				if err == nil || auth.Access != "expired-access" {
+					t.Fatal("foreign login replaced saved identity", err)
+				}
+				return
+			}
+			if err != nil || profile.ID != 7 || auth.QuotaPerUnit != 500000 || auth.UserID != 7 || auth.Username != "fixture" {
+				t.Fatal("auto-login failed or lost billing/identity context", err)
+			}
+			if mode == "cookie" && auth.Cookies["session"] != "cookie-session" {
+				t.Fatal("renewed session cookie was not saved")
+			}
+		})
 	}
 }

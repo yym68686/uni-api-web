@@ -130,6 +130,7 @@ export interface SubAccount {
   email: string;
   login_name?: string;
   provider_kind?: string;
+  has_saved_password?: boolean;
   state: string;
   job_kind?: string;
   message: string;
@@ -1048,6 +1049,9 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                     (t) => t.active && t.state === "done",
                   ).length,
                   total = a.targets.filter((t) => t.active).length;
+                const accountMessage = a.has_saved_password === false && /登录.*失效|会话.*失效/.test(a.message)
+                  ? "站点会话已失效，且尚未保存登录密码；请补填一次密码，后续将自动登录。"
+                  : a.message;
                 return (
                   <article className="sub-account" key={a.id} role="listitem" aria-label={a.name}>
                     <div className="sub-account-identity">
@@ -1068,8 +1072,8 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                       {a.synced_at > 0 && !pending(a.state) && (
                         <small>上次同步 {time(a.synced_at)}</small>
                       )}
-                      {a.message && (
-                        <small className="sub-account-message" title={a.message}>{a.message}</small>
+                      {accountMessage && (
+                        <small className="sub-account-message" title={accountMessage}>{accountMessage}</small>
                       )}
                     </div>
                     <div className="sub-account-actions">

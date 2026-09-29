@@ -431,26 +431,28 @@ func (s *Service) newAPICall(ctx context.Context, account, base, method, path st
 		}
 		if refreshErr != nil || login.Access == "" {
 			if password == "" {
-				if refreshErr != nil {
-					return errors.New("站点会话已失效，请重新登录")
-				}
-				return errors.New("自动登录凭据缺失，请重新登录")
+				return subMissingLoginPasswordError(refreshErr)
 			}
+			identity := next
 			var loginResult newAPILogin
 			next, loginResult, e = newAPILoginSession(lockCtx, base, next.Username, password, "", "")
 			if e != nil {
 				return e
 			}
-			if loginResult.Verification || loginResult.TwoFA || next.Access == "" {
+			if loginResult.Verification || loginResult.TwoFA {
 				return errors.New("站点需要二次验证，请手动完成登录")
+			}
+			if next.Access == "" && next.Cookies["session"] == "" {
+				return errors.New("站点未返回登录会话")
 			}
 			var user newAPIUser
 			if e = newAPIJSON(lockCtx, base, "GET", "/api/user/self", &next, nil, &user); e != nil {
 				return e
 			}
-			if user.ID <= 0 || user.ID != next.UserID {
+			if user.ID <= 0 || user.ID != identity.UserID || !strings.EqualFold(user.Username, identity.Username) || (next.UserID > 0 && next.UserID != user.ID) {
 				return errors.New("自动登录账号身份不匹配")
 			}
+			next.UserID, next.Username, next.QuotaPerUnit = user.ID, user.Username, identity.QuotaPerUnit
 		} else {
 			newAPIApplyLogin(&next, login)
 		}

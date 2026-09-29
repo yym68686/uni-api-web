@@ -329,10 +329,7 @@ func (s *Service) subUsageAuth(ctx context.Context, account, base, rejected stri
 	}
 	if renewErr != nil || next.Access == "" {
 		if encryptedPassword == "" {
-			if renewErr != nil {
-				return "", renewErr
-			}
-			return "", errors.New("站点登录已失效，请重新登录")
+			return "", subMissingLoginPasswordError(renewErr)
 		}
 		password, decryptErr := s.control.decrypt(encryptedPassword)
 		if decryptErr != nil || password == "" {

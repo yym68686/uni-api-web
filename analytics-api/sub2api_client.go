@@ -77,6 +77,15 @@ type subRemoteError struct {
 }
 
 const subSessionExpiredMessage = "站点保存的登录会话已失效，请重新登录站点后继续"
+const subMissingLoginPasswordMessage = "站点会话无法自动续期，尚未保存登录密码；请补填一次密码，后续将自动登录"
+
+func subMissingLoginPasswordError(refreshErr error) error {
+	var remote *subRemoteError
+	if refreshErr != nil && !(errors.As(refreshErr, &remote) && remote.Status == http.StatusUnauthorized) {
+		return refreshErr
+	}
+	return errors.New(subMissingLoginPasswordMessage)
+}
 
 func (e *subRemoteError) Error() string {
 	if strings.Contains(e.Reason, "CAPTCHA") || strings.Contains(e.Reason, "TURNSTILE") {
