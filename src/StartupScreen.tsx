@@ -12,7 +12,7 @@ const panelTitles: Record<Exclude<View, "overview">, string> = {
   prices: "模型价格",
   sources: "uni-api 来源",
   automations: "自动化",
-  requests: "请求追踪",
+  requests: "请求日志",
 };
 
 function SkeletonPanel({ title }: { title: string }) {

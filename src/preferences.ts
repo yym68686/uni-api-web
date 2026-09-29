@@ -55,7 +55,7 @@ export function saveView(base: string, view: View) {
   }
 }
 
-export type FilterScope = "channels" | "balances";
+export type FilterScope = "channels" | "balances" | "requests";
 const storageKey = (base: string, scope: FilterScope) =>
   `uni-console-filters:v2:${scope}:${base}`;
 const legacyStorageKey = (base: string) => `uni-console-filters:v1:${base}`;
@@ -93,9 +93,17 @@ function validate(value: unknown): Filters {
         ? value
         : "";
     })(),
-    statusFilter: field("statusFilter", ["", "eligible", "unavailable"]),
+    statusFilter: field("statusFilter", [
+      "",
+      "eligible",
+      "unavailable",
+      "success",
+      "failed",
+      "cancelled",
+      "unknown",
+    ]),
     search: field("search"),
-    sort: field("sort", ["config", "success", "latency", "wait"]),
+    sort: field("sort", ["config", "success", "latency", "wait", "oldest"]),
     endpoint:
       field("endpoint") === "all" ||
       /^\/[^?#\s]{1,500}$/.test(field("endpoint"))
@@ -114,7 +122,9 @@ export function loadFilters(
     // from then on, including an explicit reset to defaults.
     const saved =
       localStorage.getItem(storageKey(base, scope)) ??
-      localStorage.getItem(legacyStorageKey(base));
+      (scope === "requests"
+        ? null
+        : localStorage.getItem(legacyStorageKey(base)));
     return validate(JSON.parse(saved || "null"));
   } catch {
     return { ...defaultFilters };

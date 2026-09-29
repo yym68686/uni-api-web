@@ -2,7 +2,7 @@ import { it, expect, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { RequestTracePage, TraceTimeline } from "./RequestTrace";
+import { RequestTraceDialog, TraceTimeline } from "./RequestTrace";
 import type { TraceRun, TraceEvent } from "./RequestTrace";
 const events: Partial<TraceEvent>[] = [
   {
@@ -82,27 +82,22 @@ const run: TraceRun = {
     ...e,
   })),
 };
-it("queries only on submit, preserves errors and final success after retry, and handles no matches", async () => {
+it("loads a scoped request in a modal, preserves retry errors and refreshes", async () => {
   const calls: string[] = [];
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string) => {
       calls.push(input);
-      return Response.json({
-        data:
-          new URL(input).searchParams.get("request_id") === "missing"
-            ? []
-            : [run],
-        import: { caught_up: true },
-      });
+      return Response.json({ data: [run], import: { caught_up: true } });
     }),
   );
+  const close = vi.fn();
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   render(
     <QueryClientProvider client={client}>
-      <RequestTracePage
+      <RequestTraceDialog
         connection={{
           base: location.origin,
           key: "",
@@ -110,27 +105,25 @@ it("queries only on submit, preserves errors and final success after retry, and 
           account: true,
         }}
         sources={[{ id: "primary", name: "Fugue" }]}
+        requestId="r"
+        sourceId="primary"
+        instanceId="instance"
+        onClose={close}
       />
     </QueryClientProvider>,
   );
-  const user = userEvent.setup();
-  await user.type(screen.getByLabelText("请求 ID"), "r");
-  expect(calls).toHaveLength(0);
-  await user.click(screen.getByRole("button", { name: "查询请求" }));
   await screen.findByRole("heading", { name: "请求成功" });
+  const url = new URL(calls[0]);
+  expect(url.searchParams.get("source_id")).toBe("primary");
+  expect(url.searchParams.get("instance_id")).toBe("instance");
   expect(
     screen.getAllByText(/账号余额不足 · Insufficient account balance/)[0],
   ).toBeVisible();
-  expect(screen.getAllByText("second").length).toBeGreaterThan(0);
-  expect(screen.queryByText(/1970\/1\/1 08:00:00/)).not.toBeInTheDocument();
-  await user.clear(screen.getByLabelText("请求 ID"));
-  await user.type(screen.getByLabelText("请求 ID"), "missing");
-  await user.click(screen.getByRole("button", { name: "查询请求" }));
-  await screen.findByText("未找到该请求的网关记录");
-  expect(
-    screen.queryByRole("heading", { name: "请求成功" }),
-  ).not.toBeInTheDocument();
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "刷新记录" }));
   await waitFor(() => expect(calls).toHaveLength(2));
+  await user.click(screen.getByRole("button", { name: "关闭请求详情" }));
+  expect(close).toHaveBeenCalledOnce();
 });
 it("marks ambiguous caller IDs instead of inventing a single final outcome", () => {
   render(

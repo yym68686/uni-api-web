@@ -21,7 +21,7 @@ import { Brand } from "./ui";
 const pages = [
   { view: "overview", label: "总览", icon: Gauge },
   { view: "channels", label: "渠道观测", icon: LayoutDashboard },
-  { view: "requests", label: "请求追踪", icon: Search },
+  { view: "requests", label: "日志", icon: Search },
   { view: "sub2api", label: "渠道管理", icon: ScanLine, account: true },
   { view: "prices", label: "价格设置", icon: SlidersHorizontal },
   { view: "balances", label: "余额管理", icon: Wallet },

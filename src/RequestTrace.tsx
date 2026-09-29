@@ -1,12 +1,10 @@
 import { useState } from "react";
-import type { FormEvent, CSSProperties } from "react";
+import type { CSSProperties } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Search,
   RefreshCw,
   ArrowUpRight,
-  ArrowDown,
   Check,
   X,
   Clock3,
@@ -34,6 +32,113 @@ import type {
 } from "./requestTraceModel";
 export type { TraceRun, TraceEvent } from "./requestTraceModel";
 import "./requestTrace.css";
+
+export function RequestTraceDialog({
+  connection,
+  sources,
+  requestId,
+  sourceId,
+  instanceId,
+  onClose,
+}: {
+  connection: Connection;
+  sources: { id: string; name: string }[];
+  requestId: string;
+  sourceId: string;
+  instanceId?: string;
+  onClose: () => void;
+}) {
+  const query = useQuery({
+    queryKey: [
+      "request-trace",
+      connection.session,
+      sourceId,
+      instanceId,
+      requestId,
+    ],
+    queryFn: ({ signal }) => {
+      const params = new URLSearchParams({
+        request_id: requestId,
+        source_id: sourceId,
+      });
+      if (instanceId !== undefined) params.set("instance_id", instanceId);
+      return analyticsRequest<TraceResult>(
+        connection,
+        "/analytics/v1/request-trace?" + params,
+        signal,
+      );
+    },
+    retry: false,
+    refetchInterval: initializationRetryInterval,
+  });
+  return (
+    <Dialog.Root
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
+      <Dialog.Portal>
+        <Dialog.Overlay className="dialog-overlay" />
+        <Dialog.Content className="request-log-dialog">
+          <header className="request-log-dialog-heading">
+            <div>
+              <Dialog.Title>请求详情</Dialog.Title>
+              <Dialog.Description>{requestId}</Dialog.Description>
+            </div>
+            <button
+              className="button small"
+              onClick={() => void query.refetch()}
+              disabled={query.isFetching}
+            >
+              <RefreshCw size={15} />
+              刷新记录
+            </button>
+            <Dialog.Close className="icon-button" aria-label="关闭请求详情">
+              <X size={20} />
+            </Dialog.Close>
+          </header>
+          <div className="request-log-dialog-body">
+            {query.isPending && (
+              <p role="status">
+                <Spinner small />
+                正在读取请求记录…
+              </p>
+            )}
+            {query.error && (
+              <p role="alert" className="error-banner">
+                {query.error.message}
+              </p>
+            )}
+            {query.data?.import?.caught_up === false && (
+              <p className="coverage-note">
+                历史事实仍在同步，当前链路可能不完整。稍后可刷新记录。
+              </p>
+            )}
+            {query.data?.data.length === 0 && (
+              <div className="trace-empty">
+                <h3>未找到该请求的网关记录</h3>
+                <p>
+                  请核对请求 ID 与来源。记录可能尚未同步或发生于采集启用之前。
+                </p>
+              </div>
+            )}
+            {query.data?.data.map((run) => (
+              <TraceTimeline
+                key={`${run.source_id}:${run.instance_id}:${run.request_id}`}
+                run={run}
+                sourceName={
+                  sources.find((s) => s.id === run.source_id)?.name ||
+                  run.source_id
+                }
+              />
+            ))}
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
 interface TraceResult {
   request_id: string;
   data: TraceRun[];
@@ -228,7 +333,7 @@ function AttemptDrawer({
       }}
     >
       <Dialog.Portal>
-        <Dialog.Overlay className="dialog-overlay" />
+        <Dialog.Overlay className="dialog-overlay trace-attempt-overlay" />
         <Dialog.Content className="detail-panel trace-detail-drawer">
           <Dialog.Close
             className="icon-button detail-close"
@@ -559,156 +664,6 @@ export function TraceTimeline({
           onClose={() => setOpenAttempt(null)}
         />
       )}
-    </section>
-  );
-}
-
-export function RequestTracePage({
-  connection,
-  sources,
-}: {
-  connection: Connection;
-  sources: { id: string; name: string }[];
-}) {
-  const [id, setId] = useState("");
-  const [source, setSource] = useState("");
-  const [search, setSearch] = useState<{ id: string; source: string } | null>(
-    null,
-  );
-  const query = useQuery({
-    queryKey: ["request-trace", connection.session, search?.source, search?.id],
-    queryFn: ({ signal }) =>
-      analyticsRequest<TraceResult>(
-        connection,
-        "/analytics/v1/request-trace?" +
-          new URLSearchParams({
-            request_id: search!.id,
-            source_id: search!.source,
-          }),
-        signal,
-      ),
-    enabled: !!search,
-    retry: false,
-    refetchInterval: initializationRetryInterval,
-  });
-  function submit(e: FormEvent) {
-    e.preventDefault();
-    const value = id.trim();
-    if (!value) return;
-    if (search?.id === value && search.source === source) void query.refetch();
-    else setSearch({ id: value, source });
-  }
-  return (
-    <section className="data-panel request-trace-panel">
-      <div className="trace-page-heading">
-        <span className="trace-heading-icon">
-          <Route size={21} />
-        </span>
-        <div>
-          <span className="eyebrow">REQUEST INSIGHTS</span>
-          <h2>请求追踪</h2>
-        </div>
-      </div>
-      <p className="muted">
-        输入 Request ID，查看请求进入 uni-api
-        后的渠道选择、重试、错误、阶段时间和最终结果。
-      </p>
-      <form className="trace-search" onSubmit={submit}>
-        <label>
-          Request ID
-          <input
-            aria-label="请求 ID"
-            value={id}
-            onChange={(e) => setId(e.target.value)}
-            placeholder="粘贴请求 ID"
-            maxLength={512}
-            required
-          />
-        </label>
-        {!!sources.length && (
-          <label>
-            来源
-            <select
-              aria-label="请求追踪来源"
-              value={source}
-              onChange={(e) => setSource(e.target.value)}
-            >
-              <option value="">全部来源</option>
-              {sources.map((s) => (
-                <option value={s.id} key={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        <button
-          className="button primary"
-          disabled={!id.trim() || query.isFetching}
-        >
-          {query.isFetching ? <Spinner small /> : <Search size={16} />}查询请求
-        </button>
-        {search && (
-          <button
-            className="button"
-            type="button"
-            onClick={() => void query.refetch()}
-            disabled={query.isFetching}
-          >
-            <RefreshCw size={16} />
-            刷新记录
-          </button>
-        )}
-      </form>
-      {query.isFetching && (
-        <p role="status">
-          <Spinner small />
-          正在读取请求记录…
-        </p>
-      )}
-      {query.error && (
-        <p role="alert" className="error-banner">
-          {query.error.message}
-        </p>
-      )}
-      {query.data?.import?.caught_up === false && (
-        <p className="coverage-note">
-          历史事实仍在同步，当前链路可能不完整。稍后可刷新记录。
-        </p>
-      )}
-      {!search && (
-        <div className="trace-empty trace-welcome">
-          <Activity size={26} />
-          <h3>每一次重试，都有迹可循</h3>
-          <p>输入请求 ID，查看渠道尝试的先后、耗时和最终结果。</p>
-          <div>
-            <span>进入网关</span>
-            <ArrowDown size={14} />
-            <span>渠道尝试与重试</span>
-            <ArrowDown size={14} />
-            <span>最终结果</span>
-          </div>
-        </div>
-      )}
-      {query.data?.data.length === 0 && (
-        <div className="trace-empty">
-          <h3>未找到该请求的网关记录</h3>
-          <p>
-            请核对请求 ID 与来源。请求可能尚未同步、发生于采集启用之前，或在到达
-            uni-api
-            之前已被上层服务拒绝。仅凭没有记录，不能判断请求是否进入过网关。
-          </p>
-        </div>
-      )}
-      {query.data?.data.map((run) => (
-        <TraceTimeline
-          key={`${run.source_id}:${run.instance_id}:${run.request_id}`}
-          run={run}
-          sourceName={
-            sources.find((s) => s.id === run.source_id)?.name || run.source_id
-          }
-        />
-      ))}
     </section>
   );
 }

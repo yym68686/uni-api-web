@@ -192,6 +192,15 @@ func (s *Service) requestTrace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result.Import = s.importStatus(allowed)
+	if r.URL.Query().Has("instance_id") {
+		filtered := []RequestTrace{}
+		for _, run := range result.Data {
+			if run.InstanceID == r.URL.Query().Get("instance_id") {
+				filtered = append(filtered, run)
+			}
+		}
+		result.Data = filtered
+	}
 	// Metadata is optional; its failure must not hide the captured request.
 	if s.control != nil {
 		if owner, err := s.controlUser(r); err == nil {

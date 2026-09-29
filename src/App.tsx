@@ -1,3 +1,5 @@
+import { endpointChoices, readKeys } from "./requestFilters";
+import type { Keys } from "./requestFilters";
 import { FailureCounts } from "./FailureCounts";
 import { useKeyRequestStats } from "./keyRequestStats";
 import {
@@ -113,7 +115,6 @@ import type {
   Catalog,
   Channel,
   Connection,
-  KeyInfo,
   Metrics,
   ModelPrice,
 } from "./types";
@@ -139,15 +140,10 @@ import { clearSummaryCache } from "./summaryCache";
 import { useTheme } from "./theme";
 const SourceSettings = lazy(() => import("./SourceSettings").then(m => ({default:m.SourceSettings})));
 const Sub2apiChecks = lazy(() => import("./Sub2apiChecks").then(m => ({default:m.Sub2apiChecks})));
-const RequestTracePage = lazy(() => import("./RequestTrace").then(m => ({default:m.RequestTracePage})));
+const RequestLogsPage = lazy(() => import("./RequestLogs").then(m => ({default:m.RequestLogsPage})));
 const PriceSettings = lazy(() => import("./PriceSettings").then(m => ({default:m.PriceSettings})));
 const Automation = lazy(() => import("./Automation").then(m => ({default:m.Automation})));
 
-type Keys = {
-  data: KeyInfo[];
-  snapshot_revision: string;
-  can_inspect_all: boolean;
-};
 
 function Overview({
   metrics,
@@ -270,32 +266,6 @@ function Overview({
   );
 }
 
-const endpointChoices = [
-  "/v1/systemone",
-  "/v1/responses",
-  "/v1/responses/compact",
-  "/v1/chat/completions",
-  "/v1/messages",
-  "/v1/embeddings",
-  "/v1/images/generations",
-  "/v1/images/edits",
-  "/v1/audio/speech",
-  "/v1/audio/transcriptions",
-  "/v1/audio/translations",
-  "/v1/moderations",
-];
-
-async function readKeys(connection: Connection, signal: AbortSignal) {
-  const keys = await request<Keys>(connection, "/v1/api-keys", signal);
-  if (!Array.isArray(keys.data))
-    throw new Error("服务未提供平台目录，请检查 uni-api 版本与权限。");
-  if (!keys.can_inspect_all)
-    throw new ApiError(
-      "密钥没有平台查看权限，请使用配置中的第一个密钥或管理员密钥。",
-      403,
-    );
-  return keys;
-}
 
 function AccountForm({ onConnect }: { onConnect: () => void }) {
   const [username, setUsername] = useState(""),
@@ -1532,7 +1502,7 @@ function Dashboard({
                 : metrics.error?.message}
             </div>
           )}
-          {view === "requests" ? <RequestTracePage connection={baseConnection} sources={sourceList}/> : view === "sub2api" && baseConnection.account ? (
+          {view === "requests" ? <RequestLogsPage connection={baseConnection} sources={sourceList}/> : view === "sub2api" && baseConnection.account ? (
             <Sub2apiChecks
               key={baseConnection.session}
               user={baseConnection.session}
