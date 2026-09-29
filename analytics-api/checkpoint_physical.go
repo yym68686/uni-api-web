@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"math"
@@ -271,9 +272,6 @@ func (s *checkpointStore) restorePhysical(ctx context.Context, e *Engine) (resto
 	if schemaErr != nil {
 		return false, true, schemaErr
 	}
-	if schema != manifest.Schema {
-		return false, true, errors.New("incompatible history schema")
-	}
 	stage = "local_storage"
 	dir, err := os.MkdirTemp(filepath.Dir(e.historyPath), "restore-physical-")
 	if err != nil {
@@ -331,12 +329,50 @@ func (s *checkpointStore) restorePhysical(ctx context.Context, e *Engine) (resto
 	if err = validatePhysical(ctx, path, manifest); err != nil {
 		return false, true, err
 	}
+	if schema != manifest.Schema {
+		stage = "migrate"
+		if err = migrateTraceCheckpoint(ctx, path, schema, e.cfg.DatabaseMemoryLimitMB); err != nil {
+			return false, true, err
+		}
+	}
 	stage = "apply"
 	if err = e.installPhysical(ctx, path); err != nil {
 		return false, true, err
 	}
 	log.Printf("analytics checkpoint format=duckdb stage=installed bytes=%d objects=%d", manifest.Bytes, expected)
 	return true, true, nil
+}
+
+// Upgrade only an already verified temporary checkpoint. It is installed only
+// if this known additive migration produces exactly the expected schema.
+// Unknown schema changes still fall back to the existing Parquet/fact recovery.
+func migrateTraceCheckpoint(ctx context.Context, path, expected string, memoryMB int) error {
+	if memoryMB == 0 {
+		memoryMB = 512
+	}
+	u := url.URL{Path: path, RawQuery: fmt.Sprintf("enable_external_access=false&memory_limit=%dMiB&threads=1", memoryMB)}
+	db, err := sql.Open("duckdb", u.String())
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	if _, err = db.ExecContext(ctx, requestTraceSchema("")); err != nil {
+		return err
+	}
+	var catalog string
+	if err = db.QueryRowContext(ctx, "SELECT current_database()").Scan(&catalog); err != nil {
+		return err
+	}
+	schema, err := historySchema(ctx, db, catalog)
+	if err != nil {
+		return err
+	}
+	if schema != expected {
+		return errors.New("incompatible history schema after additive migration")
+	}
+	_, err = db.ExecContext(ctx, "CHECKPOINT")
+	return err
 }
 
 func validatePhysical(ctx context.Context, path string, m physicalManifest) error {

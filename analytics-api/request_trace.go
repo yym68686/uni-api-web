@@ -9,6 +9,19 @@ import (
 	"unicode"
 )
 
+func requestTraceSchema(prefix string) string {
+	return strings.NewReplacer("TABLE facts", "TABLE "+prefix+"facts", "ON facts", "ON "+prefix+"facts").Replace(`
+ ALTER TABLE facts ADD COLUMN IF NOT EXISTS trace_id VARCHAR;
+ ALTER TABLE facts ADD COLUMN IF NOT EXISTS stage VARCHAR;
+ ALTER TABLE facts ADD COLUMN IF NOT EXISTS trace_detail VARCHAR;
+ ALTER TABLE facts ADD COLUMN IF NOT EXISTS transport_timing VARCHAR;
+ ALTER TABLE facts ADD COLUMN IF NOT EXISTS terminal_kind VARCHAR;
+ ALTER TABLE facts ADD COLUMN IF NOT EXISTS failure_reason VARCHAR;
+ ALTER TABLE facts ADD COLUMN IF NOT EXISTS response_completed BOOLEAN;
+ CREATE INDEX IF NOT EXISTS facts_request ON facts(request_id);
+ CREATE INDEX IF NOT EXISTS facts_trace ON facts(trace_id);`)
+}
+
 // Diagnostics are separate from metrics: they must not add attempts, cost or
 // success samples. Explicit columns avoid exposing upstream credential hashes.
 type RequestTraceEvent struct {

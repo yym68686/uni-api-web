@@ -120,15 +120,15 @@ func TestRequestTraceRestoresLegacyCheckpointWithoutLosingFacts(t *testing.T) {
 	if err := old.Import(ctx, "legacy-object", "etag", []Fact{f}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := old.DB.Exec(`CREATE TABLE history.previous_facts AS SELECT * EXCLUDE(trace_id,stage,trace_detail,transport_timing,terminal_kind,failure_reason,response_completed) FROM facts; DROP TABLE facts; ALTER TABLE history.previous_facts RENAME TO facts`); err != nil {
+	if _, err := old.DB.Exec(`DROP INDEX history.facts_at; DROP INDEX history.facts_request; DROP INDEX history.facts_trace; ALTER TABLE facts DROP COLUMN trace_id; ALTER TABLE facts DROP COLUMN stage; ALTER TABLE facts DROP COLUMN trace_detail; ALTER TABLE facts DROP COLUMN transport_timing; ALTER TABLE facts DROP COLUMN terminal_kind; ALTER TABLE facts DROP COLUMN failure_reason; ALTER TABLE facts DROP COLUMN response_completed; CREATE INDEX facts_at ON facts(at_ms)`); err != nil {
 		t.Fatal(err)
 	}
 	store := newCheckpointStore(&fakeStateObjects{}, Config{StateBucket: "state"})
-	if err := store.saveParquet(ctx, old); err != nil {
+	if err := store.save(ctx, old); err != nil {
 		t.Fatal(err)
 	}
 	current := stateTestEngine(t)
-	if ok, err := store.restoreParquet(ctx, current); err != nil || !ok {
+	if ok, found, err := store.restorePhysical(ctx, current); err != nil || !ok || !found {
 		t.Fatal(ok, err)
 	}
 	result, err := current.RequestTrace(ctx, "legacy-request", nil, "")

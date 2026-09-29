@@ -91,15 +91,6 @@ func OpenEngine(path string, cfg Config) (*Engine, error) {
       ALTER TABLE history.facts ADD COLUMN IF NOT EXISTS upstream_error_sha256 VARCHAR;
       ALTER TABLE history.facts ADD COLUMN IF NOT EXISTS response_created_ms DOUBLE;
       ALTER TABLE history.facts ADD COLUMN IF NOT EXISTS first_text_ms DOUBLE;
-      ALTER TABLE history.facts ADD COLUMN IF NOT EXISTS trace_id VARCHAR;
-      ALTER TABLE history.facts ADD COLUMN IF NOT EXISTS stage VARCHAR;
-      ALTER TABLE history.facts ADD COLUMN IF NOT EXISTS trace_detail VARCHAR;
-      ALTER TABLE history.facts ADD COLUMN IF NOT EXISTS transport_timing VARCHAR;
-      ALTER TABLE history.facts ADD COLUMN IF NOT EXISTS terminal_kind VARCHAR;
-      ALTER TABLE history.facts ADD COLUMN IF NOT EXISTS failure_reason VARCHAR;
-      ALTER TABLE history.facts ADD COLUMN IF NOT EXISTS response_completed BOOLEAN;
-      CREATE INDEX IF NOT EXISTS facts_request ON history.facts(request_id);
-      CREATE INDEX IF NOT EXISTS facts_trace ON history.facts(trace_id);
       ALTER TABLE history.rollups ADD COLUMN IF NOT EXISTS created_bins BIGINT[];
       ALTER TABLE history.rollups ADD COLUMN IF NOT EXISTS created_count BIGINT DEFAULT 0;
       ALTER TABLE history.rollups ADD COLUMN IF NOT EXISTS created_sum DOUBLE DEFAULT 0;
@@ -109,6 +100,10 @@ func OpenEngine(path string, cfg Config) (*Engine, error) {
       ALTER TABLE history.rollups ADD COLUMN IF NOT EXISTS text_sum DOUBLE DEFAULT 0;
       ALTER TABLE history.rollups ADD COLUMN IF NOT EXISTS last_text DOUBLE;
     `); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if _, err = db.Exec(requestTraceSchema("history.")); err != nil {
 		db.Close()
 		return nil, err
 	}
