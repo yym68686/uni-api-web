@@ -29,6 +29,7 @@ import { endpointChoices, readKeys } from "./requestFilters";
 import { useKeyRequestStats } from "./keyRequestStats";
 import { friendlyReason } from "./requestTraceModel";
 import { RequestTraceDialog, requestTraceOptions } from "./RequestTrace";
+import { LatencyBadge } from "./LatencyBadge";
 import { Spinner } from "./ui";
 import "./requestLogs.css";
 
@@ -598,7 +599,9 @@ export function RequestLogsPage({
                     </td>
                     <td className="mono">{ms(row.duration_ms)}</td>
                     <td className="mono">
-                      {ms(row.response_created_ms ?? row.first_text_ms)}
+                      <LatencyBadge
+                        value={row.response_created_ms ?? row.first_text_ms}
+                      />
                     </td>
                     <td className="mono">{ms(row.dispatch_ms)}</td>
                     <td className="mono">
