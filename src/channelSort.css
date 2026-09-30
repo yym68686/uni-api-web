@@ -103,6 +103,55 @@
 .channel-sort-note p {
   margin: 8px 0;
 }
+.channel-sort-busy {
+  opacity: 0.65;
+}
+.route-sort-preview {
+  margin: 20px 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px;
+}
+.route-sort-preview h3 {
+  font-size: 15px;
+  margin-bottom: 12px;
+}
+.route-sort-preview h4 {
+  font-size: 13px;
+  margin: 12px 0;
+}
+.route-sort-preview details {
+  margin: 10px 0;
+  font-size: 12px;
+}
+.route-sort-preview summary {
+  cursor: pointer;
+}
+.route-sort-preview ol {
+  padding-left: 24px;
+  max-height: 320px;
+  overflow: auto;
+}
+.route-sort-preview li {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+.route-sort-preview li small {
+  float: right;
+  color: var(--muted);
+  margin-left: 12px;
+}
+.route-sort-receipt {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  margin: 14px 0;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.route-sort-receipt button {
+  margin: 10px 8px 0 0;
+}
 .channel-sort-footer {
   display: flex;
   justify-content: flex-end;

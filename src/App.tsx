@@ -80,8 +80,9 @@ import { useSubImports, boundGroups } from "./sub2apiImports";
 import type { SubImportsQuery } from "./sub2apiImports";
 import { ChannelModels } from "./ChannelModels";
 import { ChannelSortDialog } from "./ChannelSortDialog";
-import { activeChannelSortRules, sortChannels } from "./channelSorting";
+import { sortChannels } from "./channelSorting";
 import { applyScopedChannelSort, channelSortScope, defaultChannelSort, deleteSortTemplate, loadChannelSortPreferences, saveChannelSortPreferences, scopedChannelSort } from "./channelSortPreferences";
+import { useRouteSorting } from "./routeSorting";
 
 import { SiteLink, useChannelSites, dashboardURL } from "./ChannelSite";
 import { ChannelAccess } from "./ChannelAccess";
@@ -969,6 +970,7 @@ function Dashboard({
   const [sortPreferences, setSortPreferences] = useState(() => loadChannelSortPreferences(sortStorageScope, pageFilters.channels));
   const channelScope = channelSortScope(pageFilters.channels);
   const channelSort = scopedChannelSort(sortPreferences, channelScope);
+  const routingSort = useRouteSorting(sortStorageScope);
   const filterScope = view === "balances" ? "balances" : "channels";
   const needsChannelData = ["channels", "balances", "overview", "automations"].includes(view);
   const filters = pageFilters[filterScope];
@@ -1002,7 +1004,6 @@ function Dashboard({
     balanceThreshold,
     statusFilter,
     search,
-    sort: legacySort,
     endpoint,
     stream,
   } = filters;
@@ -1010,9 +1011,7 @@ function Dashboard({
     [adjustingChannels, setAdjustingChannels] = useState(false),
     [checkingChannels, setCheckingChannels] = useState(false);
   const channelView = view === "channels";
-  const sort = channelView ? channelSort.sort : legacySort;
-  const sortRules = channelView ? channelSort.rules : activeChannelSortRules(sort, filters.sortRules);
-  const configOrder = sortRules.length === 0;
+  const sortRules = channelSort.rules;
   useEffect(() => {
     saveView(baseConnection.base, view);
   }, [baseConnection.base, view]);
@@ -1026,7 +1025,7 @@ function Dashboard({
       ((channelView && ["keyId", "sourceId", "model", "window", "search", "balanceFilter", "statusFilter", "endpoint", "stream", "sort", "sortRules"].includes(key)) ||
         (view === "balances" && ["keyId", "sourceId", "model", "window", "search", "balanceTopN", "balanceThreshold"].includes(key))) &&
       !["sort", "sortRules"].includes(key) && filters[key] !== defaultFilters[key],
-  ) || (channelView && sortRules.length > 0);
+  );
   const [detailId, setDetailId] = useState<string | null>(null),
     [showTrend, setShowTrend] = useState(false),
     [guide, setGuide] = useState(false),
@@ -1199,7 +1198,7 @@ function Dashboard({
     enabled: !!baseConnection.account && channelView,
   });
   const tableRows =
-    channelView ? sortChannels(controls.arrange(rows), sortRules, {checks: checks.results, multipliers: imported.data?.multipliers}) : rows;
+    channelView && adjustingChannels ? controls.arrange(rows) : rows;
   const rowRanks = useMemo(
     () => new Map(tableRows.map((row, i) => [rowId(row), i + 1])),
     [tableRows],
@@ -1377,10 +1376,6 @@ function Dashboard({
   const busy = metrics.isFetching || catalog.isFetching || keys.isFetching;
   function setFilter(name: keyof Filters, value: string) {
     setPage(0);
-    if (channelView && name === "sort") {
-      setSortPreferences(current => applyScopedChannelSort(current, channelScope, model, {sort:value,rules:activeChannelSortRules(value, "")}));
-      return;
-    }
     setPageFilters((current) => ({
       ...current,
       [filterScope]: { ...current[filterScope], [name]: value },
@@ -1629,6 +1624,11 @@ function Dashboard({
                     )}
                   </div>
                   {channelView && <ChannelSortDialog key={channelScope} rules={sortRules}
+                    previewRows={rules=>sortChannels(filtered,rules,{checks:checks.results,multipliers:imported.data?.multipliers})}
+                    labelRows={rows}
+                    routing={baseConnection.account?routingSort:undefined}
+                    keyId={keyId}
+                    routeApplyDisabled={busy||!!error||controls.pending||controls.drafts.size>0||!!(balanceFilter&&pendingBalances)||search!==deferredSearch}
                     scopeLabel={[
                       model || "全部模型",
                       sourceList.find(s=>s.id===selectedSourceId)?.name || "全部来源",
@@ -1654,6 +1654,8 @@ function Dashboard({
                     setPage(0);
                     setSortPreferences(current=>applyScopedChannelSort(current,channelScope,model,{sort:rules.length?"custom":"config",rules,templateId}));
                   }} />}
+                  {channelView && baseConnection.account && routingSort.pending && <button className="button small" title="撤回上一次多条件排序涉及的来源与 API key，恢复应用前顺序" disabled={routingSort.busy} onClick={()=>void routingSort.undo()}>撤回排序</button>}
+                  {channelView && routingSort.error && <span role="alert" className="negative">{routingSort.error}</span>}
                   {channelView && baseConnection.account && (
                     <ChannelControlActions
                       controls={controls}
@@ -1883,16 +1885,11 @@ function Dashboard({
                       <SlidersHorizontal size={13} />
                       <select
                         aria-label="排序"
-                        value={sort}
-                        onChange={(e) => setFilter("sort", e.target.value)}
+                        title={keyId ? "当前 API key 的实际路由顺序" : "不同 API key 的请求顺序可能不同；请选定 API key 查看其实际顺序。"}
+                        value="config"
+                        disabled
                       >
-                        <option value="config">
-                          {keyId ? "API key 顺序" : "Provider 顺序"}
-                        </option>
-                        <option value="success">成功率从高到低</option>
-                        <option value="latency">首字延迟从低到高</option>
-                        <option value="wait">请求前等待从低到高</option>
-                        {sort === "custom" && <option value="custom">多条件排序 · {sortRules.length} 项</option>}
+                        <option value="config">{keyId ? "实际 API key 请求顺序" : "实际 Provider 配置顺序"}</option>
                       </select>
                       <ChevronDown size={12} />
                     </div>
@@ -2050,7 +2047,7 @@ function Dashboard({
                                 row={row}
                                 controls={controls}
                                 visible={filtered}
-                                configOrder={configOrder}
+                                configOrder
                               />
                             )}
                             <td>

@@ -38,8 +38,9 @@ it("saves, selects, renames and deletes templates without changing applied rules
   expect(screen.getByLabelText("排序模板")).toHaveValue("t");
   expect(screen.getByRole("button", { name: "保存为模板" })).toBeDisabled();
   expect(apply).not.toHaveBeenCalled();
-  await user.click(screen.getByRole("button", { name: "应用排序" }));
+  await user.click(screen.getByRole("button", { name: "预览" }));
   expect(apply).toHaveBeenCalledWith(qualityFirstRules, "t");
+  await user.click(screen.getByRole("button", { name: "关闭" }));
   await user.click(screen.getByRole("button", { name: "多条件排序" }));
   await user.selectOptions(screen.getByLabelText("排序模板"), "t");
   await user.clear(screen.getByLabelText("排序模板名称"));
@@ -75,7 +76,7 @@ it("prefills the model's previous template for a new scope without auto-applying
   expect(screen.getByLabelText("第 1 排序依据")).toHaveValue("quality");
   expect(apply).not.toHaveBeenCalled();
   await user.selectOptions(screen.getByLabelText("第 1 排序方向"), "desc");
-  await user.click(screen.getByRole("button", { name: "应用排序" }));
+  await user.click(screen.getByRole("button", { name: "预览" }));
   expect(apply).toHaveBeenCalledWith([
     { field: "quality", direction: "desc" },
     qualityFirstRules[1],
@@ -98,7 +99,7 @@ it("allows status to precede existing criteria and explains both directions", as
   ).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "上移第 3 项" }));
   await user.click(screen.getByRole("button", { name: "上移第 2 项" }));
-  await user.click(screen.getByRole("button", { name: "应用排序" }));
+  await user.click(screen.getByRole("button", { name: "预览" }));
   expect(apply).toHaveBeenCalledWith([
     { field: "status", direction: "desc" },
     ...qualityFirstRules,
@@ -135,15 +136,16 @@ it("edits priorities and directions in a cancelable draft, with reset and reusab
     within(dialog).getByLabelText("第 3 排序依据"),
     "cache",
   );
-  await user.click(within(dialog).getByRole("button", { name: "应用排序" }));
+  await user.click(within(dialog).getByRole("button", { name: "预览" }));
   expect(apply).toHaveBeenLastCalledWith([
     { field: "probability", direction: "asc" },
     { field: "quality", direction: "asc" },
     { field: "cache", direction: "desc" },
   ]);
+  await user.click(screen.getByRole("button", { name: "关闭" }));
   await user.click(screen.getByRole("button", { name: "多条件排序" }));
   await user.click(screen.getByRole("button", { name: "删除第 1 项" }));
-  await user.click(screen.getByRole("button", { name: "取消" }));
+  await user.click(screen.getByRole("button", { name: "关闭" }));
   expect(apply).toHaveBeenCalledTimes(1);
   await user.click(screen.getByRole("button", { name: "多条件排序" }));
   expect(screen.getByLabelText("第 1 排序依据")).toHaveValue("quality");
@@ -154,6 +156,6 @@ it("edits priorities and directions in a cancelable draft, with reset and reusab
   );
   expect(screen.getByLabelText("第 2 排序方向")).toHaveValue("desc");
   await user.click(screen.getByRole("button", { name: "恢复配置顺序" }));
-  await user.click(screen.getByRole("button", { name: "应用排序" }));
+  await user.click(screen.getByRole("button", { name: "预览" }));
   expect(apply).toHaveBeenLastCalledWith([]);
 });

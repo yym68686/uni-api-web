@@ -150,8 +150,9 @@ describe("dashboard workflows", () => {
     await app.user.click(screen.getByRole("button",{name:"不降智优先，再按概率"}));
     await app.user.type(screen.getByLabelText("排序模板名称"),"高级模型");
     await app.user.click(screen.getByRole("button",{name:"保存为模板"}));
-    await app.user.click(screen.getByRole("button",{name:"应用排序"}));
-    expect(screen.getByLabelText("排序")).toHaveValue("custom");
+    await app.user.click(screen.getByRole("button",{name:"预览"}));
+    await app.user.click(screen.getByRole("button",{name:"关闭"}));
+    expect(screen.getByLabelText("排序")).toHaveValue("config");
     await app.user.selectOptions(screen.getByLabelText("模型筛选"),"model-b");
     expect(screen.getByLabelText("排序")).toHaveValue("config");
     await app.user.click(screen.getByRole("button",{name:"多条件排序"}));
@@ -160,29 +161,30 @@ describe("dashboard workflows", () => {
     await app.user.selectOptions(screen.getByLabelText("第 1 排序依据"),"multiplier");
     await app.user.type(screen.getByLabelText("排序模板名称"),"低价优先");
     await app.user.click(screen.getByRole("button",{name:"保存为模板"}));
-    await app.user.click(screen.getByRole("button",{name:"应用排序"}));
+    await app.user.click(screen.getByRole("button",{name:"预览"}));
+    await app.user.click(screen.getByRole("button",{name:"关闭"}));
     await app.user.selectOptions(screen.getByLabelText("模型筛选"),"");
     expect(screen.getByLabelText("排序")).toHaveValue("config");
     await app.user.selectOptions(screen.getByLabelText("模型筛选"),"model-a");
     await app.user.click(screen.getByRole("button",{name:"多条件排序"}));
     expect(within(screen.getByLabelText("排序模板")).getByRole("option",{name:"高级模型"})).toHaveProperty("selected",true);
     expect(screen.getByLabelText("第 1 排序依据")).toHaveValue("quality");
-    await app.user.click(screen.getByRole("button",{name:"取消"}));
+    await app.user.click(screen.getByRole("button",{name:"关闭"}));
     await app.user.selectOptions(screen.getByLabelText("时间范围筛选"),"24h");
     expect(screen.getByLabelText("排序")).toHaveValue("config");
     await app.user.click(screen.getByRole("button",{name:"多条件排序"}));
     expect(screen.getByLabelText("第 1 排序依据")).toHaveValue("quality");
     expect(screen.getByRole("status")).toHaveTextContent("上次使用的模板");
-    await app.user.click(screen.getByRole("button",{name:"取消"}));
+    await app.user.click(screen.getByRole("button",{name:"关闭"}));
     await app.user.selectOptions(screen.getByLabelText("时间范围筛选"),"15m");
     app.unmount();app=setup({extraModel:true});await screen.findByRole("table");
-    expect(screen.getByLabelText("排序")).toHaveValue("custom");
+    expect(screen.getByLabelText("排序")).toHaveValue("config");
     await app.user.click(screen.getByRole("button",{name:"多条件排序"}));
     await app.user.clear(screen.getByLabelText("排序模板名称"));await app.user.type(screen.getByLabelText("排序模板名称"),"质量优先");
     await app.user.click(screen.getByRole("button",{name:"重命名模板"}));
     await app.user.click(screen.getByRole("button",{name:"删除模板"}));
-    await app.user.click(screen.getByRole("button",{name:"取消"}));
-    expect(screen.getByLabelText("排序")).toHaveValue("custom");
+    await app.user.click(screen.getByRole("button",{name:"关闭"}));
+    expect(screen.getByLabelText("排序")).toHaveValue("config");
     await app.user.selectOptions(screen.getByLabelText("模型筛选"),"model-b");
     await app.user.click(screen.getByRole("button",{name:"多条件排序"}));
     expect(screen.getByLabelText("第 1 排序依据")).toHaveValue("multiplier");
@@ -190,7 +192,7 @@ describe("dashboard workflows", () => {
     expect(screen.queryByRole("option",{name:"质量优先"})).not.toBeInTheDocument();
     expect(app.calls.every(call=>!call.includes("channel-controls"))).toBe(true);
   }, 15000); // Multiple model switches and a remount can exceed 5s on CI runners.
-  it("applies multi-sort before pagination, persists it, and leaves balance sorting independent", async () => {
+  it("previews multi-sort without changing real order or restoring preview order on reload", async () => {
     let app = setup();
     await connect(app.user);
     await app.user.selectOptions(screen.getByLabelText("API key 筛选"), "key-second");
@@ -199,21 +201,23 @@ describe("dashboard workflows", () => {
     await app.user.click(screen.getByRole("button", {name: "多条件排序"}));
     await app.user.click(screen.getByRole("button", {name: "添加排序依据"}));
     await app.user.selectOptions(screen.getByLabelText("第 1 排序依据"), "success");
-    await app.user.click(screen.getByRole("button", {name: "应用排序"}));
-    expect(order()).toEqual(["查看 first model-a 详情", "查看 third model-a 详情"]);
+    await app.user.click(screen.getByRole("button", {name: "预览"}));
+    await app.user.click(screen.getByRole("button", {name: "关闭"}));
+    expect(order()).toEqual(["查看 third model-a 详情", "查看 first model-a 详情"]);
     await app.user.click(screen.getByRole("button", {name: /^余额管理/}));
     expect(screen.queryByRole("button", {name: "多条件排序"})).not.toBeInTheDocument();
     await app.user.click(screen.getByRole("button", {name: /^渠道观测/}));
-    expect(order()[0]).toBe("查看 first model-a 详情");
+    expect(order()[0]).toBe("查看 third model-a 详情");
     app.unmount();
     app = setup();
     await screen.findByRole("table");
-    expect(order()[0]).toBe("查看 first model-a 详情");
-    expect(screen.getByLabelText("排序")).toHaveValue("custom");
+    expect(order()[0]).toBe("查看 third model-a 详情");
+    expect(screen.getByLabelText("排序")).toHaveValue("config");
     await app.user.click(screen.getByRole("button", {name: "多条件排序"}));
     expect(screen.getByLabelText("第 1 排序依据")).toHaveValue("success");
     await app.user.click(screen.getByRole("button", {name: "恢复配置顺序"}));
-    await app.user.click(screen.getByRole("button", {name: "应用排序"}));
+    await app.user.click(screen.getByRole("button", {name: "预览"}));
+    await app.user.click(screen.getByRole("button", {name: "关闭"}));
     expect(order()).toEqual(["查看 third model-a 详情", "查看 first model-a 详情"]);
     expect(app.calls.every(call => !call.includes("channel-controls"))).toBe(true);
   });
@@ -467,7 +471,7 @@ describe("dashboard workflows", () => {
     );
     await app.user.selectOptions(screen.getByLabelText("流式状态筛选"), "true");
     await app.user.click(screen.getByRole("button", { name: /^余额不足$/ }));
-    await app.user.selectOptions(screen.getByLabelText("排序"), "latency");
+    expect(screen.getByLabelText("排序")).toBeDisabled();
     await waitFor(() => expect(screen.getAllByRole("row")).toHaveLength(2));
     app.unmount();
 
@@ -480,7 +484,7 @@ describe("dashboard workflows", () => {
     expect(screen.getByLabelText("时间范围筛选")).toHaveValue("1h");
     expect(screen.getByLabelText("搜索渠道或模型")).toHaveValue("third");
     expect(screen.getByLabelText("渠道状态筛选")).toHaveValue("unavailable");
-    expect(screen.getByLabelText("排序")).toHaveValue("latency");
+    expect(screen.getByLabelText("排序")).toHaveValue("config");
     expect(screen.getByLabelText("端点筛选")).toHaveValue("/v1/messages");
     expect(screen.getByLabelText("流式状态筛选")).toHaveValue("true");
     expect(screen.getByRole("button", { name: /^余额不足$/ })).toHaveAttribute(

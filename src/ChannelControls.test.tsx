@@ -78,6 +78,14 @@ function setup(
           })),
         ),
       );
+      // The real catalog already includes applied gateway rules; drafts do not.
+      rows.sort((a,b)=>{
+        if(a.source_id!==b.source_id)return ids.indexOf(a.source_id)-ids.indexOf(b.source_id);
+        const key=(u.searchParams.get("api_key_id")||"").split("::").at(-1)||"";
+        const rule=states[a.source_id].rules.find(r=>r.api_key_id===key && r.model===(u.searchParams.get("model")||""));
+        const rank=(p:string)=>rule?.order.includes(p)?rule.order.indexOf(p):9999;
+        return rank(a.provider)-rank(b.provider);
+      });
       let body: any;
       if (u.pathname.endsWith("/auth/me"))
         body = { enabled: true, authenticated: true, username: "admin" };
@@ -265,7 +273,7 @@ it("toggles adjustment inside observation with the same table, filters and metri
     screen.getByLabelText("渠道状态筛选"),
     "eligible",
   );
-  await app.user.selectOptions(screen.getByLabelText("排序"), "success");
+  expect(screen.getByLabelText("排序")).toBeDisabled();
   const labels = [
     "uni-api 来源",
     "API key 筛选",
