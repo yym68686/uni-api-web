@@ -1787,7 +1787,7 @@ nav > button.active > svg {
   font-size: 12px;
 }
 .balance-table {
-  min-width: 760px;
+  min-width: 1150px;
 }
 .balance-table th:last-child,
 .balance-table td:last-child {
@@ -1798,6 +1798,11 @@ nav > button.active > svg {
   height: 58px;
   vertical-align: middle;
 }
+.balance-model-stat { min-width: 90px; font-size: 11px; white-space: nowrap; }
+.balance-model-rate, .balance-model-timing { display: inline-flex; flex-direction: column; gap: 5px; align-items: flex-start; font-family: var(--font-mono); }
+.balance-model-stat small { font: 9px var(--font-sans, sans-serif); color: var(--muted); }
+.balance-model-continuation td { background: var(--subtle); }
+.balance-provider-start td { border-top: 1px solid var(--line); }
 .balance-channel {
   display: flex;
   align-items: center;

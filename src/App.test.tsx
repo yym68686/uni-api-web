@@ -270,6 +270,49 @@ describe("dashboard workflows", () => {
     );
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
+  it("shows every balance model with scoped metrics while keeping channel finance and wallet merged", async () => {
+    const { user, calls } = setup();
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    const distribution = (p50: number) => ({ sample_count: 4, p50_ms: p50, p95_ms: p50*2, mean_ms: p50 });
+    vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      const url = new URL(input);
+      if (url.pathname.endsWith("/channel-model-stats")) {
+        calls.push(input);
+        const one = !!url.searchParams.get("model");
+        return Response.json({ data: Array.from({ length: one?1:5 }, (_, i) => ({
+          source_id: "primary", provider: "first", model: `model-${String.fromCharCode(97+i)}`,
+          success: i+1, failed: 1, cancelled: 0, success_rate: (i+1)/(i+2),
+          first_text: distribution(1000*(i+1)), response_created: distribution(100), duration: distribution(10000*(i+1)),
+        })), import: { caught_up: true } });
+      }
+      const response = await original(input, init);
+      if (url.pathname.endsWith("/model-channels") || url.pathname.endsWith("/analytics")) {
+        const body = await response.json();
+        body.data = Array.from({ length: 5 }, (_, i) => ({...rows[0], model:`model-${String.fromCharCode(97+i)}`}));
+        return Response.json(body);
+      }
+      return response;
+    }));
+    await connect(user);
+    await user.click(screen.getByRole("button", { name: /^余额管理/ }));
+    const table = await screen.findByRole("table");
+    await waitFor(()=>expect(within(table).getByText("83.3%")).toBeVisible());
+    expect(within(table).getAllByRole("row")).toHaveLength(6);
+    expect(within(table).getByText("model-e")).toBeVisible();
+    expect(within(table).getByText("model-a").closest("tr")).toHaveTextContent("50.0%1/2");
+    expect(within(table).getByText("model-e").closest("tr")).toHaveTextContent("50.00 s");
+    expect(within(table).getByText("first").closest("td")).toHaveAttribute("rowspan","5");
+    expect(within(table).queryByText(/另有/)).not.toBeInTheDocument();
+    for (const label of ["渠道成功率","首字 P50","总耗时 P50"]) expect(screen.getByRole("columnheader",{name:label})).toBeVisible();
+    await user.selectOptions(screen.getByLabelText("时间范围筛选"), "1h");
+    await user.selectOptions(screen.getByLabelText("API key 筛选"), "key-first");
+    await user.selectOptions(screen.getByLabelText("模型筛选"), "model-a");
+    await waitFor(()=>expect(within(screen.getByRole("table")).getAllByRole("row")).toHaveLength(2));
+    await waitFor(()=>{
+      const query = new URL(calls.filter(x=>x.includes("channel-model-stats")).at(-1)!);
+      expect(Object.fromEntries(query.searchParams)).toMatchObject({range:"1h",key_id:"key-first",model:"model-a"});
+    });
+  });
   it("persists independent balance and channel filters across reloads and resets only the active page", async () => {
     let app = setup();
     await connect(app.user);

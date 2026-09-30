@@ -99,6 +99,7 @@ func (s *Service) Handler() http.Handler {
 
 	mux.HandleFunc("GET /v1/analytics", s.analytics)
 	mux.HandleFunc("GET /v1/key-request-stats", s.keyRequestStats)
+	mux.HandleFunc("GET /v1/channel-model-stats", s.channelModelStats)
 	mux.HandleFunc("GET /v1/request-trace", s.requestTrace)
 	mux.HandleFunc("GET /v1/request-logs", s.requestLogs)
 	mux.HandleFunc("GET /v1/prices", s.prices)

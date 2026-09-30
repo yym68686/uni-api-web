@@ -3,6 +3,7 @@ import type { Keys } from "./requestFilters";
 import { FailureCounts } from "./FailureCounts";
 import { useKeyRequestStats } from "./keyRequestStats";
 import {
+  Fragment,
   lazy,
   Suspense,
   useCallback,
@@ -133,6 +134,7 @@ import { balanceSpend } from "./balanceSpend";
 import { useChannelAccountBalances, withAccountWallet } from "./ChannelAccountBalances";
 import { balanceSite, scheduleBalance } from "./balanceRequests";
 import { balanceBelowThreshold, rankBalanceProviders } from "./balanceFilters";
+import { useBalanceModelMetrics, balanceModelMetricID, BalanceModelMetricCells } from "./BalanceModelMetrics";
 import { salePercent } from "./modelPrices";
 import { ConsoleHeader, ConsoleNavigation } from "./ConsoleChrome";
 import { StartupScreen } from "./StartupScreen";
@@ -1109,6 +1111,10 @@ function Dashboard({
     refetchInterval: auto ? 5_000 : false,
     refetchIntervalInBackground: false,
   });
+  const balanceModelMetrics = useBalanceModelMetrics(connection, {
+    range: effectiveWindow, model, keyId, to: metrics.data?.to, refresh, auto,
+    enabled: view === "balances" && keysLoaded && !keyRemoved && !!metrics.data,
+  });
   const staleSources = useMemo(
     () => staleHistorySources(metrics.data, liveMetrics.data),
     [metrics.data, liveMetrics.data],
@@ -2039,6 +2045,9 @@ function Dashboard({
                         <th className="rank">#</th>
                         <th>渠道</th>
                         <th>模型 / 优先级</th>
+                        <th title="该渠道该模型的成功尝试 ÷（成功 + 失败）；取消和跳过不计入。">渠道成功率</th>
+                        <th title="渠道请求开始至首个正文增量的 P50，缺失时显示 —。">首字 P50</th>
+                        <th title="当前渠道单次尝试从开始到结束的 P50，包含成功和失败，不包含前序重试。">总耗时 P50</th>
                         <th>估算消费</th>
                         <th>渠道实际消费</th>
                         <th>利润</th>
@@ -2060,18 +2069,17 @@ function Dashboard({
                     const sourceName = sourceRow?.source_name;
                     const sourceLink = siteFor(sourceRow) || dashboardURL(sourceList.find((source) => source.id === sourceRow?.source_id)?.base);
                     const modelRanks = balanceRanks.ranks.get(provider) || [];
-                    const visibleModelRanks = modelRanks.slice(0, 3);
                     const checkedAt = Math.max(
                       0,
                       ...(balance?.data?.keys || []).map((key) => key.checked_at || 0),
                     );
                     const finance = balanceFinance.get(provider);
                     return (
-                      <tr key={provider}>
-                        <td className="rank mono">
+                      <Fragment key={provider}>{modelRanks.map(({ model: modelName, rank }, modelIndex) => <tr key={modelName} className={modelIndex === 0 ? "balance-provider-start" : "balance-model-continuation"}>
+                        {modelIndex === 0 && <td rowSpan={modelRanks.length} className="rank mono">
                           {String(currentPage * 25 + index + 1).padStart(2, "0")}
-                        </td>
-                        <td>
+                        </td>}
+                        {modelIndex === 0 && <td rowSpan={modelRanks.length}>
                           <div className="balance-channel">
                             <span className="provider-avatar">
                               {displayName[0].toUpperCase()}
@@ -2081,50 +2089,44 @@ function Dashboard({
                               <small>{sourceName || "uni-api"}</small>
                             </span>
                           </div>
-                        </td>
+                        </td>}
                         <td>
                           <div className="balance-model-ranks">
-                            {visibleModelRanks.map(({ model: modelName, rank }) => (
-                              <span key={modelName}>
+                              <span>
                                 {modelName}<small>第 {rank} 位</small>
                               </span>
-                            ))}
-                            {modelRanks.length > visibleModelRanks.length && (
-                              <small
-                                className="more"
-                                title={modelRanks
-                                  .slice(3)
-                                  .map(({ model: modelName, rank }) => `${modelName} · 第 ${rank} 位`)
-                                  .join("\n")}
-                              >
-                                另有 {modelRanks.length - visibleModelRanks.length} 个模型
-                              </small>
-                            )}
                           </div>
                         </td>
-                        <td>
+                        <BalanceModelMetricCells
+                          value={balanceModelMetrics.byModel.get(balanceModelMetricID(sourceRow?.source_id || "", sourceRow?.provider || JSON.parse(provider)[1], modelName))}
+                          pending={balanceModelMetrics.isPending}
+                          error={balanceModelMetrics.isError}
+                          partial={balanceModelMetrics.data?.import?.caught_up === false}
+                        />
+                        {modelIndex === 0 && <>
+                        <td rowSpan={modelRanks.length}>
                           <span className={`mono balance-finance ${finance?.estimated == null ? "muted" : ""}`}>
                             {finance?.estimated == null ? "—" : usd(finance.estimated)}
                           </span>
                         </td>
-                        <td>
+                        <td rowSpan={modelRanks.length}>
                           <span title={finance?.actualExplanation} className={`mono balance-finance ${finance?.actual == null ? "muted" : ""}`}>
                             {finance?.actual == null ? finance?.actualLabel || "—" : `${finance.actualUpperBound ? "≥" : ""}${usd(finance.actual)}`}
                           </span>
                         </td>
-                        <td>
+                        <td rowSpan={modelRanks.length}>
                           <span title={finance?.actualExplanation} className={`mono balance-finance ${finance?.profit == null ? "muted" : finance.profit < 0 ? "negative" : "profit-positive"}`}>
                             {finance?.profit == null ? "—" : `${finance.actualUpperBound ? "≤" : ""}¥${finance.profit.toFixed(2)}`}
                           </span>
                         </td>
-                        <td>
+                        <td rowSpan={modelRanks.length}>
                           <BalanceValue
                             balance={balance?.data}
                             loading={balance?.isPending}
                             failed={balance?.isError}
                           />
                         </td>
-                        <td>
+                        <td rowSpan={modelRanks.length}>
                           {balanceIsLow(balance?.data) ? (
                             <span className="status-pill cooling">余额不足</span>
                           ) : balance?.isPending ? (
@@ -2139,10 +2141,11 @@ function Dashboard({
                             </span>
                           )}
                         </td>
-                        <td className="muted">
+                        <td rowSpan={modelRanks.length} className="muted">
                           {checkedAt ? time(checkedAt) : "暂无"}
                         </td>
-                      </tr>
+                        </>}
+                      </tr>)}</Fragment>
                     );
                   })}
                     </tbody>
