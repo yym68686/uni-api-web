@@ -81,6 +81,7 @@ import type { SubImportsQuery } from "./sub2apiImports";
 import { ChannelModels } from "./ChannelModels";
 import { ChannelSortDialog } from "./ChannelSortDialog";
 import { activeChannelSortRules, sortChannels } from "./channelSorting";
+import { applyScopedChannelSort, channelSortScope, defaultChannelSort, deleteSortTemplate, loadChannelSortPreferences, saveChannelSortPreferences, scopedChannelSort } from "./channelSortPreferences";
 
 import { SiteLink, useChannelSites, dashboardURL } from "./ChannelSite";
 import { ChannelAccess } from "./ChannelAccess";
@@ -964,6 +965,10 @@ function Dashboard({
   const [view, setView] = useState<View>(() =>
     loadView(baseConnection.base, !!baseConnection.account),
   );
+  const sortStorageScope = baseConnection.account ? JSON.stringify([baseConnection.base, baseConnection.session]) : baseConnection.base;
+  const [sortPreferences, setSortPreferences] = useState(() => loadChannelSortPreferences(sortStorageScope, pageFilters.channels));
+  const channelScope = channelSortScope(pageFilters.channels);
+  const channelSort = scopedChannelSort(sortPreferences, channelScope);
   const filterScope = view === "balances" ? "balances" : "channels";
   const needsChannelData = ["channels", "balances", "overview", "automations"].includes(view);
   const filters = pageFilters[filterScope];
@@ -997,7 +1002,7 @@ function Dashboard({
     balanceThreshold,
     statusFilter,
     search,
-    sort,
+    sort: legacySort,
     endpoint,
     stream,
   } = filters;
@@ -1005,7 +1010,8 @@ function Dashboard({
     [adjustingChannels, setAdjustingChannels] = useState(false),
     [checkingChannels, setCheckingChannels] = useState(false);
   const channelView = view === "channels";
-  const sortRules = useMemo(() => activeChannelSortRules(sort, filters.sortRules), [sort, filters.sortRules]);
+  const sort = channelView ? channelSort.sort : legacySort;
+  const sortRules = channelView ? channelSort.rules : activeChannelSortRules(sort, filters.sortRules);
   const configOrder = sortRules.length === 0;
   useEffect(() => {
     saveView(baseConnection.base, view);
@@ -1014,12 +1020,13 @@ function Dashboard({
     saveFilters(baseConnection.base, pageFilters.channels, "channels");
     saveFilters(baseConnection.base, pageFilters.balances, "balances");
   }, [baseConnection.base, pageFilters]);
+  useEffect(() => saveChannelSortPreferences(sortStorageScope, sortPreferences), [sortStorageScope, sortPreferences]);
   const hasFilters = (Object.keys(defaultFilters) as (keyof Filters)[]).some(
     (key) =>
       ((channelView && ["keyId", "sourceId", "model", "window", "search", "balanceFilter", "statusFilter", "endpoint", "stream", "sort", "sortRules"].includes(key)) ||
         (view === "balances" && ["keyId", "sourceId", "model", "window", "search", "balanceTopN", "balanceThreshold"].includes(key))) &&
-      filters[key] !== defaultFilters[key],
-  );
+      !["sort", "sortRules"].includes(key) && filters[key] !== defaultFilters[key],
+  ) || (channelView && sortRules.length > 0);
   const [detailId, setDetailId] = useState<string | null>(null),
     [showTrend, setShowTrend] = useState(false),
     [guide, setGuide] = useState(false),
@@ -1370,6 +1377,10 @@ function Dashboard({
   const busy = metrics.isFetching || catalog.isFetching || keys.isFetching;
   function setFilter(name: keyof Filters, value: string) {
     setPage(0);
+    if (channelView && name === "sort") {
+      setSortPreferences(current => applyScopedChannelSort(current, channelScope, model, {sort:value,rules:activeChannelSortRules(value, "")}));
+      return;
+    }
     setPageFilters((current) => ({
       ...current,
       [filterScope]: { ...current[filterScope], [name]: value },
@@ -1617,9 +1628,31 @@ function Dashboard({
                       </button>
                     )}
                   </div>
-                  {channelView && <ChannelSortDialog rules={sortRules} onApply={rules => {
+                  {channelView && <ChannelSortDialog key={channelScope} rules={sortRules}
+                    scopeLabel={[
+                      model || "全部模型",
+                      sourceList.find(s=>s.id===selectedSourceId)?.name || "全部来源",
+                      keyId ? `Key ${keys.data?.data.find(k=>(k.source_id ? `${k.source_id}::${k.key_id}` : k.key_id)===keyId)?.position || "（已选）"}` : "全部 API key",
+                      ranges.find(([value])=>value===window)?.[1] || window,
+                      endpoint === "all" ? "全部端点" : endpoint,
+                      stream === "all" ? "全部流式状态" : stream === "true" ? "流式" : "非流式",
+                      statusFilter ? statusFilter === "eligible" ? "可用渠道" : "不可用渠道" : "全部状态",
+                      ...(balanceFilter ? ["余额不足"] : []),
+                      ...(search ? [`搜索：${search}`] : []),
+                    ].join(" · ")}
+                    templates={sortPreferences.templates}
+                    templateId={channelSort.templateId}
+                    suggestedTemplateId={!Object.hasOwn(sortPreferences.scopes,channelScope) ? sortPreferences.modelTemplates[model] : undefined}
+                    onSaveTemplate={(name,rules) => {
+                      const id=crypto.randomUUID();
+                      setSortPreferences(current=>({...current,templates:[...current.templates,{id,name,rules:rules.map(r=>({...r}))}]}));
+                      return id;
+                    }}
+                    onRenameTemplate={(id,name)=>setSortPreferences(current=>({...current,templates:current.templates.map(t=>t.id===id?{...t,name}:t)}))}
+                    onDeleteTemplate={id=>setSortPreferences(current=>deleteSortTemplate(current,id))}
+                    onApply={(rules,templateId) => {
                     setPage(0);
-                    setPageFilters(current => ({...current, channels: {...current.channels, sort: rules.length ? "custom" : "config", sortRules: rules.length ? JSON.stringify(rules) : ""}}));
+                    setSortPreferences(current=>applyScopedChannelSort(current,channelScope,model,{sort:rules.length?"custom":"config",rules,templateId}));
                   }} />}
                   {channelView && baseConnection.account && (
                     <ChannelControlActions
@@ -1869,6 +1902,7 @@ function Dashboard({
                   <button
                     className="filter-chip"
                     onClick={() => {
+                      if(channelView) setSortPreferences(current=>applyScopedChannelSort(current,channelScope,model,defaultChannelSort()));
                       setPageFilters((current) => ({
                         ...current,
                         [filterScope]: { ...defaultFilters },

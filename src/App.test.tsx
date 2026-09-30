@@ -41,6 +41,7 @@ function setup(
     denyPlatform?: boolean;
     legacyMetrics?: boolean;
     historyInitializing?: boolean;
+    extraModel?: boolean;
   } = {},
 ) {
   const calls: string[] = [];
@@ -63,7 +64,8 @@ function setup(
     }
     if (url.pathname.endsWith("/analytics") && options.historyInitializing) return new Response(JSON.stringify({ code: "analytics_initializing" }), { status: 503 });
     const selected = url.searchParams.has("api_key_id");
-    const data = selected ? [rows[2], rows[0]] : rows;
+    const primary = selected ? [rows[2], rows[0]] : rows;
+    const data = options.extraModel ? [...primary,...primary.map(row=>({...row,model:"model-b"}))] : primary;
     const result = url.pathname.endsWith("api-keys")
       ? {
           can_inspect_all: !options.denyPlatform,
@@ -141,6 +143,53 @@ async function connect(
   if (expectTable) await screen.findByRole("table");
 }
 describe("dashboard workflows", () => {
+  it("keeps each model/filter sort independent and restores its template through reload, rename and delete",async()=>{
+    let app=setup({extraModel:true});await connect(app.user);
+    await app.user.selectOptions(screen.getByLabelText("模型筛选"),"model-a");
+    await app.user.click(screen.getByRole("button",{name:"多条件排序"}));
+    await app.user.click(screen.getByRole("button",{name:"不降智优先，再按概率"}));
+    await app.user.type(screen.getByLabelText("排序模板名称"),"高级模型");
+    await app.user.click(screen.getByRole("button",{name:"保存为模板"}));
+    await app.user.click(screen.getByRole("button",{name:"应用排序"}));
+    expect(screen.getByLabelText("排序")).toHaveValue("custom");
+    await app.user.selectOptions(screen.getByLabelText("模型筛选"),"model-b");
+    expect(screen.getByLabelText("排序")).toHaveValue("config");
+    await app.user.click(screen.getByRole("button",{name:"多条件排序"}));
+    expect(screen.queryByLabelText("第 1 排序依据")).not.toBeInTheDocument();
+    await app.user.click(screen.getByRole("button",{name:"添加排序依据"}));
+    await app.user.selectOptions(screen.getByLabelText("第 1 排序依据"),"multiplier");
+    await app.user.type(screen.getByLabelText("排序模板名称"),"低价优先");
+    await app.user.click(screen.getByRole("button",{name:"保存为模板"}));
+    await app.user.click(screen.getByRole("button",{name:"应用排序"}));
+    await app.user.selectOptions(screen.getByLabelText("模型筛选"),"");
+    expect(screen.getByLabelText("排序")).toHaveValue("config");
+    await app.user.selectOptions(screen.getByLabelText("模型筛选"),"model-a");
+    await app.user.click(screen.getByRole("button",{name:"多条件排序"}));
+    expect(within(screen.getByLabelText("排序模板")).getByRole("option",{name:"高级模型"})).toHaveProperty("selected",true);
+    expect(screen.getByLabelText("第 1 排序依据")).toHaveValue("quality");
+    await app.user.click(screen.getByRole("button",{name:"取消"}));
+    await app.user.selectOptions(screen.getByLabelText("时间范围筛选"),"24h");
+    expect(screen.getByLabelText("排序")).toHaveValue("config");
+    await app.user.click(screen.getByRole("button",{name:"多条件排序"}));
+    expect(screen.getByLabelText("第 1 排序依据")).toHaveValue("quality");
+    expect(screen.getByRole("status")).toHaveTextContent("上次使用的模板");
+    await app.user.click(screen.getByRole("button",{name:"取消"}));
+    await app.user.selectOptions(screen.getByLabelText("时间范围筛选"),"15m");
+    app.unmount();app=setup({extraModel:true});await screen.findByRole("table");
+    expect(screen.getByLabelText("排序")).toHaveValue("custom");
+    await app.user.click(screen.getByRole("button",{name:"多条件排序"}));
+    await app.user.clear(screen.getByLabelText("排序模板名称"));await app.user.type(screen.getByLabelText("排序模板名称"),"质量优先");
+    await app.user.click(screen.getByRole("button",{name:"重命名模板"}));
+    await app.user.click(screen.getByRole("button",{name:"删除模板"}));
+    await app.user.click(screen.getByRole("button",{name:"取消"}));
+    expect(screen.getByLabelText("排序")).toHaveValue("custom");
+    await app.user.selectOptions(screen.getByLabelText("模型筛选"),"model-b");
+    await app.user.click(screen.getByRole("button",{name:"多条件排序"}));
+    expect(screen.getByLabelText("第 1 排序依据")).toHaveValue("multiplier");
+    expect(screen.getByLabelText("排序模板名称")).toHaveValue("低价优先");
+    expect(screen.queryByRole("option",{name:"质量优先"})).not.toBeInTheDocument();
+    expect(app.calls.every(call=>!call.includes("channel-controls"))).toBe(true);
+  });
   it("applies multi-sort before pagination, persists it, and leaves balance sorting independent", async () => {
     let app = setup();
     await connect(app.user);
@@ -412,13 +461,13 @@ describe("dashboard workflows", () => {
       screen.getByLabelText("渠道状态筛选"),
       "unavailable",
     );
-    await app.user.selectOptions(screen.getByLabelText("排序"), "latency");
     await app.user.selectOptions(
       screen.getByLabelText("端点筛选"),
       "/v1/messages",
     );
     await app.user.selectOptions(screen.getByLabelText("流式状态筛选"), "true");
     await app.user.click(screen.getByRole("button", { name: /^余额不足$/ }));
+    await app.user.selectOptions(screen.getByLabelText("排序"), "latency");
     await waitFor(() => expect(screen.getAllByRole("row")).toHaveLength(2));
     app.unmount();
 

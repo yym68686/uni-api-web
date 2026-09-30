@@ -10,17 +10,39 @@ import {
 } from "lucide-react";
 import { channelSortFields, qualityFirstRules } from "./channelSorting";
 import type { ChannelSortRule } from "./channelSorting";
+import type { SortTemplate } from "./channelSortPreferences";
 import "./channelSort.css";
 
 export function ChannelSortDialog({
   rules,
   onApply,
+  scopeLabel = "当前筛选范围",
+  templates = [],
+  templateId,
+  suggestedTemplateId,
+  onSaveTemplate,
+  onRenameTemplate,
+  onDeleteTemplate,
 }: {
   rules: ChannelSortRule[];
-  onApply: (rules: ChannelSortRule[]) => void;
+  onApply: (rules: ChannelSortRule[], templateId?: string) => void;
+  scopeLabel?: string;
+  templates?: SortTemplate[];
+  templateId?: string;
+  suggestedTemplateId?: string;
+  onSaveTemplate?: (name: string, rules: ChannelSortRule[]) => string;
+  onRenameTemplate?: (id: string, name: string) => void;
+  onDeleteTemplate?: (id: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<ChannelSortRule[]>([]);
+  const [chosenTemplate, setChosenTemplate] = useState("");
+  const [name, setName] = useState("");
+  const [notice, setNotice] = useState("");
+  const chosen = templates.find((t) => t.id === chosenTemplate);
+  const nameConflict = templates.some((t) => t.name === name.trim());
+  const matchesTemplate =
+    !!chosen && JSON.stringify(chosen.rules) === JSON.stringify(draft);
   function move(index: number, offset: number) {
     setDraft((current) => {
       const next = [...current];
@@ -32,7 +54,24 @@ export function ChannelSortDialog({
     <Dialog.Root
       open={open}
       onOpenChange={(next) => {
-        if (next) setDraft(rules.map((rule) => ({ ...rule })));
+        if (next) {
+          const selected = templates.find(
+            (t) => t.id === (templateId || suggestedTemplateId),
+          );
+          setDraft(
+            (selected && suggestedTemplateId && !templateId
+              ? selected.rules
+              : rules
+            ).map((rule) => ({ ...rule })),
+          );
+          setChosenTemplate(selected?.id || "");
+          setName(selected?.name || "");
+          setNotice(
+            selected && suggestedTemplateId && !templateId
+              ? "已带出此模型上次使用的模板，点击应用排序后用于当前范围。"
+              : "",
+          );
+        }
         setOpen(next);
       }}
     >
@@ -54,7 +93,8 @@ export function ChannelSortDialog({
         <Dialog.Content className="guide-dialog channel-sort-dialog">
           <Dialog.Title>渠道排序</Dialog.Title>
           <Dialog.Description>
-            从上到下依次比较；上一项相同时再比较下一项。仅改变列表显示顺序，不修改实际请求路由。
+            仅应用于{scopeLabel}
+            ，其他筛选范围保持原样。从上到下依次比较；上一项相同时再比较下一项。仅改变列表显示顺序，不修改实际请求路由。
           </Dialog.Description>
           <Dialog.Close
             className="icon-button detail-close"
@@ -62,6 +102,107 @@ export function ChannelSortDialog({
           >
             <X size={18} />
           </Dialog.Close>
+          {onSaveTemplate && (
+            <section
+              className="channel-sort-templates"
+              aria-label="排序模板管理"
+            >
+              <label>
+                排序模板
+                <select
+                  aria-label="排序模板"
+                  value={chosenTemplate}
+                  onChange={(event) => {
+                    const selected = templates.find(
+                      (t) => t.id === event.target.value,
+                    );
+                    setChosenTemplate(selected?.id || "");
+                    setName(selected?.name || "");
+                    setNotice("");
+                    if (selected)
+                      setDraft(selected.rules.map((r) => ({ ...r })));
+                  }}
+                >
+                  <option value="">自定义方案</option>
+                  {templates.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                模板名称
+                <input
+                  aria-label="排序模板名称"
+                  placeholder="例如：高级模型质量优先"
+                  value={name}
+                  onChange={(event) => {
+                    setName(event.target.value);
+                    setNotice("");
+                  }}
+                />
+              </label>
+              <div className="channel-sort-template-actions">
+                <button
+                  className="button small"
+                  disabled={!name.trim() || nameConflict}
+                  onClick={() => {
+                    const id = onSaveTemplate(name.trim(), draft);
+                    setChosenTemplate(id);
+                    setNotice("模板已保存，点击应用排序后用于当前范围。");
+                  }}
+                >
+                  保存为模板
+                </button>
+                <button
+                  className="button small"
+                  disabled={
+                    !chosen ||
+                    !name.trim() ||
+                    chosen.name === name.trim() ||
+                    templates.some(
+                      (t) => t.id !== chosen.id && t.name === name.trim(),
+                    )
+                  }
+                  onClick={() => {
+                    if (chosen) {
+                      onRenameTemplate?.(chosen.id, name.trim());
+                      setNotice("模板已重命名。");
+                    }
+                  }}
+                >
+                  重命名模板
+                </button>
+                <button
+                  className="button small"
+                  disabled={!chosen}
+                  onClick={() => {
+                    if (chosen) {
+                      onDeleteTemplate?.(chosen.id);
+                      setChosenTemplate("");
+                      setName("");
+                      setNotice("模板已删除，各筛选范围已应用的排序保留。");
+                    }
+                  }}
+                >
+                  删除模板
+                </button>
+              </div>
+              {chosen && !matchesTemplate && (
+                <p>当前规则已调整，可输入新名称另存为模板。</p>
+              )}
+              {!!name.trim() &&
+                nameConflict &&
+                (!chosen || chosen.name !== name.trim()) && (
+                  <p role="alert">模板名称已存在，请使用其他名称。</p>
+                )}
+              {notice && <p role="status">{notice}</p>}
+              <p>
+                模板可跨模型选用，保存在当前浏览器。相同筛选范围恢复已应用方案；此模型进入新的筛选范围时，弹窗带出上次使用的模板。
+              </p>
+            </section>
+          )}
           <div className="channel-sort-presets">
             <button
               className="button small"
@@ -223,7 +364,8 @@ export function ChannelSortDialog({
             <button
               className="button primary"
               onClick={() => {
-                onApply(draft);
+                if (matchesTemplate) onApply(draft, chosen!.id);
+                else onApply(draft);
                 setOpen(false);
               }}
             >
