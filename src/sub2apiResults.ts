@@ -1,5 +1,5 @@
 import { SUB_MODELS } from "./sub2apiModels";
-import type { SubTarget } from "./Sub2apiChecks";
+import type { SubTarget, Result, Probe } from "./Sub2apiChecks";
 
 export type SubModelCheck = NonNullable<SubTarget["models"]>[number];
 
@@ -69,4 +69,20 @@ export function modelMatchStatus(
   if (!status) return "legacy";
   if (check.result.availability.status !== "success") return "unavailable";
   return status;
+}
+
+// Shared quality is separate from model availability and its billing details.
+export function groupQualityResult(target: SubTarget): Result | null {
+  const saved = modelChecks(target).find(c => c.model === "gpt-6-astra")?.result || null;
+  const check = target.quality_check;
+  if (!check) return saved;
+  // Receipt lookups enrich the saved native probe after history was recorded.
+  // Keep that newer billing detail when both refer to the same native check.
+  if (check.quality_probe && saved?.checked_at === check.checked_at &&
+      saved.quality.id === check.quality_probe.id) return saved;
+  const unavailable: Probe = { status: "skipped", text: "", ttft_ms: null, duration_ms: 0 };
+  return { model: "gpt-6-astra", checked_at: check.checked_at, verdict: check.verdict,
+    availability: saved?.availability || unavailable,
+    quality: check.quality_probe || { status: check.verdict === "error" ? "error" : "success", text: check.text, message: check.message, ttft_ms: null, duration_ms: check.duration_ms },
+  };
 }

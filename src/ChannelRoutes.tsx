@@ -21,6 +21,8 @@ import { importModelLabel } from "./sub2apiResults";
 import { SUB_MODELS } from "./sub2apiModels";
 import {useSubAccounts} from "./sub2apiAccounts";
 import {toolUseFailed,modelToolUse,toolUseLabels} from "./toolUse";
+import { configuredQualityResult } from "./channelManagement";
+import { ModelQualityWarning } from "./ModelQualityWarning";
 import {
   managedRouteCount,
   providerRoutes,
@@ -259,6 +261,7 @@ export function ConfiguredChannelDialog({
   ];
   const allChecks=configuredModelChecks(item,accounts.data?.data||[],toolChecks.data?.data||[],modelOptions);
   const toolTarget={tool_use:configuredToolUseResult(item,accounts.data?.data||[],toolChecks.data?.data||[],modelOptions)};
+  const quality=configuredQualityResult(item,accounts.data?.data||[],toolChecks.data?.data||[]);
   const canSelectModel=(model:string)=>!toolDefaultsPending&&!toolDefaultsError&&modelIsAvailable(allChecks.find(c=>c.model===model));
   const selected=selectedOverride ?? item.models.filter(model=>canSelectModel(model)&&!toolUseFailed(toolTarget,model));
   const mapping = aliasMappings(aliases, selected);
@@ -697,6 +700,7 @@ export function ConfiguredChannelDialog({
                   disabled={busy || options.isFetching || inventory.isPending || toolDefaultsPending || toolDefaultsError}
                   actions={batchButton("models","模型勾选")}
                   status={model=><>
+                    <ModelQualityWarning model={model} result={quality} />
                     {!canSelectModel(model)&&<small>{importModelLabel(allChecks.find(c=>c.model===model)||{model,state:"idle",message:"",result:null})}</small>}
                     {toolUseFailed(toolTarget,model)&&<small className="negative">Tool use · {toolUseLabels[modelToolUse(toolTarget,model)!.status]}</small>}
                   </>}

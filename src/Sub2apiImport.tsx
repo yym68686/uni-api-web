@@ -14,6 +14,7 @@ import type { ConsoleSourcesQuery } from "./consoleSources";
 import {toolUseFailed,modelToolUse,toolUseLabels} from "./toolUse";
 import { CompactionStatus } from "./SubCompaction";
 import { assessPrice } from "./sub2apiPriceCheck";
+import { ModelQualityWarning } from "./ModelQualityWarning";
 import type { KeyInfo, ModelPrice } from "./types";
 import type { SubAccount, SubTarget } from "./Sub2apiChecks";
 import type { InstalledChannel, SubImportsQuery } from "./sub2apiImports";
@@ -38,6 +39,7 @@ import {
 import type { ManagedChannel } from "./channelManagement";
 import {
   modelChecks,
+  groupQualityResult,
   availableModelChecks,
   importModelLabel,
 } from "./sub2apiResults";
@@ -75,6 +77,7 @@ export function Sub2apiImport({
   const destinationSources = (sources.data?.data || []).map(source => source.id);
   const keyDirectories = useChannelImportKeys(destinationSources);
   const checks = useMemo(() => modelChecks(target), [target]);
+  const quality = groupQualityResult(target);
   const available = availableModelChecks(target).map((check) => check.model);
   const installed = (imports.data?.data || []).filter(
     (i) =>
@@ -883,6 +886,7 @@ export function Sub2apiImport({
                   status={model=>{
                     const check=editChecks.find(c=>c.model===model)!;
                     return <>
+                      <ModelQualityWarning model={model} result={quality} />
                       {toolUseFailed(target,model) && <small className="negative">Tool use · {toolUseLabels[modelToolUse(target,model)!.status]}</small>}
                       {assessPrice(check,prices).status==="abnormal" && <small className="negative">单价异常</small>}
                       {!available.includes(model) && <small>{importModelLabel(check)}</small>}

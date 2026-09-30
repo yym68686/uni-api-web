@@ -2142,6 +2142,7 @@ it("shows model-scoped Tool use and leaves failed models unchecked when importin
  const data=fixtures().slice(0,1),t=data[0].targets[0];
  t.models=['gpt-5.5','gpt-6-sol','gpt-6-astra','gpt-6-luna'].map(model=>({model,state:'done',message:'',result:{...t.result!,model}}));
  t.result=null;
+ t.quality_check={source_id:"primary",provider:t.channel,model:"gpt-6-astra",verdict:"fail",checked_at:20,text:"",duration_ms:1};
  t.tool_use={status:'unsupported',checked_at:10,attempts:[],models:[
   {model:'gpt-5.5',state:'done',result:{status:'supported',model:'gpt-5.5',checked_at:10,attempts:[]}},
   {model:'gpt-6-sol',state:'done',result:{status:'unsupported',model:'gpt-6-sol',message:'NO_EXEC',checked_at:10,attempts:[]}},
@@ -2162,6 +2163,8 @@ it("shows model-scoped Tool use and leaves failed models unchecked when importin
  expect(await screen.findByText('same-group',{selector:'strong'})).toBeVisible();
  await user.click(screen.getByRole('button',{name:'添加到渠道'}));
  const d=within(screen.getByRole('dialog'));
+ expect(d.getByRole('checkbox',{name:'gpt-6-astra'}).closest('label')).toHaveTextContent('降智');
+ expect(d.getByRole('checkbox',{name:'gpt-6-sol'}).closest('label')).not.toHaveTextContent('降智');
  expect(d.getByRole('checkbox',{name:'gpt-5.5'})).toBeChecked();
  expect(d.getByRole('checkbox',{name:/^gpt-6-sol/})).not.toBeChecked();
  expect(d.getByRole('checkbox',{name:/^gpt-6-astra/})).not.toBeChecked();

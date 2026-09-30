@@ -8,6 +8,29 @@ import type { ManagedChannel } from "./channelManagement";
 afterEach(() => vi.unstubAllGlobals());
 const passedModels=(source_id:string,provider:string,models:string[])=>models.map(model=>({source_id,provider,kind:"model",model,fingerprint:"",state:"done",message:"",history:{},result:{model,checked_at:1,availability:{status:"success"}}}));
 
+it("annotates degraded Astra in the native editor without disabling selection and removes the badge after a passing retest", async()=>{
+ const models=["gpt-6-astra","gpt-6-sol"];
+ const item={kind:"configured",source_id:"do",source_name:"DigitalOcean",provider:"native",name:"native",models,probe_fingerprint:"current"} as ManagedChannel;
+ let verdict="fail";
+ vi.stubGlobal("fetch",vi.fn(async(input:string)=>{
+  if(input.includes("channel-options"))return Response.json({revision:"r1",keys:[{key_id:"k1",position:1,prefix:"masked"}],channels:[]});
+  return Response.json({data:input.endsWith("/channel-management/checks")?passedModels("do","native",models).map(c=>({...c,fingerprint:"current",result:{...c.result,verdict,quality:{status:"success"}}})):[],unavailable_keys:[],unavailable_sources:[]});
+ }));
+ const client=new QueryClient();
+ render(<QueryClientProvider client={client}><ConfiguredChannelDialog item={item} close={()=>{}}/></QueryClientProvider>);
+ const astra=await screen.findByRole("checkbox",{name:"gpt-6-astra"});
+ await waitFor(()=>expect(astra.closest("label")).toHaveTextContent("降智"));
+ expect(screen.getByRole("checkbox",{name:"gpt-6-sol"}).closest("label")).not.toHaveTextContent("降智");
+ await waitFor(()=>expect(astra).toBeEnabled());
+ expect(within(astra.closest("label")!).getByText("降智")).toHaveClass("model-quality-warning");
+ await userEvent.setup().click(astra);
+ expect(astra).not.toBeChecked();
+ verdict="pass";
+ await client.invalidateQueries({queryKey:["configured-checks"]});
+ await waitFor(()=>expect(astra.closest("label")).not.toHaveTextContent("降智"));
+ expect(astra).not.toBeChecked();
+});
+
 it("disables all 21 failed native models while preserving saved routes and allowing verified additions",async()=>{
  const models=Array.from({length:26},(_,i)=>`fixture-model-${i}`);
  const item={kind:"configured",source_id:"do",source_name:"DigitalOcean",provider:"xchai",name:"xchai",models,probe_fingerprint:"current"} as ManagedChannel;

@@ -7,7 +7,7 @@ import type { InstalledChannel } from "./sub2apiImports";
 import { SUB_MODELS } from "./sub2apiModels";
 import {toolUseModels} from "./toolUse";
 import type {ToolUseResult,ToolUseModel} from "./toolUse";
-import { modelChecks } from "./sub2apiResults";
+import { modelChecks, groupQualityResult } from "./sub2apiResults";
 import type { SubModelCheck } from "./sub2apiResults";
 import { boundGroups } from "./sub2apiImports";
 
@@ -40,6 +40,25 @@ export function configuredModelChecks(member:ManagedChannel, accounts:SubAccount
       candidates.push({model,state:check.state,message:check.message,result:check.result as SubTarget["result"]});
     return recent(candidates) || missing;
   });
+}
+
+export function configuredQualityResult(member: ManagedChannel, accounts: SubAccount[], checks: ConfiguredCheck[]) {
+  const site = boundGroups(member).flatMap(group => {
+    const target = accounts.find(a => a.id === group.account_id)?.targets.find(t => t.group_id === group.group_id);
+    const result = target ? groupQualityResult(target) : null;
+    return result ? [result] : [];
+  });
+  const native = checks.filter(c => c.kind === "model" && c.model === "gpt-6-astra" &&
+    c.source_id === member.source_id && c.provider === member.provider &&
+    (c.fingerprint || "") === (member.probe_fingerprint || ""))
+    .map(c => c.result as SubTarget["result"])
+    .filter((r): r is NonNullable<typeof r> => !!r && !!r.quality && r.quality.status !== "skipped")
+    .sort((a,b) => b.checked_at - a.checked_at)[0];
+  // A failure in one bound group is relevant to this multi-key channel. Only
+  // a newer native check of this exact provider may supersede that evidence.
+  const latestSite = (site.some(r => r.verdict === "fail") ? site.filter(r => r.verdict === "fail") : site)
+    .sort((a,b) => b.checked_at - a.checked_at)[0];
+  return native && (!latestSite || native.checked_at >= latestSite.checked_at) ? native : latestSite || null;
 }
 
 export const UNASSIGNED_ACCOUNT = "__unassigned__";

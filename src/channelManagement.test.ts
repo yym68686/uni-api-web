@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { groupManagedChannels, managementRows, configuredModelChecks } from "./channelManagement";
+import { groupManagedChannels, managementRows, configuredModelChecks, configuredQualityResult } from "./channelManagement";
 import type { ConfiguredCheck } from "./channelManagement";
 import type { SubAccount } from "./Sub2apiChecks";
 import { modelIsAvailable } from "./ChannelModelSelection";
@@ -25,6 +25,18 @@ const channel = (overrides: Partial<ManagedChannel> = {}): ManagedChannel => ({
   revision: "",
   manageable: false,
   ...overrides,
+});
+
+it("uses shared quality separately from availability and isolates source and credential evidence", () => {
+  const member=channel({account_id:"a",group_id:1,binding_status:"matched",bound_keys:[{account_id:"a",account_name:"a",base:"https://site.test",group_id:1,remote_key_id:1}],probe_fingerprint:"current",models:["gpt-6-astra"]});
+  const result=(verdict:string,checked_at:number)=>({model:"gpt-6-astra",verdict,checked_at,availability:{status:"success"},quality:{status:"success"}});
+  const accounts=[{id:"a",targets:[{group_id:1,models:[{model:"gpt-6-astra",state:"done",result:result("pass",5)}],quality_check:{model:"gpt-6-astra",verdict:"fail",checked_at:20,text:"",duration_ms:1}}]}] as unknown as SubAccount[];
+  const native=(patch:Partial<ConfiguredCheck>={})=>({source_id:"fugue",provider:"native",model:"gpt-6-astra",kind:"model",fingerprint:"current",state:"done",result:result("pass",30),...patch}) as ConfiguredCheck;
+  expect(configuredQualityResult(member,accounts,[])?.verdict).toBe("fail");
+  expect(configuredQualityResult(member,accounts,[native({source_id:"do"}),native({fingerprint:"old"}),native({kind:"availability"})])?.verdict).toBe("fail");
+  expect(configuredQualityResult(member,accounts,[native()])?.verdict).toBe("pass");
+  expect(configuredQualityResult(member,[],[native({result:result("fail",30) as ConfiguredCheck["result"]})])?.verdict).toBe("fail");
+  expect(configuredQualityResult(member,[],[native({fingerprint:"old"})])).toBeNull();
 });
 
 it("never borrows availability from another source, changed credential, or incomplete bound group",()=>{
