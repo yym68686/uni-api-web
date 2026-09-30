@@ -10,6 +10,7 @@ export const channelSortFields = [
   { value: "cache", label: "缓存率", direction: "desc" },
   { value: "success", label: "成功率", direction: "desc" },
   { value: "wait", label: "请求前等待 P50", direction: "asc" },
+  { value: "status", label: "状态", direction: "asc" },
 ] as const;
 export type ChannelSortField = (typeof channelSortFields)[number]["value"];
 export interface ChannelSortRule {
@@ -67,6 +68,15 @@ function sortValue(
 ): number | null {
   const check = context.checks.get(providerId(row));
   switch (field) {
+    case "status":
+      // Cooldown is transient; group it with available channels rather than
+      // treating every ineligible channel as intentionally disabled.
+      if (row.reason === "temporarily_disabled") return 1;
+      return row.eligible ||
+        row.reason === "eligible" ||
+        row.reason === "channel_cooldown"
+        ? 0
+        : null;
     case "quality":
       return check?.verdict === "pass"
         ? 0

@@ -21,6 +21,71 @@ const row = (
     stats,
   }) as unknown as Channel;
 const names = (rows: Channel[]) => rows.map((r) => r.provider);
+it("groups available and cooling together, separates temporarily disabled, and applies later rules within each group", () => {
+  const rows = [
+    {
+      ...row("disabled-high", { success_rate: 1 }),
+      eligible: false,
+      reason: "temporarily_disabled",
+    },
+    {
+      ...row("available-low", { success_rate: 0.5 }),
+      eligible: true,
+      reason: "eligible",
+    },
+    {
+      ...row("cooling-high", { success_rate: 0.9 }),
+      eligible: false,
+      reason: "channel_cooldown",
+    },
+    {
+      ...row("disabled-low", { success_rate: 0.2 }),
+      eligible: false,
+      reason: "temporarily_disabled",
+    },
+    {
+      ...row("no-key", { success_rate: 1 }),
+      eligible: false,
+      reason: "no_provider_key",
+    },
+    row("unknown"),
+  ];
+  const rules = [
+    { field: "status", direction: "asc" },
+    { field: "success", direction: "desc" },
+  ] as const;
+  expect(names(sortChannels(rows, [...rules], { checks: new Map() }))).toEqual([
+    "cooling-high",
+    "available-low",
+    "disabled-high",
+    "disabled-low",
+    "no-key",
+    "unknown",
+  ]);
+  expect(
+    names(
+      sortChannels(rows, [{ field: "status", direction: "desc" }, rules[1]], {
+        checks: new Map(),
+      }),
+    ),
+  ).toEqual([
+    "disabled-high",
+    "disabled-low",
+    "cooling-high",
+    "available-low",
+    "no-key",
+    "unknown",
+  ]);
+  expect(names(sortChannels(rows, [rules[0]], { checks: new Map() }))).toEqual([
+    "available-low",
+    "cooling-high",
+    "disabled-high",
+    "disabled-low",
+    "no-key",
+    "unknown",
+  ]);
+  expect(parseChannelSortRules(JSON.stringify(rules))).toEqual(rules);
+});
 it("groups latest quality first and then sorts probability within both groups, in either direction", () => {
   const rows = [
     row("fail-low"),

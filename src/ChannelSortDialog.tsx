@@ -137,12 +137,16 @@ export function ChannelSortDialog({
                     <option value="asc">
                       {rule.field === "quality"
                         ? "不降智在前（升序）"
-                        : "从低到高（升序）"}
+                        : rule.field === "status"
+                          ? "可用/冷却优先（升序）"
+                          : "从低到高（升序）"}
                     </option>
                     <option value="desc">
                       {rule.field === "quality"
                         ? "降智在前（降序）"
-                        : "从高到低（降序）"}
+                        : rule.field === "status"
+                          ? "临时停用优先（降序）"
+                          : "从高到低（降序）"}
                     </option>
                   </select>
                 </label>
@@ -201,6 +205,9 @@ export function ChannelSortDialog({
             添加排序依据
           </button>
           <div className="channel-sort-note">
+            <p>
+              状态排序将“可用”和“冷却中”视为同一组，“临时停用”单独分组，其他或未知状态排在末尾。放在第一优先级时，可将临时停用渠道集中排在后面，组内继续按后续条件排序。
+            </p>
             <p>
               未检测、检测失败、无法判定及缺失数值均排在该项末尾；所有条件相同时保留配置顺序。
             </p>

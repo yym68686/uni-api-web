@@ -4,6 +4,29 @@ import userEvent from "@testing-library/user-event";
 import { ChannelSortDialog } from "./ChannelSortDialog";
 import { qualityFirstRules } from "./channelSorting";
 
+it("allows status to precede existing criteria and explains both directions", async () => {
+  const apply = vi.fn(),
+    user = userEvent.setup();
+  render(<ChannelSortDialog rules={qualityFirstRules} onApply={apply} />);
+  await user.click(screen.getByRole("button", { name: "多条件排序" }));
+  await user.click(screen.getByRole("button", { name: "添加排序依据" }));
+  await user.selectOptions(screen.getByLabelText("第 3 排序依据"), "status");
+  expect(
+    screen.getByRole("option", { name: "可用/冷却优先（升序）" }),
+  ).toBeInTheDocument();
+  await user.selectOptions(screen.getByLabelText("第 3 排序方向"), "desc");
+  expect(
+    screen.getByRole("option", { name: "临时停用优先（降序）" }),
+  ).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "上移第 3 项" }));
+  await user.click(screen.getByRole("button", { name: "上移第 2 项" }));
+  await user.click(screen.getByRole("button", { name: "应用排序" }));
+  expect(apply).toHaveBeenCalledWith([
+    { field: "status", direction: "desc" },
+    ...qualityFirstRules,
+  ]);
+});
+
 it("edits priorities and directions in a cancelable draft, with reset and reusable presets", async () => {
   const apply = vi.fn();
   const user = userEvent.setup();
