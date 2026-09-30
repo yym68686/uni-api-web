@@ -49,6 +49,7 @@ type RequestTraceEvent struct {
 	DispatchMS        *float64       `json:"dispatch_ms"`
 	ResponseCreatedMS *float64       `json:"response_created_ms"`
 	FirstTextMS       *float64       `json:"first_text_ms"`
+	FirstOutputMS     *float64       `json:"first_output_ms"`
 	Detail            map[string]any `json:"detail"`
 	Transport         map[string]any `json:"transport"`
 }
@@ -101,7 +102,26 @@ func traceDetails(raw string) map[string]any {
 	return out
 }
 
-const traceEventColumns = `source_id,coalesce(instance_id,'') AS instance_id,coalesce(request_id,'') AS request_id,event_id,kind,coalesce(stage,''),at_ms,started_ms,coalesce(attempt_id,''),coalesce(provider,''),coalesce(model,''),coalesce(upstream_model,''),coalesce(endpoint,''),coalesce(stream,false),coalesce(outcome,''),coalesce(status,0),coalesce(terminal_kind,''),coalesce(failure_reason,''),response_completed,duration_ms,dispatch_ms,response_created_ms,first_text_ms,coalesce(trace_detail,'{}'),coalesce(transport_timing,'{}'),coalesce(key_id,'')`
+// Expose only the last observed upstream chunk timestamp from the stored raw
+// stream diagnostics. Connection addresses and arbitrary nested data stay private.
+func traceTransport(raw string) map[string]any {
+	out := traceDetails(raw)
+	var timing struct {
+		RawStream *struct {
+			Totals struct {
+				LastChunkMS *float64 `json:"last_chunk_ms"`
+			} `json:"totals"`
+		} `json:"raw_stream"`
+	}
+	if json.Unmarshal([]byte(raw), &timing) == nil && timing.RawStream != nil {
+		if last := timing.RawStream.Totals.LastChunkMS; last != nil && *last >= 0 {
+			out["last_upstream_chunk_ms"] = *last
+		}
+	}
+	return out
+}
+
+const traceEventColumns = `source_id,coalesce(instance_id,'') AS instance_id,coalesce(request_id,'') AS request_id,event_id,kind,coalesce(stage,''),at_ms,started_ms,coalesce(attempt_id,''),coalesce(provider,''),coalesce(model,''),coalesce(upstream_model,''),coalesce(endpoint,''),coalesce(stream,false),coalesce(outcome,''),coalesce(status,0),coalesce(terminal_kind,''),coalesce(failure_reason,''),response_completed,duration_ms,dispatch_ms,response_created_ms,first_text_ms,first_output_ms,coalesce(trace_detail,'{}'),coalesce(transport_timing,'{}'),coalesce(key_id,'')`
 
 func (e *Engine) RequestTrace(ctx context.Context, id string, allowed []string, source string, instance ...string) (RequestTraceResult, error) {
 	out := RequestTraceResult{Data: []RequestTrace{}, RequestID: id, GeneratedAt: time.Now().Unix()}
@@ -173,10 +193,10 @@ func (e *Engine) RequestTrace(ctx context.Context, id string, allowed []string, 
 	for rows.Next() {
 		var source, instance, request, detail, transport string
 		var v RequestTraceEvent
-		if err := rows.Scan(&source, &instance, &request, &v.EventID, &v.Kind, &v.Stage, &v.AtMS, &v.StartedMS, &v.AttemptID, &v.Provider, &v.Model, &v.UpstreamModel, &v.Endpoint, &v.Stream, &v.Outcome, &v.Status, &v.TerminalKind, &v.FailureReason, &v.ResponseCompleted, &v.DurationMS, &v.DispatchMS, &v.ResponseCreatedMS, &v.FirstTextMS, &detail, &transport, &v.KeyID); err != nil {
+		if err := rows.Scan(&source, &instance, &request, &v.EventID, &v.Kind, &v.Stage, &v.AtMS, &v.StartedMS, &v.AttemptID, &v.Provider, &v.Model, &v.UpstreamModel, &v.Endpoint, &v.Stream, &v.Outcome, &v.Status, &v.TerminalKind, &v.FailureReason, &v.ResponseCompleted, &v.DurationMS, &v.DispatchMS, &v.ResponseCreatedMS, &v.FirstTextMS, &v.FirstOutputMS, &detail, &transport, &v.KeyID); err != nil {
 			return out, err
 		}
-		v.Detail, v.Transport = traceDetails(detail), traceDetails(transport)
+		v.Detail, v.Transport = traceDetails(detail), traceTransport(transport)
 		key := source + "\x00" + instance + "\x00" + request
 		i, ok := indices[key]
 		if !ok {

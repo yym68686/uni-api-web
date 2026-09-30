@@ -30,6 +30,8 @@ import type {
   TraceAttempt,
   TraceTone,
 } from "./requestTraceModel";
+import { attemptTiming, downstreamTiming } from "./requestTraceTiming";
+import type { TraceMilestone } from "./requestTraceTiming";
 export type { TraceRun, TraceEvent } from "./requestTraceModel";
 import "./requestTrace.css";
 
@@ -169,6 +171,7 @@ const fields: Record<string, string> = {
   first_upstream_chunk_ms: "收到上游首块数据",
   public_stream_ready_ms: "流式响应就绪",
   first_wire_prepared_ms: "首个下行数据就绪",
+  last_upstream_chunk_ms: "收到上游末块数据",
   preflight_decode_ms: "预检解析耗时",
   preflight_read_wait_ms: "预检读取等待",
   preflight_process_ms: "预检处理耗时",
@@ -330,6 +333,172 @@ function StageList({
     </ol>
   );
 }
+
+function TimingMilestones({
+  milestones,
+  origin,
+  started,
+  missing = [],
+}: {
+  milestones: TraceMilestone[];
+  origin: number;
+  started?: number;
+  missing?: string[];
+}) {
+  return (
+    <div className="trace-timing-details">
+      <dl className="trace-milestone-list">
+        {milestones.map((point) => (
+          <div key={point.id} title={point.description}>
+            <dt>{point.label}</dt>
+            <dd>
+              <strong>+{duration(point.at - origin)}</strong>
+              <time dateTime={new Date(point.at).toISOString()}>
+                {clock(Math.round(point.at))}
+              </time>
+              {started != null && (
+                <small>本次渠道 +{duration(point.at - started)}</small>
+              )}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      {missing.length > 0 && (
+        <p className="trace-timing-missing">{missing.join(" · ")}</p>
+      )}
+    </div>
+  );
+}
+
+function AttemptWaterfall({
+  run,
+  attempt: a,
+  index,
+  origin,
+  span,
+  selected,
+  onOpen,
+}: {
+  run: TraceRun;
+  attempt: TraceAttempt;
+  index: number;
+  origin: number;
+  span: number;
+  selected: boolean;
+  onOpen: () => void;
+}) {
+  const { milestones, segments, missing } = attemptTiming(a);
+  const [activeID, setActiveID] = useState<string | null>(null);
+  const active =
+    milestones.find((m) => m.id === activeID) ||
+    milestones.find((m) => m.id === "first-text") ||
+    milestones.find((m) => m.id === "first-output") ||
+    milestones.find((m) => m.id === "headers");
+  const position = (at: number) =>
+    Math.max(0, Math.min(100, ((at - origin) / span) * 100));
+  const markers: { at: number; points: TraceMilestone[] }[] = [];
+  for (const point of milestones) {
+    const last = markers.at(-1);
+    if (last && position(point.at) - position(last.at) < 4)
+      last.points.push(point);
+    else markers.push({ at: point.at, points: [point] });
+  }
+  return (
+    <div className={`trace-waterfall-row ${selected ? "selected" : ""}`}>
+      <button
+        className="trace-channel-link"
+        onClick={onOpen}
+        title={traceChannel(run, a.provider).group_name}
+      >
+        <span className="trace-attempt-number">{index + 1}</span>
+        <span>{traceChannel(run, a.provider).name}</span>
+        <ArrowUpRight size={13} />
+      </button>
+      <button
+        className="trace-lane"
+        aria-label={`查看第 ${index + 1} 次尝试：${traceChannel(run, a.provider).name}，${a.label}，${duration(a.duration)}`}
+        onClick={onOpen}
+      >
+        <span
+          className={`trace-duration-bar ${a.tone} ${a.end == null ? "incomplete" : ""} ${segments.length ? "segmented" : ""}`}
+          style={
+            {
+              "--trace-left": `${position(a.started)}%`,
+              "--trace-width": `${Math.max(0.6, position(a.end ?? a.last) - position(a.started))}%`,
+            } as CSSProperties
+          }
+        />
+        {segments.map((s) => (
+          <span
+            key={s.phase}
+            className={`trace-phase-bar ${s.phase}`}
+            aria-hidden="true"
+            style={{
+              left: `${position(s.from)}%`,
+              width: `${position(s.to) - position(s.from)}%`,
+            }}
+          />
+        ))}
+        {markers.map((m) => (
+          <span
+            key={m.points[0].id}
+            className="trace-time-marker"
+            aria-hidden="true"
+            style={{ left: `${position(m.at)}%` }}
+          >
+            <span>
+              {m.points.length > 1
+                ? `${m.points.length}点`
+                : milestones.indexOf(m.points[0]) + 1}
+            </span>
+          </span>
+        ))}
+        {active && (
+          <span
+            className="trace-active-marker"
+            aria-hidden="true"
+            style={{ left: `${position(active.at)}%` }}
+          />
+        )}
+      </button>
+      <span className="trace-elapsed">
+        {duration(a.duration)}
+        <small className={a.tone}>{a.label}</small>
+      </span>
+      <div className="trace-waterfall-points">
+        <div
+          className="trace-milestone-chips"
+          aria-label={`第 ${index + 1} 次尝试的时间节点`}
+        >
+          {milestones.map((m, i) => (
+            <button
+              key={m.id}
+              className={`trace-milestone-chip ${m.id === "first-text" ? "first-text" : ""}`}
+              aria-pressed={active?.id === m.id}
+              onClick={() => setActiveID(m.id)}
+              onFocus={() => setActiveID(m.id)}
+            >
+              <span>{i + 1}</span>
+              {m.label}
+              <strong>+{duration(m.at - origin)}</strong>
+            </button>
+          ))}
+        </div>
+        {active && (
+          <p className="trace-active-time" role="status">
+            <strong>{active.label}</strong> · {clock(Math.round(active.at))}
+            {a.hasStart && ` · 本次渠道 +${duration(active.at - a.started)}`}
+            <span>{active.description}</span>
+          </p>
+        )}
+        {!!missing.length && (
+          <p className="trace-timing-missing">{missing.join(" · ")}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AttemptDrawer({
   run,
   attempt,
@@ -344,6 +513,7 @@ function AttemptDrawer({
   onClose: () => void;
 }) {
   const channel = traceChannel(run, attempt.provider);
+  const timing = attemptTiming(attempt);
   return (
     <Dialog.Root
       open
@@ -386,6 +556,14 @@ function AttemptDrawer({
               站点名称与倍率来自当前渠道配置，不代表请求发生时的计费倍率。
             </p>
           )}
+          <section className="detail-section">
+            <h3>响应时间节点</h3>
+            <TimingMilestones
+              {...timing}
+              origin={origin}
+              started={attempt.hasStart ? attempt.started : undefined}
+            />
+          </section>
           <section className="detail-section">
             <h3>阶段时间线</h3>
             <StageList events={attempt.events} origin={origin} />
@@ -434,6 +612,7 @@ export function TraceTimeline({
   const failures = attempts.filter((a) => a.tone === "failure").length;
   const chosen = attempts.find((a) => a.id === openAttempt);
   const hasTimes = !run.ambiguous && trace.events.length > 0;
+  const downstream = run.ambiguous ? [] : downstreamTiming(trace.gateway);
   const open = (attempt: TraceAttempt) => {
     setSelected(attempt.id);
     setOpenAttempt(attempt.id);
@@ -523,44 +702,38 @@ export function TraceTimeline({
               <span>耗时</span>
             </div>
             {attempts.map((a, i) => (
-              <div
-                className={`trace-waterfall-row ${selected === a.id ? "selected" : ""}`}
+              <AttemptWaterfall
                 key={a.id}
-              >
-                <button
-                  className="trace-channel-link"
-                  onClick={() => open(a)}
-                  title={traceChannel(run, a.provider).group_name}
-                >
-                  <span className="trace-attempt-number">{i + 1}</span>
-                  <span>{traceChannel(run, a.provider).name}</span>
-                  <ArrowUpRight size={13} />
-                </button>
-                <button
-                  className="trace-lane"
-                  aria-label={`查看第 ${i + 1} 次尝试：${traceChannel(run, a.provider).name}，${a.label}，${duration(a.duration)}`}
-                  onClick={() => open(a)}
-                >
-                  <span
-                    className={`trace-duration-bar ${a.tone} ${a.end == null ? "incomplete" : ""}`}
-                    style={
-                      {
-                        "--trace-left": `${Math.max(0, ((a.started - origin) / span) * 100)}%`,
-                        "--trace-width": `${Math.max(0.6, (((a.end ?? a.last) - a.started) / span) * 100)}%`,
-                      } as CSSProperties
-                    }
-                  />
-                </button>
-                <span className="trace-elapsed">{duration(a.duration)}</span>
-              </div>
+                run={run}
+                attempt={a}
+                index={i}
+                origin={origin}
+                span={span}
+                selected={selected === a.id}
+                onOpen={() => open(a)}
+              />
             ))}
-            <div className="trace-legend">
-              <span className="success">成功</span>
-              <span className="failure">失败</span>
-              <span className="warning">跳过 / 取消</span>
-              <span className="neutral">结果未记录</span>
-              <small>重叠时间条表示并发，不将耗时相加</small>
+            <div className="trace-phase-legend">
+              <span className="waiting">等待响应</span>
+              <span className="responding">响应已开始</span>
+              <span className="text">首个正文之后</span>
+              <small>
+                点击节点查看具体时间 · 临近节点合并显示 · 重叠时间条表示并发
+              </small>
             </div>
+            <p className="trace-timing-missing">
+              未采集阶段不作推测。上游末块可能包含多条 SSE；最后一条 SSE
+              的独立时间未记录。
+            </p>
+            {downstream.length > 0 && (
+              <div className="trace-downstream-timing">
+                <h5>网关 → 下游</h5>
+                <TimingMilestones milestones={downstream} origin={origin} />
+                <p className="trace-timing-missing">
+                  响应发送结束是网关侧时间，不代表客户端已接收完成。
+                </p>
+              </div>
+            )}
           </div>
         ) : (
           <p className="trace-notice">

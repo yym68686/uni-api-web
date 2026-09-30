@@ -179,7 +179,10 @@ it("coalesces attempt events into a waterfall, uses readable names, and opens ch
   };
   render(<TraceTimeline run={item} sourceName="Fugue" />);
   const chart = screen.getByRole("region", { name: "渠道请求时间线" });
-  expect(within(chart).getAllByRole("button")).toHaveLength(2);
+  expect(
+    within(chart).getByRole("button", { name: /查看第 1 次尝试/ }),
+  ).toBeVisible();
+  expect(within(chart).getByRole("button", { name: /发起请求/ })).toBeVisible();
   expect(screen.getByText("纯Pro号池")).toBeVisible();
   for (const el of screen.getAllByText(provider)) expect(el).not.toBeVisible();
   await user.click(
@@ -223,4 +226,71 @@ it("labels legacy origins, hides opaque names and tolerates empty records", () =
   view.unmount();
   render(<TraceTimeline run={{ ...run, events: [] }} sourceName="Fugue" />);
   expect(screen.getByText("没有可绘制的渠道尝试记录。")).toBeVisible();
+});
+
+it("shows response milestones on the bar, focuses their exact time, and separates downstream completion", async () => {
+  const user = userEvent.setup();
+  const item: TraceRun = {
+    ...run,
+    events: [
+      run.events[0],
+      { ...run.events[2], at_ms: 100200 },
+      {
+        ...run.events[2],
+        event_id: "attempt",
+        kind: "attempt",
+        at_ms: 105200,
+        duration_ms: 5000,
+        stream: true,
+        response_created_ms: 300,
+        first_text_ms: 1000,
+        first_output_ms: 700,
+        outcome: "success",
+        transport: {
+          headers_received_ms: 100,
+          first_upstream_chunk_ms: 200,
+          last_upstream_chunk_ms: 4900,
+        },
+      },
+      {
+        ...run.events[3],
+        event_id: "sent",
+        kind: "trace",
+        stage: "response_body_finished",
+        at_ms: 105250,
+      },
+      { ...run.events[3], at_ms: 105200 },
+    ],
+  };
+  render(<TraceTimeline run={item} sourceName="Fugue" />);
+  const chart = screen.getByRole("region", { name: "渠道请求时间线" });
+  expect(
+    within(chart).getByRole("button", { name: /首个正文.*1.20 s/ }),
+  ).toHaveAttribute("aria-pressed", "true");
+  expect(
+    within(chart).getByRole("button", { name: /响应创建.*500.0 ms/ }),
+  ).toBeVisible();
+  await user.click(
+    within(chart).getByRole("button", { name: /上游末块.*5.10 s/ }),
+  );
+  expect(within(chart).getByRole("status")).toHaveTextContent(
+    "本次渠道 +4.90 s",
+  );
+  expect(within(chart).getByRole("status")).toHaveTextContent(
+    "不等同于独立采集的最后一条 SSE 时间",
+  );
+  expect(within(chart).getByText("响应发送结束")).toBeVisible();
+  expect(within(chart).getByText("+5.25 s")).toBeVisible();
+  expect(
+    within(chart).getByText(/最后一条 SSE 的独立时间未记录/),
+  ).toBeVisible();
+  await user.click(
+    within(chart).getByRole("button", { name: /查看第 1 次尝试/ }),
+  );
+  const drawer = screen.getByRole("dialog");
+  expect(
+    within(drawer).getByRole("heading", { name: "响应时间节点" }),
+  ).toBeVisible();
+  expect(within(drawer).getByText("首个正文")).toBeVisible();
+  expect(within(drawer).getByText("上游末块")).toBeVisible();
 });

@@ -232,6 +232,7 @@
 .trace-waterfall-row {
   min-height: 47px;
   border-top: 1px solid var(--line);
+  padding-top: 10px;
 }
 .trace-waterfall-row.selected {
   background: var(--subtle);
@@ -276,7 +277,7 @@
 }
 .trace-lane {
   position: relative;
-  height: 46px;
+  height: 62px;
   border: 0;
   padding: 0;
   background: repeating-linear-gradient(
@@ -290,7 +291,7 @@
 }
 .trace-duration-bar {
   position: absolute;
-  top: 15px;
+  top: 30px;
   height: 16px;
   min-width: 3px;
   left: var(--trace-left);
@@ -307,11 +308,176 @@
 .trace-lane:hover .trace-duration-bar {
   filter: brightness(1.25);
 }
+.trace-duration-bar.segmented {
+  background: transparent;
+}
+.trace-phase-bar {
+  position: absolute;
+  top: 33px;
+  height: 10px;
+  background: var(--phase-color);
+}
+.trace-phase-bar.waiting,
+.trace-phase-legend .waiting {
+  --phase-color: #b69b55;
+}
+.trace-phase-bar.responding,
+.trace-phase-legend .responding {
+  --phase-color: #739abf;
+}
+.trace-phase-bar.text,
+.trace-phase-legend .text {
+  --phase-color: var(--green);
+}
+.trace-time-marker,
+.trace-active-marker {
+  position: absolute;
+  top: 27px;
+  height: 22px;
+  width: 1px;
+  background: var(--muted);
+  pointer-events: none;
+}
+.trace-time-marker > span {
+  position: absolute;
+  bottom: 26px;
+  left: 0;
+  transform: translateX(-50%);
+  font: 9px var(--font-mono);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.trace-time-marker:first-of-type > span {
+  transform: none;
+}
+.trace-active-marker {
+  width: 2px;
+  background: var(--green);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+.trace-waterfall-points {
+  grid-column: 2 / -1;
+  min-width: 0;
+  padding-bottom: 16px;
+}
+.trace-milestone-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.trace-milestone-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 7px;
+  border: 1px solid var(--line);
+  background: var(--subtle);
+  border-radius: 5px;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+}
+.trace-milestone-chip > span {
+  font-family: var(--font-mono);
+  opacity: 0.7;
+}
+.trace-milestone-chip strong {
+  font: 11px var(--font-mono);
+  color: var(--ink);
+}
+.trace-milestone-chip[aria-pressed="true"],
+.trace-milestone-chip:hover {
+  border-color: var(--green);
+  color: var(--green);
+}
+.trace-milestone-chip:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
+.trace-milestone-chip.first-text strong {
+  color: var(--green);
+}
+.trace-active-time,
+.trace-timing-missing {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.trace-active-time > strong {
+  color: var(--ink);
+  font-weight: 500;
+}
+.trace-active-time > span {
+  display: block;
+}
+.trace-phase-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.trace-phase-legend > span::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 7px;
+  border-radius: 2px;
+  background: var(--phase-color);
+  margin-right: 5px;
+}
+.trace-phase-legend > small {
+  margin-left: auto;
+}
+.trace-downstream-timing {
+  border-top: 1px solid var(--line);
+  margin-top: 16px;
+  padding-top: 14px;
+}
+.trace-downstream-timing h5 {
+  font-size: 11px;
+  font-weight: 500;
+  margin: 0 0 10px;
+}
+.trace-milestone-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+.trace-milestone-list dt {
+  font-size: 11px;
+  color: var(--muted);
+}
+.trace-milestone-list dd {
+  margin: 5px 0 0;
+}
+.trace-milestone-list dd strong {
+  font: 12px var(--font-mono);
+}
+.trace-milestone-list time,
+.trace-milestone-list small {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  margin-top: 4px;
+}
 .trace-elapsed {
   text-align: right;
   font-size: 11px;
   color: var(--muted);
   font-family: var(--font-mono);
+}
+.trace-elapsed small {
+  display: block;
+  margin-top: 5px;
+  font-size: 10px;
+  color: var(--trace-tone);
 }
 .trace-legend {
   display: flex;
@@ -627,6 +793,9 @@
   }
   .trace-axis > span:nth-child(even) {
     display: none;
+  }
+  .trace-waterfall-points {
+    grid-column: 1 / -1;
   }
   .trace-legend {
     gap: 10px;

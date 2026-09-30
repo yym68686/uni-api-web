@@ -15,11 +15,12 @@ func TestRequestTraceRetainsStagesErrorsAndIsolatesSources(t *testing.T) {
 	ctx := context.Background()
 	at := time.Now().Add(-time.Minute).UnixMilli()
 	completed := true
+	firstOutput := 150.0
 	facts := []Fact{
 		{EventID: "start", Kind: "trace", Stage: "request_received"},
 		{EventID: "dispatch1", Kind: "dispatch", AttemptID: "r-r1", Provider: "first"},
 		{EventID: "bill1", Kind: "billing", AttemptID: "r-r1", Provider: "first", Status: 403, TraceDetail: json.RawMessage(`{"error":{"error_code":"INSUFFICIENT_BALANCE","error_message":"Insufficient account balance sk-secret"},"headers_at_ms":123,"api_key":"private"}`)},
-		{EventID: "attempt1", Kind: "attempt", AttemptID: "r-r1", Provider: "first", Outcome: "failed", FailureReason: "upstream_http_403", TerminalKind: "http_error", TransportTiming: json.RawMessage(`{"origin":"upstream_http_send","headers_received_ms":123.4,"connection":{"remote_addr":"private"}}`)},
+		{EventID: "attempt1", Kind: "attempt", AttemptID: "r-r1", Provider: "first", Outcome: "failed", FirstOutputMS: &firstOutput, FailureReason: "upstream_http_403", TerminalKind: "http_error", TransportTiming: json.RawMessage(`{"origin":"upstream_http_send","headers_received_ms":123.4,"raw_stream":{"totals":{"last_chunk_ms":456.7,"private":"private"}},"connection":{"remote_addr":"private"}}`)},
 		{EventID: "dispatch2", Kind: "dispatch", AttemptID: "r-r2", Provider: "second"},
 		{EventID: "attempt2", Kind: "attempt", AttemptID: "r-r2", Provider: "second", Outcome: "success"},
 		{EventID: "request", Kind: "request", Provider: "second", Outcome: "success", Status: 200, TerminalKind: "completed", ResponseCompleted: &completed, TraceID: "trace-alias"},
@@ -47,6 +48,9 @@ func TestRequestTraceRetainsStagesErrorsAndIsolatesSources(t *testing.T) {
 	first := result.Data[0].Events[3]
 	if first.TerminalKind != "http_error" || first.FailureReason != "upstream_http_403" || first.Transport["headers_received_ms"] != 123.4 {
 		t.Fatalf("lost diagnostics: %+v", first)
+	}
+	if first.Transport["last_upstream_chunk_ms"] != 456.7 || first.FirstOutputMS == nil || *first.FirstOutputMS != firstOutput {
+		t.Fatalf("lost stream milestones: %+v", first)
 	}
 	raw, _ := json.Marshal(result)
 	if strings.Contains(string(raw), "private") || strings.Contains(string(raw), "sk-secret") || !strings.Contains(string(raw), "INSUFFICIENT_BALANCE") {
@@ -81,6 +85,17 @@ func TestRequestTraceRetainsStagesErrorsAndIsolatesSources(t *testing.T) {
 	result, err = e.RequestTrace(ctx, "r", []string{"primary"}, "")
 	if err != nil || !result.Data[0].Ambiguous {
 		t.Fatal("reused caller IDs must be explicit", result, err)
+	}
+}
+
+func TestTraceTransportLastChunkValidation(t *testing.T) {
+	for _, raw := range []string{`{}`, `{"raw_stream":null}`, `{"raw_stream":{"totals":{"last_chunk_ms":null}}}`, `{"raw_stream":{"totals":{"last_chunk_ms":-1}}}`, `{"raw_stream":{"totals":{"last_chunk_ms":"12"}}}`} {
+		if value := traceTransport(raw)["last_upstream_chunk_ms"]; value != nil {
+			t.Fatalf("invented last chunk for %s: %v", raw, value)
+		}
+	}
+	if got := traceTransport(`{"raw_stream":{"totals":{"last_chunk_ms":0}}}`)["last_upstream_chunk_ms"]; got != float64(0) {
+		t.Fatal("lost zero timestamp", got)
 	}
 }
 

@@ -19,6 +19,7 @@ export interface TraceEvent {
   dispatch_ms: number | null;
   response_created_ms: number | null;
   first_text_ms: number | null;
+  first_output_ms?: number | null;
   detail: Record<string, unknown>;
   transport: Record<string, unknown>;
 }
