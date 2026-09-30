@@ -114,7 +114,13 @@ export function attemptTiming(attempt: TraceAttempt) {
   milestones.sort((a, b) => a.at - b.at);
 
   const firstResponse = milestones.find((m) =>
-    ["headers", "first-chunk", "created", "first-text"].includes(m.id),
+    [
+      "headers",
+      "first-chunk",
+      "created",
+      "first-output",
+      "first-text",
+    ].includes(m.id),
   );
   const firstText = milestones.find((m) => m.id === "first-text");
   const end = attempt.end ?? attempt.last;
@@ -129,7 +135,10 @@ export function attemptTiming(attempt: TraceAttempt) {
   };
   // Only assign phases when the boundary was actually observed.
   if (attempt.hasStart && firstResponse) {
-    segment("waiting", "等待上游响应", attempt.started, firstResponse.at);
+    // With only a body/semantic milestone, earlier HTTP headers may be missing.
+    // Leave that leading interval unclassified rather than claiming no response.
+    if (firstResponse.id === "headers")
+      segment("waiting", "等待上游响应", attempt.started, firstResponse.at);
     if (firstText && firstText.at >= firstResponse.at) {
       segment(
         "responding",

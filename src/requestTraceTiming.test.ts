@@ -222,3 +222,16 @@ it("supports a zero offset and keeps downstream failure distinct from upstream c
     { label: "下游连接关闭", at: 2010 },
   ]);
 });
+
+it("does not label an unobserved leading interval as waiting for response", () => {
+  const trace = buildTrace({
+    ...timingRun,
+    events: [
+      event({ kind: "dispatch" }),
+      event({ kind: "attempt", at_ms: 2000, first_text_ms: 500 }),
+    ],
+  });
+  expect(attemptTiming(trace.attempts[0]).segments).toEqual([
+    { phase: "text", label: "首个正文之后", from: 1500, to: 2000 },
+  ]);
+});
