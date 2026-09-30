@@ -84,3 +84,48 @@ func TestBatchSnapshotValidatesEveryCurrentMappingBeforeChanges(t *testing.T) {
 		t.Fatal("partial mutation", err, snapshot)
 	}
 }
+
+func TestOptimizationBatchMixesRemovalAndAdditionAndPreservesOtherKeys(t *testing.T) {
+	snapshot := retainedSnapshot{Version: 2, Settings: map[string]json.RawMessage{}, Channels: []retainedChannel{
+		{KeyID: "key", Provider: "bad", Models: []string{"m"}},
+		{KeyID: "key", Provider: "good", Models: []string{"old"}},
+	}, Rules: []retainedRule{{KeyID: "key", Model: "m", Order: []string{"bad", "peer"}}, {KeyID: "other", Model: "m", Order: []string{"untouched"}}}}
+	in := channelBatchInput{Part: "optimize", Targets: []channelBatchTarget{
+		{Key: "key", Provider: "bad", Account: "account", Current: map[string]string{"m": "m"}, Models: map[string]string{}},
+		{Key: "key", Provider: "good", Account: "account", Current: map[string]string{"old": "upstream"}, Models: map[string]string{"old": "upstream", "m": "m"}, Positions: map[string]int{"old": 1, "m": 2}},
+	}}
+	rows := map[string][]batchCatalogRow{"key": {{Provider: "bad", Model: "m"}, {Provider: "peer", Model: "m"}, {Provider: "good", Model: "old", Upstream: "upstream"}}}
+	docs := map[string]map[string]any{"key\ngood": {"provider": "good", "api": "secret", "base_url": "https://example.test", "preferences": map[string]any{"timeout": 42}}}
+	changed, err := buildBatchSnapshot(&snapshot, in, rows, docs)
+	if err != nil || !changed {
+		t.Fatal(changed, err)
+	}
+	if len(snapshot.Channels) != 1 || snapshot.Channels[0].Provider != "good" {
+		t.Fatal("last-model removal failed", snapshot.Channels)
+	}
+	var doc map[string]any
+	_ = json.Unmarshal(snapshot.Channels[0].Definition, &doc)
+	if doc["preferences"] == nil || doc["api"] != "secret" {
+		t.Fatal("channel settings lost")
+	}
+	for _, rule := range snapshot.Rules {
+		if rule.KeyID == "other" && !reflect.DeepEqual(rule.Order, []string{"untouched"}) {
+			t.Fatal("unselected key changed")
+		}
+		if rule.KeyID == "key" && rule.Model == "m" && !reflect.DeepEqual(rule.Order, []string{"peer", "good"}) {
+			t.Fatal("unselected route order changed", rule)
+		}
+	}
+}
+
+func TestOptimizationBatchDoesNotAllowEmptyModelsForOtherOperations(t *testing.T) {
+	target := channelBatchTarget{Models: map[string]string{}}
+	for _, part := range []string{"all", "models", "aliases", "positions"} {
+		if (channelBatchInput{Part: part}).removes(target) {
+			t.Fatal("empty models became a deletion for", part)
+		}
+	}
+	if !(channelBatchInput{Part: "optimize"}).removes(target) {
+		t.Fatal("optimization did not remove empty binding")
+	}
+}

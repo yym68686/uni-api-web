@@ -11,6 +11,8 @@ export const subFilterDefaults = {
   quality: "",
   minQuality: "",
   platform: "",
+  joined: "",
+  modelMatch: "",
 };
 export type SubFilters = typeof subFilterDefaults;
 const cache = new Map<string, SubFilters>();
@@ -25,6 +27,8 @@ function validate(raw: unknown): SubFilters {
       : "";
   const maxRate = field("maxRate");
   return {
+    joined: field("joined", ["", "joined", "unjoined"]),
+    modelMatch: field("modelMatch", ["", "match", "mismatch", "missing", "invalid", "unavailable", "legacy", "untested"]),
     platform: field("platform"),
     search: field("search"),
     accountId: field("accountId"),

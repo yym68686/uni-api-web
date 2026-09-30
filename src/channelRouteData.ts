@@ -20,6 +20,7 @@ export interface Routes {
   manageable?: boolean;
   batch_revisions?: boolean;
   atomic_batch?: boolean;
+  optimize_batch?: boolean;
   checked_at?: number;
 }
 export const routeOptions = (source: string) => ({

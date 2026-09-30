@@ -65,6 +65,40 @@ function fixtures(): SubAccount[] {
   }));
 }
 
+it("filters joined routes independently of the selected model and opens optimization for the filtered scope", async () => {
+  const data=fixtures();
+  data[0].targets[0].result!.availability.model_match="match";
+  data[1].targets[0].result!.availability.model_match="mismatch";
+  const installed={account_id:"one",group_id:1,source_id:"primary",source_name:"Fugue",api_key_id:"key",key_position:1,provider:"import-one",name:"one-0.01",models:["gpt-5.5"],positions:{"gpt-5.5":1},revision:"r1",manageable:true};
+  const calls:string[]=[];
+  vi.stubGlobal("fetch",vi.fn(async(input:string,init?:RequestInit)=>{
+    calls.push(init?.method||"GET");
+    if(input.endsWith("/accounts"))return Response.json({data});
+    if(input.endsWith("/sources"))return Response.json({data:[{id:"primary",name:"Fugue"}]});
+    if(input.endsWith("/sub2api/channels"))return Response.json({data:[installed],labels:{},unavailable_sources:[]});
+    if(input.endsWith("/channel-routes"))return Response.json({revision:"r1",snapshot_consistent:true,manageable:true,atomic_batch:true,optimize_batch:true,unavailable_keys:[],data:[{provider:"import-one",model:"gpt-5.5",upstream_model:"gpt-5.5",api_key_id:"key",key_position:1,position:1,key_prefix:"masked"}]});
+    return Response.json({data:[],unavailable_sources:[]});
+  }));
+  const user=userEvent.setup();let view=mount("optimization-filters");
+  await screen.findAllByText("same-group",{selector:"strong"});
+  await user.selectOptions(screen.getByLabelText("检测模型筛选"),"gpt-6-astra");
+  await user.selectOptions(screen.getByLabelText("是否已加入渠道筛选"),"joined");
+  await waitFor(()=>expect(screen.getAllByText("same-group",{selector:"strong"})).toHaveLength(1));
+  await user.click(screen.getByRole("button",{name:"优化渠道模型"}));
+  expect(await screen.findByRole("checkbox",{name:"新增 gpt-6-astra · Fugue Key 1 one-0.01"})).toBeVisible();
+  expect(calls.every(method=>method==="GET")).toBe(true);
+  await user.click(screen.getByRole("button",{name:"取消"}));
+  await user.selectOptions(screen.getByLabelText("是否已加入渠道筛选"),"unjoined");
+  await user.selectOptions(screen.getByLabelText("模型匹配筛选"),"mismatch");
+  expect(screen.getAllByText("same-group",{selector:"strong"})).toHaveLength(1);
+  view.unmount();view=mount("optimization-filters");
+  expect(screen.getByLabelText("是否已加入渠道筛选")).toHaveValue("unjoined");
+  expect(screen.getByLabelText("模型匹配筛选")).toHaveValue("mismatch");
+  await user.click(screen.getByRole("button",{name:"重置筛选"}));
+  expect(screen.getByLabelText("是否已加入渠道筛选")).toHaveValue("");
+  expect(screen.getByLabelText("模型匹配筛选")).toHaveValue("");
+});
+
 it("keeps channel loading honest and does not read every source key directory on entry", async () => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(["sources", "quick-entry"], { data: [{ id: "do", name: "DigitalOcean" }] });

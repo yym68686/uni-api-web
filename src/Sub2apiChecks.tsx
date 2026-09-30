@@ -27,6 +27,8 @@ import { useSubImports, boundGroups } from "./sub2apiImports";
 import { useSubAccounts } from "./sub2apiAccounts";
 import { Sub2apiImport } from "./Sub2apiImport";
 import { CreateChannel } from "./CreateChannel";
+import { ChannelOptimization } from "./ChannelOptimization";
+import { managementJoinState } from "./channelOptimizationPlan";
 import { channelMembers, managementRows, UNASSIGNED_ACCOUNT, useChannelManagement, useConfiguredChecks } from "./channelManagement";
 import type { ManagedChannel, ManagementRow } from "./channelManagement";
 import { ConfiguredChannelDialog } from "./ChannelRoutes";
@@ -715,6 +717,8 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
     quality,
     minQuality,
     platform,
+    joined,
+    modelMatch,
   } = filters;
   useEffect(() => saveSubFilters(user, filters), [user, filters]);
   const setSearch = (search: string) => setFilters((v) => ({ ...v, search }));
@@ -737,6 +741,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
     ? [...new Set([...(sources.data?.data || []).map(s=>s.id), ...management.data.data.map(c=>c.source_id)])]
     : [];
   const routeQueries = useAllChannelRoutes(routeSources);
+  const optimizationRoutes = Object.fromEntries(routeSources.flatMap((source,i) => routeQueries[i]?.data && !routeQueries[i].isError ? [[source,routeQueries[i].data!]] : []));
   function configuredCount(item: ManagedChannel) {
     return managedRouteCount(item, routeSources, routeQueries);
   }
@@ -775,6 +780,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                   : check.result?.availability.status === availability,
               )) &&
             matchesPriceFilter(priceStatus, selected ? [selected] : checks, prices.data?.data) &&
+            (!modelMatch || (selected ? [selected] : checks).some(check => modelMatchStatus(check) === modelMatch)) &&
             (!compaction || compactionStatus(target) === compaction) &&
             toolUseMatches(target,toolUse,model) &&
             (!quality || groupQualityResult(target)?.verdict === quality) &&
@@ -782,7 +788,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
               (!!target.history?.successful &&
                 target.history.passed * 100 >= Number(minQuality) * target.history.successful)),
         ),
-    [accounts, management.data, configuredChecks.data, imports.data, search, accountId, availability, priceStatus, prices.data, quality, minQuality, model, compaction, toolUse],
+    [accounts, management.data, configuredChecks.data, imports.data, search, accountId, availability, priceStatus, prices.data, quality, minQuality, model, compaction, toolUse, modelMatch],
   );
   const rates = [
     ...new Set(
@@ -808,7 +814,8 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
     ),
   ].sort();
   const rows = candidateRows.filter(
-    (row) => withinRate(row) && (!platform || row.target.platform === platform),
+    (row) => withinRate(row) && (!platform || row.target.platform === platform) &&
+      (!joined || managementJoinState(row,imports.data,optimizationRoutes) === joined),
   );
   if (sort)
     rows.sort((a, b) => {
@@ -1162,6 +1169,10 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
           </div>
           <div className="sub-detection-controls" role="region" aria-label="渠道管理操作" tabIndex={0}>
             <CreateChannel sources={sources.data?.data || []} />
+            <ChannelOptimization
+              disabled={!rows.length || !query.data || !management.data || !imports.data || !prices.data || !configuredChecks.data || query.isError || management.isError || imports.isError || prices.isError || configuredChecks.isError}
+              snapshot={() => ({rows,accounts,inventory:management.data!.data,imports:imports.data!,routes:optimizationRoutes,checks:configuredChecks.data!.data,prices:prices.data!.data,filters})}
+            />
             <label className="search-field">
               <Search size={16} />
               <input
@@ -1227,6 +1238,13 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
           </div>
         </div>
         <div className="filters sub-filters" role="region" aria-label="渠道管理筛选" tabIndex={0}>
+          <label className="select-field">
+            <select aria-label="是否已加入渠道筛选" value={joined} onChange={e=>{setFilters(v=>({...v,joined:e.target.value}));setPage(0);}} title="依据 API key 的实际路由判断；读取不完整的渠道不会误判为未加入">
+              <option value="">全部接入状态</option>
+              <option value="joined">已加入 API key</option>
+              <option value="unjoined">未加入任何 API key</option>
+            </select><ChevronDown size={13}/>
+          </label>
           <label className="select-field">
             <Globe2 size={15} />
             <select
@@ -1366,6 +1384,12 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
               <option value="unconfirmed_mismatch">未确认 · 定价不匹配</option>
             </select>
             <ChevronDown size={13} />
+          </label>
+          <label className="select-field">
+            <select aria-label="模型匹配筛选" value={modelMatch} onChange={e=>{setFilters(v=>({...v,modelMatch:e.target.value}));setPage(0);}}>
+              <option value="">全部模型匹配</option>
+              {Object.entries(modelMatchLabels).map(([value,label])=><option key={value} value={value}>{label}</option>)}
+            </select><ChevronDown size={13}/>
           </label>
           <label className="select-field">
             <select aria-label="是否支持压缩筛选" value={compaction} onChange={e => {setFilters(v => ({...v, compaction: e.target.value})); setPage(0);}}>

@@ -28,6 +28,11 @@ type channelBatchInput struct {
 	EvidenceSource  string               `json:"evidence_source_id"`
 	Targets         []channelBatchTarget `json:"targets"`
 }
+
+func (in channelBatchInput) removes(t channelBatchTarget) bool {
+	return in.Part == "delete" || (in.Part == "optimize" && len(t.Models) == 0)
+}
+
 type batchCatalogRow struct {
 	Provider string `json:"provider"`
 	Model    string `json:"model"`
@@ -49,7 +54,7 @@ func (s *Service) applyChannelBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch in.Part {
-	case "all", "models", "aliases", "positions", "delete":
+	case "all", "models", "aliases", "positions", "delete", "optimize":
 	default:
 		http.Error(w, "无效的批量操作", 400)
 		return
@@ -84,7 +89,7 @@ func (s *Service) applyChannelBatch(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "接入不属于所选渠道", 400)
 			return
 		}
-		if in.Part != "delete" {
+		if !in.removes(*t) {
 			public, e := importPublicModels(nil, t.Models)
 			if e != nil || validateModelPositions(public, t.Positions) != nil ||
 				len(t.Positions) == 0 || (in.Part != "positions" && len(t.Positions) != len(public)) {
@@ -171,7 +176,7 @@ func (s *Service) applyChannelBatch(w http.ResponseWriter, r *http.Request) {
 	baseDocuments := map[string]map[string]any{}
 	needBase := false
 	for _, t := range in.Targets {
-		if in.Part != "positions" && in.Part != "delete" && t.Account == "" {
+		if in.Part != "positions" && !in.removes(t) && t.Account == "" {
 			needBase = true
 		}
 	}
@@ -206,7 +211,7 @@ func (s *Service) applyChannelBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	neededByScope := map[validationScope]map[string]string{}
 	for _, t := range in.Targets {
-		if in.Part == "positions" || in.Part == "delete" {
+		if in.Part == "positions" || in.removes(t) {
 			continue
 		}
 		doc, status, e := s.importProviderDocument(ctx, src, snapshot, t.Provider, in.Revision, baseDocuments)
@@ -292,7 +297,7 @@ func buildBatchSnapshot(snapshot *retainedSnapshot, in channelBatchInput, catalo
 		if in.Part == "positions" && !reflect.DeepEqual(actual, t.Models) {
 			return false, errors.New("调整位置不能修改模型")
 		}
-		same := in.Part != "delete" && reflect.DeepEqual(actual, t.Models)
+		same := !in.removes(t) && reflect.DeepEqual(actual, t.Models)
 		for m, pos := range t.Positions {
 			same = same && positions[m] == pos
 		}
@@ -314,7 +319,7 @@ func buildBatchSnapshot(snapshot *retainedSnapshot, in channelBatchInput, catalo
 		changed = true
 		changedKeys[t.Key] = true
 		provider := t.Provider
-		if in.Part == "delete" {
+		if in.removes(t) {
 			if err := removeConfiguredFromSnapshot(snapshot, t.Key, provider, t.Account == ""); err != nil {
 				return false, err
 			}
@@ -374,14 +379,14 @@ func buildBatchSnapshot(snapshot *retainedSnapshot, in channelBatchInput, catalo
 					rows = append(rows, row)
 				}
 			}
-			if in.Part != "delete" {
+			if !in.removes(t) {
 				for model, up := range t.Models {
 					rows = append(rows, batchCatalogRow{Provider: provider, Model: model, Upstream: up})
 				}
 			}
 			catalogs[t.Key] = rows
 		}
-		if in.Part != "delete" {
+		if !in.removes(t) {
 			for model, pos := range t.Positions {
 				moves[t.Key] = append(moves[t.Key], routeMove{Provider: provider, Model: model, Position: pos})
 			}
