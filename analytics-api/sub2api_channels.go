@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"net/url"
 	"sort"
@@ -16,6 +17,7 @@ type subChannelRef struct {
 	Group   int64
 	Name    string
 	Base    string
+	Rate    *float64
 }
 type subInstalledChannel struct {
 	ModelMappings    map[string]string `json:"model_mappings,omitempty"`
@@ -86,6 +88,10 @@ func (s *controlStore) subChannelRefs(ctx context.Context, owner string) ([]subC
 			return nil, e
 		}
 		ref.Name = subChannelDisplayName(ref.Name, billing)
+		var b subBilling
+		if json.Unmarshal(billing, &b) == nil && b.Rate != nil && *b.Rate >= 0 && !math.IsNaN(*b.Rate) && !math.IsInf(*b.Rate, 0) {
+			ref.Rate = b.Rate
+		}
 		refs = append(refs, ref)
 	}
 	return refs, rows.Err()
@@ -258,7 +264,44 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 		}
 		return data[i].KeyID+data[i].Provider < data[j].KeyID+data[j].Provider
 	})
-	writeJSON(w, 200, map[string]any{"data": data, "labels": labels, "unavailable_sources": unavailable})
+	writeJSON(w, 200, map[string]any{"data": data, "labels": labels, "multipliers": subChannelMultipliers(data, refs), "unavailable_sources": unavailable})
+}
+
+// Reuse saved billing metadata; sorting must not query upstreams or infer a
+// multiplier from a user-editable channel name. Mixed or unbound keys are unknown.
+func subChannelMultipliers(channels []subInstalledChannel, refs []subChannelRef) map[string]map[string]*float64 {
+	type group struct {
+		account string
+		id      int64
+	}
+	rates := map[group]*float64{}
+	for _, ref := range refs {
+		rates[group{ref.Account, ref.Group}] = ref.Rate
+	}
+	out := map[string]map[string]*float64{}
+	for _, channel := range channels {
+		var rate *float64
+		if channel.Kind != "configured" {
+			rate = rates[group{channel.AccountID, channel.GroupID}]
+		} else if channel.BindingStatus == "matched" {
+			for i, key := range channel.BoundKeys {
+				value := rates[group{key.AccountID, key.GroupID}]
+				if value == nil || (i > 0 && rate != nil && *value != *rate) {
+					rate = nil
+					break
+				}
+				rate = value
+			}
+		}
+		if out[channel.SourceID] == nil {
+			out[channel.SourceID] = map[string]*float64{}
+		}
+		if previous, ok := out[channel.SourceID][channel.Provider]; ok && (previous == nil || rate == nil || *previous != *rate) {
+			rate = nil
+		}
+		out[channel.SourceID][channel.Provider] = rate
+	}
+	return out
 }
 func (s *Service) subManageChannel(w http.ResponseWriter, r *http.Request) {
 	var in subImportInput

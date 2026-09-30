@@ -141,6 +141,33 @@ async function connect(
   if (expectTable) await screen.findByRole("table");
 }
 describe("dashboard workflows", () => {
+  it("applies multi-sort before pagination, persists it, and leaves balance sorting independent", async () => {
+    let app = setup();
+    await connect(app.user);
+    await app.user.selectOptions(screen.getByLabelText("API key 筛选"), "key-second");
+    const order = () => within(screen.getByRole("table")).getAllByRole("button", {name: /^查看 .* 详情$/}).map(b => b.getAttribute("aria-label"));
+    await waitFor(() => expect(order()).toEqual(["查看 third model-a 详情", "查看 first model-a 详情"]));
+    await app.user.click(screen.getByRole("button", {name: "多条件排序"}));
+    await app.user.click(screen.getByRole("button", {name: "添加排序依据"}));
+    await app.user.selectOptions(screen.getByLabelText("第 1 排序依据"), "success");
+    await app.user.click(screen.getByRole("button", {name: "应用排序"}));
+    expect(order()).toEqual(["查看 first model-a 详情", "查看 third model-a 详情"]);
+    await app.user.click(screen.getByRole("button", {name: /^余额管理/}));
+    expect(screen.queryByRole("button", {name: "多条件排序"})).not.toBeInTheDocument();
+    await app.user.click(screen.getByRole("button", {name: /^渠道观测/}));
+    expect(order()[0]).toBe("查看 first model-a 详情");
+    app.unmount();
+    app = setup();
+    await screen.findByRole("table");
+    expect(order()[0]).toBe("查看 first model-a 详情");
+    expect(screen.getByLabelText("排序")).toHaveValue("custom");
+    await app.user.click(screen.getByRole("button", {name: "多条件排序"}));
+    expect(screen.getByLabelText("第 1 排序依据")).toHaveValue("success");
+    await app.user.click(screen.getByRole("button", {name: "恢复配置顺序"}));
+    await app.user.click(screen.getByRole("button", {name: "应用排序"}));
+    expect(order()).toEqual(["查看 third model-a 详情", "查看 first model-a 详情"]);
+    expect(app.calls.every(call => !call.includes("channel-controls"))).toBe(true);
+  });
   it("shows final request success rates for every key and follows each page's model and time filters", async () => {
     const { user, calls } = setup();
     await connect(user);

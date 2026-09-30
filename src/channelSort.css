@@ -1,0 +1,81 @@
+.guide-dialog.channel-sort-dialog {
+  width: min(740px, calc(100vw - 32px));
+}
+.channel-sort-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 24px 0 18px;
+}
+.channel-sort-rules {
+  display: grid;
+  gap: 12px;
+  list-style: none;
+  margin: 0 0 18px;
+  padding: 0;
+}
+.channel-sort-rules li {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.channel-sort-priority {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.channel-sort-rules label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.channel-sort-rules select {
+  width: 100%;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--ink);
+  background: var(--bg);
+}
+.channel-sort-moves {
+  display: flex;
+  gap: 2px;
+  padding-top: 20px;
+}
+.channel-sort-empty {
+  padding: 20px 0;
+  color: var(--muted);
+}
+.channel-sort-note {
+  margin-top: 20px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+.channel-sort-note p {
+  margin: 8px 0;
+}
+.channel-sort-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 20px;
+}
+@media (max-width: 600px) {
+  .channel-sort-rules li {
+    grid-template-columns: 20px minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px;
+    padding: 10px;
+  }
+  .channel-sort-moves {
+    grid-column: 2 / -1;
+    justify-content: flex-end;
+    padding-top: 0;
+  }
+}

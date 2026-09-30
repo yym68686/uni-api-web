@@ -38,6 +38,14 @@ describe("page preferences", () => {
 describe("filter preferences", () => {
   const base = "https://mock.example";
   const key = `uni-console-filters:v1:${base}`;
+  it("persists validated multi-sort rules only in the selected page scope", () => {
+    saveFilters(base, {...defaultFilters, sort: "custom", sortRules: JSON.stringify([{field: "quality", direction: "asc"}, {field: "probability", direction: "desc"}, {field: "unknown", direction: "desc"}])});
+    expect(JSON.parse(loadFilters(base).sortRules)).toEqual([{field: "quality", direction: "asc"}, {field: "probability", direction: "desc"}]);
+    expect(loadFilters(base, "balances").sort).toBe("config");
+    expect(loadFilters(base, "requests").sortRules).toBe("");
+    saveFilters(base, defaultFilters);
+    expect(loadFilters(base).sortRules).toBe("");
+  });
   it("ignores corrupt data and validates individual fields from saved storage", () => {
     localStorage.setItem(key, "not-json");
     expect(loadFilters(base)).toEqual(defaultFilters);

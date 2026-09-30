@@ -48,6 +48,7 @@ export function boundGroups(item: InstalledChannel | undefined) {
 export interface SubImports {
   data: InstalledChannel[];
   labels: Record<string, Record<string, string>>;
+  multipliers?: Record<string, Record<string, number | null>>;
   unavailable_sources: string[];
 }
 export function useSubImports(enabled = true) {

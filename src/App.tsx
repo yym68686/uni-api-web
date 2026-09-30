@@ -79,6 +79,8 @@ import { ResponseLatency } from "./LatencyBadge";
 import { useSubImports, boundGroups } from "./sub2apiImports";
 import type { SubImportsQuery } from "./sub2apiImports";
 import { ChannelModels } from "./ChannelModels";
+import { ChannelSortDialog } from "./ChannelSortDialog";
+import { activeChannelSortRules, sortChannels } from "./channelSorting";
 
 import { SiteLink, useChannelSites, dashboardURL } from "./ChannelSite";
 import { ChannelAccess } from "./ChannelAccess";
@@ -1003,6 +1005,8 @@ function Dashboard({
     [adjustingChannels, setAdjustingChannels] = useState(false),
     [checkingChannels, setCheckingChannels] = useState(false);
   const channelView = view === "channels";
+  const sortRules = useMemo(() => activeChannelSortRules(sort, filters.sortRules), [sort, filters.sortRules]);
+  const configOrder = sortRules.length === 0;
   useEffect(() => {
     saveView(baseConnection.base, view);
   }, [baseConnection.base, view]);
@@ -1012,8 +1016,8 @@ function Dashboard({
   }, [baseConnection.base, pageFilters]);
   const hasFilters = (Object.keys(defaultFilters) as (keyof Filters)[]).some(
     (key) =>
-      ((channelView || view === "balances") &&
-        ["keyId", "sourceId", "model", "window", "search", "balanceTopN", "balanceThreshold"].includes(key)) &&
+      ((channelView && ["keyId", "sourceId", "model", "window", "search", "balanceFilter", "statusFilter", "endpoint", "stream", "sort", "sortRules"].includes(key)) ||
+        (view === "balances" && ["keyId", "sourceId", "model", "window", "search", "balanceTopN", "balanceThreshold"].includes(key))) &&
       filters[key] !== defaultFilters[key],
   );
   const [detailId, setDetailId] = useState<string | null>(null),
@@ -1188,7 +1192,7 @@ function Dashboard({
     enabled: !!baseConnection.account && channelView,
   });
   const tableRows =
-    channelView && sort === "config" ? controls.arrange(rows) : rows;
+    channelView ? sortChannels(controls.arrange(rows), sortRules, {checks: checks.results, multipliers: imported.data?.multipliers}) : rows;
   const rowRanks = useMemo(
     () => new Map(tableRows.map((row, i) => [rowId(row), i + 1])),
     [tableRows],
@@ -1265,18 +1269,6 @@ function Dashboard({
       (!channelView || !statusFilter ||
         (statusFilter === "eligible" ? row.eligible : !row.eligible)),
   );
-  if (channelView && sort !== "config")
-    filtered.sort((a, b) => {
-      const values = (row: Channel) =>
-        sort === "success"
-          ? row.stats?.success_rate == null
-            ? null
-            : -row.stats.success_rate
-          : sort === "latency"
-            ? row.stats?.response_created?.p50_ms
-            : row.stats?.request_to_dispatch?.p50_ms;
-      return (values(a) ?? Infinity) - (values(b) ?? Infinity);
-    });
   const balanceRanks = rankBalanceProviders(
     filtered,
     channelView ? "" : balanceTopN,
@@ -1625,6 +1617,10 @@ function Dashboard({
                       </button>
                     )}
                   </div>
+                  {channelView && <ChannelSortDialog rules={sortRules} onApply={rules => {
+                    setPage(0);
+                    setPageFilters(current => ({...current, channels: {...current.channels, sort: rules.length ? "custom" : "config", sortRules: rules.length ? JSON.stringify(rules) : ""}}));
+                  }} />}
                   {channelView && baseConnection.account && (
                     <ChannelControlActions
                       controls={controls}
@@ -1863,6 +1859,7 @@ function Dashboard({
                         <option value="success">成功率从高到低</option>
                         <option value="latency">首字延迟从低到高</option>
                         <option value="wait">请求前等待从低到高</option>
+                        {sort === "custom" && <option value="custom">多条件排序 · {sortRules.length} 项</option>}
                       </select>
                       <ChevronDown size={12} />
                     </div>
@@ -2019,7 +2016,7 @@ function Dashboard({
                                 row={row}
                                 controls={controls}
                                 visible={filtered}
-                                configOrder={sort === "config"}
+                                configOrder={configOrder}
                               />
                             )}
                             <td>

@@ -129,12 +129,16 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	var listing struct {
-		Data   []subInstalledChannel        `json:"data"`
-		Labels map[string]map[string]string `json:"labels"`
+		Data        []subInstalledChannel          `json:"data"`
+		Labels      map[string]map[string]string   `json:"labels"`
+		Multipliers map[string]map[string]*float64 `json:"multipliers"`
 	}
 	json.Unmarshal(w.Body.Bytes(), &listing)
 	if len(listing.Data) != 3 || listing.Labels[source][provider] != "My Site-0.18" {
 		t.Fatal("missing live association", w.Body.String())
+	}
+	if listing.Multipliers[source][provider] == nil || *listing.Multipliers[source][provider] != .18 || listing.Multipliers[source][newFirst] != nil {
+		t.Fatal("billing multipliers missing or unknown rate fabricated")
 	}
 	for _, v := range listing.Data {
 		if v.Provider == provider && (v.Positions[checkModel] != 2 || v.KeyPrefix != "masked-one" || !v.Manageable) {

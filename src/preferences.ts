@@ -1,4 +1,5 @@
 import { ranges } from "./analytics";
+import { parseChannelSortRules } from "./channelSorting";
 export const defaultFilters = {
   keyId: "",
   sourceId: "",
@@ -10,6 +11,7 @@ export const defaultFilters = {
   statusFilter: "",
   search: "",
   sort: "config",
+  sortRules: "",
   endpoint: "all",
   stream: "all",
 };
@@ -103,7 +105,11 @@ function validate(value: unknown): Filters {
       "unknown",
     ]),
     search: field("search"),
-    sort: field("sort", ["config", "success", "latency", "wait", "oldest"]),
+    sort: field("sort", ["config", "success", "latency", "wait", "oldest", "custom"]),
+    sortRules: (() => {
+      const rules = parseChannelSortRules(field("sortRules"));
+      return rules.length ? JSON.stringify(rules) : "";
+    })(),
     endpoint:
       field("endpoint") === "all" ||
       /^\/[^?#\s]{1,500}$/.test(field("endpoint"))
