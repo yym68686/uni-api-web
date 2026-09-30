@@ -189,7 +189,7 @@ describe("dashboard workflows", () => {
     expect(screen.getByLabelText("排序模板名称")).toHaveValue("低价优先");
     expect(screen.queryByRole("option",{name:"质量优先"})).not.toBeInTheDocument();
     expect(app.calls.every(call=>!call.includes("channel-controls"))).toBe(true);
-  });
+  }, 15000); // Multiple model switches and a remount can exceed 5s on CI runners.
   it("applies multi-sort before pagination, persists it, and leaves balance sorting independent", async () => {
     let app = setup();
     await connect(app.user);
