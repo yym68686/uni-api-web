@@ -1632,7 +1632,7 @@ function Dashboard({
                     scopeLabel={[
                       model || "全部模型",
                       sourceList.find(s=>s.id===selectedSourceId)?.name || "全部来源",
-                      keyId ? `Key ${keys.data?.data.find(k=>(k.source_id ? `${k.source_id}::${k.key_id}` : k.key_id)===keyId)?.position || "（已选）"}` : "全部 API key",
+                      keyId ? [keys.data?.data.find(k=>k.key_id===keyId)?.source_name, `Key ${keys.data?.data.find(k=>k.key_id===keyId)?.position || "（已选）"}`].filter(Boolean).join(" · ") : "全部 API key",
                       ranges.find(([value])=>value===window)?.[1] || window,
                       endpoint === "all" ? "全部端点" : endpoint,
                       stream === "all" ? "全部流式状态" : stream === "true" ? "流式" : "非流式",
