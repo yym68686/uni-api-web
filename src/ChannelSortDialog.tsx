@@ -454,10 +454,18 @@ export function ChannelSortDialog({
             </Dialog.Close>
             <button
               className="button"
-              disabled={loading || routing?.busy}
-              onClick={() => void showPreview()}
+              disabled={routing?.busy}
+              onClick={() => {
+                if (currentPreview) {
+                  controller.current?.abort();
+                  setLoading(false);
+                  setPreview(null);
+                } else {
+                  void showPreview();
+                }
+              }}
             >
-              预览
+              {currentPreview ? "取消预览" : "预览"}
             </button>
             {routing && (
               <button
