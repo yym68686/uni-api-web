@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ChannelSortDialog } from "./ChannelSortDialog";
@@ -27,18 +27,25 @@ const changes = [
     upstreams: { a: "gpt-6-sol", b: "gpt-6-sol", hidden: "gpt-6-sol" },
   },
 ];
-function setup(ambiguous = false, conflict = false) {
+function setup(
+  ambiguous = false,
+  conflict = false,
+  prepare?: () => Promise<Response>,
+) {
+  const onPreview = vi.fn();
   let applied = false;
   const calls: { action: string; [key: string]: unknown }[] = [];
   const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body));
     calls.push(body);
     if (body.action === "prepare")
-      return Response.json({
-        receipt: "signed-receipt",
-        revision: "r1",
-        changes,
-      });
+      return prepare
+        ? prepare()
+        : Response.json({
+            receipt: "signed-receipt",
+            revision: "r1",
+            changes,
+          });
     if (body.action === "status")
       return Response.json({
         status: conflict ? "conflict" : applied ? "applied" : "before",
@@ -63,6 +70,7 @@ function setup(ambiguous = false, conflict = false) {
         rules={[{ field: "quality", direction: "asc" }]}
         onApply={() => {}}
         previewRows={() => rows}
+        onPreview={onPreview}
         keyId="s::key"
         routing={routing}
       />
@@ -78,7 +86,7 @@ function setup(ambiguous = false, conflict = false) {
         <Harness />
       </QueryClientProvider>,
     );
-  return { calls, mount, user: userEvent.setup() };
+  return { calls, mount, onPreview, user: userEvent.setup() };
 }
 it("previews without writing, submits one real change, persists rollback before sending, and can undo after remount", async () => {
   const app = setup();
@@ -94,8 +102,13 @@ it("previews without writing, submits one real change, persists rollback before 
     api_key_id: "s::key",
     models: [{ model: "gpt-6-sol", providers: ["b", "a"] }],
   });
-  expect(screen.getByText("3 → 1")).toBeInTheDocument();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(app.onPreview).toHaveBeenLastCalledWith(rows);
+  expect(
+    screen.queryByRole("region", { name: "请求顺序预览" }),
+  ).not.toBeInTheDocument();
   await app.user.dblClick(screen.getByRole("button", { name: "应用排序" }));
+  await app.user.click(screen.getByRole("button", { name: "多条件排序" }));
   await screen.findByText("Fugue：已应用到真实路由");
   expect(app.calls.filter((c) => c.action === "apply")).toHaveLength(1);
   view.unmount();
@@ -115,6 +128,8 @@ it("requires a new preview after rules change and recovers an ambiguous apply re
   await waitFor(() =>
     expect(screen.getByRole("button", { name: "应用排序" })).toBeEnabled(),
   );
+  await app.user.click(screen.getByRole("button", { name: "多条件排序" }));
+  expect(screen.getByRole("button", { name: "取消预览" })).toBeInTheDocument();
   await app.user.selectOptions(screen.getByLabelText("第 1 排序方向"), "desc");
   expect(screen.getByRole("button", { name: "应用排序" })).toBeDisabled();
   await app.user.click(screen.getByRole("button", { name: "预览" }));
@@ -122,6 +137,7 @@ it("requires a new preview after rules change and recovers an ambiguous apply re
     expect(screen.getByRole("button", { name: "应用排序" })).toBeEnabled(),
   );
   await app.user.click(screen.getByRole("button", { name: "应用排序" }));
+  await app.user.click(screen.getByRole("button", { name: "多条件排序" }));
   await screen.findByText(/Fugue：已应用到真实路由/);
   expect(app.calls.map((c) => c.action)).toEqual([
     "prepare",
@@ -139,6 +155,7 @@ it("preserves recovery information on conflicts and never retries a write automa
     expect(screen.getByRole("button", { name: "应用排序" })).toBeEnabled(),
   );
   await app.user.click(screen.getByRole("button", { name: "应用排序" }));
+  await app.user.click(screen.getByRole("button", { name: "多条件排序" }));
   await screen.findByRole("alert");
   expect(screen.getByRole("button", { name: "应用排序" })).toBeDisabled();
   expect(app.calls.map((c) => c.action)).toEqual([
@@ -176,4 +193,40 @@ it("partitions all model/source selections and deduplicates endpoint rows withou
   const plan = await prepareRouteSorting(input, "");
   expect(plan.errors).toHaveLength(1);
   expect(plan.sources).toHaveLength(1);
+});
+
+it("cancels an in-flight preview and ignores its late response without modifying routes", async () => {
+  let finish!: (response: Response) => void;
+  const app = setup(
+    false,
+    false,
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  app.mount();
+  await app.user.click(screen.getByRole("button", { name: "多条件排序" }));
+  await app.user.click(
+    screen.getByRole("button", { name: "预览" }),
+  );
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(app.onPreview).toHaveBeenLastCalledWith(rows);
+  await app.user.click(screen.getByRole("button", { name: "取消预览" }));
+  expect(app.onPreview).toHaveBeenLastCalledWith(null);
+  await act(async () =>
+    finish(Response.json({ receipt: "late", revision: "r1", changes })),
+  );
+  expect(
+    screen.queryByRole("button", { name: "应用排序" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "取消预览" }),
+  ).not.toBeInTheDocument();
+  expect(app.calls.map((c) => c.action)).toEqual(["prepare"]);
+  await app.user.click(screen.getByRole("button", { name: "多条件排序" }));
+  expect(
+    screen.getByRole("button", { name: "预览" }),
+  ).toBeEnabled();
+  expect(screen.getByRole("button", { name: "应用排序" })).toBeDisabled();
 });

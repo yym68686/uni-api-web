@@ -40,7 +40,7 @@ it("saves, selects, renames and deletes templates without changing applied rules
   expect(apply).not.toHaveBeenCalled();
   await user.click(screen.getByRole("button", { name: "预览" }));
   expect(apply).toHaveBeenCalledWith(qualityFirstRules, "t");
-  await user.click(screen.getByRole("button", { name: "关闭" }));
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "多条件排序" }));
   await user.selectOptions(screen.getByLabelText("排序模板"), "t");
   await user.clear(screen.getByLabelText("排序模板名称"));
@@ -142,7 +142,7 @@ it("edits priorities and directions in a cancelable draft, with reset and reusab
     { field: "quality", direction: "asc" },
     { field: "cache", direction: "desc" },
   ]);
-  await user.click(screen.getByRole("button", { name: "关闭" }));
+  await user.click(screen.getByRole("button", { name: "取消预览" }));
   await user.click(screen.getByRole("button", { name: "多条件排序" }));
   await user.click(screen.getByRole("button", { name: "删除第 1 项" }));
   await user.click(screen.getByRole("button", { name: "关闭" }));

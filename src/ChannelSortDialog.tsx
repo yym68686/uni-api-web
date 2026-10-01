@@ -13,7 +13,7 @@ import type { ChannelSortRule } from "./channelSorting";
 import type { SortTemplate } from "./channelSortPreferences";
 import { prepareRouteSorting } from "./routeSorting";
 import type { RouteSortPlan, RouteSorting } from "./routeSorting";
-import { RouteSortPreview, RouteSortReceipt } from "./RouteSortPreview";
+import { RouteSortReceipt } from "./RouteSortReceipt";
 import type { Channel } from "./types";
 import { Spinner } from "./ui";
 import "./channelSort.css";
@@ -33,6 +33,7 @@ export function ChannelSortDialog({
   routing,
   keyId = "",
   routeApplyDisabled,
+  onPreview,
 }: {
   rules: ChannelSortRule[];
   onApply: (rules: ChannelSortRule[], templateId?: string) => void;
@@ -48,6 +49,7 @@ export function ChannelSortDialog({
   routing?: RouteSorting;
   keyId?: string;
   routeApplyDisabled?: boolean;
+  onPreview?: (rows: Channel[] | null) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<ChannelSortRule[]>([]);
@@ -56,6 +58,7 @@ export function ChannelSortDialog({
   const [notice, setNotice] = useState("");
   const [preview, setPreview] = useState<{
     signature: string;
+    rules: ChannelSortRule[];
     rows: Channel[];
     plan: RouteSortPlan | null;
   } | null>(null);
@@ -64,13 +67,41 @@ export function ChannelSortDialog({
   useEffect(() => () => controller.current?.abort(), []);
   const signature = JSON.stringify(draft);
   const currentPreview = preview?.signature === signature ? preview : null;
+  function cancelPreview() {
+    controller.current?.abort();
+    setLoading(false);
+    setPreview(null);
+    onPreview?.(null);
+  }
+  const canApply = (plan: RouteSortPlan | null | undefined) =>
+    !loading &&
+    !routing?.busy &&
+    !routeApplyDisabled &&
+    !!plan &&
+    !plan.errors.length &&
+    plan.sources.some((s) => s.changes.length) &&
+    !routing?.unresolved;
+  function applyPreview(plan: RouteSortPlan) {
+    if (!canApply(plan)) return;
+    cancelPreview();
+    void routing?.apply(plan);
+  }
   async function showPreview() {
     if (matchesTemplate) onApply(draft, chosen!.id);
     else onApply(draft);
     const rows = previewRows?.(draft) || [];
-    setPreview({ signature, rows, plan: null });
-    if (!routing || routeApplyDisabled) return;
+    const next = {
+      signature,
+      rules: draft.map((r) => ({ ...r })),
+      rows,
+      plan: null,
+    };
     controller.current?.abort();
+    setLoading(false);
+    setPreview(next);
+    onPreview?.(rows);
+    setOpen(false);
+    if (!routing || routeApplyDisabled) return;
     const abort = new AbortController();
     controller.current = abort;
     setLoading(true);
@@ -81,7 +112,7 @@ export function ChannelSortDialog({
         abort.signal,
         labelRows,
       );
-      if (!abort.signal.aborted) setPreview({ signature, rows, plan });
+      if (!abort.signal.aborted) setPreview({ ...next, plan });
     } finally {
       if (!abort.signal.aborted) setLoading(false);
     }
@@ -102,10 +133,9 @@ export function ChannelSortDialog({
       open={open}
       onOpenChange={(next) => {
         if (routing?.busy) return;
-        controller.current?.abort();
-        setLoading(false);
-        setPreview(null);
-        if (next) {
+        if (next && preview) {
+          setDraft(preview.rules.map((rule) => ({ ...rule })));
+        } else if (next) {
           const selected = templates.find(
             (t) => t.id === (templateId || suggestedTemplateId),
           );
@@ -144,8 +174,9 @@ export function ChannelSortDialog({
         <Dialog.Content className="guide-dialog channel-sort-dialog">
           <Dialog.Title>渠道排序</Dialog.Title>
           <Dialog.Description>
-            当前范围：{scopeLabel}。预览仅展示建议顺序；应用排序会修改 uni-api
-            的真实请求顺序。主列表始终显示真实路由，刷新不会启用未应用的方案。
+            当前范围：{scopeLabel}
+            。预览会关闭此窗口，并在渠道表现中临时展示建议顺序；应用排序会修改
+            uni-api 的真实请求顺序。取消预览或刷新网页后恢复显示真实路由。
           </Dialog.Description>
           <Dialog.Close
             className="icon-button detail-close"
@@ -436,10 +467,14 @@ export function ChannelSortDialog({
           {preview && !currentPreview && (
             <p role="status">排序条件已变化，请重新预览后应用。</p>
           )}
-          <RouteSortPreview
-            plan={currentPreview?.plan || null}
-            rows={currentPreview?.rows || null}
-          />
+          {currentPreview && (
+            <p role="status">正在渠道表现中预览此方案，尚未应用到真实路由。</p>
+          )}
+          {currentPreview?.plan?.errors.map((error) => (
+            <p role="alert" className="negative" key={error}>
+              {error}
+            </p>
+          ))}
           {routing && <RouteSortReceipt routing={routing} />}
           {routeApplyDisabled && (
             <p className="muted">
@@ -457,9 +492,7 @@ export function ChannelSortDialog({
               disabled={routing?.busy}
               onClick={() => {
                 if (currentPreview) {
-                  controller.current?.abort();
-                  setLoading(false);
-                  setPreview(null);
+                  cancelPreview();
                 } else {
                   void showPreview();
                 }
@@ -471,20 +504,8 @@ export function ChannelSortDialog({
               <button
                 className="button primary"
                 title="按当前预览顺序请求"
-                disabled={
-                  loading ||
-                  routing.busy ||
-                  routeApplyDisabled ||
-                  !currentPreview?.plan ||
-                  !!currentPreview.plan.errors.length ||
-                  !currentPreview.plan.sources.some((s) => s.changes.length) ||
-                  routing.unresolved
-                }
-                onClick={() => {
-                  const plan = currentPreview!.plan!;
-                  setPreview(null);
-                  void routing.apply(plan);
-                }}
+                disabled={!canApply(currentPreview?.plan)}
+                onClick={() => applyPreview(currentPreview!.plan!)}
               >
                 {routing.busy ? (
                   <>
@@ -499,6 +520,47 @@ export function ChannelSortDialog({
           </footer>
         </Dialog.Content>
       </Dialog.Portal>
+      {preview && !open && (
+        <>
+          <button
+            className="button small selected"
+            disabled={routing?.busy}
+            onClick={cancelPreview}
+          >
+            <X size={14} />
+            取消预览
+          </button>
+          {routing && (
+            <button
+              className="button small primary"
+              title="按当前预览顺序请求"
+              disabled={!canApply(preview.plan)}
+              onClick={() => applyPreview(preview.plan!)}
+            >
+              {loading ? (
+                <>
+                  <Spinner small />
+                  核对路由中
+                </>
+              ) : (
+                "应用排序"
+              )}
+            </button>
+          )}
+          {preview.plan?.errors.map((error) => (
+            <span role="alert" className="negative" key={error}>
+              {error}
+            </span>
+          ))}
+          {preview.plan &&
+            !preview.plan.errors.length &&
+            !preview.plan.sources.some((s) => s.changes.length) && (
+              <span role="status" className="muted">
+                顺序与实际路由一致
+              </span>
+            )}
+        </>
+      )}
     </Dialog.Root>
   );
 }

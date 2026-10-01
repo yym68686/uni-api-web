@@ -1,6 +1,6 @@
 import type { Channel } from "./types";
 import type { ChannelCheck } from "./ChannelChecks";
-import { providerId } from "./format";
+import { providerId, rowId } from "./format";
 
 export const channelSortFields = [
   { value: "quality", label: "最近检测是否降智", direction: "asc" },
@@ -128,4 +128,31 @@ export function sortChannels(
       return a.index - b.index;
     })
     .map((item) => item.row);
+}
+
+// Keep hidden channels in their slots and preview each source/model separately,
+// just as the gateway applies an order. Use live row values with frozen ordering.
+export function previewChannelOrder(
+  rows: Channel[],
+  preview: Channel[],
+): Channel[] {
+  const current = new Map(rows.map((row) => [rowId(row), row]));
+  const selected = new Set<string>();
+  const groups = new Map<string, { rows: Channel[]; index: number }>();
+  const groupKey = (row: Channel) => JSON.stringify([row.source_id, row.model]);
+  for (const row of preview) {
+    const id = rowId(row),
+      live = current.get(id);
+    if (!live || selected.has(id)) continue;
+    selected.add(id);
+    const key = groupKey(live);
+    const group = groups.get(key) || { rows: [], index: 0 };
+    group.rows.push(live);
+    groups.set(key, group);
+  }
+  return rows.map((row) => {
+    if (!selected.has(rowId(row))) return row;
+    const group = groups.get(groupKey(row))!;
+    return group.rows[group.index++];
+  });
 }

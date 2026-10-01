@@ -151,8 +151,8 @@ describe("dashboard workflows", () => {
     await app.user.type(screen.getByLabelText("排序模板名称"),"高级模型");
     await app.user.click(screen.getByRole("button",{name:"保存为模板"}));
     await app.user.click(screen.getByRole("button",{name:"预览"}));
-    await app.user.click(screen.getByRole("button",{name:"关闭"}));
-    expect(screen.getByLabelText("排序")).toHaveValue("config");
+    expect(screen.queryByRole("dialog",{name:"渠道排序"})).not.toBeInTheDocument();
+    expect(screen.getByLabelText("排序")).toHaveValue("preview");
     await app.user.selectOptions(screen.getByLabelText("模型筛选"),"model-b");
     expect(screen.getByLabelText("排序")).toHaveValue("config");
     await app.user.click(screen.getByRole("button",{name:"多条件排序"}));
@@ -162,7 +162,7 @@ describe("dashboard workflows", () => {
     await app.user.type(screen.getByLabelText("排序模板名称"),"低价优先");
     await app.user.click(screen.getByRole("button",{name:"保存为模板"}));
     await app.user.click(screen.getByRole("button",{name:"预览"}));
-    await app.user.click(screen.getByRole("button",{name:"关闭"}));
+    expect(screen.queryByRole("dialog",{name:"渠道排序"})).not.toBeInTheDocument();
     await app.user.selectOptions(screen.getByLabelText("模型筛选"),"");
     expect(screen.getByLabelText("排序")).toHaveValue("config");
     await app.user.selectOptions(screen.getByLabelText("模型筛选"),"model-a");
@@ -192,33 +192,45 @@ describe("dashboard workflows", () => {
     expect(screen.queryByRole("option",{name:"质量优先"})).not.toBeInTheDocument();
     expect(app.calls.every(call=>!call.includes("channel-controls"))).toBe(true);
   }, 15000); // Multiple model switches and a remount can exceed 5s on CI runners.
-  it("previews multi-sort without changing real order or restoring preview order on reload", async () => {
+  it("previews in the channel table, cancels without writes, and resets preview on scope changes or reload", async () => {
     let app = setup();
     await connect(app.user);
     await app.user.selectOptions(screen.getByLabelText("API key 筛选"), "key-second");
     const order = () => within(screen.getByRole("table")).getAllByRole("button", {name: /^查看 .* 详情$/}).map(b => b.getAttribute("aria-label"));
-    await waitFor(() => expect(order()).toEqual(["查看 third model-a 详情", "查看 first model-a 详情"]));
+    const actual = ["查看 third model-a 详情", "查看 first model-a 详情"];
+    await waitFor(() => expect(order()).toEqual(actual));
     await app.user.click(screen.getByRole("button", {name: "多条件排序"}));
     await app.user.click(screen.getByRole("button", {name: "添加排序依据"}));
     await app.user.selectOptions(screen.getByLabelText("第 1 排序依据"), "success");
     await app.user.click(screen.getByRole("button", {name: "预览"}));
-    await app.user.click(screen.getByRole("button", {name: "关闭"}));
-    expect(order()).toEqual(["查看 third model-a 详情", "查看 first model-a 详情"]);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", {name:"请求顺序预览"})).not.toBeInTheDocument();
+    expect(order()).toEqual([...actual].reverse());
+    expect(screen.getByLabelText("排序")).toHaveValue("preview");
+    await app.user.click(screen.getByRole("button", {name:"取消预览"}));
+    expect(order()).toEqual(actual);
+    expect(screen.getByLabelText("排序")).toHaveValue("config");
+    await app.user.click(screen.getByRole("button", {name: "多条件排序"}));
+    await app.user.click(screen.getByRole("button", {name: "预览"}));
+    expect(order()).toEqual([...actual].reverse());
     await app.user.click(screen.getByRole("button", {name: /^余额管理/}));
-    expect(screen.queryByRole("button", {name: "多条件排序"})).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", {name: "取消预览"})).not.toBeInTheDocument();
     await app.user.click(screen.getByRole("button", {name: /^渠道观测/}));
-    expect(order()[0]).toBe("查看 third model-a 详情");
+    await waitFor(() => expect(order()).toEqual(actual));
+    await app.user.click(screen.getByRole("button", {name: "多条件排序"}));
+    await app.user.click(screen.getByRole("button", {name: "预览"}));
+    expect(order()).toEqual([...actual].reverse());
     app.unmount();
     app = setup();
     await screen.findByRole("table");
-    expect(order()[0]).toBe("查看 third model-a 详情");
+    expect(order()).toEqual(actual);
     expect(screen.getByLabelText("排序")).toHaveValue("config");
     await app.user.click(screen.getByRole("button", {name: "多条件排序"}));
     expect(screen.getByLabelText("第 1 排序依据")).toHaveValue("success");
-    await app.user.click(screen.getByRole("button", {name: "恢复配置顺序"}));
     await app.user.click(screen.getByRole("button", {name: "预览"}));
-    await app.user.click(screen.getByRole("button", {name: "关闭"}));
-    expect(order()).toEqual(["查看 third model-a 详情", "查看 first model-a 详情"]);
+    await app.user.selectOptions(screen.getByLabelText("时间范围筛选"),"24h");
+    expect(order()).toEqual(actual);
+    expect(screen.queryByRole("button", {name: "取消预览"})).not.toBeInTheDocument();
     expect(app.calls.every(call => !call.includes("channel-controls"))).toBe(true);
   });
   it("shows final request success rates for every key and follows each page's model and time filters", async () => {

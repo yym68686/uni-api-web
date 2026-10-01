@@ -80,7 +80,7 @@ import { useSubImports, boundGroups } from "./sub2apiImports";
 import type { SubImportsQuery } from "./sub2apiImports";
 import { ChannelModels } from "./ChannelModels";
 import { ChannelSortDialog } from "./ChannelSortDialog";
-import { sortChannels } from "./channelSorting";
+import { previewChannelOrder, sortChannels } from "./channelSorting";
 import { applyScopedChannelSort, channelSortScope, defaultChannelSort, deleteSortTemplate, loadChannelSortPreferences, saveChannelSortPreferences, scopedChannelSort } from "./channelSortPreferences";
 import { useRouteSorting } from "./routeSorting";
 
@@ -971,6 +971,7 @@ function Dashboard({
   const channelScope = channelSortScope(pageFilters.channels);
   const channelSort = scopedChannelSort(sortPreferences, channelScope);
   const routingSort = useRouteSorting(sortStorageScope);
+  const [sortPreview, setSortPreview] = useState<{ scope: string; rows: Channel[] } | null>(null);
   const filterScope = view === "balances" ? "balances" : "channels";
   const needsChannelData = ["channels", "balances", "overview", "automations"].includes(view);
   const filters = pageFilters[filterScope];
@@ -1011,6 +1012,8 @@ function Dashboard({
     [adjustingChannels, setAdjustingChannels] = useState(false),
     [checkingChannels, setCheckingChannels] = useState(false);
   const channelView = view === "channels";
+  const previewingSort = channelView && !adjustingChannels && sortPreview?.scope === channelScope;
+  useEffect(() => setSortPreview(null), [channelScope, view, adjustingChannels]);
   const sortRules = channelSort.rules;
   useEffect(() => {
     saveView(baseConnection.base, view);
@@ -1197,8 +1200,8 @@ function Dashboard({
     model,
     enabled: !!baseConnection.account && channelView,
   });
-  const tableRows =
-    channelView && adjustingChannels ? controls.arrange(rows) : rows;
+  const tableRows = channelView && adjustingChannels ? controls.arrange(rows)
+    : previewingSort ? previewChannelOrder(rows, sortPreview.rows) : rows;
   const rowRanks = useMemo(
     () => new Map(tableRows.map((row, i) => [rowId(row), i + 1])),
     [tableRows],
@@ -1623,8 +1626,9 @@ function Dashboard({
                       </button>
                     )}
                   </div>
-                  {channelView && <ChannelSortDialog key={channelScope} rules={sortRules}
-                    previewRows={rules=>sortChannels(filtered,rules,{checks:checks.results,multipliers:imported.data?.multipliers})}
+                  {channelView && !adjustingChannels && <ChannelSortDialog key={channelScope} rules={sortRules}
+                    previewRows={rules=>{const visible=new Set(filtered.map(rowId));return sortChannels(rows.filter(row=>visible.has(rowId(row))),rules,{checks:checks.results,multipliers:imported.data?.multipliers});}}
+                    onPreview={preview=>{setSortPreview(preview?{scope:channelScope,rows:preview}:null);setPage(0);}}
                     labelRows={rows}
                     routing={baseConnection.account?routingSort:undefined}
                     keyId={keyId}
@@ -1885,10 +1889,11 @@ function Dashboard({
                       <SlidersHorizontal size={13} />
                       <select
                         aria-label="排序"
-                        title={keyId ? "当前 API key 的实际路由顺序" : "不同 API key 的请求顺序可能不同；请选定 API key 查看其实际顺序。"}
-                        value="config"
+                        title={previewingSort ? "当前仅为预览，应用排序后才会修改真实请求顺序" : keyId ? "当前 API key 的实际路由顺序" : "不同 API key 的请求顺序可能不同；请选定 API key 查看其实际顺序。"}
+                        value={previewingSort ? "preview" : "config"}
                         disabled
                       >
+                        {previewingSort && <option value="preview">排序预览 · 未应用</option>}
                         <option value="config">{keyId ? "实际 API key 请求顺序" : "实际 Provider 配置顺序"}</option>
                       </select>
                       <ChevronDown size={12} />

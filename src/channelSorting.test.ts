@@ -5,6 +5,7 @@ import { providerId } from "./format";
 import {
   activeChannelSortRules,
   parseChannelSortRules,
+  previewChannelOrder,
   qualityFirstRules,
   sortChannels,
 } from "./channelSorting";
@@ -223,4 +224,24 @@ it("validates persisted rules and migrates existing quick sorts", () => {
   expect(
     activeChannelSortRules("custom", JSON.stringify(qualityFirstRules)),
   ).toEqual(qualityFirstRules);
+});
+
+it("keeps preview swaps within the source/model and visible slots while retaining fresh metrics", () => {
+  const rows = [
+    row("a"),
+    row("hidden"),
+    row("x", {}, "b"),
+    row("b"),
+    { ...row("other-model"), model: "gpt-6-luna" },
+  ];
+  const proposal = [rows[4], rows[3], rows[2], rows[0]];
+  const live = rows.map((r) => ({ ...r, stats: { ...r.stats!, success: 7 } }));
+  const result = previewChannelOrder(live, proposal);
+  expect(names(result)).toEqual(["b", "hidden", "x", "a", "other-model"]);
+  expect(result.every((r) => r.stats?.success === 7)).toBe(true);
+  expect(names(previewChannelOrder(live.slice(0, 3), proposal))).toEqual([
+    "a",
+    "hidden",
+    "x",
+  ]);
 });
