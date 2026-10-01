@@ -33,19 +33,21 @@ it("saves, selects, renames and deletes templates without changing applied rules
   }
   render(<Harness />);
   await user.click(screen.getByRole("button", { name: "多条件排序" }));
-  await user.type(screen.getByLabelText("排序模板名称"), "质量方案");
   await user.click(screen.getByRole("button", { name: "保存为模板" }));
+  await user.type(screen.getByLabelText("排序模板名称"), "质量方案");
+  await user.click(screen.getByRole("button", { name: "保存" }));
   expect(screen.getByLabelText("排序模板")).toHaveValue("t");
-  expect(screen.getByRole("button", { name: "保存为模板" })).toBeDisabled();
+  expect(screen.queryByLabelText("排序模板名称")).not.toBeInTheDocument();
   expect(apply).not.toHaveBeenCalled();
   await user.click(screen.getByRole("button", { name: "预览" }));
   expect(apply).toHaveBeenCalledWith(qualityFirstRules, "t");
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "多条件排序" }));
   await user.selectOptions(screen.getByLabelText("排序模板"), "t");
+  await user.click(screen.getByRole("button", { name: "重命名模板" }));
   await user.clear(screen.getByLabelText("排序模板名称"));
   await user.type(screen.getByLabelText("排序模板名称"), "高级模型");
-  await user.click(screen.getByRole("button", { name: "重命名模板" }));
+  await user.click(screen.getByRole("button", { name: "保存" }));
   expect(screen.getByRole("option", { name: "高级模型" })).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "删除模板" }));
   expect(
@@ -69,9 +71,9 @@ it("prefills the model's previous template for a new scope without auto-applying
     />,
   );
   await user.click(screen.getByRole("button", { name: "多条件排序" }));
-  expect(screen.getByRole("dialog")).toHaveTextContent(
-    "gpt-6-astra · Fugue · Key 2",
-  );
+  expect(screen.getByRole("dialog")).toHaveTextContent("gpt-6-astra");
+  expect(screen.getByRole("dialog")).toHaveTextContent("Fugue");
+  expect(screen.getByRole("dialog")).toHaveTextContent("Key 2");
   expect(screen.getByLabelText("排序模板")).toHaveValue("q");
   expect(screen.getByLabelText("第 1 排序依据")).toHaveValue("quality");
   expect(apply).not.toHaveBeenCalled();
@@ -91,11 +93,11 @@ it("allows status to precede existing criteria and explains both directions", as
   await user.click(screen.getByRole("button", { name: "添加排序依据" }));
   await user.selectOptions(screen.getByLabelText("第 3 排序依据"), "status");
   expect(
-    screen.getByRole("option", { name: "可用/冷却优先（升序）" }),
+    screen.getByRole("option", { name: "可用 / 冷却优先" }),
   ).toBeInTheDocument();
   await user.selectOptions(screen.getByLabelText("第 3 排序方向"), "desc");
   expect(
-    screen.getByRole("option", { name: "临时停用优先（降序）" }),
+    screen.getByRole("option", { name: "临时停用优先" }),
   ).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "上移第 3 项" }));
   await user.click(screen.getByRole("button", { name: "上移第 2 项" }));
@@ -145,7 +147,7 @@ it("edits priorities and directions in a cancelable draft, with reset and reusab
   await user.click(screen.getByRole("button", { name: "取消预览" }));
   await user.click(screen.getByRole("button", { name: "多条件排序" }));
   await user.click(screen.getByRole("button", { name: "删除第 1 项" }));
-  await user.click(screen.getByRole("button", { name: "关闭" }));
+  await user.click(screen.getByRole("button", { name: "关闭排序设置" }));
   expect(apply).toHaveBeenCalledTimes(1);
   await user.click(screen.getByRole("button", { name: "多条件排序" }));
   expect(screen.getByLabelText("第 1 排序依据")).toHaveValue("quality");
