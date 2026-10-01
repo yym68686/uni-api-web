@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -217,23 +218,37 @@ type subRemoteKey struct {
 }
 
 type subProbe struct {
-	ID                string    `json:"id,omitempty"`
-	StartedAt         int64     `json:"started_at,omitempty"`
-	RequestIDs        []string  `json:"request_ids,omitempty"`
-	Usage             *subUsage `json:"usage,omitempty"`
-	RequestedModel    string    `json:"requested_model,omitempty"`
-	ResponseModel     string    `json:"response_model,omitempty"`
-	ModelMatch        string    `json:"model_match,omitempty"`
-	Status            string    `json:"status"`
-	Text              string    `json:"text"`
-	Message           string    `json:"message,omitempty"`
-	TTFT              *int64    `json:"ttft_ms"`
-	ResponseCreatedMS *int64    `json:"response_created_ms"`
-	FirstResponseMS   *int64    `json:"first_response_ms,omitempty"`
-	Protocol          string    `json:"protocol,omitempty"`
-	Duration          int64     `json:"duration_ms"`
-	HTTPStatus        int       `json:"http_status,omitempty"`
+	ID             string    `json:"id,omitempty"`
+	StartedAt      int64     `json:"started_at,omitempty"`
+	RequestIDs     []string  `json:"request_ids,omitempty"`
+	Usage          *subUsage `json:"usage,omitempty"`
+	RequestedModel string    `json:"requested_model,omitempty"`
+	ResponseModel  string    `json:"response_model,omitempty"`
+	ModelMatch     string    `json:"model_match,omitempty"`
+	Status         string    `json:"status"`
+	// Warnings distinguish missing completion from missing terminal output.
+	// Both remain manually selectable, without becoming import defaults.
+	TerminalStatus    string `json:"terminal_status,omitempty"`
+	Text              string `json:"text"`
+	Message           string `json:"message,omitempty"`
+	TTFT              *int64 `json:"ttft_ms"`
+	ResponseCreatedMS *int64 `json:"response_created_ms"`
+	FirstResponseMS   *int64 `json:"first_response_ms,omitempty"`
+	Protocol          string `json:"protocol,omitempty"`
+	Duration          int64  `json:"duration_ms"`
+	HTTPStatus        int    `json:"http_status,omitempty"`
 }
+
+// Availability can tolerate a missing terminal event; quality verdicts cannot
+// use a potentially truncated answer as a completed pass/fail measurement.
+func (p subProbe) qualityResult() subProbe {
+	if p.Status == "success" && p.TerminalStatus == "missing" {
+		p.Status = "error"
+		p.Message = "缺少结束事件，无法完成降智判定"
+	}
+	return p
+}
+
 type subResult struct {
 	Model        string   `json:"model"`
 	CheckedAt    int64    `json:"checked_at"`
@@ -242,8 +257,9 @@ type subResult struct {
 	Verdict      string   `json:"verdict"`
 }
 
-// Only output_text deltas are first text. A stream must end with a successful
-// response.completed event and final assistant text; EOF/[DONE] alone is not success.
+// Only output_text deltas are first text. Clean EOF with usable text but no
+// completion event is selectable availability evidence with a terminal warning.
+// Explicit failure events and transport/parser errors remain failures.
 func subProbeStream(ctx context.Context, client *http.Client, base, key, prompt string, models ...string) (out subProbe) {
 	start := time.Now()
 	out.ID = "subcheck-" + randomID()
@@ -289,10 +305,26 @@ func subProbeStream(ctx context.Context, client *http.Client, base, key, prompt 
 		out.Message = "站点未返回 SSE 流式响应"
 		return
 	}
-	scanner := bufio.NewScanner(io.LimitReader(resp.Body, (2<<20)+1))
+	limited := &io.LimitedReader{R: resp.Body, N: (2 << 20) + 1}
+	scanner := bufio.NewScanner(limited)
 	scanner.Buffer(make([]byte, 4096), 512<<10)
 	var data strings.Builder
 	var eventName string
+	completedItems := map[int]string{}
+	completedBytes := 0
+	finalItems := func() string {
+		indices := make([]int, 0, len(completedItems))
+		for index := range completedItems {
+			indices = append(indices, index)
+		}
+		sort.Ints(indices)
+		var text strings.Builder
+		for _, index := range indices {
+			text.WriteString(completedItems[index])
+		}
+		return text.String()
+	}
+	var lastModel json.RawMessage
 	consume := func() bool {
 		payload := strings.TrimSpace(data.String())
 		data.Reset()
@@ -301,8 +333,18 @@ func subProbeStream(ctx context.Context, client *http.Client, base, key, prompt 
 			return false
 		}
 		var event struct {
-			Type     string `json:"type"`
-			Delta    string `json:"delta"`
+			Type        string `json:"type"`
+			Delta       string `json:"delta"`
+			OutputIndex int    `json:"output_index"`
+			Item        struct {
+				Type    string `json:"type"`
+				Role    string `json:"role"`
+				Status  string `json:"status"`
+				Content []struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"content"`
+			} `json:"item"`
 			Response struct {
 				ID     string          `json:"id"`
 				Model  json.RawMessage `json:"model"`
@@ -329,6 +371,11 @@ func subProbeStream(ctx context.Context, client *http.Client, base, key, prompt 
 		if value := subSafeRequestID(event.Response.ID, key); value != "" && (event.Type == "response.created" || event.Type == "response.completed") {
 			out.addRequestIDs(value)
 		}
+		if event.Type == "response.created" || event.Type == "response.in_progress" {
+			if len(event.Response.Model) > 0 {
+				lastModel = event.Response.Model
+			}
+		}
 		switch event.Type {
 		case "error", "response.failed", "response.incomplete":
 			out.Message = "模型响应失败或未完成"
@@ -350,6 +397,24 @@ func subProbeStream(ctx context.Context, client *http.Client, base, key, prompt 
 					return true
 				}
 			}
+		case "response.output_item.done":
+			if event.Item.Type == "message" && event.Item.Role == "assistant" && event.Item.Status == "completed" {
+				var final strings.Builder
+				for _, c := range event.Item.Content {
+					if c.Type == "output_text" {
+						final.WriteString(c.Text)
+					}
+				}
+				if text := final.String(); strings.TrimSpace(text) != "" {
+					size := completedBytes - len(completedItems[event.OutputIndex]) + len(text)
+					if size > 8192 {
+						out.Message = "检测回复超出长度限制"
+						return true
+					}
+					completedBytes = size
+					completedItems[event.OutputIndex] = text
+				}
+			}
 		case "response.completed":
 			if event.Response.Status != "completed" || (len(event.Response.Error) > 0 && string(event.Response.Error) != "null") {
 				out.Message = "模型未完整完成"
@@ -366,12 +431,26 @@ func subProbeStream(ctx context.Context, client *http.Client, base, key, prompt 
 				}
 			}
 			text := strings.TrimSpace(final.String())
+			// Some Responses-compatible gateways put the completed assistant
+			// message in response.output_item.done and leave response.completed
+			// output empty. A text delta is the final fallback when that happens.
+			if text == "" && len(event.Response.Output) == 0 {
+				text = strings.TrimSpace(finalItems())
+				if text == "" {
+					text = strings.TrimSpace(out.Text)
+				}
+				out.TerminalStatus = "missing_output"
+				out.Message = "成功，但结束事件缺少最终文本"
+			}
 			if len(text) > 8192 || text == "" {
 				out.Message = "模型未返回有效最终文本"
 				return true
 			}
 			out.Text = text
-			if out.TTFT == nil {
+			if out.TerminalStatus == "" {
+				out.TerminalStatus = "complete"
+			}
+			if out.TTFT == nil && out.Message == "" {
 				out.Message = "响应完成，但缺少文本增量，无法测量首字延迟"
 			}
 			out.Status = "success"
@@ -404,15 +483,36 @@ func subProbeStream(ctx context.Context, client *http.Client, base, key, prompt 
 			}
 		}
 	}
+	if scanner.Err() != nil || ctx.Err() != nil || limited.N == 0 {
+		out.Message = "流式读取失败、超时或超过长度限制"
+		return
+	}
 	if data.Len() > 0 && consume() {
+		return
+	}
+	// A 200 SSE response with valid assistant text is useful evidence even if
+	// the upstream closes without response.completed. Keep it selectable while
+	// surfacing the missing terminal event as a warning for the UI and default
+	// selection logic.
+	if completedBytes > 0 {
+		out.Text = finalItems()
+	}
+	if strings.TrimSpace(out.Text) != "" {
+		out.Status = "success"
+		out.TerminalStatus = "missing"
+		out.Message = "成功，但缺少结束事件"
+		out.ResponseModel, out.ModelMatch = subCompareModel(model, lastModel)
+		if key != "" {
+			out.ResponseModel = strings.ReplaceAll(out.ResponseModel, key, "[redacted]")
+		}
 		return
 	}
 	out.Message = "流式连接中断或缺少完成事件"
 	return
 }
 
-// A completed Responses object is the authoritative response body. Never use
-// the requested model as a fallback or infer identity from output/reasoning text.
+// Completion metadata is authoritative; a missing-completion warning can use
+// observed creation metadata. Never substitute the requested model or text.
 // Malformed model metadata does not erase a valid availability/latency result.
 func subCompareModel(requested string, raw json.RawMessage) (string, string) {
 	if len(raw) == 0 || string(raw) == "null" {
@@ -473,7 +573,7 @@ func subRunProbes(ctx context.Context, client *http.Client, base, key string, mo
 		return out
 	}
 	if out.Availability.Status == "success" && ctx.Err() == nil {
-		out.Quality = subProbeStream(ctx, client, base, key, checkPrompt)
+		out.Quality = subProbeStream(ctx, client, base, key, checkPrompt).qualityResult()
 		if out.Quality.Status == "success" {
 			out.Verdict = checkVerdict(out.Quality.Text)
 		}
@@ -486,8 +586,8 @@ func subRunProbes(ctx context.Context, client *http.Client, base, key string, mo
 // identity. All fields come from the same request; no say-test probe is sent.
 func subRunQualityProbe(ctx context.Context, client *http.Client, base, key string) subResult {
 	probe := subProbeStream(ctx, client, base, key, checkPrompt, checkModel)
-	out := subResult{Model: checkModel, CheckedAt: time.Now().Unix(), Availability: probe, Quality: probe, Verdict: "error"}
-	if probe.Status == "success" {
+	out := subResult{Model: checkModel, CheckedAt: time.Now().Unix(), Availability: probe, Quality: probe.qualityResult(), Verdict: "error"}
+	if out.Quality.Status == "success" {
 		out.Verdict = checkVerdict(probe.Text)
 	}
 	return out

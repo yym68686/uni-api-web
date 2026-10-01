@@ -342,7 +342,7 @@ func (s *Service) runConfiguredCheck(ctx context.Context, c *configuredCheck, ta
 				out.Verdict = "error"
 				out.Quality = subProbe{Status: "skipped", Message: "可用性检测未通过"}
 				if out.Availability.Status == "success" && ctx.Err() == nil {
-					out.Quality = subProbeStream(ctx, client, src.Base, src.Key, checkPrompt, checkModel)
+					out.Quality = subProbeStream(ctx, client, src.Base, src.Key, checkPrompt, checkModel).qualityResult()
 					if out.Quality.Status == "success" {
 						out.Verdict = checkVerdict(out.Quality.Text)
 					}

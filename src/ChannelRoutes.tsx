@@ -17,7 +17,7 @@ import {
 import type { ManagedChannel } from "./channelManagement";
 import { channelMembers,configuredModelChecks,configuredToolUseResult,useConfiguredChecks,useChannelManagement } from "./channelManagement";
 import { ChannelModelSelection, splitChannelModels, modelIsAvailable, unavailableModelChanges, retainedOnlyModels } from "./ChannelModelSelection";
-import { importModelLabel } from "./sub2apiResults";
+import { importModelLabel, modelIsDefaultSelected, probeHasWarning } from "./sub2apiResults";
 import { SUB_MODELS } from "./sub2apiModels";
 import {useSubAccounts} from "./sub2apiAccounts";
 import {toolUseFailed,modelToolUse,toolUseLabels} from "./toolUse";
@@ -263,7 +263,7 @@ export function ConfiguredChannelDialog({
   const toolTarget={tool_use:configuredToolUseResult(item,accounts.data?.data||[],toolChecks.data?.data||[],modelOptions)};
   const quality=configuredQualityResult(item,accounts.data?.data||[],toolChecks.data?.data||[]);
   const canSelectModel=(model:string)=>!toolDefaultsPending&&!toolDefaultsError&&modelIsAvailable(allChecks.find(c=>c.model===model));
-  const selected=selectedOverride ?? item.models.filter(model=>canSelectModel(model)&&!toolUseFailed(toolTarget,model));
+  const selected=selectedOverride ?? item.models.filter(model=>canSelectModel(model)&&modelIsDefaultSelected(allChecks.find(c=>c.model===model))&&!toolUseFailed(toolTarget,model));
   const mapping = aliasMappings(aliases, selected);
   const [key, setKey] = useState("");
   const [position, setPosition] = useState(1);
@@ -699,11 +699,15 @@ export function ConfiguredChannelDialog({
                   selected={selected} onChange={setSelected} editing={!!editingProvider}
                   disabled={busy || options.isFetching || inventory.isPending || toolDefaultsPending || toolDefaultsError}
                   actions={batchButton("models","模型勾选")}
-                  status={model=><>
-                    <ModelQualityWarning model={model} result={quality} />
-                    {!canSelectModel(model)&&<small>{importModelLabel(allChecks.find(c=>c.model===model)||{model,state:"idle",message:"",result:null})}</small>}
-                    {toolUseFailed(toolTarget,model)&&<small className="negative">Tool use · {toolUseLabels[modelToolUse(toolTarget,model)!.status]}</small>}
-                  </>}
+                  status={model=>{
+                    const check=allChecks.find(c=>c.model===model);
+                    const warning=probeHasWarning(check?.result?.availability);
+                    return <>
+                      <ModelQualityWarning model={model} result={quality} />
+                      {(!canSelectModel(model)||warning)&&<small className={warning?"completion-warning":undefined}>{importModelLabel(check||{model,state:"idle",message:"",result:null})}</small>}
+                      {toolUseFailed(toolTarget,model)&&<small className="negative">Tool use · {toolUseLabels[modelToolUse(toolTarget,model)!.status]}</small>}
+                    </>;
+                  }}
                 />
                 <ModelAliases
                   actions={batchButton("aliases","模型重命名")}

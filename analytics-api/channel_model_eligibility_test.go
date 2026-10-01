@@ -52,6 +52,12 @@ func TestConfiguredModelEligibilityIsScopedAndReusesConfirmedSiteEvidence(t *tes
 	check(nil, saved, false)
 	seed(fingerprint, "done", "success", 10)
 	check(nil, saved, true)
+	for _, terminal := range []string{"missing", "missing_output"} {
+		if _, err := s.control.db.Exec(`UPDATE console_configured_checks SET result=$2 WHERE source_id=$1`, src.ID, mustJSON(subResult{Model: "public", CheckedAt: 10, Availability: subProbe{Status: "success", TerminalStatus: terminal}})); err != nil {
+			t.Fatal(err)
+		}
+		check(nil, saved, true)
+	}
 	check(nil, map[string]string{"alias": "unprobed"}, false)
 	other := src
 	other.ID = "other-source"
@@ -75,6 +81,16 @@ func TestConfiguredModelEligibilityIsScopedAndReusesConfirmedSiteEvidence(t *tes
 		t.Fatal(err)
 	}
 	check(nil, saved, true) // Normalized site path plus exact credential binding.
+	for _, terminal := range []string{"missing", "missing_output"} {
+		if _, err := s.control.db.Exec(`UPDATE console_sub_models SET result=$2 WHERE account_id=$1 AND model='actual'`, account.ID, mustJSON(subResult{Model: "actual", CheckedAt: 30, Availability: subProbe{Status: "success", TerminalStatus: terminal}})); err != nil {
+			t.Fatal(err)
+		}
+		check(nil, saved, true)
+		if err := s.validateSiteModelChanges(ctx, account.ID, 7, nil, map[string]string{"actual": "actual"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	if s.validateConfiguredModelChanges(ctx, src, "native", "foreign-owner", nil, saved) == nil {
 		t.Fatal("borrowed foreign account evidence")
 	}

@@ -281,7 +281,7 @@ No model service settings or production routing are changed by this application.
 
 渠道管理的“添加到渠道”支持跨全部来源、全部已有 API key 接入的批量操作。编辑时，模型勾选、模型重命名、路由位置各有独立应用按钮，底部可应用全部设置；单项应用保留其余设置，位置单项只移动目标 Key 已有的同名模型。新增模型或别名放到第 1 位；指定位置超出目标路由数量时落到末位，预览展示实际最终位置。已有接入页可“删除所有已保存接入”，保留基础渠道定义和其他渠道。
 
-站点接入和原生配置渠道的编辑页共用模型选择区域，合并基础模型、已保存路由及候选模型。绑定记录本身没有模型时从渠道清单补齐；同名映射归为勾选的原模型，保留真正的独立重命名。编辑已有接入时默认保留其模型选择，并允许手动勾选其他未配置或未检测模型；此显式编辑通过 `allow_unverified_models` 标记保存到所选 Key 的独立接入，不修改共享基础定义，也不伪造检测通过记录。新增站点接入仍默认只选择检测可用且 Tool use 未失败的模型。
+站点接入和原生配置渠道的编辑页共用模型选择区域，合并基础模型、已保存路由及候选模型。绑定记录本身没有模型时从渠道清单补齐；同名映射归为勾选的原模型，保留真正的独立重命名。编辑已有接入时默认保留其模型选择；新增勾选和重命名要求该模型在对应来源、渠道与凭据下检测可用，未检测和检测失败的新增模型不可选。检测成功但结束异常的模型允许手动选择；新增接入默认排除结束异常、已确认单价异常及 Tool use 失败的模型。
 
 批量预览直接复用管理页已加载的完整来源路由快照，在浏览器同步计算，点击时不逐 Key 重读接口。快照附带来源版本，并在并发读取前后核对一致性；缓存不完整时，每个来源并行读取一次完整路由（最多 4 路并发）。确认提交前重新读取全部影响范围和版本，若与预览不同则更新预览并要求再次确认，尚不执行任何修改。
 
@@ -301,7 +301,7 @@ Tool use 检测复用 Codex 的 `additional_tools` / namespace / custom `exec` �
 
 支持 27 个检测模型：`gpt-6-astra`、`gpt-6-sol`、`gpt-6-luna`、`gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna`、`gpt-5.5`、`codex-auto-review`、`glm-5.3`、`glm-5.3-flash`、`kimi-k3`、`deepseek-v4.1-flash`、`deepseek-v4-pro`、`grok-4.7`、`grok-4.6`、`gemini-3.1-pro`、`gemini-3.8-flash`、`claude-fable-5`、`claude-fable-5-1`、`claude-opus-5-5`、`claude-opus-5`、`claude-sonnet-5-5`、`claude-sonnet-5`、`claude-opus-4-8`、`claude-opus-4-6`、`claude-sonnet-4-6`、`claude-haiku-4-5-20251001`。
 
-每个模型发送流式 `say test`。Claude 使用 `/v1/messages` 和 `x-api-key`，两个 Gemini 使用 `/v1beta/models/{model}:streamGenerateContent?alt=sse` 和 `x-goog-api-key`，其他使用 `/v1/responses`。不尝试切换协议或回退模型。Responses 默认延迟记录首个 `response.created`，Claude 记录首个 `message_start`，Gemini 记录首个原生响应事件；tooltip 同时列出首个非思考文本片段的延迟，原生事件不会伪装为 `response.created`。模型匹配使用原生返回的 `model` / `modelVersion`，缺失时不拿请求模型补全。请求 ID 继续用于账单核验。完整 Responses、正常结束的 Messages、以 STOP 完成的 Gemini 且有可见文本才判可用；思考内容、HTTP 200 和截断流不算成功。仅 `gpt-6-astra` 可用性成功后再次发送糖果推理题，回复含 `21` 判不降智，否则判降智；其他模型只发送 `say test`。
+每个模型发送流式 `say test`。Claude 使用 `/v1/messages` 和 `x-api-key`，两个 Gemini 使用 `/v1beta/models/{model}:streamGenerateContent?alt=sse` 和 `x-goog-api-key`，其他使用 `/v1/responses`。不尝试切换协议或回退模型。Responses 默认延迟记录首个 `response.created`，Claude 记录首个 `message_start`，Gemini 记录首个原生响应事件；tooltip 同时列出首个非思考文本片段的延迟，原生事件不会伪装为 `response.created`。模型匹配使用原生返回的 `model` / `modelVersion`，缺失时不拿请求模型补全。请求 ID 继续用于账单核验。Responses 收到有效文本且 HTTP 200、正常读到 EOF 但缺少 `response.completed` 时，显示“成功，但缺少结束事件”；完成事件存在但 output 为空时，使用已完成的 assistant output item 或文本增量，显示“成功，但结束事件缺少最终文本”。两种情况保存 `availability.status=success` 及 `terminal_status=missing/missing_output`，均可手动勾选，新增接入和批量优化的新增建议默认不选；已有接入保留原选择。明确失败/未完成事件、读取错误、超时、超限和无有效文本仍失败。历史记录不自动改判，须重新检测。正常结束的 Messages、以 STOP 完成的 Gemini 且有可见文本才判可用。缺少结束事件的 Responses 不参与降智成功/失败判定。仅 `gpt-6-astra` 可用性成功后再次发送糖果推理题，回复含 `21` 判不降智，否则判降智；其他模型只发送 `say test`。
 
 后台 PostgreSQL 队列保存同步任务、检测进度、最后结果，网页刷新不影响任务。所有已排队的站点账号可同时同步和检测，不设账号间并发上限；每个账号仍先完成同步，再以最多两个“分组 × 模型”任务并发检测。会话互斥通过短期数据库租约实现，等待上游期间不占用数据库连接；账号租约及任务 ID 阻止重复执行与过期结果覆盖。进程中断的付费请求不会自动重放，标记中断后可手动重试。支持账号、搜索、模型、可用性、降智结果、倍率上限筛选和倍率升降序；倍率选项来自其他筛选后的数据，选择后保留小于等于阈值的渠道。表格每个站点分组只显示一行；全部模型模式隐藏模型列，汇总可用/失败/未检测数量，首字延迟主单元格显示缺失，可展开各模型结果。选择具体模型时显示该模型结果。可用性在全部模型下按“存在匹配模型”筛选分组，降智筛选始终使用分组的 Astra 结果。一键检测覆盖所有匹配页，“检测全部模型”旁的设置弹窗默认勾选全部模型；保存后按控制台用户写入浏览器本地存储，刷新及返回页面保留选择。设置用于模型检测区域的批量和逐渠道检测，包含未检测和此前失败的已勾选模型；具体模型筛选与设置取交集，未勾选时禁用检测。至少保留一个模型，取消不保存草稿。站点账号同步仍自动检测全部支持模型，单独降智检测仍只请求 Astra。按钮明确显示模型范围与渠道数量。新接口为 `/v1/sub2api/accounts`、`/v1/sub2api/accounts/{id}/sync`、`/v1/sub2api/accounts/{id}/stop`、`/v1/sub2api/checks`，仅账户会话可访问。
 

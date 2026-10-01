@@ -16,6 +16,7 @@ import type { Routes } from "./channelRouteData";
 import type { SubFilters } from "./sub2apiPreferences";
 import {
   modelChecks,
+  modelIsDefaultSelected,
   modelMatchStatus,
   groupQualityResult,
 } from "./sub2apiResults";
@@ -534,7 +535,7 @@ export function buildOptimizationPlan(
               modelMatchesFilters(e, snapshot.filters, snapshot.prices) &&
               e.canAdd &&
               e.check.state === "done" &&
-              e.check.result?.availability.status === "success" &&
+              modelIsDefaultSelected(e.check) &&
               !running(e.tool?.state) &&
               e.tool?.result?.status !== "error",
           )

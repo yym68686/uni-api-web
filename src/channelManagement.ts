@@ -7,7 +7,7 @@ import type { InstalledChannel } from "./sub2apiImports";
 import { SUB_MODELS } from "./sub2apiModels";
 import {toolUseModels} from "./toolUse";
 import type {ToolUseResult,ToolUseModel} from "./toolUse";
-import { modelChecks, groupQualityResult } from "./sub2apiResults";
+import { modelChecks, groupQualityResult, probeHasWarning } from "./sub2apiResults";
 import type { SubModelCheck } from "./sub2apiResults";
 import { boundGroups } from "./sub2apiImports";
 
@@ -34,7 +34,8 @@ export function configuredModelChecks(member:ManagedChannel, accounts:SubAccount
       // A multi-key provider can reuse site evidence only when every bound
       // group passed. A single group's success cannot clear a sibling failure.
       const failed=site.filter(c=>!available(c));
-      candidates.push(recent(failed.length?failed:site));
+      const warned=site.filter(c=>probeHasWarning(c.result?.availability));
+      candidates.push(recent(failed.length?failed:warned.length?warned:site));
     }
     for(const check of native.filter(c=>(member.model_mappings?.[c.model]||c.model)===upstream))
       candidates.push({model,state:check.state,message:check.message,result:check.result as SubTarget["result"]});

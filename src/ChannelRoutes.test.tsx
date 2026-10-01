@@ -783,3 +783,45 @@ it("shows bound site Tool use failures for candidates absent from the native cha
   expect(sol).toBeChecked();
   expect(sol.closest("label")).toHaveTextContent("Tool use · 不支持工具调用");
 });
+
+it("keeps terminal warnings selectable but unchecked for new native routes", async () => {
+ const models=["gpt-5.5","gpt-6-luna","gpt-6-sol"];
+ const item={kind:"configured",source_id:"source",source_name:"Fugue",provider:"native",name:"native",models} as ManagedChannel;
+ const checks=passedModels("source","native",models).map((c,i)=>({...c,result:{...c.result,availability:{status:"success",terminal_status:i===1?"missing":i===2?"missing_output":"complete"}}}));
+ const writes:any[]=[];
+ vi.stubGlobal("fetch",vi.fn(async(input:string,init?:RequestInit)=>{
+  if(init?.method==="POST"){writes.push(JSON.parse(String(init.body)));return Response.json({message:"已添加"});}
+  if(input.includes("channel-options"))return Response.json({revision:"r1",keys:[{key_id:"key",position:1,prefix:"masked"}],channels:[]});
+  return Response.json({data:input.endsWith("/channel-management/checks")?checks:[],unavailable_keys:[],unavailable_sources:[]});
+ }));
+ render(<QueryClientProvider client={new QueryClient()}><ConfiguredChannelDialog item={item} close={()=>{}}/></QueryClientProvider>);
+ const user=userEvent.setup();
+ await waitFor(()=>expect(screen.getByRole("checkbox",{name:"gpt-6-luna"})).toBeEnabled());
+ expect(screen.getByRole("checkbox",{name:"gpt-5.5"})).toBeChecked();
+ for(const model of models.slice(1)){
+  const box=screen.getByRole("checkbox",{name:model});
+  expect(box).not.toBeChecked();expect(box).toBeEnabled();
+  expect(box.closest("label")).toHaveTextContent("成功，但");
+ }
+ await user.click(screen.getByRole("checkbox",{name:"gpt-6-luna"}));
+ await user.selectOptions(screen.getByLabelText("添加到 API key"),"key");
+ await waitFor(()=>expect(screen.getByRole("button",{name:"添加到渠道"})).toBeEnabled());
+ await user.click(screen.getByRole("button",{name:"添加到渠道"}));
+ await waitFor(()=>expect(writes).toHaveLength(1));
+ expect(writes[0].models).toEqual(["gpt-5.5","gpt-6-luna"]);
+});
+
+it("retains a previously saved warning model when editing and permits reselecting it", async()=>{
+ const item={source_id:"do",source_name:"DigitalOcean",provider:"native",name:"native",models:["gpt-6-luna"]} as ManagedChannel;
+ const rows=[{provider:"native",model:"gpt-6-luna",api_key_id:"k1",key_position:1,key_prefix:"masked",position:1}];
+ const checks=passedModels("do","native",["gpt-6-luna"]).map(c=>({...c,result:{...c.result,availability:{status:"success",terminal_status:"missing"}}}));
+ vi.stubGlobal("fetch",vi.fn(async(input:string)=>{
+  if(input.includes("channel-options"))return Response.json({revision:"r1",keys:[{key_id:"k1",position:1,prefix:"masked"}],channels:rows});
+  return Response.json({data:input.endsWith("/channel-management/checks")?checks:input.endsWith("/channel-routes")?rows:[],unavailable_keys:[],unavailable_sources:[]});
+ }));
+ render(<QueryClientProvider client={new QueryClient()}><ConfiguredChannelDialog item={item} initialEdit={rows} close={()=>{}}/></QueryClientProvider>);
+ const box=await screen.findByRole("checkbox",{name:"gpt-6-luna"});
+ await waitFor(()=>expect(box).toBeEnabled());expect(box).toBeChecked();
+ expect(box.closest("label")).toHaveTextContent("成功，但缺少结束事件");
+ const user=userEvent.setup();await user.click(box);expect(box).not.toBeChecked();expect(box).toBeEnabled();await user.click(box);expect(box).toBeChecked();
+});

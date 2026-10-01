@@ -33,7 +33,7 @@ func TestSubProbeStreamMeasuresTextAndRequiresCompletion(t *testing.T) {
 		ttft               bool
 	}{
 		{"success", "success", "success", true}, {"reasoning is not first text", "reasoning", "success", true},
-		{"truncated", "truncated", "error", true}, {"failed after text", "failed", "error", true},
+		{"truncated", "truncated", "success", true}, {"failed after text", "failed", "error", true},
 		{"JSON instead of SSE", "json", "error", false}, {"missing delta", "no_delta", "success", false},
 		{"no message", "no_message", "error", false}, {"HTTP error", "http", "error", false},
 	} {

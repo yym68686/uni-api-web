@@ -3121,3 +3121,6 @@ nav > button.active > svg {
 .source-item { flex-wrap:wrap; }
 .source-item > div:first-child { flex-basis:220px; }
 @media(max-width:700px) { .timeout-match-grid,.timeout-phase-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+
+.check-status.warning, .sub-model-options .completion-warning { color: #9a7208; white-space: normal; }
+:root[data-theme="dark"] .check-status.warning, :root[data-theme="dark"] .sub-model-options .completion-warning { color: #e9cc70; }

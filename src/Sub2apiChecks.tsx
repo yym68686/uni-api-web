@@ -45,6 +45,8 @@ import {
   modelChecks,
   groupQualityResult,
   availabilityCounts,
+  importModelLabel,
+  probeHasWarning,
   modelMatchStatus,
   modelMatchLabels,
 } from "./sub2apiResults";
@@ -67,6 +69,7 @@ export interface Probe {
   response_model?: string;
   model_match?: "match" | "mismatch" | "missing" | "invalid" | "unavailable";
   status: string;
+  terminal_status?: "complete" | "missing" | "missing_output";
   text: string;
   message?: string;
   ttft_ms: number | null;
@@ -204,10 +207,11 @@ function AvailabilityStatus({ check }: { check: SubModelCheck }) {
     );
   if (!check.result) return <span className="muted">未检测</span>;
   const success = check.result.availability.status === "success";
+  const warning = probeHasWarning(check.result.availability);
   return (
-    <span className={`check-status ${success ? "pass" : "fail"}`}>
+    <span className={`check-status ${warning ? "warning" : success ? "pass" : "fail"}`}>
       {success ? <Check size={15} /> : <X size={15} />}
-      {success ? "可用" : "检测失败"}
+      {importModelLabel(check)}
     </span>
   );
 }
@@ -223,6 +227,7 @@ function GroupAvailability({ checks }: { checks: SubModelCheck[] }) {
       </span>
       <small className="check-source">
         {[
+          counts.warning ? `${counts.warning} 个结束异常` : "",
           counts.failed ? `${counts.failed} 个失败` : "",
           counts.untested ? `${counts.untested} 个未检测` : "",
         ]
@@ -631,7 +636,7 @@ function ManagementChannelDrawer({
                         <small>{check.result ? `最近检测 ${time(check.result.checked_at)}` : "尚未检测"}</small>
                       </div>
                       <span className={available ? "detail-model-added" : "muted"}>
-                        {check.result ? (available ? "可用" : "检测失败") : "未检测"}
+                        {importModelLabel(check)}
                       </span>
                     </li>
                   );

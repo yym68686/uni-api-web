@@ -204,3 +204,11 @@ it("keeps configured check progress and custom model results source and credenti
   expect(row.selected?.result).toBeNull();
   expect(row.target.compaction_state).toBe("running");
 });
+
+it("keeps a bound group's terminal warning visible when other keys completed normally", () => {
+ const member=channel({models:["m"],binding_status:"matched",bound_keys:[1,2].map(group_id=>({account_id:"a",account_name:"a",base:"https://site.test",group_id,remote_key_id:group_id}))});
+ const accounts=[{id:"a",targets:[1,2].map(group_id=>({group_id,models:[{model:"m",state:"done",result:{model:"m",checked_at:group_id*10,availability:{status:"success",terminal_status:group_id===1?"missing":"complete"}}}]}))}] as unknown as SubAccount[];
+ const checks=configuredModelChecks(member,accounts,[],["m"]);
+ expect(checks[0].result?.availability.terminal_status).toBe("missing");
+ expect(modelIsAvailable(checks[0])).toBe(true);
+});

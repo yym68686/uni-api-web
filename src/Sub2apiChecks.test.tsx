@@ -2260,3 +2260,32 @@ it("loads original diagnostics only when opened and keeps all model choices", as
   expect(dialog.getByRole("option",{name:"gpt-6-astra"})).toBeInTheDocument();
   expect(fetcher.mock.calls.filter(([url])=>url.includes("/details?")).length).toBe(2);
 });
+
+it("shows terminal warnings in site checks and imports only the models the user chooses", async()=>{
+ const data=fixtures().slice(0,1),target=data[0].targets[0];
+ target.models=["gpt-5.5","gpt-6-luna","gpt-6-sol"].map((model,i)=>({model,state:"done",message:"",result:{...target.result!,model,availability:{...target.result!.availability,terminal_status:i===1?"missing" as const:i===2?"missing_output" as const:"complete" as const}}}));
+ target.result=null;
+ const writes:any[]=[];
+ vi.stubGlobal("fetch",vi.fn(async(input:string,init?:RequestInit)=>{
+  if(init?.method==="POST"){writes.push(JSON.parse(String(init.body)));return Response.json({message:"已添加"});}
+  if(input.includes("channel-options"))return Response.json({revision:"r1",supported:true,keys:[{key_id:"k1",position:1,prefix:"masked"}],channels:[]});
+  return Response.json({data:input.endsWith("/accounts")?data:input.endsWith("/sources")?[{id:"primary",name:"Fugue"}]:[],labels:{},unavailable_keys:[],unavailable_sources:[]});
+ }));
+ const user=userEvent.setup();mount("terminal-warning");
+ await screen.findByRole("table");
+ await user.selectOptions(screen.getByLabelText("检测模型筛选"),"gpt-6-luna");
+ expect(await screen.findByText("成功，但缺少结束事件",{selector:"span"})).toBeVisible();
+ await user.click(screen.getByRole("button",{name:"添加到渠道"}));
+ const d=within(screen.getByRole("dialog"));
+ expect(d.getByRole("checkbox",{name:"gpt-5.5"})).toBeChecked();
+ for(const name of ["gpt-6-luna","gpt-6-sol"]){
+  const box=d.getByRole("checkbox",{name});expect(box).toBeEnabled();expect(box).not.toBeChecked();expect(box.closest("label")).toHaveTextContent("成功，但");
+ }
+ await user.click(d.getByRole("checkbox",{name:"gpt-6-luna"}));
+ await user.selectOptions(d.getByLabelText("添加到 uni-api 来源"),"primary");
+ await waitFor(()=>expect(d.getByLabelText("添加到 API key")).toBeEnabled());
+ await user.selectOptions(d.getByLabelText("添加到 API key"),"k1");
+ await user.click(d.getByRole("button",{name:"添加到渠道"}));
+ await waitFor(()=>expect(writes).toHaveLength(1));
+ expect(writes[0].models).toEqual(["gpt-6-luna","gpt-5.5"]);
+});

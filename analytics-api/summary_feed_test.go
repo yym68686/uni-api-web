@@ -16,7 +16,7 @@ import (
 func TestSummaryPreservesListEvidenceWithoutDetailedReplies(t *testing.T) {
 	price := 2.5
 	tokens := int64(100)
-	probe := subProbe{ID: "unique-probe-identifier", Status: "success", Text: strings.Repeat("private-reply", 5000), ModelMatch: "match", TTFT: &tokens, Usage: &subUsage{Status: "matched", InputPrice: &price, OutputPrice: &price, InputTokens: &tokens, OutputTokens: &tokens, ActualCost: &price}}
+	probe := subProbe{ID: "unique-probe-identifier", Status: "success", TerminalStatus: "missing", Text: strings.Repeat("private-reply", 5000), ModelMatch: "match", TTFT: &tokens, Usage: &subUsage{Status: "matched", InputPrice: &price, OutputPrice: &price, InputTokens: &tokens, OutputTokens: &tokens, ActualCost: &price}}
 	input := subTarget{GroupID: 1, Models: []subModelResult{{Model: "m", State: "done", Result: &subResult{Model: "m", CheckedAt: 10, Availability: probe, Quality: probe, Verdict: "pass"}}}, ToolUse: &subCapabilityResult{Status: "supported", Models: []subToolUseModel{{Model: "m", State: "done", Result: &subCapabilityResult{Status: "supported", Attempts: []subProbe{probe}}}}}}
 	before := mustJSON(input)
 	compact := mustJSON(compactSummary(input))
@@ -28,7 +28,7 @@ func TestSummaryPreservesListEvidenceWithoutDetailedReplies(t *testing.T) {
 		t.Fatal("summary cannot be read")
 	}
 	result := output.Models[0].Result
-	if result.Availability.Status != "success" || result.Availability.ModelMatch != "match" || *result.Availability.Usage.InputPrice != price || *result.Availability.Usage.InputTokens != tokens || output.ToolUse.Models[0].Result.Status != "supported" {
+	if result.Availability.Status != "success" || result.Availability.TerminalStatus != "missing" || result.Availability.ModelMatch != "match" || *result.Availability.Usage.InputPrice != price || *result.Availability.Usage.InputTokens != tokens || output.ToolUse.Models[0].Result.Status != "supported" {
 		t.Fatal("list evidence lost")
 	}
 	if mustJSON(input) != before {

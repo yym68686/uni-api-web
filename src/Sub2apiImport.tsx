@@ -42,6 +42,8 @@ import {
   groupQualityResult,
   availableModelChecks,
   importModelLabel,
+  modelIsDefaultSelected,
+  probeHasWarning,
 } from "./sub2apiResults";
 interface Options {
   provider?: string;
@@ -192,7 +194,7 @@ export function Sub2apiImport({
     .filter(
       (check) =>
         modelChoices[check.model] ??
-        (editing ? editing.models.includes(check.model)&&(!editing.model_mappings?.[check.model]||editing.model_mappings[check.model]===check.model) : available.includes(check.model) &&
+        (editing ? editing.models.includes(check.model)&&(!editing.model_mappings?.[check.model]||editing.model_mappings[check.model]===check.model) : modelIsDefaultSelected(check) &&
           assessPrice(check, prices).status !== "abnormal" && !toolUseFailed(target,check.model)),
     )
     .map((check) => check.model);
@@ -889,7 +891,7 @@ export function Sub2apiImport({
                       <ModelQualityWarning model={model} result={quality} />
                       {toolUseFailed(target,model) && <small className="negative">Tool use · {toolUseLabels[modelToolUse(target,model)!.status]}</small>}
                       {assessPrice(check,prices).status==="abnormal" && <small className="negative">单价异常</small>}
-                      {!available.includes(model) && <small>{importModelLabel(check)}</small>}
+                      {(!available.includes(model) || probeHasWarning(check.result?.availability)) && <small className={probeHasWarning(check.result?.availability)?"completion-warning":undefined}>{importModelLabel(check)}</small>}
                     </>;
                   }}
                 />

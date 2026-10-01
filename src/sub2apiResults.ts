@@ -3,6 +3,15 @@ import type { SubTarget, Result, Probe } from "./Sub2apiChecks";
 
 export type SubModelCheck = NonNullable<SubTarget["models"]>[number];
 
+export function probeHasWarning(probe?: Probe): boolean {
+  return probe?.status === "success" && !!probe.terminal_status && probe.terminal_status !== "complete";
+}
+
+// Selectable warnings require an explicit user choice when creating routes.
+export function modelIsDefaultSelected(check?: SubModelCheck): boolean {
+  return check?.state === "done" && check.result?.availability.status === "success" && !probeHasWarning(check.result.availability);
+}
+
 // Each result belongs to one model. Only Astra had a legacy group-level result;
 // an absent sibling entry must stay untested instead of inheriting that result.
 export function modelChecks(target: SubTarget): SubModelCheck[] {
@@ -31,6 +40,7 @@ export function availabilityCounts(checks: SubModelCheck[]) {
   return {
     success: checks.filter((c) => c.result?.availability.status === "success")
       .length,
+    warning: checks.filter(c => probeHasWarning(c.result?.availability)).length,
     failed: checks.filter((c) => c.result?.availability.status === "error")
       .length,
     untested: checks.filter((c) => !c.result).length,
@@ -47,7 +57,10 @@ export function importModelLabel(check: SubModelCheck): string {
   if (check.state === "error" || check.result?.availability.status === "error")
     return "检测失败";
   if (check.state === "done" && check.result?.availability.status === "success")
-    return "可用";
+    return check.result.availability.terminal_status === "missing"
+      ? "成功，但缺少结束事件"
+      : check.result.availability.terminal_status === "missing_output"
+        ? "成功，但结束事件缺少最终文本" : "可用";
   return "未检测";
 }
 
