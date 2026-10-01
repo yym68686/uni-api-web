@@ -1,3 +1,4 @@
+import { TableLoading, DetailLoading } from "./PageLoading";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
@@ -414,7 +415,7 @@ function CheckDetails({
               </select>
             </label>
           )}
-          {needsDetails && details.isPending ? <div role="status"><Spinner />正在读取完整检测详情…</div> : details.isError ? <div role="alert">{details.error.message}<button className="button" onClick={()=>void details.refetch()}>重试</button></div> : <table
+          {needsDetails && details.isPending ? <DetailLoading kind="form" label="检测详情" /> : details.isError ? <div role="alert">{details.error.message}<button className="button" onClick={()=>void details.refetch()}>重试</button></div> : <table
             className="sub-check-details-table"
             aria-label={`${check.model} 检测详情`}
           >
@@ -1024,11 +1025,8 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
           </div>
         )}
         {query.data && (query.data.cached || query.isError) && <p className="settings-note" role="status">正在显示上次读取的数据；最新数据尚未确认。</p>}
-        {!query.data && !accountHeaders.data ? (
-          <div className="sub-loading">
-            <Spinner />
-            正在读取账号
-          </div>
+        {!query.data && !accountHeaders.data && (query.isPending || accountHeaders.isPending) ? (
+          <TableLoading kind="accounts" rows={3} />
         ) : accounts.length === 0 ? (
           <Empty title="添加第一个站点账号" icon={<Globe2 size={25} />}>
             填入站点地址与账号密码，自动发现可用分组并检测模型。
@@ -1168,9 +1166,9 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
             <div className="data-title">
               <ScanLine size={19} />
               <h2>渠道管理</h2>
-              <span className="count-badge">{query.isPending || management.isPending ? "…" : rows.length}</span>
+              <span className="count-badge">{query.isPending || management.isPending ? "—" : rows.length}</span>
             </div>
-            <span className="sub-detection-scope">{query.isPending || management.isPending ? "正在读取渠道" : `${eligible.length} 个渠道可检测`}</span>
+            <span className="sub-detection-scope">{query.isPending || management.isPending ? "" : `${eligible.length} 个渠道可检测`}</span>
           </div>
           <div className="sub-detection-controls" role="region" aria-label="渠道管理操作" tabIndex={0}>
             <CreateChannel sources={sources.data?.data || []} />
@@ -1452,7 +1450,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
           </button>
         </div>
         {query.isPending || management.isPending ? (
-          <div className="sub-loading" role="status"><Spinner />正在读取渠道</div>
+          <TableLoading kind="checks" rows={6} />
         ) : rows.length === 0 ? (
           <Empty title="没有匹配的渠道">
             添加渠道、同步站点账号或调整筛选后查看。

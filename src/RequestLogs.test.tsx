@@ -289,13 +289,13 @@ it("prefetches only the intended row, shares in-flight work, and reopens instant
   await waitFor(() => expect(traces).toHaveLength(1));
   await user.click(button);
   expect(traces).toHaveLength(1);
-  expect(screen.getByText("正在读取请求记录…")).toBeVisible();
+  expect(screen.getByRole("status", {name:"加载请求详情"})).toBeVisible();
   await act(async () => finish(Response.json(traceResult())));
   await screen.findByRole("heading", { name: "请求成功" });
   await user.click(screen.getByRole("button", { name: "关闭请求详情" }));
   await user.click(button);
   expect(screen.getByRole("heading", { name: "请求成功" })).toBeVisible();
-  expect(screen.queryByText("正在读取请求记录…")).not.toBeInTheDocument();
+  expect(screen.queryByRole("status", {name:"加载请求详情"})).not.toBeInTheDocument();
   expect(traces).toHaveLength(1);
   await user.click(screen.getByRole("button", { name: "刷新记录" }));
   await waitFor(() => expect(traces).toHaveLength(2));

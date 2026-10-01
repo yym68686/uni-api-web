@@ -1,8 +1,8 @@
+import { DetailLoading } from "./PageLoading";
 import { lazy, Suspense, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Settings2, SlidersHorizontal, X } from "lucide-react";
 import type { Channel } from "./types";
-import { Spinner } from "./ui";
 const Editor = lazy(() => import("./ChannelSettingsEditor").then(m=>({default:m.Editor})));
 
 export type SettingsChannel = Pick<Channel, "provider" | "provider_name" | "source_id" | "source_name" | "model">;
@@ -40,7 +40,7 @@ export function ChannelSettings({ row }: { row: SettingsChannel }) {
               <X size={20} />
             </Dialog.Close>
           </header>
-          {open && <Suspense fallback={<div role="status"><Spinner />正在读取渠道设置…</div>}><Editor row={row} onClose={() => setOpen(false)} /></Suspense>}
+          {open && <Suspense fallback={<DetailLoading kind="form" label="渠道设置" />}><Editor row={row} onClose={() => setOpen(false)} /></Suspense>}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

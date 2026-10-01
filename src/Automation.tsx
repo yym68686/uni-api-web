@@ -1,3 +1,4 @@
+import { TaskLoading, TableLoading } from "./PageLoading";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import {
@@ -186,6 +187,8 @@ export function Automation({
     [selected, setSelected] = useState(""),
     [draft, setDraft] = useState<Task | null>(null),
     [audit, setAudit] = useState<Audit[]>([]),
+    [auditLoading, setAuditLoading] = useState(true),
+    auditScope = useRef<string>(""),
     [detail, setDetail] = useState<Audit | null>(null),
     [keys, setKeys] = useState<Key[]>([]),
     [loading, setLoading] = useState(true),
@@ -218,7 +221,9 @@ export function Automation({
   }, [generation]);
   useEffect(() => {
     let live = true;
-    setAudit([]);
+    if (auditScope.current !== selected) setAudit([]);
+    auditScope.current = selected;
+    setAuditLoading(true);
     void controlRequest<{ data: Audit[] }>(
       selected
         ? `/v1/automations/${encodeURIComponent(selected)}`
@@ -229,7 +234,8 @@ export function Automation({
       })
       .catch((e) => {
         if (live) setError(String(e.message || e));
-      });
+      })
+      .finally(() => { if (live) setAuditLoading(false); });
     return () => {
       live = false;
     };
@@ -399,8 +405,8 @@ export function Automation({
             <span className="count-badge">{tasks.length}</span>
           </div>
           <div className="data-actions">
-            <button className="button small" onClick={reload}>
-              <RefreshCw size={15} />
+            <button className="button small" onClick={reload} disabled={loading || auditLoading}>
+              <RefreshCw size={15} className={loading || auditLoading ? "spin" : ""} />
               刷新数据
             </button>
             <button className="button small" onClick={newTask}>
@@ -421,8 +427,8 @@ export function Automation({
       <div className="data-panel automation-list">
         <div className="data-heading">
           <h3>任务</h3>
-          {loading && <Spinner small />}
         </div>
+        {loading && !tasks.length && <TaskLoading />}
         {tasks.map((t) => (
           <article
             className={`automation-card ${selected === t.id ? "selected" : ""}`}
@@ -882,7 +888,7 @@ export function Automation({
             </button>
           )}
         </div>
-        {audit.length ? (
+        {auditLoading && !audit.length ? <TableLoading kind="history" rows={4} /> : audit.length ? (
           <>
             <div className="automation-audit-list">
               {audit.map((a) => (

@@ -1,3 +1,4 @@
+import { DetailLoading } from "./PageLoading";
 import { useEffect, useState, useRef, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -829,10 +830,7 @@ export function Editor({
   }
   if (query.isPending)
     return (
-      <div className="settings-loading">
-        <Spinner />
-        正在读取渠道设置…
-      </div>
+      <DetailLoading kind="form" label="渠道设置" />
     );
   if (query.isError || !view || !draft)
     return (

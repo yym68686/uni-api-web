@@ -1,3 +1,4 @@
+import { DetailLoading } from "./PageLoading";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -18,7 +19,6 @@ import type { SubAccount, SubTarget } from "./Sub2apiChecks";
 import { routeOptions } from "./channelRouteData";
 import type { SubImportsQuery } from "./sub2apiImports";
 import type { Channel } from "./types";
-import { Spinner } from "./ui";
 
 // The drawer owns only navigation. All editing, validation and batch actions
 // remain in the same dialogs used by Channel Management.
@@ -187,9 +187,7 @@ export function ChannelModelEditor({
             <X size={18} />
           </Dialog.Close>
           {loading ? (
-            <p role="status">
-              <Spinner small /> 正在读取当前渠道的已保存模型和路由…
-            </p>
+            <DetailLoading kind="models" label="模型和路由" />
           ) : (
             <div role="alert">
               <p>

@@ -1,3 +1,4 @@
+import { TableLoading } from "./PageLoading";
 import { Fragment, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
@@ -331,10 +332,9 @@ export function PriceSettings({
         <div className="data-title">
           <SlidersHorizontal size={19} />
           <h2>模型价格</h2>
-          <span className="count-badge">{all.length}</span>
+          <span className="count-badge">{loading ? "—" : all.length}</span>
         </div>
         <div className="data-actions price-toolbar">
-          {loading && <Spinner small />}
           <label className="price-search-field">
             <Search size={15} aria-hidden="true" />
             <input
@@ -383,6 +383,7 @@ export function PriceSettings({
           {error}
         </p>
       )}
+      {loading ? <TableLoading kind="prices" rows={8} /> : <>
       <div
         className="price-table-scroll"
         role="region"
@@ -451,6 +452,7 @@ export function PriceSettings({
         </span>
         <span>窄屏可横向滚动，模型列固定</span>
       </div>
+      </>}
     </section>
   );
 }

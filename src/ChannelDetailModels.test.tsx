@@ -204,7 +204,7 @@ it("shows loading and recoverable errors instead of declaring models unavailable
   );
   const detail = await openDetail(app);
   expect(await within(detail.getByRole("region",{name:"可用模型"})).findByRole("status")).toHaveTextContent(
-    "正在读取可用模型",
+    "可用模型加载中",
   );
   await act(async () => finish(new Response("unavailable", { status: 503 })));
   expect(await detail.findByRole("alert")).toHaveTextContent(

@@ -1,38 +1,9 @@
 import { useState } from "react";
 import { ConsoleHeader, ConsoleNavigation } from "./ConsoleChrome";
 import { loadView } from "./preferences";
-import type { View } from "./preferences";
+import { PageLoading } from "./PageLoading";
 import { loadConnection } from "./session";
 import { useTheme } from "./theme";
-
-const panelTitles: Record<Exclude<View, "overview">, string> = {
-  channels: "渠道表现",
-  balances: "渠道余额",
-  sub2api: "站点账号",
-  prices: "模型价格",
-  sources: "uni-api 来源",
-  automations: "自动化",
-  requests: "请求日志",
-};
-
-function SkeletonPanel({ title }: { title: string }) {
-  return (
-    <section className="data-panel">
-      <div className="data-heading">
-        <div className="data-title">
-          <h2>{title}</h2>
-        </div>
-        <div className="skeleton startup-search" />
-      </div>
-      <div className="table-skeleton">
-        <div className="skeleton skeleton-header" />
-        {Array.from({ length: 6 }, (_, i) => (
-          <div className="skeleton skeleton-row" key={i} />
-        ))}
-      </div>
-    </section>
-  );
-}
 
 export function StartupScreen({ onRetry }: { onRetry?: () => void }) {
   const [theme] = useTheme();
@@ -43,8 +14,6 @@ export function StartupScreen({ onRetry }: { onRetry?: () => void }) {
       account: !connection,
     };
   });
-  const showMetrics =
-    view === "overview" || view === "channels" || view === "balances";
   return (
     <div className="app-shell startup-screen" aria-busy={!onRetry}>
       <aside className="sidebar" aria-hidden="true" inert>
@@ -68,28 +37,7 @@ export function StartupScreen({ onRetry }: { onRetry?: () => void }) {
                 正在恢复会话…
               </span>
               <div aria-hidden="true" className="startup-content">
-                {showMetrics && (
-                  <div
-                    className={
-                      view === "overview" ? "overview-grid" : "metric-grid"
-                    }
-                  >
-                    {Array.from(
-                      { length: view === "overview" ? 8 : 4 },
-                      (_, i) => (
-                        <div className="metric-card" key={i}>
-                          <div className="skeleton startup-label" />
-                          <div className="skeleton startup-value" />
-                          <div className="skeleton startup-note" />
-                        </div>
-                      ),
-                    )}
-                  </div>
-                )}
-                {view === "overview" ? null : (
-                  <SkeletonPanel title={panelTitles[view]} />
-                )}
-                {view === "sub2api" && <SkeletonPanel title="模型检测" />}
+                <PageLoading view={view} />
               </div>
             </>
           )}

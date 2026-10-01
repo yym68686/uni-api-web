@@ -1,5 +1,5 @@
 import { expect, it, vi, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Automation } from "./Automation";
 const sources = [
@@ -130,4 +130,25 @@ it("provides independent quality tasks and refreshes task and audit data", async
   const count = requests.length;
   await user.click(screen.getByRole("button", { name: "刷新数据" }));
   await waitFor(() => expect(requests.length).toBeGreaterThan(count));
+});
+
+it("retains audit records during a refresh and when the refresh fails", async () => {
+  let resolveAudit!: (response: Response) => void;
+  let reads = 0;
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+    if (url.endsWith("/automations/audit")) {
+      if (++reads > 1) return new Promise<Response>(resolve => { resolveAudit = resolve; });
+      return Response.json({data:[{id:7, task_name:"保留审计", task_id:"task", run_at:"2026-10-01T00:00:00Z", status:"applied", reason:"已调整渠道顺序"}]});
+    }
+    return Response.json({data:[]});
+  }));
+  render(<Automation sources={sources} />);
+  const user = userEvent.setup();
+  const original = await screen.findByText("已调整渠道顺序");
+  await user.click(screen.getByRole("button", {name:"刷新数据"}));
+  expect(original).toBeVisible();
+  expect(screen.queryByRole("status", {name:"加载历史记录"})).not.toBeInTheDocument();
+  await act(async () => resolveAudit(new Response("audit unavailable", {status:503})));
+  expect(await screen.findByRole("alert")).toHaveTextContent("audit unavailable");
+  expect(original).toBeVisible();
 });

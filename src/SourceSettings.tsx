@@ -1,3 +1,4 @@
+import { SourceLoading } from "./PageLoading";
 import { useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { Plus, Server, Trash2, Pencil, Check, X } from "lucide-react";
@@ -17,10 +18,12 @@ export function SourceSettings({
   sources,
   onSaved,
   refreshAction,
+  loading = false,
 }: {
   sources: ConsoleSource[];
   onSaved: () => void;
   refreshAction?: ReactNode;
+  loading?: boolean;
 }) {
   const [editing, setEditing] = useState<ConsoleSource | null>(null),
     [open, setOpen] = useState(false),
@@ -121,6 +124,7 @@ export function SourceSettings({
           {error}
         </p>
       )}
+      {loading && !sources.length && <SourceLoading />}
       {sources.map((src) => (
         <div className="source-item" key={src.id}>
           <Server size={20} />
@@ -170,7 +174,7 @@ export function SourceSettings({
           )}
         </div>
       ))}
-      {!sources.length && !open && (
+      {!loading && !sources.length && !open && (
         <p className="settings-note">
           还没有来源。添加第一个 uni-api 后即可开始观测。
         </p>

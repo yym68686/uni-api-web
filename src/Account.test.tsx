@@ -32,6 +32,8 @@ it.each([
   ["prices", "价格设置", "light"],
   ["balances", "余额管理", "dark"],
   ["sources", "设置", "light"],
+  ["requests", "日志", "dark"],
+  ["automations", "自动化", "light"],
 ] as const)(
   "restores the %s shell and saved theme while authentication is pending",
   async (view, label, theme) => {
@@ -71,7 +73,7 @@ it.each([
       app.container.querySelector(".startup-screen .topbar strong"),
     ).toHaveTextContent(label);
     expect(
-      app.container.querySelector(".startup-screen .workspace .skeleton"),
+      app.container.querySelector(".startup-screen .workspace .loading-bone"),
     ).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toContain("/auth/me");
@@ -230,7 +232,7 @@ it.each(["configured", "empty", "failed"] as const)(
       }),
     );
     mount();
-    await screen.findByLabelText("加载渠道");
+    await screen.findByRole("status", {name:"加载渠道"});
     expect(screen.getByRole("heading", { name: "渠道表现" })).toBeVisible();
     expect(
       screen.queryByRole("heading", { name: "uni-api 来源" }),

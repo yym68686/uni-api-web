@@ -170,3 +170,14 @@ it("does not claim long-context settings were saved when the backend omits the f
   expect(onSaved).not.toHaveBeenCalled();
   expect(toggle).toBeChecked();
 });
+
+it("waits for saved prices before allowing edits instead of flashing editable defaults", () => {
+  const props = {prices:[] as ModelPrice[],loading:true,connection:{base:"",key:"",session:"test",account:true},onSaved:vi.fn()};
+  const view=render(<PriceSettings {...props}/>);
+  expect(screen.getByRole("status",{name:"加载模型价格"})).toBeInTheDocument();
+  expect(screen.queryByRole("spinbutton")).not.toBeInTheDocument();
+  expect(screen.queryByText("没有匹配的检测模型。")).not.toBeInTheDocument();
+  view.rerender(<PriceSettings {...props} loading={false}/>);
+  expect(screen.queryByRole("status",{name:"加载模型价格"})).not.toBeInTheDocument();
+  expect(screen.getByLabelText("gpt-6-astra 售卖价格百分比")).toBeEnabled();
+});

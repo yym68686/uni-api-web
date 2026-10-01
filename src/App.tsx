@@ -1,3 +1,4 @@
+import { PageLoading, MetricLoading, TableLoading, DetailLoading } from "./PageLoading";
 import { endpointChoices, readKeys } from "./requestFilters";
 import type { Keys } from "./requestFilters";
 import { FailureCounts } from "./FailureCounts";
@@ -696,7 +697,7 @@ function Trend({
         </div>
       </div>
       {series.isPending ? (
-        <div className="chart-skeleton skeleton" />
+        <DetailLoading kind="chart" label="请求趋势" />
       ) : series.error instanceof AnalyticsInitializingError ? (
         <p role="status"><Spinner small /> {series.error.message}</p>
       ) : series.isError ? (
@@ -1175,7 +1176,7 @@ function Dashboard({
           catalog.error?.message);
   const rows = useMemo(
     () =>
-      error
+      (keyRemoved || modelRemoved || sourceRemoved || (error && !catalog.data))
         ? []
         : catalogMetrics(catalog.data, metrics.data)
             .filter((row) => !model || row.model === model)
@@ -1184,7 +1185,7 @@ function Dashboard({
               provider_name:
                 imported.data?.labels?.[row.source_id || ""]?.[row.provider],
             })),
-    [catalog.data, metrics.data, model, error, imported.data],
+    [catalog.data, metrics.data, model, error, imported.data, keyRemoved, modelRemoved, sourceRemoved],
   );
   const controls = useChannelControls({
     connection: baseConnection,
@@ -1494,7 +1495,7 @@ function Dashboard({
             baseConnection.account ? selectView("sources") : changeConnection()
           }
         />
-        <main className="workspace"><Suspense fallback={<div role="status" className="data-panel"><Spinner />正在读取页面…</div>}>
+        <main className="workspace"><Suspense fallback={<PageLoading view={view} />}>
           {!!catalog.data?.unavailable_sources?.length && (
             <div role="alert" className="error-banner">
               来源暂不可用：{catalog.data.unavailable_sources.join("、")}
@@ -1519,6 +1520,7 @@ function Dashboard({
               (sourceQuery.isSuccess && sourceList.length === 0)) ? (
             <SourceSettings
               sources={sourceList}
+              loading={sourceQuery.isPending}
               refreshAction={refreshButton}
               onSaved={() => {
                 queryClient.removeQueries({ queryKey: ["channel-import-keys"] });
@@ -1544,14 +1546,16 @@ function Dashboard({
                 void queryClient.invalidateQueries({ queryKey: ["metrics"] });
               }}
             />
-          ) : historyInitializing && !metrics.data ? null : view === "overview" ? (
+          ) : view === "overview" && !metrics.data && (metrics.isPending || historyInitializing) ? (
+            <PageLoading view="overview" />
+          ) : view === "overview" ? (
             <Overview
               metrics={metrics.data}
               rows={rows}
               live={liveMap}
               refreshAction={refreshButton}
             />
-          ) : (
+          ) : !metrics.data && metrics.isPending ? <MetricLoading /> : (
             <motion.section
               {...reveal}
               transition={{ delay: 0.04 }}
@@ -1945,7 +1949,8 @@ function Dashboard({
                     : `实例于 ${time(metrics.data.collection_started_at)} 开始采集，当前窗口覆盖尚不完整。`}
                 </div>
               )}
-              {error ? (
+              {error && rows.length > 0 && <p role="alert" className="error-banner">刷新失败，保留当前数据。{error}</p>}
+              {error && !rows.length ? (
                 <div role="alert" className="table-error">
                   <Unplug size={26} />
                   <h3>暂时无法读取渠道</h3>
@@ -1955,12 +1960,7 @@ function Dashboard({
                   </button>
                 </div>
               ) : metrics.isPending || (historyInitializing && !metrics.data) ? (
-                <div className="table-skeleton" aria-label="加载渠道">
-                  <div className="skeleton skeleton-header" />
-                  {Array.from({ length: 7 }, (_, i) => (
-                    <div className="skeleton skeleton-row" key={i} />
-                  ))}
-                </div>
+                <TableLoading kind={channelView ? "channels" : "balances"} />
               ) : total === 0 ? (
                 <Empty
                   title={

@@ -1,3 +1,4 @@
+import { DetailLoading } from "./PageLoading";
 import { lazy, Suspense, useState } from "react";
 import { Check, Pencil } from "lucide-react";
 const ChannelModelEditor = lazy(() => import("./ChannelModelEditor").then(m=>({default:m.ChannelModelEditor})));
@@ -6,7 +7,6 @@ import { availableModelChecks } from "./sub2apiResults";
 import type { SubImportsQuery } from "./sub2apiImports";
 import { boundGroups } from "./sub2apiImports";
 import type { Channel } from "./types";
-import { Spinner } from "./ui";
 import { time } from "./format";
 import { pricePair } from "./sub2apiPriceCheck";
 
@@ -27,7 +27,7 @@ export function ChannelModels({
   const editButton = row.source_id && <button className="button small detail-model-edit" onClick={() => setEditing(true)} aria-haspopup="dialog">
     <Pencil size={13} /> 编辑可用模型
   </button>;
-  const editor = editing && <Suspense fallback={<div role="status"><Spinner />正在读取模型编辑器…</div>}><ChannelModelEditor row={row} imports={imports} keyId={keyId} session={session} close={() => setEditing(false)} /></Suspense>;
+  const editor = editing && <Suspense fallback={<DetailLoading kind="models" label="模型编辑器" />}><ChannelModelEditor row={row} imports={imports} keyId={keyId} session={session} close={() => setEditing(false)} /></Suspense>;
   const installed = imports.data?.data.find(
     (channel) =>
       channel.source_id === row.source_id && channel.provider === row.provider,
@@ -115,10 +115,7 @@ export function ChannelModels({
           </button>
         </div>
       ) : loading ? (
-        <div className="detail-models-message" role="status">
-          <Spinner small />
-          正在读取可用模型…
-        </div>
+        <DetailLoading kind="models" label="可用模型" />
       ) : !target ? (
         <p className="muted">未找到对应的 sub2api 检测记录。</p>
       ) : models.length ? (

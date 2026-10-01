@@ -1396,34 +1396,6 @@ nav > button.active > svg {
   line-height: 1.7;
   text-align: center;
 }
-.skeleton {
-  background: linear-gradient(
-    100deg,
-    var(--subtle) 20%,
-    var(--surface) 45%,
-    var(--subtle) 70%
-  );
-  background-size: 220% 100%;
-  animation: shimmer 1.8s linear infinite;
-  border-radius: 4px;
-}
-.table-skeleton {
-  padding: 10px 22px 20px;
-  display: grid;
-  gap: 16px;
-}
-.skeleton-header {
-  height: 28px;
-}
-.skeleton-row {
-  height: 45px;
-  opacity: 0.6;
-}
-@keyframes shimmer {
-  to {
-    background-position-x: -220%;
-  }
-}
 /* Detail surfaces and charts */
 .dialog-overlay {
   position: fixed;
@@ -1770,10 +1742,6 @@ nav > button.active > svg {
   color: var(--muted);
   font-size: 8px;
   margin: 9px 0 0 38px;
-}
-.chart-skeleton {
-  height: 150px;
-  margin-top: 20px;
 }
 .inline-error {
   font-size: 12px;
@@ -2586,15 +2554,6 @@ nav > button.active > svg {
 
 /* Match the console layout while the session is restored. */
 .startup-screen button:disabled { opacity: 1; }
-.startup-content { display: grid; gap: 20px; }
-.startup-content .metric-grid { margin-bottom: 6px; }
-.startup-label { width: 40%; height: 12px; }
-.startup-value { width: 55%; height: 31px; margin-top: 20px; }
-.startup-note { width: 75%; height: 12px; margin-top: 15px; }
-.startup-search { width: min(45%, 360px); height: 34px; }
-@media (prefers-reduced-motion: reduce) {
-  .startup-screen .skeleton { animation: none; }
-}
 
 .sub-account-dialog { width: min(510px, calc(100vw - 32px)); }
 .site-reauth-overlay { z-index: 110; }

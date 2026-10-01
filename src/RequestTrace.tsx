@@ -1,3 +1,4 @@
+import { DetailLoading } from "./PageLoading";
 import { useState } from "react";
 import type { CSSProperties } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
@@ -13,7 +14,6 @@ import {
 } from "lucide-react";
 import { analyticsRequest, initializationRetryInterval } from "./api";
 import type { Connection, Metrics } from "./types";
-import { Spinner } from "./ui";
 import { SiteLink } from "./ChannelSite";
 import {
   buildTrace,
@@ -121,10 +121,7 @@ export function RequestTraceDialog({
           </header>
           <div className="request-log-dialog-body">
             {query.isPending && (
-              <p role="status">
-                <Spinner small />
-                正在读取请求记录…
-              </p>
+              <DetailLoading kind="timeline" label="请求详情" />
             )}
             {query.error && (
               <p role="alert" className="error-banner">

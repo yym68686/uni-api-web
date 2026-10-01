@@ -111,12 +111,12 @@ it("keeps channel loading honest and does not read every source key directory on
   vi.stubGlobal("fetch", fetcher);
   mount("quick-entry", client);
   expect(screen.getByRole("heading", { name: "站点账号" }).parentElement).toHaveTextContent("…");
-  expect(screen.getByRole("status", { name: "" })).toHaveTextContent("正在读取渠道");
+  expect(screen.getByRole("status", { name: "加载渠道检测" })).toBeInTheDocument();
   expect(screen.queryByText("没有匹配的渠道")).not.toBeInTheDocument();
   expect(fetcher.mock.calls.some(([input]) => input.includes("keys_only"))).toBe(false);
   await act(async () => { replies.headers(Response.json({data:fixtures().map(a=>({...a,targets:[]}))})); });
   await waitFor(() => expect(screen.getByRole("heading", { name: "站点账号" }).parentElement).toHaveTextContent("2"));
-  expect(screen.getByRole("status", {name:""})).toHaveTextContent("正在读取渠道");
+  expect(screen.getByRole("status", {name:"加载渠道检测"})).toBeInTheDocument();
   await act(async () => {
     replies.accounts(Response.json({ data: fixtures() }));
     replies.management(Response.json({ data: [], unavailable_sources: [] }));

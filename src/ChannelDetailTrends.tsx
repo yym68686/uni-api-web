@@ -1,3 +1,4 @@
+import { DetailLoading } from "./PageLoading";
 import { FailureCounts } from "./FailureCounts";
 import { useMemo, useState } from "react";
 import { AnalyticsInitializingError } from "./api";
@@ -213,9 +214,7 @@ export function ChannelDetailTrends(props: ChannelTimeseriesProps) {
         当前来源、渠道与模型 · 跟随 API key、时间、端点和流式筛选
       </p>
       {query.isPending ? (
-        <p role="status">
-          <Spinner small /> 正在读取渠道趋势…
-        </p>
+        <DetailLoading kind="chart" label="渠道趋势" />
       ) : query.error instanceof AnalyticsInitializingError ? (
         <p role="status">
           <Spinner small /> {query.error.message}

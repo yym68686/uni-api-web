@@ -1,3 +1,4 @@
+import { TableLoading } from "./PageLoading";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { queryOptions, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -548,10 +549,7 @@ export function RequestLogsPage({
         </p>
       )}
       {query.isPending ? (
-        <div className="request-log-empty" role="status">
-          <Spinner />
-          正在读取请求日志…
-        </div>
+        <TableLoading kind="requests" rows={8} />
       ) : !data?.data.length ? (
         <div className="request-log-empty">
           <Search size={26} />
