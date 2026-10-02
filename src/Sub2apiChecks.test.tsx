@@ -835,6 +835,15 @@ it("isolates row submissions by account, group and check kind, including out-of-
   view.unmount();
   client.clear();
 });
+it("labels absent response-created samples without substituting legacy near-zero text timing", () => {
+  render(<Tooltip.Provider><Timing
+    value={{sample_count:0,p50_ms:null,p95_ms:null,mean_ms:null,last_ms:null}}
+    text={{sample_count:25,p50_ms:1,p95_ms:1,mean_ms:.02,last_ms:.01}}
+  /></Tooltip.Provider>);
+  expect(screen.getByText("未记录")).toBeVisible();
+  expect(document.querySelector(".latency-badge")).toBeNull();
+});
+
 it("colors only first-output p50 with exact 5s and 10s boundaries", () => {
   const { container } = render(
     <Tooltip.Provider>

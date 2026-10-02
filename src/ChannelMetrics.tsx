@@ -131,6 +131,13 @@ export function Timing({
           p95 {ms(value?.p95_ms)} · 最近 {ms(value?.last_ms)}
           <br />
           {count(value?.sample_count || 0)} 次样本 · 分位值为直方图上界估计
+          {!wait && !value?.sample_count && (
+            <>
+              <br />
+              当前范围未采集 response.created 时间；成功次数不代表有延迟样本。
+              旧版协议转换遗漏的时间无法从成功率或总耗时补算。
+            </>
+          )}
           {!wait && (
             <>
               <br />
@@ -155,6 +162,8 @@ export function Timing({
         >
           {ms(value?.p50_ms)}
         </span>
+      ) : !value?.sample_count && value?.p50_ms == null ? (
+        <span className="muted">未记录</span>
       ) : (
         <LatencyBadge value={value?.p50_ms} />
       )}
@@ -278,9 +287,9 @@ export function ChannelMetricCells({
             value={row.stats?.response_created}
             text={row.stats?.first_text}
           />
-          <span className="muted mono">
+          {!!row.stats?.response_created?.sample_count && <span className="muted mono">
             {ms(row.stats?.response_created?.p95_ms)}
-          </span>
+          </span>}
         </div>
       </td>
       <td className="mono">
