@@ -50,6 +50,16 @@ func canonicalPriceModel(model string) string {
 	return model
 }
 
+// Price immutable request facts by the model actually sent upstream. Public
+// aliases (and today's route definitions) must not reprice historical usage as
+// a different model. Only legacy facts without an upstream name use the alias.
+func usagePriceModel(model, upstream string) string {
+	if upstream = strings.TrimSpace(upstream); upstream != "" {
+		model = upstream
+	}
+	return canonicalPriceModel(model)
+}
+
 // A missing setting is a legacy/default value, not an explicit opt-out.
 func (p Price) chargesCacheWrite() bool {
 	if p.ChargeCacheWrite != nil {

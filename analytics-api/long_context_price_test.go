@@ -21,7 +21,7 @@ func TestLongContextPremiumPerRequestBoundariesAndFilters(t *testing.T) {
 	}
 	samples := []sample{}
 	add := func(id string, input, output, read, write int64, base, extra float64) {
-		samples = append(samples, sample{fact: Fact{Schema: 1, EventID: id, Kind: "request", AtMS: now.Add(-10 * time.Minute).UnixMilli(), SourceID: "s1", KeyID: "k1", Provider: "p", Model: "gpt-6-sol-test", UpstreamModel: "up", Endpoint: "/v1/responses", Stream: true, Outcome: "success", InputTokens: &input, OutputTokens: &output, CacheReadTokens: &read, CacheWriteTokens: &write}, base: base, extra: extra})
+		samples = append(samples, sample{fact: Fact{Schema: 1, EventID: id, Kind: "request", AtMS: now.Add(-10 * time.Minute).UnixMilli(), SourceID: "s1", KeyID: "k1", Provider: "p", Model: "gpt-6-sol-test", UpstreamModel: "", Endpoint: "/v1/responses", Stream: true, Outcome: "success", InputTokens: &input, OutputTokens: &output, CacheReadTokens: &read, CacheWriteTokens: &write}, base: base, extra: extra})
 	}
 	// Multiple short requests in the same rollup must not trip the threshold.
 	add("short-a", 200000, 1000, 0, 0, .81, 0)
@@ -81,7 +81,7 @@ func TestLongContextPremiumPerRequestBoundariesAndFilters(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, filter := range []QueryFilter{
-			{Range: "all"}, {Range: "24h"}, {Range: "all", SourceID: "s1", KeyID: "k1", Stream: "true", Endpoint: "/v1/responses", Model: "gpt-6-sol-test", UpstreamModel: "up", Provider: "p"},
+			{Range: "all"}, {Range: "24h"}, {Range: "all", SourceID: "s1", KeyID: "k1", Stream: "true", Endpoint: "/v1/responses", Model: "gpt-6-sol-test", UpstreamModel: "", Provider: "p"},
 			{Range: "all", SourceIDs: []string{"s2"}}, {Range: "all", SourceIDs: []string{}}, {Range: "all", Model: "gpt-6-luna"},
 		} {
 			filter.To = now.Unix()
