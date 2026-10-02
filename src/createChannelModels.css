@@ -1,0 +1,136 @@
+.create-channel-models {
+  border-top: 1px solid var(--line);
+  padding-top: 20px;
+  min-width: 0;
+}
+.create-models-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.create-models-heading h3 {
+  margin: 0;
+  font-size: 14px;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.create-models-actions {
+  display: flex;
+  gap: 8px;
+}
+.create-models-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 16px 0 12px;
+}
+.create-channel-body .create-models-filter label {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  border-radius: 7px;
+  padding-left: 10px;
+}
+.create-channel-body .create-models-filter input {
+  border: 0;
+  background: transparent;
+  padding: 7px 8px;
+}
+.create-models-filter > span {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.create-models-empty {
+  padding: 24px 12px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+.create-model-manual {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.create-model-manual input {
+  flex: 1;
+}
+.create-model-manual p {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 12px;
+}
+.create-channel-body .create-channel-models .batch-model-heading {
+  display: none;
+}
+.create-channel-models .sub-model-options {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-height: 270px;
+  overflow: auto;
+  padding: 2px;
+}
+.create-channel-body .create-channel-models .sub-model-options label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.create-channel-models .sub-model-options label:has(input:checked) {
+  background: var(--green-bg);
+  border-color: color-mix(in srgb, var(--green) 35%, var(--line));
+}
+.create-channel-models .sub-model-options label:has(input:disabled) {
+  cursor: default;
+  opacity: 0.6;
+}
+.create-channel-body .create-channel-models input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  padding: 0;
+}
+.create-channel-models .sub-model-options span {
+  overflow-wrap: anywhere;
+}
+.create-channel-models .model-aliases {
+  margin-bottom: 0;
+}
+.create-channel-models .model-aliases p {
+  color: var(--muted);
+}
+.create-channel-models .model-alias-row input,
+.create-channel-models .model-alias-row select {
+  color: var(--ink);
+}
+.create-models-feedback {
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  margin: 0;
+}
+@media (max-width: 600px) {
+  .create-channel-models .sub-model-options {
+    grid-template-columns: 1fr;
+  }
+  .create-models-filter {
+    flex-wrap: wrap;
+  }
+  .create-models-filter > label {
+    flex-basis: 100%;
+  }
+  .create-models-actions .button {
+    padding-inline: 8px;
+  }
+}

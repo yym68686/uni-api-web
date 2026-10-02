@@ -1,11 +1,16 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { Plus, X, SlidersHorizontal, Braces } from "lucide-react";
+import { Plus, X, SlidersHorizontal, Braces, Download } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { parse, stringify } from "yaml";
 import { ApiError, controlRequest } from "./api";
 import type { ConsoleSource } from "./SourceSettings";
 import type { KeyInfo } from "./types";
+
+import { CreateChannelModels } from "./CreateChannelModels";
+import { readCreationModels, writeCreationModels } from "./creationModelMapping";
+import type { ModelAlias } from "./ModelAliases";
+import { Spinner } from "./ui";
 
 type Document = Record<string, unknown>;
 interface Schema {
@@ -121,7 +126,28 @@ export function CreateChannel({
   const [source, setSource] = useState("");
   const [key, setKey] = useState("");
   const [draft, setDraft] = useState<Document>(initialDocument);
-  const [modelText, setModelText] = useState("");
+  const [knownModels, setKnownModels] = useState<string[]>([]);
+  const [selectedModels, setSelectedModels] = useState<string[]>([]);
+  const [aliases, setAliases] = useState<ModelAlias[]>([]);
+  const [discovering, setDiscovering] = useState(false);
+  const [discoveryError, setDiscoveryError] = useState("");
+  const [discoveryNote, setDiscoveryNote] = useState("");
+  const discovery = useRef<AbortController | null>(null);
+  useEffect(() => () => discovery.current?.abort(), []);
+  const modelOptions = [
+    ...new Set([
+      ...knownModels,
+      ...selectedModels,
+      ...aliases.map((a) => a.upstream),
+    ]),
+  ];
+  function cancelDiscovery() {
+    discovery.current?.abort();
+    discovery.current = null;
+    setDiscovering(false);
+    setDiscoveryError("");
+    setDiscoveryNote("");
+  }
   const [keyText, setKeyText] = useState("");
   const [advanced, setAdvanced] = useState(false);
   const [raw, setRaw] = useState("");
@@ -141,30 +167,26 @@ export function CreateChannel({
   });
   const remoteKeys = useQuery({
     queryKey: ["create-channel-keys", source],
-    queryFn: ({ signal }) => controlRequest<{ data: KeyInfo[] }>(`/v1/sources/${encodeURIComponent(source)}/proxy/v1/api-keys`, { signal }),
-    enabled: open && !!source && !keys.length, retry: false,
+    queryFn: ({ signal }) =>
+      controlRequest<{ data: KeyInfo[] }>(
+        `/v1/sources/${encodeURIComponent(source)}/proxy/v1/api-keys`,
+        { signal },
+      ),
+    enabled: open && !!source && !keys.length,
+    retry: false,
   });
-  const available = keys.length ? keys.filter(
-    (k) => k.source_id === source || (!k.source_id && sources.length === 1),
-  ) : remoteKeys.data?.data || [];
+  const available = keys.length
+    ? keys.filter(
+        (k) => k.source_id === source || (!k.source_id && sources.length === 1),
+      )
+    : remoteKeys.data?.data || [];
   const edit = (field: string, value: unknown) => {
+    if (field === "base_url" || field === "engine") cancelDiscovery();
     setDraft((old) => ({ ...old, [field]: value }));
     setMessage("");
   };
   function basicDocument() {
-    const models = modelText
-      .split("\n")
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .map((line) => {
-        const index = line.indexOf("=");
-        if (index < 0) return line;
-        const upstream = line.slice(0, index).trim(),
-          alias = line.slice(index + 1).trim();
-        if (!alias || !upstream)
-          throw Error("模型映射请填写：原来的名字 = 重命名后的名字。");
-        return { [upstream]: alias };
-      });
+    const models = writeCreationModels(selectedModels, aliases);
     const secrets = keyText
       .split("\n")
       .map((s) => s.trim())
@@ -181,6 +203,7 @@ export function CreateChannel({
     return result;
   }
   function switchMode(next: boolean) {
+    cancelDiscovery();
     try {
       const doc = readDocument();
       if (next) setRaw(stringify(doc));
@@ -188,17 +211,16 @@ export function CreateChannel({
         if (!schema.data) return;
         creationSettings(doc, schema.data);
         setDraft(doc);
-        setModelText(
-          (doc.model as unknown[])
-            .flatMap((m) =>
-              typeof m === "string"
-                ? [m]
-                : isObject(m)
-                  ? Object.entries(m).map(([up, alias]) => `${up} = ${alias}`)
-                  : [],
-            )
-            .join("\n"),
-        );
+        const models = readCreationModels(doc.model);
+        setSelectedModels(models.originals);
+        setAliases(models.aliases);
+        setKnownModels((old) => [
+          ...new Set([
+            ...old,
+            ...models.originals,
+            ...models.aliases.map((a) => a.upstream),
+          ]),
+        ]);
         setKeyText(
           Array.isArray(doc.api)
             ? doc.api.join("\n")
@@ -218,8 +240,73 @@ export function CreateChannel({
     setDraft(initialDocument());
     setRaw("");
     setKeyText("");
-    setModelText("");
+    setKnownModels([]);
+    setSelectedModels([]);
+    setAliases([]);
+    cancelDiscovery();
     setAdvanced(false);
+  }
+  async function fetchModels() {
+    if (discovery.current || !source || !String(draft.base_url).trim()) return;
+    const abort = new AbortController();
+    discovery.current = abort;
+    setDiscovering(true);
+    setDiscoveryError("");
+    setDiscoveryNote("");
+    try {
+      const result = await controlRequest<{
+        models: string[];
+        endpoint: string;
+      }>(`${path}/discover-draft`, {
+        method: "POST",
+        signal: AbortSignal.any([abort.signal, AbortSignal.timeout(30000)]),
+        body: JSON.stringify({
+          base_url: String(draft.base_url).trim(),
+          api:
+            keyText
+              .split("\n")
+              .map((k) => k.trim())
+              .find(Boolean) || "",
+          engine: String(draft.engine),
+        }),
+      });
+      if (abort.signal.aborted) return;
+      if (
+        !Array.isArray(result.models) ||
+        result.models.some((m) => typeof m !== "string" || !m.trim())
+      )
+        throw Error("上游模型列表格式无效");
+      const found = [...new Set(result.models)];
+      setKnownModels([
+        ...new Set([
+          ...found,
+          ...selectedModels,
+          ...aliases.map((a) => a.upstream),
+        ]),
+      ]);
+      // Refreshing the catalog must preserve deliberate deselections and aliases.
+      if (!modelOptions.length && !selectedModels.length && !aliases.length)
+        setSelectedModels(found);
+      setDiscoveryNote(
+        found.length
+          ? `已获取 ${found.length} 个模型`
+          : "上游返回空模型列表，可手动添加",
+      );
+    } catch (error) {
+      if (!abort.signal.aborted)
+        setDiscoveryError(
+          error instanceof ApiError && error.status === 404
+            ? "当前服务暂未提供模型获取功能，请稍后刷新重试"
+            : error instanceof Error
+              ? error.message
+              : "获取模型失败",
+        );
+    } finally {
+      if (discovery.current === abort) {
+        discovery.current = null;
+        setDiscovering(false);
+      }
+    }
   }
   function finish(result: Result) {
     if (result.status === "applied") {
@@ -249,7 +336,7 @@ export function CreateChannel({
       setMessage(result.message || "保存结果待确认，请点击“核对保存结果”。");
   }
   async function save() {
-    if (busy) return;
+    if (busy || discovering) return;
     setBusy(true);
     setMessage("");
     let dispatched = false;
@@ -378,6 +465,7 @@ export function CreateChannel({
                   <select
                     value={source}
                     onChange={(e) => {
+                      cancelDiscovery();
                       setSource(e.target.value);
                       setKey("");
                       setMessage("");
@@ -393,7 +481,11 @@ export function CreateChannel({
                 </label>
                 <label>
                   调用 API key
-                  <select value={key} disabled={remoteKeys.isFetching} onChange={(e) => setKey(e.target.value)}>
+                  <select
+                    value={key}
+                    disabled={remoteKeys.isFetching}
+                    onChange={(e) => setKey(e.target.value)}
+                  >
                     <option value="">选择 API key</option>
                     {available.map((k) => (
                       <option key={k.key_id} value={k.key_id}>
@@ -403,7 +495,18 @@ export function CreateChannel({
                   </select>
                 </label>
               </div>
-              {remoteKeys.error && <p role="alert" className="negative">{remoteKeys.error.message}<button type="button" className="button small" onClick={() => void remoteKeys.refetch()}>重新读取 API key</button></p>}
+              {remoteKeys.error && (
+                <p role="alert" className="negative">
+                  {remoteKeys.error.message}
+                  <button
+                    type="button"
+                    className="button small"
+                    onClick={() => void remoteKeys.refetch()}
+                  >
+                    重新读取 API key
+                  </button>
+                </p>
+              )}
               {schema.isFetching && (
                 <p className="settings-help">正在读取来源支持的渠道类型…</p>
               )}
@@ -502,7 +605,10 @@ export function CreateChannel({
                     上游 API key
                     <textarea
                       value={keyText}
-                      onChange={(e) => setKeyText(e.target.value)}
+                      onChange={(e) => {
+                        cancelDiscovery();
+                        setKeyText(e.target.value);
+                      }}
                       autoComplete="off"
                       spellCheck={false}
                       rows={2}
@@ -540,20 +646,47 @@ export function CreateChannel({
                       ))}
                     </div>
                   )}
-                  <label>
-                    模型与映射
-                    <textarea
-                      aria-label="模型与映射"
-                      value={modelText}
-                      onChange={(e) => setModelText(e.target.value)}
-                      spellCheck={false}
-                      rows={4}
-                      placeholder={"每行一个模型\n原来的名字 = 重命名后的名字"}
-                    />
-                    <small>
-                      名称相同时只填模型名；映射时左侧为原来的名字，右侧为重命名后的对外模型名。
-                    </small>
-                  </label>
+                  <CreateChannelModels
+                    models={modelOptions}
+                    selected={selectedModels}
+                    aliases={aliases}
+                    disabled={busy || discovering || !!pending}
+                    onSelect={setSelectedModels}
+                    onAliases={setAliases}
+                    onAdd={(model) => {
+                      setKnownModels((v) => [...new Set([...v, model])]);
+                      setSelectedModels((v) => [...new Set([...v, model])]);
+                    }}
+                    discovery={
+                      <button
+                        type="button"
+                        className="button small"
+                        disabled={
+                          discovering ||
+                          !source ||
+                          !String(draft.base_url).trim()
+                        }
+                        onClick={() => void fetchModels()}
+                      >
+                        {discovering ? (
+                          <Spinner small />
+                        ) : (
+                          <Download size={14} />
+                        )}{" "}
+                        {discovering ? "获取中…" : "获取模型"}
+                      </button>
+                    }
+                  />
+                  {discoveryError && (
+                    <p role="alert" className="create-models-feedback negative">
+                      {discoveryError}
+                    </p>
+                  )}
+                  {discoveryNote && (
+                    <p role="status" className="create-models-feedback muted">
+                      {discoveryNote}
+                    </p>
+                  )}
                 </>
               )}
             </fieldset>
@@ -575,6 +708,7 @@ export function CreateChannel({
                 className="button primary"
                 disabled={
                   busy ||
+                  discovering ||
                   (!pending &&
                     (!source || !key || !supported || schema.isFetching))
                 }

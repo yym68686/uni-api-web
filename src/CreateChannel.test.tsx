@@ -1,5 +1,5 @@
 import { beforeEach, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { CreateChannel, creationSettings } from "./CreateChannel";
@@ -99,15 +99,43 @@ async function mount() {
 }
 
 it("loads caller keys inside channel management without depending on observation filters", async () => {
-  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
-    if (url.endsWith("/api-keys")) return Response.json({ data: [{ key_id: "caller-key", position: 2, prefix: "masked-caller" }] });
-    return Response.json({ create_provider: true, engines: ["gpt"], fields: [] });
-  }));
-  render(<QueryClientProvider client={new QueryClient()}><CreateChannel sources={[{ id:"primary", name:"Fugue", base:"https://gateway.test", has_storage:true, created_at:0 }]} /></QueryClientProvider>);
-  const user=userEvent.setup();
-  await user.click(screen.getByRole("button",{name:"添加渠道"}));
-  expect(await screen.findByRole("option",{name:"#2 · masked-caller"})).toBeInTheDocument();
-  await user.selectOptions(screen.getByLabelText("调用 API key"),"caller-key");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      if (url.endsWith("/api-keys"))
+        return Response.json({
+          data: [
+            { key_id: "caller-key", position: 2, prefix: "masked-caller" },
+          ],
+        });
+      return Response.json({
+        create_provider: true,
+        engines: ["gpt"],
+        fields: [],
+      });
+    }),
+  );
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <CreateChannel
+        sources={[
+          {
+            id: "primary",
+            name: "Fugue",
+            base: "https://gateway.test",
+            has_storage: true,
+            created_at: 0,
+          },
+        ]}
+      />
+    </QueryClientProvider>,
+  );
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "添加渠道" }));
+  expect(
+    await screen.findByRole("option", { name: "#2 · masked-caller" }),
+  ).toBeInTheDocument();
+  await user.selectOptions(screen.getByLabelText("调用 API key"), "caller-key");
   expect(screen.getByLabelText("调用 API key")).toHaveValue("caller-key");
 });
 async function fill(user: ReturnType<typeof userEvent.setup>) {
@@ -121,10 +149,20 @@ async function fill(user: ReturnType<typeof userEvent.setup>) {
     screen.getByLabelText("上游 API key"),
     "fixture-secret-a\nfixture-secret-b",
   );
+  await user.click(screen.getByRole("button", { name: "手动添加" }));
   await user.type(
-    screen.getByLabelText("模型与映射"),
-    "vendor/upstream-model = public-model\nsecond-model",
+    screen.getByLabelText("手动模型名称"),
+    "vendor/upstream-model",
   );
+  await user.click(screen.getByRole("button", { name: "添加模型" }));
+  await user.click(
+    screen.getByRole("checkbox", { name: "vendor/upstream-model" }),
+  );
+  await user.click(screen.getByRole("button", { name: "添加重命名" }));
+  await user.type(screen.getByLabelText("重命名 1 对外模型名"), "public-model");
+  await user.click(screen.getByRole("button", { name: "手动添加" }));
+  await user.type(screen.getByLabelText("手动模型名称"), "second-model");
+  await user.click(screen.getByRole("button", { name: "添加模型" }));
 }
 it("creates an arbitrary provider with multiple keys and model aliases only in the selected calling key", async () => {
   const user = await mount();
@@ -144,8 +182,8 @@ it("creates an arbitrary provider with multiple keys and model aliases only in t
           "/engine": "claude",
           "/api": ["fixture-secret-a", "fixture-secret-b"],
           "/model": [
-            { "vendor/upstream-model": "public-model" },
             "second-model",
+            { "vendor/upstream-model": "public-model" },
           ],
         },
       },
@@ -249,4 +287,114 @@ it("rejects unknown advanced fields and refuses a key from another source", asyn
   );
   expect(screen.getByRole("button", { name: "校验并添加" })).toBeDisabled();
   expect(mutations).toHaveLength(0);
+});
+
+it("fetches draft models without saving a channel, preserves unchecked models and aliases on refresh, and serializes the selected mappings", async () => {
+  const originalFetch = globalThis.fetch;
+  const discoveries: unknown[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/discover-draft")) {
+        discoveries.push(JSON.parse(String(init?.body)));
+        return Response.json({
+          models: ["upstream-a", "upstream-b", "upstream-a"],
+          endpoint: "https://catalog.example/gateway/v1/models",
+        });
+      }
+      return originalFetch(url, init);
+    }),
+  );
+  const user = await mount();
+  await user.type(
+    screen.getByLabelText("上游地址"),
+    "https://catalog.example/gateway/v1/responses",
+  );
+  await user.type(
+    screen.getByLabelText("上游 API key"),
+    "fixture-first-key\nfixture-second-key",
+  );
+  await user.click(screen.getByRole("button", { name: "获取模型" }));
+  expect(
+    await screen.findByRole("checkbox", { name: "upstream-a" }),
+  ).toBeChecked();
+  expect(screen.getAllByRole("checkbox")).toHaveLength(2);
+  expect(discoveries).toEqual([
+    {
+      base_url: "https://catalog.example/gateway/v1/responses",
+      api: "fixture-first-key",
+      engine: "gpt",
+    },
+  ]);
+  expect(mutations).toHaveLength(0);
+  await user.click(screen.getByRole("checkbox", { name: "upstream-a" }));
+  await user.click(screen.getByRole("button", { name: "添加重命名" }));
+  await user.type(screen.getByLabelText("重命名 1 对外模型名"), "public-a");
+  await user.click(screen.getByRole("button", { name: "获取模型" }));
+  await waitFor(() => expect(discoveries).toHaveLength(2));
+  expect(
+    screen.getByRole("checkbox", { name: "upstream-a" }),
+  ).not.toBeChecked();
+  expect(screen.getByLabelText("重命名 1 对外模型名")).toHaveValue("public-a");
+  await user.type(screen.getByLabelText("渠道名称"), "draft-models");
+  await user.click(screen.getByRole("button", { name: "高级配置" }));
+  expect(
+    (screen.getByLabelText("渠道配置 · JSON / YAML") as HTMLTextAreaElement)
+      .value,
+  ).toContain("public-a");
+  await user.click(screen.getByRole("button", { name: "基本配置" }));
+  expect(screen.getByRole("checkbox", { name: "upstream-b" })).toBeChecked();
+  expect(
+    screen.getByRole("checkbox", { name: "upstream-a" }),
+  ).not.toBeChecked();
+  await user.click(screen.getByRole("button", { name: "校验并添加" }));
+  await waitFor(() => expect(mutations).toHaveLength(2));
+  expect(mutations[1].body.changes[0].set["/model"]).toEqual([
+    "upstream-b",
+    { "upstream-a": "public-a" },
+  ]);
+  expect(JSON.stringify(localStorage)).not.toContain("fixture-first-key");
+});
+it("cancels old discovery when credentials change or the dialog closes and preserves manually selected models after a failure", async () => {
+  const originalFetch = globalThis.fetch;
+  let finish!: (response: Response) => void;
+  let signal: AbortSignal | null | undefined;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith("/discover-draft")) {
+        signal = init?.signal;
+        return new Promise<Response>((resolve) => {
+          finish = resolve;
+        });
+      }
+      return originalFetch(url, init);
+    }),
+  );
+  const user = await mount();
+  await fill(user);
+  await user.click(screen.getByRole("button", { name: "获取模型" }));
+  await user.type(screen.getByLabelText("上游 API key"), "changed");
+  expect(signal?.aborted).toBe(true);
+  await act(async () => finish(Response.json({ models: ["stale-model"] })));
+  expect(
+    screen.queryByRole("checkbox", { name: "stale-model" }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByRole("checkbox", { name: "second-model" })).toBeChecked();
+  await user.click(screen.getByRole("button", { name: "获取模型" }));
+  await act(async () => finish(new Response("获取失败", { status: 400 })));
+  expect(screen.getByRole("alert")).toHaveTextContent("获取失败");
+  expect(screen.getByRole("checkbox", { name: "second-model" })).toBeChecked();
+  expect(screen.getByLabelText("重命名 1 对外模型名")).toHaveValue(
+    "public-model",
+  );
+  await user.click(screen.getByRole("button", { name: "获取模型" }));
+  await user.click(screen.getByRole("button", { name: "取消" }));
+  expect(signal?.aborted).toBe(true);
+  await act(async () => finish(Response.json({ models: ["stale-model"] })));
+  await user.click(screen.getByRole("button", { name: "添加渠道" }));
+  expect(
+    screen.queryByRole("checkbox", { name: "stale-model" }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByLabelText("上游 API key")).toHaveValue("");
 });

@@ -337,6 +337,7 @@ func (s *Service) controlHandler() http.Handler {
 	mux.HandleFunc("GET /v1/sources/{id}/channel-settings/secrets", s.channelSettingsSecrets)
 	mux.HandleFunc("POST /v1/sources/{id}/channel-settings/validate", s.channelSettingsValidate)
 	mux.HandleFunc("POST /v1/sources/{id}/channel-settings/discover", s.channelSettingsDiscover)
+	mux.HandleFunc("POST /v1/sources/{id}/channel-settings/discover-draft", s.channelDraftModels)
 	mux.HandleFunc("PATCH /v1/sources/{id}/channel-settings", s.channelSettingsApply)
 	mux.HandleFunc("GET /v1/sources/{id}/channel-settings/operations", s.channelSettingsOperations)
 	mux.HandleFunc("GET /v1/sources/{id}/channel-settings/operations/{operation}", s.channelSettingsOperation)
