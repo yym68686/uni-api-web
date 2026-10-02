@@ -23,6 +23,7 @@ import {useSubAccounts} from "./sub2apiAccounts";
 import {toolUseFailed,modelToolUse,toolUseLabels} from "./toolUse";
 import { configuredQualityResult } from "./channelManagement";
 import { ModelQualityWarning } from "./ModelQualityWarning";
+import { ModelPriceWarning } from "./Sub2apiPricing";
 import {
   managedRouteCount,
   providerRoutes,
@@ -31,7 +32,7 @@ import {
 } from "./channelRouteData";
 import { ModelAliases, aliasMappings } from "./ModelAliases";
 import type { ModelAlias } from "./ModelAliases";
-import type { KeyInfo } from "./types";
+import type { KeyInfo, ModelPrice } from "./types";
 import type { ChannelRoute } from "./channelRouteData";
 import {
   ModelPositions,
@@ -216,6 +217,7 @@ export function ConfiguredChannelDialog({
   initialSourceId,
   nested = false,
   batchScope,
+  prices,
 }: {
   item: ManagedChannel;
   close: () => void;
@@ -223,6 +225,7 @@ export function ConfiguredChannelDialog({
   initialSourceId?: string;
   nested?: boolean;
   batchScope?: BatchScope;
+  prices?: ModelPrice[];
 }) {
   const client = useQueryClient();
   const members = channelMembers(group);
@@ -704,6 +707,7 @@ export function ConfiguredChannelDialog({
                     const warning=probeHasWarning(check?.result?.availability);
                     return <>
                       <ModelQualityWarning model={model} result={quality} />
+                      <ModelPriceWarning check={check} prices={prices} />
                       {(!canSelectModel(model)||warning)&&<small className={warning?"completion-warning":undefined}>{importModelLabel(check||{model,state:"idle",message:"",result:null})}</small>}
                       {toolUseFailed(toolTarget,model)&&<small className="negative">Tool use · {toolUseLabels[modelToolUse(toolTarget,model)!.status]}</small>}
                     </>;

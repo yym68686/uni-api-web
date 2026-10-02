@@ -14,6 +14,7 @@ import type { ConsoleSourcesQuery } from "./consoleSources";
 import {toolUseFailed,modelToolUse,toolUseLabels} from "./toolUse";
 import { CompactionStatus } from "./SubCompaction";
 import { assessPrice } from "./sub2apiPriceCheck";
+import { ModelPriceWarning } from "./Sub2apiPricing";
 import { ModelQualityWarning } from "./ModelQualityWarning";
 import type { KeyInfo, ModelPrice } from "./types";
 import type { SubAccount, SubTarget } from "./Sub2apiChecks";
@@ -890,7 +891,7 @@ export function Sub2apiImport({
                     return <>
                       <ModelQualityWarning model={model} result={quality} />
                       {toolUseFailed(target,model) && <small className="negative">Tool use · {toolUseLabels[modelToolUse(target,model)!.status]}</small>}
-                      {assessPrice(check,prices).status==="abnormal" && <small className="negative">单价异常</small>}
+                      <ModelPriceWarning check={check} prices={prices} />
                       {(!available.includes(model) || probeHasWarning(check.result?.availability)) && <small className={probeHasWarning(check.result?.availability)?"completion-warning":undefined}>{importModelLabel(check)}</small>}
                     </>;
                   }}
@@ -1049,6 +1050,7 @@ export function Sub2apiImport({
           {editingNative && (
             <ConfiguredChannelDialog
               item={editingNative.item}
+              prices={prices}
               batchScope={{kind:"site",account:account.id,group:target.group_id}}
               initialEdit={editingNative.rows}
               close={() => setEditingNative(null)}

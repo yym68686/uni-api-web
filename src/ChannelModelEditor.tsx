@@ -158,6 +158,7 @@ export function ChannelModelEditor({
     return (
       <ConfiguredChannelDialog
         item={ready.group}
+        prices={prices.data?.data}
         initialSourceId={row.source_id}
         initialEdit={ready.initialEdit}
         nested

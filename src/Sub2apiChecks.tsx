@@ -1689,7 +1689,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
           close={() => setImporting(null)}
         />
       )}
-      {configuredDialog && <ConfiguredChannelDialog item={configuredDialog} close={() => setConfiguredDialog(null)} />}
+      {configuredDialog && <ConfiguredChannelDialog item={configuredDialog} prices={prices.data?.data} close={() => setConfiguredDialog(null)} />}
       {managementDetail && (
         <ManagementChannelDrawer
           row={managementDetail}

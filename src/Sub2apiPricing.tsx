@@ -30,6 +30,11 @@ export function PriceStatus({ check, prices }: { check: SubModelCheck; prices?: 
   </div>;
 }
 
+export function ModelPriceWarning({ check, prices }: { check?: SubModelCheck; prices?: ModelPrice[] }) {
+  if (!check || assessPrice(check, prices).status !== "abnormal") return null;
+  return <small className="negative">单价异常</small>;
+}
+
 export function GroupPriceStatus({ checks, prices }: { checks: SubModelCheck[]; prices?: ModelPrice[] }) {
   const abnormal = checks.filter(check => assessPrice(check, prices).status === "abnormal");
   if (abnormal.length) return <div className="sub-price-group">{abnormal.map(check => <div key={check.model}><small className="check-source">{check.model}</small><PriceStatus check={check} prices={prices} /></div>)}</div>;

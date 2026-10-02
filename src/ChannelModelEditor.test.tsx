@@ -39,7 +39,7 @@ function setup(site = false) {
   const result = (model: string, status = "success") => ({
     model,
     checked_at: 10,
-    availability: { status },
+    availability: { status, usage: { status: "matched", input_tokens: 100, output_tokens: 10, input_price: 2, output_price: 10 } },
   });
   const modelChecks = ["saved", "available", "failed"].map((model) => ({
     model,
@@ -82,6 +82,7 @@ function setup(site = false) {
     }
     const url = new URL(input, location.origin),
       p = url.pathname;
+    if (p.endsWith("/prices")) return Response.json({ data: [{model:"saved",input:1,output:10,verified:true}] });
     if (p.endsWith("/sources"))
       return Response.json({
         data: [
@@ -184,6 +185,7 @@ for (const site of [false, true])
     expect(screen.getByLabelText("添加到 uni-api 来源")).toHaveValue("do");
     expect(screen.getByLabelText("添加到 API key")).toHaveValue("key2");
     expect(screen.getByRole("checkbox", { name: "saved" })).toBeChecked();
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: "saved" }).closest("label")).toHaveTextContent("单价异常"));
     expect(screen.getByRole("checkbox", { name: "failed" })).toBeDisabled();
     expect(screen.getByLabelText("saved 的路由位置")).toHaveValue("2");
     expect(screen.getByLabelText("重命名 1 对外模型名")).toHaveValue("alias");

@@ -208,6 +208,65 @@ it("manages initial channels with account/unassigned filters and shows every cal
   expect(screen.getByLabelText("检测模型筛选")).toHaveValue("custom-model");
 });
 
+it.each(["site", "native"])("keeps configured model-card price warnings consistent with the %s check and current prices", async evidence => {
+  const data = fixtures().slice(0, 1);
+  const target = data[0].targets[0];
+  const models = ["gpt-6-luna", "gpt-6-sol"];
+  target.models = models.map(model => ({
+    model, state: "done", message: "", result: {
+      ...target.result!, model,
+      availability: { ...target.result!.availability, usage: {
+        status: "matched", input_tokens: 100, output_tokens: 10,
+        input_price: model === "gpt-6-luna" ? 2 : 1, output_price: 10,
+      } as SubUsage },
+    },
+  }));
+  target.result = null;
+  const channel = {
+    kind: "configured", source_id: "primary", source_name: "Fugue",
+    provider: "tokensfather-0.149", name: "tokensfather-0.149", engine: "gpt",
+    models, account_ids: evidence === "site" ? ["one"] : [], probe_fingerprint: "current",
+    ...(evidence === "site" ? { account_id: "one", group_id: 1, binding_status: "matched", bound_keys: [{ account_id: "one", group_id: 1 }] } : {}),
+  };
+  const rows = models.map(model => ({ provider: channel.provider, model, api_key_id: "key", key_position: 1, key_prefix: "masked", position: 1 }));
+  let inputPrice = 1;
+  const requests: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+    requests.push(init?.method || "GET");
+    if (input.includes("channel-options")) return Response.json({revision:"r1", keys:[{key_id:"key",position:1,prefix:"masked"}],channels:rows});
+    return Response.json({data:
+      input.endsWith("/prices") ? models.map(model => ({model,input:model === "gpt-6-luna" ? inputPrice : 1,output:10,verified:true})) :
+      input.endsWith("/channel-management/checks") ? evidence === "native" ? target.models!.map(c => ({...c,source_id:"primary",provider:channel.provider,kind:"model",fingerprint:"current"})) : [] :
+      input.endsWith("/channel-management") ? [channel] :
+      input.endsWith("/accounts") ? evidence === "site" ? data : [] :
+      input.endsWith("/channel-routes") ? rows :
+      input.endsWith("/sources") ? [{id:"primary",name:"Fugue"}] : [],
+      labels:{},unavailable_keys:[],unavailable_sources:[],
+    });
+  }));
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const user = userEvent.setup();
+  mount(`configured-price-${evidence}`, client);
+  await screen.findByRole("table");
+  await user.selectOptions(screen.getByLabelText("检测模型筛选"), "gpt-6-luna");
+  expect((await screen.findAllByText("异常", {exact:true}))[0]).toBeVisible();
+  await user.click(screen.getByRole("button",{name:"已添加 · 1 个 key"}));
+  await user.click(await screen.findByRole("button",{name:"编辑 Key 1"}));
+  const luna = screen.getByRole("checkbox",{name:"gpt-6-luna"});
+  await waitFor(() => expect(luna).toBeEnabled());
+  expect(luna).toBeChecked();
+  expect(within(luna.closest("label")!).getByText("单价异常")).toHaveClass("negative");
+  expect(screen.getByRole("checkbox",{name:"gpt-6-sol"}).closest("label")).not.toHaveTextContent("单价异常");
+  await user.click(luna);
+  expect(luna).not.toBeChecked();
+  expect(luna.closest("label")).toHaveTextContent("单价异常");
+  inputPrice = 2;
+  await client.invalidateQueries({queryKey:["sub2api-prices"]});
+  await waitFor(() => expect(luna.closest("label")).not.toHaveTextContent("单价异常"));
+  expect(luna).not.toBeChecked();
+  expect(requests.every(method => method === "GET")).toBe(true);
+});
+
 it("merges the same native channel across sources in the list and import dialog", async () => {
   const channels = ["fugue", "do"].map((source_id, i) => ({
     kind: "configured", source_id, source_name: i ? "DigitalOcean" : "Fugue",
