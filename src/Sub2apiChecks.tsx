@@ -835,7 +835,9 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   const availableModels = [...SUB_MODELS, ...extraModels];
   const modelSelectionKey = JSON.stringify(availableModels);
   const detectionModels = useMemo(() => loadSubModels(user, JSON.parse(modelSelectionKey)), [user, modelSelectionKey, modelSelectionRevision]);
-  const modelsToCheck = detectionModels.filter(item => !model || item === model);
+  // An explicit model filter is a direct probe request. Saved checkbox choices
+  // only define the batch when no individual model is selected.
+  const modelsToCheck = model ? [model] : detectionModels;
   const allModelsSelected = detectionModels.length === availableModels.length;
   const currentPage = Math.min(
     page,
@@ -1227,7 +1229,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                 className="button primary small"
                 aria-label={`${model ? "检测所选模型" : allModelsSelected ? "检测全部模型" : `检测已选 ${detectionModels.length} 个模型`} · ${eligible.length} 个渠道`}
                 disabled={batchDisabled("check")}
-                title={!modelsToCheck.length ? "当前筛选模型未勾选，请在设置中启用" : `检测 ${eligible.length} 个渠道，${modelsToCheck.length} 个模型`}
+                title={!modelsToCheck.length ? "请在检测模型设置中选择模型" : `检测 ${eligible.length} 个渠道，${modelsToCheck.length} 个模型`}
                 onClick={() => void check(eligible)}
               >
                 <ScanLine size={15} />
@@ -1602,6 +1604,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                           <button
                             className="button small"
                             aria-label={`检测 ${account.name} ${t.name}`}
+                            title={checkBusy(account, t, "check", configured) ? "检测正在排队或执行，请稍候" : model ? `检测 ${model}` : `检测已勾选的 ${modelsToCheck.length} 个模型`}
                             disabled={!canCheck(account, t, "check", configured)}
                             aria-busy={checkBusy(account, t, "check", configured)}
                             onClick={() =>

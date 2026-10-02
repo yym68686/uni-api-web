@@ -34,7 +34,7 @@ export function SubModelSettings({
         <Dialog.Content className="guide-dialog sub-model-settings">
           <Dialog.Title>检测模型设置</Dialog.Title>
           <Dialog.Description>
-            勾选的模型均会检测，包括渠道尚未配置的模型。额外模型来自当前筛选中的渠道，选择会自动记住。筛选单个模型时，仅检测已勾选的该模型。
+            此处设置未筛选模型时的批量检测范围。筛选单个模型后直接检测该模型，不受这里的勾选限制。
           </Dialog.Description>
           <Dialog.Close asChild>
             <button

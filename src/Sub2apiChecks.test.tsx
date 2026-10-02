@@ -7,7 +7,7 @@ import { Sub2apiChecks, groupQualityResult } from "./Sub2apiChecks";
 import type { SubAccount } from "./Sub2apiChecks";
 import { LatencyBadge } from "./LatencyBadge";
 import { Timing } from "./ChannelMetrics";
-import { SUB_MODELS } from "./sub2apiModels";
+import { SUB_MODELS, saveSubModels, loadSubModels } from "./sub2apiModels";
 import type { SubUsage } from "./sub2apiPriceCheck";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -2051,12 +2051,14 @@ it("remembers model settings per user and uses them for batch and row probes", a
   await user.click(dialog.getByRole("button", { name: "取消" }));
   expect(screen.getByRole("button", { name: buttonName })).toBeEnabled();
   await user.selectOptions(screen.getByLabelText("检测模型筛选"), "gpt-6-astra");
-  expect(screen.getByRole("button", { name: "检测所选模型 · 1 个渠道" })).toBeDisabled();
-  expect(screen.getByRole("button", { name: "检测 one same-group" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "检测所选模型 · 1 个渠道" })).toBeEnabled();
+  await user.click(screen.getByRole("button", { name: "检测 one same-group" }));
+  await waitFor(() => expect(writes).toHaveLength(3));
+  expect(writes[2].targets[0].models).toEqual(["gpt-6-astra"]);
   await user.selectOptions(screen.getByLabelText("检测模型筛选"), "claude-opus-5");
   await user.click(screen.getByRole("button", { name: "检测所选模型 · 1 个渠道" }));
-  await waitFor(() => expect(writes).toHaveLength(3));
-  expect(writes[2].targets[0].models).toEqual(["claude-opus-5"]);
+  await waitFor(() => expect(writes).toHaveLength(4));
+  expect(writes[3].targets[0].models).toEqual(["claude-opus-5"]);
   view.unmount();
   mount("different-owner");
   await screen.findByRole("table");
@@ -2159,7 +2161,9 @@ it("shows scoped extra models and submits exactly the checked models to native a
  await user.click(screen.getByRole('button',{name:'检测 未归属渠道 native'}));
  expect(writes.at(-1).targets).toEqual([{source_id:'fugue',provider:'native',models:['gpt-6-sol']}]);
  await user.selectOptions(screen.getByLabelText('检测模型筛选'),'custom-model');
- expect(screen.getByRole('button',{name:'检测 未归属渠道 native'})).toBeDisabled();
+ expect(screen.getByRole('button',{name:'检测 未归属渠道 native'})).toBeEnabled();
+ await user.click(screen.getByRole('button',{name:'检测 未归属渠道 native'}));
+ expect(writes.at(-1).targets).toEqual([{source_id:'fugue',provider:'native',models:['custom-model']}]);
  view.unmount();view=mount('consistent-selection');
  await screen.findByText('native',{selector:'strong'});
  await user.click(screen.getByRole('button',{name:'检测模型设置'}));d=within(screen.getByRole('dialog'));
@@ -2288,4 +2292,39 @@ it("shows terminal warnings in site checks and imports only the models the user 
  await user.click(d.getByRole("button",{name:"添加到渠道"}));
  await waitFor(()=>expect(writes).toHaveLength(1));
  expect(writes[0].models).toEqual(["gpt-6-luna","gpt-5.5"]);
+});
+
+it("rechecks an explicitly filtered native model despite batch exclusions, without probing other models or allowing duplicate submissions", async () => {
+  saveSubModels("native-single-probe", ["gpt-6-sol"]);
+  const base = {kind:"configured",source_id:"do",source_name:"DigitalOcean",api_key_id:"",key_position:0,key_prefix:"",positions:{},revision:"",manageable:false,account_id:"",group_id:0,account_ids:[],engine:"gpt",probe_fingerprint:"same",provider:"fugue-codex",name:"fugue-codex",models:["gpt-6-luna","gpt-6-sol"]};
+  const writes: unknown[] = [];
+  let finish!: (response: Response) => void;
+  vi.stubGlobal("fetch",vi.fn(async(input:string,init?:RequestInit)=>{
+    if(init?.method === "POST") {
+      writes.push(JSON.parse(String(init.body)));
+      return new Promise<Response>(resolve => {finish=resolve;});
+    }
+    return Response.json({data:input.endsWith("/channel-management")?[base,{...base,source_id:"fugue",source_name:"Fugue"}]:input.endsWith("/channel-management/checks")?[
+      {source_id:"do",provider:"fugue-codex",fingerprint:"same",kind:"model",model:"gpt-6-sol",state:"running",message:"",result:null},
+      {source_id:"do",provider:"fugue-codex",fingerprint:"same",kind:"model",model:"gpt-6-luna",state:"done",message:"",result:{model:"gpt-6-luna",checked_at:1,availability:{status:"success",terminal_status:"missing_output",ttft_ms:13440,duration_ms:15000}}},
+    ]:[],labels:{},unavailable_sources:[]});
+  }));
+  mount("native-single-probe");
+  const user=userEvent.setup();
+  await screen.findByText("fugue-codex",{selector:"strong"});
+  await user.selectOptions(screen.getByLabelText("检测模型筛选"),"gpt-6-luna");
+  const button=screen.getByRole("button",{name:"检测 未归属渠道 fugue-codex"});
+  expect(button).toBeEnabled();
+  expect(button).toHaveTextContent("检测此模型");
+  expect(screen.getByRole("button",{name:"检测所选模型 · 1 个渠道"})).toBeEnabled();
+  await user.dblClick(button);
+  expect(writes).toEqual([{kind:"check",targets:[{source_id:"do",provider:"fugue-codex",models:["gpt-6-luna"]}]}]);
+  expect(button).toBeDisabled();
+  expect(button).toHaveAttribute("aria-busy","true");
+  expect(screen.getByRole("button",{name:"检测所选模型 · 1 个渠道"})).toBeDisabled();
+  await act(async()=>finish(Response.json({queued:1})));
+  await waitFor(()=>expect(button).toBeEnabled());
+  expect(loadSubModels("native-single-probe")).toEqual(["gpt-6-sol"]);
+  await user.selectOptions(screen.getByLabelText("检测模型筛选"),"gpt-6-sol");
+  expect(button).toBeDisabled();
 });
