@@ -18,3 +18,32 @@ jobs:
       - run: npm test
       - run: node --test scripts/check-nginx-upstream.cjs
       - run: npm run build
+  analytics:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: analytics-test-only
+          POSTGRES_DB: analytics_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: analytics-api
+    env:
+      TEST_CONTROL_DATABASE_URL: postgres://postgres:analytics-test-only@localhost:5432/analytics_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: analytics-api/go.sum
+      - run: go test ./... -count=1 -timeout=10m
+      - run: go vet ./...
+      - run: go build ./...

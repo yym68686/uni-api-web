@@ -228,7 +228,14 @@ func (e *Engine) rollupWindow(f QueryFilter) (time.Time, int64, []string, []any,
 	return now, startMS, where, args, nil
 }
 
-func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) {
+func (e *Engine) Query(ctx context.Context, f QueryFilter) (queryResult QueryResult, queryErr error) {
+	release, err := e.acquireAnalytical(ctx, "analytics_query")
+	if err != nil {
+		return QueryResult{}, err
+	}
+	defer release()
+	operation := e.observeOperation("analytics_query")
+	defer func() { operation.finish(queryErr) }()
 	began := time.Now()
 	now, startMS, where, args, err := e.rollupWindow(f)
 	if err != nil {
@@ -251,6 +258,7 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 		return QueryResult{}, err
 	}
 	q, args = withLongContextUsage(q, args, where, startMS, now.UnixMilli(), prices)
+	operation.stage("rollup_aggregate")
 	rows, err := e.DB.QueryContext(ctx, q, args...)
 	if err != nil {
 		return QueryResult{}, err
@@ -400,6 +408,7 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 	// Expose actual event freshness separately, including when this window is empty.
 	out.SourceFreshness = []SourceFreshness{}
 	coverageWhere, coverageArgs := sourceWhere([]string{"true"}, nil, f)
+	operation.stage("source_coverage")
 	coverageRows, err := e.DB.QueryContext(ctx, "SELECT source_id,min(at_ms),max(at_ms) FROM facts WHERE "+strings.Join(coverageWhere, " AND ")+" GROUP BY source_id", coverageArgs...)
 	if err != nil {
 		return QueryResult{}, fmt.Errorf("read source coverage: %w", err)
@@ -427,6 +436,7 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (QueryResult, error) 
 		out.Coverage = "available_history"
 	}
 	if f.Timeseries {
+		operation.stage("timeseries")
 		if err := e.attachTimeseries(ctx, &out, f, startMS, now.UnixMilli()); err != nil {
 			return QueryResult{}, err
 		}

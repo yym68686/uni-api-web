@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -186,19 +187,16 @@ func (s *Service) importListedObjects(ctx context.Context, client *s3.Client, pe
 	return nil
 }
 func decodeFacts(body io.Reader) ([]Fact, error) {
-	// Read one extra byte, rejecting rather than checkpointing a truncated object.
-	raw, err := io.ReadAll(io.LimitReader(body, maxObjectBytes+1))
-	if err != nil {
-		return nil, err
-	}
-	if len(raw) > maxObjectBytes {
-		return nil, errors.New("object_too_large")
-	}
-	scan := bufio.NewScanner(strings.NewReader(string(raw)))
+	// Decode incrementally: retaining raw bytes, a second string copy and all
+	// decoded facts amplified every concurrent download. Still read one byte past
+	// the limit and reject the entire object before any import/checkpoint occurs.
+	limited := &io.LimitedReader{R: body, N: maxObjectBytes + 1}
+	scan := bufio.NewScanner(limited)
 	scan.Buffer(make([]byte, 64<<10), 1<<20)
+	var err error
 	facts := []Fact{}
 	for scan.Scan() {
-		if len(strings.TrimSpace(scan.Text())) == 0 {
+		if len(bytes.TrimSpace(scan.Bytes())) == 0 {
 			continue
 		}
 		var f Fact
@@ -213,8 +211,14 @@ func decodeFacts(body io.Reader) ([]Fact, error) {
 			return nil, errors.New("too_many_events")
 		}
 	}
-	if scan.Err() != nil {
-		return nil, errors.New("fact_line_too_large")
+	if limited.N == 0 {
+		return nil, errors.New("object_too_large")
+	}
+	if err = scan.Err(); err != nil {
+		if errors.Is(err, bufio.ErrTooLong) {
+			return nil, errors.New("fact_line_too_large")
+		}
+		return nil, err
 	}
 	return facts, nil
 }

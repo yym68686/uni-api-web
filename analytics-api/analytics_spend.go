@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"sync"
 	"time"
 )
 
@@ -33,25 +32,22 @@ func (s *Service) analyticsWithSpend(w http.ResponseWriter, r *http.Request, all
 	var spend []attributedSpend
 	var metricsErr, spendErr error
 	var metricsMS, spendMS float64
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		t := time.Now()
-		result, metricsErr = s.engine.Query(ctx, f)
-		metricsMS = float64(time.Since(t).Microseconds()) / 1000
-	}()
-	go func() {
-		defer wg.Done()
-		t := time.Now()
-		spendFilter := f
-		if q.Has("spend_model") {
-			spendFilter.Model = q.Get("spend_model")
-		}
-		spend, spendErr = s.attributedChannelSpend(ctx, owner, spendFilter, start.UnixMilli()/60000*60, cutoff.Unix())
-		spendMS = float64(time.Since(t).Microseconds()) / 1000
-	}()
-	wg.Wait()
+	// Both plans use blocking aggregates. Run them sequentially so one page
+	// load cannot double DuckDB's working set; keep the same cutoff and deadline.
+	t := time.Now()
+	result, metricsErr = s.engine.Query(ctx, f)
+	metricsMS = float64(time.Since(t).Microseconds()) / 1000
+	// Preserve the previous response contract: a metrics error is still
+	// reported to the caller, but the account-scoped spend attempt is made when
+	// its request context is still usable. Running the two plans sequentially
+	// bounds their combined DuckDB working set without hiding spend diagnostics.
+	t = time.Now()
+	spendFilter := f
+	if q.Has("spend_model") {
+		spendFilter.Model = q.Get("spend_model")
+	}
+	spend, spendErr = s.attributedChannelSpend(ctx, owner, spendFilter, start.UnixMilli()/60000*60, cutoff.Unix())
+	spendMS = float64(time.Since(t).Microseconds()) / 1000
 	w.Header().Set("Server-Timing", fmt.Sprintf("metrics;dur=%.1f, spend;dur=%.1f, total;dur=%.1f", metricsMS, spendMS, float64(time.Since(began).Microseconds())/1000))
 	if metricsErr != nil {
 		log.Printf("event=analytics_spend_metrics_failed error=%q", metricsErr)

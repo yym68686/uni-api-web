@@ -21,12 +21,16 @@ import (
 var histogramBounds = []float64{1, 2, 5, 10, 20, 50, 100, 200, 300, 500, 750, 1000, 1500, 2000, 3000, 5000, 7500, 10000, 15000, 20000, 30000, 45000, 60000, 90000, 120000, 180000, 300000, 600000, 1200000, math.Inf(1)}
 
 type Engine struct {
-	DB          *sql.DB
-	historyPath string
-	cfg         Config
-	mu          sync.Mutex
-	Revision    atomic.Uint64
-	Location    *time.Location
+	DB                *sql.DB
+	analyticalSlots   chan struct{}
+	analyticalWaiting atomic.Int64
+	operationsMu      sync.Mutex
+	operations        map[*databaseOperation]string
+	historyPath       string
+	cfg               Config
+	mu                sync.Mutex
+	Revision          atomic.Uint64
+	Location          *time.Location
 }
 
 func OpenEngine(path string, cfg Config) (*Engine, error) {
@@ -57,7 +61,7 @@ func OpenEngine(path string, cfg Config) (*Engine, error) {
 		return nil, err
 	}
 	attached.Store(true)
-	e := &Engine{DB: db, cfg: cfg, Location: location, historyPath: path}
+	e := &Engine{DB: db, cfg: cfg, Location: location, historyPath: path, analyticalSlots: make(chan struct{}, 1), operations: make(map[*databaseOperation]string)}
 	if err = e.migrateSettings(); err != nil {
 		db.Close()
 		return nil, err
@@ -70,7 +74,11 @@ func OpenEngine(path string, cfg Config) (*Engine, error) {
 		db.Close()
 		return nil, errors.New("database memory limit must be at least 64 MiB")
 	}
-	if _, err = db.Exec(fmt.Sprintf("SET memory_limit='%dMiB';", memoryMB) + ` SET threads=2;
+	if err = configureDatabaseResources(db, path, cfg); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if _, err = db.Exec(fmt.Sprintf("SET memory_limit='%dMiB';", memoryMB) + `
  CREATE TABLE IF NOT EXISTS history.facts(event_id VARCHAR PRIMARY KEY,kind VARCHAR NOT NULL,source_id VARCHAR DEFAULT 'primary',instance_id VARCHAR,request_id VARCHAR,attempt_id VARCHAR,at_ms BIGINT,started_ms BIGINT,key_id VARCHAR,provider VARCHAR,model VARCHAR,upstream_model VARCHAR,endpoint VARCHAR,stream BOOLEAN,outcome VARCHAR,status INTEGER,duration_ms DOUBLE,dispatch_ms DOUBLE,first_output_ms DOUBLE,input_tokens BIGINT,output_tokens BIGINT,cache_read_tokens BIGINT,cache_write_tokens BIGINT,cache_write_1h_tokens BIGINT,actual_cost_usd DOUBLE);
  CREATE TABLE IF NOT EXISTS history.imported_objects(object_key VARCHAR PRIMARY KEY,etag VARCHAR,imported_at TIMESTAMP DEFAULT current_timestamp,events BIGINT);
  CREATE TABLE IF NOT EXISTS prices(model VARCHAR PRIMARY KEY,input DOUBLE,output DOUBLE,cache_read DOUBLE,cache_write DOUBLE,cache_write_1h DOUBLE,source VARCHAR,verified BOOLEAN,effective_at TIMESTAMP);
@@ -176,9 +184,12 @@ func (e *Engine) Import(ctx context.Context, key, etag string, facts []Fact) err
 
 // Validate every object before the transaction. Commit facts, affected rollups
 // and object checkpoints atomically, so replay after a crash is idempotent.
-func (e *Engine) ImportBatch(ctx context.Context, objects []FactObject) error {
+func (e *Engine) ImportBatch(ctx context.Context, objects []FactObject) (resultErr error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	operation := e.observeOperation("import_batch")
+	defer func() { operation.finish(resultErr) }()
+	operation.stage("deduplicate_objects")
 	pending := make([]FactObject, 0, len(objects))
 	seen := map[string]string{}
 	for _, obj := range objects {
@@ -253,6 +264,7 @@ func (e *Engine) ImportBatch(ctx context.Context, objects []FactObject) error {
 		return err
 	}
 	defer tx.Rollback()
+	operation.stage("insert_facts")
 	if factCount > 0 {
 		_, err = tx.ExecContext(ctx, `INSERT INTO facts BY NAME SELECT event_id,kind,source_id,instance_id,request_id,attempt_id,at_ms,started_ms,key_id,provider,model,upstream_model,endpoint,stream,outcome,status,duration_ms,dispatch_ms,first_output_ms,response_created_ms,first_text_ms,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,cache_write_1h_tokens,actual_cost_usd,upstream_base,upstream_key_hash,billing_request_ids,upstream_error_sha256,trace_id,stage,CAST(trace_detail AS VARCHAR) AS trace_detail,CAST(transport_timing AS VARCHAR) AS transport_timing,terminal_kind,failure_reason,response_completed FROM read_json(?,format='newline_delimited',columns={schema:'INTEGER',event_id:'VARCHAR',kind:'VARCHAR',source_id:'VARCHAR',instance_id:'VARCHAR',request_id:'VARCHAR',attempt_id:'VARCHAR',at_ms:'BIGINT',started_ms:'BIGINT',key_id:'VARCHAR',provider:'VARCHAR',model:'VARCHAR',upstream_model:'VARCHAR',endpoint:'VARCHAR',stream:'BOOLEAN',outcome:'VARCHAR',status:'INTEGER',duration_ms:'DOUBLE',dispatch_ms:'DOUBLE',first_output_ms:'DOUBLE',response_created_ms:'DOUBLE',first_text_ms:'DOUBLE',input_tokens:'BIGINT',output_tokens:'BIGINT',cache_read_tokens:'BIGINT',cache_write_tokens:'BIGINT',cache_write_1h_tokens:'BIGINT',actual_cost_usd:'DOUBLE',upstream_base:'VARCHAR',upstream_key_hash:'VARCHAR',billing_request_ids:'VARCHAR[]',upstream_error_sha256:'VARCHAR',trace_id:'VARCHAR',stage:'VARCHAR',trace_detail:'JSON',transport_timing:'JSON',terminal_kind:'VARCHAR',failure_reason:'VARCHAR',response_completed:'BOOLEAN'}) ON CONFLICT DO NOTHING`, file.Name())
 		if err != nil {
@@ -262,11 +274,17 @@ func (e *Engine) ImportBatch(ctx context.Context, objects []FactObject) error {
 	minutes, days := map[int64]bool{}, map[int64]bool{}
 	for _, obj := range pending {
 		for _, f := range obj.Facts {
+			// Neither kind contributes to rollups. Trace/billing-only arrivals must
+			// not repeatedly rebuild a whole day of unrelated request histograms.
+			if f.Kind == "billing" || f.Kind == "trace" {
+				continue
+			}
 			minutes[f.AtMS/60000*60000] = true
 			local := time.UnixMilli(f.AtMS).In(e.Location)
 			days[time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, e.Location).UnixMilli()] = true
 		}
 	}
+	operation.stage("insert_objects")
 	for start := 0; start < len(pending); start += 256 {
 		end := min(start+256, len(pending))
 		values := make([]string, 0, end-start)
@@ -279,16 +297,19 @@ func (e *Engine) ImportBatch(ctx context.Context, objects []FactObject) error {
 			return err
 		}
 	}
+	operation.stage("minute_rollups")
 	for minute := range minutes {
 		if err = e.rebuildRollup(ctx, tx, "minute", minute, minute+60000); err != nil {
 			return err
 		}
 	}
+	operation.stage("day_rollups")
 	for day := range days {
 		if err = e.rebuildRollup(ctx, tx, "day", day, time.UnixMilli(day).In(e.Location).AddDate(0, 0, 1).UnixMilli()); err != nil {
 			return err
 		}
 	}
+	operation.stage("commit")
 	if err = tx.Commit(); err != nil {
 		return err
 	}

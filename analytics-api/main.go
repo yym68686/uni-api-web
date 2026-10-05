@@ -34,6 +34,19 @@ func main() {
 	if memoryErr != nil || cfg.DatabaseMemoryLimitMB < 64 {
 		log.Fatal("ANALYTICS_DB_MEMORY_LIMIT_MB must be an integer of at least 64")
 	}
+	cfg.CheckpointCacheWindowMB, memoryErr = strconv.Atoi(env("ANALYTICS_CHECKPOINT_CACHE_WINDOW_MB", "0"))
+	if memoryErr != nil || cfg.CheckpointCacheWindowMB < 0 {
+		log.Fatal("ANALYTICS_CHECKPOINT_CACHE_WINDOW_MB must be a non-negative integer")
+	}
+	cfg.DatabaseTempDir = env("ANALYTICS_DB_TEMP_DIR", "")
+	cfg.DatabaseTempLimitMB, memoryErr = strconv.Atoi(env("ANALYTICS_DB_TEMP_LIMIT_MB", "0"))
+	if memoryErr != nil || cfg.DatabaseTempLimitMB < 0 {
+		log.Fatal("ANALYTICS_DB_TEMP_LIMIT_MB must be a non-negative integer")
+	}
+	cfg.DatabaseThreads, memoryErr = strconv.Atoi(env("ANALYTICS_DB_THREADS", "2"))
+	if memoryErr != nil || cfg.DatabaseThreads < 1 {
+		log.Fatal("ANALYTICS_DB_THREADS must be a positive integer")
+	}
 	if cfg.RequireInitialImport && (cfg.StateBucket == "" || cfg.StateEndpoint == "" || cfg.S3Bucket == "" || cfg.S3Endpoint == "") {
 		log.Fatal("rebuildable analytics requires configured fact and state storage")
 	}
@@ -50,6 +63,8 @@ func main() {
 		log.Fatal(err)
 	}
 	defer engine.Close()
+	stopDiagnostics := engine.startMemoryDiagnostics(ctx, 5*time.Second)
+	defer stopDiagnostics()
 	service, err := NewService(engine, cfg)
 	if err != nil {
 		log.Fatal(err)

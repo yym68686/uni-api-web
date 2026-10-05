@@ -81,6 +81,9 @@ type Price struct {
 	EffectiveAt        time.Time `json:"effective_at"`
 }
 type Config struct {
+	CheckpointCacheWindowMB                                                              int
+	DatabaseThreads, DatabaseTempLimitMB                                                 int
+	DatabaseTempDir                                                                      string
 	DatabaseMemoryLimitMB                                                                int
 	Address, DataDir, Upstream, SourceID, Timezone, S3Endpoint, S3Bucket, S3Prefix       string
 	StateEndpoint, StateBucket, StatePrefix, StateAccessKey, StateSecretKey              string

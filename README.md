@@ -183,6 +183,24 @@ checkpoint; replay of that same checkpoint succeeds with 1GiB. Database failures
 are logged by safe driver category, including commit-time buffer exhaustion,
 without SQL, request contents or credentials.
 
+Heavy analytics and receipt queries share a cancellable single-query gate; imports
+and request-trace reads remain independent. Receipt alignment materializes only
+needed columns/candidate identities, and global receipt conflicts are aggregated
+once per request. Every five seconds, `analytics_memory` records operation phases,
+DuckDB buffer/spill categories, Go heap, RSS and Linux cgroup counters without
+SQL, credentials or fact payloads. `db_operation` records failing import stages.
+
+Additional startup configuration (defaults preserve the existing resource budgets):
+
+- `ANALYTICS_DB_THREADS`: database-wide worker threads, default `2`.
+- `ANALYTICS_DB_TEMP_DIR`: spill directory, default `<database path>.tmp` under the data directory.
+- `ANALYTICS_DB_TEMP_LIMIT_MB`: explicit spill cap in MiB; `0` keeps DuckDB's disk-dependent default.
+- `ANALYTICS_CHECKPOINT_CACHE_WINDOW_MB`: Linux scratch-file sync/reclaim window; `0` disables the optional hint. `32` was tested offline. It never discards the active database's cache or changes snapshot bytes, hashes, conditional publication, or recovery behavior.
+
+Do not reduce production memory budgets based only on a single-query benchmark.
+See [the measured optimization study](docs/analytics-memory-optimization-2026-10-05.md)
+for scope, limitations and offline reproduction.
+
 `/healthz` reports process health once listening; `/readyz` reports complete
 historical analytics readiness. In immediate-listen/development mode, incomplete
 analytics returns 503 with `code: analytics_initializing` and `Retry-After: 5`.

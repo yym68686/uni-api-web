@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"math/big"
 	"net/http"
@@ -170,26 +171,59 @@ const billingAlignedSQL = `WITH aligned_billing AS (
 
 const billingIdentityColumns = "source_id,instance_id,request_id,attempt_id,provider,key_id,model,upstream_model,endpoint,stream"
 
-// Join only candidate identities before grouping completions. Do not restrict
-// their time: responses can start outside the window or finish after it, and
-// reused caller IDs must retain every completion for ambiguity checks.
-func scopedBillingAlignment(f QueryFilter) (string, []any) {
-	where, args := billingWhere(f, 0, 1)
-	where = strings.TrimPrefix(strings.TrimPrefix(where, "at_ms>=? AND at_ms<?"), " AND ")
-	if where == "" {
-		where = "true"
+// A billing record can belong to the window by its observation OR a matching
+// completion. Select that superset first, then count ALL completions (including
+// those outside the window) to preserve reused-ID ambiguity and late arrivals.
+// Explicit projection keeps trace_detail, transport_timing and usage payloads
+// out of the materialized relation. No historical facts or indexes are changed.
+const billingProjection = "event_id," + billingIdentityColumns + ",at_ms,started_ms,upstream_base,upstream_key_hash,billing_request_ids,status,upstream_error_sha256"
+
+func scopedBillingAlignment(f QueryFilter, from, to int64) (string, []any) {
+	window, windowArgs := billingWhere(f, from, to)
+	scope, scopeArgs := billingWhere(f, 0, 1)
+	scope = strings.TrimPrefix(strings.TrimPrefix(scope, "at_ms>=? AND at_ms<?"), " AND ")
+	if scope == "" {
+		scope = "true"
 	}
-	return `WITH candidate_billing AS MATERIALIZED (SELECT * FROM facts WHERE kind='billing' AND ` + where + `),
+	var equal []string
+	for _, column := range strings.Split(billingIdentityColumns, ",") {
+		equal = append(equal, "k."+column+"=b."+column)
+	}
+	args := append(append([]any{}, windowArgs...), scopeArgs[2:]...)
+	args = append(args, from*1000, to*1000)
+	return `WITH window_completions AS MATERIALIZED (
+ SELECT DISTINCT ` + billingIdentityColumns + ` FROM facts WHERE kind='attempt' AND ` + window + `),
+ candidate_billing AS MATERIALIZED (SELECT ` + billingProjection + ` FROM facts b
+ WHERE kind='billing' AND ` + scope + ` AND ((at_ms>=? AND at_ms<?)
+ OR EXISTS(SELECT 1 FROM window_completions k WHERE ` + strings.Join(equal, " AND ") + `))),
  completion_keys AS (SELECT DISTINCT ` + billingIdentityColumns + ` FROM candidate_billing),
- completions AS (SELECT ` + "a." + strings.ReplaceAll(billingIdentityColumns, ",", ",a.") + `,max(a.at_ms) AS completed_at,count(*) AS n
+ completions AS (SELECT a.` + strings.ReplaceAll(billingIdentityColumns, ",", ",a.") + `,max(a.at_ms) AS completed_at,count(*) AS n
  FROM facts a JOIN completion_keys k USING(` + billingIdentityColumns + `) WHERE a.kind='attempt' GROUP BY ALL),
  aligned_billing AS (SELECT b.* EXCLUDE(at_ms),coalesce(a.completed_at,b.at_ms) AS at_ms,coalesce(a.n,0) AS completions
- FROM candidate_billing b LEFT JOIN completions a USING(` + billingIdentityColumns + `)) `, args[2:]
+ FROM candidate_billing b LEFT JOIN completions a USING(` + billingIdentityColumns + `)) `, args
 }
 
-func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f QueryFilter, from, to int64) ([]attributedSpend, error) {
+// Compute competing claims once per request, not once per 5,000-row ledger page.
+// Target identities are scoped; competitors deliberately include all sources and
+// keys, or one receipt could be charged to multiple callers.
+const billingClaimsSQL = `CREATE TEMP TABLE console_spend_claims AS
+ WITH target AS (SELECT DISTINCT ` + billingSiteSQL + ` AS upstream_base,upstream_key_hash,unnest(billing_request_ids) AS rid FROM console_spend_facts),
+ claims AS (SELECT event_id,` + billingSiteSQL + ` AS upstream_base,upstream_key_hash,unnest(billing_request_ids) AS rid FROM facts WHERE kind='billing')
+ SELECT t.upstream_base,t.upstream_key_hash,t.rid,count(DISTINCT c.event_id) AS n
+ FROM target t JOIN claims c USING(upstream_base,upstream_key_hash,rid)
+ GROUP BY t.upstream_base,t.upstream_key_hash,t.rid`
+
+func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f QueryFilter, from, to int64) (result []attributedSpend, resultErr error) {
+	release, err := s.engine.acquireAnalytical(ctx, "channel_spend")
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	operation := s.engine.observeOperation("channel_spend")
+	defer func() { operation.finish(resultErr) }()
+	operation.stage("alignment")
 	where, args := billingWhere(f, from, to)
-	alignment, scopeArgs := scopedBillingAlignment(f)
+	alignment, scopeArgs := scopedBillingAlignment(f, from, to)
 	alignedArgs := append(append([]any{}, scopeArgs...), args...)
 	// Keep one immutable fact snapshot while processing bounded Go/ledger batches.
 	// Materialize alignment once; repeating it for each page rescans all history.
@@ -199,8 +233,13 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 	}
 	defer snapshot.Rollback() // Also drops the transaction-local temporary table.
 	if _, err = snapshot.ExecContext(ctx, `CREATE TEMP TABLE console_spend_facts AS `+alignment+`SELECT * FROM aligned_billing WHERE `+where, alignedArgs...); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("billing alignment: %w", err)
 	}
+	operation.stage("receipt_claims")
+	if _, err = snapshot.ExecContext(ctx, billingClaimsSQL); err != nil {
+		return nil, fmt.Errorf("billing receipt claims: %w", err)
+	}
+	operation.stage("legacy_completions")
 	totals := map[string]*attributedSpend{}
 	sums := map[string]*big.Rat{}
 	ensure := func(source, provider, model, upstream string) *attributedSpend {
@@ -236,6 +275,7 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 	if err != nil {
 		return nil, err
 	}
+	operation.stage("ledger_pages")
 	bindings, err := s.receiptBindings(ctx, owner)
 	if err != nil {
 		return nil, err
@@ -340,7 +380,7 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 			if e != nil {
 				return nil, e
 			}
-			claimsSQL := `WITH target AS (SELECT DISTINCT value->>'base' AS upstream_base,value->>'hash' AS upstream_key_hash,value->>'id' AS rid FROM json_each(?)), claims AS (SELECT event_id,` + billingSiteSQL + ` AS upstream_base,upstream_key_hash,unnest(billing_request_ids) AS rid FROM facts WHERE kind='billing') SELECT t.upstream_base,t.upstream_key_hash,t.rid,count(DISTINCT c.event_id) FROM target t JOIN claims c ON c.upstream_base=t.upstream_base AND c.upstream_key_hash=t.upstream_key_hash AND c.rid=t.rid GROUP BY t.upstream_base,t.upstream_key_hash,t.rid`
+			claimsSQL := `WITH target AS (SELECT DISTINCT value->>'base' AS upstream_base,value->>'hash' AS upstream_key_hash,value->>'id' AS rid FROM json_each(?)) SELECT t.upstream_base,t.upstream_key_hash,t.rid,c.n FROM target t JOIN console_spend_claims c USING(upstream_base,upstream_key_hash,rid)`
 			rows, err = snapshot.QueryContext(ctx, claimsSQL, string(targetJSON))
 			if err != nil {
 				return nil, err

@@ -106,7 +106,7 @@ func (e *Engine) physicalCheckpoint(ctx context.Context, path string) (physicalM
 		return m, err
 	}
 	hash := sha256.New()
-	m.Bytes, err = io.CopyBuffer(io.MultiWriter(dst, hash), contextReader{ctx, src}, make([]byte, checkpointBufferSize))
+	m.Bytes, err = io.CopyBuffer(io.MultiWriter(&checkpointCacheWriter{file: dst, window: int64(e.cfg.CheckpointCacheWindowMB) << 20}, hash), contextReader{ctx, src}, make([]byte, checkpointBufferSize))
 	if err == nil {
 		err = dst.Sync()
 	}
@@ -119,6 +119,8 @@ func (e *Engine) physicalCheckpoint(ctx context.Context, path string) (physicalM
 }
 
 func (s *checkpointStore) save(ctx context.Context, e *Engine) (err error) {
+	operation := e.observeOperation("checkpoint")
+	defer func() { operation.finish(err) }()
 	stage := "read_metadata"
 	defer func() { err = checkpointStageError(stage, err) }()
 	head, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(s.physicalKey)})
@@ -158,6 +160,7 @@ func (s *checkpointStore) save(ctx context.Context, e *Engine) (err error) {
 	}
 	defer os.RemoveAll(dir)
 	stage = "export"
+	operation.stage(stage)
 	started := time.Now()
 	path := filepath.Join(dir, "history.duckdb")
 	manifest, err := e.physicalCheckpoint(ctx, path)
@@ -166,6 +169,7 @@ func (s *checkpointStore) save(ctx context.Context, e *Engine) (err error) {
 	}
 	log.Printf("analytics checkpoint format=duckdb stage=copy duration_ms=%d bytes=%d objects=%d", time.Since(started).Milliseconds(), manifest.Bytes, manifest.Rows["imported_objects"])
 	stage = "pack"
+	operation.stage(stage)
 	src, err := os.Open(path)
 	if err != nil {
 		return err
@@ -177,8 +181,8 @@ func (s *checkpointStore) save(ctx context.Context, e *Engine) (err error) {
 	}
 	defer compressed.Close()
 	hash := sha256.New()
-	gz, _ := gzip.NewWriterLevel(io.MultiWriter(compressed, hash), gzip.BestSpeed)
-	_, err = io.CopyBuffer(gz, contextReader{ctx, src}, make([]byte, checkpointBufferSize))
+	gz, _ := gzip.NewWriterLevel(io.MultiWriter(&checkpointCacheWriter{file: compressed, window: int64(e.cfg.CheckpointCacheWindowMB) << 20}, hash), gzip.BestSpeed)
+	_, err = io.CopyBuffer(gz, contextReader{ctx, &checkpointCacheReader{file: src, window: int64(e.cfg.CheckpointCacheWindowMB) << 20}}, make([]byte, checkpointBufferSize))
 	closeErr := gz.Close()
 	if err != nil {
 		return err
@@ -186,17 +190,24 @@ func (s *checkpointStore) save(ctx context.Context, e *Engine) (err error) {
 	if closeErr != nil {
 		return closeErr
 	}
+	if e.cfg.CheckpointCacheWindowMB > 0 {
+		if err = compressed.Sync(); err != nil {
+			return err
+		}
+		discardCheckpointCache(compressed, 0, 0)
+	}
 	if _, err = compressed.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
 	raw, _ := json.Marshal(manifest)
-	req := &s3.PutObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(s.physicalKey), Body: compressed, ContentType: aws.String("application/gzip"), Metadata: map[string]string{"schema": physicalSchema, "source": s.physicalSource, "objects": strconv.FormatInt(manifest.Rows["imported_objects"], 10), "sha256": hex.EncodeToString(hash.Sum(nil)), "manifest": string(raw)}}
+	req := &s3.PutObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(s.physicalKey), Body: &checkpointCacheReader{file: compressed, window: int64(e.cfg.CheckpointCacheWindowMB) << 20}, ContentType: aws.String("application/gzip"), Metadata: map[string]string{"schema": physicalSchema, "source": s.physicalSource, "objects": strconv.FormatInt(manifest.Rows["imported_objects"], 10), "sha256": hex.EncodeToString(hash.Sum(nil)), "manifest": string(raw)}}
 	if etag == "" {
 		req.IfNoneMatch = aws.String("*")
 	} else {
 		req.IfMatch = aws.String(etag)
 	}
 	stage = "upload"
+	operation.stage(stage)
 	_, err = s.client.PutObject(ctx, req)
 	if code := storageErrorCode(err); code == "PreconditionFailed" || code == "ConditionalRequestConflict" {
 		return nil
