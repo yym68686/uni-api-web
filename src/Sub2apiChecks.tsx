@@ -1,3 +1,4 @@
+import { CopyProbeCurl } from "./CopyProbeCurl";
 import { TableLoading, DetailLoading } from "./PageLoading";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -62,6 +63,7 @@ import { matchesPriceFilter } from "./sub2apiPriceCheck";
 import type { ModelPrice } from "./types";
 
 export interface Probe {
+  curl_token?: string;
   id?: string;
   started_at?: number;
   request_ids?: string[];
@@ -375,6 +377,16 @@ function CheckDetails({
   const probe = result?.availability;
   const qualityResult = groupQualityResult(target);
   const toolResult = modelToolUse(target,check.model);
+  const curlTargets = [
+    ...(account.id ? [{ account_id: account.id, group_id: target.group_id }] : []),
+    ...(configured ? channelMembers(configured).flatMap(member => [
+      { source_id: member.source_id, provider: member.provider },
+      ...boundGroups(member).map(group => ({ account_id: group.account_id, group_id: group.group_id })),
+    ]) : []),
+    ...(target.quality_check?.source_id ? [{ source_id: target.quality_check.source_id, provider: target.quality_check.provider }] : []),
+  ];
+  const copyProbe = (kind: "availability" | "quality" | "tool-use" | "compaction", probe: Probe | undefined, label: string) =>
+    <CopyProbeCurl probe={probe} kind={kind} targets={curlTargets} label={label} />;
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>
       <Dialog.Trigger asChild>
@@ -427,12 +439,12 @@ function CheckDetails({
             </thead>
             <tbody>
               {check.source_name && <DetailRow label="检测来源">{check.source_name}</DetailRow>}
-              <DetailRow label="Tool use"><ToolUseStatus target={target} model={check.model} /></DetailRow>
+              <DetailRow label="Tool use"><ToolUseStatus target={target} model={check.model} />{!toolResult?.attempts.length && copyProbe("tool-use", undefined, "Tool use 检测")}</DetailRow>
               {toolResult?.model && <DetailRow label="工具检测模型">{toolResult.model}</DetailRow>}
               {toolResult?.message && <DetailRow label="工具检测诊断">{toolResult.message}</DetailRow>}
               {toolResult?.attempts.map((attempt, i) => <DetailRow key={attempt.id || i} label="工具检测请求">
                 <table className="sub-check-details-table"><tbody>
-                  <tr><th>请求模型</th><td>{attempt.requested_model}</td></tr>
+                  <tr><th>请求模型</th><td>{attempt.requested_model}{copyProbe("tool-use", attempt, `Tool use 检测 ${attempt.requested_model} `)}</td></tr>
                   <tr><th>返回模型</th><td>{attempt.response_model || "—"}</td></tr>
                   <tr><th>HTTP 状态</th><td>{attempt.http_status || "—"}</td></tr>
                   <tr><th>工具调用结果</th><td>{attempt.text || attempt.message || "—"}</td></tr>
@@ -440,13 +452,13 @@ function CheckDetails({
                   <UsageDetailRows probe={attempt} label="工具检测" prices={prices} model={attempt.requested_model || toolResult?.model || ""} />
                 </tbody></table>
               </DetailRow>)}
-              <DetailRow label="远程压缩"><CompactionStatus target={target} /></DetailRow>
+              <DetailRow label="远程压缩"><CompactionStatus target={target} />{!target.compaction?.attempts.length && copyProbe("compaction", undefined, "远程压缩检测")}</DetailRow>
               {target.compaction?.model && <DetailRow label="压缩支持模型">{target.compaction.model}</DetailRow>}
               {target.compaction?.message && <DetailRow label="压缩诊断">{target.compaction.message}</DetailRow>}
               {!!target.compaction?.attempts.length && <DetailRow label="压缩检测请求">
                 <table className="sub-check-details-table"><thead><tr><th>模型</th><th>结果 / HTTP</th><th>诊断</th><th>实际扣费</th></tr></thead><tbody>
                   {target.compaction.attempts.map((attempt, i) => <tr key={attempt.id || i}>
-                    <td>{attempt.requested_model}</td>
+                    <td>{attempt.requested_model}{copyProbe("compaction", attempt, `远程压缩检测 ${attempt.requested_model} `)}</td>
                     <td>{compactionLabels[attempt.status as keyof typeof compactionLabels] || "检测失败"} · {attempt.http_status || "—"}</td>
                     <td>{attempt.message}</td>
                     <td>{attempt.usage?.actual_cost != null ? `$${attempt.usage.actual_cost}` : "—"}</td>
@@ -463,6 +475,7 @@ function CheckDetails({
               </DetailRow>
               <DetailRow label="可用性">
                 <AvailabilityStatus check={check} />
+                {copyProbe("availability", probe, "可用性检测")}
               </DetailRow>
               <DetailRow label="模型匹配">
                 <ModelMatch check={check} />
@@ -507,6 +520,7 @@ function CheckDetails({
                 <>
                   <DetailRow label="Astra 降智">
                     <div className="quality-status-stack"><Verdict result={qualityResult} history={target.history} /><QualityProbability history={target.history} checkedAt={qualityResult?.checked_at} /></div>
+                    {copyProbe("quality", qualityResult?.quality, "降智检测")}
                   </DetailRow>
                   {qualityResult?.quality.id && qualityResult.quality.id === probe?.id ? (
                     <DetailRow label="降智扣费">与可用性为同一次请求，扣费见上方</DetailRow>

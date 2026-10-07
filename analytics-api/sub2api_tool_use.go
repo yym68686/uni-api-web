@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -50,15 +49,12 @@ func subProbeToolUse(ctx context.Context, client *http.Client, base, key, model 
 	out = subProbe{ID: "subtools-" + randomID(), StartedAt: start.Unix(), RequestedModel: model, Protocol: "responses", Status: "error", ModelMatch: "unavailable"}
 	out.RequestIDs = []string{out.ID, "local:" + out.ID}
 	defer func() { out.Duration = time.Since(start).Milliseconds() }()
-	req, err := http.NewRequestWithContext(ctx, "POST", base+"/v1/responses", bytes.NewReader(toolUseBody(model)))
+	req, err := newProbeRequest(ctx, base, key, model, "tool-use", "say test", out.ID)
 	if err != nil {
 		out.Message = "站点地址无效"
 		return
 	}
-	req.Header.Set("Authorization", "Bearer "+key)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("X-Request-ID", out.ID)
+	out.CurlToken = captureProbeCurl(ctx, client, req)
 	resp, err := client.Do(req)
 	if err != nil {
 		out.Message = "连接失败或 Tool use 检测超时"

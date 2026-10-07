@@ -121,7 +121,7 @@ func compactSummary(value any) any {
 		case map[string]any:
 			for key, child := range item {
 				switch key {
-				case "text", "id", "started_at", "request_ids", "request_id", "log_id", "created_at":
+				case "curl_token", "text", "id", "started_at", "request_ids", "request_id", "log_id", "created_at":
 					delete(item, key)
 				case "attempts":
 					item[key] = []any{}

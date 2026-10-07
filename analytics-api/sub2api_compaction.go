@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -59,16 +58,12 @@ func subProbeCompaction(ctx context.Context, client *http.Client, base, key, mod
 	out = subProbe{ID: "subcompact-" + randomID(), StartedAt: start.Unix(), RequestedModel: model, Protocol: "responses", Status: "error", ModelMatch: "unavailable"}
 	out.RequestIDs = []string{out.ID, "local:" + out.ID}
 	defer func() { out.Duration = time.Since(start).Milliseconds() }()
-	raw, _ := json.Marshal(compactionBody(model))
-	req, err := http.NewRequestWithContext(ctx, "POST", base+"/v1/responses", bytes.NewReader(raw))
+	req, err := newProbeRequest(ctx, base, key, model, "compaction", "say test", out.ID)
 	if err != nil {
 		out.Message = "站点地址无效"
 		return
 	}
-	req.Header.Set("Authorization", "Bearer "+key)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("X-Request-ID", out.ID)
+	out.CurlToken = captureProbeCurl(ctx, client, req)
 	resp, err := client.Do(req)
 	if err != nil {
 		out.Message = "连接失败或压缩检测超时"
@@ -243,6 +238,7 @@ func (s *Service) subTestCompactions(ctx context.Context, id, base, job string) 
 }
 
 func (s *Service) subTestCapability(ctx context.Context, id, base, job, kind string) error {
+	ctx = withProbeCurl(ctx, s.control, probeCurlScope{Account: id})
 	if kind == "tool_use" {
 		return s.subTestAllModelTools(ctx, id, base, job)
 	}

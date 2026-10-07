@@ -358,6 +358,7 @@ func (s *Service) controlHandler() http.Handler {
 	mux.HandleFunc("DELETE /v1/sub2api/accounts/{id}", s.subDelete)
 	mux.HandleFunc("POST /v1/sub2api/accounts/{id}/sync", s.subSync)
 	mux.HandleFunc("POST /v1/sub2api/accounts/{id}/stop", s.subStop)
+	mux.HandleFunc("POST /v1/sub2api/check-curl", s.copyProbeCurl)
 	mux.HandleFunc("POST /v1/sub2api/checks", s.subCheck)
 	mux.HandleFunc("POST /v1/sub2api/quality-checks", s.subQualityCheck)
 	mux.HandleFunc("POST /v1/sub2api/compaction-checks", s.subCompactionCheck)

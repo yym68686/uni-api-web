@@ -218,6 +218,7 @@ type subRemoteKey struct {
 }
 
 type subProbe struct {
+	CurlToken      string    `json:"curl_token,omitempty"`
 	ID             string    `json:"id,omitempty"`
 	StartedAt      int64     `json:"started_at,omitempty"`
 	RequestIDs     []string  `json:"request_ids,omitempty"`
@@ -274,12 +275,12 @@ func subProbeStream(ctx context.Context, client *http.Client, base, key, prompt 
 	}
 	out.RequestedModel = model
 	out.ModelMatch = "unavailable"
-	body, _ := json.Marshal(map[string]any{"model": model, "input": []map[string]string{{"role": "user", "content": prompt}}, "stream": true})
-	req, _ := http.NewRequestWithContext(ctx, "POST", base+"/v1/responses", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+key)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("X-Request-ID", out.ID)
+	req, err := newProbeRequest(ctx, base, key, model, "responses", prompt, out.ID)
+	if err != nil {
+		out.Message = "站点地址无效"
+		return
+	}
+	out.CurlToken = captureProbeCurl(ctx, client, req)
 	resp, err := client.Do(req)
 	if err != nil {
 		out.Message = "连接失败或检测超时"

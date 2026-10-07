@@ -20,6 +20,7 @@ const checkPrompt = `在一个黑色的袋子里放有三种口味的糖果，�
 五角星形 7 6 4`
 
 type ChannelCheck struct {
+	CurlToken    string          `json:"curl_token,omitempty"`
 	QualityProbe *subProbe       `json:"quality_probe,omitempty"`
 	HistoryScope string          `json:"history_scope,omitempty"`
 	Origin       string          `json:"origin,omitempty"`
@@ -89,6 +90,7 @@ func runChannelCheck(ctx context.Context, src controlSource, provider string) Ch
 	req.Header.Set("X-Uni-API-Provider", provider)
 	out.RequestID = "check-" + randomID()
 	req.Header.Set("X-Request-ID", out.RequestID)
+	out.CurlToken = captureProbeCurl(ctx, checkHTTP, req)
 	resp, err = checkHTTP.Do(req)
 	if err != nil {
 		out.Message = "检测请求失败或超时，请稍后重试"
@@ -243,7 +245,7 @@ func (s *Service) checkChannel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "共享检测历史关联失败，未发起请求", 503)
 		return
 	}
-	result := runChannelCheck(ctx, src, in.Provider)
+	result := runChannelCheck(withProbeCurl(ctx, s.control, probeCurlScope{Source: src.ID}), src, in.Provider)
 	historyVerdict := result.Verdict
 	if ctx.Err() == context.Canceled && result.Verdict == "error" {
 		historyVerdict = "cancelled"

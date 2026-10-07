@@ -61,6 +61,7 @@ func summarizeToolUse(models []subToolUseModel) subCapabilityResult {
 }
 
 func (s *Service) subTestAllModelTools(ctx context.Context, id, base, job string) error {
+	ctx = withProbeCurl(ctx, s.control, probeCurlScope{Account: id})
 	rows, err := s.control.db.QueryContext(ctx, `SELECT group_id,encrypted_key,remote_key_id,tool_use,
  COALESCE((SELECT jsonb_agg(jsonb_build_object('model',m.model,'state',m.state,'result',m.result)) FROM console_sub_models m WHERE m.account_id=t.account_id AND m.group_id=t.group_id),'[]'::jsonb)
  FROM console_sub_targets t WHERE account_id=$1 AND active AND tool_use_state='queued'`, id)

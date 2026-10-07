@@ -1101,6 +1101,7 @@ func (s *Service) subSynchronize(ctx context.Context, id, base, job, encrypted s
 }
 
 func (s *Service) subTestTargets(ctx context.Context, id, base, job string, qualityOnly bool) error {
+	ctx = withProbeCurl(ctx, s.control, probeCurlScope{Account: id})
 	rows, err := s.control.db.QueryContext(ctx, `SELECT m.group_id,m.model,t.encrypted_key,t.remote_key_id FROM console_sub_models m JOIN console_sub_targets t USING(account_id,group_id) WHERE m.account_id=$1 AND t.active AND t.state<>'error' AND m.state='queued' AND t.encrypted_key<>'' AND (NOT $2 OR m.model=$3) ORDER BY m.group_id,m.model`, id, qualityOnly, checkModel)
 	if err != nil {
 		return errors.New("测试 key 读取失败")

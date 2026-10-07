@@ -96,6 +96,6 @@ export function groupQualityResult(target: SubTarget): Result | null {
   const unavailable: Probe = { status: "skipped", text: "", ttft_ms: null, duration_ms: 0 };
   return { model: "gpt-6-astra", checked_at: check.checked_at, verdict: check.verdict,
     availability: saved?.availability || unavailable,
-    quality: check.quality_probe || { status: check.verdict === "error" ? "error" : "success", text: check.text, message: check.message, ttft_ms: null, duration_ms: check.duration_ms },
+    quality: check.quality_probe || { curl_token: check.curl_token, status: check.verdict === "error" ? "error" : "success", text: check.text, message: check.message, ttft_ms: null, duration_ms: check.duration_ms },
   };
 }

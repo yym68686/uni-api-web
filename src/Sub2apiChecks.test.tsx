@@ -2408,3 +2408,33 @@ it("rechecks an explicitly filtered native model despite batch exclusions, witho
   await user.selectOptions(screen.getByLabelText("检测模型筛选"),"gpt-6-sol");
   expect(button).toBeDisabled();
 });
+
+it("exports the exact attempt for each diagnostic kind without queueing another check", async () => {
+  const accounts=fixtures().slice(0,1),target=accounts[0].targets[0];
+  target.result!.availability={...target.result!.availability,id:"available",curl_token:"sealed-availability"};
+  target.result!.quality={...target.result!.quality,id:"quality",curl_token:"sealed-quality"};
+  target.tool_use={status:"supported",checked_at:1,model:"gpt-6-astra",attempts:[{...target.result!.availability,id:"tool",requested_model:"gpt-6-astra",curl_token:"sealed-tool"}]};
+  target.compaction={status:"supported",checked_at:1,model:"gpt-5.6-terra",attempts:[{...target.result!.availability,id:"compact",requested_model:"gpt-5.6-terra",curl_token:"sealed-compact"}]};
+  const exports:string[]=[];
+  vi.stubGlobal("fetch",vi.fn(async(input:string,init?:RequestInit)=>{
+    if(init?.method==="POST") {
+      expect(input).toContain("/sub2api/check-curl");
+      const {token}=JSON.parse(String(init.body));exports.push(token);
+      return Response.json({curl:`curl --data '${token}'`,original:true});
+    }
+    return Response.json({data:input.endsWith("/accounts")?accounts:[],labels:{},unavailable_keys:[],unavailable_sources:[]});
+  }));
+  const user=userEvent.setup();mount("copy-diagnostic-requests");
+  await user.click(await screen.findByRole("button",{name:"查看 one same-group 的回复与诊断"}));
+  const dialog=within(screen.getByRole("dialog",{name:"回复 / 诊断"}));
+  for (const [name,token] of [
+    ["可用性检测复制为 curl","sealed-availability"],
+    ["降智检测复制为 curl","sealed-quality"],
+    ["Tool use 检测 gpt-6-astra 复制为 curl","sealed-tool"],
+    ["远程压缩检测 gpt-5.6-terra 复制为 curl","sealed-compact"],
+  ]) {
+    await user.click(dialog.getByRole("button",{name}));
+    await waitFor(async()=>expect(await navigator.clipboard.readText()).toBe(`curl --data '${token}'`));
+  }
+  expect(exports).toEqual(["sealed-availability","sealed-quality","sealed-tool","sealed-compact"]);
+});

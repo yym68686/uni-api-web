@@ -11,6 +11,7 @@ import { QualityProbability, qualityTooltip } from "./QualityHistory";
 import type { QualitySummary } from "./QualityHistory";
 
 export interface ChannelCheck {
+  curl_token?: string;
 	 history_scope?: "account_group";
   history?: QualitySummary;
   origin?: string;

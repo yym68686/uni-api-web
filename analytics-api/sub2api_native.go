@@ -2,13 +2,11 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 )
@@ -26,27 +24,12 @@ func subProbeNative(ctx context.Context, client *http.Client, base, key, model s
 			out.ResponseModel = strings.ReplaceAll(out.ResponseModel, key, "[redacted]")
 		}
 	}()
-	path := "/v1/messages"
-	body := map[string]any{"model": model, "max_tokens": 256, "stream": true, "messages": []map[string]string{{"role": "user", "content": "say test"}}}
-	if out.Protocol == "gemini" {
-		path = "/v1beta/models/" + url.PathEscape(model) + ":streamGenerateContent?alt=sse"
-		body = map[string]any{"contents": []any{map[string]any{"role": "user", "parts": []any{map[string]string{"text": "say test"}}}}}
-	}
-	raw, _ := json.Marshal(body)
-	req, err := http.NewRequestWithContext(ctx, "POST", base+path, bytes.NewReader(raw))
+	req, err := newProbeRequest(ctx, base, key, model, out.Protocol, "say test", out.ID)
 	if err != nil {
 		out.Message = "站点地址无效"
 		return
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("X-Request-ID", out.ID)
-	if out.Protocol == "gemini" {
-		req.Header.Set("x-goog-api-key", key)
-	} else {
-		req.Header.Set("x-api-key", key)
-		req.Header.Set("anthropic-version", "2023-06-01")
-	}
+	out.CurlToken = captureProbeCurl(ctx, client, req)
 	resp, err := client.Do(req)
 	if err != nil {
 		out.Message = "连接失败或检测超时"

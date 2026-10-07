@@ -3083,3 +3083,8 @@ nav > button.active > svg {
 
 .check-status.warning, .sub-model-options .completion-warning { color: #9a7208; white-space: normal; }
 :root[data-theme="dark"] .check-status.warning, :root[data-theme="dark"] .sub-model-options .completion-warning { color: #e9cc70; }
+
+.probe-curl-action { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 6px; margin-left: 12px; vertical-align: middle; max-width: 100%; }
+.probe-curl-action small { color: var(--muted); line-height: 1.5; }
+.probe-curl-action [role="alert"] { color: var(--danger); }
+.sub-check-details-table table .probe-curl-action { display: flex; margin: 8px 0 0; }

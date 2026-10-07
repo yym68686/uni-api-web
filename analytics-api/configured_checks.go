@@ -181,13 +181,17 @@ type configuredProbeTransport struct {
 	allowUnconfigured bool
 }
 
-func (t configuredProbeTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+func (t configuredProbeTransport) prepare(r *http.Request) *http.Request {
 	r = r.Clone(r.Context())
 	r.Header.Set("X-Uni-API-Provider", t.provider)
 	if t.allowUnconfigured {
 		r.Header.Set("X-Uni-API-Probe-Unconfigured-Model", "true")
 	}
-	return t.base.RoundTrip(r)
+	return r
+}
+
+func (t configuredProbeTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	return t.base.RoundTrip(t.prepare(r))
 }
 
 func (s *Service) configuredCheckLoop(ctx context.Context) {
@@ -259,6 +263,7 @@ func (s *Service) configuredCheckOne(parent context.Context) bool {
 }
 
 func (s *Service) runConfiguredCheck(ctx context.Context, c *configuredCheck, target, run string, qualityOnly bool, result *any) error {
+	ctx = withProbeCurl(ctx, s.control, probeCurlScope{Source: c.Source})
 	src, err := s.control.source(ctx, c.Source)
 	if err != nil || controlTarget(src) != target {
 		return errors.New("来源已变更，请刷新后重新检测")

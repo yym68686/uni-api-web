@@ -525,7 +525,7 @@ func (s *Service) runAutomationQualityChecks(ctx context.Context, src controlSou
 				result = "检测历史保存失败，未发起请求"
 				return
 			}
-			checked := runChannelCheck(checkCtx, src, provider)
+			checked := runChannelCheck(withProbeCurl(checkCtx, s.control, probeCurlScope{Source: src.ID}), src, provider)
 			if e = s.control.finishQuality(id, checked.Verdict, checked.Verdict == "pass" || checked.Verdict == "fail", checked.CheckedAt, checked); e != nil {
 				result = "检测完成但历史保存失败"
 				return
