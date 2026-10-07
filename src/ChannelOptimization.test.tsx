@@ -76,3 +76,41 @@ it("supports event selection and cancel; freezes the preview scope while open", 
   await user.click(screen.getByRole("button", { name: "取消" }));
   expect(fetch).not.toHaveBeenCalled();
 });
+
+it("reports a rejected atomic source batch once without accusing every selected channel", async () => {
+  const snapshot = optimizationFixture();
+  snapshot.imports.data.push({
+    ...snapshot.imports.data[0],
+    provider: "peer-binding",
+    name: "Other Site",
+  });
+  snapshot.routes.s.data.push({
+    ...snapshot.routes.s.data[0],
+    provider: "peer-binding",
+    position: 2,
+  });
+  const fetch = vi.fn(
+    async () =>
+      new Response(
+        "新增或重命名模型必须在当前渠道检测可用，请先完成检测；未通过：new",
+        { status: 400 },
+      ),
+  );
+  vi.stubGlobal("fetch", fetch);
+  const user = userEvent.setup();
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <ChannelOptimization snapshot={() => snapshot} />
+    </QueryClientProvider>,
+  );
+  await user.click(screen.getByRole("button", { name: "优化渠道模型" }));
+  await user.click(screen.getByRole("checkbox", { name: "选择全部优化变更" }));
+  await user.click(screen.getByRole("button", { name: "一键应用优化" }));
+  const alert = await screen.findByRole("alert");
+  expect(alert).toHaveTextContent("Fugue：本批次优化未确认");
+  expect(alert).toHaveTextContent("此提示不代表每个渠道都未通过检测");
+  expect(alert.closest(".optimization-binding")).toBeNull();
+  expect(screen.getAllByRole("alert")).toHaveLength(1);
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole("button", { name: "一键应用优化" })).toBeDisabled();
+});

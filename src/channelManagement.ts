@@ -14,6 +14,13 @@ import { boundGroups } from "./sub2apiImports";
 // Editing always uses the selected member's evidence, not another source's
 // merged summary. Credentials changed since detection invalidate old checks.
 export function configuredModelChecks(member:ManagedChannel, accounts:SubAccount[], checks:ConfiguredCheck[], models:string[]): SubModelCheck[] {
+  return configuredUpstreamModelChecks(member, accounts, checks, models.map(model => member.model_mappings?.[model] || model))
+    .map((check, i) => ({ ...check, model: models[i] }));
+}
+
+// Canonical upstream names must never be resolved through the public alias map
+// a second time. A same-named alias can point at a different, passing model.
+export function configuredUpstreamModelChecks(member:ManagedChannel, accounts:SubAccount[], checks:ConfiguredCheck[], models:string[]): SubModelCheck[] {
   const groups=boundGroups(member);
   const native=checks.filter(c=>(c.kind==="model"||c.kind==="availability") && c.source_id===member.source_id && c.provider===member.provider &&
     (c.fingerprint||"")===(member.probe_fingerprint||""));
@@ -22,7 +29,7 @@ export function configuredModelChecks(member:ManagedChannel, accounts:SubAccount
     Number(["queued","running"].includes(b.state))-Number(["queued","running"].includes(a.state)) ||
     (b.result?.checked_at||0)-(a.result?.checked_at||0) || Number(available(a))-Number(available(b)))[0];
   return models.map(model=>{
-    const upstream=member.model_mappings?.[model]||model;
+    const upstream=model;
     const missing:SubModelCheck={model,state:"idle",message:"",result:null};
     const candidates:SubModelCheck[]=[];
     const site=groups.map(g=>{

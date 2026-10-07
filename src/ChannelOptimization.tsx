@@ -174,6 +174,17 @@ export function ChannelOptimization({
                   {error}
                 </p>
               )}
+              {Object.entries(progress)
+                .filter(([, state]) => state.state === "error")
+                .map(([source, state]) => (
+                  <p className="error-banner" role="alert" key={source}>
+                    {groups.find(
+                      (changes) => changes[0].binding.source === source,
+                    )?.[0].binding.sourceName || source}
+                    ：本批次优化未确认。{state.message}
+                    所选渠道属于同一批次，此提示不代表每个渠道都未通过检测。请刷新核对后重新分析。
+                  </p>
+                ))}
               <div className="optimization-selection">
                 <label>
                   <input
@@ -287,22 +298,13 @@ export function ChannelOptimization({
                         将移除该渠道接入。
                       </p>
                     )}
-                    {state && changes.some((c) => selected.has(c.id)) && (
-                      <p
-                        role={state.state === "error" ? "alert" : "status"}
-                        className={
-                          state.state === "error"
-                            ? "negative"
-                            : "optimization-result"
-                        }
-                      >
-                        {state.state === "running"
-                          ? "正在应用…"
-                          : state.state === "done"
-                            ? "已应用"
-                            : `未确认：${state.message}`}
-                      </p>
-                    )}
+                    {state &&
+                      state.state !== "error" &&
+                      changes.some((c) => selected.has(c.id)) && (
+                        <p role="status" className="optimization-result">
+                          {state.state === "running" ? "正在应用…" : "已应用"}
+                        </p>
+                      )}
                   </section>
                 );
               })}

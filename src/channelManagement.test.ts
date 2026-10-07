@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { groupManagedChannels, managementRows, configuredModelChecks, configuredQualityResult } from "./channelManagement";
+import { groupManagedChannels, managementRows, configuredModelChecks, configuredUpstreamModelChecks, configuredQualityResult } from "./channelManagement";
 import type { ConfiguredCheck } from "./channelManagement";
 import type { SubAccount } from "./Sub2apiChecks";
 import { modelIsAvailable } from "./ChannelModelSelection";
@@ -211,4 +211,17 @@ it("keeps a bound group's terminal warning visible when other keys completed nor
  const checks=configuredModelChecks(member,accounts,[],["m"]);
  expect(checks[0].result?.availability.terminal_status).toBe("missing");
  expect(modelIsAvailable(checks[0])).toBe(true);
+});
+
+
+it("distinguishes public alias evidence from the same-named canonical upstream", () => {
+  const member = channel({ models: ["actual", "alias"], model_mappings: { alias: "actual" }, probe_fingerprint: "fp" });
+  const checks: ConfiguredCheck[] = [{
+    source_id: "fugue", provider: "native", kind: "availability", model: "alias", fingerprint: "fp", state: "done", message: "",
+    result: { model: "alias", checked_at: 10, verdict: "pass", availability: { status: "success", text: "", ttft_ms: 1, duration_ms: 1 }, quality: { status: "skipped", text: "", ttft_ms: null, duration_ms: 0 } },
+    history: undefined,
+  }];
+  expect(configuredModelChecks(member, [], checks, ["alias"])[0].result?.availability.status).toBe("success");
+  expect(configuredUpstreamModelChecks(member, [], checks, ["actual"])[0].result?.availability.status).toBe("success");
+  expect(configuredUpstreamModelChecks(member, [], checks, ["alias"])[0].result).toBeNull();
 });

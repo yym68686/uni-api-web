@@ -341,3 +341,53 @@ it("applies only selected changes once per source and reports revision conflicts
     expect.stringContaining("配置已变化"),
   );
 });
+
+it.each(["failed", "missing", "running"])(
+  "does not add a canonical model using a passing alias target when its own check is %s",
+  (state) => {
+    const s = optimizationFixture();
+    const native: ManagedChannel = {
+      ...s.imports.data[0],
+      kind: "configured",
+      provider: "native",
+      name: "Native",
+      account_ids: ["a"],
+      engine: "openai",
+      probe_fingerprint: "fp",
+      models: ["old", "new"],
+      model_mappings: { new: "old" },
+      binding_status: "matched",
+      bound_keys: [
+        {
+          account_id: "a",
+          account_name: "Site",
+          base: "https://site.test",
+          group_id: 1,
+          remote_key_id: 1,
+        },
+      ],
+    };
+    const ownCheck = modelCheck("new", "error");
+    if (state === "running") ownCheck.state = "running";
+    s.accounts[0].targets[0].models = [
+      modelCheck("old"),
+      ...(state === "missing" ? [] : [ownCheck]),
+    ];
+    s.inventory = [native];
+    s.imports.data = [native];
+    s.rows = [{ ...s.rows[0], configured: native }];
+    s.routes.s.data = [{ ...s.routes.s.data[0], provider: "native" }];
+    s.filters.model = "new";
+    expect(buildOptimizationPlan(s, ["add"]).changes).toEqual([]);
+    // A real probe for this canonical upstream now allows it, despite the
+    // provider's unrelated public alias having the same name.
+    s.accounts[0].targets[0].models = [modelCheck("old"), modelCheck("new")];
+    const plan = buildOptimizationPlan(s, ["add"]);
+    expect(plan.changes.map((c) => [c.model, c.upstream, c.action])).toEqual([
+      ["new", "new", "add"],
+    ]);
+    expect(
+      optimizationRequests(plan.changes, s.routes).get("s")!.targets[0].models,
+    ).toEqual({ old: "old", new: "new" });
+  },
+);

@@ -3,7 +3,7 @@ import { boundGroups } from "./sub2apiImports";
 import type { InstalledChannel, SubImports } from "./sub2apiImports";
 import {
   channelMembers,
-  configuredModelChecks,
+  configuredUpstreamModelChecks,
   configuredQualityResult,
 } from "./channelManagement";
 import type {
@@ -188,14 +188,6 @@ function evidenceFor(
       c.provider === member.provider &&
       (c.fingerprint || "") === (member.probe_fingerprint || ""),
   );
-  const names = [
-    ...new Set([
-      upstream,
-      ...member.models.filter(
-        (m) => (member.model_mappings?.[m] || m) === upstream,
-      ),
-    ]),
-  ];
   const toolCandidates = native
     .filter((c) => c.kind === "tool-use")
     .flatMap((c) =>
@@ -238,13 +230,13 @@ function evidenceFor(
         ? [{ ...siteGroups[i], account_name: "", base: "", remote_key_id: 0 }]
         : [],
     };
-    const checks = configuredModelChecks(
+    const checks = configuredUpstreamModelChecks(
       scoped,
       snapshot.accounts,
       native,
-      names,
+      [upstream],
     );
-    const check = checks.find((c) => c.model === upstream) || checks[0];
+    const check = checks[0];
     const savedTool = siteTool(target, upstream);
     const tool =
       directTool &&
