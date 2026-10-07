@@ -55,7 +55,7 @@ func summarizeToolUse(models []subToolUseModel) subCapabilityResult {
 	}
 	out.Message = fmt.Sprintf("%d/%d 个可用模型支持工具调用；%d 个不支持，%d 个未完成或检测失败", passed, len(models), failed, unknown)
 	if len(models) == 0 {
-		out.Message = "没有已检测可用的模型，请先运行模型检测"
+		out.Message = "没有已检测可用的 gpt 或 codex 模型，请先运行模型检测"
 	}
 	return out
 }

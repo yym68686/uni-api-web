@@ -1,3 +1,4 @@
+import { isCapabilityCheckModel, capabilityCheckScope } from "./sub2apiModels";
 import { CopyProbeCurl } from "./CopyProbeCurl";
 import { TableLoading, DetailLoading } from "./PageLoading";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -377,6 +378,8 @@ function CheckDetails({
   const probe = result?.availability;
   const qualityResult = groupQualityResult(target);
   const toolResult = modelToolUse(target,check.model);
+  const capabilitiesApplicable = isCapabilityCheckModel(check.model);
+  const compactionResult = capabilitiesApplicable && (!target.compaction?.model || isCapabilityCheckModel(target.compaction.model)) ? target.compaction : undefined;
   const curlTargets = [
     ...(account.id ? [{ account_id: account.id, group_id: target.group_id }] : []),
     ...(configured ? channelMembers(configured).flatMap(member => [
@@ -439,7 +442,7 @@ function CheckDetails({
             </thead>
             <tbody>
               {check.source_name && <DetailRow label="检测来源">{check.source_name}</DetailRow>}
-              <DetailRow label="Tool use"><ToolUseStatus target={target} model={check.model} />{!toolResult?.attempts.length && copyProbe("tool-use", undefined, "Tool use 检测")}</DetailRow>
+              <DetailRow label="Tool use"><ToolUseStatus target={target} model={check.model} />{capabilitiesApplicable && !toolResult?.attempts.length && copyProbe("tool-use", undefined, "Tool use 检测")}</DetailRow>
               {toolResult?.model && <DetailRow label="工具检测模型">{toolResult.model}</DetailRow>}
               {toolResult?.message && <DetailRow label="工具检测诊断">{toolResult.message}</DetailRow>}
               {toolResult?.attempts.map((attempt, i) => <DetailRow key={attempt.id || i} label="工具检测请求">
@@ -452,12 +455,12 @@ function CheckDetails({
                   <UsageDetailRows probe={attempt} label="工具检测" prices={prices} model={attempt.requested_model || toolResult?.model || ""} />
                 </tbody></table>
               </DetailRow>)}
-              <DetailRow label="远程压缩"><CompactionStatus target={target} />{!target.compaction?.attempts.length && copyProbe("compaction", undefined, "远程压缩检测")}</DetailRow>
-              {target.compaction?.model && <DetailRow label="压缩支持模型">{target.compaction.model}</DetailRow>}
-              {target.compaction?.message && <DetailRow label="压缩诊断">{target.compaction.message}</DetailRow>}
-              {!!target.compaction?.attempts.length && <DetailRow label="压缩检测请求">
+              <DetailRow label="远程压缩"><CompactionStatus target={target} model={check.model} />{capabilitiesApplicable && !compactionResult?.attempts.length && copyProbe("compaction", undefined, "远程压缩检测")}</DetailRow>
+              {compactionResult?.model && <DetailRow label="压缩支持模型">{compactionResult.model}</DetailRow>}
+              {compactionResult?.message && <DetailRow label="压缩诊断">{compactionResult.message}</DetailRow>}
+              {!!compactionResult?.attempts.length && <DetailRow label="压缩检测请求">
                 <table className="sub-check-details-table"><thead><tr><th>模型</th><th>结果 / HTTP</th><th>诊断</th><th>实际扣费</th></tr></thead><tbody>
-                  {target.compaction.attempts.map((attempt, i) => <tr key={attempt.id || i}>
+                  {compactionResult.attempts.filter(attempt => isCapabilityCheckModel(attempt.requested_model || "")).map((attempt, i) => <tr key={attempt.id || i}>
                     <td>{attempt.requested_model}{copyProbe("compaction", attempt, `远程压缩检测 ${attempt.requested_model} `)}</td>
                     <td>{compactionLabels[attempt.status as keyof typeof compactionLabels] || "检测失败"} · {attempt.http_status || "—"}</td>
                     <td>{attempt.message}</td>
@@ -670,7 +673,7 @@ function ManagementChannelDrawer({
               </div>
               <div>
                 <span>远程压缩</span>
-                <strong><CompactionStatus target={target} /></strong>
+                <strong><CompactionStatus target={target} model={current?.model} /></strong>
               </div>
               <div>
                 <span>Tool use</span>
@@ -806,7 +809,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
               )) &&
             matchesPriceFilter(priceStatus, selected ? [selected] : checks, prices.data?.data) &&
             (!modelMatch || (selected ? [selected] : checks).some(check => modelMatchStatus(check) === modelMatch)) &&
-            (!compaction || compactionStatus(target) === compaction) &&
+            (!compaction || compactionStatus(target, model) === compaction) &&
             toolUseMatches(target,toolUse,model) &&
             (!quality || groupQualityResult(target)?.verdict === quality) &&
             (minQuality === "" ||
@@ -923,6 +926,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
       (!target.models && pending(target.state) && !pending(target.compaction_state || "") && !pending(target.tool_use_state || ""));
   };
   const canCheck = (account: SubAccount, target: SubTarget, kind: CheckKind, configured?: ManagedChannel) => {
+    if ((kind === "compaction" || kind === "tool-use") && model && !isCapabilityCheckModel(model)) return false;
     const native = !account.id && configured;
     if (native ? !channelMembers(configured).length
       : !target.active || !target.key_id || target.state === "error") return false;
@@ -1224,7 +1228,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                 降智检测
               </button>
               <button className="button small" disabled={batchDisabled("compaction")}
-                aria-label={`压缩检测 · ${eligible.length} 个渠道`}
+                title={capabilityCheckScope} aria-label={`压缩检测 · ${eligible.length} 个渠道`}
                 onClick={() => void checkCompaction()}>
                 {batchBusy("compaction") ? <Spinner small /> : <ScanLine size={15} />} 压缩检测
               </button>
@@ -1600,10 +1604,10 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                         <td>
                           <div className="quality-status-stack"><Verdict result={groupQualityResult(t)} history={t.history} /><QualityProbability history={t.history} checkedAt={groupQualityResult(t)?.checked_at} /></div>
                         </td>
-                        <td><div className="quality-status-stack"><CompactionStatus target={t} /><button className="button small ghost" disabled={!canCheck(account, t, "compaction", configured)} aria-busy={checkBusy(account, t, "compaction", configured)}
-                          aria-label={`检测 ${account.name} ${t.name} 的远程压缩`} onClick={() => void checkCompaction([{account, target:t, configured}])}>{checkBusy(account, t, "compaction", configured) && <Spinner small />}重新检测</button></div></td>
+                        <td><div className="quality-status-stack"><CompactionStatus target={t} model={model || undefined} /><button className="button small ghost" disabled={!canCheck(account, t, "compaction", configured)} aria-busy={checkBusy(account, t, "compaction", configured)}
+                          title={capabilityCheckScope} aria-label={`检测 ${account.name} ${t.name} 的远程压缩`} onClick={() => void checkCompaction([{account, target:t, configured}])}>{checkBusy(account, t, "compaction", configured) && <Spinner small />}重新检测</button></div></td>
                         <td><div className="quality-status-stack"><ToolUseStatus target={t} model={model || undefined} /><button className="button small ghost" disabled={!canCheck(account, t, "tool-use", configured)} aria-busy={checkBusy(account, t, "tool-use", configured)}
-                          aria-label={`检测 ${account.name} ${t.name} 的 Tool use`} onClick={() => void checkToolUse([{account, target:t, configured}])}>{checkBusy(account, t, "tool-use", configured) && <Spinner small />}重新检测</button></div></td>
+                          title={capabilityCheckScope} aria-label={`检测 ${account.name} ${t.name} 的 Tool use`} onClick={() => void checkToolUse([{account, target:t, configured}])}>{checkBusy(account, t, "tool-use", configured) && <Spinner small />}重新检测</button></div></td>
                         <td>
                           {<CheckDetails
                             key={model || "all"}

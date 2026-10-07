@@ -127,7 +127,7 @@ it("native import reads only the selected source and current credentials", () =>
 it("resolves site tool evidence for every editor candidate, including new models and aliases", () => {
   const member = {
     source_id: "do", provider: "xrelayai-0.15", account_id: "site", group_id: 5,
-    models: ["gpt-5.5"], model_mappings: { "sol-alias": "gpt-6-sol" },
+    models: ["gpt-5.5"], model_mappings: { "codex-sol-alias": "gpt-6-sol" },
   } as unknown as ManagedChannel;
   const bound = target({ group_id: 5, tool_use: {
     status: "unsupported", checked_at: 10, attempts: [], models: [
@@ -137,11 +137,24 @@ it("resolves site tool evidence for every editor candidate, including new models
     ],
   }});
   const accounts = [{ id: "site", targets: [bound] }] as import("./Sub2apiChecks").SubAccount[];
-  const tool_use = configuredToolUseResult(member, accounts, [], ["gpt-5.5", "gpt-6-sol", "sol-alias", "gpt-6-astra", "gpt-6-luna"]);
+  const tool_use = configuredToolUseResult(member, accounts, [], ["gpt-5.5", "gpt-6-sol", "codex-sol-alias", "gpt-6-astra", "gpt-6-luna"]);
   expect(modelToolUse({tool_use}, "gpt-6-sol")?.status).toBe("unsupported");
-  expect(modelToolUse({tool_use}, "sol-alias")?.status).toBe("unsupported");
+  expect(modelToolUse({tool_use}, "codex-sol-alias")?.status).toBe("unsupported");
   expect(modelToolUse({tool_use}, "gpt-6-astra")?.status).toBe("error");
   expect(toolUseFailed({tool_use}, "gpt-5.5")).toBe(false);
   expect(modelToolUse({tool_use}, "gpt-6-luna")).toBeUndefined();
   expect(configuredToolUseResult(member, accounts, []).models?.map(m=>m.model)).toEqual(["gpt-5.5"]);
+});
+
+it('ignores historical unsupported results for non-GPT/Codex models',()=>{
+ const t=target({tool_use:{status:'unsupported',checked_at:1,attempts:[],models:[
+  {model:'claude-opus-4-8',state:'done',result:{status:'unsupported',checked_at:1,attempts:[]}},
+  {model:'gpt-5.5',state:'done',result:{status:'supported',checked_at:1,attempts:[]}},
+  {model:'gpt-6-sol',state:'done',result:{status:'supported',checked_at:1,attempts:[]}},
+ ]}});
+ expect(toolUseStatus(t,'claude-opus-4-8')).toBe('not_applicable');
+ expect(modelToolUse(t,'claude-opus-4-8')).toBeUndefined();
+ expect(toolUseFailed(t,'claude-opus-4-8')).toBe(false);
+ expect(toolUseMatches(t,'unsupported')).toBe(false);
+ expect(toolUseStatus(t)).toBe('supported');
 });

@@ -1,3 +1,4 @@
+import { isCapabilityCheckModel, capabilityCheckScope } from "./sub2apiModels";
 import { Check, CircleHelp, X } from "lucide-react";
 import { Tip, Spinner } from "./ui";
 import { time } from "./format";
@@ -20,6 +21,7 @@ export function ToolUseStatus({
   target: SubTarget;
   model?: string;
 }) {
+  if (model && !isCapabilityCheckModel(model)) return <Tip text={capabilityCheckScope}><span className="check-status inconclusive">不适用</span></Tip>;
   const result = model ? modelToolUse(target, model) : target.tool_use,
     status = toolUseStatus(target, model);
   const state = toolUseModels(target.tool_use).find(

@@ -1,3 +1,4 @@
+import { isCapabilityCheckModel, capabilityCheckScope } from "./sub2apiModels";
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Play, RefreshCw } from "lucide-react";
@@ -33,7 +34,7 @@ const items: { kind: Kind; label: string; description: string }[] = [
   {
     kind: "compaction",
     label: "远程压缩检测",
-    description: "自动选择本渠道模型验证",
+    description: "自动选择本渠道 gpt / codex 模型验证",
   },
 ];
 const pending = (state?: string) => state === "queued" || state === "running";
@@ -89,8 +90,11 @@ export function ChannelDetailChecks({ row }: { row: Channel }) {
         : combined;
     return exact;
   }
+  const applicable = (kind: Kind) =>
+    (kind !== "compaction" && kind !== "tool-use") || isCapabilityCheckModel(row.model);
   async function run(kind: Kind) {
     if (
+      !applicable(kind) ||
       active.current.has(kind) ||
       pending(entry(kind)?.state) ||
       !row.source_id
@@ -134,6 +138,7 @@ export function ChannelDetailChecks({ row }: { row: Channel }) {
     }
   }
   const text = (kind: Kind, c?: ConfiguredCheck) => {
+    if (!applicable(kind)) return "不适用";
     if (!c) return "未检测";
     if (c.state === "queued") return "已排队";
     if (c.state === "running") return "检测中";
@@ -180,7 +185,7 @@ export function ChannelDetailChecks({ row }: { row: Channel }) {
       )}
       <div className="detail-check-grid">
         {items.map(({ kind, label, description }) => {
-          const c = entry(kind),
+          const c = applicable(kind) ? entry(kind) : undefined,
             busy = submitting.has(kind) || pending(c?.state);
           const message =
             c?.message ||
@@ -196,12 +201,12 @@ export function ChannelDetailChecks({ row }: { row: Channel }) {
                 className="button small"
                 aria-label={label}
                 aria-busy={busy}
-                disabled={busy || !row.source_id}
+                disabled={!applicable(kind) || busy || !row.source_id}
                 onClick={() => void run(kind)}
               >
                 {busy ? <Spinner small /> : <Play size={13} />} {label}
               </button>
-              <small>{description}</small>
+              <small>{applicable(kind) ? description : capabilityCheckScope}</small>
               <span
                 className={
                   status.includes("失败") ||

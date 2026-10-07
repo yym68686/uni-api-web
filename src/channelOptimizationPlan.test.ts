@@ -77,25 +77,26 @@ it("scopes by model and preserves unrelated models and aliases, including a last
 it("does not treat unknown, running or tool errors as proof of unsupported capability", () => {
   const s = optimizationFixture(),
     t = s.accounts[0].targets[0];
+  setCurrent(s, ["gpt-old"]);
   t.models = [
-    { ...modelCheck("old", "error"), state: "running" },
-    { ...modelCheck("new"), state: "running" },
+    { ...modelCheck("gpt-old", "error"), state: "running" },
+    { ...modelCheck("gpt-new"), state: "running" },
     { model: "unknown", state: "idle", message: "", result: null },
   ];
   expect(buildOptimizationPlan(s, events).changes).toEqual([]);
-  t.models = [modelCheck("old"), modelCheck("new")];
+  t.models = [modelCheck("gpt-old"), modelCheck("gpt-new")];
   t.tool_use = {
     status: "error",
     checked_at: 20,
     attempts: [],
     models: [
       {
-        model: "old",
+        model: "gpt-old",
         state: "done",
         result: { status: "error", checked_at: 20, attempts: [] },
       },
       {
-        model: "new",
+        model: "gpt-new",
         state: "done",
         result: { status: "error", checked_at: 20, attempts: [] },
       },
@@ -105,15 +106,15 @@ it("does not treat unknown, running or tool errors as proof of unsupported capab
   t.tool_use.models![0].result!.status = "unsupported";
   expect(
     buildOptimizationPlan(s, events).changes.map((c) => [c.model, c.action]),
-  ).toEqual([["old", "remove"]]);
+  ).toEqual([["gpt-old", "remove"]]);
   t.tool_use_state = "running";
   expect(buildOptimizationPlan(s, events).changes).toEqual([]);
 });
 it("limits quality and compaction removals to the actually tested models and combines model filters with AND", () => {
   const s = optimizationFixture(),
     t = s.accounts[0].targets[0];
-  t.models = [modelCheck("gpt-6-astra"), modelCheck("old"), modelCheck("new")];
-  setCurrent(s, ["gpt-6-astra", "old", "new"]);
+  t.models = [modelCheck("gpt-6-astra"), modelCheck("gpt-old"), modelCheck("gpt-new")];
+  setCurrent(s, ["gpt-6-astra", "gpt-old", "gpt-new"]);
   t.quality_check = {
     source_id: "s",
     provider: "p",
@@ -124,7 +125,7 @@ it("limits quality and compaction removals to the actually tested models and com
     duration_ms: 1,
   };
   t.compaction = {
-    model: "old",
+    model: "gpt-old",
     status: "unsupported",
     checked_at: 20,
     attempts: [],
@@ -133,15 +134,15 @@ it("limits quality and compaction removals to the actually tested models and com
     buildOptimizationPlan(s, events)
       .changes.map((c) => c.model)
       .sort(),
-  ).toEqual(["gpt-6-astra", "old"]);
-  s.filters.model = "new";
+  ).toEqual(["gpt-6-astra", "gpt-old"]);
+  s.filters.model = "gpt-new";
   expect(buildOptimizationPlan(s, events).changes).toEqual([]);
   s.filters.model = "";
   s.filters.modelMatch = "mismatch";
   expect(buildOptimizationPlan(s, events).changes).toEqual([]);
   t.models[1].result!.availability.model_match = "mismatch";
   expect(buildOptimizationPlan(s, events).changes.map((c) => c.model)).toEqual([
-    "old",
+    "gpt-old",
   ]);
 });
 it("blocks abnormal price additions and previews removals using verified unit prices", () => {
@@ -391,3 +392,12 @@ it.each(["failed", "missing", "running"])(
     ).toEqual({ old: "old", new: "new" });
   },
 );
+
+it('does not remove Claude or Gemini models due to historical Codex capability failures',()=>{
+ const s=optimizationFixture(),t=s.accounts[0].targets[0];
+ const models=['claude-opus-4-8','gemini-3.1-pro','codex-auto-review'];
+ t.models=models.map(model=>modelCheck(model));setCurrent(s,models);
+ t.tool_use={status:'unsupported',checked_at:20,attempts:[],models:models.map(model=>({model,state:'done',result:{status:'unsupported',checked_at:20,attempts:[]}}))};
+ t.compaction={model:models[0],status:'unsupported',checked_at:20,attempts:[]};
+ expect(buildOptimizationPlan(s,['tool','compaction']).changes.map(c=>c.model)).toEqual(['codex-auto-review']);
+});

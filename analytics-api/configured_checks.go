@@ -107,6 +107,10 @@ func (s *Service) queueConfiguredChecks(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		for _, m := range t.Models {
+			if (in.Kind == "tool-use" || in.Kind == "compaction") && !subCapabilityModel(m) {
+				http.Error(w, "仅检测 gpt 或 codex 开头的模型", http.StatusBadRequest)
+				return
+			}
 			if strings.TrimSpace(m) == "" || len(m) > 256 {
 				http.Error(w, "无效模型", 400)
 				return
@@ -263,6 +267,11 @@ func (s *Service) configuredCheckOne(parent context.Context) bool {
 }
 
 func (s *Service) runConfiguredCheck(ctx context.Context, c *configuredCheck, target, run string, qualityOnly bool, result *any) error {
+	// Also fence already-queued jobs from an older release before any HTTP call.
+	if c.Kind == "tool-use" && c.Model != "" && !subCapabilityModel(c.Model) {
+		*result = subCapabilityResult{Model: c.Model, Status: "not_applicable", CheckedAt: time.Now().Unix(), Message: "仅检测 gpt 或 codex 开头的模型", Attempts: []subProbe{}}
+		return nil
+	}
 	ctx = withProbeCurl(ctx, s.control, probeCurlScope{Source: c.Source})
 	src, err := s.control.source(ctx, c.Source)
 	if err != nil || controlTarget(src) != target {
@@ -323,8 +332,8 @@ func (s *Service) runConfiguredCheck(ctx context.Context, c *configuredCheck, ta
 	client := &http.Client{Timeout: 60 * time.Second, Transport: configuredProbeTransport{base: http.DefaultTransport, provider: c.Provider, allowUnconfigured: caps.Unconfigured}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	if c.Kind == "model" || c.Kind == "availability" {
 		valid := false
-		for _, m := range candidates {
-			if m == c.Model {
+		for _, m := range models {
+			if m.Model == c.Model {
 				valid = true
 				break
 			}
@@ -370,7 +379,7 @@ func (s *Service) runConfiguredCheck(ctx context.Context, c *configuredCheck, ta
 		return nil
 	}
 	probeFn := subProbeCompaction
-	out := subCapabilityResult{Status: "error", Attempts: []subProbe{}, Message: "没有可用模型完成检测，请查看模型检测结果"}
+	out := subCapabilityResult{Status: "error", Attempts: []subProbe{}, Message: "没有可用的 gpt 或 codex 模型完成检测，请查看模型检测结果"}
 	// Prefer previously successful models, but a first capability check must also
 	// work before model checks have ever run. Try configured models serially.
 	uncertain := false
@@ -440,6 +449,9 @@ func (s *Service) runConfiguredCheck(ctx context.Context, c *configuredCheck, ta
 func (s *Service) expandConfiguredToolChecks(ctx context.Context, c *configuredCheck, target, run string, available map[string]bool, result *any) error {
 	models := []subToolUseModel{}
 	for model := range available {
+		if !subCapabilityModel(model) {
+			continue
+		}
 		models = append(models, subToolUseModel{Model: model, State: "queued"})
 	}
 	sort.Slice(models, func(i, j int) bool { return models[i].Model < models[j].Model })

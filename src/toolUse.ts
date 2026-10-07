@@ -1,3 +1,4 @@
+import { isCapabilityCheckModel } from "./sub2apiModels";
 import type { SubTarget } from "./Sub2apiChecks";
 import type { CompactionResult } from "./SubCompaction";
 
@@ -14,9 +15,10 @@ export const toolUseLabels = {
   unsupported: "不支持工具调用",
   error: "检测失败",
   untested: "未检测",
+  not_applicable: "不适用",
 };
 export const toolUseDescription =
-  "逐个检测渠道全部已验证可用的模型。使用 Codex additional_tools 中的 custom exec，要求返回指定工具调用与输入；结果仅代表对应模型的本次 exec 检测。";
+  "逐个检测渠道已验证可用且名称以 gpt 或 codex 开头的模型。使用 Codex additional_tools 中的 custom exec，要求返回指定工具调用与输入；结果仅代表对应模型的本次 exec 检测。";
 export function toolUseModels(result?: ToolUseResult): ToolUseModel[] {
   if (result?.models) return result.models;
   // Older channel-wide records are evidence for exactly one named model.
@@ -26,6 +28,7 @@ export function modelToolUse(
   target: Pick<SubTarget, "tool_use">,
   model: string,
 ) {
+  if (!isCapabilityCheckModel(model)) return undefined;
   return (
     toolUseModels(target.tool_use).find((m) => m.model === model)?.result ||
     undefined
@@ -49,9 +52,10 @@ export function toolUseCandidates(target: SubTarget) {
         : []),
       ...toolUseModels(target.tool_use).map((m) => m.model),
     ]),
-  ];
+  ].filter(isCapabilityCheckModel);
 }
 export function toolUseStatus(target: SubTarget, model?: string) {
+  if (model && !isCapabilityCheckModel(model)) return "not_applicable";
   if (model) return modelToolUse(target, model)?.status || "untested";
   const statuses = toolUseCandidates(target).map(
     (m) => modelToolUse(target, m)?.status || "untested",

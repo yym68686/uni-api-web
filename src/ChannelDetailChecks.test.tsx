@@ -9,10 +9,10 @@ const row = {
   source_id: "do",
   source_name: "DigitalOcean",
   provider: "sub2api-key-owned",
-  model: "public-alias",
+  model: "codex-public-alias",
   upstream_model: "real-upstream",
 } as Channel;
-function mount() {
+function mount(channel = row) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -20,7 +20,7 @@ function mount() {
     client,
     ...render(
       <QueryClientProvider client={client}>
-        <ChannelDetailChecks row={row} />
+        <ChannelDetailChecks row={channel} />
       </QueryClientProvider>,
     ),
   };
@@ -58,13 +58,13 @@ it("independently queues each probe against the exact source, installed channel 
     {
       kind: "availability",
       targets: [
-        { source_id: "do", provider: row.provider, models: ["public-alias"] },
+        { source_id: "do", provider: row.provider, models: ["codex-public-alias"] },
       ],
     },
     {
       kind: "tool-use",
       targets: [
-        { source_id: "do", provider: row.provider, models: ["public-alias"] },
+        { source_id: "do", provider: row.provider, models: ["codex-public-alias"] },
       ],
     },
     {
@@ -104,7 +104,7 @@ it("keeps queued work disabled across reads and shows the corresponding complete
   const result = {
     status: "unsupported",
     checked_at: 10,
-    model: "public-alias",
+    model: "codex-public-alias",
     message: "No exec",
     attempts: [],
   };
@@ -210,4 +210,16 @@ it("does not let Astra quality work disable its independent availability check",
   expect(screen.getByRole("button", { name: "可用性检测" })).toBeEnabled();
   expect(screen.getByRole("button", { name: "Tool use 检测" })).toBeEnabled();
   expect(screen.getByRole("button", { name: "远程压缩检测" })).toBeEnabled();
+});
+
+it.each(["claude-opus-4-8","gemini-3.1-pro","deepseek"])('does not offer Codex capability probes for %s', async model=>{
+ const fetcher=vi.fn(async(_input: string, _init?: RequestInit)=>Response.json({data:[]}));vi.stubGlobal('fetch',fetcher);
+ mount({...row,model});
+ const user=userEvent.setup();
+ for(const name of ['Tool use 检测','远程压缩检测']) {
+  const button=screen.getByRole('button',{name});expect(button).toBeDisabled();await user.click(button);
+ }
+ expect(screen.getAllByText('不适用')).toHaveLength(2);
+ expect(screen.getByRole('button',{name:'可用性检测'})).toBeEnabled();
+ expect(fetcher.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
 });

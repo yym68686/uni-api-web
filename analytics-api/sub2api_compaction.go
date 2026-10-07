@@ -54,6 +54,9 @@ func compactionBody(model string) map[string]any {
 // terminal event with exactly one usable compaction item; never persist its
 // opaque encrypted state or arbitrary upstream error bodies.
 func subProbeCompaction(ctx context.Context, client *http.Client, base, key, model string) (out subProbe) {
+	if !subCapabilityModel(model) {
+		return subProbe{RequestedModel: model, Status: "not_applicable", Message: "仅检测 gpt 或 codex 开头的模型"}
+	}
 	start := time.Now()
 	out = subProbe{ID: "subcompact-" + randomID(), StartedAt: start.Unix(), RequestedModel: model, Protocol: "responses", Status: "error", ModelMatch: "unavailable"}
 	out.RequestIDs = []string{out.ID, "local:" + out.ID}
@@ -197,11 +200,15 @@ func subProbeCompaction(ctx context.Context, client *http.Client, base, key, mod
 	return
 }
 
+func subCapabilityModel(model string) bool {
+	return strings.HasPrefix(model, "gpt") || strings.HasPrefix(model, "codex")
+}
+
 func subCompactionModels(models []subModelResult) []string {
 	var out []string
 	seen := map[string]bool{}
 	for _, m := range models {
-		if m.State == "done" && m.Result != nil && m.Result.Availability.Status == "success" && !seen[m.Model] {
+		if subCapabilityModel(m.Model) && m.State == "done" && m.Result != nil && m.Result.Availability.Status == "success" && !seen[m.Model] {
 			out = append(out, m.Model)
 			seen[m.Model] = true
 		}
@@ -296,7 +303,7 @@ func (s *Service) subTestCapability(ctx context.Context, id, base, job, kind str
 		models := subCompactionModels(t.models)
 		if len(models) == 0 {
 			result.Status = "error"
-			result.Message = "没有已检测可用的模型，请先运行模型检测"
+			result.Message = "没有已检测可用的 gpt 或 codex 模型，请先运行模型检测"
 		}
 		for _, model := range models {
 			probeCtx, cancel := context.WithTimeout(ctx, 90*time.Second)

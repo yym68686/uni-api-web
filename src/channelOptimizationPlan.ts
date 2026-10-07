@@ -1,5 +1,6 @@
 import { controlRequest } from "./api";
 import { boundGroups } from "./sub2apiImports";
+import { isCapabilityCheckModel } from "./sub2apiModels";
 import type { InstalledChannel, SubImports } from "./sub2apiImports";
 import {
   channelMembers,
@@ -328,11 +329,12 @@ function faults(
     if (assessPrice(e.check, prices).status === "abnormal")
       result.push(["price", "单价异常"]);
   }
-  if (!running(e.tool?.state) && e.tool?.result?.status === "unsupported")
+  if (isCapabilityCheckModel(model) && !running(e.tool?.state) && e.tool?.result?.status === "unsupported")
     result.push(["tool", "不支持 Tool use"]);
   if (e.degraded && !running(e.check.state))
     result.push(["quality", "Astra 最近检测降智"]);
   if (
+    isCapabilityCheckModel(model) &&
     !running(e.compactionState) &&
     e.compaction?.model === model &&
     e.compaction.status === "unsupported"
@@ -548,8 +550,8 @@ export function buildOptimizationPlan(
               e.canAdd &&
               e.check.state === "done" &&
               modelIsDefaultSelected(e.check) &&
-              !running(e.tool?.state) &&
-              e.tool?.result?.status !== "error",
+              (!isCapabilityCheckModel(upstream) ||
+                (!running(e.tool?.state) && e.tool?.result?.status !== "error")),
           )
         ) {
           changes.push({

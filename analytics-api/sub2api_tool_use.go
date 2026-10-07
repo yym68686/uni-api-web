@@ -45,6 +45,9 @@ func (item toolUseItem) named(namespace, name string) bool {
 }
 
 func subProbeToolUse(ctx context.Context, client *http.Client, base, key, model string) (out subProbe) {
+	if !subCapabilityModel(model) {
+		return subProbe{RequestedModel: model, Status: "not_applicable", Message: "仅检测 gpt 或 codex 开头的模型"}
+	}
 	start := time.Now()
 	out = subProbe{ID: "subtools-" + randomID(), StartedAt: start.Unix(), RequestedModel: model, Protocol: "responses", Status: "error", ModelMatch: "unavailable"}
 	out.RequestIDs = []string{out.ID, "local:" + out.ID}

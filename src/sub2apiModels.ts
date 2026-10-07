@@ -38,3 +38,9 @@ export function saveSubModels(user: string, models: SubModel[], available: strin
     localStorage.setItem(selectionKey(user), JSON.stringify({ disabled }));
   } catch { /* Keep choices for this session when storage is unavailable. */ }
 }
+
+// These two probes exercise Codex-specific protocols, not generic model capabilities.
+export function isCapabilityCheckModel(model: string): boolean {
+  return model.startsWith("gpt") || model.startsWith("codex");
+}
+export const capabilityCheckScope = "仅适用于 gpt 或 codex 开头的模型";

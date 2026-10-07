@@ -31,7 +31,7 @@ func TestConfiguredChecksWithoutAccountPersistAllKinds(t *testing.T) {
 		case "/v1/channel-settings/providers":
 			writeJSON(w, 200, map[string]any{"providers": providers})
 		case "/v1/model-channels":
-			writeJSON(w, 200, map[string]any{"data": []any{map[string]string{"provider": "native", "model": checkModel}, map[string]string{"provider": "native", "model": "custom-model"}}})
+			writeJSON(w, 200, map[string]any{"data": []any{map[string]string{"provider": "native", "model": checkModel}, map[string]string{"provider": "native", "model": "codex-custom-model"}}})
 		case "/v1/responses":
 			calls.Add(1)
 			if r.Header.Get("X-Uni-API-Provider") != "native" {
@@ -48,7 +48,7 @@ func TestConfiguredChecksWithoutAccountPersistAllKinds(t *testing.T) {
 			} else if strings.Contains(raw, "TOOL_PROBE_OK") {
 				w.Header().Set("Content-Type", "text/event-stream")
 				fmt.Fprint(w, strings.ReplaceAll(strings.ReplaceAll(toolUseSSE(nil, func() []toolUseItem {
-					if body["model"] == "custom-model" {
+					if body["model"] == "codex-custom-model" {
 						return []toolUseItem{{Type: "function_call", Name: "js", Namespace: "mcp__cua_repl", CallID: "noexec", Arguments: `{"code":"NO_EXEC"}`}}
 					}
 					return []toolUseItem{validToolUseItem()}
@@ -94,7 +94,7 @@ func TestConfiguredChecksWithoutAccountPersistAllKinds(t *testing.T) {
 		json.Unmarshal(w.Body.Bytes(), &out)
 		return out.Queued
 	}
-	if n := enqueue("check", "native", []string{checkModel, "custom-model"}); n != 2 {
+	if n := enqueue("check", "native", []string{checkModel, "codex-custom-model"}); n != 2 {
 		t.Fatal(n)
 	}
 	if n := enqueue("quality", "native", nil); n != 0 {
@@ -158,7 +158,7 @@ func TestConfiguredChecksWithoutAccountPersistAllKinds(t *testing.T) {
 				continue
 			}
 			want := "supported"
-			if c.Kind == "tool-use" && c.Model == "custom-model" {
+			if c.Kind == "tool-use" && c.Model == "codex-custom-model" {
 				want = "unsupported"
 			}
 			if result.Status != want {
@@ -250,7 +250,7 @@ func TestConfiguredChecksThroughRealGatewayWithoutClientRoutes(t *testing.T) {
 	listener.Close()
 	providers := []any{}
 	for _, name := range []string{"native", "other", "fail"} {
-		providers = append(providers, map[string]any{"provider": name, "engine": "gpt", "base_url": upstream.URL + "/" + name + "/v1/responses", "api": "fixture-key", "model": []string{checkModel, "custom-model"}})
+		providers = append(providers, map[string]any{"provider": name, "engine": "gpt", "base_url": upstream.URL + "/" + name + "/v1/responses", "api": "fixture-key", "model": []string{checkModel, "codex-custom-model"}})
 	}
 	providers = append(providers, map[string]any{"provider": "claude", "engine": "claude", "base_url": upstream.URL + "/claude/v1/messages", "api": "fixture-claude", "model": []string{"claude-fixture"}})
 	providers = append(providers, map[string]any{"provider": "gemini", "engine": "gemini", "base_url": upstream.URL + "/gemini/", "api": "fixture-gemini", "model": []string{"gemini-fixture"}})
@@ -307,13 +307,13 @@ func TestConfiguredChecksThroughRealGatewayWithoutClientRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	key := keys["data"].([]any)[0].(map[string]any)["key_id"].(string)
-	before, _, err = subGateway(ctx, src, "POST", "/v1/temporary-channels", map[string]any{"revision": before["revision"], "api_key_id": key, "provider": "sub2api-drawer", "base_url": upstream.URL + "/native/v1/responses", "api_key": "fixture-key", "models": []string{checkModel, "custom-model"}, "position": 1})
+	before, _, err = subGateway(ctx, src, "POST", "/v1/temporary-channels", map[string]any{"revision": before["revision"], "api_key_id": key, "provider": "sub2api-drawer", "base_url": upstream.URL + "/native/v1/responses", "api_key": "fixture-key", "models": []string{checkModel, "codex-custom-model"}, "position": 1})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, test := range []struct{ provider, kind, model, want string }{
-		{"sub2api-drawer", "availability", checkModel, "success"}, {"sub2api-drawer", "tool-use", "custom-model", "supported"}, {"sub2api-drawer", "compaction", "", "supported"},
-		{"native", "model", checkModel, "success"}, {"native", "model", "new-unconfigured-model", "success"}, {"native", "compaction", "", "supported"}, {"native", "tool-use", checkModel, "supported"}, {"claude", "model", "claude-fixture", "success"}, {"claude", "model", "claude-new-unconfigured", "success"}, {"gemini", "model", "gemini-fixture", "success"}, {"gemini", "model", "gemini-new-unconfigured", "success"}, {"fail", "model", "custom-model", "error"},
+		{"sub2api-drawer", "availability", checkModel, "success"}, {"sub2api-drawer", "tool-use", "codex-custom-model", "supported"}, {"sub2api-drawer", "compaction", "", "supported"},
+		{"native", "model", checkModel, "success"}, {"native", "model", "new-unconfigured-model", "success"}, {"native", "compaction", "", "supported"}, {"native", "tool-use", checkModel, "supported"}, {"claude", "model", "claude-fixture", "success"}, {"claude", "model", "claude-new-unconfigured", "success"}, {"gemini", "model", "gemini-fixture", "success"}, {"gemini", "model", "gemini-new-unconfigured", "success"}, {"fail", "model", "codex-custom-model", "error"},
 	} {
 		c := configuredCheck{Source: src.ID, Provider: test.provider, Kind: test.kind, Model: test.model}
 		var result any
