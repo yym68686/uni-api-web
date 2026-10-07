@@ -89,6 +89,12 @@
   color: var(--muted);
   font-size: 11px;
 }
+.optimization-change .optimization-price-detail {
+  color: var(--ink);
+  line-height: 1.7;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
 .optimization-result,
 .optimization-binding > .negative {
   padding: 12px 14px;

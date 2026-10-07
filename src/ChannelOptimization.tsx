@@ -284,6 +284,21 @@ export function ChannelOptimization({
                         </span>
                         <span>
                           {c.reasons.join("；")}
+                          {!!c.priceDetails?.length && (
+                            <>
+                              <small>
+                                倍率前单价 · 美元／百万 token · 应为价格设置值
+                              </small>
+                              {c.priceDetails.map((detail) => (
+                                <small
+                                  className="optimization-price-detail"
+                                  key={detail}
+                                >
+                                  {detail}
+                                </small>
+                              ))}
+                            </>
+                          )}
                           <small>
                             {c.checkedAt
                               ? `检测于 ${new Date(c.checkedAt * 1000).toLocaleString("zh-CN", { hour12: false })}`

@@ -21,7 +21,7 @@ import {
   groupQualityResult,
 } from "./sub2apiResults";
 import type { SubModelCheck } from "./sub2apiResults";
-import { assessPrice, matchesPriceFilter } from "./sub2apiPriceCheck";
+import { assessPrice, dollars, matchesPriceFilter } from "./sub2apiPriceCheck";
 import { toolUseModels } from "./toolUse";
 import type { ToolUseResult, ToolUseModel } from "./toolUse";
 import type { CompactionResult } from "./SubCompaction";
@@ -67,6 +67,7 @@ export interface OptimizationChange {
   upstream: string;
   action: "add" | "remove";
   reasons: string[];
+  priceDetails?: string[];
   checkedAt: number;
 }
 export interface OptimizationPlan {
@@ -499,6 +500,24 @@ export function buildOptimizationPlan(
               .map(([, reason]) => reason),
           ),
         ];
+        const priceDetails = events.includes("price")
+          ? [
+              ...new Set(
+                evidence
+                  .filter(
+                    (e) =>
+                      !running(e.check.state) &&
+                      modelMatchesFilters(e, snapshot.filters, snapshot.prices),
+                  )
+                  .map((e) => assessPrice(e.check, snapshot.prices))
+                  .filter((price) => price.status === "abnormal")
+                  .map(
+                    ({ expected, usage }) =>
+                      `输入：应为 ${dollars(expected?.input)}，实际 ${dollars(usage?.input_price)}；输出：应为 ${dollars(expected?.output)}，实际 ${dollars(usage?.output_price)}`,
+                  ),
+              ),
+            ]
+          : [];
         const checkedAt = Math.max(
           0,
           ...evidence.map((e) => e.check.result?.checked_at || 0),
@@ -515,6 +534,7 @@ export function buildOptimizationPlan(
                 upstream,
                 action: "remove",
                 reasons,
+                priceDetails,
                 checkedAt,
               });
             }
