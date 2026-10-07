@@ -42,8 +42,8 @@ function validate(raw: unknown): SubFilters {
     sort: field("sort", ["", "asc", "desc"]),
     availability: field("availability", ["", "success", "error", "untested"]),
     priceStatus: field("priceStatus", ["", "normal", "abnormal", "unconfirmed", "unconfirmed_match", "unconfirmed_mismatch"]),
-    compaction: field("compaction", ["", "supported", "unsupported", "error", "untested"]),
-    toolUse: field("toolUse", ["", "supported", "unsupported", "error", "untested"]),
+    compaction: field("compaction", ["", "supported", "unsupported", "error", "untested", "not_applicable"]),
+    toolUse: field("toolUse", ["", "supported", "unsupported", "error", "untested", "not_applicable"]),
     quality: field("quality", ["", "pass", "fail", "inconclusive", "error"]),
     minQuality: field("minQuality", ["", ...Array.from({ length: 11 }, (_, i) => String(i * 10))]),
   };
