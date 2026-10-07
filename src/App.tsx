@@ -976,7 +976,10 @@ function Dashboard({
   const filterScope = view === "balances" ? "balances" : "channels";
   const needsChannelData = ["channels", "balances", "overview", "automations"].includes(view);
   const filters = pageFilters[filterScope];
-  const sourceQuery = useConsoleSources(baseConnection.session, !!baseConnection.account);
+  const sourceQuery = useConsoleSources(baseConnection.session, !!baseConnection.account, view === "sources");
+  useEffect(() => {
+    if (baseConnection.account && view === "sources") void sourceQuery.refetch();
+  }, [baseConnection.account, view, sourceQuery.refetch]);
   const sourceList = sourceQuery.data?.data || [];
   const imported = useSubImports(!!baseConnection.account && needsChannelData);
   const rawChecks = useChannelChecks(
@@ -1496,12 +1499,6 @@ function Dashboard({
           }
         />
         <main className="workspace"><Suspense fallback={<PageLoading view={view} />}>
-          {!!catalog.data?.unavailable_sources?.length && (
-            <div role="alert" className="error-banner">
-              来源暂不可用：{catalog.data.unavailable_sources.join("、")}
-              。当前结果不完整。
-            </div>
-          )}
           {historyInitializing && (channelView || view === "overview") && (
             <div className="coverage-note" role="status">
               <Spinner small />

@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { controlRequest } from "./api";
 import type { ConsoleSource } from "./SourceSettings";
 
-export function useConsoleSources(session: string, enabled = true) {
+export function useConsoleSources(session: string, enabled = true, watchStatus = false) {
   return useQuery({
     queryKey: ["sources", session],
     queryFn: ({ signal }) =>
@@ -13,6 +13,7 @@ export function useConsoleSources(session: string, enabled = true) {
     staleTime: 30_000,
     retry: false,
     refetchOnWindowFocus: false,
+    refetchInterval: watchStatus ? 5_000 : false,
   });
 }
 

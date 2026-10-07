@@ -122,7 +122,14 @@ func (s *Service) channelSites(w http.ResponseWriter, r *http.Request) {
 			src, e := s.control.source(ctx, id)
 			var providers []configuredProvider
 			if e == nil {
+				if s.skipUnavailableObservation(src) {
+					mu.Lock()
+					unavailable = append(unavailable, id)
+					mu.Unlock()
+					return
+				}
 				providers, e = configuredProviders(ctx, src)
+				s.observeSourceFailure(r.Context(), src, e)
 			}
 			mu.Lock()
 			defer mu.Unlock()

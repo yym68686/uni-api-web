@@ -506,5 +506,13 @@ func (s *Service) sources(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "storage unavailable", 503)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"data": out})
+	type observedSource struct {
+		sourceView
+		TemporarilyUnavailable bool `json:"temporarily_unavailable,omitempty"`
+	}
+	observed := make([]observedSource, 0, len(out))
+	for _, source := range out {
+		observed = append(observed, observedSource{sourceView: source, TemporarilyUnavailable: s.observationHealth.unavailable(source)})
+	}
+	writeJSON(w, 200, map[string]any{"data": observed})
 }

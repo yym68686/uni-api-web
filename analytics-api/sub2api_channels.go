@@ -131,6 +131,10 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 				results[i].Error = source.Name
 				return
 			}
+			if s.skipUnavailableObservation(src) {
+				results[i].Error = source.Name
+				return
+			}
 			var stateMap, keysMap, catalogMap map[string]any
 			var stateErr, keysErr error
 			var readers sync.WaitGroup
@@ -145,6 +149,8 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 				catalogMap, _, _ = fetchSource(r.Context(), src, "/v1/model-channels", url.Values{"endpoint": {"all"}, "stream": {"all"}})
 			}()
 			readers.Wait()
+			s.observeSourceFailure(r.Context(), src, stateErr)
+			s.observeSourceFailure(r.Context(), src, keysErr)
 			if stateErr != nil || keysErr != nil {
 				results[i].Error = source.Name
 				return

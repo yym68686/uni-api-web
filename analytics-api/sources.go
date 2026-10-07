@@ -60,7 +60,7 @@ func fetchSource(ctx context.Context, src controlSource, path string, q url.Valu
 	req.Header.Set("Accept", "application/json")
 	resp, e := sourceHTTP.Do(req)
 	if e != nil {
-		return nil, 502, errors.New("source unavailable")
+		return nil, 502, &sourceTransportError{message: "source unavailable", cause: e}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
@@ -179,6 +179,7 @@ func (s *Service) saveSource(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "source storage unavailable", 503)
 		return
 	}
+	s.observationHealth.reset(out.ID)
 	writeJSON(w, 200, out)
 }
 func (s *Service) deleteSource(w http.ResponseWriter, r *http.Request) {
@@ -186,6 +187,7 @@ func (s *Service) deleteSource(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "source storage unavailable", 503)
 		return
 	}
+	s.observationHealth.reset(r.PathValue("id"))
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 func (s *Service) proxySource(w http.ResponseWriter, r *http.Request) {
@@ -252,8 +254,13 @@ func (s *Service) proxySource(w http.ResponseWriter, r *http.Request) {
 				failures[i] = view.Name
 				return
 			}
+			if s.skipUnavailableObservation(src) {
+				failures[i] = view.Name
+				return
+			}
 			body, _, e := fetchSource(r.Context(), src, path, q)
 			if e != nil {
+				s.observeSourceFailure(r.Context(), src, e)
 				failures[i] = view.Name
 				return
 			}

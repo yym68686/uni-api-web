@@ -158,6 +158,9 @@ func (s *Service) refreshConfiguredBindings(ctx context.Context) {
 			defer cancel()
 			src, e := s.control.source(scanCtx, id)
 			if e == nil {
+				if s.skipUnavailableObservation(src) {
+					return
+				}
 				var providers []configuredProvider
 				var catalog managementSnapshot
 				var catalogErr error
@@ -172,10 +175,12 @@ func (s *Service) refreshConfiguredBindings(ctx context.Context) {
 					_, _, _ = s.channelImportKeys(scanCtx, src)
 				}()
 				providers, e = configuredProviders(scanCtx, src)
+				s.observeSourceFailure(ctx, src, e)
 				if e == nil {
 					e = s.saveConfiguredInventory(scanCtx, src, providers)
 				}
 				catalogWG.Wait()
+				s.observeSourceFailure(ctx, src, catalogErr)
 				if catalogErr == nil {
 					_ = s.saveManagementSnapshot(scanCtx, src.ID, catalog)
 				}

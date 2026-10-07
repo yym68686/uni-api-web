@@ -12,6 +12,7 @@ export interface ConsoleSource {
   base: string;
   has_storage: boolean;
   has_config_key?: boolean;
+  temporarily_unavailable?: boolean;
   created_at: number;
 }
 export function SourceSettings({
@@ -130,6 +131,7 @@ export function SourceSettings({
           <Server size={20} />
           <div>
             <strong>{src.name}</strong>
+            {src.temporarily_unavailable && <small role="status">暂时不可用</small>}
             <small>{src.base}</small>
             <small>
               {src.has_storage

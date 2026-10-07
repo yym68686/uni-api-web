@@ -1158,8 +1158,8 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
         </div>
       )}
       {configuredChecks.isError && <div role="alert" className="error-banner">已有渠道检测记录读取失败。<button className="button small" onClick={() => void configuredChecks.refetch()}>重试</button></div>}
-      {(management.error || !!management.data?.unavailable_sources?.length) && <div className="error-banner" role="alert">
-        {management.error?.message || `渠道列表暂不完整：${management.data?.unavailable_sources.join("、")}`}
+      {management.error && <div className="error-banner" role="alert">
+        {management.error.message}
         <button className="button small" onClick={() => void management.refetch()}>重试</button>
       </div>}
       <section className="data-panel">

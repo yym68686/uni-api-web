@@ -11,6 +11,18 @@ import { SUB_MODELS, saveSubModels, loadSubModels } from "./sub2apiModels";
 import type { SubUsage } from "./sub2apiPriceCheck";
 
 afterEach(() => vi.unstubAllGlobals());
+it("keeps partial source availability out of the channel management banner", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (input: string) => Response.json({
+    data: input.endsWith("/accounts") ? fixtures() : [],
+    labels: {},
+    unavailable_sources: ["DigitalOcean"],
+    unavailable_keys: [],
+  })));
+  mount("offline-source-banner");
+  await screen.findAllByText("same-group", { selector: "strong" });
+  expect(screen.queryByText(/渠道列表暂不完整/)).not.toBeInTheDocument();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
 function mount(user = "account", client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
   return render(
     <QueryClientProvider client={client}>

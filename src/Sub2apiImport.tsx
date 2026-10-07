@@ -495,10 +495,9 @@ export function Sub2apiImport({
           </nav>
           <div className="route-dialog-body">
             {imports.isPending && <p role="status">正在读取已添加渠道…</p>}
-            {(imports.error || !!imports.data?.unavailable_sources?.length) && (
+            {imports.error && (
               <div role="alert" className="error-banner">
-                {imports.error?.message ||
-                  `${imports.data?.unavailable_sources.join("、")} 暂时无法读取，已添加记录可能不完整。`}
+                {imports.error.message}
                 <button
                   className="button small"
                   disabled={busy}

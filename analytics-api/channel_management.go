@@ -162,7 +162,14 @@ func (s *Service) channelManagement(w http.ResponseWriter, r *http.Request) {
 			snapshot, cached := snapshots[id]
 			cached = cached && snapshot.Identity == controlTarget(src)
 			if e == nil && !cached {
+				if s.skipUnavailableObservation(src) {
+					mu.Lock()
+					unavailable = append(unavailable, source.Name)
+					mu.Unlock()
+					return
+				}
 				snapshot, e = loadManagementSnapshot(ctx, src)
+				s.observeSourceFailure(r.Context(), src, e)
 			}
 			mu.Lock()
 			defer mu.Unlock()

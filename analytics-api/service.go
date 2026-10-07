@@ -51,6 +51,7 @@ type Service struct {
 	control           *controlStore
 	keyDirectories    keyDirectoryCache
 	summaries         summaryHistory
+	observationHealth sourceObservationCircuit
 }
 
 type cachedAnalytics struct {

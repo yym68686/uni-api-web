@@ -58,7 +58,7 @@ func subGateway(ctx context.Context, src controlSource, method, path string, bod
 	req.Header.Set("Accept", "application/json")
 	resp, err := sourceHTTP.Do(req)
 	if err != nil {
-		return nil, 502, errors.New("无法确认来源结果，请刷新后核对，勿重复提交")
+		return nil, 502, &sourceTransportError{message: "无法确认来源结果，请刷新后核对，勿重复提交", cause: err}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
