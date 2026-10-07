@@ -5,6 +5,7 @@ export const subFilterDefaults = {
   maxRate: "",
   sort: "",
   availability: "",
+  groupStatus: "available",
   priceStatus: "",
   compaction: "",
   toolUse: "",
@@ -28,6 +29,7 @@ function validate(raw: unknown): SubFilters {
   const maxRate = field("maxRate");
   return {
     joined: field("joined", ["", "joined", "unjoined"]),
+    groupStatus: field("groupStatus", ["available", "all", "unavailable"]) || subFilterDefaults.groupStatus,
     modelMatch: field("modelMatch", ["", "match", "mismatch", "missing", "invalid", "unavailable", "legacy", "untested"]),
     platform: field("platform"),
     search: field("search"),

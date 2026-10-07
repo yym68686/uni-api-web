@@ -717,6 +717,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
     maxRate,
     sort,
     availability,
+    groupStatus,
     priceStatus,
     compaction,
     toolUse,
@@ -776,6 +777,10 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
           ({ account, target, checks, selected, accountIds, configured }) =>
             (!accountId || (accountId === UNASSIGNED_ACCOUNT ? !accountIds.length : accountIds.includes(accountId))) &&
             (!configured || !account.id || !model || checks.some(c => c.model === model)) &&
+            (groupStatus === "all" ||
+              (groupStatus === "unavailable"
+                ? !configured && !target.active
+                : !!configured || target.active)) &&
             `${account.name} ${account.email} ${target.name} ${target.channel} ${target.platform} ${configured?.source_name || ""} ${configured?.members?.map(m=>m.base || "").join(" ") || configured?.base || ""}`
               .toLowerCase()
               .includes(search.toLowerCase()) &&
@@ -794,7 +799,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
               (!!target.history?.successful &&
                 target.history.passed * 100 >= Number(minQuality) * target.history.successful)),
         ),
-    [accounts, management.data, configuredChecks.data, imports.data, search, accountId, availability, priceStatus, prices.data, quality, minQuality, model, compaction, toolUse, modelMatch],
+    [accounts, management.data, configuredChecks.data, imports.data, search, accountId, availability, groupStatus, priceStatus, prices.data, quality, minQuality, model, compaction, toolUse, modelMatch],
   );
   const rates = [
     ...new Set(
@@ -1243,6 +1248,22 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
           </div>
         </div>
         <div className="filters sub-filters" role="region" aria-label="渠道管理筛选" tabIndex={0}>
+          <label className="select-field">
+            <select
+              aria-label="分组状态筛选"
+              title="按站点分组是否可用筛选，与模型检测结果无关"
+              value={groupStatus}
+              onChange={(e) => {
+                setFilters((v) => ({ ...v, groupStatus: e.target.value }));
+                setPage(0);
+              }}
+            >
+              <option value="available">可用分组</option>
+              <option value="all">全部分组</option>
+              <option value="unavailable">不可用分组</option>
+            </select>
+            <ChevronDown size={13} />
+          </label>
           <label className="select-field">
             <select aria-label="是否已加入渠道筛选" value={joined} onChange={e=>{setFilters(v=>({...v,joined:e.target.value}));setPage(0);}} title="依据 API key 的实际路由判断；读取不完整的渠道不会误判为未加入">
               <option value="">全部接入状态</option>
