@@ -1561,7 +1561,7 @@ function Dashboard({
                 void queryClient.invalidateQueries({ queryKey: ["metrics"] });
               }}
             />
-          ) : view === "overview" && !metrics.data && (metrics.isPending || historyInitializing) ? (
+          ) : view === "overview" && ((!metrics.data && (metrics.isPending || historyInitializing)) || (!catalog.data && catalog.isPending)) ? (
             <PageLoading view="overview" />
           ) : view === "overview" ? (
             <Overview
@@ -1570,7 +1570,7 @@ function Dashboard({
               live={liveMap}
               refreshAction={refreshButton}
             />
-          ) : !metrics.data && metrics.isPending ? <MetricLoading /> : (
+          ) : (!metrics.data && metrics.isPending) || (!catalog.data && catalog.isPending) ? <MetricLoading /> : (
             <motion.section
               {...reveal}
               transition={{ delay: 0.04 }}
