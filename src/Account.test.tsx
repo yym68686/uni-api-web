@@ -269,10 +269,9 @@ it.each(["configured", "empty", "failed"] as const)(
         expect(screen.getByText("channel-one")).toBeVisible();
         expect(screen.queryByLabelText("加载渠道")).not.toBeInTheDocument();
       } else {
-        expect(await screen.findByRole("alert")).toHaveTextContent(
-          "暂时无法读取渠道",
-        );
-        expect(screen.getByRole("button", { name: "重新读取" })).toBeEnabled();
+        expect(await screen.findByRole("alert")).toHaveTextContent("来源服务暂不可用");
+        expect(screen.getByRole("table")).toBeVisible();
+        expect(screen.getByText("channel-one")).toBeVisible();
       }
       expect(
         screen.queryByRole("heading", { name: "uni-api 来源" }),
@@ -567,4 +566,45 @@ it("shows 24h balance deductions and profit with inactive models, model filterin
   await user.selectOptions(screen.getByLabelText("模型筛选"),"active-a");
   await waitFor(()=>expect(cells()[7]).toHaveTextContent("查询失败"));
   expect(cells()[8]).toHaveTextContent("—");
+});
+
+it("starts independent observation reads before sources, keys or catalog resolve", async()=>{
+ const calls:string[]=[];
+ vi.stubGlobal("fetch",vi.fn(async(input:string)=>{
+  const path=new URL(input,location.origin).pathname;calls.push(path);
+  if(path.endsWith('/auth/me'))return Response.json({enabled:true,authenticated:true,username:'parallel-admin'});
+  return new Promise<Response>(()=>{});
+ }));
+ saveView(location.origin,'channels');mount();
+ await waitFor(()=>expect(calls.some(path=>path.endsWith('/analytics'))).toBe(true));
+ for(const suffix of ['/sources','/api-keys','/model-channels','/channel-metrics','/key-request-stats'])expect(calls.some(path=>path.endsWith(suffix))).toBe(true);
+ expect(screen.getByLabelText('加载渠道')).toBeVisible();
+});
+
+it("restores the complete observation table after authenticated reload while every live read is still pending", async()=>{
+ const row={source_id:'one',source_name:'One',provider:'cached-channel',model:'gpt-6-astra',upstream_model:'gpt-6-astra',endpoint:'all',stream:null,eligible:true,reason:'eligible',stats:{...emptyStats(),success:7,started:7,success_rate:1,success_rate_denominator:7}};
+ let delayed=false;
+ const fetcher=vi.fn(async(input:string)=>{
+  const path=new URL(input,location.origin).pathname;
+  if(path.endsWith('/auth/me'))return Response.json({enabled:true,authenticated:true,username:'snapshot-admin'});
+  if(delayed)return new Promise<Response>(()=>{});
+  if(path.endsWith('/sources'))return Response.json({data:[{id:'one',name:'One',base:'https://one.test',has_storage:true}]});
+  if(path.endsWith('/api-keys'))return Response.json({can_inspect_all:true,data:[],snapshot_revision:'r1'});
+  if(path.endsWith('/key-request-stats'))return Response.json({data:[],total:{requests:7,success:7,failed:0,success_rate:1}});
+  if(/\/(model-channels|channel-metrics|analytics)$/.test(path))return Response.json({data:[row],snapshot_revision:'r1',total:{requests:7},channel_spend:[],from:1,to:2});
+  if(path.endsWith('/channel-balances'))return Response.json({status:'complete',keys:[{kind:'wallet',status:'ok',amount:20,currency:'USD'}]});
+  return Response.json({data:[],labels:{},unavailable_sources:[],unavailable_keys:[]});
+ });
+ vi.stubGlobal('fetch',fetcher);saveView(location.origin,'channels');
+ const first=mount();
+ await waitFor(()=>expect(first.container.querySelector('[data-channel-data-state="complete"]')).toBeInTheDocument());
+ await waitFor(()=>expect(Object.keys(localStorage).some(k=>k.startsWith('uni-console-dashboard:'))).toBe(true));
+ first.unmount();first.client.clear();delayed=true;fetcher.mockClear();
+ const second=mount();
+ await screen.findByText('cached-channel');
+ expect(second.container.querySelector('[data-channel-data-state="complete"]')).toBeInTheDocument();
+ expect(screen.queryByLabelText('加载渠道')).not.toBeInTheDocument();
+ expect(screen.queryByLabelText('加载统计指标')).not.toBeInTheDocument();
+ expect(screen.getByText(/上次完整数据/)).toHaveTextContent('正在后台更新');
+ expect(fetcher.mock.calls.some(([url])=>url.includes('/v1/analytics?'))).toBe(true);
 });

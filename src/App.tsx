@@ -1,3 +1,4 @@
+import { clearDashboardSnapshots, restoreDashboardSnapshot, restoredDashboardAt, saveDashboardSnapshot } from "./dashboardSnapshot";
 import { PageLoading, MetricLoading, TableLoading, DetailLoading } from "./PageLoading";
 import { endpointChoices, readKeys } from "./requestFilters";
 import type { Keys } from "./requestFilters";
@@ -1043,7 +1044,7 @@ function Dashboard({
   const [theme, setTheme] = useTheme();
   const deferredSearch = useDeferredValue(search);
   const keys = useQuery({
-    enabled: (needsChannelData || view === "prices") && (!baseConnection.account || !!sourceQuery.data),
+    enabled: needsChannelData || view === "prices",
     queryKey: ["keys", connection.session],
     queryFn: ({ signal }) => readKeys(connection, signal),
   });
@@ -1064,7 +1065,7 @@ function Dashboard({
   const effectiveStream = view === "balances" ? "all" : stream;
   const keyRequestStats = useKeyRequestStats(connection, {
     range: effectiveWindow, model, endpoint: effectiveEndpoint, stream: effectiveStream,
-  }, (channelView || view === "balances") && keysLoaded, auto);
+  }, (channelView || view === "balances") && (baseConnection.account || keysLoaded), auto);
   const params = channelParams(
     keyId,
     effectiveWindow,
@@ -1078,9 +1079,9 @@ function Dashboard({
       request<Catalog>(connection, "/v1/model-channels?" + params, signal),
     enabled:
       needsChannelData &&
-      keysLoaded &&
+      (baseConnection.account || keysLoaded) &&
       !keyRemoved &&
-      (!baseConnection.account || sourceList.length > 0),
+      (!baseConnection.account || !sourceQuery.isSuccess || sourceList.length > 0),
   });
   const prices = useQuery({
     queryKey: ["prices", connection.session],
@@ -1094,8 +1095,9 @@ function Dashboard({
     refetchInterval: initializationRetryInterval,
     staleTime: 60_000,
   });
+  const metricsKey = ["metrics", connection.session, keyId, effectiveWindow, effectiveEndpoint, effectiveStream, channelView && !!baseConnection.account, channelView || view === "balances" ? model : ""];
   const metrics = useQuery({
-    queryKey: ["metrics", connection.session, keyId, effectiveWindow, effectiveEndpoint, effectiveStream, channelView && !!baseConnection.account, channelView || view === "balances" ? model : ""],
+    queryKey: metricsKey,
     queryFn: ({ signal }) =>
       readMetrics(
         connection,
@@ -1106,7 +1108,7 @@ function Dashboard({
         channelView && !!baseConnection.account,
       ),
     staleTime: 30_000,
-    enabled: needsChannelData && keysLoaded && !keyRemoved && !!catalog.data,
+    enabled: needsChannelData && !keyRemoved && (baseConnection.account || (keysLoaded && !!catalog.data)),
     refetchInterval: (query) => initializationRetryInterval(query) || (auto ? 30_000 : false),
     refetchIntervalInBackground: false,
   });
@@ -1120,9 +1122,8 @@ function Dashboard({
         signal,
       ),
     enabled:
-      keysLoaded &&
       !keyRemoved &&
-      !!catalog.data &&
+      (baseConnection.account || (keysLoaded && !!catalog.data)) &&
       (view === "overview" || channelView),
     staleTime: 2_000,
     refetchInterval: auto ? 5_000 : false,
@@ -1150,6 +1151,20 @@ function Dashboard({
     [liveMetrics.data],
   );
   const queryClient = useQueryClient();
+  const cachedDashboardAt = restoredDashboardAt(queryClient, metricsKey);
+  const snapshotScope = JSON.stringify(metricsKey);
+  useEffect(() => {
+    if (!baseConnection.account || !channelView) return;
+    const scope = JSON.parse(snapshotScope);
+    let timer: ReturnType<typeof setTimeout>;
+    const save = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => saveDashboardSnapshot(queryClient, baseConnection.session, scope), 100);
+    };
+    const unsubscribe = queryClient.getQueryCache().subscribe(save);
+    save();
+    return () => { clearTimeout(timer); unsubscribe(); };
+  }, [queryClient, baseConnection.account, baseConnection.session, channelView, snapshotScope]);
   const models = useMemo(
     () => [...new Set(catalog.data?.data.map((row) => row.model) || [])].sort(),
     [catalog.data],
@@ -1271,6 +1286,9 @@ function Dashboard({
   const lowCount = balanceQueries.filter((query) =>
     balanceIsLow(query.data),
   ).length;
+  const channelDataComplete = !!catalog.data && !!metrics.data && !!liveMetrics.data && !!keyRequestStats.data &&
+    balanceQueries.every(query => !!query.data && !query.isError) &&
+    (!baseConnection.account || (!!queryClient.getQueryData(["channel-checks", baseConnection.session]) && !!subQuality.data && !!imported.data && !!sourceQuery.data));
   const stats = summarize(rows);
   const filtered = tableRows.filter(
     (row) =>
@@ -1595,7 +1613,7 @@ function Dashboard({
             </motion.section>
           )}
           {channelView || view === "balances" ? (
-            <section className="data-panel">
+            <section className="data-panel" data-channel-data-state={channelView ? (channelDataComplete ? "complete" : "loading") : undefined}>
               <div className="data-heading">
                 <div className="data-title">
                   <span className="section-icon">
@@ -1917,6 +1935,12 @@ function Dashboard({
                   </button>
                 )}
               </div>
+              {channelView && cachedDashboardAt && (
+                <div className="coverage-note" role="status">
+                  <Clock3 size={14} />
+                  上次完整数据 · {time(cachedDashboardAt / 1000)}{metrics.isFetching ? " · 正在后台更新" : " · 可刷新获取最新数据"}
+                </div>
+              )}
               {channelView && checks.error && (
                 <div className="coverage-note" role="alert">
                   最近检测结果读取失败：{checks.error.message}
@@ -1956,7 +1980,7 @@ function Dashboard({
                     重新读取
                   </button>
                 </div>
-              ) : metrics.isPending || (historyInitializing && !metrics.data) ? (
+              ) : catalog.isPending || metrics.isPending || (historyInitializing && !metrics.data) ? (
                 <TableLoading kind={channelView ? "channels" : "balances"} />
               ) : total === 0 ? (
                 <Empty
@@ -2328,7 +2352,12 @@ export default function App() {
   const [error, setError] = useState("");
   const auth = useQuery({
     queryKey: ["account"],
-    queryFn: () => controlRequest<AccountSession>("/v1/auth/me"),
+    queryFn: async () => {
+      const session = await controlRequest<AccountSession>("/v1/auth/me");
+      if (session.enabled && session.authenticated) restoreDashboardSnapshot(client, session.username);
+      else clearDashboardSnapshots(client);
+      return session;
+    },
     retry: false,
     staleTime: 30_000,
   });
@@ -2353,6 +2382,7 @@ export default function App() {
       }
       await client.cancelQueries();
       await clearSummaryCache();
+      clearDashboardSnapshots(client);
       client.removeQueries({
         predicate: (query) => query.queryKey[0] !== "account",
       });
