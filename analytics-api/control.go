@@ -66,7 +66,7 @@ func newControlStore(dsn, master string) (*controlStore, error) {
 		db.Close()
 		return nil, err
 	}
-	_, err = db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS console_users(username TEXT PRIMARY KEY,password_hash TEXT NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+	err = execControlSchema(ctx, db, `CREATE TABLE IF NOT EXISTS console_users(username TEXT PRIMARY KEY,password_hash TEXT NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT now());
  CREATE TABLE IF NOT EXISTS console_sources(id TEXT PRIMARY KEY,name TEXT NOT NULL,base TEXT NOT NULL,encrypted_key TEXT NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT now());
  ALTER TABLE console_sources ADD COLUMN IF NOT EXISTS encrypted_storage TEXT NOT NULL DEFAULT '';
  ALTER TABLE console_sources ADD COLUMN IF NOT EXISTS encrypted_config_key TEXT NOT NULL DEFAULT '';
@@ -79,31 +79,31 @@ func newControlStore(dsn, master string) (*controlStore, error) {
 		db.Close()
 		return nil, err
 	}
-	if _, err = db.ExecContext(ctx, controlPersistenceSchema); err != nil {
+	if err = execControlSchema(ctx, db, controlPersistenceSchema); err != nil {
 		db.Close()
 		return nil, err
 	}
-	if _, err = db.ExecContext(ctx, subSchema); err != nil {
+	if err = execControlSchema(ctx, db, subSchema); err != nil {
 		db.Close()
 		return nil, err
 	}
-	if _, err = db.ExecContext(ctx, subBindingSchema); err != nil {
+	if err = execControlSchema(ctx, db, subBindingSchema); err != nil {
 		db.Close()
 		return nil, err
 	}
-	if _, err = db.ExecContext(ctx, qualityHistorySchema); err != nil {
+	if err = execControlSchema(ctx, db, qualityHistorySchema); err != nil {
 		db.Close()
 		return nil, err
 	}
-	if _, err = db.ExecContext(ctx, channelSettingsSchema); err != nil {
+	if err = execControlSchema(ctx, db, channelSettingsSchema); err != nil {
 		db.Close()
 		return nil, err
 	}
-	if _, err = db.ExecContext(ctx, configuredCheckSchema); err != nil {
+	if err = execControlSchema(ctx, db, configuredCheckSchema); err != nil {
 		db.Close()
 		return nil, err
 	}
-	if _, err = db.ExecContext(ctx, automationSchema); err != nil {
+	if err = execControlSchema(ctx, db, automationSchema); err != nil {
 		db.Close()
 		return nil, err
 	}
