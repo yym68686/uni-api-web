@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"math"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -130,6 +133,29 @@ func TestHaikuTierPreservesOverridesAndDoesNotStack272k(t *testing.T) {
 		got, ok := result.Total["estimated_cost_usd"].(float64)
 		if *tc.verified && (!ok || math.Abs(got-tc.want) > 1e-9) || !*tc.verified && ok {
 			t.Fatalf("got=%v want=%v verified=%v", result.Total, tc.want, *tc.verified)
+		}
+	}
+}
+
+func TestHaikuPriceAPIAcknowledgesCatalogTier(t *testing.T) {
+	service := &Service{engine: stateTestEngine(t)}
+	for _, body := range []string{
+		`{"input":0.1,"output":0.5,"verified":true}`,
+		`{"input":0.1,"output":0.5,"verified":true,"prompt_price_tier":{"threshold_tokens":1,"input_multiplier":100}}`,
+	} {
+		request := httptest.NewRequest("PUT", "/v1/prices/claude-haiku-5-5", strings.NewReader(body))
+		request.SetPathValue("model", "claude-haiku-5-5")
+		response := httptest.NewRecorder()
+		service.savePrice(response, request)
+		var result struct {
+			Price Price `json:"price"`
+		}
+		if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &result) != nil {
+			t.Fatal(response.Code, response.Body.String())
+		}
+		tier := result.Price.PromptPriceTier
+		if tier == nil || *tier != (PromptPriceTier{100000, 5, 5, 5}) {
+			t.Fatalf("API must acknowledge the actual catalog policy: %+v", tier)
 		}
 	}
 }

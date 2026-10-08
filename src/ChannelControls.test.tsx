@@ -846,8 +846,11 @@ it("keeps the last check while retesting, updates observation immediately, and r
   app.client.clear();
   app = setup(false, undefined, fixture);
   await screen.findByRole("table");
-  expect(observedCheck("One", "visible-first")).toHaveTextContent("降智");
-  expect(observedCheck("One", "visible-first")).not.toHaveTextContent("不降智");
+  // Metrics can render from cache before the independent check-history fetch.
+  await waitFor(() => {
+    expect(observedCheck("One", "visible-first")).toHaveTextContent("降智");
+    expect(observedCheck("One", "visible-first")).not.toHaveTextContent("不降智");
+  });
   expect(app.checkWrites).toHaveLength(0);
   app.unmount();
   app.client.clear();

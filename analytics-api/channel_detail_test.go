@@ -114,7 +114,7 @@ func TestDrawerIndependentChecksTargetInstalledChannels(t *testing.T) {
 		case "/v1/channel-settings/providers":
 			writeJSON(w, 200, map[string]any{"providers": []configuredProvider{{Provider: "installed", Temporary: true, Base: "https://upstream.test/v1/responses", API: "secret"}}})
 		case "/v1/model-channels":
-			writeJSON(w, 200, map[string]any{"data": []any{map[string]string{"provider": "installed", "model": checkModel}, map[string]string{"provider": "installed", "model": "alias", "upstream_model": "actual"}}})
+			writeJSON(w, 200, map[string]any{"data": []any{map[string]string{"provider": "installed", "model": checkModel}, map[string]string{"provider": "installed", "model": "gpt-public-alias", "upstream_model": "actual"}}})
 		case "/v1/responses":
 			if r.Header.Get("X-Uni-API-Provider") != "installed" {
 				t.Error("not directed to exact channel")
@@ -128,7 +128,7 @@ func TestDrawerIndependentChecksTargetInstalledChannels(t *testing.T) {
 				compactSSE(w, fmt.Sprint(body["model"]), `[{"type":"compaction","encrypted_content":"opaque"}]`)
 			case strings.Contains(raw, "TOOL_PROBE_OK"):
 				toolCalls.Add(1)
-				if body["model"] != "alias" {
+				if body["model"] != "gpt-public-alias" {
 					t.Error("lost public alias", body["model"])
 				}
 				w.Header().Set("Content-Type", "text/event-stream")
@@ -178,7 +178,7 @@ func TestDrawerIndependentChecksTargetInstalledChannels(t *testing.T) {
 	queue("availability", checkModel, 1)
 	queue("availability", checkModel, 0)
 	queue("quality", checkModel, 1) // Separate job: availability must not gray out quality.
-	queue("tool-use", "alias", 1)
+	queue("tool-use", "gpt-public-alias", 1)
 	queue("compaction", "", 1)
 	for range 4 {
 		if !s.configuredCheckOne(context.Background()) {

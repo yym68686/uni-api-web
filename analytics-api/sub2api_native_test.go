@@ -208,3 +208,15 @@ func TestSubNativeCompletionAndTextTiming(t *testing.T) {
 		}
 	}
 }
+
+// Availability covers every catalog model; tool-use probes are limited to
+// GPT/Codex. Quality and remote compaction each add one successful probe.
+func subFixtureSyncProbeCount() int {
+	count := len(subModels) + 2
+	for _, model := range subModels {
+		if strings.HasPrefix(model, "gpt") || strings.HasPrefix(model, "codex") {
+			count++
+		}
+	}
+	return count
+}
