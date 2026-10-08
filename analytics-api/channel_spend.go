@@ -423,6 +423,14 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 		defer ledger.Rollback()
 		logs := map[string][]bill{}
 		if len(ids) > 0 {
+			// PostgreSQL estimates jsonb_to_recordset as a small relation and can
+			// choose a hash join, scanning the whole ledger instead of probing the
+			// existing (account_id,key_id,request_id) index. This transaction is
+			// read-only and scoped to this lookup, so force indexed nested probes
+			// without changing the database-wide planner or any serving writes.
+			if _, err = ledger.ExecContext(ctx, `SET LOCAL enable_hashjoin=off; SET LOCAL enable_mergejoin=off`); err != nil {
+				return nil, err
+			}
 			// Receipt identity includes the remote key. Independent account/request
 			// arrays form a cross-product and skip the middle column of the
 			// (account_id,key_id,request_id) index, rescanning unrelated keys on
