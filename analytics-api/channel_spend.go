@@ -285,7 +285,13 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 	cursor := ""
 	pages := 0
 	began := time.Now()
+	defer func() {
+		if resultErr != nil {
+			log.Printf("event=channel_spend_incomplete pages=%d channel_models=%d duration_ms=%d", pages, len(totals), time.Since(began).Milliseconds())
+		}
+	}()
 	for {
+		operation.stage("fact_page")
 		rows, err := snapshot.QueryContext(ctx, `SELECT event_id,source_id,COALESCE(instance_id,''),COALESCE(request_id,''),COALESCE(attempt_id,''),provider,model,upstream_model,key_id,at_ms,COALESCE(started_ms,at_ms),`+billingSiteSQL+`,COALESCE(upstream_key_hash,''),CAST(COALESCE(to_json(billing_request_ids),'[]') AS VARCHAR),completions,COALESCE(status,0),COALESCE(upstream_error_sha256,''),COALESCE(endpoint,'') FROM console_spend_facts WHERE event_id>? ORDER BY event_id LIMIT ?`, cursor, billingFactBatchSize)
 		if err != nil {
 			return nil, err
@@ -314,6 +320,7 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 		}
 		cursor = facts[len(facts)-1].Event
 		pages++
+		operation.stage("error_evidence")
 		if err = s.supplementBillingErrorEvidence(ctx, facts); err != nil {
 			return nil, err
 		}
@@ -361,6 +368,7 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 				ids[id] = true
 			}
 		}
+		operation.stage("queue_windows")
 		if err = s.queueAccountSpendWindows(ctx, windows); err != nil {
 			return nil, err
 		}
@@ -380,6 +388,7 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 			if e != nil {
 				return nil, e
 			}
+			operation.stage("receipt_claim_lookup")
 			claimsSQL := `WITH target AS (SELECT DISTINCT value->>'base' AS upstream_base,value->>'hash' AS upstream_key_hash,value->>'id' AS rid FROM json_each(?)) SELECT t.upstream_base,t.upstream_key_hash,t.rid,c.n FROM target t JOIN console_spend_claims c USING(upstream_base,upstream_key_hash,rid)`
 			rows, err = snapshot.QueryContext(ctx, claimsSQL, string(targetJSON))
 			if err != nil {
@@ -406,6 +415,7 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 		}
 		// Read coverage and cached rows from the same snapshot. Otherwise a scan
 		// completing between the two reads can falsely label a newly saved bill absent.
+		operation.stage("ledger_snapshot")
 		ledger, err := s.control.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 		if err != nil {
 			return nil, err
@@ -413,15 +423,38 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 		defer ledger.Rollback()
 		logs := map[string][]bill{}
 		if len(ids) > 0 {
-			requestIDs := make([]string, 0, len(ids))
-			for id := range ids {
-				requestIDs = append(requestIDs, id)
+			// Receipt identity includes the remote key. Independent account/request
+			// arrays form a cross-product and skip the middle column of the
+			// (account_id,key_id,request_id) index, rescanning unrelated keys on
+			// every page. Match only the authorized, already-resolved tuples.
+			wanted := []map[string]any{}
+			seen := map[string]bool{}
+			for _, fact := range facts {
+				scope, ok := selectedBindings[fact.Event]
+				if !ok {
+					continue
+				}
+				for _, id := range siteReceiptIDs(fact.IDs, scope.Kind) {
+					identity := receiptIdentity(scope.Account, scope.Key, id)
+					if seen[identity] {
+						continue
+					}
+					seen[identity] = true
+					wanted = append(wanted, map[string]any{"account_id": scope.Account, "key_id": scope.Key, "request_id": id})
+				}
 			}
-			accountIDs := make([]string, 0, len(accounts))
-			for id := range accounts {
-				accountIDs = append(accountIDs, id)
+			raw, e := json.Marshal(wanted)
+			if e != nil {
+				return nil, e
 			}
-			rows, err = ledger.QueryContext(ctx, `SELECT account_id,key_id,log_id,request_id,actual_cost::text FROM console_sub_spend_logs WHERE account_id=ANY($1) AND request_id=ANY($2)`, accountIDs, requestIDs)
+			operation.stage("receipt_lookup")
+			lookupStarted := time.Now()
+			rows, err = ledger.QueryContext(ctx, `SELECT l.account_id,l.key_id,l.log_id,l.request_id,l.actual_cost::text
+ FROM jsonb_to_recordset($1::jsonb) AS wanted(account_id text,key_id bigint,request_id text)
+ JOIN console_sub_spend_logs l USING(account_id,key_id,request_id)`, string(raw))
+			if elapsed := time.Since(lookupStarted); elapsed >= time.Second || err != nil {
+				log.Printf("event=channel_spend_receipt_lookup page=%d identities=%d duration_ms=%d failed=%t", pages, len(wanted), elapsed.Milliseconds(), err != nil)
+			}
 			if err != nil {
 				return nil, err
 			}
@@ -452,6 +485,7 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 			for account := range accounts {
 				accountIDs = append(accountIDs, account)
 			}
+			operation.stage("coverage_lookup")
 			rows, err = ledger.QueryContext(ctx, `SELECT account_id,covered_from,covered_to,checked_at,error<>'' FROM console_sub_account_spend_cache WHERE account_id=ANY($1)`, accountIDs)
 			if err != nil {
 				return nil, err
@@ -477,6 +511,7 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 		if err = ledger.Commit(); err != nil {
 			return nil, err
 		}
+		operation.stage("receipt_aggregate")
 		for _, b := range facts {
 			scope, ok := selectedBindings[b.Event]
 			if !ok {

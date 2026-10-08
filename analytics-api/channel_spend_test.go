@@ -526,3 +526,27 @@ func TestAttributedSpendBatchesMoreThanFiftyThousandFactsWithoutDroppingOrDouble
 		t.Fatal("model scoped total", rows, err)
 	}
 }
+
+func TestAttributedSpendMatchesExactAccountKeyAndReceiptTuple(t *testing.T) {
+	s, account, owner := attributionFixture(t)
+	ctx := context.Background()
+	now := time.Now().Truncate(time.Second)
+	facts := []Fact{attributedFact("exact-a", "caller", now.Add(-time.Minute)), attributedFact("exact-b", "caller", now.Add(-time.Minute))}
+	// Multiple headers can identify one receipt; never multiply its charge.
+	facts[0].BillingRequestIDs = []string{"client:exact-a", "client:exact-a"}
+	if err := s.engine.Import(ctx, "exact-tuples", "1", facts); err != nil {
+		t.Fatal(err)
+	}
+	storeAttributedLog(t, s, account, "exact-a", "0.10", 1)
+	storeAttributedLog(t, s, account, "exact-b", "0.20", 2)
+	// Another upstream key may reuse the same request ID. It is neither this
+	// request's cost nor evidence that this request has two receipts.
+	_, err := s.control.db.Exec(`INSERT INTO console_sub_spend_logs(account_id,key_id,log_id,at_ms,actual_cost,request_id,model) VALUES($1,999,3,$2,99,'client:exact-a',$3),($1,999,4,$2,88,'client:exact-b',$3)`, account, now.UnixMilli(), checkModel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := s.attributedChannelSpend(ctx, owner, QueryFilter{SourceID: "source", KeyID: "caller"}, now.Add(-time.Hour).Unix(), now.Unix())
+	if err != nil || len(rows) != 1 || rows[0].Amount == nil || *rows[0].Amount != 0.30 || rows[0].Matched != 2 || rows[0].Ambiguous != 0 {
+		t.Fatal(rows, err)
+	}
+}
