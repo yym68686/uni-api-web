@@ -1,3 +1,5 @@
+import { readAccountSession } from "./accountSession";
+import type { AccountSession } from "./accountSession";
 import { clearDashboardSnapshots, restoreDashboardSnapshot, restoredDashboardAt, saveDashboardSnapshot } from "./dashboardSnapshot";
 import { PageLoading, MetricLoading, TableLoading, DetailLoading } from "./PageLoading";
 import { endpointChoices, readKeys } from "./requestFilters";
@@ -2342,18 +2344,13 @@ export function LegacyConsole() {
   );
 }
 
-type AccountSession = {
-  enabled: boolean;
-  authenticated: boolean;
-  username: string;
-};
 export default function App() {
   const client = useQueryClient();
   const [error, setError] = useState("");
   const auth = useQuery({
     queryKey: ["account"],
     queryFn: async () => {
-      const session = await controlRequest<AccountSession>("/v1/auth/me");
+      const session = await readAccountSession();
       if (session.enabled && session.authenticated) restoreDashboardSnapshot(client, session.username);
       else clearDashboardSnapshots(client);
       return session;

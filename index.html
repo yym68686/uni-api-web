@@ -16,6 +16,16 @@
         document.querySelector('meta[name="theme-color"]').content =
           theme === "dark" ? "#101916" : "#f6f7f8";
       })();
+      // Check the existing session while the application bundle downloads.
+      // The application still awaits this response before restoring private data.
+      globalThis.__uniConsoleSessionBootstrap = {
+        startedAt: Date.now(),
+        result: fetch("/analytics/v1/auth/me", {
+          credentials: "same-origin", cache: "no-store",
+          headers: { Accept: "application/json", "Content-Type": "application/json" },
+          signal: AbortSignal.timeout(10000),
+        }).then(response => response.ok ? response.json() : null).catch(() => null),
+      };
     </script>
     <style>
       html {
