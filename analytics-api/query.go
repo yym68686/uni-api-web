@@ -296,13 +296,13 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (queryResult QueryRes
 			// Disabled writes contribute no cost and are not charged again as
 			// ordinary input. Token counts and cache-read charges are unchanged.
 			s.KnownEstimatedUSD = (float64(ordinary)*p.Input + float64(s.Output)*p.Output + float64(s.CacheRead)*p.CacheRead + writeCost) / 1e6
-			if p.chargesLongContextPremium() {
+			if tier := p.promptPriceTier(); tier != nil {
 				// Add only the premium: all base costs are already counted.
 				longWriteCost := 0.0
 				if p.chargesCacheWrite() {
 					longWriteCost = float64(max(0, longCacheWrite-longCacheWrite1h))*p.CacheWrite + float64(longCacheWrite1h)*p.CacheWrite1h
 				}
-				s.KnownEstimatedUSD += (float64(longInput)*p.Input + float64(longOutput)*p.Output*.5 + float64(longCacheRead)*p.CacheRead + longWriteCost) / 1e6
+				s.KnownEstimatedUSD += (float64(longInput)*p.Input*(tier.InputMultiplier-1) + float64(longOutput)*p.Output*(tier.OutputMultiplier-1) + (float64(longCacheRead)*p.CacheRead+longWriteCost)*(tier.CacheMultiplier-1)) / 1e6
 			}
 			s.PricedSamples = s.UsageSamples
 		}

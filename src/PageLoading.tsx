@@ -70,7 +70,7 @@ const columns: Record<TableKind, string[]> = {
     "缓存读取",
     "缓存写入",
     "售卖比例",
-    "超过272k",
+    "长上下文",
     "操作",
   ],
   history: ["时间", "任务 / 事件", "结果", "详情"],

@@ -103,7 +103,14 @@ export interface Metrics extends Catalog {
   total?: Record<string, any>;
   models?: Record<string, any>[];
 }
+export interface PromptPriceTier {
+  threshold_tokens: number;
+  input_multiplier: number;
+  output_multiplier: number;
+  cache_multiplier: number;
+}
 export interface ModelPrice {
+  prompt_price_tier?: PromptPriceTier;
   model: string;
   input: number;
   output: number;

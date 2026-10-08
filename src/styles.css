@@ -2670,6 +2670,13 @@ nav > button.active > svg {
 .price-number-input::placeholder { color: var(--muted); font-family: "Geist Variable", sans-serif; font-size: 11px; }
 .price-number-input:disabled { opacity: .6; }
 .price-derived { display: block; color: var(--muted); text-align: center; font-size: 11px; white-space: nowrap; }
+/* Both Haiku prompt tiers stay visible alongside the editable base rate. */
+.price-tier-label { display: block; margin-bottom: 4px; color: var(--muted); font-size: 10px; text-align: right; }
+.price-tier-rate { display: flex; justify-content: space-between; gap: 4px; margin-top: 6px; color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.price-tier-rate > span:last-child { color: var(--ink); }
+.price-tier-policy { display: inline-flex; flex-direction: column; align-items: center; gap: 4px; white-space: nowrap; }
+.price-tier-policy strong { color: var(--ink); font-size: 11px; font-weight: 500; }
+.price-tier-policy small { color: var(--muted); font-size: 10px; }
 .price-toggle-cell { text-align: center; }
 .price-table-toggle { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 34px; cursor: pointer; }
 .price-table-toggle input { position: absolute; width: 34px; height: 20px; margin: 0; opacity: 0; cursor: inherit; }

@@ -16,3 +16,10 @@ it('does not silently select all when every visible model has been disabled',()=
  expect(loadSubModels('hidden-extra')).toEqual([]);
  expect(loadSubModels('hidden-extra',[...SUB_MODELS,'extra'])).toEqual(['extra']);
 });
+it('offers Haiku 5.5 in the shared channel model catalog without resetting saved exclusions',()=>{
+ const user='haiku-catalog-upgrade';
+ const previous=SUB_MODELS.filter(m=>m!=='claude-haiku-5-5');
+ saveSubModels(user,previous.filter(m=>m!=='gpt-6-sol'),previous);
+ expect(loadSubModels(user)).toContain('claude-haiku-5-5');
+ expect(loadSubModels(user)).not.toContain('gpt-6-sol');
+});

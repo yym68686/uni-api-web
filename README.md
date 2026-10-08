@@ -317,7 +317,9 @@ Tool use 检测复用 Codex 的 `additional_tools` / namespace / custom `exec` �
 
 添加后自动读取有权限的全部分组，为每组创建并复用 `uni-console-check-*` 专用 key，创建时不设置额度上限，检测费用由站点账号承担，不修改业务 key。同步时，对名称、分组、已保存 ID 和密钥均匹配的旧版 $1 测试 key，读取上游最新状态后将 `quota` 更新为 `0`（不限额）并回读核验，不清零累计用量；停用、过期或自定义额度的 key 保留原设置。额度耗尽、停用、过期、额度更新失败与创建失败分别提示。重复同步通过专用名称、分组校验与 Idempotency-Key 避免重复创建。可用渠道接口关闭时继续按分组运行。移除账号只删除控制台凭据与结果，上游测试 key 保留，由用户在上游撤销。
 
-支持 27 个检测模型：`gpt-6-astra`、`gpt-6-sol`、`gpt-6-luna`、`gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna`、`gpt-5.5`、`codex-auto-review`、`glm-5.3`、`glm-5.3-flash`、`kimi-k3`、`deepseek-v4.1-flash`、`deepseek-v4-pro`、`grok-4.7`、`grok-4.6`、`gemini-3.1-pro`、`gemini-3.8-flash`、`claude-fable-5`、`claude-fable-5-1`、`claude-opus-5-5`、`claude-opus-5`、`claude-sonnet-5-5`、`claude-sonnet-5`、`claude-opus-4-8`、`claude-opus-4-6`、`claude-sonnet-4-6`、`claude-haiku-4-5-20251001`。
+支持 29 个检测模型：`gpt-6-astra`、`gpt-6.1-sol`、`gpt-6-sol`、`gpt-6-luna`、`gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna`、`gpt-5.5`、`codex-auto-review`、`glm-5.3`、`glm-5.3-flash`、`kimi-k3`、`deepseek-v4.1-flash`、`deepseek-v4-pro`、`grok-4.7`、`grok-4.6`、`gemini-3.1-pro`、`gemini-3.8-flash`、`claude-fable-5`、`claude-fable-5-1`、`claude-opus-5-5`、`claude-opus-5`、`claude-sonnet-5-5`、`claude-sonnet-5`、`claude-opus-4-8`、`claude-opus-4-6`、`claude-sonnet-4-6`、`claude-haiku-5-5`、`claude-haiku-4-5-20251001`。
+
+Haiku 5.5 按单次总输入（含缓存）自动采用 ≤100k / >100k 两档价格，详见 [Haiku 5.5 定价](docs/haiku-5-5-pricing.md)。
 
 每个模型发送流式 `say test`。Claude 使用 `/v1/messages` 和 `x-api-key`，两个 Gemini 使用 `/v1beta/models/{model}:streamGenerateContent?alt=sse` 和 `x-goog-api-key`，其他使用 `/v1/responses`。不尝试切换协议或回退模型。Responses 默认延迟记录首个 `response.created`，Claude 记录首个 `message_start`，Gemini 记录首个原生响应事件；tooltip 同时列出首个非思考文本片段的延迟，原生事件不会伪装为 `response.created`。模型匹配使用原生返回的 `model` / `modelVersion`，缺失时不拿请求模型补全。请求 ID 继续用于账单核验。Responses 收到有效文本且 HTTP 200、正常读到 EOF 但缺少 `response.completed` 时，显示“成功，但缺少结束事件”；完成事件存在但 output 为空时，使用已完成的 assistant output item 或文本增量，显示“成功，但结束事件缺少最终文本”。两种情况保存 `availability.status=success` 及 `terminal_status=missing/missing_output`，均可手动勾选，新增接入和批量优化的新增建议默认不选；已有接入保留原选择。明确失败/未完成事件、读取错误、超时、超限和无有效文本仍失败。历史记录不自动改判，须重新检测。正常结束的 Messages、以 STOP 完成的 Gemini 且有可见文本才判可用。缺少结束事件的 Responses 不参与降智成功/失败判定。仅 `gpt-6-astra` 可用性成功后再次发送糖果推理题，回复含 `21` 判不降智，否则判降智；其他模型只发送 `say test`。
 
@@ -425,7 +427,7 @@ HTTP deadlines and deployment resources still apply; removing a count quota
 is not a guarantee of unlimited capacity or completion within one request.
 
 
-价格设置每行提供“超过272k加价”开关，默认关闭，随该行价格独立保存。开启后按单次请求的总输入 token（包括缓存）严格大于 272,000 判断，对该请求全部普通输入、缓存读取、5 分钟及 1 小时缓存写入分别按各自单价 ×2、全部输出按输出单价 ×1.5 估算；关闭写入计费时仍不计缓存写入费用。后缀模型继承基础模型设置。估算消费及由其计算的利润使用当前设置，适用于已有历史记录；上游实际消费仍使用账单。 映射模型按历史请求中记录的 `upstream_model` 选择单价、售卖比例、缓存写入和长上下文开关（如对外 `gpt-5.4` 实际调用 `gpt-5.5`，使用 `gpt-5.5` 定价）。旧记录未保存上游模型时才回退到对外请求名；已知上游无已确认价格时不借用别名价格。渠道统计返回 `pricing_model` 标明计价模型，当前路由修改不会重写历史模型归属。判断读取过滤范围内的逐请求 token，不使用窗口汇总输入量，多个短请求不会被误加价。设置独立持久化至 S3，旧价格文档默认关闭，旧客户端省略字段时保留已有选择。
+除 Haiku 5.5 自动按 100k 分档外，价格设置每行提供“超过272k加价”开关，默认关闭，随该行价格独立保存。开启后按单次请求的总输入 token（包括缓存）严格大于 272,000 判断，对该请求全部普通输入、缓存读取、5 分钟及 1 小时缓存写入分别按各自单价 ×2、全部输出按输出单价 ×1.5 估算；关闭写入计费时仍不计缓存写入费用。后缀模型继承基础模型设置。估算消费及由其计算的利润使用当前设置，适用于已有历史记录；上游实际消费仍使用账单。 映射模型按历史请求中记录的 `upstream_model` 选择单价、售卖比例、缓存写入和长上下文开关（如对外 `gpt-5.4` 实际调用 `gpt-5.5`，使用 `gpt-5.5` 定价）。旧记录未保存上游模型时才回退到对外请求名；已知上游无已确认价格时不借用别名价格。渠道统计返回 `pricing_model` 标明计价模型，当前路由修改不会重写历史模型归属。判断读取过滤范围内的逐请求 token，不使用窗口汇总输入量，多个短请求不会被误加价。设置独立持久化至 S3，旧价格文档默认关闭，旧客户端省略字段时保留已有选择。
 
 请求追踪页按尝试 ID 合并派发、尝试结果和账单事件，提供共享时间轴上的耗时条、最终状态概览与逐次尝试卡片；并发条保留重叠关系，不把它们的耗时相加。缺少入口事件时明确使用首条记录作为相对起点；未记录开始时间或最终结果时保持未知。重复请求 ID 不合并为单次重试链。渠道显示当前所属站点与倍率、分组名称，点击名称或时间条打开阶段详情抽屉，并可打开原站控制台。内部渠道、请求和尝试 ID 保留在展开详情中。名称只用当前用户的本地账号分组、来源绑定及历史请求 Key 指纹精确关联，不向网关或站点发起探测；无法关联时显示未关联渠道，不猜测名称或历史计费倍率。
 

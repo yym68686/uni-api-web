@@ -137,7 +137,7 @@ it("defaults long-context pricing off, persists independent toggles and can turn
   }));
   const props = {prices: [] as ModelPrice[], loading:false, connection:{base:"",key:"",session:"test",account:true},onSaved:vi.fn()};
   const view=render(<PriceSettings {...props} />);
-  for (const price of MODEL_PRICE_CATALOG)
+  for (const price of MODEL_PRICE_CATALOG.filter(p => !p.prompt_price_tier))
     expect(screen.getByRole("checkbox",{name:`${price.model} 超过272k加价`})).not.toBeChecked();
   const user=userEvent.setup();
   const toggle=screen.getByRole("checkbox",{name:"gpt-6-sol 超过272k加价"});
@@ -180,4 +180,52 @@ it("waits for saved prices before allowing edits instead of flashing editable de
   view.rerender(<PriceSettings {...props} loading={false}/>);
   expect(screen.queryByRole("status",{name:"加载模型价格"})).not.toBeInTheDocument();
   expect(screen.getByLabelText("gpt-6-astra 售卖价格百分比")).toBeEnabled();
+});
+
+it("shows both Haiku prompt tiers, updates derived prices and preserves the policy on save", async () => {
+  const saved: ModelPrice[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (_url, options) => {
+    saved.push(JSON.parse(options.body));
+    return Response.json({ price: saved.at(-1) });
+  }));
+  const props = { prices: [] as ModelPrice[], loading: false, connection: { base: "", key: "", session: "test", account: true }, onSaved: vi.fn() };
+  const view = render(<PriceSettings {...props} />);
+  const user = userEvent.setup();
+  await user.type(screen.getByRole("textbox", { name: "搜索模型价格" }), "claude-haiku-5-5");
+  const row = screen.getByLabelText("claude-haiku-5-5 输入价格").closest("tr")!;
+  expect(row).toHaveTextContent("自动分档");
+  expect(screen.queryByRole("checkbox", { name: "claude-haiku-5-5 超过272k加价" })).not.toBeInTheDocument();
+  expect(screen.getByLabelText("claude-haiku-5-5 输入价格")).toHaveValue(.1);
+  expect(screen.getByLabelText("claude-haiku-5-5 输出价格")).toHaveValue(.5);
+  for (const [field, value] of [["输入", "$0.5"], ["输出", "$2.5"], ["缓存读取", "$0.05"], ["缓存写入 · 5 分钟", "$0.625"], ["缓存写入 · 1 小时", "$1"]]) {
+    expect(screen.getByLabelText(`claude-haiku-5-5 超过100k ${field}价格`)).toHaveTextContent(value);
+  }
+  await user.clear(screen.getByLabelText("claude-haiku-5-5 输入价格"));
+  await user.type(screen.getByLabelText("claude-haiku-5-5 输入价格"), "0.2");
+  expect(screen.getByLabelText("claude-haiku-5-5 超过100k 输入价格")).toHaveTextContent("$1");
+  await user.click(within(row).getByRole("button", { name: "保存价格" }));
+  await waitFor(() => expect(props.onSaved).toHaveBeenCalledOnce());
+  expect(saved[0]).toMatchObject({ model: "claude-haiku-5-5", input: .2, cache_read: .01, cache_write: .125, cache_write_1h: .2, long_context_premium: false });
+  view.unmount();
+  render(<PriceSettings {...props} prices={saved} />);
+  expect(screen.getByLabelText("claude-haiku-5-5 输入价格")).toHaveValue(.2);
+  expect(screen.getByLabelText("claude-haiku-5-5 超过100k 输入价格")).toHaveTextContent("$1");
+  await user.click(screen.getByRole("button", { name: "查看 claude-haiku-5-5 价格说明" }));
+  const dialog = screen.getByRole("dialog", { name: "claude-haiku-5-5" });
+  expect(dialog).toHaveTextContent("总输入（含缓存）≤100,000");
+  expect(dialog).toHaveTextContent("不叠加 272k 加价");
+});
+
+it("does not claim the automatic Haiku tier works against a backend that has not been upgraded", async () => {
+  const onSaved = vi.fn();
+  vi.stubGlobal("fetch", vi.fn(async (_url, options) => {
+    const price = JSON.parse(options.body);
+    delete price.prompt_price_tier;
+    return Response.json({ price });
+  }));
+  render(<PriceSettings prices={[]} loading={false} connection={{ base: "", key: "", session: "test", account: true }} onSaved={onSaved} />);
+  const row = screen.getByLabelText("claude-haiku-5-5 输入价格").closest("tr")!;
+  await userEvent.setup().click(within(row).getByRole("button", { name: "保存价格" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("服务尚未确认 100k 分档规则");
+  expect(onSaved).not.toHaveBeenCalled();
 });

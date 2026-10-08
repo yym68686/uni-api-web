@@ -1,4 +1,4 @@
-import { canonicalPriceModel } from "./modelPrices";
+import { canonicalPriceModel, priceForPrompt, promptPriceTier } from "./modelPrices";
 import type { SubModelCheck } from "./sub2apiResults";
 import type { ModelPrice } from "./types";
 
@@ -50,8 +50,15 @@ function compareUnitPrices(usage?: SubUsage, expected?: ModelPrice) {
 }
 export function assessPrice(check: SubModelCheck, prices?: ModelPrice[]) {
   const usage = check.result?.availability.usage;
-  const expected = configuredPrice(check.model, prices);
-  const comparison = compareUnitPrices(usage, expected);
+  const configured = configuredPrice(check.model, prices);
+  // Receipts expose uncached input separately from cache reads/writes. Unlike
+  // analytics facts, these counts must be added to obtain the prompt length.
+  const totalInput = [usage?.input_tokens, usage?.cache_read_tokens, usage?.cache_creation_tokens].reduce<number>((total, count) => total + (known(count) ? count : 0), 0);
+  const expected = configured ? priceForPrompt(configured, totalInput) : undefined;
+  const tier = promptPriceTier(check.model);
+  const incompletePrompt = tier && totalInput <= tier.threshold_tokens &&
+    (!known(usage?.input_tokens) || !known(usage?.cache_read_tokens) || !known(usage?.cache_creation_tokens));
+  const comparison = incompletePrompt ? "unknown" : compareUnitPrices(usage, expected);
   const details = { usage, expected, comparison };
   if (!check.result) return { status: "untested", label: "未检测", ...details } as const;
   if (usage?.status === "pending") return { status: "pending", label: "核验中", ...details } as const;

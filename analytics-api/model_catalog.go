@@ -88,6 +88,28 @@ func (p Price) salePercent() float64 {
 	return 2.5
 }
 
+// Catalog tiers take precedence over the optional legacy 272k premium, so they
+// cannot be disabled or compounded by an older client's checkbox setting.
+func catalogPromptPriceTier(model string) *PromptPriceTier {
+	model = canonicalPriceModel(model)
+	for _, reference := range modelCatalog {
+		if reference.Model == model && reference.PromptPriceTier != nil {
+			return reference.PromptPriceTier
+		}
+	}
+	return nil
+}
+
+func (p Price) promptPriceTier() *PromptPriceTier {
+	if tier := catalogPromptPriceTier(p.Model); tier != nil {
+		return tier
+	}
+	if p.chargesLongContextPremium() {
+		return &PromptPriceTier{ThresholdTokens: 272000, InputMultiplier: 2, OutputMultiplier: 1.5, CacheMultiplier: 2}
+	}
+	return nil
+}
+
 func withCatalogPrices(prices []Price) []Price {
 	indices := make(map[string]int, len(prices))
 	for i, p := range prices {
@@ -96,6 +118,8 @@ func withCatalogPrices(prices []Price) []Price {
 	for _, p := range modelCatalog {
 		if i, found := indices[p.Model]; found {
 			old := prices[i]
+			// Derived metadata is not persisted in operator price documents or DB rows.
+			prices[i].PromptPriceTier = p.PromptPriceTier
 			if old.Source == "fact-discovered" && !old.Verified && old.Input == 0 && old.Output == 0 && old.CacheRead == 0 && old.CacheWrite == 0 && old.CacheWrite1h == 0 {
 				p.ChargeCacheWrite = old.ChargeCacheWrite
 				p.LongContextPremium = old.LongContextPremium

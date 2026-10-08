@@ -64,3 +64,11 @@ it("uses the longest complete model prefix, ignoring stale suffix prices and res
   expect(referencePrice("claude-sonnet-5-5-thinking", [sonnet5, sonnet55])).toEqual(sonnet55);
   expect(canonicalPriceModel("gemini-3.1-pro-search")).toBe(base.model);
 });
+
+it("includes the official Haiku rates without changing saved operator prices", () => {
+  const reference = MODEL_PRICE_CATALOG.find(p => p.model === "claude-haiku-5-5")!;
+  expect(reference).toMatchObject({ input: .1, output: .5, cache_read: .01, cache_write: .125, cache_write_1h: .2, verified: true, prompt_price_tier: { threshold_tokens: 100000, input_multiplier: 5, output_multiplier: 5, cache_multiplier: 5 } });
+  const custom = { ...reference, input: .3, source: "manual", verified: false };
+  expect(displayedModelPrices([custom]).find(p => p.model === custom.model)).toEqual(custom);
+  expect(canonicalPriceModel("claude-haiku-5-5-thinking")).toBe("claude-haiku-5-5");
+});

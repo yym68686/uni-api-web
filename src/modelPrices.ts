@@ -1,5 +1,5 @@
 import catalog from "../analytics-api/model_catalog.json";
-import type { ModelPrice } from "./types";
+import type { ModelPrice, PromptPriceTier } from "./types";
 
 export const MODEL_PRICE_CATALOG = catalog;
 const baseModels = catalog
@@ -53,4 +53,22 @@ export function displayedModelPrices(prices: ModelPrice[]): ModelPrice[] {
           sale_percent: price?.sale_percent,
         };
   });
+}
+
+// Catalog policy is shared with the backend, including for model suffixes.
+export function promptPriceTier(model: string): PromptPriceTier | undefined {
+  return catalog.find((entry) => entry.model === canonicalPriceModel(model))?.prompt_price_tier;
+}
+
+export function priceForPrompt(price: ModelPrice, inputTokens: number): ModelPrice {
+  const tier = promptPriceTier(price.model);
+  if (!tier || inputTokens <= tier.threshold_tokens) return price;
+  return {
+    ...price,
+    input: price.input * tier.input_multiplier,
+    output: price.output * tier.output_multiplier,
+    cache_read: price.cache_read * tier.cache_multiplier,
+    cache_write: price.cache_write * tier.cache_multiplier,
+    cache_write_1h: price.cache_write_1h * tier.cache_multiplier,
+  };
 }

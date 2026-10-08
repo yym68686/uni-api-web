@@ -66,19 +66,30 @@ type LiveChannel struct {
 	Stream   bool   `json:"stream"`
 	Count    int64  `json:"count"`
 }
+
+// PromptPriceTier is a catalog-defined automatic pricing rule. Editable prices
+// are the short-prompt rates; the long-prompt rates scale those operator values.
+type PromptPriceTier struct {
+	ThresholdTokens  int64   `json:"threshold_tokens"`
+	InputMultiplier  float64 `json:"input_multiplier"`
+	OutputMultiplier float64 `json:"output_multiplier"`
+	CacheMultiplier  float64 `json:"cache_multiplier"`
+}
+
 type Price struct {
-	Model              string    `json:"model"`
-	Input              float64   `json:"input"`
-	Output             float64   `json:"output"`
-	CacheRead          float64   `json:"cache_read"`
-	CacheWrite         float64   `json:"cache_write"`
-	CacheWrite1h       float64   `json:"cache_write_1h"`
-	ChargeCacheWrite   *bool     `json:"charge_cache_write,omitempty"`
-	LongContextPremium *bool     `json:"long_context_premium,omitempty"`
-	SalePercent        *float64  `json:"sale_percent,omitempty"`
-	Source             string    `json:"source"`
-	Verified           bool      `json:"verified"`
-	EffectiveAt        time.Time `json:"effective_at"`
+	PromptPriceTier    *PromptPriceTier `json:"prompt_price_tier,omitempty"`
+	Model              string           `json:"model"`
+	Input              float64          `json:"input"`
+	Output             float64          `json:"output"`
+	CacheRead          float64          `json:"cache_read"`
+	CacheWrite         float64          `json:"cache_write"`
+	CacheWrite1h       float64          `json:"cache_write_1h"`
+	ChargeCacheWrite   *bool            `json:"charge_cache_write,omitempty"`
+	LongContextPremium *bool            `json:"long_context_premium,omitempty"`
+	SalePercent        *float64         `json:"sale_percent,omitempty"`
+	Source             string           `json:"source"`
+	Verified           bool             `json:"verified"`
+	EffectiveAt        time.Time        `json:"effective_at"`
 }
 type Config struct {
 	CheckpointCacheWindowMB                                                              int

@@ -216,6 +216,8 @@ func (s *Service) savePrice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p.Model = r.PathValue("model")
+	// Tier metadata is authoritative catalog policy, never a client override.
+	p.PromptPriceTier = catalogPromptPriceTier(p.Model)
 	if err := validatePrice(p); err != nil {
 		http.Error(w, "invalid price", 400)
 		return

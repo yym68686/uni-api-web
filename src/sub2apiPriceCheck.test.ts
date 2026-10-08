@@ -56,3 +56,13 @@ it("compares unverified reference prices without confirming them or treating mis
   expect(matchesPriceFilter("unconfirmed_mismatch", [check({input_price: null, output_price: 35})], unverified)).toBe(true);
   expect(matchesPriceFilter("unconfirmed_match", [{...same, model: "gpt-6-astra-search"}], unverified)).toBe(true);
 });
+
+it("assesses Haiku prices using per-request cache-inclusive input and the recorded prompt tier", () => {
+  const haiku: ModelPrice = { model: "claude-haiku-5-5", input: .1, output: .5, cache_read: .01, cache_write: .125, cache_write_1h: .2, verified: true };
+  const sample = (usage: Partial<SubUsage>) => ({ ...check({ input_tokens: 5000, cache_read_tokens: 80000, cache_creation_tokens: 15000, input_price: .1, output_price: .5, ...usage }), model: "claude-haiku-5-5-thinking" });
+  expect(assessPrice(sample({}), [haiku]).status).toBe("normal");
+  expect(assessPrice(sample({ input_tokens: 5001 }), [haiku]).status).toBe("abnormal");
+  expect(assessPrice(sample({ input_tokens: 5001, input_price: .5, output_price: 2.5 }), [haiku]).status).toBe("normal");
+  expect(assessPrice(sample({ input_tokens: 200000, input_price: .5, output_price: 2.5 }), [haiku]).expected).toMatchObject({ input: .5, output: 2.5, cache_write: .625, cache_write_1h: 1 });
+  expect(assessPrice(sample({ cache_read_tokens: null }), [haiku]).status).toBe("unknown");
+});

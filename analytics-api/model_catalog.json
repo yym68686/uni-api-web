@@ -324,6 +324,24 @@
     "note": "Claude API 标准全球价格，缓存写入按 5 分钟 / 1 小时区分。"
   },
   {
+    "model": "claude-haiku-5-5",
+    "input": 0.1,
+    "output": 0.5,
+    "cache_read": 0.01,
+    "cache_write": 0.125,
+    "cache_write_1h": 0.2,
+    "prompt_price_tier": {
+      "threshold_tokens": 100000,
+      "input_multiplier": 5,
+      "output_multiplier": 5,
+      "cache_multiplier": 5
+    },
+    "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "verified": true,
+    "cache_write_kind": "ttl",
+    "note": "Claude API 标准全球价格，2026-10-08 核对。单次请求总输入（含缓存）≤100,000 token：输入 $0.10、输出 $0.50、缓存读取 $0.01、5 分钟写入 $0.125、1 小时写入 $0.20；>100,000 token：依次为 $0.50、$2.50、$0.05、$0.625、$1，均为每百万 token。超过阈值时整次请求使用高档单价，自动生效，不叠加 272k 加价。"
+  },
+  {
     "model": "claude-haiku-4-5-20251001",
     "input": 1,
     "output": 5,
