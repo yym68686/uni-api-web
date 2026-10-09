@@ -37,6 +37,8 @@ const imported = (source: string): InstalledChannel => ({
   revision: "r1",
   manageable: true,
   protocol: "messages",
+  engine: "claude",
+  engine_mode: "auto",
 });
 const configured = (source: string): InstalledChannel => ({
   ...imported(source),
@@ -154,6 +156,7 @@ it("uses one source/key selector and one table for native and imported routes, p
   expect(screen.getAllByLabelText("查看 uni-api 来源")).toHaveLength(1);
   expect(screen.getAllByLabelText("查看 API key")).toHaveLength(1);
   expect(screen.queryByText(/已有渠道 ·/)).not.toBeInTheDocument();
+  expect(screen.getAllByText(/自动识别（实际：claude）/).length).toBeGreaterThan(0);
   for (const row of document.querySelectorAll(".route-binding-provider")) {
     expect(
       within(row as HTMLElement)

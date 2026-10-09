@@ -22,6 +22,7 @@ type subChannelRef struct {
 type subInstalledChannel struct {
 	Protocol         string            `json:"protocol,omitempty"`
 	Engine           string            `json:"engine,omitempty"`
+	EngineMode       string            `json:"engine_mode,omitempty"`
 	ModelMappings    map[string]string `json:"model_mappings,omitempty"`
 	Fingerprint      string            `json:"-"`
 	Kind             string            `json:"kind,omitempty"`
@@ -111,9 +112,11 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type sourceResult struct {
-		Data   []subInstalledChannel
-		Labels map[string]string
-		Error  string
+		Data        []subInstalledChannel
+		Labels      map[string]string
+		Engines     map[string]string
+		EngineModes map[string]string
+		Error       string
 	}
 	results := make([]sourceResult, len(sources))
 	slots := make(chan struct{}, 4)
@@ -168,16 +171,19 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			var modelRows []struct {
-				Provider string `json:"provider"`
-				Model    string `json:"model"`
-				Upstream string `json:"upstream_model"`
-				Engine   string `json:"engine"`
+				Provider   string `json:"provider"`
+				Model      string `json:"model"`
+				Upstream   string `json:"upstream_model"`
+				Engine     string `json:"engine"`
+				EngineMode string `json:"engine_mode"`
 			}
 			_ = decodeMap(catalogMap["data"], &modelRows)
 			mappings := map[string]map[string]string{}
 			engines := map[string]string{}
+			engineModes := map[string]string{}
 			for _, row := range modelRows {
 				engines[row.Provider] = row.Engine
+				engineModes[row.Provider] = row.EngineMode
 				if row.Upstream != "" && row.Upstream != row.Model {
 					if mappings[row.Provider] == nil {
 						mappings[row.Provider] = map[string]string{}
@@ -185,6 +191,8 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 					mappings[row.Provider][row.Model] = row.Upstream
 				}
 			}
+			results[i].Engines = engines
+			results[i].EngineModes = engineModes
 			labels := map[string]string{}
 			lookup := map[string]subChannelRef{}
 			keyLabels := map[string]struct {
@@ -241,7 +249,7 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 						}
 					}
 				}
-				results[i].Data = append(results[i].Data, subInstalledChannel{Protocol: protocol, Engine: engines[p.Provider], ModelMappings: mappings[p.Provider], Base: ref.Base, AccountID: ref.Account, GroupID: ref.Group, SourceID: src.ID, SourceName: src.Name, KeyID: p.KeyID, KeyPosition: kl.Position, KeyPrefix: kl.Prefix, Provider: p.Provider, Name: ref.Name, Models: p.Models, Positions: positions, Revision: state.Revision, Manageable: state.Manageable})
+				results[i].Data = append(results[i].Data, subInstalledChannel{Protocol: protocol, Engine: engines[p.Provider], EngineMode: engineModes[p.Provider], ModelMappings: mappings[p.Provider], Base: ref.Base, AccountID: ref.Account, GroupID: ref.Group, SourceID: src.ID, SourceName: src.Name, KeyID: p.KeyID, KeyPosition: kl.Position, KeyPrefix: kl.Prefix, Provider: p.Provider, Name: ref.Name, Models: p.Models, Positions: positions, Revision: state.Revision, Manageable: state.Manageable})
 			}
 		}(i, source)
 	}
@@ -269,6 +277,13 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, c := range configured {
 		if !seen[c.SourceID+"\n"+c.Provider] {
+			for i, source := range sources {
+				if source.ID == c.SourceID {
+					c.Engine = results[i].Engines[c.Provider]
+					c.EngineMode = results[i].EngineModes[c.Provider]
+					break
+				}
+			}
 			data = append(data, c)
 			if c.Name != c.Provider {
 				if labels[c.SourceID] == nil {

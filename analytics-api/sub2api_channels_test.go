@@ -60,10 +60,10 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 		case "/v1/api-keys":
 			writeJSON(w, 200, map[string]any{"data": []any{map[string]any{"key_id": key, "prefix": "masked-one", "position": 1}, map[string]any{"key_id": other, "prefix": "masked-two", "position": 2}}})
 		case "/v1/model-channels":
-			catalog := []batchCatalogRow{}
+			catalog := []map[string]any{}
 			if !deleted {
 				for _, model := range models {
-					catalog = append(catalog, batchCatalogRow{Provider: provider, Model: model, Upstream: model, Engine: "codex"})
+					catalog = append(catalog, map[string]any{"provider": provider, "model": model, "upstream_model": model, "engine": "codex", "engine_mode": "auto"})
 				}
 			}
 			writeJSON(w, 200, map[string]any{"data": catalog})
@@ -167,7 +167,7 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 		t.Fatal("billing multipliers missing or unknown rate fabricated")
 	}
 	for _, v := range listing.Data {
-		if v.Provider == provider && (v.Positions[checkModel] != 2 || v.KeyPrefix != "masked-one" || !v.Manageable) {
+		if v.Provider == provider && (v.Positions[checkModel] != 2 || v.KeyPrefix != "masked-one" || !v.Manageable || v.Engine != "codex" || v.EngineMode != "auto") {
 			t.Fatal("wrong key/position", v)
 		}
 	}

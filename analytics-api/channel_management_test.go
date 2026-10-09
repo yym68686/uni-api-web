@@ -120,7 +120,9 @@ func TestChannelManagementUsesConfiguredInventoryAndEffectiveKeyRoutes(t *testin
 				http.Error(w, "unavailable", 503)
 				return
 			}
-			row := func(p, m string) map[string]any { return map[string]any{"provider": p, "model": m, "engine": "gpt"} }
+			row := func(p, m string) map[string]any {
+				return map[string]any{"provider": p, "model": m, "engine": "gpt", "engine_mode": "auto"}
+			}
 			rows := []any{row("bound", "gpt-6-astra"), row("site-only", "gpt-6-astra"), row("unassigned", "custom-model"), row("bound", "gpt-5.6-sol")}
 			if key == "caller-one" {
 				rows = []any{row("site-only", "gpt-6-astra"), row("bound", "gpt-6-astra"), row("bound", "gpt-6-astra"), row("bound", "gpt-5.6-sol")}
@@ -169,6 +171,9 @@ func TestChannelManagementUsesConfiguredInventoryAndEffectiveKeyRoutes(t *testin
 		t.Fatal(w.Body.String())
 	}
 	for _, item := range listing.Data {
+		if item.EngineMode != "auto" || item.Engine != "gpt" {
+			t.Fatal("configuration mode was conflated with effective engine", item)
+		}
 		switch item.Provider {
 		case "bound":
 			if item.AccountID != a.ID || item.GroupID != 7 || len(item.Models) != 2 || len(item.AccountIDs) != 1 {

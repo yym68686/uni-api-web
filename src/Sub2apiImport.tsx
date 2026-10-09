@@ -6,7 +6,7 @@ import { controlRequest } from "./api";
 import { useChannelImportKeys } from "./channelImportKeys";
 import { useRouteKeyRequestStats } from "./keyRequestStats";
 import { ChannelImportKeyFeedback } from "./ChannelImportKeyFeedback";
-import { channelProtocols } from "./channelProtocol";
+import { channelEngineLabel, channelProtocols } from "./channelProtocol";
 import { Spinner } from "./ui";
 import { AccountForm } from "./SiteAccountForm";
 import { ChannelBatchApply } from "./ChannelBatchApply";
@@ -777,9 +777,11 @@ export function Sub2apiImport({
                             <div>
                               <strong>{binding.name}</strong>
                               <small>
-                                {binding.installed
-                                  ? `站点接入${binding.installed.engine ? ` · ${binding.installed.engine}` : ""}`
-                                  : "配置渠道"}{" "}
+                                {binding.installed ? "站点接入" : "配置渠道"}
+                                {channelEngineLabel(
+                                  binding.installed || binding.configured,
+                                ) &&
+                                  ` · ${channelEngineLabel(binding.installed || binding.configured)}`}{" "}
                                 · {binding.rows.length} 个模型
                               </small>
                             </div>

@@ -982,7 +982,7 @@ export function Editor({
                   <header className="settings-field-heading">
                     <div>
                       <h4 title={f.path}>{label}</h4>
-                      <small>{sourceLabel}</small>
+                      <small>{f.type === "engine" && inherited ? "自动识别" : sourceLabel}</small>
                       {resolved?.note && <small>{resolved.note}</small>}
                     </div>
                     {resolved?.can_inherit && !inherited && (

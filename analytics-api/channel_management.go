@@ -18,10 +18,11 @@ type managementChannel struct {
 }
 
 type managementModel struct {
-	Provider string `json:"provider"`
-	Model    string `json:"model"`
-	Upstream string `json:"upstream_model"`
-	Engine   string `json:"engine"`
+	Provider   string `json:"provider"`
+	Model      string `json:"model"`
+	Upstream   string `json:"upstream_model"`
+	Engine     string `json:"engine"`
+	EngineMode string `json:"engine_mode"`
 }
 type managementProvider struct {
 	Base             string `json:"base"`
@@ -201,6 +202,7 @@ func (s *Service) channelManagement(w http.ResponseWriter, r *http.Request) {
 						}
 						binding.Base = live.Base
 					}
+					binding.EngineMode = row.EngineMode
 					item = &managementChannel{subInstalledChannel: binding, Engine: row.Engine, AccountIDs: []string{}}
 					if live, ok := snapshot.Providers[row.Provider]; ok {
 						item.ProbeFingerprint = live.ProbeFingerprint

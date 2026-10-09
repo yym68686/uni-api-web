@@ -3,6 +3,7 @@ import { controlRequest } from "./api";
 export interface InstalledChannel {
   protocol?: string;
   engine?: string;
+  engine_mode?: string;
   model_mappings?: Record<string, string>;
   kind?: "configured";
   binding_status?:
