@@ -31,7 +31,7 @@ func TestSubImportUsesBusinessKeyAndFencesModelsOwnerAndRevision(t *testing.T) {
 		t.Fatal(e)
 	}
 	store.db.Exec(`INSERT INTO console_sub_targets(account_id,group_id,name,platform,remote_key_id,encrypted_key) VALUES($1,7,'group','openai',1,$2)`, account, testkey)
-	raw, _ := json.Marshal(subResult{Model: checkModel, Availability: subProbe{Status: "success"}})
+	raw, _ := json.Marshal(subResult{Model: checkModel, Availability: subProbe{Status: "success", Protocol: "responses"}})
 	store.db.Exec(`INSERT INTO console_sub_models(account_id,group_id,model,state,result) VALUES($1,7,$2,'done',$3)`, account, checkModel, string(raw))
 	remoteKey := subRemoteKey{}
 	groupMissing := false
@@ -77,8 +77,12 @@ func TestSubImportUsesBusinessKeyAndFencesModelsOwnerAndRevision(t *testing.T) {
 		}
 		switch r.URL.Path {
 		case "/v1/channel-controls":
-			writeJSON(w, 200, map[string]any{"instance_id": "boot", "revision": revision, "temporary_channel_import": true})
-		case "/v1/temporary-channels":
+			writeJSON(w, 200, map[string]any{"instance_id": "boot", "revision": revision, "temporary_channel_import": true, "temporary_channel_restore": true, "automatic_engine": true, "channel_settings": true, "temporary_channels": []any{}})
+		case "/v1/channel-settings/export":
+			writeJSON(w, 200, map[string]any{"revision": revision, "channel_settings": map[string]any{}, "temporary_definitions": map[string]any{}})
+		case "/v1/model-channels":
+			writeJSON(w, 200, map[string]any{"data": []any{}})
+		case "/v1/channel-controls/restore":
 			imports++
 			json.NewDecoder(r.Body).Decode(&last)
 			if last["revision"] != revision {
@@ -124,7 +128,15 @@ func TestSubImportUsesBusinessKeyAndFencesModelsOwnerAndRevision(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	if imports != 1 || created != 1 || last["api_key"] != "business-secret" || last["position"] != float64(1) || last["base_url"] != "https://site.example/v1/responses" {
+	var saved retainedSnapshot
+	if err := decodeMap(last["snapshot"], &saved); err != nil {
+		t.Fatal(err)
+	}
+	var definition map[string]any
+	if len(saved.Channels) != 1 || json.Unmarshal(saved.Channels[0].Definition, &definition) != nil {
+		t.Fatal("missing definition")
+	}
+	if imports != 1 || created != 1 || saved.Channels[0].Key != "business-secret" || definition["engine"] != nil || saved.Channels[0].Base != "https://site.example/v1/responses" {
 		t.Fatal("wrong business route", imports, created)
 	}
 	if strings.Contains(w.Body.String(), "secret") {

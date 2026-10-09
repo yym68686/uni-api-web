@@ -263,7 +263,7 @@ func (s *Service) captureControls(ctx context.Context, src controlSource, live r
 		if !ok || saved.KeyID != p.KeyID {
 			ok = false
 			for _, c := range credentials {
-				if subProviderName(c.account, c.group, p.KeyID) == p.Provider {
+				if matchesSubProvider(p.Provider, c.account, c.group, p.KeyID) && providerProtocol(p.Provider) == "" {
 					saved = retainedChannel{Provider: p.Provider, KeyID: p.KeyID, Base: c.base + "/v1/responses", Key: c.key}
 					ok = true
 					break

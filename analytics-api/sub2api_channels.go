@@ -20,6 +20,8 @@ type subChannelRef struct {
 	Rate    *float64
 }
 type subInstalledChannel struct {
+	Protocol         string            `json:"protocol,omitempty"`
+	Engine           string            `json:"engine,omitempty"`
 	ModelMappings    map[string]string `json:"model_mappings,omitempty"`
 	Fingerprint      string            `json:"-"`
 	Kind             string            `json:"kind,omitempty"`
@@ -169,10 +171,13 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 				Provider string `json:"provider"`
 				Model    string `json:"model"`
 				Upstream string `json:"upstream_model"`
+				Engine   string `json:"engine"`
 			}
 			_ = decodeMap(catalogMap["data"], &modelRows)
 			mappings := map[string]map[string]string{}
+			engines := map[string]string{}
 			for _, row := range modelRows {
+				engines[row.Provider] = row.Engine
 				if row.Upstream != "" && row.Upstream != row.Model {
 					if mappings[row.Provider] == nil {
 						mappings[row.Provider] = map[string]string{}
@@ -192,8 +197,9 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 					Position int
 				}{key.Prefix, key.Position}
 				for _, ref := range refs {
-					provider := subProviderName(ref.Account, ref.Group, key.ID)
-					lookup[provider] = ref
+					for _, provider := range subProviderNames(ref.Account, ref.Group, key.ID) {
+						lookup[provider] = ref
+					}
 				}
 			}
 			results[i].Labels = labels
@@ -227,7 +233,15 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 				kl := keyLabels[p.KeyID]
-				results[i].Data = append(results[i].Data, subInstalledChannel{ModelMappings: mappings[p.Provider], Base: ref.Base, AccountID: ref.Account, GroupID: ref.Group, SourceID: src.ID, SourceName: src.Name, KeyID: p.KeyID, KeyPosition: kl.Position, KeyPrefix: kl.Prefix, Provider: p.Provider, Name: ref.Name, Models: p.Models, Positions: positions, Revision: state.Revision, Manageable: state.Manageable})
+				protocol := providerProtocol(p.Provider)
+				if protocol == "" {
+					for _, spec := range channelProtocols {
+						if spec.Engine == engines[p.Provider] {
+							protocol = spec.Protocol
+						}
+					}
+				}
+				results[i].Data = append(results[i].Data, subInstalledChannel{Protocol: protocol, Engine: engines[p.Provider], ModelMappings: mappings[p.Provider], Base: ref.Base, AccountID: ref.Account, GroupID: ref.Group, SourceID: src.ID, SourceName: src.Name, KeyID: p.KeyID, KeyPosition: kl.Position, KeyPrefix: kl.Prefix, Provider: p.Provider, Name: ref.Name, Models: p.Models, Positions: positions, Revision: state.Revision, Manageable: state.Manageable})
 			}
 		}(i, source)
 	}
@@ -360,6 +374,13 @@ func (s *Service) subManageChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	provider := subProviderName(in.AccountID, in.GroupID, key)
+	if in.Provider != "" {
+		if !matchesSubProvider(in.Provider, in.AccountID, in.GroupID, key) {
+			http.Error(w, "接入不属于所选分组", 400)
+			return
+		}
+		provider = in.Provider
+	}
 	var existing []string
 	for _, p := range state.Temporary {
 		if p.Provider == provider && p.KeyID == key {
@@ -383,6 +404,7 @@ func (s *Service) subManageChannel(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		current := map[string]string{}
+		retainedProtocols := map[string]string{}
 		for _, row := range actual {
 			if row.Provider == provider {
 				up := row.Upstream
@@ -390,12 +412,31 @@ func (s *Service) subManageChannel(w http.ResponseWriter, r *http.Request) {
 					up = row.Model
 				}
 				current[row.Model] = up
+				for _, spec := range channelProtocols {
+					if spec.Engine == row.Engine {
+						retainedProtocols[up] = spec.Protocol
+					}
+				}
 			}
 		}
 		if e = s.validateSiteModelChanges(r.Context(), in.AccountID, in.GroupID, current, publicChannelModels(in.Models, in.ModelMappings)); e != nil {
 			http.Error(w, e.Error(), 400)
 			return
 		}
+		if in.Protocols == nil {
+			in.Protocols = map[string]string{}
+		}
+		for model, protocol := range retainedProtocols {
+			if in.Protocols[model] == "" {
+				in.Protocols[model] = protocol
+			}
+		}
+		protocols, err := s.importProtocols(r.Context(), in.AccountID, in.GroupID, importUpstreamModels(in.Models, in.ModelMappings), in.Protocols)
+		if err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		in.Protocols = protocols
 	}
 	mutation := map[string]any{"action": in.Action, "revision": in.Revision, "api_key_id": key, "provider": provider}
 	// Delete has no model/position payload. A nil Go slice becomes JSON null,
@@ -405,23 +446,45 @@ func (s *Service) subManageChannel(w http.ResponseWriter, r *http.Request) {
 		mutation["position"] = in.Position
 	}
 	var applied map[string]any
-	if in.Action == "replace" && (in.ModelMappings != nil || len(in.Positions) > 0) {
+	if in.Action == "replace" {
 		var snapshot retainedSnapshot
+		if stateMap["automatic_engine"] != true {
+			http.Error(w, "来源尚不支持按地址自动识别引擎，请更新 uni-api", 400)
+			return
+		}
 		snapshot, status, e = s.importSnapshot(r.Context(), src, stateMap, in.Revision)
 		if e == nil {
 			var document map[string]any
 			document, status, e = s.importProviderDocument(r.Context(), src, snapshot, provider, in.Revision)
 			if e == nil {
-				document["model"] = importModelDefinition(in.Models, in.ModelMappings)
-				raw, _ := json.Marshal(document)
-				public, _ := importPublicModels(in.Models, in.ModelMappings)
 				e = errors.New("渠道定义已变化，请刷新重试")
 				status = 409
 				for _, old := range snapshot.Channels {
 					if old.Provider == provider {
-						old.Definition = raw
-						old.Models = public
-						applied, status, e = s.applyImportSnapshot(r.Context(), src, snapshot, in.Revision, old, in.Position, in.Positions)
+						var parts []protocolPartition
+						parts, e = partitionChannelModels(publicChannelModels(in.Models, in.ModelMappings), in.Protocols)
+						if e != nil {
+							status = 400
+							break
+						}
+						var channels []retainedChannel
+						channels, e = splitProtocolChannel(&snapshot, old, document, parts)
+						if e != nil {
+							break
+						}
+						for _, channel := range channels {
+							snapshot, status, e = s.prepareImportSnapshot(r.Context(), src, snapshot, channel, in.Position, protocolPositions(channel.Models, in.Positions), provider)
+							if e != nil {
+								break
+							}
+						}
+						if e == nil {
+							admin := src
+							if src.ConfigKey != "" {
+								admin.Key = src.ConfigKey
+							}
+							applied, status, e = subGateway(r.Context(), admin, "POST", "/v1/channel-controls/restore", map[string]any{"revision": in.Revision, "snapshot": snapshot})
+						}
 						break
 					}
 				}

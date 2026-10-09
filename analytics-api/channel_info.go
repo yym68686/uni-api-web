@@ -203,7 +203,7 @@ func (s *Service) channelInfo(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			for _, ref := range refs {
-				if subProviderName(ref.Account, ref.Group, p.KeyID) != provider {
+				if !matchesSubProvider(provider, ref.Account, ref.Group, p.KeyID) {
 					continue
 				}
 				if !reveal {

@@ -21,6 +21,7 @@ export interface BatchDraft {
   name: string;
   // Canonical upstream names: never reinterpret an alias through another source.
   models: Record<string, string>;
+  protocols?: Record<string, string>;
   originals: Record<string, string>;
   aliases: Record<string, string>;
   // Exact public/upstream pairs allowed only where already saved. This is
@@ -113,6 +114,30 @@ export function batchTargetSettings(
     );
   const models = { ...originals, ...aliases };
   const omitted: string[] = [];
+  if (t.installed?.protocol && draft.part !== "positions") {
+    const savedUpstreams = new Set(Object.values(t.current));
+    for (const [name, upstream] of Object.entries(models)) {
+      if (savedUpstreams.has(upstream)) continue;
+      const protocol = draft.protocols?.[upstream];
+      if (!protocol)
+        throw new Error(
+          `模型 ${upstream} 的协议不明确，请在添加渠道中选择上游协议。`,
+        );
+      if (protocol !== t.installed.protocol) {
+        delete models[name];
+        omitted.push(name);
+      }
+    }
+    if (!Object.keys(models).length)
+      return {
+        models: { ...t.current },
+        positions: {},
+        currentPositions: {},
+        clamped: false,
+        omitted,
+        skip: "无对应协议模型，保持原渠道",
+      };
+  }
   if (draft.part !== "positions") {
     for (const [name, up] of Object.entries(draft.retainedOnly || {})) {
       if (models[name] === up && t.current[name] !== up) {

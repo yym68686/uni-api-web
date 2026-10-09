@@ -82,7 +82,9 @@ func (s *Service) enrichTraceChannels(ctx context.Context, owner string, runs []
 		// temporary channels that have since been removed. No gateway API calls.
 		for key := range keys {
 			for _, g := range groups {
-				put(subProviderName(g.account, g.channel.GroupID, key), g.channel)
+				for _, provider := range subProviderNames(g.account, g.channel.GroupID, key) {
+					put(provider, g.channel)
+				}
 			}
 		}
 		for _, b := range bySource[run.SourceID] {

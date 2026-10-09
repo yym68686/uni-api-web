@@ -63,7 +63,7 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 			catalog := []batchCatalogRow{}
 			if !deleted {
 				for _, model := range models {
-					catalog = append(catalog, batchCatalogRow{Provider: provider, Model: model, Upstream: model})
+					catalog = append(catalog, batchCatalogRow{Provider: provider, Model: model, Upstream: model, Engine: "codex"})
 				}
 			}
 			writeJSON(w, 200, map[string]any{"data": catalog})
@@ -72,7 +72,33 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 			if !deleted {
 				temporary = append(temporary, map[string]any{"provider": provider, "api_key_id": key, "models": models})
 			}
-			writeJSON(w, 200, map[string]any{"instance_id": "boot", "revision": revision, "temporary_channel_management": true, "temporary_channels": temporary, "rules": []any{map[string]any{"api_key_id": key, "model": checkModel, "order": order}}})
+			writeJSON(w, 200, map[string]any{"instance_id": "boot", "revision": revision, "temporary_channel_management": true, "temporary_channel_restore": true, "automatic_engine": true, "channel_settings": true, "temporary_channels": temporary, "rules": []any{map[string]any{"api_key_id": key, "model": checkModel, "order": order}}})
+		case "/v1/channel-settings/export":
+			definitions := map[string]any{}
+			for _, name := range []string{provider, otherProvider, newFirst} {
+				definitions[name] = map[string]any{"provider": name, "engine": "codex", "base_url": "https://example.com/v1/responses", "api": []string{"routing-secret"}, "model": models}
+			}
+			writeJSON(w, 200, map[string]any{"revision": revision, "temporary_definitions": definitions, "channel_settings": map[string]any{}})
+		case "/v1/channel-controls/restore":
+			var body struct {
+				Revision string           `json:"revision"`
+				Snapshot retainedSnapshot `json:"snapshot"`
+			}
+			json.NewDecoder(r.Body).Decode(&body)
+			if body.Revision != revision {
+				http.Error(w, "conflict", 409)
+				return
+			}
+			for _, channel := range body.Snapshot.Channels {
+				if channel.Provider == provider {
+					models = channel.Models
+				}
+			}
+			last = map[string]any{"provider": provider, "action": "replace"}
+			order = []string{provider, newFirst, "existing"}
+			writes++
+			revision = "boot:" + string(rune('1'+writes))
+			writeJSON(w, 200, map[string]any{"instance_id": "boot", "revision": revision})
 		case "/v1/temporary-channels":
 			last = nil
 			json.NewDecoder(r.Body).Decode(&last)
@@ -174,7 +200,7 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 	if w := readInfo(session, "true"); w.Code != 200 || !strings.Contains(w.Body.String(), "routing-secret") || strings.Contains(w.Body.String(), "panel-secret") || w.Header().Get("Cache-Control") != "no-store" {
 		t.Fatal("wrong scoped credential", w.Code)
 	}
-	in := subImportInput{Action: "replace", AccountID: account, GroupID: 7, SourceID: source, KeyID: key, Revision: "boot:1", Models: []string{checkModel}, Position: 1}
+	in := subImportInput{Action: "replace", AccountID: account, GroupID: 7, SourceID: source, KeyID: key, Revision: "boot:1", Models: []string{checkModel}, Protocols: map[string]string{"gpt-6-sol": "responses"}, Position: 1}
 	if w = request("PATCH", foreign, in); w.Code != 404 {
 		t.Fatal("foreign mutation allowed", w.Code)
 	}

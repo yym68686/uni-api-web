@@ -6,7 +6,8 @@ import { CreateChannel, creationSettings } from "./CreateChannel";
 
 const schema = {
   create_provider: true,
-  engines: ["gpt", "claude", "gemini", "typesafe", "aws", "vertex"],
+  automatic_engine: true,
+  engines: ["gpt", "codex", "claude", "gemini", "typesafe", "aws", "vertex"],
   fields: [
     "engine",
     "base_url",
@@ -97,6 +98,20 @@ async function mount() {
   await waitFor(() => expect(screen.getByLabelText("渠道引擎")).toBeEnabled());
   return user;
 }
+
+it("defaults new channels to automatic protocols while allowing explicit engine choices and resetting on reopen", async () => {
+  const user = await mount();
+  expect(screen.getByLabelText("渠道引擎")).toHaveValue("auto");
+  await user.selectOptions(screen.getByLabelText("渠道引擎"), "gpt");
+  await user.click(screen.getByRole("button", { name: "高级配置" }));
+  expect(
+    (screen.getByLabelText("渠道配置 · JSON / YAML") as HTMLTextAreaElement)
+      .value,
+  ).toContain("engine: gpt");
+  await user.click(screen.getByRole("button", { name: "取消" }));
+  await user.click(screen.getByRole("button", { name: "添加渠道" }));
+  expect(screen.getByLabelText("渠道引擎")).toHaveValue("auto");
+});
 
 it("loads caller keys inside channel management without depending on observation filters", async () => {
   vi.stubGlobal(
@@ -306,6 +321,7 @@ it("fetches draft models without saving a channel, preserves unchecked models an
     }),
   );
   const user = await mount();
+  await user.selectOptions(screen.getByLabelText("渠道引擎"), "codex");
   await user.type(
     screen.getByLabelText("上游地址"),
     "https://catalog.example/gateway/v1/responses",
@@ -323,7 +339,7 @@ it("fetches draft models without saving a channel, preserves unchecked models an
     {
       base_url: "https://catalog.example/gateway/v1/responses",
       api: "fixture-first-key",
-      engine: "gpt",
+      engine: "codex",
     },
   ]);
   expect(mutations).toHaveLength(0);
@@ -349,6 +365,7 @@ it("fetches draft models without saving a channel, preserves unchecked models an
   ).not.toBeChecked();
   await user.click(screen.getByRole("button", { name: "校验并添加" }));
   await waitFor(() => expect(mutations).toHaveLength(2));
+  expect(mutations[1].body.changes[0].set["/engine"]).toBe("codex");
   expect(mutations[1].body.changes[0].set["/model"]).toEqual([
     "upstream-b",
     { "upstream-a": "public-a" },

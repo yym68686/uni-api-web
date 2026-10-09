@@ -1,4 +1,5 @@
 import { DetailLoading } from "./PageLoading";
+import { ChannelProtocolRepair } from "./ChannelProtocolRepair";
 import { useEffect, useState, useRef, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -939,6 +940,10 @@ export function Editor({
             </p>
           )}
 
+          {!isGlobal && tab === "基本与模型" && row.source_id && row.provider.startsWith("sub2api-") && (
+            <ChannelProtocolRepair source={row.source_id} provider={row.provider} onApplied={()=>{void refreshed();}} />
+          )}
+
           {view.schema.fields
             .filter((f) => f.group === tab)
             .map((f) => {
@@ -1166,7 +1171,7 @@ export function Editor({
                             )
                           }
                         >
-                          <option value="">继承 / 未设置</option>
+                          <option value="">{f.type === "engine" ? "自动识别（由 uni-api 按上游地址判断）" : "继承 / 未设置"}</option>
                           {(f.type === "boolean"
                             ? ["true", "false"]
                             : f.type === "engine"

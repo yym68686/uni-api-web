@@ -36,6 +36,7 @@ const imported = (source: string): InstalledChannel => ({
   positions: { "claude-opus-5-5": 2 },
   revision: "r1",
   manageable: true,
+  protocol: "messages",
 });
 const configured = (source: string): InstalledChannel => ({
   ...imported(source),
@@ -282,7 +283,7 @@ it("uses the same availability restrictions for site edits and aliases",async()=
   if(input.includes('channel-options'))return Response.json({revision:'r1',supported:true,manageable:true,provider:'temp',keys:[{key_id:'key1',position:1,prefix:'masked'}],channels:[{provider:'temp',model:'claude-opus-5-5'}]});
   return Response.json({data:[],unavailable_keys:[],unavailable_sources:[]});
  }));
- const models=[['claude-opus-5-5','error'],['gpt-6-sol','error'],['gpt-5.5','success']].map(([model,status])=>({model,state:'done',message:'',result:{model,availability:{status}}}));
+ const models=[['claude-opus-5-5','error'],['gpt-6-sol','error'],['gpt-5.5','success']].map(([model,status])=>({model,state:'done',message:'',result:{model,availability:{status,protocol:'responses'}}}));
  mount({...target,models} as SubTarget);
  const user=userEvent.setup();
  await user.click(await screen.findByRole('button',{name:'编辑'}));
@@ -328,7 +329,7 @@ it("recovers an expired site session in place without slow refetches or losing t
     return Response.json({ data: [], unavailable_keys: [], unavailable_sources: [] });
   }));
   const models = ["gpt-6-sol", "gpt-5.5"].map(model => ({
-    model, state: "done", message: "", result: { model, availability: { status: "success" } },
+    model, state: "done", message: "", result: { model, availability: { status: "success", protocol: "responses" } },
   }));
   mount({ ...target, models } as SubTarget);
   const user = userEvent.setup();
@@ -388,7 +389,7 @@ it("checks live group state without blocking source selection and disables stale
     });
     return Response.json({ data: [], unavailable_keys: [], unavailable_sources: [] });
   }));
-  const models = [{ model: "gpt-6-sol", state: "done", message: "", result: { model: "gpt-6-sol", availability: { status: "success" } } }];
+  const models = [{ model: "gpt-6-sol", state: "done", message: "", result: { model: "gpt-6-sol", availability: { status: "success", protocol: "responses" } } }];
   mount({ ...target, active: true, models } as SubTarget);
   const user = userEvent.setup();
   await user.click(await screen.findByRole("button", { name: /新增接入/ }));

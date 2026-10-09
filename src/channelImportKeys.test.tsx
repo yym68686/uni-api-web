@@ -32,7 +32,7 @@ const keys = (source: string) =>
 const result = {
   model,
   checked_at: 1,
-  availability: { status: "success", text: "ok", duration_ms: 1, ttft_ms: 1 },
+  availability: { status: "success", protocol: "responses", text: "ok", duration_ms: 1, ttft_ms: 1 },
   quality: {
     status: "not_applicable",
     text: "",

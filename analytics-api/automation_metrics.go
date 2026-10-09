@@ -222,7 +222,9 @@ func (s *Service) automationMetrics(ctx context.Context, t AutomationTask, catal
 			return nil, err
 		}
 		for _, ref := range refs {
-			bindings[subProviderName(ref.Account, ref.Group, t.KeyID)] = ref
+			for _, provider := range subProviderNames(ref.Account, ref.Group, t.KeyID) {
+				bindings[provider] = ref
+			}
 		}
 		configured, err := s.configuredBindings(ctx, t.Owner)
 		if err != nil {

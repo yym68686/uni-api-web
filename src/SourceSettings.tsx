@@ -6,6 +6,7 @@ import { controlRequest } from "./api";
 import { Spinner } from "./ui";
 import { ChannelSettings, GLOBAL_SETTINGS_SCOPE } from "./ChannelSettings";
 import { ControlPersistence } from "./ControlPersistence";
+import { ChannelProtocolRepair } from "./ChannelProtocolRepair";
 export interface ConsoleSource {
   id: string;
   name: string;
@@ -141,6 +142,7 @@ export function SourceSettings({
           </div>
           <ChannelSettings row={{provider:GLOBAL_SETTINGS_SCOPE,provider_name:"全局设置",source_id:src.id,source_name:src.name,model:""}} />
           <ControlPersistence source={src.id} name={src.name} />
+          <ChannelProtocolRepair source={src.id} provider="" onApplied={onSaved} />
           <button
             className="icon-button"
             aria-label={`编辑 ${src.name}`}

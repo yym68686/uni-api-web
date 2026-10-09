@@ -114,10 +114,33 @@ func TestCompactionImportRoutesWithRealGateway(t *testing.T) {
 	}
 	enabled := false
 	service := &Service{control: store}
-	in := subImportInput{Revision: state["revision"].(string), Models: []string{checkModel}, Position: 1, CompactionEnabled: &enabled}
+	in := subImportInput{Revision: state["revision"].(string), Models: []string{checkModel}, Protocols: map[string]string{checkModel: "responses"}, Position: 1, CompactionEnabled: &enabled}
 	applied, code, err := service.subImportCompactionChannel(ctx, src, state, in, key, "sub2api-compaction-fixture", upstream.URL+"/new", "fixture-key")
 	if err != nil || code != 200 {
 		t.Fatal("atomic creation failed", code, err)
+	}
+	catalog, _, err := subGateway(ctx, src, "GET", "/v1/model-channels?endpoint=all&stream=all", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows []struct {
+		Provider string `json:"provider"`
+		Engine   string `json:"engine"`
+	}
+	if decodeMap(catalog["data"], &rows) != nil {
+		t.Fatal("invalid catalog")
+	}
+	found := false
+	for _, row := range rows {
+		if row.Provider == "sub2api-compaction-fixture" {
+			found = true
+			if row.Engine != "codex" {
+				t.Fatal("gateway failed to infer codex", row.Engine)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("imported channel not found")
 	}
 	probe := func(compaction bool, want string) {
 		t.Helper()

@@ -72,7 +72,7 @@ func (s *Service) qualityBindings(ctx context.Context, owner string) ([]qualityB
 				continue
 			}
 			for _, ref := range refs {
-				if c.Provider == subProviderName(ref.Account, ref.Group, c.KeyID) && subBindingSite(c.Base) == subBindingSite(ref.Base) {
+				if matchesSubProvider(c.Provider, ref.Account, ref.Group, c.KeyID) && subBindingSite(c.Base) == subBindingSite(ref.Base) {
 					bindings[qualityChannelID(source, c.Provider)] = qualityBinding{source, c.Provider, ref.Account, ref.Group}
 				}
 			}

@@ -39,7 +39,7 @@ function setup(site = false) {
   const result = (model: string, status = "success") => ({
     model,
     checked_at: 10,
-    availability: { status, usage: { status: "matched", input_tokens: 100, output_tokens: 10, input_price: 2, output_price: 10 } },
+    availability: { status, protocol: "responses", usage: { status: "matched", input_tokens: 100, output_tokens: 10, input_price: 2, output_price: 10 } },
   });
   const modelChecks = ["saved", "available", "failed"].map((model) => ({
     model,

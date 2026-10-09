@@ -1,7 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { controlRequest } from "./api";
 export interface InstalledChannel {
-  model_mappings?: Record<string,string>;
+  protocol?: string;
+  engine?: string;
+  model_mappings?: Record<string, string>;
   kind?: "configured";
   binding_status?:
     "matched" | "partial" | "unmatched" | "ambiguous" | "no_account";

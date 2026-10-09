@@ -59,6 +59,7 @@ function fixtures(): SubAccount[] {
           verdict: id === "one" ? "pass" : "fail",
           availability: {
             status: "success",
+            protocol: "responses",
             text: "test",
             ttft_ms: id === "one" ? 1000 : 6500,
             response_created_ms: id === "one" ? 1000 : 6500,
@@ -1101,6 +1102,7 @@ it("preselects successful models and imports into the selected source key at the
     models: ["gpt-6-astra", "gpt-5.6-sol"],
     position: 2,
     positions: {"gpt-6-astra":2,"gpt-5.6-sol":2},
+    protocols: {"gpt-6-astra":"responses","gpt-5.6-sol":"responses"},
     revision: "revision-1",
   });
   expect(JSON.stringify(writes)).not.toContain("secret");
@@ -1611,6 +1613,7 @@ it("lists imported keys, replaces exact models and deletes only the chosen bindi
       key_position: 1,
       key_prefix: "masked-one",
       provider: "sub2api-test1",
+      protocol: "responses",
       name: "one-0.01",
       models: ["gpt-6-astra", "gpt-5.6-sol"],
       positions: { "gpt-6-astra": 2, "gpt-5.6-sol": 1 },
@@ -1626,6 +1629,7 @@ it("lists imported keys, replaces exact models and deletes only the chosen bindi
       key_position: 2,
       key_prefix: "masked-two",
       provider: "sub2api-test2",
+      protocol: "responses",
       name: "one-0.01",
       models: ["gpt-6-astra"],
       positions: { "gpt-6-astra": 2 },

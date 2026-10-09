@@ -8,13 +8,18 @@ import type { ConsoleSource } from "./SourceSettings";
 import type { KeyInfo } from "./types";
 
 import { CreateChannelModels } from "./CreateChannelModels";
-import { readCreationModels, writeCreationModels } from "./creationModelMapping";
+import {
+  readCreationModels,
+  writeCreationModels,
+} from "./creationModelMapping";
 import type { ModelAlias } from "./ModelAliases";
 import { Spinner } from "./ui";
+import { automaticChannelDocument } from "./channelProtocol";
 
 type Document = Record<string, unknown>;
 interface Schema {
   create_provider?: boolean;
+  automatic_engine?: boolean;
   engines: string[];
   fields: { path: string; type: string }[];
 }
@@ -24,6 +29,7 @@ interface Result {
   message?: string;
 }
 const engineNames: Record<string, string> = {
+  auto: "自动识别（由 uni-api 按上游地址判断）",
   gpt: "OpenAI / 兼容接口",
   codex: "Codex",
   claude: "Claude",
@@ -37,7 +43,7 @@ const engineNames: Record<string, string> = {
 };
 const initialDocument = (): Document => ({
   provider: "",
-  engine: "gpt",
+  engine: "auto",
   base_url: "",
   model: [],
 });
@@ -56,6 +62,10 @@ const isObject = (value: unknown): value is Document =>
 
 // Reject unknown fields rather than silently dropping operator configuration.
 export function creationSettings(document: Document, schema: Schema): Document {
+  if (document.engine === undefined && !schema.automatic_engine)
+    throw Error(
+      "该来源尚不支持按地址自动识别引擎，请更新 uni-api 或明确选择引擎。",
+    );
   if (
     typeof document.provider !== "string" ||
     !document.provider ||
@@ -65,7 +75,10 @@ export function creationSettings(document: Document, schema: Schema): Document {
     throw Error(
       "渠道名称需为 1–100 字节，可使用文字、数字、点、下划线或连字符。",
     );
-  if (!schema.engines.includes(String(document.engine)))
+  if (
+    document.engine !== undefined &&
+    !schema.engines.includes(String(document.engine))
+  )
     throw Error("请选择当前来源支持的引擎。");
   let url: URL;
   try {
@@ -209,7 +222,7 @@ export function CreateChannel({
       if (next) setRaw(stringify(doc));
       else {
         if (!schema.data) return;
-        creationSettings(doc, schema.data);
+        creationSettings(automaticChannelDocument(doc), schema.data);
         setDraft(doc);
         const models = readCreationModels(doc.model);
         setSelectedModels(models.originals);
@@ -267,7 +280,7 @@ export function CreateChannel({
               .split("\n")
               .map((k) => k.trim())
               .find(Boolean) || "",
-          engine: String(draft.engine),
+          engine: draft.engine === "auto" ? undefined : String(draft.engine),
         }),
       });
       if (abort.signal.aborted) return;
@@ -355,24 +368,22 @@ export function CreateChannel({
       const current = await controlRequest<Schema>(`${path}/schema`);
       if (!current.create_provider)
         throw Error("该来源尚不支持通用渠道创建，请先更新 uni-api。");
-      const doc = readDocument(),
-        settings = creationSettings(doc, current);
+      const documents = [automaticChannelDocument(readDocument())];
+      const changes = documents.map((doc) => ({
+        provider: doc.provider,
+        create_to_key: key.includes("::")
+          ? key.split("::").slice(1).join("::")
+          : key,
+        set: creationSettings(doc, current),
+        remove: [],
+      }));
       const controls = await controlRequest<{ revision: string }>(
         `/v1/sources/${encodeURIComponent(source)}/channel-controls`,
       );
       const mutation = {
         revision: controls.revision,
         operation_id: crypto.randomUUID(),
-        changes: [
-          {
-            provider: doc.provider,
-            create_to_key: key.includes("::")
-              ? key.split("::").slice(1).join("::")
-              : key,
-            set: settings,
-            remove: [],
-          },
-        ],
+        changes,
       };
       await controlRequest(`${path}/validate`, {
         method: "POST",
@@ -416,7 +427,7 @@ export function CreateChannel({
       setMessage("");
     }
   }
-  const engine = String(draft.engine);
+  const engine = String(draft.engine ?? "auto");
   const cloudFields =
     engine === "aws"
       ? ["region", "aws_access_key", "aws_secret_key", "aws_session_token"]
@@ -579,11 +590,13 @@ export function CreateChannel({
                         onChange={(e) => edit("engine", e.target.value)}
                         disabled={!supported}
                       >
-                        {!schema.data?.engines?.includes(engine) && (
-                          <option value={engine}>
-                            {engineNames[engine] || engine}
-                          </option>
-                        )}
+                        <option value="auto">{engineNames.auto}</option>
+                        {engine !== "auto" &&
+                          !schema.data?.engines?.includes(engine) && (
+                            <option value={engine}>
+                              {engineNames[engine] || engine}
+                            </option>
+                          )}
                         {schema.data?.engines?.map((value) => (
                           <option key={value} value={value}>
                             {engineNames[value] || value}
@@ -592,6 +605,12 @@ export function CreateChannel({
                       </select>
                     </label>
                   </div>
+                  {engine === "auto" && (
+                    <p role="note">
+                      不指定引擎，保留完整上游地址，由 uni-api
+                      统一识别。模型名称不参与判断；同一地址下的所有模型共用网关识别的引擎。
+                    </p>
+                  )}
                   <label>
                     上游地址
                     <input

@@ -15,6 +15,8 @@ import (
 )
 
 type subImportInput struct {
+	Provider              string            `json:"provider,omitempty"`
+	Protocols             map[string]string `json:"protocols,omitempty"`
 	AllowUnverifiedModels bool              `json:"allow_unverified_models,omitempty"`
 	Positions             map[string]int    `json:"positions,omitempty"`
 	ModelMappings         map[string]string `json:"model_mappings,omitempty"`
@@ -201,6 +203,20 @@ func (s *Service) subImportChannel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "渠道顺序已变化，请刷新弹窗后重试", 409)
 		return
 	}
+	if state["temporary_channel_restore"] != true || state["channel_settings"] != true {
+		http.Error(w, "来源不支持按协议原子添加，请更新 uni-api", 400)
+		return
+	}
+	if state["automatic_engine"] != true {
+		http.Error(w, "来源尚不支持按地址自动识别引擎，请更新 uni-api", 400)
+		return
+	}
+	protocols, protocolErr := s.importProtocols(ctx, in.AccountID, in.GroupID, importUpstreamModels(in.Models, in.ModelMappings), in.Protocols)
+	if protocolErr != nil {
+		http.Error(w, protocolErr.Error(), 400)
+		return
+	}
+	in.Protocols = protocols
 	// Claim account to serialize refresh-token rotation, key creation and stop.
 	job := randomID()
 	var base, auth string
@@ -309,12 +325,7 @@ func (s *Service) subImportChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	provider := subProviderName(in.AccountID, in.GroupID, key)
-	var applied map[string]any
-	if in.CompactionEnabled != nil || len(in.ModelMappings) > 0 || len(in.Positions) > 0 {
-		applied, status, err = s.subImportCompactionChannel(ctx, src, state, in, key, provider, base, routeKey.Key)
-	} else {
-		applied, status, err = subGateway(ctx, src, "POST", "/v1/temporary-channels", map[string]any{"revision": in.Revision, "api_key_id": key, "provider": provider, "base_url": base + "/v1/responses", "api_key": routeKey.Key, "models": in.Models, "position": in.Position})
-	}
+	applied, status, err := s.subImportCompactionChannel(ctx, src, state, in, key, provider, base, routeKey.Key)
 	if err != nil {
 		http.Error(w, err.Error(), status)
 		return
@@ -333,6 +344,9 @@ func int64Param(v string) int64 { n, _ := strconv.ParseInt(v, 10, 64); return n 
 // compaction exclusion is applied. The caller holds the source lock; both
 // export and final apply must match the same revision.
 func (s *Service) subImportCompactionChannel(ctx context.Context, src controlSource, state map[string]any, in subImportInput, key, provider, base, upstreamKey string) (map[string]any, int, error) {
+	if state["automatic_engine"] != true {
+		return nil, 400, errors.New("来源尚不支持按地址自动识别引擎，请更新 uni-api")
+	}
 	public, err := importPublicModels(in.Models, in.ModelMappings)
 	if err != nil {
 		return nil, 400, err
@@ -350,8 +364,39 @@ func (s *Service) subImportCompactionChannel(ctx context.Context, src controlSou
 	if in.CompactionEnabled != nil && !*in.CompactionEnabled {
 		excluded = append(excluded, "compaction")
 	}
-	definition, _ := json.Marshal(map[string]any{"provider": provider, "base_url": base + "/v1/responses", "engine": "gpt", "api": []string{upstreamKey}, "model": importModelDefinition(in.Models, in.ModelMappings), "exclude_request_types": excluded})
-	return s.applyImportSnapshot(ctx, src, snapshot, in.Revision, retainedChannel{Provider: provider, KeyID: key, Base: base + "/v1/responses", Key: upstreamKey, Models: public, Definition: definition}, in.Position, in.Positions)
+	protocols, err := s.importProtocols(ctx, in.AccountID, in.GroupID, importUpstreamModels(in.Models, in.ModelMappings), in.Protocols)
+	if err != nil {
+		return nil, 400, err
+	}
+	parts, err := partitionChannelModels(publicChannelModels(in.Models, in.ModelMappings), protocols)
+	if err != nil {
+		return nil, 400, err
+	}
+	document := map[string]any{"provider": provider, "base_url": base, "api": []string{upstreamKey}, "exclude_request_types": excluded}
+	for index, part := range parts {
+		name := provider
+		if index > 0 {
+			name = protocolProvider(provider, part.Protocol)
+		}
+		channel, err := protocolChannel(retainedChannel{KeyID: key, Key: upstreamKey, Models: public}, document, name, part)
+		if err != nil {
+			return nil, 400, err
+		}
+		for _, existing := range snapshot.Channels {
+			if existing.Provider == name {
+				return nil, 409, errors.New("渠道已存在，请使用编辑")
+			}
+		}
+		snapshot, code, err = s.prepareImportSnapshot(ctx, src, snapshot, channel, in.Position, protocolPositions(channel.Models, in.Positions))
+		if err != nil {
+			return nil, code, err
+		}
+	}
+	admin := src
+	if src.ConfigKey != "" {
+		admin.Key = src.ConfigKey
+	}
+	return subGateway(ctx, admin, "POST", "/v1/channel-controls/restore", map[string]any{"revision": in.Revision, "snapshot": snapshot})
 }
 
 func (s *Service) importSnapshot(ctx context.Context, src controlSource, state map[string]any, revision string) (retainedSnapshot, int, error) {
@@ -423,8 +468,20 @@ func (s *Service) importSnapshot(ctx context.Context, src controlSource, state m
 }
 
 func (s *Service) applyImportSnapshot(ctx context.Context, src controlSource, snapshot retainedSnapshot, revision string, channel retainedChannel, position int, positions map[string]int, suppress ...string) (map[string]any, int, error) {
+	next, code, err := s.prepareImportSnapshot(ctx, src, snapshot, channel, position, positions, suppress...)
+	if err != nil {
+		return nil, code, err
+	}
+	admin := src
+	if src.ConfigKey != "" {
+		admin.Key = src.ConfigKey
+	}
+	return subGateway(ctx, admin, "POST", "/v1/channel-controls/restore", map[string]any{"revision": revision, "snapshot": next})
+}
+
+func (s *Service) prepareImportSnapshot(ctx context.Context, src controlSource, snapshot retainedSnapshot, channel retainedChannel, position int, positions map[string]int, suppress ...string) (retainedSnapshot, int, error) {
 	if err := validateModelPositions(channel.Models, positions); err != nil {
-		return nil, 400, err
+		return snapshot, 400, err
 	}
 	replaced := snapshotExcluded(snapshot.Rules, snapshot.Channels, channel.KeyID)
 	for _, provider := range suppress {
@@ -455,14 +512,14 @@ func (s *Service) applyImportSnapshot(ctx context.Context, src controlSource, sn
 	delete(snapshot.Settings, channel.Provider)
 	catalog, code, err := fetchSource(ctx, src, "/v1/model-channels", url.Values{"api_key_id": {channel.KeyID}, "endpoint": {"all"}, "stream": {"all"}})
 	if err != nil {
-		return nil, code, err
+		return snapshot, code, err
 	}
 	var channels []struct {
 		Provider string `json:"provider"`
 		Model    string `json:"model"`
 	}
 	if decodeMap(catalog["data"], &channels) != nil {
-		return nil, 502, errors.New("渠道顺序无效")
+		return snapshot, 502, errors.New("渠道顺序无效")
 	}
 	for _, model := range channel.Models {
 		modelPosition := position
@@ -478,7 +535,7 @@ func (s *Service) applyImportSnapshot(ctx context.Context, src controlSource, sn
 			}
 		}
 		if modelPosition < 1 || modelPosition > len(order)+1 {
-			return nil, 400, errors.New("添加位置已失效，请刷新后重试")
+			return snapshot, 400, errors.New("添加位置已失效，请刷新后重试")
 		}
 		order = append(order, "")
 		copy(order[modelPosition:], order[modelPosition-1:])
@@ -514,9 +571,5 @@ func (s *Service) applyImportSnapshot(ctx context.Context, src controlSource, sn
 		}
 		compactBatchRouteRules(&snapshot, map[string][]batchCatalogRow{channel.KeyID: rows}, map[string][]routeMove{channel.KeyID: moves})
 	}
-	admin := src
-	if src.ConfigKey != "" {
-		admin.Key = src.ConfigKey
-	}
-	return subGateway(ctx, admin, "POST", "/v1/channel-controls/restore", map[string]any{"revision": revision, "snapshot": snapshot})
+	return snapshot, 200, nil
 }

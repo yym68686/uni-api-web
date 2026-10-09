@@ -232,7 +232,7 @@ func TestModelAliasesServeBothNamesWithRealGateway(t *testing.T) {
 	// The same alias document path used by sub2api imports serves both names too.
 	state, _, _ = subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
 	enabled := false
-	in := subImportInput{Revision: state["revision"].(string), Models: []string{"codex-auto-review"}, ModelMappings: map[string]string{"review-alias": "codex-auto-review"}, Position: 1, Positions: map[string]int{"codex-auto-review": 2, "review-alias": 1}, CompactionEnabled: &enabled}
+	in := subImportInput{Revision: state["revision"].(string), Models: []string{"codex-auto-review"}, ModelMappings: map[string]string{"review-alias": "codex-auto-review"}, Protocols: map[string]string{"codex-auto-review": "responses"}, Position: 1, Positions: map[string]int{"codex-auto-review": 2, "review-alias": 1}, CompactionEnabled: &enabled}
 	applied, _, e := service.subImportCompactionChannel(ctx, src, state, in, key, "sub2api-alias-fixture", upstream.URL, "fixture-upstream-key")
 	if e != nil {
 		t.Fatal(e)

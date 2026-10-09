@@ -225,7 +225,7 @@ func TestCompactionImportIsAtomicAndPreservesExistingRules(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
 				case "/v1/channel-settings/export":
-					writeJSON(w, 200, map[string]any{"revision": revision, "channel_settings": map[string]any{"existing": map[string]any{"set": map[string]any{"/preferences/cooldown_period": 30}, "remove": []string{}}}, "temporary_definitions": map[string]any{"existing": map[string]any{"provider": "existing", "base_url": "https://old.test/v1/responses", "api": []string{"old-secret"}, "model": []string{checkModel}}}})
+					writeJSON(w, 200, map[string]any{"revision": revision, "channel_settings": map[string]any{"existing": map[string]any{"set": map[string]any{"/preferences/cooldown_period": 30}, "remove": []string{}}}, "temporary_definitions": map[string]any{"existing": map[string]any{"provider": "existing", "engine": "gpt", "base_url": "https://old.test/v1/responses", "api": []string{"old-secret"}, "model": []string{checkModel}}}})
 				case "/v1/model-channels":
 					writeJSON(w, 200, map[string]any{"data": []any{map[string]any{"provider": "configured", "model": checkModel}, map[string]any{"provider": "existing", "model": checkModel}}})
 				case "/v1/channel-controls/restore":
@@ -246,10 +246,10 @@ func TestCompactionImportIsAtomicAndPreservesExistingRules(t *testing.T) {
 				}
 			}))
 			defer server.Close()
-			state := map[string]any{"temporary_channel_restore": true, "channel_settings": true, "rules": []retainedRule{{KeyID: "key", Model: checkModel, Order: []string{"configured", "existing"}, Disabled: []string{"existing"}}, {KeyID: "other", Model: "other-model", Order: []string{"unrelated"}, Disabled: []string{}}}, "temporary_channels": []retainedChannel{{Provider: "existing", KeyID: "key", Models: []string{checkModel}}}}
+			state := map[string]any{"temporary_channel_restore": true, "automatic_engine": true, "channel_settings": true, "rules": []retainedRule{{KeyID: "key", Model: checkModel, Order: []string{"configured", "existing"}, Disabled: []string{"existing"}}, {KeyID: "other", Model: "other-model", Order: []string{"unrelated"}, Disabled: []string{}}}, "temporary_channels": []retainedChannel{{Provider: "existing", KeyID: "key", Models: []string{checkModel}}}}
 			src := controlSource{sourceView: sourceView{Base: server.URL}}
 			service := &Service{}
-			in := subImportInput{Revision: "r1", Models: []string{checkModel}, Position: 2, CompactionEnabled: &enabled}
+			in := subImportInput{Revision: "r1", Models: []string{checkModel}, Protocols: map[string]string{checkModel: "responses"}, Position: 2, CompactionEnabled: &enabled}
 			_, code, err := service.subImportCompactionChannel(context.Background(), src, state, in, "key", "sub2api-new", "https://new.test", "new-secret")
 			if err != nil || code != 200 || mutations != 1 {
 				t.Fatal(code, err, mutations)
@@ -259,6 +259,14 @@ func TestCompactionImportIsAtomicAndPreservesExistingRules(t *testing.T) {
 			}
 			var doc map[string]any
 			json.Unmarshal(applied.Channels[1].Definition, &doc)
+			if doc["engine"] != nil {
+				t.Fatal("new channel must delegate engine inference", doc["engine"])
+			}
+			var existing map[string]any
+			json.Unmarshal(applied.Channels[0].Definition, &existing)
+			if existing["engine"] != "gpt" {
+				t.Fatal("existing channel engine changed", existing["engine"])
+			}
 			types := doc["exclude_request_types"].([]any)
 			if enabled && len(types) != 0 || !enabled && (len(types) != 1 || types[0] != "compaction") {
 				t.Fatal("incorrect compaction policy", types)

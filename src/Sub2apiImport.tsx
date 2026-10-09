@@ -6,12 +6,13 @@ import { controlRequest } from "./api";
 import { useChannelImportKeys } from "./channelImportKeys";
 import { useRouteKeyRequestStats } from "./keyRequestStats";
 import { ChannelImportKeyFeedback } from "./ChannelImportKeyFeedback";
+import { channelProtocols } from "./channelProtocol";
 import { Spinner } from "./ui";
 import { AccountForm } from "./SiteAccountForm";
 import { ChannelBatchApply } from "./ChannelBatchApply";
 import type { BatchPart, BatchDraft } from "./channelBatch";
 import type { ConsoleSourcesQuery } from "./consoleSources";
-import {toolUseFailed,modelToolUse,toolUseLabels} from "./toolUse";
+import { toolUseFailed, modelToolUse, toolUseLabels } from "./toolUse";
 import { CompactionStatus } from "./SubCompaction";
 import { assessPrice } from "./sub2apiPriceCheck";
 import { ModelPriceWarning } from "./Sub2apiPricing";
@@ -30,7 +31,12 @@ import { channelBindingView } from "./channelBindingView";
 import type { ChannelRoute } from "./channelRouteData";
 import { providerRoutes, useAllChannelRoutes } from "./channelRouteData";
 import { ModelAliases, aliasMappings } from "./ModelAliases";
-import { ChannelModelSelection, splitChannelModels, unavailableModelChanges, retainedOnlyModels } from "./ChannelModelSelection";
+import {
+  ChannelModelSelection,
+  splitChannelModels,
+  unavailableModelChanges,
+  retainedOnlyModels,
+} from "./ChannelModelSelection";
 import type { ModelAlias } from "./ModelAliases";
 import {
   ModelPositions,
@@ -54,7 +60,8 @@ interface Options {
   keys: KeyInfo[];
   channels: { provider: string; model: string }[];
 }
-const siteLoginRequired = (message: string) => /站点登录|站点会话|登录会话|重新登录|刷新凭据/.test(message);
+const siteLoginRequired = (message: string) =>
+  /站点登录|站点会话|登录会话|重新登录|刷新凭据/.test(message);
 export function Sub2apiImport({
   account,
   target,
@@ -77,7 +84,9 @@ export function Sub2apiImport({
   close: () => void;
 }) {
   const client = useQueryClient();
-  const destinationSources = (sources.data?.data || []).map(source => source.id);
+  const destinationSources = (sources.data?.data || []).map(
+    (source) => source.id,
+  );
   const keyDirectories = useChannelImportKeys(destinationSources);
   const checks = useMemo(() => modelChecks(target), [target]);
   const quality = groupQualityResult(target);
@@ -180,7 +189,10 @@ export function Sub2apiImport({
       !configuredChannels.length &&
       !imports.isPending);
   const [removing, setRemoving] = useState<InstalledChannel | null>(null);
-  const keyRequestStats = useRouteKeyRequestStats(activeSource, !showForm && keyOptions.length > 0);
+  const keyRequestStats = useRouteKeyRequestStats(
+    activeSource,
+    !showForm && keyOptions.length > 0,
+  );
   const isRemoving = (item: InstalledChannel) =>
     !!removing &&
     removing.source_id === item.source_id &&
@@ -188,24 +200,70 @@ export function Sub2apiImport({
     removing.provider === item.provider;
   const [modelChoices, setModelChoices] = useState<Record<string, boolean>>({});
   const editChecks = [...checks];
-  for(const model of [...installed.flatMap(i=>[...i.models,...Object.values(i.model_mappings||{})]),...(editing?.models||[]),...Object.values(editing?.model_mappings||{})]) {
-    if(!editChecks.some(c=>c.model===model))editChecks.push({model,state:"idle",message:"",result:null});
+  for (const model of [
+    ...installed.flatMap((i) => [
+      ...i.models,
+      ...Object.values(i.model_mappings || {}),
+    ]),
+    ...(editing?.models || []),
+    ...Object.values(editing?.model_mappings || {}),
+  ]) {
+    if (!editChecks.some((c) => c.model === model))
+      editChecks.push({ model, state: "idle", message: "", result: null });
   }
   const originals = editChecks
     .filter(
       (check) =>
         modelChoices[check.model] ??
-        (editing ? editing.models.includes(check.model)&&(!editing.model_mappings?.[check.model]||editing.model_mappings[check.model]===check.model) : modelIsDefaultSelected(check) &&
-          assessPrice(check, prices).status !== "abnormal" && !toolUseFailed(target,check.model)),
+        (editing
+          ? editing.models.includes(check.model) &&
+            (!editing.model_mappings?.[check.model] ||
+              editing.model_mappings[check.model] === check.model)
+          : modelIsDefaultSelected(check) &&
+            assessPrice(check, prices).status !== "abnormal" &&
+            !toolUseFailed(target, check.model)),
     )
     .map((check) => check.model);
   const [aliases, setAliases] = useState<ModelAlias[]>([]);
+  const [protocolChoices, setProtocolChoices] = useState<
+    Record<string, string>
+  >({});
   const mapping = aliasMappings(aliases, originals);
   const models = mapping.models;
+  const upstreamModels = [
+    ...new Set([...originals, ...aliases.map((alias) => alias.upstream)]),
+  ];
+  const savedUpstreams = new Set(
+    (editing?.models || []).map(
+      (model) => editing?.model_mappings?.[model] || model,
+    ),
+  );
+  const protocols = Object.fromEntries(
+    upstreamModels.map((model) => {
+      const probe = checks.find((check) => check.model === model)?.result
+        ?.availability;
+      return [
+        model,
+        protocolChoices[model] ||
+          (probe?.status === "success" ? probe.protocol : "") ||
+          (savedUpstreams.has(model) ? editing?.protocol : "") ||
+          "",
+      ];
+    }),
+  );
+  const missingProtocol = upstreamModels.some((model) => !protocols[model]);
   const invalidModels = unavailableModelChanges(
-    {...Object.fromEntries(originals.map(m=>[m,m])),...mapping.mappings},
-    Object.fromEntries((editing?.models||[]).map(m=>[m,editing?.model_mappings?.[m]||m])),
-    model=>available.includes(model),
+    {
+      ...Object.fromEntries(originals.map((m) => [m, m])),
+      ...mapping.mappings,
+    },
+    Object.fromEntries(
+      (editing?.models || []).map((m) => [
+        m,
+        editing?.model_mappings?.[m] || m,
+      ]),
+    ),
+    (model) => available.includes(model),
   );
   const [source, setSource] = useState("");
   const [key, setKey] = useState("");
@@ -246,20 +304,28 @@ export function Sub2apiImport({
   });
   const groupAccess = useQuery({
     queryKey: ["sub-group-access", account.id, target.group_id],
-    queryFn: ({ signal }) => controlRequest<{ available: boolean; status: string; message?: string }>(
-      `/v1/sub2api/accounts/${encodeURIComponent(account.id)}/groups/${target.group_id}/access`, { signal },
-    ),
+    queryFn: ({ signal }) =>
+      controlRequest<{ available: boolean; status: string; message?: string }>(
+        `/v1/sub2api/accounts/${encodeURIComponent(account.id)}/groups/${target.group_id}/access`,
+        { signal },
+      ),
     enabled: showForm && !editing,
     retry: false,
     staleTime: 0,
     refetchOnWindowFocus: false,
   });
-  const groupUnavailable = groupAccess.data?.available === false ||
+  const groupUnavailable =
+    groupAccess.data?.available === false ||
     (!groupAccess.data && target.active === false);
   const groupAccessMessage = groupUnavailable
-    ? groupAccess.data?.message || target.message || "站点当前未开放该分组，请重新检查分组状态。"
-    : groupAccess.error ? "暂时无法核对站点分组状态，请重新检查。" : "";
-  const visibleError = error || sources.error?.message || options.error?.message || "";
+    ? groupAccess.data?.message ||
+      target.message ||
+      "站点当前未开放该分组，请重新检查分组状态。"
+    : groupAccess.error
+      ? "暂时无法核对站点分组状态，请重新检查。"
+      : "";
+  const visibleError =
+    error || sources.error?.message || options.error?.message || "";
   useEffect(() => {
     if (
       !editing ||
@@ -300,27 +366,94 @@ export function Sub2apiImport({
   );
   const stale =
     !!editing && !!options.data && editing.revision !== options.data.revision;
-  function batchDraft(part:BatchPart):BatchDraft {
-    const originalModels=Object.fromEntries(originals.map(m=>[m,m]));
-    const desired={...originalModels,...mapping.mappings};
-    const saved=Object.fromEntries((editing?.models||[]).map(m=>[m,editing?.model_mappings?.[m]||m]));
-    return {part,name:`${account.name} / ${target.name}`,scope:{kind:"site",account:account.id,group:target.group_id},originals:originalModels,aliases:mapping.mappings,models:desired,retainedOnly:retainedOnlyModels(desired,saved,m=>available.includes(m)),positions:selectedModelPositions(models,activePositions,validPosition),anchor:{source:editing?.source_id||activeSource,key:editing?.api_key_id||activeKey,provider:editing?.provider||"",revision:editing?.revision||""}};
+  function batchDraft(part: BatchPart): BatchDraft {
+    const originalModels = Object.fromEntries(originals.map((m) => [m, m]));
+    const desired = { ...originalModels, ...mapping.mappings };
+    const saved = Object.fromEntries(
+      (editing?.models || []).map((m) => [
+        m,
+        editing?.model_mappings?.[m] || m,
+      ]),
+    );
+    return {
+      part,
+      name: `${account.name} / ${target.name}`,
+      scope: { kind: "site", account: account.id, group: target.group_id },
+      protocols,
+      originals: originalModels,
+      aliases: mapping.mappings,
+      models: desired,
+      retainedOnly: retainedOnlyModels(desired, saved, (m) =>
+        available.includes(m),
+      ),
+      positions: selectedModelPositions(models, activePositions, validPosition),
+      anchor: {
+        source: editing?.source_id || activeSource,
+        key: editing?.api_key_id || activeKey,
+        provider: editing?.provider || "",
+        revision: editing?.revision || "",
+      },
+    };
   }
-  function batchButton(part:BatchPart,section?:string) {
-    if(!editing)return undefined;
-    return <ChannelBatchApply section={section} draft={()=>batchDraft(part)}
-      disabled={busy||invalidModels.length>0||stale||options.isFetching||options.isError||!options.data?.manageable||!source||!key||(part!=="models"&&!!mapping.error)||((part==="all"||part==="positions")&&!models.length)}
-      onApplied={()=>{setEditing(null);setView("existing");setSuccess("批量操作结果已更新，请核对各来源接入状态。");}}/>;
+  function batchButton(part: BatchPart, section?: string) {
+    if (!editing) return undefined;
+    return (
+      <ChannelBatchApply
+        section={section}
+        draft={() => batchDraft(part)}
+        disabled={
+          busy ||
+          invalidModels.length > 0 ||
+          stale ||
+          options.isFetching ||
+          options.isError ||
+          !options.data?.manageable ||
+          !source ||
+          !key ||
+          (part !== "models" && !!mapping.error) ||
+          ((part === "all" || part === "positions") && !models.length)
+        }
+        onApplied={() => {
+          setEditing(null);
+          setView("existing");
+          setSuccess("批量操作结果已更新，请核对各来源接入状态。");
+        }}
+      />
+    );
   }
   function edit(item: InstalledChannel) {
+    const protocol = channelProtocols.find(
+      (spec) => spec.engine === item.engine,
+    )?.protocol;
+    setProtocolChoices(
+      protocol
+        ? Object.fromEntries(
+            item.models.map((model) => [
+              item.model_mappings?.[model] || model,
+              protocol,
+            ]),
+          )
+        : {},
+    );
     initializedPositions.current = "";
     setEditing(item);
     setView("existing");
     setRemoving(null);
     setSource(item.source_id);
     setKey(item.api_key_id);
-    const saved=splitChannelModels(item.models.map(model=>({model,upstream_model:item.model_mappings?.[model]})));
-    setModelChoices(Object.fromEntries([...new Set([...checks.map(c=>c.model),...item.models])].map(model=>[model,saved.originals.includes(model)])));
+    const saved = splitChannelModels(
+      item.models.map((model) => ({
+        model,
+        upstream_model: item.model_mappings?.[model],
+      })),
+    );
+    setModelChoices(
+      Object.fromEntries(
+        [...new Set([...checks.map((c) => c.model), ...item.models])].map(
+          (model) => [model, saved.originals.includes(model)],
+        ),
+      ),
+    );
     setAliases(saved.aliases);
     setPosition(1);
     setPerModel(true);
@@ -330,6 +463,7 @@ export function Sub2apiImport({
     void client.invalidateQueries({ queryKey: ["sub-import-options"] });
   }
   function add() {
+    setProtocolChoices({});
     setCompactionChoice(null);
     setEditing(null);
     setView("new");
@@ -371,11 +505,19 @@ export function Sub2apiImport({
     action: "add" | "replace" | "delete",
     item?: InstalledChannel,
   ) {
-    if (busy || (action === "add" && groupUnavailable) || (action !== "delete" && (
-      mapping.error || invalidModels.length || options.isFetching || options.isError ||
-      !options.data?.keys.some(k => k.key_id === key) ||
-      !keyDirectory?.data?.keys.some(k => k.key_id === key)
-    ))) return;
+    if (
+      busy ||
+      (action === "add" && groupUnavailable) ||
+      (action !== "delete" &&
+        (mapping.error ||
+          invalidModels.length ||
+          missingProtocol ||
+          options.isFetching ||
+          options.isError ||
+          !options.data?.keys.some((k) => k.key_id === key) ||
+          !keyDirectory?.data?.keys.some((k) => k.key_id === key)))
+    )
+      return;
     setBusy(true);
     setError("");
     setSuccess("");
@@ -391,9 +533,13 @@ export function Sub2apiImport({
             group_id: target.group_id,
             source_id: item?.source_id || source,
             api_key_id: item?.api_key_id || key,
+            ...(action !== "add"
+              ? { provider: item?.provider || editing?.provider }
+              : {}),
             ...(action !== "delete"
               ? {
                   models: originals,
+                  protocols,
                   ...(aliases.length || action === "replace"
                     ? { model_mappings: mapping.mappings }
                     : {}),
@@ -429,7 +575,8 @@ export function Sub2apiImport({
       // Site authentication fails before a destination write, so no route
       // refresh is needed in that case.
       if (!siteLoginRequired(message)) void refresh();
-      if (action === "add" && message.includes("分组")) void groupAccess.refetch();
+      if (action === "add" && message.includes("分组"))
+        void groupAccess.refetch();
     } finally {
       setBusy(false);
     }
@@ -442,7 +589,9 @@ export function Sub2apiImport({
       }}
     >
       <Dialog.Portal>
-        <Dialog.Overlay className={`dialog-overlay${nested ? " route-edit-overlay" : ""}`} />
+        <Dialog.Overlay
+          className={`dialog-overlay${nested ? " route-edit-overlay" : ""}`}
+        />
         <Dialog.Content
           className={`guide-dialog sub-import-dialog route-workspace${nested ? " route-edit-dialog" : ""}`}
           onEscapeKeyDown={(e) => {
@@ -511,8 +660,17 @@ export function Sub2apiImport({
               <>
                 <div className="route-section-heading">
                   <h3>已保存接入</h3>
-                  <ChannelBatchApply remove onPreview={()=>setView("existing")} draft={()=>batchDraft("delete")} disabled={busy||partialBindings||!boundKeys.size}
-                    onApplied={()=>{setEditing(null);setView("existing");setSuccess("批量删除结果已更新，请核对各来源接入状态。");}}/>
+                  <ChannelBatchApply
+                    remove
+                    onPreview={() => setView("existing")}
+                    draft={() => batchDraft("delete")}
+                    disabled={busy || partialBindings || !boundKeys.size}
+                    onApplied={() => {
+                      setEditing(null);
+                      setView("existing");
+                      setSuccess("批量删除结果已更新，请核对各来源接入状态。");
+                    }}
+                  />
                 </div>
                 <div className="route-destination-grid route-browse-selectors">
                   <label className="sub-import-field">
@@ -559,7 +717,11 @@ export function Sub2apiImport({
                       {keyOptions.map((item) => (
                         <option key={item.api_key_id} value={item.api_key_id}>
                           Key {item.key_position} · {item.key_prefix}
-                          {" · 近 24 小时 · "}{keyRequestStats.label({ key_id: item.api_key_id, source_id: activeSource })}
+                          {" · 近 24 小时 · "}
+                          {keyRequestStats.label({
+                            key_id: item.api_key_id,
+                            source_id: activeSource,
+                          })}
                         </option>
                       ))}
                     </select>
@@ -615,8 +777,10 @@ export function Sub2apiImport({
                             <div>
                               <strong>{binding.name}</strong>
                               <small>
-                                {binding.installed ? "站点接入" : "配置渠道"} ·{" "}
-                                {binding.rows.length} 个模型
+                                {binding.installed
+                                  ? `站点接入${binding.installed.engine ? ` · ${binding.installed.engine}` : ""}`
+                                  : "配置渠道"}{" "}
+                                · {binding.rows.length} 个模型
                               </small>
                             </div>
                             <ChannelBindingActions
@@ -652,7 +816,9 @@ export function Sub2apiImport({
                                     open={isRemoving(binding.installed)}
                                     onOpenChange={(open) => {
                                       if (busy) return;
-                                      setRemoving(open ? binding.installed! : null);
+                                      setRemoving(
+                                        open ? binding.installed! : null,
+                                      );
                                       setError("");
                                     }}
                                   >
@@ -660,7 +826,9 @@ export function Sub2apiImport({
                                       <button
                                         type="button"
                                         className="button small"
-                                        disabled={busy || !binding.installed.manageable}
+                                        disabled={
+                                          busy || !binding.installed.manageable
+                                        }
                                       >
                                         <Trash2 size={13} />
                                         删除
@@ -669,13 +837,22 @@ export function Sub2apiImport({
                                     {isRemoving(binding.installed) && (
                                       <BindingRemoveDialog
                                         target={binding.installed}
-                                        keyPosition={binding.installed.key_position}
+                                        keyPosition={
+                                          binding.installed.key_position
+                                        }
                                         busy={busy}
                                         close={() => setRemoving(null)}
-                                        onConfirm={() => void mutate("delete", removing!)}
+                                        onConfirm={() =>
+                                          void mutate("delete", removing!)
+                                        }
                                       >
                                         {error && (
-                                          <div role="alert" className="error-banner">{error}</div>
+                                          <div
+                                            role="alert"
+                                            className="error-banner"
+                                          >
+                                            {error}
+                                          </div>
                                         )}
                                       </BindingRemoveDialog>
                                     )}
@@ -747,17 +924,16 @@ export function Sub2apiImport({
             {visibleError && (
               <div role="alert" className="error-banner">
                 {visibleError}
-                {!!account.id &&
-                  siteLoginRequired(visibleError) && (
-                    <button
-                      type="button"
-                      className="button small"
-                      disabled={busy}
-                      onClick={() => setRelogin(true)}
-                    >
-                      重新登录站点
-                    </button>
-                  )}
+                {!!account.id && siteLoginRequired(visibleError) && (
+                  <button
+                    type="button"
+                    className="button small"
+                    disabled={busy}
+                    onClick={() => setRelogin(true)}
+                  >
+                    重新登录站点
+                  </button>
+                )}
                 {sources.isError && (
                   <button
                     type="button"
@@ -773,8 +949,15 @@ export function Sub2apiImport({
             {showForm && !editing && groupAccessMessage && (
               <div role="alert" className="error-banner">
                 {groupAccessMessage}
-                <button type="button" className="button small" disabled={groupAccess.isFetching || busy}
-                  onClick={() => { setError(""); void groupAccess.refetch(); }}>
+                <button
+                  type="button"
+                  className="button small"
+                  disabled={groupAccess.isFetching || busy}
+                  onClick={() => {
+                    setError("");
+                    void groupAccess.refetch();
+                  }}
+                >
                   重新检查分组状态
                 </button>
               </div>
@@ -789,6 +972,33 @@ export function Sub2apiImport({
                 }}
               >
                 <h3>{editing ? "编辑临时渠道" : "添加到新的 API key"}</h3>
+                <div role="note">
+                  按检测成功或明确选择的协议生成上游地址，不指定引擎，由 uni-api
+                  统一识别。混合协议将一次原子拆分保存；编辑只影响当前渠道。
+                </div>
+                {upstreamModels.map((model) => (
+                  <label className="sub-import-field" key={model}>
+                    {model} · 上游协议
+                    <select
+                      aria-label={`${model} 上游协议`}
+                      value={protocols[model] || ""}
+                      disabled={busy}
+                      onChange={(event) =>
+                        setProtocolChoices((old) => ({
+                          ...old,
+                          [model]: event.target.value,
+                        }))
+                      }
+                    >
+                      <option value="">请选择（未能自动确定）</option>
+                      {channelProtocols.map((spec) => (
+                        <option key={spec.protocol} value={spec.protocol}>
+                          {spec.label} · {spec.endpoint}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ))}
                 <div className="route-destination-grid">
                   <label className="sub-import-field">
                     uni-api 来源
@@ -841,7 +1051,17 @@ export function Sub2apiImport({
                         setModelPositions({});
                       }}
                     >
-                      <option value="">{!source ? "请先选择来源" : keyDirectory?.data ? keyDirectory.data.keys.length ? "选择 API key" : "暂无 API key" : keyDirectory?.isError ? "API key 加载失败" : "正在读取 API key…"}</option>
+                      <option value="">
+                        {!source
+                          ? "请先选择来源"
+                          : keyDirectory?.data
+                            ? keyDirectory.data.keys.length
+                              ? "选择 API key"
+                              : "暂无 API key"
+                            : keyDirectory?.isError
+                              ? "API key 加载失败"
+                              : "正在读取 API key…"}
+                      </option>
                       {keyDirectory?.data?.keys.map((k) => (
                         <option key={k.key_id} value={k.key_id}>
                           Key {k.position} · {k.prefix}
@@ -854,7 +1074,13 @@ export function Sub2apiImport({
                     <select
                       aria-label="渠道添加位置"
                       value={perModel ? "per-model" : validPosition}
-                      disabled={!key || !options.data || options.isFetching || options.isError || busy}
+                      disabled={
+                        !key ||
+                        !options.data ||
+                        options.isFetching ||
+                        options.isError ||
+                        busy
+                      }
                       onChange={(e) => {
                         if (e.target.value === "per-model") {
                           setPerModel(true);
@@ -874,33 +1100,67 @@ export function Sub2apiImport({
                     </select>
                   </label>
                 </div>
-                {!!key && options.isFetching && <p role="status"><Spinner small /> 正在读取所选 API key 的路由位置…</p>}
+                {!!key && options.isFetching && (
+                  <p role="status">
+                    <Spinner small /> 正在读取所选 API key 的路由位置…
+                  </p>
+                )}
                 {sources.isPending && (
                   <p role="status">
                     <Spinner small /> 正在读取 uni-api 来源…
                   </p>
                 )}
                 <ChannelModelSelection
-                  models={editChecks.map(c=>c.model)} selected={originals} editing={!!editing}
-                  disabled={busy || (!editing && groupUnavailable)} actions={batchButton("models","模型勾选")}
-                  canSelect={model=>available.includes(model)}
-                  onChange={selected=>setModelChoices(Object.fromEntries(editChecks.map(c=>[c.model,selected.includes(c.model)])))}
-                  status={model=>{
-                    const check=editChecks.find(c=>c.model===model)!;
-                    return <>
-                      <ModelQualityWarning model={model} result={quality} />
-                      {toolUseFailed(target,model) && <small className="negative">Tool use · {toolUseLabels[modelToolUse(target,model)!.status]}</small>}
-                      <ModelPriceWarning check={check} prices={prices} />
-                      {(!available.includes(model) || probeHasWarning(check.result?.availability)) && <small className={probeHasWarning(check.result?.availability)?"completion-warning":undefined}>{importModelLabel(check)}</small>}
-                    </>;
+                  models={editChecks.map((c) => c.model)}
+                  selected={originals}
+                  editing={!!editing}
+                  disabled={busy || (!editing && groupUnavailable)}
+                  actions={batchButton("models", "模型勾选")}
+                  canSelect={(model) => available.includes(model)}
+                  onChange={(selected) =>
+                    setModelChoices(
+                      Object.fromEntries(
+                        editChecks.map((c) => [
+                          c.model,
+                          selected.includes(c.model),
+                        ]),
+                      ),
+                    )
+                  }
+                  status={(model) => {
+                    const check = editChecks.find((c) => c.model === model)!;
+                    return (
+                      <>
+                        <ModelQualityWarning model={model} result={quality} />
+                        {toolUseFailed(target, model) && (
+                          <small className="negative">
+                            Tool use ·{" "}
+                            {toolUseLabels[modelToolUse(target, model)!.status]}
+                          </small>
+                        )}
+                        <ModelPriceWarning check={check} prices={prices} />
+                        {(!available.includes(model) ||
+                          probeHasWarning(check.result?.availability)) && (
+                          <small
+                            className={
+                              probeHasWarning(check.result?.availability)
+                                ? "completion-warning"
+                                : undefined
+                            }
+                          >
+                            {importModelLabel(check)}
+                          </small>
+                        )}
+                      </>
+                    );
                   }}
                 />
                 <ModelAliases
-                  actions={batchButton("aliases","模型重命名")}
-                  canSelect={model=>available.includes(model)}
+                  actions={batchButton("aliases", "模型重命名")}
+                  canSelect={(model) => available.includes(model)}
                   models={[
                     ...new Set([
-                      ...(editing?editChecks.map(c=>c.model):available),
+                      ...(editing ? editChecks.map((c) => c.model) : available),
                       ...Object.values(editing?.model_mappings || {}),
                     ]),
                   ]}
@@ -908,7 +1168,11 @@ export function Sub2apiImport({
                   onChange={setAliases}
                   disabled={busy}
                 />
-                {!!invalidModels.length && <p role="alert" className="negative">新增模型须检测可用：{invalidModels.join("、")}</p>}
+                {!!invalidModels.length && (
+                  <p role="alert" className="negative">
+                    新增模型须检测可用：{invalidModels.join("、")}
+                  </p>
+                )}
                 {mapping.error && (
                   <p role="alert" className="negative">
                     {mapping.error}
@@ -934,18 +1198,28 @@ export function Sub2apiImport({
                   </div>
                 )}
                 <ModelPositions
-                  actions={batchButton("positions","路由位置")}
+                  actions={batchButton("positions", "路由位置")}
                   models={models}
                   channels={options.data?.channels || []}
                   provider={options.data?.provider}
                   positions={activePositions}
                   defaultPosition={validPosition}
                   onChange={setModelPositions}
-                  disabled={!key || !options.data || options.isFetching || options.isError || busy || !perModel}
+                  disabled={
+                    !key ||
+                    !options.data ||
+                    options.isFetching ||
+                    options.isError ||
+                    busy ||
+                    !perModel
+                  }
                   uniform={!perModel}
                 />
                 <p className="sub-import-note">
-                  {editing ? "保存更改仅更新当前 API key；分项按钮只同步对应设置，底部按钮可同步全部设置。" : "仅对所选 key 和模型生效。"}开启“保留临时配置”时，来源重启后自动恢复。
+                  {editing
+                    ? "保存更改仅更新当前 API key；分项按钮只同步对应设置，底部按钮可同步全部设置。"
+                    : "仅对所选 key 和模型生效。"}
+                  开启“保留临时配置”时，来源重启后自动恢复。
                 </p>
                 {source && options.data && !options.data.supported && (
                   <div role="alert" className="error-banner">
@@ -1004,9 +1278,11 @@ export function Sub2apiImport({
                       (!editing && groupUnavailable) ||
                       !source ||
                       !key ||
-                      !keyDirectory?.data?.keys.some(k => k.key_id === key) ||
-                      !options.data?.keys.some(k => k.key_id === key) ||
-                      !!mapping.error || invalidModels.length>0 ||
+                      !keyDirectory?.data?.keys.some((k) => k.key_id === key) ||
+                      !options.data?.keys.some((k) => k.key_id === key) ||
+                      !!mapping.error ||
+                      invalidModels.length > 0 ||
+                      missingProtocol ||
                       !models.length ||
                       !options.data?.supported ||
                       options.isFetching ||
@@ -1040,9 +1316,14 @@ export function Sub2apiImport({
               saved={() => {
                 setRelogin(false);
                 setError("");
-                setSuccess("站点登录已更新，已保留当前选择，请继续添加到渠道。");
+                setSuccess(
+                  "站点登录已更新，已保留当前选择，请继续添加到渠道。",
+                );
                 void options.refetch();
-                void client.invalidateQueries({ queryKey: ["sub2api"], refetchType: "none" });
+                void client.invalidateQueries({
+                  queryKey: ["sub2api"],
+                  refetchType: "none",
+                });
               }}
             />
           )}
@@ -1050,7 +1331,11 @@ export function Sub2apiImport({
             <ConfiguredChannelDialog
               item={editingNative.item}
               prices={prices}
-              batchScope={{kind:"site",account:account.id,group:target.group_id}}
+              batchScope={{
+                kind: "site",
+                account: account.id,
+                group: target.group_id,
+              }}
               initialEdit={editingNative.rows}
               close={() => setEditingNative(null)}
             />

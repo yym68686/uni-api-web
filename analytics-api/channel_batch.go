@@ -37,6 +37,7 @@ type batchCatalogRow struct {
 	Provider string `json:"provider"`
 	Model    string `json:"model"`
 	Upstream string `json:"upstream_model"`
+	Engine   string `json:"engine"`
 }
 
 // Independent sources commit in parallel. All keys of one source share one
@@ -81,7 +82,7 @@ func (s *Service) applyChannelBatch(w http.ResponseWriter, r *http.Request) {
 		if t.Account != "" {
 			var owned bool
 			err = s.control.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM console_sub_accounts a JOIN console_sub_targets t ON t.account_id=a.id WHERE a.id=$1 AND t.group_id=$2 AND a.owner=$3)`, t.Account, t.Group, owner).Scan(&owned)
-			if err != nil || !owned || t.Provider != subProviderName(t.Account, t.Group, t.Key) {
+			if err != nil || !owned || !matchesSubProvider(t.Provider, t.Account, t.Group, t.Key) {
 				http.Error(w, "分组不存在或接入不匹配", 404)
 				return
 			}
@@ -220,6 +221,35 @@ func (s *Service) applyChannelBatch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		documents[t.Key+"\n"+t.Provider] = doc
+		if t.Account != "" {
+			protocol := catalogChannelProtocol(catalogs[t.Key], t.Provider)
+			if protocol == "" {
+				for _, spec := range channelProtocols {
+					if spec.Engine == doc["engine"] {
+						protocol = spec.Protocol
+					}
+				}
+			}
+			added := []string{}
+			for model := range newChannelModels(t.Current, t.Models) {
+				added = append(added, model)
+			}
+			if len(added) > 0 && protocol == "" {
+				http.Error(w, "来源未返回渠道协议，无法安全添加模型，请刷新或更新 uni-api", 400)
+				return
+			}
+			resolved, resolveErr := s.importProtocols(ctx, t.Account, t.Group, added, nil)
+			if resolveErr != nil {
+				http.Error(w, resolveErr.Error(), 400)
+				return
+			}
+			for _, inferred := range resolved {
+				if inferred != protocol {
+					http.Error(w, "批量编辑不能混入不同协议模型，请在添加渠道中按协议拆分", 400)
+					return
+				}
+			}
+		}
 		scope := validationScope{t.Account, t.Group, t.Origin}
 		for model := range newChannelModels(t.Current, t.Models) {
 			if neededByScope[scope] == nil {

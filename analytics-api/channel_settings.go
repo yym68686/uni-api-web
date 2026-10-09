@@ -18,7 +18,12 @@ const channelSettingsSchema = `CREATE TABLE IF NOT EXISTS console_channel_settin
  encrypted_before TEXT NOT NULL,encrypted_intent TEXT NOT NULL,public_result JSONB NOT NULL,
  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
  CREATE INDEX IF NOT EXISTS console_channel_settings_audit ON console_channel_settings_operations(source_id,created_at DESC);
- CREATE TABLE IF NOT EXISTS console_channel_setting_templates(id TEXT PRIMARY KEY,owner TEXT NOT NULL,name TEXT NOT NULL,patch JSONB NOT NULL,updated_at TIMESTAMPTZ NOT NULL DEFAULT now());`
+ CREATE TABLE IF NOT EXISTS console_channel_setting_templates(id TEXT PRIMARY KEY,owner TEXT NOT NULL,name TEXT NOT NULL,patch JSONB NOT NULL,updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
+ CREATE TABLE IF NOT EXISTS console_channel_protocol_operations(
+ id TEXT PRIMARY KEY,source_id TEXT NOT NULL REFERENCES console_sources(id),owner TEXT NOT NULL,
+ request_hash TEXT NOT NULL,request_revision TEXT NOT NULL,target_hash TEXT NOT NULL,status TEXT NOT NULL,
+ encrypted_before TEXT NOT NULL,encrypted_intent TEXT NOT NULL,public_result JSONB NOT NULL,
+ created_at TIMESTAMPTZ NOT NULL DEFAULT now(),updated_at TIMESTAMPTZ NOT NULL DEFAULT now());`
 
 type channelSettingChange struct {
 	DeleteCopy  bool           `json:"delete_copy,omitempty"`

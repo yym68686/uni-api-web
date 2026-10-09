@@ -365,6 +365,7 @@ func (s *Service) controlHandler() http.Handler {
 	mux.HandleFunc("POST /v1/sub2api/tool-use-checks", s.subToolUseCheck)
 	mux.HandleFunc("GET /v1/sub2api/channel-options", s.subChannelOptions)
 	mux.HandleFunc("POST /v1/sub2api/channels", s.subImportChannel)
+	mux.HandleFunc("POST /v1/sources/{id}/channel-protocol-repair", s.repairChannelProtocols)
 	mux.HandleFunc("GET /v1/sub2api/channels", s.subInstalledChannels)
 	mux.HandleFunc("PATCH /v1/sub2api/channels", s.subManageChannel)
 	mux.HandleFunc("POST /v1/automations/audit/{audit}/review", s.reviewAutomationSubmission)
