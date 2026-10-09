@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { controlRequest } from "./api";
+import { ApiError, controlRequest } from "./api";
 import type { Channel } from "./types";
 import { channelName } from "./format";
 
@@ -26,7 +26,7 @@ export interface RouteSortPlan {
 }
 type SortRecord = {
   sources: (RouteSortSource & {
-    status: "pending" | "applied" | "undone" | "error";
+    status: "pending" | "applied" | "undone" | "error" | "conflict";
     message?: string;
   })[];
   createdAt: number;
@@ -128,13 +128,78 @@ export function useRouteSorting(scope: string) {
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const locked = useRef(false);
-  const pending = !!record?.sources.some((s) => s.status !== "undone");
+  const pending = !!record?.sources.some(
+    (s) => s.status !== "undone" && s.status !== "conflict",
+  );
   const unresolved = !!record?.sources.some(
     (s) => s.status === "pending" || s.status === "error",
   );
   function persist(next: SortRecord) {
     localStorage.setItem(storageKey(scope), JSON.stringify(next));
     setRecord(next);
+  }
+  async function confirmSource(
+    source: SortRecord["sources"][number],
+    signal?: AbortSignal,
+  ) {
+    try {
+      const result = await post<{ status: string; revision: string }>(
+        source.source,
+        {
+          action: "status",
+          receipt: source.receipt,
+        },
+        signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(15000)])
+          : AbortSignal.timeout(15000),
+      );
+      if (
+        !result.revision ||
+        !["applied", "before", "conflict"].includes(result.status)
+      )
+        throw Error("未取得有效排序记录状态");
+      if (result.status === "conflict") {
+        source.status = "conflict";
+        source.message = "当前路由已变化，请重新预览后应用。";
+      } else {
+        source.status = result.status === "applied" ? "applied" : "undone";
+        source.message = undefined;
+      }
+    } catch (e) {
+      // A rejected receipt cannot authorize undo. Network failures still need
+      // confirmation and must not be discarded or replaced by another write.
+      source.status =
+        e instanceof ApiError && [400, 404].includes(e.status)
+          ? "conflict"
+          : "error";
+      source.message = e instanceof Error ? e.message : "排序结果尚未确认";
+    }
+  }
+  async function refresh(signal?: AbortSignal) {
+    if (locked.current) return false;
+    if (!record || record.sources.every((s) => s.status === "undone"))
+      return true;
+    const next = structuredClone(record);
+    locked.current = true;
+    setBusy(true);
+    setError("");
+    try {
+      await Promise.all(
+        next.sources
+          .filter((s) => s.status !== "undone")
+          .map((s) => confirmSource(s, signal)),
+      );
+      persist(next);
+      return !next.sources.some(
+        (s) => s.status === "error" || s.status === "pending",
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "排序记录核对失败");
+      return false;
+    } finally {
+      locked.current = false;
+      setBusy(false);
+    }
   }
   async function execute(action: "apply" | "undo", plan?: RouteSortPlan) {
     if (locked.current) return;
@@ -162,7 +227,8 @@ export function useRouteSorting(scope: string) {
       }
       await Promise.all(
         next.sources.map(async (source) => {
-          if (source.status === "undone") return;
+          if (source.status === "undone" || source.status === "conflict")
+            return;
           try {
             const result = await post<{ status: string; revision: string }>(
               source.source,
@@ -179,16 +245,7 @@ export function useRouteSorting(scope: string) {
             source.status = "error";
             source.message = e instanceof Error ? e.message : "操作结果未确认";
             // Read-only recovery after an ambiguous response; never retry a write.
-            try {
-              const status = await post<{ status: string }>(source.source, {
-                action: "status",
-                receipt: source.receipt,
-              });
-              if (status.status === "applied") source.status = "applied";
-              if (status.status === "before") source.status = "undone";
-            } catch {
-              /* Keep the receipt so the user can retry recovery. */
-            }
+            await confirmSource(source);
           }
           try {
             persist(structuredClone(next));
@@ -232,6 +289,7 @@ export function useRouteSorting(scope: string) {
     error,
     pending,
     unresolved,
+    refresh,
     apply: (plan: RouteSortPlan) => execute("apply", plan),
     undo: () => (record ? execute("undo") : Promise.resolve()),
     dismiss,

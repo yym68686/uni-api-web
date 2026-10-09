@@ -221,12 +221,13 @@ func TestChannelSortPrepareApplyUndoHTTP(t *testing.T) {
 	key := "key-" + strings.Repeat("a", 64)
 	other := "key-" + strings.Repeat("b", 64)
 	revision := "boot:1"
+	instance := "boot"
 	baseRevision := "base-1"
 	writes := 0
 	snapshot := retainedSnapshot{Version: 2, Channels: []retainedChannel{}, Settings: map[string]json.RawMessage{}, Rules: []retainedRule{{KeyID: other, Model: "m", Order: []string{"a", "hidden", "b"}, Disabled: []string{"hidden"}}}}
 	initial := sortSnapshotDigest(snapshot)
 	state := func() map[string]any {
-		return map[string]any{"revision": revision, "instance_id": "boot", "config_revision": baseRevision, "temporary_channel_restore": true, "temporary_channel_management": true, "channel_settings": true, "rules": snapshot.Rules, "temporary_channels": []any{}}
+		return map[string]any{"revision": revision, "instance_id": instance, "config_revision": baseRevision, "temporary_channel_restore": true, "temporary_channel_management": true, "channel_settings": true, "rules": snapshot.Rules, "temporary_channels": []any{}}
 	}
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -336,5 +337,18 @@ func TestChannelSortPrepareApplyUndoHTTP(t *testing.T) {
 	call(map[string]any{"action": "apply", "receipt": all["receipt"]}, 409)
 	if writes != 2 {
 		t.Fatal("stale preview wrote routes")
+	}
+	// Opening a persisted receipt after a gateway restart is an observation,
+	// not authorization to restore retained configuration to that new instance.
+	retained, err := store.retainedRecord(context.Background(), id)
+	if err != nil || retained.Encrypted == "" {
+		t.Fatal("missing retained configuration", err)
+	}
+	instance, revision = "new-boot", "new-boot:0"
+	snapshot.Rules = []retainedRule{}
+	status = call(map[string]any{"action": "status", "receipt": all["receipt"]}, 200)
+	afterRead, err := store.retainedRecord(context.Background(), id)
+	if status["status"] != "conflict" || writes != 2 || len(snapshot.Rules) != 0 || err != nil || retained != afterRead {
+		t.Fatal("receipt status mutated the gateway or retained intent", status, writes, err)
 	}
 }

@@ -116,6 +116,19 @@ export function ChannelSortDialog({
     controller.current = abort;
     setLoading(true);
     try {
+      const confirmed = await routing.refresh(abort.signal);
+      if (abort.signal.aborted) return;
+      if (!confirmed) {
+        setPreview({
+          ...next,
+          plan: {
+            sources: [],
+            labels: {},
+            errors: ["上次排序结果尚未确认，请核对排序记录后重试。"],
+          },
+        });
+        return;
+      }
       const plan = await prepareRouteSorting(
         rows,
         keyId,

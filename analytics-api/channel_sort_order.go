@@ -214,7 +214,14 @@ func (s *Service) channelSortOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer unlock()
-	state, err := s.reconcileControls(ctx, src)
+	var state map[string]any
+	if in.Action == "status" {
+		// Receipt recovery only observes the gateway; it must never restore
+		// retained configuration as a side effect of checking a sort receipt.
+		state, _, err = subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
+	} else {
+		state, err = s.reconcileControls(ctx, src)
+	}
 	if err != nil {
 		http.Error(w, err.Error(), 409)
 		return

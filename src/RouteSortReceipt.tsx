@@ -1,4 +1,4 @@
-import { Check, RotateCcw, X } from "lucide-react";
+import { Check, RefreshCw, RotateCcw, X } from "lucide-react";
 import type { RouteSorting } from "./routeSorting";
 
 export function RouteSortReceipt({ routing }: { routing: RouteSorting }) {
@@ -25,12 +25,26 @@ export function RouteSortReceipt({ routing }: { routing: RouteSorting }) {
                     ? "已恢复应用前顺序"
                     : source.status === "pending"
                       ? "结果待确认"
-                      : "未确认或配置已变化"}
+                      : source.status === "conflict"
+                        ? "旧排序记录已失效"
+                        : "排序结果尚未确认"}
                 {source.message && ` · ${source.message}`}
               </p>
             ))}
           </div>
           <div className="route-sort-receipt-actions">
+            <button
+              className="icon-button"
+              aria-label="核对排序记录"
+              title="核对排序记录"
+              disabled={routing.busy}
+              onClick={() => void routing.refresh()}
+            >
+              <RefreshCw
+                size={14}
+                className={routing.busy ? "spin" : undefined}
+              />
+            </button>
             <button
               className="button small ghost"
               disabled={routing.busy || !routing.pending}
