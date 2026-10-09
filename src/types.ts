@@ -58,6 +58,7 @@ export interface Channel {
   model: string;
   upstream_model: string;
   engine: string;
+  engine_mode?: string;
   position?: number;
   endpoint: string;
   stream: boolean | null;

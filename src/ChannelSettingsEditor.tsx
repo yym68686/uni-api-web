@@ -651,7 +651,7 @@ export function Editor({
       controlRequest<{ data: Channel[] }>(
         `/v1/sources/${encodeURIComponent(row.source_id!)}/proxy/v1/model-channels?endpoint=all&stream=all`,
       ),
-    enabled: tab === "模板与批量",
+    enabled: !isGlobal && (tab === "模板与批量" || tab === "基本与模型"),
     retry: false,
   });
   const [editingView, setEditingView] = useState<SettingsView>();
@@ -695,6 +695,7 @@ export function Editor({
         "channel-info",
         "channel-management",
         "channel-routes",
+        "settings-channel-catalog",
       ].map((name) => client.invalidateQueries({ queryKey: [name] })),
     ]);
   }
@@ -847,6 +848,18 @@ export function Editor({
         </button>
       </div>
     );
+  const savedEngine = catalog.data?.data.find(
+    (channel) => channel.provider === row.provider,
+  );
+  const autoEngineLabel = !equal(draft.base_url, view.effective.base_url)
+    ? "自动识别（地址已修改，保存后重新判断）"
+    : view.effective.engine != null
+      ? "自动识别（保存后由 uni-api 判断）"
+      : savedEngine?.engine_mode === "auto" && savedEngine.engine
+        ? `自动识别（实际：${savedEngine.engine}）`
+        : catalog.isPending
+          ? "自动识别（正在读取实际引擎…）"
+          : "自动识别（实际引擎未返回）";
   const groups = [
     ...new Set(view.schema.fields.map((f) => f.group)),
     "高级配置",
@@ -1171,7 +1184,7 @@ export function Editor({
                             )
                           }
                         >
-                          <option value="">{f.type === "engine" ? "自动识别（由 uni-api 按上游地址判断）" : "继承 / 未设置"}</option>
+                          <option value="">{f.type === "engine" ? autoEngineLabel : "继承 / 未设置"}</option>
                           {(f.type === "boolean"
                             ? ["true", "false"]
                             : f.type === "engine"

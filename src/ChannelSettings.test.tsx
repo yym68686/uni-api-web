@@ -17,12 +17,14 @@ let effective: typeof base,
   revision: string,
   writes: Record<string, unknown>[],
   reads: number;
+let catalog: Partial<Channel>[];
 beforeEach(() => {
   effective = structuredClone(base);
   effective.preferences.cooldown_period = 90;
   revision = "v1";
   writes = [];
   reads = 0;
+  catalog = [{ provider: "one", engine: "codex", engine_mode: "auto" }];
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string, init?: RequestInit) => {
@@ -35,10 +37,11 @@ beforeEach(() => {
             },
           }),
         );
+      if (url.includes("model-channels"))
+        return new Response(JSON.stringify({ data: catalog }));
       if (
         url.includes("channel-setting-templates") ||
-        url.endsWith("/operations") ||
-        url.includes("model-channels")
+        url.endsWith("/operations")
       )
         return new Response(JSON.stringify({ data: [] }));
       if (init?.method === "POST" || init?.method === "PATCH") {
@@ -70,8 +73,10 @@ beforeEach(() => {
           affected_keys: [{ key_id: "caller", models: ["model-a"] }],
           global_preferences: {},
           schema: {
+            engines: ["gpt", "codex", "claude", "gemini"],
             fields: [
               { path: "/base_url", type: "string", group: "基本与模型" },
+              { path: "/engine", type: "engine", group: "基本与模型" },
               { path: "/model", type: "models", group: "基本与模型" },
               { path: "/api", type: "keys", group: "密钥" },
               { path: "/only_request_types", type: "json", group: "请求规则" },
@@ -112,6 +117,23 @@ async function mount() {
   await screen.findByText("来源共享渠道");
   return user;
 }
+it("shows the gateway resolved engine for automatic settings without guessing from the URL", async () => {
+  catalog = [{ provider: "one", engine: "claude", engine_mode: "auto" }];
+  const user = await mount();
+  expect(await screen.findByRole("option", { name: "自动识别（实际：claude）" })).toBeVisible();
+  expect(screen.getByLabelText("引擎")).toHaveValue("");
+  await user.clear(screen.getByLabelText("上游地址"));
+  await user.type(screen.getByLabelText("上游地址"), "https://other.example/v1/responses");
+  expect(screen.getByRole("option", { name: "自动识别（地址已修改，保存后重新判断）" })).toBeVisible();
+  expect(screen.queryByRole("option", { name: "自动识别（实际：claude）" })).not.toBeInTheDocument();
+  expect(writes).toHaveLength(0);
+});
+it("does not mislabel an unknown or explicit runtime engine as automatic", async () => {
+  catalog = [{ provider: "one", engine: "codex" }];
+  await mount();
+  expect(await screen.findByRole("option", { name: "自动识别（实际引擎未返回）" })).toBeVisible();
+  expect(screen.queryByRole("option", { name: "自动识别（实际：codex）" })).not.toBeInTheDocument();
+});
 it("sends only changed fields, preserves zero, and refreshes the draft after applying", async () => {
   const user = await mount();
   await user.click(screen.getByRole("button", { name: "超时与冷却" }));
