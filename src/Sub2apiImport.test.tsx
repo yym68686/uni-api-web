@@ -118,6 +118,7 @@ it("uses one source/key selector and one table for native and imported routes, p
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string, init?: RequestInit) => {
+      if (input.endsWith("/import-status")) return Response.json({ state: "idle", job_kind: "", can_import: true });
       if (init?.method === "PATCH" || init?.method === "POST") {
         writes.push({ path: input, body: JSON.parse(String(init.body)) });
         return Response.json({});
@@ -310,6 +311,7 @@ it("recovers an expired site session in place without slow refetches or losing t
   let importAttempts = 0;
   let postFailureReads = 0;
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      if (input.endsWith("/import-status")) return Response.json({ state: "idle", job_kind: "", can_import: true });
     if (init?.method === "POST") {
       writes.push({ path: input, body: JSON.parse(String(init.body)) });
       if (input.endsWith("/accounts/account/login")) return Response.json({ authenticated: true, queued: false });
@@ -380,6 +382,7 @@ it("checks live group state without blocking source selection and disables stale
   let recovered = false;
   const writes: string[] = [];
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+      if (input.endsWith("/import-status")) return Response.json({ state: "idle", job_kind: "", can_import: true });
     if (init?.method === "POST") { writes.push(input); return Response.json({}); }
     if (input.endsWith("/groups/1/access")) {
       if (recovered) return Response.json({ available: true, status: "available" });
@@ -410,4 +413,98 @@ it("checks live group state without blocking source selection and disables stale
   expect(screen.getByRole("checkbox", { name: "gpt-6-sol" })).toBeChecked();
   expect(screen.getByLabelText("添加到 API key")).toHaveValue("key2");
   expect(writes).toHaveLength(0);
+});
+
+it("waits for the live account task and automatically restores add without losing the draft", async () => {
+  let running = true;
+  let statusReads = 0;
+  const writes: any[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+    if (input.endsWith("/import-status")) {
+      statusReads++;
+      return Response.json(running
+        ? { state: "running", job_kind: "sync", can_import: false, message: "账号正在同步检测，完成后可添加渠道。当前选择会保留。" }
+        : { state: "idle", job_kind: "", can_import: true });
+    }
+    if (init?.method === "POST") { writes.push(JSON.parse(String(init.body))); return Response.json({ message: "已添加" }); }
+    if (input.endsWith("/groups/1/access")) return Response.json({ available: true, status: "available" });
+    if (input.includes("channel-options")) return Response.json({
+      revision: "r1", supported: true, manageable: true,
+      keys: [{ key_id: "key2", position: 2, prefix: "masked-two" }], channels: [],
+    });
+    return Response.json({ data: [], unavailable_keys: [], unavailable_sources: [] });
+  }));
+  // The account prop is an old snapshot; submission must use live task state.
+  const models = ["gpt-6-sol", "gpt-5.5"].map(model => ({ model, state: "done", message: "", result: { model, availability: { status: "success", protocol: "responses" } } }));
+  mount({ ...target, active: true, models } as SubTarget);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: /新增接入/ }));
+  await screen.findByText(/账号正在同步检测/);
+  await user.selectOptions(screen.getByLabelText("添加到 uni-api 来源"), "primary");
+  await user.selectOptions(screen.getByLabelText("添加到 API key"), "key2");
+  await user.click(screen.getByRole("checkbox", { name: "gpt-5.5" }));
+  await user.click(screen.getByRole("button", { name: "添加重命名" }));
+  await user.selectOptions(screen.getByLabelText("重命名 1 上游模型"), "gpt-6-sol");
+  await user.type(screen.getByLabelText("重命名 1 对外模型名"), "public-alias");
+  expect(screen.getByRole("button", { name: "添加到渠道" })).toBeDisabled();
+  await user.click(screen.getByRole("button", { name: "添加到渠道" }));
+  expect(writes).toHaveLength(0);
+  running = false;
+  // No manual refresh and no auto-submit: the local status poll unlocks the form.
+  await waitFor(() => expect(screen.getByRole("button", { name: "添加到渠道" })).toBeEnabled(), { timeout: 7000 });
+  expect(statusReads).toBeGreaterThanOrEqual(2);
+  expect(screen.queryByText(/账号正在同步检测/)).not.toBeInTheDocument();
+  expect(screen.getByLabelText("添加到 API key")).toHaveValue("key2");
+  expect(screen.getByRole("checkbox", { name: "gpt-5.5" })).not.toBeChecked();
+  expect(screen.getByLabelText("重命名 1 对外模型名")).toHaveValue("public-alias");
+  expect(writes).toHaveLength(0);
+  await user.click(screen.getByRole("button", { name: "添加到渠道" }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0].model_mappings).toEqual({ "public-alias": "gpt-6-sol" });
+}, 12000);
+
+it("keeps addition blocked when account state cannot be read and permits an explicit retry", async () => {
+  let failed = true;
+  vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+    if (input.endsWith("/import-status")) return failed
+      ? new Response("暂时无法读取账号状态，请稍后重试", { status: 503 })
+      : Response.json({ state: "idle", job_kind: "", can_import: true });
+    if (input.includes("channel-options")) return Response.json({
+      revision: "r1", supported: true, manageable: true,
+      keys: [{ key_id: "key2", position: 2, prefix: "masked-two" }], channels: [],
+    });
+    return Response.json({ data: [], unavailable_keys: [], unavailable_sources: [] });
+  }));
+  const models = [{ model: "gpt-6-sol", state: "done", message: "", result: { model: "gpt-6-sol", availability: { status: "success", protocol: "responses" } } }];
+  mount({ ...target, models } as SubTarget);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: /新增接入/ }));
+  await user.selectOptions(screen.getByLabelText("添加到 uni-api 来源"), "primary");
+  await user.selectOptions(screen.getByLabelText("添加到 API key"), "key2");
+  expect(screen.getByRole("button", { name: "添加到渠道" })).toBeDisabled();
+  failed = false;
+  await user.click(await screen.findByRole("button", { name: "重新读取账号状态" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "添加到渠道" })).toBeEnabled());
+});
+
+it("uses the existing account summary when the new status endpoint has not rolled out yet", async () => {
+  const reads: { path: string; view?: string }[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+    reads.push({ path: input, view: (init?.headers as Record<string, string>)?.["X-Console-View"] });
+    if (input.endsWith("/import-status")) return new Response("404 page not found", { status: 404 });
+    if (input.endsWith("/accounts")) return Response.json({
+      format: "summary-v1", version: "v1", base_version: "", removed: [], order: ["account"],
+      data: [{ id: "account", value: { position: 0, account: { ...account, state: "running", job_kind: "sync" } } }],
+    });
+    return Response.json({ data: [], unavailable_keys: [], unavailable_sources: [] });
+  }));
+  mount();
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: /新增接入/ }));
+  await screen.findByText(/账号任务进行中，完成后可添加渠道/);
+  expect(screen.getByRole("button", { name: "添加到渠道" })).toBeDisabled();
+  expect(reads.filter(read => read.path.endsWith("/accounts"))).toEqual([
+    { path: expect.any(String), view: "accounts" },
+  ]);
+  expect(screen.queryByText(/暂时无法核对账号任务状态/)).not.toBeInTheDocument();
 });

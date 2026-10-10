@@ -144,6 +144,7 @@ it.each([false,true])("imports sub2api aliases independently of originals (keep 
   target.result=null;
   const writes:any[]=[];
   vi.stubGlobal("fetch",vi.fn(async(input:string,init?:RequestInit)=>{
+    if (input.endsWith("/import-status")) return Response.json({ state: "idle", job_kind: "", can_import: true });
     if(init?.method==="POST"){writes.push(JSON.parse(String(init.body)));return Response.json({message:"已添加"});}
     if(input.includes("channel-options"))return Response.json({revision:"r1",supported:true,keys:[{key_id:"k1",position:1,prefix:"masked"}],channels:[]});
     return Response.json({data:input.endsWith("/accounts")?data:input.endsWith("/sources")?[{id:"primary",name:"Fugue"}]:[],labels:{},unavailable_keys:[],unavailable_sources:[]});
@@ -340,6 +341,7 @@ it("opens the import dialog with the dashboard sources while a background refres
 it("loads sources before opening the dialog and offers retry when the initial request fails", async () => {
   let finishSources!: (response: Response) => void;
   const fetcher = vi.fn(async (input: string) => {
+    if (input.endsWith("/import-status")) return Response.json({ state: "idle", job_kind: "", can_import: true });
     if (input.endsWith("/v1/sources")) return new Promise<Response>(resolve => { finishSources = resolve; });
     return new Response(JSON.stringify({ data: input.endsWith("/accounts") ? fixtures().slice(0, 1) : [] }));
   });
@@ -1022,6 +1024,7 @@ it("preselects successful models and imports into the selected source key at the
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string, init?: RequestInit) => {
+    if (input.endsWith("/import-status")) return Response.json({ state: "idle", job_kind: "", can_import: true });
       const u = new URL(input);
       if (u.pathname.endsWith("/sub2api/channels")) {
         writes.push(JSON.parse(init?.body as string));
@@ -2272,6 +2275,7 @@ it("shows model-scoped Tool use and leaves failed models unchecked when importin
  ]};
  const writes:any[]=[];
  vi.stubGlobal('fetch',vi.fn(async(input:string,init?:RequestInit)=>{
+    if (input.endsWith("/import-status")) return Response.json({ state: "idle", job_kind: "", can_import: true });
   if(init?.method==='POST'){writes.push(JSON.parse(String(init.body)));return Response.json({message:'已添加'});}
   if(input.includes('channel-options'))return Response.json({revision:'r1',supported:true,keys:[{key_id:'k1',position:1,prefix:'masked'}],channels:[]});
   return Response.json({data:input.endsWith('/accounts')?data:input.endsWith('/sources')?[{id:'primary',name:'Fugue'}]:[],labels:{},unavailable_keys:[],unavailable_sources:[]});
@@ -2355,6 +2359,7 @@ it("shows terminal warnings in site checks and imports only the models the user 
  target.result=null;
  const writes:any[]=[];
  vi.stubGlobal("fetch",vi.fn(async(input:string,init?:RequestInit)=>{
+    if (input.endsWith("/import-status")) return Response.json({ state: "idle", job_kind: "", can_import: true });
   if(init?.method==="POST"){writes.push(JSON.parse(String(init.body)));return Response.json({message:"已添加"});}
   if(input.includes("channel-options"))return Response.json({revision:"r1",supported:true,keys:[{key_id:"k1",position:1,prefix:"masked"}],channels:[]});
   return Response.json({data:input.endsWith("/accounts")?data:input.endsWith("/sources")?[{id:"primary",name:"Fugue"}]:[],labels:{},unavailable_keys:[],unavailable_sources:[]});

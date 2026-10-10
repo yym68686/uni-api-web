@@ -38,6 +38,7 @@ func TestSubImportUsesBusinessKeyAndFencesModelsOwnerAndRevision(t *testing.T) {
 	created := 0
 	imports := 0
 	revision := "boot:1"
+	startSyncOnRead := false
 	var last map[string]any
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		success := func(data any) { writeJSON(w, 200, map[string]any{"code": 0, "data": data}) }
@@ -77,6 +78,12 @@ func TestSubImportUsesBusinessKeyAndFencesModelsOwnerAndRevision(t *testing.T) {
 		}
 		switch r.URL.Path {
 		case "/v1/channel-controls":
+			if startSyncOnRead {
+				startSyncOnRead = false
+				if _, err := store.db.Exec(`UPDATE console_sub_accounts SET state='running',job_kind='sync',job_id='racing-sync',lease_until=now()+interval '30 seconds' WHERE id=$1`, account); err != nil {
+					t.Error(err)
+				}
+			}
 			writeJSON(w, 200, map[string]any{"instance_id": "boot", "revision": revision, "temporary_channel_import": true, "temporary_channel_restore": true, "automatic_engine": true, "channel_settings": true, "temporary_channels": []any{}})
 		case "/v1/channel-settings/export":
 			writeJSON(w, 200, map[string]any{"revision": revision, "channel_settings": map[string]any{}, "temporary_definitions": map[string]any{}})
@@ -115,7 +122,7 @@ func TestSubImportUsesBusinessKeyAndFencesModelsOwnerAndRevision(t *testing.T) {
 		s.Handler().ServeHTTP(w, r)
 		return w
 	}
-	if w := request([]string{checkModel}, "boot:1", foreign); w.Code != 409 {
+	if w := request([]string{checkModel}, "boot:1", foreign); w.Code != 404 {
 		t.Fatal("foreign import allowed", w.Code)
 	}
 	if w := request([]string{"gpt-5.6-sol"}, "boot:1", session); w.Code != 400 {
@@ -124,7 +131,57 @@ func TestSubImportUsesBusinessKeyAndFencesModelsOwnerAndRevision(t *testing.T) {
 	if created != 0 || imports != 0 {
 		t.Fatal("rejected import changed upstream")
 	}
-	w := request([]string{checkModel}, "boot:1", session)
+	statusRequest := func(cookie string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", "/v1/sub2api/accounts/"+account+"/import-status", nil)
+		r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: cookie})
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		return w
+	}
+	if w := statusRequest(foreign); w.Code != 404 {
+		t.Fatal("foreign status exposed", w.Code)
+	}
+	for _, state := range []string{"queued", "running"} {
+		if _, err := store.db.Exec(`UPDATE console_sub_accounts SET state=$2,job_kind='sync',job_id='sync-job',lease_until=now()+interval '30 seconds' WHERE id=$1`, account, state); err != nil {
+			t.Fatal(err)
+		}
+		w := statusRequest(session)
+		var status subImportAccountState
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &status) != nil || status.CanImport || status.State != state || status.JobKind != "sync" || !strings.Contains(status.Message, "同步检测") {
+			t.Fatal("incorrect busy status", w.Code, w.Body.String())
+		}
+		if w.Header().Get("Cache-Control") != "no-store" {
+			t.Fatal("status may be cached")
+		}
+		w = request([]string{checkModel}, "boot:1", session)
+		if w.Code != 409 || !strings.Contains(w.Body.String(), "账号正在同步检测") || strings.Contains(w.Body.String(), "不存在") {
+			t.Fatal("incorrect busy rejection", w.Code, w.Body.String())
+		}
+		var afterState, afterJob string
+		if err := store.db.QueryRow(`SELECT state,job_id FROM console_sub_accounts WHERE id=$1`, account).Scan(&afterState, &afterJob); err != nil {
+			t.Fatal(err)
+		}
+		if afterState != state || afterJob != "sync-job" || created != 0 || imports != 0 {
+			t.Fatal("busy import changed task/key/route", afterState, afterJob, created, imports)
+		}
+	}
+	if _, err := store.db.Exec(`UPDATE console_sub_accounts SET state='idle',job_kind='',job_id='',lease_until=NULL WHERE id=$1`, account); err != nil {
+		t.Fatal(err)
+	}
+	w := statusRequest(session)
+	var status subImportAccountState
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &status) != nil || !status.CanImport || status.Message != "" {
+		t.Fatal("idle did not recover", w.Code, w.Body.String())
+	}
+	startSyncOnRead = true
+	w = request([]string{checkModel}, "boot:1", session)
+	if w.Code != 409 || !strings.Contains(w.Body.String(), "账号正在同步检测") || created != 0 || imports != 0 {
+		t.Fatal("concurrent sync not fenced", w.Code, w.Body.String(), created, imports)
+	}
+	if _, err := store.db.Exec(`UPDATE console_sub_accounts SET state='idle',job_kind='',job_id='',lease_until=NULL WHERE id=$1`, account); err != nil {
+		t.Fatal(err)
+	}
+	w = request([]string{checkModel}, "boot:1", session)
 	if w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}

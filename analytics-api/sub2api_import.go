@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -151,6 +152,53 @@ func (s *Service) subChannelOptions(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]any{"batch_revisions": true, "revision": state["revision"], "supported": state["temporary_channel_import"] == true, "manageable": state["temporary_channel_management"] == true, "keys": keys["data"], "channels": channels, "provider": subProviderName(r.URL.Query().Get("account_id"), int64Param(r.URL.Query().Get("group_id")), strings.TrimPrefix(r.URL.Query().Get("api_key_id"), src.ID+"::"))})
 }
+
+// Import owns the account job lease while it reconciles/creates a business key.
+// Report that prerequisite separately from upstream group availability, without
+// contacting the site or changing the running sync/check task.
+type subImportAccountState struct {
+	State     string `json:"state"`
+	JobKind   string `json:"job_kind"`
+	CanImport bool   `json:"can_import"`
+	Message   string `json:"message,omitempty"`
+}
+
+func (s *Service) subReadImportAccountState(ctx context.Context, account, owner string) (subImportAccountState, error) {
+	var state subImportAccountState
+	err := s.control.db.QueryRowContext(ctx, `SELECT state,job_kind FROM console_sub_accounts WHERE id=$1 AND owner=$2`, account, owner).Scan(&state.State, &state.JobKind)
+	if err != nil {
+		return state, err
+	}
+	state.CanImport = state.State != "running" && state.State != "queued"
+	if !state.CanImport {
+		task := map[string]string{"sync": "同步检测", "check": "模型检测", "quality": "降智检测", "compaction": "压缩检测", "tool_use": "工具调用检测", "import": "添加渠道"}[state.JobKind]
+		if task == "" {
+			task = "处理任务"
+		}
+		state.Message = "账号正在" + task + "，完成后可添加渠道。当前选择会保留。"
+	}
+	return state, nil
+}
+
+func subImportAccountError(w http.ResponseWriter, err error) {
+	if errors.Is(err, sql.ErrNoRows) {
+		http.Error(w, "账号不存在或无权访问", http.StatusNotFound)
+	} else {
+		http.Error(w, "暂时无法读取账号状态，请稍后重试", http.StatusServiceUnavailable)
+	}
+}
+
+func (s *Service) subImportAccountStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	owner, _ := s.controlUser(r)
+	state, err := s.subReadImportAccountState(r.Context(), r.PathValue("id"), owner)
+	if err != nil {
+		subImportAccountError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, state)
+}
+
 func (s *Service) subImportChannel(w http.ResponseWriter, r *http.Request) {
 	var in subImportInput
 	if !decodeConfiguration(w, r, &in) {
@@ -178,6 +226,15 @@ func (s *Service) subImportChannel(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
 	defer cancel()
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(50 * time.Second))
+	accountState, err := s.subReadImportAccountState(ctx, in.AccountID, owner)
+	if err != nil {
+		subImportAccountError(w, err)
+		return
+	}
+	if !accountState.CanImport {
+		http.Error(w, accountState.Message, http.StatusConflict)
+		return
+	}
 	src, err := s.control.source(ctx, in.SourceID)
 	if err != nil {
 		http.Error(w, "来源不存在", 404)
@@ -223,7 +280,21 @@ func (s *Service) subImportChannel(w http.ResponseWriter, r *http.Request) {
 	var synced int64
 	err = s.control.db.QueryRowContext(ctx, `UPDATE console_sub_accounts SET state='running',job_id=$3,job_kind='import',lease_until=now()+interval '90 seconds',message='' WHERE id=$1 AND owner=$2 AND state NOT IN ('running','queued') RETURNING base,encrypted_auth,synced_at`, in.AccountID, owner, job).Scan(&base, &auth, &synced)
 	if err != nil {
-		http.Error(w, "账号不存在或有任务进行中", 409)
+		if !errors.Is(err, sql.ErrNoRows) {
+			subImportAccountError(w, err)
+			return
+		}
+		// A job can start between the preflight read and this atomic claim.
+		current, readErr := s.subReadImportAccountState(ctx, in.AccountID, owner)
+		if readErr != nil {
+			subImportAccountError(w, readErr)
+			return
+		}
+		message := current.Message
+		if message == "" {
+			message = "账号任务状态已变化，请重试。当前选择会保留。"
+		}
+		http.Error(w, message, http.StatusConflict)
 		return
 	}
 	defer func() {

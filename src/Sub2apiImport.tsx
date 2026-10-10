@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Plus, Trash2, X } from "lucide-react";
-import { controlRequest } from "./api";
+import { ApiError, controlRequest } from "./api";
+import { readSummary } from "./summaryFeed";
 import { useChannelImportKeys } from "./channelImportKeys";
 import { useRouteKeyRequestStats } from "./keyRequestStats";
 import { ChannelImportKeyFeedback } from "./ChannelImportKeyFeedback";
@@ -302,6 +303,70 @@ export function Sub2apiImport({
     staleTime: 0,
     refetchOnWindowFocus: false,
   });
+  const importStatus = useQuery({
+    queryKey: ["sub-import-status", account.id],
+    queryFn: async ({ signal }) => {
+      try {
+        const status = await controlRequest<{
+          state: string;
+          job_kind: string;
+          can_import: boolean;
+          message?: string;
+        }>(
+          `/v1/sub2api/accounts/${encodeURIComponent(account.id)}/import-status`,
+          { signal },
+        );
+        if (typeof status.can_import !== "boolean")
+          throw new Error("账号状态读取失败");
+        return status;
+      } catch (error) {
+        if (!(error instanceof ApiError) || error.status !== 404) throw error;
+        // The frontend may roll out before the new backend. The existing
+        // headers-only summary is also local and carries the account job state.
+        const { summary, legacy } = await readSummary<
+          { account?: SubAccount; position: number },
+          { data: SubAccount[] }
+        >("/v1/sub2api/accounts", undefined, signal, "accounts");
+        const current = summary
+          ? summary.rows.find((row) => row.value.account?.id === account.id)
+              ?.value.account
+          : legacy?.data.find((row) => row.id === account.id);
+        if (!current || typeof current.state !== "string") throw error;
+        const canImport =
+          current.state !== "running" && current.state !== "queued";
+        return {
+          state: current.state,
+          job_kind: current.job_kind || "",
+          can_import: canImport,
+          message: canImport
+            ? ""
+            : "账号任务进行中，完成后可添加渠道。当前选择会保留。",
+        };
+      }
+    },
+    enabled: showForm && !editing && !busy,
+    retry: false,
+    staleTime: 0,
+    refetchInterval: 5000,
+  });
+  const importBlocked =
+    importStatus.data?.can_import !== true || importStatus.isError;
+  const accountWasBusy = useRef(false);
+  useEffect(() => {
+    if (!showForm || editing || busy || !importStatus.data) return;
+    if (!importStatus.data.can_import) {
+      accountWasBusy.current = true;
+    } else if (accountWasBusy.current) {
+      accountWasBusy.current = false;
+      setError((message) =>
+        /账号正在|账号任务状态已变化|账号不存在或有任务进行中/.test(message) ? "" : message,
+      );
+      // Refresh availability and destination revision after waiting, without
+      // replacing the user's models, aliases, destination or position.
+      for (const name of ["sub2api", "sub-import-options", "sub-group-access"])
+        void client.invalidateQueries({ queryKey: [name] });
+    }
+  }, [showForm, editing, busy, importStatus.data, client]);
   const groupAccess = useQuery({
     queryKey: ["sub-group-access", account.id, target.group_id],
     queryFn: ({ signal }) =>
@@ -507,7 +572,7 @@ export function Sub2apiImport({
   ) {
     if (
       busy ||
-      (action === "add" && groupUnavailable) ||
+      (action === "add" && (groupUnavailable || importBlocked)) ||
       (action !== "delete" &&
         (mapping.error ||
           invalidModels.length ||
@@ -574,7 +639,10 @@ export function Sub2apiImport({
       // take a minute when a source is slow; they must not keep recovery locked.
       // Site authentication fails before a destination write, so no route
       // refresh is needed in that case.
-      if (!siteLoginRequired(message)) void refresh();
+      if (action === "add" && /账号正在|账号任务状态已变化|账号不存在或有任务进行中/.test(message)) {
+        accountWasBusy.current = true;
+        void importStatus.refetch();
+      } else if (!siteLoginRequired(message)) void refresh();
       if (action === "add" && message.includes("分组"))
         void groupAccess.refetch();
     } finally {
@@ -948,6 +1016,27 @@ export function Sub2apiImport({
                 )}
               </div>
             )}
+            {showForm && !editing && importBlocked && (
+              <div
+                role="status"
+                aria-label="账号任务状态"
+                className="sub-import-note"
+              >
+                {importStatus.isError
+                  ? "暂时无法核对账号任务状态。"
+                  : importStatus.data?.message || "正在核对账号任务状态…"}
+                {importStatus.isError && (
+                  <button
+                    type="button"
+                    className="button small"
+                    disabled={importStatus.isFetching || busy}
+                    onClick={() => void importStatus.refetch()}
+                  >
+                    重新读取账号状态
+                  </button>
+                )}
+              </div>
+            )}
             {showForm && !editing && groupAccessMessage && (
               <div role="alert" className="error-banner">
                 {groupAccessMessage}
@@ -1277,7 +1366,7 @@ export function Sub2apiImport({
                     className="button primary"
                     disabled={
                       busy ||
-                      (!editing && groupUnavailable) ||
+                      (!editing && (groupUnavailable || importBlocked)) ||
                       !source ||
                       !key ||
                       !keyDirectory?.data?.keys.some((k) => k.key_id === key) ||

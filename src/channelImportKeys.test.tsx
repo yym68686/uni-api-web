@@ -72,6 +72,7 @@ it.each(["site", "native"])(
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: string, init?: RequestInit) => {
+      if (input.endsWith("/import-status")) return Response.json({ state: "idle", job_kind: "", can_import: true });
         const u = new URL(input);
         if (init?.method === "POST") {
           writes.push(JSON.parse(String(init.body)));
