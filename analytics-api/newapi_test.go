@@ -156,7 +156,7 @@ func TestNewAPIKeysUnlimitedStableGroupsAndInterruptedCreation(t *testing.T) {
 			newAPIOK(w, map[string]any{"default": map[string]any{"ratio": 0.25}, "vip name": map[string]any{"ratio": 2}, "auto": map[string]any{"ratio": "自动"}})
 		case r.URL.Path == "/api/user/self":
 			newAPIOK(w, map[string]any{"id": 7, "username": "fixture"})
-		case r.URL.Path == "/api/token/search":
+		case r.URL.Path == "/api/token/" && r.Method == "GET":
 			items := []newAPIToken{}
 			if remoteKey.ID > 0 {
 				items = append(items, remoteKey)
@@ -396,7 +396,10 @@ func TestNewAPISynchronizationReusesExistingDetectionQueue(t *testing.T) {
 				t.Error("missing group scope")
 			}
 			newAPIOK(w, []string{"gpt-6-sol", "extra-model"})
-		case "/api/token/search":
+		case "/api/token/":
+			if r.Method != "GET" {
+				t.Error("existing key must not be recreated")
+			}
 			newAPIOK(w, map[string]any{"items": []newAPIToken{key}, "total": 1})
 		default:
 			t.Error("unexpected mutation or sub2api call", r.Method, r.URL.Path)

@@ -148,27 +148,58 @@ func (s *Service) newAPINormalizeKey(ctx context.Context, account, base string, 
 	return out, nil
 }
 func (s *Service) newAPIKeys(ctx context.Context, account, base, search string, page int) ([]subRemoteKey, int, error) {
-	q := url.Values{"p": {strconv.Itoa(page)}, "page_size": {"100"}}
-	path := "/api/token/"
-	if search != "" {
-		path = "/api/token/search"
-		q.Set("keyword", search)
+	if page < 1 {
+		return nil, 0, errors.New("站点令牌页码无效")
 	}
-	var list struct {
-		Items []newAPIToken `json:"items"`
-		Total int           `json:"total"`
+	// This is an inventory reconciliation, not an interactive search. New API's
+	// search endpoint has a separate, low per-user limit and treats a keyword
+	// without '%' as an exact name. Listing metadata and matching locally avoids
+	// exhausting that limit during create/reconcile and correctly finds prefixes.
+	// Complete the upstream scan before paginating matches: a page containing
+	// only unrelated user keys must not imply that our dedicated key is absent.
+	matches := []newAPIToken{}
+	matched := map[int64]bool{}
+	progress := keyPageProgress{}
+	for upstreamPage := 1; ; upstreamPage++ {
+		q := url.Values{"p": {strconv.Itoa(upstreamPage)}, "page_size": {"100"}}
+		var list struct {
+			Items []newAPIToken `json:"items"`
+			Total int           `json:"total"`
+		}
+		if err := s.newAPICall(ctx, account, base, "GET", "/api/token/?"+q.Encode(), nil, &list); err != nil {
+			return nil, 0, err
+		}
+		if list.Items == nil || list.Total < 0 {
+			return nil, 0, errors.New("站点令牌分页数据无效")
+		}
+		identities := make([]subRemoteKey, len(list.Items))
+		for i, token := range list.Items {
+			identities[i].ID = token.ID
+		}
+		if err := progress.advance(identities); err != nil {
+			return nil, 0, err
+		}
+		for _, token := range list.Items {
+			if strings.HasPrefix(token.Name, search) && !matched[token.ID] {
+				matched[token.ID] = true
+				matches = append(matches, token)
+			}
+		}
+		if len(list.Items) == 0 || (list.Total > 0 && len(progress) >= list.Total) || (list.Total == 0 && len(list.Items) < 100) {
+			break
+		}
 	}
-	if err := s.newAPICall(ctx, account, base, "GET", path+"?"+q.Encode(), nil, &list); err != nil {
-		return nil, 0, err
+	total := len(matches)
+	if total == 0 || page > (total+99)/100 {
+		return []subRemoteKey{}, total, nil
 	}
-	if list.Items == nil || list.Total < 0 {
-		return nil, 0, errors.New("站点令牌分页数据无效")
-	}
-	out := make([]subRemoteKey, len(list.Items))
-	errs := make([]error, len(list.Items))
+	start := (page - 1) * 100
+	matches = matches[start:min(start+100, total)]
+	out := make([]subRemoteKey, len(matches))
+	errs := make([]error, len(matches))
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 4)
-	for i, token := range list.Items {
+	for i, token := range matches {
 		wg.Add(1)
 		go func(i int, key newAPIToken) {
 			defer wg.Done()
@@ -188,7 +219,7 @@ func (s *Service) newAPIKeys(ctx context.Context, account, base, search string, 
 			return nil, 0, e
 		}
 	}
-	return out, list.Total, nil
+	return out, total, nil
 }
 func (s *Service) newAPIEnsureKey(ctx context.Context, account, base, name string, group int64) (subRemoteKey, error) {
 	if len(name) > 50 || !(name == subKeyName(account, group) || name == "uni-console-route-"+account+"-"+strconv.FormatInt(group, 10)) {
