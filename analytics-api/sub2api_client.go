@@ -73,8 +73,10 @@ func newSubHTTP() *http.Client {
 var subHTTP = newSubHTTP()
 
 type subRemoteError struct {
-	Status int
-	Reason string
+	Status     int
+	Reason     string
+	Operation  string
+	RetryAfter time.Duration
 }
 
 const subSessionExpiredMessage = "站点保存的登录会话已失效，请重新登录站点后继续"
@@ -101,6 +103,9 @@ func (e *subRemoteError) Error() string {
 	case 403:
 		return "站点拒绝访问，请检查账号权限、验证要求或站点防护"
 	case 429:
+		if e.Operation != "" {
+			return e.Operation + "被站点限流，请稍后重试"
+		}
 		return "站点限流，请稍后重试"
 	default:
 		return fmt.Sprintf("站点接口返回 HTTP %d", e.Status)
@@ -170,7 +175,7 @@ func subJSON(ctx context.Context, client *http.Client, base, method, path, token
 				envelope.Reason = "SITE_SESSION_EXPIRED"
 			}
 		}
-		return &subRemoteError{resp.StatusCode, envelope.Reason}
+		return &subRemoteError{Status: resp.StatusCode, Reason: envelope.Reason}
 	}
 	var code int
 	if parseErr != nil || (len(envelope.Code) > 0 && json.Unmarshal(envelope.Code, &code) != nil) || code != 0 || len(envelope.Data) == 0 {

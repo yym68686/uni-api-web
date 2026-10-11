@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -115,6 +116,28 @@ func (s *Service) newAPINormalizeKey(ctx context.Context, account, base string, 
 		return subRemoteKey{}, err
 	}
 	secret := newAPIKeyValue(key.Key)
+	if reveal && secret == "" && (key.Name == subKeyName(account, group) || key.Name == "uni-console-route-"+account+"-"+strconv.FormatInt(group, 10)) {
+		// New API token secrets are immutable for a given token ID. Reuse only
+		// our exact account/group/ID/name binding, after reading current remote
+		// metadata. Revoked, expired and disabled states still come from above.
+		// This avoids spending the IP-wide critical-operation budget on every sync.
+		var saved string
+		query := `SELECT encrypted_key FROM console_sub_targets WHERE account_id=$1 AND group_id=$2 AND remote_key_id=$3`
+		if strings.HasPrefix(key.Name, "uni-console-route-") {
+			query = `SELECT encrypted_routing_key FROM console_sub_targets WHERE account_id=$1 AND group_id=$2 AND routing_key_id=$3`
+		}
+		err := s.control.db.QueryRowContext(ctx, query, account, group, key.ID).Scan(&saved)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return subRemoteKey{}, err
+		}
+		if saved != "" {
+			plain, err := s.control.decrypt(saved)
+			if err != nil {
+				return subRemoteKey{}, errors.New("已保存密钥无法解密，请重新同步核对")
+			}
+			secret = newAPIKeyValue(plain)
+		}
+	}
 	if reveal && secret == "" {
 		var data struct {
 			Key string `json:"key"`

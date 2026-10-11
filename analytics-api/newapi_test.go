@@ -22,6 +22,8 @@ import (
 func newAPITestService(t *testing.T) (*Service, string, string) {
 	t.Helper()
 	s, account, owner := subUsageTestService(t)
+	gap := time.Duration(0)
+	s.newAPILogGap = &gap // Synthetic endpoints have no external request budget.
 	raw, _ := json.Marshal(subAuth{Kind: "newapi", UserID: 7, Username: "fixture", Access: "expired-access", Cookies: map[string]string{"new_api_refresh": "refresh-fixture"}, QuotaPerUnit: 500000})
 	enc, _ := s.control.encrypt(string(raw))
 	if _, err := s.control.db.Exec(`UPDATE console_sub_accounts SET provider_kind='newapi',login_name='fixture',email='fixture',encrypted_auth=$2 WHERE id=$1`, account, enc); err != nil {

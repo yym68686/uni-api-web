@@ -322,6 +322,11 @@ func (s *Service) subScanSpend(parent context.Context, task subSpendTask) {
 		saveCtx, stop := context.WithTimeout(parent, 3*time.Second)
 		defer stop()
 		delay := min(300, 5*(1<<min(task.attempts, 6)))
+		if errors.As(err, &remote) && remote.Status == 429 && s.isNewAPI(ctx, task.account) {
+			// A rapid retry loop also consumes the shared management API budget.
+			// Preserve the page cursor and allow the upstream window to recover.
+			delay = max(delay, 180, int(math.Ceil(remote.RetryAfter.Seconds())))
+		}
 		_, _ = s.control.db.ExecContext(saveCtx, `UPDATE console_sub_account_spend_cache SET error=$2,attempts=attempts+1,next_attempt=now()+$3*interval '1 second' WHERE account_id=$1 AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND usage_lease_token=$4)`, task.account, message, delay, task.lease)
 		log.Printf("event=sub_account_spend_retry account_id=%s page=%d delay_seconds=%d cause=%s reason=%q", task.account, task.page, delay, subSpendErrorCode(err), message)
 	}

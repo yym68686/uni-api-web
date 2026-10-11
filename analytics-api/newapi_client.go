@@ -99,7 +99,7 @@ func newAPIJSON(ctx context.Context, base, method, path string, auth *subAuth, b
 	}
 	parsed := json.Unmarshal(raw, &envelope)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &subRemoteError{Status: resp.StatusCode, Reason: envelope.Code}
+		return &subRemoteError{Status: resp.StatusCode, Reason: envelope.Code, Operation: newAPIOperation(method, path), RetryAfter: newAPIRetryAfter(resp.Header.Get("Retry-After"), time.Now())}
 	}
 	if parsed != nil || envelope.Success == nil {
 		return errors.New("站点返回了不兼容的数据")
@@ -389,7 +389,7 @@ func (s *Service) newAPICall(ctx context.Context, account, base, method, path st
 	if err != nil {
 		return err
 	}
-	err = newAPIJSON(ctx, base, method, path, &auth, body, out)
+	err = s.newAPIReadCall(ctx, account, base, method, path, &auth, body, out)
 	var remote *subRemoteError
 	if !errors.As(err, &remote) || remote.Status != 401 {
 		return err
@@ -469,7 +469,7 @@ func (s *Service) newAPICall(ctx context.Context, account, base, method, path st
 			return errors.New("账号会话已更新，请重试")
 		}
 	}
-	return newAPIJSON(ctx, base, method, path, &next, body, out)
+	return s.newAPIReadCall(ctx, account, base, method, path, &next, body, out)
 }
 func (s *Service) isNewAPI(ctx context.Context, account string) bool {
 	var kind string

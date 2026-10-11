@@ -31,6 +31,8 @@ CREATE TABLE IF NOT EXISTS console_site_groups(
 CREATE TABLE IF NOT EXISTS console_site_key_creates(
  account_id TEXT NOT NULL REFERENCES console_sub_accounts(id) ON DELETE CASCADE,name TEXT NOT NULL,
  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),PRIMARY KEY(account_id,name));
+CREATE TABLE IF NOT EXISTS console_site_api_schedule(
+ site TEXT PRIMARY KEY,next_log_at TIMESTAMPTZ NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS console_site_receipt_ids(
  id BIGSERIAL PRIMARY KEY,account_id TEXT NOT NULL REFERENCES console_sub_accounts(id) ON DELETE CASCADE,
  request_id TEXT NOT NULL,event_type INT NOT NULL,key_id BIGINT NOT NULL,

@@ -100,7 +100,7 @@ func TestNewAPISyncTwentyGroupsWithoutSearchRateLimit(t *testing.T) {
 			t.Fatalf("pass %d: ready=%d failed=%d", pass, ready, failed)
 		}
 	}
-	if searches != 0 || creates != 13 || reveals != 40 {
+	if searches != 0 || creates != 13 || reveals != 20 {
 		t.Fatalf("searches=%d creates=%d reveals=%d", searches, creates, reveals)
 	}
 }
@@ -190,5 +190,38 @@ func TestNewAPIEnsureKeyDoesNotCreateAfterIncompleteInventory(t *testing.T) {
 				t.Fatalf("partial inventory claimed creation: count=%d err=%v", intents, err)
 			}
 		})
+	}
+}
+
+func TestNewAPICachedSecretStillRequiresExactLiveIdentityAndState(t *testing.T) {
+	s, account, _ := newAPITestService(t)
+	ctx := context.Background()
+	group, err := s.newAPIGroupID(ctx, account, "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, _ := s.control.encrypt("sk-cached-test-secret")
+	if _, err = s.control.db.Exec(`INSERT INTO console_sub_targets(account_id,group_id,name,platform,remote_key_id,encrypted_key) VALUES($1,$2,'default','openai',42,$3)`, account, group, secret); err != nil {
+		t.Fatal(err)
+	}
+	reveals := 0
+	withSpendUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reveals++
+		newAPIOK(w, map[string]string{"key": "fresh-secret"})
+	}))
+	token := newAPIToken{ID: 42, UserID: 7, Name: subKeyName(account, group), Group: "default", Key: "sk-****", Status: 2}
+	key, err := s.newAPINormalizeKey(ctx, account, "https://usage.example", token, true)
+	if err != nil || key.Status != "disabled" || key.Key != "sk-cached-test-secret" || reveals != 0 {
+		t.Fatal("cached secret changed current status", key.Status, reveals, err)
+	}
+	token.ID = 43
+	token.Status = 1
+	key, err = s.newAPINormalizeKey(ctx, account, "https://usage.example", token, true)
+	if err != nil || key.Key != "sk-fresh-secret" || reveals != 1 {
+		t.Fatal("recreated token reused old secret", reveals, err)
+	}
+	token.UserID = 8
+	if _, err = s.newAPINormalizeKey(ctx, account, "https://usage.example", token, true); err == nil || reveals != 1 {
+		t.Fatal("foreign token reused/revealed")
 	}
 }
