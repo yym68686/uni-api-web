@@ -194,6 +194,7 @@ func (s *Service) startBackground(ctx context.Context) <-chan struct{} {
 		start(s.controlRecoveryLoop)
 		start(s.subWorkerLoop)
 		start(s.configuredCheckLoop)
+		start(s.fingerprintLoop)
 		start(s.subUsageLoop)
 		start(s.subSpendLoop)
 		start(s.subBindingLoop)

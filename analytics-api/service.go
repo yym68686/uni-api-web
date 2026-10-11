@@ -94,6 +94,7 @@ func (s *Service) Handler() http.Handler {
 	mux.Handle("/v1/automations", control)
 	mux.Handle("/v1/automations/", control)
 	mux.Handle("/v1/channel-sites", control)
+	mux.Handle("/v1/model-fingerprints", control)
 	mux.Handle("/v1/channel-management", control)
 	mux.Handle("/v1/channel-management/", control)
 	mux.Handle("/v1/channel-spend", control)

@@ -553,6 +553,10 @@ func (s *Service) subStop(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "账号不存在", 404)
 		return
 	}
+	if _, err = tx.ExecContext(r.Context(), `UPDATE console_model_fingerprints SET state='interrupted',message='检测已停止',deadline=NULL WHERE account_id=$1 AND state IN ('queued','running')`, id); err != nil {
+		http.Error(w, "停止检测失败", 503)
+		return
+	}
 	_, err = tx.ExecContext(r.Context(), `WITH stopped AS (UPDATE console_sub_targets SET state='interrupted',message='检测已停止，已有结果保留' WHERE account_id=$1 AND state IN ('queued','running') RETURNING group_id) UPDATE console_sub_models SET state='interrupted',message='检测已停止' WHERE account_id=$1 AND state IN ('queued','running')`, id)
 	if err == nil {
 		_, err = tx.ExecContext(r.Context(), `UPDATE console_sub_targets SET compaction_state='interrupted' WHERE account_id=$1 AND compaction_state IN ('queued','running')`, id)
@@ -1197,6 +1201,26 @@ func (s *Service) subTestTargets(ctx context.Context, id, base, job string, qual
 				if e != nil {
 					errs <- errors.New("检测结果保存失败")
 					continue
+				}
+				if !qualityOnly && fingerprintModel(t.model) && result.Availability.Status == "success" {
+					// Enqueue only while this account job is still current. Stop
+					// shares the account lock and also cancels fingerprint jobs.
+					tx, e := s.control.db.BeginTx(ctx, nil)
+					if e == nil {
+						var current bool
+						e = tx.QueryRowContext(ctx, `SELECT job_id=$2 FROM console_sub_accounts WHERE id=$1 FOR UPDATE`, id, job).Scan(&current)
+						if e == nil && current {
+							e = enqueueFingerprint(ctx, tx, fingerprintTarget{Account: id, Group: t.id, Model: t.model})
+						}
+						if e == nil {
+							e = tx.Commit()
+						} else {
+							_ = tx.Rollback()
+						}
+					}
+					if e != nil {
+						errs <- errors.New("模型指纹入队失败，请单独重新检测")
+					}
 				}
 				// Preserve the legacy Astra projection for older clients during rollout.
 				if t.model == checkModel {

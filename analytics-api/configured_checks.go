@@ -376,6 +376,11 @@ func (s *Service) runConfiguredCheck(ctx context.Context, c *configuredCheck, ta
 				return errors.New("渠道降智结果保存失败")
 			}
 		}
+		if c.Kind == "model" && !qualityOnly && fingerprintModel(c.Model) && out.Availability.Status == "success" {
+			if err := enqueueFingerprint(ctx, s.control.db, fingerprintTarget{Source: c.Source, Provider: c.Provider, Model: c.Model}); err != nil {
+				return errors.New("模型指纹入队失败，请单独重新检测")
+			}
+		}
 		return nil
 	}
 	probeFn := subProbeCompaction

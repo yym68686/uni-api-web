@@ -14,6 +14,7 @@ export const subFilterDefaults = {
   platform: "",
   joined: "",
   modelMatch: "",
+  fingerprint: "",
 };
 export type SubFilters = typeof subFilterDefaults;
 const cache = new Map<string, SubFilters>();
@@ -30,6 +31,7 @@ function validate(raw: unknown): SubFilters {
   return {
     joined: field("joined", ["", "joined", "unjoined"]),
     groupStatus: field("groupStatus", ["available", "all", "unavailable"]) || subFilterDefaults.groupStatus,
+    fingerprint: field("fingerprint", ["", "match", "mismatch", "insufficient", "error", "queued", "running", "interrupted", "untested", "not_applicable"]),
     modelMatch: field("modelMatch", ["", "match", "mismatch", "missing", "invalid", "unavailable", "legacy", "untested"]),
     platform: field("platform"),
     search: field("search"),

@@ -103,6 +103,10 @@ func newControlStore(dsn, master string) (*controlStore, error) {
 		db.Close()
 		return nil, err
 	}
+	if err = execControlSchema(ctx, db, modelFingerprintSchema); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err = execControlSchema(ctx, db, automationSchema); err != nil {
 		db.Close()
 		return nil, err
@@ -322,6 +326,9 @@ func (s *Service) controlHandler() http.Handler {
 	mux.HandleFunc("POST /v1/sources/{id}/channel-checks", s.checkChannel)
 	mux.HandleFunc("GET /v1/channel-sites", s.channelSites)
 	mux.HandleFunc("GET /v1/channel-management", s.channelManagement)
+	mux.HandleFunc("GET /v1/model-fingerprints", s.modelFingerprints)
+	mux.HandleFunc("POST /v1/model-fingerprints", s.queueModelFingerprints)
+	mux.HandleFunc("DELETE /v1/model-fingerprints", s.queueModelFingerprints)
 	mux.HandleFunc("GET /v1/channel-management/checks", s.configuredChecks)
 	mux.HandleFunc("POST /v1/channel-management/checks", s.queueConfiguredChecks)
 	mux.HandleFunc("POST /v1/channel-management", s.configuredImport)

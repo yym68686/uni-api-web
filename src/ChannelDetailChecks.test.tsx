@@ -1,3 +1,4 @@
+import * as Tooltip from "@radix-ui/react-tooltip";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -20,7 +21,7 @@ function mount(channel = row) {
     client,
     ...render(
       <QueryClientProvider client={client}>
-        <ChannelDetailChecks row={channel} />
+        <Tooltip.Provider><ChannelDetailChecks row={channel} /></Tooltip.Provider>
       </QueryClientProvider>,
     ),
   };
@@ -198,7 +199,7 @@ it("does not let Astra quality work disable its independent availability check",
         new QueryClient({ defaultOptions: { queries: { retry: false } } })
       }
     >
-      <ChannelDetailChecks row={astra} />
+      <Tooltip.Provider><ChannelDetailChecks row={astra} /></Tooltip.Provider>
     </QueryClientProvider>,
   );
   await waitFor(() =>

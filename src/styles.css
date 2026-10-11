@@ -3096,3 +3096,12 @@ nav > button.active > svg {
 .probe-curl-action small { color: var(--muted); line-height: 1.5; }
 .probe-curl-action [role="alert"] { color: var(--danger); }
 .sub-check-details-table table .probe-curl-action { display: flex; margin: 8px 0 0; }
+
+.fingerprint-cell { display: grid; gap: 12px; min-width: 108px; }
+.fingerprint-panel { border-top: 1px solid var(--border); padding: 20px 0; }
+.fingerprint-panel h3, .fingerprint-heading { display: flex; align-items: center; gap: 10px; }
+.fingerprint-panel h3 { font-size: 14px; }
+.fingerprint-detail { padding: 12px 0; }
+.fingerprint-heading { flex-wrap: wrap; justify-content: space-between; }
+.fingerprint-detail details { margin-top: 12px; font-size: 12px; }
+.fingerprint-detail li { margin: 6px 0; }

@@ -1,3 +1,4 @@
+import { useModelFingerprints, rowFingerprints, fingerprintTargets, fingerprintLabels, fingerprintStatus, FingerprintCell, FingerprintPanel, fingerprintNote } from "./ModelFingerprints";
 import { isCapabilityCheckModel, capabilityCheckScope } from "./sub2apiModels";
 import { CopyProbeCurl } from "./CopyProbeCurl";
 import { TableLoading, DetailLoading } from "./PageLoading";
@@ -609,6 +610,7 @@ function ManagementChannelDrawer({
             <span>{target.channel || target.platform}</span>
             {target.group_id > 0 && <span>· 分组 #{target.group_id}</span>}
           </Dialog.Description>
+          <FingerprintPanel targets={fingerprintTargets(row, selected ? [selected.model] : undefined)} revisions={configured ? Object.fromEntries(channelMembers(configured).map(m => [JSON.stringify([m.source_id,m.provider]),m.probe_fingerprint || ""])) : undefined}/>
           <div className="detail-channel-actions">
             <span className={`check-status ${target.state === "error" ? "fail" : "pass"}`}>
               {target.state === "error" ? <X size={15} /> : <Check size={15} />}
@@ -743,6 +745,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
     platform,
     joined,
     modelMatch,
+    fingerprint,
   } = filters;
   useEffect(() => saveSubFilters(user, filters), [user, filters]);
   const setSearch = (search: string) => setFilters((v) => ({ ...v, search }));
@@ -761,6 +764,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   const imports = useSubImports();
   const management = useChannelManagement();
   const configuredChecks = useConfiguredChecks();
+  const fingerprints = useModelFingerprints();
   const routeSources = query.data && management.data
     ? [...new Set([...(sources.data?.data || []).map(s=>s.id), ...management.data.data.map(c=>c.source_id)])]
     : [];
@@ -842,7 +846,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
     ),
   ].sort();
   const rows = candidateRows.filter(
-    (row) => withinRate(row) && (!platform || row.target.platform === platform) &&
+    (row) => (!fingerprint || (fingerprint === "not_applicable" ? rowFingerprints(row,fingerprints.index,model).length === 0 : rowFingerprints(row,fingerprints.index,model).some(e => fingerprintStatus(e.record) === fingerprint))) && withinRate(row) && (!platform || row.target.platform === platform) &&
       (!joined || managementJoinState(row,imports.data,optimizationRoutes) === joined),
   );
   if (sort)
@@ -993,6 +997,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
             <button
               className="button small"
               aria-label="一键同步并检测"
+              title={`可用的目标模型同时检测模型指纹。${fingerprintNote}`}
               aria-busy={action === "sync-all"}
               disabled={
                 !syncableAccounts.length ||
@@ -1252,7 +1257,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                 className="button primary small"
                 aria-label={`${model ? "检测所选模型" : allModelsSelected ? "检测全部模型" : `检测已选 ${detectionModels.length} 个模型`} · ${eligible.length} 个渠道`}
                 disabled={batchDisabled("check")}
-                title={!modelsToCheck.length ? "请在检测模型设置中选择模型" : `检测 ${eligible.length} 个渠道，${modelsToCheck.length} 个模型`}
+                title={!modelsToCheck.length ? "请在检测模型设置中选择模型" : `检测 ${eligible.length} 个渠道，${modelsToCheck.length} 个模型；可用的 Astra / 6.1-sol 同时检测模型指纹，每模型 3 次请求`}
                 onClick={() => void check(eligible)}
               >
                 <ScanLine size={15} />
@@ -1436,6 +1441,12 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
             </select><ChevronDown size={13}/>
           </label>
           <label className="select-field">
+            <select aria-label="模型指纹筛选" value={fingerprint} onChange={e => {setFilters(v => ({...v,fingerprint:e.target.value}));setPage(0);}}>
+              <option value="">全部模型指纹</option>
+              {Object.entries(fingerprintLabels).map(([value,label])=><option key={value} value={value}>{label}</option>)}
+            </select><ChevronDown size={13}/>
+          </label>
+          <label className="select-field">
             <select aria-label="是否支持压缩筛选" value={compaction} onChange={e => {setFilters(v => ({...v, compaction: e.target.value})); setPage(0);}}>
               <option value="">全部压缩能力</option>
               {Object.entries(compactionLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -1514,6 +1525,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                       </Tip>
                     </th>
                     <th><Tip text="按站点请求账单的倍率前输入／输出单价与价格设置比较；单位为美元／百万 token。缺少账单或 token 样本时不判为正常。">单价异常 <CircleHelp size={12} /></Tip></th>
+                    <th><Tip text={fingerprintNote}>模型指纹 <CircleHelp size={12}/></Tip></th>
                     <th>Astra 降智</th>
                     <th>远程压缩</th>
                     <th><Tip text={toolUseDescription}>Tool use <CircleHelp size={12} /></Tip></th>
@@ -1601,6 +1613,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                           )}
                         </td>
                         <td>{selected ? <PriceStatus check={selected} prices={prices.data?.data} /> : <GroupPriceStatus checks={checks} prices={prices.data?.data} />}</td>
+                        <td><FingerprintCell entries={rowFingerprints(managementRow,fingerprints.index,model)}/></td>
                         <td>
                           <div className="quality-status-stack"><Verdict result={groupQualityResult(t)} history={t.history} /><QualityProbability history={t.history} checkedAt={groupQualityResult(t)?.checked_at} /></div>
                         </td>
@@ -1643,7 +1656,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                           <button
                             className="button small"
                             aria-label={`检测 ${account.name} ${t.name}`}
-                            title={checkBusy(account, t, "check", configured) ? "检测正在排队或执行，请稍候" : model ? `检测 ${model}` : `检测已勾选的 ${modelsToCheck.length} 个模型`}
+                            title={checkBusy(account, t, "check", configured) ? "检测正在排队或执行，请稍候" : model ? `检测 ${model}；可用的 Astra / 6.1-sol 同时检测模型指纹，每模型 3 次请求` : `检测已勾选的 ${modelsToCheck.length} 个模型，包含可用的 Astra / 6.1-sol 模型指纹`}
                             disabled={!canCheck(account, t, "check", configured)}
                             aria-busy={checkBusy(account, t, "check", configured)}
                             onClick={() =>
@@ -1717,6 +1730,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
           </>
         )}
       </section>
+      {fingerprints.isError && <p className="error-banner" role="alert">模型指纹读取失败，筛选结果可能不完整。<button className="button small" onClick={() => void fingerprints.refetch()}>重试</button></p>}
       {importing && (
         <Sub2apiImport
           sources={sources}
