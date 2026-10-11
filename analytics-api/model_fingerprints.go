@@ -84,9 +84,13 @@ func (s *Service) modelFingerprints(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var f fingerprintRecord
 		var base, key string
-		if err = rows.Scan(&f.Source, &f.Provider, &f.Account, &f.Group, &f.Model, &f.State, &f.Message, &f.Revision, &f.Result, &base, &key); err != nil {
+		// Queued, running and unsuccessful checks legitimately have SQL NULL
+		// results. database/sql supports NULL for []byte, but not *json.RawMessage.
+		var result []byte
+		if err = rows.Scan(&f.Source, &f.Provider, &f.Account, &f.Group, &f.Model, &f.State, &f.Message, &f.Revision, &result, &base, &key); err != nil {
 			break
 		}
+		f.Result = json.RawMessage(result)
 		// A rotated site credential must not inherit an old identity result.
 		if f.Account != "" && f.State == "done" && f.Revision != tokenHash(base+"\n"+key) {
 			continue

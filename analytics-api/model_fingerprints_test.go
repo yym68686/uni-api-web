@@ -26,6 +26,59 @@ func fingerprintRequest(t *testing.T, s *Service, owner, method string, targets 
 	s.Handler().ServeHTTP(w, req)
 	return w
 }
+
+func TestModelFingerprintListIncludesUnfinishedAndFailedJobs(t *testing.T) {
+	s, a, src := bindingFixture(t, "https://site.example")
+	ctx := context.Background()
+	// These states legitimately have SQL NULL results. A single unfinished job
+	// must not make the entire list, including completed results, unreadable.
+	states := []string{"queued", "running", "error", "interrupted", "done"}
+	for _, state := range states {
+		target := fingerprintTarget{Source: src.ID, Provider: state, Model: "gpt-6-astra"}
+		if err := enqueueFingerprint(ctx, s.control.db, target); err != nil {
+			t.Fatal(err)
+		}
+		var result any
+		if state == "done" {
+			result = `{"status":"match","probability":1}`
+		}
+		if _, err := s.control.db.Exec(`UPDATE console_model_fingerprints SET state=$3,result=$4,deadline=now()+interval '30 seconds' WHERE scope=$1 AND model=$2`, target.scope(), target.Model, state, result); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w := fingerprintRequest(t, s, a.Owner, "GET", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("mixed fingerprint list: HTTP %d: %s", w.Code, w.Body.String())
+	}
+	var out struct {
+		Data []fingerprintRecord `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, record := range out.Data {
+		if record.Source != src.ID {
+			continue
+		}
+		seen[record.State] = true
+		if record.State == "done" {
+			var result struct {
+				Status      string  `json:"status"`
+				Probability float64 `json:"probability"`
+			}
+			if err := json.Unmarshal(record.Result, &result); err != nil || result.Status != "match" || result.Probability != 1 {
+				t.Fatalf("completed result missing: %s", record.Result)
+			}
+		} else if string(record.Result) != "null" {
+			t.Fatalf("%s must return result:null, got %s", record.State, record.Result)
+		}
+	}
+	if len(seen) != len(states) {
+		t.Fatalf("missing states: %v", seen)
+	}
+}
+
 func TestModelFingerprintQueueScopesLeasesCancelAndExpiry(t *testing.T) {
 	s, a, src := bindingFixture(t, "https://site.example")
 	key, _ := s.control.encrypt("test-secret")
@@ -253,6 +306,9 @@ func TestModelFingerprintAutomaticBatchOnlySupportedAvailableModels(t *testing.T
 	s.control.db.QueryRow(`SELECT count(*) FROM console_model_fingerprints WHERE account_id=$1 AND state='queued'`, a.ID).Scan(&n)
 	if n != 2 {
 		t.Fatal("batch should queue exactly two supported fingerprints", n)
+	}
+	if w := fingerprintRequest(t, s, a.Owner, "GET", nil); w.Code != http.StatusOK {
+		t.Fatalf("batch-queued fingerprints unreadable: HTTP %d: %s", w.Code, w.Body.String())
 	}
 	// Standalone quality detection must never enqueue a new identity probe.
 	s.control.db.Exec(`UPDATE console_model_fingerprints SET state='done' WHERE account_id=$1`, a.ID)
