@@ -17,6 +17,48 @@ import {
 
 const events = optimizationEvents.map((e) => e.id);
 
+it("migrates only proven legacy defaults and can combine upgrade with a compatible addition", () => {
+  const s = optimizationFixture();
+  s.imports.data[0].engine = "gpt";
+  s.routes.s.data[0].engine = "gpt";
+  s.routes.s.data[0].engine_origin = "legacy_default";
+  s.routes.s.legacy_engine_migration = true;
+  const plan = buildOptimizationPlan(s, events);
+  const migration = plan.changes.find((c) => c.action === "migrate")!;
+  const added = plan.changes.find((c) => c.action === "add")!;
+  expect(migration).toBeDefined();
+  expect(added.blockedReason).toBeUndefined();
+  expect(added.requiresLegacyMigration).toBe(true);
+  expect(() => optimizationRequests([added], s.routes)).toThrow("同时勾选");
+  expect(
+    optimizationRequests(plan.changes, s.routes).get("s")!.targets[0],
+  ).toMatchObject({
+    migrate_legacy_engine: true,
+    models: { old: "old", new: "new" },
+  });
+  expect(
+    optimizationRequests([migration], s.routes).get("s")!.targets[0],
+  ).toMatchObject({ migrate_legacy_engine: true, models: { old: "old" } });
+  expect(buildOptimizationPlan(s, ["add"]).changes[0].blockedReason).toContain(
+    "协议冲突",
+  );
+  for (const origin of ["unknown", "user_override"] as const) {
+    s.routes.s.data[0].engine_origin = origin;
+    expect(
+      buildOptimizationPlan(s, events).changes.some(
+        (c) => c.action === "migrate",
+      ),
+    ).toBe(false);
+  }
+  s.routes.s.data[0].engine_origin = "legacy_default";
+  s.routes.s.legacy_engine_migration = false;
+  expect(
+    buildOptimizationPlan(s, events).changes.some(
+      (c) => c.action === "migrate",
+    ),
+  ).toBe(false);
+});
+
 it("blocks protocol conflicts per binding before batch selection and preserves compatible changes", () => {
   const s = optimizationFixture();
   s.imports.data.push({

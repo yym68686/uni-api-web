@@ -31,6 +31,7 @@ import type { ModelPrice } from "./types";
 
 export const optimizationEvents = [
   { id: "add", label: "新增可用模型" },
+  { id: "legacy", label: "升级旧版默认协议" },
   { id: "availability", label: "取消检测失败的模型" },
   { id: "tool", label: "取消不支持 Tool use 的模型" },
   { id: "price", label: "取消单价异常的模型" },
@@ -64,18 +65,21 @@ export interface OptimizationBinding {
   engine?: string;
   engineMode?: string;
   protocol?: string;
+  engineOrigin?: string;
+  legacyEngineEligible?: boolean;
 }
 export interface OptimizationChange {
   id: string;
   binding: OptimizationBinding;
   model: string;
   upstream: string;
-  action: "add" | "remove";
+  action: "add" | "remove" | "migrate";
   reasons: string[];
   priceDetails?: string[];
   checkedAt: number;
   detectedProtocols?: string[];
   blockedReason?: string;
+  requiresLegacyMigration?: boolean;
 }
 export interface OptimizationPlan {
   changes: OptimizationChange[];
@@ -465,6 +469,15 @@ export function buildOptimizationPlan(
         routeRows.find((r) => r.engine_mode)?.engine_mode ||
         (binding.installed || binding.native)?.engine_mode;
       binding.protocol = protocolForEngine(binding.engine);
+      const origins = [
+        ...new Set(routeRows.map((r) => r.engine_origin || "unknown")),
+      ];
+      binding.engineOrigin = origins.length === 1 ? origins[0] : "unknown";
+      binding.legacyEngineEligible =
+        !!binding.installed &&
+        routes.legacy_engine_migration === true &&
+        binding.engine === "gpt" &&
+        binding.engineOrigin === "legacy_default";
       if (
         binding.installed &&
         (Object.keys(binding.current).length !==
@@ -481,6 +494,19 @@ export function buildOptimizationPlan(
         continue;
       }
       const groups = boundGroups(binding.installed || binding.native);
+      const migrate = binding.legacyEngineEligible && events.includes("legacy");
+      if (migrate)
+        changes.push({
+          id: JSON.stringify([binding.id, "legacy-engine", "migrate"]),
+          binding,
+          model: "",
+          upstream: "",
+          action: "migrate",
+          checkedAt: 0,
+          reasons: [
+            "删除旧版自动写入的 gpt，引擎改由现有 Responses 地址识别；已有模型、映射和请求顺序保留",
+          ],
+        });
       const names = new Set(Object.values(binding.current));
       for (const g of groups)
         for (const c of modelChecks(
@@ -605,12 +631,15 @@ export function buildOptimizationPlan(
             reasons: ["检测可用，未发现单价、模型匹配或能力异常"],
             checkedAt,
             detectedProtocols,
+            requiresLegacyMigration: !!migrate,
             blockedReason: binding.installed
               ? !binding.protocol
                 ? "当前渠道协议未确认，请刷新或检查渠道配置"
                 : !detectedProtocols.length
                   ? "检测未记录上游协议，请先重新检测该模型"
-                  : detectedProtocols.some((p) => p !== binding.protocol)
+                  : detectedProtocols.some(
+                        (p) => p !== (migrate ? "responses" : binding.protocol),
+                      )
                     ? `协议冲突：当前 ${channelProtocolLabel(binding.protocol)}，检测 ${detectedProtocols.map(channelProtocolLabel).join(" / ")}；请在添加到渠道中按协议拆分`
                     : undefined
               : undefined,
@@ -635,15 +664,26 @@ export function optimizationRequests(
     );
   const bindings = new Map<
     string,
-    { binding: OptimizationBinding; models: Record<string, string> }
+    {
+      binding: OptimizationBinding;
+      models: Record<string, string>;
+      migrate: boolean;
+    }
   >();
+  const migrations = new Set(
+    changes.filter((c) => c.action === "migrate").map((c) => c.binding.id),
+  );
+  for (const c of changes)
+    if (c.requiresLegacyMigration && !migrations.has(c.binding.id))
+      throw Error(`${c.binding.name}：请同时勾选旧版默认协议升级`);
   for (const c of changes) {
     const item = bindings.get(c.binding.id) || {
       binding: c.binding,
       models: { ...c.binding.current },
+      migrate: migrations.has(c.binding.id),
     };
     if (c.action === "add") item.models[c.model] = c.upstream;
-    else delete item.models[c.model];
+    else if (c.action === "remove") delete item.models[c.model];
     bindings.set(c.binding.id, item);
   }
   const orders = new Map<string, string[]>();
@@ -686,10 +726,11 @@ export function optimizationRequests(
         current: Record<string, string>;
         models: Record<string, string>;
         positions: Record<string, number>;
+        migrate_legacy_engine?: boolean;
       }[];
     }
   >();
-  for (const { binding: b, models } of bindings.values()) {
+  for (const { binding: b, models, migrate } of bindings.values()) {
     const request = requests.get(b.source) || {
       revision: b.revision,
       part: "optimize" as const,
@@ -704,6 +745,9 @@ export function optimizationRequests(
         ? { account_id: b.installed.account_id, group_id: b.installed.group_id }
         : { origin_provider: b.native!.provider }),
       current: b.current,
+      ...(migrate && Object.keys(models).length
+        ? { migrate_legacy_engine: true }
+        : {}),
       models,
       positions: Object.fromEntries(
         Object.keys(models).map((model) => [

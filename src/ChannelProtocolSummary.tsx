@@ -7,13 +7,16 @@ import { channelMembers } from "./channelManagement";
 import type { ManagementRow } from "./channelManagement";
 import { boundGroups } from "./sub2apiImports";
 import type { SubImports } from "./sub2apiImports";
+import type { Routes } from "./channelRouteData";
 
 export function ChannelProtocolSummary({
   row,
   imports,
+  routes,
 }: {
   row: ManagementRow;
   imports?: SubImports;
+  routes?: Record<string, Routes>;
 }) {
   const channels = row.configured
     ? channelMembers(row.configured)
@@ -25,7 +28,20 @@ export function ChannelProtocolSummary({
         ),
       );
   const descriptions = [
-    ...new Set(channels.map((c) => channelEngineLabel(c) || "实际引擎未确认")),
+    ...new Set(
+      channels.flatMap((c) => {
+        const found = routes?.[c.source_id]?.data.filter(
+          (r) =>
+            r.provider === c.provider &&
+            (!c.api_key_id || r.api_key_id === c.api_key_id),
+        );
+        return found?.length
+          ? found.map(
+              (r) => channelEngineLabel({ ...c, ...r }) || "实际引擎未确认",
+            )
+          : [channelEngineLabel(c) || "实际引擎未确认"];
+      }),
+    ),
   ];
   const detected = [
     ...new Set(

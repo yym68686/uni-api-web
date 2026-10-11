@@ -12,8 +12,22 @@ it("distinguishes automatic configuration from effective and explicit engines", 
     "自动识别（实际：claude）",
   );
   expect(channelEngineLabel({ engine: "gpt", engine_mode: "explicit" })).toBe(
-    "手动指定：gpt",
+    "显式配置：gpt（来源未确认）",
   );
+  expect(
+    channelEngineLabel({
+      engine: "gpt",
+      engine_mode: "explicit",
+      engine_origin: "legacy_default",
+    }),
+  ).toBe("旧版默认：gpt");
+  expect(
+    channelEngineLabel({
+      engine: "gpt",
+      engine_mode: "explicit",
+      engine_origin: "user_override",
+    }),
+  ).toBe("人工覆盖：gpt");
   expect(channelEngineLabel({ engine: "codex" })).toBe(
     "实际引擎：codex（配置模式未知）",
   );

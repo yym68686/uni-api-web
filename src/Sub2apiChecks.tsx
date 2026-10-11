@@ -1576,7 +1576,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                           <small className="check-source">
                             {t.key_id ? `key #${t.key_id}` : configured ? "配置密钥" : "尚未创建"}
                           </small>
-                          <ChannelProtocolSummary row={managementRow} imports={imports.data}/>
+                          <ChannelProtocolSummary row={managementRow} imports={imports.data} routes={optimizationRoutes}/>
                         </td>
                         <td
                           className="mono"

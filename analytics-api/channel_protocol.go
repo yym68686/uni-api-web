@@ -92,6 +92,11 @@ func (s *Service) validateBatchProtocols(ctx context.Context, in channelBatchInp
 			continue
 		}
 		protocol := catalogChannelProtocol(catalogs[t.Key], t.Provider)
+		if t.MigrateLegacyEngine {
+			// prepareLegacyEngineMigrations has already proved the legacy origin
+			// and removed gpt from the unchanged /v1/responses document.
+			protocol = "responses"
+		}
 		if protocol == "" {
 			for _, spec := range channelProtocols {
 				if spec.Engine == documents[t.Key+"\n"+t.Provider]["engine"] {

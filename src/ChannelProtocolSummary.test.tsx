@@ -8,7 +8,7 @@ it("distinguishes actual configured engine from the model probe protocol in the 
   s.imports.data[0].engine = "gpt";
   s.imports.data[0].engine_mode = "explicit";
   render(<ChannelProtocolSummary row={s.rows[0]} imports={s.imports} />);
-  expect(screen.getByText("手动指定：gpt")).toBeInTheDocument();
+  expect(screen.getByText("显式配置：gpt（来源未确认）")).toBeInTheDocument();
   expect(
     screen.getByText("检测：Responses / Codex · codex"),
   ).toBeInTheDocument();

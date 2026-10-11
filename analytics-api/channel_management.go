@@ -257,6 +257,7 @@ func (s *Service) channelManagement(w http.ResponseWriter, r *http.Request) {
 }
 
 type channelRoute struct {
+	EngineOrigin   string `json:"engine_origin,omitempty"`
 	Engine         string `json:"engine,omitempty"`
 	EngineMode     string `json:"engine_mode,omitempty"`
 	OriginProvider string `json:"origin_provider,omitempty"`
@@ -388,10 +389,23 @@ func (s *Service) channelRoutes(w http.ResponseWriter, r *http.Request) {
 	endState, _, endErr := subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
 	revision, _ := state["revision"].(string)
 	consistent := endErr == nil && revision != "" && endState["revision"] == revision
+	// Classification is optional display metadata. Unavailable evidence never
+	// invents a migration candidate or makes the existing route list disappear.
+	if consistent {
+		owner, _ := s.controlUser(r)
+		if snapshot, _, e := s.importSnapshot(ctx, src, state, revision); e == nil {
+			if origins, e := s.snapshotEngineOrigins(ctx, src, snapshot, owner); e == nil {
+				for i := range data {
+					data[i].EngineOrigin = origins[data[i].Provider]
+				}
+			}
+		}
+	}
 	writeJSON(w, 200, map[string]any{
 		"data": data, "unavailable_keys": unavailable,
 		"revision": revision, "snapshot_consistent": consistent,
 		"manageable":      state["temporary_channel_management"] == true,
 		"batch_revisions": true, "atomic_batch": true, "optimize_batch": true, "checked_at": time.Now().UnixMilli(),
+		"legacy_engine_migration": state["automatic_engine"] == true,
 	})
 }

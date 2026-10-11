@@ -41,10 +41,15 @@ export function automaticChannelDocument(document: Record<string, unknown>) {
 export function channelEngineLabel(channel?: {
   engine?: string;
   engine_mode?: string;
+  engine_origin?: string;
 }) {
   if (channel?.engine_mode === "auto")
     return channel.engine ? `自动识别（实际：${channel.engine}）` : "自动识别";
+  if (channel?.engine_origin === "legacy_default")
+    return `旧版默认：${channel.engine || "gpt"}`;
+  if (channel?.engine_origin === "user_override")
+    return `人工覆盖：${channel.engine || "未确认"}`;
   if (channel?.engine_mode === "explicit")
-    return channel.engine ? `手动指定：${channel.engine}` : "手动指定";
+    return `显式配置：${channel.engine || "未确认"}（来源未确认）`;
   return channel?.engine ? `实际引擎：${channel.engine}（配置模式未知）` : "";
 }

@@ -12,14 +12,15 @@ import (
 )
 
 type channelBatchTarget struct {
-	Key       string            `json:"api_key_id"`
-	Provider  string            `json:"provider"`
-	Origin    string            `json:"origin_provider"`
-	Account   string            `json:"account_id"`
-	Group     int64             `json:"group_id"`
-	Current   map[string]string `json:"current"`
-	Models    map[string]string `json:"models"`
-	Positions map[string]int    `json:"positions"`
+	MigrateLegacyEngine bool              `json:"migrate_legacy_engine,omitempty"`
+	Key                 string            `json:"api_key_id"`
+	Provider            string            `json:"provider"`
+	Origin              string            `json:"origin_provider"`
+	Account             string            `json:"account_id"`
+	Group               int64             `json:"group_id"`
+	Current             map[string]string `json:"current"`
+	Models              map[string]string `json:"models"`
+	Positions           map[string]int    `json:"positions"`
 }
 type channelBatchInput struct {
 	Revision        string               `json:"revision"`
@@ -229,6 +230,10 @@ func (s *Service) applyChannelBatch(w http.ResponseWriter, r *http.Request) {
 			neededByScope[scope][model] = model
 		}
 	}
+	if err := s.prepareLegacyEngineMigrations(ctx, src, snapshot, state, owner, in, catalogs, documents); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	if err := s.validateBatchProtocols(ctx, in, catalogs, documents); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -303,7 +308,7 @@ func buildBatchSnapshot(snapshot *retainedSnapshot, in channelBatchInput, catalo
 		if in.Part == "positions" && !reflect.DeepEqual(actual, t.Models) {
 			return false, errors.New("调整位置不能修改模型")
 		}
-		same := !in.removes(t) && reflect.DeepEqual(actual, t.Models)
+		same := !t.MigrateLegacyEngine && !in.removes(t) && reflect.DeepEqual(actual, t.Models)
 		for m, pos := range t.Positions {
 			same = same && positions[m] == pos
 		}

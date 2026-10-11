@@ -47,6 +47,27 @@ export function ChannelOptimization({
     return [...result.values()];
   }, [plan]);
   const eligible = plan.changes.filter((c) => !c.blockedReason);
+  function toggleChange(id: string, checked: boolean) {
+    const change = plan.changes.find((c) => c.id === id);
+    if (!change || change.blockedReason) return;
+    setSelected((old) => {
+      const next = new Set(old);
+      if (checked) {
+        next.add(id);
+        if (change.requiresLegacyMigration)
+          for (const c of eligible)
+            if (c.binding.id === change.binding.id && c.action === "migrate")
+              next.add(c.id);
+      } else {
+        next.delete(id);
+        if (change.action === "migrate")
+          for (const c of eligible)
+            if (c.binding.id === change.binding.id && c.requiresLegacyMigration)
+              next.delete(c.id);
+      }
+      return next;
+    });
+  }
   function open() {
     setInput(structuredClone(snapshot()));
     setSelected(new Set());
@@ -211,6 +232,8 @@ export function ChannelOptimization({
                   {groups.length} 个接入 ·{" "}
                   {eligible.filter((c) => c.action === "add").length} 项新增 ·{" "}
                   {eligible.filter((c) => c.action === "remove").length} 项取消
+                  {!!eligible.filter((c) => c.action === "migrate").length &&
+                    ` · ${eligible.filter((c) => c.action === "migrate").length} 项协议升级`}
                   {plan.changes.length > eligible.length &&
                     ` · ${plan.changes.length - eligible.length} 项需处理`}
                 </span>
@@ -229,7 +252,7 @@ export function ChannelOptimization({
                 for (const c of changes)
                   if (selected.has(c.id)) {
                     if (c.action === "add") kept.add(c.model);
-                    else kept.delete(c.model);
+                    else if (c.action === "remove") kept.delete(c.model);
                   }
                 return (
                   <section className="optimization-binding" key={b.id}>
@@ -268,6 +291,7 @@ export function ChannelOptimization({
                         {channelEngineLabel({
                           engine: b.engine,
                           engine_mode: b.engineMode,
+                          engine_origin: b.engineOrigin,
                         }) || "未取得实际引擎"}
                       </span>
                       <small>渠道标识：{b.provider}</small>
@@ -279,38 +303,41 @@ export function ChannelOptimization({
                       >
                         <input
                           type="checkbox"
-                          aria-label={`${c.action === "add" ? "新增" : "取消"} ${c.model} · ${b.sourceName} Key ${b.keyPosition} ${b.name}`}
+                          aria-label={`${c.action === "migrate" ? "升级旧版默认协议" : `${c.action === "add" ? "新增" : "取消"} ${c.model}`} · ${b.sourceName} Key ${b.keyPosition} ${b.name}`}
                           checked={selected.has(c.id)}
                           disabled={busy || finished || !!c.blockedReason}
-                          onChange={(e) =>
-                            setSelected((old) => {
-                              const next = new Set(old);
-                              if (e.target.checked) next.add(c.id);
-                              else next.delete(c.id);
-                              return next;
-                            })
-                          }
+                          onChange={(e) => toggleChange(c.id, e.target.checked)}
                         />
                         <span
                           className={
-                            c.action === "add" ? "positive" : "negative"
+                            c.action !== "remove" ? "positive" : "negative"
                           }
                         >
-                          {c.action === "add" ? "新增勾选" : "取消勾选"}
+                          {c.action === "migrate"
+                            ? "协议升级"
+                            : c.action === "add"
+                              ? "新增勾选"
+                              : "取消勾选"}
                         </span>
                         <span>
-                          <strong>{c.model}</strong>
+                          <strong>
+                            {c.action === "migrate"
+                              ? "旧版默认 gpt → 自动识别 codex"
+                              : c.model}
+                          </strong>
                           {c.model !== c.upstream && (
                             <small>原模型：{c.upstream}</small>
                           )}
-                          <small>
-                            检测协议：
-                            {c.detectedProtocols?.length
-                              ? c.detectedProtocols
-                                  .map(channelProtocolLabel)
-                                  .join(" / ")
-                              : "未记录"}
-                          </small>
+                          {c.action !== "migrate" && (
+                            <small>
+                              检测协议：
+                              {c.detectedProtocols?.length
+                                ? c.detectedProtocols
+                                    .map(channelProtocolLabel)
+                                    .join(" / ")
+                                : "未记录"}
+                            </small>
+                          )}
                         </span>
                         <span>
                           {c.reasons.join("；")}

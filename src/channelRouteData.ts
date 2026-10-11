@@ -3,6 +3,7 @@ import { controlRequest } from "./api";
 import { channelMembers } from "./channelManagement";
 import type { ManagedChannel } from "./channelManagement";
 export interface ChannelRoute {
+  engine_origin?: "legacy_default" | "user_override" | "unknown";
   engine?: string;
   engine_mode?: string;
   provider: string;
@@ -23,6 +24,7 @@ export interface Routes {
   batch_revisions?: boolean;
   atomic_batch?: boolean;
   optimize_batch?: boolean;
+  legacy_engine_migration?: boolean;
   checked_at?: number;
 }
 export const routeOptions = (source: string) => ({

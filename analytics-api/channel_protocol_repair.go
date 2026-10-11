@@ -30,7 +30,10 @@ func protocolRepairCustomized(snapshot retainedSnapshot, provider string) bool {
 		Set    map[string]any `json:"set"`
 		Remove []string       `json:"remove"`
 	}
-	_ = json.Unmarshal(snapshot.Settings[provider], &settings)
+	raw := snapshot.Settings[provider]
+	if len(raw) > 0 && json.Unmarshal(raw, &settings) != nil {
+		return true
+	}
 	for path := range settings.Set {
 		if path == "/engine" || path == "/base_url" {
 			return true
@@ -46,6 +49,10 @@ func protocolRepairCustomized(snapshot retainedSnapshot, provider string) bool {
 
 func (s *Service) protocolRepairPlan(ctx context.Context, src controlSource, snapshot retainedSnapshot, owner string, selected []string) (retainedSnapshot, []protocolRepairChange, []map[string]string, error) {
 	refs, err := s.control.subChannelRefs(ctx, owner)
+	if err != nil {
+		return snapshot, nil, nil, err
+	}
+	origins, err := s.snapshotEngineOrigins(ctx, src, snapshot, owner)
 	if err != nil {
 		return snapshot, nil, nil, err
 	}
@@ -73,8 +80,11 @@ func (s *Service) protocolRepairPlan(ctx context.Context, src controlSource, sna
 		skip := func(reason string) {
 			skipped = append(skipped, map[string]string{"provider": old.Provider, "reason": reason})
 		}
-		if protocolRepairCustomized(snapshot, old.Provider) {
+		if origins[old.Provider] == engineOriginUser {
 			skip("引擎或地址已有人工覆盖，保留原设置")
+			continue
+		}
+		if origins[old.Provider] != engineOriginLegacy {
 			continue
 		}
 		document, _, err := s.importProviderDocument(ctx, src, snapshot, old.Provider, "")

@@ -8,6 +8,47 @@ import {
   modelCheck,
 } from "./channelOptimization.test-data";
 
+it("shows legacy retirement and couples a model addition to its selected protocol upgrade", async () => {
+  const snapshot = optimizationFixture();
+  snapshot.imports.data[0].engine = "gpt";
+  snapshot.routes.s.data[0].engine = "gpt";
+  snapshot.routes.s.data[0].engine_mode = "explicit";
+  snapshot.routes.s.data[0].engine_origin = "legacy_default";
+  snapshot.routes.s.legacy_engine_migration = true;
+  const fetch = vi.fn(async (_url: string, _init?: RequestInit) =>
+    Response.json({ revision: "r2" }),
+  );
+  vi.stubGlobal("fetch", fetch);
+  const user = userEvent.setup();
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <ChannelOptimization snapshot={() => snapshot} />
+    </QueryClientProvider>,
+  );
+  await user.click(screen.getByRole("button", { name: "优化渠道模型" }));
+  expect(screen.getByText("旧版默认 gpt → 自动识别 codex")).toBeInTheDocument();
+  expect(screen.getByText("旧版默认：gpt")).toBeInTheDocument();
+  const add = screen.getByRole("checkbox", {
+    name: "新增 new · Fugue Key 1 Site-0.1",
+  });
+  const migrate = screen.getByRole("checkbox", {
+    name: "升级旧版默认协议 · Fugue Key 1 Site-0.1",
+  });
+  await user.click(add);
+  expect(migrate).toBeChecked();
+  await user.click(migrate);
+  expect(add).not.toBeChecked();
+  await user.click(add);
+  await user.click(screen.getByRole("button", { name: "一键应用优化" }));
+  await screen.findByText("已应用");
+  expect(
+    JSON.parse(fetch.mock.calls[0][1]!.body as string).targets[0],
+  ).toMatchObject({
+    migrate_legacy_engine: true,
+    models: { old: "old", new: "new" },
+  });
+});
+
 it("shows current and detected protocols per channel and all-selection excludes incompatible additions", async () => {
   const snapshot = optimizationFixture();
   snapshot.imports.data.push({
@@ -42,7 +83,9 @@ it("shows current and detected protocols per channel and all-selection excludes 
   expect(
     within(group).getByText("检测协议：Responses / Codex · codex"),
   ).toBeInTheDocument();
-  expect(within(group).getByText("手动指定：claude")).toBeInTheDocument();
+  expect(
+    within(group).getByText("显式配置：claude（来源未确认）"),
+  ).toBeInTheDocument();
   await user.click(screen.getByRole("checkbox", { name: "选择全部优化变更" }));
   expect(blocked).not.toBeChecked();
   expect(screen.getByText("已选 1 项变更")).toBeInTheDocument();
