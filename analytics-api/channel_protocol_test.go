@@ -1,10 +1,52 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 )
+
+func TestBatchProtocolValidationIdentifiesEveryConflictAndLeavesUnchangedModelsAlone(t *testing.T) {
+	s, a, _ := bindingFixture(t, "https://site.example")
+	ctx := context.Background()
+	if _, err := s.control.db.Exec(`INSERT INTO console_sub_targets(account_id,group_id,name,platform,active) VALUES($1,1,'group','openai',true)`, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	result := subResult{Model: "new-model", Availability: subProbe{Status: "success", Protocol: "responses"}}
+	if _, err := s.control.db.Exec(`INSERT INTO console_sub_models(account_id,group_id,model,state,result) VALUES($1,1,'new-model','done',$2)`, a.ID, mustJSON(result)); err != nil {
+		t.Fatal(err)
+	}
+	in := channelBatchInput{Part: "optimize"}
+	catalogs := map[string][]batchCatalogRow{"key": {}}
+	for provider, engine := range map[string]string{"compatible": "codex", "wrong-chat": "gpt", "wrong-messages": "claude"} {
+		in.Targets = append(in.Targets, channelBatchTarget{Key: "key", Provider: provider, Account: a.ID, Group: 1, Current: map[string]string{"old": "old"}, Models: map[string]string{"old": "old", "new-model": "new-model"}})
+		catalogs["key"] = append(catalogs["key"], batchCatalogRow{Provider: provider, Model: "old", Engine: engine})
+	}
+	err := s.validateBatchProtocols(ctx, in, catalogs, nil)
+	if err == nil {
+		t.Fatal("mixed protocols accepted")
+	}
+	for _, text := range []string{"wrong-chat · new-model：当前 Chat Completions，检测 Responses / Codex", "wrong-messages · new-model：当前 Claude Messages，检测 Responses / Codex", "未提交任何变更"} {
+		if !strings.Contains(err.Error(), text) {
+			t.Fatal(err)
+		}
+	}
+	if strings.Contains(err.Error(), "compatible") {
+		t.Fatal("compatible channel incorrectly accused", err)
+	}
+	for i := range in.Targets {
+		in.Targets[i].Models = in.Targets[i].Current
+	}
+	if err = s.validateBatchProtocols(ctx, in, catalogs, nil); err != nil {
+		t.Fatal("unchanged models rejected", err)
+	}
+	in.Targets[0].Models = map[string]string{}
+	if err = s.validateBatchProtocols(ctx, in, catalogs, nil); err != nil {
+		t.Fatal("removal rejected", err)
+	}
+}
 
 func TestChannelProtocolPartitionAndSplitPreservesRules(t *testing.T) {
 	models := map[string]string{"gpt-6-luna": "gpt-6-luna", "gpt-alias": "claude-fable-5"}

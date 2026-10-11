@@ -16,6 +16,69 @@ import {
 } from "./channelOptimization.test-data";
 
 const events = optimizationEvents.map((e) => e.id);
+
+it("blocks protocol conflicts per binding before batch selection and preserves compatible changes", () => {
+  const s = optimizationFixture();
+  s.imports.data.push({
+    ...s.imports.data[0],
+    provider: "messages-copy",
+    name: "Messages Site",
+    engine: "claude",
+  });
+  s.routes.s.data.push({
+    ...s.routes.s.data[0],
+    provider: "messages-copy",
+    engine: "claude",
+    engine_mode: "auto",
+  });
+  const plan = buildOptimizationPlan(s, ["add"]);
+  expect(plan.changes).toHaveLength(2);
+  const blocked = plan.changes.find(
+    (c) => c.binding.provider === "messages-copy",
+  )!;
+  expect(blocked.binding.protocol).toBe("messages");
+  expect(blocked.detectedProtocols).toEqual(["responses"]);
+  expect(blocked.blockedReason).toContain("Claude Messages");
+  expect(blocked.blockedReason).toContain("Responses / Codex");
+  expect(() => optimizationRequests(plan.changes, s.routes)).toThrow(
+    "Messages Site",
+  );
+  expect(
+    optimizationRequests(
+      plan.changes.filter((c) => !c.blockedReason),
+      s.routes,
+    )
+      .get("s")!
+      .targets.map((t) => t.provider),
+  ).toEqual(["p"]);
+});
+
+it("uses the effective caller-key engine instead of provider suffix or stale import metadata", () => {
+  const s = optimizationFixture();
+  s.imports.data[0].provider = "p--responses";
+  s.routes.s.data[0].provider = "p--responses";
+  s.routes.s.data[0].engine = "gpt";
+  const change = buildOptimizationPlan(s, ["add"]).changes[0];
+  expect(change.binding.engine).toBe("gpt");
+  expect(change.blockedReason).toContain("Chat Completions");
+  s.accounts[0].targets[0].models = [modelCheck("old", "error")];
+  expect(
+    buildOptimizationPlan(s, ["availability"]).changes[0].blockedReason,
+  ).toBeUndefined();
+});
+
+it("keeps unknown protocol additions visible but unselectable", () => {
+  const s = optimizationFixture();
+  delete s.imports.data[0].engine;
+  expect(buildOptimizationPlan(s, ["add"]).changes[0].blockedReason).toContain(
+    "当前渠道协议未确认",
+  );
+  s.imports.data[0].engine = "codex";
+  delete s.accounts[0].targets[0].models![1].result!.availability.protocol;
+  expect(buildOptimizationPlan(s, ["add"]).changes[0].blockedReason).toContain(
+    "检测未记录",
+  );
+});
 function setCurrent(s: OptimizationSnapshot, names: string[]) {
   s.imports.data[0].models = names;
   s.routes.s.data = names.map((model, i) => ({
@@ -113,7 +176,11 @@ it("does not treat unknown, running or tool errors as proof of unsupported capab
 it("limits quality and compaction removals to the actually tested models and combines model filters with AND", () => {
   const s = optimizationFixture(),
     t = s.accounts[0].targets[0];
-  t.models = [modelCheck("gpt-6-astra"), modelCheck("gpt-old"), modelCheck("gpt-new")];
+  t.models = [
+    modelCheck("gpt-6-astra"),
+    modelCheck("gpt-old"),
+    modelCheck("gpt-new"),
+  ];
   setCurrent(s, ["gpt-6-astra", "gpt-old", "gpt-new"]);
   t.quality_check = {
     source_id: "s",
@@ -393,11 +460,31 @@ it.each(["failed", "missing", "running"])(
   },
 );
 
-it('does not remove Claude or Gemini models due to historical Codex capability failures',()=>{
- const s=optimizationFixture(),t=s.accounts[0].targets[0];
- const models=['claude-opus-4-8','gemini-3.1-pro','codex-auto-review'];
- t.models=models.map(model=>modelCheck(model));setCurrent(s,models);
- t.tool_use={status:'unsupported',checked_at:20,attempts:[],models:models.map(model=>({model,state:'done',result:{status:'unsupported',checked_at:20,attempts:[]}}))};
- t.compaction={model:models[0],status:'unsupported',checked_at:20,attempts:[]};
- expect(buildOptimizationPlan(s,['tool','compaction']).changes.map(c=>c.model)).toEqual(['codex-auto-review']);
+it("does not remove Claude or Gemini models due to historical Codex capability failures", () => {
+  const s = optimizationFixture(),
+    t = s.accounts[0].targets[0];
+  const models = ["claude-opus-4-8", "gemini-3.1-pro", "codex-auto-review"];
+  t.models = models.map((model) => modelCheck(model));
+  setCurrent(s, models);
+  t.tool_use = {
+    status: "unsupported",
+    checked_at: 20,
+    attempts: [],
+    models: models.map((model) => ({
+      model,
+      state: "done",
+      result: { status: "unsupported", checked_at: 20, attempts: [] },
+    })),
+  };
+  t.compaction = {
+    model: models[0],
+    status: "unsupported",
+    checked_at: 20,
+    attempts: [],
+  };
+  expect(
+    buildOptimizationPlan(s, ["tool", "compaction"]).changes.map(
+      (c) => c.model,
+    ),
+  ).toEqual(["codex-auto-review"]);
 });

@@ -3,6 +3,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { useQueryClient } from "@tanstack/react-query";
 import { Sparkles, X } from "lucide-react";
 import { Spinner } from "./ui";
+import { channelEngineLabel, channelProtocolLabel } from "./channelProtocol";
 import {
   applyOptimization,
   buildOptimizationPlan,
@@ -45,6 +46,7 @@ export function ChannelOptimization({
       result.set(c.binding.id, [...(result.get(c.binding.id) || []), c]);
     return [...result.values()];
   }, [plan]);
+  const eligible = plan.changes.filter((c) => !c.blockedReason);
   function open() {
     setInput(structuredClone(snapshot()));
     setSelected(new Set());
@@ -59,7 +61,7 @@ export function ChannelOptimization({
     setError("");
     try {
       await applyOptimization(
-        plan.changes.filter((c) => selected.has(c.id)),
+        eligible.filter((c) => selected.has(c.id)),
         input.routes,
         (source, state, message) =>
           setProgress((old) => ({ ...old, [source]: { state, message } })),
@@ -190,26 +192,27 @@ export function ChannelOptimization({
                   <input
                     type="checkbox"
                     aria-label="选择全部优化变更"
-                    disabled={busy || finished || !plan.changes.length}
+                    disabled={busy || finished || !eligible.length}
                     checked={
-                      !!plan.changes.length &&
-                      selected.size === plan.changes.length
+                      !!eligible.length &&
+                      eligible.every((c) => selected.has(c.id))
                     }
                     onChange={(e) =>
                       setSelected(
                         e.target.checked
-                          ? new Set(plan.changes.map((c) => c.id))
+                          ? new Set(eligible.map((c) => c.id))
                           : new Set(),
                       )
                     }
                   />
-                  全选
+                  全选可应用项
                 </label>
                 <span>
                   {groups.length} 个接入 ·{" "}
-                  {plan.changes.filter((c) => c.action === "add").length} 项新增
-                  · {plan.changes.filter((c) => c.action === "remove").length}{" "}
-                  项取消
+                  {eligible.filter((c) => c.action === "add").length} 项新增 ·{" "}
+                  {eligible.filter((c) => c.action === "remove").length} 项取消
+                  {plan.changes.length > eligible.length &&
+                    ` · ${plan.changes.length - eligible.length} 项需处理`}
                 </span>
               </div>
               {!plan.changes.length && (
@@ -221,6 +224,7 @@ export function ChannelOptimization({
               {groups.map((changes) => {
                 const b = changes[0].binding,
                   state = progress[b.source];
+                const selectable = changes.filter((c) => !c.blockedReason);
                 const kept = new Set(Object.keys(b.current));
                 for (const c of changes)
                   if (selected.has(c.id)) {
@@ -234,12 +238,15 @@ export function ChannelOptimization({
                         <input
                           type="checkbox"
                           aria-label={`选择 ${b.sourceName} Key ${b.keyPosition} ${b.name} 的优化变更`}
-                          disabled={busy || finished}
-                          checked={changes.every((c) => selected.has(c.id))}
+                          disabled={busy || finished || !selectable.length}
+                          checked={
+                            !!selectable.length &&
+                            selectable.every((c) => selected.has(c.id))
+                          }
                           onChange={(e) =>
                             setSelected((old) => {
                               const next = new Set(old);
-                              for (const c of changes) {
+                              for (const c of selectable) {
                                 if (e.target.checked) next.add(c.id);
                                 else next.delete(c.id);
                               }
@@ -253,13 +260,28 @@ export function ChannelOptimization({
                         {b.sourceName} · Key {b.keyPosition}
                       </span>
                     </header>
+                    <div className="optimization-protocol">
+                      <strong>
+                        当前协议：{channelProtocolLabel(b.protocol)}
+                      </strong>
+                      <span>
+                        {channelEngineLabel({
+                          engine: b.engine,
+                          engine_mode: b.engineMode,
+                        }) || "未取得实际引擎"}
+                      </span>
+                      <small>渠道标识：{b.provider}</small>
+                    </div>
                     {changes.map((c) => (
-                      <label className="optimization-change" key={c.id}>
+                      <label
+                        className={`optimization-change${c.blockedReason ? " optimization-blocked" : ""}`}
+                        key={c.id}
+                      >
                         <input
                           type="checkbox"
                           aria-label={`${c.action === "add" ? "新增" : "取消"} ${c.model} · ${b.sourceName} Key ${b.keyPosition} ${b.name}`}
                           checked={selected.has(c.id)}
-                          disabled={busy || finished}
+                          disabled={busy || finished || !!c.blockedReason}
                           onChange={(e) =>
                             setSelected((old) => {
                               const next = new Set(old);
@@ -281,9 +303,22 @@ export function ChannelOptimization({
                           {c.model !== c.upstream && (
                             <small>原模型：{c.upstream}</small>
                           )}
+                          <small>
+                            检测协议：
+                            {c.detectedProtocols?.length
+                              ? c.detectedProtocols
+                                  .map(channelProtocolLabel)
+                                  .join(" / ")
+                              : "未记录"}
+                          </small>
                         </span>
                         <span>
                           {c.reasons.join("；")}
+                          {c.blockedReason && (
+                            <strong className="optimization-blocked-reason">
+                              {c.blockedReason}
+                            </strong>
+                          )}
                           {!!c.priceDetails?.length && (
                             <>
                               <small>

@@ -1,4 +1,5 @@
 import { controlRequest } from "./api";
+import { channelProtocolLabel, protocolForEngine } from "./channelProtocol";
 import { boundGroups } from "./sub2apiImports";
 import { isCapabilityCheckModel } from "./sub2apiModels";
 import type { InstalledChannel, SubImports } from "./sub2apiImports";
@@ -60,6 +61,9 @@ export interface OptimizationBinding {
   native?: ManagedChannel;
   current: Record<string, string>;
   revision: string;
+  engine?: string;
+  engineMode?: string;
+  protocol?: string;
 }
 export interface OptimizationChange {
   id: string;
@@ -70,6 +74,8 @@ export interface OptimizationChange {
   reasons: string[];
   priceDetails?: string[];
   checkedAt: number;
+  detectedProtocols?: string[];
+  blockedReason?: string;
 }
 export interface OptimizationPlan {
   changes: OptimizationChange[];
@@ -329,7 +335,11 @@ function faults(
     if (assessPrice(e.check, prices).status === "abnormal")
       result.push(["price", "单价异常"]);
   }
-  if (isCapabilityCheckModel(model) && !running(e.tool?.state) && e.tool?.result?.status === "unsupported")
+  if (
+    isCapabilityCheckModel(model) &&
+    !running(e.tool?.state) &&
+    e.tool?.result?.status === "unsupported"
+  )
     result.push(["tool", "不支持 Tool use"]);
   if (e.degraded && !running(e.check.state))
     result.push(["quality", "Astra 最近检测降智"]);
@@ -435,6 +445,26 @@ export function buildOptimizationPlan(
       bindings.set(id, binding);
     }
     for (const binding of bindings.values()) {
+      const routeRows = routes.data.filter(
+        (r) => r.api_key_id === binding.key && r.provider === binding.provider,
+      );
+      const engines = [
+        ...new Set(
+          routeRows.map((r) => r.engine).filter((v): v is string => !!v),
+        ),
+      ];
+      // The caller-key catalog is authoritative. Never infer a protocol from a
+      // model name or a provider suffix; copies can have independent overrides.
+      binding.engine =
+        engines.length === 1
+          ? engines[0]
+          : engines.length
+            ? undefined
+            : (binding.installed || binding.native)?.engine;
+      binding.engineMode =
+        routeRows.find((r) => r.engine_mode)?.engine_mode ||
+        (binding.installed || binding.native)?.engine_mode;
+      binding.protocol = protocolForEngine(binding.engine);
       if (
         binding.installed &&
         (Object.keys(binding.current).length !==
@@ -525,6 +555,16 @@ export function buildOptimizationPlan(
           ...evidence.map((e) => e.check.result?.checked_at || 0),
           ...evidence.map((e) => e.tool?.result?.checked_at || 0),
         );
+        const detectedProtocols = [
+          ...new Set(
+            evidence.flatMap((e) =>
+              e.check.result?.availability.status === "success" &&
+              e.check.result.availability.protocol
+                ? [e.check.result.availability.protocol]
+                : [],
+            ),
+          ),
+        ];
         if (publicModels.length) {
           if (reasons.length)
             for (const model of publicModels) {
@@ -538,6 +578,7 @@ export function buildOptimizationPlan(
                 reasons,
                 priceDetails,
                 checkedAt,
+                detectedProtocols,
               });
             }
         } else if (
@@ -551,7 +592,8 @@ export function buildOptimizationPlan(
               e.check.state === "done" &&
               modelIsDefaultSelected(e.check) &&
               (!isCapabilityCheckModel(upstream) ||
-                (!running(e.tool?.state) && e.tool?.result?.status !== "error")),
+                (!running(e.tool?.state) &&
+                  e.tool?.result?.status !== "error")),
           )
         ) {
           changes.push({
@@ -562,6 +604,16 @@ export function buildOptimizationPlan(
             action: "add",
             reasons: ["检测可用，未发现单价、模型匹配或能力异常"],
             checkedAt,
+            detectedProtocols,
+            blockedReason: binding.installed
+              ? !binding.protocol
+                ? "当前渠道协议未确认，请刷新或检查渠道配置"
+                : !detectedProtocols.length
+                  ? "检测未记录上游协议，请先重新检测该模型"
+                  : detectedProtocols.some((p) => p !== binding.protocol)
+                    ? `协议冲突：当前 ${channelProtocolLabel(binding.protocol)}，检测 ${detectedProtocols.map(channelProtocolLabel).join(" / ")}；请在添加到渠道中按协议拆分`
+                    : undefined
+              : undefined,
           });
         }
       }
@@ -576,6 +628,11 @@ export function optimizationRequests(
   changes: OptimizationChange[],
   routes: Record<string, Routes>,
 ) {
+  const blocked = changes.find((c) => c.blockedReason);
+  if (blocked)
+    throw Error(
+      `${blocked.binding.name} · ${blocked.model}：${blocked.blockedReason}`,
+    );
   const bindings = new Map<
     string,
     { binding: OptimizationBinding; models: Record<string, string> }

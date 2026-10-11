@@ -223,6 +223,9 @@ func TestChannelManagementUsesConfiguredInventoryAndEffectiveKeyRoutes(t *testin
 	}
 	for _, route := range routes.Data {
 		if route.Provider == "bound" {
+			if route.Engine != "gpt" || route.EngineMode != "auto" {
+				t.Fatal("route lost actual engine/mode", route)
+			}
 			want := 1
 			if route.KeyID == "caller-one" && route.Model == "gpt-6-astra" {
 				want = 2

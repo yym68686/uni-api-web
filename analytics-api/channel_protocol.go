@@ -74,6 +74,53 @@ func catalogChannelProtocol(rows []batchCatalogRow, provider string) string {
 	return ""
 }
 
+func channelProtocolLabel(protocol string) string {
+	labels := map[string]string{"responses": "Responses / Codex", "messages": "Claude Messages", "gemini": "Gemini", "chat": "Chat Completions"}
+	if label := labels[protocol]; label != "" {
+		return label
+	}
+	return "协议未确认"
+}
+
+// Report every incompatible target before the single atomic restore. A rejected
+// source batch must identify the offending channel and model, not accuse all
+// channels or silently change the protocol of their existing serving models.
+func (s *Service) validateBatchProtocols(ctx context.Context, in channelBatchInput, catalogs map[string][]batchCatalogRow, documents map[string]map[string]any) error {
+	problems := []string{}
+	for _, t := range in.Targets {
+		if t.Account == "" || in.Part == "positions" || in.removes(t) {
+			continue
+		}
+		protocol := catalogChannelProtocol(catalogs[t.Key], t.Provider)
+		if protocol == "" {
+			for _, spec := range channelProtocols {
+				if spec.Engine == documents[t.Key+"\n"+t.Provider]["engine"] {
+					protocol = spec.Protocol
+				}
+			}
+		}
+		added := []string{}
+		for model := range newChannelModels(t.Current, t.Models) {
+			added = append(added, model)
+		}
+		sort.Strings(added)
+		for _, model := range added {
+			resolved, err := s.importProtocols(ctx, t.Account, t.Group, []string{model}, nil)
+			if err != nil {
+				problems = append(problems, fmt.Sprintf("%s · %s：%s", t.Provider, model, err))
+				continue
+			}
+			if protocol == "" || resolved[model] != protocol {
+				problems = append(problems, fmt.Sprintf("%s · %s：当前 %s，检测 %s", t.Provider, model, channelProtocolLabel(protocol), channelProtocolLabel(resolved[model])))
+			}
+		}
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("渠道协议冲突，未提交任何变更：\n%s\n请取消这些新增项，或在添加到渠道中按协议拆分后重新分析", strings.Join(problems, "\n"))
+	}
+	return nil
+}
+
 func protocolPositions(models []string, positions map[string]int) map[string]int {
 	filtered := map[string]int{}
 	for _, model := range models {

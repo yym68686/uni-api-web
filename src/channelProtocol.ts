@@ -24,6 +24,13 @@ export const channelProtocols = [
     label: "Chat Completions",
   },
 ] as const;
+export function protocolForEngine(engine?: string) {
+  return channelProtocols.find((p) => p.engine === engine)?.protocol || "";
+}
+export function channelProtocolLabel(protocol?: string) {
+  const spec = channelProtocols.find((p) => p.protocol === protocol);
+  return spec ? `${spec.label} · ${spec.engine}` : "协议未确认";
+}
 export function automaticChannelDocument(document: Record<string, unknown>) {
   if (document.engine !== "auto") return document;
   const result = { ...document };

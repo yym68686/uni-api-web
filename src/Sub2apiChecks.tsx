@@ -32,6 +32,7 @@ import { useSubAccounts } from "./sub2apiAccounts";
 import { Sub2apiImport } from "./Sub2apiImport";
 import { CreateChannel } from "./CreateChannel";
 import { ChannelOptimization } from "./ChannelOptimization";
+import { ChannelProtocolSummary } from "./ChannelProtocolSummary";
 import { managementJoinState } from "./channelOptimizationPlan";
 import { channelMembers, managementRows, UNASSIGNED_ACCOUNT, useChannelManagement, useConfiguredChecks } from "./channelManagement";
 import type { ManagedChannel, ManagementRow } from "./channelManagement";
@@ -80,7 +81,7 @@ export interface Probe {
   ttft_ms: number | null;
   response_created_ms?: number | null;
   first_response_ms?: number | null;
-  protocol?: "responses" | "gemini" | "messages";
+  protocol?: "responses" | "gemini" | "messages" | "chat";
   duration_ms: number;
   http_status?: number;
 }
@@ -1575,6 +1576,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                           <small className="check-source">
                             {t.key_id ? `key #${t.key_id}` : configured ? "配置密钥" : "尚未创建"}
                           </small>
+                          <ChannelProtocolSummary row={managementRow} imports={imports.data}/>
                         </td>
                         <td
                           className="mono"

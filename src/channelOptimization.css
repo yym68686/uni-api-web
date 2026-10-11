@@ -71,6 +71,32 @@
 .optimization-binding header > span {
   color: var(--muted);
 }
+.optimization-protocol {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+.optimization-protocol span,
+.optimization-protocol small {
+  color: var(--muted);
+}
+.optimization-protocol small {
+  flex-basis: 100%;
+  overflow-wrap: anywhere;
+}
+.optimization-blocked {
+  background: var(--subtle);
+}
+.optimization-blocked-reason {
+  display: block;
+  margin-top: 6px;
+  color: var(--warning, #dca36b);
+  line-height: 1.7;
+}
 .optimization-change {
   display: grid;
   grid-template-columns: 18px 70px minmax(140px, 1fr) minmax(160px, 1.5fr);

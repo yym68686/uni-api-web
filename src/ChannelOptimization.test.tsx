@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ChannelOptimization } from "./ChannelOptimization";
@@ -7,6 +7,54 @@ import {
   optimizationFixture,
   modelCheck,
 } from "./channelOptimization.test-data";
+
+it("shows current and detected protocols per channel and all-selection excludes incompatible additions", async () => {
+  const snapshot = optimizationFixture();
+  snapshot.imports.data.push({
+    ...snapshot.imports.data[0],
+    provider: "claude-copy",
+    name: "Messages Site",
+    engine: "claude",
+    engine_mode: "explicit",
+  });
+  snapshot.routes.s.data.push({
+    ...snapshot.routes.s.data[0],
+    provider: "claude-copy",
+    engine: "claude",
+  });
+  const fetch = vi.fn(async () => Response.json({ revision: "r2" }));
+  vi.stubGlobal("fetch", fetch);
+  const user = userEvent.setup();
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <ChannelOptimization snapshot={() => snapshot} />
+    </QueryClientProvider>,
+  );
+  await user.click(screen.getByRole("button", { name: "优化渠道模型" }));
+  const blocked = screen.getByRole("checkbox", {
+    name: "新增 new · Fugue Key 1 Messages Site",
+  });
+  expect(blocked).toBeDisabled();
+  const group = blocked.closest(".optimization-binding") as HTMLElement;
+  expect(
+    within(group).getByText("当前协议：Claude Messages · claude"),
+  ).toBeInTheDocument();
+  expect(
+    within(group).getByText("检测协议：Responses / Codex · codex"),
+  ).toBeInTheDocument();
+  expect(within(group).getByText("手动指定：claude")).toBeInTheDocument();
+  await user.click(screen.getByRole("checkbox", { name: "选择全部优化变更" }));
+  expect(blocked).not.toBeChecked();
+  expect(screen.getByText("已选 1 项变更")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "一键应用优化" }));
+  await screen.findByText("已应用");
+  expect(
+    JSON.parse(
+      (fetch.mock.calls as unknown as [string, RequestInit][])[0][1]
+        .body as string,
+    ).targets.map((t: { provider: string }) => t.provider),
+  ).toEqual(["p"]);
+});
 
 it("previews without writes and applies only explicitly checked changes", async () => {
   const snapshot = optimizationFixture();

@@ -3,6 +3,8 @@ import { controlRequest } from "./api";
 import { channelMembers } from "./channelManagement";
 import type { ManagedChannel } from "./channelManagement";
 export interface ChannelRoute {
+  engine?: string;
+  engine_mode?: string;
   provider: string;
   origin_provider?: string;
   model: string;
