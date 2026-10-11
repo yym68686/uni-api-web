@@ -1097,17 +1097,19 @@ function Dashboard({
     refetchInterval: initializationRetryInterval,
     staleTime: 60_000,
   });
-  const metricsKey = ["metrics", connection.session, keyId, effectiveWindow, effectiveEndpoint, effectiveStream, channelView && !!baseConnection.account, channelView || view === "balances" ? model : ""];
+  // Keep optional receipt reconciliation out of the critical list request.
+  // Metrics already contain every model; switching the visible model only
+  // changes the separately scoped billing query.
+  const metricsKey = ["metrics", connection.session, keyId, effectiveWindow, effectiveEndpoint, effectiveStream, "statistics-v2"];
   const metrics = useQuery({
     queryKey: metricsKey,
     queryFn: ({ signal }) =>
       readMetrics(
         connection,
-        "/v1/channel-metrics?" + params + "&spend_model=" + encodeURIComponent(model),
+        "/v1/channel-metrics?" + params,
         signal,
         effectiveEndpoint,
         effectiveStream,
-        channelView && !!baseConnection.account,
       ),
     staleTime: 30_000,
     enabled: needsChannelData && !keyRemoved && (baseConnection.account || (keysLoaded && !!catalog.data)),
@@ -1229,7 +1231,7 @@ function Dashboard({
   );
   const providers = useMemo(() => [...new Set(rows.map(providerId))], [rows]);
   const actualRange = useMemo(() => actualCostRange(window), [window]);
-  const channelSpend = useScopedChannelSpend({ rows, session: connection.session, sourceId: selectedSourceId, keyId, model, endpoint: effectiveEndpoint, stream: effectiveStream, from: metrics.data?.from, to: metrics.data?.to, snapshot: metrics.data, snapshotError: metrics.isError, snapshotUpdatedAt: metrics.dataUpdatedAt, refresh, auto, enabled: (channelView || view === "balances") && !!baseConnection.account });
+  const channelSpend = useScopedChannelSpend({ rows, session: connection.session, sourceId: selectedSourceId, keyId, model, endpoint: effectiveEndpoint, stream: effectiveStream, from: metrics.data?.from, to: metrics.data?.to, snapshot: metrics.data, snapshotError: metrics.isError, snapshotUpdatedAt: metrics.dataUpdatedAt, refresh, auto, paused: metrics.isFetching, enabled: (channelView || view === "balances") && !!baseConnection.account });
   const accountBalances = useChannelAccountBalances(providers, imported.data?.data || [], baseConnection.session, !!baseConnection.account && needsChannelData, auto);
   const rawBalanceQueries = useQueries({
     queries: providers.map((provider) => ({

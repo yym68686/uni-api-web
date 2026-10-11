@@ -1,5 +1,5 @@
-import { useMemo } from "react";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo } from "react";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { controlRequest, makeLimiter } from "./api";
 import type { Channel, Metrics } from "./types";
@@ -72,10 +72,12 @@ export function useScopedChannelSpend({
   snapshot,
   snapshotError = false,
   snapshotUpdatedAt,
+  paused = false,
 }: {
   snapshot?: Metrics;
   snapshotError?: boolean;
   snapshotUpdatedAt?: number;
+  paused?: boolean;
   rows: Channel[];
   session: string;
   sourceId: string;
@@ -101,8 +103,17 @@ export function useScopedChannelSpend({
   });
   const combined =
     snapshot?.channel_spend !== undefined || !!snapshot?.channel_spend_error;
+  const client = useQueryClient();
+  const scope = params.toString();
+  useEffect(() => {
+    // A list refresh takes precedence over optional billing. Abort the old
+    // reconciliation so it releases the backend analytical slot immediately.
+    if (paused) void client.cancelQueries({
+      queryKey: ["channel-spend", session, scope, refresh], exact: true,
+    });
+  }, [client, paused, session, scope, refresh]);
   const query = useQuery({
-    queryKey: ["channel-spend", session, params.toString(), refresh],
+    queryKey: ["channel-spend", session, scope, refresh],
     queryFn: ({ signal }) =>
       controlRequest<{
         data: (SubChannelSpend & {
@@ -122,7 +133,7 @@ export function useScopedChannelSpend({
       : undefined,
     initialDataUpdatedAt: snapshotUpdatedAt,
     enabled:
-      enabled && !snapshot?.channel_spend_error && from != null && to != null,
+      enabled && !paused && !snapshot?.channel_spend_error && from != null && to != null,
     staleTime: 15000,
     retry: false,
     refetchInterval: (query) => {
