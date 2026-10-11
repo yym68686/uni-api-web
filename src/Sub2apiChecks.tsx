@@ -1,4 +1,4 @@
-import { useModelFingerprints, rowFingerprints, fingerprintTargets, fingerprintLabels, fingerprintStatus, FingerprintCell, FingerprintPanel, fingerprintNote } from "./ModelFingerprints";
+import { useModelFingerprints, rowFingerprints, fingerprintTargets, fingerprintLabels, fingerprintStatus, FingerprintCell, FingerprintPanel, fingerprintNote, fingerprintReadMessage } from "./ModelFingerprints";
 import { isCapabilityCheckModel, capabilityCheckScope } from "./sub2apiModels";
 import { CopyProbeCurl } from "./CopyProbeCurl";
 import { TableLoading, DetailLoading } from "./PageLoading";
@@ -846,7 +846,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
     ),
   ].sort();
   const rows = candidateRows.filter(
-    (row) => (!fingerprint || (fingerprint === "not_applicable" ? rowFingerprints(row,fingerprints.index,model).length === 0 : rowFingerprints(row,fingerprints.index,model).some(e => fingerprintStatus(e.record) === fingerprint))) && withinRate(row) && (!platform || row.target.platform === platform) &&
+    (row) => (!fingerprint || fingerprints.isError || fingerprints.isPending || (fingerprint === "not_applicable" ? rowFingerprints(row,fingerprints.index,model).length === 0 : rowFingerprints(row,fingerprints.index,model).some(e => fingerprintStatus(e.record) === fingerprint))) && withinRate(row) && (!platform || row.target.platform === platform) &&
       (!joined || managementJoinState(row,imports.data,optimizationRoutes) === joined),
   );
   if (sort)
@@ -1441,7 +1441,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
             </select><ChevronDown size={13}/>
           </label>
           <label className="select-field">
-            <select aria-label="模型指纹筛选" value={fingerprint} onChange={e => {setFilters(v => ({...v,fingerprint:e.target.value}));setPage(0);}}>
+            <select aria-label="模型指纹筛选" disabled={fingerprints.isError || fingerprints.isPending} value={fingerprint} onChange={e => {setFilters(v => ({...v,fingerprint:e.target.value}));setPage(0);}}>
               <option value="">全部模型指纹</option>
               {Object.entries(fingerprintLabels).map(([value,label])=><option key={value} value={value}>{label}</option>)}
             </select><ChevronDown size={13}/>
@@ -1613,7 +1613,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                           )}
                         </td>
                         <td>{selected ? <PriceStatus check={selected} prices={prices.data?.data} /> : <GroupPriceStatus checks={checks} prices={prices.data?.data} />}</td>
-                        <td><FingerprintCell entries={rowFingerprints(managementRow,fingerprints.index,model)}/></td>
+                        <td><FingerprintCell entries={rowFingerprints(managementRow,fingerprints.index,model)} error={fingerprints.error} loading={fingerprints.isPending}/></td>
                         <td>
                           <div className="quality-status-stack"><Verdict result={groupQualityResult(t)} history={t.history} /><QualityProbability history={t.history} checkedAt={groupQualityResult(t)?.checked_at} /></div>
                         </td>
@@ -1730,7 +1730,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
           </>
         )}
       </section>
-      {fingerprints.isError && <p className="error-banner" role="alert">模型指纹读取失败，筛选结果可能不完整。<button className="button small" onClick={() => void fingerprints.refetch()}>重试</button></p>}
+      {fingerprints.isError && <p className="error-banner" role="alert">{fingerprintReadMessage(fingerprints.error)}，暂未使用指纹筛选。<button className="button small" onClick={() => void fingerprints.refetch()}>重试</button></p>}
       {importing && (
         <Sub2apiImport
           sources={sources}

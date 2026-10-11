@@ -54,3 +54,11 @@ it("persists and validates fingerprint filters",()=>{
  saveSubFilters("fp-test",{...subFilterDefaults,fingerprint:"mismatch"});expect(loadSubFilters("fp-test").fingerprint).toBe("mismatch");
  saveSubFilters("fp-test",{...subFilterDefaults,fingerprint:"bogus"});expect(loadSubFilters("fp-test").fingerprint).toBe("");
 });
+
+it("shows backend rollout unavailability without reporting untested or submitting paid requests",async()=>{
+ vi.stubGlobal("fetch",vi.fn(async()=>new Response("not found",{status:404})));
+ mount(<FingerprintPanel targets={[{source_id:"fugue",provider:"native",model:"gpt-6-astra"}]}/>);
+ await screen.findByText("指纹检测服务待更新");
+ expect(screen.getByRole("button",{name:"检测指纹"})).toBeDisabled();
+ expect(screen.queryByText("未检测")).not.toBeInTheDocument();
+});

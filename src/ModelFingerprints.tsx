@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, CircleHelp, Fingerprint, X } from "lucide-react";
-import { controlRequest } from "./api";
+import { ApiError, controlRequest } from "./api";
 import { channelMembers } from "./channelManagement";
 import type { ManagementRow } from "./channelManagement";
 import { rate, time } from "./format";
@@ -25,6 +25,7 @@ export interface FingerprintResult {
 }
 export interface FingerprintRecord extends FingerprintTarget {state: string; message: string; revision: string; result: FingerprintResult | null}
 export const fingerprintKey = (t: FingerprintTarget) => JSON.stringify([t.source_id || "", t.provider || "", t.account_id || "", t.group_id || 0, t.model]);
+export const fingerprintReadMessage = (error: unknown) => error instanceof ApiError && error.status === 404 ? "指纹检测服务待更新" : "模型指纹读取失败";
 export const fingerprintBusy = (record?: FingerprintRecord) => record?.state === "queued" || record?.state === "running";
 export function fingerprintStatus(record?: FingerprintRecord) {
   return !record ? "untested" : record.state !== "done" ? record.state : record.result?.status || "error";
@@ -74,7 +75,8 @@ export function FingerprintStatus({ record }: { record?: FingerprintRecord }) {
     </Tip>
   </div>;
 }
-export function FingerprintCell({ entries }: { entries: ReturnType<typeof rowFingerprints> }) {
+export function FingerprintCell({ entries, error, loading }: { entries: ReturnType<typeof rowFingerprints>; error?: Error | null; loading?: boolean }) {
+  if (entries.length && (error || loading)) return <span className="muted">{error ? fingerprintReadMessage(error) : "读取中…"}</span>;
   if (!entries.length) return <span className="muted">—</span>;
   return <div className="fingerprint-cell">{entries.map(({target,record}) => <div key={fingerprintKey(target)}>
     {entries.length > 1 && <small className="check-source">{target.model}</small>}
@@ -97,14 +99,14 @@ export function FingerprintPanel({ targets, revisions }: { targets: FingerprintT
   if (!targets.length) return null;
   return <section className="fingerprint-panel">
     <h3><Fingerprint size={16}/>模型指纹 <Tip text={fingerprintNote}><CircleHelp size={13}/></Tip></h3>
-    {query.isError && <p role="alert">模型指纹读取失败 <button className="button small" onClick={() => void query.refetch()}>重试</button></p>}
+    {query.isError && <p role="alert">{fingerprintReadMessage(query.error)} <button className="button small" onClick={() => void query.refetch()}>重试</button></p>}
     {error && <p role="alert">{error}</p>}
     {targets.map(target => {
       let record = query.index.get(fingerprintKey(target));
       if (record?.state === "done" && target.source_id && revisions && record.revision !== revisions[JSON.stringify([target.source_id,target.provider])]) record = undefined;
       const pending = fingerprintBusy(record), result = record?.state === "done" ? record.result : null;
       return <div className="fingerprint-detail" key={fingerprintKey(target)}>
-        <div className="fingerprint-heading"><strong>{target.model}</strong><FingerprintStatus record={record}/>
+        <div className="fingerprint-heading"><strong>{target.model}</strong>{query.isError ? <span className="muted">待启用</span> : <FingerprintStatus record={record}/>}
           <button className="button small" disabled={busy || query.isError || query.isPending} title={fingerprintNote} onClick={() => void run(target, pending)}>{pending ? "取消检测" : "检测指纹"}</button>
         </div>
         {record?.message && <p className="muted">{record.message}</p>}
