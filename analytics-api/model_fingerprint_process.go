@@ -54,7 +54,7 @@ func (p *fingerprintProcess) get(ctx context.Context) (*fingerprintNode, error) 
 	if dir := os.Getenv("MODEL_FINGERPRINT_DIR"); dir != "" {
 		runner = filepath.Join(dir, "runner.mjs")
 	}
-	cmd := exec.Command("node", "--max-old-space-size=256", runner, "--serve")
+	cmd := exec.Command("node", "--max-old-space-size=192", "--max-semi-space-size=4", runner, "--serve")
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "NODE_NO_WARNINGS=1"}
 	cmd.Stderr = io.Discard
 	stdin, err := cmd.StdinPipe()

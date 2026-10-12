@@ -41,7 +41,7 @@ fenced while any new site lease exists.
 
 Each job has a 780-second overall deadline. One shared Node process per backend
 collects concurrently for up to 50 sites, using one validated reference bank and
-a 256 MiB heap limit. Scoring runs sequentially on its event loop without extra
+a 192 MiB old-generation heap limit and 4 MiB semi-spaces. Scoring runs sequentially on its event loop without extra
 scoring heaps. The local worker only calls Go's authenticated loopback bridges;
 Go retains upstream credentials and network I/O. Cancelling one job aborts only
 its collector. A worker crash fails in-flight jobs without replaying them; future
