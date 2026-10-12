@@ -1,3 +1,4 @@
+import { channelLatency, latencyLabel } from "./channelLatency";
 import { readAccountSession } from "./accountSession";
 import type { AccountSession } from "./accountSession";
 import { clearDashboardSnapshots, restoreDashboardSnapshot, restoredDashboardAt, saveDashboardSnapshot } from "./dashboardSnapshot";
@@ -832,9 +833,9 @@ function Detail({
                   </div>
                   <div>
                     <span className="track-dot end" />
-                    <small>响应已创建</small>
+                    <small>{latencyLabel(channelLatency(row.stats).kind)}</small>
                     <strong>
-                      + <ResponseLatency created={row.stats?.response_created?.p50_ms} text={row.stats?.first_text?.p50_ms} />
+                      + <ResponseLatency created={row.stats?.response_created?.p50_ms} output={row.stats?.first_output?.p50_ms} text={row.stats?.first_text?.p50_ms} />
                     </strong>
                     <span>渠道首字 p50</span>
                   </div>
@@ -860,11 +861,11 @@ function Detail({
                   </div>
                   <div>
                     <dt>首字延迟 p95</dt>
-                    <dd>{ms(row.stats?.response_created?.p95_ms)}</dd>
+                    <dd>{ms(channelLatency(row.stats).value?.p95_ms)}</dd>
                   </div>
                   <div>
                     <dt>最近一次首字延迟</dt>
-                    <dd>{ms(row.stats?.response_created?.last_ms)}</dd>
+                    <dd>{ms(channelLatency(row.stats).value?.last_ms)}</dd>
                   </div>
                 </dl>
               </div>

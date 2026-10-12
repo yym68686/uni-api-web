@@ -2447,3 +2447,10 @@ it("exports the exact attempt for each diagnostic kind without queueing another 
   }
   expect(exports).toEqual(["sealed-availability","sealed-quality","sealed-tool","sealed-compact"]);
 });
+
+it("labels observed native output without claiming a response.created event", async () => {
+  render(<Tooltip.Provider><Timing kind="output" value={{sample_count:4,p50_ms:45000,p95_ms:180000,mean_ms:46000,last_ms:30000}} text={{sample_count:2,p50_ms:46000,p95_ms:180000,mean_ms:47000,last_ms:31000}} /></Tooltip.Provider>);
+  expect(screen.getByText("45.00 s")).toBeVisible();
+  expect(screen.getByText("首个输出")).toBeVisible();
+  expect(screen.queryByText("未记录")).toBeNull();
+});

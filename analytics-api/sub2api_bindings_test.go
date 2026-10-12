@@ -305,6 +305,44 @@ func TestConfiguredCopiesUseVerifiedAccountRateInChannelLabels(t *testing.T) {
 	}
 }
 
+func TestConfiguredGeneratedIDsUseVerifiedGroupLabels(t *testing.T) {
+	s, a, src := bindingFixture(t, "https://guanlanai.example.test")
+	ctx := context.Background()
+	if _, err := s.control.db.Exec(`UPDATE console_sub_accounts SET name='guanlanai' WHERE id=$1`, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.control.db.Exec(`INSERT INTO console_sub_targets(account_id,group_id,name,platform,billing) VALUES($1,16,'group','openai','{"rate":0.12}')`, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.control.db.Exec(`INSERT INTO console_sub_key_index(account_id,key_hash,remote_key_id,group_id) VALUES($1,$2,744,16)`, a.ID, tokenHash("private-fixture")); err != nil {
+		t.Fatal(err)
+	}
+	base := "sub2api-bfa838f2c3e99ac1b8b4235f"
+	names := []string{base, base + "--messages", "sub2api-custom-name", base + "--custom"}
+	providers := []configuredProvider{}
+	for _, name := range names {
+		providers = append(providers, configuredProvider{Provider: name, Base: a.Base, API: "private-fixture"})
+	}
+	providers = append(providers, configuredProvider{Provider: base + "--responses", Base: "https://unrelated.example.test", API: "private-fixture"})
+	if err := s.saveConfiguredInventory(ctx, src, providers); err != nil {
+		t.Fatal(err)
+	}
+	for i, name := range names {
+		got := assertConfiguredBinding(t, s, a, src.ID, name, "matched")
+		want := name
+		if i < 2 {
+			want = "guanlanai-0.12"
+		}
+		if got.Name != want || got.Provider != name {
+			t.Fatalf("name or route identity: %+v", got)
+		}
+	}
+	got := assertConfiguredBinding(t, s, a, src.ID, base+"--responses", "no_account")
+	if got.Name != got.Provider {
+		t.Fatal("label crossed site boundary", got)
+	}
+}
+
 func TestAccountKeyIndexResumesBeyondHundredPagesAndPublishesAtomically(t *testing.T) {
 	calls := 0
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

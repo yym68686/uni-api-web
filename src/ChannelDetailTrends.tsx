@@ -1,3 +1,4 @@
+import { channelLatency, latencyLabel } from "./channelLatency";
 import { DetailLoading } from "./PageLoading";
 import { FailureCounts } from "./FailureCounts";
 import { useMemo, useState } from "react";
@@ -30,12 +31,12 @@ interface Series {
 const latencySeries: Series[] = [
   {
     label: "p50",
-    value: (p) => p.response_created?.p50_ms ?? null,
+    value: (p) => channelLatency(p).value?.p50_ms ?? null,
     color: "var(--green)",
   },
   {
     label: "p95",
-    value: (p) => p.response_created?.p95_ms ?? null,
+    value: (p) => channelLatency(p).value?.p95_ms ?? null,
     color: "var(--danger)",
   },
 ];
@@ -73,7 +74,7 @@ function Curve({
   const detail = (p: Point) =>
     percentage
       ? `成功 ${p.success} / 失败 ${p.failed} · ${p.success + p.failed} 次有效尝试`
-      : `${p.response_created?.sample_count || 0} 个响应创建样本 · 正文首字 p50 ${ms(p.first_text?.p50_ms)}`;
+      : `${channelLatency(p).value?.sample_count || 0} 个${latencyLabel(channelLatency(p).kind)}样本 · 正文首字 p50 ${ms(p.first_text?.p50_ms)}`;
   const label = (p: Point) =>
     `${date(p.timestamp)}–${date(p.bucket_end || p.timestamp)} · ${series.map((s) => `${s.label} ${format(s.value(p))}`).join(" / ")} · ${detail(p)}${p.covered === false ? " · 覆盖不完整" : ""}`;
   return (

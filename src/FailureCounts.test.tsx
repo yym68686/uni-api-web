@@ -33,7 +33,7 @@ it("shows scoped reason counts once and keeps missing historical reasons separat
     ["输出达到上限", "4 次"],
     ["缺少完成事件", "3 次"],
     ["上游 HTTP 429", "1 次"],
-    ["历史失败／原因未记录", "2 次"],
+    ["历史记录未采集失败分类", "2 次"],
   ]) {
     expect(
       within(region.getByText(label).parentElement!).getByText(value),

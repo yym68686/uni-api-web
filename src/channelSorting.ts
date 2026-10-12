@@ -1,3 +1,4 @@
+import { channelLatency } from "./channelLatency";
 import type { Channel } from "./types";
 import type { ChannelCheck } from "./ChannelChecks";
 import { providerId, rowId } from "./format";
@@ -90,7 +91,7 @@ function sortValue(
     case "multiplier":
       return context.multipliers?.[row.source_id || ""]?.[row.provider] ?? null;
     case "latency":
-      return row.stats?.response_created?.p50_ms ?? null;
+      return channelLatency(row.stats).value?.p50_ms ?? null;
     case "wait":
       return row.stats?.request_to_dispatch?.p50_ms ?? null;
     case "cache":

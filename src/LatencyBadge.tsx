@@ -12,11 +12,13 @@ export function ResponseLatency({
   text,
   protocol,
   firstResponse,
+  output,
 }: {
   created?: number | null;
   text?: number | null;
   protocol?: string;
   firstResponse?: number | null;
+  output?: number | null;
 }) {
   const native = protocol === "gemini" || protocol === "messages";
   const responseLabel =
@@ -30,7 +32,7 @@ export function ResponseLatency({
       ? "首个 Gemini 非思考文本片段"
       : protocol === "messages"
         ? "首个 Messages 文本片段"
-        : "首个 response.output_text.delta";
+        : "首个上游正文片段";
   return (
     <Tip
       text={
@@ -38,11 +40,12 @@ export function ResponseLatency({
           {responseLabel}：{ms(native ? firstResponse : created)}
           <br />
           {textLabel}：{ms(text)}
+          {output != null && <><br />首个上游输出（含正文、推理或工具调用）：{ms(output)}</>}
         </>
       }
     >
       <span>
-        <LatencyBadge value={native ? firstResponse : created} />
+        <LatencyBadge value={native ? firstResponse : created ?? output} />
       </span>
     </Tip>
   );

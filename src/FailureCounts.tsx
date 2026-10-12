@@ -13,7 +13,7 @@ const labels: Record<string, string> = {
   downstream_disconnected: "下游连接中断",
   no_successful_channel: "无成功渠道",
   other: "其他失败",
-  unknown: "历史失败／原因未记录",
+  unknown: "历史记录未采集失败分类",
 };
 
 export function FailureCounts({

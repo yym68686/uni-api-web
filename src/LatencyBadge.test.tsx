@@ -14,7 +14,7 @@ it("shows response creation by default and the later first text in the tooltip",
   expect(screen.queryByText(/6\.20 s/)).not.toBeInTheDocument();
   await userEvent.setup().tab();
   expect(await screen.findByRole("tooltip")).toHaveTextContent(
-    "首个 response.output_text.delta：6.20 s",
+    "首个上游正文片段：6.20 s",
   );
 });
 
@@ -30,6 +30,6 @@ it("does not relabel legacy text-only latency as response creation", async () =>
     "首个 response.created：—",
   );
   expect(screen.getByRole("tooltip")).toHaveTextContent(
-    "首个 response.output_text.delta：6.20 s",
+    "首个上游正文片段：6.20 s",
   );
 });

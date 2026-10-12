@@ -1,3 +1,4 @@
+import { channelLatency, latencyLabel } from "./channelLatency";
 import { FailureCounts } from "./FailureCounts";
 import { BalanceAmount } from "./BalanceAmount";
 import { LatencyBadge } from "./LatencyBadge";
@@ -113,10 +114,12 @@ export function Timing({
   value,
   text,
   wait = false,
+  kind = "created",
 }: {
   value?: Distribution;
   text?: Distribution;
   wait?: boolean;
+  kind?: "created" | "output";
 }) {
   return (
     <Tip
@@ -125,7 +128,7 @@ export function Timing({
           <strong>
             {wait
               ? "请求进入 uni-api → 渠道 HTTP 发起前"
-              : "渠道请求发起 → 首个 response.created"}
+              : `渠道请求发起 → ${latencyLabel(kind)}`}
           </strong>
           <br />
           p95 {ms(value?.p95_ms)} · 最近 {ms(value?.last_ms)}
@@ -134,14 +137,14 @@ export function Timing({
           {!wait && !value?.sample_count && (
             <>
               <br />
-              当前范围未采集 response.created 时间；成功次数不代表有延迟样本。
+              当前范围未采集此延迟时间；成功次数不代表有延迟样本。
               旧版协议转换遗漏的时间无法从成功率或总耗时补算。
             </>
           )}
           {!wait && (
             <>
               <br />
-              首个 response.output_text.delta：p50 {ms(text?.p50_ms)} · p95{" "}
+              首个上游正文片段：p50 {ms(text?.p50_ms)} · p95{" "}
               {ms(text?.p95_ms)} · 最近 {ms(text?.last_ms)}
               <br />
               {count(text?.sample_count || 0)} 次正文首字样本
@@ -165,7 +168,7 @@ export function Timing({
       ) : !value?.sample_count && value?.p50_ms == null ? (
         <span className="muted">未记录</span>
       ) : (
-        <LatencyBadge value={value?.p50_ms} />
+        <span><LatencyBadge value={value?.p50_ms} />{kind === "output" && <small className="muted"> 首个输出</small>}</span>
       )}
     </Tip>
   );
@@ -284,11 +287,12 @@ export function ChannelMetricCells({
       <td>
         <div className="dual-metric">
           <Timing
-            value={row.stats?.response_created}
+            value={channelLatency(row.stats).value}
+            kind={channelLatency(row.stats).kind}
             text={row.stats?.first_text}
           />
-          {!!row.stats?.response_created?.sample_count && <span className="muted mono">
-            {ms(row.stats?.response_created?.p95_ms)}
+          {!!channelLatency(row.stats).value?.sample_count && <span className="muted mono">
+            {ms(channelLatency(row.stats).value?.p95_ms)}
           </span>}
         </div>
       </td>

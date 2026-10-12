@@ -466,7 +466,7 @@ func (s *Service) configuredBindings(ctx context.Context, owner string) ([]subIn
 				item.GroupID = first.GroupID
 				// Generated IDs stay stable for routing; only their public label
 				// inherits the verified account/group. Preserve user-named channels.
-				if strings.HasPrefix(item.Provider, "sub2api-copy-") {
+				if generatedSubProvider(item.Provider) {
 					item.Name = groupNames[qualityGroupID(first.AccountID, first.GroupID)]
 				}
 			}
@@ -474,4 +474,29 @@ func (s *Service) configuredBindings(ctx context.Context, owner string) ([]subIn
 		out = append(out, item)
 	}
 	return out, rows.Err()
+}
+
+// Labels may follow verified account/group bindings; route IDs never change.
+// Match only our generated formats so custom sub2api-* names remain untouched.
+func generatedSubProvider(name string) bool {
+	if strings.HasPrefix(name, "sub2api-copy-") {
+		return true
+	}
+	hash, ok := strings.CutPrefix(name, "sub2api-")
+	if !ok {
+		return false
+	}
+	hash, suffix, _ := strings.Cut(hash, "--")
+	if suffix != "" && suffix != "messages" && suffix != "responses" && suffix != "chat" && suffix != "gemini" {
+		return false
+	}
+	if len(hash) != 24 {
+		return false
+	}
+	for _, c := range hash {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
 }
