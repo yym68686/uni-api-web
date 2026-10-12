@@ -1,11 +1,32 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { detect, loadReference, score } from './runner.mjs';
+import { collect, detect, loadReference, score, scoreCollected } from './runner.mjs';
 import { analyzeSharedOutputs } from './upstream/shared-detector.ts';
 import { generateChallenges } from './upstream/challenge-browser.js';
 const fixture = JSON.parse(readFileSync(new URL('./reference-fixture.json', import.meta.url)));
 const reference = loadReference();
+
+test('separate collection and scoring preserve results and never return raw outputs', async () => {
+  let active=0,maxActive=0,calls=0;
+  const collected=await collect({base_url:'https://mock.example',key:'secret',model:'gpt-6-astra'},async()=>{
+    maxActive=Math.max(maxActive,++active);
+    await new Promise(resolve=>setTimeout(resolve,1));
+    active--;calls++;
+    return Response.json({status:'completed',output:[{type:'message',role:'assistant',content:[{type:'output_text',text:fixture['gpt-6-astra'][0].text}]}]});
+  });
+  assert.equal(calls,3);assert.equal(maxActive,1);
+  const actual=scoreCollected(collected,reference);
+  const expected=score(collected.model,collected.outputs,reference);
+  assert.equal(actual.status,expected.status);
+  assert.equal(actual.probability,expected.probability);
+  assert.deepEqual(actual.candidates,expected.candidates);
+  assert.deepEqual(actual.samples,collected.samples);
+  assert.equal(actual.outputs,undefined);
+  collected.samples[0].state='error';
+  assert.equal(scoreCollected(collected,reference).status,'error');
+  assert.equal(scoreCollected(collected,reference).probability,null);
+});
 
 test('full reference bank, original scoring and the merged Astra/Sol class are preserved', () => {
   assert.equal(reference.bank.models.length, 57);

@@ -115,13 +115,19 @@ func TestModelFingerprintQueueScopesLeasesCancelAndExpiry(t *testing.T) {
 	if err != nil || claimed.scope() != target.scope() {
 		t.Fatal(claimed, err)
 	}
-	t.Cleanup(func() { s.control.db.Exec(`UPDATE console_fingerprint_worker SET deadline=NULL WHERE id=true`) })
+	t.Cleanup(func() {
+		s.control.db.Exec(`DELETE FROM console_fingerprint_site_leases`)
+		s.control.db.Exec(`UPDATE console_fingerprint_worker SET deadline=NULL WHERE id=true`)
+	})
 	native := fingerprintTarget{Source: src.ID, Provider: "native", Model: "gpt-6-astra"}
+	if err = s.saveConfiguredInventory(context.Background(), src, []configuredProvider{{Provider: "native", Base: "https://SITE.example:443/v1/responses", API: "test"}}); err != nil {
+		t.Fatal(err)
+	}
 	if err = enqueueFingerprint(context.Background(), s.control.db, native); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err = s.claimFingerprint(context.Background()); err == nil {
-		t.Fatal("global worker lease allowed concurrent scorer")
+		t.Fatal("same-site channels ran concurrently")
 	}
 	if w := fingerprintRequest(t, s, a.Owner, "DELETE", []fingerprintTarget{target}); w.Code != 202 {
 		t.Fatal(w.Code)
@@ -133,13 +139,21 @@ func TestModelFingerprintQueueScopesLeasesCancelAndExpiry(t *testing.T) {
 	if n, _ := res.RowsAffected(); n != 0 {
 		t.Fatal("late result resurrected cancelled request")
 	}
-	s.control.db.Exec(`UPDATE console_fingerprint_worker SET deadline=now()-interval '1 second' WHERE id=true`)
+	if err = s.renewFingerprint(context.Background(), target, run); err == nil {
+		t.Fatal("cancelled job renewed its lease")
+	}
+	if _, _, err = s.claimFingerprint(context.Background()); err == nil {
+		t.Fatal("cancel released site before the running process stopped")
+	}
+	if err = s.finishFingerprint(context.Background(), target, run, "done", "", "", nil); err != nil {
+		t.Fatal(err)
+	}
 	second, run2, err := s.claimFingerprint(context.Background())
 	if err != nil || second.scope() != native.scope() {
 		t.Fatal(second, err)
 	}
 	s.control.db.Exec(`UPDATE console_model_fingerprints SET deadline=now()-interval '1 second' WHERE scope=$1`, native.scope())
-	s.control.db.Exec(`UPDATE console_fingerprint_worker SET deadline=now()-interval '1 second' WHERE id=true AND run_id=$1`, run2)
+	s.control.db.Exec(`UPDATE console_fingerprint_site_leases SET deadline=now()-interval '1 second' WHERE run_id=$1`, run2)
 	if _, _, err = s.claimFingerprint(context.Background()); err == nil {
 		t.Fatal("expired paid request was replayed")
 	}
@@ -230,7 +244,7 @@ func TestModelFingerprintEndToEndTargetedThreeCallsAndIndependentQuality(t *test
 		t.Fatal("fingerprint polluted legacy quality")
 	}
 	targeted.Store(false)
-	_, _, err = s.runFingerprint(ctx, target)
+	_, err = s.prepareFingerprint(ctx, target)
 	if err == nil || calls.Load() != 3 {
 		t.Fatal("capability preflight did not fence paid request", err)
 	}

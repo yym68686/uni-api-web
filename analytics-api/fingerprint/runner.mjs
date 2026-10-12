@@ -49,10 +49,9 @@ function bounded(response) {
     },
   })), { status: response.status, headers: response.headers });
 }
-export async function detect(config, transport) {
+export async function collect(config, transport) {
   if (!models.includes(config.model)) throw Error('unsupported_model');
-  // Check files before issuing any billable requests.
-  const reference = loadReference(), challenges = generateChallenges(3), outputs = [], samples = [];
+  const challenges = generateChallenges(3), outputs = [], samples = [];
   const started = Date.now();
   // Stored gateway URLs may use private HTTP; retain upstream URL validation
   // using HTTPS, then restore the trusted configuration's transport protocol.
@@ -83,16 +82,33 @@ export async function detect(config, transport) {
         message: '请求失败或输出不完整' });
     }
   }
-  const result = score(config.model, outputs, reference);
-  if (samples.some(s => s.state === 'error')) { result.status = 'error'; result.probability = null; }
-  return { ...result, samples, checked_at: Math.floor(Date.now() / 1000), duration_ms: Date.now() - started };
+  return { model: config.model, outputs, samples, checked_at: Math.floor(Date.now() / 1000), duration_ms: Date.now() - started };
+}
+export function scoreCollected(collected, reference = loadReference()) {
+  const started = Date.now();
+  const result = score(collected.model, collected.outputs, reference);
+  if (collected.samples.some(s => s.state === 'error')) { result.status = 'error'; result.probability = null; }
+  return { ...result, samples: collected.samples, checked_at: collected.checked_at, duration_ms: collected.duration_ms + Date.now() - started };
+}
+export async function detect(config, transport) {
+  // Standalone detection validates before paid I/O. In collect/score mode Go
+  // validates once per immutable deployment before starting any collectors.
+  const reference = loadReference();
+  return scoreCollected(await collect(config, transport), reference);
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     let input = '';
-    for await (const chunk of process.stdin) { input += chunk; if (input.length > 65536) throw Error('invalid_input'); }
+    for await (const chunk of process.stdin) { input += chunk; if (input.length > 8 * 1024 * 1024) throw Error('invalid_input'); }
     const config = JSON.parse(input);
-    const result = config.operation === 'score' ? score(config.model, config.outputs) : await detect(config);
+    let result;
+    switch (config.operation) {
+      case 'validate': loadReference(); result = { validated: true }; break;
+      case 'collect': result = await collect(config); break;
+      case 'score_collected': result = scoreCollected(config); break;
+      case 'score': result = score(config.model, config.outputs); break;
+      default: result = await detect(config);
+    }
     process.stdout.write(JSON.stringify(result));
   } catch {
     process.stderr.write('fingerprint_worker_failed\n'); process.exitCode = 1;

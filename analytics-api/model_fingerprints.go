@@ -7,13 +7,13 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -28,7 +28,10 @@ CREATE TABLE IF NOT EXISTS console_model_fingerprints(
  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY(scope,model));
 CREATE INDEX IF NOT EXISTS console_model_fingerprints_pending ON console_model_fingerprints(updated_at) WHERE state='queued';
 CREATE TABLE IF NOT EXISTS console_fingerprint_worker(id BOOLEAN PRIMARY KEY CHECK(id),run_id TEXT NOT NULL DEFAULT '',deadline TIMESTAMPTZ);
-INSERT INTO console_fingerprint_worker(id) VALUES(true) ON CONFLICT DO NOTHING;`
+INSERT INTO console_fingerprint_worker(id) VALUES(true) ON CONFLICT DO NOTHING;
+ALTER TABLE console_model_fingerprints ADD COLUMN IF NOT EXISTS site_key TEXT NOT NULL DEFAULT '';
+CREATE TABLE IF NOT EXISTS console_fingerprint_site_leases(
+ run_id TEXT PRIMARY KEY, site TEXT NOT NULL UNIQUE, deadline TIMESTAMPTZ NOT NULL);`
 
 type fingerprintTarget struct {
 	Source   string `json:"source_id,omitempty"`
@@ -63,7 +66,7 @@ func enqueueFingerprint(ctx context.Context, db fingerprintDB, t fingerprintTarg
 	}
 	_, err := db.ExecContext(ctx, `INSERT INTO console_model_fingerprints(scope,model,source_id,provider,account_id,group_id)
  VALUES($1,$2,NULLIF($3,''),$4,NULLIF($5,''),$6) ON CONFLICT(scope,model) DO UPDATE SET
- state='queued',message='',result=NULL,revision='',deadline=NULL,updated_at=now()
+ state='queued',message='',result=NULL,revision='',deadline=NULL,site_key='',updated_at=now()
  WHERE console_model_fingerprints.state NOT IN ('queued','running') OR console_model_fingerprints.deadline<now()`, t.scope(), t.Model, t.Source, t.Provider, t.Account, t.Group)
 	return err
 }
@@ -157,111 +160,17 @@ func (s *Service) queueModelFingerprints(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, 202, map[string]bool{"accepted": true})
 }
 
-// Separate from all quality history and availability tables. One bounded worker
-// across replicas prevents bulk checks from creating a fleet of scoring heaps.
-func (s *Service) fingerprintLoop(ctx context.Context) {
-	for ctx.Err() == nil {
-		if s.fingerprintOne(ctx) {
-			continue
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(2 * time.Second):
-		}
-	}
+type fingerprintPlan struct {
+	client         http.Client
+	config         map[string]any
+	revision, site string
 }
-func (s *Service) claimFingerprint(ctx context.Context) (fingerprintTarget, string, error) {
-	var t fingerprintTarget
-	tx, err := s.control.db.BeginTx(ctx, nil)
-	if err != nil {
-		return t, "", err
-	}
-	defer tx.Rollback()
-	var free bool
-	err = tx.QueryRowContext(ctx, `SELECT deadline IS NULL OR deadline<now() FROM console_fingerprint_worker WHERE id=true FOR UPDATE SKIP LOCKED`).Scan(&free)
-	if err != nil {
-		return t, "", err
-	}
-	if !free {
-		return t, "", sql.ErrNoRows
-	}
-	if _, err = tx.ExecContext(ctx, `UPDATE console_model_fingerprints SET state='interrupted',message='检测中断，请重新检测',deadline=NULL WHERE state='running' AND deadline<now()`); err != nil {
-		return t, "", err
-	}
-	run := randomID()
-	err = tx.QueryRowContext(ctx, `WITH next AS (SELECT scope,model FROM console_model_fingerprints WHERE state='queued' ORDER BY updated_at,scope,model FOR UPDATE SKIP LOCKED LIMIT 1)
- UPDATE console_model_fingerprints f SET state='running',run_id=$1,deadline=now()+interval '30 seconds'
- FROM next n WHERE f.scope=n.scope AND f.model=n.model RETURNING COALESCE(f.source_id,''),f.provider,COALESCE(f.account_id,''),f.group_id,f.model`, run).Scan(&t.Source, &t.Provider, &t.Account, &t.Group, &t.Model)
-	if errors.Is(err, sql.ErrNoRows) {
-		// Persist expiry classification even when there is no next queued job.
-		if e := tx.Commit(); e != nil {
-			return t, "", e
-		}
-		return t, "", err
-	}
-	if err != nil {
-		return t, "", err
-	}
-	_, err = tx.ExecContext(ctx, `UPDATE console_fingerprint_worker SET run_id=$1,deadline=now()+interval '30 seconds' WHERE id=true`, run)
-	if err != nil {
-		return t, "", err
-	}
-	err = tx.Commit()
-	return t, run, err
-}
-func (s *Service) fingerprintOne(parent context.Context) bool {
-	t, run, err := s.claimFingerprint(parent)
-	if err != nil {
-		return false
-	}
-	ctx, cancel := context.WithTimeout(parent, 780*time.Second)
-	heartbeat := make(chan struct{})
-	go func() {
-		defer close(heartbeat)
-		ticker := time.NewTicker(2 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				pulse, done := context.WithTimeout(ctx, 3*time.Second)
-				var alive bool
-				e := s.control.db.QueryRowContext(pulse, `WITH live AS (UPDATE console_model_fingerprints SET deadline=now()+interval '30 seconds' WHERE scope=$1 AND model=$2 AND run_id=$3 AND state='running' RETURNING run_id)
- UPDATE console_fingerprint_worker SET deadline=now()+interval '30 seconds' WHERE id=true AND run_id=$3 AND EXISTS(SELECT 1 FROM live) RETURNING true`, t.scope(), t.Model, run).Scan(&alive)
-				done()
-				if e != nil || !alive {
-					cancel()
-					return
-				}
-			}
-		}
-	}()
-	result, revision, err := s.runFingerprint(ctx, t)
-	state, message := "done", ""
-	if err != nil {
-		state, message = "error", err.Error()
-	}
-	if ctx.Err() != nil {
-		state, message = "interrupted", "检测中断或超时，未自动重发请求"
-	}
-	cancel()
-	<-heartbeat
-	finish, done := context.WithTimeout(context.Background(), 5*time.Second)
-	defer done()
-	var raw any
-	if len(result) > 0 {
-		raw = string(result)
-	}
-	_, e := s.control.db.ExecContext(finish, `UPDATE console_model_fingerprints SET state=$4,message=$5,result=$6,revision=$7,deadline=NULL,updated_at=now() WHERE scope=$1 AND model=$2 AND run_id=$3 AND state='running'`, t.scope(), t.Model, run, state, message, raw, revision)
-	_, _ = s.control.db.ExecContext(finish, `UPDATE console_fingerprint_worker SET deadline=NULL WHERE id=true AND run_id=$1`, run)
-	log.Printf("model_fingerprint model=%q state=%s saved=%t", t.Model, state, e == nil)
-	return true
-}
-func (s *Service) runFingerprint(ctx context.Context, t fingerprintTarget) (json.RawMessage, string, error) {
+
+// Resolve the actual upstream before reserving its site and sending paid probes.
+func (s *Service) prepareFingerprint(ctx context.Context, t fingerprintTarget) (fingerprintPlan, error) {
+	plan := fingerprintPlan{}
 	if !t.valid() {
-		return nil, "", errors.New("不支持的指纹检测模型")
+		return plan, errors.New("不支持的指纹检测模型")
 	}
 	config := map[string]any{"model": t.Model}
 	revision := ""
@@ -271,13 +180,14 @@ func (s *Service) runFingerprint(ctx context.Context, t fingerprintTarget) (json
 		var base, encrypted, protocol string
 		err := s.control.db.QueryRowContext(ctx, `SELECT a.base,t.encrypted_key,COALESCE(m.result->'availability'->>'protocol','responses') FROM console_sub_targets t JOIN console_sub_accounts a ON a.id=t.account_id LEFT JOIN console_sub_models m ON m.account_id=t.account_id AND m.group_id=t.group_id AND m.model=$3 WHERE t.account_id=$1 AND t.group_id=$2 AND t.active AND t.encrypted_key<>''`, t.Account, t.Group, t.Model).Scan(&base, &encrypted, &protocol)
 		if err != nil {
-			return nil, "", errors.New("站点渠道已不可用")
+			return plan, errors.New("站点渠道已不可用")
 		}
 		key, err := s.control.decrypt(encrypted)
 		if err != nil {
-			return nil, "", errors.New("测试 key 无法解密")
+			return plan, errors.New("测试 key 无法解密")
 		}
 		revision = tokenHash(base + "\n" + encrypted)
+		plan.site = fingerprintSite(base)
 		config["base_url"], config["key"] = base, key
 		if protocol == "messages" {
 			config["format"] = "anthropic"
@@ -285,7 +195,7 @@ func (s *Service) runFingerprint(ctx context.Context, t fingerprintTarget) (json
 	} else {
 		src, err := s.control.source(ctx, t.Source)
 		if err != nil {
-			return nil, "", errors.New("来源已不可用")
+			return plan, errors.New("来源已不可用")
 		}
 		preflight, done := context.WithTimeout(ctx, 15*time.Second)
 		defer done()
@@ -295,42 +205,59 @@ func (s *Service) runFingerprint(ctx context.Context, t fingerprintTarget) (json
 			Unconfigured bool `json:"targeted_unconfigured_models"`
 		}
 		if err != nil || decodeMap(runtime["capabilities"], &caps) != nil || !caps.Targeted {
-			return nil, "", errors.New("来源不支持渠道定向检测")
+			return plan, errors.New("来源不支持渠道定向检测")
 		}
 		providers, err := effectiveProviders(preflight, src, true)
 		if err != nil {
-			return nil, "", errors.New("无法确认渠道配置")
+			return plan, errors.New("无法确认渠道配置")
 		}
 		for _, p := range providers {
 			if p.Provider == t.Provider {
 				revision = configuredProbeFingerprint(src, p)
+				plan.site = fingerprintSite(p.Base)
 				break
 			}
 		}
 		if revision == "" {
-			return nil, "", errors.New("渠道已不存在")
+			return plan, errors.New("渠道已不存在")
 		}
 		config["base_url"], config["key"], config["provider"], config["allow_unconfigured"] = src.Base, src.Key, t.Provider, caps.Unconfigured
 		client = http.Client{Timeout: 250 * time.Second, Transport: configuredProbeTransport{base: http.DefaultTransport, provider: t.Provider, allowUnconfigured: caps.Unconfigured}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	}
-	result, err := runFingerprintViaTransport(ctx, &client, config)
-	return result, revision, err
+	if plan.site == "" {
+		return plan, errors.New("无法确认渠道上游站点")
+	}
+	plan.client, plan.config, plan.revision = client, config, revision
+	return plan, nil
 }
 
 type boundedFingerprintOutput struct{ bytes.Buffer }
 
 func (b *boundedFingerprintOutput) Write(p []byte) (int, error) {
-	if b.Len()+len(p) > 1<<20 {
+	if b.Len()+len(p) > 8<<20 {
 		return 0, errors.New("fingerprint_output_limit")
 	}
 	return b.Buffer.Write(p)
 }
-func runFingerprintProcess(ctx context.Context, config map[string]any) (json.RawMessage, error) {
+
+var fingerprintScoringSlots = make(chan struct{}, 2)
+var validateFingerprintReference = sync.OnceValues(func() (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	raw, err := fingerprintCommand(ctx, map[string]any{"operation": "validate"}, 256)
+	return string(raw) == `{"validated":true}`, err
+})
+
+func fingerprintCommand(ctx context.Context, config map[string]any, heapMiB int) (json.RawMessage, error) {
 	runner := filepath.Join("fingerprint", "runner.mjs")
 	if dir := os.Getenv("MODEL_FINGERPRINT_DIR"); dir != "" {
 		runner = filepath.Join(dir, "runner.mjs")
 	}
-	cmd := exec.CommandContext(ctx, "node", "--max-old-space-size=256", runner)
+	heap := "--max-old-space-size=256"
+	if heapMiB == 128 {
+		heap = "--max-old-space-size=128"
+	}
+	cmd := exec.CommandContext(ctx, "node", heap, runner)
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "NODE_NO_WARNINGS=1"}
 	cmd.Stdin = strings.NewReader(mustJSON(config))
 	var out boundedFingerprintOutput
@@ -339,14 +266,43 @@ func runFingerprintProcess(ctx context.Context, config map[string]any) (json.Raw
 	if err := cmd.Run(); err != nil {
 		return nil, errors.New("指纹检测执行失败，请检查检测运行环境或稍后重试")
 	}
+	return append(json.RawMessage(nil), out.Bytes()...), nil
+}
+
+func runFingerprintProcess(ctx context.Context, config map[string]any) (json.RawMessage, error) {
+	if valid, err := validateFingerprintReference(); err != nil || !valid {
+		return nil, errors.New("指纹参考数据校验失败")
+	}
+	config["operation"] = "collect"
+	raw, err := fingerprintCommand(ctx, config, 128)
+	if err != nil {
+		return nil, err
+	}
+	var collected map[string]any
+	if json.Unmarshal(raw, &collected) != nil || collected["model"] != config["model"] {
+		return nil, errors.New("指纹样本无效")
+	}
+	// No reference bank stays resident while up to 50 sites wait on network I/O.
+	// Completed samples wait in Go; only two scoring heaps run per process.
+	select {
+	case fingerprintScoringSlots <- struct{}{}:
+		defer func() { <-fingerprintScoringSlots }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	collected["operation"] = "score_collected"
+	raw, err = fingerprintCommand(ctx, collected, 256)
+	if err != nil {
+		return nil, err
+	}
 	var result struct {
 		Model, Status string
 		Probability   *float64 `json:"probability"`
 	}
-	if json.Unmarshal(out.Bytes(), &result) != nil || result.Model != config["model"] || (result.Status != "match" && result.Status != "mismatch" && result.Status != "error" && result.Status != "insufficient") || (result.Probability != nil && (*result.Probability < 0 || *result.Probability > 1)) {
+	if json.Unmarshal(raw, &result) != nil || result.Model != config["model"] || (result.Status != "match" && result.Status != "mismatch" && result.Status != "error" && result.Status != "insufficient") || (result.Probability != nil && (*result.Probability < 0 || *result.Probability > 1)) {
 		return nil, errors.New("指纹结果无效")
 	}
-	return append(json.RawMessage(nil), out.Bytes()...), nil
+	return raw, nil
 }
 
 // Keep upstream I/O in Go: site probes retain the existing DNS/IP restrictions,
