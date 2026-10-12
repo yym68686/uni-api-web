@@ -39,11 +39,14 @@ later queued jobs for other sites. During rolling releases, a running legacy
 singleton finishes before the new scheduler starts; the legacy worker stays
 fenced while any new site lease exists.
 
-Each worker has a 780-second overall deadline. Collection uses a 128 MiB Node heap
-without loading the reference bank; at most two scoring processes per backend
-load the full bank, each with a 256 MiB heap. The pinned reference bank is validated
-once per backend process before any billable call. Completed samples are passed
-to scoring in memory and never persisted. Each request is bounded to 250 seconds
+Each job has a 780-second overall deadline. One shared Node process per backend
+collects concurrently for up to 50 sites, using one validated reference bank and
+a 256 MiB heap limit. Scoring runs sequentially on its event loop without extra
+scoring heaps. The local worker only calls Go's authenticated loopback bridges;
+Go retains upstream credentials and network I/O. Cancelling one job aborts only
+its collector. A worker crash fails in-flight jobs without replaying them; future
+jobs can start a fresh worker. Completed samples stay in memory and are never
+persisted. Each request is bounded to 250 seconds
 and 2 MiB output. Lease expiry and
 cancellation do not replay paid requests. Site credential changes invalidate old
 results; configured results are fenced by the current probe fingerprint in the

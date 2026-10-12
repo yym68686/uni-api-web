@@ -34,6 +34,7 @@ func fingerprintSite(base string) string {
 }
 
 func (s *Service) fingerprintLoop(ctx context.Context) {
+	defer sharedFingerprintWorker.close()
 	var wg sync.WaitGroup
 	defer wg.Wait()
 	finished := make(chan struct{}, 1)

@@ -9,11 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -231,67 +227,8 @@ func (s *Service) prepareFingerprint(ctx context.Context, t fingerprintTarget) (
 	return plan, nil
 }
 
-type boundedFingerprintOutput struct{ bytes.Buffer }
-
-func (b *boundedFingerprintOutput) Write(p []byte) (int, error) {
-	if b.Len()+len(p) > 8<<20 {
-		return 0, errors.New("fingerprint_output_limit")
-	}
-	return b.Buffer.Write(p)
-}
-
-var fingerprintScoringSlots = make(chan struct{}, 2)
-var validateFingerprintReference = sync.OnceValues(func() (bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	raw, err := fingerprintCommand(ctx, map[string]any{"operation": "validate"}, 256)
-	return string(raw) == `{"validated":true}`, err
-})
-
-func fingerprintCommand(ctx context.Context, config map[string]any, heapMiB int) (json.RawMessage, error) {
-	runner := filepath.Join("fingerprint", "runner.mjs")
-	if dir := os.Getenv("MODEL_FINGERPRINT_DIR"); dir != "" {
-		runner = filepath.Join(dir, "runner.mjs")
-	}
-	heap := "--max-old-space-size=256"
-	if heapMiB == 128 {
-		heap = "--max-old-space-size=128"
-	}
-	cmd := exec.CommandContext(ctx, "node", heap, runner)
-	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "NODE_NO_WARNINGS=1"}
-	cmd.Stdin = strings.NewReader(mustJSON(config))
-	var out boundedFingerprintOutput
-	cmd.Stdout = &out
-	cmd.Stderr = io.Discard
-	if err := cmd.Run(); err != nil {
-		return nil, errors.New("指纹检测执行失败，请检查检测运行环境或稍后重试")
-	}
-	return append(json.RawMessage(nil), out.Bytes()...), nil
-}
-
 func runFingerprintProcess(ctx context.Context, config map[string]any) (json.RawMessage, error) {
-	if valid, err := validateFingerprintReference(); err != nil || !valid {
-		return nil, errors.New("指纹参考数据校验失败")
-	}
-	config["operation"] = "collect"
-	raw, err := fingerprintCommand(ctx, config, 128)
-	if err != nil {
-		return nil, err
-	}
-	var collected map[string]any
-	if json.Unmarshal(raw, &collected) != nil || collected["model"] != config["model"] {
-		return nil, errors.New("指纹样本无效")
-	}
-	// No reference bank stays resident while up to 50 sites wait on network I/O.
-	// Completed samples wait in Go; only two scoring heaps run per process.
-	select {
-	case fingerprintScoringSlots <- struct{}{}:
-		defer func() { <-fingerprintScoringSlots }()
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-	collected["operation"] = "score_collected"
-	raw, err = fingerprintCommand(ctx, collected, 256)
+	raw, err := sharedFingerprintWorker.detect(ctx, config)
 	if err != nil {
 		return nil, err
 	}

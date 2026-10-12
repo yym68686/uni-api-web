@@ -1,9 +1,10 @@
-// This process receives credentials over stdin, never argv. No credentials or
-// upstream error bodies are returned. The Go worker owns its lifetime/lease.
+// Go supplies only ephemeral loopback bridge tokens to the shared worker.
+// No credentials or upstream error bodies are returned; Go owns job leases.
 import { readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { createHash, randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
+import { createServer } from 'node:http';
 import { generateChallenges } from './upstream/challenge-browser.js';
 import { complete } from './upstream/detection.ts';
 import { analyzeSharedOutputs, supportsSharedDetector } from './upstream/shared-detector.ts';
@@ -49,7 +50,7 @@ function bounded(response) {
     },
   })), { status: response.status, headers: response.headers });
 }
-export async function collect(config, transport) {
+export async function collect(config, transport, signal) {
   if (!models.includes(config.model)) throw Error('unsupported_model');
   const challenges = generateChallenges(3), outputs = [], samples = [];
   const started = Date.now();
@@ -59,13 +60,14 @@ export async function collect(config, transport) {
   if (!['http:', 'https:'].includes(base.protocol)) throw Error('invalid_base_url');
   const protocol = base.protocol; base.protocol = 'https:';
   for (const challenge of challenges) {
+    signal?.throwIfAborted();
     const requestId = 'fingerprint-' + randomUUID(), at = Date.now();
     try {
       const result = await complete({ baseUrl: base.href, apiKey: config.key, model: config.model,
         format: config.format === 'anthropic' ? 'anthropic' : 'responses', effort: 'low', stream: true }, challenge.prompt, '', undefined, undefined,
-      transport || (async (url, cfg, body, signal) => {
+      transport || (async (url, cfg, body, requestSignal) => {
         const destination = new URL(url); destination.protocol = protocol;
-        const response = await fetch(destination, { method: 'POST', redirect: 'error', signal,
+        const response = await fetch(destination, { method: 'POST', redirect: 'error', signal: signal ? AbortSignal.any([signal, requestSignal]) : requestSignal,
           headers: { ...(cfg.format === 'anthropic' ? {'x-api-key':cfg.apiKey,'anthropic-version':'2023-06-01'} : {Authorization: `Bearer ${cfg.apiKey}`}), 'Content-Type': 'application/json', Accept: 'text/event-stream',
             'X-Request-ID': requestId, ...(config.provider ? { 'X-Uni-API-Provider': config.provider,
               ...(config.allow_unconfigured ? { 'X-Uni-API-Probe-Unconfigured-Model': 'true' } : {}) } : {}) },
@@ -75,6 +77,7 @@ export async function collect(config, transport) {
       outputs.push({ text: result.text, expected_count: challenge.expected_count });
       samples.push({ request_id: requestId, state: 'done', duration_ms: Date.now() - at, expected_count: challenge.expected_count });
     } catch (error) {
+      signal?.throwIfAborted();
       outputs.push({ text: '', expected_count: challenge.expected_count });
       samples.push({ request_id: requestId, state: 'error', duration_ms: Date.now() - at,
         expected_count: challenge.expected_count, http_status: Number.isInteger(error.httpStatus) ? error.httpStatus : undefined,
@@ -91,13 +94,58 @@ export function scoreCollected(collected, reference = loadReference()) {
   return { ...result, samples: collected.samples, checked_at: collected.checked_at, duration_ms: collected.duration_ms + Date.now() - started };
 }
 export async function detect(config, transport) {
-  // Standalone detection validates before paid I/O. In collect/score mode Go
-  // validates once per immutable deployment before starting any collectors.
+  // Standalone detection validates before paid I/O. The shared server validates
+  // once before listening and reuses its immutable reference for every job.
   const reference = loadReference();
   return scoreCollected(await collect(config, transport), reference);
 }
+
+// One immutable bank and one Node runtime serve concurrent collectors. Scoring
+// runs synchronously on this event loop, so it never creates extra scoring heaps.
+export async function serve() {
+  const reference = loadReference(), token = randomUUID(), active = new Set();
+  const server = createServer(async (req, res) => {
+    if (req.method !== 'POST' || req.url !== '/detect' || req.headers.authorization !== `Bearer ${token}`) {
+      res.writeHead(403).end(); return;
+    }
+    if (active.size >= 50) { res.writeHead(503).end(); return; }
+    const controller = new AbortController();
+    active.add(controller);
+    req.on('aborted', () => controller.abort());
+    res.on('close', () => { if (!res.writableFinished) controller.abort(); });
+    try {
+      let input = '';
+      for await (const chunk of req) {
+        input += chunk;
+        if (input.length > 65536) throw Error('invalid_input');
+      }
+      const config = JSON.parse(input), base = new URL(config.base_url);
+      // Only Go's authenticated ephemeral bridge is an allowed destination.
+      if (base.protocol !== 'http:' || base.hostname !== '127.0.0.1' || base.username || base.password) throw Error('invalid_bridge');
+      const collected = await collect(config, undefined, controller.signal);
+      controller.signal.throwIfAborted();
+      const result = scoreCollected(collected, reference);
+      res.writeHead(200, {'Content-Type':'application/json'}).end(JSON.stringify(result));
+    } catch {
+      if (!res.destroyed) res.writeHead(500).end('fingerprint_worker_failed');
+    } finally { active.delete(controller); }
+  });
+  server.requestTimeout = 800_000;
+  server.headersTimeout = 5_000;
+  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
+  process.stdout.write(JSON.stringify({port: server.address().port, token}) + '\n');
+  // Losing the owning Go process stops every probe; no job is replayed.
+  process.stdin.resume();
+  process.stdin.on('end', () => {
+    for (const controller of active) controller.abort();
+    server.close(); server.closeAllConnections();
+  });
+}
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
+    if (process.argv.includes('--serve')) {
+      await serve();
+    } else {
     let input = '';
     for await (const chunk of process.stdin) { input += chunk; if (input.length > 8 * 1024 * 1024) throw Error('invalid_input'); }
     const config = JSON.parse(input);
@@ -110,6 +158,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       default: result = await detect(config);
     }
     process.stdout.write(JSON.stringify(result));
+    }
   } catch {
     process.stderr.write('fingerprint_worker_failed\n'); process.exitCode = 1;
   }

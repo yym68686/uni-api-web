@@ -59,16 +59,19 @@ test('generates three independent supported-length challenges', () => {
   assert.ok(challenges.every(c=>c.expected_count>=292 && c.expected_count<=332));
 });
 test('uses targeted Responses requests, strict completion, and no retries or secret persistence', async () => {
-  let calls=0;
+  let calls=0;const requests=[];
   const transport=async(_url,config,body)=>{
-    calls++;assert.equal(config.model,'gpt-6.1-sol');assert.deepEqual(body.reasoning,{effort:'low'});
-    assert.equal(body.stream,true);assert.equal(body.store,false);assert.equal(body.max_output_tokens,8192);
-    assert.ok(body.input[0].content.length>300);
+    calls++;requests.push({config,body});
     if(calls===2)return Response.json({error:{message:'secret-key should not persist'}},{status:429});
     return Response.json({status:'completed',output:[{type:'message',role:'assistant',content:[{type:'output_text',text:fixture['gpt-6-astra'][0].text}]}]});
   };
   const result=await detect({base_url:'https://mock.example',key:'secret-key',model:'gpt-6.1-sol'},transport);
   assert.equal(calls,3);assert.equal(result.status,'error');assert.equal(result.probability,null);
+  for(const {config,body} of requests){
+    assert.equal(config.model,'gpt-6.1-sol');assert.deepEqual(body.reasoning,{effort:'low'});
+    assert.equal(body.stream,true);assert.equal(body.store,false);assert.equal(body.max_output_tokens,8192);
+    assert.ok(body.input[0].content.includes('355'));
+  }
   assert.equal(result.samples[1].http_status,429);assert.ok(!JSON.stringify(result).includes('secret-key'));
 });
 test('configured private HTTP endpoints keep provider targeting and never follow redirects', async () => {
