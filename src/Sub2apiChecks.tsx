@@ -65,7 +65,7 @@ import type { SubUsage } from "./sub2apiPriceCheck";
 import { matchesPriceFilter } from "./sub2apiPriceCheck";
 import type { ModelPrice } from "./types";
 import { BillingRate } from "./BillingRate";
-import { billingRate } from "./billingRates";
+import { billingRate, matchesBillingRateFilter } from "./billingRates";
 import type { ObservedRate } from "./billingRates";
 
 export interface Probe {
@@ -836,11 +836,17 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
     ),
   ].sort((a, b) => a - b);
   const effectiveMaxRate = maxRate;
-  if (maxRate && !rates.includes(Number(maxRate))) rates.push(Number(maxRate));
+  if (
+    maxRate &&
+    Number.isFinite(Number(maxRate)) &&
+    !rates.includes(Number(maxRate))
+  ) rates.push(Number(maxRate));
   rates.sort((a, b) => a - b);
   const withinRate = ({ target, configured }: (typeof candidateRows)[number]) => {
-    const rate = billingRate(target, model, configured).rate;
-    return !effectiveMaxRate || (rate != null && rate <= Number(effectiveMaxRate));
+    return matchesBillingRateFilter(
+      billingRate(target, model, configured),
+      effectiveMaxRate,
+    );
   };
   const platforms = [
     ...new Set(
@@ -1375,6 +1381,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
               }}
             >
               <option value="">全部倍率</option>
+              <option value="mismatch">倍率不一致</option>
               {rates.map((rate) => (
                 <option key={rate} value={rate}>
                   ≤ {rate}

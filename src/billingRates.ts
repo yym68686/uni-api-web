@@ -10,6 +10,15 @@ export interface ObservedRate {
 const validRate = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value) && value >= 0;
 
+export function matchesBillingRateFilter(
+  billing: ReturnType<typeof billingRate>,
+  filter: string,
+) {
+  if (!filter) return true;
+  if (filter === "mismatch") return billing.mismatch;
+  return billing.rate != null && billing.rate <= Number(filter);
+}
+
 export function billingRate(
   target?: SubTarget,
   model = "",

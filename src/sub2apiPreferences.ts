@@ -38,7 +38,8 @@ function validate(raw: unknown): SubFilters {
     accountId: field("accountId"),
     model: field("model").slice(0, 512),
     maxRate:
-      maxRate !== "" && Number.isFinite(Number(maxRate)) && Number(maxRate) >= 0
+      maxRate === "mismatch" ||
+      (maxRate !== "" && Number.isFinite(Number(maxRate)) && Number(maxRate) >= 0)
         ? maxRate
         : "",
     sort: field("sort", ["", "asc", "desc"]),

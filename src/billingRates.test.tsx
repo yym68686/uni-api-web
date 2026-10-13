@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { BillingRate } from "./BillingRate";
-import { billingRate } from "./billingRates";
+import { billingRate, matchesBillingRateFilter } from "./billingRates";
 import type { SubTarget } from "./Sub2apiChecks";
 import type { ManagedChannel } from "./channelManagement";
 
@@ -77,6 +77,14 @@ it("keeps unknown models unverified and uses the highest observed rate for a mix
     rate: 3,
     observed: true,
   });
+});
+
+it("filters only verified discrepancies for the selected model or any model", () => {
+  expect(matchesBillingRateFilter(billingRate(target, "luna"), "mismatch")).toBe(true);
+  expect(matchesBillingRateFilter(billingRate(target, "astra"), "mismatch")).toBe(false);
+  expect(matchesBillingRateFilter(billingRate(target, "missing"), "mismatch")).toBe(false);
+  expect(matchesBillingRateFilter(billingRate(target, "free"), "mismatch")).toBe(true);
+  expect(matchesBillingRateFilter(billingRate(target), "mismatch")).toBe(true);
 });
 
 it("does not reuse one group's multiplier for a provider with multiple bound groups", () => {

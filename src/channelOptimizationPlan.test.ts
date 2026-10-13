@@ -17,6 +17,19 @@ import {
 
 const events = optimizationEvents.map((e) => e.id);
 
+it("respects the billing discrepancy filter when proposing model additions", () => {
+  const snapshot = optimizationFixture();
+  const target = snapshot.accounts[0].targets[0];
+  target.billing = { rate: .3, source: "key", checked_at: 1 };
+  target.observed_rates = { new: { rate: 3, observed_at: 100 } };
+  snapshot.filters.maxRate = "mismatch";
+  expect(buildOptimizationPlan(snapshot, ["add"]).changes.map(change => change.model)).toEqual(["new"]);
+  target.observed_rates.new.rate = .3;
+  expect(buildOptimizationPlan(snapshot, ["add"]).changes).toEqual([]);
+  target.observed_rates = {};
+  expect(buildOptimizationPlan(snapshot, ["add"]).changes).toEqual([]);
+});
+
 it("migrates only proven legacy defaults and can combine upgrade with a compatible addition", () => {
   const s = optimizationFixture();
   s.imports.data[0].engine = "gpt";
