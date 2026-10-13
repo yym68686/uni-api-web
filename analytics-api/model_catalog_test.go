@@ -18,6 +18,7 @@ func TestCatalogFallbackPreservesPersistedOperatorSettings(t *testing.T) {
 	// An older authoritative S3 document replaces the local seeded table.
 	if err = e.applyPrices(ctx, []Price{
 		{Model: "gemini-3.1-pro", Source: "fact-discovered"},
+		{Model: "gemini-4-argon", Source: "fact-discovered"},
 		{Model: "glm-5.3", Input: 9, Output: 8, Source: "manual", Verified: false},
 	}); err != nil {
 		t.Fatal(err)
@@ -32,6 +33,9 @@ func TestCatalogFallbackPreservesPersistedOperatorSettings(t *testing.T) {
 	}
 	if p := byModel["gemini-3.1-pro"]; p.Input != 2 || p.Output != 12 || !p.Verified {
 		t.Fatal(p)
+	}
+	if p := byModel["gemini-4-argon"]; p.Input != 2 || p.Output != 10 || p.CacheRead != .1 || !p.Verified {
+		t.Fatal("Argon discovery placeholder was not hydrated", p)
 	}
 	if p := byModel["glm-5.3"]; p.Input != 9 || p.Verified {
 		t.Fatal("manual price changed", p)

@@ -72,3 +72,12 @@ it("includes the official Haiku rates without changing saved operator prices", (
   expect(displayedModelPrices([custom]).find(p => p.model === custom.model)).toEqual(custom);
   expect(canonicalPriceModel("claude-haiku-5-5-thinking")).toBe("claude-haiku-5-5");
 });
+
+it("uses Gemini 4 Argon reference prices for aliases and preserves saved prices", () => {
+  const reference = MODEL_PRICE_CATALOG.find(p => p.model === "gemini-4-argon")!;
+  expect(reference).toMatchObject({ input: 2, output: 10, cache_read: .1, verified: true });
+  expect(referencePrice("gemini-4-argon-high", MODEL_PRICE_CATALOG)).toEqual(reference);
+  const custom = { ...reference, input: 4, output: 20, source: "manual", verified: false };
+  expect(displayedModelPrices([custom]).find(p => p.model === custom.model)).toEqual(custom);
+  expect(referencePrice(custom.model, [custom])).toBeUndefined();
+});

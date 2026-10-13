@@ -81,7 +81,7 @@ func testSubConcurrentAccounts(t *testing.T, interrupt bool) {
 			ok(map[string]any{"items": []subRemoteKey{{ID: 1, Name: subKeyName(id, 1), Key: id, GroupID: 1, Status: "active"}}, "total": 1, "pages": 1})
 		case "/v1/sub2api/billing":
 			writeJSON(w, 200, map[string]any{"object": "sub2api.key_billing", "billing_scope": "token", "effective_rate_multiplier": 1})
-		case "/v1/responses", "/v1/messages", "/v1beta/models/gemini-3.1-pro:streamGenerateContent", "/v1beta/models/gemini-3.8-flash:streamGenerateContent":
+		case "/v1/responses", "/v1/messages", "/v1beta/models/gemini-4-argon:streamGenerateContent", "/v1beta/models/gemini-3.1-pro:streamGenerateContent", "/v1beta/models/gemini-3.8-flash:streamGenerateContent":
 			mu.Lock()
 			active[id]++
 			peak[id] = max(peak[id], active[id])

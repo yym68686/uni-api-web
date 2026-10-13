@@ -1,5 +1,5 @@
 import {expect,it,vi,afterEach} from 'vitest';
-import {loadSubModels,saveSubModels,SUB_MODELS} from './sub2apiModels';
+import {loadSubModels,saveSubModels,SUB_MODELS,subModelProtocolLabel} from './sub2apiModels';
 afterEach(()=>vi.unstubAllGlobals());
 it('preserves extra-model choices across scopes, reloads and catalog additions',()=>{
  const user='scope-models',extra='private-custom';
@@ -22,4 +22,13 @@ it('offers Haiku 5.5 in the shared channel model catalog without resetting saved
  saveSubModels(user,previous.filter(m=>m!=='gpt-6-sol'),previous);
  expect(loadSubModels(user)).toContain('claude-haiku-5-5');
  expect(loadSubModels(user)).not.toContain('gpt-6-sol');
+});
+
+it('offers Gemini 4 Argon with native protocol without resetting model exclusions',()=>{
+ const user='argon-catalog-upgrade';
+ const previous=SUB_MODELS.filter(m=>m!=='gemini-4-argon');
+ saveSubModels(user,previous.filter(m=>m!=='gpt-6-sol'),previous);
+ expect(loadSubModels(user)).toContain('gemini-4-argon');
+ expect(loadSubModels(user)).not.toContain('gpt-6-sol');
+ expect(subModelProtocolLabel('gemini-4-argon')).toBe('Gemini 原生');
 });

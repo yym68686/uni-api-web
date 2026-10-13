@@ -5,7 +5,7 @@ export const SUB_MODELS = modelCatalog
   .map((entry) => entry.model);
 export type SubModel = (typeof SUB_MODELS)[number];
 export const isGeminiModel = (model: string) =>
-  model === "gemini-3.1-pro" || model === "gemini-3.8-flash";
+  model === "gemini-4-argon" || model === "gemini-3.1-pro" || model === "gemini-3.8-flash";
 export const subModelProtocolLabel = (model: string) =>
   isGeminiModel(model)
     ? "Gemini 原生"
