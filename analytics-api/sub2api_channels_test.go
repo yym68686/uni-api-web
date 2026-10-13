@@ -33,11 +33,15 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	_, e = store.db.Exec(`INSERT INTO console_sub_targets(account_id,group_id,name,platform,billing,encrypted_routing_key) VALUES($1,7,'Group','openai','{"rate":0.18}',$2)`, account, routeSecret)
+	_, e = store.db.Exec(`INSERT INTO console_sub_targets(account_id,group_id,name,platform,billing,encrypted_routing_key,remote_key_id) VALUES($1,7,'Group','openai','{"rate":0.18}',$2,625)`, account, routeSecret)
 	if e != nil {
 		t.Fatal(e)
 	}
 	provider := subProviderName(account, 7, key)
+	_, e = store.db.Exec(`INSERT INTO console_sub_usage(id,account_id,group_id,key_id,model,started_at,request_ids,status,result) VALUES($1,$2,7,625,$3,1,'[]','matched','{"status":"matched","input_price":10,"total_cost":1,"actual_cost":3}')`, randomID(), account, checkModel)
+	if e != nil {
+		t.Fatal(e)
+	}
 	otherProvider := subProviderName(account, 7, other)
 	// A second group was inserted at position 1 on the same caller key,
 	// shifting the first group down. Deleting the first must preserve this one.
@@ -155,9 +159,10 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	var listing struct {
-		Data        []subInstalledChannel          `json:"data"`
-		Labels      map[string]map[string]string   `json:"labels"`
-		Multipliers map[string]map[string]*float64 `json:"multipliers"`
+		Data         []subInstalledChannel                                `json:"data"`
+		Labels       map[string]map[string]string                         `json:"labels"`
+		Multipliers  map[string]map[string]*float64                       `json:"multipliers"`
+		ModelBilling map[string]map[string]map[string]subChannelModelRate `json:"model_billing"`
 	}
 	json.Unmarshal(w.Body.Bytes(), &listing)
 	if len(listing.Data) != 3 || listing.Labels[source][provider] != "My Site-0.18" {
@@ -165,6 +170,9 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 	}
 	if listing.Multipliers[source][provider] == nil || *listing.Multipliers[source][provider] != .18 || listing.Multipliers[source][newFirst] != nil {
 		t.Fatal("billing multipliers missing or unknown rate fabricated")
+	}
+	if listing.ModelBilling[source][provider][checkModel].Name != "My Site-3" || listing.ModelBilling[source][provider]["gpt-5.6-sol"].Rate != nil {
+		t.Fatal("model billing did not separate actual and unverified rates", w.Body.String())
 	}
 	for _, v := range listing.Data {
 		if v.Provider == provider && (v.Positions[checkModel] != 2 || v.KeyPrefix != "masked-one" || !v.Manageable || v.Engine != "codex" || v.EngineMode != "auto") {

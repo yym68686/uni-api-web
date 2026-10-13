@@ -52,6 +52,11 @@ export interface SubImports {
   data: InstalledChannel[];
   labels: Record<string, Record<string, string>>;
   multipliers?: Record<string, Record<string, number | null>>;
+  model_billing?: Record<string, Record<string, Record<string, {
+    name: string;
+    rate: number | null;
+    observed_at?: number;
+  }>>>;
   unavailable_sources: string[];
 }
 export function useSubImports(enabled = true) {

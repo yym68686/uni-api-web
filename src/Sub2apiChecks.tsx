@@ -64,6 +64,9 @@ import { useSubPrices, PriceStatus, GroupPriceStatus, UsageDetailRows } from "./
 import type { SubUsage } from "./sub2apiPriceCheck";
 import { matchesPriceFilter } from "./sub2apiPriceCheck";
 import type { ModelPrice } from "./types";
+import { BillingRate } from "./BillingRate";
+import { billingRate } from "./billingRates";
+import type { ObservedRate } from "./billingRates";
 
 export interface Probe {
   curl_token?: string;
@@ -93,6 +96,7 @@ export interface Result {
   verdict: string;
 }
 export interface SubTarget {
+  observed_rates?: Record<string, ObservedRate>;
   details_omitted?: boolean;
   check_source_id?: string;
   tool_use?: ToolUseResult;
@@ -630,7 +634,7 @@ function ManagementChannelDrawer({
               </div>
               <div>
                 <dt>倍率</dt>
-                <dd>{target.billing?.rate ?? "—"}</dd>
+                <dd><BillingRate target={target} model={selected?.model} configured={configured} /></dd>
               </div>
               <div>
                 <dt>可用模型</dt>
@@ -827,17 +831,17 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
     ...new Set(
       candidateRows
         .filter(({ target }) => !platform || target.platform === platform)
-        .map(({ target }) => target.billing?.rate)
+        .map(({ target, configured }) => billingRate(target, model, configured).rate)
         .filter((v): v is number => v != null && Number.isFinite(v)),
     ),
   ].sort((a, b) => a - b);
   const effectiveMaxRate = maxRate;
   if (maxRate && !rates.includes(Number(maxRate))) rates.push(Number(maxRate));
   rates.sort((a, b) => a - b);
-  const withinRate = ({ target }: (typeof candidateRows)[number]) =>
-    !effectiveMaxRate ||
-    (target.billing?.rate != null &&
-      target.billing.rate <= Number(effectiveMaxRate));
+  const withinRate = ({ target, configured }: (typeof candidateRows)[number]) => {
+    const rate = billingRate(target, model, configured).rate;
+    return !effectiveMaxRate || (rate != null && rate <= Number(effectiveMaxRate));
+  };
   const platforms = [
     ...new Set(
       candidateRows
@@ -852,8 +856,8 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   );
   if (sort)
     rows.sort((a, b) => {
-      const x = a.target.billing?.rate,
-        y = b.target.billing?.rate;
+      const x = billingRate(a.target, model, a.configured).rate,
+        y = billingRate(b.target, model, b.configured).rate;
       if (x == null) return y == null ? 0 : 1;
       if (y == null) return -1;
       return sort === "asc" ? x - y : y - x;
@@ -1578,16 +1582,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                           </small>
                           <ChannelProtocolSummary row={managementRow} imports={imports.data} routes={optimizationRoutes}/>
                         </td>
-                        <td
-                          className="mono"
-                          title={
-                            t.billing?.checked_at
-                              ? `倍率采集于 ${time(t.billing.checked_at)}`
-                              : "上游未提供可确认的有效倍率"
-                          }
-                        >
-                          {t.billing?.rate != null ? t.billing.rate : "—"}
-                        </td>
+                        <td><BillingRate target={t} model={model} configured={configured} /></td>
                         <td>
                           {t.state === "error" ? (
                             <span className="check-status error">同步失败</span>

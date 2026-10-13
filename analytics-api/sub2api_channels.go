@@ -13,11 +13,13 @@ import (
 )
 
 type subChannelRef struct {
-	Account string
-	Group   int64
-	Name    string
-	Base    string
-	Rate    *float64
+	AccountName   string
+	ObservedRates map[string]subObservedRate
+	Account       string
+	Group         int64
+	Name          string
+	Base          string
+	Rate          *float64
 }
 type subInstalledChannel struct {
 	Protocol         string            `json:"protocol,omitempty"`
@@ -90,6 +92,7 @@ func (s *controlStore) subChannelRefs(ctx context.Context, owner string) ([]subC
 		if e = rows.Scan(&ref.Account, &ref.Group, &ref.Name, &billing, &ref.Base); e != nil {
 			return nil, e
 		}
+		ref.AccountName = ref.Name
 		ref.Name = subChannelDisplayName(ref.Name, billing)
 		var b subBilling
 		if json.Unmarshal(billing, &b) == nil && b.Rate != nil && *b.Rate >= 0 && !math.IsNaN(*b.Rate) && !math.IsInf(*b.Rate, 0) {
@@ -105,6 +108,14 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 	if e != nil {
 		http.Error(w, "渠道关联读取失败", 503)
 		return
+	}
+	observed, e := s.control.subObservedRates(r.Context(), owner)
+	if e != nil {
+		http.Error(w, "账单倍率读取失败", 503)
+		return
+	}
+	for index := range refs {
+		refs[index].ObservedRates = observed[qualityGroupID(refs[index].Account, refs[index].Group)]
 	}
 	sources, e := s.control.listSources(r.Context())
 	if e != nil {
@@ -299,7 +310,7 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 		}
 		return data[i].KeyID+data[i].Provider < data[j].KeyID+data[j].Provider
 	})
-	writeJSON(w, 200, map[string]any{"data": data, "labels": labels, "multipliers": subChannelMultipliers(data, refs), "unavailable_sources": unavailable})
+	writeJSON(w, 200, map[string]any{"data": data, "labels": labels, "multipliers": subChannelMultipliers(data, refs), "model_billing": subChannelModelRates(data, refs), "unavailable_sources": unavailable})
 }
 
 // Reuse saved billing metadata; sorting must not query upstreams or infer a

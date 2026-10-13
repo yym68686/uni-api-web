@@ -987,6 +987,26 @@ it("filters models, derives rate options from other filters, applies inclusive c
   expect(screen.queryByText("gpt-6-astra · Responses")).not.toBeInTheDocument();
 });
 
+it("shows actual model multipliers and keeps rate filters and sorting consistent with the discrepancy label", async () => {
+  const data = fixtures();
+  data[0].targets[0].billing!.rate = .3;
+  data[1].targets[0].billing!.rate = .4;
+  data[0].targets[0].observed_rates = { "gpt-6-astra": { rate: 3, observed_at: 100 } };
+  data[1].targets[0].observed_rates = { "gpt-6-astra": { rate: .4, observed_at: 100 } };
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ data })));
+  const user = userEvent.setup();
+  mount("observed-rate-filter");
+  await screen.findByRole("table");
+  await user.selectOptions(screen.getByLabelText("检测模型筛选"), "gpt-6-astra");
+  expect(screen.getByText("倍率不一致 · 公布 0.3")).toBeVisible();
+  expect([...screen.getByLabelText("倍率上限筛选").querySelectorAll("option")].map(option => option.value)).toEqual(["", "0.4", "3"]);
+  await user.selectOptions(screen.getByLabelText("倍率排序"), "asc");
+  expect(screen.getByRole("table").querySelector("tbody tr")).toHaveTextContent("two");
+  await user.selectOptions(screen.getByLabelText("倍率上限筛选"), "0.4");
+  expect(screen.getByRole("table").querySelectorAll("tbody tr")).toHaveLength(1);
+  expect(screen.queryByText("倍率不一致 · 公布 0.3")).not.toBeInTheDocument();
+});
+
 it("preselects successful models and imports into the selected source key at the selected position", async () => {
   const data = fixtures().slice(0, 1),
     writes: any[] = [];

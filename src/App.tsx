@@ -99,6 +99,7 @@ import type { CacheTrendProps } from "./CacheTrend";
 import { QualityHistory, QualityProbability, qualityTooltip } from "./QualityHistory";
 import type { ChannelCheck } from "./ChannelChecks";
 import { channelName } from "./format";
+import { channelBilling } from "./channelBilling";
 import { useConsoleSources } from "./consoleSources";
 import {
   defaultFilters,
@@ -1203,11 +1204,7 @@ function Dashboard({
         ? []
         : catalogMetrics(catalog.data, metrics.data)
             .filter((row) => !model || row.model === model)
-            .map((row) => ({
-              ...row,
-              provider_name:
-                imported.data?.labels?.[row.source_id || ""]?.[row.provider],
-            })),
+            .map((row) => channelBilling(row, imported.data)),
     [catalog.data, metrics.data, model, error, imported.data, keyRemoved, modelRemoved, sourceRemoved],
   );
   const controls = useChannelControls({

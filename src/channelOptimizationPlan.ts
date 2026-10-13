@@ -1,5 +1,6 @@
 import { controlRequest } from "./api";
 import { channelProtocolLabel, protocolForEngine } from "./channelProtocol";
+import { billingRate } from "./billingRates";
 import { boundGroups } from "./sub2apiImports";
 import { isCapabilityCheckModel } from "./sub2apiModels";
 import type { InstalledChannel, SubImports } from "./sub2apiImports";
@@ -296,14 +297,14 @@ function modelMatchesFilters(
   prices: ModelPrice[],
 ) {
   const c = e.check;
+  const rate = billingRate(e.target, c.model).rate;
   return (
     (!filters.accountId ||
       (filters.accountId === "__unassigned__"
         ? !e.accountId
         : filters.accountId === e.accountId)) &&
     (!filters.maxRate ||
-      (e.target?.billing?.rate != null &&
-        e.target.billing.rate <= Number(filters.maxRate))) &&
+      (rate != null && rate <= Number(filters.maxRate))) &&
     (!filters.platform || e.target?.platform === filters.platform) &&
     (!filters.quality || e.qualityVerdict === filters.quality) &&
     (!filters.minQuality ||

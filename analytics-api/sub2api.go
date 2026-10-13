@@ -124,24 +124,25 @@ type subModelResult struct {
 	Result  *subResult `json:"result"`
 }
 type subTarget struct {
-	ToolUse         *subCapabilityResult `json:"tool_use,omitempty"`
-	ToolUseState    string               `json:"tool_use_state"`
-	Compaction      *subCompaction       `json:"compaction,omitempty"`
-	CompactionState string               `json:"compaction_state"`
-	QualityCheck    *ChannelCheck        `json:"quality_check,omitempty"`
-	History         qualitySummary       `json:"history"`
-	Models          []subModelResult     `json:"models"`
-	GroupID         int64                `json:"group_id"`
-	Name            string               `json:"name"`
-	Platform        string               `json:"platform"`
-	Channel         string               `json:"channel"`
-	Rate            float64              `json:"rate"`
-	KeyID           int64                `json:"key_id"`
-	Active          bool                 `json:"active"`
-	State           string               `json:"state"`
-	Message         string               `json:"message"`
-	Result          *subResult           `json:"result"`
-	Billing         *subBilling          `json:"billing"`
+	ObservedRates   map[string]subObservedRate `json:"observed_rates,omitempty"`
+	ToolUse         *subCapabilityResult       `json:"tool_use,omitempty"`
+	ToolUseState    string                     `json:"tool_use_state"`
+	Compaction      *subCompaction             `json:"compaction,omitempty"`
+	CompactionState string                     `json:"compaction_state"`
+	QualityCheck    *ChannelCheck              `json:"quality_check,omitempty"`
+	History         qualitySummary             `json:"history"`
+	Models          []subModelResult           `json:"models"`
+	GroupID         int64                      `json:"group_id"`
+	Name            string                     `json:"name"`
+	Platform        string                     `json:"platform"`
+	Channel         string                     `json:"channel"`
+	Rate            float64                    `json:"rate"`
+	KeyID           int64                      `json:"key_id"`
+	Active          bool                       `json:"active"`
+	State           string                     `json:"state"`
+	Message         string                     `json:"message"`
+	Result          *subResult                 `json:"result"`
+	Billing         *subBilling                `json:"billing"`
 }
 type subAccount struct {
 	HasSavedPassword bool               `json:"has_saved_password"`
@@ -265,6 +266,17 @@ func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.subAttachUsage(r.Context(), owner, accounts)
+	observed, err := s.control.subObservedRates(r.Context(), owner)
+	if err != nil {
+		http.Error(w, "账单倍率读取失败", 503)
+		return
+	}
+	for accountIndex := range accounts {
+		for targetIndex := range accounts[accountIndex].Targets {
+			target := &accounts[accountIndex].Targets[targetIndex]
+			target.ObservedRates = observed[qualityGroupID(accounts[accountIndex].ID, target.GroupID)]
+		}
+	}
 	if accountID != "" && (len(accounts) != 1 || len(accounts[0].Targets) != 1) {
 		http.Error(w, "分组不存在", 404)
 		return

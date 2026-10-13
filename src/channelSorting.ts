@@ -89,7 +89,7 @@ function sortValue(
         ? check.history.passed / check.history.successful
         : null;
     case "multiplier":
-      return context.multipliers?.[row.source_id || ""]?.[row.provider] ?? null;
+      return row.billing_multiplier !== undefined ? row.billing_multiplier : context.multipliers?.[row.source_id || ""]?.[row.provider] ?? null;
     case "latency":
       return channelLatency(row.stats).value?.p50_ms ?? null;
     case "wait":
