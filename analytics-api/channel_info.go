@@ -21,8 +21,8 @@ func configuredProviders(ctx context.Context, src controlSource) ([]configuredPr
 	return effectiveProviders(ctx, src, false)
 }
 
-// Diagnostics must target the actual installed channel, including temporary
-// key-owned copies. Inventory/binding discovery keeps its original filtering.
+// Diagnostics and edits must target the actual installed channel, including
+// key-owned imports. Inventory/binding discovery keeps its original filtering.
 func effectiveProviders(ctx context.Context, src controlSource, includeTemporary bool) ([]configuredProvider, error) {
 	if src.configKeyError != nil {
 		return nil, src.configKeyError
@@ -241,7 +241,8 @@ func (s *Service) channelInfo(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "渠道不存在或不属于当前账号", 404)
 		return
 	}
-	providers, err := configuredProviders(ctx, src)
+	// Imported channels may have user-chosen names without a sub2api- prefix.
+	providers, err := effectiveProviders(ctx, src, true)
 	if err != nil {
 		http.Error(w, "无法读取渠道配置，请在设置中配置有效的配置读取管理员密钥", 503)
 		return

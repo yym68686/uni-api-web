@@ -8,9 +8,14 @@ import (
 )
 
 func TestConfiguredModelEligibilityIsScopedAndReusesConfirmedSiteEvidence(t *testing.T) {
+	t.Run("configured", func(t *testing.T) { checkConfiguredModelEligibility(t, false) })
+	t.Run("imported", func(t *testing.T) { checkConfiguredModelEligibility(t, true) })
+}
+
+func checkConfiguredModelEligibility(t *testing.T, temporary bool) {
 	s, account, src := bindingFixture(t, "https://upstream.test/v1")
 	ctx := context.Background()
-	provider := configuredProvider{Provider: "native", Base: "https://upstream.test/v1/responses", API: "fixture-key"}
+	provider := configuredProvider{Provider: "native", Temporary: temporary, Base: "https://upstream.test/v1/responses", API: "fixture-key"}
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "GET" {
 			t.Error("validation must not mutate gateway", r.Method)

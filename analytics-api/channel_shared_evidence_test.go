@@ -16,6 +16,7 @@ func TestBatchSharedEvidenceRequiresIdenticalUpstreamAndNoLocalFailure(t *testin
 	}
 	revisions := map[string]string{"target": "r1", "peer": "r1"}
 	global := map[string]map[string]any{"target": {}, "peer": {}}
+	temporary := false
 	overrides := map[string]map[string]any{"target": {}, "peer": {}}
 	server := func(id string) *httptest.Server {
 		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -25,9 +26,13 @@ func TestBatchSharedEvidenceRequiresIdenticalUpstreamAndNoLocalFailure(t *testin
 			d := definitions[id]
 			switch r.URL.Path {
 			case "/v1/channel-settings/providers":
-				writeJSON(w, 200, map[string]any{"providers": []configuredProvider{{Provider: "native", Base: d["base_url"].(string), API: d["api"]}}})
+				writeJSON(w, 200, map[string]any{"providers": []configuredProvider{{Provider: "native", Temporary: temporary, Base: d["base_url"].(string), API: d["api"]}}})
 			case "/v1/channel-settings/export":
-				writeJSON(w, 200, map[string]any{"revision": "r1", "channel_settings": overrides[id], "temporary_definitions": map[string]any{}})
+				definitions := map[string]any{}
+				if temporary {
+					definitions["native"] = d
+				}
+				writeJSON(w, 200, map[string]any{"revision": "r1", "channel_settings": overrides[id], "temporary_definitions": definitions})
 			case "/v1/api_config":
 				writeJSON(w, 200, map[string]any{"api_config": map[string]any{"providers": []any{d}, "preferences": global[id]}})
 			case "/v1/channel-controls":
@@ -67,6 +72,8 @@ func TestBatchSharedEvidenceRequiresIdenticalUpstreamAndNoLocalFailure(t *testin
 		}
 	}
 	seed(peer, "success", "done", fingerprint(peer))
+	check(true)
+	temporary = true
 	check(true)
 	seed(peer, "success", "done", "stale-credentials")
 	check(false)

@@ -80,7 +80,10 @@ func (s *Service) validateConfiguredModelChanges(ctx context.Context, src contro
 	if len(needed) == 0 {
 		return nil
 	}
-	providers, err := configuredProviders(ctx, src)
+	// Editing an installed channel must include key-owned imports, including
+	// custom names such as openai-next. Inventory discovery excludes these to
+	// avoid duplicate bindings; that filter is not an existence check.
+	providers, err := effectiveProviders(ctx, src, true)
 	if err != nil {
 		return errors.New("无法核对渠道的最新检测配置")
 	}

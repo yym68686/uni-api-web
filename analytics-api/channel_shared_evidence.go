@@ -16,7 +16,7 @@ func (s *Service) sharedConfiguredEvidence(ctx context.Context, target controlSo
 	if err != nil {
 		return result
 	}
-	providers, err := configuredProviders(ctx, peer)
+	providers, err := effectiveProviders(ctx, peer, true)
 	if err != nil {
 		return result
 	}
