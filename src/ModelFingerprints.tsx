@@ -6,13 +6,14 @@ import { channelMembers } from "./channelManagement";
 import type { ManagementRow } from "./channelManagement";
 import { rate, time } from "./format";
 import { Spinner, Tip } from "./ui";
+import fingerprintModels from "../analytics-api/fingerprint/models.json";
 
-export const FINGERPRINT_MODELS = ["gpt-6-astra", "gpt-6.1-sol"];
+export const FINGERPRINT_MODELS = Object.keys(fingerprintModels);
 export const fingerprintLabels: Record<string, string> = {
   match: "匹配", mismatch: "不匹配", insufficient: "样本不足", error: "检测失败",
   queued: "排队中", running: "检测中", interrupted: "已中断", untested: "未检测", not_applicable: "不适用",
 };
-export const fingerprintNote = "每个模型发起 3 次请求。Astra 与 6.1-sol 共用一个指纹类别；概率是请求类别在参考库内的相对概率，不代表身份保证或不降智概率。";
+export const fingerprintNote = "每个模型发起 3 次请求。Astra 与 6.1-sol 共用一个指纹类别；Gemini 3.1 Pro 对应 3.1 Pro Preview，3.8 Flash 和 4 Argon 各自独立。概率是请求类别在参考库内的相对概率，不代表身份保证或不降智概率。";
 export interface FingerprintTarget {
   source_id?: string; provider?: string; account_id?: string; group_id?: number; model: string;
 }

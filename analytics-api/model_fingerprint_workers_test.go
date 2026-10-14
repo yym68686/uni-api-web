@@ -117,6 +117,7 @@ func TestFingerprintSameSiteAccountsGroupsModelsAndNativeChannelsSerialize(t *te
 		{Account: a.ID, Group: 1, Model: checkModel},
 		{Account: a.ID, Group: 2, Model: checkModel},
 		{Account: a.ID, Group: 1, Model: "gpt-6.1-sol"},
+		{Account: a.ID, Group: 1, Model: "gemini-4-argon"},
 		{Account: secondAccount, Group: 1, Model: checkModel},
 		{Source: src.ID, Provider: "same-site", Model: checkModel},
 		{Source: src.ID, Provider: "other-site", Model: checkModel},

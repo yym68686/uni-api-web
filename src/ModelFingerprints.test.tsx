@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { afterEach, expect, it, vi } from "vitest";
-import { FingerprintPanel, FingerprintStatus, fingerprintProbabilityClass, fingerprintTargets, fingerprintKey, rowFingerprints } from "./ModelFingerprints";
+import { FingerprintPanel, FingerprintStatus, FINGERPRINT_MODELS, fingerprintProbabilityClass, fingerprintTargets, fingerprintKey, rowFingerprints } from "./ModelFingerprints";
 import type { FingerprintRecord } from "./ModelFingerprints";
 import type { ManagementRow } from "./channelManagement";
 import { Sub2apiChecks } from "./Sub2apiChecks";
@@ -25,6 +25,18 @@ it("only selects the supported models and fences configured stale evidence",()=>
  expect(rowFingerprints(row,new Map([[fingerprintKey(native),native]]),"gpt-6-astra")[0].record).toBeUndefined();
  expect(rowFingerprints(row,new Map(),"gpt-5.5")).toEqual([]);
 });
+it("enables each supported Gemini with its own probability and target",()=>{
+ const row={account:{id:"one"},target:{group_id:1}} as ManagementRow;
+ for(const model of ["gemini-3.1-pro","gemini-3.8-flash","gemini-4-argon"]){
+  expect(FINGERPRINT_MODELS).toContain(model);
+  expect(fingerprintTargets(row,[model,"gpt-5.5"])).toEqual([{account_id:"one",group_id:1,model}]);
+  const gemini={...record,model,result:{...record.result!,model,expected_class:model,probability:.95}};
+  const view=mount(<FingerprintStatus record={gemini}/>);
+  expect(screen.getByText("不匹配")).toBeInTheDocument();
+  expect(screen.getByText("95.0%")).toHaveClass("quality-partial");
+  view.unmount();
+ }
+});
 it("queues/cancels only fingerprint jobs and retains independent legacy detection",async()=>{
  let current:FingerprintRecord|undefined;const writes:unknown[]=[];
  vi.stubGlobal("fetch",vi.fn(async(input:string,init?:RequestInit)=>{
@@ -38,12 +50,13 @@ it("queues/cancels only fingerprint jobs and retains independent legacy detectio
  await user.click(screen.getByRole("button",{name:"取消检测"}));await screen.findByText("已中断");
  expect(writes).toEqual(Array(2).fill({targets:[{account_id:"one",group_id:1,model:"gpt-6-astra"}]}));
 });
-it("channel management renders fingerprint column and filters per requested model independently of quality",async()=>{
+it.each(["gpt-6-astra","gemini-3.1-pro","gemini-3.8-flash","gemini-4-argon"])("channel management filters %s fingerprints independently of quality",async(model)=>{
+ const scoped={...record,model,result:{...record.result!,model}};
  const accounts=["one","two"].map(id=>({id,name:id,base:`https://${id}.test`,email:"test",state:"idle",message:"",synced_at:1,targets:[{group_id:1,name:`group-${id}`,platform:"openai",channel:id,rate:1,key_id:1,active:true,state:"done",message:"",result:null}]}));
- vi.stubGlobal("fetch",vi.fn(async(input:string)=>Response.json({data:input.endsWith("/accounts")?accounts:input.endsWith("/model-fingerprints")?[record,{...record,account_id:"two",result:{...record.result,status:"match",probability:1}}]:[],labels:{},unavailable_sources:[]})));
- mount(<Sub2apiChecks user="fingerprint-filter-test"/>);await screen.findByText("group-one",{selector:"strong"});
+ vi.stubGlobal("fetch",vi.fn(async(input:string)=>Response.json({data:input.endsWith("/accounts")?accounts:input.endsWith("/model-fingerprints")?[scoped,{...scoped,account_id:"two",result:{...scoped.result,status:"match",probability:1}}]:[],labels:{},unavailable_sources:[]})));
+ mount(<Sub2apiChecks user={`fingerprint-filter-${model}`}/>);await screen.findByText("group-one",{selector:"strong"});
  expect(screen.getByRole("columnheader",{name:/模型指纹/})).toBeInTheDocument();
- const user=userEvent.setup();await user.selectOptions(screen.getByLabelText("检测模型筛选"),"gpt-6-astra");
+ const user=userEvent.setup();await user.selectOptions(screen.getByLabelText("检测模型筛选"),model);
  await user.selectOptions(screen.getByLabelText("模型指纹筛选"),"mismatch");
  await waitFor(()=>expect(screen.queryByText("group-two",{selector:"strong"})).not.toBeInTheDocument());
  expect(screen.getByText("group-one",{selector:"strong"})).toBeInTheDocument();expect(screen.getByText("12.0%")).toBeInTheDocument();

@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -44,7 +46,25 @@ type fingerprintRecord struct {
 	Result   json.RawMessage `json:"result"`
 }
 
-func fingerprintModel(model string) bool { return model == "gpt-6-astra" || model == "gpt-6.1-sol" }
+// Shared by the UI, API and scorer so each model uses the same reference class.
+//
+//go:embed fingerprint/models.json
+var fingerprintModelsJSON []byte
+
+type fingerprintReference struct {
+	ClassID string `json:"class_id"`
+	Effort  string `json:"effort"`
+}
+
+var fingerprintModels = func() map[string]fingerprintReference {
+	var models map[string]fingerprintReference
+	if err := json.Unmarshal(fingerprintModelsJSON, &models); err != nil {
+		panic(err)
+	}
+	return models
+}()
+
+func fingerprintModel(model string) bool { _, ok := fingerprintModels[model]; return ok }
 func (t fingerprintTarget) scope() string {
 	return mustJSON([]any{t.Source, t.Provider, t.Account, t.Group})
 }
@@ -58,7 +78,7 @@ type fingerprintDB interface {
 
 func enqueueFingerprint(ctx context.Context, db fingerprintDB, t fingerprintTarget) error {
 	if !t.valid() {
-		return errors.New("仅支持 gpt-6-astra 与 gpt-6.1-sol 的指纹检测")
+		return errors.New("检测目标无效或模型未接入指纹参考库")
 	}
 	_, err := db.ExecContext(ctx, `INSERT INTO console_model_fingerprints(scope,model,source_id,provider,account_id,group_id)
  VALUES($1,$2,NULLIF($3,''),$4,NULLIF($5,''),$6) ON CONFLICT(scope,model) DO UPDATE SET
@@ -122,7 +142,7 @@ func (s *Service) queueModelFingerprints(w http.ResponseWriter, r *http.Request)
 	defer tx.Rollback()
 	for _, t := range in.Targets {
 		if !t.valid() {
-			http.Error(w, "仅支持 gpt-6-astra 与 gpt-6.1-sol 的指纹检测", 400)
+			http.Error(w, "检测目标无效或模型未接入指纹参考库", 400)
 			return
 		}
 		var allowed bool
@@ -174,7 +194,7 @@ func (s *Service) prepareFingerprint(ctx context.Context, t fingerprintTarget) (
 	client.Timeout = 250 * time.Second
 	if t.Account != "" {
 		var base, encrypted, protocol string
-		err := s.control.db.QueryRowContext(ctx, `SELECT a.base,t.encrypted_key,COALESCE(m.result->'availability'->>'protocol','responses') FROM console_sub_targets t JOIN console_sub_accounts a ON a.id=t.account_id LEFT JOIN console_sub_models m ON m.account_id=t.account_id AND m.group_id=t.group_id AND m.model=$3 WHERE t.account_id=$1 AND t.group_id=$2 AND t.active AND t.encrypted_key<>''`, t.Account, t.Group, t.Model).Scan(&base, &encrypted, &protocol)
+		err := s.control.db.QueryRowContext(ctx, `SELECT a.base,t.encrypted_key,COALESCE(NULLIF(m.result->'availability'->>'protocol',''),$4) FROM console_sub_targets t JOIN console_sub_accounts a ON a.id=t.account_id LEFT JOIN console_sub_models m ON m.account_id=t.account_id AND m.group_id=t.group_id AND m.model=$3 WHERE t.account_id=$1 AND t.group_id=$2 AND t.active AND t.encrypted_key<>''`, t.Account, t.Group, t.Model, subModelProtocol(t.Model)).Scan(&base, &encrypted, &protocol)
 		if err != nil {
 			return plan, errors.New("站点渠道已不可用")
 		}
@@ -187,6 +207,12 @@ func (s *Service) prepareFingerprint(ctx context.Context, t fingerprintTarget) (
 		config["base_url"], config["key"] = base, key
 		if protocol == "messages" {
 			config["format"] = "anthropic"
+		} else if protocol == "gemini" {
+			config["format"] = "gemini"
+		} else if protocol == "chat" {
+			config["format"] = "openai"
+		} else if protocol != "responses" {
+			return plan, errors.New("渠道检测协议不受支持")
 		}
 	} else {
 		src, err := s.control.source(ctx, t.Source)
@@ -257,10 +283,18 @@ func runFingerprintViaTransport(ctx context.Context, client *http.Client, config
 	path := "/v1/responses"
 	if config["format"] == "anthropic" {
 		path = "/v1/messages"
+	} else if config["format"] == "gemini" {
+		path = "/v1beta/models/" + url.PathEscape(model) + ":streamGenerateContent"
+	} else if config["format"] == "openai" {
+		path = "/v1/chat/completions"
+	}
+	query := ""
+	if config["format"] == "gemini" {
+		query = "alt=sse"
 	}
 	var requests atomic.Int32
 	server := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "POST" || r.URL.Path != path || r.Header.Get("Authorization") != "Bearer "+token && r.Header.Get("x-api-key") != token {
+		if r.Method != "POST" || r.URL.EscapedPath() != path || r.URL.RawQuery != query || r.Header.Get("Authorization") != "Bearer "+token && r.Header.Get("x-api-key") != token && r.Header.Get("x-goog-api-key") != token {
 			http.Error(w, "invalid probe", 403)
 			return
 		}
@@ -272,7 +306,13 @@ func runFingerprintViaTransport(ctx context.Context, client *http.Client, config
 		var body struct {
 			Model string `json:"model"`
 		}
-		if json.Unmarshal(raw, &body) != nil || body.Model != model || requests.Add(1) > 3 {
+		decodeErr := json.Unmarshal(raw, &body)
+		validBody := decodeErr == nil && body.Model == model
+		// Native Gemini selects the fixed model in the URL, never in the body.
+		if config["format"] == "gemini" {
+			validBody = decodeErr == nil && body.Model == "" && len(raw) > 0 && raw[0] == '{'
+		}
+		if !validBody || requests.Add(1) > 3 {
 			http.Error(w, "invalid probe", 400)
 			return
 		}
@@ -280,7 +320,11 @@ func runFingerprintViaTransport(ctx context.Context, client *http.Client, config
 		defer cancel()
 		stop := context.AfterFunc(r.Context(), cancel)
 		defer stop()
-		req, err := http.NewRequestWithContext(call, "POST", strings.TrimRight(base, "/")+path, bytes.NewReader(raw))
+		destination := strings.TrimRight(base, "/") + path
+		if query != "" {
+			destination += "?" + query
+		}
+		req, err := http.NewRequestWithContext(call, "POST", destination, bytes.NewReader(raw))
 		if err != nil {
 			http.Error(w, "invalid endpoint", 502)
 			return
@@ -291,6 +335,8 @@ func runFingerprintViaTransport(ctx context.Context, client *http.Client, config
 		if path == "/v1/messages" {
 			req.Header.Set("x-api-key", key)
 			req.Header.Set("anthropic-version", "2023-06-01")
+		} else if config["format"] == "gemini" {
+			req.Header.Set("x-goog-api-key", key)
 		} else {
 			req.Header.Set("Authorization", "Bearer "+key)
 		}

@@ -1,18 +1,19 @@
 {
   "repository": "https://github.com/Ikaleio/lm-detector",
-  "commit": "97eb41f78722d32524265bb259fe6258856ca470",
+  "commit": "5fcfb4cd34da10915daa38d3ec04d573d946c97e",
   "files": {
     "shared/positional.ts": "a44799a179e8eb0b19b83449f0bdb6fa914a64a27c7dc2e5cd71fad31e93719a",
-    "shared/shared-detector.ts": "769be84fa2fe8e4b565fa6043c966785ba188b98cf26b1d4125e776ce9346026",
+    "shared/shared-detector.ts": "06698e67671f9539caa8e294774e82bb0b68e4a3ab6d1fca455073782b84bd43",
     "shared/detection.ts": "898ab49e1e13c5e8702d782d2a1d1a0d4c36ad136fc559d4b7e0d2336a5d1653",
     "shared/completion.ts": "5eec6adc0f8790cd419daeec90998f7a3da17bc58b58ae61b399b9d5d937f16b",
     "shared/completion-request.ts": "f70ece4b4ee9653e138f59ab6d1fd0d47cc597b317c99ffba6e9c21d68423a15",
     "shared/throughput.ts": "f5a8cdb500545ddcfa10628e34129c29c5b5ceeb4453d59b8d1705129b5e4630",
-    "shared/fingerprint-core.js": "5a096c0e5638b9b7e266714725660549273b018e0b5eddbec3302ef96af21f16",
+    "shared/fingerprint-core.js": "f7a88e9b0141b0088608a2c86ba9f26cf6b916860e94c3c7f14028c94c165be7",
     "shared/challenge-browser.js": "65884da44d29b7d5337993609414596272010cb07cffe98b0c5546b1fe9728e4",
-    "data/unified_bank.json": "5b7e0cc1e29c07ed2f074cff9825caa73456a61318872381ac993dff297c556f",
-    "data/shared_detector.json": "1f4275364dcfeb1d72a3de5a27edd24076ef6beef6e8488dbf72fa8bd93f5d15",
-    "shared/types.ts": "1199e1086ad586813ca939afdf61181baef29bb4f91ed97941476d516c4ea06d",
-    "shared/reference.ts": "f1d8c73c503e72a9c76ce3110989680f9d0ce1833f00dfeb2f1f6501a40211a8"
+    "shared/types.ts": "75590a2b2d706e8a8153804a48fec0ab0e6d39da21fe1ee7c4691a03b6bdd61e",
+    "shared/reference.ts": "17547966e022bbea074794b6b1fe3916a028dba6fe8741bdacaae30077f1d0f0",
+    "shared/detector-codec.ts": "4ebc548f4c03f3a150e1d395c547ca84722af60a2a115bf05a17d448dd840acb",
+    "data/unified_bank.json": "4778a1684d5464449967856e2e82d340e9ed0e68c555c157931224a6a365cc7d",
+    "data/shared_detector.bin": "aa21df4a09906d38e6fce567ac483555abd0a38939ebb14794c0364db52f4a18"
   }
 }

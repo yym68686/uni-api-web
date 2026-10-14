@@ -23,6 +23,9 @@ func TestSharedFingerprintProcessFiftyCollectorsCancelIsolationAndCrash(t *testi
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, r.Body)
 		key := r.Header.Get("Authorization")
+		if value := r.Header.Get("x-goog-api-key"); value != "" {
+			key = "Bearer " + value
+		}
 		mu.Lock()
 		calls[key]++
 		n := calls[key]
@@ -35,7 +38,11 @@ func TestSharedFingerprintProcessFiftyCollectorsCancelIsolationAndCrash(t *testi
 				return
 			}
 		}
-		writeJSON(w, 200, map[string]any{"status": "completed", "output": []any{map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "1 2 3"}}}}})
+		if r.URL.Path == "/v1beta/models/gemini-4-argon:streamGenerateContent" {
+			subNativeSSE(w, "gemini-4-argon", "1 2 3")
+		} else {
+			writeJSON(w, 200, map[string]any{"status": "completed", "output": []any{map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "1 2 3"}}}}})
+		}
 	}))
 	defer server.Close()
 	type completion struct {
@@ -50,7 +57,11 @@ func TestSharedFingerprintProcessFiftyCollectorsCancelIsolationAndCrash(t *testi
 			jobCtx, cancelOne = context.WithCancel(ctx)
 		}
 		go func() {
-			_, err := p.detect(jobCtx, map[string]any{"base_url": server.URL, "key": fmt.Sprintf("job-%d", i), "model": checkModel})
+			config := map[string]any{"base_url": server.URL, "key": fmt.Sprintf("job-%d", i), "model": checkModel}
+			if i%2 == 0 {
+				config["model"], config["format"] = "gemini-4-argon", "gemini"
+			}
+			_, err := p.detect(jobCtx, config)
 			results <- completion{i, err}
 		}()
 	}

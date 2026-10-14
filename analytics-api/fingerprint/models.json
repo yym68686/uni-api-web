@@ -1,0 +1,7 @@
+{
+  "gpt-6-astra": { "class_id": "gpt-6-astra", "class_name": "gpt-6-astra/6.1-sol", "effort": "low" },
+  "gpt-6.1-sol": { "class_id": "gpt-6-astra", "class_name": "gpt-6-astra/6.1-sol", "effort": "low" },
+  "gemini-3.1-pro": { "class_id": "gemini-3.1-pro-preview", "class_name": "gemini-3.1-pro-preview", "effort": "default" },
+  "gemini-3.8-flash": { "class_id": "gemini-3.8-flash", "class_name": "gemini-3.8-flash", "effort": "default" },
+  "gemini-4-argon": { "class_id": "gemini-4-argon", "class_name": "gemini-4-argon", "effort": "low" }
+}

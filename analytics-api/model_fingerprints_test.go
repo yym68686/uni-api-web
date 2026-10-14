@@ -164,89 +164,100 @@ func TestModelFingerprintQueueScopesLeasesCancelAndExpiry(t *testing.T) {
 	}
 }
 func TestModelFingerprintEndToEndTargetedThreeCallsAndIndependentQuality(t *testing.T) {
-	raw, err := os.ReadFile("fingerprint/reference-fixture.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var samples map[string][]struct {
-		Text string `json:"text"`
-	}
-	json.Unmarshal(raw, &samples)
-	var calls atomic.Int32
-	var targeted atomic.Bool
-	targeted.Store(true)
-	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer gateway-secret" {
-			t.Error("wrong credential")
-		}
-		switch r.URL.Path {
-		case "/v1/observability/runtime":
-			writeJSON(w, 200, map[string]any{"capabilities": map[string]bool{"targeted_responses": targeted.Load(), "targeted_unconfigured_models": true}})
-		case "/v1/channel-settings/providers":
-			writeJSON(w, 200, map[string]any{"providers": []configuredProvider{{Provider: "native", Base: "https://upstream.example/v1/responses", API: "upstream-secret"}}})
-		case "/v1/responses":
-			if r.Header.Get("X-Uni-API-Provider") != "native" {
-				t.Error("non-targeted call")
+	for _, requested := range []string{"gpt-6.1-sol", "gemini-3.1-pro", "gemini-3.8-flash", "gemini-4-argon"} {
+		t.Run(requested, func(t *testing.T) {
+			raw, err := os.ReadFile("fingerprint/reference-fixture.json")
+			if err != nil {
+				t.Fatal(err)
 			}
-			var body map[string]any
-			json.NewDecoder(r.Body).Decode(&body)
-			if body["model"] != "gpt-6.1-sol" || body["stream"] != true || mustJSON(body["reasoning"]) != `{"effort":"low"}` {
-				t.Error("incorrect parameters", body["model"])
+			var samples map[string][]struct {
+				Text string `json:"text"`
 			}
-			n := calls.Add(1)
-			text := samples["gpt-6-astra"][(n-1)%3].Text
-			w.Header().Set("Content-Type", "text/event-stream")
-			fmt.Fprintf(w, "data: %s\n\n", mustJSON(map[string]any{"type": "response.completed", "response": map[string]any{"status": "completed", "output": []any{map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": text}}}}}}))
-		default:
-			t.Error("unexpected endpoint", r.URL.Path)
-			http.NotFound(w, r)
-		}
-	}))
-	defer gateway.Close()
-	s, a, src := bindingFixture(t, "https://site.example")
-	src.Base = gateway.URL
-	s.control.saveSource(context.Background(), src, false)
-	target := fingerprintTarget{Source: src.ID, Provider: "native", Model: "gpt-6.1-sol"}
-	if w := fingerprintRequest(t, s, a.Owner, "POST", []fingerprintTarget{target}); w.Code != 202 {
-		t.Fatal(w.Code, w.Body.String())
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if !s.fingerprintOne(ctx) {
-		t.Fatal("no job")
-	}
-	if calls.Load() != 3 {
-		t.Fatal("expected exactly three calls", calls.Load())
-	}
-	w := fingerprintRequest(t, s, a.Owner, "GET", nil)
-	if w.Code != 200 {
-		t.Fatal(w.Code, w.Body.String())
-	}
-	var out struct {
-		Data []fingerprintRecord `json:"data"`
-	}
-	json.Unmarshal(w.Body.Bytes(), &out)
-	var saved *fingerprintRecord
-	for i := range out.Data {
-		if out.Data[i].Source == src.ID {
-			saved = &out.Data[i]
-		}
-	}
-	if saved == nil || saved.State != "done" || !strings.Contains(string(saved.Result), `"status":"match"`) || saved.Revision == "" {
-		t.Fatalf("bad result %+v", saved)
-	}
-	if strings.Contains(w.Body.String(), "secret") {
-		t.Fatal("credential leaked")
-	}
-	var n int
-	s.control.db.QueryRow(`SELECT count(*) FROM console_channel_checks WHERE source_id=$1`, src.ID).Scan(&n)
-	if n != 0 {
-		t.Fatal("fingerprint polluted legacy quality")
-	}
-	targeted.Store(false)
-	_, err = s.prepareFingerprint(ctx, target)
-	if err == nil || calls.Load() != 3 {
-		t.Fatal("capability preflight did not fence paid request", err)
+			json.Unmarshal(raw, &samples)
+			var calls atomic.Int32
+			var targeted atomic.Bool
+			targeted.Store(true)
+			gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("Authorization") != "Bearer gateway-secret" {
+					t.Error("wrong credential")
+				}
+				switch r.URL.Path {
+				case "/v1/observability/runtime":
+					writeJSON(w, 200, map[string]any{"capabilities": map[string]bool{"targeted_responses": targeted.Load(), "targeted_unconfigured_models": true}})
+				case "/v1/channel-settings/providers":
+					writeJSON(w, 200, map[string]any{"providers": []configuredProvider{{Provider: "native", Base: "https://upstream.example/v1/responses", API: "upstream-secret"}}})
+				case "/v1/responses":
+					if r.Header.Get("X-Uni-API-Provider") != "native" {
+						t.Error("non-targeted call")
+					}
+					var body map[string]any
+					json.NewDecoder(r.Body).Decode(&body)
+					if body["model"] != requested || body["stream"] != true {
+						t.Error("incorrect parameters", body["model"])
+					}
+					if fingerprintModels[requested].Effort == "low" {
+						if mustJSON(body["reasoning"]) != `{"effort":"low"}` {
+							t.Error("wrong reference effort")
+						}
+					} else if body["reasoning"] != nil {
+						t.Error("reference uses provider default effort")
+					}
+					n := calls.Add(1)
+					text := samples[fingerprintModels[requested].ClassID][(n-1)%3].Text
+					w.Header().Set("Content-Type", "text/event-stream")
+					fmt.Fprintf(w, "data: %s\n\n", mustJSON(map[string]any{"type": "response.completed", "response": map[string]any{"status": "completed", "output": []any{map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": text}}}}}}))
+				default:
+					t.Error("unexpected endpoint", r.URL.Path)
+					http.NotFound(w, r)
+				}
+			}))
+			defer gateway.Close()
+			s, a, src := bindingFixture(t, "https://site.example")
+			src.Base = gateway.URL
+			s.control.saveSource(context.Background(), src, false)
+			target := fingerprintTarget{Source: src.ID, Provider: "native", Model: requested}
+			if w := fingerprintRequest(t, s, a.Owner, "POST", []fingerprintTarget{target}); w.Code != 202 {
+				t.Fatal(w.Code, w.Body.String())
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if !s.fingerprintOne(ctx) {
+				t.Fatal("no job")
+			}
+			if calls.Load() != 3 {
+				t.Fatal("expected exactly three calls", calls.Load())
+			}
+			w := fingerprintRequest(t, s, a.Owner, "GET", nil)
+			if w.Code != 200 {
+				t.Fatal(w.Code, w.Body.String())
+			}
+			var out struct {
+				Data []fingerprintRecord `json:"data"`
+			}
+			json.Unmarshal(w.Body.Bytes(), &out)
+			var saved *fingerprintRecord
+			for i := range out.Data {
+				if out.Data[i].Source == src.ID {
+					saved = &out.Data[i]
+				}
+			}
+			if saved == nil || saved.State != "done" || !strings.Contains(string(saved.Result), `"status":"match"`) || saved.Revision == "" {
+				t.Fatalf("bad result %+v", saved)
+			}
+			if strings.Contains(w.Body.String(), "secret") {
+				t.Fatal("credential leaked")
+			}
+			var n int
+			s.control.db.QueryRow(`SELECT count(*) FROM console_channel_checks WHERE source_id=$1`, src.ID).Scan(&n)
+			if n != 0 {
+				t.Fatal("fingerprint polluted legacy quality")
+			}
+			targeted.Store(false)
+			_, err = s.prepareFingerprint(ctx, target)
+			if err == nil || calls.Load() != 3 {
+				t.Fatal("capability preflight did not fence paid request", err)
+			}
+		})
 	}
 }
 func TestModelFingerprintSiteResultInvalidatesAfterKeyRotation(t *testing.T) {
@@ -287,6 +298,10 @@ func TestModelFingerprintSiteResultInvalidatesAfterKeyRotation(t *testing.T) {
 
 func TestModelFingerprintAutomaticBatchOnlySupportedAvailableModels(t *testing.T) {
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v1beta/models/") {
+			subNativeSSE(w, subFixtureProbeModel(r), "test")
+			return
+		}
 		if r.URL.Path != "/v1/responses" {
 			http.NotFound(w, r)
 			return
@@ -307,7 +322,7 @@ func TestModelFingerprintAutomaticBatchOnlySupportedAvailableModels(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, model := range []string{checkModel, "gpt-6.1-sol", "gpt-5.5"} {
+	for _, model := range []string{checkModel, "gpt-6.1-sol", "gpt-5.5", "gemini-3.1-pro", "gemini-3.8-flash", "gemini-4-argon"} {
 		if _, err = s.control.db.Exec(`INSERT INTO console_sub_models(account_id,group_id,model,state) VALUES($1,1,$2,'queued')`, a.ID, model); err != nil {
 			t.Fatal(err)
 		}
@@ -318,8 +333,8 @@ func TestModelFingerprintAutomaticBatchOnlySupportedAvailableModels(t *testing.T
 	}
 	var n int
 	s.control.db.QueryRow(`SELECT count(*) FROM console_model_fingerprints WHERE account_id=$1 AND state='queued'`, a.ID).Scan(&n)
-	if n != 2 {
-		t.Fatal("batch should queue exactly two supported fingerprints", n)
+	if n != 5 {
+		t.Fatal("batch should queue exactly five supported fingerprints", n)
 	}
 	if w := fingerprintRequest(t, s, a.Owner, "GET", nil); w.Code != http.StatusOK {
 		t.Fatalf("batch-queued fingerprints unreadable: HTTP %d: %s", w.Code, w.Body.String())

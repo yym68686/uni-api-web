@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { collect, detect, loadReference, score, scoreCollected } from './runner.mjs';
+import { collect, detect, loadReference, models, score, scoreCollected } from './runner.mjs';
 import { analyzeSharedOutputs } from './upstream/shared-detector.ts';
 import { generateChallenges } from './upstream/challenge-browser.js';
+import { completeGemini } from './gemini.mjs';
 const fixture = JSON.parse(readFileSync(new URL('./reference-fixture.json', import.meta.url)));
 const reference = loadReference();
 
@@ -29,7 +30,7 @@ test('separate collection and scoring preserve results and never return raw outp
 });
 
 test('full reference bank, original scoring and the merged Astra/Sol class are preserved', () => {
-  assert.equal(reference.bank.models.length, 57);
+  assert.equal(reference.bank.models.length, 59);
   for (const model of ['gpt-6-astra', 'gpt-6.1-sol']) {
     const result = score(model, fixture['gpt-6-astra'], reference);
     const original = analyzeSharedOutputs(fixture['gpt-6-astra'], reference.bank, reference.detector);
@@ -93,4 +94,76 @@ test('error SSE and truncated completion cannot count as complete samples', asyn
     const result=await detect({base_url:'https://mock.example',key:'secret',model:'gpt-6-astra'},async()=>new Response(sse,{headers:{'content-type':'text/event-stream'}}));
     assert.equal(result.status,'error');assert.equal(result.probability,null);
   }
+});
+
+test('every catalog Gemini with an upstream reference is enabled with its exact class', () => {
+  const catalog = JSON.parse(readFileSync(new URL('../model_catalog.json', import.meta.url)));
+  const classes = JSON.parse(readFileSync(new URL('./models.json', import.meta.url)));
+  for (const entry of catalog.filter(p => p.model.startsWith('gemini-'))) {
+    const id = entry.model === 'gemini-3.1-pro' ? 'gemini-3.1-pro-preview' : entry.model;
+    assert.ok(reference.detector.model_ids.includes(id));
+    assert.ok(models.includes(entry.model));
+    const outputs = fixture[id], result = score(entry.model, outputs, reference);
+    const original = analyzeSharedOutputs(outputs, reference.bank, reference.detector);
+    assert.equal(classes[entry.model].class_id, id);
+    assert.equal(result.status, 'match');
+    assert.equal(result.expected_class, id);
+    assert.equal(result.probability, original.results.find(r => r.model === id).probability);
+    assert.deepEqual(result.candidates, original.results.slice(0,5));
+    const mismatch = score(entry.model, fixture['gpt-6-astra'], reference);
+    assert.equal(mismatch.status, 'mismatch');
+    assert.ok(mismatch.probability < mismatch.candidates[0].probability);
+  }
+});
+
+test('Gemini native challenges use sequential requests, low Argon thinking, and visible text only', async () => {
+  let active = 0, peak = 0, calls = 0;
+  const result = await detect({model:'gemini-4-argon',format:'gemini',base_url:'https://mock.example',key:'secret'},async(url,cfg,body)=>{
+    assert.equal(url,'https://mock.example/v1beta/models/gemini-4-argon:streamGenerateContent?alt=sse');
+    assert.deepEqual(body.generationConfig,{maxOutputTokens:8192,thinkingConfig:{thinkingLevel:'low'}});
+    assert.equal(body.model,undefined); assert.ok(body.contents[0].parts[0].text.includes('355'));
+    peak = Math.max(peak,++active);
+    const text = fixture['gemini-4-argon'][calls++ % 3].text;
+    await new Promise(resolve=>setTimeout(resolve,1)); active--;
+    const payload = `data: ${JSON.stringify({candidates:[{index:0,content:{parts:[{text:'private thinking',thought:true}]}}]})}\r\n\r\ndata: ${JSON.stringify({candidates:[{index:0,content:{parts:[{text}]},finishReason:'STOP'}]})}\r\n\r\n`;
+    const bytes = new TextEncoder().encode(payload);
+    return new Response(new ReadableStream({start(controller){for(let i=0;i<bytes.length;i+=7)controller.enqueue(bytes.slice(i,i+7));controller.close()}}),{headers:{'Content-Type':'text/event-stream'}});
+  });
+  assert.equal(calls,3);assert.equal(peak,1);assert.equal(result.status,'match');
+  assert.ok(!JSON.stringify(result).includes('private thinking'));
+  for (const model of ['gemini-3.1-pro','gemini-3.8-flash']) {
+    const collected = await collect({model,format:'gemini',base_url:'https://mock.example',key:'secret'},async(_url,_cfg,body)=>{
+      assert.equal(body.generationConfig.thinkingConfig,undefined);
+      return Response.json({candidates:[{content:{parts:[{text:'1 2 3'}]},finishReason:'STOP'}]});
+    });
+    assert.equal(collected.samples.filter(s=>s.state==='done').length,3);
+  }
+});
+
+test('Gemini truncation, safety blocks, errors and reasoning-only outputs never become mismatch', async () => {
+  const text = fixture['gemini-4-argon'][0].text;
+  for (const payload of [
+    {candidates:[{content:{parts:[{text}]}}]},
+    {candidates:[{content:{parts:[{text}]},finishReason:'MAX_TOKENS'}]},
+    {candidates:[{content:{parts:[{text,thought:true}]},finishReason:'STOP'}]},
+    {candidates:[{content:{parts:[{functionCall:{name:'fake'}}]},finishReason:'STOP'}]},
+    {promptFeedback:{blockReason:'SAFETY'}},
+    {error:{message:'do not persist this'}}
+  ]) {
+    let calls=0;
+    const result=await detect({model:'gemini-4-argon',format:'gemini',base_url:'https://mock.example',key:'secret'},async()=>{calls++;return new Response(`data: ${JSON.stringify(payload)}\n\n`,{headers:{'Content-Type':'text/event-stream'}})});
+    assert.equal(calls,3);assert.equal(result.status,'error');assert.equal(result.probability,null);
+    assert.ok(!JSON.stringify(result).includes('do not persist this'));
+  }
+  await assert.rejects(completeGemini({model:'gemini-4-argon',baseUrl:'https://mock.example',effort:'low'},'test',async()=>Response.json({error:{message:'private'}},{status:429})),e=>e.httpStatus===429);
+});
+
+test('Gemini Chat Completions compatibility preserves requested model and reference effort', async()=>{
+  let calls=0;
+  const result=await detect({model:'gemini-4-argon',format:'openai',base_url:'https://mock.example',key:'secret'},async(url,_cfg,body)=>{
+    assert.equal(url,'https://mock.example/v1/chat/completions');assert.equal(body.model,'gemini-4-argon');
+    assert.equal(body.reasoning_effort,'low');assert.equal(body.max_tokens,8192);
+    return Response.json({choices:[{message:{content:fixture['gemini-4-argon'][calls++%3].text},finish_reason:'stop'}]});
+  });
+  assert.equal(calls,3);assert.equal(result.status,'match');
 });
