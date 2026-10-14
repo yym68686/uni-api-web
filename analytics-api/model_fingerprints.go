@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -40,10 +41,11 @@ type fingerprintTarget struct {
 }
 type fingerprintRecord struct {
 	fingerprintTarget
-	State    string          `json:"state"`
-	Message  string          `json:"message"`
-	Revision string          `json:"revision"`
-	Result   json.RawMessage `json:"result"`
+	State       string          `json:"state"`
+	Message     string          `json:"message"`
+	Revision    string          `json:"revision"`
+	UpdatedAtMS int64           `json:"updated_at_ms"`
+	Result      json.RawMessage `json:"result"`
 }
 
 // Shared by the UI, API and scorer so each model uses the same reference class.
@@ -90,7 +92,7 @@ func (s *Service) modelFingerprints(w http.ResponseWriter, r *http.Request) {
 	owner, _ := s.controlUser(r)
 	rows, err := s.control.db.QueryContext(r.Context(), `SELECT COALESCE(f.source_id,''),f.provider,COALESCE(f.account_id,''),f.group_id,f.model,
  CASE WHEN f.state='running' AND f.deadline<now() THEN 'interrupted' ELSE f.state END,f.message,f.revision,f.result,
- COALESCE(a.base,''),COALESCE(t.encrypted_key,'')
+ COALESCE(a.base,''),COALESCE(t.encrypted_key,''),floor(extract(epoch FROM f.updated_at)*1000)::BIGINT
  FROM console_model_fingerprints f LEFT JOIN console_sub_accounts a ON a.id=f.account_id
  LEFT JOIN console_sub_targets t ON t.account_id=f.account_id AND t.group_id=f.group_id
  LEFT JOIN console_sources s ON s.id=f.source_id WHERE (a.owner=$1 OR s.enabled)`, owner)
@@ -106,7 +108,7 @@ func (s *Service) modelFingerprints(w http.ResponseWriter, r *http.Request) {
 		// Queued, running and unsuccessful checks legitimately have SQL NULL
 		// results. database/sql supports NULL for []byte, but not *json.RawMessage.
 		var result []byte
-		if err = rows.Scan(&f.Source, &f.Provider, &f.Account, &f.Group, &f.Model, &f.State, &f.Message, &f.Revision, &result, &base, &key); err != nil {
+		if err = rows.Scan(&f.Source, &f.Provider, &f.Account, &f.Group, &f.Model, &f.State, &f.Message, &f.Revision, &result, &base, &key, &f.UpdatedAtMS); err != nil {
 			break
 		}
 		f.Result = json.RawMessage(result)
@@ -120,7 +122,12 @@ func (s *Service) modelFingerprints(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "模型指纹记录读取失败", 503)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"data": data})
+	supported := make([]string, 0, len(fingerprintModels))
+	for model := range fingerprintModels {
+		supported = append(supported, model)
+	}
+	sort.Strings(supported)
+	writeJSON(w, 200, map[string]any{"data": data, "supported_models": supported})
 }
 func (s *Service) queueModelFingerprints(w http.ResponseWriter, r *http.Request) {
 	var in struct {

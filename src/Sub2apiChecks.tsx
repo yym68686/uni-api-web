@@ -1617,7 +1617,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                           )}
                         </td>
                         <td>{selected ? <PriceStatus check={selected} prices={prices.data?.data} /> : <GroupPriceStatus checks={checks} prices={prices.data?.data} />}</td>
-                        <td><FingerprintCell entries={rowFingerprints(managementRow,fingerprints.index,model)} error={fingerprints.error} loading={fingerprints.isPending}/></td>
+                        <td><FingerprintCell entries={rowFingerprints(managementRow,fingerprints.index,model)} error={fingerprints.error} loading={fingerprints.isPending} supportedModels={fingerprints.supportedModels}/></td>
                         <td>
                           <div className="quality-status-stack"><Verdict result={groupQualityResult(t)} history={t.history} /><QualityProbability history={t.history} checkedAt={groupQualityResult(t)?.checked_at} /></div>
                         </td>

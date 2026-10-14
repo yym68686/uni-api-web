@@ -5,7 +5,7 @@ import * as Tooltip from "@radix-ui/react-tooltip";
 import { afterEach, expect, it, vi } from "vitest";
 import { FingerprintPanel, FingerprintStatus, FINGERPRINT_MODELS, fingerprintProbabilityClass, fingerprintTargets, fingerprintKey, rowFingerprints } from "./ModelFingerprints";
 import type { FingerprintRecord } from "./ModelFingerprints";
-import type { ManagementRow } from "./channelManagement";
+import type { ManagedChannel, ManagementRow } from "./channelManagement";
 import { Sub2apiChecks } from "./Sub2apiChecks";
 import { loadSubFilters, saveSubFilters, subFilterDefaults } from "./sub2apiPreferences";
 afterEach(()=>vi.unstubAllGlobals());
@@ -40,6 +40,7 @@ it("enables each supported Gemini with its own probability and target",()=>{
 it("queues/cancels only fingerprint jobs and retains independent legacy detection",async()=>{
  let current:FingerprintRecord|undefined;const writes:unknown[]=[];
  vi.stubGlobal("fetch",vi.fn(async(input:string,init?:RequestInit)=>{
+  if(input.endsWith("/channel-management"))return Response.json({data:[],unavailable_sources:[]});
   expect(input).toContain("/v1/model-fingerprints");
   if(init?.method){writes.push(JSON.parse(init.body as string));current={...record,state:init.method==="DELETE"?"interrupted":"queued",result:null};return Response.json({accepted:true})}
   return Response.json({data:current?[current]:[]});
@@ -74,4 +75,50 @@ it("shows backend rollout unavailability without reporting untested or submittin
  await screen.findByText("指纹检测服务待更新");
  expect(screen.getByRole("button",{name:"检测指纹"})).toBeDisabled();
  expect(screen.queryByText("未检测")).not.toBeInTheDocument();
+});
+
+it("waits for backend Gemini support and enables detection after capability refresh",async()=>{
+ let updated=false;const writes:unknown[]=[];
+ vi.stubGlobal("fetch",vi.fn(async(path:string,init?:RequestInit)=>{
+  if(path.endsWith("/channel-management"))return Response.json({data:[],unavailable_sources:[]});
+  if(init?.method){writes.push(JSON.parse(init.body as string));return Response.json({accepted:true});}
+  return Response.json({data:[],...(updated?{supported_models:FINGERPRINT_MODELS}:{})});
+ }));
+ mount(<FingerprintPanel targets={[{source_id:"fugue",provider:"native",model:"gemini-4-argon"}]}/>);
+ const user=userEvent.setup();
+ await screen.findByText("指纹检测服务待更新");
+ expect(screen.getByRole("button",{name:"检测指纹"})).toBeDisabled();
+ expect(writes).toHaveLength(0);
+ const recheck=await screen.findByRole("button",{name:"重新检查"});
+ updated=true;await user.click(recheck);
+ await waitFor(()=>expect(screen.getByRole("button",{name:"检测指纹"})).toBeEnabled());
+ await user.click(screen.getByRole("button",{name:"检测指纹"}));
+ expect(writes).toEqual([{targets:[{source_id:"fugue",provider:"native",model:"gemini-4-argon"}]}]);
+});
+
+it.each([false,true])("shares site results and cancels the originating job (imported=%s)",async(imported)=>{
+ const channel={source_id:"fugue",provider:"native",models:["gemini-4-argon"],kind:"configured",binding_status:"matched",bound_keys:[{account_id:"one",group_id:1}],probe_fingerprint:"new"} as ManagedChannel;
+ const importedChannel={...channel,kind:undefined,account_id:"one",group_id:1};
+ if(imported){channel.binding_status=undefined;channel.bound_keys=undefined;}
+ let current: FingerprintRecord={...record,model:"gemini-4-argon",updated_at_ms:1000,result:{...record.result!,model:"gemini-4-argon"}};
+ const writes:unknown[]=[];
+ const client=new QueryClient({defaultOptions:{queries:{retry:false}}});
+ vi.stubGlobal("fetch",vi.fn(async(path:string,init?:RequestInit)=>{
+  if(path.endsWith("/channel-management"))return Response.json({data:[channel],unavailable_sources:[]});
+  if(path.endsWith("/sub2api/channels"))return Response.json({data:imported?[importedChannel]:[],unavailable_sources:[]});
+  if(init?.method){writes.push(JSON.parse(init.body as string));current={...current,state:"interrupted",updated_at_ms:3000};return Response.json({accepted:true});}
+  return Response.json({data:[current],supported_models:FINGERPRINT_MODELS});
+ }));
+ render(<QueryClientProvider client={client}><Tooltip.Provider>
+  <FingerprintPanel targets={[{source_id:"fugue",provider:"native",model:"gemini-4-argon"}]}/>
+  <FingerprintPanel targets={[{account_id:"one",group_id:1,model:"gemini-4-argon"}]}/>
+ </Tooltip.Provider></QueryClientProvider>);
+ await waitFor(()=>expect(screen.getAllByText("12.0%")).toHaveLength(2));
+ // A running channel-detail check is also visible in the site/group entry.
+ current={...current,account_id:undefined,group_id:undefined,source_id:"fugue",provider:"native",revision:"",state:"running",result:null,updated_at_ms:2000};
+ await client.invalidateQueries({queryKey:["model-fingerprints"]});
+ await waitFor(()=>expect(screen.getAllByRole("button",{name:"取消检测"})).toHaveLength(2));
+ const user=userEvent.setup();await user.click(screen.getAllByRole("button",{name:"取消检测"})[1]);
+ expect(writes).toEqual([{targets:[{source_id:"fugue",provider:"native",model:"gemini-4-argon"}]}]);
+ await waitFor(()=>expect(screen.getAllByText("已中断")).toHaveLength(2));
 });

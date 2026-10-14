@@ -48,7 +48,9 @@ func loadManagementSnapshot(ctx context.Context, src controlSource) (managementS
 		defer readers.Done()
 		catalog, _, catalogErr = fetchSource(ctx, src, "/v1/model-channels", url.Values{"endpoint": {"all"}, "stream": {"all"}})
 	}()
-	go func() { defer readers.Done(); providers, _ = configuredProviders(ctx, src) }()
+	// Result sharing needs the current credential identity of imported channels
+	// too. Binding discovery still uses configuredProviders and its own filter.
+	go func() { defer readers.Done(); providers, _ = effectiveProviders(ctx, src, true) }()
 	go func() {
 		defer readers.Done()
 		controls, _, _ = subGateway(ctx, src, "GET", "/v1/channel-controls", nil)

@@ -29,6 +29,22 @@ checks do not trigger fingerprints. Existing quality prompts, pass/fail rules,
 results and historical probabilities remain unchanged. Fingerprints may also be
 started/cancelled in channel details, independently of other checks.
 
+Channel detail and management consume the same result feed. Exact, fully matched
+single-account/group bindings, including live generated imports, with an unchanged model name share the newest valid
+result and pending state in both directions. The original job target is retained
+for cancellation; no duplicate database result is created. Changed credentials,
+unavailable sources, ambiguous or multi-group providers and public aliases mapped
+to another model do not share evidence. The management binding remains scoped to
+the authenticated owner. Imported providers are joined by exact source/provider
+and verified account/group identity from the imports endpoint; their current probe
+fingerprint comes from the effective catalog, including temporary channels. Result timestamps include milliseconds so a newer error
+can replace an older success consistently.
+
+The result feed advertises `supported_models`. During rolling updates, a new
+frontend paired with an old backend disables unsupported Gemini actions and shows
+“指纹检测服务待更新”; periodic reads and an explicit recheck enable them once the
+backend advertises support. Existing GPT actions remain available.
+
 Each fingerprint run sends three separately generated challenges through the
 channel's own credentials, with the reference's reasoning setting: low for
 Astra/Sol and Argon, provider default for Gemini 3.1 Pro and 3.8 Flash. Requests are sequential,

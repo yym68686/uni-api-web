@@ -249,3 +249,33 @@ func TestChannelManagementUsesConfiguredInventoryAndEffectiveKeyRoutes(t *testin
 		t.Fatal("changing revision advertised a safe snapshot", w.Body.String())
 	}
 }
+
+func TestManagementSnapshotIncludesImportedProbeIdentity(t *testing.T) {
+	provider := configuredProvider{Provider: "sub2api-generated", Base: "https://site.example/v1beta", API: "current-key", Temporary: true}
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/channel-settings/providers":
+			writeJSON(w, 200, map[string]any{"providers": []configuredProvider{provider}})
+		case "/v1/model-channels":
+			writeJSON(w, 200, map[string]any{"data": []managementModel{{Provider: provider.Provider, Model: "gemini-4-argon", Upstream: "gemini-4-argon", Engine: "gemini"}}})
+		case "/v1/channel-controls":
+			writeJSON(w, 200, map[string]any{"temporary_channels": []any{map[string]any{"provider": provider.Provider, "api_key_id": "key-1", "models": []string{"gemini-4-argon"}}}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer gateway.Close()
+	src := controlSource{sourceView: sourceView{Base: gateway.URL}, Key: "gateway-key"}
+	snapshot, err := loadManagementSnapshot(context.Background(), src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	live, ok := snapshot.Providers[provider.Provider]
+	if !ok || live.ProbeFingerprint != configuredProbeFingerprint(src, provider) || snapshot.Copies[provider.Provider] || len(snapshot.Rows) != 1 {
+		t.Fatal("imported channel must carry its current probe identity", snapshot)
+	}
+	providers, err := configuredProviders(context.Background(), src)
+	if err != nil || len(providers) != 0 {
+		t.Fatal("binding discovery must still exclude temporary providers", providers, err)
+	}
+}

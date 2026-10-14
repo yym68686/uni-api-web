@@ -51,10 +51,19 @@ func TestModelFingerprintListIncludesUnfinishedAndFailedJobs(t *testing.T) {
 		t.Fatalf("mixed fingerprint list: HTTP %d: %s", w.Code, w.Body.String())
 	}
 	var out struct {
-		Data []fingerprintRecord `json:"data"`
+		Data      []fingerprintRecord `json:"data"`
+		Supported []string            `json:"supported_models"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
 		t.Fatal(err)
+	}
+	if len(out.Supported) != len(fingerprintModels) {
+		t.Fatal("missing model capabilities", out.Supported)
+	}
+	for _, model := range out.Supported {
+		if !fingerprintModel(model) {
+			t.Fatal("unsupported capability", model)
+		}
 	}
 	seen := map[string]bool{}
 	for _, record := range out.Data {
@@ -62,6 +71,9 @@ func TestModelFingerprintListIncludesUnfinishedAndFailedJobs(t *testing.T) {
 			continue
 		}
 		seen[record.State] = true
+		if record.UpdatedAtMS <= 0 {
+			t.Fatal("missing result recency", record)
+		}
 		if record.State == "done" {
 			var result struct {
 				Status      string  `json:"status"`
