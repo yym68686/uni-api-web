@@ -29,6 +29,9 @@ func detectSite(ctx context.Context, base string) (string, error) {
 	req, _ := http.NewRequestWithContext(ctx, "GET", base+"/api/status", nil)
 	resp, err := subHTTP.Do(req)
 	if err != nil {
+		if errors.Is(err, errSubDNSLookup) {
+			return "", errSubDNSLookup
+		}
 		return "", errors.New("无法识别站点，请检查站点地址或网络")
 	}
 	defer resp.Body.Close()

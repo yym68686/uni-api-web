@@ -46,14 +46,9 @@ func newSubHTTP() *http.Client {
 		if err != nil {
 			return nil, err
 		}
-		ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-		if err != nil || len(ips) == 0 {
-			return nil, errors.New("站点域名无法解析")
-		}
-		for _, ip := range ips {
-			if !subPublicIP(ip.IP) {
-				return nil, errors.New("不允许访问内部地址")
-			}
+		ips, err := subLookupPublicIPs(ctx, host)
+		if err != nil {
+			return nil, err
 		}
 		dialer := net.Dialer{Timeout: 10 * time.Second}
 		for _, ip := range ips {
