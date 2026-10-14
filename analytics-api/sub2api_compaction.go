@@ -300,7 +300,7 @@ func (s *Service) subTestCapability(ctx context.Context, id, base, job, kind str
 			return errors.New(label + " 检测 key 无法解密")
 		}
 		result := subCompaction{Status: "unsupported", Attempts: []subProbe{}}
-		models := subCompactionModels(t.models)
+		models := subCompactionModels(subSyncModelResults(ctx, t.models))
 		if len(models) == 0 {
 			result.Status = "error"
 			result.Message = "没有已检测可用的 gpt 或 codex 模型，请先运行模型检测"

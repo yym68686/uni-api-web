@@ -1824,13 +1824,15 @@ it("syncs all idle accounts independently of channel filters and prevents repeat
     state: "running",
     targets: [],
   });
-  const writes: string[] = [];
+  const selected = ["gpt-6.1-sol", "gemini-4-argon"];
+  saveSubModels("sync-selected", selected);
+  const writes: { path: string; models: string[] }[] = [];
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string, init?: RequestInit) => {
       const { pathname } = new URL(input, location.origin);
       if (init?.method === "POST") {
-        writes.push(pathname);
+        writes.push({ path: pathname, models: JSON.parse(String(init.body)).models });
         data.forEach((account) => {
           if (account.state === "idle") account.state = "queued";
         });
@@ -1844,14 +1846,15 @@ it("syncs all idle accounts independently of channel filters and prevents repeat
     }),
   );
   const user = userEvent.setup();
-  mount();
+  mount("sync-selected");
   await screen.findByRole("table");
   await user.selectOptions(screen.getByLabelText("sub2api 账号筛选"), "one");
+  await user.selectOptions(screen.getByLabelText("检测模型筛选"), "gpt-6-astra");
   const button = screen.getByRole("button", { name: "一键同步并检测" });
   expect(button).toHaveTextContent("2 个账号");
   await user.click(button);
   await waitFor(() => expect(button).toBeDisabled());
-  expect(writes).toEqual(["/analytics/v1/sub2api/accounts/sync"]);
+  expect(writes).toEqual([{ path: "/analytics/v1/sub2api/accounts/sync-selected", models: selected }]);
   expect(
     screen.getByText("已提交 2 个账号，正在后台同步并检测。"),
   ).toBeVisible();
@@ -2486,4 +2489,38 @@ it("labels observed native output without claiming a response.created event", as
   expect(screen.getByText("45.00 s")).toBeVisible();
   expect(screen.getByText("首个输出")).toBeVisible();
   expect(screen.queryByText("未记录")).toBeNull();
+});
+
+
+it("does not submit all-account sync when no detection models are selected", async () => {
+  saveSubModels("sync-empty", []);
+  const writes: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+    if (init?.method === "POST") writes.push(input);
+    return Response.json({data: input.endsWith("/accounts") ? fixtures() : [], labels: {}});
+  }));
+  const user = userEvent.setup();
+  mount("sync-empty");
+  await screen.findByRole("table");
+  await user.selectOptions(screen.getByLabelText("检测模型筛选"), "gpt-6-astra");
+  const button = screen.getByRole("button", {name: "一键同步并检测"});
+  expect(button).toBeDisabled();
+  await user.click(button);
+  expect(writes).toEqual([]);
+});
+
+
+it("does not fall back to unscoped sync on an older backend", async () => {
+  saveSubModels("sync-old-backend", ["gemini-4-argon"]);
+  const writes: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async(input: string, init?: RequestInit) => {
+    if (init?.method === "POST") {writes.push(new URL(input, location.origin).pathname); return new Response("404 page not found", {status: 404});}
+    return Response.json({data: input.endsWith("/accounts") ? fixtures() : [], labels: {}});
+  }));
+  const user = userEvent.setup();
+  mount("sync-old-backend");
+  await screen.findByRole("table");
+  await user.click(screen.getByRole("button", {name: "一键同步并检测"}));
+  expect(await screen.findByText("同步检测服务待更新，请稍后重试。")).toBeVisible();
+  expect(writes).toEqual(["/analytics/v1/sub2api/accounts/sync-selected"]);
 });

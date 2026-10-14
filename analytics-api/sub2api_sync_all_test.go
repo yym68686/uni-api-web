@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -39,8 +40,9 @@ func TestSubSyncAllScopesAccountsAndKeepsExistingJobs(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := func(cookie string) *httptest.ResponseRecorder {
-		r := httptest.NewRequest("POST", "/v1/sub2api/accounts/sync", nil)
+		r := httptest.NewRequest("POST", "/v1/sub2api/accounts/sync", strings.NewReader(`{"models":["gemini-4-argon","gpt-6.1-sol","gemini-4-argon"]}`))
 		if cookie != "" {
+			r.Header.Set("Content-Type", "application/json")
 			r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: cookie})
 		}
 		w := httptest.NewRecorder()
@@ -75,16 +77,23 @@ func TestSubSyncAllScopesAccountsAndKeepsExistingJobs(t *testing.T) {
 	for _, original := range states {
 		var state, kind, job, message string
 		var leased bool
-		err = store.db.QueryRow(`SELECT state,job_kind,job_id,message,lease_until IS NOT NULL FROM console_sub_accounts WHERE id=$1`, owner+"-"+original).Scan(&state, &kind, &job, &message, &leased)
+		var scope []byte
+		err = store.db.QueryRow(`SELECT state,job_kind,job_id,message,lease_until IS NOT NULL,sync_models FROM console_sub_accounts WHERE id=$1`, owner+"-"+original).Scan(&state, &kind, &job, &message, &leased, &scope)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if original == "queued" || original == "running" {
-			if state != original || kind != "quality" || job != "existing-job" || message != "existing-message" || !leased {
+			if scope != nil || state != original || kind != "quality" || job != "existing-job" || message != "existing-message" || !leased {
 				t.Fatal("existing job changed", original, state, kind, job, message, leased)
 			}
 		} else if state != "queued" || kind != "sync" || job != "" || message != "" || leased {
 			t.Fatal("sync not queued", original, state, kind, job, message, leased)
+		}
+		if original != "queued" && original != "running" {
+			var models []string
+			if err := json.Unmarshal(scope, &models); err != nil || !reflect.DeepEqual(models, []string{"gemini-4-argon", "gpt-6.1-sol"}) {
+				t.Fatalf("lost selected models: %s, %v", scope, err)
+			}
 		}
 	}
 	var foreignState string
@@ -93,5 +102,20 @@ func TestSubSyncAllScopesAccountsAndKeepsExistingJobs(t *testing.T) {
 	}
 	if foreignState != "idle" {
 		t.Fatal("foreign account changed", foreignState)
+	}
+}
+
+func TestSubSyncAllRejectsMissingOrInvalidSelection(t *testing.T) {
+	for _, body := range []string{"", `{}`, `{"models":null}`, `{"models":[]}`, `{"models":[""]}`, `{"models":[" invalid"]}`, `{"models":"gpt-6.1-sol"}`} {
+		t.Run(body, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			// Validation must reject before touching the queue/database.
+			r := httptest.NewRequest("POST", "/v1/sub2api/accounts/sync", strings.NewReader(body))
+			r.Header.Set("Content-Type", "application/json")
+			(&Service{}).subSyncAll(w, r)
+			if w.Code != 400 {
+				t.Fatalf("%d: %s", w.Code, w.Body.String())
+			}
+		})
 	}
 }

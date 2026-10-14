@@ -105,11 +105,25 @@ func (s *Service) subTestAllModelTools(ctx context.Context, id, base, job string
 		}
 		previous := toolUseModelResults(t.previous)
 		models := []subToolUseModel{}
-		for _, model := range subCompactionModels(t.models) {
+		for _, model := range subCompactionModels(subSyncModelResults(ctx, t.models)) {
 			models = append(models, subToolUseModel{Model: model, State: "queued", Result: previous[model]})
 		}
 		save := func(state string) error {
-			result := summarizeToolUse(models)
+			// A scoped sync only replaces selected models. Retain unchecked
+			// per-model history without putting it into the probe loop.
+			savedModels := append([]subToolUseModel{}, models...)
+			if _, scoped := ctx.Value(subSyncScopeKey{}).([]string); scoped && t.previous != nil {
+				if len(t.previous.Models) > 0 {
+					for _, previousModel := range t.previous.Models {
+						if !subSyncIncludesModel(ctx, previousModel.Model) {
+							savedModels = append(savedModels, previousModel)
+						}
+					}
+				} else if t.previous.Model != "" && !subSyncIncludesModel(ctx, t.previous.Model) {
+					savedModels = append(savedModels, subToolUseModel{Model: t.previous.Model, State: "done", Result: t.previous})
+				}
+			}
+			result := summarizeToolUse(savedModels)
 			res, e := s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET tool_use_state=$4,tool_use=$5,
  state=CASE WHEN $4='done' AND state IN ('queued','running') THEN 'done' ELSE state END
  WHERE account_id=$1 AND group_id=$2 AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$3 AND state='running')`, id, t.group, job, state, mustJSON(result))

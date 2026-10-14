@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS console_sub_accounts(
  synced_at BIGINT NOT NULL DEFAULT 0, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
  UNIQUE(owner,base,email));
 ALTER TABLE console_sub_accounts ADD COLUMN IF NOT EXISTS balance JSONB;
+ALTER TABLE console_sub_accounts ADD COLUMN IF NOT EXISTS sync_models JSONB;
 ALTER TABLE console_sub_accounts ADD COLUMN IF NOT EXISTS provider_kind TEXT NOT NULL DEFAULT 'sub2api';
 ALTER TABLE console_sub_accounts ADD COLUMN IF NOT EXISTS login_name TEXT NOT NULL DEFAULT '';
 ALTER TABLE console_sub_accounts ADD COLUMN IF NOT EXISTS encrypted_login_password TEXT NOT NULL DEFAULT '';
@@ -466,7 +467,7 @@ func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var id string
-	err = s.control.db.QueryRowContext(ctx, `INSERT INTO console_sub_accounts(id,owner,name,base,email,encrypted_auth,encrypted_login_password,state,job_kind) VALUES($1,$2,$3,$4,$5,$6,$7,'queued','sync') ON CONFLICT(owner,base,email) DO UPDATE SET name=excluded.name,encrypted_auth=excluded.encrypted_auth,encrypted_login_password=CASE WHEN excluded.encrypted_login_password<>'' THEN excluded.encrypted_login_password ELSE console_sub_accounts.encrypted_login_password END,state='queued',job_kind='sync',job_id='',message='',lease_until=NULL WHERE console_sub_accounts.state NOT IN ('queued','running') RETURNING id`, "sub_"+randomID()[:16], owner, in.Name, in.Base, in.Email, encrypted, encryptedPassword).Scan(&id)
+	err = s.control.db.QueryRowContext(ctx, `INSERT INTO console_sub_accounts(id,owner,name,base,email,encrypted_auth,encrypted_login_password,state,job_kind) VALUES($1,$2,$3,$4,$5,$6,$7,'queued','sync') ON CONFLICT(owner,base,email) DO UPDATE SET name=excluded.name,encrypted_auth=excluded.encrypted_auth,encrypted_login_password=CASE WHEN excluded.encrypted_login_password<>'' THEN excluded.encrypted_login_password ELSE console_sub_accounts.encrypted_login_password END,state='queued',job_kind='sync',sync_models=NULL,job_id='',message='',lease_until=NULL WHERE console_sub_accounts.state NOT IN ('queued','running') RETURNING id`, "sub_"+randomID()[:16], owner, in.Name, in.Base, in.Email, encrypted, encryptedPassword).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		http.Error(w, "该账号已有任务进行中，请等待完成", 409)
 		return
@@ -505,7 +506,7 @@ func (s *Service) subSaveLogin(w http.ResponseWriter, r *http.Request, base, log
 
 func (s *Service) subSync(w http.ResponseWriter, r *http.Request) {
 	owner, _ := s.controlUser(r)
-	result, err := s.control.db.ExecContext(r.Context(), `UPDATE console_sub_accounts SET state='queued',job_kind='sync',job_id='',lease_until=NULL,message='' WHERE id=$1 AND owner=$2 AND state NOT IN ('queued','running')`, r.PathValue("id"), owner)
+	result, err := s.control.db.ExecContext(r.Context(), `UPDATE console_sub_accounts SET state='queued',job_kind='sync',sync_models=NULL,job_id='',lease_until=NULL,message='' WHERE id=$1 AND owner=$2 AND state NOT IN ('queued','running')`, r.PathValue("id"), owner)
 	if err != nil {
 		http.Error(w, "无法同步账号", 503)
 		return
@@ -519,6 +520,28 @@ func (s *Service) subSync(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) subSyncAll(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Models []string `json:"models"`
+	}
+	if !decodeConfiguration(w, r, &in) {
+		return
+	}
+	if len(in.Models) == 0 || len(in.Models) > 256 {
+		http.Error(w, "请在检测模型设置中选择模型（最多 256 个）", 400)
+		return
+	}
+	models := []string{}
+	seen := map[string]bool{}
+	for _, model := range in.Models {
+		if !validProbeModel(model) {
+			http.Error(w, "无效的检测模型", 400)
+			return
+		}
+		if !seen[model] {
+			models = append(models, model)
+			seen[model] = true
+		}
+	}
 	owner, _ := s.controlUser(r)
 	var queued int
 	// Lock in the same order as grouped checks. One atomic update prevents
@@ -526,9 +549,9 @@ func (s *Service) subSyncAll(w http.ResponseWriter, r *http.Request) {
 	err := s.control.db.QueryRowContext(r.Context(), `WITH candidates AS (
 		SELECT id FROM console_sub_accounts WHERE owner=$1 AND state NOT IN ('queued','running') ORDER BY id FOR UPDATE
 	), queued AS (
-		UPDATE console_sub_accounts a SET state='queued',job_kind='sync',job_id='',lease_until=NULL,message=''
+		UPDATE console_sub_accounts a SET state='queued',job_kind='sync',sync_models=$2,job_id='',lease_until=NULL,message=''
 		FROM candidates c WHERE a.id=c.id AND a.state NOT IN ('queued','running') RETURNING a.id
-	) SELECT count(*) FROM queued`, owner).Scan(&queued)
+	) SELECT count(*) FROM queued`, owner, mustJSON(models)).Scan(&queued)
 	if err != nil {
 		http.Error(w, "无法批量同步账号", 503)
 		return
@@ -679,6 +702,7 @@ func (s *Service) subQueueChecksKind(w http.ResponseWriter, r *http.Request, kin
 // Durable queue with leases: page reloads do not cancel work. Interrupted paid
 // requests are never automatically replayed after a process crash.
 type subJob struct {
+	syncModels                       []byte
 	id, base, kind, encrypted, token string
 }
 
@@ -727,7 +751,7 @@ func (s *Service) subClaimJob(ctx context.Context) (subJob, error) {
 	if err := s.subPromoteChecks(ctx); err != nil {
 		return job, err
 	}
-	err := s.control.db.QueryRowContext(ctx, `UPDATE console_sub_accounts SET state='running',job_id=$1,lease_until=now()+interval '30 seconds' WHERE id=(SELECT id FROM console_sub_accounts WHERE state='queued' ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING id,base,job_kind,encrypted_auth`, job.token).Scan(&job.id, &job.base, &job.kind, &job.encrypted)
+	err := s.control.db.QueryRowContext(ctx, `UPDATE console_sub_accounts SET state='running',job_id=$1,lease_until=now()+interval '30 seconds' WHERE id=(SELECT id FROM console_sub_accounts WHERE state='queued' ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING id,base,job_kind,encrypted_auth,COALESCE(sync_models,'null'::jsonb)`, job.token).Scan(&job.id, &job.base, &job.kind, &job.encrypted, &job.syncModels)
 	return job, err
 }
 
@@ -749,6 +773,12 @@ func (s *Service) subRunJob(parent context.Context, claimed subJob) {
 	defer cancel()
 	id, base, kind, encrypted, job := claimed.id, claimed.base, claimed.kind, claimed.encrypted, claimed.token
 	var err error
+	if kind == "sync" && len(claimed.syncModels) > 0 {
+		var models []string
+		if err = json.Unmarshal(claimed.syncModels, &models); err == nil && models != nil {
+			ctx = withSubSyncModels(ctx, models)
+		}
+	}
 
 	heartbeatDone := make(chan struct{})
 	go func() {
@@ -774,7 +804,7 @@ func (s *Service) subRunJob(parent context.Context, claimed subJob) {
 		}
 	}()
 	defer func() { cancel(); <-heartbeatDone }()
-	if kind == "sync" {
+	if err == nil && kind == "sync" {
 		_, err = s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET tool_use_state='interrupted' WHERE account_id=$1 AND tool_use_state IN ('queued','running')`, id)
 		if err == nil {
 			_, err = s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET compaction_state='interrupted' WHERE account_id=$1 AND compaction_state IN ('queued','running')`, id)
@@ -788,7 +818,7 @@ func (s *Service) subRunJob(parent context.Context, claimed subJob) {
 	}
 	if err == nil && ctx.Err() == nil && (kind == "check" || kind == "sync" || kind == "compaction") {
 		if kind == "sync" {
-			_, err = s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET compaction_state='queued' WHERE account_id=$1 AND active AND state='done'`, id)
+			err = s.subQueueSyncCapabilities(ctx, id, job, "compaction")
 		}
 		if err == nil {
 			err = s.subTestCompactions(ctx, id, base, job)
@@ -796,7 +826,7 @@ func (s *Service) subRunJob(parent context.Context, claimed subJob) {
 	}
 	if err == nil && ctx.Err() == nil && (kind == "check" || kind == "sync" || kind == "tool_use") {
 		if kind == "sync" {
-			_, err = s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET tool_use_state='queued' WHERE account_id=$1 AND active AND state='done'`, id)
+			err = s.subQueueSyncCapabilities(ctx, id, job, "tool_use")
 		}
 		if err == nil {
 			err = s.subTestCapability(ctx, id, base, job, "tool_use")
@@ -1046,12 +1076,18 @@ func (s *Service) subSynchronize(ctx context.Context, id, base, job, encrypted s
 	}
 	for _, g := range groups {
 		seenModels := map[string]bool{}
-		for _, model := range append(append([]string{}, subModels...), groupModels[g.ID]...) {
+		candidates := append(append([]string{}, subModels...), groupModels[g.ID]...)
+		candidates = append(candidates, subSyncScopeModels(ctx)...)
+		for _, model := range candidates {
 			if seenModels[model] {
 				continue
 			}
 			seenModels[model] = true
-			if _, err = tx.ExecContext(ctx, `INSERT INTO console_sub_models(account_id,group_id,model,state) VALUES($1,$2,$3,'queued') ON CONFLICT(account_id,group_id,model) DO UPDATE SET state='queued',message=''`, id, g.ID, model); err != nil {
+			state := "idle"
+			if subSyncIncludesModel(ctx, model) {
+				state = "queued"
+			}
+			if _, err = tx.ExecContext(ctx, `INSERT INTO console_sub_models(account_id,group_id,model,state) VALUES($1,$2,$3,$4) ON CONFLICT(account_id,group_id,model) DO UPDATE SET state='queued',message='' WHERE $4='queued'`, id, g.ID, model, state); err != nil {
 				return errors.New("模型保存失败")
 			}
 		}
@@ -1134,7 +1170,9 @@ func (s *Service) subTestTargets(ctx context.Context, id, base, job string, qual
 		if err = rows.Scan(&t.id, &t.model, &t.key, &t.keyID); err != nil {
 			break
 		}
-		targets = append(targets, t)
+		if subSyncIncludesModel(ctx, t.model) {
+			targets = append(targets, t)
+		}
 	}
 	if err == nil {
 		err = rows.Err()

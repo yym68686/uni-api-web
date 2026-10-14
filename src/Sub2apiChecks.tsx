@@ -19,7 +19,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { controlRequest } from "./api";
+import { ApiError, controlRequest } from "./api";
 import { accountBalanceQuery } from "./accountBalance";
 import type { AccountBalance as SubAccountBalance } from "./accountBalance";
 import { BalanceAmount } from "./BalanceAmount";
@@ -909,19 +909,19 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
     }
   }
   async function syncAll() {
-    if (action || !syncableAccounts.length) return;
+    if (action || !syncableAccounts.length || !detectionModels.length) return;
     setAction("sync-all");
     setError("");
     setSyncSubmitted(null);
     try {
       const result = await controlRequest<{ queued: number }>(
-        "/v1/sub2api/accounts/sync",
-        { method: "POST" },
+        "/v1/sub2api/accounts/sync-selected",
+        { method: "POST", body: JSON.stringify({ models: detectionModels }) },
       );
       setSyncSubmitted(result.queued);
       await client.invalidateQueries({ queryKey: ["sub2api"] });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "批量同步失败");
+      setError(e instanceof ApiError && e.status === 404 ? "同步检测服务待更新，请稍后重试。" : e instanceof Error ? e.message : "批量同步失败");
     } finally {
       setAction("");
     }
@@ -1008,10 +1008,11 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
             <button
               className="button small"
               aria-label="一键同步并检测"
-              title={`可用的目标模型同时检测模型指纹。${fingerprintNote}`}
+              title={!detectionModels.length ? "请在检测模型设置中选择模型" : `仅检测已勾选的 ${detectionModels.length} 个模型。可用的目标模型同时检测模型指纹。${fingerprintNote}`}
               aria-busy={action === "sync-all"}
               disabled={
                 !syncableAccounts.length ||
+                !detectionModels.length ||
                 !!action ||
                 query.isPending ||
                 query.isError

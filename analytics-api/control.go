@@ -363,6 +363,8 @@ func (s *Service) controlHandler() http.Handler {
 	mux.HandleFunc("POST /v1/sub2api/accounts", s.subAddAccount)
 	mux.HandleFunc("POST /v1/sub2api/accounts/{id}/login", s.subAddAccount)
 	mux.HandleFunc("POST /v1/sub2api/accounts/sync", s.subSyncAll)
+	// Dedicated endpoint prevents an older backend from ignoring the model list.
+	mux.HandleFunc("POST /v1/sub2api/accounts/sync-selected", s.subSyncAll)
 	mux.HandleFunc("DELETE /v1/sub2api/accounts/{id}", s.subDelete)
 	mux.HandleFunc("POST /v1/sub2api/accounts/{id}/sync", s.subSync)
 	mux.HandleFunc("POST /v1/sub2api/accounts/{id}/stop", s.subStop)

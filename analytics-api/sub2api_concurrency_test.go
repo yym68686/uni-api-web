@@ -123,7 +123,8 @@ func testSubConcurrentAccounts(t *testing.T, interrupt bool) {
 	service.control = store
 	restoreStarted := blockCheckpointUntilCanceled(t, service)
 	token, _ := store.newSession(context.Background(), owner)
-	r := httptest.NewRequest("POST", "/v1/sub2api/accounts/sync", nil)
+	r := httptest.NewRequest("POST", "/v1/sub2api/accounts/sync", strings.NewReader(mustJSON(map[string]any{"models": subModels})))
+	r.Header.Set("Content-Type", "application/json")
 	r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
 	w := httptest.NewRecorder()
 	service.Handler().ServeHTTP(w, r)
