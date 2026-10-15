@@ -66,6 +66,8 @@ export function balanceIsLow(balance?: Balance) {
   );
 }
 export function balanceLabel(key: BalanceKey) {
+  if (key.status === "unsupported" && [404, 405].includes(key.http_status || 0))
+    return "上游未提供余额接口";
   if (key.status !== "ok") return balanceStatus[key.status] || "查询失败";
   if (key.unlimited) return "无限额";
   if (typeof key.amount === "number" && Number.isFinite(key.amount))

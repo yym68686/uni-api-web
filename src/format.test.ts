@@ -17,6 +17,15 @@ const balance = (keys: BalanceKey[], extra = {}): Balance => ({
   ...extra,
 });
 describe("metric meaning", () => {
+  it("distinguishes a missing upstream balance endpoint from unsupported adapter paths", () => {
+    for (const http_status of [404, 405]) {
+      const missing = { ...key(-1), status: "unsupported", http_status };
+      expect(balanceLabel(missing)).toBe("上游未提供余额接口");
+      expect(balanceIsLow(balance([missing]))).toBe(false);
+    }
+    expect(balanceLabel({ ...key(null), status: "unsupported" })).toBe("未适配");
+    expect(balanceLabel({ ...key(null), status: "access_denied", http_status: 403 })).toBe("鉴权失败");
+  });
   it("requires all keys to be known and exhausted", () => {
     expect(balanceIsLow(balance([key(0), key(-1)]))).toBe(true);
     for (const data of [

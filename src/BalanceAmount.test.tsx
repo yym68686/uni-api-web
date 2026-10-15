@@ -2,6 +2,15 @@ import { it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { BalanceValue } from "./ChannelMetrics";
+it("shows the upstream endpoint failure without inventing a balance", () => {
+  render(<Tooltip.Provider><BalanceValue balance={{
+    provider: "openai-next", status: "complete", key_count: 1,
+    keys: [{ position: 1, status: "unsupported", http_status: 404 }],
+  }} /></Tooltip.Provider>);
+  expect(screen.getByText("上游未提供余额接口")).toBeVisible();
+  expect(screen.queryByText("未适配")).not.toBeInTheDocument();
+  expect(screen.queryByText("$0.00")).not.toBeInTheDocument();
+});
 it("uses the same colors for channel wallets and each remaining-quota window", () => {
   render(
     <Tooltip.Provider>

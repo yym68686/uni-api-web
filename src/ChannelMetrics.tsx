@@ -60,6 +60,9 @@ export function BalanceValue({
             <>
               <strong>{balanceKind[item.kind || ""] || "余额查询"}</strong>
               <br />
+              {item.http_status && item.status !== "ok" && (
+                <>上游余额接口返回 HTTP {item.http_status}<br /></>
+              )}
               {item.checked_at
                 ? `查询时间 ${time(item.checked_at)} · 最多缓存 5 分钟`
                 : "上游尚未提供金额"}
