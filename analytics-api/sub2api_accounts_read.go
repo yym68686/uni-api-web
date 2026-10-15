@@ -26,15 +26,18 @@ func (s *Service) subReadModels(ctx context.Context, owner, accountID string, gr
 	if len(targets) == 0 {
 		return 0, 0, nil
 	}
-	// Trim verbose probe data before it crosses the database connection. The
-	// previous Go-only compaction still transferred hundreds of MB on refresh.
+	// Read the transactional projection without touching full probe bodies.
 	// Keep probe IDs until current receipts are attached; details use the original.
 	resultSQL := "m.result"
+	projectionJoin := ""
 	if summary {
-		resultSQL = subModelSummarySQL
+		// COALESCE never detoasts the full result when its transactional
+		// projection exists. Legacy rows remain readable during backfill.
+		resultSQL = "COALESCE(ms.result, console_sub_model_summary_v1(m.result))"
+		projectionJoin = " LEFT JOIN console_sub_model_summaries ms ON ms.account_id=m.account_id AND ms.group_id=m.group_id AND ms.model=m.model "
 	}
 	rows, err := s.control.db.QueryContext(ctx, `SELECT m.account_id,m.group_id,m.model,m.state,m.message,`+resultSQL+`
-FROM console_sub_models m
+FROM console_sub_models m `+projectionJoin+`
 JOIN console_sub_targets t ON t.account_id=m.account_id AND t.group_id=m.group_id
 JOIN console_sub_accounts a ON a.id=t.account_id
 WHERE a.owner=$1 AND ($2='' OR a.id=$2) AND ($3=0 OR t.group_id=$3)
@@ -74,14 +77,6 @@ AND ($4='' OR m.model=$4 OR m.model='gpt-6-astra')`, owner, accountID, groupID, 
 	}
 	return count, resultBytes, nil
 }
-
-// JSONB path deletion preserves null/missing probes and all evidence fields.
-// Only list-excluded payload is removed here; Go applies the final summary shape.
-const subModelSummarySQL = `CASE WHEN jsonb_typeof(m.result)='object' THEN m.result
- #- '{availability,curl_token}' #- '{availability,text}' #- '{availability,request_ids}'
- #- '{availability,usage,message}' #- '{availability,usage,request_id}'
- #- '{quality,curl_token}' #- '{quality,text}' #- '{quality,request_ids}'
- #- '{quality,usage,message}' #- '{quality,usage,request_id}' ELSE m.result END`
 
 // Discard detail as each row arrives, before retaining the list. IDs must stay
 // until subAttachUsage attaches current receipts. The result is request-local.

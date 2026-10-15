@@ -12,6 +12,13 @@ import (
 	"testing"
 )
 
+// Previous read-time projection, retained as a compatibility fixture only.
+const subModelSummarySQL = `CASE WHEN jsonb_typeof(m.result)='object' THEN m.result
+ #- '{availability,curl_token}' #- '{availability,text}' #- '{availability,request_ids}'
+ #- '{availability,usage,message}' #- '{availability,usage,request_id}'
+ #- '{quality,curl_token}' #- '{quality,text}' #- '{quality,request_ids}'
+ #- '{quality,usage,message}' #- '{quality,usage,request_id}' ELSE m.result END`
+
 func TestSubAccountModelSummaryCompaction(t *testing.T) {
 	price, tokens := 2.5, int64(120)
 	probe := subProbe{ID: "receipt-id", CurlToken: "secret-curl", StartedAt: 123, RequestIDs: []string{"request-1"}, Text: strings.Repeat("reply", 1000), Status: "success", TerminalStatus: "completed", RequestedModel: "m", ResponseModel: "m", ModelMatch: "match", Protocol: "gemini", TTFT: &tokens, ResponseCreatedMS: &tokens, FirstResponseMS: &tokens, Duration: 321, HTTPStatus: 200, Message: strings.Repeat("消息", 200), Usage: &subUsage{Status: "pending", InputPrice: &price, OutputPrice: &price, InputTokens: &tokens, OutputTokens: &tokens, ActualCost: &price, RequestID: "private-request"}}

@@ -190,6 +190,7 @@ func (s *Service) startBackground(ctx context.Context) <-chan struct{} {
 		go func() { defer workers.Done(); fn(ctx) }()
 	}
 	if s.control != nil {
+		start(s.subModelSummaryBackfillLoop)
 		start(s.automationLoop)
 		start(s.controlRecoveryLoop)
 		start(s.subWorkerLoop)

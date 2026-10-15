@@ -110,4 +110,24 @@ FROM (SELECT n,n%684 g,n/684 m,(SELECT string_agg(md5(n::text||':'||k),'') FROM 
 			t.Fatal("models missing")
 		}
 	}
+	// Simulate an upgraded installation whose historical projections do not
+	// exist yet. Verify bounded progress over the full incident-sized dataset.
+	exec(`DELETE FROM console_sub_model_summaries WHERE account_id IN (SELECT id FROM console_sub_accounts WHERE owner=$1)`, owner)
+	start = time.Now()
+	var cursor subModelSummaryCursor
+	filled, batches := 0, 0
+	for {
+		next, n, done, err := store.backfillSubModelSummaries(context.Background(), cursor)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cursor, filled, batches = next, filled+n, batches+1
+		if done {
+			break
+		}
+	}
+	if filled != 115675 {
+		t.Fatal("historical projection incomplete", filled)
+	}
+	t.Logf("bounded historical backfill (without production pauses): %s, %d rows, %d batches", time.Since(start), filled, batches)
 }
