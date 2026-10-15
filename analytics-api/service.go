@@ -38,6 +38,7 @@ type Service struct {
 	checkpoints       *checkpointStore
 	checkpointWorkers sync.WaitGroup
 	historyLoading    atomic.Bool
+	auditPending      atomic.Bool
 	startup           atomic.Pointer[analyticsStartup]
 	checkpointActive  atomic.Bool
 	lastCheckpoint    atomic.Int64

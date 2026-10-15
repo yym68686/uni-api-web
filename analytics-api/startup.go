@@ -230,7 +230,8 @@ func (s *Service) initializeAnalytics(ctx context.Context) {
 		startup.LastError = previous.LastError
 	}
 	s.startup.Store(&startup)
-	for ctx.Err() == nil {
+	resumed := s.resumeVerifiedHistory(ctx)
+	for !resumed && ctx.Err() == nil {
 		s.maybeImport(ctx)
 		if s.lastCollect.Load() > 0 {
 			break

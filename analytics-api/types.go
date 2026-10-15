@@ -92,6 +92,7 @@ type Price struct {
 	EffectiveAt        time.Time        `json:"effective_at"`
 }
 type Config struct {
+	WarmCacheDir                                                                         string
 	CheckpointCacheWindowMB                                                              int
 	DatabaseThreads, DatabaseTempLimitMB                                                 int
 	DatabaseTempDir                                                                      string

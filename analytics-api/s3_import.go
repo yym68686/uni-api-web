@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -36,54 +35,7 @@ func (s *Service) importSingleS3(ctx context.Context) error {
 			return err
 		}
 	}
-	pager := s3.NewListObjectsV2Paginator(client, &s3.ListObjectsV2Input{Bucket: aws.String(s.cfg.S3Bucket), Prefix: aws.String(strings.Trim(s.cfg.S3Prefix, "/") + "/")})
-	var failures []error
-	var pages, listed int
-	listStarted := time.Now()
-	for pager.HasMorePages() {
-		page, err := pager.NextPage(ctx)
-		if err != nil {
-			return err
-		}
-		pages++
-		listed += len(page.Contents)
-		s.listPages.Store(int64(pages))
-		s.listedObjects.Store(int64(listed))
-		keys := make([]string, 0, len(page.Contents))
-		for _, obj := range page.Contents {
-			if strings.HasSuffix(aws.ToString(obj.Key), ".jsonl") {
-				keys = append(keys, sourceObjectKey(s.cfg.SourceID, aws.ToString(obj.Key)))
-			}
-		}
-		known, err := s.engine.ImportedObjectPage(ctx, keys)
-		if err != nil {
-			return err
-		}
-		var pending []types.Object
-		for _, obj := range page.Contents {
-			key := aws.ToString(obj.Key)
-			if !strings.HasSuffix(key, ".jsonl") {
-				continue
-			}
-			if etag, ok := known[sourceObjectKey(s.cfg.SourceID, key)]; ok {
-				if etag != aws.ToString(obj.ETag) {
-					return errors.New("immutable object changed")
-				}
-				continue
-			}
-			pending = append(pending, obj)
-		}
-		// Hash-addressed objects have no chronological cursor. Import discoveries
-		// before asking for the next page, and still scan every page for late data.
-		if err = s.importListedObjects(ctx, client, pending); err != nil {
-			failures = append(failures, err)
-		}
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-	}
-	fmt.Printf("analytics source_scan source=%s pages=%d objects=%d duration_ms=%d failures=%d\n", s.cfg.SourceID, pages, listed, time.Since(listStarted).Milliseconds(), len(failures))
-	return errors.Join(failures...)
+	return s.scanFactPipeline(ctx, client)
 }
 
 func (s *Service) importListedObjects(ctx context.Context, client *s3.Client, pending []types.Object) error {
@@ -113,6 +65,7 @@ func (s *Service) importListedObjects(ctx context.Context, client *s3.Client, pe
 		group := pending[start:end]
 		objects := make([]FactObject, len(group))
 		errs := make([]error, len(group))
+		batchStarted := time.Now()
 		var wg sync.WaitGroup
 		slots := s.factDownloadSlots
 		if slots == nil {
@@ -133,7 +86,7 @@ func (s *Service) importListedObjects(ctx context.Context, client *s3.Client, pe
 					errs[i] = errors.New("object_too_large")
 					return
 				}
-				response, e := client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(s.cfg.S3Bucket), Key: obj.Key})
+				response, e := client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(s.cfg.S3Bucket), Key: obj.Key, IfMatch: obj.ETag})
 				if e != nil {
 					errs[i] = e
 					return
@@ -155,6 +108,7 @@ func (s *Service) importListedObjects(ctx context.Context, client *s3.Client, pe
 			}(i, obj)
 		}
 		wg.Wait()
+		downloadDuration := time.Since(batchStarted)
 		good := make([]FactObject, 0, len(objects))
 		for i, obj := range objects {
 			if errs[i] != nil {
@@ -164,6 +118,7 @@ func (s *Service) importListedObjects(ctx context.Context, client *s3.Client, pe
 			}
 		}
 		if len(good) > 0 {
+			commitStarted := time.Now()
 			if err = s.engine.ImportBatch(ctx, good); err != nil {
 				if start == 0 {
 					fmt.Printf("analytics import_batch source=%s class=%s objects=%d\n", s.cfg.SourceID, importErrorClass(err), len(good))
@@ -171,6 +126,7 @@ func (s *Service) importListedObjects(ctx context.Context, client *s3.Client, pe
 				return err
 			}
 			s.remaining.Add(-int64(len(good)))
+			fmt.Printf("analytics import_batch_timing source=%s objects=%d listed_bytes=%d download_decode_ms=%d transaction_ms=%d\n", s.cfg.SourceID, len(good), groupBytes, downloadDuration.Milliseconds(), time.Since(commitStarted).Milliseconds())
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()

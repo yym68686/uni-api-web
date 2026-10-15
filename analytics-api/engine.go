@@ -21,6 +21,7 @@ import (
 var histogramBounds = []float64{1, 2, 5, 10, 20, 50, 100, 200, 300, 500, 750, 1000, 1500, 2000, 3000, 5000, 7500, 10000, 15000, 20000, 30000, 45000, 60000, 90000, 120000, 180000, 300000, 600000, 1200000, math.Inf(1)}
 
 type Engine struct {
+	replay            map[string]replayCheckpoint
 	DB                *sql.DB
 	analyticalSlots   chan struct{}
 	analyticalWaiting atomic.Int64

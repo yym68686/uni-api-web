@@ -1956,12 +1956,14 @@ function Dashboard({
                 </div>
               )}
               {metrics.data?.import && !metrics.data.import.caught_up &&
-                (!metrics.data.import.scanning || !!metrics.data.import.error_class || metrics.data.import.remaining_objects > 0) && (
+                (!metrics.data.import.scanning || metrics.data.import.audit_complete === false || !!metrics.data.import.error_class || metrics.data.import.remaining_objects > 0) && (
                 <div className="coverage-note" role="status">
                   <Clock3 size={14} />
                   {metrics.data.import.error_class
                     ? `采集异常：${metrics.data.import.error_class}`
-                    : `正在同步历史事实，剩余 ${count(metrics.data.import.remaining_objects || 0)} 个对象；当前统计尚不完整。`}
+                    : metrics.data.import.audit_complete === false
+                      ? "已加载经校验的历史快照，正在核对后续记录；当前统计可能尚未追平。"
+                      : `正在同步历史事实，剩余 ${count(metrics.data.import.remaining_objects || 0)} 个对象；当前统计尚不完整。`}
                 </div>
               )}
               {metrics.data?.coverage === "partial" && (

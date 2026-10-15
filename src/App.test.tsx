@@ -41,6 +41,7 @@ function setup(
     denyPlatform?: boolean;
     legacyMetrics?: boolean;
     historyInitializing?: boolean;
+    auditPending?: boolean;
     extraModel?: boolean;
   } = {},
 ) {
@@ -109,6 +110,7 @@ function setup(
               "/v1/responses",
             ],
             snapshot_revision: "v1",
+            ...(options.auditPending ? { import: { caught_up: false, scanning: true, remaining_objects: 0, audit_complete: false } } : {}),
             coverage: "complete_for_instance",
             generated_at: 1000,
             window_minutes: 15,
@@ -699,4 +701,11 @@ it("retains last successful rows during warmup but never reuses them for a diffe
   await user.click(screen.getByRole("button", { name: "刷新数据" }));
   await screen.findByRole("table");
   expect(screen.queryByText(/历史数据正在初始化/)).not.toBeInTheDocument();
+});
+
+it("shows incomplete-history warning for a verified snapshot during its background audit", async () => {
+  const { user } = setup({ auditPending: true });
+  await connect(user);
+  expect(await screen.findByText(/已加载经校验的历史快照/)).toBeVisible();
+  expect(screen.getByRole("table")).toBeVisible();
 });

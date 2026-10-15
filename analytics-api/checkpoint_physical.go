@@ -26,11 +26,12 @@ const physicalSchema = "1"
 const checkpointBufferSize = 256 << 10
 
 type physicalManifest struct {
-	Rows    map[string]int64 `json:"rows"`
-	Schema  string           `json:"schema"`
-	Version string           `json:"version"`
-	Bytes   int64            `json:"bytes"`
-	SHA256  string           `json:"sha256"`
+	Replay  map[string]replayCheckpoint `json:"replay,omitempty"`
+	Rows    map[string]int64            `json:"rows"`
+	Schema  string                      `json:"schema"`
+	Version string                      `json:"version"`
+	Bytes   int64                       `json:"bytes"`
+	SHA256  string                      `json:"sha256"`
 }
 
 func historySchema(ctx context.Context, db *sql.DB, catalog string) (string, error) {
@@ -76,7 +77,10 @@ func historySchema(ctx context.Context, db *sql.DB, catalog string) (string, err
 func (e *Engine) physicalCheckpoint(ctx context.Context, path string) (physicalManifest, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	m := physicalManifest{Rows: map[string]int64{}}
+	m := physicalManifest{Rows: map[string]int64{}, Replay: map[string]replayCheckpoint{}}
+	for key, state := range e.replay {
+		m.Replay[key] = state
+	}
 	var err error
 	for _, table := range checkpointTables {
 		var n int64
@@ -151,7 +155,9 @@ func (s *checkpointStore) save(ctx context.Context, e *Engine) (err error) {
 			return e2
 		}
 		if json.Unmarshal([]byte(head.Metadata["manifest"]), &old) == nil && head.Metadata["schema"] == physicalSchema && old.Schema == schema && old.Version == version {
-			return nil
+			if current < previous || e.sameReplayState(old.Replay) || e.replayBehind(old.Replay) {
+				return nil
+			}
 		}
 	}
 	dir, err := os.MkdirTemp(e.cfg.DataDir, "physical-checkpoint-")
@@ -168,6 +174,9 @@ func (s *checkpointStore) save(ctx context.Context, e *Engine) (err error) {
 		return err
 	}
 	log.Printf("analytics checkpoint format=duckdb stage=copy duration_ms=%d bytes=%d objects=%d", time.Since(started).Milliseconds(), manifest.Bytes, manifest.Rows["imported_objects"])
+	if warmErr := s.publishWarm(ctx, e, path, manifest); warmErr != nil {
+		log.Printf("analytics checkpoint format=warm outcome=publish_failed")
+	}
 	stage = "pack"
 	operation.stage(stage)
 	src, err := os.Open(path)
@@ -200,6 +209,11 @@ func (s *checkpointStore) save(ctx context.Context, e *Engine) (err error) {
 		return err
 	}
 	raw, _ := json.Marshal(manifest)
+	// S3 user metadata is bounded. Large source sets safely use the full audit.
+	if len(raw) > 1500 {
+		manifest.Replay = nil
+		raw, _ = json.Marshal(manifest)
+	}
 	req := &s3.PutObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(s.physicalKey), Body: &checkpointCacheReader{file: compressed, window: int64(e.cfg.CheckpointCacheWindowMB) << 20}, ContentType: aws.String("application/gzip"), Metadata: map[string]string{"schema": physicalSchema, "source": s.physicalSource, "objects": strconv.FormatInt(manifest.Rows["imported_objects"], 10), "sha256": hex.EncodeToString(hash.Sum(nil)), "manifest": string(raw)}}
 	if etag == "" {
 		req.IfNoneMatch = aws.String("*")
@@ -216,6 +230,11 @@ func (s *checkpointStore) save(ctx context.Context, e *Engine) (err error) {
 }
 
 func (s *checkpointStore) restore(ctx context.Context, e *Engine) (bool, error) {
+	if restored, err := s.restoreWarm(ctx, e); restored && err == nil {
+		return true, nil
+	} else if err != nil {
+		log.Printf("analytics checkpoint format=warm outcome=fallback")
+	}
 	restored, found, err := s.restorePhysical(ctx, e)
 	if err == nil && found {
 		return restored, nil
@@ -245,6 +264,8 @@ func (s *checkpointStore) restore(ctx context.Context, e *Engine) (bool, error) 
 
 func (s *checkpointStore) restorePhysical(ctx context.Context, e *Engine) (restored, found bool, err error) {
 	stage := "inspect_cache"
+	timings := newStartupTimings()
+	defer func() { timings.finish(err) }()
 	defer func() { err = checkpointStageError(stage, err) }()
 	var current int64
 	if err = e.DB.QueryRowContext(ctx, "SELECT count(*) FROM imported_objects").Scan(&current); err != nil {
@@ -254,6 +275,7 @@ func (s *checkpointStore) restorePhysical(ctx context.Context, e *Engine) (resto
 		return false, true, nil
 	}
 	stage = "download"
+	timings.next("download")
 	out, err := s.client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(s.physicalKey)})
 	if err != nil {
 		if code := storageErrorCode(err); code == "NoSuchKey" || code == "NotFound" {
@@ -264,6 +286,7 @@ func (s *checkpointStore) restorePhysical(ctx context.Context, e *Engine) (resto
 	defer out.Body.Close()
 	found = true
 	stage = "metadata"
+	timings.next("metadata")
 	var manifest physicalManifest
 	if out.Metadata["source"] != s.physicalSource || out.Metadata["schema"] != physicalSchema || len(out.Metadata["sha256"]) != 64 || json.Unmarshal([]byte(out.Metadata["manifest"]), &manifest) != nil || manifest.Bytes < 0 || manifest.Bytes == math.MaxInt64 || len(manifest.SHA256) != 64 || len(manifest.Rows) != len(checkpointTables) {
 		return false, true, errors.New("incompatible physical checkpoint")
@@ -284,6 +307,7 @@ func (s *checkpointStore) restorePhysical(ctx context.Context, e *Engine) (resto
 		return false, true, schemaErr
 	}
 	stage = "local_storage"
+	timings.next("local_storage")
 	dir, err := os.MkdirTemp(filepath.Dir(e.historyPath), "restore-physical-")
 	if err != nil {
 		return false, true, err
@@ -295,6 +319,7 @@ func (s *checkpointStore) restorePhysical(ctx context.Context, e *Engine) (resto
 	}
 	defer compressed.Close()
 	stage = "download"
+	timings.next("download")
 	hash := sha256.New()
 	n, err := io.CopyBuffer(io.MultiWriter(compressed, hash), contextReader{ctx, out.Body}, make([]byte, checkpointBufferSize))
 	if err != nil {
@@ -304,6 +329,7 @@ func (s *checkpointStore) restorePhysical(ctx context.Context, e *Engine) (resto
 		return false, true, io.ErrUnexpectedEOF
 	}
 	stage = "integrity"
+	timings.next("integrity")
 	if hex.EncodeToString(hash.Sum(nil)) != out.Metadata["sha256"] {
 		return false, true, errors.New("checkpoint integrity mismatch")
 	}
@@ -311,6 +337,7 @@ func (s *checkpointStore) restorePhysical(ctx context.Context, e *Engine) (resto
 		return false, true, err
 	}
 	stage = "unpack"
+	timings.next("unpack")
 	gz, err := gzip.NewReader(contextReader{ctx, compressed})
 	if err != nil {
 		return false, true, err
@@ -337,6 +364,7 @@ func (s *checkpointStore) restorePhysical(ctx context.Context, e *Engine) (resto
 		return false, true, errors.New("database file integrity mismatch")
 	}
 	stage = "validate"
+	timings.next("validate")
 	if err = validatePhysical(ctx, path, manifest); err != nil {
 		return false, true, err
 	}
@@ -347,9 +375,13 @@ func (s *checkpointStore) restorePhysical(ctx context.Context, e *Engine) (resto
 		}
 	}
 	stage = "apply"
+	timings.next("apply")
 	if err = e.installPhysical(ctx, path); err != nil {
 		return false, true, err
 	}
+	e.mu.Lock()
+	e.replay = manifest.Replay
+	e.mu.Unlock()
 	log.Printf("analytics checkpoint format=duckdb stage=installed bytes=%d objects=%d", manifest.Bytes, expected)
 	return true, true, nil
 }

@@ -52,14 +52,17 @@ func migrationTestDB(t *testing.T) *sql.DB {
 
 func TestControlMigrationLockInventory(t *testing.T) {
 	known := map[string]bool{}
-	for _, table := range controlMigrations()[0].Tables {
-		known[table] = true
-	}
 	// Guard the explicit relation lock inventory against an omitted table.
 	pattern := regexp.MustCompile(`(?i)(?:CREATE TABLE IF NOT EXISTS|ALTER TABLE|REFERENCES|UPDATE|INSERT INTO|FROM|JOIN)\s+(console_[a-z_]+)`)
-	for _, match := range pattern.FindAllStringSubmatch(controlBaselineSQL, -1) {
-		if !known[match[1]] {
-			t.Errorf("baseline touches unlocked relation %s", match[1])
+	for _, migration := range controlMigrations() {
+		clear(known)
+		for _, table := range migration.Tables {
+			known[table] = true
+		}
+		for _, match := range pattern.FindAllStringSubmatch(migration.SQL, -1) {
+			if !known[match[1]] {
+				t.Errorf("migration %s touches unlocked relation %s", migration.Version, match[1])
+			}
 		}
 	}
 }
@@ -84,7 +87,7 @@ func TestControlMigrationConcurrentAdoptionAndReadOnlyRestart(t *testing.T) {
 	}
 	wg.Wait()
 	var count int
-	if err := db.QueryRow(`SELECT count(*) FROM console_schema_migrations`).Scan(&count); err != nil || count != 1 {
+	if err := db.QueryRow(`SELECT count(*) FROM console_schema_migrations`).Scan(&count); err != nil || count != len(controlMigrations()) {
 		t.Fatal("migration not recorded exactly once", count, err)
 	}
 	// An already applied startup must succeed even with an exclusive table

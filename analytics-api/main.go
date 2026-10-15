@@ -28,6 +28,14 @@ func main() {
 	cfg.PublicOrigin = env("PUBLIC_ORIGIN", "")
 	cfg.InsecureCookie = env("INSECURE_COOKIE", "false") == "true"
 	cfg.AdminUsername, cfg.AdminPassword = env("ADMIN_USERNAME", ""), env("ADMIN_PASSWORD", "")
+	cfg.WarmCacheDir = env("ANALYTICS_WARM_CACHE_DIR", "")
+	// A platform-mounted cache is opt-in through its presence. Active DuckDB
+	// remains private; deployments without this mount keep the S3 path.
+	if cfg.WarmCacheDir == "" {
+		if info, err := os.Stat("/warm-cache"); err == nil && info.IsDir() {
+			cfg.WarmCacheDir = "/warm-cache"
+		}
+	}
 	cfg.RequireInitialImport = env("REQUIRE_INITIAL_IMPORT", "false") == "true"
 	var memoryErr error
 	cfg.DatabaseMemoryLimitMB, memoryErr = strconv.Atoi(env("ANALYTICS_DB_MEMORY_LIMIT_MB", "1024"))

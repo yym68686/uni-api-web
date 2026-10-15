@@ -25,6 +25,12 @@ var controlBaselineSQL string
 //go:embed migrations/0001_control.tables
 var controlBaselineTables string
 
+//go:embed migrations/0002_fact_journal.sql
+var factJournalSQL string
+
+//go:embed migrations/0002_fact_journal.tables
+var factJournalTables string
+
 type controlMigration struct {
 	Version string
 	SQL     string
@@ -32,7 +38,10 @@ type controlMigration struct {
 }
 
 func controlMigrations() []controlMigration {
-	return []controlMigration{{"0001_control", controlBaselineSQL, strings.Fields(controlBaselineTables)}}
+	return []controlMigration{
+		{"0001_control", controlBaselineSQL, strings.Fields(controlBaselineTables)},
+		{"0002_fact_journal", factJournalSQL, strings.Fields(factJournalTables)},
+	}
 }
 
 func (m controlMigration) checksum() string {

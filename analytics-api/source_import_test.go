@@ -73,8 +73,17 @@ func TestImportMakesDiscoveredFactsVisibleBeforeSlowFinalPage(t *testing.T) {
 		t.Fatal("second page never started")
 	}
 	var count int
-	if err := s.engine.DB.QueryRow(`SELECT count(*) FROM facts WHERE event_id='fresh'`).Scan(&count); err != nil || count != 1 {
-		t.Fatal("fresh object hidden behind full archive scan", count, err)
+	deadline := time.Now().Add(2 * time.Second)
+	for count != 1 {
+		if err := s.engine.DB.QueryRow(`SELECT count(*) FROM facts WHERE event_id='fresh'`).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("fresh object hidden behind blocked final page", count)
+		}
+		if count != 1 {
+			time.Sleep(5 * time.Millisecond)
+		}
 	}
 }
 

@@ -35,7 +35,7 @@ func (s *Service) factSources(ctx context.Context) ([]*Service, error) {
 	s.importMu.Unlock()
 	var jobs []*Service
 	if primaryEnabled && s.cfg.S3Bucket != "" {
-		jobs = append(jobs, &Service{engine: s.engine, cfg: s.cfg, factClient: s.factClient, factDownloadSlots: slots})
+		jobs = append(jobs, &Service{engine: s.engine, cfg: s.cfg, factClient: s.factClient, factDownloadSlots: slots, control: s.control})
 	}
 	for _, v := range sources {
 		if v.ID == s.cfg.SourceID || !v.HasStorage {
@@ -51,7 +51,7 @@ func (s *Service) factSources(ctx context.Context) ([]*Service, error) {
 		if err != nil {
 			return nil, err
 		}
-		jobs = append(jobs, &Service{engine: s.engine, cfg: cfg, factClient: client, factDownloadSlots: slots})
+		jobs = append(jobs, &Service{engine: s.engine, cfg: cfg, factClient: client, factDownloadSlots: slots, control: s.control})
 	}
 	return jobs, nil
 }
@@ -59,6 +59,9 @@ func (s *Service) factSources(ctx context.Context) ([]*Service, error) {
 func (s *Service) runSourceImport(ctx context.Context, child *Service) error {
 	child.scanStarted.Store(time.Now().UnixMilli())
 	err := child.importSingleS3(ctx)
+	if err == nil && child.control != nil {
+		err = child.replayJournal(ctx, time.Now().UnixMilli())
+	}
 	if err != nil {
 		if ctx.Err() == nil {
 			child.importFailures.Add(1)
@@ -68,6 +71,7 @@ func (s *Service) runSourceImport(ctx context.Context, child *Service) error {
 	} else {
 		child.importError.Store("")
 		child.lastCollect.Store(time.Now().UnixMilli())
+		child.auditPending.Store(false)
 	}
 	child.active.Store(0)
 	return err
@@ -170,6 +174,7 @@ func (s *Service) pollSourceImports(ctx context.Context, interval time.Duration)
 				}
 				if old != nil {
 					child.lastCollect.Store(old.lastCollect.Load())
+					child.auditPending.Store(old.auditPending.Load())
 					child.importFailures.Store(old.importFailures.Load())
 					if e := old.importError.Load(); e != nil {
 						child.importError.Store(e)
@@ -241,7 +246,7 @@ func (s *Service) importStatus(allowed []string) map[string]any {
 		if len(sources) == 0 || at < last {
 			last = at
 		}
-		if at == 0 {
+		if at == 0 || child.auditPending.Load() {
 			complete = false
 		}
 		scanning = scanning || active
@@ -254,7 +259,7 @@ func (s *Service) importStatus(allowed []string) map[string]any {
 		if sourceError != "" {
 			errorClass = sourceError
 		}
-		sources = append(sources, map[string]any{"source_id": id, "scanning": active, "scan_started_ms": child.scanStarted.Load(), "last_scan_ms": at, "pages": child.listPages.Load(), "listed_objects": child.listedObjects.Load(), "remaining_objects": child.remaining.Load(), "error_class": sourceError})
+		sources = append(sources, map[string]any{"source_id": id, "scanning": active, "audit_pending": child.auditPending.Load(), "scan_started_ms": child.scanStarted.Load(), "last_scan_ms": at, "pages": child.listPages.Load(), "listed_objects": child.listedObjects.Load(), "remaining_objects": child.remaining.Load(), "error_class": sourceError})
 	}
 	if len(sources) == 0 {
 		last = s.lastCollect.Load()
@@ -266,5 +271,5 @@ func (s *Service) importStatus(allowed []string) map[string]any {
 		}
 		complete = last > 0
 	}
-	return map[string]any{"last_scan_ms": last, "remaining_objects": remaining, "errors": failures, "error_class": errorClass, "scanning": scanning, "caught_up": complete && !scanning && remaining == 0 && errorClass == "", "sources": sources}
+	return map[string]any{"last_scan_ms": last, "remaining_objects": remaining, "errors": failures, "error_class": errorClass, "scanning": scanning, "audit_complete": complete, "caught_up": complete && !scanning && remaining == 0 && errorClass == "", "sources": sources}
 }
