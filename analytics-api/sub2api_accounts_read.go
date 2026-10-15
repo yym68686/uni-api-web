@@ -15,7 +15,7 @@ import (
 // those large aggregates before returning any row. Read models as one stream
 // instead. Keep authorization and target membership in the SQL, and retain every
 // model/state used by list filters.
-func (s *Service) subReadModels(ctx context.Context, owner, accountID string, groupID int64, model string, summary bool, accounts []subAccount) (int, error) {
+func (s *Service) subReadModels(ctx context.Context, owner, accountID string, groupID int64, model string, summary bool, accounts []subAccount) (int, int, error) {
 	targets := map[string]*subTarget{}
 	for i := range accounts {
 		for j := range accounts[i].Targets {
@@ -24,30 +24,38 @@ func (s *Service) subReadModels(ctx context.Context, owner, accountID string, gr
 		}
 	}
 	if len(targets) == 0 {
-		return 0, nil
+		return 0, 0, nil
 	}
-	rows, err := s.control.db.QueryContext(ctx, `SELECT m.account_id,m.group_id,m.model,m.state,m.message,m.result
+	// Trim verbose probe data before it crosses the database connection. The
+	// previous Go-only compaction still transferred hundreds of MB on refresh.
+	// Keep probe IDs until current receipts are attached; details use the original.
+	resultSQL := "m.result"
+	if summary {
+		resultSQL = subModelSummarySQL
+	}
+	rows, err := s.control.db.QueryContext(ctx, `SELECT m.account_id,m.group_id,m.model,m.state,m.message,`+resultSQL+`
 FROM console_sub_models m
 JOIN console_sub_targets t ON t.account_id=m.account_id AND t.group_id=m.group_id
 JOIN console_sub_accounts a ON a.id=t.account_id
 WHERE a.owner=$1 AND ($2='' OR a.id=$2) AND ($3=0 OR t.group_id=$3)
 AND ($4='' OR m.model=$4 OR m.model='gpt-6-astra')`, owner, accountID, groupID, model)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	defer rows.Close()
-	count := 0
+	count, resultBytes := 0, 0
 	for rows.Next() {
 		var account string
 		var group int64
 		var m subModelResult
 		var raw []byte
 		if err := rows.Scan(&account, &group, &m.Model, &m.State, &m.Message, &raw); err != nil {
-			return count, err
+			return count, resultBytes, err
 		}
+		resultBytes += len(raw)
 		if len(raw) > 0 {
 			if err := json.Unmarshal(raw, &m.Result); err != nil {
-				return count, err
+				return count, resultBytes, err
 			}
 		}
 		if summary {
@@ -59,13 +67,21 @@ AND ($4='' OR m.model=$4 OR m.model='gpt-6-astra')`, owner, accountID, groupID, 
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return count, err
+		return count, resultBytes, err
 	}
 	for _, target := range targets {
 		sort.Slice(target.Models, func(i, j int) bool { return target.Models[i].Model < target.Models[j].Model })
 	}
-	return count, nil
+	return count, resultBytes, nil
 }
+
+// JSONB path deletion preserves null/missing probes and all evidence fields.
+// Only list-excluded payload is removed here; Go applies the final summary shape.
+const subModelSummarySQL = `CASE WHEN jsonb_typeof(m.result)='object' THEN m.result
+ #- '{availability,curl_token}' #- '{availability,text}' #- '{availability,request_ids}'
+ #- '{availability,usage,message}' #- '{availability,usage,request_id}'
+ #- '{quality,curl_token}' #- '{quality,text}' #- '{quality,request_ids}'
+ #- '{quality,usage,message}' #- '{quality,usage,request_id}' ELSE m.result END`
 
 // Discard detail as each row arrives, before retaining the list. IDs must stay
 // until subAttachUsage attaches current receipts. The result is request-local.
@@ -90,6 +106,7 @@ type subAccountsReadTrace struct {
 	stage                     string
 	stages                    []string
 	accounts, targets, models int
+	modelBytes                int
 }
 
 func newSubAccountsReadTrace(r *http.Request) *subAccountsReadTrace {
@@ -114,6 +131,6 @@ func (t *subAccountsReadTrace) finish() {
 	if view != "summary" && view != "accounts" {
 		view = "detail"
 	}
-	log.Printf("sub_accounts_read view=%s elapsed_ms=%d last_stage=%s canceled=%t accounts=%d targets=%d models=%d %s",
-		view, elapsed.Milliseconds(), lastStage, t.r.Context().Err() != nil, t.accounts, t.targets, t.models, strings.Join(t.stages, " "))
+	log.Printf("sub_accounts_read view=%s elapsed_ms=%d last_stage=%s canceled=%t accounts=%d targets=%d models=%d model_result_bytes=%d %s",
+		view, elapsed.Milliseconds(), lastStage, t.r.Context().Err() != nil, t.accounts, t.targets, t.models, t.modelBytes, strings.Join(t.stages, " "))
 }

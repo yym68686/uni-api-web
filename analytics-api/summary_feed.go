@@ -40,8 +40,17 @@ func (s *Service) writeSummary(w http.ResponseWriter, r *http.Request, rows []su
 	sort.Slice(rows, func(i, j int) bool { return rows[i].ID < rows[j].ID })
 	hashes := make(map[string]string, len(rows))
 	order := make([]string, 0, len(rows))
-	for _, row := range rows {
-		hashes[row.ID] = tokenHash(mustJSON(row.Value))
+	for i := range rows {
+		row := &rows[i]
+		encoded, err := json.Marshal(row.Value)
+		if err != nil {
+			http.Error(w, "摘要编码失败", http.StatusInternalServerError)
+			return
+		}
+		// Reuse the exact bytes for the hash and response. In particular, do not
+		// encode every model in a large account summary a second time.
+		row.Value = json.RawMessage(encoded)
+		hashes[row.ID] = tokenHash(string(encoded))
 		order = append(order, row.ID)
 	}
 	version := tokenHash(mustJSON(hashes))
@@ -157,7 +166,7 @@ func (s *Service) writeAccountSummary(w http.ResponseWriter, r *http.Request, ac
 		a.Targets = []subTarget{}
 		rows = append(rows, summaryRow{ID: a.ID, Value: map[string]any{"account": a, "position": i}})
 		for j, t := range targets {
-			rows = append(rows, summaryRow{ID: qualityGroupID(a.ID, t.GroupID), Value: map[string]any{"account_id": a.ID, "target": compactSummary(t), "position": j}})
+			rows = append(rows, summaryRow{ID: qualityGroupID(a.ID, t.GroupID), Value: map[string]any{"account_id": a.ID, "target": compactAccountTarget(t), "position": j}})
 		}
 	}
 	s.writeSummary(w, r, rows)

@@ -268,7 +268,7 @@ func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 	}
 	rows.Close()
 	trace.next("models")
-	trace.models, err = s.subReadModels(r.Context(), owner, accountID, groupID, r.URL.Query().Get("model"), summaryView(r) == "summary", accounts)
+	trace.models, trace.modelBytes, err = s.subReadModels(r.Context(), owner, accountID, groupID, r.URL.Query().Get("model"), summaryView(r) == "summary", accounts)
 	if err != nil {
 		http.Error(w, "检测结果读取失败", 503)
 		return

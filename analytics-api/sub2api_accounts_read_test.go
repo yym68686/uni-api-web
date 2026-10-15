@@ -126,3 +126,65 @@ func TestSubAccountSummaryBulkModelsAndCurrentReceipt(t *testing.T) {
 		t.Fatal("model detail scope changed")
 	}
 }
+
+func TestSubAccountTypedSummaryMatchesLegacy(t *testing.T) {
+	price, tokens := 2.5, int64(120)
+	probe := subProbe{ID: "private-probe", CurlToken: "private-curl", Text: "private-reply", StartedAt: 123,
+		RequestIDs: []string{"private-request"}, RequestedModel: "m", ResponseModel: "m", ModelMatch: "match",
+		Status: "success", TerminalStatus: "missing", Message: strings.Repeat("消息🙂", 161), TTFT: &tokens,
+		ResponseCreatedMS: &tokens, FirstResponseMS: &tokens, Protocol: "gemini", Duration: 123, HTTPStatus: 200,
+		Usage: &subUsage{Status: "matched", InputPrice: &price, OutputPrice: &price, InputTokens: &tokens, OutputTokens: &tokens, RequestID: "private"}}
+	for _, models := range [][]subModelResult{nil, {}, {{Model: "pending", State: "queued"}}, {
+		{Model: "m", State: "done", Message: strings.Repeat("长消息", 180), Result: &subResult{Model: "m", CheckedAt: 321, Verdict: "pass", Availability: probe, Quality: probe}},
+		{Model: "zero", Result: &subResult{}},
+		{Model: "empty-usage", Result: &subResult{Availability: subProbe{Usage: &subUsage{}}}},
+	}} {
+		target := subTarget{Models: models, Result: &subResult{Availability: probe}, Message: strings.Repeat("目标🙂", 180)}
+		before := mustJSON(target)
+		var typed any
+		if err := json.Unmarshal([]byte(mustJSON(compactAccountTarget(target))), &typed); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(compactSummary(target), typed) {
+			t.Fatalf("summary semantics changed: legacy=%s typed=%s", mustJSON(compactSummary(target)), mustJSON(typed))
+		}
+		if mustJSON(target) != before {
+			t.Fatal("summary mutated shared input")
+		}
+	}
+}
+
+func TestSubAccountSQLProjectionPreservesEvidence(t *testing.T) {
+	dsn := os.Getenv("TEST_CONTROL_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("isolated PostgreSQL required")
+	}
+	store, err := newControlStore(dsn, strings.Repeat("s", 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	for _, raw := range []string{`null`, `{}`, `{"availability":null,"quality":null}`,
+		`{"availability":{"id":"receipt","text":"reply","curl_token":"secret","request_ids":["r"],"usage":{"status":"matched","message":"private","request_id":"r","input_tokens":42},"message":"keep","http_status":200},"quality":{"text":"reply","status":"skipped"}}`} {
+		var projected []byte
+		if err := store.db.QueryRow(`SELECT `+subModelSummarySQL+` FROM (SELECT $1::jsonb AS result) m`, raw).Scan(&projected); err != nil {
+			t.Fatal(err)
+		}
+		var full, slim *subResult
+		if err := json.Unmarshal([]byte(raw), &full); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(projected, &slim); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(compactSummary(full), compactSummary(slim)) {
+			t.Fatal("projection lost list evidence")
+		}
+		if full != nil && full.Availability.ID != slim.Availability.ID {
+			t.Fatal("projection lost receipt identity")
+		}
+		if strings.Contains(string(projected), "secret") || strings.Contains(string(projected), "private") {
+			t.Fatal("projection retained verbose details")
+		}
+	}
+}

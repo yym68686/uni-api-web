@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -73,6 +74,26 @@ FROM (SELECT n,n%684 g,n/684 m,(SELECT string_agg(md5(n::text||':'||k),'') FROM 
 	}
 	t.Logf("legacy aggregate/model decode: %s, %d bytes, %d models", time.Since(start), oldBytes, count)
 	s := &Service{control: store}
+	accounts := make([]subAccount, 46)
+	for i := range accounts {
+		accounts[i].ID = fmt.Sprintf("%s-%d", owner, i)
+	}
+	for group := 0; group < 684; group++ {
+		accounts[group%46].Targets = append(accounts[group%46].Targets, subTarget{GroupID: int64(group)})
+	}
+	for _, summary := range []bool{false, true} {
+		for i := range accounts {
+			for j := range accounts[i].Targets {
+				accounts[i].Targets[j].Models = nil
+			}
+		}
+		start = time.Now()
+		count, resultBytes, err := s.subReadModels(ctx, owner, "", 0, "", summary, accounts)
+		if err != nil || count != 115675 {
+			t.Fatal(count, err)
+		}
+		t.Logf("bulk models summary=%t: %s, result_bytes=%d", summary, time.Since(start), resultBytes)
+	}
 	token, _ := store.newSession(context.Background(), owner)
 	for run := 1; run <= 2; run++ {
 		start = time.Now()
