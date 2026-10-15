@@ -67,7 +67,10 @@ func TestCheckpointRestoreRetriesTruncatedBodyAndTransientErrors(t *testing.T) {
 				return objects.GetObject(ctx, req)
 			}}
 			service := &Service{engine: stateTestEngine(t), checkpoints: store}
-			outcome := service.restoreCheckpoint(context.Background(), checkpointRestorePolicy{3, 100 * time.Millisecond, time.Millisecond})
+			// A successful physical DuckDB restore includes disk fsync and can
+			// exceed 100ms under concurrent CI load. Test the injected first
+			// failure without accidentally timing out the healthy second try.
+			outcome := service.restoreCheckpoint(context.Background(), checkpointRestorePolicy{3, 2 * time.Second, time.Millisecond})
 			if outcome != "restored" || calls != 2 {
 				t.Fatal(outcome, calls)
 			}

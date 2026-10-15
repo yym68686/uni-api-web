@@ -13,32 +13,6 @@ import (
 	"time"
 )
 
-const subBindingSchema = `
-CREATE TABLE IF NOT EXISTS console_configured_channels(
- source_id TEXT NOT NULL, provider TEXT NOT NULL, base TEXT NOT NULL, site TEXT NOT NULL,
- key_hashes JSONB NOT NULL, fingerprint TEXT NOT NULL, active BOOLEAN NOT NULL DEFAULT true,
- checked_at BIGINT NOT NULL, PRIMARY KEY(source_id,provider));
-CREATE TABLE IF NOT EXISTS console_sub_key_scans(
- account_id TEXT PRIMARY KEY REFERENCES console_sub_accounts(id) ON DELETE CASCADE,
- revision TEXT NOT NULL DEFAULT '', lease_token TEXT NOT NULL DEFAULT '', lease_until TIMESTAMPTZ,
- checked_at BIGINT NOT NULL DEFAULT 0, error TEXT NOT NULL DEFAULT '', next_attempt TIMESTAMPTZ NOT NULL DEFAULT now());
-CREATE TABLE IF NOT EXISTS console_sub_key_index(
- account_id TEXT NOT NULL REFERENCES console_sub_accounts(id) ON DELETE CASCADE,
- key_hash TEXT NOT NULL, remote_key_id BIGINT NOT NULL, group_id BIGINT NOT NULL,
- key_created_at TIMESTAMPTZ, PRIMARY KEY(account_id,key_hash));
-ALTER TABLE console_sub_key_scans ADD COLUMN IF NOT EXISTS scan_revision TEXT NOT NULL DEFAULT '';
-ALTER TABLE console_sub_key_scans ADD COLUMN IF NOT EXISTS next_page INT NOT NULL DEFAULT 1;
-ALTER TABLE console_sub_key_scans ADD COLUMN IF NOT EXISTS page_fingerprint TEXT NOT NULL DEFAULT '';
-CREATE TABLE IF NOT EXISTS console_sub_key_index_stage(
- account_id TEXT NOT NULL REFERENCES console_sub_accounts(id) ON DELETE CASCADE,
- key_hash TEXT NOT NULL, remote_key_id BIGINT NOT NULL, group_id BIGINT NOT NULL,
- key_created_at TIMESTAMPTZ, PRIMARY KEY(account_id,key_hash));
-CREATE TABLE IF NOT EXISTS console_channel_management_snapshots(
- source_id TEXT PRIMARY KEY REFERENCES console_sources(id) ON DELETE CASCADE,
- catalog JSONB NOT NULL, checked_at BIGINT NOT NULL);
-CREATE TABLE IF NOT EXISTS console_channel_import_key_snapshots(
- source_id TEXT PRIMARY KEY REFERENCES console_sources(id) ON DELETE CASCADE,
- identity TEXT NOT NULL, directory JSONB NOT NULL, checked_at BIGINT NOT NULL);`
 
 // Retain a deployment path (multi-tenant origins may share a hostname) while
 // removing known inference suffixes. Never send a credential to a guessed host.

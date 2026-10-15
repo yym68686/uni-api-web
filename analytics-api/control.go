@@ -66,51 +66,11 @@ func newControlStore(dsn, master string) (*controlStore, error) {
 		db.Close()
 		return nil, err
 	}
-	err = execControlSchema(ctx, db, `CREATE TABLE IF NOT EXISTS console_users(username TEXT PRIMARY KEY,password_hash TEXT NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT now());
- CREATE TABLE IF NOT EXISTS console_sources(id TEXT PRIMARY KEY,name TEXT NOT NULL,base TEXT NOT NULL,encrypted_key TEXT NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT now());
- ALTER TABLE console_sources ADD COLUMN IF NOT EXISTS encrypted_storage TEXT NOT NULL DEFAULT '';
- ALTER TABLE console_sources ADD COLUMN IF NOT EXISTS encrypted_config_key TEXT NOT NULL DEFAULT '';
- ALTER TABLE console_sources ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT true;
- CREATE TABLE IF NOT EXISTS console_channel_checks(source_id TEXT NOT NULL REFERENCES console_sources(id),provider TEXT NOT NULL,result JSONB NOT NULL,PRIMARY KEY(source_id,provider));
- CREATE TABLE IF NOT EXISTS console_channel_check_runs(source_id TEXT NOT NULL REFERENCES console_sources(id),provider TEXT NOT NULL,run_id TEXT NOT NULL,expires_at TIMESTAMPTZ NOT NULL,PRIMARY KEY(source_id,provider));
- CREATE TABLE IF NOT EXISTS console_sessions(token_hash TEXT PRIMARY KEY,username TEXT NOT NULL,expires_at TIMESTAMPTZ NOT NULL);
- CREATE INDEX IF NOT EXISTS console_sessions_expiry ON console_sessions(expires_at);`)
-	if err != nil {
+	if err = migrateControlSchema(ctx, db, controlMigrations()); err != nil {
 		db.Close()
 		return nil, err
 	}
-	if err = execControlSchema(ctx, db, controlPersistenceSchema); err != nil {
-		db.Close()
-		return nil, err
-	}
-	if err = execControlSchema(ctx, db, subSchema); err != nil {
-		db.Close()
-		return nil, err
-	}
-	if err = execControlSchema(ctx, db, subBindingSchema); err != nil {
-		db.Close()
-		return nil, err
-	}
-	if err = execControlSchema(ctx, db, qualityHistorySchema); err != nil {
-		db.Close()
-		return nil, err
-	}
-	if err = execControlSchema(ctx, db, channelSettingsSchema); err != nil {
-		db.Close()
-		return nil, err
-	}
-	if err = execControlSchema(ctx, db, configuredCheckSchema); err != nil {
-		db.Close()
-		return nil, err
-	}
-	if err = execControlSchema(ctx, db, modelFingerprintSchema); err != nil {
-		db.Close()
-		return nil, err
-	}
-	if err = execControlSchema(ctx, db, automationSchema); err != nil {
-		db.Close()
-		return nil, err
-	}
+
 	return &controlStore{db: db, key: sum[:]}, nil
 }
 func (s *controlStore) Close() { _ = s.db.Close() }

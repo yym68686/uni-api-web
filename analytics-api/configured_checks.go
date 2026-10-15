@@ -16,15 +16,6 @@ import (
 
 // Independent of site accounts: a configured provider already owns its upstream
 // credentials. Only the gateway uses them; diagnostic requests never edit routes.
-const configuredCheckSchema = `
-CREATE TABLE IF NOT EXISTS console_configured_checks(
- source_id TEXT NOT NULL REFERENCES console_sources(id) ON DELETE CASCADE,
- provider TEXT NOT NULL,kind TEXT NOT NULL,model TEXT NOT NULL DEFAULT '',
- source_target TEXT NOT NULL,fingerprint TEXT NOT NULL DEFAULT '',quality_only BOOLEAN NOT NULL DEFAULT false,
- state TEXT NOT NULL DEFAULT 'queued',message TEXT NOT NULL DEFAULT '',result JSONB,
- run_id TEXT NOT NULL DEFAULT '',deadline TIMESTAMPTZ,updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
- PRIMARY KEY(source_id,provider,kind,model));
-CREATE INDEX IF NOT EXISTS console_configured_checks_pending ON console_configured_checks(updated_at) WHERE state='queued';`
 
 type configuredCheck struct {
 	Source      string          `json:"source_id"`

@@ -16,23 +16,6 @@ import (
 	"time"
 )
 
-const controlPersistenceSchema = `CREATE TABLE IF NOT EXISTS console_control_snapshots (
- source_id TEXT PRIMARY KEY REFERENCES console_sources(id) ON DELETE CASCADE, enabled BOOLEAN NOT NULL DEFAULT true,
- encrypted_snapshot TEXT NOT NULL DEFAULT '', target_hash TEXT NOT NULL DEFAULT '',
- instance_id TEXT NOT NULL DEFAULT '', revision TEXT NOT NULL DEFAULT '',
- restoring_instance TEXT NOT NULL DEFAULT '', restore_revision TEXT NOT NULL DEFAULT '',
- status TEXT NOT NULL DEFAULT 'pending', message TEXT NOT NULL DEFAULT '',
- saved_at TIMESTAMPTZ, restored_at TIMESTAMPTZ, checked_at TIMESTAMPTZ,
- rule_count INTEGER NOT NULL DEFAULT 0, channel_count INTEGER NOT NULL DEFAULT 0);
-CREATE TABLE IF NOT EXISTS console_control_bootstraps (
- source_id TEXT NOT NULL REFERENCES console_sources(id) ON DELETE CASCADE,
- target_hash TEXT NOT NULL, snapshot_id TEXT NOT NULL, encrypted_snapshot TEXT NOT NULL,
- instance_id TEXT NOT NULL, revision TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
- PRIMARY KEY(source_id,target_hash,snapshot_id));
-CREATE TABLE IF NOT EXISTS console_control_retired_instances (
- source_id TEXT NOT NULL REFERENCES console_sources(id) ON DELETE CASCADE,
- target_hash TEXT NOT NULL, instance_id TEXT NOT NULL, superseded_by TEXT NOT NULL,
- retired_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY(source_id,target_hash,instance_id));`
 
 type retainedRule struct {
 	KeyID    string   `json:"api_key_id"`

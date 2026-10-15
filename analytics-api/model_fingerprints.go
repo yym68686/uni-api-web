@@ -17,20 +17,6 @@ import (
 	"time"
 )
 
-const modelFingerprintSchema = `
-CREATE TABLE IF NOT EXISTS console_model_fingerprints(
- scope TEXT NOT NULL, model TEXT NOT NULL,
- source_id TEXT REFERENCES console_sources(id) ON DELETE CASCADE, provider TEXT NOT NULL DEFAULT '',
- account_id TEXT REFERENCES console_sub_accounts(id) ON DELETE CASCADE, group_id BIGINT NOT NULL DEFAULT 0,
- state TEXT NOT NULL DEFAULT 'queued', result JSONB, message TEXT NOT NULL DEFAULT '',
- revision TEXT NOT NULL DEFAULT '', run_id TEXT NOT NULL DEFAULT '', deadline TIMESTAMPTZ,
- updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY(scope,model));
-CREATE INDEX IF NOT EXISTS console_model_fingerprints_pending ON console_model_fingerprints(updated_at) WHERE state='queued';
-CREATE TABLE IF NOT EXISTS console_fingerprint_worker(id BOOLEAN PRIMARY KEY CHECK(id),run_id TEXT NOT NULL DEFAULT '',deadline TIMESTAMPTZ);
-INSERT INTO console_fingerprint_worker(id) VALUES(true) ON CONFLICT DO NOTHING;
-ALTER TABLE console_model_fingerprints ADD COLUMN IF NOT EXISTS site_key TEXT NOT NULL DEFAULT '';
-CREATE TABLE IF NOT EXISTS console_fingerprint_site_leases(
- run_id TEXT PRIMARY KEY, site TEXT NOT NULL UNIQUE, deadline TIMESTAMPTZ NOT NULL);`
 
 type fingerprintTarget struct {
 	Source   string `json:"source_id,omitempty"`

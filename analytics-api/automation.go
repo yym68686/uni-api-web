@@ -11,39 +11,6 @@ import (
 	"time"
 )
 
-const automationSchema = `
-CREATE TABLE IF NOT EXISTS console_automation_tasks(
- id TEXT PRIMARY KEY, owner TEXT NOT NULL, name TEXT NOT NULL,
- enabled BOOLEAN NOT NULL DEFAULT false, source_id TEXT NOT NULL,
- key_id TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '',
- interval_seconds INTEGER NOT NULL, range_name TEXT NOT NULL,
- policy JSONB NOT NULL DEFAULT '{}', next_run TIMESTAMPTZ NOT NULL DEFAULT now(),
- last_run TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
- updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
- FOREIGN KEY(source_id) REFERENCES console_sources(id) ON DELETE CASCADE);
-CREATE INDEX IF NOT EXISTS console_automation_due ON console_automation_tasks(enabled,next_run);
-CREATE TABLE IF NOT EXISTS console_automation_audit(
- id BIGSERIAL PRIMARY KEY, task_id TEXT NOT NULL REFERENCES console_automation_tasks(id) ON DELETE RESTRICT,
- run_at TIMESTAMPTZ NOT NULL DEFAULT now(), status TEXT NOT NULL, action TEXT NOT NULL,
- source_id TEXT NOT NULL, model TEXT NOT NULL DEFAULT '',
- before_order JSONB NOT NULL DEFAULT '[]', after_order JSONB NOT NULL DEFAULT '[]',
- changes JSONB NOT NULL DEFAULT '[]', metrics JSONB NOT NULL DEFAULT '{}',
- reason TEXT NOT NULL DEFAULT '');
-CREATE INDEX IF NOT EXISTS console_automation_audit_task ON console_automation_audit(task_id,id DESC);
-ALTER TABLE console_automation_tasks ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'order';
-ALTER TABLE console_automation_tasks ADD COLUMN IF NOT EXISTS revision BIGINT NOT NULL DEFAULT 1;
-ALTER TABLE console_automation_tasks ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT false;
-ALTER TABLE console_automation_tasks ADD COLUMN IF NOT EXISTS lease_token TEXT NOT NULL DEFAULT '';
-ALTER TABLE console_automation_tasks ADD COLUMN IF NOT EXISTS lease_until TIMESTAMPTZ;
-ALTER TABLE console_automation_tasks ADD COLUMN IF NOT EXISTS last_error TEXT NOT NULL DEFAULT '';
-ALTER TABLE console_automation_audit ADD COLUMN IF NOT EXISTS task_name TEXT NOT NULL DEFAULT '';
-ALTER TABLE console_automation_audit ADD COLUMN IF NOT EXISTS policy JSONB NOT NULL DEFAULT '{}';
-DO $$ BEGIN
-  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname='console_automation_audit_task_id_fkey' AND confdeltype='c') THEN
-    ALTER TABLE console_automation_audit DROP CONSTRAINT console_automation_audit_task_id_fkey;
-    ALTER TABLE console_automation_audit ADD CONSTRAINT console_automation_audit_task_id_fkey FOREIGN KEY(task_id) REFERENCES console_automation_tasks(id) ON DELETE RESTRICT;
-  END IF;
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;`
 
 type AutomationPolicy struct {
 	Metrics            []string `json:"metrics"`

@@ -12,51 +12,6 @@ import (
 
 // History is independent of the latest-result projections. A durable pending
 // row is created before each probe, so a stopped worker does not erase a check.
-const qualityHistorySchema = `
-CREATE TABLE IF NOT EXISTS console_quality_history(
- id BIGSERIAL PRIMARY KEY, check_id TEXT NOT NULL UNIQUE,
- source_id TEXT REFERENCES console_sources(id) ON DELETE CASCADE, provider TEXT,
- account_id TEXT, group_id BIGINT,
- model TEXT NOT NULL DEFAULT 'gpt-6-astra', rule TEXT NOT NULL DEFAULT 'candy-21',
- checked_at BIGINT NOT NULL, deadline TIMESTAMPTZ NOT NULL DEFAULT now(),
- verdict TEXT NOT NULL DEFAULT 'running', successful BOOLEAN NOT NULL DEFAULT false,
- result JSONB NOT NULL DEFAULT '{}',
- FOREIGN KEY(account_id,group_id) REFERENCES console_sub_targets(account_id,group_id) ON DELETE CASCADE,
- CHECK((source_id IS NOT NULL AND provider IS NOT NULL AND account_id IS NULL AND group_id IS NULL)
-    OR (source_id IS NULL AND provider IS NULL AND account_id IS NOT NULL AND group_id IS NOT NULL)));
-CREATE INDEX IF NOT EXISTS console_quality_channel_history ON console_quality_history(source_id,provider,id DESC);
-CREATE INDEX IF NOT EXISTS console_quality_sub_history ON console_quality_history(account_id,group_id,id DESC);
-CREATE TABLE IF NOT EXISTS console_quality_migrations(name TEXT PRIMARY KEY);
-WITH first_run AS (
- INSERT INTO console_quality_migrations VALUES('latest-to-history-v1') ON CONFLICT DO NOTHING RETURNING name
-)
-INSERT INTO console_quality_history(check_id,source_id,provider,account_id,group_id,checked_at,verdict,successful,result,rule)
- SELECT 'legacy-channel:'||md5(source_id||':'||provider),source_id,provider,NULL,NULL,
- COALESCE((result->>'checked_at')::BIGINT,0),COALESCE(result->>'verdict','error'),
- COALESCE(result->>'verdict' IN ('pass','fail','inconclusive'),false),result,'legacy'
- FROM console_channel_checks WHERE EXISTS(SELECT 1 FROM first_run)
- UNION ALL
- SELECT 'legacy-sub:'||md5(account_id||':'||group_id),NULL,NULL,account_id,group_id,
- COALESCE((result->>'checked_at')::BIGINT,0),COALESCE(result->>'verdict','error'),
- COALESCE(result->'quality'->>'status'='success',false),result,'legacy'
- FROM console_sub_models WHERE model='gpt-6-astra' AND result IS NOT NULL AND EXISTS(SELECT 1 FROM first_run)
- ON CONFLICT DO NOTHING;
-CREATE OR REPLACE VIEW console_quality_totals AS
- SELECT source_id,provider,account_id,group_id,count(*) AS total,
- count(*) FILTER(WHERE successful) AS successful,
- count(*) FILTER(WHERE successful AND verdict='pass') AS passed
- FROM console_quality_history GROUP BY source_id,provider,account_id,group_id;
-CREATE TABLE IF NOT EXISTS console_quality_group_links(
- check_id TEXT PRIMARY KEY REFERENCES console_quality_history(check_id) ON DELETE CASCADE,
- account_id TEXT NOT NULL, group_id BIGINT NOT NULL,
- linked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
- FOREIGN KEY(account_id,group_id) REFERENCES console_sub_targets(account_id,group_id) ON DELETE CASCADE);
-CREATE INDEX IF NOT EXISTS console_quality_group_links_scope ON console_quality_group_links(account_id,group_id);
-CREATE OR REPLACE VIEW console_quality_group_history AS
- SELECT h.id,h.check_id,h.model,h.rule,h.checked_at,h.deadline,h.verdict,h.successful,h.result,h.source_id,h.provider,
- COALESCE(h.account_id,l.account_id) AS account_id,COALESCE(h.group_id,l.group_id) AS group_id
- FROM console_quality_history h LEFT JOIN console_quality_group_links l USING(check_id)
- WHERE h.account_id IS NOT NULL OR l.account_id IS NOT NULL;`
 
 type qualitySummary struct {
 	Total      int64 `json:"total"`
