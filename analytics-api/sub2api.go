@@ -169,6 +169,8 @@ type subChallenge struct {
 
 func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 	owner, _ := s.controlUser(r)
+	trace := newSubAccountsReadTrace(r)
+	defer trace.finish()
 	accountID, groupID := r.PathValue("id"), int64Param(r.PathValue("group"))
 	rows, err := s.control.db.QueryContext(r.Context(), `SELECT id,name,base,email,state,message,synced_at,balance,job_kind,provider_kind,login_name,encrypted_login_password<>'' FROM console_sub_accounts WHERE owner=$1 AND ($2='' OR id=$2) ORDER BY created_at,id`, owner, accountID)
 	if err != nil {
@@ -204,7 +206,10 @@ func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "分组不存在", 404)
 		return
 	}
+	trace.next("shared_quality")
+	trace.accounts = len(accounts)
 	if summaryView(r) == "accounts" {
+		trace.next("serialize")
 		s.writeAccountSummary(w, r, accounts)
 		return
 	}
@@ -213,7 +218,8 @@ func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "共享检测记录暂不可用", 503)
 		return
 	}
-	rows, err = s.control.db.QueryContext(r.Context(), `SELECT t.account_id,t.group_id,t.name,t.platform,t.channel,t.rate,t.remote_key_id,t.active,t.state,t.message,t.result,t.billing,COALESCE((SELECT jsonb_agg(jsonb_build_object('model',m.model,'state',m.state,'message',m.message,'result',m.result) ORDER BY m.model) FROM console_sub_models m WHERE m.account_id=t.account_id AND m.group_id=t.group_id AND ($4='' OR m.model=$4 OR m.model='gpt-6-astra')),'[]'::jsonb),COALESCE(h.total,0),COALESCE(h.successful,0),COALESCE(h.passed,0),t.compaction,t.compaction_state,t.tool_use,t.tool_use_state FROM console_sub_targets t JOIN console_sub_accounts a ON a.id=t.account_id LEFT JOIN console_quality_totals h ON h.account_id=t.account_id AND h.group_id=t.group_id WHERE a.owner=$1 AND ($2='' OR a.id=$2) AND ($3=0 OR t.group_id=$3) ORDER BY t.group_id`, owner, accountID, groupID, r.URL.Query().Get("model"))
+	trace.next("targets")
+	rows, err = s.control.db.QueryContext(r.Context(), `SELECT t.account_id,t.group_id,t.name,t.platform,t.channel,t.rate,t.remote_key_id,t.active,t.state,t.message,t.result,t.billing,COALESCE(h.total,0),COALESCE(h.successful,0),COALESCE(h.passed,0),t.compaction,t.compaction_state,t.tool_use,t.tool_use_state FROM console_sub_targets t JOIN console_sub_accounts a ON a.id=t.account_id LEFT JOIN console_quality_totals h ON h.account_id=t.account_id AND h.group_id=t.group_id WHERE a.owner=$1 AND ($2='' OR a.id=$2) AND ($3=0 OR t.group_id=$3) ORDER BY t.group_id`, owner, accountID, groupID)
 	if err != nil {
 		http.Error(w, "检测结果暂不可用", 503)
 		return
@@ -222,8 +228,8 @@ func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var id string
 		var t subTarget
-		var raw, billingRaw, modelsRaw, compactionRaw, toolUseRaw []byte
-		if err = rows.Scan(&id, &t.GroupID, &t.Name, &t.Platform, &t.Channel, &t.Rate, &t.KeyID, &t.Active, &t.State, &t.Message, &raw, &billingRaw, &modelsRaw, &t.History.Total, &t.History.Successful, &t.History.Passed, &compactionRaw, &t.CompactionState, &toolUseRaw, &t.ToolUseState); err != nil {
+		var raw, billingRaw, compactionRaw, toolUseRaw []byte
+		if err = rows.Scan(&id, &t.GroupID, &t.Name, &t.Platform, &t.Channel, &t.Rate, &t.KeyID, &t.Active, &t.State, &t.Message, &raw, &billingRaw, &t.History.Total, &t.History.Successful, &t.History.Passed, &compactionRaw, &t.CompactionState, &toolUseRaw, &t.ToolUseState); err != nil {
 			break
 		}
 		if len(toolUseRaw) > 0 {
@@ -236,9 +242,7 @@ func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 		}
-		if err = json.Unmarshal(modelsRaw, &t.Models); err != nil {
-			break
-		}
+		t.Models = []subModelResult{}
 		if len(billingRaw) > 0 {
 			if err = json.Unmarshal(billingRaw, &t.Billing); err != nil {
 				break
@@ -255,6 +259,7 @@ func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 				t.QualityCheck = projection.Check
 			}
 			accounts[i].Targets = append(accounts[i].Targets, t)
+			trace.targets++
 		}
 	}
 	if err != nil || rows.Err() != nil {
@@ -262,11 +267,20 @@ func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows.Close()
+	trace.next("models")
+	trace.models, err = s.subReadModels(r.Context(), owner, accountID, groupID, r.URL.Query().Get("model"), summaryView(r) == "summary", accounts)
+	if err != nil {
+		http.Error(w, "检测结果读取失败", 503)
+		return
+	}
+	trace.next("queued_checks")
 	if err := s.subAttachQueuedChecks(r.Context(), owner, accounts); err != nil {
 		http.Error(w, "排队任务读取失败", 503)
 		return
 	}
+	trace.next("usage")
 	s.subAttachUsage(r.Context(), owner, accounts)
+	trace.next("observed_rates")
 	observed, err := s.control.subObservedRates(r.Context(), owner)
 	if err != nil {
 		http.Error(w, "账单倍率读取失败", 503)
@@ -282,6 +296,7 @@ func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "分组不存在", 404)
 		return
 	}
+	trace.next("serialize")
 	if summaryView(r) == "summary" {
 		s.writeAccountSummary(w, r, accounts)
 		return
