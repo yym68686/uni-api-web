@@ -99,6 +99,42 @@ func TestPricePrefixBoundaries(t *testing.T) {
 	}
 }
 
+func TestDeepSeekFlash1017CatalogAndOperatorPrices(t *testing.T) {
+	const model = "deepseek-v4.1-flash-1017"
+	prices := withCatalogPrices(nil)
+	found := 0
+	for _, p := range prices {
+		if p.Model != model {
+			continue
+		}
+		found++
+		if p.Input != .3 || p.Output != 1.2 || p.CacheRead != .006 || p.CacheWrite != .3 || p.CacheWrite1h != .3 || !p.Verified {
+			t.Fatalf("wrong Flash 1017 reference: %+v", p)
+		}
+	}
+	if found != 1 || !subModelAllowed(model) {
+		t.Fatal("missing or duplicate Flash 1017", found)
+	}
+	for _, name := range []string{model, model + "-thinking"} {
+		if canonicalPriceModel(name) != model {
+			t.Fatal("new model collapsed into previous Flash", name)
+		}
+	}
+	for _, p := range withCatalogPrices([]Price{{Model: model, Input: 7, Source: "manual", Verified: false}, {Model: "deepseek-v4.1-flash", Input: 9, Source: "manual", Verified: true}}) {
+		if p.Model == model && (p.Input != 7 || p.Verified || p.Source != "manual") {
+			t.Fatal("manual Flash 1017 price changed", p)
+		}
+		if p.Model == "deepseek-v4.1-flash" && p.Input != 9 {
+			t.Fatal("previous Flash price changed", p)
+		}
+	}
+	for _, p := range withCatalogPrices([]Price{{Model: model, Source: "fact-discovered"}}) {
+		if p.Model == model && (p.Input != .3 || !p.Verified) {
+			t.Fatal("unconfirmed discovery not hydrated", p)
+		}
+	}
+}
+
 func TestJevInputOnlyPriceAndNativeProtocol(t *testing.T) {
 	for _, model := range []string{"jev-latest", "jev-preview", "jev-1.13.0"} {
 		var found bool

@@ -7,6 +7,18 @@ import {
 import { SUB_MODELS } from "./sub2apiModels";
 import { referencePrice } from "./sub2apiPriceCheck";
 
+it("keeps DeepSeek Flash 1017 pricing independent of the previous Flash model", () => {
+  const model = "deepseek-v4.1-flash-1017";
+  const reference = MODEL_PRICE_CATALOG.find(p => p.model === model)!;
+  expect(reference).toMatchObject({ input: .3, output: 1.2, cache_read: .006, cache_write: .3, cache_write_1h: .3, verified: true });
+  expect(canonicalPriceModel(model + "-thinking")).toBe(model);
+  const previous = { ...reference, model: "deepseek-v4.1-flash", input: 9, source: "manual" };
+  const custom = { ...reference, input: 2, source: "manual", verified: false };
+  expect(displayedModelPrices([previous, custom]).find(p => p.model === model)).toEqual(custom);
+  expect(referencePrice(model, [previous, custom])).toBeUndefined();
+  expect(referencePrice(model + "-thinking", [previous, reference])).toEqual(reference);
+});
+
 it("shows exactly the detection models, preserves manual values and fills old placeholders", () => {
   const base = MODEL_PRICE_CATALOG.find((p) => p.model === "gemini-3.1-pro")!;
   const prices = displayedModelPrices([

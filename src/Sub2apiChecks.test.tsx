@@ -2153,13 +2153,13 @@ it("remembers model settings per user and uses them for batch and row probes", a
   for (const box of dialog.getAllByRole("checkbox")) expect(box).toBeChecked();
   await user.click(dialog.getByRole("button", { name: "清空" }));
   expect(dialog.getByRole("button", { name: "保存设置" })).toBeDisabled();
-  for (const model of ["glm-5.3", "gemini-4-argon", "claude-opus-5"])
+  for (const model of ["deepseek-v4.1-flash-1017", "gemini-4-argon", "claude-opus-5"])
     await user.click(dialog.getByRole("checkbox", { name: model }));
   await user.click(dialog.getByRole("button", { name: "保存设置" }));
   const buttonName = "检测已选 3 个模型 · 1 个渠道";
   await user.click(screen.getByRole("button", { name: buttonName }));
   await waitFor(() => expect(writes).toHaveLength(1));
-  expect(writes[0]).toEqual({ targets: [{ account_id: "one", group_id: 1, models: ["glm-5.3", "gemini-4-argon", "claude-opus-5"] }] });
+  expect(writes[0]).toEqual({ targets: [{ account_id: "one", group_id: 1, models: ["deepseek-v4.1-flash-1017", "gemini-4-argon", "claude-opus-5"] }] });
   await user.click(screen.getByRole("button", { name: "检测 one same-group" }));
   await waitFor(() => expect(writes).toHaveLength(2));
   expect(writes[1]).toEqual(writes[0]);

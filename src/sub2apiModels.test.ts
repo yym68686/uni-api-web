@@ -1,6 +1,15 @@
 import {expect,it,vi,afterEach} from 'vitest';
 import {loadSubModels,saveSubModels,SUB_MODELS,subModelProtocolLabel} from './sub2apiModels';
 afterEach(()=>vi.unstubAllGlobals());
+it('offers DeepSeek Flash 1017 as an independent Responses model while preserving saved exclusions',()=>{
+ const model='deepseek-v4.1-flash-1017',user='deepseek-1017-catalog-upgrade';
+ const previous=SUB_MODELS.filter(m=>m!==model);
+ saveSubModels(user,previous.filter(m=>m!=='deepseek-v4.1-flash'),previous);
+ expect(SUB_MODELS.filter(m=>m===model)).toHaveLength(1);
+ expect(loadSubModels(user)).toContain(model);
+ expect(loadSubModels(user)).not.toContain('deepseek-v4.1-flash');
+ expect(subModelProtocolLabel(model)).toBe('Responses');
+});
 it('preserves extra-model choices across scopes, reloads and catalog additions',()=>{
  const user='scope-models',extra='private-custom';
  expect(loadSubModels(user,[...SUB_MODELS,extra])).toContain(extra);

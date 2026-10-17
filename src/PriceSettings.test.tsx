@@ -5,6 +5,20 @@ import { PriceSettings } from "./PriceSettings";
 import { MODEL_PRICE_CATALOG } from "./modelPrices";
 import type { ModelPrice } from "./types";
 
+it("shows DeepSeek Flash 1017 with its reference prices and upstream naming note", async () => {
+  render(<PriceSettings prices={[]} loading={false} connection={{ base: "", key: "", session: "test", account: true }} onSaved={vi.fn()} />);
+  const model = "deepseek-v4.1-flash-1017";
+  const user = userEvent.setup();
+  await user.type(screen.getByRole("textbox", { name: "搜索模型价格" }), model);
+  expect(screen.getByLabelText(model + " 输入价格")).toHaveValue(.3);
+  expect(screen.getByLabelText(model + " 输出价格")).toHaveValue(1.2);
+  expect(within(screen.getByRole("table", { name: "模型价格" })).getAllByRole("rowheader")).toHaveLength(1);
+  await user.click(screen.getByRole("button", { name: "查看 " + model + " 价格说明" }));
+  const dialog = screen.getByRole("dialog", { name: model });
+  expect(dialog).toHaveTextContent("deepseek-flash");
+  expect(dialog).toHaveTextContent("不自动按时段切价");
+});
+
 it("defaults GPT write billing off and other models on, saves explicit choices without erasing rates", async () => {
   const saved: ModelPrice[] = [];
   vi.stubGlobal("fetch", vi.fn(async (_url, options) => {

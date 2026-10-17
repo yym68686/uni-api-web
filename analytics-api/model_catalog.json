@@ -144,6 +144,18 @@
     "note": "Kimi 官方美元价格，1M 上下文不按长度分档。"
   },
   {
+    "model": "deepseek-v4.1-flash-1017",
+    "input": 0.3,
+    "output": 1.2,
+    "cache_read": 0.006,
+    "cache_write": 0.3,
+    "cache_write_1h": 0.3,
+    "source": "https://api-docs.deepseek.com/quick_start/pricing/",
+    "verified": true,
+    "cache_write_kind": "input",
+    "note": "2026-10-17 官方更新：DeepSeek-V4.1-Flash-1017 价格不变，官方 API 调用名为 deepseek-flash；此处保留渠道模型名 deepseek-v4.1-flash-1017，直连官方时请按需配置模型映射。采用高峰参考价：输入 $0.30、输出 $1.20、缓存读取 $0.006 / 百万 token；非高峰为半价。高峰为周一至周五 UTC 01–04、06–10（中国法定节假日除外），其余为非高峰；不自动按时段切价。未单列缓存写入费，沿用普通输入参考价；不含 Search/Fetch 按次费用。"
+  },
+  {
     "model": "deepseek-v4.1-flash",
     "input": 0.3,
     "output": 1.2,
