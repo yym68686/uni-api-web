@@ -87,6 +87,11 @@ beforeEach(() => {
               },
               { path: "/preferences/headers", type: "json", group: "请求改写" },
               {
+                path: "/preferences/upstream_stream_mode",
+                type: "json",
+                group: "网络与适配",
+              },
+              {
                 path: "/preferences/cooldown_period",
                 type: "number",
                 group: "超时与冷却",
@@ -120,19 +125,34 @@ async function mount() {
 it("shows the gateway resolved engine for automatic settings without guessing from the URL", async () => {
   catalog = [{ provider: "one", engine: "claude", engine_mode: "auto" }];
   const user = await mount();
-  expect(await screen.findByRole("option", { name: "自动识别（实际：claude）" })).toBeVisible();
+  expect(
+    await screen.findByRole("option", { name: "自动识别（实际：claude）" }),
+  ).toBeVisible();
   expect(screen.getByLabelText("引擎")).toHaveValue("");
   await user.clear(screen.getByLabelText("上游地址"));
-  await user.type(screen.getByLabelText("上游地址"), "https://other.example/v1/responses");
-  expect(screen.getByRole("option", { name: "自动识别（地址已修改，保存后重新判断）" })).toBeVisible();
-  expect(screen.queryByRole("option", { name: "自动识别（实际：claude）" })).not.toBeInTheDocument();
+  await user.type(
+    screen.getByLabelText("上游地址"),
+    "https://other.example/v1/responses",
+  );
+  expect(
+    screen.getByRole("option", {
+      name: "自动识别（地址已修改，保存后重新判断）",
+    }),
+  ).toBeVisible();
+  expect(
+    screen.queryByRole("option", { name: "自动识别（实际：claude）" }),
+  ).not.toBeInTheDocument();
   expect(writes).toHaveLength(0);
 });
 it("does not mislabel an unknown or explicit runtime engine as automatic", async () => {
   catalog = [{ provider: "one", engine: "codex" }];
   await mount();
-  expect(await screen.findByRole("option", { name: "自动识别（实际引擎未返回）" })).toBeVisible();
-  expect(screen.queryByRole("option", { name: "自动识别（实际：codex）" })).not.toBeInTheDocument();
+  expect(
+    await screen.findByRole("option", { name: "自动识别（实际引擎未返回）" }),
+  ).toBeVisible();
+  expect(
+    screen.queryByRole("option", { name: "自动识别（实际：codex）" }),
+  ).not.toBeInTheDocument();
 });
 it("sends only changed fields, preserves zero, and refreshes the draft after applying", async () => {
   const user = await mount();
@@ -412,4 +432,23 @@ it("lets a user replace an inherited JSON timeout without resetting partial inpu
   expect((writes[0].changes as any[])[0].set).toEqual({
     "/preferences/model_timeout": 240,
   });
+});
+
+it("previews and applies stream-only as channel intent without rewriting the sample request", async () => {
+  const user = await mount();
+  await user.click(screen.getByRole("button", { name: "网络与适配" }));
+  await user.selectOptions(
+    screen.getByLabelText("上游流式模式（Responses）"),
+    "stream_only",
+  );
+  await user.click(screen.getByRole("button", { name: "校验与预览" }));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "保存并应用" })).toBeEnabled(),
+  );
+  await user.click(screen.getByRole("button", { name: "保存并应用" }));
+  await screen.findByText("设置已保存并应用");
+  expect((writes[1].changes as { set: object }[])[0].set).toEqual({
+    "/preferences/upstream_stream_mode": "stream_only",
+  });
+  expect(JSON.stringify(writes)).not.toContain("post_body_parameter_overrides");
 });

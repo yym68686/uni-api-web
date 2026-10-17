@@ -16,7 +16,6 @@ import (
 	"time"
 )
 
-
 type retainedRule struct {
 	KeyID    string   `json:"api_key_id"`
 	Model    string   `json:"model"`
@@ -597,6 +596,10 @@ func (s *Service) bootstrapControls(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "saved channel settings require a compatible gateway", 409)
 		return
 	}
+	if requiresUpstreamStreamMode([]byte(mustJSON(saved))) && r.Header.Get("X-Uni-Upstream-Stream-Mode") != "1" {
+		http.Error(w, "saved stream mode requires a compatible gateway", 409)
+		return
+	}
 	// Keep the exact encrypted version issued at boot. A later saved edit must
 	// not erase the evidence needed to recognize an unchanged older bootstrap.
 	id := tokenHash(record.Encrypted)
@@ -606,4 +609,41 @@ func (s *Service) bootstrapControls(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"enabled": true, "snapshot_id": id, "snapshot": saved})
+}
+
+// Reject restoration into gateways that would silently ignore transport intent.
+// The retained snapshot stays authoritative and is never rewritten here.
+func requiresUpstreamStreamMode(raw []byte) bool {
+	var value any
+	if json.Unmarshal(raw, &value) != nil {
+		return false
+	}
+	var visit func(any) bool
+	visit = func(v any) bool {
+		switch v := v.(type) {
+		case map[string]any:
+			if prefs, ok := v["preferences"].(map[string]any); ok {
+				if _, exists := prefs["upstream_stream_mode"]; exists {
+					return true
+				}
+			}
+			// Settings overlays store JSON pointers rather than full definitions.
+			for k, child := range v {
+				if k == "/preferences/upstream_stream_mode" || strings.HasPrefix(k, "/preferences/upstream_stream_mode/") {
+					return true
+				}
+				if visit(child) {
+					return true
+				}
+			}
+		case []any:
+			for _, child := range v {
+				if visit(child) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	return visit(value)
 }

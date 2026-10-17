@@ -116,6 +116,7 @@ const labels: Record<string, string> = {
   headers: "自定义请求头",
   post_body_parameter_overrides: "请求体覆盖与删除",
   normalize_responses_custom_tool_call_ids: "工具调用 ID 归一化",
+  upstream_stream_mode: "上游流式模式（Responses）",
   tools: "工具调用",
   image: "图片能力",
   proxy: "出口代理",
@@ -830,10 +831,7 @@ export function Editor({
       setBusy(false);
     }
   }
-  if (query.isPending)
-    return (
-      <DetailLoading kind="form" label="渠道设置" />
-    );
+  if (query.isPending) return <DetailLoading kind="form" label="渠道设置" />;
   if (query.isError || !view || !draft)
     return (
       <div className="settings-loading">
@@ -953,9 +951,18 @@ export function Editor({
             </p>
           )}
 
-          {!isGlobal && tab === "基本与模型" && row.source_id && row.provider.startsWith("sub2api-") && (
-            <ChannelProtocolRepair source={row.source_id} provider={row.provider} onApplied={()=>{void refreshed();}} />
-          )}
+          {!isGlobal &&
+            tab === "基本与模型" &&
+            row.source_id &&
+            row.provider.startsWith("sub2api-") && (
+              <ChannelProtocolRepair
+                source={row.source_id}
+                provider={row.provider}
+                onApplied={() => {
+                  void refreshed();
+                }}
+              />
+            )}
 
           {view.schema.fields
             .filter((f) => f.group === tab)
@@ -995,7 +1002,11 @@ export function Editor({
                   <header className="settings-field-heading">
                     <div>
                       <h4 title={f.path}>{label}</h4>
-                      <small>{f.type === "engine" && inherited ? "自动识别" : sourceLabel}</small>
+                      <small>
+                        {f.type === "engine" && inherited
+                          ? "自动识别"
+                          : sourceLabel}
+                      </small>
                       {resolved?.note && <small>{resolved.note}</small>}
                     </div>
                     {resolved?.can_inherit && !inherited && (
@@ -1024,6 +1035,59 @@ export function Editor({
                   <div className="settings-field-control">
                     {resolved?.read_only ? (
                       <p>{String(resolved.value)}</p>
+                    ) : f.path === "/preferences/upstream_stream_mode" ? (
+                      <>
+                        <select
+                          aria-label={label}
+                          value={
+                            typeof value === "string"
+                              ? value
+                              : String(
+                                  (value as Document | undefined)?.default ??
+                                    "follow_client",
+                                )
+                          }
+                          onChange={(e) =>
+                            edit(
+                              set(
+                                draft,
+                                f.path,
+                                value && typeof value === "object"
+                                  ? {
+                                      ...(value as Document),
+                                      default: e.target.value,
+                                    }
+                                  : e.target.value,
+                              ),
+                            )
+                          }
+                        >
+                          <option value="follow_client">
+                            跟随客户端（默认）
+                          </option>
+                          <option value="stream_only">
+                            仅支持流式（非流式请求自动聚合）
+                          </option>
+                        </select>
+                        <small>
+                          适用于 Responses
+                          上游。客户端请求非流式时，收集完整结果后返回
+                          JSON；不影响 compact 等其他上游端点。
+                        </small>
+                        <details>
+                          <summary>按模型覆盖（高级 JSON）</summary>
+                          <p>
+                            可使用{" "}
+                            {`{"default":"follow_client","models":{"模型名":"stream_only"}}`}
+                            。优先匹配公开模型名，其次匹配上游模型名。
+                          </p>
+                          <JSONField
+                            label={label + "高级 JSON"}
+                            value={value ?? "follow_client"}
+                            onChange={(v) => edit(set(draft, f.path, v))}
+                          />
+                        </details>
+                      </>
                     ) : f.path === "/preferences/timeout_policy" ? (
                       <>
                         <TimeoutPolicyField
@@ -1184,7 +1248,11 @@ export function Editor({
                             )
                           }
                         >
-                          <option value="">{f.type === "engine" ? autoEngineLabel : "继承 / 未设置"}</option>
+                          <option value="">
+                            {f.type === "engine"
+                              ? autoEngineLabel
+                              : "继承 / 未设置"}
+                          </option>
                           {(f.type === "boolean"
                             ? ["true", "false"]
                             : f.type === "engine"

@@ -43,3 +43,19 @@ API key 的跨渠道调度/权重/重试预算，以及全局 hedging，仍属�
 控制台代理入口为 `/v1/sources/{id}/channel-settings`，另提供 `/operations`、`/rollback` 及 `/v1/channel-setting-templates`。回滚以新的带 revision 的操作应用，保留操作记录。跨来源分别提交，不承诺分布式原子应用。
 
 恢复快照 v2 增加 `channel_settings` 和临时渠道完整 `definition`；新网关兼容 v1/v2。来源启动恢复会声明 `X-Uni-Channel-Settings-Version: 1`；不支持的旧网关无法读取 v2，控制台保留已知良好快照，不清除高级设置。发布顺序为先网关，再控制台。
+
+## 上游仅支持流式（Responses）
+
+在「网络与适配」设置「上游流式模式（Responses）」：默认跟随客户端；选择
+「仅支持流式」后，客户端非流式请求由网关向上游发送流式请求，收集完整结果后
+返回 JSON。客户端流式请求继续正常流式传输。此配置仅作用于 Responses 上游
+生成端点，不影响 compact、搜索、向量及其他上游协议。
+
+高级 JSON 支持按模型覆盖，例如
+`{"default":"follow_client","models":{"deepseek-v4.1-flash":"stream_only"}}`。
+优先匹配公开模型名，其次匹配上游模型名。此字段是渠道能力设置，不是请求体
+`stream` 参数覆盖；预览同时显示客户端与上游的流式模式。
+
+只有网关 schema 声明该字段才显示编辑项。配置沿用加密保存、版本检查、应用与
+恢复机制。包含新设置的启动恢复要求网关声明 `X-Uni-Upstream-Stream-Mode: 1`；
+旧网关不会静默忽略设置，已保存快照保留。先发布网关支持，再启用渠道配置。
