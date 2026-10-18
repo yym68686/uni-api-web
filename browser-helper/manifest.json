@@ -1,9 +1,10 @@
 {
   "manifest_version": 3,
   "name": "uni-api 登录助手",
-  "version": "1.1.0",
-  "description": "在你授权的 sub2api 站点完成登录，并将会话交回 uni-api 控制台。",
+  "version": "1.2.0",
+  "description": "在你授权的 sub2api / New API 站点完成登录，并将会话交回 uni-api 控制台。",
   "permissions": ["scripting"],
+  "optional_permissions": ["cookies"],
   "background": {
     "service_worker": "background.js",
     "type": "module"
@@ -16,7 +17,8 @@
     }
   ],
   "action": {
-    "default_title": "uni-api 登录助手"
+    "default_title": "uni-api 登录助手",
+    "default_popup": "popup.html"
   },
   "host_permissions": ["https://*/*"]
 }

@@ -97,18 +97,31 @@ func newAPIJSON(ctx context.Context, base, method, path string, auth *subAuth, b
 	}
 	var envelope struct {
 		Success *bool           `json:"success"`
-		Code    string          `json:"code"`
+		Code    json.RawMessage `json:"code"`
+		Message string          `json:"message"`
 		Data    json.RawMessage `json:"data"`
 	}
 	parsed := json.Unmarshal(raw, &envelope)
+	reason := ""
+	if len(envelope.Code) > 0 && string(envelope.Code) != "null" {
+		var code string
+		if json.Unmarshal(envelope.Code, &code) == nil {
+			reason = code
+		} else {
+			reason = string(envelope.Code)
+		}
+	}
+	if strings.Contains(strings.ToUpper(reason), "TURNSTILE") || strings.Contains(strings.ToUpper(reason), "CAPTCHA") || strings.Contains(strings.ToUpper(envelope.Message), "TURNSTILE") || strings.Contains(strings.ToUpper(envelope.Message), "CAPTCHA") {
+		reason = "TURNSTILE_REQUIRED"
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &subRemoteError{Status: resp.StatusCode, Reason: envelope.Code, Operation: newAPIOperation(method, path), RetryAfter: newAPIRetryAfter(resp.Header.Get("Retry-After"), time.Now())}
+		return &subRemoteError{Status: resp.StatusCode, Reason: reason, Operation: newAPIOperation(method, path), RetryAfter: newAPIRetryAfter(resp.Header.Get("Retry-After"), time.Now())}
 	}
 	if parsed != nil || envelope.Success == nil {
 		return errors.New("站点返回了不兼容的数据")
 	}
 	if !*envelope.Success {
-		return &subRemoteError{Status: 400, Reason: envelope.Code}
+		return &subRemoteError{Status: 400, Reason: reason}
 	}
 	if auth != nil {
 		if auth.Cookies == nil {
@@ -132,6 +145,20 @@ func newAPIJSON(ctx context.Context, base, method, path string, auth *subAuth, b
 		return errors.New("站点返回的数据格式不兼容")
 	}
 	return nil
+}
+
+func newAPIUserMatches(input string, user newAPIUser) bool {
+	input = strings.TrimSpace(input)
+	return input != "" && (strings.EqualFold(input, user.Username) || strings.EqualFold(input, user.Email))
+}
+
+type newAPIBrowserAuth struct {
+	Access       string
+	UserID       int64
+	Username     string
+	SessionID    string
+	AccessExpiry int64
+	Cookies      map[string]string
 }
 
 type newAPIUser struct {
@@ -253,6 +280,42 @@ func newAPILoginSession(ctx context.Context, base, username, password, flow, cod
 	}
 	return auth, login, err
 }
+
+// Accept only the two session cookies used by New API. Profile validation is
+// authoritative; extension-supplied identity fields are never trusted alone.
+func (s *Service) newAPIBrowserAccount(w http.ResponseWriter, r *http.Request, base, identity, name, password string, browser newAPIBrowserAuth) {
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	if browser.UserID <= 0 || len(browser.Username) == 0 || len(browser.Username) > 320 || len(browser.SessionID) > 512 || len(browser.Access) > 8192 || len(browser.Cookies) > 2 || (browser.Access == "" && len(browser.Cookies) == 0) {
+		http.Error(w, "浏览器未返回有效的 New API 会话", 400)
+		return
+	}
+	for name, value := range browser.Cookies {
+		if (name != "session" && name != "new_api_refresh") || len(value) == 0 || len(value) > 8192 || strings.ContainsAny(value, ";\r\n\x00") {
+			http.Error(w, "浏览器返回的站点会话无效", 400)
+			return
+		}
+	}
+	auth := subAuth{Kind: "newapi", Access: browser.Access, UserID: browser.UserID, Username: browser.Username, SessionID: browser.SessionID, ExpiresAt: browser.AccessExpiry, Cookies: browser.Cookies, BrowserLogin: true}
+	var user newAPIUser
+	if err := newAPIJSON(ctx, base, "GET", "/api/user/self", &auth, nil, &user); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	if user.ID != browser.UserID || !newAPIUserMatches(identity, user) || !strings.EqualFold(browser.Username, user.Username) {
+		http.Error(w, "登录账号与用户名不一致", 400)
+		return
+	}
+	if r.PathValue("id") != "" {
+		previous, _, err := s.newAPIAuth(ctx, r.PathValue("id"))
+		if err != nil || previous.UserID != user.ID {
+			http.Error(w, "登录账号身份已变化，请核对原站账号", 400)
+			return
+		}
+	}
+	s.newAPISaveVerifiedAccount(w, r, base, name, password, auth, user)
+}
+
 func newAPIQuota(ctx context.Context, base string) (float64, error) {
 	var status struct {
 		Quota float64 `json:"quota_per_unit"`
@@ -272,8 +335,26 @@ func (s *Service) newAPIAddAccount(w http.ResponseWriter, r *http.Request, base,
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
+	if flow == "" {
+		var status struct {
+			Turnstile bool `json:"turnstile_check"`
+		}
+		if err := newAPIJSON(ctx, base, "GET", "/api/status", nil, nil, &status); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		if status.Turnstile {
+			writeJSON(w, 200, map[string]any{"requires_browser": true, "browser_base": base, "browser_kind": "newapi"})
+			return
+		}
+	}
 	auth, login, err := newAPILoginSession(ctx, base, username, password, flow, code)
 	if err != nil {
+		var remote *subRemoteError
+		if errors.As(err, &remote) && (strings.Contains(strings.ToUpper(remote.Reason), "TURNSTILE") || strings.Contains(strings.ToUpper(remote.Reason), "CAPTCHA")) {
+			writeJSON(w, 200, map[string]any{"requires_browser": true, "browser_base": base, "browser_kind": "newapi"})
+			return
+		}
 		http.Error(w, err.Error(), 400)
 		return
 	}
@@ -309,10 +390,18 @@ func (s *Service) newAPIAddAccount(w http.ResponseWriter, r *http.Request, base,
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	if user.ID <= 0 || !strings.EqualFold(username, user.Username) || (auth.UserID > 0 && auth.UserID != user.ID) {
+	if user.ID <= 0 || !newAPIUserMatches(username, user) || (auth.UserID > 0 && auth.UserID != user.ID) {
 		http.Error(w, "登录账号与用户名不一致", 400)
 		return
 	}
+	s.newAPISaveVerifiedAccount(w, r, base, name, password, auth, user)
+}
+
+func (s *Service) newAPISaveVerifiedAccount(w http.ResponseWriter, r *http.Request, base, name, password string, auth subAuth, user newAPIUser) {
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	owner, _ := s.controlUser(r)
+	var err error
 	auth.UserID = user.ID
 	auth.Username = user.Username
 	if auth.Access == "" && len(auth.Cookies) == 0 {
@@ -433,6 +522,9 @@ func (s *Service) newAPICall(ctx context.Context, account, base, method, path st
 			}
 		}
 		if refreshErr != nil || login.Access == "" {
+			if next.BrowserLogin {
+				return errors.New("站点浏览器会话已失效，请重新登录并在原站完成验证")
+			}
 			if password == "" {
 				return subMissingLoginPasswordError(refreshErr)
 			}

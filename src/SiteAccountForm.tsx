@@ -23,10 +23,15 @@ export function AccountForm({
     : "/v1/sub2api/accounts";
   const [name, setName] = useState(initial?.name || "");
   const [base, setBase] = useState(initial?.base || "");
-  const [email, setEmail] = useState(initial?.login_name || initial?.email || "");
+  const [email, setEmail] = useState(
+    initial?.login_name || initial?.email || "",
+  );
   const [password, setPassword] = useState("");
   const hasSavedPassword = initial?.has_saved_password === true;
   const [browserNeeded, setBrowserNeeded] = useState(false);
+  const [browserKind, setBrowserKind] = useState<"sub2api" | "newapi">(
+    "sub2api",
+  );
   const [helperReady, setHelperReady] = useState(false);
   const [browserBusy, setBrowserBusy] = useState(false);
   const [challenge, setChallenge] = useState("");
@@ -38,14 +43,14 @@ export function AccountForm({
   const opener = useRef(document.activeElement);
   useEffect(() => {
     let active = true;
-    void browserHelperAvailable().then((ready) => {
+    void browserHelperAvailable(browserKind).then((ready) => {
       if (active) setHelperReady(ready);
     });
     return () => {
       active = false;
       browserAbort.current?.abort();
     };
-  }, []);
+  }, [browserKind]);
   function dismiss() {
     if (busy) return;
     browserAbort.current?.abort();
@@ -58,35 +63,52 @@ export function AccountForm({
     setLoginSaved(true);
     if (initial && !sessionOnly) {
       try {
-        await controlRequest(`/v1/sub2api/accounts/${encodeURIComponent(initial.id)}/sync`, {
-          method: "POST", body: "{}",
-        });
+        await controlRequest(
+          `/v1/sub2api/accounts/${encodeURIComponent(initial.id)}/sync`,
+          {
+            method: "POST",
+            body: "{}",
+          },
+        );
       } catch (e) {
-        throw new Error(`登录已保存，同步未启动：${e instanceof Error ? e.message : "请稍后点击同步并检测"}`);
+        throw new Error(
+          `登录已保存，同步未启动：${e instanceof Error ? e.message : "请稍后点击同步并检测"}`,
+        );
       }
     }
     saved();
   }
   async function browserLogin() {
     if (busy || browserBusy) return;
-    if (!helperReady) {
-      setError("登录助手未连接，请重新加载扩展和控制台后重试。");
-      return;
-    }
     setBrowserBusy(true);
     setError("");
     const abort = new AbortController();
     browserAbort.current = abort;
     try {
+      const available = await browserHelperAvailable(browserKind);
+      setHelperReady(available);
+      if (!available)
+        throw new Error(
+          browserKind === "newapi"
+            ? "请安装或更新登录助手到 1.2.0 或更新版本，并重新加载扩展和控制台。"
+            : "登录助手未连接，请重新加载扩展和控制台后重试。",
+        );
+      abort.signal.throwIfAborted();
       const auth = await loginWithBrowser(
-        { base, email, password, agreed: true },
+        { base, email, password, agreed: true, kind: browserKind },
         abort.signal,
       );
       await controlRequest(endpoint, {
         method: "POST",
         // Keep the operator's password through the browser verification step
         // so the server can encrypt it for future automatic sign-ins.
-        body: JSON.stringify({ name, base, email, ...(password ? { password } : {}), ...auth }),
+        body: JSON.stringify({
+          name,
+          base,
+          email,
+          ...(password ? { password } : {}),
+          ...auth,
+        }),
         signal: abort.signal,
       });
       await finishLogin();
@@ -117,6 +139,7 @@ export function AccountForm({
         challenge?: string;
         requires_browser?: boolean;
         browser_base?: string;
+        browser_kind?: "sub2api" | "newapi";
       }>(endpoint, {
         method: "POST",
         body: JSON.stringify(
@@ -128,7 +151,12 @@ export function AccountForm({
       if (result.requires_browser) {
         setBrowserNeeded(true);
         if (result.browser_base) setBase(result.browser_base);
-        setHelperReady(await browserHelperAvailable());
+        setBrowserKind(result.browser_kind === "newapi" ? "newapi" : "sub2api");
+        setHelperReady(
+          await browserHelperAvailable(
+            result.browser_kind === "newapi" ? "newapi" : "sub2api",
+          ),
+        );
       } else if (result.requires_2fa && result.challenge) {
         setChallenge(result.challenge);
         setPassword("");
@@ -149,7 +177,9 @@ export function AccountForm({
       }}
     >
       <Dialog.Portal>
-        <Dialog.Overlay className={`dialog-overlay${sessionOnly ? " site-reauth-overlay" : ""}`} />
+        <Dialog.Overlay
+          className={`dialog-overlay${sessionOnly ? " site-reauth-overlay" : ""}`}
+        />
         <Dialog.Content
           className={`guide-dialog sub-account-dialog${sessionOnly ? " site-reauth-dialog" : ""}`}
           onPointerDownOutside={(event) => {
@@ -229,6 +259,7 @@ export function AccountForm({
                       onChange={(event) => {
                         setBase(event.target.value);
                         setBrowserNeeded(false);
+                        setBrowserKind("sub2api");
                         setError("");
                       }}
                       readOnly={!!initial}
@@ -252,7 +283,11 @@ export function AccountForm({
                       type="password"
                       aria-label="账号密码"
                       aria-describedby="site-password-note"
-                      placeholder={hasSavedPassword ? "已保存密码，留空继续使用" : "输入账号密码"}
+                      placeholder={
+                        hasSavedPassword
+                          ? "已保存密码，留空继续使用"
+                          : "输入账号密码"
+                      }
                       autoFocus={sessionOnly}
                       autoComplete="current-password"
                       value={password}
@@ -273,7 +308,23 @@ export function AccountForm({
             {browserBusy && (
               <p className="sub-login-status" role="status">
                 <Spinner small />
-                {sessionOnly ? "正在等待原站登录…" : "正在等待原站登录，成功后自动同步…"}
+                {sessionOnly
+                  ? "正在等待原站登录…"
+                  : "正在等待原站登录，成功后自动同步…"}
+              </p>
+            )}
+            {browserNeeded && browserKind === "newapi" && (
+              <p className="settings-note">
+                使用登录助手 1.2.0 或更新版本。首次请点击扩展图标授权 New API
+                会话读取； 在打开的原站完成验证并点击登录，成功后自动返回。
+                {!helperReady && (
+                  <>
+                    {" "}
+                    <a href="/uni-api-browser-helper.zip" download>
+                      下载新版登录助手
+                    </a>
+                  </>
+                )}
               </p>
             )}
             {error && (
@@ -305,10 +356,14 @@ export function AccountForm({
                 {loginSaved
                   ? "重试同步并检测"
                   : challenge
-                  ? sessionOnly ? "验证并返回" : "验证并检测"
-                  : browserNeeded
-                    ? "使用浏览器登录"
-                    : sessionOnly ? "登录并返回" : "连接并检测"}
+                    ? sessionOnly
+                      ? "验证并返回"
+                      : "验证并检测"
+                    : browserNeeded
+                      ? "使用浏览器登录"
+                      : sessionOnly
+                        ? "登录并返回"
+                        : "连接并检测"}
               </button>
             </div>
           </form>

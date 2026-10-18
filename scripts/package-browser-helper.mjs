@@ -5,6 +5,10 @@ const files = [
   "background.js",
   "bridge.js",
   "login-page.js",
+  "newapi-login-page.js",
+  "newapi-cookies.js",
+  "popup.html",
+  "popup.js",
   "README.md",
 ];
 const archive = Object.fromEntries(

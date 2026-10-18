@@ -1,4 +1,6 @@
 import { loginPageStep } from "./login-page.js";
+import { newAPILoginPageStep } from "./newapi-login-page.js";
+import { newAPISessionCookies } from "./newapi-cookies.js";
 const consoleOrigin = "https://uni-api-console.fugue.pro";
 let active = null;
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
@@ -34,8 +36,11 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     input.email.length > 320 ||
     input.base.length > 2048 ||
     typeof input.password !== "string" ||
-    !input.password ||
-    input.password.length > 1024
+    (!input.password && input.kind !== "newapi") ||
+    input.password.length > 1024 ||
+    (input.kind !== undefined &&
+      input.kind !== "sub2api" &&
+      input.kind !== "newapi")
   ) {
     reply({ error: "站点登录信息无效" });
     return;
@@ -51,8 +56,17 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     let tab;
     try {
       if (job.cancelled) throw new Error("登录已取消");
+      if (
+        input.kind === "newapi" &&
+        !(await chrome.permissions.contains({ permissions: ["cookies"] }))
+      )
+        throw new Error(
+          "请点击登录助手扩展图标，授权 New API 会话读取后重试。",
+        );
       tab = await chrome.tabs.create({
-        url: input.base.replace(/\/$/, "") + "/login",
+        url:
+          input.base.replace(/\/$/, "") +
+          (input.kind === "newapi" ? "/sign-in" : "/login"),
         active: true,
       });
       job.tabId = tab.id;
@@ -60,29 +74,76 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       while (Date.now() < deadline && !job.cancelled) {
         let results;
         try {
-          results = await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            func: loginPageStep,
-            args: [
-              {
-                origin: site.origin,
-                base: input.base.replace(/\/$/, ""),
-                email: input.email,
-                password: input.password,
-                agreed: true,
-              },
-            ],
-          });
+          const current =
+            input.kind === "newapi" ? await chrome.tabs.get(tab.id) : tab;
+          const loading =
+            !current.url ||
+            (current.url === "about:blank" &&
+              current.pendingUrl &&
+              new URL(current.pendingUrl).origin === site.origin);
+          if (!loading && new URL(current.url).origin !== site.origin)
+            throw new Error("站点跳转到其他域名，已停止登录");
+          if (loading && input.kind === "newapi") {
+            results = [];
+          } else {
+            const cookies =
+              input.kind === "newapi"
+                ? await newAPISessionCookies(
+                    input.base.replace(/\/$/, ""),
+                    current,
+                  )
+                : {};
+            results = await chrome.scripting.executeScript({
+              target: { tabId: tab.id },
+              func:
+                input.kind === "newapi" ? newAPILoginPageStep : loginPageStep,
+              args: [
+                {
+                  origin: site.origin,
+                  base: input.base.replace(/\/$/, ""),
+                  email: input.email,
+                  password: input.password,
+                  agreed: true,
+                  hasSession: !!cookies.session,
+                  hasRefresh: !!cookies.new_api_refresh,
+                },
+              ],
+            });
+          }
         } catch {
           const current = await chrome.tabs.get(tab.id);
-          if (current.url && new URL(current.url).origin !== site.origin)
+          if (
+            current.url &&
+            current.url !== "about:blank" &&
+            new URL(current.url).origin !== site.origin
+          )
             throw new Error("站点跳转到其他域名，已停止登录");
         }
         if (job.cancelled) throw new Error("登录已取消");
         const state = results?.[0]?.result;
         if (state?.filled) input.password = "";
         if (state?.error) throw new Error(state.error);
+        if (
+          state?.login_path === "/login" &&
+          input.kind === "newapi" &&
+          !job.legacyLogin
+        ) {
+          job.legacyLogin = true;
+          await chrome.tabs.update(tab.id, {
+            url: input.base.replace(/\/$/, "") + "/login",
+          });
+        }
         if (state?.auth) {
+          if (input.kind === "newapi") {
+            const current = await chrome.tabs.get(tab.id);
+            state.auth.browser_cookies = await newAPISessionCookies(
+              input.base.replace(/\/$/, ""),
+              current,
+            );
+            if (!state.auth.access_token && !state.auth.browser_cookies.session)
+              throw new Error("原站登录会话已变化，请重新连接");
+          }
+          if (job.cancelled) throw new Error("登录已取消");
           input.password = "";
           reply({ auth: state.auth });
           await chrome.tabs.remove(tab.id);
@@ -106,6 +167,3 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   })();
   return true;
 });
-chrome.action.onClicked.addListener(() =>
-  chrome.tabs.create({ url: consoleOrigin }),
-);

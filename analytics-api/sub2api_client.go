@@ -183,6 +183,7 @@ func subJSON(ctx context.Context, client *http.Client, base, method, path, token
 }
 
 type subAuth struct {
+	BrowserLogin bool              `json:"browser_login,omitempty"`
 	Kind         string            `json:"kind,omitempty"`
 	UserID       int64             `json:"user_id,omitempty"`
 	Username     string            `json:"username,omitempty"`

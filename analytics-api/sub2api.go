@@ -14,7 +14,6 @@ import (
 	"time"
 )
 
-
 type subModelResult struct {
 	Model   string     `json:"model"`
 	State   string     `json:"state"`
@@ -204,15 +203,21 @@ func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 	owner, _ := s.controlUser(r)
 	var in struct {
-		Username  string `json:"username"`
-		Name      string `json:"name"`
-		Base      string `json:"base"`
-		Email     string `json:"email"`
-		Password  string `json:"password"`
-		Access    string `json:"access_token"`
-		Refresh   string `json:"refresh_token"`
-		Challenge string `json:"challenge"`
-		Code      string `json:"totp_code"`
+		Username               string            `json:"username"`
+		Name                   string            `json:"name"`
+		Base                   string            `json:"base"`
+		Email                  string            `json:"email"`
+		Password               string            `json:"password"`
+		Access                 string            `json:"access_token"`
+		Refresh                string            `json:"refresh_token"`
+		BrowserKind            string            `json:"browser_kind"`
+		BrowserUserID          int64             `json:"browser_user_id"`
+		BrowserUsername        string            `json:"browser_username"`
+		BrowserCookies         map[string]string `json:"browser_cookies"`
+		BrowserSessionID       string            `json:"browser_session_id"`
+		BrowserAccessExpiresAt int64             `json:"browser_access_expires_at"`
+		Challenge              string            `json:"challenge"`
+		Code                   string            `json:"totp_code"`
 	}
 	if !decodeConfiguration(w, r, &in) {
 		return
@@ -241,7 +246,7 @@ func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 		}
 		// Reuse credentials only after ownership and the immutable site identity
 		// have been checked. Never return the saved password to the browser.
-		if in.Password == "" && in.Access == "" && in.Challenge == "" {
+		if in.Password == "" && in.Access == "" && in.BrowserKind != "newapi" && in.Challenge == "" {
 			if encryptedPassword == "" {
 				http.Error(w, subMissingLoginPasswordMessage, 400)
 				return
@@ -287,6 +292,21 @@ func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 			u, _ := url.Parse(in.Base)
 			in.Name = u.Hostname()
 		}
+		if in.BrowserKind != "" && in.BrowserKind != "newapi" {
+			http.Error(w, "浏览器登录类型无效", 400)
+			return
+		}
+		if in.BrowserKind == "newapi" {
+			if savedKind != "" && savedKind != "newapi" {
+				http.Error(w, "账号站点类型不一致", 400)
+				return
+			}
+			s.newAPIBrowserAccount(w, r, in.Base, in.Email, in.Name, in.Password, newAPIBrowserAuth{
+				Access: in.Access, UserID: in.BrowserUserID, Username: in.BrowserUsername,
+				SessionID: in.BrowserSessionID, AccessExpiry: in.BrowserAccessExpiresAt, Cookies: in.BrowserCookies,
+			})
+			return
+		}
 		if in.Access == "" {
 			kind, e := savedKind, error(nil)
 			if kind == "" {
@@ -302,6 +322,7 @@ func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if in.Access != "" {
+
 			auth = subAuth{Access: strings.TrimSpace(in.Access), Refresh: strings.TrimSpace(in.Refresh)}
 			var user struct {
 				Email string `json:"email"`

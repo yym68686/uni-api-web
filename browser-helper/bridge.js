@@ -10,7 +10,7 @@
     const { id, type, input } = event.data;
     if (typeof id !== "string" || id.length > 100) return;
     if (type === "ping") {
-      window.postMessage({ channel, id, type: "ready" }, location.origin);
+      window.postMessage({ channel, id, type: "ready", capabilities: ["sub2api", "newapi"] }, location.origin);
       return;
     }
     if (type === "cancel") {

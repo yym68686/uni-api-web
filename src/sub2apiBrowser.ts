@@ -4,12 +4,21 @@ export interface BrowserLoginInput {
   email: string;
   password: string;
   agreed: boolean;
+  kind?: "sub2api" | "newapi";
 }
 export interface BrowserAuth {
   access_token: string;
   refresh_token: string;
+  browser_kind?: "sub2api" | "newapi";
+  browser_user_id?: number;
+  browser_username?: string;
+  browser_cookies?: Record<string, string>;
+  browser_session_id?: string;
+  browser_access_expires_at?: number;
 }
-export function browserHelperAvailable(): Promise<boolean> {
+export function browserHelperAvailable(
+  kind: "sub2api" | "newapi" = "sub2api",
+): Promise<boolean> {
   const id = crypto.randomUUID();
   return new Promise((resolve) => {
     const listener = (event: MessageEvent) => {
@@ -21,7 +30,10 @@ export function browserHelperAvailable(): Promise<boolean> {
         event.data.type === "ready"
       ) {
         cleanup();
-        resolve(true);
+        resolve(
+          kind !== "newapi" ||
+            event.data.capabilities?.includes("newapi") === true,
+        );
       }
     };
     const cleanup = () => {
@@ -63,11 +75,51 @@ export function loginWithBrowser(
         return;
       cleanup();
       const { auth, error } = event.data;
-      if (typeof auth?.access_token === "string" && auth.access_token)
+      if (
+        auth &&
+        (input.kind === "newapi") !== (auth.browser_kind === "newapi")
+      ) {
+        reject(new Error("请更新登录助手到 1.2.0 或更新版本后重试"));
+        return;
+      }
+      if (
+        (typeof auth?.access_token === "string" && auth.access_token) ||
+        (input.kind === "newapi" &&
+          typeof auth?.browser_cookies?.session === "string" &&
+          auth.browser_cookies.session)
+      )
         resolve({
-          access_token: auth.access_token,
+          access_token:
+            typeof auth.access_token === "string" ? auth.access_token : "",
           refresh_token:
             typeof auth.refresh_token === "string" ? auth.refresh_token : "",
+          browser_kind: auth.browser_kind === "newapi" ? "newapi" : undefined,
+          browser_user_id:
+            typeof auth.browser_user_id === "number"
+              ? auth.browser_user_id
+              : undefined,
+          browser_username:
+            typeof auth.browser_username === "string"
+              ? auth.browser_username
+              : undefined,
+          browser_cookies:
+            input.kind === "newapi"
+              ? Object.fromEntries(
+                  ["session", "new_api_refresh"].flatMap((name) =>
+                    typeof auth.browser_cookies?.[name] === "string"
+                      ? [[name, auth.browser_cookies[name]]]
+                      : [],
+                  ),
+                )
+              : undefined,
+          browser_session_id:
+            typeof auth.browser_session_id === "string"
+              ? auth.browser_session_id
+              : undefined,
+          browser_access_expires_at:
+            typeof auth.browser_access_expires_at === "number"
+              ? auth.browser_access_expires_at
+              : undefined,
         });
       else
         reject(

@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -102,6 +103,88 @@ func TestNewAPIAutoLoginAndEncryptedPassword(t *testing.T) {
 	auth, _, e := s.newAPIAuth(ctx, response.ID)
 	if e != nil || auth.Cookies["new_api_refresh"] != "refresh-secret" || auth.UserID != 42 {
 		t.Fatal("auth not retained", e)
+	}
+}
+
+func TestNewAPITurnstileOffersBrowserLogin(t *testing.T) {
+	s, _, owner := newAPITestService(t)
+	token, _ := s.control.newSession(context.Background(), owner)
+	withSpendUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/status":
+			newAPIOK(w, map[string]any{"version": "fixture", "quota_per_unit": 500000})
+		case "/api/user/login/encryption-key":
+			http.NotFound(w, r)
+		case "/api/user/login":
+			writeJSON(w, 400, map[string]any{"success": false, "code": 400, "message": "Turnstile token is empty"})
+		default:
+			t.Error("unexpected endpoint", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	req := httptest.NewRequest("POST", "/v1/sub2api/accounts", strings.NewReader(`{"base":"https://newapi.example","email":"fixture-user","password":"test-pass"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, req)
+	var result struct {
+		Browser bool   `json:"requires_browser"`
+		Kind    string `json:"browser_kind"`
+		Base    string `json:"browser_base"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil || w.Code != 200 || !result.Browser || result.Kind != "newapi" || result.Base != "https://newapi.example" {
+		t.Fatal(w.Code, w.Body.String(), err)
+	}
+	var count int
+	if err := s.control.db.QueryRow(`SELECT count(*) FROM console_sub_accounts WHERE owner=$1`, owner).Scan(&count); err != nil || count != 1 {
+		t.Fatal("browser challenge persisted an account", count, err)
+	}
+}
+
+func TestNewAPIBrowserSessionIsVerifiedAndSaved(t *testing.T) {
+	s, _, owner := newAPITestService(t)
+	token, _ := s.control.newSession(context.Background(), owner)
+	withSpendUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/user/self":
+			if r.Header.Get("Authorization") != "Bearer browser-access" || r.Header.Get("New-Api-User") != "42" || r.Header.Get("X-Auth-Session") != "browser-session" {
+				t.Error("browser session headers not forwarded")
+			}
+			newAPIOK(w, map[string]any{"id": 42, "username": "fixture-user", "email": "fixture@example"})
+		case "/api/status":
+			newAPIOK(w, map[string]any{"version": "fixture", "quota_per_unit": 500000})
+		default:
+			t.Error("unexpected endpoint", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	body := `{"base":"https://newapi.example","name":"FoxRouter","email":"fixture@example","password":"browser-password","access_token":"browser-access","browser_kind":"newapi","browser_user_id":42,"browser_username":"fixture-user","browser_email":"fixture@example","browser_session_id":"browser-session","browser_access_expires_at":9999999999}`
+	req := httptest.NewRequest("POST", "/v1/sub2api/accounts", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, req)
+	if w.Code != 202 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	var id string
+	if err := json.Unmarshal(w.Body.Bytes(), &struct {
+		ID *string `json:"id"`
+	}{ID: &id}); err != nil || id == "" {
+		t.Fatal("missing account id", w.Body.String(), err)
+	}
+	t.Cleanup(func() { _, _ = s.control.db.Exec(`DELETE FROM console_sub_accounts WHERE id=$1`, id) })
+	var kind, loginName, encrypted, encryptedPassword string
+	if err := s.control.db.QueryRow(`SELECT provider_kind,login_name,encrypted_auth,encrypted_login_password FROM console_sub_accounts WHERE id=$1`, id).Scan(&kind, &loginName, &encrypted, &encryptedPassword); err != nil {
+		t.Fatal(err)
+	}
+	if kind != "newapi" || loginName != "fixture-user" || strings.Contains(encrypted, "browser-access") || strings.Contains(encryptedPassword, "browser-password") {
+		t.Fatal("browser session persistence is invalid", kind, loginName)
+	}
+	var auth subAuth
+	raw, err := s.control.decrypt(encrypted)
+	if err != nil || json.Unmarshal([]byte(raw), &auth) != nil || auth.UserID != 42 || auth.SessionID != "browser-session" || auth.Access != "browser-access" {
+		t.Fatal("saved New API browser auth invalid", err)
 	}
 }
 func TestNewAPIRefreshIsAccountScopedAndOnlyOnce(t *testing.T) {
@@ -459,6 +542,7 @@ func TestNewAPIReloginUpdatesSessionWithoutSynchronizing(t *testing.T) {
 	}))
 	r := httptest.NewRequest("POST", "/v1/sub2api/accounts/"+account+"/login", strings.NewReader(`{}`))
 	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Content-Type", "application/json")
 	r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, r)
@@ -537,5 +621,130 @@ func TestNewAPIAutomaticallyReloginsWithSavedPasswordAndPreservesIdentity(t *tes
 				t.Fatal("renewed session cookie was not saved")
 			}
 		})
+	}
+}
+
+func TestNewAPIBrowserPreflightDoesNotSubmitPassword(t *testing.T) {
+	s, _, owner := newAPITestService(t)
+	token, _ := s.control.newSession(context.Background(), owner)
+	withSpendUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/status" || r.Method != "GET" {
+			t.Error("password submitted despite Turnstile", r.URL.Path)
+		}
+		newAPIOK(w, map[string]any{"version": "fixture", "quota_per_unit": 500000, "turnstile_check": true})
+	}))
+	r := httptest.NewRequest("POST", "/v1/sub2api/accounts", strings.NewReader(`{"base":"https://usage.example","email":"fixture","password":"private"}`))
+	r.Header.Set("Content-Type", "application/json")
+	r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"browser_kind":"newapi"`) || strings.Contains(w.Body.String(), "private") {
+		t.Fatal(w.Code, w.Body.String())
+	}
+}
+
+func TestNewAPIBrowserCookieReLoginAndScope(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		id      int64
+		cookies string
+		kind    string
+		want    int
+	}{
+		{"legacy", 7, `{"session":"signed-session"}`, "newapi", 200},
+		{"changed-remote-user", 8, `{"session":"signed-session"}`, "newapi", 400},
+		{"foreign-cookie", 7, `{"cf_clearance":"never-copy"}`, "newapi", 400},
+		{"header-injection", 7, `{"session":"one;other=two"}`, "newapi", 400},
+		{"wrong-provider", 7, `{"session":"signed-session"}`, "sub2api", 400},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, account, owner := newAPITestService(t)
+			token, _ := s.control.newSession(context.Background(), owner)
+			if tc.kind != "newapi" {
+				_, err := s.control.db.Exec(`UPDATE console_sub_accounts SET provider_kind=$2 WHERE id=$1`, account, tc.kind)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			called := 0
+			withSpendUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				called++
+				switch r.URL.Path {
+				case "/api/user/self":
+					cookie, err := r.Cookie("session")
+					if err != nil || cookie.Value != "signed-session" {
+						t.Error("missing session")
+					}
+					if r.Header.Get("New-Api-User") != fmt.Sprint(tc.id) {
+						t.Error("missing user ID")
+					}
+					newAPIOK(w, map[string]any{"id": tc.id, "username": "fixture"})
+				case "/api/status":
+					newAPIOK(w, map[string]any{"quota_per_unit": 500000})
+				default:
+					t.Error("unexpected request", r.URL.Path)
+					http.NotFound(w, r)
+				}
+			}))
+			body := fmt.Sprintf(`{"base":"https://evil.test","email":"other","browser_kind":"newapi","browser_user_id":%d,"browser_username":"fixture","browser_cookies":%s}`, tc.id, tc.cookies)
+			r := httptest.NewRequest("POST", "/v1/sub2api/accounts/"+account+"/login", strings.NewReader(body))
+			r.Header.Set("Content-Type", "application/json")
+			r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
+			w := httptest.NewRecorder()
+			s.Handler().ServeHTTP(w, r)
+			if w.Code != tc.want {
+				t.Fatal(w.Code, w.Body.String())
+			}
+			if tc.want == 200 {
+				auth, _, err := s.newAPIAuth(context.Background(), account)
+				if err != nil || auth.Cookies["session"] != "signed-session" || !auth.BrowserLogin {
+					t.Fatal("session not saved", err)
+				}
+				var state string
+				s.control.db.QueryRow(`SELECT state FROM console_sub_accounts WHERE id=$1`, account).Scan(&state)
+				if state != "idle" {
+					t.Fatal("re-login queued work")
+				}
+			} else if tc.name != "changed-remote-user" && called != 0 {
+				t.Fatal("invalid auth sent to upstream")
+			}
+		})
+	}
+}
+
+func TestNewAPIErrorClassifiesTurnstileWithoutEchoingMessages(t *testing.T) {
+	for _, body := range []string{`{"success":false,"message":"Turnstile token is empty"}`, `{"success":false,"code":400,"message":"Turnstile token 为空 private-password"}`, `{"success":false,"code":"TURNSTILE_FAILED","message":"private-password"}`} {
+		withSpendUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, body) }))
+		err := newAPIJSON(context.Background(), "https://usage.example", "POST", "/api/user/login", nil, nil, nil)
+		var remote *subRemoteError
+		if !errors.As(err, &remote) || remote.Reason != "TURNSTILE_REQUIRED" || strings.Contains(err.Error(), "private-password") {
+			t.Fatal("bad classification", err)
+		}
+	}
+}
+
+func TestNewAPIBrowserExpiredSessionNeverRetriesUnverifiedPassword(t *testing.T) {
+	s, account, _ := newAPITestService(t)
+	auth, _, err := s.newAPIAuth(context.Background(), account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth.BrowserLogin = true
+	auth.Cookies = map[string]string{"session": "expired"}
+	enc, _ := s.control.encrypt(mustJSON(auth))
+	pass, _ := s.control.encrypt("must-not-submit")
+	_, err = s.control.db.Exec(`UPDATE console_sub_accounts SET encrypted_auth=$2,encrypted_login_password=$3 WHERE id=$1`, account, enc, pass)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withSpendUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/user/self" {
+			t.Error("unexpected unverified login", r.URL.Path)
+		}
+		w.WriteHeader(401)
+	}))
+	err = s.newAPICall(context.Background(), account, "https://usage.example", "GET", "/api/user/self", nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "浏览器会话已失效") {
+		t.Fatal(err)
 	}
 }

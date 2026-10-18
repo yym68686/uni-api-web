@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="zh-CN">
+  <meta charset="utf-8" /><title>uni-api 登录助手</title>
+  <body>
+    <h3>uni-api 登录助手</h3>
+    <p>
+      New API 登录需要读取你本次授权站点的登录 Cookie，并交回 uni-api
+      控制台加密保存。仅在你发起登录时读取 session 和 new_api_refresh。
+    </p>
+    <button id="enable">授权 New API 会话读取</button>
+    <p id="status" role="status"></p>
+    <button id="console">打开控制台</button>
+    <script src="popup.js"></script>
+  </body>
+</html>
