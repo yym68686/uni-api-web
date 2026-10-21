@@ -126,6 +126,8 @@ export interface SubTarget {
 }
 export { groupQualityResult } from "./sub2apiResults";
 export interface SubAccount {
+  active_groups?: number;
+  completed_groups?: number;
   id: string;
   name: string;
   base: string;
@@ -728,9 +730,19 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   const client = useQueryClient();
   const sources = useConsoleSources(user);
   const query = useSubAccounts();
-  const accountHeaders = useSubAccounts(!query.data, true);
+  const accountHeaders = useSubAccounts(true, true);
   const prices = useSubPrices(user);
-  const accounts = query.data?.data || accountHeaders.data?.data || [];
+  const accounts = useMemo(() => {
+    const data = query.data?.data || accountHeaders.data?.data || [];
+    if (!accountHeaders.data || accountHeaders.data.cached) return data;
+    const headers = new Map(accountHeaders.data.data.map(a => [a.id, a]));
+    return data.map(a => headers.has(a.id) ? { ...a, ...headers.get(a.id), targets: a.targets } : a);
+  }, [query.data, query.dataUpdatedAt, accountHeaders.data, accountHeaders.dataUpdatedAt]);
+  const statusAccounts = useMemo(() => {
+    if (!accountHeaders.data || accountHeaders.data.cached) return accounts;
+    const targets = new Map(accounts.map(a => [a.id, a.targets]));
+    return accountHeaders.data.data.map(header => ({ ...header, targets: targets.get(header.id) || [] }));
+  }, [accounts, accountHeaders.data]);
   const [form, setForm] = useState<{ account: SubAccount | null } | null>(null);
   const [filters, setFilters] = useState(() => loadSubFilters(user));
   const [modelSelectionRevision, setModelSelectionRevision] = useState(0);
@@ -791,7 +803,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   const checksInFlight = useRef(new Set<string>());
   const [submittingChecks, setSubmittingChecks] = useState(new Set<string>());
   const [syncSubmitted, setSyncSubmitted] = useState<number | null>(null);
-  const syncableAccounts = accounts.filter(
+  const syncableAccounts = statusAccounts.filter(
     (account) => !pending(account.state),
   );
   const [removing, setRemoving] = useState<string | null>(null);
@@ -900,7 +912,8 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
         method,
         ...(body ? { body: JSON.stringify(body) } : {}),
       });
-      await client.invalidateQueries({ queryKey: ["sub2api"] });
+      void client.invalidateQueries({ queryKey: ["sub2api"] });
+      await client.invalidateQueries({ queryKey: ["sub2api-headers"] });
       setRemoving(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "操作失败");
@@ -919,7 +932,8 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
         { method: "POST", body: JSON.stringify({ models: detectionModels }) },
       );
       setSyncSubmitted(result.queued);
-      await client.invalidateQueries({ queryKey: ["sub2api"] });
+      void client.invalidateQueries({ queryKey: ["sub2api"] });
+      await client.invalidateQueries({ queryKey: ["sub2api-headers"] });
     } catch (e) {
       setError(e instanceof ApiError && e.status === 404 ? "同步检测服务待更新，请稍后重试。" : e instanceof Error ? e.message : "批量同步失败");
     } finally {
@@ -1002,7 +1016,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
           <div className="data-title">
             <Globe2 size={19} />
             <h2>站点账号</h2>
-            <span className="count-badge">{!query.data && !accountHeaders.data ? "…" : accounts.length}</span>
+            <span className="count-badge">{!query.data && !accountHeaders.data ? "…" : statusAccounts.length}</span>
           </div>
           <div className="sub-account-actions">
             <button
@@ -1052,24 +1066,25 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
             saved={() => {
               setForm(null);
               void client.invalidateQueries({ queryKey: ["sub2api"] });
+              void client.invalidateQueries({ queryKey: ["sub2api-headers"] });
             }}
           />
         )}
-        {query.error && (
+        {accountHeaders.error && (
           <div role="alert" className="error-banner">
-            {query.error.message}
+            账号状态读取失败：{accountHeaders.error.message}
             <button
               className="button small"
-              onClick={() => void query.refetch()}
+              onClick={() => void accountHeaders.refetch()}
             >
               重试
             </button>
           </div>
         )}
-        {query.data && (query.data.cached || query.isError) && <p className="settings-note" role="status">正在显示上次读取的数据；最新数据尚未确认。</p>}
+        {accountHeaders.data && (accountHeaders.data.cached || accountHeaders.isError) && <p className="settings-note" role="status">正在显示上次读取的账号状态；最新状态尚未确认。</p>}
         {!query.data && !accountHeaders.data && (query.isPending || accountHeaders.isPending) ? (
           <TableLoading kind="accounts" rows={3} />
-        ) : accounts.length === 0 ? (
+        ) : statusAccounts.length === 0 ? (
           <Empty title="添加第一个站点账号" icon={<Globe2 size={25} />}>
             填入站点地址与账号密码，自动发现可用分组并检测模型。
           </Empty>
@@ -1083,11 +1098,11 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
               <span>操作</span>
             </div>
             <div className="sub-account-rows" role="list">
-              {accounts.map((a) => {
-                const completed = a.targets.filter(
+              {statusAccounts.map((a) => {
+                const completed = a.completed_groups ?? a.targets.filter(
                     (t) => t.active && t.state === "done",
                   ).length,
-                  total = a.targets.filter((t) => t.active).length;
+                  total = a.active_groups ?? a.targets.filter((t) => t.active).length;
                 const accountMessage = a.has_saved_password === false && /登录.*失效|会话.*失效/.test(a.message)
                   ? "站点会话已失效，且尚未保存登录密码；请补填一次密码，后续将自动登录。"
                   : a.message;
@@ -1197,6 +1212,8 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
           {error}
         </div>
       )}
+      {query.error && <div role="alert" className="error-banner">检测结果刷新失败，已提交的后台任务不受影响。{query.error.message}<button className="button small" onClick={() => void query.refetch()}>重试读取</button></div>}
+      {query.data && (query.data.cached || query.isError) && <p className="settings-note" role="status">正在显示上次读取的检测结果；最新结果尚未确认。</p>}
       {configuredChecks.isError && <div role="alert" className="error-banner">已有渠道检测记录读取失败。<button className="button small" onClick={() => void configuredChecks.refetch()}>重试</button></div>}
       {management.error && <div className="error-banner" role="alert">
         {management.error.message}

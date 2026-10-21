@@ -11,6 +11,39 @@ import (
 	"time"
 )
 
+// Account progress must not wait for model results, receipts, or serialization
+// of every target. This path is also used while full results are refreshing.
+func (s *Service) subAccountProgress(ctx context.Context, owner string, accounts []subAccount) error {
+	rows, err := s.control.db.QueryContext(ctx, `SELECT a.id,
+ (SELECT count(*) FROM console_sub_targets t WHERE t.account_id=a.id AND t.active),
+ (SELECT count(*) FROM console_sub_targets t WHERE t.account_id=a.id AND t.active AND t.state='done'),
+ EXISTS(SELECT 1 FROM console_sub_check_queue q WHERE q.account_id=a.id)
+ FROM console_sub_accounts a WHERE a.owner=$1`, owner)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	index := make(map[string]*subAccount, len(accounts))
+	for i := range accounts {
+		index[accounts[i].ID] = &accounts[i]
+	}
+	for rows.Next() {
+		var id string
+		var active, completed int
+		var queued bool
+		if err := rows.Scan(&id, &active, &completed, &queued); err != nil {
+			return err
+		}
+		if a := index[id]; a != nil {
+			a.ActiveGroups, a.CompletedGroups = &active, &completed
+			if queued && a.State != "running" && a.State != "queued" {
+				a.State = "queued"
+			}
+		}
+	}
+	return rows.Err()
+}
+
 // The list used to aggregate the entire result JSON once per target, then sort
 // those large aggregates before returning any row. Read models as one stream
 // instead. Keep authorization and target membership in the SQL, and retain every
@@ -123,7 +156,7 @@ func (t *subAccountsReadTrace) finish() {
 	lastStage := t.stage
 	t.next("done")
 	view := summaryView(t.r)
-	if view != "summary" && view != "accounts" {
+	if view != "summary" && view != "accounts" && view != "rates" {
 		view = "detail"
 	}
 	log.Printf("sub_accounts_read view=%s elapsed_ms=%d last_stage=%s canceled=%t accounts=%d targets=%d models=%d model_result_bytes=%d %s",

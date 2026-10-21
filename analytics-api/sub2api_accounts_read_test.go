@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Previous read-time projection, retained as a compatibility fixture only.
@@ -73,7 +74,7 @@ func TestSubAccountSummaryBulkModelsAndCurrentReceipt(t *testing.T) {
 		exec(`INSERT INTO console_sub_models(account_id,group_id,model,state) VALUES($1,7,'pending','running')`, a)
 	}
 	price, tokens := 9.0, int64(42)
-	exec(`INSERT INTO console_sub_usage(id,account_id,group_id,key_id,model,started_at,request_ids,status,result) VALUES($1,$2,7,0,'a',0,'[]','matched',$3)`, owner+"-a-a", owner+"-a", mustJSON(subUsage{Status: "matched", InputPrice: &price, InputTokens: &tokens}))
+	exec(`INSERT INTO console_sub_usage(id,account_id,group_id,key_id,model,started_at,request_ids,status,result) VALUES($1,$2,7,0,'a',0,'[]','matched',$3)`, owner+"-a-a", owner+"-a", mustJSON(subUsage{Status: "matched", InputPrice: &price, InputTokens: &tokens, ActualCost: &price, TotalCost: &price}))
 	s := &Service{control: store}
 	token, _ := store.newSession(context.Background(), owner)
 	get := func(path, view string) *httptest.ResponseRecorder {
@@ -127,6 +128,90 @@ func TestSubAccountSummaryBulkModelsAndCurrentReceipt(t *testing.T) {
 	}
 	if gotTargets != 2 || strings.Contains(summary.Body.String(), other) || strings.Contains(summary.Body.String(), "detail-") {
 		t.Fatal("scope or detail leakage")
+	}
+	// The single receipt-rate read must preserve the original owner-scoped rates.
+	var rates struct {
+		Data []struct {
+			ID    string                     `json:"id"`
+			Value map[string]subObservedRate `json:"value"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(get("/v1/sub2api/accounts", "rates").Body.Bytes(), &rates); err != nil {
+		t.Fatal(err)
+	}
+	if len(rates.Data) != 1 || rates.Data[0].ID != qualityGroupID(owner+"-a", 7) || rates.Data[0].Value["a"].Rate != 1 {
+		t.Fatal("rate snapshot differs or leaks scope", rates)
+	}
+	withoutRates := get("/v1/sub2api/accounts?include_rates=0&account_id="+owner+"-a", "summary")
+	if strings.Contains(withoutRates.Body.String(), "observed_rates") || !strings.Contains(withoutRates.Body.String(), "matched") {
+		t.Fatal("separate rates must not omit model receipt evidence")
+	}
+	// Account-scoped refreshes must retain exactly the original target evidence
+	// without loading any other account's models or changing detail semantics.
+	for _, id := range []string{owner + "-a", owner + "-b"} {
+		part := get("/v1/sub2api/accounts?account_id="+id, "summary")
+		var scoped struct {
+			Data []struct {
+				Value struct {
+					AccountID string     `json:"account_id"`
+					Target    *subTarget `json:"target"`
+				} `json:"value"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(part.Body.Bytes(), &scoped); err != nil {
+			t.Fatal(err)
+		}
+		found := 0
+		for _, row := range scoped.Data {
+			if row.Value.Target == nil {
+				continue
+			}
+			if row.Value.AccountID != id {
+				t.Fatal("foreign account included")
+			}
+			for _, original := range compact.Data {
+				if original.Value.AccountID == id && !reflect.DeepEqual(original.Value.Target, row.Value.Target) {
+					t.Fatal("scoped evidence differs")
+				}
+			}
+			found++
+		}
+		if found != 1 {
+			t.Fatal("scoped target missing", found)
+		}
+	}
+	for _, path := range []string{"/v1/sub2api/accounts?account_id=" + other, "/v1/sub2api/accounts?account_id=missing"} {
+		r := httptest.NewRequest("GET", path, nil)
+		r.Header.Set("X-Console-View", "summary")
+		r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		if w.Code != 404 {
+			t.Fatal("account scope bypassed ownership", w.Code)
+		}
+	}
+	// Fast status reads must finish even while model results are blocked. This
+	// lock is only on the disposable test database, never a production table.
+	lock, err := store.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Rollback()
+	if _, err := lock.Exec("LOCK TABLE console_sub_models IN ACCESS EXCLUSIVE MODE"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	r := httptest.NewRequest("GET", "/v1/sub2api/accounts", nil).WithContext(ctx)
+	r.Header.Set("X-Console-View", "accounts")
+	r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != 200 || w.Header().Get("X-Console-Account-Scope") != "v2" || !strings.Contains(w.Body.String(), `"active_groups":1`) || !strings.Contains(w.Body.String(), `"completed_groups":0`) {
+		t.Fatal("status read blocked or lacked counts", w.Code, w.Body.String())
+	}
+	if err := lock.Rollback(); err != nil {
+		t.Fatal(err)
 	}
 	detail := get(fmt.Sprintf("/v1/sub2api/accounts/%s/groups/7/details?model=a", owner+"-b"), "")
 	if !strings.Contains(detail.Body.String(), "detail-"+owner+"-b") || strings.Contains(detail.Body.String(), `"model":"z"`) || !strings.Contains(detail.Body.String(), `"model":"gpt-6-astra"`) {

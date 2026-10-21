@@ -10,11 +10,99 @@ type AccountRow = {
   target?: SubTarget;
   position: number;
 };
+type AccountRates = NonNullable<SubTarget["observed_rates"]>;
 export type AccountData = {
   data: SubAccount[];
   summary?: SummaryState<AccountRow>;
   cached?: boolean;
+  accountSummaries?: Record<string, SummaryState<AccountRow>>;
+  rateSummary?: SummaryState<AccountRates>;
 };
+
+// Publish only a complete refresh. A failed part leaves the prior complete
+// list in React Query; neither cancellation nor retry can replay a mutation.
+export async function readAccountData(
+  previous: AccountData | undefined,
+  signal: AbortSignal,
+): Promise<AccountData> {
+  const directory = await readSummary<AccountRow, AccountData>(
+    "/v1/sub2api/accounts",
+    undefined,
+    signal,
+    "accounts",
+  );
+  if (!directory.accountScope) {
+    const full = await readSummary<AccountRow, AccountData>(
+      "/v1/sub2api/accounts",
+      previous?.summary,
+      signal,
+    );
+    return full.summary
+      ? { data: summaryAccounts(full.summary), summary: full.summary }
+      : full.legacy!;
+  }
+  if (!directory.summary) throw Error("账号目录数据不完整，请重新读取");
+  const headers = summaryAccounts(directory.summary!);
+  const accountSummaries: Record<string, SummaryState<AccountRow>> = {};
+  const parts: SubAccount[][] = new Array(headers.length);
+  const controller = new AbortController();
+  const combined = AbortSignal.any([signal, controller.signal]);
+  let next = 0;
+  const worker = async () => {
+    while (next < headers.length) {
+      combined.throwIfAborted();
+      const index = next++;
+      const id = headers[index].id;
+      const result = await readSummary<AccountRow, AccountData>(
+        "/v1/sub2api/accounts?include_rates=0&account_id=" +
+          encodeURIComponent(id),
+        previous?.accountSummaries?.[id],
+        combined,
+      );
+      const accounts = result.summary
+        ? summaryAccounts(result.summary)
+        : result.legacy?.data;
+      if (!accounts || accounts.length !== 1 || accounts[0].id !== id)
+        throw Error("账号数据不完整，请重新读取");
+      parts[index] = accounts;
+      if (result.summary) accountSummaries[id] = result.summary;
+    }
+  };
+  try {
+    await Promise.all(
+      Array.from({ length: Math.min(2, headers.length) }, worker),
+    );
+    const rateResult = headers.length
+      ? await readSummary<AccountRates, never>(
+          "/v1/sub2api/accounts",
+          previous?.rateSummary,
+          combined,
+          "rates",
+        )
+      : undefined;
+    if (headers.length && !rateResult?.summary)
+      throw Error("账单倍率数据不完整，请重新读取");
+    signal.throwIfAborted();
+    const rates = new Map(
+      rateResult?.summary?.rows.map((row) => [row.id, row.value]),
+    );
+    const data = parts.flat().map((account) => ({
+      ...account,
+      targets: account.targets.map((target) => ({
+        ...target,
+        observed_rates: rates.get(`${account.id}:${target.group_id}`),
+      })),
+    }));
+    return {
+      data,
+      accountSummaries,
+      rateSummary: rateResult?.summary,
+      cached: false,
+    };
+  } finally {
+    controller.abort();
+  }
+}
 export function summaryAccounts(
   summary: SummaryState<AccountRow>,
 ): SubAccount[] {
@@ -54,6 +142,50 @@ export function useSubAccounts(enabled = true, headersOnly = false) {
           previous = { data: summaryAccounts(summary), summary, cached: true };
           client.setQueryData(queryKey, previous);
         }
+      }
+      if (!headersOnly) {
+        const result = await readAccountData(previous, signal);
+        if (result.summary)
+          void saveSummaryCache(user, cacheKey, result.summary);
+        else if (result.accountSummaries) {
+          // Store only a complete assembled snapshot. Per-account server
+          // cursors remain session-local; a reload revalidates every part.
+          const rows = Object.values(result.accountSummaries).flatMap(
+            (part) => part.rows,
+          );
+          const rates = new Map(
+            result.rateSummary?.rows.map((row) => [row.id, row.value]),
+          );
+          const positions = new Map(
+            result.data.map((account, i) => [account.id, i]),
+          );
+          void saveSummaryCache(user, cacheKey, {
+            version: "assembled",
+            rows: rows.map((row) =>
+              row.value.account
+                ? {
+                    ...row,
+                    value: {
+                      ...row.value,
+                      position: positions.get(row.value.account.id)!,
+                    },
+                  }
+                : row.value.target
+                  ? {
+                      ...row,
+                      value: {
+                        ...row.value,
+                        target: {
+                          ...row.value.target,
+                          observed_rates: rates.get(row.id),
+                        },
+                      },
+                    }
+                  : row,
+            ),
+          });
+        }
+        return result;
       }
       const { summary, legacy } = await readSummary<AccountRow, AccountData>(
         "/v1/sub2api/accounts",

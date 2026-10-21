@@ -42,6 +42,8 @@ type subTarget struct {
 	Billing         *subBilling                `json:"billing"`
 }
 type subAccount struct {
+	ActiveGroups     *int               `json:"active_groups,omitempty"`
+	CompletedGroups  *int               `json:"completed_groups,omitempty"`
 	HasSavedPassword bool               `json:"has_saved_password"`
 	ProviderKind     string             `json:"provider_kind"`
 	LoginName        string             `json:"login_name"`
@@ -68,6 +70,27 @@ func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 	trace := newSubAccountsReadTrace(r)
 	defer trace.finish()
 	accountID, groupID := r.PathValue("id"), int64Param(r.PathValue("group"))
+	if summaryView(r) == "rates" {
+		if r.URL.Query().Get("account_id") != "" || r.PathValue("id") != "" {
+			http.Error(w, "账单倍率范围无效", http.StatusBadRequest)
+			return
+		}
+		trace.next("observed_rates")
+		s.subAccountRatesSummary(w, r, owner)
+		return
+	}
+	if scoped := r.URL.Query().Get("account_id"); scoped != "" {
+		if accountID != "" || summaryView(r) != "summary" {
+			http.Error(w, "账号范围仅用于摘要读取", 400)
+			return
+		}
+		accountID = scoped
+	}
+	omitRates := r.URL.Query().Get("include_rates") == "0"
+	if omitRates && (accountID == "" || summaryView(r) != "summary") {
+		http.Error(w, "账单倍率范围无效", http.StatusBadRequest)
+		return
+	}
 	rows, err := s.control.db.QueryContext(r.Context(), `SELECT id,name,base,email,state,message,synced_at,balance,job_kind,provider_kind,login_name,encrypted_login_password<>'' FROM console_sub_accounts WHERE owner=$1 AND ($2='' OR id=$2) ORDER BY created_at,id`, owner, accountID)
 	if err != nil {
 		http.Error(w, "账号列表暂不可用", 503)
@@ -105,11 +128,16 @@ func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 	trace.next("shared_quality")
 	trace.accounts = len(accounts)
 	if summaryView(r) == "accounts" {
+		if err := s.subAccountProgress(r.Context(), owner, accounts); err != nil {
+			http.Error(w, "账号状态暂不可用", 503)
+			return
+		}
+		w.Header().Set("X-Console-Account-Scope", "v2")
 		trace.next("serialize")
 		s.writeAccountSummary(w, r, accounts)
 		return
 	}
-	shared, sharedErr := s.sharedQuality(r.Context(), owner)
+	shared, sharedErr := s.sharedQualityForAccount(r.Context(), owner, accountID)
 	if sharedErr != nil {
 		http.Error(w, "共享检测记录暂不可用", 503)
 		return
@@ -177,18 +205,20 @@ func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 	trace.next("usage")
 	s.subAttachUsage(r.Context(), owner, accounts)
 	trace.next("observed_rates")
-	observed, err := s.control.subObservedRates(r.Context(), owner)
-	if err != nil {
-		http.Error(w, "账单倍率读取失败", 503)
-		return
-	}
-	for accountIndex := range accounts {
-		for targetIndex := range accounts[accountIndex].Targets {
-			target := &accounts[accountIndex].Targets[targetIndex]
-			target.ObservedRates = observed[qualityGroupID(accounts[accountIndex].ID, target.GroupID)]
+	if !omitRates {
+		observed, err := s.control.subObservedRatesForAccount(r.Context(), owner, accountID)
+		if err != nil {
+			http.Error(w, "账单倍率读取失败", 503)
+			return
+		}
+		for accountIndex := range accounts {
+			for targetIndex := range accounts[accountIndex].Targets {
+				target := &accounts[accountIndex].Targets[targetIndex]
+				target.ObservedRates = observed[qualityGroupID(accounts[accountIndex].ID, target.GroupID)]
+			}
 		}
 	}
-	if accountID != "" && (len(accounts) != 1 || len(accounts[0].Targets) != 1) {
+	if r.PathValue("id") != "" && (len(accounts) != 1 || len(accounts[0].Targets) != 1) {
 		http.Error(w, "分组不存在", 404)
 		return
 	}

@@ -110,6 +110,29 @@ FROM (SELECT n,n%684 g,n/684 m,(SELECT string_agg(md5(n::text||':'||k),'') FROM 
 			t.Fatal("models missing")
 		}
 	}
+	start = time.Now()
+	maxPart, allModels, maxBytes := time.Duration(0), 0, 0
+	for _, account := range accounts {
+		partCtx, stop := context.WithTimeout(context.Background(), 10*time.Second)
+		r := httptest.NewRequest("GET", "/v1/sub2api/accounts?include_rates=0&account_id="+account.ID, nil).WithContext(partCtx)
+		r.Header.Set("X-Console-View", "summary")
+		r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
+		w := httptest.NewRecorder()
+		began := time.Now()
+		s.Handler().ServeHTTP(w, r)
+		elapsed := time.Since(began)
+		stop()
+		if w.Code != 200 || elapsed >= 10*time.Second {
+			t.Fatal("account part exceeded safe response budget", w.Code, elapsed)
+		}
+		maxPart = max(maxPart, elapsed)
+		maxBytes = max(maxBytes, w.Body.Len())
+		allModels += strings.Count(w.Body.String(), `"state":"done"`)
+	}
+	if allModels != 115675 {
+		t.Fatal("scoped reads dropped or duplicated models", allModels)
+	}
+	t.Logf("account-scoped complete refresh: %s, max_part=%s max_bytes=%d models=%d", time.Since(start), maxPart, maxBytes, allModels)
 	// Simulate an upgraded installation whose historical projections do not
 	// exist yet. Verify bounded progress over the full incident-sized dataset.
 	exec(`DELETE FROM console_sub_model_summaries WHERE account_id IN (SELECT id FROM console_sub_accounts WHERE owner=$1)`, owner)

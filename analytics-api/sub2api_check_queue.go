@@ -116,7 +116,11 @@ func (s *Service) subPromoteChecks(ctx context.Context) error {
 // Project durable waiting tasks into the same per-check UI states used by the
 // active worker. Do not overwrite stored results or the active worker's states.
 func (s *Service) subAttachQueuedChecks(ctx context.Context, owner string, accounts []subAccount) error {
-	rows, err := s.control.db.QueryContext(ctx, `SELECT q.account_id,q.group_id,q.kind,q.model FROM console_sub_check_queue q JOIN console_sub_accounts a ON a.id=q.account_id WHERE a.owner=$1`, owner)
+	ids := make([]string, 0, len(accounts))
+	for _, a := range accounts {
+		ids = append(ids, a.ID)
+	}
+	rows, err := s.control.db.QueryContext(ctx, `SELECT q.account_id,q.group_id,q.kind,q.model FROM console_sub_check_queue q JOIN console_sub_accounts a ON a.id=q.account_id WHERE a.owner=$1 AND a.id=ANY($2)`, owner, ids)
 	if err != nil {
 		return err
 	}

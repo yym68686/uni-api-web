@@ -104,11 +104,24 @@ type sharedQuality struct {
 // retained; concurrent reads, multiple installed caller keys and restarts do
 // not duplicate attempts or move previously linked history to a new group.
 func (s *Service) sharedQuality(ctx context.Context, owner string) (sharedQuality, error) {
+	return s.sharedQualityForAccount(ctx, owner, "")
+}
+
+func (s *Service) sharedQualityForAccount(ctx context.Context, owner, accountID string) (sharedQuality, error) {
 	out := sharedQuality{Groups: map[string]sharedQualityProjection{}}
 	var err error
 	out.Bindings, err = s.qualityBindings(ctx, owner)
 	if err != nil {
 		return out, err
+	}
+	if accountID != "" {
+		filtered := out.Bindings[:0]
+		for _, binding := range out.Bindings {
+			if binding.Account == accountID {
+				filtered = append(filtered, binding)
+			}
+		}
+		out.Bindings = filtered
 	}
 	if len(out.Bindings) > 0 {
 		raw, _ := json.Marshal(out.Bindings)
@@ -125,11 +138,11 @@ func (s *Service) sharedQuality(ctx context.Context, owner string) (sharedQualit
 	}
 	rows, err := s.control.db.QueryContext(ctx, `WITH owned AS MATERIALIZED (
  SELECT h.id,h.account_id,h.group_id,h.successful,h.verdict,h.checked_at
- FROM console_quality_group_history h JOIN console_sub_accounts a ON a.id=h.account_id WHERE a.owner=$1
+ FROM console_quality_group_history h JOIN console_sub_accounts a ON a.id=h.account_id WHERE a.owner=$1 AND ($2='' OR a.id=$2)
  ), totals AS (SELECT account_id,group_id,count(*) AS total,count(*) FILTER(WHERE successful) AS successful,count(*) FILTER(WHERE successful AND verdict='pass') AS passed FROM owned GROUP BY account_id,group_id),
  latest AS (SELECT DISTINCT ON(account_id,group_id) account_id,group_id,id FROM owned WHERE verdict<>'running' ORDER BY account_id,group_id,checked_at DESC,id DESC)
  SELECT t.account_id,t.group_id,t.total,t.successful,t.passed,h.result,COALESCE(h.source_id,''),COALESCE(h.verdict,''),COALESCE(h.checked_at,0)
- FROM totals t LEFT JOIN latest l USING(account_id,group_id) LEFT JOIN console_quality_history h ON h.id=l.id`, owner)
+ FROM totals t LEFT JOIN latest l USING(account_id,group_id) LEFT JOIN console_quality_history h ON h.id=l.id`, owner, accountID)
 	if err != nil {
 		return out, err
 	}

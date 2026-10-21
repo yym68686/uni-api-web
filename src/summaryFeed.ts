@@ -43,25 +43,44 @@ export async function readSummary<T, Legacy>(
   previous: SummaryState<T> | undefined,
   signal: AbortSignal,
   view = "summary",
-): Promise<{ summary?: SummaryState<T>; legacy?: Legacy }> {
-  const response = await fetch(location.origin + "/analytics" + path, {
-    credentials: "same-origin",
-    cache: "no-store",
-    headers: {
-      Accept: "application/json",
-      "X-Console-View": view,
-      ...(previous ? { "X-Console-Since": previous.version } : {}),
-    },
-    signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
-  });
-  if (response.status === 304 && previous) return { summary: previous };
-  if (!response.ok)
-    throw new ApiError(
-      (await response.text()) || `HTTP ${response.status}`,
-      response.status,
-    );
-  const body = await response.json();
-  // During rolling upgrades an older backend can still return the full shape.
-  if (body.format !== "summary-v1") return { legacy: body as Legacy };
-  return { summary: mergeSummary(previous, body) };
+): Promise<{
+  summary?: SummaryState<T>;
+  legacy?: Legacy;
+  accountScope?: boolean;
+}> {
+  try {
+    const response = await fetch(location.origin + "/analytics" + path, {
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: {
+        Accept: "application/json",
+        "X-Console-View": view,
+        ...(previous ? { "X-Console-Since": previous.version } : {}),
+      },
+      signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
+    });
+    const accountScope =
+      response.headers.get("X-Console-Account-Scope") === "v2";
+    if (response.status === 304 && previous)
+      return { summary: previous, accountScope };
+    if (!response.ok)
+      throw new ApiError(
+        (await response.text()) || `HTTP ${response.status}`,
+        response.status,
+      );
+    const body = await response.json();
+    // During rolling upgrades an older backend can still return the full shape.
+    if (body.format !== "summary-v1")
+      return { legacy: body as Legacy, accountScope };
+    return { summary: mergeSummary(previous, body), accountScope };
+  } catch (error) {
+    if (
+      !signal.aborted &&
+      error instanceof Error &&
+      error.name === "TimeoutError"
+    ) {
+      throw new Error("数据读取超时，请稍后重试读取。");
+    }
+    throw error;
+  }
 }

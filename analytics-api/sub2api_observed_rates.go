@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"math"
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -13,6 +14,22 @@ import (
 type subObservedRate struct {
 	Rate       float64 `json:"rate"`
 	ObservedAt int64   `json:"observed_at"`
+}
+
+// Read receipt-derived rates once per complete refresh, independently from
+// model payloads. Receipt history has no per-account matched-row index; doing
+// this for every account would multiply the same history scan.
+func (s *Service) subAccountRatesSummary(w http.ResponseWriter, r *http.Request, owner string) {
+	observed, err := s.control.subObservedRates(r.Context(), owner)
+	if err != nil {
+		http.Error(w, "账单倍率读取失败", http.StatusServiceUnavailable)
+		return
+	}
+	rows := make([]summaryRow, 0, len(observed))
+	for group, rates := range observed {
+		rows = append(rows, summaryRow{ID: group, Value: rates})
+	}
+	s.writeSummary(w, r, rows)
 }
 
 func subReceiptRate(usage subUsage, startedAt int64) *subObservedRate {
@@ -36,13 +53,17 @@ func subReceiptRate(usage subUsage, startedAt int64) *subObservedRate {
 }
 
 func (s *controlStore) subObservedRates(ctx context.Context, owner string) (map[string]map[string]subObservedRate, error) {
+	return s.subObservedRatesForAccount(ctx, owner, "")
+}
+
+func (s *controlStore) subObservedRatesForAccount(ctx context.Context, owner, accountID string) (map[string]map[string]subObservedRate, error) {
 	rows, err := s.db.QueryContext(ctx, `WITH owned_targets AS MATERIALIZED (
- SELECT t.account_id,t.group_id,t.remote_key_id FROM console_sub_targets t JOIN console_sub_accounts a ON a.id=t.account_id WHERE a.owner=$1),
+ SELECT t.account_id,t.group_id,t.remote_key_id FROM console_sub_targets t JOIN console_sub_accounts a ON a.id=t.account_id WHERE a.owner=$1 AND ($2='' OR a.id=$2)),
  latest AS (
  SELECT DISTINCT ON (u.account_id,u.group_id,u.model) u.id,u.account_id,u.group_id,u.model,u.started_at
  FROM console_sub_usage u JOIN owned_targets t ON t.account_id=u.account_id AND t.group_id=u.group_id AND t.remote_key_id=u.key_id
  WHERE u.status='matched' ORDER BY u.account_id,u.group_id,u.model,u.started_at DESC,u.id DESC)
- SELECT latest.account_id,latest.group_id,latest.model,latest.started_at,u.result FROM latest JOIN console_sub_usage u ON u.id=latest.id`, owner)
+ SELECT latest.account_id,latest.group_id,latest.model,latest.started_at,u.result FROM latest JOIN console_sub_usage u ON u.id=latest.id`, owner, accountID)
 	if err != nil {
 		return nil, err
 	}

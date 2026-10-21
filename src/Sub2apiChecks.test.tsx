@@ -116,9 +116,13 @@ it("keeps channel loading honest and does not read every source key directory on
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(["sources", "quick-entry"], { data: [{ id: "do", name: "DigitalOcean" }] });
   const replies: Record<string, (response: Response) => void> = {};
+  const headerReplies: ((response: Response) => void)[] = [];
   const fetcher = vi.fn(async (input: string, init?: RequestInit) => {
     if (input.endsWith("/accounts") || input.endsWith("/channel-management"))
-      return new Promise<Response>(resolve => { replies[input.endsWith("/accounts") ? new Headers(init?.headers).get("X-Console-View") === "accounts" ? "headers" : "accounts" : "management"] = resolve; });
+      return new Promise<Response>(resolve => {
+        if (input.endsWith("/accounts") && new Headers(init?.headers).get("X-Console-View") === "accounts") headerReplies.push(resolve);
+        else replies[input.endsWith("/accounts") ? "accounts" : "management"] = resolve;
+      });
     return Response.json({ data: [], unavailable_sources: [] });
   });
   vi.stubGlobal("fetch", fetcher);
@@ -127,7 +131,7 @@ it("keeps channel loading honest and does not read every source key directory on
   expect(screen.getByRole("status", { name: "加载渠道检测" })).toBeInTheDocument();
   expect(screen.queryByText("没有匹配的渠道")).not.toBeInTheDocument();
   expect(fetcher.mock.calls.some(([input]) => input.includes("keys_only"))).toBe(false);
-  await act(async () => { replies.headers(Response.json({data:fixtures().map(a=>({...a,targets:[]}))})); });
+  await act(async () => { for (const reply of headerReplies) reply(Response.json({data:fixtures().map(a=>({...a,targets:[]}))})); });
   await waitFor(() => expect(screen.getByRole("heading", { name: "站点账号" }).parentElement).toHaveTextContent("2"));
   expect(screen.getByRole("status", {name:"加载渠道检测"})).toBeInTheDocument();
   await act(async () => {
@@ -2523,4 +2527,35 @@ it("does not fall back to unscoped sync on an older backend", async () => {
   await user.click(screen.getByRole("button", {name: "一键同步并检测"}));
   expect(await screen.findByText("同步检测服务待更新，请稍后重试。")).toBeVisible();
   expect(writes).toEqual(["/analytics/v1/sub2api/accounts/sync-selected"]);
+});
+
+it("keeps accepted sync and live account status when result refresh times out without resubmitting", async () => {
+  saveSubModels("accepted-sync-read-timeout", ["gemini-4-argon"]);
+  let submitted = false;
+  const posts: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+    if (init?.method === "POST") {
+      posts.push(new URL(input,location.origin).pathname);
+      submitted = true;
+      return Response.json({queued:2},{status:202});
+    }
+    if (input.endsWith("/accounts")) {
+      if (submitted && new Headers(init?.headers).get("X-Console-View") !== "accounts") {
+        throw new DOMException("signal timed out","TimeoutError");
+      }
+      return Response.json({data:fixtures().map(a=>({...a,state:submitted?"queued":"idle",job_kind:submitted?"sync":""}))});
+    }
+    return Response.json({data:[],labels:{}});
+  }));
+  const user = userEvent.setup();
+  mount("accepted-sync-read-timeout");
+  await screen.findByRole("table");
+  await user.click(screen.getByRole("button",{name:"一键同步并检测"}));
+  expect(await screen.findByText("已提交 2 个账号，正在后台同步并检测。")).toBeVisible();
+  await screen.findByText(/检测结果刷新失败，已提交的后台任务不受影响/);
+  expect(screen.queryByText("signal timed out")).not.toBeInTheDocument();
+  expect(screen.getAllByRole("button",{name:"停止"})).toHaveLength(2);
+  expect(screen.getAllByText("same-group",{selector:"strong"})).toHaveLength(2);
+  await user.click(screen.getByRole("button",{name:"重试读取"}));
+  expect(posts).toEqual(["/analytics/v1/sub2api/accounts/sync-selected"]);
 });
