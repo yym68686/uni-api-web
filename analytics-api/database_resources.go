@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -45,13 +46,42 @@ func configureDatabaseResources(db *sql.DB, path string, cfg Config) error {
 	return err
 }
 
+var errAnalyticsPriority = errors.New("billing deferred for interactive analytics")
+
 func (e *Engine) acquireAnalytical(ctx context.Context, name string) (func(), error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	// A few helper-only Engine values used by tests and migration code do not
 	// open a database. Keep those callers usable without turning a nil channel
 	// send into an unbounded block; normal engines always initialize the gate in
 	// OpenEngine.
 	if e.analyticalSlots == nil {
 		return func() {}, nil
+	}
+	// Per-request billing reconciliation is optional and can scan a large
+	// receipt set. A critical analytics read must be able to reclaim the single
+	// analytical slot from that work instead of waiting until its 20s deadline.
+	leavePriority := func() {}
+	if name == "analytics_query" {
+		e.spendMu.Lock()
+		e.criticalReads++
+		cancels := make([]context.CancelCauseFunc, 0, len(e.spendCancels))
+		for _, cancel := range e.spendCancels {
+			cancels = append(cancels, cancel)
+		}
+		e.spendMu.Unlock()
+		for _, cancel := range cancels {
+			cancel(errAnalyticsPriority)
+		}
+		if len(cancels) > 0 {
+			log.Printf("analytics billing_deferred reason=interactive_analytics requests=%d", len(cancels))
+		}
+		leavePriority = func() {
+			e.spendMu.Lock()
+			e.criticalReads--
+			e.spendMu.Unlock()
+		}
 	}
 	e.analyticalWaiting.Add(1)
 	defer e.analyticalWaiting.Add(-1)
@@ -60,14 +90,46 @@ func (e *Engine) acquireAnalytical(ctx context.Context, name string) (func(), er
 	case e.analyticalSlots <- struct{}{}:
 		if err := ctx.Err(); err != nil {
 			<-e.analyticalSlots
+			leavePriority()
 			return nil, err
 		}
 		if elapsed := time.Since(began); elapsed >= 100*time.Millisecond {
 			log.Printf("analytics db_wait operation=%s duration_ms=%d", name, elapsed.Milliseconds())
 		}
-		return func() { <-e.analyticalSlots }, nil
+		var once sync.Once
+		return func() {
+			once.Do(func() {
+				<-e.analyticalSlots
+				leavePriority()
+			})
+		}, nil
 	case <-ctx.Done():
+		leavePriority()
 		return nil, ctx.Err()
+	}
+}
+
+// Registration shares the priority lock: new billing must also yield while
+// an interactive reader is queued or running. Billing never cancels its peers.
+func (e *Engine) registerSpend(ctx context.Context) (context.Context, func()) {
+	workCtx, cancel := context.WithCancelCause(ctx)
+	e.spendMu.Lock()
+	e.nextSpendID++
+	id := e.nextSpendID
+	if e.spendCancels == nil {
+		e.spendCancels = make(map[uint64]context.CancelCauseFunc)
+	}
+	e.spendCancels[id] = cancel
+	deferred := e.criticalReads > 0
+	e.spendMu.Unlock()
+	if deferred {
+		cancel(errAnalyticsPriority)
+	}
+	return workCtx, func() {
+		cancel(nil)
+		e.spendMu.Lock()
+		delete(e.spendCancels, id)
+		e.spendMu.Unlock()
 	}
 }
 

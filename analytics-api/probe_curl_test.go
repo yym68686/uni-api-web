@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -18,9 +19,17 @@ func TestProbeCurlCapturesActualRequestsAndReplaysWithoutShellExpansion(t *testi
 	for _, mode := range []string{"responses", "quality", "messages", "gemini", "tool-use", "compaction", "targeted"} {
 		t.Run(mode, func(t *testing.T) {
 			var received []probeCurlSnapshot
+			var receivedMu sync.Mutex
+			readReceived := func() []probeCurlSnapshot {
+				receivedMu.Lock()
+				defer receivedMu.Unlock()
+				return append([]probeCurlSnapshot(nil), received...)
+			}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				body, _ := io.ReadAll(r.Body)
+				receivedMu.Lock()
 				received = append(received, probeCurlSnapshot{Method: r.Method, URL: r.URL.String(), Headers: r.Header.Clone(), Body: string(body)})
+				receivedMu.Unlock()
 				w.WriteHeader(400)
 			}))
 			defer server.Close()
@@ -56,16 +65,17 @@ func TestProbeCurlCapturesActualRequestsAndReplaysWithoutShellExpansion(t *testi
 				t.Fatal(err)
 			}
 			var snapshot probeCurlSnapshot
-			if json.Unmarshal([]byte(raw), &snapshot) != nil || len(received) != 1 || snapshot.Body != received[0].Body {
+			observed := readReceived()
+			if json.Unmarshal([]byte(raw), &snapshot) != nil || len(observed) != 1 || snapshot.Body != observed[0].Body {
 				t.Fatal("snapshot does not match actual body")
 			}
 			for name, values := range snapshot.Headers {
-				if strings.Join(values, ",") != strings.Join(received[0].Headers.Values(name), ",") {
+				if strings.Join(values, ",") != strings.Join(observed[0].Headers.Values(name), ",") {
 					t.Fatalf("header mismatch: %s", name)
 				}
 			}
 			for _, name := range []string{"User-Agent", "Accept-Encoding"} {
-				if snapshot.Headers.Get(name) != received[0].Headers.Get(name) {
+				if snapshot.Headers.Get(name) != observed[0].Headers.Get(name) {
 					t.Fatalf("lost transport header %s", name)
 				}
 			}
@@ -85,11 +95,12 @@ func TestProbeCurlCapturesActualRequestsAndReplaysWithoutShellExpansion(t *testi
 			if out, err := exec.Command("sh", "-c", probeCurl(snapshot)).CombinedOutput(); err != nil {
 				t.Fatalf("curl failed: %v %s", err, out)
 			}
-			if len(received) != 2 || received[1].Body != received[0].Body || received[1].URL != received[0].URL {
+			observed = readReceived()
+			if len(observed) != 2 || observed[1].Body != observed[0].Body || observed[1].URL != observed[0].URL {
 				t.Fatal("curl did not replay the exact request")
 			}
 			for name, values := range snapshot.Headers {
-				if strings.Join(values, ",") != strings.Join(received[1].Headers.Values(name), ",") {
+				if strings.Join(values, ",") != strings.Join(observed[1].Headers.Values(name), ",") {
 					t.Fatalf("replay header mismatch: %s", name)
 				}
 			}

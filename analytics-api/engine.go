@@ -25,6 +25,10 @@ type Engine struct {
 	DB                *sql.DB
 	analyticalSlots   chan struct{}
 	analyticalWaiting atomic.Int64
+	spendMu           sync.Mutex
+	spendCancels      map[uint64]context.CancelCauseFunc
+	nextSpendID       uint64
+	criticalReads     int
 	operationsMu      sync.Mutex
 	operations        map[*databaseOperation]string
 	historyPath       string

@@ -133,6 +133,12 @@ func (s *Service) channelSpend(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 	rows, err := s.attributedChannelSpend(ctx, owner, f, from, to)
+	if errors.Is(err, errAnalyticsPriority) {
+		w.Header().Set("Retry-After", "5")
+		log.Printf("event=channel_spend_deferred reason=interactive_analytics")
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"code": "billing_deferred", "error": "账单核对已暂缓，优先加载渠道统计；稍后自动重试。"})
+		return
+	}
 	if err != nil {
 		log.Printf("event=channel_spend_query_failed error=%q", err)
 		http.Error(w, "逐请求账单关联暂不可用，请稍后刷新", 503)
@@ -214,6 +220,13 @@ const billingClaimsSQL = `CREATE TEMP TABLE console_spend_claims AS
  GROUP BY t.upstream_base,t.upstream_key_hash,t.rid`
 
 func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f QueryFilter, from, to int64) (result []attributedSpend, resultErr error) {
+	ctx, unregisterSpend := s.engine.registerSpend(ctx)
+	defer unregisterSpend()
+	defer func() {
+		if resultErr != nil && errors.Is(context.Cause(ctx), errAnalyticsPriority) {
+			resultErr = errAnalyticsPriority
+		}
+	}()
 	release, err := s.engine.acquireAnalytical(ctx, "channel_spend")
 	if err != nil {
 		return nil, err

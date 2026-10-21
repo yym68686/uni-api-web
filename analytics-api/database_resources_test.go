@@ -100,3 +100,106 @@ func TestAnalyticalQueueDoesNotBlockImportOrLeakAfterCancellation(t *testing.T) 
 		t.Fatal("cancelled query left a waiter")
 	}
 }
+
+func TestCriticalAnalyticsPreemptsSpend(t *testing.T) {
+	e := stateTestEngine(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	spendCtx, unregister := e.registerSpend(ctx)
+	defer unregister()
+	queuedSpendCtx, unregisterQueued := e.registerSpend(ctx)
+	defer unregisterQueued()
+	if spendCtx.Err() != nil {
+		t.Fatal("billing canceled its peer")
+	}
+	release, err := e.acquireAnalytical(spendCtx, "channel_spend")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	type acquisition struct {
+		release func()
+		err     error
+	}
+	criticalDone := make(chan acquisition, 1)
+	go func() {
+		r, err := e.acquireAnalytical(ctx, "analytics_query")
+		criticalDone <- acquisition{r, err}
+	}()
+	for _, c := range []context.Context{spendCtx, queuedSpendCtx} {
+		select {
+		case <-c.Done():
+		case <-ctx.Done():
+			t.Fatal("critical analytics query did not preempt spend")
+		}
+		if !errors.Is(context.Cause(c), errAnalyticsPriority) {
+			t.Fatal(context.Cause(c))
+		}
+	}
+	lateCtx, unregisterLate := e.registerSpend(ctx)
+	defer unregisterLate()
+	if !errors.Is(context.Cause(lateCtx), errAnalyticsPriority) {
+		t.Fatal("late billing bypassed queued reader")
+	}
+	select {
+	case <-criticalDone:
+		t.Fatal("reader bypassed billing cleanup")
+	default:
+	}
+	release()
+	var r acquisition
+	select {
+	case r = <-criticalDone:
+		if r.err != nil {
+			t.Fatal(r.err)
+		}
+	case <-ctx.Done():
+		t.Fatal("critical analytics query did not acquire the released slot")
+	}
+	defer r.release()
+	duringCtx, unregisterDuring := e.registerSpend(ctx)
+	defer unregisterDuring()
+	if !errors.Is(context.Cause(duringCtx), errAnalyticsPriority) {
+		t.Fatal("billing bypassed active reader")
+	}
+	r.release()
+	nextCtx, unregisterNext := e.registerSpend(ctx)
+	defer unregisterNext()
+	if nextCtx.Err() != nil {
+		t.Fatal("priority leaked after reader completed")
+	}
+	nextRelease, err := e.acquireAnalytical(nextCtx, "channel_spend")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextRelease()
+	if e.analyticalWaiting.Load() != 0 {
+		t.Fatal("waiter leaked")
+	}
+}
+
+func TestCanceledAnalyticsReaderDoesNotPoisonBilling(t *testing.T) {
+	e := stateTestEngine(t)
+	release, err := e.acquireAnalytical(context.Background(), "channel_spend")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if _, err = e.acquireAnalytical(ctx, "analytics_query"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal(err)
+	}
+	spendCtx, unregister := e.registerSpend(context.Background())
+	defer unregister()
+	if spendCtx.Err() != nil {
+		t.Fatal("canceled queued reader retained priority")
+	}
+	if _, err = e.acquireAnalytical(ctx, "analytics_query"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal(err)
+	}
+	if spendCtx.Err() != nil {
+		t.Fatal("already expired reader canceled billing")
+	}
+}
