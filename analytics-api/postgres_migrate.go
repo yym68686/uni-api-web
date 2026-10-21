@@ -22,6 +22,7 @@ func migratePostgres(args []string) error {
 	indexes := flags.Bool("prepare-indexes", false, "prepare the existing receipt FIFO index without blocking writes")
 	facts := flags.Bool("facts-stdin", false, "import NDJSON facts from stdin")
 	analyze := flags.Bool("analyze", false, "publish parent planner statistics once after the complete backfill")
+	verify := flags.Bool("verify-queries", false, "run bounded read-only analytics acceptance queries")
 	pace := flags.Duration("batch-delay", 0, "pause between migration batches to protect interactive work")
 	phase := flags.String("phase", "", "set prepared after migration validation")
 	if err := flags.Parse(args); err != nil {
@@ -149,6 +150,19 @@ func migratePostgres(args []string) error {
 				return err
 			}
 			fmt.Printf("{\"phase\":\"analyzed\",\"table\":%q,\"elapsed_ms\":%d}\n", table, time.Since(began).Milliseconds())
+		}
+	}
+	if *verify {
+		for _, window := range []string{"3h", "24h", "all"} {
+			for _, chart := range []bool{false, true} {
+				call, cancel := context.WithTimeout(ctx, 10*time.Second)
+				result, err := e.Query(call, QueryFilter{Range: window, SourceID: cfg.SourceID, Timeseries: chart})
+				cancel()
+				if err != nil {
+					return err
+				}
+				fmt.Printf("{\"phase\":\"query_verified\",\"range\":%q,\"timeseries\":%t,\"channels\":%d,\"query_ms\":%.2f,\"coverage\":%q}\n", window, chart, len(result.Data), result.DurationMS, result.Coverage)
+			}
 		}
 	}
 	if *phase != "" {
