@@ -1,6 +1,5 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { controlRequest } from "./api";
-import { cachedControlRead } from "./cachedControlRead";
 export interface InstalledChannel {
   protocol?: string;
   engine?: string;
@@ -71,13 +70,10 @@ export interface SubImports {
   unavailable_sources: string[];
 }
 export function useSubImports(enabled = true) {
-  const client = useQueryClient();
   return useQuery({
     queryKey: ["sub2api-imports"],
     queryFn: ({ signal }) =>
-      cachedControlRead(client, ["sub2api-imports"], signal, () =>
-        controlRequest<SubImports>("/v1/sub2api/channels", { signal }),
-      ),
+      controlRequest<SubImports>("/v1/sub2api/channels", { signal }),
     enabled,
     retry: false,
     staleTime: 5000,

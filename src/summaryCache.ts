@@ -1,5 +1,4 @@
 import type { SummaryState } from "./summaryFeed";
-import { decodeSummaryCache, encodeSummaryCache } from "./summaryCacheCodec";
 
 const database = "uni-console-summaries-v1";
 const ttl = 30 * 60_000;
@@ -40,7 +39,7 @@ export async function loadSummaryCache<T>(
   const started = epoch;
   try {
     const conn = await db();
-    const record = await new Promise<{at: number; summary?: unknown; gzip?: ArrayBuffer} | undefined>((resolve) => {
+    return await new Promise((resolve) => {
       const timer = setTimeout(() => {
         conn.close();
         resolve(undefined);
@@ -52,7 +51,19 @@ export async function loadSummaryCache<T>(
       request.onsuccess = () => {
         clearTimeout(timer);
         const value = request.result;
-        resolve(started === epoch && value && Number.isFinite(value.at) && value.at <= Date.now() && Date.now() - value.at < ttl ? value : undefined);
+        resolve(
+          started === epoch &&
+            value &&
+            Date.now() - value.at < ttl &&
+            typeof value.summary?.version === "string" &&
+            Array.isArray(value.summary?.rows) &&
+            value.summary.rows.every(
+              (row: { id?: unknown; value?: unknown }) =>
+                typeof row.id === "string" && row.value,
+            )
+            ? value.summary
+            : undefined,
+        );
       };
       request.onerror = () => {
         clearTimeout(timer);
@@ -65,11 +76,6 @@ export async function loadSummaryCache<T>(
         resolve(undefined);
       };
     });
-    if (!record) return;
-    const summary = await decodeSummaryCache(record) as SummaryState<T> | undefined;
-    if (started !== epoch || typeof summary?.version !== "string" || !Array.isArray(summary.rows) ||
-      !summary.rows.every(row => typeof row.id === "string" && row.value)) return;
-    return {...summary, cachedAt: record.at};
   } catch {
     return undefined;
   }
@@ -82,8 +88,7 @@ export async function saveSummaryCache<T>(
   if (!user || typeof indexedDB === "undefined") return;
   const started = epoch;
   try {
-    const encoded = await encodeSummaryCache(summary);
-    if (!encoded || started !== epoch) return;
+    if (JSON.stringify(summary).length > 8_000_000) return;
     const conn = await db();
     if (started !== epoch) {
       conn.close();
@@ -91,7 +96,7 @@ export async function saveSummaryCache<T>(
     }
     const tx = conn.transaction("summaries", "readwrite");
     tx.objectStore("summaries").put(
-      { at: Date.now(), ...encoded },
+      { at: Date.now(), summary },
       JSON.stringify([location.origin, user, key]),
     );
     tx.oncomplete = () => conn.close();

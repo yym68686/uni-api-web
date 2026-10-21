@@ -226,8 +226,8 @@ func (e *Engine) applyPrices(ctx context.Context, prices []Price) error {
 			return err
 		}
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	e.settingsMu.Lock()
+	defer e.settingsMu.Unlock()
 	tx, err := e.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err

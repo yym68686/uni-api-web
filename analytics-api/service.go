@@ -109,7 +109,7 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/prices", s.prices)
 	mux.HandleFunc("PUT /v1/prices/{model}", s.savePrice)
 	mux.HandleFunc("GET /v1/status", s.status)
-	return s.authenticate(mux)
+	return observeConsoleRequests(s.authenticate(mux))
 }
 func (s *Service) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"status": "ok", "revision": s.engine.Revision.Load(), "last_collect_ms": s.lastCollect.Load(), "state_ready": s.state == nil || s.stateReady.Load(), "analytics_ready": s.analyticsReady()})

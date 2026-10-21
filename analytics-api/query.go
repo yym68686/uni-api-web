@@ -234,7 +234,7 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (queryResult QueryRes
 		return QueryResult{}, err
 	}
 	defer release()
-	operation := e.observeOperation("analytics_query")
+	operation := e.observeRequestOperation(ctx, "analytics_query")
 	defer func() { operation.finish(queryErr) }()
 	began := time.Now()
 	now, startMS, where, args, err := e.rollupWindow(f)
@@ -253,7 +253,10 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (queryResult QueryRes
 	}
 	where, args = sourceWhere(where, args, f)
 	q := `SELECT source_id,kind,provider,model,upstream_model,endpoint,stream,outcome,sum(n)::BIGINT,sum(input_tokens)::BIGINT,sum(output_tokens)::BIGINT,sum(cache_read_tokens)::BIGINT,sum(cache_write_tokens)::BIGINT,sum(cache_write_1h_tokens)::BIGINT,sum(usage_samples)::BIGINT,sum(cache_samples)::BIGINT,sum(actual_cost_usd),sum(actual_cost_samples)::BIGINT,to_json(` + mergeHistogramSQL("first_bins") + `),to_json(` + mergeHistogramSQL("dispatch_bins") + `),sum(first_count)::BIGINT,sum(dispatch_count)::BIGINT,sum(first_sum),sum(dispatch_sum),max(last_ms),arg_max(last_first,last_ms),arg_max(last_dispatch,last_ms),to_json(` + mergeHistogramSQL("created_bins") + `),coalesce(sum(created_count),0)::BIGINT,coalesce(sum(created_sum),0),arg_max(last_created,last_ms),to_json(` + mergeHistogramSQL("text_bins") + `),coalesce(sum(text_count),0)::BIGINT,coalesce(sum(text_sum),0),arg_max(last_text,last_ms),coalesce(max(last_ms) FILTER (WHERE last_created IS NOT NULL),0),coalesce(max(last_ms) FILTER (WHERE last_text IS NOT NULL),0) FROM rollups WHERE ` + strings.Join(where, " AND ") + ` GROUP BY source_id,kind,provider,model,upstream_model,endpoint,stream,outcome`
-	prices, err := e.Prices(ctx)
+	operation.stage("price_read")
+	// Statistics need configured prices, not an additional DISTINCT scan over
+	// all historical model names. Missing prices remain explicitly unpriced.
+	prices, err := e.readPrices(ctx, false)
 	if err != nil {
 		return QueryResult{}, err
 	}

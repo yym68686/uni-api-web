@@ -1,3 +1,4 @@
+import { withRequestDeadline } from "./requestDeadline";
 import type { Connection } from "./types";
 export class ApiError extends Error {
   status: number;
@@ -148,7 +149,8 @@ export function makeLimiter(limit: number) {
 
 export async function analyticsRequest<T>(connection: Connection,path: string,signal?: AbortSignal, init: RequestInit = {}): Promise<T> {
   if (typeof window === "undefined") throw new Error("analytics API requires a browser session");
-  const timeout=AbortSignal.timeout(20_000); const response=await fetch(window.location.origin+path,{...init,headers:{...(connection.key?{Authorization:`Bearer ${connection.key}`}:{ }),Accept:"application/json",...(init.headers||{})},cache:"no-store",credentials:"include",redirect:"error",signal:signal?AbortSignal.any([signal,timeout]):timeout});
+  return withRequestDeadline(signal, 20_000, false, async (combined, requestId) => {
+  const response=await fetch(window.location.origin+path,{...init,headers:{...(connection.key?{Authorization:`Bearer ${connection.key}`}:{ }),Accept:"application/json",...(init.headers||{}),"X-Console-Request-ID": requestId},cache:"no-store",credentials:"include",redirect:"error",signal:combined});
   if(response.status===401||response.status===403) throw new ApiError("分析服务未接受平台密钥，请检查控制台后端配置。",response.status);
   if (!response.ok) {
     if (response.status === 503) {
@@ -158,12 +160,14 @@ export async function analyticsRequest<T>(connection: Connection,path: string,si
     throw new ApiError(`分析服务暂时无法响应（HTTP ${response.status}）。`, response.status);
   }
   return await response.json() as T;
+  });
 }
 
 export async function controlRequest<T>(path:string,init:RequestInit={}):Promise<T>{
  const read=!init.method || init.method.toUpperCase()==="GET";
- const timeout=AbortSignal.timeout(read ? 30_000 : 120_000);
- const response=await fetch(globalThis.location.origin+"/analytics"+path,{...init,headers:{Accept:"application/json","Content-Type":"application/json",...init.headers},credentials:"same-origin",cache:"no-store",signal:init.signal?AbortSignal.any([init.signal,timeout]):timeout});
+ return withRequestDeadline(init.signal, read ? 30_000 : 120_000, !read, async (signal, requestId) => {
+ const response=await fetch(globalThis.location.origin+"/analytics"+path,{...init,headers:{Accept:"application/json","Content-Type":"application/json",...init.headers,"X-Console-Request-ID":requestId},credentials:"same-origin",cache:"no-store",signal});
  if(!response.ok){const message=await response.text();throw new ApiError(message||`HTTP ${response.status}`,response.status)}
  return await response.json() as T;
+ });
 }

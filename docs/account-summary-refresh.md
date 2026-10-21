@@ -77,18 +77,7 @@ Successful add/replace writes close the editor immediately. Query invalidation
 runs in the background; its completion is not part of the save acknowledgement.
 Failed writes keep the draft and release the close button.
 
-The complete list was around 60 MB, but the old IndexedDB cache discarded
-snapshots over 8 MB before compression. Large snapshots now use gzip with an
-8 MB stored limit and 128 MB decompressed limit. Small existing records remain
-compatible. Read-only inventory, binding, and configured-check snapshots restore
-alongside account results under the authenticated origin/user. Cached results
-are explicitly labeled with the account snapshot time and remain stale until
-live validation; they do not grant write authorization. Expiration, corrupt
-storage, cancellation, and logout retain the existing fallback to a live read.
-
-A local in-app Chromium fixture with 123,648 models / 61,077,128 JSON bytes
-restored every model in 196 ms and rendered the actual channel management table
-(first 25 rows of 768 groups) in 676 ms with all live reads still pending. These
-are authenticated cache-restoration measurements, not a claim about cold loads,
-network/login latency, or production latency. Production reload timing remains
-part of deployment acceptance.
+Reloads require successful live reads before publishing channel results. Persistent
+snapshots are not restored into these queries. The earlier local cache benchmark
+does not satisfy the one-second current-data requirement and is not acceptance
+evidence. Scoped editor reads and immediate close after successful saves remain.

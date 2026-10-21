@@ -2,7 +2,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { SubAccount, SubTarget } from "./Sub2apiChecks";
 import { readSummary } from "./summaryFeed";
 import type { SummaryState } from "./summaryFeed";
-import { loadSummaryCache, saveSummaryCache } from "./summaryCache";
 import { ApiError } from "./api";
 
 type AccountRow = {
@@ -16,7 +15,6 @@ export type AccountData = {
   data: SubAccount[];
   summary?: SummaryState<AccountRow>;
   cached?: boolean;
-  cachedAt?: number;
   accountSummaries?: Record<string, SummaryState<AccountRow>>;
   rateSummary?: SummaryState<AccountRates>;
 };
@@ -208,70 +206,10 @@ export function useSubAccounts(enabled = true, headersOnly = false) {
   return useQuery({
     queryKey,
     queryFn: async ({ signal }): Promise<AccountData> => {
-      let previous = client.getQueryData<AccountData>(queryKey);
-      const auth = client.getQueryData<{
-        authenticated: boolean;
-        username: string;
-      }>(["account"]);
-      const user = auth?.authenticated ? auth.username : "";
-      const cacheKey = headersOnly ? "account-headers" : "account-summary";
-      if (!previous && user) {
-        const summary = await loadSummaryCache<AccountRow>(user, cacheKey);
-        signal.throwIfAborted();
-        if (summary) {
-          previous = {
-            data: summaryAccounts(summary),
-            summary,
-            cached: true,
-            cachedAt: summary.cachedAt,
-          };
-          client.setQueryData(queryKey, previous);
-        }
-      }
-      if (!headersOnly) {
-        const result = await readAccountData(previous, signal);
-        if (result.summary)
-          void saveSummaryCache(user, cacheKey, result.summary);
-        else if (result.accountSummaries) {
-          // Store only a complete assembled snapshot. Per-account server
-          // cursors remain session-local; a reload revalidates every part.
-          const rows = Object.values(result.accountSummaries).flatMap(
-            (part) => part.rows,
-          );
-          const rates = new Map(
-            result.rateSummary?.rows.map((row) => [row.id, row.value]),
-          );
-          const positions = new Map(
-            result.data.map((account, i) => [account.id, i]),
-          );
-          void saveSummaryCache(user, cacheKey, {
-            version: "assembled",
-            rows: rows.map((row) =>
-              row.value.account
-                ? {
-                    ...row,
-                    value: {
-                      ...row.value,
-                      position: positions.get(row.value.account.id)!,
-                    },
-                  }
-                : row.value.target
-                  ? {
-                      ...row,
-                      value: {
-                        ...row.value,
-                        target: {
-                          ...row.value.target,
-                          observed_rates: rates.get(row.id),
-                        },
-                      },
-                    }
-                  : row,
-            ),
-          });
-        }
-        return result;
-      }
+      const previous = client.getQueryData<AccountData>(queryKey);
+      // A reload must validate live results before publishing the list. Disk
+      // snapshots cannot satisfy the current-data contract.
+      if (!headersOnly) return readAccountData(previous, signal);
       const { summary, legacy } = await readSummary<AccountRow, AccountData>(
         "/v1/sub2api/accounts",
         previous?.summary,
@@ -280,7 +218,6 @@ export function useSubAccounts(enabled = true, headersOnly = false) {
       );
       if (!summary) return legacy!;
       signal.throwIfAborted();
-      void saveSummaryCache(user, cacheKey, summary);
       if (summary === previous?.summary) return { ...previous, cached: false };
       return { data: summaryAccounts(summary), summary, cached: false };
     },

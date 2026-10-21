@@ -34,8 +34,12 @@ type Engine struct {
 	historyPath       string
 	cfg               Config
 	mu                sync.Mutex
-	Revision          atomic.Uint64
-	Location          *time.Location
+	// History copying serializes history writers only. Settings transactions
+	// and interactive MVCC reads must not wait for a multi-gigabyte file copy.
+	settingsMu       sync.RWMutex
+	historyCatalogMu sync.RWMutex
+	Revision         atomic.Uint64
+	Location         *time.Location
 }
 
 func OpenEngine(path string, cfg Config) (*Engine, error) {
@@ -388,9 +392,20 @@ func mergeHistogramSQL(column string) string {
 	return "[" + strings.Join(parts, ",") + "]"
 }
 func (e *Engine) Prices(ctx context.Context) ([]Price, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	rows, err := e.DB.QueryContext(ctx, `SELECT model,input,output,cache_read,cache_write,cache_write_1h,source,verified,effective_at,charge_cache_write,sale_percent,long_context_premium FROM prices UNION ALL SELECT DISTINCT model,0,0,0,0,0,'fact-discovered',false,current_timestamp,NULL::BOOLEAN,NULL::DOUBLE,NULL::BOOLEAN FROM rollups WHERE model <> '' AND model NOT IN (SELECT model FROM prices) ORDER BY model`)
+	// Only startup catalog replacement needs to exclude discovery reads.
+	e.historyCatalogMu.RLock()
+	defer e.historyCatalogMu.RUnlock()
+	return e.readPrices(ctx, true)
+}
+
+func (e *Engine) readPrices(ctx context.Context, discover bool) ([]Price, error) {
+	e.settingsMu.RLock()
+	defer e.settingsMu.RUnlock()
+	q := `SELECT model,input,output,cache_read,cache_write,cache_write_1h,source,verified,effective_at,charge_cache_write,sale_percent,long_context_premium FROM prices`
+	if discover {
+		q += ` UNION ALL SELECT DISTINCT model,0,0,0,0,0,'fact-discovered',false,current_timestamp,NULL::BOOLEAN,NULL::DOUBLE,NULL::BOOLEAN FROM rollups WHERE model <> '' AND model NOT IN (SELECT model FROM prices)`
+	}
+	rows, err := e.DB.QueryContext(ctx, q+` ORDER BY model`)
 	if err != nil {
 		return nil, err
 	}
@@ -458,8 +473,8 @@ func (e *Engine) SavePrice(ctx context.Context, p Price) error {
 	if err := validatePrice(p); err != nil {
 		return err
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	e.settingsMu.Lock()
+	defer e.settingsMu.Unlock()
 	// An older client omitting the new field must not erase a saved override.
 	if p.SalePercent == nil {
 		err := e.DB.QueryRowContext(ctx, "SELECT sale_percent FROM prices WHERE model=?", p.Model).Scan(&p.SalePercent)

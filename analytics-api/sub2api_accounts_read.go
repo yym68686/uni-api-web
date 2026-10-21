@@ -159,6 +159,6 @@ func (t *subAccountsReadTrace) finish() {
 	if view != "summary" && view != "accounts" && view != "rates" {
 		view = "detail"
 	}
-	log.Printf("sub_accounts_read view=%s elapsed_ms=%d last_stage=%s canceled=%t accounts=%d targets=%d models=%d model_result_bytes=%d %s",
-		view, elapsed.Milliseconds(), lastStage, t.r.Context().Err() != nil, t.accounts, t.targets, t.models, t.modelBytes, strings.Join(t.stages, " "))
+	log.Printf("sub_accounts_read view=%s elapsed_ms=%d last_stage=%s canceled=%t accounts=%d targets=%d models=%d model_result_bytes=%d request_id=%s %s",
+		view, elapsed.Milliseconds(), lastStage, t.r.Context().Err() != nil, t.accounts, t.targets, t.models, t.modelBytes, consoleRequestID(t.r.Context()), strings.Join(t.stages, " "))
 }

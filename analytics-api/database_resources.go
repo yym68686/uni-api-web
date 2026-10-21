@@ -94,7 +94,7 @@ func (e *Engine) acquireAnalytical(ctx context.Context, name string) (func(), er
 			return nil, err
 		}
 		if elapsed := time.Since(began); elapsed >= 100*time.Millisecond {
-			log.Printf("analytics db_wait operation=%s duration_ms=%d", name, elapsed.Milliseconds())
+			log.Printf("analytics db_wait operation=%s duration_ms=%d request_id=%s", name, elapsed.Milliseconds(), consoleRequestID(ctx))
 		}
 		var once sync.Once
 		return func() {
@@ -105,6 +105,7 @@ func (e *Engine) acquireAnalytical(ctx context.Context, name string) (func(), er
 		}, nil
 	case <-ctx.Done():
 		leavePriority()
+		log.Printf("analytics db_wait operation=%s duration_ms=%d request_id=%s class=%s", name, time.Since(began).Milliseconds(), consoleRequestID(ctx), databaseErrorClass(ctx.Err()))
 		return nil, ctx.Err()
 	}
 }
@@ -138,10 +139,18 @@ type databaseOperation struct {
 	name   string
 	phase  string
 	began  time.Time
+	last   time.Time
+	stages []string
+	ctx    context.Context
 }
 
 func (e *Engine) observeOperation(name string) *databaseOperation {
-	o := &databaseOperation{engine: e, name: name, phase: "start", began: time.Now()}
+	return e.observeRequestOperation(context.Background(), name)
+}
+
+func (e *Engine) observeRequestOperation(ctx context.Context, name string) *databaseOperation {
+	now := time.Now()
+	o := &databaseOperation{engine: e, name: name, phase: "start", began: now, last: now, ctx: ctx}
 	o.stage("start")
 	return o
 }
@@ -152,7 +161,11 @@ func (o *databaseOperation) stage(phase string) {
 	if o.engine.operations == nil {
 		o.engine.operations = make(map[*databaseOperation]string)
 	}
-	o.phase = phase
+	now := time.Now()
+	if o.phase != phase {
+		o.stages = append(o.stages, fmt.Sprintf("%s_ms=%d", o.phase, now.Sub(o.last).Milliseconds()))
+	}
+	o.phase, o.last = phase, now
 	o.engine.operations[o] = o.name + "/" + phase
 }
 
@@ -161,12 +174,16 @@ func (o *databaseOperation) finish(err error) {
 	delete(o.engine.operations, o)
 	o.engine.operationsMu.Unlock()
 	class := databaseErrorClass(err)
+	if err != nil && o.ctx.Err() != nil {
+		class = databaseErrorClass(o.ctx.Err())
+	}
 	if err != nil && class == "" {
 		class = "operation_failed"
 	}
 	if err != nil || time.Since(o.began) >= time.Second {
 		// Never log SQL, source credentials, object names or driver error text.
-		log.Printf("analytics db_operation operation=%s stage=%s duration_ms=%d class=%s", o.name, o.phase, time.Since(o.began).Milliseconds(), class)
+		stages := append(o.stages, fmt.Sprintf("%s_ms=%d", o.phase, time.Since(o.last).Milliseconds()))
+		log.Printf("analytics db_operation operation=%s stage=%s duration_ms=%d class=%s request_id=%s %s", o.name, o.phase, time.Since(o.began).Milliseconds(), class, consoleRequestID(o.ctx), strings.Join(stages, " "))
 	}
 	if class == "database_out_of_memory" {
 		o.engine.logMemory("failure_after_cleanup")

@@ -458,10 +458,13 @@ func validatePhysical(ctx context.Context, path string, m physicalManifest) erro
 }
 
 // The startup worker installs before analytics readiness. The mutex protects
-// writers and Prices() across catalog replacement; settings never detaches.
+// history writers and discovery reads across catalog replacement; settings
+// never detaches and remains independently recoverable.
 func (e *Engine) installPhysical(ctx context.Context, path string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	e.historyCatalogMu.Lock()
+	defer e.historyCatalogMu.Unlock()
 	var n int64
 	if err := e.DB.QueryRowContext(ctx, "SELECT count(*) FROM imported_objects").Scan(&n); err != nil {
 		return err

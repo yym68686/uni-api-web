@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,6 +12,12 @@ import (
 // Driver messages can contain SQL, paths and fact contents. Log only the
 // driver's typed category; do not copy its message into telemetry.
 func databaseErrorClass(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "deadline_exceeded"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "canceled"
+	}
 	var dbErr *duckdb.Error
 	if !errors.As(err, &dbErr) {
 		return ""

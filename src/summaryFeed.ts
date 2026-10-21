@@ -1,7 +1,7 @@
+import { withRequestDeadline } from "./requestDeadline";
 import { ApiError } from "./api";
 
 export interface SummaryState<T> {
-  cachedAt?: number;
   version: string;
   rows: { id: string; value: T }[];
 }
@@ -49,16 +49,17 @@ export async function readSummary<T, Legacy>(
   legacy?: Legacy;
   accountScope?: boolean;
 }> {
-  try {
+  return withRequestDeadline(signal, 30_000, false, async (combined, requestId) => {
     const response = await fetch(location.origin + "/analytics" + path, {
       credentials: "same-origin",
       cache: "no-store",
       headers: {
         Accept: "application/json",
+        "X-Console-Request-ID": requestId,
         "X-Console-View": view,
         ...(previous ? { "X-Console-Since": previous.version } : {}),
       },
-      signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
+      signal: combined,
     });
     const accountScope =
       response.headers.get("X-Console-Account-Scope") === "v2";
@@ -74,14 +75,5 @@ export async function readSummary<T, Legacy>(
     if (body.format !== "summary-v1")
       return { legacy: body as Legacy, accountScope };
     return { summary: mergeSummary(previous, body), accountScope };
-  } catch (error) {
-    if (
-      !signal.aborted &&
-      error instanceof Error &&
-      error.name === "TimeoutError"
-    ) {
-      throw new Error("数据读取超时，请稍后重试读取。");
-    }
-    throw error;
-  }
+  });
 }
