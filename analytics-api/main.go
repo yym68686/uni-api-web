@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -20,44 +18,18 @@ func env(name, fallback string) string {
 	return fallback
 }
 func main() {
-	cfg := Config{Address: env("LISTEN_ADDR", ":8080"), DataDir: env("DATA_DIR", "./data"), Upstream: strings.TrimRight(env("UNI_API_URL", ""), "/"), SourceID: env("SOURCE_ID", "primary"), Timezone: env("ANALYTICS_TIMEZONE", "Asia/Shanghai"), S3Endpoint: env("S3_ENDPOINT", ""), S3Bucket: env("S3_BUCKET", ""), S3Prefix: env("S3_PREFIX", "uni-api-facts/v1/"), Poll: 5 * time.Second}
-	cfg.StateBucket, cfg.StateEndpoint, cfg.StatePrefix = env("STATE_S3_BUCKET", ""), env("STATE_S3_ENDPOINT", cfg.S3Endpoint), env("STATE_S3_PREFIX", "analytics/v1")
-	cfg.StateAccessKey, cfg.StateSecretKey = env("STATE_AWS_ACCESS_KEY_ID", ""), env("STATE_AWS_SECRET_ACCESS_KEY", "")
+	if len(os.Args) > 1 && os.Args[1] == "migrate-postgresql" {
+		if err := migratePostgres(os.Args[2:]); err != nil {
+			log.Fatal("PostgreSQL migration failed: ", databaseErrorClass(err))
+		}
+		return
+	}
+	cfg := Config{Address: env("LISTEN_ADDR", ":8080"), DataDir: env("DATA_DIR", "./data"), Upstream: strings.TrimRight(env("UNI_API_URL", ""), "/"), SourceID: env("SOURCE_ID", "primary"), Timezone: env("ANALYTICS_TIMEZONE", "Asia/Shanghai")}
 	cfg.ControlDatabaseURL, cfg.ControlMasterKey = env("CONTROL_DATABASE_URL", env("DATABASE_URL", "")), env("CONTROL_MASTER_KEY", "")
 	cfg.BootstrapSources = env("BOOTSTRAP_SOURCES", "")
 	cfg.PublicOrigin = env("PUBLIC_ORIGIN", "")
 	cfg.InsecureCookie = env("INSECURE_COOKIE", "false") == "true"
 	cfg.AdminUsername, cfg.AdminPassword = env("ADMIN_USERNAME", ""), env("ADMIN_PASSWORD", "")
-	cfg.WarmCacheDir = env("ANALYTICS_WARM_CACHE_DIR", "")
-	// A platform-mounted cache is opt-in through its presence. Active DuckDB
-	// remains private; deployments without this mount keep the S3 path.
-	if cfg.WarmCacheDir == "" {
-		if info, err := os.Stat("/warm-cache"); err == nil && info.IsDir() {
-			cfg.WarmCacheDir = "/warm-cache"
-		}
-	}
-	cfg.RequireInitialImport = env("REQUIRE_INITIAL_IMPORT", "false") == "true"
-	var memoryErr error
-	cfg.DatabaseMemoryLimitMB, memoryErr = strconv.Atoi(env("ANALYTICS_DB_MEMORY_LIMIT_MB", "1024"))
-	if memoryErr != nil || cfg.DatabaseMemoryLimitMB < 64 {
-		log.Fatal("ANALYTICS_DB_MEMORY_LIMIT_MB must be an integer of at least 64")
-	}
-	cfg.CheckpointCacheWindowMB, memoryErr = strconv.Atoi(env("ANALYTICS_CHECKPOINT_CACHE_WINDOW_MB", "0"))
-	if memoryErr != nil || cfg.CheckpointCacheWindowMB < 0 {
-		log.Fatal("ANALYTICS_CHECKPOINT_CACHE_WINDOW_MB must be a non-negative integer")
-	}
-	cfg.DatabaseTempDir = env("ANALYTICS_DB_TEMP_DIR", "")
-	cfg.DatabaseTempLimitMB, memoryErr = strconv.Atoi(env("ANALYTICS_DB_TEMP_LIMIT_MB", "0"))
-	if memoryErr != nil || cfg.DatabaseTempLimitMB < 0 {
-		log.Fatal("ANALYTICS_DB_TEMP_LIMIT_MB must be a non-negative integer")
-	}
-	cfg.DatabaseThreads, memoryErr = strconv.Atoi(env("ANALYTICS_DB_THREADS", "2"))
-	if memoryErr != nil || cfg.DatabaseThreads < 1 {
-		log.Fatal("ANALYTICS_DB_THREADS must be a positive integer")
-	}
-	if cfg.RequireInitialImport && (cfg.StateBucket == "" || cfg.StateEndpoint == "" || cfg.S3Bucket == "" || cfg.S3Endpoint == "") {
-		log.Fatal("rebuildable analytics requires configured fact and state storage")
-	}
 	if cfg.Upstream == "" && cfg.ControlMasterKey == "" {
 		log.Fatal("UNI_API_URL is required")
 	}
@@ -66,11 +38,14 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	engine, err := OpenEngine(filepath.Join(cfg.DataDir, "analytics.duckdb"), cfg)
+	engine, err := OpenEngine("analytics", cfg)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer engine.Close()
+	if err = engine.verifyLegacyMigration(ctx); err != nil {
+		log.Fatal(err)
+	}
 	stopDiagnostics := engine.startMemoryDiagnostics(ctx, 5*time.Second)
 	defer stopDiagnostics()
 	service, err := NewService(engine, cfg)
@@ -93,20 +68,6 @@ func main() {
 			log.Fatal("initialize source configuration: ", err)
 		}
 	}
-	if cfg.S3Endpoint != "" && cfg.S3Bucket != "" {
-		service.factClient, err = newS3Client(ctx, cfg)
-		if err != nil {
-			log.Fatal("initialize analytics fact client")
-		}
-	}
-	if cfg.StateBucket != "" {
-		client, err := newObjectClient(ctx, cfg.StateEndpoint, cfg.StateAccessKey, cfg.StateSecretKey, defaultCheckpointRestorePolicy.timeout)
-		if err != nil {
-			log.Fatal("initialize analytics state client")
-		}
-		service.state = newStateStore(client, cfg)
-		service.checkpoints = newCheckpointStore(client, cfg)
-	}
 	backgroundDone := service.startBackground(ctx)
 	defer func() { stop(); <-backgroundDone }()
 	server := &http.Server{Addr: cfg.Address, Handler: service.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 25 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
@@ -127,14 +88,6 @@ func main() {
 }
 
 func (s *Service) listenAndServe(ctx context.Context, server *http.Server) error {
-	// Fugue uses TCP readiness. Keep the previous ready replica serving until
-	// this replacement can answer analytics; background workers already run.
-	if s.cfg.RequireInitialImport {
-		log.Print("analytics traffic waiting for complete history; background workers active")
-		if err := s.waitForTraffic(ctx); err != nil {
-			return err
-		}
-	}
 	log.Printf("analytics API listening on %s", server.Addr)
 	return server.ListenAndServe()
 }

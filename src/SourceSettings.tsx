@@ -35,11 +35,6 @@ export function SourceSettings({
     [base, setBase] = useState(""),
     [key, setKey] = useState(""),
     [configKey, setConfigKey] = useState("");
-  const [endpoint, setEndpoint] = useState(""),
-    [bucket, setBucket] = useState(""),
-    [prefix, setPrefix] = useState("uni-api-facts/v1/"),
-    [access, setAccess] = useState(""),
-    [secret, setSecret] = useState("");
   const [removing, setRemoving] = useState<string | null>(null);
   function edit(source: ConsoleSource | null) {
     setEditing(source);
@@ -47,10 +42,6 @@ export function SourceSettings({
     setBase(source?.base || "");
     setKey("");
     setConfigKey("");
-    setEndpoint("");
-    setBucket("");
-    setAccess("");
-    setSecret("");
     setError("");
     setOpen(true);
   }
@@ -67,22 +58,11 @@ export function SourceSettings({
           base,
           key,
           config_key: configKey,
-          storage: bucket
-            ? {
-                endpoint,
-                bucket,
-                prefix,
-                access_key: access,
-                secret_key: secret,
-              }
-            : undefined,
         }),
       });
       setOpen(false);
       setKey("");
       setConfigKey("");
-      setAccess("");
-      setSecret("");
       onSaved();
     } catch (e) {
       setError(e instanceof Error ? e.message : "保存失败");
@@ -118,8 +98,7 @@ export function SourceSettings({
         </div>
       </div>
       <p className="settings-note">
-        每个来源可独立管理全局超时、冷却、心跳和 hedging；渠道自定义值优先。平台密钥和 S3
-        只读凭据加密保存在服务端。默认保留已应用的临时渠道、顺序和停用规则，来源重启后自动恢复。
+        每个来源可独立管理全局超时、冷却、心跳和 hedging；渠道自定义值优先。账号凭据和平台密钥加密保存在服务端。默认保留已应用的临时渠道、顺序和停用规则，来源重启后自动恢复。
       </p>
       {error && (
         <p role="alert" className="error-banner">
@@ -135,9 +114,7 @@ export function SourceSettings({
             {src.temporarily_unavailable && <small role="status">暂时不可用</small>}
             <small>{src.base}</small>
             <small>
-              {src.has_storage
-                ? "已配置历史事实存储"
-                : "仅实时目录 · 添加 S3 只读凭据以采集历史请求"}
+              历史请求由来源网关异步上报；接收状态见渠道观测。
             </small>
           </div>
           <ChannelSettings row={{provider:GLOBAL_SETTINGS_SCOPE,provider_name:"全局设置",source_id:src.id,source_name:src.name,model:""}} />
@@ -230,59 +207,7 @@ export function SourceSettings({
               />
             </label>
           </details>
-          <details>
-            <summary>
-              S3 历史事实存储 {editing ? "（留空保留原配置）" : ""}
-            </summary>
-            <p>
-              填写 uni-api 正在写入的独立 bucket/prefix
-              和只读凭据。未配置时历史统计显示为未接入，不会显示为零流量。
-            </p>
-            <div className="source-storage-fields">
-              <label>
-                S3 Endpoint
-                <input
-                  type="url"
-                  value={endpoint}
-                  onChange={(e) => setEndpoint(e.target.value)}
-                  required={!!bucket}
-                />
-              </label>
-              <label>
-                Bucket
-                <input
-                  value={bucket}
-                  onChange={(e) => setBucket(e.target.value)}
-                />
-              </label>
-              <label>
-                Prefix
-                <input
-                  value={prefix}
-                  onChange={(e) => setPrefix(e.target.value)}
-                />
-              </label>
-              <label>
-                Access key
-                <input
-                  autoComplete="off"
-                  value={access}
-                  onChange={(e) => setAccess(e.target.value)}
-                  required={!!bucket}
-                />
-              </label>
-              <label>
-                Secret key
-                <input
-                  type="password"
-                  autoComplete="new-password"
-                  value={secret}
-                  onChange={(e) => setSecret(e.target.value)}
-                  required={!!bucket}
-                />
-              </label>
-            </div>
-          </details>
+
           <button className="button primary" disabled={busy}>
             {busy ? <Spinner small /> : <Check size={16} />}验证并保存
           </button>
@@ -296,8 +221,7 @@ export function SourceSettings({
         </form>
       )}
       <p className="settings-note">
-        移除来源会停止展示和导入；已经存储在 S3
-        的事实不会删除。不同来源若共用上游账号，上游账单会包含共享用量，不能逐行相加。
+        移除来源会停止展示和接收请求记录；已保存的请求历史继续按容量策略保留。不同来源若共用上游账号，上游账单会包含共享用量，不能逐行相加。
       </p>
       <PasswordSettings />
     </section>

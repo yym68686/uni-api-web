@@ -173,15 +173,7 @@ func TestBillingFactCheckpointAndLegacyCompanion(t *testing.T) {
 		t.Fatal(rows, e)
 	}
 	// Correlation lists survive export and fresh-engine restore.
-	objects := &fakeStateObjects{}
-	cp := newCheckpointStore(objects, Config{StateBucket: "state", SourceID: "source"})
-	if e = cp.save(context.Background(), s.engine); e != nil {
-		t.Fatal(e)
-	}
-	fresh := stateTestEngine(t)
-	if ok, e := cp.restore(context.Background(), fresh); e != nil || !ok {
-		t.Fatal(ok, e)
-	}
+	fresh := replicaTestEngine(t, s.engine)
 	s.engine = fresh
 	rows, e = s.attributedChannelSpend(context.Background(), owner, QueryFilter{SourceID: "source"}, now.Add(-time.Hour).Unix(), now.Unix())
 	if e != nil || len(rows) != 1 || rows[0].Amount == nil {

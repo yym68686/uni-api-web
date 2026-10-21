@@ -52,22 +52,7 @@ func TestMappedUsageUsesRecordedUpstreamPriceAndPolicy(t *testing.T) {
 	}
 	// Existing checkpoint history is repriced on read; no route/config rewrite or
 	// fact migration is needed, including the old day-bucket mapping.
-	objects := &fakeStateObjects{}
-	checkpoint := newCheckpointStore(objects, Config{StateBucket: "test", Timezone: "UTC"})
-	if err := checkpoint.save(ctx, e); err != nil {
-		t.Fatal(err)
-	}
-	restored := stateTestEngine(t)
-	if ok, err := checkpoint.restore(ctx, restored); err != nil || !ok {
-		t.Fatal(ok, err)
-	}
-	prices, err := e.Prices(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = restored.applyPrices(ctx, prices); err != nil {
-		t.Fatal(err)
-	}
+	restored := replicaTestEngine(t, e)
 	for _, filter := range []QueryFilter{
 		{Range: "all", Model: "gpt-5.4"}, {Range: "24h", Model: "gpt-5.4", SourceID: "s1", KeyID: "k1", Provider: "route", Endpoint: "/v1/responses", Stream: "true"},
 		{Range: "all", Model: "gpt-5.4", UpstreamModel: "gpt-5.5"},

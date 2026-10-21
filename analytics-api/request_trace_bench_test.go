@@ -7,7 +7,7 @@ import (
 )
 
 func BenchmarkRequestTraceLookup(b *testing.B) {
-	e, err := OpenEngine(filepath.Join(b.TempDir(), "trace.duckdb"), Config{Timezone: "UTC", DatabaseMemoryLimitMB: 512})
+	e, err := OpenEngine(filepath.Join(b.TempDir(), "trace-postgresql"), Config{Timezone: "UTC"})
 	if err != nil {
 		b.Fatal(err)
 	}

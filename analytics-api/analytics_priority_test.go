@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// Exercise the production path with DuckDB and an isolated PostgreSQL ledger:
+// Exercise the production path with PostgreSQL analytics and an isolated receipt ledger:
 // billing is blocked on receipt lookup, an interactive read preempts it, then
 // billing recovers with the same exact amount after all transactions unwind.
 func TestAnalyticsPreemptsBlockedReceiptLookupAndBillingRecovers(t *testing.T) {

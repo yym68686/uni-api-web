@@ -47,14 +47,7 @@ func TestBalanceRejectedAttemptsReconcileAlongsidePaidRequests(t *testing.T) {
 		t.Fatal(row)
 	}
 	// Error evidence survives checkpoints without changing request metrics.
-	cp := newCheckpointStore(&fakeStateObjects{}, Config{StateBucket: "state"})
-	if err := cp.save(ctx, s.engine); err != nil {
-		t.Fatal(err)
-	}
-	fresh := stateTestEngine(t)
-	if ok, err := cp.restore(ctx, fresh); err != nil || !ok {
-		t.Fatal(ok, err)
-	}
+	fresh := replicaTestEngine(t, s.engine)
 	s.engine = fresh
 	if row := read(); row.ConfirmedUnbilled != 2 {
 		t.Fatal(row)

@@ -17,7 +17,6 @@ import (
 	"time"
 )
 
-
 type fingerprintTarget struct {
 	Source   string `json:"source_id,omitempty"`
 	Provider string `json:"provider,omitempty"`

@@ -64,7 +64,7 @@ func (e *Engine) ChannelModelStats(ctx context.Context, f QueryFilter) (ChannelM
 	columns := []string{"coalesce(source_id,'')", "coalesce(provider,'')", "coalesce(model,'')", "count(*) FILTER (WHERE " + success + ")", "count(*) FILTER (WHERE NOT (" + success + " OR " + cancelled + "))", "count(*) FILTER (WHERE " + cancelled + ")"}
 	for _, field := range []string{"first_text_ms", "response_created_ms", "duration_ms"} {
 		value := "CASE WHEN NOT (" + cancelled + ") AND isfinite(" + field + ") AND " + field + ">=0 THEN " + field + " END"
-		columns = append(columns, "count("+value+")", "avg("+value+")", "quantile_cont("+value+",0.5)", "quantile_cont("+value+",0.95)")
+		columns = append(columns, "count("+value+")", "avg("+value+")", "percentile_cont(0.5) WITHIN GROUP (ORDER BY "+value+")", "percentile_cont(0.95) WITHIN GROUP (ORDER BY "+value+")")
 	}
 	rows, err := e.DB.QueryContext(ctx, "SELECT "+strings.Join(columns, ",")+" FROM facts WHERE "+strings.Join(where, " AND ")+" GROUP BY source_id,provider,model ORDER BY source_id,provider,model", args...)
 	if err != nil {

@@ -113,6 +113,17 @@ func (s *Service) subSpendForKey(w http.ResponseWriter, r *http.Request, account
 	// account date; existing configured keys use their own upstream creation date.
 	wantedFrom := max(from.UnixMilli(), created.UnixMilli())
 	wantedTo := to.UnixMilli()
+	floor, floorErr := s.receiptHistoryFloor(ctx)
+	if floorErr != nil {
+		http.Error(w, "账单保留范围暂不可用", 503)
+		return
+	}
+	if wantedFrom < floor {
+		out.Status = "history_limited"
+		out.Message = "所选时间范围包含已按容量淘汰的账单，完整金额未知"
+		writeJSON(w, 200, out)
+		return
+	}
 	if wantedFrom >= wantedTo {
 		zero, count := float64(0), int64(0)
 		out.Status, out.Amount, out.Requests = "complete", &zero, &count
@@ -239,6 +250,21 @@ func (s *Service) subScanSpend(parent context.Context, task subSpendTask) {
 	err := s.control.db.QueryRowContext(ctx, `SELECT wanted_from,wanted_to,covered_from,covered_to,scan_from,scan_to,page,attempts,page_size FROM console_sub_account_spend_cache WHERE account_id=$1 AND requested AND next_attempt<=now()`, task.account).Scan(&task.wantedFrom, &task.wantedTo, &task.coveredFrom, &task.coveredTo, &task.from, &task.to, &task.page, &task.attempts, &task.pageSize)
 	if err != nil {
 		return
+	}
+	floor, floorErr := s.receiptHistoryFloor(ctx)
+	if floorErr != nil {
+		return
+	}
+	if task.wantedFrom < floor || task.from > 0 && task.from < floor {
+		task.wantedFrom = max(task.wantedFrom, floor)
+		if task.wantedTo <= floor {
+			_, _ = s.control.db.ExecContext(ctx, "UPDATE console_sub_account_spend_cache SET requested=false,scan_from=0,scan_to=0,page=1 WHERE account_id=$1", task.account)
+			return
+		}
+		task.from, task.to, task.page = task.wantedFrom, task.wantedTo, 1
+		if _, err = s.control.db.ExecContext(ctx, "UPDATE console_sub_account_spend_cache SET wanted_from=greatest(wanted_from,$2),scan_from=$2,scan_to=$3,page=1 WHERE account_id=$1", task.account, task.from, task.to); err != nil {
+			return
+		}
 	}
 	if task.to == 0 {
 		task.from, task.to, task.page = task.wantedFrom, task.wantedTo, 1
@@ -411,6 +437,13 @@ func (s *Service) subStoreSpendReceipts(ctx context.Context, task subSpendTask, 
 	if !valid {
 		return context.Canceled
 	}
+	var floor int64
+	if s.engine != nil && s.engine.DB != nil {
+		if err = tx.QueryRowContext(ctx, "SELECT receipt_evicted_before_ms FROM "+s.engine.historyPath+".storage_state WHERE singleton").Scan(&floor); err != nil {
+			return err
+		}
+	}
+	task.from = max(task.from, floor)
 	// Preserve each record's key so one account download serves every channel.
 	// This is the same immutable row identity used by the earlier per-key cache.
 	unique := map[string]map[string]any{}
@@ -465,12 +498,22 @@ func (s *Service) queueAccountSpendWindow(ctx context.Context, account string, f
 }
 
 func (s *Service) queueAccountSpendWindows(ctx context.Context, windows map[string][2]int64) error {
+	floor, err := s.receiptHistoryFloor(ctx)
+	if err != nil {
+		return err
+	}
 	if len(windows) == 0 {
 		return nil
 	}
 	entries := make([]map[string]any, 0, len(windows))
 	for account, w := range windows {
-		entries = append(entries, map[string]any{"account_id": account, "wanted_from": w[0], "wanted_to": w[1]})
+		if w[1] <= floor {
+			continue
+		}
+		entries = append(entries, map[string]any{"account_id": account, "wanted_from": max(w[0], floor), "wanted_to": w[1]})
+	}
+	if len(entries) == 0 {
+		return nil
 	}
 	raw, err := json.Marshal(entries)
 	if err != nil {
@@ -478,7 +521,7 @@ func (s *Service) queueAccountSpendWindows(ctx context.Context, windows map[stri
 	}
 	_, err = s.control.db.ExecContext(ctx, `INSERT INTO console_sub_account_spend_cache(account_id,wanted_from,wanted_to)
  SELECT account_id,wanted_from,wanted_to FROM jsonb_to_recordset($1::jsonb) AS w(account_id text,wanted_from bigint,wanted_to bigint) ORDER BY account_id
- ON CONFLICT(account_id) DO UPDATE SET wanted_from=least(console_sub_account_spend_cache.wanted_from,excluded.wanted_from),wanted_to=greatest(console_sub_account_spend_cache.wanted_to,excluded.wanted_to),
- requested=console_sub_account_spend_cache.requested OR console_sub_account_spend_cache.covered_from IS NULL OR console_sub_account_spend_cache.covered_from>excluded.wanted_from OR console_sub_account_spend_cache.covered_to<excluded.wanted_to OR console_sub_account_spend_cache.checked_at<$2`, string(raw), time.Now().Add(-time.Minute).UnixMilli())
+ ON CONFLICT(account_id) DO UPDATE SET wanted_from=greatest($3,least(console_sub_account_spend_cache.wanted_from,excluded.wanted_from)),wanted_to=greatest(console_sub_account_spend_cache.wanted_to,excluded.wanted_to),
+ requested=console_sub_account_spend_cache.requested OR console_sub_account_spend_cache.covered_from IS NULL OR console_sub_account_spend_cache.covered_from>excluded.wanted_from OR console_sub_account_spend_cache.covered_to<excluded.wanted_to OR console_sub_account_spend_cache.checked_at<$2`, string(raw), time.Now().Add(-time.Minute).UnixMilli(), floor)
 	return err
 }

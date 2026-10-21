@@ -13,7 +13,6 @@ import (
 	"time"
 )
 
-
 // Retain a deployment path (multi-tenant origins may share a hostname) while
 // removing known inference suffixes. Never send a credential to a guessed host.
 func subBindingSite(base string) string {

@@ -108,7 +108,7 @@ func (s *Service) automationMetrics(ctx context.Context, t AutomationTask, catal
 	}
 	p := t.Policy
 
-	// Aggregate in DuckDB, which can spill within its configured memory budget.
+	// Aggregate in PostgreSQL with bounded analytical concurrency.
 	// Never copy the full fact window or all latency samples into Go memory.
 	type samples struct {
 		m            automationMetric
@@ -120,7 +120,7 @@ func (s *Service) automationMetrics(ctx context.Context, t AutomationTask, catal
 	for _, c := range catalog {
 		all[c.Provider] = &samples{m: automationMetric{Provider: c.Provider, Upstream: c.Upstream, Eligible: c.Eligible}, blocks: map[int64]cacheBlock{}}
 	}
-	tx, e := s.engine.DB.BeginTx(ctx, nil)
+	tx, e := s.engine.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if e != nil {
 		return nil, e
 	}
@@ -155,7 +155,7 @@ func (s *Service) automationMetrics(ctx context.Context, t AutomationTask, catal
 	z := confidenceZ(p.ConfidenceLevel)
 	// Exact order-statistic ranks, including the original binomial CI endpoints.
 	latencyArgs := append(append([]any{}, args...), p.LatencyQuantile, z)
-	query := `WITH ranked AS (SELECT provider,upstream_model,at_ms,response_created_ms AS latency,row_number() OVER(PARTITION BY provider,upstream_model ORDER BY response_created_ms) AS rank,count(*) OVER(PARTITION BY provider,upstream_model) AS n` + scope + `AND kind='attempt' AND response_created_ms>=0 AND isfinite(response_created_ms)), parameters AS (SELECT ?::DOUBLE AS q,?::DOUBLE AS z), bounds AS (SELECT *,greatest(1,ceil(q*n)) AS mid,floor(q*n-z*sqrt(n*q*(1-q))) AS lo,ceil(q*n+z*sqrt(n*q*(1-q))) AS hi FROM ranked CROSS JOIN parameters) SELECT provider,upstream_model,max(n),max(at_ms),max(latency) FILTER(WHERE rank=mid),max(latency) FILTER(WHERE rank=lo),max(latency) FILTER(WHERE rank=hi) FROM bounds GROUP BY provider,upstream_model`
+	query := `WITH ranked AS (SELECT provider,upstream_model,at_ms,response_created_ms AS latency,row_number() OVER(PARTITION BY provider,upstream_model ORDER BY response_created_ms) AS rank,count(*) OVER(PARTITION BY provider,upstream_model) AS n` + scope + `AND kind='attempt' AND response_created_ms>=0 AND isfinite(response_created_ms)), parameters AS (SELECT ?::DOUBLE PRECISION AS q,?::DOUBLE PRECISION AS z), bounds AS (SELECT *,greatest(1,ceil(q*n)) AS mid,floor(q*n-z*sqrt(n*q*(1-q))) AS lo,ceil(q*n+z*sqrt(n*q*(1-q))) AS hi FROM ranked CROSS JOIN parameters) SELECT provider,upstream_model,max(n),max(at_ms),max(latency) FILTER(WHERE rank=mid),max(latency) FILTER(WHERE rank=lo),max(latency) FILTER(WHERE rank=hi) FROM bounds GROUP BY provider,upstream_model`
 	rows, e = tx.QueryContext(ctx, query, latencyArgs...)
 	if e != nil {
 		return nil, e
@@ -186,7 +186,7 @@ func (s *Service) automationMetrics(ctx context.Context, t AutomationTask, catal
 	if e != nil {
 		return nil, e
 	}
-	rows, e = tx.QueryContext(ctx, `SELECT provider,upstream_model,at_ms//60000,count(*),max(at_ms),sum(input_tokens::DOUBLE),sum(cache_read_tokens::DOUBLE)`+scope+`AND kind='request' AND input_tokens>0 AND cache_read_tokens>=0 AND cache_read_tokens<=input_tokens GROUP BY provider,upstream_model,at_ms//60000`, args...)
+	rows, e = tx.QueryContext(ctx, `SELECT provider,upstream_model,at_ms/60000,count(*),max(at_ms),sum(input_tokens::DOUBLE PRECISION),sum(cache_read_tokens::DOUBLE PRECISION)`+scope+`AND kind='request' AND input_tokens>0 AND cache_read_tokens>=0 AND cache_read_tokens<=input_tokens GROUP BY provider,upstream_model,at_ms/60000`, args...)
 	if e != nil {
 		return nil, e
 	}

@@ -11,7 +11,6 @@ import (
 	"time"
 )
 
-
 type AutomationPolicy struct {
 	Metrics            []string `json:"metrics"`
 	MinSuccessSamples  int      `json:"min_success_samples"`

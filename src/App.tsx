@@ -247,7 +247,7 @@ function Overview({
             ))
           ) : (
             <Empty title="暂无模型事实" icon={<Activity size={22} />}>
-              等待 S3 事实导入。
+              等待来源上报请求记录。
             </Empty>
           )}
         </div>
@@ -941,7 +941,7 @@ function Guide({ open, onClose }: { open: boolean; onClose: () => void }) {
               ],
               [
                 "范围与保留",
-                "默认统计全部端点和全部流式状态，可分别筛选。跨组延迟由后端合并直方图后计算。默认按 provider 配置顺序；选择 API key 后按该 key 配置顺序，历史请求、尝试、延迟、Token 和估算消费仅统计该 key 发起的请求。渠道状态、总并发和余额为渠道整体数据；sub2api 实际消费按当前筛选范围逐请求关联，无法归属的历史请求不计为零消费。历史事实存储于 S3，由 DuckDB 聚合；采集开始之前的流量无法补回。",
+                "默认统计全部端点和全部流式状态，可分别筛选。跨组延迟由后端合并直方图后计算。默认按 provider 配置顺序；选择 API key 后按该 key 配置顺序，历史请求、尝试、延迟、Token 和估算消费仅统计该 key 发起的请求。渠道状态、总并发和余额为渠道整体数据；sub2api 实际消费按当前筛选范围逐请求关联，无法归属的历史请求不计为零消费。统计仅覆盖已接收并保留的请求记录；达到容量上限时最早的请求历史会自动淘汰。",
               ],
             ].map(([title, text]) => (
               <section key={title}>
@@ -1962,8 +1962,8 @@ function Dashboard({
                   {metrics.data.import.error_class
                     ? `采集异常：${metrics.data.import.error_class}`
                     : metrics.data.import.audit_complete === false
-                      ? "已加载经校验的历史快照，正在核对后续记录；当前统计可能尚未追平。"
-                      : `正在同步历史事实，剩余 ${count(metrics.data.import.remaining_objects || 0)} 个对象；当前统计尚不完整。`}
+                      ? "来源上报尚未追平或存在记录缺口，当前统计可能不完整。"
+                      : "正在接收请求记录，当前统计尚不完整。"}
                 </div>
               )}
               {metrics.data?.coverage === "partial" && (
@@ -1971,7 +1971,7 @@ function Dashboard({
                   <Clock3 size={14} />
                   {metrics.data.dropped
                     ? "部分指标因容量限制未收集，请结合日志核对。"
-                    : `实例于 ${time(metrics.data.collection_started_at)} 开始采集，当前窗口覆盖尚不完整。`}
+                    : `当前保留记录始于 ${time(metrics.data.collection_started_at)}，筛选窗口包含未采集或已淘汰的数据。`}
                 </div>
               )}
               {error && rows.length > 0 && <p role="alert" className="error-banner">刷新失败，保留当前数据。{error}</p>}

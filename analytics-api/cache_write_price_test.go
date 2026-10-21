@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"math"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -48,33 +46,16 @@ func TestCacheWriteBillingDefaultsOverridesAndSuffixCosts(t *testing.T) {
 	}
 }
 
-func TestCacheWriteSettingSurvivesS3AndLegacyDatabaseUpgrade(t *testing.T) {
+func TestCacheWriteSettingSurvivesReplicaReplacement(t *testing.T) {
 	ctx := context.Background()
-	objects := &fakeStateObjects{}
 	e := stateTestEngine(t)
-	state := newStateStore(objects, Config{StateBucket: "test", StatePrefix: "v1"})
-	if err := state.sync(ctx, e); err != nil {
-		t.Fatal(err)
-	}
 	for _, model := range []string{"gpt-6-astra", "claude-fable-5"} {
-		enabled := model == "gpt-6-astra" // override each model's default
-		if err := state.save(ctx, e, Price{Model: model, Input: 4, CacheWrite: 6, CacheWrite1h: 8, ChargeCacheWrite: &enabled, Verified: true}); err != nil {
+		enabled := model == "gpt-6-astra"
+		if err := e.SavePrice(ctx, Price{Model: model, Input: 4, CacheWrite: 6, CacheWrite1h: 8, ChargeCacheWrite: &enabled, Verified: true}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	var doc priceState
-	if err := json.Unmarshal(objects.body, &doc); err != nil {
-		t.Fatal(err)
-	}
-	for _, p := range doc.Prices {
-		if p.Model == "claude-fable-5" && (p.ChargeCacheWrite == nil || *p.ChargeCacheWrite) {
-			t.Fatal("explicit false omitted from S3")
-		}
-	}
-	other := stateTestEngine(t)
-	if err := newStateStore(objects, Config{StateBucket: "test", StatePrefix: "v1"}).sync(ctx, other); err != nil {
-		t.Fatal(err)
-	}
+	other := replicaTestEngine(t, e)
 	prices, err := other.Prices(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -82,34 +63,8 @@ func TestCacheWriteSettingSurvivesS3AndLegacyDatabaseUpgrade(t *testing.T) {
 	for _, p := range prices {
 		if p.Model == "gpt-6-astra" || p.Model == "claude-fable-5" {
 			if p.ChargeCacheWrite == nil || *p.ChargeCacheWrite != (p.Model == "gpt-6-astra") || p.CacheWrite != 6 || p.CacheWrite1h != 8 {
-				t.Fatal("lost override or rates", p)
+				t.Fatal("lost override", p)
 			}
-		}
-	}
-	path := filepath.Join(t.TempDir(), "legacy.duckdb")
-	legacy, err := OpenEngine(path, Config{Timezone: "UTC"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = legacy.DB.Exec("ALTER TABLE prices DROP COLUMN charge_cache_write"); err != nil {
-		t.Fatal(err)
-	}
-	legacy.Close()
-	legacy, err = OpenEngine(path, Config{Timezone: "UTC"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer legacy.Close()
-	prices, err = legacy.Prices(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, p := range prices {
-		if p.Model == "gpt-6-astra" && p.chargesCacheWrite() {
-			t.Fatal("legacy GPT did not get default")
-		}
-		if p.Model == "claude-fable-5" && !p.chargesCacheWrite() {
-			t.Fatal("legacy Claude did not get default")
 		}
 	}
 }

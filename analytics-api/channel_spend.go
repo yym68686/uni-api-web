@@ -167,10 +167,10 @@ func billingWhere(f QueryFilter, from, to int64) (string, []any) {
 // without a completion keeps its observation timestamp. Reused caller IDs are
 // deliberately ambiguous instead of choosing a completion arbitrarily.
 const billingAlignedSQL = `WITH aligned_billing AS (
- SELECT b.* EXCLUDE(at_ms),coalesce(a.completed_at,b.at_ms) AS at_ms,coalesce(a.n,0) AS completions
+ SELECT b.event_id,b.source_id,b.instance_id,b.request_id,b.attempt_id,b.provider,b.key_id,b.model,b.upstream_model,b.endpoint,b.stream,b.started_ms,b.upstream_base,b.upstream_key_hash,b.billing_request_ids,b.status,b.upstream_error_sha256,coalesce(a.completed_at,b.at_ms) AS at_ms,coalesce(a.n,0) AS completions
  FROM facts b LEFT JOIN (
  SELECT source_id,instance_id,request_id,attempt_id,provider,key_id,model,upstream_model,endpoint,stream,max(at_ms) AS completed_at,count(*) AS n
- FROM facts WHERE kind='attempt' GROUP BY ALL
+ FROM facts WHERE kind='attempt' GROUP BY source_id,instance_id,request_id,attempt_id,provider,key_id,model,upstream_model,endpoint,stream
  ) a USING(source_id,instance_id,request_id,attempt_id,provider,key_id,model,upstream_model,endpoint,stream)
  WHERE b.kind='billing'
 ) `
@@ -202,10 +202,10 @@ func scopedBillingAlignment(f QueryFilter, from, to int64) (string, []any) {
  candidate_billing AS MATERIALIZED (SELECT ` + billingProjection + ` FROM facts b
  WHERE kind='billing' AND ` + scope + ` AND ((at_ms>=? AND at_ms<?)
  OR EXISTS(SELECT 1 FROM window_completions k WHERE ` + strings.Join(equal, " AND ") + `))),
- completion_keys AS (SELECT DISTINCT ` + billingIdentityColumns + ` FROM candidate_billing),
- completions AS (SELECT a.` + strings.ReplaceAll(billingIdentityColumns, ",", ",a.") + `,max(a.at_ms) AS completed_at,count(*) AS n
- FROM facts a JOIN completion_keys k USING(` + billingIdentityColumns + `) WHERE a.kind='attempt' GROUP BY ALL),
- aligned_billing AS (SELECT b.* EXCLUDE(at_ms),coalesce(a.completed_at,b.at_ms) AS at_ms,coalesce(a.n,0) AS completions
+ completion_keys AS MATERIALIZED (SELECT DISTINCT ` + billingIdentityColumns + ` FROM candidate_billing),
+ completions AS MATERIALIZED (SELECT a.` + strings.ReplaceAll(billingIdentityColumns, ",", ",a.") + `,max(a.at_ms) AS completed_at,count(*) AS n
+ FROM facts a JOIN completion_keys k USING(` + billingIdentityColumns + `) WHERE a.kind='attempt' GROUP BY a.source_id,a.instance_id,a.request_id,a.attempt_id,a.provider,a.key_id,a.model,a.upstream_model,a.endpoint,a.stream),
+ aligned_billing AS (SELECT b.event_id,b.source_id,b.instance_id,b.request_id,b.attempt_id,b.provider,b.key_id,b.model,b.upstream_model,b.endpoint,b.stream,b.started_ms,b.upstream_base,b.upstream_key_hash,b.billing_request_ids,b.status,b.upstream_error_sha256,coalesce(a.completed_at,b.at_ms) AS at_ms,coalesce(a.n,0) AS completions
  FROM candidate_billing b LEFT JOIN completions a USING(` + billingIdentityColumns + `)) `, args
 }
 
@@ -240,11 +240,16 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 	alignedArgs := append(append([]any{}, scopeArgs...), args...)
 	// Keep one immutable fact snapshot while processing bounded Go/ledger batches.
 	// Materialize alignment once; repeating it for each page rescans all history.
-	snapshot, err := s.engine.DB.BeginTx(ctx, nil)
+	snapshot, err := s.engine.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
 	if err != nil {
 		return nil, err
 	}
 	defer snapshot.Rollback() // Also drops the transaction-local temporary table.
+	var claimsComplete bool
+	var evictedBefore int64
+	if err = snapshot.QueryRowContext(ctx, "SELECT claims_history_complete,evicted_before_ms FROM storage_state WHERE singleton").Scan(&claimsComplete, &evictedBefore); err != nil {
+		return nil, err
+	}
 	if _, err = snapshot.ExecContext(ctx, `CREATE TEMP TABLE console_spend_facts AS `+alignment+`SELECT * FROM aligned_billing WHERE `+where, alignedArgs...); err != nil {
 		return nil, fmt.Errorf("billing alignment: %w", err)
 	}
@@ -402,7 +407,7 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 				return nil, e
 			}
 			operation.stage("receipt_claim_lookup")
-			claimsSQL := `WITH target AS (SELECT DISTINCT value->>'base' AS upstream_base,value->>'hash' AS upstream_key_hash,value->>'id' AS rid FROM json_each(?)) SELECT t.upstream_base,t.upstream_key_hash,t.rid,c.n FROM target t JOIN console_spend_claims c USING(upstream_base,upstream_key_hash,rid)`
+			claimsSQL := `WITH target AS (SELECT DISTINCT value->>'base' AS upstream_base,value->>'hash' AS upstream_key_hash,value->>'id' AS rid FROM json_array_elements(?::json) AS entries(value)) SELECT t.upstream_base,t.upstream_key_hash,t.rid,c.n FROM target t JOIN console_spend_claims c USING(upstream_base,upstream_key_hash,rid)`
 			rows, err = snapshot.QueryContext(ctx, claimsSQL, string(targetJSON))
 			if err != nil {
 				return nil, err
@@ -421,6 +426,9 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 			if err != nil {
 				return nil, err
 			}
+		}
+		if err = s.engine.addRetiredClaims(ctx, snapshot, ownership); err != nil {
+			return nil, err
 		}
 		type bill struct {
 			ID   int64
@@ -606,6 +614,9 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 		item.Refreshing = item.Pending > 0
 		item.SyncError = rowErrors[id]
 		switch {
+		case !claimsComplete || from*1000 < evictedBefore:
+			item.Status = "history_limited"
+			item.Message = "部分请求历史已按容量淘汰，无法确认完整账单归属；已匹配部分单独展示"
 		case item.Ambiguous > 0:
 			item.Status = "ambiguous"
 			item.Message = "账单标识对应多个请求或多条账单，不能准确归属"

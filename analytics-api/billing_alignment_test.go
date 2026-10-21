@@ -72,7 +72,7 @@ func TestBoundedBillingAlignmentMatchesFullHistory(t *testing.T) {
 				t.Fatal(err)
 			}
 			var diff int
-			if err = tx.QueryRow("SELECT count(*) FROM ((SELECT * FROM expected EXCEPT ALL SELECT * FROM actual) UNION ALL (SELECT * FROM actual EXCEPT ALL SELECT * FROM expected))").Scan(&diff); err != nil {
+			if err = tx.QueryRow("SELECT count(*) FROM ((SELECT * FROM expected EXCEPT ALL SELECT * FROM actual) UNION ALL (SELECT * FROM actual EXCEPT ALL SELECT * FROM expected)) AS differences").Scan(&diff); err != nil {
 				t.Fatal(err)
 			}
 			if diff != 0 {

@@ -28,25 +28,10 @@ services:
       CONTROL_MASTER_KEY: ${CONTROL_MASTER_KEY:?set CONTROL_MASTER_KEY}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD}
-      S3_ENDPOINT: ${S3_ENDPOINT:-}
-      S3_BUCKET: ${S3_BUCKET:-}
-      S3_PREFIX: ${S3_PREFIX:-uni-api-facts/v1/}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
-      AWS_REGION: ${AWS_REGION:-auto}
-      # Facts remain read-only. Settings and the rebuildable query checkpoint
-      # use a separate bucket and a separate application credential.
-      STATE_S3_ENDPOINT: ${STATE_S3_ENDPOINT:-}
-      STATE_S3_BUCKET: ${STATE_S3_BUCKET:-}
-      STATE_S3_PREFIX: ${STATE_S3_PREFIX:-analytics/v1}
-      STATE_AWS_ACCESS_KEY_ID: ${STATE_AWS_ACCESS_KEY_ID:-}
-      STATE_AWS_SECRET_ACCESS_KEY: ${STATE_AWS_SECRET_ACCESS_KEY:-}
-      REQUIRE_INITIAL_IMPORT: ${REQUIRE_INITIAL_IMPORT:-false}
     depends_on:
       postgres:
         condition: service_healthy
-    # /data is a per-container query cache. Sharing one DuckDB file across old
-    # and new replicas would prevent safe rolling updates.
+    # All durable console and analytics state lives in PostgreSQL.
     ports:
       - "8080"
     healthcheck:

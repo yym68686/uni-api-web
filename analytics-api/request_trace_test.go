@@ -199,24 +199,14 @@ func TestRequestTraceOrdersSameMillisecondByGatewaySequence(t *testing.T) {
 	}
 }
 
-func TestRequestTraceRestoresLegacyCheckpointWithoutLosingFacts(t *testing.T) {
+func TestRequestTraceSurvivesReplicaReplacement(t *testing.T) {
 	ctx := context.Background()
 	old := stateTestEngine(t)
 	f := Fact{Schema: 1, EventID: "legacy", RequestID: "legacy-request", Kind: "request", AtMS: time.Now().Add(-time.Minute).UnixMilli(), Outcome: "failed", Status: 403}
 	if err := old.Import(ctx, "legacy-object", "etag", []Fact{f}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := old.DB.Exec(`DROP INDEX history.facts_at; DROP INDEX history.facts_request; DROP INDEX history.facts_trace; ALTER TABLE facts DROP COLUMN trace_id; ALTER TABLE facts DROP COLUMN stage; ALTER TABLE facts DROP COLUMN trace_detail; ALTER TABLE facts DROP COLUMN transport_timing; ALTER TABLE facts DROP COLUMN terminal_kind; ALTER TABLE facts DROP COLUMN failure_reason; ALTER TABLE facts DROP COLUMN response_completed; CREATE INDEX facts_at ON facts(at_ms)`); err != nil {
-		t.Fatal(err)
-	}
-	store := newCheckpointStore(&fakeStateObjects{}, Config{StateBucket: "state"})
-	if err := store.save(ctx, old); err != nil {
-		t.Fatal(err)
-	}
-	current := stateTestEngine(t)
-	if ok, found, err := store.restorePhysical(ctx, current); err != nil || !ok || !found {
-		t.Fatal(ok, err)
-	}
+	current := replicaTestEngine(t, old)
 	result, err := current.RequestTrace(ctx, "legacy-request", nil, "")
 	if err != nil || len(result.Data) != 1 || len(result.Data[0].Events) != 1 || result.Data[0].Events[0].Status != 403 {
 		t.Fatal(result, err)

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"math"
 	"net/http/httptest"
 	"path/filepath"
@@ -135,13 +134,7 @@ func TestLongContextPremiumPerRequestBoundariesAndFilters(t *testing.T) {
 func TestLongContextPremiumPersistsAndLegacyClientsPreserveIt(t *testing.T) {
 	ctx := context.Background()
 	e := stateTestEngine(t)
-	objects := &fakeStateObjects{}
-	state := newStateStore(objects, Config{StateBucket: "settings"})
-	if err := state.sync(ctx, e); err != nil {
-		t.Fatal(err)
-	}
-	svc := &Service{engine: e, state: state}
-	svc.stateReady.Store(true)
+	svc := &Service{engine: e}
 	save := func(body string) {
 		r := httptest.NewRequest("PUT", "/v1/prices/gpt-6-sol", strings.NewReader(body))
 		r.SetPathValue("model", "gpt-6-sol")
@@ -153,13 +146,9 @@ func TestLongContextPremiumPersistsAndLegacyClientsPreserveIt(t *testing.T) {
 	}
 	save(`{"input":4,"output":10,"verified":true,"long_context_premium":true}`)
 	save(`{"input":4,"output":10,"verified":true}`)
-	other := stateTestEngine(t)
-	syncState := newStateStore(objects, Config{StateBucket: "settings"})
+	other := replicaTestEngine(t, e)
 	assert := func(want bool) {
 		t.Helper()
-		if err := syncState.sync(ctx, other); err != nil {
-			t.Fatal(err)
-		}
 		prices, err := other.Prices(ctx)
 		if err != nil {
 			t.Fatal(err)
@@ -182,24 +171,13 @@ func TestLongContextPremiumPersistsAndLegacyClientsPreserveIt(t *testing.T) {
 	}
 	save(`{"input":4,"output":10,"verified":true,"long_context_premium":false}`)
 	assert(false)
-	var doc priceState
-	if err := json.Unmarshal(objects.body, &doc); err != nil {
-		t.Fatal(err)
-	}
-	for _, p := range doc.Prices {
-		if p.Model == "gpt-6-sol" && (p.LongContextPremium == nil || *p.LongContextPremium) {
-			t.Fatal("explicit off missing in S3")
-		}
-	}
+
 }
 
 func TestLongContextPremiumLegacyDatabaseDefaultsOff(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "legacy.duckdb")
 	e, err := OpenEngine(path, Config{Timezone: "UTC"})
 	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = e.DB.Exec("ALTER TABLE prices DROP COLUMN long_context_premium"); err != nil {
 		t.Fatal(err)
 	}
 	e.Close()
@@ -227,15 +205,7 @@ func TestLongContextPremiumRepricesRestoredFactsAndHonorsCacheWriteToggle(t *tes
 	if err := source.Import(ctx, "historical", "v1", []Fact{{Schema: 1, EventID: "cached-long", Kind: "request", AtMS: at, Model: "gpt-6-sol", Provider: "p", Outcome: "success", InputTokens: &input, OutputTokens: &output, CacheReadTokens: &read, CacheWriteTokens: &write, CacheWrite1hTokens: &hour}}); err != nil {
 		t.Fatal(err)
 	}
-	objects := &fakeStateObjects{}
-	store := newCheckpointStore(objects, Config{StateBucket: "test", Timezone: "UTC"})
-	if err := store.save(ctx, source); err != nil {
-		t.Fatal(err)
-	}
-	restored := stateTestEngine(t)
-	if ok, err := store.restore(ctx, restored); err != nil || !ok {
-		t.Fatal(ok, err)
-	}
+	restored := replicaTestEngine(t, source)
 	yes, no := true, false
 	for _, test := range []struct {
 		premium, write *bool

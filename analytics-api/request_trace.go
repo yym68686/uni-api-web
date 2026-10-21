@@ -127,8 +127,7 @@ func (e *Engine) RequestTrace(ctx context.Context, id string, allowed []string, 
 	out := RequestTraceResult{Data: []RequestTrace{}, RequestID: id, GeneratedAt: time.Now().Unix()}
 	// Separate equality probes use facts_request/facts_trace indexes. An OR
 	// across both columns followed by a correlated join scans the whole history.
-	// Materialize the small ID matches before applying source/instance filters:
-	// DuckDB's ART scan only supports a single-column predicate at the scan.
+	// Materialize the small ID matches before applying instance filters.
 	where, args := sourceWhere(nil, nil, QueryFilter{SourceIDs: allowed, SourceID: source})
 	if len(instance) > 0 {
 		where = append(where, "coalesce(instance_id,'')=?")
@@ -138,9 +137,8 @@ func (e *Engine) RequestTrace(ctx context.Context, id string, allowed []string, 
 	if len(where) > 0 {
 		scope = " WHERE " + strings.Join(where, " AND ")
 	}
-	// DuckDB does not support sql.TxOptions.ReadOnly; all statements below
-	// are SELECTs and share one snapshot while ingestion continues.
-	tx, err := e.DB.BeginTx(ctx, nil)
+	// All trace stages share one snapshot while ingestion/retention continues.
+	tx, err := e.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
 	if err != nil {
 		return out, err
 	}

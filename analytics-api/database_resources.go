@@ -8,43 +8,12 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
-
-func configureDatabaseResources(db *sql.DB, path string, cfg Config) error {
-	threads := cfg.DatabaseThreads
-	if threads == 0 {
-		threads = 2
-	}
-	if threads < 1 || cfg.DatabaseTempLimitMB < 0 {
-		return fmt.Errorf("invalid database resource limits")
-	}
-	dir := cfg.DatabaseTempDir
-	if dir == "" {
-		dir = path + ".tmp"
-	}
-	dir, err := filepath.Abs(dir)
-	if err != nil {
-		return err
-	}
-	if err = os.MkdirAll(dir, 0700); err != nil {
-		return err
-	}
-	// These settings are database-wide, not a budget multiplied by each connection.
-	if _, err = db.Exec(fmt.Sprintf("SET threads=%d; SET temp_directory=%s", threads, sqlPath(dir))); err != nil {
-		return err
-	}
-	// Zero preserves DuckDB's disk-dependent default until a measured limit is set.
-	if cfg.DatabaseTempLimitMB > 0 {
-		_, err = db.Exec(fmt.Sprintf("SET max_temp_directory_size='%dMiB'", cfg.DatabaseTempLimitMB))
-	}
-	return err
-}
 
 var errAnalyticsPriority = errors.New("billing deferred for interactive analytics")
 
@@ -191,20 +160,19 @@ func (o *databaseOperation) finish(err error) {
 }
 
 type databaseMemorySample struct {
-	Event          string              `json:"event"`
-	Reason         string              `json:"reason"`
-	Active         map[string]int      `json:"active"`
-	Pool           sql.DBStats         `json:"pool"`
-	QueriesWaiting int64               `json:"queries_waiting"`
-	GoHeap         uint64              `json:"go_heap_bytes"`
-	Process        map[string]int64    `json:"process_bytes,omitempty"`
-	Cgroup         map[string]int64    `json:"cgroup_bytes,omitempty"`
-	DuckDB         map[string][2]int64 `json:"duckdb_bytes,omitempty"`
-	SampleError    string              `json:"sample_error,omitempty"`
+	Event          string           `json:"event"`
+	Reason         string           `json:"reason"`
+	Active         map[string]int   `json:"active"`
+	Pool           sql.DBStats      `json:"pool"`
+	QueriesWaiting int64            `json:"queries_waiting"`
+	GoHeap         uint64           `json:"go_heap_bytes"`
+	Process        map[string]int64 `json:"process_bytes,omitempty"`
+	Cgroup         map[string]int64 `json:"cgroup_bytes,omitempty"`
+	SampleError    string           `json:"sample_error,omitempty"`
 }
 
 // Linux proc/cgroup counters are read independently; they are observations, not
-// an atomic peak breakdown. RSS is distinct from DuckDB buffers and file cache.
+// an atomic peak breakdown. RSS describes the API process; database memory belongs to PostgreSQL.
 func processMemory() map[string]int64 {
 	out := map[string]int64{}
 	if data, err := os.ReadFile("/proc/self/status"); err == nil {
@@ -253,29 +221,6 @@ func (e *Engine) logMemory(reason string) {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	sample.GoHeap = m.HeapAlloc
-	// Sampling must never queue behind work for more than 200 ms, or hold a
-	// transaction/lock on the writer. Failure itself is useful evidence.
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	defer cancel()
-	rows, err := e.DB.QueryContext(ctx, "SELECT tag,memory_usage_bytes,temporary_storage_bytes FROM duckdb_memory() WHERE memory_usage_bytes>0 OR temporary_storage_bytes>0")
-	if err == nil {
-		sample.DuckDB = map[string][2]int64{}
-		for rows.Next() {
-			var tag string
-			var memory, temporary int64
-			if err = rows.Scan(&tag, &memory, &temporary); err != nil {
-				break
-			}
-			sample.DuckDB[tag] = [2]int64{memory, temporary}
-		}
-		if err == nil {
-			err = rows.Err()
-		}
-		rows.Close()
-	}
-	if err != nil {
-		sample.SampleError = "database_sample_unavailable"
-	}
 	if data, err := json.Marshal(sample); err == nil {
 		log.Print(string(data))
 	}

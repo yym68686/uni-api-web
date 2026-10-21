@@ -58,7 +58,7 @@ Only the selected filter key's opaque ID is stored, never the access credential.
   and check the original revision before modifying any routes. Model-validation
   failures identify the actual unverified upstream names.
 - Optional 30-second metric refresh, paused while the page is in the background.
-- S3-backed history across today/week/month/year/all ranges, usage and estimated
+- PostgreSQL history across today/week/month/year/all ranges, usage and estimated
   cost dashboards, live channel concurrency, cache rates and editable model prices.
 - Motion entrance/tab transitions, Radix accessible dialogs/tooltips, reduced
   motion support, keyboard navigation and a mobile navigation drawer.
@@ -72,11 +72,9 @@ user requests: retries count separately. Overall success rate is weighted by
 completed attempts, never averaged from row percentages. API key selection
 filters channel configuration; statistics still include all requests to those
 channels. p50/p95 are histogram upper-bound estimates and must not be added
-between stages. Historical facts are retained in S3 and queried through DuckDB
-minute/day aggregates. Only current concurrency remains a live instance metric.
+between stages. Historical facts and incrementally updated minute/day aggregates are retained in PostgreSQL. Only current concurrency remains a live instance metric.
 Error responses never turn into a fake zero balance or success rate. The analytics API
-reports each source's latest persisted fact separately from the last successful S3
-scan. If a source has recent completed live traffic but no persisted fact for over
+reports each source's latest persisted fact separately from the last authenticated exporter heartbeat. If a source has recent completed live traffic but no persisted fact for over
 two minutes, the console warns of missing history and labels zero attempt counts
 as unsynchronized. An idle source or an in-flight request alone does not trigger
 this warning.
@@ -125,8 +123,7 @@ Users sign in with a console username and password. The API stores bcrypt passwo
 hashes and hashed, revocable 30-day sessions in PostgreSQL. Cookies are HttpOnly,
 Secure and SameSite=Strict. The frontend never stores a source credential.
 
-Under Sources, add a name, uni-api URL and platform administrator key. Optional
-S3 read credentials connect that source's historical facts. The backend encrypts
+Under Sources, add a name, uni-api URL and platform administrator key. The gateway reports facts to the source-bound authenticated ingestion endpoint. The backend encrypts
 credentials with `CONTROL_MASTER_KEY`, validates platform access and proxies only
 observation endpoints. The default view combines sources; selecting a source
 scopes catalog, API keys, concurrency, balances and historical analytics. Same-name
@@ -139,106 +136,57 @@ source CRUD under `/v1/sources`, and authenticated source observation proxies.
 When account mode is disabled, a legacy direct-key connection remains available.
 Network failure never downgrades an enabled account service to legacy mode.
 
-## Rebuildable analysis service
+## PostgreSQL analysis service
 
-`docker-compose.yml` contains the frontend, Go analysis API and a private PostgreSQL service. Set `POSTGRES_PASSWORD`, a random `CONTROL_MASTER_KEY` (at least 32 characters), and initial `ADMIN_USERNAME` / `ADMIN_PASSWORD` (12–72 bytes). Bootstrap only creates the first administrator; change the password under Sources after signing in. Fugue may supply an independent managed PostgreSQL via `CONTROL_DATABASE_URL` instead of the compose database. Back up this database and the master key together. DuckDB remains a disposable local query cache.
+The API and frontend are stateless. All durable settings, source/account credentials,
+admin password hashes, sessions, prices, encrypted gateway recovery documents,
+detection results and request history live in PostgreSQL. `CONTROL_DATABASE_URL`
+(or `DATABASE_URL`) and `CONTROL_MASTER_KEY` remain bootstrap secrets supplied by
+the deployment. Credentials in the database remain encrypted; the master key is
+not stored beside their ciphertext. No DuckDB engine, S3 client, checkpoint restore,
+archive scan or backup job runs in this release. Backups are not configured.
 
-The frontend keeps up to 16 idle analysis connections per nginx worker. Its startup
-hook derives the connection pool from `ANALYTICS_UPSTREAM` while preserving the
-configured HTTP(S) scheme, authority and base path. Requests retain the original
-Host and HTTPS SNI; connection reuse does not cache analytics responses.
+Use `docker-compose.yml` or an existing managed PostgreSQL database. Set
+`POSTGRES_PASSWORD`, a random `CONTROL_MASTER_KEY` (at least 32 characters),
+`ADMIN_USERNAME` and `ADMIN_PASSWORD` (12–72 bytes). Bootstrap creates only the
+first administrator. Restarting/releasing the API reuses committed data and runs
+only versioned additive schema migrations; it does not reimport request history.
+`/readyz` verifies database access before the candidate serves traffic.
 
-Provide the
-fact bucket through `S3_ENDPOINT`, `S3_BUCKET`, `S3_PREFIX` and a read-only AWS
-credential. Provide a separate private state bucket through `STATE_S3_ENDPOINT`,
-`STATE_S3_BUCKET`, `STATE_S3_PREFIX` and the `STATE_AWS_*` read-write credential.
-Sources can use separate fact buckets/prefixes; credentials are not included in the repo.
+Gateway facts use `POST /v1/runtime-facts/{source_id}` with a source-bound Bearer
+credential. New gateways use `FACTS_INGEST_URL` / `FACTS_INGEST_TOKEN`, or derive
+these from `UNI_API_CONTROL_RESTORE_URL` / `UNI_API_CONTROL_RESTORE_TOKEN`.
+The exporter has a bounded queue and local retry spool outside the paid request
+path. It deletes a batch only after a matching SHA-256 acknowledgement. Retries
+are deduplicated in the same transaction that adds facts, aggregate deltas and a
+shared revision. Epoch, sequence, pending and loss counters expose collection gaps;
+automation cannot apply a rule over a known incomplete window.
 
-Operator prices live in a conditional S3 document. Concurrent changes return a
-conflict instead of overwriting a newer version. Every replica refreshes its price
-cache. The state bucket also holds one atomically replaced, checksummed DuckDB
-physical checkpoint of facts, aggregates and import checkpoints. Settings are kept separate
-so restoring an older query cache cannot revert an operator edit.
+The total database budget is 10,000,000,000 bytes. Admission starts oldest-first
+reclamation at 7.5 GB and reclaims toward 6.5 GB, reserving the remainder for WAL,
+indexes, temporary query files and protected control state. Request facts and
+aggregates use hourly physical partitions; dropping the oldest partition releases
+files at commit. Receipt caches are shortened to the same retained boundary in
+bounded idle-account transactions and vacated pages are reusable. Configuration,
+prices, credentials and pending operations are never FIFO eviction candidates.
+If protected state leaves insufficient capacity, ingestion returns an explicit
+retryable error rather than deleting it. The existing time filters are unchanged;
+there is no age-based expiration. A window reaching past the actual retained
+boundary is marked partial/history-limited, never fabricated as a complete zero.
 
-Each API container uses its own `/data` directory, with no shared volume. Historical
-tables live in `analytics.duckdb`; prices and configuration cache live in the separate
-`analytics.duckdb.settings` catalog. Existing combined databases migrate settings
-without dropping operator edits. A v5 checkpoint flushes the history WAL and copies
-the file under the history write lock, then compresses/uploads outside that lock.
-Restore streams into a staging file, validates hashes, schema/constraints, engine
-version and row counts, then atomically replaces only the attached history file.
-Legacy v4/v3/v2 Parquet snapshots remain readable for migration/recovery. A failed
-download or validation preserves the existing cache and current prices.
-Configuration recovery, detection and billing workers start before history
-restoration. Production uses `REQUIRE_INITIAL_IMPORT=true`: the replacement does
-not bind its HTTP port until a complete initial fact scan and price sync finish.
-With Fugue's TCP readiness and `maxUnavailable=0`, the old replica continues
-serving login, control and analytics until the replacement is ready. This traffic
-gate does not delay background workers or optional query warming.
+`GET /v1/status` exposes actual database bytes, capacity watermarks and the
+retained boundary. Safe request IDs and per-route/per-stage durations diagnose
+slow reads without logging credentials or request contents. Large analytical
+and receipt queries retain bounded concurrency and cancellation; PostgreSQL
+indexes and transactional range summaries avoid full-history freshness scans.
 
-`ANALYTICS_DB_MEMORY_LIMIT_MB` configures DuckDB's budget in MiB (default 1024,
-minimum 64). Keep container memory above this budget for Go workers and downloads.
-The former fixed 512MB budget exhausted memory while committing a production
-checkpoint; replay of that same checkpoint succeeds with 1GiB. Database failures
-are logged by safe driver category, including commit-time buffer exhaustion,
-without SQL, request contents or credentials.
-
-Heavy analytics and receipt queries share a cancellable single-query gate; imports
-and request-trace reads remain independent. Receipt alignment materializes only
-needed columns/candidate identities, and global receipt conflicts are aggregated
-once per request. Every five seconds, `analytics_memory` records operation phases,
-DuckDB buffer/spill categories, Go heap, RSS and Linux cgroup counters without
-SQL, credentials or fact payloads. `db_operation` records failing import stages.
-
-Additional startup configuration (defaults preserve the existing resource budgets):
-
-- `ANALYTICS_DB_THREADS`: database-wide worker threads, default `2`.
-- `ANALYTICS_DB_TEMP_DIR`: spill directory, default `<database path>.tmp` under the data directory.
-- `ANALYTICS_DB_TEMP_LIMIT_MB`: explicit spill cap in MiB; `0` keeps DuckDB's disk-dependent default.
-- `ANALYTICS_CHECKPOINT_CACHE_WINDOW_MB`: Linux scratch-file sync/reclaim window; `0` disables the optional hint. `32` was tested offline. It never discards the active database's cache or changes snapshot bytes, hashes, conditional publication, or recovery behavior.
-
-Do not reduce production memory budgets based only on a single-query benchmark.
-See [the measured optimization study](docs/analytics-memory-optimization-2026-10-05.md)
-for scope, limitations and offline reproduction.
-
-`/healthz` reports process health once listening; `/readyz` reports complete
-historical analytics readiness. In immediate-listen/development mode, incomplete
-analytics returns 503 with `code: analytics_initializing` and `Retry-After: 5`.
-The console retries automatically even with auto-refresh disabled, retaining the
-last successful data for the same query and labeling it as previous data. It never
-substitutes another key/range's cached result. Initialization does not display an
-unrelated S3 export-configuration warning. `/v1/prices` waits only for price sync.
-
-After initialization, each source polls independently, with at most four scans
-and four object downloads in flight across the service. Replay checks query only
-the current S3 listing page (up to 1,000 object keys), avoiding one full-history Go
-map per source. Decoded batches contain at most 64 objects / 4MiB of source data
-(one larger object may exceed that byte target, subject to the 32MiB object limit).
-These are bounded batches, not a 50MiB memory cap for the entire service. Newly discovered
-objects are imported before the next listing page; every page is still scanned
-so late arrivals cannot be skipped. Fact/object checkpoints remain atomic and
-idempotent. A large source archive does not delay another source's next poll.
-Analytics import diagnostics are scoped to the selected source and include
-`scanning`, scan start/completion, pages, listed objects and known pending objects.
-An active scan with zero discovered pending objects is not reported as caught up.
-Freshness warnings describe import lag without asserting an S3 export failure.
-
-### 请求追踪
-
-“请求追踪”按 Request ID（也接受已采集的 Trace ID）精确查找各来源的网关事实，显示入口、路由选择/跳过、实际渠道派发、重试结果、脱敏错误、上游响应头/首块/首字等阶段时间和最终业务结果。来源、实例及请求 ID 分开关联；同一实例重复使用请求 ID 时明确标记歧义，不拼接成一次请求。无需选择时间范围，也不会用当前渠道成功率代替最终请求状态。
-
-读取接口为管理员认证的 `GET /v1/request-trace?request_id=...&source_id=...`。索引查找与日常统计分离；新增 `trace` 事件不进入次数、成功率、Token 或消费汇总。新网关通过现有异步 S3 队列导出诊断事件，响应体观察保持字节、状态、帧和 trailers；原始请求体、响应正文及凭据不导出。错误仅保留经过筛选脱敏的 code/type/message。控制台保留 `transport_timing`、终止原因等字段，旧版本检查点可恢复，旧事实缺少的入口时间和错误原文不会被伪造或自动补齐。HTTP 200、响应头已提交和响应体传输结束与模型成功分别展示。事实异步采集可能有延迟；没有记录也不能证明请求从未进入网关。
-
-Checkpoint restoration retries transient storage, timeout and interrupted-download
-failures at most three times, with a five-minute deadline per attempt and backoff
-of two then four seconds. Missing, incompatible, corrupt or access-denied snapshots
-fall back directly to raw facts. Restoration applies all history tables atomically;
-failed attempts preserve the existing cache and never restore operator settings.
-Logs report operation, stage, error class, attempt, duration and retry decision,
-without raw SDK errors, URLs or credentials. `/v1/status` exposes analytics readiness,
-startup phase and the last restore failure. Shutdown cancels restoration/backoff
-and drains import, checkpoint and worker goroutines before closing databases.
-Query checkpoints are derived caches; the fact and state buckets are authoritative.
+One-time migration is explicit: `scripts/migrate-postgresql.py` reads and verifies
+legacy immutable objects; `analytics-api migrate-postgresql` prepares the schema,
+imports validated prices/facts and records a validated activation phase. The normal
+image includes no legacy reader. A three-way final price merge preserves edits
+made in either release and blocks completion on conflicts. Legacy bucket settings
+are ignored at runtime except for an activation guard preventing an unprepared
+upgrade. See [the cutover design](docs/postgresql-only-storage.md).
 
 ## Build and verify
 
@@ -365,13 +313,13 @@ sub2api 检测的「模型匹配」比较请求模型与成功流式 `response.c
 配置文件渠道保持原名及原有配置，不获得临时渠道的编辑/删除入口；自动关联不修改 uni-api 路由、来源密钥或站点业务密钥。读取上游账单继续复用站点登录会话和现有自动刷新机制。
 
 
-价格设置可为每个模型保存 `sale_percent`（原价的百分比）。GPT 默认 2.5%，Claude / Gemini 默认 15%，其他模型默认 2.5%；支持小数、0% 和高于 100% 的比例。后缀模型沿用最长匹配的基础模型设置。原价估算消费保持原口径，利润和利润率使用该模型的当前售卖比例；保存后会刷新渠道统计。配置与现有价格一起保存至 S3，旧价格文档省略此字段时使用默认值；旧客户端省略该字段更新价格时保留已保存比例。
+价格设置可为每个模型保存 `sale_percent`（原价的百分比）。GPT 默认 2.5%，Claude / Gemini 默认 15%，其他模型默认 2.5%；支持小数、0% 和高于 100% 的比例。后缀模型沿用最长匹配的基础模型设置。原价估算消费保持原口径，利润和利润率使用该模型的当前售卖比例；保存后会刷新渠道统计。配置与现有价格一起保存至 PostgreSQL，旧价格文档省略此字段时使用默认值；旧客户端省略该字段更新价格时保留已保存比例。
 
 渠道观测的「渠道名＋倍率」使用该上游模型最近已核对检测账单的 `actual_cost / total_cost`，例如公布 0.3、账单实际 3 时显示 `codex5-3`。差异说明只放在渠道管理的倍率列；公布倍率继续保留，实际倍率不同则标注「倍率不一致 · 公布 0.3」。观测页不附加此文案，也不修改网关 provider 标识、路由、价格配置或实际账单。模型映射按上游模型匹配；缺少可用账单、账单原价为零、非 token 计费或多个绑定分组倍率不一致时，观测名称显示未知倍率，不拿其他模型的倍率代替。管理页尚未核对时明确显示「公布 · 待核对」；查看全部模型时可显示已核对倍率范围，筛选和排序取其中最高值。倍率为最近账单样本，详情提示样本时间，不承诺未来请求倍率固定。
 
 渠道管理的倍率筛选支持「倍率不一致」：选定模型时，只保留该模型已核对倍率与公布倍率不同的渠道；查看全部模型时，保留任一模型存在此差异的渠道。尚未核对的倍率不算差异，筛选会随用户偏好保存，并用于优化预览的模型范围。
 
-发布顺序：先更新 analytics-api 消费者以支持 additive `billing` 事实，再更新网关生产者。账单事实不进入请求/尝试/token 汇总；DuckDB 快照使用 cache-v5 物理文件，兼容读取 cache-v4/cache-v3/cache-v2 Parquet 快照。物理文件校验引擎版本及 schema，避免不兼容恢复。升级前历史缺少上游标识，无法事后精确拆分。
+发布顺序：先更新 analytics-api 消费者以支持 additive `billing` 事实，再更新网关生产者。账单事实不进入请求/尝试/token 汇总；请求事实和增量汇总提交到 PostgreSQL；发布不恢复历史快照。升级前历史缺少上游标识，无法事后精确拆分。
 
 账号级账单同步状态存入 `console_sub_account_spend_cache`，多个 Key/渠道/筛选窗口共用覆盖范围。升级只从旧 Key 游标合并需要同步的时间范围，不能把任一 Key 的完整覆盖当成账号完整覆盖；旧明细及游标表保留以兼容滚动更新。后台 `sub_account_spend_page` 日志记录账号、分页大小、返回行数及完成状态，不记录令牌或请求内容。
 
@@ -380,7 +328,7 @@ sub2api 检测的「模型匹配」比较请求模型与成功流式 `response.c
 
 余额不足拒绝的费用归属：网关仅增加 `upstream_error_sha256`（已缓冲 HTTP 错误正文的 SHA-256），不改变请求、重试或转发。控制台仅在站点账号/业务 Key 唯一关联、HTTP 403 且指纹严格匹配 sub2api 的鉴权余额检查或模型调用前余额资格检查响应时，将该次请求计为已确认零费用；`confirmed_unbilled_attempts` 与真实账单数分开记录。真实账单优先，未知 403、流内失败、超时、缺失账单、充值后的余额都不能单独作为零费用依据。
 
-旧版事实可通过 `console_billing_error_evidence` 补充从保留网关日志恢复的错误指纹：必须记录来源、事件/请求/尝试/渠道、HTTP 状态、原日志摘要和取证来源，查询时逐项匹配。该表不保存费用或错误正文，也不修改不可变 S3 事实。缺少原始证据的历史保持未知。
+旧版事实可通过 `console_billing_error_evidence` 补充从保留网关日志恢复的错误指纹：必须记录来源、事件/请求/尝试/渠道、HTTP 状态、原日志摘要和取证来源，查询时逐项匹配。该表不保存费用或错误正文，也不修改已保存的请求事实。缺少原始证据的历史保持未知。
 
 
 渠道观测先通过 `/v1/analytics` 读取统计，再用返回的 `from/to` 独立读取当前模型的 `/v1/channel-spend`。账单核对慢或失败只影响消费/利润列，不阻断渠道列表、成功率和延迟显示；刷新统计时取消旧账单查询，释放分析执行槽。切换模型复用同一范围的统计，只更新账单筛选。补账继续使用固定时间范围，不把不同截止时间的统计与消费混算；未核对费用保持未知，不能当作零。旧版 `include_spend=true` 合并接口保留兼容。
@@ -431,7 +379,7 @@ configuration quota. Login retains its 32 KiB budget. The gateway's general
 transport/decompression budget (`REQUEST_MAX_BODY_BYTES`, default 128 MiB) is
 independent and still applies; operators can adjust it to their resources.
 
-Automation aggregates full windows in DuckDB under its memory/spill budget;
+Automation aggregates fully covered retained windows in PostgreSQL;
 latency quantiles retain the exact order-statistic definition. Checkpoints and
 price uploads stage on disk and preserve checksum/schema/ETag validation and
 last-known-good state on failure. Available disk, provider object-upload limits,
@@ -439,7 +387,7 @@ HTTP deadlines and deployment resources still apply; removing a count quota
 is not a guarantee of unlimited capacity or completion within one request.
 
 
-除 Haiku 5.5 自动按 100k 分档外，价格设置每行提供“超过272k加价”开关，默认关闭，随该行价格独立保存。开启后按单次请求的总输入 token（包括缓存）严格大于 272,000 判断，对该请求全部普通输入、缓存读取、5 分钟及 1 小时缓存写入分别按各自单价 ×2、全部输出按输出单价 ×1.5 估算；关闭写入计费时仍不计缓存写入费用。后缀模型继承基础模型设置。估算消费及由其计算的利润使用当前设置，适用于已有历史记录；上游实际消费仍使用账单。 映射模型按历史请求中记录的 `upstream_model` 选择单价、售卖比例、缓存写入和长上下文开关（如对外 `gpt-5.4` 实际调用 `gpt-5.5`，使用 `gpt-5.5` 定价）。旧记录未保存上游模型时才回退到对外请求名；已知上游无已确认价格时不借用别名价格。渠道统计返回 `pricing_model` 标明计价模型，当前路由修改不会重写历史模型归属。判断读取过滤范围内的逐请求 token，不使用窗口汇总输入量，多个短请求不会被误加价。设置独立持久化至 S3，旧价格文档默认关闭，旧客户端省略字段时保留已有选择。
+除 Haiku 5.5 自动按 100k 分档外，价格设置每行提供“超过272k加价”开关，默认关闭，随该行价格独立保存。开启后按单次请求的总输入 token（包括缓存）严格大于 272,000 判断，对该请求全部普通输入、缓存读取、5 分钟及 1 小时缓存写入分别按各自单价 ×2、全部输出按输出单价 ×1.5 估算；关闭写入计费时仍不计缓存写入费用。后缀模型继承基础模型设置。估算消费及由其计算的利润使用当前设置，适用于已有历史记录；上游实际消费仍使用账单。 映射模型按历史请求中记录的 `upstream_model` 选择单价、售卖比例、缓存写入和长上下文开关（如对外 `gpt-5.4` 实际调用 `gpt-5.5`，使用 `gpt-5.5` 定价）。旧记录未保存上游模型时才回退到对外请求名；已知上游无已确认价格时不借用别名价格。渠道统计返回 `pricing_model` 标明计价模型，当前路由修改不会重写历史模型归属。判断读取过滤范围内的逐请求 token，不使用窗口汇总输入量，多个短请求不会被误加价。设置独立持久化至 PostgreSQL，旧价格文档默认关闭，旧客户端省略字段时保留已有选择。
 
 请求追踪页按尝试 ID 合并派发、尝试结果和账单事件，提供共享时间轴上的耗时条、最终状态概览与逐次尝试卡片；并发条保留重叠关系，不把它们的耗时相加。缺少入口事件时明确使用首条记录作为相对起点；未记录开始时间或最终结果时保持未知。重复请求 ID 不合并为单次重试链。渠道显示当前所属站点与倍率、分组名称，点击名称或时间条打开阶段详情抽屉，并可打开原站控制台。内部渠道、请求和尝试 ID 保留在展开详情中。名称只用当前用户的本地账号分组、来源绑定及历史请求 Key 指纹精确关联，不向网关或站点发起探测；无法关联时显示未关联渠道，不猜测名称或历史计费倍率。
 

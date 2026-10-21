@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"math"
 	"net/http/httptest"
 	"path/filepath"
@@ -32,9 +31,6 @@ func TestSalePercentDefaultsValidationAndLegacyUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = e.DB.Exec("ALTER TABLE prices DROP COLUMN sale_percent"); err != nil {
-		t.Fatal(err)
-	}
 	e.Close()
 	e, err = OpenEngine(path, Config{Timezone: "UTC"})
 	if err != nil {
@@ -55,16 +51,10 @@ func TestSalePercentDefaultsValidationAndLegacyUpgrade(t *testing.T) {
 	}
 }
 
-func TestSalePercentPersistsThroughAPIAndS3WithoutChangingReferenceCosts(t *testing.T) {
+func TestSalePercentPersistsThroughAPIAndPostgreSQLWithoutChangingReferenceCosts(t *testing.T) {
 	ctx := context.Background()
 	e := stateTestEngine(t)
-	objects := &fakeStateObjects{}
-	state := newStateStore(objects, Config{StateBucket: "settings"})
-	if err := state.sync(ctx, e); err != nil {
-		t.Fatal(err)
-	}
-	s := &Service{engine: e, state: state}
-	s.stateReady.Store(true)
+	s := &Service{engine: e}
 	save := func(model, body string, want int) {
 		t.Helper()
 		r := httptest.NewRequest("PUT", "/v1/prices/"+model, strings.NewReader(body))
@@ -81,19 +71,16 @@ func TestSalePercentPersistsThroughAPIAndS3WithoutChangingReferenceCosts(t *test
 	save("gpt-6-astra", `{"input":4,"verified":true,"sale_percent":0}`, 200)
 	save("claude-fable-5", `{"input":4,"verified":true,"sale_percent":18.75}`, 200)
 	save("gemini-3.1-pro", `{"input":4,"verified":true,"sale_percent":-1}`, 400)
-	var doc priceState
-	if err := json.Unmarshal(objects.body, &doc); err != nil {
+	stored, err := e.Prices(ctx)
+	if err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range doc.Prices {
+	for _, p := range stored {
 		if want, ok := map[string]float64{"gemini-3.1-pro": 8, "gpt-6-astra": 0, "claude-fable-5": 18.75}[p.Model]; ok && (p.SalePercent == nil || *p.SalePercent != want) {
 			t.Fatal("lost setting", p)
 		}
 	}
-	replica := stateTestEngine(t)
-	if err := newStateStore(objects, Config{StateBucket: "settings"}).sync(ctx, replica); err != nil {
-		t.Fatal(err)
-	}
+	replica := replicaTestEngine(t, e)
 	// Stale suffix overrides cannot supersede the base model's sale percentage.
 	suffixSale := 99.0
 	if err := replica.SavePrice(ctx, Price{Model: "gemini-3.1-pro-search", Input: 999, SalePercent: &suffixSale, Verified: true}); err != nil {

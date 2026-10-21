@@ -3,7 +3,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-ENV CGO_ENABLED=1
+ENV CGO_ENABLED=0
 RUN go build -trimpath -ldflags='-s -w' -o /out/analytics-api .
 
 FROM node:24-bookworm-slim

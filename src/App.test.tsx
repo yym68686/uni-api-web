@@ -706,6 +706,6 @@ it("retains last successful rows during warmup but never reuses them for a diffe
 it("shows incomplete-history warning for a verified snapshot during its background audit", async () => {
   const { user } = setup({ auditPending: true });
   await connect(user);
-  expect(await screen.findByText(/已加载经校验的历史快照/)).toBeVisible();
+  expect(await screen.findByText(/来源上报尚未追平或存在记录缺口/)).toBeVisible();
   expect(screen.getByRole("table")).toBeVisible();
 });

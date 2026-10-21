@@ -3,14 +3,9 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
-	"strings"
-
-	duckdb "github.com/duckdb/duckdb-go/v2"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// Driver messages can contain SQL, paths and fact contents. Log only the
-// driver's typed category; do not copy its message into telemetry.
 func databaseErrorClass(err error) string {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return "deadline_exceeded"
@@ -18,30 +13,24 @@ func databaseErrorClass(err error) string {
 	if errors.Is(err, context.Canceled) {
 		return "canceled"
 	}
-	var dbErr *duckdb.Error
-	if !errors.As(err, &dbErr) {
+	var pg *pgconn.PgError
+	if !errors.As(err, &pg) {
 		return ""
 	}
-	// A commit can wrap buffer exhaustion as TransactionContext rather than OOM.
-	if dbErr.Type == duckdb.ErrorTypeTransaction && strings.Contains(dbErr.Msg, "failed to pin block of size") {
+	switch pg.Code {
+	case "53200":
 		return "database_out_of_memory"
-	}
-	switch dbErr.Type {
-	case duckdb.ErrorTypeOutOfMemory:
-		return "database_out_of_memory"
-	case duckdb.ErrorTypeConstraint:
-		return "database_constraint"
-	case duckdb.ErrorTypeTransaction:
+	case "53100":
+		return "database_disk_full"
+	case "57014":
+		return "database_query_canceled"
+	case "55P03":
+		return "database_lock_timeout"
+	case "40001", "40P01":
 		return "database_transaction"
-	case duckdb.ErrorTypeIO:
-		return "database_io"
-	case duckdb.ErrorTypeFatal:
-		return "database_fatal"
-	case duckdb.ErrorTypeInternal:
-		return "database_internal"
-	case duckdb.ErrorTypeBinder:
-		return "database_binder"
+	case "23505", "23503", "23514":
+		return "database_constraint"
 	default:
-		return fmt.Sprintf("database_type_%d", dbErr.Type)
+		return "database_error"
 	}
 }

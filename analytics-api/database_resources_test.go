@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -36,20 +35,7 @@ func TestSpendGateHonorsCancellationAndReleases(t *testing.T) {
 }
 
 func TestDatabaseResourceSettingsAndDiagnostics(t *testing.T) {
-	dir := t.TempDir()
-	e, err := OpenEngine(filepath.Join(dir, "history.duckdb"), Config{Timezone: "UTC", DataDir: dir, DatabaseMemoryLimitMB: 128, DatabaseThreads: 1, DatabaseTempDir: filepath.Join(dir, "spill's"), DatabaseTempLimitMB: 256})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer e.Close()
-	var threads int
-	var temp string
-	if err = e.DB.QueryRow("SELECT current_setting('threads'),current_setting('temp_directory')").Scan(&threads, &temp); err != nil {
-		t.Fatal(err)
-	}
-	if threads != 1 || temp != filepath.Join(dir, "spill's") {
-		t.Fatal(threads, temp)
-	}
+	e := stateTestEngine(t)
 	o := e.observeOperation("import_batch")
 	o.stage("day_rollups")
 	e.operationsMu.Lock()

@@ -33,14 +33,14 @@ func (s *Service) analyticsWithSpend(w http.ResponseWriter, r *http.Request, all
 	var metricsErr, spendErr error
 	var metricsMS, spendMS float64
 	// Both plans use blocking aggregates. Run them sequentially so one page
-	// load cannot double DuckDB's working set; keep the same cutoff and deadline.
+	// load cannot double query working sets; keep the same cutoff and deadline.
 	t := time.Now()
 	result, metricsErr = s.engine.Query(ctx, f)
 	metricsMS = float64(time.Since(t).Microseconds()) / 1000
 	// Preserve the previous response contract: a metrics error is still
 	// reported to the caller, but the account-scoped spend attempt is made when
 	// its request context is still usable. Running the two plans sequentially
-	// bounds their combined DuckDB working set without hiding spend diagnostics.
+	// bounds their combined database work without hiding spend diagnostics.
 	t = time.Now()
 	spendFilter := f
 	if q.Has("spend_model") {

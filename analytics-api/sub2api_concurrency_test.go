@@ -116,12 +116,11 @@ func testSubConcurrentAccounts(t *testing.T, interrupt bool) {
 	url, _ := url.Parse(upstream.URL)
 	subHTTP = &http.Client{Transport: subTestTransport{url, http.DefaultTransport}}
 	defer func() { subHTTP = oldHTTP }()
-	service, err := NewService(stateTestEngine(t), Config{Upstream: "https://fixture.example", RequireInitialImport: true})
+	service, err := NewService(stateTestEngine(t), Config{Upstream: "https://fixture.example"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	service.control = store
-	restoreStarted := blockCheckpointUntilCanceled(t, service)
 	token, _ := store.newSession(context.Background(), owner)
 	r := httptest.NewRequest("POST", "/v1/sub2api/accounts/sync", strings.NewReader(mustJSON(map[string]any{"models": subModels})))
 	r.Header.Set("Content-Type", "application/json")
@@ -141,14 +140,9 @@ func testSubConcurrentAccounts(t *testing.T, interrupt bool) {
 	workers.Add(1)
 	go func() { defer workers.Done(); service.subWorkerLoop(ctx) }()
 	defer func() { cancel(); unblockPanel(); unblockProbes(); workers.Wait() }()
-	select {
-	case <-restoreStarted:
-	case <-time.After(3 * time.Second):
-		t.Fatal("checkpoint restore did not start")
-	}
 	// The real startup path must serve authenticated control endpoints while
-	// blocking historical analytics, even with every detection worker busy.
-	for path, code := range map[string]int{"/v1/auth/me": 200, "/v1/sources": 200, "/v1/analytics": 503, "/healthz": 200} {
+	// serving historical analytics, even with every detection worker busy.
+	for path, code := range map[string]int{"/v1/auth/me": 200, "/v1/sources": 200, "/v1/analytics": 200, "/healthz": 200} {
 		r := httptest.NewRequest("GET", path, nil)
 		r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
 		w := httptest.NewRecorder()

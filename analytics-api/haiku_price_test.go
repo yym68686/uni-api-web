@@ -42,15 +42,7 @@ func TestHaikuPromptTierPerRequestAndMappedHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The tier applies to restored facts too, without changing checkpoint format.
-	objects := &fakeStateObjects{}
-	store := newCheckpointStore(objects, Config{StateBucket: "test", Timezone: "UTC"})
-	if err := store.save(ctx, e); err != nil {
-		t.Fatal(err)
-	}
-	restored := stateTestEngine(t)
-	if ok, err := store.restore(ctx, restored); err != nil || !ok {
-		t.Fatal(ok, err)
-	}
+	restored := replicaTestEngine(t, e)
 	for _, filter := range []QueryFilter{
 		{Range: "all"},
 		{Range: "24h", SourceID: "s1", Model: "claude-haiku-5-5", KeyID: "key", Endpoint: "/v1/messages", Stream: "true"},

@@ -12,7 +12,6 @@ import (
 	"time"
 )
 
-
 type channelSettingChange struct {
 	DeleteCopy  bool           `json:"delete_copy,omitempty"`
 	CopyToKey   string         `json:"copy_to_key,omitempty"`

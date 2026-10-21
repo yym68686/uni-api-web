@@ -90,7 +90,7 @@ func (e *Engine) RequestLogs(ctx context.Context, f RequestLogFilter) (RequestLo
 	out.From, out.To = start.UnixMilli(), now.UnixMilli()
 	where, args := sourceWhere([]string{"kind='request'", "at_ms>=? AND at_ms<=?"}, []any{out.From, out.To}, f.QueryFilter)
 	// Historical facets stay available when keys/models are removed from live routes.
-	models, err := e.DB.QueryContext(ctx, `SELECT DISTINCT coalesce(source_id,''),coalesce(key_id,''),coalesce(model,''),coalesce(endpoint,'') FROM facts WHERE `+strings.Join(where, " AND ")+` ORDER BY source_id,key_id,model,endpoint`, args...)
+	models, err := e.DB.QueryContext(ctx, `SELECT DISTINCT coalesce(source_id,'') AS source_id,coalesce(key_id,'') AS key_id,coalesce(model,'') AS model,coalesce(endpoint,'') AS endpoint FROM facts WHERE `+strings.Join(where, " AND ")+` ORDER BY source_id,key_id,model,endpoint`, args...)
 	if err != nil {
 		return out, err
 	}
@@ -143,10 +143,10 @@ func (e *Engine) RequestLogs(ctx context.Context, f RequestLogFilter) (RequestLo
 	if f.Balance == "low" {
 		where = append(where, `(contains(lower(coalesce(failure_reason,'')),'balance') OR contains(lower(coalesce(outcome,'')),'balance') OR contains(lower(coalesce(failure_reason,'')),'quota'))`)
 	}
-	sortExpr := "-at_ms::DOUBLE"
+	sortExpr := "-at_ms::DOUBLE PRECISION"
 	switch f.Sort {
 	case "oldest":
-		sortExpr = "at_ms::DOUBLE"
+		sortExpr = "at_ms::DOUBLE PRECISION"
 	case "success":
 		sortExpr = "CASE result WHEN 'success' THEN 0 WHEN 'failed' THEN 1 ELSE 2 END"
 	case "latency":

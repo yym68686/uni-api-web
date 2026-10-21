@@ -9,7 +9,7 @@ import "strings"
 func withLongContextUsage(q string, args []any, where []string, startMS, endMS int64, prices []Price) (string, []any) {
 	modelFilters := []string{}
 	longArgs := []any{startMS, endMS/60000*60000 + 60000}
-	// The first predicate and first six args describe the disjoint day/minute
+	// The first predicate and first six args describe the disjoint hour/minute
 	// window. Its fact equivalent has the same full-minute boundary semantics.
 	longArgs = append(longArgs, args[6:]...)
 	for _, p := range prices {

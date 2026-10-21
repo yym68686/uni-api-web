@@ -13,8 +13,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
 type Service struct {
@@ -24,32 +22,14 @@ type Service struct {
 	cfg               Config
 	active            atomic.Int64
 	lastCollect       atomic.Int64
-	remaining         atomic.Int64
 	importFailures    atomic.Uint64
-	importError       atomic.Value
 	loginMu           sync.Mutex
 	loginWindow       time.Time
 	loginAttempts     int
 	cacheMu           sync.Mutex
 	cache             map[string]cachedAnalytics
-	state             *stateStore
-	stateReady        atomic.Bool
-	stateError        atomic.Value
-	checkpoints       *checkpointStore
-	checkpointWorkers sync.WaitGroup
 	historyLoading    atomic.Bool
-	auditPending      atomic.Bool
 	startup           atomic.Pointer[analyticsStartup]
-	checkpointActive  atomic.Bool
-	lastCheckpoint    atomic.Int64
-	checkpointError   atomic.Value
-	factClient        *s3.Client
-	factDownloadSlots chan struct{}
-	importMu          sync.Mutex
-	sourceImports     map[string]*Service
-	listPages         atomic.Int64
-	listedObjects     atomic.Int64
-	scanStarted       atomic.Int64
 	control           *controlStore
 	keyDirectories    keyDirectoryCache
 	summaries         summaryHistory
@@ -87,6 +67,7 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /readyz", s.ready)
 	mux.HandleFunc("GET /v1/runtime-restore/{id}", s.bootstrapControls)
+	mux.HandleFunc("POST /v1/runtime-facts/{id}", s.ingestFacts)
 	control := s.controlHandler()
 	mux.Handle("/v1/auth/", control)
 	mux.Handle("/v1/sources", control)
@@ -112,25 +93,35 @@ func (s *Service) Handler() http.Handler {
 	return observeConsoleRequests(s.authenticate(mux))
 }
 func (s *Service) health(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"status": "ok", "revision": s.engine.Revision.Load(), "last_collect_ms": s.lastCollect.Load(), "state_ready": s.state == nil || s.stateReady.Load(), "analytics_ready": s.analyticsReady()})
+	writeJSON(w, 200, map[string]any{"status": "ok", "revision": s.engine.Revision.Load(), "last_collect_ms": s.lastCollect.Load(), "state_ready": true, "analytics_ready": s.analyticsReady()})
 }
 func (s *Service) ready(w http.ResponseWriter, r *http.Request) {
 	if !s.analyticsReady() {
 		s.initializing(w)
 		return
 	}
+	ctx, cancel := context.WithTimeout(r.Context(), time.Second)
+	defer cancel()
+	if err := s.engine.DB.PingContext(ctx); err != nil {
+		writeJSON(w, 503, map[string]string{"code": "database_unavailable"})
+		return
+	}
 	s.health(w, r)
 }
-func (s *Service) analyticsReady() bool {
-	return !s.historyLoading.Load() && (!s.cfg.RequireInitialImport || s.lastCollect.Load() > 0) && (s.state == nil || s.stateReady.Load())
-}
+func (s *Service) analyticsReady() bool { return !s.historyLoading.Load() }
 func (s *Service) initializing(w http.ResponseWriter) {
 	w.Header().Set("Retry-After", "5")
 	writeJSON(w, http.StatusServiceUnavailable, map[string]any{"code": "analytics_initializing", "error": "historical analytics initializing; retry shortly"})
 }
 func (s *Service) status(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"status": "ok", "revision": s.engine.Revision.Load(), "active_ingest": s.active.Load(), "last_collect_ms": s.lastCollect.Load(), "remaining_objects": s.remaining.Load(), "import_failures": s.importFailures.Load(), "import_error": s.importError.Load(), "state_ready": s.state == nil || s.stateReady.Load(), "state_error": s.stateError.Load(), "checkpoint_active": s.checkpointActive.Load(), "checkpoint_error": s.checkpointError.Load(), "analytics_ready": s.analyticsReady(), "startup": s.startup.Load()})
+	var size, limit, high, floor, evicted int64
+	if err := s.engine.DB.QueryRowContext(r.Context(), "SELECT pg_database_size(current_database()),database_limit_bytes,ingest_limit_bytes,evicted_before_ms,evicted_events FROM storage_state WHERE singleton").Scan(&size, &limit, &high, &floor, &evicted); err != nil {
+		http.Error(w, "storage status unavailable", 503)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"status": "ok", "backend": "postgresql", "revision": s.engine.Revision.Load(), "active_ingest": s.active.Load(), "last_collect_ms": s.lastCollect.Load(), "import_failures": s.importFailures.Load(), "state_ready": true, "analytics_ready": s.analyticsReady(), "startup": s.startup.Load(), "storage": map[string]any{"database_bytes": size, "limit_bytes": limit, "ingest_limit_bytes": high, "evicted_before_ms": floor, "evicted_events": evicted}})
 }
+
 func (s *Service) analytics(w http.ResponseWriter, r *http.Request) {
 	if !s.analyticsReady() {
 		s.initializing(w)
@@ -151,7 +142,11 @@ func (s *Service) analytics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key := q.Encode() + "|" + strings.Join(allowed, ",")
-	rev := s.engine.Revision.Load()
+	rev, revisionErr := s.engine.currentRevision(r.Context())
+	if revisionErr != nil {
+		http.Error(w, "analytics unavailable", 503)
+		return
+	}
 	now := time.Now()
 	s.cacheMu.Lock()
 	if item, ok := s.cache[key]; ok && item.revision == rev && now.Before(item.expires) {
@@ -201,10 +196,6 @@ func (s *Service) writeAnalyticsBody(w http.ResponseWriter, r *http.Request, bod
 	_, _ = w.Write(body)
 }
 func (s *Service) prices(w http.ResponseWriter, r *http.Request) {
-	if s.state != nil && !s.stateReady.Load() {
-		s.initializing(w)
-		return
-	}
 	out, err := s.engine.Prices(r.Context())
 	if err != nil {
 		http.Error(w, "prices unavailable", 503)
@@ -225,14 +216,7 @@ func (s *Service) savePrice(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid price", 400)
 		return
 	}
-	var err error
-	if s.state != nil {
-		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
-		defer cancel()
-		err = s.state.save(ctx, s.engine, p)
-	} else {
-		err = s.engine.SavePrice(r.Context(), p)
-	}
+	err := s.engine.SavePrice(r.Context(), p)
 	if err != nil {
 		status := http.StatusServiceUnavailable
 		message := "price storage unavailable; refresh before retrying"
@@ -246,32 +230,8 @@ func (s *Service) savePrice(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"price": p})
 }
 
-// Optional query warming follows the first complete import; it never gates
-// the HTTP listener, configuration recovery, detection workers or readiness.
-func (s *Service) warmAnalytics(ctx context.Context) {
-	for _, name := range []string{"5m", "15m", "1h", "24h", "7d", "30d", "today", "week", "month", "year", "all"} {
-		callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		_, _ = s.engine.Query(callCtx, QueryFilter{Range: name, Timeseries: true})
-		cancel()
-		if ctx.Err() != nil {
-			return
-		}
-	}
-}
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
-}
-func (s *Service) Collect(ctx context.Context) {
-	ticker := time.NewTicker(s.cfg.Poll)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			s.lastCollect.Store(time.Now().UnixMilli())
-		}
-	}
 }

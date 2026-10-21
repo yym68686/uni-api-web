@@ -16,12 +16,13 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
 	"golang.org/x/crypto/bcrypt"
 )
 
-// PostgreSQL stores mutable account/source state. DuckDB remains a rebuildable
-// cache. No platform key or S3 secret is returned to the browser.
+// PostgreSQL owns mutable account/source state. Credentials remain encrypted
+// and are never returned to the browser.
 type controlStore struct {
 	db  *sql.DB
 	key []byte
@@ -54,10 +55,14 @@ func newControlStore(dsn, master string) (*controlStore, error) {
 		return nil, errors.New("database URL and a master key of at least 32 characters are required")
 	}
 	sum := sha256.Sum256([]byte(master))
-	db, err := sql.Open("pgx", dsn)
+	pc, err := pgx.ParseConfig(dsn)
 	if err != nil {
-		return nil, err
+		return nil, errors.New("invalid control database configuration")
 	}
+	pc.RuntimeParams["application_name"] = "uni-api-control"
+	pc.RuntimeParams["temp_file_limit"] = "65536"
+	pc.RuntimeParams["work_mem"] = "4096"
+	db := stdlib.OpenDB(*pc)
 	db.SetMaxOpenConns(8)
 	db.SetMaxIdleConns(4)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -209,10 +214,11 @@ func (s *controlStore) source(ctx context.Context, id string) (controlSource, er
 	}
 	if storage != "" {
 		raw, e := s.decrypt(storage)
-		if e != nil {
-			return x, e
+		if e == nil {
+			// Legacy storage metadata is retained for rollback only. Its
+			// decryption must never gate source access or PostgreSQL ingestion.
+			_ = json.Unmarshal([]byte(raw), &x.Storage)
 		}
-		err = json.Unmarshal([]byte(raw), &x.Storage)
 	}
 	x.HasStorage = storage != "" || id == "primary"
 	x.HasConfigKey = configKey != ""
@@ -241,6 +247,15 @@ func (s *controlStore) saveSource(ctx context.Context, x controlSource, bootstra
 		storage, err = s.encrypt(string(raw))
 		if err != nil {
 			return sourceView{}, err
+		}
+	} else if !bootstrap && x.ID != "" {
+		// Legacy archive credentials are inert now. Preserve their encrypted
+		// value on ordinary edits while old replicas may still be rolling back.
+		var legacy sql.NullString
+		if e := s.db.QueryRowContext(ctx, `SELECT encrypted_storage FROM console_sources WHERE id=$1`, x.ID).Scan(&legacy); e == nil {
+			storage = legacy.String
+		} else if !errors.Is(e, sql.ErrNoRows) {
+			return sourceView{}, e
 		}
 	}
 	if x.ID == "" {

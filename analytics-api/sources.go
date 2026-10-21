@@ -12,9 +12,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
 func (s *Service) allowLogin() bool {
@@ -149,28 +146,6 @@ func (s *Service) saveSource(w http.ResponseWriter, r *http.Request) {
 		}
 		if _, err := configuredProviders(r.Context(), in); err != nil {
 			http.Error(w, "配置读取密钥验证失败，请使用此来源已有的管理员密钥", 400)
-			return
-		}
-	}
-	if in.Storage.Bucket != "" {
-		if in.Storage.AccessKey == "" || in.Storage.SecretKey == "" {
-			http.Error(w, "S3 read credentials required", 400)
-			return
-		}
-		if in.Storage.Prefix == "" {
-			in.Storage.Prefix = "uni-api-facts/v1/"
-		}
-		in.Storage.Endpoint, e = validateSourceURL(in.Storage.Endpoint)
-		if e != nil {
-			http.Error(w, "invalid S3 endpoint", 400)
-			return
-		}
-		client, e := newObjectClient(r.Context(), in.Storage.Endpoint, in.Storage.AccessKey, in.Storage.SecretKey, 10*time.Second)
-		if e == nil {
-			_, e = client.ListObjectsV2(r.Context(), &s3.ListObjectsV2Input{Bucket: aws.String(in.Storage.Bucket), Prefix: aws.String(in.Storage.Prefix), MaxKeys: aws.Int32(1)})
-		}
-		if e != nil {
-			http.Error(w, "S3 read validation failed", 400)
 			return
 		}
 	}

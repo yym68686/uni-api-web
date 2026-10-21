@@ -10,22 +10,26 @@ import (
 )
 
 func TestPricePersistenceBeyondFormerSizeAndModelLimits(t *testing.T) {
-	objects := &fakeStateObjects{}
-	store := &stateStore{client: objects, bucket: "fixture", key: "prices"}
-	doc := priceState{Schema: 1}
-	for i := 0; i < 16000; i++ {
-		doc.Prices = append(doc.Prices, Price{Model: fmt.Sprintf("model-%d-", i) + strings.Repeat("m", 220), Input: 1, Output: 2, Verified: true})
-	}
-	etag, err := store.put(context.Background(), doc, "")
+	e := stateTestEngine(t)
+	ctx := context.Background()
+	tx, err := e.DB.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(objects.body) <= 4<<20 {
-		t.Fatal("fixture does not exceed old byte quota", len(objects.body))
+	defer tx.Rollback()
+	for i := 0; i < 16000; i++ {
+		_, err = tx.ExecContext(ctx, "INSERT INTO prices(model,input,output,verified) VALUES(?,?,?,?)", fmt.Sprintf("bulk-%d-", i)+strings.Repeat("m", 220), 1, 2, true)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
-	restored, got, exists, err := store.read(context.Background())
-	if err != nil || !exists || etag != got || len(restored.Prices) != len(doc.Prices) {
-		t.Fatal("incomplete persistence", len(restored.Prices), err)
+	if err = tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	other := replicaTestEngine(t, e)
+	var count int
+	if err = other.DB.QueryRow("SELECT count(*) FROM prices WHERE model LIKE 'bulk-%'").Scan(&count); err != nil || count != 16000 {
+		t.Fatal(count, err)
 	}
 }
 
@@ -34,7 +38,14 @@ func TestAutomationUsesCompleteLargeWindowAndExactQuantiles(t *testing.T) {
 	ctx := context.Background()
 	at := time.Now().Add(-time.Minute).UnixMilli()
 	const count = 200123
-	_, err := e.DB.ExecContext(ctx, `INSERT INTO facts(source_id,event_id,kind,provider,upstream_model,key_id,model,endpoint,stream,outcome,at_ms,response_created_ms) SELECT 'fixture','event-'||i,'attempt','p','u','k','m','/v1/responses',true,CASE WHEN i%10=0 THEN 'failed' ELSE 'success' END,?,i::DOUBLE FROM range(?) t(i)`, at, count)
+	tx, _ := e.DB.BeginTx(ctx, nil)
+	if err := ensureFactPartition(ctx, tx, at); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	_, err := e.DB.ExecContext(ctx, `INSERT INTO facts(source_id,event_id,kind,provider,upstream_model,key_id,model,endpoint,stream,outcome,at_ms,response_created_ms) SELECT 'fixture','event-'||i,'attempt','p','u','k','m','/v1/responses',true,CASE WHEN i%10=0 THEN 'failed' ELSE 'success' END,?,i::DOUBLE PRECISION FROM generate_series(0,?::bigint-1) t(i)`, at, count)
 	if err != nil {
 		t.Fatal(err)
 	}

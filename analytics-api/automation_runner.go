@@ -290,6 +290,10 @@ func (s *Service) runAutomation(parent context.Context, t AutomationTask) {
 		return
 	}
 	status := s.importStatus([]string{t.SourceID})
+	if !s.historyWindowAvailable(ctx, t.SourceID, t.Range) {
+		audit("skipped", "当前统计窗口包含未采集或已淘汰的请求，本次不调序", nil, nil, nil, nil)
+		return
+	}
 	lastScan, _ := status["last_scan_ms"].(int64)
 	if lastScan == 0 || time.Now().UnixMilli()-lastScan > int64(t.Policy.MaxAgeSeconds)*1000 || status["caught_up"] != true {
 		audit("skipped", "历史采集尚未追平或扫描已过期，本次不调序", nil, nil, nil, nil)
@@ -734,6 +738,10 @@ func (s *Service) applyAutomationSuggestion(w http.ResponseWriter, r *http.Reque
 	}
 	if !s.analyticsReady() || s.importStatus([]string{t.SourceID})["caught_up"] != true {
 		http.Error(w, "历史数据尚未就绪，请稍后重试", 409)
+		return
+	}
+	if !s.historyWindowAvailable(r.Context(), t.SourceID, t.Range) {
+		http.Error(w, "统计窗口包含未采集或已淘汰的请求，无法批准调序", 409)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)

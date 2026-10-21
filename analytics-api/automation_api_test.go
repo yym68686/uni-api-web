@@ -288,6 +288,9 @@ func TestAutomationScheduledRunUsesActualOrderAndPersistsDecision(t *testing.T) 
 		t.Fatal(e)
 	}
 	f.service.lastCollect.Store(now.UnixMilli())
+	if _, err := f.service.engine.DB.Exec(`INSERT INTO ingest_sources(source_id,last_received_ms,first_received_ms,last_event_ms) VALUES(?,?,?,?)`, f.source.ID, now.UnixMilli(), now.Add(-48*time.Hour).UnixMilli(), now.UnixMilli()); err != nil {
+		t.Fatal(err)
+	}
 	tasks, e := f.store.claimAutomations(context.Background())
 	if e != nil || len(tasks) != 1 {
 		t.Fatal(e, tasks)
