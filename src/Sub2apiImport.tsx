@@ -122,6 +122,7 @@ export function Sub2apiImport({
     installed.map((i) => `${i.source_id}:${i.api_key_id}`),
   );
   let partialBindings =
+    (!!imports.data?.scope_source_id && destinationSources.some(id => id !== imports.data?.scope_source_id)) ||
     imports.isPending ||
     imports.isError ||
     !!imports.data?.unavailable_sources?.length;

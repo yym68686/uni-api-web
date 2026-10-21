@@ -5,7 +5,8 @@ import { useQuery } from "@tanstack/react-query";
 import { X } from "lucide-react";
 import { ConfiguredChannelDialog } from "./ChannelRoutes";
 import { Sub2apiImport } from "./Sub2apiImport";
-import { useSubAccounts } from "./sub2apiAccounts";
+import { useSubGroupAccounts } from "./sub2apiAccounts";
+import { useChannelBindings } from "./sub2apiImports";
 import { useConsoleSources } from "./consoleSources";
 import { useSubPrices } from "./Sub2apiPricing";
 import {
@@ -24,7 +25,7 @@ import type { Channel } from "./types";
 // remain in the same dialogs used by Channel Management.
 export function ChannelModelEditor({
   row,
-  imports,
+  imports: parentImports,
   keyId,
   session,
   close,
@@ -51,6 +52,8 @@ export function ChannelModelEditor({
       }
     | null
   >(null);
+  const bindings = useChannelBindings(row.source_id || "");
+  const imports = bindings.data || bindings.isError ? bindings : parentImports;
   const installed = imports.data?.data.find(
     (item) =>
       item.source_id === row.source_id &&
@@ -58,7 +61,7 @@ export function ChannelModelEditor({
       item.kind !== "configured",
   );
   const sources = useConsoleSources(session);
-  const accounts = useSubAccounts(!!installed);
+  const accounts = useSubGroupAccounts(installed ? [installed] : [], !!installed);
   const prices = useSubPrices(session);
   const inventory = useChannelManagement(!installed);
   const routes = useQuery({
@@ -75,6 +78,7 @@ export function ChannelModelEditor({
     (source) => source === row.source_id || source === row.source_name,
   );
   const loading =
+    (bindings.isPending && !imports.data) ||
     imports.isPending ||
     sources.isPending ||
     (installed ? accounts.isPending : inventory.isPending || routes.isPending);

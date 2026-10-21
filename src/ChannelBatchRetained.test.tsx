@@ -130,7 +130,7 @@ it.each(["native", "site"])(
           });
         if (u.pathname.endsWith("/sub2api/channels"))
           return Response.json(imports);
-        if (u.pathname.endsWith("/sub2api/accounts"))
+        if (u.pathname.endsWith("/sub2api/accounts") || u.pathname.includes("/groups/"))
           return Response.json({ data: [account] });
         if (u.pathname.endsWith("/channel-routes"))
           return Response.json(routeData(u.pathname.split("/")[4]));

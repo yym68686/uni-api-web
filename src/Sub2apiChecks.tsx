@@ -785,6 +785,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   // Account headers do not contain detection results. A failed initial read
   // cannot establish an empty filter result or a safe batch selection.
   const resultsUnavailable = !query.data || !management.data;
+  const resultsRestored = query.data?.cached || management.data?.cached || configuredChecks.data?.cached;
   const resultsReadFailed = (!query.data && query.isError) || (!management.data && management.isError);
   const routeSources = query.data && management.data
     ? [...new Set([...(sources.data?.data || []).map(s=>s.id), ...management.data.data.map(c=>c.source_id)])]
@@ -959,6 +960,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
       (!target.models && pending(target.state) && !pending(target.compaction_state || "") && !pending(target.tool_use_state || ""));
   };
   const canCheck = (account: SubAccount, target: SubTarget, kind: CheckKind, configured?: ManagedChannel) => {
+    if (resultsRestored) return false;
     if ((kind === "compaction" || kind === "tool-use") && model && !isCapabilityCheckModel(model)) return false;
     const native = !account.id && configured;
     if (native ? !channelMembers(configured).length
@@ -1217,7 +1219,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
         </div>
       )}
       {query.error && <div role="alert" className="error-banner">检测结果刷新失败，已提交的后台任务不受影响。{query.error.message}<button className="button small" onClick={() => void query.refetch()}>重试读取</button></div>}
-      {query.data && (query.data.cached || query.isError) && <p className="settings-note" role="status">正在显示上次读取的检测结果；最新结果尚未确认。</p>}
+      {query.data && (query.data.cached || management.data?.cached || imports.data?.cached || configuredChecks.data?.cached || query.isError) && <p className="settings-note" role="status">正在显示上次读取的检测结果{query.data.cachedAt ? `（${time(query.data.cachedAt / 1000)}）` : ""}；正在后台更新，最新结果尚未确认。</p>}
       {configuredChecks.isError && <div role="alert" className="error-banner">已有渠道检测记录读取失败。<button className="button small" onClick={() => void configuredChecks.refetch()}>重试</button></div>}
       {management.error && <div className="error-banner" role="alert">
         {management.error.message}
@@ -1236,7 +1238,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
           <div className="sub-detection-controls" role="region" aria-label="渠道管理操作" tabIndex={0}>
             <CreateChannel sources={sources.data?.data || []} />
             <ChannelOptimization
-              disabled={!rows.length || !query.data || !management.data || !imports.data || !prices.data || !configuredChecks.data || query.isError || management.isError || imports.isError || prices.isError || configuredChecks.isError}
+              disabled={resultsRestored || !rows.length || !query.data || !management.data || !imports.data || !prices.data || !configuredChecks.data || query.isError || management.isError || imports.isError || prices.isError || configuredChecks.isError}
               snapshot={() => ({rows,accounts,inventory:management.data!.data,imports:imports.data!,routes:optimizationRoutes,checks:configuredChecks.data!.data,prices:prices.data!.data,filters})}
             />
             <label className="search-field">

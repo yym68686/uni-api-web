@@ -109,18 +109,34 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "渠道关联读取失败", 503)
 		return
 	}
-	observed, e := s.control.subObservedRates(r.Context(), owner)
-	if e != nil {
-		http.Error(w, "账单倍率读取失败", 503)
-		return
-	}
-	for index := range refs {
-		refs[index].ObservedRates = observed[qualityGroupID(refs[index].Account, refs[index].Group)]
+	bindingsOnly := summaryView(r) == "bindings"
+	if !bindingsOnly {
+		observed, err := s.control.subObservedRates(r.Context(), owner)
+		if err != nil {
+			http.Error(w, "账单倍率读取失败", 503)
+			return
+		}
+		for index := range refs {
+			refs[index].ObservedRates = observed[qualityGroupID(refs[index].Account, refs[index].Group)]
+		}
 	}
 	sources, e := s.control.listSources(r.Context())
 	if e != nil {
 		http.Error(w, "来源列表读取失败", 503)
 		return
+	}
+	if sourceID := r.URL.Query().Get("source_id"); sourceID != "" {
+		selected := sources[:0]
+		for _, source := range sources {
+			if source.ID == sourceID {
+				selected = append(selected, source)
+			}
+		}
+		sources = selected
+		if len(sources) == 0 {
+			http.Error(w, "来源不存在", http.StatusNotFound)
+			return
+		}
 	}
 	type sourceResult struct {
 		Data        []subInstalledChannel
@@ -287,6 +303,9 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 		seen[c.SourceID+"\n"+c.Provider] = true
 	}
 	for _, c := range configured {
+		if sourceID := r.URL.Query().Get("source_id"); sourceID != "" && c.SourceID != sourceID {
+			continue
+		}
 		if !seen[c.SourceID+"\n"+c.Provider] {
 			for i, source := range sources {
 				if source.ID == c.SourceID {
@@ -310,6 +329,10 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 		}
 		return data[i].KeyID+data[i].Provider < data[j].KeyID+data[j].Provider
 	})
+	if bindingsOnly {
+		writeJSON(w, 200, map[string]any{"data": data, "labels": labels, "unavailable_sources": unavailable, "scope_source_id": r.URL.Query().Get("source_id")})
+		return
+	}
 	writeJSON(w, 200, map[string]any{"data": data, "labels": labels, "multipliers": subChannelMultipliers(data, refs), "model_billing": subChannelModelRates(data, refs), "unavailable_sources": unavailable})
 }
 

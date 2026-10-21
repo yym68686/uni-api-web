@@ -93,6 +93,15 @@ function setup() {
     new Response(JSON.stringify({ data: accounts }));
   const fetchMock = vi.fn(async (input: string) => {
     const { pathname } = new URL(input, location.origin);
+    if (pathname.includes("/groups/")) {
+      const response = await readAccounts();
+      if (!response.ok) return response;
+      const data = await response.json();
+      const id = pathname.split("/accounts/")[1].split("/")[0];
+      const selected = data.data.find((a: SubAccount) => a.id === id);
+      if (!selected?.targets.length) return new Response("missing", {status:404});
+      return Response.json({data:[selected]});
+    }
     if (pathname.endsWith("/sub2api/accounts")) return readAccounts();
     const body = pathname.endsWith("/auth/me")
       ? { enabled: true, authenticated: true, username: "admin" }

@@ -1,5 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { controlRequest } from "./api";
+import { cachedControlRead } from "./cachedControlRead";
 export interface InstalledChannel {
   protocol?: string;
   engine?: string;
@@ -49,21 +50,34 @@ export function boundGroups(item: InstalledChannel | undefined) {
   ];
 }
 export interface SubImports {
+  scope_source_id?: string;
   data: InstalledChannel[];
   labels: Record<string, Record<string, string>>;
   multipliers?: Record<string, Record<string, number | null>>;
-  model_billing?: Record<string, Record<string, Record<string, {
-    name: string;
-    rate: number | null;
-    observed_at?: number;
-  }>>>;
+  model_billing?: Record<
+    string,
+    Record<
+      string,
+      Record<
+        string,
+        {
+          name: string;
+          rate: number | null;
+          observed_at?: number;
+        }
+      >
+    >
+  >;
   unavailable_sources: string[];
 }
 export function useSubImports(enabled = true) {
+  const client = useQueryClient();
   return useQuery({
     queryKey: ["sub2api-imports"],
     queryFn: ({ signal }) =>
-      controlRequest<SubImports>("/v1/sub2api/channels", { signal }),
+      cachedControlRead(client, ["sub2api-imports"], signal, () =>
+        controlRequest<SubImports>("/v1/sub2api/channels", { signal }),
+      ),
     enabled,
     retry: false,
     staleTime: 5000,
@@ -71,3 +85,20 @@ export function useSubImports(enabled = true) {
   });
 }
 export type SubImportsQuery = ReturnType<typeof useSubImports>;
+
+// Model editors need the selected source's binding/revision, not the global
+// billing-rate ledger or unrelated gateways. Saving still validates live state.
+export function useChannelBindings(sourceId: string) {
+  return useQuery({
+    queryKey: ["sub2api-imports", "bindings", sourceId],
+    queryFn: ({ signal }) =>
+      controlRequest<SubImports>(
+        "/v1/sub2api/channels?" +
+          new URLSearchParams({ source_id: sourceId, view: "bindings" }),
+        { signal },
+      ),
+    enabled: !!sourceId,
+    staleTime: 5000,
+    retry: false,
+  });
+}

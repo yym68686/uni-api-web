@@ -19,7 +19,8 @@ import { channelMembers,configuredModelChecks,configuredToolUseResult,useConfigu
 import { ChannelModelSelection, splitChannelModels, modelIsAvailable, unavailableModelChanges, retainedOnlyModels } from "./ChannelModelSelection";
 import { importModelLabel, modelIsDefaultSelected, probeHasWarning } from "./sub2apiResults";
 import { SUB_MODELS } from "./sub2apiModels";
-import {useSubAccounts} from "./sub2apiAccounts";
+import {useSubGroupAccounts} from "./sub2apiAccounts";
+import {boundGroups} from "./sub2apiImports";
 import {toolUseFailed,modelToolUse,toolUseLabels} from "./toolUse";
 import { configuredQualityResult } from "./channelManagement";
 import { ModelQualityWarning } from "./ModelQualityWarning";
@@ -230,7 +231,6 @@ export function ConfiguredChannelDialog({
   const client = useQueryClient();
   const members = channelMembers(group);
   const toolChecks = useConfiguredChecks();
-  const accounts = useSubAccounts();
   const inventory = useChannelManagement();
   const [memberId, setMemberId] = useState(members.some(m => m.source_id === initialSourceId) ? initialSourceId! : members[0].source_id);
   const member = members.find((m) => m.source_id === memberId) || members[0];
@@ -238,6 +238,7 @@ export function ConfiguredChannelDialog({
   // Hydrate from the already-loaded live inventory instead of treating it as
   // the channel definition or allowing it to hide the saved routes.
   const item = inventory.data?.data.find(m=>m.source_id===member.source_id&&m.provider===member.provider) || member;
+  const accounts = useSubGroupAccounts(boundGroups(item));
   const sources = members.map((m) => m.source_id);
   const keyDirectories = useChannelImportKeys(sources);
   const keyDirectory = keyDirectories[sources.indexOf(item.source_id)];

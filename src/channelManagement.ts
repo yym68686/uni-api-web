@@ -10,6 +10,7 @@ import type {ToolUseResult,ToolUseModel} from "./toolUse";
 import { modelChecks, groupQualityResult, probeHasWarning } from "./sub2apiResults";
 import type { SubModelCheck } from "./sub2apiResults";
 import { boundGroups } from "./sub2apiImports";
+import { cachedControlRead } from "./cachedControlRead";
 
 // Editing always uses the selected member's evidence, not another source's
 // merged summary. Credentials changed since detection invalidate old checks.
@@ -119,13 +120,13 @@ export function useConfiguredChecks() {
   type Data={data:ConfiguredCheck[];summary?:SummaryState<ConfiguredCheck>};
   return useQuery({
     queryKey: ["configured-checks"],
-    queryFn: async ({ signal }):Promise<Data> => {
+    queryFn: ({ signal }) => cachedControlRead(client, ["configured-checks"], signal, async ():Promise<Data> => {
       const previous=client.getQueryData<Data>(["configured-checks"]);
       const {summary,legacy}=await readSummary<ConfiguredCheck,Data>("/v1/channel-management/checks",previous?.summary,signal);
       if(!summary)return legacy!;
       if(summary===previous?.summary)return previous;
       return {data:summary.rows.map(row=>({...row.value,details_omitted:true})),summary};
-    },
+    }),
     staleTime:30_000,
     refetchInterval: query => query.state.data?.data.some(c => ["queued", "running"].includes(c.state)) ? 5000 : 60000,
     retry: false,
@@ -154,13 +155,14 @@ export function groupManagedChannels(
   }));
 }
 export function useChannelManagement(enabled = true) {
+  const client = useQueryClient();
   return useQuery({
     queryKey: ["channel-management"],
-    queryFn: ({ signal }) =>
+    queryFn: ({ signal }) => cachedControlRead(client, ["channel-management"], signal, () =>
       controlRequest<{ data: ManagedChannel[]; unavailable_sources: string[] }>(
         "/v1/channel-management",
         { signal },
-      ),
+      )),
     enabled,
     staleTime: 15000,
     refetchInterval: enabled ? 60000 : false,

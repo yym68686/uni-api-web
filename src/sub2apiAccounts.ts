@@ -3,6 +3,7 @@ import type { SubAccount, SubTarget } from "./Sub2apiChecks";
 import { readSummary } from "./summaryFeed";
 import type { SummaryState } from "./summaryFeed";
 import { loadSummaryCache, saveSummaryCache } from "./summaryCache";
+import { ApiError } from "./api";
 
 type AccountRow = {
   account?: SubAccount;
@@ -15,6 +16,7 @@ export type AccountData = {
   data: SubAccount[];
   summary?: SummaryState<AccountRow>;
   cached?: boolean;
+  cachedAt?: number;
   accountSummaries?: Record<string, SummaryState<AccountRow>>;
   rateSummary?: SummaryState<AccountRates>;
 };
@@ -122,6 +124,84 @@ export function summaryAccounts(
   return [...accounts.values()];
 }
 
+export function useSubGroupAccounts(
+  groups: { account_id: string; group_id: number }[],
+  enabled = true,
+) {
+  const client = useQueryClient();
+  const scope = [
+    ...new Set(
+      groups
+        .filter((g) => g.account_id && g.group_id > 0)
+        .map((g) => JSON.stringify([g.account_id, g.group_id])),
+    ),
+  ].sort();
+  const queryKey = ["sub2api", "groups", ...scope];
+  return useQuery({
+    queryKey,
+    queryFn: async ({ signal }): Promise<AccountData> => {
+      if (!scope.length) return { data: [] };
+      const previous = client.getQueryData<AccountData>(queryKey);
+      const accountSummaries: Record<string, SummaryState<AccountRow>> = {};
+      const parts: SubAccount[][] = new Array(scope.length);
+      const controller = new AbortController();
+      const combined = AbortSignal.any([signal, controller.signal]);
+      let next = 0;
+      const worker = async () => {
+        while (next < scope.length) {
+          const i = next++;
+          const [id, group] = JSON.parse(scope[i]) as [string, number];
+          let result;
+          try {
+            result = await readSummary<AccountRow, AccountData>(
+              `/v1/sub2api/accounts/${encodeURIComponent(id)}/groups/${group}/details?include_rates=0`,
+              previous?.accountSummaries?.[scope[i]], combined,
+            );
+          } catch (error) {
+            if (!(error instanceof ApiError) || error.status !== 404) throw error;
+            parts[i] = [];
+            continue;
+          }
+          const data = result.summary
+            ? summaryAccounts(result.summary)
+            : result.legacy?.data;
+          if (
+            !data ||
+            data.length !== 1 ||
+            data[0].id !== id ||
+            data[0].targets.length !== 1 ||
+            data[0].targets[0].group_id !== group
+          )
+            throw Error("分组检测结果不完整，请重新读取");
+          parts[i] = data;
+          if (result.summary) accountSummaries[scope[i]] = result.summary;
+        }
+      };
+      try {
+        await Promise.all(
+          Array.from({ length: Math.min(2, scope.length) }, worker),
+        );
+        signal.throwIfAborted();
+        const accounts = new Map<string, SubAccount>();
+        for (const a of parts.flat()) {
+          const prior = accounts.get(a.id);
+          accounts.set(a.id, {
+            ...a,
+            targets: [...(prior?.targets || []), ...a.targets],
+          });
+        }
+        return { data: [...accounts.values()], accountSummaries };
+      } finally {
+        controller.abort();
+      }
+    },
+    enabled,
+    staleTime: 15_000,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+}
+
 export function useSubAccounts(enabled = true, headersOnly = false) {
   const client = useQueryClient();
   const queryKey = headersOnly ? ["sub2api-headers"] : ["sub2api"];
@@ -139,7 +219,12 @@ export function useSubAccounts(enabled = true, headersOnly = false) {
         const summary = await loadSummaryCache<AccountRow>(user, cacheKey);
         signal.throwIfAborted();
         if (summary) {
-          previous = { data: summaryAccounts(summary), summary, cached: true };
+          previous = {
+            data: summaryAccounts(summary),
+            summary,
+            cached: true,
+            cachedAt: summary.cachedAt,
+          };
           client.setQueryData(queryKey, previous);
         }
       }

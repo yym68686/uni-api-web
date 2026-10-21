@@ -7,7 +7,7 @@ import { ChannelModels } from "./ChannelModels";
 import type { Channel } from "./types";
 import type { SubImportsQuery } from "./sub2apiImports";
 
-function setup(site = false, saveError = false) {
+function setup(site = false, saveError = false, failedGlobalImports = false) {
   const provider = site ? "sub2api-site" : "sub2api-copy-native";
   const row = {
     source_id: "do",
@@ -36,6 +36,8 @@ function setup(site = false, saveError = false) {
     isPending: false,
     refetch: vi.fn(),
   } as unknown as SubImportsQuery;
+  const bindingData = imports.data;
+  if (failedGlobalImports) Object.assign(imports, {data: undefined, error: new DOMException("signal timed out", "TimeoutError"), isError: true});
   const result = (model: string, status = "success") => ({
     model,
     checked_at: 10,
@@ -90,7 +92,7 @@ function setup(site = false, saveError = false) {
           { id: "do", name: "DigitalOcean" },
         ],
       });
-    if (p.endsWith("/sub2api/accounts"))
+    if (p.endsWith("/sub2api/accounts") || p.includes("/groups/"))
       return Response.json({
         data: site
           ? [
@@ -111,6 +113,7 @@ function setup(site = false, saveError = false) {
             ]
           : [],
       });
+    if (p.endsWith("/sub2api/channels")) return Response.json(bindingData);
     if (p.endsWith("/channel-management"))
       return inventoryFailed
         ? new Response("读取失败", { status: 503 })
@@ -254,3 +257,17 @@ for (const site of [false, true])
     expect(screen.getByRole("button", {name:/关闭添加渠道|关闭已有渠道/})).toBeEnabled();
     invalidate.mockRestore();
   });
+
+it("opens the selected editor when the global billing-enriched imports read times out", async () => {
+  const app = setup(true, false, true);
+  await app.user.click(screen.getByRole("button", {name:"编辑可用模型"}));
+  await waitFor(() => expect(screen.getByRole("button", {name:"保存更改"})).toBeEnabled());
+  expect(screen.getByRole("checkbox", {name:"available"})).toBeEnabled();
+  expect(screen.queryByText("signal timed out")).not.toBeInTheDocument();
+  const urls = app.fetchMock.mock.calls.map(([input]) => new URL(input,location.origin));
+  expect(urls.some(url => url.pathname.endsWith("/sub2api/accounts"))).toBe(false);
+  expect(urls.filter(url => url.pathname.endsWith("/sub2api/channels")).map(url => Object.fromEntries(url.searchParams)))
+    .toEqual([{source_id:"do",view:"bindings"}]);
+  expect(urls.some(url => url.pathname.endsWith("/accounts/a/groups/7/details"))).toBe(true);
+  expect(app.writes).toHaveLength(0);
+});

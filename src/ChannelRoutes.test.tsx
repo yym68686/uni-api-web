@@ -770,7 +770,7 @@ it("shows bound site Tool use failures for candidates absent from the native cha
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
     expect(init?.method || "GET").toBe("GET");
     if (input.includes("channel-options")) return Response.json({ revision: "r1", keys: [{ key_id: "key2", position: 2, prefix: "masked" }], channels: rows });
-    return Response.json({ data: input.endsWith("/sub2api/accounts") ? accounts : input.endsWith("/channel-management") ? [item] : input.endsWith("/channel-routes") ? rows : [], unavailable_keys: [], unavailable_sources: [] });
+    return Response.json({ data: (input.endsWith("/sub2api/accounts") || input.includes("/groups/")) ? accounts : input.endsWith("/channel-management") ? [item] : input.endsWith("/channel-routes") ? rows : [], unavailable_keys: [], unavailable_sources: [] });
   }));
   render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><ConfiguredChannelDialog item={item} initialEdit={rows} close={()=>{}}/></QueryClientProvider>);
   await waitFor(() => expect(screen.getByRole("checkbox", {name:"gpt-6-sol"})).toBeEnabled());

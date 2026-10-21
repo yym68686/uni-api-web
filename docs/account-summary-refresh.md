@@ -60,3 +60,35 @@ fixture checks all 115,675 model rows survive per-account reads exactly once.
 On the development machine the full response was 63.1 MB; the largest scoped
 response was 1.38 MB and took 113 ms. These measurements are not production
 latency guarantees. Very large individual accounts may require finer paging.
+
+## Editor reads and reload snapshots
+
+Model editors use `GET /v1/sub2api/channels?view=bindings&source_id=...`
+for a live binding/revision without the unrelated receipt-rate scan. The
+response declares `scope_source_id`; a source-scoped result must not imply that
+all other sources are empty. The original full endpoint remains unchanged.
+Editors and model drawers load only their bound group summaries through the
+existing detail route with the `X-Console-View: summary` header and the
+`include_rates=0` query parameter. Missing groups are represented as missing;
+other failures remain errors. They do not request all accounts first. Save-time
+revision and ownership checks are unchanged.
+
+Successful add/replace writes close the editor immediately. Query invalidation
+runs in the background; its completion is not part of the save acknowledgement.
+Failed writes keep the draft and release the close button.
+
+The complete list was around 60 MB, but the old IndexedDB cache discarded
+snapshots over 8 MB before compression. Large snapshots now use gzip with an
+8 MB stored limit and 128 MB decompressed limit. Small existing records remain
+compatible. Read-only inventory, binding, and configured-check snapshots restore
+alongside account results under the authenticated origin/user. Cached results
+are explicitly labeled with the account snapshot time and remain stale until
+live validation; they do not grant write authorization. Expiration, corrupt
+storage, cancellation, and logout retain the existing fallback to a live read.
+
+A local in-app Chromium fixture with 123,648 models / 61,077,128 JSON bytes
+restored every model in 196 ms and rendered the actual channel management table
+(first 25 rows of 768 groups) in 676 ms with all live reads still pending. These
+are authenticated cache-restoration measurements, not a claim about cold loads,
+network/login latency, or production latency. Production reload timing remains
+part of deployment acceptance.

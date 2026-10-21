@@ -135,6 +135,7 @@ it("uses one source/key selector and one table for native and imported routes, p
             { provider: "native", model: "native-only" },
           ],
         });
+      if (input.includes("/groups/")) return Response.json({data:[{...account, targets:[target]}]});
       if (input.includes("/primary/"))
         return Response.json({
           data: [

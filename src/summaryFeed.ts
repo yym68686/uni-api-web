@@ -1,6 +1,7 @@
 import { ApiError } from "./api";
 
 export interface SummaryState<T> {
+  cachedAt?: number;
   version: string;
   rows: { id: string; value: T }[];
 }

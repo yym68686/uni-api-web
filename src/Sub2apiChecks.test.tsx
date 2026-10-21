@@ -256,7 +256,7 @@ it.each(["site", "native"])("keeps configured model-card price warnings consiste
       input.endsWith("/prices") ? models.map(model => ({model,input:model === "gpt-6-luna" ? inputPrice : 1,output:10,verified:true})) :
       input.endsWith("/channel-management/checks") ? evidence === "native" ? target.models!.map(c => ({...c,source_id:"primary",provider:channel.provider,kind:"model",fingerprint:"current"})) : [] :
       input.endsWith("/channel-management") ? [channel] :
-      input.endsWith("/accounts") ? evidence === "site" ? data : [] :
+      (input.endsWith("/accounts") || input.includes("/groups/")) ? evidence === "site" ? data : [] :
       input.endsWith("/channel-routes") ? rows :
       input.endsWith("/sources") ? [{id:"primary",name:"Fugue"}] : [],
       labels:{},unavailable_keys:[],unavailable_sources:[],

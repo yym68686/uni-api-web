@@ -2,7 +2,7 @@ import { DetailLoading } from "./PageLoading";
 import { lazy, Suspense, useState } from "react";
 import { Check, Pencil } from "lucide-react";
 const ChannelModelEditor = lazy(() => import("./ChannelModelEditor").then(m=>({default:m.ChannelModelEditor})));
-import { useSubAccounts } from "./sub2apiAccounts";
+import { useSubGroupAccounts } from "./sub2apiAccounts";
 import { availableModelChecks } from "./sub2apiResults";
 import type { SubImportsQuery } from "./sub2apiImports";
 import { boundGroups } from "./sub2apiImports";
@@ -32,8 +32,8 @@ export function ChannelModels({
     (channel) =>
       channel.source_id === row.source_id && channel.provider === row.provider,
   );
-  const accounts = useSubAccounts(!!installed);
   const groups = boundGroups(installed);
+  const accounts = useSubGroupAccounts(groups, !!installed);
   const targets = groups.flatMap(group => accounts.data?.data.find(a => a.id === group.account_id)?.targets.filter(t => t.group_id === group.group_id) || []);
   const target = targets[0];
   const models = [...new Map(targets.flatMap(availableModelChecks).sort((a,b) => (a.result?.checked_at || 0) - (b.result?.checked_at || 0)).map(check => [check.model, check])).values()];

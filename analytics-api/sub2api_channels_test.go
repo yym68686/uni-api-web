@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
@@ -181,6 +183,41 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 	}
 	if strings.Contains(w.Body.String(), "secret") {
 		t.Fatal("credentials exposed")
+	}
+	// Bindings used by an editor must be independent of receipt-rate history.
+	// Lock only the isolated fixture's table and compare every binding field.
+	lock, err := store.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Rollback()
+	if _, err = lock.Exec("LOCK TABLE console_sub_usage IN ACCESS EXCLUSIVE MODE"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	r := httptest.NewRequest("GET", "/v1/sub2api/channels?view=bindings&source_id="+source, nil).WithContext(ctx)
+	r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: session})
+	fast := httptest.NewRecorder()
+	s.Handler().ServeHTTP(fast, r)
+	cancel()
+	if fast.Code != 200 {
+		t.Fatal("bindings waited for billing", fast.Code, fast.Body.String())
+	}
+	var bindingView struct {
+		Data   []subInstalledChannel        `json:"data"`
+		Labels map[string]map[string]string `json:"labels"`
+	}
+	if err := json.Unmarshal(fast.Body.Bytes(), &bindingView); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(bindingView.Data, listing.Data) || !reflect.DeepEqual(bindingView.Labels, listing.Labels) {
+		t.Fatal("binding semantics changed")
+	}
+	if strings.Contains(fast.Body.String(), "model_billing") || strings.Contains(fast.Body.String(), "multipliers") {
+		t.Fatal("bindings claimed billing evidence")
+	}
+	if err := lock.Rollback(); err != nil {
+		t.Fatal(err)
 	}
 	w = request("GET", foreign, nil)
 	json.Unmarshal(w.Body.Bytes(), &listing)
