@@ -782,6 +782,10 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   const management = useChannelManagement();
   const configuredChecks = useConfiguredChecks();
   const fingerprints = useModelFingerprints();
+  // Account headers do not contain detection results. A failed initial read
+  // cannot establish an empty filter result or a safe batch selection.
+  const resultsUnavailable = !query.data || !management.data;
+  const resultsReadFailed = (!query.data && query.isError) || (!management.data && management.isError);
   const routeSources = query.data && management.data
     ? [...new Set([...(sources.data?.data || []).map(s=>s.id), ...management.data.data.map(c=>c.source_id)])]
     : [];
@@ -1004,7 +1008,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   }
   const batchBusy = (kind: CheckKind) => eligible.some(({account, target, configured}) =>
     checkKeys(account, target, kind, configured).some(key => submittingChecks.has(key)));
-  const batchDisabled = (kind: CheckKind) => !eligible.some(({account, target, configured}) => canCheck(account, target, kind, configured));
+  const batchDisabled = (kind: CheckKind) => resultsUnavailable || !eligible.some(({account, target, configured}) => canCheck(account, target, kind, configured));
   const check = (selection: CheckSelection) => queueChecks("check", selection);
   const checkQuality = () => queueChecks("quality", eligible);
   const checkCompaction = (selection: CheckSelection = eligible) => queueChecks("compaction", selection);
@@ -1225,9 +1229,9 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
             <div className="data-title">
               <ScanLine size={19} />
               <h2>渠道管理</h2>
-              <span className="count-badge">{query.isPending || management.isPending ? "—" : rows.length}</span>
+              <span className="count-badge">{resultsUnavailable ? "—" : rows.length}</span>
             </div>
-            <span className="sub-detection-scope">{query.isPending || management.isPending ? "" : `${eligible.length} 个渠道可检测`}</span>
+            <span className="sub-detection-scope">{resultsUnavailable ? "" : `${eligible.length} 个渠道可检测`}</span>
           </div>
           <div className="sub-detection-controls" role="region" aria-label="渠道管理操作" tabIndex={0}>
             <CreateChannel sources={sources.data?.data || []} />
@@ -1531,7 +1535,11 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
             <X size={12} /> 重置筛选
           </button>
         </div>
-        {query.isPending || management.isPending ? (
+        {resultsReadFailed ? (
+          <Empty title="暂时无法读取渠道">
+            检测结果尚未完整读取，暂时无法判断是否有匹配渠道。请重试读取。
+          </Empty>
+        ) : resultsUnavailable ? (
           <TableLoading kind="checks" rows={6} />
         ) : rows.length === 0 ? (
           <Empty title="没有匹配的渠道">

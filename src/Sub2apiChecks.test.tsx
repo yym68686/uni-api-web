@@ -2559,3 +2559,33 @@ it("keeps accepted sync and live account status when result refresh times out wi
   await user.click(screen.getByRole("button",{name:"重试读取"}));
   expect(posts).toEqual(["/analytics/v1/sub2api/accounts/sync-selected"]);
 });
+
+it.each(["accounts", "channel-management"])("does not report an empty filter result when %s has never loaded", async failedEndpoint => {
+  let fail = true;
+  const methods: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+    methods.push(init?.method || "GET");
+    const headersOnly = new Headers(init?.headers).get("X-Console-View") === "accounts";
+    if (fail && input.endsWith("/" + failedEndpoint) && !headersOnly)
+      throw new DOMException("signal timed out", "TimeoutError");
+    if (input.endsWith("/accounts"))
+      return Response.json({data: fixtures().map(a => headersOnly ? {...a, targets: []} : a)});
+    return Response.json({data: [], labels: {}, unavailable_sources: []});
+  }));
+  const user = userEvent.setup();
+  mount("filter-unavailable-" + failedEndpoint);
+  await screen.findByRole("alert");
+  await user.selectOptions(screen.getByLabelText("检测模型筛选"), "gpt-5.5");
+  await user.selectOptions(screen.getByLabelText("可用性筛选"), "success");
+  expect(await screen.findByText("暂时无法读取渠道")).toBeVisible();
+  expect(screen.queryByText("没有匹配的渠道")).not.toBeInTheDocument();
+  expect(screen.queryByText("0 个渠道可检测")).not.toBeInTheDocument();
+  expect(screen.getByRole("heading", {name:"渠道管理"}).parentElement).toHaveTextContent("—");
+  expect(screen.getByRole("button", {name: /检测所选模型/})).toBeDisabled();
+  fail = false;
+  await user.click(screen.getByRole("button", {name:"刷新渠道管理"}));
+  expect(await screen.findByText("没有匹配的渠道")).toBeVisible();
+  expect(screen.queryByText("暂时无法读取渠道")).not.toBeInTheDocument();
+  expect(screen.getByText("0 个渠道可检测")).toBeVisible();
+  expect(methods.every(method => method === "GET")).toBe(true);
+});

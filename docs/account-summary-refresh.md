@@ -41,6 +41,12 @@ protocol. A backend that ignores an account filter cannot silently turn an
 unscoped multi-account response into one valid part. Reload caches store only
 complete assembled results; every part is revalidated after reload.
 
+Account metadata alone cannot establish a channel count. If the first result
+or channel-directory read fails, the page shows an unavailable state and an
+unknown count, and disables batch checks. It only reports no matching channels
+after both result sources have loaded. A failed refresh with previous results
+continues to show those results with the existing stale-data notice.
+
 After a successful mutation, account state and result reads are refreshed
 separately. A result-read error states that accepted background tasks continue;
 retry only issues GET requests. No timeout, probe concurrency, routing setting,
