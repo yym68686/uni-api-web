@@ -70,3 +70,37 @@ func TestInteractiveReadsAndSettingsDoNotWaitForHistoryCopy(t *testing.T) {
 		t.Fatal("interactive read/settings blocked on history copy mutex")
 	}
 }
+
+func TestSettingsWaitForCatalogReplacementOnly(t *testing.T) {
+	e := stateTestEngine(t)
+	ctx := context.Background()
+	e.historyCatalogMu.Lock()
+	locked := true
+	defer func() {
+		if locked {
+			e.historyCatalogMu.Unlock()
+		}
+	}()
+	if _, err := e.DB.ExecContext(ctx, "DETACH history"); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 3)
+	go func() { done <- e.SavePrice(ctx, Price{Model: "replacement", Input: 7}) }()
+	go func() { done <- e.applyPrices(ctx, []Price{{Model: "replacement", Input: 7}}) }()
+	go func() { _, err := e.readPrices(ctx, false); done <- err }()
+	select {
+	case err := <-done:
+		t.Fatalf("settings entered detached catalog: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if _, err := e.DB.ExecContext(ctx, "ATTACH "+sqlPath(e.historyPath)+" AS history"); err != nil {
+		t.Fatal(err)
+	}
+	e.historyCatalogMu.Unlock()
+	locked = false
+	for i := 0; i < 3; i++ {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+}

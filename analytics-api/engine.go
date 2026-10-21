@@ -392,13 +392,14 @@ func mergeHistogramSQL(column string) string {
 	return "[" + strings.Join(parts, ",") + "]"
 }
 func (e *Engine) Prices(ctx context.Context) ([]Price, error) {
-	// Only startup catalog replacement needs to exclude discovery reads.
-	e.historyCatalogMu.RLock()
-	defer e.historyCatalogMu.RUnlock()
 	return e.readPrices(ctx, true)
 }
 
 func (e *Engine) readPrices(ctx context.Context, discover bool) ([]Price, error) {
+	// Every connection resolves settings,history in its search path, even for
+	// settings-only statements. Exclude the short startup DETACH/ATTACH window.
+	e.historyCatalogMu.RLock()
+	defer e.historyCatalogMu.RUnlock()
 	e.settingsMu.RLock()
 	defer e.settingsMu.RUnlock()
 	q := `SELECT model,input,output,cache_read,cache_write,cache_write_1h,source,verified,effective_at,charge_cache_write,sale_percent,long_context_premium FROM prices`
@@ -473,6 +474,8 @@ func (e *Engine) SavePrice(ctx context.Context, p Price) error {
 	if err := validatePrice(p); err != nil {
 		return err
 	}
+	e.historyCatalogMu.RLock()
+	defer e.historyCatalogMu.RUnlock()
 	e.settingsMu.Lock()
 	defer e.settingsMu.Unlock()
 	// An older client omitting the new field must not erase a saved override.
