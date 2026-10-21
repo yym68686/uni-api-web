@@ -21,6 +21,7 @@ func migratePostgres(args []string) error {
 	merge := flags.Bool("merge-final-prices", false, "merge final legacy writes after old writers have drained")
 	indexes := flags.Bool("prepare-indexes", false, "prepare the existing receipt FIFO index without blocking writes")
 	facts := flags.Bool("facts-stdin", false, "import NDJSON facts from stdin")
+	analyze := flags.Bool("analyze", false, "publish parent planner statistics once after the complete backfill")
 	pace := flags.Duration("batch-delay", 0, "pause between migration batches to protect interactive work")
 	phase := flags.String("phase", "", "set prepared after migration validation")
 	if err := flags.Parse(args); err != nil {
@@ -129,12 +130,26 @@ func migratePostgres(args []string) error {
 		if err = flush(); err != nil {
 			return err
 		}
-		// PostgreSQL does not auto-analyze partitioned parents. Publish planner
-		// statistics once after a bounded backfill, outside the writer transaction.
-		if _, err = e.DB.ExecContext(ctx, "ANALYZE facts; ANALYZE rollups"); err != nil {
+		fmt.Printf("{\"phase\":\"facts_imported\",\"events\":%d}\n", count)
+	}
+	if *analyze {
+		conn, err := e.DB.DB.Conn(ctx)
+		if err != nil {
 			return err
 		}
-		fmt.Printf("{\"phase\":\"facts_imported\",\"events\":%d}\n", count)
+		defer conn.Close()
+		// Migration maintenance has its own bounded budget. Interactive sessions
+		// keep their existing timeout. Do this once, not after every hourly file.
+		if _, err = conn.ExecContext(ctx, "SET statement_timeout='60s'"); err != nil {
+			return err
+		}
+		for _, table := range []string{"facts", "rollups"} {
+			began := time.Now()
+			if _, err = conn.ExecContext(ctx, "ANALYZE "+table); err != nil {
+				return err
+			}
+			fmt.Printf("{\"phase\":\"analyzed\",\"table\":%q,\"elapsed_ms\":%d}\n", table, time.Since(began).Milliseconds())
+		}
 	}
 	if *phase != "" {
 		if *phase != "prepared" && *phase != "complete" {
@@ -208,6 +223,20 @@ func (e *Engine) migrateLegacyPrices(ctx context.Context, prices []Price, final 
 	if baselineErr == nil {
 		if err = json.Unmarshal([]byte(baselineRaw), &baseline); err != nil {
 			return errors.New("invalid price baseline")
+		}
+	}
+	if !final {
+		var edited bool
+		if err = tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM price_history)").Scan(&edited); err != nil {
+			return err
+		}
+		if edited {
+			return errors.New("operator price edits exist before legacy baseline; explicit reconciliation required")
+		}
+		// The legacy document owns the complete saved set, including absence.
+		// Fresh bootstrap defaults must not be promoted into saved operator intent.
+		if _, err = tx.ExecContext(ctx, "DELETE FROM prices"); err != nil {
+			return err
 		}
 	}
 	current := map[string]Price{}

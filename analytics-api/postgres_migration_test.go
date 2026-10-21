@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"net/url"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -63,7 +66,29 @@ func TestPostgresParametersPreserveQuotedQuestionMarks(t *testing.T) {
 }
 
 func TestPostgresFIFOReclaimsFilesPreservesPricesAndRejectsExpiredReplay(t *testing.T) {
-	e := stateTestEngine(t)
+	// Capacity is database-wide. Other fixtures' vacuum/temp cleanup must not
+	// alter this test's deliberately tiny threshold between its two readings.
+	dsn := os.Getenv("TEST_CONTROL_DATABASE_URL")
+	u, err := url.Parse(dsn)
+	if err != nil || u.Host == "" {
+		t.Fatal("isolated PostgreSQL URL required")
+	}
+	admin, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close()
+	name := "analytics_budget_" + tokenHash(t.TempDir())[:16]
+	if _, err = admin.Exec("CREATE DATABASE " + name); err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Exec("DROP DATABASE " + name + " WITH (FORCE)")
+	u.Path = "/" + name
+	e, err := OpenEngine("analytics", Config{ControlDatabaseURL: u.String(), Timezone: "UTC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Hour)
 	old := Fact{Schema: 1, EventID: "old", Kind: "request", AtMS: now.Add(-3 * time.Hour).UnixMilli(), Provider: "p", Model: "m", Outcome: "success"}
@@ -270,5 +295,30 @@ func TestPostgresIncrementalRollupsMatchRebuildWithLateEventsAndRetries(t *testi
 	var last float64
 	if err = e.DB.QueryRow("SELECT n,last_first FROM rollups WHERE level='day'").Scan(&n, &last); err != nil || n != 3 || last != 100 {
 		t.Fatal(n, last, err)
+	}
+}
+
+func TestPostgresLegacyPriceSetSurvivesReplicaStartupExactly(t *testing.T) {
+	e := stateTestEngine(t)
+	if err := e.migrateLegacyPrices(context.Background(), []Price{{Model: "saved-only", Input: 7}}, false); err != nil {
+		t.Fatal(err)
+	}
+	other := replicaTestEngine(t, e)
+	var n int
+	if err := other.DB.QueryRow("SELECT count(*) FROM prices").Scan(&n); err != nil || n != 1 {
+		t.Fatal(n, err)
+	}
+}
+func TestPostgresLegacyBaselineDoesNotOverwriteExistingOperatorEdits(t *testing.T) {
+	e := stateTestEngine(t)
+	if err := e.SavePrice(context.Background(), Price{Model: "operator", Input: 11}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.migrateLegacyPrices(context.Background(), []Price{{Model: "other", Input: 7}}, false); err == nil {
+		t.Fatal("existing operator edits overwritten")
+	}
+	var v float64
+	if err := e.DB.QueryRow("SELECT input FROM prices WHERE model='operator'").Scan(&v); err != nil || v != 11 {
+		t.Fatal(v, err)
 	}
 }

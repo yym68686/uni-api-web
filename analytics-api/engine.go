@@ -194,20 +194,39 @@ var defaultPrices = func() map[string]Price {
 }()
 
 func (e *Engine) seedDefaultPrices() error {
-	for model, price := range defaultPrices {
-		var exists bool
-		if err := e.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM prices WHERE model=?)", model).Scan(&exists); err != nil {
-			return err
-		}
-		if exists {
-			continue
-		}
-		if _, err := e.DB.Exec("INSERT INTO prices(model,input,output,cache_read,cache_write,cache_write_1h,source,verified,effective_at) VALUES(?,?,?,?,?,?,?,?,current_timestamp) ON CONFLICT(model) DO NOTHING", model, price.Input, price.Output, price.CacheRead, price.CacheWrite, price.CacheWrite1h, price.Source, price.Verified); err != nil {
-			return err
+	ctx := context.Background()
+	var ready bool
+	if err := e.DB.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM meta WHERE name='price_defaults_initialized')").Scan(&ready); err != nil {
+		return err
+	}
+	if ready {
+		return nil
+	}
+	tx, err := e.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(8395016)"); err != nil {
+		return err
+	}
+	var initialized bool
+	if err = tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM meta WHERE name IN ('price_defaults_initialized','legacy_price_baseline')) OR EXISTS(SELECT 1 FROM prices)").Scan(&initialized); err != nil {
+		return err
+	}
+	if !initialized {
+		for model, price := range defaultPrices {
+			if _, err = tx.ExecContext(ctx, "INSERT INTO prices(model,input,output,cache_read,cache_write,cache_write_1h,source,verified,effective_at) VALUES(?,?,?,?,?,?,?,?,current_timestamp) ON CONFLICT(model) DO NOTHING", model, price.Input, price.Output, price.CacheRead, price.CacheWrite, price.CacheWrite1h, price.Source, price.Verified); err != nil {
+				return err
+			}
 		}
 	}
-	return nil
+	if _, err = tx.ExecContext(ctx, "INSERT INTO meta(name,value) VALUES('price_defaults_initialized','true') ON CONFLICT DO NOTHING"); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
+
 func validatePrice(p Price) error {
 	if p.Model == "" || len(p.Model) > 512 {
 		return errors.New("model required")
