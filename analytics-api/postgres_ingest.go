@@ -121,6 +121,10 @@ func (s *Service) importStatus(allowed []string) map[string]any {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	complete := len(allowed) > 0
+	var handoffPending bool
+	if err := s.engine.DB.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM meta WHERE name='legacy_migration_phase' AND value<>'complete')").Scan(&handoffPending); err != nil || handoffPending {
+		complete = false
+	}
 	var last int64
 	sources := []map[string]any{}
 	for _, id := range allowed {
@@ -149,7 +153,11 @@ func (s *Service) historyWindowAvailable(ctx context.Context, source, window str
 	}
 	var boundary int64
 	err = s.engine.DB.QueryRowContext(ctx, `SELECT greatest(first_received_ms,gap_after_ms,evicted_before_ms) FROM ingest_sources CROSS JOIN storage_state WHERE source_id=? AND singleton`, source).Scan(&boundary)
-	return err == nil && start.UnixMilli() >= boundary
+	if err != nil || start.UnixMilli() < boundary {
+		return false
+	}
+	var pending bool
+	return s.engine.DB.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM meta WHERE name='legacy_migration_phase' AND value<>'complete')").Scan(&pending) == nil && !pending
 }
 
 func (e *Engine) recordExporterState(ctx context.Context, source, epoch, instance string, sequence, pending, dropped, latest int64) error {

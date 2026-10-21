@@ -121,3 +121,22 @@ func TestPostgresExporterLossAccumulatesAcrossEpochsWithoutCountingRetries(t *te
 		t.Fatal(total, err)
 	}
 }
+
+func TestPostgresLegacyHandoffCannotClaimCompleteCollection(t *testing.T) {
+	e := stateTestEngine(t)
+	ctx := context.Background()
+	now := time.Now().UnixMilli()
+	if _, err := e.DB.Exec("INSERT INTO ingest_sources(source_id,first_received_ms,last_received_ms,last_event_ms) VALUES('source',?,?,?)", now-86400000, now, now); err != nil {
+		t.Fatal(err)
+	}
+	s := &Service{engine: e}
+	for _, phase := range []string{"prepared", "complete"} {
+		if _, err := e.DB.Exec("INSERT INTO meta(name,value) VALUES('legacy_migration_phase',?) ON CONFLICT(name) DO UPDATE SET value=excluded.value", phase); err != nil {
+			t.Fatal(err)
+		}
+		want := phase == "complete"
+		if s.importStatus([]string{"source"})["caught_up"] != want || s.historyWindowAvailable(ctx, "source", "1h") != want {
+			t.Fatalf("handoff phase %s misreported collection availability", phase)
+		}
+	}
+}
