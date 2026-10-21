@@ -631,7 +631,10 @@ export function Sub2apiImport({
       setRemoving(null);
       setSource("");
       setKey("");
-      await refresh();
+      // The write acknowledgement completes the user's action. Background
+      // reconciliation must not hold the modal open (account reads can be slow).
+      if (action !== "delete") close();
+      void refresh();
     } catch (e) {
       const message = e instanceof Error ? e.message : "操作失败";
       setError(message);

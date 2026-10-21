@@ -7,7 +7,7 @@ import { ChannelModels } from "./ChannelModels";
 import type { Channel } from "./types";
 import type { SubImportsQuery } from "./sub2apiImports";
 
-function setup(site = false) {
+function setup(site = false, saveError = false) {
   const provider = site ? "sub2api-site" : "sub2api-copy-native";
   const row = {
     source_id: "do",
@@ -78,7 +78,7 @@ function setup(site = false) {
   const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
     if (["PATCH", "POST"].includes(init?.method || "")) {
       writes.push({ path: input, body: JSON.parse(String(init?.body)) });
-      return Response.json({ message: "已保存" });
+      return saveError ? new Response("版本冲突", {status:409}) : Response.json({ message: "已保存" });
     }
     const url = new URL(input, location.origin),
       p = url.pathname;
@@ -229,3 +229,28 @@ it("preserves the native editor draft when background inventory refresh fails", 
     screen.getByRole("dialog", { name: "添加到渠道" }),
   ).toBeInTheDocument();
 });
+
+for (const site of [false, true])
+  it(`closes the ${site ? "site" : "native"} editor on write success while refreshes remain pending`, async () => {
+    const app = setup(site);
+    await app.user.click(screen.getByRole("button", {name:"编辑可用模型"}));
+    await waitFor(() => expect(screen.getByRole("button", {name:"保存更改"})).toBeEnabled());
+    const invalidate = vi.spyOn(app.client, "invalidateQueries").mockImplementation(() => new Promise(() => {}));
+    await app.user.click(screen.getByRole("button", {name:"保存更改"}));
+    await waitFor(() => expect(screen.queryByRole("dialog", {name:"添加到渠道"})).not.toBeInTheDocument());
+    expect(app.writes).toHaveLength(1);
+    expect(invalidate).toHaveBeenCalled();
+    invalidate.mockRestore();
+  });
+for (const site of [false, true])
+  it(`preserves the ${site ? "site" : "native"} editor on write failure and releases the close button`, async () => {
+    const app = setup(site, true);
+    await app.user.click(screen.getByRole("button", {name:"编辑可用模型"}));
+    await waitFor(() => expect(screen.getByRole("button", {name:"保存更改"})).toBeEnabled());
+    const invalidate = vi.spyOn(app.client, "invalidateQueries").mockImplementation(() => new Promise(() => {}));
+    await app.user.click(screen.getByRole("button", {name:"保存更改"}));
+    expect(await screen.findByText("版本冲突")).toBeVisible();
+    expect(screen.getByRole("dialog", {name:"添加到渠道"})).toBeVisible();
+    expect(screen.getByRole("button", {name:/关闭添加渠道|关闭已有渠道/})).toBeEnabled();
+    invalidate.mockRestore();
+  });

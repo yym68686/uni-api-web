@@ -1146,7 +1146,7 @@ it("preselects successful models and imports into the selected source key at the
     revision: "revision-1",
   });
   expect(JSON.stringify(writes)).not.toContain("secret");
-  await screen.findByText("已临时添加至第 2 位");
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "添加到渠道" })).not.toBeInTheDocument());
 });
 
 it("filters compaction across all pages, queues groups independently of the selected model, and defaults imports from evidence", async () => {
@@ -1750,11 +1750,10 @@ it("lists imported keys, replaces exact models and deletes only the chosen bindi
     positions: {"gpt-6-astra":1},
     revision: "boot:1",
   });
-  await waitFor(() =>
-    expect(
-      within(dialog).getAllByRole("button", { name: "删除" })[0],
-    ).toBeEnabled(),
-  );
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "添加到渠道" })).not.toBeInTheDocument());
+  await user.click(await screen.findByRole("button", { name: "已添加 · 2 个 key" }));
+  dialog = screen.getByRole("dialog", { name: "添加到渠道" });
+  await waitFor(() => expect(within(dialog).getAllByRole("button", { name: "删除" })[0]).toBeEnabled());
   await user.click(within(dialog).getAllByRole("button", { name: "删除" })[0]);
   await user.click(within(screen.getByRole("dialog", { name: "删除渠道接入" })).getByRole("button", { name: "确认删除" }));
   await waitFor(() => expect(writes).toHaveLength(2));

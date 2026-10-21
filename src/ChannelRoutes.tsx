@@ -422,7 +422,8 @@ export function ConfiguredChannelDialog({
       );
       setSuccess(result.message);
       setAdding(false);
-      await Promise.all(
+      close();
+      void Promise.all(
         [
           "channel-management",
           "channel-routes",
@@ -432,7 +433,6 @@ export function ConfiguredChannelDialog({
           "channel-controls",
         ].map((name) => client.invalidateQueries({ queryKey: [name] })),
       );
-      if (initialEdit) close();
     } catch (e) {
       setError(e instanceof Error ? e.message : "添加失败");
       // Keep the failed revision until the user explicitly reloads, so retrying
