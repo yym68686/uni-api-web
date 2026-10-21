@@ -130,6 +130,27 @@ def download_recent(env, journal, destination, hours):
     print(json.dumps({"operation": "recent-download", "verified": True, "objects": done, "hours": hours, "through_modified_ms": newest}), flush=True)
 
 
+def scan_recent(env, destination, after_ms):
+    # Final handoff audit must work after the old console journal writer drains.
+    # Keys are content hashes, so time filtering cannot use a lexicographic cursor.
+    client = boto3.client("s3", endpoint_url=env["S3_ENDPOINT"],
+                          aws_access_key_id=env["AWS_ACCESS_KEY_ID"], aws_secret_access_key=env["AWS_SECRET_ACCESS_KEY"],
+                          region_name="auto", config=Config(connect_timeout=10, read_timeout=30, retries={"max_attempts": 3}))
+    selected, scanned = 0, 0
+    with os.fdopen(os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as out:
+        for page in client.get_paginator("list_objects_v2").paginate(Bucket=env["S3_BUCKET"], Prefix=env.get("S3_PREFIX") or "uni-api-facts/v1/"):
+            for obj in page.get("Contents", []):
+                scanned += 1
+                modified = int(obj["LastModified"].timestamp() * 1000)
+                if modified >= after_ms and "/immutable/batch-" in obj["Key"] and obj["Key"].endswith(".jsonl"):
+                    selected += 1
+                    out.write(json.dumps([selected, obj["Key"], obj["ETag"], obj["Size"], modified]) + "\n")
+            out.flush()
+            if scanned % 100000 == 0:
+                print(json.dumps({"operation": "scan-recent", "scanned": scanned, "selected": selected}), flush=True)
+    print(json.dumps({"operation": "scan-recent", "complete": True, "scanned": scanned, "selected": selected}), flush=True)
+
+
 def prepare_facts(inputs, destination, source_id):
     """Verify every archived batch again and write bounded hourly import files."""
     destination.mkdir(mode=0o700, parents=True, exist_ok=False)
@@ -168,13 +189,14 @@ def prepare_facts(inputs, destination, source_id):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=["inspect", "download", "recent-download", "prepare-facts"])
+    parser.add_argument("operation", choices=["inspect", "download", "recent-download", "prepare-facts", "scan-recent"])
     parser.add_argument("--credentials", type=Path)
     parser.add_argument("--destination", type=Path)
     parser.add_argument("--journal", type=Path)
     parser.add_argument("--hours", type=int, default=24)
     parser.add_argument("--input", action="append", type=Path)
     parser.add_argument("--source-id", default="primary")
+    parser.add_argument("--after-ms", type=int)
     args = parser.parse_args()
     if args.operation == "prepare-facts":
         if not args.input or not args.destination or not args.source_id:
@@ -186,6 +208,11 @@ def main():
     if args.credentials.stat().st_mode & 0o077:
         raise ValueError("credential file must be private")
     env = json.loads(args.credentials.read_text())
+    if args.operation == "scan-recent":
+        if not args.destination or not args.after_ms:
+            raise ValueError("scan-recent requires destination and lower watermark")
+        scan_recent(env, args.destination, args.after_ms)
+        return
     if args.operation == "recent-download":
         if not args.destination or not args.journal or args.hours <= 0:
             raise ValueError("recent download requires journal, destination and positive hours")
