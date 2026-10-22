@@ -72,6 +72,9 @@ func (e *Engine) enforceStorageBudget(ctx context.Context) error {
 			_, err = tx.ExecContext(ctx, fmt.Sprintf("DROP TABLE IF EXISTS usage_%d", start))
 		}
 		if err == nil {
+			_, err = tx.ExecContext(ctx, fmt.Sprintf("DROP TABLE IF EXISTS billing_%d", start))
+		}
+		if err == nil {
 			_, err = tx.ExecContext(ctx, "DELETE FROM fact_source_ranges WHERE start_ms=?", start)
 		}
 		if err == nil {

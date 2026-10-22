@@ -258,6 +258,15 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 		return nil, err
 	}
 	defer snapshot.Rollback() // Also drops the transaction-local temporary table.
+	billingTable, receiptIndex := "facts", "facts_receipt_ids"
+	var projected bool
+	if err = snapshot.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM meta WHERE name='billing_projection_complete' AND value='true')").Scan(&projected); err != nil {
+		return nil, err
+	}
+	if projected {
+		billingTable, receiptIndex = "billing_facts", "billing_facts_receipt_ids"
+		alignment = strings.ReplaceAll(alignment, "FROM facts", "FROM billing_facts")
+	}
 	// One analytical slot, no parallel workers: keep the scoped identity sort
 	// in bounded memory without multiplying the budget across worker processes.
 	// The independent 64 MB temporary-file limit remains in force.
@@ -287,7 +296,7 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 		return nil, err
 	}
 	if narrow {
-		if err = snapshot.QueryRowContext(ctx, "SELECT coalesce((SELECT indisvalid FROM pg_index WHERE indexrelid=to_regclass('facts_receipt_ids')),false)").Scan(&indexed); err != nil {
+		if err = snapshot.QueryRowContext(ctx, "SELECT coalesce((SELECT indisvalid FROM pg_index WHERE indexrelid=to_regclass(?)),false)", receiptIndex).Scan(&indexed); err != nil {
 			return nil, err
 		}
 		if indexed {
@@ -295,6 +304,7 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 			operation.stage("receipt_claims_index")
 		}
 	}
+	claimQuery = strings.ReplaceAll(claimQuery, "FROM facts", "FROM "+billingTable)
 	if _, err = snapshot.ExecContext(ctx, claimQuery); err != nil {
 		return nil, fmt.Errorf("billing receipt claims: %w", err)
 	}
@@ -313,6 +323,7 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 	// missing export), never proof of zero upstream cost. Search companions outside
 	// this window because generic streaming headers can precede stream completion.
 	legacySQL := `WITH selected AS (SELECT * FROM facts WHERE kind='attempt' AND ` + where + `) SELECT a.source_id,a.provider,a.model,a.upstream_model,count(*) FROM selected a WHERE NOT EXISTS(SELECT 1 FROM facts b WHERE b.kind='billing' AND b.source_id=a.source_id AND b.instance_id=a.instance_id AND b.request_id=a.request_id AND b.attempt_id=a.attempt_id AND b.provider=a.provider AND b.key_id=a.key_id AND b.model=a.model AND b.upstream_model=a.upstream_model AND b.endpoint=a.endpoint AND b.stream=a.stream) GROUP BY a.source_id,a.provider,a.model,a.upstream_model`
+	legacySQL = strings.ReplaceAll(legacySQL, "FROM facts", "FROM "+billingTable)
 	rows, err := snapshot.QueryContext(ctx, legacySQL, args...)
 	if err != nil {
 		return nil, err

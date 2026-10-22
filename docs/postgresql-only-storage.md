@@ -105,3 +105,11 @@ databases explicitly with `--prepare-receipt-indexes`; each hourly child is buil
 concurrently and attached with a short metadata-lock timeout. No history scan
 runs at application startup. The query selects this path only after the entire
 parent index is valid, and broad scopes retain the bulk aggregation path.
+
+Billing reads can use a compact transactional `billing_facts` projection containing
+only completion identities and receipt correlation fields. Deploy dual-writing
+code first, let every older API writer drain, then run
+`--prepare-billing-projection`. Preparation copies at most 512 rows per transaction,
+yields to live ingestion, checks capacity headroom, and verifies every column in
+both directions for each retained hour. Reads continue using raw facts until the
+explicit completion marker is written. FIFO removes matching projection partitions.

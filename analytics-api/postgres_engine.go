@@ -99,6 +99,10 @@ func openPostgresEngine(namespace string, cfg Config) (*Engine, error) {
 		db.Close()
 		return nil, err
 	}
+	if err = e.initializeBillingProjection(ctx); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err = e.seedDefaultPrices(); err != nil {
 		db.Close()
 		return nil, err
@@ -176,6 +180,7 @@ func (e *Engine) insertFactPage(ctx context.Context, tx *analyticsTx, facts []Fa
 	incoming := "(SELECT DISTINCT ON(event_id) * FROM jsonb_to_recordset(?::jsonb) AS r(" + factRecordTypes + ") ORDER BY event_id,at_ms) incoming"
 	query := "WITH inserted AS (INSERT INTO facts(" + factColumns + ") SELECT " + strings.Join(columns, ",") + " FROM " + incoming + " WHERE NOT EXISTS(SELECT 1 FROM facts known WHERE known.event_id=incoming.event_id) ON CONFLICT DO NOTHING RETURNING *), metrics AS (SELECT inserted.*,periods.* FROM inserted CROSS JOIN LATERAL (VALUES ('minute'::text,at_ms/60000*60000),('hour'::text,at_ms/3600000*3600000),('day'::text,(extract(epoch FROM (date_trunc('day',to_timestamp(at_ms/1000.0) AT TIME ZONE ?) AT TIME ZONE ?))*1000)::bigint)) periods(level,period_ms)), aggregated AS (INSERT INTO rollups(" + rollupColumns() + ") " + factRollupSelect("metrics") + rollupMerge() + " RETURNING 1), coverage AS (INSERT INTO fact_source_ranges(source_id,start_ms,first_ms,last_ms) SELECT source_id,at_ms/3600000*3600000,min(at_ms),max(at_ms) FROM inserted GROUP BY source_id,at_ms/3600000*3600000 ON CONFLICT(source_id,start_ms) DO UPDATE SET first_ms=least(fact_source_ranges.first_ms,excluded.first_ms),last_ms=greatest(fact_source_ranges.last_ms,excluded.last_ms) RETURNING 1) SELECT count(*) FROM inserted"
 	query = strings.Replace(query, "), metrics AS (", "), usage_projection AS (INSERT INTO usage_facts("+usageColumns+") SELECT "+usageColumns+" FROM inserted WHERE "+usagePredicate+" ON CONFLICT DO NOTHING RETURNING 1), metrics AS (", 1)
+	query = strings.Replace(query, "), metrics AS (", "), billing_projection AS (INSERT INTO billing_facts("+billingColumns+") SELECT "+billingColumns+" FROM inserted WHERE "+billingPredicate+" ON CONFLICT DO NOTHING RETURNING 1), metrics AS (", 1)
 	args := []any{string(raw), e.Location.String(), e.Location.String()}
 	metrics := false
 	for _, f := range facts {
@@ -230,6 +235,7 @@ func (e *Engine) importPostgres(ctx context.Context, objects []FactObject) (err 
 	}
 	rollupPartitions := map[int64]bool{}
 	usagePartitions := map[int64]bool{}
+	billingPartitions := map[int64]bool{}
 	changed := false
 	partitions := map[int64]bool{}
 	for _, obj := range objects {
@@ -280,6 +286,12 @@ func (e *Engine) importPostgres(ctx context.Context, objects []FactObject) (err 
 			}
 			maxAt = max(maxAt, f.AtMS)
 			hour := f.AtMS / 3600000
+			if (f.Kind == "attempt" || f.Kind == "billing") && !billingPartitions[hour] {
+				if err = ensureBillingPartition(ctx, tx, f.AtMS); err != nil {
+					return err
+				}
+				billingPartitions[hour] = true
+			}
 			if f.Kind != "trace" && f.Kind != "billing" && f.InputTokens != nil && !usagePartitions[hour] {
 				if err = ensureUsagePartition(ctx, tx, f.AtMS); err != nil {
 					return err

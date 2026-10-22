@@ -23,6 +23,7 @@ func migratePostgres(args []string) error {
 	readIndexes := flags.Bool("prepare-analytics-indexes", false, "prepare partitioned request-usage indexes concurrently")
 	receiptIndexes := flags.Bool("prepare-receipt-indexes", false, "prepare receipt identity lookup indexes concurrently")
 	usage := flags.Bool("prepare-usage-projection", false, "backfill and verify compact transactional usage rows")
+	billing := flags.Bool("prepare-billing-projection", false, "backfill and verify billing identities after older API writers drain")
 	layout := flags.Bool("prepare-rollup-layout", false, "separate rollup levels before initial activation")
 	facts := flags.Bool("facts-stdin", false, "import NDJSON facts from stdin")
 	analyze := flags.Bool("analyze", false, "publish parent planner statistics once after the complete backfill")
@@ -71,6 +72,11 @@ func migratePostgres(args []string) error {
 	}
 	if *usage {
 		if err = e.backfillUsageProjection(ctx); err != nil {
+			return err
+		}
+	}
+	if *billing {
+		if err = e.backfillBillingProjection(ctx); err != nil {
 			return err
 		}
 	}
