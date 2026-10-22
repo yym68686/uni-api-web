@@ -102,6 +102,14 @@ export function useScopedChannelSpend({
     from: String(from || 0),
     to: String(to || 0),
   });
+  // Search/status/balance filtering can leave just one provider. The backend
+  // already scopes its billing facts by provider while checking competing
+  // receipt claims globally, so unrelated channels need not be reconciled.
+  const providers = new Set(rows.map(row => row.provider));
+  if (providers.size === 1) {
+    const provider = rows[0].provider;
+    if (provider && provider !== "all") params.set("provider", provider);
+  }
   const combined =
     snapshot?.channel_spend !== undefined || !!snapshot?.channel_spend_error;
   const client = useQueryClient();
@@ -134,7 +142,7 @@ export function useScopedChannelSpend({
       : undefined,
     initialDataUpdatedAt: snapshotUpdatedAt,
     enabled:
-      enabled && !paused && !snapshot?.channel_spend_error && from != null && to != null,
+      enabled && rows.length > 0 && !paused && !snapshot?.channel_spend_error && from != null && to != null,
     staleTime: 15000,
     retry: false,
     refetchInterval: (query) => {

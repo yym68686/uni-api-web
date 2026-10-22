@@ -1230,7 +1230,6 @@ function Dashboard({
   );
   const providers = useMemo(() => [...new Set(rows.map(providerId))], [rows]);
   const actualRange = useMemo(() => actualCostRange(window), [window]);
-  const channelSpend = useScopedChannelSpend({ rows, session: connection.session, sourceId: selectedSourceId, keyId, model, endpoint: effectiveEndpoint, stream: effectiveStream, from: metrics.data?.from, to: metrics.data?.to, snapshot: metrics.data, snapshotError: metrics.isError, snapshotUpdatedAt: metrics.dataUpdatedAt, refresh, auto, paused: metrics.isFetching, enabled: (channelView || view === "balances") && !!baseConnection.account });
   const accountBalances = useChannelAccountBalances(providers, imported.data?.data || [], baseConnection.session, !!baseConnection.account && needsChannelData, auto);
   const rawBalanceQueries = useQueries({
     queries: providers.map((provider) => ({
@@ -1315,6 +1314,7 @@ function Dashboard({
           balanceThreshold,
         ),
       );
+  const channelSpend = useScopedChannelSpend({ rows: filtered, session: connection.session, sourceId: selectedSourceId, keyId, model, endpoint: effectiveEndpoint, stream: effectiveStream, from: metrics.data?.from, to: metrics.data?.to, snapshot: metrics.data, snapshotError: metrics.isError, snapshotUpdatedAt: metrics.dataUpdatedAt, refresh, auto, paused: metrics.isFetching, enabled: (channelView || view === "balances") && !!baseConnection.account });
   const balanceFinance = useMemo(() => {
     const result = new Map<
       string,

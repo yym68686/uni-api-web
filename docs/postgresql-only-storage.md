@@ -126,3 +126,10 @@ one statement snapshot per batch. This bounds comparison sorts without raising
 the 64 MiB temporary-file limit, and detects extra projection rows as well as
 missing or altered ones. Reads continue using raw facts until the
 explicit completion marker is written. FIFO removes matching projection partitions.
+
+The channel table passes its displayed search/status/balance scope to billing.
+When those filters leave a single provider, the existing provider filter limits
+the billing facts being reconciled. Receipt ownership checks still include
+competing claims from every source, caller and provider; narrowing the table
+cannot turn an ambiguous receipt into a confirmed charge. Clearing the filter
+restores the broad query, and an empty result makes no billing request.

@@ -68,6 +68,31 @@ func TestAttributedSpendSplitsSharedBusinessKeyAndPreservesReferenceMetrics(t *t
 		t.Fatal("foreign bill leak", rows, e)
 	}
 }
+
+func TestAttributedSpendProviderFilterKeepsCompetingClaimsOutsideVisibleProvider(t *testing.T) {
+	s, account, owner := attributionFixture(t)
+	ctx := context.Background()
+	now := time.Now().Truncate(time.Second)
+	visible := attributedFact("visible", "caller", now.Add(-time.Minute))
+	conflicted := attributedFact("conflicted", "caller", now.Add(-time.Minute))
+	competitor := attributedFact("competitor", "another-caller", now.Add(-time.Minute))
+	competitor.Provider, competitor.SourceID = "hidden-provider", "other-source"
+	competitor.BillingRequestIDs = conflicted.BillingRequestIDs
+	storeAttributedLog(t, s, account, "visible", "0.25", 1)
+	storeAttributedLog(t, s, account, "conflicted", "9.99", 2)
+	if err := s.engine.Import(ctx, "provider-scope", "one", []Fact{visible, conflicted, competitor}); err != nil {
+		t.Fatal(err)
+	}
+	filter := QueryFilter{SourceID: "source", KeyID: "caller", Model: checkModel, Provider: "shared"}
+	rows, err := s.attributedChannelSpend(ctx, owner, filter, now.Add(-time.Hour).Unix(), now.Unix())
+	if err != nil || len(rows) != 1 {
+		t.Fatal(rows, err)
+	}
+	row := rows[0]
+	if row.Provider != "shared" || row.Total != 2 || row.Matched != 1 || row.Ambiguous != 1 || row.Amount != nil || row.MatchedAmount != .25 || row.Status != "ambiguous" {
+		t.Fatal("provider filtering changed ownership or charged a hidden competitor", row)
+	}
+}
 func TestAttributedSpendOldMissingDuplicateAndUnmatchedReceiptsRemainUnknown(t *testing.T) {
 	for _, mode := range []string{"old", "header_missing", "receipt_missing", "duplicate", "duplicate_other_key", "duplicate_bill"} {
 		t.Run(mode, func(t *testing.T) {

@@ -316,6 +316,7 @@ it("attributes by caller and all analytic filters, without leaking a cached tota
   ).toEqual({
     source_id: "source-a",
     key_id: "caller-a",
+    provider: "shared",
     model: "gpt-6-astra",
     endpoint: "/v1/responses",
     stream: "true",

@@ -78,3 +78,43 @@ it("shows and refreshes channel statistics independently of slow or failed billi
   app.unmount();
   client.clear();
 });
+
+it("limits billing to the searched provider and restores the broad scope when search is cleared", async () => {
+  saveFilters(location.origin, { ...defaultFilters, window: "24h", model: "gpt-6-luna", keyId: "primary::caller", search: "needle-channel" });
+  const channels = ["needle-channel", "unrelated-channel"].map(provider => ({
+    source_id: "primary", source_name: "Fugue", provider, model: "gpt-6-luna", upstream_model: "gpt-6-luna",
+    eligible: true, reason: "eligible", endpoint: "all", stream: null,
+    stats: { ...emptyStats(), success: 9, failed: 1, success_rate_denominator: 10, success_rate: .9 },
+  }));
+  const bills: URL[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+    const u = new URL(input, location.origin);
+    if (u.pathname.endsWith("/auth/me")) return Response.json({ enabled: true, authenticated: true, username: "provider-scope-test" });
+    if (u.pathname.endsWith("/sources")) return Response.json({ data: [{ id: "primary", name: "Fugue", base: "https://gateway.test", has_storage: true }] });
+    if (u.pathname.endsWith("/api-keys")) return Response.json({ can_inspect_all: true, data: [{ key_id: "primary::caller", source_id: "primary", position: 1, prefix: "masked" }] });
+    if (u.pathname.endsWith("/model-channels") || u.pathname.endsWith("/channel-metrics")) return Response.json({ data: channels });
+    if (u.pathname.endsWith("/channel-controls")) return Response.json({ revision: "r1", instance_id: "gateway", rules: [] });
+    if (u.pathname.endsWith("/analytics")) return Response.json({ data: channels, total: { ...emptyStats(), requests: 20 }, from: 100, to: 200, coverage: "full" });
+    if (u.pathname.endsWith("/channel-spend")) {
+      bills.push(u);
+      return Response.json({ data: channels.filter(c => !u.searchParams.get("provider") || c.provider === u.searchParams.get("provider")).map(c => ({ ...c, status: "complete", scope: "matched_requests", from: 100, to: 200, actual_cost_usd: c.provider === "needle-channel" ? 1 : 2 })) });
+    }
+    return Response.json({ data: [], total: { requests: 0 }, unavailable_sources: [] });
+  }));
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const app = render(<QueryClientProvider client={client}><MotionConfig reducedMotion="always"><LazyMotion features={domAnimation}><Tooltip.Provider><App /></Tooltip.Provider></LazyMotion></MotionConfig></QueryClientProvider>);
+  const user = userEvent.setup();
+  await waitFor(() => expect(bills).toHaveLength(1));
+  expect(bills[0].searchParams.get("provider")).toBe("needle-channel");
+  expect(await screen.findByText("$1.00")).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "清除搜索" }));
+  await waitFor(() => expect(bills).toHaveLength(2));
+  expect(bills[1].searchParams.has("provider")).toBe(false);
+  expect(await screen.findByText("$2.00")).toBeVisible();
+  const reads = bills.length;
+  await user.type(screen.getByRole("textbox", { name: "搜索渠道或模型" }), "nonexistent-provider");
+  await screen.findByText("没有匹配的渠道");
+  expect(bills).toHaveLength(reads);
+  app.unmount();
+  client.clear();
+});
