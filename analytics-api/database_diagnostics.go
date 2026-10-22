@@ -17,7 +17,7 @@ func databaseErrorClass(err error) string {
 	if errors.Is(err, errBillingBackfillBusy) || errors.Is(err, errSubSummaryBackfillBusy) || errors.Is(err, errReceiptRetentionIndexRequired) {
 		return "maintenance_deferred"
 	}
-	if errors.Is(err, errBillingProjectionMismatch) {
+	if errors.Is(err, errBillingProjectionMismatch) || errors.Is(err, errClaimProjectionMismatch) {
 		return "projection_mismatch"
 	}
 	if errors.Is(err, context.DeadlineExceeded) {

@@ -273,8 +273,8 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 	}
 	defer closeSnapshot() // Drop temporary tables and retire this analytical backend.
 	billingTable, receiptIndex := "facts", "facts_receipt_ids"
-	var projected bool
-	if err = snapshot.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM meta WHERE name='billing_projection_complete' AND value='true')").Scan(&projected); err != nil {
+	var projected, projectedClaims bool
+	if err = snapshot.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM meta WHERE name='billing_projection_complete' AND value='true'),EXISTS(SELECT 1 FROM meta WHERE name='claim_projection_complete' AND value='true')").Scan(&projected, &projectedClaims); err != nil {
 		return nil, err
 	}
 	if projected {
@@ -309,7 +309,10 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 	if err = snapshot.QueryRowContext(ctx, "SELECT count(*)<=? FROM (SELECT 1 FROM console_spend_facts WHERE event_id IS NOT NULL LIMIT ?) f", billingFactBatchSize, billingFactBatchSize+1).Scan(&narrow); err != nil {
 		return nil, err
 	}
-	if narrow {
+	if projectedClaims {
+		claimQuery = projectedBillingClaimsSQL(narrow)
+		operation.stage("receipt_claims_projection")
+	} else if narrow {
 		if err = snapshot.QueryRowContext(ctx, "SELECT coalesce((SELECT indisvalid FROM pg_index WHERE indexrelid=to_regclass(?)),false)", receiptIndex).Scan(&indexed); err != nil {
 			return nil, err
 		}

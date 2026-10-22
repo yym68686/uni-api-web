@@ -22,6 +22,7 @@ func TestDatabaseDiagnosticsClassifiesBoundedMaintenanceWithoutErrorText(t *test
 		{errSubSummaryBackfillBusy, "maintenance_deferred"},
 		{errReceiptRetentionIndexRequired, "maintenance_deferred"},
 		{errBillingProjectionMismatch, "projection_mismatch"},
+		{errClaimProjectionMismatch, "projection_mismatch"},
 		{context.DeadlineExceeded, "deadline_exceeded"},
 		{fmt.Errorf("private query: %w", io.ErrUnexpectedEOF), "database_connection_lost"},
 		{io.EOF, "database_connection_lost"},

@@ -1,8 +1,9 @@
 # PostgreSQL-only storage and release protocol
 
-Status: migration implementation and isolated validation in progress. This document
-is not evidence that production has switched. Actual cutover results and commit
-identities are recorded in .codex/postgresql-migration-20261021/report.md.
+This document describes the implemented storage and preparation contracts. Actual
+production activation, validation results and commit identities are recorded in
+.codex/postgresql-migration-20261021/report.md; implementation alone is not
+evidence that a new read projection has been activated.
 
 The console API and static frontend deploy independently. Compatible additive APIs
 and versioned database migrations allow old/new clients to overlap. Database state
@@ -159,3 +160,24 @@ avoids a second historical anti-join and preserves late headers, reused IDs and
 SQL NULL identity semantics. The result is recomputed from the current snapshot;
 it is not a persisted or stale browser cache. Global competing receipt claims
 and history-limited financial status still use their existing checks.
+
+`billing_claims` expands each billing fact's receipt identifiers through a
+statement trigger in the same ingestion transaction, including writes from an
+older API after code rollback. It is indexed by a digest of the normalized site, upstream
+credential hash and receipt ID. The digest only accelerates lookup: reads also
+compare the entire tuple and count distinct event IDs across all sources and
+hours. Duplicate headers and digest collisions cannot create false ownership.
+The projection follows the same hourly FIFO boundaries as its source facts;
+retired ownership evidence and incomplete-history handling remain separate.
+Reads apply the committed FIFO floor even when an older writer leaves a derived
+claim partition behind; capacity reclamation removes those orphan files before
+evicting additional retained facts.
+
+After all older API writers drain, explicitly run `--prepare-claim-projection`
+once to populate an existing database. Each batch copies or verifies at most 512
+fact identities (at most 1,536 claims), yields admission to live writers and
+preserves a 32 MiB storage reserve. Verification walks the union of both identity
+sets and compares every projected column in both directions. It also removes
+only derived claim partitions orphaned by an older FIFO writer during rollout.
+Until every retained hour passes, reads keep the prior global ownership query.
+API startup creates only empty schema metadata and never backfills history.

@@ -208,6 +208,7 @@ func TestPostgresFIFOReclaimsFilesPreservesPricesAndRejectsExpiredReplay(t *test
 	oldBill, freshBill := old, fresh
 	oldBill.Kind, oldBill.EventID = "billing", "old-billing"
 	freshBill.Kind, freshBill.EventID = "billing", "fresh-billing"
+	oldBill.BillingRequestIDs, freshBill.BillingRequestIDs = []string{"client:old"}, []string{"client:fresh"}
 	if err := e.Import(ctx, "billing-retention", "one", []Fact{oldBill, freshBill}); err != nil {
 		t.Fatal(err)
 	}
@@ -237,6 +238,9 @@ func TestPostgresFIFOReclaimsFilesPreservesPricesAndRejectsExpiredReplay(t *test
 	}
 	if err := e.DB.QueryRow("SELECT count(*) FROM billing_facts").Scan(&n); err != nil || n != 1 {
 		t.Fatal("billing projection did not follow FIFO", n, err)
+	}
+	if err := e.DB.QueryRow("SELECT count(*) FROM billing_claims").Scan(&n); err != nil || n != 1 {
+		t.Fatal("receipt ownership projection did not follow FIFO", n, err)
 	}
 	if err := e.DB.QueryRow("SELECT input FROM prices WHERE model='operator'").Scan(&price); err != nil || price != 77 {
 		t.Fatal(price, err)

@@ -42,6 +42,17 @@ func (e *Engine) enforceStorageBudget(ctx context.Context) error {
 			tx.Rollback()
 			return nil
 		}
+		reclaimed, err := reclaimOrphanClaimPartition(ctx, tx)
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+		if reclaimed {
+			if err = tx.Commit(); err != nil {
+				return err
+			}
+			continue
+		}
 		var start, end int64
 		var name string
 		err = tx.QueryRowContext(ctx, "SELECT start_ms,end_ms,name FROM fact_partitions ORDER BY start_ms LIMIT 1").Scan(&start, &end, &name)
@@ -73,6 +84,9 @@ func (e *Engine) enforceStorageBudget(ctx context.Context) error {
 		}
 		if err == nil {
 			_, err = tx.ExecContext(ctx, fmt.Sprintf("DROP TABLE IF EXISTS billing_%d", start))
+		}
+		if err == nil {
+			_, err = tx.ExecContext(ctx, fmt.Sprintf("DROP TABLE IF EXISTS claims_%d", start))
 		}
 		if err == nil {
 			_, err = tx.ExecContext(ctx, "DELETE FROM fact_source_ranges WHERE start_ms=?", start)

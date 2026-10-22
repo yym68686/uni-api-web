@@ -25,6 +25,7 @@ func migratePostgres(args []string) error {
 	billingProviderIndex := flags.Bool("prepare-billing-provider-index", false, "prepare the provider-scoped billing lookup index concurrently")
 	usage := flags.Bool("prepare-usage-projection", false, "backfill and verify compact transactional usage rows")
 	billing := flags.Bool("prepare-billing-projection", false, "backfill and verify billing identities after older API writers drain")
+	claims := flags.Bool("prepare-claim-projection", false, "backfill and verify receipt ownership after older API writers drain")
 	layout := flags.Bool("prepare-rollup-layout", false, "separate rollup levels before initial activation")
 	facts := flags.Bool("facts-stdin", false, "import NDJSON facts from stdin")
 	analyze := flags.Bool("analyze", false, "publish parent planner statistics once after the complete backfill")
@@ -80,6 +81,12 @@ func migratePostgres(args []string) error {
 		if err = e.backfillBillingProjection(ctx); err != nil {
 			return err
 		}
+	}
+	if *claims {
+		if err = e.backfillClaimProjection(ctx); err != nil {
+			return err
+		}
+		fmt.Println(`{"phase":"claim_projection_prepared"}`)
 	}
 	if *readIndexes {
 		if err = e.prepareReadIndexes(ctx); err != nil {
