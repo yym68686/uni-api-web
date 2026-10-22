@@ -42,12 +42,28 @@ func TestBoundedBillingAlignmentMatchesFullHistory(t *testing.T) {
 			facts = append(facts, a)
 		}
 	}
+	// Missing companions, duplicate completions across the window boundary, and
+	// headers emitted before the window must retain their old attribution.
+	for _, offset := range []int64{-1, 0, 1, 3599, 3600} {
+		a := attributedFact(fmt.Sprintf("legacy-%d", offset), "key-1", time.Unix(from+offset, 0))
+		a.Kind = "attempt"
+		facts = append(facts, a)
+		if offset == 1 {
+			b := a
+			b.EventID = "early-header"
+			b.Kind = "billing"
+			b.AtMS = time.Unix(from-7200, 0).UnixMilli()
+			facts = append(facts, b)
+		}
+	}
 	if err := e.Import(ctx, "fixtures", "one", facts); err != nil {
 		t.Fatal(err)
 	}
 	// SQL NULL identities in older checkpoints must retain SQL join semantics.
-	if _, err := e.DB.Exec("UPDATE facts SET request_id=NULL WHERE event_id IN ('bill-1','attempt-bill-1')"); err != nil {
-		t.Fatal(err)
+	for i, column := range []string{"request_id", "instance_id", "attempt_id", "provider", "key_id", "model", "upstream_model", "endpoint", "stream"} {
+		if _, err := e.DB.Exec("UPDATE facts SET "+column+"=NULL WHERE event_id IN (?,?)", fmt.Sprintf("bill-%d", i+1), fmt.Sprintf("attempt-bill-%d", i+1)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	cases := []QueryFilter{
 		{}, {SourceIDs: []string{"source"}}, {SourceIDs: []string{}, SourceID: "other"},
@@ -67,8 +83,11 @@ func TestBoundedBillingAlignmentMatchesFullHistory(t *testing.T) {
 			if _, err = tx.ExecContext(ctx, "CREATE TEMP TABLE expected AS "+billingAlignedSQL+"SELECT "+billingProjection+",completions FROM aligned_billing WHERE "+where, args...); err != nil {
 				t.Fatal(err)
 			}
-			sql, scope := scopedBillingAlignment(f, from, to)
-			if _, err = tx.ExecContext(ctx, "CREATE TEMP TABLE actual AS "+sql+"SELECT "+billingProjection+",completions FROM aligned_billing WHERE "+where, append(scope, args...)...); err != nil {
+			sql, parameters := scopedBillingSnapshot(f, from, to)
+			if _, err = tx.ExecContext(ctx, "CREATE TEMP TABLE combined AS "+sql, parameters...); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = tx.ExecContext(ctx, "CREATE TEMP TABLE actual AS SELECT "+billingProjection+",completions FROM combined WHERE event_id IS NOT NULL"); err != nil {
 				t.Fatal(err)
 			}
 			var diff int
@@ -77,6 +96,16 @@ func TestBoundedBillingAlignmentMatchesFullHistory(t *testing.T) {
 			}
 			if diff != 0 {
 				t.Fatalf("%d different records for %+v", diff, f)
+			}
+			legacy := `WITH selected AS (SELECT * FROM facts WHERE kind='attempt' AND ` + where + `) SELECT a.source_id,a.provider,a.model,a.upstream_model,count(*) AS n FROM selected a WHERE NOT EXISTS(SELECT 1 FROM facts b WHERE b.kind='billing' AND b.source_id=a.source_id AND b.instance_id=a.instance_id AND b.request_id=a.request_id AND b.attempt_id=a.attempt_id AND b.provider=a.provider AND b.key_id=a.key_id AND b.model=a.model AND b.upstream_model=a.upstream_model AND b.endpoint=a.endpoint AND b.stream=a.stream) GROUP BY a.source_id,a.provider,a.model,a.upstream_model`
+			if _, err = tx.ExecContext(ctx, "CREATE TEMP TABLE expected_legacy AS "+legacy, args...); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = tx.ExecContext(ctx, `CREATE TEMP TABLE actual_legacy AS SELECT source_id,provider,model,upstream_model,sum(legacy_count)::bigint AS n FROM combined WHERE event_id IS NULL GROUP BY source_id,provider,model,upstream_model`); err != nil {
+				t.Fatal(err)
+			}
+			if err = tx.QueryRow("SELECT count(*) FROM ((SELECT * FROM expected_legacy EXCEPT ALL SELECT * FROM actual_legacy) UNION ALL (SELECT * FROM actual_legacy EXCEPT ALL SELECT * FROM expected_legacy)) AS differences").Scan(&diff); err != nil || diff != 0 {
+				t.Fatalf("missing-correlation counts differ for %+v: rows=%d err=%v", f, diff, err)
 			}
 		})
 	}

@@ -191,24 +191,40 @@ const billingAlignedSQL = `WITH aligned_billing AS (
 
 const billingIdentityColumns = "source_id,instance_id,request_id,attempt_id,provider,key_id,model,upstream_model,endpoint,stream"
 
-// Count all retained completions in the requested identity scope before applying
-// the completion-time window. This preserves late arrivals and reused-ID
-// ambiguity. Joining one aggregate avoids both a per-bill correlated history
-// scan and multiple wide materialized copies of the candidate billing records.
 const billingProjection = "event_id," + billingIdentityColumns + ",at_ms,started_ms,upstream_base,upstream_key_hash,billing_request_ids,status,upstream_error_sha256"
 
-func scopedBillingAlignment(f QueryFilter, from, to int64) (string, []any) {
+// Align billing and find completions with missing correlation in one join of the
+// same retained identity scope. The old separate anti-join read both histories
+// again. A full join also preserves SQL NULL identity semantics: those rows must
+// not acquire a companion merely because both sides have a missing identifier.
+// Missing-correlation rows have a NULL event_id (real facts forbid it) and carry
+// only the count of completions inside the requested window. They cannot enter
+// the receipt-claim or keyset billing paths.
+func scopedBillingSnapshot(f QueryFilter, from, to int64) (string, []any) {
 	scope, scopeArgs := billingWhere(f, 0, 1)
 	scope = strings.TrimPrefix(strings.TrimPrefix(scope, "at_ms>=? AND at_ms<?"), " AND ")
 	if scope == "" {
 		scope = "true"
 	}
-	args := append(append([]any{}, scopeArgs[2:]...), scopeArgs[2:]...)
+	args := []any{from * 1000, to * 1000}
+	args = append(args, scopeArgs[2:]...)
+	args = append(args, scopeArgs[2:]...)
+	args = append(args, from*1000, to*1000)
+	identities := make([]string, 0, 10)
+	for _, column := range strings.Split(billingIdentityColumns, ",") {
+		identities = append(identities, "coalesce(b."+column+",a."+column+") AS "+column)
+	}
 	return `WITH completions AS (
- SELECT ` + billingIdentityColumns + `,max(at_ms) AS completed_at,count(*) AS n
+ SELECT ` + billingIdentityColumns + `,max(at_ms) AS completed_at,count(*) AS n,
+ count(*) FILTER(WHERE at_ms>=? AND at_ms<?) AS legacy_count
  FROM facts WHERE kind='attempt' AND ` + scope + ` GROUP BY ` + billingIdentityColumns + `),
- aligned_billing AS (SELECT b.event_id,b.source_id,b.instance_id,b.request_id,b.attempt_id,b.provider,b.key_id,b.model,b.upstream_model,b.endpoint,b.stream,b.started_ms,b.upstream_base,b.upstream_key_hash,b.billing_request_ids,b.status,b.upstream_error_sha256,coalesce(a.completed_at,b.at_ms) AS at_ms,coalesce(a.n,0) AS completions
- FROM facts b LEFT JOIN completions a USING(` + billingIdentityColumns + `) WHERE b.kind='billing' AND ` + scope + `) `, args
+ bills AS (SELECT * FROM facts WHERE kind='billing' AND ` + scope + `)
+ SELECT b.event_id,` + strings.Join(identities, ",") + `,
+ coalesce(a.completed_at,b.at_ms) AS at_ms,b.started_ms,b.upstream_base,b.upstream_key_hash,b.billing_request_ids,b.status,b.upstream_error_sha256,
+ coalesce(a.n,0) AS completions,CASE WHEN b.event_id IS NULL THEN a.legacy_count ELSE 0 END AS legacy_count
+ FROM bills b FULL JOIN completions a USING(` + billingIdentityColumns + `)
+ WHERE (b.event_id IS NOT NULL AND coalesce(a.completed_at,b.at_ms)>=? AND coalesce(a.completed_at,b.at_ms)<?)
+ OR (b.event_id IS NULL AND a.legacy_count>0)`, args
 }
 
 // Compute competing claims once per request, not once per 5,000-row ledger page.
@@ -248,9 +264,7 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 	operation := s.engine.observeRequestOperation(ctx, "channel_spend")
 	defer func() { operation.finish(resultErr) }()
 	operation.stage("alignment")
-	where, args := billingWhere(f, from, to)
-	alignment, scopeArgs := scopedBillingAlignment(f, from, to)
-	alignedArgs := append(append([]any{}, scopeArgs...), args...)
+	alignment, alignedArgs := scopedBillingSnapshot(f, from, to)
 	// Keep one immutable fact snapshot while processing bounded Go/ledger batches.
 	// Materialize alignment once; repeating it for each page rescans all history.
 	snapshot, closeSnapshot, err := s.engine.DB.analyticalSnapshot(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
@@ -278,7 +292,7 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 	if err = snapshot.QueryRowContext(ctx, "SELECT claims_history_complete,evicted_before_ms FROM storage_state WHERE singleton").Scan(&claimsComplete, &evictedBefore); err != nil {
 		return nil, err
 	}
-	if _, err = snapshot.ExecContext(ctx, `CREATE TEMP TABLE console_spend_facts AS `+alignment+`SELECT * FROM aligned_billing WHERE `+where, alignedArgs...); err != nil {
+	if _, err = snapshot.ExecContext(ctx, `CREATE TEMP TABLE console_spend_facts AS `+alignment, alignedArgs...); err != nil {
 		return nil, fmt.Errorf("billing alignment: %w", err)
 	}
 	// Keyset pages must seek once, not sort the remaining full result on each
@@ -292,7 +306,7 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 	// A full Go ledger page has at most 5,000 facts and 15,000 identifiers.
 	// The batched GIN probe handles that set once per partition; limiting it to
 	// 256 facts sent ordinary model filters back to a full history expansion.
-	if err = snapshot.QueryRowContext(ctx, "SELECT count(*)<=? FROM (SELECT 1 FROM console_spend_facts LIMIT ?) f", billingFactBatchSize, billingFactBatchSize+1).Scan(&narrow); err != nil {
+	if err = snapshot.QueryRowContext(ctx, "SELECT count(*)<=? FROM (SELECT 1 FROM console_spend_facts WHERE event_id IS NOT NULL LIMIT ?) f", billingFactBatchSize, billingFactBatchSize+1).Scan(&narrow); err != nil {
 		return nil, err
 	}
 	if narrow {
@@ -319,12 +333,9 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 		}
 		return totals[id]
 	}
-	// Completion facts without any companion correlation fact are old data (or a
-	// missing export), never proof of zero upstream cost. Search companions outside
-	// this window because generic streaming headers can precede stream completion.
-	legacySQL := `WITH selected AS (SELECT * FROM facts WHERE kind='attempt' AND ` + where + `) SELECT a.source_id,a.provider,a.model,a.upstream_model,count(*) FROM selected a WHERE NOT EXISTS(SELECT 1 FROM facts b WHERE b.kind='billing' AND b.source_id=a.source_id AND b.instance_id=a.instance_id AND b.request_id=a.request_id AND b.attempt_id=a.attempt_id AND b.provider=a.provider AND b.key_id=a.key_id AND b.model=a.model AND b.upstream_model=a.upstream_model AND b.endpoint=a.endpoint AND b.stream=a.stream) GROUP BY a.source_id,a.provider,a.model,a.upstream_model`
-	legacySQL = strings.ReplaceAll(legacySQL, "FROM facts", "FROM "+billingTable)
-	rows, err := snapshot.QueryContext(ctx, legacySQL, args...)
+	// The full join already checked companions outside the time window, before
+	// filtering aligned billing. Reuse its exact missing-correlation counts.
+	rows, err := snapshot.QueryContext(ctx, `SELECT source_id,provider,model,upstream_model,sum(legacy_count)::bigint FROM console_spend_facts WHERE event_id IS NULL GROUP BY source_id,provider,model,upstream_model`)
 	if err != nil {
 		return nil, err
 	}

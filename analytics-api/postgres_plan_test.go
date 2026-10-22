@@ -22,9 +22,8 @@ func TestPostgresBillingPlan(t *testing.T) {
 	f := QueryFilter{SourceID: "source", KeyID: "caller"}
 	now := time.Now()
 	from, to := now.Add(-24*time.Hour).Unix(), now.Unix()
-	q, a := scopedBillingAlignment(f, from, to)
-	where, b := billingWhere(f, from, to)
-	rows, err := e.DB.QueryContext(context.Background(), "EXPLAIN "+q+"SELECT * FROM aligned_billing WHERE "+where, append(a, b...)...)
+	q, a := scopedBillingSnapshot(f, from, to)
+	rows, err := e.DB.QueryContext(context.Background(), "EXPLAIN "+q, a...)
 	if err != nil {
 		t.Fatal(err)
 	}

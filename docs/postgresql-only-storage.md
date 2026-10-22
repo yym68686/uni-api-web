@@ -150,3 +150,12 @@ the billing facts being reconciled. Receipt ownership checks still include
 competing claims from every source, caller and provider; narrowing the table
 cannot turn an ambiguous receipt into a confirmed charge. Clearing the filter
 restores the broad query, and an empty result makes no billing request.
+
+Billing alignment and missing-correlation accounting share one transaction-local
+full join of the retained billing and completion identity scope. Completions are
+counted across the retained history before applying the UI time window, while
+missing-correlation counts include only completions inside that window. This
+avoids a second historical anti-join and preserves late headers, reused IDs and
+SQL NULL identity semantics. The result is recomputed from the current snapshot;
+it is not a persisted or stale browser cache. Global competing receipt claims
+and history-limited financial status still use their existing checks.
