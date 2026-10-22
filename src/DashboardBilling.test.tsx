@@ -17,6 +17,7 @@ it("shows and refreshes channel statistics independently of slow or failed billi
       first_text: { p50_ms: 1200, p95_ms: 2000, sample_count: 9 }, estimated_cost_usd: 2 },
   }));
   let metricsReads = 0;
+  const metricsModels: (string | null)[] = [];
   let finishRefresh: (() => void) | undefined;
   const bills: { url: URL; signal: AbortSignal; fail: () => void }[] = [];
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
@@ -30,8 +31,9 @@ it("shows and refreshes channel statistics independently of slow or failed billi
       // The former combined request cannot finish while billing is pending.
       if (u.searchParams.has("include_spend")) throw new Error("signal timed out");
       metricsReads++;
+      metricsModels.push(u.searchParams.get("model"));
       if (metricsReads === 2) await new Promise<void>(resolve => { finishRefresh = resolve; });
-      return Response.json({ data: channels, total: { ...emptyStats(), requests: 20 }, from: 100, to: 200 + metricsReads, coverage: "full" });
+      return Response.json({ data: channels.filter(row => !u.searchParams.get("model") || row.model === u.searchParams.get("model")), total: { ...emptyStats(), requests: 20 }, from: 100, to: 200 + metricsReads, coverage: "full" });
     }
     if (u.pathname.endsWith("/channel-spend")) return new Promise<Response>((resolve, reject) => {
       const signal = init!.signal!;
@@ -46,6 +48,7 @@ it("shows and refreshes channel statistics independently of slow or failed billi
   const table = await screen.findByRole("table");
   expect(within(table).getByText("90.0%")).toBeVisible();
   await waitFor(() => expect(bills).toHaveLength(1));
+  expect(metricsModels).toEqual(["gpt-6-luna"]);
   expect(Object.fromEntries(bills[0].url.searchParams)).toMatchObject({ source_id: "primary", key_id: "caller", model: "gpt-6-luna", from: "100", to: "201" });
   expect(screen.queryByText("暂时无法读取渠道")).not.toBeInTheDocument();
 
@@ -64,9 +67,14 @@ it("shows and refreshes channel statistics independently of slow or failed billi
 
   await user.selectOptions(screen.getByLabelText("模型筛选"), "gpt-6-astra");
   await waitFor(() => expect(bills).toHaveLength(3));
-  expect(metricsReads).toBe(2);
+  expect(metricsReads).toBe(3);
+  expect(metricsModels).toEqual(["gpt-6-luna", "gpt-6-luna", "gpt-6-astra"]);
   expect(bills[2].url.searchParams.get("model")).toBe("gpt-6-astra");
-  expect(bills[2].url.searchParams.get("to")).toBe("202");
+  expect(bills[2].url.searchParams.get("to")).toBe("203");
+  expect(screen.getByRole("option", { name: "gpt-6-luna" })).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "总览" }));
+  await waitFor(() => expect(metricsReads).toBe(4));
+  expect(metricsModels[3]).toBeNull();
   app.unmount();
   client.clear();
 });

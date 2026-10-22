@@ -1099,16 +1099,17 @@ function Dashboard({
     refetchInterval: initializationRetryInterval,
     staleTime: 60_000,
   });
-  // Keep optional receipt reconciliation out of the critical list request.
-  // Metrics already contain every model; switching the visible model only
-  // changes the separately scoped billing query.
-  const metricsKey = ["metrics", connection.session, keyId, effectiveWindow, effectiveEndpoint, effectiveStream, "statistics-v2"];
+  // The independent catalog supplies model choices. Only aggregate the selected
+  // model for channel statistics; overview still requests its complete scope.
+  const statisticsModel = channelView ? model : "";
+  const metricsParams = channelParams(keyId, effectiveWindow, statisticsModel, effectiveEndpoint, effectiveStream);
+  const metricsKey = ["metrics", connection.session, keyId, effectiveWindow, effectiveEndpoint, effectiveStream, "statistics-v3", statisticsModel];
   const metrics = useQuery({
     queryKey: metricsKey,
     queryFn: ({ signal }) =>
       readMetrics(
         connection,
-        "/v1/channel-metrics?" + params,
+        "/v1/channel-metrics?" + metricsParams,
         signal,
         effectiveEndpoint,
         effectiveStream,
