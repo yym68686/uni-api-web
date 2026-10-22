@@ -6,10 +6,72 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestQualityBindingsAccountScopeMatchesFullAuthorizedBindings(t *testing.T) {
+	s, account, owner := subUsageTestService(t)
+	ctx := context.Background()
+	other, foreign := account+"-other", account+"-foreign"
+	source := "scoped-quality-" + randomID()[:8]
+	if _, err := s.control.saveSource(ctx, controlSource{sourceView: sourceView{ID: source, Name: "fixture", Base: "https://gateway.example"}, Key: "secret"}, false); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		s.control.db.Exec("DELETE FROM console_sources WHERE id=$1", source)
+		s.control.db.Exec("DELETE FROM console_sub_accounts WHERE id=ANY($1::text[])", []string{other, foreign})
+	})
+	for _, a := range []struct{ id, owner string }{{other, owner}, {foreign, owner + "-foreign"}} {
+		if _, err := s.control.db.Exec(`INSERT INTO console_sub_accounts(id,owner,name,base,email,encrypted_auth) VALUES($1,$2,'site','https://usage.example','fixture','')`, a.id, a.owner); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var channels []retainedChannel
+	settings := map[string]json.RawMessage{}
+	for _, id := range []string{account, other, foreign} {
+		for _, g := range []int64{7, 8} {
+			if _, err := s.control.db.Exec(`INSERT INTO console_sub_targets(account_id,group_id,name,platform) VALUES($1,$2,'group','openai')`, id, g); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range subProviderNames(id, g, "caller") {
+				channels = append(channels, retainedChannel{Provider: name, KeyID: "caller", Base: "https://usage.example/v1/responses"})
+			}
+		}
+	}
+	changed := channels[0].Provider
+	settings[changed] = json.RawMessage(`{"set":{"/api":["changed"]}}`)
+	enc, err := s.control.encrypt(mustJSON(retainedSnapshot{Version: 2, Channels: channels, Settings: settings}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.control.db.Exec(`INSERT INTO console_control_snapshots(source_id,encrypted_snapshot) VALUES($1,$2)`, source, enc); err != nil {
+		t.Fatal(err)
+	}
+	full, err := s.qualityBindings(ctx, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{account, other, foreign, "absent"} {
+		want := []qualityBinding{}
+		for _, b := range full {
+			if b.Account == id {
+				want = append(want, b)
+			}
+		}
+		got, err := s.qualityBindingsForAccount(ctx, owner, id)
+		if err != nil || !reflect.DeepEqual(got, want) {
+			t.Fatal("scoping changed authorized binding", id, got, want, err)
+		}
+		for _, b := range got {
+			if b.Provider == changed {
+				t.Fatal("changed credential inherited old evidence")
+			}
+		}
+	}
+}
 
 func TestSharedQualityBackfillsBothOriginsOnceAndSharesLatest(t *testing.T) {
 	s, account, owner := subUsageTestService(t)

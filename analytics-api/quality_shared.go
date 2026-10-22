@@ -23,20 +23,25 @@ func qualityChannelID(source, provider string) string { return source + "\n" + p
 // Multi-group/ambiguous configured providers cannot identify the key a probe
 // used, so their checks remain local instead of being copied into every group.
 func (s *Service) qualityBindings(ctx context.Context, owner string) ([]qualityBinding, error) {
+	return s.qualityBindingsForAccount(ctx, owner, "")
+}
+
+func (s *Service) qualityBindingsForAccount(ctx context.Context, owner, accountID string) ([]qualityBinding, error) {
 	configured, err := s.configuredBindings(ctx, owner)
 	if err != nil {
 		return nil, err
 	}
 	bindings := map[string]qualityBinding{}
 	for _, c := range configured {
-		if c.AccountID != "" && c.GroupID > 0 && c.BindingStatus == "matched" {
+		if c.AccountID != "" && c.GroupID > 0 && c.BindingStatus == "matched" && (accountID == "" || c.AccountID == accountID) {
 			bindings[qualityChannelID(c.SourceID, c.Provider)] = qualityBinding{c.SourceID, c.Provider, c.AccountID, c.GroupID}
 		}
 	}
-	refs, err := s.control.subChannelRefs(ctx, owner)
+	refs, err := s.control.subChannelRefsForAccount(ctx, owner, accountID)
 	if err != nil {
 		return nil, err
 	}
+	providerRefs := newSubProviderRefIndex(refs)
 	rows, err := s.control.db.QueryContext(ctx, `SELECT p.source_id,p.encrypted_snapshot FROM console_control_snapshots p JOIN console_sources s ON s.id=p.source_id WHERE s.enabled AND p.encrypted_snapshot<>''`)
 	if err != nil {
 		return nil, err
@@ -71,10 +76,8 @@ func (s *Service) qualityBindings(ctx context.Context, owner string) ([]qualityB
 			if changed {
 				continue
 			}
-			for _, ref := range refs {
-				if matchesSubProvider(c.Provider, ref.Account, ref.Group, c.KeyID) && subBindingSite(c.Base) == subBindingSite(ref.Base) {
-					bindings[qualityChannelID(source, c.Provider)] = qualityBinding{source, c.Provider, ref.Account, ref.Group}
-				}
+			for _, ref := range providerRefs.matches(c.Provider, c.KeyID, c.Base) {
+				bindings[qualityChannelID(source, c.Provider)] = qualityBinding{source, c.Provider, ref.Account, ref.Group}
 			}
 		}
 	}
@@ -110,18 +113,9 @@ func (s *Service) sharedQuality(ctx context.Context, owner string) (sharedQualit
 func (s *Service) sharedQualityForAccount(ctx context.Context, owner, accountID string) (sharedQuality, error) {
 	out := sharedQuality{Groups: map[string]sharedQualityProjection{}}
 	var err error
-	out.Bindings, err = s.qualityBindings(ctx, owner)
+	out.Bindings, err = s.qualityBindingsForAccount(ctx, owner, accountID)
 	if err != nil {
 		return out, err
-	}
-	if accountID != "" {
-		filtered := out.Bindings[:0]
-		for _, binding := range out.Bindings {
-			if binding.Account == accountID {
-				filtered = append(filtered, binding)
-			}
-		}
-		out.Bindings = filtered
 	}
 	if len(out.Bindings) > 0 {
 		raw, _ := json.Marshal(out.Bindings)
