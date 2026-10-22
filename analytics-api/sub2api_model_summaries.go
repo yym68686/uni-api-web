@@ -16,7 +16,7 @@ type subModelSummaryCursor struct {
 
 var errSubSummaryBackfillBusy = errors.New("model summary backfill busy")
 
-// Each transaction reads at most 128 historical results. A single database-wide
+// Each transaction visits at most 128 historical identities. A single database-wide
 // worker is active per batch, including during rolling releases. The cursor
 // scans the metadata once, rather than re-scanning an increasing filled prefix.
 func (s *controlStore) backfillSubModelSummaries(ctx context.Context, after subModelSummaryCursor) (next subModelSummaryCursor, inserted int, done bool, err error) {
@@ -39,13 +39,14 @@ func (s *controlStore) backfillSubModelSummaries(ctx context.Context, after subM
 	// published a newer result via the trigger. Never overwrite that projection
 	// with the older SELECT snapshot. Deletes remain protected by the FK.
 	err = tx.QueryRowContext(ctx, `WITH batch AS MATERIALIZED (
- SELECT m.account_id,m.group_id,m.model,m.result FROM console_sub_models m
+ SELECT m.account_id,m.group_id,m.model FROM console_sub_models m
  WHERE (m.account_id,m.group_id,m.model)>($1,$2,$3)
- AND NOT EXISTS (SELECT 1 FROM console_sub_model_summaries ms WHERE ms.account_id=m.account_id AND ms.group_id=m.group_id AND ms.model=m.model)
  ORDER BY m.account_id,m.group_id,m.model LIMIT 128
 ), filled AS (
  INSERT INTO console_sub_model_summaries(account_id,group_id,model,result)
- SELECT account_id,group_id,model,console_sub_model_summary_v1(result) FROM batch
+ SELECT m.account_id,m.group_id,m.model,console_sub_model_summary_v1(m.result)
+ FROM batch b JOIN console_sub_models m USING(account_id,group_id,model)
+ WHERE NOT EXISTS (SELECT 1 FROM console_sub_model_summaries ms WHERE ms.account_id=b.account_id AND ms.group_id=b.group_id AND ms.model=b.model)
  ON CONFLICT(account_id,group_id,model) DO NOTHING RETURNING 1
 )
 SELECT account_id,group_id,model,(SELECT count(*) FROM filled) FROM batch
@@ -72,7 +73,7 @@ func (s *Service) subModelSummaryBackfillLoop(ctx context.Context) {
 				return
 			}
 			if time.Since(lastLog) >= 10*time.Second {
-				log.Printf("sub_model_summary_backfill status=retry rows=%d elapsed_ms=%d", rows, time.Since(started).Milliseconds())
+				log.Printf("sub_model_summary_backfill status=retry rows=%d elapsed_ms=%d class=%s", rows, time.Since(started).Milliseconds(), databaseErrorClass(err))
 				lastLog = time.Now()
 			}
 			if !waitStartup(ctx, time.Second) {

@@ -98,3 +98,10 @@ account credentials or current transactional request counters.
 Query acceptance includes real node measurements. Passing local fixtures or
 health probes does not establish the earlier one-second UI target. Record
 remaining latency and ingestion freshness in the release report.
+
+Narrow receipt attribution scopes use a partial GIN index on request identifiers
+to check competing claims across all retained sources and keys. Prepare populated
+databases explicitly with `--prepare-receipt-indexes`; each hourly child is built
+concurrently and attached with a short metadata-lock timeout. No history scan
+runs at application startup. The query selects this path only after the entire
+parent index is valid, and broad scopes retain the bulk aggregation path.

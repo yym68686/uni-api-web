@@ -221,6 +221,17 @@ const billingClaimsSQL = `CREATE TEMP TABLE console_spend_claims AS
  FROM target t JOIN claims c USING(upstream_base,upstream_key_hash,rid)
  GROUP BY t.upstream_base,t.upstream_key_hash,t.rid`
 
+// Narrow UI scopes need only their receipt identifiers. Probe each hourly GIN
+// index once for the entire identifier set, not once per identifier per hour.
+// Then preserve global source/key competitors and duplicate-header semantics.
+const billingClaimsSeekSQL = `CREATE TEMP TABLE console_spend_claims AS
+ WITH target AS MATERIALIZED (SELECT DISTINCT ` + billingSiteSQL + ` AS upstream_base,upstream_key_hash,unnest(billing_request_ids) AS rid FROM console_spend_facts),
+ claims AS (SELECT event_id,` + billingSiteSQL + ` AS upstream_base,upstream_key_hash,unnest(billing_request_ids) AS rid FROM facts
+ WHERE kind='billing' AND billing_request_ids && ARRAY(SELECT DISTINCT rid FROM target))
+ SELECT t.upstream_base,t.upstream_key_hash,t.rid,count(DISTINCT c.event_id) AS n
+ FROM target t JOIN claims c USING(upstream_base,upstream_key_hash,rid)
+ GROUP BY t.upstream_base,t.upstream_key_hash,t.rid`
+
 func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f QueryFilter, from, to int64) (result []attributedSpend, resultErr error) {
 	ctx, unregisterSpend := s.engine.registerSpend(ctx)
 	defer unregisterSpend()
@@ -234,7 +245,7 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 		return nil, err
 	}
 	defer release()
-	operation := s.engine.observeOperation("channel_spend")
+	operation := s.engine.observeRequestOperation(ctx, "channel_spend")
 	defer func() { operation.finish(resultErr) }()
 	operation.stage("alignment")
 	where, args := billingWhere(f, from, to)
@@ -267,7 +278,20 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 		return nil, err
 	}
 	operation.stage("receipt_claims")
-	if _, err = snapshot.ExecContext(ctx, billingClaimsSQL); err != nil {
+	claimQuery := billingClaimsSQL
+	var narrow, indexed bool
+	if err = snapshot.QueryRowContext(ctx, "SELECT count(*)<=256 FROM (SELECT 1 FROM console_spend_facts LIMIT 257) f").Scan(&narrow); err != nil {
+		return nil, err
+	}
+	if narrow {
+		if err = snapshot.QueryRowContext(ctx, "SELECT coalesce((SELECT indisvalid FROM pg_index WHERE indexrelid=to_regclass('facts_receipt_ids')),false)").Scan(&indexed); err != nil {
+			return nil, err
+		}
+		if indexed {
+			claimQuery = billingClaimsSeekSQL
+		}
+	}
+	if _, err = snapshot.ExecContext(ctx, claimQuery); err != nil {
 		return nil, fmt.Errorf("billing receipt claims: %w", err)
 	}
 	operation.stage("legacy_completions")

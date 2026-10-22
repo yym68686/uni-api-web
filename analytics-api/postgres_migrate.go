@@ -21,6 +21,7 @@ func migratePostgres(args []string) error {
 	merge := flags.Bool("merge-final-prices", false, "merge final legacy writes after old writers have drained")
 	indexes := flags.Bool("prepare-indexes", false, "prepare the existing receipt FIFO index without blocking writes")
 	readIndexes := flags.Bool("prepare-analytics-indexes", false, "prepare partitioned request-usage indexes concurrently")
+	receiptIndexes := flags.Bool("prepare-receipt-indexes", false, "prepare receipt identity lookup indexes concurrently")
 	usage := flags.Bool("prepare-usage-projection", false, "backfill and verify compact transactional usage rows")
 	layout := flags.Bool("prepare-rollup-layout", false, "separate rollup levels before initial activation")
 	facts := flags.Bool("facts-stdin", false, "import NDJSON facts from stdin")
@@ -78,6 +79,11 @@ func migratePostgres(args []string) error {
 			return err
 		}
 		fmt.Println(`{"phase":"analytics_indexes_prepared"}`)
+	}
+	if *receiptIndexes {
+		if err = e.prepareFactIndex(ctx, "facts_receipt_ids", "receipt_ids", receiptIndexDefinition); err != nil {
+			return err
+		}
 	}
 	if *indexes {
 		conn, err := e.DB.DB.Conn(ctx)

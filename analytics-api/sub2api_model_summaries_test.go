@@ -92,6 +92,13 @@ func TestSubModelSummaryRollingBackfillAndLegacyWrites(t *testing.T) {
 	if read(false)[1].Result.Availability.Text != "original detail" {
 		t.Fatal("backfill modified detail")
 	}
+	// A new replica must advance through already-filled identities in bounded
+	// pages. Filtering missing rows before LIMIT scanned the complete filled
+	// history, exceeded the production 2s budget, and retried from zero forever.
+	restarted, count, done, err := s.control.backfillSubModelSummaries(ctx, subModelSummaryCursor{})
+	if err != nil || count != 0 || done || restarted.model != "m-127" {
+		t.Fatal("restart scanned beyond the first bounded page", restarted, count, done, err)
+	}
 	// Writes in the old application shape must atomically update the summary.
 	exec(`UPDATE console_sub_models SET state='done',result='{"availability":{"id":"new-probe","status":"error","text":"new private detail"}}' WHERE model='m-001'`)
 	if p := read(true)[1].Result.Availability; p.ID != "new-probe" || p.Status != "error" || p.Text != "" {

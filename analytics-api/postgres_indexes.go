@@ -9,6 +9,7 @@ import (
 )
 
 const usageIndexDefinition = "(source_id,input_tokens,at_ms) WHERE kind NOT IN ('billing','trace') AND input_tokens IS NOT NULL"
+const receiptIndexDefinition = "USING gin(billing_request_ids) WHERE kind='billing'"
 
 func usageIndexChecksum() string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(usageIndexDefinition)))
@@ -53,6 +54,9 @@ func (e *Engine) initializeEmptyReadIndexes(ctx context.Context) error {
 	if _, err = tx.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS facts_long_usage ON facts "+usageIndexDefinition); err != nil {
 		return err
 	}
+	if _, err = tx.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS facts_receipt_ids ON facts "+receiptIndexDefinition); err != nil {
+		return err
+	}
 	if _, err = tx.ExecContext(ctx, "INSERT INTO schema_versions(version,checksum) VALUES('0002',?) ON CONFLICT DO NOTHING", usageIndexChecksum()); err != nil {
 		return err
 	}
@@ -63,6 +67,17 @@ func (e *Engine) initializeEmptyReadIndexes(ctx context.Context) error {
 // leaf concurrently, then attach it using short metadata operations. This never
 // rewrites facts or changes account/configuration tables.
 func (e *Engine) prepareReadIndexes(ctx context.Context) error {
+	if err := e.prepareFactIndex(ctx, "facts_long_usage", "long_usage", usageIndexDefinition); err != nil {
+		return err
+	}
+	_, err := e.DB.ExecContext(ctx, "INSERT INTO schema_versions(version,checksum) VALUES('0002',?) ON CONFLICT DO NOTHING", usageIndexChecksum())
+	if err != nil {
+		return err
+	}
+	return e.readIndexesReady(ctx)
+}
+
+func (e *Engine) prepareFactIndex(ctx context.Context, parent, suffix, definition string) error {
 	conn, err := e.DB.DB.Conn(ctx)
 	if err != nil {
 		return err
@@ -83,7 +98,7 @@ func (e *Engine) prepareReadIndexes(ctx context.Context) error {
 	if _, err = conn.ExecContext(ctx, "SET statement_timeout='60s'; SET lock_timeout='1s'; SET maintenance_work_mem='32MB'"); err != nil {
 		return err
 	}
-	if _, err = conn.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS facts_long_usage ON ONLY facts "+usageIndexDefinition); err != nil {
+	if _, err = conn.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS "+parent+" ON ONLY facts "+definition); err != nil {
 		return err
 	}
 	rows, err := conn.QueryContext(ctx, "SELECT start_ms,name FROM fact_partitions ORDER BY start_ms")
@@ -111,13 +126,13 @@ func (e *Engine) prepareReadIndexes(ctx context.Context) error {
 	}
 	for _, name := range names {
 		var attached bool
-		if err = conn.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pg_inherits h JOIN pg_index i ON i.indexrelid=h.inhrelid WHERE h.inhparent='facts_long_usage'::regclass AND i.indrelid=$1::regclass)`, name).Scan(&attached); err != nil {
+		if err = conn.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pg_inherits h JOIN pg_index i ON i.indexrelid=h.inhrelid WHERE h.inhparent=$1::regclass AND i.indrelid=$2::regclass AND i.indisvalid)`, parent, name).Scan(&attached); err != nil {
 			return err
 		}
 		if attached {
 			continue
 		}
-		index := name + "_long_usage"
+		index := name + "_" + suffix
 		// Concurrent builds may wait for old snapshots or autovacuum without
 		// blocking normal reads/writes. Keep the short limit for metadata swaps,
 		// but allow this nonblocking wait to finish within the maintenance budget.
@@ -133,18 +148,23 @@ func (e *Engine) prepareReadIndexes(ctx context.Context) error {
 				return err
 			}
 		}
-		if _, err = conn.ExecContext(ctx, "CREATE INDEX CONCURRENTLY IF NOT EXISTS "+index+" ON "+name+" "+usageIndexDefinition); err != nil {
+		if _, err = conn.ExecContext(ctx, "CREATE INDEX CONCURRENTLY IF NOT EXISTS "+index+" ON "+name+" "+definition); err != nil {
 			return err
 		}
 		if _, err = conn.ExecContext(ctx, "SET lock_timeout='1s'"); err != nil {
 			return err
 		}
-		if _, err = conn.ExecContext(ctx, "ALTER INDEX facts_long_usage ATTACH PARTITION "+index); err != nil {
+		if _, err = conn.ExecContext(ctx, "ALTER INDEX "+parent+" ATTACH PARTITION "+index); err != nil {
 			return err
 		}
+		fmt.Printf("{\"phase\":\"fact_index_partition_ready\",\"index\":%q,\"partition\":%q}\n", parent, name)
 	}
-	if _, err = conn.ExecContext(ctx, "INSERT INTO schema_versions(version,checksum) VALUES('0002',$1) ON CONFLICT DO NOTHING", usageIndexChecksum()); err != nil {
+	var valid bool
+	if err = conn.QueryRowContext(ctx, "SELECT indisvalid FROM pg_index WHERE indexrelid=$1::regclass", parent).Scan(&valid); err != nil {
 		return err
 	}
-	return e.readIndexesReady(ctx)
+	if !valid {
+		return errors.New("fact index is not valid")
+	}
+	return nil
 }

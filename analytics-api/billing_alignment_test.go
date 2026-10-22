@@ -111,6 +111,16 @@ func TestBillingClaimsRemainGlobalAcrossPagesAndKeys(t *testing.T) {
 	if _, err = tx.Exec(billingClaimsSQL); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = tx.Exec("ALTER TABLE console_spend_claims RENAME TO expected_claims"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec(billingClaimsSeekSQL); err != nil {
+		t.Fatal(err)
+	}
+	var different bool
+	if err = tx.QueryRow(`SELECT EXISTS((SELECT * FROM expected_claims EXCEPT ALL SELECT * FROM console_spend_claims) UNION ALL (SELECT * FROM console_spend_claims EXCEPT ALL SELECT * FROM expected_claims))`).Scan(&different); err != nil || different {
+		t.Fatal("indexed claims differ from full global history", different, err)
+	}
 	rows, err := tx.Query("SELECT rid,n FROM console_spend_claims ORDER BY rid")
 	if err != nil {
 		t.Fatal(err)
