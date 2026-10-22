@@ -29,6 +29,9 @@ transactionally. No fixed number of days or requests determines retention. The
 oldest-hour eviction boundary, loss counters and actual event coverage are surfaced.
 Receipt caches follow the same floor through bounded idle-account transactions;
 DELETE frees reusable heap/index pages but does not immediately shrink that table.
+Finalized per-request receipt tasks follow that floor too; pending tasks and
+active account leases are preserved. Both receipt retention indexes are prepared
+concurrently before releasing against a populated database.
 A compact, capped retired receipt-claim index preserves ambiguity across eviction.
 When complete ownership evidence is no longer retained, attribution is explicitly
 history_limited. Automatic rules require full window coverage after collection,
@@ -68,3 +71,30 @@ Legacy objects are not deleted by migration. Keeping them unchanged is migration
 evidence, not a newly configured backup. Once runtime has switched it does not read,
 write or depend on them. Encrypted legacy storage metadata is retained inertly for
 rollback; a broken legacy storage credential cannot block PostgreSQL reads.
+
+## Transactional read projections and migration checks
+
+Pricing reads compact usage rows committed with facts and rollups. Minute/hour/day
+rollups use separate physical children so a current-hour query need not load minute
+history. No browser snapshot substitutes for current committed data. Prepare the
+existing data with `--prepare-analytics-indexes`, `--prepare-usage-projection`, and
+`--prepare-rollup-layout`; then run `--analyze` once and `--verify-queries`. The
+initial layout migration is rejected after source activation and compares every
+column in both directions before committing each hour. Normal application startup
+only checks the completed schema/layout and never rebuilds historical data.
+
+Retired receipt ownership is preserved separately from disposable raw facts. Late
+expired billing records retain idempotent ownership digests. Incomplete ownership
+history omits a cost lower bound on the wire, including for already-open old clients,
+so a partial dataset cannot silently become a financial claim.
+
+Legacy ownership coverage must be recorded before setting a migration phase.
+When its exact claim set exceeds the bounded index, use the explicit
+`--mark-legacy-claims-incomplete` migration step; this preserves uncertainty
+instead of falsely promoting retained history into complete financial evidence.
+This limit affects exact historical receipt attribution, not saved prices,
+account credentials or current transactional request counters.
+
+Query acceptance includes real node measurements. Passing local fixtures or
+health probes does not establish the earlier one-second UI target. Record
+remaining latency and ingestion freshness in the release report.

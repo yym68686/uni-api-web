@@ -59,6 +59,20 @@ type unresolvedSpendAttempt struct {
 	Reason    string `json:"reason"`
 }
 
+func (s attributedSpend) MarshalJSON() ([]byte, error) {
+	type fields attributedSpend
+	var matched *float64
+	if s.Status != "history_limited" {
+		matched = &s.MatchedAmount
+	}
+	// Older clients interpret any matched amount as a proven lower bound.
+	// Missing ownership history cannot provide that guarantee.
+	return json.Marshal(struct {
+		fields
+		MatchedCost *float64 `json:"matched_cost_usd,omitempty"`
+	}{fields(s), matched})
+}
+
 func (s *attributedSpend) unresolved(b billingFact, reason string) {
 	if len(s.UnresolvedSamples) < 8 {
 		s.UnresolvedSamples = append(s.UnresolvedSamples, unresolvedSpendAttempt{b.Request, b.Attempt, b.Endpoint, b.Status, b.At / 1000, reason})

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -62,7 +61,7 @@ func (e *Engine) KeyRequestStats(ctx context.Context, f QueryFilter) (KeyRequest
 	// winning provider. A failure before dispatch still counts as one failure.
 	rows, err := e.DB.QueryContext(ctx, `SELECT source_id,key_id,sum(n)::BIGINT,
  coalesce(sum(n) FILTER (WHERE outcome IN ('success','completed')),0)::BIGINT
- FROM rollups WHERE `+strings.Join(where, " AND ")+` GROUP BY source_id,key_id ORDER BY source_id,key_id`, args...)
+ FROM `+rollupReadSQL(where)+` GROUP BY source_id,key_id ORDER BY source_id,key_id`, args...)
 	if err != nil {
 		return KeyRequestStatsResult{}, err
 	}

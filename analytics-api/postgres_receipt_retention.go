@@ -43,7 +43,7 @@ func (s *Service) trimReceiptHistory(ctx context.Context) error {
 		return err
 	}
 	// Active lease owners retain their rows until their scan has completed.
-	rows, err := tx.QueryContext(ctx, `SELECT id FROM console_sub_accounts a WHERE (usage_lease_until IS NULL OR usage_lease_until<now()) AND EXISTS(SELECT 1 FROM console_sub_spend_logs l WHERE l.account_id=a.id AND l.at_ms<$1) ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT 4`, floor)
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM console_sub_accounts a WHERE (usage_lease_until IS NULL OR usage_lease_until<now()) AND (EXISTS(SELECT 1 FROM console_sub_spend_logs l WHERE l.account_id=a.id AND l.at_ms<$1) OR EXISTS(SELECT 1 FROM console_sub_usage u WHERE u.account_id=a.id AND u.status<>'pending' AND u.started_at<$1::bigint/1000)) ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT 4`, floor)
 	if err != nil {
 		return err
 	}
@@ -65,6 +65,12 @@ func (s *Service) trimReceiptHistory(ctx context.Context) error {
 		return nil
 	}
 	_, err = tx.ExecContext(ctx, `DELETE FROM console_sub_spend_logs WHERE ctid IN (SELECT ctid FROM console_sub_spend_logs WHERE account_id=ANY($1::text[]) AND at_ms<$2 ORDER BY at_ms LIMIT 5000)`, accounts, floor)
+	if err != nil {
+		return err
+	}
+	// Completed per-request receipt tasks are history too. Keep pending work
+	// and active leases, but do not let finalized request rows grow forever.
+	_, err = tx.ExecContext(ctx, `DELETE FROM console_sub_usage WHERE ctid IN (SELECT ctid FROM console_sub_usage WHERE account_id=ANY($1::text[]) AND status<>'pending' AND started_at<$2::bigint/1000 ORDER BY started_at LIMIT 5000)`, accounts, floor)
 	if err != nil {
 		return err
 	}

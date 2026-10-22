@@ -15,6 +15,7 @@ export interface SubChannelSpend {
     | "unsupported"
     | "unmatched"
     | "ambiguous"
+    | "history_limited"
     | "no_records";
   actual_cost_usd: number | null;
   requests?: number | null;
@@ -377,6 +378,7 @@ export function SubChannelSpendValue({
     (data?.matched_attempts || 0) + (data?.confirmed_unbilled_attempts || 0);
   const partial =
     !known &&
+    data?.status !== "history_limited" &&
     data?.scope === "matched_requests" &&
     verified > 0 &&
     typeof data.matched_cost_usd === "number" &&
@@ -447,6 +449,7 @@ export function SubChannelSpendValue({
             : "尚未确认此渠道的 sub2api 账号关联。";
   let label = "未确认";
   if (known) label = money(data.actual_cost_usd!);
+  else if (data?.status === "history_limited") label = "历史不完整";
   else if (partial) label = `≥${money(data.matched_cost_usd!)}`;
   else if (query?.isError || data?.status === "error" || data?.sync_error)
     label = "查询失败";

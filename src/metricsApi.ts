@@ -65,6 +65,6 @@ export async function readMetrics(
                   ? 525600
                   : 0,
     coverage: result.coverage || "partial",
-    statistics_scope: "s3",
+    statistics_scope: "postgresql",
   };
 }

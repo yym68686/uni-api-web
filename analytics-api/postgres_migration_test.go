@@ -3,9 +3,12 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -62,6 +65,72 @@ func TestPostgresParametersPreserveQuotedQuestionMarks(t *testing.T) {
 	got := postgresQuery(`SELECT '?' AS text,"?" AS name,?,'it''s ?' WHERE x=?`)
 	if got != `SELECT '?' AS text,"?" AS name,$1,'it''s ?' WHERE x=$2` {
 		t.Fatal(got)
+	}
+}
+
+func TestDisjointRollupSlicesMatchMinuteTruthAcrossTimezones(t *testing.T) {
+	for _, zone := range []string{"UTC", "Asia/Shanghai", "Asia/Kathmandu", "America/New_York"} {
+		t.Run(zone, func(t *testing.T) {
+			e, err := OpenEngine(filepath.Join(t.TempDir(), "slices"), Config{Timezone: zone})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer e.Close()
+			ctx := context.Background()
+			to := time.Now().UTC().Truncate(time.Minute)
+			var facts []Fact
+			for i := 0; i < 200; i++ {
+				facts = append(facts, Fact{Schema: 1, EventID: fmt.Sprint(i), Kind: "request", SourceID: "primary", AtMS: to.Add(-time.Duration(i) * 23 * time.Minute).UnixMilli(), Model: "m", Outcome: "success", KeyID: "key"})
+			}
+			if err = e.Import(ctx, "slices", "v1", facts); err != nil {
+				t.Fatal(err)
+			}
+			for _, window := range []string{"5m", "1h", "24h", "7d", "today", "all"} {
+				f := QueryFilter{Range: window, To: to.Unix(), SourceID: "primary", KeyID: "key"}
+				_, start, _, _, err := e.rollupWindow(f)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var want int64
+				if err = e.DB.QueryRowContext(ctx, "SELECT coalesce(sum(n),0)::bigint FROM rollups WHERE level='minute' AND kind='request' AND period_ms>=? AND period_ms<=?", start, to.UnixMilli()).Scan(&want); err != nil {
+					t.Fatal(err)
+				}
+				got, err := e.Query(ctx, f)
+				if err != nil {
+					t.Fatal(window, err)
+				}
+				if got.Total["requests"] != float64(want) {
+					t.Fatalf("%s: requests=%v, minute truth=%d", window, got.Total["requests"], want)
+				}
+			}
+		})
+	}
+}
+
+func TestReceiptFIFORemovesFinalizedHistoryAndPreservesPendingTasks(t *testing.T) {
+	s, account, _ := attributionFixture(t)
+	ctx := context.Background()
+	floor := time.Now().Add(-time.Hour).UnixMilli()
+	if _, err := s.engine.DB.Exec("UPDATE storage_state SET evicted_before_ms=?", floor); err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range []struct {
+		id, status string
+		at         int64
+	}{{"done-old", "complete", floor/1000 - 60}, {"pending-old", "pending", floor/1000 - 60}, {"done-new", "complete", floor/1000 + 60}} {
+		if _, err := s.control.db.Exec(`INSERT INTO console_sub_usage(id,account_id,group_id,key_id,model,started_at,request_ids,status) VALUES($1,$2,7,42,'m',$3,'[]',$4)`, account+row.id, account, row.at, row.status); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.trimReceiptHistory(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := s.control.db.QueryRow("SELECT count(*) FROM console_sub_usage WHERE account_id=$1", account).Scan(&n); err != nil || n != 2 {
+		t.Fatal(n, err)
+	}
+	if err := s.control.db.QueryRow("SELECT count(*) FROM console_sub_usage WHERE account_id=$1 AND status='pending'", account).Scan(&n); err != nil || n != 1 {
+		t.Fatal(n, err)
 	}
 }
 
@@ -320,5 +389,131 @@ func TestPostgresLegacyBaselineDoesNotOverwriteExistingOperatorEdits(t *testing.
 	var v float64
 	if err := e.DB.QueryRow("SELECT input FROM prices WHERE model='operator'").Scan(&v); err != nil || v != 11 {
 		t.Fatal(v, err)
+	}
+}
+
+func TestPostgresUsageIndexBackfillPreservesFactsAndCoversNewPartitions(t *testing.T) {
+	e := stateTestEngine(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	now := time.Now().UTC().Truncate(time.Hour)
+	tokens := int64(500000)
+	for i, at := range []time.Time{now.Add(-3 * time.Hour), now.Add(-time.Hour)} {
+		f := Fact{Schema: 1, EventID: fmt.Sprint(i), Kind: "request", AtMS: at.UnixMilli(), Provider: strings.Repeat("p", 512), Model: strings.Repeat("m", 512), UpstreamModel: strings.Repeat("u", 512), Endpoint: strings.Repeat("e", 512), InputTokens: &tokens}
+		if err := e.Import(ctx, f.EventID, "hash", []Fact{f}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := e.DB.Exec("DROP INDEX facts_long_usage; DELETE FROM schema_versions WHERE version='0002'"); err != nil {
+		t.Fatal(err)
+	}
+	if e.readIndexesReady(ctx) == nil {
+		t.Fatal("missing index accepted")
+	}
+	if err := e.prepareReadIndexes(ctx); err != nil {
+		t.Fatal(err)
+	}
+	f := Fact{Schema: 1, EventID: "later", Kind: "request", AtMS: now.Add(-2 * time.Hour).UnixMilli(), InputTokens: &tokens}
+	if err := e.Import(ctx, "later", "hash", []Fact{f}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.readIndexesReady(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var count, indexed int
+	if err := e.DB.QueryRow("SELECT count(*) FROM facts").Scan(&count); err != nil || count != 3 {
+		t.Fatal(count, err)
+	}
+	if err := e.DB.QueryRow("SELECT count(*) FROM pg_inherits WHERE inhparent='facts_long_usage'::regclass").Scan(&indexed); err != nil || indexed != 3 {
+		t.Fatal(indexed, err)
+	}
+}
+
+func TestPostgresRollupLayoutMigrationPreservesEveryColumn(t *testing.T) {
+	e := stateTestEngine(t)
+	ctx := context.Background()
+	at := time.Now().UTC().Truncate(time.Hour).Add(-2 * time.Hour).UnixMilli()
+	name := fmt.Sprintf("rollups_%d", at)
+	if _, err := e.DB.Exec(fmt.Sprintf("CREATE TABLE %s PARTITION OF rollups FOR VALUES FROM (%d) TO (%d)", name, at, at+3600000)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.DB.Exec("INSERT INTO rollup_partitions(start_ms,end_ms,name) VALUES(?,?,?)", at, at+3600000, name); err != nil {
+		t.Fatal(err)
+	}
+	tokens := int64(400000)
+	latency := 12.5
+	f := Fact{Schema: 1, EventID: "old", Kind: "request", AtMS: at + 1000, Provider: "p", Model: "gpt-6-sol", InputTokens: &tokens, FirstTextMS: &latency}
+	if err := e.Import(ctx, "old", "hash", []Fact{f}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := func() string {
+		var s string
+		if err := e.DB.QueryRow("SELECT json_agg(r ORDER BY period_ms,level,kind)::text FROM rollups r").Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	before := snapshot()
+	if e.rollupLayoutReady(ctx) == nil {
+		t.Fatal("flat layout accepted")
+	}
+	if err := e.separateRollupLevels(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if after := snapshot(); after != before {
+		t.Fatal("rollup content changed")
+	}
+	if err := e.rollupLayoutReady(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.separateRollupLevels(ctx); err != nil {
+		t.Fatal(err)
+	}
+	f.EventID = "new"
+	f.AtMS = at + 3600000
+	if err := e.Import(ctx, "new", "hash", []Fact{f}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.rollupLayoutReady(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHistoryLimitedAmountIsNotAdvertisedToOlderClients(t *testing.T) {
+	for _, status := range []string{"history_limited", "complete"} {
+		b, err := json.Marshal(attributedSpend{Status: status, MatchedAmount: 0, Matched: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got map[string]any
+		if err = json.Unmarshal(b, &got); err != nil {
+			t.Fatal(err)
+		}
+		_, present := got["matched_cost_usd"]
+		if present != (status == "complete") {
+			t.Fatal(status, got)
+		}
+	}
+}
+
+func TestExpiredBillingArrivalPreservesOwnershipWithoutResurrectingFacts(t *testing.T) {
+	e := stateTestEngine(t)
+	ctx := context.Background()
+	floor := time.Now().Add(-time.Hour).UnixMilli()
+	if _, err := e.DB.Exec("UPDATE storage_state SET evicted_before_ms=?", floor); err != nil {
+		t.Fatal(err)
+	}
+	f := Fact{Schema: 1, EventID: "late", Kind: "billing", AtMS: floor - 1000, UpstreamBase: "https://example.test/v1/alpha/search", UpstreamKeyHash: "key-hash", BillingRequestIDs: []string{"client:receipt"}}
+	for _, key := range []string{"delivery", "retry"} {
+		if err := e.Import(ctx, key, "v1", []Fact{f}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var raw, claims int
+	if err := e.DB.QueryRow("SELECT count(*) FROM facts").Scan(&raw); err != nil || raw != 0 {
+		t.Fatal(raw, err)
+	}
+	if err := e.DB.QueryRow("SELECT claims FROM receipt_claim_history WHERE digest=?", tokenHash("https://example.test\nkey-hash\nclient:receipt")).Scan(&claims); err != nil || claims != 1 {
+		t.Fatal(claims, err)
 	}
 }

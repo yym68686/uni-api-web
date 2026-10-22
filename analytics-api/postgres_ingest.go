@@ -102,18 +102,28 @@ func (s *Service) ingestFacts(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
+	s.active.Add(1)
+	defer s.active.Add(-1)
+	operation := s.engine.observeRequestOperation(ctx, "facts_ingest")
+	defer func() { operation.finish(err) }()
+	operation.stage("capacity")
 	if err = s.engine.enforceStorageBudget(ctx); err == nil {
+		operation.stage("fact_commit")
 		err = s.engine.Import(ctx, src.ID+"::"+digest, digest, facts)
 	}
 	if err != nil {
+		s.importFailures.Add(1)
 		w.Header().Set("Retry-After", "5")
 		writeJSON(w, 503, map[string]string{"code": "fact_ingest_unavailable", "error": "fact ingestion unavailable"})
 		return
 	}
+	operation.stage("exporter_state")
 	if err = s.engine.recordExporterState(ctx, src.ID, epoch, instance, sequence, pending, dropped, latest); err != nil {
+		s.importFailures.Add(1)
 		http.Error(w, "exporter acknowledgement unavailable", 503)
 		return
 	}
+	s.lastCollect.Store(time.Now().UnixMilli())
 	writeJSON(w, 200, map[string]any{"format": "facts-ack-v1", "sha256": digest, "received": len(facts)})
 }
 

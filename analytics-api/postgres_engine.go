@@ -91,6 +91,14 @@ func openPostgresEngine(namespace string, cfg Config) (*Engine, error) {
 		return nil, err
 	}
 	e := &Engine{DB: &analyticsDB{DB: db}, cfg: cfg, Location: loc, historyPath: schema, analyticalSlots: make(chan struct{}, 1), operations: make(map[*databaseOperation]string)}
+	if err = e.initializeEmptyReadIndexes(ctx); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err = e.initializeUsageProjection(ctx); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err = e.seedDefaultPrices(); err != nil {
 		db.Close()
 		return nil, err
@@ -101,6 +109,12 @@ func openPostgresEngine(namespace string, cfg Config) (*Engine, error) {
 func (e *Engine) readSnapshot(ctx context.Context) (*Engine, func(), error) {
 	tx, err := e.DB.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
+		return nil, nil, err
+	}
+	// This bounded, single analytical slot needs 16 MB per sort to avoid
+	// spilling the verified production rollup input. Control sessions keep 4 MB.
+	if _, err = tx.ExecContext(ctx, "SET LOCAL work_mem='16MB'"); err != nil {
+		tx.Rollback()
 		return nil, nil, err
 	}
 	view := &Engine{DB: &analyticsDB{DB: e.DB.DB, snapshot: tx}, cfg: e.cfg, Location: e.Location}
@@ -161,6 +175,7 @@ func (e *Engine) insertFactPage(ctx context.Context, tx *analyticsTx, facts []Fa
 	// creating a second row in another partition inside the same statement.
 	incoming := "(SELECT DISTINCT ON(event_id) * FROM jsonb_to_recordset(?::jsonb) AS r(" + factRecordTypes + ") ORDER BY event_id,at_ms) incoming"
 	query := "WITH inserted AS (INSERT INTO facts(" + factColumns + ") SELECT " + strings.Join(columns, ",") + " FROM " + incoming + " WHERE NOT EXISTS(SELECT 1 FROM facts known WHERE known.event_id=incoming.event_id) ON CONFLICT DO NOTHING RETURNING *), metrics AS (SELECT inserted.*,periods.* FROM inserted CROSS JOIN LATERAL (VALUES ('minute'::text,at_ms/60000*60000),('hour'::text,at_ms/3600000*3600000),('day'::text,(extract(epoch FROM (date_trunc('day',to_timestamp(at_ms/1000.0) AT TIME ZONE ?) AT TIME ZONE ?))*1000)::bigint)) periods(level,period_ms)), aggregated AS (INSERT INTO rollups(" + rollupColumns() + ") " + factRollupSelect("metrics") + rollupMerge() + " RETURNING 1), coverage AS (INSERT INTO fact_source_ranges(source_id,start_ms,first_ms,last_ms) SELECT source_id,at_ms/3600000*3600000,min(at_ms),max(at_ms) FROM inserted GROUP BY source_id,at_ms/3600000*3600000 ON CONFLICT(source_id,start_ms) DO UPDATE SET first_ms=least(fact_source_ranges.first_ms,excluded.first_ms),last_ms=greatest(fact_source_ranges.last_ms,excluded.last_ms) RETURNING 1) SELECT count(*) FROM inserted"
+	query = strings.Replace(query, "), metrics AS (", "), usage_projection AS (INSERT INTO usage_facts("+usageColumns+") SELECT "+usageColumns+" FROM inserted WHERE "+usagePredicate+" ON CONFLICT DO NOTHING RETURNING 1), metrics AS (", 1)
 	args := []any{string(raw), e.Location.String(), e.Location.String()}
 	metrics := false
 	for _, f := range facts {
@@ -214,6 +229,7 @@ func (e *Engine) importPostgres(ctx context.Context, objects []FactObject) (err 
 		return err
 	}
 	rollupPartitions := map[int64]bool{}
+	usagePartitions := map[int64]bool{}
 	changed := false
 	partitions := map[int64]bool{}
 	for _, obj := range objects {
@@ -253,10 +269,23 @@ func (e *Engine) importPostgres(ctx context.Context, objects []FactObject) (err 
 				return err
 			}
 			if f.AtMS < evicted {
+				if f.Kind == "billing" {
+					retained, err := e.retainExpiredReceiptClaim(ctx, tx, f)
+					if err != nil {
+						return err
+					}
+					changed = changed || retained
+				}
 				continue
 			}
 			maxAt = max(maxAt, f.AtMS)
 			hour := f.AtMS / 3600000
+			if f.Kind != "trace" && f.Kind != "billing" && f.InputTokens != nil && !usagePartitions[hour] {
+				if err = ensureUsagePartition(ctx, tx, f.AtMS); err != nil {
+					return err
+				}
+				usagePartitions[hour] = true
+			}
 			if !partitions[hour] {
 				if err = ensureFactPartition(ctx, tx, f.AtMS); err != nil {
 					return err

@@ -148,7 +148,7 @@ func histogramSQL(column string) string {
 func mergeHistogramSQL(column string) string {
 	parts := make([]string, len(histogramBounds))
 	for i := range parts {
-		parts[i] = fmt.Sprintf("sum(%s[%d])", column, i+1)
+		parts[i] = fmt.Sprintf("coalesce(sum(%s[%d]) FILTER (WHERE %s[%d]<>0),0)", column, i+1, column, i+1)
 	}
 	return "ARRAY[" + strings.Join(parts, ",") + "]"
 }

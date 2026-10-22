@@ -12,7 +12,7 @@ export function channelProfitCost(spend?: SubChannelSpend) {
   if (spend.status === "complete" && known(spend.actual_cost_usd))
     return { actual: spend.actual_cost_usd, upperBound: false };
   const reconciled = (spend.matched_attempts || 0) + (spend.confirmed_unbilled_attempts || 0);
-  if (spend.status !== "complete" && reconciled > 0 && known(spend.matched_cost_usd))
+  if (spend.status !== "complete" && spend.status !== "history_limited" && reconciled > 0 && known(spend.matched_cost_usd))
     return { actual: spend.matched_cost_usd, upperBound: true };
   return undefined;
 }

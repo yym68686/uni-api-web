@@ -37,6 +37,12 @@ var subModelSummariesSQL string
 //go:embed migrations/0003_sub_model_summaries.tables
 var subModelSummariesTables string
 
+//go:embed migrations/0004_receipt_retention.sql
+var receiptRetentionSQL string
+
+//go:embed migrations/0004_receipt_retention.tables
+var receiptRetentionTables string
+
 type controlMigration struct {
 	Version string
 	SQL     string
@@ -48,6 +54,7 @@ func controlMigrations() []controlMigration {
 		{"0001_control", controlBaselineSQL, strings.Fields(controlBaselineTables)},
 		{"0002_fact_journal", factJournalSQL, strings.Fields(factJournalTables)},
 		{"0003_sub_model_summaries", subModelSummariesSQL, strings.Fields(subModelSummariesTables)},
+		{"0004_receipt_retention", receiptRetentionSQL, strings.Fields(receiptRetentionTables)},
 	}
 }
 

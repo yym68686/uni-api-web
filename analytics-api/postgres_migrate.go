@@ -20,9 +20,13 @@ func migratePostgres(args []string) error {
 	prices := flags.String("prices", "", "validated legacy price JSON document")
 	merge := flags.Bool("merge-final-prices", false, "merge final legacy writes after old writers have drained")
 	indexes := flags.Bool("prepare-indexes", false, "prepare the existing receipt FIFO index without blocking writes")
+	readIndexes := flags.Bool("prepare-analytics-indexes", false, "prepare partitioned request-usage indexes concurrently")
+	usage := flags.Bool("prepare-usage-projection", false, "backfill and verify compact transactional usage rows")
+	layout := flags.Bool("prepare-rollup-layout", false, "separate rollup levels before initial activation")
 	facts := flags.Bool("facts-stdin", false, "import NDJSON facts from stdin")
 	analyze := flags.Bool("analyze", false, "publish parent planner statistics once after the complete backfill")
 	verify := flags.Bool("verify-queries", false, "run bounded read-only analytics acceptance queries")
+	claimsUnavailable := flags.Bool("mark-legacy-claims-incomplete", false, "record that legacy receipt ownership exceeds the bounded retained history")
 	pace := flags.Duration("batch-delay", 0, "pause between migration batches to protect interactive work")
 	phase := flags.String("phase", "", "set prepared after migration validation")
 	if err := flags.Parse(args); err != nil {
@@ -39,13 +43,49 @@ func migratePostgres(args []string) error {
 	defer e.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	if *claimsUnavailable {
+		tx, err := e.DB.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		if _, err = tx.ExecContext(ctx, "SELECT pg_advisory_xact_lock(8395015)"); err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, "UPDATE storage_state SET claims_history_complete=false,revision=revision+1 WHERE singleton"); err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, "INSERT INTO meta(name,value) VALUES('legacy_claims_validation','incomplete_capacity') ON CONFLICT(name) DO NOTHING"); err != nil {
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+		fmt.Println(`{"phase":"legacy_claims_incomplete","reason":"bounded_history"}`)
+	}
+	if *layout {
+		if err = e.separateRollupLevels(ctx); err != nil {
+			return err
+		}
+	}
+	if *usage {
+		if err = e.backfillUsageProjection(ctx); err != nil {
+			return err
+		}
+	}
+	if *readIndexes {
+		if err = e.prepareReadIndexes(ctx); err != nil {
+			return err
+		}
+		fmt.Println(`{"phase":"analytics_indexes_prepared"}`)
+	}
 	if *indexes {
 		conn, err := e.DB.DB.Conn(ctx)
 		if err != nil {
 			return err
 		}
 		defer conn.Close()
-		if _, err = conn.ExecContext(ctx, "SET statement_timeout='10min';SET lock_timeout='1s';SET maintenance_work_mem='32MB';SET temp_file_limit='256MB'"); err != nil {
+		if _, err = conn.ExecContext(ctx, "SET statement_timeout='10min';SET lock_timeout='60s';SET maintenance_work_mem='32MB';SET temp_file_limit='256MB'"); err != nil {
 			return err
 		}
 		// A cancelled concurrent build leaves an invalid index. Only repair
@@ -60,6 +100,17 @@ func migratePostgres(args []string) error {
 			}
 		}
 		if _, err = conn.ExecContext(ctx, "CREATE INDEX CONCURRENTLY IF NOT EXISTS console_sub_spend_retention ON public.console_sub_spend_logs(at_ms)"); err != nil {
+			return err
+		}
+		if err = conn.QueryRowContext(ctx, "SELECT coalesce((SELECT NOT indisvalid FROM pg_index WHERE indexrelid=to_regclass('public.console_sub_usage_retention')),false)").Scan(&invalid); err != nil {
+			return err
+		}
+		if invalid {
+			if _, err = conn.ExecContext(ctx, "DROP INDEX CONCURRENTLY public.console_sub_usage_retention"); err != nil {
+				return err
+			}
+		}
+		if _, err = conn.ExecContext(ctx, "CREATE INDEX CONCURRENTLY IF NOT EXISTS console_sub_usage_retention ON public.console_sub_usage(account_id,started_at) WHERE status<>'pending'"); err != nil {
 			return err
 		}
 		fmt.Println(`{"phase":"receipt_index_prepared"}`)
@@ -144,7 +195,7 @@ func migratePostgres(args []string) error {
 		if _, err = conn.ExecContext(ctx, "SET statement_timeout='60s'"); err != nil {
 			return err
 		}
-		for _, table := range []string{"facts", "rollups"} {
+		for _, table := range []string{"facts", "rollups", "usage_facts"} {
 			began := time.Now()
 			if _, err = conn.ExecContext(ctx, "ANALYZE "+table); err != nil {
 				return err
@@ -166,6 +217,19 @@ func migratePostgres(args []string) error {
 		}
 	}
 	if *phase != "" {
+		var claimsValidated bool
+		if err = e.DB.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM meta WHERE name='legacy_claims_validation')").Scan(&claimsValidated); err != nil || !claimsValidated {
+			return errors.New("legacy receipt ownership coverage must be explicitly validated")
+		}
+		if err = e.rollupLayoutReady(ctx); err != nil {
+			return err
+		}
+		if err = e.usageProjectionReady(ctx); err != nil {
+			return err
+		}
+		if err = e.readIndexesReady(ctx); err != nil {
+			return err
+		}
 		if *phase != "prepared" && *phase != "complete" {
 			return errors.New("invalid migration phase")
 		}
@@ -188,7 +252,7 @@ func migratePostgres(args []string) error {
 			return errors.New("retained request history must be migrated before activation")
 		}
 		var indexReady bool
-		if err = e.DB.QueryRowContext(ctx, "SELECT coalesce((SELECT indisvalid FROM pg_index WHERE indexrelid=to_regclass('public.console_sub_spend_retention')),false)").Scan(&indexReady); err != nil || !indexReady {
+		if err = e.DB.QueryRowContext(ctx, "SELECT count(*)=2 FROM pg_index WHERE indisvalid AND indexrelid IN (to_regclass('public.console_sub_spend_retention'),to_regclass('public.console_sub_usage_retention'))").Scan(&indexReady); err != nil || !indexReady {
 			return errors.New("receipt retention index must be prepared before activation")
 		}
 		if _, err = e.DB.ExecContext(ctx, "INSERT INTO meta(name,value) VALUES('legacy_migration_phase',?) ON CONFLICT(name) DO UPDATE SET value=excluded.value", *phase); err != nil {
@@ -319,6 +383,15 @@ func (e *Engine) migrateLegacyPrices(ctx context.Context, prices []Price, final 
 }
 
 func (e *Engine) verifyLegacyMigration(ctx context.Context) error {
+	if err := e.rollupLayoutReady(ctx); err != nil {
+		return err
+	}
+	if err := e.usageProjectionReady(ctx); err != nil {
+		return err
+	}
+	if err := e.readIndexesReady(ctx); err != nil {
+		return err
+	}
 	if os.Getenv("STATE_S3_BUCKET") == "" && os.Getenv("S3_BUCKET") == "" {
 		return nil
 	}

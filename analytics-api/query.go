@@ -200,7 +200,25 @@ type QueryResult struct {
 	ChannelSpendError string             `json:"channel_spend_error,omitempty"`
 }
 
-// Use non-overlapping hour/minute buckets for sliding historical windows.
+// Each disjoint level/window branch is a separate Append input. A single OR
+// makes PostgreSQL plan and visit irrelevant level partitions for every hour.
+// Boundaries are server-derived int64 literals; all client filters stay bound.
+func rollupReadSQL(where []string) string {
+	if len(where) > 0 && strings.HasPrefix(where[0], "((") && strings.HasSuffix(where[0], "))") {
+		parts := strings.Split(strings.TrimSuffix(strings.TrimPrefix(where[0], "(("), "))"), ") OR (")
+		for i, p := range parts {
+			parts[i] = "SELECT * FROM rollups WHERE " + p
+		}
+		filters := "true"
+		if len(where) > 1 {
+			filters = strings.Join(where[1:], " AND ")
+		}
+		return "(" + strings.Join(parts, " UNION ALL ") + ") AS rollups WHERE " + filters
+	}
+	return "rollups WHERE " + strings.Join(where, " AND ")
+}
+
+// Use non-overlapping day/hour/minute buckets for sliding historical windows.
 func (e *Engine) rollupWindow(f QueryFilter) (time.Time, int64, []string, []any, error) {
 	now := time.Now().UTC()
 	if f.To > 0 {
@@ -210,21 +228,44 @@ func (e *Engine) rollupWindow(f QueryFilter) (time.Time, int64, []string, []any,
 	if err != nil {
 		return time.Time{}, 0, nil, nil, err
 	}
-	// Preserve full-minute boundaries. Whole hours use transactional hourly
-	// projections; only the two partial hours read minute rows. This bounds the
-	// scan for arbitrary sliding windows without double-counting a minute.
 	startMS := start.UnixMilli() / 60000 * 60000
 	lo := (startMS + 3599999) / 3600000 * 3600000
 	hi := now.UnixMilli() / 3600000 * 3600000
-	if hi < lo {
-		hi = lo
+	parts := []string{}
+	add := func(level string, from, to int64) {
+		if from < to {
+			parts = append(parts, fmt.Sprintf("level='%s' AND period_ms>=%d AND period_ms<%d", level, from, to))
+		}
 	}
-	where := []string{`((level='hour' AND period_ms>=? AND period_ms<?) OR (level='minute' AND period_ms>=? AND period_ms<=? AND NOT(period_ms>=? AND period_ms<?)))`}
-	args := []any{lo, hi, startMS, now.UnixMilli(), lo, hi}
-	return now, startMS, where, args, nil
+	localStart, localEnd := start.In(e.Location), now.In(e.Location)
+	first := time.Date(localStart.Year(), localStart.Month(), localStart.Day(), 0, 0, 0, 0, e.Location)
+	if first.UnixMilli() < startMS {
+		first = first.AddDate(0, 0, 1)
+	}
+	last := time.Date(localEnd.Year(), localEnd.Month(), localEnd.Day(), 0, 0, 0, 0, e.Location)
+	if first.Before(last) && first.UnixMilli()%3600000 == 0 && last.UnixMilli()%3600000 == 0 {
+		add("minute", startMS, lo)
+		add("hour", lo, first.UnixMilli())
+		add("day", first.UnixMilli(), last.UnixMilli())
+		add("hour", last.UnixMilli(), hi)
+		add("minute", hi, now.UnixMilli()+1)
+	} else if hi >= lo {
+		add("minute", startMS, lo)
+		add("hour", lo, hi)
+		add("minute", hi, now.UnixMilli()+1)
+	} else {
+		add("minute", startMS, now.UnixMilli()+1)
+	}
+	if len(parts) == 0 {
+		return now, startMS, []string{"false"}, nil, nil
+	}
+	return now, startMS, []string{"((" + strings.Join(parts, ") OR (") + "))"}, nil, nil
 }
 
 func (e *Engine) Query(ctx context.Context, f QueryFilter) (queryResult QueryResult, queryErr error) {
+	if err := e.usageProjectionReady(ctx); err != nil {
+		return QueryResult{}, err
+	}
 	release, err := e.acquireAnalytical(ctx, "analytics_query")
 	if err != nil {
 		return QueryResult{}, err
@@ -254,7 +295,7 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (queryResult QueryRes
 		args = append(args, f.Stream == "true")
 	}
 	where, args = sourceWhere(where, args, f)
-	q := `SELECT source_id,kind,provider,model,upstream_model,endpoint,stream,outcome,sum(n)::BIGINT,sum(input_tokens)::BIGINT,sum(output_tokens)::BIGINT,sum(cache_read_tokens)::BIGINT,sum(cache_write_tokens)::BIGINT,sum(cache_write_1h_tokens)::BIGINT,sum(usage_samples)::BIGINT,sum(cache_samples)::BIGINT,sum(actual_cost_usd),sum(actual_cost_samples)::BIGINT,to_json(` + mergeHistogramSQL("first_bins") + `),to_json(` + mergeHistogramSQL("dispatch_bins") + `),sum(first_count)::BIGINT,sum(dispatch_count)::BIGINT,sum(first_sum),sum(dispatch_sum),max(last_ms),(max(ARRAY[last_first_ms::DOUBLE PRECISION,last_first]) FILTER(WHERE last_first IS NOT NULL AND last_first_ms IS NOT NULL))[2],(max(ARRAY[last_dispatch_ms::DOUBLE PRECISION,last_dispatch]) FILTER(WHERE last_dispatch IS NOT NULL AND last_dispatch_ms IS NOT NULL))[2],to_json(` + mergeHistogramSQL("created_bins") + `),coalesce(sum(created_count),0)::BIGINT,coalesce(sum(created_sum),0),(max(ARRAY[last_created_ms::DOUBLE PRECISION,last_created]) FILTER(WHERE last_created IS NOT NULL AND last_created_ms IS NOT NULL))[2],to_json(` + mergeHistogramSQL("text_bins") + `),coalesce(sum(text_count),0)::BIGINT,coalesce(sum(text_sum),0),(max(ARRAY[last_text_ms::DOUBLE PRECISION,last_text]) FILTER(WHERE last_text IS NOT NULL AND last_text_ms IS NOT NULL))[2],coalesce(max(last_created_ms),0),coalesce(max(last_text_ms),0) FROM rollups WHERE ` + strings.Join(where, " AND ") + ` GROUP BY source_id,kind,provider,model,upstream_model,endpoint,stream,outcome`
+	q := `SELECT source_id,kind,provider,model,upstream_model,endpoint,stream,outcome,sum(n)::BIGINT,sum(input_tokens)::BIGINT,sum(output_tokens)::BIGINT,sum(cache_read_tokens)::BIGINT,sum(cache_write_tokens)::BIGINT,sum(cache_write_1h_tokens)::BIGINT,sum(usage_samples)::BIGINT,sum(cache_samples)::BIGINT,sum(actual_cost_usd),sum(actual_cost_samples)::BIGINT,to_json(` + mergeHistogramSQL("first_bins") + `),to_json(` + mergeHistogramSQL("dispatch_bins") + `),sum(first_count)::BIGINT,sum(dispatch_count)::BIGINT,sum(first_sum),sum(dispatch_sum),max(last_ms),(max(ARRAY[last_first_ms::DOUBLE PRECISION,last_first]) FILTER(WHERE last_first IS NOT NULL AND last_first_ms IS NOT NULL))[2],(max(ARRAY[last_dispatch_ms::DOUBLE PRECISION,last_dispatch]) FILTER(WHERE last_dispatch IS NOT NULL AND last_dispatch_ms IS NOT NULL))[2],to_json(` + mergeHistogramSQL("created_bins") + `),coalesce(sum(created_count),0)::BIGINT,coalesce(sum(created_sum),0),(max(ARRAY[last_created_ms::DOUBLE PRECISION,last_created]) FILTER(WHERE last_created IS NOT NULL AND last_created_ms IS NOT NULL))[2],to_json(` + mergeHistogramSQL("text_bins") + `),coalesce(sum(text_count),0)::BIGINT,coalesce(sum(text_sum),0),(max(ARRAY[last_text_ms::DOUBLE PRECISION,last_text]) FILTER(WHERE last_text IS NOT NULL AND last_text_ms IS NOT NULL))[2],coalesce(max(last_created_ms),0),coalesce(max(last_text_ms),0) FROM ` + rollupReadSQL(where) + ` GROUP BY source_id,kind,provider,model,upstream_model,endpoint,stream,outcome`
 	operation.stage("price_read")
 	// Statistics need configured prices, not an additional DISTINCT scan over
 	// all historical model names. Missing prices remain explicitly unpriced.
@@ -483,7 +524,14 @@ func (e *Engine) attachTimeseries(ctx context.Context, result *QueryResult, f Qu
 	result.BucketSeconds = bucket / 1000
 	where := []string{"level='minute'", "period_ms>=?", "period_ms<=?"}
 	args := []any{startMS, endMS}
-	if endMS-startMS > 48*60*60*1000 {
+	if f.Range == "all" {
+		localEnd := time.UnixMilli(endMS).In(e.Location)
+		day := time.Date(localEnd.Year(), localEnd.Month(), localEnd.Day(), 0, 0, 0, 0, e.Location).UnixMilli()
+		where = []string{`((level='day' AND period_ms<?) OR (level='minute' AND period_ms>=? AND period_ms<=?))`}
+		args = []any{day, day, endMS}
+		bucket = max(bucket, 86400000)
+		result.BucketSeconds = bucket / 1000
+	} else if endMS-startMS > 48*60*60*1000 {
 		localStart := time.UnixMilli(startMS).In(e.Location)
 		firstDay := time.Date(localStart.Year(), localStart.Month(), localStart.Day(), 0, 0, 0, 0, e.Location)
 		if firstDay.UnixMilli() < startMS {
@@ -529,7 +577,7 @@ func (e *Engine) attachTimeseries(ctx context.Context, result *QueryResult, f Qu
       coalesce(sum(text_count) FILTER (WHERE kind='attempt'),0)::BIGINT,
       coalesce(sum(text_sum) FILTER (WHERE kind='attempt'),0),
       (max(ARRAY[last_text_ms::DOUBLE PRECISION,last_text]) FILTER(WHERE last_text IS NOT NULL AND last_text_ms IS NOT NULL AND kind='attempt'))[2]
-      FROM rollups WHERE `+strings.Join(where, " AND ")+` GROUP BY bucket ORDER BY bucket`, args...)
+      FROM `+rollupReadSQL(where)+` GROUP BY bucket ORDER BY bucket`, args...)
 	if err != nil {
 		return err
 	}

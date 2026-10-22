@@ -83,9 +83,22 @@ func ensureRollupPartition(ctx context.Context, tx *analyticsTx, at int64) error
 	if exists {
 		return nil
 	}
-	if _, err := tx.ExecContext(ctx, fmt.Sprintf("CREATE TABLE %s PARTITION OF rollups FOR VALUES FROM (%d) TO (%d)", name, start, start+3600000)); err != nil {
+	if err := createRollupHour(ctx, tx, start); err != nil {
 		return err
 	}
 	_, err := tx.ExecContext(ctx, "INSERT INTO rollup_partitions(start_ms,end_ms,name) VALUES(?,?,?)", start, start+3600000, name)
 	return err
+}
+
+func createRollupHour(ctx context.Context, tx *analyticsTx, start int64) error {
+	name := fmt.Sprintf("rollups_%d", start)
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf("CREATE TABLE %s PARTITION OF rollups FOR VALUES FROM (%d) TO (%d) PARTITION BY LIST(level)", name, start, start+3600000)); err != nil {
+		return err
+	}
+	for _, level := range []string{"minute", "hour", "day"} {
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf("CREATE TABLE %s_%s PARTITION OF %s FOR VALUES IN ('%s')", name, level, name, level)); err != nil {
+			return err
+		}
+	}
+	return nil
 }

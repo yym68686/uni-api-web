@@ -573,3 +573,9 @@ it("distinguishes completed ledger scans from downloads and rechecks absent bill
     vi.useRealTimers();
   }
 });
+
+it("keeps cost and profit unknown when historical ownership is unavailable", () => {
+ render(<Tooltip.Provider><SubChannelSpendValue query={{isPending:false,isError:false,data:{...receipt,scope:"matched_requests",status:"history_limited",actual_cost_usd:null,matched_cost_usd:5,matched_attempts:3,total_attempts:3}}} /></Tooltip.Provider>);
+ expect(screen.getByText("历史不完整")).toBeVisible();
+ expect(screen.queryByText("≥$5.00")).toBeNull();
+});

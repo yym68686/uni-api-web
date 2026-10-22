@@ -179,6 +179,7 @@ it("uses only reconciled per-request costs for an upper bound, never missing or 
   };
   expect(channelProfitCost(spend)).toEqual({ actual: 5, upperBound: true });
   expect(channelProfitCost({ ...spend, status: "error", sync_error: true })).toEqual({ actual: 5, upperBound: true });
+  expect(channelProfitCost({ ...spend, status: "history_limited" })).toBeUndefined();
   expect(channelProfitCost({ ...spend, matched_cost_usd: 0, matched_attempts: 0, confirmed_unbilled_attempts: 1 })).toEqual({ actual: 0, upperBound: true });
   expect(channelProfitCost({ ...spend, matched_cost_usd: 0, matched_attempts: 0 })).toBeUndefined();
   expect(channelProfitCost({ ...spend, scope: "sub2api_business_key" })).toBeUndefined();

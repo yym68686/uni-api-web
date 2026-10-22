@@ -10,11 +10,13 @@ import json
 import os
 from pathlib import Path
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from collections import Counter
 
 import boto3
 from botocore.config import Config
+from botocore.exceptions import IncompleteReadError, ReadTimeoutError, ConnectionClosedError
 
 
 def legacy_client(env):
@@ -108,8 +110,17 @@ def download_recent(env, journal, destination, hours):
         if path.exists():
             raw = path.read_bytes()
         else:
-            obj = client.get_object(Bucket=env["S3_BUCKET"], Key=key, IfMatch=etag)
-            raw = obj["Body"].read(32 * 1024 * 1024 + 1)
+            for attempt in range(3):
+                obj = client.get_object(Bucket=env["S3_BUCKET"], Key=key, IfMatch=etag)
+                try:
+                    raw = obj["Body"].read(32 * 1024 * 1024 + 1)
+                    break
+                except (IncompleteReadError, ReadTimeoutError, ConnectionClosedError):
+                    if attempt == 2:
+                        raise
+                    time.sleep(0.25 * (attempt + 1))
+                finally:
+                    obj["Body"].close()
         if len(raw) != expected_bytes or hashlib.sha256(raw).hexdigest() != digest:
             raise ValueError("immutable object verification failed")
         if not path.exists():

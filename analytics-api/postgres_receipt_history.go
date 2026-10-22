@@ -70,3 +70,40 @@ func (e *Engine) addRetiredClaims(ctx context.Context, tx *analyticsTx, ownershi
 	}
 	return rows.Err()
 }
+
+// A late, already-expired billing fact still establishes an older owner. The
+// digest itself is idempotent; it must not resurrect expired raw facts.
+func (e *Engine) retainExpiredReceiptClaim(ctx context.Context, tx *analyticsTx, f Fact) (bool, error) {
+	if len(f.BillingRequestIDs) == 0 {
+		return false, nil
+	}
+	var complete bool
+	var bytes int64
+	if err := tx.QueryRowContext(ctx, "SELECT claims_history_complete,pg_total_relation_size('receipt_claim_history'::regclass) FROM storage_state WHERE singleton").Scan(&complete, &bytes); err != nil {
+		return false, err
+	}
+	if !complete {
+		return false, nil
+	}
+	if bytes+3072 > 256<<20 {
+		if _, err := tx.ExecContext(ctx, "TRUNCATE receipt_claim_history"); err != nil {
+			return false, err
+		}
+		_, err := tx.ExecContext(ctx, "UPDATE storage_state SET claims_history_complete=false WHERE singleton")
+		return true, err
+	}
+	changed := false
+	for _, id := range f.BillingRequestIDs {
+		digest := tokenHash(subBindingSite(f.UpstreamBase) + "\n" + f.UpstreamKeyHash + "\n" + id)
+		result, err := tx.ExecContext(ctx, "INSERT INTO receipt_claim_history(digest,claims) VALUES(?,1) ON CONFLICT DO NOTHING", digest)
+		if err != nil {
+			return false, err
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return false, err
+		}
+		changed = changed || n > 0
+	}
+	return changed, nil
+}
