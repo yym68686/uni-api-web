@@ -5,11 +5,16 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 )
 
 const usageIndexDefinition = "(source_id,input_tokens,at_ms) WHERE kind NOT IN ('billing','trace') AND input_tokens IS NOT NULL"
 const receiptIndexDefinition = "USING gin(billing_request_ids) WHERE kind='billing'"
+const billingProviderIndexDefinition = "(source_id,key_id,model,provider,at_ms)"
+
+var errBillingProviderIndexHeadroom = errors.New("billing provider index deferred for storage headroom; wait for bounded FIFO maintenance")
 
 func usageIndexChecksum() string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(usageIndexDefinition)))
@@ -78,6 +83,17 @@ func (e *Engine) prepareReadIndexes(ctx context.Context) error {
 }
 
 func (e *Engine) prepareFactIndex(ctx context.Context, parent, suffix, definition string) error {
+	return e.preparePartitionedFactIndex(ctx, parent, suffix, definition, "facts")
+}
+
+// Billing facts are written transactionally with request facts. This additive
+// index is prepared after projection activation, so a provider-scoped billing
+// read can seek the selected channel instead of scanning every model row.
+func (e *Engine) prepareBillingProviderIndex(ctx context.Context) error {
+	return e.preparePartitionedFactIndex(ctx, "billing_facts_provider_scope", "provider_scope", billingProviderIndexDefinition, "billing_facts")
+}
+
+func (e *Engine) preparePartitionedFactIndex(ctx context.Context, parent, suffix, definition, table string) error {
 	conn, err := e.DB.DB.Conn(ctx)
 	if err != nil {
 		return err
@@ -95,13 +111,48 @@ func (e *Engine) prepareFactIndex(ctx context.Context, parent, suffix, definitio
 		defer cancel()
 		_, _ = conn.ExecContext(call, "SELECT pg_advisory_unlock(8395018)")
 	}()
+	if table == "billing_facts" {
+		var projectionReady bool
+		if err = conn.QueryRowContext(ctx, "SELECT COALESCE((SELECT value='true' FROM meta WHERE name='billing_projection_complete'),false)").Scan(&projectionReady); err != nil {
+			return err
+		}
+		if !projectionReady {
+			return errors.New("billing provider index requires the completed billing projection")
+		}
+		var ready bool
+		if err = conn.QueryRowContext(ctx, `SELECT COALESCE((SELECT indisvalid FROM pg_index WHERE indexrelid=to_regclass($1)),false)`, parent).Scan(&ready); err != nil {
+			return err
+		}
+		if ready {
+			return nil
+		}
+		// The production database is deliberately budgeted below the physical
+		// volume limit. Estimate this additive B-tree conservatively from the
+		// projected heap before starting any DDL and leave room for live writes.
+		// If ordinary FIFO has not reclaimed enough space, keep serving reads and
+		// ingestion unchanged and defer explicit preparation.
+		var databaseBytes, heapBytes, ingestLimit int64
+		if err = conn.QueryRowContext(ctx, `SELECT pg_database_size(current_database()),
+ COALESCE((SELECT sum(pg_relation_size(h.inhrelid)) FROM pg_inherits h WHERE h.inhparent='billing_facts'::regclass),0),
+ ingest_limit_bytes FROM storage_state WHERE singleton`).Scan(&databaseBytes, &heapBytes, &ingestLimit); err != nil {
+			return err
+		}
+		const reserve = int64(64 << 20)
+		if databaseBytes+heapBytes/3+reserve >= ingestLimit {
+			return errBillingProviderIndexHeadroom
+		}
+	}
 	if _, err = conn.ExecContext(ctx, "SET statement_timeout='60s'; SET lock_timeout='1s'; SET maintenance_work_mem='32MB'"); err != nil {
 		return err
 	}
-	if _, err = conn.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS "+parent+" ON ONLY facts "+definition); err != nil {
+	if _, err = conn.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS "+parent+" ON ONLY "+table+" "+definition); err != nil {
 		return err
 	}
-	rows, err := conn.QueryContext(ctx, "SELECT start_ms,name FROM fact_partitions ORDER BY start_ms")
+	partitionQuery := "SELECT start_ms,name FROM fact_partitions ORDER BY start_ms"
+	if table == "billing_facts" {
+		partitionQuery = "SELECT 0::BIGINT,c.relname FROM pg_inherits h JOIN pg_class c ON c.oid=h.inhrelid WHERE h.inhparent='billing_facts'::regclass ORDER BY c.relname"
+	}
+	rows, err := conn.QueryContext(ctx, partitionQuery)
 	if err != nil {
 		return err
 	}
@@ -113,7 +164,12 @@ func (e *Engine) prepareFactIndex(ctx context.Context, parent, suffix, definitio
 			rows.Close()
 			return err
 		}
-		if name != fmt.Sprintf("facts_%d", at) {
+		valid := name == fmt.Sprintf("facts_%d", at)
+		if table == "billing_facts" {
+			partitionAt, parseErr := strconv.ParseInt(strings.TrimPrefix(name, "billing_"), 10, 64)
+			valid = parseErr == nil && name == fmt.Sprintf("billing_%d", partitionAt)
+		}
+		if !valid {
 			rows.Close()
 			return errors.New("invalid fact partition")
 		}

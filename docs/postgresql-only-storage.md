@@ -127,6 +127,14 @@ the 64 MiB temporary-file limit, and detects extra projection rows as well as
 missing or altered ones. Reads continue using raw facts until the
 explicit completion marker is written. FIFO removes matching projection partitions.
 
+Provider-filtered billing reads use an additional partitioned lookup index on
+`(source_id,key_id,model,provider,at_ms)`. It is not created at API startup.
+Prepare it explicitly after billing projection activation; the command uses
+`CREATE INDEX CONCURRENTLY` on hourly children and attaches a parent index, with
+a conservative storage-headroom gate and bounded DDL timeouts. If FIFO has not
+reclaimed enough space, preparation defers without changing any serving data.
+New hourly projection partitions inherit the prepared index automatically.
+
 The channel table passes its displayed search/status/balance scope to billing.
 When those filters leave a single provider, the existing provider filter limits
 the billing facts being reconciled. Receipt ownership checks still include

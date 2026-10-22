@@ -22,6 +22,7 @@ func migratePostgres(args []string) error {
 	indexes := flags.Bool("prepare-indexes", false, "prepare the existing receipt FIFO index without blocking writes")
 	readIndexes := flags.Bool("prepare-analytics-indexes", false, "prepare partitioned request-usage indexes concurrently")
 	receiptIndexes := flags.Bool("prepare-receipt-indexes", false, "prepare receipt identity lookup indexes concurrently")
+	billingProviderIndex := flags.Bool("prepare-billing-provider-index", false, "prepare the provider-scoped billing lookup index concurrently")
 	usage := flags.Bool("prepare-usage-projection", false, "backfill and verify compact transactional usage rows")
 	billing := flags.Bool("prepare-billing-projection", false, "backfill and verify billing identities after older API writers drain")
 	layout := flags.Bool("prepare-rollup-layout", false, "separate rollup levels before initial activation")
@@ -90,6 +91,12 @@ func migratePostgres(args []string) error {
 		if err = e.prepareFactIndex(ctx, "facts_receipt_ids", "receipt_ids", receiptIndexDefinition); err != nil {
 			return err
 		}
+	}
+	if *billingProviderIndex {
+		if err = e.prepareBillingProviderIndex(ctx); err != nil {
+			return err
+		}
+		fmt.Println(`{"phase":"billing_provider_index_prepared"}`)
 	}
 	if *indexes {
 		conn, err := e.DB.DB.Conn(ctx)
