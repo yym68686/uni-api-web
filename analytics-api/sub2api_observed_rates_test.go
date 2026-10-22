@@ -6,7 +6,153 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestSubObservedRateSurvivesReceiptFIFO(t *testing.T) {
+	s, account, owner := attributionFixture(t)
+	ctx := context.Background()
+	for _, query := range []string{
+		"CREATE INDEX IF NOT EXISTS " + receiptAccountTimeIndex + " ON console_sub_spend_logs(account_id,at_ms)",
+	} {
+		if _, err := s.control.db.Exec(query); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.control.db.Exec(`INSERT INTO console_sub_targets(account_id,group_id,name,platform,remote_key_id,billing) VALUES($1,7,'group','openai',42,'{"rate":0.3}')`, account); err != nil {
+		t.Fatal(err)
+	}
+	floor := time.Now().Add(-time.Hour).UnixMilli()
+	if _, err := s.engine.DB.Exec("UPDATE storage_state SET evicted_before_ms=?", floor); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.control.db.Exec(`INSERT INTO console_sub_usage(id,account_id,group_id,key_id,model,started_at,request_ids,status,result) VALUES($1,$2,7,42,'luna',$3,'[]','matched','{"status":"matched","total_cost":1,"actual_cost":3,"input_price":0.1}')`, account+"-receipt", account, floor/1000-60); err != nil {
+		t.Fatal(err)
+	}
+	before, err := s.control.subObservedRates(ctx, owner)
+	if err != nil || before[qualityGroupID(account, 7)]["luna"].Rate != 3 {
+		t.Fatal(before, err)
+	}
+	if err := s.trimReceiptHistory(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var remaining int
+	if err := s.control.db.QueryRow("SELECT count(*) FROM console_sub_usage WHERE account_id=$1", account).Scan(&remaining); err != nil || remaining != 0 {
+		t.Fatal("expired request must still be evicted", remaining, err)
+	}
+	after, err := s.control.subObservedRates(ctx, owner)
+	if err != nil || after[qualityGroupID(account, 7)]["luna"].Rate != 3 {
+		t.Fatalf("FIFO erased current model billing metadata: before=%v after=%v err=%v", before, after, err)
+	}
+}
+
+func TestObservedRateMetadataTracksCurrentKeyAndRollsBackAtomically(t *testing.T) {
+	s, account, owner := subUsageTestService(t)
+	ctx := context.Background()
+	if _, err := s.control.db.Exec(`INSERT INTO console_sub_targets(account_id,group_id,name,platform,remote_key_id) VALUES($1,7,'group','openai',42)`, account); err != nil {
+		t.Fatal(err)
+	}
+	insert := `INSERT INTO console_sub_usage(id,account_id,group_id,key_id,model,started_at,request_ids,status,result) VALUES($1,$2,7,$3,'m',$4,'[]','matched',$5)`
+	good := `{"status":"matched","total_cost":1,"actual_cost":0,"input_price":1,"message":"not durable metadata"}`
+	if _, err := s.control.db.Exec(insert, account+"-first", account, 42, 100, good); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := s.control.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec(insert, account+"-rollback", account, 42, 200, `{"status":"matched","total_cost":1,"actual_cost":9,"input_price":1}`); err != nil {
+		tx.Rollback()
+		t.Fatal(err)
+	}
+	tx.Rollback()
+	read := func() map[string]subObservedRate {
+		t.Helper()
+		v, e := s.control.subObservedRates(ctx, owner)
+		if e != nil {
+			t.Fatal(e)
+		}
+		return v[qualityGroupID(account, 7)]
+	}
+	if v, ok := read()["m"]; !ok || v.Rate != 0 {
+		t.Fatal("zero/rollback", read())
+	}
+	var extra bool
+	if err = s.control.db.QueryRow(`SELECT result ? 'message' FROM console_sub_observed_rates WHERE account_id=$1`, account).Scan(&extra); err != nil || extra {
+		t.Fatal("metadata retained unrelated payload", extra, err)
+	}
+	if _, err = s.control.db.Exec(`UPDATE console_sub_targets SET remote_key_id=43 WHERE account_id=$1`, account); err != nil {
+		t.Fatal(err)
+	}
+	if len(read()) != 0 {
+		t.Fatal("old key rate applied to replacement key")
+	}
+	if _, err = s.control.db.Exec(insert, account+"-replacement", account, 43, 50, `{"status":"matched","total_cost":1,"actual_cost":2,"input_price":1}`); err != nil {
+		t.Fatal(err)
+	}
+	// An older writer's DELETE trigger must not resurrect the replaced key.
+	if _, err = s.control.db.Exec(`DELETE FROM console_sub_usage WHERE account_id=$1`, account); err != nil {
+		t.Fatal(err)
+	}
+	if read()["m"].Rate != 2 {
+		t.Fatal("replacement was lost", read())
+	}
+	if _, err = s.control.db.Exec(insert, account+"-invalid", account, 43, 60, `{"status":"matched","total_cost":0,"actual_cost":0,"input_price":1}`); err != nil {
+		t.Fatal(err)
+	}
+	if len(read()) != 0 {
+		t.Fatal("older valid rate hid newest unusable evidence")
+	}
+	if _, err = s.control.db.Exec(`DELETE FROM console_sub_usage WHERE account_id=$1`, account); err != nil {
+		t.Fatal(err)
+	}
+	if len(read()) != 0 {
+		t.Fatal("FIFO revived an older rate")
+	}
+}
+
+func TestObservedRateRecoveryUsesExistingReceiptAndExactCurrentKey(t *testing.T) {
+	s, account, owner := subUsageTestService(t)
+	ctx := context.Background()
+	if _, err := s.control.db.Exec(`INSERT INTO console_sub_targets(account_id,group_id,name,platform,remote_key_id) VALUES($1,7,'group','openai',42)`, account); err != nil {
+		t.Fatal(err)
+	}
+	old := usageFixture(1, "receipt-one")
+	old.CreatedAt = time.Now().Add(-2 * time.Hour).UTC().Format(time.RFC3339)
+	latest := usageFixture(2, "receipt-two")
+	latest.CreatedAt = time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
+	latest.ActualCost = usageFloat(.0024)
+	foreign := usageFixture(3, "foreign")
+	foreign.KeyID = 99
+	foreign.CreatedAt = time.Now().UTC().Format(time.RFC3339)
+	foreignGroup := foreign
+	foreignGroup.KeyID = 42
+	foreignGroup.GroupID = usageInt(9)
+	page := []subUsageLog{old, latest, foreign, foreignGroup}
+	if n, err := s.control.retainObservedRatePage(ctx, account, 7, 42, page, false); err != nil || n != 1 {
+		t.Fatal(n, err)
+	}
+	got, err := s.control.subObservedRates(ctx, owner)
+	if err != nil || len(got) != 0 {
+		t.Fatal("preview wrote evidence", got, err)
+	}
+	if n, err := s.control.retainObservedRatePage(ctx, account, 7, 42, page, true); err != nil || n != 1 {
+		t.Fatal(n, err)
+	}
+	got, err = s.control.subObservedRates(ctx, owner)
+	if err != nil || math.Abs(got[qualityGroupID(account, 7)][checkModel].Rate-3) > 1e-9 {
+		t.Fatal(got, err)
+	}
+	if n, err := s.control.retainObservedRatePage(ctx, account, 7, 42, page, true); err != nil || n != 0 {
+		t.Fatal("replay was not idempotent", n, err)
+	}
+	if _, err = s.control.db.Exec(`UPDATE console_sub_targets SET remote_key_id=99 WHERE account_id=$1`, account); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.control.retainObservedRatePage(ctx, account, 7, 42, page, true); err == nil {
+		t.Fatal("changed current key accepted")
+	}
+}
 
 func TestSubReceiptRateUsesActualChargeAndRejectsUnusableReceipts(t *testing.T) {
 	input, total, actual, declared := .1, .0000537, .0001611, .3

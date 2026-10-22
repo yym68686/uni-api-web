@@ -16,9 +16,8 @@ type subObservedRate struct {
 	ObservedAt int64   `json:"observed_at"`
 }
 
-// Read receipt-derived rates once per complete refresh, independently from
-// model payloads. Receipt history has no per-account matched-row index; doing
-// this for every account would multiply the same history scan.
+// Read current receipt-derived metadata independently from model payloads.
+// Historical request FIFO must not erase the last verified model multiplier.
 func (s *Service) subAccountRatesSummary(w http.ResponseWriter, r *http.Request, owner string) {
 	observed, err := s.control.subObservedRates(r.Context(), owner)
 	if err != nil {
@@ -59,11 +58,18 @@ func (s *controlStore) subObservedRates(ctx context.Context, owner string) (map[
 func (s *controlStore) subObservedRatesForAccount(ctx context.Context, owner, accountID string) (map[string]map[string]subObservedRate, error) {
 	rows, err := s.db.QueryContext(ctx, `WITH owned_targets AS MATERIALIZED (
  SELECT t.account_id,t.group_id,t.remote_key_id FROM console_sub_targets t JOIN console_sub_accounts a ON a.id=t.account_id WHERE a.owner=$1 AND ($2='' OR a.id=$2)),
- latest AS (
+ raw_latest AS (
  SELECT DISTINCT ON (u.account_id,u.group_id,u.model) u.id,u.account_id,u.group_id,u.model,u.started_at
  FROM console_sub_usage u JOIN owned_targets t ON t.account_id=u.account_id AND t.group_id=u.group_id AND t.remote_key_id=u.key_id
- WHERE u.status='matched' ORDER BY u.account_id,u.group_id,u.model,u.started_at DESC,u.id DESC)
- SELECT latest.account_id,latest.group_id,latest.model,latest.started_at,u.result FROM latest JOIN console_sub_usage u ON u.id=latest.id`, owner, accountID)
+ WHERE u.status='matched' ORDER BY u.account_id,u.group_id,u.model,u.started_at DESC,u.id DESC),
+ candidates AS (
+ SELECT l.id,l.account_id,l.group_id,l.model,l.started_at,u.result
+ FROM raw_latest l JOIN console_sub_usage u ON u.id=l.id
+ UNION ALL
+ SELECT r.receipt_id,r.account_id,r.group_id,r.model,r.started_at,r.result
+ FROM console_sub_observed_rates r JOIN owned_targets t ON t.account_id=r.account_id AND t.group_id=r.group_id AND t.remote_key_id=r.key_id)
+ SELECT DISTINCT ON (account_id,group_id,model) account_id,group_id,model,started_at,result
+ FROM candidates ORDER BY account_id,group_id,model,started_at DESC,id DESC`, owner, accountID)
 	if err != nil {
 		return nil, err
 	}

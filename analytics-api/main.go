@@ -18,6 +18,12 @@ func env(name, fallback string) string {
 	return fallback
 }
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "recover-observed-rates" {
+		if err := recoverObservedRates(os.Args[2:]); err != nil {
+			log.Fatal("Observed rate recovery failed: ", databaseErrorClass(err))
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "migrate-postgresql" {
 		if err := migratePostgres(os.Args[2:]); err != nil {
 			log.Fatal("PostgreSQL migration failed: ", databaseErrorClass(err))

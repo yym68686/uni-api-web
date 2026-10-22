@@ -181,3 +181,20 @@ sets and compares every projected column in both directions. It also removes
 only derived claim partitions orphaned by an older FIFO writer during rollout.
 Until every retained hour passes, reads keep the prior global ownership query.
 API startup creates only empty schema metadata and never backfills history.
+
+Latest verified model multipliers are durable channel metadata. A control-table
+trigger retains one compact receipt per account/group/model for the current
+dedicated probe key when a receipt is matched, and atomically before request
+FIFO removes it. Older writers and retention workers are covered too. Reads
+still choose the latest evidence and require the current key; incomplete or
+invalid newer evidence cannot reveal an older valid rate. Deleting an account
+or group removes its metadata. This does not retain the raw request history.
+
+If historical cleanup already removed that evidence, `recover-observed-rates`
+reads a bounded first page of existing usage receipts for each explicitly
+selected current probe key. It never invokes a model, changes channels, or
+creates keys. Preview is the default; `--apply` records validated receipt
+evidence, with account/group/key checks and a transaction-time key recheck.
+Each invocation accepts at most twelve groups and supports an account/group
+resume cursor. Unavailable receipts remain unknown; published group rates are
+not substituted for verified model multipliers.
