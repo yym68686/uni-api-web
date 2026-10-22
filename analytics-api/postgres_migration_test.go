@@ -376,6 +376,55 @@ func TestPostgresIncrementalRollupsMatchRebuildWithLateEventsAndRetries(t *testi
 	}
 }
 
+func TestPostgresDayRebuildUsesEquivalentHoursWithoutScanningMinutes(t *testing.T) {
+	e := stateTestEngine(t)
+	ctx := context.Background()
+	day := time.Now().UTC().Add(-48 * time.Hour).Truncate(24 * time.Hour)
+	var facts []Fact
+	for i := 0; i < 72; i++ {
+		at := day.Add(time.Duration(i%24)*time.Hour + time.Duration(i)*time.Minute)
+		latency, tokens := float64(i%7)*13, int64(i*11)
+		f := Fact{Schema: 1, EventID: fmt.Sprintf("day-hierarchy-%d", i), Kind: "attempt", AtMS: at.UnixMilli(), SourceID: "primary", Provider: fmt.Sprint(i % 2), Model: fmt.Sprint(i % 3), Outcome: "success", InputTokens: &tokens, FirstOutputMS: &latency, DispatchMS: &latency, FirstTextMS: &latency, ResponseCreatedMS: &latency}
+		if i%4 == 0 {
+			f.FirstOutputMS, f.FirstTextMS = nil, nil
+		}
+		facts = append(facts, f)
+	}
+	if err := e.Import(ctx, "day-hierarchy", "one", facts); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Import(ctx, "day-hierarchy-retry", "two", facts); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := func() string {
+		var raw string
+		if err := e.DB.QueryRow("SELECT json_agg(r ORDER BY period_ms,kind,provider,model)::text FROM rollups r WHERE level='day'").Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	before := snapshot()
+	tx, err := e.DB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	// Removing minute detail must not change a day rebuilt from the exact
+	// hourly projections. The previous FIFO path scanned these rows instead.
+	if _, err = tx.ExecContext(ctx, "DELETE FROM rollups WHERE level='minute'"); err != nil {
+		t.Fatal(err)
+	}
+	if err = e.rebuildRollup(ctx, tx, "day", day.UnixMilli(), day.AddDate(0, 0, 1).UnixMilli()); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if after := snapshot(); before != after {
+		t.Fatalf("hourly day rebuild differs from transactional daily projection:\n%s\n%s", before, after)
+	}
+}
+
 func TestPostgresLegacyPriceSetSurvivesReplicaStartupExactly(t *testing.T) {
 	e := stateTestEngine(t)
 	if err := e.migrateLegacyPrices(context.Background(), []Price{{Model: "saved-only", Input: 7}}, false); err != nil {

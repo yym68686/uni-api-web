@@ -25,7 +25,10 @@ on WAL and query temp files and monitoring actual filesystem available space.
 Do not claim pg_database_size includes WAL or other databases.
 
 Oldest hourly request-fact partitions and expired aggregate partitions are dropped
-transactionally. No fixed number of days or requests determines retention. The
+transactionally. The remaining daily aggregate is rebuilt from committed hourly
+aggregates, preserving sums, histograms and latest-value clocks without scanning
+an entire day of minute rows while holding the ingestion admission lock.
+No fixed number of days or requests determines retention. The
 oldest-hour eviction boundary, loss counters and actual event coverage are surfaced.
 Receipt caches follow the same floor through bounded idle-account transactions;
 DELETE frees reusable heap/index pages but does not immediately shrink that table.

@@ -35,7 +35,16 @@ func (e *Engine) rebuildRollup(ctx context.Context, tx *analyticsTx, level strin
 	for _, name := range []string{"first", "dispatch", "created", "text"} {
 		selects = append(selects, "max(last_"+name+"_ms)")
 	}
-	_, err := tx.ExecContext(ctx, "INSERT INTO rollups("+rollupColumns()+") SELECT "+strings.Join(selects, ",")+" FROM rollups WHERE level='minute' AND period_ms>=? AND period_ms<? GROUP BY kind,source_id,key_id,provider,model,upstream_model,endpoint,stream,outcome", start, level, start, end)
+	// Hour rows contain the same additive sums, histograms and last-value
+	// clocks as their minutes, committed in the same fact transaction. FIFO
+	// already removes the expired hour before rebuilding its day. Reading the
+	// remaining hours avoids scanning a whole day of minutes under admission's
+	// global write lock, which can otherwise prevent capacity recovery.
+	sourceLevel := "minute"
+	if level == "day" {
+		sourceLevel = "hour"
+	}
+	_, err := tx.ExecContext(ctx, "INSERT INTO rollups("+rollupColumns()+") SELECT "+strings.Join(selects, ",")+" FROM rollups WHERE level=? AND period_ms>=? AND period_ms<? GROUP BY kind,source_id,key_id,provider,model,upstream_model,endpoint,stream,outcome", start, level, sourceLevel, start, end)
 	return err
 }
 
