@@ -253,11 +253,11 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 	alignedArgs := append(append([]any{}, scopeArgs...), args...)
 	// Keep one immutable fact snapshot while processing bounded Go/ledger batches.
 	// Materialize alignment once; repeating it for each page rescans all history.
-	snapshot, err := s.engine.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
+	snapshot, closeSnapshot, err := s.engine.DB.analyticalSnapshot(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
 	if err != nil {
 		return nil, err
 	}
-	defer snapshot.Rollback() // Also drops the transaction-local temporary table.
+	defer closeSnapshot() // Drop temporary tables and retire this analytical backend.
 	billingTable, receiptIndex := "facts", "facts_receipt_ids"
 	var projected bool
 	if err = snapshot.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM meta WHERE name='billing_projection_complete' AND value='true')").Scan(&projected); err != nil {

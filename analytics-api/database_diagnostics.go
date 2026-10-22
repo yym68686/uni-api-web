@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/jackc/pgx/v5/pgconn"
+	"io"
 )
 
 func databaseErrorClass(err error) string {
@@ -25,11 +26,16 @@ func databaseErrorClass(err error) string {
 	if errors.Is(err, context.Canceled) {
 		return "canceled"
 	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return "database_connection_lost"
+	}
 	var pg *pgconn.PgError
 	if !errors.As(err, &pg) {
 		return "unclassified_error"
 	}
 	switch pg.Code {
+	case "08000", "08003", "08006", "57P01", "57P02", "57P03":
+		return "database_connection_lost"
 	case "53200":
 		return "database_out_of_memory"
 	case "53100":

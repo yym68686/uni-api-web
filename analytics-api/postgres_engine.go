@@ -111,24 +111,24 @@ func openPostgresEngine(namespace string, cfg Config) (*Engine, error) {
 }
 
 func (e *Engine) readSnapshot(ctx context.Context) (*Engine, func(), error) {
-	tx, err := e.DB.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	tx, closeSnapshot, err := e.DB.analyticalSnapshot(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
 		return nil, nil, err
 	}
 	// This bounded, single analytical slot needs 16 MB per sort to avoid
 	// spilling the verified production rollup input. Control sessions keep 4 MB.
 	if _, err = tx.ExecContext(ctx, "SET LOCAL work_mem='16MB'"); err != nil {
-		tx.Rollback()
+		closeSnapshot()
 		return nil, nil, err
 	}
-	view := &Engine{DB: &analyticsDB{DB: e.DB.DB, snapshot: tx}, cfg: e.cfg, Location: e.Location}
+	view := &Engine{DB: &analyticsDB{DB: e.DB.DB, snapshot: tx.Tx}, cfg: e.cfg, Location: e.Location}
 	var revision uint64
 	if err = tx.QueryRowContext(ctx, "SELECT revision FROM storage_state WHERE singleton").Scan(&revision); err != nil {
-		tx.Rollback()
+		closeSnapshot()
 		return nil, nil, err
 	}
 	view.Revision.Store(revision)
-	return view, func() { _ = tx.Rollback() }, nil
+	return view, closeSnapshot, nil
 }
 
 func (e *Engine) currentRevision(ctx context.Context) (uint64, error) {

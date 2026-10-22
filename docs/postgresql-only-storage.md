@@ -108,6 +108,15 @@ Query acceptance includes real node measurements. Passing local fixtures or
 health probes does not establish the earlier one-second UI target. Record
 remaining latency and ingestion freshness in the release report.
 
+Analytical snapshots lease a database connection for their full transaction and
+retire that session after rollback, including cancellation and failed reads.
+They do not return a backend with retained query allocations to the shared
+idle pool. Ingestion and control transactions keep their existing pooling.
+The analytical gate, repeatable-read isolation, statement deadlines and memory
+settings are unchanged. Session acquisition/retirement logs include only backend
+PID and the safe request ID so database memory incidents can be correlated.
+Connection loss is classified separately from disk or retention capacity errors.
+
 Narrow receipt attribution scopes use a partial GIN index on request identifiers
 to check competing claims across all retained sources and keys. Prepare populated
 databases explicitly with `--prepare-receipt-indexes`; each hourly child is built

@@ -3,8 +3,11 @@ package main
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
+	"log"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // Analytics predicates use positional ? parameters. Bind them without touching
@@ -77,6 +80,43 @@ func (d *analyticsDB) BeginTx(c context.Context, o *sql.TxOptions) (*analyticsTx
 		return nil, e
 	}
 	return &analyticsTx{t}, nil
+}
+
+// A finished analytical transaction can leave a large private allocation in its
+// PostgreSQL backend even when the session is idle. Lease the connection until
+// rollback, then retire that backend instead of returning it to the shared pool.
+// Ingestion and control connections retain their ordinary pool lifetimes.
+func (d *analyticsDB) analyticalSnapshot(ctx context.Context, options *sql.TxOptions) (*analyticsTx, func(), error) {
+	conn, err := d.DB.Conn(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	retire := func() {
+		// database/sql discards the connection on ErrBadConn. This happens only
+		// after the read transaction is finished, never during a statement, and
+		// the sentinel is not returned to callers or used to replay any query.
+		_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+		_ = conn.Close()
+	}
+	var backendPID int
+	if err = conn.QueryRowContext(ctx, "SELECT pg_backend_pid()").Scan(&backendPID); err != nil {
+		retire()
+		return nil, nil, err
+	}
+	tx, err := conn.BeginTx(ctx, options)
+	if err != nil {
+		retire()
+		return nil, nil, err
+	}
+	log.Printf("event=analytics_session_acquired backend_pid=%d request_id=%s", backendPID, consoleRequestID(ctx))
+	var once sync.Once
+	return &analyticsTx{tx}, func() {
+		once.Do(func() {
+			_ = tx.Rollback()
+			retire()
+			log.Printf("event=analytics_session_retired backend_pid=%d request_id=%s", backendPID, consoleRequestID(ctx))
+		})
+	}, nil
 }
 func (d *analyticsDB) Conn(c context.Context) (*analyticsConn, error) {
 	v, e := d.DB.Conn(c)

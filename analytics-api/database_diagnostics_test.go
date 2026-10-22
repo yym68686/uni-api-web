@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -22,6 +23,9 @@ func TestDatabaseDiagnosticsClassifiesBoundedMaintenanceWithoutErrorText(t *test
 		{errReceiptRetentionIndexRequired, "maintenance_deferred"},
 		{errBillingProjectionMismatch, "projection_mismatch"},
 		{context.DeadlineExceeded, "deadline_exceeded"},
+		{fmt.Errorf("private query: %w", io.ErrUnexpectedEOF), "database_connection_lost"},
+		{io.EOF, "database_connection_lost"},
+		{&pgconn.PgError{Code: "57P02", Message: "database crash details"}, "database_connection_lost"},
 		{&pgconn.PgError{Code: "53400", Message: "private SQL and parameters"}, "database_resource_limit"},
 		{errors.New("private connection configuration"), "unclassified_error"},
 	} {
