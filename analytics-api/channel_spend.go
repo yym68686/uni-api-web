@@ -191,36 +191,24 @@ const billingAlignedSQL = `WITH aligned_billing AS (
 
 const billingIdentityColumns = "source_id,instance_id,request_id,attempt_id,provider,key_id,model,upstream_model,endpoint,stream"
 
-// A billing record can belong to the window by its observation OR a matching
-// completion. Select that superset first, then count ALL completions (including
-// those outside the window) to preserve reused-ID ambiguity and late arrivals.
-// Explicit projection keeps trace_detail, transport_timing and usage payloads
-// out of the materialized relation. No historical facts or indexes are changed.
+// Count all retained completions in the requested identity scope before applying
+// the completion-time window. This preserves late arrivals and reused-ID
+// ambiguity. Joining one aggregate avoids both a per-bill correlated history
+// scan and multiple wide materialized copies of the candidate billing records.
 const billingProjection = "event_id," + billingIdentityColumns + ",at_ms,started_ms,upstream_base,upstream_key_hash,billing_request_ids,status,upstream_error_sha256"
 
 func scopedBillingAlignment(f QueryFilter, from, to int64) (string, []any) {
-	window, windowArgs := billingWhere(f, from, to)
 	scope, scopeArgs := billingWhere(f, 0, 1)
 	scope = strings.TrimPrefix(strings.TrimPrefix(scope, "at_ms>=? AND at_ms<?"), " AND ")
 	if scope == "" {
 		scope = "true"
 	}
-	var equal []string
-	for _, column := range strings.Split(billingIdentityColumns, ",") {
-		equal = append(equal, "k."+column+"=b."+column)
-	}
-	args := append(append([]any{}, windowArgs...), scopeArgs[2:]...)
-	args = append(args, from*1000, to*1000)
-	return `WITH window_completions AS MATERIALIZED (
- SELECT DISTINCT ` + billingIdentityColumns + ` FROM facts WHERE kind='attempt' AND ` + window + `),
- candidate_billing AS MATERIALIZED (SELECT ` + billingProjection + ` FROM facts b
- WHERE kind='billing' AND ` + scope + ` AND ((at_ms>=? AND at_ms<?)
- OR EXISTS(SELECT 1 FROM window_completions k WHERE ` + strings.Join(equal, " AND ") + `))),
- completion_keys AS MATERIALIZED (SELECT DISTINCT ` + billingIdentityColumns + ` FROM candidate_billing),
- completions AS MATERIALIZED (SELECT a.` + strings.ReplaceAll(billingIdentityColumns, ",", ",a.") + `,max(a.at_ms) AS completed_at,count(*) AS n
- FROM facts a JOIN completion_keys k USING(` + billingIdentityColumns + `) WHERE a.kind='attempt' GROUP BY a.source_id,a.instance_id,a.request_id,a.attempt_id,a.provider,a.key_id,a.model,a.upstream_model,a.endpoint,a.stream),
+	args := append(append([]any{}, scopeArgs[2:]...), scopeArgs[2:]...)
+	return `WITH completions AS (
+ SELECT ` + billingIdentityColumns + `,max(at_ms) AS completed_at,count(*) AS n
+ FROM facts WHERE kind='attempt' AND ` + scope + ` GROUP BY ` + billingIdentityColumns + `),
  aligned_billing AS (SELECT b.event_id,b.source_id,b.instance_id,b.request_id,b.attempt_id,b.provider,b.key_id,b.model,b.upstream_model,b.endpoint,b.stream,b.started_ms,b.upstream_base,b.upstream_key_hash,b.billing_request_ids,b.status,b.upstream_error_sha256,coalesce(a.completed_at,b.at_ms) AS at_ms,coalesce(a.n,0) AS completions
- FROM candidate_billing b LEFT JOIN completions a USING(` + billingIdentityColumns + `)) `, args
+ FROM facts b LEFT JOIN completions a USING(` + billingIdentityColumns + `) WHERE b.kind='billing' AND ` + scope + `) `, args
 }
 
 // Compute competing claims once per request, not once per 5,000-row ledger page.
@@ -259,6 +247,12 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 		return nil, err
 	}
 	defer snapshot.Rollback() // Also drops the transaction-local temporary table.
+	// One analytical slot, no parallel workers: keep the scoped identity sort
+	// in bounded memory without multiplying the budget across worker processes.
+	// The independent 64 MB temporary-file limit remains in force.
+	if _, err = snapshot.ExecContext(ctx, "SET LOCAL work_mem='64MB'; SET LOCAL max_parallel_workers_per_gather=0"); err != nil {
+		return nil, err
+	}
 	var claimsComplete bool
 	var evictedBefore int64
 	if err = snapshot.QueryRowContext(ctx, "SELECT claims_history_complete,evicted_before_ms FROM storage_state WHERE singleton").Scan(&claimsComplete, &evictedBefore); err != nil {
@@ -266,6 +260,11 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 	}
 	if _, err = snapshot.ExecContext(ctx, `CREATE TEMP TABLE console_spend_facts AS `+alignment+`SELECT * FROM aligned_billing WHERE `+where, alignedArgs...); err != nil {
 		return nil, fmt.Errorf("billing alignment: %w", err)
+	}
+	// Keyset pages must seek once, not sort the remaining full result on each
+	// page. Event IDs are validated at ingestion and this index is transaction-local.
+	if _, err = snapshot.ExecContext(ctx, "CREATE INDEX ON console_spend_facts(event_id)"); err != nil {
+		return nil, err
 	}
 	operation.stage("receipt_claims")
 	if _, err = snapshot.ExecContext(ctx, billingClaimsSQL); err != nil {

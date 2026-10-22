@@ -95,3 +95,33 @@ func TestPostgresVolumeFixtureReads(t *testing.T) {
 		}
 	}
 }
+
+func TestPostgresVolumeFixtureBilling(t *testing.T) {
+	dsn := os.Getenv("PG_VOLUME_FIXTURE_URL")
+	if dsn == "" {
+		t.Skip("private volume fixture")
+	}
+	e, err := OpenEngine("analytics", Config{ControlDatabaseURL: dsn, Timezone: "Asia/Shanghai"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	s, _, owner := attributionFixture(t)
+	s.engine = e
+	var latest int64
+	if err = e.DB.QueryRow("SELECT max(last_ms) FROM fact_source_ranges").Scan(&latest); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	began := time.Now()
+	rows, err := s.attributedChannelSpend(ctx, owner, QueryFilter{SourceID: "primary"}, latest/1000-86400, latest/1000)
+	if err != nil || len(rows) == 0 {
+		t.Fatal(len(rows), err)
+	}
+	total := 0
+	for _, row := range rows {
+		total += row.Total
+	}
+	t.Logf("billing_rows=%d attempts=%d elapsed=%s", len(rows), total, time.Since(began))
+}
