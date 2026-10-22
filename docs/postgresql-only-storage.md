@@ -109,6 +109,14 @@ Query acceptance includes real node measurements. Passing local fixtures or
 health probes does not establish the earlier one-second UI target. Record
 remaining latency and ingestion freshness in the release report.
 
+Channel account reads publish receipt enrichment only after the full authorized
+query succeeds. SQL cancellation, row-stream failure or an unusable typed receipt
+fails the read instead of returning embedded older usage with HTTP 200 or 304.
+Failure logs contain the error class and request ID, not receipt or credential
+contents. A receipt that is genuinely absent remains absent; it is not fabricated
+or confused with a failed lookup. This protects read correctness and does not by
+itself meet the interactive latency target.
+
 Analytical snapshots lease a database connection for their full transaction and
 retire that session after rollback, including cancellation and failed reads.
 They do not return a backend with retained query allocations to the shared

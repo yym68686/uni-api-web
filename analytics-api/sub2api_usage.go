@@ -180,7 +180,7 @@ func (s *Service) subQueueUsage(ctx context.Context, account string, group, key 
 	return tx.Commit()
 }
 
-func (s *Service) subAttachUsage(ctx context.Context, owner string, accounts []subAccount) {
+func (s *Service) subAttachUsage(ctx context.Context, owner string, accounts []subAccount) error {
 	probes := map[string][]*subProbe{}
 	for i := range accounts {
 		for j := range accounts[i].Targets {
@@ -229,7 +229,7 @@ func (s *Service) subAttachUsage(ctx context.Context, owner string, accounts []s
 		}
 	}
 	if len(probes) == 0 {
-		return
+		return ctx.Err()
 	}
 	ids := make([]string, 0, len(probes))
 	for id := range probes {
@@ -237,23 +237,38 @@ func (s *Service) subAttachUsage(ctx context.Context, owner string, accounts []s
 	}
 	rows, err := s.control.db.QueryContext(ctx, `SELECT u.id,u.status,u.result FROM console_sub_usage u JOIN console_sub_accounts a ON a.id=u.account_id WHERE a.owner=$1 AND u.id=ANY($2)`, owner, ids)
 	if err != nil {
-		return
+		return err
 	}
 	defer rows.Close()
+	// Publish only after the entire receipt read succeeds. An interrupted read
+	// cannot leave a mixture of current receipts and older embedded probe usage.
+	current := make(map[string]*subUsage, len(probes))
 	for rows.Next() {
 		var id, status string
 		var raw []byte
-		if rows.Scan(&id, &status, &raw) != nil {
-			return
+		if err := rows.Scan(&id, &status, &raw); err != nil {
+			return err
 		}
 		usage := &subUsage{Status: status}
-		if len(raw) > 0 && json.Unmarshal(raw, usage) != nil {
-			continue
+		if len(raw) > 0 {
+			if err := json.Unmarshal(raw, usage); err != nil {
+				return err
+			}
 		}
+		current[id] = usage
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	for id, usage := range current {
 		for _, p := range probes[id] {
 			p.Usage = usage
 		}
 	}
+	return nil
 }
 
 // Free account-API reads have a durable queue and separate leases. Slow log

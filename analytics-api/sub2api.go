@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"net/url"
 	"sort"
@@ -203,7 +204,11 @@ func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	trace.next("usage")
-	s.subAttachUsage(r.Context(), owner, accounts)
+	if err := s.subAttachUsage(r.Context(), owner, accounts); err != nil {
+		log.Printf("sub_accounts_receipt_read_failed class=%s canceled=%t request_id=%s", databaseErrorClass(err), r.Context().Err() != nil, consoleRequestID(r.Context()))
+		http.Error(w, "模型账单读取失败，请重新读取", http.StatusServiceUnavailable)
+		return
+	}
 	trace.next("observed_rates")
 	if !omitRates {
 		observed, err := s.control.subObservedRatesForAccount(r.Context(), owner, accountID)
