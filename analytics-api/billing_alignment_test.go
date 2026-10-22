@@ -97,7 +97,11 @@ func TestBillingClaimsRemainGlobalAcrossPagesAndKeys(t *testing.T) {
 	c := b
 	c.EventID = "c"
 	c.UpstreamKeyHash = "different-credential"
-	if err := e.Import(ctx, "claims", "one", []Fact{a, b, c}); err != nil {
+	facts := []Fact{a, b, c}
+	for i := 0; i < 1024; i++ {
+		facts = append(facts, attributedFact(fmt.Sprintf("padding-%04d", i), "selected", now))
+	}
+	if err := e.Import(ctx, "claims", "one", facts); err != nil {
 		t.Fatal(err)
 	}
 	tx, err := e.DB.BeginTx(ctx, nil)
@@ -105,7 +109,7 @@ func TestBillingClaimsRemainGlobalAcrossPagesAndKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	if _, err = tx.Exec("CREATE TEMP TABLE console_spend_facts AS SELECT " + billingProjection + " FROM facts WHERE event_id='a'"); err != nil {
+	if _, err = tx.Exec("CREATE TEMP TABLE console_spend_facts AS SELECT " + billingProjection + " FROM facts WHERE event_id='a' OR event_id LIKE 'padding-%'"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = tx.Exec(billingClaimsSQL); err != nil {
@@ -138,7 +142,7 @@ func TestBillingClaimsRemainGlobalAcrossPagesAndKeys(t *testing.T) {
 	if err = rows.Err(); err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 || got["client:shared"] != 2 || got["client:unique"] != 1 {
+	if len(got) != 1026 || got["client:shared"] != 2 || got["client:unique"] != 1 {
 		t.Fatal(got)
 	}
 }

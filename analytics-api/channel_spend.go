@@ -280,7 +280,10 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 	operation.stage("receipt_claims")
 	claimQuery := billingClaimsSQL
 	var narrow, indexed bool
-	if err = snapshot.QueryRowContext(ctx, "SELECT count(*)<=256 FROM (SELECT 1 FROM console_spend_facts LIMIT 257) f").Scan(&narrow); err != nil {
+	// A full Go ledger page has at most 5,000 facts and 15,000 identifiers.
+	// The batched GIN probe handles that set once per partition; limiting it to
+	// 256 facts sent ordinary model filters back to a full history expansion.
+	if err = snapshot.QueryRowContext(ctx, "SELECT count(*)<=? FROM (SELECT 1 FROM console_spend_facts LIMIT ?) f", billingFactBatchSize, billingFactBatchSize+1).Scan(&narrow); err != nil {
 		return nil, err
 	}
 	if narrow {
@@ -289,6 +292,7 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 		}
 		if indexed {
 			claimQuery = billingClaimsSeekSQL
+			operation.stage("receipt_claims_index")
 		}
 	}
 	if _, err = snapshot.ExecContext(ctx, claimQuery); err != nil {
