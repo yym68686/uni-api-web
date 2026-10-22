@@ -48,6 +48,12 @@ func TestReceiptRetentionSeeksOldestBatchAcrossAccountsWithoutDeletingLeasedHist
 			t.Fatal(err)
 		}
 	}
+	// The tuple lower bound must include the complete timestamp domain, not
+	// silently omit legacy rows before Unix epoch or the smallest bigint.
+	if _, err := s.control.db.Exec(`INSERT INTO console_sub_spend_logs(account_id,key_id,log_id,at_ms,actual_cost,request_id,model)
+ VALUES($1,1,9001,$2,1,'oldest','m')`, first, int64(-1<<63)); err != nil {
+		t.Fatal(err)
+	}
 	read := func(query string) []string {
 		t.Helper()
 		rows, err := s.control.db.QueryContext(ctx, query, accounts, floor, receiptRetentionBatchSize)
@@ -78,7 +84,7 @@ func TestReceiptRetentionSeeksOldestBatchAcrossAccountsWithoutDeletingLeasedHist
 		t.Fatal(err)
 	}
 	var remaining, leasedRows int
-	if err := s.control.db.QueryRow("SELECT count(*) FROM console_sub_spend_logs WHERE account_id=ANY($1::text[])", accounts).Scan(&remaining); err != nil || remaining != 3200-receiptRetentionBatchSize {
+	if err := s.control.db.QueryRow("SELECT count(*) FROM console_sub_spend_logs WHERE account_id=ANY($1::text[])", accounts).Scan(&remaining); err != nil || remaining != 3201-receiptRetentionBatchSize {
 		t.Fatal("unexpected bounded deletion", remaining, err)
 	}
 	if err := s.control.db.QueryRow("SELECT count(*) FROM console_sub_spend_logs WHERE account_id=$1", leased).Scan(&leasedRows); err != nil || leasedRows != 50000 {

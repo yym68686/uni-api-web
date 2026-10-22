@@ -13,9 +13,14 @@ const receiptAccountTimeIndex = "console_sub_spend_account_retention"
 
 var errReceiptRetentionIndexRequired = errors.New("receipt retention account-time index requires explicit preparation")
 
+// Tuple bounds preserve account equality over the entire bigint timestamp
+// domain while retaining the account/time index ordering. With separate
+// predicates PostgreSQL can instead choose the global time index and filter a
+// long prefix belonging to other accounts before reaching the LIMIT.
 const receiptExpiredCandidatesSQL = `SELECT expired.ctid,expired.at_ms FROM unnest($1::text[]) AS a(account_id)
  CROSS JOIN LATERAL (SELECT ctid,at_ms FROM console_sub_spend_logs l
- WHERE l.account_id=a.account_id AND l.at_ms<$2 ORDER BY l.at_ms LIMIT $3) expired
+ WHERE (l.account_id,l.at_ms)>=(a.account_id,'-9223372036854775808'::bigint)
+ AND (l.account_id,l.at_ms)<(a.account_id,$2::bigint) ORDER BY l.account_id,l.at_ms LIMIT $3) expired
  ORDER BY expired.at_ms LIMIT $3`
 
 const usageExpiredCandidatesSQL = `SELECT expired.ctid,expired.started_at FROM unnest($1::text[]) AS a(account_id)
