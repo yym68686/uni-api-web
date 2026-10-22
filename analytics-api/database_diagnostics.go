@@ -13,7 +13,7 @@ func databaseErrorClass(err error) string {
 	if errors.Is(err, errHistoryCapacity) || errors.Is(err, errBillingBackfillHeadroom) {
 		return "history_capacity_unavailable"
 	}
-	if errors.Is(err, errBillingBackfillBusy) || errors.Is(err, errSubSummaryBackfillBusy) {
+	if errors.Is(err, errBillingBackfillBusy) || errors.Is(err, errSubSummaryBackfillBusy) || errors.Is(err, errReceiptRetentionIndexRequired) {
 		return "maintenance_deferred"
 	}
 	if errors.Is(err, errBillingProjectionMismatch) {

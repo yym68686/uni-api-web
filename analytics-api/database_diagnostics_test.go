@@ -19,6 +19,7 @@ func TestDatabaseDiagnosticsClassifiesBoundedMaintenanceWithoutErrorText(t *test
 		{errHistoryCapacity, "history_capacity_unavailable"},
 		{errBillingBackfillBusy, "maintenance_deferred"},
 		{errSubSummaryBackfillBusy, "maintenance_deferred"},
+		{errReceiptRetentionIndexRequired, "maintenance_deferred"},
 		{errBillingProjectionMismatch, "projection_mismatch"},
 		{context.DeadlineExceeded, "deadline_exceeded"},
 		{&pgconn.PgError{Code: "53400", Message: "private SQL and parameters"}, "database_resource_limit"},

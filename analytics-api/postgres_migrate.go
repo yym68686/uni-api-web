@@ -125,6 +125,37 @@ func migratePostgres(args []string) error {
 		if _, err = conn.ExecContext(ctx, "CREATE INDEX CONCURRENTLY IF NOT EXISTS console_sub_usage_retention ON public.console_sub_usage(account_id,started_at) WHERE status<>'pending'"); err != nil {
 			return err
 		}
+		ready, indexErr := receiptAccountTimeIndexReady(ctx, e.DB.DB)
+		if indexErr != nil {
+			return indexErr
+		}
+		if !ready {
+			// The existing wider index is a conservative allowance for this
+			// additive account/time index. Leave the ingestion reserve intact.
+			var room bool
+			if err = conn.QueryRowContext(ctx, "SELECT pg_database_size(current_database())+pg_relation_size('public.console_sub_spend_time')+33554432<ingest_limit_bytes FROM storage_state WHERE singleton").Scan(&room); err != nil {
+				return err
+			}
+			if !room {
+				return errBillingBackfillHeadroom
+			}
+			if err = conn.QueryRowContext(ctx, "SELECT coalesce((SELECT NOT indisvalid FROM pg_index WHERE indexrelid=to_regclass('public.console_sub_spend_account_retention')),false)").Scan(&invalid); err != nil {
+				return err
+			}
+			if invalid {
+				if _, err = conn.ExecContext(ctx, "DROP INDEX CONCURRENTLY public.console_sub_spend_account_retention"); err != nil {
+					return err
+				}
+			}
+			if _, err = conn.ExecContext(ctx, "CREATE INDEX CONCURRENTLY IF NOT EXISTS console_sub_spend_account_retention ON public.console_sub_spend_logs(account_id,at_ms)"); err != nil {
+				return err
+			}
+			if ready, err = receiptAccountTimeIndexReady(ctx, e.DB.DB); err != nil {
+				return err
+			} else if !ready {
+				return errReceiptRetentionIndexRequired
+			}
+		}
 		fmt.Println(`{"phase":"receipt_index_prepared"}`)
 	}
 	if *prices != "" {

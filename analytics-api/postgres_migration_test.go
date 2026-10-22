@@ -110,6 +110,9 @@ func TestDisjointRollupSlicesMatchMinuteTruthAcrossTimezones(t *testing.T) {
 func TestReceiptFIFORemovesFinalizedHistoryAndPreservesPendingTasks(t *testing.T) {
 	s, account, _ := attributionFixture(t)
 	ctx := context.Background()
+	if _, err := s.control.db.Exec("CREATE INDEX IF NOT EXISTS " + receiptAccountTimeIndex + " ON console_sub_spend_logs(account_id,at_ms)"); err != nil {
+		t.Fatal(err)
+	}
 	floor := time.Now().Add(-time.Hour).UnixMilli()
 	if _, err := s.engine.DB.Exec("UPDATE storage_state SET evicted_before_ms=?", floor); err != nil {
 		t.Fatal(err)

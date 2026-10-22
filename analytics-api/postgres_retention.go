@@ -147,12 +147,14 @@ func (s *Service) retentionLoop(ctx context.Context) {
 	for ctx.Err() == nil {
 		call, cancel := context.WithTimeout(ctx, 10*time.Second)
 		err := s.engine.enforceStorageBudget(call)
+		event := "analytics_capacity_unavailable"
 		if err == nil {
+			event = "receipt_retention_retry"
 			err = s.trimReceiptHistory(call)
 		}
 		cancel()
 		if err != nil && ctx.Err() == nil {
-			log.Printf("event=analytics_capacity_unavailable class=%s", databaseErrorClass(err))
+			log.Printf("event=%s class=%s", event, databaseErrorClass(err))
 		}
 		if !waitStartup(ctx, 10*time.Second) {
 			return

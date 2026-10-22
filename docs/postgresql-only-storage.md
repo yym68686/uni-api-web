@@ -32,6 +32,12 @@ No fixed number of days or requests determines retention. The
 oldest-hour eviction boundary, loss counters and actual event coverage are surfaced.
 Receipt caches follow the same floor through bounded idle-account transactions;
 DELETE frees reusable heap/index pages but does not immediately shrink that table.
+Receipt cleanup requires the account/time index prepared concurrently by
+`--prepare-indexes`; normal startup never builds it over history. Until valid,
+receipt cleanup defers without blocking fact admission. Each pass seeks at most
+512 oldest rows per selected account, merges the oldest 512 overall and deletes
+only that batch. This avoids traversing unrelated accounts through a global time
+index while preserving the expiration floor and FIFO order within each pass.
 Finalized per-request receipt tasks follow that floor too; pending tasks and
 active account leases are preserved. Both receipt retention indexes are prepared
 concurrently before releasing against a populated database.
