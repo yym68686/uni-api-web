@@ -68,7 +68,7 @@ func TestManagementDatabaseSnapshotKeepsPricesModelsReceiptsAndQueueConsistent(t
 	if err := write.Commit(); err != nil {
 		t.Fatal(err)
 	}
-	old, err := s.readManagementDatabaseFrom(ctx, tx, owner)
+	old, err := s.readManagementDatabaseFrom(ctx, tx, owner, nil)
 	if err != nil {
 		t.Fatalf("snapshot read: %v; cause: %v", err, errors.Unwrap(err))
 	}
@@ -113,7 +113,7 @@ func TestManagementDatabaseSnapshotKeepsPricesModelsReceiptsAndQueueConsistent(t
 		t.Fatal(err)
 	}
 	defer fresh.Rollback()
-	current, err := s.readManagementDatabaseFrom(ctx, fresh, owner)
+	current, err := s.readManagementDatabaseFrom(ctx, fresh, owner, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

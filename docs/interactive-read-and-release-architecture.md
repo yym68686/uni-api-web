@@ -35,12 +35,36 @@ storage change does not remove the management page's full-dataset read contract.
 
 The management query foundation includes a browser-verified row/filter model,
 exact count/facets, 25-row signed cursors, explicit transaction-aware control
-readers and version-fenced gateway reads. It is not registered as an HTTP API or
-activated in the frontend. The initial database reader still loads all model
-results. Before activation, live credential bindings must replace cached binding
-assumptions, the page and full batch-selection contracts must be wired, and the
-database work and browser latency must be measured at production cardinality.
-These components alone do not establish the one-second target.
+readers and version-fenced gateway reads. The in-progress management branch now
+registers `GET /v1/channel-management/query`, plus a separate complete-selection
+read fenced by an owner-signed token. Both use a fresh read-only repeatable-read
+transaction enclosed by live gateway revision checks. Source membership and
+credentials are checked before and after that read. Current provider hashes are
+matched against the owner's published PostgreSQL key index; the periodic binding
+inventory is not used as proof of current ownership. Temporary imports also
+require matching site paths and unchanged effective identity.
+
+`useManagementPage` and the complete-selection reader are implemented and tested,
+but **Sub2apiChecks still uses the old read flow**. These branch changes have not
+been published. The database reader still loads all model results and computes a
+revision over all matching rows. Before activation, scope selected-model reads
+including public aliases, preserve full model/facet and batch semantics, wire
+the UI and action invalidations, and measure database work and browser latency
+at production cardinality. These components alone do not establish one second.
+
+The new snapshot read does not create quality-history associations. Previously
+linked history keeps its original account/group. An unlinked old channel check
+without credential provenance must not be attributed using today's credentials.
+The existing writer/legacy read behavior remains unchanged; exact writer-time
+attribution must be addressed before replacing all legacy consumers. Optimization
+reads now include current route revisions and batch capabilities; verified legacy
+engine-origin classification still needs to be carried into the new read contract
+before switching the optimization UI.
+
+Local row assembly at 749 groups / 119,840 model results / 276 configured channels
+improved from 133–143 ms to 36–37 ms by indexing model positions within the request.
+Allocation rose from 81.2 MB to 84.9 MB. Browser-generated row/filter contracts
+remain equal. This isolated measurement excludes SQL, transfer and rendering.
 
 The current read contract cannot provide a one-second complete initial view:
 48 account requests assemble about 120,000 model records before publishing any

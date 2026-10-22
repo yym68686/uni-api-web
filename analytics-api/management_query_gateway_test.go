@@ -13,7 +13,7 @@ import (
 )
 
 func TestManagementGatewayReadsAreBoundedVersionFencedAndReadOnly(t *testing.T) {
-	for _, mode := range []string{"stable", "changed", "old-catalog", "wrong-key", "missing-provider"} {
+	for _, mode := range []string{"stable", "changed", "old-catalog", "wrong-key", "missing-provider", "duplicate-provider", "unknown-key-provider"} {
 		t.Run(mode, func(t *testing.T) {
 			var revision atomic.Int64
 			revision.Store(1)
@@ -50,6 +50,9 @@ func TestManagementGatewayReadsAreBoundedVersionFencedAndReadOnly(t *testing.T) 
 					if mode == "missing-provider" {
 						providers = []any{}
 					}
+					if mode == "duplicate-provider" {
+						providers = append(providers, providers[0])
+					}
 					writeJSON(w, 200, map[string]any{"providers": providers})
 				case "/v1/model-channels":
 					if r.URL.Query().Get("endpoint") != "all" || r.URL.Query().Get("stream") != "all" {
@@ -69,7 +72,11 @@ func TestManagementGatewayReadsAreBoundedVersionFencedAndReadOnly(t *testing.T) 
 					if mode == "old-catalog" {
 						config = "config-old"
 					}
-					writeJSON(w, 200, map[string]any{"snapshot_revision": config, "api_key_id": selected, "data": []any{map[string]any{"provider": "native", "model": "public", "upstream_model": "actual", "engine": "gpt"}}})
+					provider := "native"
+					if mode == "unknown-key-provider" && selected == "2" {
+						provider = "missing"
+					}
+					writeJSON(w, 200, map[string]any{"snapshot_revision": config, "api_key_id": selected, "data": []any{map[string]any{"provider": provider, "model": "public", "upstream_model": "actual", "engine": "gpt"}}})
 				default:
 					t.Error("unexpected endpoint; no model requests are permitted", r.URL.Path)
 					http.NotFound(w, r)
@@ -105,7 +112,7 @@ func TestManagementGatewayReadsAreBoundedVersionFencedAndReadOnly(t *testing.T) 
 				}
 			}
 			routes := managementGatewayRoutes(facts)
-			if len(routes.Data) != 6 || routes.SnapshotConsistent == nil || !*routes.SnapshotConsistent || len(routes.UnavailableKeys) != 0 {
+			if len(routes.Data) != 6 || routes.SnapshotConsistent == nil || !*routes.SnapshotConsistent || len(routes.UnavailableKeys) != 0 || routes.Revision != facts.Revision || !routes.BatchRevisions || !routes.AtomicBatch || !routes.OptimizeBatch {
 				t.Fatal("route scope incomplete")
 			}
 			for i, route := range routes.Data {

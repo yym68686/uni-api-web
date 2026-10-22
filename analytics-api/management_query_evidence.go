@@ -15,6 +15,12 @@ type managementQueryRoutes struct {
 	Data               []channelRoute `json:"data"`
 	UnavailableKeys    []string       `json:"unavailable_keys"`
 	SnapshotConsistent *bool          `json:"snapshot_consistent,omitempty"`
+	Revision           string         `json:"revision,omitempty"`
+	Manageable         bool           `json:"manageable,omitempty"`
+	BatchRevisions     bool           `json:"batch_revisions,omitempty"`
+	AtomicBatch        bool           `json:"atomic_batch,omitempty"`
+	OptimizeBatch      bool           `json:"optimize_batch,omitempty"`
+	LegacyMigration    bool           `json:"legacy_engine_migration,omitempty"`
 }
 
 var managementFingerprintModels = func() []string {

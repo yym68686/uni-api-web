@@ -138,6 +138,14 @@ func (s *Service) sharedQualityForAccountFrom(ctx context.Context, db controlQue
 			return out, err
 		}
 	}
+	return readSharedQualityProjectionFrom(ctx, db, owner, accountID, out.Bindings)
+}
+
+// Reading a page must not attribute unlinked historical checks using a current
+// credential. Existing associations are immutable; unknown provenance remains
+// channel-local until the writer can record its exact account/group identity.
+func readSharedQualityProjectionFrom(ctx context.Context, db controlQueryDB, owner, accountID string, bindings []qualityBinding) (sharedQuality, error) {
+	out := sharedQuality{Bindings: bindings, Groups: map[string]sharedQualityProjection{}}
 	rows, err := db.QueryContext(ctx, `WITH owned AS MATERIALIZED (
  SELECT h.id,h.account_id,h.group_id,h.successful,h.verdict,h.checked_at
  FROM console_quality_group_history h JOIN console_sub_accounts a ON a.id=h.account_id WHERE a.owner=$1 AND ($2='' OR a.id=$2)

@@ -46,13 +46,17 @@ func readSubAccountHeaders(ctx context.Context, db controlQueryDB, owner, accoun
 }
 
 func (s *Service) readSubAccountDetailsFrom(ctx context.Context, db controlQueryDB, owner, accountID string, groupID int64, model string, summary, omitRates bool, accounts []subAccount, trace *subAccountsReadTrace) error {
-	index := map[string]int{}
-	for i, a := range accounts {
-		index[a.ID] = i
-	}
 	shared, err := s.sharedQualityForAccountFrom(ctx, db, owner, accountID)
 	if err != nil {
 		return subAccountReadFailure{"共享检测记录暂不可用", err}
+	}
+	return s.readSubAccountDetailsWithQualityFrom(ctx, db, owner, accountID, groupID, model, summary, omitRates, accounts, trace, shared)
+}
+
+func (s *Service) readSubAccountDetailsWithQualityFrom(ctx context.Context, db controlQueryDB, owner, accountID string, groupID int64, model string, summary, omitRates bool, accounts []subAccount, trace *subAccountsReadTrace, shared sharedQuality) error {
+	index := map[string]int{}
+	for i, a := range accounts {
+		index[a.ID] = i
 	}
 	trace.next("targets")
 	rows, err := db.QueryContext(ctx, `SELECT t.account_id,t.group_id,t.name,t.platform,t.channel,t.rate,t.remote_key_id,t.active,t.state,t.message,t.result,t.billing,COALESCE(h.total,0),COALESCE(h.successful,0),COALESCE(h.passed,0),t.compaction,t.compaction_state,t.tool_use,t.tool_use_state FROM console_sub_targets t JOIN console_sub_accounts a ON a.id=t.account_id LEFT JOIN console_quality_totals h ON h.account_id=t.account_id AND h.group_id=t.group_id WHERE a.owner=$1 AND ($2='' OR a.id=$2) AND ($3=0 OR t.group_id=$3) ORDER BY t.group_id`, owner, accountID, groupID)

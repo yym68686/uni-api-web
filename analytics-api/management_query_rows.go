@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"slices"
 	"sort"
 	"strings"
 )
@@ -21,6 +20,7 @@ type managementQueryInput struct {
 	UnavailableSources []string                         `json:"unavailable_sources"`
 	UnavailableImports []string                         `json:"unavailable_imports"`
 	Routes             map[string]managementQueryRoutes `json:"routes"`
+	SourceRevisions    map[string]string                `json:"-"`
 }
 
 type managementQueryChannel struct {
@@ -161,6 +161,7 @@ func buildManagementQueryRows(in managementQueryInput, model, accountFilter stri
 	accounts := make(map[string]*subAccount, len(in.Accounts))
 	targets := map[string]*subTarget{}
 	checks := map[string][]managementQueryCheck{}
+	checkPositions := map[string]map[string]int{}
 	rows := []managementQueryRow{}
 	for i := range in.Accounts {
 		account := &in.Accounts[i]
@@ -199,6 +200,7 @@ func buildManagementQueryRows(in managementQueryInput, model, accountFilter stri
 			member  managementChannel
 			account *subAccount
 			target  *subTarget
+			models  map[string]bool
 		}
 		visible := []binding{}
 		native := []configuredCheck{}
@@ -206,7 +208,19 @@ func buildManagementQueryRows(in managementQueryInput, model, accountFilter stri
 		for _, member := range group.Members {
 			account := accounts[member.AccountID]
 			if accountFilter == "" || accountFilter == "__unassigned__" || account != nil && account.ID == accountFilter {
-				visible = append(visible, binding{member, account, targets[qualityGroupID(member.AccountID, member.GroupID)]})
+				models := make(map[string]bool, len(member.Models))
+				for _, name := range member.Models {
+					models[name] = true
+				}
+				id := qualityGroupID(member.AccountID, member.GroupID)
+				if target := targets[id]; target != nil && checkPositions[id] == nil {
+					positions := make(map[string]int, len(checks[id]))
+					for i, check := range checks[id] {
+						positions[check.Model] = i
+					}
+					checkPositions[id] = positions
+				}
+				visible = append(visible, binding{member, account, targets[id], models})
 			}
 			if _, exists := sourceNames[member.SourceID]; !exists {
 				sourceNames[member.SourceID] = member.SourceName
@@ -220,7 +234,7 @@ func buildManagementQueryRows(in managementQueryInput, model, accountFilter stri
 		var preferred *binding
 		for i := range visible {
 			b := &visible[i]
-			if b.target != nil && (model == "" || slices.Contains(b.member.Models, model)) {
+			if b.target != nil && (model == "" || b.models[model]) {
 				preferred = b
 				break
 			}
@@ -332,7 +346,7 @@ func buildManagementQueryRows(in managementQueryInput, model, accountFilter stri
 		if preferred == nil {
 			models = append(models, subModels...)
 		}
-		nativeModels := []managementQueryCheck{}
+		nativeModels := map[string][]managementQueryCheck{}
 		for _, c := range native {
 			if c.Kind != "model" && c.Kind != "availability" {
 				continue
@@ -344,24 +358,19 @@ func buildManagementQueryRows(in managementQueryInput, model, accountFilter stri
 					return nil, fmt.Errorf("management model decode: %w", err)
 				}
 			}
-			nativeModels = append(nativeModels, check)
+			nativeModels[c.Model] = append(nativeModels[c.Model], check)
 		}
 		for _, name := range managementUnique(models) {
 			candidates := []managementQueryCheck{}
 			for _, b := range visible {
-				if b.target != nil && slices.Contains(b.member.Models, name) {
-					for _, c := range checks[qualityGroupID(b.account.ID, b.target.GroupID)] {
-						if c.Model == managementUpstream(b.member, name) {
-							candidates = append(candidates, c)
-						}
+				if b.target != nil && b.models[name] {
+					id := qualityGroupID(b.account.ID, b.target.GroupID)
+					if position, ok := checkPositions[id][managementUpstream(b.member, name)]; ok {
+						candidates = append(candidates, checks[id][position])
 					}
 				}
 			}
-			for _, c := range nativeModels {
-				if c.Model == name {
-					candidates = append(candidates, c)
-				}
-			}
+			candidates = append(candidates, nativeModels[name]...)
 			check := managementQueryCheck{subModelResult: subModelResult{State: "idle"}}
 			if recent := managementRecent(candidates); recent != nil {
 				check = *recent

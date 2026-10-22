@@ -22,17 +22,44 @@ type managementDatabaseView struct {
 // Caller owns one repeatable-read transaction for the complete view. Sources
 // are returned privately for live revision fencing; their credentials are
 // never part of a page or cursor. No historical request partitions are scanned.
-func (s *Service) readManagementDatabaseFrom(ctx context.Context, db controlQueryDB, owner string) (managementDatabaseView, error) {
+func (s *Service) readManagementDatabaseFrom(ctx context.Context, db controlQueryDB, owner string, facts []managementGatewayFacts) (managementDatabaseView, error) {
 	out := managementDatabaseView{}
 	if err := db.QueryRowContext(ctx, `SELECT transaction_timestamp()`).Scan(&out.ReadAt); err != nil {
 		return out, err
 	}
 	var err error
+	out.Sources, err = s.control.managementSourcesFrom(ctx, db)
+	if err != nil {
+		return out, err
+	}
+	if err := verifyManagementSources(out.Sources, facts); err != nil {
+		return out, err
+	}
+	out.Bindings, err = s.managementBindingsFrom(ctx, db, owner, facts)
+	if err != nil {
+		return out, err
+	}
+	out.References, err = s.control.subChannelRefsForAccountFrom(ctx, db, owner, "")
+	if err != nil {
+		return out, err
+	}
+	out.BindingAccounts, err = s.bindingAccountsFrom(ctx, db)
+	if err != nil {
+		return out, err
+	}
+	bindings, err := managementQualityBindings(out.Bindings, out.References, facts)
+	if err != nil {
+		return out, err
+	}
+	shared, err := readSharedQualityProjectionFrom(ctx, db, owner, "", bindings)
+	if err != nil {
+		return out, err
+	}
 	out.Input.Accounts, err = readSubAccountHeaders(ctx, db, owner, "")
 	if err != nil {
 		return out, err
 	}
-	if err = s.readSubAccountDetailsFrom(ctx, db, owner, "", 0, "", true, false, out.Input.Accounts, nil); err != nil {
+	if err = s.readSubAccountDetailsWithQualityFrom(ctx, db, owner, "", 0, "", true, false, out.Input.Accounts, nil, shared); err != nil {
 		return out, err
 	}
 	// Filter the same summary representation the browser currently receives.
@@ -64,29 +91,6 @@ func (s *Service) readManagementDatabaseFrom(ctx context.Context, db controlQuer
 		out.Input.Fingerprints = append(out.Input.Fingerprints, managementFingerprintRecord{fingerprintRecord: record, UpdatedAt: &at})
 	}
 	out.Input.FingerprintReady = true
-	out.Bindings, err = s.configuredBindingsFrom(ctx, db, owner)
-	if err != nil {
-		return out, err
-	}
-	out.References, err = s.control.subChannelRefsForAccountFrom(ctx, db, owner, "")
-	if err != nil {
-		return out, err
-	}
-	out.BindingAccounts, err = s.bindingAccountsFrom(ctx, db)
-	if err != nil {
-		return out, err
-	}
-	sources, err := s.control.listSourcesFrom(ctx, db)
-	if err != nil {
-		return out, err
-	}
-	for _, source := range sources {
-		current, err := s.control.sourceFrom(ctx, db, source.ID)
-		if err != nil {
-			return out, err
-		}
-		out.Sources = append(out.Sources, current)
-	}
 	if s.engine == nil {
 		return out, errors.New("management pricing unavailable")
 	}

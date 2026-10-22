@@ -101,11 +101,15 @@ func managementEligibleRows(rows []managementQueryRow) []managementQueryRow {
 // read, identical revision. Batch operations must use the full result and the
 // same revision fence rather than treating these 25 rows as a whole selection.
 func buildManagementQueryPage(in managementQueryInput, filters managementQueryFilters, evidence managementFilterEvidence, owner string, key []byte, cursor string, readAt time.Time) (managementQueryPage, error) {
-	page := managementQueryPage{Format: "management-page-v1", PageSize: managementPageSize, ReadAtMS: readAt.UnixMilli(), Rows: []managementQueryRow{}}
 	rows, err := buildManagementQueryRows(in, filters.Model, filters.AccountID)
 	if err != nil {
-		return page, err
+		return managementQueryPage{}, err
 	}
+	return buildManagementQueryPageFromRows(in, rows, filters, evidence, owner, key, cursor, readAt)
+}
+
+func buildManagementQueryPageFromRows(in managementQueryInput, rows []managementQueryRow, filters managementQueryFilters, evidence managementFilterEvidence, owner string, key []byte, cursor string, readAt time.Time) (managementQueryPage, error) {
+	page := managementQueryPage{Format: "management-page-v1", PageSize: managementPageSize, ReadAtMS: readAt.UnixMilli(), Rows: []managementQueryRow{}}
 	filtered := filterManagementQueryRows(rows, filters, evidence)
 	page.Rates, page.Platforms = filtered.Rates, filtered.Platforms
 	page.Total, page.EligibleCount = len(filtered.Rows), len(managementEligibleRows(filtered.Rows))
@@ -147,7 +151,8 @@ func buildManagementQueryPage(in managementQueryInput, filters managementQueryFi
 		Rates                              []float64
 		Platforms, Models, DetectionModels []string
 		Evidence                           managementFilterEvidence
-	}{filtered.Rows, page.Rates, page.Platforms, page.Models, page.DetectionModels, evidence})
+		Sources                            map[string]string
+	}{filtered.Rows, page.Rates, page.Platforms, page.Models, page.DetectionModels, evidence, in.SourceRevisions})
 	if err != nil {
 		return page, err
 	}

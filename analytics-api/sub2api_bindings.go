@@ -358,10 +358,18 @@ func (s *Service) configuredBindings(ctx context.Context, owner string) ([]subIn
 	return s.configuredBindingsFrom(ctx, s.control.db, owner)
 }
 
-func (s *Service) configuredBindingsFrom(ctx context.Context, db controlQueryDB, owner string) ([]subInstalledChannel, error) {
+type subBindingIndex struct {
+	bySite     map[string][]subBindingAccount
+	keys       map[string][]subBoundKey
+	groupNames map[string]string
+}
+
+// Read the owner's complete published key generation inside the caller's
+// transaction. Staging pages never participate in credential attribution.
+func (s *Service) readSubBindingIndexFrom(ctx context.Context, db controlQueryDB, owner string) (subBindingIndex, error) {
 	accounts, err := s.bindingAccountsFrom(ctx, db)
 	if err != nil {
-		return nil, err
+		return subBindingIndex{}, err
 	}
 	byID := map[string]subBindingAccount{}
 	bySite := map[string][]subBindingAccount{}
@@ -373,7 +381,7 @@ func (s *Service) configuredBindingsFrom(ctx context.Context, db controlQueryDB,
 	}
 	rows, err := db.QueryContext(ctx, `SELECT i.account_id,i.key_hash,i.remote_key_id,i.group_id,t.billing FROM console_sub_key_index i JOIN console_sub_accounts a ON a.id=i.account_id LEFT JOIN console_sub_targets t ON t.account_id=i.account_id AND t.group_id=i.group_id WHERE a.owner=$1`, owner)
 	if err != nil {
-		return nil, err
+		return subBindingIndex{}, err
 	}
 	index := map[string][]subBoundKey{}
 	groupNames := map[string]string{}
@@ -394,9 +402,60 @@ func (s *Service) configuredBindingsFrom(ctx context.Context, db controlQueryDB,
 	}
 	rows.Close()
 	if err != nil {
+		return subBindingIndex{}, err
+	}
+	return subBindingIndex{bySite: bySite, keys: index, groupNames: groupNames}, nil
+}
+
+func (i subBindingIndex) resolve(item subInstalledChannel, site string, hashes []string) subInstalledChannel {
+	item.Name = item.Provider
+	item.BindingStatus = "matched"
+	for _, hash := range hashes {
+		matches := i.keys[site+"\n"+hash]
+		if len(matches) != 1 {
+			if len(matches) > 1 {
+				item.BindingStatus = "ambiguous"
+			} else if item.BindingStatus != "ambiguous" {
+				item.BindingStatus = "unmatched"
+			}
+			continue
+		}
+		item.BoundKeys = append(item.BoundKeys, matches[0])
+	}
+	if len(item.BoundKeys) > 0 && item.BindingStatus == "unmatched" {
+		item.BindingStatus = "partial"
+	}
+	if len(i.bySite[site]) == 0 {
+		item.BindingStatus = "no_account"
+	}
+	// Reuse group-level enrichment only when all credentials refer to one group.
+	if item.BindingStatus == "matched" && len(item.BoundKeys) > 0 {
+		first := item.BoundKeys[0]
+		one := true
+		for _, key := range item.BoundKeys {
+			if key.AccountID != first.AccountID || key.GroupID != first.GroupID {
+				one = false
+			}
+		}
+		if one {
+			item.AccountID = first.AccountID
+			item.GroupID = first.GroupID
+			// Generated IDs stay stable for routing; only their public label
+			// inherits the verified account/group. Preserve user-named channels.
+			if generatedSubProvider(item.Provider) {
+				item.Name = i.groupNames[qualityGroupID(first.AccountID, first.GroupID)]
+			}
+		}
+	}
+	return item
+}
+
+func (s *Service) configuredBindingsFrom(ctx context.Context, db controlQueryDB, owner string) ([]subInstalledChannel, error) {
+	index, err := s.readSubBindingIndexFrom(ctx, db, owner)
+	if err != nil {
 		return nil, err
 	}
-	rows, err = db.QueryContext(ctx, `SELECT c.source_id,s.name,c.provider,c.base,c.site,c.key_hashes,c.checked_at,c.fingerprint FROM console_configured_channels c JOIN console_sources s ON s.id=c.source_id WHERE c.active AND s.enabled ORDER BY c.source_id,c.provider`)
+	rows, err := db.QueryContext(ctx, `SELECT c.source_id,s.name,c.provider,c.base,c.site,c.key_hashes,c.checked_at,c.fingerprint FROM console_configured_channels c JOIN console_sources s ON s.id=c.source_id WHERE c.active AND s.enabled ORDER BY c.source_id,c.provider`)
 	if err != nil {
 		return nil, err
 	}
@@ -413,45 +472,7 @@ func (s *Service) configuredBindingsFrom(ctx context.Context, db controlQueryDB,
 		if err = json.Unmarshal(raw, &hashes); err != nil {
 			return nil, err
 		}
-		item.Name = item.Provider
-		item.BindingStatus = "matched"
-		for _, hash := range hashes {
-			matches := index[site+"\n"+hash]
-			if len(matches) != 1 {
-				if len(matches) > 1 {
-					item.BindingStatus = "ambiguous"
-				} else if item.BindingStatus != "ambiguous" {
-					item.BindingStatus = "unmatched"
-				}
-				continue
-			}
-			item.BoundKeys = append(item.BoundKeys, matches[0])
-		}
-		if len(item.BoundKeys) > 0 && item.BindingStatus == "unmatched" {
-			item.BindingStatus = "partial"
-		}
-		if len(bySite[site]) == 0 {
-			item.BindingStatus = "no_account"
-		}
-		// Reuse group-level enrichment only when all credentials refer to one group.
-		if item.BindingStatus == "matched" && len(item.BoundKeys) > 0 {
-			first := item.BoundKeys[0]
-			one := true
-			for _, key := range item.BoundKeys {
-				if key.AccountID != first.AccountID || key.GroupID != first.GroupID {
-					one = false
-				}
-			}
-			if one {
-				item.AccountID = first.AccountID
-				item.GroupID = first.GroupID
-				// Generated IDs stay stable for routing; only their public label
-				// inherits the verified account/group. Preserve user-named channels.
-				if generatedSubProvider(item.Provider) {
-					item.Name = groupNames[qualityGroupID(first.AccountID, first.GroupID)]
-				}
-			}
-		}
+		item = index.resolve(item, site, hashes)
 		out = append(out, item)
 	}
 	return out, rows.Err()

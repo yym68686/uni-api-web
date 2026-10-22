@@ -90,6 +90,13 @@ func TestManagementPageCoversCompleteSelectionAndFencesEveryRead(t *testing.T) {
 	if _, err := buildManagementQueryPage(in, changedFilter, evidence, "owner", key, first.NextCursor, readAt); !errors.Is(err, errManagementCursor) {
 		t.Fatal("cursor reused for different filters", err)
 	}
+	// An unfiltered routing change still invalidates a full-selection preview,
+	// even when the displayed rows and their joined labels remain identical.
+	in.SourceRevisions = map[string]string{"source": "changed-live-revision"}
+	if _, err := buildManagementQueryPage(in, filters, evidence, "owner", key, first.NextCursor, readAt); !errors.Is(err, errManagementRevision) {
+		t.Fatal("gateway revision change accepted", err)
+	}
+	in.SourceRevisions = nil
 	changedEvidence := evidence
 	changedEvidence.Prices = []Price{{Model: "gpt-5.5", Input: 3, Output: 2, Verified: true}}
 	if _, err := buildManagementQueryPage(in, filters, changedEvidence, "owner", key, first.NextCursor, readAt); !errors.Is(err, errManagementRevision) {

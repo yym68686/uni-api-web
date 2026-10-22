@@ -104,6 +104,9 @@ func readManagementGateway(ctx context.Context, source controlSource) (managemen
 	}
 	providerNames := map[string]bool{}
 	for _, provider := range out.Providers {
+		if provider.Provider == "" || providerNames[provider.Provider] {
+			return out, errManagementSourceContract
+		}
 		providerNames[provider.Provider] = true
 	}
 	for _, row := range out.Catalog {
@@ -131,6 +134,11 @@ func readManagementGateway(ctx context.Context, source controlSource) (managemen
 		return out, err
 	}
 	for i, key := range out.Keys {
+		for _, row := range parts[i] {
+			if row.Provider == "" || !providerNames[row.Provider] {
+				return out, errManagementSourceContract
+			}
+		}
 		out.Routes[key.ID] = parts[i]
 	}
 	if err := verifyManagementGateway(ctx, out); err != nil {
@@ -152,7 +160,9 @@ func verifyManagementGateway(ctx context.Context, facts managementGatewayFacts) 
 
 func managementGatewayRoutes(facts managementGatewayFacts) managementQueryRoutes {
 	consistent := true
-	out := managementQueryRoutes{Data: []channelRoute{}, UnavailableKeys: []string{}, SnapshotConsistent: &consistent}
+	out := managementQueryRoutes{Data: []channelRoute{}, UnavailableKeys: []string{}, SnapshotConsistent: &consistent,
+		Revision: facts.Revision, Manageable: facts.Controls["temporary_channel_management"] == true,
+		BatchRevisions: true, AtomicBatch: true, OptimizeBatch: true, LegacyMigration: facts.Controls["automatic_engine"] == true}
 	providers := map[string]bool{}
 	for _, row := range facts.Catalog {
 		providers[row.Provider] = true
@@ -240,15 +250,14 @@ func assembleManagementImports(facts managementGatewayFacts, refs []subChannelRe
 			mappings[row.Provider][row.Model] = row.Upstream
 		}
 	}
-	lookup := map[string]subChannelRef{}
+	providerRefs := newSubProviderRefIndex(refs)
+	providers := map[string]configuredProvider{}
+	for _, provider := range facts.Providers {
+		providers[provider.Provider] = provider
+	}
 	keys := map[string]managementGatewayKey{}
 	for _, key := range facts.Keys {
 		keys[key.ID] = key
-		for _, ref := range refs {
-			for _, provider := range subProviderNames(ref.Account, ref.Group, key.ID) {
-				lookup[provider] = ref
-			}
-		}
 	}
 	type scope struct{ key, model string }
 	rules := map[scope]map[string]int{}
@@ -265,13 +274,18 @@ func assembleManagementImports(facts managementGatewayFacts, refs []subChannelRe
 	}
 	out := []subInstalledChannel{}
 	for _, channel := range controls.Temporary {
-		if channel.IdentityChanged {
+		provider, exists := providers[channel.Provider]
+		if !exists || !provider.Temporary || provider.IdentityChanged || channel.IdentityChanged {
 			continue
 		}
-		ref, exists := lookup[channel.Provider]
-		if !exists {
+		if _, exists := keys[channel.KeyID]; !exists {
 			continue
 		}
+		matches := providerRefs.matches(channel.Provider, channel.KeyID, provider.Base)
+		if len(matches) != 1 {
+			continue
+		}
+		ref := matches[0]
 		positions := map[string]int{}
 		for _, model := range channel.Models {
 			for _, key := range []scope{{channel.KeyID, model}, {channel.KeyID, ""}, {"", model}, {"", ""}} {
@@ -305,9 +319,11 @@ func assembleManagementGatewayView(view *managementDatabaseView, facts []managem
 	view.Input.Channels = []managementChannel{}
 	view.Input.Imports = []subInstalledChannel{}
 	view.Input.Routes = map[string]managementQueryRoutes{}
+	view.Input.SourceRevisions = map[string]string{}
 	available := map[string]bool{}
 	for _, source := range facts {
 		available[source.Source.ID] = true
+		view.Input.SourceRevisions[source.Source.ID] = tokenHash(mustJSON([]string{managementSourceIdentity(source.Source), source.Revision, source.ConfigRevision}))
 		snapshot := managementSnapshotFromFacts(source)
 		view.Input.Channels = append(view.Input.Channels, assembleManagementChannels(source.Source, snapshot, lookup, view.BindingAccounts, owner)...)
 		installed, err := assembleManagementImports(source, view.References)
