@@ -45,10 +45,10 @@ WHERE h.inhparent='billing_facts'::regclass`).Scan(&children, &indexed); err != 
 	if _, err := e.DB.Exec(fmt.Sprintf("CREATE TABLE %s PARTITION OF billing_facts FOR VALUES FROM (%d) TO (%d)", futureName, futureStart, futureStart+3600000)); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.DB.QueryRow(`SELECT i.indisvalid FROM pg_inherits h
-JOIN pg_class c ON c.oid=h.inhrelid
-JOIN pg_index i ON i.indrelid=c.oid AND i.indexrelid=to_regclass(c.relname || '_provider_scope')
-WHERE h.inhparent='billing_facts'::regclass AND c.relname LIKE 'billing_%' ORDER BY c.relname DESC LIMIT 1`).Scan(&parentReady); err != nil || !parentReady {
+	if err := e.DB.QueryRow(`SELECT EXISTS(SELECT 1 FROM pg_inherits h
+JOIN pg_index i ON i.indexrelid=h.inhrelid
+WHERE h.inhparent='billing_facts_provider_scope'::regclass
+AND i.indrelid=to_regclass(?) AND i.indisvalid)`, futureName).Scan(&parentReady); err != nil || !parentReady {
 		t.Fatal("new billing partition did not inherit its provider index", parentReady, err)
 	}
 	var after int
@@ -76,7 +76,7 @@ func TestBillingProviderIndexDefersWhenStorageReserveIsInsufficient(t *testing.T
 COALESCE((SELECT sum(pg_relation_size(h.inhrelid)) FROM pg_inherits h WHERE h.inhparent='billing_facts'::regclass),0)`).Scan(&databaseBytes, &heapBytes); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.DB.Exec("UPDATE storage_state SET ingest_limit_bytes=? WHERE singleton", databaseBytes+heapBytes/3+(64<<20)); err != nil {
+	if _, err := e.DB.Exec("UPDATE storage_state SET ingest_limit_bytes=? WHERE singleton", databaseBytes+heapBytes+(64<<20)); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.prepareBillingProviderIndex(ctx); !errors.Is(err, errBillingProviderIndexHeadroom) {

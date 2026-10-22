@@ -138,7 +138,7 @@ func (e *Engine) preparePartitionedFactIndex(ctx context.Context, parent, suffix
 			return err
 		}
 		const reserve = int64(64 << 20)
-		if databaseBytes+heapBytes/3+reserve >= ingestLimit {
+		if databaseBytes+heapBytes+reserve >= ingestLimit {
 			return errBillingProviderIndexHeadroom
 		}
 	}
