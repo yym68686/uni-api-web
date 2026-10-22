@@ -122,6 +122,29 @@ func TestReceiptFIFORemovesFinalizedHistoryAndPreservesPendingTasks(t *testing.T
 			t.Fatal(err)
 		}
 	}
+	// An older receipt can belong to a later key: the eligibility probe must
+	// not mistake the first key's recent receipt for the whole account's floor.
+	for _, row := range []struct{ key, at int64 }{{1, floor + 60}, {42, floor}, {99, floor - 60}} {
+		if _, err := s.control.db.Exec(`INSERT INTO console_sub_spend_logs(account_id,key_id,log_id,at_ms,actual_cost,request_id,model) VALUES($1,$2,1,$3,1,'fixture','m')`, account, row.key, row.at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.control.db.Exec("UPDATE console_sub_accounts SET usage_lease_until=now()+interval '1 hour' WHERE id=$1", account); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.trimReceiptHistory(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var protected int
+	if err := s.control.db.QueryRow("SELECT count(*) FROM console_sub_spend_logs WHERE account_id=$1", account).Scan(&protected); err != nil || protected != 3 {
+		t.Fatal("active account receipts were removed", protected, err)
+	}
+	if err := s.control.db.QueryRow("SELECT count(*) FROM console_sub_usage WHERE account_id=$1", account).Scan(&protected); err != nil || protected != 3 {
+		t.Fatal("active account tasks were removed", protected, err)
+	}
+	if _, err := s.control.db.Exec("UPDATE console_sub_accounts SET usage_lease_until=now()-interval '1 second' WHERE id=$1", account); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.trimReceiptHistory(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -131,6 +154,16 @@ func TestReceiptFIFORemovesFinalizedHistoryAndPreservesPendingTasks(t *testing.T
 	}
 	if err := s.control.db.QueryRow("SELECT count(*) FROM console_sub_usage WHERE account_id=$1 AND status='pending'", account).Scan(&n); err != nil || n != 1 {
 		t.Fatal(n, err)
+	}
+	if err := s.control.db.QueryRow("SELECT count(*) FROM console_sub_spend_logs WHERE account_id=$1 AND at_ms>=$2", account, floor).Scan(&n); err != nil || n != 2 {
+		t.Fatal("removed a current receipt or exact floor", n, err)
+	}
+	if err := s.control.db.QueryRow("SELECT count(*) FROM console_sub_spend_logs WHERE account_id=$1 AND at_ms<$2", account, floor).Scan(&n); err != nil || n != 0 {
+		t.Fatal("missed the expired receipt on a later key", n, err)
+	}
+	// No expired receipt/task remains; the next pass must be harmless.
+	if err := s.trimReceiptHistory(ctx); err != nil {
+		t.Fatal(err)
 	}
 }
 

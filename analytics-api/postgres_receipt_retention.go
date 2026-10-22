@@ -43,7 +43,11 @@ func (s *Service) trimReceiptHistory(ctx context.Context) error {
 		return err
 	}
 	// Active lease owners retain their rows until their scan has completed.
-	rows, err := tx.QueryContext(ctx, `SELECT id FROM console_sub_accounts a WHERE (usage_lease_until IS NULL OR usage_lease_until<now()) AND (EXISTS(SELECT 1 FROM console_sub_spend_logs l WHERE l.account_id=a.id AND l.at_ms<$1) OR EXISTS(SELECT 1 FROM console_sub_usage u WHERE u.account_id=a.id AND u.status<>'pending' AND u.started_at<$1::bigint/1000)) ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT 4`, floor)
+	// EXISTS can choose a sequential scan assuming an early match, scanning
+	// the entire receipt table for each account with no expired receipts. A
+	// one-row scalar probe retains the existing account/key/time index order;
+	// any matching row is sufficient, including receipts on later keys.
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM console_sub_accounts a WHERE (usage_lease_until IS NULL OR usage_lease_until<now()) AND (coalesce((SELECT true FROM console_sub_spend_logs l WHERE l.account_id=a.id AND l.at_ms<$1 ORDER BY l.key_id,l.at_ms LIMIT 1),false) OR EXISTS(SELECT 1 FROM console_sub_usage u WHERE u.account_id=a.id AND u.status<>'pending' AND u.started_at<$1::bigint/1000)) ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT 4`, floor)
 	if err != nil {
 		return err
 	}
