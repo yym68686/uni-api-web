@@ -181,6 +181,10 @@ func (s *Service) subQueueUsage(ctx context.Context, account string, group, key 
 }
 
 func (s *Service) subAttachUsage(ctx context.Context, owner string, accounts []subAccount) error {
+	return s.subAttachUsageFrom(ctx, s.control.db, owner, accounts)
+}
+
+func (s *Service) subAttachUsageFrom(ctx context.Context, db controlQueryDB, owner string, accounts []subAccount) error {
 	probes := map[string][]*subProbe{}
 	for i := range accounts {
 		for j := range accounts[i].Targets {
@@ -235,7 +239,7 @@ func (s *Service) subAttachUsage(ctx context.Context, owner string, accounts []s
 	for id := range probes {
 		ids = append(ids, id)
 	}
-	rows, err := s.control.db.QueryContext(ctx, `SELECT u.id,u.status,u.result FROM console_sub_usage u JOIN console_sub_accounts a ON a.id=u.account_id WHERE a.owner=$1 AND u.id=ANY($2)`, owner, ids)
+	rows, err := db.QueryContext(ctx, `SELECT u.id,u.status,u.result FROM console_sub_usage u JOIN console_sub_accounts a ON a.id=u.account_id WHERE a.owner=$1 AND u.id=ANY($2)`, owner, ids)
 	if err != nil {
 		return err
 	}

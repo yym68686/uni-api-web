@@ -84,7 +84,11 @@ func (s *controlStore) subChannelRefs(ctx context.Context, owner string) ([]subC
 }
 
 func (s *controlStore) subChannelRefsForAccount(ctx context.Context, owner, accountID string) ([]subChannelRef, error) {
-	rows, e := s.db.QueryContext(ctx, `SELECT a.id,t.group_id,a.name,t.billing,a.base FROM console_sub_accounts a JOIN console_sub_targets t ON t.account_id=a.id WHERE a.owner=$1 AND ($2='' OR a.id=$2) ORDER BY a.created_at,t.group_id`, owner, accountID)
+	return s.subChannelRefsForAccountFrom(ctx, s.db, owner, accountID)
+}
+
+func (s *controlStore) subChannelRefsForAccountFrom(ctx context.Context, db controlQueryDB, owner, accountID string) ([]subChannelRef, error) {
+	rows, e := db.QueryContext(ctx, `SELECT a.id,t.group_id,a.name,t.billing,a.base FROM console_sub_accounts a JOIN console_sub_targets t ON t.account_id=a.id WHERE a.owner=$1 AND ($2='' OR a.id=$2) ORDER BY a.created_at,t.group_id`, owner, accountID)
 	if e != nil {
 		return nil, e
 	}

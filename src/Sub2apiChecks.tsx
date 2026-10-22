@@ -39,11 +39,11 @@ import type { ManagedChannel, ManagementRow } from "./channelManagement";
 import { ConfiguredChannelDialog } from "./ChannelRoutes";
 import { managedRouteCount, useAllChannelRoutes } from "./channelRouteData";
 import { useConsoleSources } from "./consoleSources";
-import { CompactionStatus, compactionStatus, compactionLabels } from "./SubCompaction";
+import { CompactionStatus, compactionLabels } from "./SubCompaction";
 import type { CompactionResult } from "./SubCompaction";
 import { ToolUseStatus, toolUseLabels, toolUseDescription } from "./SubToolUse";
 import type { ToolUseResult } from "./SubToolUse";
-import {modelToolUse,toolUseMatches} from "./toolUse";
+import {modelToolUse} from "./toolUse";
 import { SUB_MODELS, loadSubModels, saveSubModels } from "./sub2apiModels";
 import { SubModelSettings } from "./SubModelSettings";
 import {
@@ -62,10 +62,9 @@ import type { QualitySummary } from "./QualityHistory";
 import { SiteLink } from "./ChannelSite";
 import { useSubPrices, PriceStatus, GroupPriceStatus, UsageDetailRows } from "./Sub2apiPricing";
 import type { SubUsage } from "./sub2apiPriceCheck";
-import { matchesPriceFilter } from "./sub2apiPriceCheck";
 import type { ModelPrice } from "./types";
 import { BillingRate } from "./BillingRate";
-import { billingRate, matchesBillingRateFilter } from "./billingRates";
+import { managementCandidateRows, filterManagementCandidates } from "./managementQueryFilters";
 import type { ObservedRate } from "./billingRates";
 
 export interface Probe {
@@ -812,78 +811,15 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   );
   const [removing, setRemoving] = useState<string | null>(null);
   const [page, setPage] = useState(0);
-  const candidateRows = useMemo(
-    () =>
-      managementRows(accounts, management.data?.data || [], imports.data?.data || [], model, accountId, configuredChecks.data?.data || [])
-        .filter(
-          ({ account, target, checks, selected, accountIds, configured }) =>
-            (!accountId || (accountId === UNASSIGNED_ACCOUNT ? !accountIds.length : accountIds.includes(accountId))) &&
-            (!configured || !account.id || !model || checks.some(c => c.model === model)) &&
-            (groupStatus === "all" ||
-              (groupStatus === "unavailable"
-                ? !configured && !target.active
-                : !!configured || target.active)) &&
-            `${account.name} ${account.email} ${target.name} ${target.channel} ${target.platform} ${configured?.source_name || ""} ${configured?.members?.map(m=>m.base || "").join(" ") || configured?.base || ""}`
-              .toLowerCase()
-              .includes(search.toLowerCase()) &&
-            (!availability ||
-              (selected ? [selected] : checks).some((check) =>
-                availability === "untested"
-                  ? !check.result
-                  : check.result?.availability.status === availability,
-              )) &&
-            matchesPriceFilter(priceStatus, selected ? [selected] : checks, prices.data?.data) &&
-            (!modelMatch || (selected ? [selected] : checks).some(check => modelMatchStatus(check) === modelMatch)) &&
-            (!compaction || compactionStatus(target, model) === compaction) &&
-            toolUseMatches(target,toolUse,model) &&
-            (!quality || groupQualityResult(target)?.verdict === quality) &&
-            (minQuality === "" ||
-              (!!target.history?.successful &&
-                target.history.passed * 100 >= Number(minQuality) * target.history.successful)),
-        ),
-    [accounts, management.data, configuredChecks.data, imports.data, search, accountId, availability, groupStatus, priceStatus, prices.data, quality, minQuality, model, compaction, toolUse, modelMatch],
+  const allManagementRows=useMemo(()=>managementRows(accounts,management.data?.data || [],imports.data?.data || [],model,accountId,configuredChecks.data?.data || []),
+    [accounts,management.data,imports.data,model,accountId,configuredChecks.data]);
+  const candidates=useMemo(()=>managementCandidateRows(allManagementRows,filters,prices.data?.data),[allManagementRows,filters,prices.data]);
+  const {rows,rates,platforms} = filterManagementCandidates(candidates,filters,
+    {prices:prices.data?.data,fingerprintReady:!fingerprints.isError && !fingerprints.isPending,
+      fingerprints:row=>rowFingerprints(row,fingerprints.index,model).map(e=>fingerprintStatus(e.record)),
+      joined:row=>managementJoinState(row,imports.data,optimizationRoutes)},
   );
-  const rates = [
-    ...new Set(
-      candidateRows
-        .filter(({ target }) => !platform || target.platform === platform)
-        .map(({ target, configured }) => billingRate(target, model, configured).rate)
-        .filter((v): v is number => v != null && Number.isFinite(v)),
-    ),
-  ].sort((a, b) => a - b);
   const effectiveMaxRate = maxRate;
-  if (
-    maxRate &&
-    Number.isFinite(Number(maxRate)) &&
-    !rates.includes(Number(maxRate))
-  ) rates.push(Number(maxRate));
-  rates.sort((a, b) => a - b);
-  const withinRate = ({ target, configured }: (typeof candidateRows)[number]) => {
-    return matchesBillingRateFilter(
-      billingRate(target, model, configured),
-      effectiveMaxRate,
-    );
-  };
-  const platforms = [
-    ...new Set(
-      candidateRows
-        .filter(withinRate)
-        .map(({ target }) => target.platform)
-        .filter(Boolean),
-    ),
-  ].sort();
-  const rows = candidateRows.filter(
-    (row) => (!fingerprint || fingerprints.isError || fingerprints.isPending || (fingerprint === "not_applicable" ? rowFingerprints(row,fingerprints.index,model).length === 0 : rowFingerprints(row,fingerprints.index,model).some(e => fingerprintStatus(e.record) === fingerprint))) && withinRate(row) && (!platform || row.target.platform === platform) &&
-      (!joined || managementJoinState(row,imports.data,optimizationRoutes) === joined),
-  );
-  if (sort)
-    rows.sort((a, b) => {
-      const x = billingRate(a.target, model, a.configured).rate,
-        y = billingRate(b.target, model, b.configured).rate;
-      if (x == null) return y == null ? 0 : 1;
-      if (y == null) return -1;
-      return sort === "asc" ? x - y : y - x;
-    });
   const extraModels = [...new Set(rows.flatMap(r => r.checks.map(c => c.model)).filter(m => !SUB_MODELS.includes(m)))].sort();
   const availableModels = [...SUB_MODELS, ...extraModels];
   const modelSelectionKey = JSON.stringify(availableModels);

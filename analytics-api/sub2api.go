@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"log"
 	"net/http"
 	"net/url"
 	"sort"
@@ -22,6 +21,7 @@ type subModelResult struct {
 	Result  *subResult `json:"result"`
 }
 type subTarget struct {
+	CheckSourceID   string                     `json:"check_source_id,omitempty"`
 	ObservedRates   map[string]subObservedRate `json:"observed_rates,omitempty"`
 	ToolUse         *subCapabilityResult       `json:"tool_use,omitempty"`
 	ToolUseState    string                     `json:"tool_use_state"`
@@ -92,34 +92,9 @@ func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "账单倍率范围无效", http.StatusBadRequest)
 		return
 	}
-	rows, err := s.control.db.QueryContext(r.Context(), `SELECT id,name,base,email,state,message,synced_at,balance,job_kind,provider_kind,login_name,encrypted_login_password<>'' FROM console_sub_accounts WHERE owner=$1 AND ($2='' OR id=$2) ORDER BY created_at,id`, owner, accountID)
+	accounts, err := readSubAccountHeaders(r.Context(), s.control.db, owner, accountID)
 	if err != nil {
-		http.Error(w, "账号列表暂不可用", 503)
-		return
-	}
-	accounts := []subAccount{}
-	index := map[string]int{}
-	for rows.Next() {
-		var a subAccount
-		var balanceRaw []byte
-		if err = rows.Scan(&a.ID, &a.Name, &a.Base, &a.Email, &a.State, &a.Message, &a.SyncedAt, &balanceRaw, &a.JobKind, &a.ProviderKind, &a.LoginName, &a.HasSavedPassword); err != nil {
-			break
-		}
-		if len(balanceRaw) > 0 {
-			if err = json.Unmarshal(balanceRaw, &a.Balance); err != nil {
-				break
-			}
-		}
-		a.Targets = []subTarget{}
-		index[a.ID] = len(accounts)
-		accounts = append(accounts, a)
-	}
-	if err == nil {
-		err = rows.Err()
-	}
-	rows.Close()
-	if err != nil {
-		http.Error(w, "账号列表读取失败", 503)
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
 	if accountID != "" && len(accounts) == 0 {
@@ -138,90 +113,9 @@ func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 		s.writeAccountSummary(w, r, accounts)
 		return
 	}
-	shared, sharedErr := s.sharedQualityForAccount(r.Context(), owner, accountID)
-	if sharedErr != nil {
-		http.Error(w, "共享检测记录暂不可用", 503)
+	if err := s.readSubAccountDetailsFrom(r.Context(), s.control.db, owner, accountID, groupID, r.URL.Query().Get("model"), summaryView(r) == "summary", omitRates, accounts, trace); err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
-	}
-	trace.next("targets")
-	rows, err = s.control.db.QueryContext(r.Context(), `SELECT t.account_id,t.group_id,t.name,t.platform,t.channel,t.rate,t.remote_key_id,t.active,t.state,t.message,t.result,t.billing,COALESCE(h.total,0),COALESCE(h.successful,0),COALESCE(h.passed,0),t.compaction,t.compaction_state,t.tool_use,t.tool_use_state FROM console_sub_targets t JOIN console_sub_accounts a ON a.id=t.account_id LEFT JOIN console_quality_totals h ON h.account_id=t.account_id AND h.group_id=t.group_id WHERE a.owner=$1 AND ($2='' OR a.id=$2) AND ($3=0 OR t.group_id=$3) ORDER BY t.group_id`, owner, accountID, groupID)
-	if err != nil {
-		http.Error(w, "检测结果暂不可用", 503)
-		return
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var id string
-		var t subTarget
-		var raw, billingRaw, compactionRaw, toolUseRaw []byte
-		if err = rows.Scan(&id, &t.GroupID, &t.Name, &t.Platform, &t.Channel, &t.Rate, &t.KeyID, &t.Active, &t.State, &t.Message, &raw, &billingRaw, &t.History.Total, &t.History.Successful, &t.History.Passed, &compactionRaw, &t.CompactionState, &toolUseRaw, &t.ToolUseState); err != nil {
-			break
-		}
-		if len(toolUseRaw) > 0 {
-			if err = json.Unmarshal(toolUseRaw, &t.ToolUse); err != nil {
-				break
-			}
-		}
-		if len(compactionRaw) > 0 {
-			if err = json.Unmarshal(compactionRaw, &t.Compaction); err != nil {
-				break
-			}
-		}
-		t.Models = []subModelResult{}
-		if len(billingRaw) > 0 {
-			if err = json.Unmarshal(billingRaw, &t.Billing); err != nil {
-				break
-			}
-		}
-		if len(raw) > 0 {
-			if err = json.Unmarshal(raw, &t.Result); err != nil {
-				break
-			}
-		}
-		if i, ok := index[id]; ok {
-			if projection, exists := shared.Groups[qualityGroupID(id, t.GroupID)]; exists {
-				t.History = projection.History
-				t.QualityCheck = projection.Check
-			}
-			accounts[i].Targets = append(accounts[i].Targets, t)
-			trace.targets++
-		}
-	}
-	if err != nil || rows.Err() != nil {
-		http.Error(w, "检测结果读取失败", 503)
-		return
-	}
-	rows.Close()
-	trace.next("models")
-	trace.models, trace.modelBytes, err = s.subReadModels(r.Context(), owner, accountID, groupID, r.URL.Query().Get("model"), summaryView(r) == "summary", accounts)
-	if err != nil {
-		http.Error(w, "检测结果读取失败", 503)
-		return
-	}
-	trace.next("queued_checks")
-	if err := s.subAttachQueuedChecks(r.Context(), owner, accounts); err != nil {
-		http.Error(w, "排队任务读取失败", 503)
-		return
-	}
-	trace.next("usage")
-	if err := s.subAttachUsage(r.Context(), owner, accounts); err != nil {
-		log.Printf("sub_accounts_receipt_read_failed class=%s canceled=%t request_id=%s", databaseErrorClass(err), r.Context().Err() != nil, consoleRequestID(r.Context()))
-		http.Error(w, "模型账单读取失败，请重新读取", http.StatusServiceUnavailable)
-		return
-	}
-	trace.next("observed_rates")
-	if !omitRates {
-		observed, err := s.control.subObservedRatesForAccount(r.Context(), owner, accountID)
-		if err != nil {
-			http.Error(w, "账单倍率读取失败", 503)
-			return
-		}
-		for accountIndex := range accounts {
-			for targetIndex := range accounts[accountIndex].Targets {
-				target := &accounts[accountIndex].Targets[targetIndex]
-				target.ObservedRates = observed[qualityGroupID(accounts[accountIndex].ID, target.GroupID)]
-			}
-		}
 	}
 	if r.PathValue("id") != "" && (len(accounts) != 1 || len(accounts[0].Targets) != 1) {
 		http.Error(w, "分组不存在", 404)

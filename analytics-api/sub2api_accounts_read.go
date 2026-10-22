@@ -49,6 +49,10 @@ func (s *Service) subAccountProgress(ctx context.Context, owner string, accounts
 // instead. Keep authorization and target membership in the SQL, and retain every
 // model/state used by list filters.
 func (s *Service) subReadModels(ctx context.Context, owner, accountID string, groupID int64, model string, summary bool, accounts []subAccount) (int, int, error) {
+	return s.subReadModelsFrom(ctx, s.control.db, owner, accountID, groupID, model, summary, accounts)
+}
+
+func (s *Service) subReadModelsFrom(ctx context.Context, db controlQueryDB, owner, accountID string, groupID int64, model string, summary bool, accounts []subAccount) (int, int, error) {
 	targets := map[string]*subTarget{}
 	for i := range accounts {
 		for j := range accounts[i].Targets {
@@ -69,7 +73,7 @@ func (s *Service) subReadModels(ctx context.Context, owner, accountID string, gr
 		resultSQL = "COALESCE(ms.result, console_sub_model_summary_v1(m.result))"
 		projectionJoin = " LEFT JOIN console_sub_model_summaries ms ON ms.account_id=m.account_id AND ms.group_id=m.group_id AND ms.model=m.model "
 	}
-	rows, err := s.control.db.QueryContext(ctx, `SELECT m.account_id,m.group_id,m.model,m.state,m.message,`+resultSQL+`
+	rows, err := db.QueryContext(ctx, `SELECT m.account_id,m.group_id,m.model,m.state,m.message,`+resultSQL+`
 FROM console_sub_models m `+projectionJoin+`
 JOIN console_sub_targets t ON t.account_id=m.account_id AND t.group_id=m.group_id
 JOIN console_sub_accounts a ON a.id=t.account_id
@@ -143,6 +147,9 @@ func newSubAccountsReadTrace(r *http.Request) *subAccountsReadTrace {
 }
 
 func (t *subAccountsReadTrace) next(stage string) {
+	if t == nil {
+		return
+	}
 	now := time.Now()
 	t.stages = append(t.stages, fmt.Sprintf("%s_ms=%d", t.stage, now.Sub(t.last).Milliseconds()))
 	t.stage, t.last = stage, now

@@ -183,72 +183,7 @@ func (s *Service) channelManagement(w http.ResponseWriter, r *http.Request) {
 			if cached && time.Since(time.Unix(snapshot.CheckedAt, 0)) > 5*time.Minute {
 				unavailable = append(unavailable, source.Name)
 			}
-			grouped := map[string]*managementChannel{}
-			for _, row := range snapshot.Rows {
-				if snapshot.Copies[row.Provider] {
-					continue
-				}
-				item := grouped[row.Provider]
-				if item == nil {
-					binding, found := lookup[id+"\n"+row.Provider]
-					if !found {
-						binding = subInstalledChannel{Kind: "configured", SourceID: id, SourceName: src.Name, Provider: row.Provider, Name: row.Provider, Models: []string{}, Positions: map[string]int{}}
-					}
-					if live, ok := snapshot.Providers[row.Provider]; ok {
-						// An edited credential must not inherit the previous account's
-						// results while the durable binding worker catches up.
-						if found && live.Fingerprint != binding.Fingerprint {
-							binding.AccountID = ""
-							binding.GroupID = 0
-							binding.BoundKeys = nil
-						}
-						binding.Base = live.Base
-					}
-					binding.EngineMode = row.EngineMode
-					item = &managementChannel{subInstalledChannel: binding, Engine: row.Engine, AccountIDs: []string{}}
-					if live, ok := snapshot.Providers[row.Provider]; ok {
-						item.ProbeFingerprint = live.ProbeFingerprint
-					}
-					ids := map[string]bool{}
-					for _, key := range binding.BoundKeys {
-						ids[key.AccountID] = true
-					}
-					// A site match enables navigation/filtering only. Probe results and
-					// account-only data still require a verified key/group binding.
-					if len(ids) == 0 && binding.Base != "" {
-						for _, a := range accounts {
-							if a.Owner == owner && subBindingSite(a.Base) == subBindingSite(binding.Base) {
-								ids[a.ID] = true
-							}
-						}
-					}
-					for id := range ids {
-						item.AccountIDs = append(item.AccountIDs, id)
-					}
-					sort.Strings(item.AccountIDs)
-					grouped[row.Provider] = item
-				}
-				found := false
-				for _, model := range item.Models {
-					if model == row.Model {
-						found = true
-						break
-					}
-				}
-				if !found {
-					item.Models = append(item.Models, row.Model)
-				}
-				if row.Upstream != "" && row.Upstream != row.Model {
-					if item.ModelMappings == nil {
-						item.ModelMappings = map[string]string{}
-					}
-					item.ModelMappings[row.Model] = row.Upstream
-				}
-			}
-			for _, item := range grouped {
-				sort.Strings(item.Models)
-				data = append(data, *item)
-			}
+			data = append(data, assembleManagementChannels(src, snapshot, lookup, accounts, owner)...)
 		}(source.ID)
 	}
 	wg.Wait()

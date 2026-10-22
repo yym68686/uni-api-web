@@ -29,6 +29,19 @@ an uncertain response.
 
 ## One-second current channel management
 
+The PostgreSQL-only migration described in `postgresql-only-storage.md` is now
+active; ordinary API releases no longer restore DuckDB or S3 history. That
+storage change does not remove the management page's full-dataset read contract.
+
+The management query foundation includes a browser-verified row/filter model,
+exact count/facets, 25-row signed cursors, explicit transaction-aware control
+readers and version-fenced gateway reads. It is not registered as an HTTP API or
+activated in the frontend. The initial database reader still loads all model
+results. Before activation, live credential bindings must replace cached binding
+assumptions, the page and full batch-selection contracts must be wired, and the
+database work and browser latency must be measured at production cardinality.
+These components alone do not establish the one-second target.
+
 The current read contract cannot provide a one-second complete initial view:
 48 account requests assemble about 120,000 model records before publishing any
 row. Recent serving-node samples spend 3–5 seconds per account: shared quality

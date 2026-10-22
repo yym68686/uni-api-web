@@ -85,7 +85,11 @@ type subBindingAccount struct {
 }
 
 func (s *Service) bindingAccounts(ctx context.Context) ([]subBindingAccount, error) {
-	rows, err := s.control.db.QueryContext(ctx, `SELECT id,owner,base,name,email,synced_at FROM console_sub_accounts ORDER BY id`)
+	return s.bindingAccountsFrom(ctx, s.control.db)
+}
+
+func (s *Service) bindingAccountsFrom(ctx context.Context, db controlQueryDB) ([]subBindingAccount, error) {
+	rows, err := db.QueryContext(ctx, `SELECT id,owner,base,name,email,synced_at FROM console_sub_accounts ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -351,7 +355,11 @@ type subBoundKey struct {
 }
 
 func (s *Service) configuredBindings(ctx context.Context, owner string) ([]subInstalledChannel, error) {
-	accounts, err := s.bindingAccounts(ctx)
+	return s.configuredBindingsFrom(ctx, s.control.db, owner)
+}
+
+func (s *Service) configuredBindingsFrom(ctx context.Context, db controlQueryDB, owner string) ([]subInstalledChannel, error) {
+	accounts, err := s.bindingAccountsFrom(ctx, db)
 	if err != nil {
 		return nil, err
 	}
@@ -363,7 +371,7 @@ func (s *Service) configuredBindings(ctx context.Context, owner string) ([]subIn
 			bySite[subBindingSite(a.Base)] = append(bySite[subBindingSite(a.Base)], a)
 		}
 	}
-	rows, err := s.control.db.QueryContext(ctx, `SELECT i.account_id,i.key_hash,i.remote_key_id,i.group_id,t.billing FROM console_sub_key_index i JOIN console_sub_accounts a ON a.id=i.account_id LEFT JOIN console_sub_targets t ON t.account_id=i.account_id AND t.group_id=i.group_id WHERE a.owner=$1`, owner)
+	rows, err := db.QueryContext(ctx, `SELECT i.account_id,i.key_hash,i.remote_key_id,i.group_id,t.billing FROM console_sub_key_index i JOIN console_sub_accounts a ON a.id=i.account_id LEFT JOIN console_sub_targets t ON t.account_id=i.account_id AND t.group_id=i.group_id WHERE a.owner=$1`, owner)
 	if err != nil {
 		return nil, err
 	}
@@ -388,7 +396,7 @@ func (s *Service) configuredBindings(ctx context.Context, owner string) ([]subIn
 	if err != nil {
 		return nil, err
 	}
-	rows, err = s.control.db.QueryContext(ctx, `SELECT c.source_id,s.name,c.provider,c.base,c.site,c.key_hashes,c.checked_at,c.fingerprint FROM console_configured_channels c JOIN console_sources s ON s.id=c.source_id WHERE c.active AND s.enabled ORDER BY c.source_id,c.provider`)
+	rows, err = db.QueryContext(ctx, `SELECT c.source_id,s.name,c.provider,c.base,c.site,c.key_hashes,c.checked_at,c.fingerprint FROM console_configured_channels c JOIN console_sources s ON s.id=c.source_id WHERE c.active AND s.enabled ORDER BY c.source_id,c.provider`)
 	if err != nil {
 		return nil, err
 	}

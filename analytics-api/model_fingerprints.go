@@ -75,35 +75,8 @@ func enqueueFingerprint(ctx context.Context, db fingerprintDB, t fingerprintTarg
 }
 func (s *Service) modelFingerprints(w http.ResponseWriter, r *http.Request) {
 	owner, _ := s.controlUser(r)
-	rows, err := s.control.db.QueryContext(r.Context(), `SELECT COALESCE(f.source_id,''),f.provider,COALESCE(f.account_id,''),f.group_id,f.model,
- CASE WHEN f.state='running' AND f.deadline<now() THEN 'interrupted' ELSE f.state END,f.message,f.revision,f.result,
- COALESCE(a.base,''),COALESCE(t.encrypted_key,''),floor(extract(epoch FROM f.updated_at)*1000)::BIGINT
- FROM console_model_fingerprints f LEFT JOIN console_sub_accounts a ON a.id=f.account_id
- LEFT JOIN console_sub_targets t ON t.account_id=f.account_id AND t.group_id=f.group_id
- LEFT JOIN console_sources s ON s.id=f.source_id WHERE (a.owner=$1 OR s.enabled)`, owner)
+	data, err := readManagementFingerprintsFrom(r.Context(), s.control.db, owner)
 	if err != nil {
-		http.Error(w, "模型指纹记录读取失败", 503)
-		return
-	}
-	defer rows.Close()
-	data := []fingerprintRecord{}
-	for rows.Next() {
-		var f fingerprintRecord
-		var base, key string
-		// Queued, running and unsuccessful checks legitimately have SQL NULL
-		// results. database/sql supports NULL for []byte, but not *json.RawMessage.
-		var result []byte
-		if err = rows.Scan(&f.Source, &f.Provider, &f.Account, &f.Group, &f.Model, &f.State, &f.Message, &f.Revision, &result, &base, &key, &f.UpdatedAtMS); err != nil {
-			break
-		}
-		f.Result = json.RawMessage(result)
-		// A rotated site credential must not inherit an old identity result.
-		if f.Account != "" && f.State == "done" && f.Revision != tokenHash(base+"\n"+key) {
-			continue
-		}
-		data = append(data, f)
-	}
-	if err != nil || rows.Err() != nil {
 		http.Error(w, "模型指纹记录读取失败", 503)
 		return
 	}

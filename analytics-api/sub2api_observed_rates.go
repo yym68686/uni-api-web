@@ -56,7 +56,11 @@ func (s *controlStore) subObservedRates(ctx context.Context, owner string) (map[
 }
 
 func (s *controlStore) subObservedRatesForAccount(ctx context.Context, owner, accountID string) (map[string]map[string]subObservedRate, error) {
-	rows, err := s.db.QueryContext(ctx, `WITH owned_targets AS MATERIALIZED (
+	return s.subObservedRatesForAccountFrom(ctx, s.db, owner, accountID)
+}
+
+func (s *controlStore) subObservedRatesForAccountFrom(ctx context.Context, db controlQueryDB, owner, accountID string) (map[string]map[string]subObservedRate, error) {
+	rows, err := db.QueryContext(ctx, `WITH owned_targets AS MATERIALIZED (
  SELECT t.account_id,t.group_id,t.remote_key_id FROM console_sub_targets t JOIN console_sub_accounts a ON a.id=t.account_id WHERE a.owner=$1 AND ($2='' OR a.id=$2)),
  raw_latest AS (
  SELECT DISTINCT ON (u.account_id,u.group_id,u.model) u.id,u.account_id,u.group_id,u.model,u.started_at

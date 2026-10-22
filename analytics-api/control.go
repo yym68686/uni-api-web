@@ -186,7 +186,11 @@ func (s *controlStore) decrypt(v string) (string, error) {
 	return string(p), err
 }
 func (s *controlStore) listSources(ctx context.Context) ([]sourceView, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,name,base,extract(epoch FROM created_at)::bigint,(encrypted_storage<>'' OR id='primary'),encrypted_config_key<>'' FROM console_sources WHERE enabled ORDER BY created_at,id`)
+	return s.listSourcesFrom(ctx, s.db)
+}
+
+func (s *controlStore) listSourcesFrom(ctx context.Context, db controlQueryDB) ([]sourceView, error) {
+	rows, err := db.QueryContext(ctx, `SELECT id,name,base,extract(epoch FROM created_at)::bigint,(encrypted_storage<>'' OR id='primary'),encrypted_config_key<>'' FROM console_sources WHERE enabled ORDER BY created_at,id`)
 	if err != nil {
 		return nil, err
 	}
@@ -202,9 +206,13 @@ func (s *controlStore) listSources(ctx context.Context) ([]sourceView, error) {
 	return out, rows.Err()
 }
 func (s *controlStore) source(ctx context.Context, id string) (controlSource, error) {
+	return s.sourceFrom(ctx, s.db, id)
+}
+
+func (s *controlStore) sourceFrom(ctx context.Context, db controlQueryDB, id string) (controlSource, error) {
 	var x controlSource
 	var key, storage, configKey string
-	err := s.db.QueryRowContext(ctx, `SELECT id,name,base,encrypted_key,encrypted_storage,extract(epoch FROM created_at)::bigint,encrypted_config_key FROM console_sources WHERE id=$1 AND enabled`, id).Scan(&x.ID, &x.Name, &x.Base, &key, &storage, &x.CreatedAt, &configKey)
+	err := db.QueryRowContext(ctx, `SELECT id,name,base,encrypted_key,encrypted_storage,extract(epoch FROM created_at)::bigint,encrypted_config_key FROM console_sources WHERE id=$1 AND enabled`, id).Scan(&x.ID, &x.Name, &x.Base, &key, &storage, &x.CreatedAt, &configKey)
 	if err != nil {
 		return x, err
 	}

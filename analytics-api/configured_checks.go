@@ -34,31 +34,9 @@ func configuredProbeFingerprint(src controlSource, p configuredProvider) string 
 }
 
 func (s *Service) configuredChecks(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.control.db.QueryContext(r.Context(), `SELECT c.source_id,c.provider,c.kind,c.model,c.fingerprint,
- CASE WHEN c.state='running' AND c.deadline<now() THEN 'interrupted' ELSE c.state END,c.message,c.result,
- COALESCE(h.total,0),COALESCE(h.successful,0),COALESCE(h.passed,0)
- FROM console_configured_checks c JOIN console_sources s ON s.id=c.source_id
- LEFT JOIN console_quality_totals h ON h.source_id=c.source_id AND h.provider=c.provider WHERE s.enabled
- AND ($1='' OR c.source_id=$1) AND ($2='' OR c.provider=$2)
- AND ($3='' OR c.model=$3 OR c.model='' OR c.model='gpt-6-astra')`, r.URL.Query().Get("source_id"), r.URL.Query().Get("provider"), r.URL.Query().Get("model"))
+	data, err := readConfiguredChecksFrom(r.Context(), s.control.db, r.URL.Query().Get("source_id"), r.URL.Query().Get("provider"), r.URL.Query().Get("model"))
 	if err != nil {
-		log.Printf("configured_checks read: %v", err)
-		http.Error(w, "检测记录读取失败", 503)
-		return
-	}
-	defer rows.Close()
-	data := []configuredCheck{}
-	for rows.Next() {
-		var c configuredCheck
-		var raw []byte
-		if err = rows.Scan(&c.Source, &c.Provider, &c.Kind, &c.Model, &c.Fingerprint, &c.State, &c.Message, &raw, &c.History.Total, &c.History.Successful, &c.History.Passed); err != nil {
-			break
-		}
-		c.Result = raw
-		data = append(data, c)
-	}
-	if err != nil || rows.Err() != nil {
-		log.Printf("configured_checks scan: %v rows: %v", err, rows.Err())
+		log.Printf("configured_checks read failed class=%s", databaseErrorClass(err))
 		http.Error(w, "检测记录读取失败", 503)
 		return
 	}

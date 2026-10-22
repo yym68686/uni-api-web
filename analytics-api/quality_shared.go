@@ -27,7 +27,11 @@ func (s *Service) qualityBindings(ctx context.Context, owner string) ([]qualityB
 }
 
 func (s *Service) qualityBindingsForAccount(ctx context.Context, owner, accountID string) ([]qualityBinding, error) {
-	configured, err := s.configuredBindings(ctx, owner)
+	return s.qualityBindingsForAccountFrom(ctx, s.control.db, owner, accountID)
+}
+
+func (s *Service) qualityBindingsForAccountFrom(ctx context.Context, db controlQueryDB, owner, accountID string) ([]qualityBinding, error) {
+	configured, err := s.configuredBindingsFrom(ctx, db, owner)
 	if err != nil {
 		return nil, err
 	}
@@ -37,12 +41,12 @@ func (s *Service) qualityBindingsForAccount(ctx context.Context, owner, accountI
 			bindings[qualityChannelID(c.SourceID, c.Provider)] = qualityBinding{c.SourceID, c.Provider, c.AccountID, c.GroupID}
 		}
 	}
-	refs, err := s.control.subChannelRefsForAccount(ctx, owner, accountID)
+	refs, err := s.control.subChannelRefsForAccountFrom(ctx, db, owner, accountID)
 	if err != nil {
 		return nil, err
 	}
 	providerRefs := newSubProviderRefIndex(refs)
-	rows, err := s.control.db.QueryContext(ctx, `SELECT p.source_id,p.encrypted_snapshot FROM console_control_snapshots p JOIN console_sources s ON s.id=p.source_id WHERE s.enabled AND p.encrypted_snapshot<>''`)
+	rows, err := db.QueryContext(ctx, `SELECT p.source_id,p.encrypted_snapshot FROM console_control_snapshots p JOIN console_sources s ON s.id=p.source_id WHERE s.enabled AND p.encrypted_snapshot<>''`)
 	if err != nil {
 		return nil, err
 	}
@@ -111,15 +115,19 @@ func (s *Service) sharedQuality(ctx context.Context, owner string) (sharedQualit
 }
 
 func (s *Service) sharedQualityForAccount(ctx context.Context, owner, accountID string) (sharedQuality, error) {
+	return s.sharedQualityForAccountFrom(ctx, s.control.db, owner, accountID)
+}
+
+func (s *Service) sharedQualityForAccountFrom(ctx context.Context, db controlQueryDB, owner, accountID string) (sharedQuality, error) {
 	out := sharedQuality{Groups: map[string]sharedQualityProjection{}}
 	var err error
-	out.Bindings, err = s.qualityBindingsForAccount(ctx, owner, accountID)
+	out.Bindings, err = s.qualityBindingsForAccountFrom(ctx, db, owner, accountID)
 	if err != nil {
 		return out, err
 	}
 	if len(out.Bindings) > 0 {
 		raw, _ := json.Marshal(out.Bindings)
-		_, err = s.control.db.ExecContext(ctx, `INSERT INTO console_quality_group_links(check_id,account_id,group_id)
+		_, err = db.ExecContext(ctx, `INSERT INTO console_quality_group_links(check_id,account_id,group_id)
  SELECT h.check_id,b.account,b."group" FROM jsonb_to_recordset($1::jsonb) AS b(source text,provider text,account text,"group" bigint)
  JOIN console_quality_history h ON h.source_id=b.source AND h.provider=b.provider
  JOIN console_sub_targets t ON t.account_id=b.account AND t.group_id=b."group"
@@ -130,7 +138,7 @@ func (s *Service) sharedQualityForAccount(ctx context.Context, owner, accountID 
 			return out, err
 		}
 	}
-	rows, err := s.control.db.QueryContext(ctx, `WITH owned AS MATERIALIZED (
+	rows, err := db.QueryContext(ctx, `WITH owned AS MATERIALIZED (
  SELECT h.id,h.account_id,h.group_id,h.successful,h.verdict,h.checked_at
  FROM console_quality_group_history h JOIN console_sub_accounts a ON a.id=h.account_id WHERE a.owner=$1 AND ($2='' OR a.id=$2)
  ), totals AS (SELECT account_id,group_id,count(*) AS total,count(*) FILTER(WHERE successful) AS successful,count(*) FILTER(WHERE successful AND verdict='pass') AS passed FROM owned GROUP BY account_id,group_id),
