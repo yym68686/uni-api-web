@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -76,5 +78,53 @@ func TestBillingBackfillPreservesIncompleteMarkerWhenStorageHasNoReserve(t *test
 	}
 	if err := e.DB.QueryRow("SELECT value='true' FROM meta WHERE name='billing_projection_complete'").Scan(&complete); err != nil || complete {
 		t.Fatal(complete, err)
+	}
+}
+
+func TestBillingProjectionVerificationChecksEveryPageAndBothDirections(t *testing.T) {
+	e := postgresTestEngine(t)
+	ctx := context.Background()
+	at := time.Now().Add(-time.Hour).Truncate(time.Hour)
+	facts := make([]Fact, 1300)
+	for i := range facts {
+		facts[i] = attributedFact(fmt.Sprintf("verify-%04d", i), "caller", at.Add(time.Duration(i)*time.Millisecond))
+		// Keep the comparison wider than its identity index, with null and array
+		// values. Failures on later pages must not be missed by a bounded scan.
+		facts[i].UpstreamErrorSHA256 = strings.Repeat("a", 64)
+	}
+	if err := e.Import(ctx, "verify-fixture", "one", facts); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.verifyBillingProjectionHour(ctx, at.UnixMilli()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.DB.Exec("UPDATE billing_facts SET upstream_error_sha256=NULL WHERE event_id='verify-1200'"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.verifyBillingProjectionHour(ctx, at.UnixMilli()); !errors.Is(err, errBillingProjectionMismatch) {
+		t.Fatal("missed a later-page column mismatch", err)
+	}
+	if _, err := e.DB.Exec("UPDATE billing_facts SET upstream_error_sha256=? WHERE event_id='verify-1200'", strings.Repeat("a", 64)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.DB.Exec("DELETE FROM billing_facts WHERE event_id='verify-1201'"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.verifyBillingProjectionHour(ctx, at.UnixMilli()); !errors.Is(err, errBillingProjectionMismatch) {
+		t.Fatal("missed a missing projection row", err)
+	}
+	if _, err := e.DB.Exec("INSERT INTO billing_facts(" + billingColumns + ") SELECT " + billingColumns + " FROM facts WHERE event_id='verify-1201'"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.DB.Exec("UPDATE billing_facts SET event_id='zz-extra' WHERE event_id='verify-1202'"); err != nil {
+		t.Fatal(err)
+	}
+	// The extra identity sorts after the last real fact. A scan driven only by
+	// source identities could otherwise incorrectly publish completeness.
+	if _, err := e.DB.Exec("DELETE FROM facts WHERE event_id='verify-1202'"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.verifyBillingProjectionHour(ctx, at.UnixMilli()); !errors.Is(err, errBillingProjectionMismatch) {
+		t.Fatal("missed an extra projection row", err)
 	}
 }

@@ -7,6 +7,18 @@ import (
 )
 
 func databaseErrorClass(err error) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, errHistoryCapacity) || errors.Is(err, errBillingBackfillHeadroom) {
+		return "history_capacity_unavailable"
+	}
+	if errors.Is(err, errBillingBackfillBusy) || errors.Is(err, errSubSummaryBackfillBusy) {
+		return "maintenance_deferred"
+	}
+	if errors.Is(err, errBillingProjectionMismatch) {
+		return "projection_mismatch"
+	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return "deadline_exceeded"
 	}
@@ -15,13 +27,15 @@ func databaseErrorClass(err error) string {
 	}
 	var pg *pgconn.PgError
 	if !errors.As(err, &pg) {
-		return ""
+		return "unclassified_error"
 	}
 	switch pg.Code {
 	case "53200":
 		return "database_out_of_memory"
 	case "53100":
 		return "database_disk_full"
+	case "53400":
+		return "database_resource_limit"
 	case "57014":
 		return "database_query_canceled"
 	case "55P03":

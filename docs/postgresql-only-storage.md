@@ -114,5 +114,9 @@ only completion identities and receipt correlation fields. Deploy dual-writing
 code first, let every older API writer drain, then run
 `--prepare-billing-projection`. Preparation copies at most 512 rows per transaction,
 yields to live ingestion, checks capacity headroom, and verifies every column in
-both directions for each retained hour. Reads continue using raw facts until the
+both directions for each retained hour. Verification walks the union of source
+and projection identities in batches of 512, comparing both complete row sets in
+one statement snapshot per batch. This bounds comparison sorts without raising
+the 64 MiB temporary-file limit, and detects extra projection rows as well as
+missing or altered ones. Reads continue using raw facts until the
 explicit completion marker is written. FIFO removes matching projection partitions.
