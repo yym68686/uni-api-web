@@ -59,21 +59,60 @@ func (s *controlStore) subObservedRatesForAccount(ctx context.Context, owner, ac
 	return s.subObservedRatesForAccountFrom(ctx, s.db, owner, accountID)
 }
 
-func (s *controlStore) subObservedRatesForAccountFrom(ctx context.Context, db controlQueryDB, owner, accountID string) (map[string]map[string]subObservedRate, error) {
-	rows, err := db.QueryContext(ctx, `WITH owned_targets AS MATERIALIZED (
+// Payload selection never changes current-key or latest-receipt membership.
+// The prepared variant is used only inside the management snapshot after its
+// bounded projection verification. Any unsupported candidate falls back before
+// publishing, preserving the original decoder (including legacy field casing).
+func subObservedRatesReadSQL(prepared bool) string {
+	payload, rawSource, rawSupport, metadataSupport, support := "u.result", "FROM raw_latest l JOIN console_sub_usage u ON u.id=l.id", "", "", ""
+	if prepared {
+		payload = "p.rate_result"
+		// raw_latest already identifies a visible, owned, current-key receipt in
+		// this statement. Reading its raw row again is unnecessary for projection.
+		rawSource = "FROM raw_latest l LEFT JOIN console_management_receipt_signal p ON p.id=l.id AND p.account_id=l.account_id"
+		rawSupport = ",NOT COALESCE(p.valid,false) AS requires_raw"
+		metadataSupport = ",false"
+		// Evaluate before DISTINCT so an unsupported raw candidate cannot be
+		// hidden by its compact metadata twin or allow a partially decoded map.
+		support = ",bool_or(requires_raw) OVER()"
+	}
+	return `WITH owned_targets AS MATERIALIZED (
  SELECT t.account_id,t.group_id,t.remote_key_id FROM console_sub_targets t JOIN console_sub_accounts a ON a.id=t.account_id WHERE a.owner=$1 AND ($2='' OR a.id=$2)),
  raw_latest AS (
  SELECT DISTINCT ON (u.account_id,u.group_id,u.model) u.id,u.account_id,u.group_id,u.model,u.started_at
  FROM console_sub_usage u JOIN owned_targets t ON t.account_id=u.account_id AND t.group_id=u.group_id AND t.remote_key_id=u.key_id
  WHERE u.status='matched' ORDER BY u.account_id,u.group_id,u.model,u.started_at DESC,u.id DESC),
  candidates AS (
- SELECT l.id,l.account_id,l.group_id,l.model,l.started_at,u.result
- FROM raw_latest l JOIN console_sub_usage u ON u.id=l.id
+ SELECT l.id,l.account_id,l.group_id,l.model,l.started_at,` + payload + ` AS result` + rawSupport + `
+ ` + rawSource + `
  UNION ALL
- SELECT r.receipt_id,r.account_id,r.group_id,r.model,r.started_at,r.result
+ SELECT r.receipt_id,r.account_id,r.group_id,r.model,r.started_at,r.result` + metadataSupport + `
  FROM console_sub_observed_rates r JOIN owned_targets t ON t.account_id=r.account_id AND t.group_id=r.group_id AND t.remote_key_id=r.key_id)
- SELECT DISTINCT ON (account_id,group_id,model) account_id,group_id,model,started_at,result
- FROM candidates ORDER BY account_id,group_id,model,started_at DESC,id DESC`, owner, accountID)
+ SELECT DISTINCT ON (account_id,group_id,model) account_id,group_id,model,started_at,result` + support + `
+ FROM candidates ORDER BY account_id,group_id,model,started_at DESC,id DESC`
+}
+
+func (s *controlStore) subObservedRatesPreparedFrom(ctx context.Context, db controlQueryDB, owner, accountID string) (map[string]map[string]subObservedRate, error) {
+	var complete bool
+	if err := db.QueryRowContext(ctx, `SELECT complete FROM console_management_projection_state WHERE singleton`).Scan(&complete); err != nil {
+		return nil, err
+	}
+	if !complete {
+		return s.subObservedRatesForAccountFrom(ctx, db, owner, accountID)
+	}
+	result, err := readSubObservedRatesQuery(ctx, db, owner, accountID, true)
+	if err == errManagementPredicateFallback {
+		return s.subObservedRatesForAccountFrom(ctx, db, owner, accountID)
+	}
+	return result, err
+}
+
+func (s *controlStore) subObservedRatesForAccountFrom(ctx context.Context, db controlQueryDB, owner, accountID string) (map[string]map[string]subObservedRate, error) {
+	return readSubObservedRatesQuery(ctx, db, owner, accountID, false)
+}
+
+func readSubObservedRatesQuery(ctx context.Context, db controlQueryDB, owner, accountID string, prepared bool) (map[string]map[string]subObservedRate, error) {
+	rows, err := db.QueryContext(ctx, subObservedRatesReadSQL(prepared), owner, accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -83,8 +122,16 @@ func (s *controlStore) subObservedRatesForAccountFrom(ctx context.Context, db co
 		var account, model string
 		var group, startedAt int64
 		var raw []byte
-		if err := rows.Scan(&account, &group, &model, &startedAt, &raw); err != nil {
+		var requiresRaw bool
+		fields := []any{&account, &group, &model, &startedAt, &raw}
+		if prepared {
+			fields = append(fields, &requiresRaw)
+		}
+		if err := rows.Scan(fields...); err != nil {
 			return nil, err
+		}
+		if requiresRaw {
+			return nil, errManagementPredicateFallback
 		}
 		var usage subUsage
 		if json.Unmarshal(raw, &usage) != nil {

@@ -54,10 +54,10 @@ func (s *Service) readSubAccountDetailsFrom(ctx context.Context, db controlQuery
 }
 
 func (s *Service) readSubAccountDetailsWithQualityFrom(ctx context.Context, db controlQueryDB, owner, accountID string, groupID int64, model string, summary, omitRates bool, accounts []subAccount, trace *subAccountsReadTrace, shared sharedQuality) error {
-	return s.readSubAccountDetailsWithModelsFrom(ctx, db, owner, accountID, groupID, model, summary, omitRates, accounts, trace, shared, nil)
+	return s.readSubAccountDetailsWithModelsFrom(ctx, db, owner, accountID, groupID, model, summary, omitRates, accounts, trace, shared, nil, nil)
 }
 
-func (s *Service) readSubAccountDetailsWithModelsFrom(ctx context.Context, db controlQueryDB, owner, accountID string, groupID int64, model string, summary, omitRates bool, accounts []subAccount, trace *subAccountsReadTrace, shared sharedQuality, readModels func([]subAccount) error) error {
+func (s *Service) readSubAccountDetailsWithModelsFrom(ctx context.Context, db controlQueryDB, owner, accountID string, groupID int64, model string, summary, omitRates bool, accounts []subAccount, trace *subAccountsReadTrace, shared sharedQuality, readModels func([]subAccount) error, readRates func() (map[string]map[string]subObservedRate, error)) error {
 	index := map[string]int{}
 	for i, a := range accounts {
 		index[a.ID] = i
@@ -144,7 +144,12 @@ func (s *Service) readSubAccountDetailsWithModelsFrom(ctx context.Context, db co
 	stages.next("database_rates")
 	trace.next("observed_rates")
 	if !omitRates {
-		observed, err := s.control.subObservedRatesForAccountFrom(ctx, db, owner, accountID)
+		if readRates == nil {
+			readRates = func() (map[string]map[string]subObservedRate, error) {
+				return s.control.subObservedRatesForAccountFrom(ctx, db, owner, accountID)
+			}
+		}
+		observed, err := readRates()
 		if err != nil {
 			return subAccountReadFailure{"账单倍率读取失败", err}
 		}

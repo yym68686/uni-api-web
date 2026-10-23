@@ -7,7 +7,8 @@ CREATE TABLE console_management_receipt_signal (
  valid BOOLEAN NOT NULL,evidence_digest BYTEA NOT NULL,
  status TEXT NOT NULL,
  input_price DOUBLE PRECISION, output_price DOUBLE PRECISION,
- input_tokens BIGINT, output_tokens BIGINT
+ input_tokens BIGINT, output_tokens BIGINT,
+ rate_result JSONB
 );
 CREATE TABLE console_management_model_signal (
  account_id TEXT NOT NULL,group_id BIGINT NOT NULL,model TEXT NOT NULL,
@@ -80,6 +81,11 @@ BEGIN
  IF NOT v.valid THEN RETURN v;END IF;
  IF r IS NULL OR r='null'::jsonb THEN RETURN v; END IF;
  IF jsonb_typeof(r)<>'object' THEN v.valid:=false;RETURN v;END IF;
+ -- Preserve only rate inputs after the COMPLETE original receipt has passed
+ -- the conservative typed support check. Unsupported receipts use raw JSON.
+ -- In particular, do not invent a JSON status from the row's base_status.
+ SELECT COALESCE(jsonb_object_agg(key,value),'{}'::jsonb) INTO v.rate_result
+ FROM jsonb_each(r) WHERE key=ANY(ARRAY['status','actual_cost','total_cost','rate_multiplier','input_price','output_price','created_at']);
  IF r->'status' IS NOT NULL AND r->'status'<>'null'::jsonb THEN
   IF jsonb_typeof(r->'status')<>'string' THEN v.valid:=false;RETURN v;END IF;
   v.status:=r->>'status';
@@ -151,7 +157,7 @@ BEGIN
  v:=console_management_receipt_signal_value(NEW.result,NEW.status);v.id:=NEW.id;v.account_id:=NEW.account_id;
  INSERT INTO console_management_receipt_signal SELECT v.*
  ON CONFLICT(id) DO UPDATE SET account_id=EXCLUDED.account_id,valid=EXCLUDED.valid,evidence_digest=EXCLUDED.evidence_digest,status=EXCLUDED.status,
- input_price=EXCLUDED.input_price,output_price=EXCLUDED.output_price,input_tokens=EXCLUDED.input_tokens,output_tokens=EXCLUDED.output_tokens;
+ input_price=EXCLUDED.input_price,output_price=EXCLUDED.output_price,input_tokens=EXCLUDED.input_tokens,output_tokens=EXCLUDED.output_tokens,rate_result=EXCLUDED.rate_result;
  RETURN NEW;
 END $$;
 CREATE TRIGGER console_management_receipt_signal_write AFTER INSERT OR UPDATE OF id,result,status,account_id ON console_sub_usage

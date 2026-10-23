@@ -29,7 +29,7 @@ type managementProjectionIdentity struct {
 }
 
 const managementModelSignalColumns = "account_id,group_id,model,valid,present,evidence_digest,checked_at,verdict,availability,terminal,model_match,probe_id,quality_probe_id,has_usage,usage_status,input_price,output_price,input_tokens,output_tokens"
-const managementReceiptSignalColumns = "id,account_id,valid,evidence_digest,status,input_price,output_price,input_tokens,output_tokens"
+const managementReceiptSignalColumns = "id,account_id,valid,evidence_digest,status,input_price,output_price,input_tokens,output_tokens,rate_result"
 
 // Preparation is explicit, restartable and bounded. Installing writer triggers
 // precedes preparation, so updates/inserts behind a durable cursor are covered.
@@ -116,7 +116,7 @@ func prepareManagementProjectionStep(ctx context.Context, db *sql.DB, budgetSche
 	}
 	columns, relation := managementReceiptSignalColumns, "console_management_receipt_signal"
 	cte := `WITH wanted AS (SELECT * FROM jsonb_to_recordset($1::jsonb) AS k(id text)), expected AS MATERIALIZED (
- SELECT r.id,r.account_id,v.valid,v.evidence_digest,v.status,v.input_price,v.output_price,v.input_tokens,v.output_tokens
+ SELECT r.id,r.account_id,v.valid,v.evidence_digest,v.status,v.input_price,v.output_price,v.input_tokens,v.output_tokens,v.rate_result
  FROM wanted k JOIN console_sub_usage r USING(id) CROSS JOIN LATERAL console_management_receipt_signal_value(r.result,r.status) v) `
 	keys := "id"
 	if models {

@@ -156,6 +156,17 @@ values. Queue identities and states remain part of the revision. Gzip transport
 is negotiated for complete JSON responses; it does not omit models or replace
 current results with cached data.
 
+The same unpublished receipt projection also stores compact rate inputs after
+checking the complete receipt's typed shape. Preparation compares this payload
+along with every other derived column. Prepared management reads still select
+the latest raw/current-key and retained-metadata candidates; they substitute
+only the verified compact payload, avoiding historical diagnostic text during
+rate sorting and decoding. Any unsupported or missing projected candidate
+requests the original whole-query reader before publishing. Key rotation, FIFO,
+zero cost, latest unusable evidence and old field casing retain that reader's
+semantics. There is no new rate-recovery job or permission to repeat production
+recovery, and this projection has not been activated in production.
+
 Analytical snapshots lease a database connection for their full transaction and
 retire that session after rollback, including cancellation and failed reads.
 They do not return a backend with retained query allocations to the shared

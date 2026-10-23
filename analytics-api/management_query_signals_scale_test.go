@@ -211,6 +211,20 @@ func TestManagementModelSignalsProductionCardinality(t *testing.T) {
 	// copy/verification behavior has separate integration tests. Never do this
 	// marker update on an existing production database.
 	exec(`UPDATE console_management_projection_state SET phase='complete',complete=true WHERE singleton`)
+	if os.Getenv("RUN_MANAGEMENT_RATE_PLANS") == "1" {
+		for _, analyze := range []string{"", "console_management_receipt_signal", "console_sub_observed_rates"} {
+			if analyze != "" {
+				exec(`ANALYZE ` + analyze)
+			}
+			for _, prepared := range []bool{false, true} {
+				var plan []byte
+				if err := s.control.db.QueryRowContext(ctx, `EXPLAIN (ANALYZE,BUFFERS,TIMING FALSE,FORMAT JSON) `+subObservedRatesReadSQL(prepared), "owner", "").Scan(&plan); err != nil {
+					t.Fatal(err)
+				}
+				t.Logf("rate_plan analyzed=%q prepared=%t plan=%s", analyze, prepared, plan)
+			}
+		}
+	}
 	start = time.Now()
 	separateRevision, err := readManagementModelRevisionFrom(ctx, s.control.db, "owner")
 	if err != nil {

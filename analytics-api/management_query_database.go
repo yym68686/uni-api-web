@@ -112,7 +112,13 @@ func (s *Service) readManagementDatabaseViewFrom(ctx context.Context, db control
 			return nil
 		}
 	}
-	if err = s.readSubAccountDetailsWithModelsFrom(ctx, db, owner, "", 0, "", true, false, out.Input.Accounts, nil, shared, readModels); err != nil {
+	var readRates func() (map[string]map[string]subObservedRate, error)
+	if out.Input.ModelsRevision != "" {
+		readRates = func() (map[string]map[string]subObservedRate, error) {
+			return s.control.subObservedRatesPreparedFrom(ctx, db, owner, "")
+		}
+	}
+	if err = s.readSubAccountDetailsWithModelsFrom(ctx, db, owner, "", 0, "", true, false, out.Input.Accounts, nil, shared, readModels, readRates); err != nil {
 		return out, err
 	}
 	trace.next("database_normalize")
