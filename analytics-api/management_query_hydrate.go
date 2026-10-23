@@ -40,6 +40,8 @@ func (s *Service) hydrateManagementPageFrom(ctx context.Context, db controlQuery
 		}
 	}
 	if len(wanted) > 0 {
+		stages := newManagementReadTimeline(ctx, "hydrate_models")
+		defer stages.finish()
 		index := map[string]*subTarget{}
 		for i := range subset {
 			for j := range subset[i].Targets {
@@ -85,12 +87,15 @@ func (s *Service) hydrateManagementPageFrom(ctx context.Context, db controlQuery
 		if err != nil {
 			return err
 		}
+		stages.next("hydrate_queue")
 		if err = s.subAttachQueuedChecksFrom(ctx, db, owner, subset); err != nil {
 			return err
 		}
+		stages.next("hydrate_receipts")
 		if err = s.subAttachUsageFrom(ctx, db, owner, subset); err != nil {
 			return err
 		}
+		stages.next("hydrate_normalize")
 		if err = normalizeManagementAccounts(subset); err != nil {
 			return err
 		}

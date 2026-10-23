@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
+	"log"
 	"slices"
 	"strings"
 )
@@ -88,6 +89,9 @@ func readManagementScopedStreams(ctx context.Context, db controlQueryDB, owner s
 	endModels()
 	if err != nil {
 		return nil, "", err
+	}
+	if managementTraceEnabled(ctx) {
+		log.Printf("management_signal_scope compact_revision=%t catalog_only=%t model_scoped=%t models=%d receipt_ids=%d request_id=%s", compact, scope.CatalogOnly, scope.Model != "", len(models), len(ids), consoleRequestID(ctx))
 	}
 	endReceipts := managementReadSpan(ctx, "database_signal_receipts")
 	receipts, err := readManagementStreamReceipts(ctx, db, owner, ids, strict)
