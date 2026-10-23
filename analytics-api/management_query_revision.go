@@ -39,7 +39,7 @@ func readManagementRevisionCatalogFrom(ctx context.Context, db controlQueryDB, o
 		models = []managementModelSignals{}
 	}
 	hash := sha256.New()
-	encoder := json.NewEncoder(hash)
+	writer := newManagementRevisionWriter(hash)
 	for rows.Next() {
 		var account, model, state, message string
 		var group int64
@@ -54,9 +54,7 @@ func readManagementRevisionCatalogFrom(ctx context.Context, db controlQueryDB, o
 		if catalog {
 			models = append(models, managementModelSignals{Account: account, Group: group, Model: subModelResult{Model: model, State: state}})
 		}
-		if err := encoder.Encode([]any{account, group, model, state, summaryMessage(message), evidence, receipt, quality}); err != nil {
-			return "", nil, err
-		}
+		writer.write(account, group, model, state, message, evidence, receipt, quality)
 	}
 	if err := rows.Err(); err != nil {
 		return "", nil, err

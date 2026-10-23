@@ -62,6 +62,16 @@ the complete typed-reader path. The combined query removes one scan without
 weakening freshness or the revision fence. It remains unpublished and does not
 by itself meet the end-to-end latency target.
 
+The unpublished revision writer also preserves the previous JSON-line bytes
+while reusing its output buffer, quoted identity strings and base64 encoding
+space inside a single request. It reads all current evidence as before and
+changes neither SQL nor signed cursor hashes. Byte comparisons cover Unicode,
+escaping, null versus empty digests, long messages and integer limits; database
+cases compare the old and new hashes after model, receipt and queue changes.
+At 119,840 synthetic rows, revision encoding alone decreased from about 80 ms
+and 30.4 MB allocated to 26 ms and 66 KB. This reduces CPU/allocation during the
+existing scan; it is not a transactional aggregate or an end-to-end latency claim.
+
 For a selected model, the unpublished page reader now keeps the full current
 model directory and global evidence revision but reads predicates only for that
 model, its current upstream aliases, and Astra quality evidence. Site groups

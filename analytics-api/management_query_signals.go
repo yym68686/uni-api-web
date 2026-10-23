@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 )
 
@@ -111,7 +110,7 @@ func readCurrentManagementSignalsAndRevision(ctx context.Context, db controlQuer
 	defer rows.Close()
 	out := []managementModelSignals{}
 	hash := sha256.New()
-	encoder := json.NewEncoder(hash)
+	writer := newManagementRevisionWriter(hash)
 	for rows.Next() {
 		var item managementModelSignals
 		var valid, present, hasUsage bool
@@ -127,9 +126,7 @@ func readCurrentManagementSignalsAndRevision(ctx context.Context, db controlQuer
 		if !valid || len(evidence) != sha256.Size {
 			return nil, "", errManagementPredicateFallback
 		}
-		if err := encoder.Encode([]any{item.Account, item.Group, item.Model.Model, item.Model.State, summaryMessage(message), evidence, receipt, quality}); err != nil {
-			return nil, "", err
-		}
+		writer.write(item.Account, item.Group, item.Model.Model, item.Model.State, message, evidence, receipt, quality)
 		if present {
 			item.Model.Result = result
 			if hasUsage {

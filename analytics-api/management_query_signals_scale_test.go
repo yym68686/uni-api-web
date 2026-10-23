@@ -384,7 +384,44 @@ func TestManagementModelSignalsProductionCardinality(t *testing.T) {
 	if string(uniqueExpanded) != string(uniqueRestored) {
 		t.Fatal("distinct result round trip changed values")
 	}
+	allRequest := httptest.NewRequest(http.MethodGet, "/v1/channel-management/query?"+url.Values{"filters": {`{"groupStatus":"all"}`}}.Encode(), nil)
+	allRequest.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
+	allRequest.Header.Set("Accept-Encoding", "gzip")
+	allRequest.Header.Set("Accept", managementPageV2MediaType)
+	allResponse := httptest.NewRecorder()
+	start = time.Now()
+	s.Handler().ServeHTTP(allResponse, allRequest)
+	allElapsed := time.Since(start)
+	if allResponse.Code != 200 || allResponse.Header().Get("Content-Encoding") != "gzip" {
+		t.Fatal("all-model page failed", allResponse.Code)
+	}
+	allCompressed := allResponse.Body.Len()
+	allReader, err := gzip.NewReader(allResponse.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	allBody, err := io.ReadAll(allReader)
+	allReader.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var allWire managementWirePage
+	if err := json.Unmarshal(allBody, &allWire); err != nil {
+		t.Fatal(err)
+	}
+	allPage := decodeManagementWireForTest(t, allWire)
+	// These are different filters: fingerprint evidence can differ. The shared
+	// revision contract is page versus full selection for the SAME filter.
+	if allPage.Total != 749 || len(allPage.Rows) != 25 || !reflect.DeepEqual(allPage.Models, page.Models) || !reflect.DeepEqual(allPage.DetectionModels, page.DetectionModels) {
+		t.Fatal("all-model page count or model directory changed")
+	}
+	for _, row := range allPage.Rows {
+		if len(row.Target.Models) != 160 {
+			t.Fatal("all-model page lost hydrated evidence")
+		}
+	}
 	result := map[string]any{"models": count, "model_fixture_write_ms": modelWriteElapsed.Milliseconds(), "receipt_fixture_write_ms": receiptWriteElapsed.Milliseconds(), "shadow_projection_bytes": projectionBytes, "summary_result_bytes": bytes, "predicate_bytes": signalBytes, "old_model_and_receipt_ms": oldElapsed.Milliseconds(), "predicate_join_ms": newElapsed.Milliseconds(), "typed_predicate_join_ms": typedElapsed.Milliseconds(), "transactional_typed_join_ms": transactionalElapsed.Milliseconds(), "stored_typed_read_ms": storedElapsed.Milliseconds(), "stored_aggregate_read_and_compare_ms": aggregateElapsed.Milliseconds(), "aggregate_groups": aggregateCount, "all_predicates_equal": true}
+	result["all_models_page_http_local_ms"], result["all_models_page_json_bytes"], result["all_models_page_gzip_bytes"] = allElapsed.Milliseconds(), len(allBody), allCompressed
 	result["page_http_local_ms"], result["page_json_bytes"], result["page_gzip_bytes"] = pageElapsed.Milliseconds(), len(body), compressedBytes
 	result["page_wire_format"], result["page_expanded_json_bytes"], result["page_distinct_results"] = "management-page-v2", len(expanded), len(wire.Results)
 	result["unique_groups_wire_bytes"], result["unique_groups_expanded_bytes"], result["unique_groups_distinct_results"] = len(uniqueRaw), len(uniqueExpanded), len(uniqueWire.Results)
