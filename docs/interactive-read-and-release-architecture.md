@@ -355,3 +355,14 @@ transactional projection, then add release-set coordination. Each phase needs an
 independent rollback that preserves configuration and stored facts. Production
 route/DNS/source configuration changes are not part of this patch. The ten-second
 activation guarantee is not implemented or verified by this patch.
+
+
+Account balance refreshes are independent of channel filtering and routing
+eligibility. The next reader fetches fresh account headers in the same validation
+transaction and overlays those headers on the verified page, so balance updates
+need not rerun the channel query. Balance values remain current. They are removed
+from channel cursor/action revisions because they do not affect the operation
+selection. A separate account-header epoch continues invalidating older whole-
+response readers during rolling deployment. Account identity, state, password
+availability, configured keys and all channel inputs still invalidate channel
+computations; site login-session rotation is not a channel-result dependency.

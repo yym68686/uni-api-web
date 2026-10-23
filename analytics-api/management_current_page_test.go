@@ -67,6 +67,33 @@ func TestManagementComputedPageRequiresExactCurrentTransaction(t *testing.T) {
 	if _, ok, err := s.currentComputedManagementPage(ctx, "owner", key); err != nil || !ok {
 		t.Fatal("nonpresentation clocks invalidated computation", err)
 	}
+	var headersBefore, headersAfter, channelsBefore, channelsAfter int64
+	if err := s.control.db.QueryRow(`SELECT revision FROM console_management_view_epoch WHERE relation_name='console_sub_account_headers'`).Scan(&headersBefore); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.control.db.QueryRow(`SELECT revision FROM console_management_view_epoch WHERE relation_name='console_sub_accounts'`).Scan(&channelsBefore); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.control.db.Exec(`UPDATE console_sub_accounts SET balance='{"amount":123.45,"checked_at":99,"status":"ok"}',encrypted_auth='renewed-session' WHERE id='a'`); err != nil {
+		t.Fatal(err)
+	}
+	balanced, ok, err := s.currentComputedManagementPage(ctx, "owner", key)
+	if err != nil || !ok || balanced.Accounts[0].Balance == nil || *balanced.Accounts[0].Balance.Amount != 123.45 || *balanced.Rows[0].Account.Balance.Amount != 123.45 {
+		t.Fatal("current balances not overlaid", err)
+	}
+	if err := s.control.db.QueryRow(`SELECT revision FROM console_management_view_epoch WHERE relation_name='console_sub_account_headers'`).Scan(&headersAfter); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.control.db.QueryRow(`SELECT revision FROM console_management_view_epoch WHERE relation_name='console_sub_accounts'`).Scan(&channelsAfter); err != nil {
+		t.Fatal(err)
+	}
+	if headersAfter == headersBefore || channelsAfter != channelsBefore {
+		t.Fatal("old reader invalidation or current channel epoch changed")
+	}
+	full, err := s.readManagementQuerySnapshot(ctx, "owner", filters, "", true)
+	if err != nil || full.Page.Revision != balanced.Revision {
+		t.Fatal("balance invalidated full operation revision", err)
+	}
 	tx, err := s.control.db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)

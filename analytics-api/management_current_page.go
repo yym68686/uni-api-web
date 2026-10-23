@@ -13,9 +13,10 @@ import (
 )
 
 type managementFreshProof struct {
-	Stamp string
-	Until time.Time
-	Facts []managementGatewayFacts
+	Stamp    string
+	Until    time.Time
+	Facts    []managementGatewayFacts
+	Accounts []subAccount
 }
 type managementComputedPage struct {
 	Proof managementFreshProof
@@ -54,13 +55,17 @@ func (s *Service) managementReadProof(ctx context.Context, db controlQueryDB, ow
 	var price []byte
 	var until sql.NullTime
 	var now time.Time
-	query := `SELECT (SELECT jsonb_agg(jsonb_build_array(relation_name,revision) ORDER BY relation_name) FROM console_management_view_epoch),transaction_timestamp(),(SELECT min(deadline) FROM (SELECT deadline FROM console_configured_checks WHERE state='running' AND deadline>transaction_timestamp() UNION ALL SELECT deadline FROM console_model_fingerprints WHERE state='running' AND deadline>transaction_timestamp()) d), (SELECT COALESCE(jsonb_agg(to_jsonb(p) ORDER BY model),'[]'::jsonb) FROM ` + pgx.Identifier{s.engine.historyPath, "prices"}.Sanitize() + ` p)`
+	query := `SELECT (SELECT jsonb_agg(jsonb_build_array(relation_name,revision) ORDER BY relation_name) FROM console_management_view_epoch WHERE relation_name<>'console_sub_account_headers'),transaction_timestamp(),(SELECT min(deadline) FROM (SELECT deadline FROM console_configured_checks WHERE state='running' AND deadline>transaction_timestamp() UNION ALL SELECT deadline FROM console_model_fingerprints WHERE state='running' AND deadline>transaction_timestamp()) d), (SELECT COALESCE(jsonb_agg(to_jsonb(p) ORDER BY model),'[]'::jsonb) FROM ` + pgx.Identifier{s.engine.historyPath, "prices"}.Sanitize() + ` p)`
 	if err = db.QueryRowContext(ctx, query).Scan(&epoch, &now, &until, &price); err != nil {
 		return proof, now, err
 	}
 	proof.Stamp = tokenHash(mustJSON([]any{revision, string(epoch), string(price)}))
 	if until.Valid {
 		proof.Until = until.Time
+	}
+	proof.Accounts, err = readSubAccountHeaders(ctx, db, owner, "")
+	if err != nil {
+		return managementFreshProof{}, now, err
 	}
 	return proof, now, nil
 }
@@ -102,6 +107,7 @@ func (s *Service) rememberManagementPage(key string, proof *managementFreshProof
 		delete(c.pages, old)
 	}
 	minimal := *proof
+	minimal.Accounts = nil
 	minimal.Facts = make([]managementGatewayFacts, len(proof.Facts))
 	for i, f := range proof.Facts {
 		minimal.Facts[i] = managementGatewayFacts{Source: f.Source, Revision: f.Revision, ConfigRevision: f.ConfigRevision, AtomicSnapshot: f.AtomicSnapshot}
@@ -176,5 +182,24 @@ func (s *Service) currentComputedManagementPage(ctx context.Context, owner, key 
 	}
 	page := entry.Page
 	page.ReadAtMS = now.UnixMilli()
+	current := map[string]subAccount{}
+	for _, a := range proof.Accounts {
+		current[a.ID] = a
+	}
+	page.Accounts = append([]subAccount{}, entry.Page.Accounts...)
+	for i, a := range page.Accounts {
+		fresh, ok := current[a.ID]
+		if !ok {
+			return managementPageResponse{}, false, nil
+		}
+		fresh.ActiveGroups, fresh.CompletedGroups = a.ActiveGroups, a.CompletedGroups
+		page.Accounts[i] = fresh
+	}
+	page.Rows = append([]managementQueryRow{}, entry.Page.Rows...)
+	for i := range page.Rows {
+		if fresh, ok := current[page.Rows[i].Account.ID]; ok {
+			page.Rows[i].Account = fresh
+		}
+	}
 	return page, true, nil
 }

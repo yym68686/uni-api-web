@@ -62,6 +62,9 @@ func managementProjectedRevision(in managementQueryInput, page managementQueryPa
 	compact.Accounts = make([]subAccount, len(in.Accounts))
 	for i, account := range in.Accounts {
 		compact.Accounts[i] = account
+		// Balance is read freshly for each response and affects neither channel
+		// filtering nor action eligibility. It must not invalidate route cursors.
+		compact.Accounts[i].Balance = nil
 		compact.Accounts[i].Targets = make([]subTarget, len(account.Targets))
 		for j, target := range account.Targets {
 			compact.Accounts[i].Targets[j] = target
@@ -76,7 +79,7 @@ func managementProjectedRevision(in managementQueryInput, page managementQueryPa
 		Models          []string
 		DetectionModels []string
 		Evidence        managementFilterEvidence
-	}{"management-projected-v1", in.ModelsRevision, compact, in.SourceRevisions, page.Models, page.DetectionModels, evidence})
+	}{"management-projected-v2", in.ModelsRevision, compact, in.SourceRevisions, page.Models, page.DetectionModels, evidence})
 	if err != nil {
 		return "", err
 	}
