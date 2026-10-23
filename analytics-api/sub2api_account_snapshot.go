@@ -66,13 +66,15 @@ func (s *Service) readSubAccountDetailsWithModelsFrom(ctx context.Context, db co
 	stages := newManagementReadTimeline(ctx, "database_targets")
 	defer stages.finish()
 	capabilityColumns := "t.compaction,t.compaction_state,t.tool_use,t.tool_use_state"
+	capabilityJoin := ""
 	if summary && compactCapabilities {
 		// Only management's compact representation omits these attempt bodies.
 		// Detail readers retain the original full diagnostics. The SQL function
 		// falls back to raw JSON for any unsupported or malformed representation.
-		capabilityColumns = "console_sub_capability_summary_v1(t.compaction),t.compaction_state,console_sub_capability_summary_v1(t.tool_use),t.tool_use_state"
+		capabilityJoin = " LEFT JOIN console_sub_capability_summaries cs ON cs.account_id=t.account_id AND cs.group_id=t.group_id"
+		capabilityColumns = "CASE WHEN cs.account_id IS NULL THEN console_sub_capability_summary_v1(t.compaction) ELSE cs.compaction END,t.compaction_state,CASE WHEN cs.account_id IS NULL THEN console_sub_capability_summary_v1(t.tool_use) ELSE cs.tool_use END,t.tool_use_state"
 	}
-	rows, err := db.QueryContext(ctx, `SELECT t.account_id,t.group_id,t.name,t.platform,t.channel,t.rate,t.remote_key_id,t.active,t.state,t.message,t.result,t.billing,COALESCE(h.total,0),COALESCE(h.successful,0),COALESCE(h.passed,0),`+capabilityColumns+` FROM console_sub_targets t JOIN console_sub_accounts a ON a.id=t.account_id LEFT JOIN console_quality_totals h ON h.account_id=t.account_id AND h.group_id=t.group_id WHERE a.owner=$1 AND ($2='' OR a.id=$2) AND ($3=0 OR t.group_id=$3) ORDER BY t.group_id`, owner, accountID, groupID)
+	rows, err := db.QueryContext(ctx, `SELECT t.account_id,t.group_id,t.name,t.platform,t.channel,t.rate,t.remote_key_id,t.active,t.state,t.message,t.result,t.billing,COALESCE(h.total,0),COALESCE(h.successful,0),COALESCE(h.passed,0),`+capabilityColumns+` FROM console_sub_targets t JOIN console_sub_accounts a ON a.id=t.account_id LEFT JOIN console_quality_totals h ON h.account_id=t.account_id AND h.group_id=t.group_id`+capabilityJoin+` WHERE a.owner=$1 AND ($2='' OR a.id=$2) AND ($3=0 OR t.group_id=$3) ORDER BY t.group_id`, owner, accountID, groupID)
 	if err != nil {
 		return subAccountReadFailure{"检测结果暂不可用", err}
 	}

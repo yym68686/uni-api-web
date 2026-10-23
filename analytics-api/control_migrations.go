@@ -58,6 +58,9 @@ var managementSignalsTables string
 //go:embed migrations/0007_capability_summary.sql
 var capabilitySummarySQL string
 
+//go:embed migrations/0008_capability_projection.sql
+var capabilityProjectionSQL string
+
 type controlMigration struct {
 	Version string
 	SQL     string
@@ -73,6 +76,7 @@ func controlMigrations() []controlMigration {
 		{"0005_observed_rates", observedRatesSQL, strings.Fields(observedRatesTables)},
 		{"0006_management_signals", managementSignalsSQL, strings.Fields(managementSignalsTables)},
 		{"0007_capability_summary", capabilitySummarySQL, nil},
+		{"0008_capability_projection", capabilityProjectionSQL, []string{"console_sub_targets", "console_sub_capability_summaries"}},
 	}
 }
 

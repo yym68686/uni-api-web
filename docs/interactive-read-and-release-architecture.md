@@ -47,6 +47,18 @@ or require preparation. Local 749-group equal-output reads decreased from
 13,580,119 to 51,681 bytes (150–174 ms to 41–44 ms). Production effects require
 measurement after rollout.
 
+The initial capability compaction is deployed as `4fd317d`. It reduced
+normalization CPU but current target queries still measured 2.2–2.6 seconds;
+a saved-filter browser response took 8.666 seconds. Computing the summary on
+every read remains expensive. A subsequent additive target projection stores
+those same capability summaries in the source writer's transaction, including
+old writers, updates, rollback and identity changes. Missing rows keep the
+current calculation fallback. Its explicit preparation fills at most 32 missing
+targets per transaction with source locks, complete value comparison, ingestion
+admission and capacity reserve; there is no global readiness flag or startup
+backfill. This preparation is distinct from the already completed management
+model/receipt projection and must never rerun that older operation.
+
 ## Confirmed incident, 2026-10-21
 
 At 10:48:26 UTC the console analytics request with trace

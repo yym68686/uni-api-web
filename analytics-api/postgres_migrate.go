@@ -29,6 +29,7 @@ func migratePostgres(args []string) error {
 	billing := flags.Bool("prepare-billing-projection", false, "backfill and verify billing identities after older API writers drain")
 	claims := flags.Bool("prepare-claim-projection", false, "backfill and verify receipt ownership after older API writers drain")
 	management := flags.Bool("prepare-management-projection", false, "prepare current management predicates in bounded verified transactions")
+	capability := flags.Bool("prepare-capability-summary", false, "prepare compact current group capability summaries in bounded transactions")
 	managementBatchSize := flags.Int("management-batch-size", 512, "maximum identities per management preparation transaction (1-512)")
 	layout := flags.Bool("prepare-rollup-layout", false, "separate rollup levels before initial activation")
 	facts := flags.Bool("facts-stdin", false, "import NDJSON facts from stdin")
@@ -57,6 +58,30 @@ func migratePostgres(args []string) error {
 	defer e.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	if *capability {
+		migration := controlMigration{"0008_capability_projection", capabilityProjectionSQL, []string{"console_sub_targets", "console_sub_capability_summaries"}}
+		applied, checkErr := controlMigrationApplied(ctx, e.DB.DB, migration)
+		if checkErr != nil {
+			return checkErr
+		}
+		if !applied {
+			return errors.New("capability writer schema must be deployed before preparation")
+		}
+		for {
+			rows, err := prepareCapabilitySummaryBatch(ctx, e.DB.DB, e.historyPath)
+			if err != nil {
+				log.Printf("capability_summary_prepare class=%s", databaseErrorClass(err))
+				return err
+			}
+			_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"rows": rows, "complete": rows == 0})
+			if rows == 0 {
+				break
+			}
+			if !waitStartup(ctx, max(*pace, 100*time.Millisecond)) {
+				return ctx.Err()
+			}
+		}
+	}
 	if *claimsUnavailable {
 		tx, err := e.DB.BeginTx(ctx, nil)
 		if err != nil {

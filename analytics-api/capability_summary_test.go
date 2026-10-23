@@ -122,4 +122,14 @@ func TestCapabilitySummaryManagementAndDetailRemainEquivalent(t *testing.T) {
 	if !reflect.DeepEqual(full, summary) {
 		t.Fatal("management output changed")
 	}
+	if _, err := db.Exec(`DELETE FROM console_sub_capability_summaries WHERE group_id=1`); err != nil {
+		t.Fatal(err)
+	}
+	fallback := read(ctx, true)
+	if err := normalizeManagementAccounts(fallback); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(fallback, summary) {
+		t.Fatal("missing projection changed current summary")
+	}
 }
