@@ -36,6 +36,10 @@ func managementAcceptsGzip(header string) bool {
 // Compression changes only the transport encoding. The complete, current page
 // and its revision are finalized before any success headers or bytes are sent.
 func writeManagementJSON(w http.ResponseWriter, r *http.Request, value any) error {
+	return writeManagementJSONMedia(w, r, value, "application/json")
+}
+
+func writeManagementJSONMedia(w http.ResponseWriter, r *http.Request, value any, mediaType string) error {
 	if err := r.Context().Err(); err != nil {
 		return err
 	}
@@ -58,7 +62,7 @@ func writeManagementJSON(w http.ResponseWriter, r *http.Request, value any) erro
 	if err := r.Context().Err(); err != nil {
 		return err
 	}
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", mediaType)
 	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 	w.WriteHeader(http.StatusOK)
 	_, err = w.Write(body)

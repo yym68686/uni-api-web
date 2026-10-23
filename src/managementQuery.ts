@@ -1,6 +1,10 @@
 import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { controlRequest } from "./api";
+import {
+  decodeManagementPage,
+  managementPageMediaType,
+} from "./managementQueryWire";
 import type {
   ManagementRow,
   ManagedChannel,
@@ -89,10 +93,12 @@ export async function readManagementPage(
   cursor: string,
   signal: AbortSignal,
 ): Promise<ManagementPage> {
-  const page = await controlRequest<ManagementPage>(path(filters, { cursor }), {
+  const response = await controlRequest<unknown>(path(filters, { cursor }), {
     signal,
+    headers: { Accept: managementPageMediaType },
   });
   signal.throwIfAborted();
+  const page = decodeManagementPage(response);
   if (
     page.format !== "management-page-v1" ||
     !page.revision ||

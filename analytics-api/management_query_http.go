@@ -164,7 +164,7 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 	} else {
 		headers := managementAccountHeaders(view.Input.Accounts)
 		selectionToken := encodeManagementCursor(s.control.key, owner, managementPageCursor{Version: 1, Revision: page.Revision, Filter: tokenHash(mustJSON(filters))})
-		err = writeManagementJSON(w, r, managementPageResponse{managementQueryPage: page, SelectionToken: selectionToken, Accounts: headers, Context: managementContextForPage(view, page, filters.Model)})
+		err = writeManagementPage(w, r, managementPageResponse{managementQueryPage: page, SelectionToken: selectionToken, Accounts: headers, Context: managementContextForPage(view, page, filters.Model)})
 	}
 	if err != nil && class == "none" {
 		class = "management_response_write_failed"

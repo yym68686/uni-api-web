@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
 	"encoding/json"
@@ -16,6 +17,22 @@ import (
 	"testing"
 	"time"
 )
+
+func managementScaleGzipBytes(t *testing.T, data []byte) int {
+	t.Helper()
+	var out bytes.Buffer
+	writer, err := gzip.NewWriterLevel(&out, gzip.BestSpeed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.Write(data); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return out.Len()
+}
 
 // Synthetic evidence only, explicitly opt-in on the local integration cluster.
 // This measures a candidate predicate read, not HTTP/page/browser acceptance.
@@ -274,6 +291,7 @@ func TestManagementModelSignalsProductionCardinality(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/v1/channel-management/query?"+url.Values{"filters": {`{"groupStatus":"all","model":"m002"}`}}.Encode(), nil)
 	request.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
 	request.Header.Set("Accept-Encoding", "gzip")
+	request.Header.Set("Accept", managementPageV2MediaType)
 	response := httptest.NewRecorder()
 	start = time.Now()
 	s.Handler().ServeHTTP(response, request)
@@ -291,12 +309,87 @@ func TestManagementModelSignalsProductionCardinality(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var page managementPageResponse
-	if err := json.Unmarshal(body, &page); err != nil || page.Total != 749 || len(page.Rows) != 25 || page.Rows[0].Selected == nil || *page.Rows[0].Selected.Result.Availability.TTFT != 123 {
+	var wire managementWirePage
+	if err := json.Unmarshal(body, &wire); err != nil || wire.Format != "management-page-v2" {
+		t.Fatal("negotiated wire page missing", err)
+	}
+	page := decodeManagementWireForTest(t, wire)
+	if page.Total != 749 || len(page.Rows) != 25 || page.Rows[0].Selected == nil || *page.Rows[0].Selected.Result.Availability.TTFT != 123 {
 		t.Fatal("incomplete hydrated page", err)
+	}
+	expanded, err := json.Marshal(page)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output := os.Getenv("MANAGEMENT_WIRE_SCALE_OUTPUT"); output != "" {
+		fixture, err := json.Marshal(map[string]any{"page": page, "wire": wire})
+		if err != nil {
+			t.Fatal(err)
+		}
+		file, err := os.Create(output)
+		if err != nil {
+			t.Fatal(err)
+		}
+		zip := gzip.NewWriter(file)
+		if _, err = zip.Write(fixture); err != nil {
+			t.Fatal(err)
+		}
+		if err = zip.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err = file.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The repeated fixture above is deliberately compressible. Also measure
+	// distinct per-group results so savings cannot depend on cross-row equality.
+	var unique managementPageResponse
+	if err := json.Unmarshal(expanded, &unique); err != nil {
+		t.Fatal(err)
+	}
+	for i := range unique.Rows {
+		row := &unique.Rows[i]
+		offset := int64(i+1) * 1000000
+		if row.Target.Result != nil {
+			row.Target.Result.CheckedAt += offset
+		}
+		for j := range row.Target.Models {
+			if row.Target.Models[j].Result != nil {
+				row.Target.Models[j].Result.CheckedAt += offset
+			}
+		}
+		for j := range row.Checks {
+			if row.Checks[j].Result != nil {
+				row.Checks[j].Result.CheckedAt += offset
+			}
+		}
+		if row.Selected != nil && row.Selected.Result != nil {
+			row.Selected.Result.CheckedAt += offset
+		}
+	}
+	uniqueWire, err := encodeManagementPage(unique)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uniqueRaw, err := json.Marshal(uniqueWire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var receivedUnique managementWirePage
+	if err := json.Unmarshal(uniqueRaw, &receivedUnique); err != nil {
+		t.Fatal(err)
+	}
+	uniqueExpanded, _ := json.Marshal(unique)
+	uniqueRestored, _ := json.Marshal(decodeManagementWireForTest(t, receivedUnique))
+	if string(uniqueExpanded) != string(uniqueRestored) {
+		t.Fatal("distinct result round trip changed values")
 	}
 	result := map[string]any{"models": count, "model_fixture_write_ms": modelWriteElapsed.Milliseconds(), "receipt_fixture_write_ms": receiptWriteElapsed.Milliseconds(), "shadow_projection_bytes": projectionBytes, "summary_result_bytes": bytes, "predicate_bytes": signalBytes, "old_model_and_receipt_ms": oldElapsed.Milliseconds(), "predicate_join_ms": newElapsed.Milliseconds(), "typed_predicate_join_ms": typedElapsed.Milliseconds(), "transactional_typed_join_ms": transactionalElapsed.Milliseconds(), "stored_typed_read_ms": storedElapsed.Milliseconds(), "stored_aggregate_read_and_compare_ms": aggregateElapsed.Milliseconds(), "aggregate_groups": aggregateCount, "all_predicates_equal": true}
 	result["page_http_local_ms"], result["page_json_bytes"], result["page_gzip_bytes"] = pageElapsed.Milliseconds(), len(body), compressedBytes
+	result["page_wire_format"], result["page_expanded_json_bytes"], result["page_distinct_results"] = "management-page-v2", len(expanded), len(wire.Results)
+	result["unique_groups_wire_bytes"], result["unique_groups_expanded_bytes"], result["unique_groups_distinct_results"] = len(uniqueRaw), len(uniqueExpanded), len(uniqueWire.Results)
+	result["page_expanded_gzip_bytes"] = managementScaleGzipBytes(t, expanded)
+	result["unique_groups_wire_gzip_bytes"], result["unique_groups_expanded_gzip_bytes"] = managementScaleGzipBytes(t, uniqueRaw), managementScaleGzipBytes(t, uniqueExpanded)
 	result["separate_revision_predicates_ms"], result["combined_revision_predicates_ms"] = separateElapsed.Milliseconds(), combinedElapsed.Milliseconds()
 	result["scoped_revision_catalog_predicates_ms"], result["scoped_predicates"] = scopedElapsed.Milliseconds(), predicateCount
 	raw, _ := json.Marshal(result)

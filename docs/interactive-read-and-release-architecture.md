@@ -136,6 +136,24 @@ selection share model/receipt evidence digests, queue identities and current
 header/configuration data, so hydrating different payload sizes does not break
 their revision fence.
 
+The unpublished management page can negotiate a second transport format. It
+stores byte-identical complete test results once per response and uses references
+where the row, model list and selected check repeat them. The browser restores
+independent complete objects before the existing page validation and rendering;
+no evidence, diagnostic, facet or operation selection is removed. Older clients
+receive the original format and new clients still accept it, so this change does
+not require simultaneous frontend/backend activation. Invalid references fail
+the read before publishing, and the existing revision is unchanged.
+
+At the same synthetic cardinality, the repeated 25-row fixture decreased from
+7,692,053 JSON bytes / 244,692 gzip bytes to 735,960 / 28,897. A second fixture with
+different results per group decreased from 7,734,739 / 245,162 to 4,195,046 /
+124,751 bytes, with complete round-trip equality. Local Node parsing and object
+restoration took 33–39 ms versus 16–23 ms for the original JSON; fewer transfer
+bytes do not imply lower decoding CPU. The latest local HTTP sample still took
+1,071 ms, excluding gateway, network and browser rendering. This transport change
+has not been deployed and does not establish the one-second target.
+
 The new snapshot read does not create quality-history associations. Previously
 linked history keeps its original account/group. An unlinked old channel check
 without credential provenance must not be attributed using today's credentials.
