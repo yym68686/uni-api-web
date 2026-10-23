@@ -241,6 +241,28 @@ func TestManagementModelSignalsProductionCardinality(t *testing.T) {
 	if err != nil || combinedRevision != separateRevision || !reflect.DeepEqual(combinedSignals, separateSignals) {
 		t.Fatal("combined read differs at production cardinality", err)
 	}
+	start = time.Now()
+	scopedSignals, scopedRevision, err := readManagementScopedSignals(ctx, s.control.db, "owner", "m002", []string{"m002", "gpt-6-astra"})
+	scopedElapsed := time.Since(start)
+	if err != nil || scopedRevision != combinedRevision || len(scopedSignals) != len(combinedSignals) {
+		t.Fatal("scoped catalog or global revision differs", err)
+	}
+	predicateCount := 0
+	for i, item := range scopedSignals {
+		if item.Account != combinedSignals[i].Account || item.Group != combinedSignals[i].Group || item.Model.Model != combinedSignals[i].Model.Model || item.Model.State != combinedSignals[i].Model.State {
+			t.Fatal("scoped model catalog differs")
+		}
+		if item.Model.Result != nil {
+			predicateCount++
+			if item.Model.Model != "m002" || !reflect.DeepEqual(item.Model, combinedSignals[i].Model) {
+				t.Fatal("scoped predicate changed")
+			}
+		}
+	}
+	if predicateCount != 749 {
+		t.Fatal("selected model scope incomplete", predicateCount)
+	}
+	scopedSignals = nil
 	separateSignals, combinedSignals = nil, nil
 	s.engine = postgresTestEngine(t)
 	token, err := s.control.newSession(ctx, "owner")
@@ -276,6 +298,7 @@ func TestManagementModelSignalsProductionCardinality(t *testing.T) {
 	result := map[string]any{"models": count, "model_fixture_write_ms": modelWriteElapsed.Milliseconds(), "receipt_fixture_write_ms": receiptWriteElapsed.Milliseconds(), "shadow_projection_bytes": projectionBytes, "summary_result_bytes": bytes, "predicate_bytes": signalBytes, "old_model_and_receipt_ms": oldElapsed.Milliseconds(), "predicate_join_ms": newElapsed.Milliseconds(), "typed_predicate_join_ms": typedElapsed.Milliseconds(), "transactional_typed_join_ms": transactionalElapsed.Milliseconds(), "stored_typed_read_ms": storedElapsed.Milliseconds(), "stored_aggregate_read_and_compare_ms": aggregateElapsed.Milliseconds(), "aggregate_groups": aggregateCount, "all_predicates_equal": true}
 	result["page_http_local_ms"], result["page_json_bytes"], result["page_gzip_bytes"] = pageElapsed.Milliseconds(), len(body), compressedBytes
 	result["separate_revision_predicates_ms"], result["combined_revision_predicates_ms"] = separateElapsed.Milliseconds(), combinedElapsed.Milliseconds()
+	result["scoped_revision_catalog_predicates_ms"], result["scoped_predicates"] = scopedElapsed.Milliseconds(), predicateCount
 	raw, _ := json.Marshal(result)
 	t.Log(string(raw))
 }

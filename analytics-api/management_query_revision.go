@@ -12,44 +12,58 @@ import (
 // into a page revision. Both compact page reads and full selections use these
 // same committed identities; omitted presentation fields still invalidate them.
 func readManagementModelRevisionFrom(ctx context.Context, db controlQueryDB, owner string) (string, error) {
+	revision, _, err := readManagementRevisionCatalogFrom(ctx, db, owner, false)
+	return revision, err
+}
+
+func readManagementRevisionCatalogFrom(ctx context.Context, db controlQueryDB, owner string, catalog bool) (string, []managementModelSignals, error) {
 	var complete bool
 	if err := db.QueryRowContext(ctx, `SELECT complete FROM console_management_projection_state WHERE singleton`).Scan(&complete); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if !complete {
-		return "", errManagementPredicateFallback
+		return "", nil, errManagementPredicateFallback
 	}
-	rows, err := db.QueryContext(ctx, `SELECT m.account_id,m.group_id,m.model,m.state,m.message,p.evidence_digest,r.evidence_digest,q.evidence_digest
+	rows, err := db.QueryContext(ctx, `SELECT m.account_id,m.group_id,m.model,m.state,m.message,p.evidence_digest,r.evidence_digest,q.evidence_digest,COALESCE(p.valid,false) AND COALESCE(r.valid,true) AND COALESCE(q.valid,true)
  FROM console_sub_models m JOIN console_sub_accounts a ON a.id=m.account_id
  LEFT JOIN console_management_model_signal p USING(account_id,group_id,model)
  LEFT JOIN console_management_receipt_signal r ON r.id=NULLIF(p.probe_id,'') AND EXISTS(SELECT 1 FROM console_sub_accounts ra WHERE ra.id=r.account_id AND ra.owner=$1)
  LEFT JOIN console_management_receipt_signal q ON q.id=NULLIF(p.quality_probe_id,'') AND EXISTS(SELECT 1 FROM console_sub_accounts qa WHERE qa.id=q.account_id AND qa.owner=$1)
  WHERE a.owner=$1 ORDER BY m.account_id COLLATE "C",m.group_id,m.model COLLATE "C"`, owner)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	defer rows.Close()
+	var models []managementModelSignals
+	if catalog {
+		models = []managementModelSignals{}
+	}
 	hash := sha256.New()
 	encoder := json.NewEncoder(hash)
 	for rows.Next() {
 		var account, model, state, message string
 		var group int64
 		var evidence, receipt, quality []byte
-		if err := rows.Scan(&account, &group, &model, &state, &message, &evidence, &receipt, &quality); err != nil {
-			return "", err
+		var supported bool
+		if err := rows.Scan(&account, &group, &model, &state, &message, &evidence, &receipt, &quality, &supported); err != nil {
+			return "", nil, err
 		}
-		if len(evidence) != sha256.Size {
-			return "", errManagementPredicateFallback
+		if len(evidence) != sha256.Size || catalog && !supported {
+			return "", nil, errManagementPredicateFallback
+		}
+		if catalog {
+			models = append(models, managementModelSignals{Account: account, Group: group, Model: subModelResult{Model: model, State: state}})
 		}
 		if err := encoder.Encode([]any{account, group, model, state, summaryMessage(message), evidence, receipt, quality}); err != nil {
-			return "", err
+			return "", nil, err
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	rows.Close()
-	return finishManagementModelRevision(ctx, db, owner, hash)
+	revision, err := finishManagementModelRevision(ctx, db, owner, hash)
+	return revision, models, err
 }
 
 func finishManagementModelRevision(ctx context.Context, db controlQueryDB, owner string, hash hash.Hash) (string, error) {

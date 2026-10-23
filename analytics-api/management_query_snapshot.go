@@ -89,7 +89,7 @@ type managementQuerySnapshot struct {
 func (s *Service) readManagementQuerySnapshot(ctx context.Context, owner string, filters managementQueryFilters, token string, selection bool) (managementQuerySnapshot, error) {
 	out := managementQuerySnapshot{}
 	view, err := s.withManagementSnapshot(ctx, func(tx *sql.Tx, facts []managementGatewayFacts) (managementDatabaseView, error) {
-		view, err := s.readManagementDatabaseViewFrom(ctx, tx, owner, facts, !selection)
+		view, err := s.readManagementDatabaseScopedFrom(ctx, tx, owner, facts, !selection, filters.Model)
 		if err != nil {
 			return view, err
 		}

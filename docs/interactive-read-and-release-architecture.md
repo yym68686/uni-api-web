@@ -62,6 +62,16 @@ the complete typed-reader path. The combined query removes one scan without
 weakening freshness or the revision fence. It remains unpublished and does not
 by itself meet the end-to-end latency target.
 
+For a selected model, the unpublished page reader now keeps the full current
+model directory and global evidence revision but reads predicates only for that
+model, its current upstream aliases, and Astra quality evidence. Site groups
+where the selected non-default model is absent keep the original all-check
+filter behavior. Unsupported evidence anywhere still requests the complete
+typed reader. The private directory entries are never published as test results:
+all visible page groups and bound alias members receive full hydration, and
+batch/optimization selections remain complete. Exact facet/model choices and
+page/selection revisions are compared against the full reader.
+
 A bounded read-only diagnostic on the serving node measured 1.165 seconds for
 gateway reads, 10.411 seconds for the database snapshot and 3.2-3.4 seconds for
 assembly and serialization. Its 25-row response was 7.8 MB because those rows

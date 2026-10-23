@@ -29,6 +29,10 @@ func (s *Service) readManagementDatabaseFrom(ctx context.Context, db controlQuer
 }
 
 func (s *Service) readManagementDatabaseViewFrom(ctx context.Context, db controlQueryDB, owner string, facts []managementGatewayFacts, predicates bool) (managementDatabaseView, error) {
+	return s.readManagementDatabaseScopedFrom(ctx, db, owner, facts, predicates, "")
+}
+
+func (s *Service) readManagementDatabaseScopedFrom(ctx context.Context, db controlQueryDB, owner string, facts []managementGatewayFacts, predicates bool, model string) (managementDatabaseView, error) {
 	ctx = managementTraceContext(ctx)
 	out := managementDatabaseView{}
 	trace := newManagementReadTimeline(ctx, "database_sources")
@@ -82,7 +86,11 @@ func (s *Service) readManagementDatabaseViewFrom(ctx context.Context, db control
 	trace.next("database_account_details")
 	var signals []managementModelSignals
 	if predicates {
-		signals, out.Input.ModelsRevision, err = readCurrentManagementSignalsAndRevision(ctx, db, owner)
+		if model != "" {
+			signals, out.Input.ModelsRevision, err = readManagementScopedSignals(ctx, db, owner, model, managementScopeModelNames(model, facts, out.Bindings))
+		} else {
+			signals, out.Input.ModelsRevision, err = readCurrentManagementSignalsAndRevision(ctx, db, owner)
+		}
 	}
 	if !predicates || errors.Is(err, errManagementPredicateFallback) {
 		out.Input.ModelsRevision, err = readManagementModelRevisionFrom(ctx, db, owner)

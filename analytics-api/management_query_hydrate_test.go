@@ -64,7 +64,7 @@ func TestManagementProjectedPageHydratesOnlyItsGroupsAndKeepsCompleteSelection(t
 	}
 	for i, target := range page.View.Input.Accounts[0].Targets {
 		for _, model := range target.Models {
-			hydrated := model.Result.Availability.TTFT != nil
+			hydrated := model.Result != nil && model.Result.Availability.TTFT != nil
 			if hydrated != (i < 25) {
 				t.Fatal("hydration read outside the page or omitted a page model", i)
 			}

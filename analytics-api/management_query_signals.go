@@ -52,7 +52,11 @@ func readCurrentManagementModelSignals(ctx context.Context, db controlQueryDB, o
 }
 
 func readManagementSignalsColumns(ctx context.Context, db controlQueryDB, owner, query string) ([]managementModelSignals, error) {
-	rows, err := db.QueryContext(ctx, query, owner)
+	return readManagementSignalsColumnsArgs(ctx, db, query, owner)
+}
+
+func readManagementSignalsColumnsArgs(ctx context.Context, db controlQueryDB, query string, args ...any) ([]managementModelSignals, error) {
+	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
