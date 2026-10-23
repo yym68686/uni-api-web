@@ -86,11 +86,13 @@ func (s *Service) readManagementDatabaseScopedFrom(ctx context.Context, db contr
 	trace.next("database_account_details")
 	var signals []managementModelSignals
 	if predicates {
+		endPredicates := managementReadSpan(ctx, "database_predicate_snapshot")
 		if model != "" {
 			signals, out.Input.ModelsRevision, err = readManagementScopedSignals(ctx, db, owner, model, managementScopeModelNames(model, facts, out.Bindings))
 		} else {
 			signals, out.Input.ModelsRevision, err = readCurrentManagementSignalsAndRevision(ctx, db, owner)
 		}
+		endPredicates()
 	}
 	if !predicates || errors.Is(err, errManagementPredicateFallback) {
 		out.Input.ModelsRevision, err = readManagementModelRevisionFrom(ctx, db, owner)

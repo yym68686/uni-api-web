@@ -88,23 +88,35 @@ type managementQuerySnapshot struct {
 }
 
 func (s *Service) readManagementQuerySnapshot(ctx context.Context, owner string, filters managementQueryFilters, token string, selection bool) (managementQuerySnapshot, error) {
+	ctx = managementTraceContext(ctx)
 	out := managementQuerySnapshot{}
 	view, err := s.withManagementSnapshot(ctx, func(tx *sql.Tx, facts []managementGatewayFacts) (managementDatabaseView, error) {
 		view, err := s.readManagementDatabaseScopedFrom(ctx, tx, owner, facts, !selection, filters.Model)
 		if err != nil {
 			return view, err
 		}
-		if err = assembleManagementGatewayView(&view, facts, owner); err != nil {
-			return view, err
-		}
-		out.Rows, err = buildManagementQueryRows(view.Input, filters.Model, filters.AccountID)
+		endAssembly := managementReadSpan(ctx, "assemble_gateway")
+		err = assembleManagementGatewayView(&view, facts, owner)
+		endAssembly()
 		if err != nil {
 			return view, err
 		}
+		endRows := managementReadSpan(ctx, "assemble_rows")
+		out.Rows, err = buildManagementQueryRows(view.Input, filters.Model, filters.AccountID)
+		endRows()
+		if err != nil {
+			return view, err
+		}
+		endEvidence := managementReadSpan(ctx, "filter_evidence")
 		out.Evidence = managementQueryEvidence(view.Input, out.Rows, filters.Model, view.Prices)
+		endEvidence()
+		endPage := managementReadSpan(ctx, "filter_page")
 		out.Page, err = buildManagementQueryPageFromRows(view.Input, out.Rows, filters, out.Evidence, owner, s.control.key, token, view.ReadAt)
+		endPage()
 		if err == nil && !selection {
+			endHydrate := managementReadSpan(ctx, "hydrate_page")
 			err = s.hydrateManagementPageFrom(ctx, tx, owner, &view, &out.Page, filters)
+			endHydrate()
 		}
 		return view, err
 	})

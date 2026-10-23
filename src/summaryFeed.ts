@@ -49,7 +49,7 @@ export async function readSummary<T, Legacy>(
   legacy?: Legacy;
   accountScope?: boolean;
 }> {
-  return withRequestDeadline(signal, 30_000, false, async (combined, requestId) => {
+  return withRequestDeadline(signal, 30_000, false, async (combined, requestId, responseReceived) => {
     const response = await fetch(location.origin + "/analytics" + path, {
       credentials: "same-origin",
       cache: "no-store",
@@ -61,6 +61,7 @@ export async function readSummary<T, Legacy>(
       },
       signal: combined,
     });
+    responseReceived();
     const accountScope =
       response.headers.get("X-Console-Account-Scope") === "v2";
     if (response.status === 304 && previous)

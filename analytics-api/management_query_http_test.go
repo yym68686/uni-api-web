@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -11,6 +13,10 @@ import (
 )
 
 func TestManagementHTTPCompleteSelectionAuthorizationAndFreshness(t *testing.T) {
+	var logs bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&logs)
+	defer log.SetOutput(previous)
 	s := managementBindingTestService(t)
 	s.engine = postgresTestEngine(t)
 	ctx := context.Background()
@@ -51,6 +57,14 @@ func TestManagementHTTPCompleteSelectionAuthorizationAndFreshness(t *testing.T) 
 	response := call(ownerToken, nil)
 	if response.Code != 200 {
 		t.Fatal(response.Code, response.Body.String())
+	}
+	for _, stage := range []string{"database_predicate_snapshot", "assemble_gateway", "assemble_rows", "filter_evidence", "filter_page", "hydrate_page"} {
+		if !strings.Contains(logs.String(), "stage="+stage+" ") {
+			t.Fatal("missing current-read stage", stage)
+		}
+	}
+	if strings.Contains(logs.String(), "PRIVATE") || strings.Contains(logs.String(), "private@example") {
+		t.Fatal("private data escaped timing logs")
 	}
 	if strings.Contains(response.Body.String(), "PRIVATE") || strings.Contains(response.Body.String(), "private@example") {
 		t.Fatal("foreign data leaked")
