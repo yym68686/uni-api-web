@@ -22,6 +22,16 @@ func (s *Service) readManagementSources(ctx context.Context) ([]controlSource, e
 // No database connection is held during network reads, no stale fallback is
 // published, and a failed fence never triggers a mutation or an implicit retry.
 func (s *Service) readManagementSnapshot(ctx context.Context, owner string) (managementDatabaseView, error) {
+	return s.withManagementSnapshot(ctx, func(db *sql.Tx, facts []managementGatewayFacts) (managementDatabaseView, error) {
+		view, err := s.readManagementDatabaseFrom(ctx, db, owner, facts)
+		if err == nil {
+			err = assembleManagementGatewayView(&view, facts, owner)
+		}
+		return view, err
+	})
+}
+
+func (s *Service) withManagementSnapshot(ctx context.Context, read func(*sql.Tx, []managementGatewayFacts) (managementDatabaseView, error)) (managementDatabaseView, error) {
 	sources, err := s.readManagementSources(ctx)
 	if err != nil {
 		return managementDatabaseView{}, err
@@ -46,7 +56,7 @@ func (s *Service) readManagementSnapshot(ctx context.Context, owner string) (man
 			return managementDatabaseView{}, err
 		}
 		defer tx.Rollback()
-		return s.readManagementDatabaseFrom(ctx, tx, owner, facts)
+		return read(tx, facts)
 	}()
 	if err != nil {
 		return managementDatabaseView{}, err
@@ -66,8 +76,41 @@ func (s *Service) readManagementSnapshot(ctx context.Context, owner string) (man
 	if err := verifyManagementSources(current, facts); err != nil {
 		return managementDatabaseView{}, err
 	}
-	if err := assembleManagementGatewayView(&view, facts, owner); err != nil {
-		return managementDatabaseView{}, err
-	}
 	return view, nil
+}
+
+type managementQuerySnapshot struct {
+	View     managementDatabaseView
+	Page     managementQueryPage
+	Rows     []managementQueryRow
+	Evidence managementFilterEvidence
+}
+
+func (s *Service) readManagementQuerySnapshot(ctx context.Context, owner string, filters managementQueryFilters, token string, selection bool) (managementQuerySnapshot, error) {
+	out := managementQuerySnapshot{}
+	view, err := s.withManagementSnapshot(ctx, func(tx *sql.Tx, facts []managementGatewayFacts) (managementDatabaseView, error) {
+		view, err := s.readManagementDatabaseViewFrom(ctx, tx, owner, facts, !selection)
+		if err != nil {
+			return view, err
+		}
+		if err = assembleManagementGatewayView(&view, facts, owner); err != nil {
+			return view, err
+		}
+		out.Rows, err = buildManagementQueryRows(view.Input, filters.Model, filters.AccountID)
+		if err != nil {
+			return view, err
+		}
+		out.Evidence = managementQueryEvidence(view.Input, out.Rows, filters.Model, view.Prices)
+		out.Page, err = buildManagementQueryPageFromRows(view.Input, out.Rows, filters, out.Evidence, owner, s.control.key, token, view.ReadAt)
+		if err == nil && !selection {
+			err = s.hydrateManagementPageFrom(ctx, tx, owner, &view, &out.Page, filters)
+		}
+		return view, err
+	})
+	if err != nil {
+		// Never return a partial page when a post-read gateway/source fence fails.
+		return managementQuerySnapshot{}, err
+	}
+	out.View = view
+	return out, nil
 }

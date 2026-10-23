@@ -1,11 +1,17 @@
 package main
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -199,7 +205,45 @@ func TestManagementModelSignalsProductionCardinality(t *testing.T) {
 	if len(expected) != 0 {
 		t.Fatal("missing predicate rows")
 	}
+	// Every synthetic model references the corresponding synthetic receipts;
+	// the comparison above verified every row created by the installed writer
+	// triggers. This local fixture bypasses only preparation cost, whose bounded
+	// copy/verification behavior has separate integration tests. Never do this
+	// marker update on an existing production database.
+	exec(`UPDATE console_management_projection_state SET phase='complete',complete=true WHERE singleton`)
+	s.engine = postgresTestEngine(t)
+	token, err := s.control.newSession(ctx, "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	accounts, got, typed, transactional, stored = nil, nil, nil, nil, nil
+	runtime.GC()
+	request := httptest.NewRequest(http.MethodGet, "/v1/channel-management/query?"+url.Values{"filters": {`{"groupStatus":"all","model":"m002"}`}}.Encode(), nil)
+	request.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
+	request.Header.Set("Accept-Encoding", "gzip")
+	response := httptest.NewRecorder()
+	start = time.Now()
+	s.Handler().ServeHTTP(response, request)
+	pageElapsed := time.Since(start)
+	if response.Code != 200 || response.Header().Get("Content-Encoding") != "gzip" {
+		t.Fatal("current page failed", response.Code, response.Body.String())
+	}
+	compressedBytes := response.Body.Len()
+	reader, err := gzip.NewReader(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(reader)
+	_ = reader.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var page managementPageResponse
+	if err := json.Unmarshal(body, &page); err != nil || page.Total != 749 || len(page.Rows) != 25 || page.Rows[0].Selected == nil || *page.Rows[0].Selected.Result.Availability.TTFT != 123 {
+		t.Fatal("incomplete hydrated page", err)
+	}
 	result := map[string]any{"models": count, "model_fixture_write_ms": modelWriteElapsed.Milliseconds(), "receipt_fixture_write_ms": receiptWriteElapsed.Milliseconds(), "shadow_projection_bytes": projectionBytes, "summary_result_bytes": bytes, "predicate_bytes": signalBytes, "old_model_and_receipt_ms": oldElapsed.Milliseconds(), "predicate_join_ms": newElapsed.Milliseconds(), "typed_predicate_join_ms": typedElapsed.Milliseconds(), "transactional_typed_join_ms": transactionalElapsed.Milliseconds(), "stored_typed_read_ms": storedElapsed.Milliseconds(), "stored_aggregate_read_and_compare_ms": aggregateElapsed.Milliseconds(), "aggregate_groups": aggregateCount, "all_predicates_equal": true}
+	result["page_http_local_ms"], result["page_json_bytes"], result["page_gzip_bytes"] = pageElapsed.Milliseconds(), len(body), compressedBytes
 	raw, _ := json.Marshal(result)
 	t.Log(string(raw))
 }

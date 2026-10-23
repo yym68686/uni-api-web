@@ -146,17 +146,25 @@ func buildManagementQueryPageFromRows(in managementQueryInput, rows []management
 		return slices.Compare(utf16.Encode([]rune(extra[i])), utf16.Encode([]rune(extra[j]))) < 0
 	})
 	page.DetectionModels = append(append([]string{}, subModels...), extra...)
-	revisionData, err := json.Marshal(struct {
-		Rows                               []managementQueryRow
-		Rates                              []float64
-		Platforms, Models, DetectionModels []string
-		Evidence                           managementFilterEvidence
-		Sources                            map[string]string
-	}{filtered.Rows, page.Rates, page.Platforms, page.Models, page.DetectionModels, evidence, in.SourceRevisions})
-	if err != nil {
-		return page, err
+	var err error
+	if in.ModelsRevision != "" {
+		page.Revision, err = managementProjectedRevision(in, page, evidence)
+		if err != nil {
+			return page, err
+		}
+	} else {
+		revisionData, err := json.Marshal(struct {
+			Rows                               []managementQueryRow
+			Rates                              []float64
+			Platforms, Models, DetectionModels []string
+			Evidence                           managementFilterEvidence
+			Sources                            map[string]string
+		}{filtered.Rows, page.Rates, page.Platforms, page.Models, page.DetectionModels, evidence, in.SourceRevisions})
+		if err != nil {
+			return page, err
+		}
+		page.Revision = tokenHash(string(revisionData))
 	}
-	page.Revision = tokenHash(string(revisionData))
 	filterHash := tokenHash(mustJSON(filters))
 	if cursor != "" {
 		decoded, err := decodeManagementCursor(key, owner, cursor)

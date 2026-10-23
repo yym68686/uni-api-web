@@ -48,10 +48,11 @@ require matching site paths and unchanged effective identity.
 It invalidates the page after successful writes and reads a separate complete
 selection for batch actions and optimization. Engine-origin classification uses
 the current export and transaction-local override evidence. These branch changes
-have not been published. The database reader still loads all model results and
-computes a revision over all matching rows. Before activation, scope reads while
-preserving public aliases, complete facets and batch semantics, then measure
-database work and browser latency at production cardinality.
+have not been published. The database reader now uses prepared typed model
+predicates when available and hydrates complete evidence only for page groups
+and their bound aliases. Unsupported evidence uses the existing full typed
+reader. Before activation, further scope the compact read and measure all
+database work, transfer and browser latency at production cardinality.
 
 A bounded read-only diagnostic on the serving node measured 1.165 seconds for
 gateway reads, 10.411 seconds for the database snapshot and 3.2-3.4 seconds for
@@ -79,7 +80,8 @@ transaction and preserves the existing missing-receipt behavior. Migration
 `0006_management_signals` creates empty projections and writer triggers;
 explicit preparation copies and verifies at most 512 identities per transaction
 before setting a completion marker. It has no startup backfill. These changes
-are local and the current HTTP reader does not yet use the projection.
+are local. The HTTP reader uses the projection only after its explicit verified
+completion marker; otherwise it continues reading the original source data.
 
 At 48 synthetic accounts, 749 groups, 119,840 models and 59,920 receipts, a local
 comparison found identical predicate values for every model. Reading the
@@ -99,11 +101,22 @@ than production. Before activation, the projection needs a bounded, concurrency-
 safe backfill and completeness/capacity gate in production, and page hydration
 under the same snapshot. The implemented conservative type-support check requests
 the original decoder for unsupported evidence, including non-predicate receipt
-fields; this fallback still needs HTTP integration. Selected-model
+fields; this fallback is now integrated into the HTTP path. Selected-model
 aliases, queued jobs, shared quality, full action selections and revision changes
 must remain exact. The 7.8 MB wire response and the complete end-to-end read still
 need separate measurement and reduction; a sub-second projection scan does not
 satisfy the one-second page requirement.
+
+The integrated local HTTP fixture now includes authentication, a current
+transaction, exact count/facets, page hydration and response encoding at the
+same 119,840-model scale. It took 2,100 ms without a remote gateway, public
+network or browser rendering. The complete 7,692,053-byte JSON page compressed
+to 244,693 bytes. Model predicates took 583 ms and observed-rate reading another
+863 ms in that run. This still fails the one-second requirement; transport
+compression and a faster model scan alone are insufficient. Page and full
+selection share model/receipt evidence digests, queue identities and current
+header/configuration data, so hydrating different payload sizes does not break
+their revision fence.
 
 The new snapshot read does not create quality-history associations. Previously
 linked history keeps its original account/group. An unlinked old channel check

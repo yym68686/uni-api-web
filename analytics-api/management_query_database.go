@@ -18,12 +18,17 @@ type managementDatabaseView struct {
 	Sources         []controlSource `json:"-"`
 	ReadAt          time.Time
 	EngineOrigins   map[string]map[string]string
+	ProjectedModels bool
 }
 
 // Caller owns one repeatable-read transaction for the complete view. Sources
 // are returned privately for live revision fencing; their credentials are
 // never part of a page or cursor. No historical request partitions are scanned.
 func (s *Service) readManagementDatabaseFrom(ctx context.Context, db controlQueryDB, owner string, facts []managementGatewayFacts) (managementDatabaseView, error) {
+	return s.readManagementDatabaseViewFrom(ctx, db, owner, facts, false)
+}
+
+func (s *Service) readManagementDatabaseViewFrom(ctx context.Context, db controlQueryDB, owner string, facts []managementGatewayFacts, predicates bool) (managementDatabaseView, error) {
 	ctx = managementTraceContext(ctx)
 	out := managementDatabaseView{}
 	trace := newManagementReadTimeline(ctx, "database_sources")
@@ -75,7 +80,41 @@ func (s *Service) readManagementDatabaseFrom(ctx context.Context, db controlQuer
 		return out, err
 	}
 	trace.next("database_account_details")
-	if err = s.readSubAccountDetailsWithQualityFrom(ctx, db, owner, "", 0, "", true, false, out.Input.Accounts, nil, shared); err != nil {
+	out.Input.ModelsRevision, err = readManagementModelRevisionFrom(ctx, db, owner)
+	if errors.Is(err, errManagementPredicateFallback) {
+		out.Input.ModelsRevision, err = "", nil
+	}
+	if err != nil {
+		return out, err
+	}
+	var readModels func([]subAccount) error
+	if predicates && out.Input.ModelsRevision != "" {
+		readModels = func(accounts []subAccount) error {
+			signals, err := readCurrentManagementModelSignals(ctx, db, owner)
+			if errors.Is(err, errManagementPredicateFallback) {
+				_, _, err = s.subReadModelsFrom(ctx, db, owner, "", 0, "", true, accounts)
+				return err
+			}
+			if err != nil {
+				return err
+			}
+			index := map[string]*subTarget{}
+			for i := range accounts {
+				for j := range accounts[i].Targets {
+					target := &accounts[i].Targets[j]
+					index[qualityGroupID(accounts[i].ID, target.GroupID)] = target
+				}
+			}
+			for _, item := range signals {
+				if target := index[qualityGroupID(item.Account, item.Group)]; target != nil {
+					target.Models = append(target.Models, item.Model)
+				}
+			}
+			out.ProjectedModels = true
+			return nil
+		}
+	}
+	if err = s.readSubAccountDetailsWithModelsFrom(ctx, db, owner, "", 0, "", true, false, out.Input.Accounts, nil, shared, readModels); err != nil {
 		return out, err
 	}
 	trace.next("database_normalize")

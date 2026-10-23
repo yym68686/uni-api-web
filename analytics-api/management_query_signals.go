@@ -20,7 +20,7 @@ type managementModelSignals struct {
 }
 
 const managementModelSignalsStoredSQL = `SELECT m.account_id,m.group_id,m.model,m.state,
- COALESCE(p.valid,false) AND COALESCE(r.valid,true),COALESCE(p.present,false),COALESCE(p.checked_at,0),COALESCE(p.verdict,''),COALESCE(p.availability,''),COALESCE(p.terminal,''),COALESCE(p.model_match,''),
+ COALESCE(p.valid,false) AND COALESCE(r.valid,true) AND COALESCE(q.valid,true),COALESCE(p.present,false),COALESCE(p.checked_at,0),COALESCE(p.verdict,''),COALESCE(p.availability,''),COALESCE(p.terminal,''),COALESCE(p.model_match,''),
  CASE WHEN r.id IS NOT NULL THEN r.status ELSE COALESCE(p.usage_status,'') END,
  CASE WHEN r.id IS NOT NULL THEN r.input_price ELSE p.input_price END,
  CASE WHEN r.id IS NOT NULL THEN r.output_price ELSE p.output_price END,
@@ -31,6 +31,8 @@ const managementModelSignalsStoredSQL = `SELECT m.account_id,m.group_id,m.model,
  LEFT JOIN console_management_model_signal p USING(account_id,group_id,model)
  LEFT JOIN console_management_receipt_signal r ON r.id=NULLIF(p.probe_id,'')
  AND EXISTS(SELECT 1 FROM console_sub_accounts ra WHERE ra.id=r.account_id AND ra.owner=$1)
+ LEFT JOIN console_management_receipt_signal q ON q.id=NULLIF(p.quality_probe_id,'')
+ AND EXISTS(SELECT 1 FROM console_sub_accounts qa WHERE qa.id=q.account_id AND qa.owner=$1)
  WHERE a.owner=$1 ORDER BY m.account_id,m.group_id,m.model COLLATE "C"`
 
 func readCurrentManagementModelSignals(ctx context.Context, db controlQueryDB, owner string) ([]managementModelSignals, error) {

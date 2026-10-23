@@ -4,17 +4,17 @@
 CREATE TABLE console_management_receipt_signal (
  id TEXT PRIMARY KEY REFERENCES console_sub_usage(id) ON DELETE CASCADE ON UPDATE CASCADE,
  account_id TEXT NOT NULL,
- valid BOOLEAN NOT NULL,
+ valid BOOLEAN NOT NULL,evidence_digest BYTEA NOT NULL,
  status TEXT NOT NULL,
  input_price DOUBLE PRECISION, output_price DOUBLE PRECISION,
  input_tokens BIGINT, output_tokens BIGINT
 );
 CREATE TABLE console_management_model_signal (
  account_id TEXT NOT NULL,group_id BIGINT NOT NULL,model TEXT NOT NULL,
- valid BOOLEAN NOT NULL,present BOOLEAN NOT NULL,
+ valid BOOLEAN NOT NULL,present BOOLEAN NOT NULL,evidence_digest BYTEA NOT NULL,
  checked_at BIGINT NOT NULL,verdict TEXT NOT NULL,
  availability TEXT NOT NULL,terminal TEXT NOT NULL,model_match TEXT NOT NULL,
- probe_id TEXT NOT NULL,has_usage BOOLEAN NOT NULL,
+ probe_id TEXT NOT NULL,quality_probe_id TEXT NOT NULL,has_usage BOOLEAN NOT NULL,
  usage_status TEXT NOT NULL,input_price DOUBLE PRECISION,output_price DOUBLE PRECISION,
  input_tokens BIGINT,output_tokens BIGINT,
  PRIMARY KEY(account_id,group_id,model),
@@ -75,6 +75,7 @@ CREATE FUNCTION console_management_receipt_signal_value(r JSONB,base_status TEXT
 LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE AS $$
 DECLARE v console_management_receipt_signal; k TEXT;
 BEGIN
+ v.evidence_digest:=sha256(convert_to(jsonb_build_array(r,base_status)::text,'UTF8'));
  v.valid:=console_management_usage_supported_v1(r);v.status:=base_status;
  IF NOT v.valid THEN RETURN v;END IF;
  IF r IS NULL OR r='null'::jsonb THEN RETURN v; END IF;
@@ -90,6 +91,7 @@ BEGIN
  v.output_price:=(r->>'output_price')::double precision;
  v.input_tokens:=(r->>'input_tokens')::bigint;
  v.output_tokens:=(r->>'output_tokens')::bigint;
+ v.evidence_digest:=sha256(convert_to(jsonb_build_array(v.status,v.input_price,v.output_price,v.input_tokens,v.output_tokens)::text,'UTF8'));
  RETURN v;
 EXCEPTION WHEN data_exception THEN
  v.valid:=false;RETURN v;
@@ -100,8 +102,11 @@ LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE AS $$
 DECLARE v console_management_model_signal;u console_management_receipt_signal;p JSONB;k TEXT;
 BEGIN
  r:=console_sub_model_summary_v1(r);
+ v.evidence_digest:=sha256(convert_to(r::text,'UTF8'));
  v.valid:=console_management_model_supported_v1(r);v.present:=(r IS NOT NULL AND r<>'null'::jsonb);
- v.checked_at:=0;v.verdict:='';v.availability:='';v.terminal:='';v.model_match:='';v.probe_id:='';v.has_usage:=false;v.usage_status:='';
+ v.checked_at:=0;v.verdict:='';v.availability:='';v.terminal:='';v.model_match:='';v.probe_id:='';v.quality_probe_id:='';v.has_usage:=false;v.usage_status:='';
+ IF jsonb_typeof(r#>'{availability,id}')='string' THEN v.probe_id:=r#>>'{availability,id}'; END IF;
+ IF jsonb_typeof(r#>'{quality,id}')='string' THEN v.quality_probe_id:=r#>>'{quality,id}'; END IF;
  IF NOT v.valid OR NOT v.present THEN RETURN v;END IF;
  IF jsonb_typeof(r)<>'object' THEN v.valid:=false;RETURN v;END IF;
  IF r->'checked_at' IS NOT NULL AND r->'checked_at'<>'null'::jsonb AND jsonb_typeof(r->'checked_at')<>'number' THEN v.valid:=false;RETURN v;END IF;
@@ -131,9 +136,9 @@ BEGIN
  v.account_id:=NEW.account_id;v.group_id:=NEW.group_id;v.model:=NEW.model;
  INSERT INTO console_management_model_signal SELECT v.*
  ON CONFLICT(account_id,group_id,model) DO UPDATE SET
- valid=EXCLUDED.valid,present=EXCLUDED.present,checked_at=EXCLUDED.checked_at,verdict=EXCLUDED.verdict,
+ valid=EXCLUDED.valid,present=EXCLUDED.present,evidence_digest=EXCLUDED.evidence_digest,checked_at=EXCLUDED.checked_at,verdict=EXCLUDED.verdict,
  availability=EXCLUDED.availability,terminal=EXCLUDED.terminal,model_match=EXCLUDED.model_match,
- probe_id=EXCLUDED.probe_id,has_usage=EXCLUDED.has_usage,usage_status=EXCLUDED.usage_status,
+ probe_id=EXCLUDED.probe_id,quality_probe_id=EXCLUDED.quality_probe_id,has_usage=EXCLUDED.has_usage,usage_status=EXCLUDED.usage_status,
  input_price=EXCLUDED.input_price,output_price=EXCLUDED.output_price,input_tokens=EXCLUDED.input_tokens,output_tokens=EXCLUDED.output_tokens;
  RETURN NEW;
 END $$;
@@ -145,7 +150,7 @@ DECLARE v console_management_receipt_signal;
 BEGIN
  v:=console_management_receipt_signal_value(NEW.result,NEW.status);v.id:=NEW.id;v.account_id:=NEW.account_id;
  INSERT INTO console_management_receipt_signal SELECT v.*
- ON CONFLICT(id) DO UPDATE SET account_id=EXCLUDED.account_id,valid=EXCLUDED.valid,status=EXCLUDED.status,
+ ON CONFLICT(id) DO UPDATE SET account_id=EXCLUDED.account_id,valid=EXCLUDED.valid,evidence_digest=EXCLUDED.evidence_digest,status=EXCLUDED.status,
  input_price=EXCLUDED.input_price,output_price=EXCLUDED.output_price,input_tokens=EXCLUDED.input_tokens,output_tokens=EXCLUDED.output_tokens;
  RETURN NEW;
 END $$;

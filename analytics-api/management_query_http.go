@@ -140,18 +140,9 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 	start := time.Now()
-	view, err := s.readManagementSnapshot(ctx, owner)
+	snapshot, err := s.readManagementQuerySnapshot(ctx, owner, filters, token, selection != "")
 	readElapsed := time.Since(start)
-	var page managementQueryPage
-	var rows []managementQueryRow
-	var evidence managementFilterEvidence
-	if err == nil {
-		rows, err = buildManagementQueryRows(view.Input, filters.Model, filters.AccountID)
-	}
-	if err == nil {
-		evidence = managementQueryEvidence(view.Input, rows, filters.Model, view.Prices)
-		page, err = buildManagementQueryPageFromRows(view.Input, rows, filters, evidence, owner, s.control.key, token, view.ReadAt)
-	}
+	view, page, rows, evidence := snapshot.View, snapshot.Page, snapshot.Rows, snapshot.Evidence
 	if err == nil {
 		err = ctx.Err()
 	}
@@ -169,11 +160,14 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, message, status)
 	} else if selection != "" {
 		filtered := filterManagementQueryRows(rows, filters, evidence).Rows
-		writeJSON(w, http.StatusOK, managementSelectionResponse{Format: "management-selection-v1", Revision: page.Revision, ReadAtMS: page.ReadAtMS, Total: page.Total, EligibleCount: page.EligibleCount, Rows: filtered, Eligible: managementEligibleRows(filtered), Input: view.Input, Prices: view.Prices})
+		err = writeManagementJSON(w, r, managementSelectionResponse{Format: "management-selection-v1", Revision: page.Revision, ReadAtMS: page.ReadAtMS, Total: page.Total, EligibleCount: page.EligibleCount, Rows: filtered, Eligible: managementEligibleRows(filtered), Input: view.Input, Prices: view.Prices})
 	} else {
 		headers := managementAccountHeaders(view.Input.Accounts)
 		selectionToken := encodeManagementCursor(s.control.key, owner, managementPageCursor{Version: 1, Revision: page.Revision, Filter: tokenHash(mustJSON(filters))})
-		writeJSON(w, http.StatusOK, managementPageResponse{managementQueryPage: page, SelectionToken: selectionToken, Accounts: headers, Context: managementContextForPage(view, page, filters.Model)})
+		err = writeManagementJSON(w, r, managementPageResponse{managementQueryPage: page, SelectionToken: selectionToken, Accounts: headers, Context: managementContextForPage(view, page, filters.Model)})
+	}
+	if err != nil && class == "none" {
+		class = "management_response_write_failed"
 	}
 	log.Printf("management_query read_ms=%d elapsed_ms=%d rows=%d total=%d selection=%t class=%s canceled=%t request_id=%s", readElapsed.Milliseconds(), time.Since(start).Milliseconds(), len(page.Rows), page.Total, selection != "", class, ctx.Err() != nil, consoleRequestID(r.Context()))
 }

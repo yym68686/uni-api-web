@@ -54,6 +54,10 @@ func (s *Service) readSubAccountDetailsFrom(ctx context.Context, db controlQuery
 }
 
 func (s *Service) readSubAccountDetailsWithQualityFrom(ctx context.Context, db controlQueryDB, owner, accountID string, groupID int64, model string, summary, omitRates bool, accounts []subAccount, trace *subAccountsReadTrace, shared sharedQuality) error {
+	return s.readSubAccountDetailsWithModelsFrom(ctx, db, owner, accountID, groupID, model, summary, omitRates, accounts, trace, shared, nil)
+}
+
+func (s *Service) readSubAccountDetailsWithModelsFrom(ctx context.Context, db controlQueryDB, owner, accountID string, groupID int64, model string, summary, omitRates bool, accounts []subAccount, trace *subAccountsReadTrace, shared sharedQuality, readModels func([]subAccount) error) error {
 	index := map[string]int{}
 	for i, a := range accounts {
 		index[a.ID] = i
@@ -114,9 +118,14 @@ func (s *Service) readSubAccountDetailsWithQualityFrom(ctx context.Context, db c
 	rows.Close()
 	stages.next("database_models")
 	trace.next("models")
-	models, modelBytes, err := s.subReadModelsFrom(ctx, db, owner, accountID, groupID, model, summary, accounts)
-	if trace != nil {
-		trace.models, trace.modelBytes = models, modelBytes
+	if readModels != nil {
+		err = readModels(accounts)
+	} else {
+		var models, modelBytes int
+		models, modelBytes, err = s.subReadModelsFrom(ctx, db, owner, accountID, groupID, model, summary, accounts)
+		if trace != nil {
+			trace.models, trace.modelBytes = models, modelBytes
+		}
 	}
 	if err != nil {
 		return subAccountReadFailure{"检测结果读取失败", err}

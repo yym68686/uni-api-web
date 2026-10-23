@@ -141,9 +141,20 @@ typed evidence requests the original full typed reader rather than treating a
 partial projection as valid. The conservative support check covers receipt fields
 omitted from predicates too; unfamiliar casing, future fields or numeric forms
 also request the legacy decoder, which decides whether the data is valid. This
-storage foundation and CLI are not yet connected to the management HTTP read
-path. They have not been deployed or prepared in production and do not establish
-the one-second page target.
+management HTTP path now uses that fallback when necessary. With a complete
+projection it filters compact current values, then hydrates the page's groups
+and every bound alias member inside the same repeatable-read transaction. Full
+action selection still reads all matching evidence. Neither path has been
+deployed or prepared in production, and this does not establish the one-second
+page target.
+
+Model projection digests include the complete compact summary, while receipt
+digests include current display/pricing values. A changed off-page model latency
+or quality receipt invalidates the same signed revision used by page and full
+selection. Routine receipt poll timestamps do not invalidate unchanged summary
+values. Queue identities and states remain part of the revision. Gzip transport
+is negotiated for complete JSON responses; it does not omit models or replace
+current results with cached data.
 
 Analytical snapshots lease a database connection for their full transaction and
 retire that session after rollback, including cancellation and failed reads.

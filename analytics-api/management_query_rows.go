@@ -21,6 +21,7 @@ type managementQueryInput struct {
 	UnavailableImports []string                         `json:"unavailable_imports"`
 	Routes             map[string]managementQueryRoutes `json:"routes"`
 	SourceRevisions    map[string]string                `json:"-"`
+	ModelsRevision     string                           `json:"-"`
 }
 
 type managementQueryChannel struct {
