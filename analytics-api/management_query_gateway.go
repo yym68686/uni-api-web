@@ -54,17 +54,25 @@ func managementCatalogRows(raw map[string]any, configRevision string) ([]managem
 // cannot establish current configuration. The revision is checked again after
 // the database snapshot is read, before any page is published.
 func readManagementGateway(ctx context.Context, source controlSource) (managementGatewayFacts, error) {
-	if out, supported, err := readManagementGatewayAtomic(ctx, source); supported || err != nil {
+	out, supported, err := readManagementGatewayAtomic(ctx, source)
+	if supported || err != nil {
 		return out, err
 	}
-	return readManagementGatewayLegacy(ctx, source)
+	return readManagementGatewayLegacyWithControls(ctx, source, out.Controls)
 }
 
 func readManagementGatewayLegacy(ctx context.Context, source controlSource) (managementGatewayFacts, error) {
+	return readManagementGatewayLegacyWithControls(ctx, source, nil)
+}
+
+func readManagementGatewayLegacyWithControls(ctx context.Context, source controlSource, controls map[string]any) (managementGatewayFacts, error) {
 	out := managementGatewayFacts{Source: source, Routes: map[string][]managementModel{}}
 	defer managementReadSpan(ctx, "gateway")()
 	endControls := managementReadSpan(ctx, "gateway_controls")
-	controls, _, err := subGateway(ctx, source, "GET", "/v1/channel-controls", nil)
+	var err error
+	if controls == nil {
+		controls, _, err = subGateway(ctx, source, "GET", "/v1/channel-controls", nil)
+	}
 	endControls()
 	if err != nil {
 		return out, err
@@ -188,11 +196,7 @@ func readManagementGatewayLegacy(ctx context.Context, source controlSource) (man
 func verifyManagementGateway(ctx context.Context, facts managementGatewayFacts) error {
 	defer managementReadSpan(ctx, "gateway_fence")()
 	if facts.AtomicSnapshot {
-		admin := facts.Source
-		if admin.ConfigKey != "" {
-			admin.Key = admin.ConfigKey
-		}
-		raw, _, err := subGateway(ctx, admin, "GET", "/v1/channel-settings/management-revision", nil)
+		raw, _, err, controls, observationErr := managementGatewayDocuments(ctx, facts.Source, "/v1/channel-settings/management-revision")
 		if err != nil {
 			return err
 		}
@@ -203,9 +207,8 @@ func verifyManagementGateway(ctx context.Context, facts managementGatewayFacts) 
 			return errManagementSourceRevision
 		}
 		if facts.Source.ConfigKey != "" && facts.Source.ConfigKey != facts.Source.Key {
-			controls, _, err := subGateway(ctx, facts.Source, "GET", "/v1/channel-controls", nil)
-			if err != nil {
-				return err
+			if observationErr != nil {
+				return observationErr
 			}
 			if controls["revision"] != facts.Revision || controls["config_revision"] != facts.ConfigRevision {
 				return errManagementSourceRevision

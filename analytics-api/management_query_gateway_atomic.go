@@ -1,6 +1,31 @@
 package main
 
-import "context"
+import (
+	"context"
+	"golang.org/x/sync/errgroup"
+)
+
+// Both credential reads are independent. Their revisions are still required
+// to match, and the complete pair still encloses the PostgreSQL snapshot.
+func managementGatewayDocuments(ctx context.Context, source controlSource, path string) (map[string]any, int, error, map[string]any, error) {
+	admin := source
+	if admin.ConfigKey != "" {
+		admin.Key = admin.ConfigKey
+	}
+	var document, controls map[string]any
+	var code int
+	var adminErr, observationErr error
+	var group errgroup.Group
+	group.Go(func() error { document, code, adminErr = subGateway(ctx, admin, "GET", path, nil); return nil })
+	if source.ConfigKey != "" && source.ConfigKey != source.Key {
+		group.Go(func() error {
+			controls, _, observationErr = subGateway(ctx, source, "GET", "/v1/channel-controls", nil)
+			return nil
+		})
+	}
+	_ = group.Wait()
+	return document, code, adminErr, controls, observationErr
+}
 
 // Only a genuine 404 negotiates the older multi-request protocol. Permission,
 // transport, malformed-data and revision errors must not silently downgrade.
@@ -10,13 +35,10 @@ func readManagementGatewayAtomic(ctx context.Context, source controlSource) (man
 	if source.configKeyError != nil {
 		return out, true, source.configKeyError
 	}
-	admin := source
-	if admin.ConfigKey != "" {
-		admin.Key = admin.ConfigKey
-	}
-	raw, code, err := subGateway(ctx, admin, "GET", "/v1/channel-settings/management-snapshot", nil)
+	raw, code, err, controls, observationErr := managementGatewayDocuments(ctx, source, "/v1/channel-settings/management-snapshot")
 	if code == 404 {
-		return out, false, nil
+		out.Controls = controls
+		return out, false, observationErr
 	}
 	if err != nil {
 		return out, true, err
@@ -76,9 +98,8 @@ func readManagementGatewayAtomic(ctx context.Context, source controlSource) (man
 	// Configuration administration cannot mask a revoked observation credential.
 	// Preserve the legacy requirement that both source identities are valid.
 	if source.ConfigKey != "" && source.ConfigKey != source.Key {
-		controls, _, err := subGateway(ctx, source, "GET", "/v1/channel-controls", nil)
-		if err != nil {
-			return out, true, err
+		if observationErr != nil {
+			return out, true, observationErr
 		}
 		if controls["revision"] != out.Revision || controls["config_revision"] != out.ConfigRevision {
 			return out, true, errManagementSourceRevision

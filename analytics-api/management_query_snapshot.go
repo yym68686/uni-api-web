@@ -91,7 +91,8 @@ func (s *Service) readManagementQuerySnapshot(ctx context.Context, owner string,
 	ctx = managementTraceContext(ctx)
 	out := managementQuerySnapshot{}
 	view, err := s.withManagementSnapshot(ctx, func(tx *sql.Tx, facts []managementGatewayFacts) (managementDatabaseView, error) {
-		view, err := s.readManagementDatabaseScopedFrom(ctx, tx, owner, facts, !selection, filters.Model)
+		catalogOnly := filters.Model == "" && filters.Availability == "" && filters.PriceStatus == "" && filters.ModelMatch == "" && filters.ToolUse == "" && filters.Quality == ""
+		view, err := s.readManagementDatabaseModeFrom(ctx, tx, owner, facts, !selection, filters.Model, catalogOnly && !selection)
 		if err != nil {
 			return view, err
 		}

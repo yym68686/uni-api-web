@@ -30,6 +30,7 @@ func migratePostgres(args []string) error {
 	claims := flags.Bool("prepare-claim-projection", false, "backfill and verify receipt ownership after older API writers drain")
 	management := flags.Bool("prepare-management-projection", false, "prepare current management predicates in bounded verified transactions")
 	capability := flags.Bool("prepare-capability-summary", false, "prepare compact current group capability summaries in bounded transactions")
+	managementRevisions := flags.Bool("prepare-management-revisions", false, "initialize transactional current-evidence revision counters")
 	managementBatchSize := flags.Int("management-batch-size", 512, "maximum identities per management preparation transaction (1-512)")
 	layout := flags.Bool("prepare-rollup-layout", false, "separate rollup levels before initial activation")
 	facts := flags.Bool("facts-stdin", false, "import NDJSON facts from stdin")
@@ -58,6 +59,29 @@ func migratePostgres(args []string) error {
 	defer e.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	if *managementRevisions {
+		applied, checkErr := controlMigrationApplied(ctx, e.DB.DB, controlMigration{"0009_management_revisions", managementRevisionsSQL, managementRevisionTables})
+		if checkErr != nil {
+			return checkErr
+		}
+		if !applied {
+			return errors.New("management revision writer schema must be deployed first")
+		}
+		for {
+			relation, err := prepareManagementRevisionState(ctx, e.DB.DB)
+			if err != nil {
+				log.Printf("management_revision_prepare class=%s", databaseErrorClass(err))
+				return err
+			}
+			_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"relation": relation, "complete": relation == ""})
+			if relation == "" {
+				break
+			}
+			if !waitStartup(ctx, max(*pace, 100*time.Millisecond)) {
+				return ctx.Err()
+			}
+		}
+	}
 	if *capability {
 		migration := controlMigration{"0008_capability_projection", capabilityProjectionSQL, []string{"console_sub_targets", "console_sub_capability_summaries"}}
 		applied, checkErr := controlMigrationApplied(ctx, e.DB.DB, migration)

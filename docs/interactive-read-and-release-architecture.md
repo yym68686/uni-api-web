@@ -59,6 +59,32 @@ admission and capacity reserve; there is no global readiness flag or startup
 backfill. This preparation is distinct from the already completed management
 model/receipt projection and must never rerun that older operation.
 
+The next current-read contract uses transactional revision counters rather than
+hashing every model and receipt on each page. Four relation counters include
+source/projection row counts and unsupported-value counts; an explicit bounded
+repeatable-read baseline must complete before use. Concurrent writers force a
+serialization failure while establishing that baseline. Afterward insert,
+update, delete and truncate change the counters in the source transaction.
+Missing or unsupported projections retain the complete-reader fallback.
+
+Model and receipt projections are maintained by statement triggers so a bulk
+write advances a counter in batches. Equal semantic projections do not rewrite
+rows when only receipt polling clocks change. Default pages without model-result
+filters read the complete directory and hydrate visible rows; selected-model
+pages read only their current predicates, aliases and required fallback groups.
+All other filters and full operation selections retain complete current inputs.
+The new revision family invalidates older cursors through the existing conflict
+path; page and selection use the same new version and queue fence. This is not
+a retained result cache. Gateway administration and observation authorization
+reads now overlap, with both revisions still required to agree before and after
+the database snapshot.
+
+At 119,840 models the isolated new selected directory/revision path took 150 ms,
+and local complete HTTP reads took 600–667 ms excluding gateway/public transport.
+Actual production/browser acceptance remains required. Initial row-counter and
+filtered-update prototypes were rejected by scale/repair tests and are not the
+implemented statement-batch path.
+
 ## Confirmed incident, 2026-10-21
 
 At 10:48:26 UTC the console analytics request with trace

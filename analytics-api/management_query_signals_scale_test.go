@@ -286,6 +286,18 @@ func TestManagementModelSignalsProductionCardinality(t *testing.T) {
 	if predicateCount != 749 {
 		t.Fatal("selected model scope incomplete", predicateCount)
 	}
+	prepareManagementRevisionsForTest(t, s.control.db)
+	start = time.Now()
+	currentSignals, currentRevision, err := readManagementScopedSignals(ctx, s.control.db, "owner", "m002", []string{"m002", "gpt-6-astra"})
+	currentElapsed := time.Since(start)
+	if err != nil || !reflect.DeepEqual(currentSignals, scopedSignals) || currentRevision == "" {
+		t.Fatal("transactional revision scoped values differ", err)
+	}
+	fullCurrentRevision, err := readManagementModelRevisionFrom(ctx, s.control.db, "owner")
+	if err != nil || fullCurrentRevision != currentRevision {
+		t.Fatal("current page/selection revision mismatch", err)
+	}
+	currentSignals = nil
 	scopedSignals = nil
 	separateSignals, combinedSignals = nil, nil
 	s.engine = postgresTestEngine(t)
@@ -436,6 +448,7 @@ func TestManagementModelSignalsProductionCardinality(t *testing.T) {
 	result["unique_groups_wire_gzip_bytes"], result["unique_groups_expanded_gzip_bytes"] = managementScaleGzipBytes(t, uniqueRaw), managementScaleGzipBytes(t, uniqueExpanded)
 	result["separate_revision_predicates_ms"], result["combined_revision_predicates_ms"] = separateElapsed.Milliseconds(), combinedElapsed.Milliseconds()
 	result["streamed_revision_predicates_ms"] = streamedElapsed.Milliseconds()
+	result["current_revision_scoped_ms"] = currentElapsed.Milliseconds()
 	result["scoped_revision_catalog_predicates_ms"], result["scoped_predicates"] = scopedElapsed.Milliseconds(), predicateCount
 	raw, _ := json.Marshal(result)
 	t.Log(string(raw))

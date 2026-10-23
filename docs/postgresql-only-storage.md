@@ -279,3 +279,12 @@ and verification. Reducing it neither skips rows nor relaxes capacity, source
 locks, checksums, full-column comparisons or the 2-second statement timeout.
 Admission deferrals leave the cursor unchanged and can be resumed; other failures
 must be diagnosed before resuming. Do not start multiple preparation processes.
+
+
+Current management revision counters are initialized separately with
+`--prepare-management-revisions` after their writer schema is installed. Each
+relation baseline uses one bounded repeatable-read transaction; concurrent
+counter changes cause serialization failure instead of an inconsistent count.
+No historical facts are copied. Do not repeat earlier management projection or
+capability preparation as part of this operation. Counters and complete-read
+fallbacks keep old/new writer compatibility and preserve rollback semantics.

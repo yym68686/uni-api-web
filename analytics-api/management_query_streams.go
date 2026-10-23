@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/json"
 	"slices"
 	"strings"
 )
@@ -19,6 +20,8 @@ const managementModelStreamSQL = `SELECT p.account_id,p.group_id,p.model,p.valid
  p.checked_at,p.verdict,p.availability,p.terminal,p.model_match,p.probe_id,p.quality_probe_id,p.has_usage,p.usage_status,
  p.input_price,p.output_price,p.input_tokens,p.output_tokens
  FROM console_management_model_signal p JOIN console_sub_accounts a ON a.id=p.account_id WHERE a.owner=$1`
+
+const managementReceiptSelectedStreamSQL = managementReceiptStreamSQL + ` AND r.id=ANY($2::text[])`
 
 const managementReceiptStreamSQL = `SELECT r.id,r.valid,r.evidence_digest,r.status,r.input_price,r.output_price,r.input_tokens,r.output_tokens
  FROM console_management_receipt_signal r JOIN console_sub_accounts a ON a.id=r.account_id
@@ -47,9 +50,10 @@ func (u managementStreamUsage) expanded() *subUsage {
 }
 
 type managementStreamScope struct {
-	CatalogOnly bool
-	Model       string
-	Names       []string
+	CatalogOnly     bool
+	Model           string
+	Names           []string
+	CompactRevision bool
 }
 
 func readManagementSignalStreams(ctx context.Context, db controlQueryDB, owner string, strict bool) ([]managementModelSignals, string, error) {
@@ -74,6 +78,11 @@ func readManagementScopedStreams(ctx context.Context, db controlQueryDB, owner s
 	if !complete {
 		return nil, "", errManagementPredicateFallback
 	}
+	compactRevision, compact, err := readManagementCompactRevision(ctx, db, owner)
+	if err != nil {
+		return nil, "", err
+	}
+	scope.CompactRevision = compact
 	endModels := managementReadSpan(ctx, "database_signal_models")
 	models, ids, err := readManagementStreamModels(ctx, db, owner, strict, scope)
 	endModels()
@@ -114,8 +123,13 @@ func readManagementScopedStreams(ctx context.Context, db controlQueryDB, owner s
 		if q, ok := receipts[model.quality]; ok {
 			qualityDigest = q.evidence
 		}
-		writer.write(model.item.Account, model.item.Group, model.item.Model.Model, model.item.Model.State, model.message, model.evidence, receiptDigest, qualityDigest)
+		if !compact {
+			writer.write(model.item.Account, model.item.Group, model.item.Model.Model, model.item.Model.State, model.message, model.evidence, receiptDigest, qualityDigest)
+		}
 		out = append(out, model.item)
+	}
+	if compact {
+		return out, compactRevision, ctx.Err()
 	}
 	revision, err := finishManagementModelRevision(ctx, db, owner, hash)
 	if err != nil {
@@ -151,20 +165,35 @@ func readManagementStreamModels(ctx context.Context, db controlQueryDB, owner st
 		return nil, nil, err
 	}
 	fallback := map[string]bool{}
+	fallbackGroups := []subBoundKey{}
 	wanted := map[string]bool{}
 	if scope.Model != "" {
 		catalog := make([]managementModelSignals, len(out))
 		for i := range out {
 			catalog[i] = out[i].item
 		}
-		for _, g := range managementScopeFallbackGroups(scope.Model, catalog) {
+		fallbackGroups = managementScopeFallbackGroups(scope.Model, catalog)
+		for _, g := range fallbackGroups {
 			fallback[qualityGroupID(g.AccountID, g.GroupID)] = true
 		}
 		for _, name := range scope.Names {
 			wanted[name] = true
 		}
 	}
-	rows, err = db.QueryContext(ctx, managementModelStreamSQL, owner)
+	query := managementModelStreamSQL
+	args := []any{owner}
+	if scope.CompactRevision && scope.CatalogOnly {
+		return out, []string{}, ctx.Err()
+	}
+	if scope.CompactRevision && scope.Model != "" {
+		raw, err := json.Marshal(fallbackGroups)
+		if err != nil {
+			return nil, nil, err
+		}
+		query += ` AND (p.model=ANY($2::text[]) OR EXISTS(SELECT 1 FROM jsonb_to_recordset($3::jsonb) AS g(account_id text,group_id bigint) WHERE g.account_id=p.account_id AND g.group_id=p.group_id))`
+		args = append(args, scope.Names, string(raw))
+	}
+	rows, err = db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -211,7 +240,7 @@ func readManagementStreamModels(ctx context.Context, db controlQueryDB, owner st
 		return nil, nil, err
 	}
 	for _, model := range out {
-		if len(model.evidence) != sha256.Size {
+		if len(model.evidence) != sha256.Size && (!scope.CompactRevision || scope.Model == "" || wanted[model.item.Model.Model] || fallback[qualityGroupID(model.item.Account, model.item.Group)]) {
 			return nil, nil, errManagementPredicateFallback
 		}
 	}
@@ -231,7 +260,13 @@ func readManagementStreamReceipts(ctx context.Context, db controlQueryDB, owner 
 	for _, id := range ids {
 		wanted[id] = true
 	}
-	rows, err := db.QueryContext(ctx, managementReceiptStreamSQL, owner)
+	query := managementReceiptStreamSQL
+	args := []any{owner}
+	if len(ids) <= 4096 {
+		query = managementReceiptSelectedStreamSQL
+		args = append(args, ids)
+	}
+	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

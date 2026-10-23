@@ -14,7 +14,7 @@ type managementStreamReadHook struct {
 }
 
 func (d managementStreamReadHook) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
-	if query == managementReceiptStreamSQL {
+	if query == managementReceiptStreamSQL || query == managementReceiptSelectedStreamSQL {
 		d.beforeReceipts()
 	}
 	return d.controlQueryDB.QueryContext(ctx, query, args...)

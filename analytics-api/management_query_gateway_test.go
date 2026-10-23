@@ -12,6 +12,58 @@ import (
 	"time"
 )
 
+func TestManagementGatewayCredentialChecksOverlapWithoutWeakeningFence(t *testing.T) {
+	for _, mode := range []string{"stable", "changed", "unauthorized"} {
+		t.Run(mode, func(t *testing.T) {
+			adminStarted, observationStarted := make(chan struct{}), make(chan struct{})
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var other <-chan struct{}
+				if r.URL.Path == "/v1/channel-settings/management-revision" {
+					if r.Header.Get("Authorization") != "Bearer fixture-admin" {
+						t.Error("admin credential changed")
+					}
+					close(adminStarted)
+					other = observationStarted
+				} else if r.URL.Path == "/v1/channel-controls" {
+					if r.Header.Get("Authorization") != "Bearer fixture-observer" {
+						t.Error("observation credential changed")
+					}
+					close(observationStarted)
+					other = adminStarted
+				} else {
+					t.Error("unexpected endpoint")
+					http.NotFound(w, r)
+					return
+				}
+				select {
+				case <-other:
+				case <-r.Context().Done():
+					return
+				}
+				if mode == "unauthorized" && r.URL.Path == "/v1/channel-controls" {
+					http.Error(w, "denied", 403)
+					return
+				}
+				revision := "r1"
+				if mode == "changed" && r.URL.Path == "/v1/channel-controls" {
+					revision = "r2"
+				}
+				fmt.Fprintf(w, `{"format":"management-revision-v1","revision":%q,"config_revision":"c1"}`, revision)
+			}))
+			defer server.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			err := verifyManagementGateway(ctx, managementGatewayFacts{AtomicSnapshot: true, Source: controlSource{sourceView: sourceView{Base: server.URL}, Key: "fixture-observer", ConfigKey: "fixture-admin"}, Revision: "r1", ConfigRevision: "c1"})
+			if mode == "stable" && err != nil || mode != "stable" && err == nil {
+				t.Fatal("credential/fence result", err)
+			}
+			if ctx.Err() != nil {
+				t.Fatal("credential reads did not overlap")
+			}
+		})
+	}
+}
+
 func TestManagementGatewayReadsAreBoundedVersionFencedAndReadOnly(t *testing.T) {
 	for _, mode := range []string{"stable", "changed", "old-catalog", "wrong-key", "missing-provider", "duplicate-provider", "unknown-key-provider"} {
 		t.Run(mode, func(t *testing.T) {
