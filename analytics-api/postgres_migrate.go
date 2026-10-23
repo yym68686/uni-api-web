@@ -29,6 +29,7 @@ func migratePostgres(args []string) error {
 	billing := flags.Bool("prepare-billing-projection", false, "backfill and verify billing identities after older API writers drain")
 	claims := flags.Bool("prepare-claim-projection", false, "backfill and verify receipt ownership after older API writers drain")
 	management := flags.Bool("prepare-management-projection", false, "prepare current management predicates in bounded verified transactions")
+	managementBatchSize := flags.Int("management-batch-size", 512, "maximum identities per management preparation transaction (1-512)")
 	layout := flags.Bool("prepare-rollup-layout", false, "separate rollup levels before initial activation")
 	facts := flags.Bool("facts-stdin", false, "import NDJSON facts from stdin")
 	analyze := flags.Bool("analyze", false, "publish parent planner statistics once after the complete backfill")
@@ -38,6 +39,9 @@ func migratePostgres(args []string) error {
 	phase := flags.String("phase", "", "set prepared after migration validation")
 	if err := flags.Parse(args); err != nil {
 		return err
+	}
+	if *managementBatchSize < 1 || *managementBatchSize > 512 {
+		return errManagementProjectionBatchSize
 	}
 	cfg := Config{ControlDatabaseURL: env("CONTROL_DATABASE_URL", env("DATABASE_URL", "")), Timezone: env("ANALYTICS_TIMEZONE", "Asia/Shanghai"), SourceID: env("SOURCE_ID", "primary")}
 	if cfg.ControlDatabaseURL == "" {
@@ -105,7 +109,7 @@ func migratePostgres(args []string) error {
 			log.Printf("management_projection_prepare stage=schema_check class=management_schema_required")
 			return errors.New("management writer schema must be deployed before preparation")
 		}
-		if err = prepareManagementProjection(ctx, e.DB.DB, e.historyPath, *pace, func(step managementProjectionStep) {
+		if err = prepareManagementProjectionSized(ctx, e.DB.DB, e.historyPath, *managementBatchSize, *pace, func(step managementProjectionStep) {
 			_ = json.NewEncoder(os.Stdout).Encode(step)
 		}); err != nil {
 			log.Printf("management_projection_prepare stage=prepare class=%s", databaseErrorClass(err))

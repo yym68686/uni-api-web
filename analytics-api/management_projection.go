@@ -14,6 +14,7 @@ import (
 var errManagementPreparationBusy = errors.New("management projection preparation yielded to another transaction")
 var errManagementProjectionMismatch = errors.New("management projection differs from current source rows")
 var errManagementProjectionHeadroom = errors.New("management projection preparation needs database headroom")
+var errManagementProjectionBatchSize = errors.New("management projection batch size must be between 1 and 512")
 
 type managementProjectionStep struct {
 	Phase    string `json:"phase"`
@@ -36,7 +37,14 @@ const managementReceiptSignalColumns = "id,account_id,valid,evidence_digest,stat
 // Source rows are locked before a second statement computes their projection;
 // this prevents a backfill snapshot from overwriting a concurrent newer writer.
 func prepareManagementProjectionStep(ctx context.Context, db *sql.DB, budgetSchema string) (managementProjectionStep, error) {
+	return prepareManagementProjectionBatch(ctx, db, budgetSchema, 512)
+}
+
+func prepareManagementProjectionBatch(ctx context.Context, db *sql.DB, budgetSchema string, batchSize int) (managementProjectionStep, error) {
 	step := managementProjectionStep{}
+	if batchSize < 1 || batchSize > 512 {
+		return step, errManagementProjectionBatchSize
+	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return step, err
@@ -68,11 +76,11 @@ func prepareManagementProjectionStep(ctx context.Context, db *sql.DB, budgetSche
 			return step, errManagementPreparationBusy
 		}
 	}
-	query := `SELECT id FROM console_sub_usage WHERE NOT $1 OR id>$2 ORDER BY id LIMIT 512 FOR UPDATE`
-	args := []any{started, cursor.Receipt}
+	query := `SELECT id FROM console_sub_usage WHERE NOT $1 OR id>$2 ORDER BY id LIMIT $3 FOR UPDATE`
+	args := []any{started, cursor.Receipt, batchSize}
 	if models {
-		query = `SELECT account_id,group_id,model FROM console_sub_models WHERE NOT $1 OR (account_id,group_id,model)>($2,$3,$4) ORDER BY account_id,group_id,model LIMIT 512 FOR UPDATE`
-		args = []any{started, cursor.Account, cursor.Group, cursor.Model}
+		query = `SELECT account_id,group_id,model FROM console_sub_models WHERE NOT $1 OR (account_id,group_id,model)>($2,$3,$4) ORDER BY account_id,group_id,model LIMIT $5 FOR UPDATE`
+		args = []any{started, cursor.Account, cursor.Group, cursor.Model, batchSize}
 	}
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -165,8 +173,12 @@ func prepareManagementProjectionStep(ctx context.Context, db *sql.DB, budgetSche
 }
 
 func prepareManagementProjection(ctx context.Context, db *sql.DB, budgetSchema string, delay time.Duration, progress func(managementProjectionStep)) error {
+	return prepareManagementProjectionSized(ctx, db, budgetSchema, 512, delay, progress)
+}
+
+func prepareManagementProjectionSized(ctx context.Context, db *sql.DB, budgetSchema string, batchSize int, delay time.Duration, progress func(managementProjectionStep)) error {
 	for {
-		step, err := prepareManagementProjectionStep(ctx, db, budgetSchema)
+		step, err := prepareManagementProjectionBatch(ctx, db, budgetSchema, batchSize)
 		if err != nil {
 			return err
 		}

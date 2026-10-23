@@ -131,6 +131,45 @@ func TestManagementProjectionPreparationIsBoundedResumableAndCurrent(t *testing.
 	}
 }
 
+func TestManagementProjectionSmallerBatchesResumeAcrossAllPhases(t *testing.T) {
+	ctx := context.Background()
+	for _, size := range []int{-1, 0, 513} {
+		if _, err := prepareManagementProjectionBatch(ctx, nil, "", size); !errors.Is(err, errManagementProjectionBatchSize) {
+			t.Fatal("invalid limit reached database", size, err)
+		}
+		if err := migratePostgres([]string{"--prepare-management-projection", fmt.Sprintf("--management-batch-size=%d", size)}); !errors.Is(err, errManagementProjectionBatchSize) {
+			t.Fatal("CLI accepted invalid batch size", size, err)
+		}
+	}
+	db, schema := managementPreparationFixture(t, 11)
+	// Start with a smaller limit, then change it while resuming the same cursor.
+	step, err := prepareManagementProjectionBatch(ctx, db, schema, 3)
+	if err != nil || step.Rows != 3 || step.Complete {
+		t.Fatal(step, err)
+	}
+	seen := map[string]int{"models": step.Rows}
+	for i := 0; i < 30 && !step.Complete; i++ {
+		step, err = prepareManagementProjectionBatch(ctx, db, schema, 2)
+		if err != nil || step.Rows > 2 {
+			t.Fatal(step, err)
+		}
+		seen[step.Phase] += step.Rows
+	}
+	if !step.Complete {
+		t.Fatal("smaller batches did not finish")
+	}
+	for _, phase := range []string{"models", "receipts", "verify_models", "verify_receipts"} {
+		if seen[phase] != 11 {
+			t.Fatal("phase skipped or repeated identities", phase, seen)
+		}
+	}
+	got, err := readCurrentManagementModelSignals(ctx, db, "owner")
+	want, _, legacyErr := readManagementModelSignalsFrom(ctx, db, "owner")
+	if err != nil || legacyErr != nil || !reflect.DeepEqual(got, want) {
+		t.Fatal("smaller batch result changed", err, legacyErr)
+	}
+}
+
 func TestManagementProjectionPreparationYieldsAndPreservesCursorOnCapacityOrCancellation(t *testing.T) {
 	db, schema := managementPreparationFixture(t, 2)
 	ctx := context.Background()

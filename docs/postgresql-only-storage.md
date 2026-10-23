@@ -267,3 +267,15 @@ evidence, with account/group/key checks and a transaction-time key recheck.
 Each invocation accepts at most twelve groups and supports an account/group
 resume cursor. Unavailable receipts remain unknown; published group rates are
 not substituted for verified model multipliers.
+
+
+Management projection preparation is a separate bounded operation after its
+writer schema is deployed. `--prepare-management-projection` maintains a durable
+cursor through copy and complete verification passes; only verified completion
+activates the new reader. `--management-batch-size` can reduce each transaction
+from the default 512 identities to any value from 1 to 512 when production row
+processing exceeds the fixed statement budget. The same limit applies to copy
+and verification. Reducing it neither skips rows nor relaxes capacity, source
+locks, checksums, full-column comparisons or the 2-second statement timeout.
+Admission deferrals leave the cursor unchanged and can be resumed; other failures
+must be diagnosed before resuming. Do not start multiple preparation processes.
