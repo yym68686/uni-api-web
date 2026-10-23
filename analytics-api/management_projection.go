@@ -76,12 +76,7 @@ func prepareManagementProjectionBatch(ctx context.Context, db *sql.DB, budgetSch
 			return step, errManagementPreparationBusy
 		}
 	}
-	query := `SELECT id FROM console_sub_usage WHERE NOT $1 OR id>$2 ORDER BY id LIMIT $3 FOR UPDATE`
-	args := []any{started, cursor.Receipt, batchSize}
-	if models {
-		query = `SELECT account_id,group_id,model FROM console_sub_models WHERE NOT $1 OR (account_id,group_id,model)>($2,$3,$4) ORDER BY account_id,group_id,model LIMIT $5 FOR UPDATE`
-		args = []any{started, cursor.Account, cursor.Group, cursor.Model, batchSize}
-	}
+	query, args := managementPreparationBatchQuery(models, started, cursor, batchSize)
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return step, err
@@ -170,6 +165,22 @@ func prepareManagementProjectionBatch(ctx context.Context, db *sql.DB, budgetSch
 		return step, err
 	}
 	return step, tx.Commit()
+}
+
+// Separate initial/resumed statements keep the durable cursor as an index
+// boundary even after PostgreSQL chooses a generic prepared-statement plan.
+// An optional OR predicate would scan and discard all earlier identities.
+func managementPreparationBatchQuery(models, started bool, cursor managementProjectionIdentity, batchSize int) (string, []any) {
+	if models {
+		if started {
+			return `SELECT account_id,group_id,model FROM console_sub_models WHERE (account_id,group_id,model)>($1,$2,$3) ORDER BY account_id,group_id,model LIMIT $4 FOR UPDATE`, []any{cursor.Account, cursor.Group, cursor.Model, batchSize}
+		}
+		return `SELECT account_id,group_id,model FROM console_sub_models ORDER BY account_id,group_id,model LIMIT $1 FOR UPDATE`, []any{batchSize}
+	}
+	if started {
+		return `SELECT id FROM console_sub_usage WHERE id>$1 ORDER BY id LIMIT $2 FOR UPDATE`, []any{cursor.Receipt, batchSize}
+	}
+	return `SELECT id FROM console_sub_usage ORDER BY id LIMIT $1 FOR UPDATE`, []any{batchSize}
 }
 
 func prepareManagementProjection(ctx context.Context, db *sql.DB, budgetSchema string, delay time.Duration, progress func(managementProjectionStep)) error {
