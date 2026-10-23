@@ -27,35 +27,44 @@ func TestManagementPreparedRatesScale(t *testing.T) {
 	if _, err := s.control.db.Exec(`UPDATE console_management_projection_state SET phase='complete',complete=true WHERE singleton`); err != nil {
 		t.Fatal(err)
 	}
-	read := func(prepared bool) (map[string]map[string]subObservedRate, time.Duration) {
+	read := func(mode string) (map[string]map[string]subObservedRate, time.Duration) {
 		t.Helper()
 		start := time.Now()
 		var got map[string]map[string]subObservedRate
 		var err error
-		if prepared {
-			got, err = s.control.subObservedRatesPreparedFrom(ctx, s.control.db, "owner", "")
-		} else {
+		switch mode {
+		case "legacy":
 			got, err = s.control.subObservedRatesForAccountFrom(ctx, s.control.db, "owner", "")
+		case "previous":
+			got, err = s.control.subObservedRatesPreparedFrom(ctx, previousRateQueryDB{s.control.db}, "owner", "")
+		case "merged":
+			got, err = s.control.subObservedRatesPreparedFrom(ctx, s.control.db, "owner", "")
 		}
 		if err != nil {
 			t.Fatal(err)
 		}
 		return got, time.Since(start)
 	}
-
-	for round := 0; round < 3; round++ {
-		var a, b map[string]map[string]subObservedRate
-		var ta, tb time.Duration
-		if round%2 == 0 {
-			a, ta = read(false)
-			b, tb = read(true)
-		} else {
-			b, tb = read(true)
-			a, ta = read(false)
+	for round, order := range [][]string{{"legacy", "previous", "merged"}, {"merged", "previous", "legacy"}, {"previous", "merged", "legacy"}, {"merged", "legacy", "previous"}} {
+		values := map[string]map[string]map[string]subObservedRate{}
+		durations := map[string]int64{}
+		for _, mode := range order {
+			value, elapsed := read(mode)
+			values[mode] = value
+			durations[mode] = elapsed.Milliseconds()
 		}
-		if len(a) != 749 || !reflect.DeepEqual(a, b) {
+		if len(values["legacy"]) != 749 || !reflect.DeepEqual(values["legacy"], values["previous"]) || !reflect.DeepEqual(values["legacy"], values["merged"]) {
 			t.Fatal("latest rates changed")
 		}
-		t.Logf("round=%d groups=%d legacy_ms=%d projected_payload_ms=%d", round, len(a), ta.Milliseconds(), tb.Milliseconds())
+		t.Logf("round=%d order=%v groups=749 legacy_ms=%d previous_projected_ms=%d merged_ms=%d", round, order, durations["legacy"], durations["previous"], durations["merged"])
+	}
+	if os.Getenv("EXPLAIN_OBSERVED_RATE_MERGE") == "1" {
+		for _, variant := range []struct{ name, query string }{{"previous", previousObservedRatesReadSQL(true)}, {"merged", subObservedRatesReadSQL(true)}} {
+			var raw []byte
+			if err := s.control.db.QueryRowContext(ctx, `EXPLAIN (ANALYZE,BUFFERS,TIMING FALSE,FORMAT JSON) `+variant.query, "owner", "").Scan(&raw); err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("rate_merge_plan variant=%s plan=%s", variant.name, raw)
+		}
 	}
 }

@@ -167,6 +167,17 @@ zero cost, latest unusable evidence and old field casing retain that reader's
 semantics. There is no new rate-recovery job or permission to repeat production
 recovery, and this projection has not been activated in production.
 
+Prepared management reads pair the latest raw and retained rate candidate for
+each account/group/model using a full join. Each side is unique, so the final
+choice can compare timestamps and receipt IDs directly without sorting both
+payloads or applying a global window over them. PostgreSQL performs ID comparison
+with its existing collation. A missing or unsupported raw projection still
+requests the whole original decoder even when retained evidence is newer. Equal
+identities carrying different payloads also request that decoder because the
+original query does not specify a winner for such a tie. Current-key, owner,
+FIFO and repeatable-read behavior remain unchanged. This is an unpublished
+management query optimization, not a new projection or a new preparation step.
+
 Analytical snapshots lease a database connection for their full transaction and
 retire that session after rollback, including cancellation and failed reads.
 They do not return a backend with retained query allocations to the shared

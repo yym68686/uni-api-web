@@ -64,17 +64,8 @@ func (s *controlStore) subObservedRatesForAccount(ctx context.Context, owner, ac
 // bounded projection verification. Any unsupported candidate falls back before
 // publishing, preserving the original decoder (including legacy field casing).
 func subObservedRatesReadSQL(prepared bool) string {
-	payload, rawSource, rawSupport, metadataSupport, support := "u.result", "FROM raw_latest l JOIN console_sub_usage u ON u.id=l.id", "", "", ""
 	if prepared {
-		payload = "p.rate_result"
-		// raw_latest already identifies a visible, owned, current-key receipt in
-		// this statement. Reading its raw row again is unnecessary for projection.
-		rawSource = "FROM raw_latest l LEFT JOIN console_management_receipt_signal p ON p.id=l.id AND p.account_id=l.account_id"
-		rawSupport = ",NOT COALESCE(p.valid,false) AS requires_raw"
-		metadataSupport = ",false"
-		// Evaluate before DISTINCT so an unsupported raw candidate cannot be
-		// hidden by its compact metadata twin or allow a partially decoded map.
-		support = ",bool_or(requires_raw) OVER()"
+		return managementPreparedRateSQL
 	}
 	return `WITH owned_targets AS MATERIALIZED (
  SELECT t.account_id,t.group_id,t.remote_key_id FROM console_sub_targets t JOIN console_sub_accounts a ON a.id=t.account_id WHERE a.owner=$1 AND ($2='' OR a.id=$2)),
@@ -83,12 +74,12 @@ func subObservedRatesReadSQL(prepared bool) string {
  FROM console_sub_usage u JOIN owned_targets t ON t.account_id=u.account_id AND t.group_id=u.group_id AND t.remote_key_id=u.key_id
  WHERE u.status='matched' ORDER BY u.account_id,u.group_id,u.model,u.started_at DESC,u.id DESC),
  candidates AS (
- SELECT l.id,l.account_id,l.group_id,l.model,l.started_at,` + payload + ` AS result` + rawSupport + `
- ` + rawSource + `
+ SELECT l.id,l.account_id,l.group_id,l.model,l.started_at,u.result AS result
+ FROM raw_latest l JOIN console_sub_usage u ON u.id=l.id
  UNION ALL
- SELECT r.receipt_id,r.account_id,r.group_id,r.model,r.started_at,r.result` + metadataSupport + `
+ SELECT r.receipt_id,r.account_id,r.group_id,r.model,r.started_at,r.result
  FROM console_sub_observed_rates r JOIN owned_targets t ON t.account_id=r.account_id AND t.group_id=r.group_id AND t.remote_key_id=r.key_id)
- SELECT DISTINCT ON (account_id,group_id,model) account_id,group_id,model,started_at,result` + support + `
+ SELECT DISTINCT ON (account_id,group_id,model) account_id,group_id,model,started_at,result
  FROM candidates ORDER BY account_id,group_id,model,started_at DESC,id DESC`
 }
 
