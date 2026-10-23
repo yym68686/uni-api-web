@@ -49,6 +49,12 @@ var observedRatesSQL string
 //go:embed migrations/0005_observed_rates.tables
 var observedRatesTables string
 
+//go:embed migrations/0006_management_signals.sql
+var managementSignalsSQL string
+
+//go:embed migrations/0006_management_signals.tables
+var managementSignalsTables string
+
 type controlMigration struct {
 	Version string
 	SQL     string
@@ -62,6 +68,7 @@ func controlMigrations() []controlMigration {
 		{"0003_sub_model_summaries", subModelSummariesSQL, strings.Fields(subModelSummariesTables)},
 		{"0004_receipt_retention", receiptRetentionSQL, strings.Fields(receiptRetentionTables)},
 		{"0005_observed_rates", observedRatesSQL, strings.Fields(observedRatesTables)},
+		{"0006_management_signals", managementSignalsSQL, strings.Fields(managementSignalsTables)},
 	}
 }
 

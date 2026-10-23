@@ -7,16 +7,6 @@ import (
 	"strings"
 )
 
-// Predicate input only. This is deliberately separate from a page row: absence
-// of timing/messages here must never be presented as a missing test result.
-// The page must hydrate its selected groups under the same transaction before
-// publishing, and complete-selection reads must retain their full action data.
-type managementModelSignals struct {
-	Account string
-	Group   int64
-	Model   subModelResult
-}
-
 func managementPredicateResult(result *subResult) *subResult {
 	if result == nil {
 		return nil
@@ -96,43 +86,6 @@ var managementModelSignalsTypedSQL = func() string {
 
 func readManagementModelSignalsTypedFrom(ctx context.Context, db controlQueryDB, owner string) ([]managementModelSignals, error) {
 	return readManagementSignalsColumns(ctx, db, owner, managementModelSignalsTypedSQL)
-}
-
-func readManagementSignalsColumns(ctx context.Context, db controlQueryDB, owner, query string) ([]managementModelSignals, error) {
-	rows, err := db.QueryContext(ctx, query, owner)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []managementModelSignals{}
-	for rows.Next() {
-		var item managementModelSignals
-		var valid, present, hasUsage bool
-		result := &subResult{}
-		usage := &subUsage{}
-		if err := rows.Scan(&item.Account, &item.Group, &item.Model.Model, &item.Model.State, &valid, &present, &result.CheckedAt, &result.Verdict,
-			&result.Availability.Status, &result.Availability.TerminalStatus, &result.Availability.ModelMatch,
-			&usage.Status, &usage.InputPrice, &usage.OutputPrice, &usage.InputTokens, &usage.OutputTokens, &hasUsage); err != nil {
-			return nil, err
-		}
-		if !valid {
-			return nil, errors.New("invalid management predicate evidence")
-		}
-		if present {
-			item.Model.Result = result
-			if hasUsage {
-				result.Availability.Usage = usage
-			}
-		}
-		out = append(out, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 func decodeManagementModelSignals(raw []byte) (*subResult, error) {

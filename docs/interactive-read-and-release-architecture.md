@@ -69,20 +69,25 @@ both remain authorized. Only a 404 negotiates the older multi-request protocol.
 This reduces remote round trips without using a timed cache, but its production
 latency has not yet been verified and it does not remove the database full scan.
 
-An isolated, test-only prototype now separates model predicates from receipt
+The unpublished storage implementation separates model predicates from receipt
 predicates. Each raw writer updates its own typed projection in the same
 transaction; the read joins the current model's probe ID to the authorized
 receipt under one repeatable-read snapshot. It does not copy receipt values into
 model rows, so independently committing model and receipt writers cannot miss
 each other's updates. A receipt deletion removes its projection in the same
-transaction and preserves the existing missing-receipt behavior. This prototype
-is not a registered migration, startup task or live read path.
+transaction and preserves the existing missing-receipt behavior. Migration
+`0006_management_signals` creates empty projections and writer triggers;
+explicit preparation copies and verifies at most 512 identities per transaction
+before setting a completion marker. It has no startup backfill. These changes
+are local and the current HTTP reader does not yet use the projection.
 
 At 48 synthetic accounts, 749 groups, 119,840 models and 59,920 receipts, a local
 comparison found identical predicate values for every model. Reading the
-existing model summaries and attaching receipts took 1,410 ms. Extracting JSON
-predicates during the query still took 1,120 ms; precomputing typed predicates at
-write time and joining them took 361 ms. The two projection tables and their
+existing model summaries and attaching receipts took 1,471 ms in the latest
+storage implementation run; precomputing typed predicates at write time and
+joining them took 447 ms. The earlier prototype measured 1,410 ms versus 361 ms,
+while extracting JSON predicates during a read still exceeded one second.
+The two projection tables and their
 indexes occupied 32,210,944 bytes in this fixture. The 260 browser filter cases
 retain their row IDs, facets, eligibility and complete model choices. Independent
 writer commits, repeatable-read isolation, rollback, owner changes, deletion and
@@ -91,8 +96,10 @@ invalid predicate values have isolated regression coverage.
 These are local database-stage measurements, not a browser latency result or a
 production capacity estimate. In particular, the fixture has fewer receipt rows
 than production. Before activation, the projection needs a bounded, concurrency-
-safe backfill and completeness/capacity gate, validation of the entire existing
-typed error contract, and page hydration under the same snapshot. Selected-model
+safe backfill and completeness/capacity gate in production, and page hydration
+under the same snapshot. The implemented conservative type-support check requests
+the original decoder for unsupported evidence, including non-predicate receipt
+fields; this fallback still needs HTTP integration. Selected-model
 aliases, queued jobs, shared quality, full action selections and revision changes
 must remain exact. The 7.8 MB wire response and the complete end-to-end read still
 need separate measurement and reduction; a sub-second projection scan does not

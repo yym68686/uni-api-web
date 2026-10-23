@@ -117,6 +117,34 @@ contents. A receipt that is genuinely absent remains absent; it is not fabricate
 or confused with a failed lookup. This protects read correctness and does not by
 itself meet the interactive latency target.
 
+The unpublished management branch adds control migration `0006_management_signals`.
+It installs empty typed model/receipt projections and transaction triggers, with
+no historical scan or readiness shortcut at startup. Separate projections let
+model and receipt writers commit independently; reads join the current probe ID
+to an authorized receipt under one snapshot. Source deletion cascades to its
+projection, and older writers also update it after deployment or code rollback.
+
+After deploying that writer schema, the explicit
+`--prepare-management-projection` command copies at most 512 source rows per
+transaction, records a durable cursor, and then performs a second bounded pass
+comparing every projected column. It locks source rows before computing their
+derived values, so preparation cannot overwrite a newer concurrent writer.
+Updates or key changes behind a cursor remain covered by the triggers. Each
+copy batch yields to ingestion admission, has short lock/statement deadlines,
+and checks the exact batch's projected size plus index overhead and a 32 MiB
+reserve against the existing ingestion watermark. Insufficient space or a failed
+comparison leaves the completion marker false and does not advance that batch.
+Preparation does not alter the budget or manually evict data.
+
+The fast reader requires this completion marker in the same transaction. Unsupported
+typed evidence requests the original full typed reader rather than treating a
+partial projection as valid. The conservative support check covers receipt fields
+omitted from predicates too; unfamiliar casing, future fields or numeric forms
+also request the legacy decoder, which decides whether the data is valid. This
+storage foundation and CLI are not yet connected to the management HTTP read
+path. They have not been deployed or prepared in production and do not establish
+the one-second page target.
+
 Analytical snapshots lease a database connection for their full transaction and
 retire that session after rollback, including cancellation and failed reads.
 They do not return a backend with retained query allocations to the shared

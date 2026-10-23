@@ -26,9 +26,9 @@ func TestManagementModelSignalsProductionCardinality(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	exec(managementPredicatePrototypeSQL)
 	exec(`INSERT INTO console_sub_accounts(id,owner,name,base,email,encrypted_auth) SELECT 'a'||a,'owner','fixture','https://fixture.test',a::text,'' FROM generate_series(0,47) a`)
 	exec(`INSERT INTO console_sub_targets(account_id,group_id,name,platform) SELECT 'a'||(g%48),g,'group','openai' FROM generate_series(1,749) g`)
+	writeStart := time.Now()
 	exec(`INSERT INTO console_sub_models(account_id,group_id,model,state,result)
  SELECT 'a'||(g%48),g,'m'||lpad(m::text,3,'0'),CASE WHEN m%9=0 THEN 'queued' ELSE 'done' END,
  jsonb_build_object('model','m'||lpad(m::text,3,'0'),'checked_at',m,'verdict','pass',
@@ -38,17 +38,20 @@ func TestManagementModelSignalsProductionCardinality(t *testing.T) {
  'usage',jsonb_build_object('status','pending','input_price',2,'output_price',10,'input_tokens',100,'output_tokens',20)),
  'quality',jsonb_build_object('status','skipped'))
  FROM generate_series(1,749) g CROSS JOIN generate_series(1,160) m`)
+	modelWriteElapsed := time.Since(writeStart)
+	writeStart = time.Now()
 	exec(`INSERT INTO console_sub_usage(id,account_id,group_id,key_id,model,started_at,request_ids,status,result)
  SELECT 'probe-'||g||'-'||m,'a'||(g%48),g,0,'m'||lpad(m::text,3,'0'),0,'[]','matched',
  jsonb_build_object('status','matched','input_price',3,'output_price',15,'input_tokens',100,'output_tokens',20,'message',repeat('receipt ',40))
  FROM generate_series(1,749) g CROSS JOIN generate_series(1,160) m WHERE m%2=0`)
+	receiptWriteElapsed := time.Since(writeStart)
 	exec(`ANALYZE console_sub_accounts`)
 	exec(`ANALYZE console_sub_targets`)
 	exec(`ANALYZE console_sub_models`)
 	exec(`ANALYZE console_sub_model_summaries`)
 	exec(`ANALYZE console_sub_usage`)
 	var projectionBytes int64
-	if err := s.control.db.QueryRowContext(ctx, `SELECT pg_total_relation_size('management_model_signal')+pg_total_relation_size('management_receipt_signal')`).Scan(&projectionBytes); err != nil {
+	if err := s.control.db.QueryRowContext(ctx, `SELECT pg_total_relation_size('console_management_model_signal')+pg_total_relation_size('console_management_receipt_signal')`).Scan(&projectionBytes); err != nil {
 		t.Fatal(err)
 	}
 	accounts := make([]subAccount, 48)
@@ -196,7 +199,7 @@ func TestManagementModelSignalsProductionCardinality(t *testing.T) {
 	if len(expected) != 0 {
 		t.Fatal("missing predicate rows")
 	}
-	result := map[string]any{"models": count, "shadow_projection_bytes": projectionBytes, "summary_result_bytes": bytes, "predicate_bytes": signalBytes, "old_model_and_receipt_ms": oldElapsed.Milliseconds(), "predicate_join_ms": newElapsed.Milliseconds(), "typed_predicate_join_ms": typedElapsed.Milliseconds(), "transactional_typed_join_ms": transactionalElapsed.Milliseconds(), "stored_typed_read_ms": storedElapsed.Milliseconds(), "stored_aggregate_read_and_compare_ms": aggregateElapsed.Milliseconds(), "aggregate_groups": aggregateCount, "all_predicates_equal": true}
+	result := map[string]any{"models": count, "model_fixture_write_ms": modelWriteElapsed.Milliseconds(), "receipt_fixture_write_ms": receiptWriteElapsed.Milliseconds(), "shadow_projection_bytes": projectionBytes, "summary_result_bytes": bytes, "predicate_bytes": signalBytes, "old_model_and_receipt_ms": oldElapsed.Milliseconds(), "predicate_join_ms": newElapsed.Milliseconds(), "typed_predicate_join_ms": typedElapsed.Milliseconds(), "transactional_typed_join_ms": transactionalElapsed.Milliseconds(), "stored_typed_read_ms": storedElapsed.Milliseconds(), "stored_aggregate_read_and_compare_ms": aggregateElapsed.Milliseconds(), "aggregate_groups": aggregateCount, "all_predicates_equal": true}
 	raw, _ := json.Marshal(result)
 	t.Log(string(raw))
 }

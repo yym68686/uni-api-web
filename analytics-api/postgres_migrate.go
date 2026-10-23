@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -26,6 +27,7 @@ func migratePostgres(args []string) error {
 	usage := flags.Bool("prepare-usage-projection", false, "backfill and verify compact transactional usage rows")
 	billing := flags.Bool("prepare-billing-projection", false, "backfill and verify billing identities after older API writers drain")
 	claims := flags.Bool("prepare-claim-projection", false, "backfill and verify receipt ownership after older API writers drain")
+	management := flags.Bool("prepare-management-projection", false, "prepare current management predicates in bounded verified transactions")
 	layout := flags.Bool("prepare-rollup-layout", false, "separate rollup levels before initial activation")
 	facts := flags.Bool("facts-stdin", false, "import NDJSON facts from stdin")
 	analyze := flags.Bool("analyze", false, "publish parent planner statistics once after the complete backfill")
@@ -87,6 +89,21 @@ func migratePostgres(args []string) error {
 			return err
 		}
 		fmt.Println(`{"phase":"claim_projection_prepared"}`)
+	}
+	if *management {
+		migration := controlMigration{"0006_management_signals", managementSignalsSQL, strings.Fields(managementSignalsTables)}
+		applied, err := controlMigrationApplied(ctx, e.DB.DB, migration)
+		if err != nil {
+			return err
+		}
+		if !applied {
+			return errors.New("management writer schema must be deployed before preparation")
+		}
+		if err = prepareManagementProjection(ctx, e.DB.DB, e.historyPath, *pace, func(step managementProjectionStep) {
+			_ = json.NewEncoder(os.Stdout).Encode(step)
+		}); err != nil {
+			return err
+		}
 	}
 	if *readIndexes {
 		if err = e.prepareReadIndexes(ctx); err != nil {

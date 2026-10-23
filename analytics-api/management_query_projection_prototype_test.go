@@ -13,7 +13,7 @@ var managementPredicatePrototypeSQL string
 
 // This prototype query assumes both shadow tables have been completely
 // prepared. That is intentionally NOT a production readiness contract yet.
-const managementModelSignalsStoredSQL = `SELECT m.account_id,m.group_id,m.model,m.state,
+const managementPrototypeSignalsSQL = `SELECT m.account_id,m.group_id,m.model,m.state,
  COALESCE(p.valid,false) AND COALESCE(r.valid,true),p.present,p.checked_at,p.verdict,p.availability,p.terminal,p.model_match,
  CASE WHEN r.id IS NOT NULL THEN r.status ELSE p.usage_status END,
  CASE WHEN r.id IS NOT NULL THEN r.input_price ELSE p.input_price END,
@@ -47,7 +47,7 @@ func TestManagementShadowPredicatesFollowIndependentWriterTransactions(t *testin
 		if err != nil {
 			t.Fatal(err)
 		}
-		got, err := readManagementSignalsColumns(ctx, db, "owner", managementModelSignalsStoredSQL)
+		got, err := readManagementSignalsColumns(ctx, db, "owner", managementPrototypeSignalsSQL)
 		if err != nil || !reflect.DeepEqual(want, got) {
 			t.Fatalf("shadow divergence err=%v want=%s got=%s", err, mustJSON(want), mustJSON(got))
 		}
@@ -60,7 +60,7 @@ func TestManagementShadowPredicatesFollowIndependentWriterTransactions(t *testin
 		t.Fatal(err)
 	}
 	defer reader.Rollback()
-	before, err := readManagementSignalsColumns(ctx, reader, "owner", managementModelSignalsStoredSQL)
+	before, err := readManagementSignalsColumns(ctx, reader, "owner", managementPrototypeSignalsSQL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestManagementShadowPredicatesFollowIndependentWriterTransactions(t *testin
 	}
 	check(reader)
 	check(s.control.db)
-	old, err := readManagementSignalsColumns(ctx, reader, "owner", managementModelSignalsStoredSQL)
+	old, err := readManagementSignalsColumns(ctx, reader, "owner", managementPrototypeSignalsSQL)
 	if err != nil || !reflect.DeepEqual(before, old) {
 		t.Fatal("repeatable read changed", err)
 	}
@@ -123,7 +123,7 @@ func TestManagementShadowPredicatesFollowIndependentWriterTransactions(t *testin
 	exec(`UPDATE console_sub_models SET result=$1 WHERE account_id='a'`, result)
 	check(s.control.db)
 	exec(`UPDATE console_sub_usage SET result='{"input_price":"bad"}' WHERE id='probe'`)
-	if rows, err := readManagementSignalsColumns(ctx, s.control.db, "owner", managementModelSignalsStoredSQL); err == nil || rows != nil {
+	if rows, err := readManagementSignalsColumns(ctx, s.control.db, "owner", managementPrototypeSignalsSQL); err == nil || rows != nil {
 		t.Fatal("invalid receipt published predicates")
 	}
 	exec(`UPDATE console_sub_usage SET result='{"input_price":0}' WHERE id='probe'`)
@@ -132,7 +132,7 @@ func TestManagementShadowPredicatesFollowIndependentWriterTransactions(t *testin
 	// Do not round token counts or silently accept quoted numbers.
 	for _, raw := range []string{`[]`, `{"status":false}`, `{"input_price":"3"}`, `{"input_price":1e400}`, `{"input_tokens":1.5}`, `{"output_tokens":9223372036854775808}`} {
 		exec(`UPDATE console_sub_usage SET result=$1 WHERE id='probe'`, raw)
-		if rows, err := readManagementSignalsColumns(ctx, s.control.db, "owner", managementModelSignalsStoredSQL); err == nil || rows != nil {
+		if rows, err := readManagementSignalsColumns(ctx, s.control.db, "owner", managementPrototypeSignalsSQL); err == nil || rows != nil {
 			t.Fatal("invalid receipt was coerced", raw)
 		}
 	}
@@ -140,7 +140,7 @@ func TestManagementShadowPredicatesFollowIndependentWriterTransactions(t *testin
 	check(s.control.db)
 	for _, raw := range []string{`[]`, `{"checked_at":"3"}`, `{"checked_at":1.5}`, `{"verdict":false}`, `{"availability":true}`, `{"availability":{"status":3}}`, `{"availability":{"id":7}}`, `{"availability":{"usage":{"input_price":"2"}}}`} {
 		exec(`UPDATE console_sub_models SET result=$1 WHERE account_id='a'`, raw)
-		if rows, err := readManagementSignalsColumns(ctx, s.control.db, "owner", managementModelSignalsStoredSQL); err == nil || rows != nil {
+		if rows, err := readManagementSignalsColumns(ctx, s.control.db, "owner", managementPrototypeSignalsSQL); err == nil || rows != nil {
 			t.Fatal("invalid model was coerced", raw)
 		}
 	}
