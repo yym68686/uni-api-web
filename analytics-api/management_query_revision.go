@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"hash"
 )
 
 // Stream fixed-size evidence digests rather than serializing every model reply
@@ -48,6 +49,11 @@ func readManagementModelRevisionFrom(ctx context.Context, db controlQueryDB, own
 		return "", err
 	}
 	rows.Close()
+	return finishManagementModelRevision(ctx, db, owner, hash)
+}
+
+func finishManagementModelRevision(ctx context.Context, db controlQueryDB, owner string, hash hash.Hash) (string, error) {
+	encoder := json.NewEncoder(hash)
 	queued, err := db.QueryContext(ctx, `SELECT q.account_id,q.group_id,q.kind,q.model FROM console_sub_check_queue q JOIN console_sub_accounts a ON a.id=q.account_id WHERE a.owner=$1 ORDER BY q.account_id COLLATE "C",q.group_id,q.kind COLLATE "C",q.model COLLATE "C"`, owner)
 	if err != nil {
 		return "", err

@@ -54,6 +54,14 @@ and their bound aliases. Unsupported evidence uses the existing full typed
 reader. Before activation, further scope the compact read and measure all
 database work, transfer and browser latency at production cardinality.
 
+The page path now streams predicate columns and complete evidence digests from
+one model/receipt join. Previously the page performed that same authorized join
+once for its revision and again for filtering. Full action selections use the
+same digest and queue encoding; malformed or unprepared projections still take
+the complete typed-reader path. The combined query removes one scan without
+weakening freshness or the revision fence. It remains unpublished and does not
+by itself meet the end-to-end latency target.
+
 A bounded read-only diagnostic on the serving node measured 1.165 seconds for
 gateway reads, 10.411 seconds for the database snapshot and 3.2-3.4 seconds for
 assembly and serialization. Its 25-row response was 7.8 MB because those rows

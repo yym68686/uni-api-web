@@ -80,7 +80,13 @@ func (s *Service) readManagementDatabaseViewFrom(ctx context.Context, db control
 		return out, err
 	}
 	trace.next("database_account_details")
-	out.Input.ModelsRevision, err = readManagementModelRevisionFrom(ctx, db, owner)
+	var signals []managementModelSignals
+	if predicates {
+		signals, out.Input.ModelsRevision, err = readCurrentManagementSignalsAndRevision(ctx, db, owner)
+	}
+	if !predicates || errors.Is(err, errManagementPredicateFallback) {
+		out.Input.ModelsRevision, err = readManagementModelRevisionFrom(ctx, db, owner)
+	}
 	if errors.Is(err, errManagementPredicateFallback) {
 		out.Input.ModelsRevision, err = "", nil
 	}
@@ -88,16 +94,8 @@ func (s *Service) readManagementDatabaseViewFrom(ctx context.Context, db control
 		return out, err
 	}
 	var readModels func([]subAccount) error
-	if predicates && out.Input.ModelsRevision != "" {
+	if signals != nil {
 		readModels = func(accounts []subAccount) error {
-			signals, err := readCurrentManagementModelSignals(ctx, db, owner)
-			if errors.Is(err, errManagementPredicateFallback) {
-				_, _, err = s.subReadModelsFrom(ctx, db, owner, "", 0, "", true, accounts)
-				return err
-			}
-			if err != nil {
-				return err
-			}
 			index := map[string]*subTarget{}
 			for i := range accounts {
 				for j := range accounts[i].Targets {
