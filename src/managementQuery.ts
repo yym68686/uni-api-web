@@ -47,6 +47,10 @@ export interface ManagementPage {
   };
 }
 
+declare global {
+  var __uniManagementBootstrap: { owner: string; filters: string; startedAt: number; controller: AbortController; result: Promise<ManagementPage> } | undefined;
+}
+
 export interface ManagementSelection {
   format: "management-selection-v1";
   revision: string;
@@ -92,12 +96,31 @@ export async function readManagementPage(
   filters: SubFilters,
   cursor: string,
   signal: AbortSignal,
+  owner?: string,
 ): Promise<ManagementPage> {
+  if (owner) {
+    const bootstrap = globalThis.__uniManagementBootstrap;
+    delete globalThis.__uniManagementBootstrap;
+    if (bootstrap) {
+      if (!cursor && bootstrap.owner === owner && bootstrap.filters === JSON.stringify(filters) && Date.now() - bootstrap.startedAt < 10_000) {
+        const abort = () => bootstrap.controller.abort(signal.reason);
+        if (signal.aborted) abort();
+        else signal.addEventListener("abort", abort, { once: true });
+        try { const page = await bootstrap.result; signal.throwIfAborted(); return validateManagementPage(page); }
+        finally { signal.removeEventListener("abort", abort); }
+      }
+      bootstrap.controller.abort();
+    }
+  }
   const response = await controlRequest<unknown>(path(filters, { cursor }), {
     signal,
     headers: { Accept: managementPageMediaType },
   });
   signal.throwIfAborted();
+  return validateManagementPage(response);
+}
+
+function validateManagementPage(response: unknown): ManagementPage {
   const page = decodeManagementPage(response);
   if (
     page.format !== "management-page-v1" ||
@@ -159,7 +182,7 @@ export function useManagementPage(
   }, [client, owner]);
   const query = useQuery({
     queryKey: ["management-query", owner, filters, cursor],
-    queryFn: ({ signal }) => readManagementPage(filters, cursor, signal),
+    queryFn: ({ signal }) => readManagementPage(filters, cursor, signal, owner),
     enabled: !!owner,
     retry: false,
     staleTime: 0,
