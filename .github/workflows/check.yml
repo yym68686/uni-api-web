@@ -15,7 +15,7 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npm test
+      - run: npm test -- --maxWorkers=2 --no-file-parallelism
       - run: node --test scripts/check-nginx-upstream.cjs
       - run: npm run build
   analytics:
