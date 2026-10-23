@@ -46,3 +46,35 @@ func TestRequestObservationCorrelatesStagesWithoutSecrets(t *testing.T) {
 		t.Fatal("unvalidated identifier reached log")
 	}
 }
+
+func TestInteractiveReadsLogFastCompletionWithoutSensitivePaths(t *testing.T) {
+	var logs bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&logs)
+	defer log.SetOutput(previous)
+	mux := http.NewServeMux()
+	for _, route := range []string{"GET /v1/analytics", "GET /v1/sources/{id}/channel-checks", "GET /healthz"} {
+		mux.HandleFunc(route, func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(`{"data":[]}`)) })
+	}
+	for _, path := range []string{"/v1/analytics?key=private-key", "/v1/sources/private-account/channel-checks?token=private-key"} {
+		logs.Reset()
+		r := httptest.NewRequest(http.MethodGet, path, nil)
+		r.Header.Set("Authorization", "Bearer private-token")
+		r.Header.Set("X-Console-Request-ID", "99a277df-a091-4ebb-85e5-cd6f28eb49c5")
+		w := httptest.NewRecorder()
+		observeConsoleRequests(mux).ServeHTTP(w, r)
+		for _, expected := range []string{"console_request_started", "received_at_ms=", "finished_at_ms=", "status=200", "response_bytes=11", "request_id=99a277df-a091-4ebb-85e5-cd6f28eb49c5"} {
+			if !strings.Contains(logs.String(), expected) {
+				t.Fatal("fast successful read lost correlation", expected, logs.String())
+			}
+		}
+		if strings.Contains(logs.String(), "private-") || strings.Contains(logs.String(), "Bearer") {
+			t.Fatal("private request fields were logged")
+		}
+	}
+	logs.Reset()
+	observeConsoleRequests(mux).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if logs.Len() != 0 {
+		t.Fatal("routine health probes became verbose")
+	}
+}

@@ -168,7 +168,12 @@ func (s *Service) retentionLoop(ctx context.Context) {
 		}
 		cancel()
 		if err != nil && ctx.Err() == nil {
-			log.Printf("event=%s class=%s", event, databaseErrorClass(err))
+			var stage *receiptRetentionStageError
+			if errors.As(err, &stage) {
+				log.Printf("event=%s class=%s stage=%s", event, databaseErrorClass(err), stage.Stage)
+			} else {
+				log.Printf("event=%s class=%s", event, databaseErrorClass(err))
+			}
 		}
 		if !waitStartup(ctx, 10*time.Second) {
 			return

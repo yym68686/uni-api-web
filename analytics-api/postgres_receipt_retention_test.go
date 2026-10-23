@@ -2,11 +2,22 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"testing"
 	"time"
 )
+
+func TestReceiptRetentionStagePreservesErrorClassification(t *testing.T) {
+	err := &receiptRetentionStageError{Stage: "delete_receipts", Cause: context.DeadlineExceeded}
+	if !errors.Is(err, context.DeadlineExceeded) || databaseErrorClass(err) != "deadline_exceeded" {
+		t.Fatal("stage wrapper hid the original failure class")
+	}
+	if got := err.Error(); got != "receipt retention stage delete_receipts failed" {
+		t.Fatal("unexpected stage description", got)
+	}
+}
 
 func TestReceiptRetentionSeeksOldestBatchAcrossAccountsWithoutDeletingLeasedHistory(t *testing.T) {
 	s, first, _ := attributionFixture(t)
@@ -48,7 +59,7 @@ func TestReceiptRetentionSeeksOldestBatchAcrossAccountsWithoutDeletingLeasedHist
 			t.Fatal(err)
 		}
 	}
-	// The tuple lower bound must include the complete timestamp domain, not
+	// The time predicate must include the complete timestamp domain, not
 	// silently omit legacy rows before Unix epoch or the smallest bigint.
 	if _, err := s.control.db.Exec(`INSERT INTO console_sub_spend_logs(account_id,key_id,log_id,at_ms,actual_cost,request_id,model)
  VALUES($1,1,9001,$2,1,'oldest','m')`, first, int64(-1<<63)); err != nil {
