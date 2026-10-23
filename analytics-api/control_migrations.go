@@ -64,6 +64,12 @@ var capabilityProjectionSQL string
 //go:embed migrations/0009_management_revisions.sql
 var managementRevisionsSQL string
 
+//go:embed migrations/0010_management_view_epoch.sql
+var managementViewEpochSQL string
+
+//go:embed migrations/0010_management_view_epoch.tables
+var managementViewEpochTables string
+
 var managementRevisionTables = []string{"console_sub_models", "console_management_model_signal", "console_sub_usage", "console_management_receipt_signal", "console_management_revision_state"}
 
 type controlMigration struct {
@@ -83,6 +89,7 @@ func controlMigrations() []controlMigration {
 		{"0007_capability_summary", capabilitySummarySQL, nil},
 		{"0008_capability_projection", capabilityProjectionSQL, []string{"console_sub_targets", "console_sub_capability_summaries"}},
 		{"0009_management_revisions", managementRevisionsSQL, managementRevisionTables},
+		{"0010_management_view_epoch", managementViewEpochSQL, strings.Fields(managementViewEpochTables)},
 	}
 }
 

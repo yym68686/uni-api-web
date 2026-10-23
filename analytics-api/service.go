@@ -16,24 +16,25 @@ import (
 )
 
 type Service struct {
-	newAPILogGap      *time.Duration // nil uses conservative production pacing
-	auth              *authorizer
-	engine            *Engine
-	cfg               Config
-	active            atomic.Int64
-	lastCollect       atomic.Int64
-	importFailures    atomic.Uint64
-	loginMu           sync.Mutex
-	loginWindow       time.Time
-	loginAttempts     int
-	cacheMu           sync.Mutex
-	cache             map[string]cachedAnalytics
-	historyLoading    atomic.Bool
-	startup           atomic.Pointer[analyticsStartup]
-	control           *controlStore
-	keyDirectories    keyDirectoryCache
-	summaries         summaryHistory
-	observationHealth sourceObservationCircuit
+	newAPILogGap       *time.Duration // nil uses conservative production pacing
+	auth               *authorizer
+	engine             *Engine
+	cfg                Config
+	active             atomic.Int64
+	lastCollect        atomic.Int64
+	importFailures     atomic.Uint64
+	loginMu            sync.Mutex
+	loginWindow        time.Time
+	loginAttempts      int
+	cacheMu            sync.Mutex
+	cache              map[string]cachedAnalytics
+	historyLoading     atomic.Bool
+	startup            atomic.Pointer[analyticsStartup]
+	control            *controlStore
+	keyDirectories     keyDirectoryCache
+	summaries          summaryHistory
+	observationHealth  sourceObservationCircuit
+	managementComputed managementComputedPages
 }
 
 type cachedAnalytics struct {

@@ -85,6 +85,25 @@ Actual production/browser acceptance remains required. Initial row-counter and
 filtered-update prototypes were rejected by scale/repair tests and are not the
 implemented statement-batch path.
 
+Repeated refreshes can reuse a completed computation only after proving it is
+still current. The proposed reader checks live source credentials and gateway
+revisions on both sides of a fresh PostgreSQL snapshot. That snapshot checks
+semantic model/receipt revisions, all management-input table epochs, current
+prices, queued work and time-dependent running-task deadlines. Any changed input,
+expired deadline, permission error or unavailable source prevents reuse. It
+never publishes a prior result while checking or recomputing in the background.
+Each successful response has a newly verified read timestamp. Full operation
+selections always perform their independent complete read.
+
+The bounded process-local computation store holds at most four complete pages,
+16 MiB of encoded page values and only minimal gateway proof metadata. It retains
+no browser snapshot and has no timed-staleness exception. Per-relation epoch
+triggers advance at most once per writing transaction, with irrelevant account
+lease and receipt polling clocks excluded. Changed values and rollback follow
+PostgreSQL commit visibility. This targets repeated refresh cost; first reads,
+new filters and changed revisions still take the full path and must be measured
+separately rather than described as sub-second by a reuse sample.
+
 ## Confirmed incident, 2026-10-21
 
 At 10:48:26 UTC the console analytics request with trace

@@ -85,12 +85,21 @@ type managementQuerySnapshot struct {
 	Page     managementQueryPage
 	Rows     []managementQueryRow
 	Evidence managementFilterEvidence
+	Proof    *managementFreshProof
 }
 
 func (s *Service) readManagementQuerySnapshot(ctx context.Context, owner string, filters managementQueryFilters, token string, selection bool) (managementQuerySnapshot, error) {
 	ctx = managementTraceContext(ctx)
 	out := managementQuerySnapshot{}
 	view, err := s.withManagementSnapshot(ctx, func(tx *sql.Tx, facts []managementGatewayFacts) (managementDatabaseView, error) {
+		if !selection {
+			proof, _, err := s.managementReadProof(ctx, tx, owner)
+			if err != nil {
+				return managementDatabaseView{}, err
+			}
+			proof.Facts = facts
+			out.Proof = &proof
+		}
 		catalogOnly := filters.Model == "" && filters.Availability == "" && filters.PriceStatus == "" && filters.ModelMatch == "" && filters.ToolUse == "" && filters.Quality == ""
 		view, err := s.readManagementDatabaseModeFrom(ctx, tx, owner, facts, !selection, filters.Model, catalogOnly && !selection)
 		if err != nil {

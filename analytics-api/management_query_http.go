@@ -140,6 +140,19 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 	start := time.Now()
+	computedKey := managementComputedKey(owner, filters, cursor)
+	if selection == "" {
+		page, reused, reuseErr := s.currentComputedManagementPage(ctx, owner, computedKey)
+		if reuseErr != nil {
+			http.Error(w, "渠道数据实时核验失败，请重新读取", http.StatusServiceUnavailable)
+			return
+		}
+		if reused {
+			err := writeManagementPage(w, r, page)
+			log.Printf("management_current_computation verified=true elapsed_ms=%d rows=%d total=%d failed=%t request_id=%s", time.Since(start).Milliseconds(), len(page.Rows), page.Total, err != nil, consoleRequestID(r.Context()))
+			return
+		}
+	}
 	snapshot, err := s.readManagementQuerySnapshot(ctx, owner, filters, token, selection != "")
 	readElapsed := time.Since(start)
 	view, page, rows, evidence := snapshot.View, snapshot.Page, snapshot.Rows, snapshot.Evidence
@@ -164,7 +177,11 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 	} else {
 		headers := managementAccountHeaders(view.Input.Accounts)
 		selectionToken := encodeManagementCursor(s.control.key, owner, managementPageCursor{Version: 1, Revision: page.Revision, Filter: tokenHash(mustJSON(filters))})
-		err = writeManagementPage(w, r, managementPageResponse{managementQueryPage: page, SelectionToken: selectionToken, Accounts: headers, Context: managementContextForPage(view, page, filters.Model)})
+		response := managementPageResponse{managementQueryPage: page, SelectionToken: selectionToken, Accounts: headers, Context: managementContextForPage(view, page, filters.Model)}
+		err = writeManagementPage(w, r, response)
+		if err == nil {
+			s.rememberManagementPage(computedKey, snapshot.Proof, response)
+		}
 	}
 	if err != nil && class == "none" {
 		class = "management_response_write_failed"
