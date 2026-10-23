@@ -69,6 +69,35 @@ both remain authorized. Only a 404 negotiates the older multi-request protocol.
 This reduces remote round trips without using a timed cache, but its production
 latency has not yet been verified and it does not remove the database full scan.
 
+An isolated, test-only prototype now separates model predicates from receipt
+predicates. Each raw writer updates its own typed projection in the same
+transaction; the read joins the current model's probe ID to the authorized
+receipt under one repeatable-read snapshot. It does not copy receipt values into
+model rows, so independently committing model and receipt writers cannot miss
+each other's updates. A receipt deletion removes its projection in the same
+transaction and preserves the existing missing-receipt behavior. This prototype
+is not a registered migration, startup task or live read path.
+
+At 48 synthetic accounts, 749 groups, 119,840 models and 59,920 receipts, a local
+comparison found identical predicate values for every model. Reading the
+existing model summaries and attaching receipts took 1,410 ms. Extracting JSON
+predicates during the query still took 1,120 ms; precomputing typed predicates at
+write time and joining them took 361 ms. The two projection tables and their
+indexes occupied 32,210,944 bytes in this fixture. The 260 browser filter cases
+retain their row IDs, facets, eligibility and complete model choices. Independent
+writer commits, repeatable-read isolation, rollback, owner changes, deletion and
+invalid predicate values have isolated regression coverage.
+
+These are local database-stage measurements, not a browser latency result or a
+production capacity estimate. In particular, the fixture has fewer receipt rows
+than production. Before activation, the projection needs a bounded, concurrency-
+safe backfill and completeness/capacity gate, validation of the entire existing
+typed error contract, and page hydration under the same snapshot. Selected-model
+aliases, queued jobs, shared quality, full action selections and revision changes
+must remain exact. The 7.8 MB wire response and the complete end-to-end read still
+need separate measurement and reduction; a sub-second projection scan does not
+satisfy the one-second page requirement.
+
 The new snapshot read does not create quality-history associations. Previously
 linked history keeps its original account/group. An unlinked old channel check
 without credential provenance must not be attributed using today's credentials.
@@ -126,8 +155,9 @@ Use a coordinated immutable release manifest containing both image digests and
 their API compatibility contract. The lifecycle is:
 
 1. Build and validate both artifacts; the prior release continues serving.
-2. Prepare both candidates with explicit capacity reservations. Backend history
-   recovery and replay happen here, before the activation interval. A reservation
+2. Prepare both candidates with explicit capacity reservations. Database
+   connectivity, schema compatibility and business-read validation happen here,
+   before the activation interval. A reservation
    must not hold a controller mutex that prevents its dependency from preparing.
 3. Validate the candidate database watermark, configuration revision, representative
    read-only business query and API contract, not just `/healthz`.
@@ -142,17 +172,16 @@ failure must leave the existing traffic artifact and configuration recovery
 usable. Existing browser tabs require a compatibility window or explicit release
 pinning; switching HTML alone does not upgrade already loaded JavaScript.
 
-For sustained improvement, make the history ingestion/query engine a durable
-service with its own release cycle. Stateless console control APIs and frontend
-can then release together without restoring DuckDB. Keep ingestion, receipt
-reconciliation, checkpoint creation and interactive reads in separate resource
-budgets. History upgrades still use validated candidates and LKG rollback; no
-two writers open the same DuckDB file. A future storage migration must run shadow
-queries and preserve fact totals/cost semantics before activation.
+PostgreSQL already owns durable state independently of API releases. Ordinary
+backend releases no longer restore DuckDB or S3 history. Keep ingestion, receipt
+reconciliation, FIFO maintenance and interactive reads in separate resource
+budgets; changing a stateless API image must not rebuild stored history. The
+remaining release coordination problem is candidate build, scheduling and
+activation, not database restoration. Compatible old and new API versions must
+continue to read and write the same durable state during rolling releases.
 
-The initial safe migration is additive: deploy observability and a versioned read
-contract, shadow the transactional projection, then add release-set coordination,
-and finally separate the history service behind that contract. Each phase has an
-independent rollback. Production route/DNS/source configuration changes are not
-part of this patch. The ten-second activation guarantee is not implemented or
-verified by this patch.
+The remaining rollout is additive: validate the versioned read contract and
+transactional projection, then add release-set coordination. Each phase needs an
+independent rollback that preserves configuration and stored facts. Production
+route/DNS/source configuration changes are not part of this patch. The ten-second
+activation guarantee is not implemented or verified by this patch.
