@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"sort"
 	"strings"
@@ -44,6 +45,9 @@ func migratePostgres(args []string) error {
 	}
 	e, err := openPostgresEngine("analytics", cfg)
 	if err != nil {
+		if *management {
+			log.Printf("management_projection_prepare stage=engine_open class=%s", databaseErrorClass(err))
+		}
 		return err
 	}
 	defer e.Close()
@@ -94,14 +98,17 @@ func migratePostgres(args []string) error {
 		migration := controlMigration{"0006_management_signals", managementSignalsSQL, strings.Fields(managementSignalsTables)}
 		applied, err := controlMigrationApplied(ctx, e.DB.DB, migration)
 		if err != nil {
+			log.Printf("management_projection_prepare stage=schema_check class=%s", databaseErrorClass(err))
 			return err
 		}
 		if !applied {
+			log.Printf("management_projection_prepare stage=schema_check class=management_schema_required")
 			return errors.New("management writer schema must be deployed before preparation")
 		}
 		if err = prepareManagementProjection(ctx, e.DB.DB, e.historyPath, *pace, func(step managementProjectionStep) {
 			_ = json.NewEncoder(os.Stdout).Encode(step)
 		}); err != nil {
+			log.Printf("management_projection_prepare stage=prepare class=%s", databaseErrorClass(err))
 			return err
 		}
 	}

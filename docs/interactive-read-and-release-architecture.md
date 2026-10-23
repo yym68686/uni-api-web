@@ -1,5 +1,25 @@
 # Interactive reads and coordinated releases
 
+## Staged rollout status, 2026-10-23
+
+The user authorized incremental production releases and measurement; a complete
+end-to-end one-second result is an acceptance target, not a prerequisite for
+publishing a compatible observation candidate. The gateway snapshot contract
+and console management page are now deployed. Earlier unpublished descriptions
+below describe their development history and do not override this status.
+
+Production currently uses the complete legacy reader until management projection
+preparation passes its explicit completeness gate. A measured current page took
+10.814 seconds in the API and 13.325 seconds in the browser, with 2.897 seconds
+reading models and 4.527 seconds attaching receipts. These measurements identify
+the next activation step without claiming the performance target is met.
+Preparation must remain bounded, preserve the storage reserve, yield to live
+writers and validate all projected columns; its first attempt exited before
+committing a batch. Safe maintenance error classes and complete gateway/database
+spans distinguish a guarded deferral from a validation or execution failure.
+No raw database errors, filters, source credentials or receipt identities are
+logged.
+
 ## Confirmed incident, 2026-10-21
 
 At 10:48:26 UTC the console analytics request with trace

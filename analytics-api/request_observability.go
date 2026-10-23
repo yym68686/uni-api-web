@@ -23,6 +23,9 @@ func consoleAlwaysObservedRead(method, path string) string {
 	if path == "/v1/analytics" {
 		return "GET /v1/analytics"
 	}
+	if path == "/v1/channel-management/query" {
+		return "GET /v1/channel-management/query"
+	}
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	if len(parts) == 4 && parts[0] == "v1" && parts[1] == "sources" && parts[2] != "" && parts[3] == "channel-checks" {
 		return "GET /v1/sources/{id}/channel-checks"

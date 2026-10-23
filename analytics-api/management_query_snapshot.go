@@ -32,6 +32,7 @@ func (s *Service) readManagementSnapshot(ctx context.Context, owner string) (man
 }
 
 func (s *Service) withManagementSnapshot(ctx context.Context, read func(*sql.Tx, []managementGatewayFacts) (managementDatabaseView, error)) (managementDatabaseView, error) {
+	ctx = managementTraceContext(ctx)
 	sources, err := s.readManagementSources(ctx)
 	if err != nil {
 		return managementDatabaseView{}, err

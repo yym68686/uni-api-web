@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,7 +17,7 @@ func TestManagementSnapshotFencesSourcesAndGatewayAroundReadOnlyDatabase(t *test
 		t.Run(mode, func(t *testing.T) {
 			s := managementBindingTestService(t)
 			s.engine = postgresTestEngine(t)
-			ctx := context.Background()
+			ctx := context.WithValue(context.Background(), consoleRequestIDKey{}, "management-trace-test")
 			var controls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method != "GET" {
@@ -64,7 +66,21 @@ func TestManagementSnapshotFencesSourcesAndGatewayAroundReadOnlyDatabase(t *test
 			if _, err := s.control.saveSource(ctx, controlSource{sourceView: sourceView{ID: "source", Name: "Source", Base: server.URL}, Key: "source-secret"}, false); err != nil {
 				t.Fatal(err)
 			}
+			var logs bytes.Buffer
+			previous := log.Writer()
+			log.SetOutput(&logs)
+			defer log.SetOutput(previous)
 			view, err := s.readManagementSnapshot(ctx, "owner")
+			for _, secret := range []string{"source-secret", "upstream-secret", server.URL} {
+				if strings.Contains(logs.String(), secret) {
+					t.Fatal("private source details escaped stage logs")
+				}
+			}
+			for _, stage := range []string{"sources", "gateway_atomic", "gateway"} {
+				if !strings.Contains(logs.String(), "stage="+stage+" ") || !strings.Contains(logs.String(), "request_id=management-trace-test") {
+					t.Fatal("outer management stage was not traced", stage, logs.String())
+				}
+			}
 			if mode != "stable" {
 				if err == nil || len(view.Input.Channels) != 0 || len(view.Sources) != 0 {
 					t.Fatal("partial or mixed snapshot published", err)
@@ -76,6 +92,11 @@ func TestManagementSnapshotFencesSourcesAndGatewayAroundReadOnlyDatabase(t *test
 			}
 			if err != nil || len(view.Input.Channels) != 1 || len(view.Input.Imports) != 1 || view.ReadAt.IsZero() || controls.Load() != 3 {
 				t.Fatal("incomplete fresh snapshot", err)
+			}
+			for _, stage := range []string{"database", "gateway_fence"} {
+				if !strings.Contains(logs.String(), "stage="+stage+" ") {
+					t.Fatal("snapshot phase was not traced", stage)
+				}
 			}
 			if view.Input.Channels[0].BindingStatus != "no_account" || view.Input.Channels[0].AccountID != "" {
 				t.Fatal("unowned channel acquired account")

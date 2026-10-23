@@ -5,6 +5,7 @@ import "context"
 // Only a genuine 404 negotiates the older multi-request protocol. Permission,
 // transport, malformed-data and revision errors must not silently downgrade.
 func readManagementGatewayAtomic(ctx context.Context, source controlSource) (managementGatewayFacts, bool, error) {
+	defer managementReadSpan(ctx, "gateway_atomic")()
 	out := managementGatewayFacts{Source: source, AtomicSnapshot: true}
 	if source.configKeyError != nil {
 		return out, true, source.configKeyError

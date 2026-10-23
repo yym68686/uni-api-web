@@ -53,10 +53,10 @@ func TestInteractiveReadsLogFastCompletionWithoutSensitivePaths(t *testing.T) {
 	log.SetOutput(&logs)
 	defer log.SetOutput(previous)
 	mux := http.NewServeMux()
-	for _, route := range []string{"GET /v1/analytics", "GET /v1/sources/{id}/channel-checks", "GET /healthz"} {
+	for _, route := range []string{"GET /v1/analytics", "GET /v1/channel-management/query", "GET /v1/sources/{id}/channel-checks", "GET /healthz"} {
 		mux.HandleFunc(route, func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(`{"data":[]}`)) })
 	}
-	for _, path := range []string{"/v1/analytics?key=private-key", "/v1/sources/private-account/channel-checks?token=private-key"} {
+	for _, path := range []string{"/v1/analytics?key=private-key", "/v1/channel-management/query?filters=private-filter&selection=private-token", "/v1/sources/private-account/channel-checks?token=private-key"} {
 		logs.Reset()
 		r := httptest.NewRequest(http.MethodGet, path, nil)
 		r.Header.Set("Authorization", "Bearer private-token")

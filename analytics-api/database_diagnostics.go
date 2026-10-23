@@ -11,13 +11,13 @@ func databaseErrorClass(err error) string {
 	if err == nil {
 		return ""
 	}
-	if errors.Is(err, errHistoryCapacity) || errors.Is(err, errBillingBackfillHeadroom) {
+	if errors.Is(err, errHistoryCapacity) || errors.Is(err, errBillingBackfillHeadroom) || errors.Is(err, errManagementProjectionHeadroom) {
 		return "history_capacity_unavailable"
 	}
-	if errors.Is(err, errBillingBackfillBusy) || errors.Is(err, errSubSummaryBackfillBusy) || errors.Is(err, errReceiptRetentionIndexRequired) {
+	if errors.Is(err, errBillingBackfillBusy) || errors.Is(err, errSubSummaryBackfillBusy) || errors.Is(err, errReceiptRetentionIndexRequired) || errors.Is(err, errManagementPreparationBusy) {
 		return "maintenance_deferred"
 	}
-	if errors.Is(err, errBillingProjectionMismatch) || errors.Is(err, errClaimProjectionMismatch) {
+	if errors.Is(err, errBillingProjectionMismatch) || errors.Is(err, errClaimProjectionMismatch) || errors.Is(err, errManagementProjectionMismatch) {
 		return "projection_mismatch"
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
