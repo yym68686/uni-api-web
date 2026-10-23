@@ -146,12 +146,39 @@ func managementSharedFingerprints(in managementQueryInput) map[string]management
 	return index
 }
 
+type managementFingerprintEntry struct {
+	Target fingerprintTarget            `json:"target"`
+	Record *managementFingerprintRecord `json:"record,omitempty"`
+}
+
 func managementRowFingerprints(row managementQueryRow, index map[string]managementFingerprintRecord, model string) []string {
+	statuses := []string{}
+	for _, entry := range managementRowFingerprintEntries(row, index, model) {
+		status := "untested"
+		if record := entry.Record; record != nil {
+			status = record.State
+			if status == "done" {
+				var result struct {
+					Status string `json:"status"`
+				}
+				_ = json.Unmarshal(record.Result, &result)
+				status = result.Status
+				if status == "" {
+					status = "error"
+				}
+			}
+		}
+		statuses = append(statuses, status)
+	}
+	return statuses
+}
+
+func managementRowFingerprintEntries(row managementQueryRow, index map[string]managementFingerprintRecord, model string) []managementFingerprintEntry {
 	models := managementFingerprintModels
 	if model != "" {
 		models = []string{model}
 	}
-	statuses := []string{}
+	entries := []managementFingerprintEntry{}
 	for _, name := range models {
 		if !fingerprintModel(name) {
 			continue
@@ -180,23 +207,13 @@ func managementRowFingerprints(row managementQueryRow, index map[string]manageme
 				}
 			}
 		}
-		status := "untested"
+		entry := managementFingerprintEntry{Target: target}
 		if exists {
-			status = record.State
-			if status == "done" {
-				var result struct {
-					Status string `json:"status"`
-				}
-				_ = json.Unmarshal(record.Result, &result)
-				status = result.Status
-				if status == "" {
-					status = "error"
-				}
-			}
+			entry.Record = &record
 		}
-		statuses = append(statuses, status)
+		entries = append(entries, entry)
 	}
-	return statuses
+	return entries
 }
 
 func managementRowJoined(row managementQueryRow, in managementQueryInput) string {

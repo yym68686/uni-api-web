@@ -274,6 +274,7 @@ func buildManagementQueryRows(in managementQueryInput, model, accountFilter stri
 		var latestCompactionResult *subCapabilityResult
 		for i := range native {
 			c := &native[i]
+			target.DetailsOmitted = target.DetailsOmitted || c.DetailsOmitted
 			if c.Kind != "compaction" {
 				continue
 			}

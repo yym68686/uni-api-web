@@ -8,6 +8,7 @@ import type { FingerprintRecord } from "./ModelFingerprints";
 import type { ManagedChannel, ManagementRow } from "./channelManagement";
 import { Sub2apiChecks } from "./Sub2apiChecks";
 import { loadSubFilters, saveSubFilters, subFilterDefaults } from "./sub2apiPreferences";
+import { installManagementPageFixture } from "../tests/managementPageFixture";
 afterEach(()=>vi.unstubAllGlobals());
 const record: FingerprintRecord = { account_id:"one",group_id:1,model:"gpt-6-astra",state:"done",message:"",revision:"r1",result:{model:"gpt-6-astra",status:"mismatch",probability:.12,prediction:"claude-haiku-4.5",prediction_name:"Claude Haiku 4.5",expected_class:"gpt-6-astra/6.1-sol",used_outputs:3,checked_at:1,reference_commit:"abc",candidates:[]} };
 function mount(view: React.ReactNode){return render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><Tooltip.Provider>{view}</Tooltip.Provider></QueryClientProvider>)}
@@ -55,7 +56,7 @@ it.each(["gpt-6-astra","gemini-3.1-pro","gemini-3.8-flash","gemini-4-argon"])("c
  const scoped={...record,model,result:{...record.result!,model}};
  const accounts=["one","two"].map(id=>({id,name:id,base:`https://${id}.test`,email:"test",state:"idle",message:"",synced_at:1,targets:[{group_id:1,name:`group-${id}`,platform:"openai",channel:id,rate:1,key_id:1,active:true,state:"done",message:"",result:null}]}));
  vi.stubGlobal("fetch",vi.fn(async(input:string)=>Response.json({data:input.endsWith("/accounts")?accounts:input.endsWith("/model-fingerprints")?[scoped,{...scoped,account_id:"two",result:{...scoped.result,status:"match",probability:1}}]:[],labels:{},unavailable_sources:[]})));
- mount(<Sub2apiChecks user={`fingerprint-filter-${model}`}/>);await screen.findByText("group-one",{selector:"strong"});
+ installManagementPageFixture();mount(<Sub2apiChecks user={`fingerprint-filter-${model}`}/>);await screen.findByText("group-one",{selector:"strong"});
  expect(screen.getByRole("columnheader",{name:/模型指纹/})).toBeInTheDocument();
  const user=userEvent.setup();await user.selectOptions(screen.getByLabelText("检测模型筛选"),model);
  await user.selectOptions(screen.getByLabelText("模型指纹筛选"),"mismatch");

@@ -18,15 +18,16 @@ import (
 // credentials. Only the gateway uses them; diagnostic requests never edit routes.
 
 type configuredCheck struct {
-	Source      string          `json:"source_id"`
-	Provider    string          `json:"provider"`
-	Kind        string          `json:"kind"`
-	Model       string          `json:"model"`
-	Fingerprint string          `json:"fingerprint"`
-	State       string          `json:"state"`
-	Message     string          `json:"message"`
-	Result      json.RawMessage `json:"result"`
-	History     qualitySummary  `json:"history"`
+	DetailsOmitted bool            `json:"details_omitted,omitempty"`
+	Source         string          `json:"source_id"`
+	Provider       string          `json:"provider"`
+	Kind           string          `json:"kind"`
+	Model          string          `json:"model"`
+	Fingerprint    string          `json:"fingerprint"`
+	State          string          `json:"state"`
+	Message        string          `json:"message"`
+	Result         json.RawMessage `json:"result"`
+	History        qualitySummary  `json:"history"`
 }
 
 func configuredProbeFingerprint(src controlSource, p configuredProvider) string {

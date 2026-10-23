@@ -135,6 +135,8 @@ func TestManagementAccountNormalizationMatchesWireSummary(t *testing.T) {
 	if err := json.Unmarshal(raw, &expected); err != nil {
 		t.Fatal(err)
 	}
+	// summaryAccounts previously added this transport marker in the browser.
+	expected.DetailsOmitted = true
 	if err := normalizeManagementAccounts(accounts); err != nil {
 		t.Fatal(err)
 	}

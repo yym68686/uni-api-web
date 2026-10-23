@@ -9,6 +9,7 @@ import { LatencyBadge } from "./LatencyBadge";
 import { Timing } from "./ChannelMetrics";
 import { SUB_MODELS, saveSubModels, loadSubModels } from "./sub2apiModels";
 import type { SubUsage } from "./sub2apiPriceCheck";
+import { installManagementPageFixture } from "../tests/managementPageFixture";
 
 afterEach(() => vi.unstubAllGlobals());
 it("keeps partial source availability out of the channel management banner", async () => {
@@ -24,6 +25,7 @@ it("keeps partial source availability out of the channel management banner", asy
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 });
 function mount(user = "account", client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
+  installManagementPageFixture();
   return render(
     <QueryClientProvider client={client}>
       <Tooltip.Provider>
@@ -116,12 +118,10 @@ it("keeps channel loading honest and does not read every source key directory on
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(["sources", "quick-entry"], { data: [{ id: "do", name: "DigitalOcean" }] });
   const replies: Record<string, (response: Response) => void> = {};
-  const headerReplies: ((response: Response) => void)[] = [];
-  const fetcher = vi.fn(async (input: string, init?: RequestInit) => {
+  const fetcher = vi.fn(async (input: string) => {
     if (input.endsWith("/accounts") || input.endsWith("/channel-management"))
       return new Promise<Response>(resolve => {
-        if (input.endsWith("/accounts") && new Headers(init?.headers).get("X-Console-View") === "accounts") headerReplies.push(resolve);
-        else replies[input.endsWith("/accounts") ? "accounts" : "management"] = resolve;
+        replies[input.endsWith("/accounts") ? "accounts" : "management"] = resolve;
       });
     return Response.json({ data: [], unavailable_sources: [] });
   });
@@ -131,9 +131,6 @@ it("keeps channel loading honest and does not read every source key directory on
   expect(screen.getByRole("status", { name: "加载渠道检测" })).toBeInTheDocument();
   expect(screen.queryByText("没有匹配的渠道")).not.toBeInTheDocument();
   expect(fetcher.mock.calls.some(([input]) => input.includes("keys_only"))).toBe(false);
-  await act(async () => { for (const reply of headerReplies) reply(Response.json({data:fixtures().map(a=>({...a,targets:[]}))})); });
-  await waitFor(() => expect(screen.getByRole("heading", { name: "站点账号" }).parentElement).toHaveTextContent("2"));
-  expect(screen.getByRole("status", {name:"加载渠道检测"})).toBeInTheDocument();
   await act(async () => {
     replies.accounts(Response.json({ data: fixtures() }));
     replies.management(Response.json({ data: [], unavailable_sources: [] }));
@@ -279,7 +276,7 @@ it.each(["site", "native"])("keeps configured model-card price warnings consiste
   expect(luna).not.toBeChecked();
   expect(luna.closest("label")).toHaveTextContent("单价异常");
   inputPrice = 2;
-  await client.invalidateQueries({queryKey:["sub2api-prices"]});
+  await client.invalidateQueries({queryKey:["management-query"]});
   await waitFor(() => expect(luna.closest("label")).not.toHaveTextContent("单价异常"));
   expect(luna).not.toBeChecked();
   expect(requests.every(method => method === "GET")).toBe(true);
@@ -357,7 +354,7 @@ it("loads sources before opening the dialog and offers retry when the initial re
   await user.click(add);
   const dialog = within(screen.getByRole("dialog"));
   expect(dialog.getByLabelText("添加到 uni-api 来源")).toBeDisabled();
-  expect(dialog.getByRole("status")).toHaveTextContent("正在读取 uni-api 来源");
+  expect(dialog.getByText("正在读取 uni-api 来源…")).toBeVisible();
   finishSources(new Response("来源服务暂不可用", { status: 503 }));
   await user.click(await dialog.findByRole("button", { name: "重新读取来源" }));
   expect(fetcher.mock.calls.filter(([input]) => input.endsWith("/v1/sources"))).toHaveLength(2);
@@ -764,12 +761,12 @@ it("keeps busy accounts from duplicate checks and removes only after explicit se
   const methods: string[] = [];
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (_input: string, init?: RequestInit) => {
+    vi.fn(async (input: string, init?: RequestInit) => {
       if (init?.method) {
         methods.push(init.method);
         return new Response('{"ok":true}');
       }
-      return new Response(JSON.stringify({ data }));
+      return Response.json({data: input.endsWith("/accounts") ? data : []});
     }),
   );
   const user = userEvent.setup();
@@ -1063,7 +1060,7 @@ it("preselects successful models and imports into the selected source key at the
     vi.fn(async (input: string, init?: RequestInit) => {
     if (input.endsWith("/import-status")) return Response.json({ state: "idle", job_kind: "", can_import: true });
       const u = new URL(input);
-      if (u.pathname.endsWith("/sub2api/channels")) {
+      if (u.pathname.endsWith("/sub2api/channels") && init?.method === "POST") {
         writes.push(JSON.parse(init?.body as string));
         return new Response(JSON.stringify({ message: "已临时添加至第 2 位" }));
       }
@@ -1087,7 +1084,7 @@ it("preselects successful models and imports into the selected source key at the
             ],
           }),
         );
-      return new Response(JSON.stringify({ data }));
+      return Response.json({data: input.endsWith("/accounts") ? data : []});
     }),
   );
   const user = userEvent.setup();
@@ -1238,12 +1235,12 @@ it("all-models groups channels and probes all supported models despite available
   data[0].targets[0].billing = { rate: 0.18, source: "key", checked_at: 1 };
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (_input: string, init?: RequestInit) => {
+    vi.fn(async (input: string, init?: RequestInit) => {
       if (init?.method === "POST") {
         writes.push(JSON.parse(init.body as string));
         return new Response('{"queued":true}');
       }
-      return new Response(JSON.stringify({ data }));
+      return Response.json({data: input.endsWith("/accounts") ? data : []});
     }),
   );
   const user = userEvent.setup();
@@ -1334,12 +1331,12 @@ it("specific model uses Astra group quality and only tests the selected model", 
   });
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (_input: string, init?: RequestInit) => {
+    vi.fn(async (input: string, init?: RequestInit) => {
       if (init?.method === "POST") {
         writes.push(JSON.parse(init.body as string));
         return new Response('{"queued":true}');
       }
-      return new Response(JSON.stringify({ data }));
+      return Response.json({data: input.endsWith("/accounts") ? data : []});
     }),
   );
   const user = userEvent.setup();
@@ -1401,12 +1398,12 @@ it("all-model batch spans all filtered pages and includes failed and untested si
   const writes: any[] = [];
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (_input: string, init?: RequestInit) => {
+    vi.fn(async (input: string, init?: RequestInit) => {
       if (init?.method === "POST") {
         writes.push(JSON.parse(init.body as string));
         return new Response('{"queued":true}');
       }
-      return new Response(JSON.stringify({ data }));
+      return Response.json({data: input.endsWith("/accounts") ? data : []});
     }),
   );
   const user = userEvent.setup();
@@ -1464,7 +1461,7 @@ it("shows model matching separately from availability, including missing and his
     vi.fn(async (input: string) => {
       if (new URL(input).pathname.endsWith("/sources"))
         return new Response('{"data":[]}');
-      return new Response(JSON.stringify({ data }));
+      return Response.json({data: input.endsWith("/accounts") ? data : []});
     }),
   );
   const user = userEvent.setup();
@@ -1490,11 +1487,12 @@ it("shows model matching separately from availability, including missing and his
       screen.getByLabelText("检测模型筛选"),
       fixtureModels[i],
     );
-    const currentHeaders = within(table).getAllByRole("columnheader");
+    const currentTable=await screen.findByRole("table");
+    const currentHeaders = within(currentTable).getAllByRole("columnheader");
     const currentColumn = currentHeaders.findIndex((h) =>
       h.textContent?.includes("模型匹配"),
     );
-    const cell = table.querySelector("tbody tr")!.children[currentColumn];
+    const cell = currentTable.querySelector("tbody tr")!.children[currentColumn];
     expect(
       within(cell as HTMLElement).getByText(expected[i] || "待补测", { exact: true }),
     ).toBeVisible();
@@ -1503,10 +1501,11 @@ it("shows model matching separately from availability, including missing and his
     screen.getByLabelText("检测模型筛选"),
     "gpt-5.6-sol",
   );
-  const row = table.querySelector("tbody tr")!;
+  const selectedTable=await screen.findByRole("table");
+  const row = selectedTable.querySelector("tbody tr")!;
   const matchCell =
     row.children[
-      within(table)
+      within(selectedTable)
         .getAllByRole("columnheader")
         .findIndex((h) => h.textContent?.includes("模型匹配"))
     ];
@@ -2254,8 +2253,9 @@ it("detects unassigned configured channels without site keys and isolates busy s
   await user.click(screen.getByRole("button",{name:"检测全部模型 · 2 个渠道"}));
   expect(writes.at(-1)).toEqual({kind:"check",targets:[{source_id:"fugue",provider:"native-one",models:[...SUB_MODELS,"custom-model"]},{source_id:"fugue",provider:"native-two",models:[...SUB_MODELS,"custom-model"]}]});
   await user.selectOptions(screen.getByLabelText("检测模型筛选"),"custom-model");
-  await waitFor(()=>expect(first.getByText("可用")).toBeVisible());
-  await user.click(first.getByRole("button",{name:"查看 未归属渠道 native-one 的回复与诊断"}));
+  const updatedFirst=within((await screen.findByText("native-one",{selector:"strong"})).closest("tr")!);
+  await waitFor(()=>expect(updatedFirst.getByText("可用")).toBeVisible());
+  await user.click(updatedFirst.getByRole("button",{name:"查看 未归属渠道 native-one 的回复与诊断"}));
   const dialog=within(screen.getByRole("dialog"));
   expect(dialog.getByRole("heading",{name:"回复 / 诊断"})).toBeVisible();
   expect(dialog.getByText("test")).toBeVisible();
@@ -2454,7 +2454,7 @@ it("rechecks an explicitly filtered native model despite batch exclusions, witho
   await waitFor(()=>expect(button).toBeEnabled());
   expect(loadSubModels("native-single-probe")).toEqual(["gpt-6-sol"]);
   await user.selectOptions(screen.getByLabelText("检测模型筛选"),"gpt-6-sol");
-  expect(button).toBeDisabled();
+  await waitFor(()=>expect(screen.getByRole("button",{name:"检测 未归属渠道 fugue-codex"})).toBeDisabled());
 });
 
 it("exports the exact attempt for each diagnostic kind without queueing another check", async () => {
@@ -2528,7 +2528,7 @@ it("does not fall back to unscoped sync on an older backend", async () => {
   expect(writes).toEqual(["/analytics/v1/sub2api/accounts/sync-selected"]);
 });
 
-it("keeps accepted sync and live account status when result refresh times out without resubmitting", async () => {
+it("keeps accepted sync acknowledged but hides unverified results after refresh failure without resubmitting", async () => {
   saveSubModels("accepted-sync-read-timeout", ["gemini-4-argon"]);
   let submitted = false;
   const posts: string[] = [];
@@ -2551,11 +2551,11 @@ it("keeps accepted sync and live account status when result refresh times out wi
   await screen.findByRole("table");
   await user.click(screen.getByRole("button",{name:"一键同步并检测"}));
   expect(await screen.findByText("已提交 2 个账号，正在后台同步并检测。")).toBeVisible();
-  await screen.findByText(/检测结果刷新失败，已提交的后台任务不受影响/);
+  await screen.findByText(/账号状态读取失败/);
   expect(screen.queryByText("signal timed out")).not.toBeInTheDocument();
-  expect(screen.getAllByRole("button",{name:"停止"})).toHaveLength(2);
-  expect(screen.getAllByText("same-group",{selector:"strong"})).toHaveLength(2);
-  await user.click(screen.getByRole("button",{name:"重试读取"}));
+  expect(screen.queryByRole("button",{name:"停止"})).not.toBeInTheDocument();
+  expect(screen.queryByText("same-group",{selector:"strong"})).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button",{name:"重试"}));
   expect(posts).toEqual(["/analytics/v1/sub2api/accounts/sync-selected"]);
 });
 

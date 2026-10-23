@@ -19,7 +19,7 @@ export function ChannelOptimization({
   snapshot,
   disabled,
 }: {
-  snapshot: () => OptimizationSnapshot;
+  snapshot: () => OptimizationSnapshot | Promise<OptimizationSnapshot>;
   disabled?: boolean;
 }) {
   const client = useQueryClient();
@@ -31,6 +31,9 @@ export function ChannelOptimization({
   const [busy, setBusy] = useState(false),
     [finished, setFinished] = useState(false),
     [error, setError] = useState("");
+  const [reading,setReading]=useState(false);
+  const [readError,setReadError]=useState("");
+  const readingRef=useRef(false);
   const [progress, setProgress] = useState<
     Record<string, { state: string; message?: string }>
   >({});
@@ -68,8 +71,12 @@ export function ChannelOptimization({
       return next;
     });
   }
-  function open() {
-    setInput(structuredClone(snapshot()));
+  async function open() {
+    if(readingRef.current)return;
+    readingRef.current=true;setReading(true);setReadError("");
+    try { setInput(structuredClone(await snapshot())); }
+    catch(error){setReadError(error instanceof Error ? error.message : "优化数据读取失败");return;}
+    finally{readingRef.current=false;setReading(false);}
     setSelected(new Set());
     setFinished(false);
     setError("");
@@ -120,13 +127,14 @@ export function ChannelOptimization({
       <Dialog.Trigger asChild>
         <button
           className="button small"
-          disabled={disabled}
+          disabled={disabled || reading}
           aria-label="优化渠道模型"
         >
-          <Sparkles size={15} />
-          优化
+          {reading?<Spinner small/>:<Sparkles size={15} />}
+          {reading?"读取完整结果…":"优化"}
         </button>
       </Dialog.Trigger>
+      {readError && <span role="alert" className="negative">{readError}</span>}
       {input && (
         <Dialog.Portal>
           <Dialog.Overlay className="dialog-overlay" />

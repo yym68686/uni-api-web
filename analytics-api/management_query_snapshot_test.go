@@ -22,6 +22,10 @@ func TestManagementSnapshotFencesSourcesAndGatewayAroundReadOnlyDatabase(t *test
 					t.Error("snapshot attempted a gateway mutation")
 				}
 				switch r.URL.Path {
+				case "/v1/channel-settings/management-snapshot":
+					http.NotFound(w, r)
+				case "/v1/channel-settings/management-revision":
+					writeJSON(w, 200, map[string]any{"format": "management-revision-v1", "revision": "1", "config_revision": "1"})
 				case "/v1/channel-controls":
 					n := controls.Add(1)
 					revision := "1"

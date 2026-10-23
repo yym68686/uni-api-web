@@ -28,6 +28,8 @@ type managementGatewayFacts struct {
 	Catalog                  []managementModel
 	Providers                []configuredProvider `json:"-"`
 	Routes                   map[string][]managementModel
+	Export                   map[string]any `json:"-"`
+	AtomicSnapshot           bool           `json:"-"`
 }
 
 func managementSourceIdentity(source controlSource) string {
@@ -52,8 +54,18 @@ func managementCatalogRows(raw map[string]any, configRevision string) ([]managem
 // cannot establish current configuration. The revision is checked again after
 // the database snapshot is read, before any page is published.
 func readManagementGateway(ctx context.Context, source controlSource) (managementGatewayFacts, error) {
+	if out, supported, err := readManagementGatewayAtomic(ctx, source); supported || err != nil {
+		return out, err
+	}
+	return readManagementGatewayLegacy(ctx, source)
+}
+
+func readManagementGatewayLegacy(ctx context.Context, source controlSource) (managementGatewayFacts, error) {
 	out := managementGatewayFacts{Source: source, Routes: map[string][]managementModel{}}
+	defer managementReadSpan(ctx, "gateway")()
+	endControls := managementReadSpan(ctx, "gateway_controls")
 	controls, _, err := subGateway(ctx, source, "GET", "/v1/channel-controls", nil)
+	endControls()
 	if err != nil {
 		return out, err
 	}
@@ -65,6 +77,7 @@ func readManagementGateway(ctx context.Context, source controlSource) (managemen
 	}
 	group, child := errgroup.WithContext(ctx)
 	group.Go(func() error {
+		defer managementReadSpan(child, "gateway_keys")()
 		raw, _, err := fetchSource(child, source, "/v1/api-keys", nil)
 		if err != nil {
 			return err
@@ -88,6 +101,7 @@ func readManagementGateway(ctx context.Context, source controlSource) (managemen
 		return nil
 	})
 	group.Go(func() error {
+		defer managementReadSpan(child, "gateway_catalog")()
 		raw, _, err := fetchSource(child, source, "/v1/model-channels", url.Values{"endpoint": {"all"}, "stream": {"all"}})
 		if err != nil {
 			return err
@@ -98,7 +112,30 @@ func readManagementGateway(ctx context.Context, source controlSource) (managemen
 		out.Catalog, err = managementCatalogRows(raw, out.ConfigRevision)
 		return err
 	})
-	group.Go(func() error { var err error; out.Providers, err = effectiveProviders(child, source, true); return err })
+	group.Go(func() error {
+		defer managementReadSpan(child, "gateway_providers")()
+		var err error
+		out.Providers, err = effectiveProviders(child, source, true)
+		return err
+	})
+	if controls["channel_settings"] == true && controls["temporary_channel_restore"] == true {
+		group.Go(func() error {
+			defer managementReadSpan(child, "gateway_export")()
+			admin := source
+			if source.ConfigKey != "" {
+				admin.Key = source.ConfigKey
+			}
+			var err error
+			out.Export, _, err = subGateway(child, admin, "GET", "/v1/channel-settings/export", nil)
+			if err != nil {
+				return err
+			}
+			if out.Export["revision"] != out.Revision {
+				return errManagementSourceRevision
+			}
+			return nil
+		})
+	}
 	if err := group.Wait(); err != nil {
 		return out, err
 	}
@@ -119,6 +156,7 @@ func readManagementGateway(ctx context.Context, source controlSource) (managemen
 	group.SetLimit(4)
 	for i, key := range out.Keys {
 		group.Go(func() error {
+			defer managementReadSpan(child, "gateway_key_catalog")()
 			raw, _, err := fetchSource(child, source, "/v1/model-channels", url.Values{"api_key_id": {key.ID}, "endpoint": {"all"}, "stream": {"all"}})
 			if err != nil {
 				return err
@@ -148,6 +186,33 @@ func readManagementGateway(ctx context.Context, source controlSource) (managemen
 }
 
 func verifyManagementGateway(ctx context.Context, facts managementGatewayFacts) error {
+	defer managementReadSpan(ctx, "gateway_fence")()
+	if facts.AtomicSnapshot {
+		admin := facts.Source
+		if admin.ConfigKey != "" {
+			admin.Key = admin.ConfigKey
+		}
+		raw, _, err := subGateway(ctx, admin, "GET", "/v1/channel-settings/management-revision", nil)
+		if err != nil {
+			return err
+		}
+		if raw["format"] != "management-revision-v1" {
+			return errManagementSourceContract
+		}
+		if raw["revision"] != facts.Revision || raw["config_revision"] != facts.ConfigRevision {
+			return errManagementSourceRevision
+		}
+		if facts.Source.ConfigKey != "" && facts.Source.ConfigKey != facts.Source.Key {
+			controls, _, err := subGateway(ctx, facts.Source, "GET", "/v1/channel-controls", nil)
+			if err != nil {
+				return err
+			}
+			if controls["revision"] != facts.Revision || controls["config_revision"] != facts.ConfigRevision {
+				return errManagementSourceRevision
+			}
+		}
+		return nil
+	}
 	controls, _, err := subGateway(ctx, facts.Source, "GET", "/v1/channel-controls", nil)
 	if err != nil {
 		return err
@@ -331,7 +396,11 @@ func assembleManagementGatewayView(view *managementDatabaseView, facts []managem
 			return err
 		}
 		view.Input.Imports = append(view.Input.Imports, installed...)
-		view.Input.Routes[source.Source.ID] = managementGatewayRoutes(source)
+		routes := managementGatewayRoutes(source)
+		for i := range routes.Data {
+			routes.Data[i].EngineOrigin = view.EngineOrigins[source.Source.ID][routes.Data[i].Provider]
+		}
+		view.Input.Routes[source.Source.ID] = routes
 	}
 	seen := map[string]bool{}
 	for _, channel := range view.Input.Imports {

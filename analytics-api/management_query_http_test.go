@@ -62,6 +62,12 @@ func TestManagementHTTPCompleteSelectionAuthorizationAndFreshness(t *testing.T) 
 	if len(page.Rows) != 25 || page.Total != 61 || page.EligibleCount != 61 || len(page.Accounts) != 1 || len(page.Accounts[0].Targets) != 0 || page.SelectionToken == "" {
 		t.Fatal("incomplete page metadata", page.Total, page.EligibleCount, len(page.Rows))
 	}
+	if len(page.Context.Fingerprints) != 25 || page.Context.Imports == nil || page.Context.Routes == nil || page.Context.Prices == nil || page.Accounts[0].ActiveGroups == nil || *page.Accounts[0].ActiveGroups != 61 {
+		t.Fatal("page omitted current display metadata or full account counts")
+	}
+	if !page.Rows[0].Target.DetailsOmitted {
+		t.Fatal("compact target presented as a full diagnostic")
+	}
 	second := call(ownerToken, url.Values{"cursor": {page.NextCursor}})
 	var next managementPageResponse
 	if err := json.Unmarshal(second.Body.Bytes(), &next); err != nil || second.Code != 200 || next.Offset != 25 || len(next.Rows) != 25 || next.Revision != page.Revision {

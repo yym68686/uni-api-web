@@ -59,6 +59,8 @@ func (s *Service) readSubAccountDetailsWithQualityFrom(ctx context.Context, db c
 		index[a.ID] = i
 	}
 	trace.next("targets")
+	stages := newManagementReadTimeline(ctx, "database_targets")
+	defer stages.finish()
 	rows, err := db.QueryContext(ctx, `SELECT t.account_id,t.group_id,t.name,t.platform,t.channel,t.rate,t.remote_key_id,t.active,t.state,t.message,t.result,t.billing,COALESCE(h.total,0),COALESCE(h.successful,0),COALESCE(h.passed,0),t.compaction,t.compaction_state,t.tool_use,t.tool_use_state FROM console_sub_targets t JOIN console_sub_accounts a ON a.id=t.account_id LEFT JOIN console_quality_totals h ON h.account_id=t.account_id AND h.group_id=t.group_id WHERE a.owner=$1 AND ($2='' OR a.id=$2) AND ($3=0 OR t.group_id=$3) ORDER BY t.group_id`, owner, accountID, groupID)
 	if err != nil {
 		return subAccountReadFailure{"检测结果暂不可用", err}
@@ -110,6 +112,7 @@ func (s *Service) readSubAccountDetailsWithQualityFrom(ctx context.Context, db c
 		return subAccountReadFailure{"检测结果读取失败", err}
 	}
 	rows.Close()
+	stages.next("database_models")
 	trace.next("models")
 	models, modelBytes, err := s.subReadModelsFrom(ctx, db, owner, accountID, groupID, model, summary, accounts)
 	if trace != nil {
@@ -118,15 +121,18 @@ func (s *Service) readSubAccountDetailsWithQualityFrom(ctx context.Context, db c
 	if err != nil {
 		return subAccountReadFailure{"检测结果读取失败", err}
 	}
+	stages.next("database_queued")
 	trace.next("queued_checks")
 	if err := s.subAttachQueuedChecksFrom(ctx, db, owner, accounts); err != nil {
 		return subAccountReadFailure{"排队任务读取失败", err}
 	}
+	stages.next("database_usage")
 	trace.next("usage")
 	if err := s.subAttachUsageFrom(ctx, db, owner, accounts); err != nil {
 		log.Printf("sub_accounts_receipt_read_failed class=%s canceled=%t request_id=%s", databaseErrorClass(err), ctx.Err() != nil, consoleRequestID(ctx))
 		return subAccountReadFailure{"模型账单读取失败，请重新读取", err}
 	}
+	stages.next("database_rates")
 	trace.next("observed_rates")
 	if !omitRates {
 		observed, err := s.control.subObservedRatesForAccountFrom(ctx, db, owner, accountID)
@@ -140,6 +146,5 @@ func (s *Service) readSubAccountDetailsWithQualityFrom(ctx context.Context, db c
 			}
 		}
 	}
-
 	return nil
 }

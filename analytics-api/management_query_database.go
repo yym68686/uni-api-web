@@ -17,13 +17,17 @@ type managementDatabaseView struct {
 	BindingAccounts []subBindingAccount
 	Sources         []controlSource `json:"-"`
 	ReadAt          time.Time
+	EngineOrigins   map[string]map[string]string
 }
 
 // Caller owns one repeatable-read transaction for the complete view. Sources
 // are returned privately for live revision fencing; their credentials are
 // never part of a page or cursor. No historical request partitions are scanned.
 func (s *Service) readManagementDatabaseFrom(ctx context.Context, db controlQueryDB, owner string, facts []managementGatewayFacts) (managementDatabaseView, error) {
+	ctx = managementTraceContext(ctx)
 	out := managementDatabaseView{}
+	trace := newManagementReadTimeline(ctx, "database_sources")
+	defer trace.finish()
 	if err := db.QueryRowContext(ctx, `SELECT transaction_timestamp()`).Scan(&out.ReadAt); err != nil {
 		return out, err
 	}
@@ -35,6 +39,7 @@ func (s *Service) readManagementDatabaseFrom(ctx context.Context, db controlQuer
 	if err := verifyManagementSources(out.Sources, facts); err != nil {
 		return out, err
 	}
+	trace.next("database_bindings")
 	out.Bindings, err = s.managementBindingsFrom(ctx, db, owner, facts)
 	if err != nil {
 		return out, err
@@ -47,6 +52,15 @@ func (s *Service) readManagementDatabaseFrom(ctx context.Context, db controlQuer
 	if err != nil {
 		return out, err
 	}
+	out.EngineOrigins = map[string]map[string]string{}
+	for _, source := range facts {
+		origins, err := s.managementEngineOriginsFrom(ctx, db, source, out.References)
+		if err != nil {
+			return out, err
+		}
+		out.EngineOrigins[source.Source.ID] = origins
+	}
+	trace.next("database_quality")
 	bindings, err := managementQualityBindings(out.Bindings, out.References, facts)
 	if err != nil {
 		return out, err
@@ -55,19 +69,23 @@ func (s *Service) readManagementDatabaseFrom(ctx context.Context, db controlQuer
 	if err != nil {
 		return out, err
 	}
+	trace.next("database_account_headers")
 	out.Input.Accounts, err = readSubAccountHeaders(ctx, db, owner, "")
 	if err != nil {
 		return out, err
 	}
+	trace.next("database_account_details")
 	if err = s.readSubAccountDetailsWithQualityFrom(ctx, db, owner, "", 0, "", true, false, out.Input.Accounts, nil, shared); err != nil {
 		return out, err
 	}
+	trace.next("database_normalize")
 	// Filter the same summary representation the browser currently receives.
 	// Private probe IDs are needed for receipt attachment, then discarded before
 	// shared-quality selection and any page serialization.
 	if err := normalizeManagementAccounts(out.Input.Accounts); err != nil {
 		return out, err
 	}
+	trace.next("database_configured_checks")
 	out.Input.Checks, err = readConfiguredChecksFrom(ctx, db, "", "", "")
 	if err != nil {
 		return out, err
@@ -80,7 +98,9 @@ func (s *Service) readManagementDatabaseFrom(ctx context.Context, db controlQuer
 		if err := json.Unmarshal(raw, &out.Input.Checks[i]); err != nil {
 			return out, err
 		}
+		out.Input.Checks[i].DetailsOmitted = true
 	}
+	trace.next("database_fingerprints")
 	fingerprints, err := readManagementFingerprintsFrom(ctx, db, owner)
 	if err != nil {
 		return out, err
@@ -94,6 +114,7 @@ func (s *Service) readManagementDatabaseFrom(ctx context.Context, db controlQuer
 	if s.engine == nil {
 		return out, errors.New("management pricing unavailable")
 	}
+	trace.next("database_prices")
 	table := pgx.Identifier{s.engine.historyPath, "prices"}.Sanitize()
 	rows, err := db.QueryContext(ctx, `SELECT model,input,output,cache_read,cache_write,cache_write_1h,source,verified,effective_at,charge_cache_write,sale_percent,long_context_premium FROM `+table+` ORDER BY model`)
 	if err != nil {
@@ -140,6 +161,7 @@ func normalizeManagementAccounts(accounts []subAccount) error {
 				}
 			}
 			target.Models = models
+			target.DetailsOmitted = true
 		}
 	}
 	return nil

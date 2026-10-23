@@ -33,6 +33,8 @@ func TestManagementGatewayReadsAreBoundedVersionFencedAndReadOnly(t *testing.T) 
 					return
 				}
 				switch r.URL.Path {
+				case "/v1/channel-settings/management-snapshot":
+					http.NotFound(w, r)
 				case "/v1/channel-controls":
 					controls.Add(1)
 					writeJSON(w, 200, map[string]any{"revision": fmt.Sprint(revision.Load()), "config_revision": "config-1", "rules": []any{}, "temporary_channels": []any{}})
@@ -123,6 +125,132 @@ func TestManagementGatewayReadsAreBoundedVersionFencedAndReadOnly(t *testing.T) 
 			revision.Store(3)
 			if err := verifyManagementGateway(context.Background(), facts); !errors.Is(err, errManagementSourceRevision) {
 				t.Fatal("post-database gateway change accepted", err)
+			}
+		})
+	}
+}
+
+func TestManagementGatewayAtomicSnapshotIsAcceptedAsOneRevision(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/channel-controls" {
+			if r.Header.Get("Authorization") != "Bearer catalog-secret" {
+				t.Error("observation credential was not verified")
+			}
+			writeJSON(w, 200, map[string]any{"revision": "runtime-1", "config_revision": "config-1"})
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer config-secret" {
+			t.Error("snapshot used a non-admin identity")
+		}
+		if r.URL.Path == "/v1/channel-settings/management-revision" {
+			writeJSON(w, 200, map[string]any{"format": "management-revision-v1", "revision": "runtime-1", "config_revision": "config-1"})
+			return
+		}
+		if r.URL.Path != "/v1/channel-settings/management-snapshot" {
+			http.NotFound(w, r)
+			return
+		}
+		writeJSON(w, 200, map[string]any{
+			"format": "management-snapshot-v1", "revision": "runtime-1", "config_revision": "config-1",
+			"controls":  map[string]any{"revision": "runtime-1", "config_revision": "config-1"},
+			"keys":      []any{map[string]any{"key_id": "k1", "prefix": "masked", "position": 1}},
+			"catalog":   []any{map[string]any{"provider": "native", "model": "public", "upstream_model": "actual", "engine": "gpt", "engine_mode": "auto"}},
+			"routes":    map[string]any{"k1": []any{map[string]any{"provider": "native", "model": "public", "upstream_model": "actual", "engine": "gpt", "engine_mode": "auto"}}},
+			"providers": []any{map[string]any{"provider": "native", "base_url": "https://site.test/v1", "api": []any{"opaque"}}},
+			"export":    map[string]any{"revision": "runtime-1", "channel_settings": map[string]any{}, "temporary_definitions": map[string]any{}},
+		})
+	}))
+	defer server.Close()
+	source := controlSource{sourceView: sourceView{ID: "fixture", Name: "fixture", Base: server.URL}, Key: "catalog-secret", ConfigKey: "config-secret"}
+	facts, err := readManagementGateway(context.Background(), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !facts.AtomicSnapshot || facts.Revision != "runtime-1" || facts.ConfigRevision != "config-1" || len(facts.Routes["k1"]) != 1 || facts.Catalog[0].Provider != "native" {
+		t.Fatalf("atomic snapshot was not preserved: %+v", facts)
+	}
+	if err := verifyManagementGateway(context.Background(), facts); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestManagementGatewayAtomicRejectsIncompleteOrUnauthorizedReads(t *testing.T) {
+	for _, mode := range []string{"forbidden", "unavailable", "conflict", "format", "missing-export", "mixed-export", "mixed-controls", "duplicate-provider", "duplicate-key", "missing-key-routes", "extra-key-routes", "unknown-provider", "revoked-observer", "changed-fence", "revoked-at-fence"} {
+		t.Run(mode, func(t *testing.T) {
+			var legacy, observerReads atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet {
+					t.Error("read attempted a mutation")
+				}
+				switch r.URL.Path {
+				case "/v1/channel-settings/management-snapshot":
+					status := map[string]int{"forbidden": 403, "unavailable": 503, "conflict": 409}[mode]
+					if status != 0 {
+						http.Error(w, "private upstream diagnostic", status)
+						return
+					}
+					row := managementModel{Provider: "native", Model: "m"}
+					raw := map[string]any{
+						"format": "management-snapshot-v1", "revision": "r1", "config_revision": "c1",
+						"controls": map[string]any{"revision": "r1", "config_revision": "c1"},
+						"export":   map[string]any{"revision": "r1", "channel_settings": map[string]any{}, "temporary_definitions": map[string]any{}},
+						"keys":     []managementGatewayKey{{ID: "key"}}, "catalog": []managementModel{row},
+						"routes":    map[string][]managementModel{"key": {row}},
+						"providers": []configuredProvider{{Provider: "native", API: "private-provider"}},
+					}
+					switch mode {
+					case "format":
+						raw["format"] = "unknown"
+					case "missing-export":
+						delete(raw, "export")
+					case "mixed-export":
+						raw["export"].(map[string]any)["revision"] = "r2"
+					case "mixed-controls":
+						raw["controls"].(map[string]any)["config_revision"] = "c2"
+					case "duplicate-provider":
+						raw["providers"] = []configuredProvider{{Provider: "native"}, {Provider: "native"}}
+					case "duplicate-key":
+						raw["keys"] = []managementGatewayKey{{ID: "key"}, {ID: "key"}}
+					case "missing-key-routes":
+						raw["routes"] = map[string][]managementModel{}
+					case "extra-key-routes":
+						raw["routes"].(map[string][]managementModel)["extra"] = []managementModel{}
+					case "unknown-provider":
+						raw["catalog"] = []managementModel{{Provider: "other", Model: "m"}}
+					}
+					writeJSON(w, 200, raw)
+				case "/v1/channel-controls":
+					n := observerReads.Add(1)
+					if mode == "revoked-observer" || mode == "revoked-at-fence" && n > 1 {
+						http.Error(w, "revoked", 403)
+						return
+					}
+					writeJSON(w, 200, map[string]any{"revision": "r1", "config_revision": "c1"})
+				case "/v1/channel-settings/management-revision":
+					revision := "r1"
+					if mode == "changed-fence" {
+						revision = "r2"
+					}
+					writeJSON(w, 200, map[string]any{"format": "management-revision-v1", "revision": revision, "config_revision": "c1"})
+				default:
+					legacy.Add(1)
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			source := controlSource{sourceView: sourceView{Base: server.URL}, Key: "observer", ConfigKey: "admin"}
+			facts, err := readManagementGateway(context.Background(), source)
+			if mode == "changed-fence" || mode == "revoked-at-fence" {
+				if err != nil {
+					t.Fatal("initial read failed", err)
+				}
+				err = verifyManagementGateway(context.Background(), facts)
+			}
+			if err == nil || legacy.Load() != 0 {
+				t.Fatal("invalid snapshot accepted or silently downgraded", err, legacy.Load())
+			}
+			if strings.Contains(err.Error(), "private") {
+				t.Fatal("private diagnostics escaped")
 			}
 		})
 	}

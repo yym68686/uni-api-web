@@ -22,7 +22,7 @@ it("never publishes persisted channel snapshots while live reads remain pending"
   const client = new QueryClient({defaultOptions:{queries:{retry:false}}});
   client.setQueryData(["account"], {authenticated:true,username:"fixture"});
   render(<QueryClientProvider client={client}><Tooltip.Provider><Sub2apiChecks user="fixture"/></Tooltip.Provider></QueryClientProvider>);
-  await waitFor(() => expect(client.getQueryState(["sub2api"])?.fetchStatus).toBe("fetching"));
+  await waitFor(() => expect(client.getQueryCache().findAll({queryKey:["management-query"]})[0]?.state.fetchStatus).toBe("fetching"));
   expect(loadSummaryCache).not.toHaveBeenCalled();
   expect(screen.queryByText("cached-group", {selector:"strong"})).not.toBeInTheDocument();
   expect(client.getQueryData(["sub2api"])).toBeUndefined();

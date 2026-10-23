@@ -1,4 +1,4 @@
-import { useModelFingerprints, rowFingerprints, fingerprintTargets, fingerprintLabels, fingerprintStatus, FingerprintCell, FingerprintPanel, fingerprintNote, fingerprintReadMessage } from "./ModelFingerprints";
+import { fingerprintTargets, fingerprintLabels, FingerprintCell, FingerprintPanel, fingerprintNote } from "./ModelFingerprints";
 import { isCapabilityCheckModel, capabilityCheckScope } from "./sub2apiModels";
 import { CopyProbeCurl } from "./CopyProbeCurl";
 import { TableLoading, DetailLoading } from "./PageLoading";
@@ -28,16 +28,15 @@ import { ResponseLatency } from "./LatencyBadge";
 import { Empty, Spinner, Tip } from "./ui";
 import { loadSubFilters, saveSubFilters, subFilterDefaults } from "./sub2apiPreferences";
 import { useSubImports, boundGroups } from "./sub2apiImports";
-import { useSubAccounts } from "./sub2apiAccounts";
 import { Sub2apiImport } from "./Sub2apiImport";
 import { CreateChannel } from "./CreateChannel";
 import { ChannelOptimization } from "./ChannelOptimization";
 import { ChannelProtocolSummary } from "./ChannelProtocolSummary";
-import { managementJoinState } from "./channelOptimizationPlan";
-import { channelMembers, managementRows, UNASSIGNED_ACCOUNT, useChannelManagement, useConfiguredChecks } from "./channelManagement";
+import { useManagementPage, readManagementSelection, managementOptimizationSnapshot } from "./managementQuery";
+import { channelMembers, managementRows, UNASSIGNED_ACCOUNT } from "./channelManagement";
 import type { ManagedChannel, ManagementRow } from "./channelManagement";
 import { ConfiguredChannelDialog } from "./ChannelRoutes";
-import { managedRouteCount, useAllChannelRoutes } from "./channelRouteData";
+import { managedRouteCount } from "./channelRouteData";
 import { useConsoleSources } from "./consoleSources";
 import { CompactionStatus, compactionLabels } from "./SubCompaction";
 import type { CompactionResult } from "./SubCompaction";
@@ -60,11 +59,10 @@ import { time } from "./format";
 import { QualityHistory, QualityProbability, qualityTooltip } from "./QualityHistory";
 import type { QualitySummary } from "./QualityHistory";
 import { SiteLink } from "./ChannelSite";
-import { useSubPrices, PriceStatus, GroupPriceStatus, UsageDetailRows } from "./Sub2apiPricing";
+import { PriceStatus, GroupPriceStatus, UsageDetailRows } from "./Sub2apiPricing";
 import type { SubUsage } from "./sub2apiPriceCheck";
 import type { ModelPrice } from "./types";
 import { BillingRate } from "./BillingRate";
-import { managementCandidateRows, filterManagementCandidates } from "./managementQueryFilters";
 import type { ObservedRate } from "./billingRates";
 
 export interface Probe {
@@ -728,22 +726,20 @@ function ManagementChannelDrawer({
 export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   const client = useQueryClient();
   const sources = useConsoleSources(user);
-  const query = useSubAccounts();
-  const accountHeaders = useSubAccounts(true, true);
-  const prices = useSubPrices(user);
-  const accounts = useMemo(() => {
-    const data = query.data?.data || accountHeaders.data?.data || [];
-    if (!accountHeaders.data || accountHeaders.data.cached) return data;
-    const headers = new Map(accountHeaders.data.data.map(a => [a.id, a]));
-    return data.map(a => headers.has(a.id) ? { ...a, ...headers.get(a.id), targets: a.targets } : a);
-  }, [query.data, query.dataUpdatedAt, accountHeaders.data, accountHeaders.dataUpdatedAt]);
-  const statusAccounts = useMemo(() => {
-    if (!accountHeaders.data || accountHeaders.data.cached) return accounts;
-    const targets = new Map(accounts.map(a => [a.id, a.targets]));
-    return accountHeaders.data.data.map(header => ({ ...header, targets: targets.get(header.id) || [] }));
-  }, [accounts, accountHeaders.data]);
-  const [form, setForm] = useState<{ account: SubAccount | null } | null>(null);
   const [filters, setFilters] = useState(() => loadSubFilters(user));
+  const [cursorState,setCursorState]=useState({filter:"",cursor:""});
+  const filterKey=JSON.stringify(filters);
+  const cursor=cursorState.filter===filterKey?cursorState.cursor:"";
+  const pageQuery=useManagementPage(user,filters,cursor);
+  const pageData=pageQuery.data;
+  const accounts=pageData?.accounts || [];
+  const statusAccounts=accounts;
+  const query={...pageQuery,data:pageData?{data:accounts,cached:false}:undefined};
+  const accountHeaders=query;
+  const prices={data:pageData?{data:pageData.context.prices}:undefined};
+  const [form, setForm] = useState<{ account: SubAccount | null } | null>(null);
+  const setPage=(_page:number)=>setCursorState({filter:filterKey,cursor:""});
+  const refreshPage=()=>{if(cursor)setPage(0);else void pageQuery.refetch();};
   const [modelSelectionRevision, setModelSelectionRevision] = useState(0);
   const {
     search,
@@ -777,23 +773,17 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
     setFilters((v) => ({ ...v, quality }));
   const setPlatform = (platform: string) =>
     setFilters((v) => ({ ...v, platform }));
-  const imports = useSubImports();
-  const management = useChannelManagement();
-  const configuredChecks = useConfiguredChecks();
-  const fingerprints = useModelFingerprints();
-  // Account headers do not contain detection results. A failed initial read
-  // cannot establish an empty filter result or a safe batch selection.
-  const resultsUnavailable = !query.data || !management.data;
-  const resultsReadFailed = (!query.data && query.isError) || (!management.data && management.isError);
-  const routeSources = query.data && management.data
-    ? [...new Set([...(sources.data?.data || []).map(s=>s.id), ...management.data.data.map(c=>c.source_id)])]
-    : [];
-  const routeQueries = useAllChannelRoutes(routeSources);
-  const optimizationRoutes = Object.fromEntries(routeSources.flatMap((source,i) => routeQueries[i]?.data && !routeQueries[i].isError ? [[source,routeQueries[i].data!]] : []));
-  function configuredCount(item: ManagedChannel) {
-    return managedRouteCount(item, routeSources, routeQueries);
-  }
-  const filterModels = [...new Set([...SUB_MODELS, ...(management.data?.data || []).flatMap(item => item.models || []), ...(configuredChecks.data?.data || []).filter(c => c.kind === "model").map(c => c.model), ...accounts.flatMap(a => a.targets.flatMap(t => (t.models || []).map(c => c.model))), ...(model ? [model] : [])])];
+  const resultsUnavailable = !pageData;
+  const resultsReadFailed = pageQuery.isError;
+  const optimizationRoutes = pageData?.context.routes || {};
+  const routeSources=Object.keys(optimizationRoutes);
+  const routeQueries=routeSources.map(source=>({data:optimizationRoutes[source]}));
+  function configuredCount(item:ManagedChannel){return managedRouteCount(item,routeSources,routeQueries);}
+  // Keep the vocabulary selectable during a new query; no previous result
+  // rows, counts or eligibility are rendered as the new filter's answer.
+  const knownModels=useRef<string[]>(SUB_MODELS);
+  if(pageData)knownModels.current=pageData.models;
+  const filterModels=[...new Set([...knownModels.current,...(model?[model]:[])])];
   const [configuredDialog, setConfiguredDialog] = useState<ManagedChannel | null>(null);
   const [managementDetail, setManagementDetail] = useState<ManagementRow | null>(null);
   const [importing, setImporting] = useState<{
@@ -801,6 +791,8 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
     target: SubTarget;
     configured?: ManagedChannel;
   } | null>(null);
+  const dialogImports=useSubImports(!!importing);
+  const imports={data:pageData?{data:pageData.context.imports,labels:{},unavailable_sources:[]}:undefined};
   const [error, setError] = useState("");
   const [action, setAction] = useState("");
   const checksInFlight = useRef(new Set<string>());
@@ -810,34 +802,40 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
     (account) => !pending(account.state),
   );
   const [removing, setRemoving] = useState<string | null>(null);
-  const [page, setPage] = useState(0);
-  const allManagementRows=useMemo(()=>managementRows(accounts,management.data?.data || [],imports.data?.data || [],model,accountId,configuredChecks.data?.data || []),
-    [accounts,management.data,imports.data,model,accountId,configuredChecks.data]);
-  const candidates=useMemo(()=>managementCandidateRows(allManagementRows,filters,prices.data?.data),[allManagementRows,filters,prices.data]);
-  const {rows,rates,platforms} = filterManagementCandidates(candidates,filters,
-    {prices:prices.data?.data,fingerprintReady:!fingerprints.isError && !fingerprints.isPending,
-      fingerprints:row=>rowFingerprints(row,fingerprints.index,model).map(e=>fingerprintStatus(e.record)),
-      joined:row=>managementJoinState(row,imports.data,optimizationRoutes)},
-  );
-  const effectiveMaxRate = maxRate;
-  const extraModels = [...new Set(rows.flatMap(r => r.checks.map(c => c.model)).filter(m => !SUB_MODELS.includes(m)))].sort();
-  const availableModels = [...SUB_MODELS, ...extraModels];
+  const rows=pageData?.rows || [], rates=pageData?.rates || [], platforms=pageData?.platforms || [];
+  const total=pageData?.total || 0, eligibleCount=pageData?.eligible_count || 0;
+  const effectiveMaxRate=maxRate;
+  const availableModels=pageData?.detection_models || SUB_MODELS;
+  const extraModels=availableModels.filter(m=>!SUB_MODELS.includes(m));
   const modelSelectionKey = JSON.stringify(availableModels);
   const detectionModels = useMemo(() => loadSubModels(user, JSON.parse(modelSelectionKey)), [user, modelSelectionKey, modelSelectionRevision]);
   // An explicit model filter is a direct probe request. Saved checkbox choices
   // only define the batch when no individual model is selected.
   const modelsToCheck = model ? [model] : detectionModels;
   const allModelsSelected = detectionModels.length === availableModels.length;
-  const currentPage = Math.min(
-    page,
-    Math.max(0, Math.ceil(rows.length / 25) - 1),
-  );
+  const currentPage=(pageData?.offset || 0)/25;
   const selectionID = (account: SubAccount, target: SubTarget, configured?: ManagedChannel) =>
     !account.id && configured ? `configured:${configured.provider}:${configured.engine}` : `${account.id}:${target.group_id}`;
-  const eligible = rows.filter(
-    ({ account, target, configured }) =>
-      (!account.id && configured) || (target.active && target.key_id > 0 && !pending(account.state) && target.state !== "error"),
-  ).filter((row, index, all) => all.findIndex(other => selectionID(other.account, other.target, other.configured) === selectionID(row.account, row.target, row.configured)) === index);
+  const [readingSelection,setReadingSelection]=useState(false);
+  const selectionRead=useRef(false);
+  const selectionRequest=useRef<AbortController|null>(null);
+  const selectionScope=useRef("");
+  selectionScope.current=JSON.stringify([user,filterKey,cursor,pageData?.revision]);
+  useEffect(()=>{
+    selectionRequest.current?.abort();
+    return ()=>{selectionRequest.current?.abort();};
+  },[user,filterKey,cursor]);
+  async function completeSelection(){
+    if(!pageData)throw Error("请先读取最新渠道结果");
+    selectionRequest.current?.abort();
+    const controller=new AbortController(),scope=selectionScope.current;
+    selectionRequest.current=controller;
+    try{
+      const selected=await readManagementSelection(filters,pageData,controller.signal);
+      if(scope!==selectionScope.current)throw Error("筛选或渠道结果已变化，请重新选择操作");
+      return selected;
+    }finally{if(selectionRequest.current===controller)selectionRequest.current=null;}
+  }
   async function mutate(
     key: string,
     path: string,
@@ -942,13 +940,19 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
       setSubmittingChecks(new Set(checksInFlight.current));
     }
   }
-  const batchBusy = (kind: CheckKind) => eligible.some(({account, target, configured}) =>
-    checkKeys(account, target, kind, configured).some(key => submittingChecks.has(key)));
-  const batchDisabled = (kind: CheckKind) => resultsUnavailable || !eligible.some(({account, target, configured}) => canCheck(account, target, kind, configured));
-  const check = (selection: CheckSelection) => queueChecks("check", selection);
-  const checkQuality = () => queueChecks("quality", eligible);
-  const checkCompaction = (selection: CheckSelection = eligible) => queueChecks("compaction", selection);
-  const checkToolUse = (selection: CheckSelection = eligible) => queueChecks("tool-use", selection);
+  async function batch(kind:CheckKind){
+    if(selectionRead.current || !pageData)return;
+    selectionRead.current=true;setReadingSelection(true);setError("");
+    try{const selected=await completeSelection();await queueChecks(kind,selected.eligible);}
+    catch(e){setError(e instanceof Error?e.message:"完整筛选结果读取失败");}
+    finally{selectionRead.current=false;setReadingSelection(false);}
+  }
+  const batchBusy=(_kind:CheckKind)=>readingSelection || submittingChecks.size>0;
+  const batchDisabled=(kind:CheckKind)=>resultsUnavailable || !eligibleCount || readingSelection || submittingChecks.size>0 || (kind==="check"&&!modelsToCheck.length) || ((kind==="compaction"||kind==="tool-use")&&!!model&&!isCapabilityCheckModel(model)) || (rows.length===total && !rows.some(row=>canCheck(row.account,row.target,kind,row.configured)));
+  const check=(selection?:CheckSelection)=>selection?queueChecks("check",selection):batch("check");
+  const checkQuality=()=>batch("quality");
+  const checkCompaction=(selection?:CheckSelection)=>selection?queueChecks("compaction",selection):batch("compaction");
+  const checkToolUse=(selection?:CheckSelection)=>selection?queueChecks("tool-use",selection):batch("tool-use");
   return (
     <div className="sub2api-page">
       <section className="data-panel sub-accounts">
@@ -1015,14 +1019,13 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
             账号状态读取失败：{accountHeaders.error.message}
             <button
               className="button small"
-              onClick={() => void accountHeaders.refetch()}
+              onClick={refreshPage}
             >
               重试
             </button>
           </div>
         )}
-        {accountHeaders.data && (accountHeaders.data.cached || accountHeaders.isError) && <p className="settings-note" role="status">正在显示上次读取的账号状态；最新状态尚未确认。</p>}
-        {!query.data && !accountHeaders.data && (query.isPending || accountHeaders.isPending) ? (
+        {resultsReadFailed ? null : resultsUnavailable ? (
           <TableLoading kind="accounts" rows={3} />
         ) : statusAccounts.length === 0 ? (
           <Empty title="添加第一个站点账号" icon={<Globe2 size={25} />}>
@@ -1152,28 +1155,21 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
           {error}
         </div>
       )}
-      {query.error && <div role="alert" className="error-banner">检测结果刷新失败，已提交的后台任务不受影响。{query.error.message}<button className="button small" onClick={() => void query.refetch()}>重试读取</button></div>}
-      {query.data && (query.data.cached || query.isError) && <p className="settings-note" role="status">正在显示上次读取的检测结果；最新结果尚未确认。</p>}
-      {configuredChecks.isError && <div role="alert" className="error-banner">已有渠道检测记录读取失败。<button className="button small" onClick={() => void configuredChecks.refetch()}>重试</button></div>}
-      {management.error && <div className="error-banner" role="alert">
-        {management.error.message}
-        <button className="button small" onClick={() => void management.refetch()}>重试</button>
-      </div>}
       <section className="data-panel">
         <div className="data-heading sub-detection-heading">
           <div className="sub-detection-title">
             <div className="data-title">
               <ScanLine size={19} />
               <h2>渠道管理</h2>
-              <span className="count-badge">{resultsUnavailable ? "—" : rows.length}</span>
+              <span className="count-badge">{resultsUnavailable ? "—" : total}</span>
             </div>
-            <span className="sub-detection-scope">{resultsUnavailable ? "" : `${eligible.length} 个渠道可检测`}</span>
+            <span className="sub-detection-scope">{resultsUnavailable ? "" : `${eligibleCount} 个渠道可检测`}</span>
           </div>
           <div className="sub-detection-controls" role="region" aria-label="渠道管理操作" tabIndex={0}>
             <CreateChannel sources={sources.data?.data || []} />
             <ChannelOptimization
-              disabled={!rows.length || !query.data || !management.data || !imports.data || !prices.data || !configuredChecks.data || query.isError || management.isError || imports.isError || prices.isError || configuredChecks.isError}
-              snapshot={() => ({rows,accounts,inventory:management.data!.data,imports:imports.data!,routes:optimizationRoutes,checks:configuredChecks.data!.data,prices:prices.data!.data,filters})}
+              disabled={!pageData || !total || readingSelection}
+              snapshot={async()=>managementOptimizationSnapshot(await completeSelection(),filters)}
             />
             <label className="search-field">
               <Search size={16} />
@@ -1190,7 +1186,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
             <div className="sub-check-group" role="group" aria-label="专项检测">
               <button
                 className="button small"
-                aria-label={`降智检测 · ${eligible.length} 个渠道`}
+                aria-label={`降智检测 · ${eligibleCount} 个渠道`}
                 disabled={batchDisabled("quality")}
                 onClick={() => void checkQuality()}
               >
@@ -1202,12 +1198,12 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                 降智检测
               </button>
               <button className="button small" disabled={batchDisabled("compaction")}
-                title={capabilityCheckScope} aria-label={`压缩检测 · ${eligible.length} 个渠道`}
+                title={capabilityCheckScope} aria-label={`压缩检测 · ${eligibleCount} 个渠道`}
                 onClick={() => void checkCompaction()}>
                 {batchBusy("compaction") ? <Spinner small /> : <ScanLine size={15} />} 压缩检测
               </button>
               <button className="button small" disabled={batchDisabled("tool-use")}
-                aria-label={`Tool use 检测 · ${eligible.length} 个渠道`}
+                aria-label={`Tool use 检测 · ${eligibleCount} 个渠道`}
                 onClick={() => void checkToolUse()} title={toolUseDescription}>
                 {batchBusy("tool-use") ? <Spinner small /> : <ScanLine size={15} />} Tool use
               </button>
@@ -1216,18 +1212,18 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
               className="button small sub-check-icon"
               aria-label="刷新渠道管理"
               title="刷新数据"
-              onClick={() => { void query.refetch(); void management.refetch(); void configuredChecks.refetch(); void imports.refetch(); void client.invalidateQueries({queryKey:["channel-routes"]}); }}
-              disabled={query.isFetching || management.isFetching}
+              onClick={refreshPage}
+              disabled={query.isFetching}
             >
               <RefreshCw size={15} className={query.isFetching ? "spin" : ""} />
             </button>
             <div className="sub-model-check-group" role="group" aria-label="模型检测与设置">
               <button
                 className="button primary small"
-                aria-label={`${model ? "检测所选模型" : allModelsSelected ? "检测全部模型" : `检测已选 ${detectionModels.length} 个模型`} · ${eligible.length} 个渠道`}
+                aria-label={`${model ? "检测所选模型" : allModelsSelected ? "检测全部模型" : `检测已选 ${detectionModels.length} 个模型`} · ${eligibleCount} 个渠道`}
                 disabled={batchDisabled("check")}
-                title={!modelsToCheck.length ? "请在检测模型设置中选择模型" : `检测 ${eligible.length} 个渠道，${modelsToCheck.length} 个模型；可用的 Astra / 6.1-sol 同时检测模型指纹，每模型 3 次请求`}
-                onClick={() => void check(eligible)}
+                title={!modelsToCheck.length ? "请在检测模型设置中选择模型" : `检测 ${eligibleCount} 个渠道，${modelsToCheck.length} 个模型；可用的 Astra / 6.1-sol 同时检测模型指纹，每模型 3 次请求`}
+                onClick={() => void check()}
               >
                 <ScanLine size={15} />
                 {model ? "检测所选模型" : allModelsSelected ? "检测全部模型" : "检测已选模型"}
@@ -1411,7 +1407,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
             </select><ChevronDown size={13}/>
           </label>
           <label className="select-field">
-            <select aria-label="模型指纹筛选" disabled={fingerprints.isError || fingerprints.isPending} value={fingerprint} onChange={e => {setFilters(v => ({...v,fingerprint:e.target.value}));setPage(0);}}>
+            <select aria-label="模型指纹筛选" disabled={!pageData} value={fingerprint} onChange={e => {setFilters(v => ({...v,fingerprint:e.target.value}));setPage(0);}}>
               <option value="">全部模型指纹</option>
               {Object.entries(fingerprintLabels).map(([value,label])=><option key={value} value={value}>{label}</option>)}
             </select><ChevronDown size={13}/>
@@ -1510,7 +1506,6 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                 </thead>
                 <tbody>
                   {rows
-                    .slice(currentPage * 25, (currentPage + 1) * 25)
                     .map((managementRow) => {
                       const { id, account, target: t, checks, selected, configured } = managementRow;
                       const openDrawer = () => setManagementDetail(managementRow);
@@ -1579,7 +1574,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                           )}
                         </td>
                         <td>{selected ? <PriceStatus check={selected} prices={prices.data?.data} /> : <GroupPriceStatus checks={checks} prices={prices.data?.data} />}</td>
-                        <td><FingerprintCell entries={rowFingerprints(managementRow,fingerprints.index,model)} error={fingerprints.error} loading={fingerprints.isPending} supportedModels={fingerprints.supportedModels}/></td>
+                        <td><FingerprintCell entries={(pageData?.context.fingerprints[id] || []).map(({target,record})=>({target,record}))} supportedModels={pageData?.context.fingerprint_models}/></td>
                         <td>
                           <div className="quality-status-stack"><Verdict result={groupQualityResult(t)} history={t.history} /><QualityProbability history={t.history} checkedAt={groupQualityResult(t)?.checked_at} /></div>
                         </td>
@@ -1671,23 +1666,23 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
             </div>
             <div className="table-footer">
               <span>
-                共 {rows.length} 个渠道 · {eligible.length} 个可发起检测
+                共 {total} 个渠道 · {eligibleCount} 个可发起检测
               </span>
               <div className="sub-pagination">
                 <button
                   className="button small"
-                  disabled={currentPage === 0}
-                  onClick={() => setPage(currentPage - 1)}
+                  disabled={!pageData?.previous_cursor}
+                  onClick={() => setCursorState({filter:filterKey,cursor:pageData?.previous_cursor || ""})}
                 >
                   上一页
                 </button>
                 <span>
-                  {currentPage + 1} / {Math.max(1, Math.ceil(rows.length / 25))}
+                  {currentPage + 1} / {Math.max(1, Math.ceil(total / 25))}
                 </span>
                 <button
                   className="button small"
-                  disabled={(currentPage + 1) * 25 >= rows.length}
-                  onClick={() => setPage(currentPage + 1)}
+                  disabled={!pageData?.next_cursor}
+                  onClick={() => setCursorState({filter:filterKey,cursor:pageData?.next_cursor || ""})}
                 >
                   下一页
                 </button>
@@ -1696,11 +1691,10 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
           </>
         )}
       </section>
-      {fingerprints.isError && <p className="error-banner" role="alert">{fingerprintReadMessage(fingerprints.error)}，暂未使用指纹筛选。<button className="button small" onClick={() => void fingerprints.refetch()}>重试</button></p>}
       {importing && (
         <Sub2apiImport
           sources={sources}
-          imports={imports}
+          imports={dialogImports}
           account={importing.account}
           configured={importing.configured}
           target={accounts.find(a => a.id === importing.account.id)?.targets.find(t => t.group_id === importing.target.group_id) || importing.target}

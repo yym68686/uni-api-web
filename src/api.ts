@@ -168,6 +168,7 @@ export async function controlRequest<T>(path:string,init:RequestInit={}):Promise
  return withRequestDeadline(init.signal, read ? 30_000 : 120_000, !read, async (signal, requestId) => {
  const response=await fetch(globalThis.location.origin+"/analytics"+path,{...init,headers:{Accept:"application/json","Content-Type":"application/json",...init.headers,"X-Console-Request-ID":requestId},credentials:"same-origin",cache:"no-store",signal});
  if(!response.ok){const message=await response.text();throw new ApiError(message||`HTTP ${response.status}`,response.status)}
+ if(!read && typeof window !== "undefined") window.dispatchEvent(new Event("uni-console-control-write"));
  return await response.json() as T;
  });
 }

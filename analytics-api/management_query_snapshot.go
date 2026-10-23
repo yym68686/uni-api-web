@@ -8,6 +8,7 @@ import (
 )
 
 func (s *Service) readManagementSources(ctx context.Context) ([]controlSource, error) {
+	defer managementReadSpan(ctx, "sources")()
 	tx, err := s.control.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
 		return nil, err
@@ -39,6 +40,7 @@ func (s *Service) readManagementSnapshot(ctx context.Context, owner string) (man
 		return managementDatabaseView{}, err
 	}
 	view, err := func() (managementDatabaseView, error) {
+		defer managementReadSpan(ctx, "database")()
 		tx, err := s.control.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 		if err != nil {
 			return managementDatabaseView{}, err

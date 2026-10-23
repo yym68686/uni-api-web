@@ -21,6 +21,7 @@ type subModelResult struct {
 	Result  *subResult `json:"result"`
 }
 type subTarget struct {
+	DetailsOmitted  bool                       `json:"details_omitted,omitempty"`
 	CheckSourceID   string                     `json:"check_source_id,omitempty"`
 	ObservedRates   map[string]subObservedRate `json:"observed_rates,omitempty"`
 	ToolUse         *subCapabilityResult       `json:"tool_use,omitempty"`

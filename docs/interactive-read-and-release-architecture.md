@@ -44,22 +44,38 @@ matched against the owner's published PostgreSQL key index; the periodic binding
 inventory is not used as proof of current ownership. Temporary imports also
 require matching site paths and unchanged effective identity.
 
-`useManagementPage` and the complete-selection reader are implemented and tested,
-but **Sub2apiChecks still uses the old read flow**. These branch changes have not
-been published. The database reader still loads all model results and computes a
-revision over all matching rows. Before activation, scope selected-model reads
-including public aliases, preserve full model/facet and batch semantics, wire
-the UI and action invalidations, and measure database work and browser latency
-at production cardinality. These components alone do not establish one second.
+`Sub2apiChecks` now uses the page reader on the unpublished management branch.
+It invalidates the page after successful writes and reads a separate complete
+selection for batch actions and optimization. Engine-origin classification uses
+the current export and transaction-local override evidence. These branch changes
+have not been published. The database reader still loads all model results and
+computes a revision over all matching rows. Before activation, scope reads while
+preserving public aliases, complete facets and batch semantics, then measure
+database work and browser latency at production cardinality.
+
+A bounded read-only diagnostic on the serving node measured 1.165 seconds for
+gateway reads, 10.411 seconds for the database snapshot and 3.2-3.4 seconds for
+assembly and serialization. Its 25-row response was 7.8 MB because those rows
+still carried all model evidence. These measurements disprove the one-second
+target for the current candidate; pagination alone does not satisfy it.
+
+The unpublished uni-api companion branch adds an administrator-only current
+management snapshot and a small revision endpoint. One captured configuration
+provides controls, key directories, effective provider identities, routes and
+exported intent. Directory expansion runs after releasing the serving lock.
+Analytics validates the complete response and rechecks its revision after the
+database read; when observation and administration use different credentials,
+both remain authorized. Only a 404 negotiates the older multi-request protocol.
+This reduces remote round trips without using a timed cache, but its production
+latency has not yet been verified and it does not remove the database full scan.
 
 The new snapshot read does not create quality-history associations. Previously
 linked history keeps its original account/group. An unlinked old channel check
 without credential provenance must not be attributed using today's credentials.
 The existing writer/legacy read behavior remains unchanged; exact writer-time
 attribution must be addressed before replacing all legacy consumers. Optimization
-reads now include current route revisions and batch capabilities; verified legacy
-engine-origin classification still needs to be carried into the new read contract
-before switching the optimization UI.
+reads now include current route revisions, batch capabilities and verified legacy
+engine-origin classification. Missing current definition evidence remains unknown.
 
 Local row assembly at 749 groups / 119,840 model results / 276 configured channels
 improved from 133–143 ms to 36–37 ms by indexing model positions within the request.

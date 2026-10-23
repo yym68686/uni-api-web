@@ -17,7 +17,11 @@ const (
 // Settings can be folded into a channel definition by later model edits. Keep
 // historical engine/address overrides protected even when live settings are empty.
 func (s *Service) engineOverrideHistory(ctx context.Context, source string) (map[string]bool, error) {
-	rows, err := s.control.db.QueryContext(ctx, `SELECT DISTINCT p->>'provider'
+	return engineOverrideHistoryFrom(ctx, s.control.db, source)
+}
+
+func engineOverrideHistoryFrom(ctx context.Context, db controlQueryDB, source string) (map[string]bool, error) {
+	rows, err := db.QueryContext(ctx, `SELECT DISTINCT p->>'provider'
  FROM console_channel_settings_operations o
  CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(o.public_result->'previews')='array' THEN o.public_result->'previews' ELSE '[]'::jsonb END) p
  WHERE o.source_id=$1 AND o.status<>'rejected' AND

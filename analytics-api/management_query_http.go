@@ -19,8 +19,9 @@ var errManagementFilters = errors.New("invalid management query filters")
 
 type managementPageResponse struct {
 	managementQueryPage
-	SelectionToken string       `json:"selection_token"`
-	Accounts       []subAccount `json:"accounts"`
+	SelectionToken string                `json:"selection_token"`
+	Accounts       []subAccount          `json:"accounts"`
+	Context        managementPageContext `json:"context"`
 }
 
 type managementSelectionResponse struct {
@@ -170,13 +171,9 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 		filtered := filterManagementQueryRows(rows, filters, evidence).Rows
 		writeJSON(w, http.StatusOK, managementSelectionResponse{Format: "management-selection-v1", Revision: page.Revision, ReadAtMS: page.ReadAtMS, Total: page.Total, EligibleCount: page.EligibleCount, Rows: filtered, Eligible: managementEligibleRows(filtered), Input: view.Input, Prices: view.Prices})
 	} else {
-		headers := make([]subAccount, len(view.Input.Accounts))
-		for i, account := range view.Input.Accounts {
-			headers[i] = account
-			headers[i].Targets = []subTarget{}
-		}
+		headers := managementAccountHeaders(view.Input.Accounts)
 		selectionToken := encodeManagementCursor(s.control.key, owner, managementPageCursor{Version: 1, Revision: page.Revision, Filter: tokenHash(mustJSON(filters))})
-		writeJSON(w, http.StatusOK, managementPageResponse{managementQueryPage: page, SelectionToken: selectionToken, Accounts: headers})
+		writeJSON(w, http.StatusOK, managementPageResponse{managementQueryPage: page, SelectionToken: selectionToken, Accounts: headers, Context: managementContextForPage(view, page, filters.Model)})
 	}
 	log.Printf("management_query read_ms=%d elapsed_ms=%d rows=%d total=%d selection=%t class=%s canceled=%t request_id=%s", readElapsed.Milliseconds(), time.Since(start).Milliseconds(), len(page.Rows), page.Total, selection != "", class, ctx.Err() != nil, consoleRequestID(r.Context()))
 }
