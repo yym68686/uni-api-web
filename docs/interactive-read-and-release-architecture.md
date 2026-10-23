@@ -31,6 +31,22 @@ query took 3.36 seconds with 123,704 projection index probes. Request timing and
 real browser checks determine the deployed effect. Historical unpublished notes
 below describe development stages, not the current rollout state.
 
+The streamed evidence change is deployed as `e2d6782`. With the same saved
+filter, a browser read improved from 10.523 seconds to 8.907 seconds; the API
+predicate/revision stage decreased from 4.465 to 2.095 seconds. Default all-model
+reads still took 10.1–12.2 seconds for 25 rows of 721. This is a partial gain,
+not one-second acceptance. Target details then took 2.001 seconds; measured
+stored tool-use JSON alone is 13,952,815 bytes before summary compaction.
+
+The next additive migration contains pure capability-summary functions only.
+Management reads omit attempt bodies which the existing wire summary already
+removes. The function validates all typed fields first and returns the original
+JSON on unsupported representations, preserving full-decoder failures. Detail
+reads remain complete. It does not alter any row, writer, historical projection,
+or require preparation. Local 749-group equal-output reads decreased from
+13,580,119 to 51,681 bytes (150–174 ms to 41–44 ms). Production effects require
+measurement after rollout.
+
 ## Confirmed incident, 2026-10-21
 
 At 10:48:26 UTC the console analytics request with trace

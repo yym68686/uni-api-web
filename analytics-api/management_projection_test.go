@@ -15,7 +15,17 @@ func managementPreparationFixture(t *testing.T, count int) (*sql.DB, string) {
 	db := migrationTestDB(t)
 	ctx := context.Background()
 	migrations := controlMigrations()
-	if err := migrateControlSchema(ctx, db, migrations[:len(migrations)-1]); err != nil {
+	projectionIndex := -1
+	for i, migration := range migrations {
+		if migration.Version == "0006_management_signals" {
+			projectionIndex = i
+			break
+		}
+	}
+	if projectionIndex < 0 {
+		t.Fatal("management projection migration missing")
+	}
+	if err := migrateControlSchema(ctx, db, migrations[:projectionIndex]); err != nil {
 		t.Fatal(err)
 	}
 	exec := func(q string, args ...any) {

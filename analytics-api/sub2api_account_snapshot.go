@@ -54,10 +54,10 @@ func (s *Service) readSubAccountDetailsFrom(ctx context.Context, db controlQuery
 }
 
 func (s *Service) readSubAccountDetailsWithQualityFrom(ctx context.Context, db controlQueryDB, owner, accountID string, groupID int64, model string, summary, omitRates bool, accounts []subAccount, trace *subAccountsReadTrace, shared sharedQuality) error {
-	return s.readSubAccountDetailsWithModelsFrom(ctx, db, owner, accountID, groupID, model, summary, omitRates, accounts, trace, shared, nil, nil)
+	return s.readSubAccountDetailsWithModelsFrom(ctx, db, owner, accountID, groupID, model, summary, omitRates, accounts, trace, shared, nil, nil, false)
 }
 
-func (s *Service) readSubAccountDetailsWithModelsFrom(ctx context.Context, db controlQueryDB, owner, accountID string, groupID int64, model string, summary, omitRates bool, accounts []subAccount, trace *subAccountsReadTrace, shared sharedQuality, readModels func([]subAccount) error, readRates func() (map[string]map[string]subObservedRate, error)) error {
+func (s *Service) readSubAccountDetailsWithModelsFrom(ctx context.Context, db controlQueryDB, owner, accountID string, groupID int64, model string, summary, omitRates bool, accounts []subAccount, trace *subAccountsReadTrace, shared sharedQuality, readModels func([]subAccount) error, readRates func() (map[string]map[string]subObservedRate, error), compactCapabilities bool) error {
 	index := map[string]int{}
 	for i, a := range accounts {
 		index[a.ID] = i
@@ -65,7 +65,14 @@ func (s *Service) readSubAccountDetailsWithModelsFrom(ctx context.Context, db co
 	trace.next("targets")
 	stages := newManagementReadTimeline(ctx, "database_targets")
 	defer stages.finish()
-	rows, err := db.QueryContext(ctx, `SELECT t.account_id,t.group_id,t.name,t.platform,t.channel,t.rate,t.remote_key_id,t.active,t.state,t.message,t.result,t.billing,COALESCE(h.total,0),COALESCE(h.successful,0),COALESCE(h.passed,0),t.compaction,t.compaction_state,t.tool_use,t.tool_use_state FROM console_sub_targets t JOIN console_sub_accounts a ON a.id=t.account_id LEFT JOIN console_quality_totals h ON h.account_id=t.account_id AND h.group_id=t.group_id WHERE a.owner=$1 AND ($2='' OR a.id=$2) AND ($3=0 OR t.group_id=$3) ORDER BY t.group_id`, owner, accountID, groupID)
+	capabilityColumns := "t.compaction,t.compaction_state,t.tool_use,t.tool_use_state"
+	if summary && compactCapabilities {
+		// Only management's compact representation omits these attempt bodies.
+		// Detail readers retain the original full diagnostics. The SQL function
+		// falls back to raw JSON for any unsupported or malformed representation.
+		capabilityColumns = "console_sub_capability_summary_v1(t.compaction),t.compaction_state,console_sub_capability_summary_v1(t.tool_use),t.tool_use_state"
+	}
+	rows, err := db.QueryContext(ctx, `SELECT t.account_id,t.group_id,t.name,t.platform,t.channel,t.rate,t.remote_key_id,t.active,t.state,t.message,t.result,t.billing,COALESCE(h.total,0),COALESCE(h.successful,0),COALESCE(h.passed,0),`+capabilityColumns+` FROM console_sub_targets t JOIN console_sub_accounts a ON a.id=t.account_id LEFT JOIN console_quality_totals h ON h.account_id=t.account_id AND h.group_id=t.group_id WHERE a.owner=$1 AND ($2='' OR a.id=$2) AND ($3=0 OR t.group_id=$3) ORDER BY t.group_id`, owner, accountID, groupID)
 	if err != nil {
 		return subAccountReadFailure{"检测结果暂不可用", err}
 	}

@@ -128,7 +128,7 @@ func (s *Service) readManagementDatabaseScopedFrom(ctx context.Context, db contr
 			return s.control.subObservedRatesPreparedFrom(ctx, db, owner, "")
 		}
 	}
-	if err = s.readSubAccountDetailsWithModelsFrom(ctx, db, owner, "", 0, "", true, false, out.Input.Accounts, nil, shared, readModels, readRates); err != nil {
+	if err = s.readSubAccountDetailsWithModelsFrom(ctx, db, owner, "", 0, "", true, false, out.Input.Accounts, nil, shared, readModels, readRates, true); err != nil {
 		return out, err
 	}
 	trace.next("database_normalize")
