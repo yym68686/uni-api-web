@@ -36,9 +36,12 @@ func TestManagementComputedPageRequiresExactCurrentTransaction(t *testing.T) {
 		t.Fatal("verified current computation unavailable", err)
 	}
 	page.ReadAtMS = original.ReadAtMS
-	if !reflect.DeepEqual(page, original) {
-		t.Fatal("retained computation changed current page")
+	// JSON cloning preserves the HTTP contract. time.Time can retain distinct
+	// internal Location pointers for the same UTC instant under TZ=UTC.
+	if mustJSON(page) != mustJSON(original) {
+		t.Fatal("retained computation changed complete wire values")
 	}
+
 	if _, ok, err := s.currentComputedManagementPage(ctx, "foreign", managementComputedKey("foreign", filters, "")); err != nil || ok {
 		t.Fatal("owner computation leaked")
 	}
