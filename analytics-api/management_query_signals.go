@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 )
 
@@ -95,53 +94,5 @@ func readManagementSignalsColumnsArgs(ctx context.Context, db controlQueryDB, qu
 // Read their shared model/receipt join once, under the caller's transaction;
 // full action selections retain the same revision encoding and queue fence.
 func readCurrentManagementSignalsAndRevision(ctx context.Context, db controlQueryDB, owner string) ([]managementModelSignals, string, error) {
-	var complete bool
-	if err := db.QueryRowContext(ctx, `SELECT complete FROM console_management_projection_state WHERE singleton`).Scan(&complete); err != nil {
-		return nil, "", err
-	}
-	if !complete {
-		return nil, "", errManagementPredicateFallback
-	}
-	query := `SELECT ` + managementModelSignalsStoredColumns + `,m.message,p.evidence_digest,r.evidence_digest,q.evidence_digest` + managementModelSignalsStoredFrom + ` ORDER BY m.account_id COLLATE "C",m.group_id,m.model COLLATE "C"`
-	rows, err := db.QueryContext(ctx, query, owner)
-	if err != nil {
-		return nil, "", err
-	}
-	defer rows.Close()
-	out := []managementModelSignals{}
-	hash := sha256.New()
-	writer := newManagementRevisionWriter(hash)
-	for rows.Next() {
-		var item managementModelSignals
-		var valid, present, hasUsage bool
-		var message string
-		var evidence, receipt, quality []byte
-		result, usage := &subResult{}, &subUsage{}
-		if err := rows.Scan(&item.Account, &item.Group, &item.Model.Model, &item.Model.State, &valid, &present, &result.CheckedAt, &result.Verdict,
-			&result.Availability.Status, &result.Availability.TerminalStatus, &result.Availability.ModelMatch,
-			&usage.Status, &usage.InputPrice, &usage.OutputPrice, &usage.InputTokens, &usage.OutputTokens, &hasUsage,
-			&message, &evidence, &receipt, &quality); err != nil {
-			return nil, "", err
-		}
-		if !valid || len(evidence) != sha256.Size {
-			return nil, "", errManagementPredicateFallback
-		}
-		writer.write(item.Account, item.Group, item.Model.Model, item.Model.State, message, evidence, receipt, quality)
-		if present {
-			item.Model.Result = result
-			if hasUsage {
-				result.Availability.Usage = usage
-			}
-		}
-		out = append(out, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, "", err
-	}
-	rows.Close()
-	revision, err := finishManagementModelRevision(ctx, db, owner, hash)
-	if err != nil {
-		return nil, "", err
-	}
-	return out, revision, nil
+	return readManagementSignalStreams(ctx, db, owner, true)
 }

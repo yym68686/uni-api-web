@@ -1,0 +1,257 @@
+package main
+
+import (
+	"context"
+	"crypto/sha256"
+	"database/sql"
+	"slices"
+	"strings"
+)
+
+// Keep model and receipt streams narrow. Joining both receipt roles in SQL
+// duplicates the large receipt scan and sorts the expanded rows on disk. The
+// caller's repeatable-read transaction permits one request-local ID index to
+// resolve both roles without changing the snapshot or retaining a cache.
+const managementModelSourceStreamSQL = `SELECT m.account_id,m.group_id,m.model,m.state,m.message
+ FROM console_sub_models m JOIN console_sub_accounts a ON a.id=m.account_id WHERE a.owner=$1`
+
+const managementModelStreamSQL = `SELECT p.account_id,p.group_id,p.model,p.valid,p.present,p.evidence_digest,
+ p.checked_at,p.verdict,p.availability,p.terminal,p.model_match,p.probe_id,p.quality_probe_id,p.has_usage,p.usage_status,
+ p.input_price,p.output_price,p.input_tokens,p.output_tokens
+ FROM console_management_model_signal p JOIN console_sub_accounts a ON a.id=p.account_id WHERE a.owner=$1`
+
+const managementReceiptStreamSQL = `SELECT r.id,r.valid,r.evidence_digest,r.status,r.input_price,r.output_price,r.input_tokens,r.output_tokens
+ FROM console_management_receipt_signal r JOIN console_sub_accounts a ON a.id=r.account_id
+ WHERE a.owner=$1`
+
+type managementStreamModel struct {
+	item                    managementModelSignals
+	message, probe, quality string
+	evidence                []byte
+}
+
+type managementStreamReceipt struct {
+	valid    bool
+	evidence []byte
+	usage    managementStreamUsage
+}
+
+type managementStreamUsage struct {
+	Status                    string
+	InputPrice, OutputPrice   *float64
+	InputTokens, OutputTokens *int64
+}
+
+func (u managementStreamUsage) expanded() *subUsage {
+	return &subUsage{Status: u.Status, InputPrice: u.InputPrice, OutputPrice: u.OutputPrice, InputTokens: u.InputTokens, OutputTokens: u.OutputTokens}
+}
+
+type managementStreamScope struct {
+	CatalogOnly bool
+	Model       string
+	Names       []string
+}
+
+func readManagementSignalStreams(ctx context.Context, db controlQueryDB, owner string, strict bool) ([]managementModelSignals, string, error) {
+	return readManagementScopedStreams(ctx, db, owner, strict, managementStreamScope{})
+}
+
+func readManagementScopedStreams(ctx context.Context, db controlQueryDB, owner string, strict bool, scope managementStreamScope) ([]managementModelSignals, string, error) {
+	// Public helpers are also used with a pool in integration tests. Never allow
+	// their streams to observe different committed generations either.
+	if pool, ok := db.(*sql.DB); ok {
+		tx, err := pool.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+		if err != nil {
+			return nil, "", err
+		}
+		defer tx.Rollback()
+		return readManagementScopedStreams(ctx, tx, owner, strict, scope)
+	}
+	var complete bool
+	if err := db.QueryRowContext(ctx, `SELECT complete FROM console_management_projection_state WHERE singleton`).Scan(&complete); err != nil {
+		return nil, "", err
+	}
+	if !complete {
+		return nil, "", errManagementPredicateFallback
+	}
+	endModels := managementReadSpan(ctx, "database_signal_models")
+	models, ids, err := readManagementStreamModels(ctx, db, owner, strict, scope)
+	endModels()
+	if err != nil {
+		return nil, "", err
+	}
+	endReceipts := managementReadSpan(ctx, "database_signal_receipts")
+	receipts, err := readManagementStreamReceipts(ctx, db, owner, ids, strict)
+	endReceipts()
+	if err != nil {
+		return nil, "", err
+	}
+	// PostgreSQL COLLATE "C" orders UTF-8 text by bytes, exactly like Go's
+	// string comparison. Preserve the existing revision byte stream verbatim.
+	slices.SortFunc(models, func(a, b managementStreamModel) int {
+		if c := strings.Compare(a.item.Account, b.item.Account); c != 0 {
+			return c
+		}
+		if a.item.Group < b.item.Group {
+			return -1
+		}
+		if a.item.Group > b.item.Group {
+			return 1
+		}
+		return strings.Compare(a.item.Model.Model, b.item.Model.Model)
+	})
+	out := make([]managementModelSignals, 0, len(models))
+	hash := sha256.New()
+	writer := newManagementRevisionWriter(hash)
+	for _, model := range models {
+		var receiptDigest, qualityDigest []byte
+		if r, ok := receipts[model.probe]; ok {
+			receiptDigest = r.evidence
+			if model.item.Model.Result != nil {
+				model.item.Model.Result.Availability.Usage = r.usage.expanded()
+			}
+		}
+		if q, ok := receipts[model.quality]; ok {
+			qualityDigest = q.evidence
+		}
+		writer.write(model.item.Account, model.item.Group, model.item.Model.Model, model.item.Model.State, model.message, model.evidence, receiptDigest, qualityDigest)
+		out = append(out, model.item)
+	}
+	revision, err := finishManagementModelRevision(ctx, db, owner, hash)
+	if err != nil {
+		return nil, "", err
+	}
+	return out, revision, nil
+}
+
+func readManagementStreamModels(ctx context.Context, db controlQueryDB, owner string, strict bool, scope managementStreamScope) ([]managementStreamModel, []string, error) {
+	rows, err := db.QueryContext(ctx, managementModelSourceStreamSQL, owner)
+	if err != nil {
+		return nil, nil, err
+	}
+	type identity struct {
+		account string
+		group   int64
+		model   string
+	}
+	out := []managementStreamModel{}
+	positions := map[identity]int{}
+	for rows.Next() {
+		var model managementStreamModel
+		if err := rows.Scan(&model.item.Account, &model.item.Group, &model.item.Model.Model, &model.item.Model.State, &model.message); err != nil {
+			rows.Close()
+			return nil, nil, err
+		}
+		positions[identity{model.item.Account, model.item.Group, model.item.Model.Model}] = len(out)
+		out = append(out, model)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, nil, err
+	}
+	fallback := map[string]bool{}
+	wanted := map[string]bool{}
+	if scope.Model != "" {
+		catalog := make([]managementModelSignals, len(out))
+		for i := range out {
+			catalog[i] = out[i].item
+		}
+		for _, g := range managementScopeFallbackGroups(scope.Model, catalog) {
+			fallback[qualityGroupID(g.AccountID, g.GroupID)] = true
+		}
+		for _, name := range scope.Names {
+			wanted[name] = true
+		}
+	}
+	rows, err = db.QueryContext(ctx, managementModelStreamSQL, owner)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	ids := []string{}
+	seen := map[string]bool{}
+	for rows.Next() {
+		var key identity
+		var valid, present, hasUsage bool
+		var evidence []byte
+		var probe, quality string
+		var checkedAt int64
+		var verdict, availability, terminal, modelMatch string
+		var usage managementStreamUsage
+		if err := rows.Scan(&key.account, &key.group, &key.model, &valid, &present, &evidence, &checkedAt, &verdict, &availability, &terminal, &modelMatch, &probe, &quality, &hasUsage, &usage.Status, &usage.InputPrice, &usage.OutputPrice, &usage.InputTokens, &usage.OutputTokens); err != nil {
+			return nil, nil, err
+		}
+		i, exists := positions[key]
+		// The foreign key excludes orphan projections. Still never publish one if
+		// a future storage implementation returns an identity absent from sources.
+		if !exists {
+			return nil, nil, errManagementPredicateFallback
+		}
+		if len(evidence) != sha256.Size || strict && !valid {
+			return nil, nil, errManagementPredicateFallback
+		}
+		model := &out[i]
+		model.evidence, model.probe, model.quality = evidence, probe, quality
+		if present && !scope.CatalogOnly && (scope.Model == "" || wanted[key.model] || fallback[qualityGroupID(key.account, key.group)]) {
+			result := &subResult{CheckedAt: checkedAt, Verdict: verdict, Availability: subProbe{Status: availability, TerminalStatus: terminal, ModelMatch: modelMatch}}
+			model.item.Model.Result = result
+			if hasUsage {
+				result.Availability.Usage = usage.expanded()
+			}
+		}
+		for _, id := range []string{probe, quality} {
+			if id != "" && !seen[id] {
+				seen[id] = true
+				ids = append(ids, id)
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	for _, model := range out {
+		if len(model.evidence) != sha256.Size {
+			return nil, nil, errManagementPredicateFallback
+		}
+	}
+	return out, ids, ctx.Err()
+}
+
+func readManagementStreamReceipts(ctx context.Context, db controlQueryDB, owner string, ids []string, strict bool) (map[string]managementStreamReceipt, error) {
+	out := make(map[string]managementStreamReceipt)
+	if len(ids) == 0 {
+		return out, ctx.Err()
+	}
+	// One narrow owner scan has stable cost even when most current models have
+	// different receipt IDs. An enormous ANY parameter can instead cause a
+	// generic prepared plan to perform one random index lookup per ID. Retain
+	// only referenced receipts, and never validate unrelated receipt payloads.
+	wanted := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		wanted[id] = true
+	}
+	rows, err := db.QueryContext(ctx, managementReceiptStreamSQL, owner)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var r managementStreamReceipt
+		if err := rows.Scan(&id, &r.valid, &r.evidence, &r.usage.Status, &r.usage.InputPrice, &r.usage.OutputPrice, &r.usage.InputTokens, &r.usage.OutputTokens); err != nil {
+			return nil, err
+		}
+		if !wanted[id] {
+			continue
+		}
+		if strict && !r.valid {
+			return nil, errManagementPredicateFallback
+		}
+		out[id] = r
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, ctx.Err()
+}

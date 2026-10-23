@@ -253,11 +253,18 @@ func TestManagementModelSignalsProductionCardinality(t *testing.T) {
 	}
 	separateElapsed := time.Since(start)
 	start = time.Now()
-	combinedSignals, combinedRevision, err := readCurrentManagementSignalsAndRevision(ctx, s.control.db, "owner")
+	combinedSignals, combinedRevision, err := readManagementJoinedSignalsAndRevision(ctx, s.control.db, "owner")
 	combinedElapsed := time.Since(start)
 	if err != nil || combinedRevision != separateRevision || !reflect.DeepEqual(combinedSignals, separateSignals) {
 		t.Fatal("combined read differs at production cardinality", err)
 	}
+	start = time.Now()
+	streamedSignals, streamedRevision, err := readManagementSignalStreams(ctx, s.control.db, "owner", true)
+	streamedElapsed := time.Since(start)
+	if err != nil || streamedRevision != combinedRevision || !reflect.DeepEqual(streamedSignals, combinedSignals) {
+		t.Fatal("streamed read differs at production cardinality", err)
+	}
+	streamedSignals = nil
 	start = time.Now()
 	scopedSignals, scopedRevision, err := readManagementScopedSignals(ctx, s.control.db, "owner", "m002", []string{"m002", "gpt-6-astra"})
 	scopedElapsed := time.Since(start)
@@ -428,6 +435,7 @@ func TestManagementModelSignalsProductionCardinality(t *testing.T) {
 	result["page_expanded_gzip_bytes"] = managementScaleGzipBytes(t, expanded)
 	result["unique_groups_wire_gzip_bytes"], result["unique_groups_expanded_gzip_bytes"] = managementScaleGzipBytes(t, uniqueRaw), managementScaleGzipBytes(t, uniqueExpanded)
 	result["separate_revision_predicates_ms"], result["combined_revision_predicates_ms"] = separateElapsed.Milliseconds(), combinedElapsed.Milliseconds()
+	result["streamed_revision_predicates_ms"] = streamedElapsed.Milliseconds()
 	result["scoped_revision_catalog_predicates_ms"], result["scoped_predicates"] = scopedElapsed.Milliseconds(), predicateCount
 	raw, _ := json.Marshal(result)
 	t.Log(string(raw))

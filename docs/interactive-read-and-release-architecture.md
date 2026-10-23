@@ -8,17 +8,28 @@ publishing a compatible observation candidate. The gateway snapshot contract
 and console management page are now deployed. Earlier unpublished descriptions
 below describe their development history and do not override this status.
 
-Production currently uses the complete legacy reader until management projection
-preparation passes its explicit completeness gate. A measured current page took
-10.814 seconds in the API and 13.325 seconds in the browser, with 2.897 seconds
-reading models and 4.527 seconds attaching receipts. These measurements identify
-the next activation step without claiming the performance target is met.
-Preparation must remain bounded, preserve the storage reserve, yield to live
-writers and validate all projected columns; its first attempt exited before
-committing a batch. Safe maintenance error classes and complete gateway/database
-spans distinguish a guarded deferral from a validation or execution failure.
-No raw database errors, filters, source credentials or receipt identities are
-logged.
+Management projection preparation passed all copy and verification phases on
+2026-10-23. It is active; do not repeat preparation. The completed projection
+still took roughly 10–11 seconds for a real filtered browser page. Trace stages
+identified 5.8 seconds in predicate/revision reads and 1.2 seconds in hydration.
+Pagination and projection activation alone did not meet the one-second target.
+
+The next incremental read change separates current model headers, model
+predicates and compact receipt predicates inside the same repeatable-read
+transaction. A request-local identity index resolves receipt roles and preserves
+the previous byte-exact evidence revision, including off-scope/quality evidence.
+This avoids per-model index probes, duplicate receipt hash joins and sorting wide
+joined rows on disk. Only currently referenced, owner-authorized receipts are
+retained; selected-model reads construct predicates only for their exact scope.
+All visible rows are still fully hydrated, and action selections stay complete.
+No cache, schema, preparation, timeout or production setting changes are needed.
+
+Read-only production plans measured separate model-header and model-predicate
+reads at 164 and 149 ms, and one complete owner receipt scan at 362 ms. These are
+SQL-stage measurements, not browser acceptance. The prior narrow joined model
+query took 3.36 seconds with 123,704 projection index probes. Request timing and
+real browser checks determine the deployed effect. Historical unpublished notes
+below describe development stages, not the current rollout state.
 
 ## Confirmed incident, 2026-10-21
 

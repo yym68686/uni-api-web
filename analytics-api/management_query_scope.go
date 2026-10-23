@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"slices"
 )
 
@@ -65,38 +64,6 @@ func managementScopeFallbackGroups(model string, catalog []managementModelSignal
 // complete action selections continue to read every model's full evidence.
 func readManagementScopedSignals(ctx context.Context, db controlQueryDB, owner, model string, names []string) ([]managementModelSignals, string, error) {
 	endCatalog := managementReadSpan(ctx, "database_model_catalog")
-	revision, catalog, err := readManagementRevisionCatalogFrom(ctx, db, owner, true)
-	endCatalog()
-	if err != nil {
-		return nil, "", err
-	}
-	fallback := managementScopeFallbackGroups(model, catalog)
-	raw, err := json.Marshal(fallback)
-	if err != nil {
-		return nil, "", err
-	}
-	query := `SELECT ` + managementModelSignalsStoredColumns + managementModelSignalsStoredFrom + `
- AND (m.model=ANY($2::text[]) OR EXISTS(SELECT 1 FROM jsonb_to_recordset($3::jsonb) AS g(account_id text,group_id bigint) WHERE g.account_id=m.account_id AND g.group_id=m.group_id))
- ORDER BY m.account_id COLLATE "C",m.group_id,m.model COLLATE "C"`
-	endPredicates := managementReadSpan(ctx, "database_scoped_predicates")
-	selected, err := readManagementSignalsColumnsArgs(ctx, db, query, owner, names, string(raw))
-	endPredicates()
-	if err != nil {
-		return nil, "", err
-	}
-	positions := make(map[string]map[string]int)
-	for i, item := range catalog {
-		key := qualityGroupID(item.Account, item.Group)
-		if positions[key] == nil {
-			positions[key] = map[string]int{}
-		}
-		positions[key][item.Model.Model] = i
-	}
-	for _, item := range selected {
-		group := positions[qualityGroupID(item.Account, item.Group)]
-		if i, exists := group[item.Model.Model]; exists {
-			catalog[i] = item
-		}
-	}
-	return catalog, revision, nil
+	defer endCatalog()
+	return readManagementScopedStreams(ctx, db, owner, true, managementStreamScope{Model: model, Names: names})
 }
