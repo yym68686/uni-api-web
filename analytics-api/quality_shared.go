@@ -103,8 +103,10 @@ type sharedQualityProjection struct {
 	Check   *ChannelCheck
 }
 type sharedQuality struct {
-	Bindings []qualityBinding
-	Groups   map[string]sharedQualityProjection
+	Bindings       []qualityBinding
+	Groups         map[string]sharedQualityProjection
+	complete       bool
+	owner, account string
 }
 
 // Associate each original history row at most once. Original results/IDs are
@@ -189,7 +191,11 @@ func readSharedQualityProjectionFrom(ctx context.Context, db controlQueryDB, own
 		}
 		out.Groups[qualityGroupID(account, group)] = p
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	out.complete, out.owner, out.account = true, owner, accountID
+	return out, nil
 }
 
 func (q sharedQuality) channel(source, provider string) *ChannelCheck {

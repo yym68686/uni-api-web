@@ -140,7 +140,7 @@ func TestManagementRevisionStateAdoptsLegacyAndCascades(t *testing.T) {
 	if err := migrateControlSchema(ctx, db, all[:index]); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`INSERT INTO console_sub_accounts(id,owner,name,base,email,encrypted_auth) VALUES('a','owner','A','https://a.test','a','');INSERT INTO console_sub_targets(account_id,group_id,name,platform) VALUES('a',1,'G','openai');INSERT INTO console_sub_models(account_id,group_id,model,state,result) SELECT 'a',1,'m'||g,'done','{}'::jsonb FROM generate_series(1,100) g;INSERT INTO console_sub_usage(id,account_id,group_id,key_id,model,started_at,request_ids,status,result) SELECT 'p'||g,'a',1,0,'m',1,'[]','pending','{}' FROM generate_series(1,100) g`); err != nil {
+	if _, err := db.Exec(`INSERT INTO console_sub_accounts(id,owner,name,base,email,encrypted_auth) VALUES('a','owner','A','https://a.test','a','');INSERT INTO console_sub_targets(account_id,group_id,name,platform) VALUES('a',1,'G','openai');INSERT INTO console_sub_models(account_id,group_id,model,state,result) SELECT 'a',1,'m'||g,'done','{}'::jsonb FROM generate_series(1,100) g;INSERT INTO console_sub_usage(id,account_id,group_id,key_id,model,started_at,request_ids,status,result) SELECT CASE WHEN g=1 THEN '' WHEN g=2 THEN '雪' ELSE 'p'||g END,'a',1,0,'m',1,'[]','pending','{}' FROM generate_series(1,1300) g`); err != nil {
 		t.Fatal(err)
 	}
 	if err := migrateControlSchema(ctx, db, all); err != nil {

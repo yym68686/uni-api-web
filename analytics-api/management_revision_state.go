@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -33,7 +34,13 @@ func prepareManagementRevisionState(ctx context.Context, db *sql.DB) (string, er
 	if relation == "console_management_model_signal" || relation == "console_management_receipt_signal" {
 		expr = "count(*) FILTER(WHERE NOT valid)"
 	}
-	if err = tx.QueryRowContext(ctx, `SELECT count(*),`+expr+` FROM `+pgx.Identifier{relation}.Sanitize()).Scan(&count, &bad); err != nil {
+	if relation == "console_sub_usage" {
+		count, err = countManagementReceiptsByIdentity(ctx, tx)
+	} else {
+		err = tx.QueryRowContext(ctx, `SELECT count(*),`+expr+` FROM `+pgx.Identifier{relation}.Sanitize()).Scan(&count, &bad)
+	}
+	if err != nil {
+		log.Printf("management_revision_prepare stage=count relation=%s class=%s", relation, databaseErrorClass(err))
 		return "", err
 	}
 	// A writer changing this counter after our snapshot causes PostgreSQL's
@@ -42,6 +49,33 @@ func prepareManagementRevisionState(ctx context.Context, db *sql.DB) (string, er
 		return "", err
 	}
 	return relation, tx.Commit()
+}
+
+// Count disjoint primary-key ranges in one RR transaction. Separate first and
+// resumed statements retain an index boundary with generic plans too. Every
+// statement keeps the two-second guard; concurrent committed insert/delete
+// conflicts with the final counter update instead of escaping the baseline.
+func countManagementReceiptsByIdentity(ctx context.Context, db controlQueryDB) (int64, error) {
+	var total int64
+	var cursor string
+	started := false
+	for {
+		query := `SELECT count(*),COALESCE(max(id),'') FROM (SELECT id FROM console_sub_usage ORDER BY id LIMIT 512) batch`
+		var args []any
+		if started {
+			query = `SELECT count(*),COALESCE(max(id),'') FROM (SELECT id FROM console_sub_usage WHERE id>$1 ORDER BY id LIMIT 512) batch`
+			args = []any{cursor}
+		}
+		var count int64
+		if err := db.QueryRowContext(ctx, query, args...).Scan(&count, &cursor); err != nil {
+			return 0, err
+		}
+		total += count
+		if count < 512 {
+			return total, nil
+		}
+		started = true
+	}
 }
 
 func readManagementCompactRevision(ctx context.Context, db controlQueryDB, owner string) (string, bool, error) {
