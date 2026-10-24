@@ -88,7 +88,15 @@ func testSubConcurrentAccounts(t *testing.T, interrupt bool) {
 			calls[id]++
 			mu.Unlock()
 			defer func() { mu.Lock(); active[id]--; mu.Unlock() }()
-			probesStarted <- id
+			// Only the initial blocked wave is observed through this channel.
+			// Later probes are counted under mu above. A full observation
+			// buffer must not block fixture cleanup after release/cancellation.
+			select {
+			case <-releaseProbes:
+			case <-r.Context().Done():
+				return
+			case probesStarted <- id:
+			}
 			select {
 			case <-releaseProbes:
 			case <-r.Context().Done():

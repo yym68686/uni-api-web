@@ -28,7 +28,8 @@ export interface SubUsage {
 
 const known = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0;
 export function configuredPrice(model: string, prices?: ModelPrice[]) {
-  return prices?.find(price => price.model === canonicalPriceModel(model) && known(price.input) && known(price.output) &&
+  const canonical = canonicalPriceModel(model);
+  return prices?.find(price => price.model === canonical && known(price.input) && known(price.output) &&
     // Unpublished catalog/discovered prices use zero as a placeholder. An
     // explicitly saved manual zero remains a valid comparison price.
     (price.verified || price.source === "manual" || price.input > 0 || price.output > 0));

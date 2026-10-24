@@ -36,9 +36,9 @@ it("restores every complete Go page field without sharing mutable result objects
   expect(decoded.rows[0].target.models![2].result).toBeNull();
 });
 
-it("negotiates v2 while accepting an older backend's complete v1 page", async () => {
-  const { page, wire } = fixture();
-  for (const response of [page, wire]) {
+it("negotiates v3 while accepting complete v1 and v2 pages", async () => {
+  const { page, wire, columns } = fixture();
+  for (const response of [page, wire, columns]) {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (_url: string, init: RequestInit) => {
@@ -120,5 +120,36 @@ it("rejects malformed reference tables and conflicting evidence before publishin
     await expect(
       readManagementPage(subFilterDefaults, "", new AbortController().signal),
     ).rejects.toThrow("分页数据不完整");
+  }
+});
+
+it("restores every column-encoded field from the actual Go encoder", () => {
+  const { page, columns } = fixture();
+  const restored = decodeManagementPage(columns);
+  expect(restored).toStrictEqual(page);
+  restored.rows[0].checks[0].result!.availability.message = "local edit";
+  expect(decodeManagementPage(columns)).toStrictEqual(page);
+  expect(restored.rows[1].checks[0].result!.availability.message).toBe(
+    page.rows[1].checks[0].result.availability.message,
+  );
+});
+
+it("rejects malformed columns before publishing any page", () => {
+  const cases: ((wire: any) => void)[] = [
+    (w) => (w.result_fields.count = -1),
+    (w) => (w.result_fields.count = Number.MAX_SAFE_INTEGER),
+    (w) => w.result_fields.fields.push(w.result_fields.fields[0]),
+    (w) => w.result_fields.columns[0].pop(),
+    (w) => (w.result_fields.columns[0][0] = [1, 2]),
+    (w) => (w.result_fields.columns[0][0] = null),
+    (w) => w.quality.count++,
+    (w) => (w.availability.columns = null),
+    (w) => (w.results = []),
+    (w) => (w.result_fields.fields[0] = "availability"),
+  ];
+  for (const change of cases) {
+    const { columns } = fixture();
+    change(columns);
+    expect(() => decodeManagementPage(columns)).toThrow("分页数据不完整");
   }
 });

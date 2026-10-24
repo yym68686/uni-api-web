@@ -391,3 +391,12 @@ observation credentials. It returns only the live configuration/runtime versions
 under the same catalog authorization; admin verification remains independent.
 Only404 uses the old full control document. Permission, format, conflict and
 transport failures cannot downgrade or authorize a retained result.
+
+The negotiated v3 page transport uses lossless columns for result metadata,
+availability and quality. Missing properties have empty cells; present null,
+zero, false and empty values remain present. Browser reconstruction restores
+the full v1 object contract and independent result objects before validation.
+Older v1/v2 clients and backends remain accepted. The bounded computation store
+counts both the complete page and its prepared wire representation against its
+16 MiB limit; each read still validates current revisions and overlays live
+account headers. Static result columns need not be reassembled on every refresh.

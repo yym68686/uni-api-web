@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -53,17 +54,25 @@ func TestNewAPILogPacingSharedAcrossServicesAndAccounts(t *testing.T) {
 	gap := 100 * time.Millisecond
 	s.newAPILogGap = &gap
 	other := &Service{control: s.control, newAPILogGap: &gap}
-	base := "https://" + randomID() + ".example"
+	base := "https://" + strings.ToLower(randomID()) + ".example"
 	t.Cleanup(func() { s.control.db.Exec(`DELETE FROM console_site_api_schedule WHERE site=$1`, base) })
 	ctx := context.Background()
 	if err := s.newAPIWaitLog(ctx, base); err != nil {
 		t.Fatal(err)
 	}
-	start := time.Now()
+	var reserved, next, observed time.Time
+	if err := s.control.db.QueryRow(`SELECT next_log_at FROM console_site_api_schedule WHERE site=$1`, base).Scan(&reserved); err != nil {
+		t.Fatal(err)
+	}
 	if err := other.newAPIWaitLog(ctx, base+"/other-account-path"); err != nil {
 		t.Fatal(err)
 	}
-	if time.Since(start) < 70*time.Millisecond {
+	if err := s.control.db.QueryRow(`SELECT next_log_at,clock_timestamp() FROM console_site_api_schedule WHERE site=$1`, base).Scan(&next, &observed); err != nil {
+		t.Fatal(err)
+	}
+	// Assert the shared reservation, not how long the client happened to be
+	// descheduled between two SQL calls. Millisecond waits round down <1ms.
+	if next.Before(reserved.Add(gap)) || observed.Add(time.Millisecond).Before(reserved) {
 		t.Fatal("another replica/account bypassed host pacing")
 	}
 	short, cancel := context.WithTimeout(ctx, time.Millisecond)

@@ -1,7 +1,7 @@
 import type { ManagementPage } from "./managementQuery";
 
 export const managementPageMediaType =
-  "application/vnd.uni-api.management-page-v2+json";
+  "application/vnd.uni-api.management-page-v3+json";
 
 const record = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -13,6 +13,77 @@ const invalid = (): never => {
 // lossless transport deduplication, not a partial summary or a retained cache.
 export function decodeManagementPage(input: unknown): ManagementPage {
   if (!record(input)) return invalid();
+  if (input.format === "management-page-v3") {
+    const columns = (value: unknown): Record<string, unknown>[] => {
+      if (
+        !record(value) ||
+        !Number.isSafeInteger(value.count) ||
+        (value.count as number) < 0 ||
+        !Array.isArray(value.fields) ||
+        !Array.isArray(value.columns) ||
+        value.fields.length !== value.columns.length ||
+        value.fields.some((field) => typeof field !== "string") ||
+        new Set(value.fields).size !== value.fields.length
+      )
+        return invalid();
+      if ((value.count as number) > 0 && value.fields.length === 0)
+        return invalid();
+      if (
+        value.columns.some(
+          (column) => !Array.isArray(column) || column.length !== value.count,
+        )
+      )
+        return invalid();
+      const rows: Record<string, unknown>[] = Array.from(
+        { length: value.count as number },
+        () => ({}),
+      );
+      value.fields.forEach((field, index) => {
+        const column = (value.columns as unknown[])[index];
+        if (!Array.isArray(column) || column.length !== rows.length)
+          return invalid();
+        column.forEach((cell, i) => {
+          if (!Array.isArray(cell) || cell.length > 1) return invalid();
+          if (cell.length)
+            Object.defineProperty(rows[i], field, {
+              value: cell[0],
+              enumerable: true,
+              writable: true,
+              configurable: true,
+            });
+        });
+      });
+      return rows;
+    };
+    const metadata = columns(input.result_fields),
+      availability = columns(input.availability),
+      quality = columns(input.quality);
+    if (
+      metadata.length !== availability.length ||
+      metadata.length !== quality.length ||
+      Object.hasOwn(input, "results") ||
+      metadata.some(
+        (row) =>
+          Object.hasOwn(row, "availability") || Object.hasOwn(row, "quality"),
+      )
+    )
+      return invalid();
+    const {
+      result_fields: _resultFields,
+      availability: _availability,
+      quality: _quality,
+      ...page
+    } = input;
+    return decodeManagementPage({
+      ...page,
+      format: "management-page-v2",
+      results: metadata.map((row, i) => ({
+        ...row,
+        availability: availability[i],
+        quality: quality[i],
+      })),
+    });
+  }
   if (input.format !== "management-page-v2")
     return input as unknown as ManagementPage;
   if (!Array.isArray(input.results) || !Array.isArray(input.rows))

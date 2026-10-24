@@ -66,3 +66,23 @@ it("assesses Haiku prices using per-request cache-inclusive input and the record
   expect(assessPrice(sample({ input_tokens: 200000, input_price: .5, output_price: 2.5 }), [haiku]).expected).toMatchObject({ input: .5, output: 2.5, cache_write: .625, cache_write_1h: 1 });
   expect(assessPrice(sample({ cache_read_tokens: null }), [haiku]).status).toBe("unknown");
 });
+
+it("keeps first valid price selection while avoiding repeated catalog scans per candidate", async () => {
+  const { configuredPrice } = await import("./sub2apiPriceCheck");
+  const { canonicalPriceModel, MODEL_PRICE_CATALOG, promptPriceTier } = await import("./modelPrices");
+  const prices:ModelPrice[]=MODEL_PRICE_CATALOG.map(p=>({...p,verified:true,source:"manual"}));
+  prices.unshift({...prices[0],input:NaN});
+  const known=(n:unknown)=>typeof n==="number"&&Number.isFinite(n)&&n>=0;
+  const old=(model:string)=>prices.find(p=>p.model===canonicalPriceModel(model)&&known(p.input)&&known(p.output)&&(p.verified||p.source==="manual"||p.input>0||p.output>0));
+  const models=Array.from({length:4155},(_,i)=>i%5?`${prices[i%prices.length].model}-thinking`:`unknown-${i%236}`);
+  const start=performance.now();
+  const expected=models.map(model=>[old(model),MODEL_PRICE_CATALOG.find(p=>p.model===canonicalPriceModel(model))?.prompt_price_tier]);
+  const oldMS=performance.now()-start;
+  const currentStart=performance.now();
+  const actual=models.map(model=>[configuredPrice(model,prices),promptPriceTier(model)]);
+  const currentMS=performance.now()-currentStart;
+  expect(actual).toStrictEqual(expected);
+  prices[1]={...prices[1],input:123};
+  expect(configuredPrice(prices[1].model,prices)?.input).toBe(123);
+  console.info("management_price_lookup", {models:models.length,old_ms:oldMS,current_ms:currentMS});
+});

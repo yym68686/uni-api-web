@@ -85,6 +85,19 @@ func (s *Service) rememberManagementPage(key string, proof *managementFreshProof
 	if json.Unmarshal(raw, &immutable) != nil {
 		return
 	}
+	columns, err := encodeManagementColumnPage(immutable)
+	if err != nil {
+		return
+	}
+	encodedColumns, err := json.Marshal(columns)
+	if err != nil {
+		return
+	}
+	storedBytes := len(raw) + len(encodedColumns)
+	if storedBytes > 16<<20 {
+		return
+	}
+	immutable.preparedColumns = &columns
 	c := &s.managementComputed
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -101,7 +114,7 @@ func (s *Service) rememberManagementPage(key string, proof *managementFreshProof
 			}
 		}
 	}
-	for len(c.order) > 0 && (len(c.order) >= 4 || c.bytes+len(raw) > 16<<20) {
+	for len(c.order) > 0 && (len(c.order) >= 4 || c.bytes+storedBytes > 16<<20) {
 		old := c.order[0]
 		c.order = c.order[1:]
 		c.bytes -= c.pages[old].Bytes
@@ -113,9 +126,9 @@ func (s *Service) rememberManagementPage(key string, proof *managementFreshProof
 	for i, f := range proof.Facts {
 		minimal.Facts[i] = managementGatewayFacts{Source: f.Source, Revision: f.Revision, ConfigRevision: f.ConfigRevision, AtomicSnapshot: f.AtomicSnapshot}
 	}
-	c.pages[key] = managementComputedPage{Proof: minimal, Page: immutable, Bytes: len(raw)}
+	c.pages[key] = managementComputedPage{Proof: minimal, Page: immutable, Bytes: storedBytes}
 	c.order = append(c.order, key)
-	c.bytes += len(raw)
+	c.bytes += storedBytes
 }
 
 func verifyManagementFacts(ctx context.Context, facts []managementGatewayFacts) error {

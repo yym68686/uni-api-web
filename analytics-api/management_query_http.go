@@ -18,7 +18,8 @@ import (
 var errManagementFilters = errors.New("invalid management query filters")
 
 type managementPageResponse struct {
-	Owner string `json:"owner,omitempty"`
+	preparedColumns *managementColumnPage
+	Owner           string `json:"owner,omitempty"`
 	managementQueryPage
 	SelectionToken string                `json:"selection_token"`
 	Accounts       []subAccount          `json:"accounts"`

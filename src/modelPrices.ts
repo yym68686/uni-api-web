@@ -56,8 +56,12 @@ export function displayedModelPrices(prices: ModelPrice[]): ModelPrice[] {
 }
 
 // Catalog policy is shared with the backend, including for model suffixes.
+const promptTiers = new Map<string, PromptPriceTier | undefined>();
+for (const entry of catalog) {
+  if (!promptTiers.has(entry.model)) promptTiers.set(entry.model, entry.prompt_price_tier);
+}
 export function promptPriceTier(model: string): PromptPriceTier | undefined {
-  return catalog.find((entry) => entry.model === canonicalPriceModel(model))?.prompt_price_tier;
+  return promptTiers.get(canonicalPriceModel(model));
 }
 
 export function priceForPrompt(price: ModelPrice, inputTokens: number): ModelPrice {

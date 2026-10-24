@@ -114,6 +114,14 @@ func encodeManagementPage(page managementPageResponse) (managementWirePage, erro
 
 func writeManagementPage(w http.ResponseWriter, r *http.Request, page managementPageResponse) error {
 	w.Header().Add("Vary", "Accept")
+	if r.Header.Get("Accept") == managementPageV3MediaType {
+		wire, err := currentManagementColumnPage(page)
+		if err != nil {
+			http.Error(w, "渠道响应编码失败", http.StatusInternalServerError)
+			return err
+		}
+		return writeManagementJSONMedia(w, r, wire, managementPageV3MediaType)
+	}
 	if r.Header.Get("Accept") != managementPageV2MediaType {
 		return writeManagementJSON(w, r, page)
 	}

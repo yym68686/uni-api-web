@@ -110,7 +110,11 @@ func TestManagementWirePreservesCompleteJSONAndSnapshot(t *testing.T) {
 		t.Fatal("wire dictionary did not remove repeated payload")
 	}
 	if os.Getenv("UPDATE_MANAGEMENT_WIRE_FIXTURE") == "1" {
-		fixture, _ := json.Marshal(map[string]any{"page": page, "wire": encoded})
+		columns, columnErr := encodeManagementColumnPage(page)
+		if columnErr != nil {
+			t.Fatal(columnErr)
+		}
+		fixture, _ := json.Marshal(map[string]any{"page": page, "wire": encoded, "columns": columns})
 		file, err := os.Create("testdata/management-page-wire.json.gz")
 		if err != nil {
 			t.Fatal(err)
@@ -144,7 +148,7 @@ func TestManagementHTTPNegotiatesPageWithoutBreakingOldClients(t *testing.T) {
 		t.Fatal(err)
 	}
 	var legacy managementPageResponse
-	for _, accept := range []string{"application/json", managementPageV2MediaType} {
+	for _, accept := range []string{"application/json", managementPageV2MediaType, managementPageV3MediaType} {
 		r := httptest.NewRequest(http.MethodGet, "/v1/channel-management/query", nil)
 		r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
 		r.Header.Set("Accept", accept)
@@ -169,6 +173,18 @@ func TestManagementHTTPNegotiatesPageWithoutBreakingOldClients(t *testing.T) {
 			}
 			if legacy.Format != "management-page-v1" {
 				t.Fatal("old client unexpectedly upgraded")
+			}
+		} else if accept == managementPageV3MediaType {
+			var wire managementColumnPage
+			if err := json.Unmarshal(raw, &wire); err != nil {
+				t.Fatal(err)
+			}
+			if wire.Format != "management-page-v3" || w.Header().Get("Content-Type") != managementPageV3MediaType {
+				t.Fatal("v3 negotiation failed")
+			}
+			page := decodeManagementColumnPageForTest(t, wire)
+			if page.Owner != "owner" || page.Revision != legacy.Revision || !reflect.DeepEqual(page.Rows, legacy.Rows) || !reflect.DeepEqual(page.Context, legacy.Context) {
+				t.Fatal("v3 HTTP response changed")
 			}
 		} else {
 			var wire managementWirePage
