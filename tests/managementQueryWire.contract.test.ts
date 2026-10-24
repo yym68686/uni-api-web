@@ -45,7 +45,7 @@ it("negotiates v3 while accepting complete v1 and v2 pages", async () => {
         expect(new Headers(init.headers).get("Accept")).toBe(
           managementPageMediaType,
         );
-        expect(init.cache).toBe("no-store");
+        expect(init.cache).toBe("no-cache");
         return Response.json(response);
       }),
     );
@@ -152,4 +152,20 @@ it("rejects malformed columns before publishing any page", () => {
     change(columns);
     expect(() => decodeManagementPage(columns)).toThrow("分页数据不完整");
   }
+});
+
+it.each(["current", "old-request", "missing", "bad-time"])("requires this read's nonce before accepting a validated representation (%s)", async mode=>{
+  const {page,columns}=fixture();
+  columns.read_at_ms=0;
+  vi.stubGlobal("fetch",vi.fn(async(_url:string,init:RequestInit)=>{
+    const requestId=new Headers(init.headers).get("X-Console-Request-ID")!;
+    const headers=new Headers();
+    if(mode!=="missing")headers.set("X-Console-Validated-Request-ID",mode==="old-request"?"older-request":requestId);
+    headers.set("X-Console-Read-At-Ms",mode==="bad-time"?"NaN":"999");
+    expect(init.cache).toBe("no-cache");
+    return Response.json(columns,{headers});
+  }));
+  const request=readManagementPage(subFilterDefaults,"",new AbortController().signal);
+  if(mode==="current")expect(await request).toStrictEqual({...page,read_at_ms:999});
+  else await expect(request).rejects.toThrow("实时核验失败");
 });

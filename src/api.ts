@@ -167,10 +167,23 @@ export async function analyticsRequest<T>(connection: Connection,path: string,si
 export async function controlRequest<T>(path:string,init:RequestInit={}):Promise<T>{
  const read=!init.method || init.method.toUpperCase()==="GET";
  return withRequestDeadline(init.signal, read ? 30_000 : 120_000, !read, async (signal, requestId, responseReceived) => {
- const response=await fetch(globalThis.location.origin+"/analytics"+path,{...init,headers:{Accept:"application/json","Content-Type":"application/json",...init.headers,"X-Console-Request-ID":requestId},credentials:"same-origin",cache:"no-store",signal});
+ const currentManagement=read && path.startsWith("/v1/channel-management/query?") && init.cache==="no-cache" && new Headers(init.headers).get("X-Console-Current-Validation")==="1";
+ const response=await fetch(globalThis.location.origin+"/analytics"+path,{...init,headers:{Accept:"application/json","Content-Type":"application/json",...init.headers,"X-Console-Request-ID":requestId},credentials:"same-origin",cache:currentManagement?"no-cache":"no-store",signal});
  responseReceived();
  if(!response.ok){const message=await response.text();throw new ApiError(message||`HTTP ${response.status}`,response.status)}
  if(!read && typeof window !== "undefined") window.dispatchEvent(new Event("uni-console-control-write"));
- return await response.json() as T;
+ const data=await response.json();
+ if(currentManagement) {
+   const acknowledgement=response.headers.get("X-Console-Validated-Request-ID");
+   if(acknowledgement!==null) {
+     const at=Number(response.headers.get("X-Console-Read-At-Ms"));
+     if(acknowledgement!==requestId||!Number.isSafeInteger(at)||at<=0||!data||typeof data!=="object"||Array.isArray(data)) throw Error("渠道数据实时核验失败，请重新读取");
+     return {...data,read_at_ms:at} as T;
+   }
+   // Legacy backends return a full no-store page. A cached zero-timestamp
+   // representation must never be displayed without THIS request's nonce.
+   if(data?.read_at_ms===0) throw Error("渠道数据实时核验失败，请重新读取");
+ }
+ return data as T;
  });
 }

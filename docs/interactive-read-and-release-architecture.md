@@ -400,3 +400,15 @@ Older v1/v2 clients and backends remain accepted. The bounded computation store
 counts both the complete page and its prepared wire representation against its
 16 MiB limit; each read still validates current revisions and overlays live
 account headers. Static result columns need not be reassembled on every refresh.
+
+A v3 caller may request HTTP conditional revalidation. The API completes the
+same current permission/version/database checks before computing an ETag over
+the full stable page, including owner and freshly read balances. Only the read
+timestamp moves to response metadata. Matching bytes return304 with a new read
+time and the caller's unique request ID. Changed data returns the complete200.
+The browser uses no-cache; responses require private,no-cache,must-revalidate and
+Vary:Cookie. The caller rejects any response lacking its exact current request
+acknowledgement. There is no offline or stale-while-revalidate display; errors
+still hide old rows. Older backends use full no-store pages. This avoids repeated
+transfer of verified-identical bytes, rather than serving an unvalidated saved
+snapshot. Full operation selection remains an independent no-store read.

@@ -141,7 +141,11 @@ export async function readManagementPage(
   const started = performance.now();
   const response = await controlRequest<unknown>(path(filters, { cursor }), {
     signal,
-    headers: { Accept: managementPageMediaType },
+    cache: "no-cache",
+    headers: {
+      Accept: managementPageMediaType,
+      "X-Console-Current-Validation": "1",
+    },
   });
   signal.throwIfAborted();
   const page = validateManagementPage(response);

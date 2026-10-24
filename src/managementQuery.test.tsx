@@ -125,7 +125,7 @@ it("reads one current page and separately verifies the complete 61-row selection
       calls.push(url.pathname);
       expect(url.pathname).toBe("/analytics/v1/channel-management/query");
       expect(init.method).toBeUndefined();
-      expect(init.cache).toBe("no-store");
+      expect(init.cache).toBe(url.searchParams.has("selection") ? "no-store" : "no-cache");
       expect(JSON.parse(url.searchParams.get("filters")!)).toEqual(
         subFilterDefaults,
       );

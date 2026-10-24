@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 )
 
 const managementPageV2MediaType = "application/vnd.uni-api.management-page-v2+json"
@@ -115,6 +116,13 @@ func encodeManagementPage(page managementPageResponse) (managementWirePage, erro
 func writeManagementPage(w http.ResponseWriter, r *http.Request, page managementPageResponse) error {
 	w.Header().Add("Vary", "Accept")
 	if r.Header.Get("Accept") == managementPageV3MediaType {
+		if r.Header.Get("X-Console-Current-Validation") == "1" {
+			// ReadAt is dynamic response metadata. The representation remains
+			// byte-identical while every delivered header attests THIS read.
+			w.Header().Set("X-Console-Read-At-Ms", strconv.FormatInt(page.ReadAtMS, 10))
+			w.Header().Set("X-Console-Validated-Request-ID", consoleRequestID(r.Context()))
+			page.ReadAtMS = 0
+		}
 		wire, err := currentManagementColumnPage(page)
 		if err != nil {
 			http.Error(w, "渠道响应编码失败", http.StatusInternalServerError)

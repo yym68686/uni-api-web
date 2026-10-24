@@ -62,6 +62,25 @@ func writeManagementJSONMedia(w http.ResponseWriter, r *http.Request, value any,
 		return err
 	}
 	w.Header().Add("Vary", "Accept-Encoding")
+	if mediaType == managementPageV3MediaType {
+		w.Header().Add("Vary", "X-Console-Current-Validation")
+		if r.Header.Get("X-Console-Current-Validation") == "1" && w.Header().Get("X-Console-Validated-Request-ID") != "" {
+			// Revalidation runs only AFTER the same live permission, gateway
+			// and database proof as a full 200 response. Never allow freshness
+			// lifetimes, disconnected reuse or shared proxy storage.
+			w.Header().Add("Vary", "Cookie")
+			w.Header().Set("Cache-Control", "private, no-cache, must-revalidate")
+			tag := `"` + tokenHash(mediaType+"\x00"+r.Header.Get("Accept-Encoding")+"\x00"+string(body)) + `"`
+			w.Header().Set("ETag", tag)
+			w.Header().Set("Content-Type", mediaType)
+			for _, candidate := range strings.Split(r.Header.Get("If-None-Match"), ",") {
+				if strings.TrimSpace(candidate) == tag {
+					w.WriteHeader(http.StatusNotModified)
+					return nil
+				}
+			}
+		}
+	}
 	brQuality, gzipQuality := managementEncodingQuality(r.Header.Get("Accept-Encoding"), "br"), managementEncodingQuality(r.Header.Get("Accept-Encoding"), "gzip")
 	if len(body) > 1024 && brQuality > 0 && brQuality >= gzipQuality {
 		var compressed bytes.Buffer
