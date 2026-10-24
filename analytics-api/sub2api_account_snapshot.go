@@ -15,15 +15,18 @@ func (e subAccountReadFailure) Error() string { return e.message }
 func (e subAccountReadFailure) Unwrap() error { return e.cause }
 
 func readSubAccountHeaders(ctx context.Context, db controlQueryDB, owner, accountID string) ([]subAccount, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id,name,base,email,state,message,synced_at,balance,job_kind,provider_kind,login_name,encrypted_login_password<>'' FROM console_sub_accounts WHERE owner=$1 AND ($2='' OR id=$2) ORDER BY created_at,id`, owner, accountID)
+	rows, err := db.QueryContext(ctx, `SELECT id,name,base,email,state,message,synced_at,balance,job_kind,provider_kind,login_name,encrypted_login_password<>'',COALESCE(sync_models,'null'::jsonb) FROM console_sub_accounts WHERE owner=$1 AND ($2='' OR id=$2) ORDER BY created_at,id`, owner, accountID)
 	if err != nil {
 		return nil, subAccountReadFailure{"账号列表暂不可用", err}
 	}
 	accounts := []subAccount{}
 	for rows.Next() {
 		var a subAccount
-		var balanceRaw []byte
-		if err = rows.Scan(&a.ID, &a.Name, &a.Base, &a.Email, &a.State, &a.Message, &a.SyncedAt, &balanceRaw, &a.JobKind, &a.ProviderKind, &a.LoginName, &a.HasSavedPassword); err != nil {
+		var balanceRaw, syncRaw []byte
+		if err = rows.Scan(&a.ID, &a.Name, &a.Base, &a.Email, &a.State, &a.Message, &a.SyncedAt, &balanceRaw, &a.JobKind, &a.ProviderKind, &a.LoginName, &a.HasSavedPassword, &syncRaw); err != nil {
+			break
+		}
+		if err = json.Unmarshal(syncRaw, &a.SyncModels); err != nil {
 			break
 		}
 		if len(balanceRaw) > 0 {

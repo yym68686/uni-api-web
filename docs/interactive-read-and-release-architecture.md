@@ -425,3 +425,17 @@ counts that canonical representation. v3 sends it after current proof and fresh
 header overlay; older clients expand independent complete objects on demand.
 This keeps alternating filter pages from evicting each other merely because
 the same evidence was represented twice. It does not change freshness checks.
+
+Running account jobs use a separate authenticated progress read. It returns
+selected model state counts in one repeatable-read snapshot, without probe bodies,
+receipts or a management-page refresh. The visible page stays in place; progress
+polling ends when jobs finish. Window focus still does not refresh the page.
+The model selection stored with the submitted sync job defines its scope; changing
+checkboxes later does not change that job. Full historical results remain available
+in channel details. Built-in and channel-extra model selections have independent
+select-all/clear actions.
+
+Sync initialization queues all models in one ordered source statement. This avoids
+holding statement revision counters from one model while trying to acquire the
+row-summary epoch for a later model, which inverted the result writer's lock order.
+The transaction, selected-model scope, old results and rollback behavior remain.

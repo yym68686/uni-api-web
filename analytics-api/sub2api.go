@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"net/url"
 	"sort"
@@ -55,6 +56,8 @@ type subAccount struct {
 	Email            string             `json:"email"`
 	State            string             `json:"state"`
 	JobKind          string             `json:"job_kind"`
+	SyncModels       []string           `json:"sync_models,omitempty"`
+	Progress         *subSyncProgress   `json:"progress,omitempty"`
 	Message          string             `json:"message"`
 	SyncedAt         int64              `json:"synced_at"`
 	Targets          []subTarget        `json:"targets"`
@@ -937,23 +940,9 @@ func (s *Service) subSynchronize(ctx context.Context, id, base, job, encrypted s
 			return errors.New("分组保存失败")
 		}
 	}
-	for _, g := range groups {
-		seenModels := map[string]bool{}
-		candidates := append(append([]string{}, subModels...), groupModels[g.ID]...)
-		candidates = append(candidates, subSyncScopeModels(ctx)...)
-		for _, model := range candidates {
-			if seenModels[model] {
-				continue
-			}
-			seenModels[model] = true
-			state := "idle"
-			if subSyncIncludesModel(ctx, model) {
-				state = "queued"
-			}
-			if _, err = tx.ExecContext(ctx, `INSERT INTO console_sub_models(account_id,group_id,model,state) VALUES($1,$2,$3,$4) ON CONFLICT(account_id,group_id,model) DO UPDATE SET state='queued',message='' WHERE $4='queued'`, id, g.ID, model, state); err != nil {
-				return errors.New("模型保存失败")
-			}
-		}
+	if err = queueSubSyncModels(ctx, tx, id, groups, groupModels); err != nil {
+		log.Printf("sub_sync_write_failed stage=queue_models class=%s", databaseErrorClass(err))
+		return errors.New("模型保存失败")
 	}
 	if err = tx.Commit(); err != nil {
 		return errors.New("分组保存失败")
@@ -1057,6 +1046,7 @@ func (s *Service) subTestTargets(ctx context.Context, id, base, job string, qual
 				}
 				res, e := s.control.db.ExecContext(ctx, `UPDATE console_sub_models SET state='running',message='' WHERE account_id=$1 AND group_id=$2 AND model=$3 AND state='queued' AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$4)`, id, t.id, t.model, job)
 				if e != nil {
+					log.Printf("sub_sync_write_failed stage=claim_model class=%s", databaseErrorClass(e))
 					errs <- errors.New("检测进度保存失败")
 					continue
 				}
@@ -1112,6 +1102,7 @@ func (s *Service) subTestTargets(ctx context.Context, id, base, job string, qual
 				raw, _ := json.Marshal(result)
 				_, e = s.control.db.ExecContext(ctx, `UPDATE console_sub_models SET state='done',result=$4,message='' WHERE account_id=$1 AND group_id=$2 AND model=$3 AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$5)`, id, t.id, t.model, string(raw), job)
 				if e != nil {
+					log.Printf("sub_sync_write_failed stage=save_result class=%s", databaseErrorClass(e))
 					errs <- errors.New("检测结果保存失败")
 					continue
 				}
@@ -1139,6 +1130,7 @@ func (s *Service) subTestTargets(ctx context.Context, id, base, job string, qual
 				if t.model == checkModel {
 					_, e = s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET result=$3 WHERE account_id=$1 AND group_id=$2 AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$4)`, id, t.id, string(raw), job)
 					if e != nil {
+						log.Printf("sub_sync_write_failed stage=save_result class=%s", databaseErrorClass(e))
 						errs <- errors.New("检测结果保存失败")
 					}
 				}

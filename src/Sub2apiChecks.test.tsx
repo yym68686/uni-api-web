@@ -2166,7 +2166,7 @@ it("remembers model settings per user and uses them for batch and row probes", a
   let dialog = within(screen.getByRole("dialog"));
   expect(dialog.getAllByRole("checkbox")).toHaveLength(SUB_MODELS.length);
   for (const box of dialog.getAllByRole("checkbox")) expect(box).toBeChecked();
-  await user.click(dialog.getByRole("button", { name: "清空" }));
+  await user.click(dialog.getByRole("button", { name: "清空内置模型" }));
   expect(dialog.getByRole("button", { name: "保存设置" })).toBeDisabled();
   for (const model of ["deepseek-v4.1-flash-1017", "gemini-4-argon", "claude-opus-5"])
     await user.click(dialog.getByRole("checkbox", { name: model }));
@@ -2185,7 +2185,7 @@ it("remembers model settings per user and uses them for batch and row probes", a
   await user.click(screen.getByRole("button", { name: "检测模型设置" }));
   dialog = within(screen.getByRole("dialog"));
   expect(dialog.getAllByRole("checkbox").filter(box => (box as HTMLInputElement).checked)).toHaveLength(3);
-  await user.click(dialog.getByRole("button", { name: "全选" }));
+  await user.click(dialog.getByRole("button", { name: "全选内置模型" }));
   await user.click(dialog.getByRole("button", { name: "取消" }));
   expect(screen.getByRole("button", { name: buttonName })).toBeEnabled();
   await user.selectOptions(screen.getByLabelText("检测模型筛选"), "gpt-6-astra");
@@ -2286,9 +2286,10 @@ it("shows scoped extra models and submits exactly the checked models to native a
  await screen.findByText('native',{selector:'strong'});
  await user.click(screen.getByRole('button',{name:'检测模型设置'}));
  let d=within(screen.getByRole('dialog'));
- expect(d.getByText('当前筛选渠道的额外模型 · 2')).toBeVisible();
+ expect(d.getByRole('group',{name:'额外模型选择'})).toHaveTextContent('已选 2 / 2');
  expect(d.getByRole('checkbox',{name:'custom-model'})).toBeChecked();
- await user.click(d.getByRole('button',{name:'清空'}));
+ await user.click(d.getByRole('button',{name:'清空内置模型'}));
+ await user.click(d.getByRole('button',{name:'清空额外模型'}));
  for(const m of ['gpt-6-sol','second-model'])await user.click(d.getByRole('checkbox',{name:m}));
  await user.click(d.getByRole('button',{name:'保存设置'}));
  await user.click(screen.getByRole('button',{name:'检测已选 2 个模型 · 2 个渠道'}));
@@ -2600,4 +2601,24 @@ it.each(["accounts", "channel-management"])("does not report an empty filter res
   expect(screen.queryByText("暂时无法读取渠道")).not.toBeInTheDocument();
   expect(screen.getByText("0 个渠道可检测")).toBeVisible();
   expect(methods.every(method => method === "GET")).toBe(true);
+});
+
+it("shows the durable sync selection instead of the 193-model historical catalog",async()=>{
+ const data=fixtures().slice(0,1),a=data[0],t=a.targets[0];
+ const models=[...SUB_MODELS,...Array.from({length:193-SUB_MODELS.length},(_,i)=>`extra-${i}`)];
+ const selected=models.slice(0,32);
+ a.state="running";a.job_kind="sync";a.sync_models=selected;
+ t.models=models.map((model,i)=>({model,state:i<32?"queued":"done",message:"",result:{...t.result!,model,availability:{...t.result!.availability,status:"error",model_match:"unavailable"}}}));
+ // Checkbox edits made after submission cannot relabel the running job.
+ saveSubModels("scope-display",[models[100]],models);
+ vi.stubGlobal("fetch",vi.fn(async(input:string)=>Response.json({data:input.endsWith("/accounts")?data:[]})));
+ mount("scope-display");
+ const table=await screen.findByRole("table");
+ expect(within(table).getAllByText("本次已选 32 个模型")).toHaveLength(2);
+ expect(table).toHaveTextContent("0/32 可用");
+ expect(table).toHaveTextContent("32 个排队 / 检测中");
+ expect(table).toHaveTextContent("全部 193 个模型记录仍可在详情查看");
+ expect(table).not.toHaveTextContent("193 个失败");
+ expect(table).not.toHaveTextContent("0/193 匹配");
+ expect(table).not.toHaveTextContent("32 个未检测");
 });

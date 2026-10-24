@@ -19,15 +19,17 @@ func TestSubSyncAllStartsEveryAccountBeforeAnotherFinishes(t *testing.T) {
 }
 
 func testSubConcurrentAccounts(t *testing.T, interrupt bool) {
-	dsn := os.Getenv("TEST_CONTROL_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("PostgreSQL required")
-	}
-	store, err := newControlStore(dsn, strings.Repeat("c", 32))
-	if err != nil {
+	// startBackground intentionally scans every account in its schema. This
+	// fixture must not pick up queued probes left by unrelated integration
+	// cases when measuring the exact per-account dispatch count.
+	db := migrationTestDB(t)
+	db.SetMaxOpenConns(8)
+	db.SetMaxIdleConns(4)
+	if err := migrateControlSchema(context.Background(), db, controlMigrations()); err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	store := &controlStore{db: db, key: []byte(strings.Repeat("c", 32))}
+	var err error
 	owner := "parallel-" + randomID()[:12]
 	defer store.db.Exec(`DELETE FROM console_sub_accounts WHERE owner=$1`, owner)
 	// More accounts than database pool slots must still reach the upstream

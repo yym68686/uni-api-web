@@ -1,3 +1,5 @@
+import { useSubSyncProgress } from "./subSyncProgress";
+import type { SyncProgress } from "./subSyncProgress";
 import { fingerprintTargets, fingerprintLabels, FingerprintCell, FingerprintPanel, fingerprintNote } from "./ModelFingerprints";
 import { isCapabilityCheckModel, capabilityCheckScope } from "./sub2apiModels";
 import { CopyProbeCurl } from "./CopyProbeCurl";
@@ -134,6 +136,8 @@ export interface SubAccount {
   has_saved_password?: boolean;
   state: string;
   job_kind?: string;
+  sync_models?: string[];
+  progress?: SyncProgress;
   message: string;
   synced_at: number;
   balance?: SubAccountBalance | null;
@@ -265,6 +269,7 @@ function GroupAvailability({ checks }: { checks: SubModelCheck[] }) {
 }
 
 function ModelMatch({ check }: { check: SubModelCheck }) {
+  if (pending(check.state) || check.state === "interrupted") return <span className="check-status">{importModelLabel(check)}</span>;
   const status = modelMatchStatus(check);
   const label = modelMatchLabels[status];
   const probe = check.result?.availability;
@@ -286,13 +291,15 @@ function ModelMatch({ check }: { check: SubModelCheck }) {
 }
 
 function GroupModelMatch({ checks }: { checks: SubModelCheck[] }) {
-  const statuses = checks.map(modelMatchStatus);
+  const settled = checks.filter(c => !pending(c.state) && c.state !== "interrupted");
+  const statuses = settled.map(modelMatchStatus);
   const matches = statuses.filter((s) => s === "match").length;
   return (
     <div className="sub-model-match-summary">
       <span className={`check-status ${matches ? "pass" : "inconclusive"}`}>
         {matches}/{checks.length} 匹配
       </span>
+      {checks.length > settled.length && <small className="check-source">{checks.filter(c=>pending(c.state)).length || 0} 个排队 / 检测中{checks.some(c=>c.state === "interrupted") ? " · 含已中断模型" : ""}</small>}
       {(
         [
           "mismatch",
@@ -741,7 +748,9 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   const pageQuery=useManagementPage(user,filters,cursor);
   const pageData=pageQuery.data;
   const accounts=pageData?.accounts || [];
-  const statusAccounts=accounts;
+  const progressQuery=useSubSyncProgress(user,accounts,pageData?.read_at_ms);
+  const statusAccounts=progressQuery.data?.data || accounts;
+  const progressByAccount=new Map(statusAccounts.map(a=>[a.id,a]));
   const query={...pageQuery,data:pageData?{data:accounts,cached:false}:undefined};
   const accountHeaders=query;
   const prices={data:pageData?{data:pageData.context.prices}:undefined};
@@ -1022,6 +1031,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
             }}
           />
         )}
+        {progressQuery.isError && <p role="alert" className="settings-note">实时进度更新失败，当前进度尚未确认。<button className="button small" onClick={()=>void progressQuery.refetch()}>重试进度</button></p>}
         {accountHeaders.error && (
           <div role="alert" className="error-banner">
             账号状态读取失败：{accountHeaders.error.message}
@@ -1074,6 +1084,9 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                         {stateLabel[a.state] || a.state}
                         {total > 0 && ` · ${completed}/${total} 个分组`}
                       </span>
+                      {a.sync_models?.length && pending(a.state) && a.job_kind === "sync" ? <small>本次同步选择 {a.sync_models.length} 个模型 / 分组</small> : null}
+                      {a.progress && <small>模型进度：{a.progress.completed}/{a.progress.total} 完成 · {a.progress.running} 检测中 · {a.progress.queued} 排队{a.progress.interrupted ? ` · ${a.progress.interrupted} 已中断` : ""}</small>}
+                      {a.progress?.running_models.length ? <small>正在检测：{[...new Set(a.progress.running_models)].join("、")}</small> : null}
                       {a.synced_at > 0 && !pending(a.state) && (
                         <small>上次同步 {time(a.synced_at)}</small>
                       )}
@@ -1516,6 +1529,11 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                   {rows
                     .map((managementRow) => {
                       const { id, account, target: t, checks, selected, configured } = managementRow;
+                      const scopedModels = pending(account.state) && account.job_kind === "sync" ? account.sync_models : undefined;
+                      const checkByModel = new Map(checks.map(c=>[c.model,c]));
+                      const overviewChecks = scopedModels?.length ? [...new Set(scopedModels)].map(model => checkByModel.get(model) || {model,state:"idle",message:"",result:null}) : checks;
+                      const liveGroup = progressByAccount.get(account.id)?.progress?.groups.find(g=>g.group_id===t.group_id);
+                      const scopeLabel = scopedModels?.length ? `本次已选 ${overviewChecks.length} 个模型` : `全部 ${checks.length} 个模型（含历史记录）`;
                       const openDrawer = () => setManagementDetail(managementRow);
                       return (
                       <tr
@@ -1561,7 +1579,12 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                           ) : selected ? (
                             <AvailabilityStatus check={selected} />
                           ) : (
-                            <GroupAvailability checks={checks} />
+                            <><small className="check-source">{scopeLabel}</small>
+                            {scopedModels?.length ? <small className="check-source">全部 {checks.length} 个模型记录仍可在详情查看</small> : null}
+                            {liveGroup && scopedModels?.length ? <>
+                              <small className="check-status">本次进度：{liveGroup.completed}/{liveGroup.total} 完成 · {liveGroup.running} 检测中 · {liveGroup.queued} 排队{liveGroup.interrupted ? ` · ${liveGroup.interrupted} 已中断` : ""}</small>
+                              <small className="check-source">刷新渠道查看最新检测结果</small>
+                            </> : <GroupAvailability checks={overviewChecks} />}</>
                           )}
                         </td>
                         <td className="mono">
@@ -1578,7 +1601,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                           {selected ? (
                             <ModelMatch check={selected} />
                           ) : (
-                            <GroupModelMatch checks={checks} />
+                            <><small className="check-source">{scopeLabel}</small>{liveGroup && scopedModels?.length ? <small className="check-source">已完成 {liveGroup.completed}/{liveGroup.total} · 刷新渠道查看匹配结果</small> : <GroupModelMatch checks={overviewChecks} />}</>
                           )}
                         </td>
                         <td>{selected ? <PriceStatus check={selected} prices={prices.data?.data} /> : <GroupPriceStatus checks={checks} prices={prices.data?.data} />}</td>

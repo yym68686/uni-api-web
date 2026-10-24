@@ -37,13 +37,16 @@ export function availableModelChecks(target: SubTarget): SubModelCheck[] {
 }
 
 export function availabilityCounts(checks: SubModelCheck[]) {
+  // A queued rerun retains the previous result for diagnostics, but that old
+  // result is not also a current success/failure/untested task.
+  const settled = checks.filter(c => !["queued", "running", "interrupted"].includes(c.state));
   return {
-    success: checks.filter((c) => c.result?.availability.status === "success")
+    success: settled.filter((c) => c.state !== "error" && c.result?.availability.status === "success")
       .length,
-    warning: checks.filter(c => probeHasWarning(c.result?.availability)).length,
-    failed: checks.filter((c) => c.result?.availability.status === "error")
+    warning: settled.filter(c => probeHasWarning(c.result?.availability)).length,
+    failed: settled.filter((c) => c.state === "error" || c.result?.availability.status === "error")
       .length,
-    untested: checks.filter((c) => !c.result).length,
+    untested: settled.filter((c) => c.state !== "error" && !c.result).length,
     pending: checks.filter((c) => ["queued", "running"].includes(c.state))
       .length,
     interrupted: checks.filter((c) => c.state === "interrupted").length,

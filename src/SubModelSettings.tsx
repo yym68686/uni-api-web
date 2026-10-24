@@ -13,7 +13,8 @@ export function SubModelSettings({
   extraModels?: string[];
   onSave: (models: SubModel[]) => void;
 }) {
-  const available = [...new Set([...SUB_MODELS, ...extraModels])];
+  const extras = [...new Set(extraModels)].filter(model => !SUB_MODELS.includes(model));
+  const available = [...SUB_MODELS, ...extras];
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(models);
   return (
@@ -44,24 +45,20 @@ export function SubModelSettings({
               <X size={18} />
             </button>
           </Dialog.Close>
-          <div className="sub-model-settings-actions">
-            <span>
-              已选 {draft.length} / {available.length}
-            </span>
-            <button
-              className="button small"
-              onClick={() => setDraft([...available])}
-            >
-              全选
-            </button>
-            <button className="button small" onClick={() => setDraft([])}>
-              清空
-            </button>
+          <p>合计已选 {draft.filter(model => available.includes(model)).length} / {available.length}</p>
+          <div className="sub-model-settings-actions" role="group" aria-label="内置模型选择">
+            <span>内置模型 · 已选 {SUB_MODELS.filter(model=>draft.includes(model)).length} / {SUB_MODELS.length}</span>
+            <button className="button small" aria-label="全选内置模型" onClick={() => setDraft(available.filter(model=>SUB_MODELS.includes(model)||draft.includes(model)))}>全选</button>
+            <button className="button small" aria-label="清空内置模型" onClick={() => setDraft(draft.filter(model=>!SUB_MODELS.includes(model)))}>清空</button>
           </div>
           <div className="sub-model-settings-options">
             {available.map((model, index) => (
               <div key={model} style={{display:"contents"}}>
-              {index === SUB_MODELS.length && <p className="sub-model-settings-extra">当前筛选渠道的额外模型 · {extraModels.length}</p>}
+              {index === SUB_MODELS.length && <div className="sub-model-settings-extra sub-model-settings-actions" role="group" aria-label="额外模型选择">
+                <span>当前筛选渠道的额外模型 · 已选 {extras.filter(model=>draft.includes(model)).length} / {extras.length}</span>
+                <button className="button small" aria-label="全选额外模型" onClick={()=>setDraft(available.filter(model=>extras.includes(model)||draft.includes(model)))}>全选</button>
+                <button className="button small" aria-label="清空额外模型" onClick={()=>setDraft(draft.filter(model=>!extras.includes(model)))}>清空</button>
+              </div>}
               <label key={model}>
                 <input
                   type="checkbox"

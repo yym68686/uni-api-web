@@ -34,6 +34,13 @@ export function installManagementPageFixture() {
   const wrapped = Object.assign(
     async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input), location.origin);
+      if (url.pathname.endsWith("/sub2api/accounts/progress")) {
+        const directory = new URL(url); directory.pathname = directory.pathname.replace(/\/progress$/, ""); directory.search = "";
+        const response = await fixtureFetch(directory.href, {signal:init?.signal});
+        if (!response.ok) return response;
+        const body = await response.json();
+        return Response.json({...body, read_at_ms:Date.now()});
+      }
       if (!url.pathname.endsWith("/channel-management/query"))
         return fixtureFetch(input, init);
       const root =
