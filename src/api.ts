@@ -171,7 +171,11 @@ export async function controlRequest<T>(path:string,init:RequestInit={}):Promise
  const response=await fetch(globalThis.location.origin+"/analytics"+path,{...init,headers:{Accept:"application/json","Content-Type":"application/json",...init.headers,"X-Console-Request-ID":requestId},credentials:"same-origin",cache:currentManagement?"no-cache":"no-store",signal});
  responseReceived();
  if(!response.ok){const message=await response.text();throw new ApiError(message||`HTTP ${response.status}`,response.status)}
- if(!read && typeof window !== "undefined") window.dispatchEvent(new Event("uni-console-control-write"));
+ // A queued sync changes task state asynchronously. Its caller reads the
+ // dedicated progress endpoint; clearing/reloading the channel page here
+ // would discard the user's current view before any new results exist.
+ const syncQueued=init.method?.toUpperCase()==="POST" && ["/v1/sub2api/accounts/sync-selected","/v1/sub2api/accounts/sync-only"].includes(path);
+ if(!read && !syncQueued && typeof window !== "undefined") window.dispatchEvent(new Event("uni-console-control-write"));
  const data=await response.json();
  if(currentManagement) {
    const acknowledgement=response.headers.get("X-Console-Validated-Request-ID");

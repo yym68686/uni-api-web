@@ -32,6 +32,7 @@ const account: SubAccount = {
   synced_at: 1,
   targets: [],
 };
+const idleProgress=()=>Response.json({data:[{...account,progress:{total:0,completed:0,queued:0,running:0,interrupted:0,running_models:[],groups:[]}}],read_at_ms:Date.now()});
 const rows = Array.from({ length: 61 }, (_, i) => ({
   id: `row-${i + 1}`,
   account,
@@ -102,6 +103,43 @@ function mount(user: string) {
   );
 }
 
+it.each([true,false])("starts live sync progress without clearing rows, changing the page or repeating the submission (detect=%s)", async detect=>{
+ const user=userEvent.setup();let pageReads=0,progressReads=0,posts=0;
+ let finishProgress!:(response:Response)=>void;
+ vi.stubGlobal("fetch",vi.fn(async(input:string,init?:RequestInit)=>{
+  const url=new URL(input);
+  if(url.pathname.endsWith(detect ? "/sync-selected" : "/sync-only")){
+   posts++;expect(init?.method).toBe("POST");return Response.json({queued:1},{status:202});
+  }
+  if(url.pathname.endsWith("/accounts/progress")){
+   progressReads++;expect(JSON.parse(url.searchParams.get("accounts")!)).toEqual([account.id]);
+   return new Promise<Response>(resolve=>{finishProgress=resolve;});
+  }
+  if(url.pathname.endsWith("/channel-management/query")){pageReads++;return Response.json(page(Number(url.searchParams.get("cursor")||0)));}
+  if(url.pathname.endsWith("/sources"))return Response.json({data:[]});
+  if(url.pathname.endsWith("/balance"))return Response.json({status:"unavailable"});
+  throw Error(`Unexpected read ${url.pathname}`);
+ }));
+ mount("sync-stable-page");
+ await screen.findByText("Channel 1",{selector:"strong"});
+ await user.click(screen.getByRole("button",{name:"下一页"}));
+ await screen.findByText("Channel 26",{selector:"strong"});
+ const row=screen.getByRole("row",{name:"查看 Owned site Channel 26 渠道详情"});
+ const button=screen.getByRole("button",{name:detect ? "一键同步并检测" : "一键同步"});
+ await user.click(button);
+ await waitFor(()=>expect(progressReads).toBe(3));
+ expect(pageReads).toBe(2);expect(posts).toBe(1);expect(button).toBeDisabled();
+ expect(screen.getByRole("row",{name:"查看 Owned site Channel 26 渠道详情"})).toBe(row);
+ expect(screen.queryByRole("status",{name:"加载渠道检测"})).not.toBeInTheDocument();
+ await act(async()=>{finishProgress(Response.json({data:[{...account,state:"running",job_kind:"sync",sync_models:["gpt-5.5"],active_groups:1,completed_groups:0,progress:{total:32,completed:3,queued:27,running:2,interrupted:0,running_models:["gpt-5.5"],groups:[]}}],read_at_ms:2}));});
+ await screen.findByText("模型进度：3/32 完成 · 2 检测中 · 27 排队");
+ expect(screen.getByRole("row",{name:"查看 Owned site Channel 26 渠道详情"})).toBe(row);
+ expect(button).toBeDisabled();expect(pageReads).toBe(2);expect(posts).toBe(1);
+ await user.click(screen.getByRole("button",{name:"刷新渠道管理"}));
+ await screen.findByText("Channel 1",{selector:"strong"});
+ expect(pageReads).toBe(3);expect(posts).toBe(1);
+});
+
 it("renders just the current 25 rows and fetches all 61 before a batch, without old full-list reads", async () => {
   const reads: string[] = [],
     writes: { targets: unknown[] }[] = [];
@@ -109,6 +147,7 @@ it("renders just the current 25 rows and fetches all 61 before a batch, without 
     "fetch",
     vi.fn(async (input: string, init?: RequestInit) => {
       const url = new URL(input);
+      if (url.pathname.endsWith("/accounts/progress")) return idleProgress();
       reads.push(url.pathname);
       if (init?.method === "POST") {
         writes.push(JSON.parse(String(init.body)));
@@ -161,6 +200,7 @@ it("cancels an obsolete full-selection read without submitting after the filter 
     "fetch",
     vi.fn(async (input: string, init?: RequestInit) => {
       const url = new URL(input);
+      if (url.pathname.endsWith("/accounts/progress")) return idleProgress();
       if (init?.method === "POST") {
         writes.push(init.body);
         return Response.json({ queued: 61 });
@@ -200,6 +240,7 @@ it("restarts from the first page after a stale cursor without reporting an empty
     "fetch",
     vi.fn(async (input: string) => {
       const url = new URL(input);
+      if (url.pathname.endsWith("/accounts/progress")) return idleProgress();
       if (url.pathname.endsWith("/channel-management/query")) {
         const cursor = url.searchParams.get("cursor") || "";
         cursors.push(cursor);
@@ -227,4 +268,26 @@ it("restarts from the first page after a stale cursor without reporting an empty
   );
   await screen.findByText("Channel 1", { selector: "strong" });
   expect(cursors).toEqual(["", "25", ""]);
+});
+
+it("allows sync-only with no selected models and never falls back to detection on an old backend",async()=>{
+ const writes:string[]=[];
+ const {saveSubModels}=await import("./sub2apiModels");saveSubModels("sync-only-empty",[]);
+ vi.stubGlobal("fetch",vi.fn(async(input:string,init?:RequestInit)=>{
+  const path=new URL(input).pathname;
+  if(path.endsWith("/accounts/progress"))return idleProgress();
+  if(init?.method){writes.push(path);return new Response("404 page not found",{status:404});}
+  if(path.endsWith("/channel-management/query"))return Response.json(page());
+  if(path.endsWith("/sources"))return Response.json({data:[]});
+  if(path.endsWith("/balance"))return Response.json({status:"unavailable"});
+  throw Error(`Unexpected read ${path}`);
+ }));
+ mount("sync-only-empty");const user=userEvent.setup();
+ await screen.findByText("Channel 1",{selector:"strong"});
+ expect(screen.getByRole("button",{name:"一键同步并检测"})).toBeDisabled();
+ expect(screen.getByRole("button",{name:"一键同步"})).toBeEnabled();
+ await user.click(screen.getByRole("button",{name:"一键同步"}));
+ await screen.findByText("同步检测服务待更新，请稍后重试。");
+ expect(writes).toEqual(["/analytics/v1/sub2api/accounts/sync-only"]);
+ expect(screen.getByText("Channel 1",{selector:"strong"})).toBeVisible();
 });

@@ -1030,3 +1030,21 @@ it("keeps both batch buttons visible while running and preserves completed resul
   app.unmount();
   app.client.clear();
 });
+
+it("moves a channel to the true source-first position while retaining hidden channels and other source drafts", async()=>{
+ const app=setup();
+ await screen.findByRole("table");
+ await app.user.click(screen.getByRole("button",{name:"调整顺序"}));
+ await screen.findByLabelText("置顶 One visible-second m");
+ await app.user.type(screen.getByLabelText("搜索渠道或模型"),"second");
+ expect(screen.getByLabelText("上移 One visible-second m")).toBeDisabled();
+ await app.user.click(screen.getByLabelText("置顶 One visible-second m"));
+ expect(screen.getByLabelText("置顶 One visible-second m")).toBeDisabled();
+ expect(screen.getByLabelText("置顶 Two visible-second m")).toBeEnabled();
+ expect(app.writes).toHaveLength(0);
+ await app.user.click(screen.getByLabelText("应用全部临时修改"));
+ await waitFor(()=>expect(app.writes).toHaveLength(1));
+ expect(app.writes[0].source).toBe("one");
+ expect(app.writes[0].body.order).toEqual(["visible-second","visible-first","hidden"]);
+ app.unmount();app.client.clear();
+});

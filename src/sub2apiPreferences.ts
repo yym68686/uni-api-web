@@ -3,7 +3,7 @@ export const subFilterDefaults = {
   accountId: "",
   model: "",
   maxRate: "",
-  sort: "",
+  sort: "asc",
   availability: "",
   groupStatus: "available",
   priceStatus: "",
@@ -42,7 +42,8 @@ function validate(raw: unknown): SubFilters {
       (maxRate !== "" && Number.isFinite(Number(maxRate)) && Number(maxRate) >= 0)
         ? maxRate
         : "",
-    sort: field("sort", ["", "asc", "desc"]),
+    sort: typeof v.sort === "string" && ["", "asc", "desc"].includes(v.sort)
+      ? v.sort : subFilterDefaults.sort,
     availability: field("availability", ["", "success", "error", "untested"]),
     priceStatus: field("priceStatus", ["", "normal", "abnormal", "unconfirmed", "unconfirmed_match", "unconfirmed_mismatch"]),
     compaction: field("compaction", ["", "supported", "unsupported", "error", "untested", "not_applicable"]),

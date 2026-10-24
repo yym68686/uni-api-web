@@ -116,6 +116,25 @@ it("invalidates the visible current page only after an accepted control write", 
   client.clear();
 });
 
+it.each(["sync-selected","sync-only"])("keeps the current page after %s while ordinary configuration writes still refresh", async endpoint => {
+  let reads=0;
+  vi.stubGlobal("fetch",vi.fn(async(_input:string,init?:RequestInit)=>{
+    if(init?.method)return Response.json({queued:1},{status:202});
+    reads++;return Response.json(page());
+  }));
+  const client=new QueryClient({defaultOptions:{queries:{retry:false}}});
+  const wrapper=({children}:{children:ReactNode})=><QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  const hook=renderHook(()=>useManagementPage("owner",subFilterDefaults),{wrapper});
+  await waitFor(()=>expect(hook.result.current.data?.rows).toHaveLength(25));
+  const original=hook.result.current.data;
+  await act(async()=>{await controlRequest(`/v1/sub2api/accounts/${endpoint}`,{method:"POST",body:JSON.stringify({models:["gpt-5.5"]})});});
+  expect(reads).toBe(1);expect(hook.result.current.data).toBe(original);
+  expect(hook.result.current.isFetching).toBe(false);
+  await act(async()=>{await controlRequest("/v1/prices",{method:"PUT",body:"{}"});});
+  await waitFor(()=>expect(reads).toBe(2));
+  hook.unmount();client.clear();
+});
+
 it("reads one current page and separately verifies the complete 61-row selection without executing an action", async () => {
   const calls: string[] = [];
   vi.stubGlobal(

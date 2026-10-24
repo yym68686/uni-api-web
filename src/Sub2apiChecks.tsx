@@ -137,6 +137,7 @@ export interface SubAccount {
   state: string;
   job_kind?: string;
   sync_models?: string[];
+  sync_only?: boolean;
   progress?: SyncProgress;
   message: string;
   synced_at: number;
@@ -748,7 +749,10 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   const pageQuery=useManagementPage(user,filters,cursor);
   const pageData=pageQuery.data;
   const accounts=pageData?.accounts || [];
-  const progressQuery=useSubSyncProgress(user,accounts,pageData?.read_at_ms);
+  const [syncProgressSubmission,setSyncProgressSubmission]=useState({owner:user,generation:0});
+  const syncGeneration=syncProgressSubmission.owner===user?syncProgressSubmission.generation:0;
+  const progressQuery=useSubSyncProgress(user,accounts,pageData?.read_at_ms,syncGeneration);
+  const awaitingSyncProgress=syncGeneration>0 && !progressQuery.data;
   const statusAccounts=progressQuery.data?.data || accounts;
   const progressByAccount=new Map(statusAccounts.map(a=>[a.id,a]));
   const query={...pageQuery,data:pageData?{data:accounts,cached:false}:undefined};
@@ -814,7 +818,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   const [action, setAction] = useState("");
   const checksInFlight = useRef(new Set<string>());
   const [submittingChecks, setSubmittingChecks] = useState(new Set<string>());
-  const [syncSubmitted, setSyncSubmitted] = useState<number | null>(null);
+  const [syncSubmitted, setSyncSubmitted] = useState<{count:number;detect:boolean} | null>(null);
   const syncableAccounts = statusAccounts.filter(
     (account) => !pending(account.state),
   );
@@ -876,19 +880,18 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
       setAction("");
     }
   }
-  async function syncAll() {
-    if (action || !syncableAccounts.length || !detectionModels.length) return;
-    setAction("sync-all");
+  async function syncAll(detect = true) {
+    if (action || awaitingSyncProgress || !syncableAccounts.length || (detect && !detectionModels.length)) return;
+    setAction(detect ? "sync-all" : "sync-only");
     setError("");
     setSyncSubmitted(null);
     try {
       const result = await controlRequest<{ queued: number }>(
-        "/v1/sub2api/accounts/sync-selected",
-        { method: "POST", body: JSON.stringify({ models: detectionModels }) },
+        detect ? "/v1/sub2api/accounts/sync-selected" : "/v1/sub2api/accounts/sync-only",
+        { method: "POST", body: JSON.stringify(detect ? { models: detectionModels } : {}) },
       );
-      setSyncSubmitted(result.queued);
-      void client.invalidateQueries({ queryKey: ["sub2api"] });
-      await client.invalidateQueries({ queryKey: ["sub2api-headers"] });
+      setSyncSubmitted({count:result.queued,detect});
+      setSyncProgressSubmission(previous=>({owner:user,generation:previous.owner===user?previous.generation+1:1}));
     } catch (e) {
       setError(e instanceof ApiError && e.status === 404 ? "同步检测服务待更新，请稍后重试。" : e instanceof Error ? e.message : "批量同步失败");
     } finally {
@@ -901,7 +904,9 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
     (kind === "check" ? requestedModels() : kind === "quality" ? ["gpt-6-astra"] : [kind])
       .map(item => `${selectionID(account, target, configured)}:${item}`);
   const checkBusy = (account: SubAccount, target: SubTarget, kind: CheckKind, configured?: ManagedChannel) => {
-    if (pending(account.state) && account.job_kind === "sync") return true;
+    const current=progressByAccount.get(account.id)||account;
+    if (account.id && awaitingSyncProgress) return true;
+    if (pending(current.state) && current.job_kind === "sync") return true;
     if (checkKeys(account, target, kind, configured).some(key => submittingChecks.has(key))) return true;
     if (kind === "compaction") return pending(target.compaction_state || "");
     if (kind === "tool-use") return pending(target.tool_use_state || "");
@@ -988,6 +993,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
               disabled={
                 !syncableAccounts.length ||
                 !detectionModels.length ||
+                awaitingSyncProgress ||
                 !!action ||
                 query.isPending ||
                 query.isError
@@ -1003,6 +1009,13 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                 ? "正在提交…"
                 : `一键同步并检测 · ${syncableAccounts.length} 个账号`}
             </button>
+            <button className="button small" aria-label="一键同步" title="仅同步账号、分组和密钥信息，不执行模型或能力检测"
+              aria-busy={action === "sync-only"}
+              disabled={!syncableAccounts.length || awaitingSyncProgress || !!action || query.isPending || query.isError}
+              onClick={()=>void syncAll(false)}>
+              {action === "sync-only" ? <Spinner small/> : <RefreshCw size={15}/>}
+              {action === "sync-only" ? "正在提交…" : `一键同步 · ${syncableAccounts.length} 个账号`}
+            </button>
             <button
               className="button primary small"
               onClick={() => setForm({ account: null })}
@@ -1014,11 +1027,12 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
         </div>
         {syncSubmitted !== null && (
           <p className="settings-note" role="status">
-            {syncSubmitted
-              ? `已提交 ${syncSubmitted} 个账号，正在后台同步并检测。`
+            {syncSubmitted.count
+              ? `已提交 ${syncSubmitted.count} 个账号，${syncSubmitted.detect ? "正在后台同步并检测。" : "正在后台同步，不执行检测。"}`
               : "暂无可同步账号，已有任务会继续执行。"}
           </p>
         )}
+        {syncSubmitted !== null && <p className="settings-note">任务进度实时更新。渠道列表保留当前展示，点击“刷新渠道管理”读取最新检测结果。</p>}
         {form && (
           <AccountForm
             key={form.account?.id || "new"}
@@ -1081,12 +1095,13 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                         role={pending(a.state) ? "status" : undefined}
                       >
                         {pending(a.state) && <Spinner small />}
-                        {stateLabel[a.state] || a.state}
+                        {a.sync_only && pending(a.state) ? (a.state === "queued" ? "等待同步" : "同步中") : stateLabel[a.state] || a.state}
                         {total > 0 && ` · ${completed}/${total} 个分组`}
                       </span>
-                      {a.sync_models?.length && pending(a.state) && a.job_kind === "sync" ? <small>本次同步选择 {a.sync_models.length} 个模型 / 分组</small> : null}
-                      {a.progress && <small>模型进度：{a.progress.completed}/{a.progress.total} 完成 · {a.progress.running} 检测中 · {a.progress.queued} 排队{a.progress.interrupted ? ` · ${a.progress.interrupted} 已中断` : ""}</small>}
-                      {a.progress?.running_models.length ? <small>正在检测：{[...new Set(a.progress.running_models)].join("、")}</small> : null}
+                      {a.sync_only && pending(a.state) ? <small>仅同步信息，不执行检测</small> : null}
+                      {!a.sync_only && a.sync_models?.length && pending(a.state) && a.job_kind === "sync" ? <small>本次同步选择 {a.sync_models.length} 个模型 / 分组</small> : null}
+                      {a.progress && !a.sync_only && <small>模型进度：{a.progress.completed}/{a.progress.total} 完成 · {a.progress.running} 检测中 · {a.progress.queued} 排队{a.progress.interrupted ? ` · ${a.progress.interrupted} 已中断` : ""}</small>}
+                      {!a.sync_only && a.progress?.running_models.length ? <small>正在检测：{[...new Set(a.progress.running_models)].join("、")}</small> : null}
                       {a.synced_at > 0 && !pending(a.state) && (
                         <small>上次同步 {time(a.synced_at)}</small>
                       )}
@@ -1529,7 +1544,8 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                   {rows
                     .map((managementRow) => {
                       const { id, account, target: t, checks, selected, configured } = managementRow;
-                      const scopedModels = pending(account.state) && account.job_kind === "sync" ? account.sync_models : undefined;
+                      const currentAccount=progressByAccount.get(account.id)||account;
+                      const scopedModels = pending(currentAccount.state) && currentAccount.job_kind === "sync" ? currentAccount.sync_models : undefined;
                       const checkByModel = new Map(checks.map(c=>[c.model,c]));
                       const overviewChecks = scopedModels?.length ? [...new Set(scopedModels)].map(model => checkByModel.get(model) || {model,state:"idle",message:"",result:null}) : checks;
                       const liveGroup = progressByAccount.get(account.id)?.progress?.groups.find(g=>g.group_id===t.group_id);

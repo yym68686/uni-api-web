@@ -3,6 +3,7 @@ import { useQueries, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowDown,
   ArrowUp,
+  ArrowUpToLine,
   Check,
   ChevronDown,
   RotateCcw,
@@ -222,6 +223,11 @@ export function useChannelControls({
       return { ...rule, order: next };
     });
   }
+  function moveToTop(row: Channel) {
+    const i=info(row);
+    if (!i.ready || i.pending || i.stale || i.order.indexOf(row.provider)<=0) return;
+    edit(row, rule=>({...rule,order:[row.provider,...i.order.filter(provider=>provider!==row.provider)]}));
+  }
   function discardAll() {
     if (locked.current) return;
     setDrafts(new Map());
@@ -378,6 +384,7 @@ export function useChannelControls({
     toggle,
     neighbor,
     move,
+    moveToTop,
     discardAll,
     applyAll,
     reset,
@@ -436,6 +443,11 @@ export function ChannelControlCell({
           }
         >
           <span className="control-order-actions">
+            <button className="icon-button" aria-label={`置顶 ${label}`} title="置顶到此来源的第一位"
+              disabled={i.pending || i.stale || !configOrder || i.order.indexOf(row.provider)<=0}
+              onClick={()=>controls.moveToTop(row)}>
+              <ArrowUpToLine size={15}/>
+            </button>
             <button
               className="icon-button"
               aria-label={`上移 ${label}`}

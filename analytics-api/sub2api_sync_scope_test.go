@@ -16,7 +16,7 @@ import (
 // Exercise HTTP queue -> durable claim -> complete sync using local fixtures,
 // including site-discovered models and successful historical results.
 func TestSubSyncAllSelectedModelsReachEveryProbeStage(t *testing.T) {
-	for _, selected := range [][]string{{"gemini-4-argon"}, {"gpt-6.1-sol", "gemini-4-argon", "extra-selected"}} {
+	for _, selected := range [][]string{{}, {"gemini-4-argon"}, {"gpt-6.1-sol", "gemini-4-argon", "extra-selected"}} {
 		t.Run(strings.Join(selected, "+"), func(t *testing.T) {
 			s, account, owner := newAPITestService(t)
 			ctx := context.Background()
@@ -74,13 +74,23 @@ func TestSubSyncAllSelectedModelsReachEveryProbeStage(t *testing.T) {
 				}
 			}))
 			token, _ := s.control.newSession(ctx, owner)
-			r := httptest.NewRequest("POST", "/v1/sub2api/accounts/sync-selected", strings.NewReader(mustJSON(map[string]any{"models": selected})))
+			path := "/v1/sub2api/accounts/sync-selected"
+			if len(selected) == 0 {
+				path = "/v1/sub2api/accounts/sync-only"
+			}
+			r := httptest.NewRequest("POST", path, strings.NewReader(mustJSON(map[string]any{"models": selected})))
 			r.Header.Set("Content-Type", "application/json")
 			r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
 			w := httptest.NewRecorder()
 			s.Handler().ServeHTTP(w, r)
 			if w.Code != 202 {
 				t.Fatalf("queue %d: %s", w.Code, w.Body.String())
+			}
+			if len(selected) == 0 {
+				var stored []byte
+				if err = s.control.db.QueryRow(`SELECT sync_models FROM console_sub_accounts WHERE id=$1`, account).Scan(&stored); err != nil || string(stored) != "[]" {
+					t.Fatal("sync-only lost durable empty scope", string(stored), err)
+				}
 			}
 			// A newly created worker instance must recover the submitted selection.
 			worker := &Service{control: s.control, newAPILogGap: s.newAPILogGap}
@@ -99,7 +109,7 @@ func TestSubSyncAllSelectedModelsReachEveryProbeStage(t *testing.T) {
 				gotCalls[k] = v
 			}
 			mu.Unlock()
-			if gotCalls["gemini-4-argon"] != 1 {
+			if len(selected) > 0 && gotCalls["gemini-4-argon"] != 1 {
 				t.Fatal("missing Gemini availability", gotCalls)
 			}
 			if len(selected) > 1 && (gotCalls["gpt-6.1-sol"] != 3 || gotCalls["extra-selected"] != 1) {
@@ -125,7 +135,10 @@ func TestSubSyncAllSelectedModelsReachEveryProbeStage(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := []string{"gemini-4-argon"}
+			want := []string{}
+			if len(selected) > 0 {
+				want = append(want, "gemini-4-argon")
+			}
 			if len(selected) > 1 {
 				want = append(want, "gpt-6.1-sol")
 			}
@@ -151,7 +164,20 @@ func TestSubSyncAllSelectedModelsReachEveryProbeStage(t *testing.T) {
 			if history := toolUseModelResults(&tools)["gpt-5.6-terra"]; history == nil || history.CheckedAt != 123 {
 				t.Fatal("unchecked tool history lost", tools)
 			}
-			if len(selected) == 1 {
+			if len(selected) == 0 {
+				var queued, complete int
+				if err = s.control.db.QueryRow(`SELECT count(*) FROM console_sub_models WHERE account_id=$1 AND state IN ('queued','running')`, account).Scan(&queued); err != nil || queued != 0 {
+					t.Fatal("sync-only queued model work", queued, err)
+				}
+				if err = s.control.db.QueryRow(`SELECT count(*) FROM console_sub_targets WHERE account_id=$1 AND active AND state='done'`, account).Scan(&complete); err != nil || complete != 1 {
+					t.Fatal("sync-only group not completed", complete, err)
+				}
+				headers, err := readSubAccountHeaders(ctx, s.control.db, owner, account)
+				if err != nil || len(headers) != 1 || !headers[0].SyncOnly {
+					t.Fatal("sync-only header missing", err)
+				}
+			}
+			if len(selected) <= 1 {
 				if err = s.control.db.QueryRow(`SELECT compaction FROM console_sub_targets WHERE account_id=$1 AND group_id=$2`, account, group).Scan(&raw); err != nil {
 					t.Fatal(err)
 				}

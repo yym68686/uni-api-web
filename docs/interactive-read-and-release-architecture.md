@@ -439,3 +439,17 @@ Sync initialization queues all models in one ordered source statement. This avoi
 holding statement revision counters from one model while trying to acquire the
 row-summary epoch for a later model, which inverted the result writer's lock order.
 The transaction, selected-model scope, old results and rollback behavior remain.
+
+Submitting either bulk account sync action starts a new progress read stream
+instead of emitting a whole-page control invalidation. Current rows and filters
+stay mounted until an explicit refresh. Each page also reads completed-account
+summaries once, then polls active jobs and retains unchanged finished summaries;
+accounts with no groups receive an explicit zero summary. Sync-only uses a durable
+empty model scope and a dedicated endpoint, with no fallback to legacy detection.
+The worker updates account/group/key metadata while preserving prior model and
+capability results, and skips all model/capability/fingerprint probe stages.
+
+Channel management defaults to ascending observed multipliers; explicit saved
+sort preferences remain. Channel observation's move-to-top action is a normal
+cancelable control draft within the current source/key/model scope. Hidden
+providers remain in their previous relative order, and other sources are untouched.

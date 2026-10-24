@@ -68,7 +68,7 @@ func (s *Service) subPromoteAccountChecks(ctx context.Context, tx *sql.Tx, id st
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE console_sub_accounts SET state='queued',job_kind=$2,job_id='',message='',lease_until=NULL WHERE id=$1`, id, kind)
+	_, err = tx.ExecContext(ctx, `UPDATE console_sub_accounts SET state='queued',job_kind=$2,sync_models=NULL,job_id='',message='',lease_until=NULL WHERE id=$1`, id, kind)
 	if err != nil {
 		return err
 	}

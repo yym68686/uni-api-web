@@ -29,6 +29,7 @@ func readSubAccountHeaders(ctx context.Context, db controlQueryDB, owner, accoun
 		if err = json.Unmarshal(syncRaw, &a.SyncModels); err != nil {
 			break
 		}
+		a.SyncOnly = a.SyncModels != nil && len(a.SyncModels) == 0 && (a.JobKind == "sync" || a.JobKind == "")
 		if len(balanceRaw) > 0 {
 			if err = json.Unmarshal(balanceRaw, &a.Balance); err != nil {
 				break

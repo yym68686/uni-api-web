@@ -7,6 +7,11 @@ import (
 
 type subSyncScopeKey struct{}
 
+func subSyncMetadataOnly(ctx context.Context) bool {
+	models, scoped := ctx.Value(subSyncScopeKey{}).([]string)
+	return scoped && models != nil && len(models) == 0
+}
+
 // The durable sync task captures the checkbox selection at submission time.
 // An absent scope is retained only for legacy single-account/initial syncs.
 func withSubSyncModels(ctx context.Context, models []string) context.Context {

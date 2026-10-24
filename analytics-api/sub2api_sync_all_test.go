@@ -119,3 +119,45 @@ func TestSubSyncAllRejectsMissingOrInvalidSelection(t *testing.T) {
 		})
 	}
 }
+
+func TestSubSyncOnlyScopesAccountsAndRejectsDuplicateOrForeignJobs(t *testing.T) {
+	db := migrationTestDB(t)
+	ctx := context.Background()
+	if err := migrateControlSchema(ctx, db, controlMigrations()); err != nil {
+		t.Fatal(err)
+	}
+	s := &Service{control: &controlStore{db: db, key: []byte(strings.Repeat("s", 32))}}
+	for _, row := range []struct{ id, owner, state string }{{"mine", "owner", "idle"}, {"busy", "owner", "running"}, {"foreign", "other", "idle"}} {
+		if _, err := db.Exec(`INSERT INTO console_sub_accounts(id,owner,name,base,email,encrypted_auth,state,job_kind) VALUES($1,$2,$1,'https://fixture.test',$1,'',$3,'quality')`, row.id, row.owner, row.state); err != nil {
+			t.Fatal(err)
+		}
+	}
+	token, _ := s.control.newSession(ctx, "owner")
+	post := func(auth bool) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("POST", "/v1/sub2api/accounts/sync-only", strings.NewReader(`{}`))
+		if auth {
+			r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
+		}
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		return w
+	}
+	if w := post(false); w.Code != 401 {
+		t.Fatal(w.Code)
+	}
+	for i, want := range []string{`"queued":1`, `"queued":0`} {
+		if w := post(true); w.Code != 202 || !strings.Contains(w.Body.String(), want) {
+			t.Fatal(i, w.Code, w.Body.String())
+		}
+	}
+	var state, kind string
+	var scope []byte
+	if err := db.QueryRow(`SELECT state,job_kind,sync_models FROM console_sub_accounts WHERE id='mine'`).Scan(&state, &kind, &scope); err != nil || state != "queued" || kind != "sync" || string(scope) != "[]" {
+		t.Fatal(state, kind, string(scope), err)
+	}
+	for _, id := range []string{"busy", "foreign"} {
+		if err := db.QueryRow(`SELECT job_kind FROM console_sub_accounts WHERE id=$1`, id).Scan(&kind); err != nil || kind != "quality" {
+			t.Fatal(id, kind, err)
+		}
+	}
+}

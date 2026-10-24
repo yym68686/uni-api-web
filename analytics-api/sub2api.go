@@ -57,6 +57,7 @@ type subAccount struct {
 	State            string             `json:"state"`
 	JobKind          string             `json:"job_kind"`
 	SyncModels       []string           `json:"sync_models,omitempty"`
+	SyncOnly         bool               `json:"sync_only,omitempty"`
 	Progress         *subSyncProgress   `json:"progress,omitempty"`
 	Message          string             `json:"message"`
 	SyncedAt         int64              `json:"synced_at"`
@@ -408,6 +409,16 @@ func (s *Service) subSyncAll(w http.ResponseWriter, r *http.Request) {
 			seen[model] = true
 		}
 	}
+	s.queueSubSyncAll(w, r, models)
+}
+
+// An explicit empty scope is understood by existing workers as no model
+// probes. A dedicated endpoint cannot fall back to a legacy detect-all call.
+func (s *Service) subSyncAllOnly(w http.ResponseWriter, r *http.Request) {
+	s.queueSubSyncAll(w, r, []string{})
+}
+
+func (s *Service) queueSubSyncAll(w http.ResponseWriter, r *http.Request, models []string) {
 	owner, _ := s.controlUser(r)
 	var queued int
 	// Lock in the same order as grouped checks. One atomic update prevents
@@ -645,6 +656,7 @@ func (s *Service) subRunJob(parent context.Context, claimed subJob) {
 			ctx = withSubSyncModels(ctx, models)
 		}
 	}
+	syncOnly := kind == "sync" && subSyncMetadataOnly(ctx)
 
 	heartbeatDone := make(chan struct{})
 	go func() {
@@ -670,7 +682,7 @@ func (s *Service) subRunJob(parent context.Context, claimed subJob) {
 		}
 	}()
 	defer func() { cancel(); <-heartbeatDone }()
-	if err == nil && kind == "sync" {
+	if err == nil && kind == "sync" && !syncOnly {
 		_, err = s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET tool_use_state='interrupted' WHERE account_id=$1 AND tool_use_state IN ('queued','running')`, id)
 		if err == nil {
 			_, err = s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET compaction_state='interrupted' WHERE account_id=$1 AND compaction_state IN ('queued','running')`, id)
@@ -679,10 +691,13 @@ func (s *Service) subRunJob(parent context.Context, claimed subJob) {
 			err = s.subSynchronize(ctx, id, base, job, encrypted)
 		}
 	}
-	if err == nil && ctx.Err() == nil && (kind == "check" || kind == "sync" || kind == "quality") {
+	if err == nil && syncOnly {
+		err = s.subSynchronize(ctx, id, base, job, encrypted)
+	}
+	if err == nil && !syncOnly && ctx.Err() == nil && (kind == "check" || kind == "sync" || kind == "quality") {
 		err = s.subTestTargets(ctx, id, base, job, kind == "quality")
 	}
-	if err == nil && ctx.Err() == nil && (kind == "check" || kind == "sync" || kind == "compaction") {
+	if err == nil && !syncOnly && ctx.Err() == nil && (kind == "check" || kind == "sync" || kind == "compaction") {
 		if kind == "sync" {
 			err = s.subQueueSyncCapabilities(ctx, id, job, "compaction")
 		}
@@ -690,7 +705,7 @@ func (s *Service) subRunJob(parent context.Context, claimed subJob) {
 			err = s.subTestCompactions(ctx, id, base, job)
 		}
 	}
-	if err == nil && ctx.Err() == nil && (kind == "check" || kind == "sync" || kind == "tool_use") {
+	if err == nil && !syncOnly && ctx.Err() == nil && (kind == "check" || kind == "sync" || kind == "tool_use") {
 		if kind == "sync" {
 			err = s.subQueueSyncCapabilities(ctx, id, job, "tool_use")
 		}
@@ -708,7 +723,7 @@ func (s *Service) subRunJob(parent context.Context, claimed subJob) {
 		state, message = "interrupted", "任务中断，请手动重试；未自动重发检测请求"
 	}
 	// Fence all late completions against stop/re-login/new worker operations.
-	_, _ = s.control.db.ExecContext(finishCtx, `WITH finished AS (UPDATE console_sub_accounts SET state=$3,message=CASE WHEN $3='idle' THEN message ELSE $4 END,job_kind='',job_id='',lease_until=NULL WHERE id=$1 AND job_id=$2 RETURNING id), targets AS (UPDATE console_sub_targets SET state='interrupted',message='任务未完成，请重试' WHERE account_id IN (SELECT id FROM finished) AND state IN ('queued','running') RETURNING account_id) UPDATE console_sub_models SET state='interrupted',message='任务未完成，请重试' WHERE account_id IN (SELECT id FROM finished) AND state IN ('queued','running')`, id, job, state, message)
+	_, _ = s.control.db.ExecContext(finishCtx, `WITH finished AS (UPDATE console_sub_accounts SET state=$3,message=CASE WHEN $3='idle' THEN message ELSE $4 END,job_kind='',job_id='',lease_until=NULL WHERE id=$1 AND job_id=$2 RETURNING id), targets AS (UPDATE console_sub_targets SET state='interrupted',message='任务未完成，请重试' WHERE account_id IN (SELECT id FROM finished) AND state IN ('queued','running') RETURNING account_id) UPDATE console_sub_models SET state='interrupted',message='任务未完成，请重试' WHERE NOT $5 AND account_id IN (SELECT id FROM finished) AND state IN ('queued','running')`, id, job, state, message, syncOnly)
 }
 
 func (s *Service) subPanel(ctx context.Context, id, base, job, encrypted string) (func(string, string, any, any, string) error, []subRemoteGroup, error) {
@@ -993,7 +1008,7 @@ func (s *Service) subSynchronize(ctx context.Context, id, base, job, encrypted s
 		if e != nil {
 			return errors.New("测试 key 加密失败")
 		}
-		_, e = s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET remote_key_id=$3,encrypted_key=$4,billing=$6 WHERE account_id=$1 AND group_id=$2 AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$5)`, id, g.ID, key.ID, enc, job, string(billingRaw))
+		_, e = s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET remote_key_id=$3,encrypted_key=$4,billing=$6,state=CASE WHEN $7 THEN 'done' ELSE state END WHERE account_id=$1 AND group_id=$2 AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$5)`, id, g.ID, key.ID, enc, job, string(billingRaw), subSyncMetadataOnly(ctx))
 		if e != nil {
 			return errors.New("测试 key 保存失败")
 		}

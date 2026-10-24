@@ -39,7 +39,9 @@ export function installManagementPageFixture() {
         const response = await fixtureFetch(directory.href, {signal:init?.signal});
         if (!response.ok) return response;
         const body = await response.json();
-        return Response.json({...body, read_at_ms:Date.now()});
+        const accounts:SubAccount[]=body.format==="summary-v1"
+          ? body.data.flatMap((row:{value:{account?:SubAccount}})=>row.value.account?[row.value.account]:[]) : body.data;
+        return Response.json({data:accounts.map(account=>({...account,progress:account.progress||{total:0,completed:0,queued:0,running:0,interrupted:0,running_models:[],groups:[]}})),read_at_ms:Date.now()});
       }
       if (!url.pathname.endsWith("/channel-management/query"))
         return fixtureFetch(input, init);

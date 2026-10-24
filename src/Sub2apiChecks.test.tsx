@@ -2542,7 +2542,7 @@ it("does not fall back to unscoped sync on an older backend", async () => {
   expect(writes).toEqual(["/analytics/v1/sub2api/accounts/sync-selected"]);
 });
 
-it("keeps accepted sync acknowledged but hides unverified results after refresh failure without resubmitting", async () => {
+it("keeps accepted sync and the current page when its independent progress read fails without resubmitting", async () => {
   saveSubModels("accepted-sync-read-timeout", ["gemini-4-argon"]);
   let submitted = false;
   const posts: string[] = [];
@@ -2565,11 +2565,13 @@ it("keeps accepted sync acknowledged but hides unverified results after refresh 
   await screen.findByRole("table");
   await user.click(screen.getByRole("button",{name:"一键同步并检测"}));
   expect(await screen.findByText("已提交 2 个账号，正在后台同步并检测。")).toBeVisible();
-  await screen.findByText(/账号状态读取失败/);
+  await screen.findByText(/实时进度更新失败/);
   expect(screen.queryByText("signal timed out")).not.toBeInTheDocument();
   expect(screen.queryByRole("button",{name:"停止"})).not.toBeInTheDocument();
-  expect(screen.queryByText("same-group",{selector:"strong"})).not.toBeInTheDocument();
-  await user.click(screen.getByRole("button",{name:"重试"}));
+  expect(screen.getAllByText("same-group",{selector:"strong"})).toHaveLength(2);
+  expect(screen.getByRole("button",{name:"一键同步并检测"})).toBeDisabled();
+  expect(screen.queryByRole("status",{name:"加载渠道检测"})).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button",{name:"重试进度"}));
   expect(posts).toEqual(["/analytics/v1/sub2api/accounts/sync-selected"]);
 });
 

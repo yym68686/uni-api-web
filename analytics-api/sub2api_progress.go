@@ -59,7 +59,7 @@ func (s *Service) subAccountsProgress(w http.ResponseWriter, r *http.Request) {
 func readSubSyncProgress(r *http.Request, tx *sql.Tx, owner string, accounts []subAccount, watched []string) error {
 	// The durable submitted selection wins over subsequent browser checkbox
 	// changes. Only state and model identity are read, never historical results.
-	rows, err := tx.QueryContext(r.Context(), `SELECT t.account_id,t.group_id,count(m.model),
+	rows, err := tx.QueryContext(r.Context(), `SELECT t.account_id,t.group_id,t.state,count(m.model),
  count(*) FILTER(WHERE m.state IN ('done','error')),
  count(*) FILTER(WHERE m.state='queued'),count(*) FILTER(WHERE m.state='running'),
  count(*) FILTER(WHERE m.state='interrupted'),
@@ -67,30 +67,42 @@ func readSubSyncProgress(r *http.Request, tx *sql.Tx, owner string, accounts []s
  FROM console_sub_accounts a JOIN console_sub_targets t ON t.account_id=a.id AND t.active
  LEFT JOIN console_sub_models m ON m.account_id=t.account_id AND m.group_id=t.group_id
  AND (a.job_kind NOT IN ('','sync') OR a.sync_models IS NULL OR a.sync_models ? m.model)
- WHERE a.owner=$1 AND (a.state IN ('queued','running') OR a.id=ANY($2::text[])) GROUP BY t.account_id,t.group_id ORDER BY t.account_id,t.group_id`, owner, watched)
+ WHERE a.owner=$1 AND (a.state IN ('queued','running') OR a.id=ANY($2::text[])) GROUP BY t.account_id,t.group_id,t.state ORDER BY t.account_id,t.group_id`, owner, watched)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
 	index := map[string]*subAccount{}
+	synced := map[string]int{}
+	wanted := map[string]bool{}
+	for _, id := range watched {
+		wanted[id] = true
+	}
 
 	for i := range accounts {
 		a := &accounts[i]
 		index[a.ID] = a
 		// Completed, unwatched accounts need only fresh header state.
 		a.Progress = nil
+		if wanted[a.ID] || a.State == "queued" || a.State == "running" {
+			a.Progress = &subSyncProgress{RunningModels: []string{}, Groups: []subGroupProgress{}}
+		}
 
 	}
 	for rows.Next() {
 		var id string
+		var targetState string
 		var g subGroupProgress
 		var raw []byte
-		if err = rows.Scan(&id, &g.GroupID, &g.Total, &g.Completed, &g.Queued, &g.Running, &g.Interrupted, &raw); err != nil {
+		if err = rows.Scan(&id, &g.GroupID, &targetState, &g.Total, &g.Completed, &g.Queued, &g.Running, &g.Interrupted, &raw); err != nil {
 			return err
 		}
 		a := index[id]
 		if a == nil {
 			continue
+		}
+		if targetState == "done" {
+			synced[id]++
 		}
 		if a.Progress == nil {
 			a.Progress = &subSyncProgress{RunningModels: []string{}, Groups: []subGroupProgress{}}
@@ -125,6 +137,9 @@ func readSubSyncProgress(r *http.Request, tx *sql.Tx, owner string, accounts []s
 			if g.Total > 0 && g.Completed == g.Total {
 				complete++
 			}
+		}
+		if a.SyncOnly {
+			complete = synced[a.ID]
 		}
 		a.ActiveGroups, a.CompletedGroups = &active, &complete
 	}
