@@ -3105,3 +3105,7 @@ nav > button.active > svg {
 .fingerprint-heading { flex-wrap: wrap; justify-content: space-between; }
 .fingerprint-detail details { margin-top: 12px; font-size: 12px; }
 .fingerprint-detail li { margin: 6px 0; }
+
+/* Reserve the update line and table geometry; local data reads must not
+   remount the page or pull the viewport back up to the account list. */
+.sub-results-status { min-height:28px; display:flex; align-items:center; gap:6px; padding:0 16px; color:var(--muted); font-size:12px; }

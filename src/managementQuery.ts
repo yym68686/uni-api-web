@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { controlRequest } from "./api";
 import {
@@ -231,6 +231,14 @@ export function useManagementPage(
     structuralSharing: false,
     refetchInterval: false,
   });
+  // Keep only the last page successfully read by THIS mounted owner. This
+  // preserves table geometry during local updates, never restores persisted
+  // cache data and never authorizes an operation against an outdated page.
+  const displayed = useRef<{owner:string;page:ManagementPage;model:string}|undefined>(undefined);
+  if (owner && !query.isFetching && !query.isError && query.data)
+    displayed.current={owner,page:query.data,model:filters.model};
+  const current = !!owner && !query.isFetching && !query.isError;
+  const previous = displayed.current?.owner===owner?displayed.current:undefined;
   useEffect(() => {
     const page = query.data;
     if (!owner || query.isFetching || query.isError || !page) return;
@@ -262,7 +270,10 @@ export function useManagementPage(
   }, [owner, query.data, query.isFetching, query.isError]);
   return {
     ...query,
-    data: !owner || query.isFetching || query.isError ? undefined : query.data,
+    data: current ? query.data : undefined,
+    displayPage: previous?.page,
+    displayModel: previous?.model || "",
+    updating: !!previous && query.isFetching,
   };
 }
 

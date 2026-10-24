@@ -459,3 +459,13 @@ account headers and filter vocabulary remain mounted while the current page is
 requested; old rows are not presented as the new filter's answer. Progress queries
 are keyed by owner, account membership and accepted sync submission, not by page
 read timestamp. Manual refresh explicitly refreshes progress and channel results.
+
+All management query transitions now preserve the mounted page, account list,
+controls, table and dialogs. While an action/filter/page read is pending, the
+previously displayed table is explicitly labeled as previous content and inert;
+counts and action eligibility remain unavailable until the fresh full page is
+validated. A failed read hides prior rows without replacing the page with initial
+skeletons. This mounted-owner display state is never restored from persisted
+cache and never supplies selection/action authorization. Opening an import dialog
+does not invalidate the management page. Accepted configuration writes update
+only its data; tab focus, reconnect and timers cannot reload the page.

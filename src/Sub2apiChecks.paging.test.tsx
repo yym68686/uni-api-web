@@ -7,6 +7,7 @@ import { Sub2apiChecks } from "./Sub2apiChecks";
 import type { SubAccount, SubTarget } from "./Sub2apiChecks";
 import type { ManagementPage, ManagementSelection } from "./managementQuery";
 import { SUB_MODELS } from "./sub2apiModels";
+import { controlRequest } from "./api";
 
 afterEach(() => vi.unstubAllGlobals());
 const target = (n: number): SubTarget => ({
@@ -292,7 +293,7 @@ it("allows sync-only with no selected models and never falls back to detection o
  expect(screen.getByText("Channel 1",{selector:"strong"})).toBeVisible();
 });
 
-it("updates only channel results while filters change, keeping account rows and choices mounted",async()=>{
+it.each(["filter","next-page"])("updates only channel results for %s, keeping account rows and choices mounted",async change=>{
  let finish!:(response:Response)=>void,pageReads=0,progressReads=0;
  const response={...page(),rates:[0.1,0.2],platforms:["openai","anthropic"]};
  vi.stubGlobal("fetch",vi.fn(async(input:string)=>{
@@ -308,16 +309,67 @@ it("updates only channel results while filters change, keeping account rows and 
  await screen.findByText("Channel 1",{selector:"strong"});
  const accountRow=screen.getByRole("listitem",{name:"Owned site"});
  const options=screen.getByLabelText("倍率上限筛选").innerHTML;
- await user.selectOptions(screen.getByLabelText("检测模型筛选"),"gpt-5.5");
+ const table=screen.getByRole("table");
+ const firstRow=screen.getByText("Channel 1",{selector:"strong"});
+ if(change === "filter") await user.selectOptions(screen.getByLabelText("检测模型筛选"),"gpt-5.5");
+ else await user.click(screen.getByRole("button",{name:"下一页"}));
  await waitFor(()=>expect(pageReads).toBe(2));
  expect(screen.getByRole("listitem",{name:"Owned site"})).toBe(accountRow);
  expect(screen.queryByRole("status",{name:"加载站点账号"})).not.toBeInTheDocument();
  expect(screen.getByLabelText("倍率上限筛选").innerHTML).toBe(options);
- expect(screen.getByLabelText("检测模型筛选")).toHaveValue("gpt-5.5");
- expect(screen.queryByText("Channel 1",{selector:"strong"})).not.toBeInTheDocument();
+ expect(screen.getByLabelText("检测模型筛选")).toHaveValue(change === "filter" ? "gpt-5.5" : "");
+ expect(screen.getByText("Channel 1",{selector:"strong"})).toBe(firstRow);
+ expect(firstRow).toBeVisible();
+ expect(screen.getByRole("table")).toBe(table);
+ expect(table.parentElement).toHaveAttribute("inert");
+ expect(table.parentElement).toHaveAttribute("aria-busy","true");
+ expect(screen.getByText("正在更新渠道结果，暂显示更新前内容…")).toBeVisible();
+ expect(screen.queryByRole("status",{name:"加载渠道检测"})).not.toBeInTheDocument();
+ expect(screen.getByRole("button",{name:"下一页"})).toBeDisabled();
  expect(progressReads).toBe(1);
- await act(async()=>{finish(Response.json({...response,read_at_ms:2}));});
- await screen.findByText("Channel 1",{selector:"strong"});
+ await act(async()=>{finish(Response.json({...response,...page(change === "next-page" ? 25 : 0),read_at_ms:2}));});
+ await screen.findByText(change === "next-page" ? "Channel 26" : "Channel 1",{selector:"strong"});
  expect(screen.getByRole("listitem",{name:"Owned site"})).toBe(accountRow);
+ expect(screen.getByRole("table")).toBe(table);
+ expect(table.parentElement).not.toHaveAttribute("inert");
  expect(progressReads).toBe(1);
+});
+
+it.each([
+ ["POST","/v1/sub2api/import"],
+ ["POST","/v1/channel-management"],
+ ["PUT","/v1/channel-management/fixture"],
+ ["DELETE","/v1/channel-management/fixture"],
+ ["POST","/v1/sub2api/check-batch"],
+ ["POST","/v1/model-fingerprints/check"],
+ ["POST","/v1/channel-routes/optimize"],
+])("keeps the mounted page after accepted %s %s and blocks unverified row actions",async(method,path)=>{
+ let finish!:(response:Response)=>void,reads=0;
+ vi.stubGlobal("fetch",vi.fn(async(input:string,init?:RequestInit)=>{
+  const url=new URL(input);
+  if(init?.method)return Response.json({ok:true});
+  if(url.pathname.endsWith("/accounts/progress"))return idleProgress();
+  if(url.pathname.endsWith("/channel-management/query")){
+   if(++reads>1)return new Promise<Response>(resolve=>{finish=resolve;});
+   return Response.json(page());
+  }
+  return Response.json({data:[]});
+ }));
+ mount(`write-stable-${method}-${path}`);
+ await screen.findByText("Channel 1",{selector:"strong"});
+ const table=screen.getByRole("table"),accountRow=screen.getByRole("listitem",{name:"Owned site"});
+ const row=screen.getByRole("row",{name:"查看 Owned site Channel 1 渠道详情"});
+ await act(async()=>{await controlRequest(path,{method});});
+ await waitFor(()=>expect(reads).toBe(2));
+ expect(screen.getByRole("listitem",{name:"Owned site"})).toBe(accountRow);
+ expect(document.querySelector(".sub-results-table table")).toBe(table);
+ expect(table.parentElement).toHaveAttribute("inert");
+ expect(row).toBeVisible();
+ expect(within(row).getByRole("button",{name:"检测 Owned site Channel 1",hidden:true})).toBeDisabled();
+ expect(screen.queryByRole("status",{name:"加载渠道检测"})).not.toBeInTheDocument();
+ expect(screen.getByText("正在更新渠道结果，暂显示更新前内容…")).toBeVisible();
+ await act(async()=>{finish(Response.json({...page(),revision:"updated",read_at_ms:2}));});
+ await waitFor(()=>expect(table.parentElement).not.toHaveAttribute("inert"));
+ expect(screen.getByRole("table")).toBe(table);
+ expect(screen.getByRole("row",{name:"查看 Owned site Channel 1 渠道详情"})).toBe(row);
 });

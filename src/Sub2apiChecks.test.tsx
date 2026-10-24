@@ -144,14 +144,21 @@ it.each([false,true])("imports sub2api aliases independently of originals (keep 
   target.models=[{model:"codex-auto-review",state:"done",message:"",result:{...target.result!,model:"codex-auto-review"}}];
   target.result=null;
   const writes:any[]=[];
+  const pendingPageReads:Array<(response:Response)=>void>=[];
   vi.stubGlobal("fetch",vi.fn(async(input:string,init?:RequestInit)=>{
+    if(input.endsWith("/accounts") && writes.length)return new Promise<Response>(resolve=>pendingPageReads.push(resolve));
     if (input.endsWith("/import-status")) return Response.json({ state: "idle", job_kind: "", can_import: true });
     if(init?.method==="POST"){writes.push(JSON.parse(String(init.body)));return Response.json({message:"已添加"});}
     if(input.includes("channel-options"))return Response.json({revision:"r1",supported:true,keys:[{key_id:"k1",position:1,prefix:"masked"}],channels:[]});
     return Response.json({data:input.endsWith("/accounts")?data:input.endsWith("/sources")?[{id:"primary",name:"Fugue"}]:[],labels:{},unavailable_keys:[],unavailable_sources:[]});
   }));
   const user=userEvent.setup();mount(`sub-alias-${keep}`);
-  await user.click(await screen.findByRole("button",{name:"添加到渠道"}));
+  const open=await screen.findByRole("button",{name:"添加到渠道"});
+  const table=screen.getByRole("table");
+  const accountRow=screen.getByRole("listitem",{name:data[0].name});
+  await user.click(open);
+  expect(document.querySelector(".sub-results-table table")).toBe(table);
+  expect(pendingPageReads).toHaveLength(0);
   const d=within(screen.getByRole("dialog"));
   await user.click(d.getByRole("button",{name:"添加重命名"}));
   expect(d.getByRole("checkbox",{name:"codex-auto-review"})).toBeChecked();
@@ -163,6 +170,13 @@ it.each([false,true])("imports sub2api aliases independently of originals (keep 
   await waitFor(()=>expect(d.getByRole("button",{name:"添加到渠道"})).toBeEnabled());
   await user.click(d.getByRole("button",{name:"添加到渠道"}));
   await waitFor(()=>expect(writes).toHaveLength(1));
+  await waitFor(()=>expect(pendingPageReads.length).toBeGreaterThan(0));
+  expect(document.querySelector(".sub-results-table table")).toBe(table);
+  expect(document.querySelector(".sub-account-rows [role=listitem]")).toBe(accountRow);
+  expect(table.parentElement).toHaveAttribute("inert");
+  expect(screen.queryByRole("status",{name:"加载渠道检测"})).not.toBeInTheDocument();
+  await act(async()=>{for(const resolve of pendingPageReads)resolve(Response.json({data}));});
+  await waitFor(()=>expect(table.parentElement).not.toHaveAttribute("inert"));
   expect(writes[0].models).toEqual(keep?["codex-auto-review"]:[]);
   expect(writes[0].model_mappings).toEqual({"gpt-5.6-luna":"codex-auto-review"});
 });

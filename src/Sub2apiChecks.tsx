@@ -165,7 +165,7 @@ function AccountBalance({ account, enabled, user }: { account: SubAccount; enabl
     ...accountBalanceQuery(user, account.id, account.base),
     // This header was read in the just-verified management transaction. Do
     // not issue an identical balance GET for every account at first paint.
-    // The normal periodic refresh still runs, and missing values still read.
+    // Missing values still read once; page actions do not restart this query.
     initialData: account.balance || undefined,
     initialDataUpdatedAt: Date.now(),
     enabled,
@@ -748,8 +748,12 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   const cursor=cursorState.filter===filterKey?cursorState.cursor:"";
   const pageQuery=useManagementPage(user,filters,cursor);
   const pageData=pageQuery.data;
+  const displayedPage=pageQuery.displayPage;
+  const tablePending=!!displayedPage && !pageData;
+  const tableModel=pageQuery.displayModel;
   // These controls are not the answer to the current row filter. Preserve
-  // their mounted state while the next page is read; never retain old rows.
+  // their mounted state while the next page is read. Previous results below
+  // remain explicitly marked as updating and cannot authorize any action.
   const metadataRef=useRef<{owner:string;accounts:SubAccount[];rates:number[];platforms:string[];models:string[];detectionModels:string[];readAt:number}|undefined>(undefined);
   if(pageData)metadataRef.current={owner:user,accounts:pageData.accounts,rates:pageData.rates,platforms:pageData.platforms,models:pageData.models,detectionModels:pageData.detection_models,readAt:pageData.read_at_ms};
   const metadata=metadataRef.current?.owner===user?metadataRef.current:undefined;
@@ -762,7 +766,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   const progressByAccount=new Map(statusAccounts.map(a=>[a.id,a]));
   const query={...pageQuery,data:pageData?{data:accounts,cached:false}:undefined};
   const accountHeaders={data:metadata?{data:statusAccounts}:undefined,error:metadata?null:pageQuery.error};
-  const prices={data:pageData?{data:pageData.context.prices}:undefined};
+  const prices={data:displayedPage?{data:displayedPage.context.prices}:undefined};
   const [form, setForm] = useState<{ account: SubAccount | null } | null>(null);
   const setPage=(_page:number)=>setCursorState({filter:filterKey,cursor:""});
   const refreshPage=()=>{void progressQuery.refetch();if(cursor)setPage(0);else void pageQuery.refetch();};
@@ -801,7 +805,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
     setFilters((v) => ({ ...v, platform }));
   const resultsUnavailable = !pageData;
   const resultsReadFailed = pageQuery.isError;
-  const optimizationRoutes = pageData?.context.routes || {};
+  const optimizationRoutes = displayedPage?.context.routes || {};
   const routeSources=Object.keys(optimizationRoutes);
   const routeQueries=routeSources.map(source=>({data:optimizationRoutes[source]}));
   function configuredCount(item:ManagedChannel){return managedRouteCount(item,routeSources,routeQueries);}
@@ -816,7 +820,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
     configured?: ManagedChannel;
   } | null>(null);
   const dialogImports=useSubImports(!!importing);
-  const imports={data:pageData?{data:pageData.context.imports,labels:{},unavailable_sources:[]}:undefined};
+  const imports={data:displayedPage?{data:displayedPage.context.imports,labels:{},unavailable_sources:[]}:undefined};
   const [error, setError] = useState("");
   const [action, setAction] = useState("");
   const checksInFlight = useRef(new Set<string>());
@@ -826,8 +830,8 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
     (account) => !pending(account.state),
   );
   const [removing, setRemoving] = useState<string | null>(null);
-  const rows=pageData?.rows || [], rates=metadata?.rates || [], platforms=metadata?.platforms || [];
-  const total=pageData?.total || 0, eligibleCount=pageData?.eligible_count || 0;
+  const rows=displayedPage?.rows || [], rates=metadata?.rates || [], platforms=metadata?.platforms || [];
+  const total=displayedPage?.total || 0, eligibleCount=displayedPage?.eligible_count || 0;
   const effectiveMaxRate=maxRate;
   const availableModels=metadata?.detectionModels || SUB_MODELS;
   const extraModels=availableModels.filter(m=>!SUB_MODELS.includes(m));
@@ -837,7 +841,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   // only define the batch when no individual model is selected.
   const modelsToCheck = model ? [model] : detectionModels;
   const allModelsSelected = detectionModels.length === availableModels.length;
-  const currentPage=(pageData?.offset || 0)/25;
+  const currentPage=(displayedPage?.offset || 0)/25;
   const selectionID = (account: SubAccount, target: SubTarget, configured?: ManagedChannel) =>
     !account.id && configured ? `configured:${configured.provider}:${configured.engine}` : `${account.id}:${target.group_id}`;
   const [readingSelection,setReadingSelection]=useState(false);
@@ -918,6 +922,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
       (!target.models && pending(target.state) && !pending(target.compaction_state || "") && !pending(target.tool_use_state || ""));
   };
   const canCheck = (account: SubAccount, target: SubTarget, kind: CheckKind, configured?: ManagedChannel) => {
+    if (!pageData) return false;
     if ((kind === "compaction" || kind === "tool-use") && model && !isCapabilityCheckModel(model)) return false;
     const native = !account.id && configured;
     if (native ? !channelMembers(configured).length
@@ -1091,7 +1096,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                       <SiteLink base={a.base}><span title={a.base}>{new URL(a.base).host}</span></SiteLink>
                     </div>
                     <div className="sub-account-email" title={a.login_name || a.email}>{a.login_name || a.email}</div>
-                    <AccountBalance account={a} enabled={!!query.data} user={user} />
+                    <AccountBalance account={a} enabled={!!metadata} user={user} />
                     <div className="sub-account-status">
                       <span
                         className="sub-account-progress"
@@ -1506,27 +1511,26 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
             <X size={12} /> 重置筛选
           </button>
         </div>
-        {resultsReadFailed ? (
-          <>
-          {metadata && <div role="alert" className="error-banner">渠道结果读取失败：{pageQuery.error?.message}<button className="button small" onClick={refreshPage}>重试</button></div>}
-          <Empty title="暂时无法读取渠道">
-            检测结果尚未完整读取，暂时无法判断是否有匹配渠道。请重试读取。
-          </Empty>
-          </>
-        ) : resultsUnavailable ? (
+        {resultsReadFailed && metadata && <div role="alert" className="error-banner">渠道结果读取失败：{pageQuery.error?.message}<button className="button small" onClick={refreshPage}>重试</button></div>}
+        {displayedPage && <div className="sub-results-status" role="status" aria-live="polite">
+          {pageQuery.updating ? <><Spinner small/>正在更新渠道结果，暂显示更新前内容…</> : resultsReadFailed ? "暂时无法读取渠道" : ""}
+        </div>}
+        {!displayedPage && resultsReadFailed ? (
+          <Empty title="暂时无法读取渠道">检测结果尚未完整读取，暂时无法判断是否有匹配渠道。请重试读取。</Empty>
+        ) : !displayedPage ? (
           <TableLoading kind="checks" rows={6} />
         ) : rows.length === 0 ? (
-          <Empty title="没有匹配的渠道">
+          <Empty title={tablePending ? (resultsReadFailed ? "结果尚未确认" : "正在读取当前渠道结果") : "没有匹配的渠道"}>
             添加渠道、同步站点账号或调整筛选后查看。
           </Empty>
         ) : (
           <>
-            <div className="table-scroll">
+            <div className="table-scroll sub-results-table" aria-busy={tablePending} aria-hidden={resultsReadFailed || undefined} inert={tablePending} style={resultsReadFailed?{visibility:"hidden"}:undefined}>
               <table className="channel-table check-table sub-table">
                 <thead>
                   <tr>
                     <th>渠道 / 站点</th>
-                    {model && <th>模型</th>}
+                    {tableModel && <th>模型</th>}
                     <th>平台 / key</th>
                     <th>倍率</th>
                     <th>可用性</th>
@@ -1556,12 +1560,12 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                       const overviewChecks = scopedModels?.length ? [...new Set(scopedModels)].map(model => checkByModel.get(model) || {model,state:"idle",message:"",result:null}) : checks;
                       const liveGroup = progressByAccount.get(account.id)?.progress?.groups.find(g=>g.group_id===t.group_id);
                       const scopeLabel = scopedModels?.length ? `本次已选 ${overviewChecks.length} 个模型` : `全部 ${checks.length} 个模型（含历史记录）`;
-                      const openDrawer = () => setManagementDetail(managementRow);
+                      const openDrawer = () => { if (pageData) setManagementDetail(managementRow); };
                       return (
                       <tr
                         key={id}
                         className="sub-management-row"
-                        tabIndex={0}
+                        tabIndex={tablePending ? -1 : 0}
                         onClick={(event) => {
                           const element = event.target as HTMLElement;
                           if (element.closest("button, a, input, select")) return;
@@ -1586,7 +1590,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                             {!configured && !t.active && " · 已不可用"}
                           </small>
                         </td>
-                        {model && <td className="mono">{model}</td>}
+                        {tableModel && <td className="mono">{tableModel}</td>}
                         <td>
                           {t.platform}
                           <small className="check-source">
@@ -1594,7 +1598,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                           </small>
                           <ChannelProtocolSummary row={managementRow} imports={imports.data} routes={optimizationRoutes}/>
                         </td>
-                        <td><BillingRate target={t} model={model} configured={configured} /></td>
+                        <td><BillingRate target={t} model={tableModel} configured={configured} /></td>
                         <td>
                           {t.state === "error" ? (
                             <span className="check-status error">同步失败</span>
@@ -1627,17 +1631,17 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                           )}
                         </td>
                         <td>{selected ? <PriceStatus check={selected} prices={prices.data?.data} /> : <GroupPriceStatus checks={checks} prices={prices.data?.data} />}</td>
-                        <td><FingerprintCell entries={(pageData?.context.fingerprints[id] || []).map(({target,record})=>({target,record}))} supportedModels={pageData?.context.fingerprint_models}/></td>
+                        <td><FingerprintCell entries={(displayedPage?.context.fingerprints[id] || []).map(({target,record})=>({target,record}))} supportedModels={displayedPage?.context.fingerprint_models}/></td>
                         <td>
                           <div className="quality-status-stack"><Verdict result={groupQualityResult(t)} history={t.history} /><QualityProbability history={t.history} checkedAt={groupQualityResult(t)?.checked_at} /></div>
                         </td>
-                        <td><div className="quality-status-stack"><CompactionStatus target={t} model={model || undefined} /><button className="button small ghost" disabled={!canCheck(account, t, "compaction", configured)} aria-busy={checkBusy(account, t, "compaction", configured)}
+                        <td><div className="quality-status-stack"><CompactionStatus target={t} model={tableModel || undefined} /><button className="button small ghost" disabled={!canCheck(account, t, "compaction", configured)} aria-busy={checkBusy(account, t, "compaction", configured)}
                           title={capabilityCheckScope} aria-label={`检测 ${account.name} ${t.name} 的远程压缩`} onClick={() => void checkCompaction([{account, target:t, configured}])}>{checkBusy(account, t, "compaction", configured) && <Spinner small />}重新检测</button></div></td>
-                        <td><div className="quality-status-stack"><ToolUseStatus target={t} model={model || undefined} /><button className="button small ghost" disabled={!canCheck(account, t, "tool-use", configured)} aria-busy={checkBusy(account, t, "tool-use", configured)}
+                        <td><div className="quality-status-stack"><ToolUseStatus target={t} model={tableModel || undefined} /><button className="button small ghost" disabled={!canCheck(account, t, "tool-use", configured)} aria-busy={checkBusy(account, t, "tool-use", configured)}
                           title={capabilityCheckScope} aria-label={`检测 ${account.name} ${t.name} 的 Tool use`} onClick={() => void checkToolUse([{account, target:t, configured}])}>{checkBusy(account, t, "tool-use", configured) && <Spinner small />}重新检测</button></div></td>
                         <td>
                           {<CheckDetails
-                            key={model || "all"}
+                            key={tableModel || "all"}
                             account={account}
                             target={t}
                             checks={checks}
@@ -1684,6 +1688,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                           </button>
                           <button
                             className="button small"
+                            disabled={tablePending}
                             onClick={() =>
                               configured ? setConfiguredDialog(configured) : setImporting({
                                 account,
@@ -1717,9 +1722,9 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
                 </tbody>
               </table>
             </div>
-            <div className="table-footer">
+            <div className="table-footer" aria-busy={tablePending}>
               <span>
-                共 {total} 个渠道 · {eligibleCount} 个可发起检测
+                {tablePending ? "正在核对当前结果" : <>共 {total} 个渠道 · {eligibleCount} 个可发起检测</>}
               </span>
               <div className="sub-pagination">
                 <button

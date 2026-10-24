@@ -248,6 +248,7 @@ it("hides preloaded data, cancels superseded filters and does not display old ro
     { wrapper, initialProps: { filters: { ...subFilterDefaults } } },
   );
   expect(hook.result.current.data).toBeUndefined();
+  expect(hook.result.current.displayPage).toBeUndefined();
   await waitFor(() => expect(requests).toHaveLength(1));
   hook.rerender({ filters: { ...subFilterDefaults, model: "gpt-5.5" } });
   await waitFor(() => expect(requests).toHaveLength(2));
@@ -277,6 +278,22 @@ it("hides preloaded data, cancels superseded filters and does not display old ro
   expect(hook.result.current.data).toBeUndefined();
   hook.unmount();
   client.clear();
+});
+
+it("does not reuse a mounted page's layout data across account changes",async()=>{
+ let finish!:(response:Response)=>void;
+ vi.stubGlobal("fetch",vi.fn(async()=>new Promise<Response>(resolve=>{finish=resolve;})));
+ const client=new QueryClient({defaultOptions:{queries:{retry:false}}});
+ const wrapper=({children}:{children:ReactNode})=><QueryClientProvider client={client}>{children}</QueryClientProvider>;
+ const hook=renderHook(({owner})=>useManagementPage(owner,subFilterDefaults),{wrapper,initialProps:{owner:"first"}});
+ await act(async()=>{finish(Response.json({...page(),owner:"first"}));});
+ await waitFor(()=>expect(hook.result.current.displayPage?.owner).toBe("first"));
+ hook.rerender({owner:"second"});
+ expect(hook.result.current.data).toBeUndefined();
+ expect(hook.result.current.displayPage).toBeUndefined();
+ await act(async()=>{finish(Response.json({...page(),owner:"second"}));});
+ await waitFor(()=>expect(hook.result.current.displayPage?.owner).toBe("second"));
+ hook.unmount();client.clear();
 });
 
 
