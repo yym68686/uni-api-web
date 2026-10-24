@@ -1,6 +1,15 @@
 import {expect,it,vi,afterEach} from 'vitest';
 import {loadSubModels,saveSubModels,SUB_MODELS,subModelProtocolLabel} from './sub2apiModels';
 afterEach(()=>vi.unstubAllGlobals());
+it('offers Kimi K3.1 Pro independently while preserving previous model exclusions',()=>{
+ const model='kimi-k3.1-pro',user='kimi-31-catalog-upgrade';
+ const previous=SUB_MODELS.filter(m=>m!==model);
+ saveSubModels(user,previous.filter(m=>m!=='kimi-k3'),previous);
+ expect(SUB_MODELS.filter(m=>m===model)).toHaveLength(1);
+ expect(loadSubModels(user)).toContain(model);
+ expect(loadSubModels(user)).not.toContain('kimi-k3');
+ expect(subModelProtocolLabel(model)).toBe('Responses');
+});
 it('offers DeepSeek Flash 1017 as an independent Responses model while preserving saved exclusions',()=>{
  const model='deepseek-v4.1-flash-1017',user='deepseek-1017-catalog-upgrade';
  const previous=SUB_MODELS.filter(m=>m!==model);

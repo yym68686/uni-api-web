@@ -8,6 +8,27 @@ import (
 	"time"
 )
 
+func TestKimi31ProCatalogRemainsIndependentAndUnpricedUntilConfirmed(t *testing.T) {
+	const model = "kimi-k3.1-pro"
+	found := 0
+	for _, p := range withCatalogPrices(nil) {
+		if p.Model == model {
+			found++
+			if p.Verified || p.Input != 0 || p.Output != 0 || p.CacheRead != 0 || p.CacheWrite != 0 || p.CacheWrite1h != 0 {
+				t.Fatal("unverified Kimi price invented", p)
+			}
+		}
+	}
+	if found != 1 || !subModelAllowed(model) || canonicalPriceModel(model+"-thinking") != model {
+		t.Fatal("Kimi 3.1 missing or collapsed into K3")
+	}
+	for _, p := range withCatalogPrices([]Price{{Model: model, Input: 7, Output: 11, Source: "manual", Verified: true}}) {
+		if p.Model == model && (p.Input != 7 || p.Output != 11 || !p.Verified || p.Source != "manual") {
+			t.Fatal("operator price replaced", p)
+		}
+	}
+}
+
 func TestCatalogFallbackPreservesPersistedOperatorSettings(t *testing.T) {
 	e, err := OpenEngine(filepath.Join(t.TempDir(), "prices.duckdb"), Config{Timezone: "UTC"})
 	if err != nil {

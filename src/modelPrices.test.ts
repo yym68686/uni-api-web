@@ -7,6 +7,17 @@ import {
 import { SUB_MODELS } from "./sub2apiModels";
 import { referencePrice } from "./sub2apiPriceCheck";
 
+it("keeps Kimi K3.1 Pro unconfirmed and independent from K3 or saved operator prices",()=>{
+ const model="kimi-k3.1-pro";
+ const p=MODEL_PRICE_CATALOG.find(p=>p.model===model)!;
+ expect(p).toMatchObject({verified:false,input:0,output:0,cache_read:0,cache_write:0,cache_write_1h:0});
+ expect(referencePrice(model,MODEL_PRICE_CATALOG)).toBeUndefined();
+ expect(canonicalPriceModel(model+"-thinking")).toBe(model);
+ const manual={...p,input:7,output:11,source:"manual",verified:true};
+ expect(displayedModelPrices([manual]).find(p=>p.model===model)).toEqual(manual);
+ expect(referencePrice(model,[manual])).toEqual(manual);
+});
+
 it("keeps DeepSeek Flash 1017 pricing independent of the previous Flash model", () => {
   const model = "deepseek-v4.1-flash-1017";
   const reference = MODEL_PRICE_CATALOG.find(p => p.model === model)!;
@@ -34,7 +45,7 @@ it("shows exactly the detection models, preserves manual values and fills old pl
     input: 7,
     verified: false,
   });
-  expect(prices.filter((p) => !p.verified).map(p => p.model)).toEqual(["gpt-6.1-sol", "codex-auto-review", "gemini-3.1-pro"]);
+  expect(prices.filter((p) => !p.verified).map(p => p.model)).toEqual(["gpt-6.1-sol", "codex-auto-review", "kimi-k3.1-pro", "gemini-3.1-pro"]);
   const placeholder = {
     ...base,
     input: 0,

@@ -132,6 +132,18 @@
     "note": "Z.ai 官方美元 API 价格。"
   },
   {
+    "model": "kimi-k3.1-pro",
+    "input": 0,
+    "output": 0,
+    "cache_read": 0,
+    "cache_write": 0,
+    "cache_write_1h": 0,
+    "source": "https://platform.kimi.ai/docs/pricing/chat",
+    "verified": false,
+    "cache_write_kind": "ttl",
+    "note": "模型名称已按 Kimi 官方文档确认；当前公开价格页未提供可核验数值，参考单价待确认，暂不用于费用估算。可手动填写并确认。缓存写入支持 5 分钟与 1 小时两档，需分别填写。"
+  },
+  {
     "model": "kimi-k3",
     "input": 3,
     "output": 15,

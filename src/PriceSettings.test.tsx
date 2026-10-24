@@ -5,6 +5,17 @@ import { PriceSettings } from "./PriceSettings";
 import { MODEL_PRICE_CATALOG } from "./modelPrices";
 import type { ModelPrice } from "./types";
 
+it("shows Kimi K3.1 Pro as editable unconfirmed pricing without copying K3 prices",async()=>{
+ render(<PriceSettings prices={[]} loading={false} connection={{base:"",key:"",session:"test",account:true}} onSaved={vi.fn()}/>);
+ const model="kimi-k3.1-pro",user=userEvent.setup();
+ await user.click(screen.getByRole("textbox",{name:"搜索模型价格"}));await user.paste(model);
+ expect(screen.getByLabelText(model+" 输入价格")).toHaveValue(null);
+ expect(screen.getByLabelText(model+" 输出价格")).toHaveValue(null);
+ expect(screen.getByRole("button",{name:"保存价格"})).toBeDisabled();
+ await user.click(screen.getByRole("button",{name:"查看 "+model+" 价格说明"}));
+ expect(screen.getByRole("dialog",{name:model})).toHaveTextContent("参考单价待确认");
+});
+
 it("shows DeepSeek Flash 1017 with its reference prices and upstream naming note", async () => {
   render(<PriceSettings prices={[]} loading={false} connection={{ base: "", key: "", session: "test", account: true }} onSaved={vi.fn()} />);
   const model = "deepseek-v4.1-flash-1017";
