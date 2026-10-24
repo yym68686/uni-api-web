@@ -60,6 +60,11 @@ declare global {
     | undefined;
 }
 
+const managementReadTimings = new WeakMap<
+  ManagementPage,
+  { started: number; decoded: number }
+>();
+
 export interface ManagementSelection {
   format: "management-selection-v1";
   revision: string;
@@ -133,6 +138,7 @@ export async function readManagementPage(
       bootstrap.controller.abort();
     }
   }
+  const started = performance.now();
   const response = await controlRequest<unknown>(path(filters, { cursor }), {
     signal,
     headers: { Accept: managementPageMediaType },
@@ -141,6 +147,7 @@ export async function readManagementPage(
   const page = validateManagementPage(response);
   if (owner && page.owner && page.owner !== owner)
     throw Error("登录账号已变化，请重新读取");
+  managementReadTimings.set(page, { started, decoded: performance.now() });
   return page;
 }
 
@@ -221,6 +228,35 @@ export function useManagementPage(
         ? 5000
         : 60000,
   });
+  useEffect(() => {
+    const page = query.data;
+    if (!owner || query.isFetching || query.isError || !page) return;
+    const timing = managementReadTimings.get(page);
+    if (!timing) return;
+    let second = 0;
+    const first = requestAnimationFrame(() => {
+      second = requestAnimationFrame(() => {
+        const painted = performance.now();
+        // Local diagnostics only: no owner, URL, filters, credentials or
+        // response contents are logged or transmitted anywhere.
+        console.info(
+          "management_page_current",
+          JSON.stringify({
+            read_at_ms: page.read_at_ms,
+            rows: page.rows.length,
+            total: page.total,
+            request_to_paint_ms: Math.round(painted - timing.started),
+            decoded_to_paint_ms: Math.round(painted - timing.decoded),
+            navigation_to_paint_ms: Math.round(painted),
+          }),
+        );
+      });
+    });
+    return () => {
+      cancelAnimationFrame(first);
+      cancelAnimationFrame(second);
+    };
+  }, [owner, query.data, query.isFetching, query.isError]);
   return {
     ...query,
     data: !owner || query.isFetching || query.isError ? undefined : query.data,

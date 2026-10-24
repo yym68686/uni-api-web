@@ -166,7 +166,7 @@ function AccountBalance({ account, enabled, user }: { account: SubAccount; enabl
     enabled,
     refetchInterval: enabled ? 60_000 : false,
   });
-  const balance = account.balance && account.balance.checked_at >= (query.data?.checked_at || 0)
+  const balance = account.balance && account.balance.checked_at > (query.data?.checked_at || 0)
     ? account.balance : query.data || account.balance;
   return (
     <div
