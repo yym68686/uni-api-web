@@ -20,6 +20,7 @@ import type { FingerprintTarget, FingerprintRecord } from "./ModelFingerprints";
 
 export interface ManagementPage {
   format: "management-page-v1";
+  owner?: string;
   revision: string;
   read_at_ms: number;
   rows: ManagementRow[];
@@ -48,7 +49,15 @@ export interface ManagementPage {
 }
 
 declare global {
-  var __uniManagementBootstrap: { owner: string; filters: string; startedAt: number; controller: AbortController; result: Promise<ManagementPage> } | undefined;
+  var __uniManagementBootstrap:
+    | {
+        owner: string;
+        filters: string;
+        startedAt: number;
+        controller: AbortController;
+        result: Promise<ManagementPage>;
+      }
+    | undefined;
 }
 
 export interface ManagementSelection {
@@ -102,12 +111,24 @@ export async function readManagementPage(
     const bootstrap = globalThis.__uniManagementBootstrap;
     delete globalThis.__uniManagementBootstrap;
     if (bootstrap) {
-      if (!cursor && bootstrap.owner === owner && bootstrap.filters === JSON.stringify(filters) && Date.now() - bootstrap.startedAt < 10_000) {
+      if (
+        !cursor &&
+        bootstrap.owner === owner &&
+        bootstrap.filters === JSON.stringify(filters) &&
+        Date.now() - bootstrap.startedAt < 10_000
+      ) {
         const abort = () => bootstrap.controller.abort(signal.reason);
         if (signal.aborted) abort();
         else signal.addEventListener("abort", abort, { once: true });
-        try { const page = await bootstrap.result; signal.throwIfAborted(); return validateManagementPage(page); }
-        finally { signal.removeEventListener("abort", abort); }
+        try {
+          const page = validateManagementPage(await bootstrap.result);
+          signal.throwIfAborted();
+          // Older backends do not attest the owner, so negotiate a normal
+          // authenticated read rather than accept an unbound early response.
+          if (page.owner === owner) return page;
+        } finally {
+          signal.removeEventListener("abort", abort);
+        }
       }
       bootstrap.controller.abort();
     }
@@ -117,7 +138,10 @@ export async function readManagementPage(
     headers: { Accept: managementPageMediaType },
   });
   signal.throwIfAborted();
-  return validateManagementPage(response);
+  const page = validateManagementPage(response);
+  if (owner && page.owner && page.owner !== owner)
+    throw Error("登录账号已变化，请重新读取");
+  return page;
 }
 
 function validateManagementPage(response: unknown): ManagementPage {

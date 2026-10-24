@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { readAccountSession } from "./accountSession";
-afterEach(()=>{delete globalThis.__uniConsoleSessionBootstrap;vi.unstubAllGlobals();});
+afterEach(()=>{delete globalThis.__uniConsoleSessionBootstrap;vi.unstubAllGlobals();sessionStorage.clear();});
 it('awaits the early authentication result and only consumes it once',async()=>{
  let finish!:(value:unknown)=>void;
  globalThis.__uniConsoleSessionBootstrap={startedAt:Date.now(),result:new Promise(resolve=>{finish=resolve;})};

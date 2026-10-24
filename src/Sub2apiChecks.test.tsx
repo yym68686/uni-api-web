@@ -2043,6 +2043,19 @@ it("explains missing legacy credentials and requires them once without submittin
   expect(JSON.stringify(sessionStorage)).not.toContain("replacement-password");
 });
 
+it("renders the current page's account balances without a duplicate first-paint request", async () => {
+  const data = [{...fixtures()[0], name:"live-balance-account", balance:{amount:123.45,status:"ok",checked_at:Math.floor(Date.now()/1000)}}];
+  const calls:string[]=[];
+  vi.stubGlobal("fetch",vi.fn(async(input:string)=>{
+    const path=new URL(input,location.origin).pathname;calls.push(path);
+    if(path.endsWith("/balance"))throw Error("duplicate balance read");
+    return Response.json({data});
+  }));
+  mount();
+  expect(await screen.findByText("$123.45")).toBeVisible();
+  expect(calls.some(path=>path.endsWith("/balance"))).toBe(false);
+});
+
 it("shows account wallet balances using the shared thresholds", async () => {
   const amounts = [-0.01, 0, 50, 50.01, null];
   const data = amounts.map((_, index) => ({

@@ -18,6 +18,7 @@ import (
 var errManagementFilters = errors.New("invalid management query filters")
 
 type managementPageResponse struct {
+	Owner string `json:"owner,omitempty"`
 	managementQueryPage
 	SelectionToken string                `json:"selection_token"`
 	Accounts       []subAccount          `json:"accounts"`
@@ -148,6 +149,7 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if reused {
+			page.Owner = owner
 			err := writeManagementPage(w, r, page)
 			log.Printf("management_current_computation verified=true elapsed_ms=%d rows=%d total=%d failed=%t request_id=%s", time.Since(start).Milliseconds(), len(page.Rows), page.Total, err != nil, consoleRequestID(r.Context()))
 			return
@@ -177,7 +179,7 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 	} else {
 		headers := managementAccountHeaders(view.Input.Accounts)
 		selectionToken := encodeManagementCursor(s.control.key, owner, managementPageCursor{Version: 1, Revision: page.Revision, Filter: tokenHash(mustJSON(filters))})
-		response := managementPageResponse{managementQueryPage: page, SelectionToken: selectionToken, Accounts: headers, Context: managementContextForPage(view, page, filters.Model)}
+		response := managementPageResponse{Owner: owner, managementQueryPage: page, SelectionToken: selectionToken, Accounts: headers, Context: managementContextForPage(view, page, filters.Model)}
 		err = writeManagementPage(w, r, response)
 		if err == nil {
 			s.rememberManagementPage(computedKey, snapshot.Proof, response)

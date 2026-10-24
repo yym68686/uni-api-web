@@ -366,3 +366,22 @@ selection. A separate account-header epoch continues invalidating older whole-
 response readers during rolling deployment. Account identity, state, password
 availability, configured keys and all channel inputs still invalidate channel
 computations; site login-session rotation is not a channel-result dependency.
+
+
+The current repeat-read verification uses two fresh PostgreSQL proofs around one
+live gateway authorization/revision pair. Both database proofs must have identical
+semantic revisions, prices, queue state, deadlines and account-header values, and
+the live gateway revision must match the retained computation. This establishes
+one common current read point while removing a remote round trip. A concurrent
+committed mutation or expired deadline forces the complete read; no old result is
+shown during verification. Both administrator and observer credentials are checked.
+
+For repeated browser navigation, a tab-local username hint can select saved filter
+preferences while the current session request runs in parallel. The server still
+authorizes the page from its cookie and attests the response owner. The UI consumes
+that early request only after fresh authentication confirms the same owner and
+filters; old backends without owner attestation use a normal authenticated read.
+No private response is stored in browser persistence. The current page's included
+account balances seed the independent balance queries so mounting 48 accounts
+need not immediately repeat 48 already-satisfied balance reads; periodic refresh
+and missing-balance behavior remain active.

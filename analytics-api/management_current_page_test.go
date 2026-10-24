@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -144,6 +146,9 @@ func TestManagementComputedHTTPIsFreshAndFilterBounded(t *testing.T) {
 		if err := json.Unmarshal(w.Body.Bytes(), &p); err != nil {
 			t.Fatal(err)
 		}
+		if p.Owner != "owner" {
+			t.Fatal("response owner missing")
+		}
 		return p
 	}
 	first := call(`{"groupStatus":"all","model":"gpt-5.5"}`)
@@ -242,5 +247,69 @@ func TestManagementComputedProofChangesInSourceTransaction(t *testing.T) {
 	raw, _ := json.Marshal(stable)
 	if len(raw) == 0 {
 		t.Fatal("missing proof")
+	}
+}
+
+func TestManagementComputedPageBracketsOneLiveGatewayReadWithDatabaseProofs(t *testing.T) {
+	s := managementHydrationFixture(t)
+	ctx := context.Background()
+	prepareManagementRevisionsForTest(t, s.control.db)
+	var gatewayReads atomic.Int32
+	var change func()
+	var once sync.Once
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gatewayReads.Add(1)
+		once.Do(func() {
+			if change != nil {
+				change()
+			}
+		})
+		writeJSON(w, 200, map[string]any{"format": "management-revision-v1", "revision": "r1", "config_revision": "c1"})
+	}))
+	defer server.Close()
+	source := controlSource{sourceView: sourceView{ID: "live", Name: "Live", Base: server.URL}, Key: "observer", ConfigKey: "admin"}
+	if _, err := s.control.saveSource(ctx, source, false); err != nil {
+		t.Fatal(err)
+	}
+	remember := func() {
+		t.Helper()
+		proof, _, err := s.managementReadProof(ctx, s.control.db, "owner")
+		if err != nil {
+			t.Fatal(err)
+		}
+		proof.Facts = []managementGatewayFacts{{Source: source, AtomicSnapshot: true, Revision: "r1", ConfigRevision: "c1"}}
+		s.rememberManagementPage("one-live-read", &proof, managementPageResponse{managementQueryPage: managementQueryPage{Rows: []managementQueryRow{}}, Accounts: proof.Accounts})
+		gatewayReads.Store(0)
+		once = sync.Once{}
+	}
+	remember()
+	if _, ok, err := s.currentComputedManagementPage(ctx, "owner", "one-live-read"); err != nil || !ok {
+		t.Fatal("stable proof", err)
+	}
+	// One admin and one independent observer check. Neither authorization is
+	// skipped, and neither incurs another remote round trip after the proof.
+	if gatewayReads.Load() != 2 {
+		t.Fatal("remote checks", gatewayReads.Load())
+	}
+	for _, query := range []string{
+		`UPDATE console_sub_targets SET name='committed-during-gateway' WHERE account_id='a' AND group_id=1`,
+		`UPDATE console_sub_accounts SET balance='{"amount":42,"checked_at":123,"status":"ok"}' WHERE id='a'`,
+		`UPDATE console_sub_models SET message='committed-during-gateway' WHERE model='extra-model'`,
+		`UPDATE console_sub_accounts SET balance='{"amount":41,"checked_at":123,"status":"ok"}' WHERE id='a';UPDATE console_sub_accounts SET balance='{"amount":42,"checked_at":123,"status":"ok"}' WHERE id='a'`,
+	} {
+		remember()
+		var writeErr error
+		change = func() { _, writeErr = s.control.db.Exec(query) }
+		_, ok, err := s.currentComputedManagementPage(ctx, "owner", "one-live-read")
+		if writeErr != nil {
+			t.Fatal(writeErr)
+		}
+		if err != nil || ok {
+			t.Fatal("concurrent committed change escaped final proof", err, query)
+		}
+		if gatewayReads.Load() != 2 {
+			t.Fatal("missing live authorization")
+		}
+		change = nil
 	}
 }

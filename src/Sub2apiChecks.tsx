@@ -158,10 +158,16 @@ const latency = (value: number | null) =>
 function AccountBalance({ account, enabled, user }: { account: SubAccount; enabled: boolean; user: string }) {
   const query = useQuery({
     ...accountBalanceQuery(user, account.id, account.base),
+    // This header was read in the just-verified management transaction. Do
+    // not issue an identical balance GET for every account at first paint.
+    // The normal periodic refresh still runs, and missing values still read.
+    initialData: account.balance || undefined,
+    initialDataUpdatedAt: Date.now(),
     enabled,
     refetchInterval: enabled ? 60_000 : false,
   });
-  const balance = query.data || account.balance;
+  const balance = account.balance && account.balance.checked_at >= (query.data?.checked_at || 0)
+    ? account.balance : query.data || account.balance;
   return (
     <div
       className="sub-account-balance"

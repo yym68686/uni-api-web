@@ -15,6 +15,7 @@ import { controlRequest } from "./api";
 
 afterEach(() => {
   cleanup();
+  delete globalThis.__uniManagementBootstrap;
   vi.unstubAllGlobals();
 });
 const row = (id: string) =>
@@ -257,4 +258,20 @@ it("hides preloaded data, cancels superseded filters and does not display old ro
   expect(hook.result.current.data).toBeUndefined();
   hook.unmount();
   client.clear();
+});
+
+
+it.each(["owner", "other", undefined])("only consumes a parallel initial page with an attested matching owner (%s)", async responseOwner => {
+  const initial={...page(), owner:responseOwner};
+  const fresh={...page("fresh"), owner:"owner"};
+  globalThis.__uniManagementBootstrap={owner:"owner",filters:JSON.stringify(subFilterDefaults),startedAt:Date.now(),controller:new AbortController(),result:Promise.resolve(initial)};
+  vi.stubGlobal("fetch",vi.fn(async()=>Response.json(fresh)));
+  const result=await readManagementPage(subFilterDefaults,"",new AbortController().signal,"owner");
+  expect(result.revision).toBe(responseOwner==="owner"?"new":"fresh");
+  expect(fetch).toHaveBeenCalledTimes(responseOwner==="owner"?0:1);
+});
+
+it("rejects a response whose session owner changed during a normal read", async()=>{
+  vi.stubGlobal("fetch",vi.fn(async()=>Response.json({...page(),owner:"other"})));
+  await expect(readManagementPage(subFilterDefaults,"",new AbortController().signal,"owner")).rejects.toThrow("登录账号已变化");
 });

@@ -13,10 +13,11 @@ import (
 )
 
 type managementFreshProof struct {
-	Stamp    string
-	Until    time.Time
-	Facts    []managementGatewayFacts
-	Accounts []subAccount
+	Stamp           string
+	HeadersRevision int64
+	Until           time.Time
+	Facts           []managementGatewayFacts
+	Accounts        []subAccount
 }
 type managementComputedPage struct {
 	Proof managementFreshProof
@@ -55,8 +56,8 @@ func (s *Service) managementReadProof(ctx context.Context, db controlQueryDB, ow
 	var price []byte
 	var until sql.NullTime
 	var now time.Time
-	query := `SELECT (SELECT jsonb_agg(jsonb_build_array(relation_name,revision) ORDER BY relation_name) FROM console_management_view_epoch WHERE relation_name<>'console_sub_account_headers'),transaction_timestamp(),(SELECT min(deadline) FROM (SELECT deadline FROM console_configured_checks WHERE state='running' AND deadline>transaction_timestamp() UNION ALL SELECT deadline FROM console_model_fingerprints WHERE state='running' AND deadline>transaction_timestamp()) d), (SELECT COALESCE(jsonb_agg(to_jsonb(p) ORDER BY model),'[]'::jsonb) FROM ` + pgx.Identifier{s.engine.historyPath, "prices"}.Sanitize() + ` p)`
-	if err = db.QueryRowContext(ctx, query).Scan(&epoch, &now, &until, &price); err != nil {
+	query := `SELECT (SELECT jsonb_agg(jsonb_build_array(relation_name,revision) ORDER BY relation_name) FROM console_management_view_epoch WHERE relation_name<>'console_sub_account_headers'),transaction_timestamp(),(SELECT min(deadline) FROM (SELECT deadline FROM console_configured_checks WHERE state='running' AND deadline>transaction_timestamp() UNION ALL SELECT deadline FROM console_model_fingerprints WHERE state='running' AND deadline>transaction_timestamp()) d), (SELECT revision FROM console_management_view_epoch WHERE relation_name='console_sub_account_headers'), (SELECT COALESCE(jsonb_agg(jsonb_build_array(to_jsonb(p),p.xmin::text) ORDER BY model),'[]'::jsonb) FROM ` + pgx.Identifier{s.engine.historyPath, "prices"}.Sanitize() + ` p)`
+	if err = db.QueryRowContext(ctx, query).Scan(&epoch, &now, &until, &proof.HeadersRevision, &price); err != nil {
 		return proof, now, err
 	}
 	proof.Stamp = tokenHash(mustJSON([]any{revision, string(epoch), string(price)}))
@@ -130,6 +131,7 @@ func verifyManagementFacts(ctx context.Context, facts []managementGatewayFacts) 
 // it describes this request's CURRENT PostgreSQL snapshot and gateway config.
 // No stale result is published while validation/recomputation is pending.
 func (s *Service) currentComputedManagementPage(ctx context.Context, owner, key string) (managementPageResponse, bool, error) {
+	ctx = managementTraceContext(ctx)
 	c := &s.managementComputed
 	c.mu.Lock()
 	entry, exists := c.pages[key]
@@ -144,24 +146,25 @@ func (s *Service) currentComputedManagementPage(ctx context.Context, owner, key 
 	if verifyManagementSources(sources, entry.Proof.Facts) != nil {
 		return managementPageResponse{}, false, nil
 	}
-	if err = verifyManagementFacts(ctx, entry.Proof.Facts); err != nil {
-		if errors.Is(err, errManagementSourceRevision) {
-			return managementPageResponse{}, false, nil
-		}
-		return managementPageResponse{}, false, err
+	// The current proof is cheap and monotonic. Sandwich one live gateway
+	// authorization/revision read between two PostgreSQL proofs instead of
+	// performing two remote round trips around one database snapshot. Equal
+	// proofs establish that the complete stored page was current at the live
+	// gateway read. Headers are compared too, even though balance changes do
+	// not invalidate the retained channel computation between requests.
+	readProof := func() (managementFreshProof, time.Time, error) {
+		defer managementReadSpan(ctx, "current_database_proof")()
+		return s.managementReadProof(ctx, s.control.db, owner)
 	}
-	proof, now, err := func() (managementFreshProof, time.Time, error) {
-		tx, err := s.control.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
-		if err != nil {
-			return managementFreshProof{}, time.Time{}, err
-		}
-		defer tx.Rollback()
-		return s.managementReadProof(ctx, tx, owner)
-	}()
+	proof, now, err := readProof()
 	if err != nil {
 		return managementPageResponse{}, false, err
 	}
-	if proof.Stamp == "" || proof.Stamp != entry.Proof.Stamp || !entry.Proof.Until.IsZero() && !now.Before(entry.Proof.Until) {
+	valid := func(p managementFreshProof, at time.Time) bool {
+		return p.Stamp != "" && p.Stamp == entry.Proof.Stamp &&
+			(entry.Proof.Until.IsZero() || at.Before(entry.Proof.Until))
+	}
+	if !valid(proof, now) {
 		return managementPageResponse{}, false, nil
 	}
 	if err = verifyManagementFacts(ctx, entry.Proof.Facts); err != nil {
@@ -169,6 +172,13 @@ func (s *Service) currentComputedManagementPage(ctx context.Context, owner, key 
 			return managementPageResponse{}, false, nil
 		}
 		return managementPageResponse{}, false, err
+	}
+	after, afterAt, err := readProof()
+	if err != nil {
+		return managementPageResponse{}, false, err
+	}
+	if !valid(after, afterAt) || !proof.Until.Equal(after.Until) || proof.HeadersRevision != after.HeadersRevision || mustJSON(proof.Accounts) != mustJSON(after.Accounts) {
+		return managementPageResponse{}, false, nil
 	}
 	sources, err = s.readManagementSources(ctx)
 	if err != nil {
