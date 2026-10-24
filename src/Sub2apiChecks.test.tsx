@@ -550,7 +550,10 @@ it("runs standalone Astra quality checks for every filtered page regardless of t
   const user = userEvent.setup();
   mount();
   await screen.findByRole("table");
-  await user.type(screen.getByLabelText("搜索 sub2api 分组"), "selected");
+  // This case verifies batch scope, not per-keystroke rendering. Paste the
+  // final filter once instead of mounting eight intermediate result pages.
+  await user.click(screen.getByLabelText("搜索 sub2api 分组"));
+  await user.paste("selected");
   await user.selectOptions(screen.getByLabelText("sub2api 账号筛选"), "one");
   await user.selectOptions(
     screen.getByLabelText("检测模型筛选"),

@@ -127,7 +127,7 @@ it.each([true,false])("starts live sync progress without clearing rows, changing
  const row=screen.getByRole("row",{name:"查看 Owned site Channel 26 渠道详情"});
  const button=screen.getByRole("button",{name:detect ? "一键同步并检测" : "一键同步"});
  await user.click(button);
- await waitFor(()=>expect(progressReads).toBe(3));
+ await waitFor(()=>expect(progressReads).toBe(2));
  expect(pageReads).toBe(2);expect(posts).toBe(1);expect(button).toBeDisabled();
  expect(screen.getByRole("row",{name:"查看 Owned site Channel 26 渠道详情"})).toBe(row);
  expect(screen.queryByRole("status",{name:"加载渠道检测"})).not.toBeInTheDocument();
@@ -290,4 +290,34 @@ it("allows sync-only with no selected models and never falls back to detection o
  await screen.findByText("同步检测服务待更新，请稍后重试。");
  expect(writes).toEqual(["/analytics/v1/sub2api/accounts/sync-only"]);
  expect(screen.getByText("Channel 1",{selector:"strong"})).toBeVisible();
+});
+
+it("updates only channel results while filters change, keeping account rows and choices mounted",async()=>{
+ let finish!:(response:Response)=>void,pageReads=0,progressReads=0;
+ const response={...page(),rates:[0.1,0.2],platforms:["openai","anthropic"]};
+ vi.stubGlobal("fetch",vi.fn(async(input:string)=>{
+  const u=new URL(input);
+  if(u.pathname.endsWith("/accounts/progress")){progressReads++;return idleProgress();}
+  if(u.pathname.endsWith("/channel-management/query")){
+   pageReads++;if(pageReads>1)return new Promise<Response>(resolve=>{finish=resolve;});
+   return Response.json(response);
+  }
+  return Response.json({data:[]});
+ }));
+ mount("filters-stable");const user=userEvent.setup();
+ await screen.findByText("Channel 1",{selector:"strong"});
+ const accountRow=screen.getByRole("listitem",{name:"Owned site"});
+ const options=screen.getByLabelText("倍率上限筛选").innerHTML;
+ await user.selectOptions(screen.getByLabelText("检测模型筛选"),"gpt-5.5");
+ await waitFor(()=>expect(pageReads).toBe(2));
+ expect(screen.getByRole("listitem",{name:"Owned site"})).toBe(accountRow);
+ expect(screen.queryByRole("status",{name:"加载站点账号"})).not.toBeInTheDocument();
+ expect(screen.getByLabelText("倍率上限筛选").innerHTML).toBe(options);
+ expect(screen.getByLabelText("检测模型筛选")).toHaveValue("gpt-5.5");
+ expect(screen.queryByText("Channel 1",{selector:"strong"})).not.toBeInTheDocument();
+ expect(progressReads).toBe(1);
+ await act(async()=>{finish(Response.json({...response,read_at_ms:2}));});
+ await screen.findByText("Channel 1",{selector:"strong"});
+ expect(screen.getByRole("listitem",{name:"Owned site"})).toBe(accountRow);
+ expect(progressReads).toBe(1);
 });

@@ -20,7 +20,7 @@ const active = (accounts: SubAccount[]) => accounts.some(a => a.state === "queue
 // table. Scope each poll stream to its freshly read page and stop on completion.
 export function useSubSyncProgress(user: string, accounts: SubAccount[], readAt: number | undefined, submission = 0) {
   const client=useQueryClient();
-  const queryKey=["sub-sync-progress", user, readAt, submission];
+  const queryKey=["sub-sync-progress", user, JSON.stringify(accounts.map(a=>a.id).sort()), submission];
   type Response = {data:SubAccount[];read_at_ms:number};
   return useQuery({
     queryKey,

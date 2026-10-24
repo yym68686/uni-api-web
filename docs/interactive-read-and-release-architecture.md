@@ -453,3 +453,9 @@ Channel management defaults to ascending observed multipliers; explicit saved
 sort preferences remain. Channel observation's move-to-top action is a normal
 cancelable control draft within the current source/key/model scope. Hidden
 providers remain in their previous relative order, and other sources are untouched.
+
+Changing a channel filter replaces only the channel result region. Owner-scoped
+account headers and filter vocabulary remain mounted while the current page is
+requested; old rows are not presented as the new filter's answer. Progress queries
+are keyed by owner, account membership and accepted sync submission, not by page
+read timestamp. Manual refresh explicitly refreshes progress and channel results.

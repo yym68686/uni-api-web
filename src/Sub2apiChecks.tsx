@@ -748,19 +748,24 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   const cursor=cursorState.filter===filterKey?cursorState.cursor:"";
   const pageQuery=useManagementPage(user,filters,cursor);
   const pageData=pageQuery.data;
-  const accounts=pageData?.accounts || [];
+  // These controls are not the answer to the current row filter. Preserve
+  // their mounted state while the next page is read; never retain old rows.
+  const metadataRef=useRef<{owner:string;accounts:SubAccount[];rates:number[];platforms:string[];models:string[];detectionModels:string[];readAt:number}|undefined>(undefined);
+  if(pageData)metadataRef.current={owner:user,accounts:pageData.accounts,rates:pageData.rates,platforms:pageData.platforms,models:pageData.models,detectionModels:pageData.detection_models,readAt:pageData.read_at_ms};
+  const metadata=metadataRef.current?.owner===user?metadataRef.current:undefined;
+  const accounts=metadata?.accounts || [];
   const [syncProgressSubmission,setSyncProgressSubmission]=useState({owner:user,generation:0});
   const syncGeneration=syncProgressSubmission.owner===user?syncProgressSubmission.generation:0;
-  const progressQuery=useSubSyncProgress(user,accounts,pageData?.read_at_ms,syncGeneration);
+  const progressQuery=useSubSyncProgress(user,accounts,metadata?.readAt,syncGeneration);
   const awaitingSyncProgress=syncGeneration>0 && !progressQuery.data;
   const statusAccounts=progressQuery.data?.data || accounts;
   const progressByAccount=new Map(statusAccounts.map(a=>[a.id,a]));
   const query={...pageQuery,data:pageData?{data:accounts,cached:false}:undefined};
-  const accountHeaders=query;
+  const accountHeaders={data:metadata?{data:statusAccounts}:undefined,error:metadata?null:pageQuery.error};
   const prices={data:pageData?{data:pageData.context.prices}:undefined};
   const [form, setForm] = useState<{ account: SubAccount | null } | null>(null);
   const setPage=(_page:number)=>setCursorState({filter:filterKey,cursor:""});
-  const refreshPage=()=>{if(cursor)setPage(0);else void pageQuery.refetch();};
+  const refreshPage=()=>{void progressQuery.refetch();if(cursor)setPage(0);else void pageQuery.refetch();};
   const [modelSelectionRevision, setModelSelectionRevision] = useState(0);
   const {
     search,
@@ -802,9 +807,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   function configuredCount(item:ManagedChannel){return managedRouteCount(item,routeSources,routeQueries);}
   // Keep the vocabulary selectable during a new query; no previous result
   // rows, counts or eligibility are rendered as the new filter's answer.
-  const knownModels=useRef<string[]>(SUB_MODELS);
-  if(pageData)knownModels.current=pageData.models;
-  const filterModels=[...new Set([...knownModels.current,...(model?[model]:[])])];
+  const filterModels=[...new Set([...(metadata?.models || SUB_MODELS),...(model?[model]:[])])];
   const [configuredDialog, setConfiguredDialog] = useState<ManagedChannel | null>(null);
   const [managementDetail, setManagementDetail] = useState<ManagementRow | null>(null);
   const [importing, setImporting] = useState<{
@@ -823,10 +826,10 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
     (account) => !pending(account.state),
   );
   const [removing, setRemoving] = useState<string | null>(null);
-  const rows=pageData?.rows || [], rates=pageData?.rates || [], platforms=pageData?.platforms || [];
+  const rows=pageData?.rows || [], rates=metadata?.rates || [], platforms=metadata?.platforms || [];
   const total=pageData?.total || 0, eligibleCount=pageData?.eligible_count || 0;
   const effectiveMaxRate=maxRate;
-  const availableModels=pageData?.detection_models || SUB_MODELS;
+  const availableModels=metadata?.detectionModels || SUB_MODELS;
   const extraModels=availableModels.filter(m=>!SUB_MODELS.includes(m));
   const modelSelectionKey = JSON.stringify(availableModels);
   const detectionModels = useMemo(() => loadSubModels(user, JSON.parse(modelSelectionKey)), [user, modelSelectionKey, modelSelectionRevision]);
@@ -1057,7 +1060,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
             </button>
           </div>
         )}
-        {resultsReadFailed ? null : resultsUnavailable ? (
+        {!metadata && resultsReadFailed ? null : !metadata ? (
           <TableLoading kind="accounts" rows={3} />
         ) : statusAccounts.length === 0 ? (
           <Empty title="添加第一个站点账号" icon={<Globe2 size={25} />}>
@@ -1504,9 +1507,12 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
           </button>
         </div>
         {resultsReadFailed ? (
+          <>
+          {metadata && <div role="alert" className="error-banner">渠道结果读取失败：{pageQuery.error?.message}<button className="button small" onClick={refreshPage}>重试</button></div>}
           <Empty title="暂时无法读取渠道">
             检测结果尚未完整读取，暂时无法判断是否有匹配渠道。请重试读取。
           </Empty>
+          </>
         ) : resultsUnavailable ? (
           <TableLoading kind="checks" rows={6} />
         ) : rows.length === 0 ? (
