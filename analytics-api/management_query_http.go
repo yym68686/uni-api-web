@@ -144,7 +144,7 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	computedKey := managementComputedKey(owner, filters, cursor)
 	if selection == "" {
-		page, reused, reuseErr := s.currentComputedManagementPage(ctx, owner, computedKey)
+		page, reused, reuseErr := s.currentComputedManagementPageMode(ctx, owner, computedKey, r.Header.Get("Accept") == managementPageV3MediaType)
 		if reuseErr != nil {
 			http.Error(w, "渠道数据实时核验失败，请重新读取", http.StatusServiceUnavailable)
 			return

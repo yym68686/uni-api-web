@@ -92,3 +92,37 @@ func decodeManagementColumnPageForTest(t *testing.T, wire managementColumnPage) 
 	return decodeManagementWireForTest(t, old)
 
 }
+
+func TestManagementStoredColumnsDoNotRetainExpandedEvidence(t *testing.T) {
+	s := &Service{}
+	page := managementWireFixture()
+	s.rememberManagementPage("first", &managementFreshProof{Stamp: "current"}, page)
+	stored := s.managementComputed.pages["first"]
+	if stored.Page.preparedColumns == nil {
+		t.Fatal("canonical representation missing")
+	}
+	if stored.Page.Rows[0].Checks != nil || stored.Page.Rows[0].Target.Result != nil || stored.Page.Rows[0].Target.Models != nil || stored.Page.preparedColumns.managementPageResponse.Rows != nil {
+		t.Fatal("shadowed expanded evidence still retained")
+	}
+	raw, err := json.Marshal(stored.Page.preparedColumns)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Bytes != len(raw) {
+		t.Fatal("budget does not count canonical representation", stored.Bytes, len(raw))
+	}
+	expanded, err := expandManagementColumnPage(*stored.Page.preparedColumns)
+	if err != nil || mustJSON(expanded) != mustJSON(page) {
+		t.Fatal("canonical store changed complete data", err)
+	}
+	page.Rows[0].Checks[0].Result.Availability.Message = "mutated caller"
+	again, err := expandManagementColumnPage(*stored.Page.preparedColumns)
+	if err != nil || mustJSON(again) != mustJSON(expanded) {
+		t.Fatal("caller mutated retained result", err)
+	}
+	// Independent expansion is required by legacy JSON clients too.
+	again.Rows[0].Checks[0].Result.Availability.Message = "legacy edit"
+	if again.Rows[1].Checks[0].Result.Availability.Message == "legacy edit" {
+		t.Fatal("shared mutable legacy result")
+	}
+}

@@ -86,3 +86,92 @@ func currentManagementColumnPage(page managementPageResponse) (managementColumnP
 	}
 	return wire, nil
 }
+
+// Decode the canonical stored representation for older clients. v3 callers
+// keep the compact evidence until serialization; no partial row crosses HTTP.
+func expandManagementColumnPage(wire managementColumnPage) (managementPageResponse, error) {
+	expand := func(c managementResultColumns) []map[string]json.RawMessage {
+		rows := make([]map[string]json.RawMessage, c.Count)
+		for i := range rows {
+			rows[i] = map[string]json.RawMessage{}
+		}
+		for j, field := range c.Fields {
+			for i, cell := range c.Columns[j] {
+				if len(cell) == 1 {
+					rows[i][field] = cell[0]
+				}
+			}
+		}
+		return rows
+	}
+	meta, a, q := expand(wire.ResultFields), expand(wire.Availability), expand(wire.Quality)
+	results := make([]json.RawMessage, len(meta))
+	for i, m := range meta {
+		m["availability"], _ = json.Marshal(a[i])
+		m["quality"], _ = json.Marshal(q[i])
+		raw, err := json.Marshal(m)
+		if err != nil {
+			return managementPageResponse{}, err
+		}
+		results[i] = raw
+	}
+	out := wire.managementPageResponse
+	out.Format = "management-page-v1"
+	ref := func(i *int) (*subResult, error) {
+		if i == nil {
+			return nil, nil
+		}
+		r := &subResult{}
+		if err := json.Unmarshal(results[*i], r); err != nil {
+			return nil, err
+		}
+		return r, nil
+	}
+	model := func(m managementWireModel) (subModelResult, error) {
+		r, err := ref(m.ResultRef)
+		return subModelResult{Model: m.Model, State: m.State, Message: m.Message, Result: r}, err
+	}
+	check := func(c managementWireCheck) (managementQueryCheck, error) {
+		m, err := model(c.managementWireModel)
+		return managementQueryCheck{subModelResult: m, SourceName: c.SourceName}, err
+	}
+	if wire.Rows != nil {
+		out.Rows = make([]managementQueryRow, len(wire.Rows))
+	}
+	for i, w := range wire.Rows {
+		row := w.managementQueryRow
+		row.Target = w.Target.subTarget
+		var err error
+		row.Target.Result, err = ref(w.Target.ResultRef)
+		if err != nil {
+			return out, err
+		}
+		if w.Target.Models != nil {
+			row.Target.Models = make([]subModelResult, len(w.Target.Models))
+		}
+		for j, m := range w.Target.Models {
+			row.Target.Models[j], err = model(m)
+			if err != nil {
+				return out, err
+			}
+		}
+		if w.Checks != nil {
+			row.Checks = make([]managementQueryCheck, len(w.Checks))
+		}
+		for j, c := range w.Checks {
+			row.Checks[j], err = check(c)
+			if err != nil {
+				return out, err
+			}
+		}
+		if w.Selected != nil {
+			c, err := check(*w.Selected)
+			if err != nil {
+				return out, err
+			}
+			row.Selected = &c
+		}
+		out.Rows[i] = row
+	}
+	return out, nil
+}

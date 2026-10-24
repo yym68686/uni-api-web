@@ -99,13 +99,10 @@ func (s *Service) rememberManagementPage(key string, proof *managementFreshProof
 		log.Printf("management_computation_store skipped=true reason=page_size bytes=%d", len(raw))
 		return
 	}
-	// Decouple stored values from the builder's slice/pointer graph. Never
-	// mutate the retained page; each read changes only its top-level timestamp.
-	var immutable managementPageResponse
-	if json.Unmarshal(raw, &immutable) != nil {
-		return
-	}
-	columns, err := encodeManagementColumnPage(immutable)
+	// Persist one complete lossless representation. JSON roundtrip discards
+	// the wire structs' shadowed legacy fields, which otherwise retain the
+	// entire expanded result graph in addition to the columns.
+	columns, err := encodeManagementColumnPage(page)
 	if err != nil {
 		return
 	}
@@ -113,12 +110,23 @@ func (s *Service) rememberManagementPage(key string, proof *managementFreshProof
 	if err != nil {
 		return
 	}
-	storedBytes := len(raw) + len(encodedColumns)
+	storedBytes := len(encodedColumns)
 	if storedBytes > 16<<20 {
 		log.Printf("management_computation_store skipped=true reason=wire_size bytes=%d", storedBytes)
 		return
 	}
-	immutable.preparedColumns = &columns
+	var immutable managementColumnPage
+	if json.Unmarshal(encodedColumns, &immutable) != nil {
+		return
+	}
+	compact := immutable.managementPageResponse
+	compact.Format = "management-page-v1"
+	compact.Rows = make([]managementQueryRow, len(immutable.Rows))
+	for i, row := range immutable.Rows {
+		compact.Rows[i] = row.managementQueryRow
+		compact.Rows[i].Target = row.Target.subTarget
+	}
+	compact.preparedColumns = &immutable
 	c := &s.managementComputed
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -147,7 +155,7 @@ func (s *Service) rememberManagementPage(key string, proof *managementFreshProof
 	for i, f := range proof.Facts {
 		minimal.Facts[i] = managementGatewayFacts{Source: f.Source, Revision: f.Revision, ConfigRevision: f.ConfigRevision, AtomicSnapshot: f.AtomicSnapshot}
 	}
-	c.pages[key] = managementComputedPage{Proof: minimal, Page: immutable, Bytes: storedBytes}
+	c.pages[key] = managementComputedPage{Proof: minimal, Page: compact, Bytes: storedBytes}
 	c.order = append(c.order, key)
 	c.bytes += storedBytes
 }
@@ -165,6 +173,9 @@ func verifyManagementFacts(ctx context.Context, facts []managementGatewayFacts) 
 // it describes this request's CURRENT PostgreSQL snapshot and gateway config.
 // No stale result is published while validation/recomputation is pending.
 func (s *Service) currentComputedManagementPage(ctx context.Context, owner, key string) (managementPageResponse, bool, error) {
+	return s.currentComputedManagementPageMode(ctx, owner, key, false)
+}
+func (s *Service) currentComputedManagementPageMode(ctx context.Context, owner, key string, compact bool) (managementPageResponse, bool, error) {
 	ctx = managementTraceContext(ctx)
 	c := &s.managementComputed
 	c.mu.Lock()
@@ -254,6 +265,17 @@ func (s *Service) currentComputedManagementPage(ctx context.Context, owner, key 
 		if fresh, ok := current[page.Rows[i].Account.ID]; ok {
 			page.Rows[i].Account = fresh
 		}
+	}
+	if !compact {
+		wire, err := currentManagementColumnPage(page)
+		if err != nil {
+			return managementPageResponse{}, false, err
+		}
+		full, err := expandManagementColumnPage(wire)
+		if err != nil {
+			return managementPageResponse{}, false, err
+		}
+		return full, true, nil
 	}
 	return page, true, nil
 }

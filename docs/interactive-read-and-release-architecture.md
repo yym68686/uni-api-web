@@ -412,3 +412,16 @@ acknowledgement. There is no offline or stale-while-revalidate display; errors
 still hide old rows. Older backends use full no-store pages. This avoids repeated
 transfer of verified-identical bytes, rather than serving an unvalidated saved
 snapshot. Full operation selection remains an independent no-store read.
+
+Channel management does not poll or refetch on window focus/reconnection. It
+reads on initial mount, manual refresh, filter changes and accepted write
+invalidation. Account balance widgets follow the same manual-page policy.
+This avoids automatically clearing the current page during unrelated tab changes.
+
+The process-local current computation retains one canonical, complete column
+representation instead of both expanded typed results and wire data. A JSON
+round trip strips shadowed legacy struct fields, and the16MiB/four-page budget
+counts that canonical representation. v3 sends it after current proof and fresh
+header overlay; older clients expand independent complete objects on demand.
+This keeps alternating filter pages from evicting each other merely because
+the same evidence was represented twice. It does not change freshness checks.
