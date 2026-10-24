@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"log"
 )
 
 // Keep the evaluated ordering/facets and group metadata, never all model
@@ -27,6 +28,7 @@ func managementPagingKey(owner string, filters managementQueryFilters) string {
 }
 func (s *Service) rememberManagementPagingPlan(owner string, filters managementQueryFilters, snapshot managementQuerySnapshot) {
 	if snapshot.Proof == nil || snapshot.Proof.Stamp == "" || !snapshot.View.ProjectedModels {
+		log.Printf("management_paging_store stored=false reason=unprepared projected=%t", snapshot.View.ProjectedModels)
 		return
 	}
 	plan := managementPagingPlan{Input: snapshot.View.Input, Prices: snapshot.View.Prices, Page: snapshot.Page}
@@ -50,13 +52,16 @@ func (s *Service) rememberManagementPagingPlan(owner string, filters managementQ
 		plan.Rows = append(plan.Rows, identity)
 	}
 	if len(plan.Rows) != plan.Page.Total {
+		log.Printf("management_paging_store stored=false reason=count")
 		return
 	}
 	raw, err := json.Marshal(plan)
 	if err != nil || len(raw) > 8<<20 {
+		log.Printf("management_paging_store stored=false reason=encoding_or_size bytes=%d", len(raw))
 		return
 	}
 	s.rememberManagementEntry(managementPagingKey(owner, filters), snapshot.Proof, managementComputedPage{Plan: raw, Bytes: len(raw)})
+	log.Printf("management_paging_store stored=true bytes=%d rows=%d", len(raw), len(plan.Rows))
 }
 
 func (s *Service) currentManagementPagingPage(ctx context.Context, owner string, filters managementQueryFilters, cursor string, rebase bool) (managementPageResponse, bool, error) {
@@ -65,10 +70,12 @@ func (s *Service) currentManagementPagingPage(ctx context.Context, owner string,
 	entry, exists := c.pages[managementPagingKey(owner, filters)]
 	c.mu.Unlock()
 	if !exists || len(entry.Plan) == 0 {
+		log.Printf("management_paging_miss reason=absent request_id=%s", consoleRequestID(ctx))
 		return managementPageResponse{}, false, nil
 	}
 	proof, _, valid, err := s.currentManagementProof(ctx, owner, entry.Proof)
 	if err != nil || !valid {
+		log.Printf("management_paging_miss reason=proof failed=%t request_id=%s", err != nil, consoleRequestID(ctx))
 		return managementPageResponse{}, false, err
 	}
 	var plan managementPagingPlan
@@ -130,6 +137,7 @@ func (s *Service) currentManagementPagingPage(ctx context.Context, owner string,
 		return managementPageResponse{}, false, err
 	}
 	if current.Stamp != proof.Stamp || current.HeadersRevision != proof.HeadersRevision || (!entry.Proof.Until.IsZero() && !now.Before(entry.Proof.Until)) {
+		log.Printf("management_paging_miss reason=concurrent_change request_id=%s", consoleRequestID(ctx))
 		return managementPageResponse{}, false, nil
 	}
 	headers := map[string]subAccount{}
