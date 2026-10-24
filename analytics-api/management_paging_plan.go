@@ -136,7 +136,7 @@ func (s *Service) currentManagementPagingPage(ctx context.Context, owner string,
 	if err != nil {
 		return managementPageResponse{}, false, err
 	}
-	if current.Stamp != proof.Stamp || current.HeadersRevision != proof.HeadersRevision || (!entry.Proof.Until.IsZero() && !now.Before(entry.Proof.Until)) {
+	if managementProofStamp(current, entry.Proof.CurrentExport) != proof.Stamp || current.HeadersRevision != proof.HeadersRevision || (!entry.Proof.Until.IsZero() && !now.Before(entry.Proof.Until)) {
 		log.Printf("management_paging_miss reason=concurrent_change request_id=%s", consoleRequestID(ctx))
 		return managementPageResponse{}, false, nil
 	}

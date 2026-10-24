@@ -102,6 +102,7 @@ func (s *Service) readManagementQuerySnapshotMode(ctx context.Context, owner str
 				return managementDatabaseView{}, err
 			}
 			proof.Facts = facts
+			proof.CurrentExport = managementHasCompleteCurrentExport(facts)
 			out.Proof = &proof
 		}
 		catalogOnly := filters.Model == "" && filters.Availability == "" && filters.PriceStatus == "" && filters.ModelMatch == "" && filters.ToolUse == "" && filters.Quality == ""

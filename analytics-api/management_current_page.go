@@ -18,6 +18,8 @@ import (
 type managementFreshProof struct {
 	Epochs          map[string]string
 	Stamp           string
+	ExportStamp     string
+	CurrentExport   bool
 	HeadersRevision int64
 	Until           time.Time
 	Facts           []managementGatewayFacts
@@ -80,7 +82,26 @@ func (s *Service) managementReadProof(ctx context.Context, db controlQueryDB, ow
 		}
 		proof.Epochs[relation] = string(v[1])
 	}
-	proof.Stamp = tokenHash(mustJSON([]any{revision, string(epoch), string(price)}))
+	// Engine-origin classification also depends on historical user overrides.
+	// Include row generations so concurrent A->B->A edits cannot escape the fence.
+	// No encrypted intent or credential payload is part of this proof.
+	var overrides []byte
+	if err = db.QueryRowContext(ctx, `SELECT COALESCE(jsonb_agg(jsonb_build_array(source_id,provider,id,row_version) ORDER BY source_id,provider,id,row_version),'[]'::jsonb)
+ FROM (SELECT DISTINCT o.source_id,p->>'provider' AS provider,o.id,o.xmin::text AS row_version FROM console_channel_settings_operations o
+ CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(o.public_result->'previews')='array' THEN o.public_result->'previews' ELSE '[]'::jsonb END) p
+ WHERE o.status<>'rejected' AND p->>'provider' IS NOT NULL AND
+ (p->>'created'='true' OR p->'before'->'engine' IS DISTINCT FROM p->'after'->'engine'
+ OR p->'before'->'base_url' IS DISTINCT FROM p->'after'->'base_url')) origins`).Scan(&overrides); err != nil {
+		return proof, now, err
+	}
+	proof.Stamp = tokenHash(mustJSON([]any{revision, string(epoch), string(price), string(overrides)}))
+	exportedEpoch := make(map[string]string, len(proof.Epochs))
+	for relation, value := range proof.Epochs {
+		if relation != "console_control_snapshots" {
+			exportedEpoch[relation] = value
+		}
+	}
+	proof.ExportStamp = tokenHash(mustJSON([]any{revision, exportedEpoch, string(price), string(overrides)}))
 	if until.Valid {
 		proof.Until = until.Time
 	}
@@ -158,6 +179,9 @@ func (s *Service) rememberManagementEntry(key string, proof *managementFreshProo
 		delete(c.pages, old)
 	}
 	minimal := *proof
+	if minimal.CurrentExport {
+		minimal.Stamp = minimal.ExportStamp
+	}
 	minimal.Accounts = nil
 	minimal.Facts = make([]managementGatewayFacts, len(proof.Facts))
 	for i, f := range proof.Facts {
@@ -256,12 +280,15 @@ func (s *Service) currentManagementProof(ctx context.Context, owner string, expe
 		return managementFreshProof{}, time.Time{}, false, err
 	}
 	valid := func(p managementFreshProof, at time.Time) bool {
-		return p.Stamp != "" && p.Stamp == expected.Stamp &&
+		return managementProofStamp(p, expected.CurrentExport) != "" && managementProofStamp(p, expected.CurrentExport) == expected.Stamp &&
 			(expected.Until.IsZero() || at.Before(expected.Until))
 	}
 	if !valid(proof, now) {
 		changed := []string{}
 		for relation, value := range proof.Epochs {
+			if expected.CurrentExport && relation == "console_control_snapshots" {
+				continue
+			}
 			if expected.Epochs[relation] != value && strings.HasPrefix(relation, "console_") && len(relation) < 80 {
 				changed = append(changed, relation)
 			}
@@ -294,5 +321,32 @@ func (s *Service) currentManagementProof(ctx context.Context, owner string, expe
 	if err = ctx.Err(); err != nil {
 		return managementFreshProof{}, time.Time{}, false, err
 	}
+	proof.CurrentExport = expected.CurrentExport
+	proof.Stamp = managementProofStamp(proof, expected.CurrentExport)
 	return proof, now, true, nil
+}
+
+func managementProofStamp(proof managementFreshProof, currentExport bool) string {
+	if currentExport {
+		return proof.ExportStamp
+	}
+	return proof.Stamp
+}
+
+// Only complete CURRENT gateway definitions eliminate the saved-snapshot
+// fallback. A missing definition keeps the original epoch fence intact.
+func managementHasCompleteCurrentExport(facts []managementGatewayFacts) bool {
+	for _, f := range facts {
+		var definitions map[string]json.RawMessage
+		var controls subGatewayControls
+		if f.Export == nil || decodeMap(f.Export["temporary_definitions"], &definitions) != nil || definitions == nil || decodeMap(f.Controls, &controls) != nil {
+			return false
+		}
+		for _, channel := range controls.Temporary {
+			if _, ok := definitions[channel.Provider]; !ok {
+				return false
+			}
+		}
+	}
+	return true
 }
