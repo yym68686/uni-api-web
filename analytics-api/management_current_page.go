@@ -27,6 +27,7 @@ type managementComputedPage struct {
 	Proof managementFreshProof
 	Page  managementPageResponse
 	Bytes int
+	Plan  []byte
 }
 type managementComputedPages struct {
 	mu    sync.Mutex
@@ -127,6 +128,13 @@ func (s *Service) rememberManagementPage(key string, proof *managementFreshProof
 		compact.Rows[i].Target = row.Target.subTarget
 	}
 	compact.preparedColumns = &immutable
+	s.rememberManagementEntry(key, proof, managementComputedPage{Page: compact, Bytes: storedBytes})
+}
+
+func (s *Service) rememberManagementEntry(key string, proof *managementFreshProof, entry managementComputedPage) {
+	if proof == nil || proof.Stamp == "" || entry.Bytes > 16<<20 {
+		return
+	}
 	c := &s.managementComputed
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -143,7 +151,7 @@ func (s *Service) rememberManagementPage(key string, proof *managementFreshProof
 			}
 		}
 	}
-	for len(c.order) > 0 && (len(c.order) >= 4 || c.bytes+storedBytes > 16<<20) {
+	for len(c.order) > 0 && (len(c.order) >= 4 || c.bytes+entry.Bytes > 16<<20) {
 		old := c.order[0]
 		c.order = c.order[1:]
 		c.bytes -= c.pages[old].Bytes
@@ -155,9 +163,10 @@ func (s *Service) rememberManagementPage(key string, proof *managementFreshProof
 	for i, f := range proof.Facts {
 		minimal.Facts[i] = managementGatewayFacts{Source: f.Source, Revision: f.Revision, ConfigRevision: f.ConfigRevision, AtomicSnapshot: f.AtomicSnapshot}
 	}
-	c.pages[key] = managementComputedPage{Proof: minimal, Page: compact, Bytes: storedBytes}
+	entry.Proof = minimal
+	c.pages[key] = entry
 	c.order = append(c.order, key)
-	c.bytes += storedBytes
+	c.bytes += entry.Bytes
 }
 
 func verifyManagementFacts(ctx context.Context, facts []managementGatewayFacts) error {
@@ -185,64 +194,8 @@ func (s *Service) currentComputedManagementPageMode(ctx context.Context, owner, 
 		log.Printf("management_current_miss reason=absent request_id=%s", consoleRequestID(ctx))
 		return managementPageResponse{}, false, nil
 	}
-	sources, err := s.readManagementSources(ctx)
-	if err != nil {
-		return managementPageResponse{}, false, err
-	}
-	if verifyManagementSources(sources, entry.Proof.Facts) != nil {
-		return managementPageResponse{}, false, nil
-	}
-	// The current proof is cheap and monotonic. Sandwich one live gateway
-	// authorization/revision read between two PostgreSQL proofs instead of
-	// performing two remote round trips around one database snapshot. Equal
-	// proofs establish that the complete stored page was current at the live
-	// gateway read. Headers are compared too, even though balance changes do
-	// not invalidate the retained channel computation between requests.
-	readProof := func() (managementFreshProof, time.Time, error) {
-		defer managementReadSpan(ctx, "current_database_proof")()
-		return s.managementReadProof(ctx, s.control.db, owner)
-	}
-	proof, now, err := readProof()
-	if err != nil {
-		return managementPageResponse{}, false, err
-	}
-	valid := func(p managementFreshProof, at time.Time) bool {
-		return p.Stamp != "" && p.Stamp == entry.Proof.Stamp &&
-			(entry.Proof.Until.IsZero() || at.Before(entry.Proof.Until))
-	}
-	if !valid(proof, now) {
-		changed := []string{}
-		for relation, value := range proof.Epochs {
-			if entry.Proof.Epochs[relation] != value && strings.HasPrefix(relation, "console_") && len(relation) < 80 {
-				changed = append(changed, relation)
-			}
-		}
-		sort.Strings(changed)
-		log.Printf("management_current_miss reason=proof relations=%s request_id=%s", strings.Join(changed, ","), consoleRequestID(ctx))
-		return managementPageResponse{}, false, nil
-	}
-	if err = verifyManagementFacts(ctx, entry.Proof.Facts); err != nil {
-		if errors.Is(err, errManagementSourceRevision) {
-			return managementPageResponse{}, false, nil
-		}
-		return managementPageResponse{}, false, err
-	}
-	after, afterAt, err := readProof()
-	if err != nil {
-		return managementPageResponse{}, false, err
-	}
-	if !valid(after, afterAt) || !proof.Until.Equal(after.Until) || proof.HeadersRevision != after.HeadersRevision || mustJSON(proof.Accounts) != mustJSON(after.Accounts) {
-		log.Printf("management_current_miss reason=concurrent_change request_id=%s", consoleRequestID(ctx))
-		return managementPageResponse{}, false, nil
-	}
-	sources, err = s.readManagementSources(ctx)
-	if err != nil {
-		return managementPageResponse{}, false, err
-	}
-	if err = verifyManagementSources(sources, entry.Proof.Facts); err != nil {
-		return managementPageResponse{}, false, err
-	}
-	if err = ctx.Err(); err != nil {
+	proof, now, valid, err := s.currentManagementProof(ctx, owner, entry.Proof)
+	if err != nil || !valid {
 		return managementPageResponse{}, false, err
 	}
 	page := entry.Page
@@ -278,4 +231,68 @@ func (s *Service) currentComputedManagementPageMode(ctx context.Context, owner, 
 		return full, true, nil
 	}
 	return page, true, nil
+}
+
+func (s *Service) currentManagementProof(ctx context.Context, owner string, expected managementFreshProof) (managementFreshProof, time.Time, bool, error) {
+	sources, err := s.readManagementSources(ctx)
+	if err != nil {
+		return managementFreshProof{}, time.Time{}, false, err
+	}
+	if verifyManagementSources(sources, expected.Facts) != nil {
+		return managementFreshProof{}, time.Time{}, false, nil
+	}
+	// The current proof is cheap and monotonic. Sandwich one live gateway
+	// authorization/revision read between two PostgreSQL proofs instead of
+	// performing two remote round trips around one database snapshot. Equal
+	// proofs establish that the complete stored page was current at the live
+	// gateway read. Headers are compared too, even though balance changes do
+	// not invalidate the retained channel computation between requests.
+	readProof := func() (managementFreshProof, time.Time, error) {
+		defer managementReadSpan(ctx, "current_database_proof")()
+		return s.managementReadProof(ctx, s.control.db, owner)
+	}
+	proof, now, err := readProof()
+	if err != nil {
+		return managementFreshProof{}, time.Time{}, false, err
+	}
+	valid := func(p managementFreshProof, at time.Time) bool {
+		return p.Stamp != "" && p.Stamp == expected.Stamp &&
+			(expected.Until.IsZero() || at.Before(expected.Until))
+	}
+	if !valid(proof, now) {
+		changed := []string{}
+		for relation, value := range proof.Epochs {
+			if expected.Epochs[relation] != value && strings.HasPrefix(relation, "console_") && len(relation) < 80 {
+				changed = append(changed, relation)
+			}
+		}
+		sort.Strings(changed)
+		log.Printf("management_current_miss reason=proof relations=%s request_id=%s", strings.Join(changed, ","), consoleRequestID(ctx))
+		return managementFreshProof{}, time.Time{}, false, nil
+	}
+	if err = verifyManagementFacts(ctx, expected.Facts); err != nil {
+		if errors.Is(err, errManagementSourceRevision) {
+			return managementFreshProof{}, time.Time{}, false, nil
+		}
+		return managementFreshProof{}, time.Time{}, false, err
+	}
+	after, afterAt, err := readProof()
+	if err != nil {
+		return managementFreshProof{}, time.Time{}, false, err
+	}
+	if !valid(after, afterAt) || !proof.Until.Equal(after.Until) || proof.HeadersRevision != after.HeadersRevision || mustJSON(proof.Accounts) != mustJSON(after.Accounts) {
+		log.Printf("management_current_miss reason=concurrent_change request_id=%s", consoleRequestID(ctx))
+		return managementFreshProof{}, time.Time{}, false, nil
+	}
+	sources, err = s.readManagementSources(ctx)
+	if err != nil {
+		return managementFreshProof{}, time.Time{}, false, err
+	}
+	if err = verifyManagementSources(sources, expected.Facts); err != nil {
+		return managementFreshProof{}, time.Time{}, false, err
+	}
+	if err = ctx.Err(); err != nil {
+		return managementFreshProof{}, time.Time{}, false, err
+	}
+	return proof, now, true, nil
 }

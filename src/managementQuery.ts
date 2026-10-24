@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { controlRequest } from "./api";
+import { ApiError, controlRequest } from "./api";
 import {
   decodeManagementPage,
   managementPageMediaType,
@@ -87,10 +87,10 @@ export interface ManagementSelection {
 
 const path = (
   filters: SubFilters,
-  token?: { cursor?: string; selection?: string },
+  token?: { cursor?: string; selection?: string; refreshCursor?: boolean },
 ) => {
   const query = new URLSearchParams({ filters: JSON.stringify(filters) });
-  if (token?.cursor) query.set("cursor", token.cursor);
+  if (token?.cursor) { query.set("cursor", token.cursor); if(token.refreshCursor)query.set("refresh_cursor","1"); }
   if (token?.selection) query.set("selection", token.selection);
   return `/v1/channel-management/query?${query}`;
 };
@@ -139,7 +139,7 @@ export async function readManagementPage(
     }
   }
   const started = performance.now();
-  const response = await controlRequest<unknown>(path(filters, { cursor }), {
+  const read = (refreshCursor: boolean) => controlRequest<unknown>(path(filters, { cursor, refreshCursor }), {
     signal,
     cache: "no-cache",
     headers: {
@@ -147,6 +147,14 @@ export async function readManagementPage(
       "X-Console-Current-Validation": "1",
     },
   });
+  let response: unknown;
+  try { response = await read(!!cursor); }
+  catch (error) {
+    // A frontend can precede the API during a rolling release. Only the old
+    // parser's exact unsupported-parameter response permits legacy pagination.
+    if (!cursor || !(error instanceof ApiError) || error.status !== 400 || error.message.trim() !== "筛选参数无效") throw error;
+    response = await read(false);
+  }
   signal.throwIfAborted();
   const page = validateManagementPage(response);
   if (owner && page.owner && page.owner !== owner)

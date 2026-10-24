@@ -469,3 +469,19 @@ skeletons. This mounted-owner display state is never restored from persisted
 cache and never supplies selection/action authorization. Opening an import dialog
 does not invalidate the management page. Accepted configuration writes update
 only its data; tab focus, reconnect and timers cannot reload the page.
+
+Current paging directories share the existing four-entry/16 MiB computed-data
+budget. They retain evaluated row identities/order/facets and group metadata,
+not the full model payloads. Every requested page repeats live source permission
+and monotonic PostgreSQL proofs, then rechecks the proof in the same read-only
+repeatable-read transaction that hydrates the page's groups and all alias members.
+A changed proof falls back to current recomputation; no stale directory is served.
+
+The optional `refresh_cursor=1` mode keeps a signed cursor's page position when
+configuration/results have changed. It still validates owner, filters and signature,
+returns a new current revision and clamps a removed final page to the last page.
+It is forbidden for full selections. Legacy cursor reads remain revision-strict,
+and rebase responses use a distinct computed-page key. The frontend requests this
+mode for pagination and action reconciliation, keeps its cursor on explicit data
+refresh/retry, and only falls back to legacy pagination for the old API parser's
+exact unsupported-parameter response during rolling release.

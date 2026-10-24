@@ -336,6 +336,25 @@ func TestManagementModelSignalsProductionCardinality(t *testing.T) {
 	if page.Total != 749 || len(page.Rows) != 25 || page.Rows[0].Selected == nil || *page.Rows[0].Selected.Result.Availability.TTFT != 123 {
 		t.Fatal("incomplete hydrated page", err)
 	}
+	// A never-before-read page must use the current directory, not repeat the
+	// full 119840-model predicate/rate computation. Compare all public fields.
+	pagingFilters := managementQueryFilters{GroupStatus: "all", Model: "m002"}
+	start = time.Now()
+	paged, pagingHit, err := s.currentManagementPagingPage(ctx, "owner", pagingFilters, page.NextCursor, false)
+	pagingElapsed := time.Since(start)
+	if err != nil || !pagingHit || paged.Offset != 25 {
+		t.Fatal("scale directory missed", err)
+	}
+	start = time.Now()
+	fullSecond, err := s.readManagementQuerySnapshot(ctx, "owner", pagingFilters, page.NextCursor, false)
+	fullSecondElapsed := time.Since(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mustJSON(paged.Rows) != mustJSON(fullSecond.Page.Rows) || mustJSON(paged.Context) != mustJSON(managementContextForPage(fullSecond.View, fullSecond.Page, pagingFilters.Model)) || paged.Revision != fullSecond.Page.Revision {
+		t.Fatal("scale second-page data differs")
+	}
+	planBytes := s.managementComputed.pages[managementPagingKey("owner", pagingFilters)].Bytes
 	expanded, err := json.Marshal(page)
 	if err != nil {
 		t.Fatal(err)
@@ -442,6 +461,7 @@ func TestManagementModelSignalsProductionCardinality(t *testing.T) {
 	result := map[string]any{"models": count, "model_fixture_write_ms": modelWriteElapsed.Milliseconds(), "receipt_fixture_write_ms": receiptWriteElapsed.Milliseconds(), "shadow_projection_bytes": projectionBytes, "summary_result_bytes": bytes, "predicate_bytes": signalBytes, "old_model_and_receipt_ms": oldElapsed.Milliseconds(), "predicate_join_ms": newElapsed.Milliseconds(), "typed_predicate_join_ms": typedElapsed.Milliseconds(), "transactional_typed_join_ms": transactionalElapsed.Milliseconds(), "stored_typed_read_ms": storedElapsed.Milliseconds(), "stored_aggregate_read_and_compare_ms": aggregateElapsed.Milliseconds(), "aggregate_groups": aggregateCount, "all_predicates_equal": true}
 	result["all_models_page_http_local_ms"], result["all_models_page_json_bytes"], result["all_models_page_gzip_bytes"] = allElapsed.Milliseconds(), len(allBody), allCompressed
 	result["page_http_local_ms"], result["page_json_bytes"], result["page_gzip_bytes"] = pageElapsed.Milliseconds(), len(body), compressedBytes
+	result["second_page_directory_ms"], result["second_page_full_ms"], result["paging_directory_bytes"] = pagingElapsed.Milliseconds(), fullSecondElapsed.Milliseconds(), planBytes
 	result["page_wire_format"], result["page_expanded_json_bytes"], result["page_distinct_results"] = "management-page-v2", len(expanded), len(wire.Results)
 	result["unique_groups_wire_bytes"], result["unique_groups_expanded_bytes"], result["unique_groups_distinct_results"] = len(uniqueRaw), len(uniqueExpanded), len(uniqueWire.Results)
 	result["page_expanded_gzip_bytes"] = managementScaleGzipBytes(t, expanded)

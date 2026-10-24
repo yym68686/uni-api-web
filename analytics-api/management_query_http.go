@@ -41,9 +41,12 @@ type managementSelectionResponse struct {
 func parseManagementQuery(values url.Values) (managementQueryFilters, error) {
 	filters := managementQueryFilters{GroupStatus: "available"}
 	for key, list := range values {
-		if !slices.Contains([]string{"filters", "cursor", "selection"}, key) || len(list) != 1 || len(list[0]) > 8192 {
+		if !slices.Contains([]string{"filters", "cursor", "selection", "refresh_cursor"}, key) || len(list) != 1 || len(list[0]) > 8192 {
 			return filters, errManagementFilters
 		}
+	}
+	if values.Has("refresh_cursor") && values.Get("refresh_cursor") != "1" {
+		return filters, errManagementFilters
 	}
 	raw := values.Get("filters")
 	if raw == "" {
@@ -124,7 +127,8 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cursor, selection := values.Get("cursor"), values.Get("selection")
-	if cursor != "" && selection != "" {
+	rebase := values.Get("refresh_cursor") == "1"
+	if cursor != "" && selection != "" || rebase && (cursor == "" || selection != "") {
 		http.Error(w, "分页与完整选择不可同时读取", http.StatusBadRequest)
 		return
 	}
@@ -142,7 +146,11 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 	start := time.Now()
-	computedKey := managementComputedKey(owner, filters, cursor)
+	cacheCursor := cursor
+	if rebase {
+		cacheCursor += "\x00refresh"
+	}
+	computedKey := managementComputedKey(owner, filters, cacheCursor)
 	if selection == "" {
 		page, reused, reuseErr := s.currentComputedManagementPageMode(ctx, owner, computedKey, r.Header.Get("Accept") == managementPageV3MediaType)
 		if reuseErr != nil {
@@ -155,8 +163,18 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 			log.Printf("management_current_computation verified=true elapsed_ms=%d rows=%d total=%d failed=%t request_id=%s", time.Since(start).Milliseconds(), len(page.Rows), page.Total, err != nil, consoleRequestID(r.Context()))
 			return
 		}
+		page, reused, reuseErr = s.currentManagementPagingPage(ctx, owner, filters, cursor, rebase)
+		if reuseErr == nil && reused {
+			err := writeManagementPage(w, r, page)
+			log.Printf("management_paging_current verified=true elapsed_ms=%d rows=%d total=%d offset=%d failed=%t request_id=%s", time.Since(start).Milliseconds(), len(page.Rows), page.Total, page.Offset, err != nil, consoleRequestID(r.Context()))
+			return
+		}
+		if reuseErr != nil && !errors.Is(reuseErr, errManagementRevision) && !errors.Is(reuseErr, errManagementCursor) {
+			http.Error(w, "渠道数据实时核验失败，请重新读取", http.StatusServiceUnavailable)
+			return
+		}
 	}
-	snapshot, err := s.readManagementQuerySnapshot(ctx, owner, filters, token, selection != "")
+	snapshot, err := s.readManagementQuerySnapshotMode(ctx, owner, filters, token, selection != "", rebase)
 	readElapsed := time.Since(start)
 	view, page, rows, evidence := snapshot.View, snapshot.Page, snapshot.Rows, snapshot.Evidence
 	if err == nil {
@@ -184,6 +202,7 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 		err = writeManagementPage(w, r, response)
 		if err == nil {
 			s.rememberManagementPage(computedKey, snapshot.Proof, response)
+			s.rememberManagementPagingPlan(owner, filters, snapshot)
 		}
 	}
 	if err != nil && class == "none" {

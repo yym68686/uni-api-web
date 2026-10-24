@@ -185,6 +185,7 @@ func TestManagementRevisionIncludesQueueAndQualityReceiptsButNotReceiptPollClock
 func TestManagementHydrationIncludesEveryAliasMemberOutsidePreferredGroup(t *testing.T) {
 	s := managementHydrationFixture(t)
 	ctx := context.Background()
+	prepareManagementRevisionsForTest(t, s.control.db)
 	if _, err := s.control.db.Exec(`UPDATE console_sub_models SET result=jsonb_set(result,'{availability,ttft_ms}','987') WHERE group_id=61 AND model='gpt-5.5'`); err != nil {
 		t.Fatal(err)
 	}
@@ -229,5 +230,19 @@ func TestManagementHydrationIncludesEveryAliasMemberOutsidePreferredGroup(t *tes
 	}
 	if page.Revision != expected.Revision || !reflect.DeepEqual(page.Rows, expected.Rows) || page.Rows[0].Selected == nil || *page.Rows[0].Selected.Result.Availability.TTFT != 987 {
 		t.Fatal("alias hydration lost non-preferred member's latest evidence")
+	}
+	proof, _, err := s.managementReadProof(ctx, tx, "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := buildManagementQueryRows(compact.Input, f.Model, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := managementQuerySnapshot{View: compact, Page: page, Rows: rows, Evidence: managementQueryEvidence(compact.Input, rows, f.Model, compact.Prices), Proof: &proof}
+	s.rememberManagementPagingPlan("owner", f, snapshot)
+	got, ok, err := s.currentManagementPagingPage(ctx, "owner", f, "", false)
+	if err != nil || !ok || mustJSON(got.Rows) != mustJSON(expected.Rows) || mustJSON(got.Context) != mustJSON(managementContextForPage(full, expected, f.Model)) {
+		t.Fatal("directory lost cross-group alias fields", err)
 	}
 }

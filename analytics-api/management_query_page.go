@@ -109,6 +109,12 @@ func buildManagementQueryPage(in managementQueryInput, filters managementQueryFi
 }
 
 func buildManagementQueryPageFromRows(in managementQueryInput, rows []managementQueryRow, filters managementQueryFilters, evidence managementFilterEvidence, owner string, key []byte, cursor string, readAt time.Time) (managementQueryPage, error) {
+	return buildManagementQueryPageFromRowsMode(in, rows, filters, evidence, owner, key, cursor, readAt, false)
+}
+
+// Rebase is an explicit read of the same page position in a new result. It is
+// never accepted for full selections or mutation authorization.
+func buildManagementQueryPageFromRowsMode(in managementQueryInput, rows []managementQueryRow, filters managementQueryFilters, evidence managementFilterEvidence, owner string, key []byte, cursor string, readAt time.Time, rebase bool) (managementQueryPage, error) {
 	page := managementQueryPage{Format: "management-page-v1", PageSize: managementPageSize, ReadAtMS: readAt.UnixMilli(), Rows: []managementQueryRow{}}
 	filtered := filterManagementQueryRows(rows, filters, evidence)
 	page.Rates, page.Platforms = filtered.Rates, filtered.Platforms
@@ -174,12 +180,15 @@ func buildManagementQueryPageFromRows(in managementQueryInput, rows []management
 		if decoded.Filter != filterHash {
 			return page, errManagementCursor
 		}
-		if decoded.Revision != page.Revision {
+		if !rebase && decoded.Revision != page.Revision {
 			return page, errManagementRevision
 		}
 		page.Offset = decoded.Offset
 		if page.Offset >= page.Total && page.Offset != 0 {
-			return page, errManagementCursor
+			if !rebase {
+				return page, errManagementCursor
+			}
+			page.Offset = max(0, ((page.Total-1)/managementPageSize)*managementPageSize)
 		}
 	}
 	end := min(page.Total, page.Offset+managementPageSize)

@@ -769,7 +769,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   const prices={data:displayedPage?{data:displayedPage.context.prices}:undefined};
   const [form, setForm] = useState<{ account: SubAccount | null } | null>(null);
   const setPage=(_page:number)=>setCursorState({filter:filterKey,cursor:""});
-  const refreshPage=()=>{void progressQuery.refetch();if(cursor)setPage(0);else void pageQuery.refetch();};
+  const refreshPage=()=>{void progressQuery.refetch();void pageQuery.refetch();};
   const [modelSelectionRevision, setModelSelectionRevision] = useState(0);
   const {
     search,

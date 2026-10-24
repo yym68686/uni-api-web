@@ -89,6 +89,10 @@ type managementQuerySnapshot struct {
 }
 
 func (s *Service) readManagementQuerySnapshot(ctx context.Context, owner string, filters managementQueryFilters, token string, selection bool) (managementQuerySnapshot, error) {
+	return s.readManagementQuerySnapshotMode(ctx, owner, filters, token, selection, false)
+}
+
+func (s *Service) readManagementQuerySnapshotMode(ctx context.Context, owner string, filters managementQueryFilters, token string, selection, rebase bool) (managementQuerySnapshot, error) {
 	ctx = managementTraceContext(ctx)
 	out := managementQuerySnapshot{}
 	view, err := s.withManagementSnapshot(ctx, func(tx *sql.Tx, facts []managementGatewayFacts) (managementDatabaseView, error) {
@@ -121,7 +125,7 @@ func (s *Service) readManagementQuerySnapshot(ctx context.Context, owner string,
 		out.Evidence = managementQueryEvidence(view.Input, out.Rows, filters.Model, view.Prices)
 		endEvidence()
 		endPage := managementReadSpan(ctx, "filter_page")
-		out.Page, err = buildManagementQueryPageFromRows(view.Input, out.Rows, filters, out.Evidence, owner, s.control.key, token, view.ReadAt)
+		out.Page, err = buildManagementQueryPageFromRowsMode(view.Input, out.Rows, filters, out.Evidence, owner, s.control.key, token, view.ReadAt, rebase && !selection)
 		endPage()
 		if err == nil && !selection {
 			endHydrate := managementReadSpan(ctx, "hydrate_page")

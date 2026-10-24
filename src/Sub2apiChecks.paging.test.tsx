@@ -137,7 +137,8 @@ it.each([true,false])("starts live sync progress without clearing rows, changing
  expect(screen.getByRole("row",{name:"查看 Owned site Channel 26 渠道详情"})).toBe(row);
  expect(button).toBeDisabled();expect(pageReads).toBe(2);expect(posts).toBe(1);
  await user.click(screen.getByRole("button",{name:"刷新渠道管理"}));
- await screen.findByText("Channel 1",{selector:"strong"});
+ await waitFor(()=>expect(pageReads).toBe(3));
+ await screen.findByText("Channel 26",{selector:"strong"});
  expect(pageReads).toBe(3);expect(posts).toBe(1);
 });
 
@@ -234,7 +235,7 @@ it("cancels an obsolete full-selection read without submitting after the filter 
   expect(writes).toEqual([]);
 });
 
-it("restarts from the first page after a stale cursor without reporting an empty result", async () => {
+it("retries a changed cursor at the requested page instead of resetting to page one", async () => {
   let failed = false;
   const cursors: string[] = [];
   vi.stubGlobal(
@@ -245,14 +246,14 @@ it("restarts from the first page after a stale cursor without reporting an empty
       if (url.pathname.endsWith("/channel-management/query")) {
         const cursor = url.searchParams.get("cursor") || "";
         cursors.push(cursor);
-        if (cursor) {
+        if (cursor && !failed) {
           failed = true;
           return Response.json(
             { error: "渠道已变化，请刷新" },
             { status: 409 },
           );
         }
-        return Response.json(page());
+        return Response.json(page(Number(cursor || 0)));
       }
       return Response.json({ data: [] });
     }),
@@ -267,8 +268,8 @@ it("restarts from the first page after a stale cursor without reporting an empty
   await user.click(
     within(screen.getByRole("alert")).getByRole("button", { name: "重试" }),
   );
-  await screen.findByText("Channel 1", { selector: "strong" });
-  expect(cursors).toEqual(["", "25", ""]);
+  await screen.findByText("Channel 26", { selector: "strong" });
+  expect(cursors).toEqual(["", "25", "25"]);
 });
 
 it("allows sync-only with no selected models and never falls back to detection on an old backend",async()=>{
@@ -336,7 +337,7 @@ it.each(["filter","next-page"])("updates only channel results for %s, keeping ac
 });
 
 it.each([
- ["POST","/v1/sub2api/import"],
+ ["POST","/v1/sub2api/channels"],
  ["POST","/v1/channel-management"],
  ["PUT","/v1/channel-management/fixture"],
  ["DELETE","/v1/channel-management/fixture"],
@@ -350,26 +351,70 @@ it.each([
   if(init?.method)return Response.json({ok:true});
   if(url.pathname.endsWith("/accounts/progress"))return idleProgress();
   if(url.pathname.endsWith("/channel-management/query")){
-   if(++reads>1)return new Promise<Response>(resolve=>{finish=resolve;});
-   return Response.json(page());
+   if(++reads>2){expect(url.searchParams.get("cursor")).toBe("25");expect(url.searchParams.get("refresh_cursor")).toBe("1");return new Promise<Response>(resolve=>{finish=resolve;});}
+   return Response.json(page(Number(url.searchParams.get("cursor")||0)));
   }
   return Response.json({data:[]});
  }));
  mount(`write-stable-${method}-${path}`);
  await screen.findByText("Channel 1",{selector:"strong"});
+ await userEvent.setup().click(screen.getByRole("button",{name:"下一页"}));
+ await screen.findByText("Channel 26",{selector:"strong"});
  const table=screen.getByRole("table"),accountRow=screen.getByRole("listitem",{name:"Owned site"});
- const row=screen.getByRole("row",{name:"查看 Owned site Channel 1 渠道详情"});
+ const row=screen.getByRole("row",{name:"查看 Owned site Channel 26 渠道详情"});
  await act(async()=>{await controlRequest(path,{method});});
- await waitFor(()=>expect(reads).toBe(2));
+ await waitFor(()=>expect(reads).toBe(3));
  expect(screen.getByRole("listitem",{name:"Owned site"})).toBe(accountRow);
  expect(document.querySelector(".sub-results-table table")).toBe(table);
  expect(table.parentElement).toHaveAttribute("inert");
  expect(row).toBeVisible();
- expect(within(row).getByRole("button",{name:"检测 Owned site Channel 1",hidden:true})).toBeDisabled();
+ expect(within(row).getByRole("button",{name:"检测 Owned site Channel 26",hidden:true})).toBeDisabled();
  expect(screen.queryByRole("status",{name:"加载渠道检测"})).not.toBeInTheDocument();
  expect(screen.getByText("正在更新渠道结果，暂显示更新前内容…")).toBeVisible();
- await act(async()=>{finish(Response.json({...page(),revision:"updated",read_at_ms:2}));});
+ await act(async()=>{finish(Response.json({...page(25),revision:"updated",read_at_ms:2}));});
  await waitFor(()=>expect(table.parentElement).not.toHaveAttribute("inert"));
  expect(screen.getByRole("table")).toBe(table);
- expect(screen.getByRole("row",{name:"查看 Owned site Channel 1 渠道详情"})).toBe(row);
+ expect(screen.getByRole("row",{name:"查看 Owned site Channel 26 渠道详情"})).toBe(row);
+});
+
+it("submits the import form on page two and reconciles that same page after the write",async()=>{
+ const probe={status:"success",text:"fixture",ttft_ms:1,duration_ms:2,protocol:"responses" as const};
+ const result={model:"gpt-5.5",checked_at:1,availability:probe,quality:probe,verdict:"not_applicable"};
+ const cursors:string[]=[];let posts=0,finish!:(response:Response)=>void;
+ const readyPage=(offset:number)=>{const p=page(offset);return {...p,rows:p.rows.map(r=>({...r,target:{...r.target,models:[{model:"gpt-5.5",state:"done",message:"",result}]},checks:[{model:"gpt-5.5",state:"done",message:"",result}]}))};};
+ vi.stubGlobal("fetch",vi.fn(async(input:string,init?:RequestInit)=>{
+  const url=new URL(input),path=url.pathname;
+  if(path.endsWith("/sub2api/channels")&&init?.method==="POST"){posts++;return Response.json({message:"已添加"});}
+  if(path.endsWith("/accounts/progress"))return idleProgress();
+  if(path.endsWith("/channel-management/query")){
+   const cursor=url.searchParams.get("cursor")||"";cursors.push(cursor);
+   if(posts){expect(cursor).toBe("25");expect(url.searchParams.get("refresh_cursor")).toBe("1");return new Promise<Response>(resolve=>{finish=resolve;});}
+   return Response.json(readyPage(Number(cursor||0)));
+  }
+  if(path.endsWith("/sources"))return Response.json({data:[{id:"fixture",name:"Fixture"}]});
+  if(path.endsWith("/import-status"))return Response.json({state:"idle",job_kind:"",can_import:true});
+  if(path.endsWith("/access"))return Response.json({available:true,status:"ok"});
+  if(path.endsWith("/channel-options"))return Response.json({supported:true,revision:"r1",keys:[{key_id:"fixture-key",position:1,prefix:"fixture"}],channels:[]});
+  return Response.json({data:[],labels:{},unavailable_sources:[]});
+ }));
+ mount("import-second-page");const user=userEvent.setup();
+ await screen.findByText("Channel 1",{selector:"strong"});
+ await user.click(screen.getByRole("button",{name:"下一页"}));
+ const row=await screen.findByRole("row",{name:"查看 Owned site Channel 26 渠道详情"});
+ const table=screen.getByRole("table");
+ await user.click(within(row).getByRole("button",{name:"添加到渠道"}));
+ const d=within(screen.getByRole("dialog"));
+ expect(cursors).toEqual(["","25"]);
+ await user.selectOptions(d.getByLabelText("添加到 uni-api 来源"),"fixture");
+ await waitFor(()=>expect(d.getByLabelText("添加到 API key")).toBeEnabled());
+ await user.selectOptions(d.getByLabelText("添加到 API key"),"fixture-key");
+ await waitFor(()=>expect(d.getByRole("button",{name:"添加到渠道"})).toBeEnabled());
+ await user.click(d.getByRole("button",{name:"添加到渠道"}));
+ await waitFor(()=>expect(cursors).toEqual(["","25","25"]));
+ expect(posts).toBe(1);expect(document.querySelector(".sub-results-table table")).toBe(table);
+ expect(document.querySelector(".sub-pagination")).toHaveTextContent("2 / 3");
+ await act(async()=>finish(Response.json({...readyPage(25),revision:"after-import",read_at_ms:3})));
+ await waitFor(()=>expect(table.parentElement).not.toHaveAttribute("inert"));
+ expect(screen.getByRole("row",{name:"查看 Owned site Channel 26 渠道详情"})).toBe(row);
+ expect(document.querySelector(".sub-pagination")).toHaveTextContent("2 / 3");
 });

@@ -166,6 +166,24 @@ it("reads one current page and separately verifies the complete 61-row selection
   expect(calls).toHaveLength(2);
 });
 
+it("keeps signed page position during mixed releases and only falls back for the old parameter parser",async()=>{
+ const calls:URL[]=[];
+ vi.stubGlobal("fetch",vi.fn(async(input:string)=>{
+  const url=new URL(input);calls.push(url);
+  if(url.searchParams.has("refresh_cursor"))return new Response("筛选参数无效\n",{status:400});
+  return Response.json(page());
+ }));
+ await readManagementPage(subFilterDefaults,"signed-position",new AbortController().signal);
+ expect(calls).toHaveLength(2);
+ expect(calls.map(u=>u.searchParams.get("cursor"))).toEqual(["signed-position","signed-position"]);
+ expect(calls.map(u=>u.searchParams.get("refresh_cursor"))).toEqual(["1",null]);
+ for(const status of [400,401,403,409,503]) {
+  const fetcher=vi.fn(async()=>new Response("permission/revision/read failed",{status}));vi.stubGlobal("fetch",fetcher);
+  await expect(readManagementPage(subFilterDefaults,"signed-position",new AbortController().signal)).rejects.toThrow();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+ }
+});
+
 it("rejects a truncated selection, a revision mismatch and duplicate rows", async () => {
   for (const mutate of [
     (s: ManagementSelection) => {
