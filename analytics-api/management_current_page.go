@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,6 +16,7 @@ import (
 )
 
 type managementFreshProof struct {
+	Epochs          map[string]string
 	Stamp           string
 	HeadersRevision int64
 	Until           time.Time
@@ -60,6 +64,21 @@ func (s *Service) managementReadProof(ctx context.Context, db controlQueryDB, ow
 	if err = db.QueryRowContext(ctx, query).Scan(&epoch, &now, &until, &proof.HeadersRevision, &price); err != nil {
 		return proof, now, err
 	}
+	var versions [][]json.RawMessage
+	if err = json.Unmarshal(epoch, &versions); err != nil {
+		return proof, now, err
+	}
+	proof.Epochs = map[string]string{}
+	for _, v := range versions {
+		if len(v) != 2 {
+			return proof, now, errors.New("invalid management epoch")
+		}
+		var relation string
+		if json.Unmarshal(v[0], &relation) != nil {
+			return proof, now, errors.New("invalid management relation")
+		}
+		proof.Epochs[relation] = string(v[1])
+	}
 	proof.Stamp = tokenHash(mustJSON([]any{revision, string(epoch), string(price)}))
 	if until.Valid {
 		proof.Until = until.Time
@@ -77,6 +96,7 @@ func (s *Service) rememberManagementPage(key string, proof *managementFreshProof
 	}
 	raw, err := json.Marshal(page)
 	if err != nil || len(raw) > 8<<20 {
+		log.Printf("management_computation_store skipped=true reason=page_size bytes=%d", len(raw))
 		return
 	}
 	// Decouple stored values from the builder's slice/pointer graph. Never
@@ -95,6 +115,7 @@ func (s *Service) rememberManagementPage(key string, proof *managementFreshProof
 	}
 	storedBytes := len(raw) + len(encodedColumns)
 	if storedBytes > 16<<20 {
+		log.Printf("management_computation_store skipped=true reason=wire_size bytes=%d", storedBytes)
 		return
 	}
 	immutable.preparedColumns = &columns
@@ -150,6 +171,7 @@ func (s *Service) currentComputedManagementPage(ctx context.Context, owner, key 
 	entry, exists := c.pages[key]
 	c.mu.Unlock()
 	if !exists {
+		log.Printf("management_current_miss reason=absent request_id=%s", consoleRequestID(ctx))
 		return managementPageResponse{}, false, nil
 	}
 	sources, err := s.readManagementSources(ctx)
@@ -178,6 +200,14 @@ func (s *Service) currentComputedManagementPage(ctx context.Context, owner, key 
 			(entry.Proof.Until.IsZero() || at.Before(entry.Proof.Until))
 	}
 	if !valid(proof, now) {
+		changed := []string{}
+		for relation, value := range proof.Epochs {
+			if entry.Proof.Epochs[relation] != value && strings.HasPrefix(relation, "console_") && len(relation) < 80 {
+				changed = append(changed, relation)
+			}
+		}
+		sort.Strings(changed)
+		log.Printf("management_current_miss reason=proof relations=%s request_id=%s", strings.Join(changed, ","), consoleRequestID(ctx))
 		return managementPageResponse{}, false, nil
 	}
 	if err = verifyManagementFacts(ctx, entry.Proof.Facts); err != nil {
@@ -191,6 +221,7 @@ func (s *Service) currentComputedManagementPage(ctx context.Context, owner, key 
 		return managementPageResponse{}, false, err
 	}
 	if !valid(after, afterAt) || !proof.Until.Equal(after.Until) || proof.HeadersRevision != after.HeadersRevision || mustJSON(proof.Accounts) != mustJSON(after.Accounts) {
+		log.Printf("management_current_miss reason=concurrent_change request_id=%s", consoleRequestID(ctx))
 		return managementPageResponse{}, false, nil
 	}
 	sources, err = s.readManagementSources(ctx)
