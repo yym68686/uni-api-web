@@ -65,6 +65,7 @@ func (s *Service) rememberManagementPagingPlan(owner string, filters managementQ
 }
 
 func (s *Service) currentManagementPagingPage(ctx context.Context, owner string, filters managementQueryFilters, cursor string, rebase bool) (managementPageResponse, bool, error) {
+	ctx = managementTraceContext(ctx)
 	c := &s.managementComputed
 	c.mu.Lock()
 	entry, exists := c.pages[managementPagingKey(owner, filters)]
@@ -79,9 +80,12 @@ func (s *Service) currentManagementPagingPage(ctx context.Context, owner string,
 		return managementPageResponse{}, false, err
 	}
 	var plan managementPagingPlan
+	decodeEnd := managementReadSpan(ctx, "paging_directory_decode")
 	if err = json.Unmarshal(entry.Plan, &plan); err != nil {
+		decodeEnd()
 		return managementPageResponse{}, false, err
 	}
+	decodeEnd()
 	if len(plan.Rows) != plan.Page.Total {
 		return managementPageResponse{}, false, errManagementRevision
 	}
