@@ -223,14 +223,13 @@ export function useManagementPage(
     staleTime: 0,
     gcTime: 0,
     refetchOnMount: "always",
-    refetchOnWindowFocus: true,
+    // Opening, explicit refresh, changed filters and accepted writes are
+    // intentional reads. Returning to a tab or an interval must not clear
+    // the complete page or restart a long read without user action.
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     structuralSharing: false,
-    refetchInterval: (q) =>
-      q.state.data?.accounts.some(
-        (a) => a.state === "queued" || a.state === "running",
-      )
-        ? 5000
-        : 60000,
+    refetchInterval: false,
   });
   useEffect(() => {
     const page = query.data;

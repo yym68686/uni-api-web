@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, focusManager, onlineManager } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import type { ManagementRow } from "./channelManagement";
 import { subFilterDefaults } from "./sub2apiPreferences";
@@ -274,4 +274,24 @@ it.each(["owner", "other", undefined])("only consumes a parallel initial page wi
 it("rejects a response whose session owner changed during a normal read", async()=>{
   vi.stubGlobal("fetch",vi.fn(async()=>Response.json({...page(),owner:"other"})));
   await expect(readManagementPage(subFilterDefaults,"",new AbortController().signal,"owner")).rejects.toThrow("登录账号已变化");
+});
+
+
+it.each(["idle","running","queued"])("does not clear or reread management on focus, reconnect or timers (%s)", async state=>{
+  const live={...page(),accounts:[{id:"a",name:"Fixture",base:"https://fixture.test",email:"fixture@test",message:"",synced_at:0,targets:[],state}]} as ManagementPage;
+  const fetcher=vi.fn(async()=>Response.json(live));vi.stubGlobal("fetch",fetcher);
+  const client=new QueryClient({defaultOptions:{queries:{retry:false}}});
+  const wrapper=({children}:{children:ReactNode})=><QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  const hook=renderHook(()=>useManagementPage("owner",subFilterDefaults),{wrapper});
+  await waitFor(()=>expect(hook.result.current.data?.rows).toHaveLength(25));
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  vi.useFakeTimers();
+  try {
+    await act(async()=>{focusManager.setFocused(false);focusManager.setFocused(true);onlineManager.setOnline(false);onlineManager.setOnline(true);await vi.advanceTimersByTimeAsync(120_000);});
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(hook.result.current.data?.rows).toHaveLength(25);
+    await act(async()=>{await hook.result.current.refetch();});
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(hook.result.current.data?.rows).toHaveLength(25);
+  } finally {hook.unmount();client.clear();vi.useRealTimers();focusManager.setFocused(undefined);onlineManager.setOnline(true);}
 });
