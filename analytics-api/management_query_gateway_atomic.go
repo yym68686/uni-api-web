@@ -19,7 +19,11 @@ func managementGatewayDocuments(ctx context.Context, source controlSource, path 
 	group.Go(func() error { document, code, adminErr = subGateway(ctx, admin, "GET", path, nil); return nil })
 	if source.ConfigKey != "" && source.ConfigKey != source.Key {
 		group.Go(func() error {
-			controls, _, observationErr = subGateway(ctx, source, "GET", "/v1/channel-controls", nil)
+			if path == "/v1/channel-settings/management-revision" {
+				controls, observationErr = readManagementObservationRevision(ctx, source)
+			} else {
+				controls, _, observationErr = subGateway(ctx, source, "GET", "/v1/channel-controls", nil)
+			}
 			return nil
 		})
 	}
@@ -106,4 +110,22 @@ func readManagementGatewayAtomic(ctx context.Context, source controlSource) (man
 		}
 	}
 	return out, true, nil
+}
+
+// New gateways expose an observation-authorized scalar revision. Only 404
+// falls back to the older full control document; permission/transport/format
+// failures cannot be hidden by negotiating a different route.
+func readManagementObservationRevision(ctx context.Context, source controlSource) (map[string]any, error) {
+	raw, code, err := subGateway(ctx, source, "GET", "/v1/channel-controls/revision", nil)
+	if code == 404 {
+		old, _, oldErr := subGateway(ctx, source, "GET", "/v1/channel-controls", nil)
+		return old, oldErr
+	}
+	if err != nil {
+		return nil, err
+	}
+	if raw["format"] != "management-revision-v1" {
+		return nil, errManagementSourceContract
+	}
+	return raw, nil
 }

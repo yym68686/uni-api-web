@@ -24,7 +24,7 @@ func TestManagementGatewayCredentialChecksOverlapWithoutWeakeningFence(t *testin
 					}
 					close(adminStarted)
 					other = observationStarted
-				} else if r.URL.Path == "/v1/channel-controls" {
+				} else if r.URL.Path == "/v1/channel-controls/revision" {
 					if r.Header.Get("Authorization") != "Bearer fixture-observer" {
 						t.Error("observation credential changed")
 					}
@@ -40,12 +40,12 @@ func TestManagementGatewayCredentialChecksOverlapWithoutWeakeningFence(t *testin
 				case <-r.Context().Done():
 					return
 				}
-				if mode == "unauthorized" && r.URL.Path == "/v1/channel-controls" {
+				if mode == "unauthorized" && r.URL.Path == "/v1/channel-controls/revision" {
 					http.Error(w, "denied", 403)
 					return
 				}
 				revision := "r1"
-				if mode == "changed" && r.URL.Path == "/v1/channel-controls" {
+				if mode == "changed" && r.URL.Path == "/v1/channel-controls/revision" {
 					revision = "r2"
 				}
 				fmt.Fprintf(w, `{"format":"management-revision-v1","revision":%q,"config_revision":"c1"}`, revision)
@@ -184,6 +184,10 @@ func TestManagementGatewayReadsAreBoundedVersionFencedAndReadOnly(t *testing.T) 
 
 func TestManagementGatewayAtomicSnapshotIsAcceptedAsOneRevision(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/channel-controls/revision" {
+			http.NotFound(w, r)
+			return
+		}
 		if r.URL.Path == "/v1/channel-controls" {
 			if r.Header.Get("Authorization") != "Bearer catalog-secret" {
 				t.Error("observation credential was not verified")
@@ -271,6 +275,8 @@ func TestManagementGatewayAtomicRejectsIncompleteOrUnauthorizedReads(t *testing.
 						raw["catalog"] = []managementModel{{Provider: "other", Model: "m"}}
 					}
 					writeJSON(w, 200, raw)
+				case "/v1/channel-controls/revision":
+					http.NotFound(w, r) // This fixture intentionally represents an old gateway.
 				case "/v1/channel-controls":
 					n := observerReads.Add(1)
 					if mode == "revoked-observer" || mode == "revoked-at-fence" && n > 1 {
@@ -303,6 +309,68 @@ func TestManagementGatewayAtomicRejectsIncompleteOrUnauthorizedReads(t *testing.
 			}
 			if strings.Contains(err.Error(), "private") {
 				t.Fatal("private diagnostics escaped")
+			}
+		})
+	}
+}
+
+func TestManagementObservationRevisionNegotiatesOnlyAbsentEndpoint(t *testing.T) {
+	for _, mode := range []string{"current", "legacy", "forbidden", "unavailable", "malformed", "changed"} {
+		t.Run(mode, func(t *testing.T) {
+			var full atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("Authorization") != "Bearer observer" {
+					t.Error("wrong observation credential")
+				}
+				if r.URL.Path == "/v1/channel-controls" {
+					full.Add(1)
+					writeJSON(w, 200, map[string]any{"revision": "r1", "config_revision": "c1"})
+					return
+				}
+				switch mode {
+				case "legacy":
+					http.NotFound(w, r)
+					return
+				case "forbidden":
+					http.Error(w, "denied", 403)
+					return
+				case "unavailable":
+					http.Error(w, "unavailable", 503)
+					return
+				}
+				format, rev := "management-revision-v1", "r1"
+				if mode == "malformed" {
+					format = "wrong"
+				}
+				if mode == "changed" {
+					rev = "r2"
+				}
+				writeJSON(w, 200, map[string]any{"format": format, "revision": rev, "config_revision": "c1"})
+			}))
+			defer server.Close()
+			raw, err := readManagementObservationRevision(context.Background(), controlSource{sourceView: sourceView{Base: server.URL}, Key: "observer"})
+			if mode == "forbidden" || mode == "unavailable" || mode == "malformed" {
+				if err == nil {
+					t.Fatal("invalid revision accepted")
+				}
+			} else {
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := "r1"
+				if mode == "changed" {
+					want = "r2"
+				}
+				if raw["revision"] != want {
+					t.Fatal("revision lost")
+				}
+			}
+			wantCalls := int32(0)
+			if mode == "legacy" {
+				wantCalls = 1
+			}
+			if full.Load() != wantCalls {
+				t.Fatal("unexpected fallback", full.Load())
 			}
 		})
 	}

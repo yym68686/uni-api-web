@@ -385,3 +385,9 @@ No private response is stored in browser persistence. The current page's include
 account balances seed the independent balance queries so mounting 48 accounts
 need not immediately repeat 48 already-satisfied balance reads; periodic refresh
 and missing-balance behavior remain active.
+
+Current gateway verification negotiates GET /v1/channel-controls/revision for
+observation credentials. It returns only the live configuration/runtime versions
+under the same catalog authorization; admin verification remains independent.
+Only404 uses the old full control document. Permission, format, conflict and
+transport failures cannot downgrade or authorize a retained result.
