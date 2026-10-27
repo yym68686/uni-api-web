@@ -5,6 +5,21 @@ import { PriceSettings } from "./PriceSettings";
 import { MODEL_PRICE_CATALOG } from "./modelPrices";
 import type { ModelPrice } from "./types";
 
+it("shows GPT 6.1 Terra standard prices and explains optional pricing adjustments",async()=>{
+ render(<PriceSettings prices={[]} loading={false} connection={{base:"",key:"",session:"test",account:true}} onSaved={vi.fn()}/>);
+ const model="gpt-6.1-terra",user=userEvent.setup();
+ await user.click(screen.getByRole("textbox",{name:"搜索模型价格"}));await user.paste(model);
+ expect(screen.getByLabelText(model+" 输入价格")).toHaveValue(1);
+ expect(screen.getByLabelText(model+" 输出价格")).toHaveValue(5);
+ expect(screen.getByLabelText(model+" 缓存读取价格")).toHaveValue(.05);
+ expect(screen.getByLabelText(model+" 缓存写入 · 统一单价价格")).toHaveValue(1.25);
+ expect(screen.getByRole("checkbox",{name:model+" 超过272k加价"})).not.toBeChecked();
+ await user.click(screen.getByRole("button",{name:"查看 "+model+" 价格说明"}));
+ const dialog=within(screen.getByRole("dialog",{name:model}));
+ expect(dialog.getByRole("link",{name:"查看官方价格来源"})).toHaveAttribute("href","https://developers.openai.com/api/docs/pricing");
+ expect(screen.getByRole("dialog",{name:model})).toHaveTextContent("12 小时为 $2.50");
+});
+
 it("shows Kimi K3.1 Pro as editable unconfirmed pricing without copying K3 prices",async()=>{
  render(<PriceSettings prices={[]} loading={false} connection={{base:"",key:"",session:"test",account:true}} onSaved={vi.fn()}/>);
  const model="kimi-k3.1-pro",user=userEvent.setup();

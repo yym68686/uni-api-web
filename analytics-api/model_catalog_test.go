@@ -8,6 +8,39 @@ import (
 	"time"
 )
 
+func TestGPT61TerraCatalogAndOperatorPrices(t *testing.T) {
+	const model = "gpt-6.1-terra"
+	found := 0
+	for _, p := range withCatalogPrices(nil) {
+		if p.Model != model {
+			continue
+		}
+		found++
+		if p.Input != 1 || p.Output != 5 || p.CacheRead != .05 || p.CacheWrite != 1.25 || p.CacheWrite1h != 1.25 || !p.Verified {
+			t.Fatalf("wrong Terra reference: %+v", p)
+		}
+		if p.chargesCacheWrite() || p.chargesLongContextPremium() || p.salePercent() != 2.5 {
+			t.Fatal("GPT operator defaults changed", p)
+		}
+	}
+	if found != 1 || !subModelAllowed(model) || canonicalPriceModel(model+"-high") != model {
+		t.Fatal("missing or incorrectly canonicalized Terra", found)
+	}
+	for _, p := range withCatalogPrices([]Price{{Model: model, Input: 7, Source: "manual", Verified: false}, {Model: "gpt-5.6-terra", Input: 9, Source: "manual", Verified: true}}) {
+		if p.Model == model && (p.Input != 7 || p.Verified || p.Source != "manual") {
+			t.Fatal("Terra operator price replaced", p)
+		}
+		if p.Model == "gpt-5.6-terra" && p.Input != 9 {
+			t.Fatal("previous Terra price replaced", p)
+		}
+	}
+	for _, p := range withCatalogPrices([]Price{{Model: model, Source: "fact-discovered"}}) {
+		if p.Model == model && (p.Input != 1 || !p.Verified) {
+			t.Fatal("unconfirmed discovery not hydrated", p)
+		}
+	}
+}
+
 func TestKimi31ProCatalogRemainsIndependentAndUnpricedUntilConfirmed(t *testing.T) {
 	const model = "kimi-k3.1-pro"
 	found := 0

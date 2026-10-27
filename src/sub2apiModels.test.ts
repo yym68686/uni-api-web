@@ -1,6 +1,15 @@
 import {expect,it,vi,afterEach} from 'vitest';
 import {loadSubModels,saveSubModels,SUB_MODELS,subModelProtocolLabel} from './sub2apiModels';
 afterEach(()=>vi.unstubAllGlobals());
+it('offers GPT 6.1 Terra with Responses without resetting previous exclusions',()=>{
+ const model='gpt-6.1-terra',user='terra-61-catalog-upgrade';
+ const previous=SUB_MODELS.filter(m=>m!==model);
+ saveSubModels(user,previous.filter(m=>m!=='gpt-5.6-terra'),previous);
+ expect(SUB_MODELS.filter(m=>m===model)).toHaveLength(1);
+ expect(loadSubModels(user)).toContain(model);
+ expect(loadSubModels(user)).not.toContain('gpt-5.6-terra');
+ expect(subModelProtocolLabel(model)).toBe('Responses');
+});
 it('offers Kimi K3.1 Pro independently while preserving previous model exclusions',()=>{
  const model='kimi-k3.1-pro',user='kimi-31-catalog-upgrade';
  const previous=SUB_MODELS.filter(m=>m!==model);

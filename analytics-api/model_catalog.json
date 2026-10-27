@@ -24,6 +24,18 @@
     "note": "价格待确认，暂不用于费用估算；请填写并确认实际单价。"
   },
   {
+    "model": "gpt-6.1-terra",
+    "input": 1,
+    "output": 5,
+    "cache_read": 0.05,
+    "cache_write": 1.25,
+    "cache_write_1h": 1.25,
+    "source": "https://developers.openai.com/api/docs/pricing",
+    "verified": true,
+    "cache_write_kind": "flat",
+    "note": "Standard ≤272K 输入基准；官方 >272K 时输入及缓存为 2 倍，输出为 1.5 倍，可开启本行的长上下文加价。缓存写入参考 30 分钟价格 $1.25；12 小时为 $2.50，当前不自动区分该时长。Batch/Flex、Fast 与区域加价不自动套用。工具调用使用 Responses 协议。"
+  },
+  {
     "model": "gpt-6-sol",
     "input": 2,
     "output": 10,

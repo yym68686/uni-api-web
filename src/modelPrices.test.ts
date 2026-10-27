@@ -7,6 +7,18 @@ import {
 import { SUB_MODELS } from "./sub2apiModels";
 import { referencePrice } from "./sub2apiPriceCheck";
 
+it("uses GPT 6.1 Terra's official reference while preserving operator overrides", () => {
+ const model="gpt-6.1-terra";
+ const reference=MODEL_PRICE_CATALOG.find(p=>p.model===model)!;
+ expect(reference).toMatchObject({input:1,output:5,cache_read:.05,cache_write:1.25,cache_write_1h:1.25,verified:true});
+ expect(canonicalPriceModel(model+"-high")).toBe(model);
+ const previous={...reference,model:"gpt-5.6-terra",input:9,source:"manual"};
+ const custom={...reference,input:3,verified:false,source:"manual"};
+ expect(displayedModelPrices([previous,custom]).find(p=>p.model===model)).toEqual(custom);
+ expect(referencePrice(model,[previous,custom])).toBeUndefined();
+ expect(referencePrice(model+"-high",[previous,reference])).toEqual(reference);
+});
+
 it("keeps Kimi K3.1 Pro unconfirmed and independent from K3 or saved operator prices",()=>{
  const model="kimi-k3.1-pro";
  const p=MODEL_PRICE_CATALOG.find(p=>p.model===model)!;

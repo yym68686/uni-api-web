@@ -113,6 +113,10 @@ function PriceRow({
       (field !== "cache_write_1h" &&
         (reference.cache_write_kind === "flat" || field !== "cache_write")),
   );
+  const fieldLabel = (field: (typeof fields)[number][0], label: string) =>
+    field === "cache_write" && reference.cache_write_kind === "flat"
+      ? "缓存写入 · 统一单价"
+      : label;
   const tier = promptPriceTier(price.model);
   const highPrice = tier ? priceForPrompt(draft, tier.threshold_tokens + 1) : undefined;
   const tierLimit = tier ? `${tier.threshold_tokens / 1000}k` : "";
@@ -197,7 +201,7 @@ function PriceRow({
             {visibleFields.some(([visible]) => visible === field) ? (
               <input
                 className="price-number-input"
-                aria-label={`${price.model} ${label}价格`}
+                aria-label={`${price.model} ${fieldLabel(field, label)}价格`}
                 type="number"
                 min="0"
                 max="1000000000"
@@ -440,10 +444,10 @@ export function PriceSettings({
               <th scope="col">输出</th>
               <th scope="col">缓存读取</th>
               <th scope="col">
-                缓存写入<small>默认 / 5 分钟</small>
+                缓存写入<small>默认 / 短时</small>
               </th>
               <th scope="col">
-                缓存写入<small>1 小时</small>
+                缓存写入<small>长时</small>
               </th>
               <th scope="col">
                 售卖比例<small>原价 %</small>
