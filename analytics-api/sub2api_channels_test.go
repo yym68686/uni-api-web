@@ -224,7 +224,7 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 		if strings.Contains(fast.Body.String(), "model_billing") || strings.Contains(fast.Body.String(), "multipliers") {
 			t.Fatal("bindings claimed billing evidence")
 		}
-		for _, stage := range []string{"bindings_refs", "bindings_sources", "bindings_gateways", "bindings_gateway_controls", "bindings_gateway_keys", "bindings_gateway_catalog", "bindings_configured", "bindings_encode"} {
+		for _, stage := range []string{"bindings_refs", "bindings_sources", "bindings_gateways", "bindings_gateway_controls", "bindings_gateway_keys", "bindings_gateway_catalog", "bindings_owned_lookup", "bindings_configured", "bindings_index_accounts", "bindings_index_keys", "bindings_inventory", "bindings_encode"} {
 			if !strings.Contains(trace.String(), "stage="+stage+" ") {
 				t.Fatal("bindings read lost timing stage", stage)
 			}

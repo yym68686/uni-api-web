@@ -367,6 +367,8 @@ type subBindingIndex struct {
 // Read the owner's complete published key generation inside the caller's
 // transaction. Staging pages never participate in credential attribution.
 func (s *Service) readSubBindingIndexFrom(ctx context.Context, db controlQueryDB, owner string) (subBindingIndex, error) {
+	stages := newManagementReadTimeline(ctx, "bindings_index_accounts")
+	defer stages.finish()
 	accounts, err := s.bindingAccountsFrom(ctx, db)
 	if err != nil {
 		return subBindingIndex{}, err
@@ -379,6 +381,7 @@ func (s *Service) readSubBindingIndexFrom(ctx context.Context, db controlQueryDB
 			bySite[subBindingSite(a.Base)] = append(bySite[subBindingSite(a.Base)], a)
 		}
 	}
+	stages.next("bindings_index_keys")
 	rows, err := db.QueryContext(ctx, `SELECT i.account_id,i.key_hash,i.remote_key_id,i.group_id,t.billing FROM console_sub_key_index i JOIN console_sub_accounts a ON a.id=i.account_id LEFT JOIN console_sub_targets t ON t.account_id=i.account_id AND t.group_id=i.group_id WHERE a.owner=$1`, owner)
 	if err != nil {
 		return subBindingIndex{}, err
@@ -455,6 +458,8 @@ func (s *Service) configuredBindingsFrom(ctx context.Context, db controlQueryDB,
 	if err != nil {
 		return nil, err
 	}
+	endInventory := managementReadSpan(ctx, "bindings_inventory")
+	defer endInventory()
 	rows, err := db.QueryContext(ctx, `SELECT c.source_id,s.name,c.provider,c.base,c.site,c.key_hashes,c.checked_at,c.fingerprint FROM console_configured_channels c JOIN console_sources s ON s.id=c.source_id WHERE c.active AND s.enabled ORDER BY c.source_id,c.provider`)
 	if err != nil {
 		return nil, err

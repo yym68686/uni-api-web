@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"math"
 	"net/http"
 	"net/url"
@@ -242,21 +243,23 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 			results[i].Engines = engines
 			results[i].EngineModes = engineModes
 			labels := map[string]string{}
-			lookup := map[string]subChannelRef{}
+			keyIDs := make([]string, 0, len(keys))
 			keyLabels := map[string]struct {
 				Prefix   string
 				Position int
 			}{}
 			for _, key := range keys {
+				keyIDs = append(keyIDs, key.ID)
 				keyLabels[key.ID] = struct {
 					Prefix   string
 					Position int
 				}{key.Prefix, key.Position}
-				for _, ref := range refs {
-					for _, provider := range subProviderNames(ref.Account, ref.Group, key.ID) {
-						lookup[provider] = ref
-					}
-				}
+			}
+			endLookup := managementReadSpan(r.Context(), "bindings_owned_lookup")
+			lookup := subInstalledChannelRefs(state, refs, keyIDs)
+			endLookup()
+			if managementTraceEnabled(r.Context()) {
+				log.Printf("management_bindings_lookup refs=%d keys=%d temporary=%d retained=%d request_id=%s", len(refs), len(keyIDs), len(state.Temporary), len(lookup), consoleRequestID(r.Context()))
 			}
 			results[i].Labels = labels
 			channelPositions := subChannelPositionsForOwned(state, lookup)
