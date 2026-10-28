@@ -407,19 +407,7 @@ func filterManagementQueryRows(rows []managementQueryRow, f managementQueryFilte
 		return slices.Compare(utf16.Encode([]rune(out.Platforms[i])), utf16.Encode([]rune(out.Platforms[j]))) < 0
 	})
 	if f.Sort != "" {
-		sort.SliceStable(out.Rows, func(i, j int) bool {
-			a, b := managementBillingRate(out.Rows[i], f.Model).Rate, managementBillingRate(out.Rows[j], f.Model).Rate
-			if a == nil {
-				return false
-			}
-			if b == nil {
-				return true
-			}
-			if f.Sort == "asc" {
-				return *a < *b
-			}
-			return *a > *b
-		})
+		sortManagementRowsByRate(out.Rows, f.Model, f.Sort)
 	}
 	return out
 }
