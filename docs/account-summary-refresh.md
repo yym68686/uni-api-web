@@ -73,6 +73,24 @@ existing detail route with the `X-Console-View: summary` header and the
 other failures remain errors. They do not request all accounts first. Save-time
 revision and ownership checks are unchanged.
 
+The bindings-only view overlaps the independent owner-scoped configured-binding
+read with gateway reads, after validating the requested source. It adds at most
+one database reader per request; the existing four-source gateway limit stays
+unchanged. Both branches are joined before responding, including on cancellation
+or a configured-binding failure. No partial success, cache, new query, credential
+scope or write is introduced. These were already independent non-transactional
+reads, not a claimed atomic cross-system snapshot. The full billing endpoint
+retains its original serial read order.
+
+`bindings_configured_read` measures the overlapped database branch. Its duration
+overlaps `bindings_gateways`; do not sum them. The existing
+`bindings_configured` timeline measures merge and any remaining join wait after
+the gateways complete, not the entire overlapped database read. A local test
+holds all three gateway replies and the configured-inventory table separately,
+then observes the real database lock wait to prove overlap without a timing
+threshold. Success, invalid inventory, cancellation and complete output are
+checked against the unchanged full endpoint.
+
 Successful add/replace writes close the editor immediately. Query invalidation
 runs in the background; its completion is not part of the save acknowledgement.
 Failed writes keep the draft and release the close button.

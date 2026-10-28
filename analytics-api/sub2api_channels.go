@@ -162,6 +162,21 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 	}
 	results := make([]sourceResult, len(sources))
 	stages.next("bindings_gateways")
+	var configured []subInstalledChannel
+	var bindingErr error
+	var bindingRead sync.WaitGroup
+	if bindingsOnly {
+		// This read uses only the owner and the pool, not gateway results. Both
+		// branches start after source validation and finish before merging. Do
+		// not fail fast: preserve gateway observations and the existing 503 on
+		// a configured-binding error, even when its read completes first.
+		bindingRead.Add(1)
+		go func() {
+			defer bindingRead.Done()
+			defer managementReadSpan(r.Context(), "bindings_configured_read")()
+			configured, bindingErr = s.configuredBindings(r.Context(), owner)
+		}()
+	}
 	slots := make(chan struct{}, 4)
 	var wg sync.WaitGroup
 	for i, source := range sources {
@@ -300,7 +315,12 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 			labels[sources[i].ID] = result.Labels
 		}
 	}
-	configured, bindingErr := s.configuredBindings(r.Context(), owner)
+	if bindingsOnly {
+		bindingRead.Wait()
+	} else {
+		// Keep the complete billing view's original read order.
+		configured, bindingErr = s.configuredBindings(r.Context(), owner)
+	}
 	if bindingErr != nil {
 		http.Error(w, "配置渠道关联读取失败", 503)
 		return

@@ -229,6 +229,9 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 				t.Fatal("bindings read lost timing stage", stage)
 			}
 		}
+		if !strings.Contains(trace.String(), "stage=bindings_configured_read ") {
+			t.Fatal("parallel configured read lost its independent timing")
+		}
 		if strings.Count(trace.String(), "read_kind=import_bindings") != 2 {
 			t.Fatal("fast bindings request lost start/completion classification")
 		}
