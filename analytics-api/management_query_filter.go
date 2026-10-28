@@ -119,10 +119,13 @@ func managementModelMatch(check managementQueryCheck) string {
 }
 
 func managementQuality(target *subTarget) string {
-	var saved *subResult
-	for _, check := range managementModelChecks(target) {
-		if check.Model == "gpt-6-astra" {
-			saved = check.Result
+	// Astra is a built-in, so the complete check list falls back to Result
+	// only when no explicit Astra row exists. Scan backwards to keep the last
+	// duplicate (including a nil Result) without constructing every check.
+	saved := target.Result
+	for i := len(target.Models) - 1; i >= 0; i-- {
+		if target.Models[i].Model == "gpt-6-astra" {
+			saved = target.Models[i].Result
 			break
 		}
 	}
