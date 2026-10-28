@@ -91,6 +91,17 @@ then observes the real database lock wait to prove overlap without a timing
 threshold. Success, invalid inventory, cancellation and complete output are
 checked against the unchanged full endpoint.
 
+Traced management GET transport failures emit
+`management_source_transport_failed` with an allowlisted phase, a fixed error
+class and the existing request ID. DNS, connection, TLS, timeout and cancellation
+classes inspect the retained typed HTTP cause, never error text; unrelated
+database EOFs and HTTP/JSON failures are not source transport faults. The final
+`management_query` class uses the same source classification. No source URL,
+credential, query value or raw error is logged. Unknown paths, mutations and
+untraced calls do not emit this diagnostic. This adds no request, retry,
+resolution attempt or response change. An independent DNS probe is not evidence
+of an earlier request's cause; use the matching request ID.
+
 Successful add/replace writes close the editor immediately. Query invalidation
 runs in the background; its completion is not part of the save acknowledgement.
 Failed writes keep the draft and release the close button.

@@ -57,7 +57,9 @@ func fetchSource(ctx context.Context, src controlSource, path string, q url.Valu
 	req.Header.Set("Accept", "application/json")
 	resp, e := sourceHTTP.Do(req)
 	if e != nil {
-		return nil, 502, &sourceTransportError{message: "source unavailable", cause: e}
+		failure := &sourceTransportError{message: "source unavailable", cause: e}
+		managementSourceTransportFailure(ctx, http.MethodGet, path, failure)
+		return nil, 502, failure
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {

@@ -183,7 +183,10 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	class := "none"
 	if err != nil {
-		class = databaseErrorClass(err)
+		class = sourceTransportErrorClass(err)
+		if class == "" {
+			class = databaseErrorClass(err)
+		}
 		status, message := http.StatusServiceUnavailable, "渠道数据读取失败，请重新读取"
 		if errors.Is(err, errManagementRevision) || errors.Is(err, errManagementSourceRevision) {
 			status, message, class = http.StatusConflict, "渠道配置或检测结果已变化，请重新读取", "management_revision_changed"
