@@ -14,11 +14,12 @@ import (
 )
 
 func TestSubSyncAllStartsEveryAccountBeforeAnotherFinishes(t *testing.T) {
-	t.Run("complete", func(t *testing.T) { testSubConcurrentAccounts(t, false) })
-	t.Run("cancel", func(t *testing.T) { testSubConcurrentAccounts(t, true) })
+	t.Run("complete", func(t *testing.T) { testSubConcurrentAccounts(t, false, false) })
+	t.Run("complete_with_fingerprint", func(t *testing.T) { testSubConcurrentAccounts(t, false, true) })
+	t.Run("cancel", func(t *testing.T) { testSubConcurrentAccounts(t, true, false) })
 }
 
-func testSubConcurrentAccounts(t *testing.T, interrupt bool) {
+func testSubConcurrentAccounts(t *testing.T, interrupt, observeFingerprint bool) {
 	// startBackground intentionally scans every account in its schema. This
 	// fixture must not pick up queued probes left by unrelated integration
 	// cases when measuring the exact per-account dispatch count.
@@ -52,6 +53,8 @@ func testSubConcurrentAccounts(t *testing.T, interrupt bool) {
 	unblockProbes := func() { releaseProbesOnce.Do(func() { close(releaseProbes) }) }
 	var mu sync.Mutex
 	active, peak, calls := map[string]int{}, map[string]int{}, map[string]int{}
+	stages := map[string]map[string]int{}
+	fingerprintSeen := make(chan struct{}, 1)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if id == "" {
@@ -94,20 +97,40 @@ func testSubConcurrentAccounts(t *testing.T, interrupt bool) {
 		case "/v1/sub2api/billing":
 			writeJSON(w, 200, map[string]any{"object": "sub2api.key_billing", "billing_scope": "token", "effective_rate_multiplier": 1})
 		case "/v1/responses", "/v1/messages", "/v1beta/models/gemini-4-argon:streamGenerateContent", "/v1beta/models/gemini-3.1-pro:streamGenerateContent", "/v1beta/models/gemini-3.8-flash:streamGenerateContent":
+			stage, _, _ := strings.Cut(r.Header.Get("X-Request-ID"), "-")
+			fingerprint := stage == "fingerprint"
 			mu.Lock()
-			active[id]++
-			peak[id] = max(peak[id], active[id])
-			calls[id]++
+			if stages[id] == nil {
+				stages[id] = map[string]int{}
+			}
+			stages[id][stage]++
+			if !fingerprint {
+				active[id]++
+				peak[id] = max(peak[id], active[id])
+				calls[id]++
+			}
 			mu.Unlock()
-			defer func() { mu.Lock(); active[id]--; mu.Unlock() }()
+			if fingerprint {
+				// Real startup also dispatches independently queued fingerprints.
+				// Keep their fixture response, but do not count them as a duplicate
+				// availability/quality/compaction/tool-use sync probe.
+				select {
+				case fingerprintSeen <- struct{}{}:
+				default:
+				}
+			} else {
+				defer func() { mu.Lock(); active[id]--; mu.Unlock() }()
+			}
 			// Only the initial blocked wave is observed through this channel.
 			// Later probes are counted under mu above. A full observation
 			// buffer must not block fixture cleanup after release/cancellation.
-			select {
-			case <-releaseProbes:
-			case <-r.Context().Done():
-				return
-			case probesStarted <- id:
+			if !fingerprint {
+				select {
+				case <-releaseProbes:
+				case <-r.Context().Done():
+					return
+				case probesStarted <- id:
+				}
 			}
 			select {
 			case <-releaseProbes:
@@ -243,13 +266,22 @@ func testSubConcurrentAccounts(t *testing.T, interrupt bool) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+	if observeFingerprint {
+		// Deterministically exercise the overlap that used to inflate calls.
+		// All requests still use this local mock; no paid upstream is contacted.
+		select {
+		case <-fingerprintSeen:
+		case <-time.After(10 * time.Second):
+			t.Fatal("real background fingerprint did not reach the fixture")
+		}
+	}
 	cancel()
 	workers.Wait()
 	mu.Lock()
 	defer mu.Unlock()
 	for _, id := range accounts {
 		if peak[id] != 2 || calls[id] != subFixtureSyncProbeCount() {
-			t.Fatal("per-account probes changed or duplicated", id, peak[id], calls[id])
+			t.Fatal("per-account probes changed or duplicated", id, peak[id], calls[id], "expected", subFixtureSyncProbeCount(), "stages", stages[id])
 		}
 	}
 }
