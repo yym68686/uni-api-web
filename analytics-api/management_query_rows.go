@@ -58,22 +58,37 @@ func managementUnique(values []string) []string {
 }
 
 func managementModelChecks(target *subTarget) []managementQueryCheck {
-	byModel := make(map[string]subModelResult, len(target.Models))
-	names := append([]string{}, subModels...)
-	for _, check := range target.Models {
-		byModel[check.Model] = check
-		names = append(names, check.Model)
+	// One index keeps the last result for each name, then marks that name as
+	// emitted. Visit built-ins before source rows to preserve first-name order
+	// without a second names slice and deduplication map. Results still alias
+	// their request-local source exactly as before.
+	positions := make(map[string]int, len(target.Models)+len(subModels))
+	for i, check := range target.Models {
+		positions[check.Model] = i
 	}
-	checks := make([]managementQueryCheck, 0, len(names))
-	for _, name := range managementUnique(names) {
-		check, exists := byModel[name]
-		if !exists {
+	checks := make([]managementQueryCheck, 0, len(target.Models)+len(subModels))
+	appendCheck := func(name string) {
+		i, exists := positions[name]
+		if exists && i < 0 {
+			return
+		}
+		var check subModelResult
+		if exists {
+			check = target.Models[i]
+		} else {
 			check = subModelResult{Model: name, State: "idle"}
 			if name == "gpt-6-astra" && target.Result != nil {
 				check.State, check.Result = "done", target.Result
 			}
 		}
+		positions[name] = -1
 		checks = append(checks, managementQueryCheck{subModelResult: check})
+	}
+	for _, name := range subModels {
+		appendCheck(name)
+	}
+	for _, check := range target.Models {
+		appendCheck(check.Model)
 	}
 	return checks
 }
