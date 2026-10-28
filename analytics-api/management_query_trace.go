@@ -16,6 +16,17 @@ func managementTraceEnabled(ctx context.Context) bool {
 	return v
 }
 
+// Report which already-read fence disagreed, never the revision values, source
+// identity or credentials. This adds no reads and does not relax the fence.
+func managementGatewayFenceChanged(ctx context.Context, document string, raw map[string]any, facts managementGatewayFacts) bool {
+	revisionChanged := raw["revision"] != facts.Revision
+	configChanged := raw["config_revision"] != facts.ConfigRevision
+	if (revisionChanged || configChanged) && managementTraceEnabled(ctx) {
+		log.Printf("management_gateway_fence_rejected document=%s revision_changed=%t config_changed=%t request_id=%s", document, revisionChanged, configChanged, consoleRequestID(ctx))
+	}
+	return revisionChanged || configChanged
+}
+
 // Only fixed stage names, duration and the safe request ID are logged. No
 // source URL, owner, filter, model, credential or query parameters escape.
 func managementReadSpan(ctx context.Context, stage string) func() {

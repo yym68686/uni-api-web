@@ -203,14 +203,14 @@ func verifyManagementGateway(ctx context.Context, facts managementGatewayFacts) 
 		if raw["format"] != "management-revision-v1" {
 			return errManagementSourceContract
 		}
-		if raw["revision"] != facts.Revision || raw["config_revision"] != facts.ConfigRevision {
+		if managementGatewayFenceChanged(ctx, "admin", raw, facts) {
 			return errManagementSourceRevision
 		}
 		if facts.Source.ConfigKey != "" && facts.Source.ConfigKey != facts.Source.Key {
 			if observationErr != nil {
 				return observationErr
 			}
-			if controls["revision"] != facts.Revision || controls["config_revision"] != facts.ConfigRevision {
+			if managementGatewayFenceChanged(ctx, "observer", controls, facts) {
 				return errManagementSourceRevision
 			}
 		}
@@ -220,7 +220,7 @@ func verifyManagementGateway(ctx context.Context, facts managementGatewayFacts) 
 	if err != nil {
 		return err
 	}
-	if controls["revision"] != facts.Revision || controls["config_revision"] != facts.ConfigRevision {
+	if managementGatewayFenceChanged(ctx, "legacy", controls, facts) {
 		return errManagementSourceRevision
 	}
 	return nil
