@@ -16,7 +16,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test -- --maxWorkers=2 --no-file-parallelism
-      - run: node --test scripts/check-nginx-upstream.cjs
+      - run: node --test scripts/check-nginx-upstream.cjs scripts/observe-management-read.test.mjs
       - run: npm run build
   analytics:
     runs-on: ubuntu-latest

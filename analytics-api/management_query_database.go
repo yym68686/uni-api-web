@@ -45,7 +45,7 @@ func (s *Service) readManagementDatabaseModeFrom(ctx context.Context, db control
 	if err := db.QueryRowContext(ctx, `SELECT transaction_timestamp(),pg_backend_pid()`).Scan(&out.ReadAt, &backendPID); err != nil {
 		return out, err
 	}
-	managementDatabaseSession(ctx, db, "view", backendPID)
+	managementDatabaseSession(ctx, db, "view", backendPID, out.ReadAt)
 	var err error
 	out.Sources, err = s.control.managementSourcesFrom(ctx, db)
 	if err != nil {

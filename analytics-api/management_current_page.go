@@ -85,7 +85,7 @@ func (s *Service) managementReadProof(ctx context.Context, db controlQueryDB, ow
 	if err = db.QueryRowContext(ctx, query).Scan(&epoch, &now, &until, &proof.HeadersRevision, &price, &backendPID); err != nil {
 		return proof, now, err
 	}
-	managementDatabaseSession(ctx, db, "proof", backendPID)
+	managementDatabaseSession(ctx, db, "proof", backendPID, now)
 	var versions [][]json.RawMessage
 	if err = json.Unmarshal(epoch, &versions); err != nil {
 		return proof, now, err

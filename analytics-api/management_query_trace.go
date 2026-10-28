@@ -18,12 +18,13 @@ func managementTraceEnabled(ctx context.Context) bool {
 }
 
 // A transaction pins its backend until rollback, so an external read-only
-// pg_stat_activity sample can be aligned with this request's stages. Pool
-// queries cannot attest a later query's connection and must not be labelled.
-// The PID is private diagnostic metadata, never part of a proof or response.
-func managementDatabaseSession(ctx context.Context, db controlQueryDB, phase string, pid int) {
-	if tx, pinned := db.(*sql.Tx); pinned && tx != nil && pid > 0 && managementTraceEnabled(ctx) {
-		log.Printf("management_database_session phase=%s backend_pid=%d request_id=%s", phase, pid, consoleRequestID(ctx))
+// pg_stat_activity sample can be aligned with this request's stages. Include
+// the transaction timestamp already read alongside its PID: the pool can reuse
+// one PID for consecutive requests. Pool queries cannot attest a later call's
+// connection. These are private diagnostics, never proof or response fields.
+func managementDatabaseSession(ctx context.Context, db controlQueryDB, phase string, pid int, started time.Time) {
+	if tx, pinned := db.(*sql.Tx); pinned && tx != nil && pid > 0 && !started.IsZero() && managementTraceEnabled(ctx) {
+		log.Printf("management_database_session phase=%s backend_pid=%d request_id=%s xact_started_ms=%d", phase, pid, consoleRequestID(ctx), started.UnixMilli())
 	}
 }
 

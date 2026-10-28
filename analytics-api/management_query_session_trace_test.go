@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestManagementDatabaseSessionTraceRequiresPinnedTracedConnection(t *testing.T) {
@@ -17,16 +18,18 @@ func TestManagementDatabaseSessionTraceRequiresPinnedTracedConnection(t *testing
 	log.SetOutput(&output)
 	defer log.SetOutput(previous)
 	ctx := context.WithValue(managementTraceContext(context.Background()), consoleRequestIDKey{}, "session-trace-123")
+	at := time.UnixMilli(1793224800123)
 	// A diagnostic must never imply that a pool's next call uses the same PID.
-	managementDatabaseSession(ctx, (*sql.DB)(nil), "view", 123)
-	managementDatabaseSession(ctx, (*sql.Tx)(nil), "view", 123)
-	managementDatabaseSession(context.Background(), &sql.Tx{}, "view", 123)
-	managementDatabaseSession(ctx, &sql.Tx{}, "view", 0)
+	managementDatabaseSession(ctx, (*sql.DB)(nil), "view", 123, at)
+	managementDatabaseSession(ctx, (*sql.Tx)(nil), "view", 123, at)
+	managementDatabaseSession(context.Background(), &sql.Tx{}, "view", 123, at)
+	managementDatabaseSession(ctx, &sql.Tx{}, "view", 0, at)
+	managementDatabaseSession(ctx, &sql.Tx{}, "view", 123, time.Time{})
 	if output.Len() != 0 {
 		t.Fatal("unreliable connection attribution logged")
 	}
-	managementDatabaseSession(ctx, &sql.Tx{}, "view", 123)
-	if !strings.Contains(output.String(), "management_database_session phase=view backend_pid=123 request_id=session-trace-123") {
+	managementDatabaseSession(ctx, &sql.Tx{}, "view", 123, at)
+	if !strings.Contains(output.String(), "management_database_session phase=view backend_pid=123 request_id=session-trace-123 xact_started_ms=1793224800123") {
 		t.Fatal("missing fixed connection attribution")
 	}
 }
@@ -41,7 +44,8 @@ func TestManagementSessionTraceLeavesProofAndViewUnchanged(t *testing.T) {
 	}
 	defer tx.Rollback()
 	var pid int
-	if err = tx.QueryRow(`SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+	var xactMS int64
+	if err = tx.QueryRow(`SELECT pg_backend_pid(),floor(extract(epoch FROM transaction_timestamp())*1000)::bigint`).Scan(&pid, &xactMS); err != nil {
 		t.Fatal(err)
 	}
 	plainProof, plainAt, err := s.managementReadProof(ctx, tx, "owner")
@@ -66,12 +70,12 @@ func TestManagementSessionTraceLeavesProofAndViewUnchanged(t *testing.T) {
 		t.Fatal("complete view changed", err)
 	}
 	for _, phase := range []string{"proof", "view"} {
-		if !strings.Contains(output.String(), fmt.Sprintf("management_database_session phase=%s backend_pid=%d request_id=pinned-read-123", phase, pid)) {
+		if !strings.Contains(output.String(), fmt.Sprintf("management_database_session phase=%s backend_pid=%d request_id=pinned-read-123 xact_started_ms=%d", phase, pid, xactMS)) {
 			t.Fatal("diagnostic did not identify pinned backend", phase)
 		}
 	}
 	for _, raw := range []string{mustJSON(proof), mustJSON(view)} {
-		if strings.Contains(raw, "backend_pid") || strings.Contains(raw, "pinned-read-123") {
+		if strings.Contains(raw, "backend_pid") || strings.Contains(raw, "xact_started_ms") || strings.Contains(raw, "pinned-read-123") {
 			t.Fatal("private session metadata entered public values")
 		}
 	}
