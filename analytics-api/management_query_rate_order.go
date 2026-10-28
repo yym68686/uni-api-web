@@ -13,6 +13,15 @@ func sortManagementRowsByRate(rows []managementQueryRow, model, direction string
 	for i, row := range rows {
 		rates[i] = managementBillingRate(row, model).Rate
 	}
+	sortManagementRowsByKnownRates(rows, rates, direction)
+}
+
+// The facet/filter pipeline already has each accepted row's rate. Reuse only
+// those request-local, slot-aligned values under the same stable ordering.
+func sortManagementRowsByKnownRates(rows []managementQueryRow, rates []*float64, direction string) {
+	if len(rows) < 2 {
+		return
+	}
 	sort.Stable(&managementRowsByRate{rows: rows, rates: rates, ascending: direction == "asc"})
 }
 

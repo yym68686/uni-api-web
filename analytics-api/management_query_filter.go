@@ -364,8 +364,7 @@ func filterManagementQueryRows(rows []managementQueryRow, f managementQueryFilte
 		candidates = append(candidates, row)
 	}
 	rates, platforms := map[float64]bool{}, map[string]bool{}
-	withinRate := func(row managementQueryRow) bool {
-		billing := managementBillingRate(row, f.Model)
+	withinRate := func(billing managementRate) bool {
 		if f.MaxRate == "" {
 			return true
 		}
@@ -375,12 +374,14 @@ func filterManagementQueryRows(rows []managementQueryRow, f managementQueryFilte
 		limit, err := strconv.ParseFloat(f.MaxRate, 64)
 		return err == nil && billing.Rate != nil && *billing.Rate <= limit
 	}
+	var sortRates []*float64
 	for _, row := range candidates {
 		billing := managementBillingRate(row, f.Model)
+		matchesRate := withinRate(billing)
 		if (f.Platform == "" || row.Target.Platform == f.Platform) && billing.Rate != nil {
 			rates[*billing.Rate] = true
 		}
-		if withinRate(row) && row.Target.Platform != "" {
+		if matchesRate && row.Target.Platform != "" {
 			platforms[row.Target.Platform] = true
 		}
 		if f.Fingerprint != "" && evidence.FingerprintReady {
@@ -389,10 +390,14 @@ func filterManagementQueryRows(rows []managementQueryRow, f managementQueryFilte
 				continue
 			}
 		}
-		if !withinRate(row) || f.Platform != "" && row.Target.Platform != f.Platform || f.Joined != "" && evidence.Joined[row.ID] != f.Joined {
+		if !matchesRate || f.Platform != "" && row.Target.Platform != f.Platform || f.Joined != "" && evidence.Joined[row.ID] != f.Joined {
 			continue
 		}
 		out.Rows = append(out.Rows, row)
+		if f.Sort != "" {
+			// Rates follow accepted row slots, never possibly duplicate IDs.
+			sortRates = append(sortRates, billing.Rate)
+		}
 	}
 	if f.MaxRate != "" {
 		if value, err := strconv.ParseFloat(f.MaxRate, 64); err == nil && !math.IsInf(value, 0) && !math.IsNaN(value) {
@@ -410,7 +415,7 @@ func filterManagementQueryRows(rows []managementQueryRow, f managementQueryFilte
 		return slices.Compare(utf16.Encode([]rune(out.Platforms[i])), utf16.Encode([]rune(out.Platforms[j]))) < 0
 	})
 	if f.Sort != "" {
-		sortManagementRowsByRate(out.Rows, f.Model, f.Sort)
+		sortManagementRowsByKnownRates(out.Rows, sortRates, f.Sort)
 	}
 	return out
 }
