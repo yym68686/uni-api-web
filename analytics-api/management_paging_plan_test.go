@@ -158,3 +158,45 @@ func TestManagementRefreshCursorKeepsPositionButNeverRebasesFullSelection(t *tes
 		t.Fatal("rebase computation reused for strict client", w.Code)
 	}
 }
+
+func TestManagementHydratedPagingResponseIsRetainedWithCurrentProof(t *testing.T) {
+	s := managementHydrationFixture(t)
+	prepareManagementRevisionsForTest(t, s.control.db)
+	ctx := context.Background()
+	f := managementQueryFilters{GroupStatus: "all", Model: "gpt-5.5"}
+	first, err := s.readManagementQuerySnapshot(ctx, "owner", f, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.rememberManagementPagingPlan("owner", f, first)
+	for _, rebase := range []bool{false, true} {
+		cursor := first.Page.NextCursor
+		page, ok, err := s.currentManagementPagingPage(ctx, "owner", f, cursor, rebase)
+		if err != nil || !ok || page.Offset != managementPageSize {
+			t.Fatal("paging fixture failed", err)
+		}
+		if rebase {
+			cursor += "\x00refresh"
+		}
+		key := managementComputedKey("owner", f, cursor)
+		cached, ok, err := s.currentComputedManagementPage(ctx, "owner", key)
+		if err != nil || !ok {
+			t.Fatal("completed pagination not retained", err)
+		}
+		cached.ReadAtMS = page.ReadAtMS
+		if mustJSON(cached) != mustJSON(page) {
+			t.Fatal("retained page differs from fully hydrated response")
+		}
+		if _, ok, err = s.currentComputedManagementPage(ctx, "foreign", managementComputedKey("foreign", f, cursor)); err != nil || ok {
+			t.Fatal("foreign paging response exposed", err)
+		}
+	}
+	if _, err := s.control.db.Exec(`UPDATE console_sub_models SET message='new evidence' WHERE group_id=61`); err != nil {
+		t.Fatal(err)
+	}
+	for _, cursor := range []string{first.Page.NextCursor, first.Page.NextCursor + "\x00refresh"} {
+		if _, ok, err := s.currentComputedManagementPage(ctx, "owner", managementComputedKey("owner", f, cursor)); err != nil || ok {
+			t.Fatal("retained pagination accepted changed off-page evidence", err)
+		}
+	}
+}

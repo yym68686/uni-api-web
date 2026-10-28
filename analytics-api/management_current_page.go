@@ -38,6 +38,23 @@ type managementComputedPages struct {
 	bytes int
 }
 
+func (c *managementComputedPages) get(key string) (managementComputedPage, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, exists := c.pages[key]
+	if exists {
+		// A directory is used on every new page. Keep it recent while admitting
+		// hydrated pages, so sequential navigation cannot evict its own plan.
+		for i, k := range c.order {
+			if k == key {
+				c.order = append(append(c.order[:i], c.order[i+1:]...), key)
+				break
+			}
+		}
+	}
+	return entry, exists
+}
+
 func managementComputedKey(owner string, f managementQueryFilters, cursor string) string {
 	return tokenHash(owner + "\x00" + mustJSON(f) + "\x00" + cursor)
 }
@@ -116,14 +133,12 @@ func (s *Service) rememberManagementPage(key string, proof *managementFreshProof
 	if proof == nil || proof.Stamp == "" {
 		return
 	}
-	raw, err := json.Marshal(page)
-	if err != nil || len(raw) > 8<<20 {
-		log.Printf("management_computation_store skipped=true reason=page_size bytes=%d", len(raw))
-		return
-	}
 	// Persist one complete lossless representation. JSON roundtrip discards
 	// the wire structs' shadowed legacy fields, which otherwise retain the
-	// entire expanded result graph in addition to the columns.
+	// entire expanded result graph in addition to the columns. Admission must
+	// measure this retained representation: expanded rows repeat each model's
+	// evidence in targets/checks/selection and can exceed the budget while the
+	// canonical columns fit comfortably inside it.
 	columns, err := encodeManagementColumnPage(page)
 	if err != nil {
 		return
@@ -210,10 +225,7 @@ func (s *Service) currentComputedManagementPage(ctx context.Context, owner, key 
 }
 func (s *Service) currentComputedManagementPageMode(ctx context.Context, owner, key string, compact bool) (managementPageResponse, bool, error) {
 	ctx = managementTraceContext(ctx)
-	c := &s.managementComputed
-	c.mu.Lock()
-	entry, exists := c.pages[key]
-	c.mu.Unlock()
+	entry, exists := s.managementComputed.get(key)
 	if !exists {
 		log.Printf("management_current_miss reason=absent request_id=%s", consoleRequestID(ctx))
 		return managementPageResponse{}, false, nil

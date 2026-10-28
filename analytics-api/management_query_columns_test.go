@@ -2,7 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -124,5 +126,61 @@ func TestManagementStoredColumnsDoNotRetainExpandedEvidence(t *testing.T) {
 	again.Rows[0].Checks[0].Result.Availability.Message = "legacy edit"
 	if again.Rows[1].Checks[0].Result.Availability.Message == "legacy edit" {
 		t.Fatal("shared mutable legacy result")
+	}
+}
+
+func TestManagementStoreBudgetsCanonicalEvidenceRatherThanExpandedCopies(t *testing.T) {
+	s := &Service{}
+	page := managementWireFixture()
+	row := page.Rows[0]
+	row.Checks = nil
+	row.Target.Models = nil
+	for i := 0; i < 256; i++ {
+		model := subModelResult{Model: fmt.Sprint("model-", i), State: "done", Result: row.Selected.Result}
+		row.Target.Models = append(row.Target.Models, model)
+		row.Checks = append(row.Checks, managementQueryCheck{subModelResult: model})
+	}
+	page.Rows = nil
+	for i := 0; i < managementPageSize; i++ {
+		copy := row
+		copy.ID = fmt.Sprint("group-", i)
+		page.Rows = append(page.Rows, copy)
+	}
+	raw, err := json.Marshal(page)
+	if err != nil || len(raw) <= 8<<20 {
+		t.Fatal("fixture must reproduce production's expanded admission failure", len(raw), err)
+	}
+	s.rememberManagementPage("large", &managementFreshProof{Stamp: "current"}, page)
+	stored, ok := s.managementComputed.pages["large"]
+	if !ok || stored.Bytes >= 8<<20 {
+		t.Fatal("compact page rejected using expanded size", stored.Bytes)
+	}
+	expanded, err := expandManagementColumnPage(*stored.Page.preparedColumns)
+	if err != nil || mustJSON(expanded) != string(raw) {
+		t.Fatal("large page lost evidence", err)
+	}
+	// Large non-deduplicable metadata must still respect the existing bound.
+	page.Context.Prices = []Price{{Model: strings.Repeat("x", 17<<20)}}
+	s.rememberManagementPage("oversized", &managementFreshProof{Stamp: "current"}, page)
+	if _, ok := s.managementComputed.pages["oversized"]; ok || s.managementComputed.bytes > 16<<20 {
+		t.Fatal("canonical size budget exceeded")
+	}
+}
+
+func TestManagementPagingDirectorySurvivesSequentialPageAdmission(t *testing.T) {
+	s := &Service{}
+	proof := &managementFreshProof{Stamp: "current"}
+	s.rememberManagementEntry("directory", proof, managementComputedPage{Plan: []byte("plan"), Bytes: 4})
+	for i := 0; i < 12; i++ {
+		if _, ok := s.managementComputed.get("directory"); !ok {
+			t.Fatal("sequential navigation evicted its active directory", i)
+		}
+		s.rememberManagementEntry(fmt.Sprint("page-", i), proof, managementComputedPage{Bytes: 1})
+		if len(s.managementComputed.pages) > 4 || s.managementComputed.bytes > 16<<20 {
+			t.Fatal("existing store bounds changed")
+		}
+	}
+	if _, ok := s.managementComputed.get("page-0"); ok {
+		t.Fatal("unused pages were not evicted")
 	}
 }

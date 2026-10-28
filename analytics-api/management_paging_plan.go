@@ -66,10 +66,7 @@ func (s *Service) rememberManagementPagingPlan(owner string, filters managementQ
 
 func (s *Service) currentManagementPagingPage(ctx context.Context, owner string, filters managementQueryFilters, cursor string, rebase bool) (managementPageResponse, bool, error) {
 	ctx = managementTraceContext(ctx)
-	c := &s.managementComputed
-	c.mu.Lock()
-	entry, exists := c.pages[managementPagingKey(owner, filters)]
-	c.mu.Unlock()
+	entry, exists := s.managementComputed.get(managementPagingKey(owner, filters))
 	if !exists || len(entry.Plan) == 0 {
 		log.Printf("management_paging_miss reason=absent request_id=%s", consoleRequestID(ctx))
 		return managementPageResponse{}, false, nil
@@ -163,5 +160,17 @@ func (s *Service) currentManagementPagingPage(ctx context.Context, owner string,
 	if err = ctx.Err(); err != nil {
 		return managementPageResponse{}, false, err
 	}
-	return managementPageResponse{Owner: owner, managementQueryPage: page, Accounts: managementAccountHeaders(view.Input.Accounts), SelectionToken: encode(0), Context: managementContextForPage(view, page, filters.Model)}, true, nil
+	response := managementPageResponse{Owner: owner, managementQueryPage: page, Accounts: managementAccountHeaders(view.Input.Accounts), SelectionToken: encode(0), Context: managementContextForPage(view, page, filters.Model)}
+	// Do not hold a database connection while encoding the retained response.
+	_ = tx.Rollback()
+	// Hydration produced the same complete response as the cold path. Retain it
+	// with THIS transaction's proof, so revisiting a page does not repeat model
+	// and receipt reads. Every reuse still performs live current-proof checks.
+	current.Facts, current.CurrentExport = entry.Proof.Facts, entry.Proof.CurrentExport
+	cacheCursor := cursor
+	if rebase {
+		cacheCursor += "\x00refresh"
+	}
+	s.rememberManagementPage(managementComputedKey(owner, filters, cacheCursor), &current, response)
+	return response, true, nil
 }
