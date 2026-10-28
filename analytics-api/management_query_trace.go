@@ -72,6 +72,7 @@ type managementRowsTrace struct {
 	stage       string
 	start       time.Time
 	ready       time.Duration
+	advance     time.Duration
 	decode      time.Duration
 	rows, bytes int
 }
@@ -87,6 +88,20 @@ func (t *managementRowsTrace) queryReady() {
 		t.ready = time.Since(t.start)
 	}
 }
+
+// Next includes driver work and any wait for more database/network data; it
+// is NOT a disk-I/O measurement. Keep it separate from application JSON decode
+// and preserve the exact row/error/cancellation behavior of database/sql.
+func (t *managementRowsTrace) next(rows *sql.Rows) bool {
+	if t == nil {
+		return rows.Next()
+	}
+	start := time.Now()
+	more := rows.Next()
+	t.advance += time.Since(start)
+	return more
+}
+
 func (t *managementRowsTrace) decodeStart() time.Time {
 	if t == nil {
 		return time.Time{}
@@ -102,6 +117,6 @@ func (t *managementRowsTrace) decoded(start time.Time, bytes int) {
 }
 func (t *managementRowsTrace) finish() {
 	if t != nil {
-		log.Printf("management_rows_read stage=%s query_ready_ms=%d decode_ms=%d elapsed_ms=%d rows=%d bytes=%d canceled=%t request_id=%s", t.stage, t.ready.Milliseconds(), t.decode.Milliseconds(), time.Since(t.start).Milliseconds(), t.rows, t.bytes, t.ctx.Err() != nil, consoleRequestID(t.ctx))
+		log.Printf("management_rows_read stage=%s query_ready_ms=%d decode_ms=%d elapsed_ms=%d rows=%d bytes=%d advance_ms=%d canceled=%t request_id=%s", t.stage, t.ready.Milliseconds(), t.decode.Milliseconds(), time.Since(t.start).Milliseconds(), t.rows, t.bytes, t.advance.Milliseconds(), t.ctx.Err() != nil, consoleRequestID(t.ctx))
 	}
 }

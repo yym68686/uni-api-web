@@ -250,7 +250,7 @@ func (s *Service) subAttachUsageFrom(ctx context.Context, db controlQueryDB, own
 	// Publish only after the entire receipt read succeeds. An interrupted read
 	// cannot leave a mixture of current receipts and older embedded probe usage.
 	current := make(map[string]*subUsage, len(probes))
-	for rows.Next() {
+	for readTrace.next(rows) {
 		var id, status string
 		var raw []byte
 		if err := rows.Scan(&id, &status, &raw); err != nil {

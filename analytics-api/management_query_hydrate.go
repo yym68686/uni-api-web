@@ -78,7 +78,7 @@ func (s *Service) hydrateManagementPageFrom(ctx context.Context, db controlQuery
 			return err
 		}
 		readTrace.queryReady()
-		for rows.Next() {
+		for readTrace.next(rows) {
 			var account string
 			var group int64
 			var model subModelResult
