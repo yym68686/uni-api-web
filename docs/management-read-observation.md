@@ -51,7 +51,7 @@ tool does not perform those operations.
 Tests (no production access):
 
 ```sh
-node --test scripts/observe-management-read.test.mjs
+node --test scripts/observe-management-read.node-tests.mjs
 ```
 
 An optional integration test accepts `TEST_MANAGEMENT_OBSERVER_DATABASE_URL`,

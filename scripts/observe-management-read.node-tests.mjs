@@ -1,3 +1,4 @@
+// Run with node --test, not the jsdom/Vitest application test runner.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { spawn, spawnSync, execFileSync } from "node:child_process";
