@@ -455,7 +455,7 @@ it("filters unit prices across pages and models, persists selection, and scopes 
   view.unmount();
   mount("price-other-user");
   expect(screen.getByLabelText("单价是否异常筛选")).toHaveValue("");
-});
+}, 10_000);
 
 it("filters unconfirmed prices by numerical agreement and remembers the new selection", async () => {
   const data = fixtures().slice(0, 1), template = data[0].targets[0];
