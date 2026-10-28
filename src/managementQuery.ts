@@ -1,6 +1,8 @@
 import { useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, controlRequest } from "./api";
+import { managementReadTrace } from "./managementReadTrace";
+import type { ManagementReadTrace } from "./managementReadTrace";
 import {
   decodeManagementPage,
   managementPageMediaType,
@@ -62,7 +64,7 @@ declare global {
 
 const managementReadTimings = new WeakMap<
   ManagementPage,
-  { started: number; decoded: number }
+  { started: number; decoded: number; transport?: ManagementReadTrace }
 >();
 
 export interface ManagementSelection {
@@ -159,7 +161,7 @@ export async function readManagementPage(
   const page = validateManagementPage(response);
   if (owner && page.owner && page.owner !== owner)
     throw Error("登录账号已变化，请重新读取");
-  managementReadTimings.set(page, { started, decoded: performance.now() });
+  managementReadTimings.set(page, { started, decoded: performance.now(), transport: managementReadTrace(response) });
   return page;
 }
 
@@ -261,6 +263,11 @@ export function useManagementPage(
         console.info(
           "management_page_current",
           JSON.stringify({
+            request_id: timing.transport?.requestId ?? null,
+            current_validation_acknowledged: timing.transport?.validationAcknowledged ?? null,
+            response_headers_ms: timing.transport ? Math.round(timing.transport.headers - timing.transport.started) : null,
+            body_and_json_ms: timing.transport ? Math.round(timing.transport.decoded - timing.transport.headers) : null,
+            wire_expand_and_validate_ms: timing.transport ? Math.round(timing.decoded - timing.transport.decoded) : null,
             read_at_ms: page.read_at_ms,
             rows: page.rows.length,
             total: page.total,

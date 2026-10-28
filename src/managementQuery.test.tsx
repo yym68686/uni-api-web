@@ -79,6 +79,51 @@ const deferred = <T,>() => {
   return { promise, resolve };
 };
 
+it("correlates the painted page with its exact request without logging private inputs", async () => {
+  const frames = new Map<number, FrameRequestCallback>();
+  let nextFrame = 0, requestId = "";
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    frames.set(++nextFrame, callback);
+    return nextFrame;
+  });
+  vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
+  const output = vi.spyOn(console, "info").mockImplementation(() => {});
+  const fetch = vi.fn(async (_url: string, init: RequestInit) => {
+    requestId = new Headers(init.headers).get("X-Console-Request-ID")!;
+    return Response.json({ ...page(), owner: "trace-private-owner" });
+  });
+  vi.stubGlobal("fetch", fetch);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  const hook = renderHook(() => useManagementPage("trace-private-owner", { ...subFilterDefaults, model: "private-filter" }), { wrapper });
+  try {
+    await waitFor(() => expect(hook.result.current.data).toBeDefined());
+    for (let frame = 0; frame < 2; frame++) {
+      act(() => {
+        for (const [id, callback] of [...frames]) {
+          frames.delete(id);
+          callback(performance.now());
+        }
+      });
+    }
+    const detail = output.mock.calls.find(([event]) => event === "management_page_current")?.[1];
+    expect(JSON.parse(detail)).toMatchObject({
+      request_id: requestId,
+      current_validation_acknowledged: false,
+      response_headers_ms: expect.any(Number),
+      body_and_json_ms: expect.any(Number),
+      wire_expand_and_validate_ms: expect.any(Number),
+      request_to_paint_ms: expect.any(Number),
+      decoded_to_paint_ms: expect.any(Number),
+    });
+    expect(detail).not.toMatch(/private-filter|trace-private-owner|analytics\/|rows":\[/);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  } finally {
+    hook.unmount();
+    client.clear();
+  }
+});
+
 it("invalidates the visible current page only after an accepted control write", async () => {
   let reads = 0,
     fail = true;

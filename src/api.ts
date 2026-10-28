@@ -1,4 +1,5 @@
 import { withRequestDeadline } from "./requestDeadline";
+import { rememberManagementReadTrace } from "./managementReadTrace";
 import type { Connection } from "./types";
 export class ApiError extends Error {
   status: number;
@@ -168,7 +169,9 @@ export async function controlRequest<T>(path:string,init:RequestInit={}):Promise
  const read=!init.method || init.method.toUpperCase()==="GET";
  return withRequestDeadline(init.signal, read ? 30_000 : 120_000, !read, async (signal, requestId, responseReceived) => {
  const currentManagement=read && path.startsWith("/v1/channel-management/query?") && init.cache==="no-cache" && new Headers(init.headers).get("X-Console-Current-Validation")==="1";
+ const started=currentManagement?performance.now():0;
  const response=await fetch(globalThis.location.origin+"/analytics"+path,{...init,headers:{Accept:"application/json","Content-Type":"application/json",...init.headers,"X-Console-Request-ID":requestId},credentials:"same-origin",cache:currentManagement?"no-cache":"no-store",signal});
+ const headers=currentManagement?performance.now():0;
  responseReceived();
  if(!response.ok){const message=await response.text();throw new ApiError(message||`HTTP ${response.status}`,response.status)}
  // A queued sync changes task state asynchronously. Its caller reads the
@@ -176,17 +179,20 @@ export async function controlRequest<T>(path:string,init:RequestInit={}):Promise
  // would discard the user's current view before any new results exist.
  const syncQueued=init.method?.toUpperCase()==="POST" && ["/v1/sub2api/accounts/sync-selected","/v1/sub2api/accounts/sync-only"].includes(path);
  if(!read && !syncQueued && typeof window !== "undefined") window.dispatchEvent(new Event("uni-console-control-write"));
- const data=await response.json();
+ let data=await response.json();
+ const decoded=currentManagement?performance.now():0;
  if(currentManagement) {
    const acknowledgement=response.headers.get("X-Console-Validated-Request-ID");
    if(acknowledgement!==null) {
      const at=Number(response.headers.get("X-Console-Read-At-Ms"));
      if(acknowledgement!==requestId||!Number.isSafeInteger(at)||at<=0||!data||typeof data!=="object"||Array.isArray(data)) throw Error("渠道数据实时核验失败，请重新读取");
-     return {...data,read_at_ms:at} as T;
+     data={...data,read_at_ms:at};
+   } else {
+     // Legacy backends return a full no-store page. A cached zero-timestamp
+     // representation must never be displayed without THIS request's nonce.
+     if(data?.read_at_ms===0) throw Error("渠道数据实时核验失败，请重新读取");
    }
-   // Legacy backends return a full no-store page. A cached zero-timestamp
-   // representation must never be displayed without THIS request's nonce.
-   if(data?.read_at_ms===0) throw Error("渠道数据实时核验失败，请重新读取");
+   rememberManagementReadTrace(data,{requestId,validationAcknowledged:acknowledgement===requestId,started,headers,decoded});
  }
  return data as T;
  });
