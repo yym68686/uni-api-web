@@ -6,6 +6,23 @@ import (
 	"sort"
 )
 
+// Batch the page's summary ranges per owned account before joining models.
+// A point lookup for every model causes thousands of random heap reads on a
+// large page. OFFSET 0 retains the account/range scan; NOT MATERIALIZED streams
+// summary payloads rather than writing their complete CTE to a temporary file.
+// The source row and legacy summary fallback remain in the same RR snapshot.
+const managementPageModelsSQL = `WITH wanted AS MATERIALIZED (
+ SELECT w.* FROM jsonb_to_recordset($2::jsonb) AS w(account_id text,group_id bigint)
+ JOIN console_sub_accounts a ON a.id=w.account_id WHERE a.owner=$1),
+ batches AS MATERIALIZED (SELECT account_id,array_agg(group_id) AS groups FROM wanted GROUP BY account_id),
+ summaries AS NOT MATERIALIZED (
+ SELECT ms.account_id,ms.group_id,ms.model,ms.result FROM batches b CROSS JOIN LATERAL (
+ SELECT ms.account_id,ms.group_id,ms.model,ms.result FROM console_sub_model_summaries ms
+ WHERE ms.account_id=b.account_id AND ms.group_id=ANY(b.groups) OFFSET 0) ms)
+ SELECT m.account_id,m.group_id,m.model,m.state,m.message,COALESCE(ms.result,console_sub_model_summary_v1(m.result))
+ FROM wanted JOIN console_sub_models m USING(account_id,group_id)
+ LEFT JOIN summaries ms USING(account_id,group_id,model)`
+
 // Predicates determine the complete result first. Only the page's groups and
 // every bound member needed to assemble its public aliases then read display
 // evidence, under the caller's SAME repeatable-read transaction.
@@ -56,12 +73,7 @@ func (s *Service) hydrateManagementPageFrom(ctx context.Context, db controlQuery
 		}
 		readTrace := newManagementRowsTrace(ctx, "page_models")
 		defer func() { readTrace.finish() }()
-		rows, err := db.QueryContext(ctx, `SELECT m.account_id,m.group_id,m.model,m.state,m.message,COALESCE(ms.result,console_sub_model_summary_v1(m.result))
- FROM jsonb_to_recordset($2::jsonb) AS wanted(account_id text,group_id bigint)
- JOIN console_sub_models m USING(account_id,group_id)
- JOIN console_sub_accounts a ON a.id=m.account_id
- LEFT JOIN console_sub_model_summaries ms USING(account_id,group_id,model)
- WHERE a.owner=$1`, owner, string(raw))
+		rows, err := db.QueryContext(ctx, managementPageModelsSQL, owner, string(raw))
 		if err != nil {
 			return err
 		}
