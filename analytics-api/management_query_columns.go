@@ -25,10 +25,10 @@ type managementColumnPage struct {
 
 func managementColumns(rows []map[string]json.RawMessage) managementResultColumns {
 	out := managementResultColumns{Count: len(rows), Fields: []string{}, Columns: [][][]json.RawMessage{}}
-	names := map[string]bool{}
+	names := map[string]int{}
 	for _, row := range rows {
 		for k := range row {
-			names[k] = true
+			names[k]++
 		}
 	}
 	for k := range names {
@@ -37,10 +37,17 @@ func managementColumns(rows []map[string]json.RawMessage) managementResultColumn
 	sort.Strings(out.Fields)
 	for _, field := range out.Fields {
 		column := make([][]json.RawMessage, len(rows))
+		// Each present cell still has its own one-value slice, but its slot
+		// lives in one column allocation instead of a separate allocation for
+		// every result/field pair. Limit capacity to keep appends isolated.
+		values := make([]json.RawMessage, names[field])
+		next := 0
 		for i, row := range rows {
 			column[i] = []json.RawMessage{}
 			if value, ok := row[field]; ok {
-				column[i] = []json.RawMessage{value}
+				values[next] = value
+				column[i] = values[next : next+1 : next+1]
+				next++
 			}
 		}
 		out.Columns = append(out.Columns, column)
