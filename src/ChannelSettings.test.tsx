@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ChannelSettings } from "./ChannelSettings";
 import type { Channel } from "./types";
+import { setImageGenerationRemoval } from "./imageGenerationRemoval";
 
 const base = {
   provider: "one",
@@ -18,6 +19,7 @@ let effective: typeof base,
   writes: Record<string, unknown>[],
   reads: number;
 let catalog: Partial<Channel>[];
+let bodyOverrides: unknown;
 beforeEach(() => {
   effective = structuredClone(base);
   effective.preferences.cooldown_period = 90;
@@ -25,6 +27,7 @@ beforeEach(() => {
   writes = [];
   reads = 0;
   catalog = [{ provider: "one", engine: "codex", engine_mode: "auto" }];
+  bodyOverrides = undefined;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string, init?: RequestInit) => {
@@ -54,8 +57,19 @@ beforeEach(() => {
           previews: [],
         };
         if (init.method === "PATCH") {
-          effective.preferences.cooldown_period =
-            body.changes[0].set["/preferences/cooldown_period"] ?? 30;
+          const change = body.changes[0];
+          if ("/preferences/cooldown_period" in change.set)
+            effective.preferences.cooldown_period =
+              change.set["/preferences/cooldown_period"];
+          if ("/preferences/post_body_parameter_overrides" in change.set)
+            bodyOverrides =
+              change.set["/preferences/post_body_parameter_overrides"];
+          if (
+            change.remove?.includes(
+              "/preferences/post_body_parameter_overrides",
+            )
+          )
+            bodyOverrides = undefined;
           revision = "v2";
         }
         return new Response(JSON.stringify(result));
@@ -67,7 +81,13 @@ beforeEach(() => {
           revision,
           kind: "configured",
           base,
-          effective,
+          effective: {
+            ...effective,
+            preferences: {
+              ...effective.preferences,
+              post_body_parameter_overrides: bodyOverrides,
+            },
+          },
           override_paths: ["/preferences/cooldown_period"],
           available_keys: [],
           affected_keys: [{ key_id: "caller", models: ["model-a"] }],
@@ -86,6 +106,11 @@ beforeEach(() => {
                 group: "请求规则",
               },
               { path: "/preferences/headers", type: "json", group: "请求改写" },
+              {
+                path: "/preferences/post_body_parameter_overrides",
+                type: "json",
+                group: "请求改写",
+              },
               {
                 path: "/preferences/upstream_stream_mode",
                 type: "json",
@@ -122,6 +147,58 @@ async function mount() {
   await screen.findByText("来源共享渠道");
   return user;
 }
+it("keeps image removal off by default and previews only the requested removal rules", async () => {
+  const user = await mount();
+  await user.click(screen.getByRole("button", { name: "请求改写" }));
+  const checkbox = screen.getByRole("checkbox", { name: "移除生图参数" });
+  expect(checkbox).not.toBeChecked();
+  expect(writes).toHaveLength(0);
+  await user.click(checkbox);
+  await user.click(screen.getByRole("button", { name: "校验与预览" }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect((writes[0].changes as { set: object }[])[0].set).toEqual({
+    "/preferences/post_body_parameter_overrides": setImageGenerationRemoval(
+      undefined,
+      true,
+    ),
+  });
+  expect(screen.getByRole("button", { name: "保存并应用" })).toBeEnabled();
+  await user.click(screen.getByRole("button", { name: "保存并应用" }));
+  await screen.findByText("设置已保存并应用");
+  expect(screen.getByRole("checkbox", { name: "移除生图参数" })).toBeChecked();
+  expect(bodyOverrides).toEqual(setImageGenerationRemoval(undefined, true));
+  expect((writes[1].changes as object[])[0]).toEqual(
+    (writes[0].changes as object[])[0],
+  );
+});
+it("reflects existing YAML rules and preserves advanced overrides when disabled", async () => {
+  bodyOverrides = setImageGenerationRemoval(
+    { temperature: 0.2, __remove__: ["metadata"] },
+    true,
+  );
+  const user = await mount();
+  await user.click(screen.getByRole("button", { name: "请求改写" }));
+  const checkbox = screen.getByRole("checkbox", { name: "移除生图参数" });
+  expect(checkbox).toBeChecked();
+  await user.click(checkbox);
+  await user.click(screen.getByRole("button", { name: "校验与预览" }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect((writes[0].changes as { set: object }[])[0].set).toEqual({
+    "/preferences/post_body_parameter_overrides": {
+      temperature: 0.2,
+      __remove__: ["metadata"],
+    },
+  });
+});
+it("leaves no pending changes when image removal is enabled then disabled", async () => {
+  const user = await mount();
+  await user.click(screen.getByRole("button", { name: "请求改写" }));
+  const checkbox = screen.getByRole("checkbox", { name: "移除生图参数" });
+  await user.click(checkbox);
+  await user.click(checkbox);
+  expect(screen.getByText("已与来源同步")).toBeVisible();
+  expect(writes).toHaveLength(0);
+});
 it("shows the gateway resolved engine for automatic settings without guessing from the URL", async () => {
   catalog = [{ provider: "one", engine: "claude", engine_mode: "auto" }];
   const user = await mount();

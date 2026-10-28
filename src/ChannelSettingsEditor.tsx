@@ -30,6 +30,10 @@ import {
 import { parse, stringify } from "yaml";
 import { controlRequest } from "./api";
 import { TimeoutPolicyField, HedgingField } from "./TimeoutPolicyField";
+import {
+  removesImageGeneration,
+  setImageGenerationRemoval,
+} from "./imageGenerationRemoval";
 import { GLOBAL_SETTINGS_SCOPE } from "./ChannelSettings";
 import { Spinner } from "./ui";
 import type { Channel } from "./types";
@@ -1035,6 +1039,44 @@ export function Editor({
                   <div className="settings-field-control">
                     {resolved?.read_only ? (
                       <p>{String(resolved.value)}</p>
+                    ) : !isGlobal &&
+                      f.path ===
+                        "/preferences/post_body_parameter_overrides" ? (
+                      <>
+                        <label className="settings-check">
+                          <input
+                            type="checkbox"
+                            checked={removesImageGeneration(value)}
+                            onChange={(e) =>
+                              edit(
+                                set(
+                                  draft,
+                                  f.path,
+                                  setImageGenerationRemoval(
+                                    value,
+                                    e.target.checked,
+                                  ),
+                                ),
+                              )
+                            }
+                          />
+                          移除生图参数
+                        </label>
+                        <p className="muted">
+                          默认关闭。开启后移除 tools 中的 image_generation
+                          及对应的 tool_choice，保留其他工具和图片输入。
+                          适用于上游提示「Image generation is not enabled for
+                          this group」的渠道。
+                        </p>
+                        <details>
+                          <summary>请求体覆盖与删除（高级 JSON）</summary>
+                          <JSONField
+                            label={label}
+                            value={value}
+                            onChange={(v) => edit(set(draft, f.path, v))}
+                          />
+                        </details>
+                      </>
                     ) : f.path === "/preferences/upstream_stream_mode" ? (
                       <>
                         <select
