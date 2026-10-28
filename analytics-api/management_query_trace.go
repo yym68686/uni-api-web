@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"log"
 	"time"
 )
@@ -14,6 +15,16 @@ func managementTraceContext(ctx context.Context) context.Context {
 func managementTraceEnabled(ctx context.Context) bool {
 	v, _ := ctx.Value(managementTraceKey{}).(bool)
 	return v
+}
+
+// A transaction pins its backend until rollback, so an external read-only
+// pg_stat_activity sample can be aligned with this request's stages. Pool
+// queries cannot attest a later query's connection and must not be labelled.
+// The PID is private diagnostic metadata, never part of a proof or response.
+func managementDatabaseSession(ctx context.Context, db controlQueryDB, phase string, pid int) {
+	if tx, pinned := db.(*sql.Tx); pinned && tx != nil && pid > 0 && managementTraceEnabled(ctx) {
+		log.Printf("management_database_session phase=%s backend_pid=%d request_id=%s", phase, pid, consoleRequestID(ctx))
+	}
 }
 
 // Report which already-read fence disagreed, never the revision values, source

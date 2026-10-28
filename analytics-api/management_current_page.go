@@ -80,10 +80,12 @@ func (s *Service) managementReadProof(ctx context.Context, db controlQueryDB, ow
 	var price []byte
 	var until sql.NullTime
 	var now time.Time
-	query := `SELECT (SELECT jsonb_agg(jsonb_build_array(relation_name,revision) ORDER BY relation_name) FROM console_management_view_epoch WHERE relation_name<>'console_sub_account_headers'),transaction_timestamp(),(SELECT min(deadline) FROM (SELECT deadline FROM console_configured_checks WHERE state='running' AND deadline>transaction_timestamp() UNION ALL SELECT deadline FROM console_model_fingerprints WHERE state='running' AND deadline>transaction_timestamp()) d), (SELECT revision FROM console_management_view_epoch WHERE relation_name='console_sub_account_headers'), (SELECT COALESCE(jsonb_agg(jsonb_build_array(to_jsonb(p),p.xmin::text) ORDER BY model),'[]'::jsonb) FROM ` + pgx.Identifier{s.engine.historyPath, "prices"}.Sanitize() + ` p)`
-	if err = db.QueryRowContext(ctx, query).Scan(&epoch, &now, &until, &proof.HeadersRevision, &price); err != nil {
+	var backendPID int
+	query := `SELECT (SELECT jsonb_agg(jsonb_build_array(relation_name,revision) ORDER BY relation_name) FROM console_management_view_epoch WHERE relation_name<>'console_sub_account_headers'),transaction_timestamp(),(SELECT min(deadline) FROM (SELECT deadline FROM console_configured_checks WHERE state='running' AND deadline>transaction_timestamp() UNION ALL SELECT deadline FROM console_model_fingerprints WHERE state='running' AND deadline>transaction_timestamp()) d), (SELECT revision FROM console_management_view_epoch WHERE relation_name='console_sub_account_headers'), (SELECT COALESCE(jsonb_agg(jsonb_build_array(to_jsonb(p),p.xmin::text) ORDER BY model),'[]'::jsonb) FROM ` + pgx.Identifier{s.engine.historyPath, "prices"}.Sanitize() + ` p),pg_backend_pid()`
+	if err = db.QueryRowContext(ctx, query).Scan(&epoch, &now, &until, &proof.HeadersRevision, &price, &backendPID); err != nil {
 		return proof, now, err
 	}
+	managementDatabaseSession(ctx, db, "proof", backendPID)
 	var versions [][]json.RawMessage
 	if err = json.Unmarshal(epoch, &versions); err != nil {
 		return proof, now, err
