@@ -259,7 +259,8 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			results[i].Labels = labels
-			for _, p := range state.Temporary {
+			channelPositions := subChannelPositionsForOwned(state, lookup)
+			for channelIndex, p := range state.Temporary {
 				if p.IdentityChanged {
 					continue
 				}
@@ -268,26 +269,7 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				labels[p.Provider] = ref.Name
-				positions := map[string]int{}
-				for _, model := range p.Models {
-					for _, scope := range [][2]string{{p.KeyID, model}, {p.KeyID, ""}, {"", model}, {"", ""}} {
-						found := false
-						for _, rule := range state.Rules {
-							if rule.KeyID == scope[0] && rule.Model == scope[1] && len(rule.Order) > 0 {
-								for n, name := range rule.Order {
-									if name == p.Provider {
-										positions[model] = n + 1
-									}
-								}
-								found = true
-								break
-							}
-						}
-						if found {
-							break
-						}
-					}
-				}
+				positions := channelPositions[channelIndex]
 				kl := keyLabels[p.KeyID]
 				protocol := providerProtocol(p.Provider)
 				if protocol == "" {
