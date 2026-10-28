@@ -57,6 +57,23 @@ type managementStreamScope struct {
 	CompactRevision bool
 }
 
+type managementStreamIdentity struct {
+	account string
+	group   int64
+	model   string
+}
+
+type managementStreamPositionIndex struct {
+	values map[managementStreamIdentity]int
+	only   map[string]bool // nil keeps every model; a non-nil empty set keeps none.
+}
+
+func (p managementStreamPositionIndex) add(item managementModelSignals, position int) {
+	if p.values != nil && (p.only == nil || p.only[item.Model.Model]) {
+		p.values[managementStreamIdentity{item.Account, item.Group, item.Model.Model}] = position
+	}
+}
+
 func readManagementSignalStreams(ctx context.Context, db controlQueryDB, owner string, strict bool) ([]managementModelSignals, string, error) {
 	return readManagementScopedStreams(ctx, db, owner, strict, managementStreamScope{})
 }
@@ -153,17 +170,24 @@ func readManagementStreamModels(ctx context.Context, db controlQueryDB, owner st
 	if err != nil {
 		return nil, nil, err
 	}
-	type identity struct {
-		account string
-		group   int64
-		model   string
-	}
 	out := []managementStreamModel{}
-	var positions map[identity]int
+	positions := managementStreamPositionIndex{}
+	wanted := map[string]bool{}
+	if scope.Model != "" {
+		for _, name := range scope.Names {
+			wanted[name] = true
+		}
+	}
 	// The compact catalog returns before predicates are joined. It does not
 	// consume an identity index for any of the directory's model rows.
 	if !scope.CompactRevision || !scope.CatalogOnly {
-		positions = map[identity]int{}
+		positions.values = map[managementStreamIdentity]int{}
+		// Built-in selections have no missing-model fallback groups. Their
+		// compact predicate SQL returns only Names, including every public alias.
+		// Retain the complete index for legacy revisions and non-built-in models.
+		if scope.CompactRevision && scope.Model != "" && slices.Contains(subModels, scope.Model) {
+			positions.only = wanted
+		}
 	}
 	for rows.Next() {
 		var model managementStreamModel
@@ -171,9 +195,7 @@ func readManagementStreamModels(ctx context.Context, db controlQueryDB, owner st
 			rows.Close()
 			return nil, nil, err
 		}
-		if positions != nil {
-			positions[identity{model.item.Account, model.item.Group, model.item.Model.Model}] = len(out)
-		}
+		positions.add(model.item, len(out))
 		out = append(out, model)
 	}
 	err = rows.Err()
@@ -182,16 +204,15 @@ func readManagementStreamModels(ctx context.Context, db controlQueryDB, owner st
 		return nil, nil, err
 	}
 	stages.next("signal_model_scope")
+	if managementTraceEnabled(ctx) {
+		log.Printf("management_signal_index models=%d positions=%d scoped=%t request_id=%s", len(out), len(positions.values), positions.only != nil, consoleRequestID(ctx))
+	}
 	fallback := map[string]bool{}
 	fallbackGroups := []subBoundKey{}
-	wanted := map[string]bool{}
 	if scope.Model != "" {
 		fallbackGroups = managementStreamFallbackGroups(scope.Model, out)
 		for _, g := range fallbackGroups {
 			fallback[qualityGroupID(g.AccountID, g.GroupID)] = true
-		}
-		for _, name := range scope.Names {
-			wanted[name] = true
 		}
 	}
 	query := managementModelStreamSQL
@@ -216,7 +237,7 @@ func readManagementStreamModels(ctx context.Context, db controlQueryDB, owner st
 	ids := []string{}
 	seen := map[string]bool{}
 	for rows.Next() {
-		var key identity
+		var key managementStreamIdentity
 		var valid, present, hasUsage bool
 		var evidence []byte
 		var probe, quality string
@@ -226,7 +247,7 @@ func readManagementStreamModels(ctx context.Context, db controlQueryDB, owner st
 		if err := rows.Scan(&key.account, &key.group, &key.model, &valid, &present, &evidence, &checkedAt, &verdict, &availability, &terminal, &modelMatch, &probe, &quality, &hasUsage, &usage.Status, &usage.InputPrice, &usage.OutputPrice, &usage.InputTokens, &usage.OutputTokens); err != nil {
 			return nil, nil, err
 		}
-		i, exists := positions[key]
+		i, exists := positions.values[key]
 		// The foreign key excludes orphan projections. Still never publish one if
 		// a future storage implementation returns an identity absent from sources.
 		if !exists {
