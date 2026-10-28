@@ -23,6 +23,17 @@ type managementColumnPage struct {
 	Quality      managementResultColumns `json:"quality"`
 }
 
+// Parse the known subResult envelope and both probe objects in one pass. Using
+// RawMessage leaves every field value byte-for-byte intact; a schema test guards
+// this projection when subResult gains a new top-level field.
+type managementColumnResultParts struct {
+	Model        json.RawMessage            `json:"model"`
+	CheckedAt    json.RawMessage            `json:"checked_at"`
+	Availability map[string]json.RawMessage `json:"availability"`
+	Quality      map[string]json.RawMessage `json:"quality"`
+	Verdict      json.RawMessage            `json:"verdict"`
+}
+
 func managementColumns(rows []map[string]json.RawMessage) managementResultColumns {
 	out := managementResultColumns{Count: len(rows), Fields: []string{}, Columns: [][][]json.RawMessage{}}
 	names := map[string]int{}
@@ -62,17 +73,12 @@ func encodeManagementColumnPage(page managementPageResponse) (managementColumnPa
 	out := managementColumnPage{managementWirePage: wire, Format: "management-page-v3"}
 	meta, availability, quality := make([]map[string]json.RawMessage, len(wire.Results)), make([]map[string]json.RawMessage, len(wire.Results)), make([]map[string]json.RawMessage, len(wire.Results))
 	for i, raw := range wire.Results {
-		if err = json.Unmarshal(raw, &meta[i]); err != nil {
+		var parts managementColumnResultParts
+		if err = json.Unmarshal(raw, &parts); err != nil {
 			return out, err
 		}
-		if err = json.Unmarshal(meta[i]["availability"], &availability[i]); err != nil {
-			return out, err
-		}
-		if err = json.Unmarshal(meta[i]["quality"], &quality[i]); err != nil {
-			return out, err
-		}
-		delete(meta[i], "availability")
-		delete(meta[i], "quality")
+		meta[i] = map[string]json.RawMessage{"model": parts.Model, "checked_at": parts.CheckedAt, "verdict": parts.Verdict}
+		availability[i], quality[i] = parts.Availability, parts.Quality
 	}
 	out.managementWirePage.Results = nil
 	out.ResultFields, out.Availability, out.Quality = managementColumns(meta), managementColumns(availability), managementColumns(quality)
