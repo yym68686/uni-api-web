@@ -3,8 +3,11 @@ package main
 import (
 	"bytes"
 	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"github.com/andybalholm/brotli"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -52,6 +55,24 @@ func writeManagementJSON(w http.ResponseWriter, r *http.Request, value any) erro
 	return writeManagementJSONMedia(w, r, value, "application/json")
 }
 
+// Hash the exact previous media/encoding/body byte sequence without two
+// response-sized string copies. A bounded scratch block keeps large inputs
+// cache-local while leaving the original JSON available for compression.
+func managementResponseETag(mediaType, encoding string, body []byte) string {
+	hash := sha256.New()
+	_, _ = io.WriteString(hash, mediaType)
+	_, _ = hash.Write([]byte{0})
+	_, _ = io.WriteString(hash, encoding)
+	_, _ = hash.Write([]byte{0})
+	var buffer [32 << 10]byte
+	for len(body) > 0 {
+		n := copy(buffer[:], body)
+		_, _ = hash.Write(buffer[:n])
+		body = body[n:]
+	}
+	return `"` + hex.EncodeToString(hash.Sum(nil)) + `"`
+}
+
 func writeManagementJSONMedia(w http.ResponseWriter, r *http.Request, value any, mediaType string) error {
 	if err := r.Context().Err(); err != nil {
 		return err
@@ -70,7 +91,7 @@ func writeManagementJSONMedia(w http.ResponseWriter, r *http.Request, value any,
 			// lifetimes, disconnected reuse or shared proxy storage.
 			w.Header().Add("Vary", "Cookie")
 			w.Header().Set("Cache-Control", "private, no-cache, must-revalidate")
-			tag := `"` + tokenHash(mediaType+"\x00"+r.Header.Get("Accept-Encoding")+"\x00"+string(body)) + `"`
+			tag := managementResponseETag(mediaType, r.Header.Get("Accept-Encoding"), body)
 			w.Header().Set("ETag", tag)
 			w.Header().Set("Content-Type", mediaType)
 			for _, candidate := range strings.Split(r.Header.Get("If-None-Match"), ",") {
