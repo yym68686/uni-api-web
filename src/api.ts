@@ -170,8 +170,12 @@ export async function controlRequest<T>(path:string,init:RequestInit={}):Promise
  return withRequestDeadline(init.signal, read ? 30_000 : 120_000, !read, async (signal, requestId, responseReceived) => {
  const currentManagement=read && path.startsWith("/v1/channel-management/query?") && init.cache==="no-cache" && new Headers(init.headers).get("X-Console-Current-Validation")==="1";
  const started=currentManagement?performance.now():0;
+ let headers:number|undefined,phase="response_headers",status:number|null=null;
+ try {
  const response=await fetch(globalThis.location.origin+"/analytics"+path,{...init,headers:{Accept:"application/json","Content-Type":"application/json",...init.headers,"X-Console-Request-ID":requestId},credentials:"same-origin",cache:currentManagement?"no-cache":"no-store",signal});
- const headers=currentManagement?performance.now():0;
+ headers=currentManagement?performance.now():undefined;
+ phase="response_status";
+ status=response.status;
  responseReceived();
  if(!response.ok){const message=await response.text();throw new ApiError(message||`HTTP ${response.status}`,response.status)}
  // A queued sync changes task state asynchronously. Its caller reads the
@@ -179,9 +183,11 @@ export async function controlRequest<T>(path:string,init:RequestInit={}):Promise
  // would discard the user's current view before any new results exist.
  const syncQueued=init.method?.toUpperCase()==="POST" && ["/v1/sub2api/accounts/sync-selected","/v1/sub2api/accounts/sync-only"].includes(path);
  if(!read && !syncQueued && typeof window !== "undefined") window.dispatchEvent(new Event("uni-console-control-write"));
+ phase="body_json";
  let data=await response.json();
  const decoded=currentManagement?performance.now():0;
  if(currentManagement) {
+   phase="current_validation";
    const acknowledgement=response.headers.get("X-Console-Validated-Request-ID");
    if(acknowledgement!==null) {
      const at=Number(response.headers.get("X-Console-Read-At-Ms"));
@@ -192,8 +198,24 @@ export async function controlRequest<T>(path:string,init:RequestInit={}):Promise
      // representation must never be displayed without THIS request's nonce.
      if(data?.read_at_ms===0) throw Error("渠道数据实时核验失败，请重新读取");
    }
-   rememberManagementReadTrace(data,{requestId,validationAcknowledged:acknowledgement===requestId,started,headers,decoded});
+   rememberManagementReadTrace(data,{requestId,validationAcknowledged:acknowledgement===requestId,started,headers:headers!,decoded});
  }
  return data as T;
+ } catch(error) {
+   if(currentManagement) {
+     const ended=performance.now();
+     // Describe only observed phases/signals. A canceled fetch alone cannot
+     // prove navigation, a proxy disconnect, or a server-side timeout.
+     console.info("management_read_failed",JSON.stringify({
+       request_id:requestId,phase,status,
+       elapsed_ms:Math.round(ended-started),
+       response_headers_ms:headers===undefined?null:Math.round(headers-started),
+       after_headers_ms:headers===undefined?null:Math.round(ended-headers),
+       caller_signal_aborted:init.signal?.aborted??false,
+       combined_signal_aborted:signal.aborted,
+     }));
+   }
+   throw error;
+ }
  });
 }

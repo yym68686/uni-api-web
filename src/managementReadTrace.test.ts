@@ -44,6 +44,7 @@ it("keeps independently completed requests associated with their own nonce", asy
 });
 
 it("does not trace unrelated reads or writes, nor accept failed attestations", async () => {
+  vi.spyOn(console, "info").mockImplementation(() => {});
   const payload = { read_at_ms: 0 };
   vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, options) => {
     const response = Response.json(payload, { headers: { "X-Console-Validated-Request-ID": "wrong-nonce", "X-Console-Read-At-Ms": "123" } });
@@ -58,6 +59,54 @@ it("does not trace unrelated reads or writes, nor accept failed attestations", a
     expect(value).toBe(payload);
     expect(managementReadTrace(value)).toBeUndefined();
   }
+});
+
+it.each(["response_headers", "response_status", "body_json", "current_validation"])("reports the observed failure phase %s without changing the error or retrying", async phase => {
+  let clock=10,requestId="";
+  const original=Error("private error message and credential");
+  vi.spyOn(performance,"now").mockImplementation(()=>clock);
+  const output=vi.spyOn(console,"info").mockImplementation(()=>{});
+  const fetch=vi.spyOn(globalThis,"fetch").mockImplementation(async(_url,options)=>{
+    requestId=new Headers(options?.headers).get("X-Console-Request-ID")!;
+    clock=20;
+    if(phase==="response_headers")throw original;
+    const response=Response.json({read_at_ms:0},{status:phase==="response_status"?409:200,headers:{"X-Console-Validated-Request-ID":"wrong-private-nonce","X-Console-Read-At-Ms":"123"}});
+    vi.spyOn(response,"text").mockImplementation(async()=>{clock=30;return "private server error";});
+    vi.spyOn(response,"json").mockImplementation(async()=>{clock=30;if(phase==="body_json")throw original;return {read_at_ms:0};});
+    return response;
+  });
+  let failure:unknown;
+  try {await controlRequest(path,init);}catch(error){failure=error;}
+  if(phase==="response_headers"||phase==="body_json")expect(failure).toBe(original);
+  else expect(failure).toBeInstanceOf(Error);
+  expect(fetch).toHaveBeenCalledTimes(1);
+  const [event,raw]=output.mock.calls[0];
+  expect(event).toBe("management_read_failed");
+  expect(JSON.parse(raw)).toEqual({request_id:requestId,phase,status:phase==="response_headers"?null:phase==="response_status"?409:200,
+    elapsed_ms:phase==="response_headers"?10:20,response_headers_ms:phase==="response_headers"?null:10,after_headers_ms:phase==="response_headers"?null:10,
+    caller_signal_aborted:false,combined_signal_aborted:false});
+  expect(raw).not.toMatch(/private|filters|credential|nonce|server error|analytics\//);
+});
+
+it("reports caller cancellation as a signal observation, preserving its exact rejection", async()=>{
+  const controller=new AbortController();
+  const reason=new DOMException("private navigation reason","AbortError");
+  const output=vi.spyOn(console,"info").mockImplementation(()=>{});
+  const warning=vi.spyOn(console,"warn").mockImplementation(()=>{});
+  vi.spyOn(globalThis,"fetch").mockImplementation(async()=>{controller.abort(reason);throw reason;});
+  await expect(controlRequest(path,{...init,signal:controller.signal})).rejects.toBe(reason);
+  expect(JSON.parse(output.mock.calls[0][1])).toMatchObject({phase:"response_headers",caller_signal_aborted:true,combined_signal_aborted:true});
+  expect(JSON.stringify(output.mock.calls)).not.toContain("private navigation reason");
+  expect(warning).not.toHaveBeenCalled();
+});
+
+it("leaves ordinary API failures unlogged by the management diagnostic", async()=>{
+  const reason=Error("private error");
+  const output=vi.spyOn(console,"info").mockImplementation(()=>{});
+  vi.spyOn(globalThis,"fetch").mockRejectedValue(reason);
+  await expect(controlRequest("/v1/other")).rejects.toBe(reason);
+  await expect(controlRequest(path,{...init,method:"POST"})).rejects.toBe(reason);
+  expect(output).not.toHaveBeenCalled();
 });
 
 it("retains metadata only out of band and ignores non-object inputs", () => {
