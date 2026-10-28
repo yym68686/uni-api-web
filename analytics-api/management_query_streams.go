@@ -99,6 +99,8 @@ func readManagementScopedStreams(ctx context.Context, db controlQueryDB, owner s
 	if err != nil {
 		return nil, "", err
 	}
+	stages := newManagementReadTimeline(ctx, "signal_model_order")
+	defer stages.finish()
 	// PostgreSQL COLLATE "C" orders UTF-8 text by bytes, exactly like Go's
 	// string comparison. Preserve the existing revision byte stream verbatim.
 	slices.SortFunc(models, func(a, b managementStreamModel) int {
@@ -113,6 +115,7 @@ func readManagementScopedStreams(ctx context.Context, db controlQueryDB, owner s
 		}
 		return strings.Compare(a.item.Model.Model, b.item.Model.Model)
 	})
+	stages.next("signal_model_expand")
 	out := make([]managementModelSignals, 0, len(models))
 	hash := sha256.New()
 	writer := newManagementRevisionWriter(hash)
@@ -135,6 +138,7 @@ func readManagementScopedStreams(ctx context.Context, db controlQueryDB, owner s
 	if compact {
 		return out, compactRevision, ctx.Err()
 	}
+	stages.next("signal_revision_finish")
 	revision, err := finishManagementModelRevision(ctx, db, owner, hash)
 	if err != nil {
 		return nil, "", err
@@ -143,6 +147,8 @@ func readManagementScopedStreams(ctx context.Context, db controlQueryDB, owner s
 }
 
 func readManagementStreamModels(ctx context.Context, db controlQueryDB, owner string, strict bool, scope managementStreamScope) ([]managementStreamModel, []string, error) {
+	stages := newManagementReadTimeline(ctx, "signal_model_directory")
+	defer stages.finish()
 	rows, err := db.QueryContext(ctx, managementModelSourceStreamSQL, owner)
 	if err != nil {
 		return nil, nil, err
@@ -168,6 +174,7 @@ func readManagementStreamModels(ctx context.Context, db controlQueryDB, owner st
 	if err != nil {
 		return nil, nil, err
 	}
+	stages.next("signal_model_scope")
 	fallback := map[string]bool{}
 	fallbackGroups := []subBoundKey{}
 	wanted := map[string]bool{}
@@ -197,6 +204,7 @@ func readManagementStreamModels(ctx context.Context, db controlQueryDB, owner st
 		query += ` AND (p.model=ANY($2::text[]) OR EXISTS(SELECT 1 FROM jsonb_to_recordset($3::jsonb) AS g(account_id text,group_id bigint) WHERE g.account_id=p.account_id AND g.group_id=p.group_id))`
 		args = append(args, scope.Names, string(raw))
 	}
+	stages.next("signal_model_predicates")
 	rows, err = db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, nil, err
@@ -243,6 +251,7 @@ func readManagementStreamModels(ctx context.Context, db controlQueryDB, owner st
 	if err := rows.Err(); err != nil {
 		return nil, nil, err
 	}
+	stages.next("signal_model_verify")
 	for _, model := range out {
 		if len(model.evidence) != sha256.Size && (!scope.CompactRevision || scope.Model == "" || wanted[model.item.Model.Model] || fallback[qualityGroupID(model.item.Account, model.item.Group)]) {
 			return nil, nil, errManagementPredicateFallback
