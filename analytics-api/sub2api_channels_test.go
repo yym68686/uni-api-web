@@ -194,27 +194,29 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 	if _, err = lock.Exec("LOCK TABLE console_sub_usage IN ACCESS EXCLUSIVE MODE"); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	r := httptest.NewRequest("GET", "/v1/sub2api/channels?view=bindings&source_id="+source, nil).WithContext(ctx)
-	r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: session})
-	fast := httptest.NewRecorder()
-	s.Handler().ServeHTTP(fast, r)
-	cancel()
-	if fast.Code != 200 {
-		t.Fatal("bindings waited for billing", fast.Code, fast.Body.String())
-	}
 	var bindingView struct {
 		Data   []subInstalledChannel        `json:"data"`
 		Labels map[string]map[string]string `json:"labels"`
 	}
-	if err := json.Unmarshal(fast.Body.Bytes(), &bindingView); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(bindingView.Data, listing.Data) || !reflect.DeepEqual(bindingView.Labels, listing.Labels) {
-		t.Fatal("binding semantics changed")
-	}
-	if strings.Contains(fast.Body.String(), "model_billing") || strings.Contains(fast.Body.String(), "multipliers") {
-		t.Fatal("bindings claimed billing evidence")
+	for _, query := range []string{"view=bindings", "view=bindings&source_id=" + source} {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		r := httptest.NewRequest("GET", "/v1/sub2api/channels?"+query, nil).WithContext(ctx)
+		r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: session})
+		fast := httptest.NewRecorder()
+		s.Handler().ServeHTTP(fast, r)
+		cancel()
+		if fast.Code != 200 {
+			t.Fatal("bindings waited for billing", fast.Code, fast.Body.String())
+		}
+		if err := json.Unmarshal(fast.Body.Bytes(), &bindingView); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(bindingView.Data, listing.Data) || !reflect.DeepEqual(bindingView.Labels, listing.Labels) {
+			t.Fatal("binding semantics changed")
+		}
+		if strings.Contains(fast.Body.String(), "model_billing") || strings.Contains(fast.Body.String(), "multipliers") {
+			t.Fatal("bindings claimed billing evidence")
+		}
 	}
 	if err := lock.Rollback(); err != nil {
 		t.Fatal(err)

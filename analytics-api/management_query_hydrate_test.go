@@ -126,6 +126,35 @@ func TestManagementHydrationRemainsInsidePredicateSnapshot(t *testing.T) {
 	}
 }
 
+func TestManagementHydrationPreservesByteOrderedModelsAndLegacySummary(t *testing.T) {
+	s := managementHydrationFixture(t)
+	ctx := context.Background()
+	if _, err := s.control.db.Exec(`INSERT INTO console_sub_models(account_id,group_id,model,state,result)
+ SELECT 'a',1,m,'done',jsonb_build_object('model',m,'availability',jsonb_build_object('status','success','ttft_ms',456))
+ FROM unnest(ARRAY['Z-model','a-model','é-model','模型🙂']) m;
+ DELETE FROM console_sub_model_summaries WHERE account_id='a' AND group_id=1 AND model='模型🙂'`); err != nil {
+		t.Fatal(err)
+	}
+	f := managementQueryFilters{GroupStatus: "all", Model: "gpt-5.5"}
+	page, err := s.readManagementQuerySnapshot(ctx, "owner", f, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	full, err := s.readManagementQuerySnapshot(ctx, "owner", f, "", true)
+	if err != nil || !reflect.DeepEqual(page.Page.Rows, full.Page.Rows) {
+		t.Fatal("streaming page changed model order or omitted legacy evidence", err)
+	}
+	models := page.Page.Rows[0].Target.Models
+	for i := 1; i < len(models); i++ {
+		if models[i-1].Model >= models[i].Model {
+			t.Fatal("model names lost byte ordering")
+		}
+	}
+	if last := models[len(models)-1]; last.Model != "模型🙂" || last.Result == nil || *last.Result.Availability.TTFT != 456 {
+		t.Fatal("legacy summary was not preserved")
+	}
+}
+
 func TestManagementProjectedReadFallsBackToFullDecoderWithoutFalseError(t *testing.T) {
 	s := managementHydrationFixture(t)
 	ctx := context.Background()

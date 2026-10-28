@@ -239,10 +239,13 @@ func (s *Service) subAttachUsageFrom(ctx context.Context, db controlQueryDB, own
 	for id := range probes {
 		ids = append(ids, id)
 	}
+	readTrace := newManagementRowsTrace(ctx, "page_receipts")
+	defer readTrace.finish()
 	rows, err := db.QueryContext(ctx, `SELECT u.id,u.status,u.result FROM console_sub_usage u JOIN console_sub_accounts a ON a.id=u.account_id WHERE a.owner=$1 AND u.id=ANY($2)`, owner, ids)
 	if err != nil {
 		return err
 	}
+	readTrace.queryReady()
 	defer rows.Close()
 	// Publish only after the entire receipt read succeeds. An interrupted read
 	// cannot leave a mixture of current receipts and older embedded probe usage.
@@ -254,10 +257,13 @@ func (s *Service) subAttachUsageFrom(ctx context.Context, db controlQueryDB, own
 			return err
 		}
 		usage := &subUsage{Status: status}
+		decodeStart := readTrace.decodeStart()
 		if len(raw) > 0 {
-			if err := json.Unmarshal(raw, usage); err != nil {
-				return err
-			}
+			err = json.Unmarshal(raw, usage)
+		}
+		readTrace.decoded(decodeStart, len(raw))
+		if err != nil {
+			return err
 		}
 		current[id] = usage
 	}

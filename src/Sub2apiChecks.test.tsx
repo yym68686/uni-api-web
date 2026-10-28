@@ -90,7 +90,7 @@ it("filters joined routes independently of the selected model and opens optimiza
     calls.push(init?.method||"GET");
     if(input.endsWith("/accounts"))return Response.json({data});
     if(input.endsWith("/sources"))return Response.json({data:[{id:"primary",name:"Fugue"}]});
-    if(input.endsWith("/sub2api/channels"))return Response.json({data:[installed],labels:{},unavailable_sources:[]});
+    if(new URL(input).pathname.endsWith("/sub2api/channels"))return Response.json({data:[installed],labels:{},unavailable_sources:[]});
     if(input.endsWith("/channel-routes"))return Response.json({revision:"r1",snapshot_consistent:true,manageable:true,atomic_batch:true,optimize_batch:true,unavailable_keys:[],data:[{provider:"import-one",model:"gpt-5.5",upstream_model:"gpt-5.5",api_key_id:"key",key_position:1,position:1,key_prefix:"masked"}]});
     return Response.json({data:[],unavailable_sources:[]});
   }));
@@ -1711,7 +1711,7 @@ it("lists imported keys, replaces exact models and deletes only the chosen bindi
         };
       else if (input.endsWith("/v1/sources"))
         reply = { data: [{ id: "source", name: "Gateway" }] };
-      else if (input.endsWith("/v1/sub2api/channels")) {
+      else if (new URL(input).pathname.endsWith("/v1/sub2api/channels")) {
         if (init?.method === "PATCH") {
           const body = JSON.parse(init.body as string);
           writes.push(body);

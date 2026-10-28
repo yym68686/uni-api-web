@@ -380,11 +380,12 @@ it.each([
 it("submits the import form on page two and reconciles that same page after the write",async()=>{
  const probe={status:"success",text:"fixture",ttft_ms:1,duration_ms:2,protocol:"responses" as const};
  const result={model:"gpt-5.5",checked_at:1,availability:probe,quality:probe,verdict:"not_applicable"};
- const cursors:string[]=[];let posts=0,finish!:(response:Response)=>void;
+ const cursors:string[]=[];let posts=0,bindingReads=0,finish!:(response:Response)=>void;
  const readyPage=(offset:number)=>{const p=page(offset);return {...p,rows:p.rows.map(r=>({...r,target:{...r.target,models:[{model:"gpt-5.5",state:"done",message:"",result}]},checks:[{model:"gpt-5.5",state:"done",message:"",result}]}))};};
  vi.stubGlobal("fetch",vi.fn(async(input:string,init?:RequestInit)=>{
   const url=new URL(input),path=url.pathname;
   if(path.endsWith("/sub2api/channels")&&init?.method==="POST"){posts++;return Response.json({message:"已添加"});}
+  if(path.endsWith("/sub2api/channels")){bindingReads++;expect(url.searchParams.get("view")).toBe("bindings");return Response.json({data:[],labels:{},unavailable_sources:[]});}
   if(path.endsWith("/accounts/progress"))return idleProgress();
   if(path.endsWith("/channel-management/query")){
    const cursor=url.searchParams.get("cursor")||"";cursors.push(cursor);
@@ -405,6 +406,7 @@ it("submits the import form on page two and reconciles that same page after the 
  await user.click(within(row).getByRole("button",{name:"添加到渠道"}));
  const d=within(screen.getByRole("dialog"));
  expect(cursors).toEqual(["","25"]);
+ expect(bindingReads).toBe(1);
  await user.selectOptions(d.getByLabelText("添加到 uni-api 来源"),"fixture");
  await waitFor(()=>expect(d.getByLabelText("添加到 API key")).toBeEnabled());
  await user.selectOptions(d.getByLabelText("添加到 API key"),"fixture-key");

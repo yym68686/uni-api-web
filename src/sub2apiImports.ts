@@ -80,6 +80,20 @@ export function useSubImports(enabled = true) {
     refetchInterval: enabled ? 60000 : false,
   });
 }
+
+// Import dialogs consume bindings and revisions, not the billing-rate ledger.
+// Keep this cache distinct so a narrow response cannot replace a full listing.
+export function useImportBindings(enabled = true) {
+  return useQuery({
+    queryKey: ["sub2api-imports", "bindings"],
+    queryFn: ({ signal }) =>
+      controlRequest<SubImports>("/v1/sub2api/channels?view=bindings", { signal }),
+    enabled,
+    retry: false,
+    staleTime: 5000,
+    refetchInterval: enabled ? 60000 : false,
+  });
+}
 export type SubImportsQuery = ReturnType<typeof useSubImports>;
 
 // Model editors need the selected source's binding/revision, not the global

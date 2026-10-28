@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"sort"
 )
 
 // Predicates determine the complete result first. Only the page's groups and
@@ -53,15 +54,18 @@ func (s *Service) hydrateManagementPageFrom(ctx context.Context, db controlQuery
 		if err != nil {
 			return err
 		}
+		readTrace := newManagementRowsTrace(ctx, "page_models")
+		defer func() { readTrace.finish() }()
 		rows, err := db.QueryContext(ctx, `SELECT m.account_id,m.group_id,m.model,m.state,m.message,COALESCE(ms.result,console_sub_model_summary_v1(m.result))
  FROM jsonb_to_recordset($2::jsonb) AS wanted(account_id text,group_id bigint)
  JOIN console_sub_models m USING(account_id,group_id)
  JOIN console_sub_accounts a ON a.id=m.account_id
  LEFT JOIN console_sub_model_summaries ms USING(account_id,group_id,model)
- WHERE a.owner=$1 ORDER BY m.account_id COLLATE "C",m.group_id,m.model COLLATE "C"`, owner, string(raw))
+ WHERE a.owner=$1`, owner, string(raw))
 		if err != nil {
 			return err
 		}
+		readTrace.queryReady()
 		for rows.Next() {
 			var account string
 			var group int64
@@ -70,10 +74,13 @@ func (s *Service) hydrateManagementPageFrom(ctx context.Context, db controlQuery
 			if err = rows.Scan(&account, &group, &model.Model, &model.State, &model.Message, &raw); err != nil {
 				break
 			}
+			decodeStart := readTrace.decodeStart()
 			if len(raw) > 0 {
-				if err = json.Unmarshal(raw, &model.Result); err != nil {
-					break
-				}
+				err = json.Unmarshal(raw, &model.Result)
+			}
+			readTrace.decoded(decodeStart, len(raw))
+			if err != nil {
+				break
 			}
 			compactSubModelResult(model.Result)
 			if target := index[qualityGroupID(account, group)]; target != nil {
@@ -84,8 +91,18 @@ func (s *Service) hydrateManagementPageFrom(ctx context.Context, db controlQuery
 			err = rows.Err()
 		}
 		rows.Close()
+		readTrace.finish()
+		readTrace = nil
 		if err != nil {
 			return err
+		}
+		// Sorting the complete JSON rows in PostgreSQL spills page evidence to
+		// disk. Only each target's model order is observable; preserve its UTF-8
+		// COLLATE "C" order with the same byte ordering in Go after streaming.
+		for _, target := range index {
+			sort.Slice(target.Models, func(i, j int) bool {
+				return target.Models[i].Model < target.Models[j].Model
+			})
 		}
 		stages.next("hydrate_queue")
 		if err = s.subAttachQueuedChecksFrom(ctx, db, owner, subset); err != nil {

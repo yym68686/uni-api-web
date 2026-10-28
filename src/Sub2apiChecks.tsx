@@ -29,7 +29,7 @@ import { AccountForm } from "./SiteAccountForm";
 import { ResponseLatency } from "./LatencyBadge";
 import { Empty, Spinner, Tip } from "./ui";
 import { loadSubFilters, saveSubFilters, subFilterDefaults } from "./sub2apiPreferences";
-import { useSubImports, boundGroups } from "./sub2apiImports";
+import { useImportBindings, boundGroups } from "./sub2apiImports";
 import { Sub2apiImport } from "./Sub2apiImport";
 import { CreateChannel } from "./CreateChannel";
 import { ChannelOptimization } from "./ChannelOptimization";
@@ -819,7 +819,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
     target: SubTarget;
     configured?: ManagedChannel;
   } | null>(null);
-  const dialogImports=useSubImports(!!importing);
+  const dialogImports=useImportBindings(!!importing);
   const imports={data:displayedPage?{data:displayedPage.context.imports,labels:{},unavailable_sources:[]}:undefined};
   const [error, setError] = useState("");
   const [action, setAction] = useState("");
