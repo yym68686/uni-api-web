@@ -159,14 +159,21 @@ func readManagementStreamModels(ctx context.Context, db controlQueryDB, owner st
 		model   string
 	}
 	out := []managementStreamModel{}
-	positions := map[identity]int{}
+	var positions map[identity]int
+	// The compact catalog returns before predicates are joined. It does not
+	// consume an identity index for any of the directory's model rows.
+	if !scope.CompactRevision || !scope.CatalogOnly {
+		positions = map[identity]int{}
+	}
 	for rows.Next() {
 		var model managementStreamModel
 		if err := rows.Scan(&model.item.Account, &model.item.Group, &model.item.Model.Model, &model.item.Model.State, &model.message); err != nil {
 			rows.Close()
 			return nil, nil, err
 		}
-		positions[identity{model.item.Account, model.item.Group, model.item.Model.Model}] = len(out)
+		if positions != nil {
+			positions[identity{model.item.Account, model.item.Group, model.item.Model.Model}] = len(out)
+		}
 		out = append(out, model)
 	}
 	err = rows.Err()
