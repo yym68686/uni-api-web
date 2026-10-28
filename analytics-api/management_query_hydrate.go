@@ -137,7 +137,7 @@ func (s *Service) hydrateManagementPageFrom(ctx context.Context, db controlQuery
 			}
 		}
 	}
-	fullRows, err := buildManagementQueryRows(view.Input, filters.Model, filters.AccountID)
+	fullRows, err := buildHydratedManagementRows(view.Input, groups, filters.Model, filters.AccountID)
 	if err != nil {
 		return err
 	}
@@ -153,4 +153,31 @@ func (s *Service) hydrateManagementPageFrom(ctx context.Context, db controlQuery
 		page.Rows[i] = full
 	}
 	return ctx.Err()
+}
+
+// Filtering, revision and selection have already used the complete model
+// catalog. This final pass only replaces page rows. Do not reconstruct every
+// off-page model check again. Retain every configured binding, including those
+// outside the page: legacy rows can share an ID across different engines and
+// the existing replacement map deliberately keeps its last row. Keep all target
+// headers, capabilities and configured checks so binding selection and off-page
+// decode errors remain identical. The original complete view is not modified.
+func buildHydratedManagementRows(in managementQueryInput, groups map[string]bool, model, account string) ([]managementQueryRow, error) {
+	bound := make(map[string]bool, len(in.Channels))
+	for _, channel := range in.Channels {
+		bound[qualityGroupID(channel.AccountID, channel.GroupID)] = true
+	}
+	in.Accounts = append([]subAccount(nil), in.Accounts...)
+	for i := range in.Accounts {
+		a := &in.Accounts[i]
+		a.Targets = append([]subTarget(nil), a.Targets...)
+		for j := range a.Targets {
+			t := &a.Targets[j]
+			id := qualityGroupID(a.ID, t.GroupID)
+			if !groups[id] && !bound[id] {
+				t.Models = nil
+			}
+		}
+	}
+	return buildManagementQueryRows(in, model, account)
 }
