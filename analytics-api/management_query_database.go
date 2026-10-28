@@ -201,7 +201,7 @@ func normalizeManagementAccounts(accounts []subAccount) error {
 			target := &accounts[i].Targets[j]
 			models := target.Models
 			target.Models = nil
-			raw, err := json.Marshal(compactSummary(*target))
+			raw, err := json.Marshal(compactManagementTargetMetadata(*target))
 			if err != nil {
 				return err
 			}
