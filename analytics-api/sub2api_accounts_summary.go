@@ -1,5 +1,7 @@
 package main
 
+import "unicode/utf8"
+
 // Models dominate account summaries (over 100,000 rows for some owners).
 // Project them directly into the existing wire shape instead of marshaling
 // detail structs into maps and recursively walking those maps. Target metadata
@@ -24,9 +26,22 @@ func compactAccountTarget(target subTarget) any {
 }
 
 func summaryMessage(message string) string {
-	runes := []rune(message)
-	if len(runes) > 160 {
-		return string(runes[:160]) + "…"
+	if len(message) <= 160 {
+		return message
+	}
+	count := 0
+	for offset := range message {
+		if count == 160 {
+			prefix := message[:offset]
+			// Converting the original to []rune replaced invalid UTF-8 in a
+			// truncated prefix. Keep that exact behavior, without traversing
+			// or allocating storage for the discarded suffix.
+			if !utf8.ValidString(prefix) {
+				prefix = string([]rune(prefix))
+			}
+			return prefix + "…"
+		}
+		count++
 	}
 	return message
 }
