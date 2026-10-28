@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"log"
 	"slices"
-	"strings"
 )
 
 // Keep model and receipt streams narrow. Joining both receipt roles in SQL
@@ -120,23 +119,16 @@ func readManagementScopedStreams(ctx context.Context, db controlQueryDB, owner s
 	defer stages.finish()
 	// PostgreSQL COLLATE "C" orders UTF-8 text by bytes, exactly like Go's
 	// string comparison. Preserve the existing revision byte stream verbatim.
-	slices.SortFunc(models, func(a, b managementStreamModel) int {
-		if c := strings.Compare(a.item.Account, b.item.Account); c != 0 {
-			return c
-		}
-		if a.item.Group < b.item.Group {
-			return -1
-		}
-		if a.item.Group > b.item.Group {
-			return 1
-		}
-		return strings.Compare(a.item.Model.Model, b.item.Model.Model)
-	})
+	order := managementOrderedStreamModels(models)
 	stages.next("signal_model_expand")
 	out := make([]managementModelSignals, 0, len(models))
 	hash := sha256.New()
 	writer := newManagementRevisionWriter(hash)
-	for _, model := range models {
+	for i := range models {
+		model := &models[i]
+		if order != nil {
+			model = order[i]
+		}
 		var receiptDigest, qualityDigest []byte
 		if r, ok := receipts[model.probe]; ok {
 			receiptDigest = r.evidence
