@@ -201,12 +201,28 @@ func normalizeManagementAccounts(accounts []subAccount) error {
 			target := &accounts[i].Targets[j]
 			models := target.Models
 			target.Models = nil
-			raw, err := json.Marshal(compactManagementTargetMetadata(*target))
+			metadata := *target
+			rates := target.ObservedRates
+			copyRates := managementCanCopyObservedRates(rates)
+			if copyRates {
+				metadata.ObservedRates = nil
+			}
+			compacted := compactManagementTargetMetadata(metadata)
+			raw, err := json.Marshal(compacted)
 			if err != nil {
 				return err
 			}
 			*target = subTarget{}
-			if err := json.Unmarshal(raw, target); err != nil {
+			err = json.Unmarshal(raw, target)
+			if copyRates && compacted != nil && len(rates) > 0 {
+				// The old roundtrip cloned the map. Do not alias shared evidence,
+				// or restore rates when invalid metadata compacted to JSON null.
+				target.ObservedRates = make(map[string]subObservedRate, len(rates))
+				for model, rate := range rates {
+					target.ObservedRates[model] = rate
+				}
+			}
+			if err != nil {
 				return err
 			}
 			for k := range models {

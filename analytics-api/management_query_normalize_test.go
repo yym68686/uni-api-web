@@ -11,12 +11,22 @@ import (
 // Keep the pre-optimization decoder as an independent behavior/performance
 // baseline. It intentionally includes the discarded legacy reply in the JSON.
 func legacyNormalizeManagementAccounts(accounts []subAccount) error {
+	return normalizeManagementAccountsJSONBaseline(accounts, func(target subTarget) any { return compactSummary(target) })
+}
+
+// The immediately preceding production implementation, before rates bypassed
+// the roundtrip. Keep all its normalization and partial-error behavior intact.
+func previousNormalizeManagementAccounts(accounts []subAccount) error {
+	return normalizeManagementAccountsJSONBaseline(accounts, compactManagementTargetMetadata)
+}
+
+func normalizeManagementAccountsJSONBaseline(accounts []subAccount, compact func(subTarget) any) error {
 	for i := range accounts {
 		for j := range accounts[i].Targets {
 			target := &accounts[i].Targets[j]
 			models := target.Models
 			target.Models = nil
-			raw, err := json.Marshal(compactSummary(*target))
+			raw, err := json.Marshal(compact(*target))
 			if err != nil {
 				return err
 			}

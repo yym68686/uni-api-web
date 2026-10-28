@@ -1,6 +1,26 @@
 package main
 
-import "math"
+import (
+	"math"
+	"unicode/utf8"
+)
+
+// Ordinary observed rates contain only finite floats and exactly representable
+// timestamps. Copy those scalar values outside the generic JSON/map roundtrip.
+// Unusual model keys or numbers retain the old compactor, including its recursive
+// reserved-key handling, UTF-8 replacement and float64 integer conversion.
+func managementCanCopyObservedRates(rates map[string]subObservedRate) bool {
+	for model, rate := range rates {
+		if !utf8.ValidString(model) || math.IsNaN(rate.Rate) || math.IsInf(rate.Rate, 0) || rate.ObservedAt > 1<<53 || rate.ObservedAt < -(1<<53) {
+			return false
+		}
+		switch model {
+		case "curl_token", "text", "id", "started_at", "request_ids", "request_id", "log_id", "created_at", "attempts", "message", "usage":
+			return false
+		}
+	}
+	return true
+}
 
 // The legacy group result can contain large reply bodies. Project it before
 // the generic JSON compactor instead of serializing the bodies only to discard
