@@ -2280,10 +2280,12 @@ it("detects unassigned configured channels without site keys and isolates busy s
   expect(writes.at(-1)).toEqual({kind:"quality",targets:[{source_id:"fugue",provider:"native-one",models:["gpt-6-astra"]},{source_id:"fugue",provider:"native-two",models:["gpt-6-astra"]}]});
   await user.click(screen.getByRole("button",{name:"压缩检测 · 2 个渠道"}));
   expect(writes.at(-1).targets).toHaveLength(2);
-  await user.click(screen.getByRole("button",{name:"检测全部模型 · 2 个渠道"}));
-  expect(writes.at(-1)).toEqual({kind:"check",targets:[{source_id:"fugue",provider:"native-one",models:[...SUB_MODELS,"custom-model"]},{source_id:"fugue",provider:"native-two",models:[...SUB_MODELS,"custom-model"]}]});
+  await user.click(screen.getByRole("button",{name:`检测已选 ${SUB_MODELS.length} 个模型 · 2 个渠道`}));
+  expect(writes.at(-1)).toEqual({kind:"check",targets:[{source_id:"fugue",provider:"native-one",models:[...SUB_MODELS]},{source_id:"fugue",provider:"native-two",models:[...SUB_MODELS]}]});
   await user.selectOptions(screen.getByLabelText("检测模型筛选"),"custom-model");
   const updatedFirst=within((await screen.findByText("native-one",{selector:"strong"})).closest("tr")!);
+  await user.click(updatedFirst.getByRole("button",{name:"检测 未归属渠道 native-one"}));
+  expect(writes.at(-1)).toEqual({kind:"check",targets:[{source_id:"fugue",provider:"native-one",models:["custom-model"]}]});
   await waitFor(()=>expect(updatedFirst.getByText("可用")).toBeVisible());
   await user.click(updatedFirst.getByRole("button",{name:"查看 未归属渠道 native-one 的回复与诊断"}));
   const dialog=within(screen.getByRole("dialog"));
@@ -2303,8 +2305,8 @@ it("shows scoped extra models and submits exactly the checked models to native a
  await screen.findByText('native',{selector:'strong'});
  await user.click(screen.getByRole('button',{name:'检测模型设置'}));
  let d=within(screen.getByRole('dialog'));
- expect(d.getByRole('group',{name:'额外模型选择'})).toHaveTextContent('已选 2 / 2');
- expect(d.getByRole('checkbox',{name:'custom-model'})).toBeChecked();
+ expect(d.getByRole('group',{name:'额外模型选择'})).toHaveTextContent('已选 0 / 2');
+ expect(d.getByRole('checkbox',{name:'custom-model'})).not.toBeChecked();
  await user.click(d.getByRole('button',{name:'清空内置模型'}));
  await user.click(d.getByRole('button',{name:'清空额外模型'}));
  for(const m of ['gpt-6-sol','second-model'])await user.click(d.getByRole('checkbox',{name:m}));

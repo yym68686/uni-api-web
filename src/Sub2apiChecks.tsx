@@ -45,7 +45,7 @@ import type { CompactionResult } from "./SubCompaction";
 import { ToolUseStatus, toolUseLabels, toolUseDescription } from "./SubToolUse";
 import type { ToolUseResult } from "./SubToolUse";
 import {modelToolUse} from "./toolUse";
-import { SUB_MODELS, loadSubModels, saveSubModels } from "./sub2apiModels";
+import { SUB_MODELS, initializeSubModels, loadSubModels, saveSubModels, subModelSelectionNeedsReview } from "./sub2apiModels";
 import { SubModelSettings } from "./SubModelSettings";
 import {
   modelChecks,
@@ -837,6 +837,8 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   const extraModels=availableModels.filter(m=>!SUB_MODELS.includes(m));
   const modelSelectionKey = JSON.stringify(availableModels);
   const detectionModels = useMemo(() => loadSubModels(user, JSON.parse(modelSelectionKey)), [user, modelSelectionKey, modelSelectionRevision]);
+  const modelSelectionNeedsReview = subModelSelectionNeedsReview(user);
+  useEffect(() => initializeSubModels(user, JSON.parse(modelSelectionKey)), [user, modelSelectionKey]);
   // An explicit model filter is a direct probe request. Saved checkbox choices
   // only define the batch when no individual model is selected.
   const modelsToCheck = model ? [model] : detectionModels;
@@ -1038,6 +1040,11 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
             {syncSubmitted.count
               ? `已提交 ${syncSubmitted.count} 个账号，${syncSubmitted.detect ? "正在后台同步并检测。" : "正在后台同步，不执行检测。"}`
               : "暂无可同步账号，已有任务会继续执行。"}
+          </p>
+        )}
+        {modelSelectionNeedsReview && (
+          <p className="settings-note" role="status">
+            检测模型设置已安全迁移：旧设置无法确认额外模型是否在保存时已存在，因此额外模型暂未勾选。请检查检测模型设置后再运行批量检测。
           </p>
         )}
         {syncSubmitted !== null && <p className="settings-note">任务进度实时更新。渠道列表保留当前展示，点击“刷新渠道管理”读取最新检测结果。</p>}
