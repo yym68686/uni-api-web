@@ -112,12 +112,17 @@ func (s *controlStore) subChannelRefsForAccountFrom(ctx context.Context, db cont
 }
 func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 	owner, _ := s.controlUser(r)
+	bindingsOnly := summaryView(r) == "bindings"
+	if bindingsOnly {
+		r = r.WithContext(managementTraceContext(r.Context()))
+	}
+	stages := newManagementReadTimeline(r.Context(), "bindings_refs")
+	defer stages.finish()
 	refs, e := s.control.subChannelRefs(r.Context(), owner)
 	if e != nil {
 		http.Error(w, "渠道关联读取失败", 503)
 		return
 	}
-	bindingsOnly := summaryView(r) == "bindings"
 	if !bindingsOnly {
 		observed, err := s.control.subObservedRates(r.Context(), owner)
 		if err != nil {
@@ -128,6 +133,7 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 			refs[index].ObservedRates = observed[qualityGroupID(refs[index].Account, refs[index].Group)]
 		}
 	}
+	stages.next("bindings_sources")
 	sources, e := s.control.listSources(r.Context())
 	if e != nil {
 		http.Error(w, "来源列表读取失败", 503)
@@ -154,6 +160,7 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 		Error       string
 	}
 	results := make([]sourceResult, len(sources))
+	stages.next("bindings_gateways")
 	slots := make(chan struct{}, 4)
 	var wg sync.WaitGroup
 	for i, source := range sources {
@@ -181,11 +188,17 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 			readers.Add(3)
 			go func() {
 				defer readers.Done()
+				defer managementReadSpan(r.Context(), "bindings_gateway_controls")()
 				stateMap, _, stateErr = subGateway(r.Context(), src, "GET", "/v1/channel-controls", nil)
 			}()
-			go func() { defer readers.Done(); keysMap, _, keysErr = fetchSource(r.Context(), src, "/v1/api-keys", nil) }()
 			go func() {
 				defer readers.Done()
+				defer managementReadSpan(r.Context(), "bindings_gateway_keys")()
+				keysMap, _, keysErr = fetchSource(r.Context(), src, "/v1/api-keys", nil)
+			}()
+			go func() {
+				defer readers.Done()
+				defer managementReadSpan(r.Context(), "bindings_gateway_catalog")()
 				catalogMap, _, _ = fetchSource(r.Context(), src, "/v1/model-channels", url.Values{"endpoint": {"all"}, "stream": {"all"}})
 			}()
 			readers.Wait()
@@ -289,6 +302,7 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 		}(i, source)
 	}
 	wg.Wait()
+	stages.next("bindings_configured")
 	data := []subInstalledChannel{}
 	labels := map[string]map[string]string{}
 	unavailable := []string{}
@@ -337,6 +351,7 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 		}
 		return data[i].KeyID+data[i].Provider < data[j].KeyID+data[j].Provider
 	})
+	stages.next("bindings_encode")
 	if bindingsOnly {
 		writeJSON(w, 200, map[string]any{"data": data, "labels": labels, "unavailable_sources": unavailable, "scope_source_id": r.URL.Query().Get("source_id")})
 		return

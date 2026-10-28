@@ -26,11 +26,43 @@ func consoleAlwaysObservedRead(method, path string) string {
 	if path == "/v1/channel-management/query" {
 		return "GET /v1/channel-management/query"
 	}
+	if path == "/v1/sub2api/channels" {
+		return "GET /v1/sub2api/channels"
+	}
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	if len(parts) == 4 && parts[0] == "v1" && parts[1] == "sources" && parts[2] != "" && parts[3] == "channel-checks" {
 		return "GET /v1/sources/{id}/channel-checks"
 	}
 	return ""
+}
+
+// Return only fixed read categories, never parameter/header contents. The
+// ledger and import dialog share a route; route-only timings cannot establish
+// which one improved. A first page includes both navigation and filter reads.
+func consoleObservedReadKind(r *http.Request) string {
+	if r.Method != http.MethodGet {
+		return "none"
+	}
+	switch r.URL.Path {
+	case "/v1/sub2api/channels":
+		if summaryView(r) == "bindings" {
+			return "import_bindings"
+		}
+		return "channel_ledger"
+	case "/v1/channel-management/query":
+		query := r.URL.Query()
+		if query.Get("selection") != "" {
+			return "management_selection"
+		}
+		if query.Get("cursor") != "" {
+			if query.Get("refresh_cursor") == "1" {
+				return "management_page_refresh"
+			}
+			return "management_page"
+		}
+		return "management_first_page"
+	}
+	return "none"
 }
 
 func consoleRequestID(ctx context.Context) string {
@@ -81,8 +113,9 @@ func observeConsoleRequests(next http.Handler) http.Handler {
 		out := &observedResponse{ResponseWriter: w}
 		start := time.Now()
 		tracked := consoleAlwaysObservedRead(r.Method, r.URL.Path)
+		kind := consoleObservedReadKind(r)
 		if tracked != "" {
-			log.Printf("console_request_started request_id=%s route=%q received_at_ms=%d", id, tracked, start.UnixMilli())
+			log.Printf("console_request_started request_id=%s route=%q received_at_ms=%d read_kind=%s", id, tracked, start.UnixMilli(), kind)
 		}
 		next.ServeHTTP(out, r)
 		finished := time.Now()
@@ -94,6 +127,6 @@ func observeConsoleRequests(next http.Handler) http.Handler {
 		if pattern == "" {
 			pattern = "unmatched"
 		}
-		log.Printf("console_request request_id=%s route=%q status=%d elapsed_ms=%d response_bytes=%d canceled=%t received_at_ms=%d finished_at_ms=%d", id, pattern, out.status, elapsed.Milliseconds(), out.bytes, r.Context().Err() != nil, start.UnixMilli(), finished.UnixMilli())
+		log.Printf("console_request request_id=%s route=%q status=%d elapsed_ms=%d response_bytes=%d canceled=%t received_at_ms=%d finished_at_ms=%d read_kind=%s", id, pattern, out.status, elapsed.Milliseconds(), out.bytes, r.Context().Err() != nil, start.UnixMilli(), finished.UnixMilli(), kind)
 	})
 }

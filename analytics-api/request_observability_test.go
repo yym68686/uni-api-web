@@ -53,10 +53,10 @@ func TestInteractiveReadsLogFastCompletionWithoutSensitivePaths(t *testing.T) {
 	log.SetOutput(&logs)
 	defer log.SetOutput(previous)
 	mux := http.NewServeMux()
-	for _, route := range []string{"GET /v1/analytics", "GET /v1/channel-management/query", "GET /v1/sources/{id}/channel-checks", "GET /healthz"} {
+	for _, route := range []string{"GET /v1/analytics", "GET /v1/channel-management/query", "GET /v1/sub2api/channels", "GET /v1/sources/{id}/channel-checks", "GET /healthz"} {
 		mux.HandleFunc(route, func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(`{"data":[]}`)) })
 	}
-	for _, path := range []string{"/v1/analytics?key=private-key", "/v1/channel-management/query?filters=private-filter&selection=private-token", "/v1/sources/private-account/channel-checks?token=private-key"} {
+	for _, path := range []string{"/v1/analytics?key=private-key", "/v1/channel-management/query?filters=private-filter&selection=private-token", "/v1/sources/private-account/channel-checks?token=private-key", "/v1/sub2api/channels?view=bindings&source_id=private-source"} {
 		logs.Reset()
 		r := httptest.NewRequest(http.MethodGet, path, nil)
 		r.Header.Set("Authorization", "Bearer private-token")
@@ -76,5 +76,29 @@ func TestInteractiveReadsLogFastCompletionWithoutSensitivePaths(t *testing.T) {
 	observeConsoleRequests(mux).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/healthz", nil))
 	if logs.Len() != 0 {
 		t.Fatal("routine health probes became verbose")
+	}
+}
+
+func TestObservedReadKindsAreFixedAndUseHandlerViewPrecedence(t *testing.T) {
+	for _, tc := range []struct{ path, view, kind string }{
+		{"/v1/sub2api/channels?view=bindings&source_id=private-source", "", "import_bindings"},
+		{"/v1/sub2api/channels?view=private-view", "bindings", "import_bindings"},
+		{"/v1/sub2api/channels?view=bindings", "private-view", "channel_ledger"},
+		{"/v1/sub2api/channels", "", "channel_ledger"},
+		{"/v1/channel-management/query?filters=private-filter", "", "management_first_page"},
+		{"/v1/channel-management/query?cursor=private-token", "", "management_page"},
+		{"/v1/channel-management/query?cursor=private-token&refresh_cursor=1", "", "management_page_refresh"},
+		{"/v1/channel-management/query?selection=private-token&cursor=private-cursor", "", "management_selection"},
+		{"/v1/sources/private-source/proxy/private-path?view=bindings", "", "none"},
+	} {
+		r := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		r.Header.Set("X-Console-View", tc.view)
+		if got := consoleObservedReadKind(r); got != tc.kind {
+			t.Fatalf("read classification differs: got=%q want=%q", got, tc.kind)
+		}
+		r.Method = http.MethodPost
+		if got := consoleObservedReadKind(r); got != "none" {
+			t.Fatal("write request classified as a read", got)
+		}
 	}
 }

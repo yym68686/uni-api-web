@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -198,7 +200,12 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 		Data   []subInstalledChannel        `json:"data"`
 		Labels map[string]map[string]string `json:"labels"`
 	}
+	var trace bytes.Buffer
+	previousLog := log.Writer()
+	log.SetOutput(&trace)
+	defer log.SetOutput(previousLog)
 	for _, query := range []string{"view=bindings", "view=bindings&source_id=" + source} {
+		trace.Reset()
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		r := httptest.NewRequest("GET", "/v1/sub2api/channels?"+query, nil).WithContext(ctx)
 		r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: session})
@@ -217,7 +224,21 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 		if strings.Contains(fast.Body.String(), "model_billing") || strings.Contains(fast.Body.String(), "multipliers") {
 			t.Fatal("bindings claimed billing evidence")
 		}
+		for _, stage := range []string{"bindings_refs", "bindings_sources", "bindings_gateways", "bindings_gateway_controls", "bindings_gateway_keys", "bindings_gateway_catalog", "bindings_configured", "bindings_encode"} {
+			if !strings.Contains(trace.String(), "stage="+stage+" ") {
+				t.Fatal("bindings read lost timing stage", stage)
+			}
+		}
+		if strings.Count(trace.String(), "read_kind=import_bindings") != 2 {
+			t.Fatal("fast bindings request lost start/completion classification")
+		}
+		for _, private := range []string{source, account, key, gateway.URL, "admin-secret", "routing-secret", "panel-secret"} {
+			if strings.Contains(trace.String(), private) {
+				t.Fatal("bindings timing leaked a private value")
+			}
+		}
 	}
+	log.SetOutput(previousLog)
 	if err := lock.Rollback(); err != nil {
 		t.Fatal(err)
 	}
