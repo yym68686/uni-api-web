@@ -163,14 +163,14 @@ func (s *Service) currentManagementPagingPage(ctx context.Context, owner string,
 	response := managementPageResponse{Owner: owner, managementQueryPage: page, Accounts: managementAccountHeaders(view.Input.Accounts), SelectionToken: encode(0), Context: managementContextForPage(view, page, filters.Model)}
 	// Do not hold a database connection while encoding the retained response.
 	_ = tx.Rollback()
-	// Hydration produced the same complete response as the cold path. Retain it
-	// with THIS transaction's proof, so revisiting a page does not repeat model
-	// and receipt reads. Every reuse still performs live current-proof checks.
+	// Build the canonical representation once; use the same complete columns for
+	// the response and retained page. rememberManagementColumnPage independently
+	// clones the bytes so neither caller nor response can mutate retained state.
 	current.Facts, current.CurrentExport = entry.Proof.Facts, entry.Proof.CurrentExport
 	cacheCursor := cursor
 	if rebase {
 		cacheCursor += "\x00refresh"
 	}
-	s.rememberManagementPage(managementComputedKey(owner, filters, cacheCursor), &current, response)
+	response.preparedColumns = s.rememberManagementPage(managementComputedKey(owner, filters, cacheCursor), &current, response)
 	return response, true, nil
 }

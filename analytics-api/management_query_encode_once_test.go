@@ -163,7 +163,7 @@ func BenchmarkManagementFreshWriteAndStore(b *testing.B) {
 	proof := &managementFreshProof{Stamp: "current"}
 	r := httptest.NewRequest("GET", "/", nil)
 	r.Header.Set("Accept", managementPageV3MediaType)
-	for _, name := range []string{"previous_twice", "shared_once"} {
+	for _, name := range []string{"previous_twice", "shared_once", "paging_shared_once"} {
 		b.Run(name, func(b *testing.B) {
 			b.ReportAllocs()
 			for n := 0; n < b.N; n++ {
@@ -175,8 +175,12 @@ func BenchmarkManagementFreshWriteAndStore(b *testing.B) {
 					if err == nil {
 						s.rememberManagementPage("page", proof, page)
 					}
-				} else {
+				} else if name == "shared_once" {
 					err = s.writeAndRememberManagementPage(w, r, page, "page", proof)
+				} else {
+					prepared := page
+					prepared.preparedColumns = s.rememberManagementPage("page", proof, page)
+					err = writeManagementPage(w, r, prepared)
 				}
 				if err != nil || len(s.managementComputed.pages) != 1 {
 					b.Fatal("invalid output", err)

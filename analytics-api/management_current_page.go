@@ -131,15 +131,23 @@ func (s *Service) managementReadProof(ctx context.Context, db controlQueryDB, ow
 	return proof, now, nil
 }
 
-func (s *Service) rememberManagementPage(key string, proof *managementFreshProof, page managementPageResponse) {
+// Return request-local columns for callers that still need to deliver the page.
+// Retention deep-clones them independently and keeps its existing failure rules.
+func (s *Service) rememberManagementPage(key string, proof *managementFreshProof, page managementPageResponse) *managementColumnPage {
 	if proof == nil || proof.Stamp == "" {
-		return
+		return nil
 	}
 	columns, err := encodeManagementColumnPage(page)
 	if err != nil {
-		return
+		return nil
 	}
 	s.rememberManagementColumnPage(key, proof, columns)
+	// The live prepared-page helper normalizes nil Rows to an empty slice.
+	// Keep the original write path for this legacy shape, including JSON null.
+	if columns.Rows == nil {
+		return nil
+	}
+	return &columns
 }
 
 func (s *Service) rememberManagementColumnPage(key string, proof *managementFreshProof, columns managementColumnPage) {

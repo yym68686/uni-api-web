@@ -175,6 +175,9 @@ func TestManagementHydratedPagingResponseIsRetainedWithCurrentProof(t *testing.T
 		if err != nil || !ok || page.Offset != managementPageSize {
 			t.Fatal("paging fixture failed", err)
 		}
+		if page.preparedColumns == nil {
+			t.Fatal("hydrated pagination discarded its already encoded columns")
+		}
 		if rebase {
 			cursor += "\x00refresh"
 		}
