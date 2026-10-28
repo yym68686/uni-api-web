@@ -179,11 +179,7 @@ func readManagementStreamModels(ctx context.Context, db controlQueryDB, owner st
 	fallbackGroups := []subBoundKey{}
 	wanted := map[string]bool{}
 	if scope.Model != "" {
-		catalog := make([]managementModelSignals, len(out))
-		for i := range out {
-			catalog[i] = out[i].item
-		}
-		fallbackGroups = managementScopeFallbackGroups(scope.Model, catalog)
+		fallbackGroups = managementStreamFallbackGroups(scope.Model, out)
 		for _, g := range fallbackGroups {
 			fallback[qualityGroupID(g.AccountID, g.GroupID)] = true
 		}

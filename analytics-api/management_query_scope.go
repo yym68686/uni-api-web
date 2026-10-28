@@ -59,6 +59,19 @@ func managementScopeFallbackGroups(model string, catalog []managementModelSignal
 	return out
 }
 
+func managementStreamFallbackGroups(model string, models []managementStreamModel) []subBoundKey {
+	// The existing fallback contract is independent of the model directory for
+	// built-in models. Check that before allocating/copying the complete stream.
+	if slices.Contains(subModels, model) {
+		return []subBoundKey{}
+	}
+	catalog := make([]managementModelSignals, len(models))
+	for i := range models {
+		catalog[i] = models[i].item
+	}
+	return managementScopeFallbackGroups(model, catalog)
+}
+
 // Catalog entries without predicate results are private assembly inputs only.
 // Every visible page group and bound alias is fully hydrated before publishing;
 // complete action selections continue to read every model's full evidence.
