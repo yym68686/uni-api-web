@@ -81,17 +81,30 @@ func managementBillingRate(row managementQueryRow, model string) managementRate 
 		advertised = subValidCost(row.Target.Billing.Rate)
 	}
 	upstream := model
-	allowed := map[string]bool{}
 	if row.Configured != nil {
 		upstream = managementUpstream(row.Configured.managementChannel, model)
+	}
+	out := managementRate{Rate: advertised}
+	if upstream != "" {
+		// An explicit upstream admits exactly one map key. Do not build the
+		// all-model allowlist or scan unrelated billing evidence. A valid
+		// observation still replaces the advertised rate even when lower.
+		if rate, exists := row.Target.ObservedRates[upstream]; exists && subValidCost(&rate.Rate) != nil {
+			value := rate.Rate
+			out.Rate = &value
+			out.Mismatch = advertised != nil && math.Abs(value-*advertised) > math.Max(1e-9, math.Abs(*advertised)*1e-9)
+		}
+		return out
+	}
+	allowed := map[string]bool{}
+	if row.Configured != nil {
 		for _, name := range row.Configured.Models {
 			allowed[managementUpstream(row.Configured.managementChannel, name)] = true
 		}
 	}
-	out := managementRate{Rate: advertised}
 	observed := false
 	for name, rate := range row.Target.ObservedRates {
-		if subValidCost(&rate.Rate) == nil || upstream != "" && name != upstream || upstream == "" && row.Configured != nil && !allowed[name] {
+		if subValidCost(&rate.Rate) == nil || row.Configured != nil && !allowed[name] {
 			continue
 		}
 		value := rate.Rate
