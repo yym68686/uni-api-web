@@ -116,11 +116,7 @@ func encodeManagementPage(page managementPageResponse) (managementWirePage, erro
 func writeManagementPage(w http.ResponseWriter, r *http.Request, page managementPageResponse) error {
 	w.Header().Add("Vary", "Accept")
 	if r.Header.Get("Accept") == managementPageV3MediaType {
-		if r.Header.Get("X-Console-Current-Validation") == "1" {
-			// ReadAt is dynamic response metadata. The representation remains
-			// byte-identical while every delivered header attests THIS read.
-			w.Header().Set("X-Console-Read-At-Ms", strconv.FormatInt(page.ReadAtMS, 10))
-			w.Header().Set("X-Console-Validated-Request-ID", consoleRequestID(r.Context()))
+		if managementColumnReadHeaders(w, r, page.ReadAtMS) {
 			page.ReadAtMS = 0
 		}
 		wire, err := currentManagementColumnPage(page)
@@ -139,4 +135,51 @@ func writeManagementPage(w http.ResponseWriter, r *http.Request, page management
 		return err
 	}
 	return writeManagementJSONMedia(w, r, wire, managementPageV2MediaType)
+}
+
+func managementColumnReadHeaders(w http.ResponseWriter, r *http.Request, at int64) bool {
+	if r.Header.Get("X-Console-Current-Validation") != "1" {
+		return false
+	}
+	// ReadAt is dynamic response metadata. Every delivered header attests this
+	// read while the representation can stay byte-identical for HTTP validation.
+	w.Header().Set("X-Console-Read-At-Ms", strconv.FormatInt(at, 10))
+	w.Header().Set("X-Console-Validated-Request-ID", consoleRequestID(r.Context()))
+	return true
+}
+
+// Fresh v3 responses and their bounded cache entry need the SAME complete
+// columns. Encode once, then independently serialize for HTTP and deep-clone
+// for retention. Keep the original read time in the store even when HTTP moves
+// it into validation headers. Older clients retain their existing path.
+func (s *Service) writeAndRememberManagementPage(w http.ResponseWriter, r *http.Request, page managementPageResponse, key string, proof *managementFreshProof) error {
+	if r.Header.Get("Accept") != managementPageV3MediaType {
+		err := writeManagementPage(w, r, page)
+		if err == nil {
+			s.rememberManagementPage(key, proof, page)
+		}
+		return err
+	}
+	w.Header().Add("Vary", "Accept")
+	headerTime := managementColumnReadHeaders(w, r, page.ReadAtMS)
+	endColumns := managementReadSpan(r.Context(), "response_columns")
+	columns, err := encodeManagementColumnPage(page)
+	endColumns()
+	if err != nil {
+		http.Error(w, "渠道响应编码失败", http.StatusInternalServerError)
+		return err
+	}
+	delivered := columns
+	if headerTime {
+		delivered.ReadAtMS = 0
+	}
+	endWrite := managementReadSpan(r.Context(), "response_write")
+	err = writeManagementJSONMedia(w, r, delivered, managementPageV3MediaType)
+	endWrite()
+	if err == nil {
+		endStore := managementReadSpan(r.Context(), "response_store")
+		s.rememberManagementColumnPage(key, proof, columns)
+		endStore()
+	}
+	return err
 }

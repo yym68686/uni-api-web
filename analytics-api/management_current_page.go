@@ -135,16 +135,23 @@ func (s *Service) rememberManagementPage(key string, proof *managementFreshProof
 	if proof == nil || proof.Stamp == "" {
 		return
 	}
+	columns, err := encodeManagementColumnPage(page)
+	if err != nil {
+		return
+	}
+	s.rememberManagementColumnPage(key, proof, columns)
+}
+
+func (s *Service) rememberManagementColumnPage(key string, proof *managementFreshProof, columns managementColumnPage) {
+	if proof == nil || proof.Stamp == "" {
+		return
+	}
 	// Persist one complete lossless representation. JSON roundtrip discards
 	// the wire structs' shadowed legacy fields, which otherwise retain the
 	// entire expanded result graph in addition to the columns. Admission must
 	// measure this retained representation: expanded rows repeat each model's
 	// evidence in targets/checks/selection and can exceed the budget while the
 	// canonical columns fit comfortably inside it.
-	columns, err := encodeManagementColumnPage(page)
-	if err != nil {
-		return
-	}
 	encodedColumns, err := json.Marshal(columns)
 	if err != nil {
 		return
