@@ -74,9 +74,17 @@ func (s *Service) hydrateManagementPageFrom(ctx context.Context, db controlQuery
 		if err != nil {
 			return err
 		}
-		readTrace := newManagementRowsTrace(ctx, "page_models")
+		query, args, err := managementPageModelQuery(ctx, db, owner, wanted, raw)
+		if err != nil {
+			return err
+		}
+		stage := "page_models"
+		if query == managementPageDirectoryModelsSQL {
+			stage = "page_model_summaries"
+		}
+		readTrace := newManagementRowsTrace(ctx, stage)
 		defer func() { readTrace.finish() }()
-		rows, err := db.QueryContext(ctx, managementPageModelsSQL, owner, string(raw))
+		rows, err := db.QueryContext(ctx, query, args...)
 		if err != nil {
 			return err
 		}
