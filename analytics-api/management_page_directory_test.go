@@ -289,8 +289,21 @@ func TestManagementPagingReusesOnlyCurrentResidentModelDirectory(t *testing.T) {
 		}
 		output.Reset()
 		got, ok, err := s.currentManagementPagingPage(ctx, "owner", f, first.Page.NextCursor, false)
-		if err != nil || !ok || !reflect.DeepEqual(got.Rows, want.Page.Rows) || got.Revision != want.Page.Revision || !reflect.DeepEqual(got.Context, managementContextForPage(want.View, want.Page, f.Model)) {
-			t.Fatal("paging changed complete public data", resident, err)
+		if err != nil || !ok {
+			t.Fatal("paging did not accept its current proof", resident, ok, err, output.String())
+		}
+		if !reflect.DeepEqual(got.Rows, want.Page.Rows) {
+			t.Fatalf("paging changed rows resident=%t got=%s want=%s", resident, mustJSON(got.Rows), mustJSON(want.Page.Rows))
+		}
+		if got.Revision != want.Page.Revision {
+			t.Fatal("paging changed revision", resident, got.Revision, want.Page.Revision)
+		}
+		// Paging restores prices from JSON. Compare their complete public
+		// representation, not time.Time's private location pointer (pgx may use
+		// time.Local for UTC while JSON restores time.UTC for the same instant).
+		if mustJSON(got.Context) != mustJSON(managementContextForPage(want.View, want.Page, f.Model)) {
+			expected := managementContextForPage(want.View, want.Page, f.Model)
+			t.Fatalf("paging changed context resident=%t got=%s want=%s", resident, mustJSON(got.Context), mustJSON(expected))
 		}
 		if reused := strings.Contains(output.String(), "management_page_model_directory reuse=true"); reused != resident {
 			t.Fatal("paging reread a verified source directory or used an absent one", resident, output.String())
