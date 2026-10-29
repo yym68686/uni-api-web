@@ -70,52 +70,23 @@ func (s *Service) hydrateManagementPageFrom(ctx context.Context, db controlQuery
 				index[qualityGroupID(subset[i].ID, target.GroupID)] = target
 			}
 		}
-		raw, err := json.Marshal(wanted)
-		if err != nil {
-			return err
-		}
-		query, args, err := managementPageModelQuery(ctx, db, owner, wanted, raw)
-		if err != nil {
-			return err
-		}
-		stage := "page_models"
-		if query == managementPageDirectoryModelsSQL {
-			stage = "page_model_summaries"
-		}
-		readTrace := newManagementRowsTrace(ctx, stage)
-		defer func() { readTrace.finish() }()
-		rows, err := db.QueryContext(ctx, query, args...)
-		if err != nil {
-			return err
-		}
-		readTrace.queryReady()
-		for readTrace.next(rows) {
-			var account string
-			var group int64
-			var model subModelResult
-			var raw []byte
-			if err = rows.Scan(&account, &group, &model.Model, &model.State, &model.Message, &raw); err != nil {
-				break
-			}
+		err := readManagementPageModelStream(ctx, db, owner, wanted, func(row managementPageModelRecord, readTrace *managementRowsTrace) error {
+			model := subModelResult{Model: row.model, State: row.state, Message: row.message}
 			decodeStart := readTrace.decodeStart()
-			if len(raw) > 0 {
-				err = json.Unmarshal(raw, &model.Result)
+			var err error
+			if len(row.result) > 0 {
+				err = json.Unmarshal(row.result, &model.Result)
 			}
-			readTrace.decoded(decodeStart, len(raw))
+			readTrace.decoded(decodeStart, len(row.result))
 			if err != nil {
-				break
+				return err
 			}
 			compactSubModelResult(model.Result)
-			if target := index[qualityGroupID(account, group)]; target != nil {
+			if target := index[qualityGroupID(row.account, row.group)]; target != nil {
 				target.Models = append(target.Models, model)
 			}
-		}
-		if err == nil {
-			err = rows.Err()
-		}
-		rows.Close()
-		readTrace.finish()
-		readTrace = nil
+			return nil
+		})
 		if err != nil {
 			return err
 		}

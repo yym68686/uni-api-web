@@ -39,6 +39,7 @@ type Service struct {
 	targetStreams      managementTargetStreams
 	rateSnapshots      managementRateSnapshots
 	receiptSets        managementReceiptSets
+	pageModelStreams   managementPageModelStreams
 }
 
 type cachedAnalytics struct {
