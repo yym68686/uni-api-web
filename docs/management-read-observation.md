@@ -67,6 +67,15 @@ independent typed maps. `rate_rows` and `rate_raw_rows` split actual prepared an
 fallback SQL timing. A cache hit skips only the rate query, not any page,
 permission, receipt, gateway or source validation.
 
+`management_receipt_set_cache` may reuse one completed selected-ID receipt
+projection only for the exact deduplicated ID set, strictness, owner, database
+and same current read-only RR proof. It additionally requires the projection's
+`complete` flag in that transaction, then checks cancellation normally. Only
+the bounded (up to 4096 IDs) selected-ID query is eligible; larger owner scans,
+detail endpoints and unpinned reads keep their original SQL. Missing IDs remain
+missing and still flow through the original raw fallback. It uses at most eight
+entries and 8 MiB; responses are independently reconstructed typed maps.
+
 Only whitelisted counters, state/wait labels, fixed query classes and correlated
 request IDs are emitted. No raw SQL, query parameters, business identities,
 payloads, subprocess errors, connection strings or credentials are printed.

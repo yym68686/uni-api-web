@@ -111,6 +111,7 @@ func (s *Service) readManagementQuerySnapshotMode(ctx context.Context, owner str
 			proof.CurrentExport = managementHasCompleteCurrentExport(facts)
 			out.Proof = &proof
 			ctx = context.WithValue(ctx, managementRateScopeKey{}, managementRateScopeFromProof(&s.rateSnapshots, s.control.db, tx, owner, proof))
+			ctx = context.WithValue(ctx, managementReceiptSetScopeKey{}, managementReceiptSetScopeFromProof(&s.receiptSets, s.control.db, tx, owner, proof))
 			directory.accountRevision = proof.Epochs["console_sub_accounts"]
 			ctx = context.WithValue(ctx, managementTargetScopeKey{}, &managementTargetScope{
 				store: &s.targetStreams, tx: tx,

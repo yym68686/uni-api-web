@@ -96,6 +96,7 @@ func readManagementScopedStreams(ctx context.Context, db controlQueryDB, owner s
 	if !complete {
 		return nil, "", errManagementPredicateFallback
 	}
+	enableManagementReceiptSetScope(ctx, db, complete)
 	compactRevision, compact, err := readManagementCompactRevision(ctx, db, owner)
 	if err != nil {
 		return nil, "", err
@@ -291,6 +292,12 @@ func readManagementModelSourceDirectory(ctx context.Context, db controlQueryDB, 
 }
 
 func readManagementStreamReceipts(ctx context.Context, db controlQueryDB, owner string, ids []string, strict bool) (map[string]managementStreamReceipt, error) {
+	return readManagementReceiptSet(ctx, db, owner, ids, strict, func() (map[string]managementStreamReceipt, error) {
+		return readManagementStreamReceiptsUncached(ctx, db, owner, ids, strict)
+	})
+}
+
+func readManagementStreamReceiptsUncached(ctx context.Context, db controlQueryDB, owner string, ids []string, strict bool) (map[string]managementStreamReceipt, error) {
 	out := make(map[string]managementStreamReceipt)
 	if len(ids) == 0 {
 		return out, ctx.Err()

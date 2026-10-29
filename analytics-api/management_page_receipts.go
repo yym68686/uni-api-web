@@ -27,6 +27,7 @@ func (s *Service) attachManagementPageSummaryUsageFrom(ctx context.Context, db c
 	if !complete {
 		return s.attachManagementPageUsageFrom(ctx, db, owner, accounts, reuse)
 	}
+	enableManagementReceiptSetScope(ctx, db, complete)
 	current := reuse.current(db, owner)
 	ids := make([]string, 0, len(probes))
 	for id := range probes {

@@ -38,6 +38,7 @@ type Service struct {
 	modelDirectories   managementModelDirectories
 	targetStreams      managementTargetStreams
 	rateSnapshots      managementRateSnapshots
+	receiptSets        managementReceiptSets
 }
 
 type cachedAnalytics struct {
