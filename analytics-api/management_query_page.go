@@ -123,26 +123,7 @@ func buildManagementQueryPageFromFilteredRowsMode(in managementQueryInput, filte
 	page := managementQueryPage{Format: "management-page-v1", PageSize: managementPageSize, ReadAtMS: readAt.UnixMilli(), Rows: []managementQueryRow{}}
 	page.Rates, page.Platforms = filtered.Rates, filtered.Platforms
 	page.Total, page.EligibleCount = len(filtered.Rows), len(managementEligibleRows(filtered.Rows))
-	models := append([]string{}, subModels...)
-	for _, c := range in.Channels {
-		models = append(models, c.Models...)
-	}
-	for _, c := range in.Checks {
-		if c.Kind == "model" {
-			models = append(models, c.Model)
-		}
-	}
-	for _, a := range in.Accounts {
-		for _, target := range a.Targets {
-			for _, check := range target.Models {
-				models = append(models, check.Model)
-			}
-		}
-	}
-	if filters.Model != "" {
-		models = append(models, filters.Model)
-	}
-	page.Models = managementUnique(models)
+	page.Models = managementPageModelCatalog(in, filters.Model)
 	extra := []string{}
 	for _, row := range filtered.Rows {
 		for _, check := range row.Checks {
@@ -207,4 +188,40 @@ func buildManagementQueryPageFromFilteredRowsMode(in managementQueryInput, filte
 		page.PreviousCursor = encode(max(0, page.Offset-managementPageSize))
 	}
 	return page, nil
+}
+
+// Preserve the old catalog's first-seen order without first retaining every
+// repeated model name across the complete management directory.
+func managementPageModelCatalog(in managementQueryInput, selected string) []string {
+	models, seen := []string{}, map[string]bool{}
+	add := func(model string) {
+		if !seen[model] {
+			seen[model] = true
+			models = append(models, model)
+		}
+	}
+	for _, model := range subModels {
+		add(model)
+	}
+	for _, channel := range in.Channels {
+		for _, model := range channel.Models {
+			add(model)
+		}
+	}
+	for _, check := range in.Checks {
+		if check.Kind == "model" {
+			add(check.Model)
+		}
+	}
+	for _, account := range in.Accounts {
+		for _, target := range account.Targets {
+			for _, check := range target.Models {
+				add(check.Model)
+			}
+		}
+	}
+	if selected != "" {
+		add(selected)
+	}
+	return models
 }

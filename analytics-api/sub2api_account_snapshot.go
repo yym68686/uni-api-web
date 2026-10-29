@@ -93,18 +93,22 @@ func (s *Service) readSubAccountDetailsWithReadersFrom(ctx context.Context, db c
 		capabilityJoin = " LEFT JOIN console_sub_capability_summaries cs ON cs.account_id=t.account_id AND cs.group_id=t.group_id"
 		capabilityColumns = "CASE WHEN cs.account_id IS NULL THEN console_sub_capability_summary_v1(t.compaction) ELSE cs.compaction END,t.compaction_state,CASE WHEN cs.account_id IS NULL THEN console_sub_capability_summary_v1(t.tool_use) ELSE cs.tool_use END,t.tool_use_state"
 	}
+	readTrace := newManagementRowsTrace(ctx, "target_rows")
+	defer func() { readTrace.finish() }()
 	rows, err := db.QueryContext(ctx, `SELECT t.account_id,t.group_id,t.name,t.platform,t.channel,t.rate,t.remote_key_id,t.active,t.state,t.message,t.result,t.billing,`+historyColumns+`,`+capabilityColumns+` FROM console_sub_targets t JOIN console_sub_accounts a ON a.id=t.account_id`+historyJoin+capabilityJoin+` WHERE a.owner=$1 AND ($2='' OR a.id=$2) AND ($3=0 OR t.group_id=$3) ORDER BY t.group_id`, owner, accountID, groupID)
 	if err != nil {
 		return subAccountReadFailure{"检测结果暂不可用", err}
 	}
+	readTrace.queryReady()
 	defer rows.Close()
-	for rows.Next() {
+	for readTrace.next(rows) {
 		var id string
 		var t subTarget
 		var raw, billingRaw, compactionRaw, toolUseRaw []byte
 		if err = rows.Scan(&id, &t.GroupID, &t.Name, &t.Platform, &t.Channel, &t.Rate, &t.KeyID, &t.Active, &t.State, &t.Message, &raw, &billingRaw, &t.History.Total, &t.History.Successful, &t.History.Passed, &compactionRaw, &t.CompactionState, &toolUseRaw, &t.ToolUseState); err != nil {
 			break
 		}
+		decodeStart := readTrace.decodeStart()
 		if len(toolUseRaw) > 0 {
 			if err = json.Unmarshal(toolUseRaw, &t.ToolUse); err != nil {
 				break
@@ -126,6 +130,7 @@ func (s *Service) readSubAccountDetailsWithReadersFrom(ctx context.Context, db c
 				break
 			}
 		}
+		readTrace.decoded(decodeStart, len(raw)+len(billingRaw)+len(compactionRaw)+len(toolUseRaw))
 		if i, ok := index[id]; ok {
 			if projection, exists := shared.Groups[qualityGroupID(id, t.GroupID)]; exists {
 				t.History = projection.History
@@ -144,6 +149,10 @@ func (s *Service) readSubAccountDetailsWithReadersFrom(ctx context.Context, db c
 		return subAccountReadFailure{"检测结果读取失败", err}
 	}
 	rows.Close()
+	// End this stream before model, receipt, and rate readers begin. Otherwise
+	// its elapsed time would include those later queries and misattribute work.
+	readTrace.finish()
+	readTrace = nil
 	stages.next("database_models")
 	trace.next("models")
 	if readModels != nil {

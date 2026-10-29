@@ -40,6 +40,13 @@ on that backend; they are **not per-query I/O counters or I/O timings**. Older
 servers report `backend_io: null`. The tool does not enable `track_io_timing`,
 force a statistics flush, install extensions, or change execution modes.
 
+The request's `management_rows_read stage=target_rows` separates query-ready,
+row-advance and JSON-decoding time for target metadata. Its byte count covers
+result, billing, compaction and tool-use JSON from successfully decoded rows;
+it is not a wire-byte or disk-read counter. The trace finishes before later
+model, receipt and rate readers. Query-ready and advance include database,
+driver and network work and must not be described as disk-I/O durations.
+
 Only whitelisted counters, state/wait labels, fixed query classes and correlated
 request IDs are emitted. No raw SQL, query parameters, business identities,
 payloads, subprocess errors, connection strings or credentials are printed.
