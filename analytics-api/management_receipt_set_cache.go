@@ -68,6 +68,15 @@ func enableManagementReceiptSetScope(ctx context.Context, db controlQueryDB, com
 	}
 }
 
+func managementReceiptSetScopeFor(ctx context.Context, db controlQueryDB, owner string, ids []string) *managementReceiptSetScope {
+	scope, _ := ctx.Value(managementReceiptSetScopeKey{}).(*managementReceiptSetScope)
+	tx, pinned := db.(*sql.Tx)
+	if scope == nil || scope.store == nil || !scope.complete.Load() || !pinned || tx == nil || tx != scope.tx || scope.version.database == nil || owner != scope.version.owner || scope.version.stamp == "" || len(ids) == 0 || len(ids) > 4096 {
+		return nil
+	}
+	return scope
+}
+
 func (c *managementReceiptSets) get(version managementReceiptSetVersion) *managementReceiptSet {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -109,9 +118,8 @@ func (c *managementReceiptSets) put(entry *managementReceiptSet) {
 // Only encoded values are retained, so evidence bytes and numeric pointers are
 // independently reconstructed on a hit. Large owner scans stay on their reader.
 func readManagementReceiptSet(ctx context.Context, db controlQueryDB, owner string, ids []string, strict bool, read func() (map[string]managementStreamReceipt, error)) (map[string]managementStreamReceipt, error) {
-	scope, _ := ctx.Value(managementReceiptSetScopeKey{}).(*managementReceiptSetScope)
-	tx, pinned := db.(*sql.Tx)
-	if scope == nil || scope.store == nil || !scope.complete.Load() || !pinned || tx == nil || tx != scope.tx || scope.version.database == nil || owner != scope.version.owner || scope.version.stamp == "" || len(ids) == 0 || len(ids) > 4096 {
+	scope := managementReceiptSetScopeFor(ctx, db, owner, ids)
+	if scope == nil {
 		return read()
 	}
 	if err := ctx.Err(); err != nil {

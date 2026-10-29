@@ -310,7 +310,21 @@ func readManagementModelSourceDirectory(ctx context.Context, db controlQueryDB, 
 
 func readManagementStreamReceipts(ctx context.Context, db controlQueryDB, owner string, ids []string, strict bool) (map[string]managementStreamReceipt, error) {
 	return readManagementReceiptSet(ctx, db, owner, ids, strict, func() (map[string]managementStreamReceipt, error) {
-		return readManagementStreamReceiptsUncached(ctx, db, owner, ids, strict)
+		known, missing, err := managementReceiptSubset(ctx, db, owner, ids)
+		if err != nil {
+			return nil, err
+		}
+		out, err := readManagementStreamReceiptsUncached(ctx, db, owner, missing, strict)
+		if err != nil {
+			return nil, err
+		}
+		for id, receipt := range known {
+			out[id] = receipt
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return out, nil
 	})
 }
 
