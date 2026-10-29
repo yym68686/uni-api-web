@@ -211,12 +211,19 @@ func readManagementStreamModels(ctx context.Context, db controlQueryDB, owner st
 		return out, []string{}, ctx.Err()
 	}
 	if scope.CompactRevision && scope.Model != "" {
-		raw, err := json.Marshal(fallbackGroups)
-		if err != nil {
-			return nil, nil, err
+		if len(fallbackGroups) == 0 {
+			// EXISTS over an empty fallback is false. Omit that subplan so
+			// PostgreSQL need not estimate an opaque JSON recordset or JIT it.
+			query += ` AND p.model=ANY($2::text[])`
+			args = append(args, scope.Names)
+		} else {
+			raw, err := json.Marshal(fallbackGroups)
+			if err != nil {
+				return nil, nil, err
+			}
+			query += ` AND (p.model=ANY($2::text[]) OR EXISTS(SELECT 1 FROM jsonb_to_recordset($3::jsonb) AS g(account_id text,group_id bigint) WHERE g.account_id=p.account_id AND g.group_id=p.group_id))`
+			args = append(args, scope.Names, string(raw))
 		}
-		query += ` AND (p.model=ANY($2::text[]) OR EXISTS(SELECT 1 FROM jsonb_to_recordset($3::jsonb) AS g(account_id text,group_id bigint) WHERE g.account_id=p.account_id AND g.group_id=p.group_id))`
-		args = append(args, scope.Names, string(raw))
 	}
 	stages.next("signal_model_predicates")
 	readTrace := newManagementRowsTraceDerivedDecode(ctx, "model_signal_rows")

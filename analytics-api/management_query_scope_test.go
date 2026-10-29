@@ -2,13 +2,75 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
+
+type managementEmptyFallbackComparison struct {
+	controlQueryDB
+	legacy bool
+	args   int
+}
+
+func (d *managementEmptyFallbackComparison) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	if strings.HasPrefix(query, managementModelStreamSQL) {
+		d.args = len(args)
+		if d.legacy && len(args) == 2 {
+			query = managementModelStreamSQL + ` AND (p.model=ANY($2::text[]) OR EXISTS(SELECT 1 FROM jsonb_to_recordset($3::jsonb) AS g(account_id text,group_id bigint) WHERE g.account_id=p.account_id AND g.group_id=p.group_id))`
+			args = append(args, "[]")
+		}
+	}
+	return d.controlQueryDB.QueryContext(ctx, query, args...)
+}
+
+func TestManagementEmptyFallbackMatchesLegacyScopedRows(t *testing.T) {
+	s := managementHydrationFixture(t)
+	ctx := context.Background()
+	compare := func(model string, names []string, expectedArgs int) {
+		t.Helper()
+		for _, owner := range []string{"owner", "foreign"} {
+			tx, err := s.control.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			func() {
+				defer tx.Rollback()
+				legacy := &managementEmptyFallbackComparison{controlQueryDB: tx, legacy: true}
+				current := &managementEmptyFallbackComparison{controlQueryDB: tx}
+				scope := managementStreamScope{Model: model, Names: names, CompactRevision: true}
+				want, wantIDs, err := readManagementStreamModels(ctx, legacy, owner, true, scope)
+				if err != nil {
+					t.Fatal(err)
+				}
+				got, gotIDs, err := readManagementStreamModels(ctx, current, owner, true, scope)
+				if err != nil || !reflect.DeepEqual(got, want) || !reflect.DeepEqual(gotIDs, wantIDs) {
+					t.Fatal("empty fallback optimization changed complete model or receipt inputs", err)
+				}
+				expected := expectedArgs
+				if owner == "foreign" {
+					expected = 2 // No owned groups can need the missing-model fallback.
+				}
+				if current.args != expected {
+					t.Fatalf("empty fallback still retained a JSON subplan: got=%d want=%d", current.args, expected)
+				}
+			}()
+		}
+	}
+	compare("gpt-5.5", []string{"gpt-5.5", "extra-model", "gpt-5.5"}, 2)
+	compare("gpt-5.5", []string{}, 2)
+	compare("gpt-5.5", nil, 2)
+	compare("extra-model", []string{"extra-model", "gpt-6-astra"}, 2)
+	if _, err := s.control.db.Exec(`DELETE FROM console_sub_models WHERE group_id=61 AND model='extra-model'`); err != nil {
+		t.Fatal(err)
+	}
+	compare("extra-model", []string{"extra-model", "gpt-6-astra"}, 3)
+}
 
 func TestManagementScopedPredicatesPreserveBrowserFilterContract(t *testing.T) {
 	var fixture struct {

@@ -58,6 +58,10 @@ in-memory assembly rather than JSON decoding. This avoids extra clock reads
 per row. Directory `bytes` counts the returned account/model/state/message
 strings; model-signal `bytes` counts evidence digests. Neither is a complete
 wire-byte or disk-read counter.
+When the exact model scope has no missing-model fallback groups, its predicate
+SQL omits the always-false JSON-recordset branch. Nonempty fallback groups
+retain the existing complete branch; owner checks, projection verification,
+aliases, compact revision proof and full-directory assembly are unchanged.
 
 Management may reuse raw target metadata only when the current repeatable-read
 transaction proves the same owner, database, account, target and capability
