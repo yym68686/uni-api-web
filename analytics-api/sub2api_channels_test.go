@@ -241,6 +241,46 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 			}
 		}
 	}
+	for _, cookie := range []string{session, foreign} {
+		r := httptest.NewRequest("GET", "/v1/sub2api/channels?view=bindings&account_id="+account+"&group_id=7", nil)
+		r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: cookie})
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		if w.Code != 200 {
+			t.Fatal("scoped binding read failed", w.Code)
+		}
+		var got struct {
+			Data   []subInstalledChannel        `json:"data"`
+			Labels map[string]map[string]string `json:"labels"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		if cookie == foreign {
+			if len(got.Data) != 0 || len(got.Labels) != 0 {
+				t.Fatal("group scope bypassed ownership")
+			}
+			continue
+		}
+		want := []subInstalledChannel{}
+		for _, item := range listing.Data {
+			if item.Provider == provider || item.Provider == otherProvider {
+				want = append(want, item)
+			}
+		}
+		if len(want) != 2 || !reflect.DeepEqual(got.Data, want) || len(got.Labels[source]) != 2 || got.Labels[source][provider] != listing.Labels[source][provider] {
+			t.Fatal("group scope lost complete binding fields or retained another group")
+		}
+	}
+	for _, query := range []string{"account_id=" + account, "group_id=7", "account_id=" + account + "&group_id=0", "account_id=" + account + "&group_id=bad"} {
+		r := httptest.NewRequest("GET", "/v1/sub2api/channels?view=bindings&"+query, nil)
+		r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: session})
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		if w.Code != 400 {
+			t.Fatal("invalid group scope accepted", w.Code)
+		}
+	}
 	log.SetOutput(previousLog)
 	if err := lock.Rollback(); err != nil {
 		t.Fatal(err)

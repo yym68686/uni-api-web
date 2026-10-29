@@ -385,7 +385,7 @@ it("submits the import form on page two and reconciles that same page after the 
  vi.stubGlobal("fetch",vi.fn(async(input:string,init?:RequestInit)=>{
   const url=new URL(input),path=url.pathname;
   if(path.endsWith("/sub2api/channels")&&init?.method==="POST"){posts++;return Response.json({message:"已添加"});}
-  if(path.endsWith("/sub2api/channels")){bindingReads++;expect(url.searchParams.get("view")).toBe("bindings");return Response.json({data:[],labels:{},unavailable_sources:[]});}
+  if(path.endsWith("/sub2api/channels")){bindingReads++;expect(Object.fromEntries(url.searchParams)).toEqual({view:"bindings",account_id:"owned",group_id:"26"});return Response.json({data:[],labels:{},unavailable_sources:[]});}
   if(path.endsWith("/accounts/progress"))return idleProgress();
   if(path.endsWith("/channel-management/query")){
    const cursor=url.searchParams.get("cursor")||"";cursors.push(cursor);

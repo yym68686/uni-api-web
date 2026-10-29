@@ -83,11 +83,18 @@ export function useSubImports(enabled = true) {
 
 // Import dialogs consume bindings and revisions, not the billing-rate ledger.
 // Keep this cache distinct so a narrow response cannot replace a full listing.
-export function useImportBindings(enabled = true) {
+export function useImportBindings(enabled = true, group?: { accountId: string; groupId: number }) {
   return useQuery({
-    queryKey: ["sub2api-imports", "bindings"],
+    // Keep the shared invalidation prefix, but never let one group's narrow
+    // response replace another group's or the complete bindings directory.
+    queryKey: group
+      ? ["sub2api-imports", "bindings", "group", group.accountId, group.groupId]
+      : ["sub2api-imports", "bindings"],
     queryFn: ({ signal }) =>
-      controlRequest<SubImports>("/v1/sub2api/channels?view=bindings", { signal }),
+      controlRequest<SubImports>("/v1/sub2api/channels?" + new URLSearchParams({
+        view: "bindings",
+        ...(group ? { account_id: group.accountId, group_id: String(group.groupId) } : {}),
+      }), { signal }),
     enabled,
     retry: false,
     staleTime: 5000,

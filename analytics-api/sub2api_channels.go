@@ -114,6 +114,19 @@ func (s *controlStore) subChannelRefsForAccountFrom(ctx context.Context, db cont
 func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 	owner, _ := s.controlUser(r)
 	bindingsOnly := summaryView(r) == "bindings"
+	accountScope, groupScope := "", int64(0)
+	if bindingsOnly {
+		accountScope = r.URL.Query().Get("account_id")
+		groupText := r.URL.Query().Get("group_id")
+		if accountScope != "" || groupText != "" {
+			var err error
+			groupScope, err = strconv.ParseInt(groupText, 10, 64)
+			if accountScope == "" || err != nil || groupScope <= 0 {
+				http.Error(w, "请选择有效账号和分组", http.StatusBadRequest)
+				return
+			}
+		}
+	}
 	if bindingsOnly {
 		r = r.WithContext(managementTraceContext(r.Context()))
 	}
@@ -358,10 +371,52 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 	})
 	stages.next("bindings_encode")
 	if bindingsOnly {
+		if accountScope != "" {
+			// Apply the dialog's existing filter AFTER the complete owned read
+			// and merge. Never narrow binding discovery: that could turn an
+			// ambiguous credential match into a false unique match. Source
+			// failures and all retained binding/revision fields stay unchanged.
+			before := len(data)
+			data, labels = subGroupImportBindings(data, labels, accountScope, groupScope)
+			log.Printf("management_bindings_scope total=%d retained=%d request_id=%s", before, len(data), consoleRequestID(r.Context()))
+		}
 		writeJSON(w, 200, map[string]any{"data": data, "labels": labels, "unavailable_sources": unavailable, "scope_source_id": r.URL.Query().Get("source_id")})
 		return
 	}
 	writeJSON(w, 200, map[string]any{"data": data, "labels": labels, "multipliers": subChannelMultipliers(data, refs), "model_billing": subChannelModelRates(data, refs), "unavailable_sources": unavailable})
+}
+
+// Match Sub2apiImport's installed/configured selection exactly. The new scope
+// only reduces its response; billing readers and unscoped clients keep the full
+// listing. A matched configured provider retains ALL its members for edits.
+func subGroupImportBindings(data []subInstalledChannel, labels map[string]map[string]string, account string, group int64) ([]subInstalledChannel, map[string]map[string]string) {
+	out := []subInstalledChannel{}
+	selectedLabels := map[string]map[string]string{}
+	for _, item := range data {
+		matches := item.AccountID == account && item.GroupID == group
+		if item.Kind == "configured" {
+			matches = false
+			if item.BindingStatus == "matched" {
+				for _, bound := range item.BoundKeys {
+					if bound.AccountID == account && bound.GroupID == group {
+						matches = true
+						break
+					}
+				}
+			}
+		}
+		if !matches {
+			continue
+		}
+		out = append(out, item)
+		if label, found := labels[item.SourceID][item.Provider]; found {
+			if selectedLabels[item.SourceID] == nil {
+				selectedLabels[item.SourceID] = map[string]string{}
+			}
+			selectedLabels[item.SourceID][item.Provider] = label
+		}
+	}
+	return out, selectedLabels
 }
 
 // Reuse saved billing metadata; sorting must not query upstreams or infer a

@@ -819,7 +819,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
     target: SubTarget;
     configured?: ManagedChannel;
   } | null>(null);
-  const dialogImports=useImportBindings(!!importing);
+  const dialogImports=useImportBindings(!!importing, importing ? {accountId:importing.account.id,groupId:importing.target.group_id} : undefined);
   const imports={data:displayedPage?{data:displayedPage.context.imports,labels:{},unavailable_sources:[]}:undefined};
   const [error, setError] = useState("");
   const [action, setAction] = useState("");
