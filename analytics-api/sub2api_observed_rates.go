@@ -91,7 +91,9 @@ func (s *controlStore) subObservedRatesPreparedFrom(ctx context.Context, db cont
 	if !complete {
 		return s.subObservedRatesForAccountFrom(ctx, db, owner, accountID)
 	}
-	result, err := readSubObservedRatesQuery(ctx, db, owner, accountID, true)
+	result, err := readManagementRates(ctx, db, s.db, owner, accountID, func() (map[string]map[string]subObservedRate, error) {
+		return readSubObservedRatesQuery(ctx, db, owner, accountID, true)
+	})
 	if err == errManagementPredicateFallback {
 		return s.subObservedRatesForAccountFrom(ctx, db, owner, accountID)
 	}
@@ -103,13 +105,20 @@ func (s *controlStore) subObservedRatesForAccountFrom(ctx context.Context, db co
 }
 
 func readSubObservedRatesQuery(ctx context.Context, db controlQueryDB, owner, accountID string, prepared bool) (map[string]map[string]subObservedRate, error) {
+	stage := "rate_raw_rows"
+	if prepared {
+		stage = "rate_rows"
+	}
+	trace := newManagementRowsTrace(ctx, stage)
+	defer trace.finish()
 	rows, err := db.QueryContext(ctx, subObservedRatesReadSQL(prepared), owner, accountID)
 	if err != nil {
 		return nil, err
 	}
+	trace.queryReady()
 	defer rows.Close()
 	out := map[string]map[string]subObservedRate{}
-	for rows.Next() {
+	for trace.next(rows) {
 		var account, model string
 		var group, startedAt int64
 		var raw []byte
@@ -125,7 +134,10 @@ func readSubObservedRatesQuery(ctx context.Context, db controlQueryDB, owner, ac
 			return nil, errManagementPredicateFallback
 		}
 		var usage subUsage
-		if json.Unmarshal(raw, &usage) != nil {
+		start := trace.decodeStart()
+		decodeErr := json.Unmarshal(raw, &usage)
+		trace.decoded(start, len(raw))
+		if decodeErr != nil {
 			continue
 		}
 		rate := subReceiptRate(usage, startedAt)

@@ -57,6 +57,16 @@ contains no expanded models, receipts or attached quality evidence. Those inputs
 and gateway/source fences are still read and checked for every fresh snapshot.
 Cache hits alone do not establish end-to-end latency or current page validity.
 
+`management_rate_cache` identifies reuse of receipt-derived model multipliers.
+It is enabled only after current projection completeness and the same RR
+transaction's complete `ExportStamp` proof. The proof covers raw receipt rate
+inputs, membership, ownership, current keys and retained-rate revisions; it is
+not a time-based cache. Unsupported prepared reads keep the original decoder
+and are never retained. Two entries share a 4 MiB budget; every hit reconstructs
+independent typed maps. `rate_rows` and `rate_raw_rows` split actual prepared and
+fallback SQL timing. A cache hit skips only the rate query, not any page,
+permission, receipt, gateway or source validation.
+
 Only whitelisted counters, state/wait labels, fixed query classes and correlated
 request IDs are emitted. No raw SQL, query parameters, business identities,
 payloads, subprocess errors, connection strings or credentials are printed.

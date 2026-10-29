@@ -37,6 +37,7 @@ type Service struct {
 	managementComputed managementComputedPages
 	modelDirectories   managementModelDirectories
 	targetStreams      managementTargetStreams
+	rateSnapshots      managementRateSnapshots
 }
 
 type cachedAnalytics struct {
