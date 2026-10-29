@@ -124,19 +124,7 @@ func buildManagementQueryPageFromFilteredRowsMode(in managementQueryInput, filte
 	page.Rates, page.Platforms = filtered.Rates, filtered.Platforms
 	page.Total, page.EligibleCount = len(filtered.Rows), len(managementEligibleRows(filtered.Rows))
 	page.Models = managementPageModelCatalog(in, filters.Model)
-	extra := []string{}
-	for _, row := range filtered.Rows {
-		for _, check := range row.Checks {
-			if !slices.Contains(subModels, check.Model) {
-				extra = append(extra, check.Model)
-			}
-		}
-	}
-	extra = managementUnique(extra)
-	sort.Slice(extra, func(i, j int) bool {
-		return slices.Compare(utf16.Encode([]rune(extra[i])), utf16.Encode([]rune(extra[j]))) < 0
-	})
-	page.DetectionModels = append(append([]string{}, subModels...), extra...)
+	page.DetectionModels = managementPageDetectionModels(filtered.Rows)
 	var err error
 	if in.ModelsRevision != "" {
 		page.Revision, err = managementProjectedRevision(in, page, evidence)
@@ -188,6 +176,28 @@ func buildManagementQueryPageFromFilteredRowsMode(in managementQueryInput, filte
 		page.PreviousCursor = encode(max(0, page.Offset-managementPageSize))
 	}
 	return page, nil
+}
+
+func managementPageDetectionModels(rows []managementQueryRow) []string {
+	// Keep only distinct extra names while traversing the full filtered result.
+	// Built-ins remain in catalog order, followed by extras in UTF-16 order.
+	seen := make(map[string]bool, len(subModels))
+	for _, model := range subModels {
+		seen[model] = true
+	}
+	extra := []string{}
+	for _, row := range rows {
+		for _, check := range row.Checks {
+			if !seen[check.Model] {
+				seen[check.Model] = true
+				extra = append(extra, check.Model)
+			}
+		}
+	}
+	sort.Slice(extra, func(i, j int) bool {
+		return slices.Compare(utf16.Encode([]rune(extra[i])), utf16.Encode([]rune(extra[j]))) < 0
+	})
+	return append(append([]string{}, subModels...), extra...)
 }
 
 // Preserve the old catalog's first-seen order without first retaining every
