@@ -111,6 +111,10 @@ func (s *Service) readManagementQuerySnapshotMode(ctx context.Context, owner str
 			proof.CurrentExport = managementHasCompleteCurrentExport(facts)
 			out.Proof = &proof
 			directory.accountRevision = proof.Epochs["console_sub_accounts"]
+			ctx = context.WithValue(ctx, managementTargetScopeKey{}, &managementTargetScope{
+				store: &s.targetStreams, tx: tx,
+				version: managementTargetVersion{s.control.db, owner, proof.Epochs["console_sub_accounts"], proof.Epochs["console_sub_targets"], proof.Epochs["console_sub_capability_summaries"]},
+			})
 		}
 		catalogOnly := filters.Model == "" && filters.Availability == "" && filters.PriceStatus == "" && filters.ModelMatch == "" && filters.ToolUse == "" && filters.Quality == ""
 		// withManagementSnapshot owns this repeatable-read transaction. Only

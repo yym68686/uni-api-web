@@ -36,6 +36,7 @@ type Service struct {
 	observationHealth  sourceObservationCircuit
 	managementComputed managementComputedPages
 	modelDirectories   managementModelDirectories
+	targetStreams      managementTargetStreams
 }
 
 type cachedAnalytics struct {

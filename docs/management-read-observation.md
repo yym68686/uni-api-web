@@ -47,6 +47,16 @@ it is not a wire-byte or disk-read counter. The trace finishes before later
 model, receipt and rate readers. Query-ready and advance include database,
 driver and network work and must not be described as disk-I/O durations.
 
+Management may reuse raw target metadata only when the current repeatable-read
+transaction proves the same owner, database, account, target and capability
+projection epochs. `management_target_cache hit=true` and
+`management_rows_read stage=target_cached_rows` identify this replay; it performs
+the original typed JSON decoding but no target SQL query. `target_rows` remains
+the database-read stage. Retention is bounded to two entries and 8 MiB, and it
+contains no expanded models, receipts or attached quality evidence. Those inputs
+and gateway/source fences are still read and checked for every fresh snapshot.
+Cache hits alone do not establish end-to-end latency or current page validity.
+
 Only whitelisted counters, state/wait labels, fixed query classes and correlated
 request IDs are emitted. No raw SQL, query parameters, business identities,
 payloads, subprocess errors, connection strings or credentials are printed.

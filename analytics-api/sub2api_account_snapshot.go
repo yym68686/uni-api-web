@@ -93,46 +93,33 @@ func (s *Service) readSubAccountDetailsWithReadersFrom(ctx context.Context, db c
 		capabilityJoin = " LEFT JOIN console_sub_capability_summaries cs ON cs.account_id=t.account_id AND cs.group_id=t.group_id"
 		capabilityColumns = "CASE WHEN cs.account_id IS NULL THEN console_sub_capability_summary_v1(t.compaction) ELSE cs.compaction END,t.compaction_state,CASE WHEN cs.account_id IS NULL THEN console_sub_capability_summary_v1(t.tool_use) ELSE cs.tool_use END,t.tool_use_state"
 	}
-	readTrace := newManagementRowsTrace(ctx, "target_rows")
-	defer func() { readTrace.finish() }()
-	rows, err := db.QueryContext(ctx, `SELECT t.account_id,t.group_id,t.name,t.platform,t.channel,t.rate,t.remote_key_id,t.active,t.state,t.message,t.result,t.billing,`+historyColumns+`,`+capabilityColumns+` FROM console_sub_targets t JOIN console_sub_accounts a ON a.id=t.account_id`+historyJoin+capabilityJoin+` WHERE a.owner=$1 AND ($2='' OR a.id=$2) AND ($3=0 OR t.group_id=$3) ORDER BY t.group_id`, owner, accountID, groupID)
-	if err != nil {
-		return subAccountReadFailure{"检测结果暂不可用", err}
-	}
-	readTrace.queryReady()
-	defer rows.Close()
-	for readTrace.next(rows) {
-		var id string
-		var t subTarget
-		var raw, billingRaw, compactionRaw, toolUseRaw []byte
-		if err = rows.Scan(&id, &t.GroupID, &t.Name, &t.Platform, &t.Channel, &t.Rate, &t.KeyID, &t.Active, &t.State, &t.Message, &raw, &billingRaw, &t.History.Total, &t.History.Successful, &t.History.Passed, &compactionRaw, &t.CompactionState, &toolUseRaw, &t.ToolUseState); err != nil {
-			break
-		}
+	consume := func(row managementTargetRecord, readTrace *managementRowsTrace) error {
+		t := row.target
 		decodeStart := readTrace.decodeStart()
-		if len(toolUseRaw) > 0 {
-			if err = json.Unmarshal(toolUseRaw, &t.ToolUse); err != nil {
-				break
+		if len(row.tools) > 0 {
+			if err := json.Unmarshal(row.tools, &t.ToolUse); err != nil {
+				return err
 			}
 		}
-		if len(compactionRaw) > 0 {
-			if err = json.Unmarshal(compactionRaw, &t.Compaction); err != nil {
-				break
+		if len(row.compact) > 0 {
+			if err := json.Unmarshal(row.compact, &t.Compaction); err != nil {
+				return err
 			}
 		}
 		t.Models = []subModelResult{}
-		if len(billingRaw) > 0 {
-			if err = json.Unmarshal(billingRaw, &t.Billing); err != nil {
-				break
+		if len(row.billing) > 0 {
+			if err := json.Unmarshal(row.billing, &t.Billing); err != nil {
+				return err
 			}
 		}
-		if len(raw) > 0 {
-			if err = json.Unmarshal(raw, &t.Result); err != nil {
-				break
+		if len(row.result) > 0 {
+			if err := json.Unmarshal(row.result, &t.Result); err != nil {
+				return err
 			}
 		}
-		readTrace.decoded(decodeStart, len(raw)+len(billingRaw)+len(compactionRaw)+len(toolUseRaw))
-		if i, ok := index[id]; ok {
-			if projection, exists := shared.Groups[qualityGroupID(id, t.GroupID)]; exists {
+		readTrace.decoded(decodeStart, len(row.result)+len(row.billing)+len(row.compact)+len(row.tools))
+		if i, ok := index[row.account]; ok {
+			if projection, exists := shared.Groups[qualityGroupID(row.account, t.GroupID)]; exists {
 				t.History = projection.History
 				t.QualityCheck = projection.Check
 			}
@@ -141,18 +128,42 @@ func (s *Service) readSubAccountDetailsWithReadersFrom(ctx context.Context, db c
 				trace.targets++
 			}
 		}
+		return nil
 	}
-	if err == nil {
-		err = rows.Err()
+	read := func(consume managementTargetConsumer) error {
+		readTrace := newManagementRowsTrace(ctx, "target_rows")
+		defer readTrace.finish()
+		rows, err := db.QueryContext(ctx, `SELECT t.account_id,t.group_id,t.name,t.platform,t.channel,t.rate,t.remote_key_id,t.active,t.state,t.message,t.result,t.billing,`+historyColumns+`,`+capabilityColumns+` FROM console_sub_targets t JOIN console_sub_accounts a ON a.id=t.account_id`+historyJoin+capabilityJoin+` WHERE a.owner=$1 AND ($2='' OR a.id=$2) AND ($3=0 OR t.group_id=$3) ORDER BY t.group_id`, owner, accountID, groupID)
+		if err != nil {
+			return subAccountReadFailure{"检测结果暂不可用", err}
+		}
+		readTrace.queryReady()
+		defer rows.Close()
+		for readTrace.next(rows) {
+			var row managementTargetRecord
+			t := &row.target
+			if err = rows.Scan(&row.account, &t.GroupID, &t.Name, &t.Platform, &t.Channel, &t.Rate, &t.KeyID, &t.Active, &t.State, &t.Message, &row.result, &row.billing, &t.History.Total, &t.History.Successful, &t.History.Passed, &row.compact, &t.CompactionState, &row.tools, &t.ToolUseState); err != nil {
+				break
+			}
+			if err = consume(row, readTrace); err != nil {
+				break
+			}
+		}
+		if err == nil {
+			err = rows.Err()
+		}
+		if err != nil {
+			return subAccountReadFailure{"检测结果读取失败", err}
+		}
+		return nil
 	}
+	// The zero-history query is independent of live quality evidence, which
+	// consume always overlays from this request's freshly read projection.
+	cacheTargets := summary && compactCapabilities && historyJoin == "" && accountID == "" && groupID == 0
+	err := readManagementTargetStream(ctx, db, owner, cacheTargets, read, consume)
 	if err != nil {
-		return subAccountReadFailure{"检测结果读取失败", err}
+		return err
 	}
-	rows.Close()
-	// End this stream before model, receipt, and rate readers begin. Otherwise
-	// its elapsed time would include those later queries and misattribute work.
-	readTrace.finish()
-	readTrace = nil
 	stages.next("database_models")
 	trace.next("models")
 	if readModels != nil {
