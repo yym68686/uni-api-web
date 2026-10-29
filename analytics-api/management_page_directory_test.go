@@ -262,3 +262,41 @@ func TestManagementPageDirectoryKeepsOldSnapshotAndFreshOwnership(t *testing.T) 
 		}
 	}
 }
+
+func TestManagementPagingReusesOnlyCurrentResidentModelDirectory(t *testing.T) {
+	s := managementHydrationFixture(t)
+	prepareManagementRevisionsForTest(t, s.control.db)
+	ctx := context.Background()
+	f := managementQueryFilters{GroupStatus: "all", Model: "gpt-5.5"}
+	first, err := s.readManagementQuerySnapshot(ctx, "owner", f, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.rememberManagementPagingPlan("owner", f, first)
+	want, err := s.readManagementQuerySnapshot(ctx, "owner", f, first.Page.NextCursor, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&output)
+	defer log.SetOutput(previous)
+	for _, resident := range []bool{true, false} {
+		if !resident {
+			s.modelDirectories.mu.Lock()
+			s.modelDirectories.entries, s.modelDirectories.bytes = nil, 0
+			s.modelDirectories.mu.Unlock()
+		}
+		output.Reset()
+		got, ok, err := s.currentManagementPagingPage(ctx, "owner", f, first.Page.NextCursor, false)
+		if err != nil || !ok || !reflect.DeepEqual(got.Rows, want.Page.Rows) || got.Revision != want.Page.Revision || !reflect.DeepEqual(got.Context, managementContextForPage(want.View, want.Page, f.Model)) {
+			t.Fatal("paging changed complete public data", resident, err)
+		}
+		if reused := strings.Contains(output.String(), "management_page_model_directory reuse=true"); reused != resident {
+			t.Fatal("paging reread a verified source directory or used an absent one", resident, output.String())
+		}
+		if strings.Contains(output.String(), "stage=page_models ") == resident {
+			t.Fatal("paging source SQL did not follow proof/residency", resident)
+		}
+	}
+}

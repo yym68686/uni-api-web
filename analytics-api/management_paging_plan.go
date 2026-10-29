@@ -140,6 +140,8 @@ func (s *Service) currentManagementPagingPage(ctx context.Context, owner string,
 		return managementPageResponse{}, false, err
 	}
 	defer tx.Rollback()
+	directory := &managementDirectoryScope{store: &s.modelDirectories, database: s.control.db, tx: tx, owner: owner}
+	ctx = context.WithValue(ctx, managementDirectoryScopeKey{}, directory)
 	current, now, err := s.managementReadProof(ctx, tx, owner)
 	if err != nil {
 		return managementPageResponse{}, false, err
@@ -147,6 +149,13 @@ func (s *Service) currentManagementPagingPage(ctx context.Context, owner string,
 	if managementProofStamp(current, entry.Proof.CurrentExport) != proof.Stamp || current.HeadersRevision != proof.HeadersRevision || (!entry.Proof.Until.IsZero() && !now.Before(entry.Proof.Until)) {
 		log.Printf("management_paging_miss reason=concurrent_change request_id=%s", consoleRequestID(ctx))
 		return managementPageResponse{}, false, nil
+	}
+	// This RR transaction just proved the plan current. A resident source
+	// directory with the exact model/ownership versions can supply its already
+	// read scalar fields; an eviction/mismatch keeps hydration on its old SQL.
+	directory.accountRevision = current.Epochs["console_sub_accounts"]
+	if directory.ready && directory.accountRevision != "" {
+		directory.directory = s.modelDirectories.get(managementDirectoryVersion{s.control.db, owner, directory.accountRevision, directory.modelRevision})
 	}
 	ctx = context.WithValue(ctx, managementReceiptSetScopeKey{}, managementReceiptSetScopeFromProof(&s.receiptSets, s.control.db, tx, owner, current))
 	headers := map[string]subAccount{}

@@ -12,7 +12,8 @@ import (
 // Only the five columns of managementModelSourceStreamSQL are retained. The
 // existing counters cover every change to these columns and account ownership;
 // predicates, receipts, display evidence and gateway facts are NEVER retained
-// here. Only the complete management snapshot path installs this private scope.
+// here. This private scope belongs to a complete management snapshot or a
+// paging transaction that revalidates its complete current proof before reuse.
 type managementDirectoryScopeKey struct{}
 type managementDirectoryScope struct {
 	store           *managementModelDirectories
