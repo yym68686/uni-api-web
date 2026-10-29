@@ -22,7 +22,7 @@ function beginManagementRead(owner: string) {
     return;
   const controller = new AbortController();
   previous?.controller.abort();
-  const result = readManagementPage(filters, "", controller.signal);
+  const result = readManagementPage(filters, "", controller.signal, undefined, "mount");
   void result.catch(() => undefined);
   globalThis.__uniManagementBootstrap = {
     owner,

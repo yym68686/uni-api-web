@@ -3,6 +3,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, controlRequest } from "./api";
 import { managementReadTrace } from "./managementReadTrace";
 import type { ManagementReadTrace } from "./managementReadTrace";
+import { createManagementReadTriggers, managementReadTrigger } from "./managementReadTrigger";
+import type { ManagementReadTrigger } from "./managementReadTrigger";
 import {
   decodeManagementPage,
   managementPageMediaType,
@@ -64,7 +66,7 @@ declare global {
 
 const managementReadTimings = new WeakMap<
   ManagementPage,
-  { started: number; decoded: number; transport?: ManagementReadTrace }
+  { started: number; decoded: number; trigger: ManagementReadTrigger; transport?: ManagementReadTrace }
 >();
 
 export interface ManagementSelection {
@@ -113,6 +115,7 @@ export async function readManagementPage(
   cursor: string,
   signal: AbortSignal,
   owner?: string,
+  trigger: ManagementReadTrigger = "unspecified",
 ): Promise<ManagementPage> {
   if (owner) {
     const bootstrap = globalThis.__uniManagementBootstrap;
@@ -147,6 +150,7 @@ export async function readManagementPage(
     headers: {
       Accept: managementPageMediaType,
       "X-Console-Current-Validation": "1",
+      "X-Console-Read-Trigger": managementReadTrigger(trigger),
     },
   });
   let response: unknown;
@@ -161,7 +165,7 @@ export async function readManagementPage(
   const page = validateManagementPage(response);
   if (owner && page.owner && page.owner !== owner)
     throw Error("登录账号已变化，请重新读取");
-  managementReadTimings.set(page, { started, decoded: performance.now(), transport: managementReadTrace(response) });
+  managementReadTimings.set(page, { started, decoded: performance.now(), trigger: managementReadTrigger(trigger), transport: managementReadTrace(response) });
   return page;
 }
 
@@ -217,8 +221,11 @@ export function useManagementPage(
   cursor = "",
 ) {
   const client = useQueryClient();
+  const triggers = useRef<ReturnType<typeof createManagementReadTriggers> | undefined>(undefined);
+  if (!triggers.current) triggers.current = createManagementReadTriggers();
   useEffect(() => {
     const refresh = () => {
+      triggers.current!.acceptedWrite(owner);
       void client.invalidateQueries({ queryKey: ["management-query", owner] });
     };
     window.addEventListener("uni-console-control-write", refresh);
@@ -227,7 +234,7 @@ export function useManagementPage(
   }, [client, owner]);
   const query = useQuery({
     queryKey: ["management-query", owner, filters, cursor],
-    queryFn: ({ signal }) => readManagementPage(filters, cursor, signal, owner),
+    queryFn: ({ signal }) => readManagementPage(filters, cursor, signal, owner, triggers.current!.next(owner, JSON.stringify(filters), cursor)),
     enabled: !!owner,
     retry: false,
     staleTime: 0,
@@ -264,6 +271,8 @@ export function useManagementPage(
           "management_page_current",
           JSON.stringify({
             request_id: timing.transport?.requestId ?? null,
+            read_trigger: timing.trigger,
+            read_trigger_scope: "client_declared_not_authoritative",
             current_validation_acknowledged: timing.transport?.validationAcknowledged ?? null,
             response_headers_ms: timing.transport ? Math.round(timing.transport.headers - timing.transport.started) : null,
             body_and_json_ms: timing.transport ? Math.round(timing.transport.decoded - timing.transport.headers) : null,

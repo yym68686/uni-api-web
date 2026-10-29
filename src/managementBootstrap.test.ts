@@ -20,6 +20,7 @@ it("only starts the active management page, and cancels an older initial read", 
   saveView(location.origin, "sub2api"); startManagementBootstrap(session);
   const initial = globalThis.__uniManagementBootstrap!;
   expect(fetch).toHaveBeenCalledTimes(1); expect(initial.owner).toBe("alice");
+  expect(new Headers((fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].headers).get("X-Console-Read-Trigger")).toBe("mount");
   startManagementBootstrap(session); expect(initial.controller.signal.aborted).toBe(false); expect(fetch).toHaveBeenCalledTimes(1);
   saveSubFilters("alice", {...loadSubFilters("alice"), model:"gpt-5.5"});
   startManagementBootstrap(session); expect(initial.controller.signal.aborted).toBe(true); expect(fetch).toHaveBeenCalledTimes(2);

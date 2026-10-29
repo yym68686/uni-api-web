@@ -246,3 +246,35 @@ or insufficient index budget use the original sorter. Already ordered sources
 need no index. `management_model_order reuse=true` logs fixed count/request-ID
 fields only. Warm local ordering savings and one-time preparation cost must be
 reported separately; neither establishes browser E2E latency.
+
+### Distinguish independently triggered management reads
+
+The server-derived `read_kind=management_first_page` describes a request shape,
+not an action: mounting, changing any filter and refreshing after a write can
+all read that first page. Route-kind timing alone cannot verify each operation.
+Current clients therefore send a fixed `X-Console-Read-Trigger` diagnostic on
+page reads. A hook-local tracker compares inputs of successive started reads:
+new owner/mount, changed serialized filters, changed cursor, a preceding accepted
+control-write event, otherwise refetch. Structural changes take precedence over
+the write marker; the marker is consumed by the next started read. The early
+navigation bootstrap uses `mount`. Direct/older reads can remain `unspecified`.
+
+Only `mount`, `filter_change`, `page_change`, `accepted_write`, and `refetch`
+are admitted into start/completion logs; missing, invalid or repeated headers
+become `unspecified`. Selection, other routes and writes use `none`. This is
+separate from the unchanged server-derived `read_kind` and always marked
+`read_trigger_scope=client_declared_not_authoritative`. Neither the label nor
+its marker authorizes anything or changes queries, requests, URLs, cache keys,
+freshness, cancellation, retry behavior, response JSON, ETags or validation.
+
+`management_page_current` also reports the fixed trigger beside its exact
+request ID and request-to-paint measurement. Logs contain no owner, cursor,
+filter values, credentials or raw header text, and there is no persistence or
+new telemetry request. Concurrent hooks/owners do not share tracker state.
+These labels describe read triggers, not an audited physical click, a count of
+clicks, or a proof that a particular add completed. Multiple events can coalesce
+into one read. `accepted_write` includes all accepted control writes, not just
+additions. Existing import-bindings route timing still identifies the dialog's
+bindings read, not its complete browser rendering. An end-to-end acceptance
+still requires the actual operation and its browser paint to be correlated;
+fast failure, a server-only duration or a label alone is not acceptance.

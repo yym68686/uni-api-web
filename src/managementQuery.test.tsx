@@ -109,6 +109,8 @@ it("correlates the painted page with its exact request without logging private i
     const detail = output.mock.calls.find(([event]) => event === "management_page_current")?.[1];
     expect(JSON.parse(detail)).toMatchObject({
       request_id: requestId,
+      read_trigger: "mount",
+      read_trigger_scope: "client_declared_not_authoritative",
       current_validation_acknowledged: false,
       response_headers_ms: expect.any(Number),
       body_and_json_ms: expect.any(Number),
@@ -127,6 +129,7 @@ it("correlates the painted page with its exact request without logging private i
 it("invalidates the visible current page only after an accepted control write", async () => {
   let reads = 0,
     fail = true;
+  const triggers: (string | null)[] = [];
   vi.stubGlobal(
     "fetch",
     vi.fn(async (_input: string, init?: RequestInit) => {
@@ -135,6 +138,7 @@ it("invalidates the visible current page only after an accepted control write", 
           status: fail ? 409 : 200,
         });
       reads++;
+      triggers.push(new Headers(init?.headers).get("X-Console-Read-Trigger"));
       return Response.json(page());
     }),
   );
@@ -157,8 +161,45 @@ it("invalidates the visible current page only after an accepted control write", 
     await controlRequest("/v1/fixture", { method: "POST" });
   });
   await waitFor(() => expect(reads).toBe(2));
+  expect(triggers).toEqual(["mount", "accepted_write"]);
   hook.unmount();
   client.clear();
+});
+
+it("tags independent filter, page and refetch reads without changing query keys, paths or read counts", async () => {
+  const calls: { url: URL; init: RequestInit; trigger: string | null }[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: string, init: RequestInit) => {
+    calls.push({ url: new URL(input), init, trigger: new Headers(init.headers).get("X-Console-Read-Trigger") });
+    return Response.json(page());
+  }));
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  const filters = { ...subFilterDefaults, search: "private-search" };
+  const filtered = { ...filters, model: "private-model" };
+  const hook = renderHook(({ owner, filters, cursor }) => useManagementPage(owner, filters, cursor), {
+    wrapper, initialProps: { owner: "private-owner", filters, cursor: "" },
+  });
+  try {
+    await waitFor(() => expect(hook.result.current.data).toBeDefined());
+    hook.rerender({ owner: "private-owner", filters: filtered, cursor: "" });
+    await waitFor(() => { expect(calls).toHaveLength(2); expect(hook.result.current.data).toBeDefined(); });
+    hook.rerender({ owner: "private-owner", filters: filtered, cursor: "private-cursor" });
+    await waitFor(() => { expect(calls).toHaveLength(3); expect(hook.result.current.data).toBeDefined(); });
+    await act(async () => { await hook.result.current.refetch(); });
+    await waitFor(() => expect(calls).toHaveLength(4));
+    expect(client.getQueryCache().getAll().map(query => query.queryKey)).toEqual([["management-query", "private-owner", filtered, "private-cursor"]]);
+    hook.rerender({ owner: "other-private-owner", filters: filtered, cursor: "private-cursor" });
+    await waitFor(() => { expect(calls).toHaveLength(5); expect(hook.result.current.data).toBeDefined(); });
+    expect(calls.map(call => call.trigger)).toEqual(["mount", "filter_change", "page_change", "refetch", "mount"]);
+    for (const [i, call] of calls.entries()) {
+      expect(call.url.pathname).toBe("/analytics/v1/channel-management/query");
+      expect([...call.url.searchParams.keys()].sort()).toEqual(i < 2 ? ["filters"] : ["cursor", "filters", "refresh_cursor"]);
+      expect(JSON.parse(call.url.searchParams.get("filters")!)).toEqual(i === 0 ? filters : filtered);
+      expect(call.init.method).toBeUndefined();
+      expect(call.init.cache).toBe("no-cache");
+      expect(call.init.signal?.aborted).toBe(false);
+    }
+  } finally { hook.unmount(); client.clear(); }
 });
 
 it.each(["sync-selected","sync-only"])("keeps the current page after %s while ordinary configuration writes still refresh", async endpoint => {

@@ -65,6 +65,22 @@ func consoleObservedReadKind(r *http.Request) string {
 	return "none"
 }
 
+// Client intent is diagnostic, not proof of a click or permission. Keep the
+// existing server-derived read_kind separate and never echo arbitrary headers.
+func consoleObservedReadTrigger(r *http.Request) string {
+	if r.Method != http.MethodGet || r.URL.Path != "/v1/channel-management/query" || r.URL.Query().Get("selection") != "" {
+		return "none"
+	}
+	values := r.Header.Values("X-Console-Read-Trigger")
+	if len(values) == 1 {
+		switch values[0] {
+		case "mount", "filter_change", "page_change", "accepted_write", "refetch":
+			return values[0]
+		}
+	}
+	return "unspecified"
+}
+
 func consoleRequestID(ctx context.Context) string {
 	id, _ := ctx.Value(consoleRequestIDKey{}).(string)
 	return id
@@ -119,8 +135,9 @@ func observeConsoleRequests(next http.Handler) http.Handler {
 		start := time.Now()
 		tracked := consoleAlwaysObservedRead(r.Method, r.URL.Path)
 		kind := consoleObservedReadKind(r)
+		trigger := consoleObservedReadTrigger(r)
 		if tracked != "" {
-			log.Printf("console_request_started request_id=%s route=%q received_at_ms=%d read_kind=%s", id, tracked, start.UnixMilli(), kind)
+			log.Printf("console_request_started request_id=%s route=%q received_at_ms=%d read_kind=%s read_trigger=%s read_trigger_scope=client_declared_not_authoritative", id, tracked, start.UnixMilli(), kind, trigger)
 		}
 		next.ServeHTTP(out, r)
 		finished := time.Now()
@@ -132,6 +149,6 @@ func observeConsoleRequests(next http.Handler) http.Handler {
 		if pattern == "" {
 			pattern = "unmatched"
 		}
-		log.Printf("console_request request_id=%s route=%q status=%d elapsed_ms=%d response_bytes=%d canceled=%t received_at_ms=%d finished_at_ms=%d read_kind=%s", id, pattern, out.status, elapsed.Milliseconds(), out.bytes, r.Context().Err() != nil, start.UnixMilli(), finished.UnixMilli(), kind)
+		log.Printf("console_request request_id=%s route=%q status=%d elapsed_ms=%d response_bytes=%d canceled=%t received_at_ms=%d finished_at_ms=%d read_kind=%s read_trigger=%s read_trigger_scope=client_declared_not_authoritative", id, pattern, out.status, elapsed.Milliseconds(), out.bytes, r.Context().Err() != nil, start.UnixMilli(), finished.UnixMilli(), kind, trigger)
 	})
 }
