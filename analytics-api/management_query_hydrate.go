@@ -124,7 +124,7 @@ func (s *Service) hydrateManagementPageFrom(ctx context.Context, db controlQuery
 			return err
 		}
 		stages.next("hydrate_receipts")
-		if err = s.attachManagementPageUsageFrom(ctx, db, owner, subset, view.receiptReuse); err != nil {
+		if err = s.attachManagementPageSummaryUsageFrom(ctx, db, owner, subset, view.receiptReuse); err != nil {
 			return err
 		}
 		stages.next("hydrate_normalize")

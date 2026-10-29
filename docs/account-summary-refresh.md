@@ -131,11 +131,25 @@ only the same owner and the exact pinned repeatable-read transaction can use
 it. Valid summaries supply all five management usage fields; unsupported,
 unread and absent IDs keep the original raw reader and its typed error behavior.
 No receipt attaches until the remaining raw read and cancellation checks
-succeed. Detail/action reads and paging-directory hydration keep their existing
-path. The holder is cleared after hydration and never enters public JSON or
+succeed. Detail/action reads keep their existing path. The holder is cleared
+after hydration and never enters public JSON or
 retained pages. `management_receipt_reuse` logs only reused/raw ID counts and
 the request ID. A scoped model filter can overlap only a small fraction of the
 page's complete model receipts; count reduction is not an end-to-end speed claim.
+
+Page hydration (including a verified paging directory) now resolves its remaining
+receipt IDs from the same current summary projection before reading raw JSON.
+It requires a pinned transaction and a complete projection, checks ownership in
+each query, and batches at most 4,096 IDs to avoid the predicate reader's full-owner
+scan. Only `valid` receipts qualify: that flag checks the entire original typed
+payload, including fields omitted from the five-field management summary.
+Absent, foreign, missing-projection and unsupported receipts still use the
+original raw decoder; no partial attachment occurs on failure or cancellation.
+This is not a cross-request cache or a relaxed freshness/permission check.
+`hydrate_receipt_signals` measures this extra narrow read, while
+`management_page_receipt_signals` records only requested/resolved counts and the
+request ID. `page_receipts` then measures any remaining raw fallback, not all
+page receipt work. Ordinary account/detail/full-action reads are unchanged.
 
 Reloads require successful live reads before publishing channel results. Persistent
 snapshots are not restored into these queries. The earlier local cache benchmark
@@ -184,7 +198,8 @@ does not establish production proxy/browser latency or one-second acceptance.
 
 Raw receipt timings distinguish `account_receipts` (before filtering/paging)
 from `page_receipts` (page hydration), including catalog-only/fallback account
-reads. Both still issue exactly the same SQL and IDs. A traced management
+reads. Each raw fallback keeps its original SQL; projected page IDs no longer
+enter that raw read. A traced management
 snapshot also emits `management_receipt_raw_scope` after a successful nonempty
 raw lookup: fixed phase, requested-ID count, prior account-ID count, overlap
 count, and request ID only. The request-local ID set is bound to the same

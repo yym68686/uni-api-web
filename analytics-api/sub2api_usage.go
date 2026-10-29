@@ -193,6 +193,12 @@ func (s *Service) subAttachUsageFrom(ctx context.Context, db controlQueryDB, own
 // snapshot. Ordinary account/detail readers never supply it. Publication still
 // waits for every remaining raw receipt and the request context to succeed.
 func (s *Service) subAttachUsageWithCurrentFrom(ctx context.Context, db controlQueryDB, owner string, accounts []subAccount, current func(string) *subUsage) error {
+	return s.subAttachUsageProbesWithCurrentFrom(ctx, db, owner, subUsageProbes(accounts), current)
+}
+
+// The same identity set is needed by management's summary-only receipt reader.
+// Keep ordinary/detail reads on the complete original receipt decoder.
+func subUsageProbes(accounts []subAccount) map[string][]*subProbe {
 	probes := map[string][]*subProbe{}
 	for i := range accounts {
 		for j := range accounts[i].Targets {
@@ -240,6 +246,10 @@ func (s *Service) subAttachUsageWithCurrentFrom(ctx context.Context, db controlQ
 			}
 		}
 	}
+	return probes
+}
+
+func (s *Service) subAttachUsageProbesWithCurrentFrom(ctx context.Context, db controlQueryDB, owner string, probes map[string][]*subProbe, current func(string) *subUsage) error {
 	if len(probes) == 0 {
 		return ctx.Err()
 	}
