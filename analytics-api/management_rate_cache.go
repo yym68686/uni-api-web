@@ -10,10 +10,10 @@ import (
 	"unsafe"
 )
 
-// Only management's read-only RR snapshot installs this scope. ExportStamp
-// includes compact receipt revisions (including rate_result), ownership,
-// targets/current keys, usage membership and retained-rate epochs. A polling
-// clock or a gateway export timestamp is not an input to the rate query.
+// Only management's read-only RR snapshot installs this scope. Its complete
+// proof is still required, while the cache version uses only receipt revisions
+// (including rate_result), ownership, current keys, usage membership and
+// retained-rate epochs. Page prices, models and queue changes do not affect SQL.
 type managementRateScopeKey struct{}
 type managementRateScope struct {
 	store   *managementRateSnapshots
@@ -39,15 +39,18 @@ type managementRateSnapshots struct {
 const managementRateBudget = 4 << 20
 
 func managementRateScopeFromProof(store *managementRateSnapshots, database *sql.DB, tx *sql.Tx, owner string, proof managementFreshProof) *managementRateScope {
-	if proof.ExportStamp == "" {
+	if proof.ExportStamp == "" || proof.ReceiptStamp == "" {
 		return nil
 	}
+	versions := []string{"management-rates-v1", proof.ReceiptStamp}
 	for _, relation := range []string{"console_sub_accounts", "console_sub_targets", "console_sub_usage", "console_sub_observed_rates"} {
-		if proof.Epochs[relation] == "" {
+		version := proof.Epochs[relation]
+		if version == "" {
 			return nil
 		}
+		versions = append(versions, version)
 	}
-	return &managementRateScope{store: store, tx: tx, version: managementRateVersion{database, owner, proof.ExportStamp}}
+	return &managementRateScope{store: store, tx: tx, version: managementRateVersion{database, owner, tokenHash(mustJSON(versions))}}
 }
 
 func (c *managementRateSnapshots) get(version managementRateVersion) *managementRateSnapshot {

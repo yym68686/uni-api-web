@@ -21,7 +21,7 @@ func rateCacheScopeForTest() (*managementRateScope, context.Context) {
 }
 
 func TestManagementRateCacheRequiresEverySourceEpoch(t *testing.T) {
-	proof := managementFreshProof{ExportStamp: "proof", Epochs: map[string]string{"console_sub_accounts": "0", "console_sub_targets": "1", "console_sub_usage": "2", "console_sub_observed_rates": "3"}}
+	proof := managementFreshProof{ExportStamp: "proof", ReceiptStamp: "receipts", Epochs: map[string]string{"console_sub_accounts": "0", "console_sub_targets": "1", "console_sub_usage": "2", "console_sub_observed_rates": "3"}}
 	store, database, tx := &managementRateSnapshots{}, &sql.DB{}, &sql.Tx{}
 	if managementRateScopeFromProof(store, database, tx, "owner", proof) == nil {
 		t.Fatal("complete current proof rejected")
@@ -36,6 +36,10 @@ func TestManagementRateCacheRequiresEverySourceEpoch(t *testing.T) {
 	proof.ExportStamp = ""
 	if managementRateScopeFromProof(store, database, tx, "owner", proof) != nil {
 		t.Fatal("unprepared compact proof admitted")
+	}
+	proof.ExportStamp, proof.ReceiptStamp = "proof", ""
+	if managementRateScopeFromProof(store, database, tx, "owner", proof) != nil {
+		t.Fatal("missing receipt revision admitted")
 	}
 }
 
@@ -190,7 +194,7 @@ func TestManagementRateCacheUsesCurrentDatabaseProofAndKeepsOldSnapshot(t *testi
 		if err != nil || proof.ExportStamp == "" {
 			t.Fatal("missing current proof", err)
 		}
-		scope := &managementRateScope{store: &s.rateSnapshots, tx: tx, version: managementRateVersion{db, owner, proof.ExportStamp}}
+		scope := managementRateScopeFromProof(&s.rateSnapshots, db, tx, owner, proof)
 		got, err := s.control.subObservedRatesPreparedFrom(context.WithValue(ctx, managementRateScopeKey{}, scope), tx, owner, "")
 		want, wantErr := s.control.subObservedRatesForAccountFrom(context.Background(), tx, owner, "")
 		if err != nil || wantErr != nil || !reflect.DeepEqual(got, want) {
@@ -290,7 +294,7 @@ func TestManagementRateCacheKeepsProjectionFallbackAndIncompleteness(t *testing.
 		if err != nil {
 			t.Fatal(err)
 		}
-		scope := &managementRateScope{store: &s.rateSnapshots, tx: tx, version: managementRateVersion{db, "owner", proof.ExportStamp}}
+		scope := managementRateScopeFromProof(&s.rateSnapshots, db, tx, "owner", proof)
 		var output bytes.Buffer
 		previous := log.Writer()
 		log.SetOutput(&output)
@@ -328,6 +332,62 @@ func TestManagementRateCachePreservesCompletePageAndContext(t *testing.T) {
 	}
 }
 
+func TestManagementRateCacheIgnoresUnrelatedPageInputs(t *testing.T) {
+	s := managementHydrationFixture(t)
+	db := s.control.db
+	if _, err := db.Exec(`UPDATE console_sub_usage SET result='{"status":"matched","actual_cost":0.3,"total_cost":1,"input_price":2}'`); err != nil {
+		t.Fatal(err)
+	}
+	prepareManagementRevisionsForTest(t, db)
+	ctx := managementTraceContext(context.Background())
+	var output bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&output)
+	defer log.SetOutput(previous)
+	read := func() (managementFreshProof, map[string]map[string]subObservedRate) {
+		t.Helper()
+		tx, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback()
+		proof, _, err := s.managementReadProof(ctx, tx, "owner")
+		if err != nil || proof.ExportStamp == "" {
+			t.Fatal("fixture has no current proof", err)
+		}
+		scope := managementRateScopeFromProof(&s.rateSnapshots, db, tx, "owner", proof)
+		got, err := s.control.subObservedRatesPreparedFrom(context.WithValue(ctx, managementRateScopeKey{}, scope), tx, "owner", "")
+		want, wantErr := s.control.subObservedRatesForAccountFrom(context.Background(), tx, "owner", "")
+		if err != nil || wantErr != nil || !reflect.DeepEqual(got, want) {
+			t.Fatal("cached rates differ from current raw SQL", err, wantErr)
+		}
+		return proof, got
+	}
+	before, rates := read()
+	if rates["a:1"]["gpt-5.5"].Rate != 0.3 {
+		t.Fatal("fixture must contain receipt-derived rates")
+	}
+	for _, query := range []string{
+		`UPDATE console_sub_models SET message='changed page diagnostic' WHERE group_id=1 AND model='gpt-5.5'`,
+		`UPDATE console_sub_models SET result=jsonb_set(result,'{availability,ttft_ms}','456') WHERE group_id=1 AND model='gpt-5.5'`,
+		`INSERT INTO console_sub_check_queue(account_id,group_id,kind,model) VALUES('a',1,'model','gpt-5.5')`,
+		`INSERT INTO ` + s.engine.historyPath + `.prices(model,input,output) VALUES('gpt-5.5',9,10) ON CONFLICT(model) DO UPDATE SET input=EXCLUDED.input,output=EXCLUDED.output`,
+	} {
+		if _, err := db.Exec(query); err != nil {
+			t.Fatal(err)
+		}
+		output.Reset()
+		after, got := read()
+		if before.ExportStamp == after.ExportStamp || !reflect.DeepEqual(got, rates) {
+			t.Fatal("fixture did not change only unrelated page inputs", query)
+		}
+		if !strings.Contains(output.String(), "management_rate_cache hit=true") || strings.Contains(output.String(), "stage=rate_rows ") {
+			t.Fatal("unrelated page change repeated rate SQL", query, output.String())
+		}
+		before = after
+	}
+}
+
 func TestManagementRateCacheLocalMeasurement(t *testing.T) {
 	s := managementHydrationFixture(t)
 	if _, err := s.control.db.Exec(`UPDATE console_sub_usage SET result='{"status":"matched","actual_cost":0.3,"total_cost":1,"input_price":2}'`); err != nil {
@@ -344,7 +404,7 @@ func TestManagementRateCacheLocalMeasurement(t *testing.T) {
 	if err != nil || proof.ExportStamp == "" {
 		t.Fatal(err)
 	}
-	scope := &managementRateScope{store: &s.rateSnapshots, tx: tx, version: managementRateVersion{s.control.db, "owner", proof.ExportStamp}}
+	scope := managementRateScopeFromProof(&s.rateSnapshots, s.control.db, tx, "owner", proof)
 	cached := context.WithValue(ctx, managementRateScopeKey{}, scope)
 	if _, err := s.control.subObservedRatesPreparedFrom(cached, tx, "owner", ""); err != nil {
 		t.Fatal(err)
