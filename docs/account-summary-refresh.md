@@ -141,6 +141,7 @@ Reloads require successful live reads before publishing channel results. Persist
 snapshots are not restored into these queries. The earlier local cache benchmark
 does not satisfy the one-second current-data requirement and is not acceptance
 evidence. Scoped editor reads and immediate close after successful saves remain.
+
 ### Fresh management response JSON reuse
 
 Fresh v3 pages serialize their complete column representation once for HTTP,
@@ -155,3 +156,12 @@ retain their existing rejection behavior. V1/v2 clients and retained-page reads
 keep their existing paths. This removes one O(response bytes) serialization,
 not database reads or all management latency; local measurements are not E2E
 acceptance.
+
+The same transaction-local verified receipt lookup also applies to the compact
+account-summary stage that precedes page hydration. Only the management query
+supplies this reader; ordinary account/detail/action calls still read complete
+raw usage. Catalog-only, fallback, unknown, unsupported and foreign evidence
+retain their original path. Normalization still follows attachment, and any
+receipt error keeps its existing wrapper and stops the rates stage. Reuse logs
+include only a fixed `phase=account` or `phase=page` plus counts and request ID;
+overlap and production latency must be measured separately in both stages.

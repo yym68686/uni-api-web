@@ -15,6 +15,8 @@ type managementReceiptReuse struct {
 	receipts map[string]managementStreamReceipt
 }
 
+type managementAccountReceiptsKey struct{}
+
 func (r *managementReceiptReuse) capture(db controlQueryDB, owner string, receipts map[string]managementStreamReceipt) {
 	tx, pinned := db.(*sql.Tx)
 	if r != nil && pinned && tx != nil {

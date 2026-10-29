@@ -144,7 +144,16 @@ func (s *Service) readManagementDatabaseModeWithReceiptsFrom(ctx context.Context
 			return s.control.subObservedRatesPreparedFrom(ctx, db, owner, "")
 		}
 	}
-	if err = s.readSubAccountDetailsWithModelsFrom(ctx, db, owner, "", 0, "", true, false, out.Input.Accounts, nil, shared, readModels, readRates, true); err != nil {
+	var readUsage func([]subAccount) error
+	if current := out.receiptReuse.current(db, owner); current != nil {
+		// Predicate evidence precedes group metadata as well as page hydration.
+		// Reuse it only for this compact management read, never full details.
+		readUsage = func(accounts []subAccount) error {
+			accountCtx := context.WithValue(ctx, managementAccountReceiptsKey{}, true)
+			return s.subAttachUsageWithCurrentFrom(accountCtx, db, owner, accounts, current)
+		}
+	}
+	if err = s.readSubAccountDetailsWithReadersFrom(ctx, db, owner, "", 0, "", true, false, out.Input.Accounts, nil, shared, readModels, readRates, true, readUsage); err != nil {
 		return out, err
 	}
 	trace.next("database_normalize")

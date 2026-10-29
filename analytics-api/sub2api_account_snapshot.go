@@ -62,6 +62,12 @@ func (s *Service) readSubAccountDetailsWithQualityFrom(ctx context.Context, db c
 }
 
 func (s *Service) readSubAccountDetailsWithModelsFrom(ctx context.Context, db controlQueryDB, owner, accountID string, groupID int64, model string, summary, omitRates bool, accounts []subAccount, trace *subAccountsReadTrace, shared sharedQuality, readModels func([]subAccount) error, readRates func() (map[string]map[string]subObservedRate, error), compactCapabilities bool) error {
+	return s.readSubAccountDetailsWithReadersFrom(ctx, db, owner, accountID, groupID, model, summary, omitRates, accounts, trace, shared, readModels, readRates, compactCapabilities, nil)
+}
+
+// Only management's RR owner can provide a summary receipt reader. Ordinary
+// account/detail/action callers keep the complete raw receipt path above.
+func (s *Service) readSubAccountDetailsWithReadersFrom(ctx context.Context, db controlQueryDB, owner, accountID string, groupID int64, model string, summary, omitRates bool, accounts []subAccount, trace *subAccountsReadTrace, shared sharedQuality, readModels func([]subAccount) error, readRates func() (map[string]map[string]subObservedRate, error), compactCapabilities bool, readUsage func([]subAccount) error) error {
 	index := map[string]int{}
 	for i, a := range accounts {
 		index[a.ID] = i
@@ -159,7 +165,10 @@ func (s *Service) readSubAccountDetailsWithModelsFrom(ctx context.Context, db co
 	}
 	stages.next("database_usage")
 	trace.next("usage")
-	if err := s.subAttachUsageFrom(ctx, db, owner, accounts); err != nil {
+	if readUsage == nil {
+		readUsage = func(accounts []subAccount) error { return s.subAttachUsageFrom(ctx, db, owner, accounts) }
+	}
+	if err := readUsage(accounts); err != nil {
 		log.Printf("sub_accounts_receipt_read_failed class=%s canceled=%t request_id=%s", databaseErrorClass(err), ctx.Err() != nil, consoleRequestID(ctx))
 		return subAccountReadFailure{"模型账单读取失败，请重新读取", err}
 	}

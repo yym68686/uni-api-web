@@ -257,7 +257,11 @@ func (s *Service) subAttachUsageWithCurrentFrom(ctx context.Context, db controlQ
 		}
 	}
 	if current != nil && managementTraceEnabled(ctx) {
-		log.Printf("management_receipt_reuse reused=%d raw_ids=%d request_id=%s", len(resolved), len(ids), consoleRequestID(ctx))
+		phase := "page"
+		if account, _ := ctx.Value(managementAccountReceiptsKey{}).(bool); account {
+			phase = "account"
+		}
+		log.Printf("management_receipt_reuse reused=%d raw_ids=%d phase=%s request_id=%s", len(resolved), len(ids), phase, consoleRequestID(ctx))
 	}
 	if err := s.subReadUsageByIDsFrom(ctx, db, owner, ids, resolved); err != nil {
 		return err
