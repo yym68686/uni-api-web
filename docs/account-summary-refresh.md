@@ -234,3 +234,15 @@ source-directory SQL/scan but still requires O(N) local expansion and indexing;
 a miss adds O(N) dictionary packing. The opt-in real-PostgreSQL source-scale
 test (`RUN_MANAGEMENT_DIRECTORY_SCALE=1`) compares complete values/order with
 direct SQL; it is not browser E2E acceptance or proof of a production hit rate.
+
+The same directory can retain an optional immutable `uint32` order index for
+the existing account/group/model C-byte ordering. It is charged to the same
+16 MiB budget; exact-budget directories can still be admitted without it. The
+first request prepares this index instead of its old pointer sort, and later
+requests validate every original-position identity before building pointers to
+their own current envelopes in O(N). No mutable result pointers are retained.
+Different versions/scopes, changed identities/positions, duplicate source keys
+or insufficient index budget use the original sorter. Already ordered sources
+need no index. `management_model_order reuse=true` logs fixed count/request-ID
+fields only. Warm local ordering savings and one-time preparation cost must be
+reported separately; neither establishes browser E2E latency.

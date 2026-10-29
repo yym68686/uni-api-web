@@ -167,6 +167,9 @@ func TestManagementModelDirectoryRetainsErrorsCancellationAndConcurrentIsolation
 					t.Error("concurrent directory changed", err)
 					return
 				}
+				if !reflect.DeepEqual(managementDirectoryStreamOrder(localCtx, local.tx, "owner", got), managementOrderedStreamModels(got)) {
+					t.Error("concurrent order differs from the current request's original sorter")
+				}
 				got[0].item.Account = "caller-edited"
 			}
 		}()

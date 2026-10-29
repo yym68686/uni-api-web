@@ -120,7 +120,7 @@ func readManagementScopedStreams(ctx context.Context, db controlQueryDB, owner s
 	defer stages.finish()
 	// PostgreSQL COLLATE "C" orders UTF-8 text by bytes, exactly like Go's
 	// string comparison. Preserve the existing revision byte stream verbatim.
-	order := managementOrderedStreamModels(models)
+	order := managementDirectoryStreamOrder(ctx, db, owner, models)
 	stages.next("signal_model_expand")
 	out := make([]managementModelSignals, 0, len(models))
 	hash := sha256.New()

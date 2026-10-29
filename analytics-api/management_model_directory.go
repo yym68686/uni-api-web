@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"log"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -21,6 +22,7 @@ type managementDirectoryScope struct {
 	accountRevision string
 	modelRevision   int64
 	ready           bool
+	directory       *managementModelDirectory // Current read only; never a retained mutable envelope.
 }
 
 func managementDirectoryScopeFor(ctx context.Context, db controlQueryDB, owner string) *managementDirectoryScope {
@@ -34,6 +36,7 @@ func managementDirectoryScopeFor(ctx context.Context, db controlQueryDB, owner s
 
 func managementDirectoryModelRevision(ctx context.Context, db controlQueryDB, owner string, revision *int64) {
 	if scope := managementDirectoryScopeFor(ctx, db, owner); scope != nil {
+		scope.directory = nil
 		scope.ready = revision != nil && *revision >= 0
 		if scope.ready {
 			scope.modelRevision = *revision
@@ -59,6 +62,8 @@ type managementModelDirectory struct {
 	version managementDirectoryVersion
 	strings []string
 	rows    []managementDirectoryRow
+	order   []uint32
+	ordered bool
 	bytes   int
 }
 type managementModelDirectories struct {
@@ -115,7 +120,86 @@ func packManagementModelDirectory(version managementDirectoryVersion, models []m
 	}
 	// Drop append capacity so the retained backing array matches admission.
 	entry.strings = append(make([]string, 0, len(entry.strings)), entry.strings...)
+	entry.prepareOrder()
 	return entry
+}
+
+// The three immutable identity columns determine the existing C-byte order.
+// Keep indices, not pointers to any request's mutable predicate/result graph.
+func (entry *managementModelDirectory) prepareOrder() {
+	compare := func(a, b uint32) int {
+		left, right := entry.rows[a], entry.rows[b]
+		if c := strings.Compare(entry.strings[left.account], entry.strings[right.account]); c != 0 {
+			return c
+		}
+		if left.group < right.group {
+			return -1
+		}
+		if left.group > right.group {
+			return 1
+		}
+		return strings.Compare(entry.strings[left.model], entry.strings[right.model])
+	}
+	inOrder := true
+	for i := 1; i < len(entry.rows); i++ {
+		c := compare(uint32(i-1), uint32(i))
+		if c == 0 {
+			return // Source PK is unique; keep arbitrary duplicate callers on the old sorter.
+		}
+		inOrder = inOrder && c < 0
+	}
+	if inOrder {
+		entry.ordered = true
+		return
+	}
+	const indexBytes = 4
+	if len(entry.rows) > (managementDirectoryBudget-entry.bytes)/indexBytes {
+		return // Directory admission itself remains unchanged at the byte boundary.
+	}
+	order := make([]uint32, len(entry.rows))
+	for i := range order {
+		order[i] = uint32(i)
+	}
+	slices.SortFunc(order, compare)
+	for i := 1; i < len(order); i++ {
+		if compare(order[i-1], order[i]) == 0 {
+			return
+		}
+	}
+	entry.order, entry.ordered = order, true
+	entry.bytes += len(order) * indexBytes
+}
+
+func managementDirectoryStreamOrder(ctx context.Context, db controlQueryDB, owner string, models []managementStreamModel) []*managementStreamModel {
+	scope := managementDirectoryScopeFor(ctx, db, owner)
+	if scope == nil || !scope.ready || scope.directory == nil {
+		return managementOrderedStreamModels(models)
+	}
+	entry := scope.directory
+	version := managementDirectoryVersion{scope.database, owner, scope.accountRevision, scope.modelRevision}
+	if entry.version != version || !entry.ordered || len(entry.rows) != len(models) {
+		return managementOrderedStreamModels(models)
+	}
+	// Guard against a future caller changing identity/order between expansion
+	// and this stage. Predicate, receipt and result changes are intentionally
+	// not part of the ordering identity and are never copied from the cache.
+	for i, row := range entry.rows {
+		item := models[i].item
+		if item.Account != entry.strings[row.account] || item.Group != row.group || item.Model.Model != entry.strings[row.model] {
+			return managementOrderedStreamModels(models)
+		}
+	}
+	var order []*managementStreamModel
+	if entry.order != nil {
+		order = make([]*managementStreamModel, len(entry.order))
+		for i, position := range entry.order {
+			order[i] = &models[position]
+		}
+	}
+	if managementTraceEnabled(ctx) {
+		log.Printf("management_model_order reuse=true rows=%d request_id=%s", len(models), consoleRequestID(ctx))
+	}
+	return order
 }
 
 func (entry *managementModelDirectory) expand() []managementStreamModel {
@@ -170,6 +254,9 @@ func (c *managementModelDirectories) put(entry *managementModelDirectory) {
 
 func readManagementModelDirectory(ctx context.Context, db controlQueryDB, owner string, compact bool, read func() ([]managementStreamModel, error)) ([]managementStreamModel, error) {
 	scope := managementDirectoryScopeFor(ctx, db, owner)
+	if scope != nil {
+		scope.directory = nil
+	}
 	if !compact || scope == nil || !scope.ready || scope.accountRevision == "" {
 		return read()
 	}
@@ -179,6 +266,7 @@ func readManagementModelDirectory(ctx context.Context, db controlQueryDB, owner 
 			return nil, err
 		}
 		models := entry.expand()
+		scope.directory = entry
 		if managementTraceEnabled(ctx) {
 			log.Printf("management_model_directory_cache hit=true rows=%d bytes=%d request_id=%s", len(models), entry.bytes, consoleRequestID(ctx))
 		}
@@ -191,6 +279,7 @@ func readManagementModelDirectory(ctx context.Context, db controlQueryDB, owner 
 	entry := packManagementModelDirectory(version, models)
 	if entry != nil {
 		scope.store.put(entry)
+		scope.directory = entry
 	}
 	if managementTraceEnabled(ctx) {
 		log.Printf("management_model_directory_cache hit=false rows=%d stored=%t request_id=%s", len(models), entry != nil, consoleRequestID(ctx))
