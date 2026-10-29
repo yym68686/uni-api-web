@@ -94,10 +94,15 @@ func (w *observedResponse) Write(p []byte) (int, error) {
 	return n, err
 }
 func (w *observedResponse) Flush() {
+	_ = w.FlushError()
+}
+func (w *observedResponse) FlushError() error {
 	if w.status == 0 {
 		w.WriteHeader(http.StatusOK)
 	}
-	_ = http.NewResponseController(w.ResponseWriter).Flush()
+	// ResponseController prefers FlushError. Preserve the underlying transport
+	// error instead of making a failed flush appear successful to its caller.
+	return http.NewResponseController(w.ResponseWriter).Flush()
 }
 
 // Log route templates and generated IDs only: never queries, credentials,

@@ -6,8 +6,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"github.com/andybalholm/brotli"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -104,7 +106,22 @@ func writeEncodedManagementJSONMedia(w http.ResponseWriter, r *http.Request, bod
 			for _, candidate := range strings.Split(r.Header.Get("If-None-Match"), ",") {
 				if strings.TrimSpace(candidate) == tag {
 					w.WriteHeader(http.StatusNotModified)
-					return nil
+					// This is a complete, freshly validated response with no
+					// body. Do not leave its headers buffered until the caller
+					// finishes retaining the independently cloned page. Keep
+					// retention synchronous; no proof or lifetime is relaxed.
+					endFlush := managementReadSpan(r.Context(), "response_flush")
+					err := http.NewResponseController(w).Flush()
+					endFlush()
+					unsupported := errors.Is(err, http.ErrNotSupported)
+					if managementTraceEnabled(r.Context()) {
+						log.Printf("management_response_flush status=304 flushed=%t unsupported=%t request_id=%s", err == nil, unsupported, consoleRequestID(r.Context()))
+					}
+					if unsupported {
+						// Custom writers without flushing retain their old path.
+						return nil
+					}
+					return err
 				}
 			}
 		}

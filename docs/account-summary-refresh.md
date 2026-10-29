@@ -165,3 +165,19 @@ retain their original path. Normalization still follows attachment, and any
 receipt error keeps its existing wrapper and stops the rates stage. Reuse logs
 include only a fixed `phase=account` or `phase=page` plus counts and request ID;
 overlap and production latency must be measured separately in both stages.
+
+### Complete conditional response delivery
+
+After the unchanged live owner, database and gateway checks have completed,
+a matching v3 validator returns an empty 304. Explicitly flush its headers
+before synchronously retaining the independent page clone: Go's HTTP server
+otherwise may buffer the entire no-body response until the handler returns.
+This removes that retention tail from the response's server-side delivery path,
+not the preceding current-data reads. There is no background retention, new
+cache lifetime, partial response, or change to 200/v1/v2 compression and bodies.
+Writers without flushing keep their previous path. Other flush failures propagate
+and do not admit the failed response to the computed-page store; the observation
+wrapper preserves the underlying transport error. Fixed `response_flush` timing
+and `management_response_flush` flags correlate delivery with the same request ID
+without logging transport error text. A local real-HTTP retention-barrier test
+does not establish production proxy/browser latency or one-second acceptance.
