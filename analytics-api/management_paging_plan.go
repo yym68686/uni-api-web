@@ -42,7 +42,14 @@ func (s *Service) rememberManagementPagingPlan(owner string, filters managementQ
 			plan.Input.Accounts[i].Targets[j] = t
 		}
 	}
-	for _, row := range filterManagementQueryRows(snapshot.Rows, filters, snapshot.Evidence).Rows {
+	filtered := snapshot.Filtered
+	if filtered == nil {
+		// Preserve the helper's existing behavior for snapshots constructed by
+		// other callers. A present empty result must not fall back to raw rows.
+		result := filterManagementQueryRows(snapshot.Rows, filters, snapshot.Evidence)
+		filtered = &result
+	}
+	for _, row := range filtered.Rows {
 		identity := managementPagingRow{ID: row.ID, Account: row.Account.ID, Group: row.Target.GroupID}
 		if row.Configured != nil {
 			for _, member := range row.Configured.Members {

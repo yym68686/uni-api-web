@@ -24,6 +24,16 @@ func TestManagementPagingDirectoryMatchesFullReadAndRejectsChangedEvidence(t *te
 		}
 		s.rememberManagementPagingPlan("owner", f, first)
 		stored := s.managementComputed.pages[managementPagingKey("owner", f)]
+		if first.Filtered == nil {
+			t.Fatal("snapshot discarded evaluated rows")
+		}
+		previous := &Service{}
+		recomputed := first
+		recomputed.Filtered = nil
+		previous.rememberManagementPagingPlan("owner", f, recomputed)
+		if mustJSON(stored) != mustJSON(previous.managementComputed.pages[managementPagingKey("owner", f)]) {
+			t.Fatal("hydrated snapshot changed retained ordering or proof")
+		}
 		if len(stored.Plan) == 0 || stored.Bytes != len(stored.Plan) {
 			t.Fatal("directory not bounded")
 		}

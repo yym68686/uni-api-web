@@ -115,8 +115,12 @@ func buildManagementQueryPageFromRows(in managementQueryInput, rows []management
 // Rebase is an explicit read of the same page position in a new result. It is
 // never accepted for full selections or mutation authorization.
 func buildManagementQueryPageFromRowsMode(in managementQueryInput, rows []managementQueryRow, filters managementQueryFilters, evidence managementFilterEvidence, owner string, key []byte, cursor string, readAt time.Time, rebase bool) (managementQueryPage, error) {
-	page := managementQueryPage{Format: "management-page-v1", PageSize: managementPageSize, ReadAtMS: readAt.UnixMilli(), Rows: []managementQueryRow{}}
 	filtered := filterManagementQueryRows(rows, filters, evidence)
+	return buildManagementQueryPageFromFilteredRowsMode(in, filtered, filters, evidence, owner, key, cursor, readAt, rebase)
+}
+
+func buildManagementQueryPageFromFilteredRowsMode(in managementQueryInput, filtered managementFilteredRows, filters managementQueryFilters, evidence managementFilterEvidence, owner string, key []byte, cursor string, readAt time.Time, rebase bool) (managementQueryPage, error) {
+	page := managementQueryPage{Format: "management-page-v1", PageSize: managementPageSize, ReadAtMS: readAt.UnixMilli(), Rows: []managementQueryRow{}}
 	page.Rates, page.Platforms = filtered.Rates, filtered.Platforms
 	page.Total, page.EligibleCount = len(filtered.Rows), len(managementEligibleRows(filtered.Rows))
 	models := append([]string{}, subModels...)

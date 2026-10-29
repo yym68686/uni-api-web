@@ -86,6 +86,9 @@ type managementQuerySnapshot struct {
 	Rows     []managementQueryRow
 	Evidence managementFilterEvidence
 	Proof    *managementFreshProof
+	// Request-local ordering already evaluated for Page. Never populated from a
+	// retained page or reused to authorize a mutation.
+	Filtered *managementFilteredRows
 }
 
 func (s *Service) readManagementQuerySnapshot(ctx context.Context, owner string, filters managementQueryFilters, token string, selection bool) (managementQuerySnapshot, error) {
@@ -126,7 +129,9 @@ func (s *Service) readManagementQuerySnapshotMode(ctx context.Context, owner str
 		out.Evidence = managementQueryEvidence(view.Input, out.Rows, filters.Model, view.Prices)
 		endEvidence()
 		endPage := managementReadSpan(ctx, "filter_page")
-		out.Page, err = buildManagementQueryPageFromRowsMode(view.Input, out.Rows, filters, out.Evidence, owner, s.control.key, token, view.ReadAt, rebase && !selection)
+		filtered := filterManagementQueryRows(out.Rows, filters, out.Evidence)
+		out.Filtered = &filtered
+		out.Page, err = buildManagementQueryPageFromFilteredRowsMode(view.Input, filtered, filters, out.Evidence, owner, s.control.key, token, view.ReadAt, rebase && !selection)
 		endPage()
 		if err == nil && !selection {
 			endHydrate := managementReadSpan(ctx, "hydrate_page")
