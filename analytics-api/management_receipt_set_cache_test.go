@@ -319,6 +319,62 @@ func TestManagementPagingReusesVerifiedReceiptSet(t *testing.T) {
 	}
 }
 
+func TestManagementPagingReusesWideReceiptBatches(t *testing.T) {
+	s := managementHydrationFixture(t)
+	// Each 25-group page needs more than one selected-ID batch. A missing
+	// receipt still has to reach the raw decoder on every hydrated read.
+	for _, query := range []string{
+		`INSERT INTO console_sub_models(account_id,group_id,model,state,result)
+ SELECT 'a',g,m,'done',jsonb_build_object('model',m,'checked_at',g,'verdict','pass',
+ 'availability',jsonb_build_object('id','dense-a-'||g||'-'||m,'status','success','model_match','match'),
+ 'quality',jsonb_build_object('id','dense-q-'||g||'-'||m,'status','success'))
+ FROM generate_series(1,61) g CROSS JOIN (SELECT 'wide-'||lpad(n::text,3,'0') m FROM generate_series(1,100) n) models`,
+		`INSERT INTO console_sub_usage(id,account_id,group_id,key_id,model,started_at,request_ids,status,result)
+ SELECT prefix||g||'-'||m,'a',g,g,m,0,'[]','matched','{"input_price":2,"output_price":3}'
+ FROM generate_series(1,61) g CROSS JOIN (SELECT 'wide-'||lpad(n::text,3,'0') m FROM generate_series(1,100) n) models
+ CROSS JOIN unnest(ARRAY['dense-a-','dense-q-']) prefix
+ WHERE NOT (g=26 AND m='wide-001' AND prefix='dense-a-')`,
+	} {
+		if _, err := s.control.db.Exec(query); err != nil {
+			t.Fatal(err)
+		}
+	}
+	prepareManagementRevisionsForTest(t, s.control.db)
+	ctx := context.Background()
+	f := managementQueryFilters{GroupStatus: "all", Model: "gpt-5.5"}
+	first, err := s.readManagementQuerySnapshot(ctx, "owner", f, "", false)
+	if err != nil || first.Page.NextCursor == "" {
+		t.Fatal("wide fixture did not produce a next page", err)
+	}
+	s.rememberManagementPagingPlan("owner", f, first)
+	want, err := s.readManagementQuerySnapshot(ctx, "owner", f, first.Page.NextCursor, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&output)
+	defer log.SetOutput(previous)
+	for n := 0; n < 3; n++ {
+		output.Reset()
+		start := time.Now()
+		got, ok, err := s.currentManagementPagingPage(ctx, "owner", f, first.Page.NextCursor, false)
+		elapsed := time.Since(start)
+		got.ReadAtMS = want.Page.ReadAtMS
+		if err != nil || !ok || mustJSON(got.Rows) != mustJSON(want.Page.Rows) || mustJSON(got.Context) != mustJSON(managementContextForPage(want.View, want.Page, f.Model)) || got.Revision != want.Page.Revision {
+			t.Fatal("wide paging changed complete rows, context or revision", err)
+		}
+		logs := output.String()
+		t.Logf("local_wide_paging pass=%d elapsed_ms=%d hits=%d sql_reads=%d", n, elapsed.Milliseconds(), strings.Count(logs, "management_receipt_set_cache hit=true"), strings.Count(logs, "stage=receipt_signal_rows "))
+		if !strings.Contains(logs, "management_page_receipt_signals requested=5150 resolved=5149") || !strings.Contains(logs, "stage=page_receipts ") {
+			t.Fatal("wide fixture lost its second batch or missing-receipt fallback")
+		}
+		if n > 0 && (strings.Count(logs, "management_receipt_set_cache hit=true") != 2 || strings.Contains(logs, "stage=receipt_signal_rows ")) {
+			t.Fatalf("unchanged wide page repeated receipt SQL: pass=%d hits=%d sql_reads=%d", n, strings.Count(logs, "management_receipt_set_cache hit=true"), strings.Count(logs, "stage=receipt_signal_rows "))
+		}
+	}
+}
+
 func TestManagementReceiptSetCacheLocalMeasurement(t *testing.T) {
 	s := managementHydrationFixture(t)
 	prepareManagementRevisionsForTest(t, s.control.db)

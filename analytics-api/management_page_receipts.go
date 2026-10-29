@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"log"
+	"slices"
 )
 
 // Only hydrated management pages immediately normalize every usage to these
@@ -34,6 +35,11 @@ func (s *Service) attachManagementPageSummaryUsageFrom(ctx context.Context, db c
 		if current == nil || current(id) == nil {
 			ids = append(ids, id)
 		}
+	}
+	// Map iteration must not change membership across selected-ID batches:
+	// otherwise an unchanged wide page cannot reuse its exact-set snapshots.
+	if len(ids) > 4096 {
+		slices.Sort(ids)
 	}
 	end := managementReadSpan(ctx, "hydrate_receipt_signals")
 	receipts := make(map[string]managementStreamReceipt, len(ids))

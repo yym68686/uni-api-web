@@ -78,6 +78,10 @@ entries and 8 MiB; responses are independently reconstructed typed maps.
 Paging may install the same scope only after comparing its fresh proof,
 headers and deadline in the hydration transaction; the page reader still
 checks that transaction's projection completeness before any reuse.
+Pages needing more than 4096 receipt IDs sort the complete requested set
+before splitting it into bounded batches. This fixes batch membership across
+map iterations; it does not relax exact-set invalidation or cache missing IDs
+as resolved receipts. Smaller pages retain their original batching path.
 
 Only whitelisted counters, state/wait labels, fixed query classes and correlated
 request IDs are emitted. No raw SQL, query parameters, business identities,
