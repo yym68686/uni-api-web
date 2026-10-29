@@ -20,6 +20,7 @@ type managementFreshProof struct {
 	Epochs          map[string]string
 	Stamp           string
 	ExportStamp     string
+	ReceiptStamp    string
 	CurrentExport   bool
 	HeadersRevision int64
 	Until           time.Time
@@ -70,8 +71,8 @@ func (s *Service) managementReadProof(ctx context.Context, db controlQueryDB, ow
 		return s.managementReadProof(ctx, tx, owner)
 	}
 	proof := managementFreshProof{}
-	revision, ready, err := readManagementCompactRevision(ctx, db, owner)
-	if err != nil || !ready {
+	compact, err := readManagementCompactProof(ctx, db, owner)
+	if err != nil || !compact.ready {
 		return proof, time.Time{}, err
 	}
 	if s.engine == nil {
@@ -114,14 +115,17 @@ func (s *Service) managementReadProof(ctx context.Context, db controlQueryDB, ow
  OR p->'before'->'base_url' IS DISTINCT FROM p->'after'->'base_url')) origins`).Scan(&overrides); err != nil {
 		return proof, now, err
 	}
-	proof.Stamp = tokenHash(mustJSON([]any{revision, string(epoch), string(price), string(overrides)}))
+	proof.Stamp = tokenHash(mustJSON([]any{compact.revision, string(epoch), string(price), string(overrides)}))
 	exportedEpoch := make(map[string]string, len(proof.Epochs))
 	for relation, value := range proof.Epochs {
 		if relation != "console_control_snapshots" {
 			exportedEpoch[relation] = value
 		}
 	}
-	proof.ExportStamp = tokenHash(mustJSON([]any{revision, exportedEpoch, string(price), string(overrides)}))
+	proof.ExportStamp = tokenHash(mustJSON([]any{compact.revision, exportedEpoch, string(price), string(overrides)}))
+	if accounts := proof.Epochs["console_sub_accounts"]; accounts != "" {
+		proof.ReceiptStamp = tokenHash(mustJSON([]any{compact.receipts, accounts}))
+	}
 	if until.Valid {
 		proof.Until = until.Time
 	}

@@ -12,7 +12,9 @@ import (
 	"unsafe"
 )
 
-// This scope shares management's complete, same-transaction source proof.
+// This scope requires management's complete, same-transaction source proof.
+// Its version covers receipt source/projection revisions and account ownership;
+// unrelated page inputs still invalidate the full page, not these exact reads.
 // It never enters selection, detail reads, paging state or public JSON.
 type managementReceiptSetScopeKey struct{}
 type managementReceiptSetScope struct {
@@ -49,10 +51,10 @@ const managementReceiptSetBudget = 8 << 20
 func managementReceiptSetScopeFromProof(store *managementReceiptSets, database *sql.DB, tx *sql.Tx, owner string, proof managementFreshProof) *managementReceiptSetScope {
 	// Rates' proof gate checks the compact receipt revision and all membership,
 	// ownership and key epochs. Receipt inputs are a subset of those sources.
-	if managementRateScopeFromProof(nil, database, tx, owner, proof) == nil {
+	if proof.ReceiptStamp == "" || managementRateScopeFromProof(nil, database, tx, owner, proof) == nil {
 		return nil
 	}
-	return &managementReceiptSetScope{store: store, tx: tx, version: managementReceiptSetVersion{database: database, owner: owner, stamp: proof.ExportStamp}}
+	return &managementReceiptSetScope{store: store, tx: tx, version: managementReceiptSetVersion{database: database, owner: owner, stamp: proof.ReceiptStamp}}
 }
 
 func enableManagementReceiptSetScope(ctx context.Context, db controlQueryDB, complete bool) {

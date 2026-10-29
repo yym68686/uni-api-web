@@ -20,6 +20,29 @@ func receiptSetScopeForTest() (*managementReceiptSetScope, context.Context) {
 	return scope, context.WithValue(context.Background(), managementReceiptSetScopeKey{}, scope)
 }
 
+func TestManagementReceiptSetCacheRequiresCompleteReceiptProof(t *testing.T) {
+	proof := managementFreshProof{ExportStamp: "page", ReceiptStamp: "receipts", Epochs: map[string]string{"console_sub_accounts": "0", "console_sub_targets": "1", "console_sub_usage": "2", "console_sub_observed_rates": "3"}}
+	store, database, tx := &managementReceiptSets{}, &sql.DB{}, &sql.Tx{}
+	if managementReceiptSetScopeFromProof(store, database, tx, "owner", proof) == nil {
+		t.Fatal("complete receipt proof rejected")
+	}
+	for relation, value := range proof.Epochs {
+		delete(proof.Epochs, relation)
+		if managementReceiptSetScopeFromProof(store, database, tx, "owner", proof) != nil {
+			t.Fatal("incomplete source proof admitted", relation)
+		}
+		proof.Epochs[relation] = value
+	}
+	proof.ReceiptStamp = ""
+	if managementReceiptSetScopeFromProof(store, database, tx, "owner", proof) != nil {
+		t.Fatal("receipt proof missing")
+	}
+	proof.ReceiptStamp, proof.ExportStamp = "receipts", ""
+	if managementReceiptSetScopeFromProof(store, database, tx, "owner", proof) != nil {
+		t.Fatal("unprepared complete proof admitted")
+	}
+}
+
 func TestManagementReceiptSetCacheSetScopeAndTypedIsolation(t *testing.T) {
 	for _, name := range []string{"hit", "permutation", "strict", "ids", "transaction", "pool", "database", "owner", "proof", "empty_proof", "unverified", "no_scope", "empty", "large"} {
 		t.Run(name, func(t *testing.T) {
@@ -226,6 +249,7 @@ func TestManagementReceiptSetCacheCurrentProofAndOldSnapshot(t *testing.T) {
 		`UPDATE console_sub_usage SET result=jsonb_set(result,'{input_price}','9') WHERE id='a-1-gpt-5.5'`,
 		`UPDATE console_sub_usage SET result=jsonb_set(result,'{output_tokens}','9223372036854775807') WHERE id='a-1-gpt-5.5'`,
 		`UPDATE console_sub_usage SET status='pending' WHERE id='a-1-gpt-5.5'`,
+		`UPDATE console_management_receipt_signal SET evidence_digest=decode('ab','hex') WHERE id='q-1-gpt-5.5'`,
 		`UPDATE console_sub_accounts SET owner='foreign' WHERE id='a'`,
 		`UPDATE console_sub_accounts SET owner='owner' WHERE id='a'`,
 		`UPDATE console_sub_usage SET result='{"input_tokens":1.0}' WHERE id='a-1-gpt-5.5'`,
@@ -268,6 +292,67 @@ func TestManagementReceiptSetCachePreservesPageAndRawFallback(t *testing.T) {
 	}
 	if len(s.receiptSets.entries) == 0 {
 		t.Fatal("normal management snapshot did not install receipt scope")
+	}
+}
+
+func TestManagementReceiptSetCacheIgnoresUnrelatedPageInputs(t *testing.T) {
+	s := managementHydrationFixture(t)
+	db := s.control.db
+	prepareManagementRevisionsForTest(t, db)
+	ctx := managementTraceContext(context.Background())
+	ids := []string{"a-1-gpt-5.5", "q-1-gpt-5.5", "absent"}
+	var output bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&output)
+	defer log.SetOutput(previous)
+	read := func() (managementFreshProof, map[string]managementStreamReceipt) {
+		t.Helper()
+		tx, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback()
+		proof, _, err := s.managementReadProof(ctx, tx, "owner")
+		if err != nil || proof.ExportStamp == "" {
+			t.Fatal("fixture has no current proof", err)
+		}
+		scope := managementReceiptSetScopeFromProof(&s.receiptSets, db, tx, "owner", proof)
+		readCtx := context.WithValue(ctx, managementReceiptSetScopeKey{}, scope)
+		var complete bool
+		if err := tx.QueryRowContext(ctx, `SELECT complete FROM console_management_projection_state WHERE singleton`).Scan(&complete); err != nil {
+			t.Fatal(err)
+		}
+		enableManagementReceiptSetScope(readCtx, tx, complete)
+		got, err := readManagementStreamReceipts(readCtx, tx, "owner", ids, false)
+		want, wantErr := readManagementStreamReceiptsUncached(context.Background(), tx, "owner", ids, false)
+		if err != nil || wantErr != nil || !reflect.DeepEqual(got, want) {
+			t.Fatal("selected receipts differ from current transaction SQL", err, wantErr)
+		}
+		return proof, got
+	}
+	before, receipts := read()
+	for _, query := range []string{
+		`UPDATE console_sub_models SET message='changed page diagnostic' WHERE group_id=1 AND model='gpt-5.5'`,
+		`UPDATE console_sub_models SET result=jsonb_set(result,'{availability,ttft_ms}','456') WHERE group_id=1 AND model='gpt-5.5'`,
+		`UPDATE console_sub_targets SET name='changed target name' WHERE group_id=1`,
+		`INSERT INTO console_sub_check_queue(account_id,group_id,kind,model) VALUES('a',1,'model','gpt-5.5')`,
+		`INSERT INTO ` + s.engine.historyPath + `.prices(model,input,output) VALUES('gpt-5.5',9,10) ON CONFLICT(model) DO UPDATE SET input=EXCLUDED.input,output=EXCLUDED.output`,
+	} {
+		if _, err := db.Exec(query); err != nil {
+			t.Fatal(err)
+		}
+		output.Reset()
+		after, got := read()
+		if before.ExportStamp == after.ExportStamp {
+			t.Fatal("unrelated page change must still invalidate the complete page proof", query)
+		}
+		if !reflect.DeepEqual(got, receipts) {
+			t.Fatal("unrelated page input changed the selected receipt SQL", query)
+		}
+		if !strings.Contains(output.String(), "management_receipt_set_cache hit=true") || strings.Contains(output.String(), "stage=receipt_signal_rows ") {
+			t.Fatal("unrelated page change repeated the selected receipt SQL", query, output.String())
+		}
+		before = after
 	}
 }
 

@@ -79,46 +79,73 @@ func countManagementReceiptsByIdentity(ctx context.Context, db controlQueryDB) (
 }
 
 func readManagementCompactRevision(ctx context.Context, db controlQueryDB, owner string) (string, bool, error) {
+	proof, err := readManagementCompactProof(ctx, db, owner)
+	return proof.revision, proof.ready, err
+}
+
+type managementCompactProof struct {
+	revision, receipts string
+	ready              bool
+}
+
+func readManagementCompactProof(ctx context.Context, db controlQueryDB, owner string) (managementCompactProof, error) {
 	managementDirectoryModelRevision(ctx, db, owner, nil)
 	rows, err := db.QueryContext(ctx, `SELECT relation_name,revision,rows_base+rows_delta,invalid_base+invalid_delta,complete FROM console_management_revision_state ORDER BY relation_name`)
 	if err != nil {
-		return "", false, err
+		return managementCompactProof{}, err
 	}
 	defer rows.Close()
 	counts := map[string]int64{}
 	hash := sha256.New()
 	encoder := json.NewEncoder(hash)
 	if err = encoder.Encode("management-current-revisions-v1"); err != nil {
-		return "", false, err
+		return managementCompactProof{}, err
 	}
 	ready := true
 	var modelRevision *int64
+	var usageRevision, receiptRevision int64
 	for rows.Next() {
 		var name string
 		var revision, count, bad int64
 		var complete bool
 		if err = rows.Scan(&name, &revision, &count, &bad, &complete); err != nil {
-			return "", false, err
+			return managementCompactProof{}, err
 		}
 		counts[name] = count
 		if name == "console_sub_models" {
 			modelRevision = &revision
 		}
+		switch name {
+		case "console_sub_usage":
+			usageRevision = revision
+		case "console_management_receipt_signal":
+			receiptRevision = revision
+		}
 		ready = ready && complete && count >= 0 && bad == 0
 		if err = encoder.Encode([]any{name, revision}); err != nil {
-			return "", false, err
+			return managementCompactProof{}, err
 		}
 	}
 	if err = rows.Err(); err != nil {
-		return "", false, err
+		return managementCompactProof{}, err
 	}
 	rows.Close()
 	if !ready || len(counts) != 4 || counts["console_sub_models"] != counts["console_management_model_signal"] || counts["console_sub_usage"] != counts["console_management_receipt_signal"] {
-		return "", false, nil
+		return managementCompactProof{}, nil
 	}
 	revision, err := finishManagementModelRevision(ctx, db, owner, hash)
 	if err == nil && ctx.Err() == nil {
 		managementDirectoryModelRevision(ctx, db, owner, modelRevision)
 	}
-	return revision, err == nil, err
+	if err != nil {
+		return managementCompactProof{}, err
+	}
+	return managementCompactProof{
+		revision: revision,
+		// Exact selected-ID receipt reads do not depend on model results or
+		// the queue. Both source identity and every projected receipt column
+		// still advance a transactional revision, including deletes/truncates.
+		receipts: tokenHash(mustJSON([]any{"management-receipts-v1", usageRevision, receiptRevision})),
+		ready:    true,
+	}, nil
 }
