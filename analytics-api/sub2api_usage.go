@@ -257,11 +257,7 @@ func (s *Service) subAttachUsageWithCurrentFrom(ctx context.Context, db controlQ
 		}
 	}
 	if current != nil && managementTraceEnabled(ctx) {
-		phase := "page"
-		if account, _ := ctx.Value(managementAccountReceiptsKey{}).(bool); account {
-			phase = "account"
-		}
-		log.Printf("management_receipt_reuse reused=%d raw_ids=%d phase=%s request_id=%s", len(resolved), len(ids), phase, consoleRequestID(ctx))
+		log.Printf("management_receipt_reuse reused=%d raw_ids=%d phase=%s request_id=%s", len(resolved), len(ids), managementReceiptPhase(ctx), consoleRequestID(ctx))
 	}
 	if err := s.subReadUsageByIDsFrom(ctx, db, owner, ids, resolved); err != nil {
 		return err
@@ -281,7 +277,11 @@ func (s *Service) subReadUsageByIDsFrom(ctx context.Context, db controlQueryDB, 
 	if len(ids) == 0 {
 		return ctx.Err()
 	}
-	readTrace := newManagementRowsTrace(ctx, "page_receipts")
+	stage := "page_receipts"
+	if managementReceiptPhase(ctx) == "account" {
+		stage = "account_receipts"
+	}
+	readTrace := newManagementRowsTrace(ctx, stage)
 	defer readTrace.finish()
 	rows, err := db.QueryContext(ctx, `SELECT u.id,u.status,u.result FROM console_sub_usage u JOIN console_sub_accounts a ON a.id=u.account_id WHERE a.owner=$1 AND u.id=ANY($2)`, owner, ids)
 	if err != nil {
@@ -311,7 +311,13 @@ func (s *Service) subReadUsageByIDsFrom(ctx context.Context, db controlQueryDB, 
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	return ctx.Err()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if observe, _ := ctx.Value(managementRawReceiptObserverKey{}).(func([]string)); observe != nil {
+		observe(ids)
+	}
+	return nil
 }
 
 // Free account-API reads have a durable queue and separate leases. Slow log

@@ -144,14 +144,15 @@ func (s *Service) readManagementDatabaseModeWithReceiptsFrom(ctx context.Context
 			return s.control.subObservedRatesPreparedFrom(ctx, db, owner, "")
 		}
 	}
-	var readUsage func([]subAccount) error
-	if current := out.receiptReuse.current(db, owner); current != nil {
-		// Predicate evidence precedes group metadata as well as page hydration.
-		// Reuse it only for this compact management read, never full details.
-		readUsage = func(accounts []subAccount) error {
-			accountCtx := context.WithValue(ctx, managementAccountReceiptsKey{}, true)
-			return s.subAttachUsageWithCurrentFrom(accountCtx, db, owner, accounts, current)
-		}
+	// Mark this raw read even on fallback/catalog-only paths. A request can
+	// contain both account and page receipt SQL; their timings must not share
+	// the page_receipts label. The reader, SQL and attachment behavior are the
+	// same with a nil current lookup.
+	current := out.receiptReuse.current(db, owner)
+	readUsage := func(accounts []subAccount) error {
+		accountCtx := context.WithValue(ctx, managementAccountReceiptsKey{}, true)
+		accountCtx = out.receiptReuse.traceRawIDs(accountCtx, db, owner)
+		return s.subAttachUsageWithCurrentFrom(accountCtx, db, owner, accounts, current)
 	}
 	if err = s.readSubAccountDetailsWithReadersFrom(ctx, db, owner, "", 0, "", true, false, out.Input.Accounts, nil, shared, readModels, readRates, true, readUsage); err != nil {
 		return out, err

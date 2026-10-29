@@ -181,3 +181,15 @@ wrapper preserves the underlying transport error. Fixed `response_flush` timing
 and `management_response_flush` flags correlate delivery with the same request ID
 without logging transport error text. A local real-HTTP retention-barrier test
 does not establish production proxy/browser latency or one-second acceptance.
+
+Raw receipt timings distinguish `account_receipts` (before filtering/paging)
+from `page_receipts` (page hydration), including catalog-only/fallback account
+reads. Both still issue exactly the same SQL and IDs. A traced management
+snapshot also emits `management_receipt_raw_scope` after a successful nonempty
+raw lookup: fixed phase, requested-ID count, prior account-ID count, overlap
+count, and request ID only. The request-local ID set is bound to the same
+transaction/owner and discarded with the existing receipt holder. It contains
+no receipts and never resolves or suppresses a lookup, including absent IDs.
+Failed, canceled and empty reads do not report successful scope. Overlap counts
+identify a candidate for further measurement, not proof of skipped I/O, lower
+latency, or permission to cache missing rows across reads.
