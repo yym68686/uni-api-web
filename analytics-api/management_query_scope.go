@@ -76,7 +76,11 @@ func managementStreamFallbackGroups(model string, models []managementStreamModel
 // Every visible page group and bound alias is fully hydrated before publishing;
 // complete action selections continue to read every model's full evidence.
 func readManagementScopedSignals(ctx context.Context, db controlQueryDB, owner, model string, names []string) ([]managementModelSignals, string, error) {
+	return readManagementScopedSignalsWithReceipts(ctx, db, owner, model, names, nil)
+}
+
+func readManagementScopedSignalsWithReceipts(ctx context.Context, db controlQueryDB, owner, model string, names []string, reuse *managementReceiptReuse) ([]managementModelSignals, string, error) {
 	endCatalog := managementReadSpan(ctx, "database_model_catalog")
 	defer endCatalog()
-	return readManagementScopedStreams(ctx, db, owner, true, managementStreamScope{Model: model, Names: names})
+	return readManagementScopedStreams(ctx, db, owner, true, managementStreamScope{Model: model, Names: names, ReceiptReuse: reuse})
 }

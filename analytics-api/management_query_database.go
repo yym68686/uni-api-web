@@ -19,6 +19,7 @@ type managementDatabaseView struct {
 	ReadAt          time.Time
 	EngineOrigins   map[string]map[string]string
 	ProjectedModels bool
+	receiptReuse    *managementReceiptReuse
 }
 
 // Caller owns one repeatable-read transaction for the complete view. Sources
@@ -37,6 +38,10 @@ func (s *Service) readManagementDatabaseScopedFrom(ctx context.Context, db contr
 }
 
 func (s *Service) readManagementDatabaseModeFrom(ctx context.Context, db controlQueryDB, owner string, facts []managementGatewayFacts, predicates bool, model string, catalogOnly bool) (managementDatabaseView, error) {
+	return s.readManagementDatabaseModeWithReceiptsFrom(ctx, db, owner, facts, predicates, model, catalogOnly, nil)
+}
+
+func (s *Service) readManagementDatabaseModeWithReceiptsFrom(ctx context.Context, db controlQueryDB, owner string, facts []managementGatewayFacts, predicates bool, model string, catalogOnly bool, reuse *managementReceiptReuse) (managementDatabaseView, error) {
 	ctx = managementTraceContext(ctx)
 	out := managementDatabaseView{}
 	trace := newManagementReadTimeline(ctx, "database_sources")
@@ -96,11 +101,14 @@ func (s *Service) readManagementDatabaseModeFrom(ctx context.Context, db control
 		if catalogOnly {
 			out.Input.ModelsRevision, signals, err = readManagementRevisionCatalogFrom(ctx, db, owner, true)
 		} else if model != "" {
-			signals, out.Input.ModelsRevision, err = readManagementScopedSignals(ctx, db, owner, model, managementScopeModelNames(model, facts, out.Bindings))
+			signals, out.Input.ModelsRevision, err = readManagementScopedSignalsWithReceipts(ctx, db, owner, model, managementScopeModelNames(model, facts, out.Bindings), reuse)
 		} else {
-			signals, out.Input.ModelsRevision, err = readCurrentManagementSignalsAndRevision(ctx, db, owner)
+			signals, out.Input.ModelsRevision, err = readManagementScopedStreams(ctx, db, owner, true, managementStreamScope{ReceiptReuse: reuse})
 		}
 		endPredicates()
+		if err == nil {
+			out.receiptReuse = reuse
+		}
 	}
 	if !predicates || errors.Is(err, errManagementPredicateFallback) {
 		out.Input.ModelsRevision, err = readManagementModelRevisionFrom(ctx, db, owner)

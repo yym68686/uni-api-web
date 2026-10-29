@@ -125,6 +125,18 @@ Successful add/replace writes close the editor immediately. Query invalidation
 runs in the background; its completion is not part of the save acknowledgement.
 Failed writes keep the draft and release the close button.
 
+Paged snapshot reads can reuse verified receipt summaries already read by their
+predicate stream. This is request-local evidence, not another response cache:
+only the same owner and the exact pinned repeatable-read transaction can use
+it. Valid summaries supply all five management usage fields; unsupported,
+unread and absent IDs keep the original raw reader and its typed error behavior.
+No receipt attaches until the remaining raw read and cancellation checks
+succeed. Detail/action reads and paging-directory hydration keep their existing
+path. The holder is cleared after hydration and never enters public JSON or
+retained pages. `management_receipt_reuse` logs only reused/raw ID counts and
+the request ID. A scoped model filter can overlap only a small fraction of the
+page's complete model receipts; count reduction is not an end-to-end speed claim.
+
 Reloads require successful live reads before publishing channel results. Persistent
 snapshots are not restored into these queries. The earlier local cache benchmark
 does not satisfy the one-second current-data requirement and is not acceptance

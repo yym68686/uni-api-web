@@ -27,6 +27,9 @@ const managementPageModelsSQL = `WITH wanted AS MATERIALIZED (
 // every bound member needed to assemble its public aliases then read display
 // evidence, under the caller's SAME repeatable-read transaction.
 func (s *Service) hydrateManagementPageFrom(ctx context.Context, db controlQueryDB, owner string, view *managementDatabaseView, page *managementQueryPage, filters managementQueryFilters) error {
+	// Release request-only receipt evidence before the view can be retained or
+	// returned. It must never outlive this hydration or cross a transaction.
+	defer func() { view.receiptReuse = nil }()
 	if !view.ProjectedModels || len(page.Rows) == 0 {
 		return nil
 	}
@@ -121,7 +124,7 @@ func (s *Service) hydrateManagementPageFrom(ctx context.Context, db controlQuery
 			return err
 		}
 		stages.next("hydrate_receipts")
-		if err = s.subAttachUsageFrom(ctx, db, owner, subset); err != nil {
+		if err = s.attachManagementPageUsageFrom(ctx, db, owner, subset, view.receiptReuse); err != nil {
 			return err
 		}
 		stages.next("hydrate_normalize")

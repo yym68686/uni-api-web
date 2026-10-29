@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"math"
 	"net/url"
 	"strconv"
@@ -185,6 +186,13 @@ func (s *Service) subAttachUsage(ctx context.Context, owner string, accounts []s
 }
 
 func (s *Service) subAttachUsageFrom(ctx context.Context, db controlQueryDB, owner string, accounts []subAccount) error {
+	return s.subAttachUsageWithCurrentFrom(ctx, db, owner, accounts, nil)
+}
+
+// current is private, already-authorized evidence from this SAME pinned
+// snapshot. Ordinary account/detail readers never supply it. Publication still
+// waits for every remaining raw receipt and the request context to succeed.
+func (s *Service) subAttachUsageWithCurrentFrom(ctx context.Context, db controlQueryDB, owner string, accounts []subAccount, current func(string) *subUsage) error {
 	probes := map[string][]*subProbe{}
 	for i := range accounts {
 		for j := range accounts[i].Targets {
@@ -236,8 +244,38 @@ func (s *Service) subAttachUsageFrom(ctx context.Context, db controlQueryDB, own
 		return ctx.Err()
 	}
 	ids := make([]string, 0, len(probes))
+	resolved := make(map[string]*subUsage, len(probes))
 	for id := range probes {
-		ids = append(ids, id)
+		var usage *subUsage
+		if current != nil {
+			usage = current(id)
+		}
+		if usage != nil {
+			resolved[id] = usage
+		} else {
+			ids = append(ids, id)
+		}
+	}
+	if current != nil && managementTraceEnabled(ctx) {
+		log.Printf("management_receipt_reuse reused=%d raw_ids=%d request_id=%s", len(resolved), len(ids), consoleRequestID(ctx))
+	}
+	if err := s.subReadUsageByIDsFrom(ctx, db, owner, ids, resolved); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	for id, usage := range resolved {
+		for _, p := range probes[id] {
+			p.Usage = usage
+		}
+	}
+	return nil
+}
+
+func (s *Service) subReadUsageByIDsFrom(ctx context.Context, db controlQueryDB, owner string, ids []string, current map[string]*subUsage) error {
+	if len(ids) == 0 {
+		return ctx.Err()
 	}
 	readTrace := newManagementRowsTrace(ctx, "page_receipts")
 	defer readTrace.finish()
@@ -249,7 +287,6 @@ func (s *Service) subAttachUsageFrom(ctx context.Context, db controlQueryDB, own
 	defer rows.Close()
 	// Publish only after the entire receipt read succeeds. An interrupted read
 	// cannot leave a mixture of current receipts and older embedded probe usage.
-	current := make(map[string]*subUsage, len(probes))
 	for readTrace.next(rows) {
 		var id, status string
 		var raw []byte
@@ -270,15 +307,7 @@ func (s *Service) subAttachUsageFrom(ctx context.Context, db controlQueryDB, own
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	for id, usage := range current {
-		for _, p := range probes[id] {
-			p.Usage = usage
-		}
-	}
-	return nil
+	return ctx.Err()
 }
 
 // Free account-API reads have a durable queue and separate leases. Slow log

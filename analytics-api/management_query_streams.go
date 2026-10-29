@@ -54,6 +54,7 @@ type managementStreamScope struct {
 	Model           string
 	Names           []string
 	CompactRevision bool
+	ReceiptReuse    *managementReceiptReuse
 }
 
 type managementStreamIdentity struct {
@@ -145,10 +146,16 @@ func readManagementScopedStreams(ctx context.Context, db controlQueryDB, owner s
 		out = append(out, model.item)
 	}
 	if compact {
+		if ctx.Err() == nil {
+			scope.ReceiptReuse.capture(db, owner, receipts)
+		}
 		return out, compactRevision, ctx.Err()
 	}
 	stages.next("signal_revision_finish")
 	revision, err := finishManagementModelRevision(ctx, db, owner, hash)
+	if err == nil && ctx.Err() == nil {
+		scope.ReceiptReuse.capture(db, owner, receipts)
+	}
 	if err != nil {
 		return nil, "", err
 	}
