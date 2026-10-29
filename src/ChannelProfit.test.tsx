@@ -169,8 +169,26 @@ it("keeps historical profit provisional, not an upper bound or a proven gain", a
   expect(await screen.findByRole("tooltip")).toHaveTextContent("不是完整利润或可信上下限");
   expect(screen.getByRole("tooltip")).toHaveTextContent("不能据此结算");
   view.rerender(<Tooltip.Provider><ChannelProfit estimated={100} actual={20} provisional /></Tooltip.Provider>);
-  expect(screen.getByText("¥-2.75")).toBeVisible();
+  const loss = screen.getByText("¥-2.75");
+  expect(loss).toBeVisible();
+  expect(loss.closest(".channel-profit")).toHaveClass("negative");
+  expect(loss.closest(".channel-profit")).not.toHaveClass("profit-provisional", "profit-upper-bound", "profit-positive");
+  expect(screen.getByText("暂计")).toBeVisible();
   expect(screen.getByLabelText("暂计利润率 -15.94%")).toBeVisible();
+});
+
+it.each([false, true])("keeps provisional losses red with upperBound=%s, including zero revenue", upperBound => {
+  const ui = (actual?: number) => <Tooltip.Provider><ChannelProfit estimated={0} actual={actual} provisional upperBound={upperBound} /></Tooltip.Provider>;
+  const view = render(ui(5));
+  expect(screen.getByText("¥-5.00").closest(".channel-profit")).toHaveClass("negative");
+  expect(screen.getByLabelText("暂计利润率 —")).toBeVisible();
+  expect(screen.getByText("暂计")).toBeVisible();
+  view.rerender(ui(0));
+  expect(screen.getByText("¥0.00").closest(".channel-profit")).toHaveClass("profit-provisional");
+  expect(screen.getByText("¥0.00").closest(".channel-profit")).not.toHaveClass("negative");
+  view.rerender(ui());
+  expect(document.querySelector(".channel-profit")).toHaveClass("muted");
+  expect(document.querySelector(".channel-profit")).not.toHaveClass("negative");
 });
 
 it("uses only explicitly provisional current-history amounts for historical reference profit", () => {

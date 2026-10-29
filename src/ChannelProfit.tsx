@@ -69,7 +69,7 @@ export function ChannelProfit({
   return (
     <Tip text={explanation}>
       <div
-        className={`channel-profit mono ${profit == null ? "muted" : provisional ? "profit-provisional" : profit.amount < 0 ? "negative" : bounded ? "profit-upper-bound" : profit.amount > 0 ? "profit-positive" : ""}`}
+        className={`channel-profit mono ${profit == null ? "muted" : profit.amount < 0 ? "negative" : provisional ? "profit-provisional" : bounded ? "profit-upper-bound" : profit.amount > 0 ? "profit-positive" : ""}`}
       >
         <span>{profit ? `${prefix}¥${number(profit.amount)}` : "—"}{profit && (bounded || provisional) && <small className="profit-bound-label">{provisional ? "暂计" : "上限"}</small>}</span>
         <small aria-label={`${provisional ? "暂计利润率" : bounded ? "利润率上限" : "利润率"} ${displayedPercent}`}>{displayedPercent}</small>
