@@ -1,6 +1,8 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
+// Shared readers can use the same SQL outside management. A shape alone does
+// not identify an endpoint; retain the PID+transaction request correlation.
 const kinds = new Set(["receipt_read", "page_models", "model_directory", "rates", "model_signals", "receipt_signals"]);
 const identity = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$/;
 const kubernetesName = /^[a-z0-9][a-z0-9.-]{0,252}$/;
@@ -38,10 +40,12 @@ BEGIN
  FOR i IN 1..${ticks} LOOP
   PERFORM pg_catalog.pg_stat_clear_snapshot();
   FOR sample IN
+   WITH activity AS MATERIALIZED (
    SELECT floor(extract(epoch FROM clock_timestamp())*1000)::bigint AS at_ms,
     pid,floor(extract(epoch FROM xact_start)*1000)::bigint AS xact_started_ms,
     floor(extract(epoch FROM query_start)*1000)::bigint AS query_started_ms,
     state,wait_event_type AS wait_type,wait_event AS wait,
+    query LIKE 'WITH first AS (SELECT key_id,started_at/86400 AS day,scan_page,scan_fingerprint FROM console_sub_usage%' AS usage_batch,
     CASE WHEN query LIKE 'SELECT u.id,u.status,u.result FROM console_sub_usage%' THEN 'receipt_read'
      WHEN query LIKE 'WITH wanted AS MATERIALIZED%' THEN 'page_models'
      WHEN query LIKE 'SELECT m.account_id,m.group_id,m.model,m.state,m.message%' THEN 'model_directory'
@@ -51,7 +55,16 @@ BEGIN
    FROM pg_catalog.pg_stat_activity
    WHERE datname=current_database() AND application_name='uni-api-control'
     AND backend_type='client backend' AND pid<>pg_backend_pid() AND xact_start IS NOT NULL
-    AND state IN ('active','idle in transaction','idle in transaction (aborted)')
+    AND state IN ('active','idle in transaction','idle in transaction (aborted)')),
+   concurrent AS MATERIALIZED (
+    SELECT jsonb_build_object(
+     'active_control_backends',count(*) FILTER(WHERE state='active'),
+     'background_usage_batches',count(*) FILTER(WHERE state='active' AND usage_batch),
+     'background_usage_batches_data_file_read',count(*) FILTER(WHERE state='active' AND usage_batch AND wait_type='IO' AND wait='DataFileRead'),
+     'background_usage_batches_max_query_ms',COALESCE(max(greatest(0,at_ms-query_started_ms)) FILTER(WHERE state='active' AND usage_batch),0)
+    ) AS concurrent_activity FROM activity)
+   SELECT at_ms,pid,xact_started_ms,query_started_ms,state,wait_type,wait,kind,concurrent_activity
+   FROM activity CROSS JOIN concurrent WHERE kind IS NOT NULL
    ORDER BY pid LIMIT 16
   LOOP
    IF sample.kind IS NOT NULL THEN
@@ -73,6 +86,16 @@ ROLLBACK;`;
 const integer = n => Number.isSafeInteger(n) && n >= 0;
 const label = v => v === null || typeof v === "string" && /^[a-zA-Z0-9_ ():-]{1,64}$/.test(v);
 
+// Counts describe one shared activity snapshot, not per-request I/O or a cause
+// of its delay. Missing/invalid context stays unavailable, never a false zero.
+export function concurrentActivity(value) {
+  const keys = ["active_control_backends", "background_usage_batches", "background_usage_batches_data_file_read", "background_usage_batches_max_query_ms"];
+  if (!value || typeof value !== "object" || Array.isArray(value) || !keys.every(key => integer(value[key]))) return null;
+  if (value.background_usage_batches_data_file_read > value.background_usage_batches || value.background_usage_batches > value.active_control_backends ||
+    value.background_usage_batches === 0 && value.background_usage_batches_max_query_ms !== 0) return null;
+  return Object.fromEntries(keys.map(key => [key, value[key]]));
+}
+
 export function safeSamples(stderr) {
   const samples = [];
   for (const line of stderr.split("\n")) {
@@ -86,7 +109,8 @@ export function safeSamples(stderr) {
       return [{ object: v.object, context: v.context, reads: v.reads, read_bytes: v.read_bytes, hits: v.hits }];
     }) : null;
     samples.push({ at_ms: value.at_ms, pid: value.pid, xact_started_ms: value.xact_started_ms, query_started_ms: value.query_started_ms,
-      state: value.state, wait_type: value.wait_type, wait: value.wait, kind: value.kind, backend_io: io, io_scope: "backend_cumulative_may_lag" });
+      state: value.state, wait_type: value.wait_type, wait: value.wait, kind: value.kind, backend_io: io, io_scope: "backend_cumulative_may_lag",
+      concurrent_activity: concurrentActivity(value.concurrent_activity), activity_scope: "database_concurrent_not_causal", kind_scope: "query_shape_not_request_type" });
   }
   return samples;
 }

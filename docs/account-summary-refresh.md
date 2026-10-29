@@ -193,3 +193,17 @@ no receipts and never resolves or suppresses a lookup, including absent IDs.
 Failed, canceled and empty reads do not report successful scope. Overlap counts
 identify a candidate for further measurement, not proof of skipped I/O, lower
 latency, or permission to cache missing rows across reads.
+
+The opt-in passive observer adds count-only `concurrent_activity` from the same
+materialized `pg_stat_activity` snapshot: active control backends, known free
+usage batches, those batches currently in `DataFileRead`, and their maximum
+query age. Management candidates are filtered before the 16-backend limit, so
+unrelated older backends cannot crowd them out. No background SQL, IDs, rows or
+parameters leave the observer, and no business query is replayed. The fixed
+`database_concurrent_not_causal` scope explicitly does not attribute the
+management delay to this simultaneous work. Legacy/malformed context remains
+`null`, not zero. Counts do not establish contention, E2E latency, or authority
+to change worker concurrency/database settings. No recurring sampler is added.
+The fixed `query_shape_not_request_type` kind scope is equally important:
+ordinary ledger/details reads can share a SQL shape such as rates. An unmatched
+sample cannot be attributed to channel management from its shape or timing.

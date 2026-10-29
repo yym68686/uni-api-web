@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { spawn, spawnSync, execFileSync } from "node:child_process";
-import { observationSQL, optionsFrom, safeSamples, sessionRequests, correlate, runObserver } from "./observe-management-read.mjs";
+import { observationSQL, optionsFrom, concurrentActivity, safeSamples, sessionRequests, correlate, runObserver } from "./observe-management-read.mjs";
 
 const args = ["--ssh-host", "control", "--namespace", "tenant", "--pod", "database-1"];
 const options = optionsFrom(args);
@@ -88,10 +88,31 @@ test("SQL only observes activity, with read-only transaction and bounded timeout
   assert.match(sql, /FOR i IN 1\.\.140 LOOP/);
   assert.match(sql, /pg_sleep\(0\.25\)/);
   assert.match(sql, /LIMIT 16/);
+  assert.match(sql, /WITH activity AS MATERIALIZED/);
+  assert.match(sql, /FROM activity CROSS JOIN concurrent WHERE kind IS NOT NULL\s+ORDER BY pid LIMIT 16/);
+  assert.match(sql, /background_usage_batches_data_file_read/);
   assert.match(sql, /floor\(extract\(epoch FROM xact_start\)\*1000\)::bigint/);
   assert.match(sql, /to_regprocedure\('pg_catalog\.pg_stat_get_backend_io\(integer\)'\)/);
   assert.match(sql, /ROLLBACK;$/);
   assert.doesNotMatch(sql, /EXPLAIN|INSERT|UPDATE|DELETE|ALTER|VACUUM|track_io_timing|plan_cache_mode|pg_stat_force_next_flush/i);
+});
+
+test("concurrent activity is count-only, bounded to its declared database scope and never causal", () => {
+  const activity = { active_control_backends: 9, background_usage_batches: 8, background_usage_batches_data_file_read: 6, background_usage_batches_max_query_ms: 556 };
+  assert.deepEqual(concurrentActivity({ ...activity, query: "private SQL", owner: "private-owner" }), activity);
+  for (const invalid of [undefined, null, {}, { ...activity, active_control_backends: -1 },
+    { ...activity, background_usage_batches: 10 }, { ...activity, background_usage_batches_data_file_read: 9 },
+    { ...activity, background_usage_batches_max_query_ms: Number.MAX_SAFE_INTEGER + 1 },
+    { ...activity, background_usage_batches: 0, background_usage_batches_data_file_read: 0 }]) assert.equal(concurrentActivity(invalid), null);
+  const zero = { active_control_backends: 1, background_usage_batches: 0, background_usage_batches_data_file_read: 0, background_usage_batches_max_query_ms: 0 };
+  assert.deepEqual(concurrentActivity(zero), zero);
+  const samples = safeSamples(notice({ ...sample, concurrent_activity: { ...activity, credential: "private" } }) + notice(sample));
+  assert.deepEqual(samples[0].concurrent_activity, activity);
+  assert.equal(samples[0].activity_scope, "database_concurrent_not_causal");
+  assert.equal(samples[0].kind_scope, "query_shape_not_request_type");
+  assert.equal(samples[1].concurrent_activity, null, "legacy samples cannot invent zero background work");
+  assert.doesNotMatch(JSON.stringify(samples), /private|credential|owner|query"/);
+  assert.deepEqual(correlate(samples, sessionRequests([log("current")]))[0].concurrent_activity, activity);
 });
 
 test("only whitelisted sample fields leave the observer", () => {
@@ -174,6 +195,17 @@ test("PostgreSQL observation correlates the exact synthetic local transaction", 
   if (url.username) env.PGUSER = decodeURIComponent(url.username);
   if (url.password) env.PGPASSWORD = decodeURIComponent(url.password);
   const activity = spawn("psql", ["-X", "-Atq", "-v", "ON_ERROR_STOP=1"], { env, stdio: ["pipe", "pipe", "pipe"] });
+  const background = spawn("psql", ["-X", "-Atq", "-v", "ON_ERROR_STOP=1"], { env, stdio: ["pipe", "pipe", "pipe"] });
+  // A separate synthetic background query has the real fixed batch prefix.
+  // Only its counts may appear; its query, identity and values must not.
+  background.stdout.resume();
+  background.stderr.resume();
+  background.stdin.end(`BEGIN;
+CREATE TEMP TABLE console_sub_usage(key_id bigint,started_at bigint,scan_page integer,scan_fingerprint text);
+INSERT INTO console_sub_usage VALUES(1,0,1,'private-background');
+SET LOCAL application_name='uni-api-control';
+WITH first AS (SELECT key_id,started_at/86400 AS day,scan_page,scan_fingerprint FROM console_sub_usage) SELECT pg_sleep(4) FROM first;
+ROLLBACK;`);
   let output = "", resolveReady, rejectReady;
   const ready = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
   const timer = setTimeout(() => rejectReady(Error("local fixture startup timed out")), 4000);
@@ -202,12 +234,50 @@ ROLLBACK;`);
       assert.equal(value.kind, "receipt_read");
       assert.equal(value.state, "active");
       assert.equal(value.wait, "PgSleep");
+      assert.equal(value.activity_scope, "database_concurrent_not_causal");
+      assert.equal(value.concurrent_activity.background_usage_batches_data_file_read, 0);
     }
+    assert.ok(samples.some(s => s.concurrent_activity.background_usage_batches === 1 && s.concurrent_activity.active_control_backends === 2), "concurrent local background activity was not counted");
     const version = Number(execFileSync("psql", ["-X", "-Atqc", "SHOW server_version_num"], { env, encoding: "utf8" }).trim());
     if (version < 180000) assert.ok(samples.every(s => s.backend_io === null));
-    assert.doesNotMatch(JSON.stringify(samples), /private-fixture|not-output/);
+    assert.doesNotMatch(JSON.stringify(samples), /private-fixture|not-output|private-background|scan_fingerprint/);
+
+    // Feed the same SQL an isolated activity relation: 17 older background
+    // backends used to fill LIMIT 16 before the management kind was checked.
+    // Synthetic PIDs must never request live per-backend I/O counters.
+    const crowdedSQL = observationSQL(local)
+      .replace("FROM pg_catalog.pg_stat_activity", "FROM pg_temp.observer_activity")
+      .replace("has_io := pg_catalog.to_regprocedure('pg_catalog.pg_stat_get_backend_io(integer)') IS NOT NULL;", "has_io := false;");
+    assert.doesNotMatch(crowdedSQL, /FROM pg_catalog\.pg_stat_activity|has_io := pg_catalog/);
+    const crowdedFixture = `CREATE TEMP TABLE observer_activity AS SELECT current_database() AS datname,'uni-api-control'::text AS application_name,
+ 'client backend'::text AS backend_type,100000000+g AS pid,transaction_timestamp() AS xact_start,
+ transaction_timestamp()-interval '5 seconds' AS query_start,'active'::text AS state,'IO'::text AS wait_event_type,'DataFileRead'::text AS wait_event,
+ CASE WHEN g<=17 THEN 'WITH first AS (SELECT key_id,started_at/86400 AS day,scan_page,scan_fingerprint FROM console_sub_usage private-background'
+ ELSE 'SELECT u.id,u.status,u.result FROM console_sub_usage private-management' END AS query FROM generate_series(1,18) g;\n`;
+    const crowded = spawnSync("psql", ["-X", "-Atq", "-v", "ON_ERROR_STOP=1"], { env, encoding: "utf8", timeout: 6000,
+      input: crowdedFixture + crowdedSQL });
+    assert.equal(crowded.status, 0, "isolated crowded activity fixture failed");
+    const crowdedSamples = safeSamples(crowded.stderr);
+    assert.equal(crowdedSamples.length, 4, "older background activity crowded out a management sample");
+    for (const value of crowdedSamples) {
+      assert.equal(value.pid, 100000018);
+      assert.equal(value.kind, "receipt_read");
+      assert.equal(value.backend_io, null);
+      assert.equal(value.concurrent_activity.active_control_backends, 18);
+      assert.equal(value.concurrent_activity.background_usage_batches, 17);
+      assert.equal(value.concurrent_activity.background_usage_batches_data_file_read, 17);
+      assert.ok(value.concurrent_activity.background_usage_batches_max_query_ms >= 5000);
+    }
+    assert.doesNotMatch(JSON.stringify(crowdedSamples), /private-|SELECT|scan_fingerprint/);
+    const previousLimit = crowdedSQL.replace("FROM activity CROSS JOIN concurrent WHERE kind IS NOT NULL", "FROM activity CROSS JOIN concurrent");
+    assert.notEqual(previousLimit, crowdedSQL);
+    const previous = spawnSync("psql", ["-X", "-Atq", "-v", "ON_ERROR_STOP=1"], { env, encoding: "utf8", timeout: 6000,
+      input: crowdedFixture + previousLimit });
+    assert.equal(previous.status, 0, "previous-limit control fixture failed");
+    assert.equal(safeSamples(previous.stderr).length, 0, "previous filter-after-limit no longer reproduces the missed sample");
   } finally {
     clearTimeout(timer);
     activity.kill("SIGTERM");
+    background.kill("SIGTERM");
   }
 });
