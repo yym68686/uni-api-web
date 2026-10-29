@@ -165,11 +165,12 @@ func readManagementScopedStreams(ctx context.Context, db controlQueryDB, owner s
 func readManagementStreamModels(ctx context.Context, db controlQueryDB, owner string, strict bool, scope managementStreamScope) ([]managementStreamModel, []string, error) {
 	stages := newManagementReadTimeline(ctx, "signal_model_directory")
 	defer stages.finish()
-	rows, err := db.QueryContext(ctx, managementModelSourceStreamSQL, owner)
+	out, err := readManagementModelDirectory(ctx, db, owner, scope.CompactRevision, func() ([]managementStreamModel, error) {
+		return readManagementModelSourceDirectory(ctx, db, owner)
+	})
 	if err != nil {
 		return nil, nil, err
 	}
-	out := []managementStreamModel{}
 	positions := managementStreamPositionIndex{}
 	wanted := map[string]bool{}
 	if scope.Model != "" {
@@ -188,19 +189,8 @@ func readManagementStreamModels(ctx context.Context, db controlQueryDB, owner st
 			positions.only = wanted
 		}
 	}
-	for rows.Next() {
-		var model managementStreamModel
-		if err := rows.Scan(&model.item.Account, &model.item.Group, &model.item.Model.Model, &model.item.Model.State, &model.message); err != nil {
-			rows.Close()
-			return nil, nil, err
-		}
-		positions.add(model.item, len(out))
-		out = append(out, model)
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return nil, nil, err
+	for i, model := range out {
+		positions.add(model.item, i)
 	}
 	stages.next("signal_model_scope")
 	if managementTraceEnabled(ctx) {
@@ -228,7 +218,7 @@ func readManagementStreamModels(ctx context.Context, db controlQueryDB, owner st
 		args = append(args, scope.Names, string(raw))
 	}
 	stages.next("signal_model_predicates")
-	rows, err = db.QueryContext(ctx, query, args...)
+	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -281,6 +271,23 @@ func readManagementStreamModels(ctx context.Context, db controlQueryDB, owner st
 		}
 	}
 	return out, ids, ctx.Err()
+}
+
+func readManagementModelSourceDirectory(ctx context.Context, db controlQueryDB, owner string) ([]managementStreamModel, error) {
+	rows, err := db.QueryContext(ctx, managementModelSourceStreamSQL, owner)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []managementStreamModel{}
+	for rows.Next() {
+		var model managementStreamModel
+		if err := rows.Scan(&model.item.Account, &model.item.Group, &model.item.Model.Model, &model.item.Model.State, &model.message); err != nil {
+			return nil, err
+		}
+		out = append(out, model)
+	}
+	return out, rows.Err()
 }
 
 func readManagementStreamReceipts(ctx context.Context, db controlQueryDB, owner string, ids []string, strict bool) (map[string]managementStreamReceipt, error) {

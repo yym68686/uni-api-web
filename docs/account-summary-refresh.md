@@ -207,3 +207,30 @@ to change worker concurrency/database settings. No recurring sampler is added.
 The fixed `query_shape_not_request_type` kind scope is equally important:
 ordinary ledger/details reads can share a SQL shape such as rates. An unmatched
 sample cannot be attributed to channel management from its shape or timing.
+
+### Source-only model directory reuse
+
+Full management recomputation can reuse only the five-column source directory
+(`account_id`, `group_id`, `model`, `state`, `message`). The existing statement
+revision covers changes to exactly those model columns; the account view epoch
+covers ownership changes. Both are read in the current pinned repeatable-read
+transaction. Admission requires prepared, valid compact counters and the exact
+database/owner/account-epoch/model-revision key. Missing preparation, a pool or
+different transaction/owner, fallback and complete action selection retain the
+original reads. No new query or database setting is introduced.
+
+The private store retains at most two directories within a shared 16 MiB
+admission budget. A string dictionary preserves every source byte and row order;
+expansion creates independent mutable request envelopes. Eviction clears hidden
+slice references. Result JSON, predicates, usage, receipts, prices, page data,
+deadlines and gateway facts are not cached here: their original reads and fences
+remain in place. A changed result or bill can therefore update the page while
+the source-only directory remains reusable. An interleaved older transaction can
+evict the newer key, causing a miss, never a hit on the wrong snapshot.
+
+Fixed `management_model_directory_cache` logs contain hit, row count, retained
+bytes (hit) or admission result (miss), and request ID only. A hit eliminates one
+source-directory SQL/scan but still requires O(N) local expansion and indexing;
+a miss adds O(N) dictionary packing. The opt-in real-PostgreSQL source-scale
+test (`RUN_MANAGEMENT_DIRECTORY_SCALE=1`) compares complete values/order with
+direct SQL; it is not browser E2E acceptance or proof of a production hit rate.

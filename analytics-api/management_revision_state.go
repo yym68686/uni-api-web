@@ -79,6 +79,7 @@ func countManagementReceiptsByIdentity(ctx context.Context, db controlQueryDB) (
 }
 
 func readManagementCompactRevision(ctx context.Context, db controlQueryDB, owner string) (string, bool, error) {
+	managementDirectoryModelRevision(ctx, db, owner, nil)
 	rows, err := db.QueryContext(ctx, `SELECT relation_name,revision,rows_base+rows_delta,invalid_base+invalid_delta,complete FROM console_management_revision_state ORDER BY relation_name`)
 	if err != nil {
 		return "", false, err
@@ -91,6 +92,7 @@ func readManagementCompactRevision(ctx context.Context, db controlQueryDB, owner
 		return "", false, err
 	}
 	ready := true
+	var modelRevision *int64
 	for rows.Next() {
 		var name string
 		var revision, count, bad int64
@@ -99,6 +101,9 @@ func readManagementCompactRevision(ctx context.Context, db controlQueryDB, owner
 			return "", false, err
 		}
 		counts[name] = count
+		if name == "console_sub_models" {
+			modelRevision = &revision
+		}
 		ready = ready && complete && count >= 0 && bad == 0
 		if err = encoder.Encode([]any{name, revision}); err != nil {
 			return "", false, err
@@ -112,5 +117,8 @@ func readManagementCompactRevision(ctx context.Context, db controlQueryDB, owner
 		return "", false, nil
 	}
 	revision, err := finishManagementModelRevision(ctx, db, owner, hash)
+	if err == nil && ctx.Err() == nil {
+		managementDirectoryModelRevision(ctx, db, owner, modelRevision)
+	}
 	return revision, err == nil, err
 }
