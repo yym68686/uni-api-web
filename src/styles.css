@@ -2629,6 +2629,8 @@ nav > button.active > svg {
 .profit-positive { color: var(--green); }
 .profit-upper-bound, .profit-provisional { color: #9a7208; }
 :root[data-theme="dark"] .profit-upper-bound, :root[data-theme="dark"] .profit-provisional { color: #e9cc70; }
+.channel-profit.negative { color: #c73545; }
+:root[data-theme="dark"] .channel-profit.negative { color: #ff929d; }
 .profit-bound-label { margin-left: 6px; font-size: 10px; font-style: normal; font-family: var(--font-sans, sans-serif); }
 
 .prices-panel { padding: 0; min-width: 0; }
