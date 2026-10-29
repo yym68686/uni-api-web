@@ -219,14 +219,17 @@ func readManagementStreamModels(ctx context.Context, db controlQueryDB, owner st
 		args = append(args, scope.Names, string(raw))
 	}
 	stages.next("signal_model_predicates")
+	readTrace := newManagementRowsTraceDerivedDecode(ctx, "model_signal_rows")
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, nil, err
 	}
+	readTrace.queryReady()
 	defer rows.Close()
+	defer func() { readTrace.finish() }()
 	ids := []string{}
 	seen := map[string]bool{}
-	for rows.Next() {
+	for readTrace.next(rows) {
 		var key managementStreamIdentity
 		var valid, present, hasUsage bool
 		var evidence []byte
@@ -261,10 +264,13 @@ func readManagementStreamModels(ctx context.Context, db controlQueryDB, owner st
 				ids = append(ids, id)
 			}
 		}
+		readTrace.counted(len(evidence))
 	}
 	if err := rows.Err(); err != nil {
 		return nil, nil, err
 	}
+	readTrace.finish()
+	readTrace = nil
 	stages.next("signal_model_verify")
 	for _, model := range out {
 		if len(model.evidence) != sha256.Size && (!scope.CompactRevision || scope.Model == "" || wanted[model.item.Model.Model] || fallback[qualityGroupID(model.item.Account, model.item.Group)]) {
@@ -275,18 +281,22 @@ func readManagementStreamModels(ctx context.Context, db controlQueryDB, owner st
 }
 
 func readManagementModelSourceDirectory(ctx context.Context, db controlQueryDB, owner string) ([]managementStreamModel, error) {
+	readTrace := newManagementRowsTraceDerivedDecode(ctx, "model_directory_rows")
 	rows, err := db.QueryContext(ctx, managementModelSourceStreamSQL, owner)
 	if err != nil {
 		return nil, err
 	}
+	readTrace.queryReady()
 	defer rows.Close()
+	defer readTrace.finish()
 	out := []managementStreamModel{}
-	for rows.Next() {
+	for readTrace.next(rows) {
 		var model managementStreamModel
 		if err := rows.Scan(&model.item.Account, &model.item.Group, &model.item.Model.Model, &model.item.Model.State, &model.message); err != nil {
 			return nil, err
 		}
 		out = append(out, model)
+		readTrace.counted(len(model.item.Account) + len(model.item.Model.Model) + len(model.item.Model.State) + len(model.message))
 	}
 	return out, rows.Err()
 }

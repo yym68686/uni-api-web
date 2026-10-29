@@ -1,16 +1,123 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
+	"log"
 	"reflect"
+	"strconv"
+	"strings"
 	"testing"
+	"time"
 )
 
 type managementStreamReadHook struct {
 	controlQueryDB
 	beforeReceipts func()
+}
+
+func TestManagementModelReadTraceKeepsResultsAndPrivateValues(t *testing.T) {
+	s := managementHydrationFixture(t)
+	ctx := context.Background()
+	want, revision, err := readManagementSignalStreams(ctx, s.control.db, "owner", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&output)
+	defer log.SetOutput(previous)
+	for _, owner := range []string{"owner", "foreign"} {
+		output.Reset()
+		got, actual, err := readManagementSignalStreams(managementTraceContext(ctx), s.control.db, owner, true)
+		if err != nil || (owner == "owner" && (actual != revision || !reflect.DeepEqual(got, want))) || (owner == "foreign" && len(got) != 0) {
+			t.Fatal("model row tracing changed the owned snapshot", err)
+		}
+		logs := output.String()
+		count := "rows=183 "
+		if owner == "foreign" {
+			count = "rows=0 "
+		}
+		for _, stage := range []string{"model_directory_rows", "model_signal_rows"} {
+			var found string
+			for _, line := range strings.Split(logs, "\n") {
+				if strings.Contains(line, "management_rows_read stage="+stage+" ") {
+					if found != "" {
+						t.Fatal("model row span finished twice", stage)
+					}
+					found = line
+				}
+			}
+			for _, field := range []string{count, "query_ready_ms=", "decode_ms=", "elapsed_ms=", "bytes=", "advance_ms=", "canceled=false"} {
+				if !strings.Contains(found, field) {
+					t.Fatal("missing model row metric", stage, field)
+				}
+			}
+		}
+		for _, private := range []string{"owner", "foreign", "gpt-5.5", "model message", "fixture", "https://a.test"} {
+			if strings.Contains(logs, private) {
+				t.Fatal("model row trace leaked private values")
+			}
+		}
+	}
+	output.Reset()
+	if _, _, err := readManagementSignalStreams(ctx, s.control.db, "owner", true); err != nil || output.Len() != 0 {
+		t.Fatal("untraced model reads logged diagnostics", err)
+	}
+}
+
+// Measure only the new per-row counter work, not database/network latency.
+func BenchmarkManagementModelDirectoryRowCounters(b *testing.B) {
+	const rows = 190653
+	for _, mode := range []string{"per_row_timer", "counter_only"} {
+		b.Run(mode, func(b *testing.B) {
+			b.ReportAllocs()
+			for n := 0; n < b.N; n++ {
+				trace := &managementRowsTrace{}
+				for i := 0; i < rows; i++ {
+					if mode == "per_row_timer" {
+						started := time.Now()
+						trace.decoded(started, 96)
+					} else {
+						trace.counted(96)
+					}
+				}
+				if trace.rows != rows || trace.bytes != rows*96 {
+					b.Fatal("row counters lost observations")
+				}
+			}
+		})
+	}
+}
+
+func TestManagementDerivedRowsTraceSeparatesAdvanceAndProcessing(t *testing.T) {
+	if newManagementRowsTraceDerivedDecode(context.Background(), "model_directory_rows") != nil {
+		t.Fatal("disabled trace allocated row metrics")
+	}
+	var output bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&output)
+	defer log.SetOutput(previous)
+	ctx, cancel := context.WithCancel(managementTraceContext(context.Background()))
+	cancel()
+	trace := newManagementRowsTraceDerivedDecode(ctx, "model_directory_rows")
+	trace.start = time.Now().Add(-100 * time.Millisecond)
+	trace.ready, trace.advance = 20*time.Millisecond, 30*time.Millisecond
+	trace.counted(42)
+	trace.finish()
+	metrics := map[string]int64{}
+	for _, part := range strings.Fields(output.String()) {
+		key, value, ok := strings.Cut(part, "=")
+		if ok {
+			metrics[key], _ = strconv.ParseInt(value, 10, 64)
+		}
+	}
+	processing := metrics["elapsed_ms"] - metrics["query_ready_ms"] - metrics["advance_ms"]
+	if metrics["query_ready_ms"] != 20 || metrics["advance_ms"] != 30 || metrics["rows"] != 1 || metrics["bytes"] != 42 || metrics["decode_ms"] != processing || !strings.Contains(output.String(), "canceled=true") {
+		t.Fatal("derived processing timing lost row or cancellation evidence")
+	}
 }
 
 func (d managementStreamReadHook) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {

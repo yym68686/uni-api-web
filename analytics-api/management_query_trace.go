@@ -69,13 +69,14 @@ func (t *managementReadTimeline) finish() { t.end() }
 // separately so a slow stream cannot be mistaken for expensive Go decoding.
 // Counters contain no identities, payloads, filters, or SQL text.
 type managementRowsTrace struct {
-	ctx         context.Context
-	stage       string
-	start       time.Time
-	ready       time.Duration
-	advance     time.Duration
-	decode      time.Duration
-	rows, bytes int
+	ctx          context.Context
+	stage        string
+	start        time.Time
+	ready        time.Duration
+	advance      time.Duration
+	decode       time.Duration
+	rows, bytes  int
+	deriveDecode bool
 }
 
 func newManagementRowsTrace(ctx context.Context, stage string) *managementRowsTrace {
@@ -83,6 +84,17 @@ func newManagementRowsTrace(ctx context.Context, stage string) *managementRowsTr
 		return nil
 	}
 	return &managementRowsTrace{ctx: ctx, stage: stage, start: time.Now()}
+}
+
+// Large streams already time database/sql row advancement. Derive the time
+// spent between advances in one batch at finish instead of adding two clock
+// reads per row to a hot management request.
+func newManagementRowsTraceDerivedDecode(ctx context.Context, stage string) *managementRowsTrace {
+	trace := newManagementRowsTrace(ctx, stage)
+	if trace != nil {
+		trace.deriveDecode = true
+	}
+	return trace
 }
 func (t *managementRowsTrace) queryReady() {
 	if t != nil {
@@ -116,8 +128,22 @@ func (t *managementRowsTrace) decoded(start time.Time, bytes int) {
 		t.decode += time.Since(start)
 	}
 }
+func (t *managementRowsTrace) counted(bytes int) {
+	if t != nil {
+		t.rows++
+		t.bytes += bytes
+	}
+}
 func (t *managementRowsTrace) finish() {
 	if t != nil {
-		log.Printf("management_rows_read stage=%s query_ready_ms=%d decode_ms=%d elapsed_ms=%d rows=%d bytes=%d advance_ms=%d canceled=%t request_id=%s", t.stage, t.ready.Milliseconds(), t.decode.Milliseconds(), time.Since(t.start).Milliseconds(), t.rows, t.bytes, t.advance.Milliseconds(), t.ctx.Err() != nil, consoleRequestID(t.ctx))
+		elapsed := time.Since(t.start)
+		decode := t.decode
+		if t.deriveDecode {
+			decode = elapsed - t.ready - t.advance
+			if decode < 0 {
+				decode = 0
+			}
+		}
+		log.Printf("management_rows_read stage=%s query_ready_ms=%d decode_ms=%d elapsed_ms=%d rows=%d bytes=%d advance_ms=%d canceled=%t request_id=%s", t.stage, t.ready.Milliseconds(), decode.Milliseconds(), elapsed.Milliseconds(), t.rows, t.bytes, t.advance.Milliseconds(), t.ctx.Err() != nil, consoleRequestID(t.ctx))
 	}
 }

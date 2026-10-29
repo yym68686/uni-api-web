@@ -46,6 +46,18 @@ result, billing, compaction and tool-use JSON from successfully decoded rows;
 it is not a wire-byte or disk-read counter. The trace finishes before later
 model, receipt and rate readers. Query-ready and advance include database,
 driver and network work and must not be described as disk-I/O durations.
+The model-directory and model-signal streams now emit the same bounded
+`management_rows_read` counters as `model_directory_rows` and
+`model_signal_rows`. These are diagnostic-only: they do not change the
+selection, projection, decoder, error or cancellation path, and they still
+cannot distinguish PostgreSQL, driver or network waiting without a correlated
+external wait sample.
+For these streams, `decode_ms` is derived once per query as elapsed minus
+query-ready and row-advance time; it approximates successful row scanning and
+in-memory assembly rather than JSON decoding. This avoids extra clock reads
+per row. Directory `bytes` counts the returned account/model/state/message
+strings; model-signal `bytes` counts evidence digests. Neither is a complete
+wire-byte or disk-read counter.
 
 Management may reuse raw target metadata only when the current repeatable-read
 transaction proves the same owner, database, account, target and capability
