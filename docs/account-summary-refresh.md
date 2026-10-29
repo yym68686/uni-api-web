@@ -102,6 +102,25 @@ untraced calls do not emit this diagnostic. This adds no request, retry,
 resolution attempt or response change. An independent DNS probe is not evidence
 of an earlier request's cause; use the matching request ID.
 
+## Bounded database wait observation
+
+`node scripts/observe-management-read.mjs --ssh-host HOST --namespace NAMESPACE
+--pod DATABASE_POD` passively samples at most 16 active management database
+transactions for 35 seconds by default. It emits fixed query categories, waits,
+and PID/transaction-start timestamps, never SQL, parameters or raw logs. The
+observer joins only the same PID **and** transaction-start millisecond to a
+`management_database_session` event. Missing or multiple matches remain explicit;
+cumulative backend I/O can lag and is not a per-query measurement.
+
+Fugue CLI logs are preferred. If its API is unavailable, an explicit optional
+`--logs-pod ANALYTICS_POD` allows one read-only SSH log read on the same declared
+host and namespace: five minutes, at most 2,000 lines per container, 4 MiB and
+10 seconds. No pod discovery, credential read, business replay, retry loop or
+production change occurs. Failed or truncated reads remain unavailable, not
+matched. `logs_source` identifies `fugue`, `ssh` or `unavailable`; non-session log
+contents and subprocess errors never leave the tool. No fallback runs without
+that explicit pod, or when the CLI log source is available.
+
 Successful add/replace writes close the editor immediately. Query invalidation
 runs in the background; its completion is not part of the save acknowledgement.
 Failed writes keep the draft and release the close button.

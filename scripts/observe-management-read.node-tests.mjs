@@ -15,12 +15,70 @@ test("requires explicit safe targets and bounded cadence, without shell interpol
   assert.equal(options.duration, 35);
   assert.equal(options.interval, 250);
   for (const bad of [[], [...args, "--duration", "46"], [...args, "--interval-ms", "1"], [...args, "--duration", "1.5"], [...args, "--duration", "NaN"], [...args, "--unknown", "x"], [...args, "--app"], [...args, "--app", "x", "--app", "y"]]) assert.throws(() => optionsFrom(bad));
-  for (const [key, bad] of [["ssh-host", "-oProxyCommand=secret"], ["namespace", "x;echo credential"], ["pod", "$(secret)"], ["user", "user password=x"], ["database", "postgres://secret"]]) {
+  for (const [key, bad] of [["ssh-host", "-oProxyCommand=secret"], ["namespace", "x;echo credential"], ["pod", "$(secret)"], ["logs-pod", "x;echo secret"], ["logs-pod", ""], ["logs-pod", "-l app=other"], ["user", "user password=x"], ["database", "postgres://secret"]]) {
     const index = args.indexOf(`--${key}`);
     const input = [...args];
     if (index < 0) input.push(`--${key}`, bad); else input[index + 1] = bad;
     assert.throws(() => optionsFrom(input));
   }
+});
+
+test("explicit SSH log fallback correlates only exact fixed session records", () => {
+  for (const failure of ["throw", "unavailable", "invalid-json"]) {
+    const calls = [];
+    const configured = optionsFrom([...args, "--logs-pod", "analytics-1"]);
+    const result = runObserver(configured, {
+      spawn() { return { status: 0, stderr: notice(sample) }; },
+      execute(command, argv, config) {
+        calls.push(command);
+        if (command === "fugue") {
+          if (failure === "throw") throw Error("private credential");
+          return failure === "unavailable" ? JSON.stringify({ source: { status: "unavailable" }, logs: [log("wrong")] }) : "private credential";
+        }
+        assert.equal(command, "ssh");
+        assert.deepEqual(argv, ["-o", "BatchMode=yes", "-o", "ConnectTimeout=6", "control", "kubectl -n tenant logs analytics-1 --all-containers=true --since=5m --tail=2000"]);
+        assert.equal(config.timeout, 10000);
+        assert.equal(config.maxBuffer, 4 << 20);
+        return ["unrelated private credential", log("previous", sample.xact_started_ms - 1).message, log("exact").message, log("exact", undefined, "proof").message,
+          log("private/credential").message, "management_database_session phase=view backend_pid=42 request_id=legacy"].join("\n");
+      },
+    });
+    assert.deepEqual(calls, ["fugue", "ssh"]);
+    assert.equal(result.logs_available, true);
+    assert.equal(result.logs_source, "ssh");
+    assert.equal(result.samples[0].correlation, "pid_xact_ms");
+    assert.deepEqual(result.samples[0].request_ids, ["exact"]);
+    assert.doesNotMatch(JSON.stringify(result), /private|credential|wrong|previous|legacy/);
+  }
+});
+
+test("fallback never runs without explicit target or when Fugue logs are available", () => {
+  for (const configured of [options, optionsFrom([...args, "--logs-pod", "analytics-1"])]) {
+    const calls = [];
+    const result = runObserver(configured, {
+      spawn() { return { status: 0, stderr: notice(sample) }; },
+      execute(command) {
+        calls.push(command);
+        if (!configured["logs-pod"]) throw Error("private credential");
+        return JSON.stringify({ source: { status: "available" }, logs: [log("current")] });
+      },
+    });
+    assert.deepEqual(calls, ["fugue"]);
+    assert.equal(result.logs_available, !!configured["logs-pod"]);
+    assert.equal(result.logs_source, configured["logs-pod"] ? "fugue" : "unavailable");
+  }
+});
+
+test("failed fallback keeps samples unmatched without exposing raw errors", () => {
+  const result = runObserver(optionsFrom([...args, "--logs-pod", "analytics-1"]), {
+    spawn() { return { status: null, stderr: notice(sample) }; },
+    execute() { throw Error("private credential"); },
+  });
+  assert.equal(result.completed, false);
+  assert.equal(result.logs_available, false);
+  assert.equal(result.logs_source, "unavailable");
+  assert.equal(result.samples[0].correlation, "unmatched");
+  assert.doesNotMatch(JSON.stringify(result), /private|credential/);
 });
 
 test("SQL only observes activity, with read-only transaction and bounded timeout", () => {

@@ -7,7 +7,7 @@ const kubernetesName = /^[a-z0-9][a-z0-9.-]{0,252}$/;
 const requestID = /^[a-zA-Z0-9._:-]{1,128}$/;
 
 export function optionsFrom(args) {
-  const allowed = new Set(["ssh-host", "namespace", "pod", "database", "user", "app", "duration", "interval-ms"]);
+  const allowed = new Set(["ssh-host", "namespace", "pod", "logs-pod", "database", "user", "app", "duration", "interval-ms"]);
   const values = { database: "console", user: "postgres", app: "uni-api-analytics", duration: "35", "interval-ms": "250" };
   const seen = new Set();
   for (let i = 0; i < args.length; i += 2) {
@@ -18,6 +18,7 @@ export function optionsFrom(args) {
   }
   for (const key of ["ssh-host", "database", "user", "app"]) if (!identity.test(values[key] ?? "")) throw Error("Invalid observer target");
   for (const key of ["namespace", "pod"]) if (!kubernetesName.test(values[key] ?? "")) throw Error("Invalid observer target");
+  if (values["logs-pod"] !== undefined && !kubernetesName.test(values["logs-pod"])) throw Error("Invalid log target");
   const duration = Number(values.duration), interval = Number(values["interval-ms"]);
   if (!Number.isInteger(duration) || duration < 1 || duration > 45 || !Number.isInteger(interval) || interval < 250 || interval > 1000) throw Error("Observation must be bounded to 1–45 seconds and 250–1000 ms intervals");
   return { ...values, duration, interval };
@@ -123,21 +124,35 @@ export function runObserver(options, { execute = execFileSync, spawn = spawnSync
     completed = false;
     stderr = String(error.stderr ?? "");
   }
-  let available = false, logs = [];
+  let available = false, logs = [], logSource = "unavailable";
   try {
     const result = JSON.parse(execute("fugue", ["app", "logs", "query", options.app, "--since", "5m", "--grep", "management_database_session", "--limit", "500", "--json"],
       { encoding: "utf8", timeout: 10000, maxBuffer: 4 << 20, stdio: ["pipe", "pipe", "pipe"] }));
     available = result.source?.status === "available";
     if (available && Array.isArray(result.logs)) logs = result.logs;
+    if (available) logSource = "fugue";
   } catch { /* Observation failure never changes or retries a business request. */ }
-  return { completed, logs_available: available, samples: correlate(safeSamples(stderr), sessionRequests(logs)) };
+  // Opt-in fallback for an unavailable control-plane API. Read only the exact
+  // declared pod in the same namespace/host, never discover a broader target.
+  // Raw logs stay private; sessionRequests admits only the fixed event schema.
+  if (!available && options["logs-pod"]) {
+    try {
+      const remoteLogs = `kubectl -n ${options.namespace} logs ${options["logs-pod"]} --all-containers=true --since=5m --tail=2000`;
+      const raw = execute("ssh", ["-o", "BatchMode=yes", "-o", "ConnectTimeout=6", options["ssh-host"], remoteLogs],
+        { encoding: "utf8", timeout: 10000, maxBuffer: 4 << 20, stdio: ["pipe", "pipe", "pipe"] });
+      logs = String(raw).split("\n").map(message => ({ message }));
+      available = true;
+      logSource = "ssh";
+    } catch { /* Keep incomplete evidence explicit, without forwarding errors. */ }
+  }
+  return { completed, logs_available: available, logs_source: logSource, samples: correlate(safeSamples(stderr), sessionRequests(logs)) };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     const result = runObserver(optionsFrom(process.argv.slice(2)));
     for (const sample of result.samples) console.log(JSON.stringify(sample));
-    console.log(JSON.stringify({ completed: result.completed, logs_available: result.logs_available, samples: result.samples.length,
+    console.log(JSON.stringify({ completed: result.completed, logs_available: result.logs_available, logs_source: result.logs_source, samples: result.samples.length,
       correlated: result.samples.filter(s => s.correlation === "pid_xact_ms").length }));
     if (!result.completed) process.exitCode = 1;
   } catch {
