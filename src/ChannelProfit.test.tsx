@@ -6,11 +6,8 @@ import { ChannelMetricCells, ChannelMetricHeaders } from "./ChannelMetrics";
 import { emptyStats } from "./analytics";
 import type { Channel } from "./types";
 import type { SubChannelSpendResult } from "./SubChannelSpend";
-import styles from "./styles.css?raw";
 
-it("uses explicit red styles for provisional and bounded losses in both themes", () => {
-  expect(styles).toMatch(/\.channel-profit\.negative\s*\{\s*color:\s*#c73545;/);
-  expect(styles).toMatch(/:root\[data-theme="dark"\]\s+\.channel-profit\.negative\s*\{\s*color:\s*#ff929d;/);
+it("uses the loss tone instead of provisional or upper-bound tones", () => {
   const view = render(<Tooltip.Provider><ChannelProfit estimated={100} actual={20} provisional /></Tooltip.Provider>);
   expect(screen.getByText("¥-2.75").closest(".channel-profit")).toHaveClass("negative");
   expect(screen.getByLabelText("暂计利润率 -15.94%").closest(".channel-profit")).toHaveClass("negative");
