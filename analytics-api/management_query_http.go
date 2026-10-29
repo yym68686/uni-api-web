@@ -137,18 +137,26 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 	if selection != "" {
 		token = selection
 	}
+	computedCursor := cursor
+	cursorRevision := ""
 	if token != "" {
 		decoded, err := decodeManagementCursor(s.control.key, owner, token)
 		if err != nil || decoded.Filter != tokenHash(mustJSON(filters)) || selection != "" && decoded.Offset != 0 {
 			http.Error(w, "读取凭据已失效，请刷新渠道", http.StatusBadRequest)
 			return
 		}
+		cursorRevision = decoded.Revision
+		// Returning to page one can use the initial page's key, but the
+		// retained response must still match the signed cursor's revision.
+		if selection == "" && decoded.Offset == 0 {
+			computedCursor = ""
+		}
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 	start := time.Now()
-	cacheCursor := cursor
-	if rebase {
+	cacheCursor := computedCursor
+	if rebase && computedCursor != "" {
 		cacheCursor += "\x00refresh"
 	}
 	computedKey := managementComputedKey(owner, filters, cacheCursor)
@@ -157,6 +165,9 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 		if reuseErr != nil {
 			http.Error(w, "渠道数据实时核验失败，请重新读取", http.StatusServiceUnavailable)
 			return
+		}
+		if reused && !rebase && cursorRevision != "" && page.Revision != cursorRevision {
+			reused = false
 		}
 		if reused {
 			page.Owner = owner

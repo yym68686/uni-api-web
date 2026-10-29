@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -94,6 +97,113 @@ func TestManagementPagingDirectoryMatchesFullReadAndRejectsChangedEvidence(t *te
 		if _, ok, err := s.currentManagementPagingPage(ctx, "owner", f, first.Page.NextCursor, false); err != nil || ok {
 			t.Fatal("off-page changed evidence reused", err)
 		}
+	}
+}
+
+func TestManagementPagingCanonicalizesCursorForFirstPage(t *testing.T) {
+	s := managementHydrationFixture(t)
+	prepareManagementRevisionsForTest(t, s.control.db)
+	ctx := context.Background()
+	filters := managementQueryFilters{GroupStatus: "all", Model: "gpt-5.5", Sort: "asc"}
+	first, err := s.readManagementQuerySnapshot(ctx, "owner", filters, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.rememberManagementPagingPlan("owner", filters, first)
+	firstCursor := encodeManagementCursor(s.control.key, "owner", managementPageCursor{
+		Version:  1,
+		Offset:   0,
+		Revision: first.Page.Revision,
+		Filter:   tokenHash(mustJSON(filters)),
+	})
+	page, ok, err := s.currentManagementPagingPage(ctx, "owner", filters, firstCursor, false)
+	if err != nil || !ok || page.Offset != 0 {
+		t.Fatal("first page cursor was not accepted", err, ok, page.Offset)
+	}
+	canonical := managementComputedKey("owner", filters, "")
+	if _, ok, err := s.currentComputedManagementPage(ctx, "owner", canonical); err != nil || !ok {
+		t.Fatal("cursor-first page was not retained under the initial-page key", err, ok)
+	}
+	refreshKey := managementComputedKey("owner", filters, firstCursor+"\x00refresh")
+	if _, ok, _ := s.currentComputedManagementPage(ctx, "owner", refreshKey); ok {
+		t.Fatal("normal cursor unexpectedly populated the refresh generation")
+	}
+}
+
+func TestManagementPagingHTTPReusesCanonicalFirstPageCursor(t *testing.T) {
+	s := managementHydrationFixture(t)
+	prepareManagementRevisionsForTest(t, s.control.db)
+	ctx := context.Background()
+	session, err := s.control.newSession(ctx, "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	filters := `{"groupStatus":"all","model":"gpt-5.5","sort":"asc"}`
+	request := func(cursor string, rebase bool) *httptest.ResponseRecorder {
+		t.Helper()
+		query := url.Values{"filters": {filters}}
+		if cursor != "" {
+			query.Set("cursor", cursor)
+		}
+		if rebase {
+			query.Set("refresh_cursor", "1")
+		}
+		r := httptest.NewRequest(http.MethodGet, "/v1/channel-management/query?"+query.Encode(), nil)
+		r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: session})
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		return w
+	}
+	call := func(cursor string, rebase bool) managementPageResponse {
+		t.Helper()
+		w := request(cursor, rebase)
+		if w.Code != http.StatusOK {
+			t.Fatalf("query failed: %d %s", w.Code, w.Body.String())
+		}
+		var page managementPageResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+			t.Fatal(err)
+		}
+		return page
+	}
+	first := call("", false)
+	if first.NextCursor == "" {
+		t.Fatal("fixture did not produce a next cursor")
+	}
+	second := call(first.NextCursor, true)
+	if second.PreviousCursor == "" {
+		t.Fatal("fixture did not produce a previous cursor")
+	}
+	var logs bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&logs)
+	defer log.SetOutput(previous)
+	for _, rebase := range []bool{false, true} {
+		logs.Reset()
+		back := call(second.PreviousCursor, rebase)
+		if back.Offset != 0 || mustJSON(back.Rows) != mustJSON(first.Rows) {
+			t.Fatal("cursor first page changed public values", rebase)
+		}
+		if !strings.Contains(logs.String(), "management_current_computation verified=true") || strings.Contains(logs.String(), "management_paging_current verified=true") {
+			t.Fatal("cursor first page was rehydrated instead of reusing its verified computation", rebase, logs.String())
+		}
+	}
+	if _, err := s.control.db.Exec(`UPDATE console_sub_targets SET name='new committed name' WHERE group_id=1`); err != nil {
+		t.Fatal(err)
+	}
+	current := call("", false)
+	if current.Revision == first.Revision {
+		t.Fatal("fixture did not change the current revision")
+	}
+	if w := request(second.PreviousCursor, false); w.Code != http.StatusConflict {
+		t.Fatalf("old first-page cursor bypassed the revision fence: %d %s", w.Code, w.Body.String())
+	}
+	logs.Reset()
+	if rebased := call(second.PreviousCursor, true); rebased.Revision != current.Revision || mustJSON(rebased.Rows) != mustJSON(current.Rows) {
+		t.Fatal("refresh first-page cursor did not return current values")
+	}
+	if !strings.Contains(logs.String(), "management_current_computation verified=true") {
+		t.Fatal("refresh cursor did not reuse the current canonical first page", logs.String())
 	}
 }
 
