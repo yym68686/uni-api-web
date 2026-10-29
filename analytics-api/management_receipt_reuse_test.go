@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -182,6 +185,30 @@ func TestManagementReceiptReuseMatchesRawDecoderBoundaries(t *testing.T) {
 				t.Fatal("numeric/null summary changed", raw, err)
 			}
 		}()
+	}
+}
+
+func TestManagementReceiptSignalReadTraceSeparatesDatabaseWaitAndDecode(t *testing.T) {
+	s := managementHydrationFixture(t)
+	ctx := context.Background()
+	tx, err := s.control.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	var output bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&output)
+	defer log.SetOutput(previous)
+	_, err = readManagementStreamReceipts(managementTraceContext(ctx), tx, "owner", []string{"a-1-gpt-5.5"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := output.String()
+	for _, field := range []string{"stage=receipt_signal_rows ", "query_ready_ms=", "decode_ms=", "elapsed_ms=", "rows=1 ", "bytes=", "advance_ms="} {
+		if !strings.Contains(line, field) {
+			t.Fatal("receipt read timing split missing", field, line)
+		}
 	}
 }
 

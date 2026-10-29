@@ -309,17 +309,22 @@ func readManagementStreamReceipts(ctx context.Context, db controlQueryDB, owner 
 		query = managementReceiptSelectedStreamSQL
 		args = append(args, ids)
 	}
+	readTrace := newManagementRowsTrace(ctx, "receipt_signal_rows")
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
+	readTrace.queryReady()
 	defer rows.Close()
-	for rows.Next() {
+	defer readTrace.finish()
+	for readTrace.next(rows) {
+		decodeStart := readTrace.decodeStart()
 		var id string
 		var r managementStreamReceipt
 		if err := rows.Scan(&id, &r.valid, &r.evidence, &r.usage.Status, &r.usage.InputPrice, &r.usage.OutputPrice, &r.usage.InputTokens, &r.usage.OutputTokens); err != nil {
 			return nil, err
 		}
+		readTrace.decoded(decodeStart, len(r.evidence))
 		if !wanted[id] {
 			continue
 		}
