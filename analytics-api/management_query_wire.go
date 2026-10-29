@@ -149,8 +149,8 @@ func managementColumnReadHeaders(w http.ResponseWriter, r *http.Request, at int6
 }
 
 // Fresh v3 responses and their bounded cache entry need the SAME complete
-// columns. Encode once, then independently serialize for HTTP and deep-clone
-// for retention. Keep the original read time in the store even when HTTP moves
+// columns. Encode and serialize once, then deep-clone the JSON for retention.
+// Keep the original read time in the store even when HTTP moves
 // it into validation headers. Older clients retain their existing path.
 func (s *Service) writeAndRememberManagementPage(w http.ResponseWriter, r *http.Request, page managementPageResponse, key string, proof *managementFreshProof) error {
 	if r.Header.Get("Accept") != managementPageV3MediaType {
@@ -174,11 +174,20 @@ func (s *Service) writeAndRememberManagementPage(w http.ResponseWriter, r *http.
 		delivered.ReadAtMS = 0
 	}
 	endWrite := managementReadSpan(r.Context(), "response_write")
-	err = writeManagementJSONMedia(w, r, delivered, managementPageV3MediaType)
+	var body []byte
+	if err = r.Context().Err(); err == nil {
+		body, err = json.Marshal(delivered)
+		if err != nil {
+			http.Error(w, "渠道响应编码失败", http.StatusInternalServerError)
+		}
+	}
+	if err == nil {
+		err = writeEncodedManagementJSONMedia(w, r, body, managementPageV3MediaType)
+	}
 	endWrite()
 	if err == nil {
 		endStore := managementReadSpan(r.Context(), "response_store")
-		s.rememberManagementColumnPage(key, proof, columns)
+		s.rememberManagementColumnBytes(key, proof, body, delivered.ReadAtMS, columns.ReadAtMS)
 		endStore()
 	}
 	return err

@@ -141,3 +141,17 @@ Reloads require successful live reads before publishing channel results. Persist
 snapshots are not restored into these queries. The earlier local cache benchmark
 does not satisfy the one-second current-data requirement and is not acceptance
 evidence. Scoped editor reads and immediate close after successful saves remain.
+### Fresh management response JSON reuse
+
+Fresh v3 pages serialize their complete column representation once for HTTP,
+then independently decode those same uncompressed bytes for the existing
+bounded computed-page store. Transport compression never mutates the input.
+Current-validation headers may move `read_at_ms` to a response header; retention
+restores only that typed top-level integer and accounts for its original exact
+decimal byte length before the unchanged 16 MiB admission check. No JSON text
+patching, shallow retention, additional lifetime, proof relaxation or SQL change
+is involved. Missing proofs, invalid JSON, failed writes and canceled writes
+retain their existing rejection behavior. V1/v2 clients and retained-page reads
+keep their existing paths. This removes one O(response bytes) serialization,
+not database reads or all management latency; local measurements are not E2E
+acceptance.

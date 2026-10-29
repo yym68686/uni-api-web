@@ -82,6 +82,13 @@ func writeManagementJSONMedia(w http.ResponseWriter, r *http.Request, value any,
 		http.Error(w, "渠道响应编码失败", http.StatusInternalServerError)
 		return err
 	}
+	return writeEncodedManagementJSONMedia(w, r, body, mediaType)
+}
+
+// body is the complete json.Marshal output, before transport compression.
+// Keep it unchanged so fresh v3 writes can independently clone these same
+// bytes for the bounded store without serializing every evidence cell again.
+func writeEncodedManagementJSONMedia(w http.ResponseWriter, r *http.Request, body []byte, mediaType string) error {
 	w.Header().Add("Vary", "Accept-Encoding")
 	if mediaType == managementPageV3MediaType {
 		w.Header().Add("Vary", "X-Console-Current-Validation")
@@ -132,6 +139,6 @@ func writeManagementJSONMedia(w http.ResponseWriter, r *http.Request, value any,
 	w.Header().Set("Content-Type", mediaType)
 	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 	w.WriteHeader(http.StatusOK)
-	_, err = w.Write(body)
+	_, err := w.Write(body)
 	return err
 }

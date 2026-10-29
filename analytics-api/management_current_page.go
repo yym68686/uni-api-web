@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -164,15 +165,29 @@ func (s *Service) rememberManagementColumnPage(key string, proof *managementFres
 	if err != nil {
 		return
 	}
-	storedBytes := len(encodedColumns)
+	s.rememberManagementColumnBytes(key, proof, encodedColumns, columns.ReadAtMS, columns.ReadAtMS)
+}
+
+// Only trusted json.Marshal output for a complete managementColumnPage enters
+// here. HTTP validation can move the dynamic read clock to headers (JSON zero),
+// so restore that ONE typed top-level field after the independent JSON clone.
+// Its required, non-omitempty decimal integer is the only byte-length change;
+// account for the original canonical representation, not the smaller HTTP one.
+// No byte patching, caller aliases, cache lifetime or proof rules are changed.
+func (s *Service) rememberManagementColumnBytes(key string, proof *managementFreshProof, encodedColumns []byte, encodedAt, retainedAt int64) {
+	if proof == nil || proof.Stamp == "" {
+		return
+	}
+	storedBytes := len(encodedColumns) + len(strconv.FormatInt(retainedAt, 10)) - len(strconv.FormatInt(encodedAt, 10))
 	if storedBytes > 16<<20 {
 		log.Printf("management_computation_store skipped=true reason=wire_size bytes=%d", storedBytes)
 		return
 	}
 	var immutable managementColumnPage
-	if json.Unmarshal(encodedColumns, &immutable) != nil {
+	if json.Unmarshal(encodedColumns, &immutable) != nil || immutable.ReadAtMS != encodedAt {
 		return
 	}
+	immutable.ReadAtMS = retainedAt
 	compact := immutable.managementPageResponse
 	compact.Format = "management-page-v1"
 	compact.Rows = make([]managementQueryRow, len(immutable.Rows))
