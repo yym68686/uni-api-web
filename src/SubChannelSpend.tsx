@@ -38,6 +38,9 @@ export interface SubChannelSpend {
   missing_identifiers?: number;
   ambiguous_attempts?: number;
   matched_cost_usd?: number;
+  // Current-history matches only: never an exact total or a proven lower bound.
+  observed_cost_usd?: number;
+  history_incomplete_reason?: "ownership_history_incomplete" | "requested_range_evicted";
   scope_label?: string;
   message?: string;
   refreshing?: boolean;
@@ -392,6 +395,14 @@ export function SubChannelSpendValue({
     typeof data.matched_cost_usd === "number" &&
     Number.isFinite(data.matched_cost_usd) &&
     data.matched_cost_usd >= 0;
+  const provisional =
+    !known &&
+    data?.status === "history_limited" &&
+    data.scope === "matched_requests" &&
+    verified > 0 &&
+    typeof data.observed_cost_usd === "number" &&
+    Number.isFinite(data.observed_cost_usd) &&
+    data.observed_cost_usd >= 0;
   const date = (value: number) =>
     new Date(value * 1000).toLocaleString("zh-CN", { hour12: false });
   const money = (value: number) =>
@@ -447,7 +458,7 @@ export function SubChannelSpendValue({
       : "";
   const explanation =
     data?.scope === "matched_requests"
-      ? `${date(data.from)} 至 ${date(data.to)}。按当前来源、调用 Key、渠道、模型、端点及流式范围逐请求关联。已核对 ${verified}/${data.total_attempts ?? 0} 次上游尝试。${data.confirmed_unbilled_attempts ? `其中 ${data.confirmed_unbilled_attempts} 次经错误响应确认在模型调用前因余额不足被拒绝，消费为零。` : ""}${missing ? missing + "。" : data.message || ""}${data.checked_at ? `上次完整账单同步：${date(data.checked_at)}。` : ""}${(data.missing_response_identifiers || 0) > 0 ? "响应缺少关联标识，继续等待同步不能补回这些标识。" : ""}${data.sync_error ? "站点账单查询失败，后台会重试。" : ""}${partial ? `至少 ${money(data.matched_cost_usd!)}；这是已核对部分，不是完整消费。利润列据此显示上限，实际利润可能更低。` : ""}${query?.isError ? "本次刷新失败，当前为上次核对结果。" : ""}`
+      ? `${date(data.from)} 至 ${date(data.to)}。按当前来源、调用 Key、渠道、模型、端点及流式范围逐请求关联。${data.status === "history_limited" ? "当前留存记录匹配" : "已核对"} ${verified}/${data.total_attempts ?? 0} 次上游尝试。${data.confirmed_unbilled_attempts ? `其中 ${data.confirmed_unbilled_attempts} 次经错误响应确认在模型调用前因余额不足被拒绝，消费为零。` : ""}${missing ? missing + "。" : ""}${data.message || ""}${data.checked_at ? `上次完整账单同步：${date(data.checked_at)}。` : ""}${(data.missing_response_identifiers || 0) > 0 ? "响应缺少关联标识，继续等待同步不能补回这些标识。" : ""}${data.sync_error ? "站点账单查询失败，后台会重试。" : ""}${partial ? `至少 ${money(data.matched_cost_usd!)}；这是已核对部分，不是完整消费。利润列据此显示上限，实际利润可能更低。` : ""}${provisional ? `暂计 ${money(data.observed_cost_usd!)}；仅供参考，不是完整消费或可信上下限。利润列也为暂计参考值，后续可能上调或下调。` : ""}${query?.isError ? "本次刷新失败，当前为上次核对结果。" : ""}`
       : data
         ? `${data.scope_label || `sub2api 业务 Key #${data.key_id}`} · ${date(data.from)} 至 ${date(data.to)}。${known ? `${data.requests ?? 0} 条账单；` : ""}按该业务 Key 整体统计，包含所有模型和调用来源，共用 Key 的渠道不可重复相加。${data.checked_at ? `账单更新于 ${date(data.checked_at)}。` : ""}${query?.isError ? "更新失败，显示上次完整统计。" : data.message || ""}`
         : query?.isError
@@ -457,6 +468,7 @@ export function SubChannelSpendValue({
             : "尚未确认此渠道的 sub2api 账号关联。";
   let label = "未确认";
   if (known) label = money(data.actual_cost_usd!);
+  else if (provisional) label = `暂计 ${money(data.observed_cost_usd!)}`;
   else if (data?.status === "history_limited") label = "历史不完整";
   else if (partial) label = `≥${money(data.matched_cost_usd!)}`;
   else if (query?.isError || data?.status === "error" || data?.sync_error)
@@ -472,8 +484,11 @@ export function SubChannelSpendValue({
   else if (data?.status === "unmatched") label = "无法归属";
   return (
     <Tip text={explanation}>
-      <span className={`channel-spend ${known || partial ? "mono" : "muted"}`}>
+      <span className={`channel-spend ${known || partial || provisional ? "mono" : "muted"}`}>
         <span>{label}</span>
+        {provisional && (
+          <small className="muted">历史不完整 · 匹配 {verified}/{data.total_attempts}</small>
+        )}
         {partial && (
           <small className="muted">
             部分 · {verified}/{data.total_attempts}

@@ -328,6 +328,7 @@ export function ChannelMetricCells({
           estimated={row.stats?.estimated_cost_usd}
           actual={profitCost?.actual}
           upperBound={profitCost?.upperBound}
+          provisional={profitCost?.provisional}
           salePercent={salePercent({
             model: row.model,
             sale_percent: row.stats?.sale_percent,

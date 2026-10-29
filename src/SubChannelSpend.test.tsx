@@ -331,7 +331,7 @@ it("attributes by caller and all analytic filters, without leaking a cached tota
   expect(screen.queryByText("$0.00")).toBeNull();
 });
 
-it("continues polling delayed receipts alongside missing history with auto refresh disabled", async () => {
+it.each(["unmatched", "history_limited"])("continues polling delayed receipts (%s) with auto refresh disabled", async (status) => {
   const { useScopedChannelSpend } = await import("./SubChannelSpend");
   const { rowId } = await import("./format");
   const row = {
@@ -345,9 +345,10 @@ it("continues polling delayed receipts alongside missing history with auto refre
   const initial = {
     ...row,
     scope: "matched_requests",
-    status: "unmatched",
+    status,
     actual_cost_usd: null,
     matched_cost_usd: 0.25,
+    observed_cost_usd: status === "history_limited" ? 0.25 : undefined,
     total_attempts: 3,
     matched_attempts: 1,
     missing_identifiers: 1,
@@ -357,6 +358,7 @@ it("continues polling delayed receipts alongside missing history with auto refre
   const done = {
     ...initial,
     matched_cost_usd: 1,
+    observed_cost_usd: status === "history_limited" ? 1 : undefined,
     matched_attempts: 2,
     pending_attempts: 0,
     refreshing: false,
@@ -400,14 +402,14 @@ it("continues polling delayed receipts alongside missing history with auto refre
     await act(async () => {
       await vi.advanceTimersByTimeAsync(50);
     });
-    expect(screen.getByText("≥$0.25")).toBeVisible();
-    expect(screen.getByText("部分 · 1/3")).toBeVisible();
+    expect(screen.getByText(status === "history_limited" ? "暂计 $0.25" : "≥$0.25")).toBeVisible();
+    expect(screen.getByText(status === "history_limited" ? "历史不完整 · 匹配 1/3" : "部分 · 1/3")).toBeVisible();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5050);
     });
     expect(fetch).toHaveBeenCalledTimes(2);
-    expect(screen.getByText("≥$1.00")).toBeVisible();
-    expect(screen.getByText("部分 · 2/3")).toBeVisible();
+    expect(screen.getByText(status === "history_limited" ? "暂计 $1.00" : "≥$1.00")).toBeVisible();
+    expect(screen.getByText(status === "history_limited" ? "历史不完整 · 匹配 2/3" : "部分 · 2/3")).toBeVisible();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10000);
     });
@@ -575,8 +577,51 @@ it("distinguishes completed ledger scans from downloads and rechecks absent bill
   }
 });
 
-it("keeps cost and profit unknown when historical ownership is unavailable", () => {
+it("keeps legacy historical matches unknown without an explicit provisional amount", () => {
  render(<Tooltip.Provider><SubChannelSpendValue query={{isPending:false,isError:false,data:{...receipt,scope:"matched_requests",status:"history_limited",actual_cost_usd:null,matched_cost_usd:5,matched_attempts:3,total_attempts:3}}} /></Tooltip.Provider>);
  expect(screen.getByText("历史不完整")).toBeVisible();
  expect(screen.queryByText("≥$5.00")).toBeNull();
+});
+
+it("shows proven zero provisionally but rejects unmatched and shared-key subtotals", () => {
+  const data: SubChannelSpend = {...receipt, scope: "matched_requests", status: "history_limited", actual_cost_usd: null, observed_cost_usd: 0, matched_attempts: 0, confirmed_unbilled_attempts: 1, total_attempts: 2};
+  const ui = (spend: SubChannelSpend) => <Tooltip.Provider><SubChannelSpendValue query={{data: spend, isPending: false, isError: false}} /></Tooltip.Provider>;
+  const view = render(ui(data));
+  expect(screen.getByText("暂计 $0.00")).toBeVisible();
+  view.rerender(ui({...data, confirmed_unbilled_attempts: 0}));
+  expect(screen.getByText("历史不完整")).toBeVisible();
+  expect(screen.queryByText(/暂计/)).toBeNull();
+  view.rerender(ui({...data, scope: "sub2api_business_key"}));
+  expect(screen.queryByText(/暂计/)).toBeNull();
+});
+
+it("shows current-history matches provisionally, never as a bound or complete cost", async () => {
+  const data: SubChannelSpend = {
+    ...receipt, scope: "matched_requests", status: "history_limited",
+    actual_cost_usd: null, observed_cost_usd: 5, matched_attempts: 96,
+    total_attempts: 98, missing_response_identifiers: 2,
+    message: "历史账单归属证据不完整",
+  };
+  const ui = (spend: SubChannelSpend) => <Tooltip.Provider><SubChannelSpendValue query={{data: spend, isPending: false, isError: false}} /></Tooltip.Provider>;
+  const view = render(ui(data));
+  const value = screen.getByText("暂计 $5.00");
+  expect(screen.getByText("历史不完整 · 匹配 96/98")).toBeVisible();
+  fireEvent.focus(value.closest(".tip-target")!);
+  const tip = await screen.findByRole("tooltip");
+  expect(tip).toHaveTextContent("历史账单归属证据不完整");
+  expect(tip).toHaveTextContent("不是完整消费或可信上下限");
+  expect(tip).toHaveTextContent("可能上调或下调");
+  expect(tip).not.toHaveTextContent("已核对 96");
+  view.rerender(ui({...data, observed_cost_usd: 6, matched_attempts: 97}));
+  expect(screen.getByText("暂计 $6.00")).toBeVisible();
+  expect(screen.queryByText("暂计 $5.00")).toBeNull();
+  view.rerender(ui({...data, status: "complete", actual_cost_usd: 7}));
+  expect(screen.getByText("$7.00")).toBeVisible();
+  expect(screen.queryByText(/暂计/)).toBeNull();
+});
+
+it.each([undefined, Number.NaN, Infinity, -1])("rejects unavailable provisional cost %s", value => {
+  render(<Tooltip.Provider><SubChannelSpendValue query={{isPending: false, isError: false, data: {...receipt, scope:"matched_requests", status:"history_limited", actual_cost_usd:null, observed_cost_usd:value, matched_attempts:1}}} /></Tooltip.Provider>);
+  expect(screen.getByText("历史不完整")).toBeVisible();
+  expect(screen.queryByText(/暂计/)).toBeNull();
 });

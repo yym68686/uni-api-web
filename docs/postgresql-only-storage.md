@@ -48,6 +48,20 @@ history_limited. Automatic rules require full window coverage after collection,
 exporter loss and eviction boundaries. Config/accounts/credentials/prices/pending
 operations are never evicted to admit telemetry.
 
+For `history_limited` channel spending, `actual_cost_usd` stays null and
+`matched_cost_usd` remains absent: incomplete historical ownership cannot prove
+a total or a lower bound. When retained records have matches (or proven
+unbilled attempts), `observed_cost_usd` exposes only their current subtotal.
+`history_incomplete_reason` distinguishes incomplete ownership evidence from
+a requested range crossing the FIFO boundary. The UI labels this amount and
+its derived profit **暂计**, keeps the history warning and match count visible,
+and explicitly states that neither number is a total or a reliable bound.
+Known conflicting claims are still excluded, foreign-account receipts remain
+inaccessible, and shared-key totals are never substituted. Delayed receipts
+continue the existing five-second polling until no pending attempts remain;
+missing historical evidence alone does not cause endless polling. Old clients
+ignore the new field and retain their conservative unknown display.
+
 Admission is serialized with ingestion and retention. Batches have body/row limits;
 no allocation or unbounded queue is allowed on a paid-request serving path. When
 capacity cannot be safely recovered, telemetry receives a retryable error, eventually

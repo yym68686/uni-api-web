@@ -27,6 +27,7 @@ type attributedSpend struct {
 	Model             string                   `json:"model"`
 	UpstreamModel     string                   `json:"upstream_model"`
 	Status            string                   `json:"status"`
+	HistoryReason     string                   `json:"history_incomplete_reason,omitempty"`
 	Amount            *float64                 `json:"actual_cost_usd"`
 	MatchedAmount     float64                  `json:"matched_cost_usd"`
 	Total             int                      `json:"total_attempts"`
@@ -61,16 +62,21 @@ type unresolvedSpendAttempt struct {
 
 func (s attributedSpend) MarshalJSON() ([]byte, error) {
 	type fields attributedSpend
-	var matched *float64
+	var matched, observed *float64
 	if s.Status != "history_limited" {
 		matched = &s.MatchedAmount
+	} else if s.Matched+s.ConfirmedUnbilled > 0 {
+		observed = &s.MatchedAmount
 	}
 	// Older clients interpret any matched amount as a proven lower bound.
-	// Missing ownership history cannot provide that guarantee.
+	// Missing ownership history cannot provide that guarantee. Expose the
+	// currently matched subtotal separately for explicitly provisional displays;
+	// neither it nor the resulting profit is an exact total or a proven bound.
 	return json.Marshal(struct {
 		fields
-		MatchedCost *float64 `json:"matched_cost_usd,omitempty"`
-	}{fields(s), matched})
+		MatchedCost  *float64 `json:"matched_cost_usd,omitempty"`
+		ObservedCost *float64 `json:"observed_cost_usd,omitempty"`
+	}{fields(s), matched, observed})
 }
 
 func (s *attributedSpend) unresolved(b billingFact, reason string) {
@@ -682,7 +688,13 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 		switch {
 		case !claimsComplete || from*1000 < evictedBefore:
 			item.Status = "history_limited"
-			item.Message = "部分请求历史已按容量淘汰，无法确认完整账单归属；已匹配部分单独展示"
+			if !claimsComplete {
+				item.HistoryReason = "ownership_history_incomplete"
+				item.Message = "历史账单归属证据不完整；暂计金额仅按当前留存记录匹配，可能因历史冲突或缺失而调整，不是完整消费或可信下限"
+			} else {
+				item.HistoryReason = "requested_range_evicted"
+				item.Message = "所选时间范围包含已淘汰的请求历史；暂计金额仅包含当前留存记录的匹配部分，不是完整消费"
+			}
 		case item.Ambiguous > 0:
 			item.Status = "ambiguous"
 			item.Message = "账单标识对应多个请求或多条账单，不能准确归属"

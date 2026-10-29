@@ -132,6 +132,13 @@ it("uses the displayed channel spending source and never falls back to a whole-d
   );
   expect(screen.getByText("≥$5.00")).toBeVisible();
   expect(profitCell()).toHaveTextContent("≤¥12.25上限≤71.01%");
+  app.rerender(ui(true, true, {...receipt, data: {
+    ...receipt.data!, status: "history_limited", actual_cost_usd: null,
+    observed_cost_usd: 5, matched_attempts: 9, total_attempts: 10,
+  }}));
+  expect(screen.getByText("暂计 $5.00")).toBeVisible();
+  expect(profitCell()).toHaveTextContent("¥12.25暂计71.01%");
+  expect(profitCell()).not.toHaveTextContent("≤");
   app.rerender(ui(true, true, receipt));
   expect(profitCell()).toHaveTextContent("¥12.25");
   expect(profitCell()).not.toHaveTextContent("≤");
@@ -149,6 +156,35 @@ it("uses the displayed channel spending source and never falls back to a whole-d
     }),
   );
   expect(profitCell()).not.toHaveTextContent("¥");
+});
+
+it("keeps historical profit provisional, not an upper bound or a proven gain", async () => {
+  const view = render(<Tooltip.Provider><ChannelProfit estimated={100} actual={5} provisional upperBound /></Tooltip.Provider>);
+  const amount = screen.getByText("¥12.25");
+  expect(screen.getByText("暂计")).toBeVisible();
+  expect(screen.getByLabelText("暂计利润率 71.01%")).toBeVisible();
+  expect(amount.closest(".channel-profit")).toHaveClass("profit-provisional");
+  expect(amount.closest(".channel-profit")).not.toHaveClass("profit-positive", "profit-upper-bound");
+  fireEvent.focus(amount.closest(".tip-target")!);
+  expect(await screen.findByRole("tooltip")).toHaveTextContent("不是完整利润或可信上下限");
+  expect(screen.getByRole("tooltip")).toHaveTextContent("不能据此结算");
+  view.rerender(<Tooltip.Provider><ChannelProfit estimated={100} actual={20} provisional /></Tooltip.Provider>);
+  expect(screen.getByText("¥-2.75")).toBeVisible();
+  expect(screen.getByLabelText("暂计利润率 -15.94%")).toBeVisible();
+});
+
+it("uses only explicitly provisional current-history amounts for historical reference profit", () => {
+  const spend: NonNullable<SubChannelSpendResult["data"]> = {
+    status: "history_limited", scope: "matched_requests", actual_cost_usd: null,
+    from: 1, to: 2, observed_cost_usd: 5, matched_attempts: 1,
+  };
+  expect(channelProfitCost(spend)).toEqual({actual: 5, upperBound: false, provisional: true});
+  expect(channelProfitCost({...spend, observed_cost_usd: 0})).toEqual({actual: 0, upperBound: false, provisional: true});
+  for (const observed_cost_usd of [undefined, Number.NaN, Infinity, -1])
+    expect(channelProfitCost({...spend, observed_cost_usd})).toBeUndefined();
+  expect(channelProfitCost({...spend, matched_attempts: 0})).toBeUndefined();
+  expect(channelProfitCost({...spend, scope: "sub2api_business_key"})).toBeUndefined();
+  expect(channelProfitCost({...spend, status: "pending"})).toBeUndefined();
 });
 
 it("shows the screenshot profit upper bound and explains its uncertainty", async () => {
