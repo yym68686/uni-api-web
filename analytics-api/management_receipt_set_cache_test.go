@@ -271,6 +271,54 @@ func TestManagementReceiptSetCachePreservesPageAndRawFallback(t *testing.T) {
 	}
 }
 
+func TestManagementPagingReusesVerifiedReceiptSet(t *testing.T) {
+	s := managementHydrationFixture(t)
+	prepareManagementRevisionsForTest(t, s.control.db)
+	ctx := context.Background()
+	filters := managementQueryFilters{GroupStatus: "all", Model: "gpt-5.5"}
+	first, err := s.readManagementQuerySnapshot(ctx, "owner", filters, "", false)
+	if err != nil || first.Page.NextCursor == "" {
+		t.Fatal("paging fixture did not produce a next page", err)
+	}
+	s.rememberManagementPagingPlan("owner", filters, first)
+
+	var output bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&output)
+	defer log.SetOutput(previous)
+
+	page, ok, err := s.currentManagementPagingPage(ctx, "owner", filters, first.Page.NextCursor, false)
+	if err != nil || !ok {
+		t.Fatal("first verified page read failed", err)
+	}
+	if !strings.Contains(output.String(), "management_receipt_set_cache hit=") {
+		t.Fatal("verified paging did not install the receipt cache scope", output.String())
+	}
+	output.Reset()
+
+	repeated, ok, err := s.currentManagementPagingPage(ctx, "owner", filters, first.Page.NextCursor, false)
+	if err != nil || !ok {
+		t.Fatal("repeated verified page read failed", err)
+	}
+	repeated.ReadAtMS = page.ReadAtMS
+	if mustJSON(page) != mustJSON(repeated) {
+		t.Fatal("receipt reuse changed page output")
+	}
+	if !strings.Contains(output.String(), "management_receipt_set_cache hit=true") || strings.Contains(output.String(), "stage=receipt_signal_rows ") {
+		t.Fatal("repeated verified page did not bypass the selected-ID SQL", output.String())
+	}
+	if _, err := s.control.db.Exec(`UPDATE console_management_projection_state SET phase='verify_models',complete=false WHERE singleton`); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	if _, _, err := s.currentManagementPagingPage(ctx, "owner", filters, first.Page.NextCursor, false); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(output.String(), "management_receipt_set_cache hit=true") {
+		t.Fatal("incomplete projection reused cached receipt evidence", output.String())
+	}
+}
+
 func TestManagementReceiptSetCacheLocalMeasurement(t *testing.T) {
 	s := managementHydrationFixture(t)
 	prepareManagementRevisionsForTest(t, s.control.db)

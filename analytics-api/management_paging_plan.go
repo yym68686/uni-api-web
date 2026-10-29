@@ -148,6 +148,7 @@ func (s *Service) currentManagementPagingPage(ctx context.Context, owner string,
 		log.Printf("management_paging_miss reason=concurrent_change request_id=%s", consoleRequestID(ctx))
 		return managementPageResponse{}, false, nil
 	}
+	ctx = context.WithValue(ctx, managementReceiptSetScopeKey{}, managementReceiptSetScopeFromProof(&s.receiptSets, s.control.db, tx, owner, current))
 	headers := map[string]subAccount{}
 	for _, a := range current.Accounts {
 		headers[a.ID] = a

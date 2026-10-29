@@ -75,6 +75,9 @@ the bounded (up to 4096 IDs) selected-ID query is eligible; larger owner scans,
 detail endpoints and unpinned reads keep their original SQL. Missing IDs remain
 missing and still flow through the original raw fallback. It uses at most eight
 entries and 8 MiB; responses are independently reconstructed typed maps.
+Paging may install the same scope only after comparing its fresh proof,
+headers and deadline in the hydration transaction; the page reader still
+checks that transaction's projection completeness before any reuse.
 
 Only whitelisted counters, state/wait labels, fixed query classes and correlated
 request IDs are emitted. No raw SQL, query parameters, business identities,
