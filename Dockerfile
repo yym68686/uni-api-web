@@ -6,7 +6,9 @@ COPY . .
 RUN npm run build
 
 FROM nginx:stable-alpine
-ENV ANALYTICS_UPSTREAM=http://analytics-api:8080
+# Avoid passing every runtime environment variable name to envsubst.
+ENV ANALYTICS_UPSTREAM=http://analytics-api:8080 \
+    NGINX_ENVSUBST_FILTER="^ANALYTICS_UPSTREAM_(SCHEME|ADDRESS|PATH)$"
 COPY --chmod=755 scripts/15-analytics-upstream.envsh /docker-entrypoint.d/15-analytics-upstream.envsh
 COPY nginx.conf /etc/nginx/templates/default.conf.template
 COPY scripts/check-nginx-config.sh /tmp/check-nginx-config.sh
