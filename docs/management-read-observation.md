@@ -196,6 +196,29 @@ lookup, not a storage root cause or a sub-second operation. The raw-absence
 change must still be verified on its deployed image; first reads and changed
 receipt/ownership versions deliberately perform SQL again.
 
+The add dialog's full `channel-options` read logs `read_kind=import_options`;
+its separate `keys_only=true` directory read logs `read_kind=import_keys`.
+Both log fast completions as well as failures, without query parameters.
+The full read reports `options_controls`, `options_keys`, `options_catalog`
+(only when a valid key was selected), and total `options_gateway` durations.
+Controls and key labels are independent GETs and now overlap, with at most two
+upstream reads at once. The model catalog still starts after controls and keys
+complete: an old position catalog must never be paired with a newer accepted
+configuration revision. Error precedence, exclusions, ordering and empty/null
+data behavior are preserved; cancellation aborts outstanding upstream reads.
+There is no new cache, database setting, mutation or speculative group-access
+request. Catalog filtering remains O(n); only an independent network wait was
+removed from the serial critical path.
+
+Before this change, a read-only IAB key-selection request
+`446c9038-58ca-47a4-b55d-63af739f3969` completed in 1321 ms (response headers
+1017 ms). No add was submitted. A local synthetic gateway delaying each GET by
+10 ms measured the serial reader at 33.4–34.3 ms and overlapping prerequisites
+at 22.3–22.6 ms; those fixture numbers are not production improvement or
+click-to-paint acceptance. Compare deployed stages and complete browser timing
+before drawing those conclusions. Opening the dialog, selecting a key and
+refreshing after an accepted real add remain distinct operations.
+
 Only whitelisted counters, state/wait labels, fixed query classes and correlated
 request IDs are emitted. No raw SQL, query parameters, business identities,
 payloads, subprocess errors, connection strings or credentials are printed.

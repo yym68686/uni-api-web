@@ -119,40 +119,12 @@ func (s *Service) subChannelOptions(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, keys)
 		return
 	}
-	state, status, err := subGateway(r.Context(), src, "GET", "/v1/channel-controls", nil)
+	data, status, err := subChannelOptionsData(managementTraceContext(r.Context()), src, r.URL.Query())
 	if err != nil {
 		http.Error(w, err.Error(), status)
 		return
 	}
-	keys, status, err := fetchSource(r.Context(), src, "/v1/api-keys", nil)
-	if err != nil {
-		http.Error(w, "无法读取来源 API key", status)
-		return
-	}
-	channels := []any{}
-	if key := r.URL.Query().Get("api_key_id"); key != "" {
-		key, err = subRawKey(src.ID, key)
-		if err != nil {
-			http.Error(w, err.Error(), 400)
-			return
-		}
-		catalog, code, e := fetchSource(r.Context(), src, "/v1/model-channels", url.Values{"api_key_id": {key}, "endpoint": {"all"}, "stream": {"all"}})
-		if e != nil {
-			http.Error(w, "无法读取当前渠道顺序", code)
-			return
-		}
-		if data, ok := catalog["data"].([]any); ok {
-			replaced := configuredExcluded(state, key)
-			for _, row := range data {
-				item, _ := row.(map[string]any)
-				provider, _ := item["provider"].(string)
-				if !replaced[provider] {
-					channels = append(channels, row)
-				}
-			}
-		}
-	}
-	writeJSON(w, 200, map[string]any{"batch_revisions": true, "revision": state["revision"], "supported": state["temporary_channel_import"] == true, "manageable": state["temporary_channel_management"] == true, "keys": keys["data"], "channels": channels, "provider": subProviderName(r.URL.Query().Get("account_id"), int64Param(r.URL.Query().Get("group_id")), strings.TrimPrefix(r.URL.Query().Get("api_key_id"), src.ID+"::"))})
+	writeJSON(w, http.StatusOK, data)
 }
 
 // Import owns the account job lease while it reconciles/creates a business key.

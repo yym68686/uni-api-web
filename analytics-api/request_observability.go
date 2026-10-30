@@ -29,6 +29,9 @@ func consoleAlwaysObservedRead(method, path string) string {
 	if path == "/v1/sub2api/channels" {
 		return "GET /v1/sub2api/channels"
 	}
+	if path == "/v1/sub2api/channel-options" {
+		return "GET /v1/sub2api/channel-options"
+	}
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	if len(parts) == 4 && parts[0] == "v1" && parts[1] == "sources" && parts[2] != "" && parts[3] == "channel-checks" {
 		return "GET /v1/sources/{id}/channel-checks"
@@ -44,6 +47,11 @@ func consoleObservedReadKind(r *http.Request) string {
 		return "none"
 	}
 	switch r.URL.Path {
+	case "/v1/sub2api/channel-options":
+		if r.URL.Query().Get("keys_only") == "true" {
+			return "import_keys"
+		}
+		return "import_options"
 	case "/v1/sub2api/channels":
 		if summaryView(r) == "bindings" {
 			return "import_bindings"
