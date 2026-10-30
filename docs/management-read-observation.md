@@ -275,6 +275,18 @@ operation is below one second. Inspect full HTTP/browser timing separately for
 filtering, paging, opening an add dialog and refreshing after a real add. The
 tool does not perform those operations.
 
+Management's conditional v3 reads also emit `management_validator_response`
+with `source=retained_page` or `source=evicted_page`. A retained-page match skips
+encoding the complete unchanged columns; an evicted-page match skips hydration.
+Both still require the existing live database/gateway proof, exact owner,
+representation/encoding, cursor revision, header revision and unexpired deadline.
+Only an exact server-produced ETag from a prior successful complete response can
+match. Validator metadata is separately bounded to 32 records / 256KiB; it
+contains no response body and is lost at process restart/deployment. Revoked
+authorization or failed proof never confirms an old response. First reads and
+changed data retain their original paths. A fast validator sample alone is not
+acceptance of uncached first-page, filtering or pagination latency.
+
 Tests (no production access):
 
 ```sh

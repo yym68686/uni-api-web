@@ -185,6 +185,7 @@ func (s *Service) currentManagementPagingPage(ctx context.Context, owner string,
 	// the response and retained page. rememberManagementColumnPage independently
 	// clones the bytes so neither caller nor response can mutate retained state.
 	current.Facts, current.CurrentExport = entry.Proof.Facts, entry.Proof.CurrentExport
+	response.currentProof = &current
 	// Both forms of page one have the same current public response. Normal
 	// cursor reads already verified its revision; refresh reads rebase to now.
 	cacheCursor := cursor

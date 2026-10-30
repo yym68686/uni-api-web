@@ -229,7 +229,14 @@ func (s *Service) rememberManagementEntry(key string, proof *managementFreshProo
 		c.bytes -= c.pages[old].Bytes
 		delete(c.pages, old)
 	}
-	minimal := *proof
+	entry.Proof = managementRetainedProof(*proof)
+	c.pages[key] = entry
+	c.order = append(c.order, key)
+	c.bytes += entry.Bytes
+}
+
+func managementRetainedProof(proof managementFreshProof) managementFreshProof {
+	minimal := proof
 	if minimal.CurrentExport {
 		minimal.Stamp = minimal.ExportStamp
 	}
@@ -238,10 +245,7 @@ func (s *Service) rememberManagementEntry(key string, proof *managementFreshProo
 	for i, f := range proof.Facts {
 		minimal.Facts[i] = managementGatewayFacts{Source: f.Source, Revision: f.Revision, ConfigRevision: f.ConfigRevision, AtomicSnapshot: f.AtomicSnapshot}
 	}
-	entry.Proof = minimal
-	c.pages[key] = entry
-	c.order = append(c.order, key)
-	c.bytes += entry.Bytes
+	return minimal
 }
 
 func verifyManagementFacts(ctx context.Context, facts []managementGatewayFacts) error {
@@ -271,6 +275,8 @@ func (s *Service) currentComputedManagementPageMode(ctx context.Context, owner, 
 		return managementPageResponse{}, false, err
 	}
 	page := entry.Page
+	proof.Facts = entry.Proof.Facts
+	page.currentProof = &proof
 	page.ReadAtMS = now.UnixMilli()
 	current := map[string]subAccount{}
 	for _, a := range proof.Accounts {

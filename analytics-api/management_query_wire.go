@@ -186,6 +186,7 @@ func (s *Service) writeAndRememberManagementPage(w http.ResponseWriter, r *http.
 	}
 	endWrite()
 	if err == nil {
+		s.rememberManagementValidator(w, r, page, key, proof)
 		endStore := managementReadSpan(r.Context(), "response_store")
 		s.rememberManagementColumnBytes(key, proof, body, delivered.ReadAtMS, columns.ReadAtMS)
 		endStore()

@@ -19,6 +19,7 @@ var errManagementFilters = errors.New("invalid management query filters")
 
 type managementPageResponse struct {
 	preparedColumns *managementColumnPage
+	currentProof    *managementFreshProof
 	Owner           string `json:"owner,omitempty"`
 	managementQueryPage
 	SelectionToken string                `json:"selection_token"`
@@ -177,13 +178,22 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 		}
 		if reused {
 			page.Owner = owner
-			err := writeManagementPage(w, r, page)
+			err := s.writeAndRememberManagementValidator(w, r, page, computedKey)
 			log.Printf("management_current_computation verified=true elapsed_ms=%d rows=%d total=%d failed=%t request_id=%s", time.Since(start).Milliseconds(), len(page.Rows), page.Total, err != nil, consoleRequestID(r.Context()))
+			return
+		}
+		validated, validationErr := s.currentManagementNotModified(ctx, w, r, owner, computedKey, cursorRevision, rebase)
+		if validated {
+			log.Printf("management_current_validator verified=true elapsed_ms=%d failed=%t request_id=%s", time.Since(start).Milliseconds(), validationErr != nil, consoleRequestID(r.Context()))
+			return
+		}
+		if validationErr != nil {
+			http.Error(w, "渠道数据实时核验失败，请重新读取", http.StatusServiceUnavailable)
 			return
 		}
 		page, reused, reuseErr = s.currentManagementPagingPage(ctx, owner, filters, cursor, rebase)
 		if reuseErr == nil && reused {
-			err := writeManagementPage(w, r, page)
+			err := s.writeAndRememberManagementValidator(w, r, page, computedKey)
 			log.Printf("management_paging_current verified=true elapsed_ms=%d rows=%d total=%d offset=%d failed=%t request_id=%s", time.Since(start).Milliseconds(), len(page.Rows), page.Total, page.Offset, err != nil, consoleRequestID(r.Context()))
 			return
 		}

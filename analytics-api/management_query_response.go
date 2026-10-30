@@ -110,18 +110,7 @@ func writeEncodedManagementJSONMedia(w http.ResponseWriter, r *http.Request, bod
 					// body. Do not leave its headers buffered until the caller
 					// finishes retaining the independently cloned page. Keep
 					// retention synchronous; no proof or lifetime is relaxed.
-					endFlush := managementReadSpan(r.Context(), "response_flush")
-					err := http.NewResponseController(w).Flush()
-					endFlush()
-					unsupported := errors.Is(err, http.ErrNotSupported)
-					if managementTraceEnabled(r.Context()) {
-						log.Printf("management_response_flush status=304 flushed=%t unsupported=%t request_id=%s", err == nil, unsupported, consoleRequestID(r.Context()))
-					}
-					if unsupported {
-						// Custom writers without flushing retain their old path.
-						return nil
-					}
-					return err
+					return managementFlushNotModified(w, r)
 				}
 			}
 		}
@@ -157,5 +146,19 @@ func writeEncodedManagementJSONMedia(w http.ResponseWriter, r *http.Request, bod
 	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 	w.WriteHeader(http.StatusOK)
 	_, err := w.Write(body)
+	return err
+}
+
+func managementFlushNotModified(w http.ResponseWriter, r *http.Request) error {
+	endFlush := managementReadSpan(r.Context(), "response_flush")
+	err := http.NewResponseController(w).Flush()
+	endFlush()
+	unsupported := errors.Is(err, http.ErrNotSupported)
+	if managementTraceEnabled(r.Context()) {
+		log.Printf("management_response_flush status=304 flushed=%t unsupported=%t request_id=%s", err == nil, unsupported, consoleRequestID(r.Context()))
+	}
+	if unsupported {
+		return nil
+	}
 	return err
 }
