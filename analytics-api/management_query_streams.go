@@ -190,12 +190,23 @@ func readManagementStreamModels(ctx context.Context, db controlQueryDB, owner st
 			positions.only = wanted
 		}
 	}
-	for i, model := range out {
-		positions.add(model.item, i)
+	indexed := false
+	if positions.only != nil {
+		if directory := managementDirectoryScopeFor(ctx, db, owner); directory != nil && directory.ready && directory.directory != nil {
+			version := managementDirectoryVersion{directory.database, owner, directory.accountRevision, directory.modelRevision}
+			if directory.directory.version == version && len(directory.directory.rows) == len(out) {
+				indexed = directory.directory.addModelPositions(wanted, positions)
+			}
+		}
+	}
+	if !indexed {
+		for i, model := range out {
+			positions.add(model.item, i)
+		}
 	}
 	stages.next("signal_model_scope")
 	if managementTraceEnabled(ctx) {
-		log.Printf("management_signal_index models=%d positions=%d scoped=%t request_id=%s", len(out), len(positions.values), positions.only != nil, consoleRequestID(ctx))
+		log.Printf("management_signal_index models=%d positions=%d scoped=%t directory_index=%t request_id=%s", len(out), len(positions.values), positions.only != nil, indexed, consoleRequestID(ctx))
 	}
 	fallback := map[string]bool{}
 	fallbackGroups := []subBoundKey{}

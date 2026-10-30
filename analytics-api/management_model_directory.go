@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"log"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -60,12 +61,13 @@ type managementDirectoryRow struct {
 	group                          int64
 }
 type managementModelDirectory struct {
-	version managementDirectoryVersion
-	strings []string
-	rows    []managementDirectoryRow
-	order   []uint32
-	ordered bool
-	bytes   int
+	version    managementDirectoryVersion
+	strings    []string
+	rows       []managementDirectoryRow
+	modelOrder []uint32
+	order      []uint32
+	ordered    bool
+	bytes      int
 }
 type managementModelDirectories struct {
 	mu      sync.Mutex
@@ -74,7 +76,8 @@ type managementModelDirectories struct {
 }
 
 const managementDirectoryBudget = 16 << 20
-const managementDirectoryRowBytes = 24 // four uint32 indices and one int64
+const managementDirectoryRowBytes = 24       // four uint32 indices and one int64
+const managementDirectoryModelIndexBytes = 4 // one uint32 source position per row
 
 func packManagementModelDirectory(version managementDirectoryVersion, models []managementStreamModel) *managementModelDirectory {
 	base := 256
@@ -84,11 +87,16 @@ func packManagementModelDirectory(version managementDirectoryVersion, models []m
 		}
 		base += len(value)
 	}
-	if models == nil || len(models) > (managementDirectoryBudget-base)/managementDirectoryRowBytes {
+	if models == nil || len(models) > (managementDirectoryBudget-base)/(managementDirectoryRowBytes+managementDirectoryModelIndexBytes) {
 		return nil
 	}
 	version.owner, version.account = strings.Clone(version.owner), strings.Clone(version.account)
-	entry := &managementModelDirectory{version: version, rows: make([]managementDirectoryRow, len(models)), bytes: base + len(models)*managementDirectoryRowBytes}
+	entry := &managementModelDirectory{
+		version:    version,
+		rows:       make([]managementDirectoryRow, len(models)),
+		modelOrder: make([]uint32, len(models)),
+		bytes:      base + len(models)*(managementDirectoryRowBytes+managementDirectoryModelIndexBytes),
+	}
 	index := map[string]uint32{}
 	add := func(value string) (uint32, bool) {
 		if i, exists := index[value]; exists {
@@ -118,11 +126,54 @@ func packManagementModelDirectory(version managementDirectoryVersion, models []m
 			}
 		}
 		entry.rows[i] = managementDirectoryRow{packed[0], packed[1], packed[2], packed[3], model.item.Group}
+		entry.modelOrder[i] = uint32(i)
 	}
 	// Drop append capacity so the retained backing array matches admission.
 	entry.strings = append(make([]string, 0, len(entry.strings)), entry.strings...)
+	entry.prepareModelOrder()
 	entry.prepareOrder()
 	return entry
+}
+
+// Keep source positions grouped by model name so a filtered read can build its
+// identity index in O(log n + matches) instead of scanning the whole directory.
+// Position order within each name remains stable, preserving last-row-wins for
+// duplicate identities in callers that do not use the database primary key.
+func (entry *managementModelDirectory) prepareModelOrder() {
+	slices.SortFunc(entry.modelOrder, func(a, b uint32) int {
+		left, right := entry.rows[a], entry.rows[b]
+		if c := strings.Compare(entry.strings[left.model], entry.strings[right.model]); c != 0 {
+			return c
+		}
+		if a < b {
+			return -1
+		}
+		if a > b {
+			return 1
+		}
+		return 0
+	})
+}
+
+func (entry *managementModelDirectory) addModelPositions(names map[string]bool, positions managementStreamPositionIndex) bool {
+	if entry == nil || len(entry.modelOrder) != len(entry.rows) || positions.only == nil || positions.values == nil {
+		return false
+	}
+	for name := range names {
+		for i := sort.Search(len(entry.modelOrder), func(i int) bool {
+			row := entry.rows[entry.modelOrder[i]]
+			return strings.Compare(entry.strings[row.model], name) >= 0
+		}); i < len(entry.modelOrder); i++ {
+			position := entry.modelOrder[i]
+			row := entry.rows[position]
+			model := entry.strings[row.model]
+			if model != name {
+				break
+			}
+			positions.values[managementStreamIdentity{entry.strings[row.account], row.group, model}] = int(position)
+		}
+	}
+	return true
 }
 
 // The three immutable identity columns determine the existing C-byte order.

@@ -156,6 +156,62 @@ func TestManagementModelDirectoryOrderKeepsExactBudgetFallback(t *testing.T) {
 	}
 }
 
+func TestManagementModelDirectoryFilteredPositionsMatchFullScan(t *testing.T) {
+	models := directoryModelsForTest(190000)
+	version := managementDirectoryVersion{&sql.DB{}, "owner", "10", 11}
+	entry := packManagementModelDirectory(version, models)
+	if entry == nil || len(entry.modelOrder) != len(models) {
+		t.Fatal("large directory did not retain its bounded model index")
+	}
+	for _, names := range []map[string]bool{
+		{"model-0雪🙂": true, "model-17雪🙂": true, "missing-upstream": true},
+		{},
+	} {
+		want := managementStreamPositionIndex{values: map[managementStreamIdentity]int{}, only: names}
+		for i, model := range models {
+			want.add(model.item, i)
+		}
+		got := managementStreamPositionIndex{values: map[managementStreamIdentity]int{}, only: names}
+		if !entry.addModelPositions(names, got) || !reflect.DeepEqual(got.values, want.values) {
+			t.Fatal("model index changed filtered identities or positions")
+		}
+	}
+	duplicates := []managementStreamModel{
+		{item: managementModelSignals{Account: "a", Group: 1, Model: subModelResult{Model: "alias"}}, message: "first"},
+		{item: managementModelSignals{Account: "a", Group: 1, Model: subModelResult{Model: "alias"}}, message: "last"},
+	}
+	duplicateEntry := packManagementModelDirectory(version, duplicates)
+	positions := managementStreamPositionIndex{values: map[managementStreamIdentity]int{}, only: map[string]bool{"alias": true}}
+	if duplicateEntry == nil || !duplicateEntry.addModelPositions(positions.only, positions) || positions.values[managementStreamIdentity{"a", 1, "alias"}] != 1 {
+		t.Fatal("duplicate identity no longer retains last-row-wins behavior")
+	}
+}
+
+func BenchmarkManagementModelDirectoryFilteredPositions(b *testing.B) {
+	models := directoryModelsForTest(190000)
+	entry := packManagementModelDirectory(managementDirectoryVersion{&sql.DB{}, "owner", "10", 11}, models)
+	if entry == nil {
+		b.Fatal("large directory did not fit the current cache budget")
+	}
+	names := map[string]bool{"model-0雪🙂": true, "model-17雪🙂": true, "model-81雪🙂": true, "gpt-6-astra": true, "upstream-alias": true}
+	for _, mode := range []string{"full_scan", "sorted_index"} {
+		b.Run(mode, func(b *testing.B) {
+			b.ReportAllocs()
+			for range b.N {
+				positions := managementStreamPositionIndex{values: map[managementStreamIdentity]int{}, only: names}
+				if mode == "full_scan" {
+					for i, model := range models {
+						positions.add(model.item, i)
+					}
+				} else if !entry.addModelPositions(names, positions) {
+					b.Fatal("indexed lookup unavailable")
+				}
+				streamOrderBenchmarkSink = positions.values
+			}
+		})
+	}
+}
+
 func BenchmarkManagementModelDirectoryOrdering(b *testing.B) {
 	models := directoryOrderFixture(190000)
 	ctx, scope := directoryOrderScope(models)
