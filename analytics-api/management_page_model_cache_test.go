@@ -171,6 +171,9 @@ func TestManagementPageModelCacheBudgetAndEviction(t *testing.T) {
 func TestManagementPageModelCacheMatchesCurrentSQLAcrossMutations(t *testing.T) {
 	s := managementHydrationFixture(t)
 	prepareManagementRevisionsForTest(t, s.control.db)
+	if _, err := s.control.db.Exec(`UPDATE console_sub_model_summaries SET result=jsonb_set(result,'{packing_fixture}',to_jsonb(repeat('x',5000))) WHERE account_id='a' AND group_id=1 AND result IS NOT NULL`); err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	wanted := []subBoundKey{{AccountID: "a", GroupID: 1}, {AccountID: "a", GroupID: 2}, {AccountID: "q", GroupID: 1}, {AccountID: "missing", GroupID: 1}}
 	begin := func() (*sql.Tx, context.Context) {

@@ -135,6 +135,24 @@ contains no expanded models, receipts or attached quality evidence. Those inputs
 and gateway/source fences are still read and checked for every fresh snapshot.
 Cache hits alone do not establish end-to-end latency or current page validity.
 
+The separate raw page-model stream still shares its original 128-group/8 MiB
+budget and exact database/owner/account/model/summary revision proof. Large
+completed groups now retain a lossless gzip-compressed, length-prefixed byte
+representation instead of the expanded row graph. All source strings and raw
+summary bytes (including nil/empty/invalid JSON) remain intact; no public field,
+decoder error, SQL ordering, deadline, selection or authorization rule changes.
+Small or incompressible groups keep the prior representation. Admission still
+rejects oversized/failed/canceled batches before publication. Every reuse
+reconstructs request-local rows; damaged length/count/CRC/group metadata causes
+a complete same-transaction SQL fallback, never a partial cached group. The
+decompressed byte and row allocations have explicit caps. No compressor pool
+or decoded row graph survives alongside compressed storage.
+`management_page_model_cache` adds `raw_batch_bytes`, `stored_batch_bytes` and
+`packed_groups` for the newly admitted batch, not the whole cache. These scalar
+counts measure retention, not elapsed time or first-read latency. A local
+25x288-model benchmark is not production sub-second acceptance; first-ever
+groups and changed revisions still use the original SQL reader.
+
 `management_rate_cache` identifies reuse of receipt-derived model multipliers.
 It is enabled only after current projection completeness and the same RR
 transaction's complete `ExportStamp` proof. The proof covers raw receipt rate

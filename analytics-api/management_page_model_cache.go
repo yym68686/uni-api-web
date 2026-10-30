@@ -42,10 +42,12 @@ func (r managementPageModelRecord) retainedBytes() int {
 }
 
 type managementPageModelStream struct {
-	version managementPageModelVersion
-	group   managementPageModelGroup
-	rows    []managementPageModelRecord
-	bytes   int
+	version                 managementPageModelVersion
+	group                   managementPageModelGroup
+	rows                    []managementPageModelRecord
+	bytes                   int
+	packed                  []byte
+	packedBytes, packedRows int
 }
 type managementPageModelGroup struct {
 	account string
@@ -181,11 +183,24 @@ func readManagementPageModelStream(ctx context.Context, db controlQueryDB, owner
 			missing = append(missing, group)
 			continue
 		}
-		for _, row := range entry.rows {
+		rows, valid := entry.unpack(ctx)
+		if !valid {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			if err := consume(row.clone(), trace); err != nil {
+			missing = append(missing, group)
+			continue
+		}
+		for _, row := range rows {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			// Unpacked groups are request-local already; only the old retained
+			// row graph needs a clone before handing it to a mutable consumer.
+			if len(entry.packed) == 0 {
+				row = row.clone()
+			}
+			if err := consume(row, trace); err != nil {
 				return err
 			}
 		}
@@ -231,15 +246,25 @@ func readManagementPageModelStream(ctx context.Context, db controlQueryDB, owner
 		err = ctx.Err()
 	}
 	stored := 0
+	packedGroups, packedBytes := 0, 0
 	if err == nil && admit {
+		packer := managementModelPacker{}
 		for _, e := range entries {
 			e.rows = append(make([]managementPageModelRecord, 0, len(e.rows)), e.rows...)
+			packer.pack(ctx, e)
+			packedBytes += e.bytes
+			if len(e.packed) > 0 {
+				packedGroups++
+			}
+		}
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 		scope.store.put(entries)
 		stored = len(entries)
 	}
 	if managementTraceEnabled(ctx) {
-		log.Printf("management_page_model_cache reused_groups=%d raw_groups=%d stored_groups=%d request_id=%s", reused, len(missing), stored, consoleRequestID(ctx))
+		log.Printf("management_page_model_cache reused_groups=%d raw_groups=%d stored_groups=%d raw_batch_bytes=%d stored_batch_bytes=%d packed_groups=%d request_id=%s", reused, len(missing), stored, retained, packedBytes, packedGroups, consoleRequestID(ctx))
 	}
 	return err
 }
