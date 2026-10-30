@@ -14,9 +14,9 @@ import (
 // They survive large page eviction, but never process restart or deployment.
 // The client must supply the exact tag/encoding of a complete prior response.
 type managementPageValidator struct {
-	key, owner, tag, encoding, revision string
-	proof                               managementFreshProof
-	bytes                               int
+	key, owner, tag, encoding, revision, headers string
+	proof                                        managementFreshProof
+	bytes                                        int
 }
 
 type managementPageValidators struct {
@@ -80,14 +80,14 @@ func (s *Service) rememberManagementValidator(w http.ResponseWriter, r *http.Req
 	if proof == nil || proof.Stamp == "" || page.Owner == "" || r.Context().Err() != nil || r.Header.Get("Accept") != managementPageV3MediaType || r.Header.Get("X-Console-Current-Validation") != "1" || w.Header().Get("X-Console-Validated-Request-ID") == "" || w.Header().Get("ETag") == "" {
 		return
 	}
-	entry := managementPageValidator{key: strings.Clone(key), owner: strings.Clone(page.Owner), tag: strings.Clone(w.Header().Get("ETag")), encoding: strings.Clone(r.Header.Get("Accept-Encoding")), revision: strings.Clone(page.Revision), proof: managementRetainedProof(*proof)}
+	entry := managementPageValidator{key: strings.Clone(key), owner: strings.Clone(page.Owner), tag: strings.Clone(w.Header().Get("ETag")), encoding: strings.Clone(r.Header.Get("Accept-Encoding")), revision: strings.Clone(page.Revision), headers: managementValidatorHeaders(*proof), proof: managementRetainedProof(*proof)}
 	// The byte cap includes retained source facts, including credentials. They
 	// remain private server memory, just as in the existing full-page proof.
 	raw, err := json.Marshal(entry.proof)
 	if err != nil {
 		return
 	}
-	entry.bytes = len(raw) + len(entry.key) + len(entry.owner) + len(entry.tag) + len(entry.encoding) + len(entry.revision) + 256
+	entry.bytes = len(raw) + len(entry.key) + len(entry.owner) + len(entry.tag) + len(entry.encoding) + len(entry.revision) + len(entry.headers) + 256
 	// Source is intentionally excluded from the proof's JSON. Account for it
 	// explicitly; never let that privacy annotation bypass the retention cap.
 	for _, fact := range entry.proof.Facts {
@@ -101,24 +101,34 @@ func (s *Service) rememberManagementValidator(w http.ResponseWriter, r *http.Req
 }
 
 func managementValidatorProofEqual(current, retained managementFreshProof) bool {
-	if len(current.Facts) != len(retained.Facts) || mustJSON(managementRetainedProof(current)) != mustJSON(retained) {
+	current = managementRetainedProof(current)
+	if current.Stamp == "" || current.Stamp != retained.Stamp || current.CurrentExport != retained.CurrentExport || !current.Until.Equal(retained.Until) || len(current.Facts) != len(retained.Facts) {
 		return false
 	}
-	// These authorization fields are deliberately json:"-" in gateway facts;
-	// compare them explicitly instead of relying on JSON equality alone.
+	// Stamp is the EXISTING complete dependency proof, not the raw epoch map:
+	// current export deliberately excludes unused saved snapshots. Header epoch
+	// also includes private login rotation, so compare complete public account
+	// headers separately. The live proof still brackets its epoch on every read.
 	for i, fact := range current.Facts {
 		other := retained.Facts[i]
-		if fact.AtomicSnapshot != other.AtomicSnapshot || managementSourceIdentity(fact.Source) != managementSourceIdentity(other.Source) {
+		if fact.AtomicSnapshot != other.AtomicSnapshot || fact.Revision != other.Revision || fact.ConfigRevision != other.ConfigRevision || managementSourceIdentity(fact.Source) != managementSourceIdentity(other.Source) {
 			return false
 		}
 	}
 	return true
 }
 
+func managementValidatorHeaders(proof managementFreshProof) string {
+	// These are the full typed owner-authorized headers read by BOTH sides of
+	// currentManagementProof. Counts/targets depend on the unchanged page proof;
+	// every independently changing public account field remains in this digest.
+	return tokenHash(mustJSON(proof.Accounts))
+}
+
 func (s *Service) writeAndRememberManagementValidator(w http.ResponseWriter, r *http.Request, page managementPageResponse, key string) error {
 	if page.currentProof != nil && managementValidatorRequest(r) {
 		entry, exists := s.pageValidators.get(key, r.Header.Get("Accept-Encoding"), r.Header.Get("If-None-Match"))
-		if exists && page.Owner == entry.owner && page.Revision == entry.revision && managementValidatorProofEqual(*page.currentProof, entry.proof) {
+		if exists && page.Owner == entry.owner && page.Revision == entry.revision && managementValidatorHeaders(*page.currentProof) == entry.headers && managementValidatorProofEqual(*page.currentProof, entry.proof) {
 			if err := r.Context().Err(); err != nil {
 				return err
 			}
@@ -142,8 +152,12 @@ func (s *Service) currentManagementNotModified(ctx context.Context, w http.Respo
 		return false, nil
 	}
 	proof, now, valid, err := s.currentManagementProof(ctx, owner, entry.proof)
-	if err != nil || !valid || proof.HeadersRevision != entry.proof.HeadersRevision {
+	if err != nil || !valid {
 		return false, err
+	}
+	if managementValidatorHeaders(proof) != entry.headers {
+		log.Printf("management_validator_miss reason=public_headers request_id=%s", consoleRequestID(r.Context()))
+		return false, nil
 	}
 	if err = ctx.Err(); err != nil {
 		return false, err

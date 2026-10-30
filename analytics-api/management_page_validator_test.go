@@ -67,6 +67,16 @@ func TestManagementValidatorRevalidatesEvictedPageWithoutHydration(t *testing.T)
 			t.Fatal("conditional response policy changed", same.Header())
 		}
 	}
+	// The header epoch tracks private authorization rotation for older readers.
+	// It is not proof that any byte in this owner's public response changed.
+	if _, err := s.control.db.Exec(`UPDATE console_sub_accounts SET encrypted_auth='rotated-private-session' WHERE id='a'; UPDATE console_management_view_epoch SET revision=revision+1 WHERE relation_name='console_control_snapshots'`); err != nil {
+		t.Fatal(err)
+	}
+	evict()
+	logs.Reset()
+	if got := request(tag, "br", managementPageV3MediaType); got.Code != 304 || !strings.Contains(logs.String(), "source=evicted_page") || strings.Contains(logs.String(), "stage=hydrate_") {
+		t.Fatal("private rotation or unused snapshot repeated identical complete body", got.Code, logs.String())
+	}
 	// Header-only changes are outside the channel computation stamp but are
 	// part of the exact response bytes. They must return a complete new body.
 	for _, query := range []string{
@@ -114,7 +124,7 @@ func TestManagementValidatorGatesCursorDeadlineCancellationAndColdProcess(t *tes
 		t.Fatal(err)
 	}
 	proof := managementRetainedProof(*snapshot.Proof)
-	entry := managementPageValidator{key: "page", owner: "owner", tag: `"complete"`, encoding: "br", revision: snapshot.Page.Revision, proof: proof, bytes: 1024}
+	entry := managementPageValidator{key: "page", owner: "owner", tag: `"complete"`, encoding: "br", revision: snapshot.Page.Revision, proof: proof, headers: managementValidatorHeaders(*snapshot.Proof), bytes: 1024}
 	s.pageValidators.put(entry)
 	request := func(ctx context.Context, owner, revision string) (bool, error, int) {
 		r := httptest.NewRequest("GET", "/", nil).WithContext(context.WithValue(ctx, consoleRequestIDKey{}, "validator-request"))
@@ -235,7 +245,7 @@ func TestManagementValidatorStillReadsLiveGatewayPermissionAndRevision(t *testin
 		t.Fatal(err)
 	}
 	proof.Facts = []managementGatewayFacts{{Source: source, AtomicSnapshot: true, Revision: "r1", ConfigRevision: "c1"}}
-	s.pageValidators.put(managementPageValidator{key: "page", owner: "owner", tag: `"complete"`, proof: managementRetainedProof(proof), bytes: 4096})
+	s.pageValidators.put(managementPageValidator{key: "page", owner: "owner", tag: `"complete"`, proof: managementRetainedProof(proof), headers: managementValidatorHeaders(proof), bytes: 4096})
 	call := func() (bool, error) {
 		r := httptest.NewRequest("GET", "/", nil)
 		r = r.WithContext(context.WithValue(r.Context(), consoleRequestIDKey{}, "live-validator"))
