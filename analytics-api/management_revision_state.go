@@ -89,7 +89,7 @@ type managementCompactProof struct {
 }
 
 func readManagementCompactProof(ctx context.Context, db controlQueryDB, owner string) (managementCompactProof, error) {
-	managementDirectoryModelRevision(ctx, db, owner, nil)
+	managementDirectoryModelRevision(ctx, db, owner, nil, nil)
 	rows, err := db.QueryContext(ctx, `SELECT relation_name,revision,rows_base+rows_delta,invalid_base+invalid_delta,complete FROM console_management_revision_state ORDER BY relation_name`)
 	if err != nil {
 		return managementCompactProof{}, err
@@ -102,7 +102,7 @@ func readManagementCompactProof(ctx context.Context, db controlQueryDB, owner st
 		return managementCompactProof{}, err
 	}
 	ready := true
-	var modelRevision *int64
+	var modelRevision, signalRevision *int64
 	var usageRevision, receiptRevision int64
 	for rows.Next() {
 		var name string
@@ -116,6 +116,8 @@ func readManagementCompactProof(ctx context.Context, db controlQueryDB, owner st
 			modelRevision = &revision
 		}
 		switch name {
+		case "console_management_model_signal":
+			signalRevision = &revision
 		case "console_sub_usage":
 			usageRevision = revision
 		case "console_management_receipt_signal":
@@ -135,7 +137,7 @@ func readManagementCompactProof(ctx context.Context, db controlQueryDB, owner st
 	}
 	revision, err := finishManagementModelRevision(ctx, db, owner, hash)
 	if err == nil && ctx.Err() == nil {
-		managementDirectoryModelRevision(ctx, db, owner, modelRevision)
+		managementDirectoryModelRevision(ctx, db, owner, modelRevision, signalRevision)
 	}
 	if err != nil {
 		return managementCompactProof{}, err

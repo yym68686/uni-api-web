@@ -18,11 +18,13 @@ import (
 type managementDirectoryScopeKey struct{}
 type managementDirectoryScope struct {
 	store           *managementModelDirectories
+	predicates      *managementPredicateSets
 	database        *sql.DB
 	tx              *sql.Tx
 	owner           string
 	accountRevision string
 	modelRevision   int64
+	signalRevision  *int64
 	ready           bool
 	directory       *managementModelDirectory // Current read only; never a retained mutable envelope.
 }
@@ -36,9 +38,10 @@ func managementDirectoryScopeFor(ctx context.Context, db controlQueryDB, owner s
 	return scope
 }
 
-func managementDirectoryModelRevision(ctx context.Context, db controlQueryDB, owner string, revision *int64) {
+func managementDirectoryModelRevision(ctx context.Context, db controlQueryDB, owner string, revision, signalRevision *int64) {
 	if scope := managementDirectoryScopeFor(ctx, db, owner); scope != nil {
 		scope.directory = nil
+		scope.signalRevision = signalRevision
 		scope.ready = revision != nil && *revision >= 0
 		if scope.ready {
 			scope.modelRevision = *revision

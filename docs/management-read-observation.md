@@ -82,6 +82,35 @@ and execution plans. Enable it with `RUN_MANAGEMENT_SIGNAL_SEEK_SCALE=1` and an
 isolated local `TEST_CONTROL_DATABASE_URL`. Its results are not HTTP/browser
 latency acceptance or a reason to replay production business requests.
 
+`management_predicate_cache` reuses only successful narrow built-in model SQL
+projections. The current RR transaction must prove the same database, owner,
+account epoch, raw-model revision, model-signal revision and exact source-key
+set. The separate signal revision is essential: result-only and direct
+projection writes need not change the raw directory revision. Incomplete
+proofs, invalid/missing evidence, broad/legacy/non-strict reads and custom-model
+fallbacks retain the original SQL. At most two entries share 4 MiB; each hit
+decodes independent typed evidence and usage pointers. Receipts, live gateway
+authorization, filters, page hydration and current response validation still
+run outside this cache. A hit skips `model_signal_rows`, not the whole request.
+
+The read-only browser investigation on 2026-10-30 matched these request IDs:
+
+| Operation | Request ID | Request to table paint | Backend evidence |
+| --- | --- | --- | --- |
+| Open management | `ee030d88-9b36-4037-b0d8-caf0c85ca32a` | 15179 ms | Total 13399 ms; model predicate stream 2036 ms for 1535 rows |
+| Next page | `8cb7d50e-2648-4b59-b29b-6137909fede2` | 7254 ms | Total 6079 ms; selected receipt stream 2904 ms |
+| Group-status filter | `75ae7f97-afbe-44c1-81d1-9e049c867cd8` | 10432 ms | Total 8056 ms; unchanged directory reused, model predicate stream repeated for 2811 ms |
+| Open add dialog | `cc02e80a-d315-4b30-9b78-94efa32622ac` | Not instrumented | Network response headers 1284 ms; import-bindings handler 846 ms |
+
+The paging request's 17 database wait samples matched its backend PID and
+transaction start; 11 were in the selected receipt query, waiting on
+`DataFileRead` or `AioIoCompletion`. These samples establish I/O waiting during
+that query, not the cause of storage latency or a full duration breakdown.
+The receipt table already has its ID primary key; a generic (not actual
+executed) plan uses it. Further work must measure the uncached receipt read
+and response delivery rather than infer a missing index. These pre-change
+samples and cache hits do not establish sub-second end-to-end acceptance.
+
 Management may reuse raw target metadata only when the current repeatable-read
 transaction proves the same owner, database, account, target and capability
 projection epochs. `management_target_cache hit=true` and

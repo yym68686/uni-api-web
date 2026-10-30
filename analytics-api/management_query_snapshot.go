@@ -101,7 +101,7 @@ func (s *Service) readManagementQuerySnapshotMode(ctx context.Context, owner str
 	view, err := s.withManagementSnapshot(ctx, func(tx *sql.Tx, facts []managementGatewayFacts) (managementDatabaseView, error) {
 		ctx := ctx
 		if !selection {
-			directory := &managementDirectoryScope{store: &s.modelDirectories, database: s.control.db, tx: tx, owner: owner}
+			directory := &managementDirectoryScope{store: &s.modelDirectories, predicates: &s.predicateSets, database: s.control.db, tx: tx, owner: owner}
 			ctx = context.WithValue(ctx, managementDirectoryScopeKey{}, directory)
 			proof, _, err := s.managementReadProof(ctx, tx, owner)
 			if err != nil {

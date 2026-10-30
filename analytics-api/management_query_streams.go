@@ -239,76 +239,95 @@ func readManagementStreamModels(ctx context.Context, db controlQueryDB, owner st
 		}
 	}
 	seek := false
+	seekKeys := ""
 	if indexed && scope.CompactRevision && !scope.CatalogOnly && len(fallbackGroups) == 0 {
 		if keys, ok := managementModelSeekKeys(out, positions); ok {
 			raw, err := json.Marshal(keys)
 			if err != nil {
 				return nil, nil, err
 			}
-			query, args, seek = managementModelSeekSQL, []any{owner, string(raw)}, true
+			seekKeys = string(raw)
+			query, args, seek = managementModelSeekSQL, []any{owner, seekKeys}, true
 		}
 	}
 	if managementTraceEnabled(ctx) {
 		log.Printf("management_signal_read primary_key_seek=%t candidates=%d request_id=%s", seek, len(positions.values), consoleRequestID(ctx))
 	}
 	stages.next("signal_model_predicates")
-	readTrace := newManagementRowsTraceDerivedDecode(ctx, "model_signal_rows")
-	rows, err := db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, nil, err
-	}
-	readTrace.queryReady()
-	defer rows.Close()
-	defer func() { readTrace.finish() }()
 	ids := []string{}
 	seen := map[string]bool{}
-	for readTrace.next(rows) {
-		var key managementStreamIdentity
-		var valid, present, hasUsage bool
-		var evidence []byte
-		var probe, quality string
-		var checkedAt int64
-		var verdict, availability, terminal, modelMatch string
-		var usage managementStreamUsage
-		if err := rows.Scan(&key.account, &key.group, &key.model, &valid, &present, &evidence, &checkedAt, &verdict, &availability, &terminal, &modelMatch, &probe, &quality, &hasUsage, &usage.Status, &usage.InputPrice, &usage.OutputPrice, &usage.InputTokens, &usage.OutputTokens); err != nil {
-			return nil, nil, err
-		}
+	apply := func(value managementPredicateValue) error {
+		key := managementStreamIdentity{value.Account, value.Group, value.Model}
 		i, exists := positions.values[key]
 		// The foreign key excludes orphan projections. Still never publish one if
 		// a future storage implementation returns an identity absent from sources.
 		if !exists {
-			return nil, nil, errManagementPredicateFallback
+			return errManagementPredicateFallback
 		}
-		if len(evidence) != sha256.Size || strict && !valid {
-			return nil, nil, errManagementPredicateFallback
+		if len(value.Evidence) != sha256.Size || strict && !value.Valid {
+			return errManagementPredicateFallback
 		}
 		model := &out[i]
-		model.evidence, model.probe, model.quality = evidence, probe, quality
-		if present && !scope.CatalogOnly && (scope.Model == "" || wanted[key.model] || fallback[qualityGroupID(key.account, key.group)]) {
-			result := &subResult{CheckedAt: checkedAt, Verdict: verdict, Availability: subProbe{Status: availability, TerminalStatus: terminal, ModelMatch: modelMatch}}
+		model.evidence, model.probe, model.quality = value.Evidence, value.Probe, value.Quality
+		if value.Present && !scope.CatalogOnly && (scope.Model == "" || wanted[key.model] || fallback[qualityGroupID(key.account, key.group)]) {
+			result := &subResult{CheckedAt: value.CheckedAt, Verdict: value.Verdict, Availability: subProbe{Status: value.Availability, TerminalStatus: value.Terminal, ModelMatch: value.Match}}
 			model.item.Model.Result = result
-			if hasUsage {
-				result.Availability.Usage = usage.expanded()
+			if value.HasUsage {
+				result.Availability.Usage = value.Usage.expanded()
 			}
 		}
-		for _, id := range []string{probe, quality} {
+		for _, id := range []string{value.Probe, value.Quality} {
 			if id != "" && !seen[id] {
 				seen[id] = true
 				ids = append(ids, id)
 			}
 		}
-		readTrace.counted(len(evidence))
+		return nil
 	}
-	if err := rows.Err(); err != nil {
-		return nil, nil, err
+	store, version := managementPredicateCacheVersion(ctx, db, owner, seekKeys, seek, strict)
+	values, hit := store.get(ctx, version)
+	if hit {
+		for _, value := range values {
+			if err := apply(value); err != nil {
+				return nil, nil, err
+			}
+		}
+	} else {
+		readTrace := newManagementRowsTraceDerivedDecode(ctx, "model_signal_rows")
+		rows, err := db.QueryContext(ctx, query, args...)
+		if err != nil {
+			return nil, nil, err
+		}
+		readTrace.queryReady()
+		defer rows.Close()
+		defer func() { readTrace.finish() }()
+		for readTrace.next(rows) {
+			var value managementPredicateValue
+			if err := rows.Scan(&value.Account, &value.Group, &value.Model, &value.Valid, &value.Present, &value.Evidence, &value.CheckedAt, &value.Verdict, &value.Availability, &value.Terminal, &value.Match, &value.Probe, &value.Quality, &value.HasUsage, &value.Usage.Status, &value.Usage.InputPrice, &value.Usage.OutputPrice, &value.Usage.InputTokens, &value.Usage.OutputTokens); err != nil {
+				return nil, nil, err
+			}
+			if err := apply(value); err != nil {
+				return nil, nil, err
+			}
+			if store != nil {
+				values = append(values, value)
+			}
+			readTrace.counted(len(value.Evidence))
+		}
+		if err := rows.Err(); err != nil {
+			return nil, nil, err
+		}
+		readTrace.finish()
+		readTrace = nil
 	}
-	readTrace.finish()
-	readTrace = nil
 	stages.next("signal_model_verify")
 	for _, model := range out {
 		if len(model.evidence) != sha256.Size && (!scope.CompactRevision || scope.Model == "" || wanted[model.item.Model.Model] || fallback[qualityGroupID(model.item.Account, model.item.Group)]) {
 			return nil, nil, errManagementPredicateFallback
 		}
+	}
+	if !hit {
+		store.put(ctx, version, values, positions)
 	}
 	return out, ids, ctx.Err()
 }
