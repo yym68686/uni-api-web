@@ -258,10 +258,16 @@ UPDATE console_sub_targets SET result=jsonb_build_object('model','gpt-5.5','avai
 		pagingLogs := output.String()
 		full, fullErr := s.readManagementQuerySnapshot(context.Background(), "owner", f, got.Page.NextCursor, true)
 		next.ReadAtMS = full.Page.ReadAtMS
-		if nextErr != nil || fullErr != nil || !ok || !reflect.DeepEqual(next.Rows, full.Page.Rows) || !reflect.DeepEqual(next.Context, managementContextForPage(full.View, full.Page, model)) {
-			t.Logf("model=%s paging_hit=%t rows_equal=%t context_equal=%t", model, ok, reflect.DeepEqual(next.Rows, full.Page.Rows), reflect.DeepEqual(next.Context, managementContextForPage(full.View, full.Page, model)))
-			if !reflect.DeepEqual(next.Context, managementContextForPage(full.View, full.Page, model)) {
-				t.Logf("context difference\nnext=%s\nfull=%s", mustJSON(next.Context), mustJSON(managementContextForPage(full.View, full.Page, model)))
+		expectedContext := managementContextForPage(full.View, full.Page, model)
+		// Paging restores prices from JSON; pgx can use time.Local for UTC
+		// timestamps while JSON uses time.UTC. Compare the complete public
+		// context, including prices and effective_at, rather than that private
+		// location pointer. Rows retain the original typed equality check.
+		contextEqual := mustJSON(next.Context) == mustJSON(expectedContext)
+		if nextErr != nil || fullErr != nil || !ok || !reflect.DeepEqual(next.Rows, full.Page.Rows) || !contextEqual {
+			t.Logf("model=%s paging_hit=%t rows_equal=%t context_json_equal=%t", model, ok, reflect.DeepEqual(next.Rows, full.Page.Rows), contextEqual)
+			if !contextEqual {
+				t.Logf("context difference\nnext=%s\nfull=%s", mustJSON(next.Context), mustJSON(expectedContext))
 			}
 			for i := range min(len(next.Rows), len(full.Page.Rows)) {
 				if !reflect.DeepEqual(next.Rows[i], full.Page.Rows[i]) {
