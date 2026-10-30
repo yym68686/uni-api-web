@@ -13,7 +13,7 @@ import (
 // read may certify absence, and only management's complete current RR proof may
 // reuse it. The proof covers raw receipt inserts/deletes/reassignment and account
 // ownership. Ordinary/detail/selection readers retain their original SQL.
-// Certificates share the existing eight-entry/8MiB receipt budget but have a
+// Certificates share the 32-entry/8MiB receipt budget but have a
 // separate kind, so neither projection rows nor projection absences enter here.
 func readManagementRawReceiptAbsences(ctx context.Context, db controlQueryDB, owner string, ids []string, current map[string]*subUsage, read func([]string) error) error {
 	scope := managementReceiptSetScopeFor(ctx, db, owner, ids)

@@ -176,7 +176,7 @@ func TestManagementReceiptSetCacheConcurrentBudget(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
-	if len(store.entries) > 8 || store.bytes > managementReceiptSetBudget {
+	if len(store.entries) > managementReceiptSetLimit || store.bytes > managementReceiptSetBudget {
 		t.Fatal("cache exceeded memory or entry limit")
 	}
 	total := 0
@@ -191,6 +191,69 @@ func TestManagementReceiptSetCacheConcurrentBudget(t *testing.T) {
 	}
 	if store.bytes != total {
 		t.Fatal("eviction byte accounting changed")
+	}
+}
+
+func TestManagementReceiptSetCacheRetainsThreePagesAndPredicateWithinByteBudget(t *testing.T) {
+	scope, ctx := receiptSetScopeForTest()
+	enableManagementReceiptSetScope(ctx, scope.tx, true)
+	read := func(ids []string, strict bool, allowSQL bool) {
+		t.Helper()
+		got, err := readManagementReceiptSet(ctx, scope.tx, scope.version.owner, ids, strict, func() (map[string]managementStreamReceipt, error) {
+			if !allowSQL {
+				t.Fatal("still-current receipts were evicted below the byte budget")
+			}
+			rows := make(map[string]managementStreamReceipt, len(ids))
+			for _, id := range ids {
+				rows[id] = managementStreamReceipt{valid: true, evidence: bytes.Repeat([]byte{7}, 32), usage: managementStreamUsage{Status: "matched"}}
+			}
+			return rows, nil
+		})
+		if err != nil || len(got) != len(ids) {
+			t.Fatal("retained complete receipt set changed", err, len(got))
+		}
+		for _, id := range ids {
+			if row := got[id]; !row.valid || row.usage.Status != "matched" || !bytes.Equal(row.evidence, bytes.Repeat([]byte{7}, 32)) {
+				t.Fatal("retained receipt values changed")
+			}
+		}
+	}
+	predicate := []string{"predicate-receipt"}
+	read(predicate, true, true)
+	var batches [][]string
+	var absences [][]string
+	for page := 0; page < 3; page++ {
+		for _, size := range []int{4096, 2869} {
+			ids := make([]string, size)
+			for i := range ids {
+				ids[i] = fmt.Sprintf("page-%d-batch-%d-receipt-%04d", page, size, i)
+			}
+			read(ids, false, true)
+			batches = append(batches, ids)
+		}
+		ids := []string{fmt.Sprintf("page-%d-absent", page)}
+		if err := readManagementRawReceiptAbsences(ctx, scope.tx, scope.version.owner, ids, map[string]*subUsage{}, func([]string) error { return nil }); err != nil {
+			t.Fatal(err)
+		}
+		absences = append(absences, ids)
+	}
+	if scope.store.bytes >= managementReceiptSetBudget || len(scope.store.entries) != 10 {
+		t.Fatal("three-page fixture exceeded the existing byte budget or lost entries", scope.store.bytes, len(scope.store.entries))
+	}
+	// A new filter can use the same predicate and page groups without having a
+	// retained complete page response. Neither certificate kind may be lost to
+	// the old eight-entry ceiling while their total still fits in eight MiB.
+	read(predicate, true, false)
+	for _, ids := range batches {
+		read(ids, false, false)
+	}
+	for _, ids := range absences {
+		if err := readManagementRawReceiptAbsences(ctx, scope.tx, scope.version.owner, ids, map[string]*subUsage{}, func([]string) error {
+			t.Fatal("still-current raw absence was evicted below the byte budget")
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

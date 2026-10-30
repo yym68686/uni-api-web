@@ -26,13 +26,13 @@ func TestManagementReceiptCacheAdmissionDistinguishesEvictions(t *testing.T) {
 			case "count", "both":
 				size := 100
 				if name == "both" {
-					size = managementReceiptSetBudget / 8
+					size = managementReceiptSetBudget / managementReceiptSetLimit
 				}
-				for i := 0; i < 8; i++ {
+				for i := 0; i < managementReceiptSetLimit; i++ {
 					store.put(entry(fmt.Sprint(i), size))
 				}
 				state = store.put(entry("next", size))
-				want.entries, want.bytes = 8, 8*size
+				want.entries, want.bytes = managementReceiptSetLimit, managementReceiptSetLimit*size
 				if name == "count" {
 					want.countEvictions = 1
 				} else {
@@ -77,7 +77,7 @@ func TestManagementReceiptCacheAdmissionDistinguishesEvictions(t *testing.T) {
 			for _, e := range store.entries {
 				total += e.bytes
 			}
-			if total != store.bytes || len(store.entries) > 8 || total > managementReceiptSetBudget {
+			if total != store.bytes || len(store.entries) > managementReceiptSetLimit || total > managementReceiptSetBudget {
 				t.Fatal("diagnostic changed cache budget or accounting")
 			}
 		})

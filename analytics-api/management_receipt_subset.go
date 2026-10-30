@@ -6,7 +6,7 @@ import (
 	"log"
 )
 
-// Entries are immutable after admission. Snapshot only the at-most-eight
+// Entries are immutable after admission. Snapshot only the at-most-32
 // pointers under the existing lock; decode outside it into request-local data.
 func (c *managementReceiptSets) currentEntries(version managementReceiptSetVersion) []*managementReceiptSet {
 	c.mu.Lock()
@@ -26,7 +26,7 @@ func (c *managementReceiptSets) currentEntries(version managementReceiptSetVersi
 // source/ownership proof, just as an exact selected-ID cache hit already does.
 // Invalid rows still require SQL and strict fallback. An absent projection stays
 // absent from the result map, so it NEVER bypasses the later raw receipt decoder.
-// Both encoded rows and absent IDs share the existing 8-entry/8MiB budget;
+// Both encoded rows and absent IDs share the 32-entry/8MiB budget;
 // selected sets over 4096 IDs retain their original owner scan.
 func managementReceiptSubset(ctx context.Context, db controlQueryDB, owner string, ids []string) (map[string]managementStreamReceipt, []string, error) {
 	scope := managementReceiptSetScopeFor(ctx, db, owner, ids)

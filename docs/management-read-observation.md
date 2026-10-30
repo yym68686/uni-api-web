@@ -169,7 +169,7 @@ and same current read-only RR proof. It additionally requires the projection's
 `complete` flag in that transaction, then checks cancellation normally. Only
 the bounded (up to 4096 IDs) selected-ID query is eligible; larger owner scans,
 detail endpoints and unpinned reads keep their original SQL. Missing IDs remain
-missing and still flow through the original raw fallback. It uses at most eight
+missing and still flow through the original raw fallback. It uses at most 32
 entries and 8 MiB; responses are independently reconstructed typed maps.
 Paging may install the same scope only after comparing its fresh proof,
 headers and deadline in the hydration transaction; the page reader still
@@ -188,14 +188,25 @@ removal counts: `evicted_version`, `replaced`, `evicted_count`, `evicted_bytes`,
 and `evicted_both`. The last three describe the limit(s) exceeded immediately
 before each removal, not guessed causes inferred from a later SQL duration.
 Projection and raw-absence certificates are marked separately; all still
-share the unchanged eight-entry/8MiB budget. Logging happens after unlocking,
+share the 32-entry/8MiB budget. Logging happens after unlocking,
 with no IDs, owners, proof stamps or payloads. These observations do not change
 authorization, proof validation, cache lifetime, SQL or business behavior.
+
+The entry ceiling is now 32, with the same 8 MiB accounted data budget.
+Production admission observations identified count-only evictions at eight
+entries and about 3.6 MiB, while all entries still matched the current receipt
+proof. A wide page admits two projection batches and a small raw-absence set;
+three pages therefore exhausted the previous entry ceiling and evicted still
+current evidence. A later page read repeated 4,062 ms of receipt hydration,
+with zero version or byte-limit evictions. The larger ceiling lets these small
+certificates coexist without relaxing the byte budget, owner/transaction proof,
+strictness, SQL fallback or cancellation checks. It does not accelerate a first
+uncached read and is not evidence that end-to-end operations meet one second.
 
 Overlapping selected-ID sets can also reuse valid rows and certified projection
 absences under that same exact current receipt/ownership proof. A successful,
 uncanceled read records only requested IDs missing from its returned map; the
-encoded certificate shares the existing eight-entry/8 MiB budget. Unknown IDs
+encoded certificate shares the 32-entry/8 MiB budget. Unknown IDs
 and invalid rows still query SQL, including strict fallback. Insert, delete,
 reassignment, projection writes and ownership changes invalidate the proof;
 incomplete/unprepared projections, other transactions without their own complete
@@ -213,7 +224,7 @@ ownership, and confirms projection completeness. Unknown/present IDs retain the
 raw SQL/decoder, while ordinary, detail, selection, unprepared and over-4096-ID
 reads keep their original path. No raw payload is retained, and missing rows keep
 their previous embedded usage semantics. The certificates share the existing
-eight-entry/8MiB receipt budget, including their encoded IDs and version keys.
+32-entry/8MiB receipt budget, including their encoded IDs and version keys.
 `management_raw_receipt_absence reused=N raw_ids=M stored=BOOL phase=...` counts
 this separate step. A hit skips only a proven empty raw lookup, not page validity,
 source fences, current headers, response delivery or rendering.

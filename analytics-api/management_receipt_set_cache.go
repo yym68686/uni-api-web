@@ -53,6 +53,11 @@ type managementCachedReceipt struct {
 
 const managementReceiptSetBudget = 8 << 20
 
+// Wide pages admit two projection batches plus a small raw-absence set. Eight
+// entries evicted current certificates after only three pages at <4 MiB. Keep
+// the same total byte budget and a separate bound for small-set lookup work.
+const managementReceiptSetLimit = 32
+
 // Scalar observations only. Never retain or log source IDs, ownership values,
 // proof stamps or receipt payloads for cache diagnostics.
 type managementReceiptCacheState struct {
@@ -139,8 +144,8 @@ func (c *managementReceiptSets) put(entry *managementReceiptSet) (state manageme
 			remove(i)
 		}
 	}
-	for len(c.entries) > 0 && (len(c.entries) >= 8 || c.bytes+entry.bytes > managementReceiptSetBudget) {
-		count, bytes := len(c.entries) >= 8, c.bytes+entry.bytes > managementReceiptSetBudget
+	for len(c.entries) > 0 && (len(c.entries) >= managementReceiptSetLimit || c.bytes+entry.bytes > managementReceiptSetBudget) {
+		count, bytes := len(c.entries) >= managementReceiptSetLimit, c.bytes+entry.bytes > managementReceiptSetBudget
 		switch {
 		case count && bytes:
 			state.countAndByteEvictions++
