@@ -284,6 +284,12 @@ func (s *Service) subAttachUsageProbesWithCurrentFrom(ctx context.Context, db co
 }
 
 func (s *Service) subReadUsageByIDsFrom(ctx context.Context, db controlQueryDB, owner string, ids []string, current map[string]*subUsage) error {
+	return readManagementRawReceiptAbsences(ctx, db, owner, ids, current, func(wanted []string) error {
+		return s.subReadUsageByIDsUncachedFrom(ctx, db, owner, wanted, current)
+	})
+}
+
+func (s *Service) subReadUsageByIDsUncachedFrom(ctx context.Context, db controlQueryDB, owner string, ids []string, current map[string]*subUsage) error {
 	if len(ids) == 0 {
 		return ctx.Err()
 	}

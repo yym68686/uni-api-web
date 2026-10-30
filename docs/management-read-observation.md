@@ -174,6 +174,28 @@ resolved raw receipt: both account and hydrated-page raw decoders remain intact.
 skipped alongside the existing present-row `reused` and remaining `raw_ids`
 counters. These counts are not saved milliseconds or full-operation timings.
 
+Raw lookup absences have a separate certificate kind. Only a successful original
+owner-scoped raw SQL read and typed decoder may create one; a projection absence
+cannot seed it. A later bounded management read may skip those missing raw IDs
+only after its own RR transaction proves the same receipt revisions and account
+ownership, and confirms projection completeness. Unknown/present IDs retain the
+raw SQL/decoder, while ordinary, detail, selection, unprepared and over-4096-ID
+reads keep their original path. No raw payload is retained, and missing rows keep
+their previous embedded usage semantics. The certificates share the existing
+eight-entry/8MiB receipt budget, including their encoded IDs and version keys.
+`management_raw_receipt_absence reused=N raw_ids=M stored=BOOL phase=...` counts
+this separate step. A hit skips only a proven empty raw lookup, not page validity,
+source fences, current headers, response delivery or rendering.
+
+On image `1445564`, request `192c0a79-de7f-44c8-b5ff-ca20772d2a31` was a single
+next-page operation: browser request-to-paint 2717 ms, response headers 2431 ms,
+body/JSON 192 ms, backend handler 1704 ms. Its page raw receipt query returned
+zero rows for 478 unresolved IDs in 235 ms after valid projected receipts and
+model rows had already been reused. This establishes a remaining empty SQL
+lookup, not a storage root cause or a sub-second operation. The raw-absence
+change must still be verified on its deployed image; first reads and changed
+receipt/ownership versions deliberately perform SQL again.
+
 Only whitelisted counters, state/wait labels, fixed query classes and correlated
 request IDs are emitted. No raw SQL, query parameters, business identities,
 payloads, subprocess errors, connection strings or credentials are printed.

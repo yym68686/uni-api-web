@@ -27,12 +27,14 @@ type managementReceiptSetVersion struct {
 	database          *sql.DB
 	owner, stamp, ids string
 	strict            bool
+	rawAbsence        bool
 }
 type managementReceiptSet struct {
 	version managementReceiptSetVersion
 	body    []byte
 	// Only IDs requested by a successful complete read and absent from its
-	// result. This certifies projection absence, NOT absence of a raw receipt.
+	// result. The version's rawAbsence kind separates raw SQL certificates from
+	// projection certificates; neither kind can substitute for the other.
 	absent []byte
 	rows   int
 	bytes  int

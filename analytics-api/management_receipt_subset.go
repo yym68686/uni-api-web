@@ -15,7 +15,7 @@ func (c *managementReceiptSets) currentEntries(version managementReceiptSetVersi
 	for i := len(c.entries) - 1; i >= 0; i-- {
 		entry := c.entries[i]
 		v := entry.version
-		if v.database == version.database && v.owner == version.owner && v.stamp == version.stamp {
+		if v.database == version.database && v.owner == version.owner && v.stamp == version.stamp && v.rawAbsence == version.rawAbsence {
 			out = append(out, entry)
 		}
 	}

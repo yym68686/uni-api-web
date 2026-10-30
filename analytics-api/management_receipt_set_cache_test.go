@@ -410,7 +410,7 @@ func TestManagementPagingReusesVerifiedReceiptSet(t *testing.T) {
 func TestManagementPagingReusesWideReceiptBatches(t *testing.T) {
 	s := managementHydrationFixture(t)
 	// Each 25-group page needs more than one selected-ID batch. A missing
-	// receipt still has to reach the raw decoder on every hydrated read.
+	// receipt reaches the raw decoder before its certified absence is reused.
 	for _, query := range []string{
 		`INSERT INTO console_sub_models(account_id,group_id,model,state,result)
  SELECT 'a',g,m,'done',jsonb_build_object('model',m,'checked_at',g,'verdict','pass',
@@ -454,8 +454,14 @@ func TestManagementPagingReusesWideReceiptBatches(t *testing.T) {
 		}
 		logs := output.String()
 		t.Logf("local_wide_paging pass=%d elapsed_ms=%d hits=%d sql_reads=%d", n, elapsed.Milliseconds(), strings.Count(logs, "management_receipt_set_cache hit=true"), strings.Count(logs, "stage=receipt_signal_rows "))
-		if !strings.Contains(logs, "management_page_receipt_signals requested=5150 resolved=5149") || !strings.Contains(logs, "stage=page_receipts ") {
-			t.Fatal("wide fixture lost its second batch or missing-receipt fallback")
+		if !strings.Contains(logs, "management_page_receipt_signals requested=5150 resolved=5149") {
+			t.Fatal("wide fixture lost its second batch or fabricated a missing receipt")
+		}
+		if n == 0 && !strings.Contains(logs, "stage=page_receipts ") {
+			t.Fatal("unknown raw receipt bypassed the original decoder")
+		}
+		if n > 0 && (strings.Contains(logs, "stage=page_receipts ") || !strings.Contains(logs, "management_raw_receipt_absence reused=1 raw_ids=0 stored=false phase=page ")) {
+			t.Fatal("verified raw absence did not replace only the proven empty SQL")
 		}
 		if n > 0 && (strings.Count(logs, "management_receipt_set_cache hit=true") != 2 || strings.Contains(logs, "stage=receipt_signal_rows ")) {
 			t.Fatalf("unchanged wide page repeated receipt SQL: pass=%d hits=%d sql_reads=%d", n, strings.Count(logs, "management_receipt_set_cache hit=true"), strings.Count(logs, "stage=receipt_signal_rows "))
