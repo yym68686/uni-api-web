@@ -63,6 +63,25 @@ SQL omits the always-false JSON-recordset branch. Nonempty fallback groups
 retain the existing complete branch; owner checks, projection verification,
 aliases, compact revision proof and full-directory assembly are unchanged.
 
+`management_signal_read primary_key_seek=true candidates=N` identifies a narrow
+built-in model predicate read through the existing `(account_id,group_id,model)`
+primary key. It requires the exact current versioned directory index, at most
+4096 identities, at most one eighth of the source rows, and a conservative
+1 MiB JSON-parameter bound. Ownership is checked once inside a materialized
+authorized set before parameterized probes. This changes a full projection
+scan into O(k log n) index lookups (plus O(k log k) request-local ordering), not
+the complete directory, revision proof, receipt checks, facets or hydration.
+Missing/invalid required evidence still falls back; unprepared, broad, legacy
+and non-built-in scopes retain the original SQL. No index migration or database
+setting change is required. The mode counter and `model_signal_rows` timings
+must be correlated with a natural request before claiming production gains.
+
+The opt-in local synthetic test `TestManagementSignalSeekProductionCardinality`
+uses 190464 rows, including a foreign owner, to compare full predicate columns
+and execution plans. Enable it with `RUN_MANAGEMENT_SIGNAL_SEEK_SCALE=1` and an
+isolated local `TEST_CONTROL_DATABASE_URL`. Its results are not HTTP/browser
+latency acceptance or a reason to replay production business requests.
+
 Management may reuse raw target metadata only when the current repeatable-read
 transaction proves the same owner, database, account, target and capability
 projection epochs. `management_target_cache hit=true` and

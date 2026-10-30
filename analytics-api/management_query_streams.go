@@ -16,9 +16,11 @@ import (
 const managementModelSourceStreamSQL = `SELECT m.account_id,m.group_id,m.model,m.state,m.message
  FROM console_sub_models m JOIN console_sub_accounts a ON a.id=m.account_id WHERE a.owner=$1`
 
-const managementModelStreamSQL = `SELECT p.account_id,p.group_id,p.model,p.valid,p.present,p.evidence_digest,
+const managementModelStreamSelectSQL = `SELECT p.account_id,p.group_id,p.model,p.valid,p.present,p.evidence_digest,
  p.checked_at,p.verdict,p.availability,p.terminal,p.model_match,p.probe_id,p.quality_probe_id,p.has_usage,p.usage_status,
- p.input_price,p.output_price,p.input_tokens,p.output_tokens
+ p.input_price,p.output_price,p.input_tokens,p.output_tokens`
+
+const managementModelStreamSQL = managementModelStreamSelectSQL + `
  FROM console_management_model_signal p JOIN console_sub_accounts a ON a.id=p.account_id WHERE a.owner=$1`
 
 const managementReceiptSelectedStreamSQL = managementReceiptStreamSQL + ` AND r.id=ANY($2::text[])`
@@ -235,6 +237,19 @@ func readManagementStreamModels(ctx context.Context, db controlQueryDB, owner st
 			query += ` AND (p.model=ANY($2::text[]) OR EXISTS(SELECT 1 FROM jsonb_to_recordset($3::jsonb) AS g(account_id text,group_id bigint) WHERE g.account_id=p.account_id AND g.group_id=p.group_id))`
 			args = append(args, scope.Names, string(raw))
 		}
+	}
+	seek := false
+	if indexed && scope.CompactRevision && !scope.CatalogOnly && len(fallbackGroups) == 0 {
+		if keys, ok := managementModelSeekKeys(out, positions); ok {
+			raw, err := json.Marshal(keys)
+			if err != nil {
+				return nil, nil, err
+			}
+			query, args, seek = managementModelSeekSQL, []any{owner, string(raw)}, true
+		}
+	}
+	if managementTraceEnabled(ctx) {
+		log.Printf("management_signal_read primary_key_seek=%t candidates=%d request_id=%s", seek, len(positions.values), consoleRequestID(ctx))
 	}
 	stages.next("signal_model_predicates")
 	readTrace := newManagementRowsTraceDerivedDecode(ctx, "model_signal_rows")
