@@ -34,6 +34,20 @@ hydration: only request/transaction and existing stage logs establish its role.
 `idle in transaction` samples are retained as that state, not treated as active
 database work. `wait` is an instantaneous sample, not measured wait duration.
 
+For those retained backends, `blockers` describes only the direct blocking PIDs
+reported by PostgreSQL's `pg_blocking_pids`. The function runs once per retained
+backend per tick; the result also supplies `reported_blockers`. Up to eight
+blocking sessions are described using fixed application/query classes and
+PID + transaction-start correlation where matching management logs exist.
+`global_advisory_lock` names a shared lock query, not a particular caller or
+operation. A slow concurrent query does not establish a blocking relationship.
+This observes heavyweight/advisory lock dependencies, not the cause of an I/O
+wait, storage contention, a complete dependency chain or elapsed lock duration.
+The activity and lock views can change during sampling: exited sessions,
+parallel-query duplicate PIDs or prepared transactions (reported as PID 0) can
+make `reported_blockers` differ from the bounded session details. Missing or
+invalid details remain `null`; an empty list describes only that observation.
+
 On PostgreSQL 18+ with `pg_stat_get_backend_io`, samples also include cumulative
 backend reads, bytes and hits. These counters may lag and include earlier work
 on that backend; they are **not per-query I/O counters or I/O timings**. Older
@@ -161,6 +175,9 @@ Tests (no production access):
 node --test scripts/observe-management-read.node-tests.mjs
 ```
 
-An optional integration test accepts `TEST_MANAGEMENT_OBSERVER_DATABASE_URL`,
-but refuses non-local hosts. Use a fresh isolated local database, not production:
-the fixture creates temporary rows, runs a short synthetic wait and rolls back.
+Optional integration tests accept `TEST_MANAGEMENT_OBSERVER_DATABASE_URL`,
+but refuse non-local hosts. Use a fresh isolated local database, not production:
+the fixtures create temporary rows, run short synthetic receipt-query and advisory
+lock waits, and roll back. The lock fixture verifies the actual blocking
+transaction; the concurrent-activity fixture verifies that unrelated activity
+does not acquire a false blocking relationship.

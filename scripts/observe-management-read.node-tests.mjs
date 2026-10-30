@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { spawn, spawnSync, execFileSync } from "node:child_process";
-import { observationSQL, optionsFrom, concurrentActivity, safeSamples, sessionRequests, correlate, runObserver } from "./observe-management-read.mjs";
+import { observationSQL, optionsFrom, concurrentActivity, blockingActivity, safeSamples, sessionRequests, correlate, runObserver } from "./observe-management-read.mjs";
 
 const args = ["--ssh-host", "control", "--namespace", "tenant", "--pod", "database-1"];
 const options = optionsFrom(args);
@@ -91,10 +91,37 @@ test("SQL only observes activity, with read-only transaction and bounded timeout
   assert.match(sql, /WITH activity AS MATERIALIZED/);
   assert.match(sql, /FROM activity CROSS JOIN concurrent WHERE kind IS NOT NULL\s+ORDER BY pid LIMIT 16/);
   assert.match(sql, /background_usage_batches_data_file_read/);
+  assert.match(sql, /blocked AS MATERIALIZED/);
+  assert.equal(sql.match(/pg_catalog\.pg_blocking_pids\(pid\)/g)?.length, 1);
+  assert.match(sql, /ORDER BY a.pid LIMIT 8/);
   assert.match(sql, /floor\(extract\(epoch FROM xact_start\)\*1000\)::bigint/);
   assert.match(sql, /to_regprocedure\('pg_catalog\.pg_stat_get_backend_io\(integer\)'\)/);
   assert.match(sql, /ROLLBACK;$/);
   assert.doesNotMatch(sql, /EXPLAIN|INSERT|UPDATE|DELETE|ALTER|VACUUM|track_io_timing|plan_cache_mode|pg_stat_force_next_flush/i);
+});
+
+test("blockers require actual bounded observations, preserve missing evidence and redact extra fields", () => {
+  const blocker = { pid: 43, xact_started_ms: sample.xact_started_ms - 1, query_started_ms: sample.query_started_ms - 1,
+    application: "analytics", kind: "other", state: "idle in transaction", wait_type: "Client", wait: "ClientRead" };
+  assert.deepEqual(blockingActivity([{ ...blocker, query: "private SQL", owner: "private-owner" }]), [blocker]);
+  assert.deepEqual(blockingActivity([]), []);
+  assert.deepEqual(blockingActivity([{ ...blocker, xact_started_ms: null, query_started_ms: null }]), [{ ...blocker, xact_started_ms: null, query_started_ms: null }]);
+  for (const invalid of [undefined, null, {}, Array(9).fill(blocker), [blocker, blocker],
+    [{ ...blocker, pid: 0 }], [{ ...blocker, application: "private-app" }], [{ ...blocker, state: "private SQL" }],
+    [{ ...blocker, kind: "private SQL" }], [{ ...blocker, wait: "private/credential" }], [{ ...blocker, xact_started_ms: undefined }],
+    [{ ...blocker, query_started_ms: Number.MAX_SAFE_INTEGER + 1 }]]) assert.equal(blockingActivity(invalid), null);
+  const parsed = safeSamples(notice({ ...sample, blockers: [{ ...blocker, query: "private SQL" }] }) + notice(sample));
+  assert.deepEqual(parsed[0].blockers, [blocker]);
+  assert.equal(parsed[1].blockers, null, "old samples cannot invent an absence of blockers");
+  assert.equal(parsed[1].reported_blockers, null);
+  assert.equal(parsed[0].blocker_scope, "pg_blocking_pids_up_to_8_current_snapshot");
+  const sessions = sessionRequests([log("current"), { message: log("blocker-current", blocker.xact_started_ms).message.replace("backend_pid=42", "backend_pid=43") },
+    { message: log("previous-blocker", blocker.xact_started_ms - 100).message.replace("backend_pid=42", "backend_pid=43") }]);
+  const correlated = correlate(parsed, sessions);
+  assert.deepEqual(correlated[0].blockers[0].request_ids, ["blocker-current"]);
+  assert.equal(correlated[0].blockers[0].correlation, "pid_xact_ms");
+  assert.equal(correlated[1].blockers, null);
+  assert.doesNotMatch(JSON.stringify(correlated), /private|credential|previous-blocker|query"/);
 });
 
 test("concurrent activity is count-only, bounded to its declared database scope and never causal", () => {
@@ -236,6 +263,8 @@ ROLLBACK;`);
       assert.equal(value.wait, "PgSleep");
       assert.equal(value.activity_scope, "database_concurrent_not_causal");
       assert.equal(value.concurrent_activity.background_usage_batches_data_file_read, 0);
+      assert.deepEqual(value.blockers, [], "unblocked sleep cannot be described as a lock wait");
+      assert.equal(value.reported_blockers, 0);
     }
     assert.ok(samples.some(s => s.concurrent_activity.background_usage_batches === 1 && s.concurrent_activity.active_control_backends === 2), "concurrent local background activity was not counted");
     const version = Number(execFileSync("psql", ["-X", "-Atqc", "SHOW server_version_num"], { env, encoding: "utf8" }).trim());
@@ -246,7 +275,7 @@ ROLLBACK;`);
     // backends used to fill LIMIT 16 before the management kind was checked.
     // Synthetic PIDs must never request live per-backend I/O counters.
     const crowdedSQL = observationSQL(local)
-      .replace("FROM pg_catalog.pg_stat_activity", "FROM pg_temp.observer_activity")
+      .replaceAll("FROM pg_catalog.pg_stat_activity", "FROM pg_temp.observer_activity")
       .replace("has_io := pg_catalog.to_regprocedure('pg_catalog.pg_stat_get_backend_io(integer)') IS NOT NULL;", "has_io := false;");
     assert.doesNotMatch(crowdedSQL, /FROM pg_catalog\.pg_stat_activity|has_io := pg_catalog/);
     const crowdedFixture = `CREATE TEMP TABLE observer_activity AS SELECT current_database() AS datname,'uni-api-control'::text AS application_name,
@@ -279,5 +308,64 @@ ROLLBACK;`);
     clearTimeout(timer);
     activity.kill("SIGTERM");
     background.kill("SIGTERM");
+  }
+});
+
+test("local PostgreSQL reports the actual blocking transaction, not unrelated activity", { skip: !process.env.TEST_MANAGEMENT_OBSERVER_DATABASE_URL }, async () => {
+  const url = new URL(process.env.TEST_MANAGEMENT_OBSERVER_DATABASE_URL);
+  assert.ok(["127.0.0.1", "localhost", "[::1]"].includes(url.hostname));
+  assert.ok([...url.searchParams.keys()].every(key => key === "sslmode"));
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("PG")));
+  Object.assign(env, { PGHOST: url.hostname.replace(/^\[|\]$/g, ""), PGPORT: url.port || "5432", PGDATABASE: decodeURIComponent(url.pathname.slice(1)), PGSSLMODE: "disable" });
+  if (url.username) env.PGUSER = decodeURIComponent(url.username);
+  if (url.password) env.PGPASSWORD = decodeURIComponent(url.password);
+  const processes = [];
+  function start(sql) {
+    const child = spawn("psql", ["-X", "-Atq", "-v", "ON_ERROR_STOP=1"], { env, stdio: ["pipe", "pipe", "pipe"] });
+    processes.push(child);
+    child.stderr.resume();
+    let buffer = "";
+    const ready = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(Error("local lock fixture startup timed out")), 4000);
+      child.stdout.on("data", chunk => {
+        buffer += chunk;
+        const match = buffer.match(/(?:^|\n)(\d+:\d+)\n/);
+        if (match) { clearTimeout(timer); resolve(match[1]); }
+      });
+      child.once("error", () => { clearTimeout(timer); reject(Error("local lock fixture unavailable")); });
+      child.once("close", () => { clearTimeout(timer); if (!/\d+:\d+\n/.test(buffer)) reject(Error("local lock fixture did not start")); });
+    });
+    child.stdin.end(sql);
+    return ready;
+  }
+  const keySQL = `SELECT pg_backend_pid()::text||':'||floor(extract(epoch FROM transaction_timestamp())*1000)::bigint::text;`;
+  try {
+    const holder = await start(`BEGIN; SET LOCAL application_name='uni-api-analytics';
+SELECT pg_advisory_xact_lock(785491602); ${keySQL} SELECT pg_sleep(6); ROLLBACK;`);
+    const waiter = await start(`BEGIN; SET LOCAL application_name='uni-api-control';
+CREATE TEMP TABLE console_sub_usage(id text,status text,result jsonb);
+INSERT INTO console_sub_usage VALUES('private-lock-fixture','matched','{"private":"not-output"}');
+${keySQL}
+SELECT u.id,u.status,u.result FROM console_sub_usage u CROSS JOIN LATERAL pg_advisory_xact_lock(785491602);
+ROLLBACK;`);
+    const local = optionsFrom([...args, "--duration", "1"]);
+    const observed = spawnSync("psql", ["-X", "-Atq", "-v", "ON_ERROR_STOP=1"], { env, input: observationSQL(local), encoding: "utf8", timeout: 6000 });
+    assert.equal(observed.status, 0, "local blocking observer SQL failed");
+    const samples = safeSamples(observed.stderr).filter(s => `${s.pid}:${s.xact_started_ms}` === waiter);
+    assert.ok(samples.length > 0, "local blocked receipt query was not observed");
+    for (const value of samples) {
+      assert.equal(value.wait_type, "Lock");
+      assert.equal(value.wait, "advisory");
+      assert.equal(value.reported_blockers, 1);
+      assert.equal(value.blockers.length, 1);
+      const blocker = value.blockers[0];
+      assert.equal(`${blocker.pid}:${blocker.xact_started_ms}`, holder);
+      assert.equal(blocker.application, "analytics");
+      assert.equal(blocker.kind, "other");
+      assert.equal(blocker.wait, "PgSleep");
+    }
+    assert.doesNotMatch(JSON.stringify(samples), /private|785491602|pg_sleep|SELECT|console_sub_usage/);
+  } finally {
+    for (const child of processes) child.kill("SIGTERM");
   }
 });

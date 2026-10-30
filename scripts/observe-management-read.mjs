@@ -7,6 +7,7 @@ const kinds = new Set(["receipt_read", "page_models", "model_directory", "rates"
 const identity = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$/;
 const kubernetesName = /^[a-z0-9][a-z0-9.-]{0,252}$/;
 const requestID = /^[a-zA-Z0-9._:-]{1,128}$/;
+const blockerKinds = new Set([...kinds, "global_advisory_lock", "exporter_state_lock", "other"]);
 
 export function optionsFrom(args) {
   const allowed = new Set(["ssh-host", "namespace", "pod", "logs-pod", "database", "user", "app", "duration", "interval-ms"]);
@@ -62,10 +63,32 @@ BEGIN
      'background_usage_batches',count(*) FILTER(WHERE state='active' AND usage_batch),
      'background_usage_batches_data_file_read',count(*) FILTER(WHERE state='active' AND usage_batch AND wait_type='IO' AND wait='DataFileRead'),
      'background_usage_batches_max_query_ms',COALESCE(max(greatest(0,at_ms-query_started_ms)) FILTER(WHERE state='active' AND usage_batch),0)
-    ) AS concurrent_activity FROM activity)
-   SELECT at_ms,pid,xact_started_ms,query_started_ms,state,wait_type,wait,kind,concurrent_activity
-   FROM activity CROSS JOIN concurrent WHERE kind IS NOT NULL
-   ORDER BY pid LIMIT 16
+    ) AS concurrent_activity FROM activity),
+   selected AS MATERIALIZED (
+    SELECT * FROM activity CROSS JOIN concurrent WHERE kind IS NOT NULL
+    ORDER BY pid LIMIT 16),
+   blocked AS MATERIALIZED (
+    SELECT *,pg_catalog.pg_blocking_pids(pid) AS blocking_pids FROM selected)
+   SELECT at_ms,pid,xact_started_ms,query_started_ms,state,wait_type,wait,kind,concurrent_activity,
+    cardinality(blocking_pids) AS reported_blockers,
+    (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+      'pid',b.pid,'xact_started_ms',floor(extract(epoch FROM b.xact_start)*1000)::bigint,
+      'query_started_ms',floor(extract(epoch FROM b.query_start)*1000)::bigint,
+      'application',CASE b.application_name WHEN 'uni-api-control' THEN 'control' WHEN 'uni-api-analytics' THEN 'analytics' ELSE 'other' END,
+      'kind',CASE WHEN b.query LIKE 'SELECT u.id,u.status,u.result FROM console_sub_usage%' THEN 'receipt_read'
+       WHEN b.query LIKE 'WITH wanted AS MATERIALIZED%' THEN 'page_models'
+       WHEN b.query LIKE 'SELECT m.account_id,m.group_id,m.model,m.state,m.message%' THEN 'model_directory'
+       WHEN b.query LIKE 'WITH owned_targets AS MATERIALIZED%' THEN 'rates'
+       WHEN b.query LIKE '%console_management_model_signal%' THEN 'model_signals'
+       WHEN b.query LIKE '%console_management_receipt_signal%' THEN 'receipt_signals'
+       WHEN b.query LIKE 'SELECT pg_advisory_xact_lock(8395015)%' THEN 'global_advisory_lock'
+       WHEN b.query LIKE 'SELECT pg_advisory_xact_lock(hashtextextended(%' THEN 'exporter_state_lock'
+       ELSE 'other' END,
+      'state',b.state,'wait_type',b.wait_event_type,'wait',b.wait_event)), '[]'::jsonb)
+     FROM (SELECT a.pid,a.xact_start,a.query_start,a.application_name,a.state,a.wait_event_type,a.wait_event,a.query
+      FROM pg_catalog.pg_stat_activity a WHERE a.pid=ANY(activity.blocking_pids)
+      ORDER BY a.pid LIMIT 8) b) AS blockers
+   FROM blocked activity ORDER BY pid
   LOOP
    IF sample.kind IS NOT NULL THEN
     io := NULL;
@@ -85,6 +108,24 @@ ROLLBACK;`;
 
 const integer = n => Number.isSafeInteger(n) && n >= 0;
 const label = v => v === null || typeof v === "string" && /^[a-zA-Z0-9_ ():-]{1,64}$/.test(v);
+
+// Only PostgreSQL's actual blocking PIDs establish a lock dependency. Other
+// concurrent queries and I/O waits remain context, never inferred blockers.
+export function blockingActivity(value) {
+  if (!Array.isArray(value) || value.length > 8) return null;
+  const states = new Set(["active", "idle", "idle in transaction", "idle in transaction (aborted)", "fastpath function call", "disabled"]);
+  const seen = new Set();
+  const out = [];
+  for (const row of value) {
+    if (!row || !integer(row.pid) || row.pid === 0 || seen.has(row.pid) ||
+      ![row.xact_started_ms, row.query_started_ms].every(v => v === null || integer(v)) ||
+      !["control", "analytics", "other"].includes(row.application) || !blockerKinds.has(row.kind) || !states.has(row.state) || !label(row.wait_type) || !label(row.wait)) return null;
+    seen.add(row.pid);
+    out.push({ pid: row.pid, xact_started_ms: row.xact_started_ms, query_started_ms: row.query_started_ms,
+      application: row.application, kind: row.kind, state: row.state, wait_type: row.wait_type, wait: row.wait });
+  }
+  return out;
+}
 
 // Counts describe one shared activity snapshot, not per-request I/O or a cause
 // of its delay. Missing/invalid context stays unavailable, never a false zero.
@@ -110,7 +151,9 @@ export function safeSamples(stderr) {
     }) : null;
     samples.push({ at_ms: value.at_ms, pid: value.pid, xact_started_ms: value.xact_started_ms, query_started_ms: value.query_started_ms,
       state: value.state, wait_type: value.wait_type, wait: value.wait, kind: value.kind, backend_io: io, io_scope: "backend_cumulative_may_lag",
-      concurrent_activity: concurrentActivity(value.concurrent_activity), activity_scope: "database_concurrent_not_causal", kind_scope: "query_shape_not_request_type" });
+      concurrent_activity: concurrentActivity(value.concurrent_activity), activity_scope: "database_concurrent_not_causal", kind_scope: "query_shape_not_request_type",
+      blockers: blockingActivity(value.blockers), reported_blockers: integer(value.reported_blockers) ? value.reported_blockers : null,
+      blocker_scope: "pg_blocking_pids_up_to_8_current_snapshot" });
   }
   return samples;
 }
@@ -130,7 +173,11 @@ export function sessionRequests(logs) {
 export function correlate(samples, sessions) {
   return samples.map(sample => {
     const ids = [...(sessions.get(`${sample.pid}:${sample.xact_started_ms}`) ?? [])].sort();
-    return { ...sample, request_ids: ids, correlation: ids.length === 1 ? "pid_xact_ms" : ids.length ? "ambiguous" : "unmatched" };
+    const blockers = sample.blockers?.map(blocker => {
+      const request_ids = [...(sessions.get(`${blocker.pid}:${blocker.xact_started_ms}`) ?? [])].sort();
+      return { ...blocker, request_ids, correlation: request_ids.length === 1 ? "pid_xact_ms" : request_ids.length ? "ambiguous" : "unmatched" };
+    }) ?? null;
+    return { ...sample, blockers, request_ids: ids, correlation: ids.length === 1 ? "pid_xact_ms" : ids.length ? "ambiguous" : "unmatched" };
   });
 }
 

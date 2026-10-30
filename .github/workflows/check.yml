@@ -47,6 +47,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      - run: node --test ../scripts/observe-management-read.node-tests.mjs
+        env:
+          TEST_MANAGEMENT_OBSERVER_DATABASE_URL: ${{ env.TEST_CONTROL_DATABASE_URL }}
       - run: node --test fingerprint/runner.test.mjs
       - run: go test ./... -count=1 -timeout=10m
       - run: go vet ./...
