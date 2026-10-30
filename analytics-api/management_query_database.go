@@ -81,7 +81,9 @@ func (s *Service) readManagementDatabaseModeWithReceiptsFrom(ctx context.Context
 		out.EngineOrigins[source.Source.ID] = origins
 	}
 	trace.next("database_quality")
+	endQualityBindings := managementReadSpan(ctx, "database_quality_bindings")
 	bindings, err := managementQualityBindings(out.Bindings, out.References, facts)
+	endQualityBindings()
 	if err != nil {
 		return out, err
 	}

@@ -148,6 +148,10 @@ func (s *Service) sharedQualityForAccountFrom(ctx context.Context, db controlQue
 // channel-local until the writer can record its exact account/group identity.
 func readSharedQualityProjectionFrom(ctx context.Context, db controlQueryDB, owner, accountID string, bindings []qualityBinding) (sharedQuality, error) {
 	out := sharedQuality{Bindings: bindings, Groups: map[string]sharedQualityProjection{}}
+	// The management caller opts in through its existing trace context. Ordinary
+	// quality reads stay silent; no SQL, payload, scope or identity is logged.
+	readTrace := newManagementRowsTrace(ctx, "shared_quality_rows")
+	defer readTrace.finish()
 	rows, err := db.QueryContext(ctx, `WITH owned AS MATERIALIZED (
  SELECT h.id,h.account_id,h.group_id,h.successful,h.verdict,h.checked_at
  FROM console_quality_group_history h JOIN console_sub_accounts a ON a.id=h.account_id WHERE a.owner=$1 AND ($2='' OR a.id=$2)
@@ -159,7 +163,8 @@ func readSharedQualityProjectionFrom(ctx context.Context, db controlQueryDB, own
 		return out, err
 	}
 	defer rows.Close()
-	for rows.Next() {
+	readTrace.queryReady()
+	for readTrace.next(rows) {
 		var account, source, verdict string
 		var group, at int64
 		var raw []byte
@@ -167,19 +172,20 @@ func readSharedQualityProjectionFrom(ctx context.Context, db controlQueryDB, own
 		if err = rows.Scan(&account, &group, &p.History.Total, &p.History.Successful, &p.History.Passed, &raw, &source, &verdict, &at); err != nil {
 			return out, err
 		}
+		decodeStart := readTrace.decodeStart()
 		if len(raw) > 0 {
 			c := ChannelCheck{Model: checkModel, CheckedAt: at, Verdict: verdict}
 			if source != "" {
-				if err = json.Unmarshal(raw, &c); err != nil {
-					return out, err
-				}
+				err = json.Unmarshal(raw, &c)
 			} else {
 				var result subResult
-				if err = json.Unmarshal(raw, &result); err != nil {
-					return out, err
-				}
+				err = json.Unmarshal(raw, &result)
 				c.Text, c.Message, c.DurationMS = result.Quality.Text, result.Quality.Message, result.Quality.Duration
 				c.QualityProbe = &result.Quality
+			}
+			readTrace.decoded(decodeStart, len(raw))
+			if err != nil {
+				return out, err
 			}
 			if c.Verdict != "pass" && c.Verdict != "fail" && c.Verdict != "inconclusive" {
 				c.Verdict = "error"
@@ -188,6 +194,8 @@ func readSharedQualityProjectionFrom(ctx context.Context, db controlQueryDB, own
 			c.HistoryScope = "account_group"
 			c.Origin = "共享降智记录"
 			p.Check = &c
+		} else {
+			readTrace.decoded(decodeStart, 0)
 		}
 		out.Groups[qualityGroupID(account, group)] = p
 	}
