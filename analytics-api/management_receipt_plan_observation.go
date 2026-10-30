@@ -76,6 +76,7 @@ type managementReceiptPlanObservation struct {
 	tx        *sql.Tx
 	query     string
 	before    map[string]managementPreparedPlanCounts
+	access    managementReceiptAccess
 	ids       int
 	args      []any
 	metadata  time.Duration
@@ -102,7 +103,13 @@ func beginManagementReceiptPlanObservation(ctx context.Context, db controlQueryD
 		log.Printf("management_receipt_plan cache_mode=unavailable phase=before request_id=%s", consoleRequestID(ctx))
 		return nil
 	}
-	return &managementReceiptPlanObservation{tx: tx, query: query, args: args, before: before, ids: ids, metadata: time.Since(start)}
+	access, err := managementReceiptAccessSnapshot(ctx, tx)
+	if err != nil {
+		finishManagementReceiptPlanSavepoint(ctx, tx, false)
+		log.Printf("management_receipt_access available=false phase=before request_id=%s", consoleRequestID(ctx))
+		return nil
+	}
+	return &managementReceiptPlanObservation{tx: tx, query: query, args: args, before: before, access: access, ids: ids, metadata: time.Since(start)}
 }
 
 func finishManagementReceiptPlanSavepoint(ctx context.Context, tx *sql.Tx, successful bool) {
@@ -120,7 +127,13 @@ func (o *managementReceiptPlanObservation) finish(ctx context.Context) {
 		return // Never recover, retry, or mask a failed business query.
 	}
 	start := time.Now()
-	after, err := managementReceiptPreparedPlans(ctx, o.tx, o.query)
+	access, err := managementReceiptAccessSnapshot(ctx, o.tx)
+	accessDelta := "available=false"
+	var after map[string]managementPreparedPlanCounts
+	if err == nil {
+		accessDelta = managementReceiptAccessDelta(o.access, access)
+		after, err = managementReceiptPreparedPlans(ctx, o.tx, o.query)
+	}
 	mode, generic, custom := "unavailable", int64(0), int64(0)
 	plan := "unavailable"
 	if err == nil {
@@ -133,4 +146,5 @@ func (o *managementReceiptPlanObservation) finish(ctx context.Context) {
 	log.Printf("management_receipt_plan cache_mode=%s generic_delta=%d custom_delta=%d ids=%d rows=%d metadata_ms=%d scope=same_connection_execution_delta request_id=%s",
 		mode, generic, custom, o.ids, o.rows, (o.metadata + time.Since(start)).Milliseconds(), consoleRequestID(ctx))
 	log.Printf("management_receipt_plan_shape %s scope=same_connection_parameterized_estimate_not_execution_tree request_id=%s", plan, consoleRequestID(ctx))
+	log.Printf("management_receipt_access %s scope=current_transaction_receipt_relation_delta request_id=%s", accessDelta, consoleRequestID(ctx))
 }

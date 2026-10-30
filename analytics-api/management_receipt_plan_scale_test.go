@@ -38,6 +38,11 @@ func TestManagementReceiptPlanProductionCardinality(t *testing.T) {
  ANALYZE console_sub_accounts; ANALYZE console_management_receipt_signal;`); err != nil {
 		t.Fatal(err)
 	}
+	// Both baseline and the covering candidate use the same all-visible fixture.
+	// Never run VACUUM or build an experimental index on production.
+	if _, err := db.ExecContext(ctx, `VACUUM (ANALYZE) console_management_receipt_signal`); err != nil {
+		t.Fatal(err)
+	}
 	tx, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
 		t.Fatal(err)
@@ -116,6 +121,40 @@ func TestManagementReceiptPlanProductionCardinality(t *testing.T) {
 		walk(plan)
 		t.Logf("synthetic mode=%s nodes=%v shared_hits=%v shared_reads=%v execution_ms=%v", mode, nodes, plan["Shared Hit Blocks"], plan["Shared Read Blocks"], root[0]["Execution Time"])
 	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	// Test-only physical-access candidate; no production DDL or runtime change.
+	if _, err := db.ExecContext(ctx, `CREATE INDEX local_receipt_cover ON console_management_receipt_signal(id)
+ INCLUDE(account_id,valid,evidence_digest,status,input_price,output_price,input_tokens,output_tokens)`); err != nil {
+		t.Fatal(err)
+	}
+	covered, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer covered.Rollback()
+	for n := 0; n < 3; n++ {
+		start := time.Now()
+		got, err := readManagementStreamReceiptsUncached(ctx, covered, "owner", ids, true)
+		if err != nil || !reflect.DeepEqual(got, baseline) {
+			t.Fatal("covering candidate changed typed receipts or ownership", err)
+		}
+		t.Logf("synthetic covering round=%d ids=%d rows=%d elapsed_us=%d", n, len(ids), len(got), time.Since(start).Microseconds())
+	}
+	shape, err := managementReceiptEstimatedPlan(ctx, covered, []any{"owner", ids})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("synthetic covering %s", shape)
+	if err := covered.QueryRowContext(ctx, `SELECT name,generic_plans,custom_plans FROM pg_prepared_statements WHERE statement=$1`, managementReceiptSelectedStreamSQL).Scan(&name, &generic, &custom); err != nil {
+		t.Fatal(err)
+	}
+	var raw []byte
+	if err := covered.QueryRowContext(ctx, `EXPLAIN (ANALYZE,BUFFERS,TIMING FALSE,FORMAT JSON) EXECUTE `+pgx.Identifier{name}.Sanitize()+`('owner','{`+strings.Join(ids, ",")+`}'::text[])`).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("synthetic covering actual_named_plan %s generic_executions=%d custom_executions=%d", managementReceiptPlanShape(raw), generic, custom)
 }
 
 func childrenForReceiptPlanExperiment(plan map[string]any) []map[string]any {

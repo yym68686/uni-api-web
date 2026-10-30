@@ -257,6 +257,16 @@ estimate after the read, **not the captured execution tree or actual buffer
 counts**. It does not run `EXPLAIN EXECUTE` against the named business statement:
 that would advance its plan-use history and could affect automatic plan choice.
 
+The same optional read also brackets the original SELECT with the receipt
+relation's `pg_stat_xact_user_tables` counters. These are local to the current
+transaction and update within it: deltas record actual sequential scans/rows
+and index scans/fetched tuples without replaying the SELECT. Metadata reads
+do not touch the receipt relation. Missing or regressing counters are explicitly
+unavailable. These are tuple-access counters, **not physical buffer reads,
+storage latency or the execution tree**. PostgreSQL versions may count separate
+array index searches individually; `index_scans` is not an EXPLAIN node count.
+No extension, statistics reset/flush, timing setting or database change is needed.
+
 Only whitelisted counters, state/wait labels, fixed query classes and correlated
 request IDs are emitted. No raw SQL, query parameters, business identities,
 payloads, subprocess errors, connection strings or credentials are printed.
