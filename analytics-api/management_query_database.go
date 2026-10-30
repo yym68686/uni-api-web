@@ -318,7 +318,11 @@ func readManagementFingerprintsFrom(ctx context.Context, db controlQueryDB, owne
 		}
 		f.Result = json.RawMessage(result)
 		// A rotated site credential must not inherit an old identity result.
-		if f.Account != "" && f.State == "done" && f.Revision != tokenHash(base+"\n"+key) {
+		// A partial round makes no identity claim. Keep its progress visible
+		// through routine credential re-encryption; preparation validates its
+		// stable channel identity before any continuation can use the samples.
+		partial := f.RetainedSamples > 0 && f.RetainedSamples < 3
+		if f.Account != "" && f.State == "done" && !partial && f.Revision != tokenHash(base+"\n"+key) {
 			continue
 		}
 		data = append(data, f)

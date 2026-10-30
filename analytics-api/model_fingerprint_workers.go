@@ -306,7 +306,7 @@ func (s *Service) runClaimedFingerprint(parent context.Context, t fingerprintTar
 	if err == nil {
 		log.Printf("model_fingerprint_started run=%q site=%q model=%q", run, plan.site, t.Model)
 		result, err = runFingerprintViaTransportProgress(ctx, &plan.client, plan.config, resume, func(public, samples json.RawMessage) error {
-			return s.saveFingerprintSamples(ctx, t, run, plan.revision, public, samples)
+			return s.saveFingerprintSamples(ctx, t, run, plan.revision, plan.sampleKey, public, samples)
 		})
 	}
 	state, message := "done", ""

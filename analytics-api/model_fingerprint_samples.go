@@ -28,6 +28,7 @@ type fingerprintSampleState struct {
 	Model        string `json:"model"`
 	Format       string `json:"format"`
 	ReferenceKey string `json:"reference_key"`
+	ChannelKey   string `json:"channel_key"`
 	Entries      []struct {
 		Numbers       []int `json:"numbers"`
 		ExpectedCount int   `json:"expected_count"`
@@ -107,9 +108,19 @@ func (s *Service) startFingerprintSamples(ctx context.Context, t fingerprintTarg
 		return nil, err
 	}
 	count, valid := validateFingerprintSamples(raw, plan.config)
-	if revision != plan.revision || !valid || count >= 3 {
+	var saved fingerprintSampleState
+	_ = json.Unmarshal(raw, &saved)
+	sameChannel := saved.ChannelKey != "" && saved.ChannelKey == plan.sampleKey
+	// Adopt an already checkpointed first-release round only when its original
+	// ciphertext revision still matches. Never infer identity for legacy data.
+	if saved.ChannelKey == "" {
+		sameChannel = revision == plan.revision
+	}
+	if !sameChannel || !valid || count >= 3 {
 		raw = nil
 		_, err = tx.ExecContext(ctx, `UPDATE console_model_fingerprints SET result=NULL,sample_state=NULL,revision=$4 WHERE scope=$1 AND model=$2 AND run_id=$3`, t.scope(), t.Model, run, plan.revision)
+	} else if revision != plan.revision {
+		_, err = tx.ExecContext(ctx, `UPDATE console_model_fingerprints SET revision=$4 WHERE scope=$1 AND model=$2 AND run_id=$3`, t.scope(), t.Model, run, plan.revision)
 	}
 	if err != nil {
 		return nil, err
@@ -120,10 +131,19 @@ func (s *Service) startFingerprintSamples(ctx context.Context, t fingerprintTarg
 	return json.RawMessage(raw), nil
 }
 
-func (s *Service) saveFingerprintSamples(ctx context.Context, t fingerprintTarget, run, revision string, public, samples json.RawMessage) error {
+func (s *Service) saveFingerprintSamples(ctx context.Context, t fingerprintTarget, run, revision, channelKey string, public, samples json.RawMessage) error {
 	var retained any
 	if len(samples) > 0 {
-		retained = string(samples)
+		var state map[string]json.RawMessage
+		if err := json.Unmarshal(samples, &state); err != nil || state == nil || channelKey == "" {
+			return errors.New("指纹渠道证据无效")
+		}
+		state["channel_key"], _ = json.Marshal(channelKey)
+		bound, err := json.Marshal(state)
+		if err != nil {
+			return err
+		}
+		retained = string(bound)
 	}
 	result, err := s.control.db.ExecContext(ctx, `UPDATE console_model_fingerprints SET result=$5,sample_state=$6,updated_at=now()
  WHERE scope=$1 AND model=$2 AND run_id=$3 AND revision=$4 AND state='running' AND deadline>now()

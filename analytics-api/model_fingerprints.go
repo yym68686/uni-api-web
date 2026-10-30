@@ -150,6 +150,7 @@ type fingerprintPlan struct {
 	client         http.Client
 	config         map[string]any
 	revision, site string
+	sampleKey      string
 }
 
 // Resolve the actual upstream before reserving its site and sending paid probes.
@@ -173,6 +174,9 @@ func (s *Service) prepareFingerprint(ctx context.Context, t fingerprintTarget) (
 			return plan, errors.New("测试 key 无法解密")
 		}
 		revision = tokenHash(base + "\n" + encrypted)
+		// Encryption uses a fresh nonce on every normal synchronization. Bind
+		// resumable evidence to the actual credential, not its changing ciphertext.
+		plan.sampleKey = tokenHash(base + "\n" + key)
 		plan.site = fingerprintSite(base)
 		config["base_url"], config["key"] = base, key
 		if protocol == "messages" {
@@ -213,6 +217,7 @@ func (s *Service) prepareFingerprint(ctx context.Context, t fingerprintTarget) (
 		if revision == "" {
 			return plan, errors.New("渠道已不存在")
 		}
+		plan.sampleKey = revision
 		config["base_url"], config["key"], config["provider"], config["allow_unconfigured"] = src.Base, src.Key, t.Provider, caps.Unconfigured
 		client = http.Client{Timeout: 250 * time.Second, Transport: configuredProbeTransport{base: http.DefaultTransport, provider: t.Provider, allowUnconfigured: caps.Unconfigured}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	}

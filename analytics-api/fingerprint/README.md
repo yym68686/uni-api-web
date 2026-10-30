@@ -24,8 +24,9 @@ only accepted numeric runs (not provider text or credentials) enter the private
 cancellation and worker replacement. Three completed samples are cleared by the
 next explicit enqueue, never by an automatic retry. The complete scorer and
 minimum-number acceptance test are unchanged. The resume proof binds the exact
-channel configuration, model, protocol, model catalog and reference manifest;
-changes start a fresh round rather than combine incompatible evidence. Public
+channel configuration, model, protocol, model catalog and reference manifest.
+Routine encryption-nonce changes for the same site test key do not reset it;
+actual changes start a fresh round rather than combine incompatible evidence. Public
 result JSON contains only the existing score/sample diagnostics, not vectors.
 Legacy partial records lack the numeric evidence and cannot be reconstructed;
 their next explicit detection starts the first durable round.

@@ -116,13 +116,83 @@ func TestModelFingerprintAccumulatesAcrossRunsAndResetsOnlyCompletedRound(t *tes
 		if w.Code != 200 {
 			t.Fatal(w.Code, w.Body.String())
 		}
-		for _, private := range []string{"_resume", `"numbers"`, "sample_state", "upstream-secret", "private-upstream-error"} {
+		for _, private := range []string{"_resume", `"numbers"`, "sample_state", "channel_key", "upstream-secret", "private-upstream-error"} {
 			if strings.Contains(w.Body.String(), private) {
 				t.Fatal("public fingerprint read leaked private evidence", private)
 			}
 		}
 		if n == 0 {
 			sharedFingerprintWorker.close() // a new runtime must load DB evidence
+		}
+	}
+}
+
+func TestModelFingerprintSameCredentialReencryptionKeepsPartialRound(t *testing.T) {
+	texts := fingerprintFixtureTexts(t)
+	var calls atomic.Int32
+	var first atomic.Bool
+	first.Store(true)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		calls.Add(1)
+		if first.CompareAndSwap(true, false) {
+			writeFingerprintSample(w, texts[0])
+		} else {
+			http.Error(w, "limited", http.StatusTooManyRequests)
+		}
+	}))
+	defer upstream.Close()
+	previousHTTP := subHTTP
+	subHTTP = upstream.Client()
+	defer func() { subHTTP = previousHTTP }()
+	s, account, _ := bindingFixture(t, upstream.URL)
+	encrypted, err := s.control.encrypt("same-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.control.db.Exec(`INSERT INTO console_sub_targets(account_id,group_id,name,platform,encrypted_key,active) VALUES($1,1,'one','openai',$2,true)`, account.ID, encrypted); err != nil {
+		t.Fatal(err)
+	}
+	target := fingerprintTarget{Account: account.ID, Group: 1, Model: checkModel}
+	for round, key := range []string{"same-key", "same-key", "changed-key"} {
+		if round > 0 {
+			next, err := s.control.encrypt(key)
+			if err != nil || next == encrypted {
+				t.Fatal("encryption did not use a fresh nonce", err)
+			}
+			if _, err = s.control.db.Exec(`UPDATE console_sub_targets SET encrypted_key=$2 WHERE account_id=$1 AND group_id=1`, account.ID, next); err != nil {
+				t.Fatal(err)
+			}
+			if round == 1 {
+				w := fingerprintRequest(t, s, account.Owner, "GET", nil)
+				var out struct {
+					Data []fingerprintRecord `json:"data"`
+				}
+				if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &out) != nil {
+					t.Fatal("partial read failed", w.Code)
+				}
+				found := false
+				for _, record := range out.Data {
+					if record.Account == account.ID && record.RetainedSamples == 1 {
+						found = true
+					}
+				}
+				if !found {
+					t.Fatal("routine encryption hid incomplete sample progress")
+				}
+			}
+		}
+		calls.Store(0)
+		if err := enqueueFingerprint(context.Background(), s.control.db, target); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		ok := s.fingerprintOne(ctx)
+		cancel()
+		wantCalls, wantSamples := []int32{3, 2, 3}[round], []int{1, 1, 0}[round]
+		count, retained := fingerprintSavedCount(t, s, target)
+		if !ok || calls.Load() != wantCalls || count != wantSamples || retained != wantSamples {
+			t.Fatal("credential identity incorrectly reset or reused evidence", round, calls.Load(), count, retained)
 		}
 	}
 }
