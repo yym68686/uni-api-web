@@ -59,12 +59,16 @@ func subGateway(ctx context.Context, src controlSource, method, path string, bod
 	req.Header.Set("Authorization", "Bearer "+src.Key)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+	trace := newManagementGatewayReadTrace(ctx, method, path)
+	defer trace.finish()
 	resp, err := sourceHTTP.Do(req)
 	if err != nil {
+		trace.headers(0)
 		failure := &sourceTransportError{message: "无法确认来源结果，请刷新后核对，勿重复提交", cause: err}
 		managementSourceTransportFailure(ctx, method, path, failure)
 		return nil, 502, failure
 	}
+	trace.headers(resp.StatusCode)
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		switch resp.StatusCode {
@@ -95,8 +99,14 @@ func subGateway(ctx context.Context, src controlSource, method, path string, bod
 		return nil, 502, errors.New("来源未完成添加，请刷新后核对")
 	}
 	raw, err = readConfiguration(resp.Body)
+	trace.read(len(raw))
 	var data map[string]any
-	if err != nil || json.Unmarshal(raw, &data) != nil {
+	if err != nil {
+		return nil, 502, errors.New("来源返回无效状态，请刷新核对")
+	}
+	err = json.Unmarshal(raw, &data)
+	trace.decoded(err == nil)
+	if err != nil {
 		return nil, 502, errors.New("来源返回无效状态，请刷新核对")
 	}
 	return data, 200, nil

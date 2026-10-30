@@ -39,7 +39,9 @@ func readManagementGatewayAtomic(ctx context.Context, source controlSource) (man
 	if source.configKeyError != nil {
 		return out, true, source.configKeyError
 	}
+	endDocuments := managementReadSpan(ctx, "gateway_atomic_documents")
 	raw, code, err, controls, observationErr := managementGatewayDocuments(ctx, source, "/v1/channel-settings/management-snapshot")
+	endDocuments()
 	if code == 404 {
 		out.Controls = controls
 		return out, false, observationErr
@@ -60,14 +62,18 @@ func readManagementGatewayAtomic(ctx context.Context, source controlSource) (man
 			return out, true, errManagementSourceContract
 		}
 	}
-	if decodeMap(raw["controls"], &out.Controls) != nil || out.Controls == nil ||
+	endDecode := managementReadSpan(ctx, "gateway_atomic_decode")
+	invalid := decodeMap(raw["controls"], &out.Controls) != nil || out.Controls == nil ||
 		decodeMap(raw["keys"], &out.Keys) != nil || out.Keys == nil ||
 		decodeMap(raw["catalog"], &out.Catalog) != nil || out.Catalog == nil ||
 		decodeMap(raw["routes"], &out.Routes) != nil || out.Routes == nil ||
 		decodeMap(raw["providers"], &out.Providers) != nil || out.Providers == nil ||
-		decodeMap(raw["export"], &out.Export) != nil || out.Export == nil {
+		decodeMap(raw["export"], &out.Export) != nil || out.Export == nil
+	endDecode()
+	if invalid {
 		return out, true, errManagementSourceContract
 	}
+	defer managementReadSpan(ctx, "gateway_atomic_validate")()
 	if out.Controls["revision"] != out.Revision || out.Controls["config_revision"] != out.ConfigRevision || out.Export["revision"] != out.Revision {
 		return out, true, errManagementSourceRevision
 	}
