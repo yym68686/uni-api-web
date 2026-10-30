@@ -238,6 +238,30 @@ lookup, not a storage root cause or a sub-second operation. The raw-absence
 change must still be verified on its deployed image; first reads and changed
 receipt/ownership versions deliberately perform SQL again.
 
+Ordinary management queries can reuse only the configuration-versioned parts
+of a previously fully verified atomic gateway snapshot: keys, catalog, routes,
+providers and export. Every reuse still reads the complete current controls
+document and independently authorizes the administrative credential using
+`management-revision`; both replies must agree on revision and config revision.
+Controls are never retained: `bootstrap_restore` can change without increasing
+the gateway's controls sequence. The versioned fields rely on the gateway
+contract that revisions include process instance, controls mutation sequence
+and the complete base-configuration digest, including credentials and roles.
+The original post-database gateway/source fences remain required.
+
+This private store admits only after all original fences succeed, isolates
+owners and complete source/credential identities, and retains at most two
+entries under a combined 2 MiB serialized payload/key budget. Every read gets
+independent decoded values. Version changes use a fresh full snapshot; failures
+never return stale facts. Only a genuine missing revision endpoint with a
+successful observation read negotiates the original fresh protocol. Selection,
+action, account and unscoped readers keep the original reads. There is no TTL,
+background refresh, retry of failed reads or public snapshot serialization.
+`management_gateway_parts hit=true bytes=N` and `gateway_parts_read` identify
+this step; a hit skips the full snapshot download, not live authorization,
+controls, database hydration, source validation or browser rendering. It is
+not evidence of sub-second end-to-end acceptance.
+
 The add dialog's full `channel-options` read logs `read_kind=import_options`;
 its separate `keys_only=true` directory read logs `read_kind=import_keys`.
 Both log fast completions as well as failures, without query parameters.

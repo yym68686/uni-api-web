@@ -73,37 +73,11 @@ func readManagementGatewayAtomic(ctx context.Context, source controlSource) (man
 	if invalid {
 		return out, true, errManagementSourceContract
 	}
-	defer managementReadSpan(ctx, "gateway_atomic_validate")()
-	if out.Controls["revision"] != out.Revision || out.Controls["config_revision"] != out.ConfigRevision || out.Export["revision"] != out.Revision {
-		return out, true, errManagementSourceRevision
-	}
-	providers := map[string]bool{}
-	for _, provider := range out.Providers {
-		if provider.Provider == "" || providers[provider.Provider] {
-			return out, true, errManagementSourceContract
-		}
-		providers[provider.Provider] = true
-	}
-	validRows := func(rows []managementModel) bool {
-		for _, row := range rows {
-			if row.Provider == "" || row.Model == "" || !providers[row.Provider] {
-				return false
-			}
-		}
-		return true
-	}
-	if !validRows(out.Catalog) {
-		return out, true, errManagementSourceContract
-	}
-	keys := map[string]bool{}
-	for _, key := range out.Keys {
-		if key.ID == "" || keys[key.ID] || out.Routes[key.ID] == nil || !validRows(out.Routes[key.ID]) {
-			return out, true, errManagementSourceContract
-		}
-		keys[key.ID] = true
-	}
-	if len(keys) != len(out.Routes) {
-		return out, true, errManagementSourceContract
+	endValidate := managementReadSpan(ctx, "gateway_atomic_validate")
+	err = validateManagementGatewayFacts(out)
+	endValidate()
+	if err != nil {
+		return out, true, err
 	}
 	// Configuration administration cannot mask a revoked observation credential.
 	// Preserve the legacy requirement that both source identities are valid.
@@ -116,6 +90,45 @@ func readManagementGatewayAtomic(ctx context.Context, source controlSource) (man
 		}
 	}
 	return out, true, nil
+}
+
+func validateManagementGatewayFacts(out managementGatewayFacts) error {
+	if out.Revision == "" || out.ConfigRevision == "" || out.Controls == nil || out.Export == nil ||
+		out.Keys == nil || out.Catalog == nil || out.Routes == nil || out.Providers == nil {
+		return errManagementSourceContract
+	}
+	if out.Controls["revision"] != out.Revision || out.Controls["config_revision"] != out.ConfigRevision || out.Export["revision"] != out.Revision {
+		return errManagementSourceRevision
+	}
+	providers := map[string]bool{}
+	for _, provider := range out.Providers {
+		if provider.Provider == "" || providers[provider.Provider] {
+			return errManagementSourceContract
+		}
+		providers[provider.Provider] = true
+	}
+	validRows := func(rows []managementModel) bool {
+		for _, row := range rows {
+			if row.Provider == "" || row.Model == "" || !providers[row.Provider] {
+				return false
+			}
+		}
+		return true
+	}
+	if !validRows(out.Catalog) {
+		return errManagementSourceContract
+	}
+	keys := map[string]bool{}
+	for _, key := range out.Keys {
+		if key.ID == "" || keys[key.ID] || out.Routes[key.ID] == nil || !validRows(out.Routes[key.ID]) {
+			return errManagementSourceContract
+		}
+		keys[key.ID] = true
+	}
+	if len(keys) != len(out.Routes) {
+		return errManagementSourceContract
+	}
+	return nil
 }
 
 // New gateways expose an observation-authorized scalar revision. Only 404

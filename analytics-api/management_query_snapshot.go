@@ -43,7 +43,7 @@ func (s *Service) withManagementSnapshot(ctx context.Context, read func(*sql.Tx,
 	for i, source := range sources {
 		group.Go(func() error {
 			var err error
-			facts[i], err = readManagementGateway(child, source)
+			facts[i], err = readManagementGatewayWithParts(child, source)
 			return err
 		})
 	}
@@ -77,6 +77,7 @@ func (s *Service) withManagementSnapshot(ctx context.Context, read func(*sql.Tx,
 	if err := verifyManagementSources(current, facts); err != nil {
 		return managementDatabaseView{}, err
 	}
+	rememberManagementGatewayParts(ctx, facts)
 	return view, nil
 }
 
@@ -97,6 +98,9 @@ func (s *Service) readManagementQuerySnapshot(ctx context.Context, owner string,
 
 func (s *Service) readManagementQuerySnapshotMode(ctx context.Context, owner string, filters managementQueryFilters, token string, selection, rebase bool) (managementQuerySnapshot, error) {
 	ctx = managementTraceContext(ctx)
+	if !selection && owner != "" {
+		ctx = context.WithValue(ctx, managementGatewayPartsScopeKey{}, &managementGatewayPartsScope{store: &s.gatewayParts, owner: owner})
+	}
 	out := managementQuerySnapshot{}
 	view, err := s.withManagementSnapshot(ctx, func(tx *sql.Tx, facts []managementGatewayFacts) (managementDatabaseView, error) {
 		ctx := ctx
