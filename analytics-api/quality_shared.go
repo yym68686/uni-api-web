@@ -148,44 +148,50 @@ func (s *Service) sharedQualityForAccountFrom(ctx context.Context, db controlQue
 // channel-local until the writer can record its exact account/group identity.
 func readSharedQualityProjectionFrom(ctx context.Context, db controlQueryDB, owner, accountID string, bindings []qualityBinding) (sharedQuality, error) {
 	out := sharedQuality{Bindings: bindings, Groups: map[string]sharedQualityProjection{}}
-	// The management caller opts in through its existing trace context. Ordinary
-	// quality reads stay silent; no SQL, payload, scope or identity is logged.
-	readTrace := newManagementRowsTrace(ctx, "shared_quality_rows")
-	defer readTrace.finish()
-	rows, err := db.QueryContext(ctx, `WITH owned AS MATERIALIZED (
+	read := func(consume managementQualityConsumer) error {
+		// Ordinary quality readers retain their original SQL path and stay silent.
+		readTrace := newManagementRowsTrace(ctx, "shared_quality_rows")
+		defer readTrace.finish()
+		rows, err := db.QueryContext(ctx, `WITH owned AS MATERIALIZED (
  SELECT h.id,h.account_id,h.group_id,h.successful,h.verdict,h.checked_at
  FROM console_quality_group_history h JOIN console_sub_accounts a ON a.id=h.account_id WHERE a.owner=$1 AND ($2='' OR a.id=$2)
  ), totals AS (SELECT account_id,group_id,count(*) AS total,count(*) FILTER(WHERE successful) AS successful,count(*) FILTER(WHERE successful AND verdict='pass') AS passed FROM owned GROUP BY account_id,group_id),
  latest AS (SELECT DISTINCT ON(account_id,group_id) account_id,group_id,id FROM owned WHERE verdict<>'running' ORDER BY account_id,group_id,checked_at DESC,id DESC)
  SELECT t.account_id,t.group_id,t.total,t.successful,t.passed,h.result,COALESCE(h.source_id,''),COALESCE(h.verdict,''),COALESCE(h.checked_at,0)
  FROM totals t LEFT JOIN latest l USING(account_id,group_id) LEFT JOIN console_quality_history h ON h.id=l.id`, owner, accountID)
-	if err != nil {
-		return out, err
-	}
-	defer rows.Close()
-	readTrace.queryReady()
-	for readTrace.next(rows) {
-		var account, source, verdict string
-		var group, at int64
-		var raw []byte
-		var p sharedQualityProjection
-		if err = rows.Scan(&account, &group, &p.History.Total, &p.History.Successful, &p.History.Passed, &raw, &source, &verdict, &at); err != nil {
-			return out, err
+		if err != nil {
+			return err
 		}
+		defer rows.Close()
+		readTrace.queryReady()
+		for readTrace.next(rows) {
+			var row managementQualityRecord
+			if err = rows.Scan(&row.account, &row.group, &row.history.Total, &row.history.Successful, &row.history.Passed, &row.raw, &row.source, &row.verdict, &row.at); err != nil {
+				return err
+			}
+			if err = consume(row, readTrace); err != nil {
+				return err
+			}
+		}
+		return rows.Err()
+	}
+	err := readManagementQualityStream(ctx, db, owner, accountID, read, func(row managementQualityRecord, readTrace *managementRowsTrace) error {
+		p := sharedQualityProjection{History: row.history}
 		decodeStart := readTrace.decodeStart()
-		if len(raw) > 0 {
-			c := ChannelCheck{Model: checkModel, CheckedAt: at, Verdict: verdict}
-			if source != "" {
-				err = json.Unmarshal(raw, &c)
+		if len(row.raw) > 0 {
+			var err error
+			c := ChannelCheck{Model: checkModel, CheckedAt: row.at, Verdict: row.verdict}
+			if row.source != "" {
+				err = json.Unmarshal(row.raw, &c)
 			} else {
 				var result subResult
-				err = json.Unmarshal(raw, &result)
+				err = json.Unmarshal(row.raw, &result)
 				c.Text, c.Message, c.DurationMS = result.Quality.Text, result.Quality.Message, result.Quality.Duration
 				c.QualityProbe = &result.Quality
 			}
-			readTrace.decoded(decodeStart, len(raw))
+			readTrace.decoded(decodeStart, len(row.raw))
 			if err != nil {
-				return out, err
+				return err
 			}
 			if c.Verdict != "pass" && c.Verdict != "fail" && c.Verdict != "inconclusive" {
 				c.Verdict = "error"
@@ -197,9 +203,10 @@ func readSharedQualityProjectionFrom(ctx context.Context, db controlQueryDB, own
 		} else {
 			readTrace.decoded(decodeStart, 0)
 		}
-		out.Groups[qualityGroupID(account, group)] = p
-	}
-	if err := rows.Err(); err != nil {
+		out.Groups[qualityGroupID(row.account, row.group)] = p
+		return nil
+	})
+	if err != nil {
 		return out, err
 	}
 	out.complete, out.owner, out.account = true, owner, accountID

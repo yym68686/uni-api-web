@@ -58,13 +58,18 @@ type managementTargetStream struct {
 	version managementTargetVersion
 	rows    []managementTargetRecord
 	bytes   int
+	order   uint64
 }
 type managementTargetStreams struct {
 	mu      sync.Mutex
 	entries []*managementTargetStream
+	quality []*managementQualityStream
 	bytes   int
+	order   uint64
 }
 
+// Target and quality raw streams share the original retention ceilings. This
+// does not add a second byte budget or permit extra retained stream entries.
 const managementTargetBudget = 8 << 20
 
 func (c *managementTargetStreams) get(version managementTargetVersion) *managementTargetStream {
@@ -83,23 +88,42 @@ func (c *managementTargetStreams) put(entry *managementTargetStream) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	remove := func(i int) {
-		c.bytes -= c.entries[i].bytes
-		copy(c.entries[i:], c.entries[i+1:])
-		c.entries[len(c.entries)-1] = nil
-		c.entries = c.entries[:len(c.entries)-1]
-	}
 	for i, old := range c.entries {
 		if old.version.database == entry.version.database && old.version.owner == entry.version.owner {
-			remove(i)
+			c.removeTarget(i)
 			break
 		}
 	}
-	for len(c.entries) > 0 && (len(c.entries) >= 2 || c.bytes+entry.bytes > managementTargetBudget) {
-		remove(0)
+	for len(c.entries)+len(c.quality) > 0 && (len(c.entries)+len(c.quality) >= 2 || c.bytes+entry.bytes > managementTargetBudget) {
+		c.removeOldestStream()
 	}
+	c.order++
+	entry.order = c.order
 	c.entries = append(c.entries, entry)
 	c.bytes += entry.bytes
+}
+
+// All removal/admission helpers are called with the shared mutex held.
+func (c *managementTargetStreams) removeTarget(i int) {
+	c.bytes -= c.entries[i].bytes
+	copy(c.entries[i:], c.entries[i+1:])
+	c.entries[len(c.entries)-1] = nil
+	c.entries = c.entries[:len(c.entries)-1]
+}
+
+func (c *managementTargetStreams) removeQuality(i int) {
+	c.bytes -= c.quality[i].bytes
+	copy(c.quality[i:], c.quality[i+1:])
+	c.quality[len(c.quality)-1] = nil
+	c.quality = c.quality[:len(c.quality)-1]
+}
+
+func (c *managementTargetStreams) removeOldestStream() {
+	if len(c.quality) > 0 && (len(c.entries) == 0 || c.quality[0].order < c.entries[0].order) {
+		c.removeQuality(0)
+	} else {
+		c.removeTarget(0)
+	}
 }
 
 type managementTargetConsumer func(managementTargetRecord, *managementRowsTrace) error
