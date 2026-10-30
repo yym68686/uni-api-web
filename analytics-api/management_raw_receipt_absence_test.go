@@ -259,6 +259,17 @@ UPDATE console_sub_targets SET result=jsonb_build_object('model','gpt-5.5','avai
 		full, fullErr := s.readManagementQuerySnapshot(context.Background(), "owner", f, got.Page.NextCursor, true)
 		next.ReadAtMS = full.Page.ReadAtMS
 		if nextErr != nil || fullErr != nil || !ok || !reflect.DeepEqual(next.Rows, full.Page.Rows) || !reflect.DeepEqual(next.Context, managementContextForPage(full.View, full.Page, model)) {
+			t.Logf("model=%s paging_hit=%t rows_equal=%t context_equal=%t", model, ok, reflect.DeepEqual(next.Rows, full.Page.Rows), reflect.DeepEqual(next.Context, managementContextForPage(full.View, full.Page, model)))
+			if !reflect.DeepEqual(next.Context, managementContextForPage(full.View, full.Page, model)) {
+				t.Logf("context difference\nnext=%s\nfull=%s", mustJSON(next.Context), mustJSON(managementContextForPage(full.View, full.Page, model)))
+			}
+			for i := range min(len(next.Rows), len(full.Page.Rows)) {
+				if !reflect.DeepEqual(next.Rows[i], full.Page.Rows[i]) {
+					t.Logf("first row difference index=%d\nnext=%s\nfull=%s", i, mustJSON(next.Rows[i]), mustJSON(full.Page.Rows[i]))
+					break
+				}
+			}
+			t.Logf("paging trace:\n%s", pagingLogs)
 			t.Fatal("raw absence changed fresh-transaction paging or add context", nextErr, fullErr)
 		}
 		if !strings.Contains(pagingLogs, "management_raw_receipt_absence reused=25 raw_ids=0 stored=false phase=page ") || strings.Contains(pagingLogs, "stage=page_receipts ") {
