@@ -175,7 +175,9 @@ func subImportAccountError(w http.ResponseWriter, err error) {
 func (s *Service) subImportAccountStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	owner, _ := s.controlUser(r)
+	endRead := managementReadSpan(managementTraceContext(r.Context()), "import_account_status_read")
 	state, err := s.subReadImportAccountState(r.Context(), r.PathValue("id"), owner)
+	endRead()
 	if err != nil {
 		subImportAccountError(w, err)
 		return

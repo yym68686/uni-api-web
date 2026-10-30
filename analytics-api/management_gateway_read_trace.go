@@ -7,8 +7,8 @@ import (
 	"time"
 )
 
-// These four read-only documents are the complete atomic snapshot and its
-// independent credential/revision fences. Never log a caller-supplied path,
+// Fixed read-only gateway documents used by management and import dialogs.
+// Never log a caller-supplied path,
 // URL, source identity, revision, credential, body, or transport error.
 func managementGatewayReadDocument(method, path string) string {
 	if method != http.MethodGet {
@@ -23,6 +23,10 @@ func managementGatewayReadDocument(method, path string) string {
 		return "controls"
 	case "/v1/channel-controls/revision":
 		return "controls_revision"
+	case "/v1/api-keys":
+		return "keys"
+	case "/v1/model-channels":
+		return "catalog"
 	}
 	return ""
 }

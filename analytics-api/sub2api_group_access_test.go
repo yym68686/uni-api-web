@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -42,6 +44,10 @@ func TestGroupAccessRequiresDirectoryAndExplainsInactiveGroup(t *testing.T) {
 }
 
 func TestGroupAccessRefreshesOnlyMetadataAndProtectsOwnership(t *testing.T) {
+	var trace bytes.Buffer
+	previousLog := log.Writer()
+	log.SetOutput(&trace)
+	defer log.SetOutput(previousLog)
 	s, account, owner := subUsageTestService(t)
 	ctx := context.Background()
 	_, err := s.control.db.Exec(`INSERT INTO console_sub_targets(account_id,group_id,name,platform,remote_key_id,encrypted_key) VALUES($1,49,'CCMAX','anthropic',41369,'fixture')`, account)
@@ -97,6 +103,14 @@ func TestGroupAccessRefreshesOnlyMetadataAndProtectsOwnership(t *testing.T) {
 	if w := request(session); w.Code != 200 || !strings.Contains(w.Body.String(), "站点已停用") {
 		t.Fatal(w.Code, w.Body.String())
 	}
+	for _, stage := range []string{"group_access_account_read", "group_access_api_kind", "group_access_site_read", "group_access_decision", "group_access_metadata_write"} {
+		if !strings.Contains(trace.String(), "stage="+stage+" ") {
+			t.Fatal("group access lost phase correlation", stage)
+		}
+	}
+	if strings.Contains(trace.String(), account) || strings.Contains(trace.String(), owner) || !strings.Contains(trace.String(), "read_kind=import_group_access") {
+		t.Fatal("group access diagnostic scope changed")
+	}
 	var active bool
 	var result string
 	s.control.db.QueryRow(`SELECT active FROM console_sub_targets WHERE account_id=$1 AND group_id=49`, account).Scan(&active)
@@ -109,8 +123,12 @@ func TestGroupAccessRefreshesOnlyMetadataAndProtectsOwnership(t *testing.T) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	failed = true
+	trace.Reset()
 	if w := request(session); w.Code != 502 {
 		t.Fatal(w.Code)
+	}
+	if strings.Contains(trace.String(), "stage=group_access_metadata_write ") {
+		t.Fatal("failed directory read reached metadata write")
 	}
 	s.control.db.QueryRow(`SELECT active FROM console_sub_targets WHERE account_id=$1 AND group_id=49`, account).Scan(&active)
 	if !active {

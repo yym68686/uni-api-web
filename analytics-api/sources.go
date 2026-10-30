@@ -45,6 +45,8 @@ func fetchSource(ctx context.Context, src controlSource, path string, q url.Valu
 	if !proxyPaths[path] {
 		return nil, 400, errors.New("unsupported observation endpoint")
 	}
+	trace := newManagementGatewayReadTrace(ctx, http.MethodGet, path)
+	defer trace.finish()
 	u := src.Base + path
 	if len(q) > 0 {
 		u += "?" + q.Encode()
@@ -57,22 +59,27 @@ func fetchSource(ctx context.Context, src controlSource, path string, q url.Valu
 	req.Header.Set("Accept", "application/json")
 	resp, e := sourceHTTP.Do(req)
 	if e != nil {
+		trace.headers(0)
 		failure := &sourceTransportError{message: "source unavailable", cause: e}
 		managementSourceTransportFailure(ctx, http.MethodGet, path, failure)
 		return nil, 502, failure
 	}
+	trace.headers(resp.StatusCode)
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		return nil, 502, fmt.Errorf("source returned HTTP %d", resp.StatusCode)
 	}
 	raw, e := readConfiguration(resp.Body)
+	trace.read(len(raw))
 	if e != nil {
 		return nil, 502, errors.New("invalid source response")
 	}
 	var body map[string]any
 	if e = json.Unmarshal(raw, &body); e != nil {
+		trace.decoded(false)
 		return nil, 502, errors.New("invalid source JSON")
 	}
+	trace.decoded(true)
 	return body, 200, nil
 }
 func (s *Service) bootstrapSources(ctx context.Context) error {

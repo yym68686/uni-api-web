@@ -54,29 +54,41 @@ func (s *Service) subGroupAccessStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	owner, _ := s.controlUser(r)
 	account, group := r.PathValue("id"), int64Param(r.PathValue("group"))
-	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(managementTraceContext(r.Context()), 20*time.Second)
 	defer cancel()
 	var base, job string
 	var key, synced int64
+	endAccountRead := managementReadSpan(ctx, "group_access_account_read")
 	if err := s.control.db.QueryRowContext(ctx, `SELECT a.base,a.job_id,a.synced_at,t.remote_key_id FROM console_sub_accounts a JOIN console_sub_targets t ON t.account_id=a.id WHERE a.id=$1 AND a.owner=$2 AND t.group_id=$3`, account, owner, group).Scan(&base, &job, &synced, &key); err != nil {
+		endAccountRead()
 		http.Error(w, "分组不存在", 404)
 		return
 	}
+	endAccountRead()
 	read := func(path string, out any) error { return s.subUsageGET(ctx, account, base, path, out) }
 	var groups []subRemoteGroup
 	var err error
-	if s.isNewAPI(ctx, account) {
+	endAPIKindRead := managementReadSpan(ctx, "group_access_api_kind")
+	isNewAPI := s.isNewAPI(ctx, account)
+	endAPIKindRead()
+	endSiteRead := managementReadSpan(ctx, "group_access_site_read")
+	if isNewAPI {
 		groups, err = s.newAPIGroups(ctx, account, base)
 	} else {
 		err = read("/api/v1/groups/available", &groups)
 	}
+	endSiteRead()
 	if err != nil {
 		http.Error(w, err.Error(), 502)
 		return
 	}
+	endDecision := managementReadSpan(ctx, "group_access_decision")
 	access, err := readSubGroupAccess(groups, group, key, read)
+	endDecision()
 	if err == nil {
+		endMetadataWrite := managementReadSpan(ctx, "group_access_metadata_write")
 		err = s.saveSubGroupAccess(ctx, account, group, job, synced, access)
+		endMetadataWrite()
 	}
 	if err != nil {
 		http.Error(w, "无法确认最新分组状态，请稍后重新检查", 502)

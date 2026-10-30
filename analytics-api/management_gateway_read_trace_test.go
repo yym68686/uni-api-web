@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -123,6 +124,89 @@ type managementTraceCloseBody struct {
 	close func()
 }
 
+func TestSourceCatalogReadTracePreservesResultsErrorsAndSingleRequest(t *testing.T) {
+	previousLog, previousHTTP := log.Writer(), sourceHTTP
+	t.Cleanup(func() { log.SetOutput(previousLog); sourceHTTP = previousHTTP })
+	for path, document := range map[string]string{"/v1/api-keys": "keys", "/v1/model-channels": "catalog"} {
+		for _, test := range []struct {
+			name, body, phase, budget string
+			status                    int
+			broken, canceled          bool
+		}{
+			{name: "object", body: `{"data":[{"private":"value"}],"number":1}`, status: 200, phase: "complete"},
+			{name: "null", body: `null`, status: 200, phase: "complete"},
+			{name: "array", body: `[]`, status: 200, phase: "decode"},
+			{name: "json-error", body: `{`, status: 200, phase: "decode"},
+			{name: "budget", body: `{"data":[]}`, status: 200, phase: "body", budget: "2"},
+			{name: "body-error", broken: true, status: 200, phase: "body"},
+			{name: "forbidden", body: "private error", status: 403, phase: "status"},
+			{name: "not-found", body: "private error", status: 404, phase: "status"},
+			{name: "unavailable", body: "private error", status: 503, phase: "status"},
+			{name: "transport", phase: "transport"},
+			{name: "canceled", phase: "transport", canceled: true},
+		} {
+			t.Run(document+"/"+test.name, func(t *testing.T) {
+				t.Setenv("CONFIGURATION_MAX_BYTES", test.budget)
+				var expected map[string]any
+				var expectedMessage string
+				var expectedCode int
+				for _, traced := range []bool{false, true} {
+					var output bytes.Buffer
+					log.SetOutput(&output)
+					ctx := context.WithValue(context.Background(), consoleRequestIDKey{}, "catalog-read-123")
+					if traced {
+						ctx = managementTraceContext(ctx)
+					}
+					if test.canceled {
+						canceled, cancel := context.WithCancel(ctx)
+						cancel()
+						ctx = canceled
+					}
+					calls, closes := 0, 0
+					sourceHTTP = &http.Client{Transport: sourceDiagnosticRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+						calls++
+						if r.Method != http.MethodGet || r.URL.Host != "private-host" || r.URL.Path != path || r.URL.Query().Get("api_key_id") != "private-selector" || r.Header.Get("Authorization") != "Bearer private-key" || r.Header.Get("Accept") != "application/json" {
+							t.Error("observation request identity changed")
+						}
+						if test.status == 0 {
+							if test.canceled {
+								return nil, r.Context().Err()
+							}
+							return nil, errors.New("private transport")
+						}
+						var reader io.Reader = strings.NewReader(test.body)
+						if test.broken {
+							reader = &managementTraceBrokenBody{}
+						}
+						return &http.Response{StatusCode: test.status, Header: make(http.Header), Body: &managementTraceCloseBody{Reader: reader, close: func() { closes++ }}}, nil
+					})}
+					data, code, err := fetchSource(ctx, controlSource{sourceView: sourceView{Base: "https://private-host"}, Key: "private-key"}, path, url.Values{"api_key_id": {"private-selector"}})
+					message := ""
+					if err != nil {
+						message = err.Error()
+					}
+					if calls != 1 || test.status != 0 && closes != 1 {
+						t.Fatal("read retried or failed to close response", calls, closes)
+					}
+					if !traced {
+						expected, expectedCode, expectedMessage = data, code, message
+						if output.Len() != 0 {
+							t.Fatal("ordinary observation became verbose")
+						}
+						continue
+					}
+					if !reflect.DeepEqual(data, expected) || code != expectedCode || message != expectedMessage || strings.Count(output.String(), "management_gateway_read ") != 1 || !strings.Contains(output.String(), "document="+document+" phase="+test.phase) || !strings.Contains(output.String(), "request_id=catalog-read-123") || strings.Contains(output.String(), "private") {
+						t.Fatal("diagnostics changed behavior or leaked fields", output.String())
+					}
+					if test.canceled && !errors.Is(err, context.Canceled) {
+						t.Fatal("original cancellation was lost")
+					}
+				}
+			})
+		}
+	}
+}
+
 func (b *managementTraceCloseBody) Close() error { b.close(); return nil }
 
 func TestManagementGatewayReadTraceLimitsScopeAndPrivateLabels(t *testing.T) {
@@ -136,6 +220,8 @@ func TestManagementGatewayReadTraceLimitsScopeAndPrivateLabels(t *testing.T) {
 		"/v1/channel-settings/management-revision": "snapshot_revision",
 		"/v1/channel-controls":                     "controls",
 		"/v1/channel-controls/revision":            "controls_revision",
+		"/v1/api-keys":                             "keys",
+		"/v1/model-channels":                       "catalog",
 	} {
 		output.Reset()
 		trace := newManagementGatewayReadTrace(ctx, http.MethodGet, path)
