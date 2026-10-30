@@ -84,7 +84,7 @@ func readManagementRawReceiptAbsences(ctx context.Context, db controlQueryDB, ow
 		stored = err == nil && n <= managementReceiptSetBudget
 		if stored {
 			version.owner, version.stamp = strings.Clone(version.owner), strings.Clone(version.stamp)
-			scope.store.put(&managementReceiptSet{version: version, absent: append(make([]byte, 0, len(body)), body...), bytes: n})
+			stored = storeManagementReceiptSet(ctx, scope.store, &managementReceiptSet{version: version, absent: append(make([]byte, 0, len(body)), body...), bytes: n})
 		}
 	}
 	if managementTraceEnabled(ctx) {

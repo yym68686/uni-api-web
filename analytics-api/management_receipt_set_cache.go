@@ -53,6 +53,19 @@ type managementCachedReceipt struct {
 
 const managementReceiptSetBudget = 8 << 20
 
+// Scalar observations only. Never retain or log source IDs, ownership values,
+// proof stamps or receipt payloads for cache diagnostics.
+type managementReceiptCacheState struct {
+	entries, bytes, currentEntries, previousProofSets int
+}
+
+type managementReceiptCacheAdmission struct {
+	stored                                               bool
+	entries, bytes                                       int
+	versionEvictions, replacements                       int
+	countEvictions, byteEvictions, countAndByteEvictions int
+}
+
 func managementReceiptSetScopeFromProof(store *managementReceiptSets, database *sql.DB, tx *sql.Tx, owner string, proof managementFreshProof) *managementReceiptSetScope {
 	// Rates' proof gate checks the compact receipt revision and all membership,
 	// ownership and key epochs. Receipt inputs are a subset of those sources.
@@ -82,20 +95,30 @@ func managementReceiptSetScopeFor(ctx context.Context, db controlQueryDB, owner 
 	return scope
 }
 
-func (c *managementReceiptSets) get(version managementReceiptSetVersion) *managementReceiptSet {
+func (c *managementReceiptSets) get(version managementReceiptSetVersion) (*managementReceiptSet, managementReceiptCacheState) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	state := managementReceiptCacheState{entries: len(c.entries), bytes: c.bytes}
+	var found *managementReceiptSet
 	for _, entry := range c.entries {
+		v := entry.version
+		if v.database == version.database && v.owner == version.owner {
+			if v.stamp == version.stamp {
+				state.currentEntries++
+			} else if v.ids == version.ids && v.strict == version.strict && v.rawAbsence == version.rawAbsence {
+				state.previousProofSets++
+			}
+		}
 		if entry.version == version {
-			return entry
+			found = entry
 		}
 	}
-	return nil
+	return found, state
 }
 
-func (c *managementReceiptSets) put(entry *managementReceiptSet) {
+func (c *managementReceiptSets) put(entry *managementReceiptSet) (state managementReceiptCacheAdmission) {
 	if entry == nil || entry.bytes > managementReceiptSetBudget {
-		return
+		return state
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -108,14 +131,40 @@ func (c *managementReceiptSets) put(entry *managementReceiptSet) {
 	for i := len(c.entries) - 1; i >= 0; i-- {
 		old := c.entries[i].version
 		if old.database == entry.version.database && old.owner == entry.version.owner && (old.stamp != entry.version.stamp || old == entry.version) {
+			if old.stamp != entry.version.stamp {
+				state.versionEvictions++
+			} else {
+				state.replacements++
+			}
 			remove(i)
 		}
 	}
 	for len(c.entries) > 0 && (len(c.entries) >= 8 || c.bytes+entry.bytes > managementReceiptSetBudget) {
+		count, bytes := len(c.entries) >= 8, c.bytes+entry.bytes > managementReceiptSetBudget
+		switch {
+		case count && bytes:
+			state.countAndByteEvictions++
+		case count:
+			state.countEvictions++
+		case bytes:
+			state.byteEvictions++
+		}
 		remove(0)
 	}
 	c.entries = append(c.entries, entry)
 	c.bytes += entry.bytes
+	state.stored, state.entries, state.bytes = true, len(c.entries), c.bytes
+	return state
+}
+
+func storeManagementReceiptSet(ctx context.Context, store *managementReceiptSets, entry *managementReceiptSet) bool {
+	state := store.put(entry)
+	// Logging is deliberately outside the cache lock. Admission/eviction rules
+	// and immutable cached values are unchanged by observation.
+	if managementTraceEnabled(ctx) {
+		log.Printf("management_receipt_cache_store raw_absence=%t strict=%t stored=%t entry_rows=%d entry_bytes=%d entries=%d bytes=%d evicted_version=%d replaced=%d evicted_count=%d evicted_bytes=%d evicted_both=%d phase=%s request_id=%s", entry.version.rawAbsence, entry.version.strict, state.stored, entry.rows, entry.bytes, state.entries, state.bytes, state.versionEvictions, state.replacements, state.countEvictions, state.byteEvictions, state.countAndByteEvictions, managementReceiptPhase(ctx), consoleRequestID(ctx))
+	}
+	return state.stored
 }
 
 // Reuse only the selected-ID query's exact set and strictness. Missing receipts
@@ -136,7 +185,11 @@ func readManagementReceiptSet(ctx context.Context, db controlQueryDB, owner stri
 	encodedIDs, _ := json.Marshal(wanted)
 	version := scope.version
 	version.ids, version.strict = tokenHash(string(encodedIDs)), strict
-	if entry := scope.store.get(version); entry != nil {
+	entry, state := scope.store.get(version)
+	if managementTraceEnabled(ctx) {
+		log.Printf("management_receipt_cache_lookup hit=%t strict=%t requested=%d entries=%d bytes=%d current_entries=%d previous_proof_sets=%d phase=%s request_id=%s", entry != nil, strict, len(wanted), state.entries, state.bytes, state.currentEntries, state.previousProofSets, managementReceiptPhase(ctx), consoleRequestID(ctx))
+	}
+	if entry != nil {
 		var rows []managementCachedReceipt
 		if json.Unmarshal(entry.body, &rows) == nil {
 			var out map[string]managementStreamReceipt
@@ -185,7 +238,7 @@ func readManagementReceiptSet(ctx context.Context, db controlQueryDB, owner stri
 	stored := encodeErr == nil && absentErr == nil && n <= managementReceiptSetBudget
 	if stored {
 		version.owner, version.stamp = strings.Clone(version.owner), strings.Clone(version.stamp)
-		scope.store.put(&managementReceiptSet{version: version, body: append(make([]byte, 0, len(body)), body...), absent: append(make([]byte, 0, len(absent)), absent...), rows: len(out), bytes: n})
+		stored = storeManagementReceiptSet(ctx, scope.store, &managementReceiptSet{version: version, body: append(make([]byte, 0, len(body)), body...), absent: append(make([]byte, 0, len(absent)), absent...), rows: len(out), bytes: n})
 	}
 	if managementTraceEnabled(ctx) {
 		log.Printf("management_receipt_set_cache hit=false stored=%t requested=%d rows=%d request_id=%s", stored, len(wanted), len(out), consoleRequestID(ctx))

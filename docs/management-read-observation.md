@@ -179,6 +179,19 @@ before splitting it into bounded batches. This fixes batch membership across
 map iterations; it does not relax exact-set invalidation or cache missing IDs
 as resolved receipts. Smaller pages retain their original batching path.
 
+The scalar `management_receipt_cache_lookup` reports the lookup's locked
+snapshot: entry/byte totals, entries under the current owner/database/proof,
+and exact-ID/strictness/kind sets retained under a different proof. A miss does
+not by itself distinguish never-read from previously evicted sets.
+`management_receipt_cache_store` reports actual admission totals and disjoint
+removal counts: `evicted_version`, `replaced`, `evicted_count`, `evicted_bytes`,
+and `evicted_both`. The last three describe the limit(s) exceeded immediately
+before each removal, not guessed causes inferred from a later SQL duration.
+Projection and raw-absence certificates are marked separately; all still
+share the unchanged eight-entry/8MiB budget. Logging happens after unlocking,
+with no IDs, owners, proof stamps or payloads. These observations do not change
+authorization, proof validation, cache lifetime, SQL or business behavior.
+
 Overlapping selected-ID sets can also reuse valid rows and certified projection
 absences under that same exact current receipt/ownership proof. A successful,
 uncanceled read records only requested IDs missing from its returned map; the
