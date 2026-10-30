@@ -1821,6 +1821,8 @@ nav > button.active > svg {
   white-space: nowrap;
   font-size: 11px;
 }
+.balance-finance.negative { color: #c73545; }
+:root[data-theme="dark"] .balance-finance.negative { color: #ff929d; }
 @keyframes overlay-in {
   from {
     opacity: 0;
