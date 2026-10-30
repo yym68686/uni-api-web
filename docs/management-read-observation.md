@@ -219,6 +219,34 @@ click-to-paint acceptance. Compare deployed stages and complete browser timing
 before drawing those conclusions. Opening the dialog, selecting a key and
 refreshing after an accepted real add remain distinct operations.
 
+### Optional receipt plan-mode observation
+
+An authenticated management query can explicitly add `observe_receipt_plan=1`.
+This does not alter filters, cursor/selection identity, evidence, SQL parameters,
+cache validity or the response. Invalid or duplicate values are rejected. No
+ordinary page request enables this flag. At most one selected-ID receipt read
+per request and one per process per minute can observe metadata; cache hits can
+therefore produce no observation at all.
+
+Immediately before and after the original SELECT, the same pinned database
+connection reads only the names and generic/custom execution counters from
+`pg_prepared_statements` for that exact SQL. An exact one-execution delta logs
+`management_receipt_plan cache_mode=generic|custom`; absent/ambiguous counters
+remain `unavailable`. Only the fixed mode, numeric deltas, ID/row counts,
+diagnostic metadata time and request ID are logged. Statement names, SQL,
+parameters, owner and receipt IDs are never logged. Metadata failure is isolated
+with a savepoint; the business SELECT is never retried or recovered by this
+diagnostic, and cancellation retains the existing rollback path.
+
+This identifies the plan mode actually used by that SELECT. It does not expose
+its execution tree, estimate physical reads, establish storage contention, or
+prove that a generic plan caused the delay. A separate `EXPLAIN (GENERIC_PLAN)`
+on another connection describes a possible generic plan only; it cannot prove
+which plan an earlier slow request used. No production `EXPLAIN ANALYZE`,
+plan-cache setting, extension, business query replay or persistent database
+setting is required. Diagnostic requests perform extra metadata round trips;
+their timings must not be presented as ordinary-operation performance acceptance.
+
 Only whitelisted counters, state/wait labels, fixed query classes and correlated
 request IDs are emitted. No raw SQL, query parameters, business identities,
 payloads, subprocess errors, connection strings or credentials are printed.

@@ -392,6 +392,8 @@ func readManagementStreamReceiptsUncached(ctx context.Context, db controlQueryDB
 		query = managementReceiptSelectedStreamSQL
 		args = append(args, ids)
 	}
+	observation := beginManagementReceiptPlanObservation(ctx, db, query, len(ids))
+	defer observation.finish(ctx)
 	readTrace := newManagementRowsTrace(ctx, "receipt_signal_rows")
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -418,6 +420,9 @@ func readManagementStreamReceiptsUncached(ctx context.Context, db controlQueryDB
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+	if observation != nil {
+		observation.rows, observation.succeeded = len(out), true
 	}
 	return out, ctx.Err()
 }

@@ -41,11 +41,14 @@ type managementSelectionResponse struct {
 func parseManagementQuery(values url.Values) (managementQueryFilters, error) {
 	filters := managementQueryFilters{GroupStatus: "available"}
 	for key, list := range values {
-		if !slices.Contains([]string{"filters", "cursor", "selection", "refresh_cursor"}, key) || len(list) != 1 || len(list[0]) > 8192 {
+		if !slices.Contains([]string{"filters", "cursor", "selection", "refresh_cursor", "observe_receipt_plan"}, key) || len(list) != 1 || len(list[0]) > 8192 {
 			return filters, errManagementFilters
 		}
 	}
 	if values.Has("refresh_cursor") && values.Get("refresh_cursor") != "1" {
+		return filters, errManagementFilters
+	}
+	if values.Has("observe_receipt_plan") && values.Get("observe_receipt_plan") != "1" {
 		return filters, errManagementFilters
 	}
 	raw := values.Get("filters")
@@ -154,6 +157,9 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
+	if values.Get("observe_receipt_plan") == "1" {
+		ctx = context.WithValue(ctx, managementReceiptPlanKey{}, &managementReceiptPlanRequest{})
+	}
 	start := time.Now()
 	cacheCursor := computedCursor
 	if rebase && computedCursor != "" {
