@@ -392,7 +392,7 @@ func readManagementStreamReceiptsUncached(ctx context.Context, db controlQueryDB
 		query = managementReceiptSelectedStreamSQL
 		args = append(args, ids)
 	}
-	observation := beginManagementReceiptPlanObservation(ctx, db, query, len(ids))
+	observation := beginManagementReceiptPlanObservation(ctx, db, query, args, len(ids))
 	defer observation.finish(ctx)
 	readTrace := newManagementRowsTrace(ctx, "receipt_signal_rows")
 	rows, err := db.QueryContext(ctx, query, args...)

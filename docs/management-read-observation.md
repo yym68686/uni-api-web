@@ -247,6 +247,16 @@ plan-cache setting, extension, business query replay or persistent database
 setting is required. Diagnostic requests perform extra metadata round trips;
 their timings must not be presented as ordinary-operation performance acceptance.
 
+After an unambiguous counter delta, the optional observation also runs a plain
+`EXPLAIN (FORMAT JSON)` of the same SQL with the original bound parameters on
+that connection. It uses an unnamed description, without `ANALYZE` and without
+executing the SELECT. Only fixed receipt scan-type counts, account scan count,
+estimated result rows and node count are logged. Every condition, index/relation
+name and parameter value is discarded. This is explicitly a parameterized
+estimate after the read, **not the captured execution tree or actual buffer
+counts**. It does not run `EXPLAIN EXECUTE` against the named business statement:
+that would advance its plan-use history and could affect automatic plan choice.
+
 Only whitelisted counters, state/wait labels, fixed query classes and correlated
 request IDs are emitted. No raw SQL, query parameters, business identities,
 payloads, subprocess errors, connection strings or credentials are printed.
