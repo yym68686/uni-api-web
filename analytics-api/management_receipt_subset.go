@@ -22,11 +22,12 @@ func (c *managementReceiptSets) currentEntries(version managementReceiptSetVersi
 	return out
 }
 
-// Reuse only PRESENT, VALID receipts with the exact current source/ownership
-// proof. Valid typed rows are identical in strict and non-strict reads; invalid
-// or absent rows NEVER bypass SQL, its strict fallback, or the raw decoder.
-// No new evidence/cache/TTL is retained. The existing 8-entry/8MiB budget bounds
-// decoding; selected sets over 4096 IDs retain their original owner scan.
+// Reuse valid receipts and certified projection absences under the exact current
+// source/ownership proof, just as an exact selected-ID cache hit already does.
+// Invalid rows still require SQL and strict fallback. An absent projection stays
+// absent from the result map, so it NEVER bypasses the later raw receipt decoder.
+// Both encoded rows and absent IDs share the existing 8-entry/8MiB budget;
+// selected sets over 4096 IDs retain their original owner scan.
 func managementReceiptSubset(ctx context.Context, db controlQueryDB, owner string, ids []string) (map[string]managementStreamReceipt, []string, error) {
 	scope := managementReceiptSetScopeFor(ctx, db, owner, ids)
 	if scope == nil {
@@ -44,6 +45,7 @@ func managementReceiptSubset(ctx context.Context, db controlQueryDB, owner strin
 		wanted[id] = true
 	}
 	out := map[string]managementStreamReceipt{}
+	reusedAbsent := 0
 	for _, entry := range entries {
 		if err := ctx.Err(); err != nil {
 			return nil, nil, err
@@ -52,10 +54,20 @@ func managementReceiptSubset(ctx context.Context, db controlQueryDB, owner strin
 		if json.Unmarshal(entry.body, &rows) != nil {
 			continue
 		}
+		var absent []string
+		if len(entry.absent) != 0 && json.Unmarshal(entry.absent, &absent) != nil {
+			continue
+		}
 		for _, row := range rows {
 			if row.Valid && wanted[row.ID] {
 				out[row.ID] = managementStreamReceipt{valid: true, evidence: row.Evidence, usage: row.Usage}
 				delete(wanted, row.ID)
+			}
+		}
+		for _, id := range absent {
+			if wanted[id] {
+				delete(wanted, id)
+				reusedAbsent++
 			}
 		}
 		if len(wanted) == 0 {
@@ -65,7 +77,7 @@ func managementReceiptSubset(ctx context.Context, db controlQueryDB, owner strin
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
-	if len(out) == 0 {
+	if len(out) == 0 && reusedAbsent == 0 {
 		return nil, ids, nil
 	}
 	missing := make([]string, 0, len(wanted))
@@ -75,7 +87,7 @@ func managementReceiptSubset(ctx context.Context, db controlQueryDB, owner strin
 		}
 	}
 	if managementTraceEnabled(ctx) {
-		log.Printf("management_receipt_subset_cache reused=%d raw_ids=%d request_id=%s", len(out), len(missing), consoleRequestID(ctx))
+		log.Printf("management_receipt_subset_cache reused=%d raw_ids=%d absent=%d request_id=%s", len(out), len(missing), reusedAbsent, consoleRequestID(ctx))
 	}
 	return out, missing, nil
 }

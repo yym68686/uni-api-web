@@ -31,8 +31,11 @@ type managementReceiptSetVersion struct {
 type managementReceiptSet struct {
 	version managementReceiptSetVersion
 	body    []byte
-	rows    int
-	bytes   int
+	// Only IDs requested by a successful complete read and absent from its
+	// result. This certifies projection absence, NOT absence of a raw receipt.
+	absent []byte
+	rows   int
+	bytes  int
 }
 type managementReceiptSets struct {
 	mu      sync.Mutex
@@ -165,11 +168,22 @@ func readManagementReceiptSet(ctx context.Context, db controlQueryDB, owner stri
 		rows = append(rows, managementCachedReceipt{id, receipt.valid, receipt.evidence, receipt.usage})
 	}
 	body, encodeErr := json.Marshal(rows)
-	n := int(unsafe.Sizeof(managementReceiptSet{})) + len(version.owner) + len(version.stamp) + len(version.ids) + len(body)
-	stored := encodeErr == nil && n <= managementReceiptSetBudget
+	var absentIDs []string
+	for _, id := range wanted {
+		if _, found := out[id]; !found {
+			absentIDs = append(absentIDs, id)
+		}
+	}
+	var absent []byte
+	var absentErr error
+	if len(absentIDs) != 0 {
+		absent, absentErr = json.Marshal(absentIDs)
+	}
+	n := int(unsafe.Sizeof(managementReceiptSet{})) + len(version.owner) + len(version.stamp) + len(version.ids) + len(body) + len(absent)
+	stored := encodeErr == nil && absentErr == nil && n <= managementReceiptSetBudget
 	if stored {
 		version.owner, version.stamp = strings.Clone(version.owner), strings.Clone(version.stamp)
-		scope.store.put(&managementReceiptSet{version: version, body: append(make([]byte, 0, len(body)), body...), rows: len(out), bytes: n})
+		scope.store.put(&managementReceiptSet{version: version, body: append(make([]byte, 0, len(body)), body...), absent: append(make([]byte, 0, len(absent)), absent...), rows: len(out), bytes: n})
 	}
 	if managementTraceEnabled(ctx) {
 		log.Printf("management_receipt_set_cache hit=false stored=%t requested=%d rows=%d request_id=%s", stored, len(wanted), len(out), consoleRequestID(ctx))

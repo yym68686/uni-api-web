@@ -185,6 +185,9 @@ func TestManagementReceiptSetCacheConcurrentBudget(t *testing.T) {
 		if cap(entry.body) != len(entry.body) {
 			t.Fatal("retained byte capacity exceeds accounting")
 		}
+		if cap(entry.absent) != len(entry.absent) {
+			t.Fatal("retained absence capacity exceeds accounting")
+		}
 	}
 	if store.bytes != total {
 		t.Fatal("eviction byte accounting changed")

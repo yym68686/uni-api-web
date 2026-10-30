@@ -53,14 +53,14 @@ func TestManagementReceiptSubsetReadsOnlyUnverifiedIDs(t *testing.T) {
 		if len(ids) == 2 && strings.Contains(output.String(), "stage=receipt_signal_rows ") {
 			t.Fatal("fully verified subset still queried SQL", output.String())
 		}
-		if len(ids) > 2 && !strings.Contains(output.String(), "raw_ids=2 ") {
-			t.Fatal("missing receipt must remain an unknown SQL lookup", output.String())
+		if len(ids) > 2 && !strings.Contains(output.String(), "raw_ids=1 absent=1 ") {
+			t.Fatal("certified absence was reread or an unknown receipt escaped SQL", output.String())
 		}
 	}
 }
 
 func TestManagementReceiptSubsetKeepsSourceAndTypedIsolation(t *testing.T) {
-	for _, name := range []string{"hit", "database", "owner", "stamp", "empty_stamp", "transaction", "pool", "nil_tx", "unverified", "absent_scope", "large", "cancel", "corrupt"} {
+	for _, name := range []string{"hit", "database", "owner", "stamp", "empty_stamp", "transaction", "pool", "nil_tx", "unverified", "absent_scope", "large", "cancel", "corrupt", "corrupt_absent"} {
 		t.Run(name, func(t *testing.T) {
 			scope, ctx := receiptSetScopeForTest()
 			enableManagementReceiptSetScope(ctx, scope.tx, true)
@@ -99,6 +99,8 @@ func TestManagementReceiptSubsetKeepsSourceAndTypedIsolation(t *testing.T) {
 				cancel()
 			case "corrupt":
 				scope.store.entries[0].body = []byte("invalid json")
+			case "corrupt_absent":
+				scope.store.entries[0].absent = []byte("invalid json")
 			}
 			got, missing, err := managementReceiptSubset(ctx, db, owner, ids)
 			if name == "cancel" {
@@ -116,8 +118,8 @@ func TestManagementReceiptSubsetKeepsSourceAndTypedIsolation(t *testing.T) {
 				}
 				return
 			}
-			if len(got) != 1 || !reflect.DeepEqual(got["a"], warm["a"]) || !reflect.DeepEqual(missing, []string{"invalid", "absent", "unknown"}) {
-				t.Fatal("invalid/absent evidence suppressed SQL or typed values changed")
+			if len(got) != 1 || !reflect.DeepEqual(got["a"], warm["a"]) || !reflect.DeepEqual(missing, []string{"invalid", "unknown"}) {
+				t.Fatal("invalid/unknown evidence suppressed SQL, absence changed, or typed values changed")
 			}
 			*got["a"].usage.InputPrice, *got["a"].usage.OutputTokens = 3, 4
 			again, _, err := managementReceiptSubset(ctx, db, owner, []string{"a"})
@@ -144,7 +146,7 @@ func TestManagementReceiptSubsetUnionsOnlyCurrentValidRows(t *testing.T) {
 	body, _ := json.Marshal([]managementCachedReceipt{{ID: "foreign", Valid: true}})
 	scope.store.put(&managementReceiptSet{version: foreign, body: body, rows: 1, bytes: len(body) + 256})
 	got, missing, err := managementReceiptSubset(ctx, scope.tx, scope.version.owner, []string{"a", "b", "invalid", "absent", "foreign"})
-	if err != nil || len(got) != 2 || !got["a"].valid || !got["b"].valid || !reflect.DeepEqual(missing, []string{"invalid", "absent", "foreign"}) {
+	if err != nil || len(got) != 2 || !got["a"].valid || !got["b"].valid || !reflect.DeepEqual(missing, []string{"invalid", "foreign"}) {
 		t.Fatal("union crossed scope, strict invalidity, or missing-row evidence", err)
 	}
 	// Returned values remain usable after eviction, while the next lookup must

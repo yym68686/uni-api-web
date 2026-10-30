@@ -161,6 +161,19 @@ before splitting it into bounded batches. This fixes batch membership across
 map iterations; it does not relax exact-set invalidation or cache missing IDs
 as resolved receipts. Smaller pages retain their original batching path.
 
+Overlapping selected-ID sets can also reuse valid rows and certified projection
+absences under that same exact current receipt/ownership proof. A successful,
+uncanceled read records only requested IDs missing from its returned map; the
+encoded certificate shares the existing eight-entry/8 MiB budget. Unknown IDs
+and invalid rows still query SQL, including strict fallback. Insert, delete,
+reassignment, projection writes and ownership changes invalidate the proof;
+incomplete/unprepared projections, other transactions without their own complete
+proof, and large owner scans cannot use it. An absent projection is never a
+resolved raw receipt: both account and hydrated-page raw decoders remain intact.
+`management_receipt_subset_cache absent=N` counts certified projection lookups
+skipped alongside the existing present-row `reused` and remaining `raw_ids`
+counters. These counts are not saved milliseconds or full-operation timings.
+
 Only whitelisted counters, state/wait labels, fixed query classes and correlated
 request IDs are emitted. No raw SQL, query parameters, business identities,
 payloads, subprocess errors, connection strings or credentials are printed.
