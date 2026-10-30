@@ -297,10 +297,11 @@ func readConfiguredChecksFrom(ctx context.Context, db controlQueryDB, sourceID, 
 func readManagementFingerprintsFrom(ctx context.Context, db controlQueryDB, owner string) ([]fingerprintRecord, error) {
 	rows, err := db.QueryContext(ctx, `SELECT COALESCE(f.source_id,''),f.provider,COALESCE(f.account_id,''),f.group_id,f.model,
  CASE WHEN f.state='running' AND f.deadline<now() THEN 'interrupted' ELSE f.state END,f.message,f.revision,f.result,
- COALESCE(a.base,''),COALESCE(t.encrypted_key,''),floor(extract(epoch FROM f.updated_at)*1000)::BIGINT
+ COALESCE(a.base,''),COALESCE(t.encrypted_key,''),floor(extract(epoch FROM f.updated_at)*1000)::BIGINT,
+ CASE WHEN f.sample_state->>'reference_key'=$2 AND jsonb_typeof(f.sample_state->'entries')='array' THEN jsonb_array_length(f.sample_state->'entries') ELSE 0 END
  FROM console_model_fingerprints f LEFT JOIN console_sub_accounts a ON a.id=f.account_id
  LEFT JOIN console_sub_targets t ON t.account_id=f.account_id AND t.group_id=f.group_id
- LEFT JOIN console_sources s ON s.id=f.source_id WHERE (a.owner=$1 OR s.enabled)`, owner)
+ LEFT JOIN console_sources s ON s.id=f.source_id WHERE (a.owner=$1 OR s.enabled)`, owner, fingerprintReferenceKey)
 	if err != nil {
 		return nil, err
 	}
@@ -312,7 +313,7 @@ func readManagementFingerprintsFrom(ctx context.Context, db controlQueryDB, owne
 		// Queued, running and unsuccessful checks legitimately have SQL NULL
 		// results. database/sql supports NULL for []byte, but not *json.RawMessage.
 		var result []byte
-		if err = rows.Scan(&f.Source, &f.Provider, &f.Account, &f.Group, &f.Model, &f.State, &f.Message, &f.Revision, &result, &base, &key, &f.UpdatedAtMS); err != nil {
+		if err = rows.Scan(&f.Source, &f.Provider, &f.Account, &f.Group, &f.Model, &f.State, &f.Message, &f.Revision, &result, &base, &key, &f.UpdatedAtMS, &f.RetainedSamples); err != nil {
 			break
 		}
 		f.Result = json.RawMessage(result)

@@ -17,6 +17,19 @@ Flash use the provider default, matching their reference collection metadata.
 Completions use the upstream parsers. Configured gateway channels remain explicitly
 targeted through Responses. No tokenizer probes, automatic retries or route edits.
 
+Each explicit run now fills only the missing slots in a three-valid-sample
+round. Every completed attempt is checkpointed before another upstream request;
+only accepted numeric runs (not provider text or credentials) enter the private
+`console_model_fingerprints.sample_state` column. Partial rounds survive retry,
+cancellation and worker replacement. Three completed samples are cleared by the
+next explicit enqueue, never by an automatic retry. The complete scorer and
+minimum-number acceptance test are unchanged. The resume proof binds the exact
+channel configuration, model, protocol, model catalog and reference manifest;
+changes start a fresh round rather than combine incompatible evidence. Public
+result JSON contains only the existing score/sample diagnostics, not vectors.
+Legacy partial records lack the numeric evidence and cannot be reconstructed;
+their next explicit detection starts the first durable round.
+
 One shared Node 24 runtime with a 192 MiB old-space / 4 MiB semi-space cap serves
 up to 50 site collectors. Go keeps all upstream credentials, network restrictions,
 provider targeting and database site leases; Node only receives ephemeral loopback

@@ -26,11 +26,12 @@ type fingerprintTarget struct {
 }
 type fingerprintRecord struct {
 	fingerprintTarget
-	State       string          `json:"state"`
-	Message     string          `json:"message"`
-	Revision    string          `json:"revision"`
-	UpdatedAtMS int64           `json:"updated_at_ms"`
-	Result      json.RawMessage `json:"result"`
+	State           string          `json:"state"`
+	Message         string          `json:"message"`
+	Revision        string          `json:"revision"`
+	UpdatedAtMS     int64           `json:"updated_at_ms"`
+	Result          json.RawMessage `json:"result"`
+	RetainedSamples int             `json:"retained_samples,omitempty"`
 }
 
 // Shared by the UI, API and scorer so each model uses the same reference class.
@@ -69,7 +70,11 @@ func enqueueFingerprint(ctx context.Context, db fingerprintDB, t fingerprintTarg
 	}
 	_, err := db.ExecContext(ctx, `INSERT INTO console_model_fingerprints(scope,model,source_id,provider,account_id,group_id)
  VALUES($1,$2,NULLIF($3,''),$4,NULLIF($5,''),$6) ON CONFLICT(scope,model) DO UPDATE SET
- state='queued',message='',result=NULL,revision='',deadline=NULL,site_key='',updated_at=now()
+ state='queued',message='',
+ result=CASE WHEN console_model_fingerprints.sample_state IS NOT NULL AND console_model_fingerprints.result->>'used_outputs' IN ('1','2') THEN console_model_fingerprints.result END,
+ revision=CASE WHEN console_model_fingerprints.sample_state IS NOT NULL AND console_model_fingerprints.result->>'used_outputs' IN ('1','2') THEN console_model_fingerprints.revision ELSE '' END,
+ sample_state=CASE WHEN console_model_fingerprints.result->>'used_outputs' IN ('1','2') THEN console_model_fingerprints.sample_state END,
+ deadline=NULL,site_key='',updated_at=now()
  WHERE console_model_fingerprints.state NOT IN ('queued','running') OR console_model_fingerprints.deadline<now()`, t.scope(), t.Model, t.Source, t.Provider, t.Account, t.Group)
 	return err
 }
@@ -237,6 +242,10 @@ func runFingerprintProcess(ctx context.Context, config map[string]any) (json.Raw
 // source probes retain targeting, and neither upstream credential reaches Node.
 // The loopback bridge accepts at most three requests for one fixed model/path.
 func runFingerprintViaTransport(ctx context.Context, client *http.Client, config map[string]any) (json.RawMessage, error) {
+	return runFingerprintViaTransportProgress(ctx, client, config, nil, nil)
+}
+
+func runFingerprintViaTransportProgress(ctx context.Context, client *http.Client, config map[string]any, resume json.RawMessage, checkpoint func(json.RawMessage, json.RawMessage) error) (json.RawMessage, error) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, errors.New("指纹检测传输初始化失败")
@@ -258,7 +267,26 @@ func runFingerprintViaTransport(ctx context.Context, client *http.Client, config
 		query = "alt=sse"
 	}
 	var requests atomic.Int32
+	var checkpoints atomic.Int32
+	requestLimit := int32(3)
+	if count, valid := validateFingerprintSamples(resume, config); valid && count < 3 {
+		requestLimit -= int32(count)
+	}
 	server := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" && r.URL.Path == "/checkpoint" && r.URL.RawQuery == "" && r.Header.Get("Authorization") == "Bearer "+token && checkpoint != nil {
+			if checkpoints.Add(1) > requestLimit {
+				http.Error(w, "invalid checkpoint", 400)
+				return
+			}
+			raw, err := io.ReadAll(io.LimitReader(r.Body, fingerprintSampleBytes+1))
+			public, samples, decodeErr := decodeFingerprintCheckpoint(raw, config)
+			if err != nil || decodeErr != nil || checkpoint(public, samples) != nil {
+				http.Error(w, "checkpoint unavailable", 503)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		if r.Method != "POST" || r.URL.EscapedPath() != path || r.URL.RawQuery != query || r.Header.Get("Authorization") != "Bearer "+token && r.Header.Get("x-api-key") != token && r.Header.Get("x-goog-api-key") != token {
 			http.Error(w, "invalid probe", 403)
 			return
@@ -277,7 +305,7 @@ func runFingerprintViaTransport(ctx context.Context, client *http.Client, config
 		if config["format"] == "gemini" {
 			validBody = decodeErr == nil && body.Model == "" && len(raw) > 0 && raw[0] == '{'
 		}
-		if !validBody || requests.Add(1) > 3 {
+		if !validBody || requests.Add(1) > requestLimit {
 			http.Error(w, "invalid probe", 400)
 			return
 		}
@@ -331,5 +359,14 @@ func runFingerprintViaTransport(ctx context.Context, client *http.Client, config
 	go func() { _ = server.Serve(listener) }()
 	defer server.Close()
 	local := map[string]any{"model": model, "base_url": "http://" + listener.Addr().String(), "key": token, "format": config["format"]}
-	return runFingerprintProcess(ctx, local)
+	if len(resume) > 0 {
+		local["resume"] = resume
+	}
+	local["checkpoint"] = checkpoint != nil
+	raw, err := runFingerprintProcess(ctx, local)
+	if err != nil {
+		return nil, err
+	}
+	public, _, err := decodeFingerprintCheckpoint(raw, config)
+	return public, err
 }

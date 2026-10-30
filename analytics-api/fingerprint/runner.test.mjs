@@ -24,9 +24,49 @@ test('separate collection and scoring preserve results and never return raw outp
   assert.deepEqual(actual.candidates,expected.candidates);
   assert.deepEqual(actual.samples,collected.samples);
   assert.equal(actual.outputs,undefined);
+  assert.equal(actual._resume,undefined);
   collected.samples[0].state='error';
   assert.equal(scoreCollected(collected,reference).status,'error');
   assert.equal(scoreCollected(collected,reference).probability,null);
+});
+
+test('partial rounds retain only valid numeric evidence and request only missing samples',async()=>{
+  const config={base_url:'https://mock.example',key:'secret',model:'gpt-6-astra'};
+  const checkpoints=[];
+  let calls=0;
+  const response=text=>Response.json({status:'completed',output:[{type:'message',role:'assistant',content:[{type:'output_text',text}]}]});
+  const first=await collect(config,async()=>++calls===1?response(fixture['gpt-6-astra'][0].text):Response.json({error:{}},{status:429}),undefined,async c=>checkpoints.push(scoreCollected(c,reference,true)));
+  const a=scoreCollected(first,reference,true);
+  assert.equal(calls,3);assert.equal(a.used_outputs,1);assert.equal(a._resume.entries.length,1);assert.equal(checkpoints[0].used_outputs,1);
+  assert.equal(a._resume.entries[0].text,undefined);assert.ok(a._resume.entries[0].numbers.every(Number.isInteger));
+  calls=0;
+  const second=await collect({...config,resume:a._resume},async()=>++calls===1?response(fixture['gpt-6-astra'][1].text):Response.json({error:{}},{status:429}));
+  const b=scoreCollected(second,reference,true);
+  assert.equal(calls,2);assert.equal(b.used_outputs,2);assert.equal(b._resume.entries[0].sample.request_id,a._resume.entries[0].sample.request_id);
+  calls=0;
+  const third=await collect({...config,resume:b._resume},async()=>{calls++;return response(fixture['gpt-6-astra'][2].text)});
+  const c=scoreCollected(third,reference,true);
+  assert.equal(calls,1);assert.equal(c.used_outputs,3);assert.equal(c.status,'match');assert.equal(new Set(c._resume.entries.map(e=>e.expected_count)).size,3);
+  assert.deepEqual(c.candidates,score('gpt-6-astra',fixture['gpt-6-astra'],reference).candidates);
+  calls=0;
+  await collect({...config,resume:c._resume},async()=>{calls++;return response(fixture['gpt-6-astra'][0].text)});
+  assert.equal(calls,3,'a completed round must start over on the next explicit detection');
+});
+
+test('resume rejects incompatible or invalid evidence and checkpoint failure never repeats a paid call',async()=>{
+  const config={base_url:'https://mock.example',key:'secret',model:'gpt-6-astra'};
+  const response=()=>Response.json({status:'completed',output:[{type:'message',role:'assistant',content:[{type:'output_text',text:fixture['gpt-6-astra'][0].text}]}]});
+  const initial=scoreCollected(await collect(config,async()=>response()),reference,true)._resume;
+  initial.entries=initial.entries.slice(0,1);
+  for(const mutation of [r=>r.model='gpt-6.1-sol',r=>r.format='gemini',r=>r.reference_key='old',r=>r.entries[0].numbers=[1,2,3],r=>r.entries[0].numbers[0]=356,r=>r.entries.push(r.entries[0])]){
+    const resume=structuredClone(initial);mutation(resume);let calls=0;
+    await collect({...config,resume},async()=>{calls++;return response()});assert.equal(calls,3);
+  }
+  let calls=0;
+  await assert.rejects(collect(config,async()=>{calls++;return response()},undefined,async()=>{throw Error('persistence failed')}),/persistence failed/);
+  assert.equal(calls,1);
+  const failed=await collect({...config,resume:initial},async()=>Response.json({error:{}},{status:429}));
+  assert.deepEqual(scoreCollected(failed,reference,true)._resume.entries,initial.entries);
 });
 
 test('full reference bank, original scoring and the merged Astra/Sol class are preserved', () => {

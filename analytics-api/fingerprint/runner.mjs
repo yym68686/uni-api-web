@@ -11,10 +11,14 @@ import { analyzeSharedOutputs, supportsSharedDetector } from './upstream/shared-
 import { decodeDetector } from './upstream/detector-codec.ts';
 import { COMPLETION_TIMEOUT_MS } from './upstream/completion-request.ts';
 import { completeGemini } from './gemini.mjs';
+import { parseNumbers } from './upstream/fingerprint-core.js';
 
-const modelClasses = JSON.parse(readFileSync(new URL('./models.json', import.meta.url)));
+const modelBytes = readFileSync(new URL('./models.json', import.meta.url));
+const manifestBytes = readFileSync(new URL('./manifest.json', import.meta.url));
+const referenceKey = createHash('sha256').update(modelBytes).update(manifestBytes).digest('hex');
+const modelClasses = JSON.parse(modelBytes);
 export const models = Object.keys(modelClasses);
-const manifest = JSON.parse(readFileSync(new URL('./manifest.json', import.meta.url)));
+const manifest = JSON.parse(manifestBytes);
 export function loadReference() {
   const load = name => {
     const raw = gunzipSync(readFileSync(new URL(`./data/${name}.gz`, import.meta.url)));
@@ -57,9 +61,27 @@ function bounded(response) {
     },
   })), { status: response.status, headers: response.headers });
 }
-export async function collect(config, transport, signal) {
+// Persist numeric evidence only, never upstream text. Reconstructing a space
+// separated numeric run is exactly equivalent for the unchanged scorer.
+function resumable(config) {
+  const r = config.resume, format = config.format || 'responses';
+  if (!r || r.version !== 1 || r.model !== config.model || r.format !== format || r.reference_key !== referenceKey || !Array.isArray(r.entries) || r.entries.length >= 3) return [];
+  const ids = new Set(), lengths = new Set();
+  for (const entry of r.entries) {
+    const { numbers, expected_count, sample } = entry || {};
+    if (!Array.isArray(numbers) || numbers.length > 8192 || !Number.isInteger(expected_count) || expected_count < 292 || expected_count > 332 || numbers.length < Math.max(80, Math.ceil(expected_count * .55)) || !numbers.every(n => Number.isInteger(n) && n >= 1 && n <= 355) ||
+        sample?.state !== 'done' || typeof sample.request_id !== 'string' || !/^fingerprint-[a-zA-Z0-9-]{1,64}$/.test(sample.request_id) || ids.has(sample.request_id) || lengths.has(expected_count) || !Number.isSafeInteger(sample.duration_ms) || sample.duration_ms < 0) return [];
+    ids.add(sample.request_id); lengths.add(expected_count);
+  }
+  return r.entries.map(e => ({numbers:[...e.numbers],expected_count:e.expected_count,sample:{request_id:e.sample.request_id,state:'done',duration_ms:e.sample.duration_ms,expected_count:e.expected_count}}));
+}
+export async function collect(config, transport, signal, checkpoint) {
   if (!models.includes(config.model)) throw Error('unsupported_model');
-  const challenges = generateChallenges(3), outputs = [], samples = [];
+  const retained = resumable(config), usedLengths = retained.map(e=>e.expected_count);
+  // Generate a complete independent set, then take only the missing slots;
+  // distinct lengths are maintained across every continuation of this round.
+  const challenges = generateChallenges(3, usedLengths).slice(0, 3-retained.length);
+  const outputs = retained.map(e=>({text:e.numbers.join(' '),expected_count:e.expected_count})), samples = retained.map(e=>e.sample);
   const started = Date.now();
   // Stored gateway URLs may use private HTTP; retain upstream URL validation
   // using HTTPS, then restore the trusted configuration's transport protocol.
@@ -88,8 +110,12 @@ export async function collect(config, transport, signal) {
       const result = format === 'gemini'
         ? await completeGemini(cfg, challenge.prompt, boundedSend, requestSignal)
         : await complete(cfg, challenge.prompt, '', signal, undefined, boundedSend);
-      outputs.push({ text: result.text, expected_count: challenge.expected_count });
-      samples.push({ request_id: requestId, state: 'done', duration_ms: Date.now() - at, expected_count: challenge.expected_count });
+      const numbers = parseNumbers(result.text);
+      if (numbers.length > 8192) throw Error('sample_too_large');
+      const output = { text: result.text, expected_count: challenge.expected_count };
+      const sample = { request_id: requestId, state: 'done', duration_ms: Date.now() - at, expected_count: challenge.expected_count };
+      outputs.push(output); samples.push(sample);
+      if (numbers.length >= Math.max(80, Math.ceil(challenge.expected_count*.55))) retained.push({numbers,expected_count:challenge.expected_count,sample});
     } catch (error) {
       signal?.throwIfAborted();
       outputs.push({ text: '', expected_count: challenge.expected_count });
@@ -98,14 +124,18 @@ export async function collect(config, transport, signal) {
         // Do not persist arbitrary messages from an untrusted endpoint.
         message: '请求失败或输出不完整' });
     }
+    // Checkpoint failure stops collection before another paid call. It must not
+    // be mistaken for an upstream failure or cause a valid sample to be retried.
+    if (checkpoint) await checkpoint({ model:config.model,outputs,samples,retained,format:config.format || 'responses',checked_at:Math.floor(Date.now()/1000),duration_ms:Date.now()-started });
   }
-  return { model: config.model, outputs, samples, checked_at: Math.floor(Date.now() / 1000), duration_ms: Date.now() - started };
+  return { model: config.model, outputs, samples, retained, format:config.format || 'responses',checked_at: Math.floor(Date.now() / 1000), duration_ms: Date.now() - started };
 }
-export function scoreCollected(collected, reference = loadReference()) {
+export function scoreCollected(collected, reference = loadReference(), privateCheckpoint = false) {
   const started = Date.now();
   const result = score(collected.model, collected.outputs, reference);
   if (collected.samples.some(s => s.state === 'error')) { result.status = 'error'; result.probability = null; }
-  return { ...result, samples: collected.samples, checked_at: collected.checked_at, duration_ms: collected.duration_ms + Date.now() - started };
+  const saved = privateCheckpoint && collected.retained?.length ? {version:1,model:collected.model,format:collected.format,reference_key:referenceKey,entries:collected.retained} : undefined;
+  return { ...result, samples: collected.samples, checked_at: collected.checked_at, duration_ms: collected.duration_ms + Date.now() - started, ...(saved ? {_resume:saved} : {}) };
 }
 export async function detect(config, transport) {
   // Standalone detection validates before paid I/O. The shared server validates
@@ -131,14 +161,20 @@ export async function serve() {
       let input = '';
       for await (const chunk of req) {
         input += chunk;
-        if (input.length > 65536) throw Error('invalid_input');
+        if (input.length > 262144) throw Error('invalid_input');
       }
       const config = JSON.parse(input), base = new URL(config.base_url);
       // Only Go's authenticated ephemeral bridge is an allowed destination.
       if (base.protocol !== 'http:' || base.hostname !== '127.0.0.1' || base.username || base.password) throw Error('invalid_bridge');
-      const collected = await collect(config, undefined, controller.signal);
+      const checkpoint = async collected => {
+        if (!config.checkpoint) return;
+        const response = await fetch(new URL('/checkpoint',base),{method:'POST',redirect:'error',signal:controller.signal,
+          headers:{Authorization:`Bearer ${config.key}`,'Content-Type':'application/json'},body:JSON.stringify(scoreCollected(collected,reference,true))});
+        if (response.status !== 204) throw Error('checkpoint_failed');
+      };
+      const collected = await collect(config, undefined, controller.signal, checkpoint);
       controller.signal.throwIfAborted();
-      const result = scoreCollected(collected, reference);
+      const result = scoreCollected(collected, reference, true);
       res.writeHead(200, {'Content-Type':'application/json'}).end(JSON.stringify(result));
     } catch {
       if (!res.destroyed) res.writeHead(500).end('fingerprint_worker_failed');

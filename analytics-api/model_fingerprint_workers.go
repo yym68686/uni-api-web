@@ -243,7 +243,9 @@ func (s *Service) finishFingerprint(ctx context.Context, t fingerprintTarget, ru
 	if len(result) > 0 {
 		raw = string(result)
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE console_model_fingerprints SET state=$4,message=$5,result=$6,revision=$7,deadline=NULL,
+	// Preparation can fail or requeue before startFingerprintSamples validates the
+	// saved evidence. Without a new result, retain its original configuration ID.
+	_, err = tx.ExecContext(ctx, `UPDATE console_model_fingerprints SET state=$4,message=$5,result=COALESCE($6,result),revision=CASE WHEN $6 IS NULL OR $7='' THEN revision ELSE $7 END,deadline=NULL,
  updated_at=CASE WHEN $4='queued' THEN updated_at ELSE now() END
  WHERE scope=$1 AND model=$2 AND run_id=$3 AND state='running' AND (deadline>now() OR $4='interrupted')`, t.scope(), t.Model, run, state, message, raw, revision)
 	if err != nil {
@@ -297,9 +299,15 @@ func (s *Service) runClaimedFingerprint(parent context.Context, t fingerprintTar
 	if err == nil {
 		err = s.bindFingerprintSite(ctx, t, run, plan.site)
 	}
+	var resume json.RawMessage
+	if err == nil {
+		resume, err = s.startFingerprintSamples(ctx, t, run, plan)
+	}
 	if err == nil {
 		log.Printf("model_fingerprint_started run=%q site=%q model=%q", run, plan.site, t.Model)
-		result, err = runFingerprintViaTransport(ctx, &plan.client, plan.config)
+		result, err = runFingerprintViaTransportProgress(ctx, &plan.client, plan.config, resume, func(public, samples json.RawMessage) error {
+			return s.saveFingerprintSamples(ctx, t, run, plan.revision, public, samples)
+		})
 	}
 	state, message := "done", ""
 	if errors.Is(err, errFingerprintSiteBusy) {

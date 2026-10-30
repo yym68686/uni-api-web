@@ -16,7 +16,7 @@ export const fingerprintLabels: Record<string, string> = {
   match: "匹配", mismatch: "不匹配", insufficient: "样本不足", error: "检测失败",
   queued: "排队中", running: "检测中", interrupted: "已中断", untested: "未检测", not_applicable: "不适用",
 };
-export const fingerprintNote = "每个模型发起 3 次请求。Astra 与 6.1-sol 共用一个指纹类别；Gemini 3.1 Pro 对应 3.1 Pro Preview，3.8 Flash 和 4 Argon 各自独立。概率是请求类别在参考库内的相对概率，不代表身份保证或不降智概率。";
+export const fingerprintNote = "每轮累计 3 个有效样本；不足 3 个时保留已有样本，再次检测只补缺少的样本。满 3 个后再次检测开启新一轮；渠道配置或参考库变化时重新采样。Astra 与 6.1-sol 共用一个指纹类别；Gemini 3.1 Pro 对应 3.1 Pro Preview，3.8 Flash 和 4 Argon 各自独立。概率是请求类别在参考库内的相对概率，不代表身份保证或不降智概率。";
 export interface FingerprintTarget {
   source_id?: string; provider?: string; account_id?: string; group_id?: number; model: string;
 }
@@ -27,7 +27,7 @@ export interface FingerprintResult {
   candidates: { model: string; display_name: string; probability: number | null }[];
   samples?: { request_id: string; state: string; message?: string; http_status?: number }[];
 }
-export interface FingerprintRecord extends FingerprintTarget {state: string; message: string; revision: string; updated_at_ms?: number; result: FingerprintResult | null}
+export interface FingerprintRecord extends FingerprintTarget {state: string; message: string; revision: string; updated_at_ms?: number; retained_samples?: number; result: FingerprintResult | null}
 export const fingerprintReadMessage = (error: unknown) => error instanceof ApiError && error.status === 404 ? "指纹检测服务待更新" : "模型指纹读取失败";
 export const fingerprintBusy = (record?: FingerprintRecord) => record?.state === "queued" || record?.state === "running";
 export function fingerprintStatus(record?: FingerprintRecord) {
@@ -117,17 +117,21 @@ export function FingerprintPanel({ targets, revisions }: { targets: FingerprintT
     {targets.map(target => {
       let record = query.index.get(fingerprintKey(target));
       if (record?.state === "done" && target.source_id && fingerprintKey(record) === fingerprintKey(target) && revisions && record.revision !== revisions[JSON.stringify([target.source_id,target.provider])]) record = undefined;
-      const pending = fingerprintBusy(record), result = record?.state === "done" ? record.result : null;
+      const pending = fingerprintBusy(record), result = record?.result;
+      const retained = record?.retained_samples || 0;
+      const partial = retained > 0 && retained < 3;
       const supported = query.supportedModels.includes(target.model);
       const actionTarget = pending && record ? {source_id:record.source_id,provider:record.provider,account_id:record.account_id,group_id:record.group_id,model:record.model} : target;
       return <div className="fingerprint-detail" key={fingerprintKey(target)}>
         <div className="fingerprint-heading"><strong>{target.model}</strong>{query.isError ? <span className="muted">待启用</span> : !supported && !record ? <span className="muted">指纹检测服务待更新</span> : <FingerprintStatus record={record}/>}
-          <button className="button small" disabled={busy || query.isError || query.isPending || !supported} title={fingerprintNote} onClick={() => void run(actionTarget, pending)}>{pending ? "取消检测" : "检测指纹"}</button>
+          <button className="button small" disabled={busy || query.isError || query.isPending || !supported} title={fingerprintNote} onClick={() => void run(actionTarget, pending)}>{pending ? "取消检测" : partial ? "继续采样" : "检测指纹"}</button>
         </div>
         {!query.isError && !query.isPending && !supported && <p className="muted">后台正在更新此模型的指纹检测支持，完成后自动启用。<button className="button small" onClick={() => void query.refetch()}>重新检查</button></p>}
         {record?.message && <p className="muted">{record.message}</p>}
         {result && <details><summary>检测详情{result.checked_at ? ` · ${time(result.checked_at)}` : ""}</summary>
           <p className="muted">有效样本 {result.used_outputs}/3 · 目标类别 {result.expected_class}</p>
+          {partial && <p className="muted">已保留 {retained} 个有效样本，{pending ? "正在补充" : "再次检测仅补充"}剩余 {3-retained} 个。</p>}
+          {!retained && result.used_outputs > 0 && result.used_outputs < 3 && <p className="muted">此旧记录未保留可续采样本，下一次检测将开始可累计的新一轮。</p>}
           {result.candidates?.length > 0 && <ol>{result.candidates.map(c => <li key={c.model}>{c.display_name} <span className="mono">{rate(c.probability)}</span></li>)}</ol>}
           {result.samples?.filter(s=>s.state==="error").map(s=><p key={s.request_id}>{s.message}{s.http_status ? ` · HTTP ${s.http_status}` : ""}</p>)}
           <small className="muted">lm-detector · {result.reference_commit?.slice(0,12)}</small>

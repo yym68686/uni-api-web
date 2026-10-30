@@ -52,6 +52,25 @@ it("queues/cancels only fingerprint jobs and retains independent legacy detectio
  await user.click(screen.getByRole("button",{name:"取消检测"}));await screen.findByText("已中断");
  expect(writes).toEqual(Array(2).fill({targets:[{account_id:"one",group_id:1,model:"gpt-6-astra"}]}));
 });
+it.each(["done","running","queued","interrupted","error"])("retains partial sample details while %s and offers continuation",async(state)=>{
+ const partial={...record,state,retained_samples:1,result:{...record.result!,status:"error",probability:null,used_outputs:1}};
+ vi.stubGlobal("fetch",vi.fn(async(path:string)=>Response.json(path.endsWith("/model-fingerprints")?{data:[partial],supported_models:FINGERPRINT_MODELS}:{data:[],unavailable_sources:[]})));
+ mount(<FingerprintPanel targets={[{account_id:"one",group_id:1,model:"gpt-6-astra"}]}/>);
+ await screen.findByText("有效样本 1/3 · 目标类别 gpt-6-astra/6.1-sol");
+ expect(screen.getByText(/已保留 1 个有效样本/)).toBeInTheDocument();
+ expect(screen.getByRole("button",{name:state==="running"||state==="queued"?"取消检测":"继续采样"})).toBeEnabled();
+ expect(screen.queryByText("12.0%")).not.toBeInTheDocument();
+});
+
+it("explains why a legacy count cannot be resumed without numeric evidence",async()=>{
+ const legacy={...record,result:{...record.result!,used_outputs:1,status:"error",probability:null}};
+ vi.stubGlobal("fetch",vi.fn(async(path:string)=>Response.json(path.endsWith("/model-fingerprints")?{data:[legacy],supported_models:FINGERPRINT_MODELS}:{data:[],unavailable_sources:[]})));
+ mount(<FingerprintPanel targets={[{account_id:"one",group_id:1,model:"gpt-6-astra"}]}/>);
+ await screen.findByText("此旧记录未保留可续采样本，下一次检测将开始可累计的新一轮。");
+ expect(screen.getByRole("button",{name:"检测指纹"})).toBeEnabled();
+ expect(screen.queryByRole("button",{name:"继续采样"})).not.toBeInTheDocument();
+});
+
 it.each(["gpt-6-astra","gemini-3.1-pro","gemini-3.8-flash","gemini-4-argon"])("channel management filters %s fingerprints independently of quality",async(model)=>{
  const scoped={...record,model,result:{...record.result!,model}};
  const accounts=["one","two"].map(id=>({id,name:id,base:`https://${id}.test`,email:"test",state:"idle",message:"",synced_at:1,targets:[{group_id:1,name:`group-${id}`,platform:"openai",channel:id,rate:1,key_id:1,active:true,state:"done",message:"",result:null}]}));
