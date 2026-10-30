@@ -51,11 +51,13 @@ func managementReceiptSubset(ctx context.Context, db controlQueryDB, owner strin
 			return nil, nil, err
 		}
 		var rows []managementCachedReceipt
-		if json.Unmarshal(entry.body, &rows) != nil {
+		body, valid := unpackManagementReceiptData(ctx, entry.body, entry.bodySize)
+		if !valid || json.Unmarshal(body, &rows) != nil {
 			continue
 		}
 		var absent []string
-		if len(entry.absent) != 0 && json.Unmarshal(entry.absent, &absent) != nil {
+		absence, valid := unpackManagementReceiptData(ctx, entry.absent, entry.absentSize)
+		if !valid || len(absence) != 0 && json.Unmarshal(absence, &absent) != nil {
 			continue
 		}
 		for _, row := range rows {

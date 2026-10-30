@@ -36,8 +36,11 @@ type managementReceiptSet struct {
 	// result. The version's rawAbsence kind separates raw SQL certificates from
 	// projection certificates; neither kind can substitute for the other.
 	absent []byte
-	rows   int
-	bytes  int
+	// Positive sizes identify losslessly packed payloads. Keep the original
+	// decoded bound so a damaged cache entry can only become a cache miss.
+	bodySize, absentSize int
+	rows                 int
+	bytes                int
 }
 type managementReceiptSets struct {
 	mu      sync.Mutex
@@ -163,11 +166,15 @@ func (c *managementReceiptSets) put(entry *managementReceiptSet) (state manageme
 }
 
 func storeManagementReceiptSet(ctx context.Context, store *managementReceiptSets, entry *managementReceiptSet) bool {
+	entry.pack(ctx)
+	if ctx.Err() != nil {
+		return false
+	}
 	state := store.put(entry)
 	// Logging is deliberately outside the cache lock. Admission/eviction rules
 	// and immutable cached values are unchanged by observation.
 	if managementTraceEnabled(ctx) {
-		log.Printf("management_receipt_cache_store raw_absence=%t strict=%t stored=%t entry_rows=%d entry_bytes=%d entries=%d bytes=%d evicted_version=%d replaced=%d evicted_count=%d evicted_bytes=%d evicted_both=%d phase=%s request_id=%s", entry.version.rawAbsence, entry.version.strict, state.stored, entry.rows, entry.bytes, state.entries, state.bytes, state.versionEvictions, state.replacements, state.countEvictions, state.byteEvictions, state.countAndByteEvictions, managementReceiptPhase(ctx), consoleRequestID(ctx))
+		log.Printf("management_receipt_cache_store raw_absence=%t strict=%t stored=%t entry_rows=%d entry_bytes=%d entries=%d bytes=%d evicted_version=%d replaced=%d evicted_count=%d evicted_bytes=%d evicted_both=%d packed=%t payload_bytes=%d phase=%s request_id=%s", entry.version.rawAbsence, entry.version.strict, state.stored, entry.rows, entry.bytes, state.entries, state.bytes, state.versionEvictions, state.replacements, state.countEvictions, state.byteEvictions, state.countAndByteEvictions, entry.bodySize > 0 || entry.absentSize > 0, max(len(entry.body), entry.bodySize)+max(len(entry.absent), entry.absentSize), managementReceiptPhase(ctx), consoleRequestID(ctx))
 	}
 	return state.stored
 }
@@ -196,7 +203,8 @@ func readManagementReceiptSet(ctx context.Context, db controlQueryDB, owner stri
 	}
 	if entry != nil {
 		var rows []managementCachedReceipt
-		if json.Unmarshal(entry.body, &rows) == nil {
+		body, valid := unpackManagementReceiptData(ctx, entry.body, entry.bodySize)
+		if valid && json.Unmarshal(body, &rows) == nil {
 			var out map[string]managementStreamReceipt
 			if rows != nil {
 				out = make(map[string]managementStreamReceipt, len(rows))
@@ -212,6 +220,9 @@ func readManagementReceiptSet(ctx context.Context, db controlQueryDB, owner stri
 			}
 			return out, nil
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	out, err := read()
 	if err != nil {

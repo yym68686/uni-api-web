@@ -35,7 +35,8 @@ func readManagementRawReceiptAbsences(ctx context.Context, db controlQueryDB, ow
 			return err
 		}
 		var absent []string
-		if json.Unmarshal(entry.absent, &absent) != nil {
+		body, valid := unpackManagementReceiptData(ctx, entry.absent, entry.absentSize)
+		if !valid || json.Unmarshal(body, &absent) != nil {
 			continue
 		}
 		for _, id := range absent {
@@ -56,6 +57,9 @@ func readManagementRawReceiptAbsences(ctx context.Context, db controlQueryDB, ow
 				rawIDs = append(rawIDs, id)
 			}
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if len(rawIDs) > 0 {
 		if err := read(rawIDs); err != nil {
