@@ -127,7 +127,10 @@ func TestManagementReceiptAbsenceKeepsFilteredPageAndAddContext(t *testing.T) {
 		if err != nil || wantErr != nil || !reflect.DeepEqual(got.Page, want.Page) || !reflect.DeepEqual(managementContextForPage(got.View, got.Page, model), managementContextForPage(want.View, want.Page, model)) {
 			t.Fatal("absence reuse changed complete filtered page or add context", model, err, wantErr)
 		}
-		if !strings.Contains(optimizedLogs, "absent=25 ") || !strings.Contains(optimizedLogs, "management_raw_receipt_absence reused=25 raw_ids=0 stored=false phase=page ") || strings.Contains(optimizedLogs, "stage=page_receipts ") {
+		// No price predicate needs the earlier model receipt read. The account
+		// read still certifies raw absence; the page must reuse that certificate
+		// even though projection absence is first discovered during hydration.
+		if !strings.Contains(optimizedLogs, "management_signal_receipts deferred=true ") || !strings.Contains(optimizedLogs, "management_raw_receipt_absence reused=25 raw_ids=0 stored=false phase=page ") || strings.Contains(optimizedLogs, "stage=page_receipts ") {
 			t.Fatal("filtered page did not distinguish certified raw and projection absences", model, optimizedLogs)
 		}
 	}

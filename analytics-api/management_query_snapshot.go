@@ -129,7 +129,7 @@ func (s *Service) readManagementQuerySnapshotMode(ctx context.Context, owner str
 		// this path can retain predicate receipts until same-snapshot hydration.
 		var reuse *managementReceiptReuse
 		if !selection {
-			reuse = &managementReceiptReuse{}
+			reuse = &managementReceiptReuse{deferModelUsage: filters.PriceStatus == ""}
 		}
 		view, err := s.readManagementDatabaseModeWithReceiptsFrom(ctx, tx, owner, facts, !selection, filters.Model, catalogOnly && !selection, reuse)
 		if err != nil {

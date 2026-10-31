@@ -223,9 +223,13 @@ func TestManagementHydrationIncludesEveryAliasMemberOutsidePreferredGroup(t *tes
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	compact, err := s.readManagementDatabaseViewFrom(ctx, tx, "owner", nil, true)
+	reuse := &managementReceiptReuse{deferModelUsage: true}
+	compact, err := s.readManagementDatabaseModeWithReceiptsFrom(ctx, tx, "owner", nil, true, "", false, reuse)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if reuse.current(tx, "owner") == nil || len(reuse.receipts) != 0 {
+		t.Fatal("alias fixture did not defer non-price model receipts")
 	}
 	full, err := s.readManagementDatabaseViewFrom(ctx, tx, "owner", nil, false)
 	if err != nil {

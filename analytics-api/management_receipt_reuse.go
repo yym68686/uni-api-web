@@ -14,6 +14,9 @@ type managementReceiptReuse struct {
 	tx       *sql.Tx
 	owner    string
 	receipts map[string]managementStreamReceipt
+	// Only a page without price predicates may request deferral. The stream
+	// confirms the complete compact proof before activating it for this tx.
+	deferModelUsage bool
 	// Diagnostic identities only, never evidence for skipping a lookup. A
 	// successful account raw read can still have returned no row for an ID.
 	accountRawIDs map[string]struct{}

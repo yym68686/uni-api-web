@@ -163,6 +163,20 @@ independent typed maps. `rate_rows` and `rate_raw_rows` split actual prepared an
 fallback SQL timing. A cache hit skips only the rate query, not any page,
 permission, receipt, gateway or source validation.
 
+For paged reads without a price-status filter, `management_signal_receipts
+deferred=true requested=N` marks model receipt attachment deferred until the
+page's groups have been selected. Other filter and sort predicates do not use
+model receipt prices or token counts. This requires the current transaction's
+complete compact revision proof, including every receipt's typed validity and
+source/projection revision. Target and capability metadata keep their original
+receipt attachment; the selected page still hydrates every model of its groups
+and configured members. Price-status filtering, complete action selections,
+legacy revisions and unsupported evidence keep their original full reader.
+No partial page, weaker cursor revision, time-based cache or schema change is
+introduced. The deferred count is a candidate ID count, not a measured number
+of saved I/O operations or milliseconds; use the actual hydration/SQL timings
+and complete response to assess production results.
+
 `management_receipt_set_cache` may reuse one completed selected-ID receipt
 projection only for the exact deduplicated ID set, strictness, owner, database
 and same current read-only RR proof. It additionally requires the projection's

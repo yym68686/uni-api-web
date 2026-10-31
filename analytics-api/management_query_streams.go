@@ -114,7 +114,17 @@ func readManagementScopedStreams(ctx context.Context, db controlQueryDB, owner s
 		log.Printf("management_signal_scope compact_revision=%t catalog_only=%t model_scoped=%t models=%d receipt_ids=%d request_id=%s", compact, scope.CatalogOnly, scope.Model != "", len(models), len(ids), consoleRequestID(ctx))
 	}
 	endReceipts := managementReadSpan(ctx, "database_signal_receipts")
-	receipts, err := readManagementStreamReceipts(ctx, db, owner, ids, strict)
+	// Without price predicates, only the visible page needs model usage. The
+	// compact revision still covers ALL receipts (and their full typed validity),
+	// so skipping this private attachment cannot weaken revisions or errors.
+	// Legacy/full readers and price filtering keep their original complete read.
+	deferred := compact && scope.ReceiptReuse != nil && scope.ReceiptReuse.deferModelUsage
+	var receipts map[string]managementStreamReceipt
+	if !deferred {
+		receipts, err = readManagementStreamReceipts(ctx, db, owner, ids, strict)
+	} else if managementTraceEnabled(ctx) {
+		log.Printf("management_signal_receipts deferred=true requested=%d request_id=%s", len(ids), consoleRequestID(ctx))
+	}
 	endReceipts()
 	if err != nil {
 		return nil, "", err
