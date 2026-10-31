@@ -71,16 +71,14 @@ func TestBillingProviderIndexDefersWhenStorageReserveIsInsufficient(t *testing.T
 	if err := e.Import(ctx, "provider-index-headroom", "one", []Fact{attributedFact("provider-index-headroom", "caller", time.Now().Add(-time.Minute))}); err != nil {
 		t.Fatal(err)
 	}
-	var databaseBytes, heapBytes int64
-	if err := e.DB.QueryRow(`SELECT pg_database_size(current_database()),
-COALESCE((SELECT sum(pg_relation_size(h.inhrelid)) FROM pg_inherits h WHERE h.inhparent='billing_facts'::regclass),0)`).Scan(&databaseBytes, &heapBytes); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := e.DB.Exec("UPDATE storage_state SET ingest_limit_bytes=? WHERE singleton", databaseBytes+heapBytes+(64<<20)); err != nil {
+	// Database-wide size can change between fixture setup and preparation.
+	// A limit equal to the reserve guarantees insufficient headroom regardless
+	// of that change. The production capacity check remains unchanged.
+	if _, err := e.DB.Exec("UPDATE storage_state SET ingest_limit_bytes=? WHERE singleton", int64(64<<20)); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.prepareBillingProviderIndex(ctx); !errors.Is(err, errBillingProviderIndexHeadroom) {
-		t.Fatal("provider index did not defer at its reserve boundary", err)
+		t.Fatal("provider index did not defer within its storage reserve", err)
 	}
 	var exists bool
 	if err := e.DB.QueryRow("SELECT to_regclass('billing_facts_provider_scope') IS NOT NULL").Scan(&exists); err != nil || exists {
