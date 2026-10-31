@@ -303,6 +303,8 @@ func readManagementStreamModels(ctx context.Context, db controlQueryDB, owner st
 			}
 		}
 	} else {
+		observation := beginManagementModelReadObservation(ctx, db, query, len(positions.values))
+		observedRows := 0
 		readTrace := newManagementRowsTraceDerivedDecode(ctx, "model_signal_rows")
 		rows, err := db.QueryContext(ctx, query, args...)
 		if err != nil {
@@ -319,6 +321,7 @@ func readManagementStreamModels(ctx context.Context, db controlQueryDB, owner st
 			if err := apply(value); err != nil {
 				return nil, nil, err
 			}
+			observedRows++
 			if store != nil {
 				values = append(values, value)
 			}
@@ -329,6 +332,10 @@ func readManagementStreamModels(ctx context.Context, db controlQueryDB, owner st
 		}
 		readTrace.finish()
 		readTrace = nil
+		// Exhaust and close the business stream before issuing any metadata SQL
+		// on its pinned connection. No other business SQL enters this delta.
+		rows.Close()
+		observation.finish(ctx, observedRows)
 	}
 	stages.next("signal_model_verify")
 	for _, model := range out {

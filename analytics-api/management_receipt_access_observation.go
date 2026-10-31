@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 )
 
@@ -15,7 +16,16 @@ type managementReceiptAccess struct {
 }
 
 func managementReceiptAccessSnapshot(ctx context.Context, tx *sql.Tx) (managementReceiptAccess, error) {
+	return managementSignalAccessSnapshot(ctx, tx, "console_management_receipt_signal")
+}
+
+// Fixed signal relations only. The relation remains a bound regclass value;
+// no diagnostic request can choose an arbitrary relation or supply SQL text.
+func managementSignalAccessSnapshot(ctx context.Context, tx *sql.Tx, relation string) (managementReceiptAccess, error) {
 	var out managementReceiptAccess
+	if relation != "console_management_receipt_signal" && relation != "console_management_model_signal" {
+		return out, errors.New("unsupported management signal relation")
+	}
 	err := tx.QueryRowContext(ctx, `SELECT seq_scan,seq_tup_read,COALESCE(idx_scan,0),COALESCE(idx_tup_fetch,0),
  pg_catalog.pg_stat_get_xact_blocks_fetched(relid),pg_catalog.pg_stat_get_xact_blocks_hit(relid),
  index_io.fetched,index_io.hit
@@ -25,7 +35,7 @@ func managementReceiptAccessSnapshot(ctx context.Context, tx *sql.Tx) (managemen
  COALESCE(sum(pg_catalog.pg_stat_get_xact_blocks_hit(indexrelid)),0)::bigint AS hit
  FROM pg_catalog.pg_index WHERE indrelid=receipt.relid
  ) AS index_io
- WHERE relid='console_management_receipt_signal'::regclass AND current_setting('track_counts')='on'`).Scan(
+ WHERE relid=$1::regclass AND current_setting('track_counts')='on'`, relation).Scan(
 		&out.seq, &out.seqRows, &out.index, &out.indexRows, &out.heapFetch, &out.heapHit, &out.indexFetch, &out.indexHit)
 	return out, err
 }

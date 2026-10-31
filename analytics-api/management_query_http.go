@@ -42,7 +42,7 @@ type managementSelectionResponse struct {
 func parseManagementQuery(values url.Values) (managementQueryFilters, error) {
 	filters := managementQueryFilters{GroupStatus: "available"}
 	for key, list := range values {
-		if !slices.Contains([]string{"filters", "cursor", "selection", "refresh_cursor", "observe_receipt_plan"}, key) || len(list) != 1 || len(list[0]) > 8192 {
+		if !slices.Contains([]string{"filters", "cursor", "selection", "refresh_cursor", "observe_receipt_plan", "observe_model_read"}, key) || len(list) != 1 || len(list[0]) > 8192 {
 			return filters, errManagementFilters
 		}
 	}
@@ -50,6 +50,9 @@ func parseManagementQuery(values url.Values) (managementQueryFilters, error) {
 		return filters, errManagementFilters
 	}
 	if values.Has("observe_receipt_plan") && !slices.Contains([]string{"1", "hydrate"}, values.Get("observe_receipt_plan")) {
+		return filters, errManagementFilters
+	}
+	if values.Has("observe_model_read") && values.Get("observe_model_read") != "1" {
 		return filters, errManagementFilters
 	}
 	raw := values.Get("filters")
@@ -160,6 +163,9 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	if mode := values.Get("observe_receipt_plan"); mode != "" {
 		ctx = context.WithValue(ctx, managementReceiptPlanKey{}, &managementReceiptPlanRequest{hydrationOnly: mode == "hydrate"})
+	}
+	if values.Get("observe_model_read") == "1" {
+		ctx = context.WithValue(ctx, managementModelReadKey{}, &managementModelReadRequest{})
 	}
 	start := time.Now()
 	cacheCursor := computedCursor

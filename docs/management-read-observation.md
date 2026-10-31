@@ -299,6 +299,32 @@ click-to-paint acceptance. Compare deployed stages and complete browser timing
 before drawing those conclusions. Opening the dialog, selecting a key and
 refreshing after an accepted real add remain distinct operations.
 
+### Optional model read observation
+
+An authenticated query can add `observe_model_read=1` to observe the first
+uncached, bounded model primary-key seek. Other values and duplicate flags
+are rejected. This changes neither filters nor the public page/cursor/selection
+contract. Ordinary requests, cache hits, broad scans, unpinned reads, empty
+sets and sets over 4096 candidates run no model diagnostic SQL. Admission is
+limited to once per request and once per process per minute.
+
+`management_model_plan` reports the exact statement's generic/custom counter
+delta from the same pinned connection before and after the original SELECT.
+`management_model_access` reports only that transaction's model relation
+scan/tuple and heap/index buffer access deltas. The row stream is exhausted and
+closed before the second metadata read; unrelated business reads do not enter
+the delta. Conditions, identities, SQL text, statement names and parameter
+values are never logged. Only the two fixed signal relations are accepted by
+the shared metadata reader, with the relation bound as a regclass value.
+
+Optional metadata failures use a savepoint; the business SELECT and decoder
+are never retried or recovered. This adds no EXPLAIN, relation data scan,
+execution-mode change, extension or database-setting change. Shared-buffer
+misses are not physical disk operations/timings. Request-correlated external
+wait samples remain necessary to distinguish I/O and locks; the counter delta
+does not prove a storage cause. Diagnostic metadata time is separately logged,
+and diagnostic requests are not ordinary-operation latency acceptance samples.
+
 ### Optional receipt plan-mode observation
 
 An authenticated management query can explicitly add `observe_receipt_plan=1`.
