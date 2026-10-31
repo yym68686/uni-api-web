@@ -333,6 +333,20 @@ storage latency or the execution tree**. PostgreSQL versions may count separate
 array index searches individually; `index_scans` is not an EXPLAIN node count.
 No extension, statistics reset/flush, timing setting or database change is needed.
 
+The same metadata SELECT also reads `pg_stat_get_xact_blocks_fetched/hit` for
+the receipt heap and sums these counters across its indexes. Before/after
+deltas emit `heap_buffer_hits`, `heap_buffer_reads`, `index_buffer_hits` and
+`index_buffer_reads`. A read is a shared-buffer miss (`fetched - hit`), which
+may still be satisfied by the operating system's page cache; it does **not**
+prove a physical-disk operation or measure I/O duration. These counts cover
+the current backend's transaction, not concurrent requests or whole-server
+cumulative traffic. Metadata reads do not access the observed heap or indexes.
+Disabled `track_counts`, missing data or any regressing access/hit/miss counter
+make the optional observation unavailable. No additional SQL is added to
+ordinary requests, and no timing option is enabled. Interpret these counts
+alongside the matching SQL ready/advance durations and wait samples before
+attributing a slow read to storage.
+
 Only whitelisted counters, state/wait labels, fixed query classes and correlated
 request IDs are emitted. No raw SQL, query parameters, business identities,
 payloads, subprocess errors, connection strings or credentials are printed.
