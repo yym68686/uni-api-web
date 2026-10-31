@@ -146,13 +146,17 @@ func (s *Service) readManagementDatabaseModeWithReceiptsFrom(ctx context.Context
 			return s.control.subObservedRatesPreparedFrom(ctx, db, owner, "")
 		}
 	}
-	// Mark this raw read even on fallback/catalog-only paths. A request can
-	// contain both account and page receipt SQL; their timings must not share
-	// the page_receipts label. The reader, SQL and attachment behavior are the
-	// same with a nil current lookup.
+	// Paged predicate reads normalize account metadata immediately below, just
+	// like page hydration. Use the same fully validated five-field receipts for
+	// those summaries. Ordinary/detail/selection and catalog-only reads keep
+	// the complete raw decoder. Both projected and raw account timings remain
+	// distinct from the later page hydration.
 	current := out.receiptReuse.current(db, owner)
 	readUsage := func(accounts []subAccount) error {
 		accountCtx := context.WithValue(ctx, managementAccountReceiptsKey{}, true)
+		if out.ProjectedModels && current != nil {
+			return s.attachManagementSummaryUsageFrom(accountCtx, db, owner, accounts, out.receiptReuse)
+		}
 		accountCtx = out.receiptReuse.traceRawIDs(accountCtx, db, owner)
 		return s.subAttachUsageWithCurrentFrom(accountCtx, db, owner, accounts, current)
 	}

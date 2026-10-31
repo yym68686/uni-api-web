@@ -193,6 +193,16 @@ before splitting it into bounded batches. This fixes batch membership across
 map iterations; it does not relax exact-set invalidation or cache missing IDs
 as resolved receipts. Smaller pages retain their original batching path.
 
+Paged predicate reads also use this validated five-field receipt projection for
+legacy account target metadata, which is normalized before revisions, filters
+and public results are built. `database_account_receipt_signals` and
+`management_account_receipt_signals requested=N resolved=N` identify that
+separate stage. Only valid signals replace raw JSON; absent, foreign or
+unsupported receipts still use the complete owner-scoped raw decoder, logged
+as `account_receipts`. The account stage does not consume a hydration-only
+diagnostic. Ordinary account/detail/selection and catalog-only reads retain
+their original path. No new cache budget, schema or database setting is added.
+
 The scalar `management_receipt_cache_lookup` reports the lookup's locked
 snapshot: entry/byte totals, entries under the current owner/database/proof,
 and exact-ID/strictness/kind sets retained under a different proof. A miss does

@@ -7,12 +7,16 @@ import (
 	"slices"
 )
 
-// Only hydrated management pages immediately normalize every usage to these
+// Management account metadata and hydrated pages normalize every usage to these
 // five fields. A valid signal has checked the ENTIRE raw typed payload, not
 // just the fields being projected. Missing/unsupported signals retain the raw
 // decoder, its errors, and its owner check. No evidence survives this pinned
 // snapshot; ordinary account/detail/selection reads remain unchanged.
 func (s *Service) attachManagementPageSummaryUsageFrom(ctx context.Context, db controlQueryDB, owner string, accounts []subAccount, reuse *managementReceiptReuse) error {
+	return s.attachManagementSummaryUsageFrom(ctx, db, owner, accounts, reuse)
+}
+
+func (s *Service) attachManagementSummaryUsageFrom(ctx context.Context, db controlQueryDB, owner string, accounts []subAccount, reuse *managementReceiptReuse) error {
 	tx, pinned := db.(*sql.Tx)
 	if !pinned || tx == nil {
 		return s.attachManagementPageUsageFrom(ctx, db, owner, accounts, reuse)
@@ -41,8 +45,14 @@ func (s *Service) attachManagementPageSummaryUsageFrom(ctx context.Context, db c
 	if len(ids) > 4096 {
 		slices.Sort(ids)
 	}
-	ctx = managementReceiptHydrationObservationContext(ctx)
-	end := managementReadSpan(ctx, "hydrate_receipt_signals")
+	stage, event := "hydrate_receipt_signals", "management_page_receipt_signals"
+	if managementReceiptPhase(ctx) == "account" {
+		stage, event = "database_account_receipt_signals", "management_account_receipt_signals"
+	} else {
+		// Hydration-only observations must not be consumed by account reads.
+		ctx = managementReceiptHydrationObservationContext(ctx)
+	}
+	end := managementReadSpan(ctx, stage)
 	receipts := make(map[string]managementStreamReceipt, len(ids))
 	// Keep every lookup on the existing selected-ID reader. Its full-owner
 	// scan for huge predicate sets is inappropriate for a bounded page.
@@ -60,7 +70,7 @@ func (s *Service) attachManagementPageSummaryUsageFrom(ctx context.Context, db c
 	}
 	end()
 	if managementTraceEnabled(ctx) {
-		log.Printf("management_page_receipt_signals requested=%d resolved=%d request_id=%s", len(ids), len(receipts), consoleRequestID(ctx))
+		log.Printf("%s requested=%d resolved=%d request_id=%s", event, len(ids), len(receipts), consoleRequestID(ctx))
 	}
 	lookup := func(id string) *subUsage {
 		if current != nil {

@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-func TestManagementPageSummaryReceiptsMatchCompleteDecoder(t *testing.T) {
+func TestManagementSummaryReceiptsMatchCompleteDecoder(t *testing.T) {
 	s := managementHydrationFixture(t)
 	ctx := context.Background()
 	for _, raw := range []string{
@@ -27,31 +27,37 @@ func TestManagementPageSummaryReceiptsMatchCompleteDecoder(t *testing.T) {
 		if _, err := s.control.db.Exec(`UPDATE console_sub_usage SET status='pending',result=$1 WHERE id='a-1-extra-model'`, raw); err != nil {
 			t.Fatal(err)
 		}
-		func() {
-			tx, err := s.control.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer tx.Rollback()
-			want, got := managementReceiptAccounts(), managementReceiptAccounts()
-			wantErr := s.subAttachUsageFrom(ctx, tx, "owner", want)
-			gotErr := s.attachManagementPageSummaryUsageFrom(ctx, tx, "owner", got, nil)
-			if (wantErr == nil) != (gotErr == nil) {
-				t.Fatal("decoder error changed", raw, wantErr, gotErr)
-			}
-			if wantErr != nil {
-				if wantErr.Error() != gotErr.Error() || !reflect.DeepEqual(want, got) {
-					t.Fatal("partial result or typed error changed", raw)
+		for _, phase := range []string{"page", "account"} {
+			func() {
+				tx, err := s.control.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+				if err != nil {
+					t.Fatal(err)
 				}
-				return
-			}
-			if err := normalizeManagementAccounts(want); err != nil {
-				t.Fatal(err)
-			}
-			if err := normalizeManagementAccounts(got); err != nil || !reflect.DeepEqual(want, got) {
-				t.Fatal("summary changed", raw, err)
-			}
-		}()
+				defer tx.Rollback()
+				want, got := managementReceiptAccounts(), managementReceiptAccounts()
+				// Cover the legacy target metadata compactor as well as model and
+				// capability usage; they do not share the same normalization code.
+				want[0].Targets[0].Result.Availability.ID = "a-1-extra-model"
+				got[0].Targets[0].Result.Availability.ID = "a-1-extra-model"
+				wantErr := s.subAttachUsageFrom(ctx, tx, "owner", want)
+				readCtx := context.WithValue(ctx, managementAccountReceiptsKey{}, phase == "account")
+				gotErr := s.attachManagementSummaryUsageFrom(readCtx, tx, "owner", got, nil)
+				if (wantErr == nil) != (gotErr == nil) {
+					t.Fatal("decoder error changed", phase, raw, wantErr, gotErr)
+				}
+				if wantErr != nil {
+					if wantErr.Error() != gotErr.Error() || !reflect.DeepEqual(want, got) {
+						t.Fatal("partial result or typed error changed", raw)
+					}
+					return
+				}
+				wantErr = normalizeManagementAccounts(want)
+				gotErr = normalizeManagementAccounts(got)
+				if (wantErr == nil) != (gotErr == nil) || wantErr != nil && (reflect.TypeOf(wantErr) != reflect.TypeOf(gotErr) || wantErr.Error() != gotErr.Error()) || wantErr == nil && !reflect.DeepEqual(want, got) {
+					t.Fatal("summary or legacy numeric error changed", phase, raw, wantErr, gotErr)
+				}
+			}()
+		}
 	}
 }
 

@@ -47,6 +47,14 @@ func TestManagementAccountReceiptReusePreservesWholeViewAndFallback(t *testing.T
 				} else if catalogOnly && strings.Contains(trace.String(), "management_receipt_reuse ") {
 					t.Fatal("catalog-only read invented verified receipts")
 				}
+				if !catalogOnly && model == "extra-model" {
+					if !strings.Contains(trace.String(), "management_account_receipt_signals requested=122 resolved=122 ") || strings.Contains(trace.String(), "stage=account_receipts ") {
+						t.Fatal("account metadata outside the model predicate still read full receipts")
+					}
+				}
+				if !catalogOnly && model == "missing-extra" && strings.Contains(trace.String(), "stage=account_receipts ") {
+					t.Fatal("missing custom model did not reuse its complete fallback predicates")
+				}
 				for _, private := range []string{"private", "embedded", "gpt-5.5", "owner"} {
 					if strings.Contains(trace.String(), private) {
 						t.Fatal("reuse trace leaked private evidence")

@@ -169,12 +169,12 @@ func TestManagementReceiptRawScopeInstalledAcrossAccountAndPageReaders(t *testin
 	// Normalization removes the legacy target's private IDs before hydration.
 	// The page reintroduces a-1-extra-model from its model row, not the absent
 	// quality ID from legacy metadata. With no price predicate, all 150 model
-	// receipts are first attached during hydration; account metadata retains its
-	// original raw reader and request correlation.
+	// receipts are first attached during hydration. Account metadata uses its
+	// validated summary receipt and retains the raw reader for the absent ID.
 	if result := snapshot.View.Input.Accounts[0].Targets[0].Result; result == nil || result.Availability.ID != "" || result.Quality.ID != "" {
 		t.Fatal("fixture did not normalize legacy private IDs before hydration")
 	}
-	for _, want := range []string{"stage=account_receipts ", "phase=account requested=2 prior_account=0 repeated=0 ", "management_page_receipt_signals requested=150 resolved=150 request_id=raw-scope-full-123"} {
+	for _, want := range []string{"management_account_receipt_signals requested=2 resolved=1 ", "stage=account_receipts ", "phase=account requested=1 prior_account=0 repeated=0 ", "management_page_receipt_signals requested=150 resolved=150 request_id=raw-scope-full-123"} {
 		if !strings.Contains(output.String(), want) {
 			for _, line := range strings.Split(output.String(), "\n") {
 				if strings.Contains(line, "management_receipt_raw_scope ") {
