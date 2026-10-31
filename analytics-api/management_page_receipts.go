@@ -41,6 +41,7 @@ func (s *Service) attachManagementPageSummaryUsageFrom(ctx context.Context, db c
 	if len(ids) > 4096 {
 		slices.Sort(ids)
 	}
+	ctx = managementReceiptHydrationObservationContext(ctx)
 	end := managementReadSpan(ctx, "hydrate_receipt_signals")
 	receipts := make(map[string]managementStreamReceipt, len(ids))
 	// Keep every lookup on the existing selected-ID reader. Its full-owner

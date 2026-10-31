@@ -15,7 +15,11 @@ import (
 // one-execution delta identifies this read's actual plan mode, unlike EXPLAIN
 // of an unrelated connection or a cumulative server-wide statistic.
 type managementReceiptPlanKey struct{}
-type managementReceiptPlanRequest struct{ used atomic.Bool }
+type managementReceiptHydrationKey struct{}
+type managementReceiptPlanRequest struct {
+	used          atomic.Bool
+	hydrationOnly bool
+}
 type managementReceiptPlanLimiter struct{ at atomic.Int64 }
 
 var managementReceiptPlanAdmission managementReceiptPlanLimiter
@@ -82,12 +86,21 @@ type managementReceiptPlanObservation struct {
 	metadata  time.Duration
 	rows      int
 	succeeded bool
+	phase     string
+}
+
+func managementReceiptHydrationObservationContext(ctx context.Context) context.Context {
+	if request, _ := ctx.Value(managementReceiptPlanKey{}).(*managementReceiptPlanRequest); request != nil {
+		return context.WithValue(ctx, managementReceiptHydrationKey{}, true)
+	}
+	return ctx
 }
 
 func beginManagementReceiptPlanObservation(ctx context.Context, db controlQueryDB, query string, args []any, ids int) *managementReceiptPlanObservation {
 	request, _ := ctx.Value(managementReceiptPlanKey{}).(*managementReceiptPlanRequest)
+	hydrating, _ := ctx.Value(managementReceiptHydrationKey{}).(bool)
 	tx, pinned := db.(*sql.Tx)
-	if request == nil || !pinned || tx == nil || ids < 1 || ids > 4096 || query != managementReceiptSelectedStreamSQL || ctx.Err() != nil ||
+	if request == nil || request.hydrationOnly && !hydrating || !pinned || tx == nil || ids < 1 || ids > 4096 || query != managementReceiptSelectedStreamSQL || ctx.Err() != nil ||
 		!request.used.CompareAndSwap(false, true) || !managementReceiptPlanAdmission.admit(time.Now()) {
 		return nil
 	}
@@ -109,7 +122,11 @@ func beginManagementReceiptPlanObservation(ctx context.Context, db controlQueryD
 		log.Printf("management_receipt_access available=false phase=before request_id=%s", consoleRequestID(ctx))
 		return nil
 	}
-	return &managementReceiptPlanObservation{tx: tx, query: query, args: args, before: before, access: access, ids: ids, metadata: time.Since(start)}
+	phase := "unspecified"
+	if hydrating {
+		phase = "hydrate"
+	}
+	return &managementReceiptPlanObservation{tx: tx, query: query, args: args, before: before, access: access, ids: ids, metadata: time.Since(start), phase: phase}
 }
 
 func finishManagementReceiptPlanSavepoint(ctx context.Context, tx *sql.Tx, successful bool) {
@@ -143,8 +160,8 @@ func (o *managementReceiptPlanObservation) finish(ctx context.Context) {
 		}
 	}
 	finishManagementReceiptPlanSavepoint(ctx, o.tx, err == nil)
-	log.Printf("management_receipt_plan cache_mode=%s generic_delta=%d custom_delta=%d ids=%d rows=%d metadata_ms=%d scope=same_connection_execution_delta request_id=%s",
-		mode, generic, custom, o.ids, o.rows, (o.metadata + time.Since(start)).Milliseconds(), consoleRequestID(ctx))
+	log.Printf("management_receipt_plan cache_mode=%s generic_delta=%d custom_delta=%d ids=%d rows=%d metadata_ms=%d phase=%s scope=same_connection_execution_delta request_id=%s",
+		mode, generic, custom, o.ids, o.rows, (o.metadata + time.Since(start)).Milliseconds(), o.phase, consoleRequestID(ctx))
 	log.Printf("management_receipt_plan_shape %s scope=same_connection_parameterized_estimate_not_execution_tree request_id=%s", plan, consoleRequestID(ctx))
-	log.Printf("management_receipt_access %s scope=current_transaction_receipt_relation_delta request_id=%s", accessDelta, consoleRequestID(ctx))
+	log.Printf("management_receipt_access %s phase=%s scope=current_transaction_receipt_relation_delta request_id=%s", accessDelta, o.phase, consoleRequestID(ctx))
 }

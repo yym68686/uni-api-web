@@ -172,10 +172,12 @@ func TestManagementReceiptPlanOptInKeepsValidationAuthorizationAndFilters(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	base.Set("observe_receipt_plan", "1")
-	got, err := parseManagementQuery(base)
-	if err != nil || !reflect.DeepEqual(got, want) {
-		t.Fatal("diagnostic changed filters", err)
+	for _, mode := range []string{"1", "hydrate"} {
+		base.Set("observe_receipt_plan", mode)
+		got, err := parseManagementQuery(base)
+		if err != nil || !reflect.DeepEqual(got, want) {
+			t.Fatal("diagnostic changed filters", mode, err)
+		}
 	}
 	for _, value := range []string{"", "0", "true", "1&sql=SELECT"} {
 		base.Set("observe_receipt_plan", value)
@@ -187,42 +189,90 @@ func TestManagementReceiptPlanOptInKeepsValidationAuthorizationAndFilters(t *tes
 	if _, err := parseManagementQuery(base); !errors.Is(err, errManagementFilters) {
 		t.Fatal("duplicate flag accepted")
 	}
-	s := managementHydrationFixture(t)
-	managementReceiptPlanAdmission.at.Store(0)
-	r := httptest.NewRequest(http.MethodGet, "/v1/channel-management/query?observe_receipt_plan=1", nil)
-	w := httptest.NewRecorder()
-	s.Handler().ServeHTTP(w, r)
-	if w.Code != http.StatusUnauthorized || managementReceiptPlanAdmission.at.Load() != 0 {
-		t.Fatal("diagnostic bypassed authentication", w.Code)
+	for _, mode := range []string{"1", "hydrate"} {
+		t.Run(mode, func(t *testing.T) {
+			s := managementHydrationFixture(t)
+			managementReceiptPlanAdmission.at.Store(0)
+			r := httptest.NewRequest(http.MethodGet, "/v1/channel-management/query?observe_receipt_plan="+mode, nil)
+			w := httptest.NewRecorder()
+			s.Handler().ServeHTTP(w, r)
+			if w.Code != http.StatusUnauthorized || managementReceiptPlanAdmission.at.Load() != 0 {
+				t.Fatal("diagnostic bypassed authentication", w.Code)
+			}
+			token, err := s.control.newSession(context.Background(), "owner")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var output bytes.Buffer
+			previous := log.Writer()
+			log.SetOutput(&output)
+			defer log.SetOutput(previous)
+			var before managementPageResponse
+			for _, suffix := range []string{"&observe_receipt_plan=" + mode, ""} {
+				r := httptest.NewRequest(http.MethodGet, "/v1/channel-management/query?filters="+url.QueryEscape(`{"model":"gpt-5.5"}`)+suffix, nil)
+				r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
+				w := httptest.NewRecorder()
+				s.Handler().ServeHTTP(w, r)
+				var page managementPageResponse
+				if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &page) != nil {
+					t.Fatal("diagnostic changed successful HTTP read", w.Code)
+				}
+				page.ReadAtMS = 0
+				if suffix != "" {
+					before = page
+					if mode == "1" && !strings.Contains(output.String(), "management_receipt_plan cache_mode=") {
+						t.Fatal("authenticated diagnostic did not reach pinned reader", output.String())
+					}
+					// This fixture may resolve all page receipts from the predicate
+					// read. Hydration mode must not force an extra SELECT to observe.
+					if mode == "hydrate" && strings.Contains(output.String(), "management_receipt_plan cache_mode=") && !strings.Contains(output.String(), "phase=hydrate ") {
+						t.Fatal("hydration diagnostic observed an earlier reader")
+					}
+					output.Reset()
+				} else if !reflect.DeepEqual(page, before) || strings.Contains(output.String(), "management_receipt_plan ") {
+					t.Fatal("diagnostic changed public snapshot or enabled ordinary observation")
+				}
+			}
+			managementReceiptPlanAdmission.at.Store(0)
+		})
 	}
-	token, err := s.control.newSession(context.Background(), "owner")
+}
+
+func TestManagementReceiptHydrationObservationWaitsForActualPageRead(t *testing.T) {
+	s := managementHydrationFixture(t)
+	ctx := context.Background()
+	if managementReceiptHydrationObservationContext(ctx) != ctx {
+		t.Fatal("ordinary hydration installed diagnostic state")
+	}
+	tx, err := s.control.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer tx.Rollback()
+	request := &managementReceiptPlanRequest{hydrationOnly: true}
+	ctx = context.WithValue(ctx, managementReceiptPlanKey{}, request)
+	managementReceiptPlanAdmission.at.Store(0)
+	defer managementReceiptPlanAdmission.at.Store(0)
 	var output bytes.Buffer
 	previous := log.Writer()
 	log.SetOutput(&output)
 	defer log.SetOutput(previous)
-	var before managementPageResponse
-	for _, suffix := range []string{"?observe_receipt_plan=1", ""} {
-		r := httptest.NewRequest(http.MethodGet, "/v1/channel-management/query"+suffix, nil)
-		r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
-		w := httptest.NewRecorder()
-		s.Handler().ServeHTTP(w, r)
-		var page managementPageResponse
-		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &page) != nil {
-			t.Fatal("diagnostic changed successful HTTP read", w.Code)
-		}
-		page.ReadAtMS = 0
-		if suffix != "" {
-			before = page
-			if !strings.Contains(output.String(), "management_receipt_plan cache_mode=") {
-				t.Fatal("authenticated diagnostic did not reach pinned reader", output.String())
-			}
-			output.Reset()
-		} else if !reflect.DeepEqual(page, before) || strings.Contains(output.String(), "management_receipt_plan ") {
-			t.Fatal("diagnostic changed public snapshot or enabled ordinary observation")
-		}
+	if _, err := readManagementStreamReceiptsUncached(ctx, tx, "owner", []string{"a-1-gpt-5.5"}, true); err != nil {
+		t.Fatal(err)
 	}
-	managementReceiptPlanAdmission.at.Store(0)
+	if request.used.Load() || managementReceiptPlanAdmission.at.Load() != 0 || output.Len() != 0 {
+		t.Fatal("earlier predicate consumed hydration diagnostic", output.String())
+	}
+	result := &subResult{Availability: subProbe{ID: "a-1-gpt-5.5"}}
+	accounts := []subAccount{{Targets: []subTarget{{Models: []subModelResult{{Result: result}}}}}}
+	if err := s.attachManagementPageSummaryUsageFrom(ctx, tx, "owner", accounts, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !request.used.Load() || !strings.Contains(output.String(), "phase=hydrate ") || !strings.Contains(output.String(), "management_receipt_access available=true ") || result.Availability.Usage == nil {
+		t.Fatal("actual page hydration was not observed or populated", output.String())
+	}
+	output.Reset()
+	if _, err := readManagementStreamReceiptsUncached(managementReceiptHydrationObservationContext(ctx), tx, "owner", []string{"q-1-gpt-5.5"}, true); err != nil || output.Len() != 0 {
+		t.Fatal("hydration diagnostic exceeded one query per request", err, output.String())
+	}
 }

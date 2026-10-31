@@ -294,6 +294,14 @@ ordinary page request enables this flag. At most one selected-ID receipt read
 per request and one per process per minute can observe metadata; cache hits can
 therefore produce no observation at all.
 
+Use `observe_receipt_plan=hydrate` to reserve that same single observation for
+the first uncached page-summary receipt SELECT. Earlier predicate reads do not
+consume the request or process admission. Its logs include `phase=hydrate`.
+This does not bypass any cache or retry a query, so a retained page or fully
+cached receipt set can still produce no observation. The existing `1` value
+continues to observe the first eligible SELECT in any phase. Both modes retain
+the same authentication, limits and unchanged public response.
+
 Immediately before and after the original SELECT, the same pinned database
 connection reads only the names and generic/custom execution counters from
 `pg_prepared_statements` for that exact SQL. An exact one-execution delta logs

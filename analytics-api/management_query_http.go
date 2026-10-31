@@ -49,7 +49,7 @@ func parseManagementQuery(values url.Values) (managementQueryFilters, error) {
 	if values.Has("refresh_cursor") && values.Get("refresh_cursor") != "1" {
 		return filters, errManagementFilters
 	}
-	if values.Has("observe_receipt_plan") && values.Get("observe_receipt_plan") != "1" {
+	if values.Has("observe_receipt_plan") && !slices.Contains([]string{"1", "hydrate"}, values.Get("observe_receipt_plan")) {
 		return filters, errManagementFilters
 	}
 	raw := values.Get("filters")
@@ -158,8 +158,8 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
-	if values.Get("observe_receipt_plan") == "1" {
-		ctx = context.WithValue(ctx, managementReceiptPlanKey{}, &managementReceiptPlanRequest{})
+	if mode := values.Get("observe_receipt_plan"); mode != "" {
+		ctx = context.WithValue(ctx, managementReceiptPlanKey{}, &managementReceiptPlanRequest{hydrationOnly: mode == "hydrate"})
 	}
 	start := time.Now()
 	cacheCursor := computedCursor
