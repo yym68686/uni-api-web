@@ -128,6 +128,19 @@ func consoleRequestID(ctx context.Context) string {
 	return id
 }
 
+// Measure each existing session validation, including the middleware and
+// handler reads. Do not cache identities or add diagnostic SQL: revocation,
+// expiry and database-error behavior must remain the original live checks.
+func consoleSessionReadSpan(r *http.Request) func() {
+	if consoleRequestID(r.Context()) == "" || consoleAlwaysObservedRead(r.Method, r.URL.Path) == "" {
+		return func() {}
+	}
+	start := time.Now()
+	return func() {
+		log.Printf("console_session_read elapsed_ms=%d canceled=%t request_id=%s", time.Since(start).Milliseconds(), r.Context().Err() != nil, consoleRequestID(r.Context()))
+	}
+}
+
 type observedResponse struct {
 	http.ResponseWriter
 	status, bytes int

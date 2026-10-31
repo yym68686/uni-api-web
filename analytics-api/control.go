@@ -380,6 +380,7 @@ func (s *Service) controlHandler() http.Handler {
 type userContextKey struct{}
 
 func (s *Service) controlUser(r *http.Request) (string, error) {
+	defer consoleSessionReadSpan(r)()
 	if s.control == nil {
 		return "", sql.ErrNoRows
 	}
