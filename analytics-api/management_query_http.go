@@ -42,7 +42,7 @@ type managementSelectionResponse struct {
 func parseManagementQuery(values url.Values) (managementQueryFilters, error) {
 	filters := managementQueryFilters{GroupStatus: "available"}
 	for key, list := range values {
-		if !slices.Contains([]string{"filters", "cursor", "selection", "refresh_cursor", "observe_receipt_plan", "observe_model_read", "receipt_view"}, key) || len(list) != 1 || len(list[0]) > 8192 {
+		if !slices.Contains([]string{"filters", "cursor", "selection", "refresh_cursor", "observe_receipt_plan", "observe_model_read", "receipt_view", "model_view"}, key) || len(list) != 1 || len(list[0]) > 8192 {
 			return filters, errManagementFilters
 		}
 	}
@@ -56,6 +56,9 @@ func parseManagementQuery(values url.Values) (managementQueryFilters, error) {
 		return filters, errManagementFilters
 	}
 	if values.Has("receipt_view") && values.Get("receipt_view") != "selected" {
+		return filters, errManagementFilters
+	}
+	if values.Has("model_view") && values.Get("model_view") != "selected" {
 		return filters, errManagementFilters
 	}
 	raw := values.Get("filters")
@@ -142,6 +145,10 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "单模型页面读取范围无效", http.StatusBadRequest)
 		return
 	}
+	if values.Has("model_view") && (filters.Model == "" || selection != "" || values.Get("receipt_view") != "selected") {
+		http.Error(w, "单模型页面读取范围无效", http.StatusBadRequest)
+		return
+	}
 	rebase := values.Get("refresh_cursor") == "1"
 	if cursor != "" && selection != "" || rebase && (cursor == "" || selection != "") {
 		http.Error(w, "分页与完整选择不可同时读取", http.StatusBadRequest)
@@ -170,6 +177,9 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	if values.Get("receipt_view") == "selected" {
 		ctx = context.WithValue(ctx, managementSelectedReceiptsKey{}, true)
+	}
+	if values.Get("model_view") == "selected" {
+		ctx = context.WithValue(ctx, managementSelectedModelsKey{}, true)
 	}
 	if mode := values.Get("observe_receipt_plan"); mode != "" {
 		ctx = context.WithValue(ctx, managementReceiptPlanKey{}, &managementReceiptPlanRequest{hydrationOnly: mode == "hydrate"})

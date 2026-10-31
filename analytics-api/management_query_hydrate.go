@@ -36,6 +36,7 @@ func (s *Service) hydrateManagementPageFrom(ctx context.Context, db controlQuery
 	}
 	groups := map[string]bool{}
 	fullGroups := map[string]bool{}
+	var projectedGroups map[string]bool
 	for _, row := range page.Rows {
 		if row.Account.ID != "" {
 			id := qualityGroupID(row.Account.ID, row.Target.GroupID)
@@ -74,7 +75,8 @@ func (s *Service) hydrateManagementPageFrom(ctx context.Context, db controlQuery
 				index[qualityGroupID(subset[i].ID, target.GroupID)] = target
 			}
 		}
-		err := readManagementPageModelStream(ctx, db, owner, wanted, func(row managementPageModelRecord, readTrace *managementRowsTrace) error {
+		var err error
+		projectedGroups, err = readManagementDisplayModelStream(ctx, db, owner, wanted, fullGroups, filters.Model, func(row managementPageModelRecord, readTrace *managementRowsTrace) error {
 			model := subModelResult{Model: row.model, State: row.state, Message: row.message}
 			decodeStart := readTrace.decodeStart()
 			var err error
@@ -153,6 +155,9 @@ func (s *Service) hydrateManagementPageFrom(ctx context.Context, db controlQuery
 		page.Rows[i] = full
 		if managementSelectedReceipts(ctx) && filters.Model != "" && full.Configured == nil && !fullGroups[qualityGroupID(full.Account.ID, full.Target.GroupID)] {
 			page.Rows[i].Target.ReceiptModel = filters.Model
+		}
+		if projectedGroups[qualityGroupID(full.Account.ID, full.Target.GroupID)] && full.Configured == nil {
+			page.Rows[i].Target.SummaryModel = filters.Model
 		}
 	}
 	return ctx.Err()

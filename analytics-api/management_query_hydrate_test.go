@@ -214,6 +214,7 @@ func TestManagementRevisionIncludesQueueAndQualityReceiptsButNotReceiptPollClock
 func TestManagementHydrationIncludesEveryAliasMemberOutsidePreferredGroup(t *testing.T) {
 	s := managementHydrationFixture(t)
 	ctx := context.WithValue(context.Background(), managementSelectedReceiptsKey{}, true)
+	ctx = context.WithValue(ctx, managementSelectedModelsKey{}, true)
 	prepareManagementRevisionsForTest(t, s.control.db)
 	if _, err := s.control.db.Exec(`UPDATE console_sub_models SET result=jsonb_set(result,'{availability,ttft_ms}','987') WHERE group_id=61 AND model='gpt-5.5'`); err != nil {
 		t.Fatal(err)

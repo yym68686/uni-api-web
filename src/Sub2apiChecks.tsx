@@ -31,6 +31,7 @@ import { Empty, Spinner, Tip } from "./ui";
 import { loadSubFilters, saveSubFilters, subFilterDefaults } from "./sub2apiPreferences";
 import { useImportBindings, boundGroups } from "./sub2apiImports";
 import { Sub2apiImport } from "./Sub2apiImport";
+import { readCompleteSubTarget } from "./subTargetDetails";
 import { CreateChannel } from "./CreateChannel";
 import { ChannelOptimization } from "./ChannelOptimization";
 import { ChannelProtocolSummary } from "./ChannelProtocolSummary";
@@ -95,6 +96,7 @@ export interface Result {
   verdict: string;
 }
 export interface SubTarget {
+  summary_model?: string;
   receipt_model?: string;
   observed_rates?: Record<string, ObservedRate>;
   details_omitted?: boolean;
@@ -600,7 +602,20 @@ function ManagementChannelDrawer({
   close: () => void;
   onOpenChannel: () => void;
 }) {
-  const { account, target, checks, selected, configured } = row;
+  const { account, configured } = row;
+  const complete = useQuery({
+    queryKey: ["sub-management-models", account.id, row.target.group_id],
+    enabled: !!row.target.summary_model,
+    retry: false,
+    staleTime: Infinity,
+    gcTime: 0,
+    refetchOnWindowFocus: false,
+    queryFn: ({ signal }) => readCompleteSubTarget(account.id, row.target.group_id, signal),
+  });
+  const target = complete.data || row.target;
+  const checks = complete.data ? modelChecks(target) : row.checks;
+  const selected = complete.data ? checks.find(check => check.model === row.selected?.model) : row.selected;
+  const modelsPending = !!row.target.summary_model && !complete.data;
   const current = selected || checks[0];
   const quality = groupQualityResult(target);
   const modelCount = checks.length;
@@ -654,7 +669,7 @@ function ManagementChannelDrawer({
               </div>
               <div>
                 <dt>可用模型</dt>
-                <dd>{modelCount ? `${availableCount} / ${modelCount}` : "—"}</dd>
+                <dd>{modelsPending ? "读取中…" : modelCount ? `${availableCount} / ${modelCount}` : "—"}</dd>
               </div>
               <div>
                 <dt>API key</dt>
@@ -665,7 +680,10 @@ function ManagementChannelDrawer({
           </section>
           <section className="detail-section detail-models" aria-label="模型检测结果">
             <h3>模型检测结果 <span className="count-badge">{modelCount}</span></h3>
-            {checks.length ? (
+            {modelsPending ? complete.isError
+              ? <p role="alert">{complete.error.message}<button className="button small" onClick={() => void complete.refetch()}>重试</button></p>
+              : <p role="status"><Spinner small/> 正在读取完整模型检测结果…</p>
+            : checks.length ? (
               <ul className="detail-model-list">
                 {checks.map((check) => {
                   const available = check.result?.availability.status === "success";

@@ -6,6 +6,12 @@ import "context"
 // selections and legacy callers remain complete. A projected target must be
 // reread in full before it can supply import defaults or authorize an import.
 type managementSelectedReceiptsKey struct{}
+type managementSelectedModelsKey struct{}
+
+func managementSelectedModels(ctx context.Context) bool {
+	selected, _ := ctx.Value(managementSelectedModelsKey{}).(bool)
+	return selected
+}
 
 func managementSelectedReceipts(ctx context.Context) bool {
 	selected, _ := ctx.Value(managementSelectedReceiptsKey{}).(bool)
@@ -15,6 +21,9 @@ func managementSelectedReceipts(ctx context.Context) bool {
 func managementPageComputedKey(ctx context.Context, owner string, filters managementQueryFilters, cursor string) string {
 	if managementSelectedReceipts(ctx) {
 		cursor += "\x00selected-receipts-v1"
+	}
+	if managementSelectedModels(ctx) {
+		cursor += "\x00selected-models-v1"
 	}
 	return managementComputedKey(owner, filters, cursor)
 }

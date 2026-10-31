@@ -193,7 +193,7 @@ it("tags independent filter, page and refetch reads without changing query keys,
     expect(calls.map(call => call.trigger)).toEqual(["mount", "filter_change", "page_change", "refetch", "mount"]);
     for (const [i, call] of calls.entries()) {
       expect(call.url.pathname).toBe("/analytics/v1/channel-management/query");
-      expect([...call.url.searchParams.keys()].sort()).toEqual(i === 0 ? ["filters"] : i === 1 ? ["filters", "receipt_view"] : ["cursor", "filters", "receipt_view", "refresh_cursor"]);
+      expect([...call.url.searchParams.keys()].sort()).toEqual(i === 0 ? ["filters"] : i === 1 ? ["filters", "model_view", "receipt_view"] : ["cursor", "filters", "model_view", "receipt_view", "refresh_cursor"]);
       expect(JSON.parse(call.url.searchParams.get("filters")!)).toEqual(i === 0 ? filters : filtered);
       expect(call.init.method).toBeUndefined();
       expect(call.init.cache).toBe("no-cache");
@@ -212,10 +212,21 @@ it("negotiates selected receipts only for model pages and safely falls back duri
   }));
   await readManagementPage({...subFilterDefaults, model:"gpt-5.5"}, "", new AbortController().signal);
   expect(calls.map(url => url.searchParams.get("receipt_view"))).toEqual(["selected", null]);
+  expect(calls.map(url => url.searchParams.get("model_view"))).toEqual(["selected", null]);
   expect(calls[1].searchParams.get("filters")).toBe(calls[0].searchParams.get("filters"));
   const wrong = page(); wrong.rows[0].target.receipt_model = "other";
   vi.stubGlobal("fetch", vi.fn(async () => Response.json(wrong)));
   await expect(readManagementPage({...subFilterDefaults, model:"gpt-5.5"}, "", new AbortController().signal)).rejects.toThrow("回执模型范围不一致");
+});
+
+it("rejects incomplete or conflicting single-model summary attestations", async () => {
+  for (const [model, receipt] of [["other", "gpt-5.5"], ["gpt-5.5", undefined]]) {
+    const wrong = page();
+    wrong.rows[0].target.summary_model = model;
+    wrong.rows[0].target.receipt_model = receipt;
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json(wrong)));
+    await expect(readManagementPage({...subFilterDefaults, model:"gpt-5.5"}, "", new AbortController().signal)).rejects.toThrow("摘要模型范围不一致");
+  }
 });
 
 it.each(["sync-selected","sync-only"])("keeps the current page after %s while ordinary configuration writes still refresh", async endpoint => {

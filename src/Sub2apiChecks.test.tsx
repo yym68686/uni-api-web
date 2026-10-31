@@ -237,6 +237,46 @@ it("manages initial channels with account/unassigned filters and shows every cal
   expect(screen.getByLabelText("检测模型筛选")).toHaveValue("custom-model");
 });
 
+it("loads omitted model results on opening the drawer without reporting untested or losing selection", async () => {
+  const accounts = fixtures().slice(0, 1);
+  const fullTarget = structuredClone(accounts[0].targets[0]);
+  fullTarget.models = [{model:"gpt-6-sol",state:"done",message:"",result:{...fullTarget.result!,model:"gpt-6-sol"}}];
+  accounts[0].targets[0] = {...fullTarget,summary_model:"gpt-6-astra",receipt_model:"gpt-6-astra",models:[{model:"gpt-6-sol",state:"done",message:"",result:null}]};
+  let resolve!: (response: Response) => void;
+  let detailReads = 0;
+  const methods: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input:string, init?:RequestInit) => {
+    methods.push(init?.method || "GET");
+    if(input.includes("/groups/1/details")) {
+      detailReads++;
+      return new Promise<Response>(done => {resolve=done;});
+    }
+    return Response.json({data:input.endsWith("/accounts")?accounts:[],labels:{},unavailable_sources:[],unavailable_keys:[]});
+  }));
+  // The negotiated marker must match the current filter.
+  localStorage.setItem("uni-console-sub2api-filters:v1:slim-drawer", JSON.stringify({model:"gpt-6-astra"}));
+  const user = userEvent.setup();
+  const view = mount("slim-drawer");
+  await screen.findByText("same-group",{selector:"strong"});
+  await user.selectOptions(screen.getByLabelText("检测模型筛选"), "gpt-6-astra");
+  await user.click(screen.getByText("same-group",{selector:"strong"}));
+  const drawer = within(screen.getByRole("dialog",{name:"same-group"}));
+  expect(drawer.getByRole("status")).toHaveTextContent("正在读取完整模型检测结果");
+  expect(drawer.queryByText("gpt-6-sol",{selector:"strong"})).not.toBeInTheDocument();
+  await act(async () => resolve(Response.json({data:[{...accounts[0],targets:[fullTarget]}]})));
+  expect(await drawer.findByText("gpt-6-sol",{selector:"strong"})).toBeVisible();
+  expect(drawer.getByText(/最近检测 · gpt-6-astra/)).toBeVisible();
+  expect(drawer.queryByRole("status")).not.toBeInTheDocument();
+  await user.click(drawer.getByRole("button",{name:"关闭渠道详情"}));
+  await user.click(screen.getByText("same-group",{selector:"strong"}));
+  await waitFor(() => expect(detailReads).toBe(2));
+  await act(async () => resolve(Response.json({data:[{...accounts[0],targets:[{...fullTarget,summary_model:"gpt-6-astra"}]}]})));
+  expect(await screen.findByRole("alert")).toHaveTextContent("完整模型数据不完整");
+  expect(screen.queryByText("gpt-6-sol",{selector:"strong"})).not.toBeInTheDocument();
+  expect(methods.every(method=>method==="GET")).toBe(true);
+  view.unmount();
+});
+
 it.each(["site", "native"])("keeps configured model-card price warnings consistent with the %s check and current prices", async evidence => {
   const data = fixtures().slice(0, 1);
   const target = data[0].targets[0];

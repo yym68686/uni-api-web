@@ -97,6 +97,7 @@ const path = (
   if (token?.cursor) { query.set("cursor", token.cursor); if(token.refreshCursor)query.set("refresh_cursor","1"); }
   if (token?.selection) query.set("selection", token.selection);
   if (token?.selectedReceipts && filters.model && !token.selection) query.set("receipt_view", "selected");
+  if (token?.selectedReceipts && filters.model && !token.selection) query.set("model_view", "selected");
   return `/v1/channel-management/query?${query}`;
 };
 const count = (value: unknown): value is number =>
@@ -167,6 +168,8 @@ export async function readManagementPage(
   const page = validateManagementPage(response);
   if (page.rows.some(row => row.target.receipt_model && row.target.receipt_model !== filters.model))
     throw Error("渠道回执模型范围不一致，请重新读取");
+  if (page.rows.some(row => row.target.summary_model && (row.target.summary_model !== filters.model || row.target.receipt_model !== filters.model || row.configured)))
+    throw Error("渠道摘要模型范围不一致，请重新读取");
   if (owner && page.owner && page.owner !== owner)
     throw Error("登录账号已变化，请重新读取");
   managementReadTimings.set(page, { started, decoded: performance.now(), trigger: managementReadTrigger(trigger), transport: managementReadTrace(response) });

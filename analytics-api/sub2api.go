@@ -22,6 +22,7 @@ type subModelResult struct {
 	Result  *subResult `json:"result"`
 }
 type subTarget struct {
+	SummaryModel    string                     `json:"summary_model,omitempty"`
 	ReceiptModel    string                     `json:"receipt_model,omitempty"`
 	DetailsOmitted  bool                       `json:"details_omitted,omitempty"`
 	CheckSourceID   string                     `json:"check_source_id,omitempty"`
