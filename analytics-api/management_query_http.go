@@ -42,7 +42,7 @@ type managementSelectionResponse struct {
 func parseManagementQuery(values url.Values) (managementQueryFilters, error) {
 	filters := managementQueryFilters{GroupStatus: "available"}
 	for key, list := range values {
-		if !slices.Contains([]string{"filters", "cursor", "selection", "refresh_cursor", "observe_receipt_plan", "observe_model_read"}, key) || len(list) != 1 || len(list[0]) > 8192 {
+		if !slices.Contains([]string{"filters", "cursor", "selection", "refresh_cursor", "observe_receipt_plan", "observe_model_read", "receipt_view"}, key) || len(list) != 1 || len(list[0]) > 8192 {
 			return filters, errManagementFilters
 		}
 	}
@@ -53,6 +53,9 @@ func parseManagementQuery(values url.Values) (managementQueryFilters, error) {
 		return filters, errManagementFilters
 	}
 	if values.Has("observe_model_read") && values.Get("observe_model_read") != "1" {
+		return filters, errManagementFilters
+	}
+	if values.Has("receipt_view") && values.Get("receipt_view") != "selected" {
 		return filters, errManagementFilters
 	}
 	raw := values.Get("filters")
@@ -135,6 +138,10 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cursor, selection := values.Get("cursor"), values.Get("selection")
+	if values.Has("receipt_view") && (filters.Model == "" || selection != "") {
+		http.Error(w, "单模型页面读取范围无效", http.StatusBadRequest)
+		return
+	}
 	rebase := values.Get("refresh_cursor") == "1"
 	if cursor != "" && selection != "" || rebase && (cursor == "" || selection != "") {
 		http.Error(w, "分页与完整选择不可同时读取", http.StatusBadRequest)
@@ -161,6 +168,9 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
+	if values.Get("receipt_view") == "selected" {
+		ctx = context.WithValue(ctx, managementSelectedReceiptsKey{}, true)
+	}
 	if mode := values.Get("observe_receipt_plan"); mode != "" {
 		ctx = context.WithValue(ctx, managementReceiptPlanKey{}, &managementReceiptPlanRequest{hydrationOnly: mode == "hydrate"})
 	}
@@ -172,7 +182,7 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 	if rebase && computedCursor != "" {
 		cacheCursor += "\x00refresh"
 	}
-	computedKey := managementComputedKey(owner, filters, cacheCursor)
+	computedKey := managementPageComputedKey(ctx, owner, filters, cacheCursor)
 	if selection == "" {
 		page, reused, reuseErr := s.currentComputedManagementPageMode(ctx, owner, computedKey, r.Header.Get("Accept") == managementPageV3MediaType)
 		if reuseErr != nil {

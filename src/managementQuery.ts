@@ -91,11 +91,12 @@ export interface ManagementSelection {
 
 const path = (
   filters: SubFilters,
-  token?: { cursor?: string; selection?: string; refreshCursor?: boolean },
+  token?: { cursor?: string; selection?: string; refreshCursor?: boolean; selectedReceipts?: boolean },
 ) => {
   const query = new URLSearchParams({ filters: JSON.stringify(filters) });
   if (token?.cursor) { query.set("cursor", token.cursor); if(token.refreshCursor)query.set("refresh_cursor","1"); }
   if (token?.selection) query.set("selection", token.selection);
+  if (token?.selectedReceipts && filters.model && !token.selection) query.set("receipt_view", "selected");
   return `/v1/channel-management/query?${query}`;
 };
 const count = (value: unknown): value is number =>
@@ -144,7 +145,7 @@ export async function readManagementPage(
     }
   }
   const started = performance.now();
-  const read = (refreshCursor: boolean) => controlRequest<unknown>(path(filters, { cursor, refreshCursor }), {
+  const read = (refreshCursor: boolean, selectedReceipts = !!filters.model) => controlRequest<unknown>(path(filters, { cursor, refreshCursor, selectedReceipts }), {
     signal,
     cache: "no-cache",
     headers: {
@@ -157,12 +158,15 @@ export async function readManagementPage(
   try { response = await read(!!cursor); }
   catch (error) {
     // A frontend can precede the API during a rolling release. Only the old
-    // parser's exact unsupported-parameter response permits legacy pagination.
-    if (!cursor || !(error instanceof ApiError) || error.status !== 400 || error.message.trim() !== "筛选参数无效") throw error;
-    response = await read(false);
+    // parser's exact unsupported-parameter response permits a complete legacy
+    // read without the new receipt projection or cursor refresh parameter.
+    if ((!cursor && !filters.model) || !(error instanceof ApiError) || error.status !== 400 || error.message.trim() !== "筛选参数无效") throw error;
+    response = await read(false, false);
   }
   signal.throwIfAborted();
   const page = validateManagementPage(response);
+  if (page.rows.some(row => row.target.receipt_model && row.target.receipt_model !== filters.model))
+    throw Error("渠道回执模型范围不一致，请重新读取");
   if (owner && page.owner && page.owner !== owner)
     throw Error("登录账号已变化，请重新读取");
   managementReadTimings.set(page, { started, decoded: performance.now(), trigger: managementReadTrigger(trigger), transport: managementReadTrace(response) });

@@ -193,13 +193,29 @@ it("tags independent filter, page and refetch reads without changing query keys,
     expect(calls.map(call => call.trigger)).toEqual(["mount", "filter_change", "page_change", "refetch", "mount"]);
     for (const [i, call] of calls.entries()) {
       expect(call.url.pathname).toBe("/analytics/v1/channel-management/query");
-      expect([...call.url.searchParams.keys()].sort()).toEqual(i < 2 ? ["filters"] : ["cursor", "filters", "refresh_cursor"]);
+      expect([...call.url.searchParams.keys()].sort()).toEqual(i === 0 ? ["filters"] : i === 1 ? ["filters", "receipt_view"] : ["cursor", "filters", "receipt_view", "refresh_cursor"]);
       expect(JSON.parse(call.url.searchParams.get("filters")!)).toEqual(i === 0 ? filters : filtered);
       expect(call.init.method).toBeUndefined();
       expect(call.init.cache).toBe("no-cache");
       expect(call.init.signal?.aborted).toBe(false);
     }
   } finally { hook.unmount(); client.clear(); }
+});
+
+it("negotiates selected receipts only for model pages and safely falls back during rolling deployment", async () => {
+  const calls: URL[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+    const url = new URL(input); calls.push(url);
+    return url.searchParams.has("receipt_view")
+      ? new Response("筛选参数无效", {status:400})
+      : Response.json(page());
+  }));
+  await readManagementPage({...subFilterDefaults, model:"gpt-5.5"}, "", new AbortController().signal);
+  expect(calls.map(url => url.searchParams.get("receipt_view"))).toEqual(["selected", null]);
+  expect(calls[1].searchParams.get("filters")).toBe(calls[0].searchParams.get("filters"));
+  const wrong = page(); wrong.rows[0].target.receipt_model = "other";
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json(wrong)));
+  await expect(readManagementPage({...subFilterDefaults, model:"gpt-5.5"}, "", new AbortController().signal)).rejects.toThrow("回执模型范围不一致");
 });
 
 it.each(["sync-selected","sync-only"])("keeps the current page after %s while ordinary configuration writes still refresh", async endpoint => {

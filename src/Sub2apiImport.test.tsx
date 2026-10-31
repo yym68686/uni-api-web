@@ -7,6 +7,7 @@ import { Sub2apiImport } from "./Sub2apiImport";
 import type { SubAccount, SubTarget } from "./Sub2apiChecks";
 import type { InstalledChannel, SubImportsQuery } from "./sub2apiImports";
 import type { ConsoleSourcesQuery } from "./consoleSources";
+import type { ModelPrice } from "./types";
 
 afterEach(() => vi.unstubAllGlobals());
 const account = {
@@ -60,7 +61,7 @@ const configured = (source: string): InstalledChannel => ({
     },
   ],
 });
-function mount(checkedTarget: SubTarget = target) {
+function mount(checkedTarget: SubTarget = target, prices?: ModelPrice[]) {
   const data = [
     imported("primary"),
     imported("do"),
@@ -77,6 +78,7 @@ function mount(checkedTarget: SubTarget = target) {
         <Sub2apiImport
           account={account}
           target={checkedTarget}
+          prices={prices}
           imports={
             {
               data: { data, labels: {}, unavailable_sources: [] },
@@ -112,6 +114,53 @@ const route = (
   key_position: key === "key1" ? 1 : 2,
   key_prefix: key === "key1" ? "masked-one" : "masked-two",
   position,
+});
+
+it("waits for complete group receipts before initializing import defaults", async () => {
+  let resolve!: (response: Response) => void;
+  const calls: {url:string; init?:RequestInit}[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+    calls.push({url,init});
+    if (url.includes("/groups/1/details")) return new Promise<Response>(done => {resolve=done;});
+    return Response.json({ data: [], unavailable_keys: [], unavailable_sources: [] });
+  }));
+  mount({...target, receipt_model:"gpt-5.5"}, [
+    {model:"gpt-5.5",input:1,output:2,verified:true},
+    {model:"gpt-6-sol",input:1,output:2,verified:true},
+  ] as ModelPrice[]);
+  await screen.findByText(/正在读取完整模型检测结果/);
+  expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button",{name:"添加到渠道"})).not.toBeInTheDocument();
+  const models = ["gpt-5.5","gpt-6-sol"].map((model,index)=>({model,state:"done",message:"",result:{model,checked_at:1,verdict:"pass",
+    availability:{status:"success",protocol:"responses",usage:{status:"matched",input_price:index?99:1,output_price:2,input_tokens:5,output_tokens:5}},quality:{status:"error"}}}));
+  resolve(Response.json({format:"summary-v1",version:"full",base_version:"",removed:[],order:["group"],data:[{id:"group",value:{account_id:account.id,target:{...target,models}}}]}));
+  const user=userEvent.setup();
+  await user.click(await screen.findByRole("button",{name:/新增接入/}));
+  expect(screen.getByRole("checkbox",{name:/^gpt-5.5/})).toBeChecked();
+  expect(screen.getByRole("checkbox",{name:/^gpt-6-sol/})).not.toBeChecked();
+  const detail=calls.find(call=>call.url.includes("/groups/1/details"))!;
+  expect(detail.url).toContain("include_rates=0");
+  expect(detail.url).not.toContain("model=");
+  expect(new Headers(detail.init?.headers).get("X-Console-View")).toBe("summary");
+  expect(calls.every(call=>!call.init?.method)).toBe(true);
+});
+
+it("keeps import unavailable after an incomplete group read and allows explicit retry", async () => {
+  let reads=0;
+  vi.stubGlobal("fetch",vi.fn(async (url:string)=>{
+    if(url.includes("/groups/1/details")) {
+      reads++;
+      return reads===1 ? Response.json({data:[{...account,targets:[{...target,group_id:999}]}]})
+        : Response.json({data:[{...account,targets:[target]}]});
+    }
+    return Response.json({data:[],unavailable_keys:[],unavailable_sources:[]});
+  }));
+  mount({...target,receipt_model:"gpt-5.5"});
+  expect(await screen.findByRole("alert")).toHaveTextContent("完整模型数据不完整");
+  expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+  await userEvent.setup().click(screen.getByRole("button",{name:"重试"}));
+  await screen.findByRole("button",{name:/新增接入/});
+  expect(reads).toBe(2);
 });
 it("uses one source/key selector and one table for native and imported routes, preserving edit scope", async () => {
   const writes: any[] = [];

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"sort"
 )
 
@@ -34,13 +35,16 @@ func (s *Service) hydrateManagementPageFrom(ctx context.Context, db controlQuery
 		return nil
 	}
 	groups := map[string]bool{}
+	fullGroups := map[string]bool{}
 	for _, row := range page.Rows {
 		if row.Account.ID != "" {
-			groups[qualityGroupID(row.Account.ID, row.Target.GroupID)] = true
+			id := qualityGroupID(row.Account.ID, row.Target.GroupID)
+			groups[id] = true
 		}
 		if row.Configured != nil {
 			for _, member := range row.Configured.Members {
-				groups[qualityGroupID(member.AccountID, member.GroupID)] = true
+				id := qualityGroupID(member.AccountID, member.GroupID)
+				groups[id], fullGroups[id] = true, true
 			}
 		}
 	}
@@ -98,12 +102,26 @@ func (s *Service) hydrateManagementPageFrom(ctx context.Context, db controlQuery
 				return target.Models[i].Model < target.Models[j].Model
 			})
 		}
+		// Paging directories carry identities rather than checks. Determine the
+		// custom-model fallback only after reading the page's actual model list.
+		// Built-ins always have a check, even when it is untested.
+		if filters.Model != "" && !slices.Contains(subModels, filters.Model) {
+			for id, target := range index {
+				if !slices.ContainsFunc(target.Models, func(check subModelResult) bool { return check.Model == filters.Model }) {
+					fullGroups[id] = true
+				}
+			}
+		}
 		stages.next("hydrate_queue")
 		if err = s.subAttachQueuedChecksFrom(ctx, db, owner, subset); err != nil {
 			return err
 		}
 		stages.next("hydrate_receipts")
-		if err = s.attachManagementPageSummaryUsageFrom(ctx, db, owner, subset, view.receiptReuse); err != nil {
+		usageAccounts := subset
+		if managementSelectedReceipts(ctx) && filters.Model != "" {
+			usageAccounts = managementPageUsageAccounts(subset, filters.Model, fullGroups)
+		}
+		if err = s.attachManagementPageSummaryUsageFrom(ctx, db, owner, usageAccounts, view.receiptReuse); err != nil {
 			return err
 		}
 		stages.next("hydrate_normalize")
@@ -133,6 +151,9 @@ func (s *Service) hydrateManagementPageFrom(ctx context.Context, db controlQuery
 			return errManagementRevision
 		}
 		page.Rows[i] = full
+		if managementSelectedReceipts(ctx) && filters.Model != "" && full.Configured == nil && !fullGroups[qualityGroupID(full.Account.ID, full.Target.GroupID)] {
+			page.Rows[i].Target.ReceiptModel = filters.Model
+		}
 	}
 	return ctx.Err()
 }

@@ -63,7 +63,48 @@ interface Options {
 }
 const siteLoginRequired = (message: string) =>
   /站点登录|站点会话|登录会话|重新登录|刷新凭据/.test(message);
-export function Sub2apiImport({
+// A selected-model management page has a complete status directory, but only
+// that model's current receipts. Never initialize route defaults from it.
+export function Sub2apiImport(props: Parameters<typeof Sub2apiImportForm>[0]) {
+  const { account, target, close } = props;
+  const complete = useQuery({
+    queryKey: ["sub-import-models", account.id, target.group_id],
+    enabled: !!target.receipt_model,
+    retry: false,
+    // One complete snapshot per opening. A reconnect must not remount the
+    // form and discard edits; gcTime=0 forces a fresh read on the next open.
+    staleTime: Infinity,
+    gcTime: 0,
+    refetchOnWindowFocus: false,
+    queryFn: async ({ signal }) => {
+      const response = await readSummary<{ account_id?: string; target?: SubTarget }, { data: SubAccount[] }>(
+        `/v1/sub2api/accounts/${encodeURIComponent(account.id)}/groups/${target.group_id}/details?include_rates=0`,
+        undefined, signal,
+      );
+      const targets = response.summary
+        ? response.summary.rows.flatMap(row => row.value.account_id === account.id && row.value.target ? [row.value.target] : [])
+        : (response.legacy?.data || []).filter(row => row.id === account.id).flatMap(row => row.targets);
+      if (targets.length !== 1 || targets[0].group_id !== target.group_id || !Array.isArray(targets[0].models) || targets[0].receipt_model)
+        throw Error("渠道完整模型数据不完整，请重新读取");
+      return targets[0];
+    },
+  });
+  if (!target.receipt_model) return <Sub2apiImportForm {...props}/>;
+  if (complete.data && !complete.isFetching && !complete.isError)
+    return <Sub2apiImportForm {...props} target={complete.data}/>;
+  return <Dialog.Root open onOpenChange={open => { if (!open) close(); }}><Dialog.Portal>
+    <Dialog.Overlay className="dialog-overlay"/>
+    <Dialog.Content className={`guide-dialog sub-import-dialog route-workspace${props.nested ? " route-edit-dialog" : ""}`}>
+      <Dialog.Title>添加到渠道</Dialog.Title>
+      <Dialog.Description>{account.name} · {target.name}</Dialog.Description>
+      {complete.isError ? <p role="alert">{complete.error.message}<button className="button small" onClick={() => void complete.refetch()}>重试</button></p>
+        : <p role="status"><Spinner small/> 正在读取完整模型检测结果…</p>}
+      <button className="button" onClick={close}>关闭</button>
+    </Dialog.Content>
+  </Dialog.Portal></Dialog.Root>;
+}
+
+function Sub2apiImportForm({
   account,
   target,
   imports,

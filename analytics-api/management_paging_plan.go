@@ -195,6 +195,6 @@ func (s *Service) currentManagementPagingPage(ctx context.Context, owner string,
 	if rebase && cacheCursor != "" {
 		cacheCursor += "\x00refresh"
 	}
-	response.preparedColumns = s.rememberManagementPage(managementComputedKey(owner, filters, cacheCursor), &current, response)
+	response.preparedColumns = s.rememberManagementPage(managementPageComputedKey(ctx, owner, filters, cacheCursor), &current, response)
 	return response, true, nil
 }

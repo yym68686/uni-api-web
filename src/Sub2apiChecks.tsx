@@ -95,6 +95,7 @@ export interface Result {
   verdict: string;
 }
 export interface SubTarget {
+  receipt_model?: string;
   observed_rates?: Record<string, ObservedRate>;
   details_omitted?: boolean;
   check_source_id?: string;
