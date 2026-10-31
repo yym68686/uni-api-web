@@ -2,9 +2,9 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"log"
+	"time"
 )
 
 // Keep the evaluated ordering/facets and group metadata, never all model
@@ -78,11 +78,14 @@ func (s *Service) currentManagementPagingPage(ctx context.Context, owner string,
 		log.Printf("management_paging_miss reason=absent request_id=%s", consoleRequestID(ctx))
 		return managementPageResponse{}, false, nil
 	}
-	proof, _, valid, err := s.currentManagementProof(ctx, owner, entry.Proof)
+	var snapshot managementCurrentSnapshot
+	proof, now, valid, err := s.currentManagementProofRetaining(ctx, owner, entry.Proof, &snapshot)
 	if err != nil || !valid {
 		log.Printf("management_paging_miss reason=proof failed=%t request_id=%s", err != nil, consoleRequestID(ctx))
 		return managementPageResponse{}, false, err
 	}
+	tx := snapshot.tx
+	defer tx.Rollback()
 	var plan managementPagingPlan
 	decodeEnd := managementReadSpan(ctx, "paging_directory_decode")
 	if err = json.Unmarshal(entry.Plan, &plan); err != nil {
@@ -135,22 +138,24 @@ func (s *Service) currentManagementPagingPage(ctx context.Context, owner string,
 		page.PreviousCursor = encode(max(0, page.Offset-managementPageSize))
 	}
 	view := managementDatabaseView{Input: plan.Input, Prices: plan.Prices, ProjectedModels: true}
-	tx, err := s.control.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
-	if err != nil {
-		return managementPageResponse{}, false, err
-	}
-	defer tx.Rollback()
-	directory := &managementDirectoryScope{store: &s.modelDirectories, database: s.control.db, tx: tx, owner: owner}
+	directory := snapshot.directory
 	ctx = context.WithValue(ctx, managementDirectoryScopeKey{}, directory)
-	current, now, err := s.managementReadProof(ctx, tx, owner)
-	if err != nil {
-		return managementPageResponse{}, false, err
+	current := proof
+	if !entry.Proof.Until.IsZero() {
+		// Decoding the directory may cross a running check's deadline. The
+		// original third proof checked the database clock after that work too.
+		// Retain that guard without repeating all versions, headers and prices.
+		var hydrationAt time.Time
+		if err := tx.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&hydrationAt); err != nil {
+			return managementPageResponse{}, false, err
+		}
+		if !hydrationAt.Before(entry.Proof.Until) {
+			log.Printf("management_paging_miss reason=deadline request_id=%s", consoleRequestID(ctx))
+			return managementPageResponse{}, false, nil
+		}
 	}
-	if managementProofStamp(current, entry.Proof.CurrentExport) != proof.Stamp || current.HeadersRevision != proof.HeadersRevision || (!entry.Proof.Until.IsZero() && !now.Before(entry.Proof.Until)) {
-		log.Printf("management_paging_miss reason=concurrent_change request_id=%s", consoleRequestID(ctx))
-		return managementPageResponse{}, false, nil
-	}
-	// This RR transaction just proved the plan current. A resident source
+	// This is the SAME second RR transaction that proved the plan current
+	// after live gateway authorization. A resident source
 	// directory with the exact model/ownership versions can supply its already
 	// read scalar fields; an eviction/mismatch keeps hydration on its old SQL.
 	directory.accountRevision = current.Epochs["console_sub_accounts"]

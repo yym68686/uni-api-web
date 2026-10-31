@@ -71,6 +71,8 @@ func (s *Service) managementReadProof(ctx context.Context, db controlQueryDB, ow
 		return s.managementReadProof(ctx, tx, owner)
 	}
 	proof := managementFreshProof{}
+	stages := newManagementReadTimeline(ctx, "proof_compact")
+	defer stages.finish()
 	compact, err := readManagementCompactProof(ctx, db, owner)
 	if err != nil || !compact.ready {
 		return proof, time.Time{}, err
@@ -83,6 +85,7 @@ func (s *Service) managementReadProof(ctx context.Context, db controlQueryDB, ow
 	var until sql.NullTime
 	var now time.Time
 	var backendPID int
+	stages.next("proof_epochs")
 	query := `SELECT (SELECT jsonb_agg(jsonb_build_array(relation_name,revision) ORDER BY relation_name) FROM console_management_view_epoch WHERE relation_name<>'console_sub_account_headers'),transaction_timestamp(),(SELECT min(deadline) FROM (SELECT deadline FROM console_configured_checks WHERE state='running' AND deadline>transaction_timestamp() UNION ALL SELECT deadline FROM console_model_fingerprints WHERE state='running' AND deadline>transaction_timestamp()) d), (SELECT revision FROM console_management_view_epoch WHERE relation_name='console_sub_account_headers'), (SELECT COALESCE(jsonb_agg(jsonb_build_array(to_jsonb(p),p.xmin::text) ORDER BY model),'[]'::jsonb) FROM ` + pgx.Identifier{s.engine.historyPath, "prices"}.Sanitize() + ` p),pg_backend_pid()`
 	if err = db.QueryRowContext(ctx, query).Scan(&epoch, &now, &until, &proof.HeadersRevision, &price, &backendPID); err != nil {
 		return proof, now, err
@@ -107,6 +110,7 @@ func (s *Service) managementReadProof(ctx context.Context, db controlQueryDB, ow
 	// Include row generations so concurrent A->B->A edits cannot escape the fence.
 	// No encrypted intent or credential payload is part of this proof.
 	var overrides []byte
+	stages.next("proof_overrides")
 	if err = db.QueryRowContext(ctx, `SELECT COALESCE(jsonb_agg(jsonb_build_array(source_id,provider,id,row_version) ORDER BY source_id,provider,id,row_version),'[]'::jsonb)
  FROM (SELECT DISTINCT o.source_id,p->>'provider' AS provider,o.id,o.xmin::text AS row_version FROM console_channel_settings_operations o
  CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(o.public_result->'previews')='array' THEN o.public_result->'previews' ELSE '[]'::jsonb END) p
@@ -129,6 +133,7 @@ func (s *Service) managementReadProof(ctx context.Context, db controlQueryDB, ow
 	if until.Valid {
 		proof.Until = until.Time
 	}
+	stages.next("proof_headers")
 	proof.Accounts, err = readSubAccountHeaders(ctx, db, owner, "")
 	if err != nil {
 		return managementFreshProof{}, now, err
@@ -312,6 +317,18 @@ func (s *Service) currentComputedManagementPageMode(ctx context.Context, owner, 
 }
 
 func (s *Service) currentManagementProof(ctx context.Context, owner string, expected managementFreshProof) (managementFreshProof, time.Time, bool, error) {
+	return s.currentManagementProofRetaining(ctx, owner, expected, nil)
+}
+
+// Paging hydrates in the second, freshly verified RR snapshot rather than
+// closing it and opening a third snapshot to prove the SAME versions again.
+// Ownership of tx transfers only on a completely successful live proof.
+type managementCurrentSnapshot struct {
+	tx        *sql.Tx
+	directory *managementDirectoryScope
+}
+
+func (s *Service) currentManagementProofRetaining(ctx context.Context, owner string, expected managementFreshProof, retained *managementCurrentSnapshot) (managementFreshProof, time.Time, bool, error) {
 	sources, err := s.readManagementSources(ctx)
 	if err != nil {
 		return managementFreshProof{}, time.Time{}, false, err
@@ -357,7 +374,43 @@ func (s *Service) currentManagementProof(ctx context.Context, owner string, expe
 		}
 		return managementFreshProof{}, time.Time{}, false, err
 	}
-	after, afterAt, err := readProof()
+	verifySources := func() error {
+		current, err := s.readManagementSources(ctx)
+		if err != nil {
+			return err
+		}
+		return verifyManagementSources(current, expected.Facts)
+	}
+	if retained != nil {
+		// As on the previous paging path, the final source fence precedes the
+		// hydration transaction. Never pin a connection while acquiring a second
+		// one for this fence: concurrent requests must work even in a full pool.
+		if err := verifySources(); err != nil {
+			return managementFreshProof{}, time.Time{}, false, err
+		}
+	}
+	var tx *sql.Tx
+	var directory *managementDirectoryScope
+	transferred := false
+	afterCtx := ctx
+	afterDB := controlQueryDB(s.control.db)
+	if retained != nil {
+		tx, err = s.control.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+		if err != nil {
+			return managementFreshProof{}, time.Time{}, false, err
+		}
+		defer func() {
+			if !transferred {
+				_ = tx.Rollback()
+			}
+		}()
+		directory = &managementDirectoryScope{store: &s.modelDirectories, database: s.control.db, tx: tx, owner: owner}
+		afterCtx = context.WithValue(ctx, managementDirectoryScopeKey{}, directory)
+		afterDB = tx
+	}
+	endAfter := managementReadSpan(ctx, "current_database_proof")
+	after, afterAt, err := s.managementReadProof(afterCtx, afterDB, owner)
+	endAfter()
 	if err != nil {
 		return managementFreshProof{}, time.Time{}, false, err
 	}
@@ -365,15 +418,18 @@ func (s *Service) currentManagementProof(ctx context.Context, owner string, expe
 		log.Printf("management_current_miss reason=concurrent_change request_id=%s", consoleRequestID(ctx))
 		return managementFreshProof{}, time.Time{}, false, nil
 	}
-	sources, err = s.readManagementSources(ctx)
-	if err != nil {
-		return managementFreshProof{}, time.Time{}, false, err
-	}
-	if err = verifyManagementSources(sources, expected.Facts); err != nil {
-		return managementFreshProof{}, time.Time{}, false, err
+	if retained == nil {
+		if err := verifySources(); err != nil {
+			return managementFreshProof{}, time.Time{}, false, err
+		}
 	}
 	if err = ctx.Err(); err != nil {
 		return managementFreshProof{}, time.Time{}, false, err
+	}
+	if retained != nil {
+		retained.tx, retained.directory = tx, directory
+		transferred = true
+		proof, now = after, afterAt
 	}
 	proof.CurrentExport = expected.CurrentExport
 	proof.Stamp = managementProofStamp(proof, expected.CurrentExport)
