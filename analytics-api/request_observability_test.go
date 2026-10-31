@@ -53,10 +53,10 @@ func TestInteractiveReadsLogFastCompletionWithoutSensitivePaths(t *testing.T) {
 	log.SetOutput(&logs)
 	defer log.SetOutput(previous)
 	mux := http.NewServeMux()
-	for _, route := range []string{"GET /v1/analytics", "GET /v1/channel-management/query", "GET /v1/sub2api/channels", "GET /v1/sub2api/channel-options", "GET /v1/sub2api/accounts/{id}/import-status", "GET /v1/sub2api/accounts/{id}/groups/{group}/access", "GET /v1/sources/{id}/channel-checks", "GET /healthz"} {
+	for _, route := range []string{"GET /v1/analytics", "GET /v1/channel-management/query", "GET /v1/sub2api/channels", "GET /v1/sub2api/channel-options", "GET /v1/sub2api/accounts/{id}/import-status", "GET /v1/sub2api/accounts/{id}/groups/{group}/access", "GET /v1/sub2api/accounts/{id}/groups/{group}/details", "GET /v1/sources/{id}/channel-checks", "GET /healthz"} {
 		mux.HandleFunc(route, func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(`{"data":[]}`)) })
 	}
-	for _, path := range []string{"/v1/analytics?key=private-key", "/v1/channel-management/query?filters=private-filter&selection=private-token", "/v1/sources/private-account/channel-checks?token=private-key", "/v1/sub2api/channels?view=bindings&source_id=private-source", "/v1/sub2api/channel-options?source_id=private-source&api_key_id=private-key&account_id=private-account", "/v1/sub2api/accounts/private-account/import-status", "/v1/sub2api/accounts/private-account/groups/49/access"} {
+	for _, path := range []string{"/v1/analytics?key=private-key", "/v1/channel-management/query?filters=private-filter&selection=private-token", "/v1/sources/private-account/channel-checks?token=private-key", "/v1/sub2api/channels?view=bindings&source_id=private-source", "/v1/sub2api/channel-options?source_id=private-source&api_key_id=private-key&account_id=private-account", "/v1/sub2api/accounts/private-account/import-status", "/v1/sub2api/accounts/private-account/groups/49/access", "/v1/sub2api/accounts/private-account/groups/49/details?model=private-model&view=summary"} {
 		logs.Reset()
 		r := httptest.NewRequest(http.MethodGet, path, nil)
 		r.Header.Set("Authorization", "Bearer private-token")
@@ -94,6 +94,13 @@ func TestObservedReadKindsAreFixedAndUseHandlerViewPrecedence(t *testing.T) {
 		{"/v1/sub2api/accounts/private-account/groups//access", "", "none"},
 		{"/v1/sub2api/accounts/private-account/groups/49/access/extra", "", "none"},
 		{"/v1/sub2api/accounts/private-account/import-status/extra", "", "none"},
+		{"/v1/sub2api/accounts/private-account/groups/49/details?view=summary&include_rates=0", "", "sub_group_summary"},
+		{"/v1/sub2api/accounts/private-account/groups/49/details?view=summary", "private-view", "sub_group_detail"},
+		{"/v1/sub2api/accounts/private-account/groups/49/details", "summary", "sub_group_summary"},
+		{"/v1/sub2api/accounts/private-account/groups/49/details?model=private-model", "", "sub_group_detail"},
+		{"/v1/sub2api/accounts//groups/49/details", "summary", "none"},
+		{"/v1/sub2api/accounts/private-account/groups//details", "summary", "none"},
+		{"/v1/sub2api/accounts/private-account/groups/49/details/extra", "summary", "none"},
 		{"/v1/channel-management/query?filters=private-filter", "", "management_first_page"},
 		{"/v1/channel-management/query?cursor=private-token", "", "management_page"},
 		{"/v1/channel-management/query?cursor=private-token&refresh_cursor=1", "", "management_page_refresh"},
@@ -108,6 +115,46 @@ func TestObservedReadKindsAreFixedAndUseHandlerViewPrecedence(t *testing.T) {
 		r.Method = http.MethodPost
 		if got := consoleObservedReadKind(r); got != "none" {
 			t.Fatal("write request classified as a read", got)
+		}
+	}
+}
+
+func TestSubGroupSummaryAlwaysRecordsSafeReadStages(t *testing.T) {
+	var logs bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&logs)
+	defer log.SetOutput(previous)
+	for _, tc := range []struct {
+		path, view string
+		observed   bool
+	}{
+		{"/v1/sub2api/accounts/private-account/groups/49/details?model=private-model", "summary", true},
+		{"/v1/sub2api/accounts/private-account/groups/49/details?view=summary", "", true},
+		{"/v1/sub2api/accounts/private-account/groups/49/details", "", false},
+		{"/v1/sub2api/accounts", "summary", false},
+	} {
+		logs.Reset()
+		r := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		r.Header.Set("X-Console-View", tc.view)
+		r = r.WithContext(context.WithValue(r.Context(), consoleRequestIDKey{}, "group-read-safe-123"))
+		trace := newSubAccountsReadTrace(r)
+		trace.accounts, trace.targets, trace.models, trace.modelBytes = 1, 1, 30, 1234
+		trace.next("models")
+		trace.next("usage")
+		trace.next("serialize")
+		trace.finish()
+		if (logs.Len() > 0) != tc.observed {
+			t.Fatal("fast scoped read lost stages or broadened unrelated account logging", logs.String())
+		}
+		if tc.observed {
+			for _, value := range []string{"sub_accounts_read view=summary", "accounts=1 targets=1 models=30 model_result_bytes=1234", "models_ms=", "usage_ms=", "serialize_ms=", "request_id=group-read-safe-123"} {
+				if !strings.Contains(logs.String(), value) {
+					t.Fatal("missing scoped read metric", value, logs.String())
+				}
+			}
+		}
+		if strings.Contains(logs.String(), "private-") {
+			t.Fatal("scoped read logged private values")
 		}
 	}
 }

@@ -35,6 +35,9 @@ func consoleAlwaysObservedRead(method, path string) string {
 	if route, _ := consoleImportPrerequisiteRead(path); route != "" {
 		return route
 	}
+	if consoleSubGroupDetailsRead(path) {
+		return "GET /v1/sub2api/accounts/{id}/groups/{group}/details"
+	}
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	if len(parts) == 4 && parts[0] == "v1" && parts[1] == "sources" && parts[2] != "" && parts[3] == "channel-checks" {
 		return "GET /v1/sources/{id}/channel-checks"
@@ -54,6 +57,11 @@ func consoleImportPrerequisiteRead(path string) (string, string) {
 		return "GET /v1/sub2api/accounts/{id}/groups/{group}/access", "import_group_access"
 	}
 	return "", ""
+}
+
+func consoleSubGroupDetailsRead(path string) bool {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	return len(parts) == 7 && parts[0] == "v1" && parts[1] == "sub2api" && parts[2] == "accounts" && parts[3] != "" && parts[4] == "groups" && parts[5] != "" && parts[6] == "details"
 }
 
 // Return only fixed read categories, never parameter/header contents. The
@@ -89,6 +97,12 @@ func consoleObservedReadKind(r *http.Request) string {
 	}
 	if _, kind := consoleImportPrerequisiteRead(r.URL.Path); kind != "" {
 		return kind
+	}
+	if consoleSubGroupDetailsRead(r.URL.Path) {
+		if summaryView(r) == "summary" {
+			return "sub_group_summary"
+		}
+		return "sub_group_detail"
 	}
 	return "none"
 }

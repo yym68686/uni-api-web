@@ -157,7 +157,7 @@ func (t *subAccountsReadTrace) next(stage string) {
 
 func (t *subAccountsReadTrace) finish() {
 	elapsed := time.Since(t.start)
-	if elapsed < 2*time.Second && t.r.Context().Err() == nil {
+	if elapsed < 2*time.Second && t.r.Context().Err() == nil && consoleObservedReadKind(t.r) != "sub_group_summary" {
 		return
 	}
 	lastStage := t.stage

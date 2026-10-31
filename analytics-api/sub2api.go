@@ -74,6 +74,11 @@ type subChallenge struct {
 
 func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 	owner, _ := s.controlUser(r)
+	// Group summaries initialize import defaults. Correlate their existing
+	// readers even below the old slow-account threshold, without extra reads.
+	if consoleObservedReadKind(r) == "sub_group_summary" {
+		r = r.WithContext(managementTraceContext(r.Context()))
+	}
 	trace := newSubAccountsReadTrace(r)
 	defer trace.finish()
 	accountID, groupID := r.PathValue("id"), int64Param(r.PathValue("group"))
