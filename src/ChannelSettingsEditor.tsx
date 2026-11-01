@@ -43,6 +43,9 @@ interface Field {
   path: string;
   group: string;
   type: string;
+  minimum?: number;
+  maximum?: number;
+  note?: string;
 }
 interface SettingsView {
   provider: string;
@@ -105,6 +108,7 @@ const labels: Record<string, string> = {
   api_key_rate_limit: "密钥限额（默认或按模型）",
   model_timeout: "模型超时（秒）",
   hedging: "Hedging 并行请求",
+  unknown_upstream_400_retries: "未知400换渠道次数",
   timeout_policy: "条件超时策略",
   keepalive_interval: "心跳间隔（秒）",
   cooldown_period: "渠道冷却（秒）",
@@ -144,6 +148,11 @@ const categories: Record<
   },
   密钥: { icon: KeyRound, description: "管理上游密钥、调用顺序与限额。" },
   并行请求: { icon: Layers, description: "设置较慢请求的并行尝试策略。" },
+  重试保护: {
+    icon: ShieldCheck,
+    description:
+      "为无法明确分类的上游400设置有限换渠道机会；默认关闭，不改变已有精确规则。",
+  },
   超时与冷却: {
     icon: Timer,
     description: "调整请求等待时间与失败后的冷却策略。",
@@ -1011,7 +1020,9 @@ export function Editor({
                           ? "自动识别"
                           : sourceLabel}
                       </small>
-                      {resolved?.note && <small>{resolved.note}</small>}
+                      {(resolved?.note || f.note) && (
+                        <small>{resolved?.note || f.note}</small>
+                      )}
                     </div>
                     {resolved?.can_inherit && !inherited && (
                       <button
@@ -1307,6 +1318,38 @@ export function Editor({
                                 : v === "false"
                                   ? "关闭"
                                   : v}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : f.path ===
+                        "/preferences/unknown_upstream_400_retries" &&
+                      f.type === "integer" ? (
+                      <label>
+                        <span className="sr-only">{label}</span>
+                        <select
+                          aria-label={label}
+                          value={ownValue === undefined ? "" : String(ownValue)}
+                          onChange={(e) => {
+                            const n = Number(e.target.value);
+                            if (
+                              e.target.value === "" ||
+                              (Number.isInteger(n) && n >= 0 && n <= 3)
+                            ) {
+                              edit(
+                                set(
+                                  draft,
+                                  f.path,
+                                  e.target.value === "" ? undefined : n,
+                                ),
+                              );
+                            }
+                          }}
+                        >
+                          <option value="">运行时默认值（0，关闭）</option>
+                          {[0, 1, 2, 3].map((n) => (
+                            <option key={n} value={n}>
+                              {n === 0 ? "0 · 关闭" : `${n} 次`}
                             </option>
                           ))}
                         </select>

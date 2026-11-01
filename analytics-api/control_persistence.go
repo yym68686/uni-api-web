@@ -600,6 +600,10 @@ func (s *Service) bootstrapControls(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "saved stream mode requires a compatible gateway", 409)
 		return
 	}
+	if requiresUnknown400Retry(saved) && r.Header.Get("X-Uni-Unknown-Upstream-400-Retries") != "1" {
+		http.Error(w, "saved unknown400 retry policy requires a compatible gateway", 409)
+		return
+	}
 	// Keep the exact encrypted version issued at boot. A later saved edit must
 	// not erase the evidence needed to recognize an unchanged older bootstrap.
 	id := tokenHash(record.Encrypted)

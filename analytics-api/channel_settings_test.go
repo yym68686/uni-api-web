@@ -212,7 +212,7 @@ func TestSettingsNativeGatewayRetention(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	globalMutation := channelSettingMutation{Operation: id + "-global", Revision: globalView["revision"].(string), Changes: []channelSettingChange{{Provider: globalScope, Set: map[string]any{"/preferences/cooldown_period": 17, "/preferences/hedging": map[string]any{"enabled": true, "max_inflight_attempts": 2}, "/preferences/timeout_policy": map[string]any{"rules": []any{map[string]any{"match": map[string]any{"endpoint": "/v1/responses", "stream": false}, "timeout": map[string]any{"total": 180}}}}}}}}
+	globalMutation := channelSettingMutation{Operation: id + "-global", Revision: globalView["revision"].(string), Changes: []channelSettingChange{{Provider: globalScope, Set: map[string]any{unknown400Path: 2, "/preferences/cooldown_period": 17, "/preferences/hedging": map[string]any{"enabled": true, "max_inflight_attempts": 2}, "/preferences/timeout_policy": map[string]any{"rules": []any{map[string]any{"match": map[string]any{"endpoint": "/v1/responses", "stream": false}, "timeout": map[string]any{"total": 180}}}}}}}}
 	req = httptest.NewRequest("PATCH", "/v1/sources/"+id+"/channel-settings", strings.NewReader(mustJSON(globalMutation)))
 	req.Header.Set("Content-Type", "application/json")
 	w = httptest.NewRecorder()
@@ -252,6 +252,10 @@ func TestSettingsNativeGatewayRetention(t *testing.T) {
 	globalAfter, _, err := svc.settingsGateway(context.Background(), src, "GET", "/v1/channel-settings?provider="+globalScope, nil)
 	if err != nil || mustJSON(globalAfter["effective"]) == mustJSON(globalView["effective"]) {
 		t.Fatal("global preferences not restored", err)
+	}
+	prefs := globalAfter["effective"].(map[string]any)["preferences"].(map[string]any)
+	if prefs["unknown_upstream_400_retries"] != float64(2) {
+		t.Fatal("unknown400 retry budget did not survive Go retention/Rust restore")
 	}
 	rollback := map[string]any{"operation_id": id + "-rollback-global", "rollback_id": id + "-global", "revision": restored["revision"]}
 	req = httptest.NewRequest("POST", "/v1/sources/"+id+"/channel-settings/rollback", strings.NewReader(mustJSON(rollback)))

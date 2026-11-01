@@ -40,6 +40,12 @@ func (s *Service) settingsSource(r *http.Request) (controlSource, error) {
 	return src, err
 }
 func (s *Service) settingsGateway(ctx context.Context, src controlSource, method, path string, body any) (map[string]any, int, error) {
+	if in, ok := body.(channelSettingMutation); ok &&
+		((method == "POST" && path == "/v1/channel-settings/validate") || (method == "PATCH" && path == "/v1/channel-settings")) {
+		if status, err := s.checkUnknown400Gateway(ctx, src, in); err != nil {
+			return nil, status, err
+		}
+	}
 	var input []byte
 	if body != nil {
 		input, _ = json.Marshal(body)
