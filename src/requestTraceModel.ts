@@ -70,6 +70,8 @@ export const traceStages: Record<string, string> = {
   response_body_error: "响应传输失败",
   downstream_closed: "下游连接关闭",
   gateway_error: "网关返回错误",
+  upstream_400_retry: "上游400后换渠道重试",
+  // Retained labels for historical traces written before the unified policy.
   responses_empty_name_repair: "修复空工具名后重试",
   responses_missing_item_repair: "修复缺失推理项后重试",
   responses_encrypted_content_repair: "修复加密历史后重试",

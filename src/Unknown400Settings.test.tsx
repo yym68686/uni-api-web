@@ -51,27 +51,24 @@ async function setup(initial?: number, supported = true) {
             source: "default",
             inherited_source: "default",
             can_inherit: true,
-            note: "仍受AUTO_RETRY总预算约束；重试可能增加费用与延迟，不改变已有精确规则。",
+            note: "所有上游400统一计数；400预算独立于AUTO_RETRY，成功即停；重试可能增加费用与延迟。",
           },
         },
         schema: {
+          all_upstream_400_retries: supported,
           fields: [
             {
               path: "/preferences/cooldown_period",
               group: "超时与冷却",
               type: "number",
             },
-            ...(supported
-              ? [
-                  {
-                    path,
-                    group: "重试保护",
-                    type: "integer",
-                    minimum: 0,
-                    maximum: 3,
-                  },
-                ]
-              : []),
+            {
+              path,
+              group: "重试保护",
+              type: "integer",
+              minimum: 0,
+              maximum: 3,
+            },
           ],
           engines: [],
           key_algorithms: [],
@@ -107,14 +104,16 @@ it.each([0, 1, 3])(
   async (n) => {
     const { writes, user } = await setup();
     await user.click(screen.getByRole("button", { name: "重试保护" }));
-    const select = screen.getByRole("combobox", { name: "未知400换渠道次数" });
+    const select = screen.getByRole("combobox", {
+      name: "所有上游400换渠道次数",
+    });
     expect(select).toHaveValue("");
     expect(
       within(select)
         .getAllByRole("option")
         .map((o) => (o as HTMLOptionElement).value),
     ).toEqual(["", "0", "1", "2", "3"]);
-    expect(screen.getByText(/仍受AUTO_RETRY总预算约束/)).toBeInTheDocument();
+    expect(screen.getByText(/所有上游400统一计数/)).toBeInTheDocument();
     const save = screen.getByRole("button", { name: "保存并应用" });
     expect(save).toBeDisabled();
     await user.selectOptions(select, String(n));
@@ -135,7 +134,9 @@ it.each([0, 1, 3])(
 it("removes an explicit override and invalidates an earlier preview", async () => {
   const { writes, user } = await setup(2);
   await user.click(screen.getByRole("button", { name: "重试保护" }));
-  const select = screen.getByRole("combobox", { name: "未知400换渠道次数" });
+  const select = screen.getByRole("combobox", {
+    name: "所有上游400换渠道次数",
+  });
   expect(select).toHaveValue("2");
   await user.selectOptions(select, "3");
   await user.click(screen.getByRole("button", { name: "校验与预览" }));
@@ -143,7 +144,9 @@ it("removes an explicit override and invalidates an earlier preview", async () =
     expect(screen.getByRole("button", { name: "保存并应用" })).toBeEnabled(),
   );
   await user.click(
-    screen.getByRole("button", { name: "未知400换渠道次数：使用运行时默认值" }),
+    screen.getByRole("button", {
+      name: "所有上游400换渠道次数：使用运行时默认值",
+    }),
   );
   expect(select).toHaveValue("");
   expect(screen.getByRole("button", { name: "保存并应用" })).toBeDisabled();
@@ -159,5 +162,7 @@ it("does not offer retry configuration for an old gateway schema", async () => {
   expect(
     screen.queryByRole("button", { name: "重试保护" }),
   ).not.toBeInTheDocument();
-  expect(screen.queryByLabelText("未知400换渠道次数")).not.toBeInTheDocument();
+  expect(
+    screen.queryByLabelText("所有上游400换渠道次数"),
+  ).not.toBeInTheDocument();
 });

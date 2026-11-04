@@ -33,7 +33,7 @@ func TestUnknown400MutationValidationAndGatewayCapability(t *testing.T) {
 			writes := 0
 			up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == "GET" && r.URL.Path == "/v1/channel-settings/schema" {
-					writeJSON(w, 200, map[string]any{"unknown_upstream_400_retries": supported})
+					writeJSON(w, 200, map[string]any{"unknown_upstream_400_retries": true, "all_upstream_400_retries": supported})
 					return
 				}
 				writes++
@@ -112,16 +112,21 @@ func TestUnknown400BootstrapRequiresCapabilityAndKeepsSavedSnapshot(t *testing.T
 		if _, err = store.db.Exec(`UPDATE console_control_snapshots SET enabled=true,status='saved',encrypted_snapshot=$2,target_hash=$3 WHERE source_id=$1`, id, encrypted, controlTarget(src)); err != nil {
 			t.Fatal(err)
 		}
-		for _, capability := range []string{"", "0", "1"} {
+		for _, capability := range []string{"", "0", "1", "all"} {
 			req := httptest.NewRequest("GET", "/v1/runtime-restore/"+id, nil)
 			req.Header.Set("Authorization", "Bearer fixture-admin")
 			req.Header.Set("X-Uni-Channel-Settings-Version", "1")
-			req.Header.Set("X-Uni-Unknown-Upstream-400-Retries", capability)
+			if capability != "all" {
+				req.Header.Set("X-Uni-Unknown-Upstream-400-Retries", capability)
+			}
+			if capability == "all" {
+				req.Header.Set("X-Uni-All-Upstream-400-Retries", "1")
+			}
 			req.SetPathValue("id", id)
 			w := httptest.NewRecorder()
 			svc.bootstrapControls(w, req)
 			want := 200
-			if n > 0 && capability != "1" {
+			if n > 0 && capability != "all" && capability != "1" {
 				want = 409
 			}
 			if w.Code != want {

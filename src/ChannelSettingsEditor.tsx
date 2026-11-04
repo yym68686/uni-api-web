@@ -72,6 +72,7 @@ interface SettingsView {
     }
   >;
   schema: {
+    all_upstream_400_retries?: boolean;
     version: number;
     fields: Field[];
     engines: string[];
@@ -108,7 +109,7 @@ const labels: Record<string, string> = {
   api_key_rate_limit: "密钥限额（默认或按模型）",
   model_timeout: "模型超时（秒）",
   hedging: "Hedging 并行请求",
-  unknown_upstream_400_retries: "未知400换渠道次数",
+  unknown_upstream_400_retries: "所有上游400换渠道次数",
   timeout_policy: "条件超时策略",
   keepalive_interval: "心跳间隔（秒）",
   cooldown_period: "渠道冷却（秒）",
@@ -871,8 +872,13 @@ export function Editor({
         : catalog.isPending
           ? "自动识别（正在读取实际引擎…）"
           : "自动识别（实际引擎未返回）";
+  const visibleFields = view.schema.fields.filter(
+    (f) =>
+      f.path !== "/preferences/unknown_upstream_400_retries" ||
+      view.schema.all_upstream_400_retries === true,
+  );
   const groups = [
-    ...new Set(view.schema.fields.map((f) => f.group)),
+    ...new Set(visibleFields.map((f) => f.group)),
     "高级配置",
     ...(!isGlobal ? ["模板与批量"] : []),
     "变更记录",
@@ -977,7 +983,7 @@ export function Editor({
               />
             )}
 
-          {view.schema.fields
+          {visibleFields
             .filter((f) => f.group === tab)
             .map((f) => {
               const ownValue = get(draft, f.path),

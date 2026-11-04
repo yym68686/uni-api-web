@@ -20,15 +20,15 @@ func unknown400Mutation(in channelSettingMutation) (bool, error) {
 			continue
 		}
 		if change.Provider != unknown400Scope {
-			return false, errors.New("未知400重试仅支持来源全局设置")
+			return false, errors.New("所有上游400重试仅支持来源全局设置")
 		}
 		raw, err := json.Marshal(value)
 		if err != nil {
-			return false, errors.New("未知400换渠道次数必须是0至3的整数")
+			return false, errors.New("所有上游400换渠道次数必须是0至3的整数")
 		}
 		n, err := strconv.Atoi(string(raw))
 		if err != nil || n < 0 || n > 3 {
-			return false, errors.New("未知400换渠道次数必须是0至3的整数")
+			return false, errors.New("所有上游400换渠道次数必须是0至3的整数")
 		}
 		required = required || n > 0
 	}
@@ -47,8 +47,8 @@ func (s *Service) checkUnknown400Gateway(ctx context.Context, src controlSource,
 	if err != nil {
 		return status, err
 	}
-	if schema["unknown_upstream_400_retries"] != true {
-		return http.StatusConflict, errors.New("来源尚不支持未知400换渠道重试，请先更新uni-api；修改未发送")
+	if schema["all_upstream_400_retries"] != true {
+		return http.StatusConflict, errors.New("来源尚不支持所有上游400换渠道重试，请先更新uni-api；修改未发送")
 	}
 	return 200, nil
 }
