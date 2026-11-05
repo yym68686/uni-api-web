@@ -38,15 +38,23 @@ test('partial rounds retain only valid numeric evidence and request only missing
   const first=await collect(config,async()=>++calls===1?response(fixture['gpt-6-astra'][0].text):Response.json({error:{}},{status:429}),undefined,async c=>checkpoints.push(scoreCollected(c,reference,true)));
   const a=scoreCollected(first,reference,true);
   assert.equal(calls,3);assert.equal(a.used_outputs,1);assert.equal(a._resume.entries.length,1);assert.equal(checkpoints[0].used_outputs,1);
+  assert.ok(checkpoints.every(c=>c.decision==='partial' && c.candidates.length===5 && c.probability===null));
   assert.equal(a._resume.entries[0].text,undefined);assert.ok(a._resume.entries[0].numbers.every(Number.isInteger));
   calls=0;
   const second=await collect({...config,resume:a._resume},async()=>++calls===1?response(fixture['gpt-6-astra'][1].text):Response.json({error:{}},{status:429}));
   const b=scoreCollected(second,reference,true);
   assert.equal(calls,2);assert.equal(b.used_outputs,2);assert.equal(b._resume.entries[0].sample.request_id,a._resume.entries[0].sample.request_id);
+  for(const result of [a,b]) {
+    assert.equal(result.status,'insufficient');assert.equal(result.decision,'partial');
+    assert.ok(result.prediction);assert.equal(result.probability,null);
+    assert.ok(result.candidates.every(c=>c.probability===null));
+    assert.ok(result.samples.some(s=>s.http_status===429),'failed requests remain visible alongside the ranking');
+  }
   calls=0;
   const third=await collect({...config,resume:b._resume},async()=>{calls++;return response(fixture['gpt-6-astra'][2].text)});
   const c=scoreCollected(third,reference,true);
   assert.equal(calls,1);assert.equal(c.used_outputs,3);assert.equal(c.status,'match');assert.equal(new Set(c._resume.entries.map(e=>e.expected_count)).size,3);
+  assert.equal(c.decision,'scored');assert.ok(c.probability>0);
   assert.deepEqual(c.candidates,score('gpt-6-astra',fixture['gpt-6-astra'],reference).candidates);
   calls=0;
   await collect({...config,resume:c._resume},async()=>{calls++;return response(fixture['gpt-6-astra'][0].text)});
@@ -75,6 +83,7 @@ test('full reference bank, original scoring and the merged Astra/Sol class are p
     const result = score(model, fixture['gpt-6-astra'], reference);
     const original = analyzeSharedOutputs(fixture['gpt-6-astra'], reference.bank, reference.detector);
     assert.equal(result.status, 'match');
+    assert.equal(result.decision, 'scored');
     assert.equal(result.probability, original.results.find(r => r.model === 'gpt-6-astra').probability);
     assert.deepEqual(result.candidates, original.results.slice(0,5));
     assert.equal(result.probability_scope, 'reference-closed-set');
@@ -86,10 +95,25 @@ test('mismatch probability is for requested class rather than confidence in the 
   assert.equal(result.prediction,'claude-haiku-4.5');
   assert.ok(result.probability < result.candidates[0].probability);
 });
-test('invalid/partial samples never receive a fabricated match probability', () => {
-  for (const outputs of [[],fixture['gpt-6-astra'].slice(0,2),Array(3).fill({text:'1,2,3',expected_count:300})]) {
+test('one or two valid samples use upstream partial ranking, including failed or invalid slots', () => {
+  for (const model of models) for (const count of [1,2]) {
+    const valid=fixture['gpt-6-astra'].slice(0,count);
+    for(const outputs of [valid,[...valid,...Array(3-count).fill({text:'1 2 3',expected_count:300})]]) {
+      const result=score(model,outputs,reference);
+      const original=analyzeSharedOutputs(outputs,reference.bank,reference.detector,{allowPartial:true});
+      assert.equal(result.status,'insufficient');assert.equal(result.decision,'partial');
+      assert.equal(result.used_outputs,count);assert.equal(result.prediction,original.prediction);
+      assert.deepEqual(result.candidates,original.results.slice(0,5));
+      assert.equal(result.probability,null);assert.equal(result.probability_scope,null);
+      assert.ok(result.candidates.every(c=>c.probability===null));
+    }
+  }
+});
+test('empty or invalid samples have no candidates or fabricated match probability', () => {
+  for (const outputs of [[],Array(3).fill({text:'1,2,3',expected_count:300})]) {
     const result=score('gpt-6-astra',outputs,reference);
     assert.equal(result.status,'insufficient'); assert.equal(result.probability,null);
+    assert.equal(result.decision,'unscorable');assert.deepEqual(result.candidates,[]);
   }
   assert.throws(()=>score('gpt-5.5',fixture['gpt-6-astra'],reference),/unsupported_model/);
 });
@@ -107,7 +131,7 @@ test('uses targeted Responses requests, strict completion, and no retries or sec
     return Response.json({status:'completed',output:[{type:'message',role:'assistant',content:[{type:'output_text',text:fixture['gpt-6-astra'][0].text}]}]});
   };
   const result=await detect({base_url:'https://mock.example',key:'secret-key',model:'gpt-6.1-sol'},transport);
-  assert.equal(calls,3);assert.equal(result.status,'error');assert.equal(result.probability,null);
+  assert.equal(calls,3);assert.equal(result.status,'insufficient');assert.equal(result.decision,'partial');assert.equal(result.probability,null);
   for(const {config,body} of requests){
     assert.equal(config.model,'gpt-6.1-sol');assert.deepEqual(body.reasoning,{effort:'low'});
     assert.equal(body.stream,true);assert.equal(body.store,false);assert.equal(body.max_output_tokens,8192);

@@ -34,12 +34,14 @@ export function loadReference() {
 }
 export function score(model, outputs, reference = loadReference()) {
   if (!models.includes(model)) throw Error('unsupported_model');
-  const analysis = analyzeSharedOutputs(outputs, reference.bank, reference.detector);
+  const analysis = analyzeSharedOutputs(outputs, reference.bank, reference.detector, { allowPartial: true });
+  const decision = analysis.decision ?? (analysis.results.length ? 'scored' : 'unscorable');
   // The probability is for the requested class, even when another ranks first.
   const target = modelClasses[model];
   const expected = analysis.results.find(r => r.model === target.class_id);
   return {
-    model, status: analysis.results.length ? (analysis.prediction === target.class_id ? 'match' : 'mismatch') : 'insufficient',
+    model, status: decision === 'scored' ? (analysis.prediction === target.class_id ? 'match' : 'mismatch') : 'insufficient',
+    decision,
     probability: expected?.probability ?? null,
     prediction: analysis.prediction, prediction_name: analysis.prediction_name,
     expected_class: target.class_name, candidates: analysis.results.slice(0, 5),
@@ -133,7 +135,9 @@ export async function collect(config, transport, signal, checkpoint) {
 export function scoreCollected(collected, reference = loadReference(), privateCheckpoint = false) {
   const started = Date.now();
   const result = score(collected.model, collected.outputs, reference);
-  if (collected.samples.some(s => s.state === 'error')) { result.status = 'error'; result.probability = null; }
+  // Failed attempts remain in sample details, but must not hide a usable
+  // partial ranking. Only a complete scored round can become match/mismatch.
+  if (result.decision !== 'partial' && collected.samples.some(s => s.state === 'error')) { result.status = 'error'; result.probability = null; }
   const saved = privateCheckpoint && collected.retained?.length ? {version:1,model:collected.model,format:collected.format,reference_key:referenceKey,entries:collected.retained} : undefined;
   return { ...result, samples: collected.samples, checked_at: collected.checked_at, duration_ms: collected.duration_ms + Date.now() - started, ...(saved ? {_resume:saved} : {}) };
 }

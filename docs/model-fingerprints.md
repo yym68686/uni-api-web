@@ -17,6 +17,12 @@ commit `5fcfb4cd34da10915daa38d3ec04d573d946c97e`; unsupported models are not pr
 - **匹配**: the highest-ranked class is the requested model's reference class.
 - **不匹配**: another reference class ranks first.
 - **样本不足 / 检测失败 / 已中断**: no match judgment or probability is displayed.
+- With **1/3 or 2/3 valid samples**, the status and channel details also show
+  **暂定排名** and the closest reference model. The top five candidates use the
+  upstream `allowPartial` ranker; all probabilities remain `null`. The result has
+  `decision: "partial"` and `status: "insufficient"`, so it stays out of the
+  match/mismatch filters. A later failed attempt does not hide this ranking;
+  request failures remain visible in the sample details.
 - The probability below the status is **the requested class's probability**,
   including when a different class ranks first. It uses the same colors as
   quality probability: exactly 100% green, at least 90% amber, otherwise red.
@@ -45,7 +51,7 @@ frontend paired with an old backend disables unsupported Gemini actions and show
 “指纹检测服务待更新”; periodic reads and an explicit recheck enable them once the
 backend advertises support. Existing GPT actions remain available.
 
-Each fingerprint run sends three separately generated challenges through the
+Each fingerprint round collects three separately generated challenges through the
 channel's own credentials, with the reference's reasoning setting: low for
 Astra/Sol and Argon, provider default for Gemini 3.1 Pro and 3.8 Flash. Requests are sequential,
 not retried on failure, and require complete output. Group probes use their
@@ -53,6 +59,14 @@ recorded Responses/Messages/Chat/Gemini protocol (Gemini native when no saved
 protocol exists for a Gemini model); configured channels go through the gateway's
 Responses endpoint and its explicit provider-targeting capability. Protocol
 failure is a failed check, never a mismatched identity.
+
+Every attempt is checkpointed before the next request. The UI reads the latest
+ranking while collection is still running, and retains it when queued, cancelled
+or interrupted. An explicit continuation requests only the missing samples;
+after three valid samples, the unchanged full scorer supplies the match judgment
+and calibrated probabilities (`decision: "scored"`). Starting another completed
+round clears its previous result. No additional requests are sent just to display
+partial results.
 
 `console_model_fingerprints` persists jobs and latest results separately from
 availability/quality. Database leases permit up to **50 sites concurrently across
@@ -72,8 +86,10 @@ a 192 MiB old-generation heap limit and 4 MiB semi-spaces. Scoring runs sequenti
 scoring heaps. The local worker only calls Go's authenticated loopback bridges;
 Go retains upstream credentials and network I/O. Cancelling one job aborts only
 its collector. A worker crash fails in-flight jobs without replaying them; future
-jobs can start a fresh worker. Completed samples stay in memory and are never
-persisted. Each request is bounded to 250 seconds
+jobs can start a fresh worker. Accepted numeric evidence is stored privately in
+`sample_state` for continuation; upstream response text is never persisted or
+returned. Saved evidence is bound to the channel credentials/configuration,
+model, protocol and reference version. Each request is bounded to 250 seconds
 and 2 MiB output. Lease expiry and
 cancellation do not replay paid requests. Site credential changes invalidate old
 results; configured results are fenced by the current probe fingerprint in the
@@ -90,7 +106,7 @@ original reference commit until the user runs a new check.
 The backend image includes Node 24 and the pinned MIT-licensed upstream code/data
 under `analytics-api/fingerprint`. Runtime downloads are unnecessary. Go retains
 upstream credentials and the existing network restrictions; an authenticated,
-short-lived loopback bridge permits only three requests for the fixed model and
+short-lived loopback bridge permits only the missing requests (at most three) for the fixed model and
 endpoint. Node receives only the temporary local bridge token. Logs/results never
 contain upstream credentials or arbitrary upstream error text. Data SHA-256
 integrity and detector/bank compatibility are checked before paid requests.
@@ -99,7 +115,8 @@ Validation includes scoring parity with upstream reference samples (the older
 Gemini 3.x source samples have unknown completion metadata and are only offline
 scoring fixtures, never accepted live completions) (not an independent
 accuracy benchmark), merged-class semantics, mismatched-class probability,
-partial/error output rejection, exact targeting, duplicate queue requests,
+partial ranking parity without probabilities, invalid/error output rejection,
+progressive API checkpoints, durable continuation, exact targeting, duplicate queue requests,
 account isolation, 50-site capacity and concurrent claiming across replicas,
 same-site serialization across accounts/models/configured channels, actual HTTP
 overlap across different sites, rolling-release fencing, cancellation fencing,

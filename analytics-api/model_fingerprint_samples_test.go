@@ -75,6 +75,50 @@ func fingerprintSavedCount(t *testing.T, s *Service, target fingerprintTarget) (
 	return count, retained
 }
 
+func assertFingerprintPublicRanking(t *testing.T, s *Service, owner string, target fingerprintTarget, state string, count int) {
+	t.Helper()
+	w := fingerprintRequest(t, s, owner, "GET", nil)
+	var out struct {
+		Data []fingerprintRecord `json:"data"`
+	}
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &out) != nil {
+		t.Fatal("fingerprint progress read failed", w.Code)
+	}
+	for _, record := range out.Data {
+		if record.fingerprintTarget != target {
+			continue
+		}
+		var result struct {
+			Status, Decision, Prediction string
+			UsedOutputs                  int `json:"used_outputs"`
+			Probability                  *float64
+			Candidates                   []struct {
+				Model       string
+				Probability *float64
+			}
+		}
+		if record.State != state || json.Unmarshal(record.Result, &result) != nil || result.UsedOutputs != count {
+			t.Fatal("wrong public progress", record.State, result.UsedOutputs, count)
+		}
+		if count > 0 && count < 3 {
+			if result.Status != "insufficient" || result.Decision != "partial" || result.Prediction == "" || len(result.Candidates) != 5 || result.Probability != nil {
+				t.Fatal("partial ranking missing or misrepresented as final", result)
+			}
+			for _, candidate := range result.Candidates {
+				if candidate.Probability != nil {
+					t.Fatal("partial candidate has a fabricated probability")
+				}
+			}
+		} else if count == 3 && (result.Status != "match" || result.Decision != "scored" || result.Probability == nil) {
+			t.Fatal("completed ranking lost calibrated result", result)
+		} else if count == 0 && (len(result.Candidates) > 0 || result.Probability != nil) {
+			t.Fatal("empty round retained an old ranking", result)
+		}
+		return
+	}
+	t.Fatal("fingerprint progress missing from public read")
+}
+
 func TestModelFingerprintAccumulatesAcrossRunsAndResetsOnlyCompletedRound(t *testing.T) {
 	texts := fingerprintFixtureTexts(t)
 	var round, calls atomic.Int32
@@ -112,6 +156,7 @@ func TestModelFingerprintAccumulatesAcrossRunsAndResetsOnlyCompletedRound(t *tes
 		if count != want || stored != want {
 			t.Fatal("valid samples did not accumulate durably", n, count, stored)
 		}
+		assertFingerprintPublicRanking(t, s, account.Owner, target, "done", want)
 		w := fingerprintRequest(t, s, account.Owner, "GET", nil)
 		if w.Code != 200 {
 			t.Fatal(w.Code, w.Body.String())
@@ -125,6 +170,58 @@ func TestModelFingerprintAccumulatesAcrossRunsAndResetsOnlyCompletedRound(t *tes
 			sharedFingerprintWorker.close() // a new runtime must load DB evidence
 		}
 	}
+}
+
+func TestModelFingerprintPublishesEachPartialRankingBeforeNextRequestCompletes(t *testing.T) {
+	texts := fingerprintFixtureTexts(t)
+	reached := make(chan int, 2)
+	advance := make(chan struct{})
+	defer close(advance)
+	var calls atomic.Int32
+	s, account, target := fingerprintAccumulationFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		n := int(calls.Add(1))
+		if n > 1 {
+			reached <- n
+			select {
+			case <-advance:
+			case <-r.Context().Done():
+				return
+			}
+		}
+		writeFingerprintSample(w, texts[n-1])
+	})
+	if err := enqueueFingerprint(context.Background(), s.control.db, target); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	done := make(chan bool, 1)
+	go func() { done <- s.fingerprintOne(ctx) }()
+	for _, next := range []int{2, 3} {
+		select {
+		case n := <-reached:
+			if n != next {
+				t.Fatal("unexpected request order", n)
+			}
+		case <-ctx.Done():
+			t.Fatal("next request not reached")
+		}
+		assertFingerprintPublicRanking(t, s, account.Owner, target, "running", next-1)
+		select {
+		case advance <- struct{}{}:
+		case <-ctx.Done():
+			t.Fatal("request failed to resume")
+		}
+	}
+	select {
+	case ok := <-done:
+		if !ok {
+			t.Fatal("fingerprint job not claimed")
+		}
+	case <-ctx.Done():
+		t.Fatal("completed round not saved")
+	}
+	assertFingerprintPublicRanking(t, s, account.Owner, target, "done", 3)
 }
 
 func TestModelFingerprintSameCredentialReencryptionKeepsPartialRound(t *testing.T) {
@@ -226,6 +323,7 @@ func TestModelFingerprintCancellationAndDuplicateClickKeepCheckpoint(t *testing.
 	case <-ctx.Done():
 		t.Fatal("second request not reached")
 	}
+	assertFingerprintPublicRanking(t, s, account.Owner, target, "running", 1)
 	for _, method := range []string{"POST", "DELETE"} {
 		if w := fingerprintRequest(t, s, account.Owner, method, []fingerprintTarget{target}); w.Code != 202 {
 			t.Fatal(w.Code, w.Body.String())
@@ -245,6 +343,7 @@ func TestModelFingerprintCancellationAndDuplicateClickKeepCheckpoint(t *testing.
 	if count, stored := fingerprintSavedCount(t, s, target); count != 1 || stored != 1 {
 		t.Fatal("late finish erased checkpoint", count, stored)
 	}
+	assertFingerprintPublicRanking(t, s, account.Owner, target, "interrupted", 1)
 }
 
 func TestModelFingerprintResumeRequiresSameChannelProtocolAndReference(t *testing.T) {

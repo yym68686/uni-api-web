@@ -31,6 +31,14 @@ result JSON contains only the existing score/sample diagnostics, not vectors.
 Legacy partial records lack the numeric evidence and cannot be reconstructed;
 their next explicit detection starts the first durable round.
 
+With one or two valid samples, the runner enables upstream `allowPartial` and
+returns the top five candidates with `decision: "partial"`,
+`status: "insufficient"` and null probabilities. Failed attempts retain their
+diagnostics without hiding that ranking. Each checkpoint exposes the ranking
+while collection continues. Three valid samples still use the unchanged full
+scorer and calibration, marked `decision: "scored"`; only this complete result
+can become match/mismatch. Empty or invalid evidence produces no candidates.
+
 One shared Node 24 runtime with a 192 MiB old-space / 4 MiB semi-space cap serves
 up to 50 site collectors. Go keeps all upstream credentials, network restrictions,
 provider targeting and database site leases; Node only receives ephemeral loopback

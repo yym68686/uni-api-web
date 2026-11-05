@@ -52,14 +52,23 @@ it("queues/cancels only fingerprint jobs and retains independent legacy detectio
  await user.click(screen.getByRole("button",{name:"取消检测"}));await screen.findByText("已中断");
  expect(writes).toEqual(Array(2).fill({targets:[{account_id:"one",group_id:1,model:"gpt-6-astra"}]}));
 });
-it.each(["done","running","queued","interrupted","error"])("retains partial sample details while %s and offers continuation",async(state)=>{
- const partial={...record,state,retained_samples:1,result:{...record.result!,status:"error",probability:null,used_outputs:1}};
+it.each(["done","running","queued","interrupted","error"].flatMap(state=>[1,2].map(count=>({state,count}))))("shows provisional ranking for $count samples while $state and offers continuation",async({state,count})=>{
+ const partial:FingerprintRecord={...record,state,retained_samples:count,result:{...record.result!,status:"insufficient",decision:"partial",probability:null,used_outputs:count,candidates:[{model:"claude-haiku-4.5",display_name:"Claude Haiku 4.5",probability:null},{model:"gpt-6-astra",display_name:"GPT 6 Astra",probability:null}],samples:[{request_id:"failed",state:"error",message:"请求失败或输出不完整",http_status:429}]}};
  vi.stubGlobal("fetch",vi.fn(async(path:string)=>Response.json(path.endsWith("/model-fingerprints")?{data:[partial],supported_models:FINGERPRINT_MODELS}:{data:[],unavailable_sources:[]})));
  mount(<FingerprintPanel targets={[{account_id:"one",group_id:1,model:"gpt-6-astra"}]}/>);
- await screen.findByText("有效样本 1/3 · 目标类别 gpt-6-astra/6.1-sol");
- expect(screen.getByText(/已保留 1 个有效样本/)).toBeInTheDocument();
+ await screen.findByText(`有效样本 ${count}/3 · 目标类别 gpt-6-astra/6.1-sol`);
+ expect(screen.getByText(new RegExp(`暂定排名 · ${count}/3`))).toBeInTheDocument();
+ expect(screen.getByText(/最接近：Claude Haiku 4.5/)).toBeInTheDocument();
+ expect(screen.getByText("Claude Haiku 4.5",{selector:"li"})).toBeInTheDocument();
+ expect(screen.getByText("GPT 6 Astra",{selector:"li"})).toBeInTheDocument();
+ expect(screen.getByText("当前仅显示暂定排名，满 3 个有效样本后计算匹配结果与概率。")).toBeInTheDocument();
+ expect(screen.getByText(new RegExp(`已保留 ${count} 个有效样本`))).toBeInTheDocument();
+ expect(screen.getByText("请求失败或输出不完整 · HTTP 429")).toBeInTheDocument();
  expect(screen.getByRole("button",{name:state==="running"||state==="queued"?"取消检测":"继续采样"})).toBeEnabled();
  expect(screen.queryByText("12.0%")).not.toBeInTheDocument();
+ expect(screen.queryByText("—")).not.toBeInTheDocument();
+ expect(screen.queryByText("匹配",{exact:true})).not.toBeInTheDocument();
+ expect(screen.queryByText("不匹配",{exact:true})).not.toBeInTheDocument();
 });
 
 it("explains why a legacy count cannot be resumed without numeric evidence",async()=>{
@@ -73,16 +82,24 @@ it("explains why a legacy count cannot be resumed without numeric evidence",asyn
 
 it.each(["gpt-6-astra","gemini-3.1-pro","gemini-3.8-flash","gemini-4-argon"])("channel management filters %s fingerprints independently of quality",async(model)=>{
  const scoped={...record,model,result:{...record.result!,model}};
- const accounts=["one","two"].map(id=>({id,name:id,base:`https://${id}.test`,email:"test",state:"idle",message:"",synced_at:1,targets:[{group_id:1,name:`group-${id}`,platform:"openai",channel:id,rate:1,key_id:1,active:true,state:"done",message:"",result:null}]}));
- vi.stubGlobal("fetch",vi.fn(async(input:string)=>Response.json({data:input.endsWith("/accounts")?accounts:input.endsWith("/model-fingerprints")?[scoped,{...scoped,account_id:"two",result:{...scoped.result,status:"match",probability:1}}]:[],labels:{},unavailable_sources:[]})));
+ const accounts=["one","two","three"].map(id=>({id,name:id,base:`https://${id}.test`,email:"test",state:"idle",message:"",synced_at:1,targets:[{group_id:1,name:`group-${id}`,platform:"openai",channel:id,rate:1,key_id:1,active:true,state:"done",message:"",result:null}]}));
+ vi.stubGlobal("fetch",vi.fn(async(input:string)=>Response.json({data:input.endsWith("/accounts")?accounts:input.endsWith("/model-fingerprints")?[scoped,{...scoped,account_id:"two",result:{...scoped.result,status:"match",probability:1}},{...scoped,account_id:"three",result:{...scoped.result,status:"insufficient",decision:"partial",used_outputs:2,probability:null}}]:[],labels:{},unavailable_sources:[]})));
  installManagementPageFixture();mount(<Sub2apiChecks user={`fingerprint-filter-${model}`}/>);await screen.findByText("group-one",{selector:"strong"});
  expect(screen.getByRole("columnheader",{name:/模型指纹/})).toBeInTheDocument();
  const user=userEvent.setup();await user.selectOptions(screen.getByLabelText("检测模型筛选"),model);
  await user.selectOptions(screen.getByLabelText("模型指纹筛选"),"mismatch");
  await waitFor(()=>expect(screen.queryByText("group-two",{selector:"strong"})).not.toBeInTheDocument());
+ expect(screen.queryByText("group-three",{selector:"strong"})).not.toBeInTheDocument();
  expect(screen.getByText("group-one",{selector:"strong"})).toBeInTheDocument();expect(screen.getByText("12.0%")).toBeInTheDocument();
+ await user.selectOptions(screen.getByLabelText("模型指纹筛选"),"match");
+ await waitFor(()=>expect(screen.getByText("group-two",{selector:"strong"})).toBeInTheDocument());
+ expect(screen.queryByText("group-three",{selector:"strong"})).not.toBeInTheDocument();
+ await user.selectOptions(screen.getByLabelText("模型指纹筛选"),"insufficient");
+ await waitFor(()=>expect(screen.getByText("group-three",{selector:"strong"})).toBeInTheDocument());
+ expect(screen.queryByText("group-one",{selector:"strong"})).not.toBeInTheDocument();
+ expect(screen.queryByText("group-two",{selector:"strong"})).not.toBeInTheDocument();
  await user.selectOptions(screen.getByLabelText("检测模型筛选"),"gpt-6.1-sol");
- await waitFor(()=>expect(screen.queryByText("group-one",{selector:"strong"})).not.toBeInTheDocument());
+ await waitFor(()=>expect(screen.queryByText("group-three",{selector:"strong"})).not.toBeInTheDocument());
 });
 it("persists and validates fingerprint filters",()=>{
  saveSubFilters("fp-test",{...subFilterDefaults,fingerprint:"mismatch"});expect(loadSubFilters("fp-test").fingerprint).toBe("mismatch");
