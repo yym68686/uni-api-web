@@ -80,6 +80,32 @@ function fixtures(): SubAccount[] {
   }));
 }
 
+it("excludes channel names case-insensitively, preserves site-name matches, and saves and resets the filter", async () => {
+  const data = fixtures();
+  data[0].targets[0].name = "Claude KiRo proxy";
+  data[1].name = "Kiro site";
+  data[1].targets[0].name = "Safe channel";
+  vi.stubGlobal("fetch", vi.fn(async (input: string) => Response.json({data: input.endsWith("/accounts") ? data : [], labels:{}, unavailable_sources:[]})));
+  const user = userEvent.setup();
+  let view = mount("exclude-channel-name");
+  await screen.findByText("Claude KiRo proxy", {selector:"strong"});
+  await user.type(screen.getByRole("textbox", {name:"排除渠道名"}), "kiro");
+  await waitFor(()=>expect(screen.queryByText("Claude KiRo proxy", {selector:"strong"})).not.toBeInTheDocument());
+  expect(screen.getByText("Safe channel", {selector:"strong"})).toBeVisible();
+  expect(screen.getByRole("button", {name:"降智检测 · 1 个渠道"})).toBeEnabled();
+  view.unmount();
+  view = mount("exclude-channel-name");
+  expect(screen.getByRole("textbox", {name:"排除渠道名"})).toHaveValue("kiro");
+  await screen.findByText("Safe channel", {selector:"strong"});
+  await user.clear(screen.getByRole("textbox", {name:"排除渠道名"}));
+  await user.type(screen.getByRole("textbox", {name:"排除渠道名"}), "KIRO");
+  await waitFor(()=>expect(screen.queryByText("Claude KiRo proxy", {selector:"strong"})).not.toBeInTheDocument());
+  await user.click(screen.getByRole("button", {name:"重置筛选"}));
+  expect(screen.getByRole("textbox", {name:"排除渠道名"})).toHaveValue("");
+  await screen.findByText("Claude KiRo proxy", {selector:"strong"});
+  expect(screen.getByRole("button", {name:"降智检测 · 2 个渠道"})).toBeEnabled();
+});
+
 it("filters joined routes independently of the selected model and opens optimization for the filtered scope", async () => {
   const data=fixtures();
   data[0].targets[0].result!.availability.model_match="match";

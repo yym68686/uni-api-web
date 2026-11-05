@@ -45,3 +45,28 @@ func TestManagementFiltersMatchBrowserContract(t *testing.T) {
 		})
 	}
 }
+
+func TestManagementNameExclusion(t *testing.T) {
+	rows := []managementQueryRow{}
+	for _, name := range []string{"Claude KiRo proxy", "Safe channel", "KIRO90", "literal.*", "literal12"} {
+		rows = append(rows, managementQueryRow{ID: name, Account: subAccount{Name: "Kiro site"}, Target: subTarget{Name: name, Channel: "kiro", Platform: "kiro", Active: true}})
+	}
+	for _, c := range []struct {
+		query string
+		want  []string
+	}{
+		{"kiro", []string{"Safe channel", "literal.*", "literal12"}},
+		{" KIRO ", []string{"Safe channel", "literal.*", "literal12"}},
+		{"literal.*", []string{"Claude KiRo proxy", "Safe channel", "KIRO90", "literal12"}},
+		{"   ", []string{"Claude KiRo proxy", "Safe channel", "KIRO90", "literal.*", "literal12"}},
+	} {
+		out := filterManagementQueryRows(rows, managementQueryFilters{ExcludeName: c.query}, managementFilterEvidence{})
+		ids := []string{}
+		for _, row := range out.Rows {
+			ids = append(ids, row.ID)
+		}
+		if !reflect.DeepEqual(ids, c.want) {
+			t.Fatalf("exclude=%q ids=%v want=%v", c.query, ids, c.want)
+		}
+	}
+}

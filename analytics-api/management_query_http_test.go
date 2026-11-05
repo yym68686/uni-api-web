@@ -21,8 +21,8 @@ func TestManagementHTTPCompleteSelectionAuthorizationAndFreshness(t *testing.T) 
 	s.engine = postgresTestEngine(t)
 	ctx := context.Background()
 	for _, query := range []string{
-		`INSERT INTO console_sub_accounts(id,owner,name,base,email,encrypted_auth) VALUES('owned','owner','Own','https://site.test','owner@example.test',''),('foreign','foreign','PRIVATE-ACCOUNT','https://foreign.test','private@example.test','')`,
-		`INSERT INTO console_sub_targets(account_id,group_id,name,platform,remote_key_id,active,state) SELECT 'owned',g,'Group','openai',g,true,'done' FROM generate_series(1,61) g`,
+		`INSERT INTO console_sub_accounts(id,owner,name,base,email,encrypted_auth) VALUES('owned','owner','Own Kiro','https://site.test','owner@example.test',''),('foreign','foreign','PRIVATE-ACCOUNT','https://foreign.test','private@example.test','')`,
+		`INSERT INTO console_sub_targets(account_id,group_id,name,platform,remote_key_id,active,state) SELECT 'owned',g,CASE WHEN g%2=0 THEN 'Claude KiRo proxy' ELSE 'Group' END,'openai',g,true,'done' FROM generate_series(1,61) g`,
 		`INSERT INTO console_sub_targets(account_id,group_id,name,platform,remote_key_id,active,state) VALUES('foreign',1,'PRIVATE-TARGET','openai',1,true,'done')`,
 	} {
 		if _, err := s.control.db.Exec(query); err != nil {
@@ -92,6 +92,35 @@ func TestManagementHTTPCompleteSelectionAuthorizationAndFreshness(t *testing.T) 
 	if err := json.Unmarshal(complete.Body.Bytes(), &selected); err != nil || complete.Code != 200 || len(selected.Rows) != 61 || len(selected.Eligible) != 61 || selected.Total != 61 || selected.Revision != page.Revision {
 		t.Fatal("batch selection truncated to page", complete.Code, len(selected.Rows), len(selected.Eligible), err)
 	}
+	for _, exclusion := range []string{"kiro", "KIRO"} {
+		params := url.Values{"filters": {`{"excludeName":"` + exclusion + `"}`}}
+		filtered := call(ownerToken, params)
+		var first, last managementPageResponse
+		if err := json.Unmarshal(filtered.Body.Bytes(), &first); err != nil || filtered.Code != 200 || first.Total != 31 || first.EligibleCount != 31 || len(first.Rows) != 25 {
+			t.Fatal("exclusion did not precede pagination", filtered.Code, first.Total, len(first.Rows), err)
+		}
+		params.Set("cursor", first.NextCursor)
+		response := call(ownerToken, params)
+		if err := json.Unmarshal(response.Body.Bytes(), &last); err != nil || response.Code != 200 || last.Offset != 25 || len(last.Rows) != 6 || last.NextCursor != "" {
+			t.Fatal("excluded pagination scope changed", response.Code, last.Offset, len(last.Rows), err)
+		}
+		params.Del("cursor")
+		params.Set("selection", first.SelectionToken)
+		response = call(ownerToken, params)
+		var all managementSelectionResponse
+		if err := json.Unmarshal(response.Body.Bytes(), &all); err != nil || response.Code != 200 || all.Total != 31 || len(all.Rows) != 31 || len(all.Eligible) != 31 {
+			t.Fatal("excluded selection scope changed", response.Code, all.Total, len(all.Rows), err)
+		}
+		for _, row := range all.Rows {
+			if strings.Contains(strings.ToLower(row.Target.Name), "kiro") {
+				t.Fatal("excluded channel remained selectable")
+			}
+		}
+		params.Set("filters", `{}`)
+		if response := call(ownerToken, params); response.Code != 400 {
+			t.Fatal("selection reused after exclusion changed", response.Code)
+		}
+	}
 	for _, params := range []url.Values{
 		{"cursor": {page.SelectionToken}, "selection": {page.SelectionToken}},
 		{"selection": {page.NextCursor}},
@@ -126,6 +155,11 @@ func TestManagementHTTPCompleteSelectionAuthorizationAndFreshness(t *testing.T) 
 }
 
 func TestManagementQueryRejectsInvalidFilters(t *testing.T) {
+	for _, raw := range []string{`{"excludeName":5}`, `{"excludeName":"\u0000"}`, `{"excludeName":"` + strings.Repeat("x", 2049) + `"}`} {
+		if _, err := parseManagementQuery(url.Values{"filters": {raw}}); err == nil {
+			t.Fatal("invalid exclusion accepted")
+		}
+	}
 	for _, raw := range []string{`null`, `[]`, `{"model":5}`, `{"unknown":"value"}`, `{} {}`, `{"sort":"random"}`, `{"groupStatus":"obsolete"}`, `{"maxRate":"NaN"}`, `{"maxRate":"Inf"}`, `{"maxRate":"-1"}`, `{"minQuality":"50.5"}`, `{"minQuality":"110"}`, `{"availability":"invented"}`, `{"model":"\u0000"}`} {
 		if _, err := parseManagementQuery(url.Values{"filters": {raw}}); err == nil {
 			t.Fatal("invalid filter accepted", raw)

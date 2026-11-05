@@ -1,6 +1,7 @@
 import { channelLatency, latencyLabel } from "./channelLatency";
 import { readAccountSession } from "./accountSession";
 import type { AccountSession } from "./accountSession";
+import type { ManagementPagePosition } from "./managementQuery";
 import { clearDashboardSnapshots, restoreDashboardSnapshot, restoredDashboardAt, saveDashboardSnapshot } from "./dashboardSnapshot";
 import { PageLoading, MetricLoading, TableLoading, DetailLoading } from "./PageLoading";
 import { endpointChoices, readKeys } from "./requestFilters";
@@ -965,6 +966,7 @@ function Dashboard({
   disconnect: (reason?: string) => void;
   changeConnection: () => void;
 }) {
+  const [managementPosition, setManagementPosition] = useState<ManagementPagePosition>();
   const [pageFilters, setPageFilters] = useState(() => ({
     channels: loadFilters(baseConnection.base, "channels"),
     balances: loadFilters(baseConnection.base, "balances"),
@@ -1532,6 +1534,8 @@ function Dashboard({
             <Sub2apiChecks
               key={baseConnection.session}
               user={baseConnection.session}
+              initialPosition={managementPosition}
+              onPositionChange={setManagementPosition}
             />
           ) : baseConnection.account &&
             (view === "sources" ||

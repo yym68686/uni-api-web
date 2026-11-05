@@ -36,6 +36,7 @@ import { CreateChannel } from "./CreateChannel";
 import { ChannelOptimization } from "./ChannelOptimization";
 import { ChannelProtocolSummary } from "./ChannelProtocolSummary";
 import { useManagementPage, readManagementSelection, managementOptimizationSnapshot } from "./managementQuery";
+import type { ManagementPagePosition } from "./managementQuery";
 import { channelMembers, managementRows, UNASSIGNED_ACCOUNT } from "./channelManagement";
 import type { ManagedChannel, ManagementRow } from "./channelManagement";
 import { ConfiguredChannelDialog } from "./ChannelRoutes";
@@ -758,13 +759,18 @@ function ManagementChannelDrawer({
   );
 }
 
-export function Sub2apiChecks({ user = "account" }: { user?: string }) {
+export function Sub2apiChecks({ user = "account", initialPosition, onPositionChange }: {
+  user?: string;
+  initialPosition?: ManagementPagePosition;
+  onPositionChange?: (position: ManagementPagePosition) => void;
+}) {
   const client = useQueryClient();
   const sources = useConsoleSources(user);
   const [filters, setFilters] = useState(() => loadSubFilters(user));
-  const [cursorState,setCursorState]=useState({filter:"",cursor:""});
-  const filterKey=JSON.stringify(filters);
+  const [cursorState,setCursorState]=useState(()=>initialPosition?.owner===user ? initialPosition : {filter:"",cursor:""});
+  const filterKey=JSON.stringify({...subFilterDefaults,...filters});
   const cursor=cursorState.filter===filterKey?cursorState.cursor:"";
+  useEffect(()=>onPositionChange?.({owner:user,filter:filterKey,cursor}),[user,filterKey,cursor,onPositionChange]);
   const pageQuery=useManagementPage(user,filters,cursor);
   const pageData=pageQuery.data;
   const displayedPage=pageQuery.displayPage;
@@ -792,6 +798,7 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
   const [modelSelectionRevision, setModelSelectionRevision] = useState(0);
   const {
     search,
+    excludeName,
     accountId,
     model,
     maxRate,
@@ -1328,6 +1335,19 @@ export function Sub2apiChecks({ user = "account" }: { user?: string }) {
               <option value="joined">已加入 API key</option>
               <option value="unjoined">未加入任何 API key</option>
             </select><ChevronDown size={13}/>
+          </label>
+          <label className="search-field sub-name-exclude">
+            <input
+              aria-label="排除渠道名"
+              placeholder="排除渠道名，如 kiro"
+              title="排除名称包含此字符串的渠道，不区分大小写"
+              maxLength={512}
+              value={excludeName}
+              onChange={(e) => {
+                setFilters((v) => ({ ...v, excludeName: e.target.value }));
+                setPage(0);
+              }}
+            />
           </label>
           <label className="select-field">
             <Globe2 size={15} />

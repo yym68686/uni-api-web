@@ -194,7 +194,8 @@ it("tags independent filter, page and refetch reads without changing query keys,
     for (const [i, call] of calls.entries()) {
       expect(call.url.pathname).toBe("/analytics/v1/channel-management/query");
       expect([...call.url.searchParams.keys()].sort()).toEqual(i === 0 ? ["filters"] : i === 1 ? ["filters", "model_view", "receipt_view"] : ["cursor", "filters", "model_view", "receipt_view", "refresh_cursor"]);
-      expect(JSON.parse(call.url.searchParams.get("filters")!)).toEqual(i === 0 ? filters : filtered);
+      const { excludeName: _empty, ...sentFilters } = i === 0 ? filters : filtered;
+      expect(JSON.parse(call.url.searchParams.get("filters")!)).toEqual(sentFilters);
       expect(call.init.method).toBeUndefined();
       expect(call.init.cache).toBe("no-cache");
       expect(call.init.signal?.aborted).toBe(false);
@@ -259,7 +260,7 @@ it("reads one current page and separately verifies the complete 61-row selection
       expect(init.method).toBeUndefined();
       expect(init.cache).toBe(url.searchParams.has("selection") ? "no-store" : "no-cache");
       expect(JSON.parse(url.searchParams.get("filters")!)).toEqual(
-        subFilterDefaults,
+        (({excludeName: _empty, ...filters})=>filters)(subFilterDefaults),
       );
       return Response.json(
         url.searchParams.has("selection") ? selection() : page(),
@@ -276,6 +277,21 @@ it("reads one current page and separately verifies the complete 61-row selection
   expect(
     managementOptimizationSnapshot(all, subFilterDefaults).rows,
   ).toHaveLength(61);
+  expect(calls).toHaveLength(2);
+});
+
+it("sends name exclusions unchanged for both pages and complete batch selections", async () => {
+  const filters = { ...subFilterDefaults, excludeName: "KiRo" };
+  const calls: URL[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+    const url = new URL(input);
+    calls.push(url);
+    expect(JSON.parse(url.searchParams.get("filters")!)).toEqual(filters);
+    return Response.json(url.searchParams.has("selection") ? selection() : page());
+  }));
+  const signal = new AbortController().signal;
+  const first = await readManagementPage(filters, "", signal);
+  await readManagementSelection(filters, first, signal);
   expect(calls).toHaveLength(2);
 });
 

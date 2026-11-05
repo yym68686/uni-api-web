@@ -76,7 +76,7 @@ func parseManagementQuery(values url.Values) (managementQueryFilters, error) {
 	if err := decoder.Decode(new(any)); err != io.EOF {
 		return filters, errManagementFilters
 	}
-	for _, field := range []string{filters.Search, filters.AccountID, filters.Model, filters.Platform} {
+	for _, field := range []string{filters.Search, filters.ExcludeName, filters.AccountID, filters.Model, filters.Platform} {
 		if len(field) > 2048 || strings.ContainsRune(field, '\x00') {
 			return filters, errManagementFilters
 		}

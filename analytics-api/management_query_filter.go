@@ -14,6 +14,7 @@ import (
 
 type managementQueryFilters struct {
 	Search       string `json:"search"`
+	ExcludeName  string `json:"excludeName,omitempty"`
 	AccountID    string `json:"accountId"`
 	Model        string `json:"model"`
 	MaxRate      string `json:"maxRate"`
@@ -326,7 +327,11 @@ func filterManagementQueryRows(rows []managementQueryRow, f managementQueryFilte
 	candidates := []managementQueryRow{}
 	lower := cases.Lower(language.Und)
 	search := lower.String(f.Search)
+	excludeName := lower.String(strings.TrimSpace(f.ExcludeName))
 	for _, row := range rows {
+		if excludeName != "" && strings.Contains(lower.String(row.Target.Name), excludeName) {
+			continue
+		}
 		if f.AccountID != "" && (f.AccountID == "__unassigned__" && len(row.AccountIDs) != 0 || f.AccountID != "__unassigned__" && !slices.Contains(row.AccountIDs, f.AccountID)) {
 			continue
 		}

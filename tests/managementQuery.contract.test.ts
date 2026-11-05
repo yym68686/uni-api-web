@@ -111,6 +111,7 @@ it("freezes every filter, facets and stable sort against the browser implementat
     {model:"public",input:1,output:2,verified:false,source:"manual"}] as ModelPrice[];
   const patches:Partial<SubFilters>[]=[{},
     ...["a","private","İ","οσ","ος","i\u0307","😀","no-match"].map(search=>({search})),
+    ...["GROUP-1","MULTI"," orphan ","İ","ΟΣ","😀","literal.*","no-match","   "].map(excludeName=>({excludeName})),
     ...["a","b","__unassigned__","missing"].map(accountId=>({accountId})),
     ...["0","0.9","1","1.1","mismatch"].map(maxRate=>({maxRate})),
     ...["asc","desc"].map(sort=>({sort})),
@@ -126,6 +127,7 @@ it("freezes every filter, facets and stable sort against the browser implementat
     ...["match","mismatch","untested","not_applicable"].map(fingerprint=>({fingerprint})),
     {maxRate:"1",sort:"asc",availability:"success",minQuality:"50"},
     {maxRate:"0.9",platform:"openai",joined:"joined",fingerprint:"match"},
+    {search:"a",excludeName:"GROUP-1",sort:"asc"},
   ];
   const filterCases=["","public","gpt-5.5","claude-opus-5-5"].flatMap(model=>patches.map(patch=>{
     // Preserve the frozen contract's explicit configuration order; the UI default is tested separately.

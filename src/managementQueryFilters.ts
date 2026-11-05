@@ -25,7 +25,9 @@ export function filterManagementRows(
 
 export function managementCandidateRows(input:ManagementRow[],filters:SubFilters,prices?:ModelPrice[]) {
   const {search,accountId,model,availability,groupStatus,priceStatus,compaction,toolUse,quality,minQuality,modelMatch}=filters;
+  const excludeName = (filters.excludeName || "").trim().toLowerCase();
   return input.filter(({account,target,checks,selected,accountIds,configured})=>
+    (!excludeName || !target.name.toLowerCase().includes(excludeName)) &&
     (!accountId || (accountId===UNASSIGNED_ACCOUNT ? !accountIds.length : accountIds.includes(accountId))) &&
     (!configured || !account.id || !model || checks.some(c=>c.model===model)) &&
     (groupStatus==="all" || (groupStatus==="unavailable" ? !configured && !target.active : !!configured || target.active)) &&

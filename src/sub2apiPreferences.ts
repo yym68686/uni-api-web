@@ -1,5 +1,6 @@
 export const subFilterDefaults = {
   search: "",
+  excludeName: "",
   accountId: "",
   model: "",
   maxRate: "",
@@ -35,6 +36,7 @@ function validate(raw: unknown): SubFilters {
     modelMatch: field("modelMatch", ["", "match", "mismatch", "missing", "invalid", "unavailable", "legacy", "untested"]),
     platform: field("platform"),
     search: field("search"),
+    excludeName: field("excludeName").slice(0, 512),
     accountId: field("accountId"),
     model: field("model").slice(0, 512),
     maxRate:

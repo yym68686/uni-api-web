@@ -8,6 +8,8 @@ import type { SubAccount, SubTarget } from "./Sub2apiChecks";
 import type { ManagementPage, ManagementSelection } from "./managementQuery";
 import { SUB_MODELS } from "./sub2apiModels";
 import { controlRequest } from "./api";
+import { useState } from "react";
+import type { ManagementPagePosition } from "./managementQuery";
 
 afterEach(() => vi.unstubAllGlobals());
 const target = (n: number): SubTarget => ({
@@ -103,6 +105,49 @@ function mount(user: string) {
     </QueryClientProvider>,
   );
 }
+
+it("returns from another view to page three, rereads it, and resets position when filters change", async () => {
+  const reads: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async(input:string)=>{
+    const url = new URL(input);
+    if(url.pathname.endsWith("/accounts/progress")) return idleProgress();
+    if(url.pathname.endsWith("/channel-management/query")) {
+      reads.push(url.searchParams.get("cursor") || "");
+      return Response.json(page(Number(url.searchParams.get("cursor") || 0)));
+    }
+    return Response.json({data:[]});
+  }));
+  const client = new QueryClient({defaultOptions:{queries:{retry:false}}});
+  function Navigation() {
+    const [visible, setVisible] = useState(true);
+    const [position, setPosition] = useState<ManagementPagePosition>();
+    return <QueryClientProvider client={client}><Tooltip.Provider>
+      <button onClick={()=>setVisible(!visible)}>切换日志</button>
+      {visible ? <Sub2apiChecks user="navigation-page" initialPosition={position} onPositionChange={setPosition}/> : <p>日志页面</p>}
+    </Tooltip.Provider></QueryClientProvider>;
+  }
+  render(<Navigation/>);
+  const user = userEvent.setup();
+  await screen.findByText("Channel 1",{selector:"strong"});
+  await user.click(screen.getByRole("button",{name:"下一页"}));
+  await screen.findByText("Channel 26",{selector:"strong"});
+  await user.click(screen.getByRole("button",{name:"下一页"}));
+  await screen.findByText("Channel 51",{selector:"strong"});
+  await user.click(screen.getByRole("button",{name:"切换日志"}));
+  await screen.findByText("日志页面");
+  await user.click(screen.getByRole("button",{name:"切换日志"}));
+  await screen.findByText("Channel 51",{selector:"strong"});
+  await waitFor(()=>expect(reads).toEqual(["","25","50","50"]));
+  expect(screen.queryByText("Channel 1",{selector:"strong"})).not.toBeInTheDocument();
+  await user.type(screen.getByRole("textbox",{name:"排除渠道名"}),"kiro");
+  await screen.findByText("Channel 1",{selector:"strong"});
+  await user.click(screen.getByRole("button",{name:"切换日志"}));
+  await screen.findByText("日志页面");
+  await user.click(screen.getByRole("button",{name:"切换日志"}));
+  await screen.findByText("Channel 1",{selector:"strong"});
+  expect(screen.getByRole("textbox",{name:"排除渠道名"})).toHaveValue("kiro");
+  expect(reads.at(-1)).toBe("");
+});
 
 it.each([true,false])("starts live sync progress without clearing rows, changing the page or repeating the submission (detect=%s)", async detect=>{
  const user=userEvent.setup();let pageReads=0,progressReads=0,posts=0;
