@@ -28,6 +28,10 @@ export function AccountForm({
   );
   const [password, setPassword] = useState("");
   const hasSavedPassword = initial?.has_saved_password === true;
+  const accountID = initial?.id;
+  const [credentialsLoading, setCredentialsLoading] =
+    useState(hasSavedPassword);
+  const [credentialsError, setCredentialsError] = useState("");
   const [browserNeeded, setBrowserNeeded] = useState(false);
   const [browserKind, setBrowserKind] = useState<"sub2api" | "newapi">(
     "sub2api",
@@ -41,6 +45,35 @@ export function AccountForm({
   const [error, setError] = useState("");
   const browserAbort = useRef<AbortController | null>(null);
   const opener = useRef(document.activeElement);
+  useEffect(() => {
+    if (!accountID || !hasSavedPassword) return;
+    const abort = new AbortController();
+    let active = true;
+    setCredentialsLoading(true);
+    setCredentialsError("");
+    void controlRequest<{ password: string }>(
+      `/v1/sub2api/accounts/${encodeURIComponent(accountID)}/credentials`,
+      { signal: abort.signal },
+    )
+      .then((credentials) => {
+        if (typeof credentials.password !== "string")
+          throw new Error("账号密码返回无效");
+        if (active) setPassword(credentials.password);
+      })
+      .catch(() => {
+        if (active)
+          setCredentialsError(
+            "已保存密码暂时无法显示。可留空使用服务端密码，或填写新密码。",
+          );
+      })
+      .finally(() => {
+        if (active) setCredentialsLoading(false);
+      });
+    return () => {
+      active = false;
+      abort.abort();
+    };
+  }, [accountID, hasSavedPassword]);
   useEffect(() => {
     let active = true;
     void browserHelperAvailable(browserKind).then((ready) => {
@@ -79,7 +112,7 @@ export function AccountForm({
     saved();
   }
   async function browserLogin() {
-    if (busy || browserBusy) return;
+    if (busy || browserBusy || credentialsLoading) return;
     setBrowserBusy(true);
     setError("");
     const abort = new AbortController();
@@ -122,7 +155,7 @@ export function AccountForm({
   }
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (busy || browserBusy) return;
+    if (busy || browserBusy || credentialsLoading) return;
     if (browserNeeded && !challenge && !loginSaved) {
       void browserLogin();
       return;
@@ -221,7 +254,7 @@ export function AccountForm({
           <form className="source-form sub-account-form" onSubmit={submit}>
             <fieldset
               className="sub-login-fields"
-              disabled={busy || browserBusy || loginSaved}
+              disabled={busy || browserBusy || credentialsLoading || loginSaved}
             >
               {challenge ? (
                 <label>
@@ -280,7 +313,7 @@ export function AccountForm({
                   <label>
                     账号密码
                     <input
-                      type="password"
+                      type="text"
                       aria-label="账号密码"
                       aria-describedby="site-password-note"
                       placeholder={
@@ -290,17 +323,22 @@ export function AccountForm({
                       }
                       autoFocus={sessionOnly}
                       autoComplete="current-password"
+                      spellCheck={false}
+                      autoCapitalize="none"
                       value={password}
                       onChange={(event) => setPassword(event.target.value)}
                       required={!hasSavedPassword && !browserNeeded}
                     />
                   </label>
                   <p className="settings-note" id="site-password-note">
-                    {hasSavedPassword
-                      ? "密码已加密保存。留空使用已保存密码，填写新密码可更新；会话失效后自动重新登录。"
-                      : initial
-                        ? "此账号尚未保存登录密码，请补填一次。验证成功后加密保存，会话失效后自动重新登录。"
-                        : "验证成功后，密码将加密保存在服务端，用于会话失效时自动重新登录。"}
+                    {credentialsLoading
+                      ? "正在读取已保存密码…"
+                      : credentialsError ||
+                        (hasSavedPassword
+                          ? "密码已加密保存在服务端，默认显示已保存密码。留空继续使用，填写新密码可更新；会话失效后自动重新登录。"
+                          : initial
+                            ? "此账号尚未保存登录密码，请补填一次。验证成功后加密保存，会话失效后自动重新登录。"
+                            : "验证成功后，密码将加密保存在服务端，用于会话失效时自动重新登录。")}
                   </p>
                 </>
               )}
@@ -344,7 +382,7 @@ export function AccountForm({
               <button
                 type="submit"
                 className="button primary small"
-                disabled={busy || browserBusy}
+                disabled={busy || browserBusy || credentialsLoading}
               >
                 {busy || browserBusy ? (
                   <Spinner small />

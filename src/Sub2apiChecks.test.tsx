@@ -2041,11 +2041,12 @@ it("opens account forms in a modal and restores focus when closed", async () => 
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });
 
-it.each([false, true])("reuses a saved site password without exposing it and retries only a failed sync (%s)", async failSync => {
+it.each([false, true])("shows a saved site password in the login form and retries only a failed sync (%s)", async failSync => {
   const data = fixtures().slice(0, 1);
   data[0].has_saved_password = true;
   const writes: {path: string; body: unknown}[] = [];
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+    if (input.endsWith("/credentials")) return Response.json({password: "saved-site-password"});
     if (init?.method === "POST") {
       writes.push({path: new URL(input).pathname, body: JSON.parse(String(init.body))});
       if (failSync && writes.length === 2) return new Response("暂不可用", {status: 503});
@@ -2058,7 +2059,8 @@ it.each([false, true])("reuses a saved site password without exposing it and ret
   await user.click(await screen.findByRole("button", {name: "重新登录"}));
   const dialog = within(screen.getByRole("dialog", {name: "重新登录站点账号"}));
   expect(dialog.getByLabelText("账号密码")).not.toBeRequired();
-  expect(dialog.getByLabelText("账号密码")).toHaveValue("");
+  await waitFor(() => expect(dialog.getByLabelText("账号密码")).toHaveValue("saved-site-password"));
+  expect(dialog.getByLabelText("账号密码")).toHaveAttribute("type", "text");
   expect(dialog.getByPlaceholderText("已保存密码，留空继续使用")).toBeVisible();
   await user.click(dialog.getByRole("button", {name: "连接并检测"}));
   if (failSync) {
@@ -2067,10 +2069,12 @@ it.each([false, true])("reuses a saved site password without exposing it and ret
   }
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   expect(writes).toEqual([
-    {path: "/analytics/v1/sub2api/accounts/one/login", body: {name: "one", base: "https://one.test", email: "one@test.com"}},
+    {path: "/analytics/v1/sub2api/accounts/one/login", body: {name: "one", base: "https://one.test", email: "one@test.com", password: "saved-site-password"}},
     {path: "/analytics/v1/sub2api/accounts/one/sync", body: {}},
     ...(failSync ? [{path: "/analytics/v1/sub2api/accounts/one/sync", body: {}}] : []),
   ]);
+  expect(JSON.stringify(localStorage)).not.toContain("saved-site-password");
+  expect(JSON.stringify(sessionStorage)).not.toContain("saved-site-password");
 });
 
 it("explains missing legacy credentials and requires them once without submitting an empty login", async () => {

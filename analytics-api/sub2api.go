@@ -186,7 +186,7 @@ func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Reuse credentials only after ownership and the immutable site identity
-		// have been checked. Never return the saved password to the browser.
+		// have been checked. Password reads use the separate credentials endpoint.
 		if in.Password == "" && in.Access == "" && in.BrowserKind != "newapi" && in.Challenge == "" {
 			if encryptedPassword == "" {
 				http.Error(w, subMissingLoginPasswordMessage, 400)
