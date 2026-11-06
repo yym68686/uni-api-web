@@ -3,9 +3,27 @@ import { act, cleanup, renderHook } from "@testing-library/react";
 import { QueryClient, QueryClientProvider, focusManager } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import type { SubAccount } from "./Sub2apiChecks";
-import { useSubSyncProgress } from "./subSyncProgress";
+import { useSubSyncProgress, useSubSyncResultRefresh } from "./subSyncProgress";
+import type { ManagementPage } from "./managementQuery";
 
 afterEach(()=>{cleanup();vi.useRealTimers();vi.unstubAllGlobals();focusManager.setFocused(undefined);});
+
+it.each([5,15])("retains completion during a pending page read and refreshes only an older page (read at %s)", readAt => {
+ const client=new QueryClient();
+ const invalidate=vi.spyOn(client,"invalidateQueries");
+ const wrapper=({children}:{children:ReactNode})=><QueryClientProvider client={client}>{children}</QueryClientProvider>;
+ const accounts=[{id:"account",state:"running",targets:[]}] as unknown as SubAccount[];
+ const page={read_at_ms:1,accounts,rows:[]} as unknown as ManagementPage;
+ type Props={page:ManagementPage|undefined;progress:{data:SubAccount[];read_at_ms:number}};
+ const hook=renderHook(({page,progress}:Props)=>useSubSyncResultRefresh("owner",page,progress),{wrapper,initialProps:{page,progress:{data:accounts,read_at_ms:2}} as Props});
+ hook.rerender({page:undefined,progress:{data:[{...accounts[0],state:"idle"}],read_at_ms:10}});
+ expect(invalidate).not.toHaveBeenCalled();
+ hook.rerender({page:{...page,read_at_ms:readAt,accounts:[{...accounts[0],state:"idle"}]},progress:{data:[{...accounts[0],state:"idle"}],read_at_ms:10}});
+ expect(invalidate).toHaveBeenCalledTimes(readAt < 10 ? 1 : 0);
+ if(readAt < 10)expect(invalidate).toHaveBeenCalledWith({queryKey:["management-query","owner"]},{cancelRefetch:false});
+ hook.unmount();client.clear();
+});
+
 it("polls only lightweight progress during a job and stops on completion without a page request",async()=>{
  vi.useFakeTimers();
  focusManager.setFocused(true);

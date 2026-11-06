@@ -1,4 +1,4 @@
-import { useSubSyncProgress } from "./subSyncProgress";
+import { useSubSyncProgress, useSubSyncResultRefresh } from "./subSyncProgress";
 import type { SyncProgress } from "./subSyncProgress";
 import { fingerprintTargets, fingerprintLabels, FingerprintCell, FingerprintPanel, fingerprintNote } from "./ModelFingerprints";
 import { isCapabilityCheckModel, capabilityCheckScope } from "./sub2apiModels";
@@ -788,6 +788,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   const [syncProgressSubmission,setSyncProgressSubmission]=useState({owner:user,generation:0});
   const syncGeneration=syncProgressSubmission.owner===user?syncProgressSubmission.generation:0;
   const progressQuery=useSubSyncProgress(user,accounts,metadata?.readAt,syncGeneration);
+  useSubSyncResultRefresh(user,pageData,progressQuery.data);
   const awaitingSyncProgress=syncGeneration>0 && !progressQuery.data;
   const statusAccounts=progressQuery.data?.data || accounts;
   const progressByAccount=new Map(statusAccounts.map(a=>[a.id,a]));

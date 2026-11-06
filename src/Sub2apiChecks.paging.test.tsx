@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { Sub2apiChecks } from "./Sub2apiChecks";
-import type { SubAccount, SubTarget } from "./Sub2apiChecks";
+import type { Result, SubAccount, SubTarget } from "./Sub2apiChecks";
 import type { ManagementPage, ManagementSelection } from "./managementQuery";
 import { SUB_MODELS } from "./sub2apiModels";
 import { controlRequest } from "./api";
@@ -92,12 +92,10 @@ const selection = (): ManagementSelection => ({
   },
   prices: [],
 });
-function mount(user: string) {
+function mount(user: string, client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
   return render(
     <QueryClientProvider
-      client={
-        new QueryClient({ defaultOptions: { queries: { retry: false } } })
-      }
+      client={client}
     >
       <Tooltip.Provider>
         <Sub2apiChecks user={user} />
@@ -105,6 +103,102 @@ function mount(user: string) {
     </QueryClientProvider>,
   );
 }
+
+it.each(["idle", "interrupted", "stopped", "error"])("revalidates page two once when a running site settles as %s, without resubmitting detection", async terminal => {
+  const client = new QueryClient({defaultOptions:{queries:{retry:false}}});
+  let pageReads = 0, progressReads = 0;
+  let finishPage!: (response: Response) => void;
+  const requests: string[] = [];
+  const check = (state: string) => ({model:"gpt-5.5",state,message:"",result:state === "done" ? {
+    model:"gpt-5.5",checked_at:4,verdict:"pass",
+    availability:{status:"success",model_match:"match",text:"",ttft_ms:1,duration_ms:1},
+    quality:{status:"skipped",text:"",ttft_ms:null,duration_ms:0},
+  } as Result : null});
+  const snapshot = (offset: number, state: string) => ({...page(offset), read_at_ms:state === "queued" ? 1 : 4,
+    accounts:[{...account,state:state === "queued" ? "running" : terminal}],
+    rows:page(offset).rows.map(row=>({...row,target:{...row.target,state:state === "queued" ? "queued" : "done"},checks:[check(state)]})),
+  });
+  vi.stubGlobal("fetch", vi.fn(async(input: string, init?: RequestInit) => {
+    expect(init?.method || "GET").toBe("GET");
+    const url = new URL(input);
+    if (url.pathname.endsWith("/channel-management/query")) {
+      const cursor = url.searchParams.get("cursor") || "";
+      requests.push(cursor); pageReads++;
+      if (pageReads === 3) return new Promise<Response>(resolve=>{finishPage=resolve;});
+      return Response.json(snapshot(Number(cursor), "queued"));
+    }
+    if (url.pathname.endsWith("/accounts/progress")) {
+      progressReads++;
+      const done = progressReads > 1;
+      return Response.json({data:[{...account,state:done ? terminal : "running",progress:{total:1,completed:done ? 1 : 0,queued:done ? 0 : 1,running:0,interrupted:0,running_models:[],groups:[]}}],read_at_ms:done ? 3 : 2});
+    }
+    return Response.json({data:[]});
+  }));
+  const user = userEvent.setup(); mount(`settled-${terminal}`, client);
+  await screen.findByText("Channel 1", {selector:"strong"});
+  await waitFor(()=>expect(progressReads).toBe(1));
+  await user.click(screen.getByRole("button", {name:"下一页"}));
+  await screen.findByText("Channel 26", {selector:"strong"});
+  const row = screen.getByRole("row", {name:"查看 Owned site Channel 26 渠道详情"});
+  expect(within(row).getAllByText("1 个排队 / 检测中")).toHaveLength(2);
+  await act(async()=>{await client.refetchQueries({queryKey:["sub-sync-progress"]});});
+  await waitFor(()=>expect(pageReads).toBe(3));
+  expect(requests).toEqual(["", "25", "25"]);
+  expect(screen.getByRole("row", {name:"查看 Owned site Channel 26 渠道详情"})).toBe(row);
+  expect(screen.getByRole("button", {name:/^检测全部模型 ·/})).toBeDisabled();
+  await act(async()=>{finishPage(Response.json(snapshot(25, "done")));});
+  await waitFor(()=>expect(within(row).getByText("1/1 可用")).toBeVisible());
+  expect(within(row).queryByText("1 个排队 / 检测中")).not.toBeInTheDocument();
+  await act(async()=>{await client.refetchQueries({queryKey:["sub-sync-progress"]});});
+  expect(pageReads).toBe(3);
+});
+
+it("reconciles queued rows with the first completed progress read even when account headers already say idle", async () => {
+  let pageReads = 0;
+  vi.stubGlobal("fetch", vi.fn(async(input: string) => {
+    const url = new URL(input);
+    if (url.pathname.endsWith("/channel-management/query")) {
+      pageReads++;
+      const value = page(); value.read_at_ms = pageReads === 1 ? 1 : 3;
+      value.rows = value.rows.map(row=>({...row,checks:[{model:"gpt-5.5",state:pageReads === 1 ? "queued" : "interrupted",message:"",result:null}]}));
+      return Response.json(value);
+    }
+    if (url.pathname.endsWith("/accounts/progress")) return Response.json({data:[{...account,progress:{total:25,completed:25,queued:0,running:0,interrupted:0,running_models:[],groups:rows.map(row=>({group_id:row.target.group_id,total:1,completed:1,queued:0,running:0,interrupted:0}))}}],read_at_ms:2});
+    return Response.json({data:[]});
+  }));
+  mount("completed-before-first-poll");
+  const row = await screen.findByRole("row", {name:"查看 Owned site Channel 1 渠道详情"});
+  await waitFor(()=>expect(within(row).getByText("1 个中断")).toBeVisible());
+  expect(within(row).getByText("0/1 可用")).toBeVisible();
+  expect(within(row).queryByText("1 个排队 / 检测中")).not.toBeInTheDocument();
+  expect(pageReads).toBe(2);
+});
+
+it("hides unverified results and disables detection when the completion result read fails, without a retry loop", async () => {
+  const client = new QueryClient({defaultOptions:{queries:{retry:false}}});
+  let pageReads = 0, progressReads = 0;
+  vi.stubGlobal("fetch", vi.fn(async(input: string, init?: RequestInit) => {
+    expect(init?.method || "GET").toBe("GET");
+    const url = new URL(input);
+    if (url.pathname.endsWith("/channel-management/query")) {
+      if (++pageReads > 1) return Response.json({error:"fixture result read failed"},{status:503});
+      return Response.json({...page(),accounts:[{...account,state:"running"}]});
+    }
+    if (url.pathname.endsWith("/accounts/progress")) {
+      return Response.json({data:[{...account,state:++progressReads > 1 ? "idle" : "running",progress:{total:0,completed:0,queued:0,running:0,interrupted:0,running_models:[],groups:[]}}],read_at_ms:progressReads + 1});
+    }
+    return Response.json({data:[]});
+  }));
+  mount("failed-completion-read",client);
+  await screen.findByText("Channel 1",{selector:"strong"});
+  await waitFor(()=>expect(progressReads).toBe(1));
+  await act(async()=>{await client.refetchQueries({queryKey:["sub-sync-progress"]});});
+  await screen.findByText(/fixture result read failed/);
+  expect(screen.getByText("Channel 1",{selector:"strong"})).not.toBeVisible();
+  expect(screen.getByRole("button",{name:/^检测全部模型 ·/})).toBeDisabled();
+  await act(async()=>{await client.refetchQueries({queryKey:["sub-sync-progress"]});});
+  expect(pageReads).toBe(2);
+});
 
 it("returns from another view to page three, rereads it, and resets position when filters change", async () => {
   const reads: string[] = [];
