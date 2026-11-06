@@ -2131,16 +2131,20 @@ it("explains missing legacy credentials and requires them once without submittin
 });
 
 it("renders the current page's account balances without a duplicate first-paint request", async () => {
-  const data = [{...fixtures()[0], name:"live-balance-account", balance:{amount:123.45,status:"ok",checked_at:Math.floor(Date.now()/1000)}}];
+  const data = [{...fixtures()[0], name:"live-balance-account", provider_kind:"newapi", balance:{amount:123.45,status:"ok",checked_at:Math.floor(Date.now()/1000)}}];
+  const client = new QueryClient();
   const calls:string[]=[];
   vi.stubGlobal("fetch",vi.fn(async(input:string)=>{
     const path=new URL(input,location.origin).pathname;calls.push(path);
     if(path.endsWith("/balance"))throw Error("duplicate balance read");
     return Response.json({data});
   }));
-  mount();
+  mount("account", client);
   expect(await screen.findByText("$123.45")).toBeVisible();
   expect(calls.some(path=>path.endsWith("/balance"))).toBe(false);
+  expect(client.getQueryData(["site-account-balance", "account", data[0].id])).toMatchObject({
+    provider_kind: "newapi", amount: 123.45, status: "ok",
+  });
 });
 
 it("shows account wallet balances using the shared thresholds", async () => {

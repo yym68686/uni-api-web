@@ -11,9 +11,10 @@ import (
 )
 
 type subAccountBalance struct {
-	Amount    *float64 `json:"amount"`
-	CheckedAt int64    `json:"checked_at"`
-	Status    string   `json:"status"`
+	Amount       *float64 `json:"amount"`
+	CheckedAt    int64    `json:"checked_at"`
+	Status       string   `json:"status"`
+	ProviderKind string   `json:"provider_kind,omitempty"`
 }
 
 // Serialize token rotation with sync/import jobs, across API replicas.
@@ -53,9 +54,9 @@ func (s *Service) subAccountBalance(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	owner, _ := s.controlUser(r)
 	id := r.PathValue("id")
-	var base, email, encrypted, encryptedPassword string
+	var base, email, encrypted, encryptedPassword, providerKind string
 	var raw []byte
-	err := s.control.db.QueryRowContext(ctx, `SELECT base,email,encrypted_auth,encrypted_login_password,balance FROM console_sub_accounts WHERE id=$1 AND owner=$2`, id, owner).Scan(&base, &email, &encrypted, &encryptedPassword, &raw)
+	err := s.control.db.QueryRowContext(ctx, `SELECT base,email,encrypted_auth,encrypted_login_password,balance,provider_kind FROM console_sub_accounts WHERE id=$1 AND owner=$2`, id, owner).Scan(&base, &email, &encrypted, &encryptedPassword, &raw, &providerKind)
 	if err != nil {
 		http.Error(w, "账号不存在", 404)
 		return
@@ -64,11 +65,15 @@ func (s *Service) subAccountBalance(w http.ResponseWriter, r *http.Request) {
 	if len(raw) > 0 {
 		_ = json.Unmarshal(raw, &cached)
 	}
+	// Include the verified account's adapter even for older cached snapshots.
+	// The observation page can then distinguish a missing New API usage route
+	// from an unavailable wallet without guessing from a hostname or balance.
+	cached.ProviderKind = providerKind
 	if cached.CheckedAt > time.Now().Add(-5*time.Minute).Unix() {
 		writeJSON(w, 200, cached)
 		return
 	}
-	if s.isNewAPI(ctx, id) {
+	if providerKind == "newapi" {
 		var profile struct {
 			Email   string   `json:"email"`
 			Balance *float64 `json:"balance"`
@@ -78,7 +83,7 @@ func (s *Service) subAccountBalance(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 200, cached)
 			return
 		}
-		fresh := subAccountBalance{Amount: profile.Balance, CheckedAt: time.Now().Unix(), Status: "ok"}
+		fresh := subAccountBalance{Amount: profile.Balance, CheckedAt: time.Now().Unix(), Status: "ok", ProviderKind: providerKind}
 		if fresh.Amount == nil {
 			fresh.Status = "missing"
 		}
@@ -107,6 +112,7 @@ func (s *Service) subAccountBalance(w http.ResponseWriter, r *http.Request) {
 	if len(raw) > 0 {
 		_ = json.Unmarshal(raw, &cached)
 	}
+	cached.ProviderKind = providerKind
 	if cached.CheckedAt > time.Now().Add(-5*time.Minute).Unix() {
 		writeJSON(w, 200, cached)
 		return
@@ -186,7 +192,7 @@ func (s *Service) subAccountBalance(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, cached)
 		return
 	}
-	fresh := subAccountBalance{Amount: profile.Balance, CheckedAt: time.Now().Unix(), Status: "ok"}
+	fresh := subAccountBalance{Amount: profile.Balance, CheckedAt: time.Now().Unix(), Status: "ok", ProviderKind: providerKind}
 	if fresh.Amount == nil {
 		fresh.Status = "missing"
 	}

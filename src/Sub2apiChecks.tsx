@@ -170,7 +170,9 @@ function AccountBalance({ account, enabled, user }: { account: SubAccount; enabl
     // This header was read in the just-verified management transaction. Do
     // not issue an identical balance GET for every account at first paint.
     // Missing values still read once; page actions do not restart this query.
-    initialData: account.balance || undefined,
+    initialData: account.balance
+      ? { ...account.balance, provider_kind: account.provider_kind }
+      : undefined,
     initialDataUpdatedAt: Date.now(),
     enabled,
     refetchInterval: false,

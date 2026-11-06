@@ -5,6 +5,7 @@ export interface AccountBalance {
   amount: number | null;
   status: string;
   checked_at: number;
+  provider_kind?: string;
 }
 
 // A wallet belongs to an account, not a channel, model, source or time filter.

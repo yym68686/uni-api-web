@@ -359,6 +359,8 @@ new-api 仅同步当前账号有权限的分组，用持久映射保留字符串
 
 余额与消费按站点 `quota_per_unit` 换算；账单用 `newapi:` 请求标识、账号和业务 key 精确关联，数字展示 ID 不参与去重。按稳定请求/事件/令牌组合分配持久账单 ID。支持普通 ratio 和有明确命中档位/条件倍率证据的文本线性表达式，且核对实际扣费；其他复杂表达式保留实际消费，单价不作猜测。订阅额度不当作钱包成本，存在无法关联的退款时不宣布净消费完整。扫描使用固定时间范围；网关采集的两类请求标识由账号站点类型隔离匹配。旧网关未记录 `X-Oneapi-Request-Id` 的历史请求不能补造利润。
 
+已关联站点账号的 New API 导入渠道，若余额查询确认 `/v1/usage` 不存在（404/405），渠道观测会复用与站点账号页面相同的钱包余额，详情标注「站点账号余额」。Key 配额、订阅、鉴权失败和网络错误保留原结果；不按域名猜测账号，也不将未知余额当作零。详见 [New API 渠道余额](docs/newapi-channel-balances.md)。
+
 可选真实验证：`TEST_NEWAPI_CREDENTIALS` 指向仓库外的 JSON（`Base`、`Username`、`Password`），配合 `TEST_CONTROL_DATABASE_URL` 运行 `TestNewAPILiveAdapter`。该测试发起 4 次付费探针，验证专用 key 隔离、刷新及账单关联，退出时仅删除本次创建的 key 并撤销测试会话。默认测试不会访问真实站点。
 
 ### Collection sizes and resource budgets

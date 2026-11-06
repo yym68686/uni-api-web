@@ -19,18 +19,29 @@ interface ChannelBalanceResult {
 
 interface AccountBalanceResult extends ChannelBalanceResult {
   needsChannelBalance: boolean;
+  supportsWalletFallback?: boolean;
 }
 
 // Imported channels may expose a key quota or subscription instead of a wallet.
-// Only a proven wallet can be replaced by the shared account snapshot.
+// A missing New API usage route can fall back to its proven account wallet.
+// Successful key quotas/subscriptions and credential/network errors stay intact.
 export function withAccountWallet(
   raw: ChannelBalanceResult,
   account?: AccountBalanceResult,
 ): ChannelBalanceResult {
   if (!account) return raw;
   if (!account.needsChannelBalance) return account;
+  if (!raw.data) return raw;
   const isWallet = (kind?: string) => kind === "wallet" || kind === "account_wallet";
-  if (!raw.data?.keys?.some((key) => isWallet(key.kind))) return raw;
+  const missingNewAPIUsage = account.supportsWalletFallback
+    && !raw.isPending && !raw.isError
+    && raw.data.status === "complete"
+    && !raw.data.omitted_keys
+    && !!raw.data.keys?.length
+    && raw.data.keys.length === raw.data.key_count
+    && raw.data.keys.every((key) => key.status === "unsupported"
+      && [404, 405].includes(key.http_status || 0));
+  if (!missingNewAPIUsage && !raw.data?.keys?.some((key) => isWallet(key.kind))) return raw;
   const refetch = () => Promise.all([account.refetch(), raw.refetch()]);
   const wallet = account.data?.keys?.[0];
   if (account.isPending || account.isError || !wallet) {
@@ -38,12 +49,17 @@ export function withAccountWallet(
     // or is still loading. All views should reflect the same account state.
     return { data: undefined, isPending: account.isPending, isError: account.isError, refetch };
   }
+  const keys = missingNewAPIUsage
+    ? account.data!.keys
+    : raw.data.keys!.map((key) => isWallet(key.kind)
+      ? { ...key, ...wallet, position: key.position }
+      : key);
   return {
     data: {
       ...raw.data,
-      keys: raw.data.keys.map((key) => isWallet(key.kind)
-        ? { ...key, ...wallet, position: key.position }
-        : key),
+      // One wallet per account, even when several channels/keys share it.
+      ...(missingNewAPIUsage ? { key_count: account.data!.key_count } : {}),
+      keys,
     },
     isPending: false,
     isError: false,
@@ -124,6 +140,9 @@ export function useChannelAccountBalances(
         providerId(channel),
         {
           needsChannelBalance: channel.kind !== "configured",
+          supportsWalletFallback: unique.every(
+            (key) => byAccount.get(key.account_id)?.data?.provider_kind === "newapi",
+          ),
           data: pending ? undefined : balance,
           isPending: pending,
           isError: errors,

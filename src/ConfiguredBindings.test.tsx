@@ -8,6 +8,7 @@ import { combineChannelSpend, useSubChannelSpend } from "./SubChannelSpend";
 import type { SubChannelSpendResult } from "./SubChannelSpend";
 import { useChannelAccountBalances, withAccountWallet } from "./ChannelAccountBalances";
 import { accountBalanceQuery } from "./accountBalance";
+import { BalanceValue } from "./ChannelMetrics";
 import { withSubQuality } from "./ChannelChecks";
 import type { Checks } from "./ChannelChecks";
 import type { InstalledChannel, SubImportsQuery } from "./sub2apiImports";
@@ -256,6 +257,77 @@ it("replaces only gateway wallets and preserves key quotas, subscriptions and re
   expect(withAccountWallet(raw)).toBe(raw);
   expect(withAccountWallet(raw, { ...account, data: undefined, isPending: true })).toMatchObject({ data: undefined, isPending: true });
   expect(withAccountWallet(raw, { ...account, isError: true })).toMatchObject({ data: undefined, isError: true });
+});
+it("shows a verified New API account wallet when the imported channel has no Sub2API usage route", async () => {
+  let wallet = { status: "ok", amount: 28.250438, checked_at: 100, provider_kind: "newapi" };
+  const fetch = vi.fn(async () => new Response(JSON.stringify(wallet)));
+  vi.stubGlobal("fetch", fetch);
+  const imported: InstalledChannel = { ...bound, kind: undefined, binding_status: undefined, bound_keys: undefined };
+  const copy = { ...imported, provider: "copy", group_id: 8 };
+  const raw = {
+    data: { provider: imported.provider, status: "complete", key_count: 1,
+      keys: [{ position: 1, status: "unsupported", http_status: 404 }] } as Balance,
+    isPending: false, isError: false, refetch: vi.fn(async () => {}),
+  };
+  const { result } = renderHook(() => useChannelAccountBalances([imported, copy].map(providerId), [imported, copy], "newapi-wallet", true, false), { wrapper });
+  await waitFor(() => expect(result.current.get(providerId(imported))?.supportsWalletFallback).toBe(true));
+  for (const channel of [imported, copy]) {
+    expect(withAccountWallet(raw, result.current.get(providerId(channel))).data).toMatchObject({
+      status: "complete", key_count: 1,
+      keys: [{ kind: "account_wallet", status: "ok", currency: "USD", amount: 28.250438, checked_at: 100 }],
+    });
+  }
+  expect(fetch).toHaveBeenCalledTimes(1);
+  render(<Tooltip.Provider><BalanceValue detail balance={withAccountWallet(raw, result.current.get(providerId(imported))).data} /></Tooltip.Provider>);
+  expect(screen.getByText("$28.2504")).toBeVisible();
+  expect(screen.getByText("站点账号余额")).toBeVisible();
+  expect(screen.queryByText("上游未提供余额接口")).not.toBeInTheDocument();
+  wallet = { ...wallet, amount: -0.1, checked_at: 200 };
+  await result.current.get(providerId(copy))!.refetch();
+  await waitFor(() => expect(balanceIsLow(withAccountWallet(raw, result.current.get(providerId(imported))).data)).toBe(true));
+  expect(fetch).toHaveBeenCalledTimes(2);
+});
+it("limits the New API wallet fallback to complete missing-endpoint results", async () => {
+  const account = {
+    needsChannelBalance: true, supportsWalletFallback: true,
+    data: { provider: "imported", status: "complete", key_count: 1,
+      keys: [{ position: 1, kind: "account_wallet", status: "ok", amount: 490.96758, checked_at: 200 }] } as Balance,
+    isPending: false, isError: false, refetch: vi.fn(async () => {}),
+  };
+  const raw = {
+    data: { provider: "imported", status: "complete", key_count: 2,
+      keys: [404, 405].map((http_status, index) => ({ position: index + 1, status: "unsupported", http_status })) } as Balance,
+    isPending: false, isError: false, refetch: vi.fn(async () => {}),
+  };
+  const result = withAccountWallet(raw, account);
+  expect(result.data?.keys).toHaveLength(1);
+  expect(result.data?.key_count).toBe(1);
+  await result.refetch();
+  expect(raw.refetch).toHaveBeenCalledTimes(1);
+  expect(account.refetch).toHaveBeenCalledTimes(1);
+  expect(withAccountWallet(raw, { ...account, supportsWalletFallback: false })).toBe(raw);
+  for (const state of [{ isPending: true }, { isError: true }]) {
+    const failed = { ...raw, ...state };
+    expect(withAccountWallet(failed, account)).toBe(failed);
+  }
+  for (const data of [
+    { ...raw.data, status: "pending" },
+    { ...raw.data, omitted_keys: 1 },
+    { ...raw.data, key_count: 3 },
+    { ...raw.data, key_count: 0, keys: [] },
+    ...["access_denied", "rate_limited", "timeout", "network_error", "unsupported"].map((status) => ({ ...raw.data, keys: [{ position: 1, status }], key_count: 1 })),
+    ...["key_quota", "subscription", "key_rate_limits"].map((kind) => ({ ...raw.data, keys: [{ position: 1, status: "ok", kind, amount: 2 }], key_count: 1 })),
+    { ...raw.data, keys: [raw.data.keys![0], { position: 2, status: "ok", kind: "key_quota", amount: 2 }] },
+  ]) {
+    const other = { ...raw, data };
+    expect(withAccountWallet(other, account)).toBe(other);
+  }
+  expect(withAccountWallet(raw)).toBe(raw);
+  expect(withAccountWallet(raw, { ...account, isPending: true })).toMatchObject({ data: undefined, isPending: true });
+  expect(withAccountWallet(raw, { ...account, isError: true })).toMatchObject({ data: undefined, isError: true });
+  const missing = withAccountWallet(raw, { ...account, data: { ...account.data, keys: [{ position: 1, kind: "account_wallet", status: "missing", amount: null }] } });
+  expect(missing.data?.keys?.[0].amount).toBeNull();
+  expect(balanceIsLow(missing.data)).toBe(false);
 });
 it("scans different account sites concurrently and keeps accounts on the same site serial", async () => {
   const finish = new Map<string, () => void>();
