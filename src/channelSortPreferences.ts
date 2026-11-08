@@ -21,7 +21,7 @@ export interface ChannelSortPreferences {
   modelTemplates: Record<string, string>;
 }
 export function channelSortScope(filters: Filters) {
-  return JSON.stringify([
+  const scope = [
     filters.model,
     filters.sourceId,
     filters.keyId,
@@ -31,7 +31,10 @@ export function channelSortScope(filters: Filters) {
     filters.statusFilter,
     filters.balanceFilter,
     filters.search.toLowerCase(),
-  ]);
+  ];
+  // Preserve existing saved scopes when the new filter is unused.
+  if (filters.failureReason) scope.push(filters.failureReason);
+  return JSON.stringify(scope);
 }
 export const defaultChannelSort = (): ScopedSort => ({
   sort: "config",
@@ -71,7 +74,7 @@ function validate(value: unknown): ChannelSortPreferences {
         const parsed = JSON.parse(scope);
         if (
           !Array.isArray(parsed) ||
-          parsed.length !== 9 ||
+          ![9, 10].includes(parsed.length) ||
           !parsed.every((v) => typeof v === "string")
         )
           return [];

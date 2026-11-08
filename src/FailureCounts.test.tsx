@@ -47,3 +47,13 @@ it("shows the empty result without explanatory prose", () => {
   expect(screen.getByText("当前范围暂无失败记录")).toBeVisible();
   expect(screen.queryByText(/首字延迟沿用列表口径/)).not.toBeInTheDocument();
 });
+
+it("names compaction failures separately from successful fallback attempts", () => {
+  render(<FailureCounts channels={[{ stats: { success: 7, failed: 4, failure_reasons: {
+    compaction_invalid_output: 2, compaction_stream_failed: 1, compaction_unsupported: 1,
+  } } }] as unknown as Channel[]} summary />);
+  expect(screen.getByText("压缩响应无效")).toBeVisible();
+  expect(screen.getByText("压缩响应中断")).toBeVisible();
+  expect(screen.getByText("渠道不支持压缩")).toBeVisible();
+  expect(screen.getByText("7 次")).toBeVisible();
+});

@@ -136,6 +136,9 @@ const reasons: Record<string, string> = {
   channel_cooldown: "渠道冷却中",
   no_provider_key: "没有可用密钥",
   temporarily_disabled: "渠道已停用",
+  compaction_invalid_output: "压缩响应无效",
+  compaction_stream_failed: "压缩响应中断",
+  compaction_unsupported: "渠道不支持压缩",
   other: "其他错误",
 };
 export function friendlyReason(value: string) {

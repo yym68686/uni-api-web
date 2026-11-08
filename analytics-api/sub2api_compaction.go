@@ -100,6 +100,8 @@ func subProbeCompaction(ctx context.Context, client *http.Client, base, key, mod
 	scanner.Buffer(make([]byte, 4096), 2<<20)
 	var data strings.Builder
 	var name string
+	doneCount := 0
+	var doneState string
 	consume := func() bool {
 		payload := strings.TrimSpace(data.String())
 		data.Reset()
@@ -109,7 +111,11 @@ func subProbeCompaction(ctx context.Context, client *http.Client, base, key, mod
 			return false
 		}
 		var event struct {
-			Type  string `json:"type"`
+			Type string `json:"type"`
+			Item struct {
+				Type      string `json:"type"`
+				Encrypted string `json:"encrypted_content"`
+			} `json:"item"`
 			Error struct {
 				Message string `json:"message"`
 			} `json:"error"`
@@ -135,6 +141,16 @@ func subProbeCompaction(ctx context.Context, client *http.Client, base, key, mod
 			out.addRequestIDs(id)
 		}
 		switch event.Type {
+		case "response.output_item.done":
+			if event.Item.Type == "compaction" || event.Item.Type == "compaction_summary" {
+				doneCount++
+				doneState = event.Item.Encrypted
+				if doneCount > 1 || strings.TrimSpace(doneState) == "" {
+					out.Status = "unsupported"
+					out.Message = "压缩项完成事件重复或缺少有效状态"
+					return true
+				}
+			}
 		case "response.created":
 			if out.ResponseCreatedMS == nil {
 				ms := time.Since(start).Milliseconds()
@@ -153,17 +169,21 @@ func subProbeCompaction(ctx context.Context, client *http.Client, base, key, mod
 				return true
 			}
 			count, usable := 0, false
+			var finalState string
 			for _, item := range event.Response.Output {
-				if item.Type == "compaction" {
+				if item.Type == "compaction" || item.Type == "compaction_summary" {
 					count++
 					usable = strings.TrimSpace(item.Encrypted) != ""
+					finalState = item.Encrypted
 				}
 			}
 			out.Status = "unsupported"
 			out.Message = fmt.Sprintf("期望 1 个有效压缩输出项，实际 %d 个（共 %d 个输出项）", count, len(event.Response.Output))
-			if count == 1 && usable {
+			if count == 1 && usable && doneCount == 1 && doneState == finalState {
 				out.Status = "supported"
-				out.Message = "已返回 1 个有效压缩输出项"
+				out.Message = "已返回 1 个有效压缩输出项及一致的完成事件"
+			} else if count == 1 && usable {
+				out.Message = "缺少压缩项完成事件，或完成事件与最终状态不一致"
 			}
 			out.ResponseModel, out.ModelMatch = subCompareModel(model, event.Response.Model)
 			if key != "" {

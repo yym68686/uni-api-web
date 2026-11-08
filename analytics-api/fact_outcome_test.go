@@ -7,6 +7,52 @@ import (
 	"time"
 )
 
+func TestCompactionFailureReasonsSurviveAggregation(t *testing.T) {
+	e := stateTestEngine(t)
+	var facts []Fact
+	for _, reason := range []string{"compaction_invalid_output", "compaction_stream_failed", "compaction_unsupported"} {
+		f := Fact{Kind: "attempt", Outcome: "failed", FailureReason: reason, Status: 200, TerminalKind: "protocol_error", Endpoint: "/v1/responses", Stream: true}
+		if factFailureReason(f) != reason || failureReasonKey("failed/"+reason) != reason {
+			t.Fatal(reason)
+		}
+		f.Schema, f.EventID, f.SourceID, f.AtMS = 1, reason, "test", time.Now().Add(-time.Minute).UnixMilli()
+		f.Provider, f.Model, f.UpstreamModel = "channel", "model", "model"
+		facts = append(facts, f)
+		f.Outcome = "success"
+		f.TerminalKind = "completed"
+		if factFailureReason(f) != "" {
+			t.Fatal("successful fallback classified as a failure")
+		}
+	}
+	winner := facts[0]
+	winner.EventID, winner.Outcome, winner.TerminalKind, winner.FailureReason = "winner", "success", "completed", ""
+	facts = append(facts, winner)
+	for i := 0; i < 2; i++ {
+		if err := e.Import(context.Background(), "compaction-fixture", "v1", facts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, window := range []string{"1h", "7d"} {
+		q, err := e.Query(context.Background(), QueryFilter{Range: window, SourceID: "test", Provider: "channel", Model: "model"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(q.Data) != 1 {
+			t.Fatal(q.Data)
+		}
+		stats := q.Data[0].Stats
+		if stats["failed"] != float64(3) || stats["success"] != float64(1) {
+			t.Fatal(stats)
+		}
+		reasons := stats["failure_reasons"].(map[string]any)
+		for _, reason := range []string{"compaction_invalid_output", "compaction_stream_failed", "compaction_unsupported"} {
+			if reasons[reason] != float64(1) {
+				t.Fatal(reasons)
+			}
+		}
+	}
+}
+
 func TestResponsesCompletionEvidenceControlsSuccessMetrics(t *testing.T) {
 	for _, window := range []string{"1h", "7d"} {
 		t.Run(window, func(t *testing.T) {

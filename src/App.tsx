@@ -1015,6 +1015,7 @@ function Dashboard({
     balanceTopN,
     balanceThreshold,
     statusFilter,
+    failureReason,
     search,
     endpoint,
     stream,
@@ -1036,7 +1037,7 @@ function Dashboard({
   useEffect(() => saveChannelSortPreferences(sortStorageScope, sortPreferences), [sortStorageScope, sortPreferences]);
   const hasFilters = (Object.keys(defaultFilters) as (keyof Filters)[]).some(
     (key) =>
-      ((channelView && ["keyId", "sourceId", "model", "window", "search", "balanceFilter", "statusFilter", "endpoint", "stream", "sort", "sortRules"].includes(key)) ||
+      ((channelView && ["keyId", "sourceId", "model", "window", "search", "balanceFilter", "statusFilter", "failureReason", "endpoint", "stream", "sort", "sortRules"].includes(key)) ||
         (view === "balances" && ["keyId", "sourceId", "model", "window", "search", "balanceTopN", "balanceThreshold"].includes(key))) &&
       !["sort", "sortRules"].includes(key) && filters[key] !== defaultFilters[key],
   );
@@ -1302,7 +1303,12 @@ function Dashboard({
           .includes(deferredSearch.toLowerCase())) &&
       (!channelView || !balanceFilter || balanceIsLow(balanceMap.get(providerId(row))?.data)) &&
       (!channelView || !statusFilter ||
-        (statusFilter === "eligible" ? row.eligible : !row.eligible)),
+        (statusFilter === "eligible" ? row.eligible : !row.eligible)) &&
+      (!channelView || !failureReason || Object.entries(row.stats?.failure_reasons || {}).some(
+        ([reason, n]) => Number.isFinite(n) && n > 0 && (failureReason === "compaction"
+          ? ["compaction_invalid_output", "compaction_stream_failed", "compaction_unsupported"].includes(reason)
+          : reason === failureReason),
+      )),
   );
   const balanceRanks = rankBalanceProviders(
     filtered,
@@ -1668,6 +1674,7 @@ function Dashboard({
                       stream === "all" ? "全部流式状态" : stream === "true" ? "流式" : "非流式",
                       statusFilter ? statusFilter === "eligible" ? "可用渠道" : "不可用渠道" : "全部状态",
                       ...(balanceFilter ? ["余额不足"] : []),
+                      ...(failureReason ? ["包含压缩失败"] : []),
                       ...(search ? [`搜索：${search}`] : []),
                     ].join(" · ")}
                     templates={sortPreferences.templates}
@@ -1908,6 +1915,22 @@ function Dashboard({
                         <option value="">全部状态</option>
                         <option value="eligible">可用渠道</option>
                         <option value="unavailable">不可用渠道</option>
+                      </select>
+                      <ChevronDown size={12} />
+                    </div>
+                    <div className="inline-select">
+                      <Filter size={13} />
+                      <select
+                        aria-label="失败原因筛选"
+                        title="筛选当前范围内存在此类失败的渠道；成功率仍按全部尝试统计"
+                        value={failureReason}
+                        onChange={(e) => setFilter("failureReason", e.target.value)}
+                      >
+                        <option value="">全部失败原因</option>
+                        <option value="compaction">压缩失败</option>
+                        <option value="compaction_invalid_output">压缩响应无效</option>
+                        <option value="compaction_stream_failed">压缩响应中断</option>
+                        <option value="compaction_unsupported">渠道不支持压缩</option>
                       </select>
                       <ChevronDown size={12} />
                     </div>

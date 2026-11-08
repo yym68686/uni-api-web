@@ -30,7 +30,7 @@ func factMetricOutcome(f Fact) string {
 
 func knownFailureReason(reason string) bool {
 	switch reason {
-	case "responses_max_output_tokens", "responses_content_filter", "responses_incomplete", "missing_response_completed", "protocol_error", "transport_error", "upstream_response_failed", "upstream_http_error", "downstream_disconnected", "no_successful_channel", "other":
+	case "responses_max_output_tokens", "responses_content_filter", "responses_incomplete", "missing_response_completed", "protocol_error", "transport_error", "upstream_response_failed", "upstream_http_error", "downstream_disconnected", "no_successful_channel", "compaction_invalid_output", "compaction_stream_failed", "compaction_unsupported", "other":
 		return true
 	}
 	if strings.HasPrefix(reason, "upstream_http_") {

@@ -18,6 +18,7 @@ const rows = ["first", "second", "third"].map((provider, i) => ({
   stats: {
     success: i === 0 ? 3 : 0,
     failed: i === 0 ? 1 : 0,
+    failure_reasons: i === 0 ? { compaction_invalid_output: 1 } : {},
     success_rate_denominator: i === 0 ? 4 : 0,
     success_rate: i === 0 ? 0.75 : null,
     response_created: { p50_ms: 1500, p95_ms: 3000, sample_count: 4 },
@@ -145,6 +146,17 @@ async function connect(
   if (expectTable) await screen.findByRole("table");
 }
 describe("dashboard workflows", () => {
+  it("filters channels with compression failures and resets without changing the success denominator", async () => {
+    const { user } = setup();
+    await connect(user);
+    await user.selectOptions(screen.getByLabelText("失败原因筛选"), "compaction");
+    expect(screen.getByRole("table")).toHaveTextContent("first");
+    expect(screen.getByRole("table")).not.toHaveTextContent("second");
+    expect(screen.getByRole("table")).toHaveTextContent("75.0%");
+    await user.click(screen.getByRole("button", { name: "重置筛选" }));
+    expect(screen.getByLabelText("失败原因筛选")).toHaveValue("");
+    expect(screen.getByRole("table")).toHaveTextContent("second");
+  });
   it("keeps each model/filter sort independent and restores its template through reload, rename and delete",async()=>{
     let app=setup({extraModel:true});await connect(app.user);
     await app.user.selectOptions(screen.getByLabelText("模型筛选"),"model-a");

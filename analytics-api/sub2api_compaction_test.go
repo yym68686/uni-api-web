@@ -33,7 +33,36 @@ func subFixtureCompaction(r *http.Request) bool {
 
 func compactSSE(w http.ResponseWriter, model, output string) {
 	w.Header().Set("Content-Type", "text/event-stream")
-	fmt.Fprintf(w, "event: response.created\ndata: {\"response\":{\"id\":\"resp-compact\"}}\n\nevent: response.completed\ndata: {\"response\":{\"id\":\"resp-compact\",\"status\":\"completed\",\"model\":%q,\"output\":%s}}\n\n", model, output)
+	fmt.Fprint(w, "event: response.created\ndata: {\"response\":{\"id\":\"resp-compact\"}}\n\n")
+	var items []json.RawMessage
+	_ = json.Unmarshal([]byte(output), &items)
+	for _, item := range items {
+		fmt.Fprintf(w, "event: response.output_item.done\ndata: {\"item\":%s}\n\n", item)
+	}
+	fmt.Fprintf(w, "event: response.completed\ndata: {\"response\":{\"id\":\"resp-compact\",\"status\":\"completed\",\"model\":%q,\"output\":%s}}\n\n", model, output)
+}
+
+func TestCompactionRequiresDoneEventMatchingTerminal(t *testing.T) {
+	for _, tc := range []struct{ name, done, final, want string }{
+		{"missing-done", "", "state", "unsupported"},
+		{"mismatch", "other", "state", "unsupported"},
+		{"matching", "state", "state", "supported"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				if tc.done != "" {
+					fmt.Fprintf(w, "event: response.output_item.done\ndata: {\"item\":{\"type\":\"compaction\",\"encrypted_content\":%q}}\n\n", tc.done)
+				}
+				fmt.Fprintf(w, "event: response.completed\ndata: {\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"compaction\",\"encrypted_content\":%q}]}}\n\n", tc.final)
+			}))
+			defer server.Close()
+			result := subProbeCompaction(context.Background(), server.Client(), server.URL, "fixture", "gpt-6-astra")
+			if result.Status != tc.want {
+				t.Fatalf("%+v", result)
+			}
+		})
+	}
 }
 
 func TestCompactionRequiresValidOutputAndPreservesRequestShape(t *testing.T) {

@@ -9,6 +9,7 @@ export const defaultFilters = {
   balanceTopN: "",
   balanceThreshold: "",
   statusFilter: "",
+  failureReason: "",
   search: "",
   sort: "config",
   sortRules: "",
@@ -104,6 +105,7 @@ function validate(value: unknown): Filters {
       "cancelled",
       "unknown",
     ]),
+    failureReason: field("failureReason", ["", "compaction", "compaction_invalid_output", "compaction_stream_failed", "compaction_unsupported"]),
     search: field("search"),
     sort: field("sort", ["config", "success", "latency", "wait", "oldest", "custom"]),
     sortRules: (() => {

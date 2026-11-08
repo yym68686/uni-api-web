@@ -12,6 +12,9 @@ const labels: Record<string, string> = {
   upstream_http_error: "上游 HTTP 错误",
   downstream_disconnected: "下游连接中断",
   no_successful_channel: "无成功渠道",
+  compaction_invalid_output: "压缩响应无效",
+  compaction_stream_failed: "压缩响应中断",
+  compaction_unsupported: "渠道不支持压缩",
   other: "其他失败",
   unknown: "历史记录未采集失败分类",
 };

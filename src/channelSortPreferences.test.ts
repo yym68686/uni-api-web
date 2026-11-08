@@ -77,6 +77,7 @@ it("isolates every filter combination, restores model templates after reload and
     endpoint: "/v1/messages",
     stream: "true",
     statusFilter: "eligible",
+    failureReason: "compaction",
     balanceFilter: "low",
     search: "site",
   }))

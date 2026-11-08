@@ -44,6 +44,7 @@ func TestConfiguredChecksWithoutAccountPersistAllKinds(t *testing.T) {
 			raw := mustJSON(body)
 			if strings.Contains(raw, "compaction_trigger") {
 				w.Header().Set("Content-Type", "text/event-stream")
+				fmt.Fprint(w, "event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"compaction\",\"encrypted_content\":\"opaque\"}}\n\n")
 				fmt.Fprint(w, "event: response.completed\ndata: {\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"compaction\",\"encrypted_content\":\"opaque\"}]}}\n\n")
 			} else if strings.Contains(raw, "TOOL_PROBE_OK") {
 				w.Header().Set("Content-Type", "text/event-stream")
@@ -226,6 +227,7 @@ func TestConfiguredChecksThroughRealGatewayWithoutClientRoutes(t *testing.T) {
 		if strings.Contains(raw, "compaction_trigger") {
 			w.Header().Set("Content-Type", "text/event-stream")
 			fmt.Fprint(w, "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp-compact\",\"status\":\"in_progress\"}}\n\n")
+			fmt.Fprint(w, "event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"compact-item\",\"type\":\"compaction\",\"encrypted_content\":\"opaque\"}}\n\n")
 			fmt.Fprintf(w, "event: response.completed\ndata: %s\n\n", mustJSON(map[string]any{"type": "response.completed", "response": map[string]any{"id": "resp-compact", "status": "completed", "model": body["model"], "output": []any{map[string]string{"id": "compact-item", "type": "compaction", "encrypted_content": "opaque"}}}}))
 		} else if strings.Contains(raw, "TOOL_PROBE_OK") {
 			w.Header().Set("Content-Type", "text/event-stream")
