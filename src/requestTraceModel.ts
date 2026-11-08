@@ -135,6 +135,8 @@ const reasons: Record<string, string> = {
   timeout: "请求超时",
   channel_cooldown: "渠道冷却中",
   no_provider_key: "没有可用密钥",
+  explicit_cache_prefix_rewrite:
+    "同一显式缓存前缀在后续内容变化时重复出现大量重写，暂时跳过此渠道",
   temporarily_disabled: "渠道已停用",
   compaction_invalid_output: "压缩响应无效",
   compaction_stream_failed: "压缩响应中断",

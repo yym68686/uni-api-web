@@ -121,6 +121,7 @@ const labels: Record<string, string> = {
   only_request_types: "仅允许请求类型",
   exclude_request_types: "排除请求类型",
   exclude_request_rules: "条件排除规则",
+  explicit_cache_guard: "显式缓存前缀重写回避",
   max_request_body_bytes: "请求体大小上限",
   headers: "自定义请求头",
   post_body_parameter_overrides: "请求体覆盖与删除",

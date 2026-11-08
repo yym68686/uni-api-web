@@ -99,6 +99,17 @@ func TestTraceTransportLastChunkValidation(t *testing.T) {
 	}
 }
 
+func TestTraceDetailsRetainsSafeExplicitCacheSkipEvidence(t *testing.T) {
+	detail := traceDetails(`{"skip_reason":"explicit_cache_prefix_rewrite","cache_guard_action":"avoid","cache_prefix_hmac":"0123456789abcdef","cache_breakpoint":"messages[0].content[0]","cache_ttl_seconds":300,"cache_rewrite_count":2,"cache_baseline_tokens":4750,"cache_evidence_request_id":"previous-request","cache_avoid_remaining_seconds":280,"cache_observed_read_tokens":650,"cache_observed_write_tokens":4100,"prompt":"private prompt","api_key":"sk-private","credential_hash":"private"}`)
+	if detail["skip_reason"] != "explicit_cache_prefix_rewrite" || detail["cache_evidence_request_id"] != "previous-request" || detail["cache_rewrite_count"] != float64(2) || detail["cache_avoid_remaining_seconds"] != float64(280) || len(detail) != 11 {
+		t.Fatalf("lost cache routing evidence: %+v", detail)
+	}
+	raw, _ := json.Marshal(detail)
+	if strings.Contains(string(raw), "private") || strings.Contains(string(raw), "prompt") || strings.Contains(string(raw), "credential_hash") {
+		t.Fatal("leaked private cache evidence", string(raw))
+	}
+}
+
 func TestRequestTraceHTTPRequiresAuthAndValidID(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"can_inspect_all": true})

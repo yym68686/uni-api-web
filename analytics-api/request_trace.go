@@ -74,12 +74,12 @@ func traceDetails(raw string) map[string]any {
 	out := map[string]any{}
 	for name, value := range in {
 		switch name {
-		case "attempt_index", "attempt_status_code", "semantic_status_code", "duration_ms", "body_bytes", "resource_wait_ms", "headers_at_ms", "tool_pairs_converted", "reasoning_items_converted", "heartbeat_items_converted", "headers_received_ms", "first_upstream_chunk_ms", "public_stream_ready_ms", "first_wire_prepared_ms", "preflight_decode_ms", "preflight_read_wait_ms", "preflight_read_calls", "preflight_process_ms", "error_body_read_ms", "network_write_measured":
+		case "attempt_index", "attempt_status_code", "semantic_status_code", "duration_ms", "body_bytes", "resource_wait_ms", "headers_at_ms", "tool_pairs_converted", "reasoning_items_converted", "heartbeat_items_converted", "headers_received_ms", "first_upstream_chunk_ms", "public_stream_ready_ms", "first_wire_prepared_ms", "preflight_decode_ms", "preflight_read_wait_ms", "preflight_read_calls", "preflight_process_ms", "error_body_read_ms", "network_write_measured", "cache_ttl_seconds", "cache_rewrite_count", "cache_baseline_tokens", "cache_avoid_remaining_seconds", "cache_observed_read_tokens", "cache_observed_write_tokens":
 			switch value.(type) {
 			case float64, bool:
 				out[name] = value
 			}
-		case "attempt_outcome", "skip_reason", "status_origin", "failure_resource", "original_attempt_id", "error_code", "error_type", "error_message", "origin":
+		case "attempt_outcome", "skip_reason", "status_origin", "failure_resource", "original_attempt_id", "error_code", "error_type", "error_message", "origin", "cache_guard_action", "cache_prefix_hmac", "cache_breakpoint", "cache_evidence_request_id":
 			if text, ok := value.(string); ok {
 				words := strings.Fields(text)
 				for i, word := range words {

@@ -82,6 +82,52 @@ const run: TraceRun = {
     ...e,
   })),
 };
+it("explains a skipped cache prefix and keeps its evidence in stage details", async () => {
+  const skipped: TraceEvent = {
+    ...run.events[1],
+    kind: "routing_attempt",
+    status: 0,
+    outcome: "skipped",
+    detail: {
+      skip_reason: "explicit_cache_prefix_rewrite",
+      cache_guard_action: "avoid",
+      cache_breakpoint: "system[0]",
+      cache_ttl_seconds: 300,
+      cache_rewrite_count: 2,
+      cache_evidence_request_id: "previous-rewrite",
+      cache_avoid_remaining_seconds: 280,
+    },
+  };
+  render(
+    <TraceTimeline
+      run={{ ...run, events: [run.events[0], skipped, ...run.events.slice(2)] }}
+      sourceName="Fugue"
+    />,
+  );
+  expect(
+    screen.getAllByText(/同一显式缓存前缀在后续内容变化时重复出现大量重写/)
+      .length,
+  ).toBeGreaterThan(0);
+  const user = userEvent.setup();
+  const evidence = screen.getByText("previous-rewrite");
+  // The diagnostic lives in the expandable event details, not just the summary.
+  const disclosures: HTMLElement[] = [];
+  for (
+    let element = evidence.parentElement;
+    element;
+    element = element.parentElement
+  ) {
+    if (element.tagName === "DETAILS") disclosures.push(element);
+  }
+  expect(disclosures.length).toBeGreaterThan(0);
+  for (const disclosure of disclosures.reverse()) {
+    await user.click(disclosure.querySelector("summary")!);
+  }
+  expect(evidence).toBeVisible();
+  expect(screen.getByText("回避匹配的前缀")).toBeVisible();
+  expect(screen.getByText("回避剩余有效期（秒）")).toBeVisible();
+  expect(screen.getByText("请求成功")).toBeVisible();
+});
 it("loads a scoped request in a modal, preserves retry errors and refreshes", async () => {
   const calls: string[] = [];
   vi.stubGlobal(

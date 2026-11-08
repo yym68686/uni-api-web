@@ -21,6 +21,7 @@ import {
   eventHTTP,
   eventResult,
   eventErrors,
+  friendlyReason,
   traceChannel,
   traceStages,
 } from "./requestTraceModel";
@@ -163,6 +164,14 @@ interface TraceResult {
   import?: Metrics["import"];
   generated_at: number;
 }
+const cacheGuardActions: Record<string, string> = {
+  avoid: "回避匹配的前缀",
+  availability_fallback: "没有其他可用渠道，恢复此渠道作为兜底",
+  rewrite_observed: "观察到大量重写",
+  prefix_reused: "变化后的请求复用了缓存",
+  warmup_or_repeat: "首次建立缓存或原样重发",
+};
+
 const fields: Record<string, string> = {
   headers_received_ms: "收到上游响应头",
   first_upstream_chunk_ms: "收到上游首块数据",
@@ -178,6 +187,16 @@ const fields: Record<string, string> = {
   attempt_index: "尝试序号",
   attempt_outcome: "尝试结果",
   skip_reason: "跳过原因",
+  cache_guard_action: "缓存路由判断",
+  cache_prefix_hmac: "匹配的缓存前缀摘要",
+  cache_breakpoint: "显式缓存断点",
+  cache_ttl_seconds: "请求缓存时长（秒）",
+  cache_rewrite_count: "已观察到的不同后缀重写次数",
+  cache_baseline_tokens: "缓存用量基准",
+  cache_evidence_request_id: "最近一次重写的请求 ID",
+  cache_avoid_remaining_seconds: "回避剩余有效期（秒）",
+  cache_observed_read_tokens: "本次缓存读取 token",
+  cache_observed_write_tokens: "本次缓存写入 token",
   status_origin: "状态产生阶段",
   error_code: "错误代码",
   error_type: "错误类型",
@@ -246,9 +265,14 @@ function EventDetails({ event: e }: { event: TraceEvent }) {
             <div className="trace-field" key={key}>
               <dt>{label}</dt>
               <dd>
-                {key.endsWith("_ms")
-                  ? ms(Number(details[key]))
-                  : String(details[key])}
+                {key === "skip_reason"
+                  ? friendlyReason(String(details[key]))
+                  : key === "cache_guard_action"
+                    ? cacheGuardActions[String(details[key])] ||
+                      String(details[key])
+                    : key.endsWith("_ms")
+                      ? ms(Number(details[key]))
+                      : String(details[key])}
               </dd>
             </div>
           ),
