@@ -2594,6 +2594,33 @@ it("exports the exact attempt for each diagnostic kind without queueing another 
   expect(exports).toEqual(["sealed-availability","sealed-quality","sealed-tool","sealed-compact"]);
 });
 
+it("copies an unassigned channel's upstream curl from its saved gateway probe", async () => {
+  const channel = {kind:"configured",source_id:"fugue",source_name:"Fugue",provider:"bananarouter",name:"bananarouter",models:["gpt-5.6-luna"],api_key_id:"",key_position:0,key_prefix:"",positions:{},revision:"",manageable:false,account_id:"",group_id:0,account_ids:[],engine:"codex",probe_fingerprint:"same"};
+  const check = {source_id:"fugue",provider:"bananarouter",kind:"availability",model:"gpt-5.6-luna",fingerprint:"same",state:"done",message:"",result:{model:"gpt-5.6-luna",checked_at:42,availability:{id:"saved-probe",curl_token:"sealed-gateway-probe",requested_model:"gpt-5.6-luna",status:"error",text:"",ttft_ms:null,duration_ms:1},quality:{status:"not_applicable",text:"",ttft_ms:null,duration_ms:0},verdict:"not_applicable"}};
+  const curl = "curl --url 'https://upstream.example/v1/responses' --header 'Authorization: Bearer upstream-fixture'";
+  const notice = "已按当前渠道配置生成直连请求";
+  const exports: unknown[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input:string, init?:RequestInit) => {
+    if (init?.method === "POST") {
+      expect(input).toContain("/sub2api/check-curl");
+      exports.push(JSON.parse(String(init.body)));
+      return Response.json({curl,original:false,message:notice});
+    }
+    return Response.json({data:input.includes("/channel-management/checks")?[check]:input.endsWith("/channel-management")?[channel]:[],labels:{},unavailable_sources:[],unavailable_keys:[]});
+  }));
+  const user = userEvent.setup();
+  mount("unassigned-upstream-curl");
+  await user.selectOptions(screen.getByLabelText("sub2api 账号筛选"), "__unassigned__");
+  await user.selectOptions(screen.getByLabelText("检测模型筛选"), "gpt-5.6-luna");
+  await user.click(await screen.findByRole("button", {name:"查看 未归属渠道 bananarouter 的回复与诊断"}));
+  const dialog = within(screen.getByRole("dialog", {name:"回复 / 诊断"}));
+  await user.click(dialog.getByRole("button", {name:"可用性检测复制为 curl"}));
+  await waitFor(async () => expect(await navigator.clipboard.readText()).toBe(curl));
+  expect(exports).toEqual([{token:"sealed-gateway-probe"}]);
+  expect(dialog.getByRole("status")).toHaveTextContent(notice);
+  expect(document.body.textContent).not.toContain("upstream-fixture");
+});
+
 it("labels observed native output without claiming a response.created event", async () => {
   render(<Tooltip.Provider><Timing kind="output" value={{sample_count:4,p50_ms:45000,p95_ms:180000,mean_ms:46000,last_ms:30000}} text={{sample_count:2,p50_ms:46000,p95_ms:180000,mean_ms:47000,last_ms:31000}} /></Tooltip.Provider>);
   expect(screen.getByText("45.00 s")).toBeVisible();

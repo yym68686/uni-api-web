@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -174,7 +175,23 @@ func TestProbeCurlExportAuthorizationAndLegacyFallback(t *testing.T) {
 	}
 	source := owner + "-source"
 	defer store.db.Exec(`DELETE FROM console_sources WHERE id=$1`, source)
-	_, err = store.db.Exec(`INSERT INTO console_sources(id,name,base,encrypted_key) VALUES($1,'fixture','https://gateway.test',$2)`, source, encrypted)
+	var providerAvailable atomic.Bool
+	providerAvailable.Store(true)
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" || r.URL.Path != "/v1/channel-settings/providers" || r.Header.Get("Authorization") != "Bearer fixture-admin-key" {
+			t.Error("export sent an inference request or used the wrong configuration credential")
+			http.Error(w, "unexpected request", 400)
+			return
+		}
+		providers := []configuredProvider{}
+		if providerAvailable.Load() {
+			providers = append(providers, configuredProvider{Provider: "pinned-provider", Base: "https://upstream.test/tenant/v1/responses", API: []any{"upstream-fixture-key", "second-upstream-key"}})
+		}
+		writeJSON(w, 200, map[string]any{"providers": providers})
+	}))
+	defer gateway.Close()
+	adminKey, _ := store.encrypt("fixture-admin-key")
+	_, err = store.db.Exec(`INSERT INTO console_sources(id,name,base,encrypted_key,encrypted_config_key) VALUES($1,'fixture',$2,$3,$4)`, source, gateway.URL, encrypted, adminKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,12 +200,27 @@ func TestProbeCurlExportAuthorizationAndLegacyFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	sourceRequest := map[string]any{"probe_id": "legacy-probe", "kind": "compaction", "targets": []probeCurlTarget{{Source: source, Provider: "pinned-provider"}}}
-	if w := call(session, sourceRequest); w.Code != 200 || !strings.Contains(w.Body.String(), "X-Uni-Api-Provider: pinned-provider") || !strings.Contains(w.Body.String(), "current-fixture-key") {
-		t.Fatalf("source export failed: %d %s", w.Code, w.Body.String())
+	assertDirect := func(w *httptest.ResponseRecorder) {
+		t.Helper()
+		if w.Code != 200 || !strings.Contains(w.Body.String(), "https://upstream.test/tenant/v1/responses") || !strings.Contains(w.Body.String(), "upstream-fixture-key") || !strings.Contains(w.Body.String(), `"original":false`) || w.Header().Get("Cache-Control") != "no-store" {
+			t.Fatalf("source export did not use upstream: %d %s", w.Code, w.Body.String())
+		}
+		for _, forbidden := range []string{gateway.URL, "current-fixture-key", "fixture-admin-key", "second-upstream-key", "X-Uni-Api-Provider", "X-Uni-Api-Probe-Unconfigured-Model"} {
+			if strings.Contains(w.Body.String(), forbidden) {
+				t.Fatal("source export retained a gateway credential/header or unrelated key")
+			}
+		}
 	}
-	sourceToken := captureProbeCurl(withProbeCurl(ctx, store, probeCurlScope{Source: source}), http.DefaultClient, req)
-	if w := call(session, map[string]string{"token": sourceToken}); w.Code != 200 {
-		t.Fatal("source snapshot export failed")
+	assertDirect(call(session, sourceRequest))
+	sourceReq, _ := newProbeRequest(ctx, gateway.URL, "current-fixture-key", "gpt-5.6-luna", "responses", "say test", "original-probe")
+	sourceClient := &http.Client{Transport: configuredProbeTransport{base: http.DefaultTransport, provider: "pinned-provider", allowUnconfigured: true}}
+	sourceToken := captureProbeCurl(withProbeCurl(ctx, store, probeCurlScope{Source: source}), sourceClient, sourceReq)
+	assertDirect(call(session, map[string]string{"token": sourceToken}))
+	providerAvailable.Store(false)
+	for _, body := range []any{sourceRequest, map[string]string{"token": sourceToken}} {
+		if w := call(session, body); w.Code != 503 || strings.Contains(w.Body.String(), "fixture-key") {
+			t.Fatal("missing provider silently fell back to the gateway")
+		}
 	}
 	_, err = store.db.Exec(`UPDATE console_sources SET enabled=false WHERE id=$1`, source)
 	if err != nil {
@@ -203,6 +235,76 @@ func TestProbeCurlExportAuthorizationAndLegacyFallback(t *testing.T) {
 	legacy["probe_id"] = "not-a-record"
 	if w := call(session, legacy); w.Code != 404 {
 		t.Fatal("invented a request for missing record")
+	}
+}
+
+func TestUpstreamProbeSnapshotUsesChannelAddressAndProtocolCredential(t *testing.T) {
+	for _, tt := range []struct {
+		base, mode, model, wantURL, auth string
+	}{
+		{"https://upstream.test", "responses", "gpt-5.6-luna", "https://upstream.test/v1/responses", "Authorization"},
+		{"https://upstream.test/v1/", "responses", "gpt-5.6-luna", "https://upstream.test/v1/responses", "Authorization"},
+		{"https://upstream.test/tenant/v1/responses?route=one", "responses", "gpt-5.6-luna", "https://upstream.test/tenant/v1/responses?route=one", "Authorization"},
+		{"https://upstream.test/openai/responses?api-version=fixture", "responses", "gpt-5.6-luna", "https://upstream.test/openai/responses?api-version=fixture", "Authorization"},
+		{"https://upstream.test/tenant/v1/messages", "messages", "claude-fixture", "https://upstream.test/tenant/v1/messages", "X-Api-Key"},
+		{"https://upstream.test/custom/messages", "messages", "claude-fixture", "https://upstream.test/custom/messages", "X-Api-Key"},
+		{"https://upstream.test/tenant/v1beta/", "gemini", "gemini-3.1-pro", "https://upstream.test/tenant/v1beta/models/gemini-3.1-pro:streamGenerateContent?alt=sse", "X-Goog-Api-Key"},
+	} {
+		t.Run(tt.mode+"-"+tt.base, func(t *testing.T) {
+			req, err := newProbeRequest(context.Background(), "https://gateway.test/prefix", "gateway-secret", tt.model, tt.mode, "say test", "original-probe")
+			if err != nil {
+				t.Fatal(err)
+			}
+			req = (configuredProbeTransport{provider: "only-this-channel", allowUnconfigured: true}).prepare(req)
+			req.Header.Set("Cookie", "gateway-session")
+			snapshot, _ := snapshotProbeRequest(req, probeCurlScope{Source: "fixture-source"})
+			direct, err := upstreamProbeSnapshot(snapshot, "https://gateway.test/prefix", configuredProvider{Base: tt.base, API: []any{"upstream-secret", "other-secret"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantAuth := "upstream-secret"
+			if tt.auth == "Authorization" {
+				wantAuth = "Bearer " + wantAuth
+			}
+			if direct.URL != tt.wantURL || direct.Headers.Get(tt.auth) != wantAuth || direct.Body != snapshot.Body || direct.Headers.Get("X-Request-ID") != "original-probe" {
+				t.Fatal("incorrect direct URL, authentication or original payload")
+			}
+			for _, secret := range []string{"gateway-secret", "gateway-session", "X-Uni-Api-Provider", "X-Uni-Api-Probe-Unconfigured-Model", "other-secret"} {
+				if strings.Contains(probeCurl(direct), secret) {
+					t.Fatal("gateway data leaked into upstream curl")
+				}
+			}
+			if snapshot.Headers.Get("Cookie") != "gateway-session" || snapshot.Headers.Get("X-Uni-API-Provider") == "" {
+				t.Fatal("mutated the stored snapshot")
+			}
+		})
+	}
+	for _, provider := range []configuredProvider{{Base: "https://upstream.test"}, {Base: "file:///tmp/fixture", API: "secret"}, {Base: "https://user:pass@upstream.test", API: "secret"}} {
+		if _, err := upstreamProbeSnapshot(probeCurlSnapshot{}, "https://gateway.test", provider); err == nil {
+			t.Fatal("accepted missing credentials or an invalid provider URL")
+		}
+	}
+}
+
+func TestUpstreamProbeSnapshotConvertsGatewayTextProbeToChannelProtocol(t *testing.T) {
+	for _, tt := range []struct{ base, wantURL, auth, field string }{
+		{"https://upstream.test/prefix/v1/chat/completions", "https://upstream.test/prefix/v1/chat/completions", "Authorization", "messages"},
+		{"https://upstream.test/custom/chat/completions", "https://upstream.test/custom/chat/completions", "Authorization", "messages"},
+		{"https://upstream.test/prefix/v1/messages", "https://upstream.test/prefix/v1/messages", "X-Api-Key", "messages"},
+		{"https://upstream.test/prefix/v1beta", "https://upstream.test/prefix/v1beta/models/gemini-3.1-pro:streamGenerateContent?alt=sse", "X-Goog-Api-Key", "contents"},
+	} {
+		t.Run(tt.base, func(t *testing.T) {
+			req, _ := newProbeRequest(context.Background(), "https://gateway.test", "gateway-secret", "gemini-3.1-pro", "responses", "say test", "probe")
+			snapshot, _ := snapshotProbeRequest(req, probeCurlScope{Source: "source"})
+			direct, err := upstreamProbeSnapshot(snapshot, "https://gateway.test", configuredProvider{Base: tt.base, API: "upstream-secret"})
+			if err != nil || direct.URL != tt.wantURL || !strings.Contains(direct.Headers.Get(tt.auth), "upstream-secret") {
+				t.Fatal("wrong direct protocol", err)
+			}
+			var body map[string]any
+			if json.Unmarshal([]byte(direct.Body), &body) != nil || body[tt.field] == nil || body["input"] != nil || !strings.Contains(direct.Body, "say test") {
+				t.Fatal("retained the gateway body for a different channel protocol")
+			}
+		})
 	}
 }
 

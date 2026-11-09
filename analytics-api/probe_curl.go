@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Requests and credentials stay encrypted in the existing result JSON. The
@@ -44,6 +45,9 @@ func newProbeRequest(ctx context.Context, base, key, model, mode, prompt, id str
 	path := "/v1/responses"
 	body := map[string]any{"model": model, "input": []map[string]string{{"role": "user", "content": prompt}}, "stream": true}
 	switch mode {
+	case "chat":
+		path = "/v1/chat/completions"
+		body = map[string]any{"model": model, "stream": true, "messages": []map[string]string{{"role": "user", "content": prompt}}}
 	case "messages":
 		path = "/v1/messages"
 		body = map[string]any{"model": model, "max_tokens": 256, "stream": true, "messages": []map[string]string{{"role": "user", "content": prompt}}}
@@ -198,6 +202,15 @@ func (s *Service) copyProbeCurl(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "检测请求不存在或无权访问", 404)
 			return
 		}
+		if snapshot.Scope.Source != "" {
+			snapshot, err = s.configuredProbeCurl(r.Context(), snapshot)
+			if err != nil {
+				http.Error(w, "无法生成渠道直连请求，请检查渠道配置和来源读取权限", 503)
+				return
+			}
+			writeUpstreamProbeCurl(w, snapshot)
+			return
+		}
 		writeJSON(w, 200, map[string]any{"curl": probeCurl(snapshot), "original": true})
 		return
 	}
@@ -212,6 +225,10 @@ func (s *Service) copyProbeCurl(w http.ResponseWriter, r *http.Request) {
 		}
 		if err != nil {
 			http.Error(w, "检测请求读取失败，请重试", 503)
+			return
+		}
+		if snapshot.Scope.Source != "" {
+			writeUpstreamProbeCurl(w, snapshot)
 			return
 		}
 		notice := "历史记录未保存原始请求，已按当前渠道配置和检测模板生成；URL、密钥及动态字段可能与当时不同。"
@@ -323,5 +340,139 @@ func (s *Service) legacyProbeCurl(ctx context.Context, owner string, target prob
 	if target.Source != "" {
 		req = (configuredProbeTransport{provider: target.Provider, allowUnconfigured: true}).prepare(req)
 	}
-	return snapshotProbeRequest(probeCurlWireRequest(http.DefaultClient, req), scope)
+	snapshot, err := snapshotProbeRequest(probeCurlWireRequest(http.DefaultClient, req), scope)
+	if err == nil && target.Source != "" {
+		return s.configuredProbeCurl(ctx, snapshot)
+	}
+	return snapshot, err
+}
+
+func writeUpstreamProbeCurl(w http.ResponseWriter, snapshot probeCurlSnapshot) {
+	notice := "已按当前渠道的上游地址和首个 API key 生成直连请求，不经过 uni-api；并非原网关请求的逐字重放。"
+	writeJSON(w, 200, map[string]any{"curl": "# " + notice + "\n" + probeCurl(snapshot), "original": false, "message": notice})
+}
+
+// Source-scoped probes run through the gateway, but their diagnostic curl must
+// use the installed provider's credentials. Resolve only on authenticated export,
+// including for snapshots captured before this behavior was introduced.
+func (s *Service) configuredProbeCurl(ctx context.Context, snapshot probeCurlSnapshot) (probeCurlSnapshot, error) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	provider := snapshot.Headers.Get("X-Uni-API-Provider")
+	if provider == "" {
+		return probeCurlSnapshot{}, errors.New("probe has no provider")
+	}
+	src, err := s.control.source(ctx, snapshot.Scope.Source)
+	if err != nil {
+		return probeCurlSnapshot{}, err
+	}
+	providers, err := effectiveProviders(ctx, src, true)
+	if err != nil {
+		return probeCurlSnapshot{}, err
+	}
+	for _, p := range providers {
+		if p.Provider == provider {
+			return upstreamProbeSnapshot(snapshot, src.Base, p)
+		}
+	}
+	return probeCurlSnapshot{}, errors.New("probe provider is no longer installed")
+}
+
+func upstreamProbeSnapshot(snapshot probeCurlSnapshot, sourceBase string, provider configuredProvider) (probeCurlSnapshot, error) {
+	keys := providerKeys(provider.API)
+	base, err := url.Parse(strings.TrimSpace(provider.Base))
+	if err != nil || base.Host == "" || base.User != nil || (base.Scheme != "http" && base.Scheme != "https") || len(keys) == 0 {
+		return probeCurlSnapshot{}, errors.New("provider address or key unavailable")
+	}
+	source, err := url.Parse(sourceBase)
+	if err != nil {
+		return probeCurlSnapshot{}, errors.New("invalid source address")
+	}
+	probe, err := url.Parse(snapshot.URL)
+	if err != nil || probe.Scheme != source.Scheme || probe.Host != source.Host {
+		return probeCurlSnapshot{}, errors.New("probe source changed")
+	}
+	endpoint := strings.TrimPrefix(probe.Path, strings.TrimRight(source.Path, "/"))
+	if endpoint != "/v1/responses" && endpoint != "/v1/messages" && !strings.HasPrefix(endpoint, "/v1beta/models/") {
+		return probeCurlSnapshot{}, errors.New("unknown probe endpoint")
+	}
+	path := strings.TrimRight(base.Path, "/")
+	// Configured checks enter the gateway as Responses even when the installed
+	// channel uses another protocol. Rebuild only the simple text probe using the
+	// shared diagnostic templates; never pair a Responses body with a Chat URL.
+	mode := ""
+	switch {
+	case strings.HasSuffix(path, "/chat/completions"):
+		mode = "chat"
+	case strings.HasSuffix(path, "/messages") && endpoint != "/v1/messages":
+		mode = "messages"
+	case (strings.HasSuffix(path, "/v1beta") || strings.HasSuffix(path, "/v1beta/models")) && !strings.HasPrefix(endpoint, "/v1beta/models/"):
+		mode = "gemini"
+	}
+	if mode != "" {
+		var body struct {
+			Model string `json:"model"`
+			Input []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"input"`
+		}
+		var fields map[string]json.RawMessage
+		if json.Unmarshal([]byte(snapshot.Body), &body) != nil || json.Unmarshal([]byte(snapshot.Body), &fields) != nil || len(fields) > 3 || len(body.Input) != 1 || body.Input[0].Role != "user" || body.Model == "" {
+			return probeCurlSnapshot{}, errors.New("probe cannot be expressed in the channel protocol")
+		}
+		req, err := newProbeRequest(context.Background(), "https://template.invalid", keys[0], body.Model, mode, body.Input[0].Content, snapshot.Headers.Get("X-Request-ID"))
+		if err != nil {
+			return probeCurlSnapshot{}, err
+		}
+		template, err := snapshotProbeRequest(req, snapshot.Scope)
+		if err != nil {
+			return probeCurlSnapshot{}, err
+		}
+		endpoint, snapshot.Body = req.URL.Path, template.Body
+		snapshot.Headers = template.Headers
+		if mode == "gemini" {
+			probe.RawQuery = "alt=sse"
+		}
+	}
+	if strings.HasSuffix(path, "/responses") && endpoint != "/v1/responses" {
+		return probeCurlSnapshot{}, errors.New("probe cannot be expressed in the channel protocol")
+	}
+	// Preserve a complete channel endpoint, including custom deployment paths.
+	// A root or version-only base still needs the diagnostic endpoint appended.
+	switch {
+	case strings.HasSuffix(path, "/responses"), strings.HasSuffix(path, "/messages"), strings.HasSuffix(path, "/chat/completions"):
+		base.Path = path
+	case strings.HasSuffix(path, "/v1beta/models"):
+		base.Path = path + strings.TrimPrefix(endpoint, "/v1beta/models")
+	case strings.HasSuffix(path, "/v1beta"):
+		base.Path = path + strings.TrimPrefix(endpoint, "/v1beta")
+	case strings.HasSuffix(path, "/v1") && strings.HasPrefix(endpoint, "/v1/"):
+		base.Path = path + strings.TrimPrefix(endpoint, "/v1")
+	default:
+		base.Path = path + endpoint
+	}
+	base.RawPath, base.Fragment = "", ""
+	query := base.Query()
+	for name, values := range probe.Query() {
+		if name == "alt" {
+			query[name] = values
+		}
+	}
+	base.RawQuery = query.Encode()
+	snapshot.URL = base.String()
+	snapshot.Headers = snapshot.Headers.Clone()
+	for _, name := range []string{"Authorization", "X-Api-Key", "X-Goog-Api-Key", "Cookie", "Host", "Content-Length", "X-Uni-API-Provider", "X-Uni-API-Probe-Unconfigured-Model"} {
+		snapshot.Headers.Del(name)
+	}
+	switch {
+	case endpoint == "/v1/messages":
+		snapshot.Headers.Set("X-Api-Key", keys[0])
+		snapshot.Headers.Set("Anthropic-Version", "2023-06-01")
+	case strings.HasPrefix(endpoint, "/v1beta/models/"):
+		snapshot.Headers.Set("X-Goog-Api-Key", keys[0])
+	default:
+		snapshot.Headers.Set("Authorization", "Bearer "+keys[0])
+	}
+	return snapshot, nil
 }
