@@ -263,6 +263,70 @@ it("manages initial channels with account/unassigned filters and shows every cal
   expect(screen.getByLabelText("检测模型筛选")).toHaveValue("custom-model");
 });
 
+it.each([false, true])("edits an unassigned channel's connection settings from its drawer (multiple sources: %s)", async (multiple) => {
+  const selectedSource = multiple ? "secondary" : "primary";
+  const channels = (multiple ? ["primary", "secondary"] : ["primary"]).map(source => ({
+    kind:"configured",source_id:source,source_name:source === "primary" ? "Fugue" : "DigitalOcean",provider:"bananarouter",name:"bananarouter",models:["gpt-5.6-luna"],api_key_id:"",key_position:0,key_prefix:"",positions:{},revision:"",manageable:false,account_id:"",group_id:0,account_ids:[],engine:"codex",
+  }));
+  let address = "https://upstream.example/v1/responses";
+  let revision = "v1";
+  let managementReads = 0;
+  const settingsReads: string[] = [];
+  const writes: {url:string;method:string;body:any}[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input:string, init?:RequestInit) => {
+    const url = new URL(input, location.origin);
+    if (init?.method === "POST" || init?.method === "PATCH") {
+      const body = JSON.parse(String(init.body));
+      writes.push({url:url.pathname,method:init.method,body});
+      if (init.method === "PATCH") {
+        address = body.changes[0].set["/base_url"];
+        revision = "v2";
+      }
+      return Response.json({status:init.method === "PATCH" ? "applied" : "validated",operation_id:body.operation_id,revision,previews:[]});
+    }
+    if (url.pathname.endsWith("/channel-settings")) {
+      settingsReads.push(url.pathname);
+      expect(url.searchParams.get("provider")).toBe("bananarouter");
+      const document = {provider:"bananarouter",base_url:address,model:["gpt-5.6-luna"],api:[{$secret:"saved-key"}]};
+      return Response.json({provider:"bananarouter",revision,kind:"configured",base:document,effective:document,override_paths:[],available_keys:[],affected_keys:[],global_preferences:{},schema:{engines:["codex"],fields:[{path:"/base_url",type:"string",group:"基本与模型"},{path:"/api",type:"keys",group:"密钥"}]}});
+    }
+    if (url.pathname.endsWith("/channel-management")) managementReads++;
+    return Response.json({data:url.pathname.endsWith("/channel-management") ? channels : [],labels:{},unavailable_sources:[],unavailable_keys:[]});
+  }));
+  const user = userEvent.setup();
+  mount(`unassigned-settings-${multiple}`);
+  await screen.findByText("bananarouter", {selector:"strong"});
+  await user.selectOptions(screen.getByLabelText("sub2api 账号筛选"), "__unassigned__");
+  await user.click(screen.getByText("bananarouter", {selector:"strong"}));
+  const drawer = within(screen.getByRole("dialog", {name:"bananarouter"}));
+  expect(drawer.getByRole("button", {name:"查看接入配置"})).toBeVisible();
+  if (multiple) expect(drawer.getByRole("button", {name:"编辑 Fugue"})).toBeVisible();
+  await user.click(drawer.getByRole("button", {name:multiple ? "编辑 DigitalOcean" : "编辑渠道"}));
+  const settings = within(screen.getByRole("dialog", {name:"渠道设置"}));
+  expect(await settings.findByLabelText("上游地址")).toHaveValue(address);
+  expect(writes).toHaveLength(0);
+  await user.clear(settings.getByLabelText("上游地址"));
+  await user.type(settings.getByLabelText("上游地址"), "https://replacement.example/v1/responses");
+  await user.click(settings.getByRole("button", {name:"密钥"}));
+  expect(settings.getByLabelText("上游密钥 1")).toHaveAttribute("type", "password");
+  expect(settings.getByLabelText("上游密钥 1")).toHaveValue("");
+  await user.type(settings.getByLabelText("上游密钥 1"), "replacement-fixture-key");
+  await user.click(settings.getByRole("button", {name:"校验与预览"}));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  const readsBeforeSave = managementReads;
+  await user.click(settings.getByRole("button", {name:"保存并应用"}));
+  await settings.findByText("设置已保存并应用");
+  await waitFor(() => expect(managementReads).toBeGreaterThan(readsBeforeSave));
+  expect(writes.map(write => [write.method, write.url])).toEqual([
+    ["POST", `/analytics/v1/sources/${selectedSource}/channel-settings/validate`],
+    ["PATCH", `/analytics/v1/sources/${selectedSource}/channel-settings`],
+  ]);
+  for (const write of writes) expect(write.body.changes).toEqual([{provider:"bananarouter",set:{"/base_url":"https://replacement.example/v1/responses","/api":["replacement-fixture-key"]},remove:[]}]);
+  expect(settingsReads.every(path => path.includes(`/sources/${selectedSource}/`))).toBe(true);
+  await user.click(settings.getByRole("button", {name:"关闭渠道设置"}));
+  expect(screen.getByRole("dialog", {name:"bananarouter"})).toBeVisible();
+});
+
 it("loads omitted model results on opening the drawer without reporting untested or losing selection", async () => {
   const accounts = fixtures().slice(0, 1);
   const fullTarget = structuredClone(accounts[0].targets[0]);

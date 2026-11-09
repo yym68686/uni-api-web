@@ -7,7 +7,7 @@ const Editor = lazy(() => import("./ChannelSettingsEditor").then(m=>({default:m.
 
 export type SettingsChannel = Pick<Channel, "provider" | "provider_name" | "source_id" | "source_name" | "model">;
 export const GLOBAL_SETTINGS_SCOPE = "__uni_console_global_preferences__";
-export function ChannelSettings({ row }: { row: SettingsChannel }) {
+export function ChannelSettings({ row, triggerLabel }: { row: SettingsChannel; triggerLabel?: string }) {
   const title = row.provider === GLOBAL_SETTINGS_SCOPE ? "全局设置" : "渠道设置";
   const [open, setOpen] = useState(false);
   return (
@@ -15,7 +15,7 @@ export function ChannelSettings({ row }: { row: SettingsChannel }) {
       <Dialog.Trigger asChild>
         <button className="button channel-settings-trigger">
           <Settings2 size={16} />
-          {title}
+          {triggerLabel || title}
         </button>
       </Dialog.Trigger>
       <Dialog.Portal>

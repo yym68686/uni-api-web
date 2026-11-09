@@ -33,6 +33,7 @@ import { useImportBindings, boundGroups } from "./sub2apiImports";
 import { Sub2apiImport } from "./Sub2apiImport";
 import { readCompleteSubTarget } from "./subTargetDetails";
 import { CreateChannel } from "./CreateChannel";
+import { ChannelSettings } from "./ChannelSettings";
 import { ChannelOptimization } from "./ChannelOptimization";
 import { ChannelProtocolSummary } from "./ChannelProtocolSummary";
 import { useManagementPage, readManagementSelection, managementOptimizationSnapshot } from "./managementQuery";
@@ -606,6 +607,7 @@ function ManagementChannelDrawer({
   onOpenChannel: () => void;
 }) {
   const { account, configured } = row;
+  const configuredMembers = configured ? channelMembers(configured) : [];
   const complete = useQuery({
     queryKey: ["sub-management-models", account.id, row.target.group_id],
     enabled: !!row.target.summary_model,
@@ -655,9 +657,24 @@ function ManagementChannelDrawer({
               {target.state === "error" ? <X size={15} /> : <Check size={15} />}
               {target.state === "error" ? "同步失败" : target.active ? "可检测" : "未激活"}
             </span>
-            <button className="button small primary" onClick={onOpenChannel}>
-              {configured ? "查看接入配置" : "添加到渠道"}
-            </button>
+            <div className="sub-management-channel-actions">
+              {!account.id && configuredMembers.map(member => (
+                <ChannelSettings
+                  key={JSON.stringify([member.source_id, member.provider])}
+                  triggerLabel={configuredMembers.length > 1 ? `编辑 ${member.source_name || member.source_id}` : "编辑渠道"}
+                  row={{
+                    provider: member.provider,
+                    provider_name: member.name || member.provider,
+                    source_id: member.source_id,
+                    source_name: member.source_name,
+                    model: current?.model || member.models[0] || "",
+                  }}
+                />
+              ))}
+              <button className="button small primary" onClick={onOpenChannel}>
+                {configured ? "查看接入配置" : "添加到渠道"}
+              </button>
+            </div>
           </div>
           <section className="detail-section" aria-label="渠道概览">
             <h3>渠道概览</h3>

@@ -2768,6 +2768,7 @@ nav > button.active > svg {
 .sub-management-row:focus-visible { background: var(--subtle); }
 .sub-management-row:focus-visible { outline: 2px solid #42ad8180; outline-offset: -2px; }
 .sub-management-drawer .detail-description { gap: 6px; }
+.sub-management-channel-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .sub-management-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); padding-top: 8px; }
 .sub-management-stats dd { overflow-wrap: anywhere; }
 .sub-management-message { margin-top: 12px; overflow-wrap: anywhere; }
