@@ -4,6 +4,20 @@ import userEvent from "@testing-library/user-event";
 import { SubModelSettings } from "./SubModelSettings";
 import { SUB_MODELS } from "./sub2apiModels";
 
+it("selects Fable 5.2 independently of Fable 5.1", async () => {
+ const save=vi.fn(),user=userEvent.setup();
+ render(<SubModelSettings models={['claude-fable-5-1']} onSave={save}/>);
+ await user.click(screen.getByRole('button',{name:'检测模型设置'}));
+ const dialog=within(screen.getByRole('dialog'));
+ const next=dialog.getByRole('checkbox',{name:'claude-fable-5-2'});
+ expect(next).not.toBeChecked();
+ expect(next.closest('label')).toHaveTextContent('Messages');
+ await user.click(dialog.getByRole('checkbox',{name:'claude-fable-5-1'}));
+ await user.click(next);
+ await user.click(dialog.getByRole('button',{name:'保存设置'}));
+ expect(save).toHaveBeenCalledExactlyOnceWith(['claude-fable-5-2']);
+});
+
 it("can select only GPT 6.1 Terra for batch detection", async () => {
  const save=vi.fn(),user=userEvent.setup();
  render(<SubModelSettings models={[]} onSave={save}/>);

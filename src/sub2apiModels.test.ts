@@ -1,6 +1,16 @@
 import {expect,it,vi,afterEach} from 'vitest';
 import {initializeSubModels,loadSubModels,saveSubModels,SUB_MODELS,subModelProtocolLabel,subModelSelectionNeedsReview} from './sub2apiModels';
 afterEach(()=>vi.unstubAllGlobals());
+it('offers Fable 5.2 through Messages without expanding an existing paid probe scope',()=>{
+ const model='claude-fable-5-2',user='fable-52-catalog-upgrade';
+ const previous=SUB_MODELS.filter(m=>m!==model);
+ saveSubModels(user,['claude-fable-5-1'],previous);
+ expect(SUB_MODELS.filter(m=>m===model)).toHaveLength(1);
+ expect(subModelProtocolLabel(model)).toBe('Messages');
+ expect(loadSubModels(user)).toEqual(['claude-fable-5-1']);
+ saveSubModels(user,[model]);
+ expect(loadSubModels(user)).toEqual([model]);
+});
 it('offers GPT 6.1 Terra with Responses without resetting previous exclusions',()=>{
  const model='gpt-6.1-terra',user='terra-61-catalog-upgrade';
  const previous=SUB_MODELS.filter(m=>m!==model);

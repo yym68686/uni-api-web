@@ -288,6 +288,18 @@
     "note": "Claude API 标准全球价格，缓存写入按 5 分钟 / 1 小时区分。"
   },
   {
+    "model": "claude-fable-5-2",
+    "input": 8,
+    "output": 40,
+    "cache_read": 0.2,
+    "cache_write": 10,
+    "cache_write_1h": 16,
+    "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "verified": true,
+    "cache_write_kind": "ttl",
+    "note": "Claude API 标准全球价格，完整 1M 上下文使用同一单价，无长上下文加价。缓存写入按 5 分钟 / 1 小时区分；缓存读取为输入价格的 2.5%。Fast、Batch 和区域价格不自动套用。"
+  },
+  {
     "model": "claude-opus-5-5",
     "input": 4,
     "output": 20,

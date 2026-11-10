@@ -7,6 +7,19 @@ import {
 import { SUB_MODELS } from "./sub2apiModels";
 import { referencePrice } from "./sub2apiPriceCheck";
 
+it('prices Fable 5.2 independently from older Fable versions and preserves operator prices',()=>{
+ const model='claude-fable-5-2',reference=MODEL_PRICE_CATALOG.find(p=>p.model===model)!;
+ expect(reference).toMatchObject({input:8,output:40,cache_read:.2,cache_write:10,cache_write_1h:16,verified:true});
+ expect(canonicalPriceModel(model+'-thinking')).toBe(model);
+ expect(canonicalPriceModel('claude-fable-5-1-thinking')).toBe('claude-fable-5-1');
+ const custom={...reference,input:9,source:'manual',verified:false};
+ const prices=displayedModelPrices([custom]);
+ expect(prices.find(p=>p.model===model)).toEqual(custom);
+ expect(prices.find(p=>p.model==='claude-fable-5-1')).toMatchObject({input:10,output:50,cache_read:.25});
+ expect(referencePrice(model+'-thinking',[reference])).toEqual(reference);
+ expect(referencePrice(model,[custom])).toBeUndefined();
+});
+
 it("uses GPT 6.1 Terra's official reference while preserving operator overrides", () => {
  const model="gpt-6.1-terra";
  const reference=MODEL_PRICE_CATALOG.find(p=>p.model===model)!;

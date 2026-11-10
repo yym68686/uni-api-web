@@ -4,9 +4,42 @@ import (
 	"context"
 	"math"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
+
+func TestFable52CatalogPreservesPricesAndManagementScope(t *testing.T) {
+	const model = "claude-fable-5-2"
+	prices := withCatalogPrices([]Price{{Model: model, Source: "fact-discovered"}})
+	index := slices.IndexFunc(prices, func(p Price) bool { return p.Model == model })
+	if index < 0 {
+		t.Fatal("Fable 5.2 missing")
+	}
+	p := prices[index]
+	if p.Input != 8 || p.Output != 40 || p.CacheRead != .2 || p.CacheWrite != 10 || p.CacheWrite1h != 16 || !p.Verified {
+		t.Fatal("incorrect Fable 5.2 price", p)
+	}
+	if !p.chargesCacheWrite() || p.promptPriceTier() != nil || p.salePercent() != 15 {
+		t.Fatal("incorrect Claude billing defaults", p)
+	}
+	if canonicalPriceModel(model+"-thinking") != model || canonicalPriceModel("claude-fable-5-1-thinking") != "claude-fable-5-1" {
+		t.Fatal("Fable versions share a price identity")
+	}
+	for _, p := range withCatalogPrices([]Price{{Model: model, Input: 9, Source: "manual", Verified: false}}) {
+		if p.Model == model && (p.Input != 9 || p.Verified || p.Source != "manual") {
+			t.Fatal("operator price overwritten", p)
+		}
+		if p.Model == "claude-fable-5-1" && (p.Input != 10 || p.Output != 50 || p.CacheRead != .25) {
+			t.Fatal("older Fable price changed", p)
+		}
+	}
+	if !subModelAllowed(model) || subModelProtocol(model) != "messages" ||
+		!slices.Contains(managementPageModelCatalog(managementQueryInput{}, ""), model) ||
+		!slices.Contains(managementPageDetectionModels(nil), model) {
+		t.Fatal("Fable 5.2 missing from management/probe catalogs")
+	}
+}
 
 func TestGPT61TerraCatalogAndOperatorPrices(t *testing.T) {
 	const model = "gpt-6.1-terra"
