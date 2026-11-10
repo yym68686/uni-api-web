@@ -552,7 +552,9 @@ function AttemptDrawer({
             <X size={20} />
           </Dialog.Close>
           <span className="eyebrow">
-            CHANNEL ATTEMPT {number.toString().padStart(2, "0")}
+            {attempt.sent
+              ? `CHANNEL ATTEMPT ${number.toString().padStart(2, "0")}`
+              : "渠道选择记录"}
           </span>
           <Dialog.Title>{channel.name}</Dialog.Title>
           <Dialog.Description>
@@ -567,6 +569,12 @@ function AttemptDrawer({
             />
             <strong>{duration(attempt.duration)}</strong>
           </div>
+          {attempt.candidateIndex != null && (
+            <p className="muted">
+              配置候选 #{attempt.candidateIndex}
+              {attempt.skipped ? " · 发送前跳过" : ""}
+            </p>
+          )}
           {channel.dashboard_url && (
             <div className="trace-site-link">
               <SiteLink base={channel.dashboard_url}>打开站点控制台</SiteLink>
@@ -577,14 +585,16 @@ function AttemptDrawer({
               站点名称与倍率来自当前渠道配置，不代表请求发生时的计费倍率。
             </p>
           )}
-          <section className="detail-section">
-            <h3>响应时间节点</h3>
-            <TimingMilestones
-              {...timing}
-              origin={origin}
-              started={attempt.hasStart ? attempt.started : undefined}
-            />
-          </section>
+          {attempt.sent && (
+            <section className="detail-section">
+              <h3>响应时间节点</h3>
+              <TimingMilestones
+                {...timing}
+                origin={origin}
+                started={attempt.hasStart ? attempt.started : undefined}
+              />
+            </section>
+          )}
           <section className="detail-section">
             <h3>阶段时间线</h3>
             <StageList events={attempt.events} origin={origin} />
@@ -631,7 +641,9 @@ export function TraceTimeline({
     : (completed?.duration_ms ?? final?.duration_ms);
   const successes = attempts.filter((a) => a.tone === "success").length;
   const failures = attempts.filter((a) => a.tone === "failure").length;
-  const chosen = attempts.find((a) => a.id === openAttempt);
+  const chosen = [...attempts, ...trace.skipped, ...trace.unresolved].find(
+    (a) => a.id === openAttempt,
+  );
   const hasTimes = !run.ambiguous && trace.events.length > 0;
   const downstream = run.ambiguous ? [] : downstreamTiming(trace.gateway);
   const open = (attempt: TraceAttempt) => {
@@ -653,7 +665,7 @@ export function TraceTimeline({
                   : "请求记录"}
           </h3>
         </div>
-        <Status {...finalState} status={final ? eventHTTP(final) : undefined} />
+        <Status {...finalState} status={trace.downstreamHTTP || undefined} />
       </div>
       <div className="trace-summary">
         <div>
@@ -665,7 +677,7 @@ export function TraceTimeline({
           <strong>{duration(total)}</strong>
         </div>
         <div>
-          <small>{run.ambiguous ? "渠道事件" : "渠道尝试"}</small>
+          <small>{run.ambiguous ? "已记录发送事件" : "实际发送"}</small>
           <strong>
             {attempts.length}
             <span>次</span>
@@ -676,9 +688,67 @@ export function TraceTimeline({
           <strong className="trace-attempt-count">
             <span className="success">{successes} 成功</span>
             <span className="failure">{failures} 失败</span>
+            {trace.skipped.length > 0 && (
+              <span className="warning">{trace.skipped.length} 个候选跳过</span>
+            )}
           </strong>
         </div>
       </div>
+      {trace.statusConflict && (
+        <p className="trace-notice warning">
+          实际返回 HTTP {trace.downstreamHTTP}；历史汇总记录为 {final?.status}。
+        </p>
+      )}
+      {trace.httpSource === "legacy" && (
+        <p className="trace-notice">
+          缺少实际响应 HTTP 记录，当前状态码来自请求汇总。
+        </p>
+      )}
+      {!run.ambiguous &&
+        trace.skipped.length === 0 &&
+        attempts.some((a) => (a.candidateIndex || 0) > 1) && (
+          <p className="trace-notice">
+            历史记录未包含跳过原因，不能据此还原前序渠道的选择过程。
+          </p>
+        )}
+      {[
+        { items: trace.skipped, label: "发送前跳过" },
+        { items: trace.unresolved, label: "发送状态未记录" },
+      ].map(
+        ({ items, label }) =>
+          items.length > 0 && (
+            <details key={label} className="trace-route-decisions">
+              <summary>
+                {label} · {items.length} 个候选
+              </summary>
+              <ul>
+                {items.map((a) => (
+                  <li key={a.id}>
+                    <button
+                      className="trace-channel-link"
+                      onClick={() => open(a)}
+                    >
+                      {traceChannel(run, a.provider).name}
+                      <ArrowUpRight size={14} />
+                    </button>
+                    <span>
+                      {a.candidateIndex != null
+                        ? `配置候选 #${a.candidateIndex}`
+                        : "候选序号未记录"}{" "}
+                      · {label}
+                    </span>
+                    {a.errors.map((error) => (
+                      <p key={error} className="trace-error-message">
+                        {error}
+                      </p>
+                    ))}
+                    <StageList events={a.events} origin={origin} />
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ),
+      )}
       {run.ambiguous && (
         <p className="trace-notice warning">
           同一实例重复使用了此请求
@@ -808,6 +878,9 @@ export function TraceTimeline({
                     {duration(Math.max(0, a.started - origin))}
                   </span>
                   <span>耗时 {duration(a.duration)}</span>
+                  {a.candidateIndex != null && (
+                    <span>配置候选 #{a.candidateIndex}</span>
+                  )}
                 </div>
                 {!!a.errors.length && (
                   <div className="trace-error-message">

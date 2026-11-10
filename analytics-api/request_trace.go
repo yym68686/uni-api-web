@@ -79,7 +79,7 @@ func traceDetails(raw string) map[string]any {
 			case float64, bool:
 				out[name] = value
 			}
-		case "attempt_outcome", "skip_reason", "status_origin", "failure_resource", "original_attempt_id", "error_code", "error_type", "error_message", "origin", "cache_guard_action", "cache_prefix_hmac", "cache_breakpoint", "cache_evidence_request_id":
+		case "attempt_outcome", "skip_reason", "phase", "error_param", "status_origin", "failure_resource", "original_attempt_id", "error_code", "error_type", "error_message", "origin", "cache_guard_action", "cache_prefix_hmac", "cache_breakpoint", "cache_evidence_request_id":
 			if text, ok := value.(string); ok {
 				words := strings.Fields(text)
 				for i, word := range words {
@@ -97,6 +97,32 @@ func traceDetails(raw string) map[string]any {
 		case "error":
 			b, _ := json.Marshal(value)
 			out[name] = traceDetails(string(b))
+		case "final_facts":
+			if fields, ok := value.(map[string]any); ok {
+				out[name] = traceFinalFacts(fields)
+			}
+		}
+	}
+	return out
+}
+
+// Only the typed final-outcome contract is public, never arbitrary nested data.
+func traceFinalFacts(in map[string]any) map[string]any {
+	out := map[string]any{}
+	for _, name := range []string{"upstream_http_status", "downstream_http_status", "semantic_status"} {
+		if n, ok := in[name].(float64); ok && n >= 100 && n <= 599 && n == float64(int(n)) {
+			out[name] = int(n)
+		}
+	}
+	for _, name := range []string{"response_completed", "business_committed"} {
+		if value, ok := in[name].(bool); ok {
+			out[name] = value
+		}
+	}
+	if terminal, ok := in["terminal"].(string); ok {
+		switch terminal {
+		case "completed", "incomplete", "semantic_failure", "protocol_error", "transport_error", "downstream_disconnected", "hedge_cancelled", "rejected", "unknown":
+			out["terminal"] = terminal
 		}
 	}
 	return out

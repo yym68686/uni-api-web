@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -96,6 +97,55 @@ func TestTraceTransportLastChunkValidation(t *testing.T) {
 	}
 	if got := traceTransport(`{"raw_stream":{"totals":{"last_chunk_ms":0}}}`)["last_upstream_chunk_ms"]; got != float64(0) {
 		t.Fatal("lost zero timestamp", got)
+	}
+}
+
+func TestTraceFinalFactsAndConversionFieldsAreTypedAndSafe(t *testing.T) {
+	detail := traceDetails(`{"phase":"request_conversion","error":{"error_code":"gemini_tool_history","error_param":"messages[45].tool_calls[0]","signature":"private-signature","arguments":"private-arguments"},"final_facts":{"terminal":"semantic_failure","downstream_http_status":200,"upstream_http_status":200,"semantic_status":503,"response_completed":false,"business_committed":true,"payload":"private-payload"}}`)
+	if detail["phase"] != "request_conversion" || detail["error"].(map[string]any)["error_param"] != "messages[45].tool_calls[0]" {
+		t.Fatal(detail)
+	}
+	facts := detail["final_facts"].(map[string]any)
+	if facts["downstream_http_status"] != 200 || facts["semantic_status"] != 503 || facts["response_completed"] != false || len(facts) != 6 {
+		t.Fatal(facts)
+	}
+	raw, _ := json.Marshal(detail)
+	if strings.Contains(string(raw), "private") {
+		t.Fatal("private fields exported", string(raw))
+	}
+	invalid := traceDetails(`{"final_facts":{"terminal":"private-unknown","downstream_http_status":"401","upstream_http_status":200.5,"semantic_status":999,"response_completed":"false"}}`)
+	if len(invalid["final_facts"].(map[string]any)) != 0 {
+		t.Fatal(invalid)
+	}
+}
+
+func TestRequestTraceSkipsDoNotAddAttemptSamples(t *testing.T) {
+	e := stateTestEngine(t)
+	ctx := context.Background()
+	at := time.Now().Add(-time.Minute).UnixMilli()
+	facts := []Fact{}
+	for n := 1; n <= 26; n++ {
+		f := Fact{Schema: 1, EventID: fmt.Sprintf("candidate-%d", n), SourceID: "primary", InstanceID: "i", RequestID: "skips", AtMS: at + int64(n), Provider: fmt.Sprintf("p%d", n), AttemptID: fmt.Sprintf("skips-r%d", n), Model: "m"}
+		if n == 16 || n == 19 {
+			f.Kind = "attempt"
+			f.Outcome = "failed"
+		} else {
+			f.Kind = "trace"
+			f.Stage = "routing_attempt"
+			f.TraceDetail = json.RawMessage(`{"attempt_outcome":"skipped","skip_reason":"attempt_build_failed","phase":"request_conversion","error":{"error_param":"messages[45].tool_calls[0]"}}`)
+		}
+		facts = append(facts, f)
+	}
+	if err := e.Import(ctx, "skips", "v1", facts); err != nil {
+		t.Fatal(err)
+	}
+	result, err := e.RequestTrace(ctx, "skips", []string{"primary"}, "")
+	if err != nil || len(result.Data) != 1 || len(result.Data[0].Events) != 26 {
+		t.Fatal(result, err)
+	}
+	aggregate, err := e.Query(ctx, QueryFilter{Range: "all", SourceID: "primary"})
+	if err != nil || aggregate.Total["attempts"] != int64(2) {
+		t.Fatal(aggregate, err)
 	}
 }
 

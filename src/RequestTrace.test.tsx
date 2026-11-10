@@ -82,6 +82,91 @@ const run: TraceRun = {
     ...e,
   })),
 };
+it("shows actual HTTP, a legacy conflict, and expandable skips without inflating sends", async () => {
+  const user = userEvent.setup();
+  const skip: TraceEvent = {
+    ...run.events[0],
+    event_id: "skip",
+    stage: "routing_attempt",
+    provider: "skipped-provider",
+    attempt_id: "r-r15",
+    at_ms: 100010,
+    detail: {
+      attempt_index: 15,
+      attempt_outcome: "skipped",
+      skip_reason: "attempt_build_failed",
+      error: {
+        error_code: "gemini_tool_history",
+        error_param: "messages[45].tool_calls[0]",
+        error_message: "signature exceeds capacity",
+      },
+    },
+  };
+  const item = {
+    ...run,
+    events: [
+      run.events[0],
+      skip,
+      run.events[2],
+      { ...run.events[3], status: 400, outcome: "failed" },
+      {
+        ...run.events[0],
+        event_id: "wire",
+        stage: "response_headers",
+        status: 401,
+        at_ms: 100301,
+      },
+    ],
+  };
+  const view = render(<TraceTimeline run={item} sourceName="Fugue" />);
+  expect(screen.getByText("实际发送")).toBeVisible();
+  expect(
+    view.container.querySelector(".trace-run-heading .trace-status"),
+  ).toHaveTextContent("HTTP 401");
+  expect(screen.getByText(/历史汇总记录为 400/)).toBeVisible();
+  await user.click(screen.getByText("发送前跳过 · 1 个候选"));
+  const skipList = view.container.querySelector<HTMLElement>(
+    ".trace-route-decisions",
+  )!;
+  expect(within(skipList).getByText("配置候选 #15 · 发送前跳过")).toBeVisible();
+  expect(
+    skipList.querySelector<HTMLElement>(".trace-error-message"),
+  ).toHaveTextContent("signature exceeds capacity");
+  const chart = screen.getByRole("region", { name: "渠道请求时间线" });
+  expect(
+    within(chart).getAllByRole("button", { name: /查看第 .* 次尝试/ }),
+  ).toHaveLength(1);
+  view.unmount();
+  const semanticView = render(
+    <TraceTimeline
+      run={{
+        ...item,
+        events: [
+          { ...run.events[3], status: 503, outcome: "failed" },
+          {
+            ...run.events[0],
+            event_id: "facts",
+            stage: "request_final_facts",
+            detail: {
+              final_facts: {
+                terminal: "semantic_failure",
+                downstream_http_status: 200,
+                semantic_status: 503,
+              },
+            },
+          },
+        ],
+      }}
+      sourceName="Fugue"
+    />,
+  );
+  expect(screen.getByRole("heading", { name: "请求失败" })).toBeVisible();
+  const status = semanticView.container.querySelector<HTMLElement>(
+    ".trace-run-heading .trace-status",
+  );
+  expect(status).toHaveTextContent("HTTP 200");
+  expect(status).not.toHaveTextContent("HTTP 503");
+});
 it("explains a skipped cache prefix and keeps its evidence in stage details", async () => {
   const skipped: TraceEvent = {
     ...run.events[1],

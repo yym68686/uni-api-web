@@ -1,5 +1,10 @@
 import { expect, it } from "vitest";
-import { buildTrace, eventResult, traceChannel } from "./requestTraceModel";
+import {
+  buildTrace,
+  eventHTTP,
+  eventResult,
+  traceChannel,
+} from "./requestTraceModel";
 import type { TraceEvent, TraceRun } from "./requestTraceModel";
 const event = (patch: Partial<TraceEvent>): TraceEvent => ({
   event_id: "",
@@ -32,6 +37,128 @@ const run = (events: TraceEvent[]): TraceRun => ({
   request_id: "r",
   ambiguous: false,
   events,
+});
+
+it("separates 24 preparation skips from two sends and trusts observed downstream HTTP", () => {
+  const events = Array.from({ length: 26 }, (_, i) => {
+    const n = i + 1;
+    return event({
+      event_id: `candidate-${n}`,
+      kind: n === 16 || n === 19 ? "dispatch" : "trace",
+      stage: n === 16 || n === 19 ? "" : "routing_attempt",
+      attempt_id: `r-r${n}`,
+      provider: `p${n}`,
+      at_ms: 1000 + n,
+      detail:
+        n === 16 || n === 19
+          ? {}
+          : {
+              attempt_index: n,
+              attempt_outcome: "skipped",
+              skip_reason: "attempt_build_failed",
+              phase: "request_conversion",
+              error: {
+                error_code: "gemini_tool_history",
+                error_param: "messages[45].tool_calls[0]",
+                error_message: "invalid tool identity",
+              },
+            },
+    });
+  });
+  events.push(
+    event({
+      event_id: "final",
+      kind: "request",
+      status: 400,
+      outcome: "failed",
+      at_ms: 1100,
+    }),
+    event({
+      event_id: "wire",
+      stage: "response_headers",
+      status: 401,
+      at_ms: 1101,
+    }),
+    event({
+      event_id: "facts",
+      stage: "request_final_facts",
+      provider: "p19",
+      at_ms: 1102,
+      detail: {
+        final_facts: {
+          downstream_http_status: 401,
+          semantic_status: 401,
+          terminal: "rejected",
+        },
+      },
+    }),
+  );
+  const trace = buildTrace(run(events.reverse()));
+  expect(trace.attempts.map((a) => a.candidateIndex)).toEqual([16, 19]);
+  expect(trace.skipped).toHaveLength(24);
+  expect(trace.unresolved).toHaveLength(0);
+  expect(trace.skipped[0]).toMatchObject({
+    sent: false,
+    skipped: true,
+    duration: null,
+    status: 0,
+  });
+  expect(trace.skipped[0].errors.join()).toContain(
+    "messages[45].tool_calls[0]",
+  );
+  expect(trace.gateway.some((e) => e.event_id === "facts")).toBe(true);
+  expect(trace.downstreamHTTP).toBe(401);
+  expect(trace.statusConflict).toBe(true);
+  expect(trace.httpSource).toBe("observed");
+});
+
+it("keeps HTTP 200 separate from semantic failure and supports final-facts-only traces", () => {
+  const trace = buildTrace(
+    run([
+      event({ kind: "request", status: 503, outcome: "failed", at_ms: 1100 }),
+      event({
+        stage: "request_final_facts",
+        provider: "p",
+        at_ms: 1101,
+        detail: {
+          final_facts: {
+            terminal: "semantic_failure",
+            response_completed: false,
+            downstream_http_status: 200,
+            semantic_status: 503,
+          },
+        },
+      }),
+    ]),
+  );
+  expect(trace.downstreamHTTP).toBe(200);
+  expect(eventResult(trace.final)).toEqual({ label: "失败", tone: "failure" });
+  expect(trace.attempts).toHaveLength(0);
+  expect(eventHTTP(event({ detail: { semantic_status_code: 503 } }))).toBe(0);
+  expect(
+    eventResult(
+      event({ status: 400, detail: { skip_reason: "attempt_build_failed" } }),
+    ).label,
+  ).toBe("已跳过");
+});
+
+it("does not count selection-only events as sends or join ambiguous downstream statuses", () => {
+  const events = [
+    event({
+      event_id: "selection",
+      stage: "routing_attempt",
+      provider: "p",
+      attempt_id: "r-r1",
+      detail: { attempt_outcome: "started" },
+    }),
+    event({ event_id: "wire", stage: "response_headers", status: 401 }),
+  ];
+  const trace = buildTrace(run(events));
+  expect(trace.attempts).toHaveLength(0);
+  expect(trace.unresolved).toHaveLength(1);
+  expect(buildTrace({ ...run(events), ambiguous: true }).downstreamHTTP).toBe(
+    0,
+  );
 });
 it("keeps concurrent attempts separate and merges records only by exact attempt identity", () => {
   const result = buildTrace(
@@ -106,6 +233,21 @@ it("keeps concurrent attempts separate and merges records only by exact attempt 
   expect(result.final?.duration_ms).toBe(60);
 });
 it("does not invent an ingress or duration for an orphan receipt, or success from HTTP 200 alone", () => {
+  expect(
+    eventResult(
+      event({
+        status: 400,
+        outcome: "failed",
+        detail: {
+          final_facts: { terminal: "completed", semantic_status: 200 },
+        },
+      }),
+    ).tone,
+  ).toBe("success");
+  expect(
+    eventResult(event({ status: 200, detail: { semantic_status_code: 503 } }))
+      .tone,
+  ).toBe("failure");
   const result = buildTrace(
     run([
       event({

@@ -170,6 +170,31 @@
 .trace-notice.warning {
   color: #c4a246;
 }
+.trace-route-decisions {
+  margin: 0 24px 18px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 12px;
+}
+.trace-route-decisions > summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.trace-route-decisions > ul {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 0;
+}
+.trace-route-decisions > ul > li {
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+.trace-route-decisions li > span {
+  display: block;
+  margin: 6px 0;
+  color: var(--muted);
+}
 .trace-visual-section,
 .trace-journey-section {
   padding: 22px 24px;
