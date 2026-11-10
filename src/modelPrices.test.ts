@@ -7,6 +7,19 @@ import {
 import { SUB_MODELS } from "./sub2apiModels";
 import { referencePrice } from "./sub2apiPriceCheck";
 
+it('keeps Carbon reference prices and operator overrides separate from Argon',()=>{
+ const model='gemini-4-carbon',reference=MODEL_PRICE_CATALOG.find(p=>p.model===model)!;
+ expect(reference).toMatchObject({input:2,output:10,cache_read:.1,cache_write:2,cache_write_1h:2,verified:true});
+ expect(canonicalPriceModel(model+'-high')).toBe(model);
+ const custom={...reference,input:7,source:'manual',verified:false};
+ const argon={...reference,model:'gemini-4-argon',input:9,source:'manual'};
+ const prices=displayedModelPrices([custom,argon]);
+ expect(prices.find(p=>p.model===model)).toEqual(custom);
+ expect(prices.find(p=>p.model==='gemini-4-argon')).toEqual(argon);
+ expect(referencePrice(model,[custom])).toBeUndefined();
+ expect(referencePrice(model+'-high',[argon,reference])).toEqual(reference);
+});
+
 it('prices Fable 5.2 independently from older Fable versions and preserves operator prices',()=>{
  const model='claude-fable-5-2',reference=MODEL_PRICE_CATALOG.find(p=>p.model===model)!;
  expect(reference).toMatchObject({input:8,output:40,cache_read:.2,cache_write:10,cache_write_1h:16,verified:true});

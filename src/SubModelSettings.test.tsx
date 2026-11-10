@@ -4,6 +4,20 @@ import userEvent from "@testing-library/user-event";
 import { SubModelSettings } from "./SubModelSettings";
 import { SUB_MODELS } from "./sub2apiModels";
 
+it('selects Carbon independently with the native Gemini protocol',async()=>{
+ const save=vi.fn(),user=userEvent.setup();
+ render(<SubModelSettings models={['gemini-4-argon']} onSave={save}/>);
+ await user.click(screen.getByRole('button',{name:'检测模型设置'}));
+ const dialog=within(screen.getByRole('dialog'));
+ const carbon=dialog.getByRole('checkbox',{name:'gemini-4-carbon'});
+ expect(carbon).not.toBeChecked();
+ expect(carbon.closest('label')).toHaveTextContent('Gemini 原生');
+ await user.click(dialog.getByRole('checkbox',{name:'gemini-4-argon'}));
+ await user.click(carbon);
+ await user.click(dialog.getByRole('button',{name:'保存设置'}));
+ expect(save).toHaveBeenCalledExactlyOnceWith(['gemini-4-carbon']);
+});
+
 it("selects Fable 5.2 independently of Fable 5.1", async () => {
  const save=vi.fn(),user=userEvent.setup();
  render(<SubModelSettings models={['claude-fable-5-1']} onSave={save}/>);

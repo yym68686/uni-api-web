@@ -41,6 +41,35 @@ func TestFable52CatalogPreservesPricesAndManagementScope(t *testing.T) {
 	}
 }
 
+func TestCarbonCatalogPreservesPricesAndManagementScope(t *testing.T) {
+	const model = "gemini-4-carbon"
+	prices := withCatalogPrices([]Price{{Model: model, Source: "fact-discovered"}})
+	index := slices.IndexFunc(prices, func(p Price) bool { return p.Model == model })
+	if index < 0 {
+		t.Fatal("Carbon missing")
+	}
+	p := prices[index]
+	if p.Input != 2 || p.Output != 10 || p.CacheRead != .1 || p.CacheWrite != 2 || p.CacheWrite1h != 2 || !p.Verified {
+		t.Fatal("incorrect Carbon reference", p)
+	}
+	if !p.chargesCacheWrite() || p.chargesLongContextPremium() || p.salePercent() != 15 || canonicalPriceModel(model+"-high") != model {
+		t.Fatal("incorrect Gemini defaults or model identity", p)
+	}
+	for _, p := range withCatalogPrices([]Price{{Model: model, Input: 7, Source: "manual", Verified: false}, {Model: "gemini-4-argon", Input: 9, Source: "manual", Verified: true}}) {
+		if p.Model == model && (p.Input != 7 || p.Verified || p.Source != "manual") {
+			t.Fatal("Carbon operator price overwritten", p)
+		}
+		if p.Model == "gemini-4-argon" && p.Input != 9 {
+			t.Fatal("Argon price overwritten", p)
+		}
+	}
+	if !subModelAllowed(model) || subModelProtocol(model) != "gemini" ||
+		!slices.Contains(managementPageModelCatalog(managementQueryInput{}, ""), model) ||
+		!slices.Contains(managementPageDetectionModels(nil), model) {
+		t.Fatal("Carbon missing from management/probe catalogs")
+	}
+}
+
 func TestGPT61TerraCatalogAndOperatorPrices(t *testing.T) {
 	const model = "gpt-6.1-terra"
 	found := 0

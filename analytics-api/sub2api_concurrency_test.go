@@ -96,7 +96,7 @@ func testSubConcurrentAccounts(t *testing.T, interrupt, observeFingerprint bool)
 			ok(map[string]any{"items": []any{}, "total": 0, "pages": 1})
 		case "/v1/sub2api/billing":
 			writeJSON(w, 200, map[string]any{"object": "sub2api.key_billing", "billing_scope": "token", "effective_rate_multiplier": 1})
-		case "/v1/responses", "/v1/messages", "/v1beta/models/gemini-4-argon:streamGenerateContent", "/v1beta/models/gemini-3.1-pro:streamGenerateContent", "/v1beta/models/gemini-3.8-flash:streamGenerateContent":
+		case "/v1/responses", "/v1/messages", "/v1beta/models/gemini-4-carbon:streamGenerateContent", "/v1beta/models/gemini-4-argon:streamGenerateContent", "/v1beta/models/gemini-3.1-pro:streamGenerateContent", "/v1beta/models/gemini-3.8-flash:streamGenerateContent":
 			stage, _, _ := strings.Cut(r.Header.Get("X-Request-ID"), "-")
 			fingerprint := stage == "fingerprint"
 			mu.Lock()

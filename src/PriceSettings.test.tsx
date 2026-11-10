@@ -5,6 +5,20 @@ import { PriceSettings } from "./PriceSettings";
 import { MODEL_PRICE_CATALOG } from "./modelPrices";
 import type { ModelPrice } from "./types";
 
+it('shows Carbon promotional pricing and its expiration without inventing cache TTL rates',async()=>{
+ render(<PriceSettings prices={[]} loading={false} connection={{base:'',key:'',session:'test',account:true}} onSaved={vi.fn()}/>);
+ const model='gemini-4-carbon',user=userEvent.setup();
+ await user.click(screen.getByRole('textbox',{name:'搜索模型价格'}));await user.paste(model);
+ for(const [label,value] of [['输入',2],['输出',10],['缓存读取',.1]] as const){
+  expect(screen.getByLabelText(`${model} ${label}价格`)).toHaveValue(value);
+ }
+ expect(within(screen.getByLabelText(model+' 输入价格').closest('tr')!).getAllByText('同输入')).toHaveLength(2);
+ await user.click(screen.getByRole('button',{name:'查看 '+model+' 价格说明'}));
+ const dialog=within(screen.getByRole('dialog',{name:model}));
+ expect(dialog.getByRole('link',{name:'查看官方价格来源'})).toHaveAttribute('href','https://ai.google.dev/gemini-api/docs/pricing#gemini-4-carbon');
+ expect(screen.getByRole('dialog',{name:model})).toHaveTextContent('2026-12-01 起输入 $4、输出 $20、缓存读取 $0.20');
+});
+
 it('shows Fable 5.2 standard and independent cache TTL prices',async()=>{
  render(<PriceSettings prices={[]} loading={false} connection={{base:'',key:'',session:'test',account:true}} onSaved={vi.fn()}/>);
  const model='claude-fable-5-2',user=userEvent.setup();
