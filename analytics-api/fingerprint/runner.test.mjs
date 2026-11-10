@@ -160,12 +160,22 @@ test('error SSE and truncated completion cannot count as complete samples', asyn
   }
 });
 
-test('every catalog Gemini with an upstream reference is enabled with its exact class', () => {
+test('catalog Gemini fingerprints require an upstream reference and use its exact class', async () => {
   const catalog = JSON.parse(readFileSync(new URL('../model_catalog.json', import.meta.url)));
   const classes = JSON.parse(readFileSync(new URL('./models.json', import.meta.url)));
+  const referenced = [];
   for (const entry of catalog.filter(p => p.model.startsWith('gemini-'))) {
     const id = entry.model === 'gemini-3.1-pro' ? 'gemini-3.1-pro-preview' : entry.model;
-    assert.ok(reference.detector.model_ids.includes(id));
+    if (!reference.detector.model_ids.includes(id)) {
+      assert.equal(models.includes(entry.model), false);
+      assert.equal(classes[entry.model], undefined);
+      assert.throws(() => score(entry.model, fixture['gemini-4-argon'], reference), /unsupported_model/);
+      let calls = 0;
+      await assert.rejects(detect({model:entry.model,format:'gemini',base_url:'https://mock.example',key:'secret'},async()=>{calls++;return Response.json({});}), /unsupported_model/);
+      assert.equal(calls, 0, 'a missing fingerprint reference must not start a paid probe');
+      continue;
+    }
+    referenced.push(entry.model);
     assert.ok(models.includes(entry.model));
     const outputs = fixture[id], result = score(entry.model, outputs, reference);
     const original = analyzeSharedOutputs(outputs, reference.bank, reference.detector);
@@ -178,6 +188,7 @@ test('every catalog Gemini with an upstream reference is enabled with its exact 
     assert.equal(mismatch.status, 'mismatch');
     assert.ok(mismatch.probability < mismatch.candidates[0].probability);
   }
+  assert.deepEqual(referenced.sort(), ['gemini-3.1-pro','gemini-3.8-flash','gemini-4-argon']);
 });
 
 test('Gemini native challenges use sequential requests, low Argon thinking, and visible text only', async () => {
