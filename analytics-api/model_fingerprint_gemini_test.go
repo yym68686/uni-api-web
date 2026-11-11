@@ -22,7 +22,7 @@ func TestGeminiFingerprintSiteProtocolAndNativeBridge(t *testing.T) {
 	if err := json.Unmarshal(raw, &fixtures); err != nil {
 		t.Fatal(err)
 	}
-	for _, model := range []string{"gemini-3.1-pro", "gemini-3.8-flash", "gemini-4-argon"} {
+	for _, model := range []string{"gemini-3.1-pro", "gemini-3.8-flash", "gemini-4-argon", "gemini-4-carbon"} {
 		t.Run(model, func(t *testing.T) {
 			var calls atomic.Int32
 			up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -44,9 +44,9 @@ func TestGeminiFingerprintSiteProtocolAndNativeBridge(t *testing.T) {
 				if body.Model != "" || body.Generation.Max != 8192 {
 					t.Error("wrong body", body)
 				}
-				if model == "gemini-4-argon" {
+				if fingerprintModels[model].Effort == "low" {
 					if body.Generation.Thinking == nil || body.Generation.Thinking.Level != "low" {
-						t.Error("wrong Argon effort")
+						t.Error("wrong Gemini reference effort")
 					}
 				} else if body.Generation.Thinking != nil {
 					t.Error("older Gemini reference uses default effort")

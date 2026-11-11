@@ -1,19 +1,20 @@
 {
   "repository": "https://github.com/Ikaleio/lm-detector",
-  "commit": "5fcfb4cd34da10915daa38d3ec04d573d946c97e",
+  "commit": "a7e9d3056e019827904dd50722c20b4a0c896738",
   "files": {
-    "shared/positional.ts": "a44799a179e8eb0b19b83449f0bdb6fa914a64a27c7dc2e5cd71fad31e93719a",
-    "shared/shared-detector.ts": "06698e67671f9539caa8e294774e82bb0b68e4a3ab6d1fca455073782b84bd43",
-    "shared/detection.ts": "898ab49e1e13c5e8702d782d2a1d1a0d4c36ad136fc559d4b7e0d2336a5d1653",
-    "shared/completion.ts": "5eec6adc0f8790cd419daeec90998f7a3da17bc58b58ae61b399b9d5d937f16b",
-    "shared/completion-request.ts": "f70ece4b4ee9653e138f59ab6d1fd0d47cc597b317c99ffba6e9c21d68423a15",
-    "shared/throughput.ts": "f5a8cdb500545ddcfa10628e34129c29c5b5ceeb4453d59b8d1705129b5e4630",
-    "shared/fingerprint-core.js": "f7a88e9b0141b0088608a2c86ba9f26cf6b916860e94c3c7f14028c94c165be7",
+    "shared/api-url.ts": "7d6ca6f1c80a4edc91599968ac8008a99b5b5f163a75c5b1bb881a50253c7fdc",
     "shared/challenge-browser.js": "65884da44d29b7d5337993609414596272010cb07cffe98b0c5546b1fe9728e4",
-    "shared/types.ts": "75590a2b2d706e8a8153804a48fec0ab0e6d39da21fe1ee7c4691a03b6bdd61e",
-    "shared/reference.ts": "17547966e022bbea074794b6b1fe3916a028dba6fe8741bdacaae30077f1d0f0",
-    "shared/detector-codec.ts": "4ebc548f4c03f3a150e1d395c547ca84722af60a2a115bf05a17d448dd840acb",
-    "data/unified_bank.json": "4778a1684d5464449967856e2e82d340e9ed0e68c555c157931224a6a365cc7d",
-    "data/shared_detector.bin": "aa21df4a09906d38e6fce567ac483555abd0a38939ebb14794c0364db52f4a18"
+    "shared/completion-request.ts": "f7c58c633df5b1a19c38cbe8705af8002e3fcb441bea54bb38da00824632e371",
+    "shared/completion.ts": "5eec6adc0f8790cd419daeec90998f7a3da17bc58b58ae61b399b9d5d937f16b",
+    "shared/detection.ts": "0c943dd38775a3651ab4583928f81f05e6b93be060b68a062b06d3b057328957",
+    "shared/detector-codec.ts": "dc81fc16d94e7d4e34918142338bc810e07f42e0ddea32d5e229dced254addbb",
+    "shared/fingerprint-core.js": "f7a88e9b0141b0088608a2c86ba9f26cf6b916860e94c3c7f14028c94c165be7",
+    "shared/positional.ts": "e2c72c352ac3c1120ff23891ec40fff9a652973345badb29a9ce389de9cfc28a",
+    "shared/reference.ts": "427666f65e6310dc6031d6dc59adbe455337dbabfb2a53c5868bbfcc808db500",
+    "shared/shared-detector.ts": "2cf7e22d4db63d79bdf80573af96e8448202c92989b1b5b1a328a53e7527dcbd",
+    "shared/throughput.ts": "f5a8cdb500545ddcfa10628e34129c29c5b5ceeb4453d59b8d1705129b5e4630",
+    "shared/types.ts": "8e6c17ebfb16664a79bc07d1b90104f4d4db05d60b7d81dc058a83e9534fe19b",
+    "data/unified_bank.json": "a6e8d6291b50e7cf25744b5fbad46460ed4cc0b94e156bb2719a9d714684b635",
+    "data/shared_detector.bin": "8c7d48ea242026d123baa7cfbbe377701ac8d6899e6796f319ce555d3ae06b6c"
   }
 }

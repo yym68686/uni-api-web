@@ -1,18 +1,19 @@
 # Model fingerprints
 
 Vendored from [Ikaleio/lm-detector](https://github.com/Ikaleio/lm-detector),
-commit `5fcfb4cd34da10915daa38d3ec04d573d946c97e`, under the included MIT license.
+commit `a7e9d3056e019827904dd50722c20b4a0c896738`, under the included MIT license.
 `manifest.json` records original source/data SHA-256 digests. Relative TypeScript
 imports have explicit `.ts` extensions for Node 24. Algorithms are unchanged;
-trailing source whitespace is normalized. The complete 59-class bank and upstream
+trailing source whitespace is normalized. The complete 69-class bank and upstream
 binary detector are gzip-compressed without changing their decompressed contents.
 The upstream `detector-codec.ts` loads the binary representation.
 
 `models.json` is shared by the UI, Go API and Node scorer. It enables Astra/Sol
-(the merged class), Gemini 3.1 Pro (the 3.1 Pro Preview class), Gemini 3.8 Flash and
-Gemini 4 Argon. Three independent challenges and strict complete-output validation
-are required. Low effort is used for Astra/Sol and Argon; Gemini 3.1 Pro and 3.8
-Flash use the provider default, matching their reference collection metadata.
+(the merged class), Gemini 3.1 Pro (the 3.1 Pro Preview class), Gemini 3.8 Flash,
+Gemini 4 Argon and Gemini 4 Carbon. Three independent challenges and strict
+complete-output validation are required. Low effort is used for Astra/Sol, Argon
+and Carbon; Gemini 3.1 Pro and 3.8 Flash use the provider default, matching their
+reference collection metadata.
 `gemini.mjs` adapts native Gemini streaming only; Responses, Messages and Chat
 Completions use the upstream parsers. Configured gateway channels remain explicitly
 targeted through Responses. No tokenizer probes, automatic retries or route edits.
@@ -22,8 +23,9 @@ round. Every completed attempt is checkpointed before another upstream request;
 only accepted numeric runs (not provider text or credentials) enter the private
 `console_model_fingerprints.sample_state` column. Partial rounds survive retry,
 cancellation and worker replacement. Three completed samples are cleared by the
-next explicit enqueue, never by an automatic retry. The complete scorer and
-minimum-number acceptance test are unchanged. The resume proof binds the exact
+next explicit enqueue, never by an automatic retry. The minimum-number acceptance
+test is unchanged; the scorer follows the pinned upstream version described below.
+The resume proof binds the exact
 channel configuration, model, protocol, model catalog and reference manifest.
 Routine encryption-nonce changes for the same site test key do not reset it;
 actual changes start a fresh round rather than combine incompatible evidence. Public
@@ -51,3 +53,13 @@ explicitly. Probabilities describe the closed reference set and are independent
 of legacy reasoning-quality history.
 
 Offline verification: `node --test fingerprint/runner.test.mjs` (from analytics-api).
+
+Carbon has its own calibrated class, with 36 accepted reference answers from
+OpenRouter's pinned Google Vertex US route at low effort. The same upstream
+revision refreshes Argon's references to that route; both fixtures use the first
+three accepted collection answers. Scores are checked against the original
+upstream scorer with the complete matching bank/detector, never a subset.
+The updated upstream scorer rejects non-model-like numeric sequences; those
+results are inconclusive and carry no identity probability. Changing this pinned
+manifest invalidates partial-round resume proofs; old samples are not mixed
+with the new reference or automatically replayed.

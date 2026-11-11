@@ -78,7 +78,7 @@ test('resume rejects incompatible or invalid evidence and checkpoint failure nev
 });
 
 test('full reference bank, original scoring and the merged Astra/Sol class are preserved', () => {
-  assert.equal(reference.bank.models.length, 59);
+  assert.equal(reference.bank.models.length, 69);
   for (const model of ['gpt-6-astra', 'gpt-6.1-sol']) {
     const result = score(model, fixture['gpt-6-astra'], reference);
     const original = analyzeSharedOutputs(fixture['gpt-6-astra'], reference.bank, reference.detector);
@@ -122,6 +122,32 @@ test('generates three independent supported-length challenges', () => {
   assert.equal(new Set(challenges.map(c=>c.expected_count)).size,3);
   assert.equal(new Set(challenges.map(c=>c.id)).size,3);
   assert.ok(challenges.every(c=>c.expected_count>=292 && c.expected_count<=332));
+});
+
+test('non-model-like numeric sequences cannot produce an identity or probability', () => {
+  const output={text:Array.from({length:300},(_,i)=>i%355+1).join(' '),expected_count:300};
+  for(const count of [1,2,3]) {
+    const outputs=Array(count).fill(output);
+    const result=score('gemini-4-carbon',outputs,reference);
+    const original=analyzeSharedOutputs(outputs,reference.bank,reference.detector,{allowPartial:true});
+    assert.equal(original.decision,'not_model');
+    assert.equal(result.decision,original.decision);assert.equal(result.status,'insufficient');
+    assert.equal(result.probability,null);assert.equal(result.prediction,'');
+    assert.deepEqual(result.candidates,[]);
+  }
+});
+
+test('Carbon native collection uses low effort and shares exact upstream scoring', async () => {
+  let calls=0;
+  const result=await detect({model:'gemini-4-carbon',format:'gemini',base_url:'https://mock.example',key:'secret'},async(url,_cfg,body)=>{
+    assert.equal(url,'https://mock.example/v1beta/models/gemini-4-carbon:streamGenerateContent?alt=sse');
+    assert.equal(body.generationConfig.thinkingConfig.thinkingLevel,'low');
+    const text=fixture['gemini-4-carbon'][calls++].text;
+    return Response.json({candidates:[{content:{parts:[{text:'hidden reasoning',thought:true},{text}]},finishReason:'STOP'}]});
+  });
+  const expected=score('gemini-4-carbon',fixture['gemini-4-carbon'],reference);
+  assert.equal(calls,3);assert.equal(result.status,'match');assert.equal(result.expected_class,'gemini-4-carbon');
+  assert.equal(result.probability,expected.probability);assert.deepEqual(result.candidates,expected.candidates);
 });
 test('uses targeted Responses requests, strict completion, and no retries or secret persistence', async () => {
   let calls=0;const requests=[];
@@ -188,7 +214,7 @@ test('catalog Gemini fingerprints require an upstream reference and use its exac
     assert.equal(mismatch.status, 'mismatch');
     assert.ok(mismatch.probability < mismatch.candidates[0].probability);
   }
-  assert.deepEqual(referenced.sort(), ['gemini-3.1-pro','gemini-3.8-flash','gemini-4-argon']);
+  assert.deepEqual(referenced.sort(), ['gemini-3.1-pro','gemini-3.8-flash','gemini-4-argon','gemini-4-carbon']);
 });
 
 test('Gemini native challenges use sequential requests, low Argon thinking, and visible text only', async () => {

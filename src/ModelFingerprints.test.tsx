@@ -26,9 +26,16 @@ it("only selects the supported models and fences configured stale evidence",()=>
  expect(rowFingerprints(row,new Map([[fingerprintKey(native),native]]),"gpt-6-astra")[0].record).toBeUndefined();
  expect(rowFingerprints(row,new Map(),"gpt-5.5")).toEqual([]);
 });
+it("does not report match or mismatch for a rejected numeric sequence",()=>{
+ mount(<FingerprintStatus record={{...record,result:{...record.result!,status:"insufficient",decision:"not_model",probability:null,candidates:[],prediction:"",prediction_name:"不像语言模型回答"}}}/>);
+ expect(screen.getByText("无法判定")).toBeInTheDocument();
+ expect(screen.getByText("—")).toHaveClass("quality-unknown");
+ expect(screen.queryByText("不匹配")).not.toBeInTheDocument();
+ expect(screen.queryByText("12.0%")).not.toBeInTheDocument();
+});
 it("enables each supported Gemini with its own probability and target",()=>{
  const row={account:{id:"one"},target:{group_id:1}} as ManagementRow;
- for(const model of ["gemini-3.1-pro","gemini-3.8-flash","gemini-4-argon"]){
+ for(const model of ["gemini-3.1-pro","gemini-3.8-flash","gemini-4-argon","gemini-4-carbon"]){
   expect(FINGERPRINT_MODELS).toContain(model);
   expect(fingerprintTargets(row,[model,"gpt-5.5"])).toEqual([{account_id:"one",group_id:1,model}]);
   const gemini={...record,model,result:{...record.result!,model,expected_class:model,probability:.95}};
@@ -80,7 +87,7 @@ it("explains why a legacy count cannot be resumed without numeric evidence",asyn
  expect(screen.queryByRole("button",{name:"继续采样"})).not.toBeInTheDocument();
 });
 
-it.each(["gpt-6-astra","gemini-3.1-pro","gemini-3.8-flash","gemini-4-argon"])("channel management filters %s fingerprints independently of quality",async(model)=>{
+it.each(["gpt-6-astra","gemini-3.1-pro","gemini-3.8-flash","gemini-4-argon","gemini-4-carbon"])("channel management filters %s fingerprints independently of quality",async(model)=>{
  const scoped={...record,model,result:{...record.result!,model}};
  const accounts=["one","two","three"].map(id=>({id,name:id,base:`https://${id}.test`,email:"test",state:"idle",message:"",synced_at:1,targets:[{group_id:1,name:`group-${id}`,platform:"openai",channel:id,rate:1,key_id:1,active:true,state:"done",message:"",result:null}]}));
  vi.stubGlobal("fetch",vi.fn(async(input:string)=>Response.json({data:input.endsWith("/accounts")?accounts:input.endsWith("/model-fingerprints")?[scoped,{...scoped,account_id:"two",result:{...scoped.result,status:"match",probability:1}},{...scoped,account_id:"three",result:{...scoped.result,status:"insufficient",decision:"partial",used_outputs:2,probability:null}}]:[],labels:{},unavailable_sources:[]})));
@@ -133,11 +140,11 @@ it("waits for backend Gemini support and enables detection after capability refr
  expect(writes).toEqual([{targets:[{source_id:"fugue",provider:"native",model:"gemini-4-argon"}]}]);
 });
 
-it.each([false,true])("shares site results and cancels the originating job (imported=%s)",async(imported)=>{
- const channel={source_id:"fugue",provider:"native",models:["gemini-4-argon"],kind:"configured",binding_status:"matched",bound_keys:[{account_id:"one",group_id:1}],probe_fingerprint:"new"} as ManagedChannel;
+it.each([false,true].flatMap(imported=>["gemini-4-argon","gemini-4-carbon"].map(model=>({imported,model}))))("shares $model site results and cancels the originating job (imported=$imported)",async({imported,model})=>{
+ const channel={source_id:"fugue",provider:"native",models:[model],kind:"configured",binding_status:"matched",bound_keys:[{account_id:"one",group_id:1}],probe_fingerprint:"new"} as ManagedChannel;
  const importedChannel={...channel,kind:undefined,account_id:"one",group_id:1};
  if(imported){channel.binding_status=undefined;channel.bound_keys=undefined;}
- let current: FingerprintRecord={...record,model:"gemini-4-argon",updated_at_ms:1000,result:{...record.result!,model:"gemini-4-argon"}};
+ let current: FingerprintRecord={...record,model,updated_at_ms:1000,result:{...record.result!,model}};
  const writes:unknown[]=[];
  const client=new QueryClient({defaultOptions:{queries:{retry:false}}});
  vi.stubGlobal("fetch",vi.fn(async(path:string,init?:RequestInit)=>{
@@ -147,8 +154,8 @@ it.each([false,true])("shares site results and cancels the originating job (impo
   return Response.json({data:[current],supported_models:FINGERPRINT_MODELS});
  }));
  render(<QueryClientProvider client={client}><Tooltip.Provider>
-  <FingerprintPanel targets={[{source_id:"fugue",provider:"native",model:"gemini-4-argon"}]}/>
-  <FingerprintPanel targets={[{account_id:"one",group_id:1,model:"gemini-4-argon"}]}/>
+  <FingerprintPanel targets={[{source_id:"fugue",provider:"native",model}]}/>
+  <FingerprintPanel targets={[{account_id:"one",group_id:1,model}]}/>
  </Tooltip.Provider></QueryClientProvider>);
  await waitFor(()=>expect(screen.getAllByText("12.0%")).toHaveLength(2));
  // A running channel-detail check is also visible in the site/group entry.
@@ -156,6 +163,6 @@ it.each([false,true])("shares site results and cancels the originating job (impo
  await client.invalidateQueries({queryKey:["model-fingerprints"]});
  await waitFor(()=>expect(screen.getAllByRole("button",{name:"取消检测"})).toHaveLength(2));
  const user=userEvent.setup();await user.click(screen.getAllByRole("button",{name:"取消检测"})[1]);
- expect(writes).toEqual([{targets:[{source_id:"fugue",provider:"native",model:"gemini-4-argon"}]}]);
+ expect(writes).toEqual([{targets:[{source_id:"fugue",provider:"native",model}]}]);
  await waitFor(()=>expect(screen.getAllByText("已中断")).toHaveLength(2));
 });

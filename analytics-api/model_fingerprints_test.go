@@ -176,7 +176,7 @@ func TestModelFingerprintQueueScopesLeasesCancelAndExpiry(t *testing.T) {
 	}
 }
 func TestModelFingerprintEndToEndTargetedThreeCallsAndIndependentQuality(t *testing.T) {
-	for _, requested := range []string{"gpt-6.1-sol", "gemini-3.1-pro", "gemini-3.8-flash", "gemini-4-argon"} {
+	for _, requested := range []string{"gpt-6.1-sol", "gemini-3.1-pro", "gemini-3.8-flash", "gemini-4-argon", "gemini-4-carbon"} {
 		t.Run(requested, func(t *testing.T) {
 			raw, err := os.ReadFile("fingerprint/reference-fixture.json")
 			if err != nil {
@@ -334,7 +334,7 @@ func TestModelFingerprintAutomaticBatchOnlySupportedAvailableModels(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, model := range []string{checkModel, "gpt-6.1-sol", "gpt-5.5", "gemini-3.1-pro", "gemini-3.8-flash", "gemini-4-argon"} {
+	for _, model := range []string{checkModel, "gpt-6.1-sol", "gpt-5.5", "gemini-3.1-pro", "gemini-3.8-flash", "gemini-4-argon", "gemini-4-carbon"} {
 		if _, err = s.control.db.Exec(`INSERT INTO console_sub_models(account_id,group_id,model,state) VALUES($1,1,$2,'queued')`, a.ID, model); err != nil {
 			t.Fatal(err)
 		}
@@ -345,8 +345,8 @@ func TestModelFingerprintAutomaticBatchOnlySupportedAvailableModels(t *testing.T
 	}
 	var n int
 	s.control.db.QueryRow(`SELECT count(*) FROM console_model_fingerprints WHERE account_id=$1 AND state='queued'`, a.ID).Scan(&n)
-	if n != 5 {
-		t.Fatal("batch should queue exactly five supported fingerprints", n)
+	if n != 6 {
+		t.Fatal("batch should queue exactly six supported fingerprints", n)
 	}
 	if w := fingerprintRequest(t, s, a.Owner, "GET", nil); w.Code != http.StatusOK {
 		t.Fatalf("batch-queued fingerprints unreadable: HTTP %d: %s", w.Code, w.Body.String())

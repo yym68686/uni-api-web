@@ -16,13 +16,14 @@ export const fingerprintLabels: Record<string, string> = {
   match: "匹配", mismatch: "不匹配", insufficient: "样本不足", error: "检测失败",
   queued: "排队中", running: "检测中", interrupted: "已中断", untested: "未检测", not_applicable: "不适用",
 };
-export const fingerprintNote = "每轮累计 3 个有效样本；1、2 个样本时显示暂定排名，满 3 个后显示匹配结果与概率。不足 3 个时保留已有样本，再次检测只补缺少的样本。满 3 个后再次检测开启新一轮；渠道配置或参考库变化时重新采样。Astra 与 6.1-sol 共用一个指纹类别；Gemini 3.1 Pro 对应 3.1 Pro Preview，3.8 Flash 和 4 Argon 各自独立。概率是请求类别在参考库内的相对概率，不代表身份保证或不降智概率。";
+export const fingerprintNote = "每轮累计 3 个有效样本；1、2 个样本时显示暂定排名，满 3 个后显示匹配结果与概率。不足 3 个时保留已有样本，再次检测只补缺少的样本。满 3 个后再次检测开启新一轮；渠道配置或参考库变化时重新采样。Astra 与 6.1-sol 共用一个指纹类别；Gemini 3.1 Pro 对应 3.1 Pro Preview，3.8 Flash、4 Argon 和 4 Carbon 各自独立。概率是请求类别在参考库内的相对概率，不代表身份保证或不降智概率。";
 const partialNote = "当前仅显示暂定排名，满 3 个有效样本后计算匹配结果与概率。";
+const nonModelNote = "数字序列特征不符合参考库要求，无法判定模型身份；未生成排名或匹配概率。";
 export interface FingerprintTarget {
   source_id?: string; provider?: string; account_id?: string; group_id?: number; model: string;
 }
 export interface FingerprintResult {
-  model: string; status: string; probability: number | null; decision?: "partial" | "scored" | "unscorable";
+  model: string; status: string; probability: number | null; decision?: "partial" | "scored" | "unscorable" | "not_model";
   prediction: string; prediction_name: string; expected_class: string;
   used_outputs: number; checked_at: number; reference_commit: string;
   candidates: { model: string; display_name: string; probability: number | null }[];
@@ -86,11 +87,11 @@ export function FingerprintStatus({ record }: { record?: FingerprintRecord }) {
   return <div className="quality-status-stack">
     <span className={`check-status ${status === "match" ? "pass" : status === "mismatch" ? "fail" : "inconclusive"}`}>
       {fingerprintBusy(record) ? <Spinner small /> : status === "match" ? <Check size={14}/> : status === "mismatch" ? <X size={14}/> : <CircleHelp size={14}/>}
-      {fingerprintLabels[status] || "检测失败"}
+      {result?.decision === "not_model" ? "无法判定" : fingerprintLabels[status] || "检测失败"}
     </span>
     {partial && result ? <Tip text={`${partialNote}${record?.message || ""}`}>
       <small className="muted">暂定排名 · {result.used_outputs}/3<br/>最接近：{result.prediction_name}</small>
-    </Tip> : <Tip text={`请求类别匹配概率：${rate(probability)}。${fingerprintNote}${result?.prediction_name ? ` 最接近：${result.prediction_name}。` : ""}${record?.message || ""}`}>
+    </Tip> : <Tip text={result?.decision === "not_model" ? nonModelNote : `请求类别匹配概率：${rate(probability)}。${fingerprintNote}${result?.prediction_name ? ` 最接近：${result.prediction_name}。` : ""}${record?.message || ""}`}>
       <small className={`quality-probability ${fingerprintProbabilityClass(probability)}`}>{rate(probability)}</small>
     </Tip>}
   </div>;
@@ -138,6 +139,7 @@ export function FingerprintPanel({ targets, revisions }: { targets: FingerprintT
         {result && <details><summary>检测详情{result.checked_at ? ` · ${time(result.checked_at)}` : ""}</summary>
           <p className="muted">有效样本 {result.used_outputs}/3 · 目标类别 {result.expected_class}</p>
           {partialFingerprint(result) && <p className="muted">{partialNote}</p>}
+          {result.decision === "not_model" && <p className="muted">{nonModelNote}</p>}
           {partial && <p className="muted">已保留 {retained} 个有效样本，{pending ? "正在补充" : "再次检测仅补充"}剩余 {3-retained} 个。</p>}
           {!retained && result.used_outputs > 0 && result.used_outputs < 3 && <p className="muted">此旧记录未保留可续采样本，下一次检测将开始可累计的新一轮。</p>}
           {result.candidates?.length > 0 && <ol>{result.candidates.map(c => <li key={c.model}>{c.display_name}{!partialFingerprint(result) && <> <span className="mono">{rate(c.probability)}</span></>}</li>)}</ol>}
