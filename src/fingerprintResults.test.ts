@@ -1,7 +1,9 @@
 import { expect, it } from "vitest";
 import { fingerprintKey, sharedFingerprintIndex } from "./fingerprintResults";
+import { observedFingerprints } from "./ModelFingerprints";
 import type { FingerprintRecord } from "./ModelFingerprints";
 import type { ManagedChannel } from "./channelManagement";
+import type { Channel } from "./types";
 
 const fingerprintChannel = {
   source_id:"fugue", provider:"native", models:["gemini-4-argon"],
@@ -63,4 +65,21 @@ it("shares generated imports using exact live ownership plus the current credent
   ]) expect(sharedFingerprintIndex([site],[managed],[],imports).get(fingerprintKey(native))).toBeUndefined();
   expect(sharedFingerprintIndex([site],[managed],["Fugue"],[imported]).get(fingerprintKey(native))).toBeUndefined();
   expect(sharedFingerprintIndex([site],[managed],[],[imported],["Fugue"]).get(fingerprintKey(native))).toBeUndefined();
+});
+
+it("projects observation results for the exact current route and model", () => {
+  const row = { source_id:"fugue", provider:"native", model:"gemini-4-argon", upstream_model:"gemini-4-argon" } as Channel;
+  const index = sharedFingerprintIndex([site], [fingerprintChannel]);
+  expect(observedFingerprints(row, index, fingerprintChannel)[0].record).toBe(site);
+  const current = sharedFingerprintIndex([native], [fingerprintChannel]);
+  expect(observedFingerprints(row, current, fingerprintChannel)[0].record).toBe(native);
+  for (const [changed, member] of [
+    [{...row, source_id:"other"}, fingerprintChannel],
+    [{...row, model:"gpt-6-astra"}, fingerprintChannel],
+    [{...row, upstream_model:"gpt-6-astra"}, fingerprintChannel],
+    [row, {...fingerprintChannel, probe_fingerprint:"new-key"}],
+    [row, {...fingerprintChannel, models:[]}],
+    [row, undefined],
+  ] as [Channel, ManagedChannel | undefined][]) expect(observedFingerprints(changed, current, member)[0]?.record).toBeUndefined();
+  expect(observedFingerprints({...row, model:"claude-opus-5-5"}, current, fingerprintChannel)).toEqual([]);
 });

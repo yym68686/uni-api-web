@@ -25,6 +25,31 @@ function mount() {
   return { ...app, client };
 }
 
+it("shows the shared model fingerprint immediately after quality in observation without starting a probe", async () => {
+  const row = {source_id:"one",source_name:"One",provider:"native",model:"gemini-4-argon",upstream_model:"gemini-4-argon",engine:"gemini",endpoint:"all",stream:null,eligible:true,reason:"eligible",stats:emptyStats()};
+  const fetchMock = vi.fn(async (input: string, _init?: RequestInit) => {
+    const {pathname} = new URL(input, location.origin);
+    const body = pathname.endsWith("/auth/me") ? {enabled:true,authenticated:true,username:"fingerprint-admin"}
+      : pathname.endsWith("/sources") ? {data:[{id:"one",name:"One",base:"https://one.test",has_storage:true}]}
+      : pathname.endsWith("/channel-management") ? {data:[{source_id:"one",source_name:"One",provider:"native",models:[row.model],probe_fingerprint:"current",kind:"configured",binding_status:"matched",bound_keys:[{account_id:"site",group_id:1}]}],unavailable_sources:[]}
+      : pathname.endsWith("/model-fingerprints") ? {data:[{account_id:"site",group_id:1,model:row.model,state:"done",message:"",revision:"site-key",result:{status:"mismatch",probability:.1,used_outputs:3,checked_at:1,prediction_name:"Other model"}}],supported_models:[row.model]}
+      : /\/(model-channels|channel-metrics|analytics)$/.test(pathname) ? {data:[row],snapshot_revision:"r1",total:{requests:1}}
+      : {data:[],labels:{},can_inspect_all:true,status:"unsupported"};
+    return Response.json(body);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const app = mount();
+  const table = await screen.findByRole("table");
+  const headers = within(table).getAllByRole("columnheader");
+  const quality = headers.findIndex(header => header.textContent?.includes("是否降智"));
+  expect(headers[quality + 1]).toHaveTextContent("指纹");
+  const status = await within(table).findByText("不匹配");
+  expect(status.closest("td")).toHaveTextContent("10.0%");
+  expect(fetchMock.mock.calls.filter(([url]) => url.includes("/model-fingerprints"))).toHaveLength(1);
+  expect(fetchMock.mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
+  app.unmount();
+});
+
 it.each([
   ["overview", "总览", "dark"],
   ["channels", "渠道观测", "light"],
@@ -486,21 +511,26 @@ it("shows zero attempts for an idle selected key while shared channels have traf
   const user = userEvent.setup();
   const business = () =>
     screen.getByText("business-channel", { selector: "strong" }).closest("tr")!;
+  const metric = (name: string) => {
+    const headers = screen.getAllByRole("columnheader");
+    const index = headers.findIndex(header => header.textContent?.trim() === name);
+    expect(index).toBeGreaterThanOrEqual(0);
+    return within(business()).getAllByRole("cell")[index];
+  };
   await screen.findByText("business-channel");
   await waitFor(() =>
-    expect(within(business()).getAllByRole("cell")[6]).toHaveTextContent(/^7$/),
+    expect(metric("尝试数")).toHaveTextContent(/^7$/),
   );
   await user.selectOptions(
     screen.getByLabelText("API key 筛选"),
     "primary::key-2b",
   );
   await waitFor(() =>
-    expect(within(business()).getAllByRole("cell")[6]).toHaveTextContent(/^0$/),
+    expect(metric("尝试数")).toHaveTextContent(/^0$/),
   );
-  const cells = within(business()).getAllByRole("cell");
-  expect(cells[5]).toHaveTextContent("—");
-  expect(cells[9]).not.toHaveTextContent("120");
-  expect(cells[10]).not.toHaveTextContent("5.00");
+  expect(metric("成功率")).toHaveTextContent("—");
+  expect(metric("Token / 缓存率")).not.toHaveTextContent("120");
+  expect(metric("估算消费")).not.toHaveTextContent("5.00");
   expect(
     screen.getByRole("columnheader", { name: "渠道总并发" }),
   ).toBeVisible();
@@ -527,7 +557,7 @@ it("shows zero attempts for an idle selected key while shared channels have traf
   );
   await user.selectOptions(screen.getByLabelText("API key 筛选"), "");
   await waitFor(() =>
-    expect(within(business()).getAllByRole("cell")[6]).toHaveTextContent(/^7$/),
+    expect(metric("尝试数")).toHaveTextContent(/^7$/),
   );
 });
 

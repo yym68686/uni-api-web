@@ -4,6 +4,7 @@ import { Check, CircleHelp, Fingerprint, X } from "lucide-react";
 import { ApiError, controlRequest } from "./api";
 import { channelMembers, useChannelManagement } from "./channelManagement";
 import type { ManagementRow } from "./channelManagement";
+import type { Channel } from "./types";
 import { rate, time } from "./format";
 import { useSubImports } from "./sub2apiImports";
 import { Spinner, Tip } from "./ui";
@@ -61,14 +62,30 @@ export function rowFingerprints(row: ManagementRow, index: Map<string, Fingerpri
     return { target, record };
   });
 }
-export function useModelFingerprints() {
-  const management = useChannelManagement();
-  const imports = useSubImports();
+export function observedFingerprints(row: Channel, index: Map<string, FingerprintRecord>, member?: ManagementRow["configured"]) {
+  if (!FINGERPRINT_MODELS.includes(row.model)) return [];
+  const target = { source_id: row.source_id, provider: row.provider, model: row.model };
+  let record = index.get(fingerprintKey(target));
+  // Observation can include historical routes. Reuse only the current model
+  // mapping and credential evidence, just like the management/detail views.
+  if (!member?.models.includes(row.model) || (member.model_mappings?.[row.model] || row.model) !== row.upstream_model ||
+      (record?.state === "done" && fingerprintKey(record) === fingerprintKey(target) && record.revision !== member.probe_fingerprint)) record = undefined;
+  return [{ target, record }];
+}
+export function useModelFingerprints(enabled = true) {
+  const management = useChannelManagement(enabled);
+  const imports = useSubImports(enabled);
   const query = useQuery({
     queryKey: ["model-fingerprints"],
     queryFn: ({ signal }) => controlRequest<{data: FingerprintRecord[]; supported_models?: string[]}>("/v1/model-fingerprints", { signal }),
-    staleTime: 5000, refetchInterval: q => q.state.data?.data?.some(fingerprintBusy) ? 5000 : 15000, retry: false,
+    enabled,
+    staleTime: 5000, refetchInterval: q => !enabled ? false : q.state.data?.data?.some(fingerprintBusy) ? 5000 : 15000, retry: false,
   });
+  const members = useMemo(() => new Map(
+    (!management.isError ? management.data?.data || [] : []).flatMap(channelMembers)
+      .filter(member => !(management.data?.unavailable_sources || []).some(source => source === member.source_id || source === member.source_name))
+      .map(member => [JSON.stringify([member.source_id, member.provider]), member]),
+  ), [management.data, management.isError]);
   const index = useMemo(() => sharedFingerprintIndex(
     Array.isArray(query.data?.data) ? query.data.data : [],
     !management.isError && Array.isArray(management.data?.data) ? management.data.data : [],
@@ -78,7 +95,7 @@ export function useModelFingerprints() {
   ), [query.data, management.data, management.isError, imports.data, imports.isError]);
   // Older backends have no capability list and only accept the original pair.
   const supportedModels = Array.isArray(query.data?.supported_models) ? query.data.supported_models : ["gpt-6-astra", "gpt-6.1-sol"];
-  return { ...query, index, supportedModels };
+  return { ...query, index, members, supportedModels };
 }
 export function FingerprintStatus({ record }: { record?: FingerprintRecord }) {
   const status = fingerprintStatus(record), partial = partialFingerprint(record?.result);

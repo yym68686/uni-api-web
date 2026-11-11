@@ -96,6 +96,7 @@ import { ChannelSettings } from "./ChannelSettings";
 import { CacheTrend } from "./CacheTrend";
 import { ChannelDetailTrends } from "./ChannelDetailTrends";
 import { ChannelDetailChecks } from "./ChannelDetailChecks";
+import { FingerprintCell, fingerprintNote, observedFingerprints, useModelFingerprints } from "./ModelFingerprints";
 import type { CacheTrendProps } from "./CacheTrend";
 import { QualityHistory, QualityProbability, qualityTooltip } from "./QualityHistory";
 import type { ChannelCheck } from "./ChannelChecks";
@@ -989,6 +990,7 @@ function Dashboard({
   }, [baseConnection.account, view, sourceQuery.refetch]);
   const sourceList = sourceQuery.data?.data || [];
   const imported = useSubImports(!!baseConnection.account && needsChannelData);
+  const fingerprints = useModelFingerprints(!!baseConnection.account && view === "channels");
   const rawChecks = useChannelChecks(
     baseConnection.session,
     !!baseConnection.account && needsChannelData,
@@ -2043,6 +2045,7 @@ function Dashboard({
                             </Tip>
                           </th>
                         )}
+                        {baseConnection.account && <th><Tip text={`显示此来源、此渠道、当前模型的最新指纹结果，与渠道管理和详情共享数据，与指标时间范围无关。${fingerprintNote}`}>指纹 <CircleHelp size={12}/></Tip></th>}
                         {checkingChannels && <th>检测操作</th>}
                         <ChannelMetricHeaders keySelected={!!keyId} channels={rows} />
                         {adjustingChannels && (
@@ -2088,6 +2091,11 @@ function Dashboard({
                             {baseConnection.account && (
                               <LatestChannelCheck row={row} checks={checks} />
                             )}
+                            {baseConnection.account && <td><FingerprintCell
+                              entries={observedFingerprints(row, fingerprints.index, fingerprints.members.get(providerId(row)))}
+                              error={fingerprints.error} loading={fingerprints.isPending}
+                              supportedModels={fingerprints.supportedModels}
+                            /></td>}
                             {checkingChannels && (
                               <ChannelCheckAction row={row} checks={checks} />
                             )}
