@@ -14,13 +14,14 @@ import (
 )
 
 type subChannelRef struct {
-	AccountName   string
-	ObservedRates map[string]subObservedRate
-	Account       string
-	Group         int64
-	Name          string
-	Base          string
-	Rate          *float64
+	RateCoefficient float64
+	AccountName     string
+	ObservedRates   map[string]subObservedRate
+	Account         string
+	Group           int64
+	Name            string
+	Base            string
+	Rate            *float64
 }
 type subInstalledChannel struct {
 	Protocol         string            `json:"protocol,omitempty"`
@@ -71,11 +72,15 @@ func decodeMap(value any, out any) error {
 	return json.Unmarshal(raw, out)
 }
 
-func subChannelDisplayName(account string, billing []byte) string {
+func subChannelDisplayName(account string, billing []byte, coefficients ...float64) string {
 	var b subBilling
 	rate := "未知倍率"
 	if json.Unmarshal(billing, &b) == nil && b.Rate != nil {
-		rate = strconv.FormatFloat(*b.Rate, 'f', -1, 64)
+		coefficient := float64(1)
+		if len(coefficients) > 0 {
+			coefficient = siteRateCoefficient(coefficients[0])
+		}
+		rate = strconv.FormatFloat(adjustedSiteAmount(*b.Rate, coefficient), 'f', -1, 64)
 	}
 	return account + "-" + rate
 }
@@ -89,7 +94,7 @@ func (s *controlStore) subChannelRefsForAccount(ctx context.Context, owner, acco
 }
 
 func (s *controlStore) subChannelRefsForAccountFrom(ctx context.Context, db controlQueryDB, owner, accountID string) ([]subChannelRef, error) {
-	rows, e := db.QueryContext(ctx, `SELECT a.id,t.group_id,a.name,t.billing,a.base FROM console_sub_accounts a JOIN console_sub_targets t ON t.account_id=a.id WHERE a.owner=$1 AND ($2='' OR a.id=$2) ORDER BY a.created_at,t.group_id`, owner, accountID)
+	rows, e := db.QueryContext(ctx, `SELECT a.id,t.group_id,a.name,t.billing,a.base,a.rate_coefficient FROM console_sub_accounts a JOIN console_sub_targets t ON t.account_id=a.id WHERE a.owner=$1 AND ($2='' OR a.id=$2) ORDER BY a.created_at,t.group_id`, owner, accountID)
 	if e != nil {
 		return nil, e
 	}
@@ -98,14 +103,15 @@ func (s *controlStore) subChannelRefsForAccountFrom(ctx context.Context, db cont
 	for rows.Next() {
 		var ref subChannelRef
 		var billing []byte
-		if e = rows.Scan(&ref.Account, &ref.Group, &ref.Name, &billing, &ref.Base); e != nil {
+		if e = rows.Scan(&ref.Account, &ref.Group, &ref.Name, &billing, &ref.Base, &ref.RateCoefficient); e != nil {
 			return nil, e
 		}
 		ref.AccountName = ref.Name
-		ref.Name = subChannelDisplayName(ref.Name, billing)
+		ref.Name = subChannelDisplayName(ref.Name, billing, ref.RateCoefficient)
 		var b subBilling
 		if json.Unmarshal(billing, &b) == nil && b.Rate != nil && *b.Rate >= 0 && !math.IsNaN(*b.Rate) && !math.IsInf(*b.Rate, 0) {
-			ref.Rate = b.Rate
+			rate := adjustedSiteAmount(*b.Rate, ref.RateCoefficient)
+			ref.Rate = &rate
 		}
 		refs = append(refs, ref)
 	}
@@ -144,7 +150,15 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for index := range refs {
-			refs[index].ObservedRates = observed[qualityGroupID(refs[index].Account, refs[index].Group)]
+			if siteRateCoefficient(refs[index].RateCoefficient) == 1 {
+				refs[index].ObservedRates = observed[qualityGroupID(refs[index].Account, refs[index].Group)]
+				continue
+			}
+			refs[index].ObservedRates = map[string]subObservedRate{}
+			for model, rate := range observed[qualityGroupID(refs[index].Account, refs[index].Group)] {
+				rate.Rate = adjustedSiteAmount(rate.Rate, refs[index].RateCoefficient)
+				refs[index].ObservedRates[model] = rate
+			}
 		}
 	}
 	stages.next("bindings_sources")

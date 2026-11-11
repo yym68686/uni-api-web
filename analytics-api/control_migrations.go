@@ -76,6 +76,9 @@ var managementAccountHeadersSQL string
 //go:embed migrations/0012_fingerprint_samples.sql
 var fingerprintSamplesSQL string
 
+//go:embed migrations/0013_site_rate_coefficient.sql
+var siteRateCoefficientSQL string
+
 var managementRevisionTables = []string{"console_sub_models", "console_management_model_signal", "console_sub_usage", "console_management_receipt_signal", "console_management_revision_state"}
 
 type controlMigration struct {
@@ -98,6 +101,7 @@ func controlMigrations() []controlMigration {
 		{"0010_management_view_epoch", managementViewEpochSQL, strings.Fields(managementViewEpochTables)},
 		{"0011_management_account_headers", managementAccountHeadersSQL, []string{"console_management_view_epoch", "console_sub_accounts"}},
 		{"0012_fingerprint_samples", fingerprintSamplesSQL, []string{"console_model_fingerprints"}},
+		{"0013_site_rate_coefficient", siteRateCoefficientSQL, []string{"console_sub_accounts", "console_management_view_epoch"}},
 	}
 }
 

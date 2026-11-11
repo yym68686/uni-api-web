@@ -22,6 +22,7 @@ const billingFactBatchSize = 5000
 const billingSiteSQL = `regexp_replace(COALESCE(upstream_base,''), '/v1/alpha/search/?$', '')`
 
 type attributedSpend struct {
+	RateCoefficients  map[string]float64       `json:"rate_coefficients,omitempty"`
 	Source            string                   `json:"source_id"`
 	Provider          string                   `json:"provider"`
 	Model             string                   `json:"model"`
@@ -88,6 +89,7 @@ func (s *attributedSpend) unresolved(b billingFact, reason string) {
 type receiptScope struct {
 	Account, Site, Kind string
 	Key, Group          int64
+	RateCoefficient     float64
 }
 type billingFact struct {
 	Event, Source, Instance, Request, Attempt, Provider, Model, Upstream, Key, Base, Hash string
@@ -442,6 +444,12 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 				continue
 			}
 			scope := matches[0]
+			if siteRateCoefficient(scope.RateCoefficient) != 1 {
+				if item.RateCoefficients == nil {
+					item.RateCoefficients = map[string]float64{}
+				}
+				item.RateCoefficients[scope.Account] = siteRateCoefficient(scope.RateCoefficient)
+			}
 			selectedBindings[b.Event] = scope
 			key := scope.Account
 			accounts[scope.Account] = true
@@ -670,6 +678,12 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 				if !ok || value.Sign() < 0 {
 					return nil, errors.New("invalid receipt cost")
 				}
+				// Convert each exactly attributed receipt once, before aggregation:
+				// one provider may have used different accounts in this window.
+				if factor := siteRateCoefficient(scope.RateCoefficient); factor != 1 {
+					coefficient, _ := new(big.Rat).SetString(strconv.FormatFloat(factor, 'f', -1, 64))
+					value.Mul(value, coefficient)
+				}
 				sums[billingRowID(b.Source, b.Provider, b.Model, b.Upstream)].Add(sums[billingRowID(b.Source, b.Provider, b.Model, b.Upstream)], value)
 				item.Matched++
 			}
@@ -720,6 +734,13 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 }
 func (s *Service) receiptBindings(ctx context.Context, owner string) (map[string][]receiptScope, error) {
 	out := map[string][]receiptScope{}
+	// Every receipt in this response uses one consistent settings snapshot,
+	// including accounts present in both the key index and routing keys.
+	tx, err := s.control.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
 	add := func(base, hash string, scope receiptScope) {
 		site := subBindingSite(base)
 		if site == "" || hash == "" || scope.Key <= 0 {
@@ -734,18 +755,19 @@ func (s *Service) receiptBindings(ctx context.Context, owner string) (map[string
 		}
 		out[k] = append(out[k], scope)
 	}
-	rows, err := s.control.db.QueryContext(ctx, `SELECT a.id,a.base,i.key_hash,i.remote_key_id,i.group_id,a.provider_kind FROM console_sub_key_index i JOIN console_sub_accounts a ON a.id=i.account_id WHERE a.owner=$1`, owner)
+	rows, err := tx.QueryContext(ctx, `SELECT a.id,a.base,i.key_hash,i.remote_key_id,i.group_id,a.provider_kind,a.rate_coefficient FROM console_sub_key_index i JOIN console_sub_accounts a ON a.id=i.account_id WHERE a.owner=$1`, owner)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		var account, base, hash, kind string
 		var key, group int64
-		if err = rows.Scan(&account, &base, &hash, &key, &group, &kind); err != nil {
+		var coefficient float64
+		if err = rows.Scan(&account, &base, &hash, &key, &group, &kind, &coefficient); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		add(base, hash, receiptScope{Account: account, Key: key, Group: group, Kind: kind})
+		add(base, hash, receiptScope{Account: account, Key: key, Group: group, Kind: kind, RateCoefficient: coefficient})
 	}
 	err = rows.Err()
 	rows.Close()
@@ -754,7 +776,7 @@ func (s *Service) receiptBindings(ctx context.Context, owner string) (map[string
 	}
 	// Imported business keys are available immediately, without waiting for the
 	// account-wide key index to refresh. Decrypted values never leave this method.
-	rows, err = s.control.db.QueryContext(ctx, `SELECT a.id,a.base,t.routing_key_id,t.group_id,t.encrypted_routing_key,a.provider_kind FROM console_sub_accounts a JOIN console_sub_targets t ON t.account_id=a.id WHERE a.owner=$1 AND t.routing_key_id>0 AND t.encrypted_routing_key<>''`, owner)
+	rows, err = tx.QueryContext(ctx, `SELECT a.id,a.base,t.routing_key_id,t.group_id,t.encrypted_routing_key,a.provider_kind,a.rate_coefficient FROM console_sub_accounts a JOIN console_sub_targets t ON t.account_id=a.id WHERE a.owner=$1 AND t.routing_key_id>0 AND t.encrypted_routing_key<>''`, owner)
 	if err != nil {
 		return nil, err
 	}
@@ -762,14 +784,20 @@ func (s *Service) receiptBindings(ctx context.Context, owner string) (map[string
 	for rows.Next() {
 		var account, base, encrypted, kind string
 		var key, group int64
-		if err = rows.Scan(&account, &base, &key, &group, &encrypted, &kind); err != nil {
+		var coefficient float64
+		if err = rows.Scan(&account, &base, &key, &group, &encrypted, &kind, &coefficient); err != nil {
 			return nil, err
 		}
 		secret, e := s.control.decrypt(encrypted)
 		if e != nil {
 			continue
 		}
-		add(base, tokenHash(secret), receiptScope{Account: account, Key: key, Group: group, Kind: kind})
+		add(base, tokenHash(secret), receiptScope{Account: account, Key: key, Group: group, Kind: kind, RateCoefficient: coefficient})
 	}
-	return out, rows.Err()
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	return out, tx.Commit()
 }

@@ -82,6 +82,7 @@ func (s *Service) saveConfiguredInventory(ctx context.Context, src controlSource
 type subBindingAccount struct {
 	ID, Owner, Base, Name, Email string
 	Synced                       int64
+	RateCoefficient              float64
 }
 
 func (s *Service) bindingAccounts(ctx context.Context) ([]subBindingAccount, error) {
@@ -89,7 +90,7 @@ func (s *Service) bindingAccounts(ctx context.Context) ([]subBindingAccount, err
 }
 
 func (s *Service) bindingAccountsFrom(ctx context.Context, db controlQueryDB) ([]subBindingAccount, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id,owner,base,name,email,synced_at FROM console_sub_accounts ORDER BY id`)
+	rows, err := db.QueryContext(ctx, `SELECT id,owner,base,name,email,synced_at,rate_coefficient FROM console_sub_accounts ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +98,7 @@ func (s *Service) bindingAccountsFrom(ctx context.Context, db controlQueryDB) ([
 	var accounts []subBindingAccount
 	for rows.Next() {
 		var a subBindingAccount
-		if err = rows.Scan(&a.ID, &a.Owner, &a.Base, &a.Name, &a.Email, &a.Synced); err != nil {
+		if err = rows.Scan(&a.ID, &a.Owner, &a.Base, &a.Name, &a.Email, &a.Synced, &a.RateCoefficient); err != nil {
 			return nil, err
 		}
 		accounts = append(accounts, a)
@@ -396,7 +397,7 @@ func (s *Service) readSubBindingIndexFrom(ctx context.Context, db controlQueryDB
 			break
 		}
 		a := byID[account]
-		groupNames[qualityGroupID(account, group)] = subChannelDisplayName(a.Name, billing)
+		groupNames[qualityGroupID(account, group)] = subChannelDisplayName(a.Name, billing, a.RateCoefficient)
 		lookup := subBindingSite(a.Base) + "\n" + hash
 		index[lookup] = append(index[lookup], subBoundKey{account, a.Name, a.Base, group, key})
 	}

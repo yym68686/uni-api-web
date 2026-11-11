@@ -15,7 +15,7 @@ func (e subAccountReadFailure) Error() string { return e.message }
 func (e subAccountReadFailure) Unwrap() error { return e.cause }
 
 func readSubAccountHeaders(ctx context.Context, db controlQueryDB, owner, accountID string) ([]subAccount, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id,name,base,email,state,message,synced_at,balance,job_kind,provider_kind,login_name,encrypted_login_password<>'',COALESCE(sync_models,'null'::jsonb) FROM console_sub_accounts WHERE owner=$1 AND ($2='' OR id=$2) ORDER BY created_at,id`, owner, accountID)
+	rows, err := db.QueryContext(ctx, `SELECT id,name,base,email,state,message,synced_at,balance,job_kind,provider_kind,login_name,encrypted_login_password<>'',COALESCE(sync_models,'null'::jsonb),rate_coefficient FROM console_sub_accounts WHERE owner=$1 AND ($2='' OR id=$2) ORDER BY created_at,id`, owner, accountID)
 	if err != nil {
 		return nil, subAccountReadFailure{"账号列表暂不可用", err}
 	}
@@ -23,7 +23,7 @@ func readSubAccountHeaders(ctx context.Context, db controlQueryDB, owner, accoun
 	for rows.Next() {
 		var a subAccount
 		var balanceRaw, syncRaw []byte
-		if err = rows.Scan(&a.ID, &a.Name, &a.Base, &a.Email, &a.State, &a.Message, &a.SyncedAt, &balanceRaw, &a.JobKind, &a.ProviderKind, &a.LoginName, &a.HasSavedPassword, &syncRaw); err != nil {
+		if err = rows.Scan(&a.ID, &a.Name, &a.Base, &a.Email, &a.State, &a.Message, &a.SyncedAt, &balanceRaw, &a.JobKind, &a.ProviderKind, &a.LoginName, &a.HasSavedPassword, &syncRaw, &a.RateCoefficient); err != nil {
 			break
 		}
 		if err = json.Unmarshal(syncRaw, &a.SyncModels); err != nil {
@@ -119,6 +119,7 @@ func (s *Service) readSubAccountDetailsWithReadersFrom(ctx context.Context, db c
 		}
 		readTrace.decoded(decodeStart, len(row.result)+len(row.billing)+len(row.compact)+len(row.tools))
 		if i, ok := index[row.account]; ok {
+			t.RateCoefficient = accounts[i].RateCoefficient
 			if projection, exists := shared.Groups[qualityGroupID(row.account, t.GroupID)]; exists {
 				t.History = projection.History
 				t.QualityCheck = projection.Check

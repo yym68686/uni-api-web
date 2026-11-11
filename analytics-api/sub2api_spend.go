@@ -15,16 +15,17 @@ import (
 )
 
 type subSpend struct {
-	Status     string   `json:"status"`
-	Amount     *float64 `json:"actual_cost_usd"`
-	Requests   *int64   `json:"requests"`
-	From       int64    `json:"from"`
-	To         int64    `json:"to"`
-	CheckedAt  int64    `json:"checked_at"`
-	KeyID      int64    `json:"key_id"`
-	Scope      string   `json:"scope"`
-	Message    string   `json:"message,omitempty"`
-	Refreshing bool     `json:"refreshing"`
+	RateCoefficient float64  `json:"rate_coefficient,omitempty"`
+	Status          string   `json:"status"`
+	Amount          *float64 `json:"actual_cost_usd"`
+	Requests        *int64   `json:"requests"`
+	From            int64    `json:"from"`
+	To              int64    `json:"to"`
+	CheckedAt       int64    `json:"checked_at"`
+	KeyID           int64    `json:"key_id"`
+	Scope           string   `json:"scope"`
+	Message         string   `json:"message,omitempty"`
+	Refreshing      bool     `json:"refreshing"`
 }
 
 // The dedicated business key is authoritative. Never use the dedicated
@@ -104,6 +105,11 @@ func (s *Service) subSpendForKey(w http.ResponseWriter, r *http.Request, account
 	// Match the minute boundaries of the observation analytics API.
 	from = from.Truncate(time.Minute)
 	out := subSpend{Status: "pending", From: from.Unix(), To: to.Unix(), KeyID: key, Scope: "sub2api_business_key"}
+	owner, _ := s.controlUser(r)
+	if err := s.control.db.QueryRowContext(ctx, `SELECT rate_coefficient FROM console_sub_accounts WHERE id=$1 AND owner=$2`, account, owner).Scan(&out.RateCoefficient); err != nil {
+		http.Error(w, "站点设置暂不可用", 503)
+		return
+	}
 	if key <= 0 {
 		out.Status, out.Message = "unsupported", "此渠道尚无可查询的 sub2api 业务 Key"
 		writeJSON(w, 200, out)
@@ -160,6 +166,7 @@ func (s *Service) subSpendForKey(w http.ResponseWriter, r *http.Request, account
 		http.Error(w, "账单统计暂不可用", 503)
 		return
 	}
+	amount = adjustedSiteAmount(amount, out.RateCoefficient)
 	out.Status, out.Amount, out.Requests, out.Refreshing = "complete", &amount, &count, requested
 	if message != "" {
 		out.Message = "更新暂未完成，显示上次完整账单统计"

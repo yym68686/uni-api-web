@@ -63,7 +63,13 @@ func managementBoundGroups(channel managementChannel) []subBoundKey {
 	return channel.BoundKeys
 }
 
-func managementBillingRate(row managementQueryRow, model string) managementRate {
+func managementBillingRate(row managementQueryRow, model string) (result managementRate) {
+	defer func() {
+		if result.Rate != nil && siteRateCoefficient(row.Target.RateCoefficient) != 1 {
+			value := adjustedSiteAmount(*result.Rate, row.Target.RateCoefficient)
+			result.Rate = &value
+		}
+	}()
 	groups := map[string]bool{}
 	if row.Configured != nil {
 		for _, member := range row.Configured.Members {

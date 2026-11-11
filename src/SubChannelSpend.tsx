@@ -18,6 +18,8 @@ export interface SubChannelSpend {
     | "history_limited"
     | "no_records";
   actual_cost_usd: number | null;
+  rate_coefficient?: number;
+  rate_coefficients?: Record<string, number>;
   requests?: number | null;
   from: number;
   to: number;
@@ -483,7 +485,7 @@ export function SubChannelSpendValue({
   else if (data?.absent_receipt_attempts) label = "未找到账单";
   else if (data?.status === "unmatched") label = "无法归属";
   return (
-    <Tip text={explanation}>
+    <Tip text={explanation + (data?.rate_coefficient && data.rate_coefficient !== 1 ? `已乘站点倍率系数 ${data.rate_coefficient}。` : data?.rate_coefficients && Object.keys(data.rate_coefficients).length ? `各账号账单已分别乘站点倍率系数（${[...new Set(Object.values(data.rate_coefficients))].join("、")}）后汇总。` : "")}>
       <span className={`channel-spend ${known || partial || provisional ? "mono" : "muted"}`}>
         <span>{label}</span>
         {provisional && (

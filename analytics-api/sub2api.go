@@ -22,6 +22,7 @@ type subModelResult struct {
 	Result  *subResult `json:"result"`
 }
 type subTarget struct {
+	RateCoefficient float64                    `json:"rate_coefficient,omitempty"`
 	SummaryModel    string                     `json:"summary_model,omitempty"`
 	ReceiptModel    string                     `json:"receipt_model,omitempty"`
 	DetailsOmitted  bool                       `json:"details_omitted,omitempty"`
@@ -47,6 +48,7 @@ type subTarget struct {
 	Billing         *subBilling                `json:"billing"`
 }
 type subAccount struct {
+	RateCoefficient  float64            `json:"rate_coefficient,omitempty"`
 	ActiveGroups     *int               `json:"active_groups,omitempty"`
 	CompletedGroups  *int               `json:"completed_groups,omitempty"`
 	HasSavedPassword bool               `json:"has_saved_password"`

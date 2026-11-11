@@ -340,6 +340,7 @@ func (s *Service) controlHandler() http.Handler {
 	mux.HandleFunc("GET /v1/sub2api/accounts", s.subAccounts)
 	mux.HandleFunc("GET /v1/sub2api/accounts/progress", s.subAccountsProgress)
 	mux.HandleFunc("GET /v1/sub2api/accounts/{id}/credentials", s.subAccountCredentials)
+	mux.HandleFunc("PATCH /v1/sub2api/accounts/{id}/settings", s.subAccountSettings)
 	mux.HandleFunc("GET /v1/sub2api/accounts/{id}/groups/{group}/details", s.subAccounts)
 	mux.HandleFunc("GET /v1/sub2api/accounts/{id}/groups/{group}/access", s.subGroupAccessStatus)
 	mux.HandleFunc("GET /v1/sub2api/accounts/{id}/balance", s.subAccountBalance)

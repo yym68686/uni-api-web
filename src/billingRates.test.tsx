@@ -103,3 +103,18 @@ it("does not reuse one group's multiplier for a provider with multiple bound gro
     advertised: null,
   });
 });
+
+it("converts advertised and observed rates once without changing raw evidence", () => {
+  const adjusted = { ...target, rate_coefficient: 0.1 };
+  const before = JSON.stringify(adjusted);
+  expect(billingRate(adjusted, "astra")).toMatchObject({rate: 0.03, advertised: 0.03, mismatch: false});
+  expect(billingRate(adjusted, "luna")).toMatchObject({rate: 0.3, advertised: 0.03, mismatch: true});
+  expect(billingRate(adjusted, "missing")).toMatchObject({rate: 0.03, observed: false});
+  expect(billingRate(adjusted)).toMatchObject({minimum: 0, rate: 0.3});
+  expect(matchesBillingRateFilter(billingRate(adjusted, "astra"), "0.03")).toBe(true);
+  expect(billingRate(adjusted, "free").rate).toBe(0);
+  render(<BillingRate target={adjusted} model="astra" />);
+  expect(screen.getByText("0.03").parentElement).toHaveAttribute("title", expect.stringContaining("已乘站点倍率系数 0.1"));
+  expect(JSON.stringify(adjusted)).toBe(before);
+  expect(billingRate({...target, rate_coefficient: 1}, "astra").rate).toBe(0.3);
+});

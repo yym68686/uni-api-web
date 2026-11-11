@@ -25,7 +25,7 @@ export function BillingRate({
     ? `已核对账单的实际费用 ÷ 倍率前费用。${model ? `模型：${model}。` : "各模型最近账单；多倍率时显示范围，筛选和排序取最高值。"}${billing.observedAt ? `账单时间：${time(billing.observedAt)}。` : ""}历史样本不保证后续请求倍率不变。`
     : "尚无对应模型的有效账单，公布倍率尚未核对。";
   return (
-    <div className="mono" title={details}>
+    <div className="mono" title={details + (billing.coefficient !== 1 ? `已乘站点倍率系数 ${number(billing.coefficient)}。` : "")}>
       <span>{value}</span>
       {billing.mismatch ? (
         <small className="check-source check-status fail">

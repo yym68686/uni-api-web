@@ -12,6 +12,7 @@ import { SubChannelSpendValue, useSubChannelSpend } from "./SubChannelSpend";
 import type { SubChannelSpend } from "./SubChannelSpend";
 import type { InstalledChannel } from "./sub2apiImports";
 import { providerId } from "./format";
+import { ChannelProfit, channelProfitCost } from "./ChannelProfit";
 
 const first = {
   source_id: "source-a",
@@ -36,6 +37,14 @@ const receipt: SubChannelSpend = {
   key_id: 42,
   scope: "sub2api_business_key",
 };
+it("uses converted backend consumption once for display and profit", async () => {
+  const query = {isPending:false,isError:false,data:{...receipt,scope:"matched_requests" as const,actual_cost_usd:1,rate_coefficients:{account:0.1},total_attempts:2,matched_attempts:2}};
+  render(<Tooltip.Provider><SubChannelSpendValue query={query} /><ChannelProfit estimated={100} actual={channelProfitCost(query.data)?.actual} /></Tooltip.Provider>);
+  const amount=screen.getByText("$1.00");
+  expect(screen.getByText("¥16.25")).toBeVisible();
+  fireEvent.focus(amount.closest(".tip-target")!);
+  expect(await screen.findByRole("tooltip")).toHaveTextContent("各账号账单已分别乘站点倍率系数（0.1）后汇总");
+});
 it("counts proven balance rejections as reconciled without inventing a bill", async () => {
   const data: SubChannelSpend = {
     ...receipt,

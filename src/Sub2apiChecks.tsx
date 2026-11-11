@@ -17,6 +17,7 @@ import {
   RefreshCw,
   ScanLine,
   Search,
+  Settings2,
   Square,
   Trash2,
   X,
@@ -26,6 +27,7 @@ import { accountBalanceQuery } from "./accountBalance";
 import type { AccountBalance as SubAccountBalance } from "./accountBalance";
 import { BalanceAmount } from "./BalanceAmount";
 import { AccountForm } from "./SiteAccountForm";
+import { SiteAccountSettings } from "./SiteAccountSettings";
 import { ResponseLatency } from "./LatencyBadge";
 import { Empty, Spinner, Tip } from "./ui";
 import { loadSubFilters, saveSubFilters, subFilterDefaults } from "./sub2apiPreferences";
@@ -98,6 +100,7 @@ export interface Result {
   verdict: string;
 }
 export interface SubTarget {
+  rate_coefficient?: number;
   summary_model?: string;
   receipt_model?: string;
   observed_rates?: Record<string, ObservedRate>;
@@ -130,6 +133,7 @@ export interface SubTarget {
 }
 export { groupQualityResult } from "./sub2apiResults";
 export interface SubAccount {
+  rate_coefficient?: number;
   active_groups?: number;
   completed_groups?: number;
   id: string;
@@ -480,7 +484,7 @@ function CheckDetails({
                   <tr><th>HTTP 状态</th><td>{attempt.http_status || "—"}</td></tr>
                   <tr><th>工具调用结果</th><td>{attempt.text || attempt.message || "—"}</td></tr>
                   <tr><th>耗时</th><td>{latency(attempt.duration_ms)}</td></tr>
-                  <UsageDetailRows probe={attempt} label="工具检测" prices={prices} model={attempt.requested_model || toolResult?.model || ""} />
+                  <UsageDetailRows probe={attempt} label="工具检测" prices={prices} model={attempt.requested_model || toolResult?.model || ""} coefficient={target.rate_coefficient} />
                 </tbody></table>
               </DetailRow>)}
               <DetailRow label="远程压缩"><CompactionStatus target={target} model={check.model} />{capabilitiesApplicable && !compactionResult?.attempts.length && copyProbe("compaction", undefined, "远程压缩检测")}</DetailRow>
@@ -514,7 +518,7 @@ function CheckDetails({
               <DetailRow label="单价核验">
                 <PriceStatus check={check} prices={prices} />
               </DetailRow>
-              <UsageDetailRows probe={probe} label="可用性" prices={prices} model={check.model} />
+              <UsageDetailRows probe={probe} label="可用性" prices={prices} model={check.model} coefficient={target.rate_coefficient} />
               <DetailRow label="最近检测">
                 {result ? time(result.checked_at) : "未检测"}
                 {result && pending(check.state) && " · 上次结果"}
@@ -555,7 +559,7 @@ function CheckDetails({
                   </DetailRow>
                   {qualityResult?.quality.id && qualityResult.quality.id === probe?.id ? (
                     <DetailRow label="降智扣费">与可用性为同一次请求，扣费见上方</DetailRow>
-                  ) : <UsageDetailRows probe={qualityResult?.quality} label="降智" prices={prices} model={check.model} />}
+                  ) : <UsageDetailRows probe={qualityResult?.quality} label="降智" prices={prices} model={check.model} coefficient={target.rate_coefficient} />}
                   <DetailRow label="降智检测耗时">
                     {latency(qualityResult?.quality.duration_ms ?? null)}
                   </DetailRow>
@@ -813,6 +817,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   const accountHeaders={data:metadata?{data:statusAccounts}:undefined,error:metadata?null:pageQuery.error};
   const prices={data:displayedPage?{data:displayedPage.context.prices}:undefined};
   const [form, setForm] = useState<{ account: SubAccount | null } | null>(null);
+  const [settingsAccount, setSettingsAccount] = useState<SubAccount | null>(null);
   const setPage=(_page:number)=>setCursorState({filter:filterKey,cursor:""});
   const refreshPage=()=>{void progressQuery.refetch();void pageQuery.refetch();};
   const [modelSelectionRevision, setModelSelectionRevision] = useState(0);
@@ -1094,6 +1099,10 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
           </p>
         )}
         {syncSubmitted !== null && <p className="settings-note">任务进度实时更新。渠道列表保留当前展示，点击“刷新渠道管理”读取最新检测结果。</p>}
+        {settingsAccount && <SiteAccountSettings account={settingsAccount} close={() => setSettingsAccount(null)} saved={() => {
+          setSettingsAccount(null);
+          void client.invalidateQueries({ predicate: q => ["management-query", "sub-sync-progress", "sub2api", "sub2api-headers", "sub2api-imports", "sub-channel-spend", "channel-spend", "metrics", "sub-check-detail", "sub-management-models"].includes(String(q.queryKey[0])) });
+        }} />}
         {form && (
           <AccountForm
             key={form.account?.id || "new"}
@@ -1171,6 +1180,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                       )}
                     </div>
                     <div className="sub-account-actions">
+                      <button className="button ghost small" aria-label={`设置站点 ${a.name}`} onClick={() => setSettingsAccount(a)}><Settings2 size={13} />设置</button>
                       {pending(a.state) ? (
                         <button
                           className="button small"

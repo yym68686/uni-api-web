@@ -2376,7 +2376,7 @@ nav > button.active > svg {
  .sub-detection-controls > .search-field { margin-left:0; max-width:none; }
 }
 .sub-account-list { max-height: 440px; overflow: auto; border-top: 1px solid var(--line); scrollbar-width: thin; overscroll-behavior-x: contain; }
-.sub-account-header, .sub-account { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(230px, 1.2fr) minmax(130px, .65fr) minmax(190px, 1fr) 236px; gap: 16px; align-items: center; min-width: 1080px; padding: 12px 21px; }
+.sub-account-header, .sub-account { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(230px, 1.2fr) minmax(130px, .65fr) minmax(190px, 1fr) 300px; gap: 16px; align-items: center; min-width: 1144px; padding: 12px 21px; }
 .sub-account-header { position: sticky; top: 0; z-index: 1; background: var(--subtle); color: var(--muted); font-size: 11px; border-bottom: 1px solid var(--line); }
 .sub-account-header > :last-child { text-align: right; }
 .sub-account { min-height: 68px; border-bottom: 1px solid var(--line); }

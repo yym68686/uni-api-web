@@ -80,6 +80,27 @@ function fixtures(): SubAccount[] {
   }));
 }
 
+it("offers settings for idle and running accounts without starting sync or detection", async () => {
+  const data=fixtures(); data[1].state="running";
+  const fetch=vi.fn(async(input:string,init?:RequestInit)=>{
+    if(init?.method==="PATCH") { data[0].rate_coefficient=0.1; data[0].targets[0].rate_coefficient=0.1; return Response.json({rate_coefficient:0.1}); }
+    return Response.json({data:input.endsWith("/accounts")?data:[],labels:{},unavailable_sources:[]});
+  });
+  vi.stubGlobal("fetch",fetch);
+  mount("site-account-settings");
+  const user=userEvent.setup();
+  await screen.findByRole("button",{name:"设置站点 one"});
+  expect(screen.getByRole("button",{name:"设置站点 two"})).toBeEnabled();
+  await user.click(screen.getByRole("button",{name:"设置站点 one"}));
+  const dialog=screen.getByRole("dialog");
+  await user.clear(within(dialog).getByRole("spinbutton"));
+  await user.type(within(dialog).getByRole("spinbutton"),"0.1");
+  await user.click(within(dialog).getByRole("button",{name:"保存设置"}));
+  await waitFor(()=>expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  await waitFor(()=>expect(screen.getByText("0.001")).toBeVisible());
+  expect(fetch.mock.calls.filter(([,init])=>init?.method&&init.method!=="GET").map(([url,init])=>[new URL(url).pathname,init?.method])).toEqual([["/analytics/v1/sub2api/accounts/one/settings","PATCH"]]);
+});
+
 it("excludes channel names case-insensitively, preserves site-name matches, and saves and resets the filter", async () => {
   const data = fixtures();
   data[0].targets[0].name = "Claude KiRo proxy";
