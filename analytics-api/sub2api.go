@@ -521,6 +521,7 @@ func (s *Service) subQueueChecksKind(w http.ResponseWriter, r *http.Request, kin
 	owner, _ := s.controlUser(r)
 	var in struct {
 		Targets []subSelection `json:"targets"`
+		Manual  bool           `json:"manual"`
 	}
 	if !decodeConfiguration(w, r, &in) {
 		return
@@ -536,12 +537,20 @@ func (s *Service) subQueueChecksKind(w http.ResponseWriter, r *http.Request, kin
 	}
 	defer tx.Rollback()
 	// Consistent account lock order also prevents overlapping batches from deadlocking.
+	disabled, _, err := readDisabledDetection(r.Context(), tx, owner)
+	if err != nil {
+		http.Error(w, "检测开关读取失败", 503)
+		return
+	}
 	sort.Slice(in.Targets, func(i, j int) bool { return in.Targets[i].AccountID < in.Targets[j].AccountID })
 	// Lock each account once. Active work keeps its lease and original job kind;
 	// unrelated checks are saved separately until that worker has finished.
 	busy := map[string]bool{}
 	seen := map[string]bool{}
 	for _, target := range in.Targets {
+		if !in.Manual && disabled[(detectionTarget{Account: target.AccountID, Group: target.GroupID}).scope()] {
+			continue
+		}
 		if _, ok := busy[target.AccountID]; !ok {
 			var state, jobKind string
 			err = tx.QueryRowContext(r.Context(), `SELECT state,job_kind FROM console_sub_accounts WHERE id=$1 AND owner=$2 FOR UPDATE`, target.AccountID, owner).Scan(&state, &jobKind)
@@ -1017,7 +1026,7 @@ func (s *Service) subSynchronize(ctx context.Context, id, base, job, encrypted s
 		if e != nil {
 			return errors.New("测试 key 加密失败")
 		}
-		_, e = s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET remote_key_id=$3,encrypted_key=$4,billing=$6,state=CASE WHEN $7 THEN 'done' ELSE state END WHERE account_id=$1 AND group_id=$2 AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$5)`, id, g.ID, key.ID, enc, job, string(billingRaw), subSyncMetadataOnly(ctx))
+		_, e = s.control.db.ExecContext(ctx, `UPDATE console_sub_targets t SET remote_key_id=$3,encrypted_key=$4,billing=$6,state=CASE WHEN $7 OR EXISTS(SELECT 1 FROM console_channel_detection_settings d JOIN console_sub_accounts a ON a.owner=d.owner WHERE a.id=t.account_id AND d.account_id=t.account_id AND d.group_id=t.group_id) THEN 'done' ELSE state END WHERE account_id=$1 AND group_id=$2 AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$5)`, id, g.ID, key.ID, enc, job, string(billingRaw), subSyncMetadataOnly(ctx))
 		if e != nil {
 			return errors.New("测试 key 保存失败")
 		}

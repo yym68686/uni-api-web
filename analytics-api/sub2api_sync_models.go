@@ -16,8 +16,17 @@ func queueSubSyncModels(ctx context.Context, tx *sql.Tx, account string, groups 
 		State string `json:"state"`
 	}
 	entries := []entry{}
+	var owner string
+	if err := tx.QueryRowContext(ctx, `SELECT owner FROM console_sub_accounts WHERE id=$1`, account).Scan(&owner); err != nil {
+		return err
+	}
+	disabled, _, err := readDisabledDetection(ctx, tx, owner)
+	if err != nil {
+		return err
+	}
 	for _, group := range groups {
 		seen := map[string]bool{}
+		enabled := !disabled[(detectionTarget{Account: account, Group: group.ID}).scope()]
 		candidates := append(append(append([]string{}, subModels...), discovered[group.ID]...), subSyncScopeModels(ctx)...)
 		for _, model := range candidates {
 			if seen[model] {
@@ -25,13 +34,13 @@ func queueSubSyncModels(ctx context.Context, tx *sql.Tx, account string, groups 
 			}
 			seen[model] = true
 			state := "idle"
-			if subSyncIncludesModel(ctx, model) {
+			if enabled && subSyncIncludesModel(ctx, model) {
 				state = "queued"
 			}
 			entries = append(entries, entry{group.ID, model, state})
 		}
 	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO console_sub_models(account_id,group_id,model,state)
+	_, err = tx.ExecContext(ctx, `INSERT INTO console_sub_models(account_id,group_id,model,state)
  SELECT $1,x.group_id,x.model,x.state FROM jsonb_to_recordset($2::jsonb) AS x(group_id bigint,model text,state text)
  ORDER BY x.group_id,x.model
  ON CONFLICT(account_id,group_id,model) DO UPDATE SET state='queued',message='' WHERE EXCLUDED.state='queued'`, account, mustJSON(entries))

@@ -58,24 +58,28 @@ it("independently queues each probe against the exact source, installed channel 
   expect(writes).toEqual([
     {
       kind: "availability",
+      manual: true,
       targets: [
         { source_id: "do", provider: row.provider, models: ["codex-public-alias"] },
       ],
     },
     {
       kind: "tool-use",
+      manual: true,
       targets: [
         { source_id: "do", provider: row.provider, models: ["codex-public-alias"] },
       ],
     },
     {
       kind: "quality",
+      manual: true,
       targets: [
         { source_id: "do", provider: row.provider, models: ["gpt-6-astra"] },
       ],
     },
     {
       kind: "compaction",
+      manual: true,
       targets: [{ source_id: "do", provider: row.provider, models: [] }],
     },
   ]);

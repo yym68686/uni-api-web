@@ -28,6 +28,7 @@ import type { AccountBalance as SubAccountBalance } from "./accountBalance";
 import { BalanceAmount } from "./BalanceAmount";
 import { AccountForm } from "./SiteAccountForm";
 import { SiteAccountSettings } from "./SiteAccountSettings";
+import { useChannelDetection, detectionEnabled } from "./channelDetection";
 import { ResponseLatency } from "./LatencyBadge";
 import { Empty, Spinner, Tip } from "./ui";
 import { loadSubFilters, saveSubFilters, subFilterDefaults } from "./sub2apiPreferences";
@@ -788,6 +789,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   onPositionChange?: (position: ManagementPagePosition) => void;
 }) {
   const client = useQueryClient();
+  const detection = useChannelDetection(user);
   const sources = useConsoleSources(user);
   const [filters, setFilters] = useState(() => loadSubFilters(user));
   const [cursorState,setCursorState]=useState(()=>initialPosition?.owner===user ? initialPosition : {filter:"",cursor:""});
@@ -819,7 +821,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   const [form, setForm] = useState<{ account: SubAccount | null } | null>(null);
   const [settingsAccount, setSettingsAccount] = useState<SubAccount | null>(null);
   const setPage=(_page:number)=>setCursorState({filter:filterKey,cursor:""});
-  const refreshPage=()=>{void progressQuery.refetch();void pageQuery.refetch();};
+  const refreshPage=()=>{void progressQuery.refetch();void pageQuery.refetch();void detection.refetch();};
   const [modelSelectionRevision, setModelSelectionRevision] = useState(0);
   const {
     search,
@@ -983,8 +985,8 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
     return !(kind === "check" && !requestedModels().length) && !checkBusy(account, target, kind, configured);
   };
   type CheckSelection = { account: SubAccount; target: SubTarget; configured?: ManagedChannel }[];
-  async function queueChecks(kind: CheckKind, selection: CheckSelection) {
-    const targets = selection.filter(({ account, target, configured }) => canCheck(account, target, kind, configured));
+  async function queueChecks(kind: CheckKind, selection: CheckSelection, manual = true) {
+    const targets = selection.filter(row => (manual || detectionEnabled(row,detection.disabled)) && canCheck(row.account, row.target, kind, row.configured));
     const keys = targets.flatMap(({account, target, configured}) => checkKeys(account, target, kind, configured));
     if (!targets.length || keys.some(key => checksInFlight.current.has(key))) return;
     keys.forEach(key => checksInFlight.current.add(key));
@@ -1009,9 +1011,9 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
       });
       const requests: Promise<unknown>[] = [];
       if (site.length) requests.push(controlRequest(`/v1/sub2api/${kind === "check" ? "checks" : `${kind}-checks`}`, {
-        method:"POST", body:JSON.stringify({targets:site.map(({account,target}) => ({account_id:account.id,group_id:target.group_id,...(kind === "check" ? {models:modelsToCheck} : {})}))}),
+        method:"POST", body:JSON.stringify({...(manual?{manual:true}:{}),targets:site.map(({account,target}) => ({account_id:account.id,group_id:target.group_id,...(kind === "check" ? {models:modelsToCheck} : {})}))}),
       }));
-      if (native.length) requests.push(controlRequest("/v1/channel-management/checks", {method:"POST",body:JSON.stringify({kind,targets:native})}));
+      if (native.length) requests.push(controlRequest("/v1/channel-management/checks", {method:"POST",body:JSON.stringify({kind,...(manual?{manual:true}:{}),targets:native})}));
       const results = await Promise.allSettled(requests);
       await Promise.all([client.invalidateQueries({queryKey:["sub2api"]}),client.invalidateQueries({queryKey:["configured-checks"]})]);
       const failed = results.find(r => r.status === "rejected");
@@ -1024,14 +1026,14 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
     }
   }
   async function batch(kind:CheckKind){
-    if(selectionRead.current || !pageData)return;
+    if(selectionRead.current || !pageData || detection.isPending || detection.isError || detection.busy)return;
     selectionRead.current=true;setReadingSelection(true);setError("");
-    try{const selected=await completeSelection();await queueChecks(kind,selected.eligible);}
+    try{const selected=await completeSelection();await queueChecks(kind,selected.eligible,false);}
     catch(e){setError(e instanceof Error?e.message:"完整筛选结果读取失败");}
     finally{selectionRead.current=false;setReadingSelection(false);}
   }
   const batchBusy=(_kind:CheckKind)=>readingSelection || submittingChecks.size>0;
-  const batchDisabled=(kind:CheckKind)=>resultsUnavailable || !eligibleCount || readingSelection || submittingChecks.size>0 || (kind==="check"&&!modelsToCheck.length) || ((kind==="compaction"||kind==="tool-use")&&!!model&&!isCapabilityCheckModel(model)) || (rows.length===total && !rows.some(row=>canCheck(row.account,row.target,kind,row.configured)));
+  const batchDisabled=(kind:CheckKind)=>resultsUnavailable || !eligibleCount || detection.isPending || detection.isError || detection.busy || readingSelection || submittingChecks.size>0 || (kind==="check"&&!modelsToCheck.length) || ((kind==="compaction"||kind==="tool-use")&&!!model&&!isCapabilityCheckModel(model)) || (rows.length===total && !rows.some(row=>detectionEnabled(row,detection.disabled)&&canCheck(row.account,row.target,kind,row.configured)));
   const check=(selection?:CheckSelection)=>selection?queueChecks("check",selection):batch("check");
   const checkQuality=()=>batch("quality");
   const checkCompaction=(selection?:CheckSelection)=>selection?queueChecks("compaction",selection):batch("compaction");
@@ -1262,6 +1264,10 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
           {error}
         </div>
       )}
+      {(detection.isError || detection.error) && <div role="alert" className="error-banner">
+        {detection.error || "检测开关读取失败，已暂停批量检测。"}
+        {detection.isError && <button className="button small" onClick={()=>void detection.refetch()}>重试读取检测开关</button>}
+      </div>}
       <section className="data-panel">
         <div className="data-heading sub-detection-heading">
           <div className="sub-detection-title">
@@ -1623,6 +1629,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                     <th><Tip text={toolUseDescription}>Tool use <CircleHelp size={12} /></Tip></th>
                     <th>回复 / 诊断</th>
                     <th>最近检测</th>
+                    <th><Tip text="默认开启。关闭后跳过批量模型、降智、压缩、Tool use 及同步后的自动检测；仍可手动检测此渠道。已提交的任务继续执行。">批量检测 <CircleHelp size={12}/></Tip></th>
                     <th>操作</th>
                   </tr>
                 </thead>
@@ -1745,6 +1752,14 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                             selected.result && (
                               <small className="check-source">上次结果</small>
                             )}
+                        </td>
+                        <td>
+                          <button type="button" role="switch" aria-label={`${account.name} ${t.name} 的批量检测开关`}
+                            aria-checked={detectionEnabled(managementRow,detection.disabled)} className="channel-detection-switch"
+                            disabled={tablePending || detection.isPending || detection.isError || detection.busy}
+                            title="关闭后跳过批量检测，仍可点击此渠道的检测按钮。已提交的任务继续执行。"
+                            onKeyDown={e=>e.stopPropagation()}
+                            onClick={()=>void detection.save(managementRow,!detectionEnabled(managementRow,detection.disabled))}><span/></button>
                         </td>
                         <td>
                           <button

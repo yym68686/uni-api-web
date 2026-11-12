@@ -16,8 +16,20 @@ import (
 // Exercise HTTP queue -> durable claim -> complete sync using local fixtures,
 // including site-discovered models and successful historical results.
 func TestSubSyncAllSelectedModelsReachEveryProbeStage(t *testing.T) {
-	for _, selected := range [][]string{{}, {"gemini-4-argon"}, {"gpt-6.1-sol", "gemini-4-argon", "extra-selected"}} {
-		t.Run(strings.Join(selected, "+"), func(t *testing.T) {
+	for _, test := range []struct {
+		models   []string
+		disabled bool
+	}{
+		{}, {models: []string{"gemini-4-argon"}},
+		{models: []string{"gpt-6.1-sol", "gemini-4-argon", "extra-selected"}},
+		{models: []string{"gpt-6.1-sol", "gemini-4-argon", "extra-selected"}, disabled: true},
+	} {
+		selected := test.models
+		name := strings.Join(selected, "+")
+		if test.disabled {
+			name += "-disabled"
+		}
+		t.Run(name, func(t *testing.T) {
 			s, account, owner := newAPITestService(t)
 			ctx := context.Background()
 			group, err := s.newAPIGroupID(ctx, account, "default")
@@ -28,6 +40,13 @@ func TestSubSyncAllSelectedModelsReachEveryProbeStage(t *testing.T) {
 			oldResult := subResult{Model: "gpt-5.6-terra", CheckedAt: 123, Availability: subProbe{Status: "success"}}
 			if _, err = s.control.db.Exec(`INSERT INTO console_sub_targets(account_id,group_id,name,platform,state,compaction_state,compaction,tool_use_state,tool_use) VALUES($1,$2,'default','openai','done','done',$3,'done',$3)`, account, group, mustJSON(oldTools)); err != nil {
 				t.Fatal(err)
+			}
+			if test.disabled {
+				target := detectionTarget{Account: account, Group: group}
+				if _, err = s.control.db.Exec(`INSERT INTO console_channel_detection_settings(owner,scope,account_id,group_id) VALUES($1,$2,$3,$4)`, owner, target.scope(), account, group); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { s.control.db.Exec(`DELETE FROM console_channel_detection_settings WHERE owner=$1`, owner) })
 			}
 			for _, model := range []string{"gpt-5.6-terra", "gpt-6-astra", "extra-unselected"} {
 				saved := oldResult
@@ -61,7 +80,7 @@ func TestSubSyncAllSelectedModelsReachEveryProbeStage(t *testing.T) {
 					mu.Lock()
 					calls[model]++
 					mu.Unlock()
-					if !slices.Contains(selected, model) {
+					if test.disabled || !slices.Contains(selected, model) {
 						t.Error("unchecked model was probed", model)
 					}
 					if compact {
@@ -109,13 +128,17 @@ func TestSubSyncAllSelectedModelsReachEveryProbeStage(t *testing.T) {
 				gotCalls[k] = v
 			}
 			mu.Unlock()
-			if len(selected) > 0 && gotCalls["gemini-4-argon"] != 1 {
+			if !test.disabled && len(selected) > 0 && gotCalls["gemini-4-argon"] != 1 {
 				t.Fatal("missing Gemini availability", gotCalls)
 			}
-			if len(selected) > 1 && (gotCalls["gpt-6.1-sol"] != 3 || gotCalls["extra-selected"] != 1) {
+			if !test.disabled && len(selected) > 1 && (gotCalls["gpt-6.1-sol"] != 3 || gotCalls["extra-selected"] != 1) {
 				t.Fatal("availability/compression/tools not scoped", gotCalls)
 			}
-			if len(gotCalls) != len(selected) {
+			wantCalls := len(selected)
+			if test.disabled {
+				wantCalls = 0
+			}
+			if len(gotCalls) != wantCalls {
 				t.Fatal("unexpected probe model", gotCalls)
 			}
 			rows, err := s.control.db.Query(`SELECT model FROM console_model_fingerprints WHERE account_id=$1 ORDER BY model`, account)
@@ -136,10 +159,10 @@ func TestSubSyncAllSelectedModelsReachEveryProbeStage(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := []string{}
-			if len(selected) > 0 {
+			if !test.disabled && len(selected) > 0 {
 				want = append(want, "gemini-4-argon")
 			}
-			if len(selected) > 1 {
+			if !test.disabled && len(selected) > 1 {
 				want = append(want, "gpt-6.1-sol")
 			}
 			sort.Strings(want)
@@ -164,7 +187,7 @@ func TestSubSyncAllSelectedModelsReachEveryProbeStage(t *testing.T) {
 			if history := toolUseModelResults(&tools)["gpt-5.6-terra"]; history == nil || history.CheckedAt != 123 {
 				t.Fatal("unchecked tool history lost", tools)
 			}
-			if len(selected) == 0 {
+			if len(selected) == 0 || test.disabled {
 				var queued, complete int
 				if err = s.control.db.QueryRow(`SELECT count(*) FROM console_sub_models WHERE account_id=$1 AND state IN ('queued','running')`, account).Scan(&queued); err != nil || queued != 0 {
 					t.Fatal("sync-only queued model work", queued, err)
@@ -173,11 +196,11 @@ func TestSubSyncAllSelectedModelsReachEveryProbeStage(t *testing.T) {
 					t.Fatal("sync-only group not completed", complete, err)
 				}
 				headers, err := readSubAccountHeaders(ctx, s.control.db, owner, account)
-				if err != nil || len(headers) != 1 || !headers[0].SyncOnly {
+				if err != nil || len(headers) != 1 || (len(selected) == 0 && !headers[0].SyncOnly) {
 					t.Fatal("sync-only header missing", err)
 				}
 			}
-			if len(selected) <= 1 {
+			if len(selected) <= 1 || test.disabled {
 				if err = s.control.db.QueryRow(`SELECT compaction FROM console_sub_targets WHERE account_id=$1 AND group_id=$2`, account, group).Scan(&raw); err != nil {
 					t.Fatal(err)
 				}

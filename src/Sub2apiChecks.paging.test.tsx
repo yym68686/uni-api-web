@@ -290,6 +290,7 @@ it("renders just the current 25 rows and fetches all 61 before a batch, without 
       const url = new URL(input);
       if (url.pathname.endsWith("/accounts/progress")) return idleProgress();
       reads.push(url.pathname);
+      if (url.pathname.endsWith("/detection-settings")) return Response.json({disabled:[]});
       if (init?.method === "POST") {
         writes.push(JSON.parse(String(init.body)));
         return Response.json({ queued: 61 });
@@ -332,6 +333,83 @@ it("renders just the current 25 rows and fetches all 61 before a batch, without 
         path.endsWith("/model-fingerprints"),
     ),
   ).toEqual([]);
+});
+
+it.each([
+ ["检测全部模型", "checks"], ["降智检测", "quality-checks"],
+ ["压缩检测", "compaction-checks"], ["Tool use 检测", "tool-use-checks"],
+])("%s skips disabled channels on every page, while explicit row detection still works",async(label,endpoint)=>{
+ const writes:{path:string;body:{manual?:boolean;targets:{group_id:number}[]}}[]=[];
+ vi.stubGlobal("fetch",vi.fn(async(input:string,init?:RequestInit)=>{
+  const url=new URL(input),path=url.pathname;
+  if(path.endsWith("/detection-settings"))return Response.json({disabled:[1,26,61].map(group_id=>({account_id:account.id,group_id}))});
+  if(path.endsWith("/accounts/progress"))return idleProgress();
+  if(init?.method==="POST"){writes.push({path,body:JSON.parse(String(init.body))});return Response.json({queued:58});}
+  if(path.endsWith("/channel-management/query"))return Response.json(url.searchParams.has("selection")?selection():page(Number(url.searchParams.get("cursor")||0)));
+  return Response.json({data:[]});
+ }));
+ mount(`disabled-${endpoint}`);const user=userEvent.setup();
+ const toggle=await screen.findByRole("switch",{name:"Owned site Channel 1 的批量检测开关"});
+ await waitFor(()=>expect(toggle).not.toBeChecked());
+ await user.click(screen.getByRole("button",{name:`${label} · 61 个渠道`}));
+ await waitFor(()=>expect(writes).toHaveLength(1));
+ expect(writes[0].path).toBe(`/analytics/v1/sub2api/${endpoint}`);
+ expect(writes[0].body.manual).not.toBe(true);
+ expect(writes[0].body.targets.map(t=>t.group_id)).toEqual(Array.from({length:61},(_,i)=>i+1).filter(n=>![1,26,61].includes(n)));
+ await user.click(screen.getByRole("button",{name:"检测 Owned site Channel 1"}));
+ await waitFor(()=>expect(writes).toHaveLength(2));
+ expect(writes[1].body.manual).toBe(true);expect(writes[1].body.targets.map(t=>t.group_id)).toEqual([1]);
+});
+
+it("persists each channel switch, keeps failed saves unchanged and restores it after a fresh page read",async()=>{
+ let disabled:{account_id:string;group_id:number}[]=[];let fail=false;
+ const patches:unknown[]=[];
+ vi.stubGlobal("fetch",vi.fn(async(input:string,init?:RequestInit)=>{
+  const url=new URL(input),path=url.pathname;
+  if(path.endsWith("/detection-settings")){
+   if(init?.method==="PATCH"){
+    const body=JSON.parse(String(init.body));patches.push(body);
+    if(fail)return new Response("检测开关保存失败",{status:503});
+    disabled=body.enabled?[]:body.targets;return Response.json({saved:true});
+   }
+   return Response.json({disabled});
+  }
+  expect(init?.method||"GET").toBe("GET");
+  if(path.endsWith("/accounts/progress"))return idleProgress();
+  if(path.endsWith("/channel-management/query"))return Response.json(page());
+  return Response.json({data:[]});
+ }));
+ const user=userEvent.setup();let view=mount("switch-persist");
+ let toggle=await screen.findByRole("switch",{name:"Owned site Channel 1 的批量检测开关"});
+ await waitFor(()=>expect(toggle).toBeEnabled());expect(toggle).toBeChecked();
+ await user.click(toggle);await waitFor(()=>expect(toggle).not.toBeChecked());
+ expect(patches).toEqual([{enabled:false,targets:[{account_id:"owned",group_id:1}]}]);
+ expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+ expect(screen.getByRole("switch",{name:"Owned site Channel 2 的批量检测开关"})).toBeChecked();
+ view.unmount();view=mount("switch-persist");
+ toggle=await screen.findByRole("switch",{name:"Owned site Channel 1 的批量检测开关"});
+ await waitFor(()=>expect(toggle).not.toBeChecked());
+ fail=true;await user.click(toggle);
+ await screen.findByText("检测开关保存失败");expect(toggle).not.toBeChecked();
+ fail=false;await user.click(toggle);await waitFor(()=>expect(toggle).toBeChecked());
+ view.unmount();
+});
+
+it("blocks bulk detection when switch settings cannot be read, but permits explicit manual detection",async()=>{
+ const writes:unknown[]=[];
+ vi.stubGlobal("fetch",vi.fn(async(input:string,init?:RequestInit)=>{
+  const url=new URL(input),path=url.pathname;
+  if(path.endsWith("/detection-settings"))return new Response("settings unavailable",{status:503});
+  if(path.endsWith("/accounts/progress"))return idleProgress();
+  if(init?.method==="POST"){writes.push(JSON.parse(String(init.body)));return Response.json({queued:true});}
+  if(path.endsWith("/channel-management/query"))return Response.json(page());
+  return Response.json({data:[]});
+ }));
+ mount("settings-unavailable");const user=userEvent.setup();
+ await screen.findByText("检测开关读取失败，已暂停批量检测。");
+ for(const label of ["检测全部模型","降智检测","压缩检测","Tool use 检测"])expect(screen.getByRole("button",{name:`${label} · 61 个渠道`})).toBeDisabled();
+ await user.click(screen.getByRole("button",{name:"检测 Owned site Channel 1"}));
+ await waitFor(()=>expect(writes).toHaveLength(1));expect(writes[0]).toMatchObject({manual:true,targets:[{account_id:"owned",group_id:1}]});
 });
 
 it("cancels an obsolete full-selection read without submitting after the filter changes", async () => {

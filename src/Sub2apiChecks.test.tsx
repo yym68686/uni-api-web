@@ -1442,7 +1442,7 @@ it("all-models groups channels and probes all supported models despite available
   });
   await user.click(screen.getByRole("button", { name: "检测 one same-group" }));
   await waitFor(() => expect(writes).toHaveLength(2));
-  expect(writes[1]).toEqual(writes[0]);
+  expect(writes[1]).toEqual({...writes[0],manual:true});
   await user.click(
     screen.getByRole("button", { name: "查看 one same-group 的回复与诊断" }),
   );
@@ -2353,7 +2353,7 @@ it("remembers model settings per user and uses them for batch and row probes", a
   expect(writes[0]).toEqual({ targets: [{ account_id: "one", group_id: 1, models: ["deepseek-v4.1-flash-1017", "gemini-4-argon", "claude-opus-5"] }] });
   await user.click(screen.getByRole("button", { name: "检测 one same-group" }));
   await waitFor(() => expect(writes).toHaveLength(2));
-  expect(writes[1]).toEqual(writes[0]);
+  expect(writes[1]).toEqual({...writes[0],manual:true});
   view.unmount();
   view = mount("model-owner");
   await screen.findByRole("table");
@@ -2444,7 +2444,7 @@ it("detects unassigned configured channels without site keys and isolates busy s
   await user.selectOptions(screen.getByLabelText("检测模型筛选"),"custom-model");
   const updatedFirst=within((await screen.findByText("native-one",{selector:"strong"})).closest("tr")!);
   await user.click(updatedFirst.getByRole("button",{name:"检测 未归属渠道 native-one"}));
-  expect(writes.at(-1)).toEqual({kind:"check",targets:[{source_id:"fugue",provider:"native-one",models:["custom-model"]}]});
+  expect(writes.at(-1)).toEqual({kind:"check",manual:true,targets:[{source_id:"fugue",provider:"native-one",models:["custom-model"]}]});
   await waitFor(()=>expect(updatedFirst.getByText("可用")).toBeVisible());
   await user.click(updatedFirst.getByRole("button",{name:"查看 未归属渠道 native-one 的回复与诊断"}));
   const dialog=within(screen.getByRole("dialog"));
@@ -2638,7 +2638,7 @@ it("rechecks an explicitly filtered native model despite batch exclusions, witho
   expect(button).toHaveTextContent("检测此模型");
   expect(screen.getByRole("button",{name:"检测所选模型 · 1 个渠道"})).toBeEnabled();
   await user.dblClick(button);
-  expect(writes).toEqual([{kind:"check",targets:[{source_id:"do",provider:"fugue-codex",models:["gpt-6-luna"]}]}]);
+  expect(writes).toEqual([{kind:"check",manual:true,targets:[{source_id:"do",provider:"fugue-codex",models:["gpt-6-luna"]}]}]);
   expect(button).toBeDisabled();
   expect(button).toHaveAttribute("aria-busy","true");
   expect(screen.getByRole("button",{name:"检测所选模型 · 1 个渠道"})).toBeDisabled();

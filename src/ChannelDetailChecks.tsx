@@ -110,6 +110,7 @@ export function ChannelDetailChecks({ row }: { row: Channel }) {
         method: "POST",
         body: JSON.stringify({
           kind,
+          manual: true,
           targets: [
             {
               source_id: row.source_id,

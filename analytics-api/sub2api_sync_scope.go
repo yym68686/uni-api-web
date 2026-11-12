@@ -55,6 +55,7 @@ func (s *Service) subQueueSyncCapabilities(ctx context.Context, id, job, kind st
 	}
 	_, err := s.control.db.ExecContext(ctx, `UPDATE console_sub_targets t SET `+kind+`_state='queued'
  WHERE account_id=$1 AND active AND state='done'
+ AND NOT EXISTS(SELECT 1 FROM console_channel_detection_settings d JOIN console_sub_accounts a ON a.owner=d.owner WHERE a.id=t.account_id AND d.account_id=t.account_id AND d.group_id=t.group_id)
  AND EXISTS(SELECT 1 FROM console_sub_accounts a WHERE a.id=t.account_id AND a.job_id=$2 AND a.state='running'
  AND (a.sync_models IS NULL OR EXISTS(SELECT 1 FROM console_sub_models m
  WHERE m.account_id=t.account_id AND m.group_id=t.group_id AND a.sync_models ? m.model

@@ -55,6 +55,7 @@ func (s *Service) configuredChecks(w http.ResponseWriter, r *http.Request) {
 func (s *Service) queueConfiguredChecks(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Kind    string `json:"kind"`
+		Manual  bool   `json:"manual"`
 		Targets []struct {
 			Source   string   `json:"source_id"`
 			Provider string   `json:"provider"`
@@ -68,9 +69,6 @@ func (s *Service) queueConfiguredChecks(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "无效检测任务", 400)
 		return
 	}
-	// Resolve credentials before opening a transaction (the source reader uses
-	// the same pool). All selections are committed together or rejected together.
-	sources := map[string]controlSource{}
 	for _, t := range in.Targets {
 		if t.Provider == "" || len(t.Provider) > 256 || strings.ContainsAny(t.Provider, "\r\n/") {
 			http.Error(w, "无效渠道或模型", 400)
@@ -86,6 +84,24 @@ func (s *Service) queueConfiguredChecks(w http.ResponseWriter, r *http.Request) 
 				return
 			}
 		}
+		if (in.Kind == "check" || in.Kind == "availability") && len(t.Models) == 0 {
+			http.Error(w, "请选择检测模型", 400)
+			return
+		}
+	}
+	owner, _ := s.controlUser(r)
+	disabled, _, err := readDisabledDetection(r.Context(), s.control.db, owner)
+	if err != nil {
+		http.Error(w, "检测开关读取失败", 503)
+		return
+	}
+	// Resolve credentials before opening a transaction (the source reader uses
+	// the same pool). All selections are committed together or rejected together.
+	sources := map[string]controlSource{}
+	for _, t := range in.Targets {
+		if !in.Manual && disabled[(detectionTarget{Source: t.Source, Provider: t.Provider}).scope()] {
+			continue
+		}
 		if _, ok := sources[t.Source]; !ok {
 			src, err := s.control.source(r.Context(), t.Source)
 			if err != nil {
@@ -93,10 +109,6 @@ func (s *Service) queueConfiguredChecks(w http.ResponseWriter, r *http.Request) 
 				return
 			}
 			sources[t.Source] = src
-		}
-		if (in.Kind == "check" || in.Kind == "availability") && len(t.Models) == 0 {
-			http.Error(w, "请选择检测模型", 400)
-			return
 		}
 	}
 	tx, err := s.control.db.BeginTx(r.Context(), nil)
@@ -107,6 +119,9 @@ func (s *Service) queueConfiguredChecks(w http.ResponseWriter, r *http.Request) 
 	defer tx.Rollback()
 	queued := int64(0)
 	for _, t := range in.Targets {
+		if !in.Manual && disabled[(detectionTarget{Source: t.Source, Provider: t.Provider}).scope()] {
+			continue
+		}
 		kind, models := in.Kind, t.Models
 		if kind == "quality" {
 			kind, models = "model", []string{checkModel}

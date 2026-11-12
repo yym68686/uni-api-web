@@ -2552,6 +2552,12 @@ nav > button.active > svg {
 .control-persistence [role=switch] span{width:14px;height:14px;border-radius:50%;background:white;transition:transform .15s}
 .control-persistence [role=switch].on{background:var(--green)}
 .control-persistence [role=switch].on span{transform:translateX(14px)}
+.channel-detection-switch { width:34px;height:20px;border-radius:12px;padding:3px;background:var(--line);border:0;display:inline-flex;align-items:center;cursor:pointer; }
+.channel-detection-switch span { width:14px;height:14px;border-radius:50%;background:white;transition:transform .15s; }
+.channel-detection-switch[aria-checked=true] { background:var(--green); }
+.channel-detection-switch[aria-checked=true] span { transform:translateX(14px); }
+.channel-detection-switch:disabled { opacity:.5;cursor:wait; }
+.channel-detection-switch:focus-visible { outline:2px solid var(--green);outline-offset:3px; }
 
 @media(max-width:700px){.source-item{flex-wrap:wrap}.source-item>.control-persistence{flex-basis:100%}}
 
