@@ -75,8 +75,7 @@ func (s *Service) hydrateManagementPageFrom(ctx context.Context, db controlQuery
 				index[qualityGroupID(subset[i].ID, target.GroupID)] = target
 			}
 		}
-		var err error
-		projectedGroups, err = readManagementDisplayModelStream(ctx, db, owner, wanted, fullGroups, filters.Model, func(row managementPageModelRecord, readTrace *managementRowsTrace) error {
+		consume := func(row managementPageModelRecord, readTrace *managementRowsTrace) error {
 			model := subModelResult{Model: row.model, State: row.state, Message: row.message}
 			decodeStart := readTrace.decodeStart()
 			var err error
@@ -92,9 +91,23 @@ func (s *Service) hydrateManagementPageFrom(ctx context.Context, db controlQuery
 				target.Models = append(target.Models, model)
 			}
 			return nil
-		})
-		if err != nil {
-			return err
+		}
+		// Complete previews may contain hundreds of groups. Keep each model
+		// read at display-page scale: expanding the entire directory can exceed
+		// its bounded SQL-input budget and force an expensive all-model join.
+		// Reuse this exact RR transaction for EVERY batch; do not truncate rows,
+		// open new snapshots, or weaken configured/custom-model full fallbacks.
+		const modelBatchGroups = 25
+		projectedGroups = map[string]bool{}
+		for start := 0; start < len(wanted); start += modelBatchGroups {
+			batch := wanted[start:min(start+modelBatchGroups, len(wanted))]
+			projected, err := readManagementDisplayModelStream(ctx, db, owner, batch, fullGroups, filters.Model, consume)
+			if err != nil {
+				return err
+			}
+			for id := range projected {
+				projectedGroups[id] = true
+			}
 		}
 		// Sorting the complete JSON rows in PostgreSQL spills page evidence to
 		// disk. Only each target's model order is observable; preserve its UTF-8
@@ -115,7 +128,7 @@ func (s *Service) hydrateManagementPageFrom(ctx context.Context, db controlQuery
 			}
 		}
 		stages.next("hydrate_queue")
-		if err = s.subAttachQueuedChecksFrom(ctx, db, owner, subset); err != nil {
+		if err := s.subAttachQueuedChecksFrom(ctx, db, owner, subset); err != nil {
 			return err
 		}
 		stages.next("hydrate_receipts")
@@ -123,11 +136,11 @@ func (s *Service) hydrateManagementPageFrom(ctx context.Context, db controlQuery
 		if managementSelectedReceipts(ctx) && filters.Model != "" {
 			usageAccounts = managementPageUsageAccounts(subset, filters.Model, fullGroups)
 		}
-		if err = s.attachManagementPageSummaryUsageFrom(ctx, db, owner, usageAccounts, view.receiptReuse); err != nil {
+		if err := s.attachManagementPageSummaryUsageFrom(ctx, db, owner, usageAccounts, view.receiptReuse); err != nil {
 			return err
 		}
 		stages.next("hydrate_normalize")
-		if err = normalizeManagementAccounts(subset); err != nil {
+		if err := normalizeManagementAccounts(subset); err != nil {
 			return err
 		}
 		for i := range view.Input.Accounts {

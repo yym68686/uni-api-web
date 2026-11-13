@@ -1,15 +1,73 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestManagementOptimizationPreviewKeepsSelectedProjectionAcrossLargeDirectory(t *testing.T) {
+	s := managementHydrationFixture(t)
+	prepareManagementRevisionsForTest(t, s.control.db)
+	// Match a full-site preview, not a 25-row display page: the directory is
+	// compact when dictionary-packed, but exceeds the 8 MiB expanded SQL input
+	// budget when all groups are hydrated together.
+	if _, err := s.control.db.Exec(`INSERT INTO console_sub_targets(account_id,group_id,name,platform,remote_key_id,active,state)
+ SELECT 'a',g,'G'||g,'openai',g,true,'done' FROM generate_series(62,842) g;
+ INSERT INTO console_sub_models(account_id,group_id,model,state,message,result)
+ SELECT 'a',g,m,'done','model message',jsonb_build_object('model',m,'checked_at',g,
+ 'availability',jsonb_build_object('status','success','protocol','gemini','model_match','match','response_model',m,'ttft_ms',123))
+ FROM generate_series(1,842) g CROSS JOIN unnest(ARRAY['gemini-4-hydrogen','gpt-6-astra']) m
+ ON CONFLICT(account_id,group_id,model) DO NOTHING;
+ INSERT INTO console_sub_models(account_id,group_id,model,state,message,result)
+ SELECT 'a',g,'off-scope-'||m,'done','model message','{"availability":{"status":"success","ttft_ms":456}}'::jsonb
+ FROM generate_series(1,842) g CROSS JOIN generate_series(1,240) m`); err != nil {
+		t.Fatal(err)
+	}
+	session, err := s.control.newSession(context.Background(), "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&output)
+	defer log.SetOutput(previous)
+	filters := managementQueryFilters{GroupStatus: "available", Model: "gemini-4-hydrogen", Sort: "asc"}
+	r := httptest.NewRequest(http.MethodGet, "/v1/channel-management/optimization-preview?"+url.Values{"filters": {mustJSON(filters)}}.Encode(), nil)
+	r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: session})
+	w := httptest.NewRecorder()
+	started := time.Now()
+	s.Handler().ServeHTTP(w, r)
+	var preview managementOptimizationResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &preview); err != nil || w.Code != 200 {
+		t.Fatal("large preview failed", w.Code, err, output.String())
+	}
+	if len(preview.Rows) != 842 || preview.Total != 842 || preview.Filters != filters {
+		t.Fatal("preview truncated or changed its scope", preview.Total, len(preview.Rows))
+	}
+	for _, row := range preview.Rows {
+		if row.Selected == nil || row.Selected.Result == nil || row.Selected.Result.Availability.TTFT == nil || *row.Selected.Result.Availability.TTFT != 123 || row.Target.SummaryModel != filters.Model || len(row.Target.Models) < 242 {
+			t.Fatal("selected evidence or complete metadata missing", row.ID)
+		}
+		for _, model := range row.Target.Models {
+			if model.Model != filters.Model && model.Model != checkModel && model.Result != nil {
+				t.Fatal("large preview fell back to off-scope model results", row.ID, model.Model)
+			}
+		}
+	}
+	if strings.Contains(output.String(), "management_rows_read stage=page_models ") || strings.Count(output.String(), "management_selected_models ") != 34 {
+		t.Fatal("large preview lost bounded selected-model reads", output.String())
+	}
+	t.Logf("large preview: groups=%d models>=%d bytes=%d elapsed=%s", len(preview.Rows), 842*242, w.Body.Len(), time.Since(started))
+}
 
 func TestManagementOptimizationPreviewReadsFreshCompleteFilteredSnapshotWithoutExecuting(t *testing.T) {
 	s := managementHydrationFixture(t)
