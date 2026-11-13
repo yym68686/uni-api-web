@@ -39,7 +39,7 @@ import { CreateChannel } from "./CreateChannel";
 import { ChannelSettings } from "./ChannelSettings";
 import { ChannelOptimization } from "./ChannelOptimization";
 import { ChannelProtocolSummary } from "./ChannelProtocolSummary";
-import { useManagementPage, readManagementSelection, managementOptimizationSnapshot } from "./managementQuery";
+import { useManagementPage, readManagementSelection, readManagementOptimizationPreview, managementOptimizationSnapshot } from "./managementQuery";
 import type { ManagementPagePosition } from "./managementQuery";
 import { channelMembers, managementRows, UNASSIGNED_ACCOUNT } from "./channelManagement";
 import type { ManagedChannel, ManagementRow } from "./channelManagement";
@@ -903,19 +903,23 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   const selectionRead=useRef(false);
   const selectionRequest=useRef<AbortController|null>(null);
   const selectionScope=useRef("");
+  const previewScope=useRef("");
   selectionScope.current=JSON.stringify([user,filterKey,cursor,pageData?.revision]);
+  previewScope.current=JSON.stringify([user,filterKey,cursor]);
   useEffect(()=>{
     selectionRequest.current?.abort();
     return ()=>{selectionRequest.current?.abort();};
   },[user,filterKey,cursor]);
-  async function completeSelection(){
+  async function completeSelection(preview=false){
     if(!pageData)throw Error("请先读取最新渠道结果");
     selectionRequest.current?.abort();
-    const controller=new AbortController(),scope=selectionScope.current;
+    const controller=new AbortController(),scope=preview?previewScope.current:selectionScope.current;
     selectionRequest.current=controller;
     try{
-      const selected=await readManagementSelection(filters,pageData,controller.signal);
-      if(scope!==selectionScope.current)throw Error("筛选或渠道结果已变化，请重新选择操作");
+      const selected=preview
+        ? await readManagementOptimizationPreview(user,filters,controller.signal)
+        : await readManagementSelection(filters,pageData,controller.signal);
+      if(scope!==(preview?previewScope.current:selectionScope.current))throw Error("筛选或渠道结果已变化，请重新选择操作");
       return selected;
     }finally{if(selectionRequest.current===controller)selectionRequest.current=null;}
   }
@@ -1282,7 +1286,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
             <CreateChannel sources={sources.data?.data || []} />
             <ChannelOptimization
               disabled={!pageData || !total || readingSelection}
-              snapshot={async()=>managementOptimizationSnapshot(await completeSelection(),filters)}
+              snapshot={async()=>managementOptimizationSnapshot(await completeSelection(true),filters)}
             />
             <label className="search-field">
               <Search size={16} />

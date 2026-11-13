@@ -335,6 +335,36 @@ it("renders just the current 25 rows and fetches all 61 before a batch, without 
   ).toEqual([]);
 });
 
+it("opens optimization from a fresh full snapshot after results changed, while batches still reject the old page selection", async () => {
+  const calls: URL[] = [];
+  vi.stubGlobal("fetch",vi.fn(async(input:string,init?:RequestInit)=>{
+    expect(init?.method || "GET").toBe("GET");
+    const url=new URL(input);calls.push(url);
+    if(url.pathname.endsWith("/accounts/progress"))return idleProgress();
+    if(url.pathname.endsWith("/channel-management/query"))return url.searchParams.has("selection")
+      ? new Response("渠道配置或检测结果已变化，请重新读取",{status:409}) : Response.json(page());
+    if(url.pathname.endsWith("/optimization-preview"))return Response.json({
+      ...selection(),format:"management-optimization-preview-v1",revision:"updated-results",owner:"fresh-optimization",
+      filters:JSON.parse(url.searchParams.get("filters")!),total:60,eligible_count:60,rows:rows.slice(0,60),eligible:rows.slice(0,60),
+    });
+    if(url.pathname.endsWith("/detection-settings"))return Response.json({disabled:[]});
+    return Response.json({data:[]});
+  }));
+  mount("fresh-optimization");const user=userEvent.setup();
+  await screen.findByText("Channel 1",{selector:"strong"});
+  await user.click(screen.getByRole("button",{name:"检测全部模型 · 61 个渠道"}));
+  await screen.findByText("渠道配置或检测结果已变化，请重新读取");
+  const before=calls.filter(u=>u.searchParams.has("selection")).length;
+  await user.click(screen.getByRole("button",{name:"优化渠道模型"}));
+  const dialog=await screen.findByRole("dialog",{name:"优化渠道模型"});
+  expect(within(dialog).getByText(/分析当前筛选的全部 60 个渠道/)).toBeVisible();
+  expect(within(dialog).getByText(/预览使用点击时读取的最新检测结果/)).toBeVisible();
+  expect(calls.filter(u=>u.searchParams.has("selection"))).toHaveLength(before);
+  expect(calls.filter(u=>u.pathname.endsWith("/optimization-preview"))).toHaveLength(1);
+  await user.click(within(dialog).getByRole("button",{name:"关闭优化预览"}));
+  expect(screen.getAllByRole("row")).toHaveLength(26);
+});
+
 it.each([
  ["检测全部模型", "checks"], ["降智检测", "quality-checks"],
  ["压缩检测", "compaction-checks"], ["Tool use 检测", "tool-use-checks"],

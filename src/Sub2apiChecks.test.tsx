@@ -25,7 +25,7 @@ it("keeps partial source availability out of the channel management banner", asy
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 });
 function mount(user = "account", client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
-  installManagementPageFixture();
+  installManagementPageFixture(user);
   return render(
     <QueryClientProvider client={client}>
       <Tooltip.Provider>

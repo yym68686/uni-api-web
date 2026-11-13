@@ -102,6 +102,7 @@ func TestObservedReadKindsAreFixedAndUseHandlerViewPrecedence(t *testing.T) {
 		{"/v1/sub2api/accounts/private-account/groups//details", "summary", "none"},
 		{"/v1/sub2api/accounts/private-account/groups/49/details/extra", "summary", "none"},
 		{"/v1/channel-management/query?filters=private-filter", "", "management_first_page"},
+		{"/v1/channel-management/optimization-preview?filters=private-filter", "", "management_optimization_preview"},
 		{"/v1/channel-management/query?cursor=private-token", "", "management_page"},
 		{"/v1/channel-management/query?cursor=private-token&refresh_cursor=1", "", "management_page_refresh"},
 		{"/v1/channel-management/query?selection=private-token&cursor=private-cursor", "", "management_selection"},

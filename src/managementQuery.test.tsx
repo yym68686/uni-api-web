@@ -8,9 +8,10 @@ import {
   managementOptimizationSnapshot,
   readManagementPage,
   readManagementSelection,
+  readManagementOptimizationPreview,
   useManagementPage,
 } from "./managementQuery";
-import type { ManagementPage, ManagementSelection } from "./managementQuery";
+import type { ManagementPage, ManagementSelection, ManagementOptimizationPreview } from "./managementQuery";
 import { controlRequest } from "./api";
 
 afterEach(() => {
@@ -70,6 +71,10 @@ const selection = (): ManagementSelection => ({
     unavailable_imports: [],
   },
   prices: [],
+});
+const optimizationPreview = (): ManagementOptimizationPreview => ({
+  ...selection(), format: "management-optimization-preview-v1", revision: "latest-preview",
+  owner: "owner", filters: {...subFilterDefaults},
 });
 const deferred = <T,>() => {
   let resolve!: (value: T) => void;
@@ -293,6 +298,41 @@ it("sends name exclusions unchanged for both pages and complete batch selections
   const first = await readManagementPage(filters, "", signal);
   await readManagementSelection(filters, first, signal);
   expect(calls).toHaveLength(2);
+});
+
+it("opens a fresh complete optimization preview independently of the old page revision without a write or selection token", async () => {
+  const filters = {...subFilterDefaults, model:"gpt-5.5", excludeName:"kiro"};
+  const fetch = vi.fn(async (input:string, init:RequestInit) => {
+    const url = new URL(input);
+    expect(url.pathname).toBe("/analytics/v1/channel-management/optimization-preview");
+    expect([...url.searchParams.keys()]).toEqual(["filters"]);
+    expect(JSON.parse(url.searchParams.get("filters")!)).toEqual(filters);
+    expect(init.method).toBeUndefined(); expect(init.cache).toBe("no-store");
+    return Response.json({...optimizationPreview(),filters});
+  });
+  vi.stubGlobal("fetch",fetch);
+  const preview = await readManagementOptimizationPreview("owner",filters,new AbortController().signal);
+  expect(preview.revision).not.toBe(page().revision);
+  expect(managementOptimizationSnapshot(preview,filters).rows).toHaveLength(61);
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+it("rejects incomplete, cross-owner and changed-filter previews instead of falling back to the old selection", async () => {
+  for(const mutate of [
+    (p:ManagementOptimizationPreview)=>{p.owner="foreign";},
+    (p:ManagementOptimizationPreview)=>{p.filters.model="other";},
+    (p:ManagementOptimizationPreview)=>{p.rows=p.rows.slice(0,25);},
+    (p:ManagementOptimizationPreview)=>{p.eligible[60]=row("foreign");},
+    (p:ManagementOptimizationPreview)=>{p.rows[60]=p.rows[0];},
+  ]) {
+    const preview=optimizationPreview();mutate(preview);
+    const fetch=vi.fn(async()=>Response.json(preview));vi.stubGlobal("fetch",fetch);
+    await expect(readManagementOptimizationPreview("owner",subFilterDefaults,new AbortController().signal)).rejects.toThrow();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  }
+  const fetch=vi.fn(async()=>new Response("not found",{status:404}));vi.stubGlobal("fetch",fetch);
+  await expect(readManagementOptimizationPreview("owner",subFilterDefaults,new AbortController().signal)).rejects.toThrow("优化预览服务待更新");
+  expect(fetch).toHaveBeenCalledTimes(1);
 });
 
 it("keeps signed page position during mixed releases and only falls back for the old parameter parser",async()=>{

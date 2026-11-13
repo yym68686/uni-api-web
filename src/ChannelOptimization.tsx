@@ -150,6 +150,7 @@ export function ChannelOptimization({
               <Dialog.Description>
                 分析当前筛选的全部 {input.rows.length}{" "}
                 个渠道（包含其他页），仅修改已经接入 API key 的渠道。
+                预览使用点击时读取的最新检测结果，所有变更均需勾选后应用。
                 {input.filters.model
                   ? `本次仅优化 ${input.filters.model}。`
                   : "本次分析各渠道符合筛选条件的模型。"}

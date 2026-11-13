@@ -310,6 +310,7 @@ func (s *Service) controlHandler() http.Handler {
 	mux.HandleFunc("GET /v1/channel-sites", s.channelSites)
 	mux.HandleFunc("GET /v1/channel-management", s.channelManagement)
 	mux.HandleFunc("GET /v1/channel-management/query", s.managementQuery)
+	mux.HandleFunc("GET /v1/channel-management/optimization-preview", s.managementOptimizationPreview)
 	mux.HandleFunc("GET /v1/model-fingerprints", s.modelFingerprints)
 	mux.HandleFunc("POST /v1/model-fingerprints", s.queueModelFingerprints)
 	mux.HandleFunc("DELETE /v1/model-fingerprints", s.queueModelFingerprints)

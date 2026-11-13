@@ -97,6 +97,13 @@ func (s *Service) readManagementQuerySnapshot(ctx context.Context, owner string,
 }
 
 func (s *Service) readManagementQuerySnapshotMode(ctx context.Context, owner string, filters managementQueryFilters, token string, selection, rebase bool) (managementQuerySnapshot, error) {
+	return s.readManagementQuerySnapshotWithPreview(ctx, owner, filters, token, selection, rebase, false)
+}
+
+// A preview is a new read for the user to review, not permission to execute a
+// batch against a previously displayed page. Keep the normal selection fence
+// intact; hydrate every matching row inside this same fenced RR transaction.
+func (s *Service) readManagementQuerySnapshotWithPreview(ctx context.Context, owner string, filters managementQueryFilters, token string, selection, rebase, preview bool) (managementQuerySnapshot, error) {
 	ctx = managementTraceContext(ctx)
 	if !selection && owner != "" {
 		ctx = context.WithValue(ctx, managementGatewayPartsScopeKey{}, &managementGatewayPartsScope{store: &s.gatewayParts, owner: owner})
@@ -156,9 +163,15 @@ func (s *Service) readManagementQuerySnapshotMode(ctx context.Context, owner str
 		out.Page, err = buildManagementQueryPageFromFilteredRowsMode(view.Input, filtered, filters, out.Evidence, owner, s.control.key, token, view.ReadAt, rebase && !selection)
 		endPage()
 		if err == nil && !selection {
+			if preview {
+				out.Page.Rows = append([]managementQueryRow{}, filtered.Rows...)
+			}
 			endHydrate := managementReadSpan(ctx, "hydrate_page")
 			err = s.hydrateManagementPageFrom(ctx, tx, owner, &view, &out.Page, filters)
 			endHydrate()
+			if preview {
+				out.Rows = out.Page.Rows
+			}
 		}
 		return view, err
 	})

@@ -95,6 +95,12 @@ export interface ManagementSelection {
   prices: ModelPrice[];
 }
 
+export interface ManagementOptimizationPreview extends Omit<ManagementSelection, "format"> {
+  format: "management-optimization-preview-v1";
+  owner: string;
+  filters: SubFilters;
+}
+
 const path = (
   filters: SubFilters,
   token?: { cursor?: string; selection?: string; refreshCursor?: boolean; selectedReceipts?: boolean },
@@ -330,9 +336,22 @@ export async function readManagementSelection(
   if (
     selection.format !== "management-selection-v1" ||
     selection.revision !== page.revision ||
-    !count(selection.read_at_ms) ||
     selection.total !== page.total ||
-    selection.eligible_count !== page.eligible_count ||
+    selection.eligible_count !== page.eligible_count
+  ) {
+    throw Error("完整筛选结果已变化或读取不完整，请刷新渠道后重试");
+  }
+  validateManagementSelection(selection);
+  return selection;
+}
+
+function validateManagementSelection(selection: ManagementSelection | ManagementOptimizationPreview) {
+  if (
+    !selection.revision ||
+    !count(selection.read_at_ms) ||
+    !count(selection.total) ||
+    !count(selection.eligible_count) ||
+    selection.eligible_count > selection.total ||
     !Array.isArray(selection.rows) ||
     selection.rows.length !== selection.total ||
     !uniqueRows(selection.rows) ||
@@ -352,11 +371,36 @@ export async function readManagementSelection(
   const all = new Set(selection.rows.map((row) => row.id));
   if (selection.eligible.some((row) => !all.has(row.id)))
     throw Error("检测选择与筛选结果不一致，请重新读取");
-  return selection;
+}
+
+// Opening a preview starts a new review; it does not execute the old page's
+// selection. Never fall back to a stale page or weaken batch detection's fence.
+export async function readManagementOptimizationPreview(
+  owner: string,
+  filters: SubFilters,
+  signal: AbortSignal,
+): Promise<ManagementOptimizationPreview> {
+  let preview: ManagementOptimizationPreview;
+  try {
+    preview = await controlRequest<ManagementOptimizationPreview>(
+      path(filters).replace("/query?", "/optimization-preview?"),
+      { signal, cache: "no-store" },
+    );
+  } catch (error) {
+    if (error instanceof ApiError && (error.status === 404 || error.status === 400 && error.message.trim() === "筛选参数无效"))
+      throw Error("优化预览服务待更新，请稍后重试");
+    throw error;
+  }
+  signal.throwIfAborted();
+  if (preview.format !== "management-optimization-preview-v1" || preview.owner !== owner ||
+    !preview.filters || Object.entries(filters).some(([key, value]) => (preview.filters[key as keyof SubFilters] || "") !== value))
+    throw Error("优化预览范围不一致，请重新读取");
+  validateManagementSelection(preview);
+  return preview;
 }
 
 export function managementOptimizationSnapshot(
-  selection: ManagementSelection,
+  selection: Pick<ManagementSelection, "rows" | "input" | "prices">,
   filters: SubFilters,
 ): OptimizationSnapshot {
   return {

@@ -26,7 +26,7 @@ import type { ModelPrice } from "../src/types";
 // reads call only the test's mocked fetch, never a live server. Separate wire
 // tests assert that the actual component sends only one paged request on entry.
 const installed = Symbol("management-page-fixture");
-export function installManagementPageFixture() {
+export function installManagementPageFixture(owner = "account") {
   const fixtureFetch = globalThis.fetch as typeof fetch & {
     [installed]?: boolean;
   };
@@ -43,10 +43,11 @@ export function installManagementPageFixture() {
           ? body.data.flatMap((row:{value:{account?:SubAccount}})=>row.value.account?[row.value.account]:[]) : body.data;
         return Response.json({data:accounts.map(account=>({...account,progress:account.progress||{total:0,completed:0,queued:0,running:0,interrupted:0,running_models:[],groups:[]}})),read_at_ms:Date.now()});
       }
-      if (!url.pathname.endsWith("/channel-management/query"))
+      const preview = url.pathname.endsWith("/channel-management/optimization-preview");
+      if (!url.pathname.endsWith("/channel-management/query") && !preview)
         return fixtureFetch(input, init);
       const root =
-        url.origin + url.pathname.replace(/\/channel-management\/query$/, "");
+        url.origin + url.pathname.replace(/\/channel-management\/(query|optimization-preview)$/, "");
       const read = async <T>(suffix: string): Promise<T> => {
         const response = await fixtureFetch(root + suffix, {
           signal: init?.signal,
@@ -158,9 +159,10 @@ export function installManagementPageFixture() {
       }
       const revision = "fixture-current",
         read_at_ms = Date.now();
-      if (url.searchParams.has("selection"))
+      if (url.searchParams.has("selection") || preview)
         return Response.json({
-          format: "management-selection-v1",
+          format: preview ? "management-optimization-preview-v1" : "management-selection-v1",
+          ...(preview ? {owner, filters} : {}),
           revision,
           read_at_ms,
           rows,

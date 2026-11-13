@@ -26,6 +26,9 @@ func consoleAlwaysObservedRead(method, path string) string {
 	if path == "/v1/channel-management/query" {
 		return "GET /v1/channel-management/query"
 	}
+	if path == "/v1/channel-management/optimization-preview" {
+		return "GET /v1/channel-management/optimization-preview"
+	}
 	if path == "/v1/sub2api/channels" {
 		return "GET /v1/sub2api/channels"
 	}
@@ -72,6 +75,8 @@ func consoleObservedReadKind(r *http.Request) string {
 		return "none"
 	}
 	switch r.URL.Path {
+	case "/v1/channel-management/optimization-preview":
+		return "management_optimization_preview"
 	case "/v1/sub2api/channel-options":
 		if r.URL.Query().Get("keys_only") == "true" {
 			return "import_keys"
