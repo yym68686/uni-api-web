@@ -5,6 +5,22 @@ import { PriceSettings } from "./PriceSettings";
 import { MODEL_PRICE_CATALOG } from "./modelPrices";
 import type { ModelPrice } from "./types";
 
+it('shows Hydrogen standard pricing without copying Carbon promotional or cache TTL rates',async()=>{
+ render(<PriceSettings prices={[]} loading={false} connection={{base:'',key:'',session:'test',account:true}} onSaved={vi.fn()}/>);
+ const model='gemini-4-hydrogen',user=userEvent.setup();
+ await user.click(screen.getByRole('textbox',{name:'搜索模型价格'}));await user.paste(model);
+ for(const [label,value] of [['输入',1.5],['输出',7.5],['缓存读取',.075]] as const){
+  expect(screen.getByLabelText(`${model} ${label}价格`)).toHaveValue(value);
+ }
+ expect(within(screen.getByLabelText(model+' 输入价格').closest('tr')!).getAllByText('同输入')).toHaveLength(2);
+ expect(screen.getByRole('checkbox',{name:model+' 超过272k加价'})).not.toBeChecked();
+ await user.click(screen.getByRole('button',{name:'查看 '+model+' 价格说明'}));
+ const dialog=screen.getByRole('dialog',{name:model});
+ expect(within(dialog).getByRole('link',{name:'查看官方价格来源'})).toHaveAttribute('href','https://aistudio.google.com/docs/pricing#gemini-4-hydrogen');
+ expect(dialog).toHaveTextContent('完整 1M 上下文使用同一单价');
+ expect(dialog).toHaveTextContent('不支持显式缓存');
+});
+
 it('shows Carbon promotional pricing and its expiration without inventing cache TTL rates',async()=>{
  render(<PriceSettings prices={[]} loading={false} connection={{base:'',key:'',session:'test',account:true}} onSaved={vi.fn()}/>);
  const model='gemini-4-carbon',user=userEvent.setup();

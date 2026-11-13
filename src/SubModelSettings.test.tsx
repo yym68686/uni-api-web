@@ -4,6 +4,20 @@ import userEvent from "@testing-library/user-event";
 import { SubModelSettings } from "./SubModelSettings";
 import { SUB_MODELS } from "./sub2apiModels";
 
+it('selects Hydrogen independently with the native Gemini protocol',async()=>{
+ const save=vi.fn(),user=userEvent.setup();
+ render(<SubModelSettings models={['gemini-4-carbon']} onSave={save}/>);
+ await user.click(screen.getByRole('button',{name:'检测模型设置'}));
+ const dialog=within(screen.getByRole('dialog'));
+ const hydrogen=dialog.getByRole('checkbox',{name:'gemini-4-hydrogen'});
+ expect(hydrogen).not.toBeChecked();
+ expect(hydrogen.closest('label')).toHaveTextContent('Gemini 原生');
+ await user.click(dialog.getByRole('checkbox',{name:'gemini-4-carbon'}));
+ await user.click(hydrogen);
+ await user.click(dialog.getByRole('button',{name:'保存设置'}));
+ expect(save).toHaveBeenCalledExactlyOnceWith(['gemini-4-hydrogen']);
+});
+
 it('selects Carbon independently with the native Gemini protocol',async()=>{
  const save=vi.fn(),user=userEvent.setup();
  render(<SubModelSettings models={['gemini-4-argon']} onSave={save}/>);

@@ -9,6 +9,35 @@ import (
 	"time"
 )
 
+func TestHydrogenCatalogPreservesPricesAndManagementScope(t *testing.T) {
+	const model = "gemini-4-hydrogen"
+	prices := withCatalogPrices([]Price{{Model: model, Source: "fact-discovered"}})
+	index := slices.IndexFunc(prices, func(p Price) bool { return p.Model == model })
+	if index < 0 || slices.IndexFunc(prices[index+1:], func(p Price) bool { return p.Model == model }) >= 0 {
+		t.Fatal("Hydrogen missing or duplicated")
+	}
+	p := prices[index]
+	if p.Input != 1.5 || p.Output != 7.5 || p.CacheRead != .075 || p.CacheWrite != 1.5 || p.CacheWrite1h != 1.5 || !p.Verified {
+		t.Fatal("incorrect Hydrogen reference", p)
+	}
+	if !p.chargesCacheWrite() || p.chargesLongContextPremium() || p.promptPriceTier() != nil || p.salePercent() != 15 || canonicalPriceModel(model+"-high") != model {
+		t.Fatal("incorrect Gemini defaults or model identity", p)
+	}
+	for _, p := range withCatalogPrices([]Price{{Model: model, Input: 7, Source: "manual", Verified: false}, {Model: "gemini-4-carbon", Input: 9, Source: "manual", Verified: true}}) {
+		if p.Model == model && (p.Input != 7 || p.Verified || p.Source != "manual") {
+			t.Fatal("Hydrogen operator price overwritten", p)
+		}
+		if p.Model == "gemini-4-carbon" && p.Input != 9 {
+			t.Fatal("Carbon price overwritten", p)
+		}
+	}
+	if !subModelAllowed(model) || subModelProtocol(model) != "gemini" ||
+		!slices.Contains(managementPageModelCatalog(managementQueryInput{}, ""), model) ||
+		!slices.Contains(managementPageDetectionModels(nil), model) {
+		t.Fatal("Hydrogen missing from management/probe catalogs")
+	}
+}
+
 func TestFable52CatalogPreservesPricesAndManagementScope(t *testing.T) {
 	const model = "claude-fable-5-2"
 	prices := withCatalogPrices([]Price{{Model: model, Source: "fact-discovered"}})

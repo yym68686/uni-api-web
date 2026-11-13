@@ -265,7 +265,9 @@ Tool use 检测复用 Codex 的 `additional_tools` / namespace / custom `exec` �
 
 添加后自动读取有权限的全部分组，为每组创建并复用 `uni-console-check-*` 专用 key，创建时不设置额度上限，检测费用由站点账号承担，不修改业务 key。同步时，对名称、分组、已保存 ID 和密钥均匹配的旧版 $1 测试 key，读取上游最新状态后将 `quota` 更新为 `0`（不限额）并回读核验，不清零累计用量；停用、过期或自定义额度的 key 保留原设置。额度耗尽、停用、过期、额度更新失败与创建失败分别提示。重复同步通过专用名称、分组校验与 Idempotency-Key 避免重复创建。可用渠道接口关闭时继续按分组运行。移除账号只删除控制台凭据与结果，上游测试 key 保留，由用户在上游撤销。
 
-支持 35 个内置检测模型（与 [共享模型目录](analytics-api/model_catalog.json) 一致）：`gpt-6-astra`、`gpt-6.1-sol`、`gpt-6.1-terra`、`gpt-6-sol`、`gpt-6-luna`、`gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna`、`gpt-5.5`、`codex-auto-review`、`glm-5.3`、`glm-5.3-flash`、`kimi-k3.1-pro`、`kimi-k3`、`deepseek-v4.1-flash-1017`、`deepseek-v4.1-flash`、`deepseek-v4-pro`、`grok-4.7`、`grok-4.6`、`gemini-4-carbon`、`gemini-4-argon`、`gemini-3.1-pro`、`gemini-3.8-flash`、`claude-fable-5`、`claude-fable-5-1`、`claude-fable-5-2`、`claude-opus-5-5`、`claude-opus-5`、`claude-sonnet-5-5`、`claude-sonnet-5`、`claude-opus-4-8`、`claude-opus-4-6`、`claude-sonnet-4-6`、`claude-haiku-5-5`、`claude-haiku-4-5-20251001`。
+支持 36 个内置检测模型（与 [共享模型目录](analytics-api/model_catalog.json) 一致）：`gpt-6-astra`、`gpt-6.1-sol`、`gpt-6.1-terra`、`gpt-6-sol`、`gpt-6-luna`、`gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna`、`gpt-5.5`、`codex-auto-review`、`glm-5.3`、`glm-5.3-flash`、`kimi-k3.1-pro`、`kimi-k3`、`deepseek-v4.1-flash-1017`、`deepseek-v4.1-flash`、`deepseek-v4-pro`、`grok-4.7`、`grok-4.6`、`gemini-4-hydrogen`、`gemini-4-carbon`、`gemini-4-argon`、`gemini-3.1-pro`、`gemini-3.8-flash`、`claude-fable-5`、`claude-fable-5-1`、`claude-fable-5-2`、`claude-opus-5-5`、`claude-opus-5`、`claude-sonnet-5-5`、`claude-sonnet-5`、`claude-opus-4-8`、`claude-opus-4-6`、`claude-sonnet-4-6`、`claude-haiku-5-5`、`claude-haiku-4-5-20251001`。
+
+`gemini-4-hydrogen` 使用 Gemini 原生检测协议。2026-11-13 核对的 [Google Standard 价格](https://aistudio.google.com/docs/pricing#gemini-4-hydrogen) 为输入 $1.50、输出 $7.50、隐式缓存读取 $0.075 / 百万 token，完整 1M 上下文同价；不自动套用其他服务层价格。未单列缓存写入费，沿用普通输入估算。目录升级不覆盖已保存价格、不扩大已有检测勾选，也不自动创建业务路由。Hydrogen 未加入指纹参考库，不将其标记为支持指纹检测。
 
 模型指纹支持 Astra / 6.1-sol、Gemini 3.1 Pro、3.8 Flash、4 Argon 和 4 Carbon，参考库固定版本及采样规则见 [模型指纹说明](analytics-api/fingerprint/README.md)。Carbon 使用独立类别和 low 推理强度；渠道详情与渠道管理共享同一结果。
 

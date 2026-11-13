@@ -1,6 +1,16 @@
 import {expect,it,vi,afterEach} from 'vitest';
 import {initializeSubModels,loadSubModels,saveSubModels,SUB_MODELS,subModelProtocolLabel,subModelSelectionNeedsReview} from './sub2apiModels';
 afterEach(()=>vi.unstubAllGlobals());
+it('offers Hydrogen through Gemini without expanding saved detection selections',()=>{
+ const model='gemini-4-hydrogen',user='hydrogen-catalog-upgrade';
+ const previous=SUB_MODELS.filter(m=>m!==model);
+ saveSubModels(user,['gemini-4-carbon'],previous);
+ expect(SUB_MODELS.filter(m=>m===model)).toHaveLength(1);
+ expect(subModelProtocolLabel(model)).toBe('Gemini 原生');
+ expect(loadSubModels(user)).toEqual(['gemini-4-carbon']);
+ saveSubModels(user,[model]);
+ expect(loadSubModels(user)).toEqual([model]);
+});
 it('offers Carbon through Gemini without expanding saved detection selections',()=>{
  const model='gemini-4-carbon',user='carbon-catalog-upgrade';
  const previous=SUB_MODELS.filter(m=>m!==model);

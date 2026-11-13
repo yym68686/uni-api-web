@@ -7,6 +7,19 @@ import {
 import { SUB_MODELS } from "./sub2apiModels";
 import { referencePrice } from "./sub2apiPriceCheck";
 
+it('keeps Hydrogen reference prices and operator overrides independent of other Gemini models',()=>{
+ const model='gemini-4-hydrogen',reference=MODEL_PRICE_CATALOG.find(p=>p.model===model)!;
+ expect(reference).toMatchObject({input:1.5,output:7.5,cache_read:.075,cache_write:1.5,cache_write_1h:1.5,verified:true});
+ expect(canonicalPriceModel(model+'-high')).toBe(model);
+ const custom={...reference,input:7,source:'manual',verified:false};
+ const carbon={...reference,model:'gemini-4-carbon',input:9,source:'manual'};
+ const prices=displayedModelPrices([custom,carbon]);
+ expect(prices.find(p=>p.model===model)).toEqual(custom);
+ expect(prices.find(p=>p.model==='gemini-4-carbon')).toEqual(carbon);
+ expect(referencePrice(model,[custom])).toBeUndefined();
+ expect(referencePrice(model+'-high',[carbon,reference])).toEqual(reference);
+});
+
 it('keeps Carbon reference prices and operator overrides separate from Argon',()=>{
  const model='gemini-4-carbon',reference=MODEL_PRICE_CATALOG.find(p=>p.model===model)!;
  expect(reference).toMatchObject({input:2,output:10,cache_read:.1,cache_write:2,cache_write_1h:2,verified:true});

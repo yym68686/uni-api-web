@@ -228,6 +228,18 @@
     "note": "标准请求 <200K 上下文；≥200K 时输入、输出与缓存均为 2 倍。"
   },
   {
+    "model": "gemini-4-hydrogen",
+    "input": 1.5,
+    "output": 7.5,
+    "cache_read": 0.075,
+    "cache_write": 1.5,
+    "cache_write_1h": 1.5,
+    "source": "https://aistudio.google.com/docs/pricing#gemini-4-hydrogen",
+    "verified": true,
+    "cache_write_kind": "input",
+    "note": "2026-11-13 核对：Standard 标准价，完整 1M 上下文使用同一单价：输入 $1.50、输出 $7.50、缓存读取 $0.075 / 百万 token；输出含思考 token。仅支持隐式缓存，不支持显式缓存；未单列缓存写入费，按普通输入估算。不含搜索等工具费用，Batch/Flex/Priority/Contributor 不自动套用。"
+  },
+  {
     "model": "gemini-4-carbon",
     "input": 2,
     "output": 10,
