@@ -182,7 +182,10 @@ export async function controlRequest<T>(path:string,init:RequestInit={}):Promise
  // dedicated progress endpoint; clearing/reloading the channel page here
  // would discard the user's current view before any new results exist.
  const syncQueued=init.method?.toUpperCase()==="POST" && ["/v1/sub2api/accounts/sync-selected","/v1/sub2api/accounts/sync-only"].includes(path);
- if(!read && !syncQueued && typeof window !== "undefined") window.dispatchEvent(new Event("uni-console-control-write"));
+ // Recharge state is polled independently. Authorizing a wallet or creating a
+ // quote must not clear/reload the unrelated full channel-management snapshot.
+ const rechargeOperation=path.includes("/recharge/");
+ if(!read && !syncQueued && !rechargeOperation && typeof window !== "undefined") window.dispatchEvent(new Event("uni-console-control-write"));
  phase="body_json";
  let data=await response.json();
  const decoded=currentManagement?performance.now():0;

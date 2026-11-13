@@ -16,7 +16,8 @@ import (
 )
 
 type Service struct {
-	newAPILogGap       *time.Duration // nil uses conservative production pacing
+	rechargePayment    rechargePayment // nil uses the explicitly configured isolated Alipay CLI
+	newAPILogGap       *time.Duration  // nil uses conservative production pacing
 	auth               *authorizer
 	engine             *Engine
 	cfg                Config

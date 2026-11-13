@@ -1,0 +1,64 @@
+.recharge-panel {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+.recharge-panel h3,
+.recharge-panel h4,
+.recharge-panel p {
+  margin: 0;
+}
+.recharge-panel h4 {
+  margin-top: 10px;
+}
+.recharge-panel label {
+  display: grid;
+  gap: 7px;
+  font-size: 13px;
+}
+.recharge-panel label:has(input[type="checkbox"]) {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  line-height: 1.6;
+}
+.recharge-panel input[type="checkbox"] {
+  flex: 0 0 auto;
+  margin-top: 4px;
+}
+.recharge-panel input:not([type="checkbox"]),
+.recharge-panel select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: inherit;
+}
+.recharge-panel a {
+  color: var(--green);
+  overflow-wrap: anywhere;
+}
+.recharge-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+.recharge-products {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.recharge-quote,
+.recharge-job {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px;
+  overflow-wrap: anywhere;
+}

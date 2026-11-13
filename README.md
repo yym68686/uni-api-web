@@ -26,6 +26,11 @@ Only the selected filter key's opaque ID is stored, never the access credential.
 
 ## Features
 
+- Optional per-site [live recharge settings](docs/site-recharge.md) for sub2api +
+  Liandong: quote confirmation, isolated Alipay CLI integration, order delivery
+  and exact redemption-history verification. Disabled until explicitly configured;
+  no real payments are made by installing or opening the console.
+
 - Separate connection page, responsive workspace, light and dark themes.
 - Provider configuration order by default; API key selection keeps its configured
   channel set and order. Search, model/status/balance filters, explicit sorting

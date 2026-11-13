@@ -36,6 +36,7 @@ func (s *Service) startBackground(ctx context.Context) <-chan struct{} {
 		start(s.subUsageLoop)
 		start(s.subSpendLoop)
 		start(s.subBindingLoop)
+		start(s.rechargeLoop)
 	}
 	start(s.retentionLoop)
 	go func() { workers.Wait(); close(done) }()

@@ -447,6 +447,15 @@ func (s *Service) queueSubSyncAll(w http.ResponseWriter, r *http.Request, models
 
 func (s *Service) subDelete(w http.ResponseWriter, r *http.Request) {
 	owner, _ := s.controlUser(r)
+	var recharge bool
+	if err := s.control.db.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM console_recharge_jobs WHERE account_id=$1 AND owner=$2)`, r.PathValue("id"), owner).Scan(&recharge); err != nil {
+		http.Error(w, "删除前无法确认充值记录，请稍后重试", 503)
+		return
+	}
+	if recharge {
+		http.Error(w, "此账号有充值账目，请保留账号以便核对原订单和恢复资料；当前不能直接删除", 409)
+		return
+	}
 	result, err := s.control.db.ExecContext(r.Context(), `DELETE FROM console_sub_accounts WHERE id=$1 AND owner=$2 AND state NOT IN ('running','queued')`, r.PathValue("id"), owner)
 	if err != nil {
 		http.Error(w, "删除失败", 503)

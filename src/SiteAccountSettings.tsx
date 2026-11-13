@@ -5,6 +5,7 @@ import { X } from "lucide-react";
 import { ApiError, controlRequest } from "./api";
 import type { SubAccount } from "./Sub2apiChecks";
 import { siteRateCoefficient } from "./billingRates";
+import { SiteRecharge } from "./SiteRecharge";
 
 export function SiteAccountSettings({
   account,
@@ -20,6 +21,7 @@ export function SiteAccountSettings({
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [section, setSection] = useState<"rate" | "recharge">("rate");
   const coefficient = Number(value);
   const valid =
     value.trim() !== "" &&
@@ -83,53 +85,81 @@ export function SiteAccountSettings({
           >
             <X size={18} />
           </button>
-          <form className="source-form sub-account-form" onSubmit={submit}>
-            <label>
-              倍率系数
-              <input
-                type="number"
-                step="any"
-                min="0"
-                max="1000000"
-                required
-                value={value}
-                disabled={busy}
-                onChange={(e) => setValue(e.target.value)}
-              />
-            </label>
-            <p className="settings-note">
-              默认 1。例如设为 0.1，渠道显示倍率 0.2 将换算为 0.02；渠道实际消费
-              $10 将换算为
-              $1，利润随之重新计算。历史消费也按当前系数展示，原始账单和站点余额保持原值。
-            </p>
-            {!valid && (
+          <div
+            className="recharge-actions"
+            role="group"
+            aria-label="站点设置分类"
+          >
+            <button
+              type="button"
+              className="button small"
+              aria-pressed={section === "rate"}
+              disabled={busy}
+              onClick={() => setSection("rate")}
+            >
+              倍率设置
+            </button>
+            <button
+              type="button"
+              className="button small"
+              aria-pressed={section === "recharge"}
+              disabled={busy}
+              onClick={() => setSection("recharge")}
+            >
+              充值设置
+            </button>
+          </div>
+          {section === "recharge" ? (
+            <SiteRecharge key={account.id} account={account} />
+          ) : (
+            <form className="source-form sub-account-form" onSubmit={submit}>
+              <label>
+                倍率系数
+                <input
+                  type="number"
+                  step="any"
+                  min="0"
+                  max="1000000"
+                  required
+                  value={value}
+                  disabled={busy}
+                  onChange={(e) => setValue(e.target.value)}
+                />
+              </label>
               <p className="settings-note">
-                请输入大于 0 且不超过 1000000 的系数。
+                默认 1。例如设为 0.1，渠道显示倍率 0.2 将换算为
+                0.02；渠道实际消费 $10 将换算为
+                $1，利润随之重新计算。历史消费也按当前系数展示，原始账单和站点余额保持原值。
               </p>
-            )}
-            {error && (
-              <p className="error-banner" role="alert">
-                {error}
-              </p>
-            )}
-            <div className="sub-account-dialog-actions">
-              <button
-                type="button"
-                className="button"
-                disabled={busy}
-                onClick={close}
-              >
-                取消
-              </button>
-              <button
-                type="submit"
-                className="button primary"
-                disabled={busy || !valid}
-              >
-                {busy ? "保存中…" : "保存设置"}
-              </button>
-            </div>
-          </form>
+              {!valid && (
+                <p className="settings-note">
+                  请输入大于 0 且不超过 1000000 的系数。
+                </p>
+              )}
+              {error && (
+                <p className="error-banner" role="alert">
+                  {error}
+                </p>
+              )}
+              <div className="sub-account-dialog-actions">
+                <button
+                  type="button"
+                  className="button"
+                  disabled={busy}
+                  onClick={close}
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  className="button primary"
+                  disabled={busy || !valid}
+                >
+                  {busy ? "保存中…" : "保存设置"}
+                </button>
+              </div>
+            </form>
+          )}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
