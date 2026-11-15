@@ -156,6 +156,7 @@ func readSubObservedRatesQuery(ctx context.Context, db controlQueryDB, owner, ac
 type subChannelModelRate struct {
 	Name       string   `json:"name"`
 	Rate       *float64 `json:"rate"`
+	RateSource string   `json:"rate_source,omitempty"`
 	ObservedAt int64    `json:"observed_at,omitempty"`
 }
 
@@ -163,6 +164,22 @@ func subChannelModelRates(channels []subInstalledChannel, refs []subChannelRef) 
 	byGroup := map[string]subChannelRef{}
 	for _, ref := range refs {
 		byGroup[qualityGroupID(ref.Account, ref.Group)] = ref
+	}
+	// A provider may occur on more than one caller key. Its display metadata is
+	// provider-scoped, so a fallback must be unambiguous across all those rows.
+	providerGroups := map[string]map[string]bool{}
+	for _, channel := range channels {
+		key := channel.SourceID + "\n" + channel.Provider
+		if providerGroups[key] == nil {
+			providerGroups[key] = map[string]bool{}
+		}
+		if channel.Kind != "configured" {
+			providerGroups[key][qualityGroupID(channel.AccountID, channel.GroupID)] = true
+		} else if channel.BindingStatus == "matched" {
+			for _, bound := range channel.BoundKeys {
+				providerGroups[key][qualityGroupID(bound.AccountID, bound.GroupID)] = true
+			}
+		}
 	}
 	out := map[string]map[string]map[string]subChannelModelRate{}
 	for _, channel := range channels {
@@ -208,18 +225,32 @@ func subChannelModelRates(channels []subInstalledChannel, refs []subChannelRef) 
 			value := subChannelModelRate{Name: prefix + "-未知倍率"}
 			for index, group := range groups {
 				rate, ok := group.ObservedRates[model]
+				// Match management's per-model display: prefer the exact model's
+				// receipt, otherwise use the single bound group's advertised rate.
+				// Never borrow another model's receipt or one member of a mixed
+				// binding. Ref.Rate has already applied the site's coefficient.
+				if !ok && len(providerGroups[channel.SourceID+"\n"+channel.Provider]) == 1 && subValidCost(group.Rate) != nil {
+					rate = subObservedRate{Rate: *group.Rate}
+					ok = true
+					value.RateSource = "advertised"
+				}
 				if !ok || (index > 0 && value.Rate != nil && math.Abs(*value.Rate-rate.Rate) > 1e-9) {
 					value.Rate = nil
+					value.RateSource = ""
 					value.ObservedAt = 0
 					break
 				}
 				value.Rate = &rate.Rate
+				if value.RateSource == "" {
+					value.RateSource = "observed"
+				}
 				if index == 0 || rate.ObservedAt < value.ObservedAt {
 					value.ObservedAt = rate.ObservedAt
 				}
 			}
 			if previous, exists := models[model]; exists && (previous.Rate == nil || value.Rate == nil || math.Abs(*previous.Rate-*value.Rate) > 1e-9) {
 				value.Rate = nil
+				value.RateSource = ""
 				value.ObservedAt = 0
 			}
 			if value.Rate != nil {

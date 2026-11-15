@@ -175,7 +175,9 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 	if listing.Multipliers[source][provider] == nil || *listing.Multipliers[source][provider] != .18 || listing.Multipliers[source][newFirst] != nil {
 		t.Fatal("billing multipliers missing or unknown rate fabricated")
 	}
-	if listing.ModelBilling[source][provider][checkModel].Name != "My Site-3" || listing.ModelBilling[source][provider]["gpt-5.6-sol"].Rate != nil {
+	verified := listing.ModelBilling[source][provider][checkModel]
+	advertised := listing.ModelBilling[source][provider]["gpt-5.6-sol"]
+	if verified.Name != "My Site-3" || verified.RateSource != "observed" || advertised.Name != "My Site-0.18" || advertised.Rate == nil || *advertised.Rate != .18 || advertised.RateSource != "advertised" || advertised.ObservedAt != 0 {
 		t.Fatal("model billing did not separate actual and unverified rates", w.Body.String())
 	}
 	for _, v := range listing.Data {
@@ -185,6 +187,19 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 	}
 	if strings.Contains(w.Body.String(), "secret") {
 		t.Fatal("credentials exposed")
+	}
+	if _, err := store.db.Exec(`UPDATE console_sub_accounts SET rate_coefficient=0.1 WHERE id=$1`, account); err != nil {
+		t.Fatal(err)
+	}
+	scaled := request("GET", session, nil)
+	if scaled.Code != 200 || json.Unmarshal(scaled.Body.Bytes(), &listing) != nil {
+		t.Fatal("scaled display read failed", scaled.Code, scaled.Body.String())
+	}
+	if got := listing.ModelBilling[source][provider]["gpt-5.6-sol"]; got.Name != "My Site-0.018" || got.RateSource != "advertised" || got.ObservedAt != 0 {
+		t.Fatal("advertised fallback lost the current coefficient or fabricated a receipt", got)
+	}
+	if got := listing.ModelBilling[source][provider][checkModel]; got.Name != "My Site-0.3" || got.RateSource != "observed" || got.ObservedAt != 1 {
+		t.Fatal("receipt precedence or coefficient changed", got)
 	}
 	// Bindings used by an editor must be independent of receipt-rate history.
 	// Lock only the isolated fixture's table and compare every binding field.

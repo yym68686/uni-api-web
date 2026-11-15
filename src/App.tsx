@@ -101,7 +101,7 @@ import type { CacheTrendProps } from "./CacheTrend";
 import { QualityHistory, QualityProbability, qualityTooltip } from "./QualityHistory";
 import type { ChannelCheck } from "./ChannelChecks";
 import { channelName } from "./format";
-import { channelBilling } from "./channelBilling";
+import { channelBilling, channelBillingHint } from "./channelBilling";
 import { useConsoleSources } from "./consoleSources";
 import {
   defaultFilters,
@@ -262,7 +262,7 @@ function Overview({
         <div className="overview-list">
           {rows.slice(0, 12).map((row) => (
             <div className="overview-row" key={rowId(row)}>
-              <strong>{channelName(row)}</strong>
+              <strong title={channelBillingHint(row)}>{channelName(row)}</strong>
               {row.source_name && (
                 <small className="source-label">{row.source_name}</small>
               )}
@@ -2078,7 +2078,7 @@ function Dashboard({
                                   {channelName(row).slice(0, 1).toUpperCase()}
                                 </span>
                                 <span>
-                                  <strong>{channelName(row)}</strong>
+                                  <strong title={channelBillingHint(row)}>{channelName(row)}</strong>
                                   {row.source_name && (
                                     <small className="source-label">
                                       {row.source_name}

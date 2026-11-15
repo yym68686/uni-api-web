@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { channelBilling } from "./channelBilling";
+import { channelBilling, channelBillingHint } from "./channelBilling";
 import { channelName } from "./format";
 import { sortChannels } from "./channelSorting";
 import type { Channel } from "./types";
@@ -42,7 +42,7 @@ it("uses exact upstream model receipts in observation names without annotation o
   ).toBeNull();
 });
 
-it("sorts observed multipliers and leaves unverified channels last without using advertised fallback", () => {
+it("sorts model-specific multipliers without guessing missing metadata from provider-wide rates", () => {
   const expensive = channelBilling(row, imports);
   const cheap = { ...row, provider: "cheap", billing_multiplier: 1 };
   const unknown = { ...row, provider: "unverified", billing_multiplier: null };
@@ -60,4 +60,33 @@ it("sorts observed multipliers and leaves unverified channels last without using
   expect(
     channelBilling(row, { ...imports, model_billing: undefined }).provider_name,
   ).toBe("codex5-0.3");
+});
+
+it("uses the backend's exact advertised fallback for display and sorting without changing actual spend", () => {
+  const unverified = {
+    ...row,
+    stats: { actual_cost_usd: 4, actual_cost_samples: 2 },
+  } as Channel;
+  const result = channelBilling(unverified, {
+    ...imports,
+    model_billing: {
+      fugue: {
+        opaque: {
+          luna: { name: "codex5-0.13", rate: 0.13, rate_source: "advertised" },
+        },
+      },
+    },
+  });
+  expect(channelName(result)).toBe("codex5-0.13");
+  expect(result.billing_multiplier).toBe(0.13);
+  expect(result.billing_multiplier_source).toBe("advertised");
+  expect(channelBillingHint(result)).toContain("0.13（待核对）");
+  expect(result.stats).toBe(unverified.stats);
+  expect(result.stats.actual_cost_usd).toBe(4);
+  expect(channelBillingHint(channelBilling(row, imports))).toBeUndefined();
+  expect(sortChannels(
+    [{ ...row, provider: "expensive", billing_multiplier: 1 }, result],
+    [{ field: "multiplier", direction: "asc" }],
+    { checks: new Map() },
+  ).map(value => value.provider)).toEqual(["opaque", "expensive"]);
 });

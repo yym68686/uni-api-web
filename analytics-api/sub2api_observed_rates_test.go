@@ -217,6 +217,66 @@ func TestSubChannelModelRatesRespectModelSourceAndEveryBoundGroup(t *testing.T) 
 	}
 }
 
+func TestSubChannelModelRatesAdvertisedFallbackMatchesManagementDisplay(t *testing.T) {
+	refs := []subChannelRef{
+		{Account: "ccodex", AccountName: "ccodex", Group: 57569107, Rate: usageFloat(.13), ObservedRates: map[string]subObservedRate{"other-model": {Rate: 9, ObservedAt: 100}, "verified": {Rate: .2, ObservedAt: 90}, "free": {Rate: 0, ObservedAt: 80}}},
+		// Both Ref.Rate and ObservedRates are already coefficient-adjusted.
+		{Account: "scaled", AccountName: "scaled", Group: 7, RateCoefficient: .1, Rate: usageFloat(.03), ObservedRates: map[string]subObservedRate{"verified": {Rate: .02, ObservedAt: 70}}},
+		{Account: "zero", AccountName: "zero", Group: 7, Rate: usageFloat(0)},
+	}
+	channels := []subInstalledChannel{
+		{SourceID: "s", Provider: "p", AccountID: "ccodex", GroupID: 57569107, Models: []string{"gpt-6.1-sol", "verified", "free"}},
+		{SourceID: "s", Provider: "scaled", AccountID: "scaled", GroupID: 7, Models: []string{"alias", "verified"}, ModelMappings: map[string]string{"alias": "gemini-4-hydrogen"}},
+		{SourceID: "s", Provider: "zero", AccountID: "zero", GroupID: 7, Models: []string{"missing"}},
+		{SourceID: "s", Provider: "configured", Kind: "configured", BindingStatus: "matched", BoundKeys: []subBoundKey{{AccountID: "ccodex", GroupID: 57569107}, {AccountID: "ccodex", GroupID: 57569107}}, Models: []string{"gpt-6.1-sol"}},
+	}
+	got := subChannelModelRates(channels, refs)["s"]
+	for _, test := range []struct {
+		provider, model, name, source string
+		rate                          float64
+		at                            int64
+	}{
+		{"p", "gpt-6.1-sol", "ccodex-0.13", "advertised", .13, 0},
+		{"p", "verified", "ccodex-0.2", "observed", .2, 90},
+		{"p", "free", "ccodex-0", "observed", 0, 80},
+		{"scaled", "gemini-4-hydrogen", "scaled-0.03", "advertised", .03, 0},
+		{"scaled", "verified", "scaled-0.02", "observed", .02, 70},
+		{"zero", "missing", "zero-0", "advertised", 0, 0},
+		{"configured", "gpt-6.1-sol", "ccodex-0.13", "advertised", .13, 0},
+	} {
+		value := got[test.provider][test.model]
+		if value.Name != test.name || value.Rate == nil || *value.Rate != test.rate || value.RateSource != test.source || value.ObservedAt != test.at {
+			t.Fatalf("%s/%s: %+v", test.provider, test.model, value)
+		}
+	}
+	if refs[0].ObservedRates["gpt-6.1-sol"].ObservedAt != 0 || len(refs[0].ObservedRates) != 3 || *refs[1].Rate != .03 {
+		t.Fatal("display fallback mutated billing evidence or applied coefficient twice")
+	}
+}
+
+func TestSubChannelModelRatesAdvertisedFallbackRejectsAmbiguousOrInvalidRates(t *testing.T) {
+	for _, invalid := range []*float64{nil, usageFloat(-1), usageFloat(math.NaN()), usageFloat(math.Inf(1))} {
+		refs := []subChannelRef{{Account: "a", AccountName: "site", Group: 1, Rate: invalid}}
+		channels := []subInstalledChannel{{SourceID: "s", Provider: "p", AccountID: "a", GroupID: 1, Models: []string{"m"}}}
+		got := subChannelModelRates(channels, refs)["s"]["p"]["m"]
+		if got.Name != "site-未知倍率" || got.Rate != nil || got.RateSource != "" || got.ObservedAt != 0 {
+			t.Fatalf("invalid advertised rate accepted: %+v", got)
+		}
+	}
+	refs := []subChannelRef{
+		{Account: "a", AccountName: "site", Group: 1, Rate: usageFloat(.3)},
+		{Account: "a", AccountName: "site", Group: 2, Rate: usageFloat(.3)},
+	}
+	for _, channels := range [][]subInstalledChannel{
+		{{SourceID: "s", Provider: "p", Kind: "configured", BindingStatus: "matched", BoundKeys: []subBoundKey{{AccountID: "a", GroupID: 1}, {AccountID: "a", GroupID: 2}}, Models: []string{"m"}}},
+		{{SourceID: "s", Provider: "p", AccountID: "a", GroupID: 1, Models: []string{"m"}}, {SourceID: "s", Provider: "p", AccountID: "a", GroupID: 2, Models: []string{"m"}}},
+	} {
+		if got := subChannelModelRates(channels, refs)["s"]["p"]["m"]; got.Rate != nil || got.RateSource != "" {
+			t.Fatalf("mixed binding acquired an advertised rate: %+v", got)
+		}
+	}
+}
+
 func TestSubObservedRatesUseLatestMatchedReceiptAndCurrentKey(t *testing.T) {
 	dsn := os.Getenv("TEST_CONTROL_DATABASE_URL")
 	if dsn == "" {

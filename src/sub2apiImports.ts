@@ -62,6 +62,7 @@ export interface SubImports {
         {
           name: string;
           rate: number | null;
+          rate_source?: "observed" | "advertised";
           observed_at?: number;
         }
       >
