@@ -47,6 +47,7 @@ export interface Stats {
   response_created?: Distribution;
   first_text?: Distribution;
   request_to_dispatch?: Distribution;
+  duration?: Distribution;
   last_success_at: number | null;
 }
 export interface Channel {

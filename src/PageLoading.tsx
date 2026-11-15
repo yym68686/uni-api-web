@@ -28,6 +28,7 @@ const columns: Record<TableKind, string[]> = {
     "状态",
     "成功率",
     "首字延迟",
+    "总时间",
     "Token / 缓存率",
     "估算消费",
   ],

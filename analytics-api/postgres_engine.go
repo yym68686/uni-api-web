@@ -107,6 +107,10 @@ func openPostgresEngine(namespace string, cfg Config) (*Engine, error) {
 		db.Close()
 		return nil, err
 	}
+	if err = e.initializeDurationRollups(ctx); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err = e.seedDefaultPrices(); err != nil {
 		db.Close()
 		return nil, err

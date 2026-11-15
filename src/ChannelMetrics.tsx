@@ -184,6 +184,27 @@ export function Status({ row }: { row: Channel }) {
     </span>
   );
 }
+export function TotalTiming({ value, attempts = 0 }: { value?: Distribution; attempts?: number }) {
+  const samples = value?.sample_count || 0;
+  const recorded = samples > 0;
+  return (
+    <Tip text={<>
+      <strong>当前渠道尝试开始 → 离开当前渠道</strong><br />
+      包含成功、失败和取消的已结束尝试；流式请求计到流结束。
+      不包含尝试此渠道之前的排队、前序重试，也不包含后续渠道耗时；跳过和进行中的尝试不计入。<br />
+      p50 {ms(value?.p50_ms)} · p95 {ms(value?.p95_ms)} · 最近 {ms(value?.last_ms)}<br />
+      {count(samples)} 次耗时样本 · 分位值为直方图上界估计
+      {!recorded ? <><br />当前范围未记录总时间，不从首字延迟或成功率推算。</> : attempts > samples && <><br />部分尝试未记录耗时或历史摘要尚未补齐，仅统计已有耗时样本。</>}
+    </>}>
+      <div className="dual-metric" aria-label="渠道总时间">
+        {recorded ? <>
+          <span className="mono" aria-label={`总时间 p50 ${ms(value?.p50_ms)}`}>{ms(value?.p50_ms)}</span>
+          <span className="muted mono" aria-label={`总时间 p95 ${ms(value?.p95_ms)}`}>{ms(value?.p95_ms)}</span>
+        </> : <span className="muted">未记录</span>}
+      </div>
+    </Tip>
+  );
+}
 export function ChannelMetricHeaders({
   keySelected = false,
   channels = [],
@@ -212,6 +233,11 @@ export function ChannelMetricHeaders({
       </th>
       <th>
         首字延迟 <small>p50 / p95</small>
+      </th>
+      <th>
+        <Tip text="当前渠道单次尝试从开始到离开的总时间，包含成功、失败和取消；流式请求计到流结束。不包含前序重试和后续渠道耗时，跳过及进行中的尝试不计入。p50 / p95 为直方图上界估计。">
+          总时间 <small>p50 / p95</small>
+        </Tip>
       </th>
       <th>Token / 缓存率</th>
       <th>估算消费</th>
@@ -298,6 +324,9 @@ export function ChannelMetricCells({
             {ms(channelLatency(row.stats).value?.p95_ms)}
           </span>}
         </div>
+      </td>
+      <td>
+        <TotalTiming value={row.stats?.duration} attempts={row.stats?.started} />
       </td>
       <td className="mono">
         {row.stats?.usage_samples

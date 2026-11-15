@@ -35,6 +35,7 @@ func (e *Engine) rebuildRollup(ctx context.Context, tx *analyticsTx, level strin
 	for _, name := range []string{"first", "dispatch", "created", "text"} {
 		selects = append(selects, "max(last_"+name+"_ms)")
 	}
+	selects = append(selects, durationRollupAggregate())
 	// Hour rows contain the same additive sums, histograms and last-value
 	// clocks as their minutes, committed in the same fact transaction. FIFO
 	// already removes the expired hour before rebuilding its day. Reading the
@@ -49,7 +50,7 @@ func (e *Engine) rebuildRollup(ctx context.Context, tx *analyticsTx, level strin
 }
 
 func rollupColumns() string {
-	return rollupDimensions + "," + rollupSums + ",first_bins,dispatch_bins,created_bins,text_bins,last_ms,last_first,last_dispatch,last_created,last_text,last_first_ms,last_dispatch_ms,last_created_ms,last_text_ms"
+	return rollupDimensions + "," + rollupSums + ",first_bins,dispatch_bins,created_bins,text_bins,last_ms,last_first,last_dispatch,last_created,last_text,last_first_ms,last_dispatch_ms,last_created_ms,last_text_ms," + durationRollupColumns
 }
 
 // Only the newly inserted, deduplicated facts contribute to these deltas.
@@ -58,7 +59,7 @@ func factRollupSelect(source string) string {
 	dims := "period_ms,level,kind,coalesce(source_id,'') AS source_id,coalesce(key_id,'') AS key_id,coalesce(provider,'') AS provider,coalesce(model,'') AS model,coalesce(upstream_model,'') AS upstream_model,coalesce(endpoint,'') AS endpoint,coalesce(stream,false) AS stream,coalesce(outcome,'') AS outcome"
 	return `SELECT ` + dims + `,count(*),sum(coalesce(input_tokens,0)),sum(coalesce(output_tokens,0)),sum(coalesce(cache_read_tokens,0)),sum(coalesce(cache_write_tokens,0)),sum(coalesce(cache_write_1h_tokens,0)),count(input_tokens),count(cache_read_tokens),sum(coalesce(actual_cost_usd,0)),count(actual_cost_usd),count(first_output_ms),count(dispatch_ms),sum(coalesce(first_output_ms,0)),sum(coalesce(dispatch_ms,0)),count(response_created_ms),sum(coalesce(response_created_ms,0)),count(first_text_ms),sum(coalesce(first_text_ms,0)),` +
 		histogramSQL("first_output_ms") + `,` + histogramSQL("dispatch_ms") + `,` + histogramSQL("response_created_ms") + `,` + histogramSQL("first_text_ms") + `,
-		max(at_ms),(max(ARRAY[at_ms::DOUBLE PRECISION,first_output_ms]) FILTER(WHERE first_output_ms IS NOT NULL AND at_ms IS NOT NULL))[2],(max(ARRAY[at_ms::DOUBLE PRECISION,dispatch_ms]) FILTER(WHERE dispatch_ms IS NOT NULL AND at_ms IS NOT NULL))[2],(max(ARRAY[at_ms::DOUBLE PRECISION,response_created_ms]) FILTER(WHERE response_created_ms IS NOT NULL AND at_ms IS NOT NULL))[2],(max(ARRAY[at_ms::DOUBLE PRECISION,first_text_ms]) FILTER(WHERE first_text_ms IS NOT NULL AND at_ms IS NOT NULL))[2],max(at_ms) FILTER(WHERE first_output_ms IS NOT NULL),max(at_ms) FILTER(WHERE dispatch_ms IS NOT NULL),max(at_ms) FILTER(WHERE response_created_ms IS NOT NULL),max(at_ms) FILTER(WHERE first_text_ms IS NOT NULL) FROM ` + source + ` WHERE kind NOT IN ('trace','billing') GROUP BY ` + rollupDimensions
+		max(at_ms),(max(ARRAY[at_ms::DOUBLE PRECISION,first_output_ms]) FILTER(WHERE first_output_ms IS NOT NULL AND at_ms IS NOT NULL))[2],(max(ARRAY[at_ms::DOUBLE PRECISION,dispatch_ms]) FILTER(WHERE dispatch_ms IS NOT NULL AND at_ms IS NOT NULL))[2],(max(ARRAY[at_ms::DOUBLE PRECISION,response_created_ms]) FILTER(WHERE response_created_ms IS NOT NULL AND at_ms IS NOT NULL))[2],(max(ARRAY[at_ms::DOUBLE PRECISION,first_text_ms]) FILTER(WHERE first_text_ms IS NOT NULL AND at_ms IS NOT NULL))[2],max(at_ms) FILTER(WHERE first_output_ms IS NOT NULL),max(at_ms) FILTER(WHERE dispatch_ms IS NOT NULL),max(at_ms) FILTER(WHERE response_created_ms IS NOT NULL),max(at_ms) FILTER(WHERE first_text_ms IS NOT NULL),` + durationFactAggregate() + ` FROM ` + source + ` WHERE kind NOT IN ('trace','billing') GROUP BY ` + rollupDimensions
 }
 
 func rollupMerge() string {
@@ -79,6 +80,7 @@ func rollupMerge() string {
 		clock := value + "_ms"
 		updates = append(updates, value+"=CASE WHEN (excluded."+clock+">coalesce(rollups."+clock+",0) OR (excluded."+clock+"=rollups."+clock+" AND excluded."+value+">=rollups."+value+")) THEN excluded."+value+" ELSE rollups."+value+" END", clock+"=greatest(rollups."+clock+",excluded."+clock+")")
 	}
+	updates = append(updates, durationRollupMerge()...)
 	return " ON CONFLICT(" + rollupDimensions + ") DO UPDATE SET " + strings.Join(updates, ",")
 }
 

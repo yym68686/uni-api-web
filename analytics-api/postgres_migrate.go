@@ -26,6 +26,7 @@ func migratePostgres(args []string) error {
 	receiptIndexes := flags.Bool("prepare-receipt-indexes", false, "prepare receipt identity lookup indexes concurrently")
 	billingProviderIndex := flags.Bool("prepare-billing-provider-index", false, "prepare the provider-scoped billing lookup index concurrently")
 	usage := flags.Bool("prepare-usage-projection", false, "backfill and verify compact transactional usage rows")
+	duration := flags.Bool("prepare-duration-rollups", false, "prepare retained attempt durations in paced bounded transactions after older writers drain")
 	billing := flags.Bool("prepare-billing-projection", false, "backfill and verify billing identities after older API writers drain")
 	claims := flags.Bool("prepare-claim-projection", false, "backfill and verify receipt ownership after older API writers drain")
 	management := flags.Bool("prepare-management-projection", false, "prepare current management predicates in bounded verified transactions")
@@ -135,6 +136,12 @@ func migratePostgres(args []string) error {
 		if err = e.backfillUsageProjection(ctx); err != nil {
 			return err
 		}
+	}
+	if *duration {
+		if err = e.backfillDurationRollups(ctx, *pace); err != nil {
+			return err
+		}
+		fmt.Println(`{"phase":"duration_rollups_prepared"}`)
 	}
 	if *billing {
 		if err = e.backfillBillingProjection(ctx); err != nil {
