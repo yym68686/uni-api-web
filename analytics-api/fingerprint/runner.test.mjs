@@ -5,8 +5,77 @@ import { collect, detect, loadReference, models, score, scoreCollected } from '.
 import { analyzeSharedOutputs } from './upstream/shared-detector.ts';
 import { generateChallenges } from './upstream/challenge-browser.js';
 import { completeGemini } from './gemini.mjs';
+import { unsupportedEffortMessage } from './response-errors.mjs';
 const fixture = JSON.parse(readFileSync(new URL('./reference-fixture.json', import.meta.url)));
 const reference = loadReference();
+
+const incompatibleResponsesError = {message:'reasoning is not supported for Claude/Gemini Responses compatibility',type:'invalid_request_error',code:'invalid_request'};
+test('exact Gemini Responses effort rejection stops without weakening the reference or making fallback calls',async()=>{
+  for (const model of ['gemini-4-argon','gemini-4-carbon']) for (const wrapped of [false,true]) {
+    let calls=0;
+    const checkpoints=[];
+    const collected=await collect({model,base_url:'https://mock.example',key:'secret'},async(url,_cfg,body)=>{
+      calls++;
+      assert.equal(url,'https://mock.example/v1/responses');
+      assert.equal(body.model,model);assert.deepEqual(body.reasoning,{effort:'low'});
+      const payload={error:incompatibleResponsesError,debug:'private upstream data'};
+      return Response.json(wrapped?{error:{message:JSON.stringify(payload)}}:payload,{status:400});
+    },undefined,async c=>checkpoints.push(scoreCollected(c,reference,true)));
+    const result=scoreCollected(collected,reference,true);
+    assert.equal(calls,1);assert.equal(checkpoints.length,1);
+    assert.equal(result.status,'error');assert.equal(result.probability,null);assert.equal(result.used_outputs,0);
+    assert.deepEqual(result.candidates,[]);assert.equal(result.samples.length,1);assert.equal(result._resume,undefined);
+    assert.equal(result.samples[0].http_status,400);assert.equal(result.samples[0].error_code,'reference_effort_unsupported');
+    assert.equal(result.samples[0].message,unsupportedEffortMessage);
+    assert.ok(!JSON.stringify(result).includes('private upstream data'));
+    assert.ok(!JSON.stringify(result).includes(incompatibleResponsesError.message));
+  }
+});
+
+test('only the exact applicable HTTP rejection stops a round and arbitrary error text never escapes',async()=>{
+  const base={model:'gemini-4-argon',base_url:'https://mock.example',key:'secret'};
+  for (const [config,payload,status] of [
+    [base,{error:{...incompatibleResponsesError,message:'private token secret'}},400],
+    [base,{error:{...incompatibleResponsesError,type:'another_type'}},400],
+    [base,{error:{...incompatibleResponsesError,code:'another_code'}},400],
+    [base,{error:{message:incompatibleResponsesError.message}},400],
+    [base,{error:{message:JSON.stringify({error:{...incompatibleResponsesError,code:'another_code'}})}},400],
+    [base,{error:{message:JSON.stringify({error:incompatibleResponsesError}),type:'another_type'}},400],
+    [base,{error:{message:JSON.stringify({error:{message:JSON.stringify({error:incompatibleResponsesError})}})}},400],
+    [base,{error:incompatibleResponsesError},429],
+    [{...base,model:'gemini-3.1-pro'},{error:incompatibleResponsesError},400],
+    [{...base,model:'gpt-6-astra'},{error:incompatibleResponsesError},400],
+    [{...base,format:'openai'},{error:incompatibleResponsesError},400],
+    [{...base,format:'gemini'},{error:incompatibleResponsesError},400],
+  ]) {
+    let calls=0;
+    const collected=await collect(config,async()=>{calls++;return Response.json(payload,{status})});
+    assert.equal(calls,3);
+    assert.ok(collected.samples.every(s=>s.http_status===status && s.message==='请求失败或输出不完整' && !s.error_code));
+    assert.ok(!JSON.stringify(scoreCollected(collected,reference)).includes('private token'));
+  }
+  for (const body of ['not JSON','{"error":'+ ' '.repeat(2*1024*1024)]) {
+    let calls=0;
+    const collected=await collect(base,async()=>{calls++;return new Response(body,{status:400})});
+    assert.equal(calls,3);assert.ok(collected.samples.every(s=>s.http_status===400 && !s.error_code));
+  }
+});
+
+test('effort rejection checkpoints retained partial evidence before stopping',async()=>{
+  const config={model:'gemini-4-argon',base_url:'https://mock.example',key:'secret'};
+  let calls=0;
+  const checkpoints=[];
+  const collected=await collect(config,async()=>++calls===1
+    ? Response.json({status:'completed',output:[{type:'message',content:[{type:'output_text',text:fixture['gemini-4-argon'][0].text}]}]})
+    : Response.json({error:incompatibleResponsesError},{status:400}),undefined,async c=>checkpoints.push(scoreCollected(c,reference,true)));
+  const result=scoreCollected(collected,reference,true);
+  assert.equal(calls,2);assert.equal(checkpoints.length,2);assert.equal(result.used_outputs,1);
+  assert.equal(result.decision,'partial');assert.equal(result.status,'insufficient');assert.equal(result.probability,null);
+  assert.equal(result._resume.entries.length,1);assert.equal(result.samples.at(-1).error_code,'reference_effort_unsupported');
+  calls=0;
+  await assert.rejects(collect(config,async()=>{calls++;return Response.json({error:incompatibleResponsesError},{status:400})},undefined,async()=>{throw Error('checkpoint unavailable')}),/checkpoint unavailable/);
+  assert.equal(calls,1);
+});
 
 test('separate collection and scoring preserve results and never return raw outputs', async () => {
   let active=0,maxActive=0,calls=0;

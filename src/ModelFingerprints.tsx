@@ -28,7 +28,7 @@ export interface FingerprintResult {
   prediction: string; prediction_name: string; expected_class: string;
   used_outputs: number; checked_at: number; reference_commit: string;
   candidates: { model: string; display_name: string; probability: number | null }[];
-  samples?: { request_id: string; state: string; message?: string; http_status?: number }[];
+  samples?: { request_id: string; state: string; message?: string; http_status?: number; error_code?: string }[];
 }
 export interface FingerprintRecord extends FingerprintTarget {state: string; message: string; revision: string; updated_at_ms?: number; retained_samples?: number; result: FingerprintResult | null}
 export const fingerprintReadMessage = (error: unknown) => error instanceof ApiError && error.status === 404 ? "指纹检测服务待更新" : "模型指纹读取失败";
@@ -104,7 +104,7 @@ export function FingerprintStatus({ record }: { record?: FingerprintRecord }) {
   return <div className="quality-status-stack">
     <span className={`check-status ${status === "match" ? "pass" : status === "mismatch" ? "fail" : "inconclusive"}`}>
       {fingerprintBusy(record) ? <Spinner small /> : status === "match" ? <Check size={14}/> : status === "mismatch" ? <X size={14}/> : <CircleHelp size={14}/>}
-      {result?.decision === "not_model" ? "无法判定" : fingerprintLabels[status] || "检测失败"}
+      {status === "error" && result?.samples?.some(s => s.error_code === "reference_effort_unsupported") ? "采样参数不支持" : result?.decision === "not_model" ? "无法判定" : fingerprintLabels[status] || "检测失败"}
     </span>
     {partial && result ? <Tip text={`${partialNote}${record?.message || ""}`}>
       <small className="muted">暂定排名 · {result.used_outputs}/3<br/>最接近：{result.prediction_name}</small>

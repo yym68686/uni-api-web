@@ -12,6 +12,18 @@ import { installManagementPageFixture } from "../tests/managementPageFixture";
 afterEach(()=>vi.unstubAllGlobals());
 const record: FingerprintRecord = { account_id:"one",group_id:1,model:"gpt-6-astra",state:"done",message:"",revision:"r1",result:{model:"gpt-6-astra",status:"mismatch",probability:.12,prediction:"claude-haiku-4.5",prediction_name:"Claude Haiku 4.5",expected_class:"gpt-6-astra/6.1-sol",used_outputs:3,checked_at:1,reference_commit:"abc",candidates:[]} };
 function mount(view: React.ReactNode){return render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><Tooltip.Provider>{view}</Tooltip.Provider></QueryClientProvider>)}
+it("distinguishes unsupported fingerprint effort from a model mismatch without submitting another request",async()=>{
+ const message="上游 Responses 兼容接口不支持指纹所需的 reasoning.effort=low；本轮已停止，未降低采样要求或切换协议。";
+ const failed:FingerprintRecord={...record,model:"gemini-4-argon",result:{...record.result!,model:"gemini-4-argon",status:"error",probability:null,used_outputs:0,candidates:[],samples:[{request_id:"failed",state:"error",http_status:400,error_code:"reference_effort_unsupported",message}]}};
+ const fetcher=vi.fn(async(_input:RequestInfo|URL,_init?:RequestInit)=>Response.json({data:[failed],supported_models:FINGERPRINT_MODELS}));
+ vi.stubGlobal("fetch",fetcher);
+ mount(<FingerprintPanel targets={[{account_id:"one",group_id:1,model:"gemini-4-argon"}]}/>);
+ await screen.findByText("采样参数不支持");
+ expect(screen.getByText(`${message} · HTTP 400`)).toBeInTheDocument();
+ expect(screen.queryByText("不匹配",{exact:true})).not.toBeInTheDocument();
+ expect(screen.queryByText("12.0%")).not.toBeInTheDocument();
+ expect(fetcher.mock.calls.every(args=>!(args[1] as RequestInit|undefined)?.method)).toBe(true);
+});
 it("shows requested-class probability below mismatch with the same quality colors and unknown as dash",()=>{
  const view=mount(<FingerprintStatus record={record}/>);
  expect(screen.getByText("不匹配")).toBeInTheDocument();expect(screen.getByText("12.0%")).toHaveClass("quality-poor");

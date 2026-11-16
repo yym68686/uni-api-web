@@ -60,6 +60,18 @@ protocol exists for a Gemini model); configured channels go through the gateway'
 Responses endpoint and its explicit provider-targeting capability. Protocol
 failure is a failed check, never a mismatched identity.
 
+Some upstream Responses compatibility layers explicitly reject `reasoning` for
+Gemini even though ordinary requests succeed. For the exact observed HTTP 400
+`invalid_request_error` / `invalid_request` rejection, low-effort Gemini sampling
+stops after that attempt and checkpoints a static `reference_effort_unsupported`
+diagnostic. No arbitrary error body is exposed. The UI shows “采样参数不支持”.
+Both the direct error and the gateway's single JSON-in-`error.message` envelope
+are recognized; substring matching and recursive unwrapping are not used.
+The collector never removes the reference effort, switches protocol, or retries
+to manufacture a score. Other HTTP errors keep their existing behavior. A native
+Gemini endpoint in site documentation does not establish that a configured
+Responses route can use it; changing that route is a separate configuration action.
+
 Every attempt is checkpointed before the next request. The UI reads the latest
 ranking while collection is still running, and retains it when queued, cancelled
 or interrupted. An explicit continuation requests only the missing samples;

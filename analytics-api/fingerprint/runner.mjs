@@ -11,6 +11,7 @@ import { analyzeSharedOutputs, supportsSharedDetector } from './upstream/shared-
 import { decodeDetector } from './upstream/detector-codec.ts';
 import { COMPLETION_TIMEOUT_MS } from './upstream/completion-request.ts';
 import { completeGemini } from './gemini.mjs';
+import { fingerprintResponse, unsupportedEffortMessage } from './response-errors.mjs';
 import { parseNumbers } from './upstream/fingerprint-core.js';
 
 const modelBytes = readFileSync(new URL('./models.json', import.meta.url));
@@ -93,6 +94,7 @@ export async function collect(config, transport, signal, checkpoint) {
   for (const challenge of challenges) {
     signal?.throwIfAborted();
     const requestId = 'fingerprint-' + randomUUID(), at = Date.now();
+    let stopRound = false;
     try {
       const format = config.format || 'responses';
       if (!['responses', 'anthropic', 'openai', 'gemini'].includes(format)) throw Error('unsupported_protocol');
@@ -106,7 +108,7 @@ export async function collect(config, transport, signal, checkpoint) {
           body: JSON.stringify(body) });
         return response;
       });
-      const boundedSend = async (...args) => bounded(await send(...args));
+      const boundedSend = async (...args) => fingerprintResponse(bounded(await send(...args)), cfg);
       const timeout = AbortSignal.timeout(COMPLETION_TIMEOUT_MS);
       const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
       const result = format === 'gemini'
@@ -120,15 +122,18 @@ export async function collect(config, transport, signal, checkpoint) {
       if (numbers.length >= Math.max(80, Math.ceil(challenge.expected_count*.55))) retained.push({numbers,expected_count:challenge.expected_count,sample});
     } catch (error) {
       signal?.throwIfAborted();
+      stopRound = error.fingerprintCode === 'reference_effort_unsupported';
       outputs.push({ text: '', expected_count: challenge.expected_count });
       samples.push({ request_id: requestId, state: 'error', duration_ms: Date.now() - at,
         expected_count: challenge.expected_count, http_status: Number.isInteger(error.httpStatus) ? error.httpStatus : undefined,
         // Do not persist arbitrary messages from an untrusted endpoint.
-        message: '请求失败或输出不完整' });
+        ...(stopRound ? {error_code:'reference_effort_unsupported'} : {}),
+        message: stopRound ? unsupportedEffortMessage : '请求失败或输出不完整' });
     }
     // Checkpoint failure stops collection before another paid call. It must not
     // be mistaken for an upstream failure or cause a valid sample to be retried.
     if (checkpoint) await checkpoint({ model:config.model,outputs,samples,retained,format:config.format || 'responses',checked_at:Math.floor(Date.now()/1000),duration_ms:Date.now()-started });
+    if (stopRound) break;
   }
   return { model: config.model, outputs, samples, retained, format:config.format || 'responses',checked_at: Math.floor(Date.now() / 1000), duration_ms: Date.now() - started };
 }
