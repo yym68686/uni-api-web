@@ -8,3 +8,5 @@ dist/
 coverage/
 
 /public/uni-api-browser-helper.zip
+/public/uni-api-browser-helper-chrome.zip
+/public/uni-api-browser-helper-firefox.zip

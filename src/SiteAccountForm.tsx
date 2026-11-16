@@ -123,7 +123,7 @@ export function AccountForm({
       if (!available)
         throw new Error(
           browserKind === "newapi"
-            ? "请安装或更新登录助手到 1.2.0 或更新版本，并重新加载扩展和控制台。"
+            ? "请安装或更新登录助手到 1.3.0 或更新版本，并重新加载扩展和控制台。"
             : "登录助手未连接，请重新加载扩展和控制台后重试。",
         );
       abort.signal.throwIfAborted();
@@ -353,16 +353,22 @@ export function AccountForm({
             )}
             {browserNeeded && browserKind === "newapi" && (
               <p className="settings-note">
-                使用登录助手 1.2.0 或更新版本。首次请点击扩展图标授权 New API
+                使用登录助手 1.3.0 或更新版本。首次请点击扩展图标授权 New API
                 会话读取； 在打开的原站完成验证并点击登录，成功后自动返回。
-                {!helperReady && (
-                  <>
-                    {" "}
-                    <a href="/uni-api-browser-helper.zip" download>
-                      下载新版登录助手
-                    </a>
-                  </>
-                )}
+              </p>
+            )}
+            {browserNeeded && !helperReady && (
+              <p className="settings-note">
+                登录助手 1.3.0 支持 Chrome 121+ / Firefox 140+。
+                <a href="/uni-api-browser-helper-chrome.zip" download>
+                  下载 Chrome 登录助手
+                </a>
+                {" · "}
+                <a href="/uni-api-browser-helper-firefox.zip" download>
+                  下载 Firefox 登录助手
+                </a>
+                。解压后，Chrome 在扩展管理页加载；Firefox 在 about:debugging
+                中临时加载 manifest.json（重启失效，长期使用需签名安装包）。
               </p>
             )}
             {error && (

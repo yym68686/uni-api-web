@@ -86,12 +86,15 @@ it.each([true, false])(
           browser_cookies: { session: "signed-session" },
         });
       } else {
-        expect(await screen.findByRole("alert")).toHaveTextContent("1.2.0");
+        expect(await screen.findByRole("alert")).toHaveTextContent("1.3.0");
         expect(logins).toHaveLength(0);
         expect(writes).toHaveLength(1);
         expect(
-          screen.getByRole("link", { name: "下载新版登录助手" }),
-        ).toHaveAttribute("href", "/uni-api-browser-helper.zip");
+          screen.getByRole("link", { name: "下载 Chrome 登录助手" }),
+        ).toHaveAttribute("href", "/uni-api-browser-helper-chrome.zip");
+        expect(
+          screen.getByRole("link", { name: "下载 Firefox 登录助手" }),
+        ).toHaveAttribute("href", "/uni-api-browser-helper-firefox.zip");
       }
     } finally {
       window.removeEventListener("message", onMessage);

@@ -1,4 +1,6 @@
 (() => {
+  if (window.top !== window) return;
+  const api = globalThis.browser ?? globalThis.chrome;
   const channel = "uni-api-browser-login-v1";
   window.addEventListener("message", async (event) => {
     if (
@@ -10,16 +12,19 @@
     const { id, type, input } = event.data;
     if (typeof id !== "string" || id.length > 100) return;
     if (type === "ping") {
-      window.postMessage({ channel, id, type: "ready", capabilities: ["sub2api", "newapi"] }, location.origin);
+      window.postMessage(
+        { channel, id, type: "ready", capabilities: ["sub2api", "newapi"] },
+        location.origin,
+      );
       return;
     }
     if (type === "cancel") {
-      void chrome.runtime.sendMessage({ type: "cancel", id });
+      void api.runtime.sendMessage({ type: "cancel", id }).catch(() => {});
       return;
     }
     if (type !== "login") return;
     try {
-      const result = await chrome.runtime.sendMessage({
+      const result = await api.runtime.sendMessage({
         type: "login",
         id,
         input,

@@ -79,7 +79,7 @@ export function loginWithBrowser(
         auth &&
         (input.kind === "newapi") !== (auth.browser_kind === "newapi")
       ) {
-        reject(new Error("请更新登录助手到 1.2.0 或更新版本后重试"));
+        reject(new Error("请更新登录助手到 1.3.0 或更新版本后重试"));
         return;
       }
       if (

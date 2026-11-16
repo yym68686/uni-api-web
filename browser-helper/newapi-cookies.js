@@ -1,8 +1,11 @@
+import { extensionAPI } from "./webextension-api.js";
+
 export async function newAPISessionCookies(base, tab) {
+  const api = extensionAPI();
   const site = new URL(base);
   if (new URL(tab.url).origin !== site.origin)
     throw Error("站点跳转到其他域名，已停止登录");
-  const stores = await chrome.cookies.getAllCookieStores();
+  const stores = await api.cookies.getAllCookieStores();
   const store = stores.find((s) => s.tabIds.includes(tab.id));
   if (!store) throw Error("无法定位原站登录会话，请重试");
   const cookies = {};
@@ -10,7 +13,7 @@ export async function newAPISessionCookies(base, tab) {
     ["session", "/api/user/self"],
     ["new_api_refresh", "/api/user/auth/refresh"],
   ]) {
-    const cookie = await chrome.cookies.get({
+    const cookie = await api.cookies.get({
       name,
       url: base + path,
       storeId: store.id,
@@ -20,6 +23,7 @@ export async function newAPISessionCookies(base, tab) {
     if (
       !cookie ||
       cookie.partitionKey ||
+      cookie.firstPartyDomain ||
       cookie.domain.replace(/^\./, "").toLowerCase() !==
         site.hostname.toLowerCase()
     )

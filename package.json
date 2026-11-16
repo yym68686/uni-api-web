@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 4173 --strictPort",
     "test": "vitest run",
+    "package:browser-helper": "node scripts/package-browser-helper.mjs",
     "format": "prettier --write src vite.config.ts",
     "prebuild": "node scripts/package-browser-helper.mjs"
   },
