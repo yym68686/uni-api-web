@@ -297,6 +297,11 @@ func (s *Service) subInstalledChannels(w http.ResponseWriter, r *http.Request) {
 					Position int
 				}{key.Prefix, key.Position}
 			}
+			if !bindingsOnly {
+				for provider, name := range s.observationCopyLabels(r.Context(), src, state, keyIDs) {
+					labels[provider] = name
+				}
+			}
 			endLookup := managementReadSpan(r.Context(), "bindings_owned_lookup")
 			lookup := subInstalledChannelRefs(state, refs, keyIDs)
 			endLookup()

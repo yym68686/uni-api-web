@@ -62,6 +62,20 @@ it("sorts model-specific multipliers without guessing missing metadata from prov
   ).toBe("codex5-0.3");
 });
 
+it("shows an unbound copy's source label without changing route identity or inventing a rate", () => {
+  const copy = { ...row, provider: "sub2api-copy-01bd2c8136e0c116158d" };
+  const result = channelBilling(copy, {
+    data: [],
+    labels: { fugue: { [copy.provider]: "bananarouter" } },
+    model_billing: {},
+    unavailable_sources: [],
+  });
+  expect(channelName(result)).toBe("bananarouter");
+  expect(result.provider).toBe(copy.provider);
+  expect(result.billing_multiplier).toBeNull();
+  expect(result.billing_multiplier_source).toBeUndefined();
+});
+
 it("uses the backend's exact advertised fallback for display and sorting without changing actual spend", () => {
   const unverified = {
     ...row,
