@@ -946,17 +946,17 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
       setAction("");
     }
   }
-  async function syncAll(detect = true) {
-    if (action || awaitingSyncProgress || !syncableAccounts.length || (detect && !detectionModels.length)) return;
-    setAction(detect ? "sync-all" : "sync-only");
+  async function syncAccounts(detect = true, account?: SubAccount) {
+    if (action || awaitingSyncProgress || (account ? pending(account.state) : !syncableAccounts.length) || (detect && !detectionModels.length)) return;
+    setAction(account?.id || (detect ? "sync-all" : "sync-only"));
     setError("");
     setSyncSubmitted(null);
     try {
-      const result = await controlRequest<{ queued: number }>(
-        detect ? "/v1/sub2api/accounts/sync-selected" : "/v1/sub2api/accounts/sync-only",
+      const result = await controlRequest<{ queued: number | boolean }>(
+        account ? `/v1/sub2api/accounts/${encodeURIComponent(account.id)}/sync-selected` : detect ? "/v1/sub2api/accounts/sync-selected" : "/v1/sub2api/accounts/sync-only",
         { method: "POST", body: JSON.stringify(detect ? { models: detectionModels } : {}) },
       );
-      setSyncSubmitted({count:result.queued,detect});
+      setSyncSubmitted({count:account ? 1 : Number(result.queued),detect});
       setSyncProgressSubmission(previous=>({owner:user,generation:previous.owner===user?previous.generation+1:1}));
     } catch (e) {
       setError(e instanceof ApiError && e.status === 404 ? "同步检测服务待更新，请稍后重试。" : e instanceof Error ? e.message : "批量同步失败");
@@ -1065,7 +1065,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                 query.isPending ||
                 query.isError
               }
-              onClick={() => void syncAll()}
+              onClick={() => void syncAccounts()}
             >
               {action === "sync-all" ? (
                 <Spinner small />
@@ -1079,7 +1079,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
             <button className="button small" aria-label="一键同步" title="仅同步账号、分组和密钥信息，不执行模型或能力检测"
               aria-busy={action === "sync-only"}
               disabled={!syncableAccounts.length || awaitingSyncProgress || !!action || query.isPending || query.isError}
-              onClick={()=>void syncAll(false)}>
+              onClick={()=>void syncAccounts(false)}>
               {action === "sync-only" ? <Spinner small/> : <RefreshCw size={15}/>}
               {action === "sync-only" ? "正在提交…" : `一键同步 · ${syncableAccounts.length} 个账号`}
             </button>
@@ -1113,11 +1113,13 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
           <AccountForm
             key={form.account?.id || "new"}
             initial={form.account}
+            detectionModels={detectionModels}
             close={() => setForm(null)}
             saved={() => {
               setForm(null);
               void client.invalidateQueries({ queryKey: ["sub2api"] });
               void client.invalidateQueries({ queryKey: ["sub2api-headers"] });
+              setSyncProgressSubmission(previous=>({owner:user,generation:previous.owner===user?previous.generation+1:1}));
             }}
           />
         )}
@@ -1202,13 +1204,9 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                         <>
                           <button
                             className="button small"
-                            disabled={!!action}
-                            onClick={() =>
-                              void mutate(
-                                a.id,
-                                `/v1/sub2api/accounts/${a.id}/sync`,
-                              )
-                            }
+                            title={!detectionModels.length ? "请在检测模型设置中选择模型" : `仅检测已勾选的 ${detectionModels.length} 个模型`}
+                            disabled={!!action || awaitingSyncProgress || !detectionModels.length}
+                            onClick={() => void syncAccounts(true, a)}
                           >
                             <RefreshCw size={13} />
                             同步并检测

@@ -181,7 +181,7 @@ export async function controlRequest<T>(path:string,init:RequestInit={}):Promise
  // A queued sync changes task state asynchronously. Its caller reads the
  // dedicated progress endpoint; clearing/reloading the channel page here
  // would discard the user's current view before any new results exist.
- const syncQueued=init.method?.toUpperCase()==="POST" && ["/v1/sub2api/accounts/sync-selected","/v1/sub2api/accounts/sync-only"].includes(path);
+ const syncQueued=init.method?.toUpperCase()==="POST" && (["/v1/sub2api/accounts/sync-selected","/v1/sub2api/accounts/sync-only"].includes(path) || /^\/v1\/sub2api\/accounts\/[^/]+\/sync-selected$/.test(path));
  // Recharge state is polled independently. Authorizing a wallet or creating a
  // quote must not clear/reload the unrelated full channel-management snapshot.
  const rechargeOperation=path.includes("/recharge/");

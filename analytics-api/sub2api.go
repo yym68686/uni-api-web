@@ -381,8 +381,12 @@ func (s *Service) subSaveLogin(w http.ResponseWriter, r *http.Request, base, log
 }
 
 func (s *Service) subSync(w http.ResponseWriter, r *http.Request) {
+	models, ok := decodeSubSyncModels(w, r)
+	if !ok {
+		return
+	}
 	owner, _ := s.controlUser(r)
-	result, err := s.control.db.ExecContext(r.Context(), `UPDATE console_sub_accounts SET state='queued',job_kind='sync',sync_models=NULL,job_id='',lease_until=NULL,message='' WHERE id=$1 AND owner=$2 AND state NOT IN ('queued','running')`, r.PathValue("id"), owner)
+	result, err := s.control.db.ExecContext(r.Context(), `UPDATE console_sub_accounts SET state='queued',job_kind='sync',sync_models=$3,job_id='',lease_until=NULL,message='' WHERE id=$1 AND owner=$2 AND state NOT IN ('queued','running')`, r.PathValue("id"), owner, mustJSON(models))
 	if err != nil {
 		http.Error(w, "无法同步账号", 503)
 		return
@@ -396,29 +400,40 @@ func (s *Service) subSync(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) subSyncAll(w http.ResponseWriter, r *http.Request) {
+	models, ok := decodeSubSyncModels(w, r)
+	if !ok {
+		return
+	}
+	s.queueSubSyncAll(w, r, models)
+}
+
+// Both single-account and all-account syncs capture the same explicit scope.
+// Reject missing/empty selections before touching durable jobs; NULL is only
+// retained for initial account creation and already queued legacy work.
+func decodeSubSyncModels(w http.ResponseWriter, r *http.Request) ([]string, bool) {
 	var in struct {
 		Models []string `json:"models"`
 	}
 	if !decodeConfiguration(w, r, &in) {
-		return
+		return nil, false
 	}
 	if len(in.Models) == 0 || len(in.Models) > 256 {
 		http.Error(w, "请在检测模型设置中选择模型（最多 256 个）", 400)
-		return
+		return nil, false
 	}
 	models := []string{}
 	seen := map[string]bool{}
 	for _, model := range in.Models {
 		if !validProbeModel(model) {
 			http.Error(w, "无效的检测模型", 400)
-			return
+			return nil, false
 		}
 		if !seen[model] {
 			models = append(models, model)
 			seen[model] = true
 		}
 	}
-	s.queueSubSyncAll(w, r, models)
+	return models, true
 }
 
 // An explicit empty scope is understood by existing workers as no model

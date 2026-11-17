@@ -13,7 +13,7 @@ func subSyncMetadataOnly(ctx context.Context) bool {
 }
 
 // The durable sync task captures the checkbox selection at submission time.
-// An absent scope is retained only for legacy single-account/initial syncs.
+// An absent scope is retained only for initial syncs/already queued legacy jobs.
 func withSubSyncModels(ctx context.Context, models []string) context.Context {
 	return context.WithValue(ctx, subSyncScopeKey{}, models)
 }

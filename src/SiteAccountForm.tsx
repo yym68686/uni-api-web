@@ -12,11 +12,13 @@ export function AccountForm({
   close,
   saved,
   sessionOnly = false,
+  detectionModels,
 }: {
   initial: SubAccount | null;
   close: () => void;
   saved: () => void;
   sessionOnly?: boolean;
+  detectionModels?: string[];
 }) {
   const endpoint = initial
     ? `/v1/sub2api/accounts/${encodeURIComponent(initial.id)}/login`
@@ -96,11 +98,12 @@ export function AccountForm({
     setLoginSaved(true);
     if (initial && !sessionOnly) {
       try {
+        if (!detectionModels?.length) throw new Error("请在检测模型设置中选择模型");
         await controlRequest(
-          `/v1/sub2api/accounts/${encodeURIComponent(initial.id)}/sync`,
+          `/v1/sub2api/accounts/${encodeURIComponent(initial.id)}/sync-selected`,
           {
             method: "POST",
-            body: "{}",
+            body: JSON.stringify({models: detectionModels}),
           },
         );
       } catch (e) {

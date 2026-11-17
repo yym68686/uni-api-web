@@ -368,6 +368,8 @@ func (s *Service) controlHandler() http.Handler {
 	mux.HandleFunc("POST /v1/sub2api/accounts/sync-only", s.subSyncAllOnly)
 	mux.HandleFunc("DELETE /v1/sub2api/accounts/{id}", s.subDelete)
 	mux.HandleFunc("POST /v1/sub2api/accounts/{id}/sync", s.subSync)
+	// Older APIs must fail closed instead of silently discarding a model scope.
+	mux.HandleFunc("POST /v1/sub2api/accounts/{id}/sync-selected", s.subSync)
 	mux.HandleFunc("POST /v1/sub2api/accounts/{id}/stop", s.subStop)
 	mux.HandleFunc("POST /v1/sub2api/check-curl", s.copyProbeCurl)
 	mux.HandleFunc("POST /v1/sub2api/checks", s.subCheck)

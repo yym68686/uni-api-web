@@ -6,7 +6,7 @@ import * as Tooltip from "@radix-ui/react-tooltip";
 import { Sub2apiChecks } from "./Sub2apiChecks";
 import type { Result, SubAccount, SubTarget } from "./Sub2apiChecks";
 import type { ManagementPage, ManagementSelection } from "./managementQuery";
-import { SUB_MODELS } from "./sub2apiModels";
+import { SUB_MODELS, saveSubModels } from "./sub2apiModels";
 import { controlRequest } from "./api";
 import { useState } from "react";
 import type { ManagementPagePosition } from "./managementQuery";
@@ -539,6 +539,59 @@ it("allows sync-only with no selected models and never falls back to detection o
  await screen.findByText("同步检测服务待更新，请稍后重试。");
  expect(writes).toEqual(["/analytics/v1/sub2api/accounts/sync-only"]);
  expect(screen.getByText("Channel 1",{selector:"strong"})).toBeVisible();
+});
+
+it.each([202,404])("submits a single site's saved model selection, never a legacy all-model sync (HTTP %s)",async status=>{
+ const owner="single-sync-scope",selected=SUB_MODELS.slice(0,36);
+ const catalog=[...SUB_MODELS,...Array.from({length:291-SUB_MODELS.length},(_,i)=>`site-extra-${i}`)];
+ expect(selected).toHaveLength(36);
+ expect(catalog).toHaveLength(291);
+ saveSubModels(owner,selected,catalog);
+ let pageReads=0,progressReads=0;
+ const writes:{path:string;body:unknown}[]=[];
+ vi.stubGlobal("fetch",vi.fn(async(input:string,init?:RequestInit)=>{
+  const path=new URL(input).pathname;
+  if(path.endsWith("/accounts/progress")){progressReads++;return idleProgress();}
+  if(init?.method==="POST"){
+   writes.push({path,body:init.body?JSON.parse(String(init.body)):null});
+   return status===202?Response.json({queued:true},{status}):new Response("404 page not found",{status});
+  }
+  if(path.endsWith("/channel-management/query")){pageReads++;return Response.json({...page(),models:catalog,detection_models:catalog});}
+  return Response.json({data:[]});
+ }));
+ mount(owner);const user=userEvent.setup();
+ await screen.findByText("Channel 1",{selector:"strong"});
+ // The list's model filter is not the saved account-sync detection scope.
+ await user.selectOptions(screen.getByLabelText("检测模型筛选"),"gpt-5.5");
+ await waitFor(()=>expect(pageReads).toBe(2));
+ const row=screen.getByRole("listitem",{name:"Owned site"});
+ const button=within(row).getByRole("button",{name:"同步并检测"});
+ expect(button).toHaveAttribute("title","仅检测已勾选的 36 个模型");
+ await waitFor(()=>expect(progressReads).toBeGreaterThan(0));
+ const before=progressReads;
+ await user.click(button);
+ if(status===202){
+  await screen.findByText("已提交 1 个账号，正在后台同步并检测。");
+  await waitFor(()=>expect(progressReads).toBeGreaterThan(before));
+  expect(pageReads).toBe(2);
+ }else await screen.findByText("同步检测服务待更新，请稍后重试。");
+ expect(writes).toEqual([{path:"/analytics/v1/sub2api/accounts/owned/sync-selected",body:{models:selected}}]);
+});
+
+it("disables single-account sync when the saved detection selection is empty",async()=>{
+ const owner="single-sync-empty";saveSubModels(owner,[]);
+ const writes:string[]=[];
+ vi.stubGlobal("fetch",vi.fn(async(input:string,init?:RequestInit)=>{
+  const path=new URL(input).pathname;
+  if(init?.method==="POST")writes.push(path);
+  if(path.endsWith("/accounts/progress"))return idleProgress();
+  if(path.endsWith("/channel-management/query"))return Response.json(page());
+  return Response.json({data:[]});
+ }));
+ mount(owner);
+ await screen.findByText("Channel 1",{selector:"strong"});
+ expect(within(screen.getByRole("listitem",{name:"Owned site"})).getByRole("button",{name:"同步并检测"})).toBeDisabled();
+ expect(writes).toEqual([]);
 });
 
 it.each(["filter","next-page"])("updates only channel results for %s, keeping account rows and choices mounted",async change=>{

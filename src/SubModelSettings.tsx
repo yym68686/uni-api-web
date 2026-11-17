@@ -35,7 +35,7 @@ export function SubModelSettings({
         <Dialog.Content className="guide-dialog sub-model-settings">
           <Dialog.Title>检测模型设置</Dialog.Title>
           <Dialog.Description>
-            一键同步并检测、未筛选模型时的批量检测，仅检测这里勾选的模型。筛选单个模型后直接检测该模型。
+            站点账号的同步并检测（含一键同步并检测）、未筛选模型时的批量检测，仅检测这里勾选的模型。筛选单个模型只影响渠道检测，不改变账号同步的检测范围。
           </Dialog.Description>
           <Dialog.Close asChild>
             <button

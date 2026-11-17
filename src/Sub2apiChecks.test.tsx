@@ -2153,6 +2153,8 @@ it("opens account forms in a modal and restores focus when closed", async () => 
 });
 
 it.each([false, true])("shows a saved site password in the login form and retries only a failed sync (%s)", async failSync => {
+  const selected = ["gpt-6.1-sol", "gemini-4-argon"];
+  saveSubModels("reauth-scope", selected);
   const data = fixtures().slice(0, 1);
   data[0].has_saved_password = true;
   const writes: {path: string; body: unknown}[] = [];
@@ -2166,7 +2168,7 @@ it.each([false, true])("shows a saved site password in the login form and retrie
     return Response.json({data: input.endsWith("/accounts") ? data : []});
   }));
   const user = userEvent.setup();
-  mount();
+  mount("reauth-scope");
   await user.click(await screen.findByRole("button", {name: "重新登录"}));
   const dialog = within(screen.getByRole("dialog", {name: "重新登录站点账号"}));
   expect(dialog.getByLabelText("账号密码")).not.toBeRequired();
@@ -2181,8 +2183,8 @@ it.each([false, true])("shows a saved site password in the login form and retrie
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   expect(writes).toEqual([
     {path: "/analytics/v1/sub2api/accounts/one/login", body: {name: "one", base: "https://one.test", email: "one@test.com", password: "saved-site-password"}},
-    {path: "/analytics/v1/sub2api/accounts/one/sync", body: {}},
-    ...(failSync ? [{path: "/analytics/v1/sub2api/accounts/one/sync", body: {}}] : []),
+    {path: "/analytics/v1/sub2api/accounts/one/sync-selected", body: {models: selected}},
+    ...(failSync ? [{path: "/analytics/v1/sub2api/accounts/one/sync-selected", body: {models: selected}}] : []),
   ]);
   expect(JSON.stringify(localStorage)).not.toContain("saved-site-password");
   expect(JSON.stringify(sessionStorage)).not.toContain("saved-site-password");

@@ -15,19 +15,26 @@ import (
 
 // Exercise HTTP queue -> durable claim -> complete sync using local fixtures,
 // including site-discovered models and successful historical results.
-func TestSubSyncAllSelectedModelsReachEveryProbeStage(t *testing.T) {
+func TestSubSyncSelectedModelsReachEveryProbeStage(t *testing.T) {
 	for _, test := range []struct {
 		models   []string
 		disabled bool
+		single   bool
 	}{
 		{}, {models: []string{"gemini-4-argon"}},
 		{models: []string{"gpt-6.1-sol", "gemini-4-argon", "extra-selected"}},
 		{models: []string{"gpt-6.1-sol", "gemini-4-argon", "extra-selected"}, disabled: true},
+		{models: []string{"gemini-4-argon"}, single: true},
+		{models: []string{"gpt-6.1-sol", "gemini-4-argon", "extra-selected"}, single: true},
+		{models: []string{"gpt-6.1-sol", "gemini-4-argon", "extra-selected"}, single: true, disabled: true},
 	} {
 		selected := test.models
 		name := strings.Join(selected, "+")
 		if test.disabled {
 			name += "-disabled"
+		}
+		if test.single {
+			name += "-single"
 		}
 		t.Run(name, func(t *testing.T) {
 			s, account, owner := newAPITestService(t)
@@ -94,6 +101,9 @@ func TestSubSyncAllSelectedModelsReachEveryProbeStage(t *testing.T) {
 			}))
 			token, _ := s.control.newSession(ctx, owner)
 			path := "/v1/sub2api/accounts/sync-selected"
+			if test.single {
+				path = "/v1/sub2api/accounts/" + account + "/sync-selected"
+			}
 			if len(selected) == 0 {
 				path = "/v1/sub2api/accounts/sync-only"
 			}

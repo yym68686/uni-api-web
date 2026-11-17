@@ -325,7 +325,8 @@ func TestSubAccountLifecycleIsolationAndIdempotency(t *testing.T) {
 		ID string `json:"id"`
 	}
 	json.Unmarshal(w.Body.Bytes(), &added)
-	if w = request("POST", "/v1/sub2api/accounts/"+added.ID+"/sync", "{}", foreign); w.Code != 409 {
+	syncBody := mustJSON(map[string]any{"models": subModels})
+	if w = request("POST", "/v1/sub2api/accounts/"+added.ID+"/sync", syncBody, foreign); w.Code != 409 {
 		t.Fatal("foreign mutation", w.Code)
 	}
 	if !service.subWorkOne(context.Background()) {
@@ -372,7 +373,7 @@ func TestSubAccountLifecycleIsolationAndIdempotency(t *testing.T) {
 	}
 	service = &Service{control: store}
 	groupCount.Store(2)
-	if w = request("POST", "/v1/sub2api/accounts/"+added.ID+"/sync", "{}", token); w.Code != 202 {
+	if w = request("POST", "/v1/sub2api/accounts/"+added.ID+"/sync", syncBody, token); w.Code != 202 {
 		t.Fatal(w.Body.String())
 	}
 	service.subWorkOne(context.Background())
@@ -401,7 +402,7 @@ func TestSubAccountLifecycleIsolationAndIdempotency(t *testing.T) {
 	if probes.Load() != int32(6*subFixtureSyncProbeCount()) {
 		t.Fatal("filter ignored", probes.Load())
 	}
-	request("POST", "/v1/sub2api/accounts/"+added.ID+"/sync", "{}", token)
+	request("POST", "/v1/sub2api/accounts/"+added.ID+"/sync", syncBody, token)
 	request("POST", "/v1/sub2api/accounts/"+added.ID+"/stop", "{}", token)
 	if service.subWorkOne(context.Background()) || probes.Load() != int32(6*subFixtureSyncProbeCount()) {
 		t.Fatal("stopped work executed")

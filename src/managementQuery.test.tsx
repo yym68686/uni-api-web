@@ -235,7 +235,7 @@ it("rejects incomplete or conflicting single-model summary attestations", async 
   }
 });
 
-it.each(["sync-selected","sync-only"])("keeps the current page after %s while ordinary configuration writes still refresh", async endpoint => {
+it.each(["sync-selected","sync-only","owned/sync-selected"])("keeps the current page after %s while ordinary configuration writes still refresh", async endpoint => {
   let reads=0;
   vi.stubGlobal("fetch",vi.fn(async(_input:string,init?:RequestInit)=>{
     if(init?.method)return Response.json({queued:1},{status:202});
