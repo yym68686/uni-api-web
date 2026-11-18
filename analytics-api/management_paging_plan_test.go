@@ -139,6 +139,37 @@ func TestManagementPagingResetWarmRetainsCurrentFirstAndDeepPage(t *testing.T) {
 	}
 }
 
+func TestManagementPagingResetDirectorySurvivesFirstPageTimeout(t *testing.T) {
+	s := managementHydrationFixture(t)
+	prepareManagementRevisionsForTest(t, s.control.db)
+	ctx := context.Background()
+	snapshot, err := s.readManagementResetDirectory(ctx, "owner")
+	if err != nil || len(snapshot.Page.Rows) != 25 || snapshot.Page.NextCursor == "" {
+		t.Fatal("reset directory could not be evaluated", err)
+	}
+	rebuilt, err := s.retainAndWarmManagementResetDirectory(ctx, "owner", snapshot,
+		func(context.Context, string, managementQueryFilters, string, bool) (managementPageResponse, bool, error) {
+			return managementPageResponse{}, false, context.DeadlineExceeded
+		})
+	if !rebuilt || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal("optional timeout lost the verified directory", rebuilt, err)
+	}
+	key := managementPageComputedKey(ctx, "owner", managementResetFilters, "")
+	if _, exists := s.managementComputed.get(key); exists {
+		t.Fatal("incomplete first page entered the response cache")
+	}
+	second, ok, err := s.currentManagementPagingPage(ctx, "owner", managementResetFilters, snapshot.Page.NextCursor, false)
+	if err != nil || !ok || second.Offset != 25 || second.Revision != snapshot.Page.Revision {
+		t.Fatal("deep page could not use the retained directory", ok, err)
+	}
+	if rebuilt, err = s.warmManagementResetPlanIfNeeded(ctx, "owner"); rebuilt || err != nil {
+		t.Fatal("retry should hydrate only the missing first page", rebuilt, err)
+	}
+	if _, exists := s.managementComputed.get(key); !exists {
+		t.Fatal("optional first page was not retained when it recovered")
+	}
+}
+
 func TestManagementDisplayWarmYieldsToForeground(t *testing.T) {
 	s := &Service{}
 	ctx, cancel := s.interruptibleManagementWarm(context.Background(), time.Second)

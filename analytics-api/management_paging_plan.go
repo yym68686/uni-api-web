@@ -26,10 +26,10 @@ type managementPagingPlan struct {
 func managementPagingKey(owner string, filters managementQueryFilters) string {
 	return managementComputedKey(owner, filters, "paging-directory")
 }
-func (s *Service) rememberManagementPagingPlan(owner string, filters managementQueryFilters, snapshot managementQuerySnapshot) {
+func (s *Service) rememberManagementPagingPlan(owner string, filters managementQueryFilters, snapshot managementQuerySnapshot) bool {
 	if snapshot.Proof == nil || snapshot.Proof.Stamp == "" || !snapshot.View.ProjectedModels {
 		log.Printf("management_paging_store stored=false reason=unprepared projected=%t", snapshot.View.ProjectedModels)
-		return
+		return false
 	}
 	plan := managementPagingPlan{Input: snapshot.View.Input, Prices: snapshot.View.Prices, Page: snapshot.Page}
 	plan.Page.Rows = nil
@@ -60,15 +60,16 @@ func (s *Service) rememberManagementPagingPlan(owner string, filters managementQ
 	}
 	if len(plan.Rows) != plan.Page.Total {
 		log.Printf("management_paging_store stored=false reason=count")
-		return
+		return false
 	}
 	raw, err := json.Marshal(plan)
 	if err != nil || len(raw) > 8<<20 {
 		log.Printf("management_paging_store stored=false reason=encoding_or_size bytes=%d", len(raw))
-		return
+		return false
 	}
 	s.rememberManagementEntry(managementPagingKey(owner, filters), snapshot.Proof, managementComputedPage{Plan: raw, Bytes: len(raw)})
 	log.Printf("management_paging_store stored=true bytes=%d rows=%d", len(raw), len(plan.Rows))
+	return true
 }
 
 // This is the console Reset filters default (not the no-parameter API default).
@@ -86,40 +87,40 @@ func (s *Service) warmManagementResetPlanIfNeeded(ctx context.Context, owner str
 		}
 		if managementProofStamp(proof, entry.Proof.CurrentExport) == entry.Proof.Stamp &&
 			(entry.Proof.Until.IsZero() || at.Before(entry.Proof.Until)) {
-			return false, nil
+			first, exists := s.managementComputed.get(managementPageComputedKey(ctx, owner, managementResetFilters, ""))
+			if exists && first.Proof.Stamp == entry.Proof.Stamp {
+				return false, nil
+			}
+			// Only the optional page may have timed out. Reuse the directory
+			// and retry that page without running the full directory query.
+			_, _, err := s.currentManagementPagingPage(ctx, owner, managementResetFilters, "", false)
+			return false, err
 		}
 	}
-	if err := s.warmManagementResetPlan(ctx, owner); err != nil {
-		return false, err
-	}
-	entry, retained = s.managementComputed.get(managementPagingKey(owner, managementResetFilters))
-	return retained && len(entry.Plan) != 0, nil
+	return s.warmManagementResetPlan(ctx, owner)
 }
 
-func (s *Service) warmManagementResetPlan(ctx context.Context, owner string) error {
-	filters := managementResetFilters
-	snapshot, err := s.readManagementQuerySnapshot(ctx, owner, filters, "", false)
+func (s *Service) warmManagementResetPlan(ctx context.Context, owner string) (bool, error) {
+	snapshot, err := s.readManagementResetDirectory(ctx, owner)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if ctx.Err() != nil || s.managementReaders.Load() != 0 {
-		return context.Canceled
+		return false, context.Canceled
 	}
-	s.rememberManagementPagingPlan(owner, filters, snapshot)
-	// This call explicitly read the first page and requested full summaries.
-	// A foreground paging plan may instead come from any offset or media mode;
-	// it must never populate this canonical response key.
-	if snapshot.Proof != nil && snapshot.Page.Offset == 0 {
-		page := snapshot.Page
-		selection := encodeManagementCursor(s.control.key, owner, managementPageCursor{Version: 1, Revision: page.Revision, Filter: tokenHash(mustJSON(filters))})
-		response := managementPageResponse{
-			Owner: owner, managementQueryPage: page, SelectionToken: selection,
-			Accounts: managementAccountHeaders(snapshot.View.Input.Accounts),
-			Context:  managementContextForPage(snapshot.View, page, filters.Model),
-		}
-		s.rememberManagementPage(managementPageComputedKey(ctx, owner, filters, ""), snapshot.Proof, response)
+	return s.retainAndWarmManagementResetDirectory(ctx, owner, snapshot, s.currentManagementPagingPage)
+}
+
+func (s *Service) retainAndWarmManagementResetDirectory(ctx context.Context, owner string, snapshot managementQuerySnapshot, warm func(context.Context, string, managementQueryFilters, string, bool) (managementPageResponse, bool, error)) (bool, error) {
+	if !s.rememberManagementPagingPlan(owner, managementResetFilters, snapshot) {
+		return false, nil
 	}
-	return ctx.Err()
+	// The directory has already passed the full fence. A timeout or an incoming
+	// foreground read during optional first-page hydration must not discard it.
+	// Hydrate through the normal verified paging path: no partial page reaches
+	// the response cache, and changes since compilation still invalidate it.
+	_, _, err := warm(ctx, owner, managementResetFilters, "", false)
+	return true, err
 }
 
 func (s *Service) currentManagementPagingPage(ctx context.Context, owner string, filters managementQueryFilters, cursor string, rebase bool) (managementPageResponse, bool, error) {

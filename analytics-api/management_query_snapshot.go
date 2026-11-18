@@ -104,6 +104,17 @@ func (s *Service) readManagementQuerySnapshotMode(ctx context.Context, owner str
 // batch against a previously displayed page. Keep the normal selection fence
 // intact; hydrate every matching row inside this same fenced RR transaction.
 func (s *Service) readManagementQuerySnapshotWithPreview(ctx context.Context, owner string, filters managementQueryFilters, token string, selection, rebase, preview bool) (managementQuerySnapshot, error) {
+	return s.readManagementQuerySnapshotModeInternal(ctx, owner, filters, token, selection, rebase, preview, true)
+}
+
+// The reset warmer only needs row identities and fully evaluated ordering. Its
+// directory must not depend on successfully reading the first page's receipts.
+// The same gateway/database fence still applies before anything can be retained.
+func (s *Service) readManagementResetDirectory(ctx context.Context, owner string) (managementQuerySnapshot, error) {
+	return s.readManagementQuerySnapshotModeInternal(ctx, owner, managementResetFilters, "", false, false, false, false)
+}
+
+func (s *Service) readManagementQuerySnapshotModeInternal(ctx context.Context, owner string, filters managementQueryFilters, token string, selection, rebase, preview, hydrate bool) (managementQuerySnapshot, error) {
 	ctx = managementTraceContext(ctx)
 	if !selection && owner != "" {
 		ctx = context.WithValue(ctx, managementGatewayPartsScopeKey{}, &managementGatewayPartsScope{store: &s.gatewayParts, owner: owner})
@@ -165,7 +176,7 @@ func (s *Service) readManagementQuerySnapshotWithPreview(ctx context.Context, ow
 		out.Filtered = &filtered
 		out.Page, err = buildManagementQueryPageFromFilteredRowsMode(view.Input, filtered, filters, out.Evidence, owner, s.control.key, token, view.ReadAt, rebase && !selection)
 		endPage()
-		if err == nil && !selection {
+		if err == nil && !selection && hydrate {
 			if preview {
 				out.Page.Rows = append([]managementQueryRow{}, filtered.Rows...)
 			}
