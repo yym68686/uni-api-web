@@ -44,6 +44,7 @@ type Service struct {
 	receiptSets        managementReceiptSets
 	pageModelStreams   managementPageModelStreams
 	gatewayParts       managementGatewayPartsStore
+	managementReaders  atomic.Int32
 }
 
 type cachedAnalytics struct {

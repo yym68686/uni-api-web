@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"slices"
 	"sort"
 )
@@ -75,22 +74,32 @@ func (s *Service) hydrateManagementPageFrom(ctx context.Context, db controlQuery
 				index[qualityGroupID(subset[i].ID, target.GroupID)] = target
 			}
 		}
-		consume := func(row managementPageModelRecord, readTrace *managementRowsTrace) error {
-			model := subModelResult{Model: row.model, State: row.state, Message: row.message}
-			decodeStart := readTrace.decodeStart()
-			var err error
-			if len(row.result) > 0 {
-				err = json.Unmarshal(row.result, &model.Result)
-			}
-			readTrace.decoded(decodeStart, len(row.result))
+		// Preserve negotiated single-model omissions and diagnostic replays.
+		// For every full-summary page (not just page 1), read only its
+		// already-resolved groups. Unchanged exact versions need no receipt
+		// lookups for those models. Account metadata and queues remain live.
+		if !managementSelectedReceipts(ctx) && !managementSelectedModels(ctx) && len(wanted) <= 128 &&
+			ctx.Value(managementReceiptPlanKey{}) == nil && ctx.Value(managementModelReadKey{}) == nil {
+			cached, err := readManagementDisplayGroups(ctx, db, owner, wanted)
 			if err != nil {
 				return err
 			}
-			compactSubModelResult(model.Result)
-			if target := index[qualityGroupID(row.account, row.group)]; target != nil {
-				target.Models = append(target.Models, model)
+			missing := wanted[:0]
+			for _, g := range wanted {
+				id := qualityGroupID(g.AccountID, g.GroupID)
+				if models, found := cached[id]; found {
+					index[id].Models = models
+				} else {
+					missing = append(missing, g)
+				}
 			}
-			return nil
+			wanted = missing
+		}
+		consume := func(row managementPageModelRecord, readTrace *managementRowsTrace) error {
+			decodeStart := readTrace.decodeStart()
+			err := appendManagementDisplayModel(index, row)
+			readTrace.decoded(decodeStart, len(row.result))
+			return err
 		}
 		// Complete previews may contain hundreds of groups. Keep each model
 		// read at display-page scale: expanding the entire directory can exceed

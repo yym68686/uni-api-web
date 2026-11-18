@@ -41,7 +41,7 @@ import { CreateChannel } from "./CreateChannel";
 import { ChannelSettings } from "./ChannelSettings";
 import { ChannelOptimization } from "./ChannelOptimization";
 import { ChannelProtocolSummary } from "./ChannelProtocolSummary";
-import { useManagementPage, readManagementSelection, readManagementOptimizationPreview, managementOptimizationSnapshot } from "./managementQuery";
+import { useManagementPage, readManagementSelection, readManagementOptimizationPreview, managementOptimizationSnapshot, type ManagementNavigation } from "./managementQuery";
 import type { ManagementPagePosition, ManagementSelection } from "./managementQuery";
 import { channelMembers, managementRows, UNASSIGNED_ACCOUNT } from "./channelManagement";
 import type { ManagedChannel, ManagementRow } from "./channelManagement";
@@ -806,7 +806,13 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   const filterKey=JSON.stringify({...subFilterDefaults,...filters});
   const cursor=cursorState.filter===filterKey?cursorState.cursor:"";
   useEffect(()=>onPositionChange?.({owner:user,filter:filterKey,cursor}),[user,filterKey,cursor,onPositionChange]);
-  const pageQuery=useManagementPage(user,filters,cursor);
+  const navigation = useRef<ManagementNavigation | undefined>(undefined);
+  const pageQuery=useManagementPage(user,filters,cursor,navigation);
+  const navigatePage = (action: "previous" | "next", token?: string) => {
+    if (!token) return;
+    navigation.current = { owner: user, filter: JSON.stringify(filters), cursor: token, action, started: performance.now() };
+    setCursorState({ filter: filterKey, cursor: token });
+  };
   const pageData=pageQuery.data;
   const displayedPage=pageQuery.displayPage;
   const tablePending=!!displayedPage && !pageData;
@@ -1647,6 +1653,9 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
               <button
                 className="filter-chip sub-filter-reset"
                 onClick={() => {
+                  const defaults = JSON.stringify(subFilterDefaults);
+                  if (defaults !== JSON.stringify(filters) || cursor)
+                    navigation.current = { owner: user, filter: defaults, cursor: "", action: "reset", started: performance.now() };
                   setFilters({ ...subFilterDefaults });
                   setPage(0);
                 }}
@@ -1944,7 +1953,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                 <button
                   className="button small"
                   disabled={!pageData?.previous_cursor}
-                  onClick={() => setCursorState({filter:filterKey,cursor:pageData?.previous_cursor || ""})}
+                  onClick={() => navigatePage("previous", pageData?.previous_cursor)}
                 >
                   上一页
                 </button>
@@ -1954,7 +1963,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                 <button
                   className="button small"
                   disabled={!pageData?.next_cursor}
-                  onClick={() => setCursorState({filter:filterKey,cursor:pageData?.next_cursor || ""})}
+                  onClick={() => navigatePage("next", pageData?.next_cursor)}
                 >
                   下一页
                 </button>

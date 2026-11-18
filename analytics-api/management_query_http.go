@@ -119,6 +119,8 @@ func parseManagementQuery(values url.Values) (managementQueryFilters, error) {
 // rows. Its signed token fences it to the page the user reviewed; no mutation
 // endpoint may mistake the current 25-row page for the complete selection.
 func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
+	s.managementReaders.Add(1)
+	defer s.managementReaders.Add(-1)
 	r = r.WithContext(managementTraceContext(r.Context()))
 	w.Header().Set("Cache-Control", "no-store")
 	owner, err := s.controlUser(r)

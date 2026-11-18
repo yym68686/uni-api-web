@@ -439,3 +439,13 @@ the fixtures create temporary rows, run short synthetic receipt-query and adviso
 lock waits, and roll back. The lock fixture verifies the actual blocking
 transaction; the concurrent-activity fixture verifies that unrelated activity
 does not acquire a false blocking relationship.
+
+## Versioned channel-group display summaries
+
+The management list can reuse compressed display summaries for the owned groups on any page. The summary is not an authorization, filter, total, selection, or gateway snapshot: the existing current-read proof, exact row selection, and queue overlay still apply. The worker uses bounded batches and skips active management reads and writes that would exceed the database storage budget. It does not backfill as part of migration or readiness.
+
+Model and receipt generations advance in the source transaction. When every probe resolves to the group's own valid receipt, a changed group leaves other groups reusable. Missing, invalid, or cross-group receipts require the broader version proof. A missing or unreadable summary takes the existing live read path. Full selections, optimization previews, diagnostics, and negotiated selected-model evidence do not use these stored summaries.
+
+For isolated API regression testing, run `RUN_MANAGEMENT_PAGE_BUDGET=1 go test -v -run '^TestManagementDisplayPageBudget$'` in `analytics-api` with a dedicated `TEST_CONTROL_DATABASE_URL`. This fixture checks 49 pages before and after warming and after a receipt change. The result is not a production SLA: it excludes a real gateway, WAN and browser, and contains three models per group.
+
+On a production browser, use the authenticated `management_page_current` event. For Reset/Next/Previous, read `navigation_action`, `page_number`, and `click_to_paint_ms`. For the first open of a restored deep page, record the navigation separately. Correlate each result with the API request ID; check all pages, not an aggregate percentile. These diagnostics stay in the browser and omit owners, filters and cursors.

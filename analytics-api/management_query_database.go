@@ -251,21 +251,25 @@ func normalizeManagementAccounts(accounts []subAccount) error {
 			if err != nil {
 				return err
 			}
-			for k := range models {
-				model := &models[k]
-				model.Message = summaryMessage(model.Message)
-				compactSubModelResult(model.Result)
-				if model.Result != nil {
-					model.Result.Availability.ID, model.Result.Quality.ID = "", ""
-					model.Result.Availability.Message = summaryMessage(model.Result.Availability.Message)
-					model.Result.Quality.Message = summaryMessage(model.Result.Quality.Message)
-				}
-			}
+			normalizeManagementModels(models)
 			target.Models = models
 			target.DetailsOmitted = true
 		}
 	}
 	return nil
+}
+
+func normalizeManagementModels(models []subModelResult) {
+	for i := range models {
+		model := &models[i]
+		model.Message = summaryMessage(model.Message)
+		compactSubModelResult(model.Result)
+		if model.Result != nil {
+			model.Result.Availability.ID, model.Result.Quality.ID = "", ""
+			model.Result.Availability.Message = summaryMessage(model.Result.Availability.Message)
+			model.Result.Quality.Message = summaryMessage(model.Result.Quality.Message)
+		}
+	}
 }
 
 func readConfiguredChecksFrom(ctx context.Context, db controlQueryDB, sourceID, provider, model string) ([]configuredCheck, error) {

@@ -100,7 +100,9 @@ it("correlates the painted page with its exact request without logging private i
   vi.stubGlobal("fetch", fetch);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
-  const hook = renderHook(() => useManagementPage("trace-private-owner", { ...subFilterDefaults, model: "private-filter" }), { wrapper });
+  const filters = { ...subFilterDefaults, model: "private-filter" };
+  const navigation = { current: { owner: "trace-private-owner", filter: JSON.stringify(filters), cursor: "private-cursor", action: "next" as const, started: performance.now() } };
+  const hook = renderHook(() => useManagementPage("trace-private-owner", filters, "private-cursor", navigation), { wrapper });
   try {
     await waitFor(() => expect(hook.result.current.data).toBeDefined());
     for (let frame = 0; frame < 2; frame++) {
@@ -122,8 +124,13 @@ it("correlates the painted page with its exact request without logging private i
       wire_expand_and_validate_ms: expect.any(Number),
       request_to_paint_ms: expect.any(Number),
       decoded_to_paint_ms: expect.any(Number),
+      navigation_action: "next",
+      click_to_paint_ms: expect.any(Number),
+      page_number: 1,
     });
-    expect(detail).not.toMatch(/private-filter|trace-private-owner|analytics\/|rows":\[/);
+    expect(JSON.parse(detail).click_to_paint_ms).toBeGreaterThanOrEqual(JSON.parse(detail).request_to_paint_ms);
+    expect(navigation.current).toBeUndefined();
+    expect(detail).not.toMatch(/private-filter|private-cursor|trace-private-owner|analytics\/|rows":\[/);
     expect(fetch).toHaveBeenCalledTimes(1);
   } finally {
     hook.unmount();

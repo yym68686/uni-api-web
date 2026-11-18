@@ -21,6 +21,7 @@ type managementFreshProof struct {
 	Stamp           string
 	ExportStamp     string
 	ReceiptStamp    string
+	DisplayVersion  string
 	CurrentExport   bool
 	HeadersRevision int64
 	Until           time.Time
@@ -129,6 +130,9 @@ func (s *Service) managementReadProof(ctx context.Context, db controlQueryDB, ow
 	proof.ExportStamp = tokenHash(mustJSON([]any{compact.revision, exportedEpoch, string(price), string(overrides)}))
 	if accounts := proof.Epochs["console_sub_accounts"]; accounts != "" {
 		proof.ReceiptStamp = tokenHash(mustJSON([]any{compact.receipts, accounts}))
+		if summaries := proof.Epochs["console_sub_model_summaries"]; summaries != "" {
+			proof.DisplayVersion = tokenHash(mustJSON([]string{"management-display-groups-v1", compact.revision, summaries, accounts}))
+		}
 	}
 	if until.Valid {
 		proof.Until = until.Time

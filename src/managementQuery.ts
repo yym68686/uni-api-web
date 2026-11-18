@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, controlRequest } from "./api";
 import { managementReadTrace } from "./managementReadTrace";
@@ -58,6 +58,11 @@ export interface ManagementPagePosition {
   cursor: string;
 }
 
+export interface ManagementNavigation extends ManagementPagePosition {
+  action: "reset" | "next" | "previous";
+  started: number;
+}
+
 declare global {
   var __uniManagementBootstrap:
     | {
@@ -72,7 +77,7 @@ declare global {
 
 const managementReadTimings = new WeakMap<
   ManagementPage,
-  { started: number; decoded: number; trigger: ManagementReadTrigger; transport?: ManagementReadTrace }
+  { started: number; decoded: number; trigger: ManagementReadTrigger; transport?: ManagementReadTrace; navigation?: Pick<ManagementNavigation, "action" | "started"> }
 >();
 
 export interface ManagementSelection {
@@ -242,6 +247,7 @@ export function useManagementPage(
   owner: string,
   filters: SubFilters,
   cursor = "",
+  navigation?: RefObject<ManagementNavigation | undefined>,
 ) {
   const client = useQueryClient();
   const triggers = useRef<ReturnType<typeof createManagementReadTriggers> | undefined>(undefined);
@@ -257,7 +263,18 @@ export function useManagementPage(
   }, [client, owner]);
   const query = useQuery({
     queryKey: ["management-query", owner, filters, cursor],
-    queryFn: ({ signal }) => readManagementPage(filters, cursor, signal, owner, triggers.current!.next(owner, JSON.stringify(filters), cursor)),
+    queryFn: async ({ signal }) => {
+      const filter = JSON.stringify(filters);
+      const position = navigation?.current;
+      const matches = position?.owner === owner && position.filter === filter && position.cursor === cursor;
+      if (matches && navigation) navigation.current = undefined;
+      const page = await readManagementPage(filters, cursor, signal, owner, triggers.current!.next(owner, filter, cursor));
+      const timing = managementReadTimings.get(page);
+      if (timing && matches && position.started <= timing.started) {
+        timing.navigation = { action: position.action, started: position.started };
+      }
+      return page;
+    },
     enabled: !!owner,
     retry: false,
     staleTime: 0,
@@ -304,6 +321,11 @@ export function useManagementPage(
             rows: page.rows.length,
             total: page.total,
             request_to_paint_ms: Math.round(painted - timing.started),
+            ...(timing.navigation && {
+              navigation_action: timing.navigation.action,
+              click_to_paint_ms: Math.round(painted - timing.navigation.started),
+              page_number: page.offset / page.page_size + 1,
+            }),
             decoded_to_paint_ms: Math.round(painted - timing.decoded),
             navigation_to_paint_ms: Math.round(painted),
           }),

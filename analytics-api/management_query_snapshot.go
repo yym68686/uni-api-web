@@ -121,6 +121,9 @@ func (s *Service) readManagementQuerySnapshotWithPreview(ctx context.Context, ow
 			proof.Facts = facts
 			proof.CurrentExport = managementHasCompleteCurrentExport(facts)
 			out.Proof = &proof
+			if !preview {
+				ctx = withManagementDisplayVersion(ctx, tx, owner, proof.DisplayVersion)
+			}
 			ctx = context.WithValue(ctx, managementRateScopeKey{}, managementRateScopeFromProof(&s.rateSnapshots, s.control.db, tx, owner, proof))
 			ctx = context.WithValue(ctx, managementQualityScopeKey{}, managementQualityScopeFromProof(&s.targetStreams, s.control.db, tx, owner, proof))
 			ctx = context.WithValue(ctx, managementReceiptSetScopeKey{}, managementReceiptSetScopeFromProof(&s.receiptSets, s.control.db, tx, owner, proof))

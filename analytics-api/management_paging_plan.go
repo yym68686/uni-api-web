@@ -164,6 +164,7 @@ func (s *Service) currentManagementPagingPage(ctx context.Context, owner string,
 	}
 	ctx = context.WithValue(ctx, managementReceiptSetScopeKey{}, managementReceiptSetScopeFromProof(&s.receiptSets, s.control.db, tx, owner, current))
 	ctx = context.WithValue(ctx, managementPageModelScopeKey{}, &managementPageModelScope{store: &s.pageModelStreams, tx: tx, summaries: current.Epochs["console_sub_model_summaries"]})
+	ctx = withManagementDisplayVersion(ctx, tx, owner, current.DisplayVersion)
 	headers := map[string]subAccount{}
 	for _, a := range current.Accounts {
 		headers[a.ID] = a
