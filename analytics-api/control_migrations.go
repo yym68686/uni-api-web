@@ -112,6 +112,9 @@ var siteDetectionTargetsSQL string
 //go:embed migrations/0024_site_detection_models.sql
 var siteDetectionModelsSQL string
 
+//go:embed migrations/0025_site_detection_handoff.sql
+var siteDetectionHandoffSQL string
+
 var managementRevisionTables = []string{"console_sub_models", "console_management_model_signal", "console_sub_usage", "console_management_receipt_signal", "console_management_revision_state"}
 
 type controlMigration struct {
@@ -147,6 +150,7 @@ func controlMigrations() []controlMigration {
 		{"0022_site_detection_runs", siteDetectionRunsSQL, []string{"console_sub_accounts", "console_site_detection_limits", "console_site_detection_slots"}},
 		{"0023_site_detection_targets", siteDetectionTargetsSQL, []string{"console_sub_targets"}},
 		{"0024_site_detection_models", siteDetectionModelsSQL, []string{"console_sub_models"}},
+		{"0025_site_detection_handoff", siteDetectionHandoffSQL, []string{"console_sub_accounts"}},
 	}
 }
 

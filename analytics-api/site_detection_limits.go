@@ -158,22 +158,26 @@ func (s *Service) trySiteDetection(ctx context.Context, b siteModelBudget, phase
 	}
 	defer tx.Rollback()
 	due := time.Time{}
-	now := time.Now()
 	rpm := b.rpm
 	lock := func(scope string, adaptive bool) error {
 		_, err := tx.ExecContext(ctx, `INSERT INTO console_site_detection_limits(scope) VALUES($1) ON CONFLICT DO NOTHING`, scope)
 		if err != nil {
 			return err
 		}
-		var retry, next, learnedAt time.Time
+		var retry, next time.Time
+		var cooling, fresh bool
 		var learned int
-		if err := tx.QueryRowContext(ctx, `SELECT retry_at,next_at,learned_rpm,learned_at FROM console_site_detection_limits WHERE scope=$1 FOR UPDATE`, scope).Scan(&retry, &next, &learned, &learnedAt); err != nil {
+		// Evaluate cooldown after the row lock is acquired. A timestamp
+		// captured before waiting can already be stale on a busy account.
+		if err := tx.QueryRowContext(ctx, `WITH locked AS MATERIALIZED (
+ SELECT retry_at,next_at,learned_rpm,learned_at FROM console_site_detection_limits WHERE scope=$1 FOR UPDATE
+ ) SELECT retry_at,next_at,learned_rpm,retry_at>clock_timestamp(),learned_at>clock_timestamp()-interval '24 hours' FROM locked`, scope).Scan(&retry, &next, &learned, &cooling, &fresh); err != nil {
 			return err
 		}
-		if retry.After(now) {
+		if cooling {
 			return &subSyncPause{phase, retry}
 		}
-		if adaptive && now.Sub(learnedAt) < 24*time.Hour && learned > 0 {
+		if adaptive && fresh && learned > 0 {
 			rpm = min(90, learned)
 		}
 		if next.After(due) {
@@ -320,7 +324,9 @@ func (t siteProbeTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	}
 	if t.job != "" {
 		var live bool
-		err = t.s.control.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$2 AND state='running')`, t.account, t.job).Scan(&live)
+		err = t.s.control.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM console_sub_accounts
+ WHERE id=$1 AND job_id=$2 AND state='running'
+ AND (sync_lease_until IS NULL OR sync_lease_until>clock_timestamp()))`, t.account, t.job).Scan(&live)
 		if err != nil || !live {
 			release()
 			if err != nil {
@@ -434,7 +440,8 @@ func (s *Service) recordSiteBlockedModel(ctx context.Context, id, job string, gr
 	}
 	_, err := s.subProbeWrite(ctx, `UPDATE console_sub_models SET state=$5,message=$6
  WHERE account_id=$1 AND group_id=$2 AND model=$3 AND state='running'
- AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$4 AND state='running')`, id, group, model, job, state, blocked.Message)
+ AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$4 AND state='running'
+ AND (sync_lease_until IS NULL OR sync_lease_until>clock_timestamp()))`, id, group, model, job, state, blocked.Message)
 	if err != nil {
 		return err
 	}

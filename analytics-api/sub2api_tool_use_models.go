@@ -108,6 +108,7 @@ func (s *Service) subTestAllModelTools(ctx context.Context, id, base, job string
 		for _, model := range subCompactionModels(subSyncModelResults(ctx, t.models)) {
 			models = append(models, subToolUseModel{Model: model, State: "queued", Result: previous[model]})
 		}
+		expectedState := "queued"
 		save := func(state string) error {
 			// A scoped sync only replaces selected models. Retain unchecked
 			// per-model history without putting it into the probe loop.
@@ -124,16 +125,17 @@ func (s *Service) subTestAllModelTools(ctx context.Context, id, base, job string
 				}
 			}
 			result := summarizeToolUse(savedModels)
-			res, e := s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET tool_use_state=$4,tool_use=$5,
+			n, e := s.subProbeWrite(ctx, `UPDATE console_sub_targets SET tool_use_state=$4,tool_use=$5,
  state=CASE WHEN $4='done' AND state IN ('queued','running') THEN 'done' ELSE state END
- WHERE account_id=$1 AND group_id=$2 AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$3 AND state='running')`, id, t.group, job, state, mustJSON(result))
+ WHERE account_id=$1 AND group_id=$2 AND tool_use_state=$6 AND EXISTS(SELECT 1 FROM console_sub_accounts
+ WHERE id=$1 AND job_id=$3 AND state='running' AND (sync_lease_until IS NULL OR sync_lease_until>clock_timestamp()) FOR SHARE)`, id, t.group, job, state, mustJSON(result), expectedState)
 			if e != nil {
 				return e
 			}
-			n, _ := res.RowsAffected()
 			if n != 1 {
 				return context.Canceled
 			}
+			expectedState = state
 			return nil
 		}
 		if e = save("running"); e != nil {

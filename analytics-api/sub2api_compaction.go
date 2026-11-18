@@ -310,11 +310,10 @@ func (s *Service) subTestCapability(ctx context.Context, id, base, job, kind str
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		res, e := s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET `+column+`_state='running' WHERE account_id=$1 AND group_id=$2 AND `+column+`_state='queued' AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$3 AND state='running')`, id, t.group, job)
+		n, e := s.subProbeWrite(ctx, `UPDATE console_sub_targets SET `+column+`_state='running' WHERE account_id=$1 AND group_id=$2 AND `+column+`_state='queued' AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$3 AND state='running' AND (sync_lease_until IS NULL OR sync_lease_until>clock_timestamp()) FOR SHARE)`, id, t.group, job)
 		if e != nil {
 			return e
 		}
-		n, _ := res.RowsAffected()
 		if n != 1 {
 			return nil
 		}
@@ -337,7 +336,7 @@ func (s *Service) subTestCapability(ctx context.Context, id, base, job, kind str
 			probe := probeFn(probeCtx, client, base, key, model)
 			cancel()
 			if isSiteBlockedProbe(probe) {
-				_, e := s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET `+column+`_state='interrupted' WHERE account_id=$1 AND group_id=$2 AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$3)`, id, t.group, job)
+				_, e := s.subProbeWrite(ctx, `UPDATE console_sub_targets SET `+column+`_state='interrupted' WHERE account_id=$1 AND group_id=$2 AND `+column+`_state='running' AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$3 AND state='running' AND (sync_lease_until IS NULL OR sync_lease_until>clock_timestamp()))`, id, t.group, job)
 				return e
 			}
 			usageResult := subResult{Model: model, Availability: probe}
@@ -366,7 +365,7 @@ func (s *Service) subTestCapability(ctx context.Context, id, base, job, kind str
 			}
 		}
 		result.CheckedAt = time.Now().Unix()
-		_, e = s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET `+column+`_state='done',`+column+`=$4,state=CASE WHEN state IN ('queued','running') THEN 'done' ELSE state END WHERE account_id=$1 AND group_id=$2 AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$3 AND state='running')`, id, t.group, job, mustJSON(result))
+		_, e = s.subProbeWrite(ctx, `UPDATE console_sub_targets SET `+column+`_state='done',`+column+`=$4,state=CASE WHEN state IN ('queued','running') THEN 'done' ELSE state END WHERE account_id=$1 AND group_id=$2 AND `+column+`_state='running' AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$3 AND state='running' AND (sync_lease_until IS NULL OR sync_lease_until>clock_timestamp()))`, id, t.group, job, mustJSON(result))
 		if e != nil {
 			return e
 		}

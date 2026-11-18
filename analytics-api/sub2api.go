@@ -551,7 +551,7 @@ func (s *Service) subStop(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 	var id string
-	err = tx.QueryRowContext(r.Context(), `UPDATE console_sub_accounts SET state='stopped',job_kind='',job_id='',lease_until=NULL,sync_phase='',sync_retry_at=NULL,message='检测已停止' WHERE id=$1 AND owner=$2 RETURNING id`, r.PathValue("id"), owner).Scan(&id)
+	err = tx.QueryRowContext(r.Context(), `UPDATE console_sub_accounts SET state='stopped',job_kind='',job_id='',lease_until=NULL,sync_lease_until=NULL,sync_phase='',sync_retry_at=NULL,sync_resume_at=NULL,message='检测已停止' WHERE id=$1 AND owner=$2 RETURNING id`, r.PathValue("id"), owner).Scan(&id)
 	if err != nil {
 		http.Error(w, "账号不存在", 404)
 		return
@@ -681,12 +681,30 @@ func (s *Service) subQueueChecksKind(w http.ResponseWriter, r *http.Request, kin
 type subJob struct {
 	syncModels                       []byte
 	id, base, kind, encrypted, token string
+	run, phase                       string
 	paused                           bool
 }
 
-func (s *Service) subWorkerLoop(ctx context.Context) {
+func (s *Service) subWorkerLoop(parent context.Context) {
+	s.subWorkerLoopWithDrain(parent, func(ctx context.Context) bool {
+		return subDrainRequested(ctx, subDrainMetricsURL)
+	})
+}
+
+func (s *Service) subWorkerLoopWithDrain(parent context.Context, probe func(context.Context) bool) {
+	ctx, stop := context.WithCancel(parent)
+	defer stop()
+	// Do not claim even the first job if this instance is already draining.
+	if ctx.Err() != nil || probe(ctx) {
+		return
+	}
 	var wg sync.WaitGroup
 	defer wg.Wait()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		subWatchDrain(ctx, probe, stop)
+	}()
 	for ctx.Err() == nil {
 		if s.subExpireJobs(ctx) == nil {
 			// Claim before launching: every queued account gets its own worker, while
@@ -699,7 +717,11 @@ func (s *Service) subWorkerLoop(ctx context.Context) {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					s.subRunJob(ctx, job)
+					jobCtx := parent
+					if job.kind == "sync" {
+						jobCtx = ctx
+					}
+					s.subRunJob(jobCtx, job)
 				}()
 			}
 		}
@@ -712,6 +734,9 @@ func (s *Service) subWorkerLoop(ctx context.Context) {
 }
 
 func (s *Service) subExpireJobs(ctx context.Context) error {
+	if err := s.subSuspendSync(ctx, "", ""); err != nil {
+		return err
+	}
 	// Expiry means the previous worker cannot report safely. Preserve old results.
 	_, err := s.control.db.ExecContext(ctx, `WITH expired AS (UPDATE console_sub_accounts SET state='interrupted',message='服务重启或任务中断，请手动重新检测',job_kind='',job_id='',lease_until=NULL,sync_phase='',sync_retry_at=NULL WHERE state='running' AND lease_until<now() RETURNING id), targets AS (UPDATE console_sub_targets SET state='interrupted',message='上次检测中断' WHERE account_id IN (SELECT id FROM expired) AND state IN ('running','queued') RETURNING account_id) UPDATE console_sub_models SET state='interrupted',message='上次检测中断' WHERE account_id IN (SELECT id FROM expired) AND state IN ('running','queued')`)
 	if err != nil {
@@ -725,18 +750,26 @@ func (s *Service) subExpireJobs(ctx context.Context) error {
 }
 
 func (s *Service) subClaimJob(ctx context.Context) (subJob, error) {
-	job := subJob{token: randomID()}
+	var job subJob
 	if err := s.subPromoteChecks(ctx); err != nil {
 		return job, err
 	}
-	err := s.control.db.QueryRowContext(ctx, `UPDATE console_sub_accounts SET state='running',job_id=CASE WHEN state='running' THEN job_id ELSE $1 END,
+	err := s.control.db.QueryRowContext(ctx, `UPDATE console_sub_accounts SET state='running',job_id=CASE WHEN job_kind='sync' THEN $2||$1 ELSE $1 END,
  sync_run_id=CASE WHEN state='queued' AND job_kind='sync' THEN $1 WHEN state='running' THEN sync_run_id ELSE '' END,
  sync_phase=CASE WHEN state='queued' AND job_kind='sync' THEN 'discovering' WHEN state='running' THEN sync_phase ELSE '' END,
- sync_retry_at=CASE WHEN state='running' THEN sync_retry_at ELSE NULL END,
+ sync_retry_at=NULL,sync_resume_at=NULL,
  sync_pause_count=CASE WHEN state='running' THEN sync_pause_count ELSE 0 END,
- sync_models=CASE WHEN state='queued' AND job_kind='sync' THEN COALESCE(sync_models,'[]'::jsonb) ELSE sync_models END,
+ sync_models=CASE WHEN job_kind='sync' THEN COALESCE(sync_models,'[]'::jsonb) ELSE sync_models END,
  sync_plan_ready=state='running' AND sync_plan_ready,
- lease_until=now()+interval '30 seconds' WHERE id=(SELECT id FROM console_sub_accounts WHERE state='queued' OR (state='running' AND lease_until IS NULL AND sync_retry_at<=now() AND job_kind='sync') ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING id,base,job_kind,encrypted_auth,COALESCE(sync_models,'null'::jsonb),job_id,sync_retry_at IS NOT NULL`, job.token).Scan(&job.id, &job.base, &job.kind, &job.encrypted, &job.syncModels, &job.token, &job.paused)
+ sync_handoff_partial=state='running' AND sync_handoff_partial,
+ lease_until=CASE WHEN job_kind<>'sync' THEN clock_timestamp()+$3*interval '1 second' END,
+ sync_lease_until=CASE WHEN job_kind='sync' THEN clock_timestamp()+$3*interval '1 second' END
+ WHERE id=(SELECT id FROM console_sub_accounts WHERE state='queued' OR
+   (state='running' AND job_kind='sync' AND lease_until IS NULL AND sync_lease_until IS NULL AND
+    (job_id='' AND sync_resume_at<=now() OR sync_retry_at<=now()))
+   ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1)
+ RETURNING id,base,job_kind,encrypted_auth,COALESCE(sync_models,'null'::jsonb),job_id,sync_run_id,sync_phase,sync_phase NOT IN ('','discovering')`,
+		randomID(), subSyncLeasePrefix, int(subJobLeaseDuration/time.Second)).Scan(&job.id, &job.base, &job.kind, &job.encrypted, &job.syncModels, &job.token, &job.run, &job.phase, &job.paused)
 	return job, err
 }
 
@@ -760,8 +793,10 @@ func (s *Service) subRunJob(parent context.Context, claimed subJob) {
 		// legitimately take longer than the ordinary single-check budget.
 		maxRuntime = 4 * time.Hour
 	}
-	ctx, cancel := context.WithTimeout(parent, maxRuntime)
-	defer cancel()
+	deadline, done := context.WithTimeout(parent, maxRuntime)
+	defer done()
+	ctx, cancel := context.WithCancelCause(deadline)
+	defer cancel(nil)
 	id, base, kind, encrypted, job := claimed.id, claimed.base, claimed.kind, claimed.encrypted, claimed.token
 	var err error
 	if kind == "sync" && len(claimed.syncModels) > 0 {
@@ -778,27 +813,9 @@ func (s *Service) subRunJob(parent context.Context, claimed subJob) {
 	heartbeatDone := make(chan struct{})
 	go func() {
 		defer close(heartbeatDone)
-		ticker := time.NewTicker(time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				res, e := s.control.db.ExecContext(ctx, `UPDATE console_sub_accounts SET lease_until=now()+interval '30 seconds' WHERE id=$1 AND job_id=$2 AND state='running'`, id, job)
-				if e != nil {
-					cancel()
-					return
-				}
-				n, _ := res.RowsAffected()
-				if n == 0 {
-					cancel()
-					return
-				}
-			}
-		}
+		s.subRenewJobLease(ctx, id, job, cancel)
 	}()
-	defer func() { cancel(); <-heartbeatDone }()
+	defer func() { cancel(nil); <-heartbeatDone }()
 	if err == nil && kind == "sync" && !syncOnly && !claimed.paused {
 		_, err = s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET tool_use_state='interrupted' WHERE account_id=$1 AND tool_use_state IN ('queued','running')`, id)
 		if err == nil {
@@ -806,23 +823,27 @@ func (s *Service) subRunJob(parent context.Context, claimed subJob) {
 		}
 	}
 	pauseGaveUp := false
-	if err == nil && kind == "sync" {
-		err = s.subRunSync(ctx, id, base, job, encrypted, syncOnly, claimed.paused)
+	if err == nil && kind == "sync" && claimed.phase != "compaction" && claimed.phase != "tool_use" {
+		err = s.subRunSync(ctx, id, base, job, claimed.run, encrypted, syncOnly, claimed.paused)
 		var pause *subSyncPause
 		if errors.As(err, &pause) && ctx.Err() == nil && time.Until(pause.until) <= 24*time.Hour {
 			// Stop the heartbeat before releasing the lease, so it cannot
 			// accidentally turn a paused job back into a leased one.
-			cancel()
+			cancel(nil)
 			<-heartbeatDone
 			saveCtx, done := context.WithTimeout(context.Background(), 5*time.Second)
-			res, saveErr := s.control.db.ExecContext(saveCtx, `UPDATE console_sub_accounts
- SET sync_phase=$3,sync_retry_at=$4,sync_pause_count=sync_pause_count+1,lease_until=NULL
- WHERE id=$1 AND job_id=$2 AND state='running' AND sync_pause_count<4`, id, job, pause.phase, pause.until)
+			n, saveErr := s.subProbeWrite(saveCtx, `UPDATE console_sub_accounts
+ SET sync_phase=$3,sync_resume_at=$4,sync_pause_count=sync_pause_count+1,sync_lease_until=NULL,job_id=''
+ WHERE id=$1 AND job_id=$2 AND state='running' AND sync_pause_count<4 AND sync_lease_until>clock_timestamp()`, id, job, pause.phase, pause.until)
 			done()
-			if saveErr == nil {
-				if n, _ := res.RowsAffected(); n == 1 {
-					return
-				}
+			if saveErr != nil {
+				// The lease expiry path can resume the plan and any cooldown
+				// already published by the model/key branch.
+				log.Printf("event=site_detection_cooldown_save_failed class=%s", databaseErrorClass(saveErr))
+				return
+			}
+			if n == 1 {
+				return
 			}
 			pauseGaveUp = true
 			err = errors.New("上游持续限流，已停止本轮自动重试")
@@ -831,8 +852,8 @@ func (s *Service) subRunJob(parent context.Context, claimed subJob) {
 	if err == nil && !syncOnly && ctx.Err() == nil && (kind == "check" || kind == "quality") {
 		err = s.subTestTargets(ctx, id, base, job, kind == "quality")
 	}
-	if err == nil && !syncOnly && ctx.Err() == nil && (kind == "check" || kind == "sync" || kind == "compaction") {
-		if kind == "sync" {
+	if err == nil && !syncOnly && ctx.Err() == nil && (kind == "check" || kind == "sync" && claimed.phase != "tool_use" || kind == "compaction") {
+		if kind == "sync" && claimed.phase != "compaction" {
 			err = s.subQueueSyncCapabilities(ctx, id, job, "compaction")
 		}
 		if err == nil {
@@ -840,7 +861,7 @@ func (s *Service) subRunJob(parent context.Context, claimed subJob) {
 		}
 	}
 	if err == nil && !syncOnly && ctx.Err() == nil && (kind == "check" || kind == "sync" || kind == "tool_use") {
-		if kind == "sync" {
+		if kind == "sync" && claimed.phase != "tool_use" {
 			err = s.subQueueSyncCapabilities(ctx, id, job, "tool_use")
 		}
 		if err == nil {
@@ -849,6 +870,21 @@ func (s *Service) subRunJob(parent context.Context, claimed subJob) {
 	}
 	finishCtx, finishCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer finishCancel()
+	if kind == "sync" && parent.Err() != nil {
+		// All probe goroutines have joined. Release only this lease, leaving
+		// never-started work in the plan for the next instance.
+		<-heartbeatDone
+		if err := s.subSuspendSync(finishCtx, id, job); err != nil {
+			log.Printf("event=site_detection_handoff_failed class=%s", databaseErrorClass(err))
+		} else {
+			log.Print("event=site_detection_handoff")
+		}
+		return
+	}
+	if errors.Is(context.Cause(ctx), errSubLeaseLost) {
+		// Do not finalize a job we no longer own. Expiry recovers its queue.
+		return
+	}
 	state, message := "idle", ""
 	if err != nil {
 		state, message = "error", err.Error()
@@ -857,7 +893,16 @@ func (s *Service) subRunJob(parent context.Context, claimed subJob) {
 		state, message = "interrupted", "任务中断，请手动重试；未自动重发检测请求"
 	}
 	// Fence all late completions against stop/re-login/new worker operations.
-	_, _ = s.control.db.ExecContext(finishCtx, `WITH finished AS (UPDATE console_sub_accounts SET state=$3,message=CASE WHEN $3='idle' THEN message ELSE $4 END,job_kind='',job_id='',lease_until=NULL,sync_phase='',sync_retry_at=NULL WHERE id=$1 AND job_id=$2 RETURNING id), targets AS (UPDATE console_sub_targets SET state='interrupted',message='任务未完成，请重试' WHERE account_id IN (SELECT id FROM finished) AND state IN ('queued','running') RETURNING account_id) UPDATE console_sub_models SET state='interrupted',message='任务未完成，请重试' WHERE NOT $5 AND account_id IN (SELECT id FROM finished) AND state IN ('queued','running')`, id, job, state, message, syncOnly)
+	_, err = s.subProbeWrite(finishCtx, `WITH finished AS (UPDATE console_sub_accounts SET state=$3,
+ message=CASE WHEN $3<>'idle' THEN $4 WHEN job_kind='sync' AND sync_handoff_partial THEN
+ concat_ws('；',NULLIF(message,''),'服务切换后已继续排队项目，可能已发出的请求未自动重发') ELSE message END,
+ job_kind='',job_id='',lease_until=NULL,sync_lease_until=NULL,sync_phase='',sync_retry_at=NULL,sync_resume_at=NULL
+ WHERE id=$1 AND job_id=$2 AND COALESCE(sync_lease_until,lease_until)>clock_timestamp() RETURNING id),
+ targets AS (UPDATE console_sub_targets SET state='interrupted',message='任务未完成，请重试' WHERE account_id IN (SELECT id FROM finished) AND state IN ('queued','running') RETURNING account_id)
+ UPDATE console_sub_models SET state='interrupted',message='任务未完成，请重试' WHERE NOT $5 AND account_id IN (SELECT id FROM finished) AND state IN ('queued','running')`, id, job, state, message, syncOnly)
+	if err != nil {
+		log.Printf("event=site_detection_finalize_failed class=%s", databaseErrorClass(err))
+	}
 }
 
 func (s *Service) subPanel(ctx context.Context, id, base, job, encrypted string) (func(string, string, any, any, string) error, []subRemoteGroup, error) {
@@ -1004,7 +1049,7 @@ func (s *Service) subSynchronize(ctx context.Context, id, base, job, encrypted s
 	var pending []subRemoteGroup
 	if plan != nil && plan.initialized {
 		var err error
-		pending, err = s.subPendingKeyGroups(ctx, id, job)
+		pending, err = s.subPendingKeyGroups(ctx, id, plan.run)
 		if err != nil {
 			return err
 		}
@@ -1118,7 +1163,7 @@ func (s *Service) subDiscoverSync(ctx context.Context, id, base, job string, gro
 	run := ""
 	var discoveredLimits any
 	if plan := subPlan(ctx); plan != nil {
-		run = plan.job
+		run = plan.run
 		if !newAPI {
 			var limits subProbeLimits
 			if call("GET", "/api/v1/auth/me", nil, &limits, "") == nil {
@@ -1220,14 +1265,15 @@ func (s *Service) subProbeWrite(ctx context.Context, query string, args ...any) 
 func (s *Service) subClaimModel(ctx context.Context, id, job, model string, group int64) (int64, error) {
 	return s.subProbeWrite(ctx, `UPDATE console_sub_models SET state='running',message=''
  WHERE account_id=$1 AND group_id=$2 AND model=$3 AND state='queued'
- AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$4)`, id, group, model, job)
+ AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$4
+ AND (sync_lease_until IS NULL OR sync_lease_until>clock_timestamp()) FOR SHARE)`, id, group, model, job)
 }
 
 func (s *Service) subTestTargets(ctx context.Context, id, base, job string, qualityOnly bool) error {
 	ctx = withProbeCurl(ctx, s.control, probeCurlScope{Account: id})
 	run := ""
 	if p := subPlan(ctx); p != nil {
-		run = p.job
+		run = p.run
 	}
 	rows, err := s.control.db.QueryContext(ctx, `SELECT m.group_id,m.model,t.encrypted_key,t.remote_key_id FROM console_sub_models m JOIN console_sub_targets t USING(account_id,group_id) WHERE m.account_id=$1 AND t.active AND t.state<>'error' AND m.state='queued' AND t.encrypted_key<>'' AND (NOT $2 OR m.model=$3)
  AND ($4='' OR (m.sync_run_id=$4 AND t.sync_run_id=$4 AND t.sync_key_state='ready'))
@@ -1351,7 +1397,7 @@ func (s *Service) subTestTargets(ctx context.Context, id, base, job string, qual
 					return
 				}
 				raw, _ := json.Marshal(result)
-				_, e = s.subProbeWrite(ctx, `UPDATE console_sub_models SET state='done',result=$4,message='' WHERE account_id=$1 AND group_id=$2 AND model=$3 AND state='running' AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$5)`, id, t.id, t.model, string(raw), job)
+				_, e = s.subProbeWrite(ctx, `UPDATE console_sub_models SET state='done',result=$4,message='' WHERE account_id=$1 AND group_id=$2 AND model=$3 AND state='running' AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$5 AND (sync_lease_until IS NULL OR sync_lease_until>clock_timestamp()))`, id, t.id, t.model, string(raw), job)
 				if e != nil {
 					log.Printf("sub_sync_write_failed stage=save_result class=%s", databaseErrorClass(e))
 					errs <- errors.New("检测结果保存失败")

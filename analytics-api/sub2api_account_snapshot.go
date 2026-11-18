@@ -17,7 +17,7 @@ func (e subAccountReadFailure) Unwrap() error { return e.cause }
 func readSubAccountHeaders(ctx context.Context, db controlQueryDB, owner, accountID string) ([]subAccount, error) {
 	rows, err := db.QueryContext(ctx, `SELECT id,name,base,email,state,message,synced_at,balance,job_kind,provider_kind,login_name,encrypted_login_password<>'',COALESCE(sync_models,'null'::jsonb),rate_coefficient,
  CASE WHEN state='running' AND job_kind='sync' THEN sync_phase ELSE '' END,
- COALESCE(extract(epoch FROM sync_retry_at)::bigint,0),probe_limits,
+ COALESCE(extract(epoch FROM CASE WHEN sync_phase IN ('waiting_keys','waiting_models') THEN COALESCE(sync_resume_at,sync_retry_at) END)::bigint,0),probe_limits,
  COALESCE((SELECT learned_rpm FROM console_site_detection_limits WHERE scope='model:'||id AND learned_at>now()-interval '24 hours'),0)
  FROM console_sub_accounts WHERE owner=$1 AND ($2='' OR id=$2) ORDER BY created_at,id`, owner, accountID)
 	if err != nil {

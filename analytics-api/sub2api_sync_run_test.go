@@ -74,7 +74,7 @@ func TestSiteSyncBatchCooldownKeepsReadyGroupsMoving(t *testing.T) {
 			var phase, job string
 			var leaseFree bool
 			var retry time.Time
-			if err := db.QueryRow(`SELECT sync_phase,job_id,lease_until IS NULL,sync_retry_at FROM console_sub_accounts WHERE id=$1`, id).Scan(&phase, &job, &leaseFree, &retry); err != nil {
+			if err := db.QueryRow(`SELECT sync_phase,sync_run_id,sync_lease_until IS NULL AND job_id='' AND sync_retry_at IS NULL,sync_resume_at FROM console_sub_accounts WHERE id=$1`, id).Scan(&phase, &job, &leaseFree, &retry); err != nil {
 				t.Fatal(err)
 			}
 			if phase != "waiting_keys" || !leaseFree || time.Until(retry) < 19*time.Minute || readyCalls.Load() != 1 || waitingCalls.Load() != 0 {
@@ -97,7 +97,7 @@ func TestSiteSyncBatchCooldownKeepsReadyGroupsMoving(t *testing.T) {
 					t.Fatal(rec.Code, rec.Body.String())
 				}
 			}
-			exec(`UPDATE console_sub_accounts SET sync_retry_at=now() WHERE id=$1 AND state='running'`, id)
+			exec(`UPDATE console_sub_accounts SET sync_resume_at=now() WHERE id=$1 AND state='running'`, id)
 			exec(`UPDATE console_site_detection_limits SET retry_at=now(),next_at=now()`)
 			// A new Service executes the due durable job, not process memory.
 			next := &Service{control: s.control}
@@ -132,7 +132,7 @@ func TestSiteProbeRateRejectionPreservesStoredResult(t *testing.T) {
 		w.WriteHeader(429)
 		fmt.Fprint(w, `{"error":{"code":"rate_limit_exceeded"}}`)
 	}))
-	ctx = context.WithValue(ctx, subSyncPlanKey{}, &subSyncPlan{job: "job"})
+	ctx = context.WithValue(ctx, subSyncPlanKey{}, &subSyncPlan{run: "job"})
 	err := s.subTestTargets(ctx, id, "https://usage.example", "job", false)
 	var pause *subSyncPause
 	if !errors.As(err, &pause) || pause.phase != "waiting_models" || time.Until(pause.until) < 59*time.Second {
@@ -175,7 +175,7 @@ func TestSiteSyncScopeProgressUsesPlannedCombinations(t *testing.T) {
 	}
 	exec(`INSERT INTO console_channel_detection_settings(owner,scope,account_id,group_id) VALUES($1,$3,$2,100)`, owner, id, (detectionTarget{Account: id, Group: 100}).scope())
 	exec(`UPDATE console_sub_targets SET state='done' WHERE account_id=$1 AND group_id=100`, id)
-	ctx = context.WithValue(withSubSyncModels(ctx, []string{"one", "two"}), subSyncPlanKey{}, &subSyncPlan{job: "job"})
+	ctx = context.WithValue(withSubSyncModels(ctx, []string{"one", "two"}), subSyncPlanKey{}, &subSyncPlan{run: "job"})
 	if err := queueSubSyncModels(ctx, tx, id, groups, nil); err != nil {
 		t.Fatal(err)
 	}

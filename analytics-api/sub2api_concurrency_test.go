@@ -246,12 +246,16 @@ func testSubConcurrentAccounts(t *testing.T, interrupt, observeFingerprint bool)
 		case <-time.After(5 * time.Second):
 			t.Fatal("shutdown did not cancel all active account workers")
 		}
-		var interrupted int
-		if err = store.db.QueryRow(`SELECT count(*) FROM console_sub_accounts WHERE owner=$1 AND state='interrupted' AND job_id=''`, owner).Scan(&interrupted); err != nil || interrupted != count {
-			t.Fatal("shutdown lost interrupted account states", interrupted, err)
+		var suspended int
+		if err = store.db.QueryRow(`SELECT count(*) FROM console_sub_accounts WHERE owner=$1 AND state='running'
+ AND sync_phase='handoff' AND job_id='' AND sync_resume_at IS NOT NULL AND sync_lease_until IS NULL`, owner).Scan(&suspended); err != nil || suspended != count {
+			t.Fatal("shutdown did not suspend all account plans", suspended, err)
 		}
-		if service.subWorkOne(context.Background()) {
-			t.Fatal("interrupted paid checks were requeued automatically")
+		var interrupted, queued int
+		if err = store.db.QueryRow(`SELECT count(*) FILTER(WHERE m.state='interrupted'),count(*) FILTER(WHERE m.state='queued')
+ FROM console_sub_models m JOIN console_sub_accounts a ON a.id=m.account_id AND a.sync_run_id=m.sync_run_id
+ WHERE a.owner=$1`, owner).Scan(&interrupted, &queued); err != nil || interrupted != count*2 || queued != count*(len(subModels)-2) {
+			t.Fatal("shutdown must retain only never-started checks", interrupted, queued, err)
 		}
 		mu.Lock()
 		defer mu.Unlock()

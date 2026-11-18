@@ -38,7 +38,7 @@ func queueSubSyncModels(ctx context.Context, tx *sql.Tx, account string, groups 
 			if enabled && subSyncIncludesModel(ctx, model) {
 				state = "queued"
 				if plan := subPlan(ctx); plan != nil {
-					run = plan.job
+					run = plan.run
 				}
 			}
 			entries = append(entries, entry{group.ID, model, state, run})

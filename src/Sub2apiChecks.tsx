@@ -199,6 +199,7 @@ const pending = (state: string) => state === "queued" || state === "running";
 const syncPhaseLabel: Record<string,string> = {
   discovering:"正在读取分组和模型", preparing:"正在准备测试密钥", probing:"检测中",
   waiting_keys:"上游限制密钥读取", waiting_models:"上游限制模型请求",
+  handoff:"等待新实例接续", compaction:"正在检测上下文压缩", tool_use:"正在检测工具调用",
 };
 const stateLabel: Record<string, string> = {
   idle: "已同步",
