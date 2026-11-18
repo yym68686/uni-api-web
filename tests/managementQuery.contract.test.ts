@@ -147,12 +147,13 @@ it("freezes every filter, facets and stable sort against the browser implementat
 it("freezes shared fingerprint identity and actual caller-key join evidence",()=>{
   const record=(patch:Partial<FingerprintRecord>):FingerprintRecord=>({model:"gpt-6-astra",state:"done",message:"",revision:"one-current",updated_at_ms:100,result:{model:"gpt-6-astra",status:"match",probability:1,prediction:"",prediction_name:"",expected_class:"",used_outputs:3,checked_at:1,reference_commit:"fixture",candidates:[]},...patch});
   const base=structuredClone(inputs);
-  base.channels=[channel("one","shared",{models:["gpt-6-astra","gpt-6.1-sol"],model_mappings:{},account_id:"a",group_id:1,account_ids:["a"],binding_status:"matched",bound_keys:[{account_id:"a",account_name:"a",base:"https://a.test",group_id:1,remote_key_id:1}]}),
+  base.channels=[channel("one","shared",{models:["gpt-6-astra","gpt-6.1-sol","deepseek-v4.1-flash-1017"],model_mappings:{},account_id:"a",group_id:1,account_ids:["a"],binding_status:"matched",bound_keys:[{account_id:"a",account_name:"a",base:"https://a.test",group_id:1,remote_key_id:1}]}),
     channel("two","shared",{models:["gpt-6-astra"],model_mappings:{},account_ids:[]}),channel("one","unbound",{models:["gpt-6-astra"],model_mappings:{}})];
-  base.imports=[{...base.channels[0],kind:undefined,api_key_id:"caller",models:["gpt-6-astra","gpt-6.1-sol"]}];
+  base.imports=[{...base.channels[0],kind:undefined,api_key_id:"caller",models:["gpt-6-astra","gpt-6.1-sol","deepseek-v4.1-flash-1017"]}];
   const records=[record({account_id:"a",group_id:1,revision:"site",updated_at_ms:50}),
     record({source_id:"one",provider:"shared",updated_at_ms:200}),record({source_id:"two",provider:"shared",revision:"two-old",updated_at_ms:300}),
-    record({source_id:"one",provider:"unbound",revision:"old",updated_at_ms:400}),record({account_id:"a",group_id:1,model:"gpt-6.1-sol",state:"queued",updated_at_ms:10,result:null})];
+    record({source_id:"one",provider:"unbound",revision:"old",updated_at_ms:400}),record({account_id:"a",group_id:1,model:"gpt-6.1-sol",state:"queued",updated_at_ms:10,result:null}),
+    record({account_id:"a",group_id:1,model:"deepseek-v4.1-flash-1017",state:"queued",updated_at_ms:20,result:null})];
   const routes={one:{data:[{provider:"copy",origin_provider:"unbound",api_key_id:"caller"}],unavailable_keys:[],snapshot_consistent:true},two:{data:[],unavailable_keys:[],snapshot_consistent:true}} as Record<string,Routes>;
   const root={...base,fingerprints:records,fingerprint_ready:true,unavailable_sources:[] as string[],unavailable_imports:[] as string[],routes};
   const variants=[
@@ -168,7 +169,7 @@ it("freezes shared fingerprint identity and actual caller-key join evidence",()=
     {...root,channels:root.channels.map(c=>({...c,model_mappings:{"gpt-6-astra":"different"}}))},
     {...root,imports:[...root.imports,{...root.imports[0],account_id:"b"}]},
   ];
-  const data=variants.flatMap(input=>["","gpt-6-astra","gpt-6.1-sol","custom"].map(model=>{
+  const data=variants.flatMap(input=>["","gpt-6-astra","gpt-6.1-sol","deepseek-v4.1-flash-1017","custom"].map(model=>{
     const rows=managementRows(input.accounts,input.channels,input.imports || [],model,"",input.checks);
     const index=sharedFingerprintIndex(input.fingerprints,input.channels,input.unavailable_sources,input.imports || [],input.unavailable_imports);
     return {input,model,expected:{prices:[],fingerprint_ready:true,

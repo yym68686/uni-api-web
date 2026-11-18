@@ -9,10 +9,16 @@ models are listed in the shared `fingerprint/models.json` mapping:
 | `gemini-3.1-pro` | `gemini-3.1-pro-preview` |
 | `gemini-3.8-flash` | `gemini-3.8-flash` |
 | `gemini-4-argon` | `gemini-4-argon` |
+| `gemini-4-carbon` | `gemini-4-carbon` |
+| `deepseek-v4.1-flash-1017` | `deepseek-v4.1-flash-1017` |
 
 These Gemini models are the intersection of the built-in console catalog and
-lm-detector's reference classes. Scoring retains all 59 classes from upstream
-commit `5fcfb4cd34da10915daa38d3ec04d573d946c97e`; unsupported models are not probed.
+lm-detector's reference classes. Scoring retains all 69 classes from upstream
+commit `a7e9d3056e019827904dd50722c20b4a0c896738`; unsupported models are not probed.
+DeepSeek 1017 uses its existing independent low-effort class, not the older
+`deepseek-v4.1-flash` class or a mutable `deepseek-flash` alias. Its model/price
+catalog entry already exists; enabling fingerprints does not edit prices, model
+mappings or gateway configuration. No reference bank or scorer upgrade is needed.
 
 - **匹配**: the highest-ranked class is the requested model's reference class.
 - **不匹配**: another reference class ranks first.
@@ -47,14 +53,15 @@ fingerprint comes from the effective catalog, including temporary channels. Resu
 can replace an older success consistently.
 
 The result feed advertises `supported_models`. During rolling updates, a new
-frontend paired with an old backend disables unsupported Gemini actions and shows
-“指纹检测服务待更新”; periodic reads and an explicit recheck enable them once the
-backend advertises support. Existing GPT actions remain available.
+frontend paired with an old backend disables unsupported Gemini/DeepSeek actions
+and shows “指纹检测服务待更新”; periodic reads and an explicit recheck enable them
+once the backend advertises support. Existing GPT actions remain available.
 
 Each fingerprint round collects three separately generated challenges through the
 channel's own credentials, with the reference's reasoning setting: low for
-Astra/Sol and Argon, provider default for Gemini 3.1 Pro and 3.8 Flash. Requests are sequential,
-not retried on failure, and require complete output. Group probes use their
+Astra/Sol, Argon, Carbon and DeepSeek 1017, provider default for Gemini 3.1 Pro and
+3.8 Flash. Requests are sequential, not retried on failure, and require complete
+output. Group probes use their
 recorded Responses/Messages/Chat/Gemini protocol (Gemini native when no saved
 protocol exists for a Gemini model); configured channels go through the gateway's
 Responses endpoint and its explicit provider-targeting capability. Protocol

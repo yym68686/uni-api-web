@@ -10,10 +10,10 @@ The upstream `detector-codec.ts` loads the binary representation.
 
 `models.json` is shared by the UI, Go API and Node scorer. It enables Astra/Sol
 (the merged class), Gemini 3.1 Pro (the 3.1 Pro Preview class), Gemini 3.8 Flash,
-Gemini 4 Argon and Gemini 4 Carbon. Three independent challenges and strict
-complete-output validation are required. Low effort is used for Astra/Sol, Argon
-and Carbon; Gemini 3.1 Pro and 3.8 Flash use the provider default, matching their
-reference collection metadata.
+Gemini 4 Argon, Gemini 4 Carbon and DeepSeek V4.1 Flash 1017. Three independent
+challenges and strict complete-output validation are required. Low effort is used
+for Astra/Sol, Argon, Carbon and DeepSeek 1017; Gemini 3.1 Pro and 3.8 Flash use
+the provider default, matching their reference collection metadata.
 `gemini.mjs` adapts native Gemini streaming only; Responses, Messages and Chat
 Completions use the upstream parsers. Configured gateway channels remain explicitly
 targeted through Responses. No tokenizer probes, automatic retries or route edits.
@@ -53,6 +53,21 @@ explicitly. Probabilities describe the closed reference set and are independent
 of legacy reasoning-quality history.
 
 Offline verification: `node --test fingerprint/runner.test.mjs` (from analytics-api).
+
+DeepSeek 1017 uses the existing `deepseek-v4.1-flash-1017` class in this pinned
+69-class bank; no scorer, detector, calibration or reference manifest update is
+needed. Its 36 accepted reference answers were collected through OpenRouter's
+DeepSeek route at low effort. The fixture adds the first three complete answers
+from `data/collections/deepseek-v4.1-flash-1017-openrouter-deepseek-low-20261017/result.json`
+at the same pinned commit. Older Flash classes and the `deepseek-flash` alias do
+not inherit this identity. The exact console model is already in the shared
+price/model catalog. Successful model checks enqueue it through the existing
+configured-channel and site/group paths; availability-only and legacy quality
+checks do not. There is no automatic historical backfill. Verification uses
+offline/local fixtures, not production probes.
+Updating `models.json` changes the existing resume proof, so earlier partial
+rounds restart on their next explicit detection; completed historical results
+and serving configuration are unchanged.
 
 Carbon has its own calibrated class, with 36 accepted reference answers from
 OpenRouter's pinned Google Vertex US route at low effort. The same upstream

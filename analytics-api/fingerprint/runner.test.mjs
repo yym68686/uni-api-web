@@ -9,6 +9,65 @@ import { unsupportedEffortMessage } from './response-errors.mjs';
 const fixture = JSON.parse(readFileSync(new URL('./reference-fixture.json', import.meta.url)));
 const reference = loadReference();
 
+test('DeepSeek 1017 uses its existing independent low-effort class and unchanged upstream scoring', () => {
+  const model = 'deepseek-v4.1-flash-1017';
+  const classes = JSON.parse(readFileSync(new URL('./models.json', import.meta.url)));
+  const catalog = JSON.parse(readFileSync(new URL('../model_catalog.json', import.meta.url)));
+  assert.ok(models.includes(model));
+  assert.ok(catalog.some(entry => entry.model === model));
+  assert.deepEqual(classes[model], {class_id:model,class_name:model,effort:'low'});
+  assert.equal(reference.bank.models.find(entry => entry.id === model).response_count, 36);
+  assert.ok(reference.detector.model_ids.includes('deepseek-v4.1-flash'));
+  for (const count of [1,2,3]) {
+    const outputs = fixture[model].slice(0,count);
+    const result = score(model,outputs,reference);
+    const original = analyzeSharedOutputs(outputs,reference.bank,reference.detector,{allowPartial:true});
+    assert.equal(result.expected_class,model);
+    assert.equal(result.prediction,model);
+    assert.equal(result.used_outputs,count);
+    assert.equal(result.status,count === 3 ? 'match' : 'insufficient');
+    assert.equal(result.decision,count === 3 ? 'scored' : 'partial');
+    assert.equal(result.probability,original.results.find(r=>r.model===model).probability);
+    assert.deepEqual(result.candidates,original.results.slice(0,5));
+  }
+  const mismatch = score(model,fixture['gpt-6-astra'],reference);
+  assert.equal(mismatch.status,'mismatch');
+  assert.equal(mismatch.prediction,'gpt-6-astra');
+  assert.ok(mismatch.probability < mismatch.candidates[0].probability);
+  for (const alias of ['deepseek-flash','deepseek-v4.1-flash']) {
+    assert.equal(models.includes(alias),false,'do not infer the 1017 identity from another request model');
+  }
+});
+
+test('DeepSeek 1017 preserves exact model and low effort in Responses, Chat and Messages probes', async () => {
+  const model = 'deepseek-v4.1-flash-1017';
+  for (const format of ['responses','openai','anthropic']) {
+    let calls = 0;
+    const result = await detect({model,format,base_url:'https://mock.example',key:'secret'},async(url,_cfg,body)=>{
+      assert.equal(url,`https://mock.example/v1/${format==='responses'?'responses':format==='openai'?'chat/completions':'messages'}`);
+      assert.equal(body.model,model);
+      assert.equal(body.stream,true);
+      if (format==='responses') assert.deepEqual(body.reasoning,{effort:'low'});
+      else if (format==='openai') assert.equal(body.reasoning_effort,'low');
+      else {
+        assert.deepEqual(body.thinking,{type:'adaptive'});
+        assert.deepEqual(body.output_config,{effort:'low'});
+      }
+      const text = fixture[model][calls++].text;
+      return Response.json(format==='responses'
+        ? {status:'completed',output:[{type:'message',content:[{type:'output_text',text}]}]}
+        : format==='openai'
+          ? {choices:[{message:{content:text},finish_reason:'stop'}]}
+          : {content:[{type:'text',text}],stop_reason:'end_turn'});
+    });
+    assert.equal(calls,3);
+    assert.equal(result.status,'match');
+    assert.equal(result.prediction,model);
+    assert.equal(result.used_outputs,3);
+    assert.ok(!JSON.stringify(result).includes('secret'));
+  }
+});
+
 const incompatibleResponsesError = {message:'reasoning is not supported for Claude/Gemini Responses compatibility',type:'invalid_request_error',code:'invalid_request'};
 test('exact Gemini Responses effort rejection stops without weakening the reference or making fallback calls',async()=>{
   for (const model of ['gemini-4-argon','gemini-4-carbon']) for (const wrapped of [false,true]) {

@@ -176,7 +176,7 @@ func TestModelFingerprintQueueScopesLeasesCancelAndExpiry(t *testing.T) {
 	}
 }
 func TestModelFingerprintEndToEndTargetedThreeCallsAndIndependentQuality(t *testing.T) {
-	for _, requested := range []string{"gpt-6.1-sol", "gemini-3.1-pro", "gemini-3.8-flash", "gemini-4-argon", "gemini-4-carbon"} {
+	for _, requested := range []string{"gpt-6.1-sol", "gemini-3.1-pro", "gemini-3.8-flash", "gemini-4-argon", "gemini-4-carbon", "deepseek-v4.1-flash-1017"} {
 		t.Run(requested, func(t *testing.T) {
 			raw, err := os.ReadFile("fingerprint/reference-fixture.json")
 			if err != nil {
@@ -309,6 +309,7 @@ func TestModelFingerprintSiteResultInvalidatesAfterKeyRotation(t *testing.T) {
 }
 
 func TestModelFingerprintAutomaticBatchOnlySupportedAvailableModels(t *testing.T) {
+	var failDeepSeek atomic.Bool
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/v1beta/models/") {
 			subNativeSSE(w, subFixtureProbeModel(r), "test")
@@ -322,6 +323,10 @@ func TestModelFingerprintAutomaticBatchOnlySupportedAvailableModels(t *testing.T
 			Model string `json:"model"`
 		}
 		json.NewDecoder(r.Body).Decode(&body)
+		if body.Model == "deepseek-v4.1-flash-1017" && failDeepSeek.Load() {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "offline fixture"})
+			return
+		}
 		subSSE(w, "21", body.Model)
 	}))
 	defer gateway.Close()
@@ -334,7 +339,7 @@ func TestModelFingerprintAutomaticBatchOnlySupportedAvailableModels(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, model := range []string{checkModel, "gpt-6.1-sol", "gpt-5.5", "gemini-3.1-pro", "gemini-3.8-flash", "gemini-4-argon", "gemini-4-carbon"} {
+	for _, model := range []string{checkModel, "gpt-6.1-sol", "gpt-5.5", "gemini-3.1-pro", "gemini-3.8-flash", "gemini-4-argon", "gemini-4-carbon", "deepseek-v4.1-flash-1017"} {
 		if _, err = s.control.db.Exec(`INSERT INTO console_sub_models(account_id,group_id,model,state) VALUES($1,1,$2,'queued')`, a.ID, model); err != nil {
 			t.Fatal(err)
 		}
@@ -345,11 +350,22 @@ func TestModelFingerprintAutomaticBatchOnlySupportedAvailableModels(t *testing.T
 	}
 	var n int
 	s.control.db.QueryRow(`SELECT count(*) FROM console_model_fingerprints WHERE account_id=$1 AND state='queued'`, a.ID).Scan(&n)
-	if n != 6 {
-		t.Fatal("batch should queue exactly six supported fingerprints", n)
+	if n != 7 {
+		t.Fatal("batch should queue exactly seven supported fingerprints", n)
 	}
 	if w := fingerprintRequest(t, s, a.Owner, "GET", nil); w.Code != http.StatusOK {
 		t.Fatalf("batch-queued fingerprints unreadable: HTTP %d: %s", w.Code, w.Body.String())
+	}
+	// A failed availability recheck must not enqueue new paid identity work.
+	s.control.db.Exec(`UPDATE console_model_fingerprints SET state='done' WHERE account_id=$1`, a.ID)
+	s.control.db.Exec(`UPDATE console_sub_models SET state='queued' WHERE account_id=$1 AND model='deepseek-v4.1-flash-1017'`, a.ID)
+	s.control.db.Exec(`UPDATE console_sub_accounts SET job_id='failed-availability' WHERE id=$1`, a.ID)
+	failDeepSeek.Store(true)
+	if err = s.subTestTargets(context.Background(), a.ID, gateway.URL, "failed-availability", false); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.control.db.QueryRow(`SELECT count(*) FROM console_model_fingerprints WHERE account_id=$1 AND state='queued'`, a.ID).Scan(&n); err != nil || n != 0 {
+		t.Fatal("failed availability started a fingerprint", n, err)
 	}
 	// Standalone quality detection must never enqueue a new identity probe.
 	s.control.db.Exec(`UPDATE console_model_fingerprints SET state='done' WHERE account_id=$1`, a.ID)

@@ -45,13 +45,13 @@ it("does not report match or mismatch for a rejected numeric sequence",()=>{
  expect(screen.queryByText("不匹配")).not.toBeInTheDocument();
  expect(screen.queryByText("12.0%")).not.toBeInTheDocument();
 });
-it("enables each supported Gemini with its own probability and target",()=>{
+it("enables each supported Gemini and DeepSeek with its own probability and target",()=>{
  const row={account:{id:"one"},target:{group_id:1}} as ManagementRow;
- for(const model of ["gemini-3.1-pro","gemini-3.8-flash","gemini-4-argon","gemini-4-carbon"]){
+ for(const model of ["gemini-3.1-pro","gemini-3.8-flash","gemini-4-argon","gemini-4-carbon","deepseek-v4.1-flash-1017"]){
   expect(FINGERPRINT_MODELS).toContain(model);
   expect(fingerprintTargets(row,[model,"gpt-5.5"])).toEqual([{account_id:"one",group_id:1,model}]);
-  const gemini={...record,model,result:{...record.result!,model,expected_class:model,probability:.95}};
-  const view=mount(<FingerprintStatus record={gemini}/>);
+  const scoped={...record,model,result:{...record.result!,model,expected_class:model,probability:.95}};
+  const view=mount(<FingerprintStatus record={scoped}/>);
   expect(screen.getByText("不匹配")).toBeInTheDocument();
   expect(screen.getByText("95.0%")).toHaveClass("quality-partial");
   view.unmount();
@@ -99,7 +99,7 @@ it("explains why a legacy count cannot be resumed without numeric evidence",asyn
  expect(screen.queryByRole("button",{name:"继续采样"})).not.toBeInTheDocument();
 });
 
-it.each(["gpt-6-astra","gemini-3.1-pro","gemini-3.8-flash","gemini-4-argon","gemini-4-carbon"])("channel management filters %s fingerprints independently of quality",async(model)=>{
+it.each(["gpt-6-astra","gemini-3.1-pro","gemini-3.8-flash","gemini-4-argon","gemini-4-carbon","deepseek-v4.1-flash-1017"])("channel management filters %s fingerprints independently of quality",async(model)=>{
  const scoped={...record,model,result:{...record.result!,model}};
  const accounts=["one","two","three"].map(id=>({id,name:id,base:`https://${id}.test`,email:"test",state:"idle",message:"",synced_at:1,targets:[{group_id:1,name:`group-${id}`,platform:"openai",channel:id,rate:1,key_id:1,active:true,state:"done",message:"",result:null}]}));
  vi.stubGlobal("fetch",vi.fn(async(input:string)=>Response.json({data:input.endsWith("/accounts")?accounts:input.endsWith("/model-fingerprints")?[scoped,{...scoped,account_id:"two",result:{...scoped.result,status:"match",probability:1}},{...scoped,account_id:"three",result:{...scoped.result,status:"insufficient",decision:"partial",used_outputs:2,probability:null}}]:[],labels:{},unavailable_sources:[]})));
@@ -133,14 +133,14 @@ it("shows backend rollout unavailability without reporting untested or submittin
  expect(screen.queryByText("未检测")).not.toBeInTheDocument();
 });
 
-it("waits for backend Gemini support and enables detection after capability refresh",async()=>{
+it.each(["gemini-4-argon","deepseek-v4.1-flash-1017"])("waits for backend %s support and enables detection after capability refresh",async(model)=>{
  let updated=false;const writes:unknown[]=[];
  vi.stubGlobal("fetch",vi.fn(async(path:string,init?:RequestInit)=>{
   if(path.endsWith("/channel-management"))return Response.json({data:[],unavailable_sources:[]});
   if(init?.method){writes.push(JSON.parse(init.body as string));return Response.json({accepted:true});}
   return Response.json({data:[],...(updated?{supported_models:FINGERPRINT_MODELS}:{})});
  }));
- mount(<FingerprintPanel targets={[{source_id:"fugue",provider:"native",model:"gemini-4-argon"}]}/>);
+ mount(<FingerprintPanel targets={[{source_id:"fugue",provider:"native",model}]}/>);
  const user=userEvent.setup();
  await screen.findByText("指纹检测服务待更新");
  expect(screen.getByRole("button",{name:"检测指纹"})).toBeDisabled();
@@ -149,10 +149,10 @@ it("waits for backend Gemini support and enables detection after capability refr
  updated=true;await user.click(recheck);
  await waitFor(()=>expect(screen.getByRole("button",{name:"检测指纹"})).toBeEnabled());
  await user.click(screen.getByRole("button",{name:"检测指纹"}));
- expect(writes).toEqual([{targets:[{source_id:"fugue",provider:"native",model:"gemini-4-argon"}]}]);
+ expect(writes).toEqual([{targets:[{source_id:"fugue",provider:"native",model}]}]);
 });
 
-it.each([false,true].flatMap(imported=>["gemini-4-argon","gemini-4-carbon"].map(model=>({imported,model}))))("shares $model site results and cancels the originating job (imported=$imported)",async({imported,model})=>{
+it.each([false,true].flatMap(imported=>["gemini-4-argon","gemini-4-carbon","deepseek-v4.1-flash-1017"].map(model=>({imported,model}))))("shares $model site results and cancels the originating job (imported=$imported)",async({imported,model})=>{
  const channel={source_id:"fugue",provider:"native",models:[model],kind:"configured",binding_status:"matched",bound_keys:[{account_id:"one",group_id:1}],probe_fingerprint:"new"} as ManagedChannel;
  const importedChannel={...channel,kind:undefined,account_id:"one",group_id:1};
  if(imported){channel.binding_status=undefined;channel.bound_keys=undefined;}

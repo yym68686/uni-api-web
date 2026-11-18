@@ -4,5 +4,6 @@
   "gemini-3.1-pro": { "class_id": "gemini-3.1-pro-preview", "class_name": "gemini-3.1-pro-preview", "effort": "default" },
   "gemini-3.8-flash": { "class_id": "gemini-3.8-flash", "class_name": "gemini-3.8-flash", "effort": "default" },
   "gemini-4-argon": { "class_id": "gemini-4-argon", "class_name": "gemini-4-argon", "effort": "low" },
-  "gemini-4-carbon": { "class_id": "gemini-4-carbon", "class_name": "gemini-4-carbon", "effort": "low" }
+  "gemini-4-carbon": { "class_id": "gemini-4-carbon", "class_name": "gemini-4-carbon", "effort": "low" },
+  "deepseek-v4.1-flash-1017": { "class_id": "deepseek-v4.1-flash-1017", "class_name": "deepseek-v4.1-flash-1017", "effort": "low" }
 }

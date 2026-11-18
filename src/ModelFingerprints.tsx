@@ -17,7 +17,7 @@ export const fingerprintLabels: Record<string, string> = {
   match: "匹配", mismatch: "不匹配", insufficient: "样本不足", error: "检测失败",
   queued: "排队中", running: "检测中", interrupted: "已中断", untested: "未检测", not_applicable: "不适用",
 };
-export const fingerprintNote = "每轮累计 3 个有效样本；1、2 个样本时显示暂定排名，满 3 个后显示匹配结果与概率。不足 3 个时保留已有样本，再次检测只补缺少的样本。满 3 个后再次检测开启新一轮；渠道配置或参考库变化时重新采样。Astra 与 6.1-sol 共用一个指纹类别；Gemini 3.1 Pro 对应 3.1 Pro Preview，3.8 Flash、4 Argon 和 4 Carbon 各自独立。概率是请求类别在参考库内的相对概率，不代表身份保证或不降智概率。";
+export const fingerprintNote = "每轮累计 3 个有效样本；1、2 个样本时显示暂定排名，满 3 个后显示匹配结果与概率。不足 3 个时保留已有样本，再次检测只补缺少的样本。满 3 个后再次检测开启新一轮；渠道配置或参考库变化时重新采样。Astra 与 6.1-sol 共用一个指纹类别；Gemini 3.1 Pro 对应 3.1 Pro Preview，3.8 Flash、4 Argon 和 4 Carbon 各自独立。DeepSeek V4.1 Flash 1017 使用独立类别及 low 推理强度，不与未标注版本的 Flash 共用身份。概率是请求类别在参考库内的相对概率，不代表身份保证或不降智概率。";
 const partialNote = "当前仅显示暂定排名，满 3 个有效样本后计算匹配结果与概率。";
 const nonModelNote = "数字序列特征不符合参考库要求，无法判定模型身份；未生成排名或匹配概率。";
 export interface FingerprintTarget {
