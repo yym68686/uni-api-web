@@ -4,6 +4,22 @@ import userEvent from "@testing-library/user-event";
 import { SubModelSettings } from "./SubModelSettings";
 import { SUB_MODELS } from "./sub2apiModels";
 
+it("selects GPT 6.2 Astra and Sol independently of older models", async () => {
+ const save=vi.fn(),user=userEvent.setup();
+ render(<SubModelSettings models={['gpt-6-astra','gpt-6.1-sol']} onSave={save}/>);
+ await user.click(screen.getByRole('button',{name:'检测模型设置'}));
+ const dialog=within(screen.getByRole('dialog'));
+ for(const model of ['gpt-6.2-astra','gpt-6.2-sol']){
+  const checkbox=dialog.getByRole('checkbox',{name:model});
+  expect(checkbox).not.toBeChecked();
+  expect(checkbox.closest('label')).toHaveTextContent('Responses');
+  await user.click(checkbox);
+ }
+ for(const model of ['gpt-6-astra','gpt-6.1-sol'])await user.click(dialog.getByRole('checkbox',{name:model}));
+ await user.click(dialog.getByRole('button',{name:'保存设置'}));
+ expect(save).toHaveBeenCalledExactlyOnceWith(['gpt-6.2-astra','gpt-6.2-sol']);
+});
+
 it('selects Hydrogen independently with the native Gemini protocol',async()=>{
  const save=vi.fn(),user=userEvent.setup();
  render(<SubModelSettings models={['gemini-4-carbon']} onSave={save}/>);

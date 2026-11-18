@@ -58,7 +58,7 @@ function PriceDetails({ model }: { model: string }) {
                 : "缓存写入分别使用 5 分钟与 1 小时价格。"}
             关闭写入计费后不计该项费用，价格设置仍保留。
           </p>
-          {reference.verified && (
+          {reference.verified && reference.source.startsWith("https://") && (
             <a
               className="price-reference-link"
               href={reference.source}
@@ -188,6 +188,8 @@ function PriceRow({
             <span>
               {price.source === "manual" || saved
                 ? "自定义价格"
+                : price.source?.startsWith("inherited:")
+                  ? "沿用参考价"
                 : reference.verified
                   ? "官方参考价"
                   : "未定价"}

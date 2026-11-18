@@ -5,6 +5,33 @@ import { PriceSettings } from "./PriceSettings";
 import { MODEL_PRICE_CATALOG } from "./modelPrices";
 import type { ModelPrice } from "./types";
 
+it("shows official GPT 6.2 Standard prices and explains cache retention limits", async () => {
+ render(<PriceSettings prices={[]} loading={false} connection={{base:'',key:'',session:'test',account:true}} onSaved={vi.fn()}/>);
+ const user=userEvent.setup();
+ const search=screen.getByRole('textbox',{name:'搜索模型价格'});
+ await user.click(search);await user.paste('gpt-6.2');
+ const table=within(screen.getByRole('table',{name:'模型价格'}));
+ expect(table.getAllByRole('rowheader')).toHaveLength(2);
+ for(const [label,astra,sol] of [['输入',8,2],['输出',40,10],['缓存读取',.4,.1],['缓存写入 · 统一单价',10,2.5]] as const){
+  expect(screen.getByLabelText(`gpt-6.2-astra ${label}价格`)).toHaveValue(astra);
+  expect(screen.getByLabelText(`gpt-6.2-sol ${label}价格`)).toHaveValue(sol);
+ }
+ for(const model of ['gpt-6.2-astra','gpt-6.2-sol']){
+  expect(screen.getByRole('checkbox',{name:model+' 计算缓存写入费用'})).not.toBeChecked();
+  expect(screen.getByLabelText(model+' 售卖价格百分比')).toHaveValue(2.5);
+  expect(screen.getByRole('checkbox',{name:model+' 超过272k加价'})).toBeChecked();
+  expect(within(screen.getByLabelText(model+' 输入价格').closest('tr')!).getByText('官方参考价')).toBeVisible();
+ }
+ const sol=screen.getByLabelText('gpt-6.2-sol 输入价格').closest('tr')!;
+ expect(within(sol).getByRole('button',{name:'保存价格'})).toBeEnabled();
+ await user.click(screen.getByRole('button',{name:'查看 gpt-6.2-sol 价格说明'}));
+ const dialog=screen.getByRole('dialog',{name:'gpt-6.2-sol'});
+ expect(dialog).toHaveTextContent('30 分钟 $2.50');
+ expect(dialog).toHaveTextContent('12 小时为 $5');
+ expect(dialog).toHaveTextContent('不自动套用 12 小时费率');
+ expect(within(dialog).getByRole('link',{name:'查看官方价格来源'})).toHaveAttribute('href','https://developers.openai.com/api/docs/pricing');
+});
+
 it('shows Hydrogen standard pricing without copying Carbon promotional or cache TTL rates',async()=>{
  render(<PriceSettings prices={[]} loading={false} connection={{base:'',key:'',session:'test',account:true}} onSaved={vi.fn()}/>);
  const model='gemini-4-hydrogen',user=userEvent.setup();
@@ -213,7 +240,7 @@ it("keeps a failed save on its own row and leaves other prices editable", async 
 });
 
 
-it("defaults long-context pricing off, persists independent toggles and can turn it off again", async () => {
+it("uses catalog long-context defaults, persists independent toggles and can turn it off again", async () => {
   const saved: ModelPrice[] = [];
   vi.stubGlobal("fetch", vi.fn(async (_url, options) => {
     saved.push(JSON.parse(options.body));
@@ -222,7 +249,7 @@ it("defaults long-context pricing off, persists independent toggles and can turn
   const props = {prices: [] as ModelPrice[], loading:false, connection:{base:"",key:"",session:"test",account:true},onSaved:vi.fn()};
   const view=render(<PriceSettings {...props} />);
   for (const price of MODEL_PRICE_CATALOG.filter(p => !p.prompt_price_tier))
-    expect(screen.getByRole("checkbox",{name:`${price.model} 超过272k加价`})).not.toBeChecked();
+    expect(screen.getByRole("checkbox",{name:`${price.model} 超过272k加价`})).toHaveProperty("checked", price.long_context_premium ?? false);
   const user=userEvent.setup();
   const toggle=screen.getByRole("checkbox",{name:"gpt-6-sol 超过272k加价"});
   await user.click(toggle);

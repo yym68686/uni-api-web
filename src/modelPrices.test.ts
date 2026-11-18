@@ -7,6 +7,33 @@ import {
 import { SUB_MODELS } from "./sub2apiModels";
 import { referencePrice } from "./sub2apiPriceCheck";
 
+it.each([
+  ["gpt-6.2-astra", "gpt-6-astra", 8, 40, .4, 10],
+  ["gpt-6.2-sol", "gpt-6.1-sol", 2, 10, .1, 2.5],
+] as const)("gives %s official prices independent of %s and preserves overrides", (model, inherited, input, output, read, write) => {
+  const reference = MODEL_PRICE_CATALOG.find(p => p.model === model)!;
+  const previous = MODEL_PRICE_CATALOG.find(p => p.model === inherited)!;
+  expect(MODEL_PRICE_CATALOG.filter(p => p.model === model)).toHaveLength(1);
+  expect(reference).toMatchObject({
+    input, output, cache_read: read, cache_write: write, cache_write_1h: write,
+    verified: true, source: "https://developers.openai.com/api/docs/pricing", cache_write_kind: "flat", long_context_premium: true,
+  });
+  expect(reference.note).toContain("2026-11-18");
+  expect(reference.note).toContain("12 小时");
+  expect(canonicalPriceModel(model + "-high")).toBe(model);
+  expect(canonicalPriceModel(inherited + "-high")).toBe(inherited);
+  const custom = { ...reference, input: 7, source: "manual", verified: false };
+  const oldCustom = { ...previous, input: 9, source: "manual", verified: true };
+  const displayed = displayedModelPrices([custom, oldCustom]);
+  expect(displayed.find(p => p.model === model)).toEqual(custom);
+  expect(displayed.find(p => p.model === inherited)).toEqual(oldCustom);
+  expect(referencePrice(model, [custom])).toBeUndefined();
+  expect(referencePrice(model + "-high", [previous, reference])).toEqual(reference.verified ? reference : undefined);
+  const placeholder = { ...reference, input: 0, output: 0, cache_read: 0, cache_write: 0, cache_write_1h: 0, source: "fact-discovered", verified: false };
+  expect(displayedModelPrices([placeholder]).find(p => p.model === model)).toMatchObject(reference);
+  expect(displayedModelPrices([{...placeholder,long_context_premium:false}]).find(p=>p.model===model)?.long_context_premium).toBe(false);
+});
+
 it('keeps Hydrogen reference prices and operator overrides independent of other Gemini models',()=>{
  const model='gemini-4-hydrogen',reference=MODEL_PRICE_CATALOG.find(p=>p.model===model)!;
  expect(reference).toMatchObject({input:1.5,output:7.5,cache_read:.075,cache_write:1.5,cache_write_1h:1.5,verified:true});

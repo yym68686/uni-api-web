@@ -49,7 +49,7 @@ export function displayedModelPrices(prices: ModelPrice[]): ModelPrice[] {
       : {
           ...reference,
           charge_cache_write: price?.charge_cache_write,
-          long_context_premium: price?.long_context_premium ?? false,
+          long_context_premium: price?.long_context_premium ?? reference.long_context_premium ?? false,
           sale_percent: price?.sale_percent,
         };
   });

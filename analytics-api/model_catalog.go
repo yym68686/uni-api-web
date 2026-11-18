@@ -122,7 +122,9 @@ func withCatalogPrices(prices []Price) []Price {
 			prices[i].PromptPriceTier = p.PromptPriceTier
 			if old.Source == "fact-discovered" && !old.Verified && old.Input == 0 && old.Output == 0 && old.CacheRead == 0 && old.CacheWrite == 0 && old.CacheWrite1h == 0 {
 				p.ChargeCacheWrite = old.ChargeCacheWrite
-				p.LongContextPremium = old.LongContextPremium
+				if old.LongContextPremium != nil {
+					p.LongContextPremium = old.LongContextPremium
+				}
 				p.SalePercent = old.SalePercent
 				prices[i] = p
 			}

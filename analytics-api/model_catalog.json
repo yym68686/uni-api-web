@@ -12,6 +12,19 @@
     "note": "Standard 短上下文基准；长上下文输入及缓存为 2 倍，输出为 1.5 倍。"
   },
   {
+    "model": "gpt-6.2-astra",
+    "input": 8,
+    "output": 40,
+    "cache_read": 0.4,
+    "cache_write": 10,
+    "cache_write_1h": 10,
+    "long_context_premium": true,
+    "source": "https://developers.openai.com/api/docs/pricing",
+    "verified": true,
+    "cache_write_kind": "flat",
+    "note": "2026-11-18 核对 OpenAI Standard 官方价，单位为美元 / 百万 token。≤272K 输入：输入 $8、输出 $40、缓存读取 $0.40；>272K 时分别为 $16、$60、$0.80。默认开启本行长上下文加价，可单独调整。缓存写入采用 30 分钟 $10 的参考价；官方 12 小时为 $20，当前统计不区分这两种时长，不自动套用 12 小时费率。默认不计缓存写入费。Batch、Fast、Ultrafast、后台完成窗口折扣及区域加价不自动套用。"
+  },
+  {
     "model": "gpt-6.1-sol",
     "input": 0,
     "output": 0,
@@ -22,6 +35,19 @@
     "verified": false,
     "cache_write_kind": "flat",
     "note": "价格待确认，暂不用于费用估算；请填写并确认实际单价。"
+  },
+  {
+    "model": "gpt-6.2-sol",
+    "input": 2,
+    "output": 10,
+    "cache_read": 0.1,
+    "cache_write": 2.5,
+    "cache_write_1h": 2.5,
+    "long_context_premium": true,
+    "source": "https://developers.openai.com/api/docs/pricing",
+    "verified": true,
+    "cache_write_kind": "flat",
+    "note": "2026-11-18 核对 OpenAI Standard 官方价，单位为美元 / 百万 token。≤272K 输入：输入 $2、输出 $10、缓存读取 $0.10；>272K 时分别为 $4、$15、$0.20。默认开启本行长上下文加价，可单独调整。缓存写入采用 30 分钟 $2.50 的参考价；官方 12 小时为 $5，当前统计不区分这两种时长，不自动套用 12 小时费率。默认不计缓存写入费。Batch、Fast、Ultrafast、后台完成窗口折扣及区域加价不自动套用。"
   },
   {
     "model": "gpt-6.1-terra",

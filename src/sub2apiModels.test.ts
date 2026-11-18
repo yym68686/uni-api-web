@@ -1,6 +1,18 @@
 import {expect,it,vi,afterEach} from 'vitest';
 import {initializeSubModels,loadSubModels,saveSubModels,SUB_MODELS,subModelProtocolLabel,subModelSelectionNeedsReview} from './sub2apiModels';
 afterEach(()=>vi.unstubAllGlobals());
+it('offers GPT 6.2 models independently through Responses without expanding saved paid detection selections',()=>{
+ const models=['gpt-6.2-astra','gpt-6.2-sol'],user='gpt-62-catalog-upgrade';
+ const previous=SUB_MODELS.filter(m=>!models.includes(m));
+ saveSubModels(user,['gpt-6-astra','gpt-6.1-sol'],previous);
+ for(const model of models){
+  expect(SUB_MODELS.filter(m=>m===model)).toHaveLength(1);
+  expect(subModelProtocolLabel(model)).toBe('Responses');
+ }
+ expect(loadSubModels(user)).toEqual(['gpt-6-astra','gpt-6.1-sol']);
+ saveSubModels(user,models);
+ expect(loadSubModels(user)).toEqual(models);
+});
 it('offers Hydrogen through Gemini without expanding saved detection selections',()=>{
  const model='gemini-4-hydrogen',user='hydrogen-catalog-upgrade';
  const previous=SUB_MODELS.filter(m=>m!==model);

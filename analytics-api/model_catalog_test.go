@@ -4,10 +4,108 @@ import (
 	"context"
 	"math"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
 )
+
+func TestGPT62OfficialPricesAndManagementScope(t *testing.T) {
+	for _, tc := range []struct {
+		model, inherited           string
+		input, output, read, write float64
+	}{
+		{"gpt-6.2-astra", "gpt-6-astra", 8, 40, .4, 10},
+		{"gpt-6.2-sol", "gpt-6.1-sol", 2, 10, .1, 2.5},
+	} {
+		t.Run(tc.model, func(t *testing.T) {
+			prices := withCatalogPrices(nil)
+			find := func(prices []Price, model string) Price {
+				t.Helper()
+				found := []Price{}
+				for _, p := range prices {
+					if p.Model == model {
+						found = append(found, p)
+					}
+				}
+				if len(found) != 1 {
+					t.Fatalf("missing or duplicate model %s: %d", model, len(found))
+				}
+				return found[0]
+			}
+			p, inherited := find(prices, tc.model), find(prices, tc.inherited)
+			if p.Input != tc.input || p.Output != tc.output || p.CacheRead != tc.read || p.CacheWrite != tc.write || p.CacheWrite1h != tc.write || !p.Verified || p.Source != "https://developers.openai.com/api/docs/pricing" {
+				t.Fatal("price differs from the official Standard reference", p)
+			}
+			if p.chargesCacheWrite() || !p.chargesLongContextPremium() || p.salePercent() != 2.5 || canonicalPriceModel(tc.model+"-high") != tc.model || canonicalPriceModel(tc.inherited+"-high") != tc.inherited {
+				t.Fatal("incorrect GPT defaults or price identity", p)
+			}
+			if !subModelAllowed(tc.model) || subModelProtocol(tc.model) != "responses" ||
+				!slices.Contains(managementPageModelCatalog(managementQueryInput{}, ""), tc.model) ||
+				!slices.Contains(managementPageDetectionModels(nil), tc.model) {
+				t.Fatal("model missing from management/probe catalogs")
+			}
+			manual, oldManual := p, inherited
+			manual.Input, manual.Source, manual.Verified = 7, "manual", false
+			oldManual.Input, oldManual.Source, oldManual.Verified = 9, "manual", true
+			preserved := withCatalogPrices([]Price{manual, oldManual})
+			if !reflect.DeepEqual(find(preserved, tc.model), manual) || !reflect.DeepEqual(find(preserved, tc.inherited), oldManual) {
+				t.Fatal("manual prices overwritten or model identities merged")
+			}
+			hydrated := withCatalogPrices([]Price{{Model: tc.model, Source: "fact-discovered"}})
+			if !reflect.DeepEqual(find(hydrated, tc.model), p) {
+				t.Fatal("discovered placeholder did not receive the official reference")
+			}
+			noPremium := false
+			explicit := withCatalogPrices([]Price{{Model: tc.model, Source: "fact-discovered", LongContextPremium: &noPremium}})
+			if find(explicit, tc.model).chargesLongContextPremium() {
+				t.Fatal("explicit operator opt-out overwritten")
+			}
+		})
+	}
+	if subModels[0] != "gpt-6-astra" {
+		t.Fatal("existing default model changed")
+	}
+}
+
+func TestGPT62OfficialCostsAtContextBoundaryAndCachedInput(t *testing.T) {
+	e := stateTestEngine(t)
+	ctx := context.Background()
+	for _, tc := range []struct {
+		model string
+		costs []float64
+	}{
+		{"gpt-6.2-astra", []float64{2.216, 4.412016, 1.82}},
+		{"gpt-6.2-sol", []float64{.554, 1.103004, .455}},
+	} {
+		for _, price := range withCatalogPrices(nil) {
+			if price.Model == tc.model {
+				if err := e.SavePrice(ctx, price); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		for i, usage := range []struct{ input, read int64 }{{272000, 0}, {272001, 0}, {300000, 200000}} {
+			id := tc.model + time.Duration(i).String()
+			output, actual := int64(1000), .123
+			fact := Fact{Schema: 1, EventID: id, Kind: "request", AtMS: time.Now().Add(-time.Minute).UnixMilli(), Provider: id, Model: "public-alias", UpstreamModel: tc.model + "-high", Outcome: "success", InputTokens: &usage.input, OutputTokens: &output, CacheReadTokens: &usage.read, ActualCostUSD: &actual}
+			if err := e.Import(ctx, id, "v1", []Fact{fact}); err != nil {
+				t.Fatal(err)
+			}
+			result, err := e.Query(ctx, QueryFilter{Range: "all", Provider: id})
+			if err != nil {
+				t.Fatal(err)
+			}
+			cost, ok := result.Total["estimated_cost_usd"].(float64)
+			if !ok || math.Abs(cost-tc.costs[i]) > 1e-9 {
+				t.Fatalf("%s input=%d read=%d cost=%v want=%v", tc.model, usage.input, usage.read, result.Total, tc.costs[i])
+			}
+			if result.Total["actual_cost_usd"] != actual {
+				t.Fatal("reference price changed actual ledger charge", result.Total)
+			}
+		}
+	}
+}
 
 func TestHydrogenCatalogPreservesPricesAndManagementScope(t *testing.T) {
 	const model = "gemini-4-hydrogen"
