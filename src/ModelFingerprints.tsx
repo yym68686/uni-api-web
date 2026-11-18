@@ -13,6 +13,7 @@ import { fingerprintKey, sharedFingerprintIndex } from "./fingerprintResults";
 export { fingerprintKey } from "./fingerprintResults";
 
 export const FINGERPRINT_MODELS = Object.keys(fingerprintModels);
+export const FINGERPRINT_BATCH_LIMIT = 512;
 export const fingerprintLabels: Record<string, string> = {
   match: "匹配", mismatch: "不匹配", insufficient: "样本不足", error: "检测失败",
   queued: "排队中", running: "检测中", interrupted: "已中断", untested: "未检测", not_applicable: "不适用",

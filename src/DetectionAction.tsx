@@ -1,18 +1,13 @@
 import { useState, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 
-export const managementDetectionProjects = [
-  "quality",
-  "tool-use",
-  "compaction",
-] as const;
-export const observationDetectionProjects = [
+export const detectionProjects = [
   "quality",
   "fingerprint",
   "tool-use",
   "compaction",
 ] as const;
-export type DetectionProject = (typeof observationDetectionProjects)[number];
+export type DetectionProject = (typeof detectionProjects)[number];
 
 export const detectionProjectLabels: Record<DetectionProject, string> = {
   quality: "降智检测",

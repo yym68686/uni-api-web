@@ -8,13 +8,14 @@ import { useConfiguredChecks } from "./channelManagement";
 import {
   DetectionAction,
   detectionProjectLabels,
-  observationDetectionProjects,
+  detectionProjects,
   useDetectionProject,
 } from "./DetectionAction";
 import { fingerprintKey } from "./fingerprintResults";
 import { channelName, providerId } from "./format";
 import {
   fingerprintBusy,
+  FINGERPRINT_BATCH_LIMIT,
   FINGERPRINT_MODELS,
   type useModelFingerprints,
 } from "./ModelFingerprints";
@@ -30,7 +31,6 @@ type Fingerprints = Pick<
   "index" | "members" | "supportedModels" | "isPending" | "isError"
 >;
 const pending = (state?: string) => state === "queued" || state === "running";
-const fingerprintBatchLimit = 512;
 
 export function useObservedDetection(
   owner: string,
@@ -42,7 +42,7 @@ export function useObservedDetection(
   const [project, selectProject] = useDetectionProject(
     "observation",
     owner,
-    observationDetectionProjects,
+    detectionProjects,
   );
   const [expanded, setExpanded] = useState(false);
   const [notice, setNotice] = useState<{ text: string; error?: boolean }>();
@@ -118,8 +118,8 @@ export function useObservedDetection(
         : project === "fingerprint" &&
             (fingerprints.isPending || fingerprints.isError)
           ? "指纹检测支持信息尚不可用。"
-          : project === "fingerprint" && total > fingerprintBatchLimit
-            ? `单次最多提交 ${fingerprintBatchLimit} 项指纹检测，请缩小筛选范围。`
+          : project === "fingerprint" && total > FINGERPRINT_BATCH_LIMIT
+            ? `单次最多提交 ${FINGERPRINT_BATCH_LIMIT} 项指纹检测，请缩小筛选范围。`
             : !total
               ? "当前筛选没有可发起此项检测的渠道。"
               : "";
@@ -239,7 +239,7 @@ export function ObservedDetectionActions({
         </span>
       )}
       <DetectionAction
-        projects={observationDetectionProjects}
+        projects={detectionProjects}
         project={detection.project}
         onSelect={detection.select}
         selectDisabled={busy || checks.pending.size > 0}

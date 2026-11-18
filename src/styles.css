@@ -2365,7 +2365,7 @@ nav > button.active > svg {
 .detection-action-picker select { position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer; }
 .detection-action-picker:has(select:disabled) { opacity:.5; }
 .detection-action-picker:has(select:focus-visible) { outline:2px solid var(--green); outline-offset:-2px; }
-.observed-detection-notice { padding:8px 20px; color:var(--muted); font-size:12px; }
+.detection-submission-notice { padding:8px 20px; color:var(--muted); font-size:12px; }
 .sub-model-check-group { gap:0; }
 .sub-model-check-group > .button:first-child { border-radius:8px 0 0 8px; }
 .sub-model-check-group > .button:last-child { border-radius:0 8px 8px 0; border-left:0; }

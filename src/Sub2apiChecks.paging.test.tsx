@@ -6,6 +6,7 @@ import * as Tooltip from "@radix-ui/react-tooltip";
 import { Sub2apiChecks } from "./Sub2apiChecks";
 import type { Result, SubAccount, SubTarget } from "./Sub2apiChecks";
 import type { ManagementPage, ManagementSelection } from "./managementQuery";
+import type { ManagedChannel, ManagementRow } from "./channelManagement";
 import { SUB_MODELS, saveSubModels } from "./sub2apiModels";
 import { controlRequest } from "./api";
 import { useState } from "react";
@@ -390,6 +391,77 @@ it.each([
  await user.click(screen.getByRole("button",{name:"检测 Owned site Channel 1"}));
  await waitFor(()=>expect(writes).toHaveLength(2));
  expect(writes[1].body.manual).toBe(true);expect(writes[1].body.targets.map(t=>t.group_id)).toEqual([1]);
+});
+
+it("offers all four projects and queues only eligible fingerprints across management pages", async () => {
+  const model = "deepseek-v4.1-flash-1017";
+  const member: ManagedChannel = {
+    kind: "configured", source_id: "gateway", source_name: "Gateway", provider: "native-deepseek", name: "Native DeepSeek",
+    models: [model], engine: "gpt", account_ids: [], account_id: "", group_id: 0, api_key_id: "", key_position: 0,
+    key_prefix: "", positions: {}, revision: "native", manageable: false,
+  };
+  const noModel = { ...member, provider: "native-other", name: "Native other", models: ["gpt-5.5"] };
+  const full: ManagementRow[] = [
+    ...rows.slice(0, 59),
+    ...[member, noModel].map((configured, i) => ({ ...rows[59 + i], account: { ...account, id: "", name: "未归属渠道" }, accountIds: [], configured })),
+  ];
+  const snapshot: ManagementSelection = {
+    ...selection(), rows: full, eligible: full, input: {
+      ...selection().input, channels: [member, noModel],
+      fingerprints: [{ account_id: account.id, group_id: 27, model, state: "running", message: "", revision: "", result: null }],
+    },
+  };
+  const writes: {path: string; body: unknown}[] = [];
+  const selections: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+    const url = new URL(input), path = url.pathname;
+    if (path.endsWith("/detection-settings")) return Response.json({ disabled: [1, 26, 59].map(group_id => ({ account_id: account.id, group_id })) });
+    if (path.endsWith("/accounts/progress")) return idleProgress();
+    if (init?.method === "POST") {
+      writes.push({ path, body: JSON.parse(String(init.body)) });
+      return Response.json({ accepted: true }, { status: 202 });
+    }
+    if (path.endsWith("/channel-management/query")) {
+      const token = url.searchParams.get("selection");
+      if (token) { selections.push(token); return Response.json(snapshot); }
+      const offset = Number(url.searchParams.get("cursor") || 0);
+      const current = page(offset);
+      return Response.json({ ...current, rows: full.slice(offset, offset + 25), context: { ...current.context, fingerprint_models: [model] } });
+    }
+    return Response.json({ data: [] });
+  }));
+
+  const user = userEvent.setup(), owner = "manage-fingerprint";
+  let view = mount(owner);
+  const picker = screen.getByLabelText("选择检测项目");
+  expect(within(picker).getAllByRole("option").map(option => option.textContent)).toEqual(["降智检测", "指纹检测", "Tool use 检测", "压缩检测"]);
+  await user.selectOptions(picker, "fingerprint");
+  await user.selectOptions(await screen.findByLabelText("检测模型筛选"), "gpt-5.5");
+  await waitFor(() => expect(screen.getByRole("button", { name: "指纹检测 · 61 个渠道" })).toBeDisabled());
+  await user.selectOptions(screen.getByLabelText("检测模型筛选"), model);
+  const action = screen.getByRole("button", { name: "指纹检测 · 61 个渠道" });
+  await waitFor(() => expect(action).toBeEnabled());
+  expect(writes).toHaveLength(0);
+  view.unmount();
+  view = mount(owner);
+  expect(screen.getByLabelText("选择检测项目")).toHaveValue("fingerprint");
+  await waitFor(() => expect(screen.getByRole("button", { name: "指纹检测 · 61 个渠道" })).toBeEnabled());
+  await user.click(screen.getByRole("button", { name: "下一页" }));
+  const group = screen.getByRole("group", { name: "专项检测" });
+  expect(within(group).getAllByRole("button")).toHaveLength(1);
+  const submit = within(group).getByRole("button", { name: "指纹检测 · 61 个渠道" });
+  await waitFor(() => expect(submit).toBeEnabled());
+  await user.click(submit);
+  await screen.findByText(/已提交 56 项指纹检测/);
+  expect(selections).toEqual(["signed-all"]);
+  expect(writes).toEqual([{
+    path: "/analytics/v1/model-fingerprints",
+    body: { targets: [
+      ...rows.slice(0, 59).map(row => row.target.group_id).filter(id => ![1, 26, 27, 59].includes(id)).map(group_id => ({ account_id: account.id, group_id, model })),
+      { source_id: member.source_id, provider: member.provider, model },
+    ] },
+  }]);
+  view.unmount();
 });
 
 it("persists each channel switch, keeps failed saves unchanged and restores it after a fresh page read",async()=>{

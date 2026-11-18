@@ -1966,7 +1966,7 @@ function Dashboard({
                 )}
               </div>
               {channelView && checkingChannels && (observedDetection.notice || observedDetection.batchIssue) && (
-                <div className={observedDetection.notice?.error ? "error-banner" : "observed-detection-notice"} role={observedDetection.notice?.error ? "alert" : "status"}>
+                <div className={observedDetection.notice?.error ? "error-banner" : "detection-submission-notice"} role={observedDetection.notice?.error ? "alert" : "status"}>
                   {observedDetection.notice?.text || observedDetection.batchIssue}
                 </div>
               )}

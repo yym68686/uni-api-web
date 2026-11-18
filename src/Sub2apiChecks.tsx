@@ -1,6 +1,7 @@
 import { useSubSyncProgress, useSubSyncResultRefresh } from "./subSyncProgress";
 import type { SyncProgress } from "./subSyncProgress";
-import { fingerprintTargets, fingerprintLabels, FingerprintCell, FingerprintPanel, fingerprintNote } from "./ModelFingerprints";
+import { fingerprintTargets, fingerprintLabels, fingerprintBusy, FINGERPRINT_MODELS, FINGERPRINT_BATCH_LIMIT, FingerprintCell, FingerprintPanel, fingerprintNote } from "./ModelFingerprints";
+import { fingerprintKey, sharedFingerprintIndex } from "./fingerprintResults";
 import { isCapabilityCheckModel, capabilityCheckScope } from "./sub2apiModels";
 import { CopyProbeCurl } from "./CopyProbeCurl";
 import { TableLoading, DetailLoading } from "./PageLoading";
@@ -29,7 +30,7 @@ import { BalanceAmount } from "./BalanceAmount";
 import { AccountForm } from "./SiteAccountForm";
 import { SiteAccountSettings } from "./SiteAccountSettings";
 import { useChannelDetection, detectionEnabled } from "./channelDetection";
-import { DetectionAction, detectionProjectLabels, managementDetectionProjects, useDetectionProject } from "./DetectionAction";
+import { DetectionAction, detectionProjectLabels, detectionProjects, useDetectionProject } from "./DetectionAction";
 import { ResponseLatency } from "./LatencyBadge";
 import { Empty, Spinner, Tip } from "./ui";
 import { loadSubFilters, saveSubFilters, subFilterDefaults } from "./sub2apiPreferences";
@@ -41,7 +42,7 @@ import { ChannelSettings } from "./ChannelSettings";
 import { ChannelOptimization } from "./ChannelOptimization";
 import { ChannelProtocolSummary } from "./ChannelProtocolSummary";
 import { useManagementPage, readManagementSelection, readManagementOptimizationPreview, managementOptimizationSnapshot } from "./managementQuery";
-import type { ManagementPagePosition } from "./managementQuery";
+import type { ManagementPagePosition, ManagementSelection } from "./managementQuery";
 import { channelMembers, managementRows, UNASSIGNED_ACCOUNT } from "./channelManagement";
 import type { ManagedChannel, ManagementRow } from "./channelManagement";
 import { ConfiguredChannelDialog } from "./ChannelRoutes";
@@ -791,7 +792,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
 }) {
   const client = useQueryClient();
   const detection = useChannelDetection(user);
-  const [detectionProject, setDetectionProject] = useDetectionProject("management", user, managementDetectionProjects);
+  const [detectionProject, setDetectionProject] = useDetectionProject("management", user, detectionProjects);
   const sources = useConsoleSources(user);
   const [filters, setFilters] = useState(() => loadSubFilters(user));
   const [cursorState,setCursorState]=useState(()=>initialPosition?.owner===user ? initialPosition : {filter:"",cursor:""});
@@ -880,6 +881,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   const [action, setAction] = useState("");
   const checksInFlight = useRef(new Set<string>());
   const [submittingChecks, setSubmittingChecks] = useState(new Set<string>());
+  const [fingerprintsSubmitted, setFingerprintsSubmitted] = useState(0);
   const [syncSubmitted, setSyncSubmitted] = useState<{count:number;detect:boolean} | null>(null);
   const syncableAccounts = statusAccounts.filter(
     (account) => !pending(account.state),
@@ -897,6 +899,9 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   // An explicit model filter is a direct probe request. Saved checkbox choices
   // only define the batch when no individual model is selected.
   const modelsToCheck = model ? [model] : detectionModels;
+  const fingerprintModelsToCheck = modelsToCheck.filter(name =>
+    FINGERPRINT_MODELS.includes(name) && pageData?.context.fingerprint_models.includes(name),
+  );
   const allModelsSelected = detectionModels.length === availableModels.length;
   const currentPage=(displayedPage?.offset || 0)/25;
   const selectionID = (account: SubAccount, target: SubTarget, configured?: ManagedChannel) =>
@@ -967,6 +972,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
     }
   }
   type CheckKind = "check" | "quality" | "compaction" | "tool-use";
+  type BatchKind = CheckKind | "fingerprint";
   const requestedModels = () => modelsToCheck;
   const checkKeys = (account: SubAccount, target: SubTarget, kind: CheckKind, configured?: ManagedChannel) =>
     (kind === "check" ? requestedModels() : kind === "quality" ? ["gpt-6-astra"] : [kind])
@@ -1031,15 +1037,47 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
       setSubmittingChecks(new Set(checksInFlight.current));
     }
   }
-  async function batch(kind:CheckKind){
+  function batchFingerprintTargets(row: ManagementRow) {
+    if (!detectionEnabled(row, detection.disabled)) return [];
+    if (row.account.id) {
+      const account = progressByAccount.get(row.account.id) || row.account;
+      if (awaitingSyncProgress || pending(account.state) || !row.target.active || !row.target.key_id || row.target.state === "error") return [];
+      return fingerprintTargets(row, fingerprintModelsToCheck);
+    }
+    if (!row.configured) return [];
+    // For bulk sampling of gateway channels, do not probe models absent from
+    // every member's configuration. The detail drawer still allows manual probes.
+    const configuredModels = new Set(channelMembers(row.configured).flatMap(member => member.models));
+    return fingerprintTargets(row, fingerprintModelsToCheck.filter(name => configuredModels.has(name)));
+  }
+  async function queueBatchFingerprints(selection: Pick<ManagementSelection, "eligible" | "input">) {
+    const { fingerprints, channels, imports, unavailable_sources, unavailable_imports } = selection.input;
+    const index = sharedFingerprintIndex(fingerprints || [], channels, unavailable_sources || [], imports, unavailable_imports || []);
+    const targets = new Map(selection.eligible.flatMap(batchFingerprintTargets).map(target => [fingerprintKey(target), target]));
+    const ready = [...targets].filter(([key]) => !fingerprintBusy(index.get(key))).map(([, target]) => target);
+    if (!ready.length) throw Error("当前筛选没有可发起指纹检测的渠道与模型，或检测已在排队。");
+    if (ready.length > FINGERPRINT_BATCH_LIMIT) throw Error(`单次最多提交 ${FINGERPRINT_BATCH_LIMIT} 项指纹检测，请缩小渠道或模型范围。`);
+    await controlRequest("/v1/model-fingerprints", { method: "POST", body: JSON.stringify({ targets: ready }) });
+    setFingerprintsSubmitted(ready.length);
+    void client.invalidateQueries({ queryKey: ["model-fingerprints"] });
+  }
+  async function batch(kind: BatchKind){
     if(selectionRead.current || !pageData || detection.isPending || detection.isError || detection.busy)return;
-    selectionRead.current=true;setReadingSelection(true);setError("");
-    try{const selected=await completeSelection();await queueChecks(kind,selected.eligible,false);}
+    selectionRead.current=true;setReadingSelection(true);setError("");setFingerprintsSubmitted(0);
+    try{
+      const selected=await completeSelection();
+      if (kind === "fingerprint") await queueBatchFingerprints(selected);
+      else await queueChecks(kind,selected.eligible,false);
+    }
     catch(e){setError(e instanceof Error?e.message:"完整筛选结果读取失败");}
     finally{selectionRead.current=false;setReadingSelection(false);}
   }
   const batchBusy=readingSelection || submittingChecks.size>0;
-  const batchDisabled=(kind:CheckKind)=>resultsUnavailable || !eligibleCount || detection.isPending || detection.isError || detection.busy || readingSelection || submittingChecks.size>0 || (kind==="check"&&!modelsToCheck.length) || ((kind==="compaction"||kind==="tool-use")&&!!model&&!isCapabilityCheckModel(model)) || (rows.length===total && !rows.some(row=>detectionEnabled(row,detection.disabled)&&canCheck(row.account,row.target,kind,row.configured)));
+  const batchDisabled=(kind:BatchKind)=>resultsUnavailable || !eligibleCount || detection.isPending || detection.isError || detection.busy || batchBusy || (
+    kind === "fingerprint"
+      ? !fingerprintModelsToCheck.length || (rows.length === total && !rows.some(row => batchFingerprintTargets(row).length))
+      : (kind==="check"&&!modelsToCheck.length) || ((kind==="compaction"||kind==="tool-use")&&!!model&&!isCapabilityCheckModel(model)) || (rows.length===total && !rows.some(row=>detectionEnabled(row,detection.disabled)&&canCheck(row.account,row.target,kind,row.configured)))
+  );
   const check=(selection?:CheckSelection)=>selection?queueChecks("check",selection):batch("check");
   const checkCompaction=(selection:CheckSelection)=>queueChecks("compaction",selection);
   const checkToolUse=(selection:CheckSelection)=>queueChecks("tool-use",selection);
@@ -1299,13 +1337,13 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                 }}
               />
             </label>
-            <DetectionAction projects={managementDetectionProjects} project={detectionProject} onSelect={setDetectionProject} selectDisabled={batchBusy}>
+            <DetectionAction projects={detectionProjects} project={detectionProject} onSelect={project => { setDetectionProject(project); setFingerprintsSubmitted(0); }} selectDisabled={batchBusy}>
               <button
                 className="button small"
                 aria-label={`${detectionProjectLabels[detectionProject]} · ${eligibleCount} 个渠道`}
                 aria-busy={batchBusy}
                 disabled={batchDisabled(detectionProject)}
-                title={detectionProject === "compaction" ? capabilityCheckScope : detectionProject === "tool-use" ? toolUseDescription : undefined}
+                title={detectionProject === "fingerprint" ? (fingerprintModelsToCheck.length ? `对当前筛选范围提交指纹检测 · ${fingerprintModelsToCheck.length} 个适用模型` : "请选择支持指纹检测的模型") : detectionProject === "compaction" ? capabilityCheckScope : detectionProject === "tool-use" ? toolUseDescription : undefined}
                 onClick={() => void batch(detectionProject)}
               >
                 {batchBusy ? (
@@ -1343,6 +1381,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
             </div>
           </div>
         </div>
+        {fingerprintsSubmitted > 0 && <div className="detection-submission-notice" role="status">已提交 {fingerprintsSubmitted} 项指纹检测，可刷新渠道查看结果。</div>}
         <div className="filters sub-filters" role="region" aria-label="渠道管理筛选" tabIndex={0}>
           <label className="select-field">
             <select

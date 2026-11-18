@@ -88,6 +88,7 @@ export interface ManagementSelection {
     channels: ManagedChannel[];
     imports: InstalledChannel[];
     checks: ConfiguredCheck[];
+    fingerprints?: FingerprintRecord[] | null;
     routes: Record<string, Routes>;
     unavailable_sources: string[] | null;
     unavailable_imports: string[] | null;
