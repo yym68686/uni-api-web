@@ -93,6 +93,15 @@ const selection = (): ManagementSelection => ({
   },
   prices: [],
 });
+async function openSites() {
+  const selector = within(screen.getByRole("navigation", {name: "管理视图"}));
+  const button = selector.getByRole("button", {name: "站点账号"});
+  if (button.getAttribute("aria-current") !== "true") await userEvent.click(button);
+}
+
+async function openChannels() {
+  await userEvent.click(within(screen.getByRole("navigation", {name: "管理视图"})).getByRole("button", {name: "渠道"}));
+}
 function mount(user: string, client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
   return render(
     <QueryClientProvider
@@ -266,16 +275,18 @@ it.each([true,false])("starts live sync progress without clearing rows, changing
  await user.click(screen.getByRole("button",{name:"下一页"}));
  await screen.findByText("Channel 26",{selector:"strong"});
  const row=screen.getByRole("row",{name:"查看 Owned site Channel 26 渠道详情"});
+  await openSites();
  const button=screen.getByRole("button",{name:detect ? "一键同步并检测" : "一键同步"});
  await user.click(button);
  await waitFor(()=>expect(progressReads).toBe(2));
  expect(pageReads).toBe(2);expect(posts).toBe(1);expect(button).toBeDisabled();
- expect(screen.getByRole("row",{name:"查看 Owned site Channel 26 渠道详情"})).toBe(row);
+ expect(screen.getByText("Channel 26",{selector:"strong"}).closest("tr")).toBe(row);
  expect(screen.queryByRole("status",{name:"加载渠道检测"})).not.toBeInTheDocument();
  await act(async()=>{finishProgress(Response.json({data:[{...account,state:"running",job_kind:"sync",sync_models:["gpt-5.5"],active_groups:1,completed_groups:0,progress:{total:32,completed:3,queued:27,running:2,interrupted:0,running_models:["gpt-5.5"],groups:[]}}],read_at_ms:2}));});
  await screen.findByText("模型进度：3/32 完成 · 2 检测中 · 27 排队");
- expect(screen.getByRole("row",{name:"查看 Owned site Channel 26 渠道详情"})).toBe(row);
+ expect(screen.getByText("Channel 26",{selector:"strong"}).closest("tr")).toBe(row);
  expect(button).toBeDisabled();expect(pageReads).toBe(2);expect(posts).toBe(1);
+ await openChannels();
  await user.click(screen.getByRole("button",{name:"刷新渠道管理"}));
  await waitFor(()=>expect(pageReads).toBe(3));
  await screen.findByText("Channel 26",{selector:"strong"});
@@ -315,7 +326,7 @@ it("renders just the current 25 rows and fetches all 61 before a batch, without 
   expect(
     screen.queryByText("Channel 26", { selector: "strong" }),
   ).not.toBeInTheDocument();
-  expect(screen.getByText("61 个渠道可检测")).toBeVisible();
+  expect(screen.getByRole("button", {name: /检测全部模型 · 61 个渠道/})).toBeVisible();
   await user.click(screen.getByRole("button", { name: "下一页" }));
   await screen.findByText("Channel 26", { selector: "strong" });
   expect(
@@ -620,11 +631,13 @@ it("allows sync-only with no selected models and never falls back to detection o
  }));
  mount("sync-only-empty");const user=userEvent.setup();
  await screen.findByText("Channel 1",{selector:"strong"});
+  await openSites();
  expect(screen.getByRole("button",{name:"一键同步并检测"})).toBeDisabled();
  expect(screen.getByRole("button",{name:"一键同步"})).toBeEnabled();
  await user.click(screen.getByRole("button",{name:"一键同步"}));
  await screen.findByText("同步检测服务待更新，请稍后重试。");
  expect(writes).toEqual(["/analytics/v1/sub2api/accounts/sync-only"]);
+ await openChannels();
  expect(screen.getByText("Channel 1",{selector:"strong"})).toBeVisible();
 });
 
@@ -651,7 +664,8 @@ it.each([202,404])("submits a single site's saved model selection, never a legac
  // The list's model filter is not the saved account-sync detection scope.
  await user.selectOptions(screen.getByLabelText("检测模型筛选"),"gpt-5.5");
  await waitFor(()=>expect(pageReads).toBe(2));
- const row=screen.getByRole("listitem",{name:"Owned site"});
+ await openSites();
+ const row=document.querySelector<HTMLElement>('[role="listitem"][aria-label="Owned site"]')!;
  const button=within(row).getByRole("button",{name:"同步并检测"});
  expect(button).toHaveAttribute("title","仅检测已勾选的 36 个模型");
  await waitFor(()=>expect(progressReads).toBeGreaterThan(0));
@@ -677,7 +691,8 @@ it("disables single-account sync when the saved detection selection is empty",as
  }));
  mount(owner);
  await screen.findByText("Channel 1",{selector:"strong"});
- expect(within(screen.getByRole("listitem",{name:"Owned site"})).getByRole("button",{name:"同步并检测"})).toBeDisabled();
+  await openSites();
+ expect(within(document.querySelector<HTMLElement>('[role="listitem"][aria-label="Owned site"]')!).getByRole("button",{name:"同步并检测"})).toBeDisabled();
  expect(writes).toEqual([]);
 });
 
@@ -695,14 +710,14 @@ it.each(["filter","next-page"])("updates only channel results for %s, keeping ac
  }));
  mount("filters-stable");const user=userEvent.setup();
  await screen.findByText("Channel 1",{selector:"strong"});
- const accountRow=screen.getByRole("listitem",{name:"Owned site"});
+ const accountRow=document.querySelector('[role="listitem"][aria-label="Owned site"]')!;
  const options=screen.getByLabelText("倍率上限筛选").innerHTML;
  const table=screen.getByRole("table");
  const firstRow=screen.getByText("Channel 1",{selector:"strong"});
  if(change === "filter") await user.selectOptions(screen.getByLabelText("检测模型筛选"),"gpt-5.5");
  else await user.click(screen.getByRole("button",{name:"下一页"}));
  await waitFor(()=>expect(pageReads).toBe(2));
- expect(screen.getByRole("listitem",{name:"Owned site"})).toBe(accountRow);
+ expect(document.querySelector<HTMLElement>('[role="listitem"][aria-label="Owned site"]')!).toBe(accountRow);
  expect(screen.queryByRole("status",{name:"加载站点账号"})).not.toBeInTheDocument();
  expect(screen.getByLabelText("倍率上限筛选").innerHTML).toBe(options);
  expect(screen.getByLabelText("检测模型筛选")).toHaveValue(change === "filter" ? "gpt-5.5" : "");
@@ -717,7 +732,7 @@ it.each(["filter","next-page"])("updates only channel results for %s, keeping ac
  expect(progressReads).toBe(1);
  await act(async()=>{finish(Response.json({...response,...page(change === "next-page" ? 25 : 0),read_at_ms:2}));});
  await screen.findByText(change === "next-page" ? "Channel 26" : "Channel 1",{selector:"strong"});
- expect(screen.getByRole("listitem",{name:"Owned site"})).toBe(accountRow);
+ expect(document.querySelector<HTMLElement>('[role="listitem"][aria-label="Owned site"]')!).toBe(accountRow);
  expect(screen.getByRole("table")).toBe(table);
  expect(table.parentElement).not.toHaveAttribute("inert");
  expect(progressReads).toBe(1);
@@ -747,11 +762,11 @@ it.each([
  await screen.findByText("Channel 1",{selector:"strong"});
  await userEvent.setup().click(screen.getByRole("button",{name:"下一页"}));
  await screen.findByText("Channel 26",{selector:"strong"});
- const table=screen.getByRole("table"),accountRow=screen.getByRole("listitem",{name:"Owned site"});
+ const table=screen.getByRole("table"),accountRow=document.querySelector('[role="listitem"][aria-label="Owned site"]')!;
  const row=screen.getByRole("row",{name:"查看 Owned site Channel 26 渠道详情"});
  await act(async()=>{await controlRequest(path,{method});});
  await waitFor(()=>expect(reads).toBe(3));
- expect(screen.getByRole("listitem",{name:"Owned site"})).toBe(accountRow);
+ expect(document.querySelector<HTMLElement>('[role="listitem"][aria-label="Owned site"]')!).toBe(accountRow);
  expect(document.querySelector(".sub-results-table table")).toBe(table);
  expect(table.parentElement).toHaveAttribute("inert");
  expect(row).toBeVisible();
@@ -761,7 +776,7 @@ it.each([
  await act(async()=>{finish(Response.json({...page(25),revision:"updated",read_at_ms:2}));});
  await waitFor(()=>expect(table.parentElement).not.toHaveAttribute("inert"));
  expect(screen.getByRole("table")).toBe(table);
- expect(screen.getByRole("row",{name:"查看 Owned site Channel 26 渠道详情"})).toBe(row);
+ expect(screen.getByText("Channel 26",{selector:"strong"}).closest("tr")).toBe(row);
 });
 
 it("submits the import form on page two and reconciles that same page after the write",async()=>{
@@ -804,6 +819,6 @@ it("submits the import form on page two and reconciles that same page after the 
  expect(document.querySelector(".sub-pagination")).toHaveTextContent("2 / 3");
  await act(async()=>finish(Response.json({...readyPage(25),revision:"after-import",read_at_ms:3})));
  await waitFor(()=>expect(table.parentElement).not.toHaveAttribute("inert"));
- expect(screen.getByRole("row",{name:"查看 Owned site Channel 26 渠道详情"})).toBe(row);
+ expect(screen.getByText("Channel 26",{selector:"strong"}).closest("tr")).toBe(row);
  expect(document.querySelector(".sub-pagination")).toHaveTextContent("2 / 3");
 });

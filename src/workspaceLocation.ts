@@ -7,8 +7,8 @@ const shared: (keyof Filters)[] = [
   "endpoint", "stream", "balanceFilter", "balanceTopN", "balanceThreshold",
 ];
 const fields = (view: View) => view === "requests" ? [...shared, "sort" as const] : shared;
-export const hasChannelScope = (view: View): view is "channels" | "balances" | "overview" =>
-  view === "channels" || view === "balances" || view === "overview";
+export const hasChannelScope = (view: View): view is "channels" | "routing" | "balances" | "overview" =>
+  view === "channels" || view === "routing" || view === "balances" || view === "overview";
 
 export type LogPosition = { id: string; source: string; instance?: string };
 export type LogWindow = { from: number; to: number };
@@ -21,7 +21,7 @@ export function readWorkspace(hash: string, account: boolean) {
   const from = Number(params.get("from")), to = Number(params.get("to"));
   const id = params.get("request")?.slice(0, 512);
   return { view, filters,
-    detail: view === "channels" || view === "balances" ? params.get("channel")?.slice(0, 1400) || null : null,
+    detail: view === "channels" || view === "routing" || view === "balances" ? params.get("channel")?.slice(0, 1400) || null : null,
     request: view === "requests" && id ? {id, source:params.get("source")?.slice(0,512) || "", instance:params.get("instance")?.slice(0,512)} : null,
     logWindow: view === "requests" && validLogWindow(from,to) ? {from,to} : null,
   };
@@ -33,7 +33,7 @@ export function workspaceHash(view: View, filters?: Filters, detail?: string | n
     params.set("scope", "1");
     for (const key of fields(view)) if (filters[key] !== defaultFilters[key]) params.set(key, filters[key]);
   }
-  if (detail && (view === "channels" || view === "balances")) params.set("channel", detail);
+  if (detail && (view === "channels" || view === "routing" || view === "balances")) params.set("channel", detail);
   return "#" + params;
 }
 

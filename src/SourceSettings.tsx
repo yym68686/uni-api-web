@@ -9,6 +9,7 @@ import { ChannelSettings, GLOBAL_SETTINGS_SCOPE } from "./ChannelSettings";
 import { ControlPersistence } from "./ControlPersistence";
 import { ManagedConfiguration } from "./ManagedConfiguration";
 import { ChannelProtocolRepair } from "./ChannelProtocolRepair";
+import { WorkbenchDisclosure, WorkbenchTabs } from "./Workbench";
 export interface ConsoleSource {
   id: string;
   name: string;
@@ -41,6 +42,7 @@ export function SourceSettings({
     [configKey, setConfigKey] = useState("");
   const [removing, setRemoving] = useState<string | null>(null);
   const [managedBootstrap, setManagedBootstrap] = useState(false);
+  const [section, setSection] = useState("sources");
   const opener = useRef<HTMLElement | null>(null);
   function edit(source: ConsoleSource | null) {
     opener.current = document.activeElement as HTMLElement;
@@ -98,19 +100,18 @@ export function SourceSettings({
       <div className="data-heading">
         <div className="data-title">
           <Server size={20} />
-          <h2>uni-api 来源</h2>
+          <h2>设置</h2>
         </div>
-        <div className="data-actions">
+        {section === "sources" && <div className="data-actions">
           {refreshAction}
           <button className="button small" onClick={() => edit(null)} disabled={loading || !!readError}>
             <Plus size={16} />
             添加来源
           </button>
-        </div>
+        </div>}
       </div>
-      <p className="settings-note">
-        每个来源可独立管理全局超时、冷却、心跳和 hedging；渠道自定义值优先。账号凭据和平台密钥加密保存在服务端。默认保留已应用的临时渠道、顺序和停用规则，来源重启后自动恢复。
-      </p>
+      <WorkbenchTabs label="设置视图" value={section} onChange={setSection} tabs={[["sources", "来源"], ["account", "账户安全"]]} />
+      <div hidden={section !== "sources"}>
       {error && !open && (
         <p role="alert" className="error-banner">
           {error}
@@ -127,14 +128,13 @@ export function SourceSettings({
             <strong>{src.name}</strong>
             {src.temporarily_unavailable && <small role="status">暂时不可用</small>}
             <small>{src.base}</small>
-            <small>
-              历史请求由来源网关异步上报；接收状态见渠道观测。
-            </small>
           </div>
+          <WorkbenchDisclosure label="管理">
           <ChannelSettings row={{provider:GLOBAL_SETTINGS_SCOPE,provider_name:"全局设置",source_id:src.id,source_name:src.name,model:""}} />
           <ControlPersistence source={src.id} name={src.name} lazyLoad />
           <ManagedConfiguration source={src.id} />
           <ChannelProtocolRepair source={src.id} provider="" onApplied={onSaved} />
+          </WorkbenchDisclosure>
           <button
             className="icon-button"
             aria-label={`编辑 ${src.name}`}
@@ -251,10 +251,8 @@ export function SourceSettings({
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
-      <p className="settings-note">
-        不同来源若共用上游账号，上游账单会包含共享用量，不能逐行相加。
-      </p>
-      <PasswordSettings />
+      </div>
+      {section === "account" && <PasswordSettings />}
     </section>
   );
 }

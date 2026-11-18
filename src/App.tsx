@@ -1,11 +1,11 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { m as motion } from "motion/react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { ArrowRight, ArrowUpRight, Check, Command, Eye, EyeOff, Gauge, Globe2, KeyRound, Layers3, Link2, ShieldCheck, TriangleAlert, Wallet } from "lucide-react";
+import { ArrowRight, Eye, EyeOff, Globe2, KeyRound, ShieldCheck, TriangleAlert } from "lucide-react";
 import { ApiError, cleanBase, controlRequest } from "./api";
 import { readKeys, type Keys } from "./requestFilters";
-import { Brand, Spinner } from "./ui";
+import { Spinner } from "./ui";
+import { ConsoleBrand } from "./ConsoleChrome";
 import { readAccountSession, type AccountSession } from "./accountSession";
 import { clearDashboardSnapshots, restoreDashboardSnapshot } from "./dashboardSnapshot";
 import { StartupScreen } from "./StartupScreen";
@@ -137,7 +137,7 @@ function ConnectionForm({
       onSubmit={connect}
     >
       <label htmlFor="service-address">
-        服务地址 <span>UNI-API ENDPOINT</span>
+        服务地址
       </label>
       <div className="input-wrap">
         <Globe2 size={18} />
@@ -154,7 +154,7 @@ function ConnectionForm({
         />
       </div>
       <label htmlFor="access-key">
-        访问密钥 <span>PLATFORM KEY</span>
+        访问密钥
       </label>
       <div className="input-wrap">
         <KeyRound size={18} />
@@ -204,12 +204,6 @@ function ConnectionForm({
   );
 }
 
-const reveal = {
-  initial: { opacity: 0, y: 12 },
-  animate: { opacity: 1, y: 0 },
-  transition: { duration: 0.32 },
-};
-
 function Welcome({
   onConnect,
   error,
@@ -222,102 +216,19 @@ function Welcome({
   shortSession?: boolean;
 }) {
   return (
-    <div className="welcome">
-      <header className="welcome-header">
-        <Brand />
-        <a
-          className="text-link"
-          href="https://github.com/yym68686/uni-api-web"
-          target="_blank"
-          rel="noreferrer"
-        >
-          GitHub <ArrowUpRight size={16} />
-        </a>
-      </header>
-      <main className="welcome-main">
-        <motion.section {...reveal} className="welcome-intro">
-          <span className="eyebrow">
-            <span className="dot" /> YOUR MODELS. ONE CLEAR VIEW.
-          </span>
-          <h1>
-            看清每一条路由。
-            <br />
-            <span>掌控每一次请求。</span>
-          </h1>
-          <p className="welcome-description">
-            将模型、渠道与请求表现连在一起。
-            <br />
-            用一个清晰的工作台，发现等待、定位异常、了解余额。
-          </p>
-          <div className="route-visual" aria-hidden="true">
-            <div className="route-line line-one" />
-            <div className="route-line line-two" />
-            <div className="visual-label">A CLEARER PATH FOR EVERY REQUEST</div>
-            <div className="route-node origin">
-              <Command size={22} />
-              <span>应用请求</span>
-            </div>
-            <div className="route-node gateway">
-              <Brand compact />
-              <span>uni-api</span>
-              <small>路由观测</small>
-            </div>
-            <div className="route-destinations">
-              {["首字延迟", "请求前等待", "渠道余额"].map((label, i) => (
-                <div className="route-node destination" key={label}>
-                  <span className={`node-dot tone-${i}`} />
-                  {label}
-                  <Check size={14} />
-                </div>
-              ))}
-            </div>
-            <div className="visual-footer">
-              <Layers3 size={14} /> 多模型 · 多渠道 · 一个视图
-            </div>
-          </div>
-          <div className="welcome-features">
-            <span>
-              <Gauge size={17} />
-              清晰的性能指标
-            </span>
-            <span>
-              <Wallet size={17} />
-              独立余额查询
-            </span>
-            <span>
-              <ShieldCheck size={17} />
-              安全连接你的服务
-            </span>
-          </div>
-        </motion.section>
-        <motion.section
-          {...reveal}
-          transition={{ delay: 0.09, duration: 0.35 }}
-          className="connect-card"
-        >
-          <div className="connect-icon">
-            <Link2 size={23} />
-          </div>
-          <h2>{legacyForm ? "直连 uni-api 服务" : "登录 uni-api console"}</h2>
-          <p>{legacyForm ? "输入服务地址和平台密钥，查看此服务的数据。" : "使用控制台账号管理多个 uni-api 来源。"}</p>
+    <div className="welcome observatory-welcome">
+      <main className="observatory-login">
+        <section className="connect-card">
+          <ConsoleBrand />
+          <h1>{legacyForm ? "连接服务" : "登录控制台"}</h1>
           {legacyForm || <AccountForm onConnect={onConnect} shortSession={shortSession} />}
           {error && (
             <p role="alert" className="error-banner">
               {error}
             </p>
           )}
-          <div className="connect-card-footer">
-            <span className="tiny-dot" /> {legacyForm ? "单一服务 · 平台密钥直连" : "多来源分析 · 控制台账户"}
-          </div>
-        </motion.section>
+        </section>
       </main>
-      <footer className="welcome-footer">
-        <span>
-          uni-api console <span className="muted">/</span>{" "}
-          为每一次模型调用带来清晰视野
-        </span>
-        <span>OPEN SOURCE · BUILT FOR CLARITY</span>
-      </footer>
     </div>
   );
 }

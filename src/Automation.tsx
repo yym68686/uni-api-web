@@ -177,6 +177,8 @@ const number = (value: string) =>
 const time = (value?: string) =>
   value ? new Date(value).toLocaleString("zh-CN", { hour12: false }) : "—";
 
+import { WorkbenchTabs } from "./Workbench";
+
 export function Automation({
   sources,
   models = [],
@@ -197,6 +199,7 @@ export function Automation({
     [error, setError] = useState(""),
     [generation, setGeneration] = useState(0),
     [keyError, setKeyError] = useState("");
+  const [section, setSection] = useState("tasks");
   const editorOpener = useRef<HTMLElement | null>(null);
   const editorBaseline = useRef("");
   const auditHeading = useRef<HTMLDivElement>(null);
@@ -475,20 +478,16 @@ export function Automation({
             </button>
           </div>
         </div>
-        <p className="field-note">
-          定时检测降智，或根据最近的渠道表现生成调序建议、自动调整优先级。每次执行和配置变更均保留审计。
-        </p>
       </div>
+      <WorkbenchTabs label="自动化视图" value={section} onChange={value => {setSection(value);if (value === "history") setSelected("");}}
+        tabs={[["tasks","任务"],["history","执行记录"]]} />
       {error && !draft && (
         <p role="alert" className="error-banner">
           {error}
         </p>
       )}
       {runNotice && <p role="status" className="coverage-note">{runNotice}</p>}
-      <div className="data-panel automation-list">
-        <div className="data-heading">
-          <h3>任务</h3>
-        </div>
+      <div className="data-panel automation-list" hidden={section !== "tasks"}>
         {loading && !tasks.length && <TaskLoading />}
         {tasks.map((t) => (
           <article
@@ -497,17 +496,17 @@ export function Automation({
           >
             <button className="automation-select" aria-pressed={selected===t.id} onClick={() => {
               setSelected(t.id);
-              auditHeading.current?.scrollIntoView?.({block:"nearest"});
+              setSection("history");
             }}>
               <strong>{t.name}</strong>
               <small>
                 {sourceNames.get(t.source_id) || t.source_id} ·{" "}
-                {t.kind === "quality" ? "定时降智检测" : "渠道调序"}
+                {t.kind === "quality" ? "降智检测" : t.policy.action === "apply" ? "自动调序" : "调序建议"}
               </small>
               <small>
                 {t.model} · 每 {t.interval_seconds} 秒
               </small>
-              <small>上次运行：{time(t.last_run)}</small>
+              <small>下次运行：{time(t.next_run)}</small>
             </button>
             <div className="automation-card-actions">
               <span className={`automation-state ${t.enabled ? "on" : ""}`}>
@@ -949,7 +948,7 @@ export function Automation({
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
-      <section className="data-panel automation-audit">
+      <section className="data-panel automation-audit" hidden={section !== "history"}>
         <div className="data-heading" ref={auditHeading}>
           <div className="data-title">
             <History size={17} />

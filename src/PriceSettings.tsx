@@ -14,6 +14,7 @@ import {
 import { analyticsRequest } from "./api";
 import type { Connection, ModelPrice } from "./types";
 import { Spinner } from "./ui";
+import { WorkbenchDisclosure } from "./Workbench";
 import {
   chargesCacheWrite,
   salePercent,
@@ -395,6 +396,8 @@ export function PriceSettings({
   onPendingChange?: Dispatch<SetStateAction<Set<string>>>;
 }) {
   const [filter, setFilter] = useState("");
+  const [editing, setEditing] = useState("");
+  const editorOpener = useRef<HTMLElement | null>(null);
   const [localDrafts, setLocalDrafts] = useState<PriceDrafts>(() => new Map());
   const drafts = externalDrafts ?? localDrafts;
   const setDrafts = onDraftChange ?? setLocalDrafts;
@@ -405,7 +408,7 @@ export function PriceSettings({
   const visible = all.filter((price) =>
     price.model.toLowerCase().includes(filter.trim().toLowerCase()),
   );
-  const visibleModels = new Set(visible.map(price => price.model));
+  const editedPrice = all.find(price => price.model === editing);
   const dirtyCount = drafts.size;
   useEffect(() => {
     if (!dirtyCount || externalDrafts) return;
@@ -415,13 +418,13 @@ export function PriceSettings({
   }, [dirtyCount, !!externalDrafts]);
   return (
     <section className="data-panel prices-panel">
-      <div className="data-heading price-heading">
+      <div className="data-heading price-heading workbench-heading">
         <div className="data-title">
           <SlidersHorizontal size={19} />
           <h2>模型价格</h2>
-          <span className="count-badge">{loading ? "—" : all.length}</span>
         </div>
-        <div className="data-actions price-toolbar">
+        <div className="workbench-tools">
+          <WorkbenchDisclosure label={filter ? "筛选 1" : "筛选"} icon={<Search size={14} aria-hidden="true" />}>
           <label className="price-search-field">
             <Search size={15} aria-hidden="true" />
             <input
@@ -432,42 +435,9 @@ export function PriceSettings({
               onChange={(event) => setFilter(event.target.value)}
             />
           </label>
+          </WorkbenchDisclosure>
           {refreshAction}
         </div>
-      </div>
-      <div className="price-table-intro">
-        <p>
-          美元 / 百万 token
-          <span>每行独立保存 · 模型旁 ⓘ 查看来源与适用条件</span>
-        </p>
-        {dirtyCount > 0 && <p role="status">有 {dirtyCount} 项未保存；切换筛选或栏目不会丢弃草稿。</p>}
-        <details className="price-help">
-          <summary>计费说明</summary>
-          <div>
-            <p>
-              模型列表与检测设置一致；带后缀的模型自动沿用基础模型价格，例如
-              gemini-3.1-pro-search → gemini-3.1-pro。
-            </p>
-            <p>
-              GPT
-              默认不计缓存写入费用，其他模型默认计费，可逐项修改。“同输入”随输入价格自动更新，“同默认”使用默认缓存写入价格。关闭写入计费后保留原有价格。价格确认后才参与估算，未公布价格不表示免费。
-            </p>
-            <p>
-              售卖比例为原价的百分比，填 2.5 表示按原价的 2.5% 售卖。GPT
-              及其他模型默认 2.5%，Claude / Gemini 默认 15%。经营参考 = 估算消费 ×
-              售卖百分比 ÷ 100 × 6.9 − 渠道实际消费数值。成本未进行币种换算，不可用于对账。
-            </p>
-            <p>不含搜索、缓存存储等额外费用，实际扣费以站点账单为准。</p>
-            <p>
-              Haiku 5.5 自动按单次请求总输入（含缓存）分档：≤100k 使用所填价格，&gt;100k 的输入、输出及缓存价格均 ×5，不叠加 272k 加价。
-            </p>
-            <p>
-              其他模型的“超过272k加价”默认关闭。开启后，单次请求输入总量（含缓存）严格大于
-              272,000 token 时，该请求的普通输入、缓存读取和缓存写入分别按各自单价
-              2 倍、输出按输出单价 1.5 倍估算，不是仅计算超出部分。关闭“写入计费”时仍不计缓存写入费用。保存后对所选时间范围内的历史请求同样生效。
-            </p>
-          </div>
-        </details>
       </div>
       {error && (
         <p role="alert" className="price-load-error negative">
@@ -476,74 +446,32 @@ export function PriceSettings({
         </p>
       )}
       {loading ? <TableLoading kind="prices" rows={8} /> : <>
-      <div
-        className="price-table-scroll"
-        role="region"
-        aria-label="模型价格表，可横向滚动"
-        tabIndex={0}
-      >
-        <table className="price-table" aria-label="模型价格">
-          <colgroup>
-            <col className="price-model-col" />
-            {fields.map(([field]) => (
-              <col className="price-number-col" key={field} />
-            ))}
-            <col className="price-number-col" />
-            <col className="price-toggle-col" />
-            <col className="price-long-context-col" />
-            <col className="price-toggle-col" />
-            <col className="price-save-col" />
-          </colgroup>
+      <div className="price-overview-wrap">
+        <table className="price-overview-table" aria-label="模型价格">
           <thead>
             <tr>
-              <th scope="col" className="price-model-cell">
-                模型
-              </th>
+              <th scope="col">模型</th>
               <th scope="col">输入</th>
               <th scope="col">输出</th>
-              <th scope="col">缓存读取</th>
-              <th scope="col">
-                缓存写入<small>默认 / 短时</small>
-              </th>
-              <th scope="col">
-                缓存写入<small>长时</small>
-              </th>
-              <th scope="col">
-                售卖比例<small>原价 %</small>
-              </th>
-              <th scope="col">写入计费</th>
-              <th scope="col">长上下文<small>自动分档 / 272k 加价</small></th>
-              <th scope="col">参与估算</th>
-              <th scope="col">操作</th>
+              <th scope="col" className="price-reference-extra">缓存读取</th>
             </tr>
           </thead>
           <tbody>
-            {all.map((price) => (
-              <PriceRow
-                key={price.model}
-                price={price}
-                connection={connection}
-                onSaved={onSaved}
-                hidden={!visibleModels.has(price.model)}
-                readOnly={!!error}
-                edit={drafts.get(price.model)}
-                pending={pendingModels.has(price.model)}
-                onPending={(model, pending) => setPendingModels(previous => {
-                  const next = new Set(previous);
-                  if (pending) next.add(model); else next.delete(model);
-                  return next;
-                })}
-                onEdit={(model, edit) => setDrafts(previous => {
-                  const next = new Map(previous);
-                  if (edit) next.set(model,edit); else next.delete(model);
-                  return next;
-                })}
-              />
-            ))}
+            {visible.map(price => {
+              const published = price.verified || references.get(price.model)?.verified;
+              return <tr key={price.model}>
+                <th scope="row"><button type="button" className="price-model-open" aria-label={`编辑 ${price.model}`} onClick={event => {
+                  editorOpener.current = event.currentTarget;
+                  setEditing(price.model);
+                }}>{price.model}</button><small>{drafts.has(price.model) ? "未保存" : price.verified ? "已确认" : published ? "待确认" : "未定价"}</small></th>
+                {(["input","output","cache_read"] as const).map(field =>
+                  <td key={field} className={field === "cache_read" ? "price-reference-extra" : undefined}>{published ? `$${price[field]}` : "—"}</td>)}
+              </tr>;
+            })}
             {!visible.length && (
               <tr>
-                <td colSpan={11} className="price-empty">
-                  没有匹配的检测模型。
+                <td colSpan={4} className="price-empty">
+                  没有匹配的模型
                 </td>
               </tr>
             )}
@@ -556,9 +484,38 @@ export function PriceSettings({
             ? `显示 ${visible.length} / ${all.length} 个模型`
             : `共 ${all.length} 个模型`}
         </span>
-        <span>窄屏可横向滚动，模型列固定</span>
+        <span>美元 / 百万 token{dirtyCount > 0 && ` · ${dirtyCount} 项未保存`}</span>
       </div>
       </>}
+      <Dialog.Root open={!!editedPrice} onOpenChange={open => { if (!open && !pendingModels.has(editing)) setEditing(""); }}>
+        {editedPrice && <Dialog.Portal>
+          <Dialog.Overlay className="dialog-overlay" />
+          <Dialog.Content className="connection-dialog price-edit-dialog" onCloseAutoFocus={event => {
+            event.preventDefault();
+            editorOpener.current?.focus({preventScroll:true});
+          }}>
+            <div className="locator-heading">
+              <Dialog.Title>{editedPrice.model}</Dialog.Title>
+              <Dialog.Close className="icon-button" aria-label="关闭价格编辑" disabled={pendingModels.has(editing)}><X size={18}/></Dialog.Close>
+            </div>
+            <Dialog.Description className="price-field-unit">美元 / 百万 token</Dialog.Description>
+            <table className="price-table price-edit-fields"><tbody>
+              <PriceRow key={editedPrice.model} price={editedPrice} connection={connection} onSaved={onSaved} readOnly={!!error}
+                edit={drafts.get(editedPrice.model)} pending={pendingModels.has(editedPrice.model)}
+                onPending={(model, pending) => setPendingModels(previous => {
+                  const next = new Set(previous);
+                  if (pending) next.add(model); else next.delete(model);
+                  return next;
+                })}
+                onEdit={(model, edit) => setDrafts(previous => {
+                  const next = new Map(previous);
+                  if (edit) next.set(model,edit); else next.delete(model);
+                  return next;
+                })} />
+            </tbody></table>
+          </Dialog.Content>
+        </Dialog.Portal>}
+      </Dialog.Root>
     </section>
   );
 }

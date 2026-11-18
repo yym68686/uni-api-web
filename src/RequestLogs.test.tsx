@@ -176,7 +176,7 @@ it("loads logs immediately, filters on the server and can jump to the newest pag
     });
   });
   await screen.findByRole("button", { name: "request-one" });
-  expect(screen.getByLabelText("API key 筛选")).toHaveTextContent("90.0%");
+  await user.click(document.querySelector<HTMLElement>(".request-logs-panel .workbench-disclosure:last-child summary")!);
   await user.click(screen.getByRole("button", { name: "下一页" }));
   await screen.findByRole("button", { name: "request-two" });
   await user.click(screen.getByRole("button", { name: "查看最新" }));
@@ -185,6 +185,7 @@ it("loads logs immediately, filters on the server and can jump to the newest pag
   await user.selectOptions(screen.getByLabelText("时间范围筛选"), "24h");
   await user.selectOptions(screen.getByLabelText("uni-api 来源"), "fugue");
   await user.selectOptions(screen.getByLabelText("API key 筛选"), "fugue::key");
+  expect(await screen.findByText(/90.0%/)).toBeVisible();
   await user.selectOptions(
     screen.getByLabelText("模型筛选"),
     "historical-model",
@@ -192,6 +193,7 @@ it("loads logs immediately, filters on the server and can jump to the newest pag
   await user.selectOptions(screen.getByLabelText("端点筛选"), "/v1/messages");
   await user.selectOptions(screen.getByLabelText("流式状态筛选"), "false");
   await user.selectOptions(screen.getByLabelText("请求状态筛选"), "failed");
+  await user.click(document.querySelector<HTMLElement>(".request-logs-panel .workbench-disclosure:first-child summary")!);
   await user.type(screen.getByLabelText("搜索请求"), "exact-id");
   await waitFor(() =>
     expect(calls.at(-1)?.searchParams.get("search")).toBe("exact-id"),

@@ -26,11 +26,15 @@ export interface BalanceResult {
   isPending?: boolean;
   isError?: boolean;
 }
-export const channelMetricColumnClasses = [
+const allMetricColumnClasses = [
   "", "column-run", "column-run", "column-quality", "column-quality",
   "column-run", "column-quality", "column-finance", "column-finance",
-  "column-finance", "column-finance", "",
+  "column-finance", "column-finance", "column-balance",
 ] as const;
+export type ChannelMetricLayout = "run" | "quality" | "finance" | "all";
+export const channelMetricColumnClasses = (layout: ChannelMetricLayout, compact = false) =>
+  compact ? ["", "column-success", "column-balance"] : allMetricColumnClasses.filter(name =>
+    !name || name === "column-balance" || layout === "all" || name === `column-${layout}`);
 export function BalanceValue({
   balance,
   loading,
@@ -215,37 +219,46 @@ export function TotalTiming({ value, attempts = 0 }: { value?: Distribution; att
 export function ChannelMetricHeaders({
   keySelected = false,
   channels = [],
+  layout = "all",
+  compact = false,
 }: {
   keySelected?: boolean;
   channels?: Channel[];
+  layout?: ChannelMetricLayout;
+  compact?: boolean;
 }) {
+  const run = layout === "run" || layout === "all";
+  const quality = layout === "quality" || layout === "all";
+  const finance = layout === "finance" || layout === "all";
   return (
     <>
-      <th>状态</th>
-      <th className="column-run">
+      <th>路由状态</th>
+      {run && !compact && <th className="column-run observation-inflight">
         <Tip text="当前正在请求此渠道的全部 API key 的尝试数，不受历史时间窗口或 API key 用量筛选影响。">
           {keySelected ? "渠道总并发" : "当前并发"} <CircleHelp size={12} />
         </Tip>
-      </th>
-      <th className="column-run">
+      </th>}
+      {run && <th className="column-run column-success">
         <Tip text={<FailureCounts channels={channels} summary />}>
-          成功率 <CircleHelp size={12} />
+          尝试成功率
         </Tip>
-      </th>
+      </th>}
+      {quality && <>
       <th className="column-quality">尝试数</th>
       <th className="column-quality">
         <Tip text="请求进入 uni-api → 渠道 HTTP 发起前。包含前序重试耗时，悬停或展开查看详情。">
           请求前等待 <small>p50</small>
         </Tip>
       </th>
-      <th className="column-run">
-        首字延迟 <small>p50 / p95</small>
-      </th>
+      </>}
+      {run && !compact && <th className="column-run">首字 <small>p50 / p95</small></th>}
+      {quality &&
       <th className="column-quality">
         <Tip text="当前渠道单次尝试从开始到离开的总时间，包含成功、失败和取消；流式请求计到流结束。不包含前序重试和后续渠道耗时，跳过及进行中的尝试不计入。p50 / p95 为直方图上界估计。">
           总时间 <small>p50 / p95</small>
         </Tip>
-      </th>
+      </th>}
+      {finance && <>
       <th className="column-finance">Token / 缓存率</th>
       <th className="column-finance">估算消费</th>
       <th className="column-finance">
@@ -258,7 +271,8 @@ export function ChannelMetricHeaders({
           利润参考 <CircleHelp size={12} />
         </Tip>
       </th>
-      <th>余额 / 额度</th>
+      </>}
+      <th className="column-balance">余额<span className="balance-heading-extra"> / 额度</span></th>
     </>
   );
 }
@@ -271,6 +285,8 @@ export function ChannelMetricCells({
   importedChannel = false,
   stale = false,
   metricsUnavailable = false,
+  layout = "all",
+  compact = false,
 }: {
   row: Channel;
   inflight?: number | null;
@@ -280,34 +296,34 @@ export function ChannelMetricCells({
   importedChannel?: boolean;
   stale?: boolean;
   metricsUnavailable?: boolean;
+  layout?: ChannelMetricLayout;
+  compact?: boolean;
 }) {
+  const run = layout === "run" || layout === "all";
+  const quality = layout === "quality" || layout === "all";
+  const finance = layout === "finance" || layout === "all";
   const success = row.stats?.success_rate;
-  const profitCost = channelProfitCost(spend?.data);
+  const latency = run && !compact ? channelLatency(row.stats) : null;
+  const profitCost = finance ? channelProfitCost(spend?.data) : undefined;
   return (
     <>
       <td>
         <Status row={row} />
       </td>
-      <td className="mono column-run">{inflight == null ? "—" : inflight}</td>
-      <td className="column-run">
+      {run && !compact && <td className="mono column-run observation-inflight">{inflight == null ? "—" : inflight}</td>}
+      {run && <td className="column-run column-success">
         <Tip keyboard={false} text={<FailureCounts channels={[row]} summary />}>
           <div className="success-cell">
             <span
               className={`mono ${success == null ? "muted" : success < 0.5 ? "negative" : ""}`}
             >
-              {rate(success)}
+              {success == null ? <span className="observation-no-sample">{row.history_configured === false ? "未接入" : stale ? "未同步" : metricsUnavailable ? "未取得" : "无样本"}</span> : rate(success)}
             </span>
-            <span className="rate-track">
-              <i
-                className={success != null && success < 0.5 ? "low" : ""}
-                style={{
-                  width: `${(success || 0) * 100}%`,
-                }}
-              />
-            </span>
+            {!!row.stats?.success_rate_denominator && <small>{count(row.stats.success || 0)}/{count(row.stats.success_rate_denominator)}</small>}
           </div>
         </Tip>
-      </td>
+      </td>}
+      {quality && <>
       <td className="mono column-quality">
         {metricsUnavailable
           ? "—"
@@ -320,21 +336,23 @@ export function ChannelMetricCells({
       <td className="column-quality">
         <Timing value={row.stats?.request_to_dispatch} wait />
       </td>
-      <td className="column-run">
+      </>}
+      {latency && <td className="column-run">
         <div className="dual-metric">
           <Timing
-            value={channelLatency(row.stats).value}
-            kind={channelLatency(row.stats).kind}
+            value={latency.value}
+            kind={latency.kind}
             text={row.stats?.first_text}
           />
-          {!!channelLatency(row.stats).value?.sample_count && <span className="muted mono">
-            {ms(channelLatency(row.stats).value?.p95_ms)}
+          {!!latency.value?.sample_count && <span className="muted mono">
+            {ms(latency.value?.p95_ms)}
           </span>}
         </div>
-      </td>
-      <td className="column-quality">
+      </td>}
+      {quality && <td className="column-quality">
         <TotalTiming value={row.stats?.duration} attempts={row.stats?.started} />
-      </td>
+      </td>}
+      {finance && <>
       <td className="mono column-finance">
         {row.stats?.usage_samples
           ? count(
@@ -371,7 +389,8 @@ export function ChannelMetricCells({
           })}
         />
       </td>
-      <td>
+      </>}
+      <td className="column-balance">
         <BalanceValue
           balance={balance?.data}
           loading={balance?.isPending}

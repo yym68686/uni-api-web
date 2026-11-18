@@ -41,6 +41,9 @@ it("shows the shared model fingerprint immediately after quality in observation 
   const app = mount();
   // The table waits for the lazy dashboard and its session-scoped reads.
   const table = await screen.findByRole("table", {}, { timeout: 5_000 });
+  const user = userEvent.setup();
+  await user.click(document.querySelector<HTMLElement>(".channel-browser .workbench-disclosure:last-child summary")!);
+  await user.selectOptions(screen.getByLabelText("渠道表列布局"),"quality");
   const headers = within(table).getAllByRole("columnheader");
   const quality = headers.findIndex(header => header.textContent?.includes("是否降智"));
   expect(headers[quality + 1]).toHaveTextContent("指纹");
@@ -55,10 +58,10 @@ it.each([
   ["overview", "总览", "dark"],
   ["channels", "渠道观测", "light"],
   ["sub2api", "渠道管理", "dark"],
-  ["prices", "价格设置", "light"],
+  ["prices", "模型价格", "light"],
   ["balances", "余额管理", "dark"],
   ["sources", "设置", "light"],
-  ["requests", "日志", "dark"],
+  ["requests", "请求日志", "dark"],
   ["automations", "自动化", "light"],
 ] as const)(
   "restores the %s shell and saved theme while authentication is pending",
@@ -93,11 +96,9 @@ it.each([
     expect(screen.getByRole("status")).toHaveTextContent("正在恢复会话");
     expect(document.documentElement).toHaveAttribute("data-theme", theme);
     expect(
-      app.container.querySelector(".startup-screen .sidebar .active"),
+      app.container.querySelector('.startup-screen .sidebar [aria-current="page"]'),
     ).toHaveTextContent(label);
-    expect(
-      app.container.querySelector(".startup-screen .topbar strong"),
-    ).toHaveTextContent(label);
+    expect(app.container.querySelector(".startup-screen .workspace .startup-content")).toBeInTheDocument();
     expect(
       app.container.querySelector(".startup-screen .workspace .loading-bone"),
     ).toBeInTheDocument();
@@ -115,10 +116,10 @@ it.each([
         ),
       );
     });
-    const navigation = within(await screen.findByRole("navigation"));
+    const navigation = within(await screen.findByRole("navigation", {name:"主导航"}));
     expect(
       navigation.getByRole("button", { name: new RegExp(`^${label}`) }),
-    ).toHaveClass("active");
+    ).toHaveAttribute("aria-current", "page");
     expect(document.documentElement).toHaveAttribute("data-theme", theme);
     expect(
       app.container.querySelector(".startup-screen"),
@@ -151,12 +152,12 @@ it("leaves the loading shell for login when the restored session has expired", a
 });
 
 it.each([
-  ["总览", "请求数量"],
-  ["渠道观测", "渠道表现"],
-  ["渠道管理", "站点账号"],
-  ["价格设置", "模型价格"],
-  ["余额管理", "渠道余额"],
-  ["设置", "uni-api 来源"],
+  ["总览", "总览"],
+  ["渠道观测", "渠道观测"],
+  ["渠道管理", "渠道管理"],
+  ["模型价格", "模型价格"],
+  ["余额管理", "余额管理"],
+  ["设置", "设置"],
 ])(
   "restores %s on refresh before the source request finishes",
   async (label, content) => {
@@ -182,16 +183,14 @@ it.each([
     );
     const user = userEvent.setup();
     const first = mount();
-    await screen.findByRole("heading", { name: "渠道表现" });
-    const navigation = within(screen.getByRole("navigation"));
+    await screen.findByRole("heading", { name: "渠道观测" });
+    const navigation = within(screen.getByRole("navigation", {name:"主导航"}));
     await user.click(navigation.getByRole("button", { name: /^总览/ }));
     await user.click(
       navigation.getByRole("button", { name: new RegExp(`^${label}`) }),
     );
-    const assertContent = () => label === "渠道管理"
-      ? within(screen.getByRole("main")).getByRole("heading", { name: content })
-      : within(screen.getByRole("main")).getByText(content);
-    expect(assertContent()).toBeInTheDocument();
+    const assertContent = () => within(screen.getByRole("main")).getByRole("heading", { name: content });
+    await waitFor(() => expect(assertContent()).toBeVisible());
     first.unmount();
 
     let resolveSources!: (response: Response) => void;
@@ -199,11 +198,10 @@ it.each([
       resolveSources = resolve;
     });
     const restored = mount();
-    const restoredNavigation = within(await screen.findByRole("navigation"));
+    const restoredNavigation = within(await screen.findByRole("navigation", {name:"主导航"}));
     expect(
       restoredNavigation.getByRole("button", { name: new RegExp(`^${label}`) }),
-    ).toHaveClass("active");
-    expect(within(screen.getByRole("banner")).getByText(label)).toBeVisible();
+    ).toHaveAttribute("aria-current", "page");
     expect(assertContent()).toBeInTheDocument();
     await act(async () => {
       resolveSources(new Response(JSON.stringify(sourceData)));
@@ -215,7 +213,7 @@ it.each([
     );
     expect(
       restoredNavigation.getByRole("button", { name: new RegExp(`^${label}`) }),
-    ).toHaveClass("active");
+    ).toHaveAttribute("aria-current", "page");
     await waitFor(() =>
       expect(assertContent()).toBeVisible(),
     );
@@ -258,7 +256,7 @@ it.each(["configured", "empty", "failed"] as const)(
     );
     mount();
     await screen.findByRole("status", {name:"加载渠道"});
-    expect(screen.getByRole("heading", { name: "渠道表现" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "渠道观测" })).toBeVisible();
     expect(
       screen.queryByRole("heading", { name: "uni-api 来源" }),
     ).not.toBeInTheDocument();
@@ -518,6 +516,8 @@ it("shows zero attempts for an idle selected key while shared channels have traf
     return within(business()).getAllByRole("cell")[index];
   };
   await screen.findByText("business-channel");
+  await user.click(document.querySelector<HTMLElement>(".channel-browser .workbench-disclosure:last-child summary")!);
+  await user.selectOptions(screen.getByLabelText("渠道表列布局"),"all");
   await waitFor(() =>
     expect(metric("尝试数")).toHaveTextContent(/^7$/),
   );
@@ -528,7 +528,7 @@ it("shows zero attempts for an idle selected key while shared channels have traf
   await waitFor(() =>
     expect(metric("尝试数")).toHaveTextContent(/^0$/),
   );
-  expect(metric("成功率")).toHaveTextContent("—");
+  expect(metric("尝试成功率")).toHaveTextContent("无样本");
   expect(metric("Token / 缓存率")).not.toHaveTextContent("120");
   expect(metric("估算消费")).not.toHaveTextContent("5.00");
   expect(
@@ -582,20 +582,22 @@ it("shows 24h balance deductions and profit with inactive models, model filterin
     return Response.json(body);
   }));
   const {client}=mount();const user=userEvent.setup();
-  await screen.findByRole("link",{name:"balance-test"});
+  await screen.findByRole("button",{name:"balance-test"});
+  await user.click(document.querySelector<HTMLElement>(".channel-browser .workbench-disclosure:last-child summary")!);
+  await user.click(screen.getByRole("checkbox",{name:"性能与费用列"}));
   await user.selectOptions(screen.getByLabelText("时间范围筛选"),"24h");
-  const cells=()=>within(screen.getByRole("link",{name:"balance-test"}).closest("tr")!).getAllByRole("cell");
-  await waitFor(()=>expect(cells()[7]).toHaveTextContent("$5.00"));
-  expect(cells()[8]).toHaveTextContent("¥46.75");
+  const cells=()=>within(screen.getByRole("button",{name:"balance-test"}).closest("tr")!).getAllByRole("cell");
+  await waitFor(()=>expect(cells()[6]).toHaveTextContent("$5.00"));
+  expect(cells()[7]).toHaveTextContent("¥46.75");
   expect(calls.filter(u=>u.pathname.endsWith("/channel-spend")).at(-1)?.searchParams.get("to")).toBe("86500");
   await user.selectOptions(screen.getByLabelText("模型筛选"),"active-b");
-  await waitFor(()=>expect(cells()[7]).toHaveTextContent("$3.00"));
-  expect(cells()[8]).toHaveTextContent("¥31.50");
+  await waitFor(()=>expect(cells()[6]).toHaveTextContent("$3.00"));
+  expect(cells()[7]).toHaveTextContent("¥31.50");
   fail=true;
   client.removeQueries({queryKey:["channel-spend"]});
   await user.selectOptions(screen.getByLabelText("模型筛选"),"active-a");
-  await waitFor(()=>expect(cells()[7]).toHaveTextContent("查询失败"));
-  expect(cells()[8]).toHaveTextContent("—");
+  await waitFor(()=>expect(cells()[6]).toHaveTextContent("查询失败"));
+  expect(cells()[7]).toHaveTextContent("—");
 });
 
 it("starts independent observation reads before sources, keys or catalog resolve", async()=>{

@@ -21,6 +21,7 @@ export type Filters = typeof defaultFilters;
 
 const views = [
   "sub2api",
+  "routing",
   "channels",
   "balances",
   "overview",
@@ -32,7 +33,7 @@ const views = [
 export type View = (typeof views)[number];
 const viewStorageKey = (base: string) => `uni-console-view:v1:${base}`;
 export const consoleView = (value: string | null, account: boolean) =>
-  views.find(view => view === value && (account || !["sub2api","sources","automations"].includes(view)));
+  views.find(view => view === value && (account || !["sub2api","routing","sources","automations"].includes(view)));
 
 export function loadView(base: string, account: boolean): View {
   try {
@@ -51,7 +52,7 @@ export function saveView(base: string, view: View) {
   }
 }
 
-export type FilterScope = "channels" | "balances" | "requests" | "overview";
+export type FilterScope = "channels" | "routing" | "balances" | "requests" | "overview";
 const storageKey = (base: string, scope: FilterScope) =>
   `uni-console-filters:v2:${scope}:${base}`;
 const legacyStorageKey = (base: string) => `uni-console-filters:v1:${base}`;

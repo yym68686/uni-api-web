@@ -1,7 +1,7 @@
 import { channelLatency, latencyLabel } from "./channelLatency";
 import type { ManagementPagePosition } from "./managementQuery";
 import { restoredDashboardAt, saveDashboardSnapshot, dashboardSnapshotKey } from "./dashboardSnapshot";
-import { PageLoading, MetricLoading, TableLoading, DetailLoading } from "./PageLoading";
+import { PageLoading, TableLoading, DetailLoading } from "./PageLoading";
 import { endpointChoices, readKeys } from "./requestFilters";
 import { FailureCounts, failureReasonLabel } from "./FailureCounts";
 import { BalanceAmount } from "./BalanceAmount";
@@ -24,8 +24,6 @@ import * as Dialog from "@radix-ui/react-dialog";
 import {
   Activity,
   ArrowRight,
-  ArrowUpRight,
-  CheckCheck,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -37,7 +35,6 @@ import {
   Globe2,
   KeyRound,
   Layers3,
-  LogOut,
   Radio,
   RefreshCw,
   Search,
@@ -75,7 +72,7 @@ import type { SubImportsQuery } from "./sub2apiImports";
 import { ChannelModels } from "./ChannelModels";
 import { ChannelSortDialog } from "./ChannelSortDialog";
 import { previewChannelOrder, sortChannels } from "./channelSorting";
-import { applyScopedChannelSort, channelSortScope, defaultChannelSort, deleteSortTemplate, loadChannelSortPreferences, saveChannelSortPreferences, scopedChannelSort } from "./channelSortPreferences";
+import { applyScopedChannelSort, channelSortScope, deleteSortTemplate, loadChannelSortPreferences, saveChannelSortPreferences, scopedChannelSort } from "./channelSortPreferences";
 import { useRouteSorting } from "./routeSorting";
 
 import { SiteLink, useChannelSites, dashboardURL } from "./ChannelSite";
@@ -109,7 +106,6 @@ import {
   rate,
   rowId,
   providerId,
-  summarize,
   time,
 } from "./format";
 import type {
@@ -140,7 +136,8 @@ import { balanceSite, scheduleBalance } from "./balanceRequests";
 import { balanceThresholdState, rankBalanceProviders } from "./balanceFilters";
 import { useBalanceModelMetrics, balanceModelMetricID, BalanceModelMetricCells } from "./BalanceModelMetrics";
 import { salePercent } from "./modelPrices";
-import { ConsoleHeader, ConsoleNavigation } from "./ConsoleChrome";
+import { ConsoleHeader, ConsoleLocator, ConsoleNavigation } from "./ConsoleChrome";
+import { useCompactWorkbench, WorkbenchDisclosure, WorkbenchTabs } from "./Workbench";
 import { PageBoundary } from "./PageBoundary";
 import type { PriceDrafts } from "./PriceSettings";
 import { hasChannelScope, readWorkspace, requestLocation, validLogWindow, workspaceHash } from "./workspaceLocation";
@@ -216,17 +213,17 @@ function Overview({
       <MetricCard
         label="请求数量"
         value={countKnown(total?.requests)}
-        sub="所选时间范围"
+        sub=""
         icon={<Activity size={17} />}
-        action={<button className="button small ghost" onClick={() => onLogs()}>查看同范围请求</button>}
+        action={<button className="button small ghost" onClick={() => onLogs()}>请求日志</button>}
       />
       <MetricCard
         label="渠道尝试"
         value={countKnown(total?.attempts)}
-        sub="包含重试与失败尝试"
+        sub="含重试"
         icon={<Radio size={17} />}
         accent
-        action={<button className="button small ghost" onClick={() => onLogs(undefined,true)}>排查失败请求</button>}
+        action={<button className="button small ghost" onClick={() => onLogs(undefined,true)}>失败请求</button>}
       />
       <MetricCard
         label="Token 数量"
@@ -295,7 +292,6 @@ function Overview({
           <Radio size={18} />
           <h2>当前渠道</h2>
         </div>
-        <p className="settings-note">不可用优先，其次按并发和历史失败数。显示 {Math.min(12,rows.length)} / {rows.length} 个组合。</p>
         <div className="overview-list">
           {priorityRows.slice(0, 12).map((row) => (
             <div className="overview-row" key={rowId(row)}>
@@ -349,7 +345,7 @@ function MetricCard({
         {icon}
       </div>
       <div className="metric-card-number">{value}</div>
-      <p>{sub}</p>
+      {sub && <p>{sub}</p>}
       {action}
     </div>
   );
@@ -489,6 +485,7 @@ function Trend({
 function Detail({
   row,
   onClose,
+  onLogs,
   balance,
   imports,
   catalog,
@@ -503,6 +500,7 @@ function Detail({
   trend: Omit<CacheTrendProps, "row">;
   row: Channel | null;
   onClose: () => void;
+  onLogs: (row: Channel) => void;
   balance?: BalanceResult;
   imports?: SubImportsQuery;
   catalog: Channel[];
@@ -524,17 +522,17 @@ function Detail({
           >
             <X size={20} />
           </Dialog.Close>
-          <span className="eyebrow">CHANNEL INSIGHTS</span>
           <Dialog.Title><SiteLink base={site}>{row ? channelName(row) : ""}</SiteLink></Dialog.Title>
           <Dialog.Description className="detail-description">
             {row?.upstream_model} <ArrowRight size={13} /> {row?.model}
           </Dialog.Description>
           {row && (
             <>
-              <div className="detail-channel-actions"><Status row={row} /></div>
+              <div className="detail-channel-actions"><Status row={row} />
+                <button type="button" className="button small" onClick={() => onLogs(row)}>查看相关日志</button>
+              </div>
               <div className="detail-section">
                 <h3>时延分布</h3>
-                <p className="muted">两组独立统计，分位值不可相加。单次请求的时间线请看请求日志。</p>
                 <dl className="detail-stats">
                   <div><dt>请求前等待 p50</dt><dd>{ms(row.stats?.request_to_dispatch?.p50_ms)}</dd></div>
                   <div><dt>{latencyLabel(channelLatency(row.stats).kind)} p50</dt>
@@ -631,32 +629,29 @@ function Guide({ open, onClose }: { open: boolean; onClose: () => void }) {
           >
             <X size={20} />
           </Dialog.Close>
-          <span className="eyebrow">READ THE SIGNAL</span>
-          <Dialog.Title>让每一个数字都有意义</Dialog.Title>
-          <Dialog.Description>
-            控制台展示当前 uni-api 实例的数据，帮助你理解渠道表现。
-          </Dialog.Description>
+          <Dialog.Title>指标定义</Dialog.Title>
+          <Dialog.Description className="sr-only">渠道指标的统计范围与口径</Dialog.Description>
           <div className="guide-items">
             {[
               [
                 "请求前等待",
-                "从请求进入 uni-api，到发起当前渠道 HTTP 请求前。包含请求体读取、排队和前序重试；p50 反映窗口内的典型等待。",
+                "从收到请求到发起本次渠道尝试，含排队和前序重试。",
               ],
               [
                 "首字延迟",
-                "当前渠道请求开始到首个 response.created 的耗时；tooltip 另列首个 response.output_text.delta 的延迟。未采集创建事件的历史或非流式请求显示缺失，与请求前等待分别聚合，分位值不可直接相加。p50 / p95 是直方图上界估计。",
+                "本次渠道请求开始到首个响应事件；详情区分响应创建与首个正文。各阶段的分位数不可相加。",
               ],
               [
                 "余额不足",
-                "余额或额度 ≤ 0；多密钥渠道须全部已查询且均不足。未适配、失败和未知不算不足，账户共享余额不可相加。",
+                "已核验且余额或额度 ≤ 0。多 Key 须均不足；未核验不等于正常。",
               ],
               [
                 "费用与利润参考",
-                "估算消费依赖已确认价格；覆盖不足会单独标记。暂计账单仅包含目前留存且匹配的记录，可能上下修正；明确的费用下界使用 ≥。渠道利润参考沿用经营公式，成本数值未作币种换算，不用于对账。共享钱包金额不能合计。",
+                "估算只用已确认价格；暂计账单只含已匹配记录。利润参考不作币种换算，不用于对账。",
               ],
               [
-                "范围与保留",
-                "默认统计全部端点和全部流式状态，可分别筛选。跨组延迟由后端合并直方图后计算。默认按 provider 配置顺序；选择 API key 后按该 key 配置顺序，历史请求、尝试、延迟、Token 和估算消费仅统计该 key 发起的请求。渠道状态、总并发和余额为渠道整体数据；sub2api 实际消费按当前筛选范围逐请求关联，无法归属的历史请求不计为零消费。统计仅覆盖已接收并保留的请求记录；达到容量上限时最早的请求历史会自动淘汰。",
+                "请求与尝试",
+                "请求按最终结果计一次；一次请求可以有多次渠道尝试。历史指标受筛选影响，路由状态、并发和余额按渠道整体展示。",
               ],
             ].map(([title, text]) => (
               <section key={title}>
@@ -696,7 +691,7 @@ export default function Dashboard({
     const owner = history.state?.workspaceOwner;
     return readWorkspace(!owner || owner === preferenceScope ? location.hash : "", !!baseConnection.account);
   });
-  const initialFilters = (scope: "channels" | "balances" | "overview") => {
+  const initialFilters = (scope: "channels" | "routing" | "balances" | "overview") => {
     const saved = loadFilters(preferenceScope, scope);
     return incoming.view === scope && incoming.filters
       ? {...incoming.filters, search: history.state?.workspaceOwner === preferenceScope ? saved.search : ""}
@@ -704,6 +699,7 @@ export default function Dashboard({
   };
   const [pageFilters, setPageFilters] = useState(() => ({
     channels: initialFilters("channels"),
+    routing: initialFilters("routing"),
     balances: initialFilters("balances"),
     overview: initialFilters("overview"),
   }));
@@ -712,12 +708,14 @@ export default function Dashboard({
   );
   const sortStorageScope = baseConnection.account ? JSON.stringify([baseConnection.base, baseConnection.session]) : baseConnection.base;
   const [sortPreferences, setSortPreferences] = useState(() => loadChannelSortPreferences(sortStorageScope, pageFilters.channels));
-  const channelScope = channelSortScope(pageFilters.channels);
+  const routeView = view === "routing";
+  const channelView = view === "channels" || routeView;
+  const channelScope = channelSortScope(pageFilters[routeView ? "routing" : "channels"]);
   const channelSort = scopedChannelSort(sortPreferences, channelScope);
   const routingSort = useRouteSorting(sortStorageScope);
   const [sortPreview, setSortPreview] = useState<{ scope: string; rows: Channel[] } | null>(null);
-  const filterScope = view === "balances" || view === "overview" ? view : "channels";
-  const needsChannelData = ["channels", "balances", "overview", "automations"].includes(view);
+  const filterScope = view === "balances" || view === "overview" || routeView ? view : "channels";
+  const needsChannelData = channelView || view === "balances" || view === "overview" || view === "automations";
   const filters = pageFilters[filterScope];
   const sourceQuery = useConsoleSources(baseConnection.session, !!baseConnection.account, view === "sources");
   useEffect(() => {
@@ -726,7 +724,7 @@ export default function Dashboard({
   const sourceList = sourceQuery.data?.data || [];
   const noSources = !!baseConnection.account && sourceQuery.isSuccess && sourceList.length === 0;
   const imported = useSubImports(!!baseConnection.account && needsChannelData);
-  const fingerprints = useModelFingerprints(!!baseConnection.account && view === "channels");
+  const fingerprints = useModelFingerprints(!!baseConnection.account && channelView);
   const rawChecks = useChannelChecks(
     baseConnection.session,
     !!baseConnection.account && needsChannelData,
@@ -759,8 +757,8 @@ export default function Dashboard({
     stream,
   } = filters;
   const [page, setPage] = useState(0),
-    [adjustingChannels, setAdjustingChannels] = useState(false);
-  const channelView = view === "channels";
+    [editingRoutes, setAdjustingChannels] = useState(false);
+  const adjustingChannels = routeView && editingRoutes;
   const previewingSort = channelView && !adjustingChannels && sortPreview?.scope === channelScope;
   useEffect(() => setSortPreview(null), [channelScope, view, adjustingChannels]);
   const sortRules = channelSort.rules;
@@ -768,16 +766,17 @@ export default function Dashboard({
     saveView(baseConnection.base, view);
   }, [baseConnection.base, view]);
   useEffect(() => {
-    for (const scope of ["channels", "balances", "overview"] as const)
+    for (const scope of ["channels", "routing", "balances", "overview"] as const)
       saveFilters(preferenceScope, pageFilters[scope], scope);
   }, [preferenceScope, pageFilters]);
   useEffect(() => saveChannelSortPreferences(sortStorageScope, sortPreferences), [sortStorageScope, sortPreferences]);
-  const hasFilters = (Object.keys(defaultFilters) as (keyof Filters)[]).some(
+  const activeFilters = (Object.keys(defaultFilters) as (keyof Filters)[]).filter(
     (key) =>
       ((channelView && ["keyId", "sourceId", "model", "window", "search", "balanceFilter", "statusFilter", "failureReason", "endpoint", "stream", "sort", "sortRules"].includes(key)) ||
         (view === "balances" && ["keyId", "sourceId", "model", "window", "search", "balanceTopN", "balanceThreshold"].includes(key))) &&
-      !["sort", "sortRules"].includes(key) && filters[key] !== defaultFilters[key],
+      !["sort", "sortRules", "window"].includes(key) && filters[key] !== defaultFilters[key],
   );
+  const hasFilters = activeFilters.length > 0 || window !== defaultFilters.window;
   const [detailId, setDetailId] = useState<string | null>(incoming.detail),
     [showTrend, setShowTrend] = useState(false),
     [guide, setGuide] = useState(false),
@@ -785,9 +784,35 @@ export default function Dashboard({
     [refresh, setRefresh] = useState(0);
 
   const [auto, setAuto] = useState(false);
-  const [columnView, setColumnView] = useState("run");
-  const [mobileTools, setMobileTools] = useState(false);
-  const [mobileSummary, setMobileSummary] = useState(false);
+  const [columnView, setColumnView] = useState<"run" | "quality" | "finance" | "all">("run");
+  const compactViewport = useCompactWorkbench();
+  const compactObservation = compactViewport && columnView === "run" && !routeView;
+  const qualityColumns = !!baseConnection.account && (columnView === "quality" || columnView === "all");
+  const [balanceView, setBalanceView] = useState("channels");
+  const [balanceDetails, setBalanceDetails] = useState(false);
+  const [locatedChannel, setLocatedChannel] = useState<Channel | null>(null);
+  const [locator, setLocator] = useState(false);
+  const locatorOpener = useRef<HTMLElement | null>(null);
+  const detailOpener = useRef<HTMLElement | null>(null);
+  const emptyChannels = useMemo<Channel[]>(() => [], []);
+  const locatorCatalog = useQuery({
+    queryKey: ["locator-catalog", baseConnection.session, baseConnection.base],
+    queryFn: ({ signal }) => request<Catalog>(baseConnection, "/v1/model-channels?" + channelParams("", "15m", "", "all", "all"), signal),
+    enabled: locator && !noSources,
+  });
+  function openLocator() {
+    locatorOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setLocator(true);
+  }
+  useEffect(() => {
+    const shortcut = (event: KeyboardEvent) => {
+      if (event.isComposing || event.altKey || !(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "k" || document.querySelector('[role="dialog"]')) return;
+      event.preventDefault();
+      openLocator();
+    };
+    globalThis.addEventListener("keydown", shortcut);
+    return () => globalThis.removeEventListener("keydown", shortcut);
+  }, []);
   const [walletDialog,setWalletDialog] = useState<string|null>(null);
   const [theme, setTheme] = useTheme();
   const deferredSearch = useDeferredValue(search);
@@ -882,7 +907,7 @@ export default function Dashboard({
   });
   const balanceModelMetrics = useBalanceModelMetrics(connection, {
     range: effectiveWindow, model, keyId, to: metrics.data?.to, refresh, auto,
-    enabled: view === "balances" && keysLoaded && !keyRemoved && !!metrics.data,
+    enabled: view === "balances" && balanceView === "channels" && balanceDetails && keysLoaded && !keyRemoved && !!metrics.data,
   });
   const staleSources = useMemo(
     () => staleHistorySources(metrics.data, liveMetrics.data),
@@ -1011,18 +1036,24 @@ export default function Dashboard({
   const balanceThresholdValid = !balanceThreshold || (Number.isFinite(Number(balanceThreshold)) && Number(balanceThreshold) >= 0);
   const balanceCatalog = balanceRanks?.providers || [...new Set(candidateRows.map(providerId))];
   const pageBounds = (n: number) => Math.min(page,Math.max(0,Math.ceil(n/25)-1))*25;
-  const [balanceAudit, setBalanceAudit] = useState(false);
-  const fullBalanceRead = balanceAudit || (channelView && !!balanceFilter) || (view==="balances" && !!balanceThreshold && balanceThresholdValid);
+  const actualRange = useMemo(() => actualCostRange(window), [window]);
+  const auditScope = JSON.stringify([view, preferenceScope, selectedSourceId, keyId, model, window, endpoint, stream, search, statusFilter, failureReason, balanceFilter, balanceTopN, balanceThreshold, actualRange.startDate, actualRange.endDate]);
+  const [balanceAudit, setBalanceAudit] = useState<{ scope: string; targets: string[] } | null>(null);
+  const activeAudit = balanceAudit?.scope === auditScope ? balanceAudit : null;
+  useEffect(() => setBalanceAudit(previous => previous?.scope === auditScope ? previous : null), [auditScope]);
+  const balanceScope = useMemo(() => new Set(balanceCatalog), [balanceCatalog]);
   const visibleBalanceProviderIds = new Set(
     view==="balances" ? balanceCatalog.slice(pageBounds(balanceCatalog.length),pageBounds(balanceCatalog.length)+25)
       : channelView ? candidateRows.slice(pageBounds(candidateRows.length),pageBounds(candidateRows.length)+25).map(providerId) : [],
   );
-  const focusedBalance = detailId && rows.find(row=>rowId(row)===detailId);
+  const focusedBalance = detailId ? rows.find(row=>rowId(row)===detailId) : locatedChannel;
   if (focusedBalance) visibleBalanceProviderIds.add(providerId(focusedBalance));
-  const balanceTargets = fullBalanceRead ? [...new Set([...balanceCatalog,...visibleBalanceProviderIds])] : [...visibleBalanceProviderIds];
-  const actualRange = useMemo(() => actualCostRange(window), [window]);
-  const balanceEnabled = channelView || view==="balances";
-  const accountBalances = useChannelAccountBalances(balanceEnabled ? balanceTargets : [], imported.data?.data || [], baseConnection.session, !!baseConnection.account && balanceEnabled, auto);
+  // An explicit balance criterion needs coverage beyond the visible page.
+  const needsBalanceCoverage = channelView ? !!balanceFilter : view === "balances" && !!balanceThreshold && balanceThresholdValid;
+  const balanceTargets = [...new Set([...(activeAudit?.targets || []), ...(needsBalanceCoverage ? balanceCatalog : []), ...visibleBalanceProviderIds])];
+  const balanceEnabled = channelView || view === "balances" || !!focusedBalance;
+  const pollBalances = auto && !activeAudit && !needsBalanceCoverage;
+  const accountBalances = useChannelAccountBalances(balanceEnabled ? balanceTargets : [], imported.data?.data || [], baseConnection.session, !!baseConnection.account && balanceEnabled, pollBalances);
   const rawBalanceQueries = useQueries({
     queries: (balanceEnabled ? balanceTargets : []).map((provider) => ({
       queryKey: [
@@ -1065,7 +1096,7 @@ export default function Dashboard({
       // Resolve the account first. Imported channels still need their balance
       // type so key quotas/subscriptions are not mistaken for account wallets.
       enabled: !sitesPending && (!baseConnection.account || !imported.isPending) && (!accountBalances.has(provider) || accountBalances.get(provider)!.needsChannelBalance),
-      refetchInterval: auto ? 300_000 : false,
+      refetchInterval: pollBalances ? 300_000 : false,
       refetchIntervalInBackground: false,
       retry: false,
     })),
@@ -1078,8 +1109,12 @@ export default function Dashboard({
   const pendingBalances = balanceQueries.filter(
     (query) => query.isPending,
   ).length;
-  const lowCount = balanceQueries.filter(query => !query.isError && balanceIsLow(query.data)).length;
-  const knownBalances = balanceQueries.filter(query => !query.isError && balanceIsKnown(query.data)).length;
+  let lowCount = 0, knownBalances = 0;
+  for (const [provider, query] of balanceMap) {
+    if (!balanceScope.has(provider) || query.isError || !balanceIsKnown(query.data)) continue;
+    knownBalances++;
+    if (balanceIsLow(query.data)) lowCount++;
+  }
   const unknownBalances = Math.max(0,balanceCatalog.length - knownBalances);
   const channelDataComplete = !!catalog.data && !!metrics.data && !!liveMetrics.data && !!keyRequestStats.data &&
     balanceQueries.every(query => !!query.data && !query.isError) &&
@@ -1088,7 +1123,17 @@ export default function Dashboard({
     const result = balanceMap.get(providerId(row));
     return !result?.isError && balanceIsLow(result?.data);
   }) : candidateRows;
-  const stats = summarize(filtered);
+  const firstProviders = useMemo(() => {
+    const index = (items: Channel[]) => {
+      const result = new Map<string, Channel>();
+      for (const item of items) {
+        const id = providerId(item);
+        if (!result.has(id)) result.set(id, item);
+      }
+      return result;
+    };
+    return view === "balances" ? {filtered: index(filtered), all: index(rows)} : null;
+  }, [view, filtered, rows]);
   let thresholdUnknown = 0;
   const balanceProviders = (balanceRanks?.providers || []).filter(provider => {
     if (!balanceThreshold || !balanceThresholdValid) return true;
@@ -1097,7 +1142,7 @@ export default function Dashboard({
     if (state === "unknown") thresholdUnknown++;
     return state === "below";
   });
-  const channelSpend = useScopedChannelSpend({ rows: filtered, session: connection.session, sourceId: selectedSourceId, keyId, model, endpoint: effectiveEndpoint, stream: effectiveStream, from: metrics.data?.from, to: metrics.data?.to, snapshot: metrics.data, snapshotError: metrics.isError, snapshotUpdatedAt: metrics.dataUpdatedAt, refresh, auto, paused: metrics.isFetching, enabled: (channelView || view === "balances") && !!baseConnection.account });
+  const channelSpend = useScopedChannelSpend({ rows: filtered, session: connection.session, sourceId: selectedSourceId, keyId, model, endpoint: effectiveEndpoint, stream: effectiveStream, from: metrics.data?.from, to: metrics.data?.to, snapshot: metrics.data, snapshotError: metrics.isError, snapshotUpdatedAt: metrics.dataUpdatedAt, refresh, auto, paused: metrics.isFetching, enabled: (view === "balances" && balanceView === "channels" && balanceDetails || channelView && (columnView === "finance" || columnView === "all")) && !!baseConnection.account });
   const balanceFinance = useMemo(() => {
     const result = new Map<
       string,
@@ -1112,7 +1157,7 @@ export default function Dashboard({
         actualExplanation: string;
       }
     >();
-    if (!balanceRanks) return result;
+    if (!balanceRanks || !balanceDetails) return result;
     const byProvider = new Map<string, Channel[]>();
     for (const row of filtered) {
       const id = providerId(row);
@@ -1190,7 +1235,7 @@ export default function Dashboard({
       });
     }
     return result;
-  }, [balanceMap, balanceRanks, baseConnection.account, channelSpend, filtered, actualRange.supported]);
+  }, [balanceMap, balanceRanks, baseConnection.account, channelSpend, filtered, actualRange.supported, balanceDetails]);
   const observedDetection = useObservedDetection(baseConnection.session, channelView && !!baseConnection.account, filtered, checks, fingerprints);
   const checkingChannels = observedDetection.expanded;
   const total = channelView ? filtered.length : balanceProviders.length;
@@ -1281,37 +1326,49 @@ export default function Dashboard({
     if (view !== next) {
       history.pushState({workspaceOwner:preferenceScope}, "", workspaceHash(next, hasChannelScope(next) ? pageFilters[next] : undefined));
       setDetailId(null);
+      setLocatedChannel(null);
+      setBalanceAudit(null);
+      setShowTrend(false);
       focusWorkspace.current = true;
     }
     setView(next);
     setPage(0);
     setMenu(false);
   }
-  function openRelatedLogs(nextModel?: string, failed = false) {
-    const scope = {...defaultFilters, model:nextModel || model, sourceId:selectedSourceId, keyId, window, endpoint, stream,
+  function openRelatedLogs(nextModel?: string, failed = false, target?: Channel) {
+    const sourceId = target?.source_id || selectedSourceId;
+    const carryKey = sourceId === selectedSourceId || !selectedSourceId && (!keyId.includes("::") || keyId.split("::")[0] === sourceId);
+    const scope = {...defaultFilters, model:nextModel || model, sourceId, keyId:carryKey ? keyId : "", window, endpoint, stream,
       statusFilter:failed ? "failed" : ""};
     const from = (metrics.data?.from || 0) * 1000, to = (metrics.data?.to || 0) * 1000;
     history.pushState(null, "", requestLocation(scope,null,validLogWindow(from,to) ? {from,to} : null));
     setView("requests");
+    setDetailId(null);
+    setLocatedChannel(null);
     setMenu(false);
     focusWorkspace.current = true;
   }
   function openDetail(id: string) {
+    detailOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setLocatedChannel(null);
     history.pushState({channelDetail:true, workspaceOwner:preferenceScope}, "", workspaceHash(view, filters, id));
     setDetailId(id);
   }
   function closeDetail() {
-    if (history.state?.channelDetail) history.back();
+    if (locatedChannel) setLocatedChannel(null);
+    else if (history.state?.channelDetail) history.back();
     else {
       history.replaceState({workspaceOwner:preferenceScope}, "", workspaceHash(view, filters));
       setDetailId(null);
     }
+    requestAnimationFrame(() => detailOpener.current?.focus({preventScroll:true}));
   }
   const mainRef = useRef<HTMLElement>(null);
   const focusWorkspace = useRef(false);
   useEffect(() => {
     if (focusWorkspace.current) {
       focusWorkspace.current = false;
+      if (globalThis.scrollY > 0) globalThis.scrollTo({top:0,behavior:"instant"});
       const title = mainRef.current?.querySelector<HTMLElement>("h2");
       if (title) {
         title.tabIndex = -1;
@@ -1330,6 +1387,9 @@ export default function Dashboard({
       const scope = next.view;
       setView(scope);
       setDetailId(next.detail);
+      setLocatedChannel(null);
+      setAdjustingChannels(false);
+      setBalanceAudit(null);
       if (next.filters && hasChannelScope(scope)) {
         const sharedFilters = next.filters;
         setPageFilters(current => ({...current, [scope]: {...sharedFilters, search:current[scope].search}}));
@@ -1348,25 +1408,19 @@ export default function Dashboard({
     <ConsoleNavigation
       view={view}
       account={!!baseConnection.account}
-      lowCount={lowCount}
       onSelect={selectView}
-      onGuide={() => {
-        setGuide(true);
-        setMenu(false);
-      }}
     />
   );
   const observationHeader = <>
-    <th className="rank">#</th>
-    <th className="channel-identity">渠道 / 模型</th>
-    {baseConnection.account && <>
+    {routeView && <th className="rank">#</th>}
+    <th className="channel-identity">渠道</th>
+    {qualityColumns && <>
       <th className="column-quality"><Tip text="显示此来源、此渠道最近一次 gpt-6-astra 检测结果，与当前指标时间范围无关；不代表表中每个模型都已单独检测。">是否降智 <CircleHelp size={12} /></Tip></th>
       <th className="column-quality"><Tip text={`显示此来源、此渠道、当前模型的最新指纹结果，与渠道管理和详情共享数据，与指标时间范围无关。${fingerprintNote}`}>指纹 <CircleHelp size={12}/></Tip></th>
     </>}
     {checkingChannels && <th>检测操作</th>}
-    <ChannelMetricHeaders keySelected={!!keyId} channels={filtered} />
+    <ChannelMetricHeaders keySelected={!!keyId} channels={filtered} layout={columnView} compact={compactObservation} />
     {adjustingChannels && <th><Tip text="修改作用于本行来源、当前选择的 API key 和模型（未选择则为全部），对所有端点和流式状态生效。无到期时间；设置开启“保留临时配置”时，重启后自动恢复已应用的更改。">临时控制 <CircleHelp size={12} /></Tip></th>}
-    <th aria-label="详情" />
   </>;
   return (
     <div className="app-shell">
@@ -1395,6 +1449,8 @@ export default function Dashboard({
           theme={theme}
           onMenu={() => setMenu(true)}
           onTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
+          onLocate={openLocator}
+          onGuide={() => setGuide(true)}
           identity={baseConnection.account ? baseConnection.session : undefined}
           account={!!baseConnection.account}
           onDisconnect={() => disconnect()}
@@ -1449,6 +1505,7 @@ export default function Dashboard({
               user={baseConnection.session}
               initialPosition={managementPosition}
               onPositionChange={setManagementPosition}
+              onRouting={() => selectView("routing")}
             />
           ) : baseConnection.account && view === "sources" ? (
             <SourceSettings
@@ -1466,11 +1523,10 @@ export default function Dashboard({
                 void queryClient.invalidateQueries({ queryKey: ["metrics"] });
               }}
             />
-          ) : noSources && (view === "channels" || view === "balances" || view === "overview") ? (
+          ) : noSources && (channelView || view === "balances" || view === "overview") ? (
             <section className="data-panel">
-              <div className="data-heading"><h2>{view === "channels" ? "渠道表现" : view === "balances" ? "渠道余额" : "总览"}</h2></div>
+              <div className="data-heading"><h2>{routeView ? "路由顺序" : channelView ? "渠道观测" : view === "balances" ? "余额管理" : "总览"}</h2></div>
               <Empty title="还没有来源" icon={<Server size={22} />}>
-                <span>连接第一个 uni-api 来源后，即可在本页查看数据。</span><br />
                 <button className="button primary" onClick={() => selectView("sources")}>添加来源</button>
               </Empty>
             </section>
@@ -1516,64 +1572,33 @@ export default function Dashboard({
                 setDetailId(rowId(row));
               }}
             />
-          ) : (!metrics.data && metrics.isPending) || (!catalog.data && catalog.isPending) ? <div className="workspace-summary-loading"><MetricLoading /></div> : (
-            <>
-            <button className="button small workspace-summary-toggle" aria-expanded={mobileSummary} aria-controls="workspace-metrics" onClick={() => setMobileSummary(value => !value)}>
-              {mobileSummary ? "收起统计摘要" : `统计摘要 · ${stats.providers} 个渠道`}
-            </button>
-            <motion.section
-              {...reveal}
-              transition={{ delay: 0.04 }}
-              id="workspace-metrics"
-              className={`metric-grid workspace-summary ${mobileSummary ? "expanded" : ""}`}
-            >
-              <MetricCard
-                label="观测渠道"
-                value={count(stats.providers)}
-                sub={`${count(new Set(filtered.map((r) => r.model)).size)} 个模型 · 符合列表条件`}
-                icon={<Layers3 size={17} />}
-              />
-              <MetricCard
-                label="可用渠道"
-                value={`${stats.eligible} / ${stats.providers}`}
-                sub={
-                  endpoint === "all"
-                    ? "按渠道整体冷却与凭据状态"
-                    : "至少一个模型当前可路由"
-                }
-                icon={<Radio size={17} />}
-                accent
-              />
-              <MetricCard
-                label="渠道成功率"
-                help={<FailureCounts channels={filtered} summary />}
-                value={rate(stats.successRate)}
-                sub={`${count(stats.success)} 成功 / ${count(stats.completed)} 次已完成尝试`}
-                icon={<CheckCheck size={17} />}
-              />
-              <MetricCard
-                label="余额不足"
-                value={knownBalances ? count(lowCount) : "—"}
-                sub={`渠道状态 · 已判定 ${knownBalances} · 未知 ${unknownBalances}${pendingBalances ? `（查询中 ${pendingBalances}）` : ""}`}
-                icon={<Wallet size={17} />}
-              />
-            </motion.section>
-            </>
-          )}
+          ) : null}
           {!noSources && (channelView || view === "balances") ? (
-            <section className="data-panel channel-browser" data-mobile-tools={mobileTools || adjustingChannels ? "expanded" : "compact"} data-channel-data-state={channelView ? (channelDataComplete ? "complete" : "loading") : undefined}>
-              <div className="data-heading">
+            <section className="data-panel channel-browser" data-channel-data-state={channelView ? (channelDataComplete ? "complete" : "loading") : undefined}>
+              <div className="data-heading workbench-heading">
                 <div className="data-title">
-                  <span className="section-icon">
-                    {channelView ? (
-                      <Activity size={19} />
-                    ) : (
-                      <Wallet size={19} />
-                    )}
-                  </span>
-                  <h2>{channelView ? "渠道表现" : "渠道余额"}</h2>
-                  <span className="count-badge">{count(total)}</span>
+                  <h2>{routeView ? "路由顺序" : channelView ? "渠道观测" : "余额管理"}</h2>
                 </div>
+                <div className="workbench-tools">
+                  {routeView && <button type="button" className="button small ghost" onClick={() => selectView("sub2api")}><ChevronLeft size={14} />渠道管理</button>}
+                  <label className="select-field time-select">
+                    <Clock3 size={15} aria-hidden="true" />
+                    <select aria-label="时间范围筛选" value={window} onChange={event => setFilter("window", event.target.value)}>
+                      {ranges.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                    </select>
+                    <ChevronDown size={13} aria-hidden="true" />
+                  </label>
+                  {view === "balances" && <WorkbenchDisclosure label="检查余额" icon={<Wallet size={14} aria-hidden="true" />}>
+                    <p className="workbench-help">当前范围：{count(balanceCatalog.length)} 个渠道</p>
+                    <button type="button" className="button small" disabled={!activeAudit && (!balanceCatalog.length || busy || search !== deferredSearch)} onClick={event => {
+                      if (activeAudit) setBalanceAudit(null);
+                      else setBalanceAudit({scope:auditScope, targets:[...balanceCatalog]});
+                      const menu = event.currentTarget.closest("details");
+                      if (menu) { menu.open = false; menu.querySelector("summary")?.focus(); }
+                    }}>{activeAudit ? "停止检查" : "检查当前范围"}</button>
+                  </WorkbenchDisclosure>}
+                  <WorkbenchDisclosure key={view} label={`筛选${activeFilters.length ? ` ${activeFilters.length}` : ""}`} icon={<Filter size={14} aria-hidden="true" />}
+                    title={[search, model, selectedSourceId && sourceList.find(source => source.id === selectedSourceId)?.name, statusFilter === "eligible" ? "可用" : statusFilter ? "不可用" : ""].filter(Boolean).join(" · ") || undefined}>
                 <div className="data-actions" id="channel-workspace-actions">
                   <div className="search-field">
                     <Search size={17} />
@@ -1593,14 +1618,13 @@ export default function Dashboard({
                       </button>
                     )}
                   </div>
-                  <button type="button" className="button small mobile-channel-tools" aria-expanded={mobileTools || adjustingChannels} aria-controls="channel-workspace-actions channel-workspace-filters" onClick={() => setMobileTools(value => !value)}>
-                    <SlidersHorizontal size={14} />{mobileTools || adjustingChannels ? "收起筛选与操作" : "筛选与操作"}
-                  </button>
+                </div>
+                <div className="filters channel-filters" id="channel-workspace-filters" aria-label="渠道筛选">
                   {channelView && !adjustingChannels && <ChannelSortDialog key={channelScope} rules={sortRules}
                     previewRows={rules=>{const visible=new Set(filtered.map(rowId));return sortChannels(rows.filter(row=>visible.has(rowId(row))),rules,{checks:checks.results,multipliers:imported.data?.multipliers});}}
                     onPreview={preview=>{setSortPreview(preview?{scope:channelScope,rows:preview}:null);setPage(0);}}
                     labelRows={rows}
-                    routing={baseConnection.account?routingSort:undefined}
+                    routing={routeView?routingSort:undefined}
                     keyId={keyId}
                     routeApplyDisabled={busy||!!error||controls.pending||controls.drafts.size>0||!!(balanceFilter&&pendingBalances)||search!==deferredSearch}
                     scopeLabel={[
@@ -1629,9 +1653,9 @@ export default function Dashboard({
                     setPage(0);
                     setSortPreferences(current=>applyScopedChannelSort(current,channelScope,model,{sort:rules.length?"custom":"config",rules,templateId}));
                   }} />}
-                  {channelView && baseConnection.account && routingSort.pending && <button className="button small" title="撤回上一次多条件排序涉及的来源与 API key，恢复应用前顺序" disabled={routingSort.busy} onClick={()=>void routingSort.undo()}>撤回排序</button>}
-                  {channelView && routingSort.error && <span role="alert" className="negative">{routingSort.error}</span>}
-                  {channelView && baseConnection.account && (
+                  {routeView && routingSort.pending && <button className="button small" title="恢复上一次应用前的路由顺序" disabled={routingSort.busy} onClick={()=>void routingSort.undo()}>撤回排序</button>}
+                  {routeView && routingSort.error && <span role="alert" className="negative">{routingSort.error}</span>}
+                  {routeView && (
                     <ChannelControlActions
                       controls={controls}
                       sources={sourceList}
@@ -1640,7 +1664,7 @@ export default function Dashboard({
                       onEditingChange={setAdjustingChannels}
                     />
                   )}
-                  {channelView && baseConnection.account && (
+                  {channelView && (
                     <ObservedDetectionActions
                       checks={checks}
                       detection={observedDetection}
@@ -1653,8 +1677,7 @@ export default function Dashboard({
                       }
                     />
                   )}
-                  {refreshButton}
-                  <button className="button small ghost" onClick={refreshBalances}><Wallet size={14}/> 刷新已查余额</button>
+                  {view === "balances" && <button className="button small" onClick={refreshBalances}><Wallet size={14}/> 刷新已查余额</button>}
                   {channelView && (
                     <button
                       className={`button small ghost ${showTrend ? "selected" : ""}`}
@@ -1675,29 +1698,6 @@ export default function Dashboard({
                     <span />
                     自动刷新
                   </label>
-                  <Tip text="每 30 秒刷新渠道指标；余额最多缓存 5 分钟。页面后台暂停自动刷新。">
-                    <CircleHelp size={14} className="muted" />
-                  </Tip>
-                </div>
-              </div>
-              <div className="filters channel-filters" id="channel-workspace-filters" aria-label="渠道时间、来源和条件">
-                {(channelView || view === "balances") && (
-                  <div className="select-field time-select">
-                    <Clock3 size={15} />
-                    <select
-                      aria-label="时间范围筛选"
-                      value={window}
-                      onChange={(e) => setFilter("window", e.target.value)}
-                    >
-                      {ranges.map(([value, label]) => (
-                        <option key={value} value={value}>
-                          {label}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown size={13} />
-                  </div>
-                )}
                 {sourceList.length > 0 && (
                   <label className="select-field source-select">
                     <Server size={15} />
@@ -1723,14 +1723,10 @@ export default function Dashboard({
                   <KeyRound size={15} />
                   <select
                     aria-label="API key 筛选"
-                    title={`${keyRequestStats.label(keyId ? keys.data?.data.find(key => key.key_id === keyId) || { key_id: keyId } : undefined)}。按当前时间、模型、端点和流式筛选统计已采集的请求。一次请求经过全部重试后的最终结果只计一次；进行中的请求不计入。括号内为成功请求数/已完成请求数。`}
                     value={keyId}
                     onChange={(e) => setFilter("keyId", e.target.value)}
                   >
-                    <option value="">
-                      {channelView ? "全部渠道 · 配置顺序" : "全部 API key"}
-                      {" · "}{keyRequestStats.label()}
-                    </option>
+                    <option value="">全部 API Key</option>
                     {keyRemoved && (
                       <option value={keyId}>已移除的 API key</option>
                     )}
@@ -1738,7 +1734,6 @@ export default function Dashboard({
                       <option key={key.key_id} value={key.key_id}>
                         {key.source_name ? `${key.source_name} · ` : ""}Key{" "}
                         {key.position} · {key.prefix}
-                        {" · "}{keyRequestStats.label(key)}
                       </option>
                     ))}
                   </select>
@@ -1763,6 +1758,7 @@ export default function Dashboard({
                 </div>
                 {view === "balances" && (
                   <>
+                    <label className="workbench-help"><input type="checkbox" checked={balanceDetails} onChange={event => setBalanceDetails(event.target.checked)} /> 性能与费用列</label>
                     <div className="inline-select">
                       <Layers3 size={13} />
                       <select
@@ -1866,7 +1862,7 @@ export default function Dashboard({
                       <ChevronDown size={12} />
                     </div>
                     <label className="inline-select"><SlidersHorizontal size={13} />
-                      <select aria-label="渠道表列布局" value={columnView} onChange={e=>setColumnView(e.target.value)}>
+                      <select aria-label="渠道表列布局" value={columnView} onChange={e=>setColumnView(e.target.value as typeof columnView)}>
                         <option value="run">运行列</option><option value="quality">质量列</option>
                         <option value="finance">费用列</option><option value="all">全部列</option>
                       </select><ChevronDown size={12} />
@@ -1877,7 +1873,6 @@ export default function Dashboard({
                   <button
                     className="filter-chip"
                     onClick={() => {
-                      if(channelView) setSortPreferences(current=>applyScopedChannelSort(current,channelScope,model,defaultChannelSort()));
                       setPageFilters((current) => ({
                         ...current,
                         [filterScope]: { ...defaultFilters },
@@ -1888,27 +1883,28 @@ export default function Dashboard({
                     <X size={12} /> 重置筛选
                   </button>
                 )}
+                </div>
+                {channelView && <p className="workbench-help" aria-label="排序">{previewingSort ? "排序预览 · 未应用到路由" : keyId ? "按当前 API key 的请求顺序" : sortRules.length ? "按自定义规则" : "按渠道配置顺序"}</p>}
+                {!!keys.data?.data.length && <details className="workbench-key-rates">
+                  <summary>调用 Key 成功率</summary>
+                  <dl>{keys.data.data.map(key => <div key={key.key_id}>
+                    <dt>{key.source_name ? `${key.source_name} · ` : ""}Key {key.position} · {key.prefix}</dt>
+                    <dd>{keyRequestStats.label(key)}</dd>
+                  </div>)}</dl>
+                </details>}
+                  </WorkbenchDisclosure>
+                </div>
               </div>
-              <p className="mobile-channel-scope" aria-label="更多已选条件">
-                {[keyId ? "已选 API key" : "", model, endpoint !== "all" ? endpoint : "", stream !== "all" ? stream === "true" ? "流式" : "非流式" : "", statusFilter ? statusFilter === "eligible" ? "可用渠道" : "不可用渠道" : "", balanceFilter || balanceThreshold ? "按余额筛选" : "", failureReason ? (failureReason === "compaction" ? "压缩失败" : failureReasonLabel(failureReason)) : ""].filter(Boolean).join(" · ")}
-              </p>
-              {channelView && <p className="channel-scope-caption">
-                <span aria-label="排序">{previewingSort ? "排序预览 · 未应用到路由" : keyId ? "按当前 API key 的请求顺序" : "按渠道配置顺序"}</span>
-                <button className="text-link" onClick={() => setGuide(true)}>指标口径</button>
-              </p>}
-              {view === "balances" && <p className="channel-scope-caption">时延、成功率按模型；渠道财务与余额只列一次，共享钱包不相加。利润为经营参考。<button className="text-link" onClick={() => setGuide(true)}>费用与统计口径</button></p>}
-              {view==="balances" && groupedWallets.size>0 && <details className="wallet-summary">
-                <summary>已确认站点钱包 · {groupedWallets.size} 个（独立计数）</summary>
-                <p>仅包含已核对归属的钱包，不包括独立 Key 额度、订阅或归属未知的余额。</p>
+              {previewingSort && <div className="workbench-status" role="status">排序预览 · 未应用到路由 <button type="button" className="text-link" onClick={() => setSortPreview(null)}>退出预览</button></div>}
+              {view === "balances" && <WorkbenchTabs label="余额视图" value={balanceView} onChange={setBalanceView} tabs={[["wallets","站点钱包"],["channels","渠道额度"]]} />}
+              {view === "balances" && balanceView === "wallets" ? <section className="wallet-summary" aria-label="已核验站点钱包">
+                {groupedWallets.size === 0 && <p>当前范围暂无已核验钱包</p>}
                 <ul>{[...groupedWallets].map(([id,entry])=><li key={id}>
                   <strong>{entry.label}</strong><span>{entry.wallet.status==="ok" && entry.wallet.amount!=null
                     ? <BalanceAmount value={entry.wallet.amount} currency={entry.wallet.currency || "USD"} /> : "金额未确认"} · 关联 {entry.providers.size} 个已查询渠道</span>
                   <button type="button" className="button small" onClick={()=>setWalletDialog(id)}>充值设置与订单</button>
                 </li>)}</ul>
-              </details>}
-              <p className="channel-scope-caption">默认查询当前页余额；按余额筛选时会检查当前范围。
-                <button className="button small ghost" aria-pressed={balanceAudit} onClick={()=>setBalanceAudit(value=>!value)}>{balanceAudit ? "停止全范围余额读取" : "检查全部余额"}</button>
-              </p>
+              </section> : null}
               <AnimatePresence>
                 {showTrend && channelView && !error && (
                   <Trend
@@ -1924,10 +1920,8 @@ export default function Dashboard({
                 )}
               </AnimatePresence>
               {view === "balances" && !balanceThresholdValid && <p role="alert" className="coverage-note">请输入非负的美元金额，阈值尚未应用。</p>}
-              {view === "balances" && thresholdUnknown > 0 && <p role="status" className="coverage-note">
-                有 {thresholdUnknown} 个渠道因币种、额度单位、缺失或查询失败无法判断是否低于阈值。
-                <button className="button small" onClick={() => setFilter("balanceThreshold", "")}>取消阈值并查看全部</button>
-              </p>}
+              {view === "balances" && thresholdUnknown > 0 && <p role="status" className="coverage-note">{thresholdUnknown} 个渠道未能判定阈值；仅显示已确认结果。</p>}
+              {channelView && balanceFilter && unknownBalances > 0 && <p role="status" className="coverage-note">仅显示已核验且不足的渠道 · {unknownBalances} 个未核验</p>}
               {channelView && checkingChannels && (observedDetection.notice || observedDetection.batchIssue) && (
                 <div className={observedDetection.notice?.error ? "error-banner" : "detection-submission-notice"} role={observedDetection.notice?.error ? "alert" : "status"}>
                   {observedDetection.notice?.text || observedDetection.batchIssue}
@@ -1939,7 +1933,7 @@ export default function Dashboard({
                   上次完整数据 · {time(cachedDashboardAt / 1000)}{metrics.isFetching ? " · 正在后台更新" : " · 可刷新获取最新数据"}
                 </div>
               )}
-              {channelView && checks.error && (
+              {channelView && (qualityColumns || checkingChannels) && checks.error && (
                 <div className="coverage-note" role="alert">
                   最近检测结果读取失败：{checks.error.message}
                 </div>
@@ -1983,7 +1977,7 @@ export default function Dashboard({
               ) : catalog.isPending || metrics.isPending || (historyInitializing && !metrics.data) ? (
                 <TableLoading kind={channelView ? "channels" : "balances"} observation={channelView ? {
                   header: observationHeader, layout: columnView,
-                  classes:["rank","channel-identity",...(baseConnection.account ? ["column-quality","column-quality"] : []),...(checkingChannels ? [""] : []),...channelMetricColumnClasses,...(adjustingChannels ? [""] : []),""],
+                  classes:[...(routeView ? ["rank"] : []),"channel-identity",...(qualityColumns ? ["column-quality","column-quality"] : []),...(checkingChannels ? [""] : []),...channelMetricColumnClasses(columnView,compactObservation),...(adjustingChannels ? [""] : [])],
                 } : undefined} />
               ) : total === 0 ? (
                 <Empty
@@ -2001,8 +1995,8 @@ export default function Dashboard({
                     : "尝试调整模型、优先级或余额条件，或清除搜索条件。"}
                 </Empty>
               ) : channelView ? (
-                <div className="table-scroll" tabIndex={0} role="region" aria-label="渠道观测表，可横向滚动">
-                  <table className="channel-table observation-table" data-columns={columnView}>
+                <div className="table-scroll" tabIndex={0} role="region" aria-label="渠道观测表">
+                  <table className="channel-table observation-table" data-columns={columnView} data-compact={compactObservation || undefined}>
                     <thead>
                       <tr>{observationHeader}</tr>
                     </thead>
@@ -2010,36 +2004,29 @@ export default function Dashboard({
                       {pageRows.map((row) => {
                         const balance = balanceMap.get(providerId(row));
                         return (
-                          <tr key={rowId(row)}>
-                            <td className="rank mono">
+                          <tr key={rowId(row)} data-route-alert={!row.eligible || undefined} data-source-name={row.source_name}>
+                            {routeView && <td className="rank mono">
                               {String(rowRanks.get(rowId(row))).padStart(
                                 2,
                                 "0",
                               )}
-                            </td>
+                            </td>}
                             <td className="channel-identity">
                               <button
                                 className="channel-link"
+                                aria-label={`查看 ${channelName(row)} ${row.model} 详情`}
                                 onClick={() => openDetail(rowId(row))}
                               >
-                                <span className="provider-avatar">
-                                  {channelName(row).slice(0, 1).toUpperCase()}
-                                </span>
                                 <span>
                                   <strong title={channelBillingHint(row)}>{channelName(row)}</strong>
-                                  {row.source_name && (
-                                    <small className="source-label">
-                                      {row.source_name}
-                                    </small>
-                                  )}
-                                  <small>{row.model}</small>
+                                  {(!model || row.source_name && !selectedSourceId) && <small>{!model && row.model}{!model && row.source_name && !selectedSourceId && " · "}{!selectedSourceId && row.source_name && <span className="source-label">{row.source_name}</span>}</small>}
                                 </span>
                               </button>
                             </td>
-                            {baseConnection.account && (
+                            {qualityColumns && (
                               <LatestChannelCheck row={row} checks={checks} />
                             )}
-                            {baseConnection.account && <td className="column-quality"><FingerprintCell
+                            {qualityColumns && <td className="column-quality"><FingerprintCell
                               entries={observedFingerprints(row, fingerprints.index, fingerprints.members.get(providerId(row)), fingerprints.supportedModels)}
                               error={fingerprints.error} loading={fingerprints.isPending}
                               supportedModels={fingerprints.supportedModels}
@@ -2055,6 +2042,9 @@ export default function Dashboard({
                               spend={baseConnection.account ? channelSpend.get(rowId(row)) : undefined}
                               importedChannel={!!baseConnection.account && row.provider.startsWith("sub2api-")}
                               stale={staleSources.has(row.source_id || "")}
+                              metricsUnavailable={!metrics.data}
+                              layout={columnView}
+                              compact={compactObservation}
                             />
                             {adjustingChannels && (
                               <ChannelControlCell
@@ -2064,28 +2054,19 @@ export default function Dashboard({
                                 configOrder
                               />
                             )}
-                            <td>
-                              <button
-                                className="row-arrow icon-button"
-                                onClick={() => openDetail(rowId(row))}
-                                aria-label={`查看 ${channelName(row)} ${row.model} 详情`}
-                              >
-                                <ArrowUpRight size={16} />
-                              </button>
-                            </td>
                           </tr>
                         );
                       })}
                     </tbody>
                   </table>
                 </div>
-              ) : (
+              ) : balanceView === "channels" ? (
                 <div className="table-scroll" tabIndex={0} role="region" aria-label="渠道余额表，可横向滚动">
-                  <table className="channel-table balance-table">
+                  <table className="channel-table balance-table" data-details={balanceDetails || undefined}>
                     <thead>
                       <tr>
-                        <th className="rank">#</th>
                         <th className="channel-identity">渠道</th>
+                        {balanceDetails && <>
                         <th>模型 / 优先级</th>
                         <th title="该渠道该模型的成功尝试 ÷（成功 + 失败）；取消和跳过不计入。">渠道成功率</th>
                         <th title="渠道请求开始至首个正文增量的 P50，缺失时显示 —。">首字 P50</th>
@@ -2093,24 +2074,24 @@ export default function Dashboard({
                         <th>估算消费</th>
                         <th>渠道实际消费</th>
                         <th>渠道利润参考</th>
+                        </>}
                         <th>余额</th>
                         <th>状态</th>
                         <th>最近查询</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {pageProviders.map((provider, index) => {
+                      {pageProviders.map(provider => {
                     const balance = balanceMap.get(provider);
-                    const providerName = filtered.find(
-                      (row) => providerId(row) === provider,
-                    );
+                    const providerName = firstProviders?.filtered.get(provider);
                     const displayName = providerName
                       ? channelName(providerName)
                       : JSON.parse(provider)[1];
-                    const sourceRow = rows.find((row) => providerId(row) === provider);
+                    const sourceRow = firstProviders?.all.get(provider);
                     const sourceName = sourceRow?.source_name;
                     const sourceLink = siteFor(sourceRow) || dashboardURL(sourceList.find((source) => source.id === sourceRow?.source_id)?.base);
-                    const modelRanks = balanceRanks?.ranks.get(provider) || [];
+                    const ranks = balanceRanks?.ranks.get(provider) || [];
+                    const modelRanks = balanceDetails ? ranks : ranks.slice(0,1);
                     const checkedKeys = (balance?.data?.keys || []).filter(key => key.checked_at && key.checked_at > 0);
                     let newest = 0, oldest = Infinity;
                     for (const key of checkedKeys) {
@@ -2120,21 +2101,15 @@ export default function Dashboard({
                     const finance = balanceFinance.get(provider);
                     return (
                       <Fragment key={provider}>{modelRanks.map(({ model: modelName, rank }, modelIndex) => <tr key={modelName} className={modelIndex === 0 ? "balance-provider-start" : "balance-model-continuation"}>
-                        {modelIndex === 0 && <td rowSpan={modelRanks.length} className="rank mono">
-                          {String(currentPage * 25 + index + 1).padStart(2, "0")}
-                        </td>}
                         {modelIndex === 0 && <td className="channel-identity" rowSpan={modelRanks.length}>
                           <div className="balance-channel">
-                            <span className="provider-avatar">
-                              {displayName[0].toUpperCase()}
-                            </span>
                             <span>
-                              <strong><SiteLink base={sourceLink}>{displayName}</SiteLink></strong>
+                              <strong>{providerName ? <button type="button" className="channel-link" onClick={() => openDetail(rowId(providerName))}>{displayName}</button> : <SiteLink base={sourceLink}>{displayName}</SiteLink>}</strong>
                               <small>{sourceName || "uni-api"}</small>
                             </span>
                           </div>
                         </td>}
-                        <td>
+                        {balanceDetails && <><td>
                           <div className="balance-model-ranks">
                               <span>
                                 {modelName}<small>第 {rank} 位</small>
@@ -2147,7 +2122,9 @@ export default function Dashboard({
                           error={balanceModelMetrics.isError}
                           partial={balanceModelMetrics.data?.import?.caught_up === false}
                         />
+                        </>}
                         {modelIndex === 0 && <>
+                        {balanceDetails && <>
                         <td rowSpan={modelRanks.length}>
                           <span className={`mono balance-finance ${finance?.estimated == null ? "muted" : ""}`}>
                             {finance?.estimated == null ? "—" : usd(finance.estimated)}
@@ -2166,29 +2143,26 @@ export default function Dashboard({
                             {finance?.profit != null && finance.provisional && <small className="profit-bound-label">暂计</small>}
                           </span>
                         </td>
+                        </>}
                         <td rowSpan={modelRanks.length}>
                           <BalanceValue
                             balance={balance?.data}
                             loading={balance?.isPending}
                             failed={balance?.isError}
                           />
-                          {!balance?.isError && (balance?.data?.keys || []).filter((key,index,keys)=>
-                            key.kind==="account_wallet" && key.account_id && keys.findIndex(value=>value.account_id===key.account_id)===index
-                          ).map(key=><button key={key.account_id} className="button small ghost balance-recharge-link"
-                            onClick={()=>setWalletDialog(key.account_id!)}>充值 {key.label || "站点钱包"}</button>)}
                         </td>
                         <td rowSpan={modelRanks.length}>
-                          {balanceIsLow(balance?.data) ? (
+                          {!balance?.isError && balanceIsLow(balance?.data) ? (
                             <span className="status-pill cooling">余额不足</span>
                           ) : balance?.isPending ? (
                             <span className="muted">查询中</span>
                           ) : balance?.isError ? (
                             <span className="status-pill cooling">查询失败</span>
-                          ) : balance?.data?.status === "complete" && balance.data.keys?.length ? (
-                            <span className="status-pill healthy">已查询</span>
+                          ) : balanceIsKnown(balance?.data) ? (
+                            <span className="status-pill healthy">已核验</span>
                           ) : (
                             <span className="muted">
-                              {balanceStatus[balance?.data?.status || ""] || "暂无数据"}
+                              {balance?.data?.status === "complete" ? "未核验" : balanceStatus[balance?.data?.status || ""] || "未核验"}
                             </span>
                           )}
                         </td>
@@ -2202,12 +2176,13 @@ export default function Dashboard({
                     </tbody>
                   </table>
                 </div>
-              )}
+              ) : null}
               <div className="table-footer">
                 <span>
                   {error
                     ? "数据不可用"
-                    : `显示 ${total ? currentPage * 25 + 1 : 0}–${Math.min((currentPage + 1) * 25, total)}，共 ${count(total)} ${channelView ? "个模型 / 渠道组合" : "个渠道"}`}
+                    : `${count(total)} ${channelView && !model ? "条渠道 / 模型" : "个渠道"}`}
+                  {!error && balanceCatalog.length > 0 && <span className="balance-coverage">余额已核验 {knownBalances}/{balanceCatalog.length}{knownBalances > 0 ? ` · 不足 ${lowCount}` : ""}</span>}
                   {pendingBalances > 0 && (
                     <span className="footer-pending">
                       <Spinner small />
@@ -2217,6 +2192,9 @@ export default function Dashboard({
                   )}
                 </span>
                 <div className="pagination">
+                  <button type="button" className="icon-button" aria-label="刷新数据" title="刷新数据" disabled={refreshBusy} onClick={reload}>
+                    <RefreshCw size={15} className={refreshBusy ? "spin" : ""} />
+                  </button>
                   <button
                     className="icon-button"
                     disabled={currentPage === 0}
@@ -2242,14 +2220,8 @@ export default function Dashboard({
             </section>
           ) : null}
         </Suspense></PageBoundary></main>
-        <div className="connection-bottom">
-          <button onClick={() => disconnect()}>
-            <LogOut size={14} />
-            {baseConnection.account ? "退出登录" : "断开连接"}
-          </button>
-        </div>
       </div>
-      {detail && <PageBoundary key={detailId} onDismiss={closeDetail}><Detail
+      {detail && <PageBoundary key={rowId(detail)} onDismiss={closeDetail}><Detail
         session={baseConnection.session}
         row={detail}
         site={siteFor(detail) || dashboardURL(sourceList.find((source) => source.id === detail?.source_id)?.base)}
@@ -2258,8 +2230,33 @@ export default function Dashboard({
         catalog={catalog.data?.data || []}
         imports={baseConnection.account ? imported : undefined}
         onClose={closeDetail}
+        onLogs={row => openRelatedLogs(row.model, false, row)}
         balance={detail ? balanceMap.get(providerId(detail)) : undefined}
       /></PageBoundary>}
+      <ConsoleLocator open={locator} onOpenChange={open => {
+        setLocator(open);
+        if (!open) requestAnimationFrame(() => {
+          if (!document.querySelector('[role="dialog"]')) locatorOpener.current?.focus({preventScroll:true});
+        });
+      }} account={!!baseConnection.account}
+        channels={locatorCatalog.data?.data || emptyChannels} loading={locatorCatalog.isFetching} failed={locatorCatalog.isError}
+        onPage={selectView}
+        onChannel={row => {
+          detailOpener.current = locatorOpener.current;
+          setLocatedChannel(rows.find(candidate => rowId(candidate) === rowId(row)) || row);
+        }}
+        onRequest={id => {
+          const hash = requestLocation({...defaultFilters}, {id,source:""}, null);
+          if (view === "requests") {
+            history.pushState({workspaceOwner:preferenceScope}, "", hash);
+            globalThis.dispatchEvent(new PopStateEvent("popstate", {state:history.state}));
+          } else {
+            history.pushState({workspaceOwner:preferenceScope}, "", hash);
+            setView("requests");
+            setDetailId(null);
+            setLocatedChannel(null);
+          }
+        }} />
       <Guide open={guide} onClose={() => setGuide(false)} />
       {walletDialog && <PageBoundary key={walletDialog} onDismiss={()=>setWalletDialog(null)}><Suspense fallback={<div className="balance-dialog-loading" role="status">加载充值设置…</div>}>
         <BalanceWalletDialog key={walletDialog} id={walletDialog} close={()=>setWalletDialog(null)}/>

@@ -7,6 +7,20 @@ import type { Channel, Distribution } from "./types";
 
 const duration: Distribution = { sample_count: 4, mean_ms: 4500, p50_ms: 3000, p95_ms: 10000, last_ms: 9000 };
 
+it("mounts only compact observation metrics and keeps counts aligned", () => {
+  const row = { provider: "channel", eligible: true, stats: { ...emptyStats(), success: 9, failed: 1, success_rate: .9, success_rate_denominator: 10 } } as Channel;
+  render(<Tooltip.Provider><table>
+    <thead><tr><ChannelMetricHeaders layout="run" compact /></tr></thead>
+    <tbody><tr><ChannelMetricCells row={row} actualRange={{supported:false}} layout="run" compact /></tr></tbody>
+  </table></Tooltip.Provider>);
+  expect(screen.getAllByRole("columnheader")).toHaveLength(3);
+  expect(screen.getAllByRole("cell")).toHaveLength(3);
+  expect(screen.getByText("90.0%")).toBeVisible();
+  expect(screen.getByText("9/10")).toBeVisible();
+  expect(screen.queryByText("估算消费")).not.toBeInTheDocument();
+  expect(screen.getByRole("columnheader", {name:/余额\s*\/\s*额度/})).toBeVisible();
+});
+
 it("places total-time p50/p95 immediately after first-token latency with aligned cells", () => {
   const row = { provider: "channel", eligible: true, stats: { ...emptyStats(), started: 5, duration } } as Channel;
   render(<Tooltip.Provider><table>
@@ -14,7 +28,7 @@ it("places total-time p50/p95 immediately after first-token latency with aligned
     <tbody><tr><ChannelMetricCells row={row} actualRange={{ supported: false }} /></tr></tbody>
   </table></Tooltip.Provider>);
   const headers = screen.getAllByRole("columnheader");
-  const index = headers.findIndex(h => h.textContent?.startsWith("首字延迟"));
+  const index = headers.findIndex(h => h.textContent?.startsWith("首字"));
   expect(headers[index + 1]).toHaveTextContent("总时间 p50 / p95");
   expect(headers[index + 2]).toHaveTextContent("Token / 缓存率");
   const cells = within(screen.getAllByRole("row")[1]).getAllByRole("cell");

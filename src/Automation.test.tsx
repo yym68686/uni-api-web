@@ -79,7 +79,7 @@ it("saves explicit scope and parameters, pauses with revision, and displays audi
   );
   expect(screen.getByLabelText("启用任务")).not.toBeChecked();
   await user.click(screen.getByRole("button", { name: "保存任务" }));
-  await screen.findByRole("button", { name: "查看详情" });
+  await screen.findByRole("button", {name: "编辑 调序"});
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   const post = requests.find((r) => r.init?.method === "POST");
   const body = JSON.parse(String(post?.init?.body));
@@ -87,10 +87,12 @@ it("saves explicit scope and parameters, pauses with revision, and displays audi
   expect(body.policy.min_success_samples).toBe(120);
   expect(body.policy.metrics).not.toContain("cache");
   expect(body.policy.endpoint).toBe("/v1/responses");
-  await user.click(screen.getByRole("button", { name: "查看详情" }));
+  await user.click(screen.getByRole("button", {name: /^调序\s*主来源/}));
+  await user.click(await screen.findByRole("button", { name: "查看详情" }));
   expect(screen.getByRole("dialog")).toHaveTextContent("慢渠道 → 快渠道");
   expect(screen.getByRole("dialog")).toHaveTextContent("等待连续确认");
   await user.click(screen.getByRole("button", { name: "关闭详情" }));
+  await user.click(screen.getByRole("button", {name:"任务"}));
   await user.click(screen.getByRole("button", { name: "启用 调序" }));
   await waitFor(() =>
     expect(requests.some((r) => r.init?.method === "PUT")).toBe(true),
@@ -103,6 +105,7 @@ it("saves explicit scope and parameters, pauses with revision, and displays audi
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: /^调序\s*主来源/ }));
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", {name:"任务"}));
   await user.click(screen.getByRole("button", { name: "编辑 调序" }));
   expect(
     screen.getByRole("dialog", { name: "编辑自动化任务" }),
@@ -151,6 +154,7 @@ it("retains audit records during a refresh and when the refresh fails", async ()
   }));
   render(<Automation sources={sources} />);
   const user = userEvent.setup();
+  await user.click(screen.getByRole("button", {name: "执行记录"}));
   const original = await screen.findByText("已调整渠道顺序");
   await user.click(screen.getByRole("button", {name:"刷新数据"}));
   expect(original).toBeVisible();

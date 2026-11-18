@@ -2,7 +2,6 @@ import type { CSSProperties, ReactNode } from "react";
 import {
   Activity,
   Bot,
-  Globe2,
   List,
   Server,
   SlidersHorizontal,
@@ -363,44 +362,36 @@ export function PageLoading({ view }: { view: View }) {
         </>
       );
       break;
+    case "routing":
     case "channels":
     case "balances":
       content = (
-        <>
-          <MetricLoading />
           <Panel
-            title={view === "channels" ? "渠道表现" : "渠道余额"}
+            title={view === "routing" ? "路由顺序" : view === "channels" ? "渠道观测" : "余额管理"}
             icon={
-              view === "channels" ? (
+              view !== "balances" ? (
                 <Activity size={19} />
               ) : (
                 <Wallet size={19} />
               )
             }
-            filters={6}
           >
-            <TableLoading kind={view} />
+            <TableLoading kind={view === "balances" ? view : "channels"} />
           </Panel>
-        </>
       );
       break;
     case "requests":
       content = (
-        <Panel title="请求日志" icon={<List size={19} />} filters={7}>
+        <Panel title="请求日志" icon={<List size={19} />}>
           <TableLoading kind="requests" rows={8} />
         </Panel>
       );
       break;
     case "sub2api":
       content = (
-        <>
-          <Panel title="站点账号" icon={<Globe2 size={19} />}>
-            <TableLoading kind="accounts" rows={3} />
-          </Panel>
-          <Panel title="渠道管理" icon={<Activity size={19} />} filters={6}>
+          <Panel title="渠道管理" icon={<Activity size={19} />}>
             <TableLoading kind="checks" rows={4} />
           </Panel>
-        </>
       );
       break;
     case "prices":
@@ -412,25 +403,16 @@ export function PageLoading({ view }: { view: View }) {
       break;
     case "sources":
       content = (
-        <Panel title="uni-api 来源" icon={<Server size={19} />}>
+        <Panel title="设置" icon={<Server size={19} />}>
           <SourceLoading />
-          <div className="loading-settings-form">
-            <Bone width="100px" />
-            <DetailLoading kind="form" label="账户设置" />
-          </div>
         </Panel>
       );
       break;
     case "automations":
       content = (
-        <>
           <Panel title="自动化" icon={<Bot size={19} />}>
             <TaskLoading />
           </Panel>
-          <Panel title="历史与变动审计" icon={<Activity size={19} />}>
-            <TableLoading kind="history" rows={4} />
-          </Panel>
-        </>
       );
       break;
   }

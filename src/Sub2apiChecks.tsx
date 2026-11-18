@@ -787,11 +787,15 @@ function ManagementChannelDrawer({
   );
 }
 
-export function Sub2apiChecks({ user = "account", initialPosition, onPositionChange }: {
+import { WorkbenchDisclosure, WorkbenchTabs } from "./Workbench";
+
+export function Sub2apiChecks({ user = "account", initialPosition, onPositionChange, onRouting }: {
   user?: string;
   initialPosition?: ManagementPagePosition;
   onPositionChange?: (position: ManagementPagePosition) => void;
+  onRouting?: () => void;
 }) {
+  const [section, setSection] = useState("channels");
   const client = useQueryClient();
   const detection = useChannelDetection(user);
   const [detectionProject, setDetectionProject] = useDetectionProject("management", user, detectionProjects);
@@ -1135,11 +1139,12 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   const checkToolUse=(selection:CheckSelection)=>queueChecks("tool-use",selection);
   return (
     <div className="sub2api-page">
-      <div className="management-section-nav">
-        <button className="button small ghost" onClick={()=>document.getElementById("management-channels")?.scrollIntoView?.({block:"start"})}>渠道列表</button>
-        <button className="button small" onClick={()=>document.getElementById("management-sites")?.scrollIntoView?.({block:"start"})}>站点账号</button>
+      <div className="data-heading management-page-heading">
+        <div className="data-title"><h2>渠道管理</h2></div>
+        {onRouting && <button type="button" className="button small" onClick={onRouting}>路由顺序</button>}
       </div>
-      <section className="data-panel sub-accounts management-sites" id="management-sites" aria-label="站点账号设置">
+      <WorkbenchTabs label="管理视图" value={section} onChange={setSection} tabs={[["channels","渠道"],["sites","站点账号"]]} />
+      <section className="data-panel sub-accounts management-sites" id="management-sites" aria-label="站点账号设置" hidden={section !== "sites"}>
         <div className="data-heading">
           <div className="data-title">
             <Globe2 size={19} />
@@ -1199,7 +1204,6 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
             检测模型设置已安全迁移：旧设置无法确认额外模型是否在保存时已存在，因此额外模型暂未勾选。请检查检测模型设置后再运行批量检测。
           </p>
         )}
-        {syncSubmitted !== null && <p className="settings-note">任务进度实时更新。渠道列表保留当前展示，点击“刷新渠道管理”读取最新检测结果。</p>}
         {settingsAccount && <SiteAccountSettings account={settingsAccount} close={() => setSettingsAccount(null)} saved={() => {
           setSettingsAccount(null);
           void client.invalidateQueries({ predicate: q => ["management-query", "sub-sync-progress", "sub2api", "sub2api-headers", "sub2api-imports", "sub-channel-spend", "channel-spend", "metrics", "sub-check-detail", "sub-management-models"].includes(String(q.queryKey[0])) });
@@ -1387,15 +1391,14 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
           {batchPreview.scope!==batchScope && <p role="alert">筛选或检测数据已变化，请关闭后重新预览。</p>}
         </Dialog.Content></Dialog.Portal>
       </Dialog.Root>}
-      <section className="data-panel" id="management-channels">
+      <section className="data-panel" id="management-channels" hidden={section !== "channels"}>
         <div className="data-heading sub-detection-heading">
           <div className="sub-detection-title">
             <div className="data-title">
               <ScanLine size={19} />
-              <h2>渠道管理</h2>
+              <h3>渠道列表</h3>
               <span className="count-badge">{resultsUnavailable ? "—" : total}</span>
             </div>
-            <span className="sub-detection-scope">{resultsUnavailable ? "" : `${eligibleCount} 个渠道可检测`}</span>
           </div>
           <div className="sub-detection-controls" role="region" aria-label="渠道管理操作" tabIndex={0}>
             <CreateChannel sources={sources.data?.data || []} />
@@ -1460,6 +1463,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
           </div>
         </div>
         {fingerprintsSubmitted > 0 && <div className="detection-submission-notice" role="status">已提交 {fingerprintsSubmitted} 项指纹检测，可刷新渠道查看结果。</div>}
+        <WorkbenchDisclosure className="management-filters" label="筛选">
         <div className="filters sub-filters" role="region" aria-label="渠道管理筛选" tabIndex={0}>
           <label className="select-field">
             <select
@@ -1705,6 +1709,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
             <X size={12} /> 重置筛选
           </button>
         </div>
+        </WorkbenchDisclosure>
         {resultsReadFailed && metadata && <div role="alert" className="error-banner">渠道结果读取失败：{pageQuery.error?.message}<button className="button small" onClick={refreshPage}>重试</button></div>}
         {displayedPage && <div className="sub-results-status" role="status" aria-live="polite">
           {pageQuery.updating ? <><Spinner small/>正在更新渠道结果，暂显示更新前内容…</> : resultsReadFailed ? "暂时无法读取渠道" : ""}
@@ -1726,7 +1731,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                 <option value="finance">费用</option>
                 <option value="all">全部</option>
               </select></label>
-              <span>{tableModel ? `当前模型：${tableModel}` : "综合结果 · 打开渠道详情可按模型查看证据"}</span>
+              {tableModel && <span>{tableModel}</span>}
             </div>
             <div className="table-scroll sub-results-table" aria-busy={tablePending} aria-hidden={resultsReadFailed || undefined} inert={tablePending} style={resultsReadFailed?{visibility:"hidden"}:undefined}>
               <table className="channel-table check-table sub-table" data-columns={managementColumns}>

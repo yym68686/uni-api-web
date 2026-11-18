@@ -24,6 +24,17 @@ it("keeps partial source availability out of the channel management banner", asy
   expect(screen.queryByText(/渠道列表暂不完整/)).not.toBeInTheDocument();
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 });
+async function openSites() {
+  const selector = within(screen.getByRole("navigation", {name: "管理视图"}));
+  const button = selector.getByRole("button", {name: "站点账号"});
+  if (button.getAttribute("aria-current") !== "true") await userEvent.click(button);
+}
+async function openChannels() {
+  const selector = within(screen.getByRole("navigation", {name: "管理视图"}));
+  const button = selector.getByRole("button", {name: "渠道"});
+  if (button.getAttribute("aria-current") !== "true") await userEvent.click(button);
+}
+
 function mount(user = "account", client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
   installManagementPageFixture(user);
   return render(
@@ -89,6 +100,7 @@ it("offers settings for idle and running accounts without starting sync or detec
   vi.stubGlobal("fetch",fetch);
   mount("site-account-settings");
   const user=userEvent.setup();
+  await openSites();
   await screen.findByRole("button",{name:"设置站点 one"});
   expect(screen.getByRole("button",{name:"设置站点 two"})).toBeEnabled();
   await user.click(screen.getByRole("button",{name:"设置站点 one"}));
@@ -97,6 +109,7 @@ it("offers settings for idle and running accounts without starting sync or detec
   await user.type(within(dialog).getByRole("spinbutton"),"0.1");
   await user.click(within(dialog).getByRole("button",{name:"保存设置"}));
   await waitFor(()=>expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  await openChannels();
   await waitFor(()=>expect(screen.getByText("0.001")).toBeVisible());
   expect(fetch.mock.calls.filter(([,init])=>init?.method&&init.method!=="GET").map(([url,init])=>[new URL(url).pathname,init?.method])).toEqual([["/analytics/v1/sub2api/accounts/one/settings","PATCH"]]);
 });
@@ -174,7 +187,9 @@ it("keeps channel loading honest and does not read every source key directory on
   });
   vi.stubGlobal("fetch", fetcher);
   mount("quick-entry", client);
+  await openSites();
   expect(screen.getByRole("heading", { name: "站点账号" }).parentElement).toHaveTextContent("…");
+  await openChannels();
   expect(screen.getByRole("status", { name: "加载渠道检测" })).toBeInTheDocument();
   expect(screen.queryByText("没有匹配的渠道")).not.toBeInTheDocument();
   expect(fetcher.mock.calls.some(([input]) => input.includes("keys_only"))).toBe(false);
@@ -182,7 +197,9 @@ it("keeps channel loading honest and does not read every source key directory on
     replies.accounts(Response.json({ data: fixtures() }));
     replies.management(Response.json({ data: [], unavailable_sources: [] }));
   });
+  await openSites();
   await waitFor(() => expect(screen.getByRole("heading", { name: "站点账号" }).parentElement).toHaveTextContent("2"));
+  await openChannels();
   expect(screen.getAllByText("same-group", { selector: "strong" })).toHaveLength(2);
 });
 
@@ -202,6 +219,7 @@ it.each([false,true])("imports sub2api aliases independently of originals (keep 
   const user=userEvent.setup();mount(`sub-alias-${keep}`);
   const open=await screen.findByRole("button",{name:"添加到渠道"});
   const table=screen.getByRole("table");
+  await openSites();
   const accountRow=screen.getByRole("listitem",{name:data[0].name});
   await user.click(open);
   expect(document.querySelector(".sub-results-table table")).toBe(table);
@@ -916,6 +934,7 @@ it("creates an account without storing its password and supports the 2FA step", 
   );
   const user = userEvent.setup();
   mount();
+  await openSites();
   await user.click(screen.getByRole("button", { name: "添加账号" }));
   await user.type(screen.getByLabelText("站点地址"), "https://example.com");
   await user.type(screen.getByLabelText("用户名 / 邮箱"), "me@example.com");
@@ -966,6 +985,7 @@ it("keeps busy accounts from duplicate checks and removes only after explicit se
     screen.getByRole("button", { name: "降智检测 · 0 个渠道" }),
   ).toBeDisabled();
   await user.selectOptions(screen.getByLabelText("sub2api 账号筛选"), "");
+  await openSites();
   await user.click(screen.getByRole("button", { name: "移除账号 two" }));
   expect(methods).toHaveLength(0);
   await user.click(screen.getByRole("button", { name: "确认移除" }));
@@ -2038,6 +2058,7 @@ it("syncs all idle accounts independently of channel filters and prevents repeat
   await screen.findByRole("table");
   await user.selectOptions(screen.getByLabelText("sub2api 账号筛选"), "one");
   await user.selectOptions(screen.getByLabelText("检测模型筛选"), "gpt-6-astra");
+  await openSites();
   const button = screen.getByRole("button", { name: "一键同步并检测" });
   expect(button).toHaveTextContent("2 个账号");
   await user.click(button);
@@ -2110,6 +2131,7 @@ it("retains the password through browser verification for encrypted server stora
   try {
     const user = userEvent.setup();
     mount();
+  await openSites();
     await user.click(await screen.findByRole("button", { name: "添加账号" }));
     await user.type(screen.getByLabelText("站点地址"), "https://site.example");
     await user.type(screen.getByLabelText("用户名 / 邮箱"), "me@example.com");
@@ -2152,6 +2174,7 @@ it("opens account forms in a modal and restores focus when closed", async () => 
   );
   const user = userEvent.setup();
   mount();
+  await openSites();
   const opener = screen.getByRole("button", { name: "添加账号" });
   await user.click(opener);
   const dialog = screen.getByRole("dialog", { name: "添加站点账号" });
@@ -2187,6 +2210,7 @@ it.each([false, true])("shows a saved site password in the login form and retrie
   }));
   const user = userEvent.setup();
   mount("reauth-scope");
+  await openSites();
   await user.click(await screen.findByRole("button", {name: "重新登录"}));
   const dialog = within(screen.getByRole("dialog", {name: "重新登录站点账号"}));
   expect(dialog.getByLabelText("账号密码")).not.toBeRequired();
@@ -2220,6 +2244,7 @@ it("explains missing legacy credentials and requires them once without submittin
   }));
   const user = userEvent.setup();
   mount();
+  await openSites();
   expect(await screen.findByText(/站点会话已失效，且尚未保存登录密码/)).toBeVisible();
   await user.click(screen.getByRole("button", {name: "重新登录"}));
   const dialog = within(screen.getByRole("dialog"));
@@ -2245,6 +2270,7 @@ it("renders the current page's account balances without a duplicate first-paint 
     return Response.json({data});
   }));
   mount("account", client);
+  await openSites();
   expect(await screen.findByText("$123.45")).toBeVisible();
   expect(calls.some(path=>path.endsWith("/balance"))).toBe(false);
   expect(client.getQueryData(["site-account-balance", "account", data[0].id])).toMatchObject({
@@ -2572,6 +2598,7 @@ it("accepts a username without requiring a site type or email-shaped login", asy
   return Response.json({data:[]});
  }));
  const user=userEvent.setup();mount();
+  await openSites();
  await user.click(await screen.findByRole('button',{name:'添加账号'}));
  const dialog=screen.getByRole('dialog',{name:'添加站点账号'});
  expect(within(dialog).queryByRole('combobox')).not.toBeInTheDocument();
@@ -2752,6 +2779,7 @@ it("does not submit all-account sync when no detection models are selected", asy
   mount("sync-empty");
   await screen.findByRole("table");
   await user.selectOptions(screen.getByLabelText("检测模型筛选"), "gpt-6-astra");
+  await openSites();
   const button = screen.getByRole("button", {name: "一键同步并检测"});
   expect(button).toBeDisabled();
   await user.click(button);
@@ -2769,6 +2797,7 @@ it("does not fall back to unscoped sync on an older backend", async () => {
   const user = userEvent.setup();
   mount("sync-old-backend");
   await screen.findByRole("table");
+  await openSites();
   await user.click(screen.getByRole("button", {name: "一键同步并检测"}));
   expect(await screen.findByText("同步检测服务待更新，请稍后重试。")).toBeVisible();
   expect(writes).toEqual(["/analytics/v1/sub2api/accounts/sync-selected"]);
@@ -2795,6 +2824,7 @@ it("keeps accepted sync and the current page when its independent progress read 
   const user = userEvent.setup();
   mount("accepted-sync-read-timeout");
   await screen.findByRole("table");
+  await openSites();
   await user.click(screen.getByRole("button",{name:"一键同步并检测"}));
   expect(await screen.findByText("已提交 2 个账号，正在后台同步并检测。")).toBeVisible();
   await screen.findByText(/实时进度更新失败/);
@@ -2802,7 +2832,9 @@ it("keeps accepted sync and the current page when its independent progress read 
   expect(screen.queryByRole("button",{name:"停止"})).not.toBeInTheDocument();
   expect(screen.getAllByText("same-group",{selector:"strong"})).toHaveLength(2);
   expect(screen.getByRole("button",{name:"一键同步并检测"})).toBeDisabled();
+  await openChannels();
   expect(screen.queryByRole("status",{name:"加载渠道检测"})).not.toBeInTheDocument();
+  await openSites();
   await user.click(screen.getByRole("button",{name:"重试进度"}));
   expect(posts).toEqual(["/analytics/v1/sub2api/accounts/sync-selected"]);
 });
@@ -2821,19 +2853,19 @@ it.each(["accounts", "channel-management"])("does not report an empty filter res
   }));
   const user = userEvent.setup();
   mount("filter-unavailable-" + failedEndpoint);
-  await screen.findByRole("alert");
+  await screen.findByText("暂时无法读取渠道");
   await user.selectOptions(screen.getByLabelText("检测模型筛选"), "gpt-5.5");
   await user.selectOptions(screen.getByLabelText("可用性筛选"), "success");
   expect(await screen.findByText("暂时无法读取渠道")).toBeVisible();
   expect(screen.queryByText("没有匹配的渠道")).not.toBeInTheDocument();
   expect(screen.queryByText("0 个渠道可检测")).not.toBeInTheDocument();
-  expect(screen.getByRole("heading", {name:"渠道管理"}).parentElement).toHaveTextContent("—");
+  expect(screen.getByRole("heading", {name:"渠道列表"}).parentElement).toHaveTextContent("—");
   expect(screen.getByRole("button", {name: /检测所选模型/})).toBeDisabled();
   fail = false;
   await user.click(screen.getByRole("button", {name:"刷新渠道管理"}));
   expect(await screen.findByText("没有匹配的渠道")).toBeVisible();
   expect(screen.queryByText("暂时无法读取渠道")).not.toBeInTheDocument();
-  expect(screen.getByText("0 个渠道可检测")).toBeVisible();
+  expect(screen.getByRole("button", {name:/检测所选模型 · 0 个渠道/})).toBeVisible();
   expect(methods.every(method => method === "GET")).toBe(true);
 });
 

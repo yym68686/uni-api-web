@@ -32,6 +32,7 @@ import { friendlyReason } from "./requestTraceModel";
 import { RequestTraceDialog, requestTraceOptions } from "./RequestTrace";
 import { LatencyBadge } from "./LatencyBadge";
 import { Spinner } from "./ui";
+import { WorkbenchDisclosure } from "./Workbench";
 import { readWorkspace, requestLocation, validLogWindow, type LogPosition, type LogWindow } from "./workspaceLocation";
 import "./requestLogs.css";
 
@@ -160,7 +161,7 @@ export function RequestLogsPage({
   const [selected, setSelected] = useState<LogPosition | null>(incoming.request);
   const [exact, setExact] = useState<LogWindow | null>(incoming.logWindow);
   const [editWindow, setEditWindow] = useState(false);
-  const [showLogTools, setShowLogTools] = useState(false);
+  const [detailedColumns, setDetailedColumns] = useState(false);
   const [fromInput, setFromInput] = useState("");
   const [toInput, setToInput] = useState("");
   const [rangeError, setRangeError] = useState("");
@@ -401,13 +402,14 @@ export function RequestLogsPage({
     filters.sourceId ||
     (filters.keyId.includes("::") ? filters.keyId.split("::")[0] : "");
   return (
-    <section className="data-panel request-logs-panel" data-tools={showLogTools ? "expanded" : "compact"}>
-      <div className="data-heading">
+    <section className="data-panel request-logs-panel" data-tools="expanded" data-columns={detailedColumns ? "all" : "summary"}>
+      <div className="data-heading workbench-heading">
         <div className="data-title">
           <List size={19} />
           <h2>请求日志</h2>
         </div>
-        <div className="data-actions">
+        <div className="workbench-tools">
+          <WorkbenchDisclosure label="定位 ID" icon={<Search size={14} aria-hidden="true" />}>
           <form
             className="search-field"
             onSubmit={(e) => {
@@ -439,6 +441,11 @@ export function RequestLogsPage({
               </button>
             )}
           </form>
+          {!!filters.search.trim() && <button type="button" className="button small" onClick={() =>
+            showTrace({ id: filters.search.trim(), source: traceSource })}>按此 ID 查看完整追踪（不限时间）</button>}
+          </WorkbenchDisclosure>
+          <WorkbenchDisclosure label={hasFilters || exact ? "筛选 · 已用" : "筛选"} icon={<Filter size={14} aria-hidden="true" />}>
+      <div id="request-log-filters" className="filters request-log-filters" aria-label="日志筛选">
           <button
             className="button small"
             aria-label="刷新日志"
@@ -461,9 +468,6 @@ export function RequestLogsPage({
             自动刷新
           </label>
           {auto && !autoActive && <span role="status" className="settings-note">自动刷新已暂停{exact ? "（固定时间）" : "（历史页）"}</span>}
-        </div>
-      </div>
-      <div id="request-log-filters" className="filters request-log-filters" aria-label="日志筛选">
         <Select
           label="时间范围筛选"
           className="time-select"
@@ -478,9 +482,6 @@ export function RequestLogsPage({
           ))}
         </Select>
         <button className="button small log-time-button" aria-expanded={editWindow} onClick={() => setEditWindow(value => !value)}>{exact ? "修改固定时间" : "指定起止时间"}</button>
-        <button type="button" className="button small request-log-tools" aria-expanded={showLogTools} aria-controls="request-log-filters" onClick={() => setShowLogTools(value => !value)}>
-          <SlidersHorizontal size={14} />{showLogTools ? "收起筛选与列" : "更多筛选与列"}
-        </button>
         <Select
           label="uni-api 来源"
           className="source-select"
@@ -502,7 +503,7 @@ export function RequestLogsPage({
           value={filters.keyId}
           onChange={(v) => change("keyId", v)}
         >
-          <option value="">全部 API key · {stats.label()}</option>
+          <option value="">全部 API Key</option>
           {filters.keyId && !keyLabels.has(filters.keyId) && (
             <option value={filters.keyId}>
               历史 API key · {filters.keyId}
@@ -510,7 +511,7 @@ export function RequestLogsPage({
           )}
           {keyList.map((key) => (
             <option value={key.key_id} key={key.key_id}>
-              {keyLabels.get(key.key_id)} · {stats.label(key)}
+              {keyLabels.get(key.key_id)}
             </option>
           ))}
         </Select>
@@ -610,7 +611,9 @@ export function RequestLogsPage({
           <X size={13} />
           重置筛选
         </button>
+        <label className="workbench-help"><input type="checkbox" checked={detailedColumns} onChange={event => setDetailedColumns(event.target.checked)} /> 详细列</label>
       </div>
+      {filters.keyId && !exact && <p className="workbench-help">{stats.label(keyList.find(key => key.key_id === filters.keyId) || {key_id:filters.keyId})}</p>}
       {editWindow && <form className="request-log-window" onSubmit={applyWindow}>
         <label>开始时间 <input type="datetime-local" required value={fromInput} onChange={event=>setFromInput(event.target.value)} /></label>
         <label>结束时间 <input type="datetime-local" required value={toInput} onChange={event=>setToInput(event.target.value)} /></label>
@@ -618,30 +621,10 @@ export function RequestLogsPage({
         <span className="settings-note">本机时区 · {Intl.DateTimeFormat().resolvedOptions().timeZone}</span>
         {rangeError && <p role="alert">{rangeError}</p>}
       </form>}
-      {exact && <p className="request-log-hint">固定时间：{new Date(exact.from).toLocaleString()} – {new Date(exact.to).toLocaleString()} · API key 成功率摘要只适用于预设窗口。</p>}
-      <p className="request-log-hint request-log-explainer">
-        每行是一条已完成请求，状态为全部重试后的最终结果。尝试数只计可关联的记录；首字一栏区分响应创建与首个文本。
-        {data && (
-          <>
-            {" "}
-            更新于{" "}
-            {new Date(data.to).toLocaleTimeString("zh-CN", { hour12: false })}
-          </>
-        )}
-      </p>
-      {!!filters.search.trim() && (
-        <div className="request-log-search-help">
-          <span>在当前筛选范围内搜索请求 ID / Trace ID。</span>
-          <button
-            className="button small ghost"
-            onClick={() =>
-              showTrace({ id: filters.search.trim(), source: traceSource })
-            }
-          >
-            按此 ID 查看完整追踪（不限时间）
-          </button>
+          </WorkbenchDisclosure>
         </div>
-      )}
+      </div>
+      {exact && <p className="workbench-status">固定时间：{new Date(exact.from).toLocaleString()} – {new Date(exact.to).toLocaleString()}</p>}
       {keys.error && (
         <p className="coverage-note">
           API key 目录暂不可用；请求日志仍可浏览。
@@ -673,13 +656,13 @@ export function RequestLogsPage({
               <thead>
                 <tr>
                   <th>时间 / 请求 ID</th>
-                  <th className="log-extra-column">来源 / API key</th>
-                  <th className="log-extra-column">模型 / 端点</th>
+                  {detailedColumns && <th className="log-extra-column">来源 / API Key</th>}
+                  {detailedColumns && <th className="log-extra-column">模型 / 端点</th>}
                   <th>最终结果</th>
-                  <th className="log-extra-column">总耗时</th>
+                  <th>总耗时</th>
                   <th>首字延迟</th>
-                  <th className="log-extra-column">请求前等待</th>
-                  <th className="log-extra-column">输入 / 输出 token</th>
+                  {detailedColumns && <th className="log-extra-column">请求前等待</th>}
+                  {detailedColumns && <th className="log-extra-column">输入 / 输出 Token</th>}
                 </tr>
               </thead>
               <tbody>
@@ -710,7 +693,7 @@ export function RequestLogsPage({
                         {row.request_id || row.trace_id || "请求 ID 未记录"}
                       </button>
                     </td>
-                    <td className="log-extra-column">
+                    {detailedColumns && <td className="log-extra-column">
                       <strong>{sourceName(row.source_id)}</strong>
                       <small title={row.key_id}>
                         {keyLabels
@@ -720,8 +703,8 @@ export function RequestLogsPage({
                             ? `历史 key · ${row.key_id.slice(0, 10)}…`
                             : "未记录 API key")}
                       </small>
-                    </td>
-                    <td className="log-extra-column">
+                    </td>}
+                    {detailedColumns && <td className="log-extra-column">
                       <strong className="mono">
                         {row.model || "未记录模型"}
                       </strong>
@@ -729,7 +712,7 @@ export function RequestLogsPage({
                         {row.endpoint || "未记录端点"} ·{" "}
                         {row.stream ? "流式" : "非流式"}
                       </small>
-                    </td>
+                    </td>}
                     <td>
                       <span
                         className={`trace-status ${states[row.result]?.tone || "neutral"}`}
@@ -747,7 +730,7 @@ export function RequestLogsPage({
                         </small>
                       )}
                     </td>
-                    <td className="mono log-extra-column">{ms(row.duration_ms)}</td>
+                    <td className="mono">{ms(row.duration_ms)}</td>
                     <td className="mono">
                       <LatencyBadge
                         value={row.response_created_ms ?? row.first_text_ms}
@@ -755,8 +738,8 @@ export function RequestLogsPage({
                       {(row.response_created_ms != null || row.first_text_ms != null) &&
                         <small>{row.response_created_ms != null ? "响应创建" : "首个文本"}</small>}
                     </td>
-                    <td className="mono log-extra-column">{ms(row.dispatch_ms)}</td>
-                    <td className="mono log-extra-column">
+                    {detailedColumns && <td className="mono log-extra-column">{ms(row.dispatch_ms)}</td>}
+                    {detailedColumns && <td className="mono log-extra-column">
                       {row.input_tokens == null ? "—" : count(row.input_tokens)}{" "}
                       /{" "}
                       {row.output_tokens == null
@@ -765,7 +748,7 @@ export function RequestLogsPage({
                       {row.cache_read_tokens != null && (
                         <small>缓存读取 {count(row.cache_read_tokens)}</small>
                       )}
-                    </td>
+                    </td>}
                   </tr>
                 ))}
               </tbody>

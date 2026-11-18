@@ -8,11 +8,6 @@
   padding: 0 21px; margin: 0 0 .85rem; color: var(--muted); font-size: .78rem;
 }
 .channel-scope-caption .text-link { border: 0; background: transparent; }
-.observation-table:not([data-columns="all"]) .column-finance,
-.observation-table:not([data-columns="all"]) .column-quality { display: none; }
-.observation-table[data-columns="finance"] .column-finance,
-.observation-table[data-columns="quality"] .column-quality { display: table-cell; }
-.observation-table:is([data-columns="finance"], [data-columns="quality"]) .column-run { display: none; }
 .observation-table .channel-link { max-width: 16rem; }
 .observation-table .channel-link span { min-width: 0; }
 .observation-table .channel-link strong, .observation-table .channel-link small {
@@ -49,8 +44,6 @@
     display:block; padding:0 12px; color:var(--muted); font-size:.75rem; overflow-wrap:anywhere;
   }
   .observation-table[data-columns="run"] { min-width:100%; }
-  .observation-table[data-columns="run"] .rank,
-  .observation-table[data-columns="run"] .column-run { display:none; }
   .observation-table[data-columns="run"] td, .observation-table[data-columns="run"] th { padding-inline:7px; }
   .observation-table .channel-link { min-width: 0; }
   .observation-table[data-columns="run"] .provider-avatar { display:none; }
