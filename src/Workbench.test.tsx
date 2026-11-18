@@ -1,7 +1,44 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { expect, it } from "vitest";
-import { WorkbenchDisclosure } from "./Workbench";
+import { expect, it, vi } from "vitest";
+import { useWorkbenchTools, WorkbenchDisclosure } from "./Workbench";
+
+it("coalesces heading resizes into one frame and cancels pending work on unmount", () => {
+  let notify!: () => void;
+  let nextFrame!: FrameRequestCallback;
+  const disconnect = vi.fn();
+  const cancelFrame = vi.fn();
+  const scheduleFrame = vi.fn((callback: FrameRequestCallback) => {
+    nextFrame = callback;
+    return 1;
+  });
+  vi.stubGlobal("ResizeObserver", class {
+    constructor(callback: () => void) { notify = callback; }
+    observe() {}
+    disconnect = disconnect;
+  });
+  vi.stubGlobal("requestAnimationFrame", scheduleFrame);
+  vi.stubGlobal("cancelAnimationFrame", cancelFrame);
+
+  function Heading() {
+    const { observeHeading, level } = useWorkbenchTools();
+    return <div ref={observeHeading}>{level}</div>;
+  }
+  const { container, unmount } = render(<Heading />);
+  const heading = container.firstElementChild!;
+  Object.defineProperty(heading, "clientWidth", { value: 960 });
+  notify();
+  notify();
+  expect(heading).toHaveTextContent("0");
+  expect(scheduleFrame).toHaveBeenCalledTimes(1);
+  act(() => nextFrame(0));
+  expect(heading).toHaveTextContent("2");
+
+  notify();
+  unmount();
+  expect(disconnect).toHaveBeenCalledTimes(1);
+  expect(cancelFrame).toHaveBeenCalledWith(1);
+});
 
 it("closes on an outside pointer, preserves inside interaction and restores focus on Escape", async () => {
   const user = userEvent.setup();

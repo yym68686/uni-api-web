@@ -22,9 +22,20 @@ export function useWorkbenchTools() {
     };
     update();
     if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(update);
+    let frame: number | null = null;
+    const observer = new ResizeObserver(() => {
+      if (frame !== null) return;
+      // Moving controls changes the heading's size. Commit after observer delivery.
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        update();
+      });
+    });
     observer.observe(heading);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
   }, [heading]);
   return { observeHeading, level };
 }
