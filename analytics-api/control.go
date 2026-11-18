@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -139,12 +140,30 @@ func tokenHash(raw string) string {
 	sum := sha256.Sum256([]byte(raw))
 	return fmt.Sprintf("%x", sum[:])
 }
+
+type consoleSessionDBTraceKey struct{}
+
 func (s *controlStore) session(ctx context.Context, raw string) (string, error) {
 	if len(raw) != 43 {
 		return "", sql.ErrNoRows
 	}
 	var user string
-	err := s.db.QueryRowContext(ctx, `SELECT username FROM console_sessions WHERE token_hash=$1 AND expires_at>now()`, tokenHash(raw)).Scan(&user)
+	const query = `SELECT username FROM console_sessions WHERE token_hash=$1 AND expires_at>now()`
+	if ctx.Value(consoleSessionDBTraceKey{}) == true {
+		start := time.Now()
+		conn, err := s.db.Conn(ctx)
+		wait := time.Since(start)
+		after := time.Now()
+		if err == nil {
+			defer conn.Close()
+			err = conn.QueryRowContext(ctx, query, tokenHash(raw)).Scan(&user)
+		}
+		if managementTraceEnabled(ctx) || time.Since(start) >= 100*time.Millisecond {
+			log.Printf("console_session_db pool_ms=%d sql_ms=%d request_id=%s", wait.Milliseconds(), time.Since(after).Milliseconds(), consoleRequestID(ctx))
+		}
+		return user, err
+	}
+	err := s.db.QueryRowContext(ctx, query, tokenHash(raw)).Scan(&user)
 	return user, err
 }
 func (s *controlStore) newSession(ctx context.Context, user string) (string, error) {
@@ -426,7 +445,11 @@ func (s *Service) controlUser(r *http.Request) (string, error) {
 	if e != nil {
 		return "", e
 	}
-	return s.control.session(r.Context(), c.Value)
+	ctx := r.Context()
+	if consoleRequestID(ctx) != "" && r.URL.Path == "/v1/channel-management/query" {
+		ctx = context.WithValue(ctx, consoleSessionDBTraceKey{}, true)
+	}
+	return s.control.session(ctx, c.Value)
 }
 func (s *Service) controlSession(r *http.Request) bool { _, e := s.controlUser(r); return e == nil }
 func (s *Service) authMe(w http.ResponseWriter, r *http.Request) {

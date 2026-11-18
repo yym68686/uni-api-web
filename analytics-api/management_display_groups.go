@@ -328,7 +328,7 @@ func (s *Service) managementDisplayLoop(ctx context.Context) {
 				}
 				planAttempt[owner] = now.Add(time.Minute)
 				warm, stopWarm := s.interruptibleManagementWarm(ctx, 12*time.Second)
-				rebuilt, err := s.warmManagementResetPlanIfNeeded(warm, owner)
+				rebuilt, err := s.warmManagementResetPlanIfNeeded(context.WithValue(warm, managementListViewKey{}, true), owner)
 				stopWarm()
 				if err != nil || rebuilt {
 					log.Printf("management_paging_warm rebuilt=%t class=%s", rebuilt, databaseErrorClass(err))

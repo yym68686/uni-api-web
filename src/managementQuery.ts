@@ -139,13 +139,14 @@ export async function readManagementPage(
   signal: AbortSignal,
   owner?: string,
   trigger: ManagementReadTrigger = "unspecified",
+  includePrices = false,
 ): Promise<ManagementPage> {
   if (owner) {
     const bootstrap = globalThis.__uniManagementBootstrap;
     delete globalThis.__uniManagementBootstrap;
     if (bootstrap) {
       if (
-        !cursor &&
+        !cursor && !includePrices &&
         bootstrap.owner === owner &&
         bootstrap.filters === JSON.stringify(filters) &&
         Date.now() - bootstrap.startedAt < 10_000
@@ -172,6 +173,7 @@ export async function readManagementPage(
     cache: "no-cache",
     headers: {
       Accept: managementPageMediaType,
+      ...(includePrices ? {} : { "X-Console-Management-View": "list-v1" }),
       "X-Console-Current-Validation": "1",
       "X-Console-Read-Trigger": managementReadTrigger(trigger),
     },
@@ -248,6 +250,7 @@ export function useManagementPage(
   filters: SubFilters,
   cursor = "",
   navigation?: RefObject<ManagementNavigation | undefined>,
+  includePrices = false,
 ) {
   const client = useQueryClient();
   const triggers = useRef<ReturnType<typeof createManagementReadTriggers> | undefined>(undefined);
@@ -262,13 +265,13 @@ export function useManagementPage(
       window.removeEventListener("uni-console-control-write", refresh);
   }, [client, owner]);
   const query = useQuery({
-    queryKey: ["management-query", owner, filters, cursor],
+    queryKey: includePrices ? ["management-query", owner, filters, cursor, "prices"] : ["management-query", owner, filters, cursor],
     queryFn: async ({ signal }) => {
       const filter = JSON.stringify(filters);
       const position = navigation?.current;
       const matches = position?.owner === owner && position.filter === filter && position.cursor === cursor;
       if (matches && navigation) navigation.current = undefined;
-      const page = await readManagementPage(filters, cursor, signal, owner, triggers.current!.next(owner, filter, cursor));
+      const page = await readManagementPage(filters, cursor, signal, owner, triggers.current!.next(owner, filter, cursor), includePrices);
       const timing = managementReadTimings.get(page);
       if (timing && matches && position.started <= timing.started) {
         timing.navigation = { action: position.action, started: position.started };

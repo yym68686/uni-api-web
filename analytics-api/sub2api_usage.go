@@ -339,16 +339,31 @@ func (s *Service) subReadUsageByIDsUncachedFrom(ctx context.Context, db controlQ
 // Free account-API reads have a durable queue and separate leases. Slow log
 // ingestion cannot occupy either of the two paid probe workers per account.
 func (s *Service) subUsageLoop(ctx context.Context) {
+	// The control pool is also used by session checks and interactive reads.
+	// Limit in-flight account leases, not just goroutines doing HTTP, so a
+	// burst of slow receipt reads cannot queue work for every pool slot.
+	const usageWorkers = 2
+	slots := make(chan struct{}, usageWorkers)
 	var wg sync.WaitGroup
 	defer wg.Wait()
 	for ctx.Err() == nil {
 		for ctx.Err() == nil {
+			select {
+			case slots <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
 			id, base, token, err := s.subClaimUsage(ctx)
 			if err != nil {
+				<-slots
 				break
 			}
 			wg.Add(1)
-			go func() { defer wg.Done(); s.subReadUsage(ctx, id, base, token) }()
+			go func() {
+				defer wg.Done()
+				defer func() { <-slots }()
+				s.subReadUsage(ctx, id, base, token)
+			}()
 		}
 		if !waitStartup(ctx, 2*time.Second) {
 			return

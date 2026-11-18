@@ -29,10 +29,11 @@ type managementFreshProof struct {
 	Accounts        []subAccount
 }
 type managementComputedPage struct {
-	Proof managementFreshProof
-	Page  managementPageResponse
-	Bytes int
-	Plan  []byte
+	Proof    managementFreshProof
+	Page     managementPageResponse
+	Bytes    int
+	Plan     []byte
+	ListPlan *managementListPagingPlan
 }
 type managementComputedPages struct {
 	mu    sync.Mutex
@@ -321,8 +322,21 @@ func (s *Service) currentComputedManagementPageMode(ctx context.Context, owner, 
 }
 
 func (s *Service) currentManagementProof(ctx context.Context, owner string, expected managementFreshProof) (managementFreshProof, time.Time, bool, error) {
+	if managementListView(ctx) {
+		// Use the post-gateway RR snapshot to verify source identity and
+		// database versions in one checkout even when no hydration follows.
+		var snapshot managementCurrentSnapshot
+		proof, at, valid, err := s.currentManagementProofRetaining(ctx, owner, expected, &snapshot)
+		if snapshot.tx != nil {
+			_ = snapshot.tx.Rollback()
+		}
+		return proof, at, valid, err
+	}
 	return s.currentManagementProofRetaining(ctx, owner, expected, nil)
 }
+
+type managementProofMissesKey struct{}
+type managementProofMisses struct{ rejected []managementFreshProof }
 
 // Paging hydrates in the second, freshly verified RR snapshot rather than
 // closing it and opening a third snapshot to prove the SAME versions again.
@@ -332,7 +346,23 @@ type managementCurrentSnapshot struct {
 	directory *managementDirectoryScope
 }
 
-func (s *Service) currentManagementProofRetaining(ctx context.Context, owner string, expected managementFreshProof, retained *managementCurrentSnapshot) (managementFreshProof, time.Time, bool, error) {
+func (s *Service) currentManagementProofRetaining(ctx context.Context, owner string, expected managementFreshProof, retained *managementCurrentSnapshot) (_ managementFreshProof, _ time.Time, matched bool, resultErr error) {
+	// A cache, validator and directory can all point at the exact same rejected
+	// proof. Skip duplicate work within this request. No successful proof or
+	// failure is shared across requests or used to authorize a fresh result.
+	if misses, ok := ctx.Value(managementProofMissesKey{}).(*managementProofMisses); ok {
+		for _, previous := range misses.rejected {
+			if managementValidatorProofEqual(expected, previous) {
+				log.Printf("management_current_miss reason=already_rejected request_id=%s", consoleRequestID(ctx))
+				return managementFreshProof{}, time.Time{}, false, nil
+			}
+		}
+		defer func() {
+			if !matched && resultErr == nil && ctx.Err() == nil {
+				misses.rejected = append(misses.rejected, expected)
+			}
+		}()
+	}
 	// The current proof is cheap and monotonic. Sandwich one live gateway
 	// authorization/revision read between two PostgreSQL proofs instead of
 	// performing two remote round trips around one database snapshot. Equal

@@ -11,7 +11,7 @@ export async function readCompleteSubTarget(accountId: string, groupId: number, 
   const targets = response.summary
     ? response.summary.rows.flatMap(row => row.value.account_id === accountId && row.value.target ? [row.value.target] : [])
     : (response.legacy?.data || []).filter(row => row.id === accountId).flatMap(row => row.targets);
-  if (targets.length !== 1 || targets[0].group_id !== groupId || !Array.isArray(targets[0].models) || targets[0].receipt_model || targets[0].summary_model)
+  if (targets.length !== 1 || targets[0].group_id !== groupId || !Array.isArray(targets[0].models) || targets[0].receipt_model || targets[0].summary_model || targets[0].list_summary)
     throw Error("渠道完整模型数据不完整，请重新读取");
   return targets[0];
 }

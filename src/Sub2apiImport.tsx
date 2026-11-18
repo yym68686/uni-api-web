@@ -68,9 +68,10 @@ const siteLoginRequired = (message: string) =>
 // Never initialize route defaults from either partial representation.
 export function Sub2apiImport(props: Parameters<typeof Sub2apiImportForm>[0]) {
   const { account, target, close } = props;
+  const needsComplete = !!(target.receipt_model || target.summary_model || target.list_summary);
   const complete = useQuery({
     queryKey: ["sub-import-models", account.id, target.group_id],
-    enabled: !!(target.receipt_model || target.summary_model),
+    enabled: needsComplete,
     retry: false,
     // One complete snapshot per opening. A reconnect must not remount the
     // form and discard edits; gcTime=0 forces a fresh read on the next open.
@@ -79,7 +80,7 @@ export function Sub2apiImport(props: Parameters<typeof Sub2apiImportForm>[0]) {
     refetchOnWindowFocus: false,
     queryFn: ({ signal }) => readCompleteSubTarget(account.id, target.group_id, signal),
   });
-  if (!target.receipt_model && !target.summary_model) return <Sub2apiImportForm {...props}/>;
+  if (!needsComplete) return <Sub2apiImportForm {...props}/>;
   if (complete.data && !complete.isFetching && !complete.isError)
     return <Sub2apiImportForm {...props} target={complete.data}/>;
   return <Dialog.Root open onOpenChange={open => { if (!open) close(); }}><Dialog.Portal>

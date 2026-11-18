@@ -23,10 +23,23 @@ type managementPagingPlan struct {
 	Rows   []managementPagingRow
 }
 
+// Decode once at admission. Account headers are always refreshed; the target
+// index points into the immutable directory for direct lookups on site pages.
+// Configured aliases and duplicate row IDs keep the general hydration path.
+type managementListPagingPlan struct {
+	plan    managementPagingPlan
+	site    map[string]subTarget
+	headers []subAccount
+}
+
 func managementPagingKey(owner string, filters managementQueryFilters) string {
 	return managementComputedKey(owner, filters, "paging-directory")
 }
 func (s *Service) rememberManagementPagingPlan(owner string, filters managementQueryFilters, snapshot managementQuerySnapshot) bool {
+	return s.rememberManagementPagingPlanMode(owner, filters, snapshot, false)
+}
+
+func (s *Service) rememberManagementPagingPlanMode(owner string, filters managementQueryFilters, snapshot managementQuerySnapshot, list bool) bool {
 	if snapshot.Proof == nil || snapshot.Proof.Stamp == "" || !snapshot.View.ProjectedModels {
 		log.Printf("management_paging_store stored=false reason=unprepared projected=%t", snapshot.View.ProjectedModels)
 		return false
@@ -67,7 +80,33 @@ func (s *Service) rememberManagementPagingPlan(owner string, filters managementQ
 		log.Printf("management_paging_store stored=false reason=encoding_or_size bytes=%d", len(raw))
 		return false
 	}
-	s.rememberManagementEntry(managementPagingKey(owner, filters), snapshot.Proof, managementComputedPage{Plan: raw, Bytes: len(raw)})
+	entry := managementComputedPage{Plan: raw, Bytes: len(raw)}
+	if list {
+		var retained managementPagingPlan
+		if json.Unmarshal(raw, &retained) != nil {
+			return false
+		}
+		site := make(map[string]subTarget)
+		for _, account := range retained.Input.Accounts {
+			for _, target := range account.Targets {
+				site[qualityGroupID(account.ID, target.GroupID)] = target
+			}
+		}
+		for _, row := range snapshot.Rows {
+			if row.Configured != nil {
+				// Legacy aliases can collide with other row IDs. Rebuilding
+				// against the full directory preserves the last-wins case.
+				delete(site, row.ID)
+			}
+		}
+		entry = managementComputedPage{ListPlan: &managementListPagingPlan{
+			plan: retained, site: site, headers: managementAccountHeaders(retained.Input.Accounts),
+		}, Bytes: 2*len(raw) + 768*len(site)}
+		if entry.Bytes > 16<<20 {
+			return false
+		}
+	}
+	s.rememberManagementEntry(managementPagingKey(owner, filters), snapshot.Proof, entry)
 	log.Printf("management_paging_store stored=true bytes=%d rows=%d", len(raw), len(plan.Rows))
 	return true
 }
@@ -112,7 +151,7 @@ func (s *Service) warmManagementResetPlan(ctx context.Context, owner string) (bo
 }
 
 func (s *Service) retainAndWarmManagementResetDirectory(ctx context.Context, owner string, snapshot managementQuerySnapshot, warm func(context.Context, string, managementQueryFilters, string, bool) (managementPageResponse, bool, error)) (bool, error) {
-	if !s.rememberManagementPagingPlan(owner, managementResetFilters, snapshot) {
+	if !s.rememberManagementPagingPlanMode(owner, managementResetFilters, snapshot, managementListView(ctx)) {
 		return false, nil
 	}
 	// The directory has already passed the full fence. A timeout or an incoming
@@ -126,7 +165,7 @@ func (s *Service) retainAndWarmManagementResetDirectory(ctx context.Context, own
 func (s *Service) currentManagementPagingPage(ctx context.Context, owner string, filters managementQueryFilters, cursor string, rebase bool) (managementPageResponse, bool, error) {
 	ctx = managementTraceContext(ctx)
 	entry, exists := s.managementComputed.get(managementPagingKey(owner, filters))
-	if !exists || len(entry.Plan) == 0 {
+	if !exists || (len(entry.Plan) == 0 && entry.ListPlan == nil) {
 		log.Printf("management_paging_miss reason=absent request_id=%s", consoleRequestID(ctx))
 		return managementPageResponse{}, false, nil
 	}
@@ -140,7 +179,9 @@ func (s *Service) currentManagementPagingPage(ctx context.Context, owner string,
 	defer tx.Rollback()
 	var plan managementPagingPlan
 	decodeEnd := managementReadSpan(ctx, "paging_directory_decode")
-	if err = json.Unmarshal(entry.Plan, &plan); err != nil {
+	if entry.ListPlan != nil {
+		plan = entry.ListPlan.plan
+	} else if err = json.Unmarshal(entry.Plan, &plan); err != nil {
 		decodeEnd()
 		return managementPageResponse{}, false, err
 	}
@@ -221,22 +262,72 @@ func (s *Service) currentManagementPagingPage(ctx context.Context, owner string,
 	for _, a := range current.Accounts {
 		headers[a.ID] = a
 	}
-	for i, a := range view.Input.Accounts {
+	var responseHeaders []subAccount
+	var compactAccounts []subAccount
+	scoped := managementListView(ctx) && entry.ListPlan != nil
+	if scoped {
+		positions := map[string]int{}
+		for _, identity := range plan.Rows[page.Offset:end] {
+			target, found := entry.ListPlan.site[identity.ID]
+			fresh, owned := headers[identity.Account]
+			if !found || !owned || identity.Account == "" || len(identity.Members) > 0 {
+				scoped = false
+				break
+			}
+			i, exists := positions[fresh.ID]
+			if !exists {
+				i = len(compactAccounts)
+				positions[fresh.ID] = i
+				fresh.Targets = nil
+				compactAccounts = append(compactAccounts, fresh)
+			}
+			compactAccounts[i].Targets = append(compactAccounts[i].Targets, target)
+		}
+	}
+	// The retained input is immutable. Hydration replaces target values, so
+	// copy the slices on the general path, never the nested evidence.
+	actual := view.Input.Accounts
+	if entry.ListPlan != nil {
+		actual = entry.ListPlan.headers
+	}
+	responseHeaders = make([]subAccount, len(actual))
+	if !scoped {
+		view.Input.Accounts = append([]subAccount{}, view.Input.Accounts...)
+	}
+	for i, a := range actual {
 		fresh, ok := headers[a.ID]
 		if !ok {
 			return managementPageResponse{}, false, nil
 		}
-		fresh.Targets = a.Targets
-		view.Input.Accounts[i] = fresh
+		responseHeaders[i] = fresh
+		responseHeaders[i].Targets = []subTarget{}
+		if entry.ListPlan != nil {
+			responseHeaders[i].ActiveGroups, responseHeaders[i].CompletedGroups = a.ActiveGroups, a.CompletedGroups
+		}
+		if !scoped {
+			fresh.Targets = append([]subTarget{}, view.Input.Accounts[i].Targets...)
+			view.Input.Accounts[i] = fresh
+		}
+	}
+	contextView := view
+	if scoped {
+		view.Input.Accounts = compactAccounts
+		view.Input.Channels, view.Input.Imports, view.Input.Checks = nil, nil, nil
 	}
 	page.ReadAtMS = now.UnixMilli()
 	if err = s.hydrateManagementPageFrom(ctx, tx, owner, &view, &page, filters); err != nil {
 		return managementPageResponse{}, false, err
 	}
+	if managementListView(ctx) {
+		managementListRows(&page)
+	}
 	if err = ctx.Err(); err != nil {
 		return managementPageResponse{}, false, err
 	}
-	response := managementPageResponse{Owner: owner, managementQueryPage: page, Accounts: managementAccountHeaders(view.Input.Accounts), SelectionToken: encode(0), Context: managementContextForPage(view, page, filters.Model)}
+	if entry.ListPlan == nil {
+		responseHeaders = managementAccountHeaders(view.Input.Accounts)
+	}
+	response := managementPageResponse{Owner: owner, managementQueryPage: page, Accounts: responseHeaders, SelectionToken: encode(0), Context: managementContextForPage(contextView, page, filters.Model)}
 	// Do not hold a database connection while encoding the retained response.
 	_ = tx.Rollback()
 	// Build the canonical representation once; use the same complete columns for

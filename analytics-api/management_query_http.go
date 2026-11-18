@@ -123,6 +123,7 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 	defer s.managementReaders.Add(-1)
 	r = r.WithContext(managementTraceContext(r.Context()))
 	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Add("Vary", managementListViewHeader)
 	owner, err := s.controlUser(r)
 	if err != nil {
 		http.Error(w, "请重新登录", http.StatusUnauthorized)
@@ -177,6 +178,11 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
+	if selection == "" && r.Header.Get("Accept") == managementPageV3MediaType &&
+		r.Header.Get(managementListViewHeader) == managementListViewV1 && !values.Has("observe_receipt_plan") && !values.Has("observe_model_read") {
+		ctx = context.WithValue(ctx, managementListViewKey{}, true)
+		ctx = context.WithValue(ctx, managementProofMissesKey{}, &managementProofMisses{})
+	}
 	if values.Get("receipt_view") == "selected" {
 		ctx = context.WithValue(ctx, managementSelectedReceiptsKey{}, true)
 	}
@@ -231,6 +237,13 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	snapshot, err := s.readManagementQuerySnapshotMode(ctx, owner, filters, token, selection != "", rebase)
+	if managementListView(ctx) && rebase && errors.Is(err, errManagementSourceRevision) && ctx.Err() == nil {
+		// Only an explicitly current, read-only page may reconcile a racing
+		// source once, from scratch and within the original deadline. Never
+		// retry a selection or convert an authorization/transport error.
+		log.Printf("management_page_rebase reason=source_revision request_id=%s", consoleRequestID(ctx))
+		snapshot, err = s.readManagementQuerySnapshotMode(ctx, owner, filters, token, false, true)
+	}
 	readElapsed := time.Since(start)
 	view, page, rows, evidence := snapshot.View, snapshot.Page, snapshot.Rows, snapshot.Evidence
 	if err == nil {
@@ -243,7 +256,9 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 			class = databaseErrorClass(err)
 		}
 		status, message := http.StatusServiceUnavailable, "渠道数据读取失败，请重新读取"
-		if errors.Is(err, errManagementRevision) || errors.Is(err, errManagementSourceRevision) {
+		if errors.Is(err, errManagementSourceRevision) {
+			status, message, class = http.StatusConflict, "渠道配置或检测结果已变化，请重新读取", "management_source_revision_changed"
+		} else if errors.Is(err, errManagementRevision) {
 			status, message, class = http.StatusConflict, "渠道配置或检测结果已变化，请重新读取", "management_revision_changed"
 		} else if errors.Is(err, errManagementCursor) {
 			status, message, class = http.StatusBadRequest, "分页凭据已失效，请刷新渠道", "management_cursor_invalid"
@@ -260,7 +275,7 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 		response := managementPageResponse{Owner: owner, managementQueryPage: page, SelectionToken: selectionToken, Accounts: headers, Context: managementContextForPage(view, page, filters.Model)}
 		err = s.writeAndRememberManagementPage(w, r, response, computedKey, snapshot.Proof)
 		if err == nil {
-			s.rememberManagementPagingPlan(owner, filters, snapshot)
+			s.rememberManagementPagingPlanMode(owner, filters, snapshot, managementListView(ctx))
 		}
 	}
 	if err != nil && class == "none" {

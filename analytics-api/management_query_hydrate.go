@@ -78,7 +78,7 @@ func (s *Service) hydrateManagementPageFrom(ctx context.Context, db controlQuery
 		// For every full-summary page (not just page 1), read only its
 		// already-resolved groups. Unchanged exact versions need no receipt
 		// lookups for those models. Account metadata and queues remain live.
-		if !managementSelectedReceipts(ctx) && !managementSelectedModels(ctx) && len(wanted) <= 128 &&
+		if !managementListView(ctx) && !managementSelectedReceipts(ctx) && !managementSelectedModels(ctx) && len(wanted) <= 128 &&
 			ctx.Value(managementReceiptPlanKey{}) == nil && ctx.Value(managementModelReadKey{}) == nil {
 			cached, err := readManagementDisplayGroups(ctx, db, owner, wanted)
 			if err != nil {
@@ -140,13 +140,15 @@ func (s *Service) hydrateManagementPageFrom(ctx context.Context, db controlQuery
 		if err := s.subAttachQueuedChecksFrom(ctx, db, owner, subset); err != nil {
 			return err
 		}
-		stages.next("hydrate_receipts")
-		usageAccounts := subset
-		if managementSelectedReceipts(ctx) && filters.Model != "" {
-			usageAccounts = managementPageUsageAccounts(subset, filters.Model, fullGroups)
-		}
-		if err := s.attachManagementPageSummaryUsageFrom(ctx, db, owner, usageAccounts, view.receiptReuse); err != nil {
-			return err
+		if !managementListView(ctx) {
+			stages.next("hydrate_receipts")
+			usageAccounts := subset
+			if managementSelectedReceipts(ctx) && filters.Model != "" {
+				usageAccounts = managementPageUsageAccounts(subset, filters.Model, fullGroups)
+			}
+			if err := s.attachManagementPageSummaryUsageFrom(ctx, db, owner, usageAccounts, view.receiptReuse); err != nil {
+				return err
+			}
 		}
 		stages.next("hydrate_normalize")
 		if err := normalizeManagementAccounts(subset); err != nil {

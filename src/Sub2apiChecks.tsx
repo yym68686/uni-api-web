@@ -140,6 +140,7 @@ export interface Result {
 export interface SubTarget {
   rate_coefficient?: number;
   summary_model?: string;
+  list_summary?: boolean;
   receipt_model?: string;
   observed_rates?: Record<string, ObservedRate>;
   details_omitted?: boolean;
@@ -371,6 +372,31 @@ function DetailRow({
   );
 }
 
+async function readChannelCheckDetails(account: SubAccount, target: SubTarget, configured: ManagedChannel | undefined, model: string, signal: AbortSignal) {
+  if (configured) {
+    const members = channelMembers(configured);
+    const paths = [...new Set(members.flatMap(member => boundGroups(member).map(group =>
+      `/v1/sub2api/accounts/${encodeURIComponent(group.account_id)}/groups/${group.group_id}/details?model=${encodeURIComponent(member.model_mappings?.[model] || model)}`)))];
+    const [bound, native] = await Promise.all([
+      Promise.all(paths.map(path => controlRequest<{data:SubAccount[]}>(path, {signal}))),
+      Promise.all(members.map(m => controlRequest<{data: import("./channelManagement").ConfiguredCheck[]}>(`/v1/channel-management/checks?source_id=${encodeURIComponent(m.source_id)}&provider=${encodeURIComponent(m.provider)}&model=${encodeURIComponent(model)}`, {signal}))),
+    ]);
+    const accounts = new Map<string, SubAccount>();
+    for (const item of bound.flatMap(r=>r.data)) {
+      const previous = accounts.get(item.id);
+      accounts.set(item.id, {...item, targets:[...(previous?.targets || []), ...item.targets]});
+    }
+    const full = managementRows([...accounts.values()], [configured], [], model, "", native.flatMap(n=>n.data)).find(row=>row.configured);
+    if (!full) throw Error("检测详情暂不可用");
+    return full;
+  }
+  const data = await controlRequest<{data:SubAccount[]}>(`/v1/sub2api/accounts/${encodeURIComponent(account.id)}/groups/${target.group_id}/details?model=${encodeURIComponent(model)}`, {signal});
+  const fullTarget = data.data.find(a=>a.id===account.id)?.targets.find(t=>t.group_id===target.group_id);
+  if (!fullTarget) throw Error("检测详情暂不可用");
+  const checks = modelChecks(fullTarget);
+  return {target:fullTarget,checks,selected:checks.find(c=>c.model===model)};
+}
+
 function CheckDetails({
   account,
   target,
@@ -395,30 +421,7 @@ function CheckDetails({
   const details = useQuery({
     queryKey: ["sub-check-detail", account.id, target.group_id, configured?.source_id, configured?.provider, model, selected?.result?.checked_at],
     enabled: open && !!needsDetails,
-    queryFn: async ({ signal }) => {
-      if (configured) {
-        const members = channelMembers(configured);
-        const paths = [...new Set(members.flatMap(member => boundGroups(member).map(group =>
-          `/v1/sub2api/accounts/${encodeURIComponent(group.account_id)}/groups/${group.group_id}/details?model=${encodeURIComponent(member.model_mappings?.[model] || model)}`)))];
-        const [bound, native] = await Promise.all([
-          Promise.all(paths.map(path => controlRequest<{data:SubAccount[]}>(path, {signal}))),
-          Promise.all(members.map(m => controlRequest<{data: import("./channelManagement").ConfiguredCheck[]}>(`/v1/channel-management/checks?source_id=${encodeURIComponent(m.source_id)}&provider=${encodeURIComponent(m.provider)}&model=${encodeURIComponent(model)}`, {signal}))),
-        ]);
-        const accounts = new Map<string, SubAccount>();
-        for (const item of bound.flatMap(r=>r.data)) {
-          const previous = accounts.get(item.id);
-          accounts.set(item.id, {...item, targets:[...(previous?.targets || []), ...item.targets]});
-        }
-        const full = managementRows([...accounts.values()], [configured], [], model, "", native.flatMap(n=>n.data)).find(row=>row.configured);
-        if (!full) throw Error("检测详情暂不可用");
-        return full;
-      }
-      const data = await controlRequest<{data:SubAccount[]}>(`/v1/sub2api/accounts/${encodeURIComponent(account.id)}/groups/${target.group_id}/details?model=${encodeURIComponent(model)}`, {signal});
-      const fullTarget = data.data[0]?.targets[0];
-      if (!fullTarget) throw Error("检测详情暂不可用");
-      const fullChecks = modelChecks(fullTarget);
-      return {target:fullTarget,checks:fullChecks,selected:fullChecks.find(c=>c.model===model)};
-    },
+    queryFn: ({ signal }) => readChannelCheckDetails(account, target, configured, model, signal),
     retry: false,
     staleTime: 30_000,
   });
@@ -632,21 +635,33 @@ function ManagementChannelDrawer({
 }) {
   const { account, configured } = row;
   const configuredMembers = configured ? channelMembers(configured) : [];
+  const loadGroup = !configured && !!(row.target.summary_model || row.target.list_summary);
   const complete = useQuery({
     queryKey: ["sub-management-models", account.id, row.target.group_id],
-    enabled: !!row.target.summary_model,
+    enabled: loadGroup,
     retry: false,
     staleTime: Infinity,
     gcTime: 0,
     refetchOnWindowFocus: false,
     queryFn: ({ signal }) => readCompleteSubTarget(account.id, row.target.group_id, signal),
   });
-  const target = complete.data || row.target;
+  const target = complete.data ? { ...complete.data, observed_rates: complete.data.observed_rates ?? row.target.observed_rates } : row.target;
   const checks = complete.data ? modelChecks(target) : row.checks;
   const selected = complete.data ? checks.find(check => check.model === row.selected?.model) : row.selected;
-  const modelsPending = !!row.target.summary_model && !complete.data;
+  const modelsPending = loadGroup && !complete.data;
   const { supportedModels } = useModelFingerprints();
   const current = selected || checks[0];
+  const readConfigured = !!(configured && row.target.list_summary && current?.model);
+  const configuredDetail = useQuery({
+    queryKey: ["sub-drawer-check", row.id, configured?.members, current?.model, current?.result?.checked_at],
+    enabled: readConfigured,
+    retry: false,
+    staleTime: Infinity,
+    gcTime: 0,
+    refetchOnWindowFocus: false,
+    queryFn: ({ signal }) => readChannelCheckDetails(account, row.target, configured, current!.model, signal),
+  });
+  const latest = readConfigured ? configuredDetail.data?.selected : modelsPending ? undefined : current;
   const quality = groupQualityResult(target);
   const modelCount = checks.length;
   const availableCount = checks.filter(
@@ -785,15 +800,17 @@ function ManagementChannelDrawer({
                 </div>
                 <div>
                   <dt>单价核验</dt>
-                  <dd><PriceStatus check={current} prices={prices} /></dd>
+                  <dd>{latest ? <PriceStatus check={latest} prices={prices} /> :
+                    configuredDetail.isError ? <button className="button small" onClick={() => void configuredDetail.refetch()}>重试读取单价</button> :
+                    complete.isError ? "未能读取" : configuredDetail.isSuccess ? "无可确认记录" : "读取中…"}</dd>
                 </div>
                 <div>
                   <dt>最近检测</dt>
                   <dd>{current.result ? dateTime(current.result.checked_at) : "未检测"}</dd>
                 </div>
               </dl>
-              {(current.result?.availability.message || current.message) && (
-                <p className="sub-management-message">{current.result?.availability.message || current.message}</p>
+              {(latest?.result?.availability.message || latest?.message) && (
+                <p className="sub-management-message">{latest.result?.availability.message || latest.message}</p>
               )}
             </section>
           )}
@@ -822,7 +839,10 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   const cursor=cursorState.filter===filterKey?cursorState.cursor:"";
   useEffect(()=>onPositionChange?.({owner:user,filter:filterKey,cursor}),[user,filterKey,cursor,onPositionChange]);
   const navigation = useRef<ManagementNavigation | undefined>(undefined);
-  const pageQuery=useManagementPage(user,filters,cursor,navigation);
+  const [managementPreset, setManagementPreset] = useState<keyof typeof managementPresets>("operations");
+  const [customColumns, setCustomColumns] = useTableColumns("uni-console:management-columns:v1", managementColumnChoices);
+  const activeColumns: readonly ManagementColumn[] = customColumns ?? managementPresets[managementPreset];
+  const pageQuery=useManagementPage(user,filters,cursor,navigation,activeColumns.includes("price"));
   const navigatePage = (action: "previous" | "next", token?: string) => {
     if (!token) return;
     navigation.current = { owner: user, filter: JSON.stringify(filters), cursor: token, action, started: performance.now() };
@@ -898,8 +918,6 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   const filterModels=[...new Set([...(metadata?.models || SUB_MODELS),...(model?[model]:[])])];
   const [configuredDialog, setConfiguredDialog] = useState<ManagedChannel | null>(null);
   const [managementDetail, setManagementDetail] = useState<ManagementRow | null>(null);
-  const [managementPreset, setManagementPreset] = useState<keyof typeof managementPresets>("operations");
-  const [customColumns, setCustomColumns] = useTableColumns("uni-console:management-columns:v1", managementColumnChoices);
   const [filterTab, setFilterTab] = useState("conditions");
   const managementColumns = customColumns ?? managementPresets[managementPreset].filter(id => id !== "model" || !!tableModel);
   const columnView = customColumns ? "custom" : managementPreset;
@@ -1841,7 +1859,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                               <Tip text={`已完成 ${liveGroup.completed}/${liveGroup.total} · 刷新渠道查看匹配结果`}><span className="muted">待更新</span></Tip>
                               : <GroupModelMatch checks={overviewChecks} scope={scopeNote} />
                           );
-                              case "price": return selected ? <PriceStatus check={selected} prices={prices.data?.data} /> : <GroupPriceStatus checks={checks} prices={prices.data?.data} />;
+                              case "price": return t.list_summary ? <span className="muted">读取中…</span> : selected ? <PriceStatus check={selected} prices={prices.data?.data} /> : <GroupPriceStatus checks={checks} prices={prices.data?.data} />;
                               case "fingerprint": return <FingerprintCell entries={displayedPage?.context.fingerprints[managementRow.id] || []} supportedModels={displayedPage?.context.fingerprint_models}/>;
                               case "quality": {
                                 const result = groupQualityResult(t);

@@ -14,6 +14,18 @@ import {
 import type { ManagementPage, ManagementSelection, ManagementOptimizationPreview } from "./managementQuery";
 import { controlRequest } from "./api";
 
+it("negotiates the lightweight view only for pages without live unit prices", async () => {
+  const received: (string | null)[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (_input: string, init?: RequestInit) => {
+    received.push(new Headers(init?.headers).get("X-Console-Management-View"));
+    return new Response("unexpected", { status: 503 });
+  }));
+  const signal = new AbortController().signal;
+  await expect(readManagementPage(subFilterDefaults, "", signal)).rejects.toThrow();
+  await expect(readManagementPage(subFilterDefaults, "", signal, undefined, "mount", true)).rejects.toThrow();
+  expect(received).toEqual(["list-v1", null]);
+});
+
 afterEach(() => {
   cleanup();
   delete globalThis.__uniManagementBootstrap;
