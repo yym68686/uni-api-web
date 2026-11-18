@@ -242,7 +242,7 @@ export function ChannelMetricHeaders({
 }) {
   function header(id: ObservationColumn) {
     switch (id) {
-      case "status": return <th>路由状态</th>;
+      case "status": return <th className="observation-status">路由状态</th>;
       case "inflight": return <th className="column-run observation-inflight">
         <Tip text="当前正在请求此渠道的全部 API key 的尝试数，不受历史时间窗口或 API key 用量筛选影响。">
           {keySelected ? "渠道总并发" : "当前并发"} <CircleHelp size={12} />

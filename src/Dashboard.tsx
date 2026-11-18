@@ -24,6 +24,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import {
   Activity,
   ArrowRight,
+  Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -32,6 +33,7 @@ import {
   Clock3,
   Filter,
   Gauge,
+  GripVertical,
   KeyRound,
   Layers3,
   Radio,
@@ -62,8 +64,10 @@ import {
 } from "./ChannelChecks";
 import {
   useChannelControls,
-  ChannelControlDrawer,
+  ChannelControlReset,
+  ChannelRowActions,
 } from "./ChannelControls";
+import { useChannelRouteDrag } from "./ChannelRouteDrag";
 import { ResponseLatency } from "./LatencyBadge";
 import { useSubImports, boundGroups } from "./sub2apiImports";
 import type { SubImportsQuery } from "./sub2apiImports";
@@ -757,10 +761,10 @@ export default function Dashboard({
   const [page, setPage] = useState(0),
     [editingRoutes, setEditingRoutes] = useState<"channels" | "routing" | null>(null);
   const [filterTab, setFilterTab] = useState("conditions");
-  const routeOpener = useRef<HTMLElement | null>(null);
   const adjustingChannels = channelView && editingRoutes === view;
   const canEditRoutes = channelView && !!baseConnection.account;
-  const previewingSort = channelView && sortPreview?.scope === channelScope;
+  const previewingSort = channelView && !adjustingChannels && sortPreview?.scope === channelScope;
+  const routeHelpId = useId();
   useEffect(() => setSortPreview(null), [channelScope, view]);
   useEffect(() => setFilterTab("conditions"), [view]);
   const sortRules = channelSort.rules;
@@ -789,7 +793,7 @@ export default function Dashboard({
   const [columnView, setColumnView] = useState<ChannelMetricLayout>("run");
   const [customColumns, setCustomColumns] = useTableColumns("uni-console:channel-columns:v1", observationColumns);
   const compactViewport = useCompactWorkbench();
-  const compactObservation = compactViewport && !customColumns && columnView === "run" && !routeView;
+  const compactObservation = compactViewport && !customColumns && columnView === "run";
   const columnChoices = baseConnection.account ? observationColumns : observationColumns.filter(({ id }) => id !== "quality" && id !== "fingerprint");
   const visibleColumns = customColumns ? customColumns.filter(id => columnChoices.some(choice => choice.id === id)) : observationPreset(columnView, compactObservation, !!baseConnection.account);
   const observationLayout = customColumns ? "custom" : columnView;
@@ -799,7 +803,7 @@ export default function Dashboard({
   const { observeHeading, level: toolsLevel } = useWorkbenchTools();
   const inlineModel = !routeView && toolsLevel >= 1;
   const inlineKey = !routeView && toolsLevel >= 2;
-  const inlineRoute = view === "channels" && canEditRoutes && toolsLevel >= 3;
+  const inlineRoute = canEditRoutes && toolsLevel >= (routeView ? 1 : 3);
   const [balanceView, setBalanceView] = useState("channels");
   const [balanceDetails, setBalanceDetails] = useState(false);
   const [locatedChannel, setLocatedChannel] = useState<Channel | null>(null);
@@ -1012,7 +1016,8 @@ export default function Dashboard({
     model,
     enabled: !!baseConnection.account && (routeView || adjustingChannels),
   });
-  const tableRows = previewingSort ? previewChannelOrder(rows, sortPreview.rows)
+  const tableRows = adjustingChannels ? controls.arrange(rows)
+    : previewingSort ? previewChannelOrder(rows, sortPreview.rows)
     : routeView ? controls.arrange(rows, true) : rows;
   const rowRanks = useMemo(
     () => new Map(tableRows.map((row, i) => [rowId(row), i + 1])),
@@ -1260,6 +1265,9 @@ export default function Dashboard({
     );
   const detail = focusedBalance || null;
   const busy = metrics.isFetching || catalog.isFetching || keys.isFetching;
+  const routePage = new Map(adjustingChannels ? pageRows.map(row => [rowId(row), row]) : []);
+  const routeDrag = useChannelRouteDrag(JSON.stringify([adjustingChannels, auditScope, currentPage, controls.pending]), routePage,
+    (from, to, after) => controls.moveRelative(from, to, after, pageRows));
   function setFilter(name: keyof Filters, value: string) {
     setPage(0);
     setPageFilters((current) => ({
@@ -1442,16 +1450,44 @@ export default function Dashboard({
     view === "balances" && thresholdUnknown > 0 && `${thresholdUnknown} 个渠道未能判定阈值；仅显示已确认结果。`,
     channelView && checkingChannels && (observedDetection.notice?.text || observedDetection.batchIssue),
   ];
-  const routeButton = <button className="button small" type="button"
-    aria-haspopup="dialog" aria-expanded={adjustingChannels} aria-controls={adjustingChannels ? "channel-route-editor" : undefined}
+  const routeButton = <button className="button small route-edit-trigger" type="button"
+    aria-pressed={adjustingChannels} disabled={controls.pending || routingSort.busy}
     onClick={event => {
       if (!canEditRoutes || (view !== "channels" && view !== "routing")) return;
-      const disclosure = event.currentTarget.closest("details");
-      routeOpener.current = disclosure?.querySelector("summary") || event.currentTarget;
+      const disclosure = event.currentTarget.closest<HTMLDetailsElement>(".workbench-disclosure");
       if (disclosure) disclosure.open = false;
-      if (adjustingChannels) document.getElementById("channel-route-editor")?.querySelector("input")?.focus();
-      else setEditingRoutes(view);
+      setEditingRoutes(view);
+      requestAnimationFrame(() => mainRef.current?.querySelector<HTMLElement>(".route-editor-actions button:not(:disabled)")?.focus({preventScroll: true}));
     }}><SlidersHorizontal size={14} aria-hidden="true" />调整顺序</button>;
+  const finishRouteEdit = () => {
+    controls.discardAll();
+    setEditingRoutes(null);
+    requestAnimationFrame(() => mainRef.current?.querySelector<HTMLElement>(
+      inlineRoute ? ".workbench-tools .route-edit-trigger" : ".channel-filter-disclosure > summary",
+    )?.focus({preventScroll:true}));
+  };
+  const hasRouteDrafts = controls.drafts.size > 0;
+  const routeActions = <div className="route-editor-actions" role="group" aria-label="请求顺序编辑">
+    <button type="button" className={`button small ${hasRouteDrafts ? "primary" : ""}`}
+      aria-label={hasRouteDrafts ? "应用全部临时修改" : "完成调整"}
+      title={hasRouteDrafts ? "应用所有范围的顺序和停用修改" : "退出顺序编辑"}
+      disabled={controls.pending} aria-busy={controls.pending || undefined}
+      onClick={() => hasRouteDrafts ? void controls.applyAll() : finishRouteEdit()}>
+      {controls.pending ? <Spinner small /> : <Check size={13} aria-hidden="true" />}{hasRouteDrafts ? "应用" : "完成"}
+    </button>
+    <button type="button" className="button small" aria-label="取消调整" title="退出并放弃未应用的修改"
+      disabled={controls.pending} onClick={finishRouteEdit}><X size={14} aria-hidden="true" /></button>
+  </div>;
+  const timeFilter = <label className="select-field time-select">
+    <Clock3 size={15} aria-hidden="true" />
+    <select aria-label="时间范围筛选" value={window} onChange={event => setFilter("window", event.target.value)}>
+      {ranges.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+    </select>
+    <ChevronDown size={13} aria-hidden="true" />
+  </label>;
+  const routeIssues = adjustingChannels && !controls.pending && controls.draftIssues.length ?
+    `未应用的修改已保留：${controls.draftIssues.map(issue =>
+      `${sourceList.find(source => source.id === issue.source)?.name || issue.source}：${issue.message}`).join("；")}` : "";
   const apiKeyFilter = <div className="select-field key-select">
     <KeyRound size={15} aria-hidden="true" />
     <select aria-label="API key 筛选" value={keyId} onChange={e => setFilter("keyId", e.target.value)}>
@@ -1624,21 +1660,15 @@ export default function Dashboard({
               <div className="data-heading workbench-heading" ref={observeHeading}>
                 <div className="data-title">
                   <h2>{routeView ? "路由顺序" : channelView ? "渠道观测" : "余额管理"}</h2>
-                  <WorkbenchNotice urgent={!!error && rows.length > 0} messages={observationMessages} />
+                  <WorkbenchNotice urgent={!!routeIssues || !!error && rows.length > 0} messages={[...observationMessages, routeIssues]} />
                   {channelView && <span className="sr-only" aria-label="排序">{previewingSort ? "排序预览 · 未应用到路由" : keyId ? "按当前 API key 的请求顺序" : sortRules.length ? "按自定义规则" : "按渠道配置顺序"}</span>}
                 </div>
                 <div className="workbench-tools">
                   {routeView && <button type="button" className="button small ghost" onClick={() => selectView("sub2api")}><ChevronLeft size={14} />渠道管理</button>}
-                  <label className="select-field time-select">
-                    <Clock3 size={15} aria-hidden="true" />
-                    <select aria-label="时间范围筛选" value={window} onChange={event => setFilter("window", event.target.value)}>
-                      {ranges.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                    </select>
-                    <ChevronDown size={13} aria-hidden="true" />
-                  </label>
+                  <div className="workbench-time-slot">{adjustingChannels && !inlineRoute ? routeActions : timeFilter}</div>
                   {inlineModel && modelFilter}
                   {inlineKey && apiKeyFilter}
-                  {inlineRoute && routeButton}
+                  {inlineRoute && <div className="route-edit-slot">{adjustingChannels ? routeActions : routeButton}</div>}
                   {view === "balances" && <WorkbenchDisclosure label="检查余额" icon={<Wallet size={14} aria-hidden="true" />}>
                     <p className="workbench-help">当前范围：{count(balanceCatalog.length)} 个渠道</p>
                     <button type="button" className="button small" disabled={!activeAudit && (!balanceCatalog.length || busy || search !== deferredSearch)} onClick={event => {
@@ -1674,6 +1704,7 @@ export default function Dashboard({
                   </div>
                 </div>
                   <div className="channel-filter-grid">
+                {adjustingChannels && !inlineRoute && <div className="channel-filter-field"><span>时间</span>{timeFilter}</div>}
                 {sourceList.length > 0 && (
                   <label className="channel-filter-field">来源<span className="select-field">
                     <select
@@ -1837,7 +1868,7 @@ export default function Dashboard({
                     labelRows={rows}
                     routing={routeView?routingSort:undefined}
                     keyId={keyId}
-                    routeApplyDisabled={busy||!!error||controls.pending||controls.drafts.size>0||!!(balanceFilter&&pendingBalances)||search!==deferredSearch}
+                    routeApplyDisabled={busy||!!error||adjustingChannels||controls.pending||controls.drafts.size>0||!!(balanceFilter&&pendingBalances)||search!==deferredSearch}
                     scopeLabel={[
                       model || "全部模型",
                       sourceList.find(s=>s.id===selectedSourceId)?.name || "全部来源",
@@ -1875,7 +1906,10 @@ export default function Dashboard({
                   <div className="channel-filter-toolbox">
                   {routeView && routingSort.pending && <button className="button small" title="恢复上一次应用前的路由顺序" disabled={routingSort.busy} onClick={()=>void routingSort.undo()}>撤回排序</button>}
                   {routeView && routingSort.error && <WorkbenchNotice label="排序操作失败" messages={[routingSort.error]} />}
-                  {canEditRoutes && !inlineRoute && routeButton}
+                  {canEditRoutes && !inlineRoute && !adjustingChannels && routeButton}
+                  {adjustingChannels && <ChannelControlReset controls={controls} sources={sourceList} keys={keys.data?.data || []} />}
+                  {adjustingChannels && hasRouteDrafts && <button type="button" className="button small"
+                    aria-label="放弃全部临时修改" disabled={controls.pending} onClick={controls.discardAll}>放弃草稿</button>}
                   {channelView && (
                     <ObservedDetectionActions
                       checks={checks}
@@ -1922,12 +1956,7 @@ export default function Dashboard({
                   </WorkbenchDisclosure>
                 </div>
               </div>
-              {adjustingChannels && <ChannelControlDrawer
-                controls={controls} sources={sourceList} keys={keys.data?.data || []} rows={filtered}
-                scopeLabel={[sourceList.find(source => source.id === selectedSourceId)?.name || "全部来源",
-                  model || "全部模型", keyId ? `Key ${keys.data?.data.find(key => key.key_id === keyId)?.position || "（已选）"}` : "全部 API key"].join(" · ")}
-                opener={routeOpener} onClose={() => setEditingRoutes(null)}
-              />}
+              {adjustingChannels && <span id={routeHelpId} className="sr-only">在当前页的同一来源内拖动渠道。键盘可用上下方向键移动，Home 置顶。同一渠道的所有模型一起移动。</span>}
               {view === "balances" && <WorkbenchTabs label="余额视图" value={balanceView} onChange={setBalanceView} tabs={[["wallets","站点钱包"],["channels","渠道额度"]]} />}
               {view === "balances" && balanceView === "wallets" ? <section className="wallet-summary" aria-label="已核验站点钱包">
                 {groupedWallets.size === 0 && <p>当前范围暂无已核验钱包</p>}
@@ -1990,15 +2019,31 @@ export default function Dashboard({
                     <tbody>
                       {pageRows.map((row) => {
                         const balance = balanceMap.get(providerId(row));
+                        const control = adjustingChannels ? controls.info(row) : null;
+                        const routeDisabled = !control?.ready || control.pending || control.stale;
+                        const routeLabel = `${row.source_name || row.source_id || ""} ${channelName(row)} ${row.model}`.trim();
                         return (
-                          <tr key={rowId(row)} data-route-alert={!row.eligible || undefined} data-source-name={row.source_name}>
+                          <tr key={rowId(row)} data-route-row={!routeDisabled ? rowId(row) : undefined}
+                            data-route-alert={!row.eligible || undefined} data-source-name={row.source_name}>
                             {routeView && <td className="rank mono">
                               {String(rowRanks.get(rowId(row))).padStart(
                                 2,
                                 "0",
                               )}
                             </td>}
-                            <td className="channel-identity">
+                            <td className="channel-identity"><div className="channel-row-identity">
+                              {control && <button type="button" className="icon-button route-grip" aria-label={`移动 ${routeLabel}`}
+                                aria-describedby={routeHelpId} aria-keyshortcuts="ArrowUp ArrowDown Home" disabled={routeDisabled}
+                                title={control.error || (control.stale ? "规则已变化，请先放弃草稿" : !control.ready ? "暂不可调整" : "拖动排序（也可用上下方向键）")}
+                                {...routeDrag(row)} onKeyDown={event => {
+                                  const direction = event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : 0;
+                                  if (!direction && event.key !== "Home") return;
+                                  event.preventDefault();
+                                  const handle = event.currentTarget;
+                                  if (direction) controls.move(row, direction, pageRows);
+                                  else controls.moveToTop(row);
+                                  requestAnimationFrame(() => handle.focus({preventScroll:true}));
+                                }}><GripVertical size={16} aria-hidden="true" /></button>}
                               <button
                                 className="channel-link"
                                 aria-label={`查看 ${channelName(row)} ${row.model} 详情`}
@@ -2009,7 +2054,8 @@ export default function Dashboard({
                                   {(!model || row.source_name && !selectedSourceId) && <small>{!model && row.model}{!model && row.source_name && !selectedSourceId && " · "}{!selectedSourceId && row.source_name && <span className="source-label">{row.source_name}</span>}</small>}
                                 </span>
                               </button>
-                            </td>
+                              {control && <ChannelRowActions row={row} controls={controls} state={control} disabled={routeDisabled} />}
+                            </div></td>
                             {checkingChannels && (observedDetection.project === "quality"
                               ? <ChannelCheckAction row={row} checks={checks} />
                               : <ObservedDetectionRow row={row} detection={observedDetection} />)}

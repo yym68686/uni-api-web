@@ -295,32 +295,38 @@
 .channel-filter-checkbox input {accent-color:var(--accent-fill)}
 .channel-filter-disclosure .workbench-key-rates {padding-top:10px;margin-top:12px;border-top:1px solid var(--line)}
 .channel-filter-disclosure .workbench-key-rates dt,.channel-filter-disclosure .workbench-key-rates dd {min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.channel-route-drawer {
-  position:fixed;inset:auto 12px 12px auto;z-index:30;width:min(31rem,calc(100vw - 24px));height:min(68dvh,42rem);
-  display:grid;grid-template-rows:auto auto minmax(0,1fr) auto;background:var(--surface);color:var(--ink);
-  border:1px solid var(--line);border-radius:9px;box-shadow:var(--shadow);
+.workbench-time-slot,.route-edit-slot {
+  display:grid;align-items:center;flex:none;width:112px;height:35px;
 }
-.channel-route-heading {display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px 8px}
-.channel-route-heading > div {min-width:0}
-.channel-route-heading h2 {margin:0;font-size:16px}
-.channel-route-heading p {margin:3px 0 0;color:var(--muted);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.channel-route-search {margin:0 14px 8px;min-width:0}
-.channel-route-list {overflow:auto;overscroll-behavior:contain;border-block-start:1px solid var(--line)}
-.channel-route-list > p {margin:16px 14px;font-size:12px}
-.channel-route-list h3 {margin:0;padding:7px 14px;background:var(--subtle);font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.channel-route-list ol {list-style:none;margin:0;padding:0}
-.channel-route-list li {display:grid;grid-template-columns:24px minmax(0,1fr) auto;align-items:center;gap:7px;min-height:42px;padding:3px 10px 3px 14px;border-bottom:1px solid var(--line);font-size:12px}
-.channel-route-list li > strong {white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.channel-route-rank {font-size:11px;color:var(--muted)}
-.channel-route-footer {background:var(--surface);border-radius:0 0 9px 9px;border-top:1px solid var(--line);padding:9px 12px}
-.channel-route-footer .control-toolbar-actions {gap:7px}
-.channel-route-footer .control-draft-error {display:block;max-height:54px;overflow:auto;margin-bottom:6px}
-.channel-route-footer .control-reset-menu {top:auto;bottom:calc(100% + 6px)}
-.channel-route-drawer .control-row-actions .icon-button {width:29px;height:29px}
+.workbench-time-slot > .time-select {width:100%;max-width:none;min-width:0;margin:0}
+.route-edit-slot > .route-edit-trigger {width:100%;height:100%}
+.route-editor-actions {display:grid;grid-template-columns:minmax(0,1fr) 34px;gap:4px;height:100%}
+.route-editor-actions > .button {height:100%;min-width:0;padding-inline:4px;gap:4px}
+.workspace .observation-table .channel-row-identity {display:flex;align-items:center;gap:4px;min-width:0}
+.workspace .observation-table .channel-row-identity .channel-link {flex:1;text-align:left}
+.route-row-actions {display:flex;align-items:center;gap:2px}
+.observation-table :is(.route-grip,.route-pin,.route-disable) {
+  display:inline-grid;place-items:center;flex:none;width:23px;height:26px;padding:0;
+  color:var(--muted);
+}
+.observation-table .route-grip {cursor:grab;touch-action:none;user-select:none}
+.observation-table .route-grip:active {cursor:grabbing}
+.observation-table .route-grip:disabled {cursor:not-allowed}
+.observation-table .route-grip svg {pointer-events:none}
+.observation-table .route-disable {cursor:pointer}
+.observation-table .route-disable input {margin:0;accent-color:var(--accent-fill)}
+.workspace .observation-table tr[data-route-dragging] > td {background:var(--selection)}
+.workspace .observation-table tr[data-route-drop="before"] > td {box-shadow:inset 0 2px var(--accent)}
+.workspace .observation-table tr[data-route-drop="after"] > td {box-shadow:inset 0 -2px var(--accent)}
+@media(max-width:440px) {
+  .workbench-time-slot {width:94px}
+}
 @media(max-width:430px) {
-  .channel-route-list li {gap:4px;padding-inline:8px;grid-template-columns:18px minmax(0,1fr) auto}
-  .channel-route-list .control-row-actions,.channel-route-list .control-order-actions {gap:3px}
   .channel-filter-grid {gap:8px}
+}
+@media(pointer:coarse) {
+  .workbench-time-slot,.route-edit-slot {height:44px}
+  .observation-table .route-grip {width:28px;height:40px}
 }
 .table-column-options {margin-top:9px;padding-top:8px;border-top:1px solid var(--line);font-size:12px}
 .table-column-options > summary {width:fit-content;cursor:pointer;color:var(--ink);font-weight:650}
@@ -368,7 +374,9 @@
 .workspace .observation-table[data-columns="run"] {min-width:100%;table-layout:fixed}
 .workspace .observation-table[data-columns="run"] .channel-identity {width:29%}
 .workspace .observation-table[data-compact] .channel-identity {width:43%}
-.workspace .observation-table[data-compact] th:nth-child(2) {width:18%}
+.workspace .observation-table[data-compact] th.observation-status {width:18%}
+.workspace .observation-table[data-compact] :is(th,td).rank {width:27px;font-size:10px;padding-inline:5px}
+.workspace .observation-table[data-compact] thead:has(.rank) .channel-identity {width:45%}
 .workspace .observation-table[data-compact] .balance-heading-extra {display:none}
 .workspace .observation-table .column-balance .balance-values {align-items:flex-end}
 .workspace .observation-table[data-compact] .column-balance .amount small {display:none}

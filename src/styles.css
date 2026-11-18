@@ -2297,12 +2297,6 @@ nav > button.active > svg {
 .latest-channel-check > small { display:block;font-size:10px;margin-top:5px; }
 .latest-channel-check > .check-status { display:flex; }
 
-.control-row-actions,.control-order-actions { display:flex; align-items:center; gap:6px; }
-.control-row-actions label { display:flex; align-items:center; gap:6px; white-space:nowrap; font-size:11px; }
-.control-row-actions input { accent-color:var(--accent); }
-.control-toolbar-actions { display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:6px; }
-.control-draft-error { flex-basis:100%;max-width:440px;line-height:1.6;overflow-wrap:anywhere; }
-
 .control-reset-action { position:relative;flex-shrink:0; }
 .control-reset-action > .tip-target { display:flex; }
 .control-reset-action summary { list-style:none;cursor:pointer; }

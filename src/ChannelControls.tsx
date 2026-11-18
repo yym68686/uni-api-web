@@ -1,15 +1,9 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
-import * as Dialog from "@radix-ui/react-dialog";
+import { useEffect, useRef, useState } from "react";
 import { useQueries, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowDown,
-  ArrowUp,
   ArrowUpToLine,
-  Check,
   ChevronDown,
   RotateCcw,
-  Search,
-  X,
 } from "lucide-react";
 import { channelParams, controlRequest, request } from "./api";
 import type { Catalog, Channel, Connection, KeyInfo } from "./types";
@@ -42,6 +36,17 @@ export function orderedProviders(providers: string[], order: string[]) {
     ...order.filter((p) => present.has(p)),
     ...providers.filter((p) => !arranged.has(p)),
   ];
+}
+
+export function moveVisibleProvider(order: string[], visible: ReadonlySet<string>, provider: string, target: string, after: boolean) {
+  if (provider === target || !visible.has(provider) || !visible.has(target)) return order;
+  const current = order.filter(name => visible.has(name));
+  if (!current.includes(provider) || !current.includes(target)) return order;
+  const next = current.filter(name => name !== provider);
+  next.splice(next.indexOf(target) + Number(after), 0, provider);
+  if (next.every((name, index) => name === current[index])) return order;
+  let index = 0;
+  return order.map(name => visible.has(name) ? next[index++] : name);
 }
 export function inheritedDisabled(
   rules: ControlRule[],
@@ -178,11 +183,13 @@ export function useChannelControls({
     update: (rule: ControlRule, order: string[]) => ControlRule,
   ) {
     const i = info(row);
-    if (!i.ready || i.stale || locked.current) return;
+    if (!i.ready || i.stale || locked.current) return false;
     const next = update(
       { ...i.rule, order: [...i.rule.order], disabled: [...i.rule.disabled] },
       i.order,
     );
+    if (next.order.every((provider, index) => provider === i.rule.order[index]) && next.order.length === i.rule.order.length &&
+        next.disabled.every((provider, index) => provider === i.rule.disabled[index]) && next.disabled.length === i.rule.disabled.length) return false;
     setDrafts((old) =>
       new Map(old).set(i.id, {
         source: i.source,
@@ -195,6 +202,7 @@ export function useChannelControls({
       next.delete(i.id);
       return next;
     });
+    return true;
   }
   function toggle(row: Channel, disabled: boolean) {
     if (info(row).inherited) return;
@@ -213,18 +221,20 @@ export function useChannelControls({
           .map((r) => r.provider),
       );
     const order = i.order.filter((p) => names.has(p));
-    return order[order.indexOf(row.provider) + direction];
+    const index = order.indexOf(row.provider);
+    return index < 0 ? undefined : order[index + direction];
+  }
+  function moveRelative(row: Channel, target: ControlTarget, after: boolean, visible: Channel[]) {
+    if (row.source_id !== target.source_id) return false;
+    const names = new Set(visible.filter(r => r.source_id === row.source_id).map(r => r.provider));
+    return edit(row, (rule, order) => {
+      const next = moveVisibleProvider(order, names, row.provider, target.provider, after);
+      return next === order ? rule : { ...rule, order: next };
+    });
   }
   function move(row: Channel, direction: number, visible: Channel[]) {
     const target = neighbor(row, direction, visible);
-    if (!target) return;
-    edit(row, (rule, order) => {
-      const next = [...order],
-        a = next.indexOf(row.provider),
-        b = next.indexOf(target);
-      [next[a], next[b]] = [next[b], next[a]];
-      return { ...rule, order: next };
-    });
+    return target ? moveRelative(row, {source_id:row.source_id, provider:target}, direction > 0, visible) : false;
   }
   function moveToTop(row: Channel) {
     const i=info(row);
@@ -388,6 +398,7 @@ export function useChannelControls({
     toggle,
     neighbor,
     move,
+    moveRelative,
     moveToTop,
     discardAll,
     applyAll,
@@ -400,173 +411,27 @@ export function useChannelControls({
   };
 }
 export type ChannelControls = ReturnType<typeof useChannelControls>;
-function ChannelControlRow({
-  row,
-  controls,
-  visible,
-}: {
+export function ChannelRowActions({ row, controls, state, disabled }: {
   row: Channel;
   controls: ChannelControls;
-  visible: Channel[];
+  state: ReturnType<ChannelControls["info"]>;
+  disabled: boolean;
 }) {
-  const i = controls.info(row),
-    label = `${row.source_name || row.source_id || ""} ${channelName(row)} ${row.model}`;
-  if (!i.ready)
-    return (
-      <Tip text={i.error}>
-        <span className={i.error ? "negative" : "muted"}>
-          {i.error ? "控制不可用" : i.catalog?.isSuccess && i.state?.isSuccess ? "不在路由范围" : "读取中…"}
-        </span>
-      </Tip>
-    );
-  return (
-      <div className="control-row-actions">
-        <label>
-          <input
-            type="checkbox"
-            aria-label={`临时停用 ${label}`}
-            checked={i.rule.disabled.includes(row.provider) || i.inherited}
-            disabled={i.pending || i.stale || i.inherited}
-            onChange={(e) => controls.toggle(row, e.target.checked)}
-          />
-          {i.inherited ? "继承停用" : "临时停用"}
-        </label>
-        <Tip text={i.error || (i.stale ? STALE_DRAFT : "只调整此来源内的渠道顺序，未显示的渠道仍保留。")}>
-          <span className="control-order-actions">
-            <button className="icon-button" aria-label={`置顶 ${label}`} title="置顶到此来源的第一位"
-              disabled={i.pending || i.stale || i.order.indexOf(row.provider)<=0}
-              onClick={()=>controls.moveToTop(row)}>
-              <ArrowUpToLine size={15}/>
-            </button>
-            <button
-              className="icon-button"
-              aria-label={`上移 ${label}`}
-              disabled={
-                i.pending ||
-                i.stale ||
-                !controls.neighbor(row, -1, visible)
-              }
-              onClick={() => controls.move(row, -1, visible)}
-            >
-              <ArrowUp size={15} />
-            </button>
-            <button
-              className="icon-button"
-              aria-label={`下移 ${label}`}
-              disabled={
-                i.pending ||
-                i.stale ||
-                !controls.neighbor(row, 1, visible)
-              }
-              onClick={() => controls.move(row, 1, visible)}
-            >
-              <ArrowDown size={15} />
-            </button>
-          </span>
-        </Tip>
-      </div>
-  );
+  const label = `${row.source_name || row.source_id || ""} ${channelName(row)} ${row.model}`.trim();
+  const stopped = state.rule.disabled.includes(row.provider) || state.inherited;
+  return <div className="route-row-actions">
+    <button type="button" className="icon-button route-pin" aria-label={`置顶 ${label}`} title="置顶到此来源的第一位"
+      disabled={disabled || state.order[0] === row.provider} onClick={() => controls.moveToTop(row)}>
+      <ArrowUpToLine size={14} aria-hidden="true" />
+    </button>
+    <label className="route-disable" title={state.inherited ? "从上级路由规则继承停用" : "临时停用"}>
+      <input type="checkbox" aria-label={`临时停用 ${label}`} checked={stopped} disabled={disabled || state.inherited}
+        onChange={event => controls.toggle(row, event.target.checked)} />
+    </label>
+  </div>;
 }
 
 export const RESET_SCOPE_LABEL = "撤销更改";
-export function ChannelControlDrawer({ controls, sources, keys, rows, scopeLabel, onClose, opener }: {
-  controls: ChannelControls;
-  sources: ConsoleSource[];
-  keys: KeyInfo[];
-  rows: Channel[];
-  scopeLabel: string;
-  onClose: () => void;
-  opener: RefObject<HTMLElement | null>;
-}) {
-  const [search, setSearch] = useState("");
-  const keyword = search.trim().toLowerCase();
-  const visible = keyword ? rows.filter(row => `${channelName(row)} ${row.provider} ${row.model}`.toLowerCase().includes(keyword)) : rows;
-  const groups = new Map<string, Channel[]>();
-  const seen = new Map<string, Set<string>>();
-  // Route rules address providers, even when the observation lists several models.
-  for (const row of controls.arrange(visible)) {
-    const source = row.source_id || "";
-    if (!groups.has(source)) {
-      groups.set(source, []);
-      seen.set(source, new Set());
-    }
-    if (seen.get(source)!.has(row.provider)) continue;
-    seen.get(source)!.add(row.provider);
-    groups.get(source)!.push(row);
-  }
-  return (
-    <Dialog.Root open modal={false} onOpenChange={open => { if (!open && !controls.pending && !controls.drafts.size) onClose(); }}>
-      <Dialog.Portal>
-        <Dialog.Content id="channel-route-editor" className="channel-route-drawer"
-          onInteractOutside={event => event.preventDefault()}
-          onEscapeKeyDown={event => { if (controls.pending || controls.drafts.size) event.preventDefault(); }}
-          onCloseAutoFocus={event => { event.preventDefault(); opener.current?.focus({preventScroll:true}); }}>
-          <header className="channel-route-heading">
-            <div>
-              <Dialog.Title>调整请求顺序</Dialog.Title>
-              <Dialog.Description title={scopeLabel}>{scopeLabel}</Dialog.Description>
-            </div>
-            <button type="button" className="icon-button" aria-label="取消调整" title="取消调整并放弃草稿" disabled={controls.pending} onClick={() => { controls.discardAll(); onClose(); }}><X size={17} /></button>
-          </header>
-          <div className="search-field channel-route-search"><Search size={15} aria-hidden="true" />
-            <input type="search" aria-label="在排序列表中查找" placeholder="查找渠道…" value={search} onChange={event => setSearch(event.target.value)} />
-          </div>
-          <div className="channel-route-list">
-            {!groups.size && <p className="muted">没有可调整的匹配渠道</p>}
-            {[...groups].map(([source, group]) => <section key={source} aria-label={group[0].source_name || source}>
-              <h3>{group[0].source_name || sources.find(item => item.id === source)?.name || source || "未识别来源"}</h3>
-              <ol>
-                {group.map(row => <li key={row.provider} data-source-name={row.source_name}>
-                  <span className="channel-route-rank mono">{Math.max(0, controls.info(row).order.indexOf(row.provider) + 1) || "—"}</span>
-                  <strong title={channelName(row)}>{channelName(row)}</strong>
-                  <ChannelControlRow row={row} controls={controls} visible={group} />
-                </li>)}
-              </ol>
-            </section>)}
-          </div>
-          <footer className="channel-route-footer">
-            {!controls.pending && controls.draftIssues.length > 0 && (
-              <small className="control-draft-error negative" role="alert">
-                未应用的修改已保留：{[...new Set(controls.draftIssues.map(issue =>
-                  `${sources.find(source => source.id === issue.source)?.name || issue.source}：${issue.message}`
-                ))].join("；")}
-              </small>
-            )}
-            <div className="control-toolbar-actions">
-              <ChannelControlReset controls={controls} sources={sources} keys={keys} />
-              {controls.drafts.size > 0 ? (
-        <>
-          <Tip text="应用全部未保存修改，包括筛选隐藏的来源、API key 和模型范围。">
-            <button
-              className="button small primary"
-              aria-label="应用全部临时修改"
-              disabled={controls.pending}
-              onClick={() => void controls.applyAll()}
-            >
-              {controls.pending ? <Spinner small /> : <Check size={13} />}
-              {controls.pending ? "应用中…" : "应用"}
-            </button>
-          </Tip>
-          <Tip text="放弃全部未保存修改，保留已生效规则。">
-            <button
-              className="button small"
-              aria-label="放弃全部临时修改"
-              disabled={controls.pending}
-              onClick={controls.discardAll}
-            >
-              <X size={13} />
-              放弃
-            </button>
-          </Tip>
-        </>
-              ) : <button className="button small" type="button" disabled={controls.pending} onClick={onClose}>完成</button>}
-            </div>
-          </footer>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
-  );
-}
 export function ChannelControlReset({
   controls,
   sources,

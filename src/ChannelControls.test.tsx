@@ -6,7 +6,7 @@ import * as Tooltip from "@radix-ui/react-tooltip";
 import { MotionConfig, LazyMotion, domAnimation } from "motion/react";
 import App from "./App";
 import { emptyStats } from "./analytics";
-import { inheritedDisabled, RESET_SCOPE_LABEL } from "./ChannelControls";
+import { inheritedDisabled, moveVisibleProvider, RESET_SCOPE_LABEL } from "./ChannelControls";
 import type { ControlState } from "./ChannelControls";
 import type { ChannelCheck } from "./ChannelChecks";
 
@@ -28,6 +28,19 @@ function openFilter(tab = "条件") {
 function tool(name: string) {
   openFilter("工具");
   return screen.getByRole("button", { name });
+}
+function condition(name: string) {
+  openFilter();
+  return screen.getByLabelText(name);
+}
+function move(label: string, key: "ArrowUp" | "ArrowDown") {
+  fireEvent.keyDown(screen.getByRole("button", {name:`移动 ${label}`}), {key});
+}
+async function openRouting(app: ReturnType<typeof setup>) {
+  const navigation = screen.getByRole("navigation", { name: "主导航" });
+  await app.user.click(within(navigation).getByRole("button", { name: /^渠道管理/ }));
+  // The management page is a lazy chunk; on its first render there is no routing button yet.
+  await app.user.click(await screen.findByRole("button", { name: "路由顺序" }, { timeout: 5000 }));
 }
 function setup(
   controlUnavailable = false,
@@ -231,7 +244,7 @@ function setup(
   );
   return { ...app, user, writes, states, client, checkWrites, detectionWrites };
 }
-it("opens a separate drawer without adding a table column or a toolbar row", async () => {
+it("adds handles to existing rows without opening a dialog or adding headers or toolbar rows", async () => {
   history.replaceState(null, "", "#view=routing");
   const app = setup();
   const table = await screen.findByRole("table", {}, {timeout:5000});
@@ -259,16 +272,18 @@ it("opens a separate drawer without adding a table column or a toolbar row", asy
         .map((c) => c.textContent),
     );
   const headers = [...table.querySelectorAll("th")];
+  const heading = table.closest(".channel-browser")!.querySelector(".workbench-heading");
+  const slots = [...heading!.querySelector(".workbench-tools")!.children];
   await app.user.click(tool("调整顺序"));
-  const drawer = screen.getByRole("dialog", { name: "调整请求顺序" });
-  expect(drawer.closest(".channel-browser")).toBeNull();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   expect([...table.querySelectorAll("th")]).toEqual(headers);
-  expect(table.closest(".channel-browser")).not.toContainElement(drawer);
+  expect([...heading!.querySelector(".workbench-tools")!.children]).toEqual(slots);
+  expect(within(table).getAllByRole("button", {name:/^移动 /})).toHaveLength(6);
   openFilter();
   expect(screen.getByRole("table")).toBe(table);
   expect(screen.getByLabelText("uni-api 来源")).toBe(source);
   expect(source).toHaveValue("");
-  expect(screen.getByLabelText("时间范围筛选")).toBe(range);
+  expect(screen.getByLabelText("时间范围筛选")).toHaveValue((range as HTMLSelectElement).value);
   expect(screen.queryByLabelText("控制来源")).not.toBeInTheDocument();
   expect(
     screen.queryByText("请选择来源后查看和编辑临时规则。"),
@@ -292,7 +307,7 @@ it("opens a separate drawer without adding a table column or a toolbar row", asy
     "one::key",
   );
   await app.user.selectOptions(screen.getByLabelText("模型筛选"), "m");
-  await app.user.selectOptions(range, "today");
+  await app.user.selectOptions(condition("时间范围筛选"), "today");
   await app.user.type(screen.getByLabelText("搜索渠道或模型"), "visible");
   await app.user.selectOptions(
     screen.getByLabelText("端点筛选"),
@@ -340,8 +355,7 @@ it("opens a separate drawer without adding a table column or a toolbar row", asy
   await app.user.selectOptions(screen.getByLabelText("API key 筛选"), "two::key");
   await app.user.selectOptions(screen.getByLabelText("时间范围筛选"), "1h");
   await app.user.type(screen.getByLabelText("搜索渠道或模型"), "second");
-  await app.user.click(within(screen.getByRole("navigation",{name:"主导航"})).getByRole("button", { name: /^渠道管理/ }));
-  await app.user.click(await screen.findByRole("button",{name:"路由顺序"}));
+  await openRouting(app);
   openFilter();
   expect(
     labels.map(
@@ -356,12 +370,12 @@ it("opens a separate drawer without adding a table column or a toolbar row", asy
   expect(screen.getByLabelText("时间范围筛选")).toHaveValue("1h");
   expect(screen.getByLabelText("搜索渠道或模型")).toHaveValue("second");
   await app.user.click(screen.getByRole("button", { name: "重置筛选" }));
-  await app.user.click(within(screen.getByRole("navigation",{name:"主导航"})).getByRole("button", { name: /^渠道管理/ }));
-  await app.user.click(await screen.findByRole("button",{name:"路由顺序"}));
+  await openRouting(app);
   openFilter();
   expect(labels.map((label) => (screen.getByLabelText(label) as HTMLInputElement).value)).toEqual(values);
   const tableBeforeCancel = screen.getByRole("table");
   await app.user.click(screen.getByRole("button", { name: "取消调整" }));
+  openFilter();
   expect(
     screen.queryByRole("columnheader", { name: "临时控制" }),
   ).not.toBeInTheDocument();
@@ -374,7 +388,7 @@ it("opens a separate drawer without adding a table column or a toolbar row", asy
   app.unmount();
   app.client.clear();
 }, 10_000);
-it("stages source-specific controls in the drawer, retains hidden channels and drafts across shared filters and views", async () => {
+it("stages source-specific controls inline and retains hidden channels and drafts across shared filters and views", async () => {
   history.replaceState(null, "", "#view=routing");
   const app = setup();
   await screen.findByRole("table");
@@ -382,12 +396,11 @@ it("stages source-specific controls in the drawer, retains hidden channels and d
   await enterRoute(app);
   await screen.findByLabelText("临时停用 One visible-first m");
   await app.user.type(screen.getByLabelText("搜索渠道或模型"), "visible");
-  await app.user.click(screen.getByLabelText("上移 One visible-second m"));
+  move("One visible-second m", "ArrowUp");
   await app.user.click(screen.getByLabelText("临时停用 One visible-first m"));
-  await app.user.selectOptions(screen.getByLabelText("时间范围筛选"), "today");
+  await app.user.selectOptions(condition("时间范围筛选"), "today");
   await app.user.click(screen.getByRole("button", { name: "余额管理" }));
-  await app.user.click(within(screen.getByRole("navigation",{name:"主导航"})).getByRole("button", { name: /^渠道管理/ }));
-  await app.user.click(await screen.findByRole("button",{name:"路由顺序"}));
+  await openRouting(app);
   openFilter();
   expect(screen.getByLabelText("临时停用 One visible-first m")).toBeChecked();
   expect(
@@ -407,6 +420,7 @@ it("stages source-specific controls in the drawer, retains hidden channels and d
       disabled: ["visible-first"],
     },
   });
+  openFilter("工具");
   const reset = await screen.findByRole("button", { name: RESET_SCOPE_LABEL });
   expect(
     within(screen.getByRole("table")).queryByRole("button", {
@@ -417,7 +431,7 @@ it("stages source-specific controls in the drawer, retains hidden channels and d
     "data-reset-scope",
     "One / 全部 API key / 全部模型",
   );
-  expect(reset.closest(".channel-route-drawer")).not.toBeNull();
+  expect(reset.closest(".channel-filter-toolbox")).not.toBeNull();
   expect(
     screen.queryByRole("region", { name: "当前范围的临时修改" }),
   ).not.toBeInTheDocument();
@@ -444,7 +458,8 @@ it("keeps the observation table visible when a source control endpoint is unavai
   const table = await screen.findByRole("table");
   openFilter();
   await enterRoute(app);
-  await screen.findAllByText("控制不可用");
+  await waitFor(() => expect(within(table).getByRole("button", {name:"移动 One visible-first m"})).toHaveAttribute("title", expect.stringContaining("控制接口暂不可用")));
+  expect(within(table).getByRole("button", {name:"移动 One visible-first m"})).toBeDisabled();
   expect(screen.getByRole("table")).toBe(table);
   expect(within(table).getAllByRole("row")).toHaveLength(7);
   expect(screen.getByLabelText("uni-api 来源")).toHaveValue("");
@@ -452,7 +467,7 @@ it("keeps the observation table visible when a source control endpoint is unavai
   app.client.clear();
 });
 
-it("keeps reset inside the drawer with scope details in the menu and tooltip", async () => {
+it("keeps reset inside the existing filter with scope details in the menu and tooltip", async () => {
   history.replaceState(null, "", "#view=routing");
   const app = setup();
   app.states.one.rules = [
@@ -470,11 +485,12 @@ it("keeps reset inside the drawer with scope details in the menu and tooltip", a
   await screen.findByRole("table");
   openFilter();
   await enterRoute(app);
+  openFilter("工具");
   const reset = await screen.findByRole("button", { name: RESET_SCOPE_LABEL });
   expect(
     screen.getAllByRole("button", { name: RESET_SCOPE_LABEL }),
   ).toHaveLength(1);
-  expect(reset.closest(".channel-route-drawer")).not.toBeNull();
+  expect(reset.closest(".channel-filter-toolbox")).not.toBeNull();
   expect(
     screen.queryByRole("region", { name: "当前范围的临时修改" }),
   ).not.toBeInTheDocument();
@@ -494,7 +510,7 @@ it("keeps reset inside the drawer with scope details in the menu and tooltip", a
     "no-matching-channel",
   );
   await screen.findByText("没有匹配的渠道");
-  expect(reset.closest("details")).not.toHaveAttribute("open");
+  openFilter("工具");
   await app.user.click(reset);
   await app.user.click(
     screen.getByRole("menuitem", { name: "Two / 全部 API key / 全部模型" }),
@@ -502,13 +518,14 @@ it("keeps reset inside the drawer with scope details in the menu and tooltip", a
   await waitFor(() => expect(app.writes).toHaveLength(1));
   expect(app.writes[0].source).toBe("two");
   expect(app.states.one.rules).toHaveLength(2);
-  await app.user.clear(screen.getByLabelText("搜索渠道或模型"));
+  await app.user.clear(condition("搜索渠道或模型"));
   await app.user.selectOptions(screen.getByLabelText("uni-api 来源"), "one");
   await app.user.selectOptions(
     screen.getByLabelText("API key 筛选"),
     "one::key",
   );
   await app.user.selectOptions(screen.getByLabelText("模型筛选"), "m");
+  openFilter("工具");
   const scoped = await screen.findByRole("button", { name: RESET_SCOPE_LABEL });
   expect(scoped).toHaveAttribute(
     "data-reset-scope",
@@ -545,19 +562,71 @@ async function openControls(app: ReturnType<typeof setup>) {
   await screen.findByLabelText("临时停用 Two visible-first m");
 }
 
+it("reorders only the visible provider slots and ignores an already-matching drop", () => {
+  const order = ["a", "hidden1", "b", "hidden2", "c", "d"];
+  const visible = new Set(["a", "b", "c", "d"]);
+  expect(moveVisibleProvider(order, visible, "d", "b", false)).toEqual(["a", "hidden1", "d", "hidden2", "b", "c"]);
+  expect(moveVisibleProvider(order, visible, "a", "c", true)).toEqual(["b", "hidden1", "c", "hidden2", "a", "d"]);
+  expect(moveVisibleProvider(order, visible, "c", "d", false)).toBe(order);
+  expect(moveVisibleProvider(order, visible, "a", "hidden1", true)).toBe(order);
+});
+
+it("drags a row in the live table, rejects drops across sources, and stages until applied", async () => {
+  history.replaceState(null, "", "#view=routing");
+  const app = setup();
+  await openControls(app);
+  await app.user.type(condition("搜索渠道或模型"), "visible");
+  await waitFor(() => expect(providerOrder("One")).toEqual(["visible-first", "visible-second"]));
+  const from = screen.getByRole("button", {name: "移动 One visible-second m"});
+  const same = screen.getByRole("button", {name: "移动 One visible-first m"}).closest("tr")!;
+  const other = screen.getByRole("button", {name: "移动 Two visible-first m"}).closest("tr")!;
+  const previous = Object.getOwnPropertyDescriptor(document, "elementFromPoint");
+  const hit = vi.fn(() => other);
+  Object.defineProperty(document, "elementFromPoint", {configurable: true, value: hit});
+  const pointer = (type: string, clientY: number) => fireEvent(from, Object.assign(
+    new Event(type, {bubbles:true}), {pointerId:1, isPrimary:true, button:0, clientX:10, clientY},
+  ));
+  try {
+    pointer("pointerdown", 30);
+    pointer("pointermove", 0);
+    expect(other).not.toHaveAttribute("data-route-drop");
+    pointer("pointerup", 0);
+    expect(screen.queryByRole("button", {name:"应用全部临时修改"})).not.toBeInTheDocument();
+    hit.mockReturnValue(same);
+    vi.spyOn(same, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 100, 30));
+    pointer("pointerdown", 30);
+    pointer("pointermove", 5);
+    expect(same).toHaveAttribute("data-route-drop", "before");
+    pointer("pointercancel", 5);
+    expect(same).not.toHaveAttribute("data-route-drop");
+    expect(providerOrder("One")).toEqual(["visible-first", "visible-second"]);
+    pointer("pointerdown", 30);
+    pointer("pointermove", 5);
+    pointer("pointerup", 5);
+    expect(providerOrder("One")).toEqual(["visible-second", "visible-first"]);
+    expect(providerOrder("Two")).toEqual(["visible-first", "visible-second"]);
+    expect(app.writes).toHaveLength(0);
+    await app.user.click(screen.getByRole("button", {name:"应用全部临时修改"}));
+    await waitFor(() => expect(app.states.one.rules[0].order).toEqual(["visible-second", "hidden", "visible-first"]));
+    expect(app.writes).toHaveLength(1);
+  } finally {
+    if (previous) Object.defineProperty(document, "elementFromPoint", previous);
+    else Reflect.deleteProperty(document, "elementFromPoint");
+    app.unmount();
+    app.client.clear();
+  }
+});
+
 it("applies moves from both sources with one toolbar action and keeps acknowledged ordering when catalog data lags", async () => {
   history.replaceState(null, "", "#view=routing");
   const app = setup();
   await openControls(app);
   await app.user.type(screen.getByLabelText("搜索渠道或模型"), "visible");
-  await app.user.click(screen.getByLabelText("上移 One visible-second m"));
-  await app.user.click(screen.getByLabelText("上移 Two visible-second m"));
+  move("One visible-second m", "ArrowUp");
+  move("Two visible-second m", "ArrowUp");
   const apply = screen.getByRole("button", { name: "应用全部临时修改" });
   expect(
     screen.getAllByRole("button", { name: "应用全部临时修改" }),
-  ).toHaveLength(1);
-  expect(
-    screen.getAllByRole("button", { name: "放弃全部临时修改" }),
   ).toHaveLength(1);
   expect(
     within(screen.getByRole("table")).queryByRole("button", {
@@ -583,17 +652,17 @@ it("applies moves from both sources with one toolbar action and keeps acknowledg
   expect(providerOrder("One")).toEqual(["visible-second", "visible-first"]);
   expect(providerOrder("Two")).toEqual(["visible-second", "visible-first"]);
   await app.user.click(screen.getByLabelText("临时停用 One visible-first m"));
-  const reset = screen.getByRole("button", { name: RESET_SCOPE_LABEL });
+  const reset = tool(RESET_SCOPE_LABEL);
   expect(
     screen
       .getByLabelText("应用全部临时修改")
-      .closest(".control-toolbar-actions"),
-  ).toBe(reset.closest(".control-toolbar-actions"));
+      .closest(".workbench-heading"),
+  ).toBe(reset.closest(".workbench-heading"));
   expect(
     screen
       .getByLabelText("放弃全部临时修改")
-      .closest(".control-toolbar-actions"),
-  ).toBe(reset.closest(".control-toolbar-actions"));
+      .closest(".channel-filter-toolbox"),
+  ).toBe(reset.closest(".channel-filter-toolbox"));
   app.unmount();
   app.client.clear();
 });
@@ -611,12 +680,12 @@ it("discards all drafts even when search hides every modified channel, preservin
   ];
   await openControls(app);
   await app.user.click(screen.getByLabelText("临时停用 One visible-first m"));
-  await app.user.click(screen.getByLabelText("上移 Two visible-second m"));
+  move("Two visible-second m", "ArrowUp");
   await app.user.type(screen.getByLabelText("搜索渠道或模型"), "no-match");
   await screen.findByText("没有匹配的渠道");
-  await app.user.click(screen.getByLabelText("放弃全部临时修改"));
+  await app.user.click(tool("放弃全部临时修改"));
   expect(app.writes).toHaveLength(0);
-  await app.user.clear(screen.getByLabelText("搜索渠道或模型"));
+  await app.user.clear(condition("搜索渠道或模型"));
   expect(
     screen.getByLabelText("临时停用 One visible-first m"),
   ).not.toBeChecked();
@@ -639,7 +708,7 @@ it("applies drafts hidden by source and model selection and chains revisions for
   history.replaceState(null, "", "#view=routing");
   const app = setup();
   await openControls(app);
-  await app.user.click(screen.getByLabelText("下移 One visible-first m"));
+  move("One visible-first m", "ArrowDown");
   await app.user.click(screen.getByLabelText("临时停用 Two visible-first m"));
   await app.user.selectOptions(screen.getByLabelText("uni-api 来源"), "one");
   await app.user.selectOptions(
@@ -696,7 +765,7 @@ it("locks all draft actions during a batch and retains only failed changes for a
   expect(screen.getByLabelText("放弃全部临时修改")).toBeDisabled();
   expect(screen.getByRole("button", { name: "取消调整" })).toBeDisabled();
   expect(screen.getByLabelText("临时停用 One visible-second m")).toBeDisabled();
-  expect(screen.getByLabelText("上移 Two visible-second m")).toBeDisabled();
+  expect(screen.getByLabelText("移动 Two visible-second m")).toBeDisabled();
   await act(async () => {
     release();
   });
@@ -745,7 +814,7 @@ it("does not overwrite an external revision when applying other valid drafts", a
   expect(screen.getByText(/未应用的修改已保留：One/)).toHaveTextContent(
     "规则已变化",
   );
-  await app.user.click(screen.getByLabelText("放弃全部临时修改"));
+  await app.user.click(tool("放弃全部临时修改"));
   expect(screen.getByLabelText("临时停用 One hidden m")).toBeChecked();
   expect(
     screen.getByLabelText("临时停用 One visible-first m"),
@@ -758,7 +827,7 @@ it("cancels adjustment and clears drafts from hidden sources and scopes while pr
   history.replaceState(null, "", "#view=routing");
   const app = setup();
   await openControls(app);
-  await app.user.click(screen.getByLabelText("上移 One visible-second m"));
+  move("One visible-second m", "ArrowUp");
   await app.user.click(screen.getByLabelText("应用全部临时修改"));
   await waitFor(() =>
     expect(screen.queryByLabelText("应用全部临时修改")).not.toBeInTheDocument(),
@@ -778,10 +847,10 @@ it("cancels adjustment and clears drafts from hidden sources and scopes while pr
     screen.queryByRole("button", { name: RESET_SCOPE_LABEL }),
   ).not.toBeInTheDocument();
   expect(tool("调整顺序")).toHaveAttribute(
-    "aria-expanded",
+    "aria-pressed",
     "false",
   );
-  await app.user.clear(screen.getByLabelText("搜索渠道或模型"));
+  await app.user.clear(condition("搜索渠道或模型"));
   await app.user.selectOptions(screen.getByLabelText("模型筛选"), "");
   await app.user.selectOptions(screen.getByLabelText("uni-api 来源"), "");
   expect(providerOrder("One")).toEqual(appliedOrder);
@@ -1171,7 +1240,7 @@ it("moves a channel to the true source-first position while retaining hidden cha
  await enterRoute(app);
  await screen.findByLabelText("置顶 One visible-second m");
  await app.user.type(screen.getByLabelText("搜索渠道或模型"),"second");
- expect(screen.getByLabelText("上移 One visible-second m")).toBeDisabled();
+ expect(screen.getByLabelText("置顶 One visible-second m")).toBeEnabled();
  await app.user.click(screen.getByLabelText("置顶 One visible-second m"));
  expect(screen.getByLabelText("置顶 One visible-second m")).toBeDisabled();
  expect(screen.getByLabelText("置顶 Two visible-second m")).toBeEnabled();
