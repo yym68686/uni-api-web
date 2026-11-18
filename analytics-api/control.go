@@ -65,12 +65,18 @@ func newControlStore(dsn, master string) (*controlStore, error) {
 	db := stdlib.OpenDB(*pc)
 	db.SetMaxOpenConns(8)
 	db.SetMaxIdleConns(4)
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	if err = db.PingContext(ctx); err != nil {
+	ping, cancelPing := context.WithTimeout(context.Background(), 5*time.Second)
+	err = db.PingContext(ping)
+	cancelPing()
+	if err != nil {
 		db.Close()
 		return nil, err
 	}
+	// Migration lock acquisition remains NOWAIT and releases each unsuccessful
+	// attempt before retrying. Give rolling startup more chances to find a gap
+	// between active writers without raising any individual lock timeout.
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
 	if err = migrateControlSchema(ctx, db, controlMigrations()); err != nil {
 		db.Close()
 		return nil, err
@@ -212,10 +218,16 @@ func (s *controlStore) source(ctx context.Context, id string) (controlSource, er
 	return s.sourceFrom(ctx, s.db, id)
 }
 
+const controlSourceColumns = "id,name,base,encrypted_key,encrypted_storage,extract(epoch FROM created_at)::bigint,encrypted_config_key"
+
 func (s *controlStore) sourceFrom(ctx context.Context, db controlQueryDB, id string) (controlSource, error) {
+	return s.scanControlSource(db.QueryRowContext(ctx, `SELECT `+controlSourceColumns+` FROM console_sources WHERE id=$1 AND enabled`, id))
+}
+
+func (s *controlStore) scanControlSource(row interface{ Scan(...any) error }) (controlSource, error) {
 	var x controlSource
 	var key, storage, configKey string
-	err := db.QueryRowContext(ctx, `SELECT id,name,base,encrypted_key,encrypted_storage,extract(epoch FROM created_at)::bigint,encrypted_config_key FROM console_sources WHERE id=$1 AND enabled`, id).Scan(&x.ID, &x.Name, &x.Base, &key, &storage, &x.CreatedAt, &configKey)
+	err := row.Scan(&x.ID, &x.Name, &x.Base, &key, &storage, &x.CreatedAt, &configKey)
 	if err != nil {
 		return x, err
 	}
@@ -231,7 +243,7 @@ func (s *controlStore) sourceFrom(ctx context.Context, db controlQueryDB, id str
 			_ = json.Unmarshal([]byte(raw), &x.Storage)
 		}
 	}
-	x.HasStorage = storage != "" || id == "primary"
+	x.HasStorage = storage != "" || x.ID == "primary"
 	x.HasConfigKey = configKey != ""
 	if x.HasConfigKey {
 		// Optional UI access must not block facts, routing controls or boot

@@ -77,13 +77,14 @@ func managementQualityBindings(bindings []subInstalledChannel, refs []subChannel
 }
 
 func (s *controlStore) managementSourcesFrom(ctx context.Context, db controlQueryDB) ([]controlSource, error) {
-	views, err := s.listSourcesFrom(ctx, db)
+	rows, err := db.QueryContext(ctx, `SELECT `+controlSourceColumns+` FROM console_sources WHERE enabled ORDER BY created_at,id`)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]controlSource, 0, len(views))
-	for _, view := range views {
-		source, err := s.sourceFrom(ctx, db, view.ID)
+	defer rows.Close()
+	out := []controlSource{}
+	for rows.Next() {
+		source, err := s.scanControlSource(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -92,7 +93,7 @@ func (s *controlStore) managementSourcesFrom(ctx context.Context, db controlQuer
 		}
 		out = append(out, source)
 	}
-	return out, nil
+	return out, rows.Err()
 }
 
 // Check both identity and membership; adding or disabling a source invalidates

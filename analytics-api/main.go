@@ -64,7 +64,7 @@ func main() {
 		}
 		service.control, err = newControlStore(cfg.ControlDatabaseURL, cfg.ControlMasterKey)
 		if err != nil {
-			log.Fatal("initialize control store")
+			log.Fatal("initialize control store class=", databaseErrorClass(err))
 		}
 		if err = service.control.ensureBootstrap(cfg.AdminUsername, cfg.AdminPassword); err != nil {
 			log.Fatal("initialize administrator")

@@ -333,25 +333,30 @@ type managementCurrentSnapshot struct {
 }
 
 func (s *Service) currentManagementProofRetaining(ctx context.Context, owner string, expected managementFreshProof, retained *managementCurrentSnapshot) (managementFreshProof, time.Time, bool, error) {
-	sources, err := s.readManagementSources(ctx)
-	if err != nil {
-		return managementFreshProof{}, time.Time{}, false, err
-	}
-	if verifyManagementSources(sources, expected.Facts) != nil {
-		return managementFreshProof{}, time.Time{}, false, nil
-	}
 	// The current proof is cheap and monotonic. Sandwich one live gateway
 	// authorization/revision read between two PostgreSQL proofs instead of
 	// performing two remote round trips around one database snapshot. Equal
 	// proofs establish that the complete stored page was current at the live
 	// gateway read. Headers are compared too, even though balance changes do
 	// not invalidate the retained channel computation between requests.
-	readProof := func() (managementFreshProof, time.Time, error) {
+	readProof := func() (managementFreshProof, time.Time, bool, error) {
 		defer managementReadSpan(ctx, "current_database_proof")()
-		return s.managementReadProof(ctx, s.control.db, owner)
+		tx, err := s.control.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+		if err != nil {
+			return managementFreshProof{}, time.Time{}, false, err
+		}
+		defer tx.Rollback()
+		endSources := managementReadSpan(ctx, "sources")
+		sources, err := s.control.managementSourcesFrom(ctx, tx)
+		endSources()
+		if err != nil || verifyManagementSources(sources, expected.Facts) != nil {
+			return managementFreshProof{}, time.Time{}, false, err
+		}
+		p, at, err := s.managementReadProof(ctx, tx, owner)
+		return p, at, true, err
 	}
-	proof, now, err := readProof()
-	if err != nil {
+	proof, now, sourcesMatch, err := readProof()
+	if err != nil || !sourcesMatch {
 		return managementFreshProof{}, time.Time{}, false, err
 	}
 	valid := func(p managementFreshProof, at time.Time) bool {
@@ -385,14 +390,6 @@ func (s *Service) currentManagementProofRetaining(ctx context.Context, owner str
 		}
 		return verifyManagementSources(current, expected.Facts)
 	}
-	if retained != nil {
-		// As on the previous paging path, the final source fence precedes the
-		// hydration transaction. Never pin a connection while acquiring a second
-		// one for this fence: concurrent requests must work even in a full pool.
-		if err := verifySources(); err != nil {
-			return managementFreshProof{}, time.Time{}, false, err
-		}
-	}
 	var tx *sql.Tx
 	var directory *managementDirectoryScope
 	transferred := false
@@ -408,6 +405,17 @@ func (s *Service) currentManagementProofRetaining(ctx context.Context, owner str
 				_ = tx.Rollback()
 			}
 		}()
+		// The final source, database proof, and page hydration share the same
+		// post-gateway snapshot. No extra pool checkout is needed for sources.
+		endSources := managementReadSpan(ctx, "sources")
+		sources, err := s.control.managementSourcesFrom(ctx, tx)
+		endSources()
+		if err != nil {
+			return managementFreshProof{}, time.Time{}, false, err
+		}
+		if err := verifyManagementSources(sources, expected.Facts); err != nil {
+			return managementFreshProof{}, time.Time{}, false, err
+		}
 		directory = &managementDirectoryScope{store: &s.modelDirectories, database: s.control.db, tx: tx, owner: owner}
 		afterCtx = context.WithValue(ctx, managementDirectoryScopeKey{}, directory)
 		afterDB = tx
