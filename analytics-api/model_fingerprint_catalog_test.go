@@ -47,7 +47,7 @@ func signedFingerprintFixture(t *testing.T, key ed25519.PrivateKey, sequence int
 }
 
 func TestFingerprintCatalogPersistsOnlyVerifiedAndValidatedGenerations(t *testing.T) {
-	s, account, _ := bindingFixture(t, "https://example.test")
+	s, account, source := bindingFixture(t, "https://example.test")
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	pub, signer, err := ed25519.GenerateKey(nil)
@@ -75,6 +75,27 @@ func TestFingerprintCatalogPersistsOnlyVerifiedAndValidatedGenerations(t *testin
 	ref := currentFingerprintCatalog()
 	if ref.sequence != 42 || ref.referenceKey == baseKey || !slices.Contains(ref.names, "fixture-new-model") {
 		t.Fatal("Go and validated scorer did not activate together")
+	}
+	for _, fixture := range []struct {
+		model, key string
+		retained   int
+	}{{"fixture-new-model", ref.referenceKey, 1}, {"gpt-6-astra", baseKey, 0}} {
+		target := fingerprintTarget{Source: source.ID, Provider: "fixture", Model: fixture.model}
+		if err = enqueueFingerprint(ctx, s.control.db, target); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = s.control.db.ExecContext(ctx, `UPDATE console_model_fingerprints SET sample_state=jsonb_build_object('reference_key',$3::text,'entries','[{}]'::jsonb) WHERE scope=$1 AND model=$2`, target.scope(), target.Model, fixture.key); err != nil {
+			t.Fatal(err)
+		}
+		records, err := readManagementFingerprintsFrom(ctx, s.control.db, account.Owner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.ContainsFunc(records, func(record fingerprintRecord) bool {
+			return record.Source == source.ID && record.Model == fixture.model && record.RetainedSamples == fixture.retained
+		}) {
+			t.Fatalf("%s: expected %d retained samples for current reference", fixture.model, fixture.retained)
+		}
 	}
 	w := fingerprintRequest(t, s, account.Owner, "GET", nil)
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"fixture-new-model"`) {

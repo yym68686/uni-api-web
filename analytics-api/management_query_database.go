@@ -307,7 +307,7 @@ func readManagementFingerprintsFrom(ctx context.Context, db controlQueryDB, owne
  CASE WHEN f.sample_state->>'reference_key'=$2 AND jsonb_typeof(f.sample_state->'entries')='array' THEN jsonb_array_length(f.sample_state->'entries') ELSE 0 END
  FROM console_model_fingerprints f LEFT JOIN console_sub_accounts a ON a.id=f.account_id
  LEFT JOIN console_sub_targets t ON t.account_id=f.account_id AND t.group_id=f.group_id
- LEFT JOIN console_sources s ON s.id=f.source_id WHERE (a.owner=$1 OR s.enabled)`, owner, fingerprintReferenceKey)
+ LEFT JOIN console_sources s ON s.id=f.source_id WHERE (a.owner=$1 OR s.enabled)`, owner, currentFingerprintCatalog().referenceKey)
 	if err != nil {
 		return nil, err
 	}
