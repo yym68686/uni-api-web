@@ -170,11 +170,26 @@ func TestRequestLogsExactWindowAndAttemptEvidence(t *testing.T) {
 	}
 	first := makeFact("first", "request", "primary", "trace-first", at)
 	first.FirstTextMS = &fast
+	first.Stream, first.Status, first.Outcome, first.FailureReason = true, 502, "failed/transport_error", "transport_error"
+	makeHeaders := func(id, source, trace string, ts int64) Fact {
+		v := makeFact(id, "trace", source, trace, ts)
+		v.Stage, v.Status = "response_headers", 200
+		return v
+	}
 	second := makeFact("second", "request", "primary", "trace-second", at)
 	second.ResponseCreatedMS = &slow
 	second.DispatchMS = &fast
-	facts := []Fact{first, second,
-		makeFact("no-metric", "request", "primary", "trace-third", at),
+	third := first
+	third.EventID, third.TraceID, third.FirstTextMS = "no-metric", "trace-third", nil
+	otherInstance := makeHeaders("other-instance", "primary", third.TraceID, at-250)
+	otherInstance.InstanceID = "another-instance"
+	otherRequest := makeHeaders("other-request", "primary", third.TraceID, at-250)
+	otherRequest.RequestID = "another-request"
+	facts := []Fact{first, second, third,
+		makeHeaders("response-headers", "primary", first.TraceID, at-500),
+		makeHeaders("other-source", "isolated", third.TraceID, at-250),
+		makeHeaders("before-request", "primary", third.TraceID, started-1),
+		otherInstance, otherRequest,
 		makeFact("before", "request", "primary", "before", at-2500),
 		makeFact("attempt-1", "attempt", "primary", "trace-second", at-800),
 		makeFact("attempt-2", "attempt", "primary", "trace-second", at-300),
@@ -192,6 +207,10 @@ func TestRequestLogsExactWindowAndAttemptEvidence(t *testing.T) {
 	if got.Data[0].EventID != "second" || got.Data[1].EventID != "first" || got.Data[2].EventID != "no-metric" ||
 		got.Data[0].ObservedAttempts == nil || *got.Data[0].ObservedAttempts != 2 || got.Data[1].ObservedAttempts != nil {
 		t.Fatalf("ordering or observed attempts: %+v", got.Data)
+	}
+	if got.Data[1].ResponseHeadersStatus == nil || *got.Data[1].ResponseHeadersStatus != 200 ||
+		got.Data[1].Status != 502 || got.Data[1].Result != "failed" || got.Data[2].ResponseHeadersStatus != nil {
+		t.Fatalf("response header status: %+v", got.Data)
 	}
 }
 

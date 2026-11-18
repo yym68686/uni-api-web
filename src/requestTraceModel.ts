@@ -181,6 +181,8 @@ const reasons: Record<string, string> = {
   upstream_http_429: "上游限流",
   upstream_http_521: "上游服务不可用",
   timeout: "请求超时",
+  transport_error: "响应传输失败",
+  missing_response_completed: "未收到 response.completed 完成事件",
   channel_cooldown: "渠道冷却中",
   no_provider_key: "没有可用密钥",
   explicit_cache_prefix_rewrite:

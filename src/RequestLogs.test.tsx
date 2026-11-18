@@ -156,6 +156,32 @@ it("scopes opaque key IDs by source and keeps log preferences independent", () =
   expect(loadFilters("base", "balances").model).toBe("balance-model");
   expect(loadFilters("base", "requests").statusFilter).toBe("failed");
 });
+it("distinguishes interrupted streams from an HTTP 502 response", async () => {
+  const failed = {
+    ...row,
+    result: "failed",
+    status: 502,
+    failure_reason: "transport_error",
+  };
+  setup(async (input) => auxiliary(new URL(input, location.origin)) || Response.json({
+    data: [
+      { ...failed, response_headers_status: 200 },
+      { ...failed, event_id: "e2", request_id: "missing-terminal", response_headers_status: 200, failure_reason: "missing_response_completed" },
+      { ...failed, event_id: "e3", response_headers_status: 502 },
+      { ...failed, event_id: "e4" },
+      { ...failed, event_id: "e5", stream: false, response_headers_status: 200 },
+    ],
+    models: [row.model],
+    next_cursor: "",
+    to: row.at_ms,
+  }));
+  const interrupted = await screen.findAllByText("响应头 HTTP 200 · 流中断");
+  expect(interrupted).toHaveLength(2);
+  expect(interrupted[0]).toHaveClass("failure");
+  expect(screen.getAllByText("失败 · HTTP 502")).toHaveLength(3);
+  fireEvent.focus(interrupted[0].parentElement!);
+  expect(await screen.findByRole("tooltip")).toHaveTextContent("网关最终判定：502");
+});
 it("loads logs immediately, filters on the server and can jump to the newest page", async () => {
   const calls: URL[] = [];
   const user = setup(async (input) => {

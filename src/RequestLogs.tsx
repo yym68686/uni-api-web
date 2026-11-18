@@ -50,6 +50,7 @@ export interface RequestLog {
   at_ms: number;
   started_ms: number | null;
   status: number;
+  response_headers_status?: number | null;
   outcome: string;
   result: string;
   failure_reason: string;
@@ -438,16 +439,23 @@ export function RequestLogsPage({
         <strong className="mono" title={row.model}>{row.model || "未记录模型"}</strong>
         <small title={row.endpoint}>{row.endpoint || "未记录端点"} · {row.stream ? "流式" : "非流式"}</small>
       </td>;
-      case "result": return <td key={id} className="log-outcome">
-        <Tip text={<div className="table-diagnostic-tip">
-          <div>{row.observed_attempts != null ? `已记录 ${row.observed_attempts} 次尝试` : "尝试数未确认"}</div>
-          {row.failure_reason && <div>{friendlyReason(row.failure_reason)}</div>}
-        </div>}>
-          <span className={`trace-status ${states[row.result]?.tone || "neutral"}`}>
-            {states[row.result]?.label || "未知"}{row.status > 0 && ` · HTTP ${row.status}`}
-          </span>
-        </Tip>
-      </td>;
+      case "result": {
+        const interrupted = row.stream && row.result === "failed" && row.status === 502 &&
+          row.response_headers_status === 200 &&
+          ["transport_error", "missing_response_completed"].includes(row.failure_reason);
+        const state = states[row.result];
+        return <td key={id} className="log-outcome">
+          <Tip text={<div className="table-diagnostic-tip">
+            <div>{row.observed_attempts != null ? `已记录 ${row.observed_attempts} 次尝试` : "尝试数未确认"}</div>
+            {interrupted && <div>网关最终判定：{row.status}</div>}
+            {row.failure_reason && <div>{friendlyReason(row.failure_reason)}</div>}
+          </div>}>
+            <span className={`trace-status ${state?.tone || "neutral"}`}>
+              {interrupted ? "响应头 HTTP 200 · 流中断" : `${state?.label || "未知"}${row.status > 0 ? ` · HTTP ${row.status}` : ""}`}
+            </span>
+          </Tip>
+        </td>;
+      }
       case "duration": return <td key={id} className="mono">{ms(row.duration_ms)}</td>;
       case "latency": return <td key={id} className="mono">
         <LatencyBadge value={row.response_created_ms ?? row.first_text_ms} />

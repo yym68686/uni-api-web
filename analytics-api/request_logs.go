@@ -39,6 +39,8 @@ type RequestLog struct {
 	OutputTokens      *int64   `json:"output_tokens"`
 	CacheReadTokens   *int64   `json:"cache_read_tokens"`
 	ObservedAttempts  *int64   `json:"observed_attempts"`
+	// Present for a streaming 502 only when the downstream headers were observed.
+	ResponseHeadersStatus *int `json:"response_headers_status,omitempty"`
 }
 type RequestLogFilter struct {
 	QueryFilter
@@ -189,10 +191,18 @@ func (e *Engine) RequestLogs(ctx context.Context, f RequestLogFilter) (RequestLo
 		outer = append(outer, `(sort_value>? OR (sort_value=? AND (at_ms<? OR (at_ms=? AND event_id<?))))`)
 		args = append(args, cursor.Value, cursor.Value, cursor.At, cursor.At, cursor.ID)
 	}
-	// Fixed-size pages bound transfer size, not the number of accessible records.
+	// Enrich only the selected page. The final status is not necessarily the
+	// status sent in the response headers, e.g. a stream that fails after HTTP 200.
 	rows, err := e.DB.QueryContext(ctx, `WITH scoped AS (SELECT *,`+requestLogResultSQL+` AS result FROM facts WHERE `+strings.Join(where, " AND ")+`), ordered AS (SELECT *,`+sortExpr+` AS sort_value FROM scoped),
  page AS MATERIALIZED (SELECT * FROM ordered WHERE `+strings.Join(outer, " AND ")+` ORDER BY sort_value,at_ms DESC,event_id DESC LIMIT 51)
- SELECT event_id,coalesce(source_id,''),coalesce(instance_id,''),coalesce(request_id,''),coalesce(trace_id,''),coalesce(key_id,''),coalesce(model,''),coalesce(endpoint,''),coalesce(stream,false),at_ms,started_ms,coalesce(status,0),coalesce(outcome,''),result,coalesce(failure_reason,''),duration_ms,dispatch_ms,response_created_ms,first_text_ms,input_tokens,output_tokens,cache_read_tokens,sort_value
+ SELECT event_id,coalesce(source_id,''),coalesce(instance_id,''),coalesce(request_id,''),coalesce(trace_id,''),coalesce(key_id,''),coalesce(model,''),coalesce(endpoint,''),coalesce(stream,false),at_ms,started_ms,coalesce(status,0),
+ CASE WHEN page.stream AND page.status=502 AND page.trace_id<>'' AND page.request_id<>'' AND page.started_ms IS NOT NULL THEN (
+   SELECT h.status FROM facts h WHERE h.kind='trace' AND h.stage='response_headers'
+     AND h.source_id=page.source_id AND h.instance_id IS NOT DISTINCT FROM page.instance_id
+     AND h.trace_id=page.trace_id AND h.request_id=page.request_id
+     AND h.at_ms BETWEEN page.started_ms AND page.at_ms AND h.status BETWEEN 200 AND 599
+   ORDER BY h.at_ms DESC,h.event_id DESC LIMIT 1) END,
+ coalesce(outcome,''),result,coalesce(failure_reason,''),duration_ms,dispatch_ms,response_created_ms,first_text_ms,input_tokens,output_tokens,cache_read_tokens,sort_value
  , (SELECT nullif(count(DISTINCT coalesce(nullif(a.attempt_id,''),a.event_id)),0)
     FROM facts a WHERE a.kind='attempt' AND page.trace_id<>'' AND page.started_ms IS NOT NULL
       AND a.source_id=page.source_id AND a.instance_id IS NOT DISTINCT FROM page.instance_id
@@ -206,7 +216,7 @@ func (e *Engine) RequestLogs(ctx context.Context, f RequestLogFilter) (RequestLo
 	for rows.Next() {
 		var v RequestLog
 		var sortValue float64
-		if err = rows.Scan(&v.EventID, &v.SourceID, &v.InstanceID, &v.RequestID, &v.TraceID, &v.KeyID, &v.Model, &v.Endpoint, &v.Stream, &v.AtMS, &v.StartedMS, &v.Status, &v.Outcome, &v.Result, &v.FailureReason, &v.DurationMS, &v.DispatchMS, &v.ResponseCreatedMS, &v.FirstTextMS, &v.InputTokens, &v.OutputTokens, &v.CacheReadTokens, &sortValue, &v.ObservedAttempts); err != nil {
+		if err = rows.Scan(&v.EventID, &v.SourceID, &v.InstanceID, &v.RequestID, &v.TraceID, &v.KeyID, &v.Model, &v.Endpoint, &v.Stream, &v.AtMS, &v.StartedMS, &v.Status, &v.ResponseHeadersStatus, &v.Outcome, &v.Result, &v.FailureReason, &v.DurationMS, &v.DispatchMS, &v.ResponseCreatedMS, &v.FirstTextMS, &v.InputTokens, &v.OutputTokens, &v.CacheReadTokens, &sortValue, &v.ObservedAttempts); err != nil {
 			return out, err
 		}
 		if len(out.Data) == 50 {
