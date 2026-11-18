@@ -66,9 +66,6 @@ it("uses the displayed channel spending source and never falls back to a whole-d
     eligible: true,
     stats: { ...emptyStats(), estimated_cost_usd: 100 },
   } as Channel;
-  const balance = {
-    data: { provider: row.provider, status: "complete", actual_cost_usd: 20 },
-  };
   const receipt: SubChannelSpendResult = {
     isPending: false,
     isError: false,
@@ -99,7 +96,7 @@ it("uses the displayed channel spending source and never falls back to a whole-d
           <tr>
             <ChannelMetricCells
               row={row}
-              balance={balance}
+              historicalCost={{ amount: 20, pending: false }}
               actualRange={{ supported }}
               importedChannel={imported}
               spend={spend}
@@ -286,9 +283,7 @@ it("uses each model's sale percentage, including explicit free pricing", () => {
                 },
               }}
               actualRange={{ supported: true }}
-              balance={{
-                data: { provider: "p", status: "complete", actual_cost_usd: 5 },
-              }}
+              historicalCost={{ amount: 5, pending: false }}
             />
           </tr>
         </tbody>

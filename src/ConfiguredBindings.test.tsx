@@ -6,13 +6,13 @@ import type { ReactNode } from "react";
 import { ChannelAccess } from "./ChannelAccess";
 import { combineChannelSpend, useSubChannelSpend } from "./SubChannelSpend";
 import type { SubChannelSpendResult } from "./SubChannelSpend";
-import { useChannelAccountBalances, withAccountWallet } from "./ChannelAccountBalances";
+import { useChannelAccountBalances } from "./ChannelAccountBalances";
 import { accountBalanceQuery } from "./accountBalance";
 import { BalanceValue } from "./ChannelMetrics";
 import { withSubQuality } from "./ChannelChecks";
 import type { Checks } from "./ChannelChecks";
 import type { InstalledChannel, SubImportsQuery } from "./sub2apiImports";
-import type { Balance, Channel } from "./types";
+import type { Channel } from "./types";
 import { providerId, balanceIsLow } from "./format";
 
 const row = {
@@ -163,12 +163,12 @@ it("uses account balances once across shared keys and retains negative balance f
     { wrapper },
   );
   await waitFor(() =>
-    expect(result.current.get(providerId(bound))?.data?.keys?.[0].amount).toBe(
+    expect(result.current.get(providerId(bound))?.data[0].amount).toBe(
       -1,
     ),
   );
   const balance = result.current.get(providerId(bound))!.data!;
-  expect(balance.keys).toHaveLength(1);
+  expect(balance).toHaveLength(1);
   expect(balanceIsLow(balance)).toBe(true);
   expect(fetch).toHaveBeenCalledTimes(1);
 });
@@ -188,8 +188,8 @@ it("shares one wallet and timestamp across configured, copied and imported chann
     { initialProps: { providers: channels.map(providerId) },
       wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> },
   );
-  await waitFor(() => expect(result.current.get(providerId(imported))?.data?.keys?.[0]).toMatchObject({
-    amount: -0.0584, checked_at: 100, kind: "account_wallet", label: "站点账号",
+  await waitFor(() => expect(result.current.get(providerId(imported))?.data[0]).toMatchObject({
+    amount: -0.0584, checked_at: 100, account_id: "account", label: "站点账号",
   }));
   expect(fetch).toHaveBeenCalledTimes(1);
   wallet = { status: "ok", amount: 99.9416, checked_at: 200 };
@@ -197,14 +197,14 @@ it("shares one wallet and timestamp across configured, copied and imported chann
   await waitFor(() => {
     for (const channel of channels) {
       const balance = result.current.get(providerId(channel))!.data!;
-      expect(balance.keys).toHaveLength(1);
-      expect(balance.keys![0]).toMatchObject({ amount: 99.9416, checked_at: 200 });
+      expect(balance).toHaveLength(1);
+      expect(balance[0]).toMatchObject({ amount: 99.9416, checked_at: 200 });
       expect(balanceIsLow(balance)).toBe(false);
     }
   });
   // Changing the source/model view does not create a separate account wallet.
   rerender({ providers: [providerId(imported)] });
-  expect(result.current.get(providerId(imported))?.data?.keys?.[0].amount).toBe(99.9416);
+  expect(result.current.get(providerId(imported))?.data[0].amount).toBe(99.9416);
   // The account list also consumes the exact same query/cache entry.
   expect(await client.fetchQuery(accountBalanceQuery("wallet-user", "account", "https://site.test"))).toEqual(wallet);
   expect(fetch).toHaveBeenCalledTimes(2);
@@ -219,44 +219,11 @@ it("keeps accounts on the same site separate and does not turn partial bindings 
   const ambiguous = { ...bound, provider: "ambiguous", binding_status: "ambiguous" as const };
   const channels = [bound, other, partial, ambiguous];
   const { result } = renderHook(() => useChannelAccountBalances(channels.map(providerId), channels, "separate", true, false), { wrapper });
-  await waitFor(() => expect(result.current.get(providerId(other))?.data?.keys?.[0].amount).toBe(10));
-  expect(result.current.get(providerId(bound))?.data?.keys?.[0].amount).toBe(20);
+  await waitFor(() => expect(result.current.get(providerId(other))?.data[0].amount).toBe(10));
+  expect(result.current.get(providerId(bound))?.data[0].amount).toBe(20);
   expect(result.current.has(providerId(partial))).toBe(false);
   expect(result.current.has(providerId(ambiguous))).toBe(false);
   expect(fetch).toHaveBeenCalledTimes(2);
-});
-it("replaces only gateway wallets and preserves key quotas, subscriptions and receipt totals", async () => {
-  const quota = { position: 2, kind: "key_quota", status: "ok", amount: 2, checked_at: 90 };
-  const subscription = { position: 3, kind: "subscription", status: "ok", amount: 3, checked_at: 90 };
-  const raw = {
-    data: { provider: "imported", status: "complete", actual_cost_usd: 12, keys: [
-      { position: 1, kind: "wallet", status: "ok", amount: -0.0584, checked_at: 90, actual_cost_usd: 4 },
-      quota, subscription,
-    ] } as Balance,
-    isPending: false, isError: false, refetch: vi.fn(async () => {}),
-  };
-  const account = {
-    needsChannelBalance: true,
-    data: { provider: "imported", status: "complete", keys: [
-      { position: 1, kind: "account_wallet", status: "ok", amount: 99.9416, checked_at: 200 },
-    ] } as Balance,
-    isPending: false, isError: false, refetch: vi.fn(async () => {}),
-  };
-  const result = withAccountWallet(raw, account);
-  expect(result.data?.keys?.[0]).toMatchObject({ amount: 99.9416, checked_at: 200, actual_cost_usd: 4 });
-  expect(result.data?.keys?.slice(1)).toEqual([quota, subscription]);
-  expect(result.data?.actual_cost_usd).toBe(12);
-  expect(raw.data.keys?.[0].amount).toBe(-0.0584);
-  await result.refetch();
-  expect(account.refetch).toHaveBeenCalledTimes(1);
-  expect(raw.refetch).toHaveBeenCalledTimes(1);
-  for (const kind of ["key_quota", "subscription", "rate_limits", undefined]) {
-    const other = { ...raw, data: { ...raw.data, keys: [{ ...quota, kind }] } };
-    expect(withAccountWallet(other, account)).toBe(other);
-  }
-  expect(withAccountWallet(raw)).toBe(raw);
-  expect(withAccountWallet(raw, { ...account, data: undefined, isPending: true })).toMatchObject({ data: undefined, isPending: true });
-  expect(withAccountWallet(raw, { ...account, isError: true })).toMatchObject({ data: undefined, isError: true });
 });
 it("shows a verified New API account wallet when the imported channel has no Sub2API usage route", async () => {
   let wallet = { status: "ok", amount: 28.250438, checked_at: 100, provider_kind: "newapi" };
@@ -264,70 +231,21 @@ it("shows a verified New API account wallet when the imported channel has no Sub
   vi.stubGlobal("fetch", fetch);
   const imported: InstalledChannel = { ...bound, kind: undefined, binding_status: undefined, bound_keys: undefined };
   const copy = { ...imported, provider: "copy", group_id: 8 };
-  const raw = {
-    data: { provider: imported.provider, status: "complete", key_count: 1,
-      keys: [{ position: 1, status: "unsupported", http_status: 404 }] } as Balance,
-    isPending: false, isError: false, refetch: vi.fn(async () => {}),
-  };
   const { result } = renderHook(() => useChannelAccountBalances([imported, copy].map(providerId), [imported, copy], "newapi-wallet", true, false), { wrapper });
-  await waitFor(() => expect(result.current.get(providerId(imported))?.supportsWalletFallback).toBe(true));
+  await waitFor(() => expect(result.current.get(providerId(imported))?.data[0].amount).toBe(28.250438));
   for (const channel of [imported, copy]) {
-    expect(withAccountWallet(raw, result.current.get(providerId(channel))).data).toMatchObject({
-      status: "complete", key_count: 1,
-      keys: [{ kind: "account_wallet", status: "ok", currency: "USD", amount: 28.250438, checked_at: 100 }],
-    });
+    expect(result.current.get(providerId(channel))?.data).toMatchObject([
+      { status: "ok", amount: 28.250438, checked_at: 100, account_id: "account" },
+    ]);
   }
   expect(fetch).toHaveBeenCalledTimes(1);
-  render(<Tooltip.Provider><BalanceValue detail balance={withAccountWallet(raw, result.current.get(providerId(imported))).data} /></Tooltip.Provider>);
+  render(<Tooltip.Provider><BalanceValue detail balance={result.current.get(providerId(imported))?.data} /></Tooltip.Provider>);
   expect(screen.getByText("$28.2504")).toBeVisible();
-  expect(screen.getByText("站点账号余额")).toBeVisible();
-  expect(screen.queryByText("上游未提供余额接口")).not.toBeInTheDocument();
+  expect(screen.queryByText(/Key|额度|鉴权失败/)).not.toBeInTheDocument();
   wallet = { ...wallet, amount: -0.1, checked_at: 200 };
   await result.current.get(providerId(copy))!.refetch();
-  await waitFor(() => expect(balanceIsLow(withAccountWallet(raw, result.current.get(providerId(imported))).data)).toBe(true));
+  await waitFor(() => expect(balanceIsLow(result.current.get(providerId(imported))?.data)).toBe(true));
   expect(fetch).toHaveBeenCalledTimes(2);
-});
-it("limits the New API wallet fallback to complete missing-endpoint results", async () => {
-  const account = {
-    needsChannelBalance: true, supportsWalletFallback: true,
-    data: { provider: "imported", status: "complete", key_count: 1,
-      keys: [{ position: 1, kind: "account_wallet", status: "ok", amount: 490.96758, checked_at: 200 }] } as Balance,
-    isPending: false, isError: false, refetch: vi.fn(async () => {}),
-  };
-  const raw = {
-    data: { provider: "imported", status: "complete", key_count: 2,
-      keys: [404, 405].map((http_status, index) => ({ position: index + 1, status: "unsupported", http_status })) } as Balance,
-    isPending: false, isError: false, refetch: vi.fn(async () => {}),
-  };
-  const result = withAccountWallet(raw, account);
-  expect(result.data?.keys).toHaveLength(1);
-  expect(result.data?.key_count).toBe(1);
-  await result.refetch();
-  expect(raw.refetch).toHaveBeenCalledTimes(1);
-  expect(account.refetch).toHaveBeenCalledTimes(1);
-  expect(withAccountWallet(raw, { ...account, supportsWalletFallback: false })).toBe(raw);
-  for (const state of [{ isPending: true }, { isError: true }]) {
-    const failed = { ...raw, ...state };
-    expect(withAccountWallet(failed, account)).toBe(failed);
-  }
-  for (const data of [
-    { ...raw.data, status: "pending" },
-    { ...raw.data, omitted_keys: 1 },
-    { ...raw.data, key_count: 3 },
-    { ...raw.data, key_count: 0, keys: [] },
-    ...["access_denied", "rate_limited", "timeout", "network_error", "unsupported"].map((status) => ({ ...raw.data, keys: [{ position: 1, status }], key_count: 1 })),
-    ...["key_quota", "subscription", "key_rate_limits"].map((kind) => ({ ...raw.data, keys: [{ position: 1, status: "ok", kind, amount: 2 }], key_count: 1 })),
-    { ...raw.data, keys: [raw.data.keys![0], { position: 2, status: "ok", kind: "key_quota", amount: 2 }] },
-  ]) {
-    const other = { ...raw, data };
-    expect(withAccountWallet(other, account)).toBe(other);
-  }
-  expect(withAccountWallet(raw)).toBe(raw);
-  expect(withAccountWallet(raw, { ...account, isPending: true })).toMatchObject({ data: undefined, isPending: true });
-  expect(withAccountWallet(raw, { ...account, isError: true })).toMatchObject({ data: undefined, isError: true });
-  const missing = withAccountWallet(raw, { ...account, data: { ...account.data, keys: [{ position: 1, kind: "account_wallet", status: "missing", amount: null }] } });
-  expect(missing.data?.keys?.[0].amount).toBeNull();
-  expect(balanceIsLow(missing.data)).toBe(false);
 });
 it("scans different account sites concurrently and keeps accounts on the same site serial", async () => {
   const finish = new Map<string, () => void>();

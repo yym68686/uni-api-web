@@ -1,30 +1,29 @@
-# New API channel wallet fallback
+# Site account balances in channel observation
 
-The observation table normally reads the gateway's `/v1/channel-balances`.
-Its Sub2API adapter calls `/v1/usage`, which New API sites can return 404 for.
-The site-account list instead uses the authenticated `/api/user/self` wallet.
+Channel observation, channel details, balance management, and site-account
+management share the same account wallet query. For New API this is backed by
+the authenticated `/api/user/self` wallet. An account is queried once across
+its groups and channels; the resulting balance is shared, not additive.
 
-For an imported channel with a verified account/group association, a complete
-404/405 missing-usage result may use that same account wallet when the account
-adapter is `newapi`. The balance response includes `provider_kind`, including
-legacy cached balances; management also seeds this metadata into the shared
-account query. One account is queried once across its groups and channels.
-The display explicitly identifies this value as the site account balance.
+Imported channels use their recorded account/group association. Configured
+channels use exact, fully verified bindings only; unmatched, partially matched
+and ambiguous credentials never gain a wallet by hostname. A missing wallet
+is not zero. A refresh failure marks any retained amount as the last result
+and excludes it from the verified-balance filters.
 
-Successful key quotas, subscriptions and periodic limits remain unchanged.
-Authentication, rate-limit, network and timeout errors do not qualify for this
-fallback. Neither incomplete key results nor omitted keys qualify. Unmatched,
-partially matched and ambiguous credentials never gain a wallet by hostname.
-An unavailable wallet remains missing/error; it is not turned into zero.
+API-key quotas, subscriptions and periodic limits are not displayed or
+queried by the account console for balance. Standalone legacy connections
+may still read the gateway's `/v1/channel-balances` for its historical
+`actual_cost_usd` field when displaying a supported calendar range; other
+fields from that response never enter the wallet display.
 
 The existing account adapter divides raw `quota` by `quota_per_unit` to obtain
 the console's USD accounting amount. It does not use the display-oriented
 `/dashboard/billing/subscription` and `/dashboard/billing/usage` values: New API
 can convert those values to CNY or token display units. Existing receipt totals
-and their time/model scope remain independent of the wallet fallback.
+and their time/model scope remain independent of the wallet.
 
 Upstream contracts: [user controller](https://github.com/QuantumNous/new-api/blob/2de51a19e35a602a0041d380b29be7c9bcd1e0e5/controller/user.go),
 [billing controller](https://github.com/QuantumNous/new-api/blob/2de51a19e35a602a0041d380b29be7c9bcd1e0e5/controller/billing.go),
 [billing routes](https://github.com/QuantumNous/new-api/blob/2de51a19e35a602a0041d380b29be7c9bcd1e0e5/router/dashboard.go).
-No model requests, gateway configuration changes, token creation or credential
-retransmission are needed for this fallback.
+Reading wallets does not send model requests or change gateway configuration.

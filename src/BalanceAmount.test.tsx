@@ -2,51 +2,24 @@ import { it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { BalanceValue } from "./ChannelMetrics";
-it("shows the upstream endpoint failure without inventing a balance", () => {
-  render(<Tooltip.Provider><BalanceValue balance={{
-    provider: "openai-next", status: "complete", key_count: 1,
-    keys: [{ position: 1, status: "unsupported", http_status: 404 }],
-  }} /></Tooltip.Provider>);
-  expect(screen.getByText("上游未提供余额接口")).toBeVisible();
-  expect(screen.queryByText("未适配")).not.toBeInTheDocument();
+it("does not invent a balance when an account is unlinked or its balance is missing", () => {
+  const { rerender } = render(<Tooltip.Provider><BalanceValue /></Tooltip.Provider>);
+  expect(screen.getByText("站点账号未核验")).toBeVisible();
+  rerender(<Tooltip.Provider><BalanceValue balance={[{ account_id: "site", status: "missing", amount: null }]} /></Tooltip.Provider>);
+  expect(screen.getByText("暂无站点余额")).toBeVisible();
   expect(screen.queryByText("$0.00")).not.toBeInTheDocument();
 });
-it("uses the same colors for channel wallets and each remaining-quota window", () => {
-  render(
-    <Tooltip.Provider>
-      <BalanceValue
-        detail
-        balance={{
-          provider: "site",
-          status: "complete",
-          keys: [
-            {
-              position: 1,
-              status: "ok",
-              kind: "wallet",
-              currency: "USD",
-              amount: -1,
-            },
-            {
-              position: 2,
-              status: "ok",
-              windows: [
-                { window: "5h", remaining: 0 },
-                { window: "7d", remaining: 50 },
-                { window: "30d", remaining: 100 },
-              ],
-            },
-            { position: 3, status: "timeout", amount: -9 },
-            { position: 4, status: "ok", unlimited: true, amount: -9 },
-          ],
-        }}
-      />
-    </Tooltip.Provider>,
-  );
+it("keeps wallet colors and marks a cached amount when refresh fails", () => {
+  render(<Tooltip.Provider>
+    <BalanceValue detail balance={[
+      ...[-1, 0, 50, 100].map(amount => ({ account_id: String(amount), status: "ok", amount })),
+      { account_id: "old", status: "error", amount: 12 },
+    ]} />
+  </Tooltip.Provider>);
   expect(screen.getByText("$-1.00")).toHaveClass("negative");
   for (const value of ["$0.00", "$50.00"])
     expect(screen.getByText(value)).toHaveClass("balance-warning");
   expect(screen.getByText("$100.00")).toHaveClass("balance-positive");
-  expect(screen.queryByText("$-9.00")).not.toBeInTheDocument();
-  expect(screen.getByText("无限额")).toBeVisible();
+  expect(screen.getByText("$12.00")).toBeVisible();
+  expect(screen.getByText("更新失败 · 上次余额")).toBeVisible();
 });

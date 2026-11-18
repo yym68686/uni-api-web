@@ -1589,12 +1589,6 @@ nav > button.active > svg {
   font-size: 22px;
   font-weight: 500;
 }
-.balance-kind {
-  display: block;
-  font-family: "Geist Variable", sans-serif;
-  font-size: 9px !important;
-  margin-top: 3px;
-}
 .guide-dialog,
 .connection-dialog {
   position: fixed;

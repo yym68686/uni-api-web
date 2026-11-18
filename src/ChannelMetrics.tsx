@@ -4,12 +4,12 @@ import { FailureCounts } from "./FailureCounts";
 import { BalanceAmount } from "./BalanceAmount";
 import { LatencyBadge } from "./LatencyBadge";
 import { CircleHelp } from "lucide-react";
-import type { Balance, Channel, Distribution } from "./types";
+import type { Channel, Distribution, SiteWallet } from "./types";
+import type { SiteBalanceResult } from "./ChannelAccountBalances";
 import { Tip, Spinner } from "./ui";
 import {
-  balanceKind,
-  balanceLabel,
-  balanceStatus,
+  hasWalletAmount,
+  walletStatusLabel,
   dateTime,
   ms,
   count,
@@ -23,11 +23,6 @@ import type { SubChannelSpendResult } from "./SubChannelSpend";
 import { salePercent } from "./modelPrices";
 import { ChannelProfit, channelProfitCost } from "./ChannelProfit";
 import { observationPreset, type ChannelMetricLayout, type ObservationColumn, type DetectionColumn } from "./observationColumns";
-export interface BalanceResult {
-  data?: Balance;
-  isPending?: boolean;
-  isError?: boolean;
-}
 type MetricColumnsProps = {
   layout?: ChannelMetricLayout;
   compact?: boolean;
@@ -37,102 +32,49 @@ type MetricColumnsProps = {
 export function BalanceValue({
   balance,
   loading,
-  failed,
   detail = false,
 }: {
-  balance?: Balance;
+  balance?: SiteWallet[];
   loading?: boolean;
-  failed?: boolean;
   detail?: boolean;
 }) {
-  if (loading && !balance)
-    return (
-      <span className="loading-text">
-        <Spinner small />
-        查询中
-      </span>
-    );
-  if (!balance || failed) return <span className="muted">查询失败</span>;
-  if (!balance.keys?.length)
-    return (
-      <span className="muted">
-        {balanceStatus[balance.status] || "暂无数据"}
-      </span>
-    );
-  if (!detail && (balance.keys.length > 1 || balance.omitted_keys)) {
+  if (!balance?.length) {
+    return loading
+      ? <span className="loading-text"><Spinner small />查询中</span>
+      : <span className="muted">站点账号未核验</span>;
+  }
+  function walletValue(wallet: SiteWallet) {
+    return <>
+      {hasWalletAmount(wallet) && <BalanceAmount value={wallet.amount} />}
+      {(wallet.status !== "ok" || !hasWalletAmount(wallet)) &&
+        <small className="muted"> {walletStatusLabel(wallet)}</small>}
+    </>;
+  }
+  if (!detail && balance.length > 1) {
     return <Tip text={<div className="table-diagnostic-tip">
-      {balance.keys.map((item, index) => <div key={index}>
-        <strong>{item.label || `Key ${item.position ?? index + 1}`}</strong> · {balanceLabel(item)}
-        {item.checked_at ? <div>{dateTime(item.checked_at)}</div> : null}
+      {balance.map(wallet => <div key={wallet.account_id}>
+        <strong>{wallet.label || "站点账号"}</strong> · {walletValue(wallet)}
+        {wallet.checked_at ? <div>{dateTime(wallet.checked_at)}</div> : null}
       </div>)}
-      {balance.omitted_keys ? <div>另 {balance.omitted_keys} 个密钥未查询</div> : null}
-      <div>共享余额不可相加。</div>
+      <div>各账号余额单独显示，不合计。</div>
     </div>}>
-      <span className="mono balance-key-summary">{balance.keys.length + (balance.omitted_keys || 0)} 个密钥</span>
+      <span className="mono">{balance.length} 个站点账号</span>
     </Tip>;
   }
   return (
     <div className={`balance-values ${detail ? "expanded" : ""}`}>
-      {balance.keys.map((item, index) => (
-        <Tip
-          key={`${item.position ?? ""}:${index}`}
-          keyboard={detail}
-          text={
-            <>
-              <strong>{balanceKind[item.kind || ""] || "余额查询"}</strong>
-              <br />
-              {item.http_status && item.status !== "ok" && (
-                <>上游余额接口返回 HTTP {item.http_status}<br /></>
-              )}
-              {item.checked_at
-                ? `查询时间 ${dateTime(item.checked_at)} · 最多缓存 5 分钟`
-                : "上游尚未提供金额"}
-              <br />
-              同一账户的多个渠道余额可能共享，不可相加。
-            </>
-          }
-        >
+      {balance.map(wallet => (
+        <Tip key={wallet.account_id} keyboard={detail} text={<>
+          <strong>{wallet.label || "站点账号余额"}</strong><br />
+          {wallet.checked_at ? `查询时间 ${dateTime(wallet.checked_at)}` : "暂无查询时间"}<br />
+          同一站点账号的渠道共享余额，不可相加。
+        </>}>
           <span className="amount">
-            {item.label && detail ? (
-              <small>{item.label} </small>
-            ) : (
-              balance.keys!.length > 1 && <small>Key {item.position} </small>
-            )}
-            {item.status !== "ok" || item.unlimited ? (
-              balanceLabel(item)
-            ) : typeof item.amount === "number" &&
-              Number.isFinite(item.amount) ? (
-              <BalanceAmount
-                value={item.amount}
-                currency={item.currency || "USD"}
-              />
-            ) : item.windows && item.windows.length > 1 && !detail ? (
-              <span title={balanceLabel(item)}>{item.windows.length} 个周期额度</span>
-            ) : item.windows?.length ? (
-              item.windows.map((window, index) => (
-                <span key={window.window}>
-                  {index > 0 && " / "}
-                  {window.window} ·{" "}
-                  <BalanceAmount
-                    value={window.remaining}
-                    currency={item.currency || "USD"}
-                  />
-                </span>
-              ))
-            ) : (
-              <span className="muted">{balanceLabel(item)}</span>
-            )}
-            {detail && (
-              <small className="balance-kind">
-                {balanceKind[item.kind || ""]}
-              </small>
-            )}
+            {detail && wallet.label && <small>{wallet.label} </small>}
+            {walletValue(wallet)}
           </span>
         </Tip>
       ))}
-      {!!balance.omitted_keys && (
-        <small>另 {balance.omitted_keys} 个密钥未查询</small>
-      )}
     </div>
   );
 }
@@ -277,7 +219,7 @@ export function ChannelMetricHeaders({
           利润参考 <CircleHelp size={12} />
         </Tip>
       </th>;
-      case "balance": return <th className="column-balance">余额<span className="balance-heading-extra"> / 额度</span></th>;
+      case "balance": return <th className="column-balance">站点余额</th>;
       default: return renderDetection?.(id);
     }
   }
@@ -287,7 +229,9 @@ export function ChannelMetricCells({
   row,
   inflight,
   balance,
+  balanceLoading = false,
   actualRange,
+  historicalCost,
   spend,
   importedChannel = false,
   stale = false,
@@ -299,8 +243,10 @@ export function ChannelMetricCells({
 }: MetricColumnsProps & {
   row: Channel;
   inflight?: number | null;
-  balance?: BalanceResult;
+  balance?: SiteBalanceResult;
+  balanceLoading?: boolean;
   actualRange: ActualCostRange;
+  historicalCost?: { amount?: number | null; pending: boolean };
   spend?: SubChannelSpendResult;
   importedChannel?: boolean;
   stale?: boolean;
@@ -376,12 +322,12 @@ export function ChannelMetricCells({
           <Tip keyboard={false} text="此渠道未关联 sub2api 账号的业务 Key，只能读取上游按日汇总；当前滚动窗口不显示整日金额。">
             <span className="muted">按日</span>
           </Tip>
-        ) : balance?.isPending && !balance.data ? (
+        ) : historicalCost?.pending ? (
           <span className="muted">查询中</span>
-        ) : balance?.data?.actual_cost_usd == null ? (
+        ) : historicalCost?.amount == null ? (
           <span className="muted">—</span>
         ) : (
-          usd(balance.data.actual_cost_usd)
+          usd(historicalCost.amount)
         )}
       </td>;
       case "profit": {
@@ -402,8 +348,7 @@ export function ChannelMetricCells({
       case "balance": return <td className="column-balance">
         <BalanceValue
           balance={balance?.data}
-          loading={balance?.isPending}
-          failed={balance?.isError}
+          loading={balanceLoading || balance?.isPending}
         />
       </td>;
       default: return renderDetection?.(id);

@@ -377,7 +377,6 @@
 .workspace .observation-table[data-compact] th.observation-status {width:18%}
 .workspace .observation-table[data-compact] :is(th,td).rank {width:27px;font-size:10px;padding-inline:5px}
 .workspace .observation-table[data-compact] thead:has(.rank) .channel-identity {width:45%}
-.workspace .observation-table[data-compact] .balance-heading-extra {display:none}
 .workspace .observation-table .column-balance .balance-values {align-items:flex-end}
 .workspace .observation-table[data-compact] .column-balance .amount small {display:none}
 .workspace .observation-table th,

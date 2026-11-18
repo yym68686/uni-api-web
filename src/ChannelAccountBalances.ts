@@ -1,7 +1,7 @@
 import { useQueries } from "@tanstack/react-query";
 import { accountBalanceQuery } from "./accountBalance";
 import type { InstalledChannel } from "./sub2apiImports";
-import type { Balance } from "./types";
+import type { SiteWallet } from "./types";
 import { providerId } from "./format";
 
 interface WalletAccount {
@@ -10,61 +10,10 @@ interface WalletAccount {
   base?: string;
 }
 
-interface ChannelBalanceResult {
-  data?: Balance;
+export interface SiteBalanceResult {
+  data: SiteWallet[];
   isPending: boolean;
-  isError: boolean;
   refetch: () => Promise<unknown>;
-}
-
-interface AccountBalanceResult extends ChannelBalanceResult {
-  needsChannelBalance: boolean;
-  supportsWalletFallback?: boolean;
-}
-
-// Imported channels may expose a key quota or subscription instead of a wallet.
-// A missing New API usage route can fall back to its proven account wallet.
-// Successful key quotas/subscriptions and credential/network errors stay intact.
-export function withAccountWallet(
-  raw: ChannelBalanceResult,
-  account?: AccountBalanceResult,
-): ChannelBalanceResult {
-  if (!account) return raw;
-  if (!account.needsChannelBalance) return account;
-  if (!raw.data) return raw;
-  const isWallet = (kind?: string) => kind === "wallet" || kind === "account_wallet";
-  const missingNewAPIUsage = account.supportsWalletFallback
-    && !raw.isPending && !raw.isError
-    && raw.data.status === "complete"
-    && !raw.data.omitted_keys
-    && !!raw.data.keys?.length
-    && raw.data.keys.length === raw.data.key_count
-    && raw.data.keys.every((key) => key.status === "unsupported"
-      && [404, 405].includes(key.http_status || 0));
-  if (!missingNewAPIUsage && !raw.data?.keys?.some((key) => isWallet(key.kind))) return raw;
-  const refetch = () => Promise.all([account.refetch(), raw.refetch()]);
-  const wallet = account.data?.keys?.[0];
-  if (account.isPending || account.isError || !wallet) {
-    // An old gateway wallet must not reappear while the account refresh fails
-    // or is still loading. All views should reflect the same account state.
-    return { data: undefined, isPending: account.isPending, isError: account.isError, refetch };
-  }
-  const keys = missingNewAPIUsage
-    ? account.data!.keys
-    : raw.data.keys!.map((key) => isWallet(key.kind)
-      ? { ...key, ...wallet, position: key.position }
-      : key);
-  return {
-    data: {
-      ...raw.data,
-      // One wallet per account, even when several channels/keys share it.
-      ...(missingNewAPIUsage ? { key_count: account.data!.key_count } : {}),
-      keys,
-    },
-    isPending: false,
-    isError: false,
-    refetch,
-  };
 }
 
 function walletAccounts(channel: InstalledChannel): WalletAccount[] {
@@ -116,37 +65,21 @@ export function useChannelAccountBalances(
       const pending = unique.some(
         (key) => byAccount.get(key.account_id)?.isPending,
       );
-      const errors = unique.some(
-        (key) => byAccount.get(key.account_id)?.isError,
-      );
-      const balance: Balance = {
-        provider: channel.provider,
-        status: "complete",
-        key_count: unique.length,
-        keys: unique.map((key, index) => {
-          const query = byAccount.get(key.account_id);
-          return {
-            position: index + 1,
-            label: accountNames.get(key.account_id),
-            account_id: key.account_id,
-            kind: "account_wallet",
-            currency: "USD",
-            status: query?.data?.status || "unavailable",
-            amount: query?.data?.amount,
-            checked_at: query?.data?.checked_at,
-          };
-        }),
-      };
+      const wallets: SiteWallet[] = unique.map(({ account_id }) => {
+        const query = byAccount.get(account_id);
+        return {
+          label: accountNames.get(account_id),
+          account_id,
+          status: query?.isError ? "error" : query?.isPending ? "pending" : query?.data?.status || "missing",
+          amount: query?.data?.amount,
+          checked_at: query?.data?.checked_at,
+        };
+      });
       return [
         providerId(channel),
         {
-          needsChannelBalance: channel.kind !== "configured",
-          supportsWalletFallback: unique.every(
-            (key) => byAccount.get(key.account_id)?.data?.provider_kind === "newapi",
-          ),
-          data: pending ? undefined : balance,
+          data: wallets,
           isPending: pending,
-          isError: errors,
           refetch: () =>
             Promise.all(
               unique.map((key) =>
@@ -161,12 +94,10 @@ export function useChannelAccountBalances(
   );
 }
 
-export function walletGroups(rows: Iterable<[string, {data?:Balance;isError?:boolean}]>) {
-  const groups = new Map<string,{label:string; wallet:NonNullable<Balance["keys"]>[number]; providers:Set<string>}>();
+export function walletGroups(rows: Iterable<[string, SiteBalanceResult]>) {
+  const groups = new Map<string,{label:string; wallet:SiteWallet; providers:Set<string>}>();
   for (const [provider, result] of rows) {
-    if (result.isError) continue;
-    for (const wallet of result.data?.keys || []) {
-      if (!wallet.account_id || wallet.kind !== "account_wallet") continue;
+    for (const wallet of result.data) {
       const found = groups.get(wallet.account_id);
       if (found) found.providers.add(provider);
       else groups.set(wallet.account_id,{label:wallet.label || "站点账号",wallet,providers:new Set([provider])});

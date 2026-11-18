@@ -1,4 +1,4 @@
-import { balanceLabel, balanceTone } from "./format";
+import { formatBalance, balanceTone } from "./format";
 
 export function BalanceAmount({
   value,
@@ -11,7 +11,7 @@ export function BalanceAmount({
   return (
     <span className={`amount ${balanceTone(value)}`}>
       {known
-        ? balanceLabel({ position: 1, status: "ok", amount: value, currency })
+        ? formatBalance(value, currency)
         : "—"}
     </span>
   );

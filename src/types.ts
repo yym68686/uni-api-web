@@ -128,29 +128,10 @@ export interface ModelPrice {
   source?: string;
   verified?: boolean;
 }
-export interface BalanceKey {
+export interface SiteWallet {
+  account_id: string;
   label?: string;
-  account_id?: string;
   status: string;
-  http_status?: number;
-  kind?: string;
   amount?: number | null;
-  currency?: string;
-  unlimited?: boolean;
   checked_at?: number;
-  position: number;
-  windows?: { window: string; remaining: number }[];
-  actual_cost_usd?: number | null;
-  actual_cost_samples?: number;
-  actual_cost_source?: string;
-}
-export interface Balance {
-  provider: string;
-  status: string;
-  key_count?: number;
-  omitted_keys?: number;
-  keys?: BalanceKey[];
-  actual_cost_usd?: number | null;
-  actual_cost_samples?: number;
-  actual_cost_source?: string;
 }

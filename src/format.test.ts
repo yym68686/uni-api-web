@@ -1,55 +1,31 @@
 import { describe, expect, it } from "vitest";
-import { balanceIsLow, balanceLabel, balanceTone, summarize } from "./format";
+import { balanceIsKnown, balanceIsLow, formatBalance, walletStatusLabel, balanceTone, summarize } from "./format";
 import { cleanBase, makeLimiter, request } from "./api";
-import type { Balance, BalanceKey, Channel } from "./types";
-const key = (amount: number | null): BalanceKey => ({
+import type { SiteWallet, Channel } from "./types";
+const wallet = (amount: number | null): SiteWallet => ({
+  account_id: "wallet",
   status: "ok",
-  position: 1,
-  kind: "wallet",
   amount,
-  currency: "USD",
-});
-const balance = (keys: BalanceKey[], extra = {}): Balance => ({
-  provider: "test",
-  status: "complete",
-  keys,
-  key_count: keys.length,
-  ...extra,
 });
 describe("metric meaning", () => {
-  it("distinguishes a missing upstream balance endpoint from unsupported adapter paths", () => {
-    for (const http_status of [404, 405]) {
-      const missing = { ...key(-1), status: "unsupported", http_status };
-      expect(balanceLabel(missing)).toBe("上游未提供余额接口");
-      expect(balanceIsLow(balance([missing]))).toBe(false);
-    }
-    expect(balanceLabel({ ...key(null), status: "unsupported" })).toBe("未适配");
-    expect(balanceLabel({ ...key(null), status: "access_denied", http_status: 403 })).toBe("鉴权失败");
+  it("distinguishes a stale wallet balance from a missing value", () => {
+    expect(walletStatusLabel({ ...wallet(12), status: "error" })).toBe("更新失败 · 上次余额");
+    expect(walletStatusLabel({ ...wallet(null), status: "error" })).toBe("站点余额查询失败");
+    expect(walletStatusLabel({ ...wallet(null), status: "missing" })).toBe("暂无站点余额");
+    expect(formatBalance(0, "USD")).toBe("$0.00");
   });
-  it("requires all keys to be known and exhausted", () => {
-    expect(balanceIsLow(balance([key(0), key(-1)]))).toBe(true);
+  it("requires every linked wallet to have a verified nonpositive amount", () => {
+    expect(balanceIsLow([wallet(0), wallet(-1)])).toBe(true);
+    expect(balanceIsKnown([wallet(0), wallet(1)])).toBe(true);
     for (const data of [
-      balance([key(-1), key(1)]),
-      balance([key(null)]),
-      balance([{ ...key(-1), status: "timeout" }]),
-      balance([key(-1)], { key_count: 2, omitted_keys: 1 }),
-      balance([{ ...key(-1), unlimited: true }]),
+      [],
+      [wallet(-1), wallet(1)],
+      [wallet(null)],
+      [wallet(NaN)],
+      [{ ...wallet(-1), status: "error" }],
+      [{ ...wallet(-1), status: "pending" }],
     ])
       expect(balanceIsLow(data)).toBe(false);
-    expect(
-      balanceIsLow(
-        balance([
-          {
-            status: "ok",
-            position: 1,
-            kind: "key_rate_limits",
-            windows: [{ window: "5h", remaining: 0 }],
-          },
-        ]),
-      ),
-    ).toBe(true);
-    expect(balanceLabel(key(0))).toBe("$0.00");
-    expect(balanceLabel(key(null))).toBe("上游未提供");
   });
   it("uses weighted counts rather than averaging success percentages", () => {
     const rows = [

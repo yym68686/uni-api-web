@@ -10,7 +10,7 @@ export const observationColumns = [
   { id: "estimated", label: "估算消费", className: "column-finance" },
   { id: "actual", label: "实际消费", className: "column-finance" },
   { id: "profit", label: "利润参考", className: "column-finance" },
-  { id: "balance", label: "余额 / 额度", className: "column-balance" },
+  { id: "balance", label: "站点余额", className: "column-balance" },
   { id: "quality", label: "是否降智", className: "column-quality" },
   { id: "fingerprint", label: "指纹", className: "column-quality" },
 ] as const;

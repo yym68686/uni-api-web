@@ -1,4 +1,4 @@
-import type { Balance, BalanceKey, Channel } from "./types";
+import type { SiteWallet, Channel } from "./types";
 export const count = (value: number) =>
   new Intl.NumberFormat("en-US").format(value);
 export const ms = (value?: number | null) =>
@@ -24,24 +24,7 @@ export const rowId = (row: Channel) =>
   ]);
 export const dateTime = (seconds?: number | null) =>
   seconds && Number.isFinite(seconds) ? new Date(seconds * 1000).toLocaleString("zh-CN", { hour12: false }) : "暂无";
-export const balanceStatus: Record<string, string> = {
-  unsupported: "未适配",
-  no_key: "无密钥",
-  access_denied: "鉴权失败",
-  timeout: "查询超时",
-  network_error: "连接失败",
-  busy: "查询繁忙",
-  rate_limited: "上游限流",
-  redirect_blocked: "上游重定向",
-  upstream_error: "上游异常",
-  response_too_large: "响应过大",
-  unsupported_credential: "密钥未适配",
-  proxy_error: "代理异常",
-  query_error: "查询失败",
-};
-const nonPositive = (value: unknown) =>
-  typeof value === "number" && Number.isFinite(value) && value <= 0;
-// Color thresholds are independent from the exhausted-quota filter (<= 0).
+// Color thresholds are independent of the low wallet balance filter (<= 0).
 export function balanceTone(value?: number | null) {
   if (value == null || !Number.isFinite(value)) return "muted";
   return value < 0
@@ -50,53 +33,23 @@ export function balanceTone(value?: number | null) {
       ? "balance-warning"
       : "balance-positive";
 }
-export function keyIsLow(key: BalanceKey) {
-  return (
-    key.status === "ok" &&
-    !key.unlimited &&
-    (nonPositive(key.amount) ||
-      key.windows?.some((w) => nonPositive(w.remaining)))
-  );
+export function balanceIsLow(wallets?: SiteWallet[]) {
+  return balanceIsKnown(wallets) && wallets.every(wallet => wallet.amount <= 0);
 }
-export function balanceIsLow(balance?: Balance) {
-  return !!(
-    balance?.status === "complete" &&
-    balance.keys?.length &&
-    balance.keys.length === balance.key_count &&
-    !balance.omitted_keys &&
-    balance.keys.every(keyIsLow)
-  );
+export function balanceIsKnown(wallets?: SiteWallet[]): wallets is (SiteWallet & {amount: number})[] {
+  return !!wallets?.length && wallets.every(wallet => wallet.status === "ok" && hasWalletAmount(wallet));
 }
-export function balanceIsKnown(balance?: Balance) {
-  return !!(balance?.status === "complete" && balance.keys?.length &&
-    balance.keys.length === balance.key_count && !balance.omitted_keys &&
-    balance.keys.every(key => key.status === "ok" &&
-      (key.unlimited || (typeof key.amount === "number" && Number.isFinite(key.amount)) ||
-        (!!key.windows?.length && key.windows.every(window => Number.isFinite(window.remaining))))));
+export function hasWalletAmount(wallet: SiteWallet): wallet is SiteWallet & {amount: number} {
+  return typeof wallet.amount === "number" && Number.isFinite(wallet.amount);
 }
-export function balanceLabel(key: BalanceKey) {
-  if (key.status === "unsupported" && [404, 405].includes(key.http_status || 0))
-    return "上游未提供余额接口";
-  if (key.status !== "ok") return balanceStatus[key.status] || "查询失败";
-  if (key.unlimited) return "无限额";
-  if (typeof key.amount === "number" && Number.isFinite(key.amount))
-    return `${key.currency === "USD" ? "$" : `${key.currency || ""} `}${key.amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
-  if (key.windows?.length)
-    return key.windows
-      .map(
-        (w) =>
-          `${w.window} · ${key.currency || "USD"} ${w.remaining.toFixed(2)}`,
-      )
-      .join(" / ");
-  return "上游未提供";
+export function walletStatusLabel(wallet: SiteWallet) {
+  if (wallet.status === "pending") return "查询中";
+  if (wallet.status === "error") return hasWalletAmount(wallet) ? "更新失败 · 上次余额" : "站点余额查询失败";
+  return "暂无站点余额";
 }
-export const balanceKind: Record<string, string> = {
-  account_wallet: "站点账号余额",
-  wallet: "钱包余额",
-  key_quota: "Key 配额",
-  key_rate_limits: "周期额度",
-  subscription: "订阅剩余",
-};
+export function formatBalance(amount: number, currency: string) {
+  return `${currency === "USD" ? "$" : `${currency} `}${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
+}
 export const reasonLabel: Record<string, string> = {
   eligible: "可用",
   channel_cooldown: "冷却中",

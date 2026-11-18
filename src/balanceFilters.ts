@@ -1,21 +1,14 @@
-import { providerId } from "./format";
-import type { Balance, Channel } from "./types";
+import { balanceIsKnown, providerId } from "./format";
+import type { SiteWallet, Channel } from "./types";
 
-export function balanceThresholdState(balance: Balance | undefined, threshold: string): "below" | "above" | "unknown" {
+export function balanceThresholdState(wallets: SiteWallet[] | undefined, threshold: string): "below" | "above" | "unknown" {
   const amount = Number(threshold);
-  if (!threshold || !Number.isFinite(amount) || amount < 0 ||
-      balance?.status !== "complete" || !balance.keys?.length ||
-      (balance.key_count != null && balance.keys.length !== balance.key_count) ||
-      balance.omitted_keys ||
-      balance.keys.some(key => key.status !== "ok" || (!key.unlimited && (
-        (!!key.currency && key.currency !== "USD") ||
-        typeof key.amount !== "number" || !Number.isFinite(key.amount)
-      )))) return "unknown";
-  return balance.keys.every(key => !key.unlimited && key.amount! < amount) ? "below" : "above";
+  if (!threshold || !Number.isFinite(amount) || amount < 0 || !balanceIsKnown(wallets)) return "unknown";
+  return wallets.every(wallet => wallet.amount < amount) ? "below" : "above";
 }
 
 export function balanceBelowThreshold(
-  balance: Balance | undefined,
+  balance: SiteWallet[] | undefined,
   threshold: string,
 ) {
   return !threshold || balanceThresholdState(balance, threshold) === "below";

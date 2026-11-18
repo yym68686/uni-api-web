@@ -101,7 +101,8 @@ import type { Filters, View } from "./preferences";
 import {
   balanceIsLow,
   balanceIsKnown,
-  balanceStatus,
+  hasWalletAmount,
+  walletStatusLabel,
   count,
   dateTime,
   ms,
@@ -110,7 +111,6 @@ import {
   providerId,
 } from "./format";
 import type {
-  Balance,
   Catalog,
   Channel,
   Connection,
@@ -123,7 +123,6 @@ import { readMetrics } from "./metricsApi";
 import { trafficBuckets } from "./trafficBuckets";
 import {
   BalanceValue,
-  type BalanceResult,
   Status,
   ChannelMetricHeaders,
   ChannelMetricCells,
@@ -133,7 +132,7 @@ import { TableColumns, useTableColumns } from "./TableColumns";
 import { actualCostRange } from "./actualCost";
 import { useScopedChannelSpend } from "./SubChannelSpend";
 import { balanceSpend } from "./balanceSpend";
-import { useChannelAccountBalances, walletGroups, withAccountWallet } from "./ChannelAccountBalances";
+import { useChannelAccountBalances, walletGroups, type SiteBalanceResult } from "./ChannelAccountBalances";
 import { balanceSite, scheduleBalance } from "./balanceRequests";
 import { balanceThresholdState, rankBalanceProviders } from "./balanceFilters";
 import { useBalanceModelMetrics, balanceModelMetricID, BalanceModelMetricCells } from "./BalanceModelMetrics";
@@ -503,7 +502,7 @@ function Detail({
   row: Channel | null;
   onClose: () => void;
   onLogs: (row: Channel) => void;
-  balance?: BalanceResult;
+  balance?: SiteBalanceResult;
   imports?: SubImportsQuery;
   catalog: Channel[];
 }) {
@@ -585,11 +584,10 @@ function Detail({
                 </div>
               </div>
               <div className="detail-section">
-                <h3>上游余额 / 额度</h3>
-                <BalanceValue balance={balance?.data} loading={balance?.isPending} failed={balance?.isError} detail />
+                <h3>站点余额</h3>
+                <BalanceValue balance={balance?.data} loading={imports?.isPending} detail />
                 <p className="muted">
-                  余额由上游提供，最多缓存 5
-                  分钟。负余额不自动改变路由可用状态。
+                  显示已关联站点账号的余额。同账号的多个渠道共享余额，负余额不自动改变路由可用状态。
                 </p>
               </div>
               <ChannelDetailTrends key={`${providerId(row)}:${row.model}:trends`} row={row} {...trend} />
@@ -645,7 +643,7 @@ function Guide({ open, onClose }: { open: boolean; onClose: () => void }) {
               ],
               [
                 "余额不足",
-                "已核验且余额或额度 ≤ 0。多 Key 须均不足；未核验不等于正常。",
+                "已核验且所有关联站点账号的余额均 ≤ 0。未核验不等于正常。",
               ],
               [
                 "费用与利润参考",
@@ -733,7 +731,7 @@ export default function Dashboard({
   );
   const subQuality = useSubQualitySummary(!!baseConnection.account && needsChannelData);
   const checks = withSubQuality(rawChecks, imported.data?.data || [], subQuality.data?.data || []);
-  const { siteFor, isPending: sitesPending } = useChannelSites(baseConnection, imported.data?.data || [], needsChannelData);
+  const { siteFor } = useChannelSites(baseConnection, imported.data?.data || [], needsChannelData);
   const selectedSourceId = filters.sourceId;
   const connection = useMemo(
     () => ({
@@ -797,7 +795,7 @@ export default function Dashboard({
   const columnChoices = baseConnection.account ? observationColumns : observationColumns.filter(({ id }) => id !== "quality" && id !== "fingerprint");
   const visibleColumns = customColumns ? customColumns.filter(id => columnChoices.some(choice => choice.id === id)) : observationPreset(columnView, compactObservation, !!baseConnection.account);
   const observationLayout = customColumns ? "custom" : columnView;
-  const showBalanceColumn = visibleColumns.includes("balance") || (!baseConnection.account && visibleColumns.includes("actual"));
+  const showBalanceColumn = visibleColumns.includes("balance");
   const showSpendColumn = visibleColumns.includes("actual") || visibleColumns.includes("profit");
   const qualityColumns = visibleColumns.includes("quality") || visibleColumns.includes("fingerprint");
   const { observeHeading, level: toolsLevel } = useWorkbenchTools();
@@ -1070,11 +1068,20 @@ export default function Dashboard({
   const balanceTargets = [...new Set([...(activeAudit?.targets || []), ...(needsBalanceCoverage ? balanceCatalog : []), ...visibleBalanceProviderIds])];
   const balanceEnabled = channelView || view === "balances" || !!focusedBalance;
   const pollBalances = auto && !activeAudit && !needsBalanceCoverage;
-  const accountBalances = useChannelAccountBalances(balanceEnabled ? balanceTargets : [], imported.data?.data || [], baseConnection.session, !!baseConnection.account && balanceEnabled, pollBalances);
-  const rawBalanceQueries = useQueries({
-    queries: (balanceEnabled ? balanceTargets : []).map((provider) => ({
+  const balanceMap = useChannelAccountBalances(balanceEnabled ? balanceTargets : [], imported.data?.data || [], baseConnection.session, !!baseConnection.account && balanceEnabled, pollBalances);
+  const balanceLoading = !!baseConnection.account && imported.isPending;
+  // Standalone gateways still expose historical deductions via this legacy
+  // route. Only retain the cost field; never use this result as a wallet.
+  const historicalCostTargets = !baseConnection.account && actualRange.supported
+    ? channelView && visibleColumns.includes("actual")
+      ? [...new Set(candidateRows.slice(pageBounds(candidateRows.length), pageBounds(candidateRows.length) + 25).map(providerId))]
+      : view === "balances" && balanceView === "channels" && balanceDetails && !balanceThreshold
+        ? [...visibleBalanceProviderIds] : []
+    : [];
+  const historicalCostQueries = useQueries({
+    queries: historicalCostTargets.map((provider) => ({
       queryKey: [
-        "balance",
+        "historical-channel-cost",
         connection.session,
         provider,
         model,
@@ -1087,8 +1094,8 @@ export default function Dashboard({
             siteFor({ source_id: JSON.parse(provider)[0], provider: JSON.parse(provider)[1] }),
             JSON.parse(provider)[0] || connection.base,
           ),
-          () =>
-            request<Balance>(
+          async () =>
+            (await request<{ actual_cost_usd?: number | null }>(
               {
                 ...connection,
                 sourceId: JSON.parse(provider)[0] || connection.sourceId,
@@ -1097,48 +1104,42 @@ export default function Dashboard({
                 new URLSearchParams({
                   provider: JSON.parse(provider)[1],
                   ...(model ? { model } : {}),
-                  ...((channelView || view === "balances") && actualRange.startDate
+                  ...(actualRange.startDate
                     ? { start_date: actualRange.startDate }
                     : {}),
-                  ...((channelView || view === "balances") && actualRange.endDate
+                  ...(actualRange.endDate
                     ? { end_date: actualRange.endDate }
                     : {}),
                 }),
               signal,
-            ),
+            )).actual_cost_usd ?? null,
           signal,
           JSON.parse(provider)[0] || connection.sourceId || connection.base,
         ),
       staleTime: 300_000,
-      // Resolve the account first. Imported channels still need their balance
-      // type so key quotas/subscriptions are not mistaken for account wallets.
-      enabled: !sitesPending && (!baseConnection.account || !imported.isPending) && (!accountBalances.has(provider) || accountBalances.get(provider)!.needsChannelBalance),
-      refetchInterval: pollBalances ? 300_000 : false,
+      refetchInterval: auto ? 300_000 : false,
       refetchIntervalInBackground: false,
       retry: false,
     })),
   });
-  const balanceQueries = balanceEnabled ? balanceTargets.map((provider, i) => withAccountWallet(rawBalanceQueries[i], accountBalances.get(provider))) : [];
-  const balanceMap = new Map(
-    balanceQueries.map((query, i) => [balanceTargets[i], query]),
-  );
+  const historicalCostMap = new Map(historicalCostTargets.map((provider, index) => [provider, historicalCostQueries[index]]));
+  const balanceQueries = [...balanceMap.values()];
   const groupedWallets = walletGroups(view === "balances" ? balanceMap : []);
   const pendingBalances = balanceQueries.filter(
     (query) => query.isPending,
   ).length;
   let lowCount = 0, knownBalances = 0;
   for (const [provider, query] of balanceMap) {
-    if (!balanceScope.has(provider) || query.isError || !balanceIsKnown(query.data)) continue;
+    if (!balanceScope.has(provider) || !balanceIsKnown(query.data)) continue;
     knownBalances++;
     if (balanceIsLow(query.data)) lowCount++;
   }
   const unknownBalances = Math.max(0,balanceCatalog.length - knownBalances);
   const channelDataComplete = !!catalog.data && !!metrics.data && !!liveMetrics.data && !!keyRequestStats.data &&
-    balanceQueries.every(query => !!query.data && !query.isError) &&
     (!baseConnection.account || (!!queryClient.getQueryData(["channel-checks", baseConnection.session]) && !!subQuality.data && !!imported.data && !!sourceQuery.data));
   const filtered = channelView && balanceFilter ? candidateRows.filter(row => {
     const result = balanceMap.get(providerId(row));
-    return !result?.isError && balanceIsLow(result?.data);
+    return balanceIsLow(result?.data);
   }) : candidateRows;
   const firstProviders = useMemo(() => {
     const index = (items: Channel[]) => {
@@ -1155,7 +1156,7 @@ export default function Dashboard({
   const balanceProviders = (balanceRanks?.providers || []).filter(provider => {
     if (!balanceThreshold || !balanceThresholdValid) return true;
     const query = balanceMap.get(provider);
-    const state = balanceThresholdState(query?.isError ? undefined : query?.data, balanceThreshold);
+    const state = balanceThresholdState(query?.data, balanceThreshold);
     if (state === "unknown") thresholdUnknown++;
     return state === "below";
   });
@@ -1221,14 +1222,10 @@ export default function Dashboard({
           ? observedAnalyticsCosts.reduce((sum, value) => sum + value, 0)
           : undefined;
       const spend = balanceSpend(providerRows.map(row => channelSpend.get(rowId(row))));
-      const balance = balanceMap.get(provider)?.data;
-      const fallbackActual =
-        !baseConnection.account && actualRange.supported &&
-        typeof balance?.actual_cost_usd === "number" && Number.isFinite(balance.actual_cost_usd)
-          ? { amount: balance.actual_cost_usd, upperBound: false }
-          : undefined;
-      const actual = baseConnection.account ? spend.actual : analyticsActual ?? fallbackActual?.amount ?? null;
-      const actualUpperBound = baseConnection.account ? spend.upperBound : Boolean(fallbackActual?.upperBound);
+      const historicalCost = historicalCostMap.get(provider)?.data;
+      const fallbackActual = typeof historicalCost === "number" && Number.isFinite(historicalCost) ? historicalCost : null;
+      const actual = baseConnection.account ? spend.actual : analyticsActual ?? fallbackActual;
+      const actualUpperBound = !!baseConnection.account && spend.upperBound;
       const revenue = estimated == null
         ? null
         : providerRows.reduce((sum, row) => {
@@ -1252,7 +1249,7 @@ export default function Dashboard({
       });
     }
     return result;
-  }, [balanceMap, balanceRanks, baseConnection.account, channelSpend, filtered, actualRange.supported, balanceDetails]);
+  }, [historicalCostMap, balanceRanks, baseConnection.account, channelSpend, filtered, balanceDetails]);
   const observedDetection = useObservedDetection(baseConnection.session, channelView && !!baseConnection.account, filtered, checks, fingerprints);
   const checkingChannels = observedDetection.expanded;
   const total = channelView ? filtered.length : balanceProviders.length;
@@ -1323,7 +1320,7 @@ export default function Dashboard({
   function refreshBalances() {
     void queryClient.refetchQueries({type:"active", predicate:query=>{
       const key=query.queryKey;
-      return key[0]==="balance" && key[1]===connection.session || key[0]==="site-account-balance" && key[1]===baseConnection.session;
+      return key[0]==="site-account-balance" && key[1]===baseConnection.session;
     }},{cancelRefetch:false});
   }
   const refreshBusy =
@@ -1957,12 +1954,13 @@ export default function Dashboard({
                 </div>
               </div>
               {adjustingChannels && <span id={routeHelpId} className="sr-only">在当前页的同一来源内拖动渠道。键盘可用上下方向键移动，Home 置顶。同一渠道的所有模型一起移动。</span>}
-              {view === "balances" && <WorkbenchTabs label="余额视图" value={balanceView} onChange={setBalanceView} tabs={[["wallets","站点钱包"],["channels","渠道额度"]]} />}
-              {view === "balances" && balanceView === "wallets" ? <section className="wallet-summary" aria-label="已核验站点钱包">
-                {groupedWallets.size === 0 && <p>当前范围暂无已核验钱包</p>}
+              {view === "balances" && <WorkbenchTabs label="余额视图" value={balanceView} onChange={setBalanceView} tabs={[["wallets","站点钱包"],["channels","关联渠道"]]} />}
+              {view === "balances" && balanceView === "wallets" ? <section className="wallet-summary" aria-label="站点钱包">
+                {groupedWallets.size === 0 && <p>{balanceLoading ? "正在查询站点关联" : "当前范围暂无已核验站点账号"}</p>}
                 <ul>{[...groupedWallets].map(([id,entry])=><li key={id}>
-                  <strong>{entry.label}</strong><span>{entry.wallet.status==="ok" && entry.wallet.amount!=null
-                    ? <BalanceAmount value={entry.wallet.amount} currency={entry.wallet.currency || "USD"} /> : "金额未确认"} · 关联 {entry.providers.size} 个已查询渠道</span>
+                  <strong>{entry.label}</strong><span>{hasWalletAmount(entry.wallet) && <BalanceAmount value={entry.wallet.amount} />}
+                    {(entry.wallet.status !== "ok" || !hasWalletAmount(entry.wallet)) && <> {walletStatusLabel(entry.wallet)}</>}
+                    {" · "}关联 {entry.providers.size} 个渠道</span>
                   <button type="button" className="button small" onClick={()=>setWalletDialog(id)}>充值设置与订单</button>
                 </li>)}</ul>
               </section> : null}
@@ -2019,6 +2017,7 @@ export default function Dashboard({
                     <tbody>
                       {pageRows.map((row) => {
                         const balance = balanceMap.get(providerId(row));
+                        const historicalCost = historicalCostMap.get(providerId(row));
                         const control = adjustingChannels ? controls.info(row) : null;
                         const routeDisabled = !control?.ready || control.pending || control.stale;
                         const routeLabel = `${row.source_name || row.source_id || ""} ${channelName(row)} ${row.model}`.trim();
@@ -2063,7 +2062,9 @@ export default function Dashboard({
                               row={row}
                               inflight={liveMap.get(rowId(row))}
                               balance={balance}
+                              balanceLoading={balanceLoading}
                               actualRange={actualRange}
+                              historicalCost={historicalCost && { amount: historicalCost.data, pending: historicalCost.isPending }}
                               spend={baseConnection.account ? channelSpend.get(rowId(row)) : undefined}
                               importedChannel={!!baseConnection.account && row.provider.startsWith("sub2api-")}
                               stale={staleSources.has(row.source_id || "")}
@@ -2096,7 +2097,7 @@ export default function Dashboard({
                         <th>渠道实际消费</th>
                         <th>渠道利润参考</th>
                         </>}
-                        <th>余额</th>
+                        <th>站点余额</th>
                         <th>状态</th>
                         <th>最近查询</th>
                       </tr>
@@ -2113,11 +2114,11 @@ export default function Dashboard({
                     const sourceLink = siteFor(sourceRow) || dashboardURL(sourceList.find((source) => source.id === sourceRow?.source_id)?.base);
                     const ranks = balanceRanks?.ranks.get(provider) || [];
                     const modelRanks = balanceDetails ? ranks : ranks.slice(0,1);
-                    const checkedKeys = (balance?.data?.keys || []).filter(key => key.checked_at && key.checked_at > 0);
+                    const checkedWallets = (balance?.data || []).filter(wallet => wallet.checked_at && wallet.checked_at > 0);
                     let newest = 0, oldest = Infinity;
-                    for (const key of checkedKeys) {
-                      newest = Math.max(newest, key.checked_at!);
-                      oldest = Math.min(oldest, key.checked_at!);
+                    for (const wallet of checkedWallets) {
+                      newest = Math.max(newest, wallet.checked_at!);
+                      oldest = Math.min(oldest, wallet.checked_at!);
                     }
                     const finance = balanceFinance.get(provider);
                     return (
@@ -2168,27 +2169,25 @@ export default function Dashboard({
                         <td rowSpan={modelRanks.length}>
                           <BalanceValue
                             balance={balance?.data}
-                            loading={balance?.isPending}
-                            failed={balance?.isError}
+                            loading={balanceLoading}
                           />
                         </td>
                         <td rowSpan={modelRanks.length}>
-                          {!balance?.isError && balanceIsLow(balance?.data) ? (
+                          {balanceIsLow(balance?.data) ? (
                             <span className="status-pill cooling">余额不足</span>
-                          ) : balance?.isPending ? (
+                          ) : balanceLoading || balance?.isPending ? (
                             <span className="muted">查询中</span>
-                          ) : balance?.isError ? (
-                            <span className="status-pill cooling">查询失败</span>
+                          ) : balance?.data.some(wallet => wallet.status === "error") ? (
+                            <span className="status-pill cooling">更新失败</span>
                           ) : balanceIsKnown(balance?.data) ? (
                             <span className="status-pill healthy">已核验</span>
                           ) : (
-                            <span className="muted">
-                              {balance?.data?.status === "complete" ? "未核验" : balanceStatus[balance?.data?.status || ""] || "未核验"}
-                            </span>
+                            <span className="muted">未核验</span>
                           )}
                         </td>
                         <td rowSpan={modelRanks.length} className="muted">
-                          {newest ? <>{newest !== oldest && <small>最早 {dateTime(oldest)}<br /></small>}{dateTime(newest)}<br /><small>{checkedKeys.length} / {balance?.data?.key_count ?? "?"} 个 Key</small></> : "暂无"}
+                          {newest ? <>{newest !== oldest && <small>最早 {dateTime(oldest)}<br /></small>}{dateTime(newest)}
+                            {(balance?.data.length ?? 0) > 1 && <><br /><small>{checkedWallets.length} / {balance?.data.length} 个账号</small></>}</> : "暂无"}
                         </td>
                         </>}
                       </tr>)}</Fragment>

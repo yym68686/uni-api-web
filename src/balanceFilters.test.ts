@@ -1,13 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { balanceBelowThreshold, balanceThresholdState, rankBalanceProviders } from "./balanceFilters";
-import type { Balance, Channel } from "./types";
+import type { SiteWallet, Channel } from "./types";
 
-const balance = (amount: number): Balance => ({
-  provider: "provider",
-  status: "complete",
-  key_count: 1,
-  keys: [{ position: 1, status: "ok", amount, currency: "USD" }],
-});
+const balance = (amount: number): SiteWallet[] => [{ account_id: "account", status: "ok", amount }];
 
 const row = (
   provider: string,
@@ -61,8 +56,8 @@ describe("balance filters", () => {
   it("accepts a decimal threshold and separates unknown from non-matches", () => {
     expect(balanceThresholdState(balance(14.24), "14.25")).toBe("below");
     expect(balanceThresholdState(balance(14.25), "14.25")).toBe("above");
-    expect(balanceThresholdState({ ...balance(1), omitted_keys: 1 }, "14.25")).toBe("unknown");
-    expect(balanceThresholdState({ ...balance(1), keys: [{ position: 1, status: "ok", amount: 1, currency: "CNY" }] }, "14.25")).toBe("unknown");
+    expect(balanceThresholdState(undefined, "14.25")).toBe("unknown");
+    expect(balanceThresholdState([...balance(1), { account_id: "other", status: "missing" }], "14.25")).toBe("unknown");
   });
 
   it("limits a model to one top-N list across selected sources", () => {

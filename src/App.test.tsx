@@ -297,10 +297,11 @@ describe("dashboard workflows", () => {
     await user.selectOptions(screen.getByLabelText("模型筛选"), "model-a");
     await waitFor(() => expect(rateRow("Key 1")).toHaveTextContent("66.7%"));
   });
-  it("keeps key routing order, filters exhausted balances, exposes timing and clears credentials on disconnect", async () => {
-    const { user, client } = setup();
+  it("keeps key routing order, ignores unverified key balances and clears credentials on disconnect", async () => {
+    const { user, client, calls } = setup();
     await connect(user);
-    await waitFor(() => expect(screen.getByText("$-1.00")).toBeInTheDocument());
+    expect(screen.getAllByText("站点账号未核验")).toHaveLength(3);
+    expect(calls.some(url => url.includes("/channel-balances"))).toBe(false);
     await user.selectOptions(
       screen.getByLabelText("API key 筛选"),
       "key-second",
@@ -310,10 +311,8 @@ describe("dashboard workflows", () => {
       within(screen.getAllByRole("row")[1]).getByText("third"),
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /^余额不足$/ }));
-    await waitFor(() => expect(screen.getAllByRole("row")).toHaveLength(2));
-    expect(
-      screen.queryByRole("button", { name: /查看 first/ }),
-    ).not.toBeInTheDocument();
+    await screen.findByText("没有匹配的渠道");
+    await user.click(screen.getByRole("button", { name: /^余额不足$/ }));
     await user.click(screen.getByRole("button", { name: /查看 third/ }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("最近一次请求前等待")).toBeInTheDocument();
@@ -383,10 +382,7 @@ describe("dashboard workflows", () => {
       screen.getByLabelText("模型优先级筛选"),
       "",
     );
-    await waitFor(() => {
-      expect(screen.getAllByRole("row")).toHaveLength(2);
-      expect(within(screen.getAllByRole("row")[1]).getByText("third")).toBeInTheDocument();
-    });
+    expect(screen.getByText("没有匹配的渠道")).toBeInTheDocument();
     const balanceCatalog = calls
       .filter((url) => new URL(url).pathname.endsWith("/v1/model-channels"))
       .map((url) => new URL(url))
@@ -472,11 +468,11 @@ describe("dashboard workflows", () => {
     await app.user.type(screen.getByLabelText("搜索渠道或模型"), "third");
     await app.user.selectOptions(screen.getByLabelText("模型优先级筛选"), "3");
     await app.user.type(screen.getByLabelText("余额低于美元"), "10");
-    await waitFor(() => expect(screen.getAllByRole("row")).toHaveLength(2));
+    await screen.findByText("没有匹配的渠道");
     app.unmount();
 
     app = setup();
-    await screen.findByRole("table", {}, {timeout:5_000});
+    await screen.findByText("没有匹配的渠道", {}, {timeout:5_000});
     expect(screen.getByLabelText("API key 筛选")).toHaveValue("key-second");
     expect(screen.getByLabelText("模型筛选")).toHaveValue("");
     expect(screen.getByLabelText("时间范围筛选")).toHaveValue("today");
@@ -532,11 +528,11 @@ describe("dashboard workflows", () => {
     await app.user.selectOptions(screen.getByLabelText("流式状态筛选"), "true");
     await app.user.click(screen.getByRole("button", { name: /^余额不足$/ }));
     expect(screen.getByLabelText("排序")).toHaveTextContent(/请求顺序|配置顺序|自定义规则/);
-    await waitFor(() => expect(screen.getAllByRole("row")).toHaveLength(2));
+    await screen.findByText("没有匹配的渠道");
     app.unmount();
 
     app = setup();
-    await screen.findByRole("table", {}, {timeout:5_000});
+    await screen.findByText("没有匹配的渠道", {}, {timeout:5_000});
     expect(screen.queryByLabelText(/访问密钥/)).not.toBeInTheDocument();
     expect(app.calls[0]).toBe("https://mock.example/v1/api-keys");
     expect(screen.getByLabelText("API key 筛选")).toHaveValue("key-second");
@@ -551,7 +547,7 @@ describe("dashboard workflows", () => {
       "aria-pressed",
       "true",
     );
-    expect(screen.getAllByRole("row")).toHaveLength(2);
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
     const firstMetrics = new URL(
       app.calls.find((url) => url.includes("/analytics/v1/analytics"))!,
     );
@@ -575,7 +571,8 @@ describe("dashboard workflows", () => {
     app.unmount();
 
     app = setup();
-    await connect(app.user);
+    await connect(app.user, "https://mock.example/v1", false);
+    await screen.findByText("没有匹配的渠道");
     expect(screen.getByLabelText("搜索渠道或模型")).toHaveValue("third");
     await openFilters(app.user);
     await app.user.click(screen.getByRole("button", { name: "重置筛选" }));

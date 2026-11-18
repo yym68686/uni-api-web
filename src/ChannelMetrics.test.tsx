@@ -18,7 +18,7 @@ it("mounts only compact observation metrics and keeps counts aligned", () => {
   expect(screen.getByText("90.0%")).toBeVisible();
   expect(screen.getByText("9/10")).toBeVisible();
   expect(screen.queryByText("估算消费")).not.toBeInTheDocument();
-  expect(screen.getByRole("columnheader", {name:/余额\s*\/\s*额度/})).toBeVisible();
+  expect(screen.getByRole("columnheader", {name:"站点余额"})).toBeVisible();
 });
 
 it.each([[.98, "healthy"], [.87, "warning"], [.55, "critical"], [0, "critical"]] as const)(

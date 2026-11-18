@@ -25,6 +25,72 @@ function mount() {
   return { ...app, client };
 }
 
+it("shows the same verified site wallet on linked channels and never queries gateway key balances", async () => {
+  saveView(location.origin, "channels");
+  const rows = ["sub2api-group-a", "sub2api-group-b", "unlinked"].map(provider => ({
+    source_id: "primary", source_name: "Fugue", provider, model: "model-a",
+    upstream_model: "model-a", endpoint: "all", stream: null, eligible: true, reason: "eligible",
+    stats: emptyStats(),
+  }));
+  const calls: string[] = [];
+  let logged = false;
+  let wallet = { status: "ok", amount: 28.250438, checked_at: 200, provider_kind: "newapi" };
+  vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+    const { pathname } = new URL(input, location.origin);
+    calls.push(pathname);
+    if (pathname.endsWith("/auth/me"))
+      return Response.json({ enabled: true, authenticated: logged, username: logged ? "wallet-admin" : "" });
+    if (pathname.endsWith("/auth/login")) {
+      logged = true;
+      return Response.json({ ok: true });
+    }
+    if (pathname.endsWith("/channel-balances"))
+      return Response.json({ status: "complete", keys: [
+        { status: "access_denied", http_status: 403 },
+        { status: "ok", amount: -5, kind: "key_quota" },
+      ] });
+    const body = pathname.endsWith("/sources") ? { data: [{ id: "primary", name: "Fugue", base: "https://fixture.test", has_storage: true }] }
+      : pathname.endsWith("/sub2api/channels") ? {
+        data: rows.slice(0, 2).map((row, i) => ({ ...row, base: "https://upstream.test", account_id: "site", group_id: i + 1, models: [row.model] })),
+        labels: {}, unavailable_sources: [],
+      }
+      : pathname.endsWith("/accounts/site/balance") ? wallet
+      : /\/(model-channels|channel-metrics|analytics)$/.test(pathname) ? { data: rows, snapshot_revision: "r1", total: { requests: 1 } }
+      : { data: [], labels: {}, can_inspect_all: true, unavailable_sources: [] };
+    return Response.json(body);
+  }));
+  const user = userEvent.setup();
+  mount();
+  await user.type(await screen.findByLabelText("用户名"), "admin");
+  await user.type(screen.getByLabelText("密码"), "password-test");
+  await user.click(screen.getByRole("button", { name: /登录/ }));
+  const table = await screen.findByRole("table", {}, { timeout: 5_000 });
+  await waitFor(() => expect(within(table).getAllByText("$28.2504")).toHaveLength(2));
+  expect(within(table).getByText("站点账号未核验")).toBeVisible();
+  expect(within(table).queryByText(/鉴权失败|额度|\$-5/)).not.toBeInTheDocument();
+  expect(calls.filter(path => path.endsWith("/accounts/site/balance"))).toHaveLength(1);
+  await user.click(screen.getByRole("button", { name: /查看 sub2api-group-a/ }));
+  const detail = await screen.findByRole("dialog");
+  expect(within(detail).getByRole("heading", { name: "站点余额" })).toBeVisible();
+  expect(within(detail).getByText("$28.2504")).toBeVisible();
+  await user.keyboard("{Escape}");
+  await user.click(screen.getByRole("button", { name: "余额管理" }));
+  const balances = await screen.findByRole("table", {}, { timeout: 5_000 });
+  expect(within(balances).getAllByText("$28.2504")).toHaveLength(2);
+  await user.click(screen.getByRole("button", { name: "站点钱包" }));
+  const summary = screen.getByRole("region", { name: "站点钱包" });
+  expect(within(summary).getByText("$28.2504")).toBeVisible();
+  expect(within(summary).getByText(/关联 2 个渠道/)).toBeVisible();
+
+  wallet = { ...wallet, status: "error" };
+  await user.click(screen.getByRole("button", { name: "工具" }));
+  await user.click(screen.getByRole("button", { name: "刷新已查余额" }));
+  expect(await within(summary).findByText(/更新失败 · 上次余额/)).toBeVisible();
+  expect(within(summary).getByText("$28.2504")).toBeVisible();
+  expect(calls.filter(path => path.endsWith("/accounts/site/balance"))).toHaveLength(2);
+  expect(calls.some(path => path.endsWith("/channel-balances"))).toBe(false);
+});
+
 it("shows the shared model fingerprint immediately after quality in observation without starting a probe", async () => {
   const row = {source_id:"one",source_name:"One",provider:"native",model:"gemini-4-argon",upstream_model:"gemini-4-argon",engine:"gemini",endpoint:"all",stream:null,eligible:true,reason:"eligible",stats:emptyStats()};
   const fetchMock = vi.fn(async (input: string, _init?: RequestInit) => {
