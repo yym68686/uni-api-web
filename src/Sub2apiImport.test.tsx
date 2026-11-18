@@ -203,7 +203,7 @@ it("uses one source/key selector and one table for native and imported routes, p
   );
   mount();
   const user = userEvent.setup();
-  await screen.findByRole("button", { name: "已接入 · 3 个 Key" });
+  await screen.findByRole("button", { name: "已接入 3" });
   expect(screen.getAllByLabelText("查看 uni-api 来源")).toHaveLength(1);
   expect(screen.getAllByLabelText("查看 API key")).toHaveLength(1);
   expect(screen.queryByText(/已有渠道 ·/)).not.toBeInTheDocument();

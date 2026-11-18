@@ -1,5 +1,5 @@
 import { DetailLoading } from "./PageLoading";
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useRef, useState } from "react";
 import { Check, Pencil } from "lucide-react";
 const ChannelModelEditor = lazy(() => import("./ChannelModelEditor").then(m=>({default:m.ChannelModelEditor})));
 import { useSubGroupAccounts } from "./sub2apiAccounts";
@@ -9,6 +9,7 @@ import { boundGroups } from "./sub2apiImports";
 import type { Channel } from "./types";
 import { time } from "./format";
 import { pricePair } from "./sub2apiPriceCheck";
+import { RouteWorkspaceLoading } from "./RouteWorkspaceLoading";
 
 export function ChannelModels({
   row,
@@ -24,10 +25,16 @@ export function ChannelModels({
   session?: string;
 }) {
   const [editing, setEditing] = useState(false);
-  const editButton = row.source_id && <button className="button small detail-model-edit" onClick={() => setEditing(true)} aria-haspopup="dialog">
+  const editTrigger = useRef<HTMLButtonElement>(null);
+  const close = () => {
+    setEditing(false);
+    requestAnimationFrame(() => editTrigger.current?.focus({ preventScroll: true }));
+  };
+  const editButton = row.source_id && <button ref={editTrigger} className="button small detail-model-edit" onClick={() => setEditing(true)} aria-haspopup="dialog">
     <Pencil size={13} /> 编辑可用模型
   </button>;
-  const editor = editing && <Suspense fallback={<DetailLoading kind="models" label="模型编辑器" />}><ChannelModelEditor row={row} imports={imports} keyId={keyId} session={session} close={() => setEditing(false)} /></Suspense>;
+  const editor = editing && <Suspense fallback={<RouteWorkspaceLoading nested close={close}
+    context={row.provider_name || row.provider} label="读取模型配置…" />}><ChannelModelEditor row={row} imports={imports} keyId={keyId} session={session} close={close} /></Suspense>;
   const installed = imports.data?.data.find(
     (channel) =>
       channel.source_id === row.source_id && channel.provider === row.provider,
@@ -66,15 +73,12 @@ export function ChannelModels({
           {editButton}
         </h3>
         {editor}
-        <p className="muted">渠道配置</p>
         {configured.length ? (
           <ul className="detail-model-list">
             {configured.map((model) => (
               <li key={model}>
                 <Check size={15} className="detail-model-check" />
-                <div>
-                  <strong>{model}</strong>
-                </div>
+                <div><strong title={model}>{model}</strong></div>
                 <span className="detail-model-added">已配置</span>
               </li>
             ))}
@@ -97,9 +101,6 @@ export function ChannelModels({
         {editButton}
       </h3>
       {editor}
-      {!loading && !error && target && (
-        <p className="muted">sub2api 检测通过{installed?.kind === "configured" && " · 关联分组"}</p>
-      )}
       {error ? (
         <div className="detail-models-message" role="alert">
           <span>可用模型暂时无法读取</span>
@@ -124,7 +125,7 @@ export function ChannelModels({
             <li key={check.model}>
               <Check size={15} className="detail-model-check" />
               <div>
-                <strong>{check.model}</strong>
+                <strong title={check.model}>{check.model}</strong>
                 <small
                   title={
                     check.result
@@ -134,7 +135,7 @@ export function ChannelModels({
                       : undefined
                   }
                 >
-                  最近检测 {time(check.result?.checked_at)}
+                  {time(check.result?.checked_at)}
                 </small>
                 {installed?.kind === "configured" && groups.length === 1 && check.result?.availability.usage?.status === "matched" && (
                   <small title="关联分组最近一次检测的倍率前单价，美元／百万 token">

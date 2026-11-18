@@ -1,8 +1,6 @@
-import { DetailLoading } from "./PageLoading";
-import * as Dialog from "@radix-ui/react-dialog";
+import { RouteWorkspaceLoading } from "./RouteWorkspaceLoading";
 import { useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { X } from "lucide-react";
 import { ConfiguredChannelDialog } from "./ChannelRoutes";
 import { Sub2apiImport } from "./Sub2apiImport";
 import { useSubGroupAccounts } from "./sub2apiAccounts";
@@ -170,55 +168,14 @@ export function ChannelModelEditor({
       />
     );
   }
-  return (
-    <Dialog.Root
-      open
-      onOpenChange={(open) => {
-        if (!open) close();
-      }}
-    >
-      <Dialog.Portal>
-        <Dialog.Overlay className="dialog-overlay route-edit-overlay" />
-        <Dialog.Content className="guide-dialog route-edit-dialog">
-          <Dialog.Title>编辑可用模型</Dialog.Title>
-          <Dialog.Description>
-            {row.source_name || row.source_id} ·{" "}
-            {row.provider_name || row.provider}
-          </Dialog.Description>
-          <Dialog.Close
-            className="icon-button detail-close"
-            aria-label="关闭模型编辑"
-          >
-            <X size={18} />
-          </Dialog.Close>
-          {loading ? (
-            <DetailLoading kind="models" label="模型和路由" />
-          ) : (
-            <div role="alert">
-              <p>
-                {error?.message ||
-                  (installed
-                    ? "此渠道关联的账号或分组已不存在，请重新同步渠道管理。"
-                    : "未找到当前渠道的配置，请刷新接入状态。")}
-              </p>
-              <button
-                className="button small"
-                onClick={() => {
-                  void imports.refetch();
-                  void sources.refetch();
-                  if (installed) void accounts.refetch();
-                  else {
-                    void inventory.refetch();
-                    void routes.refetch();
-                  }
-                }}
-              >
-                重新读取
-              </button>
-            </div>
-          )}
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
-  );
+  return <RouteWorkspaceLoading nested close={close}
+    context={`${row.source_name || row.source_id} · ${row.provider_name || row.provider}`}
+    label="读取模型配置…"
+    error={loading ? undefined : error?.message || (installed ? "未找到关联分组，请重新同步站点。" : "未找到渠道配置。")}
+    retry={() => {
+      void imports.refetch();
+      void sources.refetch();
+      if (installed) void accounts.refetch();
+      else { void inventory.refetch(); void routes.refetch(); }
+    }} />;
 }

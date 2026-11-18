@@ -316,16 +316,12 @@ export function SiteRecharge({ account, onBusyChange }: { account: SubAccount; o
   if (!settings.supported)
     return (
       <section className="recharge-panel">
-        <h3>充值</h3>
-        <p>当前仅适配 sub2api + 链动。此站点不会使用其他站点的充值流程。</p>
+        <p>此站点不支持实时充值。</p>
       </section>
     );
   return (
     <section className="recharge-panel" aria-label="站点充值">
       <h3>实时充值</h3>
-      <p className="settings-note">
-        实时购买兑换码，支付后自动取码并兑换到当前账号。首次使用需完成支付宝官方授权，每笔确认含手续费的金额。
-      </p>
       {error && (
         <p className="error-banner" role="alert">
           {error}
@@ -333,7 +329,7 @@ export function SiteRecharge({ account, onBusyChange }: { account: SubAccount; o
       )}
       {settingsError && <p role="alert" className="error-banner">充值设置当前未核实：{settingsError}</p>}
       {note && (
-        <p className="settings-note" role="status">
+        <p className="dialog-inline-note" role="status">
           {note}
         </p>
       )}
@@ -344,7 +340,7 @@ export function SiteRecharge({ account, onBusyChange }: { account: SubAccount; o
           disabled={busy}
           onChange={(e) => update({ enabled: e.target.checked })}
         />
-        启用此账号的实时充值
+        启用实时充值
       </label>
       <label>
         链动店铺地址
@@ -356,9 +352,6 @@ export function SiteRecharge({ account, onBusyChange }: { account: SubAccount; o
           onChange={(e) => update({ shop_url: e.target.value })}
         />
       </label>
-      <p className="settings-note">
-        可粘贴完整店铺链接；保存时会去除登录令牌等查询参数。请选择明确用于本账号的充值商品。
-      </p>
       <button
         type="button"
         className="button small"
@@ -367,7 +360,7 @@ export function SiteRecharge({ account, onBusyChange }: { account: SubAccount; o
       >
         读取充值商品（不下单）
       </button>
-      <div className="recharge-products">
+      {(products.length > 0 || config.products.length > 0) && <div className="recharge-products">
         {products.map((p) => (
           <label key={p.key}>
             <input
@@ -386,11 +379,12 @@ export function SiteRecharge({ account, onBusyChange }: { account: SubAccount; o
           </label>
         ))}
         {!products.length && config.products.length > 0 && (
-          <p className="settings-note">
-            已绑定 {config.products.length} 个充值商品；读取商品可调整。
+          <p className="dialog-inline-note">
+            已绑定 {config.products.length} 个商品
           </p>
         )}
-      </div>
+      </div>}
+      <div className="dialog-field-grid">
       <label>
         订单联系方式
         <input
@@ -409,6 +403,7 @@ export function SiteRecharge({ account, onBusyChange }: { account: SubAccount; o
           onChange={(e) => update({ max_cny: e.target.value })}
         />
       </label>
+      </div>
       <label>
         <input
           type="checkbox"
@@ -416,8 +411,7 @@ export function SiteRecharge({ account, onBusyChange }: { account: SubAccount; o
           disabled={busy}
           onChange={(e) => setIdentityConfirmed(e.target.checked)}
         />
-        确认这些商品可兑换到 {account.base} · {account.email}
-        ，不是其他站点的兑换码
+        <span>确认商品可兑换到 <strong>{account.email}</strong> · {account.base}</span>
       </label>
       <button
         type="button"
@@ -436,7 +430,7 @@ export function SiteRecharge({ account, onBusyChange }: { account: SubAccount; o
             });
             setConfig(saved);
             await read();
-            setNote("充值设置已保存；未创建订单或付款。");
+            setNote("充值设置已保存，未下单。");
           })
         }
       >
@@ -447,9 +441,8 @@ export function SiteRecharge({ account, onBusyChange }: { account: SubAccount; o
       )}
       <h4>支付宝授权</h4>
       {!settings.payment_configured && (
-        <p className="settings-note">
-          支付代理尚未配置。管理员需先接入支付宝官方 CLI
-          和当前用户专用钱包；此时不会创建订单或付款。
+        <p className="dialog-inline-note">
+          支付代理尚未配置，暂不能下单。
         </p>
       )}
       <div className="recharge-actions">
@@ -594,7 +587,7 @@ export function SiteRecharge({ account, onBusyChange }: { account: SubAccount; o
           const original = payment.current;
           if (original) void run(() => submitOriginal(original));
         }}>用同一提交编号重试原订单</button>
-        <p className="settings-note">这不会创建第二笔相同订单；如果原订单没有成功提交且报价仍有效，可能提交原付款。</p>
+        <p className="dialog-inline-note">若原订单未提交且报价仍有效，重试可能发起原付款，不会创建重复订单。</p>
         {jobsVerified && !hasActiveJobs && !quoteValid(payment.current.quote) && <button type="button" className="button small" disabled={busy} onClick={() => {
           if (window.confirm("请先核对商户或支付记录。确认未付款且订单列表没有原订单后，才能解除本地提醒。")) {
             rememberSubmission(null); setQuote(undefined); setConfirmed(false); setError("");
@@ -615,7 +608,7 @@ export function SiteRecharge({ account, onBusyChange }: { account: SubAccount; o
       >
         刷新充值状态（不重新付款）
       </button>
-      {jobsVerified && jobs.length === 0 && <p className="settings-note">暂无充值记录。</p>}
+      {jobsVerified && jobs.length === 0 && <p className="dialog-inline-note">暂无充值记录</p>}
       {jobs.map((j) => (
         <article className="recharge-job" key={j.id}>
           <strong>
@@ -627,8 +620,15 @@ export function SiteRecharge({ account, onBusyChange }: { account: SubAccount; o
             {j.credited_amount !== undefined &&
               ` · 到账额度 ${j.credited_amount}`}
           </p>
-          {j.merchant_order && <small>原订单：{j.merchant_order}</small>}
-          <p className="settings-note">充值记录：{j.id}{j.created_at ? ` · 提交 ${orderTime(j.created_at)}` : ""}{j.updated_at ? ` · 更新 ${orderTime(j.updated_at)}` : ""}</p>
+          <details>
+            <summary>订单编号与时间</summary>
+            <dl className="dialog-key-values">
+              <dt>记录编号</dt><dd>{j.id}</dd>
+              {j.merchant_order && <><dt>原订单</dt><dd>{j.merchant_order}</dd></>}
+              {!!j.created_at && <><dt>提交</dt><dd>{orderTime(j.created_at)}</dd></>}
+              {!!j.updated_at && <><dt>更新</dt><dd>{orderTime(j.updated_at)}</dd></>}
+            </dl>
+          </details>
           {officialLink(j.action_url) && (
             <p>
               <a href={j.action_url} target="_blank" rel="noreferrer">

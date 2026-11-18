@@ -145,12 +145,9 @@ it("keeps queued work disabled across reads and shows the corresponding complete
     }),
   );
   await waitFor(() => expect(button).toBeEnabled());
-  expect(
-    within(button.closest(".detail-check-item") as HTMLElement).getByRole(
-      "status",
-    ),
-  ).toHaveTextContent("不支持工具调用");
-  expect(screen.getByText("No exec")).toBeVisible();
+  const check = within(button.closest(".detail-check-item") as HTMLElement);
+  expect(check.getByText("不支持工具调用")).toBeVisible();
+  expect(check.getByText("No exec").closest(".sr-only")).not.toBeNull();
 });
 it("shows submission errors without disabling unrelated probes", async () => {
   vi.stubGlobal(

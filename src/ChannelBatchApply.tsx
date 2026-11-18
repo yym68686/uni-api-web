@@ -223,9 +223,6 @@ function BatchDialog({
           )}
           {plan && (
             <>
-              <p className="sub-import-note">
-                来源提交前核对实际配置，自动跳过已一致的接入；各来源同时提交，同一来源的所有接入一次原子应用。
-              </p>
               <p className="batch-apply-summary">
                 将{deleting ? "删除" : "更新"}{" "}
                 {new Set(plan.targets.map((t) => t.source)).size} 个来源、
@@ -249,7 +246,9 @@ function BatchDialog({
                       {Object.keys(draft.retainedOnly!).join("、")}。其他已验证模型正常应用。
                     </p>
                   )}
-                  <p className="sub-import-note">
+                  <details className="sub-import-note">
+                    <summary>应用规则</summary>
+                    <p>
                     {draft.part === "all"
                       ? "以当前编辑内容替换模型勾选、重命名和路由位置。"
                       : draft.part === "models"
@@ -257,9 +256,10 @@ function BatchDialog({
                         : draft.part === "aliases"
                           ? "仅同步模型重命名，保留各 Key 的原模型勾选及已有模型位置。新增别名放到第 1 位；空列表表示清除已有重命名。"
                           : "仅同步下面模型的路由位置，各 Key 的模型勾选和重命名保持不变。没有对应模型的接入会跳过。"}{" "}
-                    只更新已有接入。超出目标路由数量的位置放到末位；同一 Key
+                    只更新已有接入，自动跳过一致项。超出目标路由数量的位置放到末位；同一 Key
                     有多个相关渠道时依次插入，最终位置见下方。
-                  </p>
+                    </p>
+                  </details>
                   <div className="batch-draft-models" aria-label="将应用的模型">
                     {Object.entries(
                       draft.part === "models"

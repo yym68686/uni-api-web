@@ -7,13 +7,12 @@
 .automation-state { font-size:12px; color:var(--muted); }
 .automation-state.on { color:var(--green); }
 .automation-form { display:grid; grid-template-columns:minmax(0,1fr); gap:13px; margin:16px 0; }
-.automation-form label { display:grid; gap:7px; color:var(--muted); font-size:12px; }
+.automation-form label { display:grid; min-width:0; gap:7px; color:var(--muted); font-size:12px; }
 .automation-form input,.automation-form select { width:100%; border:1px solid var(--line); background:var(--surface); color:var(--ink); padding:10px; border-radius:6px; }
 .automation-editor h4 { margin:20px 0 10px; }
 .automation-grid { margin-top:10px; }
 .automation-metrics { display:flex; flex-wrap:wrap; gap:12px 18px; }
 .automation-metrics label,.automation-check { display:flex!important; align-items:center; gap:7px; color:var(--ink)!important; font-size:13px!important; }
-.automation-editor-actions { display:flex; gap:10px; margin-top:20px; }
 .automation-audit-list { display:grid; gap:10px; }
 .automation-audit-list article { border-top:1px solid var(--line); padding:12px 0; }
 .automation-audit-list article > div { display:flex; gap:12px; justify-content:space-between; }
@@ -38,13 +37,15 @@
 
 .automation-form input[type="checkbox"] { width:auto; flex:0 0 auto; }
 .automation-page,.automation-audit,.automation-editor { min-width:0; }
-.automation-editor-actions { flex-wrap:wrap; }
 .automation-intro > .field-note { padding:0 20px 16px; margin:0; }
 .automation-detail .dialog-close { position:absolute; top:18px; right:18px; }
 .automation-metrics input[type="checkbox"],.automation-check input[type="checkbox"] { accent-color:var(--accent); }
 
-.automation-task-dialog { width:min(680px,calc(100vw - 30px)); max-height:88svh; overscroll-behavior:contain; }
-.automation-task-dialog > .data-heading { padding:0; border:0; }
-.automation-task-dialog .data-heading h2 { margin:0; }
+.automation-task-dialog { --dialog-width: 38rem; }
+.automation-task-dialog .automation-form { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.automation-rules { margin: 10px 0; font-size: 12px; color: var(--muted); }
+@media (max-width:440px) {
+  .automation-task-dialog .automation-form { grid-template-columns: minmax(0, 1fr); }
+}
 .automation-task-dialog .error-banner { color:var(--danger); }
 .automation-card-actions { flex-wrap: wrap; }

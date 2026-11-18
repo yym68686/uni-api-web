@@ -1,7 +1,8 @@
 .recharge-panel {
   display: grid;
-  gap: 12px;
-  margin-top: 16px;
+  gap: 10px;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .recharge-panel h3,
 .recharge-panel h4,
@@ -9,8 +10,11 @@
   margin: 0;
 }
 .recharge-panel h4 {
-  margin-top: 10px;
+  padding-top: 12px;
+  margin-top: 6px;
+  border-top: 1px solid var(--line);
 }
+.recharge-panel > .button { justify-self: start; max-width: 100%; }
 .recharge-panel label {
   display: grid;
   gap: 7px;
@@ -37,7 +41,7 @@
   color: inherit;
 }
 .recharge-panel a {
-  color: var(--green);
+  color: var(--accent);
   overflow-wrap: anywhere;
 }
 .recharge-actions {
@@ -48,11 +52,14 @@
 }
 .recharge-products {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
   gap: 8px;
   max-height: 220px;
   overflow-y: auto;
 }
+.recharge-panel .recharge-actions { margin: 0; }
+.recharge-panel .dialog-key-values { grid-template-columns: max-content minmax(0, 1fr); }
+.recharge-panel .dialog-key-values dd { overflow-wrap: anywhere; }
 .recharge-quote,
 .recharge-job {
   display: grid;

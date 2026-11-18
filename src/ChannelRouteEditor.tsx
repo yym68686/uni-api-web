@@ -127,7 +127,7 @@ export function ChannelRouteEditor({
           <Dialog.Title>编辑 API key · Key {rows[0].key_position}</Dialog.Title>
           <Dialog.Description>
             {sourceName && `${sourceName} · `}
-            {rows[0].key_prefix} · 分别调整每个模型的路由位置
+            {rows[0].key_prefix}
           </Dialog.Description>
           <button
             className="icon-button detail-close"

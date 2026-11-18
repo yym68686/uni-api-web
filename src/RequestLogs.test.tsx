@@ -17,6 +17,7 @@ import type { RequestLog } from "./RequestLogs";
 afterEach(() => {
   vi.unstubAllGlobals();
   localStorage.clear();
+  history.replaceState(null, "", location.pathname);
 });
 const row: RequestLog = {
   event_id: "e1",
@@ -67,6 +68,41 @@ function setup(fetcher: (input: string) => Promise<Response>) {
   );
   return userEvent.setup();
 }
+
+it.each([
+  ["#view=requests", "", "24h"],
+  ["#view=requests&scope=1&statusFilter=failed", "failed", defaultFilters.window],
+])("ignores a saved status on normal entry but honors explicitly scoped links (%s)", async (hash, result, range) => {
+  history.replaceState(null, "", hash);
+  const storage = `${location.origin}:logs-user`;
+  saveFilters(storage, {...defaultFilters, window: "24h", statusFilter: "failed"}, "requests");
+  const reads: URL[] = [];
+  const user = setup(async input => {
+    const url = new URL(input);
+    if (url.pathname.endsWith("/request-logs")) {
+      reads.push(url);
+      const status = url.searchParams.get("status");
+      const rows = [row, {...row, event_id: "e2", status: 502, result: "failed"}];
+      return Response.json({ data: status ? rows.filter(log => log.result === status) : rows, models: [] });
+    }
+    return Response.json({ data: [] });
+  });
+  await user.click(await screen.findByText(/筛选/, { selector: "summary" }));
+  expect(screen.getByLabelText("请求状态筛选")).toHaveValue(result);
+  await waitFor(() => {
+    expect(reads.at(-1)?.searchParams.get("status") ?? "").toBe(result);
+    expect(reads.at(-1)?.searchParams.get("range")).toBe(range);
+  });
+  expect(await screen.findByText("失败 · HTTP 502")).toBeVisible();
+  if (!result) {
+    expect(await screen.findByText("成功 · HTTP 200")).toBeVisible();
+    await user.selectOptions(screen.getByLabelText("请求状态筛选"), "failed");
+    await waitFor(() => expect(reads.at(-1)?.searchParams.get("status")).toBe("failed"));
+    await user.click(screen.getByRole("button", { name: "重置筛选" }));
+    expect(screen.getByLabelText("请求状态筛选")).toHaveValue("");
+    await waitFor(() => expect(reads.at(-1)?.searchParams.get("status")).toBe(""));
+  }
+});
 function auxiliary(url: URL) {
   if (url.pathname.endsWith("/api-keys"))
     return Response.json({
@@ -216,7 +252,9 @@ it("loads logs immediately, filters on the server and can jump to the newest pag
   await user.selectOptions(screen.getByLabelText("时间范围筛选"), "24h");
   await user.selectOptions(screen.getByLabelText("uni-api 来源"), "fugue");
   await user.selectOptions(screen.getByLabelText("API key 筛选"), "fugue::key");
-  expect(await screen.findByText(/90.0%/)).toBeVisible();
+  const rate = await screen.findByText(/90.0%/);
+  expect(rate).toBeVisible();
+  expect(rate.closest(".select-field")).toContainElement(screen.getByLabelText("API key 筛选"));
   await user.selectOptions(
     screen.getByLabelText("模型筛选"),
     "historical-model",

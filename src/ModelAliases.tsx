@@ -63,9 +63,6 @@ export function ModelAliases({
           </button>
         </div>
       </div>
-      <p className="muted">
-        对外模型名用于客户端请求和模型筛选。原模型仍可在上方单独勾选。
-      </p>
       {aliases.map((alias, index) => (
         <div className="model-alias-row" key={index}>
           <label>

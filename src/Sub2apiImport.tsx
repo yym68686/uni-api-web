@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Dialog from "@radix-ui/react-dialog";
-import { Plus, Trash2, X } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import { ApiError, controlRequest } from "./api";
 import { readCompleteSubTarget } from "./subTargetDetails";
 import { readSummary } from "./summaryFeed";
@@ -10,6 +10,8 @@ import { useRouteKeyRequestStats } from "./keyRequestStats";
 import { ChannelImportKeyFeedback } from "./ChannelImportKeyFeedback";
 import { channelEngineLabel, channelProtocols } from "./channelProtocol";
 import { Spinner } from "./ui";
+import { CompactDialogHeader } from "./CompactDialog";
+import { RouteWorkspaceLoading } from "./RouteWorkspaceLoading";
 import { AccountForm } from "./SiteAccountForm";
 import { ChannelBatchApply } from "./ChannelBatchApply";
 import type { BatchPart, BatchDraft } from "./channelBatch";
@@ -83,16 +85,8 @@ export function Sub2apiImport(props: Parameters<typeof Sub2apiImportForm>[0]) {
   if (!needsComplete) return <Sub2apiImportForm {...props}/>;
   if (complete.data && !complete.isFetching && !complete.isError)
     return <Sub2apiImportForm {...props} target={complete.data}/>;
-  return <Dialog.Root open onOpenChange={open => { if (!open) close(); }}><Dialog.Portal>
-    <Dialog.Overlay className="dialog-overlay"/>
-    <Dialog.Content className={`guide-dialog sub-import-dialog route-workspace${props.nested ? " route-edit-dialog" : ""}`}>
-      <Dialog.Title>添加到渠道</Dialog.Title>
-      <Dialog.Description>{account.name} · {target.name}</Dialog.Description>
-      {complete.isError ? <p role="alert">{complete.error.message}<button className="button small" onClick={() => void complete.refetch()}>重试</button></p>
-        : <p role="status"><Spinner small/> 正在读取完整模型检测结果…</p>}
-      <button className="button" onClick={close}>关闭</button>
-    </Dialog.Content>
-  </Dialog.Portal></Dialog.Root>;
+  return <RouteWorkspaceLoading context={`${account.name} · ${target.name}`} close={close} nested={props.nested}
+    label="正在读取完整模型检测结果…" error={complete.error?.message} retry={() => void complete.refetch()} />;
 }
 
 function Sub2apiImportForm({
@@ -117,6 +111,8 @@ function Sub2apiImportForm({
   close: () => void;
 }) {
   const client = useQueryClient();
+  const formId = useId();
+  const protocolHeading = useRef<HTMLElement>(null);
   const destinationSources = (sources.data?.data || []).map(
     (source) => source.id,
   );
@@ -697,7 +693,7 @@ function Sub2apiImportForm({
           className={`dialog-overlay${nested ? " route-edit-overlay" : ""}`}
         />
         <Dialog.Content
-          className={`guide-dialog sub-import-dialog route-workspace${nested ? " route-edit-dialog" : ""}`}
+          className={`guide-dialog compact-dialog sub-import-dialog route-workspace channel-import-workspace${nested ? " route-edit-dialog" : ""}`}
           onEscapeKeyDown={(e) => {
             if (busy) e.preventDefault();
           }}
@@ -705,20 +701,7 @@ function Sub2apiImportForm({
             if (busy) e.preventDefault();
           }}
         >
-          <header className="route-dialog-header">
-            <Dialog.Title>添加到渠道</Dialog.Title>
-            <Dialog.Description>
-              {account.name} / {target.name}
-            </Dialog.Description>
-            <button
-              className="icon-button detail-close"
-              aria-label="关闭添加渠道"
-              disabled={busy}
-              onClick={close}
-            >
-              <X size={18} />
-            </button>
-          </header>
+          <CompactDialogHeader context={`${account.name} / ${target.name}`} busy={busy} closeLabel="关闭添加渠道">添加到渠道</CompactDialogHeader>
           <nav className="route-mode-tabs" aria-label="渠道接入视图">
             <button
               type="button"
@@ -731,8 +714,7 @@ function Sub2apiImportForm({
                 setError("");
               }}
             >
-              已接入 · {partialBindings ? "至少 " : ""}
-              {boundKeys.size} 个 Key
+              已接入 <span className="count-badge" title={partialBindings ? "部分路由尚未核对" : undefined}>{partialBindings ? "≥" : ""}{boundKeys.size}</span>
             </button>
             <button
               type="button"
@@ -746,8 +728,8 @@ function Sub2apiImportForm({
               {editing ? "编辑接入" : "新增接入"}
             </button>
           </nav>
-          <div className="route-dialog-body">
-            {imports.isPending && <p role="status">正在读取已添加渠道…</p>}
+          <div className="compact-dialog-scroll route-import-body">
+            {!showForm && imports.isPending && <p role="status"><Spinner small /> 读取接入记录…</p>}
             {imports.error && (
               <div role="alert" className="error-banner">
                 {imports.error.message}
@@ -1027,7 +1009,7 @@ function Sub2apiImportForm({
                 {success}
               </p>
             )}
-            {visibleError && (
+            {!showForm && visibleError && (
               <div role="alert" className="error-banner">
                 {visibleError}
                 {!!account.id && siteLoginRequired(visibleError) && (
@@ -1092,40 +1074,13 @@ function Sub2apiImportForm({
             {showForm && <ChannelImportKeyFeedback directory={keyDirectory} />}
             {showForm && (
               <form
+                id={formId}
                 onSubmit={(e) => {
                   e.preventDefault();
                   if (!stale && !duplicate && !editing) void mutate("add");
                   else if (editing && !stale) void mutate("replace", editing);
                 }}
               >
-                <h3>{editing ? "编辑临时渠道" : "添加到新的 API key"}</h3>
-                <div role="note">
-                  按检测成功或明确选择的协议生成上游地址，不指定引擎，由 uni-api
-                  统一识别。混合协议将一次原子拆分保存；编辑只影响当前渠道。
-                </div>
-                {upstreamModels.map((model) => (
-                  <label className="sub-import-field" key={model}>
-                    {model} · 上游协议
-                    <select
-                      aria-label={`${model} 上游协议`}
-                      value={protocols[model] || ""}
-                      disabled={busy}
-                      onChange={(event) =>
-                        setProtocolChoices((old) => ({
-                          ...old,
-                          [model]: event.target.value,
-                        }))
-                      }
-                    >
-                      <option value="">请选择（未能自动确定）</option>
-                      {channelProtocols.map((spec) => (
-                        <option key={spec.protocol} value={spec.protocol}>
-                          {spec.label} · {spec.endpoint}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ))}
                 <div className="route-destination-grid">
                   <label className="sub-import-field">
                     uni-api 来源
@@ -1197,9 +1152,10 @@ function Sub2apiImportForm({
                     </select>
                   </label>
                   <label className="sub-import-field">
-                    {editing ? "调整位置" : "添加位置"}
+                    请求位置
                     <select
                       aria-label="渠道添加位置"
+                      aria-busy={!!key && options.isFetching}
                       value={perModel ? "per-model" : validPosition}
                       disabled={
                         !key ||
@@ -1218,25 +1174,15 @@ function Sub2apiImportForm({
                         }
                       }}
                     >
-                      <option value="per-model">逐模型微调</option>
+                      <option value="per-model">{key && options.isFetching ? "核对路由中…" : "逐模型微调"}</option>
                       {Array.from({ length: positions }, (_, i) => (
                         <option key={i} value={i + 1}>
-                          第 {i + 1} 位{i === 0 ? " · 优先请求" : ""}
+                          {key && options.isFetching && i + 1 === validPosition ? "核对路由中…" : `第 ${i + 1} 位`}
                         </option>
                       ))}
                     </select>
                   </label>
                 </div>
-                {!!key && options.isFetching && (
-                  <p role="status">
-                    <Spinner small /> 正在读取所选 API key 的路由位置…
-                  </p>
-                )}
-                {sources.isPending && (
-                  <p role="status">
-                    <Spinner small /> 正在读取 uni-api 来源…
-                  </p>
-                )}
                 <ChannelModelSelection
                   models={editChecks.map((c) => c.model)}
                   selected={originals}
@@ -1342,12 +1288,6 @@ function Sub2apiImportForm({
                   }
                   uniform={!perModel}
                 />
-                <p className="sub-import-note">
-                  {editing
-                    ? "保存更改仅更新当前 API key；分项按钮只同步对应设置，底部按钮可同步全部设置。"
-                    : "仅对所选 key 和模型生效。"}
-                  开启“保留临时配置”时，来源重启后自动恢复。
-                </p>
                 {source && options.data && !options.data.supported && (
                   <div role="alert" className="error-banner">
                     来源尚不支持临时添加渠道，请更新 uni-api。
@@ -1383,14 +1323,37 @@ function Sub2apiImportForm({
                     </button>
                   </div>
                 )}
-                <div className="sub-import-actions">
+                {!!upstreamModels.length && <section ref={protocolHeading} tabIndex={-1} className="import-protocols" aria-label={editing ? "编辑临时渠道" : "上游协议"}>
+                  <div className="route-section-heading"><h3>{editing ? "编辑临时渠道" : "上游协议"}</h3>
+                    {missingProtocol && <span className="negative">有模型尚未选择协议</span>}
+                  </div>
+                  <div className="import-protocol-labels" aria-hidden="true"><span>模型</span><span>上游协议</span></div>
+                  {upstreamModels.map(model => <label key={model} className="import-protocol-row">
+                    <span title={model}>{model}</span>
+                    <select aria-label={`${model} 上游协议`} value={protocols[model] || ""} disabled={busy}
+                      onChange={event => setProtocolChoices(old => ({ ...old, [model]: event.target.value }))}>
+                      <option value="">选择协议</option>
+                      {channelProtocols.map(spec => <option key={spec.protocol} value={spec.protocol}>{spec.label} · {spec.endpoint}</option>)}
+                    </select>
+                  </label>)}
+                </section>}
+              </form>
+            )}
+          </div>
+          {showForm && <div className="compact-dialog-footer import-footer">
+                  {visibleError && <div role="alert" className="error-banner import-error">
+                    {visibleError}
+                    {!!account.id && siteLoginRequired(visibleError) && <button type="button" className="button small" disabled={busy} onClick={() => setRelogin(true)}>重新登录站点</button>}
+                    {sources.isError && <button type="button" className="button small" disabled={busy || sources.isFetching} onClick={() => void sources.refetch()}>重新读取来源</button>}
+                  </div>}
                   {batchButton("all")}
+                  {missingProtocol && <button type="button" className="button small ghost" onClick={() => protocolHeading.current?.focus()}>选择协议</button>}
                   <button
                     className="button"
                     type="button"
                     disabled={busy}
                     onClick={() => {
-                      if (installed.length) {
+                      if (!nested && installed.length) {
                         setEditing(null);
                         setView("existing");
                       } else close();
@@ -1400,6 +1363,8 @@ function Sub2apiImportForm({
                   </button>
                   <button
                     className="button primary"
+                    type="submit"
+                    form={formId}
                     disabled={
                       busy ||
                       (!editing && (groupUnavailable || importBlocked)) ||
@@ -1431,10 +1396,7 @@ function Sub2apiImportForm({
                     {busy ? <Spinner small /> : <Plus size={15} />}
                     {editing ? "保存更改" : "添加到渠道"}
                   </button>
-                </div>
-              </form>
-            )}
-          </div>
+          </div>}
           {relogin && (
             <AccountForm
               initial={account}

@@ -381,7 +381,10 @@ it("opens optimization from a fresh full snapshot after results changed, while b
   await user.click(screen.getByRole("button",{name:"优化渠道模型"}));
   const dialog=await screen.findByRole("dialog",{name:"优化渠道模型"});
   expect(within(dialog).getByText(/分析当前筛选的全部 60 个渠道/)).toBeVisible();
-  expect(within(dialog).getByText(/预览使用点击时读取的最新检测结果/)).toBeVisible();
+  const rules = within(dialog).getByText("优化规则").closest("details")!;
+  expect(rules).not.toHaveAttribute("open");
+  await user.click(within(rules).getByText("优化规则"));
+  expect(within(rules).getByText(/预览使用点击时读取的最新检测结果/)).toBeVisible();
   expect(calls.filter(u=>u.searchParams.has("selection"))).toHaveLength(before);
   expect(calls.filter(u=>u.pathname.endsWith("/optimization-preview"))).toHaveLength(1);
   await user.click(within(dialog).getByRole("button",{name:"关闭优化预览"}));
@@ -699,6 +702,50 @@ it("disables single-account sync when the saved detection selection is empty",as
   await openSites();
  expect(within(document.querySelector<HTMLElement>('[role="listitem"][aria-label="Owned site"]')!).getByRole("button",{name:"同步并检测"})).toBeDisabled();
  expect(writes).toEqual([]);
+});
+
+it.each(["submission", "progress"])("keeps other sites actionable while one site waits for %s", async waiting => {
+  const accounts = [account, {...account, id: "second", name: "Second site"}];
+  let finishFirst!: (response: Response) => void;
+  let firstReadWaiting = false;
+  const writes: string[] = [];
+  const progress = () => Response.json({data: accounts.map(site => ({
+    ...site, progress: {total:0,completed:0,queued:0,running:0,interrupted:0,running_models:[],groups:[]},
+  })), read_at_ms: Date.now()});
+  vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+    const path = new URL(input).pathname;
+    if (path.endsWith("/accounts/progress")) {
+      if (waiting === "progress" && writes.length === 1) {
+        firstReadWaiting = true;
+        return new Promise<Response>(resolve => { finishFirst = resolve; });
+      }
+      return progress();
+    }
+    if (path.endsWith("/sync-selected") && init?.method === "POST") {
+      writes.push(path);
+      if (waiting === "submission" && writes.length === 1) {
+        return new Promise<Response>(resolve => { finishFirst = resolve; });
+      }
+      return Response.json({queued: true}, {status: 202});
+    }
+    if (path.endsWith("/channel-management/query")) return Response.json({...page(), accounts});
+    return Response.json({data: []});
+  }));
+  mount(`independent-site-${waiting}`);
+  await openSites();
+  const user = userEvent.setup();
+  const sync = (name: string) => within(screen.getByRole("listitem", {name})).getByRole("button", {name: "同步并检测"});
+  await screen.findByRole("listitem", {name: "Owned site"});
+  await user.click(sync("Owned site"));
+  if (waiting === "progress") await waitFor(() => expect(firstReadWaiting).toBe(true));
+  expect(sync("Owned site")).toBeDisabled();
+  expect(sync("Second site")).toBeEnabled();
+  await user.click(sync("Second site"));
+  expect(writes).toEqual([
+    "/analytics/v1/sub2api/accounts/owned/sync-selected",
+    "/analytics/v1/sub2api/accounts/second/sync-selected",
+  ]);
+  await act(async () => finishFirst(waiting === "progress" ? progress() : Response.json({queued:true}, {status:202})));
 });
 
 it.each(["filter","next-page"])("updates only channel results for %s, keeping account rows and choices mounted",async change=>{

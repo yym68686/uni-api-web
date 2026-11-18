@@ -739,11 +739,6 @@ export function ConfiguredChannelDialog({
                   disabled={busy || options.isFetching || !key || !perModel}
                   uniform={!perModel}
                 />
-                <p className="muted">
-                  {editingProvider
-                    ? "保存更改仅更新当前 API key；各项“应用此项于所有”只同步对应设置，底部按钮可同步全部设置。"
-                    : "只对所选 API key 开放勾选的原模型和填写的对外模型名。"}
-                </p>
                 <div className="sub-import-actions">
                   {batchButton("all")}
                   <button

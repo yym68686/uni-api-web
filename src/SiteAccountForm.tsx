@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { Globe2, Plus, X } from "lucide-react";
+import { Globe2 } from "lucide-react";
 import { controlRequest } from "./api";
+import { CompactDialogHeader } from "./CompactDialog";
 import { browserHelperAvailable, loginWithBrowser } from "./sub2apiBrowser";
 import { Spinner } from "./ui";
 import type { SubAccount } from "./Sub2apiChecks";
@@ -49,6 +50,7 @@ export function AccountForm({
   const [busy, setBusy] = useState(false);
   const [loginSaved, setLoginSaved] = useState(false);
   const [error, setError] = useState("");
+  const noteId = useId();
   const browserAbort = useRef<AbortController | null>(null);
   const opener = useRef(document.activeElement);
   useEffect(() => {
@@ -69,7 +71,7 @@ export function AccountForm({
       .catch(() => {
         if (active)
           setCredentialsError(
-            "已保存密码暂时无法显示。可留空使用服务端密码，或填写新密码。",
+            "已保存密码暂时无法显示。留空沿用。",
           );
       })
       .finally(() => {
@@ -243,7 +245,8 @@ export function AccountForm({
           className={`dialog-overlay${sessionOnly ? " site-reauth-overlay" : ""}`}
         />
         <Dialog.Content
-          className={`guide-dialog sub-account-dialog${sessionOnly ? " site-reauth-dialog" : ""}`}
+          className={`guide-dialog compact-dialog${sessionOnly ? " site-reauth-dialog" : ""}`}
+          aria-describedby={undefined}
           onPointerDownOutside={(event) => {
             if (busy || browserBusy) event.preventDefault();
           }}
@@ -259,41 +262,21 @@ export function AccountForm({
               opener.current.focus();
           }}
         >
-          <Dialog.Title>
+          <CompactDialogHeader closeLabel="关闭账号窗口" busy={busy}>
             {challenge
               ? "完成双因素验证"
               : initial
                 ? "重新登录站点账号"
                 : "添加站点账号"}
-          </Dialog.Title>
-          <Dialog.Description>
-            {sessionOnly
-              ? "更新此站点的登录会话。已选模型、重命名和路由位置会保留，登录后可继续添加。"
-              : "自动识别站点类型并同步可用分组。选择检测时仅检测已勾选的模型，费用由站点账号承担。"}
-          </Dialog.Description>
-          <button
-            type="button"
-            className="icon-button detail-close"
-            aria-label="关闭账号窗口"
-            disabled={busy}
-            onClick={dismiss}
-          >
-            <X size={18} />
-          </button>
-          <form className="source-form sub-account-form" onSubmit={submit}>
-            {!initial && !challenge && !browserNeeded && (
-              <label className="settings-note">
-                <input type="checkbox" checked={detectOnAdd} disabled={busy || !detectionModels?.length}
-                  onChange={event => setDetectOnAdd(event.target.checked)} />
-                同步并检测已选模型（{detectionModels?.length ?? 0} 个 / 分组）；不勾选则仅同步
-              </label>
-            )}
+          </CompactDialogHeader>
+          <form className="compact-dialog-form" onSubmit={submit}>
+            <div className="compact-dialog-scroll">
             <fieldset
-              className="sub-login-fields"
+              className="dialog-field-grid"
               disabled={busy || browserBusy || credentialsLoading || loginSaved}
             >
               {challenge ? (
-                <label>
+                <label className="dialog-field dialog-field-full">
                   六位验证码
                   <input
                     autoFocus
@@ -309,17 +292,16 @@ export function AccountForm({
                 </label>
               ) : (
                 <>
-                  <label>
-                    站点名称
+                  <label className="dialog-field dialog-field-full">
+                    {initial ? "站点名称" : "站点名称（选填）"}
                     <input
-                      placeholder="例如：我的上游"
                       maxLength={120}
                       value={name}
                       readOnly={!!initial}
                       onChange={(event) => setName(event.target.value)}
                     />
                   </label>
-                  <label>
+                  <label className="dialog-field dialog-field-full">
                     站点地址
                     <input
                       type="url"
@@ -332,15 +314,16 @@ export function AccountForm({
                         setError("");
                       }}
                       readOnly={!!initial && sessionOnly}
+                      aria-describedby={addressChanged ? `${noteId}-address` : undefined}
                       required
                     />
                   </label>
                   {addressChanged && (
-                    <p className="settings-note" role="note">
-                      将使用下方密码登录新地址，请确认地址可信。验证成功后更新地址并重新检测；已有网关路由不会自动更改。
+                    <p className="dialog-inline-note dialog-field-full" role="note" id={`${noteId}-address`}>
+                      请核对域名：密码将发送到新地址，已有网关路由不会自动更改。
                     </p>
                   )}
-                  <label>
+                  <label className="dialog-field">
                     用户名 / 邮箱
                     <input
                       type="text"
@@ -351,17 +334,13 @@ export function AccountForm({
                       required
                     />
                   </label>
-                  <label>
+                  <label className="dialog-field">
                     账号密码
                     <input
                       type="text"
                       aria-label="账号密码"
-                      aria-describedby="site-password-note"
-                      placeholder={
-                        hasSavedPassword
-                          ? "已保存密码，留空继续使用"
-                          : "输入账号密码"
-                      }
+                      aria-describedby={`${noteId}-password`}
+                      placeholder={hasSavedPassword ? "已保存密码，留空继续使用" : undefined}
                       autoFocus={sessionOnly}
                       autoComplete="current-password"
                       spellCheck={false}
@@ -373,36 +352,41 @@ export function AccountForm({
                       }
                     />
                   </label>
-                  <p className="settings-note" id="site-password-note">
+                  <p className="dialog-inline-note dialog-field-full" id={`${noteId}-password`} role={credentialsError ? "status" : undefined}>
                     {credentialsLoading
                       ? "正在读取已保存密码…"
-                      : credentialsError ||
-                        (hasSavedPassword
-                          ? "密码已加密保存在服务端，默认显示已保存密码。留空继续使用，填写新密码可更新；会话失效后自动重新登录。"
-                          : initial
-                            ? "此账号尚未保存登录密码，请补填一次。验证成功后加密保存，会话失效后自动重新登录。"
-                            : "验证成功后，密码将加密保存在服务端，用于会话失效时自动重新登录。")}
+                      : credentialsError || (initial && !hasSavedPassword
+                        ? "此账号尚未保存登录密码，请补填一次。"
+                        : "密码加密保存，用于自动重新登录。")}
                   </p>
                 </>
               )}
             </fieldset>
+            {!initial && !challenge && !browserNeeded && (
+              <div className="compact-dialog-options">
+                <label className="dialog-check-row">
+                  <input type="checkbox" checked={detectOnAdd} disabled={busy || !detectionModels?.length}
+                    aria-label="同步并检测已选模型" aria-describedby={detectOnAdd ? `${noteId}-cost` : undefined}
+                    onChange={event => setDetectOnAdd(event.target.checked)} />
+                  <span>同步后检测模型</span>
+                  <small id={`${noteId}-cost`}>{detectOnAdd ? `${detectionModels?.length ?? 0} 个 / 分组 · 可能计费` : "仅同步"}</small>
+                </label>
+              </div>
+            )}
             {browserBusy && (
               <p className="sub-login-status" role="status">
                 <Spinner small />
-                {sessionOnly
-                  ? "正在等待原站登录…"
-                  : "正在等待原站登录，成功后自动同步…"}
+                等待原站登录…
               </p>
             )}
-            {browserNeeded && browserKind === "newapi" && (
-              <p className="settings-note">
-                使用登录助手 1.3.0 或更新版本。首次请点击扩展图标授权 New API
-                会话读取； 在打开的原站完成验证并点击登录，成功后自动返回。
+            {browserNeeded && browserKind === "newapi" && helperReady && (
+              <p className="dialog-inline-note">
+                首次登录需在扩展中授权读取 New API 会话。
               </p>
             )}
             {browserNeeded && !helperReady && (
-              <p className="settings-note">
-                登录助手 1.3.0 支持 Chrome 121+ / Firefox 140+。
+              <div className="compact-dialog-options">
+                <p className="dialog-inline-note">
                 <a href="/uni-api-browser-helper-chrome.zip" download>
                   下载 Chrome 登录助手
                 </a>
@@ -410,16 +394,20 @@ export function AccountForm({
                 <a href="/uni-api-browser-helper-firefox.zip" download>
                   下载 Firefox 登录助手
                 </a>
-                。解压后，Chrome 在扩展管理页加载；Firefox 在 about:debugging
-                中临时加载 manifest.json（重启失效，长期使用需签名安装包）。
-              </p>
+                </p>
+                <details className="dialog-inline-note">
+                  <summary>安装方法</summary>
+                  Chrome 121+：解压后在扩展管理页加载。Firefox 140+：在 about:debugging 临时加载 manifest.json，重启后需重新加载。
+                </details>
+              </div>
             )}
             {error && (
               <div role="alert" className="error-banner">
                 {error}
               </div>
             )}
-            <div className="sub-account-dialog-actions">
+            </div>
+            <div className="compact-dialog-footer">
               <button
                 type="button"
                 className="button small"
@@ -437,9 +425,7 @@ export function AccountForm({
                   <Spinner small />
                 ) : browserNeeded && !challenge ? (
                   <Globe2 size={14} />
-                ) : (
-                  <Plus size={14} />
-                )}
+                ) : null}
                 {loginSaved
                   ? "重试同步并检测"
                   : challenge

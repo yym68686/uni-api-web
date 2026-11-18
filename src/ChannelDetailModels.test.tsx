@@ -168,7 +168,9 @@ async function openDetail(app: ReturnType<typeof setup>, index = 0) {
       name: "查看 same-provider gpt-6-astra 详情",
     })[index],
   );
-  return within(await screen.findByRole("dialog"));
+  const detail = within(await screen.findByRole("dialog"));
+  await app.user.click(detail.getByRole("button", { name: "模型" }));
+  return detail;
 }
 
 it("shows all tested available models in the drawer and isolates same-name providers by source and account", async () => {
@@ -253,6 +255,7 @@ it("shows configured models for ordinary channels even when observation is filte
     }),
   );
   const detail = within(await screen.findByRole("dialog"));
+  await app.user.click(detail.getByRole("button", { name: "模型" }));
   const models = within(
     await detail.findByRole("region", { name: "可用模型" }),
   );

@@ -100,8 +100,7 @@ function AccountForm({ onConnect, shortSession }: { onConnect: () => void; short
           </>
         )}
       </button>
-      {shortSession && <label className="session-option"><input type="checkbox" checked={remember} disabled={pending} onChange={e => setRemember(e.target.checked)} /> 在此设备保留登录 30 天</label>}
-      <p className="connection-help">{shortSession ? "默认仅本次浏览器会话，最长 8 小时。" : "当前服务使用 30 天会话。"}公共设备使用完请主动退出。</p>
+      {shortSession && <label className="session-option" title="公共设备不要保留登录"><input type="checkbox" checked={remember} disabled={pending} onChange={e => setRemember(e.target.checked)} /> 在此设备保留登录 30 天</label>}
     </form>
   );
 }
@@ -195,10 +194,6 @@ function ConnectionForm({
           {visible ? <EyeOff size={17} /> : <Eye size={17} />}
         </button>
       </div>
-      <p className="field-note">
-        <ShieldCheck size={14} />
-        密钥保存在当前标签页会话中，断开连接时清除。
-      </p>
       {error && (
         <div role="alert" className="error-banner">
           <TriangleAlert size={17} />
@@ -216,7 +211,6 @@ function ConnectionForm({
           </>
         )}
       </button>
-      <p className="connection-help">使用普通业务密钥无法查看平台数据。</p>
     </form>
   );
 }
@@ -298,9 +292,8 @@ export function LegacyConsole() {
       <Dialog.Root open={change} onOpenChange={setChange}>
         <Dialog.Portal>
           <Dialog.Overlay className="dialog-overlay" />
-          <Dialog.Content className="connection-dialog">
+          <Dialog.Content className="connection-dialog" aria-describedby={undefined}>
             <Dialog.Title>切换服务连接</Dialog.Title>
-            <Dialog.Description>验证成功后切换连接。</Dialog.Description>
             <ConnectionForm
               compact
               initialBase={connection?.base}

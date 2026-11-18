@@ -4,6 +4,20 @@ import userEvent from "@testing-library/user-event";
 import { AccountForm } from "./SiteAccountForm";
 
 afterEach(() => vi.unstubAllGlobals());
+it("keeps account setup compact and turns model detection off without submitting", async () => {
+  const user = userEvent.setup();
+  render(<AccountForm initial={null} close={vi.fn()} saved={vi.fn()} detectionModels={["gpt-6-astra"]} />);
+  const dialog = screen.getByRole("dialog", { name: "添加站点账号" });
+  const detection = screen.getByRole("checkbox", { name: "同步并检测已选模型" });
+  expect(detection).toBeChecked();
+  expect(detection.closest(".dialog-check-row")).toHaveTextContent("可能计费");
+  expect(dialog.querySelector(".compact-dialog-footer")).toContainElement(screen.getByRole("button", { name: "连接并检测" }));
+  await user.click(detection);
+  expect(detection).not.toBeChecked();
+  expect(screen.getByRole("button", { name: "连接并同步" })).toBeVisible();
+  expect(screen.queryByText(/自动识别站点类型/)).not.toBeInTheDocument();
+});
+
 it.each([true, false])(
   "negotiates New API helper support and forwards only the matching browser session (%s)",
   async (supported) => {

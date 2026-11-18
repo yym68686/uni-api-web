@@ -13,12 +13,77 @@
 .observation-table .channel-link strong, .observation-table .channel-link small {
   display: block; white-space: normal; overflow-wrap: anywhere;
 }
-.overview-attribution { display:block; margin-top:4px; color:var(--muted); }
-.overview-row .text-link { background:none; border:0; text-align:left; overflow-wrap:anywhere; }
-.overview-grid .metric-card .button { margin-top: .55rem; }
+.workspace .overview-heading {display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:space-between;padding:9px 0 15px}
+.overview-tools {display:flex;align-items:center;flex-wrap:wrap;gap:6px;min-width:0}
+.overview-select {position:relative;display:flex;align-items:center;min-width:0;color:var(--muted)}
+.overview-select > svg {position:absolute;left:9px;pointer-events:none}
+.overview-select > svg:last-child {left:auto;right:9px}
+.overview-select select {
+  appearance:none;width:100%;max-width:clamp(7rem,14vw,12rem);height:34px;min-width:0;padding:0 28px;
+  border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink);
+  font:inherit;font-size:12px;text-overflow:ellipsis;cursor:pointer;
+}
+.overview-tools .overview-refresh {min-width:34px;height:34px;padding:0;justify-content:center}
+.overview-content {display:grid;gap:14px;min-width:0}
+.overview-grid {display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;min-width:0}
+.workspace .overview-grid .metric-card {
+  min-width:0;min-height:79px;padding:11px 12px;display:grid;align-content:center;gap:8px;
+  border:1px solid var(--line);border-radius:8px;background:var(--surface);box-shadow:none;
+}
+.workspace .overview-grid .metric-card-label {min-width:0;display:flex;align-items:center;justify-content:space-between;gap:4px;white-space:nowrap;font-size:11px;letter-spacing:0}
+.overview-grid .metric-card-label svg {width:14px;height:14px;flex:none}
+.workspace .overview-grid .metric-card-number {
+  color:var(--ink);margin:0;font:550 22px/1.15 var(--font-mono);
+  min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.overview-panels {display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);align-items:start;gap:12px}
+.overview-panel {min-width:0;border:1px solid var(--line);border-radius:9px;background:var(--surface)}
+.overview-panel-header {display:flex;align-items:center;justify-content:space-between;gap:6px;min-height:45px;padding:6px 12px}
+.overview-panel-header h3 {margin:0;font-size:14px;font-weight:650;white-space:nowrap}
+.overview-panel-actions {display:flex;gap:2px}
+.overview-panel-actions .button {min-height:28px;padding:3px 6px;white-space:nowrap}
+.overview-table {table-layout:fixed;border-spacing:0;width:100%;font-size:12px}
+.overview-table :is(th,td) {
+  height:36px;padding:5px 10px;border-top:1px solid var(--line);text-align:right;
+  overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-variant-numeric:tabular-nums;
+}
+.overview-table thead th {height:30px;background:var(--subtle);color:var(--muted);font-size:11px;font-weight:550}
+.overview-table :is(th,td):first-child {text-align:left;width:42%}
+.overview-channels :is(th,td):first-child {width:58%}
+.overview-channels :is(th,td):last-child {width:17%}
+.overview-table tbody tr:hover {background:var(--subtle)}
+.overview-link {
+  display:block;max-width:100%;padding:3px 2px;background:none;border:0;color:var(--ink);
+  font:inherit;font-weight:550;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.overview-link:hover {color:var(--accent)}
+.overview-share {display:flex;align-items:center;justify-content:flex-end;gap:6px}
+.overview-share-track {width:clamp(18px,2vw,35px);height:4px;flex:0 1 auto;background:var(--line);border-radius:4px;overflow:hidden}
+.overview-share-track > span {display:block;height:100%;border-radius:inherit;background:var(--accent-fill)}
+.overview-more {display:block;margin:4px auto}
+.overview-empty {color:var(--muted);margin:0;padding:20px 12px;border-top:1px solid var(--line);font-size:12px}
+@media (max-width:1319px) {.overview-grid {grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:850px) {.overview-panels {grid-template-columns:minmax(0,1fr)}}
+@media (max-width:580px) {
+  .overview-tools {display:grid;width:100%;grid-template-columns:repeat(4,minmax(0,1fr)) 33px}
+  .overview-select select {max-width:none;padding-inline:6px 18px;font-size:11px}
+  .overview-select > svg:first-child {display:none}
+  .overview-select > svg:last-child {right:4px;width:10px}
+  .workspace .overview-grid .metric-card {min-height:64px;padding:8px}
+  .overview-grid .metric-card-label svg {width:12px;height:12px}
+  .workspace .overview-grid .metric-card-number {font-size:16px}
+  .overview-table :is(th,td) {padding-inline:6px;font-size:11px}
+  .overview-share-track {display:none}
+  .overview-models :is(th,td):last-child {width:15%}
+}
+@media (max-width:420px) {.overview-grid {grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:365px) {
+  .overview-tools {grid-template-columns:repeat(2,minmax(0,1fr)) 34px}
+  .overview-tools .overview-refresh {grid-area:1 / 3}
+}
 .chart-inspection { color:var(--muted); font-size:.8rem; }
 .chart-column.current { outline: 1px solid var(--muted); outline-offset:-1px; }
-.chart-column.partial { background:repeating-linear-gradient(125deg,transparent 0 6px, var(--line) 6px 8px); }
+.chart-column.partial { background:var(--selection);border-radius:4px; }
 .wallet-summary { margin: 0 20px 12px; border:1px solid var(--line); border-radius:9px; padding:10px 14px; }
 .wallet-summary > summary { color:var(--accent); cursor:pointer; font-size:.88rem; }
 .wallet-summary p { color:var(--muted); font-size:.8rem; }

@@ -46,7 +46,9 @@ export function useObservedDetection(
   const [expanded, setExpanded] = useState(false);
   const [notice, setNotice] = useState<{ text: string; error?: boolean }>();
   const [submitting, setSubmitting] = useState<Set<string>>(new Set());
-  const inFlight = useRef(false);
+  const inFlight = useRef(new Set<string>());
+  const batchInFlight = useRef(false);
+  const [batchActive, setBatchActive] = useState(false);
   const client = useQueryClient();
   const additional = visible && expanded && project !== "quality";
   const detection = useChannelDetection(owner, additional);
@@ -89,8 +91,9 @@ export function useObservedDetection(
   }
   const entry = (target: Target) =>
     configuredIndex.get(`${project}:${fingerprintKey(target)}`);
+  const submissionKey = (target: Target) => JSON.stringify([owner,project,fingerprintKey(target)]);
   const busy = (target: Target) =>
-    submitting.has(fingerprintKey(target)) ||
+    submitting.has(submissionKey(target)) ||
     (project === "fingerprint"
       ? fingerprintBusy(fingerprints.index.get(fingerprintKey(target)))
       : pending(entry(target)?.state));
@@ -123,9 +126,13 @@ export function useObservedDetection(
               : "";
 
   async function queue(targets: Target[], manual = false) {
-    if (project === "quality" || inFlight.current || !targets.length) return;
-    inFlight.current = true;
-    setSubmitting(new Set(targets.map(fingerprintKey)));
+    if (project === "quality" || !manual && batchInFlight.current) return;
+    targets = targets.filter(target => !inFlight.current.has(submissionKey(target)) && !busy(target));
+    if (!targets.length) return;
+    const keys = targets.map(submissionKey);
+    keys.forEach(key => inFlight.current.add(key));
+    setSubmitting(new Set(inFlight.current));
+    if (!manual) { batchInFlight.current = true; setBatchActive(true); }
     setNotice(undefined);
     try {
       const fingerprint = project === "fingerprint";
@@ -161,8 +168,9 @@ export function useObservedDetection(
         error: true,
       });
     } finally {
-      inFlight.current = false;
-      setSubmitting(new Set());
+      keys.forEach(key => inFlight.current.delete(key));
+      setSubmitting(new Set(inFlight.current));
+      if (!manual) { batchInFlight.current = false; setBatchActive(false); }
     }
   }
 
@@ -172,7 +180,7 @@ export function useObservedDetection(
     total,
     batchIssue,
     notice,
-    active: submitting.size > 0,
+    active: batchActive,
     select(next: typeof project) {
       setNotice(undefined);
       selectProject(next);
@@ -296,7 +304,7 @@ export function ObservedDetectionRow({
       <div className="quality-status-stack">
         <button
           className="button small"
-          disabled={!action.applicable || detection.active || action.busy}
+          disabled={!action.applicable || action.busy}
           aria-busy={action.busy}
           title={
             detection.project === "fingerprint"

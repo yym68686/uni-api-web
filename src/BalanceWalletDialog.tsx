@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useSubAccounts } from "./sub2apiAccounts";
 import { SiteAccountSettings } from "./SiteAccountSettings";
 import { Spinner } from "./ui";
+import { CompactDialogHeader } from "./CompactDialog";
 
 export default function BalanceWalletDialog({id,close}:{id:string;close:()=>void}) {
   const accounts=useSubAccounts(true,true);
@@ -14,15 +15,15 @@ export default function BalanceWalletDialog({id,close}:{id:string;close:()=>void
     void client.invalidateQueries({queryKey:["sub2api-imports"]});
   }}/>;
   return <Dialog.Root open onOpenChange={open=>{if(!open)close();}}>
-    <Dialog.Portal><Dialog.Overlay className="dialog-overlay"/><Dialog.Content className="guide-dialog">
-      <Dialog.Title>站点账号充值</Dialog.Title>
-      <Dialog.Description>核对绑定账号后，才能查看充值配置或订单。</Dialog.Description>
-      {accounts.isPending ? <p role="status"><Spinner small/> 读取绑定账号</p> :
-        <p role="alert">{accounts.error?.message || "此绑定账号不存在，或不再可用。"}</p>}
-      <div className="recharge-actions">
-        {!accounts.isPending && <button className="button" onClick={()=>void accounts.refetch()}>重新读取账号</button>}
-        <Dialog.Close className="button">关闭</Dialog.Close>
+    <Dialog.Portal><Dialog.Overlay className="dialog-overlay"/><Dialog.Content className="guide-dialog compact-dialog" aria-describedby={undefined}>
+      <CompactDialogHeader>站点账号充值</CompactDialogHeader>
+      <div className="compact-dialog-scroll">
+        {accounts.isPending ? <p role="status"><Spinner small/> 读取绑定账号…</p> :
+          <p role="alert">{accounts.error?.message || "此绑定账号不存在或不可用。"}</p>}
       </div>
+      {!accounts.isPending && <div className="compact-dialog-footer">
+        <button className="button" onClick={()=>void accounts.refetch()}>重新读取账号</button>
+      </div>}
     </Dialog.Content></Dialog.Portal>
   </Dialog.Root>;
 }

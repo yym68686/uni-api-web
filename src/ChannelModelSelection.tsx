@@ -87,14 +87,9 @@ export function ChannelModelSelection({
   return (
     <fieldset disabled={disabled}>
       <legend className="model-alias-heading batch-model-heading">
-        <span>模型</span>
+        <span title={editing ? "已接入模型可以保留；新增模型必须检测通过。" : undefined}>模型 <span className="count-badge">{selected.length}</span></span>
         {actions}
       </legend>
-      {editing && (
-        <p className="sub-import-note">
-          已接入的原模型默认勾选，可取消；新增勾选或重命名仅限检测可用的模型。检测失败、未检测或检测中的模型需检测通过后再添加。
-        </p>
-      )}
       <div className="sub-model-options">
         {[...new Set(models)].map((model) => (
           <label key={model}>

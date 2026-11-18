@@ -128,6 +128,7 @@ function Select({
   icon,
   children,
   className = "",
+  accessory,
 }: {
   label: string;
   value: string;
@@ -135,6 +136,7 @@ function Select({
   icon: ReactNode;
   children: ReactNode;
   className?: string;
+  accessory?: string;
 }) {
   return (
     <label className={`select-field ${className}`}>
@@ -146,6 +148,7 @@ function Select({
       >
         {children}
       </select>
+      {accessory && <span className="log-filter-accessory" title={accessory}>{accessory.replace(/^请求成功率 (?=\d)/, "")}</span>}
       <ChevronDown size={13} />
     </label>
   );
@@ -163,9 +166,10 @@ export function RequestLogsPage({
   const [incoming] = useState(() => readWorkspace(location.hash, !!base.account));
   const [filters, setFilters] = useState(() => {
     const saved = loadFilters(storage, "requests");
+    // A normal visit starts with all statuses; scoped links can intentionally filter.
     return incoming.view === "requests" && incoming.filters
       ? {...incoming.filters, search:history.state?.workspaceOwner === workspaceOwner ? saved.search : ""}
-      : saved;
+      : {...saved, statusFilter: defaultFilters.statusFilter};
   });
   const [cursors, setCursors] = useState<string[]>([""]);
   const [page, setPage] = useState(0);
@@ -529,7 +533,7 @@ export function RequestLogsPage({
             刷新日志
           </button>
           {page > 0 && <button className="button small" disabled={busy} onClick={() => void refresh(true)}>{exact ? "返回第 1 页" : "查看最新"}</button>}
-          <label className="auto-refresh">
+          <label className="auto-refresh" title={auto && !autoActive ? (exact ? "固定时间范围暂停自动刷新" : "查看历史页时暂停自动刷新") : undefined}>
             <input
               type="checkbox"
               checked={autoActive}
@@ -538,8 +542,8 @@ export function RequestLogsPage({
             />
             <span />
             自动刷新
+            {auto && !autoActive && <small className="sr-only" role="status">已暂停</small>}
           </label>
-          {auto && !autoActive && <span role="status" className="settings-note">自动刷新已暂停{exact ? "（固定时间）" : "（历史页）"}</span>}
         <Select
           label="时间范围筛选"
           className="time-select"
@@ -553,7 +557,16 @@ export function RequestLogsPage({
             </option>
           ))}
         </Select>
-        <button className="button small log-time-button" aria-expanded={editWindow} onClick={() => setEditWindow(value => !value)}>{exact ? "修改固定时间" : "指定起止时间"}</button>
+        <button className="button small log-time-button" aria-expanded={editWindow}
+          title={exact ? `${new Date(exact.from).toLocaleString()} – ${new Date(exact.to).toLocaleString()}` : undefined}
+          onClick={() => {
+            if (!editWindow && exact) {
+              const localTime = (value: number) => new Date(value - new Date(value).getTimezoneOffset() * 60_000).toISOString().slice(0, 23);
+              setFromInput(localTime(exact.from));
+              setToInput(localTime(exact.to));
+            }
+            setEditWindow(!editWindow);
+          }}>{exact ? "修改固定时间" : "指定起止时间"}</button>
         <Select
           label="uni-api 来源"
           className="source-select"
@@ -574,6 +587,7 @@ export function RequestLogsPage({
           icon={<KeyRound size={15} />}
           value={filters.keyId}
           onChange={(v) => change("keyId", v)}
+          accessory={filters.keyId && !exact ? stats.label(keyList.find(key => key.key_id === filters.keyId) || {key_id:filters.keyId}) : undefined}
         >
           <option value="">全部 API Key</option>
           {filters.keyId && !keyLabels.has(filters.keyId) && (
@@ -668,7 +682,7 @@ export function RequestLogsPage({
           <option value="wait-desc">请求前等待从高到低</option>
         </Select>
         <button
-          className="reset-filters"
+          className="button small ghost reset-filters"
           disabled={!hasFilters && !exact}
           onClick={() => {
             setFilters({ ...defaultFilters });
@@ -685,13 +699,10 @@ export function RequestLogsPage({
         </button>
       </div>
       <TableColumns choices={logColumns} value={visibleColumns} onChange={setCustomColumns} onReset={() => setCustomColumns(null)} />
-      {exact && <p className="workbench-help">固定时间：{new Date(exact.from).toLocaleString()} – {new Date(exact.to).toLocaleString()}</p>}
-      {filters.keyId && !exact && <p className="workbench-help">{stats.label(keyList.find(key => key.key_id === filters.keyId) || {key_id:filters.keyId})}</p>}
       {editWindow && <form className="request-log-window" onSubmit={applyWindow}>
-        <label>开始时间 <input type="datetime-local" required value={fromInput} onChange={event=>setFromInput(event.target.value)} /></label>
-        <label>结束时间 <input type="datetime-local" required value={toInput} onChange={event=>setToInput(event.target.value)} /></label>
+        <label>开始时间（本机） <input type="datetime-local" step="any" required value={fromInput} onChange={event=>setFromInput(event.target.value)} /></label>
+        <label>结束时间（本机） <input type="datetime-local" step="any" required value={toInput} onChange={event=>setToInput(event.target.value)} /></label>
         <button className="button small" type="submit">应用固定时间</button>
-        <span className="settings-note">本机时区 · {Intl.DateTimeFormat().resolvedOptions().timeZone}</span>
         {rangeError && <p role="alert">{rangeError}</p>}
       </form>}
           </WorkbenchDisclosure>

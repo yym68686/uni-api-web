@@ -148,12 +148,8 @@ export function ChannelOptimization({
             <header>
               <Dialog.Title>优化渠道模型</Dialog.Title>
               <Dialog.Description>
-                分析当前筛选的全部 {input.rows.length}{" "}
-                个渠道（包含其他页），仅修改已经接入 API key 的渠道。
-                预览使用点击时读取的最新检测结果，所有变更均需勾选后应用。
-                {input.filters.model
-                  ? `本次仅优化 ${input.filters.model}。`
-                  : "本次分析各渠道符合筛选条件的模型。"}
+                分析当前筛选的全部 {input.rows.length} 个渠道
+                {input.filters.model && ` · ${input.filters.model}`}
               </Dialog.Description>
               <Dialog.Close
                 className="icon-button detail-close"
@@ -187,15 +183,17 @@ export function ChannelOptimization({
                   </label>
                 ))}
               </fieldset>
-              <p className="optimization-help">
+              <details className="optimization-help">
+                <summary>优化规则</summary>
+                <p>
                 新增模型须已检测可用，且没有已确认的单价、模型匹配、Tool
                 use、降智或压缩异常；Tool use
                 检测失败时也不新增。未确认不当作正常，未检测和检测中的模型不会因缺少结果被移除。降智仅作用于
                 Astra，压缩仅作用于实际检测的模型。取消勾选后，原模型及指向它的别名路由也会列入预览。
-              </p>
-              <p className="optimization-help">
-                新增模型放在对应模型路由末尾，现有模型的相对顺序及渠道自定义设置保留。所有变更均需勾选后应用。
-              </p>
+                </p>
+                <p>预览使用点击时读取的最新检测结果。仅优化已接入的渠道；新增模型放在路由末尾。</p>
+                <p>现有路由的相对顺序和自定义设置不变。</p>
+              </details>
               {plan.notes.map((note) => (
                 <p className="coverage-note" role="status" key={note}>
                   {note}
@@ -249,8 +247,7 @@ export function ChannelOptimization({
               </div>
               {!plan.changes.length && (
                 <p className="optimization-empty">
-                  当前筛选范围内没有可优化的已接入模型。未加入任何 API key
-                  的渠道不会自动创建接入；可调整页面筛选或先完成检测。
+                  没有可优化的已接入模型。
                 </p>
               )}
               {groups.map((changes) => {

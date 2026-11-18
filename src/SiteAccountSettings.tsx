@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { FormEvent } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { X } from "lucide-react";
 import { ApiError, controlRequest } from "./api";
 import type { SubAccount } from "./Sub2apiChecks";
 import { siteRateCoefficient } from "./billingRates";
 import { SiteRecharge } from "./SiteRecharge";
+import { CompactDialogHeader } from "./CompactDialog";
 
 export function SiteAccountSettings({
   account,
@@ -22,6 +22,7 @@ export function SiteAccountSettings({
     String(siteRateCoefficient(account.rate_coefficient)),
   );
   const [busy, setBusy] = useState(false);
+  const opener = useRef(document.activeElement);
   const [rechargeBusy, setRechargeBusy] = useState(false);
   const dialogBusy = busy || rechargeBusy;
   const [error, setError] = useState("");
@@ -76,7 +77,11 @@ export function SiteAccountSettings({
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
         <Dialog.Content
-          className="guide-dialog sub-account-dialog"
+          className="guide-dialog compact-dialog site-settings-dialog"
+          onCloseAutoFocus={event => {
+            event.preventDefault();
+            if (opener.current instanceof HTMLElement && opener.current.isConnected) opener.current.focus();
+          }}
           onPointerDownOutside={(e) => {
             if (dialogBusy) e.preventDefault();
           }}
@@ -84,21 +89,9 @@ export function SiteAccountSettings({
             if (dialogBusy) e.preventDefault();
           }}
         >
-          <Dialog.Title>站点账号设置 · {account.name}</Dialog.Title>
-          <Dialog.Description>
-            设置仅作用于此站点账号下的所有渠道。
-          </Dialog.Description>
-          <button
-            type="button"
-            className="icon-button detail-close"
-            aria-label="关闭站点设置"
-            disabled={dialogBusy}
-            onClick={close}
-          >
-            <X size={18} />
-          </button>
+          <CompactDialogHeader context={account.name} closeLabel="关闭站点设置" busy={dialogBusy}>站点账号设置</CompactDialogHeader>
           <div
-            className="recharge-actions"
+            className="dialog-subtabs"
             role="group"
             aria-label="站点设置分类"
           >
@@ -107,7 +100,7 @@ export function SiteAccountSettings({
               className="button small"
               aria-pressed={section === "rate"}
               disabled={dialogBusy}
-              onClick={() => setSection("rate")}
+              onClick={() => { setError(""); setSection("rate"); }}
             >
               倍率设置
             </button>
@@ -116,7 +109,7 @@ export function SiteAccountSettings({
               className="button small"
               aria-pressed={section === "recharge"}
               disabled={dialogBusy}
-              onClick={() => setSection("recharge")}
+              onClick={() => { setError(""); setSection("recharge"); }}
             >
               充值设置
             </button>
@@ -126,59 +119,39 @@ export function SiteAccountSettings({
             </button>
           </div>
           {section === "recharge" ? (
-            <SiteRecharge key={account.id} account={account} onBusyChange={setRechargeBusy} />
-          ) : section === "probe" ? (
-            <form className="source-form sub-account-form" onSubmit={submit}>
-              <label>每分钟检测请求上限（RPM）
-                <input type="number" min="1" max="480" step="1" value={probeRPM} disabled={busy}
-                  placeholder="自动" onChange={e => setProbeRPM(e.target.value)} />
-              </label>
-              <label>同时在途请求上限
-                <input type="number" min="1" max="8" step="1" value={probeConcurrency} disabled={busy}
-                  placeholder="自动" onChange={e => setProbeConcurrency(e.target.value)} />
-              </label>
-              <p className="settings-note">留空则使用上游声明或保守估算。手动值不突破已知的上游额度；只影响检测请求，不影响密钥准备或业务路由。正在执行的一小批请求会沿用开始时的上限。</p>
-              {error && <p className="error-banner" role="alert">{error}</p>}
-              <div className="sub-account-dialog-actions">
-                <button type="button" className="button" disabled={busy} onClick={close}>取消</button>
-                <button type="submit" className="button primary" disabled={busy || !validProbe}>{busy ? "保存中…" : "保存设置"}</button>
-              </div>
-            </form>
+            <div className="compact-dialog-scroll"><SiteRecharge key={account.id} account={account} onBusyChange={setRechargeBusy} /></div>
           ) : (
-            <form className="source-form sub-account-form" onSubmit={submit}>
-              <label>
-                倍率系数
-                <input
-                  type="number"
-                  step="any"
-                  min="0"
-                  max="1000000"
-                  required
-                  value={value}
-                  disabled={busy}
-                  onChange={(e) => setValue(e.target.value)}
-                />
-              </label>
-              <p className="settings-note">
-                默认 1。例如设为 0.1，渠道显示倍率 0.2 将换算为
-                0.02；渠道实际消费 $10 将换算为
-                $1，利润随之重新计算。历史消费也按当前系数展示，原始账单和站点余额保持原值。
-              </p>
-              {valid && <div className="site-rate-preview" role="status">
-                <p>本账号预览 · 当前系数 {precision.format(current)} → {precision.format(coefficient)} · 调整后为原展示 {precision.format(coefficient/current)} 倍</p>
-                {representative && <p>「{representative.name}」原始倍率 {precision.format(representative.rate)}：展示 {precision.format(representative.rate*current)} → {precision.format(representative.rate*coefficient)} 。</p>}
-              </div>}
-              {!valid && (
-                <p className="settings-note">
-                  请输入大于 0 且不超过 1000000 的系数。
-                </p>
-              )}
-              {error && (
-                <p className="error-banner" role="alert">
-                  {error}
-                </p>
-              )}
-              <div className="sub-account-dialog-actions">
+            <form className="compact-dialog-form" onSubmit={submit}>
+              <div className="compact-dialog-scroll">
+                {section === "probe" ? <>
+                  <div className="dialog-field-grid">
+                    <label className="dialog-field">每分钟检测请求上限（RPM）
+                      <input type="number" min="1" max="480" step="1" value={probeRPM} disabled={busy}
+                        placeholder="自动" onChange={e => setProbeRPM(e.target.value)} />
+                    </label>
+                    <label className="dialog-field">同时在途请求上限
+                      <input type="number" min="1" max="8" step="1" value={probeConcurrency} disabled={busy}
+                        placeholder="自动" onChange={e => setProbeConcurrency(e.target.value)} />
+                    </label>
+                  </div>
+                </> : <>
+                  <label className="dialog-field">
+                    倍率系数
+                    <input type="number" step="any" min="0" max="1000000" required value={value}
+                      disabled={busy} aria-invalid={!valid} onChange={e => setValue(e.target.value)} />
+                  </label>
+                  {!valid && <p className="dialog-inline-note" role="alert">系数须大于 0，且不超过 1,000,000。</p>}
+                  {valid && coefficient !== current && <dl className="dialog-key-values" aria-label="倍率预览">
+                    <dt title="历史消费按新系数展示；不修改账单和余额。">系数</dt><dd>{precision.format(current)} → {precision.format(coefficient)}</dd>
+                    {representative && <>
+                      <dt title={representative.name}>{representative.name}</dt>
+                      <dd>{precision.format(representative.rate * current)} → {precision.format(representative.rate * coefficient)}</dd>
+                    </>}
+                  </dl>}
+                </>}
+                {error && <p className="error-banner" role="alert">{error}</p>}
+              </div>
+              <div className="compact-dialog-footer">
                 <button
                   type="button"
                   className="button"
@@ -190,7 +163,7 @@ export function SiteAccountSettings({
                 <button
                   type="submit"
                   className="button primary"
-                  disabled={busy || !valid}
+                  disabled={busy || !(section === "probe" ? validProbe : valid)}
                 >
                   {busy ? "保存中…" : "保存设置"}
                 </button>

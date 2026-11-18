@@ -23,7 +23,6 @@ import { AnimatePresence, m as motion } from "motion/react";
 import * as Dialog from "@radix-ui/react-dialog";
 import {
   Activity,
-  ArrowRight,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -72,6 +71,7 @@ import { ResponseLatency } from "./LatencyBadge";
 import { useSubImports, boundGroups } from "./sub2apiImports";
 import type { SubImportsQuery } from "./sub2apiImports";
 import { ChannelModels } from "./ChannelModels";
+import { DetailDrawer } from "./DetailDrawer";
 import { ChannelSortDialog } from "./ChannelSortDialog";
 import { previewChannelOrder, sortChannels } from "./channelSorting";
 import { applyScopedChannelSort, channelSortScope, deleteSortTemplate, loadChannelSortPreferences, saveChannelSortPreferences, scopedChannelSort } from "./channelSortPreferences";
@@ -174,8 +174,10 @@ function Overview({
   onLogs: (model?: string, failed?: boolean) => void;
   onChannel: (row: Channel) => void;
 }) {
-  const total = metrics?.total as Record<string, any> | undefined;
-  const models = (metrics as any)?.models || [];
+  const total = metrics?.total;
+  const models = (metrics?.models || []).filter((item): item is {
+    model: string; estimated_cost_usd?: number; input_tokens?: number; output_tokens?: number;
+  } => typeof item.model === "string" && !!item.model);
   const knownLive = [...live.values()].filter(
     (value): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0,
   );
@@ -189,9 +191,13 @@ function Overview({
   const tokenCount = (values: {input_tokens?: unknown;output_tokens?: unknown} | undefined) => {
     const input = number(values?.input_tokens), output = number(values?.output_tokens);
     if (input == null && output == null) return "—";
-    if (input == null || output == null) return `${count((input ?? output)!)}（仅${input == null ? "输出" : "输入"}）`;
-    return count(input + output);
+    return count((input ?? 0) + (output ?? 0));
   };
+  const tokenLabel = (values: Parameters<typeof tokenCount>[0]) => {
+    const input = number(values?.input_tokens), output = number(values?.output_tokens);
+    return input == null && output == null ? "暂无 token 数据" : input == null ? "仅输出 token" : output == null ? "仅输入 token" : "输入与输出 token";
+  };
+  const money = (value: unknown) => number(value) == null ? "—" : `$${Number(value).toFixed(4)}`;
   const cacheRate =
     number(total?.cache_rate) ??
     (number(total?.input_tokens) && number(total?.cache_read_tokens) != null
@@ -208,110 +214,100 @@ function Overview({
     const existing = offers.get(row.model);
     if (!existing || cost > (existing.stats.estimated_cost_usd ?? -1)) offers.set(row.model, row);
   }
-  const knownModelCost = (models as Array<Record<string, unknown>>).reduce((sum, item) => sum + (number(item.estimated_cost_usd) ?? 0), 0);
+  const knownModelCost = models.reduce((sum, item) => sum + (number(item.estimated_cost_usd) ?? 0), 0);
+  const rankedModels = [...models].sort((a, b) =>
+    (number(b.estimated_cost_usd) ?? -1) - (number(a.estimated_cost_usd) ?? -1) || a.model.localeCompare(b.model));
+  const [showAllModels, setShowAllModels] = useState(false);
+  const [showAllChannels, setShowAllChannels] = useState(false);
+  const previewCount = 8;
   return (
-    <motion.section {...reveal} className="overview-grid">
+    <section className="overview-content">
+      <section className="overview-grid" aria-label="概览指标">
       <MetricCard
         label="请求数量"
         value={countKnown(total?.requests)}
-        sub=""
         icon={<Activity size={17} />}
-        action={<button className="button small ghost" onClick={() => onLogs()}>请求日志</button>}
       />
       <MetricCard
         label="渠道尝试"
         value={countKnown(total?.attempts)}
-        sub="含重试"
+        help="包含重试。"
         icon={<Radio size={17} />}
-        accent
-        action={<button className="button small ghost" onClick={() => onLogs(undefined,true)}>失败请求</button>}
       />
       <MetricCard
         label="Token 数量"
         value={tokenCount(total)}
-        sub="输入 + 输出"
+        help={tokenLabel(total)}
         icon={<Layers3 size={17} />}
       />
       <MetricCard
         label="估算消费"
-        value={
-          total?.estimated_cost_usd == null
-            ? "—"
-            : `$${Number(total.estimated_cost_usd).toFixed(4)}`
-        }
-        sub="依据当前模型价格"
+        value={money(total?.estimated_cost_usd)}
+        help="按当前模型价格估算。"
         icon={<Wallet size={17} />}
       />
       <MetricCard
         label="渠道总并发"
         value={currentConcurrency == null ? "—" : count(currentConcurrency)}
-        sub={liveError ? "实时并发读取失败" : livePending ? "正在读取实时并发" : liveComplete ? "所列渠道的全部 API key · 实时尝试" : `覆盖不完整 · 已知 ${knownLive.length} 项`}
+        help={liveError ? "实时并发读取失败" : livePending ? "正在读取实时并发" : liveComplete ? "所列渠道的实时尝试，包含所有 API Key。" : `覆盖不完整 · 已知 ${knownLive.length} 项`}
         icon={<Gauge size={17} />}
       />
       <MetricCard
         label="缓存率"
         value={rate(cacheRate)}
-        sub="缓存读取 / 输入 token"
+        help="缓存读取 / 输入 token"
         icon={<Database size={17} />}
       />
-      <div className="data-panel overview-panel">
-        <div className="data-heading overview-heading">
-          <div className="data-title">
-            <Gauge size={18} />
-            <h2>模型消费</h2>
-          </div>
-        </div>
-        <div className="overview-list">
-          {models.length ? (
-            (models as Array<{model:string;estimated_cost_usd?:number;input_tokens?:number;output_tokens?:number}>).map(item => {
-              const top = offers.get(item.model);
-              return <div className="overview-row" key={item.model}>
-                <div><button className="text-link" onClick={() => onLogs(item.model)}>{item.model}</button>
-                  {top && <small className="overview-attribution">最大已归属渠道 · {top.source_name ? `${top.source_name} / ` : ""}{channelName(top)}</small>}
-                </div>
-                <span>
-                  {tokenCount(item)}{" "}
-                  tokens
-                </span>
-                <b>
-                  {item.estimated_cost_usd == null
-                    ? "—"
-                    : `$${Number(item.estimated_cost_usd).toFixed(4)}`}
-                </b>
-                <small>{knownModelCost > 0 && number(item.estimated_cost_usd) != null ? `${rate(item.estimated_cost_usd! / knownModelCost)} 已估价消费` : "占比未知"}</small>
-              </div>;
-            })
-          ) : (
-            <Empty title={historyError ? "模型消费暂不可用" : "暂无模型事实"} icon={<Activity size={22} />}>
-              {historyError || "当前范围没有已上报的记录。"}
-            </Empty>
-          )}
-        </div>
-      </div>
-      <div className="data-panel overview-panel">
-        <div className="data-title">
-          <Radio size={18} />
-          <h2>当前渠道</h2>
-        </div>
-        <div className="overview-list">
-          {priorityRows.slice(0, 12).map((row) => (
-            <div className="overview-row" key={rowId(row)}>
-              <button className="text-link" onClick={() => onChannel(row)}>{channelName(row)}</button>
-              {row.source_name && (
-                <small className="source-label">{row.source_name}</small>
-              )}
-              <span>{row.model}</span>
-              <Status row={row} />
-              <b>
-                {live?.get(rowId(row)) == null
-                  ? "—"
-                  : `${live.get(rowId(row))} 并发`}
-              </b>
+      </section>
+      <div className="overview-panels">
+        <section className="overview-panel" aria-label="模型消费">
+          <header className="overview-panel-header">
+            <h3>模型消费</h3>
+            <div className="overview-panel-actions">
+              <button className="button small ghost" onClick={() => onLogs()}>请求日志</button>
+              <button className="button small ghost" onClick={() => onLogs(undefined, true)}>失败请求</button>
             </div>
-          ))}
-        </div>
+          </header>
+          {rankedModels.length ? <table className="overview-table overview-models">
+            <thead><tr><th scope="col">模型</th><th scope="col">Token</th><th scope="col">估算消费</th><th scope="col" title="占已估价消费的比例">占比</th></tr></thead>
+            <tbody>{(showAllModels ? rankedModels : rankedModels.slice(0, previewCount)).map(item => {
+              const top = offers.get(item.model);
+              const cost = number(item.estimated_cost_usd);
+              const share = knownModelCost > 0 && cost != null ? cost / knownModelCost : null;
+              return <tr key={item.model}>
+                <th scope="row"><button className="overview-link" title={top ? `${item.model} · 消费最高渠道：${channelName(top)}` : item.model} onClick={() => onLogs(item.model)}>{item.model}</button></th>
+                <td title={tokenLabel(item)}>{tokenCount(item)}</td>
+                <td>{money(cost)}</td>
+                <td><span className="overview-share">{share == null ? "—" : rate(share)}
+                  {share != null && <span className="overview-share-track" aria-hidden="true"><span style={{width:`${Math.min(share, 1) * 100}%`}} /></span>}
+                </span></td>
+              </tr>;
+            })}</tbody>
+          </table> : <p className="overview-empty">{historyError ? "模型消费暂不可用" : "暂无消费记录"}</p>}
+          {rankedModels.length > previewCount && <button type="button" className="button small ghost overview-more"
+            aria-expanded={showAllModels} onClick={() => setShowAllModels(value => !value)}>
+            {showAllModels ? "收起" : `查看全部 ${rankedModels.length} 个模型`}
+          </button>}
+        </section>
+        <section className="overview-panel" aria-label="当前渠道">
+          <header className="overview-panel-header"><h3>当前渠道</h3></header>
+          {priorityRows.length ? <table className="overview-table overview-channels">
+            <thead><tr><th scope="col">渠道</th><th scope="col">状态</th><th scope="col">并发</th></tr></thead>
+            <tbody>{priorityRows.slice(0, showAllChannels ? 12 : previewCount).map(row => (
+              <tr key={rowId(row)}>
+                <th scope="row"><button className="overview-link" title={[channelName(row), row.source_name, row.model].filter(Boolean).join(" · ")}
+                  onClick={() => onChannel(row)}>{channelName(row)}</button></th>
+                <td><Status row={row} /></td><td>{countKnown(live.get(rowId(row)))}</td>
+              </tr>
+            ))}</tbody>
+          </table> : <p className="overview-empty">暂无渠道</p>}
+          {priorityRows.length > previewCount && <button type="button" className="button small ghost overview-more"
+            aria-expanded={showAllChannels} onClick={() => setShowAllChannels(value => !value)}>
+            {showAllChannels ? "收起" : `查看更多 · ${Math.min(priorityRows.length, 12)}`}
+          </button>}
+        </section>
       </div>
-    </motion.section>
+    </section>
   );
 }
 
@@ -325,29 +321,21 @@ const reveal = {
 function MetricCard({
   label,
   value,
-  sub,
   icon,
-  accent = false,
   help,
-  action,
 }: {
   label: string;
   help?: ReactNode;
-  action?: ReactNode;
   value: string;
-  sub: string;
   icon: ReactNode;
-  accent?: boolean;
 }) {
   return (
-    <div className={`metric-card ${accent ? "accent" : ""}`}>
+    <div className="metric-card">
       <div className="metric-card-label">
-        {help ? <Tip text={help}>{label} <CircleHelp size={12} /></Tip> : label}
-        {icon}
+        {label}
+        {help ? <Tip text={help}><span aria-label={`${label}说明`}>{icon}</span></Tip> : icon}
       </div>
-      <div className="metric-card-number">{value}</div>
-      {sub && <p>{sub}</p>}
-      {action}
+      <div className="metric-card-number" title={value}>{value}</div>
     </div>
   );
 }
@@ -403,7 +391,6 @@ function Trend({
     <motion.section id="channel-trend" {...reveal} className="trend-panel">
       <div className="panel-heading">
         <div>
-          <span className="eyebrow">TRAFFIC AT A GLANCE</span>
           <h3>渠道尝试趋势</h3>
         </div>
         <div className="chart-legend">
@@ -506,32 +493,16 @@ function Detail({
   imports?: SubImportsQuery;
   catalog: Channel[];
 }) {
+  if (!row) return null;
   const installed = imports?.data?.data.find((item) => item.source_id === row?.source_id && item.provider === row?.provider);
+  const hasControls = !!row.source_id && trend.connection.account;
   return (
-    <Dialog.Root
-      open={!!row}
-      onOpenChange={(open) => {
-        if (!open) onClose();
-      }}
-    >
-      <Dialog.Portal>
-        <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content className="detail-panel">
-          <Dialog.Close
-            className="icon-button detail-close"
-            aria-label="关闭详情"
-          >
-            <X size={20} />
-          </Dialog.Close>
-          <Dialog.Title><SiteLink base={site}>{row ? channelName(row) : ""}</SiteLink></Dialog.Title>
-          <Dialog.Description className="detail-description">
-            {row?.upstream_model} <ArrowRight size={13} /> {row?.model}
-          </Dialog.Description>
-          {row && (
-            <>
-              <div className="detail-channel-actions"><Status row={row} />
-                <button type="button" className="button small" onClick={() => onLogs(row)}>查看相关日志</button>
-              </div>
+    <DetailDrawer key={rowId(row)} title={<SiteLink base={site}>{channelName(row)}</SiteLink>}
+      context={[row.source_name || row.source_id, row.upstream_model && row.upstream_model !== row.model ? `${row.upstream_model} → ${row.model}` : row.model].filter(Boolean).join(" · ")}
+      close={onClose} closeLabel="关闭详情"
+      actions={<><Status row={row} /><button type="button" className="button small" onClick={() => onLogs(row)}>查看相关日志</button></>}
+      pages={[
+        { id: "overview", label: "概览", content: <>
               <div className="detail-section">
                 <h3>时延分布</h3>
                 <dl className="detail-stats">
@@ -584,31 +555,26 @@ function Detail({
                 </div>
               </div>
               <div className="detail-section">
-                <h3>站点余额</h3>
+                <h3 title="同一站点账号下的渠道共享余额；负余额不会自动停用渠道。">站点余额</h3>
                 <BalanceValue balance={balance?.data} loading={imports?.isPending} detail />
-                <p className="muted">
-                  显示已关联站点账号的余额。同账号的多个渠道共享余额，负余额不自动改变路由可用状态。
-                </p>
               </div>
               <ChannelDetailTrends key={`${providerId(row)}:${row.model}:trends`} row={row} {...trend} />
               <CacheTrend key={`${providerId(row)}:${row.model}:cache`} row={row} {...trend} />
-              {row.source_id && trend.connection.account && <section className="detail-section">
+        </> },
+        ...(imports ? [{ id: "models", label: "模型", content: <ChannelModels key={`models:${providerId(row)}`} row={row} imports={imports} catalog={catalog} keyId={trend.keyId} session={session} /> }] : []),
+        ...(hasControls ? [{ id: "checks", label: "检测", content: <>
+              <ChannelDetailChecks key={`${providerId(row)}:${row.model}:checks`} row={row} />
+              <section className="detail-section">
                 <h3>降智检测</h3>
                 {check ? <div className="quality-status-stack"><Tip text={check.history && check.history.total > 0 ? qualityTooltip(check.history, check.checked_at, check.origin) : `最近检测：${dateTime(check.checked_at)}`}><CheckVerdict result={check} /></Tip><QualityProbability history={check.history} checkedAt={check.checked_at} origin={check.origin} /></div> : <p className="muted">暂无检测结果。</p>}
-                <QualityHistory key={providerId(row)} path={`/v1/sources/${encodeURIComponent(row.source_id)}/channel-checks/history?${new URLSearchParams({ provider: row.provider })}`} revision={`${check?.checked_at}:${check?.history?.total}:${check?.history?.successful}`} title={check?.history_scope === "account_group" ? "共享检测记录" : "渠道检测记录"} />
+                {row.source_id && <QualityHistory key={providerId(row)} path={`/v1/sources/${encodeURIComponent(row.source_id)}/channel-checks/history?${new URLSearchParams({ provider: row.provider })}`} revision={`${check?.checked_at}:${check?.history?.total}:${check?.history?.successful}`} title={check?.history_scope === "account_group" ? "共享检测记录" : "渠道检测记录"} />}
                 {check?.history_scope !== "account_group" && boundGroups(installed).map(group => <QualityHistory key={`${group.account_id}:${group.group_id}`} path={`/v1/sub2api/accounts/${encodeURIComponent(group.account_id)}/groups/${group.group_id}/quality-history`} revision={`${check?.checked_at}:${check?.history?.total}:${check?.history?.successful}`} title={`sub2api 检测记录 · 分组 #${group.group_id}`} />)}
-              </section>}
-              {row.source_id && trend.connection.account && <ChannelDetailChecks key={`${providerId(row)}:${row.model}:checks`} row={row} />}
-              {imports && <ChannelModels key={`models:${providerId(row)}`} row={row} imports={imports} catalog={catalog} keyId={trend.keyId} session={session} />}
-              {trend.connection.account && <section className="detail-section" aria-label="渠道设置与访问">
+              </section>
+        </> }, { id: "settings", label: "设置", content: <section className="detail-section" aria-label="渠道设置与访问">
                 <div className="detail-channel-actions"><h3>设置与访问</h3><ChannelSettings row={row}/></div>
                 <ChannelAccess key={`access:${providerId(row)}`} row={row} imports={imports} onRemoved={onClose} />
-              </section>}
-            </>
-          )}
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+        </section> }] : []),
+      ]} />
   );
 }
 
@@ -1550,34 +1516,33 @@ export default function Dashboard({
           }
         />
         <main className="workspace" aria-label="工作区" tabIndex={-1} ref={mainRef}><PageBoundary key={view}><Suspense fallback={<PageLoading view={view} />}>
-          {view === "overview" && !noSources && <section className="data-panel overview-scope" aria-label="总览统计范围">
-            <div className="data-heading">
-              <div className="data-title"><Gauge size={18} /><h2>总览</h2><WorkbenchNotice messages={[...historyMessages, error && `读取不完整：${error}`]} /></div>
-              {refreshButton}
-            </div>
-            <div className="filters">
-              <label className="inline-select">时间 <select aria-label="总览时间范围" value={window} onChange={event => setFilter("window",event.target.value)}>
+          {view === "overview" && !noSources && <header className="data-heading overview-heading" aria-label="总览统计范围">
+            <div className="data-title"><h2>总览</h2><WorkbenchNotice messages={[...historyMessages, error && `读取不完整：${error}`]} /></div>
+            <div className="overview-tools">
+              <label className="overview-select"><Clock3 size={14} aria-hidden="true" /><select aria-label="总览时间范围" value={window} onChange={event => setFilter("window",event.target.value)}>
                 {ranges.map(([value,label]) => <option value={value} key={value}>{label}</option>)}
-              </select></label>
-              {baseConnection.account && <label className="inline-select">来源 <select aria-label="总览来源" value={selectedSourceId} onChange={event => {
+              </select><ChevronDown size={12} aria-hidden="true" /></label>
+              {baseConnection.account && <label className="overview-select"><Server size={14} aria-hidden="true" /><select aria-label="总览来源" value={selectedSourceId} onChange={event => {
                 setFilter("sourceId",event.target.value); setFilter("keyId","");
               }}>
                 <option value="">全部来源</option>
                 {sourceRemoved && <option value={selectedSourceId}>来源已移除</option>}
                 {sourceList.map(source => <option value={source.id} key={source.id}>{source.name}</option>)}
-              </select></label>}
-              <label className="inline-select">调用 Key <select aria-label="总览调用 Key" value={keyId} onChange={event => setFilter("keyId",event.target.value)}>
+              </select><ChevronDown size={12} aria-hidden="true" /></label>}
+              <label className="overview-select"><KeyRound size={14} aria-hidden="true" /><select aria-label="总览调用 Key" value={keyId} onChange={event => setFilter("keyId",event.target.value)}>
                 <option value="">全部 Key</option>
                 {keyRemoved && <option value={keyId}>Key 已移除</option>}
                 {keys.data?.data.map(key => <option value={key.key_id} key={key.key_id}>{key.source_name ? key.source_name + " · " : ""}Key {key.position} · {key.prefix}</option>)}
-              </select></label>
-              <label className="inline-select">模型 <select aria-label="总览模型" value={model} onChange={event => setFilter("model",event.target.value)}>
+              </select><ChevronDown size={12} aria-hidden="true" /></label>
+              <label className="overview-select"><Layers3 size={14} aria-hidden="true" /><select aria-label="总览模型" value={model} onChange={event => setFilter("model",event.target.value)}>
                 <option value="">全部模型</option>
                 {model && !models.includes(model) && <option value={model}>{model}（当前目录未确认）</option>}
                 {models.map(value => <option value={value} key={value}>{value}</option>)}
-              </select></label>
+              </select><ChevronDown size={12} aria-hidden="true" /></label>
+              <button type="button" className="button small overview-refresh" disabled={refreshBusy} aria-label="刷新数据"
+                title="刷新数据" onClick={reload}><RefreshCw size={15} className={refreshBusy ? "spin" : ""} /></button>
             </div>
-          </section>}
+          </header>}
           {view === "requests" ? <RequestLogsPage connection={baseConnection} sources={sourceList}/> : view === "sub2api" && baseConnection.account ? (
             <Sub2apiChecks
               key={baseConnection.session}
@@ -1667,13 +1632,12 @@ export default function Dashboard({
                   {inlineKey && apiKeyFilter}
                   {inlineRoute && <div className="route-edit-slot">{adjustingChannels ? routeActions : routeButton}</div>}
                   {view === "balances" && <WorkbenchDisclosure label="检查余额" icon={<Wallet size={14} aria-hidden="true" />}>
-                    <p className="workbench-help">当前范围：{count(balanceCatalog.length)} 个渠道</p>
                     <button type="button" className="button small" disabled={!activeAudit && (!balanceCatalog.length || busy || search !== deferredSearch)} onClick={event => {
                       if (activeAudit) setBalanceAudit(null);
                       else setBalanceAudit({scope:auditScope, targets:[...balanceCatalog]});
                       const menu = event.currentTarget.closest("details");
                       if (menu) { menu.open = false; menu.querySelector("summary")?.focus(); }
-                    }}>{activeAudit ? "停止检查" : "检查当前范围"}</button>
+                    }}>{activeAudit ? "停止检查" : `检查 ${count(balanceCatalog.length)} 个渠道`}</button>
                   </WorkbenchDisclosure>}
                   <WorkbenchDisclosure key={view} className="channel-filter-disclosure" label={`筛选${activeFilters.length ? ` ${activeFilters.length}` : ""}`} icon={<Filter size={14} aria-hidden="true" />}
                     title={[search, model, selectedSourceId && sourceList.find(source => source.id === selectedSourceId)?.name, statusFilter === "eligible" ? "可用" : statusFilter ? "不可用" : ""].filter(Boolean).join(" · ") || undefined}>

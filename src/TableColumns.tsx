@@ -32,6 +32,7 @@ export function TableColumns<K extends string>({ choices, value, onChange, onRes
   inline?: boolean;
 }) {
   const dragged = useRef<K | null>(null);
+  const [drag, setDrag] = useState<{ id: K; over: K | null } | null>(null);
   const byId = new Map(choices.map(column => [column.id, column]));
   const selected = value.flatMap(id => byId.get(id) || []);
   const move = (id: K, index: number) => {
@@ -42,17 +43,32 @@ export function TableColumns<K extends string>({ choices, value, onChange, onRes
   };
   const fields = <>
     <button className="text-link table-column-reset" type="button" onClick={onReset}>恢复默认列</button>
-    <ul aria-label="数据列及显示顺序">
+    <ul aria-label="数据列及显示顺序" onDragLeave={event => {
+      if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+      setDrag(current => current?.over ? { ...current, over: null } : current);
+    }}>
       {[...selected, ...choices.filter(({ id }) => !value.includes(id))].map(({ id, label }) => {
         const index = value.indexOf(id);
         const checked = index !== -1;
-        return <li key={id} onDragOver={event => {
-          if (dragged.current && checked) event.preventDefault();
-        }} onDrop={event => {
-          if (!dragged.current || !checked) return;
+        const destination = drag?.over === id
+          ? value.indexOf(drag.id) > index ? "before" : "after"
+          : undefined;
+        return <li key={id} data-column-dragging={drag?.id === id || undefined}
+          data-column-drop={destination} onDragOver={event => {
+          const source = dragged.current;
+          if (!source) return;
+          const over = checked && source !== id ? id : null;
+          setDrag(current => current?.over === over ? current : { id: source, over });
+          if (!checked) return;
           event.preventDefault();
-          if (dragged.current !== id) move(dragged.current, index);
+          event.dataTransfer.dropEffect = "move";
+        }} onDrop={event => {
+          const source = dragged.current;
+          if (!source || !checked) return;
+          event.preventDefault();
           dragged.current = null;
+          setDrag(null);
+          if (source !== id) move(source, index);
         }}>
           <label><input type="checkbox" checked={checked} onChange={event => onChange(
             event.target.checked ? [...value, id] : value.filter(column => column !== id),
@@ -62,10 +78,15 @@ export function TableColumns<K extends string>({ choices, value, onChange, onRes
               dragged.current = id;
               event.dataTransfer.effectAllowed = "move";
               event.dataTransfer.setData("text/plain", id);
-            }} onDragEnd={() => { dragged.current = null; }}><GripVertical size={14} /></span>
+              setDrag({ id, over: null });
+            }} onDragEnd={() => { dragged.current = null; setDrag(null); }}><GripVertical size={14} /></span>
             <button type="button" className="icon-button" aria-label={`上移${label}列`} disabled={index === 0} onClick={() => move(id, index - 1)}><ArrowUp size={14} /></button>
             <button type="button" className="icon-button" aria-label={`下移${label}列`} disabled={index === value.length - 1} onClick={() => move(id, index + 1)}><ArrowDown size={14} /></button>
           </div>}
+          {destination && drag && <span className="table-column-drop-preview" aria-hidden="true">
+            {destination === "before" ? <ArrowUp size={12} /> : <ArrowDown size={12} />}
+            <span>{byId.get(drag.id)?.label}</span>
+          </span>}
         </li>;
       })}
     </ul>

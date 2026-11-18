@@ -47,20 +47,24 @@ export function useChannelDetection(owner: string, enabled = true) {
     retry: false,
     staleTime: 15000,
   });
-  const busyRef = useRef(false),
-    [busy, setBusy] = useState(false),
+  const busyRef = useRef(new Set<string>()),
+    [saving, setSaving] = useState(new Set<string>()),
     [error, setError] = useState("");
+  const scopedKey = (target: DetectionTarget) => JSON.stringify([owner,detectionKey(target)]);
+  const isSaving = (row: Parameters<typeof detectionTargets>[0]) =>
+    detectionTargets(row).some(target => saving.has(scopedKey(target)));
   const disabled = new Set((query.data?.disabled || []).map(detectionKey));
   async function save(
     row: Pick<ManagementRow, "account" | "target" | "configured">,
     enabled: boolean,
   ) {
-    if (busyRef.current) return;
-    busyRef.current = true;
-    setBusy(true);
+    const targets = detectionTargets(row);
+    const keys = targets.map(scopedKey);
+    if (!keys.length || keys.some(key => busyRef.current.has(key))) return;
+    keys.forEach(key => busyRef.current.add(key));
+    setSaving(new Set(busyRef.current));
     setError("");
     try {
-      const targets = detectionTargets(row);
       await controlRequest("/v1/channel-management/detection-settings", {
         method: "PATCH",
         body: JSON.stringify({ targets, enabled }),
@@ -82,9 +86,9 @@ export function useChannelDetection(owner: string, enabled = true) {
             : "检测开关保存失败",
       );
     } finally {
-      busyRef.current = false;
-      setBusy(false);
+      keys.forEach(key => busyRef.current.delete(key));
+      setSaving(new Set(busyRef.current));
     }
   }
-  return { ...query, disabled, busy, error, save };
+  return { ...query, disabled, busy: saving.size > 0, isSaving, error, save };
 }

@@ -578,8 +578,9 @@ it("loads sources before opening the dialog and offers retry when the initial re
   expect(fetcher.mock.calls.filter(([input]) => input.endsWith("/v1/sources"))).toHaveLength(1);
   await user.click(add);
   const dialog = within(screen.getByRole("dialog"));
-  expect(dialog.getByLabelText("添加到 uni-api 来源")).toBeDisabled();
-  expect(dialog.getByText("正在读取 uni-api 来源…")).toBeVisible();
+  const source = dialog.getByRole("combobox", { name: "添加到 uni-api 来源" });
+  expect(source).toBeDisabled();
+  expect(source).toHaveDisplayValue("正在读取来源…");
   finishSources(new Response("来源服务暂不可用", { status: 503 }));
   await user.click(await dialog.findByRole("button", { name: "重新读取来源" }));
   expect(fetcher.mock.calls.filter(([input]) => input.endsWith("/v1/sources"))).toHaveLength(2);
@@ -1049,7 +1050,9 @@ it("keeps busy accounts from duplicate checks and removes only after explicit se
   await openSites();
   await user.click(screen.getByRole("button", { name: "移除账号 two" }));
   expect(methods).toHaveLength(0);
-  await user.click(screen.getByRole("button", { name: "确认移除" }));
+  const removal = screen.getByRole("dialog", { name: "移除站点账号" });
+  expect(document.querySelector(".sub-account-list")).not.toHaveTextContent("确认移除");
+  await user.click(within(removal).getByRole("button", { name: "确认移除" }));
   await waitFor(() => expect(methods).toEqual(["DELETE"]));
 });
 it("isolates row submissions by account, group and check kind, including out-of-order failures", async () => {

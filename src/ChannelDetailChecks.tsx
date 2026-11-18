@@ -14,6 +14,7 @@ import { toolUseLabels } from "./toolUse";
 import { compactionLabels } from "./SubCompaction";
 import { Spinner } from "./ui";
 import { time } from "./format";
+import { WorkbenchNotice } from "./Workbench";
 
 type Kind = "availability" | "quality" | "tool-use" | "compaction";
 const items: { kind: Kind; label: string; description: string }[] = [
@@ -171,20 +172,12 @@ export function ChannelDetailChecks({ row }: { row: Channel }) {
   };
   return (
     <section className="detail-section detail-checks" aria-label="渠道独立检测">
-      <h3>独立检测</h3>
-      <p className="muted">
-        {row.source_name || row.source_id} · {row.model}
-        。仅检测当前渠道，不调整业务路由。
-      </p>
-      {query.isError && (
-        <p role="alert">
-          检测状态读取失败{" "}
-          <button className="button small" onClick={() => void query.refetch()}>
-            <RefreshCw size={13} />
-            重试
-          </button>
-        </p>
-      )}
+      <div className="detail-section-heading">
+        <h3>独立检测</h3>
+        {query.isError && <button className="button small" onClick={() => void query.refetch()}>
+          <RefreshCw size={13} />检测状态读取失败 · 重试
+        </button>}
+      </div>
       <div className="detail-check-grid">
         {items.map(({ kind, label, description }) => {
           const c = applicable(kind) ? entry(kind) : undefined,
@@ -202,13 +195,13 @@ export function ChannelDetailChecks({ row }: { row: Channel }) {
               <button
                 className="button small"
                 aria-label={label}
+                title={applicable(kind) ? description : capabilityCheckScope}
                 aria-busy={busy}
                 disabled={!applicable(kind) || busy || !row.source_id}
                 onClick={() => void run(kind)}
               >
                 {busy ? <Spinner small /> : <Play size={13} />} {label}
               </button>
-              <small>{applicable(kind) ? description : capabilityCheckScope}</small>
               <span
                 className={
                   status.includes("失败") ||
@@ -218,21 +211,11 @@ export function ChannelDetailChecks({ row }: { row: Channel }) {
                     : "muted"
                 }
                 role="status"
+                title={c?.result?.checked_at ? time(c.result.checked_at) : undefined}
               >
-                {submitting.has(kind) ? "正在提交…" : status}
-                {!busy && c?.result?.checked_at
-                  ? ` · ${time(c.result.checked_at)}`
-                  : ""}
+                {submitting.has(kind) ? "正在提交…" : accepted[kind] && !c ? "已提交" : status}
               </span>
-              {accepted[kind] && !c && (
-                <small>已提交，正在读取检测状态。</small>
-              )}
-              {errors[kind] && (
-                <p role="alert" className="negative">
-                  {errors[kind]}
-                </p>
-              )}
-              {message && <small title={message}>{message}</small>}
+              <WorkbenchNotice urgent={!!errors[kind]} label={`${label}详情`} messages={[errors[kind], message]} />
             </div>
           );
         })}

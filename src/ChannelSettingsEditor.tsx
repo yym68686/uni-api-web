@@ -532,8 +532,8 @@ function Models({
         <table className="setting-models">
           <thead>
             <tr>
-              <th>原来的名字</th>
-              <th>重命名后的名字</th>
+              <th>上游模型</th>
+              <th>公开模型</th>
               <th />
             </tr>
           </thead>
@@ -581,9 +581,6 @@ function Models({
           </tbody>
         </table>
       </div>
-      <p className="settings-help">
-        左侧是原来的上游模型名，右侧是重命名后对外提供的模型名。
-      </p>
     </div>
   );
 }

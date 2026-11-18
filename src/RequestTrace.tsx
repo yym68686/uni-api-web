@@ -15,6 +15,7 @@ import {
 import { analyticsRequest, initializationRetryInterval } from "./api";
 import type { Connection, Metrics } from "./types";
 import { SiteLink } from "./ChannelSite";
+import { WorkbenchNotice } from "./Workbench";
 import {
   buildTrace,
   duration,
@@ -105,7 +106,9 @@ export function RequestTraceDialog({
         <Dialog.Content className="request-log-dialog">
           <header className="request-log-dialog-heading">
             <div>
-              <Dialog.Title>请求详情</Dialog.Title>
+              <Dialog.Title>请求详情 <WorkbenchNotice messages={[
+                query.data?.import?.caught_up === false && "历史同步中，当前链路可能不完整。",
+              ]} /></Dialog.Title>
               <Dialog.Description>{requestId}</Dialog.Description>
             </div>
             <button
@@ -129,17 +132,9 @@ export function RequestTraceDialog({
                 {query.error.message}
               </p>
             )}
-            {query.data?.import?.caught_up === false && (
-              <p className="coverage-note">
-                历史事实仍在同步，当前链路可能不完整。稍后可刷新记录。
-              </p>
-            )}
             {query.data?.data.length === 0 && (
               <div className="trace-empty">
                 <h3>未找到该请求的网关记录</h3>
-                <p>
-                  请核对请求 ID 与来源。记录可能尚未同步或发生于采集启用之前。
-                </p>
               </div>
             )}
             {query.data?.data.map((run) => (

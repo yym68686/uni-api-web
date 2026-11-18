@@ -6,6 +6,7 @@ import * as Tooltip from "@radix-ui/react-tooltip";
 // System fonts keep cold navigation independent of additional font downloads.
 import "./styles.css";
 import "./observatory.css";
+import "./compactDialog.css";
 import App from "./App";
 import { PageBoundary } from "./PageBoundary";
 const client = new QueryClient({

@@ -184,6 +184,22 @@
 .request-log-window {display:flex;flex-wrap:wrap;align-items:end;gap:10px;padding:12px 20px;}
 .request-log-window label { display:grid;gap:4px; }
 .request-log-window input { color:inherit;background:var(--surface);border:1px solid var(--line);padding:6px;border-radius:6px; }
+.request-log-window label, .request-log-window input { min-width: 0; max-width: 100%; }
+.workspace .request-log-filters .key-select {
+  width: min(100%, 25rem);
+  padding-right: 26px;
+}
+.request-log-filters .key-select select { flex: 1; width: 0; padding-right: 0; }
+.log-filter-accessory {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
 .trace-attempt-compare { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,22rem),1fr)); gap:12px; margin-top:18px; }
 .trace-attempt-inline { position:relative; padding:16px; border:1px solid var(--line); border-radius:10px; background:var(--subtle); min-width:0; }
 .trace-attempt-inline > h4 { margin:.35rem 2rem .5rem 0;overflow-wrap:anywhere;}

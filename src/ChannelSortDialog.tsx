@@ -230,7 +230,6 @@ export function ChannelSortDialog({
                 ))}
             </Dialog.Description>
           </header>
-          <p className="settings-note">预览和排序模板只调整本地列表。点「应用排序」会把当前预览写入实际请求路由。</p>
           <div className="channel-sort-body">
             <div
               className={routing?.busy ? "channel-sort-busy" : ""}
@@ -592,7 +591,7 @@ export function ChannelSortDialog({
           </div>
           <footer className="channel-sort-footer">
             <span className="channel-sort-footer-hint">
-              {draft.length
+              {routing && currentPreview?.plan && canApply(currentPreview.plan) ? "应用后将更新实际请求顺序" : draft.length
                 ? `${draft.length} 项规则 · 上方优先`
                 : "实际路由顺序"}
             </span>

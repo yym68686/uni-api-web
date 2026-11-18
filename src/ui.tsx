@@ -51,14 +51,14 @@ export function Empty({
   icon,
 }: {
   title: string;
-  children: ReactNode;
+  children?: ReactNode;
   icon?: ReactNode;
 }) {
   return (
     <div className="empty">
       <div className="empty-icon">{icon || <Activity size={25} />}</div>
       <h3>{title}</h3>
-      <p>{children}</p>
+      {children && <p>{children}</p>}
     </div>
   );
 }

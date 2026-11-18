@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { Plus, X, SlidersHorizontal, Braces, Download } from "lucide-react";
+import { Plus, SlidersHorizontal, Braces, Download } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { parse, stringify } from "yaml";
 import { ApiError, controlRequest } from "./api";
@@ -15,6 +15,7 @@ import {
 import type { ModelAlias } from "./ModelAliases";
 import { Spinner } from "./ui";
 import { automaticChannelDocument } from "./channelProtocol";
+import { CompactDialogHeader } from "./CompactDialog";
 
 type Document = Record<string, unknown>;
 interface Schema {
@@ -447,28 +448,9 @@ export function CreateChannel({
       </Dialog.Trigger>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay channel-settings-overlay" />
-        <Dialog.Content className="create-channel-dialog">
-          <header className="settings-dialog-header">
-            <span className="settings-title-icon">
-              <Plus size={23} />
-            </span>
-            <div className="settings-title-copy">
-              <Dialog.Title>添加渠道</Dialog.Title>
-              <Dialog.Description>
-                连接上游服务，渠道仅供所选调用 API key 使用。
-              </Dialog.Description>
-            </div>
-            <Dialog.Close asChild>
-              <button
-                className="settings-icon-button settings-close"
-                aria-label="关闭"
-                disabled={busy}
-              >
-                <X size={20} />
-              </button>
-            </Dialog.Close>
-          </header>
-          <div className="create-channel-body">
+        <Dialog.Content className="guide-dialog compact-dialog create-channel-dialog" aria-describedby={undefined}>
+          <CompactDialogHeader busy={busy}>添加渠道</CompactDialogHeader>
+          <div className="compact-dialog-scroll create-channel-body">
             <fieldset disabled={busy || !!pending}>
               <div className="create-channel-grid">
                 <label>
@@ -495,9 +477,10 @@ export function CreateChannel({
                   <select
                     value={key}
                     disabled={remoteKeys.isFetching}
+                    aria-busy={remoteKeys.isFetching}
                     onChange={(e) => setKey(e.target.value)}
                   >
-                    <option value="">选择 API key</option>
+                    <option value="">{remoteKeys.isFetching ? "读取中…" : "选择 API key"}</option>
                     {available.map((k) => (
                       <option key={k.key_id} value={k.key_id}>
                         #{k.position} · {k.prefix}
@@ -517,9 +500,6 @@ export function CreateChannel({
                     重新读取 API key
                   </button>
                 </p>
-              )}
-              {schema.isFetching && (
-                <p className="settings-help">正在读取来源支持的渠道类型…</p>
               )}
               {schema.isError ? (
                 <p role="alert" className="negative">
@@ -567,10 +547,6 @@ export function CreateChannel({
                     value={raw}
                     onChange={(e) => setRaw(e.target.value)}
                   />
-                  <small>
-                    填写一个 provider
-                    对象，可设置密钥、模型映射、请求改写及其他来源支持的字段。
-                  </small>
                 </label>
               ) : (
                 <>
@@ -588,9 +564,10 @@ export function CreateChannel({
                       <select
                         value={engine}
                         onChange={(e) => edit("engine", e.target.value)}
-                        disabled={!supported}
+                        disabled={!supported || schema.isFetching}
+                        aria-busy={schema.isFetching}
                       >
-                        <option value="auto">{engineNames.auto}</option>
+                        <option value="auto">{schema.isFetching ? "读取中…" : engineNames.auto}</option>
                         {engine !== "auto" &&
                           !schema.data?.engines?.includes(engine) && (
                             <option value={engine}>
@@ -605,12 +582,6 @@ export function CreateChannel({
                       </select>
                     </label>
                   </div>
-                  {engine === "auto" && (
-                    <p role="note">
-                      不指定引擎，保留完整上游地址，由 uni-api
-                      统一识别。模型名称不参与判断；同一地址下的所有模型共用网关识别的引擎。
-                    </p>
-                  )}
                   <label>
                     上游地址
                     <input
@@ -710,32 +681,25 @@ export function CreateChannel({
               )}
             </fieldset>
           </div>
-          {message && (
-            <p role="status" className="settings-feedback is-error">
-              {message}
-            </p>
-          )}
-          <footer className="settings-footer">
-            <span className="settings-help">配置校验不会发送模型请求。</span>
-            <div className="settings-footer-primary">
-              <Dialog.Close asChild>
-                <button className="button ghost" disabled={busy}>
-                  取消
-                </button>
-              </Dialog.Close>
-              <button
-                className="button primary"
-                disabled={
-                  busy ||
-                  discovering ||
-                  (!pending &&
-                    (!source || !key || !supported || schema.isFetching))
-                }
-                onClick={() => void save()}
-              >
-                {busy ? "处理中…" : pending ? "核对保存结果" : "校验并添加"}
+          <footer className="compact-dialog-footer">
+            {message && <p role="status" className="error-banner create-channel-feedback">{message}</p>}
+            <Dialog.Close asChild>
+              <button className="button small ghost" disabled={busy}>
+                取消
               </button>
-            </div>
+            </Dialog.Close>
+            <button
+              className="button small primary"
+              disabled={
+                busy ||
+                discovering ||
+                (!pending &&
+                  (!source || !key || !supported || schema.isFetching))
+              }
+              onClick={() => void save()}
+            >
+              {busy ? "处理中…" : pending ? "核对保存结果" : "校验并添加"}
+            </button>
           </footer>
         </Dialog.Content>
       </Dialog.Portal>

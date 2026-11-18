@@ -29,6 +29,7 @@ import type { AccountBalance as SubAccountBalance } from "./accountBalance";
 import { BalanceAmount } from "./BalanceAmount";
 import { AccountForm } from "./SiteAccountForm";
 import { SiteAccountSettings } from "./SiteAccountSettings";
+import { CompactDialogHeader, RemovalDialog } from "./CompactDialog";
 import { useChannelDetection, detectionEnabled } from "./channelDetection";
 import { DetectionAction, detectionProjectLabels, detectionProjects, useDetectionProject } from "./DetectionAction";
 import { ResponseLatency } from "./LatencyBadge";
@@ -687,7 +688,6 @@ function ManagementChannelDrawer({
           >
             <X size={20} />
           </Dialog.Close>
-          <span className="eyebrow">CHANNEL MANAGEMENT</span>
           <Dialog.Title>{target.name}</Dialog.Title>
           <Dialog.Description className="detail-description">
             <span>{account.name}</span>
@@ -863,13 +863,45 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   if(pageData)metadataRef.current={owner:user,accounts:pageData.accounts,rates:pageData.rates,platforms:pageData.platforms,models:pageData.models,detectionModels:pageData.detection_models,readAt:pageData.read_at_ms};
   const metadata=metadataRef.current?.owner===user?metadataRef.current:undefined;
   const accounts=metadata?.accounts || [];
-  const [syncProgressSubmission,setSyncProgressSubmission]=useState({owner:user,generation:0});
-  const syncGeneration=syncProgressSubmission.owner===user?syncProgressSubmission.generation:0;
+  const [syncProgressSubmission, setSyncProgressSubmission] = useState<{ owner: string; generation: number; accounts: Map<string, number> }>(
+    () => ({ owner: user, generation: 0, accounts: new Map() }),
+  );
+  const [accountActions, setAccountActions] = useState(new Set<string>());
+  const accountActionsRef = useRef(new Set<string>());
+  const actionKey = (id: string) => JSON.stringify([user, id]);
+  const syncGeneration = syncProgressSubmission.owner === user ? syncProgressSubmission.generation : 0;
   const progressQuery=useSubSyncProgress(user,accounts,metadata?.readAt,syncGeneration);
   useSubSyncResultRefresh(user,pageData,progressQuery.data);
-  const awaitingSyncProgress=syncGeneration>0 && !progressQuery.data;
-  const statusAccounts=progressQuery.data?.data || accounts;
+  const lastProgress = useRef<{owner: string; generation: number; accounts: SubAccount[]} | undefined>(undefined);
+  if (progressQuery.data) lastProgress.current = { owner: user, generation: syncGeneration, accounts: progressQuery.data.data };
+  const knownProgress = lastProgress.current?.owner === user ? lastProgress.current : undefined;
+  const knownById = new Map(knownProgress?.accounts.map(account => [account.id, account]));
+  const statusAccounts = progressQuery.data?.data || accounts.map(account => knownById.get(account.id) || account);
   const progressByAccount=new Map(statusAccounts.map(a=>[a.id,a]));
+  const awaitingAccountProgress = (id: string) => syncGeneration > 0 &&
+    (syncProgressSubmission.accounts.get(id) || 0) > (knownProgress?.generation ?? 0);
+  const accountBusy = (id: string) => accountActions.has(actionKey(id)) || awaitingAccountProgress(id);
+  function markProgress(ids: string[]) {
+    setSyncProgressSubmission(previous => {
+      const sameOwner = previous.owner === user;
+      const generation = sameOwner ? previous.generation + 1 : 1;
+      const progress = lastProgress.current;
+      const confirmed = sameOwner && progress?.owner === user ? progress.generation : 0;
+      const waiting = new Map(sameOwner ? [...previous.accounts].filter(([, version]) => version > confirmed) : []);
+      ids.forEach(id => waiting.set(id, generation));
+      return { owner: user, generation, accounts: waiting };
+    });
+  }
+  function lockAccounts(ids: string[]) {
+    const keys = ids.map(actionKey);
+    if (keys.some(key => accountActionsRef.current.has(key)) || ids.some(awaitingAccountProgress)) return;
+    keys.forEach(key => accountActionsRef.current.add(key));
+    setAccountActions(new Set(accountActionsRef.current));
+    return () => {
+      keys.forEach(key => accountActionsRef.current.delete(key));
+      setAccountActions(new Set(accountActionsRef.current));
+    };
+  }
   const query={...pageQuery,data:pageData?{data:accounts,cached:false}:undefined};
   const accountHeaders={data:metadata?{data:statusAccounts}:undefined,error:metadata?null:pageQuery.error};
   const prices={data:displayedPage?{data:displayedPage.context.prices}:undefined};
@@ -933,7 +965,8 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   const dialogImports=useImportBindings(!!importing, importing ? {accountId:importing.account.id,groupId:importing.target.group_id} : undefined);
   const imports={data:displayedPage?{data:displayedPage.context.imports,labels:{},unavailable_sources:[]}:undefined};
   const [error, setError] = useState("");
-  const [action, setAction] = useState("");
+  const [batchAccountAction, setBatchAccountAction] = useState<"detect" | "sync" | null>(null);
+  const [removeError, setRemoveError] = useState("");
   const checksInFlight = useRef(new Set<string>());
   const [submittingChecks, setSubmittingChecks] = useState(new Set<string>());
   const [fingerprintsSubmitted, setFingerprintsSubmitted] = useState(0);
@@ -941,7 +974,8 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   const syncableAccounts = statusAccounts.filter(
     (account) => !pending(account.state),
   );
-  const [removing, setRemoving] = useState<string | null>(null);
+  const syncBatchBlocked = !!batchAccountAction || syncableAccounts.some(account => accountBusy(account.id));
+  const [removing, setRemoving] = useState<SubAccount | null>(null);
   const rows=displayedPage?.rows || [], rates=metadata?.rates || [], platforms=metadata?.platforms || [];
   const total=displayedPage?.total || 0, eligibleCount=displayedPage?.eligible_count || 0;
   const effectiveMaxRate=maxRate;
@@ -991,26 +1025,32 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
     body?: unknown,
     method = "POST",
   ) {
-    if (action) return;
-    setAction(key);
-    setError("");
+    const unlock = lockAccounts([key]);
+    if (!unlock) return;
+    const deleting = method === "DELETE";
+    const report = deleting ? setRemoveError : setError;
+    report("");
     try {
       await controlRequest(path, {
         method,
         ...(body ? { body: JSON.stringify(body) } : {}),
       });
-      void client.invalidateQueries({ queryKey: ["sub2api"] });
-      await client.invalidateQueries({ queryKey: ["sub2api-headers"] });
-      setRemoving(null);
+      markProgress([key]);
+      if (deleting) setRemoving(null);
+      void client.invalidateQueries({ queryKey: ["sub2api"] }, { cancelRefetch: false });
+      void client.invalidateQueries({ queryKey: ["sub2api-headers"] }, { cancelRefetch: false });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "操作失败");
+      report(e instanceof Error ? e.message : "操作失败");
     } finally {
-      setAction("");
+      unlock();
     }
   }
   async function syncAccounts(detect = true, account?: SubAccount) {
-    if (action || awaitingSyncProgress || (account ? pending(account.state) : !syncableAccounts.length) || (detect && !detectionModels.length)) return;
-    setAction(account?.id || (detect ? "sync-all" : "sync-only"));
+    if ((account ? pending(account.state) : syncBatchBlocked || !syncableAccounts.length) || (detect && !detectionModels.length)) return;
+    const ids = account ? [account.id] : syncableAccounts.map(item => item.id);
+    const unlock = lockAccounts(ids);
+    if (!unlock) return;
+    if (!account) setBatchAccountAction(detect ? "detect" : "sync");
     setError("");
     setSyncSubmitted(null);
     try {
@@ -1019,11 +1059,12 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
         { method: "POST", body: JSON.stringify(detect ? { models: detectionModels } : {}) },
       );
       setSyncSubmitted({count:account ? 1 : Number(result.queued),detect});
-      setSyncProgressSubmission(previous=>({owner:user,generation:previous.owner===user?previous.generation+1:1}));
+      markProgress(ids);
     } catch (e) {
       setError(e instanceof ApiError && e.status === 404 ? "同步检测服务待更新，请稍后重试。" : e instanceof Error ? e.message : "批量同步失败");
     } finally {
-      setAction("");
+      unlock();
+      if (!account) setBatchAccountAction(null);
     }
   }
   type CheckKind = "check" | "quality" | "compaction" | "tool-use";
@@ -1040,7 +1081,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
       .map(item => `${selectionID(account, target, configured)}:${item}`);
   const checkBusy = (account: SubAccount, target: SubTarget, kind: CheckKind, configured?: ManagedChannel) => {
     const current=progressByAccount.get(account.id)||account;
-    if (account.id && awaitingSyncProgress) return true;
+    if (account.id && accountBusy(account.id)) return true;
     if (pending(current.state) && current.job_kind === "sync") return true;
     if (checkKeys(account, target, kind, configured).some(key => submittingChecks.has(key))) return true;
     if (kind === "compaction") return pending(target.compaction_state || "");
@@ -1111,7 +1152,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
     if (!detectionEnabled(row, detection.disabled)) return [];
     if (row.account.id) {
       const account = progressByAccount.get(row.account.id) || row.account;
-      if (awaitingSyncProgress || pending(account.state) || !row.target.active || !row.target.key_id || row.target.state === "error") return [];
+      if (accountBusy(row.account.id) || pending(account.state) || !row.target.active || !row.target.key_id || row.target.state === "error") return [];
       return fingerprintTargets(row, fingerprintModelsToCheck);
     }
     if (!row.configured) return [];
@@ -1176,7 +1217,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
       submittingBatch.current=false;setBatchSubmitting(false);
     }
   }
-  const batchBusy=readingSelection || submittingChecks.size>0;
+  const batchBusy=readingSelection || batchSubmitting;
   const batchDisabled=(kind:BatchKind)=>resultsUnavailable || !eligibleCount || detection.isPending || detection.isError || detection.busy || batchBusy || (
     kind === "fingerprint"
       ? !fingerprintModelsToCheck.length || (rows.length === total && !rows.some(row => batchFingerprintTargets(row).length))
@@ -1226,32 +1267,31 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
               className="button small"
               aria-label="一键同步并检测"
               title={!detectionModels.length ? "请在检测模型设置中选择模型" : `仅检测已勾选的 ${detectionModels.length} 个模型。可用的目标模型同时检测模型指纹。${fingerprintNote}`}
-              aria-busy={action === "sync-all"}
+              aria-busy={batchAccountAction === "detect"}
               disabled={
                 !syncableAccounts.length ||
                 !detectionModels.length ||
-                awaitingSyncProgress ||
-                !!action ||
+                syncBatchBlocked ||
                 query.isPending ||
                 query.isError
               }
               onClick={() => void syncAccounts()}
             >
-              {action === "sync-all" ? (
+              {batchAccountAction === "detect" ? (
                 <Spinner small />
               ) : (
                 <RefreshCw size={15} />
               )}
-              {action === "sync-all"
+              {batchAccountAction === "detect"
                 ? "正在提交…"
                 : `一键同步并检测 · ${syncableAccounts.length} 个账号`}
             </button>
             <button className="button small" aria-label="一键同步" title="仅同步账号、分组和密钥信息，不执行模型或能力检测"
-              aria-busy={action === "sync-only"}
-              disabled={!syncableAccounts.length || awaitingSyncProgress || !!action || query.isPending || query.isError}
+              aria-busy={batchAccountAction === "sync"}
+              disabled={!syncableAccounts.length || syncBatchBlocked || query.isPending || query.isError}
               onClick={()=>void syncAccounts(false)}>
-              {action === "sync-only" ? <Spinner small/> : <RefreshCw size={15}/>}
-              {action === "sync-only" ? "正在提交…" : `一键同步 · ${syncableAccounts.length} 个账号`}
+              {batchAccountAction === "sync" ? <Spinner small/> : <RefreshCw size={15}/>}
+              {batchAccountAction === "sync" ? "正在提交…" : `一键同步 · ${syncableAccounts.length} 个账号`}
             </button>
             <button
               className="button primary small"
@@ -1276,16 +1316,14 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
               setForm(null);
               void client.invalidateQueries({ queryKey: ["sub2api"] });
               void client.invalidateQueries({ queryKey: ["sub2api-headers"] });
-              setSyncProgressSubmission(previous=>({owner:user,generation:previous.owner===user?previous.generation+1:1}));
+              markProgress(form.account ? [form.account.id] : []);
             }}
           />
         )}
         {!metadata && resultsReadFailed ? null : !metadata ? (
           <TableLoading kind="accounts" rows={3} />
         ) : statusAccounts.length === 0 ? (
-          <Empty title="添加第一个站点账号" icon={<Globe2 size={25} />}>
-            填入站点地址与账号密码，自动发现可用分组并检测模型。
-          </Empty>
+          <Empty title="暂无站点账号" icon={<Globe2 size={25} />} />
         ) : (
           <div className="sub-account-list" role="region" aria-label="站点账号列表" tabIndex={0}>
             <div className="sub-account-header" aria-hidden="true">
@@ -1343,7 +1381,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                       {pending(a.state) ? (
                         <button
                           className="button small"
-                          disabled={!!action}
+                          disabled={accountBusy(a.id)}
                           onClick={() =>
                             void mutate(a.id, `/v1/sub2api/accounts/${a.id}/stop`)
                           }
@@ -1355,15 +1393,18 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                         <>
                           <button
                             className="button small"
+                            aria-label="同步并检测"
                             title={!detectionModels.length ? "请在检测模型设置中选择模型" : `仅检测已勾选的 ${detectionModels.length} 个模型`}
-                            disabled={!!action || awaitingSyncProgress || !detectionModels.length}
+                            disabled={accountBusy(a.id) || !detectionModels.length}
+                            aria-busy={accountBusy(a.id)}
                             onClick={() => void syncAccounts(true, a)}
                           >
-                            <RefreshCw size={13} />
+                            {accountBusy(a.id) ? <Spinner small /> : <RefreshCw size={13} />}
                             同步并检测
                           </button>
                           <button
                             className="button ghost small"
+                            disabled={accountBusy(a.id)}
                             onClick={() => setForm({ account: a })}
                           >
                             重新登录
@@ -1371,40 +1412,14 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                           <button
                             className="icon-button"
                             aria-label={`移除账号 ${a.name}`}
-                            disabled={!!action}
-                            onClick={() => setRemoving(a.id)}
+                            disabled={accountBusy(a.id)}
+                            onClick={() => { setRemoveError(""); setRemoving(a); }}
                           >
                             <Trash2 size={15} />
                           </button>
                         </>
                       )}
                     </div>
-                    {removing === a.id && (
-                      <div className="sub-remove" role="alert">
-                        移除后删除本地凭据和检测记录；上游测试 key
-                        保留，可在站点密钥页面撤销。
-                        <button
-                          className="button small"
-                          disabled={!!action}
-                          onClick={() =>
-                            void mutate(
-                              a.id,
-                              `/v1/sub2api/accounts/${a.id}`,
-                              undefined,
-                              "DELETE",
-                            )
-                          }
-                        >
-                          确认移除
-                        </button>
-                        <button
-                          className="button small"
-                          onClick={() => setRemoving(null)}
-                        >
-                          取消
-                        </button>
-                      </div>
-                    )}
                   </article>
                 );
               })}
@@ -1412,21 +1427,31 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
           </div>
         )}
       </section>
+      {removing && <RemovalDialog title="移除站点账号" context={removing.name} busy={accountBusy(removing.id)} error={removeError}
+        close={() => { setRemoving(null); setRemoveError(""); }}
+        confirm={() => void mutate(removing.id, `/v1/sub2api/accounts/${encodeURIComponent(removing.id)}`, undefined, "DELETE")}>
+        将删除本地凭据和检测记录。上游测试 Key 不会被撤销。
+      </RemovalDialog>}
       {batchPreview && <Dialog.Root open onOpenChange={open=>{if(!open&&!submittingBatch.current)setBatchPreview(null);}}>
-        <Dialog.Portal><Dialog.Overlay className="dialog-overlay"/><Dialog.Content className="guide-dialog batch-detection-preview">
-          <Dialog.Title>核对批量检测范围</Dialog.Title>
-          <Dialog.Description>覆盖当前筛选的全部页。确认后可能向各上游发送请求，并产生用量或费用。</Dialog.Description>
-          <p>本次计划 {batchPreview.items.length} / {batchPreview.total} 个渠道；跳过 {Math.max(0,batchPreview.total-batchPreview.items.length)} 个（不适用、未启用、不可用或已有任务）。</p>
-          <p>{batchPreview.kind==="fingerprint" ? `去重后 ${batchPreview.fingerprintTargets.length} 个渠道 × 模型项` :
-            `${batchPreview.items.reduce((count,item)=>count+item.models.length,0)} 个计划渠道 × 检测项`}。单项可能发起多次请求。</p>
-          <details><summary>逐项查看计划渠道与模型</summary><ul>
-            {batchPreview.items.map(item=><li key={item.id}>{item.label} · {item.models.join("、")}</li>)}
-          </ul></details>
-          <div className="recharge-actions">
+        <Dialog.Portal><Dialog.Overlay className="dialog-overlay"/><Dialog.Content className="guide-dialog compact-dialog"
+          onEscapeKeyDown={event => { if (submittingBatch.current) event.preventDefault(); }}
+          onPointerDownOutside={event => { if (submittingBatch.current) event.preventDefault(); }}>
+          <CompactDialogHeader context="当前筛选的全部页" busy={batchSubmitting}>核对批量检测范围</CompactDialogHeader>
+          <div className="compact-dialog-scroll">
+            <p className="dialog-summary">
+              <span>本次计划 {batchPreview.items.length} / {batchPreview.total} 个渠道；跳过 {Math.max(0,batchPreview.total-batchPreview.items.length)} 个</span>
+              <span>{batchPreview.kind==="fingerprint" ? `去重后 ${batchPreview.fingerprintTargets.length} 项` : `${batchPreview.items.reduce((count,item)=>count+item.models.length,0)} 个检测项`}</span>
+            </p>
+            <details><summary>渠道与模型</summary><ul className="dialog-preview-list">
+              {batchPreview.items.map(item=><li key={item.id}><strong>{item.label}</strong><small>{item.models.join("、")}</small></li>)}
+            </ul></details>
+            <p className="dialog-inline-note">每项可能发送多次请求，产生上游费用。</p>
+            {batchPreview.scope!==batchScope && <p className="dialog-inline-note" role="alert">筛选或检测数据已变化，请重新预览。</p>}
+          </div>
+          <div className="compact-dialog-footer">
             <Dialog.Close className="button" disabled={batchSubmitting}>取消检测</Dialog.Close>
             <button className="button primary" disabled={batchSubmitting || batchPreview.scope!==batchScope} onClick={()=>void confirmBatch()}>{batchSubmitting ? "正在核对并提交…" : "确认提交检测"}</button>
           </div>
-          {batchPreview.scope!==batchScope && <p role="alert">筛选或检测数据已变化，请关闭后重新预览。</p>}
         </Dialog.Content></Dialog.Portal>
       </Dialog.Root>}
       <section className="data-panel" id="management-channels" hidden={section !== "channels"} aria-labelledby="management-channel-title">
@@ -1888,7 +1913,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                               }
                               case "batch": return <button type="button" role="switch" aria-label={`${account.name} ${t.name} 的批量检测开关`}
                             aria-checked={detectionEnabled(managementRow,detection.disabled)} className="channel-detection-switch"
-                            disabled={tablePending || detection.isPending || detection.isError || detection.busy}
+                            disabled={tablePending || detection.isPending || detection.isError || detection.isSaving(managementRow)}
                             title="关闭后跳过批量检测，仍可点击此渠道的检测按钮。已提交的任务继续执行。"
                             onKeyDown={e=>e.stopPropagation()}
                             onClick={()=>void detection.save(managementRow,!detectionEnabled(managementRow,detection.disabled))}><span/></button>;

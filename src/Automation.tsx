@@ -16,6 +16,7 @@ import {
 import { controlRequest } from "./api";
 import type { ConsoleSource } from "./SourceSettings";
 import { Spinner } from "./ui";
+import { CompactDialogHeader } from "./CompactDialog";
 
 type Policy = {
   metrics: string[];
@@ -549,7 +550,9 @@ export function Automation({
         <Dialog.Portal>
           <Dialog.Overlay className="dialog-overlay" />
           <Dialog.Content
-            className="connection-dialog automation-editor automation-task-dialog"
+            className="connection-dialog compact-dialog automation-editor automation-task-dialog"
+            aria-describedby={undefined}
+            onEscapeKeyDown={event => { if (saving) event.preventDefault(); }}
             onCloseAutoFocus={(event) => {
               event.preventDefault();
               editorOpener.current?.focus();
@@ -557,21 +560,10 @@ export function Automation({
           >
             {draft && (
               <>
-                <div className="data-heading">
-                  <Dialog.Title>
+                <CompactDialogHeader closeLabel="关闭编辑" busy={saving}>
                     {draft.id ? "编辑自动化任务" : "新建自动化任务"}
-                  </Dialog.Title>
-                  <Dialog.Close
-                    className="icon-button"
-                    aria-label="关闭编辑"
-                    disabled={saving}
-                  >
-                    <X size={17} />
-                  </Dialog.Close>
-                </div>
-                <Dialog.Description>
-                  设置任务范围、执行周期和判定条件。
-                </Dialog.Description>
+                </CompactDialogHeader>
+                <div className="compact-dialog-scroll">
                 {error && (
                   <p role="alert" className="error-banner">
                     {error}
@@ -671,10 +663,7 @@ export function Automation({
                 </div>
                 {!order ? (
                   <>
-                    <p className="field-note">
-                      对所选 API key 下支持 gpt-6-astra
-                      的可用渠道发起降智检测，保存最新结果和每次检测历史。该任务不调整渠道顺序。
-                    </p>
+                    <p className="dialog-inline-note">会向所选渠道发起检测请求，可能产生费用；不会调序。</p>
                     <div className="automation-form">
                       {numeric([["quality_concurrency", "检测并发数", 1, 16]])}
                     </div>
@@ -748,9 +737,6 @@ export function Automation({
                         </label>
                       ))}
                     </div>
-                    <p className="field-note">
-                      只上移全面不劣且至少一项达到改善门槛的渠道。每次跨过一个渠道都重新判定；缺少数据的渠道不会被跨过。
-                    </p>
                     <h4>样本与置信度</h4>
                     <div className="automation-form automation-grid">
                       {numeric([
@@ -816,17 +802,13 @@ export function Automation({
                         ],
                       ])}
                     </div>
-                    <p className="field-note">
-                      首字改善满足百分比或毫秒门槛之一即可。成功率和不降智概率使用
-                      Wilson 区间，缓存率按分钟重采样，首字按 response.created
-                      的分位数区间判定。
-                    </p>
+                    <details className="automation-rules">
+                      <summary>调序规则</summary>
+                      <p className="dialog-inline-note">逐个比较渠道。仅在所有指标不劣、至少一项达到改善门槛时上移；不跨过缺少数据的渠道。</p>
+                      <p className="dialog-inline-note">首字满足百分比或毫秒门槛即可。成功率和不降智概率采用 Wilson 区间，缓存率按分钟重采样，首字按 response.created 的分位数区间判定。</p>
+                    </details>
                     <details className="automation-tolerance">
                       <summary>统计不确定性容差</summary>
-                      <p className="field-note">
-                        默认
-                        0，要求区间也能确认全面不劣。即使观测值相同，区间重叠也可能阻止调整。允许容差时，所有观测值仍必须不变差；至少一项改善仍需通过置信区间确认。
-                      </p>
                       <div className="automation-form automation-grid">
                         {numeric([
                           [
@@ -916,7 +898,15 @@ export function Automation({
                   />
                   启用任务
                 </label>
-                <div className="automation-editor-actions">
+                </div>
+                {confirmDiscard ? <div className="compact-dialog-footer">
+                  <span className="dialog-footer-note" role="alert">放弃未保存的更改？</span>
+                  <button type="button" className="button small" autoFocus onClick={() => setConfirmDiscard(false)}>继续编辑</button>
+                  <button type="button" className="button small danger" onClick={() => {setDraft(null);setConfirmDiscard(false);}}>放弃更改</button>
+                </div> : <div className="compact-dialog-footer">
+                  <Dialog.Close className="button" disabled={saving}>
+                    取消
+                  </Dialog.Close>
                   <button
                     className="button primary"
                     disabled={
@@ -930,15 +920,7 @@ export function Automation({
                   >
                     {saving ? <Spinner small /> : <Save size={15} />}保存任务
                   </button>
-                  <Dialog.Close className="button" disabled={saving}>
-                    取消
-                  </Dialog.Close>
-                </div>
-                {confirmDiscard && <section className="coverage-note" role="alert">
-                  任务有未保存的更改。
-                  <button type="button" className="button small" onClick={() => setConfirmDiscard(false)}>继续编辑</button>
-                  <button type="button" className="button small danger" onClick={() => {setDraft(null);setConfirmDiscard(false);}}>放弃更改</button>
-                </section>}
+                </div>}
               </>
             )}
           </Dialog.Content>
@@ -982,7 +964,7 @@ export function Automation({
           </>
         ) : (
           <p className="muted">
-            暂无记录。已删除任务的审计也会保留在全部任务历史中。
+            暂无记录
           </p>
         )}
       </section>

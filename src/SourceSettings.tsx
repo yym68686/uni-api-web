@@ -2,7 +2,7 @@ import { SourceLoading } from "./PageLoading";
 import { useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import type { FormEvent, ReactNode } from "react";
-import { Plus, Server, Trash2, Pencil, Check, X } from "lucide-react";
+import { Plus, Server, Trash2, Pencil, Check } from "lucide-react";
 import { controlRequest } from "./api";
 import { Spinner } from "./ui";
 import { ChannelSettings, GLOBAL_SETTINGS_SCOPE } from "./ChannelSettings";
@@ -11,6 +11,7 @@ import { ManagedConfiguration } from "./ManagedConfiguration";
 import { ChannelProtocolRepair } from "./ChannelProtocolRepair";
 import { FingerprintSettings } from "./FingerprintSettings";
 import { WorkbenchDisclosure, WorkbenchNotice, WorkbenchTabs } from "./Workbench";
+import { CompactDialogHeader, RemovalDialog } from "./CompactDialog";
 export interface ConsoleSource {
   id: string;
   name: string;
@@ -102,7 +103,7 @@ export function SourceSettings({
         <div className="data-title">
           <Server size={20} />
           <h2>设置</h2>
-          {section === "sources" && <WorkbenchNotice urgent label="来源设置状态" messages={[!open && error, readError && `来源目录读取失败，现有来源未改变。${readError}`]} />}
+          {section === "sources" && <WorkbenchNotice urgent label="来源设置状态" messages={[!open && !removing && error, readError && `来源目录读取失败，现有来源未改变：${readError}`]} />}
         </div>
         {section === "sources" && <div className="data-actions">
           {refreshAction}
@@ -118,7 +119,7 @@ export function SourceSettings({
       {sources.map((src) => (
         <div className="source-item" key={src.id}>
           <Server size={20} />
-          <div>
+          <div className="source-identity">
             <strong title={src.name}>{src.name}</strong>
             <small title={src.base}>{src.base}{src.temporarily_unavailable && <span role="status"> · 暂时不可用</span>}</small>
           </div>
@@ -135,112 +136,71 @@ export function SourceSettings({
           >
             <Pencil size={16} />
           </button>
-          {removing === src.id ? (
-            <div className="source-removal-confirm">
-              <p role="alert">移除「{src.name}」（{src.base}）会停止在控制台展示该来源及接收它的新请求记录。已保存历史按容量策略保留。请先检查自动化任务和站点绑定是否仍使用此来源。</p>
-              <button
-                className="button small danger"
-                disabled={busy}
-                onClick={() => void remove(src.id)}
-              >
-                确认移除
-              </button>
-              <button
-                className="icon-button"
-                onClick={() => setRemoving(null)}
-                aria-label="取消移除"
-              >
-                <X size={16} />
-              </button>
-            </div>
-          ) : (
-            <button
-              className="icon-button"
-              aria-label={`移除 ${src.name}`}
-              onClick={() => setRemoving(src.id)}
-            >
-              <Trash2 size={16} />
-            </button>
-          )}
+          <button className="icon-button" aria-label={`移除 ${src.name}`} disabled={busy}
+            onClick={() => { setError(""); setRemoving(src.id); }}>
+            <Trash2 size={16} />
+          </button>
+          {removing === src.id && <RemovalDialog title="移除来源" context={`${src.name} · ${src.base}`}
+            close={() => { setRemoving(null); setError(""); }} confirm={() => void remove(src.id)} busy={busy} error={error}>
+            停止接收此来源的新日志，已保存历史保留。请先核对引用此来源的自动化任务和站点绑定。
+          </RemovalDialog>}
         </div>
       ))}
-      {!loading && !readError && !sources.length && !open && (
-        <p className="settings-note">
-          还没有来源。添加第一个 uni-api 后即可开始观测。
-        </p>
-      )}
+      {!loading && !readError && !sources.length && !open && <p className="sources-empty">暂无来源</p>}
       <Dialog.Root open={open} onOpenChange={next => {if (!busy) setOpen(next);}}>
         <Dialog.Portal>
           <Dialog.Overlay className="dialog-overlay" />
-          <Dialog.Content className="connection-dialog source-edit-dialog" onCloseAutoFocus={event=>{event.preventDefault(); opener.current?.focus();}}>
-          <Dialog.Title>{editing ? `编辑来源 · ${editing.name}` : "添加来源"}</Dialog.Title>
-          <Dialog.Description>{managedBootstrap ? "先登记来源和管理员密钥，网关启动后再校验配置。" : "验证连接成功后才保存来源设置。"}</Dialog.Description>
-          <form className="source-form" onSubmit={save}>
-          <label>
-            来源名称
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-              maxLength={100}
-            />
-          </label>
-          <label>
-            uni-api 地址
-            <input
-              type="url"
-              placeholder="https://api.example.com"
-              value={base}
-              onChange={(e) => setBase(e.target.value)}
-              required
-            />
-          </label>
-          <label>
-            平台密钥
-            <input
-              type="password"
-              autoComplete="new-password"
-              placeholder={editing ? "留空保留原密钥" : managedBootstrap ? "托管配置中的管理员密钥" : "配置中的第一个密钥"}
-              value={key}
-              onChange={(e) => setKey(e.target.value)}
-              required={!editing}
-            />
-          </label>
-          {!editing && <label>
-            <input type="checkbox" checked={managedBootstrap} onChange={(event) => {
-              setManagedBootstrap(event.target.checked);
-              if (event.target.checked) setConfigKey("");
-            }} />
-            预登记尚未上线的托管来源
-          </label>}
-          {!managedBootstrap && <details>
-            <summary>渠道密钥读取 {editing?.has_config_key ? "（已配置）" : ""}</summary>
-            <label>
-              配置读取管理员密钥（可选）
-              <input
-                type="password"
-                autoComplete="new-password"
-                placeholder={editing?.has_config_key ? "留空保留原密钥" : "平台密钥无配置读取权限时填写"}
-                value={configKey}
-                onChange={(e) => setConfigKey(e.target.value)}
-                maxLength={4096}
-              />
-            </label>
-          </details>}
-
-          {error && <p role="alert" className="error-banner">{error}</p>}
-          <button className="button primary" disabled={busy}>
-            {busy ? <Spinner small /> : <Check size={16} />}{managedBootstrap ? "登记来源" : "验证并保存"}
-          </button>
-          <button
-            className="button"
-            type="button"
-            disabled={busy}
-            onClick={() => setOpen(false)}
-          >
-            取消
-          </button>
-        </form>
+          <Dialog.Content className="connection-dialog compact-dialog" aria-describedby={undefined}
+            onPointerDownOutside={event => { if (busy) event.preventDefault(); }}
+            onEscapeKeyDown={event => { if (busy) event.preventDefault(); }}
+            onCloseAutoFocus={event=>{event.preventDefault(); opener.current?.focus();}}>
+            <CompactDialogHeader busy={busy}>{editing ? `编辑来源 · ${editing.name}` : "添加来源"}</CompactDialogHeader>
+            <form className="compact-dialog-form" onSubmit={save}>
+              <div className="compact-dialog-scroll">
+                <fieldset className="dialog-field-grid" disabled={busy}>
+                  <label className="dialog-field dialog-field-full">
+                    来源名称
+                    <input value={name} onChange={e => setName(e.target.value)} required maxLength={100} />
+                  </label>
+                  <label className="dialog-field dialog-field-full">
+                    uni-api 地址
+                    <input type="url" placeholder="https://api.example.com" value={base}
+                      onChange={e => setBase(e.target.value)} required />
+                  </label>
+                  <label className="dialog-field dialog-field-full">
+                    平台密钥
+                    <input type="password" autoComplete="new-password"
+                      placeholder={editing ? "留空保留原密钥" : managedBootstrap ? "托管配置中的管理员密钥" : "配置中的第一个密钥"}
+                      value={key} onChange={e => setKey(e.target.value)} required={!editing} />
+                  </label>
+                </fieldset>
+                <div className="compact-dialog-options">
+                  {!editing && <label className="dialog-check-row">
+                    <input type="checkbox" checked={managedBootstrap} disabled={busy} onChange={event => {
+                      setManagedBootstrap(event.target.checked);
+                      if (event.target.checked) setConfigKey("");
+                    }} />
+                    预登记尚未上线的托管来源
+                  </label>}
+                  {!managedBootstrap && <details className="dialog-inline-note">
+                    <summary>渠道密钥读取 {editing?.has_config_key ? "（已配置）" : ""}</summary>
+                    <label className="dialog-field">
+                      配置读取管理员密钥（可选）
+                      <input type="password" autoComplete="new-password"
+                        placeholder={editing?.has_config_key ? "留空保留原密钥" : "平台密钥无配置读取权限时填写"}
+                        value={configKey} disabled={busy} onChange={e => setConfigKey(e.target.value)} maxLength={4096} />
+                    </label>
+                  </details>}
+                </div>
+                {error && <p role="alert" className="error-banner">{error}</p>}
+              </div>
+              <div className="compact-dialog-footer">
+                <button className="button small" type="button" disabled={busy} onClick={() => setOpen(false)}>取消</button>
+                <button className="button small primary" disabled={busy}>
+                  {busy ? <Spinner small /> : <Check size={16} />}{managedBootstrap ? "登记来源" : "验证并保存"}
+                </button>
+              </div>
+            </form>
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
