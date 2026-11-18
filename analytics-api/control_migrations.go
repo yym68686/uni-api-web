@@ -88,6 +88,9 @@ var siteRechargeSQL string
 //go:embed migrations/0016_fingerprint_catalog.sql
 var fingerprintCatalogSQL string
 
+//go:embed migrations/0017_managed_configuration.sql
+var managedConfigurationSQL string
+
 var managementRevisionTables = []string{"console_sub_models", "console_management_model_signal", "console_sub_usage", "console_management_receipt_signal", "console_management_revision_state"}
 
 type controlMigration struct {
@@ -114,6 +117,7 @@ func controlMigrations() []controlMigration {
 		{"0014_channel_detection", channelDetectionSQL, nil},
 		{"0015_site_recharge", siteRechargeSQL, []string{"console_sub_accounts", "console_recharge_jobs"}},
 		{"0016_fingerprint_catalog", fingerprintCatalogSQL, []string{"console_fingerprint_catalog"}},
+		{"0017_managed_configuration", managedConfigurationSQL, []string{"console_sources", "console_managed_config_versions", "console_managed_config_operations", "console_managed_config_state"}},
 	}
 }
 

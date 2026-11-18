@@ -51,6 +51,7 @@ export function ControlPersistence({
   }
   const data = query.data;
   if (!expanded) return <button className="button small" onClick={()=>setExpanded(true)}>保留临时配置设置</button>;
+  if (data?.status === "managed") return <small>临时配置由「完整配置托管」统一保存。</small>;
   return (
     <div className="control-persistence">
       <label>

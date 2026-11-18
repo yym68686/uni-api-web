@@ -77,6 +77,8 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /readyz", s.ready)
 	mux.HandleFunc("GET /v1/runtime-restore/{id}", s.bootstrapControls)
+	mux.HandleFunc("GET /v1/runtime-config/{id}", s.runtimeConfiguration)
+	mux.HandleFunc("POST /v1/runtime-config/{id}", s.runtimeConfiguration)
 	mux.HandleFunc("POST /v1/runtime-facts/{id}", s.ingestFacts)
 	control := s.controlHandler()
 	mux.Handle("/v1/auth/", control)

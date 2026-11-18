@@ -304,6 +304,8 @@ func (s *Service) controlHandler() http.Handler {
 	mux.HandleFunc("GET /v1/sources/{id}/proxy/{path...}", s.proxySource)
 	mux.HandleFunc("GET /v1/sources/{id}/control-persistence", s.controlPersistence)
 	mux.HandleFunc("PUT /v1/sources/{id}/control-persistence", s.controlPersistence)
+	mux.HandleFunc("GET /v1/sources/{id}/managed-config", s.manageConfiguration)
+	mux.HandleFunc("POST /v1/sources/{id}/managed-config", s.manageConfiguration)
 	mux.HandleFunc("GET /v1/sources/{id}/channel-controls", s.channelControls)
 	mux.HandleFunc("POST /v1/sources/{id}/channel-controls", s.channelControls)
 	mux.HandleFunc("GET /v1/sources/{id}/channel-checks", s.channelChecks)

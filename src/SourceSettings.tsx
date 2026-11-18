@@ -7,6 +7,7 @@ import { controlRequest } from "./api";
 import { Spinner } from "./ui";
 import { ChannelSettings, GLOBAL_SETTINGS_SCOPE } from "./ChannelSettings";
 import { ControlPersistence } from "./ControlPersistence";
+import { ManagedConfiguration } from "./ManagedConfiguration";
 import { ChannelProtocolRepair } from "./ChannelProtocolRepair";
 export interface ConsoleSource {
   id: string;
@@ -39,6 +40,7 @@ export function SourceSettings({
     [key, setKey] = useState(""),
     [configKey, setConfigKey] = useState("");
   const [removing, setRemoving] = useState<string | null>(null);
+  const [managedBootstrap, setManagedBootstrap] = useState(false);
   const opener = useRef<HTMLElement | null>(null);
   function edit(source: ConsoleSource | null) {
     opener.current = document.activeElement as HTMLElement;
@@ -47,6 +49,7 @@ export function SourceSettings({
     setBase(source?.base || "");
     setKey("");
     setConfigKey("");
+    setManagedBootstrap(false);
     setError("");
     setOpen(true);
   }
@@ -63,6 +66,7 @@ export function SourceSettings({
           base,
           key,
           config_key: configKey,
+          managed_bootstrap: managedBootstrap,
         }),
       });
       setOpen(false);
@@ -129,6 +133,7 @@ export function SourceSettings({
           </div>
           <ChannelSettings row={{provider:GLOBAL_SETTINGS_SCOPE,provider_name:"全局设置",source_id:src.id,source_name:src.name,model:""}} />
           <ControlPersistence source={src.id} name={src.name} lazyLoad />
+          <ManagedConfiguration source={src.id} />
           <ChannelProtocolRepair source={src.id} provider="" onApplied={onSaved} />
           <button
             className="icon-button"
@@ -176,7 +181,7 @@ export function SourceSettings({
           <Dialog.Overlay className="dialog-overlay" />
           <Dialog.Content className="connection-dialog source-edit-dialog" onCloseAutoFocus={event=>{event.preventDefault(); opener.current?.focus();}}>
           <Dialog.Title>{editing ? `编辑来源 · ${editing.name}` : "添加来源"}</Dialog.Title>
-          <Dialog.Description>验证连接成功后才保存来源设置。</Dialog.Description>
+          <Dialog.Description>{managedBootstrap ? "先登记来源和管理员密钥，网关启动后再校验配置。" : "验证连接成功后才保存来源设置。"}</Dialog.Description>
           <form className="source-form" onSubmit={save}>
           <label>
             来源名称
@@ -202,13 +207,20 @@ export function SourceSettings({
             <input
               type="password"
               autoComplete="new-password"
-              placeholder={editing ? "留空保留原密钥" : "配置中的第一个密钥"}
+              placeholder={editing ? "留空保留原密钥" : managedBootstrap ? "托管配置中的管理员密钥" : "配置中的第一个密钥"}
               value={key}
               onChange={(e) => setKey(e.target.value)}
               required={!editing}
             />
           </label>
-          <details>
+          {!editing && <label>
+            <input type="checkbox" checked={managedBootstrap} onChange={(event) => {
+              setManagedBootstrap(event.target.checked);
+              if (event.target.checked) setConfigKey("");
+            }} />
+            预登记尚未上线的托管来源
+          </label>}
+          {!managedBootstrap && <details>
             <summary>渠道密钥读取 {editing?.has_config_key ? "（已配置）" : ""}</summary>
             <label>
               配置读取管理员密钥（可选）
@@ -221,11 +233,11 @@ export function SourceSettings({
                 maxLength={4096}
               />
             </label>
-          </details>
+          </details>}
 
           {error && <p role="alert" className="error-banner">{error}</p>}
           <button className="button primary" disabled={busy}>
-            {busy ? <Spinner small /> : <Check size={16} />}验证并保存
+            {busy ? <Spinner small /> : <Check size={16} />}{managedBootstrap ? "登记来源" : "验证并保存"}
           </button>
           <button
             className="button"

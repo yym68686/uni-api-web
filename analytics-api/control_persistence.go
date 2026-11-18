@@ -331,6 +331,20 @@ func controlEquivalent(live retainedLive, saved retainedSnapshot) bool {
 // Caller holds the source lock. A new empty instance must never replace a
 // nonempty saved intent. Conflicting live changes stop restoration visibly.
 func (s *Service) reconcileControls(ctx context.Context, src controlSource) (map[string]any, error) {
+	managed, err := s.control.managedState(ctx, s.control.db, src.ID, false)
+	if err != nil {
+		return nil, err
+	}
+	if managed.Published != 0 {
+		raw, _, err := subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
+		if err == nil {
+			revision, _ := raw["managed_config_revision"].(float64)
+			if int64(revision) != managed.Published {
+				return nil, errors.New("在线来源尚未应用已发布的配置")
+			}
+		}
+		return raw, err
+	}
 	record, e := s.control.retainedRecord(ctx, src.ID)
 	if e != nil {
 		return nil, e
@@ -472,6 +486,19 @@ func (s *Service) controlPersistence(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "来源不存在", 404)
 		return
 	}
+	managed, err := s.control.managedState(r.Context(), s.control.db, src.ID, false)
+	if err != nil {
+		http.Error(w, "配置存储暂不可用", 503)
+		return
+	}
+	if managed.Published != 0 {
+		if r.Method == http.MethodPut {
+			http.Error(w, "来源已由完整配置托管，不能关闭旧快照", 409)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"enabled": true, "status": "managed", "message": "来源由完整配置托管"})
+		return
+	}
 	if r.Method == "PUT" {
 		var in struct {
 			Enabled *bool `json:"enabled"`
@@ -536,6 +563,10 @@ func (s *Service) controlPersistence(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"enabled": enabled, "status": status, "message": message, "rules": rules, "channels": channels, "saved_at": stamp(saved), "restored_at": stamp(restored), "checked_at": stamp(checked), "saved_instance_id": instance, "saved_revision": revision, "snapshot_id": snapshotID})
 }
 func (s *Service) saveLiveControls(ctx context.Context, src controlSource, raw map[string]any) error {
+	managed, err := s.control.managedState(ctx, s.control.db, src.ID, false)
+	if err != nil || managed.Published != 0 {
+		return err
+	}
 	r, e := s.control.retainedRecord(ctx, src.ID)
 	if e != nil || !r.Enabled {
 		return e

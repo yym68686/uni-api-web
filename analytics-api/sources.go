@@ -106,10 +106,14 @@ func (s *Service) bootstrapSources(ctx context.Context) error {
 	return nil
 }
 func (s *Service) saveSource(w http.ResponseWriter, r *http.Request) {
-	var in controlSource
-	if !decodeConfiguration(w, r, &in) {
+	var input struct {
+		controlSource
+		ManagedBootstrap bool `json:"managed_bootstrap"`
+	}
+	if !decodeConfiguration(w, r, &input) {
 		return
 	}
+	in := input.controlSource
 	base, e := validateSourceURL(in.Base)
 	if e != nil {
 		http.Error(w, e.Error(), 400)
@@ -117,11 +121,26 @@ func (s *Service) saveSource(w http.ResponseWriter, r *http.Request) {
 	}
 	in.Base = base
 	in.ID = r.PathValue("id")
+	if input.ManagedBootstrap && in.ID != "" {
+		http.Error(w, "仅新来源可以使用离线引导", 400)
+		return
+	}
 	if in.ID != "" {
 		old, e := s.control.source(r.Context(), in.ID)
 		if e != nil {
 			http.Error(w, "source not found", 404)
 			return
+		}
+		if in.Base != old.Base {
+			state, err := s.control.managedState(r.Context(), s.control.db, in.ID, false)
+			if err != nil {
+				http.Error(w, "source storage unavailable", 503)
+				return
+			}
+			if state.Published != 0 || state.Draft != 0 {
+				http.Error(w, "已有托管配置，不能直接更改来源地址", 409)
+				return
+			}
 		}
 		if in.Key == "" {
 			in.Key = old.Key
@@ -143,19 +162,26 @@ func (s *Service) saveSource(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid source name or platform key", 400)
 		return
 	}
-	body, _, e := fetchSource(r.Context(), in, "/v1/api-keys", nil)
-	if e != nil || body["can_inspect_all"] != true {
-		http.Error(w, "source requires a valid platform administrator key", 400)
-		return
-	}
-	if in.ConfigKey != "" {
-		if len(in.ConfigKey) < 8 || len(in.ConfigKey) > 4096 {
-			http.Error(w, "配置读取密钥长度无效", 400)
+	if input.ManagedBootstrap {
+		if in.ConfigKey != "" && in.ConfigKey != in.Key {
+			http.Error(w, "新托管来源请先使用同一管理员密钥", 400)
 			return
 		}
-		if _, err := configuredProviders(r.Context(), in); err != nil {
-			http.Error(w, "配置读取密钥验证失败，请使用此来源已有的管理员密钥", 400)
+	} else {
+		body, _, e := fetchSource(r.Context(), in, "/v1/api-keys", nil)
+		if e != nil || body["can_inspect_all"] != true {
+			http.Error(w, "source requires a valid platform administrator key", 400)
 			return
+		}
+		if in.ConfigKey != "" {
+			if len(in.ConfigKey) < 8 || len(in.ConfigKey) > 4096 {
+				http.Error(w, "配置读取密钥长度无效", 400)
+				return
+			}
+			if _, err := configuredProviders(r.Context(), in); err != nil {
+				http.Error(w, "配置读取密钥验证失败，请使用此来源已有的管理员密钥", 400)
+				return
+			}
 		}
 	}
 	out, e := s.control.saveSource(r.Context(), in, false)
@@ -167,7 +193,17 @@ func (s *Service) saveSource(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, out)
 }
 func (s *Service) deleteSource(w http.ResponseWriter, r *http.Request) {
-	if e := s.control.deleteSource(r.Context(), r.PathValue("id")); e != nil {
+	id := r.PathValue("id")
+	state, err := s.control.managedState(r.Context(), s.control.db, id, false)
+	if err != nil {
+		http.Error(w, "source storage unavailable", 503)
+		return
+	}
+	if state.Published != 0 || state.Draft != 0 {
+		http.Error(w, "已有托管配置，不能直接删除来源", 409)
+		return
+	}
+	if e := s.control.deleteSource(r.Context(), id); e != nil {
 		http.Error(w, "source storage unavailable", 503)
 		return
 	}
