@@ -173,8 +173,7 @@ func managementValidatorRequest(r *http.Request) bool {
 func writeManagementValidatedNotModified(w http.ResponseWriter, r *http.Request, tag string, at int64) error {
 	w.Header().Add("Vary", "Accept")
 	w.Header().Add("Vary", "Accept-Encoding")
-	w.Header().Add("Vary", "X-Console-Current-Validation")
-	w.Header().Add("Vary", managementMetadataHeader)
+	addManagementV3Vary(w.Header())
 	w.Header().Add("Vary", "Cookie")
 	w.Header().Set("Cache-Control", "private, no-cache, must-revalidate")
 	w.Header().Set("Content-Type", managementPageV3MediaType)
