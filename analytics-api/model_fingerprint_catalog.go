@@ -75,13 +75,19 @@ func verifyFingerprintBundle(raw []byte, key ed25519.PublicKey) (fingerprintBund
 		Payload   json.RawMessage `json:"payload"`
 		Signature []byte          `json:"signature"`
 	}
+	if len(raw) > fingerprintCatalogLimit || len(key) != ed25519.PublicKeySize || json.Unmarshal(raw, &signed) != nil || !ed25519.Verify(key, signed.Payload, signed.Signature) {
+		return fingerprintBundle{}, nil, errors.New("invalid fingerprint bundle signature")
+	}
+	return parseFingerprintBundle(signed.Payload)
+}
+
+func parseFingerprintBundle(raw []byte) (fingerprintBundle, *fingerprintCatalog, error) {
 	var bundle fingerprintBundle
 	catalog := &fingerprintCatalog{}
 	fail := func() (fingerprintBundle, *fingerprintCatalog, error) {
-		return fingerprintBundle{}, nil, errors.New("invalid fingerprint bundle signature or schema")
+		return fingerprintBundle{}, nil, errors.New("invalid fingerprint bundle schema")
 	}
-	if len(raw) > fingerprintCatalogLimit || len(key) != ed25519.PublicKeySize || json.Unmarshal(raw, &signed) != nil || !ed25519.Verify(key, signed.Payload, signed.Signature) ||
-		json.Unmarshal(signed.Payload, &bundle) != nil || bundle.Schema != 1 || bundle.Sequence <= 0 || len(bundle.Files) != len(fingerprintBundleFiles) {
+	if len(raw) > fingerprintCatalogLimit || json.Unmarshal(raw, &bundle) != nil || bundle.Schema != 1 || bundle.Sequence <= 0 || len(bundle.Files) != len(fingerprintBundleFiles) {
 		return fail()
 	}
 	for _, name := range fingerprintBundleFiles {
@@ -133,6 +139,29 @@ func (s *Service) activateFingerprintBundle(ctx context.Context, raw []byte, key
 	if err != nil {
 		return err
 	}
+	var save func(context.Context) error
+	if persist {
+		save = func(ctx context.Context) error {
+			result, err := s.control.db.ExecContext(ctx, `INSERT INTO console_fingerprint_catalog(id,sequence,bundle)
+		  VALUES(true,$1,$2) ON CONFLICT(id) DO UPDATE SET sequence=excluded.sequence,bundle=excluded.bundle
+		  WHERE console_fingerprint_catalog.sequence < excluded.sequence`, candidate.sequence, raw)
+			return fingerprintSaved(result, err)
+		}
+	}
+	return activateFingerprintCatalog(ctx, bundle, candidate, save)
+}
+
+func fingerprintSaved(result sql.Result, err error) error {
+	if err != nil {
+		return err
+	}
+	if count, err := result.RowsAffected(); err != nil || count != 1 {
+		return errors.New("catalog publication was superseded; will reload saved catalog")
+	}
+	return nil
+}
+
+func activateFingerprintCatalog(ctx context.Context, bundle fingerprintBundle, candidate *fingerprintCatalog, persist func(context.Context) error) error {
 	if candidate.sequence <= currentFingerprintCatalog().sequence {
 		return nil
 	}
@@ -172,17 +201,11 @@ func (s *Service) activateFingerprintBundle(ctx context.Context, raw []byte, key
 	if _, err = candidate.process.get(ctx); err != nil {
 		return err
 	}
-	if persist {
+	if persist != nil {
 		save, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
-		result, err := s.control.db.ExecContext(save, `INSERT INTO console_fingerprint_catalog(id,sequence,bundle)
-		  VALUES(true,$1,$2) ON CONFLICT(id) DO UPDATE SET sequence=excluded.sequence,bundle=excluded.bundle
-		  WHERE console_fingerprint_catalog.sequence < excluded.sequence`, candidate.sequence, raw)
-		if err != nil {
+		if err := persist(save); err != nil {
 			return err
-		}
-		if count, err := result.RowsAffected(); err != nil || count != 1 {
-			return errors.New("catalog publication was superseded; will reload saved catalog")
 		}
 	}
 	publishedFingerprintCatalog.Store(candidate)
@@ -264,14 +287,23 @@ func (s *Service) fingerprintRuntime(ctx context.Context) {
 	}
 	loading, cancel := context.WithTimeout(ctx, 35*time.Second)
 	err = s.loadSavedFingerprintBundle(loading, key)
-	cancel()
 	if err != nil && ctx.Err() == nil {
 		log.Printf("fingerprint_catalog_saved_rejected: %v", err)
 	}
+	mode := os.Getenv("FINGERPRINT_CATALOG_SYNC")
+	if mode != "legacy" {
+		if err = s.loadUpstreamFingerprintCatalog(loading); err != nil && ctx.Err() == nil {
+			log.Printf("fingerprint_upstream_saved_rejected: %v", err)
+		}
+	}
+	cancel()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		if os.Getenv("FINGERPRINT_CATALOG_SYNC") == "1" {
+		switch mode {
+		case "1":
+			s.pollUpstreamFingerprintCatalog(ctx)
+		case "legacy":
 			s.pollFingerprintCatalog(ctx, key)
 		}
 	}()

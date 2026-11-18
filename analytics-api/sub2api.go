@@ -1198,9 +1198,10 @@ func (s *Service) subTestTargets(ctx context.Context, id, base, job string, qual
 					tx, e := s.control.db.BeginTx(ctx, nil)
 					if e == nil {
 						var current bool
-						e = tx.QueryRowContext(ctx, `SELECT job_id=$2 FROM console_sub_accounts WHERE id=$1 FOR UPDATE`, id, job).Scan(&current)
+						var owner string
+						e = tx.QueryRowContext(ctx, `SELECT job_id=$2,owner FROM console_sub_accounts WHERE id=$1 FOR UPDATE`, id, job).Scan(&current, &owner)
 						if e == nil && current {
-							e = enqueueFingerprint(ctx, tx, fingerprintTarget{Account: id, Group: t.id, Model: t.model})
+							e = enqueueAutomaticFingerprint(ctx, tx, fingerprintTarget{Account: id, Group: t.id, Model: t.model}, owner)
 						}
 						if e == nil {
 							e = tx.Commit()

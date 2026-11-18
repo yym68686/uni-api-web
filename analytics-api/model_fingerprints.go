@@ -85,17 +85,28 @@ type fingerprintDB interface {
 }
 
 func enqueueFingerprint(ctx context.Context, db fingerprintDB, t fingerprintTarget) error {
+	return enqueueFingerprintForOwner(ctx, db, t, nil)
+}
+
+func enqueueAutomaticFingerprint(ctx context.Context, db fingerprintDB, t fingerprintTarget, owner string) error {
+	return enqueueFingerprintForOwner(ctx, db, t, &owner)
+}
+
+func enqueueFingerprintForOwner(ctx context.Context, db fingerprintDB, t fingerprintTarget, owner *string) error {
 	if !t.valid() {
 		return errors.New("检测目标无效或模型未接入指纹参考库")
 	}
 	_, err := db.ExecContext(ctx, `INSERT INTO console_model_fingerprints(scope,model,source_id,provider,account_id,group_id)
- VALUES($1,$2,NULLIF($3,''),$4,NULLIF($5,''),$6) ON CONFLICT(scope,model) DO UPDATE SET
+ SELECT $1,$2,NULLIF($3,''),$4,NULLIF($5,''),$6
+ WHERE $7::text IS NULL OR COALESCE((SELECT models ? $2 FROM console_fingerprint_preferences WHERE owner=$7),$8::boolean)
+ ON CONFLICT(scope,model) DO UPDATE SET
  state='queued',message='',
  result=CASE WHEN console_model_fingerprints.sample_state IS NOT NULL AND console_model_fingerprints.result->>'used_outputs' IN ('1','2') THEN console_model_fingerprints.result END,
  revision=CASE WHEN console_model_fingerprints.sample_state IS NOT NULL AND console_model_fingerprints.result->>'used_outputs' IN ('1','2') THEN console_model_fingerprints.revision ELSE '' END,
  sample_state=CASE WHEN console_model_fingerprints.result->>'used_outputs' IN ('1','2') THEN console_model_fingerprints.sample_state END,
  deadline=NULL,site_key='',updated_at=now()
- WHERE console_model_fingerprints.state NOT IN ('queued','running') OR console_model_fingerprints.deadline<now()`, t.scope(), t.Model, t.Source, t.Provider, t.Account, t.Group)
+ WHERE console_model_fingerprints.state NOT IN ('queued','running') OR console_model_fingerprints.deadline<now()`,
+		t.scope(), t.Model, t.Source, t.Provider, t.Account, t.Group, owner, slices.Contains(defaultAutomaticFingerprintModels, t.Model))
 	return err
 }
 func (s *Service) modelFingerprints(w http.ResponseWriter, r *http.Request) {

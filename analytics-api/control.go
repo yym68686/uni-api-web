@@ -319,6 +319,8 @@ func (s *Service) controlHandler() http.Handler {
 	mux.HandleFunc("GET /v1/model-fingerprints", s.modelFingerprints)
 	mux.HandleFunc("POST /v1/model-fingerprints", s.queueModelFingerprints)
 	mux.HandleFunc("DELETE /v1/model-fingerprints", s.queueModelFingerprints)
+	mux.HandleFunc("GET /v1/model-fingerprints/settings", s.fingerprintSettings)
+	mux.HandleFunc("PUT /v1/model-fingerprints/settings", s.fingerprintSettings)
 	mux.HandleFunc("GET /v1/channel-management/checks", s.configuredChecks)
 	mux.HandleFunc("POST /v1/channel-management/checks", s.queueConfiguredChecks)
 	mux.HandleFunc("GET /v1/channel-management/detection-settings", s.channelDetectionSettings)

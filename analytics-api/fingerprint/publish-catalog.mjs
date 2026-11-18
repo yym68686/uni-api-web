@@ -82,13 +82,8 @@ function writeBundle(output,keyPath,files,previous) {
   writeFileSync(output,raw,{flag:'wx'});
 }
 
-async function publish(commit, output, keyPath, previousPath) {
-  if (!/^[0-9a-f]{40}$/.test(commit) || !output || !keyPath) throw Error('usage: node publish-catalog.mjs <commit> <output> <key.pem> [previous.json]');
-  const previous = previousBundle(previousPath);
-  if (previous && JSON.parse(Buffer.from(previous.files['manifest.json'],'base64')).commit===commit) {
-    console.log('Reference commit already published');
-    return;
-  }
+async function buildCatalog(commit, previous) {
+  if (!/^[0-9a-f]{40}$/.test(commit)) throw Error('expected an immutable upstream commit SHA');
   const sourceFiles = read('scorer-sources.json');
   await Promise.all(Object.entries(sourceFiles).map(async ([path,expected])=>{
     if (sha(await upstream(commit,path,1<<20))!==expected) throw Error(`Scorer or request contract changed: ${path}; review before publishing`);
@@ -126,13 +121,32 @@ async function publish(commit, output, keyPath, previousPath) {
       env:{PATH:process.env.PATH,FINGERPRINT_DATA_DIR:stage},stdio:'inherit',
     });
   } finally { rmSync(stage,{recursive:true,force:true}); }
-  writeBundle(output,keyPath,Object.fromEntries(Object.entries(files).map(([name,data])=>[name,data.toString('base64')])),previous);
-  console.log(`Verified and signed ${Object.keys(models).length} model profiles at ${commit}`);
+  return Object.fromEntries(Object.entries(files).map(([name,data])=>[name,data.toString('base64')]));
+}
+
+async function publish(commit, output, keyPath, previousPath) {
+  if (!output || !keyPath) throw Error('usage: node publish-catalog.mjs <commit> <output> <key.pem> [previous.json]');
+  const previous = previousBundle(previousPath);
+  if (previous && JSON.parse(Buffer.from(previous.files['manifest.json'],'base64')).commit===commit) {
+    console.log('Reference commit already published');
+    return;
+  }
+  writeBundle(output,keyPath,await buildCatalog(commit,previous),previous);
+}
+
+async function derive(commit, output) {
+  if (!output) throw Error('usage: node publish-catalog.mjs --derive <commit> <output>');
+  // This file is private IPC with the Go updater, not an externally accepted bundle.
+  const payload = JSON.stringify({schema:1,files:await buildCatalog(commit)});
+  if (Buffer.byteLength(payload)>(16<<20)) throw Error('fingerprint bundle exceeds runtime bound');
+  writeFileSync(output,payload,{flag:'wx',mode:0o600});
 }
 
 if (process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href) {
   const [commit,output,key,prev,restore] = process.argv.slice(2);
-  if (commit==='--restore') {
+  if (commit==='--derive') {
+    await derive(output,key);
+  } else if (commit==='--restore') {
     const current = previousBundle(prev), target = previousBundle(restore);
     if (!current || !target || target.schema!==1 || target.sequence>=current.sequence) throw Error('restore requires an older verified generation');
     writeBundle(output,key,target.files,current);

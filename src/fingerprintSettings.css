@@ -1,0 +1,23 @@
+.fingerprint-settings { max-width: 900px; padding: 12px 0; }
+.fingerprint-settings h3 { margin: 0 0 8px; }
+.fingerprint-settings p { margin: 6px 0 12px; }
+.fingerprint-settings-models {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  margin: 16px 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.fingerprint-settings-models label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px;
+  overflow-wrap: anywhere;
+}
+.fingerprint-settings-models input { accent-color: var(--accent); }
+.fingerprint-settings-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }

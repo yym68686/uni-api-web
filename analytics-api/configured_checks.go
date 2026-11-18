@@ -28,6 +28,7 @@ type configuredCheck struct {
 	Message        string          `json:"message"`
 	Result         json.RawMessage `json:"result"`
 	History        qualitySummary  `json:"history"`
+	owner          string
 }
 
 func configuredProbeFingerprint(src controlSource, p configuredProvider) string {
@@ -143,10 +144,10 @@ func (s *Service) queueConfiguredChecks(w http.ResponseWriter, r *http.Request) 
 			}
 		}
 		for _, m := range models {
-			res, e := tx.ExecContext(r.Context(), `INSERT INTO console_configured_checks(source_id,provider,kind,model,source_target,quality_only)
- VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(source_id,provider,kind,model) DO UPDATE SET
- source_target=excluded.source_target,quality_only=excluded.quality_only,state='queued',message='',deadline=NULL,updated_at=now()
- WHERE console_configured_checks.state NOT IN ('queued','running') OR console_configured_checks.deadline<now()`, t.Source, t.Provider, kind, m, controlTarget(sources[t.Source]), in.Kind == "quality")
+			res, e := tx.ExecContext(r.Context(), `INSERT INTO console_configured_checks(source_id,provider,kind,model,source_target,quality_only,owner)
+ VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(source_id,provider,kind,model) DO UPDATE SET
+ source_target=excluded.source_target,quality_only=excluded.quality_only,owner=excluded.owner,state='queued',message='',deadline=NULL,updated_at=now()
+ WHERE console_configured_checks.state NOT IN ('queued','running') OR console_configured_checks.deadline<now()`, t.Source, t.Provider, kind, m, controlTarget(sources[t.Source]), in.Kind == "quality", owner)
 			if e != nil {
 				http.Error(w, "检测入队失败", 503)
 				return
@@ -222,7 +223,7 @@ func (s *Service) configuredCheckOne(parent context.Context) bool {
  ORDER BY updated_at,source_id,provider,model FOR UPDATE SKIP LOCKED LIMIT 1)
  UPDATE console_configured_checks c SET state='running',run_id=$1,deadline=now()+interval '210 seconds'
  FROM job j WHERE c.source_id=j.source_id AND c.provider=j.provider AND c.kind=j.kind AND c.model=j.model
- RETURNING c.source_id,c.provider,c.kind,c.model,c.source_target,c.quality_only`, run).Scan(&c.Source, &c.Provider, &c.Kind, &c.Model, &target, &qualityOnly)
+ RETURNING c.source_id,c.provider,c.kind,c.model,c.source_target,c.quality_only,c.owner`, run).Scan(&c.Source, &c.Provider, &c.Kind, &c.Model, &target, &qualityOnly, &c.owner)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) && parent.Err() == nil {
 			log.Printf("configured_checks claim: %v", err)
@@ -366,7 +367,7 @@ func (s *Service) runConfiguredCheck(ctx context.Context, c *configuredCheck, ta
 			}
 		}
 		if c.Kind == "model" && !qualityOnly && fingerprintModel(c.Model) && out.Availability.Status == "success" {
-			if err := enqueueFingerprint(ctx, s.control.db, fingerprintTarget{Source: c.Source, Provider: c.Provider, Model: c.Model}); err != nil {
+			if err := enqueueAutomaticFingerprint(ctx, s.control.db, fingerprintTarget{Source: c.Source, Provider: c.Provider, Model: c.Model}, c.owner); err != nil {
 				return errors.New("模型指纹入队失败，请单独重新检测")
 			}
 		}

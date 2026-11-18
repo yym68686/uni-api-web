@@ -154,24 +154,34 @@ uses isolated fixtures; no production model probes are necessary for deployment.
 
 ## Catalog operations
 
-The **Publish fingerprint catalog** GitHub workflow checks upstream every four
-hours. New exact IDs need consistent collection metadata for a supported request
-format and effort, and three complete samples that pass offline scoring plus
-transport-contract tests. The workflow never guesses a protocol or silently
-changes one for an enabled model. A source/scorer change, incomplete metadata, or
-failed validation leaves the last known good version in use. Updating the scorer
-or adding a supported request format still requires a reviewed code change.
+In **设置 → 模型指纹**, choose the exact model IDs that should automatically
+queue a fingerprint after a successful channel availability check or site
+synchronization. The selection is saved per console user in PostgreSQL. Before
+a selection is saved, the pre-existing models keep their previous automatic
+behavior; newly supported models require opt-in. An empty saved list disables
+automatic fingerprinting. Manual fingerprint checks and jobs already submitted
+are unaffected.
 
-The analytics service checks the signed data branch `fingerprint-data-v1` at
-startup and every 15 minutes (`FINGERPRINT_CATALOG_SYNC=1`). `/healthz` reports
-`fingerprint_reference_commit`, `fingerprint_catalog_generation`, and
-`fingerprint_model_count`. No downloaded code is executed, and a catalog refresh does
-not enqueue or replay requests. Current rounds finish on their original reference;
-an explicit continuation resets partial samples if the reference changed.
+The analytics service checks lm-detector at startup and every 15 minutes
+(`FINGERPRINT_CATALOG_SYNC=1`). It reads data at an immutable upstream commit
+and runs the bundled validator against the pinned scorer and request logic.
+New exact IDs need consistent metadata for a supported request format and
+effort, and three complete samples that pass offline scoring and transport
+tests. Incompatible new profiles stay out of the list. Invalid candidates,
+missing existing profiles, changes to an existing request contract, and
+upstream outages leave the last known good catalog in use. Changing the scorer
+or supporting a new request format requires a reviewed code change.
 
-To restore an earlier signed catalog independently of a code release, dispatch
-the publisher with the exact data-branch commit in `restore_revision`. This
-publishes those data with a new generation number and holds automatic publication.
-After investigating, dispatch with `resume=true` to resume updates. If GitHub is
-unavailable, the analytics service uses the saved Postgres catalog or the bundled
-fallback at startup.
+There is no scheduled GitHub Action, private signing key, or GitHub write
+access in the normal refresh path. No downloaded code is executed. A catalog
+refresh does not enqueue or replay any requests. Current rounds finish with
+their original reference; a continuation resets partial samples if the
+reference changed. `/healthz` reports `fingerprint_reference_commit`,
+`fingerprint_catalog_generation`, and `fingerprint_model_count`.
+
+Set `FINGERPRINT_CATALOG_SYNC=0` to keep the saved catalog without polling.
+For signed-catalog recovery, use `FINGERPRINT_CATALOG_SYNC=legacy` and the
+manual **Publish fingerprint catalog** workflow (`restore_revision` selects
+an exact previously signed data-branch commit). Legacy mode deliberately uses
+the separate signed catalog in `fingerprint-data-v1`, rather than the locally
+validated upstream catalog. Set the mode back to `1` to resume direct updates.

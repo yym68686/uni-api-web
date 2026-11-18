@@ -1,8 +1,6 @@
 name: Publish fingerprint catalog
 
 on:
-  schedule:
-    - cron: '23 */4 * * *'
   workflow_dispatch:
     inputs:
       restore_revision:
@@ -10,7 +8,7 @@ on:
         type: string
         required: false
       resume:
-        description: 'Resume automatic updates after a manual hold'
+        description: 'Replace a manually held catalog with the current verified upstream data'
         type: boolean
         default: false
 
@@ -48,7 +46,7 @@ jobs:
           head=$(git rev-parse FETCH_HEAD)
           git worktree add --detach "$stage/branch" "$head"
           if test -f "$stage/branch/hold" && test -z "$RESTORE_REVISION" && test "$RESUME_UPDATES" != true; then
-            echo "Automatic catalog publication is on hold following a restore"
+            echo "Manual catalog publication is on hold following a restore"
             exit 0
           fi
           test -n "$SIGNING_KEY"

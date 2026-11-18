@@ -9,6 +9,7 @@ import { ChannelSettings, GLOBAL_SETTINGS_SCOPE } from "./ChannelSettings";
 import { ControlPersistence } from "./ControlPersistence";
 import { ManagedConfiguration } from "./ManagedConfiguration";
 import { ChannelProtocolRepair } from "./ChannelProtocolRepair";
+import { FingerprintSettings } from "./FingerprintSettings";
 import { WorkbenchDisclosure, WorkbenchTabs } from "./Workbench";
 export interface ConsoleSource {
   id: string;
@@ -110,7 +111,7 @@ export function SourceSettings({
           </button>
         </div>}
       </div>
-      <WorkbenchTabs label="设置视图" value={section} onChange={setSection} tabs={[["sources", "来源"], ["account", "账户安全"]]} />
+      <WorkbenchTabs label="设置视图" value={section} onChange={setSection} tabs={[["sources", "来源"], ["fingerprints", "模型指纹"], ["account", "账户安全"]]} />
       <div hidden={section !== "sources"}>
       {error && !open && (
         <p role="alert" className="error-banner">
@@ -252,6 +253,7 @@ export function SourceSettings({
         </Dialog.Portal>
       </Dialog.Root>
       </div>
+      {section === "fingerprints" && <FingerprintSettings />}
       {section === "account" && <PasswordSettings />}
     </section>
   );

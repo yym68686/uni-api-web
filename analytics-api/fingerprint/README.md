@@ -58,11 +58,10 @@ of legacy reasoning-quality history.
 
 Offline verification: `node --test fingerprint/runner.test.mjs` (from analytics-api).
 
-The scheduled GitHub publisher can add exact models after it confirms a supported
-wire contract in upstream collection metadata and passes offline scoring and
-request-contract tests. It signs data only. The analytics API validates the
-signature, checks the reference with its checked-in worker, and saves the last
-known good generation in Postgres. See [catalog operations](../../docs/model-fingerprints.md#catalog-operations).
+The analytics service checks upstream directly for exact models with a supported
+wire contract, then runs the checked-in offline scoring and request-contract
+tests before saving the last known good catalog in Postgres. GitHub Actions are
+not needed for routine updates. See [catalog operations](../../docs/model-fingerprints.md#catalog-operations).
 
 DeepSeek 1017 uses the existing `deepseek-v4.1-flash-1017` class in this pinned
 69-class bank; no scorer, detector, calibration or reference manifest update is
