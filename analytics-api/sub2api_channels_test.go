@@ -42,6 +42,7 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 		t.Fatal(e)
 	}
 	provider := subProviderName(account, 7, key)
+	messages := protocolProvider(provider, "messages")
 	_, e = store.db.Exec(`INSERT INTO console_sub_usage(id,account_id,group_id,key_id,model,started_at,request_ids,status,result) VALUES($1,$2,7,625,$3,1,'[]','matched','{"status":"matched","input_price":10,"total_cost":1,"actual_cost":3}')`, randomID(), account, checkModel)
 	if e != nil {
 		t.Fatal(e)
@@ -58,6 +59,7 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 	revision := "boot:1"
 	models := []string{checkModel, "gpt-5.6-sol"}
 	deleted := false
+	messagesPresent := false
 	writes := 0
 	var last map[string]any
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -79,6 +81,9 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 			temporary := []any{map[string]any{"provider": otherProvider, "api_key_id": other, "models": []string{checkModel}}, map[string]any{"provider": newFirst, "api_key_id": key, "models": []string{checkModel}}}
 			if !deleted {
 				temporary = append(temporary, map[string]any{"provider": provider, "api_key_id": key, "models": models})
+			}
+			if messagesPresent {
+				temporary = append(temporary, map[string]any{"provider": messages, "api_key_id": key, "models": []string{"claude-fixture"}})
 			}
 			writeJSON(w, 200, map[string]any{"instance_id": "boot", "revision": revision, "temporary_channel_management": true, "temporary_channel_restore": true, "automatic_engine": true, "channel_settings": true, "temporary_channels": temporary, "rules": []any{map[string]any{"api_key_id": key, "model": checkModel, "order": order}}})
 		case "/v1/channel-settings/export":
@@ -124,8 +129,15 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 			}
 			writes++
 			if last["action"] == "delete" {
-				deleted = true
-				order = []string{newFirst, "existing"}
+				switch last["provider"] {
+				case messages:
+					messagesPresent = false
+				case provider:
+					deleted = true
+					order = []string{newFirst, "existing"}
+				default:
+					t.Error("unexpected provider in delete", last["provider"])
+				}
 			} else {
 				raw, _ := json.Marshal(last["models"])
 				json.Unmarshal(raw, &models)
@@ -388,6 +400,22 @@ func TestSubInstalledChannelsManagementUsesLiveOwnedBindings(t *testing.T) {
 	in.Action = "delete"
 	in.Revision = revision
 	in.Models = nil
+	// One account/group/key can expose multiple channel identities. An old
+	// caller cannot choose among them; the exact protocol channel can be removed.
+	messagesPresent = true
+	if w = request("PATCH", session, in); w.Code != 409 || writes != 2 || deleted || !messagesPresent {
+		t.Fatal("ambiguous deletion changed a route", w.Code, w.Body.String())
+	}
+	in.Provider = otherProvider
+	if w = request("PATCH", session, in); w.Code != 400 || writes != 2 {
+		t.Fatal("deletion escaped the specified key", w.Code, w.Body.String())
+	}
+	in.Provider = messages
+	if w = request("PATCH", session, in); w.Code != 200 || writes != 3 || deleted || messagesPresent || last["provider"] != messages || last["api_key_id"] != key {
+		t.Fatal("wrong protocol binding removed", w.Code, w.Body.String(), last)
+	}
+	in.Revision = revision
+	in.Provider = "" // The legacy form still works for a lone unqualified provider.
 	if w = request("PATCH", session, in); w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}

@@ -158,6 +158,7 @@ function RemoveChannel({
           group_id: item.group_id,
           source_id: item.source_id,
           api_key_id: item.api_key_id,
+          provider: item.provider,
           revision: item.revision,
         }),
       });

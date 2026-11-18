@@ -61,10 +61,12 @@ it("scopes cache history to source, key, model, upstream, endpoint and streaming
 });
 
 it("loads secrets only on demand and removes the exact imported binding after confirmation", async () => {
+  const target = { ...row, provider: "same--messages" };
+  const binding = { ...installed, provider: target.provider };
   const fetchMock = vi.fn(async (_path: string, init?: RequestInit) => new Response(JSON.stringify(init?.method === "PATCH" ? { message: "已移除" } : { api_keys: ["fixture-business-key"] })));
   vi.stubGlobal("fetch", fetchMock);
   const removed = vi.fn();
-  const app = setup(<ChannelAccess row={row} imports={{ data: { data: [installed] } } as SubImportsQuery} onRemoved={removed} />);
+  const app = setup(<ChannelAccess row={target} imports={{ data: { data: [installed, binding] } } as SubImportsQuery} onRemoved={removed} />);
   expect(fetchMock).not.toHaveBeenCalled();
   await app.user.click(screen.getByRole("button", { name: "显示" }));
   expect(await screen.findByText("fixture-business-key")).toBeVisible();
@@ -78,7 +80,7 @@ it("loads secrets only on demand and removes the exact imported binding after co
   await app.user.click(screen.getByRole("button", { name: "确认移除" }));
   await waitFor(() => expect(removed).toHaveBeenCalledOnce());
   const mutation = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH");
-  expect(JSON.parse(String(mutation?.[1]?.body))).toEqual({ action: "delete", account_id: "account", group_id: 7, source_id: "source-two", api_key_id: "key-scope", revision: "r2" });
+  expect(JSON.parse(String(mutation?.[1]?.body))).toEqual({ action: "delete", account_id: "account", group_id: 7, source_id: "source-two", api_key_id: "key-scope", provider: target.provider, revision: "r2" });
 });
 
 it("pages quality history only when expanded and keeps unsuccessful attempts visible", async () => {

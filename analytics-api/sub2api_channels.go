@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -532,15 +533,23 @@ func (s *Service) subManageChannel(w http.ResponseWriter, r *http.Request) {
 		}
 		provider = in.Provider
 	}
-	var existing []string
+	found := false
 	for _, p := range state.Temporary {
-		if p.Provider == provider && p.KeyID == key {
-			existing = p.Models
-			break
+		if p.KeyID != key {
+			continue
+		}
+		// An older client only sends the group and key. Never let that
+		// accidentally delete a sibling of the selected protocol channel.
+		if in.Action == "delete" && in.Provider == "" && strings.HasPrefix(p.Provider, provider+"--") {
+			http.Error(w, "该分组包含独立的协议渠道，请刷新页面后重试", 409)
+			return
+		}
+		if p.Provider == provider && !p.IdentityChanged {
+			found = true
 		}
 	}
-	if existing == nil {
-		http.Error(w, "临时渠道已删除或来源已重启", 404)
+	if !found {
+		http.Error(w, "找不到此临时渠道，或渠道身份已变化，请刷新后核对", 404)
 		return
 	}
 	if in.Action == "replace" {
