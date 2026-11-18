@@ -59,6 +59,36 @@ func TestManagementOverviewMatchesListAcrossPages(t *testing.T) {
 	}
 }
 
+func TestManagementOverviewScopedSignalsKeepFallbackAndOwnership(t *testing.T) {
+	s := managementHydrationFixture(t)
+	db := s.control.db
+	ctx := context.Background()
+	if _, err := db.Exec(`INSERT INTO console_sub_accounts(id,owner,name,base,email,encrypted_auth)
+		VALUES ('b','other','fixture','https://b.test','fixture','');
+		INSERT INTO console_sub_targets(account_id,group_id,name,platform,active,state) VALUES ('b',1,'private','openai',true,'done');
+		INSERT INTO console_sub_models(account_id,group_id,model,state) VALUES ('b',1,'private-model','running')`); err != nil {
+		t.Fatal(err)
+	}
+	wanted := []subBoundKey{{AccountID: "a", GroupID: 1}, {AccountID: "b", GroupID: 1}, {AccountID: "a", GroupID: 2}}
+	a, b, c := &subTarget{}, &subTarget{}, &subTarget{}
+	slots := map[string]*subTarget{qualityGroupID("a", 1): a, qualityGroupID("b", 1): b, qualityGroupID("a", 2): c}
+	if ok, err := readManagementPageOverview(ctx, db, "owner", wanted, slots); err != nil || !ok || len(a.Models) != 3 || len(c.Models) != 3 || len(b.Models) != 0 {
+		t.Fatalf("wrong grouped overview or ownership: ok=%t err=%v", ok, err)
+	}
+	a.Models, c.Models = nil, nil
+	for _, change := range []string{
+		`UPDATE console_management_model_signal SET valid=false WHERE account_id='a' AND group_id=2 AND model='gpt-5.5'`,
+		`DELETE FROM console_management_model_signal WHERE account_id='a' AND group_id=2 AND model='gpt-5.5'`,
+	} {
+		if _, err := db.Exec(change); err != nil {
+			t.Fatal(err)
+		}
+		if ok, err := readManagementPageOverview(ctx, db, "owner", wanted, slots); err != nil || ok || len(a.Models) != 0 || len(c.Models) != 0 {
+			t.Fatalf("partial or invalid overview accepted: ok=%t err=%v", ok, err)
+		}
+	}
+}
+
 func TestManagementListViewAllPagesAndPriceContract(t *testing.T) {
 	s := managementHydrationFixture(t)
 	prepareManagementRevisionsForTest(t, s.control.db)
