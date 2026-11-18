@@ -25,7 +25,11 @@ export function SiteAccountSettings({
   const [rechargeBusy, setRechargeBusy] = useState(false);
   const dialogBusy = busy || rechargeBusy;
   const [error, setError] = useState("");
-  const [section, setSection] = useState<"rate" | "recharge">(initialSection);
+  const [section, setSection] = useState<"rate" | "recharge" | "probe">(initialSection);
+  const [probeRPM, setProbeRPM] = useState(String(account.probe_limits?.rpm_limit ?? ""));
+  const [probeConcurrency, setProbeConcurrency] = useState(String(account.probe_limits?.concurrency ?? ""));
+  const validLimit = (input: string, max: number) => input === "" || (Number.isInteger(Number(input)) && Number(input) >= 1 && Number(input) <= max);
+  const validProbe = validLimit(probeRPM,480) && validLimit(probeConcurrency,8);
   const coefficient = Number(value);
   const valid =
     value.trim() !== "" &&
@@ -37,15 +41,16 @@ export function SiteAccountSettings({
   const precision = new Intl.NumberFormat("zh-CN", {maximumSignificantDigits:6});
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (busy || !valid) return;
+    const probe = section === "probe";
+    if (busy || !(probe ? validProbe : valid)) return;
     setBusy(true);
     setError("");
     try {
       await controlRequest(
-        `/v1/sub2api/accounts/${encodeURIComponent(account.id)}/settings`,
+        `/v1/sub2api/accounts/${encodeURIComponent(account.id)}/${probe ? "probe-limits" : "settings"}`,
         {
-          method: "PATCH",
-          body: JSON.stringify({ rate_coefficient: coefficient }),
+          method: probe ? "PUT" : "PATCH",
+          body: JSON.stringify(probe ? {rpm_limit:probeRPM ? Number(probeRPM) : null, concurrency:probeConcurrency ? Number(probeConcurrency) : null} : { rate_coefficient: coefficient }),
         },
       );
       saved();
@@ -115,9 +120,30 @@ export function SiteAccountSettings({
             >
               充值设置
             </button>
+            <button type="button" className="button small" aria-pressed={section === "probe"} disabled={dialogBusy}
+              onClick={() => {setError("");setSection("probe");}}>
+              检测速率
+            </button>
           </div>
           {section === "recharge" ? (
             <SiteRecharge key={account.id} account={account} onBusyChange={setRechargeBusy} />
+          ) : section === "probe" ? (
+            <form className="source-form sub-account-form" onSubmit={submit}>
+              <label>每分钟检测请求上限（RPM）
+                <input type="number" min="1" max="480" step="1" value={probeRPM} disabled={busy}
+                  placeholder="自动" onChange={e => setProbeRPM(e.target.value)} />
+              </label>
+              <label>同时在途请求上限
+                <input type="number" min="1" max="8" step="1" value={probeConcurrency} disabled={busy}
+                  placeholder="自动" onChange={e => setProbeConcurrency(e.target.value)} />
+              </label>
+              <p className="settings-note">留空则使用上游声明或保守估算。手动值不突破已知的上游额度；只影响检测请求，不影响密钥准备或业务路由。正在执行的一小批请求会沿用开始时的上限。</p>
+              {error && <p className="error-banner" role="alert">{error}</p>}
+              <div className="sub-account-dialog-actions">
+                <button type="button" className="button" disabled={busy} onClick={close}>取消</button>
+                <button type="submit" className="button primary" disabled={busy || !validProbe}>{busy ? "保存中…" : "保存设置"}</button>
+              </div>
+            </form>
           ) : (
             <form className="source-form sub-account-form" onSubmit={submit}>
               <label>

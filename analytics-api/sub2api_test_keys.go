@@ -44,6 +44,9 @@ func subPrepareTestKey(call subPanelCall, account string, group int64, key subRe
 	if !found {
 		err := call("POST", "/api/v1/keys", map[string]any{"name": name, "group_id": group}, &key, "subcheck-"+account+"-"+strconv.FormatInt(group, 10))
 		if err != nil {
+			if subPlanRateLimit(err) {
+				return key, err
+			}
 			return key, &subTestKeyError{"create_failed", "创建专用测试 key 失败：" + err.Error()}
 		}
 	}
@@ -59,6 +62,9 @@ func subPrepareTestKey(call subPanelCall, account string, group int64, key subRe
 		path := "/api/v1/keys/" + strconv.FormatInt(key.ID, 10)
 		var current subRemoteKey
 		if err := call("GET", path, nil, &current, ""); err != nil {
+			if subPlanRateLimit(err) {
+				return key, err
+			}
 			return key, &subTestKeyError{"quota_update_failed", "读取旧测试 key 额度失败：" + err.Error()}
 		}
 		if current.ID != key.ID || current.Key != key.Key || current.Name != name || current.GroupID != group {
@@ -69,10 +75,16 @@ func subPrepareTestKey(call subPanelCall, account string, group int64, key subRe
 			// An absolute quota update is safe to retry. Do not send reset_quota or
 			// status: quota_exhausted reactivation belongs to the upstream service.
 			if err := call("PUT", path, map[string]any{"quota": 0}, nil, ""); err != nil {
+				if subPlanRateLimit(err) {
+					return key, err
+				}
 				return key, &subTestKeyError{"quota_update_failed", "取消旧测试 key 的 $1 限额失败：" + err.Error()}
 			}
 			var verified subRemoteKey
 			if err := call("GET", path, nil, &verified, ""); err != nil {
+				if subPlanRateLimit(err) {
+					return key, err
+				}
 				return key, &subTestKeyError{"quota_update_failed", "测试 key 额度更新后未能核验，请重新同步：" + err.Error()}
 			}
 			if verified.ID != current.ID || verified.Key != current.Key || verified.Name != name || verified.GroupID != group || verified.Quota == nil || *verified.Quota != 0 {
@@ -82,6 +94,11 @@ func subPrepareTestKey(call subPanelCall, account string, group int64, key subRe
 		}
 	}
 	return key, subTestKeyStateError(key)
+}
+
+func subPlanRateLimit(err error) bool {
+	var remote *subRemoteError
+	return errors.As(err, &remote) && remote.Status == 429
 }
 
 func subTestKeyFailureSummary(failures map[string]int) string {

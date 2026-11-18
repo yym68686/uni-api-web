@@ -32,6 +32,9 @@ func subProbeNative(ctx context.Context, client *http.Client, base, key, model s
 	out.CurlToken = captureProbeCurl(ctx, client, req)
 	resp, err := client.Do(req)
 	if err != nil {
+		if applySiteProbeRejection(&out, err) {
+			return
+		}
 		out.Message = "连接失败或检测超时"
 		return
 	}

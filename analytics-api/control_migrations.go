@@ -103,6 +103,15 @@ var managementDisplayGlobalProofSQL string
 //go:embed migrations/0021_management_display_global_proof.tables
 var managementDisplayGlobalProofTables string
 
+//go:embed migrations/0022_site_detection_runs.sql
+var siteDetectionRunsSQL string
+
+//go:embed migrations/0023_site_detection_targets.sql
+var siteDetectionTargetsSQL string
+
+//go:embed migrations/0024_site_detection_models.sql
+var siteDetectionModelsSQL string
+
 var managementRevisionTables = []string{"console_sub_models", "console_management_model_signal", "console_sub_usage", "console_management_receipt_signal", "console_management_revision_state"}
 
 type controlMigration struct {
@@ -133,6 +142,11 @@ func controlMigrations() []controlMigration {
 		{"0019_fingerprint_preferences", fingerprintPreferencesSQL, []string{"console_configured_checks", "console_fingerprint_preferences", "console_fingerprint_upstream_catalog"}},
 		{"0020_management_display_groups", managementDisplayGroupsSQL, []string{"console_management_display_epochs", "console_sub_models", "console_sub_model_summaries", "console_management_model_signal", "console_sub_usage", "console_management_receipt_signal"}},
 		{"0021_management_display_global_proof", managementDisplayGlobalProofSQL, strings.Fields(managementDisplayGlobalProofTables)},
+		// Independent additive changes avoid requiring an idle moment across
+		// all three busy source tables during a rolling upgrade.
+		{"0022_site_detection_runs", siteDetectionRunsSQL, []string{"console_sub_accounts", "console_site_detection_limits", "console_site_detection_slots"}},
+		{"0023_site_detection_targets", siteDetectionTargetsSQL, []string{"console_sub_targets"}},
+		{"0024_site_detection_models", siteDetectionModelsSQL, []string{"console_sub_models"}},
 	}
 }
 

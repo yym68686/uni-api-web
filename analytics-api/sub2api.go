@@ -63,6 +63,9 @@ type subAccount struct {
 	SyncModels       []string           `json:"sync_models,omitempty"`
 	SyncOnly         bool               `json:"sync_only,omitempty"`
 	Progress         *subSyncProgress   `json:"progress,omitempty"`
+	SyncPhase        string             `json:"sync_phase,omitempty"`
+	SyncRetryAt      int64              `json:"sync_retry_at,omitempty"`
+	ProbeLimits      subProbeLimits     `json:"probe_limits"`
 	Message          string             `json:"message"`
 	SyncedAt         int64              `json:"synced_at"`
 	Targets          []subTarget        `json:"targets"`
@@ -73,6 +76,7 @@ type subChallenge struct {
 	Password                       string
 	AccountID                      string
 	AccountBase                    string
+	SyncModels                     []string
 	Until                          int64
 }
 
@@ -144,6 +148,15 @@ func (s *Service) subAccounts(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"data": accounts})
 }
 
+type subInitialModelsKey struct{}
+
+func subInitialModels(r *http.Request) []string {
+	if models, ok := r.Context().Value(subInitialModelsKey{}).([]string); ok && models != nil {
+		return models
+	}
+	return []string{}
+}
+
 func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 	owner, _ := s.controlUser(r)
 	var in struct {
@@ -163,6 +176,7 @@ func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 		BrowserAccessExpiresAt int64             `json:"browser_access_expires_at"`
 		Challenge              string            `json:"challenge"`
 		Code                   string            `json:"totp_code"`
+		Models                 []string          `json:"models"`
 	}
 	if !decodeConfiguration(w, r, &in) {
 		return
@@ -175,6 +189,13 @@ func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 	var auth subAuth
 	var err error
 	accountID := r.PathValue("id")
+	if accountID == "" && in.Challenge == "" {
+		models, ok := validatedSubSyncModels(w, in.Models, true)
+		if !ok {
+			return
+		}
+		r = r.WithContext(context.WithValue(r.Context(), subInitialModelsKey{}, models))
+	}
 	var savedKind string
 	if accountID != "" {
 		// Changing a site requires an explicit compare-and-swap and fresh input;
@@ -231,6 +252,9 @@ func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 		if e != nil || parseErr != nil || challenge.Owner != owner || challenge.AccountID != accountID || challenge.Until < time.Now().Unix() || (accountID != "" && (originalBase != subLoginBase(r) || challenge.Email != in.Email)) {
 			http.Error(w, "验证会话已失效，请重新登录", 400)
 			return
+		}
+		if accountID == "" {
+			r = r.WithContext(context.WithValue(r.Context(), subInitialModelsKey{}, challenge.SyncModels))
 		}
 		if strings.HasPrefix(challenge.Temp, "newapi:") {
 			s.newAPIAddAccount(w, r, challenge.Base, challenge.Email, challenge.Name, challenge.Password, strings.TrimPrefix(challenge.Temp, "newapi:"), in.Code)
@@ -317,7 +341,7 @@ func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if auth.Requires2FA {
-		raw, _ := json.Marshal(subChallenge{Owner: owner, Base: in.Base, Email: in.Email, Name: in.Name, Password: in.Password, Temp: auth.Temp, AccountID: accountID, AccountBase: subLoginBase(r), Until: time.Now().Add(5 * time.Minute).Unix()})
+		raw, _ := json.Marshal(subChallenge{Owner: owner, Base: in.Base, Email: in.Email, Name: in.Name, Password: in.Password, Temp: auth.Temp, AccountID: accountID, AccountBase: subLoginBase(r), SyncModels: subInitialModels(r), Until: time.Now().Add(5 * time.Minute).Unix()})
 		challenge, e := s.control.encrypt(string(raw))
 		if e != nil {
 			http.Error(w, "验证会话创建失败", 503)
@@ -367,7 +391,7 @@ func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var id string
-	err = s.control.db.QueryRowContext(ctx, `INSERT INTO console_sub_accounts(id,owner,name,base,email,encrypted_auth,encrypted_login_password,state,job_kind) VALUES($1,$2,$3,$4,$5,$6,$7,'queued','sync') ON CONFLICT(owner,base,email) DO UPDATE SET name=excluded.name,encrypted_auth=excluded.encrypted_auth,encrypted_login_password=CASE WHEN excluded.encrypted_login_password<>'' THEN excluded.encrypted_login_password ELSE console_sub_accounts.encrypted_login_password END,state='queued',job_kind='sync',sync_models=NULL,job_id='',message='',lease_until=NULL WHERE console_sub_accounts.state NOT IN ('queued','running') RETURNING id`, "sub_"+randomID()[:16], owner, in.Name, in.Base, in.Email, encrypted, encryptedPassword).Scan(&id)
+	err = s.control.db.QueryRowContext(ctx, `INSERT INTO console_sub_accounts(id,owner,name,base,email,encrypted_auth,encrypted_login_password,state,job_kind,sync_models) VALUES($1,$2,$3,$4,$5,$6,$7,'queued','sync',$8) ON CONFLICT(owner,base,email) DO UPDATE SET name=excluded.name,encrypted_auth=excluded.encrypted_auth,encrypted_login_password=CASE WHEN excluded.encrypted_login_password<>'' THEN excluded.encrypted_login_password ELSE console_sub_accounts.encrypted_login_password END,state='queued',job_kind='sync',sync_models=excluded.sync_models,job_id='',message='',lease_until=NULL WHERE console_sub_accounts.state NOT IN ('queued','running') RETURNING id`, "sub_"+randomID()[:16], owner, in.Name, in.Base, in.Email, encrypted, encryptedPassword, mustJSON(subInitialModels(r))).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		http.Error(w, "该账号已有任务进行中，请等待完成", 409)
 		return
@@ -446,13 +470,17 @@ func decodeSubSyncModels(w http.ResponseWriter, r *http.Request) ([]string, bool
 	if !decodeConfiguration(w, r, &in) {
 		return nil, false
 	}
-	if len(in.Models) == 0 || len(in.Models) > 256 {
+	return validatedSubSyncModels(w, in.Models, false)
+}
+
+func validatedSubSyncModels(w http.ResponseWriter, input []string, allowEmpty bool) ([]string, bool) {
+	if (!allowEmpty && len(input) == 0) || len(input) > 256 {
 		http.Error(w, "请在检测模型设置中选择模型（最多 256 个）", 400)
 		return nil, false
 	}
 	models := []string{}
 	seen := map[string]bool{}
-	for _, model := range in.Models {
+	for _, model := range input {
 		if !validProbeModel(model) {
 			http.Error(w, "无效的检测模型", 400)
 			return nil, false
@@ -522,7 +550,7 @@ func (s *Service) subStop(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 	var id string
-	err = tx.QueryRowContext(r.Context(), `UPDATE console_sub_accounts SET state='stopped',job_kind='',job_id='',lease_until=NULL,message='检测已停止' WHERE id=$1 AND owner=$2 RETURNING id`, r.PathValue("id"), owner).Scan(&id)
+	err = tx.QueryRowContext(r.Context(), `UPDATE console_sub_accounts SET state='stopped',job_kind='',job_id='',lease_until=NULL,sync_phase='',sync_retry_at=NULL,message='检测已停止' WHERE id=$1 AND owner=$2 RETURNING id`, r.PathValue("id"), owner).Scan(&id)
 	if err != nil {
 		http.Error(w, "账号不存在", 404)
 		return
@@ -652,6 +680,7 @@ func (s *Service) subQueueChecksKind(w http.ResponseWriter, r *http.Request, kin
 type subJob struct {
 	syncModels                       []byte
 	id, base, kind, encrypted, token string
+	paused                           bool
 }
 
 func (s *Service) subWorkerLoop(ctx context.Context) {
@@ -683,7 +712,7 @@ func (s *Service) subWorkerLoop(ctx context.Context) {
 
 func (s *Service) subExpireJobs(ctx context.Context) error {
 	// Expiry means the previous worker cannot report safely. Preserve old results.
-	_, err := s.control.db.ExecContext(ctx, `WITH expired AS (UPDATE console_sub_accounts SET state='interrupted',message='服务重启或任务中断，请手动重新检测',job_kind='',job_id='',lease_until=NULL WHERE state='running' AND lease_until<now() RETURNING id), targets AS (UPDATE console_sub_targets SET state='interrupted',message='上次检测中断' WHERE account_id IN (SELECT id FROM expired) AND state IN ('running','queued') RETURNING account_id) UPDATE console_sub_models SET state='interrupted',message='上次检测中断' WHERE account_id IN (SELECT id FROM expired) AND state IN ('running','queued')`)
+	_, err := s.control.db.ExecContext(ctx, `WITH expired AS (UPDATE console_sub_accounts SET state='interrupted',message='服务重启或任务中断，请手动重新检测',job_kind='',job_id='',lease_until=NULL,sync_phase='',sync_retry_at=NULL WHERE state='running' AND lease_until<now() RETURNING id), targets AS (UPDATE console_sub_targets SET state='interrupted',message='上次检测中断' WHERE account_id IN (SELECT id FROM expired) AND state IN ('running','queued') RETURNING account_id) UPDATE console_sub_models SET state='interrupted',message='上次检测中断' WHERE account_id IN (SELECT id FROM expired) AND state IN ('running','queued')`)
 	if err != nil {
 		return err
 	}
@@ -699,7 +728,14 @@ func (s *Service) subClaimJob(ctx context.Context) (subJob, error) {
 	if err := s.subPromoteChecks(ctx); err != nil {
 		return job, err
 	}
-	err := s.control.db.QueryRowContext(ctx, `UPDATE console_sub_accounts SET state='running',job_id=$1,lease_until=now()+interval '30 seconds' WHERE id=(SELECT id FROM console_sub_accounts WHERE state='queued' ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING id,base,job_kind,encrypted_auth,COALESCE(sync_models,'null'::jsonb)`, job.token).Scan(&job.id, &job.base, &job.kind, &job.encrypted, &job.syncModels)
+	err := s.control.db.QueryRowContext(ctx, `UPDATE console_sub_accounts SET state='running',job_id=CASE WHEN state='running' THEN job_id ELSE $1 END,
+ sync_run_id=CASE WHEN state='queued' AND job_kind='sync' THEN $1 WHEN state='running' THEN sync_run_id ELSE '' END,
+ sync_phase=CASE WHEN state='queued' AND job_kind='sync' THEN 'discovering' WHEN state='running' THEN sync_phase ELSE '' END,
+ sync_retry_at=CASE WHEN state='running' THEN sync_retry_at ELSE NULL END,
+ sync_pause_count=CASE WHEN state='running' THEN sync_pause_count ELSE 0 END,
+ sync_models=CASE WHEN state='queued' AND job_kind='sync' THEN COALESCE(sync_models,'[]'::jsonb) ELSE sync_models END,
+ sync_plan_ready=state='running' AND sync_plan_ready,
+ lease_until=now()+interval '30 seconds' WHERE id=(SELECT id FROM console_sub_accounts WHERE state='queued' OR (state='running' AND lease_until IS NULL AND sync_retry_at<=now() AND job_kind='sync') ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING id,base,job_kind,encrypted_auth,COALESCE(sync_models,'null'::jsonb),job_id,sync_retry_at IS NOT NULL`, job.token).Scan(&job.id, &job.base, &job.kind, &job.encrypted, &job.syncModels, &job.token, &job.paused)
 	return job, err
 }
 
@@ -717,13 +753,22 @@ func (s *Service) subWorkOne(ctx context.Context) bool {
 }
 
 func (s *Service) subRunJob(parent context.Context, claimed subJob) {
-	ctx, cancel := context.WithTimeout(parent, 30*time.Minute)
+	maxRuntime := 30 * time.Minute
+	if claimed.kind == "sync" {
+		// A large selected plan or compatibility-mode key reads can
+		// legitimately take longer than the ordinary single-check budget.
+		maxRuntime = 4 * time.Hour
+	}
+	ctx, cancel := context.WithTimeout(parent, maxRuntime)
 	defer cancel()
 	id, base, kind, encrypted, job := claimed.id, claimed.base, claimed.kind, claimed.encrypted, claimed.token
 	var err error
 	if kind == "sync" && len(claimed.syncModels) > 0 {
 		var models []string
-		if err = json.Unmarshal(claimed.syncModels, &models); err == nil && models != nil {
+		if err = json.Unmarshal(claimed.syncModels, &models); err == nil {
+			if models == nil {
+				models = []string{}
+			}
 			ctx = withSubSyncModels(ctx, models)
 		}
 	}
@@ -753,19 +798,36 @@ func (s *Service) subRunJob(parent context.Context, claimed subJob) {
 		}
 	}()
 	defer func() { cancel(); <-heartbeatDone }()
-	if err == nil && kind == "sync" && !syncOnly {
+	if err == nil && kind == "sync" && !syncOnly && !claimed.paused {
 		_, err = s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET tool_use_state='interrupted' WHERE account_id=$1 AND tool_use_state IN ('queued','running')`, id)
 		if err == nil {
 			_, err = s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET compaction_state='interrupted' WHERE account_id=$1 AND compaction_state IN ('queued','running')`, id)
 		}
-		if err == nil {
-			err = s.subSynchronize(ctx, id, base, job, encrypted)
+	}
+	pauseGaveUp := false
+	if err == nil && kind == "sync" {
+		err = s.subRunSync(ctx, id, base, job, encrypted, syncOnly, claimed.paused)
+		var pause *subSyncPause
+		if errors.As(err, &pause) && ctx.Err() == nil && time.Until(pause.until) <= 24*time.Hour {
+			// Stop the heartbeat before releasing the lease, so it cannot
+			// accidentally turn a paused job back into a leased one.
+			cancel()
+			<-heartbeatDone
+			saveCtx, done := context.WithTimeout(context.Background(), 5*time.Second)
+			res, saveErr := s.control.db.ExecContext(saveCtx, `UPDATE console_sub_accounts
+ SET sync_phase=$3,sync_retry_at=$4,sync_pause_count=sync_pause_count+1,lease_until=NULL
+ WHERE id=$1 AND job_id=$2 AND state='running' AND sync_pause_count<4`, id, job, pause.phase, pause.until)
+			done()
+			if saveErr == nil {
+				if n, _ := res.RowsAffected(); n == 1 {
+					return
+				}
+			}
+			pauseGaveUp = true
+			err = errors.New("上游持续限流，已停止本轮自动重试")
 		}
 	}
-	if err == nil && syncOnly {
-		err = s.subSynchronize(ctx, id, base, job, encrypted)
-	}
-	if err == nil && !syncOnly && ctx.Err() == nil && (kind == "check" || kind == "sync" || kind == "quality") {
+	if err == nil && !syncOnly && ctx.Err() == nil && (kind == "check" || kind == "quality") {
 		err = s.subTestTargets(ctx, id, base, job, kind == "quality")
 	}
 	if err == nil && !syncOnly && ctx.Err() == nil && (kind == "check" || kind == "sync" || kind == "compaction") {
@@ -790,11 +852,11 @@ func (s *Service) subRunJob(parent context.Context, claimed subJob) {
 	if err != nil {
 		state, message = "error", err.Error()
 	}
-	if ctx.Err() != nil {
+	if ctx.Err() != nil && !pauseGaveUp {
 		state, message = "interrupted", "任务中断，请手动重试；未自动重发检测请求"
 	}
 	// Fence all late completions against stop/re-login/new worker operations.
-	_, _ = s.control.db.ExecContext(finishCtx, `WITH finished AS (UPDATE console_sub_accounts SET state=$3,message=CASE WHEN $3='idle' THEN message ELSE $4 END,job_kind='',job_id='',lease_until=NULL WHERE id=$1 AND job_id=$2 RETURNING id), targets AS (UPDATE console_sub_targets SET state='interrupted',message='任务未完成，请重试' WHERE account_id IN (SELECT id FROM finished) AND state IN ('queued','running') RETURNING account_id) UPDATE console_sub_models SET state='interrupted',message='任务未完成，请重试' WHERE NOT $5 AND account_id IN (SELECT id FROM finished) AND state IN ('queued','running')`, id, job, state, message, syncOnly)
+	_, _ = s.control.db.ExecContext(finishCtx, `WITH finished AS (UPDATE console_sub_accounts SET state=$3,message=CASE WHEN $3='idle' THEN message ELSE $4 END,job_kind='',job_id='',lease_until=NULL,sync_phase='',sync_retry_at=NULL WHERE id=$1 AND job_id=$2 RETURNING id), targets AS (UPDATE console_sub_targets SET state='interrupted',message='任务未完成，请重试' WHERE account_id IN (SELECT id FROM finished) AND state IN ('queued','running') RETURNING account_id) UPDATE console_sub_models SET state='interrupted',message='任务未完成，请重试' WHERE NOT $5 AND account_id IN (SELECT id FROM finished) AND state IN ('queued','running')`, id, job, state, message, syncOnly)
 }
 
 func (s *Service) subPanel(ctx context.Context, id, base, job, encrypted string) (func(string, string, any, any, string) error, []subRemoteGroup, error) {
@@ -937,49 +999,50 @@ func (s *Service) subPanel(ctx context.Context, id, base, job, encrypted string)
 }
 
 func (s *Service) subSynchronize(ctx context.Context, id, base, job, encrypted string) error {
+	plan := subPlan(ctx)
+	var pending []subRemoteGroup
+	if plan != nil && plan.initialized {
+		var err error
+		pending, err = s.subPendingKeyGroups(ctx, id, job)
+		if err != nil {
+			return err
+		}
+		if len(pending) == 0 {
+			return nil
+		}
+	}
 	call, groups, err := s.subPanel(ctx, id, base, job, encrypted)
 	if err != nil {
 		return err
 	}
 	newAPI := s.isNewAPI(ctx, id)
-	groupModels := map[int64][]string{}
-	if newAPI {
-		for _, g := range groups {
-			var remote string
-			if err = s.control.db.QueryRowContext(ctx, `SELECT remote_key FROM console_site_groups WHERE account_id=$1 AND id=$2`, id, g.ID).Scan(&remote); err != nil {
-				return err
-			}
-			var models []string
-			if err = s.newAPICall(ctx, id, base, "GET", "/api/user/models?group="+url.QueryEscape(remote), nil, &models); err != nil {
-				return err
-			}
-			for _, model := range models {
-				if !validProbeModel(model) {
-					return errors.New("站点模型名称无效")
-				}
-			}
-			groupModels[g.ID] = models
-		}
-	}
 	var userRates map[string]float64
-	ratesKnown := call("GET", "/api/v1/groups/rates", nil, &userRates, "") == nil
-	// Optional enrichment: many sites intentionally turn this endpoint off.
-	var channels []struct {
-		Name      string `json:"name"`
-		Platforms []struct {
-			Groups []struct {
-				ID int64 `json:"id"`
-			} `json:"groups"`
-		} `json:"platforms"`
-	}
-	_ = call("GET", "/api/v1/channels/available", nil, &channels, "")
-	labels := map[int64]string{}
-	for _, c := range channels {
-		for _, p := range c.Platforms {
-			for _, g := range p.Groups {
-				labels[g.ID] = c.Name
-			}
+	// New API's panel adapter synthesizes this from the same group response
+	// we just read, so a second upstream group list adds no information.
+	ratesKnown := newAPI || call("GET", "/api/v1/groups/rates", nil, &userRates, "") == nil
+	if plan == nil || !plan.initialized {
+		if err := s.subDiscoverSync(ctx, id, base, job, groups, call, newAPI); err != nil {
+			return err
 		}
+	} else {
+		available := make(map[int64]subRemoteGroup, len(groups))
+		for _, group := range groups {
+			available[group.ID] = group
+		}
+		groups = groups[:0]
+		for _, planned := range pending {
+			group, ok := available[planned.ID]
+			if !ok {
+				if err := s.subSyncKeyFailed(ctx, id, job, planned.ID, "上游分组已不可用，请重新同步"); err != nil {
+					return err
+				}
+				continue
+			}
+			groups = append(groups, group)
+		}
+	}
+	if newAPI {
+		return s.subSyncNewAPIKeys(ctx, id, base, job, groups, userRates, ratesKnown)
 	}
 	// Only keys with our exact deterministic names are adopted. Existing user keys
 	// are never changed; pagination and idempotency make interrupted creation recoverable.
@@ -1005,34 +1068,6 @@ func (s *Service) subSynchronize(ctx context.Context, id, base, job, encrypted s
 			break
 		}
 	}
-	tx, err := s.control.db.BeginTx(ctx, nil)
-	if err != nil {
-		return errors.New("分组保存失败")
-	}
-	defer tx.Rollback()
-	var activeID string
-	if err = tx.QueryRowContext(ctx, `SELECT id FROM console_sub_accounts WHERE id=$1 AND job_id=$2 FOR UPDATE`, id, job).Scan(&activeID); err != nil {
-		return context.Canceled
-	}
-	if _, err = tx.ExecContext(ctx, `UPDATE console_sub_targets SET active=false WHERE account_id=$1`, id); err != nil {
-		return errors.New("分组保存失败")
-	}
-	for _, g := range groups {
-		if g.ID <= 0 || len(g.Name) > 512 {
-			return errors.New("站点返回了无效分组")
-		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO console_sub_targets(account_id,group_id,name,platform,channel,rate,state) VALUES($1,$2,$3,$4,$5,$6,'queued') ON CONFLICT(account_id,group_id) DO UPDATE SET name=excluded.name,platform=excluded.platform,channel=excluded.channel,rate=excluded.rate,active=true,state='queued',message=''`, id, g.ID, g.Name, g.Platform, labels[g.ID], g.Rate)
-		if err != nil {
-			return errors.New("分组保存失败")
-		}
-	}
-	if err = queueSubSyncModels(ctx, tx, id, groups, groupModels); err != nil {
-		log.Printf("sub_sync_write_failed stage=queue_models class=%s", databaseErrorClass(err))
-		return errors.New("模型保存失败")
-	}
-	if err = tx.Commit(); err != nil {
-		return errors.New("分组保存失败")
-	}
 	failures := map[string]int{}
 	for _, g := range groups {
 		if ctx.Err() != nil {
@@ -1056,45 +1091,146 @@ func (s *Service) subSynchronize(ctx context.Context, id, base, job, encrypted s
 		}
 		key, e := subPrepareTestKey(call, id, g.ID, key, found, storedID, storedKey)
 		if e != nil {
+			if plan != nil {
+				if pause := syncRatePause(e, "waiting_keys"); pause != nil {
+					return pause
+				}
+			}
 			failures[subTestKeyFailureKind(e)]++
-			_, _ = s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET state='error',message=$3 WHERE account_id=$1 AND group_id=$2 AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$4)`, id, g.ID, e.Error(), job)
+			if err := s.subSyncKeyFailed(ctx, id, job, g.ID, e.Error()); err != nil {
+				return err
+			}
 			continue
 		}
-		fallback := subBilling{Source: "unavailable"}
-		if ratesKnown && !g.Peak {
-			rate := g.Rate
-			if personal, ok := userRates[strconv.FormatInt(g.ID, 10)]; ok {
-				rate = personal
-			}
-			if rate >= 0 {
-				fallback = subBilling{Rate: &rate, Source: "panel", CheckedAt: time.Now().Unix()}
-			}
-		}
-		billing := fallback
+		billing := syncGroupBilling(g, userRates, ratesKnown)
 		if !newAPI {
-			billing = subKeyBilling(ctx, subHTTP, base, key.Key, fallback)
+			billing = subKeyBilling(ctx, subHTTP, base, key.Key, billing)
 		}
-		billingRaw, _ := json.Marshal(billing)
-		enc, e := s.control.encrypt(key.Key)
-		if e != nil {
-			return errors.New("测试 key 加密失败")
-		}
-		_, e = s.control.db.ExecContext(ctx, `UPDATE console_sub_targets t SET remote_key_id=$3,encrypted_key=$4,billing=$6,state=CASE WHEN $7 OR EXISTS(SELECT 1 FROM console_channel_detection_settings d JOIN console_sub_accounts a ON a.owner=d.owner WHERE a.id=t.account_id AND d.account_id=t.account_id AND d.group_id=t.group_id) THEN 'done' ELSE state END WHERE account_id=$1 AND group_id=$2 AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$5)`, id, g.ID, key.ID, enc, job, string(billingRaw), subSyncMetadataOnly(ctx))
-		if e != nil {
-			return errors.New("测试 key 保存失败")
+		if err := s.subSaveSyncKey(ctx, id, job, g.ID, key, billing); err != nil {
+			return err
 		}
 	}
-	message := subTestKeyFailureSummary(failures)
-	_, err = s.control.db.ExecContext(ctx, `UPDATE console_sub_accounts SET synced_at=$3,message=$4 WHERE id=$1 AND job_id=$2`, id, job, time.Now().Unix(), message)
+	return s.subFinishSyncKeys(ctx, id, job, failures)
+}
+
+func (s *Service) subDiscoverSync(ctx context.Context, id, base, job string, groups []subRemoteGroup, call subPanelCall, newAPI bool) (err error) {
+	run := ""
+	var discoveredLimits any
+	if plan := subPlan(ctx); plan != nil {
+		run = plan.job
+		if !newAPI {
+			var limits subProbeLimits
+			if call("GET", "/api/v1/auth/me", nil, &limits, "") == nil {
+				discoveredLimits = mustJSON(map[string]any{"declared_rpm": positiveProbeLimit(limits.RPM), "declared_concurrency": positiveProbeLimit(limits.Concurrency)})
+			}
+		}
+	}
+	groupModels := map[int64][]string{}
+	if newAPI {
+		for _, g := range groups {
+			var remote string
+			if err = s.control.db.QueryRowContext(ctx, `SELECT remote_key FROM console_site_groups WHERE account_id=$1 AND id=$2`, id, g.ID).Scan(&remote); err != nil {
+				return err
+			}
+			var models []string
+			if err = s.newAPICall(ctx, id, base, "GET", "/api/user/models?group="+url.QueryEscape(remote), nil, &models); err != nil {
+				return err
+			}
+			for _, model := range models {
+				if !validProbeModel(model) {
+					return errors.New("站点模型名称无效")
+				}
+			}
+			groupModels[g.ID] = models
+		}
+	}
+	// Optional enrichment: many sites intentionally turn this endpoint off.
+	var channels []struct {
+		Name      string `json:"name"`
+		Platforms []struct {
+			Groups []struct {
+				ID int64 `json:"id"`
+			} `json:"groups"`
+		} `json:"platforms"`
+	}
+	_ = call("GET", "/api/v1/channels/available", nil, &channels, "")
+	labels := map[int64]string{}
+	for _, c := range channels {
+		for _, p := range c.Platforms {
+			for _, g := range p.Groups {
+				labels[g.ID] = c.Name
+			}
+		}
+	}
+	tx, err := s.control.db.BeginTx(ctx, nil)
 	if err != nil {
-		return errors.New("同步结果保存失败")
+		return errors.New("分组保存失败")
+	}
+	defer tx.Rollback()
+	var activeID string
+	if err = tx.QueryRowContext(ctx, `SELECT id FROM console_sub_accounts WHERE id=$1 AND job_id=$2 FOR UPDATE`, id, job).Scan(&activeID); err != nil {
+		return context.Canceled
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE console_sub_targets SET active=false WHERE account_id=$1`, id); err != nil {
+		return errors.New("分组保存失败")
+	}
+	for _, g := range groups {
+		if g.ID <= 0 || len(g.Name) > 512 {
+			return errors.New("站点返回了无效分组")
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO console_sub_targets(account_id,group_id,name,platform,channel,rate,state,sync_run_id,sync_key_state,probe_rpm) VALUES($1,$2,$3,$4,$5,$6,'queued',$7,'preparing',$8) ON CONFLICT(account_id,group_id) DO UPDATE SET name=excluded.name,platform=excluded.platform,channel=excluded.channel,rate=excluded.rate,active=true,state='queued',message='',sync_run_id=excluded.sync_run_id,sync_key_state=excluded.sync_key_state,probe_rpm=excluded.probe_rpm`, id, g.ID, g.Name, g.Platform, labels[g.ID], g.Rate, run, positiveProbeLimit(g.RPM))
+		if err != nil {
+			return errors.New("分组保存失败")
+		}
+	}
+	if err = queueSubSyncModels(ctx, tx, id, groups, groupModels); err != nil {
+		log.Printf("sub_sync_write_failed stage=queue_models class=%s", databaseErrorClass(err))
+		return errors.New("模型保存失败")
+	}
+	if plan := subPlan(ctx); plan != nil {
+		if _, err = tx.ExecContext(ctx, `UPDATE console_sub_accounts SET sync_plan_ready=true,sync_phase='preparing',
+ probe_limits=CASE WHEN $3::jsonb IS NULL THEN probe_limits ELSE probe_limits||$3::jsonb END
+ WHERE id=$1 AND job_id=$2`, id, job, discoveredLimits); err != nil {
+			return err
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		return errors.New("分组保存失败")
 	}
 	return nil
 }
 
+// Retry only a rolled-back database statement, never the upstream probe.
+func (s *Service) subProbeWrite(ctx context.Context, query string, args ...any) (int64, error) {
+	for attempt := 0; ; attempt++ {
+		res, err := s.control.db.ExecContext(ctx, query, args...)
+		if err == nil {
+			return res.RowsAffected()
+		}
+		if databaseErrorClass(err) != "database_transaction" || attempt >= 4 {
+			return 0, err
+		}
+		if !waitStartup(ctx, time.Duration(attempt+1)*25*time.Millisecond) {
+			return 0, ctx.Err()
+		}
+	}
+}
+
+func (s *Service) subClaimModel(ctx context.Context, id, job, model string, group int64) (int64, error) {
+	return s.subProbeWrite(ctx, `UPDATE console_sub_models SET state='running',message=''
+ WHERE account_id=$1 AND group_id=$2 AND model=$3 AND state='queued'
+ AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$4)`, id, group, model, job)
+}
+
 func (s *Service) subTestTargets(ctx context.Context, id, base, job string, qualityOnly bool) error {
 	ctx = withProbeCurl(ctx, s.control, probeCurlScope{Account: id})
-	rows, err := s.control.db.QueryContext(ctx, `SELECT m.group_id,m.model,t.encrypted_key,t.remote_key_id FROM console_sub_models m JOIN console_sub_targets t USING(account_id,group_id) WHERE m.account_id=$1 AND t.active AND t.state<>'error' AND m.state='queued' AND t.encrypted_key<>'' AND (NOT $2 OR m.model=$3) ORDER BY m.group_id,m.model`, id, qualityOnly, checkModel)
+	run := ""
+	if p := subPlan(ctx); p != nil {
+		run = p.job
+	}
+	rows, err := s.control.db.QueryContext(ctx, `SELECT m.group_id,m.model,t.encrypted_key,t.remote_key_id FROM console_sub_models m JOIN console_sub_targets t USING(account_id,group_id) WHERE m.account_id=$1 AND t.active AND t.state<>'error' AND m.state='queued' AND t.encrypted_key<>'' AND (NOT $2 OR m.model=$3)
+ AND ($4='' OR (m.sync_run_id=$4 AND t.sync_run_id=$4 AND t.sync_key_state='ready'))
+ ORDER BY row_number() OVER (PARTITION BY m.group_id ORDER BY m.model),m.group_id`, id, qualityOnly, checkModel, run)
 	if err != nil {
 		return errors.New("测试 key 读取失败")
 	}
@@ -1119,10 +1255,28 @@ func (s *Service) subTestTargets(ctx context.Context, id, base, job string, qual
 	if err != nil {
 		return errors.New("测试 key 读取失败")
 	}
+	if len(targets) == 0 && run == "" {
+		return ctx.Err()
+	}
+	clients := map[int64]*http.Client{}
+	workers := 2
+	for _, t := range targets {
+		if clients[t.id] != nil {
+			continue
+		}
+		client, e := s.siteProbeClient(ctx, subHTTP, id, t.id, job)
+		if e != nil {
+			return e
+		}
+		clients[t.id] = client
+		workers = client.Transport.(siteProbeTransport).budget.concurrency
+	}
 	jobs := make(chan target)
-	errs := make(chan error, len(targets))
+	errs := make(chan error, len(targets)*3)
+	pauseSending := make(chan struct{})
+	var once sync.Once
 	var wg sync.WaitGroup
-	for range 2 {
+	for range min(workers, len(targets)) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -1130,13 +1284,12 @@ func (s *Service) subTestTargets(ctx context.Context, id, base, job string, qual
 				if ctx.Err() != nil {
 					return
 				}
-				res, e := s.control.db.ExecContext(ctx, `UPDATE console_sub_models SET state='running',message='' WHERE account_id=$1 AND group_id=$2 AND model=$3 AND state='queued' AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$4)`, id, t.id, t.model, job)
+				n, e := s.subClaimModel(ctx, id, job, t.model, t.id)
 				if e != nil {
 					log.Printf("sub_sync_write_failed stage=claim_model class=%s", databaseErrorClass(e))
 					errs <- errors.New("检测进度保存失败")
 					continue
 				}
-				n, _ := res.RowsAffected()
 				if n != 1 {
 					continue
 				}
@@ -1145,21 +1298,32 @@ func (s *Service) subTestTargets(ctx context.Context, id, base, job string, qual
 					errs <- errors.New("测试 key 无法解密")
 					continue
 				}
-				historyID := "sub:" + job + ":" + strconv.FormatInt(t.id, 10)
+				historyID := "sub:" + job + ":" + strconv.FormatInt(t.id, 10) + ":" + randomID()[:8]
+				const probeBudget = 8 * time.Minute
 				if t.model == checkModel {
-					if e = s.control.beginQuality(ctx, historyID, qualityScope{Account: id, Group: t.id}, 140*time.Second); e != nil {
+					if e = s.control.beginQuality(ctx, historyID, qualityScope{Account: id, Group: t.id}, probeBudget+15*time.Second); e != nil {
 						errs <- errors.New("检测历史保存失败")
 						continue
 					}
 				}
-				probeCtx, cancel := context.WithTimeout(ctx, 125*time.Second)
+				probeCtx, cancel := context.WithTimeout(ctx, probeBudget)
 				var result subResult
 				if qualityOnly {
-					result = subRunQualityProbe(probeCtx, subHTTP, base, key)
+					result = subRunQualityProbe(probeCtx, clients[t.id], base, key)
 				} else {
-					result = subRunProbes(probeCtx, subHTTP, base, key, t.model)
+					result = subRunProbes(probeCtx, clients[t.id], base, key, t.model)
 				}
 				cancel()
+				blocked := siteBlockedProbe(result)
+				if blocked != nil {
+					if blocked.pause != nil {
+						once.Do(func() { close(pauseSending) })
+					}
+					if e := s.recordSiteBlockedModel(ctx, id, job, t.id, t.keyID, t.model, historyID, result, blocked, run != ""); e != nil {
+						errs <- e
+					}
+					continue
+				}
 				if e = s.subQueueUsage(ctx, id, t.id, t.keyID, &result); e != nil {
 					for _, probe := range []*subProbe{&result.Availability, &result.Quality} {
 						if probe.ID != "" {
@@ -1186,7 +1350,7 @@ func (s *Service) subTestTargets(ctx context.Context, id, base, job string, qual
 					return
 				}
 				raw, _ := json.Marshal(result)
-				_, e = s.control.db.ExecContext(ctx, `UPDATE console_sub_models SET state='done',result=$4,message='' WHERE account_id=$1 AND group_id=$2 AND model=$3 AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$5)`, id, t.id, t.model, string(raw), job)
+				_, e = s.subProbeWrite(ctx, `UPDATE console_sub_models SET state='done',result=$4,message='' WHERE account_id=$1 AND group_id=$2 AND model=$3 AND state='running' AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$5)`, id, t.id, t.model, string(raw), job)
 				if e != nil {
 					log.Printf("sub_sync_write_failed stage=save_result class=%s", databaseErrorClass(e))
 					errs <- errors.New("检测结果保存失败")
@@ -1215,7 +1379,7 @@ func (s *Service) subTestTargets(ctx context.Context, id, base, job string, qual
 				}
 				// Preserve the legacy Astra projection for older clients during rollout.
 				if t.model == checkModel {
-					_, e = s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET result=$3 WHERE account_id=$1 AND group_id=$2 AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$4)`, id, t.id, string(raw), job)
+					_, e = s.subProbeWrite(ctx, `UPDATE console_sub_targets SET result=$3 WHERE account_id=$1 AND group_id=$2 AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$4)`, id, t.id, string(raw), job)
 					if e != nil {
 						log.Printf("sub_sync_write_failed stage=save_result class=%s", databaseErrorClass(e))
 						errs <- errors.New("检测结果保存失败")
@@ -1230,17 +1394,27 @@ send:
 		case jobs <- t:
 		case <-ctx.Done():
 			break send
+		case <-pauseSending:
+			break send
 		}
 	}
 	close(jobs)
 	wg.Wait()
 	close(errs)
+	var pause *subSyncPause
 	for e := range errs {
-		if e != nil {
+		if next := syncRatePause(e, "waiting_models"); next != nil {
+			if pause == nil || pause.until.Before(next.until) {
+				pause = next
+			}
+		} else if e != nil {
 			return e
 		}
 	}
-	_, err = s.control.db.ExecContext(ctx, `UPDATE console_sub_targets t SET state='done',message='' WHERE account_id=$1 AND state<>'error' AND active AND NOT EXISTS(SELECT 1 FROM console_sub_models m WHERE m.account_id=t.account_id AND m.group_id=t.group_id AND m.state IN ('queued','running')) AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$2)`, id, job)
+	if pause != nil {
+		return pause
+	}
+	_, err = s.control.db.ExecContext(ctx, `UPDATE console_sub_targets t SET state='done',message='' WHERE account_id=$1 AND state<>'error' AND active AND ($3='' OR (t.sync_run_id=$3 AND t.sync_key_state='ready')) AND NOT EXISTS(SELECT 1 FROM console_sub_models m WHERE m.account_id=t.account_id AND m.group_id=t.group_id AND m.state IN ('queued','running') AND ($3='' OR m.sync_run_id=$3)) AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$2)`, id, job, run)
 	if err != nil {
 		return errors.New("分组状态保存失败")
 	}

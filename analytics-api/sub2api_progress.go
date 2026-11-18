@@ -14,6 +14,9 @@ type subSyncProgress struct {
 	Queued        int                `json:"queued"`
 	Running       int                `json:"running"`
 	Interrupted   int                `json:"interrupted"`
+	KeysReady     int                `json:"keys_ready"`
+	KeysTotal     int                `json:"keys_total"`
+	KeyErrors     int                `json:"key_errors"`
 	RunningModels []string           `json:"running_models"`
 	Groups        []subGroupProgress `json:"groups"`
 }
@@ -59,15 +62,20 @@ func (s *Service) subAccountsProgress(w http.ResponseWriter, r *http.Request) {
 func readSubSyncProgress(r *http.Request, tx *sql.Tx, owner string, accounts []subAccount, watched []string) error {
 	// The durable submitted selection wins over subsequent browser checkbox
 	// changes. Only state and model identity are read, never historical results.
-	rows, err := tx.QueryContext(r.Context(), `SELECT t.account_id,t.group_id,t.state,count(m.model),
+	rows, err := tx.QueryContext(r.Context(), `SELECT t.account_id,t.group_id,t.state,
+ CASE WHEN a.sync_run_id<>'' AND t.sync_run_id=a.sync_run_id THEN t.sync_key_state ELSE '' END,count(m.model),
  count(*) FILTER(WHERE m.state IN ('done','error')),
  count(*) FILTER(WHERE m.state='queued'),count(*) FILTER(WHERE m.state='running'),
  count(*) FILTER(WHERE m.state='interrupted'),
  COALESCE(jsonb_agg(m.model ORDER BY m.model) FILTER(WHERE m.state='running'),'[]'::jsonb)
  FROM console_sub_accounts a JOIN console_sub_targets t ON t.account_id=a.id AND t.active
  LEFT JOIN console_sub_models m ON m.account_id=t.account_id AND m.group_id=t.group_id
- AND (a.job_kind NOT IN ('','sync') OR a.sync_models IS NULL OR a.sync_models ? m.model)
- WHERE a.owner=$1 AND (a.state IN ('queued','running') OR a.id=ANY($2::text[])) GROUP BY t.account_id,t.group_id,t.state ORDER BY t.account_id,t.group_id`, owner, watched)
+ AND (a.sync_run_id<>'' AND a.job_kind IN ('','sync') AND m.sync_run_id=a.sync_run_id
+ OR (a.sync_run_id='' OR a.job_kind NOT IN ('','sync')) AND (a.job_kind NOT IN ('','sync') OR a.sync_models IS NULL OR a.sync_models ? m.model))
+ WHERE a.owner=$1 AND (a.state IN ('queued','running') OR a.id=ANY($2::text[]))
+ AND NOT (a.state='queued' AND a.job_kind='sync')
+ AND (a.sync_run_id='' OR a.job_kind NOT IN ('','sync') OR t.sync_run_id=a.sync_run_id)
+ GROUP BY t.account_id,t.group_id,t.state,t.sync_key_state,a.sync_run_id,t.sync_run_id ORDER BY t.account_id,t.group_id`, owner, watched)
 	if err != nil {
 		return err
 	}
@@ -91,23 +99,32 @@ func readSubSyncProgress(r *http.Request, tx *sql.Tx, owner string, accounts []s
 	}
 	for rows.Next() {
 		var id string
-		var targetState string
+		var targetState, keyState string
 		var g subGroupProgress
 		var raw []byte
-		if err = rows.Scan(&id, &g.GroupID, &targetState, &g.Total, &g.Completed, &g.Queued, &g.Running, &g.Interrupted, &raw); err != nil {
+		if err = rows.Scan(&id, &g.GroupID, &targetState, &keyState, &g.Total, &g.Completed, &g.Queued, &g.Running, &g.Interrupted, &raw); err != nil {
 			return err
 		}
 		a := index[id]
 		if a == nil {
 			continue
 		}
-		if targetState == "done" {
+		if g.Total > 0 && g.Completed == g.Total || g.Total == 0 && targetState == "done" {
 			synced[id]++
 		}
 		if a.Progress == nil {
 			a.Progress = &subSyncProgress{RunningModels: []string{}, Groups: []subGroupProgress{}}
 		}
 		p := a.Progress
+		if keyState != "" {
+			p.KeysTotal++
+		}
+		if keyState == "ready" {
+			p.KeysReady++
+		}
+		if keyState == "error" {
+			p.KeyErrors++
+		}
 		p.Groups = append(p.Groups, g)
 		p.Total += g.Total
 		p.Completed += g.Completed
@@ -132,15 +149,7 @@ func readSubSyncProgress(r *http.Request, tx *sql.Tx, owner string, accounts []s
 		if a.Progress == nil {
 			continue
 		}
-		active, complete := len(a.Progress.Groups), 0
-		for _, g := range a.Progress.Groups {
-			if g.Total > 0 && g.Completed == g.Total {
-				complete++
-			}
-		}
-		if a.SyncOnly {
-			complete = synced[a.ID]
-		}
+		active, complete := len(a.Progress.Groups), synced[a.ID]
 		a.ActiveGroups, a.CompletedGroups = &active, &complete
 	}
 	return nil

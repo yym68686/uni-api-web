@@ -13,6 +13,9 @@ export interface GroupProgress {
   interrupted: number;
 }
 export interface SyncProgress extends Omit<GroupProgress, "group_id"> {
+  keys_ready?: number;
+  keys_total?: number;
+  key_errors?: number;
   running_models: string[];
   groups: GroupProgress[];
 }

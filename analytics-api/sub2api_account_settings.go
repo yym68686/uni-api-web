@@ -63,3 +63,33 @@ func (s *Service) subAccountSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"rate_coefficient": coefficient})
 }
+
+func (s *Service) subAccountProbeLimits(w http.ResponseWriter, r *http.Request) {
+	owner, err := s.controlUser(r)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	var input struct {
+		RPM         *int `json:"rpm_limit"`
+		Concurrency *int `json:"concurrency"`
+	}
+	if !decodeConfiguration(w, r, &input) {
+		return
+	}
+	if input.RPM != nil && (*input.RPM < 1 || *input.RPM > 480) || input.Concurrency != nil && (*input.Concurrency < 1 || *input.Concurrency > 8) {
+		http.Error(w, "检测限额必须为 1–480 RPM、1–8 并发；留空则自动设定", 400)
+		return
+	}
+	res, err := s.control.db.ExecContext(r.Context(), `UPDATE console_sub_accounts SET probe_limits=jsonb_strip_nulls(probe_limits||$3::jsonb)
+ WHERE id=$1 AND owner=$2`, r.PathValue("id"), owner, mustJSON(input))
+	if err != nil {
+		http.Error(w, "检测限额保存失败", 503)
+		return
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		http.Error(w, "站点账号不存在", 404)
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}

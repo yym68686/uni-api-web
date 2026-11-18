@@ -68,7 +68,11 @@ func TestSubSyncSingle36Of291ModelsAcross21Groups(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	if err := queueSubSyncModels(withSubSyncModels(ctx, captured), tx, job.id, groups, discovered); err != nil {
+	if _, err := tx.Exec(`UPDATE console_sub_targets SET sync_run_id=$1,sync_key_state='preparing' WHERE account_id=$2`, job.token, job.id); err != nil {
+		t.Fatal(err)
+	}
+	planCtx := context.WithValue(withSubSyncModels(ctx, captured), subSyncPlanKey{}, &subSyncPlan{job: job.token})
+	if err := queueSubSyncModels(planCtx, tx, job.id, groups, discovered); err != nil {
 		t.Fatal(err)
 	}
 	if err := tx.Commit(); err != nil {

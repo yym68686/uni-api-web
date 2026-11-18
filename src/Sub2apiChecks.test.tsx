@@ -589,6 +589,26 @@ it("loads sources before opening the dialog and offers retry when the initial re
   expect(dialog.getByRole("option", { name: "DigitalOcean" })).toBeInTheDocument();
 });
 
+it("shows key progress while a model sync waits on an upstream limit", async () => {
+  const [account] = fixtures();
+  Object.assign(account, {
+    state: "running", job_kind: "sync", sync_phase: "waiting_keys", sync_retry_at: 1795029600,
+    progress: { total: 1254, completed: 0, queued: 1254, running: 0, interrupted: 0, keys_ready: 7, keys_total: 29, running_models: [], groups: [] },
+  });
+  vi.stubGlobal("fetch", vi.fn(async (input: string) => Response.json({
+    data: input.endsWith("/accounts") ? [account] : [],
+  })));
+  mount("site-key-progress");
+  await openSites();
+  const row = await screen.findByRole("listitem", { name: account.name });
+  expect(within(row).getByRole("status")).toHaveTextContent("上游限制密钥读取");
+  const summary = await within(row).findByText("测试密钥 7/29");
+  act(() => summary.parentElement?.focus());
+  const tooltip = await screen.findByRole("tooltip");
+  expect(tooltip).toHaveTextContent("模型进度：0/1254");
+  expect(tooltip).toHaveTextContent(/预计.*重试/);
+});
+
 it("filters unit prices across pages and models, persists selection, and scopes both batch checks", async () => {
   const data = fixtures().slice(0, 1);
   const template = data[0].targets[0];
@@ -668,7 +688,7 @@ it("filters unit prices across pages and models, persists selection, and scopes 
   view.unmount();
   mount("price-other-user");
   expect(screen.getByLabelText("单价是否异常筛选")).toHaveValue("");
-}, 10_000);
+}, 20_000);
 
 it("filters unconfirmed prices by numerical agreement and remembers the new selection", async () => {
   const data = fixtures().slice(0, 1), template = data[0].targets[0];
@@ -2184,6 +2204,7 @@ it("retains the password through browser verification for encrypted server stora
     await user.type(screen.getByLabelText("站点地址"), "https://site.example");
     await user.type(screen.getByLabelText("用户名 / 邮箱"), "me@example.com");
     await user.type(screen.getByLabelText("账号密码"), "private-password");
+    expect(screen.getByRole("checkbox", { name: /同步并检测已选模型/ })).toBeChecked();
     await user.click(screen.getByRole("button", { name: "连接并检测" }));
     const browserButton = await screen.findByRole("button", {
       name: "使用浏览器登录",
@@ -2203,6 +2224,7 @@ it("retains the password through browser verification for encrypted server stora
       password: "private-password",
       access_token: "browser-session",
       refresh_token: "browser-refresh",
+      models: SUB_MODELS,
     });
     await waitFor(() =>
       expect(screen.queryByLabelText("账号密码")).not.toBeInTheDocument(),

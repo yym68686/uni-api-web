@@ -363,6 +363,7 @@ func (s *Service) controlHandler() http.Handler {
 	mux.HandleFunc("GET /v1/sub2api/accounts/progress", s.subAccountsProgress)
 	mux.HandleFunc("GET /v1/sub2api/accounts/{id}/credentials", s.subAccountCredentials)
 	mux.HandleFunc("PATCH /v1/sub2api/accounts/{id}/settings", s.subAccountSettings)
+	mux.HandleFunc("PUT /v1/sub2api/accounts/{id}/probe-limits", s.subAccountProbeLimits)
 	mux.HandleFunc("GET /v1/sub2api/accounts/{id}/recharge/settings", s.rechargeSettings)
 	mux.HandleFunc("PUT /v1/sub2api/accounts/{id}/recharge/settings", s.rechargeSettings)
 	mux.HandleFunc("POST /v1/sub2api/accounts/{id}/recharge/catalog", s.rechargeCatalog)
@@ -380,6 +381,7 @@ func (s *Service) controlHandler() http.Handler {
 	mux.HandleFunc("GET /v1/sub2api/accounts/{id}/groups/{group}/spend", s.subChannelSpend)
 	mux.HandleFunc("GET /v1/sub2api/accounts/{id}/keys/{key}/spend", s.subAccountKeySpend)
 	mux.HandleFunc("POST /v1/sub2api/accounts", s.subAddAccount)
+	mux.HandleFunc("POST /v1/sub2api/accounts/scoped", s.subAddAccount)
 	mux.HandleFunc("POST /v1/sub2api/accounts/{id}/login", s.subAddAccount)
 	mux.HandleFunc("POST /v1/sub2api/accounts/sync", s.subSyncAll)
 	// Dedicated endpoint prevents an older backend from ignoring the model list.

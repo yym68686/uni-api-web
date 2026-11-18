@@ -12,9 +12,9 @@ import (
 )
 
 // Reproduce the New API search contract: exact names, ten searches per window.
-// Two synchronizations must recover/reuse all twenty groups without hitting
+// Two synchronizations must recover/reuse all twenty-nine groups without hitting
 // that endpoint or modifying the account's unrelated business credential.
-func TestNewAPISyncTwentyGroupsWithoutSearchRateLimit(t *testing.T) {
+func TestNewAPISyncTwentyNineGroupsBatchesAndReusesKeys(t *testing.T) {
 	s, account, _ := newAPITestService(t)
 	ctx := context.Background()
 	if _, err := s.control.db.Exec(`UPDATE console_sub_accounts SET state='running',job_id='sync-keys' WHERE id=$1`, account); err != nil {
@@ -24,7 +24,7 @@ func TestNewAPISyncTwentyGroupsWithoutSearchRateLimit(t *testing.T) {
 	tokens := []newAPIToken{{ID: 1, UserID: 7, Name: "business-key", Group: "group-00", Key: "sk-****", Status: 1, Unlimited: true}}
 	// A previous interrupted sync already created seven keys, matching the
 	// production failure. They must be adopted by prefix without being recreated.
-	for i := 0; i < 20; i++ {
+	for i := 0; i < 29; i++ {
 		remote := fmt.Sprintf("group-%02d", i)
 		groups[remote] = map[string]any{"ratio": 1}
 		id, err := s.newAPIGroupID(ctx, account, remote)
@@ -36,7 +36,7 @@ func TestNewAPISyncTwentyGroupsWithoutSearchRateLimit(t *testing.T) {
 		}
 	}
 	var mu sync.Mutex
-	searches, creates, reveals := 0, 0, 0
+	searches, creates, reveals, batches, lists := 0, 0, 0, 0, 0
 	withSpendUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -61,6 +61,7 @@ func TestNewAPISyncTwentyGroupsWithoutSearchRateLimit(t *testing.T) {
 			}
 			newAPIOK(w, map[string]any{"items": found, "total": len(found)})
 		case r.URL.Path == "/api/token/" && r.Method == "GET":
+			lists++
 			newAPIOK(w, map[string]any{"items": tokens, "total": len(tokens)})
 		case r.URL.Path == "/api/token/" && r.Method == "POST":
 			var token newAPIToken
@@ -76,6 +77,25 @@ func TestNewAPISyncTwentyGroupsWithoutSearchRateLimit(t *testing.T) {
 			token.ID, token.UserID, token.Key, token.Status = int64(len(tokens)+1), 7, "sk-****", 1
 			tokens = append(tokens, token)
 			newAPIOK(w, nil)
+		case r.URL.Path == newAPIBatchKeyPath && r.Method == "POST":
+			batches++
+			var body struct {
+				IDs []int `json:"ids"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Error(err)
+			}
+			if len(body.IDs) != 29 {
+				t.Errorf("batch has %d IDs", len(body.IDs))
+			}
+			keys := map[int]string{}
+			for _, id := range body.IDs {
+				if id <= 1 || id > len(tokens) {
+					t.Error("attempted to reveal an unrelated/unknown key", id)
+				}
+				keys[id] = fmt.Sprintf("fixture-%d", id)
+			}
+			newAPIOK(w, map[string]any{"keys": keys})
 		case strings.HasPrefix(r.URL.Path, "/api/token/") && strings.HasSuffix(r.URL.Path, "/key") && r.Method == "POST":
 			id, _ := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/token/"), "/key"))
 			if id <= 1 || id > len(tokens) {
@@ -96,12 +116,12 @@ func TestNewAPISyncTwentyGroupsWithoutSearchRateLimit(t *testing.T) {
 		if err := s.control.db.QueryRow(`SELECT count(*) FILTER (WHERE remote_key_id>0 AND encrypted_key<>''),count(*) FILTER (WHERE state='error') FROM console_sub_targets WHERE account_id=$1`, account).Scan(&ready, &failed); err != nil {
 			t.Fatal(err)
 		}
-		if ready != 20 || failed != 0 {
+		if ready != 29 || failed != 0 {
 			t.Fatalf("pass %d: ready=%d failed=%d", pass, ready, failed)
 		}
 	}
-	if searches != 0 || creates != 13 || reveals != 20 {
-		t.Fatalf("searches=%d creates=%d reveals=%d", searches, creates, reveals)
+	if searches != 0 || creates != 22 || reveals != 0 || batches != 1 || lists != 3 {
+		t.Fatalf("searches=%d creates=%d reveals=%d batches=%d lists=%d", searches, creates, reveals, batches, lists)
 	}
 }
 

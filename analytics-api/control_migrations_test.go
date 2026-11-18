@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -254,7 +255,11 @@ func TestManagementDisplayGlobalProofFencesLegacyCache(t *testing.T) {
 	defer cancel()
 	migrations := controlMigrations()
 	// A rolling deployment can have a cache filled by the previous replica.
-	if err := migrateControlSchema(ctx, db, migrations[:len(migrations)-1]); err != nil {
+	proof := slices.IndexFunc(migrations, func(m controlMigration) bool { return m.Version == "0021_management_display_global_proof" })
+	if proof < 0 {
+		t.Fatal("missing display proof migration")
+	}
+	if err := migrateControlSchema(ctx, db, migrations[:proof]); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.ExecContext(ctx, `INSERT INTO console_management_display_groups(owner_key,account_id,group_id,version,local_version,observed_at,raw_bytes,body)

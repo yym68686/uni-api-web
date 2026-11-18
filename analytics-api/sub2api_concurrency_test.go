@@ -65,6 +65,8 @@ func testSubConcurrentAccounts(t *testing.T, interrupt, observeFingerprint bool)
 		}
 		ok := func(value any) { writeJSON(w, 200, map[string]any{"code": 0, "data": value}) }
 		switch r.URL.Path {
+		case "/api/v1/auth/me":
+			ok(map[string]int{"rpm_limit": 600, "concurrency": 3})
 		case "/api/v1/groups/available":
 			panelStarted <- id
 			select {
@@ -202,7 +204,9 @@ func testSubConcurrentAccounts(t *testing.T, interrupt, observeFingerprint bool)
 		}
 	}
 	seen := map[string]int{}
-	deadline := time.NewTimer(5 * time.Second)
+	// Preserve the concurrency assertion independently of slower CI or local
+	// Postgres scheduling under contention.
+	deadline := time.NewTimer(15 * time.Second)
 	defer deadline.Stop()
 	for len(seen) < count {
 		select {
@@ -219,7 +223,7 @@ func testSubConcurrentAccounts(t *testing.T, interrupt, observeFingerprint bool)
 	}
 	unblockPanel()
 	started := map[string]int{}
-	deadline.Reset(5 * time.Second)
+	deadline.Reset(15 * time.Second)
 	for total := 0; total < count*2; total++ {
 		select {
 		case id := <-probesStarted:
@@ -259,7 +263,9 @@ func testSubConcurrentAccounts(t *testing.T, interrupt, observeFingerprint bool)
 		return
 	}
 	unblockProbes()
-	finish := time.Now().Add(5 * time.Second)
+	// Each mock account is paced at 480 RPM. This budget includes the two
+	// co-scheduled lanes for paid probes and the independent fingerprints.
+	finish := time.Now().Add(20 * time.Second)
 	for {
 		var idle int
 		if err = store.db.QueryRow(`SELECT count(*) FROM console_sub_accounts WHERE owner=$1 AND state='idle'`, owner).Scan(&idle); err != nil {

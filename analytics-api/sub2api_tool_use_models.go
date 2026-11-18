@@ -139,6 +139,10 @@ func (s *Service) subTestAllModelTools(ctx context.Context, id, base, job string
 		if e = save("running"); e != nil {
 			return e
 		}
+		client, err := s.siteProbeClient(ctx, subHTTP, id, t.group, job)
+		if err != nil {
+			return err
+		}
 		for i := range models {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -148,8 +152,12 @@ func (s *Service) subTestAllModelTools(ctx context.Context, id, base, job string
 				return e
 			}
 			probeCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
-			probe := subProbeToolUse(probeCtx, subHTTP, base, key, models[i].Model)
+			probe := subProbeToolUse(probeCtx, client, base, key, models[i].Model)
 			cancel()
+			if isSiteBlockedProbe(probe) {
+				models[i].State = "interrupted"
+				return save("interrupted")
+			}
 			usage := subResult{Model: models[i].Model, Availability: probe}
 			if s.subQueueUsage(ctx, id, t.group, t.keyID, &usage) == nil {
 				probe = usage.Availability

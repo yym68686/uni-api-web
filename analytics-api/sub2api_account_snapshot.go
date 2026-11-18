@@ -15,19 +15,42 @@ func (e subAccountReadFailure) Error() string { return e.message }
 func (e subAccountReadFailure) Unwrap() error { return e.cause }
 
 func readSubAccountHeaders(ctx context.Context, db controlQueryDB, owner, accountID string) ([]subAccount, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id,name,base,email,state,message,synced_at,balance,job_kind,provider_kind,login_name,encrypted_login_password<>'',COALESCE(sync_models,'null'::jsonb),rate_coefficient FROM console_sub_accounts WHERE owner=$1 AND ($2='' OR id=$2) ORDER BY created_at,id`, owner, accountID)
+	rows, err := db.QueryContext(ctx, `SELECT id,name,base,email,state,message,synced_at,balance,job_kind,provider_kind,login_name,encrypted_login_password<>'',COALESCE(sync_models,'null'::jsonb),rate_coefficient,
+ CASE WHEN state='running' AND job_kind='sync' THEN sync_phase ELSE '' END,
+ COALESCE(extract(epoch FROM sync_retry_at)::bigint,0),probe_limits,
+ COALESCE((SELECT learned_rpm FROM console_site_detection_limits WHERE scope='model:'||id AND learned_at>now()-interval '24 hours'),0)
+ FROM console_sub_accounts WHERE owner=$1 AND ($2='' OR id=$2) ORDER BY created_at,id`, owner, accountID)
 	if err != nil {
 		return nil, subAccountReadFailure{"账号列表暂不可用", err}
 	}
 	accounts := []subAccount{}
 	for rows.Next() {
 		var a subAccount
-		var balanceRaw, syncRaw []byte
-		if err = rows.Scan(&a.ID, &a.Name, &a.Base, &a.Email, &a.State, &a.Message, &a.SyncedAt, &balanceRaw, &a.JobKind, &a.ProviderKind, &a.LoginName, &a.HasSavedPassword, &syncRaw, &a.RateCoefficient); err != nil {
+		var learnedRPM int
+		var balanceRaw, syncRaw, limitsRaw []byte
+		if err = rows.Scan(&a.ID, &a.Name, &a.Base, &a.Email, &a.State, &a.Message, &a.SyncedAt, &balanceRaw, &a.JobKind, &a.ProviderKind, &a.LoginName, &a.HasSavedPassword, &syncRaw, &a.RateCoefficient, &a.SyncPhase, &a.SyncRetryAt, &limitsRaw, &learnedRPM); err != nil {
 			break
 		}
 		if err = json.Unmarshal(syncRaw, &a.SyncModels); err != nil {
 			break
+		}
+		if err = json.Unmarshal(limitsRaw, &a.ProbeLimits); err != nil {
+			break
+		}
+		a.ProbeLimits.EffectiveRPM = probeCeiling(a.ProbeLimits.DeclaredRPM, a.ProbeLimits.RPM, 30, 480)
+		a.ProbeLimits.EffectiveConcurrency = probeCeiling(a.ProbeLimits.DeclaredConcurrency, a.ProbeLimits.Concurrency, 2, 8)
+		a.ProbeLimits.EffectiveSource = "保守起步"
+		if a.ProbeLimits.DeclaredRPM != nil || a.ProbeLimits.DeclaredConcurrency != nil {
+			a.ProbeLimits.EffectiveSource = "上游声明"
+		}
+		if a.ProbeLimits.RPM != nil || a.ProbeLimits.Concurrency != nil {
+			a.ProbeLimits.EffectiveSource = "站点设置"
+		}
+		if positiveProbeLimit(a.ProbeLimits.DeclaredRPM) == nil && positiveProbeLimit(a.ProbeLimits.RPM) == nil && learnedRPM > 0 {
+			a.ProbeLimits.EffectiveRPM = min(90, learnedRPM)
+			if a.ProbeLimits.EffectiveSource == "保守起步" {
+				a.ProbeLimits.EffectiveSource = "历史反馈"
+			}
 		}
 		a.SyncOnly = a.SyncModels != nil && len(a.SyncModels) == 0 && (a.JobKind == "sync" || a.JobKind == "")
 		if len(balanceRaw) > 0 {

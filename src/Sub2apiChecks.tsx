@@ -185,6 +185,9 @@ export interface SubAccount {
   job_kind?: string;
   sync_models?: string[];
   sync_only?: boolean;
+  sync_phase?: string;
+  sync_retry_at?: number;
+  probe_limits?: {rpm_limit?: number; concurrency?: number; declared_rpm?: number; declared_concurrency?: number; effective_rpm?: number; effective_concurrency?: number; source?: string};
   progress?: SyncProgress;
   message: string;
   synced_at: number;
@@ -192,6 +195,10 @@ export interface SubAccount {
   targets: SubTarget[];
 }
 const pending = (state: string) => state === "queued" || state === "running";
+const syncPhaseLabel: Record<string,string> = {
+  discovering:"正在读取分组和模型", preparing:"正在准备测试密钥", probing:"检测中",
+  waiting_keys:"上游限制密钥读取", waiting_models:"上游限制模型请求",
+};
 const stateLabel: Record<string, string> = {
   idle: "已同步",
   queued: "等待检测",
@@ -1275,6 +1282,8 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                 const accountMessage = a.has_saved_password === false && /登录.*失效|会话.*失效/.test(a.message)
                   ? "站点会话已失效，且尚未保存登录密码；请补填一次密码，后续将自动登录。"
                   : a.message;
+                const preparingKeys = pending(a.state) && (a.sync_phase === "preparing" || a.sync_phase === "waiting_keys");
+                const keyProgress = a.progress?.keys_total ? `测试密钥 ${a.progress.keys_ready ?? 0}/${a.progress.keys_total}` : "";
                 return (
                   <article className="sub-account" key={a.id} role="listitem" aria-label={a.name}>
                     <div className="sub-account-identity">
@@ -1289,17 +1298,21 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                         role={pending(a.state) ? "status" : undefined}
                       >
                         {pending(a.state) && <Spinner small />}
-                        {a.sync_only && pending(a.state) ? (a.state === "queued" ? "等待同步" : "同步中") : stateLabel[a.state] || a.state}
+                        {pending(a.state) && a.sync_phase && syncPhaseLabel[a.sync_phase] || (a.sync_only && pending(a.state) ? (a.state === "queued" ? "等待同步" : "同步中") : stateLabel[a.state] || a.state)}
                         {total > 0 && ` · ${completed}/${total} 个分组`}
                       </span>
                       {accountMessage || a.progress || a.synced_at > 0 || pending(a.state) ? <Tip text={<div className="table-diagnostic-tip">
                         {a.sync_only && pending(a.state) && <div>仅同步信息，不执行检测</div>}
+                        {pending(a.state) && keyProgress && <div>{keyProgress} 就绪{a.progress?.key_errors ? ` · ${a.progress.key_errors} 个不可用` : ""}</div>}
+                        {pending(a.state) && !!a.sync_retry_at && <div>预计 {dateTime(a.sync_retry_at)} 重试</div>}
+                        {pending(a.state) && a.probe_limits?.effective_rpm && <div>模型请求上限：{a.probe_limits.effective_rpm} RPM · {a.probe_limits.effective_concurrency} 并发（{a.probe_limits.source}）</div>}
                         {!a.sync_only && a.sync_models?.length && pending(a.state) && a.job_kind === "sync" ? <div>本次同步选择 {a.sync_models.length} 个模型 / 分组</div> : null}
                         {a.progress && !a.sync_only && <div>模型进度：{a.progress.completed}/{a.progress.total} 完成 · {a.progress.running} 检测中 · {a.progress.queued} 排队{a.progress.interrupted ? ` · ${a.progress.interrupted} 已中断` : ""}</div>}
                         {!a.sync_only && a.progress?.running_models.length ? <div>正在检测：{[...new Set(a.progress.running_models)].join("、")}</div> : null}
                         {a.synced_at > 0 && <div>上次同步 {dateTime(a.synced_at)}</div>}
                         {accountMessage && <div>{accountMessage}</div>}
                       </div>}><small className="sub-account-message">{accountMessage && !pending(a.state) ? "查看状态"
+                        : preparingKeys && keyProgress ? keyProgress
                         : a.progress && !a.sync_only ? `模型 ${a.progress.completed}/${a.progress.total}`
                         : a.synced_at > 0 ? dateTime(a.synced_at) : "查看进度"}</small></Tip> : null}
                     </div>

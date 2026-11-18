@@ -14,6 +14,7 @@ func queueSubSyncModels(ctx context.Context, tx *sql.Tx, account string, groups 
 		Group int64  `json:"group_id"`
 		Model string `json:"model"`
 		State string `json:"state"`
+		Run   string `json:"run"`
 	}
 	entries := []entry{}
 	var owner string
@@ -33,16 +34,19 @@ func queueSubSyncModels(ctx context.Context, tx *sql.Tx, account string, groups 
 				continue
 			}
 			seen[model] = true
-			state := "idle"
+			state, run := "idle", ""
 			if enabled && subSyncIncludesModel(ctx, model) {
 				state = "queued"
+				if plan := subPlan(ctx); plan != nil {
+					run = plan.job
+				}
 			}
-			entries = append(entries, entry{group.ID, model, state})
+			entries = append(entries, entry{group.ID, model, state, run})
 		}
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO console_sub_models(account_id,group_id,model,state)
- SELECT $1,x.group_id,x.model,x.state FROM jsonb_to_recordset($2::jsonb) AS x(group_id bigint,model text,state text)
+	_, err = tx.ExecContext(ctx, `INSERT INTO console_sub_models(account_id,group_id,model,state,sync_run_id)
+ SELECT $1,x.group_id,x.model,x.state,x.run FROM jsonb_to_recordset($2::jsonb) AS x(group_id bigint,model text,state text,run text)
  ORDER BY x.group_id,x.model
- ON CONFLICT(account_id,group_id,model) DO UPDATE SET state='queued',message='' WHERE EXCLUDED.state='queued'`, account, mustJSON(entries))
+ ON CONFLICT(account_id,group_id,model) DO UPDATE SET state='queued',message='',sync_run_id=EXCLUDED.sync_run_id WHERE EXCLUDED.state='queued'`, account, mustJSON(entries))
 	return err
 }

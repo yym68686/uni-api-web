@@ -376,7 +376,7 @@ func (s *Service) newAPIAddAccount(w http.ResponseWriter, r *http.Request, base,
 			raw, _ := json.Marshal(auth)
 			flow = "cookie:" + base64.RawURLEncoding.EncodeToString(raw)
 		}
-		raw, _ := json.Marshal(subChallenge{Owner: owner, Base: base, Email: username, Name: name, Password: password, Temp: "newapi:" + flow, AccountID: r.PathValue("id"), AccountBase: subLoginBase(r), Until: time.Now().Add(5 * time.Minute).Unix()})
+		raw, _ := json.Marshal(subChallenge{Owner: owner, Base: base, Email: username, Name: name, Password: password, Temp: "newapi:" + flow, AccountID: r.PathValue("id"), AccountBase: subLoginBase(r), SyncModels: subInitialModels(r), Until: time.Now().Add(5 * time.Minute).Unix()})
 		encrypted, e := s.control.encrypt(string(raw))
 		if e != nil {
 			http.Error(w, "验证会话创建失败", 503)
@@ -444,7 +444,7 @@ func (s *Service) newAPISaveVerifiedAccount(w http.ResponseWriter, r *http.Reque
 		}
 	}
 	var id string
-	err = s.control.db.QueryRowContext(ctx, `INSERT INTO console_sub_accounts(id,owner,name,base,email,login_name,provider_kind,encrypted_auth,encrypted_login_password,state,job_kind) VALUES($1,$2,$3,$4,$5,$5,'newapi',$6,$7,'queued','sync') ON CONFLICT(owner,base,email) DO UPDATE SET name=excluded.name,login_name=excluded.login_name,provider_kind=excluded.provider_kind,encrypted_auth=excluded.encrypted_auth,encrypted_login_password=CASE WHEN excluded.encrypted_login_password<>'' THEN excluded.encrypted_login_password ELSE console_sub_accounts.encrypted_login_password END,state='queued',job_kind='sync',sync_models=NULL,job_id='',message='',lease_until=NULL WHERE console_sub_accounts.state NOT IN ('queued','running') RETURNING id`, "sub_"+randomID()[:16], owner, name, base, user.Username, encrypted, encryptedPassword).Scan(&id)
+	err = s.control.db.QueryRowContext(ctx, `INSERT INTO console_sub_accounts(id,owner,name,base,email,login_name,provider_kind,encrypted_auth,encrypted_login_password,state,job_kind,sync_models) VALUES($1,$2,$3,$4,$5,$5,'newapi',$6,$7,'queued','sync',$8) ON CONFLICT(owner,base,email) DO UPDATE SET name=excluded.name,login_name=excluded.login_name,provider_kind=excluded.provider_kind,encrypted_auth=excluded.encrypted_auth,encrypted_login_password=CASE WHEN excluded.encrypted_login_password<>'' THEN excluded.encrypted_login_password ELSE console_sub_accounts.encrypted_login_password END,state='queued',job_kind='sync',sync_models=excluded.sync_models,job_id='',message='',lease_until=NULL WHERE console_sub_accounts.state NOT IN ('queued','running') RETURNING id`, "sub_"+randomID()[:16], owner, name, base, user.Username, encrypted, encryptedPassword, mustJSON(subInitialModels(r))).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		http.Error(w, "该账号已有任务进行中，请等待完成", 409)
 		return
@@ -491,7 +491,7 @@ func (s *Service) newAPICall(ctx context.Context, account, base, method, path st
 		return err
 	}
 	// Only rejected reads (including explicit key reveal) are safe to repeat.
-	if method != "GET" && !strings.HasSuffix(path, "/key") {
+	if method != "GET" && !(method == "POST" && newAPIKeyReadPath(path)) {
 		return err
 	}
 	lockCtx, cancel := context.WithTimeout(ctx, 15*time.Second)

@@ -60,6 +60,9 @@ func subProbeToolUse(ctx context.Context, client *http.Client, base, key, model 
 	out.CurlToken = captureProbeCurl(ctx, client, req)
 	resp, err := client.Do(req)
 	if err != nil {
+		if applySiteProbeRejection(&out, err) {
+			return
+		}
 		out.Message = "连接失败或 Tool use 检测超时"
 		return
 	}

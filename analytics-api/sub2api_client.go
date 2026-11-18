@@ -170,7 +170,7 @@ func subJSON(ctx context.Context, client *http.Client, base, method, path, token
 				envelope.Reason = "SITE_SESSION_EXPIRED"
 			}
 		}
-		return &subRemoteError{Status: resp.StatusCode, Reason: envelope.Reason}
+		return &subRemoteError{Status: resp.StatusCode, Reason: envelope.Reason, RetryAfter: newAPIRetryAfter(resp.Header.Get("Retry-After"), time.Now())}
 	}
 	var code int
 	if parseErr != nil || (len(envelope.Code) > 0 && json.Unmarshal(envelope.Code, &code) != nil) || code != 0 || len(envelope.Data) == 0 {
@@ -199,6 +199,7 @@ type subAuth struct {
 }
 
 type subRemoteGroup struct {
+	RPM      *int    `json:"rpm_limit"`
 	ID       int64   `json:"id"`
 	Status   string  `json:"status,omitempty"`
 	Name     string  `json:"name"`
@@ -219,6 +220,7 @@ type subRemoteKey struct {
 }
 
 type subProbe struct {
+	pause          *subSyncPause
 	CurlToken      string    `json:"curl_token,omitempty"`
 	ID             string    `json:"id,omitempty"`
 	StartedAt      int64     `json:"started_at,omitempty"`
@@ -284,6 +286,9 @@ func subProbeStream(ctx context.Context, client *http.Client, base, key, prompt 
 	out.CurlToken = captureProbeCurl(ctx, client, req)
 	resp, err := client.Do(req)
 	if err != nil {
+		if applySiteProbeRejection(&out, err) {
+			return
+		}
 		out.Message = "连接失败或检测超时"
 		return
 	}

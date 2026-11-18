@@ -64,7 +64,7 @@ it.each([true, false])(
     try {
       const saved = vi.fn();
       const user = userEvent.setup();
-      render(<AccountForm initial={null} close={() => {}} saved={saved} />);
+      render(<AccountForm initial={null} close={() => {}} saved={saved} detectionModels={["gpt-6-astra"]} />);
       await user.type(screen.getByLabelText("站点地址"), "https://site.test");
       await user.type(screen.getByLabelText("用户名 / 邮箱"), "me@example.com");
       await user.type(screen.getByLabelText("账号密码"), "private-password");
@@ -84,6 +84,7 @@ it.each([true, false])(
           access_token: "",
           browser_user_id: 42,
           browser_cookies: { session: "signed-session" },
+          models: ["gpt-6-astra"],
         });
       } else {
         expect(await screen.findByRole("alert")).toHaveTextContent("1.3.0");

@@ -69,6 +69,9 @@ func subProbeCompaction(ctx context.Context, client *http.Client, base, key, mod
 	out.CurlToken = captureProbeCurl(ctx, client, req)
 	resp, err := client.Do(req)
 	if err != nil {
+		if applySiteProbeRejection(&out, err) {
+			return
+		}
 		out.Message = "连接失败或压缩检测超时"
 		return
 	}
@@ -325,10 +328,18 @@ func (s *Service) subTestCapability(ctx context.Context, id, base, job, kind str
 			result.Status = "error"
 			result.Message = "没有已检测可用的 gpt 或 codex 模型，请先运行模型检测"
 		}
+		client, err := s.siteProbeClient(ctx, subHTTP, id, t.group, job)
+		if err != nil {
+			return err
+		}
 		for _, model := range models {
 			probeCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
-			probe := probeFn(probeCtx, subHTTP, base, key, model)
+			probe := probeFn(probeCtx, client, base, key, model)
 			cancel()
+			if isSiteBlockedProbe(probe) {
+				_, e := s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET `+column+`_state='interrupted' WHERE account_id=$1 AND group_id=$2 AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$3)`, id, t.group, job)
+				return e
+			}
 			usageResult := subResult{Model: model, Availability: probe}
 			if s.subQueueUsage(ctx, id, t.group, t.keyID, &usageResult) == nil {
 				probe = usageResult.Availability

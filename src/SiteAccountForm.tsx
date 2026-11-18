@@ -22,7 +22,9 @@ export function AccountForm({
 }) {
   const endpoint = initial
     ? `/v1/sub2api/accounts/${encodeURIComponent(initial.id)}/login`
-    : "/v1/sub2api/accounts";
+    : "/v1/sub2api/accounts/scoped";
+  const [detectOnAdd, setDetectOnAdd] = useState(!!detectionModels?.length);
+  const initialScope = useRef<string[]>([]);
   const [name, setName] = useState(initial?.name || "");
   const [base, setBase] = useState(initial?.base || "");
   const addressChanged = !!initial && base.trim() !== initial.base;
@@ -153,6 +155,7 @@ export function AccountForm({
           ...addressUpdate,
           ...(password ? { password } : {}),
           ...auth,
+          ...(!initial ? {models: initialScope.current} : {}),
         }),
         signal: abort.signal,
       });
@@ -176,6 +179,10 @@ export function AccountForm({
     setBusy(true);
     setError("");
     try {
+      if (!initial && !challenge) {
+        if (detectOnAdd && !detectionModels?.length) throw new Error("请在检测模型设置中选择模型");
+        initialScope.current = detectOnAdd ? [...(detectionModels ?? [])] : [];
+      }
       if (loginSaved) {
         await finishLogin();
         return;
@@ -198,6 +205,7 @@ export function AccountForm({
                 email,
                 ...addressUpdate,
                 ...(password ? { password } : {}),
+                ...(!initial ? {models: initialScope.current} : {}),
               },
         ),
       });
@@ -261,7 +269,7 @@ export function AccountForm({
           <Dialog.Description>
             {sessionOnly
               ? "更新此站点的登录会话。已选模型、重命名和路由位置会保留，登录后可继续添加。"
-              : "自动识别站点类型，连接后同步可用分组并检测，专用测试 key 不设置额度上限，检测费用由站点账号承担。"}
+              : "自动识别站点类型并同步可用分组。选择检测时仅检测已勾选的模型，费用由站点账号承担。"}
           </Dialog.Description>
           <button
             type="button"
@@ -273,6 +281,13 @@ export function AccountForm({
             <X size={18} />
           </button>
           <form className="source-form sub-account-form" onSubmit={submit}>
+            {!initial && !challenge && !browserNeeded && (
+              <label className="settings-note">
+                <input type="checkbox" checked={detectOnAdd} disabled={busy || !detectionModels?.length}
+                  onChange={event => setDetectOnAdd(event.target.checked)} />
+                同步并检测已选模型（{detectionModels?.length ?? 0} 个 / 分组）；不勾选则仅同步
+              </label>
+            )}
             <fieldset
               className="sub-login-fields"
               disabled={busy || browserBusy || credentialsLoading || loginSaved}
@@ -430,12 +445,12 @@ export function AccountForm({
                   : challenge
                     ? sessionOnly
                       ? "验证并返回"
-                      : "验证并检测"
+                      : !initial && !initialScope.current.length ? "验证并同步" : "验证并检测"
                     : browserNeeded
                       ? "使用浏览器登录"
                       : sessionOnly
                         ? "登录并返回"
-                        : "连接并检测"}
+                        : !initial && !detectOnAdd ? "连接并同步" : "连接并检测"}
               </button>
             </div>
           </form>

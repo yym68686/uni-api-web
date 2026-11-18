@@ -13,7 +13,7 @@ func subSyncMetadataOnly(ctx context.Context) bool {
 }
 
 // The durable sync task captures the checkbox selection at submission time.
-// An absent scope is retained only for initial syncs/already queued legacy jobs.
+// The worker normalizes a missing legacy scope to metadata-only at claim.
 func withSubSyncModels(ctx context.Context, models []string) context.Context {
 	return context.WithValue(ctx, subSyncScopeKey{}, models)
 }
@@ -59,6 +59,7 @@ func (s *Service) subQueueSyncCapabilities(ctx context.Context, id, job, kind st
  AND EXISTS(SELECT 1 FROM console_sub_accounts a WHERE a.id=t.account_id AND a.job_id=$2 AND a.state='running'
  AND (a.sync_models IS NULL OR EXISTS(SELECT 1 FROM console_sub_models m
  WHERE m.account_id=t.account_id AND m.group_id=t.group_id AND a.sync_models ? m.model
+ AND (a.sync_run_id='' OR m.sync_run_id=a.sync_run_id)
  AND m.state='done' AND m.result->'availability'->>'status'='success'
  AND (m.model LIKE 'gpt%' OR m.model LIKE 'codex%'))))`, id, job)
 	return err

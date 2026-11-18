@@ -151,6 +151,12 @@ func (s *Service) newAPINormalizeKey(ctx context.Context, account, base string, 
 			return subRemoteKey{}, errors.New("站点未返回有效完整 key")
 		}
 	}
+	return newAPIKeyMetadata(key, group, secret, auth.QuotaPerUnit), nil
+}
+
+// Materialize metadata only after the token's account and group have been
+// verified. Batch sync already holds both of those lookups for its entire plan.
+func newAPIKeyMetadata(key newAPIToken, group int64, secret string, quotaPerUnit float64) subRemoteKey {
 	state := map[int]string{1: "active", 2: "disabled", 3: "expired", 4: "quota_exhausted"}[key.Status]
 	out := subRemoteKey{ID: key.ID, Name: key.Name, GroupID: group, Key: secret, Status: state}
 	if key.Created > 0 {
@@ -162,13 +168,13 @@ func (s *Service) newAPINormalizeKey(ctx context.Context, account, base string, 
 		out.ExpiresAt = &at
 	}
 	// Unlimited remains nil: never reuse the sub2api legacy-$1 upgrade logic.
-	if !key.Unlimited && auth.QuotaPerUnit > 0 {
-		quota := (key.Remain + key.Used) / auth.QuotaPerUnit
-		used := key.Used / auth.QuotaPerUnit
+	if !key.Unlimited && quotaPerUnit > 0 {
+		quota := (key.Remain + key.Used) / quotaPerUnit
+		used := key.Used / quotaPerUnit
 		out.Quota = &quota
 		out.QuotaUsed = &used
 	}
-	return out, nil
+	return out
 }
 func (s *Service) newAPIKeys(ctx context.Context, account, base, search string, page int) ([]subRemoteKey, int, error) {
 	if page < 1 {
@@ -180,36 +186,14 @@ func (s *Service) newAPIKeys(ctx context.Context, account, base, search string, 
 	// exhausting that limit during create/reconcile and correctly finds prefixes.
 	// Complete the upstream scan before paginating matches: a page containing
 	// only unrelated user keys must not imply that our dedicated key is absent.
-	matches := []newAPIToken{}
-	matched := map[int64]bool{}
-	progress := keyPageProgress{}
-	for upstreamPage := 1; ; upstreamPage++ {
-		q := url.Values{"p": {strconv.Itoa(upstreamPage)}, "page_size": {"100"}}
-		var list struct {
-			Items []newAPIToken `json:"items"`
-			Total int           `json:"total"`
-		}
-		if err := s.newAPICall(ctx, account, base, "GET", "/api/token/?"+q.Encode(), nil, &list); err != nil {
-			return nil, 0, err
-		}
-		if list.Items == nil || list.Total < 0 {
-			return nil, 0, errors.New("站点令牌分页数据无效")
-		}
-		identities := make([]subRemoteKey, len(list.Items))
-		for i, token := range list.Items {
-			identities[i].ID = token.ID
-		}
-		if err := progress.advance(identities); err != nil {
-			return nil, 0, err
-		}
-		for _, token := range list.Items {
-			if strings.HasPrefix(token.Name, search) && !matched[token.ID] {
-				matched[token.ID] = true
-				matches = append(matches, token)
-			}
-		}
-		if len(list.Items) == 0 || (list.Total > 0 && len(progress) >= list.Total) || (list.Total == 0 && len(list.Items) < 100) {
-			break
+	tokens, err := s.newAPIListTokens(ctx, account, base)
+	if err != nil {
+		return nil, 0, err
+	}
+	var matches []newAPIToken
+	for _, token := range tokens {
+		if strings.HasPrefix(token.Name, search) {
+			matches = append(matches, token)
 		}
 	}
 	total := len(matches)
@@ -244,6 +228,42 @@ func (s *Service) newAPIKeys(ctx context.Context, account, base, search string, 
 	}
 	return out, total, nil
 }
+func (s *Service) newAPIListTokens(ctx context.Context, account, base string) ([]newAPIToken, error) {
+	tokens := []newAPIToken{}
+	matched := map[int64]bool{}
+	progress := keyPageProgress{}
+	for upstreamPage := 1; ; upstreamPage++ {
+		q := url.Values{"p": {strconv.Itoa(upstreamPage)}, "page_size": {"100"}}
+		var list struct {
+			Items []newAPIToken `json:"items"`
+			Total int           `json:"total"`
+		}
+		if err := s.newAPICall(ctx, account, base, "GET", "/api/token/?"+q.Encode(), nil, &list); err != nil {
+			return nil, err
+		}
+		if list.Items == nil || list.Total < 0 {
+			return nil, errors.New("站点令牌分页数据无效")
+		}
+		identities := make([]subRemoteKey, len(list.Items))
+		for i, token := range list.Items {
+			identities[i].ID = token.ID
+		}
+		if err := progress.advance(identities); err != nil {
+			return nil, err
+		}
+		for _, token := range list.Items {
+			if !matched[token.ID] {
+				matched[token.ID] = true
+				tokens = append(tokens, token)
+			}
+		}
+		if len(list.Items) == 0 || (list.Total > 0 && len(progress) >= list.Total) || (list.Total == 0 && len(list.Items) < 100) {
+			break
+		}
+	}
+	return tokens, nil
+}
+
 func (s *Service) newAPIEnsureKey(ctx context.Context, account, base, name string, group int64) (subRemoteKey, error) {
 	if len(name) > 50 || !(name == subKeyName(account, group) || name == "uni-console-route-"+account+"-"+strconv.FormatInt(group, 10)) {
 		return subRemoteKey{}, errors.New("专用 key 名称无效")

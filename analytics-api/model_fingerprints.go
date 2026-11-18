@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -212,6 +213,11 @@ func (s *Service) prepareFingerprint(ctx context.Context, t fingerprintTarget) (
 		plan.sampleKey = tokenHash(base + "\n" + key)
 		plan.site = fingerprintSite(base)
 		config["base_url"], config["key"] = base, key
+		bounded, err := s.siteProbeClient(ctx, &client, t.Account, t.Group, "")
+		if err != nil {
+			return plan, err
+		}
+		client = *bounded
 	} else {
 		src, err := s.control.source(ctx, t.Source)
 		if err != nil {
@@ -379,6 +385,21 @@ func runFingerprintViaTransportProgress(ctx context.Context, client *http.Client
 		}
 		response, err := client.Do(req)
 		if err != nil {
+			var probe subProbe
+			if applySiteProbeRejection(&probe, err) {
+				status := http.StatusTooManyRequests
+				if probe.Status == "quota_rejected" {
+					status = http.StatusPaymentRequired
+				}
+				if probe.Status == "auth_rejected" {
+					status = http.StatusUnauthorized
+				}
+				if probe.pause != nil {
+					w.Header().Set("Retry-After", strconv.Itoa(max(1, int(time.Until(probe.pause.until).Seconds()))))
+				}
+				http.Error(w, probe.Message, status)
+				return
+			}
 			http.Error(w, "upstream unavailable", 502)
 			return
 		}
