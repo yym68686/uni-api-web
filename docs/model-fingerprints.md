@@ -2,7 +2,7 @@
 
 Channel management adds a **模型指纹** column and filter. The live API advertises
 supported request models in `GET /v1/model-fingerprints` (`supported_models`).
-The bundled catalog includes these references:
+The bundled and dynamically verified catalogs include these references:
 
 | Requested model | Upstream reference class |
 | --- | --- |
@@ -11,6 +11,7 @@ The bundled catalog includes these references:
 | `gemini-3.8-flash` | `gemini-3.8-flash` |
 | `gemini-4-argon` | `gemini-4-argon` |
 | `gemini-4-carbon` | `gemini-4-carbon` |
+| `gemini-4-hydrogen` | `gemini-4-hydrogen` |
 | `deepseek-v4.1-flash-1017` | `deepseek-v4.1-flash-1017` |
 
 Scoring uses the full lm-detector bank for the active generation; unsupported
@@ -60,8 +61,8 @@ GPT fallback remains available when an older response omits `supported_models`.
 
 Each fingerprint round collects three separately generated challenges through the
 channel's own credentials, with the reference's reasoning setting: low for
-Astra/Sol, Argon, Carbon and DeepSeek 1017, provider default for Gemini 3.1 Pro and
-3.8 Flash. Requests are sequential, not retried on failure, and require complete
+Astra/Sol, Argon, Carbon, Hydrogen and DeepSeek 1017; provider default for Gemini
+3.1 Pro and 3.8 Flash. Requests are sequential, not retried on failure, and require complete
 output. Group and configured-channel probes select the active catalog's wire
 contract, independently of ordinary availability checks:
 
@@ -70,6 +71,7 @@ contract, independently of ordinary availability checks:
 | Astra / Sol | `/v1/responses` | `reasoning.effort: low` |
 | Gemini 3.1 Pro / 3.8 Flash | `/v1beta/models/{model}:streamGenerateContent?alt=sse` | no thinking override |
 | Gemini 4 Argon / Carbon | same native Gemini endpoint | `generationConfig.thinkingConfig.thinkingLevel: low` |
+| Gemini 4 Hydrogen | `/v1/chat/completions` | `reasoning_effort: low` |
 | DeepSeek 1017 | `/v1/chat/completions` | `reasoning_effort: low` |
 
 Configured channels always use the named provider through the gateway. For
