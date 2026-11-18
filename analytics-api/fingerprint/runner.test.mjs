@@ -73,7 +73,7 @@ test('exact Gemini Responses effort rejection stops without weakening the refere
   for (const model of ['gemini-4-argon','gemini-4-carbon']) for (const wrapped of [false,true]) {
     let calls=0;
     const checkpoints=[];
-    const collected=await collect({model,base_url:'https://mock.example',key:'secret'},async(url,_cfg,body)=>{
+    const collected=await collect({model,format:'responses',base_url:'https://mock.example',key:'secret'},async(url,_cfg,body)=>{
       calls++;
       assert.equal(url,'https://mock.example/v1/responses');
       assert.equal(body.model,model);assert.deepEqual(body.reasoning,{effort:'low'});
@@ -92,7 +92,7 @@ test('exact Gemini Responses effort rejection stops without weakening the refere
 });
 
 test('only the exact applicable HTTP rejection stops a round and arbitrary error text never escapes',async()=>{
-  const base={model:'gemini-4-argon',base_url:'https://mock.example',key:'secret'};
+  const base={model:'gemini-4-argon',format:'responses',base_url:'https://mock.example',key:'secret'};
   for (const [config,payload,status] of [
     [base,{error:{...incompatibleResponsesError,message:'private token secret'}},400],
     [base,{error:{...incompatibleResponsesError,type:'another_type'}},400],
@@ -121,7 +121,7 @@ test('only the exact applicable HTTP rejection stops a round and arbitrary error
 });
 
 test('effort rejection checkpoints retained partial evidence before stopping',async()=>{
-  const config={model:'gemini-4-argon',base_url:'https://mock.example',key:'secret'};
+  const config={model:'gemini-4-argon',format:'responses',base_url:'https://mock.example',key:'secret'};
   let calls=0;
   const checkpoints=[];
   const collected=await collect(config,async()=>++calls===1
@@ -347,7 +347,7 @@ test('catalog Gemini fingerprints require an upstream reference and use its exac
 
 test('Gemini native challenges use sequential requests, low Argon thinking, and visible text only', async () => {
   let active = 0, peak = 0, calls = 0;
-  const result = await detect({model:'gemini-4-argon',format:'gemini',base_url:'https://mock.example',key:'secret'},async(url,cfg,body)=>{
+  const result = await detect({model:'gemini-4-argon',base_url:'https://mock.example',key:'secret'},async(url,cfg,body)=>{
     assert.equal(url,'https://mock.example/v1beta/models/gemini-4-argon:streamGenerateContent?alt=sse');
     assert.deepEqual(body.generationConfig,{maxOutputTokens:8192,thinkingConfig:{thinkingLevel:'low'}});
     assert.equal(body.model,undefined); assert.ok(body.contents[0].parts[0].text.includes('355'));

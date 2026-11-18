@@ -211,6 +211,16 @@ func TestConfiguredChecksThroughRealGatewayWithoutClientRoutes(t *testing.T) {
 		t.Skip("local uni-api binary required")
 	}
 	var otherCalls atomic.Int32
+	var fingerprintCalls atomic.Int32
+	const argon = "gemini-4-argon"
+	samples, err := os.ReadFile("fingerprint/reference-fixture.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture map[string][]struct{ Text string }
+	if err := json.Unmarshal(samples, &fixture); err != nil {
+		t.Fatal(err)
+	}
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/other/") {
 			otherCalls.Add(1)
@@ -223,6 +233,18 @@ func TestConfiguredChecksThroughRealGatewayWithoutClientRoutes(t *testing.T) {
 		}
 		var body map[string]any
 		json.NewDecoder(r.Body).Decode(&body)
+		if strings.HasPrefix(r.Header.Get("X-Request-ID"), "fingerprint-") {
+			if r.URL.RequestURI() != "/native/v1beta/models/"+argon+":streamGenerateContent?alt=sse" ||
+				r.Header.Get("X-Goog-Api-Key") != "fixture-key" || body["model"] != nil ||
+				mustJSON(body["generationConfig"]) != `{"maxOutputTokens":8192,"thinkingConfig":{"thinkingLevel":"low"}}` {
+				t.Error("fingerprint sent on wrong channel, protocol or sampling parameters", r.URL.Path)
+				http.Error(w, "fixture", 400)
+				return
+			}
+			n := fingerprintCalls.Add(1)
+			subNativeSSE(w, argon, fixture[argon][(n-1)%3].Text)
+			return
+		}
 		raw := mustJSON(body)
 		if strings.Contains(raw, "compaction_trigger") {
 			w.Header().Set("Content-Type", "text/event-stream")
@@ -341,6 +363,16 @@ func TestConfiguredChecksThroughRealGatewayWithoutClientRoutes(t *testing.T) {
 	}
 	if otherCalls.Load() != 0 {
 		t.Fatal("fell back to another channel")
+	}
+	// Reproduce the drawer regression end to end: the temporary provider's
+	// serving base ends in /responses and this model is not in its catalog.
+	plan, err := s.prepareFingerprint(ctx, fingerprintTarget{Source: src.ID, Provider: "sub2api-drawer", Model: argon})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := runFingerprintViaTransport(ctx, &plan.client, plan.config)
+	if err != nil || fingerprintCalls.Load() != 3 || otherCalls.Load() != 0 || !strings.Contains(string(raw), `"status":"match"`) {
+		t.Fatalf("real gateway Argon fingerprint calls=%d err=%v: %s", fingerprintCalls.Load(), err, raw)
 	}
 	after, _, err := subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
 	if err != nil || mustJSON(before) != mustJSON(after) {

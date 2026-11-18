@@ -61,23 +61,31 @@ Each fingerprint round collects three separately generated challenges through th
 channel's own credentials, with the reference's reasoning setting: low for
 Astra/Sol, Argon, Carbon and DeepSeek 1017, provider default for Gemini 3.1 Pro and
 3.8 Flash. Requests are sequential, not retried on failure, and require complete
-output. Group probes use their
-recorded Responses/Messages/Chat/Gemini protocol (Gemini native when no saved
-protocol exists for a Gemini model); configured channels go through the gateway's
-Responses endpoint and its explicit provider-targeting capability. Protocol
-failure is a failed check, never a mismatched identity.
+output. Group and configured-channel probes select the wire contract from
+`fingerprint/protocols.json`, independently of ordinary availability checks:
 
-Some upstream Responses compatibility layers explicitly reject `reasoning` for
-Gemini even though ordinary requests succeed. For the exact observed HTTP 400
+| Model | Probe endpoint | Sampling field |
+| --- | --- | --- |
+| Astra / Sol | `/v1/responses` | `reasoning.effort: low` |
+| Gemini 3.1 Pro / 3.8 Flash | `/v1beta/models/{model}:streamGenerateContent?alt=sse` | no thinking override |
+| Gemini 4 Argon / Carbon | same native Gemini endpoint | `generationConfig.thinkingConfig.thinkingLevel: low` |
+| DeepSeek 1017 | `/v1/chat/completions` | `reasoning_effort: low` |
+
+Configured channels always use the named provider through the gateway. For
+Gemini and Chat the gateway must advertise that specific targeted fingerprint
+protocol before sampling. Older gateways stop at preflight, without sending
+a paid request. A relay's normal Responses serving URL is not changed.
+Protocol failure is a failed check, never a mismatched identity.
+
+Older runs could reach a Responses compatibility layer that explicitly rejected
+`reasoning` for Gemini even though ordinary requests succeeded. For the observed HTTP 400
 `invalid_request_error` / `invalid_request` rejection, low-effort Gemini sampling
 stops after that attempt and checkpoints a static `reference_effort_unsupported`
 diagnostic. No arbitrary error body is exposed. The UI shows “采样参数不支持”.
 Both the direct error and the gateway's single JSON-in-`error.message` envelope
 are recognized; substring matching and recursive unwrapping are not used.
 The collector never removes the reference effort, switches protocol, or retries
-to manufacture a score. Other HTTP errors keep their existing behavior. A native
-Gemini endpoint in site documentation does not establish that a configured
-Responses route can use it; changing that route is a separate configuration action.
+to manufacture a score. Other HTTP errors keep their existing behavior.
 
 Every attempt is checkpointed before the next request. The UI reads the latest
 ranking while collection is still running, and retains it when queued, cancelled

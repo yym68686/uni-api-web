@@ -176,8 +176,23 @@ func TestModelFingerprintQueueScopesLeasesCancelAndExpiry(t *testing.T) {
 	}
 }
 func TestModelFingerprintEndToEndTargetedThreeCallsAndIndependentQuality(t *testing.T) {
-	for _, requested := range []string{"gpt-6.1-sol", "gemini-3.1-pro", "gemini-3.8-flash", "gemini-4-argon", "gemini-4-carbon", "deepseek-v4.1-flash-1017"} {
+	contracts := map[string]string{
+		"gpt-6-astra": "responses", "gpt-6.1-sol": "responses",
+		"gemini-3.1-pro": "gemini", "gemini-3.8-flash": "gemini",
+		"gemini-4-argon": "gemini", "gemini-4-carbon": "gemini", "deepseek-v4.1-flash-1017": "chat",
+	}
+	if len(contracts) != len(fingerprintModels) || len(fingerprintProtocols) != len(contracts) {
+		t.Fatal("every supported model needs a tested wire contract")
+	}
+	for requested, protocol := range contracts {
 		t.Run(requested, func(t *testing.T) {
+			probePath, marker := "/v1/responses", ""
+			switch protocol {
+			case "gemini":
+				probePath, marker = "/v1beta/models/"+requested+":streamGenerateContent", "gemini"
+			case "chat":
+				probePath, marker = "/v1/chat/completions", "chat"
+			}
 			raw, err := os.ReadFile("fingerprint/reference-fixture.json")
 			if err != nil {
 				t.Fatal(err)
@@ -190,33 +205,57 @@ func TestModelFingerprintEndToEndTargetedThreeCallsAndIndependentQuality(t *test
 			var targeted atomic.Bool
 			targeted.Store(true)
 			gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Header.Get("Authorization") != "Bearer gateway-secret" {
+				if protocol == "gemini" && r.Method == "POST" {
+					if r.Header.Get("x-goog-api-key") != "gateway-secret" || r.Header.Get("Authorization") != "" || r.URL.RawQuery != "alt=sse" {
+						t.Error("wrong native Gemini auth/query")
+					}
+				} else if r.Header.Get("Authorization") != "Bearer gateway-secret" {
 					t.Error("wrong credential")
 				}
 				switch r.URL.Path {
 				case "/v1/observability/runtime":
-					writeJSON(w, 200, map[string]any{"capabilities": map[string]bool{"targeted_responses": targeted.Load(), "targeted_unconfigured_models": true}})
+					caps := map[string]any{"targeted_responses": targeted.Load() || protocol != "responses", "targeted_unconfigured_models": true}
+					if targeted.Load() {
+						caps["targeted_fingerprint_protocols"] = []string{"gemini", "chat"}
+					}
+					writeJSON(w, 200, map[string]any{"capabilities": caps})
 				case "/v1/channel-settings/providers":
 					writeJSON(w, 200, map[string]any{"providers": []configuredProvider{{Provider: "native", Base: "https://upstream.example/v1/responses", API: "upstream-secret"}}})
-				case "/v1/responses":
-					if r.Header.Get("X-Uni-API-Provider") != "native" {
+				case probePath:
+					if r.Header.Get("X-Uni-API-Provider") != "native" || r.Header.Get("X-Uni-API-Fingerprint-Protocol") != marker || r.Header.Get("X-Uni-API-Probe-Unconfigured-Model") != "true" {
 						t.Error("non-targeted call")
 					}
 					var body map[string]any
 					json.NewDecoder(r.Body).Decode(&body)
-					if body["model"] != requested || body["stream"] != true {
+					if protocol != "gemini" && (body["model"] != requested || body["stream"] != true) {
 						t.Error("incorrect parameters", body["model"])
-					}
-					if fingerprintModels[requested].Effort == "low" {
-						if mustJSON(body["reasoning"]) != `{"effort":"low"}` {
-							t.Error("wrong reference effort")
-						}
-					} else if body["reasoning"] != nil {
-						t.Error("reference uses provider default effort")
 					}
 					n := calls.Add(1)
 					text := samples[fingerprintModels[requested].ClassID][(n-1)%3].Text
 					w.Header().Set("Content-Type", "text/event-stream")
+					switch protocol {
+					case "gemini":
+						cfg, _ := body["generationConfig"].(map[string]any)
+						want := "null"
+						if requested == "gemini-4-argon" || requested == "gemini-4-carbon" {
+							want = `{"thinkingLevel":"low"}`
+						}
+						if body["contents"] == nil || body["model"] != nil || body["reasoning"] != nil || body["reasoning_effort"] != nil || mustJSON(cfg["thinkingConfig"]) != want {
+							t.Error("wrong native Gemini sampling contract")
+						}
+						subNativeSSE(w, requested, text)
+						return
+					case "chat":
+						if body["messages"] == nil || body["reasoning_effort"] != "low" || body["reasoning"] != nil {
+							t.Error("wrong Chat sampling contract")
+						}
+						fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", mustJSON(map[string]any{"choices": []any{map[string]any{"index": 0, "delta": map[string]string{"content": text}, "finish_reason": "stop"}}}))
+						return
+					default:
+						if body["input"] == nil || mustJSON(body["reasoning"]) != `{"effort":"low"}` || body["reasoning_effort"] != nil {
+							t.Error("wrong Responses sampling contract")
+						}
+					}
 					fmt.Fprintf(w, "data: %s\n\n", mustJSON(map[string]any{"type": "response.completed", "response": map[string]any{"status": "completed", "output": []any{map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": text}}}}}}))
 				default:
 					t.Error("unexpected endpoint", r.URL.Path)

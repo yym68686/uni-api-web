@@ -36,7 +36,7 @@ func TestFingerprintResponsesEffortRejectionThroughTargetedBridge(t *testing.T) 
 	}))
 	defer up.Close()
 	client := &http.Client{Transport: configuredProbeTransport{base: up.Client().Transport, provider: "exact-provider", allowUnconfigured: true}}
-	config := map[string]any{"model": "gemini-4-argon", "base_url": up.URL, "key": "gateway-fixture"}
+	config := map[string]any{"model": "gemini-4-argon", "format": "responses", "base_url": up.URL, "key": "gateway-fixture"}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	checkpoints := 0

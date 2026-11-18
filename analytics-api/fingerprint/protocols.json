@@ -1,0 +1,9 @@
+{
+  "gpt-6-astra": "responses",
+  "gpt-6.1-sol": "responses",
+  "gemini-3.1-pro": "gemini",
+  "gemini-3.8-flash": "gemini",
+  "gemini-4-argon": "gemini",
+  "gemini-4-carbon": "gemini",
+  "deepseek-v4.1-flash-1017": "chat"
+}

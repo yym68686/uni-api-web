@@ -165,14 +165,18 @@ func (s *Service) queueConfiguredChecks(w http.ResponseWriter, r *http.Request) 
 // The wrapper is private to one job, not a mutation of the shared HTTP client.
 // Older gateways must pass the capability check before any billable request.
 type configuredProbeTransport struct {
-	base              http.RoundTripper
-	provider          string
-	allowUnconfigured bool
+	base                http.RoundTripper
+	provider            string
+	allowUnconfigured   bool
+	fingerprintProtocol string
 }
 
 func (t configuredProbeTransport) prepare(r *http.Request) *http.Request {
 	r = r.Clone(r.Context())
 	r.Header.Set("X-Uni-API-Provider", t.provider)
+	if t.fingerprintProtocol != "" {
+		r.Header.Set("X-Uni-API-Fingerprint-Protocol", t.fingerprintProtocol)
+	}
 	if t.allowUnconfigured {
 		r.Header.Set("X-Uni-API-Probe-Unconfigured-Model", "true")
 	}

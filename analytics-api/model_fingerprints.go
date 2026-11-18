@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -38,6 +39,20 @@ type fingerprintRecord struct {
 //
 //go:embed fingerprint/models.json
 var fingerprintModelsJSON []byte
+
+// Wire contracts are independent of the scorer bank. Resume proofs already
+// fence the actual format, so unaffected models keep their partial samples.
+//
+//go:embed fingerprint/protocols.json
+var fingerprintProtocolsJSON []byte
+
+var fingerprintProtocols = func() map[string]string {
+	var protocols map[string]string
+	if err := json.Unmarshal(fingerprintProtocolsJSON, &protocols); err != nil {
+		panic(err)
+	}
+	return protocols
+}()
 
 type fingerprintReference struct {
 	ClassID string `json:"class_id"`
@@ -159,13 +174,18 @@ func (s *Service) prepareFingerprint(ctx context.Context, t fingerprintTarget) (
 	if !t.valid() {
 		return plan, errors.New("不支持的指纹检测模型")
 	}
-	config := map[string]any{"model": t.Model}
+	protocol := fingerprintProtocols[t.Model]
+	format := map[string]string{"responses": "responses", "gemini": "gemini", "chat": "openai"}[protocol]
+	if format == "" {
+		return plan, errors.New("模型未配置指纹采样协议")
+	}
+	config := map[string]any{"model": t.Model, "format": format}
 	revision := ""
 	client := *subHTTP
 	client.Timeout = 250 * time.Second
 	if t.Account != "" {
-		var base, encrypted, protocol string
-		err := s.control.db.QueryRowContext(ctx, `SELECT a.base,t.encrypted_key,COALESCE(NULLIF(m.result->'availability'->>'protocol',''),$4) FROM console_sub_targets t JOIN console_sub_accounts a ON a.id=t.account_id LEFT JOIN console_sub_models m ON m.account_id=t.account_id AND m.group_id=t.group_id AND m.model=$3 WHERE t.account_id=$1 AND t.group_id=$2 AND t.active AND t.encrypted_key<>''`, t.Account, t.Group, t.Model, subModelProtocol(t.Model)).Scan(&base, &encrypted, &protocol)
+		var base, encrypted string
+		err := s.control.db.QueryRowContext(ctx, `SELECT a.base,t.encrypted_key FROM console_sub_targets t JOIN console_sub_accounts a ON a.id=t.account_id WHERE t.account_id=$1 AND t.group_id=$2 AND t.active AND t.encrypted_key<>''`, t.Account, t.Group).Scan(&base, &encrypted)
 		if err != nil {
 			return plan, errors.New("站点渠道已不可用")
 		}
@@ -179,15 +199,6 @@ func (s *Service) prepareFingerprint(ctx context.Context, t fingerprintTarget) (
 		plan.sampleKey = tokenHash(base + "\n" + key)
 		plan.site = fingerprintSite(base)
 		config["base_url"], config["key"] = base, key
-		if protocol == "messages" {
-			config["format"] = "anthropic"
-		} else if protocol == "gemini" {
-			config["format"] = "gemini"
-		} else if protocol == "chat" {
-			config["format"] = "openai"
-		} else if protocol != "responses" {
-			return plan, errors.New("渠道检测协议不受支持")
-		}
 	} else {
 		src, err := s.control.source(ctx, t.Source)
 		if err != nil {
@@ -197,11 +208,19 @@ func (s *Service) prepareFingerprint(ctx context.Context, t fingerprintTarget) (
 		defer done()
 		runtime, _, err := subGateway(preflight, src, "GET", "/v1/observability/runtime", nil)
 		var caps struct {
-			Targeted     bool `json:"targeted_responses"`
-			Unconfigured bool `json:"targeted_unconfigured_models"`
+			Targeted     bool     `json:"targeted_responses"`
+			Unconfigured bool     `json:"targeted_unconfigured_models"`
+			Fingerprints []string `json:"targeted_fingerprint_protocols"`
 		}
 		if err != nil || decodeMap(runtime["capabilities"], &caps) != nil || !caps.Targeted {
 			return plan, errors.New("来源不支持渠道定向检测")
+		}
+		targetProtocol := ""
+		if protocol != "responses" {
+			if !slices.Contains(caps.Fingerprints, protocol) {
+				return plan, errors.New("来源网关不支持此模型的定向指纹协议（" + protocol + "），请更新网关")
+			}
+			targetProtocol = protocol
 		}
 		providers, err := effectiveProviders(preflight, src, true)
 		if err != nil {
@@ -219,7 +238,7 @@ func (s *Service) prepareFingerprint(ctx context.Context, t fingerprintTarget) (
 		}
 		plan.sampleKey = revision
 		config["base_url"], config["key"], config["provider"], config["allow_unconfigured"] = src.Base, src.Key, t.Provider, caps.Unconfigured
-		client = http.Client{Timeout: 250 * time.Second, Transport: configuredProbeTransport{base: http.DefaultTransport, provider: t.Provider, allowUnconfigured: caps.Unconfigured}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+		client = http.Client{Timeout: 250 * time.Second, Transport: configuredProbeTransport{base: http.DefaultTransport, provider: t.Provider, allowUnconfigured: caps.Unconfigured, fingerprintProtocol: targetProtocol}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	}
 	if plan.site == "" {
 		return plan, errors.New("无法确认渠道上游站点")
@@ -251,26 +270,28 @@ func runFingerprintViaTransport(ctx context.Context, client *http.Client, config
 }
 
 func runFingerprintViaTransportProgress(ctx context.Context, client *http.Client, config map[string]any, resume json.RawMessage, checkpoint func(json.RawMessage, json.RawMessage) error) (json.RawMessage, error) {
+	model, _ := config["model"].(string)
+	base, _ := config["base_url"].(string)
+	key, _ := config["key"].(string)
+	var path, query string
+	switch config["format"] {
+	case "responses":
+		path = "/v1/responses"
+	case "anthropic":
+		path = "/v1/messages"
+	case "gemini":
+		path = "/v1beta/models/" + url.PathEscape(model) + ":streamGenerateContent"
+		query = "alt=sse"
+	case "openai":
+		path = "/v1/chat/completions"
+	default:
+		return nil, errors.New("缺少有效的指纹采样协议")
+	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, errors.New("指纹检测传输初始化失败")
 	}
 	token := randomID()
-	model, _ := config["model"].(string)
-	base, _ := config["base_url"].(string)
-	key, _ := config["key"].(string)
-	path := "/v1/responses"
-	if config["format"] == "anthropic" {
-		path = "/v1/messages"
-	} else if config["format"] == "gemini" {
-		path = "/v1beta/models/" + url.PathEscape(model) + ":streamGenerateContent"
-	} else if config["format"] == "openai" {
-		path = "/v1/chat/completions"
-	}
-	query := ""
-	if config["format"] == "gemini" {
-		query = "alt=sse"
-	}
 	var requests atomic.Int32
 	var checkpoints atomic.Int32
 	requestLimit := int32(3)

@@ -66,8 +66,9 @@ func TestGeminiFingerprintSiteProtocolAndNativeBridge(t *testing.T) {
 			if err != nil || plan.config["format"] != "gemini" {
 				t.Fatal("native fallback", plan.config["format"], err)
 			}
-			// A saved availability protocol takes precedence over the model default.
-			for protocol, format := range map[string]string{"gemini": "gemini", "chat": "openai", "messages": "anthropic", "responses": ""} {
+			// Ordinary availability on a compatibility endpoint says nothing
+			// about whether it supports this fingerprint's sampling parameters.
+			for _, protocol := range []string{"gemini", "chat", "messages", "responses"} {
 				_, err = s.control.db.Exec(`INSERT INTO console_sub_models(account_id,group_id,model,state,result) VALUES($1,1,$2,'done',$3) ON CONFLICT(account_id,group_id,model) DO UPDATE SET result=excluded.result`, a.ID, model, mustJSON(map[string]any{"availability": map[string]string{"protocol": protocol}}))
 				if err != nil {
 					t.Fatal(err)
@@ -77,7 +78,7 @@ func TestGeminiFingerprintSiteProtocolAndNativeBridge(t *testing.T) {
 					t.Fatal(err)
 				}
 				got, _ := p.config["format"].(string)
-				if got != format {
+				if got != "gemini" {
 					t.Fatal(protocol, got)
 				}
 			}

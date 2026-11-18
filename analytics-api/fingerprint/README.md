@@ -15,8 +15,12 @@ challenges and strict complete-output validation are required. Low effort is use
 for Astra/Sol, Argon, Carbon and DeepSeek 1017; Gemini 3.1 Pro and 3.8 Flash use
 the provider default, matching their reference collection metadata.
 `gemini.mjs` adapts native Gemini streaming only; Responses, Messages and Chat
-Completions use the upstream parsers. Configured gateway channels remain explicitly
-targeted through Responses. No tokenizer probes, automatic retries or route edits.
+Completions use the upstream parsers. Go selects the wire contract for each model
+from `protocols.json`: Responses for Astra/Sol, native Gemini for all four Gemini
+models, Chat Completions for DeepSeek 1017. Site availability results do not
+override it. Configured probes stay pinned to one gateway provider; native Gemini
+and Chat require the matching targeted fingerprint capability. No tokenizer
+probes, automatic retries or route edits.
 
 Each explicit run now fills only the missing slots in a three-valid-sample
 round. Every completed attempt is checkpointed before another upstream request;

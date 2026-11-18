@@ -18,6 +18,7 @@ const modelBytes = readFileSync(new URL('./models.json', import.meta.url));
 const manifestBytes = readFileSync(new URL('./manifest.json', import.meta.url));
 const referenceKey = createHash('sha256').update(modelBytes).update(manifestBytes).digest('hex');
 const modelClasses = JSON.parse(modelBytes);
+const protocols = JSON.parse(readFileSync(new URL('./protocols.json', import.meta.url)));
 export const models = Object.keys(modelClasses);
 const manifest = JSON.parse(manifestBytes);
 export function loadReference() {
@@ -66,8 +67,8 @@ function bounded(response) {
 }
 // Persist numeric evidence only, never upstream text. Reconstructing a space
 // separated numeric run is exactly equivalent for the unchanged scorer.
-function resumable(config) {
-  const r = config.resume, format = config.format || 'responses';
+function resumable(config, format) {
+  const r = config.resume;
   if (!r || r.version !== 1 || r.model !== config.model || r.format !== format || r.reference_key !== referenceKey || !Array.isArray(r.entries) || r.entries.length >= 3) return [];
   const ids = new Set(), lengths = new Set();
   for (const entry of r.entries) {
@@ -80,7 +81,12 @@ function resumable(config) {
 }
 export async function collect(config, transport, signal, checkpoint) {
   if (!models.includes(config.model)) throw Error('unsupported_model');
-  const retained = resumable(config), usedLengths = retained.map(e=>e.expected_count);
+  const protocol = protocols[config.model];
+  const format = config.format || (protocol === 'chat' ? 'openai' : protocol);
+  if (!['responses', 'anthropic', 'openai', 'gemini'].includes(format)) throw Error('unsupported_protocol');
+  // Non-Responses targeting requires Go's authenticated gateway capability check.
+  if (config.provider && format !== 'responses') throw Error('targeted_bridge_required');
+  const retained = resumable(config, format), usedLengths = retained.map(e=>e.expected_count);
   // Generate a complete independent set, then take only the missing slots;
   // distinct lengths are maintained across every continuation of this round.
   const challenges = generateChallenges(3, usedLengths).slice(0, 3-retained.length);
@@ -90,17 +96,15 @@ export async function collect(config, transport, signal, checkpoint) {
   // using HTTPS, then restore the trusted configuration's transport protocol.
   const base = new URL(config.base_url);
   if (!['http:', 'https:'].includes(base.protocol)) throw Error('invalid_base_url');
-  const protocol = base.protocol; base.protocol = 'https:';
+  const scheme = base.protocol; base.protocol = 'https:';
   for (const challenge of challenges) {
     signal?.throwIfAborted();
     const requestId = 'fingerprint-' + randomUUID(), at = Date.now();
     let stopRound = false;
     try {
-      const format = config.format || 'responses';
-      if (!['responses', 'anthropic', 'openai', 'gemini'].includes(format)) throw Error('unsupported_protocol');
       const cfg = {baseUrl: base.href, apiKey: config.key, model: config.model, format, effort: modelClasses[config.model].effort, stream: true};
       const send = transport || (async (url, cfg, body, requestSignal) => {
-        const destination = new URL(url); destination.protocol = protocol;
+        const destination = new URL(url); destination.protocol = scheme;
         const response = await fetch(destination, { method: 'POST', redirect: 'error', signal: signal ? AbortSignal.any([signal, requestSignal]) : requestSignal,
           headers: { ...(cfg.format === 'gemini' ? {'x-goog-api-key':cfg.apiKey} : cfg.format === 'anthropic' ? {'x-api-key':cfg.apiKey,'anthropic-version':'2023-06-01'} : {Authorization: `Bearer ${cfg.apiKey}`}), 'Content-Type': 'application/json', Accept: 'text/event-stream',
             'X-Request-ID': requestId, ...(config.provider ? { 'X-Uni-API-Provider': config.provider,
@@ -132,10 +136,10 @@ export async function collect(config, transport, signal, checkpoint) {
     }
     // Checkpoint failure stops collection before another paid call. It must not
     // be mistaken for an upstream failure or cause a valid sample to be retried.
-    if (checkpoint) await checkpoint({ model:config.model,outputs,samples,retained,format:config.format || 'responses',checked_at:Math.floor(Date.now()/1000),duration_ms:Date.now()-started });
+    if (checkpoint) await checkpoint({ model:config.model,outputs,samples,retained,format,checked_at:Math.floor(Date.now()/1000),duration_ms:Date.now()-started });
     if (stopRound) break;
   }
-  return { model: config.model, outputs, samples, retained, format:config.format || 'responses',checked_at: Math.floor(Date.now() / 1000), duration_ms: Date.now() - started };
+  return { model: config.model, outputs, samples, retained, format,checked_at: Math.floor(Date.now() / 1000), duration_ms: Date.now() - started };
 }
 export function scoreCollected(collected, reference = loadReference(), privateCheckpoint = false) {
   const started = Date.now();
