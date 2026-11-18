@@ -456,7 +456,9 @@ func (s *Service) currentManagementProofRetaining(ctx context.Context, owner str
 	if err != nil {
 		return managementFreshProof{}, time.Time{}, false, err
 	}
-	if !valid(after, afterAt) || !proof.Until.Equal(after.Until) || proof.HeadersRevision != after.HeadersRevision || mustJSON(proof.Accounts) != mustJSON(after.Accounts) {
+	// A lease extended before it expired has the same display state. If the
+	// previous fence was crossed, still perform a new complete read.
+	if !valid(after, afterAt) || !managementDeadlineUnchanged(proof.Until, after.Until, afterAt) || proof.HeadersRevision != after.HeadersRevision || mustJSON(proof.Accounts) != mustJSON(after.Accounts) {
 		log.Printf("management_current_miss reason=concurrent_change request_id=%s", consoleRequestID(ctx))
 		return managementFreshProof{}, time.Time{}, false, nil
 	}
@@ -476,6 +478,10 @@ func (s *Service) currentManagementProofRetaining(ctx context.Context, owner str
 	proof.CurrentExport = expected.CurrentExport
 	proof.Stamp = managementProofStamp(proof, expected.CurrentExport)
 	return proof, now, true, nil
+}
+
+func managementDeadlineUnchanged(before, after, at time.Time) bool {
+	return before.Equal(after) || !before.IsZero() && after.After(before) && at.Before(before)
 }
 
 func managementProofStamp(proof managementFreshProof, currentExport bool) string {

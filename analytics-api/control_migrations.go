@@ -115,6 +115,21 @@ var siteDetectionModelsSQL string
 //go:embed migrations/0025_site_detection_handoff.sql
 var siteDetectionHandoffSQL string
 
+//go:embed migrations/0026_management_overview_models.sql
+var managementOverviewModelsSQL string
+
+//go:embed migrations/0027_management_overview_signals.sql
+var managementOverviewSignalsSQL string
+
+//go:embed migrations/0028_management_fingerprint_heartbeat.sql
+var managementFingerprintHeartbeatSQL string
+
+//go:embed migrations/0029_management_overview_targets.sql
+var managementOverviewTargetsSQL string
+
+//go:embed migrations/0030_management_overview_queue.sql
+var managementOverviewQueueSQL string
+
 var managementRevisionTables = []string{"console_sub_models", "console_management_model_signal", "console_sub_usage", "console_management_receipt_signal", "console_management_revision_state"}
 
 type controlMigration struct {
@@ -151,6 +166,11 @@ func controlMigrations() []controlMigration {
 		{"0023_site_detection_targets", siteDetectionTargetsSQL, []string{"console_sub_targets"}},
 		{"0024_site_detection_models", siteDetectionModelsSQL, []string{"console_sub_models"}},
 		{"0025_site_detection_handoff", siteDetectionHandoffSQL, []string{"console_sub_accounts"}},
+		{"0026_management_overview_models", managementOverviewModelsSQL, []string{"console_management_overview_dirty", "console_management_overview_reset", "console_sub_models"}},
+		{"0027_management_overview_signals", managementOverviewSignalsSQL, []string{"console_management_model_signal"}},
+		{"0028_management_fingerprint_heartbeat", managementFingerprintHeartbeatSQL, []string{"console_model_fingerprints", "console_management_view_epoch"}},
+		{"0029_management_overview_targets", managementOverviewTargetsSQL, []string{"console_sub_targets"}},
+		{"0030_management_overview_queue", managementOverviewQueueSQL, []string{"console_sub_check_queue"}},
 	}
 }
 
@@ -159,6 +179,12 @@ func (m controlMigration) checksum() string {
 }
 
 func (m controlMigration) lockMode(table string) string {
+	if strings.Contains(m.Version, "_management_overview_") {
+		return "SHARE ROW EXCLUSIVE"
+	}
+	if m.Version == "0028_management_fingerprint_heartbeat" && table == "console_management_view_epoch" {
+		return "ROW EXCLUSIVE"
+	}
 	if m.Version == "0021_management_display_global_proof" {
 		// Installing the compatibility trigger needs SHARE ROW EXCLUSIVE on
 		// the disposable cache. The reset row needs only the normal INSERT lock;

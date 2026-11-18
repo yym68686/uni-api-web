@@ -27,6 +27,7 @@ export interface ManagementPage {
   owner?: string;
   revision: string;
   read_at_ms: number;
+  metadata_version?: string;
   rows: ManagementRow[];
   total: number;
   eligible_count: number;
@@ -134,6 +135,24 @@ const uniqueRows = (rows: ManagementRow[]) =>
       Array.isArray(row.checks),
   ) && new Set(rows.map((row) => row.id)).size === rows.length;
 
+const metadataVersion = /^[a-f0-9]{64}$/;
+type ManagementMetadata = Pick<ManagementPage, "rates" | "platforms" | "models" | "detection_models"> &
+  Pick<ManagementPage["context"], "prices" | "fingerprint_models">;
+let managementMetadata: { owner: string; version: string; fields: ManagementMetadata } | undefined;
+
+function rememberManagementMetadata(owner: string, page: ManagementPage) {
+  if (page.owner !== owner || !page.metadata_version || !metadataVersion.test(page.metadata_version)) return;
+  const { rates, platforms, models, detection_models, context: { prices, fingerprint_models } } = page;
+  managementMetadata = { owner, version: page.metadata_version, fields: { rates, platforms, models, detection_models, prices, fingerprint_models } };
+}
+
+function fillManagementMetadata(page: ManagementPage, known?: typeof managementMetadata): ManagementPage {
+  if (!known || page.owner !== known.owner || page.metadata_version !== known.version || !page.context) return page;
+  const { rates, platforms, models, detection_models, prices, fingerprint_models } = known.fields;
+  if ([page.rates, page.platforms, page.models, page.detection_models, page.context.prices, page.context.fingerprint_models].some(v => v !== null)) return page;
+  return { ...page, rates, platforms, models, detection_models, context: { ...page.context, prices, fingerprint_models } };
+}
+
 export async function readManagementPage(
   filters: SubFilters,
   cursor: string,
@@ -161,7 +180,10 @@ export async function readManagementPage(
           signal.throwIfAborted();
           // Older backends do not attest the owner, so negotiate a normal
           // authenticated read rather than accept an unbound early response.
-          if (page.owner === owner) return page;
+          if (page.owner === owner) {
+            rememberManagementMetadata(owner, page);
+            return page;
+          }
         } finally {
           signal.removeEventListener("abort", abort);
         }
@@ -169,6 +191,9 @@ export async function readManagementPage(
       bootstrap.controller.abort();
     }
   }
+  // Capture the exact version sent with this request. A concurrent refresh
+  // may install a new one before the response arrives.
+  const known = owner && managementMetadata?.owner === owner ? managementMetadata : undefined;
   const started = performance.now();
   const read = (refreshCursor: boolean, selectedReceipts = !!filters.model) => controlRequest<unknown>(path(filters, { cursor, refreshCursor, selectedReceipts }), {
     signal,
@@ -177,6 +202,7 @@ export async function readManagementPage(
       Accept: managementPageMediaType,
       ...(includePrices ? {} : { "X-Console-Management-View": overview ? "overview-v1" : "list-v1" }),
       "X-Console-Current-Validation": "1",
+      "X-Console-Management-Metadata": known?.version ?? "1",
       "X-Console-Read-Trigger": managementReadTrigger(trigger),
     },
   });
@@ -190,19 +216,20 @@ export async function readManagementPage(
     response = await read(false, false);
   }
   signal.throwIfAborted();
-  const page = validateManagementPage(response);
+  const page = validateManagementPage(response, known);
   if (page.rows.some(row => row.target.receipt_model && row.target.receipt_model !== filters.model))
     throw Error("渠道回执模型范围不一致，请重新读取");
   if (page.rows.some(row => row.target.summary_model && (row.target.summary_model !== filters.model || row.target.receipt_model !== filters.model || row.configured)))
     throw Error("渠道摘要模型范围不一致，请重新读取");
   if (owner && page.owner && page.owner !== owner)
     throw Error("登录账号已变化，请重新读取");
+  if (owner) rememberManagementMetadata(owner, page);
   managementReadTimings.set(page, { started, decoded: performance.now(), trigger: managementReadTrigger(trigger), transport: managementReadTrace(response) });
   return page;
 }
 
-function validateManagementPage(response: unknown): ManagementPage {
-  const page = decodeManagementPage(response);
+function validateManagementPage(response: unknown, known?: typeof managementMetadata): ManagementPage {
+  const page = fillManagementMetadata(decodeManagementPage(response), known);
   if (
     page.format !== "management-page-v1" ||
     !page.revision ||

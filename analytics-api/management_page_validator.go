@@ -80,7 +80,7 @@ func (s *Service) rememberManagementValidator(w http.ResponseWriter, r *http.Req
 	if proof == nil || proof.Stamp == "" || page.Owner == "" || r.Context().Err() != nil || r.Header.Get("Accept") != managementPageV3MediaType || r.Header.Get("X-Console-Current-Validation") != "1" || w.Header().Get("X-Console-Validated-Request-ID") == "" || w.Header().Get("ETag") == "" {
 		return
 	}
-	entry := managementPageValidator{key: strings.Clone(key), owner: strings.Clone(page.Owner), tag: strings.Clone(w.Header().Get("ETag")), encoding: strings.Clone(r.Header.Get("Accept-Encoding")), revision: strings.Clone(page.Revision), headers: managementValidatorHeaders(*proof), proof: managementRetainedProof(*proof)}
+	entry := managementPageValidator{key: strings.Clone(managementMetadataValidatorKey(r, key)), owner: strings.Clone(page.Owner), tag: strings.Clone(w.Header().Get("ETag")), encoding: strings.Clone(r.Header.Get("Accept-Encoding")), revision: strings.Clone(page.Revision), headers: managementValidatorHeaders(*proof), proof: managementRetainedProof(*proof)}
 	// The byte cap includes retained source facts, including credentials. They
 	// remain private server memory, just as in the existing full-page proof.
 	raw, err := json.Marshal(entry.proof)
@@ -127,7 +127,7 @@ func managementValidatorHeaders(proof managementFreshProof) string {
 
 func (s *Service) writeAndRememberManagementValidator(w http.ResponseWriter, r *http.Request, page managementPageResponse, key string) error {
 	if page.currentProof != nil && managementValidatorRequest(r) {
-		entry, exists := s.pageValidators.get(key, r.Header.Get("Accept-Encoding"), r.Header.Get("If-None-Match"))
+		entry, exists := s.pageValidators.get(managementMetadataValidatorKey(r, key), r.Header.Get("Accept-Encoding"), r.Header.Get("If-None-Match"))
 		if exists && page.Owner == entry.owner && page.Revision == entry.revision && managementValidatorHeaders(*page.currentProof) == entry.headers && managementValidatorProofEqual(*page.currentProof, entry.proof) {
 			if err := r.Context().Err(); err != nil {
 				return err
@@ -147,7 +147,7 @@ func (s *Service) currentManagementNotModified(ctx context.Context, w http.Respo
 	if !managementValidatorRequest(r) {
 		return false, nil
 	}
-	entry, exists := s.pageValidators.get(key, r.Header.Get("Accept-Encoding"), r.Header.Get("If-None-Match"))
+	entry, exists := s.pageValidators.get(managementMetadataValidatorKey(r, key), r.Header.Get("Accept-Encoding"), r.Header.Get("If-None-Match"))
 	if !exists || owner != entry.owner || !rebase && revision != "" && revision != entry.revision {
 		return false, nil
 	}
@@ -174,6 +174,7 @@ func writeManagementValidatedNotModified(w http.ResponseWriter, r *http.Request,
 	w.Header().Add("Vary", "Accept")
 	w.Header().Add("Vary", "Accept-Encoding")
 	w.Header().Add("Vary", "X-Console-Current-Validation")
+	w.Header().Add("Vary", managementMetadataHeader)
 	w.Header().Add("Vary", "Cookie")
 	w.Header().Set("Cache-Control", "private, no-cache, must-revalidate")
 	w.Header().Set("Content-Type", managementPageV3MediaType)

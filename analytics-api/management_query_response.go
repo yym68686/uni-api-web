@@ -93,6 +93,7 @@ func writeManagementJSONMedia(w http.ResponseWriter, r *http.Request, value any,
 func writeEncodedManagementJSONMedia(w http.ResponseWriter, r *http.Request, body []byte, mediaType string) error {
 	w.Header().Add("Vary", "Accept-Encoding")
 	if mediaType == managementPageV3MediaType {
+		w.Header().Add("Vary", managementMetadataHeader)
 		w.Header().Add("Vary", "X-Console-Current-Validation")
 		if r.Header.Get("X-Console-Current-Validation") == "1" && w.Header().Get("X-Console-Validated-Request-ID") != "" {
 			// Revalidation runs only AFTER the same live permission, gateway

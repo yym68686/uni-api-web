@@ -1,0 +1,4 @@
+CREATE TRIGGER zz_overview_insert AFTER INSERT ON console_management_model_signal REFERENCING NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION console_management_overview_dirty_v1();
+CREATE TRIGGER zz_overview_update AFTER UPDATE ON console_management_model_signal REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION console_management_overview_dirty_v1('account_id,group_id,model,valid,present,availability,terminal,checked_at');
+CREATE TRIGGER zz_overview_delete AFTER DELETE ON console_management_model_signal REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION console_management_overview_dirty_v1();
+CREATE TRIGGER zz_overview_truncate AFTER TRUNCATE ON console_management_model_signal FOR EACH STATEMENT EXECUTE FUNCTION console_management_overview_dirty_v1();

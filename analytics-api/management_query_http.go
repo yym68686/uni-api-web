@@ -22,9 +22,10 @@ type managementPageResponse struct {
 	currentProof    *managementFreshProof
 	Owner           string `json:"owner,omitempty"`
 	managementQueryPage
-	SelectionToken string                `json:"selection_token"`
-	Accounts       []subAccount          `json:"accounts"`
-	Context        managementPageContext `json:"context"`
+	SelectionToken  string                `json:"selection_token"`
+	MetadataVersion string                `json:"metadata_version,omitempty"`
+	Accounts        []subAccount          `json:"accounts"`
+	Context         managementPageContext `json:"context"`
 }
 
 type managementSelectionResponse struct {

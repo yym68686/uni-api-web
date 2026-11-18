@@ -119,6 +119,7 @@ func writeManagementPage(w http.ResponseWriter, r *http.Request, page management
 		if managementColumnReadHeaders(w, r, page.ReadAtMS) {
 			page.ReadAtMS = 0
 		}
+		projectManagementPageMetadata(&page, managementMetadataRequest(r))
 		wire, err := currentManagementColumnPage(page)
 		if err != nil {
 			http.Error(w, "渠道响应编码失败", http.StatusInternalServerError)
@@ -173,6 +174,8 @@ func (s *Service) writeAndRememberManagementPage(w http.ResponseWriter, r *http.
 	if headerTime {
 		delivered.ReadAtMS = 0
 	}
+	metadataVersion := managementMetadataRequest(r)
+	projectManagementPageMetadata(&delivered.managementPageResponse, metadataVersion)
 	endWrite := managementReadSpan(r.Context(), "response_write")
 	var body []byte
 	if err = r.Context().Err(); err == nil {
@@ -188,7 +191,13 @@ func (s *Service) writeAndRememberManagementPage(w http.ResponseWriter, r *http.
 	if err == nil {
 		s.rememberManagementValidator(w, r, page, key, proof)
 		endStore := managementReadSpan(r.Context(), "response_store")
-		s.rememberManagementColumnBytes(key, proof, body, delivered.ReadAtMS, columns.ReadAtMS)
+		if delivered.MetadataVersion != "" && delivered.MetadataVersion == metadataVersion {
+			// The delivered bytes may be a metadata delta. Always store the
+			// complete variant so another caller can receive a full page.
+			s.rememberManagementColumnPage(key, proof, columns)
+		} else {
+			s.rememberManagementColumnBytes(key, proof, body, delivered.ReadAtMS, columns.ReadAtMS)
+		}
 		endStore()
 	}
 	return err

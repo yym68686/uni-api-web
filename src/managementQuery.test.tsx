@@ -26,6 +26,40 @@ it("negotiates the lightweight view only for pages without live unit prices", as
   expect(received).toEqual(["list-v1", null]);
 });
 
+it("reuses verified page metadata only after receiving a complete owned page", async () => {
+  const version = "a".repeat(64);
+  const calls: Headers[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (_input: string, init?: RequestInit) => {
+    const headers = new Headers(init?.headers);
+    calls.push(headers);
+    if (calls.length === 1) {
+      return Response.json({ ...page(), owner: "metadata-owner", metadata_version: version });
+    }
+    return Response.json({
+      ...page(),
+      owner: "metadata-owner",
+      offset: 25,
+      previous_cursor: "previous",
+      next_cursor: "next-2",
+      metadata_version: version,
+      rates: null,
+      platforms: null,
+      models: null,
+      detection_models: null,
+      context: { ...page().context, prices: null, fingerprint_models: null },
+    });
+  }));
+  const signal = new AbortController().signal;
+  const first = await readManagementPage(subFilterDefaults, "", signal, "metadata-owner");
+  const second = await readManagementPage(subFilterDefaults, "next", signal, "metadata-owner");
+  expect(calls[0].get("X-Console-Management-Metadata")).toBe("1");
+  expect(calls[1].get("X-Console-Management-Metadata")).toBe(version);
+  expect(second.rates).toEqual(first.rates);
+  expect(second.platforms).toEqual(first.platforms);
+  expect(second.context.prices).toEqual(first.context.prices);
+  expect(second.context.fingerprint_models).toEqual(first.context.fingerprint_models);
+});
+
 afterEach(() => {
   cleanup();
   delete globalThis.__uniManagementBootstrap;

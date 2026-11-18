@@ -3,14 +3,142 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestManagementGroupOverviewCacheAndDirtyFence(t *testing.T) {
+	s := managementHydrationFixture(t)
+	db := s.control.db
+	ctx := context.Background()
+	owner, n, err := warmManagementOverviewBatch(ctx, db, "")
+	if err != nil || owner != "owner" || n == 0 {
+		t.Fatalf("group overview warm failed: owner=%q groups=%d err=%v", owner, n, err)
+	}
+	wanted := []subBoundKey{{AccountID: "a", GroupID: 1}}
+	read := func() map[string]managementPageGroupOverview {
+		t.Helper()
+		tx, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback()
+		got, err := readManagementPageOverview(ctx, tx, "owner", wanted)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	key := qualityGroupID("a", 1)
+	if got := read()[key]; got.counts.Success != 3 || len(got.busy) != 0 {
+		t.Fatalf("cached summary mismatch: %+v", got)
+	}
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := readStoredManagementOverviews(ctx, tx, "owner", wanted, managementOverviewCatalog(managementUnique(subModels)))
+	tx.Rollback()
+	if err != nil || len(stored) != 1 || !reflect.DeepEqual(stored, read()) {
+		t.Fatalf("did not use the stored group: %+v err=%v", stored, err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE console_sub_models SET state='running' WHERE account_id='a' AND group_id=1 AND model='gpt-5.5'`); err != nil {
+		t.Fatal(err)
+	}
+	if got := read()[key]; got.counts.Pending != 1 || len(got.busy) != 1 || got.busy[0].Model != "gpt-5.5" {
+		t.Fatalf("newer model write was hidden by cache: %+v", got)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO console_sub_check_queue(account_id,group_id,kind,model) VALUES('a',1,'check','queued')`); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(); len(got) != 0 {
+		t.Fatalf("queued group used a stale cached summary: %+v", got)
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM console_sub_check_queue WHERE account_id='a' AND group_id=1`); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := warmManagementOverviewBatch(ctx, db, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := read()[key]; got.counts.Pending != 1 || len(got.busy) != 1 {
+		t.Fatalf("queue removal did not rebuild its group: %+v", got)
+	}
+}
+
+func TestManagementGroupOverviewWarmKeepsConcurrentDirtyWrite(t *testing.T) {
+	s := managementHydrationFixture(t)
+	db := s.control.db
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, _, err := warmManagementOverviewBatch(ctx, db, ""); err != nil {
+		t.Fatal(err)
+	}
+	blocker, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer blocker.Rollback()
+	if _, err = blocker.ExecContext(ctx, `SELECT 1 FROM console_management_group_overview WHERE account_id='a' AND group_id=1 FOR UPDATE`); err != nil {
+		t.Fatal(err)
+	}
+	setState := func(state string) {
+		t.Helper()
+		if _, err := db.ExecContext(ctx, `UPDATE console_sub_models SET state=$1 WHERE account_id='a' AND group_id=1 AND model='gpt-5.5'`, state); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setState("running")
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := warmManagementOverviewBatch(ctx, db, "")
+		done <- err
+	}()
+	for {
+		var waiting bool
+		err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity
+ WHERE wait_event_type='Lock' AND query LIKE 'INSERT INTO console_management_group_overview%')`).Scan(&waiting)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("builder exited without waiting on the fixture: %v", err)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	setState("interrupted")
+	if err = blocker.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if err = <-done; err != nil {
+		t.Fatal(err)
+	}
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	wanted := []subBoundKey{{AccountID: "a", GroupID: 1}}
+	stored, err := readStoredManagementOverviews(ctx, tx, "owner", wanted, managementOverviewCatalog(managementUnique(subModels)))
+	if err != nil || len(stored) != 0 {
+		t.Fatalf("builder cleared a concurrent writer: %+v err=%v", stored, err)
+	}
+	got, err := readManagementPageOverview(ctx, tx, "owner", wanted)
+	if err != nil || got[qualityGroupID("a", 1)].counts.Interrupted != 1 {
+		t.Fatalf("foreground did not use current counts: %+v err=%v", got, err)
+	}
+}
 
 func TestManagementOverviewMatchesListAcrossPages(t *testing.T) {
 	s := managementHydrationFixture(t)

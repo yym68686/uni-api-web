@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"maps"
 	"slices"
 )
 
@@ -14,7 +16,7 @@ const managementPageOverviewSQL = `WITH wanted AS MATERIALIZED (
  SELECT w.account_id,w.group_id FROM jsonb_to_recordset($2::jsonb) AS w(account_id text,group_id bigint)
  JOIN console_sub_accounts a ON a.id=w.account_id WHERE a.owner=$1)
  SELECT w.account_id,w.group_id,
-   NOT EXISTS (SELECT 1 FROM console_sub_check_queue q WHERE q.account_id=w.account_id AND q.group_id=w.group_id)
+   ($4::boolean OR NOT EXISTS (SELECT 1 FROM console_sub_check_queue q WHERE q.account_id=w.account_id AND q.group_id=w.group_id))
      AND COALESCE(g.valid,true),
    g.total,g.builtins,g.astra,g.success,g.warning,g.failed,g.untested,g.pending,g.interrupted,g.checked_at,g.busy
  FROM wanted w
@@ -44,6 +46,32 @@ type managementPageGroupOverview struct {
 }
 
 func readManagementPageOverview(ctx context.Context, db controlQueryDB, owner string, wanted []subBoundKey) (map[string]managementPageGroupOverview, error) {
+	// Keep both reads on the caller's PostgreSQL snapshot. Standalone readers
+	// (including fixtures) can always compute the exact live summary instead.
+	tx, ok := db.(*sql.Tx)
+	if !ok || len(wanted) == 0 {
+		return computeManagementPageOverview(ctx, db, owner, wanted, false)
+	}
+	builtins := managementUnique(subModels)
+	hits, err := readStoredManagementOverviews(ctx, tx, owner, wanted, managementOverviewCatalog(builtins))
+	if err != nil || len(hits) == len(wanted) {
+		return hits, err
+	}
+	missing := make([]subBoundKey, 0, len(wanted)-len(hits))
+	for _, key := range wanted {
+		if _, found := hits[qualityGroupID(key.AccountID, key.GroupID)]; !found {
+			missing = append(missing, key)
+		}
+	}
+	exact, err := computeManagementPageOverview(ctx, db, owner, missing, false)
+	if err != nil {
+		return nil, err
+	}
+	maps.Copy(hits, exact)
+	return hits, nil
+}
+
+func computeManagementPageOverview(ctx context.Context, db controlQueryDB, owner string, wanted []subBoundKey, ignoreQueue bool) (map[string]managementPageGroupOverview, error) {
 	var complete bool
 	if err := db.QueryRowContext(ctx, `SELECT complete FROM console_management_projection_state WHERE singleton`).Scan(&complete); err != nil || !complete {
 		return nil, err
@@ -56,7 +84,7 @@ func readManagementPageOverview(ctx context.Context, db controlQueryDB, owner st
 	legacyAstra := slices.Contains(builtins, "gpt-6-astra")
 	trace := newManagementRowsTraceDerivedDecode(ctx, "page_overview_signals")
 	defer trace.finish()
-	rows, err := db.QueryContext(ctx, managementPageOverviewSQL, owner, string(raw), builtins)
+	rows, err := db.QueryContext(ctx, managementPageOverviewSQL, owner, string(raw), builtins, ignoreQueue)
 	if err != nil {
 		return nil, err
 	}
