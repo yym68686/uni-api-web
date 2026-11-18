@@ -376,7 +376,7 @@ func (s *Service) newAPIAddAccount(w http.ResponseWriter, r *http.Request, base,
 			raw, _ := json.Marshal(auth)
 			flow = "cookie:" + base64.RawURLEncoding.EncodeToString(raw)
 		}
-		raw, _ := json.Marshal(subChallenge{Owner: owner, Base: base, Email: username, Name: name, Password: password, Temp: "newapi:" + flow, AccountID: r.PathValue("id"), Until: time.Now().Add(5 * time.Minute).Unix()})
+		raw, _ := json.Marshal(subChallenge{Owner: owner, Base: base, Email: username, Name: name, Password: password, Temp: "newapi:" + flow, AccountID: r.PathValue("id"), AccountBase: subLoginBase(r), Until: time.Now().Add(5 * time.Minute).Unix()})
 		encrypted, e := s.control.encrypt(string(raw))
 		if e != nil {
 			http.Error(w, "验证会话创建失败", 503)
@@ -456,9 +456,13 @@ func (s *Service) newAPISaveVerifiedAccount(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, 202, map[string]any{"id": id, "queued": true})
 }
 func (s *Service) newAPIAuth(ctx context.Context, account string) (subAuth, string, error) {
+	return s.newAPIAuthAt(ctx, account, "")
+}
+
+func (s *Service) newAPIAuthAt(ctx context.Context, account, base string) (subAuth, string, error) {
 	var auth subAuth
 	var encrypted string
-	err := s.control.db.QueryRowContext(ctx, `SELECT encrypted_auth FROM console_sub_accounts WHERE id=$1 AND provider_kind='newapi'`, account).Scan(&encrypted)
+	err := s.control.db.QueryRowContext(ctx, `SELECT encrypted_auth FROM console_sub_accounts WHERE id=$1 AND provider_kind='newapi' AND ($2='' OR base=$2)`, account, base).Scan(&encrypted)
 	if err != nil {
 		return auth, "", err
 	}
@@ -477,7 +481,7 @@ func (s *Service) newAPICall(ctx context.Context, account, base, method, path st
 		return errors.New("账号与站点地址不匹配")
 	}
 
-	auth, encrypted, err := s.newAPIAuth(ctx, account)
+	auth, encrypted, err := s.newAPIAuthAt(ctx, account, base)
 	if err != nil {
 		return err
 	}
@@ -497,7 +501,7 @@ func (s *Service) newAPICall(ctx context.Context, account, base, method, path st
 		return e
 	}
 	defer unlock()
-	next, current, e := s.newAPIAuth(lockCtx, account)
+	next, current, e := s.newAPIAuthAt(lockCtx, account, base)
 	if e != nil {
 		return e
 	}

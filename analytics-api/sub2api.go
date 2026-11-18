@@ -72,6 +72,7 @@ type subChallenge struct {
 	Owner, Base, Email, Name, Temp string
 	Password                       string
 	AccountID                      string
+	AccountBase                    string
 	Until                          int64
 }
 
@@ -149,6 +150,7 @@ func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 		Username               string            `json:"username"`
 		Name                   string            `json:"name"`
 		Base                   string            `json:"base"`
+		PreviousBase           string            `json:"previous_base"`
 		Email                  string            `json:"email"`
 		Password               string            `json:"password"`
 		Access                 string            `json:"access_token"`
@@ -175,8 +177,9 @@ func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 	accountID := r.PathValue("id")
 	var savedKind string
 	if accountID != "" {
-		// The re-login endpoint is bound to the existing account. Client input
-		// cannot redirect its credentials or create/replace another account.
+		// Changing a site requires an explicit compare-and-swap and fresh input;
+		// legacy clients cannot redirect the server's saved credentials.
+		requestedBase := in.Base
 		var state, encryptedPassword string
 		err = s.control.db.QueryRowContext(ctx, `SELECT base,email,name,provider_kind,state,encrypted_login_password FROM console_sub_accounts WHERE id=$1 AND owner=$2`, accountID, owner).Scan(&in.Base, &in.Email, &in.Name, &savedKind, &state, &encryptedPassword)
 		if err != nil {
@@ -187,9 +190,25 @@ func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "该账号已有任务进行中，请等待完成", 409)
 			return
 		}
+		r = r.WithContext(context.WithValue(r.Context(), subLoginBaseKey{}, in.Base))
+		if in.PreviousBase != "" {
+			if in.PreviousBase != in.Base {
+				http.Error(w, "站点地址已变化，请刷新后重试", 409)
+				return
+			}
+			in.Base, err = subBase(requestedBase)
+			if err != nil {
+				http.Error(w, err.Error(), 400)
+				return
+			}
+		}
 		// Reuse credentials only after ownership and the immutable site identity
 		// have been checked. Password reads use the separate credentials endpoint.
 		if in.Password == "" && in.Access == "" && in.BrowserKind != "newapi" && in.Challenge == "" {
+			if in.Base != subLoginBase(r) {
+				http.Error(w, "更改站点地址需要填写密码或完成浏览器登录", 400)
+				return
+			}
 			if encryptedPassword == "" {
 				http.Error(w, subMissingLoginPasswordMessage, 400)
 				return
@@ -204,7 +223,12 @@ func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 	if in.Challenge != "" {
 		plain, e := s.control.decrypt(in.Challenge)
 		var challenge subChallenge
-		if e != nil || json.Unmarshal([]byte(plain), &challenge) != nil || challenge.Owner != owner || challenge.AccountID != accountID || challenge.Until < time.Now().Unix() || (accountID != "" && (challenge.Base != in.Base || challenge.Email != in.Email)) {
+		parseErr := json.Unmarshal([]byte(plain), &challenge)
+		originalBase := challenge.AccountBase
+		if originalBase == "" {
+			originalBase = challenge.Base // Previously issued same-site challenges.
+		}
+		if e != nil || parseErr != nil || challenge.Owner != owner || challenge.AccountID != accountID || challenge.Until < time.Now().Unix() || (accountID != "" && (originalBase != subLoginBase(r) || challenge.Email != in.Email)) {
 			http.Error(w, "验证会话已失效，请重新登录", 400)
 			return
 		}
@@ -293,7 +317,7 @@ func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if auth.Requires2FA {
-		raw, _ := json.Marshal(subChallenge{Owner: owner, Base: in.Base, Email: in.Email, Name: in.Name, Password: in.Password, Temp: auth.Temp, AccountID: accountID, Until: time.Now().Add(5 * time.Minute).Unix()})
+		raw, _ := json.Marshal(subChallenge{Owner: owner, Base: in.Base, Email: in.Email, Name: in.Name, Password: in.Password, Temp: auth.Temp, AccountID: accountID, AccountBase: subLoginBase(r), Until: time.Now().Add(5 * time.Minute).Unix()})
 		challenge, e := s.control.encrypt(string(raw))
 		if e != nil {
 			http.Error(w, "验证会话创建失败", 503)
@@ -355,8 +379,8 @@ func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 202, map[string]any{"id": id, "queued": true})
 }
 
-// Reauthenticate without a sync job, model probes, or route changes. Existing
-// checks and the caller's edit draft remain usable after the session is saved.
+// Reauthenticate without a sync job, model probes, or route changes. Same-site
+// logins preserve edit drafts; an explicit address change invalidates checks.
 func (s *Service) subSaveLogin(w http.ResponseWriter, r *http.Request, base, login, kind, encrypted, encryptedPassword string) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
@@ -368,6 +392,11 @@ func (s *Service) subSaveLogin(w http.ResponseWriter, r *http.Request, base, log
 		return
 	}
 	defer unlock()
+	previousBase := subLoginBase(r)
+	if previousBase != "" && previousBase != base {
+		s.subSaveSiteAddress(w, r, ctx, previousBase, base, login, kind, encrypted, encryptedPassword)
+		return
+	}
 	result, err := s.control.db.ExecContext(ctx, `UPDATE console_sub_accounts SET encrypted_auth=$3,encrypted_login_password=CASE WHEN $7<>'' THEN $7 ELSE encrypted_login_password END,state='idle',message='' WHERE id=$1 AND owner=$2 AND base=$4 AND lower(email)=lower($5) AND provider_kind=$6 AND state NOT IN ('queued','running')`, id, owner, encrypted, base, login, kind, encryptedPassword)
 	if err != nil {
 		http.Error(w, "凭据保存失败", 503)
@@ -377,7 +406,7 @@ func (s *Service) subSaveLogin(w http.ResponseWriter, r *http.Request, base, log
 		http.Error(w, "账号已变化或有任务进行中，请重试", 409)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"id": id, "authenticated": true, "queued": false})
+	writeJSON(w, 200, map[string]any{"id": id, "base": base, "authenticated": true, "queued": false})
 }
 
 func (s *Service) subSync(w http.ResponseWriter, r *http.Request) {

@@ -474,7 +474,7 @@ func (s *Service) rechargeJobs(w http.ResponseWriter, r *http.Request) {
 	}
 	var public []byte
 	var enc string
-	err = tx.QueryRowContext(r.Context(), `SELECT q.public,q.encrypted_context FROM console_recharge_quotes q JOIN console_recharge_settings c ON c.account_id=q.account_id AND c.revision=q.revision WHERE q.id=$1 AND q.owner=$2 AND q.account_id=$3 AND q.expires_at>now() AND (c.config->>'enabled')::boolean FOR UPDATE OF q`, in.Quote, owner, account).Scan(&public, &enc)
+	err = tx.QueryRowContext(r.Context(), `SELECT q.public,q.encrypted_context FROM console_recharge_quotes q JOIN console_recharge_settings c ON c.account_id=q.account_id AND c.revision=q.revision WHERE q.id=$1 AND q.owner=$2 AND q.account_id=$3 AND q.expires_at>now() AND (c.config->>'enabled')::boolean FOR UPDATE OF q,c`, in.Quote, owner, account).Scan(&public, &enc)
 	if err != nil {
 		rechargeError(w, errors.New("报价已过期或充值设置已变化，请重新获取报价"))
 		return

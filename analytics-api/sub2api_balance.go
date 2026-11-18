@@ -88,7 +88,7 @@ func (s *Service) subAccountBalance(w http.ResponseWriter, r *http.Request) {
 			fresh.Status = "missing"
 		}
 		encoded, _ := json.Marshal(fresh)
-		if _, err := s.control.db.ExecContext(ctx, `UPDATE console_sub_accounts SET balance=$2 WHERE id=$1 AND owner=$3`, id, string(encoded), owner); err != nil {
+		if _, err := s.control.db.ExecContext(ctx, `UPDATE console_sub_accounts SET balance=$2 WHERE id=$1 AND owner=$3 AND base=$4`, id, string(encoded), owner, base); err != nil {
 			cached.Status = "error"
 			writeJSON(w, 200, cached)
 			return
@@ -104,7 +104,7 @@ func (s *Service) subAccountBalance(w http.ResponseWriter, r *http.Request) {
 	}
 	defer unlock()
 	// Re-read after obtaining the lock so concurrent requests reuse this result.
-	err = s.control.db.QueryRowContext(ctx, `SELECT encrypted_auth,encrypted_login_password,balance FROM console_sub_accounts WHERE id=$1 AND owner=$2`, id, owner).Scan(&encrypted, &encryptedPassword, &raw)
+	err = s.control.db.QueryRowContext(ctx, `SELECT encrypted_auth,encrypted_login_password,balance FROM console_sub_accounts WHERE id=$1 AND owner=$2 AND base=$3`, id, owner, base).Scan(&encrypted, &encryptedPassword, &raw)
 	if err != nil {
 		http.Error(w, "账号不存在", 404)
 		return

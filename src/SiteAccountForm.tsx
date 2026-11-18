@@ -25,6 +25,8 @@ export function AccountForm({
     : "/v1/sub2api/accounts";
   const [name, setName] = useState(initial?.name || "");
   const [base, setBase] = useState(initial?.base || "");
+  const addressChanged = !!initial && base.trim() !== initial.base;
+  const addressUpdate = addressChanged ? { previous_base: initial.base } : {};
   const [email, setEmail] = useState(
     initial?.login_name || initial?.email || "",
   );
@@ -91,6 +93,12 @@ export function AccountForm({
     browserAbort.current?.abort();
     close();
   }
+  function confirmAddress(result: { base?: string }) {
+    if (addressChanged && !result.base)
+      throw new Error(
+        "后端尚未确认新站点地址，请待服务更新后重试。尚未启动同步检测。",
+      );
+  }
   async function finishLogin() {
     setPassword("");
     setChallenge("");
@@ -134,7 +142,7 @@ export function AccountForm({
         { base, email, password, agreed: true, kind: browserKind },
         abort.signal,
       );
-      await controlRequest(endpoint, {
+      const result = await controlRequest<{ base?: string }>(endpoint, {
         method: "POST",
         // Keep the operator's password through the browser verification step
         // so the server can encrypt it for future automatic sign-ins.
@@ -142,11 +150,13 @@ export function AccountForm({
           name,
           base,
           email,
+          ...addressUpdate,
           ...(password ? { password } : {}),
           ...auth,
         }),
         signal: abort.signal,
       });
+      confirmAddress(result);
       await finishLogin();
     } catch (e) {
       if (!abort.signal.aborted)
@@ -171,6 +181,7 @@ export function AccountForm({
         return;
       }
       const result = await controlRequest<{
+        base?: string;
         requires_2fa?: boolean;
         challenge?: string;
         requires_browser?: boolean;
@@ -181,7 +192,13 @@ export function AccountForm({
         body: JSON.stringify(
           challenge
             ? { challenge, totp_code: code }
-            : { name, base, email, ...(password ? { password } : {}) },
+            : {
+                name,
+                base,
+                email,
+                ...addressUpdate,
+                ...(password ? { password } : {}),
+              },
         ),
       });
       if (result.requires_browser) {
@@ -197,6 +214,7 @@ export function AccountForm({
         setChallenge(result.challenge);
         setPassword("");
       } else {
+        confirmAddress(result);
         await finishLogin();
       }
     } catch (e) {
@@ -298,10 +316,15 @@ export function AccountForm({
                         setBrowserKind("sub2api");
                         setError("");
                       }}
-                      readOnly={!!initial}
+                      readOnly={!!initial && sessionOnly}
                       required
                     />
                   </label>
+                  {addressChanged && (
+                    <p className="settings-note" role="note">
+                      将使用下方密码登录新地址，请确认地址可信。验证成功后更新地址并重新检测；已有网关路由不会自动更改。
+                    </p>
+                  )}
                   <label>
                     用户名 / 邮箱
                     <input
@@ -330,7 +353,9 @@ export function AccountForm({
                       autoCapitalize="none"
                       value={password}
                       onChange={(event) => setPassword(event.target.value)}
-                      required={!hasSavedPassword && !browserNeeded}
+                      required={
+                        (!hasSavedPassword || addressChanged) && !browserNeeded
+                      }
                     />
                   </label>
                   <p className="settings-note" id="site-password-note">

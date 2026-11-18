@@ -367,7 +367,7 @@ func (s *Service) subUsageAuth(ctx context.Context, account, base, rejected stri
 	var email, encryptedPassword string
 	read := func() (subAuth, error) {
 		var auth subAuth
-		err := s.control.db.QueryRowContext(ctx, `SELECT encrypted_auth,email,encrypted_login_password FROM console_sub_accounts WHERE id=$1`, account).Scan(&encrypted, &email, &encryptedPassword)
+		err := s.control.db.QueryRowContext(ctx, `SELECT encrypted_auth,email,encrypted_login_password FROM console_sub_accounts WHERE id=$1 AND base=$2`, account, base).Scan(&encrypted, &email, &encryptedPassword)
 		if err != nil {
 			return auth, err
 		}
