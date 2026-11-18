@@ -100,6 +100,60 @@ func TestManagementPagingDirectoryMatchesFullReadAndRejectsChangedEvidence(t *te
 	}
 }
 
+func TestManagementPagingResetWarmRetainsCurrentFirstAndDeepPage(t *testing.T) {
+	s := managementHydrationFixture(t)
+	prepareManagementRevisionsForTest(t, s.control.db)
+	ctx := context.Background()
+	f := managementResetFilters
+	key := managementPageComputedKey(ctx, "owner", f, "")
+	if rebuilt, err := s.warmManagementResetPlanIfNeeded(ctx, "owner"); !rebuilt || err != nil {
+		t.Fatal("reset warm did not build an initial directory", rebuilt, err)
+	}
+	first, ok, err := s.currentComputedManagementPage(ctx, "owner", key)
+	if err != nil || !ok || first.Offset != 0 || first.SelectionToken == "" || first.Total != 61 {
+		t.Fatal("canonical reset page missing", first.Offset, first.Total, ok, err)
+	}
+	second, ok, err := s.currentManagementPagingPage(ctx, "owner", f, first.NextCursor, true)
+	if err != nil || !ok || second.Offset != 25 || second.Total != first.Total || second.Revision != first.Revision {
+		t.Fatal("next page did not reuse current warm directory", second.Offset, ok, err)
+	}
+	third, ok, err := s.currentManagementPagingPage(ctx, "owner", f, second.NextCursor, true)
+	if err != nil || !ok || third.Offset != 50 || len(third.Rows) != 11 {
+		t.Fatal("last page did not reuse current warm directory", third.Offset, ok, err)
+	}
+	if rebuilt, err := s.warmManagementResetPlanIfNeeded(ctx, "owner"); rebuilt || err != nil {
+		t.Fatal("unchanged reset directory was rebuilt", rebuilt, err)
+	}
+	if _, err := s.control.db.Exec(`UPDATE console_sub_targets SET state='error' WHERE account_id='a' AND group_id=61`); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := s.currentComputedManagementPage(ctx, "owner", key); ok || err != nil {
+		t.Fatal("stale reset response returned as current", ok, err)
+	}
+	if rebuilt, err := s.warmManagementResetPlanIfNeeded(ctx, "owner"); !rebuilt || err != nil {
+		t.Fatal("changed reset directory was not rebuilt", rebuilt, err)
+	}
+	now, ok, err := s.currentComputedManagementPage(ctx, "owner", key)
+	if err != nil || !ok || now.Revision == first.Revision || now.EligibleCount != first.EligibleCount-1 {
+		t.Fatal("warm reset missed committed update", ok, err)
+	}
+}
+
+func TestManagementDisplayWarmYieldsToForeground(t *testing.T) {
+	s := &Service{}
+	ctx, cancel := s.interruptibleManagementWarm(context.Background(), time.Second)
+	defer cancel()
+	s.managementReaders.Add(1)
+	select {
+	case <-ctx.Done():
+		if !errors.Is(ctx.Err(), context.Canceled) {
+			t.Fatal("warm ran until deadline", ctx.Err())
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("warm did not yield")
+	}
+}
+
 func TestManagementPagingCanonicalizesCursorForFirstPage(t *testing.T) {
 	s := managementHydrationFixture(t)
 	prepareManagementRevisionsForTest(t, s.control.db)

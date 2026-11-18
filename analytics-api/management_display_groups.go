@@ -301,9 +301,12 @@ func (s *Service) managementDisplayLoop(ctx context.Context) {
 	// Do not make readiness depend on this disposable projection. One small
 	// batch at a time leaves room for live reads and other control workers.
 	positions := map[string]subBoundKey{}
+	planAttempt := map[string]time.Time{}
+	var groupsAfter time.Time
 	lastOwner := ""
 	for waitStartup(ctx, 5*time.Second) {
-		if s.managementReaders.Load() != 0 {
+		stats := s.control.db.Stats()
+		if s.managementReaders.Load() != 0 || stats.InUse > stats.MaxOpenConnections/2 {
 			continue
 		}
 		func() {
@@ -318,13 +321,38 @@ func (s *Service) managementDisplayLoop(ctx context.Context) {
 				return
 			}
 			lastOwner = owner
+			now := time.Now()
+			if !now.Before(planAttempt[owner]) {
+				if len(planAttempt) >= 16 && planAttempt[owner].IsZero() {
+					clear(planAttempt)
+				}
+				planAttempt[owner] = now.Add(time.Minute)
+				warm, stopWarm := s.interruptibleManagementWarm(ctx, 12*time.Second)
+				rebuilt, err := s.warmManagementResetPlanIfNeeded(warm, owner)
+				stopWarm()
+				if err != nil || rebuilt {
+					log.Printf("management_paging_warm rebuilt=%t class=%s", rebuilt, databaseErrorClass(err))
+					return
+				}
+			}
+			if now.Before(groupsAfter) || s.managementReaders.Load() != 0 {
+				return
+			}
 			// Keep cursor metadata bounded even if sessions switch frequently.
 			if len(positions) >= 16 && positions[owner] == (subBoundKey{}) {
 				clear(positions)
 			}
-			last, n, stored, err := s.warmManagementDisplayGroups(step, owner, positions[owner])
+			warm, stopWarm := s.interruptibleManagementWarm(step, 4*time.Second)
+			last, n, stored, err := s.warmManagementDisplayGroups(warm, owner, positions[owner])
+			stopWarm()
 			if err != nil {
-				log.Printf("management_display_warm class=%s", databaseErrorClass(err))
+				groupsAfter = time.Now().Add(30 * time.Second)
+				log.Printf("management_display_warm backoff_seconds=30 class=%s", databaseErrorClass(err))
+				return
+			}
+			if n > 0 && !stored {
+				groupsAfter = time.Now().Add(time.Minute)
+				log.Printf("management_display_warm backoff_seconds=60 stored=false")
 				return
 			}
 			if last != (subBoundKey{}) {
@@ -337,4 +365,30 @@ func (s *Service) managementDisplayLoop(ctx context.Context) {
 			}
 		}()
 	}
+}
+
+// The foreground HTTP request keeps its existing deadline; optional
+// background SQL yields quickly when it arrives.
+func (s *Service) interruptibleManagementWarm(ctx context.Context, limit time.Duration) (context.Context, context.CancelFunc) {
+	warm, cancel := context.WithTimeout(ctx, limit)
+	if s.managementReaders.Load() != 0 {
+		cancel()
+		return warm, cancel
+	}
+	go func() {
+		ticker := time.NewTicker(50 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-warm.Done():
+				return
+			case <-ticker.C:
+				if s.managementReaders.Load() != 0 {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	return warm, cancel
 }

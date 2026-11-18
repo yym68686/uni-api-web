@@ -71,6 +71,57 @@ func (s *Service) rememberManagementPagingPlan(owner string, filters managementQ
 	log.Printf("management_paging_store stored=true bytes=%d rows=%d", len(raw), len(plan.Rows))
 }
 
+// This is the console Reset filters default (not the no-parameter API default).
+var managementResetFilters = managementQueryFilters{GroupStatus: "all"}
+
+// Check the database generation at most once per maintenance interval. This
+// is only a scheduling hint; readers still perform the full live gateway and
+// database fence before using either precomputed result.
+func (s *Service) warmManagementResetPlanIfNeeded(ctx context.Context, owner string) (bool, error) {
+	entry, retained := s.managementComputed.get(managementPagingKey(owner, managementResetFilters))
+	if retained {
+		proof, at, err := s.managementReadProof(ctx, s.control.db, owner)
+		if err != nil {
+			return false, err
+		}
+		if managementProofStamp(proof, entry.Proof.CurrentExport) == entry.Proof.Stamp &&
+			(entry.Proof.Until.IsZero() || at.Before(entry.Proof.Until)) {
+			return false, nil
+		}
+	}
+	if err := s.warmManagementResetPlan(ctx, owner); err != nil {
+		return false, err
+	}
+	entry, retained = s.managementComputed.get(managementPagingKey(owner, managementResetFilters))
+	return retained && len(entry.Plan) != 0, nil
+}
+
+func (s *Service) warmManagementResetPlan(ctx context.Context, owner string) error {
+	filters := managementResetFilters
+	snapshot, err := s.readManagementQuerySnapshot(ctx, owner, filters, "", false)
+	if err != nil {
+		return err
+	}
+	if ctx.Err() != nil || s.managementReaders.Load() != 0 {
+		return context.Canceled
+	}
+	s.rememberManagementPagingPlan(owner, filters, snapshot)
+	// This call explicitly read the first page and requested full summaries.
+	// A foreground paging plan may instead come from any offset or media mode;
+	// it must never populate this canonical response key.
+	if snapshot.Proof != nil && snapshot.Page.Offset == 0 {
+		page := snapshot.Page
+		selection := encodeManagementCursor(s.control.key, owner, managementPageCursor{Version: 1, Revision: page.Revision, Filter: tokenHash(mustJSON(filters))})
+		response := managementPageResponse{
+			Owner: owner, managementQueryPage: page, SelectionToken: selection,
+			Accounts: managementAccountHeaders(snapshot.View.Input.Accounts),
+			Context:  managementContextForPage(snapshot.View, page, filters.Model),
+		}
+		s.rememberManagementPage(managementPageComputedKey(ctx, owner, filters, ""), snapshot.Proof, response)
+	}
+	return ctx.Err()
+}
+
 func (s *Service) currentManagementPagingPage(ctx context.Context, owner string, filters managementQueryFilters, cursor string, rebase bool) (managementPageResponse, bool, error) {
 	ctx = managementTraceContext(ctx)
 	entry, exists := s.managementComputed.get(managementPagingKey(owner, filters))
