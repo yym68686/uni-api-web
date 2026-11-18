@@ -12,7 +12,8 @@ const here = name => new URL(name, import.meta.url);
 const read = name => JSON.parse(readFileSync(here(name)));
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const id = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
-const knownFormats = {responses:'responses',openai:'chat',gemini:'gemini'};
+const catalogBuilderVersion = 2; // Keep in sync with fingerprintCatalogBuilderVersion in Go.
+const knownFormats = {responses:'responses',openai:'chat',chat_completions:'chat',gemini:'gemini'};
 const baseModels = read('models.json'), baseProtocols = read('protocols.json');
 
 async function upstream(commit, path, limit) {
@@ -34,7 +35,13 @@ function profile(run, model) {
   // New modes, tiers, or provider-specific options require an intentional adapter.
   if (Object.keys(r).some(k=>!['model','format','stream','reasoning_effort','response_models','service_tier'].includes(k)) ||
       (r.service_tier != null && r.service_tier !== 'default')) return;
-  if (typeof r.model !== 'string' || ![model.id,`${model.family === 'gpt' ? 'openai' : model.family}/${model.id}`].includes(r.model)) return;
+  if (typeof r.model !== 'string') return;
+  const canonical = [model.id,`${model.family === 'gpt' ? 'openai' : model.family}/${model.id}`];
+  // OpenRouter's Google namespace differs from the bank's Gemini family.
+  // Require the exact model and declared response identity, not a version or provider guess.
+  const googleAlias = model.family === 'gemini' && knownFormats[r.format] === 'chat' &&
+    r.model === `google/${model.id}` && Array.isArray(r.response_models) && r.response_models.includes(r.model);
+  if (!canonical.includes(r.model) && !googleAlias) return;
   return {protocol:knownFormats[r.format],effort:r.reasoning_effort};
 }
 
@@ -106,7 +113,7 @@ async function buildCatalog(commit, previous) {
   const files = {
     'models.json':Buffer.from(JSON.stringify(models)),
     'protocols.json':Buffer.from(JSON.stringify(protocols)),
-    'manifest.json':Buffer.from(JSON.stringify({repository:'https://github.com/Ikaleio/lm-detector',commit,files:{
+    'manifest.json':Buffer.from(JSON.stringify({repository:'https://github.com/Ikaleio/lm-detector',commit,catalog_builder_version:catalogBuilderVersion,files:{
       ...sourceFiles,'data/unified_bank.json':sha(bankBytes),'data/shared_detector.bin':sha(detectorBytes),
     }})),
     'data/unified_bank.json.gz':gzipSync(bankBytes),
@@ -127,7 +134,8 @@ async function buildCatalog(commit, previous) {
 async function publish(commit, output, keyPath, previousPath) {
   if (!output || !keyPath) throw Error('usage: node publish-catalog.mjs <commit> <output> <key.pem> [previous.json]');
   const previous = previousBundle(previousPath);
-  if (previous && JSON.parse(Buffer.from(previous.files['manifest.json'],'base64')).commit===commit) {
+  const manifest = previous && JSON.parse(Buffer.from(previous.files['manifest.json'],'base64'));
+  if (manifest?.commit===commit && manifest.catalog_builder_version>=catalogBuilderVersion) {
     console.log('Reference commit already published');
     return;
   }

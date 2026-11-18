@@ -167,8 +167,11 @@ The analytics service checks lm-detector at startup and every 15 minutes
 and runs the bundled validator against the pinned scorer and request logic.
 New exact IDs need consistent metadata for a supported request format and
 effort, and three complete samples that pass offline scoring and transport
-tests. Incompatible new profiles stay out of the list. Invalid candidates,
-missing existing profiles, changes to an existing request contract, and
+tests. The upstream `chat_completions` label maps only to the existing Chat
+Completions adapter; Gemini's `google/` alias is accepted there only when the
+source declares the exact requested ID as a response model. Incompatible new
+profiles stay out of the list. Invalid candidates, missing existing profiles,
+changes to an existing request contract, and
 upstream outages leave the last known good catalog in use. Changing the scorer
 or supporting a new request format requires a reviewed code change.
 
@@ -176,8 +179,10 @@ There is no scheduled GitHub Action, private signing key, or GitHub write
 access in the normal refresh path. No downloaded code is executed. A catalog
 refresh does not enqueue or replay any requests. Current rounds finish with
 their original reference; a continuation resets partial samples if the
-reference changed. `/healthz` reports `fingerprint_reference_commit`,
-`fingerprint_catalog_generation`, and `fingerprint_model_count`.
+reference changed. A newer catalog builder revalidates the current upstream
+commit even when it has not changed. `/healthz` reports
+`fingerprint_reference_commit`, `fingerprint_catalog_generation`,
+`fingerprint_catalog_builder_version`, and `fingerprint_model_count`.
 
 Set `FINGERPRINT_CATALOG_SYNC=0` to keep the saved catalog without polling.
 For signed-catalog recovery, use `FINGERPRINT_CATALOG_SYNC=legacy` and the

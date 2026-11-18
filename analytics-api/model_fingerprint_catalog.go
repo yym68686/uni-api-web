@@ -27,6 +27,7 @@ import (
 // either the updater or the analytics service.
 const fingerprintCatalogURL = "https://raw.githubusercontent.com/yym68686/uni-api-web/fingerprint-data-v1/bundle.json"
 const fingerprintCatalogLimit = 16 << 20
+const fingerprintCatalogBuilderVersion = 2
 
 //go:embed fingerprint/publisher.pub
 var fingerprintPublisherKey string
@@ -36,6 +37,7 @@ type fingerprintCatalog struct {
 	protocols            map[string]string
 	names                []string
 	commit, referenceKey string
+	builderVersion       int
 	sequence             int64
 	process              *fingerprintProcess
 }
@@ -96,10 +98,12 @@ func parseFingerprintBundle(raw []byte) (fingerprintBundle, *fingerprintCatalog,
 		}
 	}
 	var manifest struct {
-		Commit string
-		Files  map[string]string
+		Commit                string
+		CatalogBuilderVersion int `json:"catalog_builder_version"`
+		Files                 map[string]string
 	}
 	if json.Unmarshal(bundle.Files["manifest.json"], &manifest) != nil || !fingerprintCommit.MatchString(manifest.Commit) ||
+		manifest.CatalogBuilderVersion < 0 ||
 		json.Unmarshal(bundle.Files["models.json"], &catalog.models) != nil || json.Unmarshal(bundle.Files["protocols.json"], &catalog.protocols) != nil ||
 		len(catalog.models) < len(fingerprintModels) || len(catalog.models) > 512 || len(catalog.models) != len(catalog.protocols) {
 		return fail()
@@ -122,7 +126,7 @@ func parseFingerprintBundle(raw []byte) (fingerprintBundle, *fingerprintCatalog,
 		}
 	}
 	sort.Strings(catalog.names)
-	catalog.commit, catalog.sequence = manifest.Commit, bundle.Sequence
+	catalog.commit, catalog.sequence, catalog.builderVersion = manifest.Commit, bundle.Sequence, manifest.CatalogBuilderVersion
 	catalog.referenceKey = makeFingerprintReferenceKey(bundle.Files["models.json"], bundle.Files["manifest.json"])
 	return bundle, catalog, nil
 }
@@ -211,7 +215,7 @@ func activateFingerprintCatalog(ctx context.Context, bundle fingerprintBundle, c
 	publishedFingerprintCatalog.Store(candidate)
 	adopted = true
 	closeFingerprintCatalog(old)
-	log.Printf("fingerprint_catalog_activated commit=%s generation=%d models=%d", candidate.commit, candidate.sequence, len(candidate.names))
+	log.Printf("fingerprint_catalog_activated commit=%s generation=%d builder=%d models=%d", candidate.commit, candidate.sequence, candidate.builderVersion, len(candidate.names))
 	return nil
 }
 

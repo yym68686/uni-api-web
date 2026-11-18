@@ -29,7 +29,8 @@ func TestFingerprintUpstreamRefreshKeepsKnownGoodOnContractChange(t *testing.T) 
 		reset()
 		_, _ = s.control.db.Exec(`DELETE FROM console_fingerprint_upstream_catalog`)
 	})
-	commit := strings.Repeat("a", 40)
+	// The fallback simulates a legacy catalog at the very same upstream SHA.
+	commit := base.commit
 	client := &http.Client{Transport: fingerprintHeadTransport(func(r *http.Request) (*http.Response, error) {
 		if r.URL.String() != fingerprintUpstreamHeadURL || r.Header.Get("Accept") != "application/vnd.github.sha" {
 			t.Fatalf("incorrect upstream request: %v", r)
@@ -49,6 +50,7 @@ func TestFingerprintUpstreamRefreshKeepsKnownGoodOnContractChange(t *testing.T) 
 			return nil, err
 		}
 		manifest["commit"], _ = json.Marshal(head)
+		manifest["catalog_builder_version"], _ = json.Marshal(fingerprintCatalogBuilderVersion)
 		files["manifest.json"], _ = json.Marshal(manifest)
 		var models map[string]json.RawMessage
 		var protocols map[string]string
@@ -67,8 +69,8 @@ func TestFingerprintUpstreamRefreshKeepsKnownGoodOnContractChange(t *testing.T) 
 		t.Fatal(err)
 	}
 	active := currentFingerprintCatalog()
-	if active == base || active.commit != commit || !fingerprintModel("fixture-new-model") {
-		t.Fatal("compatible candidate did not activate")
+	if active == base || active.commit != commit || active.builderVersion != fingerprintCatalogBuilderVersion || !fingerprintModel("fixture-new-model") {
+		t.Fatal("compatible candidate did not activate at the unchanged upstream commit")
 	}
 	if err := s.refreshUpstreamFingerprintCatalog(ctx, client, func(context.Context, string, int64) ([]byte, error) {
 		return nil, fmt.Errorf("unchanged head should skip derivation")
@@ -82,5 +84,26 @@ func TestFingerprintUpstreamRefreshKeepsKnownGoodOnContractChange(t *testing.T) 
 	reset()
 	if err := s.loadUpstreamFingerprintCatalog(ctx); err != nil || currentFingerprintCatalog().commit != active.commit {
 		t.Fatal("last known good catalog was not restored", err)
+	}
+}
+
+func TestFingerprintCatalogBuilderVersionRechecksAnUnchangedUpstreamCommit(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		commit  string
+		version int
+		want    bool
+	}{
+		{name: "changed upstream", commit: "new", version: fingerprintCatalogBuilderVersion, want: true},
+		{name: "new builder", commit: "same", version: fingerprintCatalogBuilderVersion - 1, want: true},
+		{name: "already current", commit: "same", version: fingerprintCatalogBuilderVersion, want: false},
+		{name: "newer saved builder", commit: "same", version: fingerprintCatalogBuilderVersion + 1, want: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			catalog := &fingerprintCatalog{commit: "same", builderVersion: test.version}
+			if got := fingerprintCatalogNeedsRefresh(catalog, test.commit); got != test.want {
+				t.Fatalf("refresh=%t, want %t", got, test.want)
+			}
+		})
 	}
 }

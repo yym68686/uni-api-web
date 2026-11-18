@@ -86,6 +86,10 @@ func compatibleFingerprintCatalog(old, candidate *fingerprintCatalog) error {
 	return nil
 }
 
+func fingerprintCatalogNeedsRefresh(catalog *fingerprintCatalog, upstreamCommit string) bool {
+	return upstreamCommit != catalog.commit || catalog.builderVersion < fingerprintCatalogBuilderVersion
+}
+
 func (s *Service) loadUpstreamFingerprintCatalog(ctx context.Context) error {
 	var raw []byte
 	err := s.control.db.QueryRowContext(ctx, `SELECT bundle FROM console_fingerprint_upstream_catalog WHERE id AND sequence > $1`, currentFingerprintCatalog().sequence).Scan(&raw)
@@ -127,8 +131,8 @@ func (s *Service) refreshUpstreamFingerprintCatalog(ctx context.Context, client 
 		return err
 	}
 	old := currentFingerprintCatalog()
-	if commit == old.commit {
-		log.Printf("fingerprint_upstream_current commit=%s models=%d", commit, len(old.names))
+	if !fingerprintCatalogNeedsRefresh(old, commit) {
+		log.Printf("fingerprint_upstream_current commit=%s builder=%d models=%d", commit, old.builderVersion, len(old.names))
 		return nil
 	}
 	build, cancel := context.WithTimeout(ctx, 2*time.Minute)
@@ -141,8 +145,8 @@ func (s *Service) refreshUpstreamFingerprintCatalog(ctx context.Context, client 
 	if err != nil {
 		return err
 	}
-	if candidate.commit != commit {
-		return errors.New("fingerprint candidate commit mismatch")
+	if candidate.commit != commit || candidate.builderVersion != fingerprintCatalogBuilderVersion {
+		return errors.New("fingerprint candidate commit or builder version mismatch")
 	}
 	if err = compatibleFingerprintCatalog(old, candidate); err != nil {
 		return err
