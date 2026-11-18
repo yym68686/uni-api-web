@@ -279,11 +279,16 @@ LOCK TABLE console_management_display_epochs,console_sub_models,console_sub_usag
 	}
 	deadline, stop := context.WithTimeout(ctx, time.Second)
 	defer stop()
-	if err = migrateControlSchema(deadline, db, migrations); err != nil {
+	// This older replica may legitimately block a later ALTER TABLE; the
+	// compatibility promise under these locks applies to the proof migration.
+	if err = migrateControlSchema(deadline, db, migrations[:proof+1]); err != nil {
 		t.Fatal("migration did not complete while the previous replica was serving", err)
 	}
 	if err = serving.Commit(); err != nil {
 		t.Fatal(err)
+	}
+	if err = migrateControlSchema(ctx, db, migrations); err != nil {
+		t.Fatal("subsequent migrations did not complete after the writer released its locks", err)
 	}
 	var stale, normalized bool
 	if err := db.QueryRowContext(ctx, `SELECT local_version<>'summary-v1::'||(SELECT writer::text FROM console_management_display_epochs WHERE kind='reset' AND account_id='' AND group_id=0)
