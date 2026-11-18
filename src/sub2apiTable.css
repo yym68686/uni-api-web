@@ -31,12 +31,7 @@
 .sub-filters .select-field select { width:100%; min-width:0; text-overflow:ellipsis; white-space:nowrap; }
 .sub-filters .select-field svg { flex-shrink:0; }
 .sub-model { font-size: 12px; color: var(--muted); margin-left: auto; }
-.sub-table { min-width: 1080px; }
-.sub-table[data-columns="operations"],
-.sub-table[data-columns="finance"] { min-width: 650px; }
-.sub-table:not([data-columns="all"]):not([data-columns="finance"]) .sub-finance-col,
-.sub-table:not([data-columns="all"]):not([data-columns="checks"]) .sub-check-col,
-.sub-table[data-columns="finance"] :is(.sub-latency-col, .sub-platform-col) { display:none; }
+.sub-table { min-width: 100%; }
 .sub-table details { font-size: 11px; line-height: 1.7; margin-top: 8px; color: var(--muted); }
 .sub-table summary { cursor: pointer; }
 .sub-table td { vertical-align: middle; }

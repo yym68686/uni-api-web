@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
+import * as Dialog from "@radix-ui/react-dialog";
 import { useQueries, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowDown,
@@ -7,7 +8,7 @@ import {
   Check,
   ChevronDown,
   RotateCcw,
-  SlidersHorizontal,
+  Search,
   X,
 } from "lucide-react";
 import { channelParams, controlRequest, request } from "./api";
@@ -344,7 +345,7 @@ export function useChannelControls({
       "reset",
     );
   }
-  function arrange(input: Channel[]) {
+  function arrange(input: Channel[], appliedOnly = false) {
     const groups = new Map<string, Channel[]>();
     for (const row of input) {
       const src = row.source_id || "";
@@ -354,8 +355,9 @@ export function useChannelControls({
     }
     for (const group of groups.values()) {
       const i = info(group[0]);
-      if (!i.rule.order.length) continue;
-      const ranks = new Map(i.order.map((p, n) => [p, n]));
+      const rule = appliedOnly ? i.current : i.rule;
+      if (!rule?.order.length) continue;
+      const ranks = new Map(rule.order.map((p, n) => [p, n]));
       group.sort(
         (a, b) =>
           (ranks.get(a.provider) ?? Infinity) -
@@ -398,34 +400,26 @@ export function useChannelControls({
   };
 }
 export type ChannelControls = ReturnType<typeof useChannelControls>;
-export function ChannelControlCell({
+function ChannelControlRow({
   row,
   controls,
   visible,
-  configOrder,
 }: {
   row: Channel;
   controls: ChannelControls;
   visible: Channel[];
-  configOrder: boolean;
 }) {
   const i = controls.info(row),
     label = `${row.source_name || row.source_id || ""} ${channelName(row)} ${row.model}`;
   if (!i.ready)
     return (
-      <td className="control-actions-cell">
-        {i.error ? (
-          <span className="negative">{i.error}</span>
-        ) : (
-          <span className="muted">
-            <Spinner small />
-            读取控制状态…
-          </span>
-        )}
-      </td>
+      <Tip text={i.error}>
+        <span className={i.error ? "negative" : "muted"}>
+          {i.error ? "控制不可用" : i.catalog?.isSuccess && i.state?.isSuccess ? "不在路由范围" : "读取中…"}
+        </span>
+      </Tip>
     );
   return (
-    <td className="control-actions-cell">
       <div className="control-row-actions">
         <label>
           <input
@@ -437,16 +431,10 @@ export function ChannelControlCell({
           />
           {i.inherited ? "继承停用" : "临时停用"}
         </label>
-        <Tip
-          text={
-            configOrder
-              ? "只调整此来源内的渠道顺序，未显示的渠道仍保留。"
-              : "选择 Provider / API key 顺序后可调整。"
-          }
-        >
+        <Tip text={i.error || (i.stale ? STALE_DRAFT : "只调整此来源内的渠道顺序，未显示的渠道仍保留。")}>
           <span className="control-order-actions">
             <button className="icon-button" aria-label={`置顶 ${label}`} title="置顶到此来源的第一位"
-              disabled={i.pending || i.stale || !configOrder || i.order.indexOf(row.provider)<=0}
+              disabled={i.pending || i.stale || i.order.indexOf(row.provider)<=0}
               onClick={()=>controls.moveToTop(row)}>
               <ArrowUpToLine size={15}/>
             </button>
@@ -456,7 +444,6 @@ export function ChannelControlCell({
               disabled={
                 i.pending ||
                 i.stale ||
-                !configOrder ||
                 !controls.neighbor(row, -1, visible)
               }
               onClick={() => controls.move(row, -1, visible)}
@@ -469,7 +456,6 @@ export function ChannelControlCell({
               disabled={
                 i.pending ||
                 i.stale ||
-                !configOrder ||
                 !controls.neighbor(row, 1, visible)
               }
               onClick={() => controls.move(row, 1, visible)}
@@ -479,58 +465,76 @@ export function ChannelControlCell({
           </span>
         </Tip>
       </div>
-      {i.stale && <small className="negative">{STALE_DRAFT}</small>}
-      {i.error && (
-        <small className="negative" role="alert">
-          {i.error}
-        </small>
-      )}
-    </td>
   );
 }
 
 export const RESET_SCOPE_LABEL = "撤销更改";
-export function ChannelControlActions(props: {
+export function ChannelControlDrawer({ controls, sources, keys, rows, scopeLabel, onClose, opener }: {
   controls: ChannelControls;
   sources: ConsoleSource[];
   keys: KeyInfo[];
-  editing: boolean;
-  onEditingChange: (editing: boolean) => void;
-  closeDisclosureOnEdit?: boolean;
+  rows: Channel[];
+  scopeLabel: string;
+  onClose: () => void;
+  opener: RefObject<HTMLElement | null>;
 }) {
-  const { controls, sources, editing, onEditingChange, closeDisclosureOnEdit } = props;
+  const [search, setSearch] = useState("");
+  const keyword = search.trim().toLowerCase();
+  const visible = keyword ? rows.filter(row => `${channelName(row)} ${row.provider} ${row.model}`.toLowerCase().includes(keyword)) : rows;
+  const groups = new Map<string, Channel[]>();
+  const seen = new Map<string, Set<string>>();
+  // Route rules address providers, even when the observation lists several models.
+  for (const row of controls.arrange(visible)) {
+    const source = row.source_id || "";
+    if (!groups.has(source)) {
+      groups.set(source, []);
+      seen.set(source, new Set());
+    }
+    if (seen.get(source)!.has(row.provider)) continue;
+    seen.get(source)!.add(row.provider);
+    groups.get(source)!.push(row);
+  }
   return (
-    <div className="control-toolbar-actions">
-      <Tip
-        text={
-          editing
-            ? "取消调整并放弃全部未保存修改，已应用规则保留。"
-            : "显示临时控制，调整渠道顺序和停用状态。"
-        }
-      >
-        <button
-          className="button small"
-          aria-pressed={editing}
-          title="手动调整实际路由顺序或停用状态，应用前可取消"
-          disabled={controls.pending}
-          onClick={(event) => {
-            if (editing) controls.discardAll();
-            if (!editing && closeDisclosureOnEdit) {
-              const panel = event.currentTarget.closest<HTMLDetailsElement>(".workbench-disclosure");
-              if (panel) {
-                panel.open = false;
-                panel.querySelector("summary")?.focus();
-              }
-            }
-            onEditingChange(!editing);
-          }}
-        >
-          {editing ? <X size={14} /> : <SlidersHorizontal size={14} />}
-          {editing ? "取消调整" : "调整顺序"}
-        </button>
-      </Tip>
-      {editing && <ChannelControlReset {...props} />}
-      {editing && controls.drafts.size > 0 && (
+    <Dialog.Root open modal={false} onOpenChange={open => { if (!open && !controls.pending && !controls.drafts.size) onClose(); }}>
+      <Dialog.Portal>
+        <Dialog.Content id="channel-route-editor" className="channel-route-drawer"
+          onInteractOutside={event => event.preventDefault()}
+          onEscapeKeyDown={event => { if (controls.pending || controls.drafts.size) event.preventDefault(); }}
+          onCloseAutoFocus={event => { event.preventDefault(); opener.current?.focus({preventScroll:true}); }}>
+          <header className="channel-route-heading">
+            <div>
+              <Dialog.Title>调整请求顺序</Dialog.Title>
+              <Dialog.Description title={scopeLabel}>{scopeLabel}</Dialog.Description>
+            </div>
+            <button type="button" className="icon-button" aria-label="取消调整" title="取消调整并放弃草稿" disabled={controls.pending} onClick={() => { controls.discardAll(); onClose(); }}><X size={17} /></button>
+          </header>
+          <div className="search-field channel-route-search"><Search size={15} aria-hidden="true" />
+            <input type="search" aria-label="在排序列表中查找" placeholder="查找渠道…" value={search} onChange={event => setSearch(event.target.value)} />
+          </div>
+          <div className="channel-route-list">
+            {!groups.size && <p className="muted">没有可调整的匹配渠道</p>}
+            {[...groups].map(([source, group]) => <section key={source} aria-label={group[0].source_name || source}>
+              <h3>{group[0].source_name || sources.find(item => item.id === source)?.name || source || "未识别来源"}</h3>
+              <ol>
+                {group.map(row => <li key={row.provider} data-source-name={row.source_name}>
+                  <span className="channel-route-rank mono">{Math.max(0, controls.info(row).order.indexOf(row.provider) + 1) || "—"}</span>
+                  <strong title={channelName(row)}>{channelName(row)}</strong>
+                  <ChannelControlRow row={row} controls={controls} visible={group} />
+                </li>)}
+              </ol>
+            </section>)}
+          </div>
+          <footer className="channel-route-footer">
+            {!controls.pending && controls.draftIssues.length > 0 && (
+              <small className="control-draft-error negative" role="alert">
+                未应用的修改已保留：{[...new Set(controls.draftIssues.map(issue =>
+                  `${sources.find(source => source.id === issue.source)?.name || issue.source}：${issue.message}`
+                ))].join("；")}
+              </small>
+            )}
+            <div className="control-toolbar-actions">
+              <ChannelControlReset controls={controls} sources={sources} keys={keys} />
+              {controls.drafts.size > 0 ? (
         <>
           <Tip text="应用全部未保存修改，包括筛选隐藏的来源、API key 和模型范围。">
             <button
@@ -555,21 +559,12 @@ export function ChannelControlActions(props: {
             </button>
           </Tip>
         </>
-      )}
-      {editing && !controls.pending && controls.draftIssues.length > 0 && (
-        <small className="control-draft-error negative" role="alert">
-          未应用的修改已保留：
-          {[
-            ...new Set(
-              controls.draftIssues.map(
-                (issue) =>
-                  `${sources.find((source) => source.id === issue.source)?.name || issue.source}：${issue.message}`,
-              ),
-            ),
-          ].join("；")}
-        </small>
-      )}
-    </div>
+              ) : <button className="button small" type="button" disabled={controls.pending} onClick={onClose}>完成</button>}
+            </div>
+          </footer>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 export function ChannelControlReset({

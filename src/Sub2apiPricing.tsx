@@ -39,7 +39,9 @@ export function ModelPriceWarning({ check, prices }: { check?: SubModelCheck; pr
 export function GroupPriceStatus({ checks, prices }: { checks: SubModelCheck[]; prices?: ModelPrice[] }) {
   const assessed = checks.map(check => ({check, status:assessPrice(check, prices).status}));
   const abnormal = assessed.filter(item => item.status === "abnormal");
-  if (abnormal.length) return <div className="sub-price-group">{abnormal.map(({check}) => <div key={check.model}><small className="check-source">{check.model}</small><PriceStatus check={check} prices={prices} /></div>)}</div>;
+  if (abnormal.length) return <Tip text={<div className="table-diagnostic-tip">
+    {abnormal.map(({check}) => <div key={check.model}>{check.model} · {assessPrice(check, prices).label}</div>)}
+  </div>}><span className="negative">{abnormal.length} 项异常</span></Tip>;
   const confirmed = assessed.filter(item => item.status === "normal").length;
   const pending = assessed.some(item => item.status === "pending");
   return <span className="muted">{pending ? "核验中" : confirmed ? `${confirmed}/${checks.length} 已确认` : "未确认"}</span>;

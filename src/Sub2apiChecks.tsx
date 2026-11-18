@@ -75,6 +75,40 @@ import type { SubUsage } from "./sub2apiPriceCheck";
 import type { ModelPrice } from "./types";
 import { BillingRate } from "./BillingRate";
 import type { ObservedRate } from "./billingRates";
+import { TableColumns, useTableColumns } from "./TableColumns";
+
+const managementColumnChoices = [
+  {id: "model", label: "模型"},
+  {id: "platform", label: "平台 / key"},
+  {id: "rate", label: "倍率"},
+  {id: "availability", label: "可用性"},
+  {id: "latency", label: "首字延迟"},
+  {id: "fingerprint", label: "模型指纹"},
+  {id: "protocol", label: "协议"},
+  {id: "match", label: "模型匹配"},
+  {id: "price", label: "单价异常"},
+  {id: "quality", label: "Astra 降智"},
+  {id: "compaction", label: "远程压缩"},
+  {id: "tool-use", label: "Tool use"},
+  {id: "diagnostics", label: "回复 / 诊断"},
+  {id: "checked", label: "最近检测"},
+  {id: "batch", label: "批量检测"},
+] as const;
+type ManagementColumn = (typeof managementColumnChoices)[number]["id"];
+const managementPresets = {
+  operations: ["model", "platform", "rate", "availability", "latency", "fingerprint", "checked", "batch"],
+  checks: ["model", "platform", "rate", "availability", "latency", "fingerprint", "protocol", "match", "quality", "compaction", "tool-use", "diagnostics", "checked", "batch"],
+  finance: ["model", "rate", "price", "availability", "fingerprint", "checked", "batch"],
+  all: managementColumnChoices.map(({id}) => id),
+} satisfies Record<string, readonly ManagementColumn[]>;
+const managementColumnLabels = Object.fromEntries(managementColumnChoices.map(({id,label}) => [id,label])) as Record<ManagementColumn, string>;
+const managementColumnHelp: Partial<Record<ManagementColumn, string>> = {
+  fingerprint: fingerprintNote,
+  match: "检测请求与实际返回的模型名完全一致才算匹配。",
+  price: "比较倍率前账单单价与价格设置。缺少账单或 Token 样本时不判为正常。",
+  "tool-use": toolUseDescription,
+  batch: "关闭后跳过批量检测，仍可手动检测。已提交的任务继续执行。",
+};
 
 export interface Probe {
   curl_token?: string;
@@ -253,36 +287,22 @@ function AvailabilityStatus({ check }: { check: SubModelCheck }) {
   );
 }
 
-function GroupAvailability({ checks }: { checks: SubModelCheck[] }) {
+function GroupAvailability({ checks, scope }: { checks: SubModelCheck[]; scope?: string }) {
   if (!checks.length) return <span className="muted">未检测</span>;
   const counts = availabilityCounts(checks);
-  return (
-    <div className="sub-availability-summary">
-      <span
-        className={`check-status ${counts.success ? "pass" : "inconclusive"}`}
-      >
-        {counts.success}/{checks.length} 可用
-      </span>
-      <small className="check-source">
-        {[
-          counts.warning ? `${counts.warning} 个结束异常` : "",
-          counts.failed ? `${counts.failed} 个失败` : "",
-          counts.untested ? `${counts.untested} 个未检测` : "",
-        ]
-          .filter(Boolean)
-          .join(" · ")}
-      </small>
-      {counts.pending > 0 && (
-        <small className="check-status">
-          <Spinner small />
-          {counts.pending} 个排队 / 检测中
-        </small>
-      )}
-      {counts.interrupted > 0 && (
-        <small className="check-source">{counts.interrupted} 个中断</small>
-      )}
-    </div>
-  );
+  const details = [
+    scope,
+    counts.warning && `${counts.warning} 个结束异常`,
+    counts.failed && `${counts.failed} 个失败`,
+    counts.untested && `${counts.untested} 个未检测`,
+    counts.pending && `${counts.pending} 个排队 / 检测中`,
+    counts.interrupted && `${counts.interrupted} 个中断`,
+  ].filter(Boolean).join(" · ");
+  const summary = <span className={`check-status ${counts.success ? "pass" : "inconclusive"}`}>
+    {counts.pending > 0 && <Spinner small />}
+    {counts.success}/{checks.length} 可用
+  </span>;
+  return details ? <Tip text={details}>{summary}</Tip> : summary;
 }
 
 function ModelMatch({ check }: { check: SubModelCheck }) {
@@ -307,38 +327,26 @@ function ModelMatch({ check }: { check: SubModelCheck }) {
   );
 }
 
-function GroupModelMatch({ checks }: { checks: SubModelCheck[] }) {
-  const settled = checks.filter(c => !pending(c.state) && c.state !== "interrupted");
-  const statuses = settled.map(modelMatchStatus);
-  const matches = statuses.filter((s) => s === "match").length;
-  return (
-    <div className="sub-model-match-summary">
-      <span className={`check-status ${matches ? "pass" : "inconclusive"}`}>
-        {matches}/{checks.length} 匹配
-      </span>
-      {checks.length > settled.length && <small className="check-source">{checks.filter(c=>pending(c.state)).length || 0} 个排队 / 检测中{checks.some(c=>c.state === "interrupted") ? " · 含已中断模型" : ""}</small>}
-      {(
-        [
-          "mismatch",
-          "missing",
-          "invalid",
-          "unavailable",
-          "legacy",
-          "untested",
-        ] as const
-      ).map((status) => {
-        const count = statuses.filter((s) => s === status).length;
-        return count ? (
-          <small
-            className={`check-source ${status === "mismatch" ? "negative" : ""}`}
-            key={status}
-          >
-            {count} 个{modelMatchLabels[status]}
-          </small>
-        ) : null;
-      })}
-    </div>
-  );
+function GroupModelMatch({ checks, scope }: { checks: SubModelCheck[]; scope?: string }) {
+  const counts = new Map<string, number>();
+  let working = 0, interrupted = 0;
+  for (const check of checks) {
+    if (pending(check.state)) working++;
+    else if (check.state === "interrupted") interrupted++;
+    else {
+      const label = modelMatchLabels[modelMatchStatus(check)];
+      counts.set(label, (counts.get(label) || 0) + 1);
+    }
+  }
+  const matches = counts.get(modelMatchLabels.match) || 0;
+  const details = [
+    scope,
+    ...[...counts].filter(([label]) => label !== modelMatchLabels.match).map(([label, count]) => `${count} 个${label}`),
+    working && `${working} 个排队 / 检测中`,
+    interrupted && `${interrupted} 个中断`,
+  ].filter(Boolean).join(" · ");
+  const summary = <span className={`check-status ${matches ? "pass" : "inconclusive"}`}>{matches}/{checks.length} 匹配</span>;
+  return details ? <Tip text={details}>{summary}</Tip> : summary;
 }
 
 function DetailRow({
@@ -883,7 +891,11 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   const filterModels=[...new Set([...(metadata?.models || SUB_MODELS),...(model?[model]:[])])];
   const [configuredDialog, setConfiguredDialog] = useState<ManagedChannel | null>(null);
   const [managementDetail, setManagementDetail] = useState<ManagementRow | null>(null);
-  const [managementColumns, setManagementColumns] = useState("operations");
+  const [managementPreset, setManagementPreset] = useState<keyof typeof managementPresets>("operations");
+  const [customColumns, setCustomColumns] = useTableColumns("uni-console:management-columns:v1", managementColumnChoices);
+  const [filterTab, setFilterTab] = useState("conditions");
+  const managementColumns = customColumns ?? managementPresets[managementPreset].filter(id => id !== "model" || !!tableModel);
+  const columnView = customColumns ? "custom" : managementPreset;
   const [importing, setImporting] = useState<{
     account: SubAccount;
     target: SubTarget;
@@ -1147,7 +1159,17 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   return (
     <div className="sub2api-page">
       <div className="data-heading management-page-heading">
-        <div className="data-title"><h2>渠道管理</h2></div>
+        <div className="data-title"><h2>渠道管理</h2>
+          <WorkbenchNotice urgent label="渠道管理操作状态" messages={[
+            error,
+            (detection.isError || detection.error) && (detection.error || "检测开关读取失败，已暂停批量检测。"),
+          ]} />
+          {resultsReadFailed && <button type="button" className="icon-button" aria-label="重试渠道结果读取" title="重试读取渠道结果" onClick={refreshPage}><RefreshCw size={15} /></button>}
+          <WorkbenchNotice label="检测提交回执" messages={[
+            ...batchReceipts.map(receipt => `${receipt.label}：${receipt.message}`),
+            batchReceipts.some(receipt => !receipt.accepted) && "请先刷新并核对未确认的分支，已收到回执的分支不要重复提交。",
+          ]} />
+        </div>
         {onRouting && <button type="button" className="button small" onClick={onRouting}>路由顺序</button>}
       </div>
       <WorkbenchTabs label="管理视图" value={section} onChange={setSection} tabs={[["channels","渠道"],["sites","站点账号"]]} />
@@ -1157,8 +1179,20 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
             <Globe2 size={19} />
             <h2>站点账号</h2>
             <span className="count-badge">{!query.data && !accountHeaders.data ? "…" : statusAccounts.length}</span>
+            <WorkbenchNotice label="账号同步状态" messages={[
+              syncSubmitted && (syncSubmitted.count
+                ? `已提交 ${syncSubmitted.count} 个账号，${syncSubmitted.detect ? "正在后台同步并检测。" : "正在后台同步，不执行检测。"}`
+                : "暂无可同步账号，已有任务会继续执行。"),
+              modelSelectionNeedsReview && "额外模型暂未勾选。请检查检测模型设置后再运行批量检测。",
+            ]} />
+            <WorkbenchNotice urgent label="账号状态读取异常" messages={[
+              progressQuery.isError && "实时进度更新失败，当前进度尚未确认。",
+              accountHeaders.error && `账号状态读取失败：${accountHeaders.error.message}`,
+            ]} />
           </div>
           <div className="sub-account-actions">
+            {progressQuery.isError && <button type="button" className="icon-button" title="重试进度" aria-label="重试进度" onClick={()=>void progressQuery.refetch()}><RefreshCw size={15} /></button>}
+            {accountHeaders.error && <button type="button" className="icon-button" title="重试读取账号" aria-label="重试读取账号" onClick={refreshPage}><RefreshCw size={15} /></button>}
             <button
               className="button small"
               aria-label="一键同步并检测"
@@ -1199,18 +1233,6 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
             </button>
           </div>
         </div>
-        {syncSubmitted !== null && (
-          <p className="settings-note" role="status">
-            {syncSubmitted.count
-              ? `已提交 ${syncSubmitted.count} 个账号，${syncSubmitted.detect ? "正在后台同步并检测。" : "正在后台同步，不执行检测。"}`
-              : "暂无可同步账号，已有任务会继续执行。"}
-          </p>
-        )}
-        {modelSelectionNeedsReview && (
-          <p className="settings-note" role="status">
-            检测模型设置已安全迁移：旧设置无法确认额外模型是否在保存时已存在，因此额外模型暂未勾选。请检查检测模型设置后再运行批量检测。
-          </p>
-        )}
         {settingsAccount && <SiteAccountSettings account={settingsAccount} close={() => setSettingsAccount(null)} saved={() => {
           setSettingsAccount(null);
           void client.invalidateQueries({ predicate: q => ["management-query", "sub-sync-progress", "sub2api", "sub2api-headers", "sub2api-imports", "sub-channel-spend", "channel-spend", "metrics", "sub-check-detail", "sub-management-models"].includes(String(q.queryKey[0])) });
@@ -1228,18 +1250,6 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
               setSyncProgressSubmission(previous=>({owner:user,generation:previous.owner===user?previous.generation+1:1}));
             }}
           />
-        )}
-        {progressQuery.isError && <p role="alert" className="settings-note">实时进度更新失败，当前进度尚未确认。<button className="button small" onClick={()=>void progressQuery.refetch()}>重试进度</button></p>}
-        {accountHeaders.error && (
-          <div role="alert" className="error-banner">
-            账号状态读取失败：{accountHeaders.error.message}
-            <button
-              className="button small"
-              onClick={refreshPage}
-            >
-              重试
-            </button>
-          </div>
         )}
         {!metadata && resultsReadFailed ? null : !metadata ? (
           <TableLoading kind="accounts" rows={3} />
@@ -1282,16 +1292,16 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                         {a.sync_only && pending(a.state) ? (a.state === "queued" ? "等待同步" : "同步中") : stateLabel[a.state] || a.state}
                         {total > 0 && ` · ${completed}/${total} 个分组`}
                       </span>
-                      {a.sync_only && pending(a.state) ? <small>仅同步信息，不执行检测</small> : null}
-                      {!a.sync_only && a.sync_models?.length && pending(a.state) && a.job_kind === "sync" ? <small>本次同步选择 {a.sync_models.length} 个模型 / 分组</small> : null}
-                      {a.progress && !a.sync_only && <small>模型进度：{a.progress.completed}/{a.progress.total} 完成 · {a.progress.running} 检测中 · {a.progress.queued} 排队{a.progress.interrupted ? ` · ${a.progress.interrupted} 已中断` : ""}</small>}
-                      {!a.sync_only && a.progress?.running_models.length ? <small>正在检测：{[...new Set(a.progress.running_models)].join("、")}</small> : null}
-                      {a.synced_at > 0 && !pending(a.state) && (
-                        <small>上次同步 {dateTime(a.synced_at)}</small>
-                      )}
-                      {accountMessage && (
-                        <small className="sub-account-message" title={accountMessage}>{accountMessage}</small>
-                      )}
+                      {accountMessage || a.progress || a.synced_at > 0 || pending(a.state) ? <Tip text={<div className="table-diagnostic-tip">
+                        {a.sync_only && pending(a.state) && <div>仅同步信息，不执行检测</div>}
+                        {!a.sync_only && a.sync_models?.length && pending(a.state) && a.job_kind === "sync" ? <div>本次同步选择 {a.sync_models.length} 个模型 / 分组</div> : null}
+                        {a.progress && !a.sync_only && <div>模型进度：{a.progress.completed}/{a.progress.total} 完成 · {a.progress.running} 检测中 · {a.progress.queued} 排队{a.progress.interrupted ? ` · ${a.progress.interrupted} 已中断` : ""}</div>}
+                        {!a.sync_only && a.progress?.running_models.length ? <div>正在检测：{[...new Set(a.progress.running_models)].join("、")}</div> : null}
+                        {a.synced_at > 0 && <div>上次同步 {dateTime(a.synced_at)}</div>}
+                        {accountMessage && <div>{accountMessage}</div>}
+                      </div>}><small className="sub-account-message">{accountMessage && !pending(a.state) ? "查看状态"
+                        : a.progress && !a.sync_only ? `模型 ${a.progress.completed}/${a.progress.total}`
+                        : a.synced_at > 0 ? dateTime(a.synced_at) : "查看进度"}</small></Tip> : null}
                     </div>
                     <div className="sub-account-actions">
                       <button className="button ghost small" aria-label={`设置站点 ${a.name}`} onClick={() => setSettingsAccount(a)}><Settings2 size={13} />设置</button>
@@ -1367,20 +1377,6 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
           </div>
         )}
       </section>
-      {error && (
-        <div role="alert" className="error-banner">
-          {error}
-        </div>
-      )}
-      {(detection.isError || detection.error) && <div role="alert" className="error-banner">
-        {detection.error || "检测开关读取失败，已暂停批量检测。"}
-        {detection.isError && <button className="button small" onClick={()=>void detection.refetch()}>重试读取检测开关</button>}
-      </div>}
-      {!!batchReceipts.length && <div className="coverage-note batch-receipts" role="status">
-        <strong>检测提交回执</strong>
-        <ul>{batchReceipts.map(receipt => <li key={receipt.label}>{receipt.label}：{receipt.message}</li>)}</ul>
-        {batchReceipts.some(receipt=>!receipt.accepted) && <p>请先刷新并核对未确认的分支，已收到回执的分支不要重复提交。</p>}
-      </div>}
       {batchPreview && <Dialog.Root open onOpenChange={open=>{if(!open&&!submittingBatch.current)setBatchPreview(null);}}>
         <Dialog.Portal><Dialog.Overlay className="dialog-overlay"/><Dialog.Content className="guide-dialog batch-detection-preview">
           <Dialog.Title>核对批量检测范围</Dialog.Title>
@@ -1415,6 +1411,8 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
               />
             </label>
             <WorkbenchDisclosure className="management-filters" label="筛选">
+            <WorkbenchTabs label="渠道管理筛选面板" value={filterTab} onChange={setFilterTab} tabs={[["conditions","条件"],["columns","数据列"]]} />
+            <section hidden={filterTab !== "conditions"}>
             <div className="filters sub-filters" role="region" aria-label="渠道管理筛选" tabIndex={0}>
               <label className="select-field">
                 <select
@@ -1663,16 +1661,25 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                 <X size={12} /> 重置筛选
               </button>
             </div>
+            </section>
+            <section hidden={filterTab !== "columns"} aria-label="渠道管理数据列">
+              <label className="channel-filter-field">列预设<span className="select-field">
+                <select aria-label="表格视图" value={columnView} onChange={event => {
+                  setManagementPreset(event.target.value as keyof typeof managementPresets);
+                  setCustomColumns(null);
+                }}>
+                  <option value="operations">运行</option>
+                  <option value="checks">检测</option>
+                  <option value="finance">费用</option>
+                  <option value="all">全部</option>
+                  {customColumns && <option value="custom" disabled>自定义</option>}
+                </select>
+                <ChevronDown size={13} aria-hidden="true" />
+              </span></label>
+              <TableColumns inline choices={managementColumnChoices} value={managementColumns} onChange={setCustomColumns}
+                onReset={() => {setManagementPreset("operations");setCustomColumns(null);}} />
+            </section>
             </WorkbenchDisclosure>
-            <label className="select-field">
-              <select aria-label="表格视图" value={managementColumns} onChange={event => setManagementColumns(event.target.value)}>
-                <option value="operations">视图：运行</option>
-                <option value="checks">视图：检测</option>
-                <option value="finance">视图：费用</option>
-                <option value="all">视图：全部</option>
-              </select>
-              <ChevronDown size={13} aria-hidden="true" />
-            </label>
           </div>
           <div className="management-actions" role="group" aria-label="渠道管理操作">
             <DetectionAction projects={detectionProjects} project={detectionProject} onSelect={project => { setDetectionProject(project); setFingerprintsSubmitted(0); }} selectDisabled={batchBusy}>
@@ -1724,11 +1731,11 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
             />
             <WorkbenchNotice label="渠道管理状态" messages={[
               !!fingerprintsSubmitted && `已提交 ${fingerprintsSubmitted} 项指纹检测`,
-              pageQuery.updating ? "正在更新渠道结果，暂显示更新前内容…" : displayedPage && resultsReadFailed ? "暂时无法读取渠道" : "",
+              pageQuery.updating && "正在更新渠道结果，暂显示更新前内容…",
+              resultsReadFailed && `暂时无法读取渠道：${pageQuery.error?.message || "请重试"}`,
             ]} />
           </div>
         </div>
-        {resultsReadFailed && metadata && <div role="alert" className="error-banner">渠道结果读取失败：{pageQuery.error?.message}<button className="button small" onClick={refreshPage}>重试</button></div>}
         {!displayedPage && resultsReadFailed ? (
           <Empty title="暂时无法读取渠道">检测结果尚未完整读取，暂时无法判断是否有匹配渠道。请重试读取。</Empty>
         ) : !displayedPage ? (
@@ -1740,29 +1747,14 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
         ) : (
           <>
             <div className="table-scroll sub-results-table" aria-busy={tablePending} aria-hidden={resultsReadFailed || undefined} inert={tablePending} style={resultsReadFailed?{visibility:"hidden"}:undefined}>
-              <table className="channel-table check-table sub-table" data-columns={managementColumns}>
+              <table className="channel-table check-table sub-table" data-columns={columnView}>
                 <thead>
                   <tr>
-                    <th>渠道 / 站点</th>
-                    {tableModel && <th>模型</th>}
-                    <th className="sub-platform-col">平台 / key</th>
-                    <th className="sub-finance-col">倍率</th>
-                    <th>可用性</th>
-                    <th className="sub-latency-col">首字延迟</th>
-                    <th className="sub-check-col">
-                      <Tip text="比较检测请求的模型名与流式完成事件中的 response.model，完全一致才算匹配。独立降智检测同时更新 Astra 可用性和模型匹配，不额外发起请求。">
-                        模型匹配 <CircleHelp size={12} />
-                      </Tip>
-                    </th>
-                    <th className="sub-finance-col"><Tip text="按站点请求账单的倍率前输入／输出单价与价格设置比较；单位为美元／百万 token。缺少账单或 token 样本时不判为正常。">单价异常 <CircleHelp size={12} /></Tip></th>
-                    <th className="sub-check-col"><Tip text={fingerprintNote}>模型指纹 <CircleHelp size={12}/></Tip></th>
-                    <th className="sub-check-col">Astra 降智</th>
-                    <th className="sub-check-col">远程压缩</th>
-                    <th className="sub-check-col"><Tip text={toolUseDescription}>Tool use <CircleHelp size={12} /></Tip></th>
-                    <th className="sub-check-col">回复 / 诊断</th>
-                    <th>最近检测</th>
-                    <th><Tip text="默认开启。关闭后跳过批量模型、降智、压缩、Tool use 及同步后的自动检测；仍可手动检测此渠道。已提交的任务继续执行。">批量检测 <CircleHelp size={12}/></Tip></th>
-                    <th>操作</th>
+                    <th scope="col">渠道 / 站点</th>
+                    {managementColumns.map(id => <th scope="col" key={id} data-column={id}>
+                      {managementColumnHelp[id] ? <Tip text={managementColumnHelp[id]}>{managementColumnLabels[id]} <CircleHelp size={12} aria-hidden="true" /></Tip> : managementColumnLabels[id]}
+                    </th>)}
+                    <th scope="col">操作</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1773,8 +1765,8 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                       const scopedModels = pending(currentAccount.state) && currentAccount.job_kind === "sync" ? currentAccount.sync_models : undefined;
                       const checkByModel = new Map(checks.map(c=>[c.model,c]));
                       const overviewChecks = scopedModels?.length ? [...new Set(scopedModels)].map(model => checkByModel.get(model) || {model,state:"idle",message:"",result:null}) : checks;
+                      const scopeNote = scopedModels?.length ? `本次已选 ${overviewChecks.length} 个模型 · 全部 ${checks.length} 个模型记录可在详情查看` : undefined;
                       const liveGroup = progressByAccount.get(account.id)?.progress?.groups.find(g=>g.group_id===t.group_id);
-                      const scopeLabel = scopedModels?.length ? `本次已选 ${overviewChecks.length} 个模型` : `全部 ${checks.length} 个模型（含历史记录）`;
                       const openDrawer = () => { if (pageData) setManagementDetail(managementRow); };
                       return (
                       <tr
@@ -1795,65 +1787,58 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                         aria-label={`查看 ${account.name} ${t.name} 渠道详情`}
                       >
                         <td>
-                          <strong>{t.name}</strong>
-                          <small className="check-source">
+                          <strong title={t.name}>{t.name}</strong>
+                          <small className="check-source" title={[account.name, t.channel].filter(Boolean).join(" · ")}>
                             {account.name}
                             {t.channel ? ` · ${t.channel}` : ""}
                           </small>
-                          {managementColumns !== "operations" && <small className="check-source">
-                            {configured ? `${configured.source_name} · 已有渠道` : `分组 #${t.group_id}`}
-                            {!configured && !t.active && " · 已不可用"}
-                          </small>}
                         </td>
-                        {tableModel && <td className="mono">{tableModel}</td>}
-                        <td className="sub-platform-col">
-                          {t.platform}
-                          <small className="check-source">
-                            {t.key_id ? `key #${t.key_id}` : configured ? "配置密钥" : "尚未创建"}
-                          </small>
-                          {managementColumns !== "operations" && <ChannelProtocolSummary row={managementRow} imports={imports.data} routes={optimizationRoutes}/>}
-                        </td>
-                        <td className="sub-finance-col"><BillingRate target={t} model={tableModel} configured={configured} /></td>
-                        <td>
-                          {t.state === "error" ? (
+                        {managementColumns.map(id => {
+                          const content = () => {
+                            switch (id) {
+                              case "model": return <span className="mono management-table-label" title={tableModel}>{tableModel || (checks.length ? `${checks.length} 个模型` : "—")}</span>;
+                              case "platform": return <>
+                                <span title={t.platform}>{t.platform}</span>
+                                <small className="check-source">{t.key_id ? `key #${t.key_id}` : configured ? "配置密钥" : "尚未创建"}</small>
+                              </>;
+                              case "protocol": return <ChannelProtocolSummary row={managementRow} imports={imports.data} routes={optimizationRoutes}/>;
+                              case "rate": return <BillingRate target={t} model={tableModel} configured={configured} compact />;
+                              case "availability": return t.state === "error" ? (
                             <span className="check-status error">同步失败</span>
                           ) : selected ? (
                             <AvailabilityStatus check={selected} />
                           ) : (
-                            <>{scopedModels?.length ? <small className="check-source" title={`全部 ${checks.length} 个模型记录仍可在详情查看`}>{scopeLabel}</small> : null}
-                            {liveGroup && scopedModels?.length ? <>
-                              <small className="check-status">本次进度：{liveGroup.completed}/{liveGroup.total} 完成 · {liveGroup.running} 检测中 · {liveGroup.queued} 排队{liveGroup.interrupted ? ` · ${liveGroup.interrupted} 已中断` : ""}</small>
-                            </> : <GroupAvailability checks={overviewChecks} />}</>
-                          )}
-                        </td>
-                        <td className="mono sub-latency-col">
-                          <ResponseLatency
+                            liveGroup && scopedModels?.length ?
+                              <Tip text={`${liveGroup.running} 检测中 · ${liveGroup.queued} 排队${liveGroup.interrupted ? ` · ${liveGroup.interrupted} 已中断` : ""}`}>
+                                <span className="check-status">{liveGroup.completed}/{liveGroup.total} 完成</span>
+                              </Tip> : <GroupAvailability checks={overviewChecks} scope={scopeNote} />
+                          );
+                              case "latency": return <ResponseLatency
                             protocol={selected?.result?.availability.protocol}
                             firstResponse={selected?.result?.availability.first_response_ms}
                             created={
                               selected?.result?.availability.response_created_ms
                             }
                             text={selected?.result?.availability.ttft_ms}
-                          />
-                        </td>
-                        <td className="sub-check-col">
-                          {selected ? (
+                          />;
+                              case "match": return selected ? (
                             <ModelMatch check={selected} />
                           ) : (
-                            <><small className="check-source">{scopeLabel}</small>{liveGroup && scopedModels?.length ? <small className="check-source">已完成 {liveGroup.completed}/{liveGroup.total} · 刷新渠道查看匹配结果</small> : <GroupModelMatch checks={overviewChecks} />}</>
-                          )}
-                        </td>
-                        <td className="sub-finance-col">{selected ? <PriceStatus check={selected} prices={prices.data?.data} /> : <GroupPriceStatus checks={checks} prices={prices.data?.data} />}</td>
-                        <td className="sub-check-col"><FingerprintCell entries={(displayedPage?.context.fingerprints[id] || []).map(({target,record})=>({target,record}))} supportedModels={displayedPage?.context.fingerprint_models}/></td>
-                        <td className="sub-check-col">
-                          <div className="quality-status-stack"><Verdict result={groupQualityResult(t)} history={t.history} /><QualityProbability history={t.history} checkedAt={groupQualityResult(t)?.checked_at} /></div>
-                        </td>
-                        <td className="sub-check-col"><div className="quality-status-stack"><CompactionStatus target={t} model={tableModel || undefined} /><button className="button small ghost" disabled={!canCheck(account, t, "compaction", configured)} aria-busy={checkBusy(account, t, "compaction", configured)}
-                          title={capabilityCheckScope} aria-label={`检测 ${account.name} ${t.name} 的远程压缩`} onClick={() => void checkCompaction([{account, target:t, configured}])}>{checkBusy(account, t, "compaction", configured) && <Spinner small />}重新检测</button></div></td>
-                        <td className="sub-check-col"><div className="quality-status-stack"><ToolUseStatus target={t} model={tableModel || undefined} /><button className="button small ghost" disabled={!canCheck(account, t, "tool-use", configured)} aria-busy={checkBusy(account, t, "tool-use", configured)}
-                          title={capabilityCheckScope} aria-label={`检测 ${account.name} ${t.name} 的 Tool use`} onClick={() => void checkToolUse([{account, target:t, configured}])}>{checkBusy(account, t, "tool-use", configured) && <Spinner small />}重新检测</button></div></td>
-                        <td className="sub-check-col">
-                          {<CheckDetails
+                            liveGroup && scopedModels?.length ?
+                              <Tip text={`已完成 ${liveGroup.completed}/${liveGroup.total} · 刷新渠道查看匹配结果`}><span className="muted">待更新</span></Tip>
+                              : <GroupModelMatch checks={overviewChecks} scope={scopeNote} />
+                          );
+                              case "price": return selected ? <PriceStatus check={selected} prices={prices.data?.data} /> : <GroupPriceStatus checks={checks} prices={prices.data?.data} />;
+                              case "fingerprint": return <FingerprintCell entries={displayedPage?.context.fingerprints[managementRow.id] || []} supportedModels={displayedPage?.context.fingerprint_models}/>;
+                              case "quality": {
+                                const result = groupQualityResult(t);
+                                return <span className="management-metric"><Verdict result={result} history={t.history} /><QualityProbability history={t.history} checkedAt={result?.checked_at} /></span>;
+                              }
+                              case "compaction": return <span className="management-metric"><CompactionStatus target={t} model={tableModel || undefined} /><button className="icon-button" disabled={!canCheck(account, t, "compaction", configured)} aria-busy={checkBusy(account, t, "compaction", configured)}
+                                title="重新检测远程压缩" aria-label={`检测 ${account.name} ${t.name} 的远程压缩`} onClick={() => void checkCompaction([{account, target:t, configured}])}>{checkBusy(account, t, "compaction", configured) ? <Spinner small /> : <RefreshCw size={13} />}</button></span>;
+                              case "tool-use": return <span className="management-metric"><ToolUseStatus target={t} model={tableModel || undefined} /><button className="icon-button" disabled={!canCheck(account, t, "tool-use", configured)} aria-busy={checkBusy(account, t, "tool-use", configured)}
+                                title="重新检测 Tool use" aria-label={`检测 ${account.name} ${t.name} 的 Tool use`} onClick={() => void checkToolUse([{account, target:t, configured}])}>{checkBusy(account, t, "tool-use", configured) ? <Spinner small /> : <RefreshCw size={13} />}</button></span>;
+                              case "diagnostics": return <CheckDetails
                             key={tableModel || "all"}
                             account={account}
                             target={t}
@@ -1861,36 +1846,21 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                             selected={selected}
                             prices={prices.data?.data}
                             configured={configured}
-                          />}
-                        </td>
-                        <td className="mono">
-                          {(() => {
-                            const at =
-                              selected?.result?.checked_at ??
-                              (selected
-                                ? 0
-                                : Math.max(
-                                    0,
-                                    ...checks.map(
-                                      (c) => c.result?.checked_at || 0,
-                                    ),
-                                  ));
-                            return at ? dateTime(at) : "—";
-                          })()}
-                          {selected &&
-                            pending(selected.state) &&
-                            selected.result && (
-                              <small className="check-source">上次结果</small>
-                            )}
-                        </td>
-                        <td>
-                          <button type="button" role="switch" aria-label={`${account.name} ${t.name} 的批量检测开关`}
+                          />;
+                              case "checked": {
+                                const at = selected ? selected.result?.checked_at || 0 : Math.max(0, ...checks.map(c => c.result?.checked_at || 0));
+                                return <span className="mono" title={selected && pending(selected.state) && selected.result ? "上次检测结果" : undefined}>{at ? dateTime(at) : "—"}</span>;
+                              }
+                              case "batch": return <button type="button" role="switch" aria-label={`${account.name} ${t.name} 的批量检测开关`}
                             aria-checked={detectionEnabled(managementRow,detection.disabled)} className="channel-detection-switch"
                             disabled={tablePending || detection.isPending || detection.isError || detection.busy}
                             title="关闭后跳过批量检测，仍可点击此渠道的检测按钮。已提交的任务继续执行。"
                             onKeyDown={e=>e.stopPropagation()}
-                            onClick={()=>void detection.save(managementRow,!detectionEnabled(managementRow,detection.disabled))}><span/></button>
-                        </td>
+                            onClick={()=>void detection.save(managementRow,!detectionEnabled(managementRow,detection.disabled))}><span/></button>;
+                            }
+                          };
+                          return <td key={id} data-column={id}>{content()}</td>;
+                        })}
                         <td>
                           <div className="sub-row-actions">
                           <button
@@ -1947,7 +1917,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
             </div>
             <div className="table-footer" aria-busy={tablePending}>
               <span>
-                {tablePending ? "正在核对当前结果" : <>共 {total} 个渠道 · {eligibleCount} 个可发起检测{fingerprintsSubmitted > 0 && ` · 指纹已提交 ${fingerprintsSubmitted} 项`}</>}
+                {tablePending ? "正在核对当前结果" : <>共 {total} 个渠道 · {eligibleCount} 个可发起检测</>}
               </span>
               <div className="sub-pagination">
                 <button

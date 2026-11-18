@@ -10,7 +10,7 @@ import { ControlPersistence } from "./ControlPersistence";
 import { ManagedConfiguration } from "./ManagedConfiguration";
 import { ChannelProtocolRepair } from "./ChannelProtocolRepair";
 import { FingerprintSettings } from "./FingerprintSettings";
-import { WorkbenchDisclosure, WorkbenchTabs } from "./Workbench";
+import { WorkbenchDisclosure, WorkbenchNotice, WorkbenchTabs } from "./Workbench";
 export interface ConsoleSource {
   id: string;
   name: string;
@@ -102,6 +102,7 @@ export function SourceSettings({
         <div className="data-title">
           <Server size={20} />
           <h2>设置</h2>
+          {section === "sources" && <WorkbenchNotice urgent label="来源设置状态" messages={[!open && error, readError && `来源目录读取失败，现有来源未改变。${readError}`]} />}
         </div>
         {section === "sources" && <div className="data-actions">
           {refreshAction}
@@ -113,22 +114,13 @@ export function SourceSettings({
       </div>
       <WorkbenchTabs label="设置视图" value={section} onChange={setSection} tabs={[["sources", "来源"], ["fingerprints", "模型指纹"], ["account", "账户安全"]]} />
       <div hidden={section !== "sources"}>
-      {error && !open && (
-        <p role="alert" className="error-banner">
-          {error}
-        </p>
-      )}
-      {readError && <p role="alert" className="error-banner">
-        来源目录读取失败，现有来源未改变。{readError}
-      </p>}
       {loading && !sources.length && <SourceLoading />}
       {sources.map((src) => (
         <div className="source-item" key={src.id}>
           <Server size={20} />
           <div>
-            <strong>{src.name}</strong>
-            {src.temporarily_unavailable && <small role="status">暂时不可用</small>}
-            <small>{src.base}</small>
+            <strong title={src.name}>{src.name}</strong>
+            <small title={src.base}>{src.base}{src.temporarily_unavailable && <span role="status"> · 暂时不可用</span>}</small>
           </div>
           <WorkbenchDisclosure label="管理">
           <ChannelSettings row={{provider:GLOBAL_SETTINGS_SCOPE,provider_name:"全局设置",source_id:src.id,source_name:src.name,model:""}} />

@@ -59,6 +59,18 @@ export function BalanceValue({
         {balanceStatus[balance.status] || "暂无数据"}
       </span>
     );
+  if (!detail && (balance.keys.length > 1 || balance.omitted_keys)) {
+    return <Tip text={<div className="table-diagnostic-tip">
+      {balance.keys.map((item, index) => <div key={index}>
+        <strong>{item.label || `Key ${item.position ?? index + 1}`}</strong> · {balanceLabel(item)}
+        {item.checked_at ? <div>{dateTime(item.checked_at)}</div> : null}
+      </div>)}
+      {balance.omitted_keys ? <div>另 {balance.omitted_keys} 个密钥未查询</div> : null}
+      <div>共享余额不可相加。</div>
+    </div>}>
+      <span className="mono balance-key-summary">{balance.keys.length + (balance.omitted_keys || 0)} 个密钥</span>
+    </Tip>;
+  }
   return (
     <div className={`balance-values ${detail ? "expanded" : ""}`}>
       {balance.keys.map((item, index) => (
@@ -81,7 +93,7 @@ export function BalanceValue({
           }
         >
           <span className="amount">
-            {item.label ? (
+            {item.label && detail ? (
               <small>{item.label} </small>
             ) : (
               balance.keys!.length > 1 && <small>Key {item.position} </small>
@@ -94,6 +106,8 @@ export function BalanceValue({
                 value={item.amount}
                 currency={item.currency || "USD"}
               />
+            ) : item.windows && item.windows.length > 1 && !detail ? (
+              <span title={balanceLabel(item)}>{item.windows.length} 个周期额度</span>
             ) : item.windows?.length ? (
               item.windows.map((window, index) => (
                 <span key={window.window}>

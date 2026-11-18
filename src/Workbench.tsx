@@ -91,14 +91,15 @@ export function WorkbenchTabs({ label, value, tabs, onChange }: {
     <button key={key} type="button" aria-current={key === value ? "true" : undefined} onClick={() => onChange(key)}>{text}</button>)}</nav>;
 }
 
-export function WorkbenchNotice({ messages, label = "数据状态" }: {
+export function WorkbenchNotice({ messages, label = "数据状态", urgent = false }: {
   messages: readonly (string | false | null | undefined)[];
   label?: string;
+  urgent?: boolean;
 }) {
   const visible = [...new Set(messages.filter((message): message is string => !!message))];
   if (!visible.length) return null;
   return <span className="workbench-notice">
-    <span className="sr-only" role="status">{visible.map(message => <span key={message}>{message}</span>)}</span>
+    <span className="sr-only" role={urgent ? "alert" : "status"}>{visible.map(message => <span key={message}>{message}</span>)}</span>
     <Tip text={<div className="workbench-notice-text">{visible.map(message => <p key={message}>{message}</p>)}</div>}>
       <CircleAlert size={15} aria-label={label} />
     </Tip>

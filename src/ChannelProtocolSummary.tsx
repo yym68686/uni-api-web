@@ -53,26 +53,11 @@ export function ChannelProtocolSummary({
       ),
     ),
   ];
-  return (
-    <div className="channel-protocol-summary">
-      {descriptions.length ? (
-        descriptions.map((text) => (
-          <small className="check-source" key={text}>
-            {text}
-          </small>
-        ))
-      ) : (
-        <small className="check-source">尚未接入 · 无实际引擎</small>
-      )}
-      {!!detected.length && (
-        <small className="check-source">
-          检测：{detected.map(channelProtocolLabel).join(" / ")}
-        </small>
-      )}
-      {channels.length > 1 &&
-        new Set(channels.map((c) => protocolForEngine(c.engine))).size > 1 && (
-          <small className="check-source">多个协议接入 · 优化时逐项核对</small>
-        )}
-    </div>
-  );
+  const detectedLabel = detected.length ? `检测：${detected.map(channelProtocolLabel).join(" / ")}` : "";
+  const details = [...descriptions, detectedLabel,
+    channels.length > 1 && new Set(channels.map(c => protocolForEngine(c.engine))).size > 1
+      ? "多个协议接入 · 优化时逐项核对" : ""].filter(Boolean).join("\n");
+  return <small className="check-source channel-protocol-summary management-table-label" title={details}>
+    {descriptions.length > 1 ? `${descriptions.length} 种引擎` : descriptions[0] || "未接入"}
+  </small>;
 }

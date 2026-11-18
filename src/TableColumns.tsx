@@ -24,11 +24,12 @@ export function useTableColumns<K extends string>(key: string, choices: readonly
   return [selection, set] as const;
 }
 
-export function TableColumns<K extends string>({ choices, value, onChange, onReset }: {
+export function TableColumns<K extends string>({ choices, value, onChange, onReset, inline }: {
   choices: readonly TableColumn<K>[];
   value: readonly K[];
   onChange: (next: K[]) => void;
   onReset: () => void;
+  inline?: boolean;
 }) {
   const dragged = useRef<K | null>(null);
   const byId = new Map(choices.map(column => [column.id, column]));
@@ -39,8 +40,7 @@ export function TableColumns<K extends string>({ choices, value, onChange, onRes
     next.splice(index, 0, id);
     onChange(next);
   };
-  return <details className="table-column-options">
-    <summary>数据列</summary>
+  const fields = <>
     <button className="text-link table-column-reset" type="button" onClick={onReset}>恢复默认列</button>
     <ul aria-label="数据列及显示顺序">
       {[...selected, ...choices.filter(({ id }) => !value.includes(id))].map(({ id, label }) => {
@@ -69,5 +69,7 @@ export function TableColumns<K extends string>({ choices, value, onChange, onRes
         </li>;
       })}
     </ul>
-  </details>;
+  </>;
+  return inline ? <div className="table-column-options table-column-options-inline">{fields}</div>
+    : <details className="table-column-options"><summary>数据列</summary>{fields}</details>;
 }

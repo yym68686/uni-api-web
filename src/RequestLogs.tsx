@@ -31,7 +31,7 @@ import { useKeyRequestStats } from "./keyRequestStats";
 import { friendlyReason } from "./requestTraceModel";
 import { RequestTraceDialog, requestTraceOptions } from "./RequestTrace";
 import { LatencyBadge } from "./LatencyBadge";
-import { Spinner } from "./ui";
+import { Spinner, Tip } from "./ui";
 import { WorkbenchDisclosure, WorkbenchNotice } from "./Workbench";
 import { TableColumns, useTableColumns } from "./TableColumns";
 import { readWorkspace, requestLocation, validLogWindow, type LogPosition, type LogWindow } from "./workspaceLocation";
@@ -418,6 +418,7 @@ export function RequestLogsPage({
     filters.sourceId ||
     (filters.keyId.includes("::") ? filters.keyId.split("::")[0] : "");
   const traceButton = (row: RequestLog, compact = false) => <button type="button" className="request-log-id"
+    title={row.request_id || row.trace_id}
     aria-label={compact && (row.request_id || row.trace_id) ? `查看请求 ${row.request_id || row.trace_id}` : undefined}
     disabled={!row.request_id && !row.trace_id} onClick={event => { event.stopPropagation(); open(row); }}>
     {compact ? "查看" : row.request_id || row.trace_id || "请求 ID 未记录"}
@@ -429,20 +430,23 @@ export function RequestLogsPage({
         {traceButton(row)}
       </td>;
       case "source": return <td key={id} className="log-extra-column">
-        <strong>{sourceName(row.source_id)}</strong>
+        <strong title={sourceName(row.source_id)}>{sourceName(row.source_id)}</strong>
         <small title={row.key_id}>{keyLabels.get(rowKey(row))?.replace(`${sourceName(row.source_id)} · `, "") ||
           (row.key_id ? `历史 key · ${row.key_id.slice(0, 10)}…` : "未记录 API key")}</small>
       </td>;
       case "model": return <td key={id} className="log-extra-column">
-        <strong className="mono">{row.model || "未记录模型"}</strong>
-        <small>{row.endpoint || "未记录端点"} · {row.stream ? "流式" : "非流式"}</small>
+        <strong className="mono" title={row.model}>{row.model || "未记录模型"}</strong>
+        <small title={row.endpoint}>{row.endpoint || "未记录端点"} · {row.stream ? "流式" : "非流式"}</small>
       </td>;
       case "result": return <td key={id} className="log-outcome">
-        <span className={`trace-status ${states[row.result]?.tone || "neutral"}`}>
-          {states[row.result]?.label || "未知"}{row.status > 0 && ` · HTTP ${row.status}`}
-        </span>
-        <small>{row.observed_attempts != null ? `已记录 ${row.observed_attempts} 次尝试` : "尝试数未确认"}</small>
-        {row.failure_reason && <small className="request-log-error">{friendlyReason(row.failure_reason)}</small>}
+        <Tip text={<div className="table-diagnostic-tip">
+          <div>{row.observed_attempts != null ? `已记录 ${row.observed_attempts} 次尝试` : "尝试数未确认"}</div>
+          {row.failure_reason && <div>{friendlyReason(row.failure_reason)}</div>}
+        </div>}>
+          <span className={`trace-status ${states[row.result]?.tone || "neutral"}`}>
+            {states[row.result]?.label || "未知"}{row.status > 0 && ` · HTTP ${row.status}`}
+          </span>
+        </Tip>
       </td>;
       case "duration": return <td key={id} className="mono">{ms(row.duration_ms)}</td>;
       case "latency": return <td key={id} className="mono">
@@ -466,6 +470,7 @@ export function RequestLogsPage({
             keys.error && "API key 目录暂不可用；请求日志仍可浏览。",
             data?.import?.caught_up === false && "请求记录仍在同步，当前日志可能不完整。",
           ]} />
+          <WorkbenchNotice urgent label="请求日志读取失败" messages={[error && `${refreshError && data ? "刷新失败，保留当前日志。" : ""}${error.message}`]} />
         </div>
         <div className="workbench-tools">
           <WorkbenchDisclosure label="定位 ID" icon={<Search size={14} aria-hidden="true" />}>
@@ -684,12 +689,6 @@ export function RequestLogsPage({
           </WorkbenchDisclosure>
         </div>
       </div>
-      {error && (
-        <p role="alert" className="error-banner">
-          {refreshError && data ? "刷新失败，保留当前日志。" : ""}
-          {error.message}
-        </p>
-      )}
       {query.isPending ? (
         <TableLoading kind="requests" rows={8} />
       ) : !data?.data.length ? (

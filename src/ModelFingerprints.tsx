@@ -39,6 +39,11 @@ export function fingerprintStatus(record?: FingerprintRecord) {
 function partialFingerprint(result?: FingerprintResult | null) {
   return result?.decision === "partial" && result.used_outputs > 0 && result.used_outputs < 3 && result.candidates?.length > 0;
 }
+function fingerprintLabel(status: string, result?: FingerprintResult | null) {
+  if (status === "error" && result?.samples?.some(sample => sample.error_code === "reference_effort_unsupported")) return "采样参数不支持";
+  if (result?.decision === "not_model") return "无法判定";
+  return fingerprintLabels[status] || "检测失败";
+}
 export function fingerprintProbabilityClass(p: number | null) {
   return p === null ? "quality-unknown" : p === 1 ? "quality-perfect" : p >= .9 ? "quality-partial" : "quality-poor";
 }
@@ -104,7 +109,7 @@ export function FingerprintStatus({ record }: { record?: FingerprintRecord }) {
   return <div className="quality-status-stack">
     <span className={`check-status ${status === "match" ? "pass" : status === "mismatch" ? "fail" : "inconclusive"}`}>
       {fingerprintBusy(record) ? <Spinner small /> : status === "match" ? <Check size={14}/> : status === "mismatch" ? <X size={14}/> : <CircleHelp size={14}/>}
-      {status === "error" && result?.samples?.some(s => s.error_code === "reference_effort_unsupported") ? "采样参数不支持" : result?.decision === "not_model" ? "无法判定" : fingerprintLabels[status] || "检测失败"}
+      {fingerprintLabel(status, result)}
     </span>
     {partial && result ? <Tip text={`${partialNote}${record?.message || ""}`}>
       <small className="muted">暂定排名 · {result.used_outputs}/3<br/>最接近：{result.prediction_name}</small>
@@ -113,13 +118,41 @@ export function FingerprintStatus({ record }: { record?: FingerprintRecord }) {
     </Tip>}
   </div>;
 }
-export function FingerprintCell({ entries, error, loading, supportedModels = [] }: { entries: ReturnType<typeof rowFingerprints>; error?: Error | null; loading?: boolean; supportedModels?: string[] }) {
-  if (entries.length && (error || loading)) return <span className="muted">{error ? fingerprintReadMessage(error) : "读取中…"}</span>;
+export function FingerprintCell({ entries, error, loading, supportedModels = [] }: { entries: readonly {target: FingerprintTarget; record?: FingerprintRecord}[]; error?: Error | null; loading?: boolean; supportedModels?: string[] }) {
+  if (entries.length && error) return <Tip text={fingerprintReadMessage(error)}><span className="muted">读取失败</span></Tip>;
+  if (entries.length && loading) return <span className="muted">读取中…</span>;
   if (!entries.length) return <span className="muted">—</span>;
-  return <div className="fingerprint-cell">{entries.map(({target,record}) => <div key={fingerprintKey(target)}>
-    {entries.length > 1 && <small className="check-source">{target.model}</small>}
-    {!record && !supportedModels.includes(target.model) ? <span className="muted">指纹检测服务待更新</span> : <FingerprintStatus record={record}/>}
-  </div>)}</div>;
+  const summaries = entries.map(({target, record}) => {
+    const status = fingerprintStatus(record);
+    const partial = partialFingerprint(record?.result);
+    const result = record?.state === "done" || partial ? record?.result : null;
+    const probability = result && (status === "match" || status === "mismatch") ? result.probability : null;
+    const unsupported = !record && !supportedModels.includes(target.model);
+    const label = unsupported ? "待更新" : fingerprintLabel(status, result);
+    return {target, status, label, probability, partial, result, recorded: !!record, message:unsupported ? "指纹检测服务待更新" : record?.message};
+  });
+  const recorded = summaries.filter(item => item.recorded);
+  // The all-model view includes untested candidates; those aren't fingerprint results.
+  const visible = recorded.length ? recorded : summaries;
+  const [first] = visible;
+  const mismatch = visible.some(item => item.status === "mismatch");
+  const label = visible.every(item => item.label === first.label) ? first.label : mismatch ? "有不匹配" : "多种状态";
+  const probability = visible.length === 1 ? first.probability : null;
+  return <Tip text={<div className="table-diagnostic-tip">
+    {summaries.map(({target, label, probability, partial, result, message}) => <div key={fingerprintKey(target)}>
+      <strong>{target.model} · {label}</strong>
+      {partial && result && <div>暂定排名 · {result.used_outputs}/3</div>}
+      {probability != null && <div>匹配概率：{rate(probability)}</div>}
+      {result?.prediction_name && <div>最接近：{result.prediction_name}</div>}
+      {message && <div>{message}</div>}
+    </div>)}
+  </div>}>
+    <span className="fingerprint-cell">
+      <span className={label === "匹配" ? "check-status pass" : mismatch ? "check-status fail" : "muted"}>{label}</span>
+      {probability != null && <small className={`quality-probability ${fingerprintProbabilityClass(probability)}`}>{rate(probability)}</small>}
+      {recorded.length > 1 && <small className="muted" aria-label={`${recorded.length} 个模型有检测记录`}>{recorded.length}</small>}
+    </span>
+  </Tip>;
 }
 export function FingerprintPanel({ targets, revisions, onlySupported }: { targets: FingerprintTarget[]; revisions?: Record<string,string>; onlySupported?: boolean }) {
   const query = useModelFingerprints(), client = useQueryClient();

@@ -467,6 +467,7 @@ export function Automation({
             <h2>自动化</h2>
             <span className="count-badge">{tasks.length}</span>
             <WorkbenchNotice label="执行状态" messages={[runNotice]} />
+            <WorkbenchNotice urgent label="自动化操作失败" messages={[!draft && error]} />
           </div>
           <div className="data-actions">
             <button className="button small" onClick={reload} disabled={loading || auditLoading}>
@@ -482,11 +483,6 @@ export function Automation({
       </div>
       <WorkbenchTabs label="自动化视图" value={section} onChange={value => {setSection(value);if (value === "history") setSelected("");}}
         tabs={[["tasks","任务"],["history","执行记录"]]} />
-      {error && !draft && (
-        <p role="alert" className="error-banner">
-          {error}
-        </p>
-      )}
       <div className="data-panel automation-list" hidden={section !== "tasks"}>
         {loading && !tasks.length && <TaskLoading />}
         {tasks.map((t) => (
@@ -966,12 +962,12 @@ export function Automation({
               {audit.map((a) => (
                 <article key={a.id}>
                   <div>
-                    <strong>
+                    <strong title={a.task_name}>
                       {statusLabels[a.status] || a.status} · {a.task_name}
                     </strong>
                     <span>{time(a.run_at)}</span>
                   </div>
-                  <p>{a.reason}</p>
+                  <p title={a.reason}>{a.reason}</p>
                   <button className="button small" onClick={() => setDetail(a)}>
                     查看详情
                   </button>

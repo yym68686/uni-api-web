@@ -32,7 +32,6 @@ import {
   Clock3,
   Filter,
   Gauge,
-  Globe2,
   KeyRound,
   Layers3,
   Radio,
@@ -63,8 +62,7 @@ import {
 } from "./ChannelChecks";
 import {
   useChannelControls,
-  ChannelControlCell,
-  ChannelControlActions,
+  ChannelControlDrawer,
 } from "./ChannelControls";
 import { ResponseLatency } from "./LatencyBadge";
 import { useSubImports, boundGroups } from "./sub2apiImports";
@@ -758,11 +756,13 @@ export default function Dashboard({
   } = filters;
   const [page, setPage] = useState(0),
     [editingRoutes, setEditingRoutes] = useState<"channels" | "routing" | null>(null);
+  const [filterTab, setFilterTab] = useState("conditions");
+  const routeOpener = useRef<HTMLElement | null>(null);
   const adjustingChannels = channelView && editingRoutes === view;
   const canEditRoutes = channelView && !!baseConnection.account;
-  const setAdjustingChannels = (editing: boolean) => setEditingRoutes(editing && (view === "channels" || view === "routing") ? view : null);
-  const previewingSort = channelView && !adjustingChannels && sortPreview?.scope === channelScope;
-  useEffect(() => setSortPreview(null), [channelScope, view, adjustingChannels]);
+  const previewingSort = channelView && sortPreview?.scope === channelScope;
+  useEffect(() => setSortPreview(null), [channelScope, view]);
+  useEffect(() => setFilterTab("conditions"), [view]);
   const sortRules = channelSort.rules;
   useEffect(() => {
     saveView(baseConnection.base, view);
@@ -789,7 +789,7 @@ export default function Dashboard({
   const [columnView, setColumnView] = useState<ChannelMetricLayout>("run");
   const [customColumns, setCustomColumns] = useTableColumns("uni-console:channel-columns:v1", observationColumns);
   const compactViewport = useCompactWorkbench();
-  const compactObservation = compactViewport && !customColumns && columnView === "run" && !routeView && !adjustingChannels;
+  const compactObservation = compactViewport && !customColumns && columnView === "run" && !routeView;
   const columnChoices = baseConnection.account ? observationColumns : observationColumns.filter(({ id }) => id !== "quality" && id !== "fingerprint");
   const visibleColumns = customColumns ? customColumns.filter(id => columnChoices.some(choice => choice.id === id)) : observationPreset(columnView, compactObservation, !!baseConnection.account);
   const observationLayout = customColumns ? "custom" : columnView;
@@ -1012,8 +1012,8 @@ export default function Dashboard({
     model,
     enabled: !!baseConnection.account && (routeView || adjustingChannels),
   });
-  const tableRows = channelView && adjustingChannels ? controls.arrange(rows)
-    : previewingSort ? previewChannelOrder(rows, sortPreview.rows) : rows;
+  const tableRows = previewingSort ? previewChannelOrder(rows, sortPreview.rows)
+    : routeView ? controls.arrange(rows, true) : rows;
   const rowRanks = useMemo(
     () => new Map(tableRows.map((row, i) => [rowId(row), i + 1])),
     [tableRows],
@@ -1433,14 +1433,25 @@ export default function Dashboard({
   ];
   const observationMessages = [
     ...historyMessages,
+    previewingSort && "排序预览 · 未应用到路由",
+    !!error && rows.length > 0 && `刷新失败，保留当前数据。${error}`,
+    view === "balances" && !balanceThresholdValid && "余额阈值需为非负金额；已保留上次条件。",
     channelView && !!cachedDashboardAt && (metrics.isFetching ? "上次完整数据 · 正在后台更新" : "当前显示上次完整数据"),
     channelView && (qualityColumns || checkingChannels) && checks.error && `最近检测结果读取失败：${checks.error.message}`,
     channelView && balanceFilter && unknownBalances > 0 && `仅显示已核验且不足的渠道 · ${unknownBalances} 个未核验`,
     view === "balances" && thresholdUnknown > 0 && `${thresholdUnknown} 个渠道未能判定阈值；仅显示已确认结果。`,
     channelView && checkingChannels && (observedDetection.notice?.text || observedDetection.batchIssue),
   ];
-  const routeActions = (closeDisclosureOnEdit = false) => <ChannelControlActions controls={controls} sources={sourceList} keys={keys.data?.data || []}
-    editing={adjustingChannels} onEditingChange={setAdjustingChannels} closeDisclosureOnEdit={closeDisclosureOnEdit} />;
+  const routeButton = <button className="button small" type="button"
+    aria-haspopup="dialog" aria-expanded={adjustingChannels} aria-controls={adjustingChannels ? "channel-route-editor" : undefined}
+    onClick={event => {
+      if (!canEditRoutes || (view !== "channels" && view !== "routing")) return;
+      const disclosure = event.currentTarget.closest("details");
+      routeOpener.current = disclosure?.querySelector("summary") || event.currentTarget;
+      if (disclosure) disclosure.open = false;
+      if (adjustingChannels) document.getElementById("channel-route-editor")?.querySelector("input")?.focus();
+      else setEditingRoutes(view);
+    }}><SlidersHorizontal size={14} aria-hidden="true" />调整顺序</button>;
   const apiKeyFilter = <div className="select-field key-select">
     <KeyRound size={15} aria-hidden="true" />
     <select aria-label="API key 筛选" value={keyId} onChange={e => setFilter("keyId", e.target.value)}>
@@ -1468,7 +1479,6 @@ export default function Dashboard({
     <ChannelMetricHeaders keySelected={!!keyId} channels={filtered} columns={visibleColumns} renderDetection={id => id === "quality"
       ? <th className="column-quality"><Tip text="显示此来源、此渠道最近一次 gpt-6-astra 检测结果，与当前指标时间范围无关；不代表表中每个模型都已单独检测。">是否降智 <CircleHelp size={12} /></Tip></th>
       : <th className="column-quality"><Tip text={`显示此来源、此渠道、当前模型的最新指纹结果，与渠道管理和详情共享数据，与指标时间范围无关。${fingerprintNote}`}>指纹 <CircleHelp size={12}/></Tip></th> } />
-    {adjustingChannels && <th><Tip text="修改作用于本行来源、当前选择的 API key 和模型（未选择则为全部），对所有端点和流式状态生效。无到期时间；设置开启“保留临时配置”时，重启后自动恢复已应用的更改。">临时控制 <CircleHelp size={12} /></Tip></th>}
   </>;
   return (
     <div className="app-shell">
@@ -1509,7 +1519,7 @@ export default function Dashboard({
         <main className="workspace" aria-label="工作区" tabIndex={-1} ref={mainRef}><PageBoundary key={view}><Suspense fallback={<PageLoading view={view} />}>
           {view === "overview" && !noSources && <section className="data-panel overview-scope" aria-label="总览统计范围">
             <div className="data-heading">
-              <div className="data-title"><Gauge size={18} /><h2>总览</h2><WorkbenchNotice messages={historyMessages} /></div>
+              <div className="data-title"><Gauge size={18} /><h2>总览</h2><WorkbenchNotice messages={[...historyMessages, error && `读取不完整：${error}`]} /></div>
               {refreshButton}
             </div>
             <div className="filters">
@@ -1534,7 +1544,6 @@ export default function Dashboard({
                 {models.map(value => <option value={value} key={value}>{value}</option>)}
               </select></label>
             </div>
-            {error && <p role="alert" className="coverage-note">读取不完整：{error}</p>}
           </section>}
           {view === "requests" ? <RequestLogsPage connection={baseConnection} sources={sourceList}/> : view === "sub2api" && baseConnection.account ? (
             <Sub2apiChecks
@@ -1615,7 +1624,8 @@ export default function Dashboard({
               <div className="data-heading workbench-heading" ref={observeHeading}>
                 <div className="data-title">
                   <h2>{routeView ? "路由顺序" : channelView ? "渠道观测" : "余额管理"}</h2>
-                  <WorkbenchNotice messages={observationMessages} />
+                  <WorkbenchNotice urgent={!!error && rows.length > 0} messages={observationMessages} />
+                  {channelView && <span className="sr-only" aria-label="排序">{previewingSort ? "排序预览 · 未应用到路由" : keyId ? "按当前 API key 的请求顺序" : sortRules.length ? "按自定义规则" : "按渠道配置顺序"}</span>}
                 </div>
                 <div className="workbench-tools">
                   {routeView && <button type="button" className="button small ghost" onClick={() => selectView("sub2api")}><ChevronLeft size={14} />渠道管理</button>}
@@ -1628,7 +1638,7 @@ export default function Dashboard({
                   </label>
                   {inlineModel && modelFilter}
                   {inlineKey && apiKeyFilter}
-                  {inlineRoute && !adjustingChannels && routeActions()}
+                  {inlineRoute && routeButton}
                   {view === "balances" && <WorkbenchDisclosure label="检查余额" icon={<Wallet size={14} aria-hidden="true" />}>
                     <p className="workbench-help">当前范围：{count(balanceCatalog.length)} 个渠道</p>
                     <button type="button" className="button small" disabled={!activeAudit && (!balanceCatalog.length || busy || search !== deferredSearch)} onClick={event => {
@@ -1638,8 +1648,11 @@ export default function Dashboard({
                       if (menu) { menu.open = false; menu.querySelector("summary")?.focus(); }
                     }}>{activeAudit ? "停止检查" : "检查当前范围"}</button>
                   </WorkbenchDisclosure>}
-                  <WorkbenchDisclosure key={view} label={`筛选${activeFilters.length ? ` ${activeFilters.length}` : ""}`} icon={<Filter size={14} aria-hidden="true" />}
+                  <WorkbenchDisclosure key={view} className="channel-filter-disclosure" label={`筛选${activeFilters.length ? ` ${activeFilters.length}` : ""}`} icon={<Filter size={14} aria-hidden="true" />}
                     title={[search, model, selectedSourceId && sourceList.find(source => source.id === selectedSourceId)?.name, statusFilter === "eligible" ? "可用" : statusFilter ? "不可用" : ""].filter(Boolean).join(" · ") || undefined}>
+                <WorkbenchTabs label="筛选面板" value={filterTab} onChange={setFilterTab}
+                  tabs={[["conditions","条件"],["display","显示"],["tools","工具"]]} />
+                <section hidden={filterTab !== "conditions"} aria-label="筛选条件">
                 <div className="data-actions" id="channel-workspace-actions">
                   <div className="search-field">
                     <Search size={17} />
@@ -1660,8 +1673,165 @@ export default function Dashboard({
                     )}
                   </div>
                 </div>
-                <div className="filters channel-filters" id="channel-workspace-filters" aria-label="渠道筛选">
-                  {channelView && !adjustingChannels && <ChannelSortDialog key={channelScope} rules={sortRules}
+                  <div className="channel-filter-grid">
+                {sourceList.length > 0 && (
+                  <label className="channel-filter-field">来源<span className="select-field">
+                    <select
+                      aria-label="uni-api 来源"
+                      value={selectedSourceId}
+                      onChange={(e) => {
+                        setFilter("sourceId", e.target.value);
+                        setFilter("keyId", "");
+                      }}
+                    >
+                      <option value="">全部来源</option>
+                      {sourceList.map((source) => (
+                        <option value={source.id} key={source.id}>
+                          {source.name}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown size={13} />
+                  </span></label>
+                )}
+                {!inlineKey && <div className="channel-filter-field"><span>API key</span>{apiKeyFilter}</div>}
+                {!inlineModel && <div className="channel-filter-field"><span>模型</span>{modelFilter}</div>}
+                {view === "balances" && (
+                  <>
+                    <label className="channel-filter-field">优先级<span className="select-field">
+                      <select
+                        aria-label="模型优先级筛选"
+                        value={balanceTopN}
+                        onChange={(e) => setFilter("balanceTopN", e.target.value)}
+                      >
+                        <option value="">全部优先级</option>
+                        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 50, 100].map((rank) => (
+                          <option key={rank} value={rank}>
+                            前 {rank} 名渠道
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown size={12} />
+                    </span></label>
+                    <label className="channel-filter-field">
+                      余额低于 $
+                      <input
+                        className="channel-filter-number" aria-label="余额低于美元"
+                        type="number"
+                        min="0"
+                        step="any"
+                        aria-invalid={!balanceThresholdValid}
+                        placeholder="不限"
+                        value={balanceThreshold}
+                        onChange={(e) => setFilter("balanceThreshold", e.target.value)}
+                      />
+                    </label>
+                  </>
+                )}
+                {channelView && (
+                  <>
+                    <label className="channel-filter-field">端点<span className="select-field">
+                      <select
+                        aria-label="端点筛选"
+                        value={endpoint}
+                        onChange={(e) => setFilter("endpoint", e.target.value)}
+                      >
+                        <option value="all">全部端点</option>
+                        {endpoints.map((path) => (
+                          <option key={path} value={path}>
+                            {path}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown size={12} />
+                    </span></label>
+                    <label className="channel-filter-field">流式<span className="select-field">
+                      <select
+                        aria-label="流式状态筛选"
+                        value={stream}
+                        onChange={(e) => setFilter("stream", e.target.value)}
+                      >
+                        <option value="all">全部流式状态</option>
+                        <option value="true">流式</option>
+                        <option value="false">非流式</option>
+                      </select>
+                      <ChevronDown size={12} />
+                    </span></label>
+                    <label className="channel-filter-field">路由状态<span className="select-field">
+                      <select
+                        aria-label="渠道状态筛选"
+                        value={statusFilter}
+                        onChange={(e) => setFilter("statusFilter", e.target.value)}
+                      >
+                        <option value="">全部状态</option>
+                        <option value="eligible">可用渠道</option>
+                        <option value="unavailable">不可用渠道</option>
+                      </select>
+                      <ChevronDown size={12} />
+                    </span></label>
+                    <label className="channel-filter-field">失败原因<span className="select-field">
+                      <select
+                        aria-label="失败原因筛选"
+                        title="筛选当前范围内存在此类失败的渠道；成功率仍按全部尝试统计"
+                        value={failureReason}
+                        onChange={(e) => setFilter("failureReason", e.target.value)}
+                      >
+                        <option value="">全部失败原因</option>
+                        <option value="compaction">压缩失败</option>
+                        {[...knownFailures].map(reason => <option key={reason} value={reason}>
+                          {failureReasonLabel(reason) === "其他失败" && reason !== "other" ? `其他失败 · ${reason}` : failureReasonLabel(reason)}
+                        </option>)}
+                      </select>
+                      <ChevronDown size={12} />
+                    </span></label>
+                  </>
+                )}
+                  </div>
+                  <footer className="channel-filter-footer">
+                    {channelView && (
+                    <button
+                      className={`filter-chip ${balanceFilter ? "active" : ""}`}
+                      aria-pressed={!!balanceFilter}
+                      onClick={() =>
+                        setFilter("balanceFilter", balanceFilter ? "" : "low")
+                      }
+                    >
+                      <Wallet size={13} />
+                      余额不足{balanceFilter && <X size={12} />}
+                    </button>
+                    )}
+                {hasFilters && (
+                  <button
+                    className="filter-chip"
+                    onClick={() => {
+                      setPageFilters((current) => ({
+                        ...current,
+                        [filterScope]: { ...defaultFilters },
+                      }));
+                      setPage(0);
+                    }}
+                  >
+                    <X size={12} /> 重置筛选
+                  </button>
+                )}
+                  </footer>
+                </section>
+                <section hidden={filterTab !== "display"} aria-label="显示设置">
+                  {channelView ? <div className="channel-filter-grid">
+                    <div className="channel-filter-field"><span>列预设</span>
+                    <label className="select-field">
+                      <select aria-label="渠道表列布局" value={observationLayout} onChange={e=>{
+                        setCustomColumns(null);
+                        setColumnView(e.target.value as ChannelMetricLayout);
+                      }}>
+                        <option value="run">运行列</option><option value="quality">质量列</option>
+                        <option value="finance">费用列</option><option value="all">全部列</option>
+                        {customColumns && <option value="custom" disabled>自定义列</option>}
+                      </select><ChevronDown size={12} />
+                    </label>
+                    </div>
+                    <div className="channel-filter-field"><span>排序</span>
+                  {channelView && <ChannelSortDialog key={channelScope} rules={sortRules}
                     previewRows={rules=>{const visible=new Set(filtered.map(rowId));return sortChannels(rows.filter(row=>visible.has(rowId(row))),rules,{checks:checks.results,multipliers:imported.data?.multipliers});}}
                     onPreview={preview=>{setSortPreview(preview?{scope:channelScope,rows:preview}:null);setPage(0);}}
                     labelRows={rows}
@@ -1694,9 +1864,18 @@ export default function Dashboard({
                     setPage(0);
                     setSortPreferences(current=>applyScopedChannelSort(current,channelScope,model,{sort:rules.length?"custom":"config",rules,templateId}));
                   }} />}
+                    </div>
+                  </div> :
+                    <label className="channel-filter-checkbox"><input type="checkbox" checked={balanceDetails} onChange={event => setBalanceDetails(event.target.checked)} /> 性能与费用列</label>
+                  }
+                {channelView && <TableColumns choices={columnChoices} value={visibleColumns} onChange={setCustomColumns}
+                  onReset={() => { setCustomColumns(null); setColumnView("run"); }} />}
+                </section>
+                <section hidden={filterTab !== "tools"} aria-label="渠道工具">
+                  <div className="channel-filter-toolbox">
                   {routeView && routingSort.pending && <button className="button small" title="恢复上一次应用前的路由顺序" disabled={routingSort.busy} onClick={()=>void routingSort.undo()}>撤回排序</button>}
-                  {routeView && routingSort.error && <span role="alert" className="negative">{routingSort.error}</span>}
-                  {canEditRoutes && !adjustingChannels && !inlineRoute && routeActions(true)}
+                  {routeView && routingSort.error && <WorkbenchNotice label="排序操作失败" messages={[routingSort.error]} />}
+                  {canEditRoutes && !inlineRoute && routeButton}
                   {channelView && (
                     <ObservedDetectionActions
                       checks={checks}
@@ -1731,164 +1910,7 @@ export default function Dashboard({
                     <span />
                     自动刷新
                   </label>
-                {sourceList.length > 0 && (
-                  <label className="select-field source-select">
-                    <Server size={15} />
-                    <select
-                      aria-label="uni-api 来源"
-                      value={selectedSourceId}
-                      onChange={(e) => {
-                        setFilter("sourceId", e.target.value);
-                        setFilter("keyId", "");
-                      }}
-                    >
-                      <option value="">全部来源</option>
-                      {sourceList.map((source) => (
-                        <option value={source.id} key={source.id}>
-                          {source.name}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown size={13} />
-                  </label>
-                )}
-                {!inlineKey && apiKeyFilter}
-                {!inlineModel && modelFilter}
-                {view === "balances" && (
-                  <>
-                    <label className="workbench-help"><input type="checkbox" checked={balanceDetails} onChange={event => setBalanceDetails(event.target.checked)} /> 性能与费用列</label>
-                    <div className="inline-select">
-                      <Layers3 size={13} />
-                      <select
-                        aria-label="模型优先级筛选"
-                        value={balanceTopN}
-                        onChange={(e) => setFilter("balanceTopN", e.target.value)}
-                      >
-                        <option value="">全部优先级</option>
-                        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 50, 100].map((rank) => (
-                          <option key={rank} value={rank}>
-                            前 {rank} 名渠道
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronDown size={12} />
-                    </div>
-                    <label className="balance-threshold">
-                      <Wallet size={13} />
-                      <span>余额低于 $</span>
-                      <input
-                        aria-label="余额低于美元"
-                        type="number"
-                        min="0"
-                        step="any"
-                        aria-invalid={!balanceThresholdValid}
-                        placeholder="不限"
-                        value={balanceThreshold}
-                        onChange={(e) => setFilter("balanceThreshold", e.target.value)}
-                      />
-                    </label>
-                  </>
-                )}
-                {channelView && (
-                  <>
-                    <div className="inline-select">
-                      <Globe2 size={13} />
-                      <select
-                        aria-label="端点筛选"
-                        value={endpoint}
-                        onChange={(e) => setFilter("endpoint", e.target.value)}
-                      >
-                        <option value="all">全部端点</option>
-                        {endpoints.map((path) => (
-                          <option key={path} value={path}>
-                            {path}
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronDown size={12} />
-                    </div>
-                    <div className="inline-select">
-                      <Radio size={13} />
-                      <select
-                        aria-label="流式状态筛选"
-                        value={stream}
-                        onChange={(e) => setFilter("stream", e.target.value)}
-                      >
-                        <option value="all">全部流式状态</option>
-                        <option value="true">流式</option>
-                        <option value="false">非流式</option>
-                      </select>
-                      <ChevronDown size={12} />
-                    </div>
-                    <button
-                      className={`filter-chip ${balanceFilter ? "active" : ""}`}
-                      aria-pressed={!!balanceFilter}
-                      onClick={() =>
-                        setFilter("balanceFilter", balanceFilter ? "" : "low")
-                      }
-                    >
-                      <Wallet size={13} />
-                      余额不足{balanceFilter && <X size={12} />}
-                    </button>
-                    <div className="inline-select">
-                      <Filter size={13} />
-                      <select
-                        aria-label="渠道状态筛选"
-                        value={statusFilter}
-                        onChange={(e) => setFilter("statusFilter", e.target.value)}
-                      >
-                        <option value="">全部状态</option>
-                        <option value="eligible">可用渠道</option>
-                        <option value="unavailable">不可用渠道</option>
-                      </select>
-                      <ChevronDown size={12} />
-                    </div>
-                    <div className="inline-select">
-                      <Filter size={13} />
-                      <select
-                        aria-label="失败原因筛选"
-                        title="筛选当前范围内存在此类失败的渠道；成功率仍按全部尝试统计"
-                        value={failureReason}
-                        onChange={(e) => setFilter("failureReason", e.target.value)}
-                      >
-                        <option value="">全部失败原因</option>
-                        <option value="compaction">压缩失败</option>
-                        {[...knownFailures].map(reason => <option key={reason} value={reason}>
-                          {failureReasonLabel(reason) === "其他失败" && reason !== "other" ? `其他失败 · ${reason}` : failureReasonLabel(reason)}
-                        </option>)}
-                      </select>
-                      <ChevronDown size={12} />
-                    </div>
-                    <label className="inline-select"><SlidersHorizontal size={13} />
-                      <select aria-label="渠道表列布局" value={observationLayout} onChange={e=>{
-                        setCustomColumns(null);
-                        setColumnView(e.target.value as ChannelMetricLayout);
-                      }}>
-                        <option value="run">运行列</option><option value="quality">质量列</option>
-                        <option value="finance">费用列</option><option value="all">全部列</option>
-                        {customColumns && <option value="custom" disabled>自定义列</option>}
-                      </select><ChevronDown size={12} />
-                    </label>
-                  </>
-                )}
-                {hasFilters && (
-                  <button
-                    className="filter-chip"
-                    onClick={() => {
-                      setPageFilters((current) => ({
-                        ...current,
-                        [filterScope]: { ...defaultFilters },
-                      }));
-                      setPage(0);
-                    }}
-                  >
-                    <X size={12} /> 重置筛选
-                  </button>
-                )}
-                </div>
-                {channelView && <TableColumns choices={columnChoices} value={visibleColumns} onChange={setCustomColumns}
-                  onReset={() => { setCustomColumns(null); setColumnView("run"); }} />}
-                {channelView && <p className="workbench-help" aria-label="排序">{previewingSort ? "排序预览 · 未应用到路由" : keyId ? "按当前 API key 的请求顺序" : sortRules.length ? "按自定义规则" : "按渠道配置顺序"}</p>}
+                  </div>
                 {!!keys.data?.data.length && <details className="workbench-key-rates">
                   <summary>调用 Key 成功率</summary>
                   <dl>{keys.data.data.map(key => <div key={key.key_id}>
@@ -1896,11 +1918,16 @@ export default function Dashboard({
                     <dd>{keyRequestStats.label(key)}</dd>
                   </div>)}</dl>
                 </details>}
+                </section>
                   </WorkbenchDisclosure>
                 </div>
               </div>
-              {previewingSort && <div className="workbench-status" role="status">排序预览 · 未应用到路由 <button type="button" className="text-link" onClick={() => setSortPreview(null)}>退出预览</button></div>}
-              {adjustingChannels && <div className="route-edit-strip" aria-label="路由调整"><span>请求顺序</span>{routeActions()}</div>}
+              {adjustingChannels && <ChannelControlDrawer
+                controls={controls} sources={sourceList} keys={keys.data?.data || []} rows={filtered}
+                scopeLabel={[sourceList.find(source => source.id === selectedSourceId)?.name || "全部来源",
+                  model || "全部模型", keyId ? `Key ${keys.data?.data.find(key => key.key_id === keyId)?.position || "（已选）"}` : "全部 API key"].join(" · ")}
+                opener={routeOpener} onClose={() => setEditingRoutes(null)}
+              />}
               {view === "balances" && <WorkbenchTabs label="余额视图" value={balanceView} onChange={setBalanceView} tabs={[["wallets","站点钱包"],["channels","渠道额度"]]} />}
               {view === "balances" && balanceView === "wallets" ? <section className="wallet-summary" aria-label="已核验站点钱包">
                 {groupedWallets.size === 0 && <p>当前范围暂无已核验钱包</p>}
@@ -1924,8 +1951,6 @@ export default function Dashboard({
                   />
                 )}
               </AnimatePresence>
-              {view === "balances" && !balanceThresholdValid && <p role="alert" className="coverage-note">请输入非负的美元金额，阈值尚未应用。</p>}
-              {error && rows.length > 0 && <p role="alert" className="error-banner">刷新失败，保留当前数据。{error}</p>}
               {error && !rows.length ? (
                 <div role="alert" className="table-error">
                   <Unplug size={26} />
@@ -1938,7 +1963,7 @@ export default function Dashboard({
               ) : catalog.isPending || metrics.isPending || (historyInitializing && !metrics.data) ? (
                 <TableLoading kind={channelView ? "channels" : "balances"} observation={channelView ? {
                   header: observationHeader, layout: observationLayout, compact: compactObservation,
-                  classes:[...(routeView ? ["rank"] : []),"channel-identity",...(checkingChannels ? [""] : []),...visibleColumns.map(id => observationColumnClass[id]),...(adjustingChannels ? ["control-actions-cell"] : [])],
+                  classes:[...(routeView ? ["rank"] : []),"channel-identity",...(checkingChannels ? [""] : []),...visibleColumns.map(id => observationColumnClass[id])],
                 } : undefined} />
               ) : total === 0 ? (
                 <Empty
@@ -1957,8 +1982,8 @@ export default function Dashboard({
                 </Empty>
               ) : channelView ? (
                 <div className="table-scroll" tabIndex={0} role="region" aria-label="渠道观测表">
-                  <table className="channel-table observation-table" data-columns={observationLayout} data-compact={compactObservation || undefined} data-editing={adjustingChannels || undefined}
-                    style={observationLayout === "custom" ? {minWidth: `max(100%, ${170 + 110 * visibleColumns.length + (adjustingChannels ? 215 : 0)}px)`} : undefined}>
+                  <table className="channel-table observation-table" data-columns={observationLayout} data-compact={compactObservation || undefined}
+                    style={observationLayout === "custom" ? {minWidth: `max(100%, ${170 + 110 * visibleColumns.length}px)`} : undefined}>
                     <thead>
                       <tr>{observationHeader}</tr>
                     </thead>
@@ -1980,7 +2005,7 @@ export default function Dashboard({
                                 onClick={() => openDetail(rowId(row))}
                               >
                                 <span>
-                                  <strong title={channelBillingHint(row)}>{channelName(row)}</strong>
+                                  <strong title={[channelName(row), channelBillingHint(row)].filter(Boolean).join(" · ")}>{channelName(row)}</strong>
                                   {(!model || row.source_name && !selectedSourceId) && <small>{!model && row.model}{!model && row.source_name && !selectedSourceId && " · "}{!selectedSourceId && row.source_name && <span className="source-label">{row.source_name}</span>}</small>}
                                 </span>
                               </button>
@@ -2004,14 +2029,6 @@ export default function Dashboard({
                                 supportedModels={fingerprints.supportedModels}
                               /></td>}
                             />
-                            {adjustingChannels && (
-                              <ChannelControlCell
-                                row={row}
-                                controls={controls}
-                                visible={filtered}
-                                configOrder
-                              />
-                            )}
                           </tr>
                         );
                       })}

@@ -18,6 +18,8 @@
 .automation-audit-list article { border-top:1px solid var(--line); padding:12px 0; }
 .automation-audit-list article > div { display:flex; gap:12px; justify-content:space-between; }
 .automation-audit-list article p { margin:6px 0; color:var(--muted); font-size:13px; }
+.automation-audit-list article :is(p,strong) {min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.automation-audit-list article > div > span {white-space:nowrap}
 .automation-audit-list article small { color:var(--green); }
 @media(max-width:560px){.automation-form{grid-template-columns:1fr;}.automation-list,.automation-editor,.automation-audit{padding:15px;}}
 

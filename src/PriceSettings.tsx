@@ -14,7 +14,7 @@ import {
 import { analyticsRequest } from "./api";
 import type { Connection, ModelPrice } from "./types";
 import { Spinner } from "./ui";
-import { WorkbenchDisclosure } from "./Workbench";
+import { WorkbenchDisclosure, WorkbenchNotice } from "./Workbench";
 import {
   chargesCacheWrite,
   salePercent,
@@ -422,6 +422,7 @@ export function PriceSettings({
         <div className="data-title">
           <SlidersHorizontal size={19} />
           <h2>模型价格</h2>
+          <WorkbenchNotice urgent label="价格读取失败" messages={[error && `${error} · 当前配置未核实，参考价只读。`]} />
         </div>
         <div className="workbench-tools">
           <WorkbenchDisclosure label={filter ? "筛选 1" : "筛选"} icon={<Search size={14} aria-hidden="true" />}>
@@ -439,12 +440,6 @@ export function PriceSettings({
           {refreshAction}
         </div>
       </div>
-      {error && (
-        <p role="alert" className="price-load-error negative">
-          {error}
-          {" · 当前配置未核实，参考价只读。"}
-        </p>
-      )}
       {loading ? <TableLoading kind="prices" rows={8} /> : <>
       <div className="price-overview-wrap">
         <table className="price-overview-table" aria-label="模型价格">
@@ -460,7 +455,7 @@ export function PriceSettings({
             {visible.map(price => {
               const published = price.verified || references.get(price.model)?.verified;
               return <tr key={price.model}>
-                <th scope="row"><button type="button" className="price-model-open" aria-label={`编辑 ${price.model}`} onClick={event => {
+                <th scope="row"><button type="button" className="price-model-open" aria-label={`编辑 ${price.model}`} title={price.model} onClick={event => {
                   editorOpener.current = event.currentTarget;
                   setEditing(price.model);
                 }}>{price.model}</button><small>{drafts.has(price.model) ? "未保存" : price.verified ? "已确认" : published ? "待确认" : "未定价"}</small></th>

@@ -20,9 +20,14 @@ interface CheckFixture {
     signal: AbortSignal,
   ) => Promise<ChannelCheck>;
 }
-function openFilter() {
+function openFilter(tab = "条件") {
   const disclosure = document.querySelector<HTMLDetailsElement>(".channel-browser .workbench-disclosure:last-child");
   if (disclosure && !disclosure.open) fireEvent.click(disclosure.querySelector("summary")!);
+  if (disclosure) fireEvent.click(within(disclosure).getByRole("button", { name: tab }));
+}
+function tool(name: string) {
+  openFilter("工具");
+  return screen.getByRole("button", { name });
 }
 function setup(
   controlUnavailable = false,
@@ -226,10 +231,10 @@ function setup(
   );
   return { ...app, user, writes, states, client, checkWrites, detectionWrites };
 }
-it("toggles adjustment inside observation with the same table, filters and metrics, including all sources", async () => {
+it("opens a separate drawer without adding a table column or a toolbar row", async () => {
   history.replaceState(null, "", "#view=routing");
   const app = setup();
-  const table = await screen.findByRole("table");
+  const table = await screen.findByRole("table", {}, {timeout:5000});
   openFilter();
   const source = screen.getByLabelText("uni-api 来源"),
     range = screen.getByLabelText("时间范围筛选");
@@ -242,8 +247,8 @@ it("toggles adjustment inside observation with the same table, filters and metri
     screen.queryByRole("columnheader", { name: "临时控制" }),
   ).not.toBeInTheDocument();
   expect(
-    screen.getByRole("button", { name: "调整顺序" }).closest(".workbench-popover"),
-  ).toBe(screen.getByLabelText("搜索渠道或模型").closest(".workbench-popover"));
+    tool("调整顺序").closest(".workbench-popover"),
+  ).not.toBeNull();
   const metricsBefore = within(table)
     .getAllByRole("row")
     .slice(1)
@@ -253,7 +258,13 @@ it("toggles adjustment inside observation with the same table, filters and metri
         .slice(0, 7)
         .map((c) => c.textContent),
     );
-  await app.user.click(screen.getByRole("button", { name: "调整顺序" }));
+  const headers = [...table.querySelectorAll("th")];
+  await app.user.click(tool("调整顺序"));
+  const drawer = screen.getByRole("dialog", { name: "调整请求顺序" });
+  expect(drawer.closest(".channel-browser")).toBeNull();
+  expect([...table.querySelectorAll("th")]).toEqual(headers);
+  expect(table.closest(".channel-browser")).not.toContainElement(drawer);
+  openFilter();
   expect(screen.getByRole("table")).toBe(table);
   expect(screen.getByLabelText("uni-api 来源")).toBe(source);
   expect(source).toHaveValue("");
@@ -363,12 +374,12 @@ it("toggles adjustment inside observation with the same table, filters and metri
   app.unmount();
   app.client.clear();
 }, 10_000);
-it("stages source-specific controls inline, retains hidden channels and drafts across shared filters and views", async () => {
+it("stages source-specific controls in the drawer, retains hidden channels and drafts across shared filters and views", async () => {
   history.replaceState(null, "", "#view=routing");
   const app = setup();
   await screen.findByRole("table");
   openFilter();
-  await app.user.click(screen.getByRole("button", { name: "调整顺序" }));
+  await enterRoute(app);
   await screen.findByLabelText("临时停用 One visible-first m");
   await app.user.type(screen.getByLabelText("搜索渠道或模型"), "visible");
   await app.user.click(screen.getByLabelText("上移 One visible-second m"));
@@ -406,7 +417,7 @@ it("stages source-specific controls inline, retains hidden channels and drafts a
     "data-reset-scope",
     "One / 全部 API key / 全部模型",
   );
-  expect(reset.closest(".route-edit-strip")).not.toBeNull();
+  expect(reset.closest(".channel-route-drawer")).not.toBeNull();
   expect(
     screen.queryByRole("region", { name: "当前范围的临时修改" }),
   ).not.toBeInTheDocument();
@@ -432,8 +443,8 @@ it("keeps the observation table visible when a source control endpoint is unavai
   const app = setup(true);
   const table = await screen.findByRole("table");
   openFilter();
-  await app.user.click(screen.getByRole("button", { name: "调整顺序" }));
-  await screen.findAllByText("控制接口暂不可用");
+  await enterRoute(app);
+  await screen.findAllByText("控制不可用");
   expect(screen.getByRole("table")).toBe(table);
   expect(within(table).getAllByRole("row")).toHaveLength(7);
   expect(screen.getByLabelText("uni-api 来源")).toHaveValue("");
@@ -441,7 +452,7 @@ it("keeps the observation table visible when a source control endpoint is unavai
   app.client.clear();
 });
 
-it("keeps a single reset beside search with scope details in the menu and tooltip only", async () => {
+it("keeps reset inside the drawer with scope details in the menu and tooltip", async () => {
   history.replaceState(null, "", "#view=routing");
   const app = setup();
   app.states.one.rules = [
@@ -458,12 +469,12 @@ it("keeps a single reset beside search with scope details in the menu and toolti
   ];
   await screen.findByRole("table");
   openFilter();
-  await app.user.click(screen.getByRole("button", { name: "调整顺序" }));
+  await enterRoute(app);
   const reset = await screen.findByRole("button", { name: RESET_SCOPE_LABEL });
   expect(
     screen.getAllByRole("button", { name: RESET_SCOPE_LABEL }),
   ).toHaveLength(1);
-  expect(reset.closest(".route-edit-strip")).not.toBeNull();
+  expect(reset.closest(".channel-route-drawer")).not.toBeNull();
   expect(
     screen.queryByRole("region", { name: "当前范围的临时修改" }),
   ).not.toBeInTheDocument();
@@ -520,10 +531,14 @@ function providerOrder(source: string) {
     .filter((row) => row.getAttribute("data-source-name") === source)
     .map((row) => row.querySelector(".channel-link strong")?.textContent);
 }
+async function enterRoute(app: ReturnType<typeof setup>) {
+  await app.user.click(tool("调整顺序"));
+  openFilter();
+}
 async function openControls(app: ReturnType<typeof setup>) {
   await screen.findByRole("table");
   openFilter();
-  await app.user.click(screen.getByRole("button", { name: "调整顺序" }));
+  await enterRoute(app);
   await waitFor(() =>
     expect(screen.getByLabelText("临时停用 One visible-first m")).toBeEnabled(),
   );
@@ -762,8 +777,8 @@ it("cancels adjustment and clears drafts from hidden sources and scopes while pr
   expect(
     screen.queryByRole("button", { name: RESET_SCOPE_LABEL }),
   ).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "调整顺序" })).toHaveAttribute(
-    "aria-pressed",
+  expect(tool("调整顺序")).toHaveAttribute(
+    "aria-expanded",
     "false",
   );
   await app.user.clear(screen.getByLabelText("搜索渠道或模型"));
@@ -773,7 +788,7 @@ it("cancels adjustment and clears drafts from hidden sources and scopes while pr
   expect(
     screen.queryByRole("columnheader", { name: "临时控制" }),
   ).not.toBeInTheDocument();
-  await app.user.click(screen.getByRole("button", { name: "调整顺序" }));
+  await enterRoute(app);
   expect(
     screen.getByLabelText("临时停用 One visible-first m"),
   ).not.toBeChecked();
@@ -865,7 +880,7 @@ it("keeps the last check while retesting, updates observation immediately, and r
   openFilter();
   await app.user.selectOptions(screen.getByLabelText("渠道表列布局"),"all");
   await app.user.selectOptions(screen.getByLabelText("渠道表列布局"),"all");
-  await app.user.click(screen.getByRole("button", { name: "降智检测" }));
+  await app.user.click(tool("降智检测"));
   await app.user.click(screen.getByLabelText("重新检测 One visible-first m"));
   await waitFor(() => expect(app.checkWrites).toHaveLength(1));
   await app.user.click(screen.getByRole("button", { name: /^渠道观测/ }));
@@ -913,7 +928,7 @@ it("distinguishes unavailable check history from untested channels and keeps met
   expect(observedCheck("One", "visible-first")).toHaveTextContent("读取失败");
   expect(within(table).queryByText("未检测")).not.toBeInTheDocument();
   expect(within(table).getAllByRole("row")).toHaveLength(7);
-  expect(screen.getByRole("button", {name:"调整顺序"})).toBeEnabled();
+  expect(tool("调整顺序")).toBeEnabled();
   app.unmount();
   app.client.clear();
 });
@@ -930,11 +945,11 @@ it("opens detection controls inside observation without sending probes or changi
   expect(
     screen.queryByRole("columnheader", { name: "检测操作" }),
   ).not.toBeInTheDocument();
-  const enter = screen.getByRole("button", { name: "降智检测" });
+  const enter = tool("降智检测");
   expect(enter.closest(".workbench-popover")).toBe(
     screen.getByLabelText("搜索渠道或模型").closest(".workbench-popover"),
   );
-  await app.user.click(screen.getByRole("button", { name: "调整顺序" }));
+  await enterRoute(app);
   await app.user.click(screen.getByLabelText("临时停用 One visible-first m"));
   await app.user.type(screen.getByLabelText("搜索渠道或模型"), "visible");
   const metrics = () =>
@@ -943,13 +958,13 @@ it("opens detection controls inside observation without sending probes or changi
       .slice(1)
       .map((row) => row.querySelector(".channel-link")?.textContent);
   const before = metrics();
-  await app.user.click(enter);
+  await app.user.click(tool("降智检测"));
   expect(screen.getByRole("table")).toBe(table);
   expect(
     screen.queryByRole("button", { name: "降智检测" }),
   ).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "一键检测 · 4" })).toBeEnabled();
-  expect(screen.getByRole("button", { name: "取消检测" })).toBeEnabled();
+  expect(tool("一键检测 · 4")).toBeEnabled();
+  expect(tool("取消检测")).toBeEnabled();
   expect(screen.getAllByRole("button", { name: /^重新检测 / })).toHaveLength(4);
   expect(
     screen.getByLabelText("重新检测 One visible-first m"),
@@ -957,7 +972,7 @@ it("opens detection controls inside observation without sending probes or changi
   expect(screen.getByLabelText("搜索渠道或模型")).toHaveValue("visible");
   expect(metrics()).toEqual(before);
   expect(app.checkWrites).toHaveLength(0);
-  await app.user.click(screen.getByRole("button", { name: "取消检测" }));
+  await app.user.click(tool("取消检测"));
   expect(screen.getByRole("table")).toBe(table);
   expect(
     screen.queryByRole("columnheader", { name: "检测操作" }),
@@ -989,20 +1004,20 @@ it("runs one check per matching provider across all observation pages and models
   await app.user.selectOptions(screen.getByLabelText("uni-api 来源"), "one");
   await app.user.type(screen.getByLabelText("搜索渠道或模型"), "visible");
   await app.user.selectOptions(screen.getByLabelText("渠道表列布局"),"all");
-  await app.user.click(screen.getByRole("button", { name: "降智检测" }));
+  await app.user.click(tool("降智检测"));
   expect(screen.getAllByRole("button", { name: /^重新检测 / })).toHaveLength(
     25,
   );
-  await app.user.click(screen.getByRole("button", { name: "一键检测 · 27" }));
+  await app.user.click(tool("一键检测 · 27"));
   await waitFor(() => expect(app.checkWrites).toHaveLength(27));
   expect(app.checkWrites.every((write) => write.source === "one")).toBe(true);
   expect(new Set(app.checkWrites.map((write) => write.provider))).toEqual(
     new Set(providers),
   );
   await waitFor(() =>
-    expect(screen.getByRole("button", { name: "一键检测 · 27" })).toBeEnabled(),
+    expect(tool("一键检测 · 27")).toBeEnabled(),
   );
-  expect(screen.getByRole("button", { name: "取消检测" })).toBeEnabled();
+  expect(tool("取消检测")).toBeEnabled();
   expect(observedCheck("One", "visible-0")).toHaveTextContent("不降智");
   app.unmount();
   app.client.clear();
@@ -1015,6 +1030,7 @@ it("remembers the observation project and queues supported fingerprints across p
   let app = setup(false, undefined, { data: [] }, fixture);
   await screen.findByRole("table");
   openFilter();
+  openFilter("工具");
   const picker = screen.getByLabelText("选择检测项目");
   expect(picker).toHaveValue("quality");
   await app.user.selectOptions(picker, "fingerprint");
@@ -1027,7 +1043,7 @@ it("remembers the observation project and queues supported fingerprints across p
   expect(screen.getByLabelText("选择检测项目")).toHaveValue("fingerprint");
   await app.user.selectOptions(screen.getByLabelText("uni-api 来源"), "one");
   await app.user.type(screen.getByLabelText("搜索渠道或模型"), "visible");
-  await app.user.click(screen.getByRole("button", { name: "指纹检测" }));
+  await app.user.click(tool("指纹检测"));
   const batch = await screen.findByRole("button", { name: "一键指纹检测 · 26" });
   expect(app.detectionWrites).toHaveLength(0);
   await app.user.click(batch);
@@ -1038,7 +1054,7 @@ it("remembers the observation project and queues supported fingerprints across p
   expect(app.checkWrites).toHaveLength(0);
   expect(app.writes).toHaveLength(0);
   await screen.findByText("已提交指纹检测 · 26 项");
-  await app.user.click(screen.getByRole("button", { name: "收起检测" }));
+  await app.user.click(tool("收起检测"));
   expect(screen.queryByRole("columnheader", { name: "检测操作" })).not.toBeInTheDocument();
 });
 
@@ -1050,8 +1066,9 @@ it.each([
   const app = setup(false, undefined, { data: [] }, { providers: ["visible-0"], models: [model, "unrelated"], detection: true });
   await screen.findByRole("table");
   openFilter();
+  openFilter("工具");
   await app.user.selectOptions(screen.getByLabelText("选择检测项目"), project);
-  await app.user.click(screen.getByRole("button", { name: label }));
+  await app.user.click(tool(label));
   const batch = await screen.findByRole("button", { name: `一键${label} · 1` });
   expect(screen.getByLabelText("重新检测 One visible-0 unrelated")).toBeDisabled();
   await app.user.click(batch);
@@ -1085,22 +1102,22 @@ it("cancels individual in-flight checks, hides their actions, and retains the la
   await screen.findByRole("table");
   openFilter();
   await app.user.selectOptions(screen.getByLabelText("渠道表列布局"),"all");
-  await app.user.click(screen.getByRole("button", { name: "降智检测" }));
+  await app.user.click(tool("降智检测"));
   await app.user.click(screen.getByLabelText("重新检测 One visible-first m"));
   await app.user.click(screen.getByLabelText("重新检测 Two visible-first m"));
   await waitFor(() => expect(signals).toHaveLength(2));
   expect(screen.getByLabelText("重新检测 One visible-first m")).toBeDisabled();
-  expect(screen.getByRole("button", { name: "一键检测 · 6" })).toBeDisabled();
-  await app.user.click(screen.getByRole("button", { name: "取消检测" }));
+  expect(tool("一键检测 · 6")).toBeDisabled();
+  await app.user.click(tool("取消检测"));
   expect(signals.every((signal) => signal.aborted)).toBe(true);
-  expect(screen.getByRole("button", { name: "降智检测" })).toBeEnabled();
+  expect(tool("降智检测")).toBeEnabled();
   expect(observedCheck("One", "visible-first")).toHaveTextContent("不降智");
   expect(observedCheck("One", "visible-first")).not.toHaveTextContent("检测中");
   expect(observedCheck("Two", "visible-first")).toHaveTextContent("未检测");
   await app.user.selectOptions(screen.getByLabelText("渠道表列布局"),"all");
-  await app.user.click(screen.getByRole("button", { name: "降智检测" }));
+  await app.user.click(tool("降智检测"));
   expect(screen.getByLabelText("重新检测 One visible-first m")).toBeEnabled();
-  expect(screen.getByRole("button", { name: "一键检测 · 6" })).toBeEnabled();
+  expect(tool("一键检测 · 6")).toBeEnabled();
   app.unmount();
   app.client.clear();
 });
@@ -1125,15 +1142,15 @@ it("keeps both batch buttons visible while running and preserves completed resul
   await screen.findByRole("table");
   openFilter();
   await app.user.selectOptions(screen.getByLabelText("渠道表列布局"),"all");
-  await app.user.click(screen.getByRole("button", { name: "降智检测" }));
-  await app.user.click(screen.getByRole("button", { name: "一键检测 · 6" }));
+  await app.user.click(tool("降智检测"));
+  await app.user.click(tool("一键检测 · 6"));
   await waitFor(() => expect(app.checkWrites).toHaveLength(6));
   await waitFor(() =>
     expect(observedCheck("One", "visible-first")).toHaveTextContent("不降智"),
   );
-  expect(screen.getByRole("button", { name: "一键检测 · 6" })).toBeDisabled();
-  expect(screen.getByRole("button", { name: "取消检测" })).toBeEnabled();
-  await app.user.click(screen.getByRole("button", { name: "取消检测" }));
+  expect(tool("一键检测 · 6")).toBeDisabled();
+  expect(tool("取消检测")).toBeEnabled();
+  await app.user.click(tool("取消检测"));
   expect(signals).toHaveLength(5);
   expect(signals.every((signal) => signal.aborted)).toBe(true);
   expect(
@@ -1151,7 +1168,7 @@ it("moves a channel to the true source-first position while retaining hidden cha
  const app=setup();
  await screen.findByRole("table");
   openFilter();
- await app.user.click(screen.getByRole("button",{name:"调整顺序"}));
+ await enterRoute(app);
  await screen.findByLabelText("置顶 One visible-second m");
  await app.user.type(screen.getByLabelText("搜索渠道或模型"),"second");
  expect(screen.getByLabelText("上移 One visible-second m")).toBeDisabled();

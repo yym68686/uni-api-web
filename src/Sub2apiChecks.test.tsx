@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as Tooltip from "@radix-ui/react-tooltip";
@@ -35,7 +35,12 @@ async function openChannels() {
   if (button.getAttribute("aria-current") !== "true") await userEvent.click(button);
 }
 
-function mount(user = "account", client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
+const managementColumnStorage = "uni-console:management-columns:v1";
+function mount(user = "account", client = new QueryClient({ defaultOptions: { queries: { retry: false } } }), defaultColumns = false) {
+  // Workflow tests use an expanded view so diagnostic actions are visible.
+  if (!defaultColumns && !localStorage.getItem(managementColumnStorage)) {
+    localStorage.setItem(managementColumnStorage, JSON.stringify(["model", "platform", "rate", "availability", "latency", "fingerprint", "protocol", "match", "price", "quality", "compaction", "tool-use", "diagnostics", "checked", "batch"]));
+  }
   installManagementPageFixture(user);
   return render(
     <QueryClientProvider client={client}>
@@ -90,6 +95,42 @@ function fixtures(): SubAccount[] {
     ],
   }));
 }
+
+it("shows rate and fingerprint by default and keeps checked columns and their order after a remount", async () => {
+  const data = fixtures();
+  data[0].targets[0].billing!.rate = 0;
+  vi.stubGlobal("fetch", vi.fn(async (input: string) => Response.json({
+    data: input.endsWith("/accounts") ? data : [],
+  })));
+  const user = userEvent.setup();
+  const first = mount("management-columns", undefined, true);
+  const table = await screen.findByRole("table");
+  const labels = () => within(screen.getByRole("table")).getAllByRole("columnheader").map(header => header.textContent?.trim());
+  expect(labels()).toEqual(["渠道 / 站点", "平台 / key", "倍率", "可用性", "首字延迟", "模型指纹", "最近检测", "批量检测", "操作"]);
+  const rateValues = [...table.querySelectorAll("tbody td[data-column='rate']")].map(cell => cell.textContent);
+  expect(rateValues).toEqual(["0", "0.01"]);
+  const openColumns = async () => {
+    await user.click(screen.getByText("筛选", {selector:"summary"}));
+    await user.click(screen.getByRole("button", {name:"数据列"}));
+  };
+  await openColumns();
+  await user.click(screen.getByRole("button", {name:"上移倍率列"}));
+  await user.click(screen.getByRole("checkbox", {name:"模型指纹"}));
+  await user.click(screen.getByRole("checkbox", {name:"模型匹配"}));
+  expect(labels().slice(0, 3)).toEqual(["渠道 / 站点", "倍率", "平台 / key"]);
+  expect(labels()).not.toContain("模型指纹");
+  expect(labels().at(-2)).toBe("模型匹配");
+  expect(table.querySelector("tbody td:nth-child(2)")).toHaveAttribute("data-column", "rate");
+  first.unmount();
+  mount("management-columns", undefined, true);
+  await screen.findByRole("table");
+  expect(labels().slice(0, 3)).toEqual(["渠道 / 站点", "倍率", "平台 / key"]);
+  expect(labels()).not.toContain("模型指纹");
+  await openColumns();
+  await user.click(screen.getByRole("button", {name:"恢复默认列"}));
+  expect(labels()).toContain("模型指纹");
+  expect(labels()).not.toContain("模型匹配");
+});
 
 it("offers settings for idle and running accounts without starting sync or detection", async () => {
   const data=fixtures(); data[1].state="running";
@@ -1195,17 +1236,17 @@ it("shows actual model multipliers and keeps rate filters and sorting consistent
   const view = mount("observed-rate-filter");
   await screen.findByRole("table");
   await user.selectOptions(screen.getByLabelText("检测模型筛选"), "gpt-6-astra");
-  expect(screen.getByText("倍率不一致 · 公布 0.3")).toBeVisible();
+  expect(screen.getByTitle("倍率不一致 · 公布 0.3")).toBeVisible();
   expect([...screen.getByLabelText("倍率上限筛选").querySelectorAll("option")].map(option => option.value)).toEqual(["", "mismatch", "0.4", "3"]);
   await user.selectOptions(screen.getByLabelText("倍率排序"), "asc");
   expect(screen.getByRole("table").querySelector("tbody tr")).toHaveTextContent("two");
   await user.selectOptions(screen.getByLabelText("倍率上限筛选"), "0.4");
   expect(screen.getByRole("table").querySelectorAll("tbody tr")).toHaveLength(1);
-  expect(screen.queryByText("倍率不一致 · 公布 0.3")).not.toBeInTheDocument();
+  expect(screen.queryByTitle("倍率不一致 · 公布 0.3")).not.toBeInTheDocument();
   await user.selectOptions(screen.getByLabelText("倍率上限筛选"), "mismatch");
   expect(screen.getByRole("table").querySelectorAll("tbody tr")).toHaveLength(1);
   expect(screen.getByRole("table")).toHaveTextContent("one");
-  expect(screen.getByText("倍率不一致 · 公布 0.3")).toBeVisible();
+  expect(screen.getByTitle("倍率不一致 · 公布 0.3")).toBeVisible();
   expect(screen.queryByRole("option", { name: /NaN/ })).not.toBeInTheDocument();
   view.unmount();
   mount("observed-rate-filter");
@@ -1447,9 +1488,7 @@ it("all-models groups channels and probes all supported models despite available
   const user = userEvent.setup();
   mount();
   await screen.findByRole("table");
-  expect(
-    screen.queryByRole("columnheader", { name: "模型" }),
-  ).not.toBeInTheDocument();
+  expect(screen.getByRole("columnheader", { name: "模型" })).toBeVisible();
   expect(screen.getByRole("table").querySelectorAll("tbody tr")).toHaveLength(
     2,
   );
@@ -1458,8 +1497,10 @@ it("all-models groups channels and probes all supported models despite available
   await user.selectOptions(screen.getByLabelText("倍率上限筛选"), "0.18");
   const table = screen.getByRole("table");
   expect(table.querySelectorAll("tbody tr")).toHaveLength(1);
-  expect(table).toHaveTextContent(`1/${SUB_MODELS.length} 可用`);
-  expect(table).toHaveTextContent(`${SUB_MODELS.length - 1} 个未检测`);
+  const availability = within(table).getByText(`1/${SUB_MODELS.length} 可用`).closest(".tip-target")!;
+  fireEvent.focus(availability);
+  expect(await screen.findByRole("tooltip")).toHaveTextContent(`${SUB_MODELS.length - 1} 个未检测`);
+  fireEvent.blur(availability);
   const latencyIndex = within(table)
     .getAllByRole("columnheader")
     .findIndex((h) => h.textContent === "首字延迟");
@@ -1617,7 +1658,10 @@ it("all-model batch spans all filtered pages and includes failed and untested si
   expect(screen.getByRole("table").querySelectorAll("tbody tr")).toHaveLength(
     25,
   );
-  expect(screen.getAllByText(/1 个失败/).length).toBeGreaterThan(0);
+  const status = screen.getAllByText(/可用$/).find(element => element.closest("td"))!.closest(".tip-target")!;
+  fireEvent.focus(status);
+  expect(await screen.findByRole("tooltip")).toHaveTextContent("1 个失败");
+  fireEvent.blur(status);
   await user.click(screen.getByRole("button", { name: "下一页" }));
   expect(screen.getByRole("table").querySelectorAll("tbody tr")).toHaveLength(
     3,
@@ -1677,8 +1721,12 @@ it("shows model matching separately from availability, including missing and his
   expect(column).toBeGreaterThan(0);
   const summary = table.querySelector("tbody tr")!.children[column];
   expect(summary).toHaveTextContent(`1/${SUB_MODELS.length} 匹配`);
+  const modelStatus = summary.querySelector(".tip-target")!;
+  fireEvent.focus(modelStatus);
+  const diagnostic = await screen.findByRole("tooltip");
   for (const label of ["不匹配", "未返回", "格式无效", "待补测", "无法判定"])
-    expect(summary).toHaveTextContent(label);
+    expect(diagnostic).toHaveTextContent(label);
+  fireEvent.blur(modelStatus);
   const expected = [
     "匹配",
     "不匹配",
@@ -2245,7 +2293,10 @@ it("explains missing legacy credentials and requires them once without submittin
   const user = userEvent.setup();
   mount();
   await openSites();
-  expect(await screen.findByText(/站点会话已失效，且尚未保存登录密码/)).toBeVisible();
+  const accountStatus = (await screen.findByText("查看状态")).closest(".tip-target")!;
+  fireEvent.focus(accountStatus);
+  expect(await screen.findByRole("tooltip")).toHaveTextContent(/站点会话已失效，且尚未保存登录密码/);
+  fireEvent.blur(accountStatus);
   await user.click(screen.getByRole("button", {name: "重新登录"}));
   const dialog = within(screen.getByRole("dialog"));
   expect(dialog.getByLabelText("账号密码")).toBeRequired();
@@ -2880,11 +2931,12 @@ it("shows the durable sync selection instead of the 193-model historical catalog
  vi.stubGlobal("fetch",vi.fn(async(input:string)=>Response.json({data:input.endsWith("/accounts")?data:[]})));
  mount("scope-display");
  const table=await screen.findByRole("table");
- expect(within(table).getAllByText("本次已选 32 个模型")).toHaveLength(2);
- expect(table).toHaveTextContent("0/32 可用");
- expect(table).toHaveTextContent("32 个排队 / 检测中");
- expect(within(table).getByTitle("全部 193 个模型记录仍可在详情查看")).toBeVisible();
+ const status = within(table).getByText("0/32 可用").closest(".tip-target")!;
+ expect(status).toBeVisible();
+ fireEvent.focus(status);
+ const diagnostic = await screen.findByRole("tooltip");
+ expect(diagnostic).toHaveTextContent("本次已选 32 个模型");
+ expect(diagnostic).toHaveTextContent("32 个排队 / 检测中");
+ expect(diagnostic).toHaveTextContent("全部 193 个模型记录");
  expect(table).not.toHaveTextContent("193 个失败");
- expect(table).not.toHaveTextContent("0/193 匹配");
- expect(table).not.toHaveTextContent("32 个未检测");
 });

@@ -545,6 +545,7 @@ it("shows zero attempts for an idle selected key while shared channels have traf
         u.searchParams.get("key_id") === "key-2b",
     ),
   ).toBe(true);
+  await user.click(screen.getByRole("button", { name: "工具" }));
   await user.click(screen.getByRole("button", { name: "查看趋势" }));
   await waitFor(() =>
     expect(
@@ -584,6 +585,7 @@ it("shows 24h balance deductions and profit with inactive models, model filterin
   const {client}=mount();const user=userEvent.setup();
   await screen.findByRole("button",{name:"balance-test"});
   await user.click(document.querySelector<HTMLElement>(".channel-browser .workbench-disclosure:last-child summary")!);
+  await user.click(screen.getByRole("button", {name:"显示"}));
   await user.click(screen.getByRole("checkbox",{name:"性能与费用列"}));
   await user.selectOptions(screen.getByLabelText("时间范围筛选"),"24h");
   const cells=()=>within(screen.getByRole("button",{name:"balance-test"}).closest("tr")!).getAllByRole("cell");

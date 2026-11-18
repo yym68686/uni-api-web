@@ -391,7 +391,7 @@ it("does not claim the automatic Haiku tier works against a backend that has not
 
 it("preserves a draft across searches and renders confirmed prices read-only on a failed fetch", () => {
   const props = { prices: [] as ModelPrice[], loading: false, connection: { base: "", key: "", session: "test", account: true }, onSaved: vi.fn() };
-  const view = render(<PriceSettings {...props} />);
+  const view = render(<PriceSettings {...props} />, {wrapper:Tooltip.Provider});
   const search = screen.getByRole("textbox", { name: "搜索模型价格" });
   openEditor("gpt-6-astra");
   const input = screen.getByLabelText("gpt-6-astra 输入价格");
@@ -409,3 +409,4 @@ it("preserves a draft across searches and renders confirmed prices read-only on 
   expect(screen.getByText(/参考价只读/)).toBeInTheDocument();
   expect(within(restored.closest("tr")!).getByRole("button", { name: "保存价格" })).toBeDisabled();
 });
+import * as Tooltip from "@radix-ui/react-tooltip";

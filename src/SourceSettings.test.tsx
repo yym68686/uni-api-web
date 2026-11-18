@@ -5,7 +5,7 @@ import * as Tooltip from "@radix-ui/react-tooltip";
 import { SourceSettings } from "./SourceSettings";
 
 it("does not present a failed source directory read as an empty directory", () => {
-  render(<SourceSettings sources={[]} onSaved={vi.fn()} readError="网络断开" />);
+  render(<SourceSettings sources={[]} onSaved={vi.fn()} readError="网络断开" />, {wrapper:Tooltip.Provider});
   expect(screen.getByRole("alert")).toHaveTextContent("现有来源未改变");
   expect(screen.queryByText(/还没有来源/)).not.toBeInTheDocument();
   expect(screen.getByRole("button", {name:"添加来源"})).toBeDisabled();

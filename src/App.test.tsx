@@ -145,14 +145,20 @@ async function connect(
   await user.click(screen.getByRole("button", { name: /进入控制台/ }));
   if (expectTable) await screen.findByRole("table", {}, {timeout:5_000});
 }
-async function openFilters(user: ReturnType<typeof userEvent.setup>) {
+async function openFilters(user: ReturnType<typeof userEvent.setup>, tab = "条件") {
   const panel = document.querySelector<HTMLDetailsElement>(".channel-browser .workbench-disclosure:last-child");
   if (panel && !panel.open) await user.click(panel.querySelector("summary")!);
+  if (panel) await user.click(within(panel).getByRole("button", { name: tab }));
+}
+async function openSort(user: ReturnType<typeof userEvent.setup>) {
+  await openFilters(user, "显示");
+  await user.click(screen.getByRole("button", { name: "多条件排序" }));
 }
 async function balanceDetails(user: ReturnType<typeof userEvent.setup>) {
-  await openFilters(user);
+  await openFilters(user, "显示");
   const checkbox = screen.getByRole("checkbox",{name:"性能与费用列"});
   if (!(checkbox as HTMLInputElement).checked) await user.click(checkbox);
+  await openFilters(user);
 }
 
 describe("dashboard workflows", () => {
@@ -172,7 +178,7 @@ describe("dashboard workflows", () => {
   it("keeps each model/filter sort independent and restores its template through reload, rename and delete",async()=>{
     let app=setup({extraModel:true});await connect(app.user);
     await app.user.selectOptions(screen.getByLabelText("模型筛选"),"model-a");
-    await app.user.click(screen.getByRole("button",{name:"多条件排序"}));
+    await openSort(app.user);
     await app.user.click(screen.getByRole("button",{name:"不降智优先，再按概率"}));
     await app.user.click(screen.getByRole("button",{name:"保存为模板"}));
     await app.user.type(screen.getByLabelText("排序模板名称"),"高级模型");
@@ -182,7 +188,7 @@ describe("dashboard workflows", () => {
     expect(screen.getByLabelText("排序")).toHaveTextContent("排序预览");
     await app.user.selectOptions(screen.getByLabelText("模型筛选"),"model-b");
     expect(screen.getByLabelText("排序")).toHaveTextContent(/请求顺序|配置顺序|自定义规则/);
-    await app.user.click(screen.getByRole("button",{name:"多条件排序"}));
+    await openSort(app.user);
     expect(screen.queryByLabelText("第 1 排序依据")).not.toBeInTheDocument();
     await app.user.click(screen.getByRole("button",{name:"添加排序依据"}));
     await app.user.selectOptions(screen.getByLabelText("第 1 排序依据"),"multiplier");
@@ -194,20 +200,20 @@ describe("dashboard workflows", () => {
     await app.user.selectOptions(screen.getByLabelText("模型筛选"),"");
     expect(screen.getByLabelText("排序")).toHaveTextContent(/请求顺序|配置顺序|自定义规则/);
     await app.user.selectOptions(screen.getByLabelText("模型筛选"),"model-a");
-    await app.user.click(screen.getByRole("button",{name:"多条件排序"}));
+    await openSort(app.user);
     expect(within(screen.getByLabelText("排序模板")).getByRole("option",{name:"高级模型"})).toHaveProperty("selected",true);
     expect(screen.getByLabelText("第 1 排序依据")).toHaveValue("quality");
     await app.user.click(screen.getByRole("button",{name:"关闭排序设置"}));
     await app.user.selectOptions(screen.getByLabelText("时间范围筛选"),"24h");
     expect(screen.getByLabelText("排序")).toHaveTextContent(/请求顺序|配置顺序|自定义规则/);
-    await app.user.click(screen.getByRole("button",{name:"多条件排序"}));
+    await openSort(app.user);
     expect(screen.getByLabelText("第 1 排序依据")).toHaveValue("quality");
     expect(screen.getByRole("status")).toHaveTextContent("上次使用的模板");
     await app.user.click(screen.getByRole("button",{name:"关闭排序设置"}));
     await app.user.selectOptions(screen.getByLabelText("时间范围筛选"),"15m");
     app.unmount();app=setup({extraModel:true});await screen.findByRole("table", {}, {timeout:5_000});
     expect(screen.getByLabelText("排序")).toHaveTextContent(/请求顺序|配置顺序|自定义规则/);
-    await app.user.click(screen.getByRole("button",{name:"多条件排序"}));
+    await openSort(app.user);
     await app.user.click(screen.getByRole("button",{name:"重命名模板"}));
     await app.user.clear(screen.getByLabelText("排序模板名称"));await app.user.type(screen.getByLabelText("排序模板名称"),"质量优先");
     await app.user.click(screen.getByRole("button",{name:"保存"}));
@@ -215,7 +221,7 @@ describe("dashboard workflows", () => {
     await app.user.click(screen.getByRole("button",{name:"关闭排序设置"}));
     expect(screen.getByLabelText("排序")).toHaveTextContent(/请求顺序|配置顺序|自定义规则/);
     await app.user.selectOptions(screen.getByLabelText("模型筛选"),"model-b");
-    await app.user.click(screen.getByRole("button",{name:"多条件排序"}));
+    await openSort(app.user);
     expect(screen.getByLabelText("第 1 排序依据")).toHaveValue("multiplier");
     expect(within(screen.getByLabelText("排序模板")).getByRole("option", {name:"低价优先"})).toHaveProperty("selected",true);
     expect(screen.queryByRole("option",{name:"质量优先"})).not.toBeInTheDocument();
@@ -228,7 +234,7 @@ describe("dashboard workflows", () => {
     const order = () => within(screen.getByRole("table")).getAllByRole("button", {name: /^查看 .* 详情$/}).map(b => b.getAttribute("aria-label"));
     const actual = ["查看 third model-a 详情", "查看 first model-a 详情"];
     await waitFor(() => expect(order()).toEqual(actual));
-    await app.user.click(screen.getByRole("button", {name: "多条件排序"}));
+    await openSort(app.user);
     await app.user.click(screen.getByRole("button", {name: "添加排序依据"}));
     await app.user.selectOptions(screen.getByLabelText("第 1 排序依据"), "success");
     await app.user.click(screen.getByRole("button", {name: "预览"}));
@@ -239,14 +245,14 @@ describe("dashboard workflows", () => {
     await app.user.click(screen.getByRole("button", {name:"取消预览"}));
     expect(order()).toEqual(actual);
     expect(screen.getByLabelText("排序")).toHaveTextContent(/请求顺序|配置顺序|自定义规则/);
-    await app.user.click(screen.getByRole("button", {name: "多条件排序"}));
+    await openSort(app.user);
     await app.user.click(screen.getByRole("button", {name: "预览"}));
     expect(order()).toEqual([...actual].reverse());
     await app.user.click(screen.getByRole("button", {name: /^余额管理/}));
     expect(screen.queryByRole("button", {name: "取消预览"})).not.toBeInTheDocument();
     await app.user.click(screen.getByRole("button", {name: /^渠道观测/}));
     await waitFor(() => expect(order()).toEqual(actual));
-    await app.user.click(screen.getByRole("button", {name: "多条件排序"}));
+    await openSort(app.user);
     await app.user.click(screen.getByRole("button", {name: "预览"}));
     expect(order()).toEqual([...actual].reverse());
     app.unmount();
@@ -254,7 +260,7 @@ describe("dashboard workflows", () => {
     await screen.findByRole("table", {}, {timeout:5_000});
     expect(order()).toEqual(actual);
     expect(screen.getByLabelText("排序")).toHaveTextContent(/请求顺序|配置顺序|自定义规则/);
-    await app.user.click(screen.getByRole("button", {name: "多条件排序"}));
+    await openSort(app.user);
     expect(screen.getByLabelText("第 1 排序依据")).toHaveValue("success");
     await app.user.click(screen.getByRole("button", {name: "预览"}));
     await app.user.selectOptions(screen.getByLabelText("时间范围筛选"),"24h");
@@ -268,7 +274,7 @@ describe("dashboard workflows", () => {
     await openFilters(user);
     const selector = () => screen.getByLabelText("API key 筛选");
     async function openRates() {
-      await openFilters(user);
+      await openFilters(user, "工具");
       await user.click(screen.getByText("调用 Key 成功率", {selector:"summary"}));
     }
     const rateRow = (key: string) => screen.getByText(key, {selector:"dt",exact:false}).parentElement!;
@@ -620,6 +626,7 @@ describe("dashboard workflows", () => {
     expect(first.searchParams.get("stream")).toBe("all");
     await user.selectOptions(screen.getByLabelText("端点筛选"), "/v1/messages");
     await user.selectOptions(screen.getByLabelText("流式状态筛选"), "false");
+    await openFilters(user, "工具");
     await user.click(screen.getByRole("button", { name: "查看趋势" }));
     await waitFor(() =>
       expect(calls.some((url) => new URL(url).searchParams.has("timeseries"))).toBe(true),

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as Tooltip from "@radix-ui/react-tooltip";
@@ -150,7 +150,10 @@ it.each(["idle", "interrupted", "stopped", "error"])("revalidates page two once 
   await user.click(screen.getByRole("button", {name:"下一页"}));
   await screen.findByText("Channel 26", {selector:"strong"});
   const row = screen.getByRole("row", {name:"查看 Owned site Channel 26 渠道详情"});
-  expect(within(row).getAllByText("1 个排队 / 检测中")).toHaveLength(2);
+  const queued = within(row).getByText("0/1 可用").closest(".tip-target")!;
+  fireEvent.focus(queued);
+  expect(await screen.findByRole("tooltip")).toHaveTextContent("1 个排队 / 检测中");
+  fireEvent.blur(queued);
   await act(async()=>{await client.refetchQueries({queryKey:["sub-sync-progress"]});});
   await waitFor(()=>expect(pageReads).toBe(3));
   expect(requests).toEqual(["", "25", "25"]);
@@ -178,8 +181,12 @@ it("reconciles queued rows with the first completed progress read even when acco
   }));
   mount("completed-before-first-poll");
   const row = await screen.findByRole("row", {name:"查看 Owned site Channel 1 渠道详情"});
-  await waitFor(()=>expect(within(row).getByText("1 个中断")).toBeVisible());
-  expect(within(row).getByText("0/1 可用")).toBeVisible();
+  await waitFor(()=>expect(pageReads).toBe(2));
+  const state = within(row).getByText("0/1 可用").closest(".tip-target")!;
+  await waitFor(() => {
+    fireEvent.focus(state);
+    expect(screen.getByRole("tooltip")).toHaveTextContent("1 个中断");
+  });
   expect(within(row).queryByText("1 个排队 / 检测中")).not.toBeInTheDocument();
   expect(pageReads).toBe(2);
 });
@@ -283,7 +290,7 @@ it.each([true,false])("starts live sync progress without clearing rows, changing
  expect(screen.getByText("Channel 26",{selector:"strong"}).closest("tr")).toBe(row);
  expect(screen.queryByRole("status",{name:"加载渠道检测"})).not.toBeInTheDocument();
  await act(async()=>{finishProgress(Response.json({data:[{...account,state:"running",job_kind:"sync",sync_models:["gpt-5.5"],active_groups:1,completed_groups:0,progress:{total:32,completed:3,queued:27,running:2,interrupted:0,running_models:["gpt-5.5"],groups:[]}}],read_at_ms:2}));});
- await screen.findByText("模型进度：3/32 完成 · 2 检测中 · 27 排队");
+  await screen.findByText("模型 3/32");
  expect(screen.getByText("Channel 26",{selector:"strong"}).closest("tr")).toBe(row);
  expect(button).toBeDisabled();expect(pageReads).toBe(2);expect(posts).toBe(1);
  await openChannels();
@@ -607,12 +614,10 @@ it("retries a changed cursor at the requested page instead of resetting to page 
   const user = userEvent.setup();
   await screen.findByText("Channel 1", { selector: "strong" });
   await user.click(screen.getByRole("button", { name: "下一页" }));
-  await screen.findByText("暂时无法读取渠道");
+  await screen.findByText(/^暂时无法读取渠道：/);
   expect(failed).toBe(true);
   expect(screen.queryByText("没有匹配的渠道")).not.toBeInTheDocument();
-  await user.click(
-    within(screen.getByRole("alert")).getByRole("button", { name: "重试" }),
-  );
+  await user.click(screen.getByRole("button", { name: "重试渠道结果读取" }));
   await screen.findByText("Channel 26", { selector: "strong" });
   expect(cursors).toEqual(["", "25", "25"]);
 });

@@ -154,6 +154,12 @@
 .workspace .management-page-heading {padding:8px 0 10px}
 .workspace .management-filters {flex:none;position:static}
 .workspace .management-filters .workbench-popover {left:0;right:auto;width:min(36rem,calc(100vw - 24px))}
+.workspace .management-filters .sub-filters {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;overflow:visible}
+.workspace .management-filters .sub-filters > :is(.select-field,.search-field) {width:100%;min-width:0;max-width:none}
+.workspace .management-filters .sub-filters select {width:100%;max-width:100%;min-width:0}
+.workspace .management-filters .sub-name-exclude,.workspace .management-filters .sub-filter-reset {grid-column:1 / -1}
+.workspace .management-filters .sub-filter-reset {justify-self:start}
+.management-filters .table-column-options-inline {max-height: min(39dvh, 21rem);overflow:auto;overscroll-behavior:contain}
 .workspace .management-toolbar {
   display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;
   gap:8px 12px;padding:10px 0;min-width:0;
@@ -171,7 +177,14 @@
 .workspace .sub-table :is(th,td) {padding:7px 10px}
 .workspace .sub-table .check-source {margin-top:2px}
 .workspace .sub-table[data-columns="operations"] {min-width:740px}
-.workspace .sub-table[data-columns="operations"] :is(th,td):first-child {width:27%;min-width:112px;white-space:normal;overflow-wrap:anywhere}
+.workspace .sub-table :is(th,td):first-child {min-width:112px}
+.workspace .sub-table :is(th,td) {white-space:nowrap}
+.workspace .sub-table .management-metric {display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+.workspace .sub-table .management-metric .icon-button {width:26px;height:26px}
+.workspace .sub-table .sub-management-row > td:first-child > :is(strong,small),
+.workspace .sub-table .management-table-label {
+  display:block;max-width:clamp(9rem,22vw,20rem);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
 .workspace .sub-table .sub-row-actions {display:flex;gap:5px}
 .workspace .sub-table .sub-row-actions .button {min-height:28px;padding:4px 7px}
 .workspace .sub-table td:last-child .sub-row-actions .button + .button {margin-left:0}
@@ -183,8 +196,10 @@
 .workspace .request-log-table-wrap {background:var(--surface);border-top:1px solid var(--line);max-height:none;overflow:visible}
 .workspace .request-logs-panel[data-columns="summary"] .request-log-table {width:100%;min-width:100%;table-layout:fixed}
 .workspace .request-logs-panel[data-columns="custom"] .request-log-table-wrap {overflow:auto}
-.workspace .request-log-table th,.workspace .request-log-table td {padding:7px 10px;overflow-wrap:anywhere}
-.workspace .request-logs-panel[data-columns="summary"] .request-log-table :is(th,td,.trace-status,.request-log-id) {white-space:normal;overflow-wrap:anywhere}
+.workspace .request-log-table th,.workspace .request-log-table td {padding:7px 10px;white-space:nowrap}
+.workspace .request-log-table :is(th,td,strong,small,time,.trace-status,.request-log-id) {overflow:hidden;text-overflow:ellipsis}
+.workspace .request-log-table :is(.trace-status,.request-log-id) {max-width:100%;white-space:nowrap}
+.workspace .request-logs-panel[data-columns="custom"] .request-log-table :is(strong,small,.request-log-id) {max-width:18rem}
 .workspace .request-logs-panel[data-columns="summary"] .request-log-table th:first-child {width:34%}
 .workspace .request-logs-panel[data-columns="summary"] .request-log-table th:nth-child(2) {width:26%}
 .workspace .request-log-table .trace-status {max-width:100%}
@@ -199,7 +214,8 @@
 .workspace .price-overview-table :is(th,td):first-child {width:38%;text-align:left}
 .workspace .price-overview-table td {font-variant-numeric:tabular-nums}
 .workspace .price-overview-table tbody tr:hover {background:var(--subtle)}
-.workspace .price-model-open {padding:0;background:none;border:0;text-align:left;font-weight:650;overflow-wrap:anywhere;max-width:100%}
+.workspace .price-model-open {display:block;padding:0;background:none;border:0;text-align:left;font-weight:650;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.workspace .price-overview-table :is(th,td) {white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .workspace .price-model-open:hover {color:var(--accent)}
 .workspace .price-overview-table small {display:block;color:var(--muted);font-size:11px;font-weight:400}
 .workspace .price-table-footer {padding:9px 0;border:0}
@@ -217,8 +233,13 @@
 .sources-settings .source-item {padding:11px 0;gap:8px;background:var(--surface)}
 .sources-settings .source-item > svg {margin-left:9px;color:var(--muted)}
 .sources-settings .source-item > .icon-button:last-child {margin-right:8px}
+.sources-settings .source-item > div > :is(strong,small) {display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .workspace .balance-table:not([data-details]) {min-width:100%;table-layout:fixed}
-.workspace .balance-table:not([data-details]) :is(td,th) {padding:8px;overflow-wrap:anywhere}
+.workspace .balance-table :is(td,th) {white-space:nowrap}
+.workspace .balance-table:not([data-details]) :is(td,th) {padding:8px;overflow:hidden;text-overflow:ellipsis}
+.workspace .balance-table:not([data-details]) .balance-channel {min-width:0}
+.workspace .balance-table:not([data-details]) .balance-channel > span {min-width:0;max-width:100%}
+.workspace .balance-table:not([data-details]) .balance-channel :is(strong, small, .channel-link) {max-width:100%;overflow:hidden;text-overflow:ellipsis}
 .workspace .balance-table:not([data-details]) .channel-identity {width:33%;position:static}
 .workspace .balance-table:not([data-details]) .channel-link {padding:0}
 .workspace .data-panel.channel-browser {background:transparent;border:0;overflow:visible}
@@ -254,7 +275,53 @@
 }
 .workbench-tools > :is(.key-select,.model-select) {min-width:0;width:clamp(8rem,15vw,12rem)}
 .workbench-tools > :is(.key-select,.model-select) select {min-width:0;width:100%;text-overflow:ellipsis}
-.route-edit-strip {display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;padding:6px 0 10px;font-size:12px;color:var(--muted)}
+.channel-filter-disclosure .workbench-popover {padding:0 14px 13px;width:min(25rem,calc(100vw - 24px))}
+.channel-filter-disclosure .workbench-popover-heading {margin:0;padding-top:8px}
+.channel-filter-disclosure .workbench-popover-heading strong {font-size:14px}
+.channel-filter-disclosure .workbench-tabs {gap:18px;margin:0 0 12px}
+.channel-filter-disclosure .workbench-tabs button {min-width:48px;white-space:nowrap}
+.channel-filter-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-block:10px}
+.channel-filter-field {display:grid;gap:4px;min-width:0;color:var(--muted);font-size:11px}
+.workspace .channel-filter-disclosure .channel-filter-field .select-field,.channel-filter-number {
+  width:100%;max-width:none;min-height:33px;min-width:0;margin:0;
+}
+.workspace .channel-filter-disclosure .channel-filter-field select {width:100%;min-width:0;max-width:100%;font-size:12px;text-overflow:ellipsis}
+.channel-filter-number {background:var(--bg);border:1px solid var(--line);border-radius:6px;color:var(--ink);padding:0 8px}
+.channel-filter-footer {display:flex;align-items:center;justify-content:space-between;gap:6px;margin-top:12px}
+.channel-filter-footer:empty {display:none}
+.channel-filter-footer .filter-chip,.channel-filter-footer .button {min-height:32px;white-space:nowrap}
+.channel-filter-toolbox {display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.channel-filter-checkbox {display:flex;align-items:center;gap:8px;font-size:12px}
+.channel-filter-checkbox input {accent-color:var(--accent-fill)}
+.channel-filter-disclosure .workbench-key-rates {padding-top:10px;margin-top:12px;border-top:1px solid var(--line)}
+.channel-filter-disclosure .workbench-key-rates dt,.channel-filter-disclosure .workbench-key-rates dd {min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.channel-route-drawer {
+  position:fixed;inset:auto 12px 12px auto;z-index:30;width:min(31rem,calc(100vw - 24px));height:min(68dvh,42rem);
+  display:grid;grid-template-rows:auto auto minmax(0,1fr) auto;background:var(--surface);color:var(--ink);
+  border:1px solid var(--line);border-radius:9px;box-shadow:var(--shadow);
+}
+.channel-route-heading {display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px 8px}
+.channel-route-heading > div {min-width:0}
+.channel-route-heading h2 {margin:0;font-size:16px}
+.channel-route-heading p {margin:3px 0 0;color:var(--muted);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.channel-route-search {margin:0 14px 8px;min-width:0}
+.channel-route-list {overflow:auto;overscroll-behavior:contain;border-block-start:1px solid var(--line)}
+.channel-route-list > p {margin:16px 14px;font-size:12px}
+.channel-route-list h3 {margin:0;padding:7px 14px;background:var(--subtle);font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.channel-route-list ol {list-style:none;margin:0;padding:0}
+.channel-route-list li {display:grid;grid-template-columns:24px minmax(0,1fr) auto;align-items:center;gap:7px;min-height:42px;padding:3px 10px 3px 14px;border-bottom:1px solid var(--line);font-size:12px}
+.channel-route-list li > strong {white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.channel-route-rank {font-size:11px;color:var(--muted)}
+.channel-route-footer {background:var(--surface);border-radius:0 0 9px 9px;border-top:1px solid var(--line);padding:9px 12px}
+.channel-route-footer .control-toolbar-actions {gap:7px}
+.channel-route-footer .control-draft-error {display:block;max-height:54px;overflow:auto;margin-bottom:6px}
+.channel-route-footer .control-reset-menu {top:auto;bottom:calc(100% + 6px)}
+.channel-route-drawer .control-row-actions .icon-button {width:29px;height:29px}
+@media(max-width:430px) {
+  .channel-route-list li {gap:4px;padding-inline:8px;grid-template-columns:18px minmax(0,1fr) auto}
+  .channel-route-list .control-row-actions,.channel-route-list .control-order-actions {gap:3px}
+  .channel-filter-grid {gap:8px}
+}
 .table-column-options {margin-top:9px;padding-top:8px;border-top:1px solid var(--line);font-size:12px}
 .table-column-options > summary {width:fit-content;cursor:pointer;color:var(--ink);font-weight:650}
 .table-column-options ul {margin:6px 0 0;padding:0;list-style:none}
@@ -266,7 +333,7 @@
 .table-column-grip {display:inline-flex;color:var(--muted);cursor:grab}
 .table-column-reset {padding:4px 0;border:0;background:none}
 .workbench-notice {display:inline-flex;flex:none;align-items:center;color:var(--warning)}
-.workbench-notice-text {display:grid;gap:6px}
+.workbench-notice-text {display:grid;gap:6px;max-height:min(50dvh,20rem);overflow:auto}
 .workbench-help {padding:6px 0;color:var(--muted);font-size:12px}
 .workbench-key-rates {color:var(--muted);font-size:12px;margin-top:6px}
 .workbench-key-rates summary {cursor:pointer}
@@ -296,8 +363,6 @@
   padding:2px 1px 6px;font-size:13px;color:var(--muted);
 }
 .workbench-tabs button[aria-current="true"] {color:var(--accent);border-color:var(--accent);font-weight:640}
-.workbench-status {font-size:12px;color:var(--muted);margin-bottom:8px}
-.workbench-status button {background:none;border:0;padding:0 5px}
 .workspace .channel-browser .table-scroll {background:var(--surface);border-top:1px solid var(--line)}
 .workspace .channel-browser .channel-table {color:var(--ink)}
 .workspace .observation-table[data-columns="run"] {min-width:100%;table-layout:fixed}
@@ -308,11 +373,12 @@
 .workspace .observation-table .column-balance .balance-values {align-items:flex-end}
 .workspace .observation-table[data-compact] .column-balance .amount small {display:none}
 .workspace .observation-table th,
-.workspace .observation-table td {padding:7px 11px;font-size:13px;overflow-wrap:anywhere;white-space:normal}
+.workspace .observation-table td {padding:7px 11px;font-size:13px;white-space:nowrap}
 .workspace .observation-table td {height:48px}
 .workspace .observation-table :is(th,td):last-child,
 .workspace .balance-table:not([data-details]) :is(th,td):last-child {width:auto;padding-inline:11px}
-.workspace .observation-table .column-balance .amount {overflow-wrap:anywhere;white-space:normal}
+.workspace .observation-table .column-balance .amount {white-space:nowrap}
+.workspace .observation-table .channel-link {max-width:min(100%,24rem)}
 .workspace .observation-table .column-balance > :is(.balance-values,.balance-status) {margin-left:auto}
 .workspace .observation-table .column-balance {text-align:right}
 .workspace .observation-table .column-balance .amount {font-size:12px;font-variant-numeric:tabular-nums}
@@ -323,13 +389,14 @@
 .workspace .observation-table tr[data-route-alert] td {background:var(--warning-row)}
 .workspace .observation-table td:nth-child(n+3),.workspace .observation-table th:nth-child(n+3) {text-align:right;font-variant-numeric:tabular-nums}
 .workspace .observation-table .channel-link {min-width:0;max-width:100%;padding:0;display:block}
+.workspace .observation-table .channel-link :is(strong,small) {white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .workspace .observation-table .channel-link strong {font-size:13px;color:var(--ink)}
 .workspace .observation-table .channel-link:hover strong {color:var(--accent)}
 .workspace .observation-table .channel-link small {font-size:11px;margin-top:1px;color:var(--muted)}
 .workspace .observation-table :is(.dual-metric,.success-cell) {display:flex;align-items:flex-end;flex-direction:column;gap:1px}
 .workspace .observation-table .success-cell small,.workspace .observation-table .observation-no-sample {font-size:11px;color:var(--muted)}
 .workspace .observation-table .status-pill {
-  padding:0;background:transparent;color:var(--muted);font-size:12px;white-space:normal;
+  padding:0;background:transparent;color:var(--muted);font-size:12px;white-space:nowrap;
 }
 .workspace .observation-table .status-pill.healthy {color:var(--green)}
 .workspace .observation-table .status-pill.cooling {color:var(--danger)}

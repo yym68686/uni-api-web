@@ -1,9 +1,9 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { afterEach, expect, it, vi } from "vitest";
-import { FingerprintPanel, FingerprintStatus, fingerprintProbabilityClass, fingerprintTargets, fingerprintKey, rowFingerprints } from "./ModelFingerprints";
+import { FingerprintCell, FingerprintPanel, FingerprintStatus, fingerprintProbabilityClass, fingerprintTargets, fingerprintKey, rowFingerprints } from "./ModelFingerprints";
 import fingerprintModels from "../analytics-api/fingerprint/models.json";
 const FINGERPRINT_MODELS = Object.keys(fingerprintModels);
 import type { FingerprintRecord } from "./ModelFingerprints";
@@ -32,6 +32,20 @@ it("shows requested-class probability below mismatch with the same quality color
  view.rerender(<Tooltip.Provider><FingerprintStatus record={{...record,state:"error"}}/></Tooltip.Provider>);
  expect(screen.getByText("检测失败")).toBeInTheDocument();expect(screen.getByText("—")).toHaveClass("quality-unknown");
  expect(fingerprintProbabilityClass(1)).toBe("quality-perfect");expect(fingerprintProbabilityClass(.9)).toBe("quality-partial");expect(fingerprintProbabilityClass(.899)).toBe("quality-poor");
+});
+it("keeps provisional fingerprint details out of the table layout even when other models are untested", async () => {
+ const partial: FingerprintRecord = {...record, result: {...record.result!, status:"insufficient", decision:"partial", used_outputs:1, probability:null,
+  candidates:[{model:"claude-haiku-4.5",display_name:"Claude Haiku 4.5",probability:null}]}};
+ const another = {account_id:"one", group_id:1, model:"gemini-4-carbon"};
+ mount(<FingerprintCell entries={[{target:partial, record:partial},{target:another}]} supportedModels={[partial.model, another.model]}/>);
+ const trigger = screen.getByText("样本不足").closest(".tip-target")!;
+ expect(trigger).toHaveTextContent(/^样本不足$/);
+ expect(screen.queryByText(/暂定排名|最接近/)).not.toBeInTheDocument();
+ fireEvent.focus(trigger);
+ const details = await screen.findByRole("tooltip");
+ expect(details).toHaveTextContent("暂定排名 · 1/3");
+ expect(details).toHaveTextContent("最接近：Claude Haiku 4.5");
+ expect(details).toHaveTextContent("gemini-4-carbon · 未检测");
 });
 it("only selects the supported models and fences configured stale evidence",()=>{
  const row={account:{id:""},target:{group_id:0},configured:{source_id:"fugue",provider:"native",models:["gpt-6-astra"],probe_fingerprint:"new"}} as ManagementRow;

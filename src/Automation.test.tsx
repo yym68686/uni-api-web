@@ -1,6 +1,7 @@
 import { expect, it, vi, afterEach } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import * as Tooltip from "@radix-ui/react-tooltip";
 import { Automation } from "./Automation";
 const sources = [
   {
@@ -152,7 +153,7 @@ it("retains audit records during a refresh and when the refresh fails", async ()
     }
     return Response.json({data:[]});
   }));
-  render(<Automation sources={sources} />);
+  render(<Automation sources={sources} />, {wrapper:Tooltip.Provider});
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", {name: "执行记录"}));
   const original = await screen.findByText("已调整渠道顺序");
