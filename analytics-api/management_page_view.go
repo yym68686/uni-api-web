@@ -61,6 +61,38 @@ type managementOverview struct {
 	CheckedAt   int64 `json:"checked_at"`
 }
 
+// Keep the in-process counting reference used on fallback groups and for the
+// legacy Astra result. The equivalent SQL applies only to current projections.
+func (o *managementOverview) add(c subModelResult) {
+	if c.Result != nil {
+		o.CheckedAt = max(o.CheckedAt, c.Result.CheckedAt)
+	}
+	switch c.State {
+	case "queued", "running":
+		o.Pending++
+	case "interrupted":
+		o.Interrupted++
+	default:
+		status, terminal := "", ""
+		if c.Result != nil {
+			status, terminal = c.Result.Availability.Status, c.Result.Availability.TerminalStatus
+		}
+		if status == "success" {
+			if c.State != "error" {
+				o.Success++
+			}
+			if terminal != "" && terminal != "complete" {
+				o.Warning++
+			}
+		}
+		if status == "error" || c.State == "error" {
+			o.Failed++
+		} else if c.Result == nil {
+			o.Untested++
+		}
+	}
+}
+
 // Only the operations columns are negotiated here. Keep the model status
 // names used for busy-button decisions and active sync scopes. Other columns
 // and configured aliases can still negotiate the richer list.
@@ -68,37 +100,13 @@ func managementApplyOverview(row *managementQueryRow) bool {
 	if row.Selected != nil || row.Configured != nil {
 		return false
 	}
-	o := &managementOverview{Total: len(row.Checks)}
-	for _, c := range row.Checks {
-		if c.Result != nil {
-			o.CheckedAt = max(o.CheckedAt, c.Result.CheckedAt)
+	if row.Target.ListOverview == nil {
+		o := &managementOverview{Total: len(row.Checks)}
+		for _, c := range row.Checks {
+			o.add(c.subModelResult)
 		}
-		switch c.State {
-		case "queued", "running":
-			o.Pending++
-		case "interrupted":
-			o.Interrupted++
-		default:
-			status, terminal := "", ""
-			if c.Result != nil {
-				status, terminal = c.Result.Availability.Status, c.Result.Availability.TerminalStatus
-			}
-			if status == "success" {
-				if c.State != "error" {
-					o.Success++
-				}
-				if terminal != "" && terminal != "complete" {
-					o.Warning++
-				}
-			}
-			if status == "error" || c.State == "error" {
-				o.Failed++
-			} else if c.Result == nil {
-				o.Untested++
-			}
-		}
+		row.Target.ListOverview = o
 	}
-	row.Target.ListOverview = o
 	// Keep check identities while a sync is in progress for per-model progress
 	// if the independent progress feed has yet to provide a group record.
 	if row.Account.JobKind == "sync" && managementPending(row.Account.State) {

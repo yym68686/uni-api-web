@@ -38,12 +38,12 @@ func (s *Service) hydrateManagementPageFrom(ctx context.Context, db controlQuery
 	var projectedGroups map[string]bool
 	overview := managementOverviewView(ctx) && filters.Model == ""
 	for _, row := range page.Rows {
-		if row.Configured != nil || row.Account.JobKind == "sync" && managementPending(row.Account.State) {
-			overview = false
-		}
 		if row.Account.ID != "" {
 			id := qualityGroupID(row.Account.ID, row.Target.GroupID)
 			groups[id] = true
+			if overview && row.Configured != nil {
+				fullGroups[id] = true
+			}
 		}
 		if row.Configured != nil {
 			for _, member := range row.Configured.Members {
@@ -69,16 +69,13 @@ func (s *Service) hydrateManagementPageFrom(ctx context.Context, db controlQuery
 		}
 	}
 	if len(wanted) > 0 {
-		for _, a := range subset {
-			if a.JobKind == "sync" && managementPending(a.State) {
-				overview = false
-				break
-			}
-		}
 		stages := newManagementReadTimeline(ctx, "hydrate_models")
 		defer stages.finish()
 		index := map[string]*subTarget{}
+		activeSync := map[string]bool{}
 		for i := range subset {
+			a := &subset[i]
+			activeSync[a.ID] = a.JobKind == "sync" && managementPending(a.State)
 			for j := range subset[i].Targets {
 				target := &subset[i].Targets[j]
 				index[qualityGroupID(subset[i].ID, target.GroupID)] = target
@@ -118,16 +115,35 @@ func (s *Service) hydrateManagementPageFrom(ctx context.Context, db controlQuery
 		// open new snapshots, or weaken configured/custom-model full fallbacks.
 		const modelBatchGroups = 25
 		projectedGroups = map[string]bool{}
+		overviews := map[string]managementPageGroupOverview{}
 		for start := 0; start < len(wanted); start += modelBatchGroups {
 			batch := wanted[start:min(start+modelBatchGroups, len(wanted))]
 			if overview {
-				ok, err := readManagementPageOverview(ctx, db, owner, batch, index)
-				if err != nil {
-					return err
+				scoped := make([]subBoundKey, 0, len(batch))
+				for _, g := range batch {
+					if !activeSync[g.AccountID] && !fullGroups[qualityGroupID(g.AccountID, g.GroupID)] {
+						scoped = append(scoped, g)
+					}
 				}
-				if ok {
-					continue
+				if len(scoped) > 0 {
+					summaries, err := readManagementPageOverview(ctx, db, owner, scoped)
+					if err != nil {
+						return err
+					}
+					rich := make([]subBoundKey, 0, len(batch)-len(summaries))
+					for _, g := range batch {
+						id := qualityGroupID(g.AccountID, g.GroupID)
+						if summary, ok := summaries[id]; ok {
+							overviews[id] = summary
+						} else {
+							rich = append(rich, g)
+						}
+					}
+					batch = rich
 				}
+			}
+			if len(batch) == 0 {
+				continue
 			}
 			projected, err := readManagementDisplayModelStream(ctx, db, owner, batch, fullGroups, filters.Model, consume)
 			if err != nil {
@@ -172,6 +188,14 @@ func (s *Service) hydrateManagementPageFrom(ctx context.Context, db controlQuery
 		stages.next("hydrate_normalize")
 		if err := normalizeManagementAccounts(subset); err != nil {
 			return err
+		}
+		for id, summary := range overviews {
+			target := index[id]
+			if summary.legacy && target.Result != nil {
+				summary.counts.Untested--
+				summary.counts.add(subModelResult{State: "done", Result: target.Result})
+			}
+			target.ListOverview, target.Models = &summary.counts, summary.busy
 		}
 		for i := range view.Input.Accounts {
 			for j := range view.Input.Accounts[i].Targets {

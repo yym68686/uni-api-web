@@ -17,7 +17,11 @@ func TestManagementOverviewMatchesListAcrossPages(t *testing.T) {
 	prepareManagementRevisionsForTest(t, s.control.db)
 	if _, err := s.control.db.Exec(`UPDATE console_sub_models SET state='running' WHERE group_id=25 AND model='gpt-5.5';
 		UPDATE console_sub_models SET result=jsonb_set(result,'{availability,terminal_status}','"missing"') WHERE group_id=51 AND model='gpt-5.5';
-		UPDATE console_sub_models SET state='interrupted' WHERE group_id=61 AND model='extra-model'`); err != nil {
+		UPDATE console_sub_models SET state='interrupted' WHERE group_id=61 AND model='extra-model';
+		UPDATE console_sub_models SET state='error',result=jsonb_set(result,'{availability,terminal_status}','"missing"') WHERE group_id=5 AND model='gpt-5.5';
+		INSERT INTO console_sub_check_queue(account_id,group_id,kind,model) VALUES ('a',26,'check','new-queued-model');
+		UPDATE console_sub_targets t SET result=m.result FROM console_sub_models m WHERE t.account_id=m.account_id AND t.group_id=m.group_id AND m.group_id=59 AND m.model='gpt-6-astra';
+		DELETE FROM console_sub_models WHERE group_id IN (59,60)`); err != nil {
 		t.Fatal(err)
 	}
 	fullCtx := context.WithValue(context.Background(), managementListViewKey{}, true)
@@ -70,12 +74,10 @@ func TestManagementOverviewScopedSignalsKeepFallbackAndOwnership(t *testing.T) {
 		t.Fatal(err)
 	}
 	wanted := []subBoundKey{{AccountID: "a", GroupID: 1}, {AccountID: "b", GroupID: 1}, {AccountID: "a", GroupID: 2}}
-	a, b, c := &subTarget{}, &subTarget{}, &subTarget{}
-	slots := map[string]*subTarget{qualityGroupID("a", 1): a, qualityGroupID("b", 1): b, qualityGroupID("a", 2): c}
-	if ok, err := readManagementPageOverview(ctx, db, "owner", wanted, slots); err != nil || !ok || len(a.Models) != 3 || len(c.Models) != 3 || len(b.Models) != 0 {
-		t.Fatalf("wrong grouped overview or ownership: ok=%t err=%v", ok, err)
+	if got, err := readManagementPageOverview(ctx, db, "owner", wanted); err != nil || len(got) != 2 ||
+		got[qualityGroupID("a", 1)].counts.Success != 3 || got[qualityGroupID("a", 2)].counts.Success != 3 {
+		t.Fatalf("wrong grouped overview or ownership: groups=%d err=%v", len(got), err)
 	}
-	a.Models, c.Models = nil, nil
 	for _, change := range []string{
 		`UPDATE console_management_model_signal SET valid=false WHERE account_id='a' AND group_id=2 AND model='gpt-5.5'`,
 		`DELETE FROM console_management_model_signal WHERE account_id='a' AND group_id=2 AND model='gpt-5.5'`,
@@ -83,8 +85,8 @@ func TestManagementOverviewScopedSignalsKeepFallbackAndOwnership(t *testing.T) {
 		if _, err := db.Exec(change); err != nil {
 			t.Fatal(err)
 		}
-		if ok, err := readManagementPageOverview(ctx, db, "owner", wanted, slots); err != nil || ok || len(a.Models) != 0 || len(c.Models) != 0 {
-			t.Fatalf("partial or invalid overview accepted: ok=%t err=%v", ok, err)
+		if got, err := readManagementPageOverview(ctx, db, "owner", wanted); err != nil || len(got) != 1 || got[qualityGroupID("a", 1)].counts.Success != 3 {
+			t.Fatalf("missing or invalid signal group was not isolated: groups=%d err=%v", len(got), err)
 		}
 	}
 }
