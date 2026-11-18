@@ -28,8 +28,13 @@ func TestSubAddressChangeVerifiesThenInvalidatesCurrentEvidence(t *testing.T) {
 	s, account, owner := subUsageTestService(t)
 	for _, statement := range []string{
 		`UPDATE console_sub_accounts SET synced_at=123,balance='{"status":"ok"}',encrypted_login_password='old-cipher',job_id='old-job' WHERE id=$1`,
-		`INSERT INTO console_sub_targets(account_id,group_id,name,platform,remote_key_id,encrypted_key,encrypted_routing_key,routing_key_id,state,result,billing,compaction,tool_use) VALUES($1,7,'old group','openai',42,'old-key','route-key',43,'done','{}','{}','{}','{}')`,
-		`INSERT INTO console_sub_models(account_id,group_id,model,state,result) VALUES($1,7,'gpt-6-astra','done','{}')`,
+		`INSERT INTO console_sub_targets(account_id,group_id,name,platform,remote_key_id,encrypted_key,encrypted_routing_key,routing_key_id,state,result,billing,compaction,tool_use)
+SELECT $1,g,'old group','openai',42,'old-key','route-key',43,'done','{}','{}','{}','{}' FROM generate_series(1,32) g`,
+		// Match the size of the account that timed out. Both the summary and
+		// signal projections must be removed, not regenerated for old models.
+		`INSERT INTO console_sub_models(account_id,group_id,model,state,result)
+SELECT $1,1+(i-1)%32,'old-model-'||i,'done',CASE WHEN i<=5582 THEN '{"checked_at":123,"availability":{"status":"success"}}'::jsonb END
+FROM generate_series(1,6475) i`,
 		`INSERT INTO console_quality_history(check_id,account_id,group_id,checked_at,verdict) VALUES($1,$1,7,123,'pass')`,
 		`INSERT INTO console_model_fingerprints(scope,model,account_id,group_id,state,result,sample_state,run_id,revision) VALUES($1,'gpt-6-astra',$1,7,'running','{}','{}','old-run','old-revision')`,
 		`INSERT INTO console_sub_key_scans(account_id,revision) VALUES($1,'old')`,
@@ -80,13 +85,15 @@ func TestSubAddressChangeVerifiesThenInvalidatesCurrentEvidence(t *testing.T) {
 		t.Fatal("destination password not retained")
 	}
 	var valid bool
-	if err = s.control.db.QueryRow(`SELECT NOT active AND encrypted_key='' AND remote_key_id=0 AND encrypted_routing_key='' AND routing_key_id=0 AND result IS NULL AND billing IS NULL AND compaction IS NULL AND tool_use IS NULL FROM console_sub_targets WHERE account_id=$1`, account).Scan(&valid); err != nil || !valid {
+	if err = s.control.db.QueryRow(`SELECT count(*)=32 AND bool_and(NOT active AND encrypted_key='' AND remote_key_id=0 AND encrypted_routing_key='' AND routing_key_id=0 AND result IS NULL AND billing IS NULL AND compaction IS NULL AND tool_use IS NULL) FROM console_sub_targets WHERE account_id=$1`, account).Scan(&valid); err != nil || !valid {
 		t.Fatal("stale target evidence retained", err)
 	}
 	if err = s.control.db.QueryRow(`SELECT state='interrupted' AND result IS NULL AND sample_state IS NULL AND revision='' AND run_id='' FROM console_model_fingerprints WHERE account_id=$1`, account).Scan(&valid); err != nil || !valid {
 		t.Fatal("stale fingerprint evidence retained", err)
 	}
-	if err = s.control.db.QueryRow(`SELECT result IS NULL FROM console_sub_models WHERE account_id=$1`, account).Scan(&valid); err != nil || !valid {
+	if err = s.control.db.QueryRow(`SELECT NOT EXISTS(SELECT 1 FROM console_sub_models WHERE account_id=$1)
+AND NOT EXISTS(SELECT 1 FROM console_sub_model_summaries WHERE account_id=$1)
+AND NOT EXISTS(SELECT 1 FROM console_management_model_signal WHERE account_id=$1)`, account).Scan(&valid); err != nil || !valid {
 		t.Fatal("stale model result retained", err)
 	}
 	if err = s.control.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM console_quality_history WHERE account_id=$1) AND NOT EXISTS(SELECT 1 FROM console_sub_key_index WHERE account_id=$1) AND NOT EXISTS(SELECT 1 FROM console_sub_key_scans WHERE account_id=$1) AND EXISTS(SELECT 1 FROM console_recharge_settings WHERE account_id=$1 AND revision<>'old-revision')`, account).Scan(&valid); err != nil || !valid {
@@ -94,6 +101,23 @@ func TestSubAddressChangeVerifiesThenInvalidatesCurrentEvidence(t *testing.T) {
 	}
 	if _, err = s.subUsageAuth(context.Background(), account, "https://usage.example", ""); err == nil {
 		t.Fatal("old site could read destination credentials")
+	}
+	// Synchronization can repopulate models for a reused group ID without
+	// reviving a stale result. History remains attached to the retained group.
+	ctx := withSubSyncModels(context.Background(), []string{"gpt-6-astra"})
+	tx, err := s.control.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if err = queueSubSyncModels(ctx, tx, account, []subRemoteGroup{{ID: 7}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.control.db.QueryRow(`SELECT state='queued' AND result IS NULL FROM console_sub_models WHERE account_id=$1 AND group_id=7 AND model='gpt-6-astra'`, account).Scan(&valid); err != nil || !valid {
+		t.Fatal("sync could not rebuild the new site's model catalog", err)
 	}
 }
 
