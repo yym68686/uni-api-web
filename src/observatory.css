@@ -10,8 +10,25 @@
   --selection:#e5eafc;
   --accent-fill:#384c9f;
   --accent-ink:#fff;
+  --focus-ring:color-mix(in srgb,var(--accent) 40%,transparent);
+  --edge-shadow:color-mix(in srgb,var(--ink) 7%,transparent);
+  --overlay:#151a2b62;
+  --green:#166846;
+  --green-bg:#e8f4ed;
+  --danger:#a2462f;
+  --danger-bg:#fbede7;
+  --critical:#b62e42;
+  --critical-bg:#fbe9ec;
+  --warning:#856000;
   --warning-row:#fcf5eb;
   --shadow:0 12px 32px #22294420;
+  --border:var(--line);
+  --panel:var(--surface);
+  --input:var(--surface);
+  --text:var(--ink);
+  --red:var(--critical);
+  --font-mono:"Geist Mono Variable",monospace;
+  color-scheme:light;
 }
 :root[data-theme="dark"] {
   --bg:#141720;
@@ -25,8 +42,17 @@
   --selection:#2c3659;
   --accent-fill:#b1bfff;
   --accent-ink:#17224c;
+  --overlay:#080b15a6;
+  --green:#8cc8a0;
+  --green-bg:#203b30;
+  --danger:#f0a480;
+  --danger-bg:#38282a;
+  --critical:#ff9ca8;
+  --critical-bg:#412831;
+  --warning:#e9cc70;
   --warning-row:#2b2428;
   --shadow:0 12px 32px #0d11277d;
+  color-scheme:dark;
 }
 .app-shell,.observatory-welcome.welcome {background:var(--bg)}
 :root :is(button,a,input,select,[tabindex],summary):focus-visible {
@@ -124,14 +150,39 @@
 .workspace .automation-page .automation-card {margin:0;border-width:0 0 1px;background:var(--surface)}
 .workspace .automation-list {padding:0;border:0;background:transparent}
 .workspace .automation-list .automation-card:first-of-type {border-top:1px solid var(--line)}
-.workspace .sub2api-page {margin:0}
-.workspace .management-page-heading {padding:8px 0 14px}
-.workspace .management-filters {width:max-content;margin:0 0 9px auto}
-.workspace .management-filters .workbench-popover {width:min(36rem,calc(100vw - 24px))}
-.workspace .sub-results-status:empty {display:none}
+.workspace .sub2api-page {margin:0;gap:6px}
+.workspace .management-page-heading {padding:8px 0 10px}
+.workspace .management-filters {flex:none;position:static}
+.workspace .management-filters .workbench-popover {left:0;right:auto;width:min(36rem,calc(100vw - 24px))}
+.workspace .management-toolbar {
+  display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;
+  gap:8px 12px;padding:10px 0;min-width:0;
+}
+.management-query,.management-actions {
+  display:flex;align-items:center;gap:6px;min-width:0;max-width:100%;
+}
+.management-query {flex:1 1 19rem;position:relative}
+.management-query .search-field {flex:1 1 auto;min-width:0;max-width:25rem}
+.management-actions {flex:0 1 auto;flex-wrap:wrap}
+.management-toolbar :is(.search-field,.select-field,.button) {min-height:34px}
+.management-toolbar .select-field select {text-overflow:ellipsis;max-width:8rem}
+.workspace .sub-results-table {max-width:100%;border-top:1px solid var(--line)}
+.workspace .sub-table {background:var(--surface)}
+.workspace .sub-table :is(th,td) {padding:7px 10px}
+.workspace .sub-table .check-source {margin-top:2px}
+.workspace .sub-table[data-columns="operations"] {min-width:740px}
+.workspace .sub-table[data-columns="operations"] :is(th,td):first-child {width:27%;min-width:112px;white-space:normal;overflow-wrap:anywhere}
+.workspace .sub-table .sub-row-actions {display:flex;gap:5px}
+.workspace .sub-table .sub-row-actions .button {min-height:28px;padding:4px 7px}
+.workspace .sub-table td:last-child .sub-row-actions .button + .button {margin-left:0}
+@media (max-width:780px) {
+  .management-query .search-field {max-width:none}
+  .management-actions {flex:1 1 100%}
+  .workspace .management-filters .workbench-popover {left:12px;width:min(25rem,calc(100vw - 24px))}
+}
 .workspace .request-log-table-wrap {background:var(--surface);border-top:1px solid var(--line);max-height:none;overflow:visible}
 .workspace .request-logs-panel[data-columns="summary"] .request-log-table {width:100%;min-width:100%;table-layout:fixed}
-.workspace .request-logs-panel[data-columns="all"] .request-log-table-wrap {overflow:auto}
+.workspace .request-logs-panel[data-columns="custom"] .request-log-table-wrap {overflow:auto}
 .workspace .request-log-table th,.workspace .request-log-table td {padding:7px 10px;overflow-wrap:anywhere}
 .workspace .request-logs-panel[data-columns="summary"] .request-log-table :is(th,td,.trace-status,.request-log-id) {white-space:normal;overflow-wrap:anywhere}
 .workspace .request-logs-panel[data-columns="summary"] .request-log-table th:first-child {width:34%}
@@ -178,7 +229,7 @@
 .workspace .data-heading h2 {
   font-size:clamp(20px,2.4vw,29px);line-height:1.2;letter-spacing:-.028em;font-weight:670;
 }
-.workspace .data-title > svg,.workspace .sub-detection-title .data-title > svg {display:none}
+.workspace .data-title > svg {display:none}
 .workspace .data-heading .data-title {width:auto;min-width:0}
 .workspace .data-title h2 {white-space:normal}
 .workspace .data-heading .count-badge {font-size:11px}
@@ -201,6 +252,21 @@
   display:flex;align-items:center;justify-content:space-between;
   font-size:13px;margin-bottom:8px;
 }
+.workbench-tools > :is(.key-select,.model-select) {min-width:0;width:clamp(8rem,15vw,12rem)}
+.workbench-tools > :is(.key-select,.model-select) select {min-width:0;width:100%;text-overflow:ellipsis}
+.route-edit-strip {display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;padding:6px 0 10px;font-size:12px;color:var(--muted)}
+.table-column-options {margin-top:9px;padding-top:8px;border-top:1px solid var(--line);font-size:12px}
+.table-column-options > summary {width:fit-content;cursor:pointer;color:var(--ink);font-weight:650}
+.table-column-options ul {margin:6px 0 0;padding:0;list-style:none}
+.table-column-options li {display:flex;align-items:center;justify-content:space-between;gap:6px;min-height:30px;padding:0 5px;border-top:1px solid var(--line)}
+.table-column-options label,.table-column-order {display:flex;align-items:center;gap:4px}
+.table-column-options label {cursor:pointer}
+.table-column-options input {accent-color:var(--accent-fill)}
+.table-column-options .icon-button {width:26px;height:26px}
+.table-column-grip {display:inline-flex;color:var(--muted);cursor:grab}
+.table-column-reset {padding:4px 0;border:0;background:none}
+.workbench-notice {display:inline-flex;flex:none;align-items:center;color:var(--warning)}
+.workbench-notice-text {display:grid;gap:6px}
 .workbench-help {padding:6px 0;color:var(--muted);font-size:12px}
 .workbench-key-rates {color:var(--muted);font-size:12px;margin-top:6px}
 .workbench-key-rates summary {cursor:pointer}

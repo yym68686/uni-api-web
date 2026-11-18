@@ -9,6 +9,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import * as Tooltip from "@radix-ui/react-tooltip";
 import { RequestLogsPage, requestLogParams } from "./RequestLogs";
 import { defaultFilters, loadFilters, saveFilters } from "./preferences";
 import type { RequestLog } from "./RequestLogs";
@@ -48,6 +49,7 @@ function setup(fetcher: (input: string) => Promise<Response>) {
   });
   render(
     <QueryClientProvider client={client}>
+      <Tooltip.Provider>
       <RequestLogsPage
         connection={{
           base: location.origin,
@@ -60,6 +62,7 @@ function setup(fetcher: (input: string) => Promise<Response>) {
           { id: "do", name: "DigitalOcean" },
         ]}
       />
+      </Tooltip.Provider>
     </QueryClientProvider>,
   );
   return userEvent.setup();
@@ -182,6 +185,8 @@ it("loads logs immediately, filters on the server and can jump to the newest pag
   await user.click(screen.getByRole("button", { name: "查看最新" }));
   await screen.findByRole("button", { name: "request-one" });
   expect(calls.at(-1)?.searchParams.get("cursor")).toBe("");
+  expect(document.querySelector(".request-logs-panel .workbench-disclosure:last-child")).not.toHaveAttribute("open");
+  await user.click(document.querySelector<HTMLElement>(".request-logs-panel .workbench-disclosure:last-child summary")!);
   await user.selectOptions(screen.getByLabelText("时间范围筛选"), "24h");
   await user.selectOptions(screen.getByLabelText("uni-api 来源"), "fugue");
   await user.selectOptions(screen.getByLabelText("API key 筛选"), "fugue::key");
@@ -207,6 +212,7 @@ it("loads logs immediately, filters on the server and can jump to the newest pag
     stream: "false",
     status: "failed",
   });
+  await user.click(document.querySelector<HTMLElement>(".request-logs-panel .workbench-disclosure:last-child summary")!);
   await user.click(screen.getByRole("button", { name: "重置筛选" }));
   expect(screen.getByLabelText("时间范围筛选")).toHaveValue("15m");
   expect(screen.getByLabelText("模型筛选")).toHaveValue("");

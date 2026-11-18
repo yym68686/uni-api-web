@@ -30,14 +30,14 @@ it.each(["light", "dark"] as const)(
     document.documentElement.removeAttribute("data-theme");
     bootstrap(document, localStorage);
     expect(document.documentElement.dataset.theme).toBe(theme);
-    expect(meta.content).toBe(theme === "dark" ? "#101916" : "#f6f7f8");
+    expect(meta.content).toBe(theme === "dark" ? "#141720" : "#f6f7fb");
     const { result } = renderHook(useTheme);
     expect(result.current[0]).toBe(theme);
     const next = theme === "dark" ? "light" : "dark";
     act(() => result.current[1](next));
     expect(document.documentElement.dataset.theme).toBe(next);
     expect(localStorage.getItem("uni-console-theme")).toBe(next);
-    expect(meta.content).toBe(next === "dark" ? "#101916" : "#f6f7f8");
+    expect(meta.content).toBe(next === "dark" ? "#141720" : "#f6f7fb");
   },
 );
 

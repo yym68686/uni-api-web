@@ -496,8 +496,9 @@ export function ChannelControlActions(props: {
   keys: KeyInfo[];
   editing: boolean;
   onEditingChange: (editing: boolean) => void;
+  closeDisclosureOnEdit?: boolean;
 }) {
-  const { controls, sources, editing, onEditingChange } = props;
+  const { controls, sources, editing, onEditingChange, closeDisclosureOnEdit } = props;
   return (
     <div className="control-toolbar-actions">
       <Tip
@@ -512,8 +513,15 @@ export function ChannelControlActions(props: {
           aria-pressed={editing}
           title="手动调整实际路由顺序或停用状态，应用前可取消"
           disabled={controls.pending}
-          onClick={() => {
+          onClick={(event) => {
             if (editing) controls.discardAll();
+            if (!editing && closeDisclosureOnEdit) {
+              const panel = event.currentTarget.closest<HTMLDetailsElement>(".workbench-disclosure");
+              if (panel) {
+                panel.open = false;
+                panel.querySelector("summary")?.focus();
+              }
+            }
             onEditingChange(!editing);
           }}
         >

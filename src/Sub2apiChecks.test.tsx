@@ -2883,7 +2883,7 @@ it("shows the durable sync selection instead of the 193-model historical catalog
  expect(within(table).getAllByText("本次已选 32 个模型")).toHaveLength(2);
  expect(table).toHaveTextContent("0/32 可用");
  expect(table).toHaveTextContent("32 个排队 / 检测中");
- expect(table).toHaveTextContent("全部 193 个模型记录仍可在详情查看");
+ expect(within(table).getByTitle("全部 193 个模型记录仍可在详情查看")).toBeVisible();
  expect(table).not.toHaveTextContent("193 个失败");
  expect(table).not.toHaveTextContent("0/193 匹配");
  expect(table).not.toHaveTextContent("32 个未检测");

@@ -20,7 +20,7 @@
 .chart-column.current { outline: 1px solid var(--muted); outline-offset:-1px; }
 .chart-column.partial { background:repeating-linear-gradient(125deg,transparent 0 6px, var(--line) 6px 8px); }
 .wallet-summary { margin: 0 20px 12px; border:1px solid var(--line); border-radius:9px; padding:10px 14px; }
-.wallet-summary > summary { color:var(--green); cursor:pointer; font-size:.88rem; }
+.wallet-summary > summary { color:var(--accent); cursor:pointer; font-size:.88rem; }
 .wallet-summary p { color:var(--muted); font-size:.8rem; }
 .wallet-summary ul { display:grid; gap:8px; padding:0; list-style:none; }
 .wallet-summary li { display:flex; align-items:center; flex-wrap:wrap; gap:10px; font-size:.83rem; }

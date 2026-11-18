@@ -18,7 +18,7 @@ export function Tip({
         </span>
       </Tooltip.Trigger>
       <Tooltip.Portal>
-        <Tooltip.Content className="tooltip" sideOffset={8}>
+        <Tooltip.Content className="tooltip" sideOffset={8} collisionPadding={12}>
           {text}
           <Tooltip.Arrow className="tooltip-arrow" />
         </Tooltip.Content>

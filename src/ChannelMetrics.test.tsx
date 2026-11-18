@@ -21,6 +21,19 @@ it("mounts only compact observation metrics and keeps counts aligned", () => {
   expect(screen.getByRole("columnheader", {name:/余额\s*\/\s*额度/})).toBeVisible();
 });
 
+it.each([[.98, "healthy"], [.87, "warning"], [.55, "critical"], [0, "critical"]] as const)(
+  "draws a proportional, severity-coded attempt rate for %s",
+  (rate, expected) => {
+    const row = {provider: "channel", eligible: true, stats: {...emptyStats(), success_rate: rate, success_rate_denominator: 100}} as Channel;
+    const {container} = render(<Tooltip.Provider><table><tbody><tr>
+      <ChannelMetricCells row={row} actualRange={{supported:false}} columns={["success"]} />
+    </tr></tbody></table></Tooltip.Provider>);
+    const track = container.querySelector(".rate-track");
+    expect(track).toHaveAttribute("data-tone", expected);
+    expect(track?.firstElementChild).toHaveStyle({width: `${rate * 100}%`});
+  },
+);
+
 it("places total-time p50/p95 immediately after first-token latency with aligned cells", () => {
   const row = { provider: "channel", eligible: true, stats: { ...emptyStats(), started: 5, duration } } as Channel;
   render(<Tooltip.Provider><table>

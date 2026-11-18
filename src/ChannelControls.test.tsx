@@ -406,9 +406,7 @@ it("stages source-specific controls inline, retains hidden channels and drafts a
     "data-reset-scope",
     "One / 全部 API key / 全部模型",
   );
-  expect(reset.closest(".workbench-popover")).toBe(
-    screen.getByLabelText("搜索渠道或模型").closest(".workbench-popover"),
-  );
+  expect(reset.closest(".route-edit-strip")).not.toBeNull();
   expect(
     screen.queryByRole("region", { name: "当前范围的临时修改" }),
   ).not.toBeInTheDocument();
@@ -465,9 +463,7 @@ it("keeps a single reset beside search with scope details in the menu and toolti
   expect(
     screen.getAllByRole("button", { name: RESET_SCOPE_LABEL }),
   ).toHaveLength(1);
-  expect(reset.closest(".workbench-popover")).toBe(
-    screen.getByLabelText("搜索渠道或模型").closest(".workbench-popover"),
-  );
+  expect(reset.closest(".route-edit-strip")).not.toBeNull();
   expect(
     screen.queryByRole("region", { name: "当前范围的临时修改" }),
   ).not.toBeInTheDocument();
@@ -481,6 +477,7 @@ it("keeps a single reset beside search with scope details in the menu and toolti
   expect(
     screen.getByRole("menuitem", { name: "One / 全部 API key / 全部模型" }),
   ).toBeInTheDocument();
+  openFilter();
   await app.user.type(
     screen.getByLabelText("搜索渠道或模型"),
     "no-matching-channel",
@@ -916,7 +913,7 @@ it("distinguishes unavailable check history from untested channels and keeps met
   expect(observedCheck("One", "visible-first")).toHaveTextContent("读取失败");
   expect(within(table).queryByText("未检测")).not.toBeInTheDocument();
   expect(within(table).getAllByRole("row")).toHaveLength(7);
-  expect(screen.queryByRole("button", {name:"调整顺序"})).not.toBeInTheDocument();
+  expect(screen.getByRole("button", {name:"调整顺序"})).toBeEnabled();
   app.unmount();
   app.client.clear();
 });

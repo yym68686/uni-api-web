@@ -106,7 +106,6 @@ import {
   rate,
   rowId,
   providerId,
-  time,
 } from "./format";
 import type {
   Balance,
@@ -125,9 +124,10 @@ import {
   type BalanceResult,
   Status,
   ChannelMetricHeaders,
-  channelMetricColumnClasses,
   ChannelMetricCells,
 } from "./ChannelMetrics";
+import { observationColumnClass, observationColumns, observationPreset, type ChannelMetricLayout } from "./observationColumns";
+import { TableColumns, useTableColumns } from "./TableColumns";
 import { actualCostRange } from "./actualCost";
 import { useScopedChannelSpend } from "./SubChannelSpend";
 import { balanceSpend } from "./balanceSpend";
@@ -137,7 +137,7 @@ import { balanceThresholdState, rankBalanceProviders } from "./balanceFilters";
 import { useBalanceModelMetrics, balanceModelMetricID, BalanceModelMetricCells } from "./BalanceModelMetrics";
 import { salePercent } from "./modelPrices";
 import { ConsoleHeader, ConsoleLocator, ConsoleNavigation } from "./ConsoleChrome";
-import { useCompactWorkbench, WorkbenchDisclosure, WorkbenchTabs } from "./Workbench";
+import { useCompactWorkbench, useWorkbenchTools, WorkbenchDisclosure, WorkbenchNotice, WorkbenchTabs } from "./Workbench";
 import { PageBoundary } from "./PageBoundary";
 import type { PriceDrafts } from "./PriceSettings";
 import { hasChannelScope, readWorkspace, requestLocation, validLogWindow, workspaceHash } from "./workspaceLocation";
@@ -757,8 +757,10 @@ export default function Dashboard({
     stream,
   } = filters;
   const [page, setPage] = useState(0),
-    [editingRoutes, setAdjustingChannels] = useState(false);
-  const adjustingChannels = routeView && editingRoutes;
+    [editingRoutes, setEditingRoutes] = useState<"channels" | "routing" | null>(null);
+  const adjustingChannels = channelView && editingRoutes === view;
+  const canEditRoutes = channelView && !!baseConnection.account;
+  const setAdjustingChannels = (editing: boolean) => setEditingRoutes(editing && (view === "channels" || view === "routing") ? view : null);
   const previewingSort = channelView && !adjustingChannels && sortPreview?.scope === channelScope;
   useEffect(() => setSortPreview(null), [channelScope, view, adjustingChannels]);
   const sortRules = channelSort.rules;
@@ -784,10 +786,20 @@ export default function Dashboard({
     [refresh, setRefresh] = useState(0);
 
   const [auto, setAuto] = useState(false);
-  const [columnView, setColumnView] = useState<"run" | "quality" | "finance" | "all">("run");
+  const [columnView, setColumnView] = useState<ChannelMetricLayout>("run");
+  const [customColumns, setCustomColumns] = useTableColumns("uni-console:channel-columns:v1", observationColumns);
   const compactViewport = useCompactWorkbench();
-  const compactObservation = compactViewport && columnView === "run" && !routeView;
-  const qualityColumns = !!baseConnection.account && (columnView === "quality" || columnView === "all");
+  const compactObservation = compactViewport && !customColumns && columnView === "run" && !routeView && !adjustingChannels;
+  const columnChoices = baseConnection.account ? observationColumns : observationColumns.filter(({ id }) => id !== "quality" && id !== "fingerprint");
+  const visibleColumns = customColumns ? customColumns.filter(id => columnChoices.some(choice => choice.id === id)) : observationPreset(columnView, compactObservation, !!baseConnection.account);
+  const observationLayout = customColumns ? "custom" : columnView;
+  const showBalanceColumn = visibleColumns.includes("balance") || (!baseConnection.account && visibleColumns.includes("actual"));
+  const showSpendColumn = visibleColumns.includes("actual") || visibleColumns.includes("profit");
+  const qualityColumns = visibleColumns.includes("quality") || visibleColumns.includes("fingerprint");
+  const { observeHeading, level: toolsLevel } = useWorkbenchTools();
+  const inlineModel = !routeView && toolsLevel >= 1;
+  const inlineKey = !routeView && toolsLevel >= 2;
+  const inlineRoute = view === "channels" && canEditRoutes && toolsLevel >= 3;
   const [balanceView, setBalanceView] = useState("channels");
   const [balanceDetails, setBalanceDetails] = useState(false);
   const [locatedChannel, setLocatedChannel] = useState<Channel | null>(null);
@@ -998,7 +1010,7 @@ export default function Dashboard({
       .map((source) => source.id),
     keyId,
     model,
-    enabled: !!baseConnection.account && channelView,
+    enabled: !!baseConnection.account && (routeView || adjustingChannels),
   });
   const tableRows = channelView && adjustingChannels ? controls.arrange(rows)
     : previewingSort ? previewChannelOrder(rows, sortPreview.rows) : rows;
@@ -1044,7 +1056,7 @@ export default function Dashboard({
   const balanceScope = useMemo(() => new Set(balanceCatalog), [balanceCatalog]);
   const visibleBalanceProviderIds = new Set(
     view==="balances" ? balanceCatalog.slice(pageBounds(balanceCatalog.length),pageBounds(balanceCatalog.length)+25)
-      : channelView ? candidateRows.slice(pageBounds(candidateRows.length),pageBounds(candidateRows.length)+25).map(providerId) : [],
+      : channelView && showBalanceColumn ? candidateRows.slice(pageBounds(candidateRows.length),pageBounds(candidateRows.length)+25).map(providerId) : [],
   );
   const focusedBalance = detailId ? rows.find(row=>rowId(row)===detailId) : locatedChannel;
   if (focusedBalance) visibleBalanceProviderIds.add(providerId(focusedBalance));
@@ -1142,7 +1154,7 @@ export default function Dashboard({
     if (state === "unknown") thresholdUnknown++;
     return state === "below";
   });
-  const channelSpend = useScopedChannelSpend({ rows: filtered, session: connection.session, sourceId: selectedSourceId, keyId, model, endpoint: effectiveEndpoint, stream: effectiveStream, from: metrics.data?.from, to: metrics.data?.to, snapshot: metrics.data, snapshotError: metrics.isError, snapshotUpdatedAt: metrics.dataUpdatedAt, refresh, auto, paused: metrics.isFetching, enabled: (view === "balances" && balanceView === "channels" && balanceDetails || channelView && (columnView === "finance" || columnView === "all")) && !!baseConnection.account });
+  const channelSpend = useScopedChannelSpend({ rows: filtered, session: connection.session, sourceId: selectedSourceId, keyId, model, endpoint: effectiveEndpoint, stream: effectiveStream, from: metrics.data?.from, to: metrics.data?.to, snapshot: metrics.data, snapshotError: metrics.isError, snapshotUpdatedAt: metrics.dataUpdatedAt, refresh, auto, paused: metrics.isFetching, enabled: (view === "balances" && balanceView === "channels" && balanceDetails || channelView && showSpendColumn) && !!baseConnection.account });
   const balanceFinance = useMemo(() => {
     const result = new Map<
       string,
@@ -1388,7 +1400,7 @@ export default function Dashboard({
       setView(scope);
       setDetailId(next.detail);
       setLocatedChannel(null);
-      setAdjustingChannels(false);
+      if (scope !== "channels" && scope !== "routing") setEditingRoutes(null);
       setBalanceAudit(null);
       if (next.filters && hasChannelScope(scope)) {
         const sharedFilters = next.filters;
@@ -1411,15 +1423,51 @@ export default function Dashboard({
       onSelect={selectView}
     />
   );
+  const historyImport = metrics.data?.import;
+  const historyMessages = [
+    historyInitializing && (metrics.data ? "历史数据正在初始化，暂显示上次成功读取的数据。" : metrics.error?.message),
+    !historyInitializing && staleSources.size > 0 && `历史同步滞后：${staleSourceNames.join("、") || "当前来源"}。统计可能缺少近期请求。`,
+    historyImport && !historyImport.caught_up && (!historyImport.scanning || historyImport.audit_complete === false || !!historyImport.error_class || historyImport.remaining_objects > 0) &&
+      (historyImport.error_class ? `采集异常：${historyImport.error_class}` : historyImport.audit_complete === false ? "来源上报尚未追平或存在记录缺口。" : "正在接收请求记录，统计尚不完整。"),
+    metrics.data?.coverage === "partial" && "当前筛选范围的历史记录不完整。",
+  ];
+  const observationMessages = [
+    ...historyMessages,
+    channelView && !!cachedDashboardAt && (metrics.isFetching ? "上次完整数据 · 正在后台更新" : "当前显示上次完整数据"),
+    channelView && (qualityColumns || checkingChannels) && checks.error && `最近检测结果读取失败：${checks.error.message}`,
+    channelView && balanceFilter && unknownBalances > 0 && `仅显示已核验且不足的渠道 · ${unknownBalances} 个未核验`,
+    view === "balances" && thresholdUnknown > 0 && `${thresholdUnknown} 个渠道未能判定阈值；仅显示已确认结果。`,
+    channelView && checkingChannels && (observedDetection.notice?.text || observedDetection.batchIssue),
+  ];
+  const routeActions = (closeDisclosureOnEdit = false) => <ChannelControlActions controls={controls} sources={sourceList} keys={keys.data?.data || []}
+    editing={adjustingChannels} onEditingChange={setAdjustingChannels} closeDisclosureOnEdit={closeDisclosureOnEdit} />;
+  const apiKeyFilter = <div className="select-field key-select">
+    <KeyRound size={15} aria-hidden="true" />
+    <select aria-label="API key 筛选" value={keyId} onChange={e => setFilter("keyId", e.target.value)}>
+      <option value="">全部 API Key</option>
+      {keyRemoved && <option value={keyId}>已移除的 API key</option>}
+      {keys.data?.data.map(key => <option key={key.key_id} value={key.key_id}>
+        {key.source_name ? `${key.source_name} · ` : ""}Key {key.position} · {key.prefix}
+      </option>)}
+    </select>
+    <ChevronDown size={13} aria-hidden="true" />
+  </div>;
+  const modelFilter = <div className="select-field model-select">
+    <Layers3 size={15} aria-hidden="true" />
+    <select aria-label="模型筛选" value={model} onChange={e => setFilter("model", e.target.value)}>
+      <option value="">全部模型</option>
+      {modelRemoved && <option value={model}>{model} · 未配置</option>}
+      {models.map(name => <option key={name}>{name}</option>)}
+    </select>
+    <ChevronDown size={13} aria-hidden="true" />
+  </div>;
   const observationHeader = <>
     {routeView && <th className="rank">#</th>}
     <th className="channel-identity">渠道</th>
-    {qualityColumns && <>
-      <th className="column-quality"><Tip text="显示此来源、此渠道最近一次 gpt-6-astra 检测结果，与当前指标时间范围无关；不代表表中每个模型都已单独检测。">是否降智 <CircleHelp size={12} /></Tip></th>
-      <th className="column-quality"><Tip text={`显示此来源、此渠道、当前模型的最新指纹结果，与渠道管理和详情共享数据，与指标时间范围无关。${fingerprintNote}`}>指纹 <CircleHelp size={12}/></Tip></th>
-    </>}
     {checkingChannels && <th>检测操作</th>}
-    <ChannelMetricHeaders keySelected={!!keyId} channels={filtered} layout={columnView} compact={compactObservation} />
+    <ChannelMetricHeaders keySelected={!!keyId} channels={filtered} columns={visibleColumns} renderDetection={id => id === "quality"
+      ? <th className="column-quality"><Tip text="显示此来源、此渠道最近一次 gpt-6-astra 检测结果，与当前指标时间范围无关；不代表表中每个模型都已单独检测。">是否降智 <CircleHelp size={12} /></Tip></th>
+      : <th className="column-quality"><Tip text={`显示此来源、此渠道、当前模型的最新指纹结果，与渠道管理和详情共享数据，与指标时间范围无关。${fingerprintNote}`}>指纹 <CircleHelp size={12}/></Tip></th> } />
     {adjustingChannels && <th><Tip text="修改作用于本行来源、当前选择的 API key 和模型（未选择则为全部），对所有端点和流式状态生效。无到期时间；设置开启“保留临时配置”时，重启后自动恢复已应用的更改。">临时控制 <CircleHelp size={12} /></Tip></th>}
   </>;
   return (
@@ -1461,7 +1509,7 @@ export default function Dashboard({
         <main className="workspace" aria-label="工作区" tabIndex={-1} ref={mainRef}><PageBoundary key={view}><Suspense fallback={<PageLoading view={view} />}>
           {view === "overview" && !noSources && <section className="data-panel overview-scope" aria-label="总览统计范围">
             <div className="data-heading">
-              <div className="data-title"><Gauge size={18} /><h2>总览</h2></div>
+              <div className="data-title"><Gauge size={18} /><h2>总览</h2><WorkbenchNotice messages={historyMessages} /></div>
               {refreshButton}
             </div>
             <div className="filters">
@@ -1486,19 +1534,8 @@ export default function Dashboard({
                 {models.map(value => <option value={value} key={value}>{value}</option>)}
               </select></label>
             </div>
-            {!!metrics.data?.to && <p className="settings-note">历史统计截至 {new Date(metrics.data.to * 1000).toLocaleString("zh-CN", {hour12:false})}；并发为实时渠道尝试。</p>}
             {error && <p role="alert" className="coverage-note">读取不完整：{error}</p>}
-            {(staleSources.size > 0 || metrics.data?.coverage === "partial" || metrics.data?.import?.caught_up === false) &&
-              <p role="status" className="coverage-note">历史覆盖不完整{staleSourceNames.length ? ` · ${staleSourceNames.join("、")}` : ""}；请求和消费只代表当前可见记录。</p>}
           </section>}
-          {historyInitializing && (channelView || view === "overview") && (
-            <div className="coverage-note" role="status">
-              <Spinner small />
-              {metrics.data
-                ? `历史数据正在初始化，暂显示上次成功读取的数据（${time(metrics.data.generated_at)}），完成后将自动更新。`
-                : metrics.error?.message}
-            </div>
-          )}
           {view === "requests" ? <RequestLogsPage connection={baseConnection} sources={sourceList}/> : view === "sub2api" && baseConnection.account ? (
             <Sub2apiChecks
               key={baseConnection.session}
@@ -1575,9 +1612,10 @@ export default function Dashboard({
           ) : null}
           {!noSources && (channelView || view === "balances") ? (
             <section className="data-panel channel-browser" data-channel-data-state={channelView ? (channelDataComplete ? "complete" : "loading") : undefined}>
-              <div className="data-heading workbench-heading">
+              <div className="data-heading workbench-heading" ref={observeHeading}>
                 <div className="data-title">
                   <h2>{routeView ? "路由顺序" : channelView ? "渠道观测" : "余额管理"}</h2>
+                  <WorkbenchNotice messages={observationMessages} />
                 </div>
                 <div className="workbench-tools">
                   {routeView && <button type="button" className="button small ghost" onClick={() => selectView("sub2api")}><ChevronLeft size={14} />渠道管理</button>}
@@ -1588,6 +1626,9 @@ export default function Dashboard({
                     </select>
                     <ChevronDown size={13} aria-hidden="true" />
                   </label>
+                  {inlineModel && modelFilter}
+                  {inlineKey && apiKeyFilter}
+                  {inlineRoute && !adjustingChannels && routeActions()}
                   {view === "balances" && <WorkbenchDisclosure label="检查余额" icon={<Wallet size={14} aria-hidden="true" />}>
                     <p className="workbench-help">当前范围：{count(balanceCatalog.length)} 个渠道</p>
                     <button type="button" className="button small" disabled={!activeAudit && (!balanceCatalog.length || busy || search !== deferredSearch)} onClick={event => {
@@ -1655,15 +1696,7 @@ export default function Dashboard({
                   }} />}
                   {routeView && routingSort.pending && <button className="button small" title="恢复上一次应用前的路由顺序" disabled={routingSort.busy} onClick={()=>void routingSort.undo()}>撤回排序</button>}
                   {routeView && routingSort.error && <span role="alert" className="negative">{routingSort.error}</span>}
-                  {routeView && (
-                    <ChannelControlActions
-                      controls={controls}
-                      sources={sourceList}
-                      keys={keys.data?.data || []}
-                      editing={adjustingChannels}
-                      onEditingChange={setAdjustingChannels}
-                    />
-                  )}
+                  {canEditRoutes && !adjustingChannels && !inlineRoute && routeActions(true)}
                   {channelView && (
                     <ObservedDetectionActions
                       checks={checks}
@@ -1719,43 +1752,8 @@ export default function Dashboard({
                     <ChevronDown size={13} />
                   </label>
                 )}
-                <div className="select-field key-select">
-                  <KeyRound size={15} />
-                  <select
-                    aria-label="API key 筛选"
-                    value={keyId}
-                    onChange={(e) => setFilter("keyId", e.target.value)}
-                  >
-                    <option value="">全部 API Key</option>
-                    {keyRemoved && (
-                      <option value={keyId}>已移除的 API key</option>
-                    )}
-                    {keys.data?.data.map((key) => (
-                      <option key={key.key_id} value={key.key_id}>
-                        {key.source_name ? `${key.source_name} · ` : ""}Key{" "}
-                        {key.position} · {key.prefix}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown size={13} />
-                </div>
-                <div className="select-field model-select">
-                  <Layers3 size={15} />
-                  <select
-                    aria-label="模型筛选"
-                    value={model}
-                    onChange={(e) => setFilter("model", e.target.value)}
-                  >
-                    <option value="">全部模型</option>
-                    {modelRemoved && (
-                      <option value={model}>{model} · 未配置</option>
-                    )}
-                    {models.map((name) => (
-                      <option key={name}>{name}</option>
-                    ))}
-                  </select>
-                  <ChevronDown size={13} />
-                </div>
+                {!inlineKey && apiKeyFilter}
+                {!inlineModel && modelFilter}
                 {view === "balances" && (
                   <>
                     <label className="workbench-help"><input type="checkbox" checked={balanceDetails} onChange={event => setBalanceDetails(event.target.checked)} /> 性能与费用列</label>
@@ -1862,9 +1860,13 @@ export default function Dashboard({
                       <ChevronDown size={12} />
                     </div>
                     <label className="inline-select"><SlidersHorizontal size={13} />
-                      <select aria-label="渠道表列布局" value={columnView} onChange={e=>setColumnView(e.target.value as typeof columnView)}>
+                      <select aria-label="渠道表列布局" value={observationLayout} onChange={e=>{
+                        setCustomColumns(null);
+                        setColumnView(e.target.value as ChannelMetricLayout);
+                      }}>
                         <option value="run">运行列</option><option value="quality">质量列</option>
                         <option value="finance">费用列</option><option value="all">全部列</option>
+                        {customColumns && <option value="custom" disabled>自定义列</option>}
                       </select><ChevronDown size={12} />
                     </label>
                   </>
@@ -1884,6 +1886,8 @@ export default function Dashboard({
                   </button>
                 )}
                 </div>
+                {channelView && <TableColumns choices={columnChoices} value={visibleColumns} onChange={setCustomColumns}
+                  onReset={() => { setCustomColumns(null); setColumnView("run"); }} />}
                 {channelView && <p className="workbench-help" aria-label="排序">{previewingSort ? "排序预览 · 未应用到路由" : keyId ? "按当前 API key 的请求顺序" : sortRules.length ? "按自定义规则" : "按渠道配置顺序"}</p>}
                 {!!keys.data?.data.length && <details className="workbench-key-rates">
                   <summary>调用 Key 成功率</summary>
@@ -1896,6 +1900,7 @@ export default function Dashboard({
                 </div>
               </div>
               {previewingSort && <div className="workbench-status" role="status">排序预览 · 未应用到路由 <button type="button" className="text-link" onClick={() => setSortPreview(null)}>退出预览</button></div>}
+              {adjustingChannels && <div className="route-edit-strip" aria-label="路由调整"><span>请求顺序</span>{routeActions()}</div>}
               {view === "balances" && <WorkbenchTabs label="余额视图" value={balanceView} onChange={setBalanceView} tabs={[["wallets","站点钱包"],["channels","渠道额度"]]} />}
               {view === "balances" && balanceView === "wallets" ? <section className="wallet-summary" aria-label="已核验站点钱包">
                 {groupedWallets.size === 0 && <p>当前范围暂无已核验钱包</p>}
@@ -1920,50 +1925,6 @@ export default function Dashboard({
                 )}
               </AnimatePresence>
               {view === "balances" && !balanceThresholdValid && <p role="alert" className="coverage-note">请输入非负的美元金额，阈值尚未应用。</p>}
-              {view === "balances" && thresholdUnknown > 0 && <p role="status" className="coverage-note">{thresholdUnknown} 个渠道未能判定阈值；仅显示已确认结果。</p>}
-              {channelView && balanceFilter && unknownBalances > 0 && <p role="status" className="coverage-note">仅显示已核验且不足的渠道 · {unknownBalances} 个未核验</p>}
-              {channelView && checkingChannels && (observedDetection.notice || observedDetection.batchIssue) && (
-                <div className={observedDetection.notice?.error ? "error-banner" : "detection-submission-notice"} role={observedDetection.notice?.error ? "alert" : "status"}>
-                  {observedDetection.notice?.text || observedDetection.batchIssue}
-                </div>
-              )}
-              {channelView && cachedDashboardAt && (
-                <div className="coverage-note" role="status">
-                  <Clock3 size={14} />
-                  上次完整数据 · {time(cachedDashboardAt / 1000)}{metrics.isFetching ? " · 正在后台更新" : " · 可刷新获取最新数据"}
-                </div>
-              )}
-              {channelView && (qualityColumns || checkingChannels) && checks.error && (
-                <div className="coverage-note" role="alert">
-                  最近检测结果读取失败：{checks.error.message}
-                </div>
-              )}
-              {!historyInitializing && staleSources.size > 0 && (
-                <div className="coverage-note" role="alert">
-                  <Clock3 size={14} />
-                  {staleSourceNames.join("、") || "当前来源"}{" "}
-                  仍有请求完成，但历史数据同步已滞后超过 2 分钟；当前统计可能遗漏请求，不能视为零流量。
-                </div>
-              )}
-              {metrics.data?.import && !metrics.data.import.caught_up &&
-                (!metrics.data.import.scanning || metrics.data.import.audit_complete === false || !!metrics.data.import.error_class || metrics.data.import.remaining_objects > 0) && (
-                <div className="coverage-note" role="status">
-                  <Clock3 size={14} />
-                  {metrics.data.import.error_class
-                    ? `采集异常：${metrics.data.import.error_class}`
-                    : metrics.data.import.audit_complete === false
-                      ? "来源上报尚未追平或存在记录缺口，当前统计可能不完整。"
-                      : "正在接收请求记录，当前统计尚不完整。"}
-                </div>
-              )}
-              {metrics.data?.coverage === "partial" && (
-                <div className="coverage-note">
-                  <Clock3 size={14} />
-                  {metrics.data.dropped
-                    ? "部分指标因容量限制未收集，请结合日志核对。"
-                    : `当前保留记录始于 ${time(metrics.data.collection_started_at)}，筛选窗口包含未采集或已淘汰的数据。`}
-                </div>
-              )}
               {error && rows.length > 0 && <p role="alert" className="error-banner">刷新失败，保留当前数据。{error}</p>}
               {error && !rows.length ? (
                 <div role="alert" className="table-error">
@@ -1976,8 +1937,8 @@ export default function Dashboard({
                 </div>
               ) : catalog.isPending || metrics.isPending || (historyInitializing && !metrics.data) ? (
                 <TableLoading kind={channelView ? "channels" : "balances"} observation={channelView ? {
-                  header: observationHeader, layout: columnView,
-                  classes:[...(routeView ? ["rank"] : []),"channel-identity",...(qualityColumns ? ["column-quality","column-quality"] : []),...(checkingChannels ? [""] : []),...channelMetricColumnClasses(columnView,compactObservation),...(adjustingChannels ? [""] : [])],
+                  header: observationHeader, layout: observationLayout, compact: compactObservation,
+                  classes:[...(routeView ? ["rank"] : []),"channel-identity",...(checkingChannels ? [""] : []),...visibleColumns.map(id => observationColumnClass[id]),...(adjustingChannels ? ["control-actions-cell"] : [])],
                 } : undefined} />
               ) : total === 0 ? (
                 <Empty
@@ -1996,7 +1957,8 @@ export default function Dashboard({
                 </Empty>
               ) : channelView ? (
                 <div className="table-scroll" tabIndex={0} role="region" aria-label="渠道观测表">
-                  <table className="channel-table observation-table" data-columns={columnView} data-compact={compactObservation || undefined}>
+                  <table className="channel-table observation-table" data-columns={observationLayout} data-compact={compactObservation || undefined} data-editing={adjustingChannels || undefined}
+                    style={observationLayout === "custom" ? {minWidth: `max(100%, ${170 + 110 * visibleColumns.length + (adjustingChannels ? 215 : 0)}px)`} : undefined}>
                     <thead>
                       <tr>{observationHeader}</tr>
                     </thead>
@@ -2023,14 +1985,6 @@ export default function Dashboard({
                                 </span>
                               </button>
                             </td>
-                            {qualityColumns && (
-                              <LatestChannelCheck row={row} checks={checks} />
-                            )}
-                            {qualityColumns && <td className="column-quality"><FingerprintCell
-                              entries={observedFingerprints(row, fingerprints.index, fingerprints.members.get(providerId(row)), fingerprints.supportedModels)}
-                              error={fingerprints.error} loading={fingerprints.isPending}
-                              supportedModels={fingerprints.supportedModels}
-                            /></td>}
                             {checkingChannels && (observedDetection.project === "quality"
                               ? <ChannelCheckAction row={row} checks={checks} />
                               : <ObservedDetectionRow row={row} detection={observedDetection} />)}
@@ -2043,8 +1997,12 @@ export default function Dashboard({
                               importedChannel={!!baseConnection.account && row.provider.startsWith("sub2api-")}
                               stale={staleSources.has(row.source_id || "")}
                               metricsUnavailable={!metrics.data}
-                              layout={columnView}
-                              compact={compactObservation}
+                              columns={visibleColumns}
+                              renderDetection={id => id === "quality" ? <LatestChannelCheck row={row} checks={checks} /> : <td className="column-quality"><FingerprintCell
+                                entries={observedFingerprints(row, fingerprints.index, fingerprints.members.get(providerId(row)), fingerprints.supportedModels)}
+                                error={fingerprints.error} loading={fingerprints.isPending}
+                                supportedModels={fingerprints.supportedModels}
+                              /></td>}
                             />
                             {adjustingChannels && (
                               <ChannelControlCell

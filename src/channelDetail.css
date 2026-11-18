@@ -26,9 +26,11 @@
 .failure-counts { margin-top: 18px; }
 .failure-counts h4 { display: flex; justify-content: space-between; gap: 12px; margin: 0 0 8px; }
 .failure-counts dl { margin: 0; }
-.failure-counts dl > div { display: flex; justify-content: space-between; gap: 16px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.failure-counts dl > div { display: flex; justify-content: space-between; gap: 16px; padding: 8px 0; border-bottom: 1px solid var(--line); }
 .failure-counts dt { color: var(--muted); }
 .failure-counts dd { margin: 0; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.tooltip .failure-counts { margin-top: 0; min-width: 240px; max-height: min(420px, 70vh); overflow-y: auto; }
-.tooltip .failure-counts dt, .tooltip .failure-counts .muted { color: inherit; opacity: .8; }
 .failure-counts .attempt-counts { margin-bottom: 12px; }
+.tooltip .failure-counts { margin: 0; width: 14rem; max-width: 100%; max-height: min(420px, 65vh); overflow-y: auto; }
+.tooltip .failure-counts h4, .tooltip .failure-counts p { margin: 0; }
+.tooltip .failure-counts dl > div { padding: 4px 0; border: 0; }
+.tooltip .failure-counts .attempt-counts { margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid var(--line); }

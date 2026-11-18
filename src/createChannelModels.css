@@ -88,8 +88,8 @@
   cursor: pointer;
 }
 .create-channel-models .sub-model-options label:has(input:checked) {
-  background: var(--green-bg);
-  border-color: color-mix(in srgb, var(--green) 35%, var(--line));
+  background: var(--selection);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
 }
 .create-channel-models .sub-model-options label:has(input:disabled) {
   cursor: default;

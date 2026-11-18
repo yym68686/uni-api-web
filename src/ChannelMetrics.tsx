@@ -1,3 +1,4 @@
+import { Fragment, type ReactNode } from "react";
 import { channelLatency, latencyLabel } from "./channelLatency";
 import { FailureCounts } from "./FailureCounts";
 import { BalanceAmount } from "./BalanceAmount";
@@ -21,20 +22,18 @@ import { SubChannelSpendValue } from "./SubChannelSpend";
 import type { SubChannelSpendResult } from "./SubChannelSpend";
 import { salePercent } from "./modelPrices";
 import { ChannelProfit, channelProfitCost } from "./ChannelProfit";
+import { observationPreset, type ChannelMetricLayout, type ObservationColumn, type DetectionColumn } from "./observationColumns";
 export interface BalanceResult {
   data?: Balance;
   isPending?: boolean;
   isError?: boolean;
 }
-const allMetricColumnClasses = [
-  "", "column-run", "column-run", "column-quality", "column-quality",
-  "column-run", "column-quality", "column-finance", "column-finance",
-  "column-finance", "column-finance", "column-balance",
-] as const;
-export type ChannelMetricLayout = "run" | "quality" | "finance" | "all";
-export const channelMetricColumnClasses = (layout: ChannelMetricLayout, compact = false) =>
-  compact ? ["", "column-success", "column-balance"] : allMetricColumnClasses.filter(name =>
-    !name || name === "column-balance" || layout === "all" || name === `column-${layout}`);
+type MetricColumnsProps = {
+  layout?: ChannelMetricLayout;
+  compact?: boolean;
+  columns?: readonly ObservationColumn[];
+  renderDetection?: (id: DetectionColumn) => ReactNode;
+};
 export function BalanceValue({
   balance,
   loading,
@@ -221,60 +220,54 @@ export function ChannelMetricHeaders({
   channels = [],
   layout = "all",
   compact = false,
-}: {
+  columns = observationPreset(layout, compact),
+  renderDetection,
+}: MetricColumnsProps & {
   keySelected?: boolean;
   channels?: Channel[];
-  layout?: ChannelMetricLayout;
-  compact?: boolean;
 }) {
-  const run = layout === "run" || layout === "all";
-  const quality = layout === "quality" || layout === "all";
-  const finance = layout === "finance" || layout === "all";
-  return (
-    <>
-      <th>路由状态</th>
-      {run && !compact && <th className="column-run observation-inflight">
+  function header(id: ObservationColumn) {
+    switch (id) {
+      case "status": return <th>路由状态</th>;
+      case "inflight": return <th className="column-run observation-inflight">
         <Tip text="当前正在请求此渠道的全部 API key 的尝试数，不受历史时间窗口或 API key 用量筛选影响。">
           {keySelected ? "渠道总并发" : "当前并发"} <CircleHelp size={12} />
         </Tip>
-      </th>}
-      {run && <th className="column-run column-success">
+      </th>;
+      case "success": return <th className="column-run column-success">
         <Tip text={<FailureCounts channels={channels} summary />}>
           尝试成功率
         </Tip>
-      </th>}
-      {quality && <>
-      <th className="column-quality">尝试数</th>
-      <th className="column-quality">
+      </th>;
+      case "attempts": return <th className="column-quality">尝试数</th>;
+      case "wait": return <th className="column-quality">
         <Tip text="请求进入 uni-api → 渠道 HTTP 发起前。包含前序重试耗时，悬停或展开查看详情。">
           请求前等待 <small>p50</small>
         </Tip>
-      </th>
-      </>}
-      {run && !compact && <th className="column-run">首字 <small>p50 / p95</small></th>}
-      {quality &&
-      <th className="column-quality">
+      </th>;
+      case "latency": return <th className="column-run">首字 <small>p50 / p95</small></th>;
+      case "duration": return <th className="column-quality">
         <Tip text="当前渠道单次尝试从开始到离开的总时间，包含成功、失败和取消；流式请求计到流结束。不包含前序重试和后续渠道耗时，跳过及进行中的尝试不计入。p50 / p95 为直方图上界估计。">
           总时间 <small>p50 / p95</small>
         </Tip>
-      </th>}
-      {finance && <>
-      <th className="column-finance">Token / 缓存率</th>
-      <th className="column-finance">估算消费</th>
-      <th className="column-finance">
+      </th>;
+      case "usage": return <th className="column-finance">Token / 缓存率</th>;
+      case "estimated": return <th className="column-finance">估算消费</th>;
+      case "actual": return <th className="column-finance">
         <Tip text="已关联账单按上游响应标识逐请求归属，跟随来源、调用 API key、渠道、模型、时间、端点和流式筛选。重试单独关联且每条账单只计一次；账单未完整匹配时显示已核对消费下界及利润上限。未接入关联的渠道按日金额仅作参考。">
           {keySelected ? "渠道实际消费" : "实际消费"} <CircleHelp size={12} />
         </Tip>
-      </th>
-      <th className="column-finance">
+      </th>;
+      case "profit": return <th className="column-finance">
         <Tip text="沿用经营参考公式：估算消费 × 售卖比例 × 6.9 − 渠道实际消费数值。成本未进行币种换算，不是财务利润，不能用于对账。覆盖不足时按现有记录标记暂计或上限。">
           利润参考 <CircleHelp size={12} />
         </Tip>
-      </th>
-      </>}
-      <th className="column-balance">余额<span className="balance-heading-extra"> / 额度</span></th>
-    </>
-  );
+      </th>;
+      case "balance": return <th className="column-balance">余额<span className="balance-heading-extra"> / 额度</span></th>;
+      default: return renderDetection?.(id);
+    }
+  }
+  return columns.map(id => <Fragment key={id}>{header(id)}</Fragment>);
 }
 export function ChannelMetricCells({
   row,
@@ -287,7 +280,9 @@ export function ChannelMetricCells({
   metricsUnavailable = false,
   layout = "all",
   compact = false,
-}: {
+  columns = observationPreset(layout, compact),
+  renderDetection,
+}: MetricColumnsProps & {
   row: Channel;
   inflight?: number | null;
   balance?: BalanceResult;
@@ -296,22 +291,16 @@ export function ChannelMetricCells({
   importedChannel?: boolean;
   stale?: boolean;
   metricsUnavailable?: boolean;
-  layout?: ChannelMetricLayout;
-  compact?: boolean;
 }) {
-  const run = layout === "run" || layout === "all";
-  const quality = layout === "quality" || layout === "all";
-  const finance = layout === "finance" || layout === "all";
-  const success = row.stats?.success_rate;
-  const latency = run && !compact ? channelLatency(row.stats) : null;
-  const profitCost = finance ? channelProfitCost(spend?.data) : undefined;
-  return (
-    <>
-      <td>
-        <Status row={row} />
-      </td>
-      {run && !compact && <td className="mono column-run observation-inflight">{inflight == null ? "—" : inflight}</td>}
-      {run && <td className="column-run column-success">
+  function cell(id: ObservationColumn) {
+    switch (id) {
+      case "status": return <td className="observation-status"><Status row={row} /></td>;
+      case "inflight": return <td className="mono column-run observation-inflight">{inflight == null ? "—" : inflight}</td>;
+      case "success": {
+        const measured = row.stats?.success_rate;
+        const success = measured != null && measured >= 0 && measured <= 1 ? measured : null;
+        const tone = success == null ? undefined : success >= 0.95 ? "healthy" : success >= 0.8 ? "warning" : "critical";
+        return <td className="column-run column-success">
         <Tip keyboard={false} text={<FailureCounts channels={[row]} summary />}>
           <div className="success-cell">
             <span
@@ -320,11 +309,14 @@ export function ChannelMetricCells({
               {success == null ? <span className="observation-no-sample">{row.history_configured === false ? "未接入" : stale ? "未同步" : metricsUnavailable ? "未取得" : "无样本"}</span> : rate(success)}
             </span>
             {!!row.stats?.success_rate_denominator && <small>{count(row.stats.success || 0)}/{count(row.stats.success_rate_denominator)}</small>}
+            {success != null && <span className="rate-track" data-tone={tone} aria-hidden="true">
+              <span style={{ width: `${success * 100}%` }} />
+            </span>}
           </div>
         </Tip>
-      </td>}
-      {quality && <>
-      <td className="mono column-quality">
+      </td>;
+      }
+      case "attempts": return <td className="mono column-quality">
         {metricsUnavailable
           ? "—"
           : row.history_configured === false
@@ -332,12 +324,13 @@ export function ChannelMetricCells({
             : stale && !row.stats?.success_rate_denominator
               ? "未同步"
               : count(row.stats?.success_rate_denominator || 0)}
-      </td>
-      <td className="column-quality">
+      </td>;
+      case "wait": return <td className="column-quality">
         <Timing value={row.stats?.request_to_dispatch} wait />
-      </td>
-      </>}
-      {latency && <td className="column-run">
+      </td>;
+      case "latency": {
+        const latency = channelLatency(row.stats);
+        return <td className="column-run">
         <div className="dual-metric">
           <Timing
             value={latency.value}
@@ -348,21 +341,21 @@ export function ChannelMetricCells({
             {ms(latency.value?.p95_ms)}
           </span>}
         </div>
-      </td>}
-      {quality && <td className="column-quality">
+      </td>;
+      }
+      case "duration": return <td className="column-quality">
         <TotalTiming value={row.stats?.duration} attempts={row.stats?.started} />
-      </td>}
-      {finance && <>
-      <td className="mono column-finance">
+      </td>;
+      case "usage": return <td className="mono column-finance">
         {row.stats?.usage_samples
           ? count(
               (row.stats.input_tokens || 0) + (row.stats.output_tokens || 0),
             )
           : "—"}
         <small className="usage-cache">{rate(row.stats?.cache_rate)}</small>
-      </td>
-      <td className="mono column-finance">{usd(row.stats?.estimated_cost_usd)}</td>
-      <td className="mono column-finance">
+      </td>;
+      case "estimated": return <td className="mono column-finance">{usd(row.stats?.estimated_cost_usd)}</td>;
+      case "actual": return <td className="mono column-finance">
         {spend || importedChannel ? (
           <SubChannelSpendValue query={spend} />
         ) : !actualRange.supported ? (
@@ -376,8 +369,10 @@ export function ChannelMetricCells({
         ) : (
           usd(balance.data.actual_cost_usd)
         )}
-      </td>
-      <td className="column-finance">
+      </td>;
+      case "profit": {
+        const profitCost = channelProfitCost(spend?.data);
+        return <td className="column-finance">
         <ChannelProfit
           estimated={row.stats?.estimated_cost_usd}
           actual={profitCost?.actual}
@@ -388,15 +383,17 @@ export function ChannelMetricCells({
             sale_percent: row.stats?.sale_percent,
           })}
         />
-      </td>
-      </>}
-      <td className="column-balance">
+      </td>;
+      }
+      case "balance": return <td className="column-balance">
         <BalanceValue
           balance={balance?.data}
           loading={balance?.isPending}
           failed={balance?.isError}
         />
-      </td>
-    </>
-  );
+      </td>;
+      default: return renderDetection?.(id);
+    }
+  }
+  return columns.map(id => <Fragment key={id}>{cell(id)}</Fragment>);
 }

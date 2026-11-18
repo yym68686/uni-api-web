@@ -32,7 +32,8 @@ import { friendlyReason } from "./requestTraceModel";
 import { RequestTraceDialog, requestTraceOptions } from "./RequestTrace";
 import { LatencyBadge } from "./LatencyBadge";
 import { Spinner } from "./ui";
-import { WorkbenchDisclosure } from "./Workbench";
+import { WorkbenchDisclosure, WorkbenchNotice } from "./Workbench";
+import { TableColumns, useTableColumns } from "./TableColumns";
 import { readWorkspace, requestLocation, validLogWindow, type LogPosition, type LogWindow } from "./workspaceLocation";
 import "./requestLogs.css";
 
@@ -77,6 +78,19 @@ const states: Record<string, { label: string; tone: string }> = {
   cancelled: { label: "已取消", tone: "warning" },
   unknown: { label: "结果未知", tone: "neutral" },
 };
+const logColumns = [
+  { id: "request", label: "时间 / 请求 ID" },
+  { id: "source", label: "来源 / API Key" },
+  { id: "model", label: "模型 / 端点" },
+  { id: "result", label: "最终结果" },
+  { id: "duration", label: "总耗时" },
+  { id: "latency", label: "首字延迟" },
+  { id: "wait", label: "请求前等待" },
+  { id: "tokens", label: "输入 / 输出 Token" },
+] as const;
+type LogColumn = typeof logColumns[number]["id"];
+const defaultLogColumns = logColumns.filter(({ id }) => id === "request" || id === "result" || id === "duration" || id === "latency").map(({ id }) => id);
+const logColumnLabels = Object.fromEntries(logColumns.map(({ id, label }) => [id, label])) as Record<LogColumn, string>;
 export function requestLogParams(filters: Filters, cursor: string, exact?: LogWindow | null) {
   const params = new URLSearchParams({
     range: filters.window,
@@ -161,7 +175,9 @@ export function RequestLogsPage({
   const [selected, setSelected] = useState<LogPosition | null>(incoming.request);
   const [exact, setExact] = useState<LogWindow | null>(incoming.logWindow);
   const [editWindow, setEditWindow] = useState(false);
-  const [detailedColumns, setDetailedColumns] = useState(false);
+  const [customColumns, setCustomColumns] = useTableColumns("uni-console:log-columns:v1", logColumns);
+  const visibleColumns = customColumns ?? defaultLogColumns;
+  const hasRequestColumn = visibleColumns.includes("request");
   const [fromInput, setFromInput] = useState("");
   const [toInput, setToInput] = useState("");
   const [rangeError, setRangeError] = useState("");
@@ -401,12 +417,55 @@ export function RequestLogsPage({
   const traceSource =
     filters.sourceId ||
     (filters.keyId.includes("::") ? filters.keyId.split("::")[0] : "");
+  const traceButton = (row: RequestLog, compact = false) => <button type="button" className="request-log-id"
+    aria-label={compact && (row.request_id || row.trace_id) ? `查看请求 ${row.request_id || row.trace_id}` : undefined}
+    disabled={!row.request_id && !row.trace_id} onClick={event => { event.stopPropagation(); open(row); }}>
+    {compact ? "查看" : row.request_id || row.trace_id || "请求 ID 未记录"}
+  </button>;
+  function renderCell(row: RequestLog, id: LogColumn) {
+    switch (id) {
+      case "request": return <td key={id} className="log-identity">
+        <time dateTime={new Date(row.at_ms).toISOString()}>{new Date(row.at_ms).toLocaleString("zh-CN", { hour12: false })}</time>
+        {traceButton(row)}
+      </td>;
+      case "source": return <td key={id} className="log-extra-column">
+        <strong>{sourceName(row.source_id)}</strong>
+        <small title={row.key_id}>{keyLabels.get(rowKey(row))?.replace(`${sourceName(row.source_id)} · `, "") ||
+          (row.key_id ? `历史 key · ${row.key_id.slice(0, 10)}…` : "未记录 API key")}</small>
+      </td>;
+      case "model": return <td key={id} className="log-extra-column">
+        <strong className="mono">{row.model || "未记录模型"}</strong>
+        <small>{row.endpoint || "未记录端点"} · {row.stream ? "流式" : "非流式"}</small>
+      </td>;
+      case "result": return <td key={id} className="log-outcome">
+        <span className={`trace-status ${states[row.result]?.tone || "neutral"}`}>
+          {states[row.result]?.label || "未知"}{row.status > 0 && ` · HTTP ${row.status}`}
+        </span>
+        <small>{row.observed_attempts != null ? `已记录 ${row.observed_attempts} 次尝试` : "尝试数未确认"}</small>
+        {row.failure_reason && <small className="request-log-error">{friendlyReason(row.failure_reason)}</small>}
+      </td>;
+      case "duration": return <td key={id} className="mono">{ms(row.duration_ms)}</td>;
+      case "latency": return <td key={id} className="mono">
+        <LatencyBadge value={row.response_created_ms ?? row.first_text_ms} />
+        {(row.response_created_ms != null || row.first_text_ms != null) && <small>{row.response_created_ms != null ? "响应创建" : "首个文本"}</small>}
+      </td>;
+      case "wait": return <td key={id} className="mono log-extra-column">{ms(row.dispatch_ms)}</td>;
+      case "tokens": return <td key={id} className="mono log-extra-column">
+        {row.input_tokens == null ? "—" : count(row.input_tokens)} / {row.output_tokens == null ? "—" : count(row.output_tokens)}
+        {row.cache_read_tokens != null && <small>缓存读取 {count(row.cache_read_tokens)}</small>}
+      </td>;
+    }
+  }
   return (
-    <section className="data-panel request-logs-panel" data-tools="expanded" data-columns={detailedColumns ? "all" : "summary"}>
+    <section className="data-panel request-logs-panel" data-tools="expanded" data-columns={customColumns ? "custom" : "summary"}>
       <div className="data-heading workbench-heading">
         <div className="data-title">
           <List size={19} />
           <h2>请求日志</h2>
+          <WorkbenchNotice messages={[
+            keys.error && "API key 目录暂不可用；请求日志仍可浏览。",
+            data?.import?.caught_up === false && "请求记录仍在同步，当前日志可能不完整。",
+          ]} />
         </div>
         <div className="workbench-tools">
           <WorkbenchDisclosure label="定位 ID" icon={<Search size={14} aria-hidden="true" />}>
@@ -611,8 +670,9 @@ export function RequestLogsPage({
           <X size={13} />
           重置筛选
         </button>
-        <label className="workbench-help"><input type="checkbox" checked={detailedColumns} onChange={event => setDetailedColumns(event.target.checked)} /> 详细列</label>
       </div>
+      <TableColumns choices={logColumns} value={visibleColumns} onChange={setCustomColumns} onReset={() => setCustomColumns(null)} />
+      {exact && <p className="workbench-help">固定时间：{new Date(exact.from).toLocaleString()} – {new Date(exact.to).toLocaleString()}</p>}
       {filters.keyId && !exact && <p className="workbench-help">{stats.label(keyList.find(key => key.key_id === filters.keyId) || {key_id:filters.keyId})}</p>}
       {editWindow && <form className="request-log-window" onSubmit={applyWindow}>
         <label>开始时间 <input type="datetime-local" required value={fromInput} onChange={event=>setFromInput(event.target.value)} /></label>
@@ -624,17 +684,6 @@ export function RequestLogsPage({
           </WorkbenchDisclosure>
         </div>
       </div>
-      {exact && <p className="workbench-status">固定时间：{new Date(exact.from).toLocaleString()} – {new Date(exact.to).toLocaleString()}</p>}
-      {keys.error && (
-        <p className="coverage-note">
-          API key 目录暂不可用；请求日志仍可浏览。
-        </p>
-      )}
-      {data?.import?.caught_up === false && (
-        <p className="coverage-note">
-          请求记录仍在同步，当前日志可能不完整。刷新可读取最新已同步记录。
-        </p>
-      )}
       {error && (
         <p role="alert" className="error-banner">
           {refreshError && data ? "刷新失败，保留当前日志。" : ""}
@@ -651,18 +700,12 @@ export function RequestLogsPage({
         </div>
       ) : (
         <>
-          <div className="request-log-table-wrap">
-            <table className="request-log-table">
+          <div className="request-log-table-wrap" role="region" aria-label="请求日志表" tabIndex={0}>
+            <table className="request-log-table" style={customColumns ? {minWidth: `max(100%, ${visibleColumns.length * 118 + (hasRequestColumn ? 64 : 58)}px)`} : undefined}>
               <thead>
                 <tr>
-                  <th>时间 / 请求 ID</th>
-                  {detailedColumns && <th className="log-extra-column">来源 / API Key</th>}
-                  {detailedColumns && <th className="log-extra-column">模型 / 端点</th>}
-                  <th>最终结果</th>
-                  <th>总耗时</th>
-                  <th>首字延迟</th>
-                  {detailedColumns && <th className="log-extra-column">请求前等待</th>}
-                  {detailedColumns && <th className="log-extra-column">输入 / 输出 Token</th>}
+                  {visibleColumns.map(id => <th key={id} className={id === "request" ? "log-identity" : id === "result" ? "log-outcome" : undefined}>{logColumnLabels[id]}</th>)}
+                  {!hasRequestColumn && <th className="log-open">详情</th>}
                 </tr>
               </thead>
               <tbody>
@@ -676,79 +719,8 @@ export function RequestLogsPage({
                     onFocus={() => preload(row)}
                     onBlur={cancelIntent}
                   >
-                    <td>
-                      <time dateTime={new Date(row.at_ms).toISOString()}>
-                        {new Date(row.at_ms).toLocaleString("zh-CN", {
-                          hour12: false,
-                        })}
-                      </time>
-                      <button
-                        className="request-log-id"
-                        disabled={!row.request_id && !row.trace_id}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          open(row);
-                        }}
-                      >
-                        {row.request_id || row.trace_id || "请求 ID 未记录"}
-                      </button>
-                    </td>
-                    {detailedColumns && <td className="log-extra-column">
-                      <strong>{sourceName(row.source_id)}</strong>
-                      <small title={row.key_id}>
-                        {keyLabels
-                          .get(rowKey(row))
-                          ?.replace(`${sourceName(row.source_id)} · `, "") ||
-                          (row.key_id
-                            ? `历史 key · ${row.key_id.slice(0, 10)}…`
-                            : "未记录 API key")}
-                      </small>
-                    </td>}
-                    {detailedColumns && <td className="log-extra-column">
-                      <strong className="mono">
-                        {row.model || "未记录模型"}
-                      </strong>
-                      <small>
-                        {row.endpoint || "未记录端点"} ·{" "}
-                        {row.stream ? "流式" : "非流式"}
-                      </small>
-                    </td>}
-                    <td>
-                      <span
-                        className={`trace-status ${states[row.result]?.tone || "neutral"}`}
-                      >
-                        {states[row.result]?.label || "未知"}
-                        {row.status > 0 && ` · HTTP ${row.status}`}
-                      </span>
-                      <small>{row.observed_attempts != null ? `已记录 ${row.observed_attempts} 次尝试` : "尝试数未确认"}</small>
-                      {row.failure_reason && (
-                        <small
-                          className="request-log-error"
-                          title={friendlyReason(row.failure_reason)}
-                        >
-                          {friendlyReason(row.failure_reason)}
-                        </small>
-                      )}
-                    </td>
-                    <td className="mono">{ms(row.duration_ms)}</td>
-                    <td className="mono">
-                      <LatencyBadge
-                        value={row.response_created_ms ?? row.first_text_ms}
-                      />
-                      {(row.response_created_ms != null || row.first_text_ms != null) &&
-                        <small>{row.response_created_ms != null ? "响应创建" : "首个文本"}</small>}
-                    </td>
-                    {detailedColumns && <td className="mono log-extra-column">{ms(row.dispatch_ms)}</td>}
-                    {detailedColumns && <td className="mono log-extra-column">
-                      {row.input_tokens == null ? "—" : count(row.input_tokens)}{" "}
-                      /{" "}
-                      {row.output_tokens == null
-                        ? "—"
-                        : count(row.output_tokens)}
-                      {row.cache_read_tokens != null && (
-                        <small>缓存读取 {count(row.cache_read_tokens)}</small>
-                      )}
-                    </td>}
+                    {visibleColumns.map(id => renderCell(row, id))}
+                    {!hasRequestColumn && <td className="log-open">{traceButton(row, true)}</td>}
                   </tr>
                 ))}
               </tbody>

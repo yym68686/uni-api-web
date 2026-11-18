@@ -2,7 +2,7 @@
 .automation-list,.automation-editor,.automation-audit { padding:20px; }
 .automation-list h3,.automation-editor h3,.automation-audit h3 { margin:0; }
 .automation-card { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:10px; align-items:center; padding:13px 0; border-top:1px solid var(--line); cursor:pointer; }
-.automation-card.selected { color:var(--green); }
+.automation-card.selected { color:var(--accent); }
 .automation-card p { margin:5px 0 0; color:var(--muted); font-size:12px; }
 .automation-state { font-size:12px; color:var(--muted); }
 .automation-state.on { color:var(--green); }
@@ -39,7 +39,7 @@
 .automation-editor-actions { flex-wrap:wrap; }
 .automation-intro > .field-note { padding:0 20px 16px; margin:0; }
 .automation-detail .dialog-close { position:absolute; top:18px; right:18px; }
-.automation-metrics input[type="checkbox"],.automation-check input[type="checkbox"] { accent-color:var(--green); }
+.automation-metrics input[type="checkbox"],.automation-check input[type="checkbox"] { accent-color:var(--accent); }
 
 .automation-task-dialog { width:min(680px,calc(100vw - 30px)); max-height:88svh; overscroll-behavior:contain; }
 .automation-task-dialog > .data-heading { padding:0; border:0; }

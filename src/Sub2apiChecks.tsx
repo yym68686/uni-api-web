@@ -254,6 +254,7 @@ function AvailabilityStatus({ check }: { check: SubModelCheck }) {
 }
 
 function GroupAvailability({ checks }: { checks: SubModelCheck[] }) {
+  if (!checks.length) return <span className="muted">未检测</span>;
   const counts = availabilityCounts(checks);
   return (
     <div className="sub-availability-summary">
@@ -787,7 +788,7 @@ function ManagementChannelDrawer({
   );
 }
 
-import { WorkbenchDisclosure, WorkbenchTabs } from "./Workbench";
+import { WorkbenchDisclosure, WorkbenchNotice, WorkbenchTabs } from "./Workbench";
 
 export function Sub2apiChecks({ user = "account", initialPosition, onPositionChange, onRouting }: {
   user?: string;
@@ -1391,21 +1392,10 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
           {batchPreview.scope!==batchScope && <p role="alert">筛选或检测数据已变化，请关闭后重新预览。</p>}
         </Dialog.Content></Dialog.Portal>
       </Dialog.Root>}
-      <section className="data-panel" id="management-channels" hidden={section !== "channels"}>
-        <div className="data-heading sub-detection-heading">
-          <div className="sub-detection-title">
-            <div className="data-title">
-              <ScanLine size={19} />
-              <h3>渠道列表</h3>
-              <span className="count-badge">{resultsUnavailable ? "—" : total}</span>
-            </div>
-          </div>
-          <div className="sub-detection-controls" role="region" aria-label="渠道管理操作" tabIndex={0}>
-            <CreateChannel sources={sources.data?.data || []} />
-            <ChannelOptimization
-              disabled={!pageData || !total || readingSelection}
-              snapshot={async()=>managementOptimizationSnapshot(await completeSelection(true),filters)}
-            />
+      <section className="data-panel" id="management-channels" hidden={section !== "channels"} aria-labelledby="management-channel-title">
+        <div className="sr-only"><h3 id="management-channel-title">渠道列表</h3>{resultsUnavailable ? "—" : total}</div>
+        <div className="management-toolbar">
+          <div className="management-query">
             <label className="search-field">
               <Search size={16} />
               <input
@@ -1418,6 +1408,264 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                 }}
               />
             </label>
+            <WorkbenchDisclosure className="management-filters" label="筛选">
+            <div className="filters sub-filters" role="region" aria-label="渠道管理筛选" tabIndex={0}>
+              <label className="select-field">
+                <select
+                  aria-label="分组状态筛选"
+                  title="按站点分组是否可用筛选，与模型检测结果无关"
+                  value={groupStatus}
+                  onChange={(e) => {
+                    setFilters((v) => ({ ...v, groupStatus: e.target.value }));
+                    setPage(0);
+                  }}
+                >
+                  <option value="available">可用分组</option>
+                  <option value="all">全部分组</option>
+                  <option value="unavailable">不可用分组</option>
+                </select>
+                <ChevronDown size={13} />
+              </label>
+              <label className="select-field">
+                <select aria-label="是否已加入渠道筛选" value={joined} onChange={e=>{setFilters(v=>({...v,joined:e.target.value}));setPage(0);}} title="依据 API key 的实际路由判断；读取不完整的渠道不会误判为未加入">
+                  <option value="">全部接入状态</option>
+                  <option value="joined">已加入 API key</option>
+                  <option value="unjoined">未加入任何 API key</option>
+                </select><ChevronDown size={13}/>
+              </label>
+              <label className="search-field sub-name-exclude">
+                <input
+                  aria-label="排除渠道名"
+                  placeholder="排除渠道名，如 kiro"
+                  title="排除名称包含此字符串的渠道，不区分大小写"
+                  maxLength={512}
+                  value={excludeName}
+                  onChange={(e) => {
+                    setFilters((v) => ({ ...v, excludeName: e.target.value }));
+                    setPage(0);
+                  }}
+                />
+              </label>
+              <label className="select-field">
+                <Globe2 size={15} />
+                <select
+                  aria-label="sub2api 账号筛选"
+                  title={accountId === UNASSIGNED_ACCOUNT ? "未归属渠道" : accounts.find(a => a.id === accountId)?.name || "全部账号"}
+                  value={accountId}
+                  onChange={(e) => {
+                    setAccountId(e.target.value);
+                    setPage(0);
+                  }}
+                >
+                  <option value="">全部账号</option>
+                  <option value={UNASSIGNED_ACCOUNT}>未归属渠道</option>
+                  {accountId && accountId !== UNASSIGNED_ACCOUNT && !accounts.some((a) => a.id === accountId) && (
+                    <option value={accountId}>已选账号（当前不可用）</option>
+                  )}
+                  {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name} · {a.email}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={13} />
+              </label>
+              <label className="select-field">
+                <select
+                  aria-label="检测模型筛选"
+                  title={model || "全部模型"}
+                  value={model}
+                  onChange={(e) => {
+                    setModel(e.target.value);
+                    setPage(0);
+                  }}
+                >
+                  <option value="">全部模型</option>
+                  {filterModels.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={13} />
+              </label>
+              <label className="select-field">
+                <select
+                  aria-label="平台筛选"
+                  value={platform}
+                  onChange={(e) => {
+                    setPlatform(e.target.value);
+                    setPage(0);
+                  }}
+                >
+                  <option value="">全部平台</option>
+                  {platform && !platforms.includes(platform) && (
+                    <option value={platform} disabled>
+                      {platform}（当前无匹配）
+                    </option>
+                  )}
+                  {platforms.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={13} />
+              </label>
+              <label className="select-field">
+                <select
+                  aria-label="倍率上限筛选"
+                  value={effectiveMaxRate}
+                  onChange={(e) => {
+                    setMaxRate(e.target.value);
+                    setPage(0);
+                  }}
+                >
+                  <option value="">全部倍率</option>
+                  <option value="mismatch">倍率不一致</option>
+                  {rates.map((rate) => (
+                    <option key={rate} value={rate}>
+                      ≤ {rate}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={13} />
+              </label>
+              <label className="select-field">
+                <select
+                  aria-label="倍率排序"
+                  value={sort}
+                  onChange={(e) => {
+                    setSort(e.target.value);
+                    setPage(0);
+                  }}
+                >
+                  <option value="">默认顺序</option>
+                  <option value="asc">倍率 ↑</option>
+                  <option value="desc">倍率 ↓</option>
+                </select>
+                <ChevronDown size={13} />
+              </label>
+              <label className="select-field">
+                <select
+                  aria-label="可用性筛选"
+                  value={availability}
+                  onChange={(e) => {
+                    setAvailability(e.target.value);
+                    setPage(0);
+                  }}
+                >
+                  <option value="">全部可用性</option>
+                  <option value="success">
+                    {model ? "可用" : "至少一个模型可用"}
+                  </option>
+                  <option value="error">
+                    {model ? "检测失败" : "有模型检测失败"}
+                  </option>
+                  <option value="untested">
+                    {model ? "未检测" : "有模型未检测"}
+                  </option>
+                </select>
+                <ChevronDown size={13} />
+              </label>
+              <label className="select-field sub-price-filter">
+                <select
+                  aria-label="单价是否异常筛选"
+                  title={model ? "按所选模型的倍率前单价与价格设置比较；参考价未确认时也可按数值是否匹配筛选" : "任一模型异常则为异常；全部模型确认正常才为正常。未确认匹配／不匹配：包含至少一个符合条件的未确认模型；缺少单价或定价不算匹配"}
+                  value={priceStatus}
+                  onChange={(e) => {
+                    setFilters((v) => ({ ...v, priceStatus: e.target.value }));
+                    setPage(0);
+                  }}
+                >
+                  <option value="">全部单价</option>
+                  <option value="abnormal">单价异常</option>
+                  <option value="normal">单价正常</option>
+                  <option value="unconfirmed">单价未确认</option>
+                  <option value="unconfirmed_match">未确认 · 定价匹配</option>
+                  <option value="unconfirmed_mismatch">未确认 · 定价不匹配</option>
+                </select>
+                <ChevronDown size={13} />
+              </label>
+              <label className="select-field">
+                <select aria-label="模型匹配筛选" value={modelMatch} onChange={e=>{setFilters(v=>({...v,modelMatch:e.target.value}));setPage(0);}}>
+                  <option value="">全部模型匹配</option>
+                  {Object.entries(modelMatchLabels).map(([value,label])=><option key={value} value={value}>{label}</option>)}
+                </select><ChevronDown size={13}/>
+              </label>
+              <label className="select-field">
+                <select aria-label="模型指纹筛选" disabled={!pageData} value={fingerprint} onChange={e => {setFilters(v => ({...v,fingerprint:e.target.value}));setPage(0);}}>
+                  <option value="">全部模型指纹</option>
+                  {Object.entries(fingerprintLabels).map(([value,label])=><option key={value} value={value}>{label}</option>)}
+                </select><ChevronDown size={13}/>
+              </label>
+              <label className="select-field">
+                <select aria-label="是否支持压缩筛选" value={compaction} onChange={e => {setFilters(v => ({...v, compaction: e.target.value})); setPage(0);}}>
+                  <option value="">全部压缩能力</option>
+                  {Object.entries(compactionLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select><ChevronDown size={13} />
+              </label>
+              <label className="select-field">
+                <select aria-label="Tool use 是否支持筛选" value={toolUse} onChange={e => {setFilters(v => ({...v, toolUse: e.target.value})); setPage(0);}}>
+                  <option value="">Tool use 能力</option>
+                  {Object.entries(toolUseLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select><ChevronDown size={13} />
+              </label>
+              <label className="select-field">
+                <select
+                  aria-label="降智筛选"
+                  value={quality}
+                  onChange={(e) => {
+                    setQuality(e.target.value);
+                    setPage(0);
+                  }}
+                >
+                  <option value="">Astra 降智</option>
+                  <option value="pass">不降智</option>
+                  <option value="fail">降智</option>
+                  <option value="inconclusive">无法判定</option>
+                  <option value="error">检测失败</option>
+                </select>
+                <ChevronDown size={13} />
+              </label>
+              <label className="select-field">
+                <select
+                  aria-label="不降智概率筛选"
+                  value={minQuality}
+                  onChange={(e) => {
+                    setFilters((v) => ({ ...v, minQuality: e.target.value }));
+                    setPage(0);
+                  }}
+                >
+                  <option value="">全部不降智概率</option>
+                  {Array.from({ length: 11 }, (_, i) => i * 10).map((percent) => (
+                    <option key={percent} value={percent}>不降智 ≥ {percent}%</option>
+                  ))}
+                </select>
+                <ChevronDown size={13} />
+              </label>
+              <button
+                className="filter-chip sub-filter-reset"
+                onClick={() => {
+                  setFilters({ ...subFilterDefaults });
+                  setPage(0);
+                }}
+              >
+                <X size={12} /> 重置筛选
+              </button>
+            </div>
+            </WorkbenchDisclosure>
+            <label className="select-field">
+              <select aria-label="表格视图" value={managementColumns} onChange={event => setManagementColumns(event.target.value)}>
+                <option value="operations">视图：运行</option>
+                <option value="checks">视图：检测</option>
+                <option value="finance">视图：费用</option>
+                <option value="all">视图：全部</option>
+              </select>
+              <ChevronDown size={13} aria-hidden="true" />
+            </label>
+          </div>
+          <div className="management-actions" role="group" aria-label="渠道管理操作">
             <DetectionAction projects={detectionProjects} project={detectionProject} onSelect={project => { setDetectionProject(project); setFingerprintsSubmitted(0); }} selectDisabled={batchBusy}>
               <button
                 className="button small"
@@ -1442,7 +1690,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
               onClick={refreshPage}
               disabled={query.isFetching}
             >
-              <RefreshCw size={15} className={query.isFetching ? "spin" : ""} />
+              <RefreshCw size={15} className={query.isFetching || pageQuery.updating ? "spin" : ""} />
             </button>
             <div className="sub-model-check-group" role="group" aria-label="模型检测与设置">
               <button
@@ -1460,260 +1708,18 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                 setModelSelectionRevision(v => v + 1);
               }} />
             </div>
+            <CreateChannel sources={sources.data?.data || []} />
+            <ChannelOptimization
+              disabled={!pageData || !total || readingSelection}
+              snapshot={async()=>managementOptimizationSnapshot(await completeSelection(true),filters)}
+            />
+            <WorkbenchNotice label="渠道管理状态" messages={[
+              !!fingerprintsSubmitted && `已提交 ${fingerprintsSubmitted} 项指纹检测`,
+              pageQuery.updating ? "正在更新渠道结果，暂显示更新前内容…" : displayedPage && resultsReadFailed ? "暂时无法读取渠道" : "",
+            ]} />
           </div>
         </div>
-        {fingerprintsSubmitted > 0 && <div className="detection-submission-notice" role="status">已提交 {fingerprintsSubmitted} 项指纹检测，可刷新渠道查看结果。</div>}
-        <WorkbenchDisclosure className="management-filters" label="筛选">
-        <div className="filters sub-filters" role="region" aria-label="渠道管理筛选" tabIndex={0}>
-          <label className="select-field">
-            <select
-              aria-label="分组状态筛选"
-              title="按站点分组是否可用筛选，与模型检测结果无关"
-              value={groupStatus}
-              onChange={(e) => {
-                setFilters((v) => ({ ...v, groupStatus: e.target.value }));
-                setPage(0);
-              }}
-            >
-              <option value="available">可用分组</option>
-              <option value="all">全部分组</option>
-              <option value="unavailable">不可用分组</option>
-            </select>
-            <ChevronDown size={13} />
-          </label>
-          <label className="select-field">
-            <select aria-label="是否已加入渠道筛选" value={joined} onChange={e=>{setFilters(v=>({...v,joined:e.target.value}));setPage(0);}} title="依据 API key 的实际路由判断；读取不完整的渠道不会误判为未加入">
-              <option value="">全部接入状态</option>
-              <option value="joined">已加入 API key</option>
-              <option value="unjoined">未加入任何 API key</option>
-            </select><ChevronDown size={13}/>
-          </label>
-          <label className="search-field sub-name-exclude">
-            <input
-              aria-label="排除渠道名"
-              placeholder="排除渠道名，如 kiro"
-              title="排除名称包含此字符串的渠道，不区分大小写"
-              maxLength={512}
-              value={excludeName}
-              onChange={(e) => {
-                setFilters((v) => ({ ...v, excludeName: e.target.value }));
-                setPage(0);
-              }}
-            />
-          </label>
-          <label className="select-field">
-            <Globe2 size={15} />
-            <select
-              aria-label="sub2api 账号筛选"
-              title={accountId === UNASSIGNED_ACCOUNT ? "未归属渠道" : accounts.find(a => a.id === accountId)?.name || "全部账号"}
-              value={accountId}
-              onChange={(e) => {
-                setAccountId(e.target.value);
-                setPage(0);
-              }}
-            >
-              <option value="">全部账号</option>
-              <option value={UNASSIGNED_ACCOUNT}>未归属渠道</option>
-              {accountId && accountId !== UNASSIGNED_ACCOUNT && !accounts.some((a) => a.id === accountId) && (
-                <option value={accountId}>已选账号（当前不可用）</option>
-              )}
-              {accounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name} · {a.email}
-                </option>
-              ))}
-            </select>
-            <ChevronDown size={13} />
-          </label>
-          <label className="select-field">
-            <select
-              aria-label="检测模型筛选"
-              title={model || "全部模型"}
-              value={model}
-              onChange={(e) => {
-                setModel(e.target.value);
-                setPage(0);
-              }}
-            >
-              <option value="">全部模型</option>
-              {filterModels.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </select>
-            <ChevronDown size={13} />
-          </label>
-          <label className="select-field">
-            <select
-              aria-label="平台筛选"
-              value={platform}
-              onChange={(e) => {
-                setPlatform(e.target.value);
-                setPage(0);
-              }}
-            >
-              <option value="">全部平台</option>
-              {platform && !platforms.includes(platform) && (
-                <option value={platform} disabled>
-                  {platform}（当前无匹配）
-                </option>
-              )}
-              {platforms.map((p) => (
-                <option key={p} value={p}>
-                  {p}
-                </option>
-              ))}
-            </select>
-            <ChevronDown size={13} />
-          </label>
-          <label className="select-field">
-            <select
-              aria-label="倍率上限筛选"
-              value={effectiveMaxRate}
-              onChange={(e) => {
-                setMaxRate(e.target.value);
-                setPage(0);
-              }}
-            >
-              <option value="">全部倍率</option>
-              <option value="mismatch">倍率不一致</option>
-              {rates.map((rate) => (
-                <option key={rate} value={rate}>
-                  ≤ {rate}
-                </option>
-              ))}
-            </select>
-            <ChevronDown size={13} />
-          </label>
-          <label className="select-field">
-            <select
-              aria-label="倍率排序"
-              value={sort}
-              onChange={(e) => {
-                setSort(e.target.value);
-                setPage(0);
-              }}
-            >
-              <option value="">默认顺序</option>
-              <option value="asc">倍率 ↑</option>
-              <option value="desc">倍率 ↓</option>
-            </select>
-            <ChevronDown size={13} />
-          </label>
-          <label className="select-field">
-            <select
-              aria-label="可用性筛选"
-              value={availability}
-              onChange={(e) => {
-                setAvailability(e.target.value);
-                setPage(0);
-              }}
-            >
-              <option value="">全部可用性</option>
-              <option value="success">
-                {model ? "可用" : "至少一个模型可用"}
-              </option>
-              <option value="error">
-                {model ? "检测失败" : "有模型检测失败"}
-              </option>
-              <option value="untested">
-                {model ? "未检测" : "有模型未检测"}
-              </option>
-            </select>
-            <ChevronDown size={13} />
-          </label>
-          <label className="select-field sub-price-filter">
-            <select
-              aria-label="单价是否异常筛选"
-              title={model ? "按所选模型的倍率前单价与价格设置比较；参考价未确认时也可按数值是否匹配筛选" : "任一模型异常则为异常；全部模型确认正常才为正常。未确认匹配／不匹配：包含至少一个符合条件的未确认模型；缺少单价或定价不算匹配"}
-              value={priceStatus}
-              onChange={(e) => {
-                setFilters((v) => ({ ...v, priceStatus: e.target.value }));
-                setPage(0);
-              }}
-            >
-              <option value="">全部单价</option>
-              <option value="abnormal">单价异常</option>
-              <option value="normal">单价正常</option>
-              <option value="unconfirmed">单价未确认</option>
-              <option value="unconfirmed_match">未确认 · 定价匹配</option>
-              <option value="unconfirmed_mismatch">未确认 · 定价不匹配</option>
-            </select>
-            <ChevronDown size={13} />
-          </label>
-          <label className="select-field">
-            <select aria-label="模型匹配筛选" value={modelMatch} onChange={e=>{setFilters(v=>({...v,modelMatch:e.target.value}));setPage(0);}}>
-              <option value="">全部模型匹配</option>
-              {Object.entries(modelMatchLabels).map(([value,label])=><option key={value} value={value}>{label}</option>)}
-            </select><ChevronDown size={13}/>
-          </label>
-          <label className="select-field">
-            <select aria-label="模型指纹筛选" disabled={!pageData} value={fingerprint} onChange={e => {setFilters(v => ({...v,fingerprint:e.target.value}));setPage(0);}}>
-              <option value="">全部模型指纹</option>
-              {Object.entries(fingerprintLabels).map(([value,label])=><option key={value} value={value}>{label}</option>)}
-            </select><ChevronDown size={13}/>
-          </label>
-          <label className="select-field">
-            <select aria-label="是否支持压缩筛选" value={compaction} onChange={e => {setFilters(v => ({...v, compaction: e.target.value})); setPage(0);}}>
-              <option value="">全部压缩能力</option>
-              {Object.entries(compactionLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-            </select><ChevronDown size={13} />
-          </label>
-          <label className="select-field">
-            <select aria-label="Tool use 是否支持筛选" value={toolUse} onChange={e => {setFilters(v => ({...v, toolUse: e.target.value})); setPage(0);}}>
-              <option value="">Tool use 能力</option>
-              {Object.entries(toolUseLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-            </select><ChevronDown size={13} />
-          </label>
-          <label className="select-field">
-            <select
-              aria-label="降智筛选"
-              value={quality}
-              onChange={(e) => {
-                setQuality(e.target.value);
-                setPage(0);
-              }}
-            >
-              <option value="">Astra 降智</option>
-              <option value="pass">不降智</option>
-              <option value="fail">降智</option>
-              <option value="inconclusive">无法判定</option>
-              <option value="error">检测失败</option>
-            </select>
-            <ChevronDown size={13} />
-          </label>
-          <label className="select-field">
-            <select
-              aria-label="不降智概率筛选"
-              value={minQuality}
-              onChange={(e) => {
-                setFilters((v) => ({ ...v, minQuality: e.target.value }));
-                setPage(0);
-              }}
-            >
-              <option value="">全部不降智概率</option>
-              {Array.from({ length: 11 }, (_, i) => i * 10).map((percent) => (
-                <option key={percent} value={percent}>不降智 ≥ {percent}%</option>
-              ))}
-            </select>
-            <ChevronDown size={13} />
-          </label>
-          <button
-            className="filter-chip sub-filter-reset"
-            onClick={() => {
-              setFilters({ ...subFilterDefaults });
-              setPage(0);
-            }}
-          >
-            <X size={12} /> 重置筛选
-          </button>
-        </div>
-        </WorkbenchDisclosure>
         {resultsReadFailed && metadata && <div role="alert" className="error-banner">渠道结果读取失败：{pageQuery.error?.message}<button className="button small" onClick={refreshPage}>重试</button></div>}
-        {displayedPage && <div className="sub-results-status" role="status" aria-live="polite">
-          {pageQuery.updating ? <><Spinner small/>正在更新渠道结果，暂显示更新前内容…</> : resultsReadFailed ? "暂时无法读取渠道" : ""}
-        </div>}
         {!displayedPage && resultsReadFailed ? (
           <Empty title="暂时无法读取渠道">检测结果尚未完整读取，暂时无法判断是否有匹配渠道。请重试读取。</Empty>
         ) : !displayedPage ? (
@@ -1724,15 +1730,6 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
           </Empty>
         ) : (
           <>
-            <div className="sub-columns-toolbar">
-              <label>表格视图 <select value={managementColumns} onChange={event => setManagementColumns(event.target.value)}>
-                <option value="operations">运行</option>
-                <option value="checks">检测能力</option>
-                <option value="finance">费用</option>
-                <option value="all">全部</option>
-              </select></label>
-              {tableModel && <span>{tableModel}</span>}
-            </div>
             <div className="table-scroll sub-results-table" aria-busy={tablePending} aria-hidden={resultsReadFailed || undefined} inert={tablePending} style={resultsReadFailed?{visibility:"hidden"}:undefined}>
               <table className="channel-table check-table sub-table" data-columns={managementColumns}>
                 <thead>
@@ -1794,10 +1791,10 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                             {account.name}
                             {t.channel ? ` · ${t.channel}` : ""}
                           </small>
-                          <small className="check-source">
+                          {managementColumns !== "operations" && <small className="check-source">
                             {configured ? `${configured.source_name} · 已有渠道` : `分组 #${t.group_id}`}
                             {!configured && !t.active && " · 已不可用"}
-                          </small>
+                          </small>}
                         </td>
                         {tableModel && <td className="mono">{tableModel}</td>}
                         <td className="sub-platform-col">
@@ -1805,7 +1802,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                           <small className="check-source">
                             {t.key_id ? `key #${t.key_id}` : configured ? "配置密钥" : "尚未创建"}
                           </small>
-                          <ChannelProtocolSummary row={managementRow} imports={imports.data} routes={optimizationRoutes}/>
+                          {managementColumns !== "operations" && <ChannelProtocolSummary row={managementRow} imports={imports.data} routes={optimizationRoutes}/>}
                         </td>
                         <td className="sub-finance-col"><BillingRate target={t} model={tableModel} configured={configured} /></td>
                         <td>
@@ -1814,11 +1811,9 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                           ) : selected ? (
                             <AvailabilityStatus check={selected} />
                           ) : (
-                            <><small className="check-source">{scopeLabel}</small>
-                            {scopedModels?.length ? <small className="check-source">全部 {checks.length} 个模型记录仍可在详情查看</small> : null}
+                            <>{scopedModels?.length ? <small className="check-source" title={`全部 ${checks.length} 个模型记录仍可在详情查看`}>{scopeLabel}</small> : null}
                             {liveGroup && scopedModels?.length ? <>
                               <small className="check-status">本次进度：{liveGroup.completed}/{liveGroup.total} 完成 · {liveGroup.running} 检测中 · {liveGroup.queued} 排队{liveGroup.interrupted ? ` · ${liveGroup.interrupted} 已中断` : ""}</small>
-                              <small className="check-source">刷新渠道查看最新检测结果</small>
                             </> : <GroupAvailability checks={overviewChecks} />}</>
                           )}
                         </td>
@@ -1888,6 +1883,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                             onClick={()=>void detection.save(managementRow,!detectionEnabled(managementRow,detection.disabled))}><span/></button>
                         </td>
                         <td>
+                          <div className="sub-row-actions">
                           <button
                             className="button small"
                             aria-label={`检测 ${account.name} ${t.name}`}
@@ -1932,6 +1928,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                                 : "添加到渠道";
                             })()}
                           </button>
+                          </div>
                         </td>
                       </tr>
                       );
@@ -1941,7 +1938,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
             </div>
             <div className="table-footer" aria-busy={tablePending}>
               <span>
-                {tablePending ? "正在核对当前结果" : <>共 {total} 个渠道 · {eligibleCount} 个可发起检测</>}
+                {tablePending ? "正在核对当前结果" : <>共 {total} 个渠道 · {eligibleCount} 个可发起检测{fingerprintsSubmitted > 0 && ` · 指纹已提交 ${fingerprintsSubmitted} 项`}</>}
               </span>
               <div className="sub-pagination">
                 <button

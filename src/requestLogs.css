@@ -71,7 +71,7 @@
   display: block;
   border: 0;
   background: none;
-  color: var(--green);
+  color: var(--accent);
   padding: 0;
   margin-top: 7px;
   font-family: var(--font-mono);

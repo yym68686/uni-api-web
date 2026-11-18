@@ -286,11 +286,11 @@
   color: var(--muted);
 }
 .trace-channel-link:hover {
-  color: var(--green);
+  color: var(--accent);
 }
 .trace-channel-link:focus-visible,
 .trace-lane:focus-visible {
-  outline: 2px solid var(--green);
+  outline: 2px solid var(--accent);
   outline-offset: 3px;
   border-radius: 4px;
 }
@@ -377,7 +377,7 @@
 }
 .trace-active-marker {
   width: 2px;
-  background: var(--green);
+  background: var(--accent);
   box-shadow: 0 0 0 2px var(--surface);
 }
 .trace-waterfall-points {
@@ -413,11 +413,11 @@
 }
 .trace-milestone-chip[aria-pressed="true"],
 .trace-milestone-chip:hover {
-  border-color: var(--green);
-  color: var(--green);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 .trace-milestone-chip:focus-visible {
-  outline: 2px solid var(--green);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 .trace-milestone-chip.first-text strong {
@@ -587,7 +587,7 @@
   background: var(--subtle);
 }
 .trace-attempt.selected article {
-  border-color: var(--green);
+  border-color: var(--accent);
 }
 .trace-attempt-heading {
   display: flex;
@@ -633,7 +633,7 @@
 .trace-event-disclosure > summary:hover,
 .trace-gateway-records > summary:hover,
 .trace-technical > summary:hover {
-  color: var(--green);
+  color: var(--accent);
 }
 .trace-gateway-records {
   margin: 4px 0 0 39px;
@@ -769,7 +769,7 @@
   padding: 50px 24px;
 }
 .trace-welcome > svg {
-  color: var(--green);
+  color: var(--accent);
   margin-bottom: 12px;
 }
 .trace-welcome > div {

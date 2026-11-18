@@ -20,7 +20,7 @@
 .sub-account-form input { background: var(--surface); color: var(--ink); }
 .sub-loading { padding: 30px; display: flex; align-items: center; gap: 10px; }
 .sub-filters { display:flex; gap:8px; flex-wrap:nowrap; align-items:center; margin:0 21px 16px; padding:10px 0; border-top:1px solid var(--line); overflow-x:auto; overscroll-behavior-x:contain; }
-.sub-filters:focus-visible { outline:2px solid var(--green); outline-offset:2px; border-radius:6px; }
+.sub-filters:focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:6px; }
 .sub-filters .select-field { flex:0 0 auto; width:104px; min-width:0; max-width:none; height:35px; white-space:nowrap; }
 .sub-filters .select-field:first-child { width:150px; }
 .sub-filters .select-field.sub-price-filter { width: 168px; }
@@ -37,8 +37,6 @@
 .sub-table:not([data-columns="all"]):not([data-columns="finance"]) .sub-finance-col,
 .sub-table:not([data-columns="all"]):not([data-columns="checks"]) .sub-check-col,
 .sub-table[data-columns="finance"] :is(.sub-latency-col, .sub-platform-col) { display:none; }
-.sub-columns-toolbar { display:flex; align-items:center; gap:.75rem; flex-wrap:wrap; color:var(--muted); font-size:.875rem; padding:.5rem 1rem; }
-.sub-columns-toolbar select { margin-inline-start:.25rem; }
 .sub-table details { font-size: 11px; line-height: 1.7; margin-top: 8px; color: var(--muted); }
 .sub-table summary { cursor: pointer; }
 .sub-table td { vertical-align: middle; }

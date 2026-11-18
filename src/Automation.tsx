@@ -177,7 +177,7 @@ const number = (value: string) =>
 const time = (value?: string) =>
   value ? new Date(value).toLocaleString("zh-CN", { hour12: false }) : "—";
 
-import { WorkbenchTabs } from "./Workbench";
+import { WorkbenchNotice, WorkbenchTabs } from "./Workbench";
 
 export function Automation({
   sources,
@@ -466,6 +466,7 @@ export function Automation({
             <Bot size={19} />
             <h2>自动化</h2>
             <span className="count-badge">{tasks.length}</span>
+            <WorkbenchNotice label="执行状态" messages={[runNotice]} />
           </div>
           <div className="data-actions">
             <button className="button small" onClick={reload} disabled={loading || auditLoading}>
@@ -486,7 +487,6 @@ export function Automation({
           {error}
         </p>
       )}
-      {runNotice && <p role="status" className="coverage-note">{runNotice}</p>}
       <div className="data-panel automation-list" hidden={section !== "tasks"}>
         {loading && !tasks.length && <TaskLoading />}
         {tasks.map((t) => (
