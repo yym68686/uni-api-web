@@ -213,7 +213,7 @@ func TestSubAccountLifecycleIsolationAndIdempotency(t *testing.T) {
 			return
 		}
 		if r.URL.Path == "/api/v1/auth/me" {
-			success(map[string]string{"email": "test@example.com"})
+			success(map[string]any{"email": "test@example.com", "rpm_limit": 600, "concurrency": 3})
 			return
 		}
 		if r.URL.Path == "/api/v1/auth/refresh" {
@@ -317,7 +317,10 @@ func TestSubAccountLifecycleIsolationAndIdempotency(t *testing.T) {
 	if w := request("GET", "/v1/sub2api/accounts", "", ""); w.Code != 401 {
 		t.Fatal("unauthenticated", w.Code)
 	}
-	w := request("POST", "/v1/sub2api/accounts", `{"name":"test","base":"https://upstream.example","email":"test@example.com","password":"secret-password"}`, token)
+	w := request("POST", "/v1/sub2api/accounts/scoped", mustJSON(map[string]any{
+		"name": "test", "base": "https://upstream.example", "email": "test@example.com",
+		"password": "secret-password", "models": subModels,
+	}), token)
 	if w.Code != 202 {
 		t.Fatal(w.Code, w.Body.String())
 	}
