@@ -266,7 +266,23 @@ func TestManagementDisplayGlobalProofFencesLegacyCache(t *testing.T) {
 VALUES('owner','a',1,'global-before','summary-v1:::',now(),2,'x')`); err != nil {
 		t.Fatal(err)
 	}
-	if err := migrateControlSchema(ctx, db, migrations); err != nil {
+	// Reproduce the lock modes of the still-serving replica: a cache read
+	// and writes to business tables/epoch rows cannot block this adoption.
+	serving, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer serving.Rollback()
+	if _, err = serving.ExecContext(ctx, `SELECT 1 FROM console_management_display_groups;
+LOCK TABLE console_management_display_epochs,console_sub_models,console_sub_usage IN ROW EXCLUSIVE MODE`); err != nil {
+		t.Fatal(err)
+	}
+	deadline, stop := context.WithTimeout(ctx, time.Second)
+	defer stop()
+	if err = migrateControlSchema(deadline, db, migrations); err != nil {
+		t.Fatal("migration did not complete while the previous replica was serving", err)
+	}
+	if err = serving.Commit(); err != nil {
 		t.Fatal(err)
 	}
 	var stale, normalized bool

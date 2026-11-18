@@ -154,6 +154,21 @@ func (m controlMigration) checksum() string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(m.SQL+"\n"+strings.Join(m.Tables, "\n"))))
 }
 
+func (m controlMigration) lockMode(table string) string {
+	if m.Version == "0021_management_display_global_proof" {
+		// Installing the compatibility trigger needs SHARE ROW EXCLUSIVE on
+		// the disposable cache. The reset row needs only the normal INSERT lock;
+		// replacing an existing trigger function does not alter source relations.
+		// Keep the original inventory/checksum while allowing live reads and
+		// source writes to proceed during this rollout.
+		if table == "console_management_display_groups" {
+			return "SHARE ROW EXCLUSIVE"
+		}
+		return "ROW EXCLUSIVE"
+	}
+	return "ACCESS EXCLUSIVE"
+}
+
 const controlMigrationLock = 8395013
 
 var errMigrationBusy = errors.New("control schema migration lock busy")
@@ -255,7 +270,7 @@ func applyControlMigration(ctx context.Context, db *sql.DB, m controlMigration) 
 			return err
 		}
 		if exists {
-			if _, err = tx.ExecContext(ctx, "LOCK TABLE "+identifier+" IN ACCESS EXCLUSIVE MODE NOWAIT"); err != nil {
+			if _, err = tx.ExecContext(ctx, "LOCK TABLE "+identifier+" IN "+m.lockMode(table)+" MODE NOWAIT"); err != nil {
 				return err
 			}
 		}

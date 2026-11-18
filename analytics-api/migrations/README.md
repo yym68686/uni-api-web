@@ -13,7 +13,9 @@ separate deployment after older writers have retired.
 
 The first version adopts existing installations without deleting data. A
 transaction advisory lock serializes new migrators. Before DDL, all listed
-existing tables are locked using `ACCESS EXCLUSIVE NOWAIT`. If any table is
+existing tables are by default locked using `ACCESS EXCLUSIVE NOWAIT`.
+Where a migration only replaces a function or writes a fence row, its lock
+plan may use the weaker PostgreSQL lock modes it actually requires. If any table is
 busy, the entire transaction rolls back before retrying; no partial table lock
 set is held while waiting for older DML. Catalog locks also have a short timeout.
 Startup's context bounds the wait. Failed migrations never record their version.
