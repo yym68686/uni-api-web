@@ -29,6 +29,7 @@ import { BalanceAmount } from "./BalanceAmount";
 import { AccountForm } from "./SiteAccountForm";
 import { SiteAccountSettings } from "./SiteAccountSettings";
 import { useChannelDetection, detectionEnabled } from "./channelDetection";
+import { DetectionAction, detectionProjectLabels, managementDetectionProjects, useDetectionProject } from "./DetectionAction";
 import { ResponseLatency } from "./LatencyBadge";
 import { Empty, Spinner, Tip } from "./ui";
 import { loadSubFilters, saveSubFilters, subFilterDefaults } from "./sub2apiPreferences";
@@ -790,6 +791,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
 }) {
   const client = useQueryClient();
   const detection = useChannelDetection(user);
+  const [detectionProject, setDetectionProject] = useDetectionProject("management", user, managementDetectionProjects);
   const sources = useConsoleSources(user);
   const [filters, setFilters] = useState(() => loadSubFilters(user));
   const [cursorState,setCursorState]=useState(()=>initialPosition?.owner===user ? initialPosition : {filter:"",cursor:""});
@@ -1036,12 +1038,11 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
     catch(e){setError(e instanceof Error?e.message:"完整筛选结果读取失败");}
     finally{selectionRead.current=false;setReadingSelection(false);}
   }
-  const batchBusy=(_kind:CheckKind)=>readingSelection || submittingChecks.size>0;
+  const batchBusy=readingSelection || submittingChecks.size>0;
   const batchDisabled=(kind:CheckKind)=>resultsUnavailable || !eligibleCount || detection.isPending || detection.isError || detection.busy || readingSelection || submittingChecks.size>0 || (kind==="check"&&!modelsToCheck.length) || ((kind==="compaction"||kind==="tool-use")&&!!model&&!isCapabilityCheckModel(model)) || (rows.length===total && !rows.some(row=>detectionEnabled(row,detection.disabled)&&canCheck(row.account,row.target,kind,row.configured)));
   const check=(selection?:CheckSelection)=>selection?queueChecks("check",selection):batch("check");
-  const checkQuality=()=>batch("quality");
-  const checkCompaction=(selection?:CheckSelection)=>selection?queueChecks("compaction",selection):batch("compaction");
-  const checkToolUse=(selection?:CheckSelection)=>selection?queueChecks("tool-use",selection):batch("tool-use");
+  const checkCompaction=(selection:CheckSelection)=>queueChecks("compaction",selection);
+  const checkToolUse=(selection:CheckSelection)=>queueChecks("tool-use",selection);
   return (
     <div className="sub2api-page">
       <section className="data-panel sub-accounts">
@@ -1298,31 +1299,23 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                 }}
               />
             </label>
-            <div className="sub-check-group" role="group" aria-label="专项检测">
+            <DetectionAction projects={managementDetectionProjects} project={detectionProject} onSelect={setDetectionProject} selectDisabled={batchBusy}>
               <button
                 className="button small"
-                aria-label={`降智检测 · ${eligibleCount} 个渠道`}
-                disabled={batchDisabled("quality")}
-                onClick={() => void checkQuality()}
+                aria-label={`${detectionProjectLabels[detectionProject]} · ${eligibleCount} 个渠道`}
+                aria-busy={batchBusy}
+                disabled={batchDisabled(detectionProject)}
+                title={detectionProject === "compaction" ? capabilityCheckScope : detectionProject === "tool-use" ? toolUseDescription : undefined}
+                onClick={() => void batch(detectionProject)}
               >
-                {batchBusy("quality") ? (
+                {batchBusy ? (
                   <Spinner small />
                 ) : (
                   <ScanLine size={15} />
                 )}
-                降智检测
+                {detectionProjectLabels[detectionProject]}
               </button>
-              <button className="button small" disabled={batchDisabled("compaction")}
-                title={capabilityCheckScope} aria-label={`压缩检测 · ${eligibleCount} 个渠道`}
-                onClick={() => void checkCompaction()}>
-                {batchBusy("compaction") ? <Spinner small /> : <ScanLine size={15} />} 压缩检测
-              </button>
-              <button className="button small" disabled={batchDisabled("tool-use")}
-                aria-label={`Tool use 检测 · ${eligibleCount} 个渠道`}
-                onClick={() => void checkToolUse()} title={toolUseDescription}>
-                {batchBusy("tool-use") ? <Spinner small /> : <ScanLine size={15} />} Tool use
-              </button>
-            </div>
+            </DetectionAction>
             <button
               className="button small sub-check-icon"
               aria-label="刷新渠道管理"

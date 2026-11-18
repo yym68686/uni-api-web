@@ -114,7 +114,7 @@ export function configuredToolUseResult(member:ManagedChannel,accounts:SubAccoun
   }
   return {status:"error",checked_at:Math.max(0,...[...entries.values()].map(m=>m.result?.checked_at||0)),attempts:[],models:[...entries.values()]};
 }
-export function useConfiguredChecks() {
+export function useConfiguredChecks(enabled = true) {
   const client=useQueryClient();
   type Data={data:ConfiguredCheck[];summary?:SummaryState<ConfiguredCheck>};
   return useQuery({
@@ -126,8 +126,8 @@ export function useConfiguredChecks() {
       if(summary===previous?.summary)return previous;
       return {data:summary.rows.map(row=>({...row.value,details_omitted:true})),summary};
     },
-    staleTime:30_000,
-    refetchInterval: query => query.state.data?.data.some(c => ["queued", "running"].includes(c.state)) ? 5000 : 60000,
+    enabled, staleTime:30_000,
+    refetchInterval: query => !enabled ? false : query.state.data?.data.some(c => ["queued", "running"].includes(c.state)) ? 5000 : 60000,
     retry: false,
   });
 }

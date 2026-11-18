@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, X, CircleHelp, Play, ScanLine } from "lucide-react";
+import { Check, X, CircleHelp, Play } from "lucide-react";
 import { controlRequest } from "./api";
 import { providerId, channelName } from "./format";
 import type { Channel } from "./types";
@@ -286,58 +286,6 @@ export function LatestChannelCheck({
         <small className="negative">更新失败 · 上次结果</small>
       )}
     </td>
-  );
-}
-export function CheckActions({
-  checks,
-  rows,
-  disabled,
-  expanded,
-  onExpandedChange,
-}: {
-  checks: Checks;
-  rows: Channel[];
-  disabled: boolean;
-  expanded: boolean;
-  onExpandedChange: (expanded: boolean) => void;
-}) {
-  if (!expanded)
-    return (
-      <button className="button small" onClick={() => onExpandedChange(true)}>
-        <ScanLine size={15} />
-        降智检测
-      </button>
-    );
-  return (
-    <div className="check-toolbar-actions">
-      {checks.batch && (
-        <span className="muted" role="status">
-          {checks.batch.done} / {checks.batch.total}
-        </span>
-      )}
-      <button
-        className="button primary small"
-        aria-label={`一键检测 · ${rows.length}`}
-        aria-busy={!!checks.batch}
-        disabled={
-          disabled || !!checks.batch || checks.pending.size > 0 || !rows.length
-        }
-        onClick={() => void checks.runAll(rows)}
-      >
-        {checks.batch ? <Spinner small /> : <ScanLine size={16} />}
-        一键检测 · {rows.length}
-      </button>
-      <button
-        className="button small"
-        onClick={() => {
-          checks.stop();
-          onExpandedChange(false);
-        }}
-      >
-        <X size={14} />
-        取消检测
-      </button>
-    </div>
   );
 }
 export function ChannelCheckAction({

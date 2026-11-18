@@ -27,7 +27,7 @@ function setup(
     body: any,
   ) => Promise<Response | undefined> | Response | undefined,
   checkFixture: CheckFixture = { data: [] },
-  catalogFixture: { providers?: string[]; models?: string[] } = {},
+  catalogFixture: { providers?: string[]; models?: string[]; detection?: boolean } = {},
 ) {
   const states: Record<string, ControlState> = {
     one: { revision: "one:0", instance_id: "one", rules: [] },
@@ -35,6 +35,7 @@ function setup(
   };
   const writes: { source: string; body: any }[] = [];
   const checkWrites: { source: string; provider: string }[] = [];
+  const detectionWrites: { path: string; body: any }[] = [];
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string, init?: RequestInit) => {
@@ -106,7 +107,19 @@ function setup(
             },
           ],
         };
-      else if (u.pathname.endsWith("channel-controls")) {
+      else if (catalogFixture.detection && u.pathname.endsWith("/channel-management")) {
+        body = { data: ids.flatMap(source_id => catalogFixture.providers!.map(provider => ({
+          source_id, provider, models: catalogFixture.models, probe_fingerprint: "revision",
+        }))) };
+      } else if (catalogFixture.detection && u.pathname.endsWith("/detection-settings")) {
+        body = { disabled: [{ source_id: "one", provider: "visible-0" }] };
+      } else if (catalogFixture.detection && (u.pathname.endsWith("/model-fingerprints") || u.pathname.endsWith("/channel-management/checks"))) {
+        if (init?.method === "POST") {
+          detectionWrites.push({ path: u.pathname, body: JSON.parse(String(init.body)) });
+          return Response.json({ accepted: true }, { status: 202 });
+        }
+        body = { data: [], supported_models: ["deepseek-v4.1-flash-1017"] };
+      } else if (u.pathname.endsWith("channel-controls")) {
         if (controlUnavailable)
           return new Response("控制接口暂不可用", { status: 503 });
         if (init?.method === "POST") {
@@ -207,7 +220,7 @@ function setup(
       </MotionConfig>
     </QueryClientProvider>,
   );
-  return { ...app, user, writes, states, client, checkWrites };
+  return { ...app, user, writes, states, client, checkWrites, detectionWrites };
 }
 it("toggles adjustment inside observation with the same table, filters and metrics, including all sources", async () => {
   const app = setup();
@@ -955,6 +968,62 @@ it("runs one check per matching provider across all observation pages and models
   expect(observedCheck("One", "visible-0")).toHaveTextContent("不降智");
   app.unmount();
   app.client.clear();
+});
+
+it("remembers the observation project and queues supported fingerprints across pages without touching routing", async () => {
+  const providers = Array.from({ length: 27 }, (_, i) => `visible-${i}`);
+  const model = "deepseek-v4.1-flash-1017";
+  const fixture = { providers: [...providers, "hidden"], models: [model, "unrelated"], detection: true };
+  let app = setup(false, undefined, { data: [] }, fixture);
+  await screen.findByRole("table");
+  const picker = screen.getByLabelText("选择检测项目");
+  expect(picker).toHaveValue("quality");
+  await app.user.selectOptions(picker, "fingerprint");
+  expect(app.detectionWrites).toHaveLength(0);
+  app.unmount();
+  app.client.clear();
+  app = setup(false, undefined, { data: [] }, fixture);
+  await screen.findByRole("table");
+  expect(screen.getByLabelText("选择检测项目")).toHaveValue("fingerprint");
+  await app.user.selectOptions(screen.getByLabelText("uni-api 来源"), "one");
+  await app.user.type(screen.getByLabelText("搜索渠道或模型"), "visible");
+  await app.user.click(screen.getByRole("button", { name: "指纹检测" }));
+  const batch = await screen.findByRole("button", { name: "一键指纹检测 · 26" });
+  expect(app.detectionWrites).toHaveLength(0);
+  await app.user.click(batch);
+  await waitFor(() => expect(app.detectionWrites).toEqual([{
+    path: "/analytics/v1/model-fingerprints",
+    body: { targets: providers.slice(1).map(provider => ({ source_id: "one", provider, model })) },
+  }]));
+  expect(app.checkWrites).toHaveLength(0);
+  expect(app.writes).toHaveLength(0);
+  await screen.findByText("已提交指纹检测 · 26 项");
+  await app.user.click(screen.getByRole("button", { name: "收起检测" }));
+  expect(screen.queryByRole("columnheader", { name: "检测操作" })).not.toBeInTheDocument();
+});
+
+it.each([
+  ["tool-use", "Tool use 检测", ["gpt-6-astra"]],
+  ["compaction", "压缩检测", []],
+] as const)("queues observation %s with the existing capability endpoint", async (project, label, models) => {
+  const model = "gpt-6-astra";
+  const app = setup(false, undefined, { data: [] }, { providers: ["visible-0"], models: [model, "unrelated"], detection: true });
+  await screen.findByRole("table");
+  await app.user.selectOptions(screen.getByLabelText("选择检测项目"), project);
+  await app.user.click(screen.getByRole("button", { name: label }));
+  const batch = await screen.findByRole("button", { name: `一键${label} · 1` });
+  expect(screen.getByLabelText("重新检测 One visible-0 unrelated")).toBeDisabled();
+  await app.user.click(batch);
+  await waitFor(() => expect(app.detectionWrites[0]).toEqual({
+    path: "/analytics/v1/channel-management/checks",
+    body: { kind: project, targets: [{ source_id: "two", provider: "visible-0", models }] },
+  }));
+  const row = screen.getByLabelText(`重新检测 One visible-0 ${model}`);
+  await waitFor(() => expect(row).toBeEnabled());
+  await app.user.click(row);
+  await waitFor(() => expect(app.detectionWrites[1]?.body).toEqual({
+    kind: project, manual: true, targets: [{ source_id: "one", provider: "visible-0", models }],
+  }));
 });
 
 it("cancels individual in-flight checks, hides their actions, and retains the last result", async () => {

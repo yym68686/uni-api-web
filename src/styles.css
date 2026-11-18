@@ -2359,11 +2359,13 @@ nav > button.active > svg {
 .sub-detection-controls > .search-field { flex:1 0 160px; min-width:160px; max-width:360px; margin-left:auto; }
 .sub-detection-controls .button { flex:0 0 auto; height:36px; white-space:nowrap; }
 .sub-detection-controls svg { flex-shrink:0; }
-.sub-check-group, .sub-model-check-group { display:flex; flex:0 0 auto; flex-wrap:nowrap; align-items:center; }
-.sub-check-group { border:1px solid var(--line); border-radius:8px; overflow:hidden; background:var(--subtle); }
-.sub-check-group .button { height:34px; border:0; border-radius:0; background:transparent; box-shadow:none; }
-.sub-check-group .button + .button { border-left:1px solid var(--line); }
-.sub-check-group .button:hover:not(:disabled) { background:var(--surface); }
+.detection-action, .sub-model-check-group { display:flex; flex:0 0 auto; flex-wrap:nowrap; align-items:stretch; }
+.detection-action > button { border-radius:8px 0 0 8px; white-space:nowrap; }
+.detection-action > .detection-action-picker { position:relative; padding:0 8px; height:auto; border-left:0; border-radius:0 8px 8px 0; }
+.detection-action-picker select { position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer; }
+.detection-action-picker:has(select:disabled) { opacity:.5; }
+.detection-action-picker:has(select:focus-visible) { outline:2px solid var(--green); outline-offset:-2px; }
+.observed-detection-notice { padding:8px 20px; color:var(--muted); font-size:12px; }
 .sub-model-check-group { gap:0; }
 .sub-model-check-group > .button:first-child { border-radius:8px 0 0 8px; }
 .sub-model-check-group > .button:last-child { border-radius:0 8px 8px 0; border-left:0; }

@@ -1333,6 +1333,8 @@ it("filters compaction across all pages, queues groups independently of the sele
   await user.selectOptions(filter, "supported");
   await screen.findByText("compact-1");
   expect(screen.queryByText("no-compact")).not.toBeInTheDocument();
+  await user.selectOptions(screen.getByLabelText("选择检测项目"), "compaction");
+  expect(writes).toHaveLength(0);
   await user.click(screen.getByRole("button", {name:"压缩检测 · 27 个渠道"}));
   await waitFor(() => expect(writes).toHaveLength(1));
   expect(writes[0].targets.map(t => t.group_id)).toEqual(Array.from({length:27}, (_,i)=>i+1));
@@ -1347,6 +1349,7 @@ it("filters compaction across all pages, queues groups independently of the sele
   view.unmount();
   mount("compaction-filter");
   expect(screen.getByLabelText("是否支持压缩筛选")).toHaveValue("unsupported");
+  expect(screen.getByLabelText("选择检测项目")).toHaveValue("compaction");
 });
 
 it("filters Tool use across pages, remembers the filter, and queues only selected groups without prescribing a model", async () => {
@@ -1374,6 +1377,7 @@ it("filters Tool use across pages, remembers the filter, and queues only selecte
   expect(screen.queryByText("no-tools")).not.toBeInTheDocument();
   await user.click(screen.getByRole("button",{name:"下一页"}));
   expect(screen.getByRole("table").querySelectorAll("tbody tr")).toHaveLength(2);
+  await user.selectOptions(screen.getByLabelText("选择检测项目"), "tool-use");
   await user.click(screen.getByRole("button",{name:"Tool use 检测 · 27 个渠道"}));
   await waitFor(()=>expect(writes).toHaveLength(1));
   expect(writes[0].path).toBe("/analytics/v1/sub2api/tool-use-checks");
@@ -2439,6 +2443,7 @@ it("detects unassigned configured channels without site keys and isolates busy s
   await waitFor(()=>expect(first.getByRole("button",{name:"检测 未归属渠道 native-one 的 Tool use"})).toBeEnabled());
   await user.click(screen.getByRole("button",{name:"降智检测 · 2 个渠道"}));
   expect(writes.at(-1)).toEqual({kind:"quality",targets:[{source_id:"fugue",provider:"native-one",models:["gpt-6-astra"]},{source_id:"fugue",provider:"native-two",models:["gpt-6-astra"]}]});
+  await user.selectOptions(screen.getByLabelText("选择检测项目"), "compaction");
   await user.click(screen.getByRole("button",{name:"压缩检测 · 2 个渠道"}));
   expect(writes.at(-1).targets).toHaveLength(2);
   await user.click(screen.getByRole("button",{name:`检测已选 ${SUB_MODELS.length} 个模型 · 2 个渠道`}));

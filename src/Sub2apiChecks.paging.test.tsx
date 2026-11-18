@@ -366,9 +366,9 @@ it("opens optimization from a fresh full snapshot after results changed, while b
 });
 
 it.each([
- ["检测全部模型", "checks"], ["降智检测", "quality-checks"],
- ["压缩检测", "compaction-checks"], ["Tool use 检测", "tool-use-checks"],
-])("%s skips disabled channels on every page, while explicit row detection still works",async(label,endpoint)=>{
+ ["检测全部模型", "checks", ""], ["降智检测", "quality-checks", "quality"],
+ ["压缩检测", "compaction-checks", "compaction"], ["Tool use 检测", "tool-use-checks", "tool-use"],
+])("%s skips disabled channels on every page, while explicit row detection still works",async(label,endpoint,project)=>{
  const writes:{path:string;body:{manual?:boolean;targets:{group_id:number}[]}}[]=[];
  vi.stubGlobal("fetch",vi.fn(async(input:string,init?:RequestInit)=>{
   const url=new URL(input),path=url.pathname;
@@ -381,6 +381,7 @@ it.each([
  mount(`disabled-${endpoint}`);const user=userEvent.setup();
  const toggle=await screen.findByRole("switch",{name:"Owned site Channel 1 的批量检测开关"});
  await waitFor(()=>expect(toggle).not.toBeChecked());
+ if(project) await user.selectOptions(screen.getByLabelText("选择检测项目"),project);
  await user.click(screen.getByRole("button",{name:`${label} · 61 个渠道`}));
  await waitFor(()=>expect(writes).toHaveLength(1));
  expect(writes[0].path).toBe(`/analytics/v1/sub2api/${endpoint}`);
@@ -437,7 +438,11 @@ it("blocks bulk detection when switch settings cannot be read, but permits expli
  }));
  mount("settings-unavailable");const user=userEvent.setup();
  await screen.findByText("检测开关读取失败，已暂停批量检测。");
- for(const label of ["检测全部模型","降智检测","压缩检测","Tool use 检测"])expect(screen.getByRole("button",{name:`${label} · 61 个渠道`})).toBeDisabled();
+ expect(screen.getByRole("button",{name:"检测全部模型 · 61 个渠道"})).toBeDisabled();
+ for(const [project, label] of [["quality","降智检测"],["compaction","压缩检测"],["tool-use","Tool use 检测"]]) {
+  await user.selectOptions(screen.getByLabelText("选择检测项目"),project);
+  expect(screen.getByRole("button",{name:`${label} · 61 个渠道`})).toBeDisabled();
+ }
  await user.click(screen.getByRole("button",{name:"检测 Owned site Channel 1"}));
  await waitFor(()=>expect(writes).toHaveLength(1));expect(writes[0]).toMatchObject({manual:true,targets:[{account_id:"owned",group_id:1}]});
 });

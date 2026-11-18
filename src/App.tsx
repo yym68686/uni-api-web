@@ -66,11 +66,10 @@ import {
   controlRequest,
   cleanBase,
 } from "./api";
+import { ObservedDetectionActions, ObservedDetectionRow, useObservedDetection } from "./ObservedDetection";
 import {
-  CheckActions,
   ChannelCheckAction,
   LatestChannelCheck,
-  checkTargets,
   useChannelChecks,
   CheckVerdict,
   withSubQuality,
@@ -1023,8 +1022,7 @@ function Dashboard({
     stream,
   } = filters;
   const [page, setPage] = useState(0),
-    [adjustingChannels, setAdjustingChannels] = useState(false),
-    [checkingChannels, setCheckingChannels] = useState(false);
+    [adjustingChannels, setAdjustingChannels] = useState(false);
   const channelView = view === "channels";
   const previewingSort = channelView && !adjustingChannels && sortPreview?.scope === channelScope;
   useEffect(() => setSortPreview(null), [channelScope, view, adjustingChannels]);
@@ -1401,7 +1399,8 @@ function Dashboard({
     }
     return result;
   }, [balanceMap, balanceRanks.providers, baseConnection.account, channelSpend, filtered, actualRange.supported]);
-  const detectionRows = checkTargets(filtered);
+  const observedDetection = useObservedDetection(baseConnection.session, channelView && !!baseConnection.account, filtered, checks, fingerprints);
+  const checkingChannels = observedDetection.expanded;
   const total = channelView ? filtered.length : balanceProviders.length;
   const pageCount = Math.max(1, Math.ceil(total / 25)),
     currentPage = Math.min(page, pageCount - 1);
@@ -1705,15 +1704,14 @@ function Dashboard({
                     />
                   )}
                   {channelView && baseConnection.account && (
-                    <CheckActions
+                    <ObservedDetectionActions
                       checks={checks}
-                      rows={detectionRows}
-                      expanded={checkingChannels}
-                      onExpandedChange={setCheckingChannels}
+                      detection={observedDetection}
                       disabled={
                         !baseConnection.account ||
                         busy ||
                         !!error ||
+                        search !== deferredSearch ||
                         !!(balanceFilter && pendingBalances)
                       }
                     />
@@ -1967,6 +1965,11 @@ function Dashboard({
                   </button>
                 )}
               </div>
+              {channelView && checkingChannels && (observedDetection.notice || observedDetection.batchIssue) && (
+                <div className={observedDetection.notice?.error ? "error-banner" : "observed-detection-notice"} role={observedDetection.notice?.error ? "alert" : "status"}>
+                  {observedDetection.notice?.text || observedDetection.batchIssue}
+                </div>
+              )}
               {channelView && cachedDashboardAt && (
                 <div className="coverage-note" role="status">
                   <Clock3 size={14} />
@@ -2096,9 +2099,9 @@ function Dashboard({
                               error={fingerprints.error} loading={fingerprints.isPending}
                               supportedModels={fingerprints.supportedModels}
                             /></td>}
-                            {checkingChannels && (
-                              <ChannelCheckAction row={row} checks={checks} />
-                            )}
+                            {checkingChannels && (observedDetection.project === "quality"
+                              ? <ChannelCheckAction row={row} checks={checks} />
+                              : <ObservedDetectionRow row={row} detection={observedDetection} />)}
                             <ChannelMetricCells
                               row={row}
                               inflight={liveMap.get(rowId(row))}

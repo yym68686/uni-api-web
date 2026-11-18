@@ -33,7 +33,7 @@ export const detectionEnabled = (
   row: Pick<ManagementRow, "account" | "target" | "configured">,
   disabled: Set<string>,
 ) => detectionTargets(row).every((t) => !disabled.has(detectionKey(t)));
-export function useChannelDetection(owner: string) {
+export function useChannelDetection(owner: string, enabled = true) {
   const client = useQueryClient(),
     key = ["channel-detection-settings", owner];
   const query = useQuery({
@@ -43,6 +43,7 @@ export function useChannelDetection(owner: string) {
         "/v1/channel-management/detection-settings",
         { signal },
       ),
+    enabled,
     retry: false,
     staleTime: 15000,
   });
