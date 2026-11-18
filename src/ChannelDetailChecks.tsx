@@ -1,4 +1,4 @@
-import { FingerprintPanel, FINGERPRINT_MODELS } from "./ModelFingerprints";
+import { FingerprintPanel } from "./ModelFingerprints";
 import { isCapabilityCheckModel, capabilityCheckScope } from "./sub2apiModels";
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -237,7 +237,7 @@ export function ChannelDetailChecks({ row }: { row: Channel }) {
           );
         })}
       </div>
-      {row.source_id && FINGERPRINT_MODELS.includes(row.model) && <FingerprintPanel targets={[{source_id:row.source_id,provider:row.provider,model:row.model}]}/>}
+      {row.source_id && <FingerprintPanel onlySupported targets={[{source_id:row.source_id,provider:row.provider,model:row.model}]}/>}
     </section>
   );
 }

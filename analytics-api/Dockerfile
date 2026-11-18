@@ -7,6 +7,7 @@ ENV CGO_ENABLED=0
 RUN go build -trimpath -ldflags='-s -w' -o /out/analytics-api .
 
 FROM node:24-bookworm-slim
+ENV FINGERPRINT_CATALOG_SYNC=1
 RUN useradd --system --create-home --uid 10001 analytics && mkdir -p /data && chown analytics:analytics /data \
  && apt-get update && apt-get install -y --no-install-recommends ca-certificates wget \
  && rm -rf /var/lib/apt/lists/*

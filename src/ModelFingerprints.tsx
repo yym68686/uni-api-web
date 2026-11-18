@@ -8,11 +8,10 @@ import type { Channel } from "./types";
 import { rate, time } from "./format";
 import { useSubImports } from "./sub2apiImports";
 import { Spinner, Tip } from "./ui";
-import fingerprintModels from "../analytics-api/fingerprint/models.json";
 import { fingerprintKey, sharedFingerprintIndex } from "./fingerprintResults";
 export { fingerprintKey } from "./fingerprintResults";
 
-export const FINGERPRINT_MODELS = Object.keys(fingerprintModels);
+const legacyFingerprintModels = ["gpt-6-astra", "gpt-6.1-sol"];
 export const FINGERPRINT_BATCH_LIMIT = 512;
 export const fingerprintLabels: Record<string, string> = {
   match: "匹配", mismatch: "不匹配", insufficient: "样本不足", error: "检测失败",
@@ -43,8 +42,8 @@ function partialFingerprint(result?: FingerprintResult | null) {
 export function fingerprintProbabilityClass(p: number | null) {
   return p === null ? "quality-unknown" : p === 1 ? "quality-perfect" : p >= .9 ? "quality-partial" : "quality-poor";
 }
-export function fingerprintTargets(row: Pick<ManagementRow, "account" | "target" | "configured">, models = FINGERPRINT_MODELS): FingerprintTarget[] {
-  const supported = [...new Set(models)].filter(model => FINGERPRINT_MODELS.includes(model));
+export function fingerprintTargets(row: Pick<ManagementRow, "account" | "target" | "configured">, models: string[]): FingerprintTarget[] {
+  const supported = [...new Set(models)];
   if (row.account.id) return supported.map(model => ({ account_id: row.account.id, group_id: row.target.group_id, model }));
   if (!row.configured) return [];
   const members = channelMembers(row.configured);
@@ -53,8 +52,8 @@ export function fingerprintTargets(row: Pick<ManagementRow, "account" | "target"
     return { source_id: member.source_id, provider: member.provider, model };
   });
 }
-export function rowFingerprints(row: ManagementRow, index: Map<string, FingerprintRecord>, model: string) {
-  return fingerprintTargets(row, model ? [model] : FINGERPRINT_MODELS).map(target => {
+export function rowFingerprints(row: ManagementRow, index: Map<string, FingerprintRecord>, model: string, supportedModels: string[]) {
+  return fingerprintTargets(row, model ? supportedModels.filter(name => name === model) : supportedModels).map(target => {
     let record = index.get(fingerprintKey(target));
     if (record?.state === "done" && target.source_id && fingerprintKey(record) === fingerprintKey(target) && row.configured) {
       const member = channelMembers(row.configured).find(m => m.source_id === target.source_id && m.provider === target.provider);
@@ -63,13 +62,13 @@ export function rowFingerprints(row: ManagementRow, index: Map<string, Fingerpri
     return { target, record };
   });
 }
-export function observedFingerprints(row: Channel, index: Map<string, FingerprintRecord>, member?: ManagementRow["configured"]) {
-  if (!FINGERPRINT_MODELS.includes(row.model)) return [];
+export function observedFingerprints(row: Channel, index: Map<string, FingerprintRecord>, member: ManagementRow["configured"] | undefined, supportedModels: string[]) {
   const target = { source_id: row.source_id, provider: row.provider, model: row.model };
   let record = index.get(fingerprintKey(target));
+  if (!supportedModels.includes(row.model) && !record) return [];
   // Observation can include historical routes. Reuse only the current model
   // mapping and credential evidence, just like the management/detail views.
-  if (!member?.models.includes(row.model) || (member.model_mappings?.[row.model] || row.model) !== row.upstream_model ||
+  if (!member?.models?.includes(row.model) || (member.model_mappings?.[row.model] || row.model) !== row.upstream_model ||
       (record?.state === "done" && fingerprintKey(record) === fingerprintKey(target) && record.revision !== member.probe_fingerprint)) record = undefined;
   return [{ target, record }];
 }
@@ -95,7 +94,7 @@ export function useModelFingerprints(enabled = true) {
     imports.data?.unavailable_sources || [],
   ), [query.data, management.data, management.isError, imports.data, imports.isError]);
   // Older backends have no capability list and only accept the original pair.
-  const supportedModels = Array.isArray(query.data?.supported_models) ? query.data.supported_models : ["gpt-6-astra", "gpt-6.1-sol"];
+  const supportedModels = Array.isArray(query.data?.supported_models) ? query.data.supported_models : query.data ? legacyFingerprintModels : [];
   return { ...query, index, members, supportedModels };
 }
 export function FingerprintStatus({ record }: { record?: FingerprintRecord }) {
@@ -114,7 +113,7 @@ export function FingerprintStatus({ record }: { record?: FingerprintRecord }) {
     </Tip>}
   </div>;
 }
-export function FingerprintCell({ entries, error, loading, supportedModels = FINGERPRINT_MODELS }: { entries: ReturnType<typeof rowFingerprints>; error?: Error | null; loading?: boolean; supportedModels?: string[] }) {
+export function FingerprintCell({ entries, error, loading, supportedModels = [] }: { entries: ReturnType<typeof rowFingerprints>; error?: Error | null; loading?: boolean; supportedModels?: string[] }) {
   if (entries.length && (error || loading)) return <span className="muted">{error ? fingerprintReadMessage(error) : "读取中…"}</span>;
   if (!entries.length) return <span className="muted">—</span>;
   return <div className="fingerprint-cell">{entries.map(({target,record}) => <div key={fingerprintKey(target)}>
@@ -122,7 +121,7 @@ export function FingerprintCell({ entries, error, loading, supportedModels = FIN
     {!record && !supportedModels.includes(target.model) ? <span className="muted">指纹检测服务待更新</span> : <FingerprintStatus record={record}/>}
   </div>)}</div>;
 }
-export function FingerprintPanel({ targets, revisions }: { targets: FingerprintTarget[]; revisions?: Record<string,string> }) {
+export function FingerprintPanel({ targets, revisions, onlySupported }: { targets: FingerprintTarget[]; revisions?: Record<string,string>; onlySupported?: boolean }) {
   const query = useModelFingerprints(), client = useQueryClient();
   const submitting = useRef(false);
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
@@ -135,12 +134,13 @@ export function FingerprintPanel({ targets, revisions }: { targets: FingerprintT
     } catch (e) { setError(e instanceof Error ? e.message : "检测提交失败"); }
     finally { submitting.current = false;setBusy(false); }
   }
-  if (!targets.length) return null;
+  const visible = onlySupported ? targets.filter(t => query.supportedModels.includes(t.model) || query.index.has(fingerprintKey(t))) : targets;
+  if (!visible.length) return null;
   return <section className="fingerprint-panel">
     <h3><Fingerprint size={16}/>模型指纹 <Tip text={fingerprintNote}><CircleHelp size={13}/></Tip></h3>
     {query.isError && <p role="alert">{fingerprintReadMessage(query.error)} <button className="button small" onClick={() => void query.refetch()}>重试</button></p>}
     {error && <p role="alert">{error}</p>}
-    {targets.map(target => {
+    {visible.map(target => {
       let record = query.index.get(fingerprintKey(target));
       if (record?.state === "done" && target.source_id && fingerprintKey(record) === fingerprintKey(target) && revisions && record.revision !== revisions[JSON.stringify([target.source_id,target.provider])]) record = undefined;
       const pending = fingerprintBusy(record), result = record?.result;
@@ -150,9 +150,9 @@ export function FingerprintPanel({ targets, revisions }: { targets: FingerprintT
       const actionTarget = pending && record ? {source_id:record.source_id,provider:record.provider,account_id:record.account_id,group_id:record.group_id,model:record.model} : target;
       return <div className="fingerprint-detail" key={fingerprintKey(target)}>
         <div className="fingerprint-heading"><strong>{target.model}</strong>{query.isError ? <span className="muted">待启用</span> : !supported && !record ? <span className="muted">指纹检测服务待更新</span> : <FingerprintStatus record={record}/>}
-          <button className="button small" disabled={busy || query.isError || query.isPending || !supported} title={fingerprintNote} onClick={() => void run(actionTarget, pending)}>{pending ? "取消检测" : partial ? "继续采样" : "检测指纹"}</button>
+          <button className="button small" disabled={busy || query.isError || query.isPending || (!pending && !supported)} title={fingerprintNote} onClick={() => void run(actionTarget, pending)}>{pending ? "取消检测" : partial ? "继续采样" : "检测指纹"}</button>
         </div>
-        {!query.isError && !query.isPending && !supported && <p className="muted">后台正在更新此模型的指纹检测支持，完成后自动启用。<button className="button small" onClick={() => void query.refetch()}>重新检查</button></p>}
+        {!query.isError && !query.isPending && !supported && <p className="muted">当前指纹参考库未启用此模型。<button className="button small" onClick={() => void query.refetch()}>重新检查</button></p>}
         {record?.message && <p className="muted">{record.message}</p>}
         {result && <details><summary>检测详情{result.checked_at ? ` · ${time(result.checked_at)}` : ""}</summary>
           <p className="muted">有效样本 {result.used_outputs}/3 · 目标类别 {result.expected_class}</p>

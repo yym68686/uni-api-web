@@ -103,7 +103,9 @@ func (s *Service) Handler() http.Handler {
 	return observeConsoleRequests(s.authenticate(mux))
 }
 func (s *Service) health(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"status": "ok", "revision": s.engine.Revision.Load(), "last_collect_ms": s.lastCollect.Load(), "state_ready": true, "analytics_ready": s.analyticsReady()})
+	catalog := currentFingerprintCatalog()
+	writeJSON(w, 200, map[string]any{"status": "ok", "revision": s.engine.Revision.Load(), "last_collect_ms": s.lastCollect.Load(), "state_ready": true, "analytics_ready": s.analyticsReady(),
+		"fingerprint_reference_commit": catalog.commit, "fingerprint_catalog_generation": catalog.sequence, "fingerprint_model_count": len(catalog.names)})
 }
 func (s *Service) ready(w http.ResponseWriter, r *http.Request) {
 	if !s.analyticsReady() {

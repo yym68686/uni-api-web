@@ -79,7 +79,7 @@ func managementProjectedRevision(in managementQueryInput, page managementQueryPa
 		Models          []string
 		DetectionModels []string
 		Evidence        managementFilterEvidence
-	}{"management-projected-v2", in.ModelsRevision, compact, in.SourceRevisions, page.Models, page.DetectionModels, evidence})
+	}{"management-projected-v2/" + currentFingerprintCatalog().referenceKey, in.ModelsRevision, compact, in.SourceRevisions, page.Models, page.DetectionModels, evidence})
 	if err != nil {
 		return "", err
 	}

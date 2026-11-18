@@ -1,0 +1,81 @@
+name: Publish fingerprint catalog
+
+on:
+  schedule:
+    - cron: '23 */4 * * *'
+  workflow_dispatch:
+    inputs:
+      restore_revision:
+        description: 'Optional exact fingerprint-data-v1 commit to restore and hold'
+        type: string
+        required: false
+      resume:
+        description: 'Resume automatic updates after a manual hold'
+        type: boolean
+        default: false
+
+concurrency:
+  group: fingerprint-catalog-publisher
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Build and publish signed catalog
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SIGNING_KEY: ${{ secrets.FINGERPRINT_CATALOG_SIGNING_KEY }}
+          RESTORE_REVISION: ${{ inputs.restore_revision }}
+          RESUME_UPDATES: ${{ inputs.resume }}
+        run: |
+          set -euo pipefail
+          umask 077
+          branch=fingerprint-data-v1
+          stage=$(mktemp -d)
+          trap 'rm -rf -- "$stage"' EXIT
+          git fetch origin "refs/heads/$branch"
+          head=$(git rev-parse FETCH_HEAD)
+          git worktree add --detach "$stage/branch" "$head"
+          if test -f "$stage/branch/hold" && test -z "$RESTORE_REVISION" && test "$RESUME_UPDATES" != true; then
+            echo "Automatic catalog publication is on hold following a restore"
+            exit 0
+          fi
+          test -n "$SIGNING_KEY"
+          printf '%s\n' "$SIGNING_KEY" > "$stage/key"
+          unset SIGNING_KEY
+          if test -n "$RESTORE_REVISION"; then
+            [[ "$RESTORE_REVISION" =~ ^[0-9a-f]{40}$ ]]
+            git merge-base --is-ancestor "$RESTORE_REVISION" "$head"
+            git show "${RESTORE_REVISION}:bundle.json" > "$stage/restore.json"
+            node analytics-api/fingerprint/publish-catalog.mjs --restore "$stage/next.json" "$stage/key" "$stage/branch/bundle.json" "$stage/restore.json"
+            touch "$stage/branch/hold"
+          else
+            upstream=$(gh api repos/Ikaleio/lm-detector/commits/main --jq .sha)
+            node analytics-api/fingerprint/publish-catalog.mjs "$upstream" "$stage/next.json" "$stage/key" "$stage/branch/bundle.json"
+            if test "$RESUME_UPDATES" = true && test -f "$stage/branch/hold"; then
+              git -C "$stage/branch" rm -- hold
+            fi
+          fi
+          if test -f "$stage/next.json"; then
+            install -m 644 "$stage/next.json" "$stage/branch/bundle.json"
+          fi
+          git -C "$stage/branch" add -- bundle.json
+          if test -f "$stage/branch/hold"; then
+            git -C "$stage/branch" add -- hold
+          fi
+          if git -C "$stage/branch" diff --cached --quiet; then
+            exit 0
+          fi
+          git -C "$stage/branch" -c user.name=github-actions -c user.email=41898282+github-actions[bot]@users.noreply.github.com commit -m 'Publish verified fingerprint data'
+          git -C "$stage/branch" push origin "HEAD:refs/heads/$branch"

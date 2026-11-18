@@ -3,7 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { afterEach, expect, it, vi } from "vitest";
-import { FingerprintPanel, FingerprintStatus, FINGERPRINT_MODELS, fingerprintProbabilityClass, fingerprintTargets, fingerprintKey, rowFingerprints } from "./ModelFingerprints";
+import { FingerprintPanel, FingerprintStatus, fingerprintProbabilityClass, fingerprintTargets, fingerprintKey, rowFingerprints } from "./ModelFingerprints";
+import fingerprintModels from "../analytics-api/fingerprint/models.json";
+const FINGERPRINT_MODELS = Object.keys(fingerprintModels);
 import type { FingerprintRecord } from "./ModelFingerprints";
 import type { ManagedChannel, ManagementRow } from "./channelManagement";
 import { Sub2apiChecks } from "./Sub2apiChecks";
@@ -33,10 +35,10 @@ it("shows requested-class probability below mismatch with the same quality color
 });
 it("only selects the supported models and fences configured stale evidence",()=>{
  const row={account:{id:""},target:{group_id:0},configured:{source_id:"fugue",provider:"native",models:["gpt-6-astra"],probe_fingerprint:"new"}} as ManagementRow;
- const targets=fingerprintTargets(row,["gpt-6-astra","gpt-6.1-sol","gpt-5.5"]);expect(targets).toHaveLength(2);
+ const targets=fingerprintTargets(row,["gpt-6-astra","gpt-6.2-sol","gpt-6.2-sol"]);expect(targets.map(x=>x.model)).toEqual(["gpt-6-astra","gpt-6.2-sol"]);
  const native={...record,account_id:undefined,group_id:undefined,source_id:"fugue",provider:"native"};
- expect(rowFingerprints(row,new Map([[fingerprintKey(native),native]]),"gpt-6-astra")[0].record).toBeUndefined();
- expect(rowFingerprints(row,new Map(),"gpt-5.5")).toEqual([]);
+ expect(rowFingerprints(row,new Map([[fingerprintKey(native),native]]),"gpt-6-astra",FINGERPRINT_MODELS)[0].record).toBeUndefined();
+ expect(rowFingerprints(row,new Map(),"gpt-5.5",FINGERPRINT_MODELS)).toEqual([]);
 });
 it("does not report match or mismatch for a rejected numeric sequence",()=>{
  mount(<FingerprintStatus record={{...record,result:{...record.result!,status:"insufficient",decision:"not_model",probability:null,candidates:[],prediction:"",prediction_name:"不像语言模型回答"}}}/>);
@@ -49,7 +51,7 @@ it("enables each supported Gemini and DeepSeek with its own probability and targ
  const row={account:{id:"one"},target:{group_id:1}} as ManagementRow;
  for(const model of ["gemini-3.1-pro","gemini-3.8-flash","gemini-4-argon","gemini-4-carbon","deepseek-v4.1-flash-1017"]){
   expect(FINGERPRINT_MODELS).toContain(model);
-  expect(fingerprintTargets(row,[model,"gpt-5.5"])).toEqual([{account_id:"one",group_id:1,model}]);
+  expect(fingerprintTargets(row,[model])).toEqual([{account_id:"one",group_id:1,model}]);
   const scoped={...record,model,result:{...record.result!,model,expected_class:model,probability:.95}};
   const view=mount(<FingerprintStatus record={scoped}/>);
   expect(screen.getByText("不匹配")).toBeInTheDocument();
@@ -133,12 +135,12 @@ it("shows backend rollout unavailability without reporting untested or submittin
  expect(screen.queryByText("未检测")).not.toBeInTheDocument();
 });
 
-it.each(["gemini-4-argon","deepseek-v4.1-flash-1017"])("waits for backend %s support and enables detection after capability refresh",async(model)=>{
+it.each(["gemini-4-argon","deepseek-v4.1-flash-1017","gpt-6.2-sol"])("waits for backend %s support and enables detection after capability refresh",async(model)=>{
  let updated=false;const writes:unknown[]=[];
  vi.stubGlobal("fetch",vi.fn(async(path:string,init?:RequestInit)=>{
   if(path.endsWith("/channel-management"))return Response.json({data:[],unavailable_sources:[]});
   if(init?.method){writes.push(JSON.parse(init.body as string));return Response.json({accepted:true});}
-  return Response.json({data:[],...(updated?{supported_models:FINGERPRINT_MODELS}:{})});
+  return Response.json({data:[],...(updated?{supported_models:[...FINGERPRINT_MODELS,model]}:{})});
  }));
  mount(<FingerprintPanel targets={[{source_id:"fugue",provider:"native",model}]}/>);
  const user=userEvent.setup();

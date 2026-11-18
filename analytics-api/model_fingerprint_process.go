@@ -19,8 +19,9 @@ import (
 // The bank and runtime are shared by all concurrent jobs in this backend. Go
 // still owns every upstream connection, credential, cancellation and site lease.
 type fingerprintProcess struct {
-	mu     sync.Mutex
-	worker *fingerprintNode
+	mu                    sync.Mutex
+	worker                *fingerprintNode
+	dataDir, referenceKey string
 }
 
 type fingerprintNode struct {
@@ -56,6 +57,9 @@ func (p *fingerprintProcess) get(ctx context.Context) (*fingerprintNode, error) 
 	}
 	cmd := exec.Command("node", "--max-old-space-size=192", "--max-semi-space-size=4", runner, "--serve")
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "NODE_NO_WARNINGS=1"}
+	if p.dataDir != "" {
+		cmd.Env = append(cmd.Env, "FINGERPRINT_DATA_DIR="+p.dataDir)
+	}
 	cmd.Stderr = io.Discard
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -73,8 +77,9 @@ func (p *fingerprintProcess) get(ctx context.Context) (*fingerprintNode, error) 
 	}
 	w := &fingerprintNode{cmd: cmd, stdin: stdin, done: make(chan struct{})}
 	type ready struct {
-		Port  int    `json:"port"`
-		Token string `json:"token"`
+		Port         int    `json:"port"`
+		Token        string `json:"token"`
+		ReferenceKey string `json:"reference_key"`
 	}
 	readiness := make(chan ready, 1)
 	go func() {
@@ -100,7 +105,7 @@ func (p *fingerprintProcess) get(ctx context.Context) (*fingerprintNode, error) 
 		_ = cmd.Process.Kill()
 		return nil, errors.New("指纹参考数据校验超时")
 	}
-	if result.Port < 1 || result.Port > 65535 || len(result.Token) < 16 {
+	if result.Port < 1 || result.Port > 65535 || len(result.Token) < 16 || (p.referenceKey != "" && result.ReferenceKey != p.referenceKey) {
 		_ = cmd.Process.Kill()
 		return nil, errors.New("指纹参考数据或运行环境校验失败")
 	}

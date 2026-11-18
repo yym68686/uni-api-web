@@ -12,6 +12,7 @@ import type { SubFilters } from "../src/sub2apiPreferences";
 import type { ModelPrice } from "../src/types";
 import { sharedFingerprintIndex } from "../src/fingerprintResults";
 import { rowFingerprints, fingerprintStatus } from "../src/ModelFingerprints";
+import fingerprintSeedModels from "../analytics-api/fingerprint/models.json";
 import type { FingerprintRecord } from "../src/ModelFingerprints";
 import { managementJoinState } from "../src/channelOptimizationPlan";
 import type { Routes } from "../src/channelRouteData";
@@ -173,7 +174,7 @@ it("freezes shared fingerprint identity and actual caller-key join evidence",()=
     const rows=managementRows(input.accounts,input.channels,input.imports || [],model,"",input.checks);
     const index=sharedFingerprintIndex(input.fingerprints,input.channels,input.unavailable_sources,input.imports || [],input.unavailable_imports);
     return {input,model,expected:{prices:[],fingerprint_ready:true,
-      fingerprints:Object.fromEntries(rows.map(row=>[row.id,rowFingerprints(row,index,model).map(e=>fingerprintStatus(e.record))])),
+      fingerprints:Object.fromEntries(rows.map(row=>[row.id,rowFingerprints(row,index,model,Object.keys(fingerprintSeedModels)).map(e=>fingerprintStatus(e.record))])),
       joined:Object.fromEntries(rows.map(row=>[row.id,managementJoinState(row,input.imports?{data:input.imports,labels:{},unavailable_sources:input.unavailable_imports}:undefined,input.routes)]))}};
   }));
   const path=resolve("analytics-api/testdata/management-query-evidence.json.gz");

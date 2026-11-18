@@ -5,6 +5,7 @@ import { gunzipSync } from 'node:zlib';
 import { createHash, randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { createServer } from 'node:http';
+import { resolve } from 'node:path';
 import { generateChallenges } from './upstream/challenge-browser.js';
 import { complete } from './upstream/detection.ts';
 import { analyzeSharedOutputs, supportsSharedDetector } from './upstream/shared-detector.ts';
@@ -14,16 +15,18 @@ import { completeGemini } from './gemini.mjs';
 import { fingerprintResponse, unsupportedEffortMessage } from './response-errors.mjs';
 import { parseNumbers } from './upstream/fingerprint-core.js';
 
-const modelBytes = readFileSync(new URL('./models.json', import.meta.url));
-const manifestBytes = readFileSync(new URL('./manifest.json', import.meta.url));
+const dataRoot = process.env.FINGERPRINT_DATA_DIR;
+const dataFile = name => dataRoot ? resolve(dataRoot, name) : new URL(name, import.meta.url);
+const modelBytes = readFileSync(dataFile('models.json'));
+const manifestBytes = readFileSync(dataFile('manifest.json'));
 const referenceKey = createHash('sha256').update(modelBytes).update(manifestBytes).digest('hex');
 const modelClasses = JSON.parse(modelBytes);
-const protocols = JSON.parse(readFileSync(new URL('./protocols.json', import.meta.url)));
+const protocols = JSON.parse(readFileSync(dataFile('protocols.json')));
 export const models = Object.keys(modelClasses);
 const manifest = JSON.parse(manifestBytes);
 export function loadReference() {
   const load = name => {
-    const raw = gunzipSync(readFileSync(new URL(`./data/${name}.gz`, import.meta.url)));
+    const raw = gunzipSync(readFileSync(dataFile(`data/${name}.gz`)), {maxOutputLength: 32 << 20});
     if (createHash('sha256').update(raw).digest('hex') !== manifest.files[`data/${name}`]) throw Error('reference_integrity');
     return name.endsWith('.bin') ? decodeDetector(raw) : JSON.parse(raw);
   };
@@ -196,7 +199,7 @@ export async function serve() {
   server.requestTimeout = 800_000;
   server.headersTimeout = 5_000;
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
-  process.stdout.write(JSON.stringify({port: server.address().port, token}) + '\n');
+  process.stdout.write(JSON.stringify({port: server.address().port, token, reference_key: referenceKey}) + '\n');
   // Losing the owning Go process stops every probe; no job is replayed.
   process.stdin.resume();
   process.stdin.on('end', () => {

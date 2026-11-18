@@ -16,12 +16,14 @@ var fingerprintManifestJSON []byte
 
 const fingerprintSampleBytes = 256 << 10
 
-var fingerprintReferenceKey = func() string {
+var fingerprintReferenceKey = makeFingerprintReferenceKey(fingerprintModelsJSON, fingerprintManifestJSON)
+
+func makeFingerprintReferenceKey(models, manifest []byte) string {
 	h := sha256.New()
-	h.Write(fingerprintModelsJSON)
-	h.Write(fingerprintManifestJSON)
+	h.Write(models)
+	h.Write(manifest)
 	return hex.EncodeToString(h.Sum(nil))
-}()
+}
 
 type fingerprintSampleState struct {
 	Version      int    `json:"version"`
@@ -46,7 +48,11 @@ func validateFingerprintSamples(raw json.RawMessage, config map[string]any) (int
 	if format == "" {
 		format = "responses"
 	}
-	if len(raw) == 0 || len(raw) > fingerprintSampleBytes || json.Unmarshal(raw, &state) != nil || state.Version != 1 || state.Model != config["model"] || state.Format != format || state.ReferenceKey != fingerprintReferenceKey || len(state.Entries) < 1 || len(state.Entries) > 3 {
+	key := fingerprintReferenceKey
+	if catalog, _ := config["catalog"].(*fingerprintCatalog); catalog != nil {
+		key = catalog.referenceKey
+	}
+	if len(raw) == 0 || len(raw) > fingerprintSampleBytes || json.Unmarshal(raw, &state) != nil || state.Version != 1 || state.Model != config["model"] || state.Format != format || state.ReferenceKey != key || len(state.Entries) < 1 || len(state.Entries) > 3 {
 		return 0, false
 	}
 	ids, lengths := map[string]bool{}, map[int]bool{}

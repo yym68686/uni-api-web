@@ -16,7 +16,6 @@ import { channelName, providerId } from "./format";
 import {
   fingerprintBusy,
   FINGERPRINT_BATCH_LIMIT,
-  FINGERPRINT_MODELS,
   type useModelFingerprints,
 } from "./ModelFingerprints";
 import { compactionLabels } from "./SubCompaction";
@@ -71,7 +70,6 @@ export function useObservedDetection(
       if (
         fingerprints.isPending ||
         fingerprints.isError ||
-        !FINGERPRINT_MODELS.includes(row.model) ||
         !fingerprints.supportedModels.includes(row.model)
       )
         return;

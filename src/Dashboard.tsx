@@ -2040,7 +2040,7 @@ export default function Dashboard({
                               <LatestChannelCheck row={row} checks={checks} />
                             )}
                             {baseConnection.account && <td className="column-quality"><FingerprintCell
-                              entries={observedFingerprints(row, fingerprints.index, fingerprints.members.get(providerId(row)))}
+                              entries={observedFingerprints(row, fingerprints.index, fingerprints.members.get(providerId(row)), fingerprints.supportedModels)}
                               error={fingerprints.error} loading={fingerprints.isPending}
                               supportedModels={fingerprints.supportedModels}
                             /></td>}

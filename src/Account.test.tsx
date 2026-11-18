@@ -39,7 +39,8 @@ it("shows the shared model fingerprint immediately after quality in observation 
   });
   vi.stubGlobal("fetch", fetchMock);
   const app = mount();
-  const table = await screen.findByRole("table");
+  // The table waits for the lazy dashboard and its session-scoped reads.
+  const table = await screen.findByRole("table", {}, { timeout: 5_000 });
   const headers = within(table).getAllByRole("columnheader");
   const quality = headers.findIndex(header => header.textContent?.includes("是否降智"));
   expect(headers[quality + 1]).toHaveTextContent("指纹");

@@ -1,0 +1,9 @@
+{
+  "shared/shared-detector.ts": "f7b198f040f598a7f95ac245fd3b004ebe3dd3150200f6e4e822bfcc665a0ccc",
+  "shared/detector-codec.ts": "dc81fc16d94e7d4e34918142338bc810e07f42e0ddea32d5e229dced254addbb",
+  "shared/positional.ts": "e2c72c352ac3c1120ff23891ec40fff9a652973345badb29a9ce389de9cfc28a",
+  "shared/fingerprint-core.js": "f7a88e9b0141b0088608a2c86ba9f26cf6b916860e94c3c7f14028c94c165be7",
+  "shared/types.ts": "8e6c17ebfb16664a79bc07d1b90104f4d4db05d60b7d81dc058a83e9534fe19b",
+  "shared/challenge-browser.js": "65884da44d29b7d5337993609414596272010cb07cffe98b0c5546b1fe9728e4",
+  "shared/completion-request.ts": "f7c58c633df5b1a19c38cbe8705af8002e3fcb441bea54bb38da00824632e371"
+}

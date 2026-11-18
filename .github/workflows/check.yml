@@ -50,7 +50,7 @@ jobs:
       - run: node --test ../scripts/observe-management-read.node-tests.mjs
         env:
           TEST_MANAGEMENT_OBSERVER_DATABASE_URL: ${{ env.TEST_CONTROL_DATABASE_URL }}
-      - run: node --test fingerprint/runner.test.mjs
+      - run: node --test fingerprint/runner.test.mjs fingerprint/publish-catalog.test.mjs
       # The full PostgreSQL suite takes over ten minutes, including lease/deadline tests.
       - run: go test ./... -count=1 -timeout=15m
       - run: go vet ./...

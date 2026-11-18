@@ -12,7 +12,7 @@ type managementPageContext struct {
 // records to its visible groups/providers instead of starting independent UI
 // reads that can observe another configuration generation.
 func managementContextForPage(view managementDatabaseView, page managementQueryPage, model string) managementPageContext {
-	out := managementPageContext{Prices: view.Prices, Imports: []subInstalledChannel{}, Routes: map[string]managementQueryRoutes{}, Fingerprints: map[string][]managementFingerprintEntry{}, FingerprintModels: managementFingerprintModels}
+	out := managementPageContext{Prices: view.Prices, Imports: []subInstalledChannel{}, Routes: map[string]managementQueryRoutes{}, Fingerprints: map[string][]managementFingerprintEntry{}, FingerprintModels: currentFingerprintCatalog().names}
 	providers, groups := map[string]bool{}, map[string]bool{}
 	index := managementSharedFingerprints(view.Input)
 	for _, row := range page.Rows {

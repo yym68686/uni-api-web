@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
-	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -67,12 +66,18 @@ var fingerprintModels = func() map[string]fingerprintReference {
 	return models
 }()
 
-func fingerprintModel(model string) bool { _, ok := fingerprintModels[model]; return ok }
+func fingerprintModel(model string) bool {
+	_, ok := currentFingerprintCatalog().models[model]
+	return ok
+}
 func (t fingerprintTarget) scope() string {
 	return mustJSON([]any{t.Source, t.Provider, t.Account, t.Group})
 }
 func (t fingerprintTarget) valid() bool {
-	return fingerprintModel(t.Model) && ((t.Source != "" && t.Provider != "" && len(t.Provider) <= 256 && !strings.ContainsAny(t.Provider, "\r\n/") && t.Account == "" && t.Group == 0) || (t.Source == "" && t.Provider == "" && t.Account != "" && t.Group > 0))
+	return fingerprintModel(t.Model) && t.validScope()
+}
+func (t fingerprintTarget) validScope() bool {
+	return t.Model != "" && len(t.Model) <= 128 && ((t.Source != "" && t.Provider != "" && len(t.Provider) <= 256 && !strings.ContainsAny(t.Provider, "\r\n/") && t.Account == "" && t.Group == 0) || (t.Source == "" && t.Provider == "" && t.Account != "" && t.Group > 0))
 }
 
 type fingerprintDB interface {
@@ -100,12 +105,8 @@ func (s *Service) modelFingerprints(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "模型指纹记录读取失败", 503)
 		return
 	}
-	supported := make([]string, 0, len(fingerprintModels))
-	for model := range fingerprintModels {
-		supported = append(supported, model)
-	}
-	sort.Strings(supported)
-	writeJSON(w, 200, map[string]any{"data": data, "supported_models": supported})
+	catalog := currentFingerprintCatalog()
+	writeJSON(w, 200, map[string]any{"data": data, "supported_models": catalog.names, "reference_commit": catalog.commit})
 }
 func (s *Service) queueModelFingerprints(w http.ResponseWriter, r *http.Request) {
 	var in struct {
@@ -126,7 +127,7 @@ func (s *Service) queueModelFingerprints(w http.ResponseWriter, r *http.Request)
 	}
 	defer tx.Rollback()
 	for _, t := range in.Targets {
-		if !t.valid() {
+		if !t.validScope() || (r.Method != "DELETE" && !fingerprintModel(t.Model)) {
 			http.Error(w, "检测目标无效或模型未接入指纹参考库", 400)
 			return
 		}
@@ -174,12 +175,13 @@ func (s *Service) prepareFingerprint(ctx context.Context, t fingerprintTarget) (
 	if !t.valid() {
 		return plan, errors.New("不支持的指纹检测模型")
 	}
-	protocol := fingerprintProtocols[t.Model]
+	catalog := currentFingerprintCatalog()
+	protocol := catalog.protocols[t.Model]
 	format := map[string]string{"responses": "responses", "gemini": "gemini", "chat": "openai"}[protocol]
 	if format == "" {
 		return plan, errors.New("模型未配置指纹采样协议")
 	}
-	config := map[string]any{"model": t.Model, "format": format}
+	config := map[string]any{"model": t.Model, "format": format, "catalog": catalog}
 	revision := ""
 	client := *subHTTP
 	client.Timeout = 250 * time.Second
@@ -248,7 +250,12 @@ func (s *Service) prepareFingerprint(ctx context.Context, t fingerprintTarget) (
 }
 
 func runFingerprintProcess(ctx context.Context, config map[string]any) (json.RawMessage, error) {
-	raw, err := sharedFingerprintWorker.detect(ctx, config)
+	process := &sharedFingerprintWorker
+	if catalog, _ := config["catalog"].(*fingerprintCatalog); catalog != nil {
+		process = catalog.process
+		delete(config, "catalog")
+	}
+	raw, err := process.detect(ctx, config)
 	if err != nil {
 		return nil, err
 	}
@@ -385,6 +392,7 @@ func runFingerprintViaTransportProgress(ctx context.Context, client *http.Client
 	go func() { _ = server.Serve(listener) }()
 	defer server.Close()
 	local := map[string]any{"model": model, "base_url": "http://" + listener.Addr().String(), "key": token, "format": config["format"]}
+	local["catalog"] = config["catalog"]
 	if len(resume) > 0 {
 		local["resume"] = resume
 	}

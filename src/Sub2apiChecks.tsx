@@ -1,6 +1,6 @@
 import { useSubSyncProgress, useSubSyncResultRefresh } from "./subSyncProgress";
 import type { SyncProgress } from "./subSyncProgress";
-import { fingerprintTargets, fingerprintLabels, fingerprintBusy, FINGERPRINT_MODELS, FINGERPRINT_BATCH_LIMIT, FingerprintCell, FingerprintPanel, fingerprintNote } from "./ModelFingerprints";
+import { fingerprintTargets, fingerprintLabels, fingerprintBusy, useModelFingerprints, FINGERPRINT_BATCH_LIMIT, FingerprintCell, FingerprintPanel, fingerprintNote } from "./ModelFingerprints";
 import { fingerprintKey, sharedFingerprintIndex } from "./fingerprintResults";
 import { isCapabilityCheckModel, capabilityCheckScope } from "./sub2apiModels";
 import { CopyProbeCurl } from "./CopyProbeCurl";
@@ -629,6 +629,7 @@ function ManagementChannelDrawer({
   const checks = complete.data ? modelChecks(target) : row.checks;
   const selected = complete.data ? checks.find(check => check.model === row.selected?.model) : row.selected;
   const modelsPending = !!row.target.summary_model && !complete.data;
+  const { supportedModels } = useModelFingerprints();
   const current = selected || checks[0];
   const quality = groupQualityResult(target);
   const modelCount = checks.length;
@@ -659,7 +660,7 @@ function ManagementChannelDrawer({
             <span>{target.channel || target.platform}</span>
             {target.group_id > 0 && <span>· 分组 #{target.group_id}</span>}
           </Dialog.Description>
-          <FingerprintPanel targets={fingerprintTargets(row, selected ? [selected.model] : undefined)} revisions={configured ? Object.fromEntries(channelMembers(configured).map(m => [JSON.stringify([m.source_id,m.provider]),m.probe_fingerprint || ""])) : undefined}/>
+          <FingerprintPanel onlySupported targets={fingerprintTargets(row, selected ? [selected.model] : supportedModels)} revisions={configured ? Object.fromEntries(channelMembers(configured).map(m => [JSON.stringify([m.source_id,m.provider]),m.probe_fingerprint || ""])) : undefined}/>
           <div className="detail-channel-actions">
             <span className={`check-status ${target.state === "error" ? "fail" : "pass"}`}>
               {target.state === "error" ? <X size={15} /> : <Check size={15} />}
@@ -902,7 +903,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   // only define the batch when no individual model is selected.
   const modelsToCheck = model ? [model] : detectionModels;
   const fingerprintModelsToCheck = modelsToCheck.filter(name =>
-    FINGERPRINT_MODELS.includes(name) && pageData?.context.fingerprint_models.includes(name),
+    pageData?.context.fingerprint_models.includes(name),
   );
   const allModelsSelected = detectionModels.length === availableModels.length;
   const currentPage=(displayedPage?.offset || 0)/25;

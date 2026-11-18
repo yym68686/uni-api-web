@@ -1,14 +1,14 @@
 # Model fingerprints
 
-Vendored from [Ikaleio/lm-detector](https://github.com/Ikaleio/lm-detector),
-commit `a7e9d3056e019827904dd50722c20b4a0c896738`, under the included MIT license.
-`manifest.json` records original source/data SHA-256 digests. Relative TypeScript
-imports have explicit `.ts` extensions for Node 24. Algorithms are unchanged;
-trailing source whitespace is normalized. The complete 69-class bank and upstream
-binary detector are gzip-compressed without changing their decompressed contents.
-The upstream `detector-codec.ts` loads the binary representation.
+Vendored from [Ikaleio/lm-detector](https://github.com/Ikaleio/lm-detector) under
+the included MIT license. `manifest.json` describes the bundled fallback data;
+`scorer-sources.json` pins the compatible upstream source digests, including the
+scoring correction from `33fb43f26670be0ed7817ab13e5c4c4731ccb76a`. Relative
+TypeScript imports have explicit `.ts` extensions for Node 24. The full bank
+and binary detector are gzip-compressed without changing their decoded contents.
 
-`models.json` is shared by the UI, Go API and Node scorer. It enables Astra/Sol
+`models.json` seeds the Go API and Node scorer; the UI reads model support from
+the API. The seed includes Astra/Sol
 (the merged class), Gemini 3.1 Pro (the 3.1 Pro Preview class), Gemini 3.8 Flash,
 Gemini 4 Argon, Gemini 4 Carbon and DeepSeek V4.1 Flash 1017. Three independent
 challenges and strict complete-output validation are required. Low effort is used
@@ -57,6 +57,12 @@ explicitly. Probabilities describe the closed reference set and are independent
 of legacy reasoning-quality history.
 
 Offline verification: `node --test fingerprint/runner.test.mjs` (from analytics-api).
+
+The scheduled GitHub publisher can add exact models after it confirms a supported
+wire contract in upstream collection metadata and passes offline scoring and
+request-contract tests. It signs data only. The analytics API validates the
+signature, checks the reference with its checked-in worker, and saves the last
+known good generation in Postgres. See [catalog operations](../../docs/model-fingerprints.md#catalog-operations).
 
 DeepSeek 1017 uses the existing `deepseek-v4.1-flash-1017` class in this pinned
 69-class bank; no scorer, detector, calibration or reference manifest update is

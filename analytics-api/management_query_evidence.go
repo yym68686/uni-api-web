@@ -23,7 +23,7 @@ type managementQueryRoutes struct {
 	LegacyMigration    bool           `json:"legacy_engine_migration,omitempty"`
 }
 
-var managementFingerprintModels = func() []string {
+func seedFingerprintModelOrder() []string {
 	decoder := json.NewDecoder(bytes.NewReader(fingerprintModelsJSON))
 	if _, err := decoder.Token(); err != nil {
 		panic(err)
@@ -41,7 +41,7 @@ var managementFingerprintModels = func() []string {
 		models = append(models, name.(string))
 	}
 	return models
-}()
+}
 
 func managementFingerprintKey(t fingerprintTarget) string {
 	return mustJSON([]any{t.Source, t.Provider, t.Account, t.Group, t.Model})
@@ -174,13 +174,14 @@ func managementRowFingerprints(row managementQueryRow, index map[string]manageme
 }
 
 func managementRowFingerprintEntries(row managementQueryRow, index map[string]managementFingerprintRecord, model string) []managementFingerprintEntry {
-	models := managementFingerprintModels
+	catalog := currentFingerprintCatalog()
+	models := catalog.names
 	if model != "" {
 		models = []string{model}
 	}
 	entries := []managementFingerprintEntry{}
 	for _, name := range models {
-		if !fingerprintModel(name) {
+		if _, ok := catalog.models[name]; !ok {
 			continue
 		}
 		target := fingerprintTarget{Model: name}

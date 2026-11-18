@@ -6,8 +6,9 @@ import { sharedFingerprintIndex } from "../src/fingerprintResults";
 import {
   rowFingerprints,
   fingerprintStatus,
-  FINGERPRINT_MODELS,
 } from "../src/ModelFingerprints";
+import fingerprintModels from "../analytics-api/fingerprint/models.json";
+const FINGERPRINT_MODELS = Object.keys(fingerprintModels);
 import { SUB_MODELS } from "../src/sub2apiModels";
 import type { SubFilters } from "../src/sub2apiPreferences";
 import type {
@@ -130,7 +131,7 @@ export function installManagementPageFixture(owner = "account") {
         prices,
         fingerprintReady: true,
         fingerprints: (row) =>
-          rowFingerprints(row, index, filters.model).map((x) =>
+          rowFingerprints(row, index, filters.model, FINGERPRINT_MODELS).map((x) =>
             fingerprintStatus(x.record),
           ),
         joined: (row) => managementJoinState(row, i, routes),
@@ -229,7 +230,7 @@ export function installManagementPageFixture(owner = "account") {
           fingerprints: Object.fromEntries(
             page.map((row) => [
               row.id,
-              rowFingerprints(row, index, filters.model),
+              rowFingerprints(row, index, filters.model, FINGERPRINT_MODELS),
             ]),
           ),
           fingerprint_models: FINGERPRINT_MODELS,

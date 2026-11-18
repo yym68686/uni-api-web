@@ -294,6 +294,10 @@ func (s *Service) runClaimedFingerprint(parent context.Context, t fingerprintTar
 			}
 		}
 	}()
+	// A rotation never interrupts a paid round or mixes its samples with a
+	// different catalog. Admission waits until a staged rotation completes.
+	fingerprintCatalogGate.RLock()
+	defer fingerprintCatalogGate.RUnlock()
 	plan, err := s.prepareFingerprint(ctx, t)
 	var result json.RawMessage
 	if err == nil {

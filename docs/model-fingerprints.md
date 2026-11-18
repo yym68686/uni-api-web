@@ -1,7 +1,8 @@
 # Model fingerprints
 
-Channel management adds a **模型指纹** column and filter. The supported request
-models are listed in the shared `fingerprint/models.json` mapping:
+Channel management adds a **模型指纹** column and filter. The live API advertises
+supported request models in `GET /v1/model-fingerprints` (`supported_models`).
+The bundled catalog includes these references:
 
 | Requested model | Upstream reference class |
 | --- | --- |
@@ -12,13 +13,13 @@ models are listed in the shared `fingerprint/models.json` mapping:
 | `gemini-4-carbon` | `gemini-4-carbon` |
 | `deepseek-v4.1-flash-1017` | `deepseek-v4.1-flash-1017` |
 
-These Gemini models are the intersection of the built-in console catalog and
-lm-detector's reference classes. Scoring retains all 69 classes from upstream
-commit `a7e9d3056e019827904dd50722c20b4a0c896738`; unsupported models are not probed.
+Scoring uses the full lm-detector bank for the active generation; unsupported
+models are not probed. The first signed catalog includes separate `gpt-6.2-sol`
+and `gpt-6.2-astra` classes, both using Responses with low effort.
 DeepSeek 1017 uses its existing independent low-effort class, not the older
 `deepseek-v4.1-flash` class or a mutable `deepseek-flash` alias. Its model/price
 catalog entry already exists; enabling fingerprints does not edit prices, model
-mappings or gateway configuration. No reference bank or scorer upgrade is needed.
+mappings or gateway configuration.
 
 - **匹配**: the highest-ranked class is the requested model's reference class.
 - **不匹配**: another reference class ranks first.
@@ -52,17 +53,17 @@ and verified account/group identity from the imports endpoint; their current pro
 fingerprint comes from the effective catalog, including temporary channels. Result timestamps include milliseconds so a newer error
 can replace an older success consistently.
 
-The result feed advertises `supported_models`. During rolling updates, a new
-frontend paired with an old backend disables unsupported Gemini/DeepSeek actions
-and shows “指纹检测服务待更新”; periodic reads and an explicit recheck enable them
-once the backend advertises support. Existing GPT actions remain available.
+During rolling updates, the frontend disables actions the backend does not
+advertise and shows “指纹检测服务待更新” in details. Periodic reads and an explicit
+recheck pick up newly advertised models without a frontend release. The legacy
+GPT fallback remains available when an older response omits `supported_models`.
 
 Each fingerprint round collects three separately generated challenges through the
 channel's own credentials, with the reference's reasoning setting: low for
 Astra/Sol, Argon, Carbon and DeepSeek 1017, provider default for Gemini 3.1 Pro and
 3.8 Flash. Requests are sequential, not retried on failure, and require complete
-output. Group and configured-channel probes select the wire contract from
-`fingerprint/protocols.json`, independently of ordinary availability checks:
+output. Group and configured-channel probes select the active catalog's wire
+contract, independently of ordinary availability checks:
 
 | Model | Probe endpoint | Sampling field |
 | --- | --- | --- |
@@ -130,8 +131,8 @@ transport only; challenge generation and ranking remain upstream code. No tokeni
 probes or automatic paid backfill are enabled. Existing stored results keep their
 original reference commit until the user runs a new check.
 
-The backend image includes Node 24 and the pinned MIT-licensed upstream code/data
-under `analytics-api/fingerprint`. Runtime downloads are unnecessary. Go retains
+The backend image includes Node 24 and the pinned MIT-licensed scorer and fallback
+data under `analytics-api/fingerprint`. Go retains
 upstream credentials and the existing network restrictions; an authenticated,
 short-lived loopback bridge permits only the missing requests (at most three) for the fixed model and
 endpoint. Node receives only the temporary local bridge token. Logs/results never
@@ -150,3 +151,27 @@ overlap across different sites, rolling-release fencing, cancellation fencing,
 interrupted-job handling, key rotation,
 automatic batch integration and legacy quality independence. Browser verification
 uses isolated fixtures; no production model probes are necessary for deployment.
+
+## Catalog operations
+
+The **Publish fingerprint catalog** GitHub workflow checks upstream every four
+hours. New exact IDs need consistent collection metadata for a supported request
+format and effort, and three complete samples that pass offline scoring plus
+transport-contract tests. The workflow never guesses a protocol or silently
+changes one for an enabled model. A source/scorer change, incomplete metadata, or
+failed validation leaves the last known good version in use. Updating the scorer
+or adding a supported request format still requires a reviewed code change.
+
+The analytics service checks the signed data branch `fingerprint-data-v1` at
+startup and every 15 minutes (`FINGERPRINT_CATALOG_SYNC=1`). `/healthz` reports
+`fingerprint_reference_commit`, `fingerprint_catalog_generation`, and
+`fingerprint_model_count`. No downloaded code is executed, and a catalog refresh does
+not enqueue or replay requests. Current rounds finish on their original reference;
+an explicit continuation resets partial samples if the reference changed.
+
+To restore an earlier signed catalog independently of a code release, dispatch
+the publisher with the exact data-branch commit in `restore_revision`. This
+publishes those data with a new generation number and holds automatic publication.
+After investigating, dispatch with `resume=true` to resume updates. If GitHub is
+unavailable, the analytics service uses the saved Postgres catalog or the bundled
+fallback at startup.

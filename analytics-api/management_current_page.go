@@ -58,7 +58,7 @@ func (c *managementComputedPages) get(key string) (managementComputedPage, bool)
 }
 
 func managementComputedKey(owner string, f managementQueryFilters, cursor string) string {
-	return tokenHash(owner + "\x00" + mustJSON(f) + "\x00" + cursor)
+	return tokenHash(owner + "\x00" + mustJSON(f) + "\x00" + cursor + "\x00" + currentFingerprintCatalog().referenceKey)
 }
 
 func (s *Service) managementReadProof(ctx context.Context, db controlQueryDB, owner string) (managementFreshProof, time.Time, error) {
