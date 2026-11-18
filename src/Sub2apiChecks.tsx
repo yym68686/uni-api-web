@@ -76,6 +76,7 @@ import type { ModelPrice } from "./types";
 import { BillingRate } from "./BillingRate";
 import type { ObservedRate } from "./billingRates";
 import { TableColumns, useTableColumns } from "./TableColumns";
+import { managementColumnsStorageKey, managementOverviewForColumns } from "./managementOverview";
 
 const managementColumnChoices = [
   {id: "model", label: "模型"},
@@ -141,6 +142,7 @@ export interface SubTarget {
   rate_coefficient?: number;
   summary_model?: string;
   list_summary?: boolean;
+  list_overview?: ReturnType<typeof availabilityCounts> & { total: number; checked_at: number };
   receipt_model?: string;
   observed_rates?: Record<string, ObservedRate>;
   details_omitted?: boolean;
@@ -296,9 +298,10 @@ function AvailabilityStatus({ check }: { check: SubModelCheck }) {
   );
 }
 
-function GroupAvailability({ checks, scope }: { checks: SubModelCheck[]; scope?: string }) {
-  if (!checks.length) return <span className="muted">未检测</span>;
-  const counts = availabilityCounts(checks);
+function GroupAvailability({ checks, scope, overview }: { checks: SubModelCheck[]; scope?: string; overview?: SubTarget["list_overview"] }) {
+  const total = overview?.total ?? checks.length;
+  if (!total) return <span className="muted">未检测</span>;
+  const counts = overview ?? availabilityCounts(checks);
   const details = [
     scope,
     counts.warning && `${counts.warning} 个结束异常`,
@@ -309,7 +312,7 @@ function GroupAvailability({ checks, scope }: { checks: SubModelCheck[]; scope?:
   ].filter(Boolean).join(" · ");
   const summary = <span className={`check-status ${counts.success ? "pass" : "inconclusive"}`}>
     {counts.pending > 0 && <Spinner small />}
-    {counts.success}/{checks.length} 可用
+    {counts.success}/{total} 可用
   </span>;
   return details ? <Tip text={details}>{summary}</Tip> : summary;
 }
@@ -841,9 +844,9 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   useEffect(()=>onPositionChange?.({owner:user,filter:filterKey,cursor}),[user,filterKey,cursor,onPositionChange]);
   const navigation = useRef<ManagementNavigation | undefined>(undefined);
   const [managementPreset, setManagementPreset] = useState<keyof typeof managementPresets>("operations");
-  const [customColumns, setCustomColumns] = useTableColumns("uni-console:management-columns:v1", managementColumnChoices);
+  const [customColumns, setCustomColumns] = useTableColumns(managementColumnsStorageKey, managementColumnChoices);
   const activeColumns: readonly ManagementColumn[] = customColumns ?? managementPresets[managementPreset];
-  const pageQuery=useManagementPage(user,filters,cursor,navigation,activeColumns.includes("price"));
+  const pageQuery=useManagementPage(user,filters,cursor,navigation,activeColumns.includes("price"),managementOverviewForColumns(filters.model,activeColumns));
   const navigatePage = (action: "previous" | "next", token?: string) => {
     if (!token) return;
     navigation.current = { owner: user, filter: JSON.stringify(filters), cursor: token, action, started: performance.now() };
@@ -1797,7 +1800,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                       const scopedModels = pending(currentAccount.state) && currentAccount.job_kind === "sync" ? currentAccount.sync_models : undefined;
                       const checkByModel = new Map(checks.map(c=>[c.model,c]));
                       const overviewChecks = scopedModels?.length ? [...new Set(scopedModels)].map(model => checkByModel.get(model) || {model,state:"idle",message:"",result:null}) : checks;
-                      const scopeNote = scopedModels?.length ? `本次已选 ${overviewChecks.length} 个模型 · 全部 ${checks.length} 个模型记录可在详情查看` : undefined;
+                      const scopeNote = scopedModels?.length && checks.length ? `本次已选 ${overviewChecks.length} 个模型 · 全部 ${checks.length} 个模型记录可在详情查看` : undefined;
                       const liveGroup = progressByAccount.get(account.id)?.progress?.groups.find(g=>g.group_id===t.group_id);
                       const openDrawer = () => { if (pageData) setManagementDetail(managementRow); };
                       return (
@@ -1828,7 +1831,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                         {managementColumns.map(id => {
                           const content = () => {
                             switch (id) {
-                              case "model": return <span className="mono management-table-label" title={tableModel}>{tableModel || (checks.length ? `${checks.length} 个模型` : "—")}</span>;
+                              case "model": return <span className="mono management-table-label" title={tableModel}>{tableModel || ((t.list_overview?.total ?? checks.length) ? `${t.list_overview?.total ?? checks.length} 个模型` : "—")}</span>;
                               case "platform": return <>
                                 <span title={t.platform}>{t.platform}</span>
                                 <small className="check-source">{t.key_id ? `key #${t.key_id}` : configured ? "配置密钥" : "尚未创建"}</small>
@@ -1843,7 +1846,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                             liveGroup && scopedModels?.length ?
                               <Tip text={`${liveGroup.running} 检测中 · ${liveGroup.queued} 排队${liveGroup.interrupted ? ` · ${liveGroup.interrupted} 已中断` : ""}`}>
                                 <span className="check-status">{liveGroup.completed}/{liveGroup.total} 完成</span>
-                              </Tip> : <GroupAvailability checks={overviewChecks} scope={scopeNote} />
+                              </Tip> : <GroupAvailability checks={overviewChecks} scope={scopeNote} overview={scopeNote ? undefined : t.list_overview} />
                           );
                               case "latency": return <ResponseLatency
                             protocol={selected?.result?.availability.protocol}
@@ -1880,7 +1883,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                             configured={configured}
                           />;
                               case "checked": {
-                                const at = selected ? selected.result?.checked_at || 0 : Math.max(0, ...checks.map(c => c.result?.checked_at || 0));
+                                const at = selected ? selected.result?.checked_at || 0 : t.list_overview?.checked_at ?? Math.max(0, ...checks.map(c => c.result?.checked_at || 0));
                                 return <span className="mono" title={selected && pending(selected.state) && selected.result ? "上次检测结果" : undefined}>{at ? dateTime(at) : "—"}</span>;
                               }
                               case "batch": return <button type="button" role="switch" aria-label={`${account.name} ${t.name} 的批量检测开关`}

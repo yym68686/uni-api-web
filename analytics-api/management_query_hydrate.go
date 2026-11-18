@@ -36,7 +36,11 @@ func (s *Service) hydrateManagementPageFrom(ctx context.Context, db controlQuery
 	groups := map[string]bool{}
 	fullGroups := map[string]bool{}
 	var projectedGroups map[string]bool
+	overview := managementOverviewView(ctx) && filters.Model == ""
 	for _, row := range page.Rows {
+		if row.Configured != nil || row.Account.JobKind == "sync" && managementPending(row.Account.State) {
+			overview = false
+		}
 		if row.Account.ID != "" {
 			id := qualityGroupID(row.Account.ID, row.Target.GroupID)
 			groups[id] = true
@@ -65,6 +69,12 @@ func (s *Service) hydrateManagementPageFrom(ctx context.Context, db controlQuery
 		}
 	}
 	if len(wanted) > 0 {
+		for _, a := range subset {
+			if a.JobKind == "sync" && managementPending(a.State) {
+				overview = false
+				break
+			}
+		}
 		stages := newManagementReadTimeline(ctx, "hydrate_models")
 		defer stages.finish()
 		index := map[string]*subTarget{}
@@ -110,6 +120,15 @@ func (s *Service) hydrateManagementPageFrom(ctx context.Context, db controlQuery
 		projectedGroups = map[string]bool{}
 		for start := 0; start < len(wanted); start += modelBatchGroups {
 			batch := wanted[start:min(start+modelBatchGroups, len(wanted))]
+			if overview {
+				ok, err := readManagementPageOverview(ctx, db, owner, batch, index)
+				if err != nil {
+					return err
+				}
+				if ok {
+					continue
+				}
+			}
 			projected, err := readManagementDisplayModelStream(ctx, db, owner, batch, fullGroups, filters.Model, consume)
 			if err != nil {
 				return err

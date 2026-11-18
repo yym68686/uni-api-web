@@ -178,10 +178,14 @@ func (s *Service) managementQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
+	listView := r.Header.Get(managementListViewHeader)
 	if selection == "" && r.Header.Get("Accept") == managementPageV3MediaType &&
-		r.Header.Get(managementListViewHeader) == managementListViewV1 && !values.Has("observe_receipt_plan") && !values.Has("observe_model_read") {
+		(listView == managementListViewV1 || listView == managementOverviewV1 && filters.Model == "") && !values.Has("observe_receipt_plan") && !values.Has("observe_model_read") {
 		ctx = context.WithValue(ctx, managementListViewKey{}, true)
 		ctx = context.WithValue(ctx, managementProofMissesKey{}, &managementProofMisses{})
+		if listView == managementOverviewV1 {
+			ctx = context.WithValue(ctx, managementOverviewKey{}, true)
+		}
 	}
 	if values.Get("receipt_view") == "selected" {
 		ctx = context.WithValue(ctx, managementSelectedReceiptsKey{}, true)

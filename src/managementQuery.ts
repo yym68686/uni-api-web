@@ -71,6 +71,7 @@ declare global {
         startedAt: number;
         controller: AbortController;
         result: Promise<ManagementPage>;
+        overview?: boolean;
       }
     | undefined;
 }
@@ -140,13 +141,14 @@ export async function readManagementPage(
   owner?: string,
   trigger: ManagementReadTrigger = "unspecified",
   includePrices = false,
+  overview = false,
 ): Promise<ManagementPage> {
   if (owner) {
     const bootstrap = globalThis.__uniManagementBootstrap;
     delete globalThis.__uniManagementBootstrap;
     if (bootstrap) {
       if (
-        !cursor && !includePrices &&
+        !cursor && !includePrices && Boolean(bootstrap.overview) === overview &&
         bootstrap.owner === owner &&
         bootstrap.filters === JSON.stringify(filters) &&
         Date.now() - bootstrap.startedAt < 10_000
@@ -173,7 +175,7 @@ export async function readManagementPage(
     cache: "no-cache",
     headers: {
       Accept: managementPageMediaType,
-      ...(includePrices ? {} : { "X-Console-Management-View": "list-v1" }),
+      ...(includePrices ? {} : { "X-Console-Management-View": overview ? "overview-v1" : "list-v1" }),
       "X-Console-Current-Validation": "1",
       "X-Console-Read-Trigger": managementReadTrigger(trigger),
     },
@@ -251,6 +253,7 @@ export function useManagementPage(
   cursor = "",
   navigation?: RefObject<ManagementNavigation | undefined>,
   includePrices = false,
+  overview = false,
 ) {
   const client = useQueryClient();
   const triggers = useRef<ReturnType<typeof createManagementReadTriggers> | undefined>(undefined);
@@ -265,13 +268,13 @@ export function useManagementPage(
       window.removeEventListener("uni-console-control-write", refresh);
   }, [client, owner]);
   const query = useQuery({
-    queryKey: includePrices ? ["management-query", owner, filters, cursor, "prices"] : ["management-query", owner, filters, cursor],
+    queryKey: ["management-query", owner, filters, cursor, ...(includePrices ? ["prices"] : overview ? ["overview"] : [])],
     queryFn: async ({ signal }) => {
       const filter = JSON.stringify(filters);
       const position = navigation?.current;
       const matches = position?.owner === owner && position.filter === filter && position.cursor === cursor;
       if (matches && navigation) navigation.current = undefined;
-      const page = await readManagementPage(filters, cursor, signal, owner, triggers.current!.next(owner, filter, cursor), includePrices);
+      const page = await readManagementPage(filters, cursor, signal, owner, triggers.current!.next(owner, filter, cursor), includePrices, overview);
       const timing = managementReadTimings.get(page);
       if (timing && matches && position.started <= timing.started) {
         timing.navigation = { action: position.action, started: position.started };

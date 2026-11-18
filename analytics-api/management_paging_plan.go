@@ -319,7 +319,7 @@ func (s *Service) currentManagementPagingPage(ctx context.Context, owner string,
 		return managementPageResponse{}, false, err
 	}
 	if managementListView(ctx) {
-		managementListRows(&page)
+		managementListRows(&page, managementOverviewView(ctx))
 	}
 	if err = ctx.Err(); err != nil {
 		return managementPageResponse{}, false, err

@@ -195,7 +195,7 @@ func (s *Service) readManagementQuerySnapshotModeInternal(ctx context.Context, o
 	}
 	out.View = view
 	if !selection && !preview && hydrate && managementListView(ctx) {
-		managementListRows(&out.Page)
+		managementListRows(&out.Page, managementOverviewView(ctx))
 	}
 	return out, nil
 }

@@ -12,7 +12,24 @@ import { StartupScreen } from "./StartupScreen";
 import { clearSummaryCache } from "./summaryCache";
 import { loadConnection, saveConnection, clearConnection } from "./session";
 import type { Connection } from "./types";
-const Dashboard = lazy(() => import("./Dashboard"));
+// During a rolling deploy, an old entry may arrive just before its hashed
+// Dashboard asset is retired. Recover once, before any workspace can mount
+// or contain edits. Other lazy sections keep their explicit error boundary.
+const Dashboard = lazy(() => import("./Dashboard").catch((error: unknown) => {
+  const message = error instanceof Error ? error.message : "";
+  if (/dynamically imported module|importing a module script failed|error loading dynamically imported module/i.test(message)) {
+    try {
+      const key = "uni-console:dashboard-module-reload";
+      const now = Date.now();
+      if (now - Number(sessionStorage.getItem(key) || 0) >= 60_000) {
+        sessionStorage.setItem(key, String(now));
+        location.reload();
+        return new Promise<never>(() => {});
+      }
+    } catch { /* Still show the explicit recovery action. */ }
+  }
+  throw error;
+}));
 function AccountForm({ onConnect, shortSession }: { onConnect: () => void; shortSession: boolean }) {
   const [username, setUsername] = useState(""),
     [password, setPassword] = useState(""),

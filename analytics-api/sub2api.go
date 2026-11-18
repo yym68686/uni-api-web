@@ -27,6 +27,7 @@ type subTarget struct {
 	ReceiptModel    string                     `json:"receipt_model,omitempty"`
 	DetailsOmitted  bool                       `json:"details_omitted,omitempty"`
 	ListSummary     bool                       `json:"list_summary,omitempty"`
+	ListOverview    *managementOverview        `json:"list_overview,omitempty"`
 	CheckSourceID   string                     `json:"check_source_id,omitempty"`
 	ObservedRates   map[string]subObservedRate `json:"observed_rates,omitempty"`
 	ToolUse         *subCapabilityResult       `json:"tool_use,omitempty"`

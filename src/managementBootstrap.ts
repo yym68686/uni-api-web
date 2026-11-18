@@ -1,6 +1,7 @@
 import { loadSubFilters } from "./sub2apiPreferences";
 import { loadView } from "./preferences";
 import { readManagementPage } from "./managementQuery";
+import { managementBootstrapOverview } from "./managementOverview";
 import {
   managementOwnerHint,
   rememberManagementOwner,
@@ -12,17 +13,19 @@ import type { AccountSession } from "./accountSession";
 // result is displayed until live authentication and the response owner agree.
 function beginManagementRead(owner: string) {
   const filters = loadSubFilters(owner);
+  const overview = managementBootstrapOverview(filters.model);
   const previous = globalThis.__uniManagementBootstrap;
   if (
     previous &&
     previous.owner === owner &&
     previous.filters === JSON.stringify(filters) &&
+    Boolean(previous.overview) === overview &&
     Date.now() - previous.startedAt < 10_000
   )
     return;
   const controller = new AbortController();
   previous?.controller.abort();
-  const result = readManagementPage(filters, "", controller.signal, undefined, "mount");
+  const result = readManagementPage(filters, "", controller.signal, undefined, "mount", false, overview);
   void result.catch(() => undefined);
   globalThis.__uniManagementBootstrap = {
     owner,
@@ -30,6 +33,7 @@ function beginManagementRead(owner: string) {
     startedAt: Date.now(),
     controller,
     result,
+    overview,
   };
 }
 

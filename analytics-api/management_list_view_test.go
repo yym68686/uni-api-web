@@ -12,6 +12,53 @@ import (
 	"testing"
 )
 
+func TestManagementOverviewMatchesListAcrossPages(t *testing.T) {
+	s := managementHydrationFixture(t)
+	prepareManagementRevisionsForTest(t, s.control.db)
+	if _, err := s.control.db.Exec(`UPDATE console_sub_models SET state='running' WHERE group_id=25 AND model='gpt-5.5';
+		UPDATE console_sub_models SET result=jsonb_set(result,'{availability,terminal_status}','"missing"') WHERE group_id=51 AND model='gpt-5.5';
+		UPDATE console_sub_models SET state='interrupted' WHERE group_id=61 AND model='extra-model'`); err != nil {
+		t.Fatal(err)
+	}
+	fullCtx := context.WithValue(context.Background(), managementListViewKey{}, true)
+	ctx := context.WithValue(fullCtx, managementOverviewKey{}, true)
+	c := ""
+	for offset := 0; offset < 61; offset += managementPageSize {
+		full, err := s.readManagementQuerySnapshot(fullCtx, "owner", managementResetFilters, c, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got managementQueryPage
+		if c == "" {
+			snapshot, err := s.readManagementQuerySnapshot(ctx, "owner", managementResetFilters, c, false)
+			if err != nil || !s.rememberManagementPagingPlanMode("owner", managementResetFilters, snapshot, true) {
+				t.Fatal("overview directory was not retained", err)
+			}
+			got = snapshot.Page
+		} else {
+			page, found, err := s.currentManagementPagingPage(ctx, "owner", managementResetFilters, c, false)
+			if err != nil || !found {
+				t.Fatal("current overview missed", err)
+			}
+			got = page.managementQueryPage
+		}
+		for i := range full.Page.Rows {
+			want := full.Page.Rows[i]
+			managementApplyOverview(&want)
+			row := got.Rows[i]
+			if row.ID != want.ID || mustJSON(row.Target.ListOverview) != mustJSON(want.Target.ListOverview) ||
+				mustJSON(row.Target.Models) != mustJSON(want.Target.Models) || len(row.Checks) != 0 {
+				t.Fatalf("overview changed row %d at offset %d", i, offset)
+			}
+		}
+		if len(got.Rows) == 0 || got.Offset != offset || got.Revision != full.Page.Revision ||
+			len(mustJSON(got)) >= len(mustJSON(full.Page))/2 {
+			t.Fatal("overview changed pagination or did not reduce wire size")
+		}
+		c = got.NextCursor
+	}
+}
+
 func TestManagementListViewAllPagesAndPriceContract(t *testing.T) {
 	s := managementHydrationFixture(t)
 	prepareManagementRevisionsForTest(t, s.control.db)
