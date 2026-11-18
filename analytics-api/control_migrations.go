@@ -97,6 +97,12 @@ var fingerprintPreferencesSQL string
 //go:embed migrations/0020_management_display_groups.sql
 var managementDisplayGroupsSQL string
 
+//go:embed migrations/0021_management_display_global_proof.sql
+var managementDisplayGlobalProofSQL string
+
+//go:embed migrations/0021_management_display_global_proof.tables
+var managementDisplayGlobalProofTables string
+
 var managementRevisionTables = []string{"console_sub_models", "console_management_model_signal", "console_sub_usage", "console_management_receipt_signal", "console_management_revision_state"}
 
 type controlMigration struct {
@@ -126,6 +132,7 @@ func controlMigrations() []controlMigration {
 		{"0017_managed_configuration", managedConfigurationSQL, []string{"console_sources", "console_managed_config_versions", "console_managed_config_operations", "console_managed_config_state"}},
 		{"0019_fingerprint_preferences", fingerprintPreferencesSQL, []string{"console_configured_checks", "console_fingerprint_preferences", "console_fingerprint_upstream_catalog"}},
 		{"0020_management_display_groups", managementDisplayGroupsSQL, []string{"console_management_display_epochs", "console_sub_models", "console_sub_model_summaries", "console_management_model_signal", "console_sub_usage", "console_management_receipt_signal"}},
+		{"0021_management_display_global_proof", managementDisplayGlobalProofSQL, strings.Fields(managementDisplayGlobalProofTables)},
 	}
 }
 

@@ -100,14 +100,27 @@ func TestManagementDisplayGroupsAllPagesSurviveProcessReplacement(t *testing.T) 
 	if _, err := s.control.db.Exec(`UPDATE console_sub_models SET state='queued' WHERE group_id=26 AND model='gpt-5.5'`); err != nil {
 		t.Fatal(err)
 	}
-	if !read("owner", 25, false) || read("owner", 26, false) {
-		t.Fatal("one changed group invalidated its neighbors or reused its prior model")
+	if read("owner", 25, false) || read("owner", 26, false) {
+		t.Fatal("a cache row survived a model revision change")
+	}
+	for last := (subBoundKey{AccountID: "a", GroupID: 24}); ; {
+		next, n, stored, err := sweeper.warmManagementDisplayGroups(ctx, "owner", last)
+		if err != nil || n == 0 || !stored {
+			t.Fatal("could not rewarm the current proof", n, stored, err)
+		}
+		if next.GroupID >= 27 {
+			break
+		}
+		last = next
+	}
+	if !read("owner", 25, false) || !read("owner", 27, false) {
+		t.Fatal("rewarmed summaries did not match the current proof")
 	}
 	if _, err := s.control.db.Exec(`UPDATE console_sub_usage SET result='{"input_price":9}' WHERE id='a-27-gpt-5.5'`); err != nil {
 		t.Fatal(err)
 	}
-	if !read("owner", 25, false) || read("owner", 27, false) {
-		t.Fatal("receipt mutation reused the changed group or lost unrelated groups")
+	if read("owner", 25, false) || read("owner", 27, false) {
+		t.Fatal("a cache row survived a receipt revision change")
 	}
 	compare("")
 
@@ -173,8 +186,8 @@ func TestManagementDisplayCrossGroupReceiptRetainsGlobalProof(t *testing.T) {
 		t.Fatal(err)
 	}
 	found, err := readManagementDisplayGroups(withManagementDisplayVersion(ctx, tx, "owner", p.DisplayVersion), tx, "owner", []subBoundKey{{AccountID: "a", GroupID: 1}, {AccountID: "a", GroupID: 3}})
-	if _, bad := found[qualityGroupID("a", 1)]; err != nil || bad || len(found) != 1 {
-		t.Fatal("cross-group change reused stale evidence or evicted an unrelated group", err)
+	if err != nil || len(found) != 0 {
+		t.Fatal("cross-group change reused stale evidence", err)
 	}
 }
 

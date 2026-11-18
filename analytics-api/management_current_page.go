@@ -130,8 +130,8 @@ func (s *Service) managementReadProof(ctx context.Context, db controlQueryDB, ow
 	proof.ExportStamp = tokenHash(mustJSON([]any{compact.revision, exportedEpoch, string(price), string(overrides)}))
 	if accounts := proof.Epochs["console_sub_accounts"]; accounts != "" {
 		proof.ReceiptStamp = tokenHash(mustJSON([]any{compact.receipts, accounts}))
-		if summaries := proof.Epochs["console_sub_model_summaries"]; summaries != "" {
-			proof.DisplayVersion = tokenHash(mustJSON([]string{"management-display-groups-v1", compact.revision, summaries, accounts}))
+		if summaries, usage := proof.Epochs["console_sub_model_summaries"], proof.Epochs["console_sub_usage"]; summaries != "" && usage != "" {
+			proof.DisplayVersion = tokenHash(mustJSON([]string{"management-display-groups-v2", compact.revision, summaries, accounts, usage}))
 		}
 	}
 	if until.Valid {

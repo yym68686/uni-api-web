@@ -167,3 +167,114 @@ func TestControlMigrationRollsBackSchemaAndLedgerTogether(t *testing.T) {
 		t.Fatal("failed migration left applied ledger record", err)
 	}
 }
+
+func TestManagementDisplayEpochDoesNotBlockConcurrentModelProgress(t *testing.T) {
+	db := migrationTestDB(t)
+	db.SetMaxOpenConns(6)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	if err := migrateControlSchema(ctx, db, controlMigrations()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO console_sub_accounts(id,owner,name,base,email,encrypted_auth)
+VALUES('epoch-lock','owner','fixture','https://fixture.test','fixture@example.com','')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO console_sub_targets(account_id,group_id,name,platform)
+VALUES('epoch-lock',1,'fixture','openai')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO console_sub_models(account_id,group_id,model,state)
+VALUES('epoch-lock',1,'first','queued'),('epoch-lock',1,'second','queued')`); err != nil {
+		t.Fatal(err)
+	}
+	first, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Rollback()
+	if _, err = first.ExecContext(ctx, `SELECT 1 FROM console_management_revision_state WHERE relation_name='console_sub_models' FOR UPDATE`); err != nil {
+		t.Fatal(err)
+	}
+	second, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Rollback()
+	var pid int
+	if err = second.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, updateErr := second.ExecContext(ctx, `UPDATE console_sub_models SET state='done',result='{"availability":{"status":"success"}}' WHERE account_id='epoch-lock' AND model='second'`)
+		if updateErr == nil {
+			updateErr = second.Commit()
+		}
+		done <- updateErr
+	}()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		var waiting bool
+		if err = db.QueryRowContext(ctx, `SELECT cardinality(pg_blocking_pids($1))>0`, pid).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+		select {
+		case err = <-done:
+			t.Fatalf("second writer did not wait on the existing revision lock: %v", err)
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("second writer never waited on the existing revision lock")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err = first.ExecContext(ctx, `UPDATE console_sub_models SET state='running' WHERE account_id='epoch-lock' AND model='first'`); err != nil {
+		t.Fatal("cache epoch blocked a concurrent model's progress", err)
+	}
+	if err = first.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err = <-done:
+		if err != nil {
+			t.Fatal("waiting writer did not resume after commit", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("waiting writer did not resume after commit", ctx.Err())
+	}
+}
+
+func TestManagementDisplayGlobalProofFencesLegacyCache(t *testing.T) {
+	db := migrationTestDB(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	migrations := controlMigrations()
+	// A rolling deployment can have a cache filled by the previous replica.
+	if err := migrateControlSchema(ctx, db, migrations[:len(migrations)-1]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO console_management_display_groups(owner_key,account_id,group_id,version,local_version,observed_at,raw_bytes,body)
+VALUES('owner','a',1,'global-before','summary-v1:::',now(),2,'x')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateControlSchema(ctx, db, migrations); err != nil {
+		t.Fatal(err)
+	}
+	var stale, normalized bool
+	if err := db.QueryRowContext(ctx, `SELECT local_version<>'summary-v1::'||(SELECT writer::text FROM console_management_display_epochs WHERE kind='reset' AND account_id='' AND group_id=0)
+FROM console_management_display_groups WHERE group_id=1`).Scan(&stale); err != nil || !stale {
+		t.Fatal("legacy per-group proof remained valid", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO console_management_display_groups(owner_key,account_id,group_id,version,local_version,observed_at,raw_bytes,body)
+VALUES('owner','a',2,'global-after','local-after',now(),2,'x')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT local_version='' AND version='global-after'
+FROM console_management_display_groups WHERE group_id=2`).Scan(&normalized); err != nil || !normalized {
+		t.Fatal("rolling-deploy writer was not fenced by its global proof", err)
+	}
+}

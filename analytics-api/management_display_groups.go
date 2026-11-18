@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"io"
 	"log"
-	"slices"
 	"sort"
 	"time"
 
@@ -22,12 +21,6 @@ const (
 	managementDisplayReadBatch   = 25
 	managementDisplayWarmBatch   = 8
 )
-
-const managementDisplayEpochJoins = `
- LEFT JOIN console_management_display_epochs m ON m.kind='model' AND m.account_id=w.account_id AND m.group_id=w.group_id
- LEFT JOIN console_management_display_epochs u ON u.kind='receipt' AND u.account_id=w.account_id AND u.group_id=w.group_id
- CROSS JOIN LATERAL (SELECT concat_ws(':','summary-v1',COALESCE(m.writer::text,''),COALESCE(u.writer::text,''),
- COALESCE((SELECT writer::text FROM console_management_display_epochs WHERE kind='reset' AND account_id='' AND group_id=0),'')) AS version) epoch`
 
 type managementDisplayContextKey struct{}
 
@@ -44,10 +37,9 @@ func withManagementDisplayVersion(ctx context.Context, tx *sql.Tx, owner, versio
 }
 
 type managementDisplayGroup struct {
-	bound        subBoundKey
-	localVersion string
-	size         int
-	body         []byte
+	bound subBoundKey
+	size  int
+	body  []byte
 }
 
 type managementDisplayPayload struct {
@@ -118,10 +110,10 @@ func readManagementDisplayGroups(ctx context.Context, db controlQueryDB, owner s
 		rows, err := db.QueryContext(ctx, `SELECT e.account_id,e.group_id,e.raw_bytes,e.body
  FROM unnest($3::text[],$4::bigint[]) AS w(account_id,group_id)
  JOIN console_management_display_groups e USING (account_id,group_id)
- JOIN console_sub_accounts a ON a.id=w.account_id`+managementDisplayEpochJoins+`
+ JOIN console_sub_accounts a ON a.id=w.account_id
  WHERE e.owner_key=$2 AND a.owner=$1
  AND (SELECT complete FROM console_management_projection_state WHERE singleton)
- AND (e.local_version=epoch.version OR (e.local_version='' AND e.version=$5))`, owner, tokenHash(owner), accounts, groups, scope.version)
+ AND e.local_version='' AND e.version=$5`, owner, tokenHash(owner), accounts, groups, scope.version)
 		if err != nil {
 			return nil, err
 		}
@@ -179,10 +171,8 @@ func (s *Service) storeManagementDisplayGroups(ctx context.Context, owner, versi
 	wanted := make([]subBoundKey, len(groups))
 	sizes := make([]int32, len(groups))
 	bodies := make([][]byte, len(groups))
-	locals := make([]string, len(groups))
 	for i, g := range groups {
 		wanted[i], sizes[i], bodies[i] = g.bound, int32(g.size), g.body
-		locals[i] = g.localVersion
 		add += int64(len(g.body))
 	}
 	accountIDs, groupIDs := managementDisplayIDs(wanted)
@@ -195,14 +185,13 @@ func (s *Service) storeManagementDisplayGroups(ctx context.Context, owner, versi
 	if err != nil || !room {
 		return false, err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO console_management_display_groups(owner_key,account_id,group_id,version,local_version,observed_at,raw_bytes,body)
- SELECT $1,w.account_id,w.group_id,$2,w.local_version,$3,w.raw_bytes,w.body
- FROM unnest($4::text[],$5::bigint[],$6::int[],$7::bytea[],$9::text[]) AS w(account_id,group_id,raw_bytes,body,local_version)
+	_, err = tx.ExecContext(ctx, `INSERT INTO console_management_display_groups(owner_key,account_id,group_id,version,observed_at,raw_bytes,body)
+ SELECT $1,w.account_id,w.group_id,$2,$3,w.raw_bytes,w.body
+ FROM unnest($4::text[],$5::bigint[],$6::int[],$7::bytea[]) AS w(account_id,group_id,raw_bytes,body)
  JOIN console_sub_accounts a ON a.id=w.account_id AND a.owner=$8
- JOIN console_sub_targets t ON t.account_id=w.account_id AND t.group_id=w.group_id`+managementDisplayEpochJoins+`
- WHERE w.local_version='' OR w.local_version=epoch.version
+ JOIN console_sub_targets t ON t.account_id=w.account_id AND t.group_id=w.group_id
  ON CONFLICT(owner_key,account_id,group_id) DO UPDATE SET version=EXCLUDED.version,local_version=EXCLUDED.local_version,observed_at=EXCLUDED.observed_at,raw_bytes=EXCLUDED.raw_bytes,body=EXCLUDED.body
- WHERE console_management_display_groups.observed_at <= EXCLUDED.observed_at`, tokenHash(owner), version, seenAt, accountIDs, groupIDs, sizes, bodies, owner, locals)
+ WHERE console_management_display_groups.observed_at <= EXCLUDED.observed_at`, tokenHash(owner), version, seenAt, accountIDs, groupIDs, sizes, bodies, owner)
 	if err != nil {
 		return false, err
 	}
@@ -230,28 +219,25 @@ func (s *Service) warmManagementDisplayGroups(ctx context.Context, owner string,
 			return err
 		}
 		version, seen = proof.DisplayVersion, now
-		rows, err := tx.QueryContext(ctx, `SELECT w.account_id,w.group_id,epoch.version FROM console_sub_targets w
+		rows, err := tx.QueryContext(ctx, `SELECT w.account_id,w.group_id FROM console_sub_targets w
  JOIN console_sub_accounts a ON a.id=w.account_id
- LEFT JOIN console_management_display_groups e ON e.owner_key=$2 AND e.account_id=w.account_id AND e.group_id=w.group_id`+managementDisplayEpochJoins+`
+ LEFT JOIN console_management_display_groups e ON e.owner_key=$2 AND e.account_id=w.account_id AND e.group_id=w.group_id
  WHERE a.owner=$1 AND (w.account_id,w.group_id)>($4,$5)
  AND (SELECT complete FROM console_management_projection_state WHERE singleton)
  AND (e.account_id IS NULL OR e.observed_at<transaction_timestamp()-interval '24 hours' OR NOT
- (e.local_version=epoch.version OR (e.local_version='' AND e.version=$3)))
+ (e.local_version='' AND e.version=$3))
  ORDER BY w.account_id,w.group_id LIMIT $6`, owner, tokenHash(owner), version, after.AccountID, after.GroupID, managementDisplayWarmBatch)
 		if err != nil {
 			return err
 		}
 		wanted := []subBoundKey{}
-		epochs := []string{}
 		for rows.Next() {
 			var key subBoundKey
-			var epoch string
-			if err := rows.Scan(&key.AccountID, &key.GroupID, &epoch); err != nil {
+			if err := rows.Scan(&key.AccountID, &key.GroupID); err != nil {
 				rows.Close()
 				return err
 			}
 			wanted = append(wanted, key)
-			epochs = append(epochs, epoch)
 		}
 		err = rows.Err()
 		rows.Close()
@@ -273,10 +259,6 @@ func (s *Service) warmManagementDisplayGroups(ctx context.Context, owner string,
 		if err != nil {
 			return err
 		}
-		local, err := managementDisplayLocalReceipts(child, tx, owner, subset)
-		if err != nil {
-			return err
-		}
 		if err = s.attachManagementPageSummaryUsageFrom(child, tx, owner, subset, nil); err != nil {
 			return err
 		}
@@ -285,9 +267,6 @@ func (s *Service) warmManagementDisplayGroups(ctx context.Context, owner string,
 			sort.Slice(models, func(a, b int) bool { return models[a].Model < models[b].Model })
 			normalizeManagementModels(models)
 			if pack, ok := packManagementDisplayGroup(g, models); ok {
-				if local[i] {
-					pack.localVersion = epochs[i]
-				}
 				compiled = append(compiled, pack)
 			}
 		}
@@ -298,60 +277,6 @@ func (s *Service) warmManagementDisplayGroups(ctx context.Context, owner string,
 	}
 	stored, err := s.storeManagementDisplayGroups(ctx, owner, version, seen, compiled)
 	return last, len(compiled), stored, err
-}
-
-// A missing, cross-group or inconsistent receipt keeps the broad proof.
-// In particular, a later insert elsewhere must invalidate a formerly absent ID
-// regardless of the source group epoch.
-func managementDisplayLocalReceipts(ctx context.Context, tx *sql.Tx, owner string, subset []subAccount) ([]bool, error) {
-	deps := make([]map[string][]*subProbe, len(subset))
-	requested := map[string]bool{}
-	for i := range subset {
-		deps[i] = subUsageProbes(subset[i : i+1])
-		for id := range deps[i] {
-			requested[id] = true
-		}
-	}
-	ids := make([]string, 0, len(requested))
-	for id := range requested {
-		ids = append(ids, id)
-	}
-	slices.Sort(ids)
-	owners := make(map[string]managementPageModelGroup, len(ids))
-	for start := 0; start < len(ids); start += 4096 {
-		rows, err := tx.QueryContext(ctx, `SELECT r.id,r.account_id,u.group_id FROM console_management_receipt_signal r
- JOIN console_sub_usage u ON u.id=r.id AND u.account_id=r.account_id
- JOIN console_sub_accounts a ON a.id=r.account_id WHERE a.owner=$1 AND r.valid AND r.id=ANY($2)`, owner, ids[start:min(start+4096, len(ids))])
-		if err != nil {
-			return nil, err
-		}
-		for rows.Next() {
-			var id string
-			var group managementPageModelGroup
-			if err := rows.Scan(&id, &group.account, &group.group); err != nil {
-				rows.Close()
-				return nil, err
-			}
-			owners[id] = group
-		}
-		err = rows.Err()
-		rows.Close()
-		if err != nil {
-			return nil, err
-		}
-	}
-	result := make([]bool, len(subset))
-	for i, probes := range deps {
-		result[i] = true
-		group := managementPageModelGroup{subset[i].ID, subset[i].Targets[0].GroupID}
-		for id := range probes {
-			if owners[id] != group {
-				result[i] = false
-				break
-			}
-		}
-	}
-	return result, ctx.Err()
 }
 
 func appendManagementDisplayModel(slots map[string]*subTarget, row managementPageModelRecord) error {
