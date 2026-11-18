@@ -62,6 +62,7 @@ function Curve({
   percentage?: boolean;
 }) {
   const [active, setActive] = useState<number | null>(null);
+  const [showTable, setShowTable] = useState(false);
   const known = points.filter((p) => series.some((s) => s.value(p) != null));
   const selected = known.find((p) => p.timestamp === active) || known.at(-1);
   const max = percentage
@@ -97,7 +98,15 @@ function Curve({
           <svg
             viewBox="0 0 420 174"
             role="group"
-            aria-label={`${title}曲线，聚焦数据点查看详情`}
+            tabIndex={0}
+            aria-label={`${title}曲线，使用左右方向键查看数据点`}
+            onKeyDown={event => {
+              const index = selected ? known.indexOf(selected) : 0;
+              const target = event.key === "ArrowLeft" ? index - 1 : event.key === "ArrowRight" ? index + 1 : event.key === "Home" ? 0 : event.key === "End" ? known.length - 1 : null;
+              if (target === null) return;
+              event.preventDefault();
+              setActive(known[Math.max(0, Math.min(target, known.length - 1))].timestamp);
+            }}
           >
             {[0, 0.5, 1].map((tick) => (
               <g key={tick}>
@@ -150,11 +159,9 @@ function Curve({
                 y="10"
                 width="8"
                 height="134"
-                tabIndex={0}
                 role="img"
                 aria-label={label(p)}
                 onMouseEnter={() => setActive(p.timestamp)}
-                onFocus={() => setActive(p.timestamp)}
                 onClick={() => setActive(p.timestamp)}
               >
                 <title>{label(p)}</title>
@@ -180,6 +187,22 @@ function Curve({
           )}
         </>
       )}
+      {points.length > 0 && <>
+        <button type="button" className="text-link" aria-expanded={showTable} onClick={() => setShowTable(value => !value)}>
+          {showTable ? "收起数据表" : "查看数据表"}
+        </button>
+        {showTable && <div className="table-scroll">
+          <table className="channel-table">
+            <caption>{title}分时数据</caption>
+            <thead><tr><th scope="col">时间段</th>{series.map(s => <th key={s.label} scope="col">{s.label}</th>)}<th scope="col">样本与覆盖</th></tr></thead>
+            <tbody>{points.map(p => <tr key={p.timestamp}>
+              <th scope="row">{date(p.timestamp)}–{date(p.bucket_end || p.timestamp)}</th>
+              {series.map(s => <td key={s.label}>{s.value(p) == null ? "未记录" : format(s.value(p))}</td>)}
+              <td>{detail(p)}{p.covered === false ? " · 覆盖不完整" : ""}</td>
+            </tr>)}</tbody>
+          </table>
+        </div>}
+      </>}
     </section>
   );
 }

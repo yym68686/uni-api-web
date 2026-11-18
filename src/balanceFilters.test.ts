@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { balanceBelowThreshold, rankBalanceProviders } from "./balanceFilters";
+import { balanceBelowThreshold, balanceThresholdState, rankBalanceProviders } from "./balanceFilters";
 import type { Balance, Channel } from "./types";
 
 const balance = (amount: number): Balance => ({
@@ -56,6 +56,13 @@ describe("balance filters", () => {
       { model: "gpt-6-sol", rank: 2 },
       { model: "gpt-5.5", rank: 1 },
     ]);
+  });
+
+  it("accepts a decimal threshold and separates unknown from non-matches", () => {
+    expect(balanceThresholdState(balance(14.24), "14.25")).toBe("below");
+    expect(balanceThresholdState(balance(14.25), "14.25")).toBe("above");
+    expect(balanceThresholdState({ ...balance(1), omitted_keys: 1 }, "14.25")).toBe("unknown");
+    expect(balanceThresholdState({ ...balance(1), keys: [{ position: 1, status: "ok", amount: 1, currency: "CNY" }] }, "14.25")).toBe("unknown");
   });
 
   it("limits a model to one top-N list across selected sources", () => {

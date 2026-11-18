@@ -102,10 +102,17 @@ it("saves explicit scope and parameters, pauses with revision, and displays audi
   expect(put.enabled).toBe(true);
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: /^调序\s*主来源/ }));
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "编辑 调序" }));
   expect(
     screen.getByRole("dialog", { name: "编辑自动化任务" }),
   ).toBeInTheDocument();
   expect(screen.getByLabelText("成功率最小样本")).toHaveValue(120);
+  await user.type(screen.getByLabelText("任务名称"), "改动");
+  await user.keyboard("{Escape}");
+  expect(screen.getByRole("dialog")).toBeInTheDocument();
+  expect(screen.getByLabelText("任务名称")).toHaveValue("调序改动");
+  await user.click(screen.getByRole("button", {name:"放弃更改"}));
   await user.keyboard("{Escape}");
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });

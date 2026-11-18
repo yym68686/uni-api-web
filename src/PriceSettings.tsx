@@ -1,6 +1,6 @@
 import { TableLoading } from "./PageLoading";
-import { Fragment, useEffect, useState } from "react";
-import type { ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode, Dispatch, SetStateAction } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import {
   Check,
@@ -22,6 +22,10 @@ import {
   promptPriceTier,
   priceForPrompt,
 } from "./modelPrices";
+import "./priceSettings.css";
+
+type PriceEdit = { draft: ModelPrice; baseline: ModelPrice };
+export type PriceDrafts = Map<string, PriceEdit>;
 
 const fields = [
   ["input", "输入"],
@@ -30,9 +34,12 @@ const fields = [
   ["cache_write", "缓存写入 · 5 分钟"],
   ["cache_write_1h", "缓存写入 · 1 小时"],
 ] as const;
+const references = new Map(MODEL_PRICE_CATALOG.map(entry => [entry.model, entry] as const));
+const MAX_PRICE = 1_000_000_000;
+const MAX_SALE = 1_000_000;
 
 function PriceDetails({ model }: { model: string }) {
-  const reference = MODEL_PRICE_CATALOG.find((entry) => entry.model === model)!;
+  const reference = references.get(model)!;
   return (
     <Dialog.Root>
       <Dialog.Trigger asChild>
@@ -86,27 +93,40 @@ function PriceRow({
   price,
   connection,
   onSaved,
+  hidden,
+  readOnly,
+  edit,
+  onEdit,
+  pending,
+  onPending,
 }: {
   price: ModelPrice;
   connection: Connection;
-  onSaved: () => void;
+  onSaved: (price: ModelPrice) => void;
+  hidden?: boolean;
+  readOnly?: boolean;
+  edit?: PriceEdit;
+  onEdit: (model: string, edit?: PriceEdit) => void;
+  pending: boolean;
+  onPending: (model: string, pending: boolean) => void;
 }) {
-  const reference = MODEL_PRICE_CATALOG.find(
-    (entry) => entry.model === price.model,
-  )!;
-  const [draft, setDraft] = useState(price);
-  const [dirty, setDirty] = useState(false);
-  const [pending, setPending] = useState(false);
+  const reference = references.get(price.model)!;
+  const [receipt, setReceipt] = useState<{ value: ModelPrice; against: ModelPrice }>();
+  const current = receipt?.against === price ? receipt.value : price;
+  const draft = edit?.draft || current;
+  const dirty = !!edit;
   const [error, setError] = useState("");
-  const [saved, setSaved] = useState(false);
-  useEffect(() => {
-    if (!dirty) setDraft(price);
-  }, [price, dirty]);
+  const saving = useRef(false);
+  const saved = !!receipt && !dirty;
+  const conflicted = !!edit && JSON.stringify(edit.baseline) !== JSON.stringify(current);
   const change = (patch: Partial<ModelPrice>) => {
-    setDraft((value) => ({ ...value, ...patch }));
-    setDirty(true);
-    setSaved(false);
+    onEdit(price.model, {draft:{...draft,...patch},baseline:edit?.baseline || current});
+    setError("");
   };
+  function discard() {
+    onEdit(price.model);
+    setError("");
+  }
   const visibleFields = fields.filter(
     ([field]) =>
       reference.cache_write_kind === "ttl" ||
@@ -121,11 +141,15 @@ function PriceRow({
   const highPrice = tier ? priceForPrompt(draft, tier.threshold_tokens + 1) : undefined;
   const tierLimit = tier ? `${tier.threshold_tokens / 1000}k` : "";
   const unpriced = !draft.verified && !reference.verified && !dirty;
+  const canAdopt = !dirty && current.source !== "manual" && reference.verified;
+  const invalid = visibleFields.some(([field]) => !Number.isFinite(draft[field]) || draft[field] < 0 || draft[field] > MAX_PRICE) ||
+    !Number.isFinite(salePercent(draft)) || salePercent(draft) < 0 || salePercent(draft) > MAX_SALE;
+  const blocked = !!readOnly || pending || invalid || conflicted || unpriced || (!dirty && !canAdopt);
   async function save() {
-    if (pending) return;
-    setPending(true);
+    if (saving.current || blocked) return;
+    saving.current = true;
+    onPending(price.model, true);
     setError("");
-    setSaved(false);
     try {
       const next = {
         ...draft,
@@ -163,20 +187,28 @@ function PriceRow({
       )) {
         throw new Error("服务尚未确认 100k 分档规则，请等待后台更新后重新保存。");
       }
-      setDraft(next);
-      setSaved(true);
-      onSaved();
+      if (result.price.model !== next.model ||
+          fields.some(([field]) => result.price[field] !== next[field]) ||
+          chargesCacheWrite(result.price) !== next.charge_cache_write ||
+          !!result.price.verified !== !!next.verified) {
+        throw new Error("服务返回的价格与提交内容不一致，请刷新核对。");
+      }
+      setReceipt({value: result.price, against: price});
+      discard();
+      onSaved(result.price);
     } catch (error) {
       setError(error instanceof Error ? error.message : "保存失败");
     } finally {
-      setPending(false);
+      saving.current = false;
+      onPending(price.model, false);
     }
   }
   return (
     <Fragment>
       <tr
         className="price-table-row"
-        data-dirty={(dirty && !saved) || undefined}
+        hidden={hidden}
+        data-dirty={dirty || undefined}
         aria-busy={pending || undefined}
       >
         <th scope="row" className="price-model-cell">
@@ -186,7 +218,7 @@ function PriceRow({
           </div>
           <div className="price-model-meta">
             <span>
-              {price.source === "manual" || saved
+              {current.source === "manual"
                 ? "自定义价格"
                 : price.source?.startsWith("inherited:")
                   ? "沿用参考价"
@@ -194,11 +226,11 @@ function PriceRow({
                   ? "官方参考价"
                   : "未定价"}
             </span>
-            {dirty && !saved && <span className="price-unsaved">未保存</span>}
+            {dirty && <span className="price-unsaved">未保存</span>}
           </div>
         </th>
         {fields.map(([field, label]) => (
-          <td key={field} className="price-number-cell">
+          <td key={field} className="price-number-cell" data-label={label}>
             {tier && <small className="price-tier-label">≤{tierLimit}</small>}
             {visibleFields.some(([visible]) => visible === field) ? (
               <input
@@ -206,14 +238,14 @@ function PriceRow({
                 aria-label={`${price.model} ${fieldLabel(field, label)}价格`}
                 type="number"
                 min="0"
-                max="1000000000"
+                max={MAX_PRICE}
                 step="any"
                 required
                 value={
                   unpriced || !Number.isFinite(draft[field]) ? "" : draft[field]
                 }
                 placeholder={unpriced ? "未公布" : ""}
-                disabled={pending}
+                disabled={pending || readOnly}
                 onChange={(event) =>
                   change({ [field]: event.target.valueAsNumber })
                 }
@@ -238,31 +270,31 @@ function PriceRow({
             )}
           </td>
         ))}
-        <td className="price-number-cell">
+        <td className="price-number-cell" data-label="售卖比例（%）">
           <input
             className="price-number-input"
             aria-label={`${price.model} 售卖价格百分比`}
             type="number"
             min="0"
-            max="1000000"
+            max={MAX_SALE}
             step="any"
             required
             value={
               Number.isFinite(salePercent(draft)) ? salePercent(draft) : ""
             }
-            disabled={pending}
+            disabled={pending || readOnly}
             onChange={(event) =>
               change({ sale_percent: event.target.valueAsNumber })
             }
           />
         </td>
-        <td className="price-toggle-cell">
+        <td className="price-toggle-cell" data-label="分开计费">
           <label className="price-table-toggle">
             <input
               type="checkbox"
               aria-label={`${price.model} 计算缓存写入费用`}
               checked={chargesCacheWrite(draft)}
-              disabled={pending}
+              disabled={pending || readOnly}
               onChange={(event) =>
                 change({ charge_cache_write: event.target.checked })
               }
@@ -270,7 +302,7 @@ function PriceRow({
             <span aria-hidden="true" />
           </label>
         </td>
-        <td className="price-toggle-cell">
+        <td className="price-toggle-cell" data-label="长上下文">
           {tier ? (
             <span className="price-tier-policy" title={`总输入（含缓存）超过 ${tier.threshold_tokens.toLocaleString("en-US")} token 时，整次请求输入、输出及缓存单价均 ×${tier.input_multiplier}；不叠加 272k 加价。`}>
               <strong>&gt;{tierLimit} ×{tier.input_multiplier}</strong>
@@ -281,19 +313,19 @@ function PriceRow({
               type="checkbox"
               aria-label={`${price.model} 超过272k加价`}
               checked={draft.long_context_premium ?? false}
-              disabled={pending}
+              disabled={pending || readOnly}
               onChange={(event) => change({ long_context_premium: event.target.checked })}
             />
             <span aria-hidden="true" />
           </label>}
         </td>
-        <td className="price-toggle-cell">
+        <td className="price-toggle-cell" data-label="启用价格">
           <label className="price-table-toggle">
             <input
               type="checkbox"
               aria-label={`${price.model} 确认价格并用于估算`}
               checked={!!draft.verified}
-              disabled={pending}
+              disabled={pending || readOnly}
               onChange={(event) => change({ verified: event.target.checked })}
             />
             <span aria-hidden="true" />
@@ -302,16 +334,7 @@ function PriceRow({
         <td className="price-save-cell">
           <button
             className="button small"
-            disabled={
-              pending ||
-              unpriced ||
-              !Number.isFinite(salePercent(draft)) ||
-              salePercent(draft) < 0 ||
-              salePercent(draft) > 1000000 ||
-              visibleFields.some(
-                ([field]) => !Number.isFinite(draft[field]) || draft[field] < 0,
-              )
-            }
+            disabled={blocked}
             onClick={() => void save()}
           >
             {pending ? (
@@ -321,12 +344,22 @@ function PriceRow({
             ) : (
               <Save size={14} />
             )}{" "}
-            {pending ? "保存中" : saved ? "已保存" : "保存价格"}
+            {pending ? "保存中" : saved ? "已保存" : canAdopt ? "采用参考价" : "保存价格"}
           </button>
+          {dirty && <button className="button small" type="button" disabled={pending} onClick={discard}>放弃草稿</button>}
+          {dirty && !invalid && <small className="price-impact">
+            {draft.verified
+              ? `美元 / 百万 token：输入 ${current.input} → ${draft.input}，输出 ${current.output} → ${draft.output}。`
+              : "保存后不使用此价格估算。"}
+            {draft.long_context_premium !== current.long_context_premium && (draft.long_context_premium ? " 开启 272k 加价。" : " 关闭 272k 加价。")}
+            按新设置重算历史估算，不修改实际扣费。
+          </small>}
+          {dirty && invalid && <small className="negative">请核对价格和售卖比例的范围。</small>}
+          {conflicted && <small role="alert">服务端价格已变化，请先核对最新价格，再重新编辑。</small>}
         </td>
       </tr>
       {error && (
-        <tr className="price-error-row">
+        <tr className="price-error-row" hidden={hidden}>
           <td colSpan={11}>
             <p role="alert">
               {price.model}：{error}
@@ -345,19 +378,41 @@ export function PriceSettings({
   connection,
   onSaved,
   refreshAction,
+  drafts: externalDrafts,
+  onDraftChange,
+  pendingModels: externalPending,
+  onPendingChange,
 }: {
   prices: ModelPrice[];
   loading: boolean;
   error?: string;
   connection: Connection;
-  onSaved: () => void;
+  onSaved: (price: ModelPrice) => void;
   refreshAction?: ReactNode;
+  drafts?: PriceDrafts;
+  onDraftChange?: Dispatch<SetStateAction<PriceDrafts>>;
+  pendingModels?: Set<string>;
+  onPendingChange?: Dispatch<SetStateAction<Set<string>>>;
 }) {
   const [filter, setFilter] = useState("");
-  const all = displayedModelPrices(prices);
+  const [localDrafts, setLocalDrafts] = useState<PriceDrafts>(() => new Map());
+  const drafts = externalDrafts ?? localDrafts;
+  const setDrafts = onDraftChange ?? setLocalDrafts;
+  const [localPending, setLocalPending] = useState(() => new Set<string>());
+  const pendingModels = externalPending ?? localPending;
+  const setPendingModels = onPendingChange ?? setLocalPending;
+  const all = useMemo(() => displayedModelPrices(prices), [prices]);
   const visible = all.filter((price) =>
-    price.model.toLowerCase().includes(filter.toLowerCase()),
+    price.model.toLowerCase().includes(filter.trim().toLowerCase()),
   );
+  const visibleModels = new Set(visible.map(price => price.model));
+  const dirtyCount = drafts.size;
+  useEffect(() => {
+    if (!dirtyCount || externalDrafts) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirtyCount, !!externalDrafts]);
   return (
     <section className="data-panel prices-panel">
       <div className="data-heading price-heading">
@@ -385,6 +440,7 @@ export function PriceSettings({
           美元 / 百万 token
           <span>每行独立保存 · 模型旁 ⓘ 查看来源与适用条件</span>
         </p>
+        {dirtyCount > 0 && <p role="status">有 {dirtyCount} 项未保存；切换筛选或栏目不会丢弃草稿。</p>}
         <details className="price-help">
           <summary>计费说明</summary>
           <div>
@@ -398,8 +454,8 @@ export function PriceSettings({
             </p>
             <p>
               售卖比例为原价的百分比，填 2.5 表示按原价的 2.5% 售卖。GPT
-              及其他模型默认 2.5%，Claude / Gemini 默认 15%。利润 = 估算消费 ×
-              售卖百分比 ÷ 100 × 6.9 − 渠道实际消费。
+              及其他模型默认 2.5%，Claude / Gemini 默认 15%。经营参考 = 估算消费 ×
+              售卖百分比 ÷ 100 × 6.9 − 渠道实际消费数值。成本未进行币种换算，不可用于对账。
             </p>
             <p>不含搜索、缓存存储等额外费用，实际扣费以站点账单为准。</p>
             <p>
@@ -416,6 +472,7 @@ export function PriceSettings({
       {error && (
         <p role="alert" className="price-load-error negative">
           {error}
+          {" · 当前配置未核实，参考价只读。"}
         </p>
       )}
       {loading ? <TableLoading kind="prices" rows={8} /> : <>
@@ -461,12 +518,26 @@ export function PriceSettings({
             </tr>
           </thead>
           <tbody>
-            {visible.map((price) => (
+            {all.map((price) => (
               <PriceRow
                 key={price.model}
                 price={price}
                 connection={connection}
                 onSaved={onSaved}
+                hidden={!visibleModels.has(price.model)}
+                readOnly={!!error}
+                edit={drafts.get(price.model)}
+                pending={pendingModels.has(price.model)}
+                onPending={(model, pending) => setPendingModels(previous => {
+                  const next = new Set(previous);
+                  if (pending) next.add(model); else next.delete(model);
+                  return next;
+                })}
+                onEdit={(model, edit) => setDrafts(previous => {
+                  const next = new Map(previous);
+                  if (edit) next.set(model,edit); else next.delete(model);
+                  return next;
+                })}
               />
             ))}
             {!visible.length && (

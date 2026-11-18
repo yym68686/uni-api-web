@@ -41,6 +41,8 @@ interface Job {
   merchant_order?: string;
   action_url?: string;
   credited_amount?: number;
+  created_at?: number;
+  updated_at?: number;
 }
 interface Wallet {
   status: string;
@@ -53,6 +55,13 @@ interface Recovery {
   code: string;
   payment_url: string;
 }
+type Submission = {quote: Pick<Quote, "id" | "name" | "total_cny" | "expires_at">; key: string};
+const pendingSubmission = (path: string): Submission | null => {
+  try {
+    const value = JSON.parse(sessionStorage.getItem(`uni-recharge-pending:${path}`) || "null") as Submission | null;
+    return value && typeof value.key === "string" && typeof value.quote?.id === "string" ? value : null;
+  } catch { return null; }
+};
 
 const labels: Record<string, string> = {
   queued: "等待下单",
@@ -67,6 +76,8 @@ const labels: Record<string, string> = {
   review: "需核对原订单",
 };
 const active = (job: Job) => !["done", "closed", "failed"].includes(job.state);
+const orderTime = (seconds: number) => new Date(seconds * 1000).toLocaleString("zh-CN", {hour12: false});
+const quoteValid = (quote: Pick<Quote,"expires_at">) => Number.isFinite(quote.expires_at) && quote.expires_at * 1000 > Date.now();
 function officialLink(raw?: string) {
   if (!raw) return false;
   try {
@@ -103,7 +114,7 @@ function paymentLink(raw?: string) {
   }
 }
 
-export function SiteRecharge({ account }: { account: SubAccount }) {
+export function SiteRecharge({ account, onBusyChange }: { account: SubAccount; onBusyChange?: (busy:boolean) => void }) {
   const base = `/v1/sub2api/accounts/${encodeURIComponent(account.id)}/recharge`;
   const [settings, setSettings] = useState<Settings>();
   const [config, setConfig] = useState<Config>();
@@ -111,60 +122,113 @@ export function SiteRecharge({ account }: { account: SubAccount }) {
   const [selected, setSelected] = useState("");
   const [quote, setQuote] = useState<Quote>();
   const [confirmed, setConfirmed] = useState(false);
+  const [quoteExpired, setQuoteExpired] = useState(false);
   const [identityConfirmed, setIdentityConfirmed] = useState(false);
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [jobsVerified, setJobsVerified] = useState(false);
   const [wallet, setWallet] = useState<Wallet>();
   const [code, setCode] = useState("");
   const [recovery, setRecovery] = useState<Recovery>();
+  const [recoveryRevealed, setRecoveryRevealed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
   const [pollError, setPollError] = useState("");
+  const [settingsError, setSettingsError] = useState("");
+  const payment = useRef(pendingSubmission(base));
+  const [uncertain, setUncertain] = useState(!!payment.current);
   const submitKey = useRef("");
   const inFlight = useRef(false);
+  const jobRead = useRef<AbortController | null>(null);
+  function rememberSubmission(next: Submission | null) {
+    payment.current = next;
+    setUncertain(!!next);
+    try {
+      if (next) sessionStorage.setItem(`uni-recharge-pending:${base}`, JSON.stringify(next));
+      else sessionStorage.removeItem(`uni-recharge-pending:${base}`);
+    } catch { /* The current panel still prevents a second submission. */ }
+  }
+  async function readJobs(force = false) {
+    if (jobRead.current && !force) return;
+    jobRead.current?.abort();
+    const controller = new AbortController();
+    jobRead.current = controller;
+    try {
+      const result = await controlRequest<{ jobs: Job[] }>(`${base}/jobs`, {signal:controller.signal});
+      if (controller.signal.aborted) return;
+      setJobs(result.jobs);
+      if (payment.current && result.jobs.some(job => job.quote?.id === payment.current?.quote.id)) {
+        rememberSubmission(null);
+        setQuote(undefined);
+        setConfirmed(false);
+        setError("");
+        setNote("已找到原订单。请核对下方记录，无需再次付款。");
+      }
+      setJobsVerified(true);
+      setPollError("");
+    } catch {
+      if (controller.signal.aborted) return;
+      setJobsVerified(false);
+      setPollError("充值状态刷新失败，不能确认是否存在在途订单；请核对原订单，勿重复付款。");
+    } finally {
+      if (jobRead.current === controller) jobRead.current = null;
+    }
+  }
   async function read(signal?: AbortSignal) {
-    const [s, j] = await Promise.all([
-      controlRequest<Settings>(`${base}/settings`, { signal }),
-      controlRequest<{ jobs: Job[] }>(`${base}/jobs`, { signal }),
+    await Promise.all([
+      controlRequest<Settings>(`${base}/settings`, {signal}).then(s => {
+        if (signal?.aborted) return;
+        setSettings(s);
+        setConfig(c => c || s.config);
+        setSettingsError("");
+      }).catch(error => {
+        if (!signal?.aborted) setSettingsError(error instanceof Error ? error.message : "充值设置读取失败");
+      }),
+      readJobs(true),
     ]);
-    if (signal?.aborted) return;
-    setSettings(s);
-    setConfig((c) => c || s.config);
-    setJobs(j.jobs);
-    setPollError("");
   }
   useEffect(() => {
     const controller = new AbortController();
-    void read(controller.signal).catch((e) => {
-      if (!controller.signal.aborted)
-        setError(e instanceof Error ? e.message : "充值设置读取失败");
-    });
-    const timer = window.setInterval(() => {
-      void controlRequest<{ jobs: Job[] }>(`${base}/jobs`, {
-        signal: controller.signal,
-      })
-        .then((j) => {
-          if (!controller.signal.aborted) {
-            setJobs(j.jobs);
-            setPollError("");
-          }
-        })
-        .catch(() => {
-          if (!controller.signal.aborted)
-            setPollError(
-              "充值状态刷新失败，当前显示上次记录；请核对原订单，勿重复付款。",
-            );
-        });
-    }, 15000);
+    void read(controller.signal);
     return () => {
       controller.abort();
-      window.clearInterval(timer);
+      jobRead.current?.abort();
     };
   }, [base]);
+  const hasActiveJobs = jobs.some(active);
+  useEffect(() => {
+    if (!hasActiveJobs && !pollError && !uncertain) return;
+    const timer = window.setInterval(() => {
+      if (!document.hidden && !inFlight.current) void readJobs();
+    }, 15000);
+    return () => window.clearInterval(timer);
+  }, [base, hasActiveJobs, pollError, uncertain]);
+  useEffect(() => {
+    if (!quote) return;
+    const expire = () => {
+      if (!quoteValid(quote)) { setQuoteExpired(true); setConfirmed(false); }
+    };
+    expire();
+    const timer = window.setInterval(expire, 1000);
+    return () => window.clearInterval(timer);
+  }, [quote]);
+  useEffect(() => {
+    if (!recoveryRevealed) return;
+    const hide = () => setRecoveryRevealed(false);
+    const timer = window.setTimeout(hide, 20000);
+    window.addEventListener("blur", hide);
+    document.addEventListener("visibilitychange", hide);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("blur", hide);
+      document.removeEventListener("visibilitychange", hide);
+    };
+  }, [recoveryRevealed, recovery]);
   async function run(fn: () => Promise<void>) {
     if (inFlight.current) return;
     inFlight.current = true;
     setBusy(true);
+    onBusyChange?.(true);
     setError("");
     setNote("");
     try {
@@ -176,7 +240,32 @@ export function SiteRecharge({ account }: { account: SubAccount }) {
     } finally {
       inFlight.current = false;
       setBusy(false);
+      onBusyChange?.(false);
     }
+  }
+  async function submitOriginal(submission: Submission) {
+    rememberSubmission(submission);
+    try {
+      await controlRequest(`${base}/jobs`, {
+        method:"POST",
+        body: JSON.stringify({
+          quote_id: submission.quote.id,
+          total_cny: submission.quote.total_cny,
+          confirmed:true,
+          idempotency_key:submission.key,
+        }),
+      });
+      rememberSubmission(null);
+      setQuote(undefined);
+      setConfirmed(false);
+      setNote("已提交一笔实时充值，请在下方查看原订单状态，勿重复付款。");
+      setJobsVerified(false);
+    } catch (error) {
+      await readJobs(true);
+      if (payment.current) throw error;
+      return;
+    }
+    await readJobs(true);
   }
   const update = (patch: Partial<Config>) => {
     setConfig((c) => (c ? { ...c, ...patch } : c));
@@ -214,7 +303,7 @@ export function SiteRecharge({ account }: { account: SubAccount }) {
     return (
       <section className="recharge-panel">
         <h3>充值</h3>
-        <p role={error ? "alert" : "status"}>{error || "读取充值设置…"}</p>
+        <p role={settingsError || error ? "alert" : "status"}>{settingsError || error || "读取充值设置…"}</p>
         <button
           className="button small"
           onClick={() => void run(() => read())}
@@ -242,6 +331,7 @@ export function SiteRecharge({ account }: { account: SubAccount }) {
           {error}
         </p>
       )}
+      {settingsError && <p role="alert" className="error-banner">充值设置当前未核实：{settingsError}</p>}
       {note && (
         <p className="settings-note" role="status">
           {note}
@@ -440,15 +530,19 @@ export function SiteRecharge({ account }: { account: SubAccount }) {
           !settings.config.enabled ||
           !selected ||
           !settings.payment_configured ||
-          jobs.some(active)
+          !jobsVerified ||
+          !!settingsError ||
+          hasActiveJobs || uncertain
         }
         onClick={() =>
           void run(async () => {
+            if (payment.current) return;
             const q = await controlRequest<Quote>(`${base}/quotes`, {
               method: "POST",
               body: JSON.stringify({ product: selected }),
             });
             submitKey.current = crypto.randomUUID();
+            setQuoteExpired(!quoteValid(q));
             setQuote(q);
             setConfirmed(false);
           })
@@ -465,11 +559,13 @@ export function SiteRecharge({ account }: { account: SubAccount }) {
             实付 ¥{quote.total_cny}，含手续费 ¥{quote.fee_cny}
           </p>
           <p>兑换到：{quote.target}</p>
+          <p>报价有效至：{Number.isFinite(quote.expires_at) ? orderTime(quote.expires_at) : "无法确认"}</p>
+          {quoteExpired && <p role="status">报价已失效，请重新获取报价或先核对原订单。</p>}
           <label>
             <input
               type="checkbox"
               checked={confirmed}
-              disabled={busy}
+              disabled={busy || quoteExpired || !jobsVerified || !!settingsError || uncertain}
               onChange={(e) => setConfirmed(e.target.checked)}
             />
             确认本次商品、目标账号及实付金额，授权下单付款并自动兑换
@@ -477,24 +573,14 @@ export function SiteRecharge({ account }: { account: SubAccount }) {
           <button
             type="button"
             className="button primary"
-            disabled={busy || !confirmed || jobs.some(active)}
+            disabled={busy || !confirmed || quoteExpired || !jobsVerified || !!settingsError || hasActiveJobs || uncertain}
             onClick={() =>
               void run(async () => {
-                await controlRequest(`${base}/jobs`, {
-                  method: "POST",
-                  body: JSON.stringify({
-                    quote_id: quote.id,
-                    total_cny: quote.total_cny,
-                    confirmed: true,
-                    idempotency_key: submitKey.current,
-                  }),
-                });
-                setQuote(undefined);
-                setConfirmed(false);
-                await read();
-                setNote(
-                  "已提交一笔实时充值，请在下方查看原订单状态，勿重复付款。",
-                );
+                if (!quoteValid(quote)) { setQuoteExpired(true); setConfirmed(false); return; }
+                if (!payment.current && submitKey.current) {
+                  const {id,name,total_cny,expires_at}=quote;
+                  await submitOriginal({quote:{id,name,total_cny,expires_at}, key:submitKey.current});
+                }
               })
             }
           >
@@ -502,6 +588,19 @@ export function SiteRecharge({ account }: { account: SubAccount }) {
           </button>
         </div>
       )}
+      {uncertain && payment.current && <div className="recharge-quote">
+        <p>原提交尚未核实 · {payment.current.quote.name} · ¥{payment.current.quote.total_cny}。先刷新下方订单；不要获取新报价重复购买。</p>
+        <button type="button" className="button small" disabled={busy || !jobsVerified || hasActiveJobs || !!settingsError} onClick={() => {
+          const original = payment.current;
+          if (original) void run(() => submitOriginal(original));
+        }}>用同一提交编号重试原订单</button>
+        <p className="settings-note">这不会创建第二笔相同订单；如果原订单没有成功提交且报价仍有效，可能提交原付款。</p>
+        {jobsVerified && !hasActiveJobs && !quoteValid(payment.current.quote) && <button type="button" className="button small" disabled={busy} onClick={() => {
+          if (window.confirm("请先核对商户或支付记录。确认未付款且订单列表没有原订单后，才能解除本地提醒。")) {
+            rememberSubmission(null); setQuote(undefined); setConfirmed(false); setError("");
+          }
+        }}>核对后解除过期提醒</button>}
+      </div>}
       <h4>充值记录</h4>
       {pollError && (
         <p role="alert" className="error-banner">
@@ -516,7 +615,7 @@ export function SiteRecharge({ account }: { account: SubAccount }) {
       >
         刷新充值状态（不重新付款）
       </button>
-      {jobs.length === 0 && <p className="settings-note">暂无充值记录。</p>}
+      {jobsVerified && jobs.length === 0 && <p className="settings-note">暂无充值记录。</p>}
       {jobs.map((j) => (
         <article className="recharge-job" key={j.id}>
           <strong>
@@ -529,6 +628,7 @@ export function SiteRecharge({ account }: { account: SubAccount }) {
               ` · 到账额度 ${j.credited_amount}`}
           </p>
           {j.merchant_order && <small>原订单：{j.merchant_order}</small>}
+          <p className="settings-note">充值记录：{j.id}{j.created_at ? ` · 提交 ${orderTime(j.created_at)}` : ""}{j.updated_at ? ` · 更新 ${orderTime(j.updated_at)}` : ""}</p>
           {officialLink(j.action_url) && (
             <p>
               <a href={j.action_url} target="_blank" rel="noreferrer">
@@ -560,13 +660,10 @@ export function SiteRecharge({ account }: { account: SubAccount }) {
               className="button small"
               disabled={busy}
               onClick={() =>
-                void run(async () =>
-                  setRecovery(
-                    await controlRequest<Recovery>(
-                      `${base}/jobs/${encodeURIComponent(j.id)}/recovery`,
-                    ),
-                  ),
-                )
+                void run(async () => {
+                  setRecoveryRevealed(false);
+                  setRecovery(await controlRequest<Recovery>(`${base}/jobs/${encodeURIComponent(j.id)}/recovery`));
+                })
               }
             >
               查看原订单恢复资料
@@ -578,8 +675,11 @@ export function SiteRecharge({ account }: { account: SubAccount }) {
         <div className="recharge-quote">
           <strong>仅用于核对原订单，请勿泄露</strong>
           <p>订单：{recovery.merchant_order || "尚未取得"}</p>
-          <p>查询密码：{recovery.query_password}</p>
-          {recovery.code && <p>已交付兑换码：{recovery.code}</p>}
+          <p>查询密码：{recoveryRevealed ? recovery.query_password : "••••••"}</p>
+          {recovery.code && <p>已交付兑换码：{recoveryRevealed ? recovery.code : "••••••"}</p>}
+          <button type="button" className="button small" onClick={() => setRecoveryRevealed(value => !value)}>
+            {recoveryRevealed ? "隐藏敏感内容" : "暂时显示敏感内容"}
+          </button>
           {paymentLink(recovery.payment_url) && (
             <p>
               <a href={recovery.payment_url} target="_blank" rel="noreferrer">

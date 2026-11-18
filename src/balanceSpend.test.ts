@@ -15,3 +15,15 @@ it("retains reconciled costs as a bound when another model remains unknown",()=>
  expect(balanceSpend([{data:undefined,isPending:false,isError:true}])).toMatchObject({actual:null,label:"查询失败"});
  expect(balanceSpend([{data:undefined,isPending:true,isError:false}])).toMatchObject({actual:null,label:"核对中"});
 });
+it("keeps a retained-history subtotal provisional even with additional unresolved charges", () => {
+  const partial: SubChannelSpendResult = {
+    isPending: false, isError: false,
+    data: { scope: "matched_requests", from: 1, to: 86401, status: "history_limited", actual_cost_usd: null, observed_cost_usd: 2, matched_attempts: 1 },
+  };
+  expect(balanceSpend([complete(3), partial, undefined])).toMatchObject({
+    actual: 5, upperBound: false, provisional: true, label: "历史不完整",
+  });
+  expect(balanceSpend([complete(3), {...partial, data: {...partial.data!, matched_attempts: 0}}])).toMatchObject({
+    actual: 3, upperBound: false, provisional: true,
+  });
+});

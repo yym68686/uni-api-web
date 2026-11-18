@@ -1,0 +1,53 @@
+.sub-account-header, .sub-account { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(230px, 1.2fr) minmax(130px, .65fr) minmax(190px, 1fr) 300px; gap: 16px; align-items: center; min-width: 1144px; padding: 12px 21px; }
+.sub-account-header { position: sticky; top: 0; z-index: 1; background: var(--subtle); color: var(--muted); font-size: 11px; border-bottom: 1px solid var(--line); }
+.sub-account-header > :last-child { text-align: right; }
+.sub-account { min-height: 68px; border-bottom: 1px solid var(--line); }
+.sub-account:last-child { border-bottom: 0; }
+.sub-account:hover { background: var(--subtle); }
+.sub-account > div { min-width: 0; }
+.sub-account-identity strong { display: block; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sub-account-identity .site-link { max-width: 100%; margin-top: 4px; font-size: 11px; color: var(--muted); }
+.sub-account-identity .site-link > span, .sub-account-email, .sub-account-status small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sub-account-email { color: var(--muted); font-size: 12px; }
+.sub-account-progress { display: flex; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; }
+.sub-account-status small { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
+.sub-account-actions, .sub-pagination { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
+.sub-account .sub-account-actions { flex-wrap: nowrap; justify-content: flex-end; width: auto; }
+.sub-account .sub-account-actions > * { flex-shrink: 0; white-space: nowrap; }
+.sub-remove { grid-column: 1 / -1; font-size: 12px; color: var(--muted); line-height: 1.8; }
+.sub-remove button { margin: 8px 6px 0 0; }
+.sub-account-form { background: var(--surface); color: var(--ink); }
+.sub-account-form input { background: var(--surface); color: var(--ink); }
+.sub-loading { padding: 30px; display: flex; align-items: center; gap: 10px; }
+.sub-filters { display:flex; gap:8px; flex-wrap:nowrap; align-items:center; margin:0 21px 16px; padding:10px 0; border-top:1px solid var(--line); overflow-x:auto; overscroll-behavior-x:contain; }
+.sub-filters:focus-visible { outline:2px solid var(--green); outline-offset:2px; border-radius:6px; }
+.sub-filters .select-field { flex:0 0 auto; width:104px; min-width:0; max-width:none; height:35px; white-space:nowrap; }
+.sub-filters .select-field:first-child { width:150px; }
+.sub-filters .select-field.sub-price-filter { width: 168px; }
+.sub-filters .select-field:nth-child(2) { width:164px; }
+.sub-filters .sub-name-exclude { flex:0 0 190px; min-width:190px; }
+.sub-filters .select-field:nth-last-of-type(3), .sub-filters .select-field:last-of-type { width:128px; }
+.sub-filter-reset { flex-shrink:0; position:sticky; right:0; background:var(--surface); }
+.sub-filters .select-field select { width:100%; min-width:0; text-overflow:ellipsis; white-space:nowrap; }
+.sub-filters .select-field svg { flex-shrink:0; }
+.sub-model { font-size: 12px; color: var(--muted); margin-left: auto; }
+.sub-table { min-width: 1080px; }
+.sub-table[data-columns="operations"],
+.sub-table[data-columns="finance"] { min-width: 650px; }
+.sub-table:not([data-columns="all"]):not([data-columns="finance"]) .sub-finance-col,
+.sub-table:not([data-columns="all"]):not([data-columns="checks"]) .sub-check-col,
+.sub-table[data-columns="finance"] :is(.sub-latency-col, .sub-platform-col) { display:none; }
+.sub-columns-toolbar { display:flex; align-items:center; gap:.75rem; flex-wrap:wrap; color:var(--muted); font-size:.875rem; padding:.5rem 1rem; }
+.sub-columns-toolbar select { margin-inline-start:.25rem; }
+.sub-table details { font-size: 11px; line-height: 1.7; margin-top: 8px; color: var(--muted); }
+.sub-table summary { cursor: pointer; }
+.sub-table td { vertical-align: middle; }
+.sub2api-page .settings-note svg { vertical-align: middle; }
+@media(max-width:780px) {
+ .sub-accounts > .data-heading .sub-account-actions { flex-wrap: nowrap; overflow-x: auto; max-width: 100%; }
+ .sub-accounts > .data-heading .sub-account-actions > .button { flex-shrink: 0; white-space: nowrap; }
+ .sub-filters { margin:0 15px 12px; padding:10px 0; }
+ .sub-model { margin-left: 0; }
+ .sub2api-page .data-actions { flex-wrap: wrap; }
+ .sub2api-page .table-footer { gap: 12px; flex-wrap: wrap; }
+}

@@ -125,7 +125,9 @@ it("requires exact quote confirmation and never automatically retries an unknown
     confirmed: true,
   });
   expect(first.idempotency_key).toBeTruthy();
-  await user.click(pay);
+  expect(pay).toBeDisabled();
+  expect(screen.getByRole("button", {name:/获取实时含手续费报价/})).toBeDisabled();
+  await user.click(screen.getByRole("button", {name:"用同一提交编号重试原订单"}));
   await waitFor(() => expect(writes).toHaveLength(3));
   expect(writes[2].body).toEqual(first); // explicit retry reuses original key
 });
@@ -187,6 +189,10 @@ it("blocks another purchase while the original order needs reconciliation", asyn
 it("marks failed background refreshes as stale without resubmitting payment", async () => {
   vi.useFakeTimers();
   fixture();
+  const reads = request.getMockImplementation()!;
+  request.mockImplementation((path, init) => path.endsWith("/jobs")
+    ? Promise.resolve({jobs:[{id:"active", state:"paying", quote}]}) as never
+    : reads(path, init));
   render(<SiteRecharge account={account} />);
   await act(async () => {
     await Promise.resolve();
@@ -198,4 +204,14 @@ it("marks failed background refreshes as stale without resubmitting payment", as
   });
   expect(screen.getByRole("alert")).toHaveTextContent("充值状态刷新失败");
   expect(request.mock.calls.every(([, init]) => !init?.method)).toBe(true);
+});
+
+it("does not poll in the background with no active recharge jobs", async () => {
+  vi.useFakeTimers();
+  fixture();
+  render(<SiteRecharge account={account} />);
+  await act(async () => { await Promise.resolve(); });
+  expect(request.mock.calls.filter(([path]) => path.endsWith("/jobs"))).toHaveLength(1);
+  await act(async () => { await vi.advanceTimersByTimeAsync(45_000); });
+  expect(request.mock.calls.filter(([path]) => path.endsWith("/jobs"))).toHaveLength(1);
 });

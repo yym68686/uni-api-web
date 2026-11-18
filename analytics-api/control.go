@@ -142,8 +142,11 @@ func (s *controlStore) session(ctx context.Context, raw string) (string, error) 
 	return user, err
 }
 func (s *controlStore) newSession(ctx context.Context, user string) (string, error) {
+	return s.newSessionUntil(ctx, user, 30*24*time.Hour)
+}
+func (s *controlStore) newSessionUntil(ctx context.Context, user string, ttl time.Duration) (string, error) {
 	raw := randomID()
-	_, err := s.db.ExecContext(ctx, `INSERT INTO console_sessions(token_hash,username,expires_at) VALUES($1,$2,now()+interval '30 days')`, tokenHash(raw), user)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO console_sessions(token_hash,username,expires_at) VALUES($1,$2,now()+$3::bigint*interval '1 second')`, tokenHash(raw), user, int64(ttl/time.Second))
 	return raw, err
 }
 func (s *controlStore) logout(ctx context.Context, raw string) error {
@@ -411,7 +414,7 @@ func (s *Service) controlSession(r *http.Request) bool { _, e := s.controlUser(r
 func (s *Service) authMe(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	user, e := s.controlUser(r)
-	writeJSON(w, 200, map[string]any{"enabled": s.control != nil, "authenticated": e == nil, "username": user})
+	writeJSON(w, 200, map[string]any{"enabled": s.control != nil, "authenticated": e == nil, "username": user, "browser_session_supported": s.control != nil})
 }
 func decodeControl(w http.ResponseWriter, r *http.Request, v any) bool {
 	return decodeControlLimit(w, r, v, 32<<10)
@@ -446,7 +449,10 @@ func (s *Service) authLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "please wait before retrying", 429)
 		return
 	}
-	var in struct{ Username, Password string }
+	var in struct {
+		Username, Password string
+		BrowserSession     bool `json:"browser_session"`
+	}
 	if !decodeControl(w, r, &in) {
 		return
 	}
@@ -454,12 +460,16 @@ func (s *Service) authLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid username or password", 401)
 		return
 	}
-	raw, e := s.control.newSession(r.Context(), in.Username)
+	ttl, age := 30*24*time.Hour, 30*86400
+	if in.BrowserSession {
+		ttl, age = 8*time.Hour, 0
+	}
+	raw, e := s.control.newSessionUntil(r.Context(), in.Username, ttl)
 	if e != nil {
 		http.Error(w, "session storage unavailable", 503)
 		return
 	}
-	http.SetCookie(w, s.sessionCookie(raw, 30*86400))
+	http.SetCookie(w, s.sessionCookie(raw, age))
 	writeJSON(w, 200, map[string]any{"ok": true, "username": in.Username})
 }
 func (s *Service) sessionCookie(raw string, age int) *http.Cookie {

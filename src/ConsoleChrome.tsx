@@ -34,6 +34,7 @@ export function ConsoleNavigation({
   account,
   lowCount = 0,
   onSelect,
+  onGuide,
 }: {
   view: View;
   account: boolean;
@@ -52,14 +53,12 @@ export function ConsoleNavigation({
             <button
               key={page.view}
               className={view === page.view ? "active" : ""}
+              aria-current={view === page.view ? "page" : undefined}
               disabled={!onSelect}
               onClick={() => onSelect?.(page.view)}
             >
               <page.icon size={18} />
               {page.label}
-              {page.view === "channels" && (
-                <span className="nav-shortcut">⌘ 1</span>
-              )}
               {page.view === "balances" && lowCount > 0 && (
                 <span className="nav-count">{lowCount}</span>
               )}
@@ -67,6 +66,7 @@ export function ConsoleNavigation({
           ))}
       </nav>
       <div className="sidebar-bottom">
+        {onGuide && <button className="button ghost" onClick={onGuide}><BookOpen size={17} /> 指标说明</button>}
         <a
           href="https://github.com/yym68686/uni-api-web"
           target="_blank"
@@ -90,12 +90,18 @@ export function ConsoleHeader({
   onMenu,
   onTheme,
   onConnection,
+  onDisconnect,
+  identity,
+  account,
 }: {
   view: View;
   theme: Theme;
   onMenu?: () => void;
   onTheme?: () => void;
   onConnection?: () => void;
+  onDisconnect?: () => void;
+  identity?: string;
+  account?: boolean;
 }) {
   return (
     <header className="topbar">
@@ -121,14 +127,20 @@ export function ConsoleHeader({
         >
           {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
         </button>
-        <button
-          className="avatar"
-          disabled={!onConnection}
-          onClick={onConnection}
-          aria-label="管理服务连接"
-        >
-          U
-        </button>
+        {onConnection && <details className="account-menu">
+          <summary aria-label={account ? `当前账号 ${identity}` : "管理服务连接"}>
+            <span className="avatar" aria-hidden="true">{identity?.trim().slice(0, 1).toUpperCase() || "↔"}</span>
+            <span className="account-name">{identity || "直连"}</span>
+          </summary>
+          <div className="account-menu-panel">
+            <strong>{identity || "直连服务"}</strong>
+            <button className="button ghost" onClick={event => {
+              event.currentTarget.closest("details")?.removeAttribute("open");
+              onConnection();
+            }}>{account ? "管理 uni-api 来源" : "切换服务连接"}</button>
+            <button className="button ghost" onClick={onDisconnect}>{account ? "退出当前账号" : "断开当前连接"}</button>
+          </div>
+        </details>}
       </div>
     </header>
   );

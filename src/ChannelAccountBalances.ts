@@ -128,6 +128,7 @@ export function useChannelAccountBalances(
           return {
             position: index + 1,
             label: accountNames.get(key.account_id),
+            account_id: key.account_id,
             kind: "account_wallet",
             currency: "USD",
             status: query?.data?.status || "unavailable",
@@ -158,4 +159,18 @@ export function useChannelAccountBalances(
       ];
     }),
   );
+}
+
+export function walletGroups(rows: Iterable<[string, {data?:Balance;isError?:boolean}]>) {
+  const groups = new Map<string,{label:string; wallet:NonNullable<Balance["keys"]>[number]; providers:Set<string>}>();
+  for (const [provider, result] of rows) {
+    if (result.isError) continue;
+    for (const wallet of result.data?.keys || []) {
+      if (!wallet.account_id || wallet.kind !== "account_wallet") continue;
+      const found = groups.get(wallet.account_id);
+      if (found) found.providers.add(provider);
+      else groups.set(wallet.account_id,{label:wallet.label || "站点账号",wallet,providers:new Set([provider])});
+    }
+  }
+  return groups;
 }

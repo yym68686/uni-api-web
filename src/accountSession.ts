@@ -4,6 +4,7 @@ export type AccountSession = {
   enabled: boolean;
   authenticated: boolean;
   username: string;
+  browser_session_supported?: boolean;
 };
 declare global {
   var __uniConsoleSessionBootstrap:

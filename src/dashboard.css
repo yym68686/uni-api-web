@@ -1,0 +1,61 @@
+.workspace-summary-toggle { display: none; }
+.mobile-channel-tools, .mobile-channel-scope { display:none; }
+.channel-filters { flex-wrap: wrap; overflow: visible; }
+.channel-filters .key-select { width: min(20rem, 100%); }
+.channel-filters .model-select { max-width: min(16rem, 100%); }
+.channel-scope-caption {
+  display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+  padding: 0 21px; margin: 0 0 .85rem; color: var(--muted); font-size: .78rem;
+}
+.channel-scope-caption .text-link { border: 0; background: transparent; }
+.observation-table:not([data-columns="all"]) .column-finance,
+.observation-table:not([data-columns="all"]) .column-quality { display: none; }
+.observation-table[data-columns="finance"] .column-finance,
+.observation-table[data-columns="quality"] .column-quality { display: table-cell; }
+.observation-table:is([data-columns="finance"], [data-columns="quality"]) .column-run { display: none; }
+.observation-table .channel-link { max-width: 16rem; }
+.observation-table .channel-link span { min-width: 0; }
+.observation-table .channel-link strong, .observation-table .channel-link small {
+  display: block; white-space: normal; overflow-wrap: anywhere;
+}
+.overview-attribution { display:block; margin-top:4px; color:var(--muted); }
+.overview-row .text-link { background:none; border:0; text-align:left; overflow-wrap:anywhere; }
+.overview-grid .metric-card .button { margin-top: .55rem; }
+.chart-inspection { color:var(--muted); font-size:.8rem; }
+.chart-column.current { outline: 1px solid var(--muted); outline-offset:-1px; }
+.chart-column.partial { background:repeating-linear-gradient(125deg,transparent 0 6px, var(--line) 6px 8px); }
+.wallet-summary { margin: 0 20px 12px; border:1px solid var(--line); border-radius:9px; padding:10px 14px; }
+.wallet-summary > summary { color:var(--green); cursor:pointer; font-size:.88rem; }
+.wallet-summary p { color:var(--muted); font-size:.8rem; }
+.wallet-summary ul { display:grid; gap:8px; padding:0; list-style:none; }
+.wallet-summary li { display:flex; align-items:center; flex-wrap:wrap; gap:10px; font-size:.83rem; }
+.balance-recharge-link { margin-top:6px; }
+.balance-dialog-loading { position:fixed; bottom:18px; right:18px; background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:10px; }
+.observation-placeholder td { height:52px; }
+.observation-placeholder .loading-bone { max-width:100%; }
+@media (max-width:780px) {
+  .workspace-summary-loading, .workspace-summary:not(.expanded) { display:none; }
+  .workspace-summary-toggle { display:inline-flex; margin-bottom:.5rem; }
+  .workspace:has(.observation-table) { padding-top: 12px; }
+  .channel-filters { gap: 5px; padding-inline: 12px; }
+  .channel-filters > * {max-width:100%;}
+  .channel-filters .key-select {width:auto; flex:1 1 13rem; max-width:100%;}
+  .channel-filters .inline-select select, .channel-filters .select-field select { font-size:.75rem; }
+  .channel-browser .mobile-channel-tools { display:inline-flex; min-height:36px; }
+  .channel-browser[data-mobile-tools="compact"] .data-actions > :not(.search-field,.mobile-channel-tools,[role="alert"]),
+  .channel-browser[data-mobile-tools="compact"] .channel-filters > :not(.time-select,.source-select),
+  .channel-browser[data-mobile-tools="compact"] .channel-scope-caption { display:none; }
+  .channel-browser[data-mobile-tools="compact"] .mobile-channel-scope:not(:empty) {
+    display:block; padding:0 12px; color:var(--muted); font-size:.75rem; overflow-wrap:anywhere;
+  }
+  .observation-table[data-columns="run"] { min-width:100%; }
+  .observation-table[data-columns="run"] .rank,
+  .observation-table[data-columns="run"] .column-run { display:none; }
+  .observation-table[data-columns="run"] td, .observation-table[data-columns="run"] th { padding-inline:7px; }
+  .observation-table .channel-link { min-width: 0; }
+  .observation-table[data-columns="run"] .provider-avatar { display:none; }
+  .observation-table .channel-link small, .channel-table + .table-footer, .table-footer, .metric-card p {font-size:.75rem;}
+  .channel-table .channel-identity {position:sticky; left:0;}
+  .balance-table .channel-identity {max-width:10rem;}
+  .balance-table .channel-identity strong {overflow-wrap:anywhere; white-space:normal;}
+}

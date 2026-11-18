@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { expect, it, vi } from "vitest";
 import { ChannelDetailTrends } from "./ChannelDetailTrends";
@@ -65,6 +65,16 @@ it("shares one scoped request with cache history and retains the entire selected
     "aria-label",
     expect.stringContaining("p50 100 ms / p95 800 ms"),
   );
+  const chart = latency.getByRole("group", { name: /使用左右方向键/ });
+  expect(chart).toHaveAttribute("tabindex","0");
+  expect(chart.querySelectorAll('[tabindex="0"]')).toHaveLength(0);
+  const currentPoint = latency.getByText(/正文首字 p50 250 ms$/, {selector:".detail-curve-value small"}).parentElement!;
+  const lastPoint = currentPoint.textContent;
+  fireEvent.keyDown(chart,{key:"Home"});
+  expect(currentPoint.textContent).not.toBe(lastPoint);
+  expect(currentPoint).toHaveTextContent("正文首字 p50 250 ms");
+  fireEvent.click(latency.getByRole("button",{name:"查看数据表"}));
+  expect(within(latency.getByRole("table")).getAllByRole("row")).toHaveLength(181);
   expect(latency.getAllByRole("img")[0]).toHaveAttribute(
     "aria-label",
     expect.stringContaining("正文首字 p50 250 ms"),

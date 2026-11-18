@@ -4,14 +4,16 @@ import { Activity } from "lucide-react";
 export function Tip({
   children,
   text,
+  keyboard = true,
 }: {
   children: ReactNode;
   text: ReactNode;
+  keyboard?: boolean;
 }) {
   return (
     <Tooltip.Root>
       <Tooltip.Trigger asChild>
-        <span className="tip-target" tabIndex={0}>
+        <span className="tip-target" tabIndex={keyboard ? 0 : undefined}>
           {children}
         </span>
       </Tooltip.Trigger>

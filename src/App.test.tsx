@@ -167,9 +167,9 @@ describe("dashboard workflows", () => {
     await app.user.click(screen.getByRole("button",{name:"保存"}));
     await app.user.click(screen.getByRole("button",{name:"预览"}));
     expect(screen.queryByRole("dialog",{name:"渠道排序"})).not.toBeInTheDocument();
-    expect(screen.getByLabelText("排序")).toHaveValue("preview");
+    expect(screen.getByLabelText("排序")).toHaveTextContent("排序预览");
     await app.user.selectOptions(screen.getByLabelText("模型筛选"),"model-b");
-    expect(screen.getByLabelText("排序")).toHaveValue("config");
+    expect(screen.getByLabelText("排序")).toHaveTextContent(/请求顺序|配置顺序/);
     await app.user.click(screen.getByRole("button",{name:"多条件排序"}));
     expect(screen.queryByLabelText("第 1 排序依据")).not.toBeInTheDocument();
     await app.user.click(screen.getByRole("button",{name:"添加排序依据"}));
@@ -180,28 +180,28 @@ describe("dashboard workflows", () => {
     await app.user.click(screen.getByRole("button",{name:"预览"}));
     expect(screen.queryByRole("dialog",{name:"渠道排序"})).not.toBeInTheDocument();
     await app.user.selectOptions(screen.getByLabelText("模型筛选"),"");
-    expect(screen.getByLabelText("排序")).toHaveValue("config");
+    expect(screen.getByLabelText("排序")).toHaveTextContent(/请求顺序|配置顺序/);
     await app.user.selectOptions(screen.getByLabelText("模型筛选"),"model-a");
     await app.user.click(screen.getByRole("button",{name:"多条件排序"}));
     expect(within(screen.getByLabelText("排序模板")).getByRole("option",{name:"高级模型"})).toHaveProperty("selected",true);
     expect(screen.getByLabelText("第 1 排序依据")).toHaveValue("quality");
     await app.user.click(screen.getByRole("button",{name:"关闭排序设置"}));
     await app.user.selectOptions(screen.getByLabelText("时间范围筛选"),"24h");
-    expect(screen.getByLabelText("排序")).toHaveValue("config");
+    expect(screen.getByLabelText("排序")).toHaveTextContent(/请求顺序|配置顺序/);
     await app.user.click(screen.getByRole("button",{name:"多条件排序"}));
     expect(screen.getByLabelText("第 1 排序依据")).toHaveValue("quality");
     expect(screen.getByRole("status")).toHaveTextContent("上次使用的模板");
     await app.user.click(screen.getByRole("button",{name:"关闭排序设置"}));
     await app.user.selectOptions(screen.getByLabelText("时间范围筛选"),"15m");
     app.unmount();app=setup({extraModel:true});await screen.findByRole("table");
-    expect(screen.getByLabelText("排序")).toHaveValue("config");
+    expect(screen.getByLabelText("排序")).toHaveTextContent(/请求顺序|配置顺序/);
     await app.user.click(screen.getByRole("button",{name:"多条件排序"}));
     await app.user.click(screen.getByRole("button",{name:"重命名模板"}));
     await app.user.clear(screen.getByLabelText("排序模板名称"));await app.user.type(screen.getByLabelText("排序模板名称"),"质量优先");
     await app.user.click(screen.getByRole("button",{name:"保存"}));
     await app.user.click(screen.getByRole("button",{name:"删除模板"}));
     await app.user.click(screen.getByRole("button",{name:"关闭排序设置"}));
-    expect(screen.getByLabelText("排序")).toHaveValue("config");
+    expect(screen.getByLabelText("排序")).toHaveTextContent(/请求顺序|配置顺序/);
     await app.user.selectOptions(screen.getByLabelText("模型筛选"),"model-b");
     await app.user.click(screen.getByRole("button",{name:"多条件排序"}));
     expect(screen.getByLabelText("第 1 排序依据")).toHaveValue("multiplier");
@@ -223,10 +223,10 @@ describe("dashboard workflows", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.queryByRole("region", {name:"请求顺序预览"})).not.toBeInTheDocument();
     expect(order()).toEqual([...actual].reverse());
-    expect(screen.getByLabelText("排序")).toHaveValue("preview");
+    expect(screen.getByLabelText("排序")).toHaveTextContent("排序预览");
     await app.user.click(screen.getByRole("button", {name:"取消预览"}));
     expect(order()).toEqual(actual);
-    expect(screen.getByLabelText("排序")).toHaveValue("config");
+    expect(screen.getByLabelText("排序")).toHaveTextContent(/请求顺序|配置顺序/);
     await app.user.click(screen.getByRole("button", {name: "多条件排序"}));
     await app.user.click(screen.getByRole("button", {name: "预览"}));
     expect(order()).toEqual([...actual].reverse());
@@ -241,7 +241,7 @@ describe("dashboard workflows", () => {
     app = setup();
     await screen.findByRole("table");
     expect(order()).toEqual(actual);
-    expect(screen.getByLabelText("排序")).toHaveValue("config");
+    expect(screen.getByLabelText("排序")).toHaveTextContent(/请求顺序|配置顺序/);
     await app.user.click(screen.getByRole("button", {name: "多条件排序"}));
     expect(screen.getByLabelText("第 1 排序依据")).toHaveValue("success");
     await app.user.click(screen.getByRole("button", {name: "预览"}));
@@ -319,7 +319,7 @@ describe("dashboard workflows", () => {
       expect(screen.queryByLabelText(label)).not.toBeInTheDocument();
     }
     expect(screen.getByLabelText("时间范围筛选")).toHaveValue("15m");
-    for (const header of ["估算消费", "渠道实际消费", "利润"]) {
+    for (const header of ["估算消费", "渠道实际消费", "渠道利润参考"]) {
       expect(screen.getByRole("columnheader", { name: header })).toBeVisible();
     }
     await user.selectOptions(screen.getByLabelText("时间范围筛选"), "today");
@@ -500,7 +500,7 @@ describe("dashboard workflows", () => {
     );
     await app.user.selectOptions(screen.getByLabelText("流式状态筛选"), "true");
     await app.user.click(screen.getByRole("button", { name: /^余额不足$/ }));
-    expect(screen.getByLabelText("排序")).toBeDisabled();
+    expect(screen.getByLabelText("排序")).toHaveTextContent(/请求顺序|配置顺序/);
     await waitFor(() => expect(screen.getAllByRole("row")).toHaveLength(2));
     app.unmount();
 
@@ -513,7 +513,7 @@ describe("dashboard workflows", () => {
     expect(screen.getByLabelText("时间范围筛选")).toHaveValue("1h");
     expect(screen.getByLabelText("搜索渠道或模型")).toHaveValue("third");
     expect(screen.getByLabelText("渠道状态筛选")).toHaveValue("unavailable");
-    expect(screen.getByLabelText("排序")).toHaveValue("config");
+    expect(screen.getByLabelText("排序")).toHaveTextContent(/请求顺序|配置顺序/);
     expect(screen.getByLabelText("端点筛选")).toHaveValue("/v1/messages");
     expect(screen.getByLabelText("流式状态筛选")).toHaveValue("true");
     expect(screen.getByRole("button", { name: /^余额不足$/ })).toHaveAttribute(
@@ -552,7 +552,7 @@ describe("dashboard workflows", () => {
     expect(screen.getByLabelText("API key 筛选")).toHaveValue("");
     expect(screen.getByLabelText("模型筛选")).toHaveValue("");
     expect(screen.getByLabelText("搜索渠道或模型")).toHaveValue("");
-    expect(screen.getByLabelText("排序")).toHaveValue("config");
+    expect(screen.getByLabelText("排序")).toHaveTextContent(/请求顺序|配置顺序/);
     expect(screen.getByLabelText("端点筛选")).toHaveValue("all");
     expect(screen.getByLabelText("流式状态筛选")).toHaveValue("all");
     expect(screen.getByLabelText("渠道状态筛选")).toHaveValue("");

@@ -96,7 +96,7 @@ func testSubConcurrentAccounts(t *testing.T, interrupt, observeFingerprint bool)
 			ok(map[string]any{"items": []any{}, "total": 0, "pages": 1})
 		case "/v1/sub2api/billing":
 			writeJSON(w, 200, map[string]any{"object": "sub2api.key_billing", "billing_scope": "token", "effective_rate_multiplier": 1})
-		case "/v1/responses", "/v1/messages", "/v1beta/models/gemini-4-hydrogen:streamGenerateContent", "/v1beta/models/gemini-4-carbon:streamGenerateContent", "/v1beta/models/gemini-4-argon:streamGenerateContent", "/v1beta/models/gemini-3.1-pro:streamGenerateContent", "/v1beta/models/gemini-3.8-flash:streamGenerateContent":
+		case "/v1/responses", "/v1/messages", "/v1/chat/completions", "/v1beta/models/gemini-4-hydrogen:streamGenerateContent", "/v1beta/models/gemini-4-carbon:streamGenerateContent", "/v1beta/models/gemini-4-argon:streamGenerateContent", "/v1beta/models/gemini-3.1-pro:streamGenerateContent", "/v1beta/models/gemini-3.8-flash:streamGenerateContent":
 			stage, _, _ := strings.Cut(r.Header.Get("X-Request-ID"), "-")
 			fingerprint := stage == "fingerprint"
 			mu.Lock()
@@ -142,9 +142,16 @@ func testSubConcurrentAccounts(t *testing.T, interrupt, observeFingerprint bool)
 				return
 			}
 			model := subFixtureProbeModel(r)
-			if r.URL.Path == "/v1/responses" {
+			switch r.URL.Path {
+			case "/v1/responses":
 				subSSE(w, "21", model)
-			} else {
+			case "/v1/chat/completions":
+				if !fingerprint || model != "deepseek-v4.1-flash-1017" {
+					t.Error("unexpected Chat probe", stage, model)
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				fmt.Fprint(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"fixture answer\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+			default:
 				subNativeSSE(w, model, "test")
 			}
 		default:

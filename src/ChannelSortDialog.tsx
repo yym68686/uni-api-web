@@ -184,7 +184,7 @@ export function ChannelSortDialog({
         <button
           className={`button small ${rules.length ? "selected" : ""}`}
           aria-label="多条件排序"
-          title="设置列表排序依据与优先级"
+          title="多条件排序：先预览列表，只有显式应用到实际路由才会修改请求顺序"
         >
           <ArrowDownWideNarrow size={15} />
           多条件排序
@@ -201,7 +201,7 @@ export function ChannelSortDialog({
               <span className="channel-sort-title-icon">
                 <ArrowDownWideNarrow size={21} />
               </span>
-              <Dialog.Title>渠道排序</Dialog.Title>
+              <Dialog.Title>渠道排序 · 预览与路由发布</Dialog.Title>
             </div>
             <Dialog.Close
               className="icon-button channel-sort-close"
@@ -230,6 +230,7 @@ export function ChannelSortDialog({
                 ))}
             </Dialog.Description>
           </header>
+          <p className="settings-note">预览和排序模板只调整本地列表。点「应用排序」会把当前预览写入实际请求路由。</p>
           <div className="channel-sort-body">
             <div
               className={routing?.busy ? "channel-sort-busy" : ""}

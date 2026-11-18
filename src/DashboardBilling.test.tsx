@@ -9,7 +9,7 @@ import { emptyStats } from "./analytics";
 import { defaultFilters, saveFilters } from "./preferences";
 
 it("shows and refreshes channel statistics independently of slow or failed billing", async () => {
-  saveFilters(location.origin, { ...defaultFilters, window: "24h", model: "gpt-6-luna", keyId: "primary::caller" });
+  saveFilters(JSON.stringify([location.origin, "billing-test"]), { ...defaultFilters, window: "24h", model: "gpt-6-luna", keyId: "primary::caller" });
   const channels = ["gpt-6-luna", "gpt-6-astra"].map(model => ({
     source_id: "primary", source_name: "Fugue", provider: "test-channel", model, upstream_model: model,
     eligible: true, reason: "eligible", endpoint: "all", stream: null,
@@ -80,7 +80,7 @@ it("shows and refreshes channel statistics independently of slow or failed billi
 });
 
 it("limits billing to the searched provider and restores the broad scope when search is cleared", async () => {
-  saveFilters(location.origin, { ...defaultFilters, window: "24h", model: "gpt-6-luna", keyId: "primary::caller", search: "needle-channel" });
+  saveFilters(JSON.stringify([location.origin, "provider-scope-test"]), { ...defaultFilters, window: "24h", model: "gpt-6-luna", keyId: "primary::caller", search: "needle-channel" });
   const channels = ["needle-channel", "unrelated-channel"].map(provider => ({
     source_id: "primary", source_name: "Fugue", provider, model: "gpt-6-luna", upstream_model: "gpt-6-luna",
     eligible: true, reason: "eligible", endpoint: "all", stream: null,

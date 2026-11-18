@@ -4,13 +4,14 @@ import { loadView } from "./preferences";
 import { PageLoading } from "./PageLoading";
 import { loadConnection } from "./session";
 import { useTheme } from "./theme";
+import { readWorkspace } from "./workspaceLocation";
 
 export function StartupScreen({ onRetry }: { onRetry?: () => void }) {
   const [theme] = useTheme();
   const [{ view, account }] = useState(() => {
     const connection = loadConnection();
     return {
-      view: loadView(connection?.base || location.origin, !connection),
+      view: readWorkspace(location.hash, !connection).view || loadView(connection?.base || location.origin, !connection),
       account: !connection,
     };
   });
@@ -27,6 +28,7 @@ export function StartupScreen({ onRetry }: { onRetry?: () => void }) {
           {onRetry ? (
             <div className="data-panel table-error" role="alert">
               <h2>账户服务暂不可用。</h2>
+              <p>无法验证当前登录会话。渠道和历史数据尚未开始读取，已保存的配置不会被更改。</p>
               <button className="button" onClick={onRetry}>
                 重试
               </button>

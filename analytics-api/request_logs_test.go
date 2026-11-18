@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -89,20 +90,38 @@ func TestRequestLogsCursorAndRefresh(t *testing.T) {
 	var facts []Fact
 	for i := 0; i < 113; i++ {
 		latency := float64(i % 5)
-		facts = append(facts, Fact{Schema: 1, Kind: "request", EventID: fmt.Sprintf("e%03d", i), RequestID: "reused-id", AtMS: now.Add(-time.Minute).UnixMilli() + int64(i%3), ResponseCreatedMS: &latency, Outcome: "success"})
+		facts = append(facts, Fact{Schema: 1, Kind: "request", EventID: fmt.Sprintf("e%03d", i), RequestID: "reused-id", AtMS: now.Add(-time.Minute).UnixMilli() + int64(i%3), ResponseCreatedMS: &latency, FirstTextMS: &latency, DurationMS: &latency, DispatchMS: &latency, Outcome: "success"})
 	}
 	if err := e.Import(ctx, "pages", "v1", facts); err != nil {
 		t.Fatal(err)
 	}
-	for _, sort := range []string{"latest", "oldest", "latency", "wait", "success"} {
+	for _, sort := range []string{"latest", "oldest", "latency", "wait", "latency-desc", "wait-desc", "created", "created-desc", "text", "text-desc", "duration", "duration-desc", "success"} {
 		filter := RequestLogFilter{QueryFilter: QueryFilter{Range: "24h", To: now.Unix()}, Sort: sort}
 		seen := map[string]bool{}
+		last := math.Inf(1)
 		for page := 0; page < 3; page++ {
 			got, err := e.RequestLogs(ctx, filter)
 			if err != nil {
 				t.Fatal(err)
 			}
 			for _, v := range got.Data {
+				var value *float64
+				switch sort {
+				case "duration-desc":
+					value = v.DurationMS
+				case "created-desc", "latency-desc":
+					value = v.ResponseCreatedMS
+				case "text-desc":
+					value = v.FirstTextMS
+				case "wait-desc":
+					value = v.DispatchMS
+				}
+				if value != nil {
+					if *value > last {
+						t.Fatalf("%s not globally descending after cursor: %v > %v", sort, *value, last)
+					}
+					last = *value
+				}
 				if seen[v.EventID] {
 					t.Fatal("duplicate page row", v.EventID)
 				}
@@ -136,6 +155,43 @@ func TestRequestLogsCursorAndRefresh(t *testing.T) {
 	refreshed, err := e.RequestLogs(ctx, filter)
 	if err != nil || refreshed.Data[0].EventID != "new" {
 		t.Fatal("refresh failed", refreshed, err)
+	}
+}
+
+func TestRequestLogsExactWindowAndAttemptEvidence(t *testing.T) {
+	e := stateTestEngine(t)
+	ctx := context.Background()
+	at := time.Now().Add(-time.Minute).UnixMilli()
+	started := at - 1000
+	fast, slow := float64(100), float64(300)
+	makeFact := func(id, kind, source, trace string, timestamp int64) Fact {
+		return Fact{Schema: 1, EventID: id, Kind: kind, SourceID: source, InstanceID: "instance", TraceID: trace,
+			RequestID: "reusable", AtMS: timestamp, StartedMS: started, Outcome: "success"}
+	}
+	first := makeFact("first", "request", "primary", "trace-first", at)
+	first.FirstTextMS = &fast
+	second := makeFact("second", "request", "primary", "trace-second", at)
+	second.ResponseCreatedMS = &slow
+	second.DispatchMS = &fast
+	facts := []Fact{first, second,
+		makeFact("no-metric", "request", "primary", "trace-third", at),
+		makeFact("before", "request", "primary", "before", at-2500),
+		makeFact("attempt-1", "attempt", "primary", "trace-second", at-800),
+		makeFact("attempt-2", "attempt", "primary", "trace-second", at-300),
+		makeFact("wrong-source", "attempt", "isolated", "trace-second", at-300),
+		makeFact("expired", "attempt", "primary", "trace-second", at-1500),
+	}
+	if err := e.Import(ctx, "request-log-evidence", "v1", facts); err != nil {
+		t.Fatal(err)
+	}
+	filter := RequestLogFilter{QueryFilter: QueryFilter{Range: "15m"}, FromMS: at - 1500, ToMS: at + 500, Sort: "latency-desc"}
+	got, err := e.RequestLogs(ctx, filter)
+	if err != nil || got.From != filter.FromMS || got.To != filter.ToMS || len(got.Data) != 3 {
+		t.Fatalf("window: %+v %v", got, err)
+	}
+	if got.Data[0].EventID != "second" || got.Data[1].EventID != "first" || got.Data[2].EventID != "no-metric" ||
+		got.Data[0].ObservedAttempts == nil || *got.Data[0].ObservedAttempts != 2 || got.Data[1].ObservedAttempts != nil {
+		t.Fatalf("ordering or observed attempts: %+v", got.Data)
 	}
 }
 

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { controlRequest } from "./api";
-import { time } from "./format";
+import { dateTime } from "./format";
 interface Persistence {
   enabled: boolean;
   status: string;
@@ -14,15 +14,21 @@ interface Persistence {
 export function ControlPersistence({
   source,
   name,
+  lazyLoad = false,
 }: {
   source: string;
   name: string;
+  lazyLoad?: boolean;
 }) {
+  const [expanded, setExpanded] = useState(!lazyLoad);
   const path = `/v1/sources/${encodeURIComponent(source)}/control-persistence`;
   const query = useQuery({
     queryKey: ["control-persistence", source],
     queryFn: ({ signal }) => controlRequest<Persistence>(path, { signal }),
-    refetchInterval: 5000,
+    enabled: expanded,
+    staleTime:30_000,
+    refetchInterval: entry => expanded && ["pending","restoring"].includes(entry.state.data?.status || "") ? 5000 : false,
+    refetchIntervalInBackground:false,
     retry: false,
   });
   const [busy, setBusy] = useState(false),
@@ -44,6 +50,7 @@ export function ControlPersistence({
     }
   }
   const data = query.data;
+  if (!expanded) return <button className="button small" onClick={()=>setExpanded(true)}>保留临时配置设置</button>;
   return (
     <div className="control-persistence">
       <label>
@@ -64,7 +71,7 @@ export function ControlPersistence({
         {data?.enabled === false
           ? "关闭后，来源下次重启将读取原配置文件。"
           : data?.status === "saved"
-            ? `已保存 ${data.channels} 个临时渠道 · ${data.rules} 条规则${data.restored_at ? ` · 最近恢复 ${time(data.restored_at)}` : ""}`
+            ? `已保存 ${data.channels} 个临时渠道 · ${data.rules} 条规则${data.restored_at ? ` · 最近恢复 ${dateTime(data.restored_at)}` : ""}`
             : data?.status === "restoring"
               ? "正在恢复重启前的配置…"
               : data?.status === "error"
@@ -76,6 +83,10 @@ export function ControlPersistence({
           {error || query.error?.message}
         </small>
       )}
+      {lazyLoad && <div className="recharge-actions">
+        <button className="button small" disabled={query.isFetching || busy} onClick={() => void query.refetch()}>读取状态</button>
+        <button className="button small ghost" disabled={busy} onClick={() => setExpanded(false)}>收起</button>
+      </div>}
     </div>
   );
 }

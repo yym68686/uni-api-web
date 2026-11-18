@@ -61,7 +61,7 @@ describe("filter preferences", () => {
         balanceThreshold: "15",
       }),
     );
-    expect(loadFilters(base)).toEqual({ ...defaultFilters, model: "model-a" });
+    expect(loadFilters(base)).toEqual({ ...defaultFilters, model: "model-a", balanceThreshold: "15" });
     saveFilters(base, {
       ...defaultFilters,
       connection: { key: "platform-secret" },

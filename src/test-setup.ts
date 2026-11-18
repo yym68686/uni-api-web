@@ -6,6 +6,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   localStorage.clear();
   sessionStorage.clear();
+  history.replaceState(null, "", location.pathname);
 });
 Object.defineProperty(window, "matchMedia", {
   writable: true,

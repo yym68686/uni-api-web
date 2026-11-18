@@ -11,23 +11,30 @@ export function SiteAccountSettings({
   account,
   close,
   saved,
+  initialSection = "rate",
 }: {
   account: SubAccount;
   close: () => void;
   saved: () => void;
+  initialSection?: "rate" | "recharge";
 }) {
   const [value, setValue] = useState(
     String(siteRateCoefficient(account.rate_coefficient)),
   );
   const [busy, setBusy] = useState(false);
+  const [rechargeBusy, setRechargeBusy] = useState(false);
+  const dialogBusy = busy || rechargeBusy;
   const [error, setError] = useState("");
-  const [section, setSection] = useState<"rate" | "recharge">("rate");
+  const [section, setSection] = useState<"rate" | "recharge">(initialSection);
   const coefficient = Number(value);
   const valid =
     value.trim() !== "" &&
     Number.isFinite(coefficient) &&
     coefficient > 0 &&
     coefficient <= 1000000;
+  const current = siteRateCoefficient(account.rate_coefficient);
+  const representative = account.targets?.find(target => Number.isFinite(target.rate) && target.rate > 0);
+  const precision = new Intl.NumberFormat("zh-CN", {maximumSignificantDigits:6});
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (busy || !valid) return;
@@ -58,7 +65,7 @@ export function SiteAccountSettings({
     <Dialog.Root
       open
       onOpenChange={(open) => {
-        if (!open && !busy) close();
+        if (!open && !dialogBusy) close();
       }}
     >
       <Dialog.Portal>
@@ -66,10 +73,10 @@ export function SiteAccountSettings({
         <Dialog.Content
           className="guide-dialog sub-account-dialog"
           onPointerDownOutside={(e) => {
-            if (busy) e.preventDefault();
+            if (dialogBusy) e.preventDefault();
           }}
           onEscapeKeyDown={(e) => {
-            if (busy) e.preventDefault();
+            if (dialogBusy) e.preventDefault();
           }}
         >
           <Dialog.Title>站点账号设置 · {account.name}</Dialog.Title>
@@ -80,7 +87,7 @@ export function SiteAccountSettings({
             type="button"
             className="icon-button detail-close"
             aria-label="关闭站点设置"
-            disabled={busy}
+            disabled={dialogBusy}
             onClick={close}
           >
             <X size={18} />
@@ -94,7 +101,7 @@ export function SiteAccountSettings({
               type="button"
               className="button small"
               aria-pressed={section === "rate"}
-              disabled={busy}
+              disabled={dialogBusy}
               onClick={() => setSection("rate")}
             >
               倍率设置
@@ -103,14 +110,14 @@ export function SiteAccountSettings({
               type="button"
               className="button small"
               aria-pressed={section === "recharge"}
-              disabled={busy}
+              disabled={dialogBusy}
               onClick={() => setSection("recharge")}
             >
               充值设置
             </button>
           </div>
           {section === "recharge" ? (
-            <SiteRecharge key={account.id} account={account} />
+            <SiteRecharge key={account.id} account={account} onBusyChange={setRechargeBusy} />
           ) : (
             <form className="source-form sub-account-form" onSubmit={submit}>
               <label>
@@ -131,6 +138,10 @@ export function SiteAccountSettings({
                 0.02；渠道实际消费 $10 将换算为
                 $1，利润随之重新计算。历史消费也按当前系数展示，原始账单和站点余额保持原值。
               </p>
+              {valid && <div className="site-rate-preview" role="status">
+                <p>本账号预览 · 当前系数 {precision.format(current)} → {precision.format(coefficient)} · 调整后为原展示 {precision.format(coefficient/current)} 倍</p>
+                {representative && <p>「{representative.name}」原始倍率 {precision.format(representative.rate)}：展示 {precision.format(representative.rate*current)} → {precision.format(representative.rate*coefficient)} 。</p>}
+              </div>}
               {!valid && (
                 <p className="settings-note">
                   请输入大于 0 且不超过 1000000 的系数。

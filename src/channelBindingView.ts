@@ -19,6 +19,12 @@ export function channelBindingView(
   routes: ChannelRoute[],
 ): ChannelBindingView[] {
   const bindings = new Map<string, ChannelBindingView>();
+  const configuredByProvider = new Map<string, { item: InstalledChannel; index: number }>();
+  configured.forEach((item, index) => {
+    if (item.source_id === source && !configuredByProvider.has(item.provider))
+      configuredByProvider.set(item.provider, {item, index});
+  });
+  const modelsByProvider = new Map<string, Set<string>>();
   for (const item of installed) {
     if (item.source_id !== source || item.api_key_id !== key) continue;
     bindings.set(item.provider, {
@@ -38,11 +44,9 @@ export function channelBindingView(
   }
   for (const row of routes) {
     if (row.api_key_id !== key) continue;
-    const item = configured.find(
-      (i) =>
-        i.source_id === source &&
-        (i.provider === row.provider || i.provider === row.origin_provider),
-    );
+    const direct = configuredByProvider.get(row.provider);
+    const original = row.origin_provider == null ? undefined : configuredByProvider.get(row.origin_provider);
+    const item = direct && (!original || direct.index < original.index) ? direct.item : original?.item;
     if (!item) continue;
     // Imported providers already have a complete editable binding. Avoid
     // showing the same route twice when both discovery paths report it.
@@ -57,8 +61,12 @@ export function channelBindingView(
       };
       bindings.set(row.provider, binding);
     }
-    if (!binding.rows.some((r) => r.model === row.model))
+    const models = modelsByProvider.get(row.provider) || new Set<string>();
+    if (!models.has(row.model)) {
+      models.add(row.model);
+      modelsByProvider.set(row.provider, models);
       binding.rows.push(row);
+    }
   }
   return [...bindings.values()];
 }

@@ -153,7 +153,7 @@ it("scopes opaque key IDs by source and keeps log preferences independent", () =
   expect(loadFilters("base", "balances").model).toBe("balance-model");
   expect(loadFilters("base", "requests").statusFilter).toBe("failed");
 });
-it("loads logs immediately, filters on the server, paginates and refreshes to the newest page", async () => {
+it("loads logs immediately, filters on the server and can jump to the newest page", async () => {
   const calls: URL[] = [];
   const user = setup(async (input) => {
     const url = new URL(input, location.origin);
@@ -179,7 +179,7 @@ it("loads logs immediately, filters on the server, paginates and refreshes to th
   expect(screen.getByLabelText("API key 筛选")).toHaveTextContent("90.0%");
   await user.click(screen.getByRole("button", { name: "下一页" }));
   await screen.findByRole("button", { name: "request-two" });
-  await user.click(screen.getByRole("button", { name: "刷新日志" }));
+  await user.click(screen.getByRole("button", { name: "查看最新" }));
   await screen.findByRole("button", { name: "request-one" });
   expect(calls.at(-1)?.searchParams.get("cursor")).toBe("");
   await user.selectOptions(screen.getByLabelText("时间范围筛选"), "24h");
@@ -206,8 +206,10 @@ it("loads logs immediately, filters on the server, paginates and refreshes to th
     status: "failed",
   });
   await user.click(screen.getByRole("button", { name: "重置筛选" }));
-  await waitFor(() => expect(calls.at(-1)?.searchParams.get("model")).toBe(""));
   expect(screen.getByLabelText("时间范围筛选")).toHaveValue("15m");
+  expect(screen.getByLabelText("模型筛选")).toHaveValue("");
+  expect(screen.getByLabelText("搜索请求")).toHaveValue("");
+  expect(await screen.findByRole("button", {name:"request-one"})).toBeVisible();
 });
 it("opens the existing timeline in a scoped modal and returns to the same log page", async () => {
   const calls: URL[] = [];
@@ -389,18 +391,21 @@ it("keeps the visible rows mounted until refresh succeeds and preserves them on 
   expect(reads).toBe(3); // Prepared data does not cause a duplicate request on display.
 });
 
-it("keeps a later page during refresh and only resets pagination after success", async () => {
+it("refreshes the visible historical page without resetting the cursor", async () => {
   let reads = 0;
   let finish!: (response: Response) => void;
+  let refreshedCursor: string | null = null;
   const user = setup(async (input) => {
     const url = new URL(input, location.origin);
     const aux = auxiliary(url);
     if (aux) return aux;
     reads++;
-    if (reads > 2)
+    if (reads > 2) {
+      refreshedCursor = url.searchParams.get("cursor");
       return new Promise<Response>((resolve) => {
         finish = resolve;
       });
+    }
     const next = url.searchParams.get("cursor") === "next";
     return Response.json({
       data: [
@@ -429,16 +434,17 @@ it("keeps a later page during refresh and only resets pagination after success",
   await act(async () =>
     finish(
       Response.json({
-        data: [{ ...row, event_id: "new", request_id: "newest" }],
+        data: [{ ...row, event_id: "new", request_id: "updated-page-two" }],
         models: [row.model],
         next_cursor: "new-cursor",
         to: row.at_ms + 1000,
       }),
     ),
   );
-  await screen.findByRole("button", { name: "newest" });
-  expect(screen.getByText(/第 1 页/)).toBeVisible();
-  expect(screen.getByRole("button", { name: "上一页" })).toBeDisabled();
+  await screen.findByRole("button", { name: "updated-page-two" });
+  expect(screen.getByText(/第 2 页/)).toBeVisible();
+  expect(screen.getByRole("button", { name: "上一页" })).toBeEnabled();
+  expect(refreshedCursor).toBe("next");
   expect(reads).toBe(4);
 });
 

@@ -9,7 +9,7 @@ import {
   balanceKind,
   balanceLabel,
   balanceStatus,
-  time,
+  dateTime,
   ms,
   count,
   rate,
@@ -26,6 +26,11 @@ export interface BalanceResult {
   isPending?: boolean;
   isError?: boolean;
 }
+export const channelMetricColumnClasses = [
+  "", "column-run", "column-run", "column-quality", "column-quality",
+  "column-run", "column-quality", "column-finance", "column-finance",
+  "column-finance", "column-finance", "",
+] as const;
 export function BalanceValue({
   balance,
   loading,
@@ -53,9 +58,10 @@ export function BalanceValue({
     );
   return (
     <div className={`balance-values ${detail ? "expanded" : ""}`}>
-      {balance.keys.map((item) => (
+      {balance.keys.map((item, index) => (
         <Tip
-          key={item.position}
+          key={`${item.position ?? ""}:${index}`}
+          keyboard={detail}
           text={
             <>
               <strong>{balanceKind[item.kind || ""] || "余额查询"}</strong>
@@ -64,7 +70,7 @@ export function BalanceValue({
                 <>上游余额接口返回 HTTP {item.http_status}<br /></>
               )}
               {item.checked_at
-                ? `查询时间 ${time(item.checked_at)} · 最多缓存 5 分钟`
+                ? `查询时间 ${dateTime(item.checked_at)} · 最多缓存 5 分钟`
                 : "上游尚未提供金额"}
               <br />
               同一账户的多个渠道余额可能共享，不可相加。
@@ -126,6 +132,7 @@ export function Timing({
 }) {
   return (
     <Tip
+      keyboard={false}
       text={
         <>
           <strong>
@@ -188,7 +195,7 @@ export function TotalTiming({ value, attempts = 0 }: { value?: Distribution; att
   const samples = value?.sample_count || 0;
   const recorded = samples > 0;
   return (
-    <Tip text={<>
+    <Tip keyboard={false} text={<>
       <strong>当前渠道尝试开始 → 离开当前渠道</strong><br />
       包含成功、失败和取消的已结束尝试；流式请求计到流结束。
       不包含尝试此渠道之前的排队、前序重试，也不包含后续渠道耗时；跳过和进行中的尝试不计入。<br />
@@ -215,40 +222,40 @@ export function ChannelMetricHeaders({
   return (
     <>
       <th>状态</th>
-      <th>
+      <th className="column-run">
         <Tip text="当前正在请求此渠道的全部 API key 的尝试数，不受历史时间窗口或 API key 用量筛选影响。">
           {keySelected ? "渠道总并发" : "当前并发"} <CircleHelp size={12} />
         </Tip>
       </th>
-      <th>
+      <th className="column-run">
         <Tip text={<FailureCounts channels={channels} summary />}>
           成功率 <CircleHelp size={12} />
         </Tip>
       </th>
-      <th>尝试数</th>
-      <th>
+      <th className="column-quality">尝试数</th>
+      <th className="column-quality">
         <Tip text="请求进入 uni-api → 渠道 HTTP 发起前。包含前序重试耗时，悬停或展开查看详情。">
           请求前等待 <small>p50</small>
         </Tip>
       </th>
-      <th>
+      <th className="column-run">
         首字延迟 <small>p50 / p95</small>
       </th>
-      <th>
+      <th className="column-quality">
         <Tip text="当前渠道单次尝试从开始到离开的总时间，包含成功、失败和取消；流式请求计到流结束。不包含前序重试和后续渠道耗时，跳过及进行中的尝试不计入。p50 / p95 为直方图上界估计。">
           总时间 <small>p50 / p95</small>
         </Tip>
       </th>
-      <th>Token / 缓存率</th>
-      <th>估算消费</th>
-      <th>
+      <th className="column-finance">Token / 缓存率</th>
+      <th className="column-finance">估算消费</th>
+      <th className="column-finance">
         <Tip text="已关联账单按上游响应标识逐请求归属，跟随来源、调用 API key、渠道、模型、时间、端点和流式筛选。重试单独关联且每条账单只计一次；账单未完整匹配时显示已核对消费下界及利润上限。未接入关联的渠道按日金额仅作参考。">
           {keySelected ? "渠道实际消费" : "实际消费"} <CircleHelp size={12} />
         </Tip>
       </th>
-      <th>
-        <Tip text="利润（人民币）= 估算消费 × 对应模型售卖百分比 ÷ 100 × 6.9 − 渠道实际消费，仅取数值计算。利润率 = 利润 ÷（估算消费 × 对应模型售卖百分比 ÷ 100 × 6.9）。账单未齐但已有核对费用时，显示带 ≤ 的利润上限及利润率上限；实际结果可能更低。">
-          利润 <CircleHelp size={12} />
+      <th className="column-finance">
+        <Tip text="沿用经营参考公式：估算消费 × 售卖比例 × 6.9 − 渠道实际消费数值。成本未进行币种换算，不是财务利润，不能用于对账。覆盖不足时按现有记录标记暂计或上限。">
+          利润参考 <CircleHelp size={12} />
         </Tip>
       </th>
       <th>余额 / 额度</th>
@@ -281,9 +288,9 @@ export function ChannelMetricCells({
       <td>
         <Status row={row} />
       </td>
-      <td className="mono">{inflight == null ? "—" : inflight}</td>
-      <td>
-        <Tip text={<FailureCounts channels={[row]} summary />}>
+      <td className="mono column-run">{inflight == null ? "—" : inflight}</td>
+      <td className="column-run">
+        <Tip keyboard={false} text={<FailureCounts channels={[row]} summary />}>
           <div className="success-cell">
             <span
               className={`mono ${success == null ? "muted" : success < 0.5 ? "negative" : ""}`}
@@ -301,7 +308,7 @@ export function ChannelMetricCells({
           </div>
         </Tip>
       </td>
-      <td className="mono">
+      <td className="mono column-quality">
         {metricsUnavailable
           ? "—"
           : row.history_configured === false
@@ -310,10 +317,10 @@ export function ChannelMetricCells({
               ? "未同步"
               : count(row.stats?.success_rate_denominator || 0)}
       </td>
-      <td>
+      <td className="column-quality">
         <Timing value={row.stats?.request_to_dispatch} wait />
       </td>
-      <td>
+      <td className="column-run">
         <div className="dual-metric">
           <Timing
             value={channelLatency(row.stats).value}
@@ -325,10 +332,10 @@ export function ChannelMetricCells({
           </span>}
         </div>
       </td>
-      <td>
+      <td className="column-quality">
         <TotalTiming value={row.stats?.duration} attempts={row.stats?.started} />
       </td>
-      <td className="mono">
+      <td className="mono column-finance">
         {row.stats?.usage_samples
           ? count(
               (row.stats.input_tokens || 0) + (row.stats.output_tokens || 0),
@@ -336,12 +343,12 @@ export function ChannelMetricCells({
           : "—"}
         <small className="usage-cache">{rate(row.stats?.cache_rate)}</small>
       </td>
-      <td className="mono">{usd(row.stats?.estimated_cost_usd)}</td>
-      <td className="mono">
+      <td className="mono column-finance">{usd(row.stats?.estimated_cost_usd)}</td>
+      <td className="mono column-finance">
         {spend || importedChannel ? (
           <SubChannelSpendValue query={spend} />
         ) : !actualRange.supported ? (
-          <Tip text="此渠道未关联 sub2api 账号的业务 Key，只能读取上游按日汇总；当前滚动窗口不显示整日金额。">
+          <Tip keyboard={false} text="此渠道未关联 sub2api 账号的业务 Key，只能读取上游按日汇总；当前滚动窗口不显示整日金额。">
             <span className="muted">按日</span>
           </Tip>
         ) : balance?.isPending && !balance.data ? (
@@ -352,7 +359,7 @@ export function ChannelMetricCells({
           usd(balance.data.actual_cost_usd)
         )}
       </td>
-      <td>
+      <td className="column-finance">
         <ChannelProfit
           estimated={row.stats?.estimated_cost_usd}
           actual={profitCost?.actual}

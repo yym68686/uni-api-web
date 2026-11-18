@@ -187,9 +187,10 @@ it.each([
     await user.click(
       navigation.getByRole("button", { name: new RegExp(`^${label}`) }),
     );
-    expect(
-      within(screen.getByRole("main")).getByText(content),
-    ).toBeInTheDocument();
+    const assertContent = () => label === "渠道管理"
+      ? within(screen.getByRole("main")).getByRole("heading", { name: content })
+      : within(screen.getByRole("main")).getByText(content);
+    expect(assertContent()).toBeInTheDocument();
     first.unmount();
 
     let resolveSources!: (response: Response) => void;
@@ -202,9 +203,7 @@ it.each([
       restoredNavigation.getByRole("button", { name: new RegExp(`^${label}`) }),
     ).toHaveClass("active");
     expect(within(screen.getByRole("banner")).getByText(label)).toBeVisible();
-    expect(
-      within(screen.getByRole("main")).getByText(content),
-    ).toBeInTheDocument();
+    expect(assertContent()).toBeInTheDocument();
     await act(async () => {
       resolveSources(new Response(JSON.stringify(sourceData)));
     });
@@ -217,7 +216,7 @@ it.each([
       restoredNavigation.getByRole("button", { name: new RegExp(`^${label}`) }),
     ).toHaveClass("active");
     await waitFor(() =>
-      expect(within(screen.getByRole("main")).getByText(content)).toBeVisible(),
+      expect(assertContent()).toBeVisible(),
     );
   },
 );

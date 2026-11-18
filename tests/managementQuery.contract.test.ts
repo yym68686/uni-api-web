@@ -130,8 +130,8 @@ it("freezes every filter, facets and stable sort against the browser implementat
     {search:"a",excludeName:"GROUP-1",sort:"asc"},
   ];
   const filterCases=["","public","gpt-5.5","claude-opus-5-5"].flatMap(model=>patches.map(patch=>{
-    // Preserve the frozen contract's explicit configuration order; the UI default is tested separately.
-    const filters={...subFilterDefaults,sort:"",model,...patch};
+    // Freeze the explicit legacy acquisition scope and order alongside the individual all-assets case.
+    const filters={...subFilterDefaults,sort:"",groupStatus:"available",model,...patch};
     const rows=managementRows(priceInputs.accounts,priceInputs.channels,priceInputs.imports,model,filters.accountId,priceInputs.checks);
     const fingerprints=Object.fromEntries(rows.map((row,i)=>[row.id,[[],["match","untested"],["mismatch"],["untested"]][i%4]]));
     const joined=Object.fromEntries(rows.map((row,i)=>[row.id,["joined","unjoined","unknown"][i%3]]));

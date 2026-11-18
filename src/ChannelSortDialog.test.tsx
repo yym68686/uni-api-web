@@ -113,7 +113,7 @@ it("edits priorities and directions in a cancelable draft, with reset and reusab
   const user = userEvent.setup();
   render(<ChannelSortDialog rules={qualityFirstRules} onApply={apply} />);
   await user.click(screen.getByRole("button", { name: "多条件排序" }));
-  const dialog = screen.getByRole("dialog", { name: "渠道排序" });
+  const dialog = screen.getByRole("dialog", { name: /渠道排序/ });
   expect(within(dialog).getByLabelText("第 1 排序依据")).toHaveValue("quality");
   await user.click(within(dialog).getByRole("button", { name: "上移第 2 项" }));
   expect(within(dialog).getByLabelText("第 1 排序依据")).toHaveValue(

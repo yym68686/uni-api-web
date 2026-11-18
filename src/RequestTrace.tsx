@@ -1,5 +1,5 @@
 import { DetailLoading } from "./PageLoading";
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { queryOptions, useQuery } from "@tanstack/react-query";
@@ -520,7 +520,7 @@ function AttemptWaterfall({
   );
 }
 
-function AttemptDrawer({
+function AttemptDetails({
   run,
   attempt,
   number,
@@ -535,32 +535,30 @@ function AttemptDrawer({
 }) {
   const channel = traceChannel(run, attempt.provider);
   const timing = attemptTiming(attempt);
+  const panel = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    panel.current?.focus({preventScroll:true});
+    panel.current?.scrollIntoView?.({block:"nearest"});
+  }, []);
   return (
-    <Dialog.Root
-      open
-      onOpenChange={(open) => {
-        if (!open) onClose();
-      }}
-    >
-      <Dialog.Portal>
-        <Dialog.Overlay className="dialog-overlay trace-attempt-overlay" />
-        <Dialog.Content className="detail-panel trace-detail-drawer">
-          <Dialog.Close
+    <section ref={panel} tabIndex={-1} className="trace-attempt-inline" aria-label={`尝试详情 · ${channel.name}`}>
+          <button type="button"
             className="icon-button detail-close"
             aria-label="关闭尝试详情"
+            onClick={onClose}
           >
             <X size={20} />
-          </Dialog.Close>
+          </button>
           <span className="eyebrow">
             {attempt.sent
               ? `CHANNEL ATTEMPT ${number.toString().padStart(2, "0")}`
               : "渠道选择记录"}
           </span>
-          <Dialog.Title>{channel.name}</Dialog.Title>
-          <Dialog.Description>
+          <h4>{channel.name}</h4>
+          <p className="muted">
             {channel.group_name || "本次请求的渠道尝试"}
             {channel.group_id ? ` · 分组 #${channel.group_id}` : ""}
-          </Dialog.Description>
+          </p>
           <div className="trace-drawer-status">
             <Status
               tone={attempt.tone}
@@ -615,9 +613,7 @@ function AttemptDrawer({
               <dd>{run.request_id}</dd>
             </dl>
           </details>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+    </section>
   );
 }
 
@@ -630,7 +626,8 @@ export function TraceTimeline({
 }) {
   const trace = buildTrace(run);
   const [selected, setSelected] = useState<string | null>(null);
-  const [openAttempt, setOpenAttempt] = useState<string | null>(null);
+  const [openAttempts, setOpenAttempts] = useState<string[]>([]);
+  const attemptOpeners = useRef(new Map<string, HTMLElement>());
   const { attempts, arrival, final, completed, origin, span } = trace;
   const finalState = run.ambiguous
     ? { label: "无法区分", tone: "warning" as const }
@@ -641,14 +638,15 @@ export function TraceTimeline({
     : (completed?.duration_ms ?? final?.duration_ms);
   const successes = attempts.filter((a) => a.tone === "success").length;
   const failures = attempts.filter((a) => a.tone === "failure").length;
-  const chosen = [...attempts, ...trace.skipped, ...trace.unresolved].find(
-    (a) => a.id === openAttempt,
+  const chosen = [...attempts, ...trace.skipped, ...trace.unresolved].filter(
+    (a) => openAttempts.includes(a.id),
   );
   const hasTimes = !run.ambiguous && trace.events.length > 0;
   const downstream = run.ambiguous ? [] : downstreamTiming(trace.gateway);
   const open = (attempt: TraceAttempt) => {
+    if (document.activeElement instanceof HTMLElement) attemptOpeners.current.set(attempt.id,document.activeElement);
     setSelected(attempt.id);
-    setOpenAttempt(attempt.id);
+    setOpenAttempts(current => current.includes(attempt.id) ? current : [...current,attempt.id]);
   };
   return (
     <section className="trace-run">
@@ -940,16 +938,20 @@ export function TraceTimeline({
           渠道名称与倍率来自当前关联。阶段详情中的渠道耗时从各自请求开始计时；响应发送结束不证明客户端已接收全部字节。
         </p>
       </details>
-      {chosen && (
-        <AttemptDrawer
-          key={chosen.id}
+      {chosen.length > 0 && <div className="trace-attempt-compare">
+        {chosen.map(attempt => <AttemptDetails
+          key={attempt.id}
           run={run}
-          attempt={chosen}
-          number={attempts.indexOf(chosen) + 1}
+          attempt={attempt}
+          number={attempts.indexOf(attempt) + 1}
           origin={origin}
-          onClose={() => setOpenAttempt(null)}
-        />
-      )}
+          onClose={() => {
+            setOpenAttempts(current=>current.filter(id=>id!==attempt.id));
+            attemptOpeners.current.get(attempt.id)?.focus();
+            attemptOpeners.current.delete(attempt.id);
+          }}
+        />)}
+      </div>}
     </section>
   );
 }

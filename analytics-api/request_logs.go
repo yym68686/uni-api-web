@@ -7,6 +7,7 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -37,10 +38,12 @@ type RequestLog struct {
 	InputTokens       *int64   `json:"input_tokens"`
 	OutputTokens      *int64   `json:"output_tokens"`
 	CacheReadTokens   *int64   `json:"cache_read_tokens"`
+	ObservedAttempts  *int64   `json:"observed_attempts"`
 }
 type RequestLogFilter struct {
 	QueryFilter
 	Search, Status, Balance, Sort, Cursor string
+	FromMS, ToMS                          int64
 }
 type requestLogCursor struct {
 	To    int64   `json:"to"`
@@ -83,11 +86,18 @@ func (e *Engine) RequestLogs(ctx context.Context, f RequestLogFilter) (RequestLo
 		}
 		now = time.UnixMilli(cursor.To).UTC()
 	}
-	start, err := rangeStart(f.Range, now, e.Location)
-	if err != nil {
-		return out, err
+	if f.FromMS > 0 && f.ToMS > f.FromMS {
+		out.From, out.To = f.FromMS, f.ToMS
+		if f.Cursor != "" && cursor.To != out.To {
+			return out, errors.New("cursor does not match the requested window")
+		}
+	} else {
+		start, err := rangeStart(f.Range, now, e.Location)
+		if err != nil {
+			return out, err
+		}
+		out.From, out.To = start.UnixMilli(), now.UnixMilli()
 	}
-	out.From, out.To = start.UnixMilli(), now.UnixMilli()
 	where, args := sourceWhere([]string{"kind='request'", "at_ms>=? AND at_ms<=?"}, []any{out.From, out.To}, f.QueryFilter)
 	// Historical facets stay available when keys/models are removed from live routes.
 	models, err := e.DB.QueryContext(ctx, `SELECT DISTINCT coalesce(source_id,'') AS source_id,coalesce(key_id,'') AS key_id,coalesce(model,'') AS model,coalesce(endpoint,'') AS endpoint FROM facts WHERE `+strings.Join(where, " AND ")+` ORDER BY source_id,key_id,model,endpoint`, args...)
@@ -151,8 +161,24 @@ func (e *Engine) RequestLogs(ctx context.Context, f RequestLogFilter) (RequestLo
 		sortExpr = "CASE result WHEN 'success' THEN 0 WHEN 'failed' THEN 1 ELSE 2 END"
 	case "latency":
 		sortExpr = "coalesce(response_created_ms,first_text_ms,1e30)"
+	case "latency-desc":
+		sortExpr = "coalesce(-coalesce(response_created_ms,first_text_ms),1e30)"
+	case "created":
+		sortExpr = "coalesce(response_created_ms,1e30)"
+	case "created-desc":
+		sortExpr = "coalesce(-response_created_ms,1e30)"
+	case "text":
+		sortExpr = "coalesce(first_text_ms,1e30)"
+	case "text-desc":
+		sortExpr = "coalesce(-first_text_ms,1e30)"
+	case "duration":
+		sortExpr = "coalesce(duration_ms,1e30)"
+	case "duration-desc":
+		sortExpr = "coalesce(-duration_ms,1e30)"
 	case "wait":
 		sortExpr = "coalesce(dispatch_ms,1e30)"
+	case "wait-desc":
+		sortExpr = "coalesce(-dispatch_ms,1e30)"
 	}
 	outer := []string{"true"}
 	if f.Status != "" {
@@ -164,9 +190,14 @@ func (e *Engine) RequestLogs(ctx context.Context, f RequestLogFilter) (RequestLo
 		args = append(args, cursor.Value, cursor.Value, cursor.At, cursor.At, cursor.ID)
 	}
 	// Fixed-size pages bound transfer size, not the number of accessible records.
-	rows, err := e.DB.QueryContext(ctx, `WITH scoped AS (SELECT *,`+requestLogResultSQL+` AS result FROM facts WHERE `+strings.Join(where, " AND ")+`), ordered AS (SELECT *,`+sortExpr+` AS sort_value FROM scoped)
+	rows, err := e.DB.QueryContext(ctx, `WITH scoped AS (SELECT *,`+requestLogResultSQL+` AS result FROM facts WHERE `+strings.Join(where, " AND ")+`), ordered AS (SELECT *,`+sortExpr+` AS sort_value FROM scoped),
+ page AS MATERIALIZED (SELECT * FROM ordered WHERE `+strings.Join(outer, " AND ")+` ORDER BY sort_value,at_ms DESC,event_id DESC LIMIT 51)
  SELECT event_id,coalesce(source_id,''),coalesce(instance_id,''),coalesce(request_id,''),coalesce(trace_id,''),coalesce(key_id,''),coalesce(model,''),coalesce(endpoint,''),coalesce(stream,false),at_ms,started_ms,coalesce(status,0),coalesce(outcome,''),result,coalesce(failure_reason,''),duration_ms,dispatch_ms,response_created_ms,first_text_ms,input_tokens,output_tokens,cache_read_tokens,sort_value
- FROM ordered WHERE `+strings.Join(outer, " AND ")+` ORDER BY sort_value,at_ms DESC,event_id DESC LIMIT 51`, args...)
+ , (SELECT nullif(count(DISTINCT coalesce(nullif(a.attempt_id,''),a.event_id)),0)
+    FROM facts a WHERE a.kind='attempt' AND page.trace_id<>'' AND page.started_ms IS NOT NULL
+      AND a.source_id=page.source_id AND a.instance_id IS NOT DISTINCT FROM page.instance_id
+      AND a.trace_id=page.trace_id AND a.at_ms BETWEEN page.started_ms AND page.at_ms)
+ FROM page ORDER BY sort_value,at_ms DESC,event_id DESC`, args...)
 	if err != nil {
 		return out, err
 	}
@@ -175,7 +206,7 @@ func (e *Engine) RequestLogs(ctx context.Context, f RequestLogFilter) (RequestLo
 	for rows.Next() {
 		var v RequestLog
 		var sortValue float64
-		if err = rows.Scan(&v.EventID, &v.SourceID, &v.InstanceID, &v.RequestID, &v.TraceID, &v.KeyID, &v.Model, &v.Endpoint, &v.Stream, &v.AtMS, &v.StartedMS, &v.Status, &v.Outcome, &v.Result, &v.FailureReason, &v.DurationMS, &v.DispatchMS, &v.ResponseCreatedMS, &v.FirstTextMS, &v.InputTokens, &v.OutputTokens, &v.CacheReadTokens, &sortValue); err != nil {
+		if err = rows.Scan(&v.EventID, &v.SourceID, &v.InstanceID, &v.RequestID, &v.TraceID, &v.KeyID, &v.Model, &v.Endpoint, &v.Stream, &v.AtMS, &v.StartedMS, &v.Status, &v.Outcome, &v.Result, &v.FailureReason, &v.DurationMS, &v.DispatchMS, &v.ResponseCreatedMS, &v.FirstTextMS, &v.InputTokens, &v.OutputTokens, &v.CacheReadTokens, &sortValue, &v.ObservedAttempts); err != nil {
 			return out, err
 		}
 		if len(out.Data) == 50 {
@@ -199,6 +230,16 @@ func (s *Service) requestLogs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid range", 400)
 		return
 	}
+	var from, to int64
+	if q.Has("from_ms") || q.Has("to_ms") {
+		var fromErr, toErr error
+		from, fromErr = strconv.ParseInt(q.Get("from_ms"), 10, 64)
+		to, toErr = strconv.ParseInt(q.Get("to_ms"), 10, 64)
+		if fromErr != nil || toErr != nil || from <= 0 || to <= from || to-from > (366*24*time.Hour).Milliseconds() || to > time.Now().Add(5*time.Minute).UnixMilli() {
+			http.Error(w, "invalid absolute time window", 400)
+			return
+		}
+	}
 	valid := func(value string, values ...string) bool {
 		for _, v := range values {
 			if value == v {
@@ -207,14 +248,14 @@ func (s *Service) requestLogs(w http.ResponseWriter, r *http.Request) {
 		}
 		return false
 	}
-	if !valid(q.Get("status"), "", "success", "failed", "cancelled", "unknown") || !valid(q.Get("sort"), "", "latest", "oldest", "success", "latency", "wait") || !valid(q.Get("stream"), "", "all", "true", "false") || !valid(q.Get("balance"), "", "low") || len(q.Get("search")) > 512 || strings.IndexFunc(q.Get("search"), unicode.IsControl) >= 0 || len(q.Get("cursor")) > 4096 {
+	if !valid(q.Get("status"), "", "success", "failed", "cancelled", "unknown") || !valid(q.Get("sort"), "", "latest", "oldest", "success", "latency", "wait", "latency-desc", "wait-desc", "created", "created-desc", "text", "text-desc", "duration", "duration-desc") || !valid(q.Get("stream"), "", "all", "true", "false") || !valid(q.Get("balance"), "", "low") || len(q.Get("search")) > 512 || strings.IndexFunc(q.Get("search"), unicode.IsControl) >= 0 || len(q.Get("cursor")) > 4096 {
 		http.Error(w, "invalid request filters", 400)
 		return
 	}
 	if q.Get("cursor") != "" {
 		raw, err := base64.RawURLEncoding.DecodeString(q.Get("cursor"))
 		var c requestLogCursor
-		if err != nil || json.Unmarshal(raw, &c) != nil || c.To <= 0 || c.At < 0 || c.ID == "" {
+		if err != nil || json.Unmarshal(raw, &c) != nil || c.To <= 0 || c.At < 0 || c.ID == "" || (to > 0 && c.To != to) {
 			http.Error(w, "invalid cursor", 400)
 			return
 		}
@@ -228,7 +269,7 @@ func (s *Service) requestLogs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "source unavailable", 404)
 		return
 	}
-	result, err := s.engine.RequestLogs(r.Context(), RequestLogFilter{QueryFilter: QueryFilter{SourceIDs: allowed, SourceID: q.Get("source_id"), KeyID: q.Get("key_id"), Range: name, Model: q.Get("model"), Endpoint: q.Get("endpoint"), Stream: q.Get("stream")}, Search: strings.TrimSpace(q.Get("search")), Status: q.Get("status"), Balance: q.Get("balance"), Sort: q.Get("sort"), Cursor: q.Get("cursor")})
+	result, err := s.engine.RequestLogs(r.Context(), RequestLogFilter{QueryFilter: QueryFilter{SourceIDs: allowed, SourceID: q.Get("source_id"), KeyID: q.Get("key_id"), Range: name, Model: q.Get("model"), Endpoint: q.Get("endpoint"), Stream: q.Get("stream")}, Search: strings.TrimSpace(q.Get("search")), Status: q.Get("status"), Balance: q.Get("balance"), Sort: q.Get("sort"), Cursor: q.Get("cursor"), FromMS: from, ToMS: to})
 	if err != nil {
 		writeJSON(w, 503, map[string]string{"error": "request logs unavailable"})
 		return

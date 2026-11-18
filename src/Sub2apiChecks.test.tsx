@@ -261,6 +261,7 @@ it("manages initial channels with account/unassigned filters and shows every cal
   expect(managementDrawer.getAllByText("gpt-6-astra")[0]).toBeVisible();
   await user.click(managementDrawer.getByRole("button", {name:"关闭渠道详情"}));
   await user.click(screen.getByRole("button",{name:"检测全部模型 · 1 个渠道"}));
+  await user.click(await screen.findByRole("button", { name: "确认提交检测" }));
   expect(writes[0].targets).toHaveLength(1);
   await user.click(within(boundRow).getByRole("button",{name:"已添加 · 2 个 key"}));
   const dialog=within(screen.getByRole("dialog"));
@@ -578,10 +579,12 @@ it("filters unit prices across pages and models, persists selection, and scopes 
   await user.click(screen.getByRole("button", { name: "下一页" }));
   expect(screen.getByRole("table").querySelectorAll("tbody tr")).toHaveLength(2);
   await user.click(screen.getByRole("button", { name: "检测全部模型 · 27 个渠道" }));
+  await user.click(await screen.findByRole("button", { name: "确认提交检测" }));
   await waitFor(() => expect(writes).toHaveLength(1));
   expect(writes[0].targets.map(t => t.group_id)).toEqual(Array.from({ length: 27 }, (_, i) => i + 1));
   expect(writes[0].targets[0].models).toEqual(SUB_MODELS);
   await user.click(screen.getByRole("button", { name: "降智检测 · 27 个渠道" }));
+  await user.click(await screen.findByRole("button", { name: "确认提交检测" }));
   await waitFor(() => expect(writes).toHaveLength(2));
   expect(writes[1].targets.map(t => t.group_id)).toEqual(writes[0].targets.map(t => t.group_id));
   await user.selectOptions(filter, "normal");
@@ -638,6 +641,7 @@ it("filters unconfirmed prices by numerical agreement and remembers the new sele
   expect(screen.getByText("different-price")).toBeVisible();
   expect(screen.queryByText("same-price")).not.toBeInTheDocument();
   await user.click(screen.getByRole("button",{name:"检测所选模型 · 1 个渠道"}));
+  await user.click(await screen.findByRole("button", { name: "确认提交检测" }));
   expect(writes[0].targets).toEqual([{account_id:"one",group_id:2,models:["codex-auto-review"]}]);
   await user.selectOptions(screen.getByLabelText("检测模型筛选"),"gpt-6-astra");
   expect(screen.queryByText("different-price")).not.toBeInTheDocument();
@@ -735,6 +739,7 @@ it("runs standalone Astra quality checks for every filtered page regardless of t
   await user.click(
     screen.getByRole("button", { name: "降智检测 · 28 个渠道" }),
   );
+  await user.click(await screen.findByRole("button", { name: "确认提交检测" }));
   await waitFor(() =>
     expect(writes).toEqual([
       {
@@ -819,6 +824,7 @@ it("refreshes Astra availability and model match from quality results without ch
   );
   expect(screen.getByRole("table")).toHaveTextContent("6.50 s");
   await user.click(screen.getByRole("button", { name: "降智检测 · 1 个渠道" }));
+  await user.click(await screen.findByRole("button", { name: "确认提交检测" }));
   expect(await screen.findByText("不降智", { selector: "span" })).toBeVisible();
   expect(screen.getByRole("table")).toHaveTextContent("6.50 s");
   await user.selectOptions(
@@ -874,6 +880,7 @@ it("shows multipliers as numbers, filters all-page batch targets, and restores p
   await user.click(
     screen.getByRole("button", { name: "检测所选模型 · 1 个渠道" }),
   );
+  await user.click(await screen.findByRole("button", { name: "确认提交检测" }));
   await waitFor(() =>
     expect(writes).toEqual([
       {
@@ -1336,6 +1343,7 @@ it("filters compaction across all pages, queues groups independently of the sele
   await user.selectOptions(screen.getByLabelText("选择检测项目"), "compaction");
   expect(writes).toHaveLength(0);
   await user.click(screen.getByRole("button", {name:"压缩检测 · 27 个渠道"}));
+  await user.click(await screen.findByRole("button", { name: "确认提交检测" }));
   await waitFor(() => expect(writes).toHaveLength(1));
   expect(writes[0].targets.map(t => t.group_id)).toEqual(Array.from({length:27}, (_,i)=>i+1));
   expect(writes[0].targets.every(t => !t.models)).toBe(true);
@@ -1379,6 +1387,7 @@ it("filters Tool use across pages, remembers the filter, and queues only selecte
   expect(screen.getByRole("table").querySelectorAll("tbody tr")).toHaveLength(2);
   await user.selectOptions(screen.getByLabelText("选择检测项目"), "tool-use");
   await user.click(screen.getByRole("button",{name:"Tool use 检测 · 27 个渠道"}));
+  await user.click(await screen.findByRole("button", { name: "确认提交检测" }));
   await waitFor(()=>expect(writes).toHaveLength(1));
   expect(writes[0].path).toBe("/analytics/v1/sub2api/tool-use-checks");
   expect(writes[0].targets.map(t=>t.group_id)).toEqual(Array.from({length:27},(_,i)=>i+1));
@@ -1440,6 +1449,7 @@ it("all-models groups channels and probes all supported models despite available
   await user.click(
     screen.getByRole("button", { name: "检测全部模型 · 1 个渠道" }),
   );
+  await user.click(await screen.findByRole("button", { name: "确认提交检测" }));
   await waitFor(() => expect(writes).toHaveLength(1));
   expect(writes[0]).toEqual({
     targets: [{ account_id: "one", group_id: 1, models: [...SUB_MODELS] }],
@@ -1528,6 +1538,7 @@ it("specific model uses Astra group quality and only tests the selected model", 
   await user.click(
     screen.getByRole("button", { name: "检测所选模型 · 1 个渠道" }),
   );
+  await user.click(await screen.findByRole("button", { name: "确认提交检测" }));
   await waitFor(() => expect(writes).toHaveLength(1));
   expect(writes[0].targets).toEqual([
     { account_id: "one", group_id: 1, models: ["gpt-5.6-sol"] },
@@ -1537,6 +1548,7 @@ it("specific model uses Astra group quality and only tests the selected model", 
   await user.click(
     screen.getByRole("button", { name: "检测全部模型 · 1 个渠道" }),
   );
+  await user.click(await screen.findByRole("button", { name: "确认提交检测" }));
   await waitFor(() => expect(writes).toHaveLength(2));
   expect(writes[1].targets[0].models).toEqual([...SUB_MODELS]);
 });
@@ -1593,6 +1605,7 @@ it("all-model batch spans all filtered pages and includes failed and untested si
   await user.click(
     screen.getByRole("button", { name: "检测全部模型 · 28 个渠道" }),
   );
+  await user.click(await screen.findByRole("button", { name: "确认提交检测" }));
   await waitFor(() => expect(writes).toHaveLength(1));
   expect(writes[0].targets).toHaveLength(28);
   for (const target of writes[0].targets)
@@ -1741,6 +1754,7 @@ it("filters quality thresholds from successful history and applies the selection
   expect(screen.queryByText("probability-89")).not.toBeInTheDocument();
   expect(screen.getByText("probability-90")).toBeVisible();
   await user.click(screen.getByRole("button", { name: "降智检测 · 3 个渠道" }));
+  await user.click(await screen.findByRole("button", { name: "确认提交检测" }));
   expect(writes[0].body.targets.map((target) => target.group_id)).toEqual([3, 4, 5]);
   await user.selectOptions(filter, "100");
   expect(screen.queryByText("probability-95")).not.toBeInTheDocument();
@@ -2355,6 +2369,7 @@ it("remembers model settings per user and uses them for batch and row probes", a
   await user.click(dialog.getByRole("button", { name: "保存设置" }));
   const buttonName = "检测已选 3 个模型 · 1 个渠道";
   await user.click(screen.getByRole("button", { name: buttonName }));
+  await user.click(await screen.findByRole("button",{name:"确认提交检测"}));
   await waitFor(() => expect(writes).toHaveLength(1));
   expect(writes[0]).toEqual({ targets: [{ account_id: "one", group_id: 1, models: ["deepseek-v4.1-flash-1017", "gemini-4-argon", "claude-opus-5"] }] });
   await user.click(screen.getByRole("button", { name: "检测 one same-group" }));
@@ -2377,6 +2392,7 @@ it("remembers model settings per user and uses them for batch and row probes", a
   expect(writes[2].targets[0].models).toEqual(["gpt-6-astra"]);
   await user.selectOptions(screen.getByLabelText("检测模型筛选"), "claude-opus-5");
   await user.click(screen.getByRole("button", { name: "检测所选模型 · 1 个渠道" }));
+  await user.click(await screen.findByRole("button", { name: "确认提交检测" }));
   await waitFor(() => expect(writes).toHaveLength(4));
   expect(writes[3].targets[0].models).toEqual(["claude-opus-5"]);
   view.unmount();
@@ -2442,11 +2458,14 @@ it("detects unassigned configured channels without site keys and isolates busy s
   release!();
   await waitFor(()=>expect(first.getByRole("button",{name:"检测 未归属渠道 native-one 的 Tool use"})).toBeEnabled());
   await user.click(screen.getByRole("button",{name:"降智检测 · 2 个渠道"}));
+  await user.click(await screen.findByRole("button", { name: "确认提交检测" }));
   expect(writes.at(-1)).toEqual({kind:"quality",targets:[{source_id:"fugue",provider:"native-one",models:["gpt-6-astra"]},{source_id:"fugue",provider:"native-two",models:["gpt-6-astra"]}]});
   await user.selectOptions(screen.getByLabelText("选择检测项目"), "compaction");
   await user.click(screen.getByRole("button",{name:"压缩检测 · 2 个渠道"}));
+  await user.click(await screen.findByRole("button", { name: "确认提交检测" }));
   expect(writes.at(-1).targets).toHaveLength(2);
   await user.click(screen.getByRole("button",{name:`检测已选 ${SUB_MODELS.length} 个模型 · 2 个渠道`}));
+  await user.click(await screen.findByRole("button", { name: "确认提交检测" }));
   expect(writes.at(-1)).toEqual({kind:"check",targets:[{source_id:"fugue",provider:"native-one",models:[...SUB_MODELS]},{source_id:"fugue",provider:"native-two",models:[...SUB_MODELS]}]});
   await user.selectOptions(screen.getByLabelText("检测模型筛选"),"custom-model");
   const updatedFirst=within((await screen.findByText("native-one",{selector:"strong"})).closest("tr")!);
@@ -2478,6 +2497,7 @@ it("shows scoped extra models and submits exactly the checked models to native a
  for(const m of ['gpt-6-sol','second-model'])await user.click(d.getByRole('checkbox',{name:m}));
  await user.click(d.getByRole('button',{name:'保存设置'}));
  await user.click(screen.getByRole('button',{name:'检测已选 2 个模型 · 2 个渠道'}));
+ await user.click(await screen.findByRole("button", { name: "确认提交检测" }));
  expect(writes.find(w=>w.path.endsWith('/sub2api/checks')).targets[0].models).toEqual(['gpt-6-sol','second-model']);
  expect(writes.find(w=>w.path.endsWith('/channel-management/checks')).targets).toEqual([{source_id:'fugue',provider:'native',models:['gpt-6-sol']},{source_id:'do',provider:'native',models:['second-model']}]);
  await user.selectOptions(screen.getByLabelText('sub2api 账号筛选'),'__unassigned__');

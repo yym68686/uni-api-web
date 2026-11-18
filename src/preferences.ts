@@ -31,20 +31,13 @@ const views = [
 ] as const;
 export type View = (typeof views)[number];
 const viewStorageKey = (base: string) => `uni-console-view:v1:${base}`;
+export const consoleView = (value: string | null, account: boolean) =>
+  views.find(view => view === value && (account || !["sub2api","sources","automations"].includes(view)));
 
 export function loadView(base: string, account: boolean): View {
   try {
     const saved = localStorage.getItem(viewStorageKey(base));
-    return (
-      views.find(
-        (view) =>
-          view === saved &&
-          (account ||
-            (view !== "sub2api" &&
-              view !== "sources" &&
-              view !== "automations")),
-      ) || "channels"
-    );
+    return consoleView(saved, account) || "channels";
   } catch {
     return "channels";
   }
@@ -58,12 +51,12 @@ export function saveView(base: string, view: View) {
   }
 }
 
-export type FilterScope = "channels" | "balances" | "requests";
+export type FilterScope = "channels" | "balances" | "requests" | "overview";
 const storageKey = (base: string, scope: FilterScope) =>
   `uni-console-filters:v2:${scope}:${base}`;
 const legacyStorageKey = (base: string) => `uni-console-filters:v1:${base}`;
 
-function validate(value: unknown): Filters {
+export function validateFilters(value: unknown): Filters {
   const saved = value && typeof value === "object" ? value : {};
   const field = (name: keyof Filters, options?: string[]) => {
     const value = (saved as Record<string, unknown>)[name];
@@ -92,7 +85,7 @@ function validate(value: unknown): Filters {
       const value = field("balanceThreshold");
       if (!value) return "";
       const amount = Number(value);
-      return Number.isFinite(amount) && amount >= 0 && amount % 10 === 0
+      return Number.isFinite(amount) && amount >= 0
         ? value
         : "";
     })(),
@@ -105,9 +98,12 @@ function validate(value: unknown): Filters {
       "cancelled",
       "unknown",
     ]),
-    failureReason: field("failureReason", ["", "compaction", "compaction_invalid_output", "compaction_stream_failed", "compaction_unsupported"]),
+    failureReason: (() => {
+      const reason = field("failureReason");
+      return /^[a-z][a-z0-9_]{0,79}$/.test(reason) ? reason : "";
+    })(),
     search: field("search"),
-    sort: field("sort", ["config", "success", "latency", "wait", "oldest", "custom"]),
+    sort: field("sort", ["config", "success", "latency", "wait", "latency-desc", "wait-desc", "oldest", "custom", "created", "created-desc", "text", "text-desc", "duration", "duration-desc"]),
     sortRules: (() => {
       const rules = parseChannelSortRules(field("sortRules"));
       return rules.length ? JSON.stringify(rules) : "";
@@ -130,10 +126,10 @@ export function loadFilters(
     // from then on, including an explicit reset to defaults.
     const saved =
       localStorage.getItem(storageKey(base, scope)) ??
-      (scope === "requests"
+      (scope === "requests" || scope === "overview"
         ? null
         : localStorage.getItem(legacyStorageKey(base)));
-    return validate(JSON.parse(saved || "null"));
+    return validateFilters(JSON.parse(saved || "null"));
   } catch {
     return { ...defaultFilters };
   }
@@ -147,7 +143,7 @@ export function saveFilters(
   try {
     localStorage.setItem(
       storageKey(base, scope),
-      JSON.stringify(validate(filters)),
+      JSON.stringify(validateFilters(filters)),
     );
   } catch {
     // Browsers can disable storage or exhaust its quota; filtering still works.

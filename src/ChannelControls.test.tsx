@@ -286,7 +286,7 @@ it("toggles adjustment inside observation with the same table, filters and metri
     screen.getByLabelText("渠道状态筛选"),
     "eligible",
   );
-  expect(screen.getByLabelText("排序")).toBeDisabled();
+  expect(screen.getByLabelText("排序")).toHaveTextContent(/请求顺序|配置顺序/);
   const labels = [
     "uni-api 来源",
     "API key 筛选",

@@ -35,9 +35,11 @@ interface Draft {
 }
 const STALE_DRAFT = "规则已变化，请放弃草稿后重新编辑。";
 export function orderedProviders(providers: string[], order: string[]) {
+  const present = new Set(providers);
+  const arranged = new Set(order);
   return [
-    ...order.filter((p) => providers.includes(p)),
-    ...providers.filter((p) => !order.includes(p)),
+    ...order.filter((p) => present.has(p)),
+    ...providers.filter((p) => !arranged.has(p)),
   ];
 }
 export function inheritedDisabled(
@@ -508,6 +510,7 @@ export function ChannelControlActions(props: {
         <button
           className="button small"
           aria-pressed={editing}
+          title="手动调整实际路由顺序或停用状态，应用前可取消"
           disabled={controls.pending}
           onClick={() => {
             if (editing) controls.discardAll();

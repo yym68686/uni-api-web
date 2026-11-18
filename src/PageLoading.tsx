@@ -122,10 +122,24 @@ function LoadingFrame({
 export function TableLoading({
   kind,
   rows = 6,
+  observation,
 }: {
   kind: TableKind;
   rows?: number;
+  observation?: { header: ReactNode; classes: readonly string[]; layout: string };
 }) {
+  if (observation) return <LoadingFrame label={names[kind]} className="loading-table">
+    <div className="table-scroll" inert>
+      <table className="channel-table observation-table observation-placeholder" data-columns={observation.layout}>
+        <thead><tr>{observation.header}</tr></thead>
+        <tbody>{Array.from({length:rows}, (_, row) => <tr key={row}>
+          {observation.classes.map((className, col) => <td key={col} className={className}>
+            <Bone width={col === 1 ? "8rem" : "3rem"} />
+          </td>)}
+        </tr>)}</tbody>
+      </table>
+    </div>
+  </LoadingFrame>;
   const fields = columns[kind];
   return (
     <LoadingFrame

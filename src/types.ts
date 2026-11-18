@@ -130,6 +130,7 @@ export interface ModelPrice {
 }
 export interface BalanceKey {
   label?: string;
+  account_id?: string;
   status: string;
   http_status?: number;
   kind?: string;

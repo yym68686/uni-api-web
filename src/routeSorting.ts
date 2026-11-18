@@ -44,20 +44,19 @@ const post = <T>(source: string, body: unknown, signal?: AbortSignal) =>
   });
 
 export function routeSortSelections(rows: Channel[]) {
-  const sources = new Map<string, { model: string; providers: string[] }[]>();
+  const sources = new Map<string, Map<string, Set<string>>>();
   for (const row of rows) {
     if (!row.source_id) continue;
-    const models = sources.get(row.source_id) || [];
-    let model = models.find((m) => m.model === row.model);
-    if (!model) {
-      model = { model: row.model, providers: [] };
-      models.push(model);
-    }
-    if (!model.providers.includes(row.provider))
-      model.providers.push(row.provider);
+    const models = sources.get(row.source_id) || new Map<string, Set<string>>();
+    const providers = models.get(row.model) || new Set<string>();
+    providers.add(row.provider);
+    models.set(row.model, providers);
     sources.set(row.source_id, models);
   }
-  return sources;
+  return new Map([...sources].map(([source, models]) => [
+    source,
+    [...models].map(([model, providers]) => ({ model, providers: [...providers] })),
+  ] as const));
 }
 export async function prepareRouteSorting(
   rows: Channel[],

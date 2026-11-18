@@ -6,6 +6,7 @@ import {
   History,
   Pause,
   Play,
+  Pencil,
   Plus,
   RefreshCw,
   Save,
@@ -197,6 +198,22 @@ export function Automation({
     [generation, setGeneration] = useState(0),
     [keyError, setKeyError] = useState("");
   const editorOpener = useRef<HTMLElement | null>(null);
+  const editorBaseline = useRef("");
+  const auditHeading = useRef<HTMLDivElement>(null);
+  const olderRead = useRef<AbortController | null>(null);
+  const running = useRef(new Set<string>());
+  const [runningTasks, setRunningTasks] = useState(() => new Set<string>());
+  const [runNotice, setRunNotice] = useState("");
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [olderBusy, setOlderBusy] = useState(false);
+  const [auditMore, setAuditMore] = useState(false);
+  const draftDirty = !!draft && JSON.stringify(draft) !== editorBaseline.current;
+  useEffect(() => {
+    if (!draftDirty) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [draftDirty]);
   const sourceNames = useMemo(
     () => new Map(sources.map((s) => [s.id, s.name])),
     [sources],
@@ -220,7 +237,11 @@ export function Automation({
     };
   }, [generation]);
   useEffect(() => {
-    let live = true;
+    const controller = new AbortController();
+    olderRead.current?.abort();
+    olderRead.current = null;
+    setOlderBusy(false);
+    setAuditMore(false);
     if (auditScope.current !== selected) setAudit([]);
     auditScope.current = selected;
     setAuditLoading(true);
@@ -228,16 +249,21 @@ export function Automation({
       selected
         ? `/v1/automations/${encodeURIComponent(selected)}`
         : "/v1/automations/audit",
+      {signal:controller.signal},
     )
       .then((r) => {
-        if (live) setAudit(r.data || []);
+        if (!controller.signal.aborted) {
+          setAudit(r.data || []);
+          setAuditMore((r.data || []).length >= 100);
+        }
       })
       .catch((e) => {
-        if (live) setError(String(e.message || e));
+        if (!controller.signal.aborted) setError(String(e.message || e));
       })
-      .finally(() => { if (live) setAuditLoading(false); });
+      .finally(() => { if (!controller.signal.aborted) setAuditLoading(false); });
     return () => {
-      live = false;
+      controller.abort();
+      olderRead.current?.abort();
     };
   }, [selected, generation]);
   useEffect(() => {
@@ -266,17 +292,21 @@ export function Automation({
   }, [draft?.source_id, generation]);
   function edit(t: Task) {
     editorOpener.current = document.activeElement as HTMLElement;
-    setSelected(t.id);
-    setDraft({
+    const next = {
       ...t,
       policy: { ...defaults, ...t.policy, metrics: [...t.policy.metrics] },
-    });
+    };
+    editorBaseline.current = JSON.stringify(next);
+    setConfirmDiscard(false);
+    setDraft(next);
     setError("");
   }
   function newTask() {
     editorOpener.current = document.activeElement as HTMLElement;
-    setSelected("");
-    setDraft(empty(sources[0]?.id));
+    const next = empty(sources[0]?.id);
+    editorBaseline.current = JSON.stringify(next);
+    setConfirmDiscard(false);
+    setDraft(next);
     setError("");
   }
   function patch(value: Partial<Task>) {
@@ -297,6 +327,9 @@ export function Automation({
         { method: task.id ? "PUT" : "POST", body: JSON.stringify(task) },
       );
       setSelected(r.task.id);
+      setTasks(current => current.some(task => task.id === r.task.id)
+        ? current.map(task => task.id === r.task.id ? r.task : task)
+        : [...current, r.task]);
       setDraft(null);
       reload();
     } catch (e) {
@@ -321,26 +354,53 @@ export function Automation({
     }
   }
   async function run(t: Task) {
+    if (running.current.has(t.id)) return;
+    running.current.add(t.id);
+    setRunningTasks(new Set(running.current));
+    setRunNotice("");
+    setError("");
     try {
       await controlRequest(`/v1/automations/${encodeURIComponent(t.id)}/run`, {
         method: "POST",
       });
+      setSelected(t.id);
+      setRunNotice(`「${t.name}」已提交运行请求，请查看历史审计。`);
       reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "任务排队失败");
+      setError(`运行请求未确认。请先刷新历史核对，再决定是否重试。${e instanceof Error ? ` ${e.message}` : ""}`);
+    } finally {
+      running.current.delete(t.id);
+      setRunningTasks(new Set(running.current));
     }
   }
   async function older() {
-    if (!audit.length) return;
+    if (!audit.length || !auditMore || auditLoading || olderRead.current) return;
+    const controller = new AbortController(), scope = selected;
+    olderRead.current = controller;
+    setOlderBusy(true);
     try {
       const r = await controlRequest<{ data: Audit[] }>(
         (selected
           ? `/v1/automations/${encodeURIComponent(selected)}`
           : "/v1/automations/audit") + `?before=${audit[audit.length - 1].id}`,
+        {signal:controller.signal},
       );
-      setAudit((a) => [...a, ...r.data]);
+      if (controller.signal.aborted || auditScope.current !== scope) return;
+      const seen = new Set(audit.map(row => row.id));
+      const additions = (r.data || []).filter(row => {
+        if (seen.has(row.id) || row.id >= audit[audit.length-1].id) return false;
+        seen.add(row.id);
+        return true;
+      });
+      setAudit((a) => [...a, ...additions]);
+      setAuditMore(additions.length > 0 && r.data.length >= 100);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "审计读取失败");
+      if (!controller.signal.aborted) setError(e instanceof Error ? e.message : "审计读取失败");
+    } finally {
+      if (olderRead.current === controller) {
+        olderRead.current = null;
+        setOlderBusy(false);
+      }
     }
   }
   const numeric = (fields: [keyof Policy, string, number, number, number?][]) =>
@@ -424,6 +484,7 @@ export function Automation({
           {error}
         </p>
       )}
+      {runNotice && <p role="status" className="coverage-note">{runNotice}</p>}
       <div className="data-panel automation-list">
         <div className="data-heading">
           <h3>任务</h3>
@@ -434,7 +495,10 @@ export function Automation({
             className={`automation-card ${selected === t.id ? "selected" : ""}`}
             key={t.id}
           >
-            <button className="automation-select" onClick={() => edit(t)}>
+            <button className="automation-select" aria-pressed={selected===t.id} onClick={() => {
+              setSelected(t.id);
+              auditHeading.current?.scrollIntoView?.({block:"nearest"});
+            }}>
               <strong>{t.name}</strong>
               <small>
                 {sourceNames.get(t.source_id) || t.source_id} ·{" "}
@@ -449,8 +513,14 @@ export function Automation({
               <span className={`automation-state ${t.enabled ? "on" : ""}`}>
                 {t.enabled ? "已启用" : "已暂停"}
               </span>
+              <button className="button small" aria-label={`编辑 ${t.name}`} onClick={() => edit(t)} disabled={runningTasks.has(t.id)}>
+                <Pencil size={14} /> 编辑
+              </button>
+              {t.enabled && <button className="button small" aria-label={`运行已保存的任务 ${t.name}`} aria-busy={runningTasks.has(t.id)} disabled={saving || runningTasks.has(t.id)} onClick={() => void run(t)}>
+                {runningTasks.has(t.id) ? <Spinner small /> : <Play size={14}/>} 运行已保存版本
+              </button>}
               <button
-                disabled={saving}
+                disabled={saving || runningTasks.has(t.id)}
                 className="icon-button"
                 aria-label={`${t.enabled ? "暂停" : "启用"} ${t.name}`}
                 onClick={() => void save({ ...t, enabled: !t.enabled })}
@@ -459,6 +529,7 @@ export function Automation({
               </button>
               <button
                 className="icon-button"
+                disabled={runningTasks.has(t.id)}
                 aria-label={`删除 ${t.name}`}
                 onClick={() => void remove(t)}
               >
@@ -474,7 +545,10 @@ export function Automation({
       <Dialog.Root
         open={!!draft}
         onOpenChange={(open) => {
-          if (!open && !saving) setDraft(null);
+          if (!open && !saving) {
+            if (draftDirty) setConfirmDiscard(true);
+            else setDraft(null);
+          }
         }}
       >
         <Dialog.Portal>
@@ -864,23 +938,22 @@ export function Automation({
                   <Dialog.Close className="button" disabled={saving}>
                     取消
                   </Dialog.Close>
-                  {draft.id && draft.enabled && (
-                    <button className="button" onClick={() => void run(draft)}>
-                      <Play size={15} />
-                      执行已保存任务
-                    </button>
-                  )}
                 </div>
+                {confirmDiscard && <section className="coverage-note" role="alert">
+                  任务有未保存的更改。
+                  <button type="button" className="button small" onClick={() => setConfirmDiscard(false)}>继续编辑</button>
+                  <button type="button" className="button small danger" onClick={() => {setDraft(null);setConfirmDiscard(false);}}>放弃更改</button>
+                </section>}
               </>
             )}
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
       <section className="data-panel automation-audit">
-        <div className="data-heading">
+        <div className="data-heading" ref={auditHeading}>
           <div className="data-title">
             <History size={17} />
-            <h3>历史与变动审计</h3>
+            <h3>历史与变动审计{selected && tasks.find(task=>task.id===selected) ? ` · ${tasks.find(task=>task.id===selected)!.name}` : ""}</h3>
           </div>
           {selected && (
             <button className="button small" onClick={() => setSelected("")}>
@@ -906,8 +979,8 @@ export function Automation({
                 </article>
               ))}
             </div>
-            {audit.length % 100 === 0 && (
-              <button className="button" onClick={() => void older()}>
+            {auditMore && (
+              <button className="button" disabled={olderBusy || auditLoading} aria-busy={olderBusy} onClick={() => void older()}>
                 加载更早记录
               </button>
             )}
@@ -1109,3 +1182,4 @@ export function Automation({
     </section>
   );
 }
+import "./automation.css";

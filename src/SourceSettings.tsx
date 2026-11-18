@@ -1,5 +1,6 @@
 import { SourceLoading } from "./PageLoading";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import * as Dialog from "@radix-ui/react-dialog";
 import type { FormEvent, ReactNode } from "react";
 import { Plus, Server, Trash2, Pencil, Check, X } from "lucide-react";
 import { controlRequest } from "./api";
@@ -21,11 +22,13 @@ export function SourceSettings({
   onSaved,
   refreshAction,
   loading = false,
+  readError,
 }: {
   sources: ConsoleSource[];
   onSaved: () => void;
   refreshAction?: ReactNode;
   loading?: boolean;
+  readError?: string;
 }) {
   const [editing, setEditing] = useState<ConsoleSource | null>(null),
     [open, setOpen] = useState(false),
@@ -36,7 +39,9 @@ export function SourceSettings({
     [key, setKey] = useState(""),
     [configKey, setConfigKey] = useState("");
   const [removing, setRemoving] = useState<string | null>(null);
+  const opener = useRef<HTMLElement | null>(null);
   function edit(source: ConsoleSource | null) {
+    opener.current = document.activeElement as HTMLElement;
     setEditing(source);
     setName(source?.name || "");
     setBase(source?.base || "");
@@ -71,9 +76,11 @@ export function SourceSettings({
     }
   }
   async function remove(id: string) {
+    if (busy) return;
+    setError("");
     setBusy(true);
     try {
-      await controlRequest(`/v1/sources/${id}`, { method: "DELETE" });
+      await controlRequest(`/v1/sources/${encodeURIComponent(id)}`, { method: "DELETE" });
       setRemoving(null);
       onSaved();
     } catch (e) {
@@ -91,7 +98,7 @@ export function SourceSettings({
         </div>
         <div className="data-actions">
           {refreshAction}
-          <button className="button small" onClick={() => edit(null)}>
+          <button className="button small" onClick={() => edit(null)} disabled={loading || !!readError}>
             <Plus size={16} />
             添加来源
           </button>
@@ -100,11 +107,14 @@ export function SourceSettings({
       <p className="settings-note">
         每个来源可独立管理全局超时、冷却、心跳和 hedging；渠道自定义值优先。账号凭据和平台密钥加密保存在服务端。默认保留已应用的临时渠道、顺序和停用规则，来源重启后自动恢复。
       </p>
-      {error && (
+      {error && !open && (
         <p role="alert" className="error-banner">
           {error}
         </p>
       )}
+      {readError && <p role="alert" className="error-banner">
+        来源目录读取失败，现有来源未改变。{readError}
+      </p>}
       {loading && !sources.length && <SourceLoading />}
       {sources.map((src) => (
         <div className="source-item" key={src.id}>
@@ -118,7 +128,7 @@ export function SourceSettings({
             </small>
           </div>
           <ChannelSettings row={{provider:GLOBAL_SETTINGS_SCOPE,provider_name:"全局设置",source_id:src.id,source_name:src.name,model:""}} />
-          <ControlPersistence source={src.id} name={src.name} />
+          <ControlPersistence source={src.id} name={src.name} lazyLoad />
           <ChannelProtocolRepair source={src.id} provider="" onApplied={onSaved} />
           <button
             className="icon-button"
@@ -128,9 +138,10 @@ export function SourceSettings({
             <Pencil size={16} />
           </button>
           {removing === src.id ? (
-            <>
+            <div className="source-removal-confirm">
+              <p role="alert">移除「{src.name}」（{src.base}）会停止在控制台展示该来源及接收它的新请求记录。已保存历史按容量策略保留。请先检查自动化任务和站点绑定是否仍使用此来源。</p>
               <button
-                className="button small"
+                className="button small danger"
                 disabled={busy}
                 onClick={() => void remove(src.id)}
               >
@@ -143,7 +154,7 @@ export function SourceSettings({
               >
                 <X size={16} />
               </button>
-            </>
+            </div>
           ) : (
             <button
               className="icon-button"
@@ -155,14 +166,18 @@ export function SourceSettings({
           )}
         </div>
       ))}
-      {!loading && !sources.length && !open && (
+      {!loading && !readError && !sources.length && !open && (
         <p className="settings-note">
           还没有来源。添加第一个 uni-api 后即可开始观测。
         </p>
       )}
-      {open && (
-        <form className="source-form" onSubmit={save}>
-          <h3>{editing ? "编辑来源" : "添加来源"}</h3>
+      <Dialog.Root open={open} onOpenChange={next => {if (!busy) setOpen(next);}}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="dialog-overlay" />
+          <Dialog.Content className="connection-dialog source-edit-dialog" onCloseAutoFocus={event=>{event.preventDefault(); opener.current?.focus();}}>
+          <Dialog.Title>{editing ? `编辑来源 · ${editing.name}` : "添加来源"}</Dialog.Title>
+          <Dialog.Description>验证连接成功后才保存来源设置。</Dialog.Description>
+          <form className="source-form" onSubmit={save}>
           <label>
             来源名称
             <input
@@ -208,20 +223,24 @@ export function SourceSettings({
             </label>
           </details>
 
+          {error && <p role="alert" className="error-banner">{error}</p>}
           <button className="button primary" disabled={busy}>
             {busy ? <Spinner small /> : <Check size={16} />}验证并保存
           </button>
           <button
             className="button"
             type="button"
+            disabled={busy}
             onClick={() => setOpen(false)}
           >
             取消
           </button>
         </form>
-      )}
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
       <p className="settings-note">
-        移除来源会停止展示和接收请求记录；已保存的请求历史继续按容量策略保留。不同来源若共用上游账号，上游账单会包含共享用量，不能逐行相加。
+        不同来源若共用上游账号，上游账单会包含共享用量，不能逐行相加。
       </p>
       <PasswordSettings />
     </section>

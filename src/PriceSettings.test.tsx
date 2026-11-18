@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { render, screen, within, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { PriceSettings } from "./PriceSettings";
 import { MODEL_PRICE_CATALOG } from "./modelPrices";
@@ -23,7 +23,7 @@ it("shows official GPT 6.2 Standard prices and explains cache retention limits",
   expect(within(screen.getByLabelText(model+' 输入价格').closest('tr')!).getByText('官方参考价')).toBeVisible();
  }
  const sol=screen.getByLabelText('gpt-6.2-sol 输入价格').closest('tr')!;
- expect(within(sol).getByRole('button',{name:'保存价格'})).toBeEnabled();
+ expect(within(sol).getByRole('button',{name:'采用参考价'})).toBeEnabled();
  await user.click(screen.getByRole('button',{name:'查看 gpt-6.2-sol 价格说明'}));
  const dialog=screen.getByRole('dialog',{name:'gpt-6.2-sol'});
  expect(dialog).toHaveTextContent('30 分钟 $2.50');
@@ -336,7 +336,24 @@ it("does not claim the automatic Haiku tier works against a backend that has not
   }));
   render(<PriceSettings prices={[]} loading={false} connection={{ base: "", key: "", session: "test", account: true }} onSaved={onSaved} />);
   const row = screen.getByLabelText("claude-haiku-5-5 输入价格").closest("tr")!;
-  await userEvent.setup().click(within(row).getByRole("button", { name: "保存价格" }));
+  await userEvent.setup().click(within(row).getByRole("button", { name: "采用参考价" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("服务尚未确认 100k 分档规则");
   expect(onSaved).not.toHaveBeenCalled();
+});
+
+it("preserves a draft across searches and renders confirmed prices read-only on a failed fetch", () => {
+  const props = { prices: [] as ModelPrice[], loading: false, connection: { base: "", key: "", session: "test", account: true }, onSaved: vi.fn() };
+  const view = render(<PriceSettings {...props} />);
+  const input = screen.getByLabelText("gpt-6-astra 输入价格");
+  const search = screen.getByRole("textbox", { name: "搜索模型价格" });
+  fireEvent.change(input, { target: { value: "987.65" } });
+  fireEvent.change(search, { target: { value: "no-such-model" } });
+  expect(input).not.toBeVisible();
+  expect(screen.getByRole("status")).toHaveTextContent("1 项未保存");
+  fireEvent.change(search, { target: { value: "" } });
+  expect(input).toHaveValue(987.65);
+  view.rerender(<PriceSettings {...props} error="读取失败" />);
+  expect(input).toBeDisabled();
+  expect(screen.getByRole("alert")).toHaveTextContent("参考价只读");
+  expect(within(input.closest("tr")!).getByRole("button", { name: "保存价格" })).toBeDisabled();
 });

@@ -245,11 +245,12 @@ export function LatestChannelCheck({
     result = checks.results.get(id),
     pending = checks.pending.has(id);
   return (
-    <td className="latest-channel-check">
+    <td className="latest-channel-check column-quality">
       {result ? (
         <>
           <div className="quality-status-stack">
             <Tip
+              keyboard={false}
               text={
                 <>
                 <div>

@@ -13,18 +13,28 @@ const maxBytes = 3_000_000;
 type Entry = { key: QueryKey; data: unknown; at: number };
 type Snapshot = { version: 1; user: string; at: number; metricsKey: QueryKey; entries: Entry[] };
 const restored = new WeakMap<QueryClient, Map<string, number>>();
+const lastWrite = new WeakMap<QueryClient,string>();
 const key = (user: string) => prefix + JSON.stringify([location.origin, user]);
 const secretFields = new Set(["api_key", "api_keys", "encrypted_key", "password", "key", "token", "curl_token", "authorization", "cookie", "access_token", "refresh_token"]);
-function projection(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(projection);
-  if (value && typeof value === "object") return Object.fromEntries(
-    Object.entries(value).filter(([name]) => !secretFields.has(name.toLowerCase())).map(([name, item]) => [name, projection(item)]),
-  );
+function projection(value: unknown, budget: {left:number}, depth = 0): unknown {
+  budget.left -= typeof value === "string" ? 2+value.length : 8;
+  if (budget.left < 0 || depth > 50) throw Error("snapshot exceeds local budget");
+  if (Array.isArray(value)) return value.map(item=>projection(item,budget,depth+1));
+  if (value && typeof value === "object") {
+    const entries: [string,unknown][] = [];
+    for (const [name,item] of Object.entries(value)) {
+      if (secretFields.has(name.toLowerCase())) continue;
+      budget.left -= name.length+4;
+      entries.push([name,projection(item,budget,depth+1)]);
+    }
+    return Object.fromEntries(entries);
+  }
   return value;
 }
 function validKey(value: unknown): value is QueryKey {
   return Array.isArray(value) && names.has(value[0]) && value.every(v => v == null || ["string", "number", "boolean"].includes(typeof v));
 }
+export const dashboardSnapshotKey = validKey;
 export function restoreDashboardSnapshot(client: QueryClient, user: string) {
   if (!user) return;
   try {
@@ -57,15 +67,22 @@ export function saveDashboardSnapshot(client: QueryClient, user: string, metrics
   // Save only a fully settled view. Never replace a previous complete snapshot
   // with skeletons, an intermediate filtered table, or failed refresh results.
   if (!selected.some(q => q.queryKey[0] === "catalog") || !selected.some(q => q.queryKey[0] === "keys") || selected.some(q => q.state.status !== "success" || !q.state.data || q.state.fetchStatus !== "idle")) return;
-  const entries: Entry[] = selected.map(q => ({ key: q.queryKey, data: projection(q.state.data), at: q.state.dataUpdatedAt }));
-  const snapshot: Snapshot = { version: 1, user, at: Date.now(), metricsKey, entries };
+  if (selected.length > 512) return;
+  const signature = JSON.stringify([user,metricsKey,selected.map(query=>[query.queryHash,query.state.dataUpdatedAt])]);
+  if (lastWrite.get(client)===signature) return;
   try {
+    const budget = {left:maxBytes};
+    const entries: Entry[] = selected.map(q => ({ key: q.queryKey, data: projection(q.state.data,budget), at: q.state.dataUpdatedAt }));
+    const snapshot: Snapshot = { version: 1, user, at: Date.now(), metricsKey, entries };
     const raw = JSON.stringify(snapshot);
-    if (raw.length <= maxBytes) localStorage.setItem(key(user), raw);
+    if (raw.length <= maxBytes) {
+      localStorage.setItem(key(user), raw);
+      lastWrite.set(client,signature);
+    }
   } catch { /* Optional storage never changes rendering or live requests. */ }
 }
 export function clearDashboardSnapshots(client?: QueryClient) {
-  if (client) restored.delete(client);
+  if (client) {restored.delete(client);lastWrite.delete(client);}
   try {
     for (const name of Object.keys(localStorage)) if (name.startsWith(prefix)) localStorage.removeItem(name);
   } catch {}

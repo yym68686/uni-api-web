@@ -112,7 +112,7 @@ it("uses the displayed channel spending source and never falls back to a whole-d
   const app = render(ui(true, false, receipt));
   const profitIndex = screen
     .getAllByRole("columnheader")
-    .findIndex((header) => header.textContent === "利润 ");
+    .findIndex((header) => header.textContent?.trim() === "利润参考");
   expect(profitIndex).toBeGreaterThan(0);
   const profitCell = () =>
     within(screen.getAllByRole("row")[1]).getAllByRole("cell")[profitIndex];

@@ -321,7 +321,7 @@ it("coalesces attempt events into a waterfall, uses readable names, and opens ch
       name: "1xrelayai · 0.15×",
     }),
   );
-  const drawer = screen.getByRole("dialog");
+  const drawer = screen.getByRole("region",{name:"尝试详情 · xrelayai · 0.15×"});
   expect(
     within(drawer).getByRole("heading", { name: "xrelayai · 0.15×" }),
   ).toBeVisible();
@@ -335,7 +335,7 @@ it("coalesces attempt events into a waterfall, uses readable names, and opens ch
   await user.click(
     within(drawer).getByRole("button", { name: "关闭尝试详情" }),
   );
-  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(drawer).not.toBeInTheDocument();
 });
 
 it("labels legacy origins, hides opaque names and tolerates empty records", () => {
@@ -418,7 +418,7 @@ it("shows response milestones on the bar, focuses their exact time, and separate
   await user.click(
     within(chart).getByRole("button", { name: /查看第 1 次尝试/ }),
   );
-  const drawer = screen.getByRole("dialog");
+  const drawer = screen.getByRole("region", { name: /尝试详情/ });
   expect(
     within(drawer).getByRole("heading", { name: "响应时间节点" }),
   ).toBeVisible();

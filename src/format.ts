@@ -22,6 +22,8 @@ export const rowId = (row: Channel) =>
     row.endpoint,
     row.stream,
   ]);
+export const dateTime = (seconds?: number | null) =>
+  seconds && Number.isFinite(seconds) ? new Date(seconds * 1000).toLocaleString("zh-CN", { hour12: false }) : "暂无";
 export const balanceStatus: Record<string, string> = {
   unsupported: "未适配",
   no_key: "无密钥",
@@ -64,6 +66,13 @@ export function balanceIsLow(balance?: Balance) {
     !balance.omitted_keys &&
     balance.keys.every(keyIsLow)
   );
+}
+export function balanceIsKnown(balance?: Balance) {
+  return !!(balance?.status === "complete" && balance.keys?.length &&
+    balance.keys.length === balance.key_count && !balance.omitted_keys &&
+    balance.keys.every(key => key.status === "ok" &&
+      (key.unlimited || (typeof key.amount === "number" && Number.isFinite(key.amount)) ||
+        (!!key.windows?.length && key.windows.every(window => Number.isFinite(window.remaining))))));
 }
 export function balanceLabel(key: BalanceKey) {
   if (key.status === "unsupported" && [404, 405].includes(key.http_status || 0))

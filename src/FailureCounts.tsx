@@ -1,7 +1,7 @@
 import type { Channel } from "./types";
 import { count } from "./format";
 
-const labels: Record<string, string> = {
+export const failureReasonLabels: Record<string, string> = {
   responses_max_output_tokens: "输出达到上限",
   responses_content_filter: "内容过滤",
   responses_incomplete: "响应未完成",
@@ -18,6 +18,9 @@ const labels: Record<string, string> = {
   other: "其他失败",
   unknown: "历史记录未采集失败分类",
 };
+export const failureReasonLabel = (reason: string) =>
+  Object.hasOwn(failureReasonLabels, reason) ? failureReasonLabels[reason] :
+  /^upstream_http_[45]\d\d$/.test(reason) ? `上游 HTTP ${reason.slice(-3)}` : "其他失败";
 
 export function FailureCounts({
   channels,
@@ -75,10 +78,7 @@ export function FailureCounts({
           {entries.map(([reason, n]) => (
             <div key={reason}>
               <dt>
-                {labels[reason] ||
-                  (/^upstream_http_[45]\d\d$/.test(reason)
-                    ? `上游 HTTP ${reason.slice(-3)}`
-                    : "其他失败")}
+                {failureReasonLabel(reason)}
               </dt>
               <dd>{count(n)} 次</dd>
             </div>

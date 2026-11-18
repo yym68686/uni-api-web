@@ -1,6 +1,16 @@
 .request-logs-panel {
   min-width: 0;
 }
+.request-log-filters .request-log-tools { display:none; }
+@media (max-width: 780px) {
+  .request-log-filters .request-log-tools { display:inline-flex; min-height:36px; }
+  .request-logs-panel[data-tools="compact"] .request-log-filters > :not(.time-select,.log-time-button,.request-log-tools),
+  .request-logs-panel[data-tools="compact"] :is(.log-extra-column,.request-log-explainer) { display:none; }
+  .request-logs-panel[data-tools="compact"] .request-log-table :is(th,td) {
+    padding-inline:8px; white-space:normal; overflow-wrap:anywhere;
+  }
+  .request-logs-panel[data-tools="compact"] .request-log-table small { font-size:.72rem; }
+}
 .request-log-hint,
 .request-log-search-help {
   margin: 0;
@@ -171,3 +181,10 @@
     overflow: visible;
   }
 }
+.request-log-window {display:flex;flex-wrap:wrap;align-items:end;gap:10px;padding:12px 20px;}
+.request-log-window label { display:grid;gap:4px; }
+.request-log-window input { color:inherit;background:var(--surface);border:1px solid var(--line);padding:6px;border-radius:6px; }
+.trace-attempt-compare { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,22rem),1fr)); gap:12px; margin-top:18px; }
+.trace-attempt-inline { position:relative; padding:16px; border:1px solid var(--line); border-radius:10px; background:var(--subtle); min-width:0; }
+.trace-attempt-inline > h4 { margin:.35rem 2rem .5rem 0;overflow-wrap:anywhere;}
+.trace-attempt-inline .detail-close { right:10px; top:10px; }

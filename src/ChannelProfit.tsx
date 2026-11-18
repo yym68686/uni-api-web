@@ -67,7 +67,7 @@ export function ChannelProfit({
     ? `${provisional ? "历史不完整，使用当前留存记录匹配的暂计费用计算参考利润。不是完整利润或可信上下限，历史冲突或缺失可能使费用及利润上调或下调，不能据此结算。" : bounded ? "账单尚未全部核对，使用已核对费用计算利润上限。实际费用可能更高，实际利润及利润率可能更低；未核对费用没有按零处理。全部核对完成后自动显示正常利润。" : ""}仅取数值：${estimated} × ${salePercent}% × 6.9 − ${actual} = ¥${profit.amount}${provisional ? "（暂计参考）" : bounded ? "（上限）" : ""}。利润率 = 利润 ÷（估算消费 × ${salePercent}% × 6.9）。${estimated === 0 || salePercent === 0 ? "收入为 0，利润率无法计算。" : ""}使用本行显示的消费口径，共用业务 Key 的渠道不能重复相加。`
     : "等待估算消费和渠道实际消费均可用后计算；未查询到的金额不按 0 处理。";
   return (
-    <Tip text={explanation}>
+    <Tip keyboard={false} text={`${explanation} 经营参考，成本币种未换算，不可用于对账。`}>
       <div
         className={`channel-profit mono ${profit == null ? "muted" : profit.amount < 0 ? "negative" : provisional ? "profit-provisional" : bounded ? "profit-upper-bound" : profit.amount > 0 ? "profit-positive" : ""}`}
       >

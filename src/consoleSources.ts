@@ -13,7 +13,8 @@ export function useConsoleSources(session: string, enabled = true, watchStatus =
     staleTime: 30_000,
     retry: false,
     refetchOnWindowFocus: false,
-    refetchInterval: watchStatus ? 5_000 : false,
+    refetchInterval: watchStatus ? 30_000 : false,
+    refetchIntervalInBackground: false,
   });
 }
 

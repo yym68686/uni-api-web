@@ -324,6 +324,10 @@ it("renders just the current 25 rows and fetches all 61 before a batch, without 
   await user.click(
     screen.getByRole("button", { name: "检测全部模型 · 61 个渠道" }),
   );
+  const preview = await screen.findByRole("dialog",{name:"核对批量检测范围"});
+  expect(within(preview).getByText(/本次计划 61 \/ 61 个渠道/)).toBeVisible();
+  expect(writes).toHaveLength(0);
+  await user.click(within(preview).getByRole("button",{name:"确认提交检测"}));
   await waitFor(() => expect(writes).toHaveLength(1));
   expect(writes[0].targets).toHaveLength(61);
   expect(
@@ -384,6 +388,10 @@ it.each([
  await waitFor(()=>expect(toggle).not.toBeChecked());
  if(project) await user.selectOptions(screen.getByLabelText("选择检测项目"),project);
  await user.click(screen.getByRole("button",{name:`${label} · 61 个渠道`}));
+ const preview=await screen.findByRole("dialog",{name:"核对批量检测范围"});
+ expect(within(preview).getByText(/58 \/ 61 个渠道；跳过 3 个/)).toBeVisible();
+ expect(writes).toHaveLength(0);
+ await user.click(within(preview).getByRole("button",{name:"确认提交检测"}));
  await waitFor(()=>expect(writes).toHaveLength(1));
  expect(writes[0].path).toBe(`/analytics/v1/sub2api/${endpoint}`);
  expect(writes[0].body.manual).not.toBe(true);
@@ -452,8 +460,10 @@ it("offers all four projects and queues only eligible fingerprints across manage
   const submit = within(group).getByRole("button", { name: "指纹检测 · 61 个渠道" });
   await waitFor(() => expect(submit).toBeEnabled());
   await user.click(submit);
+  expect(writes).toHaveLength(0);
+  await user.click(await screen.findByRole("button",{name:"确认提交检测"}));
   await screen.findByText(/已提交 56 项指纹检测/);
-  expect(selections).toEqual(["signed-all"]);
+  expect(selections).toEqual(["signed-all","signed-all"]);
   expect(writes).toEqual([{
     path: "/analytics/v1/model-fingerprints",
     body: { targets: [

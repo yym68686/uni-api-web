@@ -1,5 +1,5 @@
 import { TableLoading } from "./PageLoading";
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { queryOptions, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -32,6 +32,7 @@ import { friendlyReason } from "./requestTraceModel";
 import { RequestTraceDialog, requestTraceOptions } from "./RequestTrace";
 import { LatencyBadge } from "./LatencyBadge";
 import { Spinner } from "./ui";
+import { readWorkspace, requestLocation, validLogWindow, type LogPosition, type LogWindow } from "./workspaceLocation";
 import "./requestLogs.css";
 
 export interface RequestLog {
@@ -57,6 +58,7 @@ export interface RequestLog {
   input_tokens: number | null;
   output_tokens: number | null;
   cache_read_tokens: number | null;
+  observed_attempts?: number | null;
 }
 interface LogResult {
   data: RequestLog[];
@@ -74,7 +76,7 @@ const states: Record<string, { label: string; tone: string }> = {
   cancelled: { label: "已取消", tone: "warning" },
   unknown: { label: "结果未知", tone: "neutral" },
 };
-export function requestLogParams(filters: Filters, cursor: string) {
+export function requestLogParams(filters: Filters, cursor: string, exact?: LogWindow | null) {
   const params = new URLSearchParams({
     range: filters.window,
     model: filters.model,
@@ -97,6 +99,10 @@ export function requestLogParams(filters: Filters, cursor: string) {
   if (keySource || filters.sourceId)
     params.set("source_id", keySource || filters.sourceId);
   if (key) params.set("key_id", key);
+  if (exact) {
+    params.set("from_ms", String(exact.from));
+    params.set("to_ms", String(exact.to));
+  }
   return params;
 }
 function Select({
@@ -137,22 +143,46 @@ export function RequestLogsPage({
 }) {
   const queryClient = useQueryClient();
   const storage = `${base.base}:${base.session}`;
-  const [filters, setFilters] = useState(() =>
-    loadFilters(storage, "requests"),
-  );
+  const workspaceOwner = base.account ? JSON.stringify([base.base,base.session]) : base.base;
+  const [incoming] = useState(() => readWorkspace(location.hash, !!base.account));
+  const [filters, setFilters] = useState(() => {
+    const saved = loadFilters(storage, "requests");
+    return incoming.view === "requests" && incoming.filters
+      ? {...incoming.filters, search:history.state?.workspaceOwner === workspaceOwner ? saved.search : ""}
+      : saved;
+  });
   const [cursors, setCursors] = useState<string[]>([""]);
   const [page, setPage] = useState(0);
   const [revision, setRevision] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<Error | null>(null);
   const refreshToken = useRef(0);
-  const [selected, setSelected] = useState<{
-    id: string;
-    source: string;
-    instance?: string;
-  } | null>(null);
+  const [selected, setSelected] = useState<LogPosition | null>(incoming.request);
+  const [exact, setExact] = useState<LogWindow | null>(incoming.logWindow);
+  const [editWindow, setEditWindow] = useState(false);
+  const [showLogTools, setShowLogTools] = useState(false);
+  const [fromInput, setFromInput] = useState("");
+  const [toInput, setToInput] = useState("");
+  const [rangeError, setRangeError] = useState("");
   const [auto, setAuto] = useState(false);
-  const deferred = useDeferredValue(filters.search);
+  const [search, setSearch] = useState(filters.search.trim());
+  const [composing, setComposing] = useState(false);
+  const intent = useRef<number | null>(null);
+  const autoActive = auto && page === 0 && !exact;
+  function resetPage() {
+    setPage(0);
+    setCursors([""]);
+  }
+  useEffect(() => {
+    if (composing) return;
+    const timer = window.setTimeout(() => {
+      if (search !== filters.search.trim()) {
+        setSearch(filters.search.trim());
+        resetPage();
+      }
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [filters.search, search, composing]);
   const connection = useMemo(
     () => ({
       ...base,
@@ -171,8 +201,8 @@ export function RequestLogsPage({
       [field]: value,
       ...(field === "sourceId" ? { keyId: "" } : {}),
     }));
-    setPage(0);
-    setCursors([""]);
+    if (field === "window") { setExact(null); setEditWindow(false); setRangeError(""); }
+    if (field !== "search") resetPage();
   }
   const keys = useQuery({
     queryKey: ["keys", connection.session],
@@ -187,8 +217,8 @@ export function RequestLogsPage({
       endpoint: filters.endpoint,
       stream: filters.stream,
     },
-    true,
-    auto,
+    !exact,
+    autoActive,
   );
   const scope = JSON.stringify([
     base.base,
@@ -202,7 +232,9 @@ export function RequestLogsPage({
     filters.statusFilter,
     filters.balanceFilter,
     filters.sort,
-    deferred,
+    search,
+    exact?.from,
+    exact?.to,
   ]);
   useEffect(() => {
     refreshToken.current++;
@@ -219,7 +251,7 @@ export function RequestLogsPage({
         analyticsRequest<LogResult>(
           base,
           "/analytics/v1/request-logs?" +
-            requestLogParams({ ...filters, search: deferred }, cursor),
+            requestLogParams({ ...filters, search }, cursor, exact),
           signal,
         ),
       retry: false,
@@ -229,7 +261,7 @@ export function RequestLogsPage({
   const query = useQuery({
     ...logOptions(cursors[page], revision),
     refetchInterval: (q) =>
-      initializationRetryInterval(q) || (auto && page === 0 ? 30_000 : false),
+      initializationRetryInterval(q) || (autoActive ? 30_000 : false),
     refetchIntervalInBackground: false,
   });
   const busy = query.isFetching || refreshing;
@@ -251,20 +283,18 @@ export function RequestLogsPage({
     ]),
   ];
   const knownKeys = keys.data?.data || [];
+  const knownKeyIds = new Set(knownKeys.map(key => key.key_id));
+  const sourceById = new Map(sources.map(source => [source.id, source.name]));
   const historyKeys = (data?.keys || [])
     .filter(
       (key) =>
-        !knownKeys.some(
-          (known) =>
-            known.key_id ===
-            (base.account ? `${key.source_id}::${key.key_id}` : key.key_id),
-        ),
+        !knownKeyIds.has(base.account ? `${key.source_id}::${key.key_id}` : key.key_id),
     )
     .map((key) => ({
       key_id: base.account ? `${key.source_id}::${key.key_id}` : key.key_id,
       source_id: key.source_id,
       source_name:
-        sources.find((s) => s.id === key.source_id)?.name || key.source_id,
+        sourceById.get(key.source_id) || key.source_id,
       position: 0,
       prefix: `历史 key · ${key.key_id.slice(0, 10)}…`,
     }));
@@ -276,28 +306,28 @@ export function RequestLogsPage({
     ]),
   );
   const sourceName = (id: string) =>
-    sources.find((s) => s.id === id)?.name || id || "当前来源";
+    sourceById.get(id) || id || "当前来源";
   const rowKey = (row: RequestLog) =>
     base.account ? `${row.source_id}::${row.key_id}` : row.key_id;
   const hasFilters = Object.keys(defaultFilters).some(
     (k) => filters[k as keyof Filters] !== defaultFilters[k as keyof Filters],
   );
-  async function refresh() {
+  async function refresh(latest = false) {
     if (refreshing) return;
     const token = ++refreshToken.current;
     const nextRevision = revision + 1;
     setRefreshing(true);
     setRefreshError(null);
-    void stats.refetch();
+    if (!exact) void stats.refetch();
     try {
-      // Keep the current page mounted until the latest page is available.
+      // Keep the current page mounted until its replacement is available.
       await queryClient.fetchQuery({
-        ...logOptions("", nextRevision),
+        ...logOptions(latest ? "" : cursors[page], nextRevision),
         staleTime: 0,
       });
       if (token !== refreshToken.current) return;
-      setPage(0);
-      setCursors([""]);
+      if (latest) resetPage();
+      else setCursors(current => current.slice(0, page + 1));
       setRevision(nextRevision);
     } catch (error) {
       if (token === refreshToken.current)
@@ -308,26 +338,70 @@ export function RequestLogsPage({
       if (token === refreshToken.current) setRefreshing(false);
     }
   }
+  function showTrace(position: LogPosition) {
+    history.replaceState({...history.state, workspaceOwner}, "", requestLocation(filters, selected, exact));
+    history.pushState({logDetail:true, workspaceOwner}, "", requestLocation(filters, position, exact));
+    setSelected(position);
+  }
   function open(row: RequestLog) {
+    cancelIntent();
     if (row.request_id || row.trace_id)
-      setSelected({
+      showTrace({
         id: row.request_id || row.trace_id,
         source: row.source_id,
         instance: row.instance_id,
       });
   }
+  function cancelIntent() {
+    if (intent.current != null) window.clearTimeout(intent.current);
+    intent.current = null;
+  }
   function preload(row: RequestLog) {
+    cancelIntent();
     const id = row.request_id || row.trace_id;
-    if (id)
-      void queryClient.prefetchQuery(
-        requestTraceOptions(base, id, row.source_id, row.instance_id),
-      );
+    const net = (navigator as Navigator & {connection?: {saveData?:boolean;effectiveType?:string}}).connection;
+    if (id && !net?.saveData && !net?.effectiveType?.includes("2g")) intent.current = window.setTimeout(() => {
+      intent.current = null;
+      void queryClient.prefetchQuery(requestTraceOptions(base, id, row.source_id, row.instance_id));
+    }, 260);
+  }
+  useEffect(() => cancelIntent, [scope, page]);
+  useEffect(() => {
+    const restore = () => {
+      const next = readWorkspace(location.hash, !!base.account);
+      if (next.view === "requests") {
+        setSelected(next.request);
+        if (next.filters) setFilters(current => {
+          const scoped = {...next.filters!, search:current.search};
+          return JSON.stringify(scoped) === JSON.stringify(current) ? current : scoped;
+        });
+        setExact(current => current?.from === next.logWindow?.from && current?.to === next.logWindow?.to ? current : next.logWindow);
+      }
+    };
+    window.addEventListener("popstate", restore);
+    return () => window.removeEventListener("popstate", restore);
+  }, [base.account]);
+  useEffect(() => {
+    if (readWorkspace(location.hash, !!base.account).view === "requests")
+      history.replaceState({...history.state, workspaceOwner}, "", requestLocation(filters, selected, exact));
+  }, [filters, exact, selected, base.account, workspaceOwner]);
+  function applyWindow(event: React.FormEvent) {
+    event.preventDefault();
+    const from = Date.parse(fromInput), to = Date.parse(toInput);
+    if (!validLogWindow(from,to)) {
+      setRangeError("请选择有效起止时间：开始早于结束，最长 366 天，结束不能晚于当前时间。");
+      return;
+    }
+    setExact({from,to});
+    setEditWindow(false);
+    setRangeError("");
+    resetPage();
   }
   const traceSource =
     filters.sourceId ||
     (filters.keyId.includes("::") ? filters.keyId.split("::")[0] : "");
   return (
-    <section className="data-panel request-logs-panel">
+    <section className="data-panel request-logs-panel" data-tools={showLogTools ? "expanded" : "compact"}>
       <div className="data-heading">
         <div className="data-title">
           <List size={19} />
@@ -338,7 +412,10 @@ export function RequestLogsPage({
             className="search-field"
             onSubmit={(e) => {
               e.preventDefault();
-              void refresh();
+              if (!composing && search !== filters.search.trim()) {
+                setSearch(filters.search.trim());
+                resetPage();
+              }
             }}
           >
             <Search size={17} />
@@ -348,6 +425,8 @@ export function RequestLogsPage({
               value={filters.search}
               maxLength={512}
               onChange={(e) => change("search", e.target.value)}
+              onCompositionStart={() => setComposing(true)}
+              onCompositionEnd={() => setComposing(false)}
             />
             {!!filters.search && (
               <button
@@ -365,23 +444,26 @@ export function RequestLogsPage({
             aria-label="刷新日志"
             aria-busy={busy}
             disabled={busy}
-            onClick={refresh}
+            onClick={() => void refresh()}
           >
             {busy ? <Spinner small /> : <RefreshCw size={15} />}
             刷新日志
           </button>
+          {page > 0 && <button className="button small" disabled={busy} onClick={() => void refresh(true)}>{exact ? "返回第 1 页" : "查看最新"}</button>}
           <label className="auto-refresh">
             <input
               type="checkbox"
-              checked={auto}
+              checked={autoActive}
+              disabled={page > 0 || !!exact}
               onChange={(e) => setAuto(e.target.checked)}
             />
             <span />
             自动刷新
           </label>
+          {auto && !autoActive && <span role="status" className="settings-note">自动刷新已暂停{exact ? "（固定时间）" : "（历史页）"}</span>}
         </div>
       </div>
-      <div className="filters" aria-label="日志筛选">
+      <div id="request-log-filters" className="filters request-log-filters" aria-label="日志筛选">
         <Select
           label="时间范围筛选"
           className="time-select"
@@ -395,6 +477,10 @@ export function RequestLogsPage({
             </option>
           ))}
         </Select>
+        <button className="button small log-time-button" aria-expanded={editWindow} onClick={() => setEditWindow(value => !value)}>{exact ? "修改固定时间" : "指定起止时间"}</button>
+        <button type="button" className="button small request-log-tools" aria-expanded={showLogTools} aria-controls="request-log-filters" onClick={() => setShowLogTools(value => !value)}>
+          <SlidersHorizontal size={14} />{showLogTools ? "收起筛选与列" : "更多筛选与列"}
+        </button>
         <Select
           label="uni-api 来源"
           className="source-select"
@@ -493,14 +579,30 @@ export function RequestLogsPage({
           <option value="config">最新请求优先</option>
           <option value="oldest">最早请求优先</option>
           <option value="success">成功请求优先</option>
-          <option value="latency">首字延迟从低到高</option>
+          <optgroup label="请求总耗时">
+            <option value="duration">总耗时从低到高</option>
+            <option value="duration-desc">总耗时从高到低</option>
+          </optgroup>
+          <optgroup label="首字事件">
+            <option value="created">响应创建从低到高</option>
+            <option value="created-desc">响应创建从高到低</option>
+            <option value="text">首个文本从低到高</option>
+            <option value="text-desc">首个文本从高到低</option>
+          </optgroup>
+          <option value="latency">首字延迟从低到高（创建或首个文本）</option>
+          <option value="latency-desc">首字延迟从高到低（创建或首个文本）</option>
           <option value="wait">请求前等待从低到高</option>
+          <option value="wait-desc">请求前等待从高到低</option>
         </Select>
         <button
           className="reset-filters"
-          disabled={!hasFilters}
+          disabled={!hasFilters && !exact}
           onClick={() => {
             setFilters({ ...defaultFilters });
+            setSearch("");
+            setExact(null);
+            setEditWindow(false);
+            setRangeError("");
             setPage(0);
             setCursors([""]);
           }}
@@ -509,8 +611,16 @@ export function RequestLogsPage({
           重置筛选
         </button>
       </div>
-      <p className="request-log-hint">
-        每行是一条已完成请求，状态为全部重试后的最终结果。点击查看完整时间线。
+      {editWindow && <form className="request-log-window" onSubmit={applyWindow}>
+        <label>开始时间 <input type="datetime-local" required value={fromInput} onChange={event=>setFromInput(event.target.value)} /></label>
+        <label>结束时间 <input type="datetime-local" required value={toInput} onChange={event=>setToInput(event.target.value)} /></label>
+        <button className="button small" type="submit">应用固定时间</button>
+        <span className="settings-note">本机时区 · {Intl.DateTimeFormat().resolvedOptions().timeZone}</span>
+        {rangeError && <p role="alert">{rangeError}</p>}
+      </form>}
+      {exact && <p className="request-log-hint">固定时间：{new Date(exact.from).toLocaleString()} – {new Date(exact.to).toLocaleString()} · API key 成功率摘要只适用于预设窗口。</p>}
+      <p className="request-log-hint request-log-explainer">
+        每行是一条已完成请求，状态为全部重试后的最终结果。尝试数只计可关联的记录；首字一栏区分响应创建与首个文本。
         {data && (
           <>
             {" "}
@@ -525,7 +635,7 @@ export function RequestLogsPage({
           <button
             className="button small ghost"
             onClick={() =>
-              setSelected({ id: filters.search.trim(), source: traceSource })
+              showTrace({ id: filters.search.trim(), source: traceSource })
             }
           >
             按此 ID 查看完整追踪（不限时间）
@@ -563,13 +673,13 @@ export function RequestLogsPage({
               <thead>
                 <tr>
                   <th>时间 / 请求 ID</th>
-                  <th>来源 / API key</th>
-                  <th>模型 / 端点</th>
+                  <th className="log-extra-column">来源 / API key</th>
+                  <th className="log-extra-column">模型 / 端点</th>
                   <th>最终结果</th>
-                  <th>总耗时</th>
+                  <th className="log-extra-column">总耗时</th>
                   <th>首字延迟</th>
-                  <th>请求前等待</th>
-                  <th>输入 / 输出 token</th>
+                  <th className="log-extra-column">请求前等待</th>
+                  <th className="log-extra-column">输入 / 输出 token</th>
                 </tr>
               </thead>
               <tbody>
@@ -579,7 +689,9 @@ export function RequestLogsPage({
                     className="request-log-row"
                     onClick={() => open(row)}
                     onPointerEnter={() => preload(row)}
+                    onPointerLeave={cancelIntent}
                     onFocus={() => preload(row)}
+                    onBlur={cancelIntent}
                   >
                     <td>
                       <time dateTime={new Date(row.at_ms).toISOString()}>
@@ -598,7 +710,7 @@ export function RequestLogsPage({
                         {row.request_id || row.trace_id || "请求 ID 未记录"}
                       </button>
                     </td>
-                    <td>
+                    <td className="log-extra-column">
                       <strong>{sourceName(row.source_id)}</strong>
                       <small title={row.key_id}>
                         {keyLabels
@@ -609,7 +721,7 @@ export function RequestLogsPage({
                             : "未记录 API key")}
                       </small>
                     </td>
-                    <td>
+                    <td className="log-extra-column">
                       <strong className="mono">
                         {row.model || "未记录模型"}
                       </strong>
@@ -625,6 +737,7 @@ export function RequestLogsPage({
                         {states[row.result]?.label || "未知"}
                         {row.status > 0 && ` · HTTP ${row.status}`}
                       </span>
+                      <small>{row.observed_attempts != null ? `已记录 ${row.observed_attempts} 次尝试` : "尝试数未确认"}</small>
                       {row.failure_reason && (
                         <small
                           className="request-log-error"
@@ -634,14 +747,16 @@ export function RequestLogsPage({
                         </small>
                       )}
                     </td>
-                    <td className="mono">{ms(row.duration_ms)}</td>
+                    <td className="mono log-extra-column">{ms(row.duration_ms)}</td>
                     <td className="mono">
                       <LatencyBadge
                         value={row.response_created_ms ?? row.first_text_ms}
                       />
+                      {(row.response_created_ms != null || row.first_text_ms != null) &&
+                        <small>{row.response_created_ms != null ? "响应创建" : "首个文本"}</small>}
                     </td>
-                    <td className="mono">{ms(row.dispatch_ms)}</td>
-                    <td className="mono">
+                    <td className="mono log-extra-column">{ms(row.dispatch_ms)}</td>
+                    <td className="mono log-extra-column">
                       {row.input_tokens == null ? "—" : count(row.input_tokens)}{" "}
                       /{" "}
                       {row.output_tokens == null
@@ -695,7 +810,10 @@ export function RequestLogsPage({
           requestId={selected.id}
           sourceId={selected.source}
           instanceId={selected.instance}
-          onClose={() => setSelected(null)}
+          onClose={() => {
+            if (history.state?.logDetail) history.back();
+            else setSelected(null);
+          }}
         />
       )}
     </section>
