@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"strings"
 	"time"
 )
 
 // Keep the evaluated ordering/facets and group metadata, never all model
-// payloads. The same bounded store accounts for these bytes and rendered pages.
-// Every use proves this directory is CURRENT before hydrating only its page.
+// payloads. Every use proves this directory is CURRENT before hydrating its page.
 type managementPagingRow struct {
 	ID      string
 	Account string
@@ -26,10 +26,21 @@ type managementPagingPlan struct {
 // Decode once at admission. Account headers are always refreshed; the target
 // index points into the immutable directory for direct lookups on site pages.
 // Configured aliases and duplicate row IDs keep the general hydration path.
-type managementListPagingPlan struct {
-	plan    managementPagingPlan
+type managementPagingData struct {
+	Input  managementQueryInput
+	Prices []Price
+}
+
+type managementListPagingData struct {
+	data    managementPagingData
 	site    map[string]subTarget
 	headers []subAccount
+}
+
+type managementListPagingPlan struct {
+	page managementQueryPage
+	rows []managementPagingRow
+	data *managementListPagingData
 }
 
 func managementPagingKey(owner string, filters managementQueryFilters) string {
@@ -44,11 +55,18 @@ func (s *Service) rememberManagementPagingPlanMode(owner string, filters managem
 		log.Printf("management_paging_store stored=false reason=unprepared projected=%t", snapshot.View.ProjectedModels)
 		return false
 	}
-	plan := managementPagingPlan{Input: snapshot.View.Input, Prices: snapshot.View.Prices, Page: snapshot.Page}
+	in := snapshot.View.Input
+	if list && snapshot.DirectoryAccounts != nil {
+		in.Accounts = snapshot.DirectoryAccounts
+	}
+	plan := managementPagingPlan{Input: in, Prices: snapshot.View.Prices, Page: snapshot.Page}
 	plan.Page.Rows = nil
-	plan.Input.Accounts = make([]subAccount, len(snapshot.View.Input.Accounts))
-	for i, a := range snapshot.View.Input.Accounts {
+	plan.Input.Accounts = make([]subAccount, len(in.Accounts))
+	for i, a := range in.Accounts {
 		plan.Input.Accounts[i] = a
+		if list {
+			plan.Input.Accounts[i].Balance = nil
+		}
 		plan.Input.Accounts[i].Targets = make([]subTarget, len(a.Targets))
 		for j, t := range a.Targets {
 			t.Models = nil
@@ -75,40 +93,49 @@ func (s *Service) rememberManagementPagingPlanMode(owner string, filters managem
 		log.Printf("management_paging_store stored=false reason=count")
 		return false
 	}
+	if list {
+		body, err := json.Marshal(managementPagingData{plan.Input, plan.Prices})
+		if err != nil || len(body) > 8<<20 {
+			log.Printf("management_paging_store stored=false reason=data_encoding_or_size bytes=%d", len(body))
+			return false
+		}
+		// Account balances get read from the live proof, not the directory.
+		// Everything else is shared only when the entire serialized input
+		// matches. Filter-dependent differences never alias the same graph.
+		key := managementPagingKey(owner, filters)
+		dataKey := tokenHash(owner + "\x00" + string(body))
+		var slice struct {
+			Page managementQueryPage
+			Rows []managementPagingRow
+		}
+		slice.Page, slice.Rows = plan.Page, plan.Rows
+		raw, err := json.Marshal(slice)
+		if err != nil || len(raw) > 4<<20 || json.Unmarshal(raw, &slice) != nil {
+			return false
+		}
+		entry := managementComputedPage{ListPlan: &managementListPagingPlan{page: slice.Page, rows: slice.Rows}, Bytes: 2*len(raw) + 1024}
+		stored, shared := s.managementPaging.put(key, dataKey, snapshot.Proof, entry, body, filters == managementResetFilters)
+		log.Printf("management_paging_store stored=%t bytes=%d rows=%d shared=%t", stored, len(raw), len(plan.Rows), shared)
+		return stored
+	}
 	raw, err := json.Marshal(plan)
 	if err != nil || len(raw) > 8<<20 {
 		log.Printf("management_paging_store stored=false reason=encoding_or_size bytes=%d", len(raw))
 		return false
 	}
-	entry := managementComputedPage{Plan: raw, Bytes: len(raw)}
-	if list {
-		var retained managementPagingPlan
-		if json.Unmarshal(raw, &retained) != nil {
-			return false
-		}
-		site := make(map[string]subTarget)
-		for _, account := range retained.Input.Accounts {
-			for _, target := range account.Targets {
-				site[qualityGroupID(account.ID, target.GroupID)] = target
-			}
-		}
-		for _, row := range snapshot.Rows {
-			if row.Configured != nil {
-				// Legacy aliases can collide with other row IDs. Rebuilding
-				// against the full directory preserves the last-wins case.
-				delete(site, row.ID)
-			}
-		}
-		entry = managementComputedPage{ListPlan: &managementListPagingPlan{
-			plan: retained, site: site, headers: managementAccountHeaders(retained.Input.Accounts),
-		}, Bytes: 2*len(raw) + 768*len(site)}
-		if entry.Bytes > 16<<20 {
-			return false
-		}
-	}
-	s.rememberManagementEntry(managementPagingKey(owner, filters), snapshot.Proof, entry)
+	s.rememberManagementEntry(managementPagingKey(owner, filters), snapshot.Proof, managementComputedPage{Plan: raw, Bytes: len(raw)})
 	log.Printf("management_paging_store stored=true bytes=%d rows=%d", len(raw), len(plan.Rows))
 	return true
+}
+
+func (s *Service) retainedManagementPagingPlan(ctx context.Context, owner string, filters managementQueryFilters) (managementComputedPage, bool) {
+	key := managementPagingKey(owner, filters)
+	if managementListView(ctx) {
+		if entry, ok := s.managementPaging.get(key); ok {
+			return entry, true
+		}
+	}
+	return s.managementComputed.get(key)
 }
 
 // This is the console Reset filters default (not the no-parameter API default).
@@ -118,7 +145,7 @@ var managementResetFilters = managementQueryFilters{GroupStatus: "all"}
 // is only a scheduling hint; readers still perform the full live gateway and
 // database fence before using either precomputed result.
 func (s *Service) warmManagementResetPlanIfNeeded(ctx context.Context, owner string) (bool, error) {
-	entry, retained := s.managementComputed.get(managementPagingKey(owner, managementResetFilters))
+	entry, retained := s.retainedManagementPagingPlan(ctx, owner, managementResetFilters)
 	if retained {
 		proof, at, err := s.managementReadProof(ctx, s.control.db, owner)
 		if err != nil {
@@ -164,7 +191,7 @@ func (s *Service) retainAndWarmManagementResetDirectory(ctx context.Context, own
 
 func (s *Service) currentManagementPagingPage(ctx context.Context, owner string, filters managementQueryFilters, cursor string, rebase bool) (managementPageResponse, bool, error) {
 	ctx = managementTraceContext(ctx)
-	entry, exists := s.managementComputed.get(managementPagingKey(owner, filters))
+	entry, exists := s.retainedManagementPagingPlan(ctx, owner, filters)
 	if !exists || (len(entry.Plan) == 0 && entry.ListPlan == nil) {
 		log.Printf("management_paging_miss reason=absent request_id=%s", consoleRequestID(ctx))
 		return managementPageResponse{}, false, nil
@@ -180,7 +207,10 @@ func (s *Service) currentManagementPagingPage(ctx context.Context, owner string,
 	var plan managementPagingPlan
 	decodeEnd := managementReadSpan(ctx, "paging_directory_decode")
 	if entry.ListPlan != nil {
-		plan = entry.ListPlan.plan
+		plan = managementPagingPlan{
+			Input: entry.ListPlan.data.data.Input, Prices: entry.ListPlan.data.data.Prices,
+			Page: entry.ListPlan.page, Rows: entry.ListPlan.rows,
+		}
 	} else if err = json.Unmarshal(entry.Plan, &plan); err != nil {
 		decodeEnd()
 		return managementPageResponse{}, false, err
@@ -268,9 +298,11 @@ func (s *Service) currentManagementPagingPage(ctx context.Context, owner string,
 	if scoped {
 		positions := map[string]int{}
 		for _, identity := range plan.Rows[page.Offset:end] {
-			target, found := entry.ListPlan.site[identity.ID]
+			target, found := entry.ListPlan.data.site[identity.ID]
 			fresh, owned := headers[identity.Account]
-			if !found || !owned || identity.Account == "" || len(identity.Members) > 0 {
+			// Legacy configured rows and site identities can collide. Retain
+			// last-wins reconstruction for every ID in that namespace.
+			if !found || !owned || identity.Account == "" || len(identity.Members) > 0 || strings.HasPrefix(identity.ID, "configured:") {
 				scoped = false
 				break
 			}
@@ -288,7 +320,7 @@ func (s *Service) currentManagementPagingPage(ctx context.Context, owner string,
 	// copy the slices on the general path, never the nested evidence.
 	actual := view.Input.Accounts
 	if entry.ListPlan != nil {
-		actual = entry.ListPlan.headers
+		actual = entry.ListPlan.data.headers
 	}
 	responseHeaders = make([]subAccount, len(actual))
 	if !scoped {

@@ -37,6 +37,9 @@ type managementFilterEvidence struct {
 	FingerprintReady bool                `json:"fingerprint_ready"`
 	Fingerprints     map[string][]string `json:"fingerprints"`
 	Joined           map[string]string   `json:"joined"`
+	// Request-local, derived from the already fenced model evidence. Do not
+	// include the optimization in the shared page/complete-selection revision.
+	siteAvailability map[string]bool
 }
 
 type managementFilteredRows struct {
@@ -368,10 +371,18 @@ func filterManagementQueryRows(rows []managementQueryRow, f managementQueryFilte
 		if row.Selected != nil {
 			checks = []managementQueryCheck{*row.Selected}
 		}
-		if f.Availability != "" && !slices.ContainsFunc(checks, func(c managementQueryCheck) bool {
-			return f.Availability == "untested" && c.Result == nil || f.Availability != "untested" && c.Result != nil && c.Result.Availability.Status == f.Availability
-		}) {
-			continue
+		if f.Availability != "" {
+			matches := false
+			if row.Configured == nil && evidence.siteAvailability != nil {
+				matches = evidence.siteAvailability[row.ID]
+			} else {
+				matches = slices.ContainsFunc(checks, func(c managementQueryCheck) bool {
+					return f.Availability == "untested" && c.Result == nil || f.Availability != "untested" && c.Result != nil && c.Result.Availability.Status == f.Availability
+				})
+			}
+			if !matches {
+				continue
+			}
 		}
 		if !managementPriceMatches(checks, f.PriceStatus, evidence.Prices) ||
 			f.ModelMatch != "" && !slices.ContainsFunc(checks, func(c managementQueryCheck) bool { return managementModelMatch(c) == f.ModelMatch }) ||

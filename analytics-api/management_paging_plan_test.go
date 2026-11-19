@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -136,6 +137,101 @@ func TestManagementPagingResetWarmRetainsCurrentFirstAndDeepPage(t *testing.T) {
 	now, ok, err := s.currentComputedManagementPage(ctx, "owner", key)
 	if err != nil || !ok || now.Revision == first.Revision || now.EligibleCount != first.EligibleCount-1 {
 		t.Fatal("warm reset missed committed update", ok, err)
+	}
+}
+
+func TestManagementListPagingDirectoriesDoNotEvictEachOther(t *testing.T) {
+	s := managementHydrationFixture(t)
+	prepareManagementRevisionsForTest(t, s.control.db)
+	ctx := context.WithValue(context.Background(), managementListViewKey{}, true)
+	defaultFirst, err := s.readManagementQuerySnapshot(ctx, "owner", managementResetFilters, "", false)
+	if err != nil || !s.rememberManagementPagingPlanMode("owner", managementResetFilters, defaultFirst, true) {
+		t.Fatal("default list directory not retained", err)
+	}
+	filter := managementQueryFilters{GroupStatus: "all", Availability: "success"}
+	filtered, err := s.readManagementQuerySnapshot(ctx, "owner", filter, "", false)
+	if err != nil || !s.rememberManagementPagingPlanMode("owner", filter, filtered, true) {
+		t.Fatal("filtered list directory not retained", err)
+	}
+	if _, ok := s.managementPaging.get(managementPagingKey("owner", managementResetFilters)); !ok {
+		t.Fatal("filtered directory evicted the independently budgeted reset directory")
+	}
+	if _, ok := s.managementPaging.get(managementPagingKey("owner", filter)); !ok {
+		t.Fatal("filtered directory was not retained")
+	}
+	before := s.managementPaging.bytes
+	if _, ok := s.managementPaging.get(managementPagingKey("owner", filter)); !ok ||
+		s.managementPaging.bytes != before || len(s.managementPaging.data) != 1 {
+		t.Fatal("identical directory inputs were not shared")
+	}
+	page, ok, err := s.currentManagementPagingPage(ctx, "owner", managementResetFilters, defaultFirst.Page.NextCursor, false)
+	if err != nil || !ok || page.Offset != managementPageSize {
+		t.Fatal("reset page did not remain navigable after filter admission", ok, err)
+	}
+	if got := managementPagingKey("owner", filter); got == managementPagingKey("owner", managementResetFilters) {
+		t.Fatal("distinct filters collided")
+	}
+}
+
+func TestManagementListPagingStoreSeparatesResetMaintenanceEviction(t *testing.T) {
+	s := managementHydrationFixture(t)
+	prepareManagementRevisionsForTest(t, s.control.db)
+	ctx := context.WithValue(context.Background(), managementListViewKey{}, true)
+	reset, err := s.readManagementQuerySnapshot(ctx, "owner", managementResetFilters, "", false)
+	if err != nil || !s.rememberManagementPagingPlanMode("owner", managementResetFilters, reset, true) {
+		t.Fatal("reset directory not retained", err)
+	}
+	for i := range managementPagingEntries {
+		owner := fmt.Sprintf("owner-%d", i)
+		entry := managementComputedPage{ListPlan: &managementListPagingPlan{page: reset.Page, rows: []managementPagingRow{{ID: owner}}}, Bytes: 1024}
+		if stored, _ := s.managementPaging.put(managementPagingKey(owner, managementQueryFilters{GroupStatus: "all"}), owner, &managementFreshProof{Stamp: owner}, entry, []byte("{}"), false); !stored {
+			t.Fatal("interactive directory admission failed", i)
+		}
+	}
+	if _, exists := s.managementPaging.get(managementPagingKey("owner", managementResetFilters)); exists {
+		t.Fatal("interactive directories should take priority")
+	}
+	if _, err := s.warmManagementResetPlanIfNeeded(ctx, "owner"); err != nil {
+		t.Fatal("reset warmer could not read its separate directory", err)
+	}
+	for i := range managementPagingEntries {
+		if _, ok := s.managementPaging.get(managementPagingKey(fmt.Sprintf("owner-%d", i), managementQueryFilters{GroupStatus: "all"})); !ok {
+			t.Fatal("warming reset evicted a user filter directory", i)
+		}
+	}
+}
+
+func TestManagementListPagingRehydratesConfiguredRowsFromCurrentInput(t *testing.T) {
+	s := managementHydrationFixture(t)
+	prepareManagementRevisionsForTest(t, s.control.db)
+	ctx := context.WithValue(context.Background(), managementListViewKey{}, true)
+	view := managementDatabaseView{ProjectedModels: true, Input: managementQueryInput{
+		Accounts: []subAccount{{ID: "a", Targets: []subTarget{{GroupID: 1, Name: "site", Platform: "openai", Models: []subModelResult{}}}}},
+		Channels: []managementChannel{{subInstalledChannel: subInstalledChannel{SourceID: "source", Provider: "provider", Kind: "configured", AccountID: "a", GroupID: 1, Models: []string{"alias"}, ModelMappings: map[string]string{"alias": "gpt-5.5"}}, Engine: "gpt", AccountIDs: []string{"a"}}},
+	}}
+	f := managementQueryFilters{GroupStatus: "all"}
+	rows, err := buildManagementQueryRows(view.Input, f.Model, f.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	filtered := filterManagementQueryRows(rows, f, managementQueryEvidence(view.Input, rows, f.Model, nil))
+	page, err := buildManagementQueryPageFromRows(view.Input, rows, f, managementQueryEvidence(view.Input, rows, f.Model, nil), "owner", s.control.key, "", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := managementQuerySnapshot{View: view, Page: page, Rows: rows, Filtered: &filtered, Proof: &managementFreshProof{}}
+	// Reuse the fully fenced fixture proof after the custom public row is added.
+	proof, _, err := s.managementReadProof(ctx, s.control.db, "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot.Proof = &proof
+	if !s.rememberManagementPagingPlanMode("owner", f, snapshot, true) {
+		t.Fatal("configured page not retained")
+	}
+	recovered, ok, err := s.currentManagementPagingPage(ctx, "owner", f, "", false)
+	if err != nil || !ok || len(recovered.Rows) != 2 || recovered.Rows[1].Configured == nil || recovered.Rows[1].ID != "configured:source:provider" {
+		t.Fatal("configured row lost on a retained page", ok, err)
 	}
 }
 

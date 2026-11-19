@@ -146,8 +146,9 @@ it("offers settings for idle and running accounts without starting sync or detec
   await screen.findByRole("button",{name:"设置站点 one"});
   expect(screen.getByRole("button",{name:"设置站点 two"})).toBeEnabled();
   await user.click(screen.getByRole("button",{name:"设置站点 one"}));
+  const coefficient=await screen.findByRole("spinbutton",{name:"倍率系数"});
   const dialog=screen.getByRole("dialog");
-  await user.clear(within(dialog).getByRole("spinbutton"));
+  await user.clear(coefficient);
   await user.type(within(dialog).getByRole("spinbutton"),"0.1");
   await user.click(within(dialog).getByRole("button",{name:"保存设置"}));
   await waitFor(()=>expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
@@ -266,8 +267,9 @@ it.each([false,true])("imports sub2api aliases independently of originals (keep 
   await user.click(open);
   expect(document.querySelector(".sub-results-table table")).toBe(table);
   expect(pendingPageReads).toHaveLength(0);
+  const addAlias=await screen.findByRole("button",{name:"添加重命名"});
   const d=within(screen.getByRole("dialog"));
-  await user.click(d.getByRole("button",{name:"添加重命名"}));
+  await user.click(addAlias);
   expect(d.getByRole("checkbox",{name:"codex-auto-review"})).toBeChecked();
   await user.type(d.getByLabelText("重命名 1 对外模型名"),"gpt-5.6-luna");
   if(!keep)await user.click(d.getByRole("checkbox",{name:"codex-auto-review"}));

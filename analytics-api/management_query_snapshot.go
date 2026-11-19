@@ -90,6 +90,9 @@ type managementQuerySnapshot struct {
 	// Request-local ordering already evaluated for Page. Never populated from a
 	// retained page or reused to authorize a mutation.
 	Filtered *managementFilteredRows
+	// Pre-hydration display metadata, so the particular first page (including
+	// its overview or expanded diagnostics) cannot change the shared input.
+	DirectoryAccounts []subAccount
 }
 
 func (s *Service) readManagementQuerySnapshot(ctx context.Context, owner string, filters managementQueryFilters, token string, selection bool) (managementQuerySnapshot, error) {
@@ -145,7 +148,10 @@ func (s *Service) readManagementQuerySnapshotModeInternal(ctx context.Context, o
 				version: managementTargetVersion{s.control.db, owner, proof.Epochs["console_sub_accounts"], proof.Epochs["console_sub_targets"], proof.Epochs["console_sub_capability_summaries"]},
 			})
 		}
-		catalogOnly := filters.Model == "" && filters.Availability == "" && filters.PriceStatus == "" && filters.ModelMatch == "" && filters.ToolUse == "" && filters.Quality == ""
+		stateOnly := !selection && !preview && managementListView(ctx) && out.Proof != nil && out.Proof.Stamp != "" &&
+			filters.Model == "" && (filters.Availability == "success" || filters.Availability == "error") &&
+			filters.PriceStatus == "" && filters.ModelMatch == "" && filters.ToolUse == "" && filters.Quality == ""
+		catalogOnly := filters.Model == "" && (filters.Availability == "" || stateOnly) && filters.PriceStatus == "" && filters.ModelMatch == "" && filters.ToolUse == "" && filters.Quality == ""
 		// withManagementSnapshot owns this repeatable-read transaction. Only
 		// this path can retain predicate receipts until same-snapshot hydration.
 		var reuse *managementReceiptReuse
@@ -162,6 +168,13 @@ func (s *Service) readManagementQuerySnapshotModeInternal(ctx context.Context, o
 		if err != nil {
 			return view, err
 		}
+		var siteAvailability map[string]bool
+		if stateOnly && view.ProjectedModels {
+			siteAvailability, err = attachManagementAvailability(ctx, tx, owner, &view.Input, filters.Availability)
+			if err != nil {
+				return view, err
+			}
+		}
 		endRows := managementReadSpan(ctx, "assemble_rows")
 		out.Rows, err = buildManagementQueryRows(view.Input, filters.Model, filters.AccountID)
 		endRows()
@@ -170,6 +183,7 @@ func (s *Service) readManagementQuerySnapshotModeInternal(ctx context.Context, o
 		}
 		endEvidence := managementReadSpan(ctx, "filter_evidence")
 		out.Evidence = managementQueryEvidence(view.Input, out.Rows, filters.Model, view.Prices)
+		out.Evidence.siteAvailability = siteAvailability
 		endEvidence()
 		endPage := managementReadSpan(ctx, "filter_page")
 		filtered := filterManagementQueryRows(out.Rows, filters, out.Evidence)
@@ -179,6 +193,15 @@ func (s *Service) readManagementQuerySnapshotModeInternal(ctx context.Context, o
 		if err == nil && !selection && hydrate {
 			if preview {
 				out.Page.Rows = append([]managementQueryRow{}, filtered.Rows...)
+			}
+			if !preview && managementListView(ctx) && view.ProjectedModels {
+				out.DirectoryAccounts = append([]subAccount{}, view.Input.Accounts...)
+				for i := range out.DirectoryAccounts {
+					out.DirectoryAccounts[i].Targets = append([]subTarget{}, out.DirectoryAccounts[i].Targets...)
+					for j := range out.DirectoryAccounts[i].Targets {
+						out.DirectoryAccounts[i].Targets[j].Models = nil
+					}
+				}
 			}
 			endHydrate := managementReadSpan(ctx, "hydrate_page")
 			err = s.hydrateManagementPageFrom(ctx, tx, owner, &view, &out.Page, filters)

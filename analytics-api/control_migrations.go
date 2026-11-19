@@ -136,6 +136,9 @@ var siteKeyCreateBackoffSQL string
 //go:embed migrations/0032_site_key_pause_budget.sql
 var siteKeyPauseBudgetSQL string
 
+//go:embed migrations/0033_management_overview_outcome.sql
+var managementOverviewOutcomeSQL string
+
 var managementRevisionTables = []string{"console_sub_models", "console_management_model_signal", "console_sub_usage", "console_management_receipt_signal", "console_management_revision_state"}
 
 type controlMigration struct {
@@ -179,6 +182,7 @@ func controlMigrations() []controlMigration {
 		{"0030_management_overview_queue", managementOverviewQueueSQL, []string{"console_sub_check_queue"}},
 		{"0031_site_key_create_backoff", siteKeyCreateBackoffSQL, []string{"console_site_detection_limits"}},
 		{"0032_site_key_pause_budget", siteKeyPauseBudgetSQL, []string{"console_sub_accounts"}},
+		{"0033_management_overview_outcome", managementOverviewOutcomeSQL, []string{"console_sub_models", "console_management_overview_reset"}},
 	}
 }
 

@@ -9,21 +9,19 @@ import (
 )
 
 // The current directory already read these exact source columns under this
-// transaction's ownership/model proof. Read summaries in account ranges as
-// before; touch the source heap only for the original missing-summary fallback.
+// transaction's ownership/model proof. Match the summary by its complete
+// primary key. PostgreSQL estimates jsonb_to_recordset at 100 rows; an
+// uncorrelated summary batch can consequently be rescanned for EVERY model of
+// a real page with thousands of rows. Keep the lookup and fallback correlated.
 const managementPageDirectoryModelsSQL = `WITH wanted AS MATERIALIZED (
  SELECT w.* FROM jsonb_to_recordset($2::jsonb) AS w(account_id text,group_id bigint)
  JOIN console_sub_accounts a ON a.id=w.account_id WHERE a.owner=$1),
- batches AS MATERIALIZED (SELECT account_id,array_agg(group_id) AS groups FROM wanted GROUP BY account_id),
- summaries AS NOT MATERIALIZED (
- SELECT ms.account_id,ms.group_id,ms.model,ms.result FROM batches b CROSS JOIN LATERAL (
- SELECT ms.account_id,ms.group_id,ms.model,ms.result FROM console_sub_model_summaries ms
- WHERE ms.account_id=b.account_id AND ms.group_id=ANY(b.groups) OFFSET 0) ms),
  directory AS MATERIALIZED (
  SELECT m.* FROM jsonb_to_recordset($3::jsonb) AS m(account_id text,group_id bigint,model text,state text,message text)
  JOIN wanted USING(account_id,group_id))
  SELECT m.account_id,m.group_id,m.model,m.state,m.message,COALESCE(ms.result,console_sub_model_summary_v1(raw.result))
- FROM directory m LEFT JOIN summaries ms USING(account_id,group_id,model)
+ FROM directory m LEFT JOIN LATERAL (SELECT result FROM console_sub_model_summaries ms
+ WHERE ms.account_id=m.account_id AND ms.group_id=m.group_id AND ms.model=m.model OFFSET 0) ms ON true
  LEFT JOIN LATERAL (SELECT source.result FROM console_sub_models source
  WHERE ms.result IS NULL AND source.account_id=m.account_id AND source.group_id=m.group_id AND source.model=m.model OFFSET 0) raw ON true`
 

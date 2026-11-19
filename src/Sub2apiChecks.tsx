@@ -5,7 +5,7 @@ import { fingerprintKey, sharedFingerprintIndex } from "./fingerprintResults";
 import { isCapabilityCheckModel, capabilityCheckScope } from "./sub2apiModels";
 import { CopyProbeCurl } from "./CopyProbeCurl";
 import { TableLoading, DetailLoading } from "./PageLoading";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -28,7 +28,6 @@ import { accountBalanceQuery } from "./accountBalance";
 import type { AccountBalance as SubAccountBalance } from "./accountBalance";
 import { BalanceAmount } from "./BalanceAmount";
 import { AccountForm } from "./SiteAccountForm";
-import { SiteAccountSettings } from "./SiteAccountSettings";
 import { CompactDialogHeader, RemovalDialog } from "./CompactDialog";
 import { useChannelDetection, detectionEnabled } from "./channelDetection";
 import { DetectionAction, detectionProjectLabels, detectionProjects, useDetectionProject } from "./DetectionAction";
@@ -36,7 +35,6 @@ import { ResponseLatency } from "./LatencyBadge";
 import { Empty, Spinner, Tip } from "./ui";
 import { loadSubFilters, saveSubFilters, subFilterDefaults } from "./sub2apiPreferences";
 import { useImportBindings, boundGroups } from "./sub2apiImports";
-import { Sub2apiImport } from "./Sub2apiImport";
 import { readCompleteSubTarget } from "./subTargetDetails";
 import { CreateChannel } from "./CreateChannel";
 import { ChannelSettings } from "./ChannelSettings";
@@ -79,6 +77,11 @@ import { BillingRate } from "./BillingRate";
 import type { ObservedRate } from "./billingRates";
 import { TableColumns, useTableColumns } from "./TableColumns";
 import { managementColumnsStorageKey, managementOverviewForColumns } from "./managementOverview";
+import { PageBoundary } from "./PageBoundary";
+import { RouteWorkspaceLoading } from "./RouteWorkspaceLoading";
+
+const SiteAccountSettings = lazy(() => import("./SiteAccountSettings").then(m => ({default: m.SiteAccountSettings})));
+const Sub2apiImport = lazy(() => import("./Sub2apiImport").then(m => ({default: m.Sub2apiImport})));
 
 const managementColumnChoices = [
   {id: "model", label: "模型"},
@@ -1315,10 +1318,11 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
             </button>
           </div>
         </div>
-        {settingsAccount && <SiteAccountSettings account={settingsAccount} close={() => setSettingsAccount(null)} saved={() => {
+        {settingsAccount && <PageBoundary onDismiss={() => setSettingsAccount(null)}><Suspense fallback={<RouteWorkspaceLoading title="站点账号设置" closeLabel="关闭站点设置" label="加载站点账号设置" close={() => setSettingsAccount(null)} context={settingsAccount.name} />}>
+          <SiteAccountSettings account={settingsAccount} close={() => setSettingsAccount(null)} saved={() => {
           setSettingsAccount(null);
           void client.invalidateQueries({ predicate: q => ["management-query", "sub-sync-progress", "sub2api", "sub2api-headers", "sub2api-imports", "sub-channel-spend", "channel-spend", "metrics", "sub-check-detail", "sub-management-models"].includes(String(q.queryKey[0])) });
-        }} />}
+        }} /></Suspense></PageBoundary>}
         {form && (
           <AccountForm
             key={form.account?.id || "new"}
@@ -2016,6 +2020,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
         )}
       </section>
       {importing && (
+        <PageBoundary onDismiss={() => setImporting(null)}><Suspense fallback={<RouteWorkspaceLoading label="加载渠道设置" close={() => setImporting(null)} context={importing.target.name} />}>
         <Sub2apiImport
           sources={sources}
           imports={dialogImports}
@@ -2025,6 +2030,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
           prices={prices.data?.data}
           close={() => setImporting(null)}
         />
+        </Suspense></PageBoundary>
       )}
       {configuredDialog && <ConfiguredChannelDialog item={configuredDialog} prices={prices.data?.data} close={() => setConfiguredDialog(null)} />}
       {managementDetail && (

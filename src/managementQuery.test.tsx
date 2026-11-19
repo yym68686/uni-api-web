@@ -552,6 +552,19 @@ it("rejects a response whose session owner changed during a normal read", async(
   await expect(readManagementPage(subFilterDefaults,"",new AbortController().signal,"owner")).rejects.toThrow("登录账号已变化");
 });
 
+it("retries a failed parallel initial page through the authenticated read", async () => {
+  const initial = Promise.reject(Error("early request failed"));
+  void initial.catch(() => undefined);
+  globalThis.__uniManagementBootstrap = {
+    owner: "owner", filters: JSON.stringify(subFilterDefaults), startedAt: Date.now(),
+    controller: new AbortController(), result: initial,
+  };
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ...page("authenticated"), owner: "owner" })));
+  const result = await readManagementPage(subFilterDefaults, "", new AbortController().signal, "owner");
+  expect(result.revision).toBe("authenticated");
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
+
 
 it.each(["idle","running","queued"])("does not clear or reread management on focus, reconnect or timers (%s)", async state=>{
   const live={...page(),accounts:[{id:"a",name:"Fixture",base:"https://fixture.test",email:"fixture@test",message:"",synced_at:0,targets:[],state}]} as ManagementPage;

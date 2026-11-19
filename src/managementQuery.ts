@@ -176,14 +176,21 @@ export async function readManagementPage(
         if (signal.aborted) abort();
         else signal.addEventListener("abort", abort, { once: true });
         try {
-          const page = validateManagementPage(await bootstrap.result);
+          const early = await bootstrap.result;
+          const page = validateManagementPage(early);
           signal.throwIfAborted();
           // Older backends do not attest the owner, so negotiate a normal
           // authenticated read rather than accept an unbound early response.
           if (page.owner === owner) {
+            const timing = managementReadTimings.get(early);
+            if (timing) managementReadTimings.set(page, timing);
             rememberManagementMetadata(owner, page);
             return page;
           }
+        } catch {
+          // An early read may fail while authentication/deployment is still
+          // settling. Retry through the regular authenticated path.
+          signal.throwIfAborted();
         } finally {
           signal.removeEventListener("abort", abort);
         }

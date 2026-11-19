@@ -140,6 +140,48 @@ func TestManagementGroupOverviewWarmKeepsConcurrentDirtyWrite(t *testing.T) {
 	}
 }
 
+func TestManagementGroupOverviewFencesMessageOnlyOutcomeChanges(t *testing.T) {
+	s := managementHydrationFixture(t)
+	ctx := context.Background()
+	db := s.control.db
+	exec := func(statement string, args ...any) {
+		t.Helper()
+		if _, err := db.ExecContext(ctx, statement, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(`UPDATE console_sub_models SET state='interrupted' WHERE account_id='a' AND group_id=1 AND model='gpt-5.5'`)
+	if _, _, err := warmManagementOverviewBatch(ctx, db, ""); err != nil {
+		t.Fatal(err)
+	}
+	read := func() (stored map[string]managementPageGroupOverview, exact managementPageGroupOverview) {
+		t.Helper()
+		tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback()
+		wanted := []subBoundKey{{AccountID: "a", GroupID: 1}}
+		stored, err = readStoredManagementOverviews(ctx, tx, "owner", wanted, managementOverviewCatalog(managementUnique(subModels)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := readManagementPageOverview(ctx, tx, "owner", wanted)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return stored, result[qualityGroupID("a", 1)]
+	}
+	exec(`UPDATE console_sub_models SET message='transport interrupted' WHERE account_id='a' AND group_id=1 AND model='gpt-5.5'`)
+	if stored, got := read(); len(stored) != 1 || got.counts.Interrupted != 1 {
+		t.Fatal("diagnostic-only change invalidated overview", got)
+	}
+	exec(`UPDATE console_sub_models SET message=$1 WHERE account_id='a' AND group_id=1 AND model='gpt-5.5'`, legacySiteAuthMessage)
+	if stored, got := read(); len(stored) != 0 || got.counts.Rejected != 1 || got.counts.Interrupted != 0 {
+		t.Fatal("classification-only change left stale overview", got)
+	}
+}
+
 func TestManagementOverviewMatchesListAcrossPages(t *testing.T) {
 	s := managementHydrationFixture(t)
 	prepareManagementRevisionsForTest(t, s.control.db)

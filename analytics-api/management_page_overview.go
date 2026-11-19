@@ -35,7 +35,7 @@ const managementPageOverviewSQL = `WITH wanted AS MATERIALIZED (
    greatest(max(s.checked_at) FILTER (WHERE s.present),0) AS checked_at,
    COALESCE(jsonb_agg(jsonb_build_object('model',m.model,'state',m.state) ORDER BY m.model COLLATE "C")
      FILTER (WHERE m.state IN ('queued','running')),'[]'::jsonb) AS busy
- FROM (SELECT model,CASE WHEN state='interrupted' AND message IN ` + legacySiteRejectionSQL + ` THEN 'rejected' ELSE state END AS state FROM console_sub_models
+ FROM (SELECT model,console_management_overview_model_state_v1(state,message) AS state FROM console_sub_models
        WHERE account_id=w.account_id AND group_id=w.group_id OFFSET 0) m
  LEFT JOIN (SELECT model,valid,present,checked_at,availability,terminal FROM console_management_model_signal
             WHERE account_id=w.account_id AND group_id=w.group_id OFFSET 0) s USING(model)

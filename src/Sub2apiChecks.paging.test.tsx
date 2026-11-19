@@ -858,10 +858,11 @@ it("submits the import form on page two and reconciles that same page after the 
  const row=await screen.findByRole("row",{name:"查看 Owned site Channel 26 渠道详情"});
  const table=screen.getByRole("table");
  await user.click(within(row).getByRole("button",{name:"添加到渠道"}));
+ const source=await screen.findByLabelText("添加到 uni-api 来源");
  const d=within(screen.getByRole("dialog"));
  expect(cursors).toEqual(["","25"]);
  expect(bindingReads).toBe(1);
- await user.selectOptions(d.getByLabelText("添加到 uni-api 来源"),"fixture");
+ await user.selectOptions(source,"fixture");
  await waitFor(()=>expect(d.getByLabelText("添加到 API key")).toBeEnabled());
  await user.selectOptions(d.getByLabelText("添加到 API key"),"fixture-key");
  await waitFor(()=>expect(d.getByRole("button",{name:"添加到渠道"})).toBeEnabled());

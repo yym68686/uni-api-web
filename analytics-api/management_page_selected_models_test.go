@@ -179,7 +179,7 @@ func TestManagementSelectedModelsSQLPreservesOwnershipRawFallbackAndSnapshot(t *
 		return out
 	}
 	wanted := []subBoundKey{{AccountID: "a", GroupID: 1}, {AccountID: "foreign", GroupID: 1}}
-	baseline := read(managementPageModelsSQL+` WHERE m.model=ANY($3::text[])`, "owner", mustJSON(wanted), []string{"gpt-5.5", checkModel})
+	baseline := read(managementPageModelsSQL+` WHERE g.model=ANY($3::text[])`, "owner", mustJSON(wanted), []string{"gpt-5.5", checkModel})
 	got := read(managementPageSelectedModelsSQL, "owner", mustJSON(metadata))
 	if len(got) != 2 || !reflect.DeepEqual(got, baseline) {
 		t.Fatal("missing summary or JSON null changed", got, baseline)

@@ -38,6 +38,7 @@ type Service struct {
 	summaries          summaryHistory
 	observationHealth  sourceObservationCircuit
 	managementComputed managementComputedPages
+	managementPaging   managementPagingDirectories
 	pageValidators     managementPageValidators
 	modelDirectories   managementModelDirectories
 	predicateSets      managementPredicateSets
