@@ -165,6 +165,9 @@ export async function analyticsRequest<T>(connection: Connection,path: string,si
   });
 }
 
+let controlWriteGeneration = 0;
+export const currentControlWriteGeneration = () => controlWriteGeneration;
+
 export async function controlRequest<T>(path:string,init:RequestInit={}):Promise<T>{
  const read=!init.method || init.method.toUpperCase()==="GET";
  return withRequestDeadline(init.signal, read ? 30_000 : 120_000, !read, async (signal, requestId, responseReceived) => {
@@ -185,7 +188,10 @@ export async function controlRequest<T>(path:string,init:RequestInit={}):Promise
  // Recharge state is polled independently. Authorizing a wallet or creating a
  // quote must not clear/reload the unrelated full channel-management snapshot.
  const rechargeOperation=path.includes("/recharge/");
- if(!read && !syncQueued && !rechargeOperation && typeof window !== "undefined") window.dispatchEvent(new Event("uni-console-control-write"));
+ if(!read && !syncQueued && !rechargeOperation && typeof window !== "undefined") {
+   controlWriteGeneration++;
+   window.dispatchEvent(new Event("uni-console-control-write"));
+ }
  phase="body_json";
  let data=await response.json();
  const decoded=currentManagement?performance.now():0;

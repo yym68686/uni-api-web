@@ -245,7 +245,7 @@ func (s *Service) finishFingerprint(ctx context.Context, t fingerprintTarget, ru
 	}
 	// Preparation can fail or requeue before startFingerprintSamples validates the
 	// saved evidence. Without a new result, retain its original configuration ID.
-	_, err = tx.ExecContext(ctx, `UPDATE console_model_fingerprints SET state=$4,message=$5,result=COALESCE($6,result),revision=CASE WHEN $6 IS NULL OR $7='' THEN revision ELSE $7 END,deadline=NULL,
+	_, err = tx.ExecContext(ctx, `UPDATE console_model_fingerprints SET state=$4,message=$5,result=COALESCE($6::jsonb,result),previous_verdict=CASE WHEN $4='done' AND $6::jsonb->>'status' IN ('match','mismatch') THEN NULL ELSE previous_verdict END,revision=CASE WHEN $6 IS NULL OR $7='' THEN revision ELSE $7 END,deadline=NULL,
  updated_at=CASE WHEN $4='queued' THEN updated_at ELSE now() END
  WHERE scope=$1 AND model=$2 AND run_id=$3 AND state='running' AND (deadline>now() OR $4='interrupted')`, t.scope(), t.Model, run, state, message, raw, revision)
 	if err != nil {

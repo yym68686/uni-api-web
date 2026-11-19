@@ -76,7 +76,7 @@ func (s *Service) subSaveSiteAddress(w http.ResponseWriter, r *http.Request, ctx
 		// rebuilds them. Deleting cascades to both projections instead of
 		// running the expensive summary/signal upserts for every old row.
 		{"clear_models", `DELETE FROM console_sub_models WHERE account_id=$1`},
-		{"reset_fingerprints", `UPDATE console_model_fingerprints SET state='interrupted',message='站点地址已更改，请重新检测',result=NULL,sample_state=NULL,revision='',run_id='',deadline=NULL,site_key='',updated_at=now() WHERE account_id=$1`},
+		{"reset_fingerprints", `UPDATE console_model_fingerprints SET state='interrupted',message='站点地址已更改，请重新检测',result=NULL,previous_verdict=NULL,sample_state=NULL,revision='',run_id='',deadline=NULL,site_key='',updated_at=now() WHERE account_id=$1`},
 		{"clear_check_queue", `DELETE FROM console_sub_check_queue WHERE account_id=$1`},
 		{"clear_key_scans", `DELETE FROM console_sub_key_scans WHERE account_id=$1`},
 		{"clear_key_index", `DELETE FROM console_sub_key_index WHERE account_id=$1`},

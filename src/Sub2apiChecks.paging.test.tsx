@@ -117,6 +117,7 @@ function mount(user: string, client = new QueryClient({ defaultOptions: { querie
 it.each(["idle", "interrupted", "stopped", "error"])("revalidates page two once when a running site settles as %s, without resubmitting detection", async terminal => {
   const client = new QueryClient({defaultOptions:{queries:{retry:false}}});
   let pageReads = 0, progressReads = 0;
+  let settled = false;
   let finishPage!: (response: Response) => void;
   const requests: string[] = [];
   const check = (state: string) => ({model:"gpt-5.5",state,message:"",result:state === "done" ? {
@@ -139,14 +140,14 @@ it.each(["idle", "interrupted", "stopped", "error"])("revalidates page two once 
     }
     if (url.pathname.endsWith("/accounts/progress")) {
       progressReads++;
-      const done = progressReads > 1;
+      const done = settled;
       return Response.json({data:[{...account,state:done ? terminal : "running",progress:{total:1,completed:done ? 1 : 0,queued:done ? 0 : 1,running:0,interrupted:0,running_models:[],groups:[]}}],read_at_ms:done ? 3 : 2});
     }
     return Response.json({data:[]});
   }));
   const user = userEvent.setup(); mount(`settled-${terminal}`, client);
   await screen.findByText("Channel 1", {selector:"strong"});
-  await waitFor(()=>expect(progressReads).toBe(1));
+  await waitFor(()=>expect(progressReads).toBeGreaterThan(0));
   await user.click(screen.getByRole("button", {name:"下一页"}));
   await screen.findByText("Channel 26", {selector:"strong"});
   const row = screen.getByRole("row", {name:"查看 Owned site Channel 26 渠道详情"});
@@ -154,6 +155,7 @@ it.each(["idle", "interrupted", "stopped", "error"])("revalidates page two once 
   fireEvent.focus(queued);
   expect(await screen.findByRole("tooltip")).toHaveTextContent("1 个排队 / 检测中");
   fireEvent.blur(queued);
+  settled = true;
   await act(async()=>{await client.refetchQueries({queryKey:["sub-sync-progress"]});});
   await waitFor(()=>expect(pageReads).toBe(3));
   expect(requests).toEqual(["", "25", "25"]);
@@ -217,7 +219,7 @@ it("hides unverified results and disables detection when the completion result r
   expect(pageReads).toBe(2);
 });
 
-it("returns from another view to page three, rereads it, and resets position when filters change", async () => {
+it("reuses the current page when returning from another view and resets position when filters change", async () => {
   const reads: string[] = [];
   vi.stubGlobal("fetch", vi.fn(async(input:string)=>{
     const url = new URL(input);
@@ -248,7 +250,8 @@ it("returns from another view to page three, rereads it, and resets position whe
   await screen.findByText("日志页面");
   await user.click(screen.getByRole("button",{name:"切换日志"}));
   await screen.findByText("Channel 51",{selector:"strong"});
-  await waitFor(()=>expect(reads).toEqual(["","25","50","50"]));
+  expect(reads).toEqual(["","25","50"]);
+  expect(screen.queryByRole("status",{name:"加载渠道检测"})).not.toBeInTheDocument();
   expect(screen.queryByText("Channel 1",{selector:"strong"})).not.toBeInTheDocument();
   await user.type(screen.getByRole("textbox",{name:"排除渠道名"}),"kiro");
   await screen.findByText("Channel 1",{selector:"strong"});

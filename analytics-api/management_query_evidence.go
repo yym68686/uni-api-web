@@ -120,6 +120,8 @@ func managementSharedFingerprints(in managementQueryInput) map[string]management
 			}
 			g.keys[sourceKey] = true
 			if record, exists := index[sourceKey]; exists {
+				record.fencePrevious(member.ProbeFingerprint)
+				index[sourceKey] = record
 				if record.State != "done" || record.Revision == member.ProbeFingerprint {
 					g.records = append(g.records, record)
 				} else {
@@ -201,10 +203,13 @@ func managementRowFingerprintEntries(row managementQueryRow, index map[string]ma
 		}
 		key := managementFingerprintKey(target)
 		record, exists := index[key]
-		if exists && record.State == "done" && target.Source != "" && managementFingerprintKey(record.fingerprintTarget) == key && row.Configured != nil {
+		if exists && target.Source != "" && managementFingerprintKey(record.fingerprintTarget) == key && row.Configured != nil {
 			for _, member := range row.Configured.Members {
-				if member.SourceID == target.Source && member.Provider == target.Provider && member.ProbeFingerprint != record.Revision {
-					exists = false
+				if member.SourceID == target.Source && member.Provider == target.Provider {
+					record.fencePrevious(member.ProbeFingerprint)
+					if record.State == "done" && member.ProbeFingerprint != record.Revision {
+						exists = false
+					}
 				}
 			}
 		}

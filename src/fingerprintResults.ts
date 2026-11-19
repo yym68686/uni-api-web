@@ -6,6 +6,11 @@ import type { FingerprintRecord, FingerprintTarget } from "./ModelFingerprints";
 import { hasScopedFingerprintRejection } from "./fingerprintRejections";
 
 export const fingerprintKey = (t: FingerprintTarget) => JSON.stringify([t.source_id || "", t.provider || "", t.account_id || "", t.group_id || 0, t.model]);
+export function fencePreviousFingerprint(record: FingerprintRecord, revision?: string) {
+  return record.previous_result && (!revision || revision !== record.previous_revision)
+    ? { ...record, previous_result: undefined, previous_revision: undefined }
+    : record;
+}
 const pending = (r: FingerprintRecord) => r.state === "queued" || r.state === "running";
 const newer = (a: FingerprintRecord, b: FingerprintRecord) =>
   Number(pending(b)) - Number(pending(a)) ||
@@ -14,7 +19,11 @@ const newer = (a: FingerprintRecord, b: FingerprintRecord) =>
 // Read-only projections: original job identity is retained for cancellation.
 // A name/host match alone cannot link accounts, groups, aliases or credentials.
 export function sharedFingerprintIndex(records: FingerprintRecord[], channels: ManagedChannel[], unavailableSources: string[] = [], imports: InstalledChannel[] = [], unavailableImports: string[] = []) {
-  const index = new Map(records.map(r => [fingerprintKey(r), r]));
+  const revisions = new Map(channels.flatMap(channelMembers)
+    .filter(member => !unavailableSources.includes(member.source_id) && !unavailableSources.includes(member.source_name))
+    .map(member => [JSON.stringify([member.source_id, member.provider]), member.probe_fingerprint]));
+  const index = new Map(records.map(r => [fingerprintKey(r), r.source_id
+    ? fencePreviousFingerprint(r, revisions.get(JSON.stringify([r.source_id, r.provider]))) : r]));
   const groups = new Map<string, { keys: Set<string>; records: FingerprintRecord[] }>();
   const unavailable = new Set(unavailableSources);
   const unavailableImport = new Set(unavailableImports);

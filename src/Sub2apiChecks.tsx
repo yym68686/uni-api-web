@@ -1621,7 +1621,6 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                     setPage(0);
                   }}
                 >
-                  <option value="">默认顺序</option>
                   <option value="asc">倍率 ↑</option>
                   <option value="desc">倍率 ↓</option>
                 </select>

@@ -245,7 +245,7 @@ it("tags independent filter, page and refetch reads without changing query keys,
     await waitFor(() => { expect(calls).toHaveLength(3); expect(hook.result.current.data).toBeDefined(); });
     await act(async () => { await hook.result.current.refetch(); });
     await waitFor(() => expect(calls).toHaveLength(4));
-    expect(client.getQueryCache().getAll().map(query => query.queryKey)).toEqual([["management-query", "private-owner", filtered, "private-cursor"]]);
+    expect(client.getQueryCache().getAll().map(query => query.queryKey)).toContainEqual(["management-query", "private-owner", filtered, "private-cursor"]);
     hook.rerender({ owner: "other-private-owner", filters: filtered, cursor: "private-cursor" });
     await waitFor(() => { expect(calls).toHaveLength(5); expect(hook.result.current.data).toBeDefined(); });
     expect(calls.map(call => call.trigger)).toEqual(["mount", "filter_change", "page_change", "refetch", "mount"]);

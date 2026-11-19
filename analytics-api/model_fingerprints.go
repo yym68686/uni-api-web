@@ -27,12 +27,20 @@ type fingerprintTarget struct {
 }
 type fingerprintRecord struct {
 	fingerprintTarget
-	State           string          `json:"state"`
-	Message         string          `json:"message"`
-	Revision        string          `json:"revision"`
-	UpdatedAtMS     int64           `json:"updated_at_ms"`
-	Result          json.RawMessage `json:"result"`
-	RetainedSamples int             `json:"retained_samples,omitempty"`
+	State            string          `json:"state"`
+	Message          string          `json:"message"`
+	Revision         string          `json:"revision"`
+	UpdatedAtMS      int64           `json:"updated_at_ms"`
+	Result           json.RawMessage `json:"result"`
+	PreviousResult   json.RawMessage `json:"previous_result,omitempty"`
+	PreviousRevision string          `json:"previous_revision,omitempty"`
+	RetainedSamples  int             `json:"retained_samples,omitempty"`
+}
+
+func (r *fingerprintRecord) fencePrevious(revision string) {
+	if revision == "" || revision != r.PreviousRevision {
+		r.PreviousResult, r.PreviousRevision = nil, ""
+	}
 }
 
 // Shared by the UI, API and scorer so each model uses the same reference class.
@@ -102,6 +110,9 @@ func enqueueFingerprintForOwner(ctx context.Context, db fingerprintDB, t fingerp
  WHERE $7::text IS NULL OR COALESCE((SELECT models ? $2 FROM console_fingerprint_preferences WHERE owner=$7),$8::boolean)
  ON CONFLICT(scope,model) DO UPDATE SET
  state='queued',message='',
+ previous_verdict=CASE WHEN console_model_fingerprints.state='done' AND console_model_fingerprints.result->>'status' IN ('match','mismatch') THEN
+  jsonb_build_object('revision',console_model_fingerprints.revision,'result',console_model_fingerprints.result)
+  ELSE console_model_fingerprints.previous_verdict END,
  result=CASE WHEN console_model_fingerprints.sample_state IS NOT NULL AND console_model_fingerprints.result->>'used_outputs' IN ('1','2') THEN console_model_fingerprints.result END,
  revision=CASE WHEN console_model_fingerprints.sample_state IS NOT NULL AND console_model_fingerprints.result->>'used_outputs' IN ('1','2') THEN console_model_fingerprints.revision ELSE '' END,
  sample_state=CASE WHEN console_model_fingerprints.result->>'used_outputs' IN ('1','2') THEN console_model_fingerprints.sample_state END,
@@ -112,7 +123,17 @@ func enqueueFingerprintForOwner(ctx context.Context, db fingerprintDB, t fingerp
 }
 func (s *Service) modelFingerprints(w http.ResponseWriter, r *http.Request) {
 	owner, _ := s.controlUser(r)
-	data, err := readManagementFingerprintsFrom(r.Context(), s.control.db, owner)
+	account, group := r.URL.Query().Get("account_id"), r.URL.Query().Get("group_id")
+	var target fingerprintTarget
+	if account != "" || group != "" {
+		id, err := strconv.ParseInt(group, 10, 64)
+		if err != nil || id <= 0 || account == "" {
+			http.Error(w, "指纹分组无效", 400)
+			return
+		}
+		target.Account, target.Group = account, id
+	}
+	data, err := readScopedManagementFingerprintsFrom(r.Context(), s.control.db, owner, target)
 	if err != nil {
 		http.Error(w, "模型指纹记录读取失败", 503)
 		return

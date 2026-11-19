@@ -1,11 +1,12 @@
 import { expect, it } from "vitest";
 import { loadSubFilters, saveSubFilters, subFilterDefaults } from "./sub2apiPreferences";
-it("includes unavailable groups in default order while preserving explicit saved order",()=>{
- expect(loadSubFilters("new-default")).toMatchObject({sort:"",groupStatus:"all"});
+it("defaults to ascending multiplier order while preserving explicit descending order",()=>{
+ expect(loadSubFilters("new-default")).toMatchObject({sort:"asc",groupStatus:"all"});
  localStorage.setItem("uni-console-sub2api-filters:v1:missing-order",JSON.stringify({model:"gpt-5.5"}));
- expect(loadSubFilters("missing-order")).toMatchObject({model:"gpt-5.5",sort:""});
- for(const sort of ["desc",""]){saveSubFilters("saved-order",{...subFilterDefaults,sort});expect(loadSubFilters("saved-order").sort).toBe(sort);}
- saveSubFilters("saved-order",{...subFilterDefaults});expect(loadSubFilters("saved-order").sort).toBe("");
+ expect(loadSubFilters("missing-order")).toMatchObject({model:"gpt-5.5",sort:"asc"});
+ saveSubFilters("saved-order",{...subFilterDefaults,sort:"desc"});expect(loadSubFilters("saved-order").sort).toBe("desc");
+ localStorage.setItem("uni-console-sub2api-filters:v1:saved-order",JSON.stringify({sort:""}));
+ expect(loadSubFilters("saved-order").sort).toBe("asc");
 });
 it("preserves name exclusions per user and defaults older or invalid preferences to empty",()=>{
  localStorage.setItem("uni-console-sub2api-filters:v1:older-exclusion",JSON.stringify({search:"site"}));

@@ -2828,13 +2828,32 @@ nav > button.active > svg {
 .fingerprint-details-trigger { padding:3px 5px; border:0; border-radius:5px; background:transparent; color:var(--muted); font:inherit; cursor:pointer; }
 .fingerprint-details-trigger:hover { background:var(--subtle); color:var(--ink); }
 .table-diagnostic-tip { display:grid;gap:8px;max-height:50vh;overflow-wrap:anywhere;overflow:auto; }
+.fingerprint-results-list { list-style:none;padding:0;margin:0; }
+.fingerprint-result-row { display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px;min-height:32px;border-bottom:1px solid var(--line); }
+.fingerprint-model-name,.fingerprint-heading > strong { min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.fingerprint-indicator,.fingerprint-verdict,.fingerprint-attempt { display:inline-flex;align-items:center;gap:5px;white-space:nowrap; }
+.fingerprint-verdict { border-radius:6px;padding:3px 6px;font-size:11px;font-weight:600;line-height:1.2; }
+.fingerprint-verdict.match { color:var(--green);background:color-mix(in srgb,var(--green) 14%,transparent); }
+.fingerprint-verdict.mismatch { color:var(--critical);background:color-mix(in srgb,var(--critical) 14%,transparent); }
+.fingerprint-verdict .quality-probability { color:inherit;font-variant-numeric:tabular-nums;font-size:11px; }
+.fingerprint-attempt { font-size:10px; }
+.route-workspace .sub-model-options label > .fingerprint-verdict { overflow-wrap:normal; }
 .fingerprint-panel { border-top: 1px solid var(--border); padding: 20px 0; }
 .fingerprint-panel h3, .fingerprint-heading { display: flex; align-items: center; gap: 10px; }
 .fingerprint-panel h3 { font-size: 14px; }
-.fingerprint-detail { padding: 12px 0; }
-.fingerprint-heading { flex-wrap: wrap; justify-content: space-between; }
-.fingerprint-detail details { margin-top: 12px; font-size: 12px; }
+.fingerprint-detail { padding: 7px 0; border-bottom:1px solid var(--line); }
+.fingerprint-heading { gap:6px; min-width:0; white-space:nowrap; }
+.fingerprint-heading > strong { flex:1; }
+.fingerprint-heading > .muted { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.fingerprint-heading > button { flex:none; }
+.fingerprint-disclosure[aria-expanded="true"] svg { transform:rotate(180deg); }
+.fingerprint-diagnostics { margin-top:8px; font-size:12px; overflow-wrap:anywhere; }
+.fingerprint-disclosure { min-width:30px; padding-inline:5px; }
 .fingerprint-detail li { margin: 6px 0; }
+@media(max-width:500px) {
+  .fingerprint-heading, .fingerprint-heading .fingerprint-indicator { gap:3px; }
+  .fingerprint-heading > button { padding-inline:5px; }
+}
 
 /* Reserve the update line and table geometry; local data reads must not
    remount the page or pull the viewport back up to the account list. */

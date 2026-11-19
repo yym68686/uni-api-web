@@ -116,6 +116,37 @@ const route = (
   position,
 });
 
+it("defaults away from an exact group's confirmed mismatch but permits explicitly choosing it", async () => {
+ const mismatch = {state:"done", account_id:account.id, group_id:target.group_id, model:"gpt-6-sol", result:{status:"mismatch",probability:0}};
+ const data = [
+   mismatch,
+   {...mismatch, model:"gpt-6.2-sol", state:"error", previous_result:mismatch.result, result:null},
+   {...mismatch, model:"gpt-6.2-astra", result:{status:"insufficient",decision:"partial",probability:null}},
+   {...mismatch, model:"gpt-5.5", group_id:2},
+ ];
+ vi.stubGlobal("fetch", vi.fn(async (input:string) => {
+   if (input.includes("/model-fingerprints?")) {
+     expect(Object.fromEntries(new URL(input).searchParams)).toEqual({account_id:account.id,group_id:"1"});
+     return Response.json({data});
+   }
+   return Response.json({data:[],unavailable_keys:[],unavailable_sources:[]});
+ }));
+ const models = [...data.map(row=>row.model), "gpt-5.6-sol"].map(model => ({model,state:"done",message:"",result:{model,availability:{status:"success",protocol:"responses"}}}));
+ mount({...target,active:true,models} as SubTarget);
+ const user = userEvent.setup();
+ await user.click(await screen.findByRole("button",{name:/新增接入/}));
+ const checkbox = (name:string) => screen.getByRole("checkbox",{name});
+ await waitFor(()=>expect(checkbox("gpt-6-sol")).toBeEnabled());
+ expect(checkbox("gpt-6-sol")).not.toBeChecked();
+ expect(checkbox("gpt-6.2-sol")).not.toBeChecked();
+ expect(checkbox("gpt-6.2-astra")).toBeChecked();
+ expect(checkbox("gpt-5.5")).toBeChecked();
+ expect(checkbox("gpt-5.6-sol")).toBeChecked();
+ expect(checkbox("gpt-6-sol").closest("label")).toHaveTextContent("不匹配");
+ await user.click(checkbox("gpt-6-sol"));
+ expect(checkbox("gpt-6-sol")).toBeChecked();
+});
+
 it("waits for complete group receipts before initializing import defaults", async () => {
   let resolve!: (response: Response) => void;
   const calls: {url:string; init?:RequestInit}[] = [];

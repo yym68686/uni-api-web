@@ -347,6 +347,60 @@ func TestModelFingerprintSiteResultInvalidatesAfterKeyRotation(t *testing.T) {
 	}
 }
 
+func TestModelFingerprintFailedRetryKeepsLastCompletedVerdict(t *testing.T) {
+	s, a, _ := bindingFixture(t, "https://site.example")
+	cleanFingerprintLeases(t, s)
+	ctx := context.Background()
+	encrypted, _ := s.control.encrypt("key-one")
+	if _, err := s.control.db.Exec(`INSERT INTO console_sub_targets(account_id,group_id,name,platform,encrypted_key,active) VALUES($1,1,'group','openai',$2,true)`, a.ID, encrypted); err != nil {
+		t.Fatal(err)
+	}
+	target := fingerprintTarget{Account: a.ID, Group: 1, Model: checkModel}
+	revision := tokenHash(a.Base + "\n" + encrypted)
+	result := `{"status":"mismatch","probability":0.12,"used_outputs":3}`
+	if _, err := s.control.db.Exec(`INSERT INTO console_model_fingerprints(scope,model,account_id,group_id,state,revision,result) VALUES($1,$2,$3,1,'done',$4,$5)`, target.scope(), target.Model, a.ID, revision, result); err != nil {
+		t.Fatal(err)
+	}
+	check := func(state, want string) {
+		t.Helper()
+		records, err := readScopedManagementFingerprintsFrom(ctx, s.control.db, a.Owner, target)
+		if err != nil || len(records) != 1 || records[0].State != state {
+			t.Fatalf("could not read %s attempt: %+v %v", state, records, err)
+		}
+		var previous struct{ Status string }
+		_ = json.Unmarshal(records[0].PreviousResult, &previous)
+		if previous.Status != want {
+			t.Fatalf("wanted previous status %q, got %s", want, records[0].PreviousResult)
+		}
+	}
+	for _, runState := range []string{"error", "done"} {
+		if err := enqueueFingerprint(ctx, s.control.db, target); err != nil {
+			t.Fatal(err)
+		}
+		check("queued", "mismatch")
+		claimed, run, err := s.claimFingerprint(ctx)
+		if err != nil || claimed != target {
+			t.Fatal("could not claim retry", claimed, err)
+		}
+		var failedResult json.RawMessage
+		if runState == "done" {
+			failedResult = json.RawMessage(`{"status":"error","used_outputs":0}`)
+		}
+		if err = s.finishFingerprint(ctx, target, run, runState, "upstream timeout", revision, failedResult); err != nil {
+			t.Fatal(err)
+		}
+		check(runState, "mismatch")
+	}
+	rotated, _ := s.control.encrypt("key-two")
+	if _, err := s.control.db.Exec(`UPDATE console_sub_targets SET encrypted_key=$2 WHERE account_id=$1`, a.ID, rotated); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := readScopedManagementFingerprintsFrom(ctx, s.control.db, a.Owner, target)
+	if err != nil || len(rows) > 0 && rows[0].PreviousResult != nil {
+		t.Fatalf("prior verdict leaked across key rotation: %+v %v", rows, err)
+	}
+}
+
 func TestModelFingerprintAutomaticBatchOnlySupportedAvailableModels(t *testing.T) {
 	var failDeepSeek atomic.Bool
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

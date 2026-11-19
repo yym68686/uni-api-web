@@ -305,13 +305,25 @@ func readConfiguredChecksFrom(ctx context.Context, db controlQueryDB, sourceID, 
 }
 
 func readManagementFingerprintsFrom(ctx context.Context, db controlQueryDB, owner string) ([]fingerprintRecord, error) {
-	rows, err := db.QueryContext(ctx, `SELECT COALESCE(f.source_id,''),f.provider,COALESCE(f.account_id,''),f.group_id,f.model,
+	return readScopedManagementFingerprintsFrom(ctx, db, owner, fingerprintTarget{})
+}
+
+func readScopedManagementFingerprintsFrom(ctx context.Context, db controlQueryDB, owner string, scope fingerprintTarget) ([]fingerprintRecord, error) {
+	query := `SELECT COALESCE(f.source_id,''),f.provider,COALESCE(f.account_id,''),f.group_id,f.model,
  CASE WHEN f.state='running' AND f.deadline<now() THEN 'interrupted' ELSE f.state END,f.message,f.revision,f.result,
+ CASE WHEN f.state='done' AND f.result->>'status' IN ('match','mismatch') THEN NULL ELSE f.previous_verdict->'result' END,
+ COALESCE(f.previous_verdict->>'revision',''),
  COALESCE(a.base,''),COALESCE(t.encrypted_key,''),floor(extract(epoch FROM f.updated_at)*1000)::BIGINT,
  CASE WHEN f.sample_state->>'reference_key'=$2 AND jsonb_typeof(f.sample_state->'entries')='array' THEN jsonb_array_length(f.sample_state->'entries') ELSE 0 END
  FROM console_model_fingerprints f LEFT JOIN console_sub_accounts a ON a.id=f.account_id
  LEFT JOIN console_sub_targets t ON t.account_id=f.account_id AND t.group_id=f.group_id
- LEFT JOIN console_sources s ON s.id=f.source_id WHERE (a.owner=$1 OR s.enabled)`, owner, currentFingerprintCatalog().referenceKey)
+ LEFT JOIN console_sources s ON s.id=f.source_id WHERE (a.owner=$1 OR s.enabled)`
+	args := []any{owner, currentFingerprintCatalog().referenceKey}
+	if scope.Account != "" {
+		query += ` AND f.account_id=$3 AND f.group_id=$4 AND a.owner=$1`
+		args = append(args, scope.Account, scope.Group)
+	}
+	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -322,8 +334,8 @@ func readManagementFingerprintsFrom(ctx context.Context, db controlQueryDB, owne
 		var base, key string
 		// Queued, running and unsuccessful checks legitimately have SQL NULL
 		// results. database/sql supports NULL for []byte, but not *json.RawMessage.
-		var result []byte
-		if err = rows.Scan(&f.Source, &f.Provider, &f.Account, &f.Group, &f.Model, &f.State, &f.Message, &f.Revision, &result, &base, &key, &f.UpdatedAtMS, &f.RetainedSamples); err != nil {
+		var result, previous []byte
+		if err = rows.Scan(&f.Source, &f.Provider, &f.Account, &f.Group, &f.Model, &f.State, &f.Message, &f.Revision, &result, &previous, &f.PreviousRevision, &base, &key, &f.UpdatedAtMS, &f.RetainedSamples); err != nil {
 			break
 		}
 		f.Result = json.RawMessage(result)
@@ -332,8 +344,19 @@ func readManagementFingerprintsFrom(ctx context.Context, db controlQueryDB, owne
 		// through routine credential re-encryption; preparation validates its
 		// stable channel identity before any continuation can use the samples.
 		partial := f.RetainedSamples > 0 && f.RetainedSamples < 3
-		if f.Account != "" && f.State == "done" && !partial && f.Revision != tokenHash(base+"\n"+key) {
-			continue
+		f.PreviousResult = json.RawMessage(previous)
+		if len(previous) == 0 {
+			f.PreviousRevision = ""
+		}
+		if f.Account != "" {
+			revision := tokenHash(base + "\n" + key)
+			if f.State == "done" && !partial && f.Revision != revision {
+				continue
+			}
+			if key == "" {
+				revision = ""
+			}
+			f.fencePrevious(revision)
 		}
 		data = append(data, f)
 	}

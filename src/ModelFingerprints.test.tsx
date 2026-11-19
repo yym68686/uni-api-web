@@ -21,6 +21,7 @@ it("distinguishes unsupported fingerprint effort from a model mismatch without s
  vi.stubGlobal("fetch",fetcher);
  mount(<FingerprintPanel targets={[{account_id:"one",group_id:1,model:"gemini-4-argon"}]}/>);
  await screen.findByText("采样参数不支持");
+ fireEvent.click(screen.getByRole("button",{name:"检测详情"}));
  expect(screen.getByText(`${message} · HTTP 400`)).toBeInTheDocument();
  expect(screen.queryByText("不匹配",{exact:true})).not.toBeInTheDocument();
  expect(screen.queryByText("12.0%")).not.toBeInTheDocument();
@@ -38,12 +39,20 @@ it("keeps the single-model provisional fingerprint details in a compact tooltip"
   candidates:[{model:"claude-haiku-4.5",display_name:"Claude Haiku 4.5",probability:null}]}};
  mount(<FingerprintCell entries={[{target:partial, record:partial}]} supportedModels={[partial.model]}/>);
  const trigger = screen.getByText("样本不足").closest(".tip-target")!;
- expect(trigger).toHaveTextContent(/^样本不足$/);
+ expect(trigger).toHaveTextContent("暂判不匹配");
+ expect(trigger).toHaveTextContent("样本不足");
  expect(screen.queryByText(/暂定排名|最接近/)).not.toBeInTheDocument();
  fireEvent.focus(trigger);
  const details = await screen.findByRole("tooltip");
- expect(details).toHaveTextContent("暂定排名 · 1/3");
- expect(details).toHaveTextContent("最接近：Claude Haiku 4.5");
+ expect(details).toHaveTextContent("暂判不匹配");
+ expect(details).toHaveTextContent("—");
+ expect(details).not.toHaveTextContent(/暂定排名|最接近/);
+});
+it("shows a prior scored verdict beside the new failed attempt, not in place of it",()=>{
+ mount(<FingerprintStatus record={{...record,state:"error",message:"上游超时",result:null,previous_result:record.result,previous_revision:"r1"}}/>);
+ expect(screen.getByText("上次不匹配")).toBeVisible();
+ expect(screen.getByText("12.0%")).toBeVisible();
+ expect(screen.getByText("检测失败")).toBeVisible();
 });
 it("opens the full multi-model list, putting late-catalog results first without starting detection or opening the channel row", async () => {
  const channel = "tokunexai / gpt-pro-速刷";
@@ -70,13 +79,14 @@ it("opens the full multi-model list, putting late-catalog results first without 
  const list = within(dialog).getByRole("region", {name:"模型指纹列表"});
  const entries = within(list).getAllByRole("listitem");
  expect(entries).toHaveLength(models.length);
- expect(entries[0]).toHaveTextContent(`${model} · 匹配`);
- expect(entries[1]).toHaveTextContent("gpt-6-astra · 不匹配");
- expect(entries[0]).toHaveTextContent("匹配概率：98.0%");
- expect(entries[0]).toHaveTextContent("指纹检测时间");
- expect(entries[2]).toHaveTextContent("deepseek-v4.1-flash-1017 · 未检测");
- expect(entries.at(-1)).toHaveTextContent("minimax-m3.1-flash · 未检测");
- await user.click(within(list).getByText(`${model} · 匹配`));
+ expect(entries[0]).toHaveClass("fingerprint-result-row");
+ expect(within(entries[0]).getByText(model)).toBeVisible();
+ expect(within(entries[0]).getByText("匹配")).toHaveClass("match");
+ expect(within(entries[1]).getByText("不匹配")).toHaveClass("mismatch");
+ expect(entries[0]).toHaveTextContent("98.0%");
+ expect(entries[2]).toHaveTextContent(/deepseek-v4\.1-flash-1017\s*未检测/);
+ expect(entries.at(-1)).toHaveTextContent(/minimax-m3\.1-flash\s*未检测/);
+ await user.click(within(list).getByText(model));
  expect(openChannel).not.toHaveBeenCalled();
  await user.keyboard("{Escape}");
  await waitFor(() => expect(trigger).toHaveFocus());
@@ -127,9 +137,9 @@ it.each(["done","running","queued","interrupted","error"].flatMap(state=>[1,2].m
  const partial:FingerprintRecord={...record,state,retained_samples:count,result:{...record.result!,status:"insufficient",decision:"partial",probability:null,used_outputs:count,candidates:[{model:"claude-haiku-4.5",display_name:"Claude Haiku 4.5",probability:null},{model:"gpt-6-astra",display_name:"GPT 6 Astra",probability:null}],samples:[{request_id:"failed",state:"error",message:"请求失败或输出不完整",http_status:429}]}};
  vi.stubGlobal("fetch",vi.fn(async(path:string)=>Response.json(path.endsWith("/model-fingerprints")?{data:[partial],supported_models:FINGERPRINT_MODELS}:{data:[],unavailable_sources:[]})));
  mount(<FingerprintPanel targets={[{account_id:"one",group_id:1,model:"gpt-6-astra"}]}/>);
+ fireEvent.click(await screen.findByRole("button",{name:"检测详情"}));
  await screen.findByText(`有效样本 ${count}/3 · 目标类别 gpt-6-astra/6.1-sol`);
- expect(screen.getByText(new RegExp(`暂定排名 · ${count}/3`))).toBeInTheDocument();
- expect(screen.getByText(/最接近：Claude Haiku 4.5/)).toBeInTheDocument();
+ expect(screen.getByText("暂判不匹配")).toBeInTheDocument();
  expect(screen.getByText("Claude Haiku 4.5",{selector:"li"})).toBeInTheDocument();
  expect(screen.getByText("GPT 6 Astra",{selector:"li"})).toBeInTheDocument();
  expect(screen.getByText("当前仅显示暂定排名，满 3 个有效样本后计算匹配结果与概率。")).toBeInTheDocument();
@@ -137,7 +147,7 @@ it.each(["done","running","queued","interrupted","error"].flatMap(state=>[1,2].m
  expect(screen.getByText("请求失败或输出不完整 · HTTP 429")).toBeInTheDocument();
  expect(screen.getByRole("button",{name:state==="running"||state==="queued"?"取消检测":"继续采样"})).toBeEnabled();
  expect(screen.queryByText("12.0%")).not.toBeInTheDocument();
- expect(screen.queryByText("—")).not.toBeInTheDocument();
+ expect(screen.getByText("—")).toHaveClass("quality-unknown");
  expect(screen.queryByText("匹配",{exact:true})).not.toBeInTheDocument();
  expect(screen.queryByText("不匹配",{exact:true})).not.toBeInTheDocument();
 });
@@ -146,9 +156,36 @@ it("explains why a legacy count cannot be resumed without numeric evidence",asyn
  const legacy={...record,result:{...record.result!,used_outputs:1,status:"error",probability:null}};
  vi.stubGlobal("fetch",vi.fn(async(path:string)=>Response.json(path.endsWith("/model-fingerprints")?{data:[legacy],supported_models:FINGERPRINT_MODELS}:{data:[],unavailable_sources:[]})));
  mount(<FingerprintPanel targets={[{account_id:"one",group_id:1,model:"gpt-6-astra"}]}/>);
+ const details = await screen.findByRole("button",{name:"检测详情"});
+ expect(details).toHaveAttribute("aria-expanded","false");
+ fireEvent.click(details);
  await screen.findByText("此旧记录未保留可续采样本，下一次检测将开始可累计的新一轮。");
  expect(screen.getByRole("button",{name:"检测指纹"})).toBeEnabled();
  expect(screen.queryByRole("button",{name:"继续采样"})).not.toBeInTheDocument();
+});
+
+it("can submit two different model fingerprints without waiting for the first request", async () => {
+ const requests: string[] = [];
+ let finish!: (response: Response) => void;
+ vi.stubGlobal("fetch", vi.fn(async (path: string, init?: RequestInit) => {
+   if (init?.method === "POST") {
+     const model = JSON.parse(init.body as string).targets[0].model as string;
+     requests.push(model);
+     if (model === "gpt-6-astra") return new Promise<Response>(resolve => { finish = resolve; });
+     return Response.json({accepted:true});
+   }
+   return Response.json(path.endsWith("/model-fingerprints") ? {data:[],supported_models:FINGERPRINT_MODELS} : {data:[],unavailable_sources:[]});
+ }));
+ mount(<FingerprintPanel targets={["gpt-6-astra","gpt-6.1-sol"].map(model => ({account_id:"one",group_id:1,model}))}/>);
+ const [first, second] = await screen.findAllByRole("button",{name:"检测指纹"});
+ await waitFor(() => expect(first).toBeEnabled());
+ fireEvent.click(first);
+ expect(first).toBeDisabled();
+ expect(second).toBeEnabled();
+ fireEvent.click(second);
+ expect(requests).toEqual(["gpt-6-astra","gpt-6.1-sol"]);
+ finish(Response.json({accepted:true}));
+ await waitFor(() => expect(first).toBeEnabled());
 });
 
 it.each(["gpt-6-astra","gemini-3.1-pro","gemini-3.8-flash","gemini-4-argon","gemini-4-carbon","deepseek-v4.1-flash-1017"])("channel management filters %s fingerprints independently of quality",async(model)=>{

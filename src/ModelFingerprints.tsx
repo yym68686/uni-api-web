@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Check, ChevronDown, CircleHelp, Fingerprint, X } from "lucide-react";
@@ -7,11 +7,12 @@ import { channelMembers, useChannelManagement } from "./channelManagement";
 import type { ManagementRow } from "./channelManagement";
 import { CompactDialogHeader } from "./CompactDialog";
 import type { Channel } from "./types";
-import { dateTime, rate, time } from "./format";
+import { rate, time } from "./format";
 import { useSubImports } from "./sub2apiImports";
 import { Spinner, Tip } from "./ui";
 import { fingerprintKey, sharedFingerprintIndex } from "./fingerprintResults";
 import { fingerprintFailures, fingerprintSampleFailure, observedGroupRejections } from "./fingerprintRejections";
+import referenceModels from "../analytics-api/fingerprint/models.json";
 export { fingerprintKey } from "./fingerprintResults";
 
 const legacyFingerprintModels = ["gpt-6-astra", "gpt-6.1-sol"];
@@ -28,16 +29,36 @@ export interface FingerprintTarget {
 }
 export interface FingerprintResult {
   model: string; status: string; probability: number | null; decision?: "partial" | "scored" | "unscorable" | "not_model";
-  prediction: string; prediction_name: string; expected_class: string;
+  prediction: string; prediction_name: string; expected_class: string; expected_class_id?: string;
   used_outputs: number; checked_at: number; reference_commit: string;
   candidates: { model: string; display_name: string; probability: number | null }[];
   samples?: { request_id: string; state: string; message?: string; http_status?: number; error_code?: string }[];
 }
-export interface FingerprintRecord extends FingerprintTarget {state: string; message: string; revision: string; updated_at_ms?: number; retained_samples?: number; result: FingerprintResult | null}
+export interface FingerprintRecord extends FingerprintTarget {state: string; message: string; revision: string; updated_at_ms?: number; retained_samples?: number; result: FingerprintResult | null; previous_result?: FingerprintResult | null; previous_revision?: string}
 export const fingerprintReadMessage = (error: unknown) => error instanceof ApiError && error.status === 404 ? "指纹检测服务待更新" : "模型指纹读取失败";
 export const fingerprintBusy = (record?: FingerprintRecord) => record?.state === "queued" || record?.state === "running";
 export function fingerprintStatus(record?: FingerprintRecord) {
   return !record ? "untested" : record.state !== "done" ? record.state : record.result?.status || "error";
+}
+export function fingerprintVerdict(record?: FingerprintRecord) {
+  const status = fingerprintStatus(record);
+  return status === "match" || status === "mismatch" ? record?.result : record?.previous_result;
+}
+
+export function useSiteFingerprints(account: string, group: number, enabled: boolean) {
+  return useQuery({
+    queryKey: ["model-fingerprints", "site", account, group],
+    queryFn: async ({ signal }) => {
+      const query = new URLSearchParams({ account_id: account, group_id: String(group) });
+      const { data } = await controlRequest<{data: FingerprintRecord[]}>(`/v1/model-fingerprints?${query}`, { signal });
+      return new Map((Array.isArray(data) ? data : [])
+        .filter(record => record.account_id === account && record.group_id === group)
+        .map(record => [record.model, record]));
+    },
+    enabled: enabled && !!account && group > 0,
+    staleTime: 5000,
+    retry: false,
+  });
 }
 function partialFingerprint(result?: FingerprintResult | null) {
   return result?.decision === "partial" && result.used_outputs > 0 && result.used_outputs < 3 && result.candidates?.length > 0;
@@ -52,6 +73,14 @@ function fingerprintLabel(status: string, result?: FingerprintResult | null) {
 }
 export function fingerprintProbabilityClass(p: number | null) {
   return p === null ? "quality-unknown" : p === 1 ? "quality-perfect" : p >= .9 ? "quality-partial" : "quality-poor";
+}
+type VerdictKind = "match" | "mismatch";
+export function FingerprintVerdictBadge({kind, probability, prefix}: {kind:VerdictKind; probability:number|null; prefix?:string}) {
+  return <span className={`fingerprint-verdict ${kind}`}>
+    {kind === "match" ? <Check size={12}/> : <X size={12}/>}
+    {prefix}{fingerprintLabels[kind]}
+    <small className={`quality-probability ${fingerprintProbabilityClass(probability)}`} title={probability == null ? "无可用匹配概率" : "请求模型的匹配概率"}>{rate(probability)}</small>
+  </span>;
 }
 export function fingerprintTargets(row: Pick<ManagementRow, "account" | "target" | "configured">, models: string[]): FingerprintTarget[] {
   const supported = [...new Set(models)];
@@ -112,58 +141,65 @@ export function useModelFingerprints(enabled = true) {
   );
   return { ...query, index, members, supportedModels, groupRejections };
 }
+function fingerprintPresentation(record?: FingerprintRecord, unsupported = false) {
+  const status = fingerprintStatus(record);
+  const result = record?.result;
+  const verdict = fingerprintVerdict(record);
+  const partial = !verdict && partialFingerprint(result);
+  const legacy = result && (referenceModels as Record<string, {class_id:string;class_name:string}>)[result.model];
+  const expected = result?.expected_class_id ||
+    (legacy && legacy.class_name === result?.expected_class ? legacy.class_id : undefined);
+  const provisional: VerdictKind | undefined = partial && result?.prediction && expected
+    ? (result.prediction === expected ? "match" : "mismatch") : undefined;
+  const kind: VerdictKind | undefined = verdict?.status === "match" || verdict?.status === "mismatch" ? verdict.status : provisional;
+  const message = [...new Set([record?.message, ...fingerprintFailures(result).map(failure => failure.detail)].filter(Boolean))].join("；");
+  return { kind, prefix: verdict && verdict === record?.previous_result ? "上次" : provisional ? "暂判" : undefined,
+    status, provisional, probability: verdict?.probability ?? null,
+    label: unsupported ? "待更新" : fingerprintLabel(status, result), message };
+}
+
+function FingerprintIndicator({presentation}: {presentation: ReturnType<typeof fingerprintPresentation>}) {
+  const {kind, prefix, status, label, probability, message} = presentation;
+  return <span className="fingerprint-indicator" title={message || undefined}>
+    {kind ? <FingerprintVerdictBadge kind={kind} probability={probability} prefix={prefix}/> :
+      <><span className="muted">{label}</span><small className="quality-probability quality-unknown">—</small></>}
+    {kind && prefix !== undefined && <small className="fingerprint-attempt muted">
+      {(status === "queued" || status === "running") && <Spinner small/>}{label}
+    </small>}
+  </span>;
+}
+
 export function FingerprintStatus({ record }: { record?: FingerprintRecord }) {
-  const status = fingerprintStatus(record), partial = partialFingerprint(record?.result);
-  const result = record?.state === "done" || partial ? record?.result : null;
-  const probability = result && (status === "match" || status === "mismatch") ? result.probability : null;
-  const failure = [...new Set(fingerprintFailures(result).map(item => item.detail))].join("；");
-  return <div className="quality-status-stack">
-    <span className={`check-status ${status === "match" ? "pass" : status === "mismatch" ? "fail" : "inconclusive"}`}>
-      {fingerprintBusy(record) ? <Spinner small /> : status === "match" ? <Check size={14}/> : status === "mismatch" ? <X size={14}/> : <CircleHelp size={14}/>}
-      {fingerprintLabel(status, result)}
-    </span>
-    {partial && result ? <Tip text={`${partialNote}${failure}${record?.message || ""}`}>
-      <small className="muted">暂定排名 · {result.used_outputs}/3<br/>最接近：{result.prediction_name}</small>
-    </Tip> : <Tip text={failure || (result?.decision === "not_model" ? nonModelNote : `请求类别匹配概率：${rate(probability)}。${fingerprintNote}${result?.prediction_name ? ` 最接近：${result.prediction_name}。` : ""}${record?.message || ""}`)}>
-      <small className={`quality-probability ${fingerprintProbabilityClass(probability)}`}>{rate(probability)}</small>
-    </Tip>}
-  </div>;
+  return <FingerprintIndicator presentation={fingerprintPresentation(record)}/>;
 }
 export function FingerprintCell({ entries, error, loading, supportedModels = [], channel }: { entries: readonly {target: FingerprintTarget; record?: FingerprintRecord}[]; error?: Error | null; loading?: boolean; supportedModels?: string[]; channel?: string }) {
   if (entries.length && error) return <Tip text={fingerprintReadMessage(error)}><span className="muted">读取失败</span></Tip>;
   if (entries.length && loading) return <span className="muted">读取中…</span>;
   if (!entries.length) return <span className="muted">—</span>;
   const summaries = entries.map(({target, record}) => {
-    const status = fingerprintStatus(record);
-    const partial = partialFingerprint(record?.result);
-    const result = record?.state === "done" || partial ? record?.result : null;
-    const probability = result && (status === "match" || status === "mismatch") ? result.probability : null;
-    const unsupported = !record && !supportedModels.includes(target.model);
-    const label = unsupported ? "待更新" : fingerprintLabel(status, result);
-    const updatedAt = record?.updated_at_ms ?? (result?.checked_at || 0) * 1000;
-    return {target, status, label, probability, partial, result, updatedAt, recorded: !!record, message:unsupported ? "指纹检测服务待更新" : record?.message};
+    const presentation = fingerprintPresentation(record, !record && !supportedModels.includes(target.model));
+    const updatedAt = record?.updated_at_ms ?? (record?.result?.checked_at || 0) * 1000;
+    return {target, presentation, updatedAt, recorded: !!record};
   });
   const recorded = summaries.filter(item => item.recorded);
   // The all-model view includes untested candidates; those aren't fingerprint results.
   const visible = recorded.length ? recorded : summaries;
   const [first] = visible;
-  const mismatch = visible.some(item => item.status === "mismatch");
-  const label = visible.every(item => item.label === first.label) ? first.label : mismatch ? "有不匹配" : "多种状态";
-  const probability = visible.length === 1 ? first.probability : null;
-  const summary = <>
+  const mismatch = visible.some(({presentation:p}) => p.kind === "mismatch" && !p.provisional);
+  const label = visible.every(item => item.presentation.label === first.presentation.label) && !mismatch
+    ? first.presentation.label : mismatch ? "有不匹配" : "多种状态";
+  const summary = visible.length === 1 ? <FingerprintIndicator presentation={first.presentation}/> : <>
     <span className={label === "匹配" ? "check-status pass" : mismatch ? "check-status fail" : "muted"}>{label}</span>
-    {probability != null && <small className={`quality-probability ${fingerprintProbabilityClass(probability)}`}>{rate(probability)}</small>}
     {recorded.length > 1 && <small className="muted" aria-label={`${recorded.length} 个模型有检测记录`}>{recorded.length}</small>}
   </>;
-  const detail = ({target, label, probability, partial, result, message}: typeof first) => <>
-      <strong>{target.model} · {label}</strong>
-      {partial && result && <div>暂定排名 · {result.used_outputs}/3</div>}
-      {probability != null && <div>匹配概率：{rate(probability)}</div>}
-      {result?.prediction_name && <div>最接近：{result.prediction_name}</div>}
-      {message && <div>{message}</div>}
-      {[...new Set(fingerprintFailures(result).map(item => item.detail))].map(detail => <div key={detail}>{detail}</div>)}
+  const detail = ({target, presentation}: typeof first) => <>
+    <strong className="fingerprint-model-name" title={target.model}>{target.model}</strong>
+    <FingerprintIndicator presentation={presentation}/>
   </>;
-  if (summaries.length === 1) return <Tip text={<div>{detail(first)}</div>}>
+  if (summaries.length === 1) return <Tip text={<>
+    <div className="fingerprint-result-row">{detail(first)}</div>
+    {first.presentation.message && <div className="muted">{first.presentation.message}</div>}
+  </>}>
     <span className="fingerprint-cell">{summary}</span>
   </Tip>;
   const unrecorded = summaries.filter(item => !item.recorded);
@@ -182,14 +218,11 @@ export function FingerprintCell({ entries, error, loading, supportedModels = [],
         <div className="compact-dialog-scroll fingerprint-details-scroll" tabIndex={0} role="region" aria-label="模型指纹列表">
           {recorded.length > 0 && <section>
             <h3>有检测记录 · {recorded.length}</h3>
-            <ul className="dialog-preview-list fingerprint-details-grid">{recordedRecentFirst.map(item => <li key={fingerprintKey(item.target)}>
-              {detail(item)}
-              {!!item.result?.checked_at && <small>指纹检测时间：{dateTime(item.result.checked_at)}</small>}
-            </li>)}</ul>
+            <ul className="fingerprint-results-list">{recordedRecentFirst.map(item => <li className="fingerprint-result-row" key={fingerprintKey(item.target)}>{detail(item)}</li>)}</ul>
           </section>}
           {unrecorded.length > 0 && <section>
             <h3>无检测记录 · {unrecorded.length}</h3>
-            <ul className="dialog-preview-list fingerprint-details-grid">{unrecorded.map(item => <li key={fingerprintKey(item.target)}>{detail(item)}</li>)}</ul>
+            <ul className="fingerprint-results-list">{unrecorded.map(item => <li className="fingerprint-result-row" key={fingerprintKey(item.target)}>{detail(item)}</li>)}</ul>
           </section>}
         </div>
       </Dialog.Content>
@@ -198,38 +231,54 @@ export function FingerprintCell({ entries, error, loading, supportedModels = [],
 }
 export function FingerprintPanel({ targets, revisions, onlySupported }: { targets: FingerprintTarget[]; revisions?: Record<string,string>; onlySupported?: boolean }) {
   const query = useModelFingerprints(), client = useQueryClient();
-  const submitting = useRef(false);
-  const [busy, setBusy] = useState(false), [error, setError] = useState("");
+  const detailId = useId();
+  const submitting = useRef(new Set<string>());
+  const [attempts, setAttempts] = useState<Record<string, {busy: boolean; error?: string}>>({});
+  const [expanded, setExpanded] = useState<string>();
   async function run(target: FingerprintTarget, stop = false) {
-    if (submitting.current) return;
-    submitting.current = true; setBusy(true); setError("");
+    const key = fingerprintKey(target);
+    if (submitting.current.has(key)) return;
+    submitting.current.add(key);
+    setAttempts(current => ({...current, [key]: {busy: true}}));
+    let error: string | undefined;
     try {
       await controlRequest("/v1/model-fingerprints", { method: stop ? "DELETE" : "POST", body: JSON.stringify({ targets: [target] }) });
       await client.invalidateQueries({queryKey:["model-fingerprints"]});
-    } catch (e) { setError(e instanceof Error ? e.message : "检测提交失败"); }
-    finally { submitting.current = false;setBusy(false); }
+    } catch (e) { error = e instanceof Error ? e.message : "检测提交失败"; }
+    finally {
+      submitting.current.delete(key);
+      setAttempts(current => ({...current, [key]: {busy: false, error}}));
+    }
   }
   const visible = onlySupported ? targets.filter(t => query.supportedModels.includes(t.model) || query.index.has(fingerprintKey(t))) : targets;
   if (!visible.length) return null;
   return <section className="fingerprint-panel">
     <h3><Fingerprint size={16}/>模型指纹 <Tip text={fingerprintNote}><CircleHelp size={13}/></Tip></h3>
     {query.isError && <p role="alert">{fingerprintReadMessage(query.error)} <button className="button small" onClick={() => void query.refetch()}>重试</button></p>}
-    {error && <p role="alert">{error}</p>}
-    {visible.map(target => {
-      let record = query.index.get(fingerprintKey(target));
-      if (record?.state === "done" && target.source_id && fingerprintKey(record) === fingerprintKey(target) && revisions && record.revision !== revisions[JSON.stringify([target.source_id,target.provider])]) record = undefined;
+    {visible.map((target, i) => {
+      const key = fingerprintKey(target);
+      let record = query.index.get(key);
+      if (record?.state === "done" && target.source_id && fingerprintKey(record) === key && revisions && record.revision !== revisions[JSON.stringify([target.source_id,target.provider])]) record = undefined;
       const pending = fingerprintBusy(record), result = record?.result;
       const retained = record?.retained_samples || 0;
       const partial = retained > 0 && retained < 3;
       const supported = query.supportedModels.includes(target.model);
       const actionTarget = pending && record ? {source_id:record.source_id,provider:record.provider,account_id:record.account_id,group_id:record.group_id,model:record.model} : target;
-      return <div className="fingerprint-detail" key={fingerprintKey(target)}>
-        <div className="fingerprint-heading"><strong>{target.model}</strong>{query.isError ? <span className="muted">待启用</span> : !supported && !record ? <span className="muted">指纹检测服务待更新</span> : <FingerprintStatus record={record}/>}
-          <button className="button small" disabled={busy || query.isError || query.isPending || (!pending && !supported)} title={fingerprintNote} onClick={() => void run(actionTarget, pending)}>{pending ? "取消检测" : partial ? "继续采样" : "检测指纹"}</button>
+      const attempt = attempts[fingerprintKey(actionTarget)] ?? attempts[key];
+      const availableDetails = Boolean(result || record?.message);
+      const open = expanded === key;
+      const unavailable = !query.isError && !query.isPending && !supported;
+      return <div className="fingerprint-detail" key={key}>
+        <div className="fingerprint-heading"><strong title={target.model}>{target.model}</strong>{query.isError ? <span className="muted">待启用</span> : unavailable && !record ? <span className="muted" title="指纹检测服务待更新">指纹检测服务待更新</span> : <FingerprintStatus record={record}/>}
+          {availableDetails && <button className="button small icon-button fingerprint-disclosure" aria-label="检测详情" aria-expanded={open} aria-controls={`${detailId}-${i}`} title="检测详情" onClick={() => setExpanded(open ? undefined : key)}><ChevronDown size={14}/></button>}
+          {unavailable && <button className="button small icon-button" aria-label="重新检查" title="重新检查" onClick={() => void query.refetch()}><Fingerprint size={14}/></button>}
+          <button className="button small" disabled={attempt?.busy || query.isError || query.isPending || (!pending && !supported)} aria-busy={attempt?.busy} onClick={() => void run(actionTarget, pending)}>{pending ? "取消检测" : partial ? "继续采样" : "检测指纹"}</button>
         </div>
-        {!query.isError && !query.isPending && !supported && <p className="muted">当前指纹参考库未启用此模型。<button className="button small" onClick={() => void query.refetch()}>重新检查</button></p>}
-        {record?.message && <p className="muted">{record.message}</p>}
-        {result && <details><summary>检测详情{result.checked_at ? ` · ${time(result.checked_at)}` : ""}</summary>
+        {attempt?.error && <p role="alert">{attempt.error}</p>}
+        {availableDetails && <div className="fingerprint-diagnostics" hidden={!open} id={`${detailId}-${i}`}>
+          {record?.message && <p className="muted">{record.message}</p>}
+          {result && <>
+          {result.checked_at > 0 && <time className="muted" dateTime={new Date(result.checked_at * 1000).toISOString()}>{time(result.checked_at)}</time>}
           <p className="muted">有效样本 {result.used_outputs}/3 · 目标类别 {result.expected_class}</p>
           {partialFingerprint(result) && <p className="muted">{partialNote}</p>}
           {result.decision === "not_model" && <p className="muted">{nonModelNote}</p>}
@@ -238,7 +287,8 @@ export function FingerprintPanel({ targets, revisions, onlySupported }: { target
           {result.candidates?.length > 0 && <ol>{result.candidates.map(c => <li key={c.model}>{c.display_name}{!partialFingerprint(result) && <> <span className="mono">{rate(c.probability)}</span></>}</li>)}</ol>}
           {result.samples?.filter(s=>s.state==="error").map(s=><p key={s.request_id}>{fingerprintSampleFailure(s).detail}</p>)}
           <small className="muted">lm-detector · {result.reference_commit?.slice(0,12)}</small>
-        </details>}
+          </>}
+        </div>}
       </div>;
     })}
   </section>;

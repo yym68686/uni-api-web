@@ -21,6 +21,7 @@ import { CompactionStatus } from "./SubCompaction";
 import { assessPrice } from "./sub2apiPriceCheck";
 import { ModelPriceWarning } from "./Sub2apiPricing";
 import { ModelQualityWarning } from "./ModelQualityWarning";
+import { FingerprintVerdictBadge, fingerprintVerdict, useSiteFingerprints } from "./ModelFingerprints";
 import type { KeyInfo, ModelPrice } from "./types";
 import type { SubAccount, SubTarget } from "./Sub2apiChecks";
 import type { InstalledChannel, SubImportsQuery } from "./sub2apiImports";
@@ -218,6 +219,9 @@ function Sub2apiImportForm({
       !installed.length &&
       !configuredChannels.length &&
       !imports.isPending);
+  const fingerprintQuery = useSiteFingerprints(account.id, target.group_id, showForm && !editing);
+  const fingerprintLoading = !editing && fingerprintQuery.isLoading;
+  const fingerprintFor = (model: string) => fingerprintVerdict(fingerprintQuery.data?.get(model));
   const [removing, setRemoving] = useState<InstalledChannel | null>(null);
   const keyRequestStats = useRouteKeyRequestStats(
     activeSource,
@@ -251,7 +255,8 @@ function Sub2apiImportForm({
               editing.model_mappings[check.model] === check.model)
           : modelIsDefaultSelected(check) &&
             assessPrice(check, prices).status !== "abnormal" &&
-            !toolUseFailed(target, check.model)),
+            !toolUseFailed(target, check.model) &&
+            fingerprintFor(check.model)?.status !== "mismatch"),
     )
     .map((check) => check.model);
   const [aliases, setAliases] = useState<ModelAlias[]>([]);
@@ -601,7 +606,7 @@ function Sub2apiImportForm({
   ) {
     if (
       busy ||
-      (action === "add" && (groupUnavailable || importBlocked)) ||
+      (action === "add" && (groupUnavailable || importBlocked || fingerprintLoading)) ||
       (action !== "delete" &&
         (mapping.error ||
           invalidModels.length ||
@@ -1187,23 +1192,22 @@ function Sub2apiImportForm({
                   models={editChecks.map((c) => c.model)}
                   selected={originals}
                   editing={!!editing}
-                  disabled={busy || (!editing && groupUnavailable)}
+                  disabled={busy || (!editing && (groupUnavailable || fingerprintLoading))}
                   actions={batchButton("models", "模型勾选")}
                   canSelect={(model) => available.includes(model)}
-                  onChange={(selected) =>
-                    setModelChoices(
-                      Object.fromEntries(
-                        editChecks.map((c) => [
-                          c.model,
-                          selected.includes(c.model),
-                        ]),
-                      ),
-                    )
-                  }
+                  onChange={(selected) => setModelChoices(previous => ({
+                    ...previous,
+                    ...Object.fromEntries(editChecks
+                      .filter(({ model }) => selected.includes(model) !== originals.includes(model))
+                      .map(({ model }) => [model, selected.includes(model)])),
+                  }))}
                   status={(model) => {
                     const check = editChecks.find((c) => c.model === model)!;
                     return (
                       <>
+                        {!editing && fingerprintFor(model)?.status === "mismatch" && (
+                          <FingerprintVerdictBadge kind="mismatch" probability={fingerprintFor(model)?.probability ?? null} />
+                        )}
                         <ModelQualityWarning model={model} result={quality} />
                         {toolUseFailed(target, model) && (
                           <small className="negative">
@@ -1379,6 +1383,7 @@ function Sub2apiImportForm({
                       !options.data?.supported ||
                       options.isFetching ||
                       options.isError ||
+                      fingerprintLoading ||
                       models.some(
                         (m) =>
                           (activePositions[m] ?? validPosition) >

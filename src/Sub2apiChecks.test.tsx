@@ -2476,7 +2476,7 @@ it("shows per-request charges and pre-multiplier anomalies, and leaves anomalous
   const dialog = screen.getByRole("dialog");
   const abnormal = within(dialog).getByRole("checkbox", { name: /gpt-6-astra/ });
   expect(abnormal).not.toBeChecked();
-  expect(abnormal).toBeEnabled();
+  await waitFor(() => expect(abnormal).toBeEnabled());
   expect(within(dialog).getByRole("checkbox", { name: "gpt-5.6-sol" })).toBeChecked();
   await user.click(abnormal);
   expect(abnormal).toBeChecked();
@@ -2768,7 +2768,7 @@ it("shows terminal warnings in site checks and imports only the models the user 
  const d=within(screen.getByRole("dialog"));
  expect(d.getByRole("checkbox",{name:"gpt-5.5"})).toBeChecked();
  for(const name of ["gpt-6-luna","gpt-6-sol"]){
-  const box=d.getByRole("checkbox",{name});expect(box).toBeEnabled();expect(box).not.toBeChecked();expect(box.closest("label")).toHaveTextContent("成功，但");
+  const box=d.getByRole("checkbox",{name});await waitFor(()=>expect(box).toBeEnabled());expect(box).not.toBeChecked();expect(box.closest("label")).toHaveTextContent("成功，但");
  }
  await user.click(d.getByRole("checkbox",{name:"gpt-6-luna"}));
  await user.selectOptions(d.getByLabelText("添加到 uni-api 来源"),"primary");

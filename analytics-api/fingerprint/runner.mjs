@@ -49,7 +49,7 @@ export function score(model, outputs, reference = loadReference()) {
     decision,
     probability: expected?.probability ?? null,
     prediction: analysis.prediction, prediction_name: analysis.prediction_name,
-    expected_class: target.class_name, candidates: analysis.results.slice(0, 5),
+    expected_class: target.class_name, expected_class_id: target.class_id, candidates: analysis.results.slice(0, 5),
     used_outputs: analysis.used_outputs, diagnostics: analysis.diagnostics,
     probability_scope: analysis.probability_scope ?? null,
     reference_commit: manifest.commit, base_sha256: reference.detector.base_sha256,

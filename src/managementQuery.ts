@@ -1,6 +1,6 @@
 import { useEffect, useRef, type RefObject } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ApiError, controlRequest } from "./api";
+import { ApiError, controlRequest, currentControlWriteGeneration } from "./api";
 import { managementReadTrace } from "./managementReadTrace";
 import type { ManagementReadTrace } from "./managementReadTrace";
 import { createManagementReadTriggers, managementReadTrigger } from "./managementReadTrigger";
@@ -81,6 +81,7 @@ const managementReadTimings = new WeakMap<
   ManagementPage,
   { started: number; decoded: number; trigger: ManagementReadTrigger; transport?: ManagementReadTrace; navigation?: Pick<ManagementNavigation, "action" | "started"> }
 >();
+const managementPageGeneration = new WeakMap<ManagementPage, number>();
 
 export interface ManagementSelection {
   format: "management-selection-v1";
@@ -275,8 +276,8 @@ function validateManagementPage(response: unknown, known?: typeof managementMeta
   return page;
 }
 
-// A page is visible only after this complete read succeeds. Cached rows are
-// never presented as current after a remount, filter change or refresh error.
+// The same owner, filters, page and projection can reuse a recent validation.
+// Stale pages stay visible during validation, but cannot authorize actions.
 export function useManagementPage(
   owner: string,
   filters: SubFilters,
@@ -300,11 +301,13 @@ export function useManagementPage(
   const query = useQuery({
     queryKey: ["management-query", owner, filters, cursor, ...(includePrices ? ["prices"] : overview ? ["overview"] : [])],
     queryFn: async ({ signal }) => {
+      const generation = currentControlWriteGeneration();
       const filter = JSON.stringify(filters);
       const position = navigation?.current;
       const matches = position?.owner === owner && position.filter === filter && position.cursor === cursor;
       if (matches && navigation) navigation.current = undefined;
       const page = await readManagementPage(filters, cursor, signal, owner, triggers.current!.next(owner, filter, cursor), includePrices, overview);
+      managementPageGeneration.set(page, generation);
       const timing = managementReadTimings.get(page);
       if (timing && matches && position.started <= timing.started) {
         timing.navigation = { action: position.action, started: position.started };
@@ -313,24 +316,23 @@ export function useManagementPage(
     },
     enabled: !!owner,
     retry: false,
-    staleTime: 0,
-    gcTime: 0,
-    refetchOnMount: "always",
-    // Opening, explicit refresh, changed filters and accepted writes are
-    // intentional reads. Returning to a tab or an interval must not clear
-    // the complete page or restart a long read without user action.
+    staleTime: query => query.state.data &&
+      managementPageGeneration.get(query.state.data) === currentControlWriteGeneration() ? 60_000 : 0,
+    gcTime: 300_000,
+    // Keep validation independent of focus, reconnect and polling.
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     structuralSharing: false,
     refetchInterval: false,
   });
-  // Keep only the last page successfully read by THIS mounted owner. This
-  // preserves table geometry during local updates, never restores persisted
-  // cache data and never authorizes an operation against an outdated page.
+  // A matching in-memory snapshot can paint immediately on remount. Keep the
+  // last validated page mounted while a new filter or page is read.
   const displayed = useRef<{owner:string;page:ManagementPage;model:string}|undefined>(undefined);
-  if (owner && !query.isFetching && !query.isError && query.data)
+  if (owner && query.data && managementPageGeneration.has(query.data) &&
+      (displayed.current?.owner !== owner || (!query.isFetching && !query.isError)))
     displayed.current={owner,page:query.data,model:filters.model};
-  const current = !!owner && !query.isFetching && !query.isError;
+  const current = !!owner && !query.isFetching && !query.isError && !!query.data &&
+    managementPageGeneration.get(query.data) === currentControlWriteGeneration();
   const previous = displayed.current?.owner===owner?displayed.current:undefined;
   useEffect(() => {
     const page = query.data;
