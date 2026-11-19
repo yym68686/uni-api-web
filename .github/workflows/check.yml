@@ -51,7 +51,8 @@ jobs:
         env:
           TEST_MANAGEMENT_OBSERVER_DATABASE_URL: ${{ env.TEST_CONTROL_DATABASE_URL }}
       - run: node --test fingerprint/runner.test.mjs fingerprint/publish-catalog.test.mjs
-      # The full PostgreSQL suite takes over ten minutes, including lease/deadline tests.
-      - run: go test ./... -count=1 -timeout=15m
+      # Runner variance can push the full PostgreSQL suite past 15 minutes
+      # (lease/deadline tests run with real timers). Keep the full suite bounded.
+      - run: go test ./... -count=1 -timeout=20m
       - run: go vet ./...
       - run: go build ./...
