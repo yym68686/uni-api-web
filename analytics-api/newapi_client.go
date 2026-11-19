@@ -93,6 +93,9 @@ func newAPIJSON(ctx context.Context, base, method, path string, auth *subAuth, b
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, (4<<20)+1))
 	if err != nil || len(raw) > 4<<20 {
+		if resp.StatusCode == http.StatusTooManyRequests {
+			return &subRemoteError{Status: resp.StatusCode, Operation: newAPIOperation(method, path), RetryAfter: newAPIRetryAfter(resp.Header.Get("Retry-After"), time.Now())}
+		}
 		return errSubResponseTooLarge
 	}
 	var envelope struct {

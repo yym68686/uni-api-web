@@ -2,10 +2,8 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
-	"time"
 )
 
 type newSyncKeyGroup struct {
@@ -127,31 +125,18 @@ func (s *Service) subSyncNewAPIKeys(ctx context.Context, account, base, job stri
 				return err
 			}
 			name := subKeyName(account, g.group.ID)
-			var intent time.Time
-			e := s.control.db.QueryRowContext(ctx, `INSERT INTO console_site_key_creates(account_id,name)
- SELECT $1,$2 FROM console_sub_accounts WHERE id=$1 AND job_id=$3 AND state='running'
- ON CONFLICT DO NOTHING RETURNING created_at`, account, name, job).Scan(&intent)
-			if errors.Is(e, sql.ErrNoRows) {
-				continue
+			e := s.newAPICreateOwnedKey(ctx, account, base, job, name, g.remote)
+			if createPause = syncRatePause(e, waitingKeyCreate); createPause != nil {
+				break
 			}
-			if e != nil {
-				return e
-			}
-			e = s.newAPICall(ctx, account, base, "POST", "/api/token/", map[string]any{"name": name, "group": g.remote,
-				"unlimited_quota": true, "expired_time": -1, "remain_quota": 0, "model_limits_enabled": false,
-				"model_limits": "", "allow_ips": "", "auto_ban": false, "auto_groups": []string{}}, nil)
 			var remote *subRemoteError
 			if errors.As(e, &remote) && remote.Status >= 400 && remote.Status < 500 {
-				if _, err := s.control.db.ExecContext(ctx, `DELETE FROM console_site_key_creates WHERE account_id=$1 AND name=$2 AND created_at=$3`, account, name, intent); err != nil {
-					return err
-				}
-				if createPause = syncRatePause(e, "waiting_keys"); createPause != nil {
-					break
-				}
 				rejections[g.group.ID] = &subTestKeyError{"create_failed", "创建专用测试 key 失败：" + e.Error()}
 				if remote.Status == 401 || remote.Status == 403 {
 					return e
 				}
+			} else if e != nil && !errors.Is(e, errNewAPIKeyCreatePending) && !errors.Is(e, errNewAPIKeyCreateUnconfirmed) {
+				return e
 			}
 		}
 		tokens, err = read()
@@ -161,12 +146,12 @@ func (s *Service) subSyncNewAPIKeys(ctx context.Context, account, base, job stri
 		for _, g := range missing {
 			found := tokens[subKeyName(account, g.group.ID)]
 			if len(found) == 0 {
-				if createPause != nil {
+				e := rejections[g.group.ID]
+				if e == nil && createPause != nil {
 					continue
 				}
-				e := rejections[g.group.ID]
 				if e == nil {
-					e = &subTestKeyError{"create_failed", "创建 key 的结果未确认，下次同步将先重查，不会重复创建"}
+					e = &subTestKeyError{"create_failed", errNewAPIKeyCreateUnconfirmed.Error()}
 				}
 				if err := fail(g, e); err != nil {
 					return err

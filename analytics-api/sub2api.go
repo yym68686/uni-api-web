@@ -760,6 +760,7 @@ func (s *Service) subClaimJob(ctx context.Context) (subJob, error) {
  sync_phase=CASE WHEN state='queued' AND job_kind='sync' THEN 'discovering' WHEN state='running' THEN sync_phase ELSE '' END,
  sync_retry_at=NULL,sync_resume_at=NULL,
  sync_pause_count=CASE WHEN state='running' THEN sync_pause_count ELSE 0 END,
+ sync_key_pause_count=CASE WHEN state='running' THEN sync_key_pause_count ELSE 0 END,
  sync_models=CASE WHEN job_kind='sync' THEN COALESCE(sync_models,'[]'::jsonb) ELSE sync_models END,
  sync_plan_ready=state='running' AND sync_plan_ready,
  sync_handoff_partial=state='running' AND sync_handoff_partial,
@@ -826,28 +827,31 @@ func (s *Service) subRunJob(parent context.Context, claimed subJob) {
 	pauseGaveUp := false
 	if err == nil && kind == "sync" && claimed.phase != "compaction" && claimed.phase != "tool_use" {
 		err = s.subRunSync(ctx, id, base, job, claimed.run, encrypted, syncOnly, claimed.paused)
-		var pause *subSyncPause
-		if errors.As(err, &pause) && ctx.Err() == nil && time.Until(pause.until) <= 24*time.Hour {
-			// Stop the heartbeat before releasing the lease, so it cannot
-			// accidentally turn a paused job back into a leased one.
-			cancel(nil)
-			<-heartbeatDone
-			saveCtx, done := context.WithTimeout(context.Background(), 5*time.Second)
-			n, saveErr := s.subProbeWrite(saveCtx, `UPDATE console_sub_accounts
- SET sync_phase=$3,sync_resume_at=$4,sync_pause_count=sync_pause_count+1,sync_lease_until=NULL,job_id=''
- WHERE id=$1 AND job_id=$2 AND state='running' AND sync_pause_count<4 AND sync_lease_until>clock_timestamp()`, id, job, pause.phase, pause.until)
-			done()
-			if saveErr != nil {
-				// The lease expiry path can resume the plan and any cooldown
-				// already published by the model/key branch.
-				log.Printf("event=site_detection_cooldown_save_failed class=%s", databaseErrorClass(saveErr))
-				return
+		var pause *subSyncSuspension
+		if errors.As(err, &pause) && ctx.Err() == nil {
+			if time.Until(pause.latest().until) > 24*time.Hour {
+				err = errors.New(pause.failure(true))
+			} else {
+				// Stop the heartbeat before releasing the lease, so it cannot
+				// accidentally turn a paused job back into a leased one.
+				cancel(nil)
+				<-heartbeatDone
+				saveCtx, done := context.WithTimeout(context.Background(), 5*time.Second)
+				n, saveErr := s.subPauseSyncJob(saveCtx, id, job, pause)
+				done()
+				if saveErr != nil {
+					// The lease expiry path can resume the plan and any cooldown
+					// already published by the model/key branch.
+					log.Printf("event=site_detection_cooldown_save_failed class=%s", databaseErrorClass(saveErr))
+					return
+				}
+				if n == 1 {
+					log.Printf("event=site_detection_deferred account_id=%s phase=%s", id, pause.latest().phase)
+					return
+				}
+				pauseGaveUp = true
+				err = errors.New(pause.failure(false))
 			}
-			if n == 1 {
-				return
-			}
-			pauseGaveUp = true
-			err = errors.New("上游持续限流，已停止本轮自动重试")
 		}
 	}
 	if err == nil && !syncOnly && ctx.Err() == nil && (kind == "check" || kind == "quality") {
@@ -899,8 +903,13 @@ func (s *Service) subRunJob(parent context.Context, claimed subJob) {
  concat_ws('；',NULLIF(message,''),'服务切换后已继续排队项目，可能已发出的请求未自动重发') ELSE message END,
  job_kind='',job_id='',lease_until=NULL,sync_lease_until=NULL,sync_phase='',sync_retry_at=NULL,sync_resume_at=NULL
  WHERE id=$1 AND job_id=$2 AND COALESCE(sync_lease_until,lease_until)>clock_timestamp() RETURNING id),
- targets AS (UPDATE console_sub_targets SET state='interrupted',message='任务未完成，请重试' WHERE account_id IN (SELECT id FROM finished) AND state IN ('queued','running') RETURNING account_id)
- UPDATE console_sub_models SET state='interrupted',message='任务未完成，请重试' WHERE NOT $5 AND account_id IN (SELECT id FROM finished) AND state IN ('queued','running')`, id, job, state, message, syncOnly)
+ targets AS (UPDATE console_sub_targets SET state='interrupted',
+ message=CASE WHEN $6='sync' AND sync_key_state='preparing' THEN '测试密钥未就绪，未发出检测请求' ELSE '任务未完成，请重试' END
+ WHERE account_id IN (SELECT id FROM finished) AND state IN ('queued','running') RETURNING account_id,group_id,sync_key_state)
+ UPDATE console_sub_models m SET state='interrupted',
+ message=CASE WHEN $6='sync' AND EXISTS(SELECT 1 FROM targets t WHERE t.account_id=m.account_id AND t.group_id=m.group_id AND t.sync_key_state='preparing')
+ THEN '测试密钥未就绪，未发出检测请求' ELSE '任务未完成，请重试' END
+ WHERE NOT $5 AND account_id IN (SELECT id FROM finished) AND state IN ('queued','running')`, id, job, state, message, syncOnly, kind)
 	if err != nil {
 		log.Printf("event=site_detection_finalize_failed class=%s", databaseErrorClass(err))
 	}
@@ -1398,11 +1407,14 @@ func (s *Service) subTestTargets(ctx context.Context, id, base, job string, qual
 					return
 				}
 				raw, _ := json.Marshal(result)
-				_, e = s.subProbeWrite(ctx, `UPDATE console_sub_models SET state='done',result=$4,message='' WHERE account_id=$1 AND group_id=$2 AND model=$3 AND state='running' AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$5 AND (sync_lease_until IS NULL OR sync_lease_until>clock_timestamp()))`, id, t.id, t.model, string(raw), job)
+				n, e = s.subProbeWrite(ctx, `UPDATE console_sub_models SET state='done',result=$4,message='' WHERE account_id=$1 AND group_id=$2 AND model=$3 AND state='running' AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$5 AND (sync_lease_until IS NULL OR sync_lease_until>clock_timestamp()))`, id, t.id, t.model, string(raw), job)
 				if e != nil {
 					log.Printf("sub_sync_write_failed stage=save_result class=%s", databaseErrorClass(e))
 					errs <- errors.New("检测结果保存失败")
 					continue
+				}
+				if p := subPlan(ctx); p != nil && n == 1 {
+					p.modelAdvanced.Store(true)
 				}
 				if !qualityOnly && fingerprintModel(t.model) && result.Availability.Status == "success" {
 					// Enqueue only while this account job is still current. Stop

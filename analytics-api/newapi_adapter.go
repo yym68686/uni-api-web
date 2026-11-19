@@ -305,24 +305,18 @@ func (s *Service) newAPIEnsureKey(ctx context.Context, account, base, name strin
 	if err := s.newAPICall(ctx, account, base, "GET", "/api/user/self", nil, &profile); err != nil {
 		return subRemoteKey{}, err
 	}
-	result, err := s.control.db.ExecContext(ctx, `INSERT INTO console_site_key_creates(account_id,name) VALUES($1,$2) ON CONFLICT DO NOTHING`, account, name)
-	if err != nil {
+	err := s.newAPICreateOwnedKey(ctx, account, base, "", name, remote)
+	var upstream *subRemoteError
+	if err != nil && !errors.Is(err, errNewAPIKeyCreateUnconfirmed) && !errors.As(err, &upstream) {
 		return subRemoteKey{}, err
 	}
-	claimed, _ := result.RowsAffected()
-	if claimed == 0 {
-		return subRemoteKey{}, errors.New("上次创建结果尚未确认，已重查；请稍后同步，避免重复创建 key")
-	}
-	err = s.newAPICall(ctx, account, base, "POST", "/api/token/", map[string]any{"name": name, "group": remote, "unlimited_quota": true, "expired_time": -1, "remain_quota": 0, "model_limits_enabled": false, "model_limits": "", "allow_ips": "", "auto_ban": false, "auto_groups": []string{}}, nil)
 	if key, ok, e := find(); e == nil && ok {
 		return key, nil
 	}
-	var upstream *subRemoteError
-	if errors.As(err, &upstream) && upstream.Status >= 400 && upstream.Status < 500 {
-		_, _ = s.control.db.ExecContext(ctx, `DELETE FROM console_site_key_creates WHERE account_id=$1 AND name=$2`, account, name)
+	if upstream != nil {
 		return subRemoteKey{}, err
 	}
-	return subRemoteKey{}, errors.New("创建 key 的结果未确认，下次同步将先重查，不会重复创建")
+	return subRemoteKey{}, errNewAPIKeyCreateUnconfirmed
 }
 func (s *Service) newAPIAdapterCall(ctx context.Context, account, base, method, path string, body, out any) error {
 	u, err := url.Parse(path)

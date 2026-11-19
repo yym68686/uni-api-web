@@ -5,15 +5,18 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"sync/atomic"
 	"time"
 )
 
 type subSyncPlanKey struct{}
 
 type subSyncPlan struct {
-	run         string
-	initialized bool
-	wake        chan struct{}
+	run           string
+	initialized   bool
+	wake          chan struct{}
+	keyAdvanced   bool // Only the key producer mutates this, after saving a ready key.
+	modelAdvanced atomic.Bool
 }
 
 func subPlan(ctx context.Context) *subSyncPlan {
@@ -24,9 +27,62 @@ func subPlan(ctx context.Context) *subSyncPlan {
 type subSyncPause struct {
 	phase string
 	until time.Time
+	local bool // No request was sent; just reschedule without using a retry.
 }
 
-func (p *subSyncPause) Error() string { return "等待上游限流冷却" }
+func (p *subSyncPause) Error() string {
+	if p.phase == waitingKeyCreate {
+		return "等待创建测试密钥：站点限速或冷却中"
+	}
+	return "等待上游限流冷却"
+}
+
+type subSyncSuspension struct {
+	key, model                 *subSyncPause
+	keyAdvanced, modelAdvanced bool
+}
+
+func (p *subSyncSuspension) latest() *subSyncPause {
+	if p.key == nil || p.model != nil && p.model.until.After(p.key.until) {
+		return p.model
+	}
+	return p.key
+}
+
+func (p *subSyncSuspension) Error() string { return p.latest().Error() }
+
+func (p *subSyncSuspension) failure(tooLong bool) string {
+	phase := "模型请求"
+	switch {
+	case p.key != nil && p.model != nil:
+		phase = "测试密钥准备或模型请求"
+	case p.key != nil && p.key.phase == waitingKeyCreate:
+		phase = "创建测试密钥"
+	case p.key != nil:
+		phase = "测试密钥准备"
+	}
+	if tooLong {
+		return phase + "冷却超过 24 小时，已暂停自动重试"
+	}
+	return phase + "持续限流，已停止本轮自动重试"
+}
+
+func (s *Service) subPauseSyncJob(ctx context.Context, id, job string, p *subSyncSuspension) (int64, error) {
+	keyLimit := 4
+	if p.key != nil && p.key.phase == waitingKeyCreate {
+		// Allow a single blocked create to age through longer upstream windows.
+		keyLimit = 6
+	}
+	pause := p.latest()
+	return s.subProbeWrite(ctx, `UPDATE console_sub_accounts
+ SET sync_phase=$3,sync_resume_at=$4,sync_lease_until=NULL,job_id='',
+ sync_pause_count=(CASE WHEN $9 THEN 0 ELSE sync_pause_count END)+CASE WHEN $5 THEN 1 ELSE 0 END,
+ sync_key_pause_count=(CASE WHEN $7 THEN 0 ELSE sync_key_pause_count END)+CASE WHEN $6 THEN 1 ELSE 0 END
+ WHERE id=$1 AND job_id=$2 AND state='running' AND sync_lease_until>clock_timestamp()
+ AND (NOT $5 OR $9 OR sync_pause_count<4)
+ AND (NOT $6 OR $7 OR sync_key_pause_count<$8)`, id, job, pause.phase, pause.until,
+		p.model != nil && !p.model.local, p.key != nil && !p.key.local, p.keyAdvanced, keyLimit, p.modelAdvanced)
+}
 
 func syncRatePause(err error, phase string) *subSyncPause {
 	var pause *subSyncPause
@@ -41,7 +97,7 @@ func syncRatePause(err error, phase string) *subSyncPause {
 	if delay <= 0 {
 		delay = 30 * time.Second
 	}
-	return &subSyncPause{phase, time.Now().Add(delay)}
+	return &subSyncPause{phase: phase, until: time.Now().Add(delay)}
 }
 
 func (p *subSyncPlan) notify() {
@@ -97,16 +153,10 @@ func (s *Service) subRunSync(ctx context.Context, id, base, job, run, encrypted 
 	if modelErr != nil && modelPause == nil {
 		return modelErr
 	}
-	// If both branches are blocked, don't consume one retry for each
-	// overlapping cooldown; wait until both can make progress.
-	if keyPause != nil && modelPause != nil && keyPause.until.Before(modelPause.until) {
-		return modelPause
-	}
-	if keyPause != nil {
-		return keyPause
-	}
-	if modelPause != nil {
-		return modelPause
+	// Ready groups drain independently. When both branches are cooling,
+	// checkpoint them together without charging either branch for the other.
+	if keyPause != nil || modelPause != nil {
+		return &subSyncSuspension{key: keyPause, model: modelPause, keyAdvanced: plan.keyAdvanced, modelAdvanced: plan.modelAdvanced.Load()}
 	}
 	return nil
 }
@@ -168,6 +218,7 @@ func (s *Service) subSaveSyncKey(ctx context.Context, id, job string, group int6
 		return context.Canceled
 	}
 	if p := subPlan(ctx); p != nil {
+		p.keyAdvanced = true
 		p.notify()
 	}
 	return nil

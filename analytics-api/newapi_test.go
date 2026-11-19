@@ -26,13 +26,17 @@ func newAPITestService(t *testing.T) (*Service, string, string) {
 	gap := time.Duration(0)
 	s.newAPILogGap = &gap // Synthetic endpoints have no external request budget.
 	s.newAPIKeyGap = &gap
+	createGap := time.Millisecond
+	s.newAPIKeyCreateGap = &createGap
 	// All fixtures use this reserved host; their durable cooldowns must not
 	// leak into a different test's simulation of the same host.
-	scope := siteKeyScope("https://usage.example")
-	if _, err := s.control.db.Exec(`DELETE FROM console_site_detection_limits WHERE scope=$1`, scope); err != nil {
+	keyRead, keyCreate := siteKeyScope("https://usage.example"), newAPIKeyCreateScope("https://usage.example")
+	if _, err := s.control.db.Exec(`DELETE FROM console_site_detection_limits WHERE scope IN ($1,$2)`, keyRead, keyCreate); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { s.control.db.Exec(`DELETE FROM console_site_detection_limits WHERE scope=$1`, scope) })
+	t.Cleanup(func() {
+		s.control.db.Exec(`DELETE FROM console_site_detection_limits WHERE scope IN ($1,$2)`, keyRead, keyCreate)
+	})
 	raw, _ := json.Marshal(subAuth{Kind: "newapi", UserID: 7, Username: "fixture", Access: "expired-access", Cookies: map[string]string{"new_api_refresh": "refresh-fixture"}, QuotaPerUnit: 500000})
 	enc, _ := s.control.encrypt(string(raw))
 	if _, err := s.control.db.Exec(`UPDATE console_sub_accounts SET provider_kind='newapi',login_name='fixture',email='fixture',encrypted_auth=$2 WHERE id=$1`, account, enc); err != nil {

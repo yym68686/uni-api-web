@@ -62,7 +62,7 @@ func (s *Service) siteDetectionCooldown(ctx context.Context, scope, phase string
 	if err != nil {
 		return err
 	}
-	return &subSyncPause{phase, retryAt}
+	return &subSyncPause{phase: phase, until: retryAt}
 }
 
 func (s *Service) saveSiteDetectionCooldown(ctx context.Context, scope string, retryAt time.Time, adaptive bool) error {
@@ -136,7 +136,7 @@ func (s *Service) acquireSiteDetection(ctx context.Context, b siteModelBudget, p
 			break
 		}
 		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) <= wait {
-			return nil, &subSyncPause{phase, time.Now().Add(wait)}
+			return nil, &subSyncPause{phase: phase, until: time.Now().Add(wait), local: true}
 		}
 		if !waitStartup(ctx, wait) {
 			return nil, ctx.Err()
@@ -176,7 +176,7 @@ func (s *Service) trySiteDetection(ctx context.Context, b siteModelBudget, phase
 			return err
 		}
 		if cooling {
-			return &subSyncPause{phase, retry}
+			return &subSyncPause{phase: phase, until: retry}
 		}
 		if adaptive && fresh && learned > 0 {
 			rpm = min(90, learned)
@@ -393,7 +393,7 @@ func (t siteProbeTransport) RoundTrip(req *http.Request) (*http.Response, error)
 			if delay <= 0 {
 				delay = 30 * time.Second
 			}
-			pause = &subSyncPause{"waiting_models", time.Now().Add(delay)}
+			pause = &subSyncPause{phase: "waiting_models", until: time.Now().Add(delay)}
 			saveCtx, done := context.WithTimeout(context.Background(), 3*time.Second)
 			err = t.s.saveSiteDetectionCooldown(saveCtx, t.budget.scope, pause.until, t.budget.adaptive)
 			done()

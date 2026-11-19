@@ -202,7 +202,7 @@ export interface SubAccount {
 const pending = (state: string) => state === "queued" || state === "running";
 const syncPhaseLabel: Record<string,string> = {
   discovering:"正在读取分组和模型", preparing:"正在准备测试密钥", probing:"检测中",
-  waiting_keys:"上游限制密钥读取", waiting_models:"上游限制模型请求",
+  waiting_keys:"上游限制密钥读取", waiting_key_create:"等待创建测试密钥", waiting_models:"上游限制模型请求",
   handoff:"等待新实例接续", compaction:"正在检测上下文压缩", tool_use:"正在检测工具调用",
 };
 const stateLabel: Record<string, string> = {
@@ -1355,7 +1355,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                 const accountMessage = a.has_saved_password === false && /登录.*失效|会话.*失效/.test(a.message)
                   ? "站点会话已失效，且尚未保存登录密码；请补填一次密码，后续将自动登录。"
                   : a.message;
-                const preparingKeys = pending(a.state) && (a.sync_phase === "preparing" || a.sync_phase === "waiting_keys");
+                const preparingKeys = pending(a.state) && (a.sync_phase === "preparing" || a.sync_phase === "waiting_keys" || a.sync_phase === "waiting_key_create");
                 const keyProgress = a.progress?.keys_total ? `测试密钥 ${a.progress.keys_ready ?? 0}/${a.progress.keys_total}` : "";
                 return (
                   <article className="sub-account" key={a.id} role="listitem" aria-label={a.name}>

@@ -591,10 +591,13 @@ it("loads sources before opening the dialog and offers retry when the initial re
   expect(dialog.getByRole("option", { name: "DigitalOcean" })).toBeInTheDocument();
 });
 
-it("shows key progress while a model sync waits on an upstream limit", async () => {
+it.each([
+  ["waiting_keys", "上游限制密钥读取"],
+  ["waiting_key_create", "等待创建测试密钥"],
+])("shows key progress during %s", async (phase, label) => {
   const [account] = fixtures();
   Object.assign(account, {
-    state: "running", job_kind: "sync", sync_phase: "waiting_keys", sync_retry_at: 1795029600,
+    state: "running", job_kind: "sync", sync_phase: phase, sync_retry_at: 1795029600,
     progress: { total: 1254, completed: 0, queued: 1254, running: 0, interrupted: 0, keys_ready: 7, keys_total: 29, running_models: [], groups: [] },
   });
   vi.stubGlobal("fetch", vi.fn(async (input: string) => Response.json({
@@ -603,7 +606,7 @@ it("shows key progress while a model sync waits on an upstream limit", async () 
   mount("site-key-progress");
   await openSites();
   const row = await screen.findByRole("listitem", { name: account.name });
-  expect(within(row).getByRole("status")).toHaveTextContent("上游限制密钥读取");
+  expect(within(row).getByRole("status")).toHaveTextContent(label);
   const summary = await within(row).findByText("测试密钥 7/29");
   act(() => summary.parentElement?.focus());
   const tooltip = await screen.findByRole("tooltip");
