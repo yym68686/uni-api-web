@@ -146,7 +146,6 @@ export function ChannelDetailChecks({ row }: { row: Channel }) {
     if (c.state === "queued") return "已排队";
     if (c.state === "running") return "检测中";
     if (c.state === "error") return "检测失败";
-    if (c.state === "interrupted") return "已中断";
     if (kind === "availability")
       return importModelLabel({
         model: row.model,
@@ -154,6 +153,7 @@ export function ChannelDetailChecks({ row }: { row: Channel }) {
         message: c.message,
         result: c.result as SubTarget["result"],
       });
+    if (c.state === "interrupted") return "已中断";
     if (kind === "quality")
       return (
         (

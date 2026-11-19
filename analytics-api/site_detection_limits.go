@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -267,8 +268,28 @@ func (b *siteProbeBody) Close() error {
 }
 
 type siteProbeRejection struct {
-	kind  string
-	pause *subSyncPause
+	kind       string
+	httpStatus int
+	pause      *subSyncPause
+}
+
+const (
+	legacySiteAuthMessage  = "上游拒绝测试凭据或访问权限"
+	legacySiteQuotaMessage = "上游余额或配额不足"
+	legacySiteLimitMessage = "上游拒绝或限制本次请求，保留上次检测结论"
+	legacySiteRejectionSQL = `('` + legacySiteAuthMessage + `','` + legacySiteQuotaMessage + `','` + legacySiteLimitMessage + `')`
+)
+
+// Old runs saved only the fixed rejection message, not the HTTP status. Map
+// it on read without guessing a code, touching results, or replaying requests.
+func siteDetectionOutcome(state, message string) string {
+	if state == "interrupted" {
+		switch message {
+		case legacySiteAuthMessage, legacySiteQuotaMessage, legacySiteLimitMessage:
+			return "rejected"
+		}
+	}
+	return state
 }
 
 func (e *siteProbeRejection) Error() string { return e.kind }
@@ -382,7 +403,7 @@ func (t siteProbeTransport) RoundTrip(req *http.Request) (*http.Response, error)
 			}
 		}
 		release()
-		return nil, &siteProbeRejection{kind, pause}
+		return nil, &siteProbeRejection{kind: kind, httpStatus: response.StatusCode, pause: pause}
 	}
 }
 
@@ -392,15 +413,19 @@ func applySiteProbeRejection(out *subProbe, err error) bool {
 	switch {
 	case errors.As(err, &rejection):
 		out.Status = rejection.kind
+		out.HTTPStatus = rejection.httpStatus
 		out.pause = rejection.pause
 		switch rejection.kind {
 		case "auth_rejected":
-			out.Message = "上游拒绝测试凭据或访问权限"
+			if rejection.httpStatus == http.StatusUnauthorized {
+				out.Message = "HTTP 401：上游未通过测试密钥认证"
+			} else {
+				out.Message = "HTTP 403：上游拒绝访问，请检查分组或协议权限"
+			}
 		case "quota_rejected":
-			out.Message = "上游余额或配额不足"
+			out.Message = fmt.Sprintf("HTTP %d：上游余额或配额不足", rejection.httpStatus)
 		default:
-			out.Message = "上游拒绝或限制本次请求，保留上次检测结论"
-			out.HTTPStatus = 429
+			out.Message = "HTTP 429：上游拒绝或限制本次请求，保留上次检测结论"
 		}
 	case errors.As(err, &pause):
 		out.Status, out.Message, out.pause = "rate_limited", "等待上游限流冷却，未发出请求", pause
@@ -424,7 +449,12 @@ func siteBlockedProbe(result subResult) *subProbe {
 }
 
 func (s *Service) recordSiteBlockedModel(ctx context.Context, id, job string, group, keyID int64, model, history string, result subResult, blocked *subProbe, resumable bool) error {
-	state := "interrupted"
+	state := "rejected"
+	if blocked.HTTPStatus == 0 {
+		// No response was received for this item (e.g. queued behind a shared
+		// cooldown). Do not attribute another item's upstream status to it.
+		state = "interrupted"
+	}
 	// If availability already ran, replaying the combined item would repeat
 	// a paid request. Keep it in receipts, and leave the prior outcome intact.
 	if result.Availability.Status == "success" {

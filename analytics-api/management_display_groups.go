@@ -281,7 +281,7 @@ func (s *Service) warmManagementDisplayGroups(ctx context.Context, owner string,
 
 func appendManagementDisplayModel(slots map[string]*subTarget, row managementPageModelRecord) error {
 	target := slots[qualityGroupID(row.account, row.group)]
-	model := subModelResult{Model: row.model, State: row.state, Message: row.message}
+	model := subModelResult{Model: row.model, State: siteDetectionOutcome(row.state, row.message), Message: row.message}
 	if len(row.result) > 0 {
 		if err := json.Unmarshal(row.result, &model.Result); err != nil {
 			return err

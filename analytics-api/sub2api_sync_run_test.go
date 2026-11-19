@@ -206,6 +206,108 @@ func TestSiteProbeRejectionVersusQuota(t *testing.T) {
 	}
 }
 
+func TestSiteSyncSkipsOnlyDeclaredProtocolAndSeparatesProbeOutcomes(t *testing.T) {
+	s, id, owner := newAPITestService(t)
+	db := s.control.db
+	ctx := context.WithValue(withSubSyncModels(context.Background(), []string{"claude-fixture", "gpt-fixture"}), subSyncPlanKey{}, &subSyncPlan{run: "job"})
+	var groups []subRemoteGroup
+	if err := json.Unmarshal([]byte(`[
+ {"id":901,"platform":"openai","allow_messages_dispatch":false},
+ {"id":902,"platform":"openai","allow_messages_dispatch":true},
+ {"id":903,"platform":"openai"},
+ {"id":904,"platform":"composite","allow_messages_dispatch":false},
+ {"id":905,"platform":"anthropic","allow_messages_dispatch":false}
+ ]`), &groups); err != nil {
+		t.Fatal(err)
+	}
+	for _, g := range groups {
+		if g.skipsModelProbe("claude-fixture") != (g.ID == 901) || g.skipsModelProbe("gpt-fixture") {
+			t.Fatal("incorrect protocol compatibility", g)
+		}
+	}
+	enc, err := s.control.encrypt("sk-fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := db.Exec(q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(`UPDATE console_sub_accounts SET state='running',job_kind='sync',job_id='job',sync_run_id='job',probe_limits='{"rpm_limit":480}' WHERE id=$1`, id)
+	exec(`UPDATE console_sub_targets SET active=false WHERE account_id=$1`, id)
+	for _, g := range groups[:2] {
+		exec(`INSERT INTO console_sub_targets(account_id,group_id,name,platform,encrypted_key,sync_run_id,sync_key_state)
+ VALUES($1,$2,'fixture',$3,$4,'job','ready')`, id, g.ID, g.Platform, enc)
+	}
+	exec(`INSERT INTO console_sub_models(account_id,group_id,model,state,result) VALUES($1,901,'claude-fixture','done','{"availability":{"status":"success","text":"prior"}}')`, id)
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if err = queueSubSyncModels(ctx, tx, id, groups[:2], nil); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	exec(`INSERT INTO console_sub_models(account_id,group_id,model,state,message,sync_run_id) VALUES
+ ($1,902,'legacy','interrupted',$2,'job'),($1,902,'stopped','interrupted','检测已停止','job')`, id, legacySiteAuthMessage)
+	var messages, responses atomic.Int32
+	withSpendUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/messages":
+			messages.Add(1)
+			w.WriteHeader(http.StatusForbidden)
+		case "/v1/responses":
+			responses.Add(1)
+			w.WriteHeader(http.StatusUnauthorized)
+		default:
+			t.Errorf("unexpected endpoint %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	if err := s.subTestTargets(ctx, id, "https://usage.example", "job", false); err != nil {
+		t.Fatal(err)
+	}
+	if messages.Load() != 1 || responses.Load() != 2 {
+		t.Fatal("unexpected dispatch", messages.Load(), responses.Load())
+	}
+	for _, tc := range []struct {
+		group                int
+		model, state, prefix string
+	}{
+		{901, "claude-fixture", "skipped", "分组未开放"},
+		{901, "gpt-fixture", "rejected", "HTTP 401："},
+		{902, "claude-fixture", "rejected", "HTTP 403："},
+	} {
+		var state, message string
+		var prior bool
+		if err := db.QueryRow(`SELECT state,message,COALESCE(result->'availability'->>'text'='prior',false) FROM console_sub_models WHERE account_id=$1 AND group_id=$2 AND model=$3`, id, tc.group, tc.model).Scan(&state, &message, &prior); err != nil || state != tc.state || !strings.HasPrefix(message, tc.prefix) || (tc.state == "skipped" && !prior) {
+			t.Fatal(tc, state, message, prior, err)
+		}
+	}
+	tx, err = db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	accounts, err := readSubAccountHeaders(ctx, tx, owner, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest("GET", "/v1/sub2api/accounts/progress", nil).WithContext(ctx)
+	if err = readSubSyncProgress(r, tx, owner, accounts, []string{id}); err != nil {
+		t.Fatal(err)
+	}
+	p := accounts[0].Progress
+	if p.Total != 6 || p.Rejected != 4 || p.Skipped != 1 || p.Interrupted != 1 || p.Running != 0 || p.Queued != 0 || *accounts[0].CompletedGroups != 1 {
+		t.Fatal(mustJSON(accounts[0]))
+	}
+}
+
 func TestSiteProbeBudgetsApplyAccountAndGroupLimits(t *testing.T) {
 	s, id, _ := newAPITestService(t)
 	ctx := context.Background()

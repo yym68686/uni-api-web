@@ -10,6 +10,7 @@ import { Timing } from "./ChannelMetrics";
 import { SUB_MODELS, saveSubModels, loadSubModels } from "./sub2apiModels";
 import type { SubUsage } from "./sub2apiPriceCheck";
 import { installManagementPageFixture } from "../tests/managementPageFixture";
+import { availabilityCounts, importModelLabel } from "./sub2apiResults";
 
 afterEach(() => vi.unstubAllGlobals());
 it("keeps partial source availability out of the channel management banner", async () => {
@@ -608,6 +609,35 @@ it("shows key progress while a model sync waits on an upstream limit", async () 
   const tooltip = await screen.findByRole("tooltip");
   expect(tooltip).toHaveTextContent("模型进度：0/1254");
   expect(tooltip).toHaveTextContent(/预计.*重试/);
+});
+
+it("shows upstream rejections and protocol skips separately from real interruptions", async () => {
+  const [account] = fixtures();
+  Object.assign(account, {
+    state: "running", job_kind: "sync", sync_phase: "probing",
+    progress: { total: 722, completed: 614, queued: 4, running: 8, interrupted: 1, rejected: 80, skipped: 15, running_models: [], groups: [] },
+  });
+  vi.stubGlobal("fetch", vi.fn(async (input: string) => Response.json({
+    data: input.endsWith("/accounts") ? [account] : [],
+  })));
+  mount("site-probe-outcomes");
+  await openSites();
+  const row = await screen.findByRole("listitem", { name: account.name });
+  const summary = await within(row).findByText("模型 614/722");
+  act(() => summary.parentElement?.focus());
+  expect(await screen.findByRole("tooltip")).toHaveTextContent("80 上游拒绝 · 15 已跳过 · 1 已中断");
+
+  const check = { model: "claude-fixture", state: "rejected", message: "HTTP 401：上游未通过测试密钥认证", result: account.targets[0].result };
+  const forbidden = { ...check, message: "HTTP 403：上游拒绝访问，请检查分组或协议权限" };
+  const legacy = { ...check, state: "interrupted", message: "上游拒绝测试凭据或访问权限" };
+  const skipped = { ...check, state: "skipped", message: "分组未开放 /v1/messages，未发送检测请求" };
+  const interrupted = { ...check, state: "interrupted", message: "服务切换时请求可能已发出，未自动重发" };
+  expect([check, forbidden, legacy, skipped, interrupted].map(importModelLabel)).toEqual([
+    "上游拒绝 · HTTP 401", "上游拒绝 · HTTP 403", "上游拒绝", "已跳过", "已中断",
+  ]);
+  expect(availabilityCounts([check, forbidden, legacy, skipped, interrupted])).toMatchObject({
+    success: 0, failed: 0, untested: 0, rejected: 3, skipped: 1, interrupted: 1,
+  });
 });
 
 it("filters unit prices across pages and models, persists selection, and scopes both batch checks", async () => {

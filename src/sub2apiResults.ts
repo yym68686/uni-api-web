@@ -36,10 +36,19 @@ export function availableModelChecks(target: SubTarget): SubModelCheck[] {
   );
 }
 
+export function modelDetectionState(check: SubModelCheck) {
+  if (check.state === "interrupted" && [
+    "上游拒绝测试凭据或访问权限",
+    "上游余额或配额不足",
+    "上游拒绝或限制本次请求，保留上次检测结论",
+  ].includes(check.message)) return "rejected";
+  return check.state;
+}
+
 export function availabilityCounts(checks: SubModelCheck[]) {
   // A queued rerun retains the previous result for diagnostics, but that old
   // result is not also a current success/failure/untested task.
-  const settled = checks.filter(c => !["queued", "running", "interrupted"].includes(c.state));
+  const settled = checks.filter(c => !["queued", "running", "interrupted", "rejected", "skipped"].includes(modelDetectionState(c)));
   return {
     success: settled.filter((c) => c.state !== "error" && c.result?.availability.status === "success")
       .length,
@@ -49,14 +58,22 @@ export function availabilityCounts(checks: SubModelCheck[]) {
     untested: settled.filter((c) => c.state !== "error" && !c.result).length,
     pending: checks.filter((c) => ["queued", "running"].includes(c.state))
       .length,
-    interrupted: checks.filter((c) => c.state === "interrupted").length,
+    interrupted: checks.filter(c => modelDetectionState(c) === "interrupted").length,
+    rejected: checks.filter(c => modelDetectionState(c) === "rejected").length,
+    skipped: checks.filter(c => modelDetectionState(c) === "skipped").length,
   };
 }
 
 export function importModelLabel(check: SubModelCheck): string {
-  if (check.state === "queued") return "排队中";
-  if (check.state === "running") return "检测中";
-  if (check.state === "interrupted") return "已中断";
+  const state = modelDetectionState(check);
+  if (state === "queued") return "排队中";
+  if (state === "running") return "检测中";
+  if (state === "interrupted") return "已中断";
+  if (state === "skipped") return "已跳过";
+  if (state === "rejected") {
+    const http = /^HTTP (401|402|403|429)：/.exec(check.message)?.[1];
+    return http ? `上游拒绝 · HTTP ${http}` : "上游拒绝";
+  }
   if (check.state === "error" || check.result?.availability.status === "error")
     return "检测失败";
   if (check.state === "done" && check.result?.availability.status === "success")
@@ -80,6 +97,8 @@ export const modelMatchLabels = {
 export function modelMatchStatus(
   check: SubModelCheck,
 ): keyof typeof modelMatchLabels {
+  const state = modelDetectionState(check);
+  if (state === "rejected" || state === "skipped") return "untested";
   if (!check.result) return "untested";
   const status = check.result.availability.model_match;
   if (!status) return "legacy";

@@ -15,7 +15,7 @@ type storedManagementOverview struct {
 }
 
 func managementOverviewCatalog(builtins []string) string {
-	return tokenHash("management-group-overview-v1\x00" + mustJSON(builtins))
+	return tokenHash("management-group-overview-v2\x00" + mustJSON(builtins))
 }
 
 // Cache admission and exact fallback run in the same repeatable-read

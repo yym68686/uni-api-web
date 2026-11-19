@@ -14,6 +14,8 @@ type subSyncProgress struct {
 	Queued        int                `json:"queued"`
 	Running       int                `json:"running"`
 	Interrupted   int                `json:"interrupted"`
+	Rejected      int                `json:"rejected,omitempty"`
+	Skipped       int                `json:"skipped,omitempty"`
 	KeysReady     int                `json:"keys_ready"`
 	KeysTotal     int                `json:"keys_total"`
 	KeyErrors     int                `json:"key_errors"`
@@ -27,6 +29,8 @@ type subGroupProgress struct {
 	Queued      int   `json:"queued"`
 	Running     int   `json:"running"`
 	Interrupted int   `json:"interrupted"`
+	Rejected    int   `json:"rejected,omitempty"`
+	Skipped     int   `json:"skipped,omitempty"`
 }
 
 // Poll only task state/identity. No result JSON, receipts, gateway directory or
@@ -66,7 +70,9 @@ func readSubSyncProgress(r *http.Request, tx *sql.Tx, owner string, accounts []s
  CASE WHEN a.sync_run_id<>'' AND t.sync_run_id=a.sync_run_id THEN t.sync_key_state ELSE '' END,count(m.model),
  count(*) FILTER(WHERE m.state IN ('done','error')),
  count(*) FILTER(WHERE m.state='queued'),count(*) FILTER(WHERE m.state='running'),
- count(*) FILTER(WHERE m.state='interrupted'),
+ count(*) FILTER(WHERE m.state='interrupted' AND m.message NOT IN `+legacySiteRejectionSQL+`),
+ count(*) FILTER(WHERE m.state='rejected' OR (m.state='interrupted' AND m.message IN `+legacySiteRejectionSQL+`)),
+ count(*) FILTER(WHERE m.state='skipped'),
  COALESCE(jsonb_agg(m.model ORDER BY m.model) FILTER(WHERE m.state='running'),'[]'::jsonb)
  FROM console_sub_accounts a JOIN console_sub_targets t ON t.account_id=a.id AND t.active
  LEFT JOIN console_sub_models m ON m.account_id=t.account_id AND m.group_id=t.group_id
@@ -102,14 +108,14 @@ func readSubSyncProgress(r *http.Request, tx *sql.Tx, owner string, accounts []s
 		var targetState, keyState string
 		var g subGroupProgress
 		var raw []byte
-		if err = rows.Scan(&id, &g.GroupID, &targetState, &keyState, &g.Total, &g.Completed, &g.Queued, &g.Running, &g.Interrupted, &raw); err != nil {
+		if err = rows.Scan(&id, &g.GroupID, &targetState, &keyState, &g.Total, &g.Completed, &g.Queued, &g.Running, &g.Interrupted, &g.Rejected, &g.Skipped, &raw); err != nil {
 			return err
 		}
 		a := index[id]
 		if a == nil {
 			continue
 		}
-		if g.Total > 0 && g.Completed == g.Total || g.Total == 0 && targetState == "done" {
+		if g.Total > 0 && g.Completed+g.Rejected+g.Skipped == g.Total && keyState != "preparing" && keyState != "error" || g.Total == 0 && targetState == "done" {
 			synced[id]++
 		}
 		if a.Progress == nil {
@@ -131,6 +137,8 @@ func readSubSyncProgress(r *http.Request, tx *sql.Tx, owner string, accounts []s
 		p.Queued += g.Queued
 		p.Running += g.Running
 		p.Interrupted += g.Interrupted
+		p.Rejected += g.Rejected
+		p.Skipped += g.Skipped
 		var names []string
 		if err = json.Unmarshal(raw, &names); err != nil {
 			return err

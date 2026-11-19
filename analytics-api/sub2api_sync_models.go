@@ -11,10 +11,11 @@ import (
 // concurrent result writers acquire those same locks in the opposite order.
 func queueSubSyncModels(ctx context.Context, tx *sql.Tx, account string, groups []subRemoteGroup, discovered map[int64][]string) error {
 	type entry struct {
-		Group int64  `json:"group_id"`
-		Model string `json:"model"`
-		State string `json:"state"`
-		Run   string `json:"run"`
+		Group   int64  `json:"group_id"`
+		Model   string `json:"model"`
+		State   string `json:"state"`
+		Message string `json:"message"`
+		Run     string `json:"run"`
 	}
 	entries := []entry{}
 	var owner string
@@ -34,19 +35,23 @@ func queueSubSyncModels(ctx context.Context, tx *sql.Tx, account string, groups 
 				continue
 			}
 			seen[model] = true
-			state, run := "idle", ""
+			state, message, run := "idle", "", ""
 			if enabled && subSyncIncludesModel(ctx, model) {
 				state = "queued"
+				if group.skipsModelProbe(model) {
+					state, message = "skipped", "分组未开放 /v1/messages，未发送检测请求"
+				}
 				if plan := subPlan(ctx); plan != nil {
 					run = plan.run
 				}
 			}
-			entries = append(entries, entry{group.ID, model, state, run})
+			entries = append(entries, entry{group.ID, model, state, message, run})
 		}
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO console_sub_models(account_id,group_id,model,state,sync_run_id)
- SELECT $1,x.group_id,x.model,x.state,x.run FROM jsonb_to_recordset($2::jsonb) AS x(group_id bigint,model text,state text,run text)
+	_, err = tx.ExecContext(ctx, `INSERT INTO console_sub_models(account_id,group_id,model,state,message,sync_run_id)
+ SELECT $1,x.group_id,x.model,x.state,x.message,x.run FROM jsonb_to_recordset($2::jsonb) AS x(group_id bigint,model text,state text,message text,run text)
  ORDER BY x.group_id,x.model
- ON CONFLICT(account_id,group_id,model) DO UPDATE SET state='queued',message='',sync_run_id=EXCLUDED.sync_run_id WHERE EXCLUDED.state='queued'`, account, mustJSON(entries))
+ ON CONFLICT(account_id,group_id,model) DO UPDATE SET state=EXCLUDED.state,message=EXCLUDED.message,sync_run_id=EXCLUDED.sync_run_id
+ WHERE EXCLUDED.state IN ('queued','skipped')`, account, mustJSON(entries))
 	return err
 }

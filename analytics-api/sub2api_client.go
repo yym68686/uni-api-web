@@ -199,14 +199,22 @@ type subAuth struct {
 }
 
 type subRemoteGroup struct {
-	RPM      *int    `json:"rpm_limit"`
-	ID       int64   `json:"id"`
-	Status   string  `json:"status,omitempty"`
-	Name     string  `json:"name"`
-	Platform string  `json:"platform"`
-	Rate     float64 `json:"rate_multiplier"`
-	Peak     bool    `json:"peak_rate_enabled"`
+	AllowMessagesDispatch *bool   `json:"allow_messages_dispatch"`
+	RPM                   *int    `json:"rpm_limit"`
+	ID                    int64   `json:"id"`
+	Status                string  `json:"status,omitempty"`
+	Name                  string  `json:"name"`
+	Platform              string  `json:"platform"`
+	Rate                  float64 `json:"rate_multiplier"`
+	Peak                  bool    `json:"peak_rate_enabled"`
 }
+
+// Only OpenAI groups have an unconditional Messages dispatch switch. A
+// missing field means unknown, and composite groups may route to other platforms.
+func (g subRemoteGroup) skipsModelProbe(model string) bool {
+	return g.Platform == "openai" && g.AllowMessagesDispatch != nil && !*g.AllowMessagesDispatch && subModelProtocol(model) == "messages"
+}
+
 type subRemoteKey struct {
 	CreatedAt *time.Time `json:"created_at"`
 	ID        int64      `json:"id"`

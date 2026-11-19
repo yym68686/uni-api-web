@@ -18,22 +18,24 @@ const managementPageOverviewSQL = `WITH wanted AS MATERIALIZED (
  SELECT w.account_id,w.group_id,
    ($4::boolean OR NOT EXISTS (SELECT 1 FROM console_sub_check_queue q WHERE q.account_id=w.account_id AND q.group_id=w.group_id))
      AND COALESCE(g.valid,true),
-   g.total,g.builtins,g.astra,g.success,g.warning,g.failed,g.untested,g.pending,g.interrupted,g.checked_at,g.busy
+   g.total,g.builtins,g.astra,g.success,g.warning,g.failed,g.untested,g.pending,g.interrupted,g.rejected,g.skipped,g.checked_at,g.busy
  FROM wanted w
  CROSS JOIN LATERAL (
  SELECT bool_and(COALESCE(s.valid,false)) AS valid,
    count(*) AS total,count(*) FILTER (WHERE m.model=ANY($3::text[])) AS builtins,
    COALESCE(bool_or(m.model='gpt-6-astra'),false) AS astra,
-   count(*) FILTER (WHERE m.state NOT IN ('queued','running','interrupted','error') AND s.present AND s.availability='success') AS success,
-   count(*) FILTER (WHERE m.state NOT IN ('queued','running','interrupted') AND s.present AND s.availability='success' AND s.terminal NOT IN ('','complete')) AS warning,
-   count(*) FILTER (WHERE m.state NOT IN ('queued','running','interrupted') AND (m.state='error' OR s.present AND s.availability='error')) AS failed,
-   count(*) FILTER (WHERE m.state NOT IN ('queued','running','interrupted','error') AND NOT s.present) AS untested,
+   count(*) FILTER (WHERE m.state NOT IN ('queued','running','interrupted','rejected','skipped','error') AND s.present AND s.availability='success') AS success,
+   count(*) FILTER (WHERE m.state NOT IN ('queued','running','interrupted','rejected','skipped') AND s.present AND s.availability='success' AND s.terminal NOT IN ('','complete')) AS warning,
+   count(*) FILTER (WHERE m.state NOT IN ('queued','running','interrupted','rejected','skipped') AND (m.state='error' OR s.present AND s.availability='error')) AS failed,
+   count(*) FILTER (WHERE m.state NOT IN ('queued','running','interrupted','rejected','skipped','error') AND NOT s.present) AS untested,
    count(*) FILTER (WHERE m.state IN ('queued','running')) AS pending,
    count(*) FILTER (WHERE m.state='interrupted') AS interrupted,
+   count(*) FILTER (WHERE m.state='rejected') AS rejected,
+   count(*) FILTER (WHERE m.state='skipped') AS skipped,
    greatest(max(s.checked_at) FILTER (WHERE s.present),0) AS checked_at,
    COALESCE(jsonb_agg(jsonb_build_object('model',m.model,'state',m.state) ORDER BY m.model COLLATE "C")
      FILTER (WHERE m.state IN ('queued','running')),'[]'::jsonb) AS busy
- FROM (SELECT model,state FROM console_sub_models
+ FROM (SELECT model,CASE WHEN state='interrupted' AND message IN ` + legacySiteRejectionSQL + ` THEN 'rejected' ELSE state END AS state FROM console_sub_models
        WHERE account_id=w.account_id AND group_id=w.group_id OFFSET 0) m
  LEFT JOIN (SELECT model,valid,present,checked_at,availability,terminal FROM console_management_model_signal
             WHERE account_id=w.account_id AND group_id=w.group_id OFFSET 0) s USING(model)
@@ -100,7 +102,7 @@ func computeManagementPageOverview(ctx context.Context, db controlQueryDB, owner
 		var overview managementPageGroupOverview
 		o := &overview.counts
 		if err := rows.Scan(&account, &group, &valid, &o.Total, &seen, &astra, &o.Success, &o.Warning, &o.Failed,
-			&o.Untested, &o.Pending, &o.Interrupted, &o.CheckedAt, &busy); err != nil {
+			&o.Untested, &o.Pending, &o.Interrupted, &o.Rejected, &o.Skipped, &o.CheckedAt, &busy); err != nil {
 			return nil, err
 		}
 		trace.counted(len(busy))

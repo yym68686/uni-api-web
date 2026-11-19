@@ -11,6 +11,8 @@ export interface GroupProgress {
   queued: number;
   running: number;
   interrupted: number;
+  rejected?: number;
+  skipped?: number;
 }
 export interface SyncProgress extends Omit<GroupProgress, "group_id"> {
   keys_ready?: number;
@@ -21,6 +23,16 @@ export interface SyncProgress extends Omit<GroupProgress, "group_id"> {
 }
 const active = (accounts: SubAccount[]) => accounts.some(a => a.state === "queued" || a.state === "running");
 interface ProgressResponse { data: SubAccount[]; read_at_ms: number }
+
+export function modelProgressDetails(progress: Omit<GroupProgress, "group_id">) {
+  return [
+    `${progress.running} 检测中`,
+    `${progress.queued} 排队`,
+    progress.rejected ? `${progress.rejected} 上游拒绝` : "",
+    progress.skipped ? `${progress.skipped} 已跳过` : "",
+    progress.interrupted ? `${progress.interrupted} 已中断` : "",
+  ].filter(Boolean).join(" · ");
+}
 
 // Polling updates account headers, not the result snapshot used by the table.
 // Once a job settles, read that snapshot once so results, filters, counts and

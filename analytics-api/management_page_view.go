@@ -58,6 +58,8 @@ type managementOverview struct {
 	Untested    int   `json:"untested"`
 	Pending     int   `json:"pending"`
 	Interrupted int   `json:"interrupted"`
+	Rejected    int   `json:"rejected,omitempty"`
+	Skipped     int   `json:"skipped,omitempty"`
 	CheckedAt   int64 `json:"checked_at"`
 }
 
@@ -67,11 +69,15 @@ func (o *managementOverview) add(c subModelResult) {
 	if c.Result != nil {
 		o.CheckedAt = max(o.CheckedAt, c.Result.CheckedAt)
 	}
-	switch c.State {
+	switch siteDetectionOutcome(c.State, c.Message) {
 	case "queued", "running":
 		o.Pending++
 	case "interrupted":
 		o.Interrupted++
+	case "rejected":
+		o.Rejected++
+	case "skipped":
+		o.Skipped++
 	default:
 		status, terminal := "", ""
 		if c.Result != nil {
@@ -132,6 +138,12 @@ func managementApplyOverview(row *managementQueryRow) bool {
 // requests this representation when no receipt-based price column is shown.
 // Copy before projection: page rows can alias input/predicate/selection data.
 func managementListRows(page *managementQueryPage, overview ...bool) {
+	compactModel := func(m *subModelResult) {
+		m.State = siteDetectionOutcome(m.State, m.Message)
+		if m.State != "skipped" && m.State != "rejected" {
+			m.Message = ""
+		}
+	}
 	projected := make(map[*subResult]*subResult)
 	result := func(r *subResult) *subResult {
 		if r == nil {
@@ -164,16 +176,17 @@ func managementListRows(page *managementQueryPage, overview ...bool) {
 		}
 		for j := range r.Target.Models {
 			r.Target.Models[j].Result = result(r.Target.Models[j].Result)
-			r.Target.Models[j].Message = ""
+			compactModel(&r.Target.Models[j])
 		}
 		r.Checks = append([]managementQueryCheck{}, r.Checks...)
 		for j := range r.Checks {
 			r.Checks[j].Result = result(r.Checks[j].Result)
-			r.Checks[j].Message = ""
+			compactModel(&r.Checks[j].subModelResult)
 		}
 		if r.Selected != nil {
 			selected := *r.Selected
-			selected.Result, selected.Message = result(selected.Result), ""
+			selected.Result = result(selected.Result)
+			compactModel(&selected.subModelResult)
 			r.Selected = &selected
 		}
 	}

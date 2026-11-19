@@ -92,6 +92,7 @@ AND ($4='' OR m.model=$4 OR m.model='gpt-6-astra')`, owner, accountID, groupID, 
 		if err := rows.Scan(&account, &group, &m.Model, &m.State, &m.Message, &raw); err != nil {
 			return count, resultBytes, err
 		}
+		m.State = siteDetectionOutcome(m.State, m.Message)
 		resultBytes += len(raw)
 		if len(raw) > 0 {
 			if err := json.Unmarshal(raw, &m.Result); err != nil {

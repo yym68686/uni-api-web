@@ -1,4 +1,4 @@
-import { useSubSyncProgress, useSubSyncResultRefresh } from "./subSyncProgress";
+import { modelProgressDetails, useSubSyncProgress, useSubSyncResultRefresh } from "./subSyncProgress";
 import type { SyncProgress } from "./subSyncProgress";
 import { fingerprintTargets, fingerprintLabels, fingerprintBusy, useModelFingerprints, FINGERPRINT_BATCH_LIMIT, FingerprintCell, FingerprintPanel, fingerprintNote } from "./ModelFingerprints";
 import { fingerprintKey, sharedFingerprintIndex } from "./fingerprintResults";
@@ -64,6 +64,7 @@ import {
   probeHasWarning,
   modelMatchStatus,
   modelMatchLabels,
+  modelDetectionState,
 } from "./sub2apiResults";
 import type { SubModelCheck } from "./sub2apiResults";
 import { dateTime } from "./format";
@@ -143,7 +144,7 @@ export interface SubTarget {
   rate_coefficient?: number;
   summary_model?: string;
   list_summary?: boolean;
-  list_overview?: ReturnType<typeof availabilityCounts> & { total: number; checked_at: number };
+  list_overview?: Omit<ReturnType<typeof availabilityCounts>, "rejected" | "skipped"> & { total: number; checked_at: number; rejected?: number; skipped?: number };
   receipt_model?: string;
   observed_rates?: Record<string, ObservedRate>;
   details_omitted?: boolean;
@@ -275,14 +276,17 @@ function Verdict({ result, history }: { result: Result | null; history?: Quality
 }
 
 function AvailabilityStatus({ check }: { check: SubModelCheck }) {
-  if (pending(check.state))
+  const state = modelDetectionState(check);
+  if (pending(state))
     return (
       <span className="check-status">
         <Spinner small />
         {check.state === "queued" ? "排队中" : "检测中"}
       </span>
     );
-  if (check.state === "interrupted" || check.state === "error")
+  if (state === "rejected" || state === "skipped")
+    return <span className="check-status inconclusive" title={check.message}>{importModelLabel(check)}</span>;
+  if (state === "interrupted" || state === "error")
     return (
       <span className="check-status error">
         {check.state === "interrupted" ? "已中断" : "检测失败"}
@@ -309,6 +313,8 @@ function GroupAvailability({ checks, scope, overview }: { checks: SubModelCheck[
     counts.failed && `${counts.failed} 个失败`,
     counts.untested && `${counts.untested} 个未检测`,
     counts.pending && `${counts.pending} 个排队 / 检测中`,
+    !!counts.rejected && `${counts.rejected} 个上游拒绝`,
+    !!counts.skipped && `${counts.skipped} 个已跳过`,
     counts.interrupted && `${counts.interrupted} 个中断`,
   ].filter(Boolean).join(" · ");
   const summary = <span className={`check-status ${counts.success ? "pass" : "inconclusive"}`}>
@@ -319,7 +325,8 @@ function GroupAvailability({ checks, scope, overview }: { checks: SubModelCheck[
 }
 
 function ModelMatch({ check }: { check: SubModelCheck }) {
-  if (pending(check.state) || check.state === "interrupted") return <span className="check-status">{importModelLabel(check)}</span>;
+  const state = modelDetectionState(check);
+  if (pending(state) || state === "interrupted" || state === "rejected" || state === "skipped") return <span className="check-status" title={check.message}>{importModelLabel(check)}</span>;
   const status = modelMatchStatus(check);
   const label = modelMatchLabels[status];
   const probe = check.result?.availability;
@@ -342,10 +349,13 @@ function ModelMatch({ check }: { check: SubModelCheck }) {
 
 function GroupModelMatch({ checks, scope }: { checks: SubModelCheck[]; scope?: string }) {
   const counts = new Map<string, number>();
-  let working = 0, interrupted = 0;
+  let working = 0, interrupted = 0, rejected = 0, skipped = 0;
   for (const check of checks) {
-    if (pending(check.state)) working++;
-    else if (check.state === "interrupted") interrupted++;
+    const state = modelDetectionState(check);
+    if (pending(state)) working++;
+    else if (state === "interrupted") interrupted++;
+    else if (state === "rejected") rejected++;
+    else if (state === "skipped") skipped++;
     else {
       const label = modelMatchLabels[modelMatchStatus(check)];
       counts.set(label, (counts.get(label) || 0) + 1);
@@ -356,6 +366,8 @@ function GroupModelMatch({ checks, scope }: { checks: SubModelCheck[]; scope?: s
     scope,
     ...[...counts].filter(([label]) => label !== modelMatchLabels.match).map(([label, count]) => `${count} 个${label}`),
     working && `${working} 个排队 / 检测中`,
+    rejected && `${rejected} 个上游拒绝`,
+    skipped && `${skipped} 个已跳过`,
     interrupted && `${interrupted} 个中断`,
   ].filter(Boolean).join(" · ");
   const summary = <span className={`check-status ${matches ? "pass" : "inconclusive"}`}>{matches}/{checks.length} 匹配</span>;
@@ -750,13 +762,14 @@ function ManagementChannelDrawer({
             : checks.length ? (
               <ul className="detail-model-list">
                 {checks.map((check) => {
-                  const available = check.result?.availability.status === "success";
+                  const state = modelDetectionState(check);
+                  const available = state === "done" && check.result?.availability.status === "success";
                   return (
                     <li key={check.model}>
                       {available ? <Check size={15} className="detail-model-check" /> : <CircleHelp size={15} />}
                       <div>
                         <strong>{check.model}</strong>
-                        <small>{check.result ? `最近检测 ${dateTime(check.result.checked_at)}` : "尚未检测"}</small>
+                        <small>{state === "skipped" || state === "rejected" ? check.message : check.result ? `最近检测 ${dateTime(check.result.checked_at)}` : "尚未检测"}</small>
                       </div>
                       <span className={available ? "detail-model-added" : "muted"}>
                         {importModelLabel(check)}
@@ -1366,8 +1379,8 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                         {pending(a.state) && keyProgress && <div>{keyProgress} 就绪{a.progress?.key_errors ? ` · ${a.progress.key_errors} 个不可用` : ""}</div>}
                         {pending(a.state) && !!a.sync_retry_at && <div>预计 {dateTime(a.sync_retry_at)} 重试</div>}
                         {pending(a.state) && a.probe_limits?.effective_rpm && <div>模型请求上限：{a.probe_limits.effective_rpm} RPM · {a.probe_limits.effective_concurrency} 并发（{a.probe_limits.source}）</div>}
-                        {!a.sync_only && a.sync_models?.length && pending(a.state) && a.job_kind === "sync" ? <div>本次同步选择 {a.sync_models.length} 个模型 / 分组</div> : null}
-                        {a.progress && !a.sync_only && <div>模型进度：{a.progress.completed}/{a.progress.total} 完成 · {a.progress.running} 检测中 · {a.progress.queued} 排队{a.progress.interrupted ? ` · ${a.progress.interrupted} 已中断` : ""}</div>}
+                        {!a.sync_only && a.sync_models?.length && pending(a.state) && a.job_kind === "sync" ? <div>本次选择 {a.sync_models.length} 个模型；按分组协议能力检测</div> : null}
+                        {a.progress && !a.sync_only && <div>模型进度：{a.progress.completed}/{a.progress.total} 完成 · {modelProgressDetails(a.progress)}</div>}
                         {!a.sync_only && a.progress?.running_models.length ? <div>正在检测：{[...new Set(a.progress.running_models)].join("、")}</div> : null}
                         {a.synced_at > 0 && <div>上次同步 {dateTime(a.synced_at)}</div>}
                         {accountMessage && <div>{accountMessage}</div>}
@@ -1869,7 +1882,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                             <AvailabilityStatus check={selected} />
                           ) : (
                             liveGroup && scopedModels?.length ?
-                              <Tip text={`${liveGroup.running} 检测中 · ${liveGroup.queued} 排队${liveGroup.interrupted ? ` · ${liveGroup.interrupted} 已中断` : ""}`}>
+                              <Tip text={modelProgressDetails(liveGroup)}>
                                 <span className="check-status">{liveGroup.completed}/{liveGroup.total} 完成</span>
                               </Tip> : <GroupAvailability checks={overviewChecks} scope={scopeNote} overview={scopeNote ? undefined : t.list_overview} />
                           );
