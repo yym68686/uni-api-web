@@ -69,3 +69,33 @@ func TestFingerprintResponsesEffortRejectionThroughTargetedBridge(t *testing.T) 
 		}
 	}
 }
+
+func TestFingerprintTargetedBridgeStopsOnGroupAndGatewayRejection(t *testing.T) {
+	for _, tc := range []struct {
+		status        int
+		message, code string
+	}{
+		{403, `{"code":"GROUP_DELETED","message":"private details"}`, "group_deleted"},
+		{503, "All matching channels are temporarily disabled", "route_temporarily_disabled"},
+	} {
+		t.Run(tc.code, func(t *testing.T) {
+			var calls atomic.Int32
+			up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				if r.URL.Path != "/v1/chat/completions" || r.Header.Get("X-Uni-API-Provider") != "exact-provider" {
+					t.Error("lost targeted Chat protocol")
+				}
+				writeJSON(w, tc.status, map[string]any{"error": map[string]string{"message": tc.message}})
+			}))
+			defer up.Close()
+			client := &http.Client{Transport: configuredProbeTransport{base: up.Client().Transport, provider: "exact-provider", fingerprintProtocol: "chat"}}
+			config := map[string]any{"model": "deepseek-v4.1-flash-1017", "format": "openai", "base_url": up.URL, "key": "gateway-fixture", "targeted": true}
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			result, err := runFingerprintViaTransport(ctx, client, config)
+			if err != nil || calls.Load() != 1 || !strings.Contains(string(result), `"error_code":"`+tc.code+`"`) || strings.Contains(string(result), "private details") {
+				t.Fatalf("calls=%d, result=%s, error=%v", calls.Load(), result, err)
+			}
+		})
+	}
+}

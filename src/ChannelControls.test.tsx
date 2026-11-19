@@ -49,7 +49,7 @@ function setup(
     body: any,
   ) => Promise<Response | undefined> | Response | undefined,
   checkFixture: CheckFixture = { data: [] },
-  catalogFixture: { providers?: string[]; models?: string[]; detection?: boolean } = {},
+  catalogFixture: { providers?: string[]; models?: string[]; detection?: boolean; rejections?: boolean } = {},
 ) {
   const states: Record<string, ControlState> = {
     one: { revision: "one:0", instance_id: "one", rules: [] },
@@ -85,8 +85,8 @@ function setup(
             upstream_model: model,
             endpoint: u.searchParams.get("endpoint") || "all",
             stream: u.searchParams.get("stream") === "true" ? true : null,
-            eligible: true,
-            reason: "eligible",
+            eligible: !(catalogFixture.rejections && provider === "temp-off"),
+            reason: catalogFixture.rejections && provider === "temp-off" ? "temporarily_disabled" : "eligible",
             stats: {
               ...emptyStats(),
               success: 7,
@@ -132,6 +132,7 @@ function setup(
       else if (catalogFixture.detection && u.pathname.endsWith("/channel-management")) {
         body = { data: ids.flatMap(source_id => catalogFixture.providers!.map(provider => ({
           source_id, provider, models: catalogFixture.models, probe_fingerprint: "revision",
+          credential_count: provider === "multi-key" ? 2 : 1,
         }))) };
       } else if (catalogFixture.detection && u.pathname.endsWith("/detection-settings")) {
         body = { disabled: [{ source_id: "one", provider: "visible-0" }] };
@@ -140,7 +141,11 @@ function setup(
           detectionWrites.push({ path: u.pathname, body: JSON.parse(String(init.body)) });
           return Response.json({ accepted: true }, { status: 202 });
         }
-        body = { data: [], supported_models: ["deepseek-v4.1-flash-1017"] };
+        const model = "deepseek-v4.1-flash-1017";
+        body = { data: catalogFixture.rejections && u.pathname.endsWith("/model-fingerprints") ? ["deleted", "multi-key", "changed-key"].map(provider => ({
+          source_id: "one", provider, model, state: "done", revision: provider === "changed-key" ? "old" : "revision",
+          result: {status: "error", checked_at: 1, samples:[{request_id: "sample", state: "error", http_status: 403, error_code: "group_deleted"}]},
+        })) : [], supported_models: [model] };
       } else if (u.pathname.endsWith("channel-controls")) {
         if (controlUnavailable)
           return new Response("控制接口暂不可用", { status: 503 });
@@ -1125,6 +1130,37 @@ it("remembers the observation project and queues supported fingerprints across p
   await screen.findByText("已提交指纹检测 · 26 项");
   await app.user.click(tool("收起检测"));
   expect(screen.queryByRole("columnheader", { name: "检测操作" })).not.toBeInTheDocument();
+});
+
+it("marks only the proven single-key channel as disabled, skips it in batches and allows a manual recheck", async () => {
+  const model = "deepseek-v4.1-flash-1017";
+  const app = setup(false, undefined, { data: [] }, {
+    providers: ["deleted", "temp-off", "multi-key", "changed-key", "healthy"], models: [model], detection: true, rejections: true,
+  });
+  await screen.findByRole("table", {}, {timeout:5000});
+  openFilter();
+  openFilter("工具");
+  await app.user.selectOptions(screen.getByLabelText("uni-api 来源"), "one");
+  const row = (provider: string, source = "One") => within(screen.getByRole("table"))
+    .getAllByRole("button",{name:`查看 ${provider} ${model} 详情`})
+    .map(button=>button.closest("tr")!).find(item=>item.dataset.sourceName === source)!;
+  await waitFor(() => expect(within(row("deleted")).getByText("分组已停用",{selector:".status-pill"})).toBeVisible(), {timeout:5000});
+  expect(within(row("temp-off")).getByText("临时停用",{selector:".status-pill"})).toBeVisible();
+  for (const provider of ["multi-key","changed-key","healthy"])
+    expect(within(row(provider)).getByText("可用",{selector:".status-pill"})).toBeVisible();
+  await app.user.selectOptions(screen.getByLabelText("渠道状态筛选"),"unavailable");
+  await waitFor(() => expect(row("deleted")).toBeVisible());
+  expect(screen.queryByRole("button",{name:`查看 healthy ${model} 详情`})).not.toBeInTheDocument();
+  await app.user.selectOptions(screen.getByLabelText("渠道状态筛选"),"");
+  await app.user.selectOptions(screen.getByLabelText("选择检测项目"),"fingerprint");
+  await app.user.click(tool("指纹检测"));
+  const batch = await screen.findByRole("button", { name: "一键指纹检测 · 3" }, {timeout:5000});
+  expect(screen.getByText("已跳过 2 个停用或无密钥项")).toBeVisible();
+  await app.user.click(batch);
+  await waitFor(() => expect(app.detectionWrites[0]?.body.targets.map((target: {provider: string})=>target.provider)).toEqual(["multi-key","changed-key","healthy"]));
+  await app.user.click(within(row("deleted")).getByRole("button", {name:`重新检测 One deleted ${model}`}));
+  await waitFor(() => expect(app.detectionWrites[1]?.body.targets).toEqual([{source_id:"one",provider:"deleted",model}]));
+  expect(app.writes).toHaveLength(0);
 });
 
 it.each([

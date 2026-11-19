@@ -3,6 +3,7 @@ import { boundGroups } from "./sub2apiImports";
 import { channelMembers } from "./channelManagement";
 import type { ManagedChannel } from "./channelManagement";
 import type { FingerprintRecord, FingerprintTarget } from "./ModelFingerprints";
+import { hasScopedFingerprintRejection } from "./fingerprintRejections";
 
 export const fingerprintKey = (t: FingerprintTarget) => JSON.stringify([t.source_id || "", t.provider || "", t.account_id || "", t.group_id || 0, t.model]);
 const pending = (r: FingerprintRecord) => r.state === "queued" || r.state === "running";
@@ -42,18 +43,22 @@ export function sharedFingerprintIndex(records: FingerprintRecord[], channels: M
       let group = groups.get(groupKey);
       if (!group) {
         const site = index.get(groupKey);
-        group = {keys:new Set([groupKey]),records:site ? [site] : []};
+        group = {keys:new Set([groupKey]),records:site && !hasScopedFingerprintRejection(site) ? [site] : []};
         groups.set(groupKey,group);
       }
       group.keys.add(sourceKey);
       const record = index.get(sourceKey);
-      if (record && (record.state !== "done" || record.revision === member.probe_fingerprint)) group.records.push(record);
+      if (record && (record.state !== "done" || record.revision === member.probe_fingerprint)) {
+        if (!hasScopedFingerprintRejection(record)) group.records.push(record);
+      }
       else if (record?.state === "done") index.delete(sourceKey);
     }
   }
   for (const group of groups.values()) {
     const latest = group.records.sort(newer)[0];
-    if (latest) for (const key of group.keys) index.set(key,latest);
+    if (latest) for (const key of group.keys) {
+      if (!hasScopedFingerprintRejection(index.get(key))) index.set(key,latest);
+    }
   }
   return index;
 }

@@ -12,7 +12,7 @@ import { analyzeSharedOutputs, supportsSharedDetector } from './upstream/shared-
 import { decodeDetector } from './upstream/detector-codec.ts';
 import { COMPLETION_TIMEOUT_MS } from './upstream/completion-request.ts';
 import { completeGemini } from './gemini.mjs';
-import { fingerprintResponse, unsupportedEffortMessage } from './response-errors.mjs';
+import { fingerprintResponse, fingerprintRejectionMessage, fingerprintResponseFailure } from './response-errors.mjs';
 import { parseNumbers } from './upstream/fingerprint-core.js';
 
 const dataRoot = process.env.FINGERPRINT_DATA_DIR;
@@ -104,8 +104,9 @@ export async function collect(config, transport, signal, checkpoint) {
     signal?.throwIfAborted();
     const requestId = 'fingerprint-' + randomUUID(), at = Date.now();
     let stopRound = false;
+    let responseStatus;
     try {
-      const cfg = {baseUrl: base.href, apiKey: config.key, model: config.model, format, effort: modelClasses[config.model].effort, stream: true};
+      const cfg = {baseUrl: base.href, apiKey: config.key, model: config.model, format, effort: modelClasses[config.model].effort, stream: true, targeted: config.targeted === true || !!config.provider};
       const send = transport || (async (url, cfg, body, requestSignal) => {
         const destination = new URL(url); destination.protocol = scheme;
         const response = await fetch(destination, { method: 'POST', redirect: 'error', signal: signal ? AbortSignal.any([signal, requestSignal]) : requestSignal,
@@ -115,7 +116,11 @@ export async function collect(config, transport, signal, checkpoint) {
           body: JSON.stringify(body) });
         return response;
       });
-      const boundedSend = async (...args) => fingerprintResponse(bounded(await send(...args)), cfg);
+      const boundedSend = async (...args) => {
+        const response = await send(...args);
+        responseStatus = response.status;
+        return fingerprintResponse(bounded(response), cfg);
+      };
       const timeout = AbortSignal.timeout(COMPLETION_TIMEOUT_MS);
       const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
       const result = format === 'gemini'
@@ -129,13 +134,14 @@ export async function collect(config, transport, signal, checkpoint) {
       if (numbers.length >= Math.max(80, Math.ceil(challenge.expected_count*.55))) retained.push({numbers,expected_count:challenge.expected_count,sample});
     } catch (error) {
       signal?.throwIfAborted();
-      stopRound = error.fingerprintCode === 'reference_effort_unsupported';
+      const reason = fingerprintRejectionMessage(error.fingerprintCode);
+      stopRound = !!reason;
       outputs.push({ text: '', expected_count: challenge.expected_count });
       samples.push({ request_id: requestId, state: 'error', duration_ms: Date.now() - at,
-        expected_count: challenge.expected_count, http_status: Number.isInteger(error.httpStatus) ? error.httpStatus : undefined,
+        expected_count: challenge.expected_count, http_status: Number.isInteger(error.httpStatus) ? error.httpStatus : responseStatus,
         // Do not persist arbitrary messages from an untrusted endpoint.
-        ...(stopRound ? {error_code:'reference_effort_unsupported'} : {}),
-        message: stopRound ? unsupportedEffortMessage : '请求失败或输出不完整' });
+        ...(stopRound ? {error_code:error.fingerprintCode} : {}),
+        message: reason || fingerprintResponseFailure(error.code ?? (format === 'gemini' ? error.message : undefined)) || '请求失败或输出不完整' });
     }
     // Checkpoint failure stops collection before another paid call. It must not
     // be mistaken for an upstream failure or cause a valid sample to be retried.
@@ -151,7 +157,7 @@ export function scoreCollected(collected, reference = loadReference(), privateCh
   // partial ranking. Only a complete scored round can become match/mismatch.
   if (result.decision !== 'partial' && collected.samples.some(s => s.state === 'error')) { result.status = 'error'; result.probability = null; }
   const saved = privateCheckpoint && collected.retained?.length ? {version:1,model:collected.model,format:collected.format,reference_key:referenceKey,entries:collected.retained} : undefined;
-  return { ...result, samples: collected.samples, checked_at: collected.checked_at, duration_ms: collected.duration_ms + Date.now() - started, ...(saved ? {_resume:saved} : {}) };
+  return { ...result, samples: collected.samples, error_detail_version: 1, checked_at: collected.checked_at, duration_ms: collected.duration_ms + Date.now() - started, ...(saved ? {_resume:saved} : {}) };
 }
 export async function detect(config, transport) {
   // Standalone detection validates before paid I/O. The shared server validates

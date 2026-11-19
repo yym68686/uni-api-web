@@ -69,6 +69,48 @@ test('DeepSeek 1017 preserves exact model and low effort in Responses, Chat and 
 });
 
 const incompatibleResponsesError = {message:'reasoning is not supported for Claude/Gemini Responses compatibility',type:'invalid_request_error',code:'invalid_request'};
+test('explicit upstream and targeted gateway refusals stop after one request in every sampling protocol', async () => {
+  const wrapped = error => ({error:{message:JSON.stringify(error)}});
+  for (const [status, payload, code, targeted = false] of [
+    [403, wrapped({code:'GROUP_DELETED',message:'private upstream text'}), 'group_deleted'],
+    [403, {error:{code:'GROUP_DISABLED',message:'private upstream text'}}, 'group_disabled'],
+    [403, {code:'GROUP_NOT_ALLOWED'}, 'group_not_allowed'],
+    [403, {error:{code:'INSUFFICIENT_BALANCE'}}, 'insufficient_balance'],
+    [404, wrapped({error:{type:'model_not_found'}}), 'model_not_found'],
+    [503, {error:{message:'All matching channels are temporarily disabled'}}, 'route_temporarily_disabled', true],
+    [410, {error:{message:'private upstream text'}}, 'endpoint_gone'],
+  ]) for (const format of ['openai','gemini','responses','anthropic']) {
+    let calls = 0, checkpoints = 0;
+    const collected = await collect({model:'deepseek-v4.1-flash-1017',format,base_url:'https://mock.example',key:'private-token',targeted},
+      async () => {calls++; return Response.json(payload,{status});}, undefined,
+      async ({samples}) => {checkpoints++; assert.equal(samples.at(-1).error_code,code);});
+    const result = scoreCollected(collected, reference);
+    assert.deepEqual([calls,checkpoints,result.status,result.used_outputs,result.samples[0].http_status],[1,1,'error',0,status]);
+    assert.ok(!JSON.stringify(result).includes('private'));
+  }
+});
+
+test('unstructured refusals, non-targeted 503, rate limits and broken streams are not terminal', async () => {
+  const base = {model:'deepseek-v4.1-flash-1017',format:'openai',base_url:'https://mock.example',key:'private'};
+  for (const [status, payload] of [
+    [403,{error:{message:'GROUP_DELETED'}}],
+    [403,{error:{code:'group_deleted'}}],
+    [403,{error:{message:JSON.stringify({error:{message:JSON.stringify({code:'GROUP_DELETED'})}})}}],
+    [404,{error:{message:'model_not_found'}}],
+    [503,{error:{code:'GROUP_DELETED'}}],
+    [503,{error:{message:'All matching channels are temporarily disabled'}}],
+    [502,{error:{code:'GROUP_DELETED'}}],
+    [429,{error:{code:'GROUP_DELETED'}}],
+  ]) {
+    const result = await collect(base,async()=>Response.json(payload,{status}));
+    assert.equal(result.samples.length,3);
+    assert.ok(result.samples.every(s=>s.state==='error' && !s.error_code && s.http_status===status));
+  }
+  const result = await collect(base, async()=>new Response('data: {"error":{"message":"private upstream text"}}\n\n',{headers:{'Content-Type':'text/event-stream'}}));
+  assert.equal(result.samples.length,3);
+  assert.ok(result.samples.every(s=>s.state==='error' && !s.error_code && s.http_status===200 && s.message==='上游流式响应报告错误。'));
+});
+
 test('exact Gemini Responses effort rejection stops without weakening the reference or making fallback calls',async()=>{
   for (const model of ['gemini-4-argon','gemini-4-carbon']) for (const wrapped of [false,true]) {
     let calls=0;

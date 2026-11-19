@@ -4,6 +4,7 @@ import { observedFingerprints } from "./ModelFingerprints";
 import type { FingerprintRecord } from "./ModelFingerprints";
 import type { ManagedChannel } from "./channelManagement";
 import type { Channel } from "./types";
+import { observedGroupRejections } from "./fingerprintRejections";
 
 const fingerprintChannel = {
   source_id:"fugue", provider:"native", models:["gemini-4-argon"],
@@ -82,4 +83,34 @@ it("projects observation results for the exact current route and model", () => {
     [row, undefined],
   ] as [Channel, ManagedChannel | undefined][]) expect(observedFingerprints(changed, current, member,[row.model])[0]?.record).toBeUndefined();
   expect(observedFingerprints({...row, model:"claude-opus-5-5"}, current, fingerprintChannel,[row.model])).toEqual([]);
+});
+
+it("keeps a structured refusal local rather than copying it over another route's successful fingerprint", () => {
+  const refused = {...native, result: {...native.result!, status:"error", samples:[{
+    request_id:"refused", state:"error", http_status:503, error_code:"route_temporarily_disabled",
+  }]}};
+  const index = sharedFingerprintIndex([site, refused], [fingerprintChannel]);
+  expect(index.get(fingerprintKey(native))).toBe(refused);
+  expect(index.get(fingerprintKey(site))).toBe(site);
+});
+
+it("uses only current exact single-credential evidence and clears a group refusal on newer usable output", () => {
+  const key = JSON.stringify(["fugue","native"]);
+  const otherModel = "deepseek-v4.1-flash-1017";
+  const member = {...fingerprintChannel, credential_count:1, models:[native.model, otherModel]};
+  const deleted = {...native, result: {...native.result!, status:"error", samples:[{
+    request_id:"refused", state:"error", http_status:403, error_code:"group_deleted",
+  }]}};
+  const group = (records: FingerprintRecord[], changes?: Partial<ManagedChannel>) =>
+    observedGroupRejections(records,new Map([[key,{...member,...changes}]]));
+  expect(group([deleted]).get(key)).toBe("group_deleted");
+  expect(group([deleted],{credential_count:2}).size).toBe(0);
+  expect(group([deleted],{probe_fingerprint:"rotated"}).size).toBe(0);
+  expect(group([{...deleted,source_id:"different"}]).size).toBe(0);
+  expect(group([{...deleted,account_id:"site"}]).size).toBe(0);
+  const later = {...native, model:otherModel, updated_at_ms:21000, result: {...native.result!, checked_at:21, samples:[{request_id:"later",state:"done"}]}};
+  const transient = {...later, result: {...later.result, samples:[{request_id:"retry",state:"error",http_status:429}]}};
+  expect(group([transient,deleted]).get(key)).toBe("group_deleted");
+  expect(group([later,deleted]).size).toBe(0);
+  expect(group([deleted,later]).size).toBe(0);
 });

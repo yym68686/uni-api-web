@@ -22,6 +22,7 @@ import { SubChannelSpendValue } from "./SubChannelSpend";
 import type { SubChannelSpendResult } from "./SubChannelSpend";
 import { salePercent } from "./modelPrices";
 import { ChannelProfit, channelProfitCost } from "./ChannelProfit";
+import { groupRejectionDetail, type GroupRejection } from "./fingerprintRejections";
 import { observationPreset, type ChannelMetricLayout, type ObservationColumn, type DetectionColumn } from "./observationColumns";
 type MetricColumnsProps = {
   layout?: ChannelMetricLayout;
@@ -142,7 +143,10 @@ export function Timing({
     </Tip>
   );
 }
-export function Status({ row }: { row: Channel }) {
+export function Status({ row, upstreamGroup }: { row: Channel; upstreamGroup?: GroupRejection }) {
+  if (upstreamGroup) return <Tip text={`${groupRejectionDetail(upstreamGroup)} 此状态来自指纹采样，不会自动修改网关规则。`}>
+    <span className="status-pill cooling"><span className="tiny-dot" />分组已停用</span>
+  </Tip>;
   return (
     <span className={`status-pill ${row.eligible ? "healthy" : "cooling"}`}>
       <span className="tiny-dot" />
@@ -240,6 +244,7 @@ export function ChannelMetricCells({
   compact = false,
   columns = observationPreset(layout, compact),
   renderDetection,
+  upstreamGroup,
 }: MetricColumnsProps & {
   row: Channel;
   inflight?: number | null;
@@ -251,10 +256,11 @@ export function ChannelMetricCells({
   importedChannel?: boolean;
   stale?: boolean;
   metricsUnavailable?: boolean;
+  upstreamGroup?: GroupRejection;
 }) {
   function cell(id: ObservationColumn) {
     switch (id) {
-      case "status": return <td className="observation-status"><Status row={row} /></td>;
+      case "status": return <td className="observation-status"><Status row={row} upstreamGroup={upstreamGroup} /></td>;
       case "inflight": return <td className="mono column-run observation-inflight">{inflight == null ? "—" : inflight}</td>;
       case "success": {
         const measured = row.stats?.success_rate;

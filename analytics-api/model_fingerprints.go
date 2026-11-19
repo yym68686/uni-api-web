@@ -117,6 +117,7 @@ func (s *Service) modelFingerprints(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "模型指纹记录读取失败", 503)
 		return
 	}
+	s.annotateLegacyFingerprintRejections(r.Context(), data)
 	catalog := currentFingerprintCatalog()
 	writeJSON(w, 200, map[string]any{"data": data, "supported_models": catalog.names, "reference_commit": catalog.commit})
 }
@@ -257,6 +258,7 @@ func (s *Service) prepareFingerprint(ctx context.Context, t fingerprintTarget) (
 		}
 		plan.sampleKey = revision
 		config["base_url"], config["key"], config["provider"], config["allow_unconfigured"] = src.Base, src.Key, t.Provider, caps.Unconfigured
+		config["targeted"] = true
 		client = http.Client{Timeout: 250 * time.Second, Transport: configuredProbeTransport{base: http.DefaultTransport, provider: t.Provider, allowUnconfigured: caps.Unconfigured, fingerprintProtocol: targetProtocol}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	}
 	if plan.site == "" {
@@ -425,6 +427,7 @@ func runFingerprintViaTransportProgress(ctx context.Context, client *http.Client
 	defer server.Close()
 	local := map[string]any{"model": model, "base_url": "http://" + listener.Addr().String(), "key": token, "format": config["format"]}
 	local["catalog"] = config["catalog"]
+	local["targeted"] = config["targeted"]
 	if len(resume) > 0 {
 		local["resume"] = resume
 	}

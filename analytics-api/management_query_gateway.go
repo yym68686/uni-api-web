@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/url"
 	"sort"
@@ -283,8 +282,7 @@ func managementGatewayRoutes(facts managementGatewayFacts) managementQueryRoutes
 func managementSnapshotFromFacts(facts managementGatewayFacts) managementSnapshot {
 	snapshot := managementSnapshot{Rows: facts.Catalog, Providers: map[string]managementProvider{}, Copies: map[string]bool{}, CheckedAt: time.Now().Unix(), Identity: controlTarget(facts.Source)}
 	for _, provider := range facts.Providers {
-		hashes, _ := json.Marshal(configuredKeyHashes(provider))
-		snapshot.Providers[provider.Provider] = managementProvider{Base: subBindingSite(provider.Base), Fingerprint: tokenHash(controlTarget(facts.Source) + "\n" + provider.Provider + "\n" + subBindingSite(provider.Base) + "\n" + string(hashes)), ProbeFingerprint: configuredProbeFingerprint(facts.Source, provider)}
+		snapshot.Providers[provider.Provider] = managementProviderEvidence(facts.Source, provider)
 	}
 	var controls subGatewayControls
 	_ = decodeMap(facts.Controls, &controls)
@@ -467,6 +465,7 @@ func assembleManagementChannels(src controlSource, snapshot managementSnapshot, 
 			item = &managementChannel{subInstalledChannel: binding, Engine: row.Engine, AccountIDs: []string{}}
 			if live, ok := snapshot.Providers[row.Provider]; ok {
 				item.ProbeFingerprint = live.ProbeFingerprint
+				item.CredentialCount = live.CredentialCount
 			}
 			ids := map[string]bool{}
 			for _, key := range binding.BoundKeys {

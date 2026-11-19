@@ -84,6 +84,7 @@ import { CacheTrend } from "./CacheTrend";
 import { ChannelDetailTrends } from "./ChannelDetailTrends";
 import { ChannelDetailChecks } from "./ChannelDetailChecks";
 import { FingerprintCell, fingerprintNote, observedFingerprints, useModelFingerprints } from "./ModelFingerprints";
+import type { GroupRejection } from "./fingerprintRejections";
 import type { CacheTrendProps } from "./CacheTrend";
 import { QualityHistory, QualityProbability, qualityTooltip } from "./QualityHistory";
 import type { ChannelCheck } from "./ChannelChecks";
@@ -482,6 +483,7 @@ function Detail({
   check,
   trend,
   session,
+  upstreamGroup,
 }: {
   session: string;
   site?: string;
@@ -493,6 +495,7 @@ function Detail({
   balance?: SiteBalanceResult;
   imports?: SubImportsQuery;
   catalog: Channel[];
+  upstreamGroup?: GroupRejection;
 }) {
   if (!row) return null;
   const installed = imports?.data?.data.find((item) => item.source_id === row?.source_id && item.provider === row?.provider);
@@ -501,7 +504,7 @@ function Detail({
     <DetailDrawer key={rowId(row)} title={<SiteLink base={site}>{channelName(row)}</SiteLink>}
       context={[row.source_name || row.source_id, row.upstream_model && row.upstream_model !== row.model ? `${row.upstream_model} → ${row.model}` : row.model].filter(Boolean).join(" · ")}
       close={onClose} closeLabel="关闭详情"
-      actions={<><Status row={row} /><button type="button" className="button small" onClick={() => onLogs(row)}>查看相关日志</button></>}
+      actions={<><Status row={row} upstreamGroup={upstreamGroup} /><button type="button" className="button small" onClick={() => onLogs(row)}>查看相关日志</button></>}
       pages={[
         { id: "overview", label: "概览", content: <>
               <div className="detail-section">
@@ -1006,7 +1009,7 @@ export default function Dashboard({
   }, [channelView, tableRows, failureReason]);
   const candidateRows = tableRows.filter(row =>
     (!text || `${channelName(row)} ${row.provider} ${row.model} ${row.upstream_model}`.toLowerCase().includes(text)) &&
-    (!channelView || !statusFilter || (statusFilter === "eligible" ? row.eligible : !row.eligible)) &&
+    (!channelView || !statusFilter || (statusFilter === "eligible") === (row.eligible && !fingerprints.groupRejections.has(providerId(row)))) &&
     (!channelView || !failureReason || (() => {
       const failures = row.stats?.failure_reasons || {};
       if (failureReason === "unknown")
@@ -1986,9 +1989,10 @@ export default function Dashboard({
                         const control = adjustingChannels ? controls.info(row) : null;
                         const routeDisabled = !control?.ready || control.pending || control.stale;
                         const routeLabel = `${row.source_name || row.source_id || ""} ${channelName(row)} ${row.model}`.trim();
+                        const upstreamGroup = fingerprints.groupRejections.get(providerId(row));
                         return (
                           <tr key={rowId(row)} data-route-row={!routeDisabled ? rowId(row) : undefined}
-                            data-route-alert={!row.eligible || undefined} data-source-name={row.source_name}>
+                            data-route-alert={!row.eligible || !!upstreamGroup || undefined} data-source-name={row.source_name}>
                             {routeView && <td className="rank mono">
                               {String(rowRanks.get(rowId(row))).padStart(
                                 2,
@@ -2025,6 +2029,7 @@ export default function Dashboard({
                               : <ObservedDetectionRow row={row} detection={observedDetection} />)}
                             <ChannelMetricCells
                               row={row}
+                              upstreamGroup={upstreamGroup}
                               inflight={liveMap.get(rowId(row))}
                               balance={balance}
                               balanceLoading={balanceLoading}
@@ -2209,6 +2214,7 @@ export default function Dashboard({
       {detail && <PageBoundary key={rowId(detail)} onDismiss={closeDetail}><Detail
         session={baseConnection.session}
         row={detail}
+        upstreamGroup={channelView ? fingerprints.groupRejections.get(providerId(detail)) : undefined}
         site={siteFor(detail) || dashboardURL(sourceList.find((source) => source.id === detail?.source_id)?.base)}
         check={detail ? checks.results.get(providerId(detail)) : undefined}
         trend={{ connection, keyId, window, endpoint, stream, refresh }}

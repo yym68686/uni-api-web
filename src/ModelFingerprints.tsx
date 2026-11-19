@@ -11,6 +11,7 @@ import { dateTime, rate, time } from "./format";
 import { useSubImports } from "./sub2apiImports";
 import { Spinner, Tip } from "./ui";
 import { fingerprintKey, sharedFingerprintIndex } from "./fingerprintResults";
+import { fingerprintFailures, fingerprintSampleFailure, observedGroupRejections } from "./fingerprintRejections";
 export { fingerprintKey } from "./fingerprintResults";
 
 const legacyFingerprintModels = ["gpt-6-astra", "gpt-6.1-sol"];
@@ -42,7 +43,10 @@ function partialFingerprint(result?: FingerprintResult | null) {
   return result?.decision === "partial" && result.used_outputs > 0 && result.used_outputs < 3 && result.candidates?.length > 0;
 }
 function fingerprintLabel(status: string, result?: FingerprintResult | null) {
-  if (status === "error" && result?.samples?.some(sample => sample.error_code === "reference_effort_unsupported")) return "采样参数不支持";
+  if (status === "error") {
+    const failures = fingerprintFailures(result);
+    return failures.at(-1)?.label || fingerprintLabels.error;
+  }
   if (result?.decision === "not_model") return "无法判定";
   return fingerprintLabels[status] || "检测失败";
 }
@@ -102,20 +106,25 @@ export function useModelFingerprints(enabled = true) {
   ), [query.data, management.data, management.isError, imports.data, imports.isError]);
   // Older backends have no capability list and only accept the original pair.
   const supportedModels = Array.isArray(query.data?.supported_models) ? query.data.supported_models : query.data ? legacyFingerprintModels : [];
-  return { ...query, index, members, supportedModels };
+  const groupRejections = useMemo(() =>
+    observedGroupRejections(!query.isError && Array.isArray(query.data?.data) ? query.data.data : [], members),
+    [members, query.data, query.isError],
+  );
+  return { ...query, index, members, supportedModels, groupRejections };
 }
 export function FingerprintStatus({ record }: { record?: FingerprintRecord }) {
   const status = fingerprintStatus(record), partial = partialFingerprint(record?.result);
   const result = record?.state === "done" || partial ? record?.result : null;
   const probability = result && (status === "match" || status === "mismatch") ? result.probability : null;
+  const failure = [...new Set(fingerprintFailures(result).map(item => item.detail))].join("；");
   return <div className="quality-status-stack">
     <span className={`check-status ${status === "match" ? "pass" : status === "mismatch" ? "fail" : "inconclusive"}`}>
       {fingerprintBusy(record) ? <Spinner small /> : status === "match" ? <Check size={14}/> : status === "mismatch" ? <X size={14}/> : <CircleHelp size={14}/>}
       {fingerprintLabel(status, result)}
     </span>
-    {partial && result ? <Tip text={`${partialNote}${record?.message || ""}`}>
+    {partial && result ? <Tip text={`${partialNote}${failure}${record?.message || ""}`}>
       <small className="muted">暂定排名 · {result.used_outputs}/3<br/>最接近：{result.prediction_name}</small>
-    </Tip> : <Tip text={result?.decision === "not_model" ? nonModelNote : `请求类别匹配概率：${rate(probability)}。${fingerprintNote}${result?.prediction_name ? ` 最接近：${result.prediction_name}。` : ""}${record?.message || ""}`}>
+    </Tip> : <Tip text={failure || (result?.decision === "not_model" ? nonModelNote : `请求类别匹配概率：${rate(probability)}。${fingerprintNote}${result?.prediction_name ? ` 最接近：${result.prediction_name}。` : ""}${record?.message || ""}`)}>
       <small className={`quality-probability ${fingerprintProbabilityClass(probability)}`}>{rate(probability)}</small>
     </Tip>}
   </div>;
@@ -152,6 +161,7 @@ export function FingerprintCell({ entries, error, loading, supportedModels = [],
       {probability != null && <div>匹配概率：{rate(probability)}</div>}
       {result?.prediction_name && <div>最接近：{result.prediction_name}</div>}
       {message && <div>{message}</div>}
+      {[...new Set(fingerprintFailures(result).map(item => item.detail))].map(detail => <div key={detail}>{detail}</div>)}
   </>;
   if (summaries.length === 1) return <Tip text={<div>{detail(first)}</div>}>
     <span className="fingerprint-cell">{summary}</span>
@@ -226,7 +236,7 @@ export function FingerprintPanel({ targets, revisions, onlySupported }: { target
           {partial && <p className="muted">已保留 {retained} 个有效样本，{pending ? "正在补充" : "再次检测仅补充"}剩余 {3-retained} 个。</p>}
           {!retained && result.used_outputs > 0 && result.used_outputs < 3 && <p className="muted">此旧记录未保留可续采样本，下一次检测将开始可累计的新一轮。</p>}
           {result.candidates?.length > 0 && <ol>{result.candidates.map(c => <li key={c.model}>{c.display_name}{!partialFingerprint(result) && <> <span className="mono">{rate(c.probability)}</span></>}</li>)}</ol>}
-          {result.samples?.filter(s=>s.state==="error").map(s=><p key={s.request_id}>{s.message}{s.http_status ? ` · HTTP ${s.http_status}` : ""}</p>)}
+          {result.samples?.filter(s=>s.state==="error").map(s=><p key={s.request_id}>{fingerprintSampleFailure(s).detail}</p>)}
           <small className="muted">lm-detector · {result.reference_commit?.slice(0,12)}</small>
         </details>}
       </div>;

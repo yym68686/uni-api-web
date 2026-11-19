@@ -56,7 +56,8 @@ to another model do not share evidence. The management binding remains scoped to
 the authenticated owner. Imported providers are joined by exact source/provider
 and verified account/group identity from the imports endpoint; their current probe
 fingerprint comes from the effective catalog, including temporary channels. Result timestamps include milliseconds so a newer error
-can replace an older success consistently.
+can replace an older success consistently. Explicit target rejections stay with
+the channel that received them instead of replacing another alias's result.
 
 During rolling updates, the frontend disables actions the backend does not
 advertise and shows “指纹检测服务待更新” in details. Periodic reads and an explicit
@@ -92,7 +93,22 @@ diagnostic. No arbitrary error body is exposed. The UI shows “采样参数不�
 Both the direct error and the gateway's single JSON-in-`error.message` envelope
 are recognized; substring matching and recursive unwrapping are not used.
 The collector never removes the reference effort, switches protocol, or retries
-to manufacture a score. Other HTTP errors keep their existing behavior.
+to manufacture a score. A structured 403 for a deleted/disabled group, revoked
+group access or insufficient balance, a structured 404 for an unsupported
+model, HTTP 410, or the targeted gateway's explicit temporary-disable 503
+ends the round after checkpointing the failed sample. Generic 403/404/503,
+429, 502 and incomplete streams still allow the next independent challenge.
+The table and drawer expose safe reasons and HTTP status, not arbitrary provider
+messages. HTTP 410 does not prove whether the endpoint or a group was withdrawn.
+
+Observation shows **分组已停用** for an explicit upstream group deletion or
+disable only when the result matches the exact source, provider and current
+single upstream credential. It is included in the unavailable filter and
+skipped by observation batch fingerprinting, together with gateway-disabled or
+keyless rows. Individual rechecks remain available. This is an observation, not
+a gateway rule change, and it does not remove the channel. Older configured
+results can recover a safe error code from matching stored request facts
+without issuing a new request.
 
 Every attempt is checkpointed before the next request. The UI reads the latest
 ranking while collection is still running, and retains it when queued, cancelled

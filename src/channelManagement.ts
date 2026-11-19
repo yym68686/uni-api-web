@@ -74,6 +74,7 @@ export interface ManagedChannel extends InstalledChannel {
   engine: string;
   account_ids: string[];
   probe_fingerprint?: string;
+  credential_count?: number;
   // Grouping is presentation-only. Mutations must use an individual member.
   members?: ManagedChannel[];
 }

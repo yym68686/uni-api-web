@@ -15,6 +15,7 @@ type managementChannel struct {
 	Engine           string   `json:"engine"`
 	AccountIDs       []string `json:"account_ids"`
 	ProbeFingerprint string   `json:"probe_fingerprint"`
+	CredentialCount  int      `json:"credential_count,omitempty"`
 }
 
 type managementModel struct {
@@ -28,6 +29,7 @@ type managementProvider struct {
 	Base             string `json:"base"`
 	Fingerprint      string `json:"fingerprint"`
 	ProbeFingerprint string `json:"probe_fingerprint"`
+	CredentialCount  int    `json:"credential_count,omitempty"`
 }
 type managementSnapshot struct {
 	Rows      []managementModel             `json:"rows"`
@@ -35,6 +37,18 @@ type managementSnapshot struct {
 	Copies    map[string]bool               `json:"copies"`
 	CheckedAt int64                         `json:"checked_at"`
 	Identity  string                        `json:"identity"`
+}
+
+func managementProviderEvidence(src controlSource, p configuredProvider) managementProvider {
+	keys := configuredKeyHashes(p)
+	hashes, _ := json.Marshal(keys)
+	base := subBindingSite(p.Base)
+	return managementProvider{
+		Base:             base,
+		Fingerprint:      tokenHash(controlTarget(src) + "\n" + p.Provider + "\n" + base + "\n" + string(hashes)),
+		ProbeFingerprint: configuredProbeFingerprint(src, p),
+		CredentialCount:  len(keys),
+	}
 }
 
 func loadManagementSnapshot(ctx context.Context, src controlSource) (managementSnapshot, error) {
@@ -64,12 +78,7 @@ func loadManagementSnapshot(ctx context.Context, src controlSource) (managementS
 		return result, err
 	}
 	for _, p := range providers {
-		hashes, _ := json.Marshal(configuredKeyHashes(p))
-		result.Providers[p.Provider] = managementProvider{
-			Base:             subBindingSite(p.Base),
-			Fingerprint:      tokenHash(controlTarget(src) + "\n" + p.Provider + "\n" + subBindingSite(p.Base) + "\n" + string(hashes)),
-			ProbeFingerprint: configuredProbeFingerprint(src, p),
-		}
+		result.Providers[p.Provider] = managementProviderEvidence(src, p)
 	}
 	var live retainedLive
 	_ = decodeMap(controls, &live)

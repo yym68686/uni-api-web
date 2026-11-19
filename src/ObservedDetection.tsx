@@ -27,7 +27,7 @@ import { Spinner } from "./ui";
 type Target = { source_id: string; provider: string; model: string };
 type Fingerprints = Pick<
   ReturnType<typeof useModelFingerprints>,
-  "index" | "members" | "supportedModels" | "isPending" | "isError"
+  "index" | "members" | "groupRejections" | "supportedModels" | "isPending" | "isError"
 >;
 const pending = (state?: string) => state === "queued" || state === "running";
 
@@ -98,15 +98,17 @@ export function useObservedDetection(
       ? fingerprintBusy(fingerprints.index.get(fingerprintKey(target)))
       : pending(entry(target)?.state));
   const batchTargets = new Map<string, Target>();
+  let skippedDisabled = 0;
   if (additional && !detection.isPending && !detection.isError) {
     for (const row of rows) {
       const target = targetFor(row);
-      if (
-        target &&
-        !busy(target) &&
-        !detection.disabled.has(detectionKey(target))
-      )
-        batchTargets.set(fingerprintKey(target), target);
+      if (!target || busy(target) || detection.disabled.has(detectionKey(target))) continue;
+      if (project === "fingerprint" && (row.reason === "temporarily_disabled" ||
+          row.reason === "no_provider_key" || fingerprints.groupRejections.has(providerId(row)))) {
+        skippedDisabled++;
+        continue;
+      }
+      batchTargets.set(fingerprintKey(target), target);
     }
   }
   const total = project === "quality" ? qualityRows.length : batchTargets.size;
@@ -122,7 +124,7 @@ export function useObservedDetection(
           : project === "fingerprint" && total > FINGERPRINT_BATCH_LIMIT
             ? `单次最多提交 ${FINGERPRINT_BATCH_LIMIT} 项指纹检测，请缩小筛选范围。`
             : !total
-              ? "当前筛选没有可发起此项检测的渠道。"
+              ? skippedDisabled ? "当前筛选中的停用或无密钥渠道已跳过，可逐个手动复检。" : "当前筛选没有可发起此项检测的渠道。"
               : "";
 
   async function queue(targets: Target[], manual = false) {
@@ -179,6 +181,7 @@ export function useObservedDetection(
     expanded,
     total,
     batchIssue,
+    skippedDisabled,
     notice,
     active: batchActive,
     select(next: typeof project) {
@@ -277,6 +280,9 @@ export function ObservedDetectionActions({
           </button>
         )}
       </DetectionAction>
+      {detection.expanded && detection.skippedDisabled > 0 && (
+        <small className="muted">已跳过 {detection.skippedDisabled} 个停用或无密钥项</small>
+      )}
       {detection.expanded && (
         <button
           className="button small"
