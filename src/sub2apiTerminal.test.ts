@@ -18,5 +18,5 @@ it.each(["missing", "missing_output"] as const)("keeps %s responses selectable a
 
 it("does not count queued reruns as old failures or untested models",()=>{
  const make=(state:string,status?:string)=>({model:state,state,message:"",result:status?{availability:{status}}:null}) as SubModelCheck;
- expect(availabilityCounts([make("queued","error"),make("running"),make("interrupted","success"),make("done","error"),make("done","success"),make("idle"),make("error")])).toEqual({success:1,warning:0,failed:2,untested:1,pending:2,interrupted:1});
+ expect(availabilityCounts([make("queued","error"),make("running"),make("interrupted","success"),make("done","error"),make("done","success"),make("idle"),make("error")])).toEqual({success:1,warning:0,failed:2,untested:1,pending:2,interrupted:1,rejected:0,skipped:0});
 });
