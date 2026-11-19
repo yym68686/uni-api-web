@@ -187,10 +187,6 @@ export async function readManagementPage(
             rememberManagementMetadata(owner, page);
             return page;
           }
-        } catch {
-          // An early read may fail while authentication/deployment is still
-          // settling. Retry through the regular authenticated path.
-          signal.throwIfAborted();
         } finally {
           signal.removeEventListener("abort", abort);
         }
