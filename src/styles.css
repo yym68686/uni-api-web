@@ -2825,6 +2825,8 @@ nav > button.active > svg {
 .sub-check-details-table table .probe-curl-action { display: flex; margin: 8px 0 0; }
 
 .fingerprint-cell { display:inline-flex;align-items:center;gap:6px;white-space:nowrap; }
+.fingerprint-details-trigger { padding:3px 5px; border:0; border-radius:5px; background:transparent; color:var(--muted); font:inherit; cursor:pointer; }
+.fingerprint-details-trigger:hover { background:var(--subtle); color:var(--ink); }
 .table-diagnostic-tip { display:grid;gap:8px;max-height:50vh;overflow-wrap:anywhere;overflow:auto; }
 .fingerprint-panel { border-top: 1px solid var(--border); padding: 20px 0; }
 .fingerprint-panel h3, .fingerprint-heading { display: flex; align-items: center; gap: 10px; }

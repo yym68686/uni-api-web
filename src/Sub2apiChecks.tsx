@@ -106,7 +106,7 @@ const managementPresets = {
 } satisfies Record<string, readonly ManagementColumn[]>;
 const managementColumnLabels = Object.fromEntries(managementColumnChoices.map(({id,label}) => [id,label])) as Record<ManagementColumn, string>;
 const managementColumnHelp: Partial<Record<ManagementColumn, string>> = {
-  fingerprint: fingerprintNote,
+  fingerprint: `点击多模型的指纹状态可查看完整列表。${fingerprintNote}`,
   match: "检测请求与实际返回的模型名完全一致才算匹配。",
   price: "比较倍率前账单单价与价格设置。缺少账单或 Token 样本时不判为正常。",
   "tool-use": toolUseDescription,
@@ -1902,7 +1902,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                               : <GroupModelMatch checks={overviewChecks} scope={scopeNote} />
                           );
                               case "price": return t.list_summary ? <span className="muted">读取中…</span> : selected ? <PriceStatus check={selected} prices={prices.data?.data} /> : <GroupPriceStatus checks={checks} prices={prices.data?.data} />;
-                              case "fingerprint": return <FingerprintCell entries={displayedPage?.context.fingerprints[managementRow.id] || []} supportedModels={displayedPage?.context.fingerprint_models}/>;
+                              case "fingerprint": return <FingerprintCell entries={displayedPage?.context.fingerprints[managementRow.id] || []} supportedModels={displayedPage?.context.fingerprint_models} channel={[account.name, t.name].filter(Boolean).join(" / ")}/>;
                               case "quality": {
                                 const result = groupQualityResult(t);
                                 return <span className="management-metric"><Verdict result={result} history={t.history} /><QualityProbability history={t.history} checkedAt={result?.checked_at} /></span>;

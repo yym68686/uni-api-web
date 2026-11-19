@@ -53,7 +53,7 @@ export function FingerprintSettings() {
 
   return <section className="fingerprint-settings" aria-labelledby="fingerprint-settings-title">
     <h3 id="fingerprint-settings-title">自动指纹检测模型</h3>
-    <p className="muted">可用性检测成功后，仅对勾选并保存的模型自动检测指纹。不影响手动指纹检测、可用性或降智检测。</p>
+    <p className="muted">勾选并保存后，下次可用性检测成功时自动检测该模型的指纹；保存不会立即补跑。不影响手动指纹检测、可用性或降智检测。</p>
     <p className="muted">服务会从 lm-detector 定期更新已验证的支持列表。新增模型默认不勾选，更新目录不会发起检测。</p>
     {query.isPending && <p role="status">正在读取支持列表…</p>}
     {query.isError && <p role="alert" className="error-banner">指纹设置读取失败，已保存设置未改变。{query.error.message}</p>}

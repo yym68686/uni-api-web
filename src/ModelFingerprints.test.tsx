@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as Tooltip from "@radix-ui/react-tooltip";
@@ -33,11 +33,10 @@ it("shows requested-class probability below mismatch with the same quality color
  expect(screen.getByText("检测失败")).toBeInTheDocument();expect(screen.getByText("—")).toHaveClass("quality-unknown");
  expect(fingerprintProbabilityClass(1)).toBe("quality-perfect");expect(fingerprintProbabilityClass(.9)).toBe("quality-partial");expect(fingerprintProbabilityClass(.899)).toBe("quality-poor");
 });
-it("keeps provisional fingerprint details out of the table layout even when other models are untested", async () => {
+it("keeps the single-model provisional fingerprint details in a compact tooltip", async () => {
  const partial: FingerprintRecord = {...record, result: {...record.result!, status:"insufficient", decision:"partial", used_outputs:1, probability:null,
   candidates:[{model:"claude-haiku-4.5",display_name:"Claude Haiku 4.5",probability:null}]}};
- const another = {account_id:"one", group_id:1, model:"gemini-4-carbon"};
- mount(<FingerprintCell entries={[{target:partial, record:partial},{target:another}]} supportedModels={[partial.model, another.model]}/>);
+ mount(<FingerprintCell entries={[{target:partial, record:partial}]} supportedModels={[partial.model]}/>);
  const trigger = screen.getByText("样本不足").closest(".tip-target")!;
  expect(trigger).toHaveTextContent(/^样本不足$/);
  expect(screen.queryByText(/暂定排名|最接近/)).not.toBeInTheDocument();
@@ -45,7 +44,44 @@ it("keeps provisional fingerprint details out of the table layout even when othe
  const details = await screen.findByRole("tooltip");
  expect(details).toHaveTextContent("暂定排名 · 1/3");
  expect(details).toHaveTextContent("最接近：Claude Haiku 4.5");
- expect(details).toHaveTextContent("gemini-4-carbon · 未检测");
+});
+it("opens the full multi-model list, putting late-catalog results first without starting detection or opening the channel row", async () => {
+ const channel = "tokunexai / gpt-pro-速刷";
+ const model = "gpt-6.2-astra";
+ const untested = ["deepseek-v4.1-flash-1017", "gemini-3.1-pro", "gemini-3.8-flash", "gemini-4-argon", "gemini-4-carbon", "gemini-4-hydrogen", "gemini-4-neon", "gpt-5.4", "gpt-5.5", "gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-6-sol", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6.2-sol", "minimax-m3.1-flash"];
+ const models = [...untested, record.model, model].sort();
+ const astra: FingerprintRecord = {...record, model, result: {...record.result!, model, status:"match", probability:.98, prediction:model, prediction_name:model, expected_class:model, checked_at:60}};
+ const onRowClick = vi.fn((event: React.MouseEvent) => {
+  if (!(event.target as HTMLElement).closest("button, a, input, select")) openChannel();
+ });
+ const openChannel = vi.fn();
+ const fetcher = vi.fn();
+ vi.stubGlobal("fetch", fetcher);
+ mount(<table><tbody><tr onClick={onRowClick}><td><FingerprintCell channel={channel} supportedModels={models}
+  entries={models.map(name => ({target:{account_id:"one",group_id:1,model:name},record:name === model ? astra : name === record.model ? record : undefined}))}/></td></tr></tbody></table>);
+ const trigger = screen.getByRole("button", {name:/有不匹配.*查看 tokunexai \/ gpt-pro-速刷 的模型指纹/});
+ expect(screen.queryByText(`${model} · 匹配`)).not.toBeInTheDocument();
+ const user = userEvent.setup();
+ await user.tab();
+ expect(trigger).toHaveFocus();
+ await user.keyboard("{Enter}");
+ const dialog = await screen.findByRole("dialog", {name:"模型指纹详情"});
+ expect(dialog).toHaveAccessibleDescription(channel);
+ const list = within(dialog).getByRole("region", {name:"模型指纹列表"});
+ const entries = within(list).getAllByRole("listitem");
+ expect(entries).toHaveLength(models.length);
+ expect(entries[0]).toHaveTextContent(`${model} · 匹配`);
+ expect(entries[1]).toHaveTextContent("gpt-6-astra · 不匹配");
+ expect(entries[0]).toHaveTextContent("匹配概率：98.0%");
+ expect(entries[0]).toHaveTextContent("指纹检测时间");
+ expect(entries[2]).toHaveTextContent("deepseek-v4.1-flash-1017 · 未检测");
+ expect(entries.at(-1)).toHaveTextContent("minimax-m3.1-flash · 未检测");
+ await user.click(within(list).getByText(`${model} · 匹配`));
+ expect(openChannel).not.toHaveBeenCalled();
+ await user.keyboard("{Escape}");
+ await waitFor(() => expect(trigger).toHaveFocus());
+ expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+ expect(fetcher).not.toHaveBeenCalled();
 });
 it("only selects the supported models and fences configured stale evidence",()=>{
  const row={account:{id:""},target:{group_id:0},configured:{source_id:"fugue",provider:"native",models:["gpt-6-astra"],probe_fingerprint:"new"}} as ManagementRow;

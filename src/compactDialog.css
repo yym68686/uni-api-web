@@ -149,6 +149,16 @@
   overflow-wrap: anywhere;
 }
 .dialog-preview-list small { color: var(--muted); }
+.fingerprint-details-dialog { --dialog-width: 58rem; }
+.fingerprint-details-scroll { flex: 0 1 auto; overflow-y: auto; }
+.fingerprint-details-scroll h3 { margin: 0; font-size: 13px; }
+.fingerprint-details-scroll section + section { margin-top: 16px; }
+.fingerprint-details-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+  gap: 0 14px;
+}
+.fingerprint-details-grid > li { min-width: 0; align-content: start; }
 .source-item .source-identity :is(strong, small) { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sources-empty { margin: 0; padding: 12px 20px; color: var(--muted); font-size: 12px; }
 .site-settings-dialog, .compact-dialog.sub-model-settings { --dialog-width: 39rem; }

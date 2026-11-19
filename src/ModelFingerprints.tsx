@@ -1,11 +1,13 @@
 import { useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, CircleHelp, Fingerprint, X } from "lucide-react";
+import * as Dialog from "@radix-ui/react-dialog";
+import { Check, ChevronDown, CircleHelp, Fingerprint, X } from "lucide-react";
 import { ApiError, controlRequest } from "./api";
 import { channelMembers, useChannelManagement } from "./channelManagement";
 import type { ManagementRow } from "./channelManagement";
+import { CompactDialogHeader } from "./CompactDialog";
 import type { Channel } from "./types";
-import { rate, time } from "./format";
+import { dateTime, rate, time } from "./format";
 import { useSubImports } from "./sub2apiImports";
 import { Spinner, Tip } from "./ui";
 import { fingerprintKey, sharedFingerprintIndex } from "./fingerprintResults";
@@ -118,7 +120,7 @@ export function FingerprintStatus({ record }: { record?: FingerprintRecord }) {
     </Tip>}
   </div>;
 }
-export function FingerprintCell({ entries, error, loading, supportedModels = [] }: { entries: readonly {target: FingerprintTarget; record?: FingerprintRecord}[]; error?: Error | null; loading?: boolean; supportedModels?: string[] }) {
+export function FingerprintCell({ entries, error, loading, supportedModels = [], channel }: { entries: readonly {target: FingerprintTarget; record?: FingerprintRecord}[]; error?: Error | null; loading?: boolean; supportedModels?: string[]; channel?: string }) {
   if (entries.length && error) return <Tip text={fingerprintReadMessage(error)}><span className="muted">读取失败</span></Tip>;
   if (entries.length && loading) return <span className="muted">读取中…</span>;
   if (!entries.length) return <span className="muted">—</span>;
@@ -129,7 +131,8 @@ export function FingerprintCell({ entries, error, loading, supportedModels = [] 
     const probability = result && (status === "match" || status === "mismatch") ? result.probability : null;
     const unsupported = !record && !supportedModels.includes(target.model);
     const label = unsupported ? "待更新" : fingerprintLabel(status, result);
-    return {target, status, label, probability, partial, result, recorded: !!record, message:unsupported ? "指纹检测服务待更新" : record?.message};
+    const updatedAt = record?.updated_at_ms ?? (result?.checked_at || 0) * 1000;
+    return {target, status, label, probability, partial, result, updatedAt, recorded: !!record, message:unsupported ? "指纹检测服务待更新" : record?.message};
   });
   const recorded = summaries.filter(item => item.recorded);
   // The all-model view includes untested candidates; those aren't fingerprint results.
@@ -138,21 +141,50 @@ export function FingerprintCell({ entries, error, loading, supportedModels = [] 
   const mismatch = visible.some(item => item.status === "mismatch");
   const label = visible.every(item => item.label === first.label) ? first.label : mismatch ? "有不匹配" : "多种状态";
   const probability = visible.length === 1 ? first.probability : null;
-  return <Tip text={<div className="table-diagnostic-tip">
-    {summaries.map(({target, label, probability, partial, result, message}) => <div key={fingerprintKey(target)}>
+  const summary = <>
+    <span className={label === "匹配" ? "check-status pass" : mismatch ? "check-status fail" : "muted"}>{label}</span>
+    {probability != null && <small className={`quality-probability ${fingerprintProbabilityClass(probability)}`}>{rate(probability)}</small>}
+    {recorded.length > 1 && <small className="muted" aria-label={`${recorded.length} 个模型有检测记录`}>{recorded.length}</small>}
+  </>;
+  const detail = ({target, label, probability, partial, result, message}: typeof first) => <>
       <strong>{target.model} · {label}</strong>
       {partial && result && <div>暂定排名 · {result.used_outputs}/3</div>}
       {probability != null && <div>匹配概率：{rate(probability)}</div>}
       {result?.prediction_name && <div>最接近：{result.prediction_name}</div>}
       {message && <div>{message}</div>}
-    </div>)}
-  </div>}>
-    <span className="fingerprint-cell">
-      <span className={label === "匹配" ? "check-status pass" : mismatch ? "check-status fail" : "muted"}>{label}</span>
-      {probability != null && <small className={`quality-probability ${fingerprintProbabilityClass(probability)}`}>{rate(probability)}</small>}
-      {recorded.length > 1 && <small className="muted" aria-label={`${recorded.length} 个模型有检测记录`}>{recorded.length}</small>}
-    </span>
+  </>;
+  if (summaries.length === 1) return <Tip text={<div>{detail(first)}</div>}>
+    <span className="fingerprint-cell">{summary}</span>
   </Tip>;
+  const unrecorded = summaries.filter(item => !item.recorded);
+  const recordedRecentFirst = recorded.sort((a, b) =>
+    b.updatedAt - a.updatedAt ||
+    a.target.model.localeCompare(b.target.model),
+  );
+  return <Dialog.Root>
+    <Dialog.Trigger type="button" className="fingerprint-cell fingerprint-details-trigger">
+      {summary}<ChevronDown size={13} aria-hidden="true" /><span className="sr-only">查看{channel ? ` ${channel} 的` : ""}模型指纹</span>
+    </Dialog.Trigger>
+    <Dialog.Portal>
+      <Dialog.Overlay className="dialog-overlay" onClick={event => event.stopPropagation()} />
+      <Dialog.Content className="guide-dialog compact-dialog fingerprint-details-dialog" onClick={event => event.stopPropagation()}>
+        <CompactDialogHeader context={channel || `共 ${summaries.length} 个模型`}>模型指纹详情</CompactDialogHeader>
+        <div className="compact-dialog-scroll fingerprint-details-scroll" tabIndex={0} role="region" aria-label="模型指纹列表">
+          {recorded.length > 0 && <section>
+            <h3>有检测记录 · {recorded.length}</h3>
+            <ul className="dialog-preview-list fingerprint-details-grid">{recordedRecentFirst.map(item => <li key={fingerprintKey(item.target)}>
+              {detail(item)}
+              {!!item.result?.checked_at && <small>指纹检测时间：{dateTime(item.result.checked_at)}</small>}
+            </li>)}</ul>
+          </section>}
+          {unrecorded.length > 0 && <section>
+            <h3>无检测记录 · {unrecorded.length}</h3>
+            <ul className="dialog-preview-list fingerprint-details-grid">{unrecorded.map(item => <li key={fingerprintKey(item.target)}>{detail(item)}</li>)}</ul>
+          </section>}
+        </div>
+      </Dialog.Content>
+    </Dialog.Portal>
+  </Dialog.Root>;
 }
 export function FingerprintPanel({ targets, revisions, onlySupported }: { targets: FingerprintTarget[]; revisions?: Record<string,string>; onlySupported?: boolean }) {
   const query = useModelFingerprints(), client = useQueryClient();

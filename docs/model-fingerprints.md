@@ -2,6 +2,10 @@
 
 Channel management adds a **模型指纹** column and filter. The live API advertises
 supported request models in `GET /v1/model-fingerprints` (`supported_models`).
+Click a multi-model cell to show every model. The dialog expands to fit its
+content and uses multiple columns when the screen is wide enough; it scrolls
+only if the list exceeds the available height. Models with detection records
+appear first, ordered by their latest update time.
 The bundled and dynamically verified catalogs include these references:
 
 | Requested model | Upstream reference class |
@@ -161,8 +165,8 @@ queue a fingerprint after a successful channel availability check or site
 synchronization. The selection is saved per console user in PostgreSQL. Before
 a selection is saved, the pre-existing models keep their previous automatic
 behavior; newly supported models require opt-in. An empty saved list disables
-automatic fingerprinting. Manual fingerprint checks and jobs already submitted
-are unaffected.
+automatic fingerprinting. Saving settings does not start new probes or backfill
+old checks. Manual fingerprint checks and jobs already submitted are unaffected.
 
 The analytics service checks lm-detector at startup and every 15 minutes
 (`FINGERPRINT_CATALOG_SYNC=1`). It reads data at an immutable upstream commit
