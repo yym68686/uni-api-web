@@ -8,6 +8,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { Plus, X } from "lucide-react";
 import { controlRequest } from "./api";
 import { Spinner } from "./ui";
+import { LoadingIndicator } from "./LoadingIndicator";
 import { ChannelBatchApply } from "./ChannelBatchApply";
 import type { BatchPart, BatchDraft, BatchScope } from "./channelBatch";
 import {
@@ -65,9 +66,7 @@ export function ChannelRoutes({
   return (
     <>
       {query.isPending && (
-        <p role="status">
-          <Spinner small /> 正在读取路由位置…
-        </p>
+        <LoadingIndicator size={query.data ? "compact" : "panel"} label="读取路由位置" />
       )}
       {(query.error || !!query.data?.unavailable_keys?.length) && (
         <div className="error-banner" role="alert">
@@ -524,7 +523,7 @@ export function ConfiguredChannelDialog({
                   <h3>
                     {counts
                       ? `已添加到 ${counts.partial ? "至少 " : ""}${counts.count} 个 API key`
-                      : "正在读取接入状态…"}
+                      : "已保存接入"}
                   </h3>
                   <ChannelBatchApply remove draft={()=>batchDraft("delete")} disabled={busy||!counts?.count||counts.partial}
                     onApplied={()=>{setSuccess("批量删除结果已更新，请核对各来源接入状态。");if(initialEdit)close();}}/>
@@ -590,7 +589,7 @@ export function ConfiguredChannelDialog({
                     ? "编辑此 API key 的模型"
                     : "添加模型到 API key"}
                 </h3>
-                {toolDefaultsPending && <p role="status"><Spinner small /> 正在读取各模型的可用性和 Tool use 检测结果…</p>}
+                {toolDefaultsPending && <LoadingIndicator size="compact" label="读取各模型检测结果" />}
                 {toolDefaultsError && <div className="error-banner" role="alert">模型检测记录读取失败。<button type="button" className="button small" onClick={()=>{void toolChecks.refetch();void accounts.refetch();}}>重试</button></div>}
                 <div className="route-destination-grid">
                   <label className="sub-import-field">
@@ -696,7 +695,7 @@ export function ConfiguredChannelDialog({
                     </select>
                   </label>
                 </div>
-                {!!key && options.isFetching && <p role="status"><Spinner small /> 正在读取所选 API key 的路由位置…</p>}
+                {!!key && options.isFetching && <LoadingIndicator size="compact" label="读取所选 API key 的路由位置" />}
                 <ChannelModelSelection
                   models={modelOptions}
                   canSelect={canSelectModel}

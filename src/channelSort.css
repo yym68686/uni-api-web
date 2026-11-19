@@ -255,7 +255,7 @@
   margin: 6px 0;
   line-height: 1.6;
 }
-.channel-sort-feedback [role="status"] {
+.channel-sort-feedback p[role="status"] {
   display: flex;
   align-items: center;
   gap: 6px;

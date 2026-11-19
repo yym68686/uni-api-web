@@ -118,11 +118,11 @@ it("automatically recovers cache history after initialization without displaying
   const app = setup(<CacheTrend row={row} connection={{ base: "", key: "", session: "starting", account: true }} keyId="" window="1h" endpoint="all" stream="all" refresh={0} />);
   try {
     await act(async () => { await vi.advanceTimersByTimeAsync(50); });
-    expect(screen.getByRole("status")).toHaveTextContent("历史数据正在初始化");
+    expect(screen.getByRole("status", {name:"加载缓存历史"}).textContent).toBe("");
     expect(screen.queryByText("此时间范围暂无缓存用量数据。")).not.toBeInTheDocument();
     await act(async () => { await vi.advanceTimersByTimeAsync(5050); });
     expect(screen.getByText("所选范围缓存率")).toBeVisible();
-    expect(screen.queryByText(/历史数据正在初始化/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("status", {name:"加载缓存历史"})).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(2);
     await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
     expect(fetchMock).toHaveBeenCalledTimes(2);

@@ -10,6 +10,7 @@ import type { Channel } from "./types";
 import { rate, time } from "./format";
 import { useSubImports } from "./sub2apiImports";
 import { Spinner, Tip } from "./ui";
+import { LoadingIndicator } from "./LoadingIndicator";
 import { fingerprintKey, sharedFingerprintIndex } from "./fingerprintResults";
 import { fingerprintFailures, fingerprintSampleFailure, observedGroupRejections } from "./fingerprintRejections";
 import referenceModels from "../analytics-api/fingerprint/models.json";
@@ -174,7 +175,7 @@ export function FingerprintStatus({ record }: { record?: FingerprintRecord }) {
 }
 export function FingerprintCell({ entries, error, loading, supportedModels = [], channel }: { entries: readonly {target: FingerprintTarget; record?: FingerprintRecord}[]; error?: Error | null; loading?: boolean; supportedModels?: string[]; channel?: string }) {
   if (entries.length && error) return <Tip text={fingerprintReadMessage(error)}><span className="muted">读取失败</span></Tip>;
-  if (entries.length && loading) return <span className="muted">读取中…</span>;
+  if (entries.length && loading) return <LoadingIndicator size="inline" label="读取模型指纹" />;
   if (!entries.length) return <span className="muted">—</span>;
   const summaries = entries.map(({target, record}) => {
     const presentation = fingerprintPresentation(record, !record && !supportedModels.includes(target.model));

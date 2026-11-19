@@ -33,16 +33,7 @@ export function StartupScreen({ onRetry }: { onRetry?: () => void }) {
                 重试
               </button>
             </div>
-          ) : (
-            <>
-              <span className="sr-only" role="status">
-                正在恢复会话…
-              </span>
-              <div aria-hidden="true" className="startup-content">
-                <PageLoading view={view} />
-              </div>
-            </>
-          )}
+          ) : <PageLoading view={view} label="正在恢复会话" />}
         </main>
       </div>
     </div>

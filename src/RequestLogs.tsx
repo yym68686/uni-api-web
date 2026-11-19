@@ -709,7 +709,7 @@ export function RequestLogsPage({
         </div>
       </div>
       {query.isPending ? (
-        <TableLoading kind="requests" rows={8} />
+        <TableLoading kind="requests" />
       ) : !data?.data.length ? (
         <div className="request-log-empty">
           <Search size={26} />

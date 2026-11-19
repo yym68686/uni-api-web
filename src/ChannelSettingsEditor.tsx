@@ -1,4 +1,5 @@
 import { DetailLoading } from "./PageLoading";
+import { LoadingIndicator } from "./LoadingIndicator";
 import { ChannelProtocolRepair } from "./ChannelProtocolRepair";
 import { useEffect, useState, useRef, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -1537,7 +1538,7 @@ export function Editor({
           {tab === "变更记录" && (
             <>
               {audit.isPending ? (
-                <Spinner />
+                <LoadingIndicator label="读取变更记录" />
               ) : audit.isError ? (
                 <p role="alert">审计读取失败</p>
               ) : (

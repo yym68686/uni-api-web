@@ -4,6 +4,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import { controlRequest } from "./api";
 import { Spinner } from "./ui";
+import { LoadingIndicator } from "./LoadingIndicator";
 import type { ChannelRoute } from "./channelRouteData";
 
 interface CatalogRow {
@@ -138,10 +139,7 @@ export function ChannelRouteEditor({
             <X size={18} />
           </button>
           {query.isFetching && (
-            <p role="status">
-              <Spinner small />
-              正在读取当前路由…
-            </p>
+            <LoadingIndicator size={query.data ? "compact" : "panel"} label="读取当前路由" />
           )}
           {(error || query.error) && (
             <div className="error-banner" role="alert">

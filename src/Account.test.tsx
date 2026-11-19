@@ -159,14 +159,13 @@ it.each([
     });
     vi.stubGlobal("fetch", fetchMock);
     const app = mount();
-    expect(screen.getByRole("status")).toHaveTextContent("正在恢复会话");
+    expect(screen.getByRole("status", { name: "正在恢复会话" }).textContent).toBe("");
     expect(document.documentElement).toHaveAttribute("data-theme", theme);
     expect(
       app.container.querySelector('.startup-screen .sidebar [aria-current="page"]'),
     ).toHaveTextContent(label);
-    expect(app.container.querySelector(".startup-screen .workspace .startup-content")).toBeInTheDocument();
     expect(
-      app.container.querySelector(".startup-screen .workspace .loading-bone"),
+      app.container.querySelector(".startup-screen .workspace > .page-loading > .spinner"),
     ).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toContain("/auth/me");

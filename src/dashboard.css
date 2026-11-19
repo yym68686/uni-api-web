@@ -90,9 +90,6 @@
 .wallet-summary ul { display:grid; gap:8px; padding:0; list-style:none; }
 .wallet-summary li { display:flex; align-items:center; flex-wrap:wrap; gap:10px; font-size:.83rem; }
 .balance-recharge-link { margin-top:6px; }
-.balance-dialog-loading { position:fixed; bottom:18px; right:18px; background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:10px; }
-.observation-placeholder td { height:52px; }
-.observation-placeholder .loading-bone { max-width:100%; }
 @media (max-width:780px) {
   .workspace-summary-loading, .workspace-summary:not(.expanded) { display:none; }
   .workspace-summary-toggle { display:inline-flex; margin-bottom:.5rem; }

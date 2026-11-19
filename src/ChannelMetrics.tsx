@@ -6,7 +6,8 @@ import { LatencyBadge } from "./LatencyBadge";
 import { CircleHelp } from "lucide-react";
 import type { Channel, Distribution, SiteWallet } from "./types";
 import type { SiteBalanceResult } from "./ChannelAccountBalances";
-import { Tip, Spinner } from "./ui";
+import { Tip } from "./ui";
+import { LoadingIndicator } from "./LoadingIndicator";
 import {
   hasWalletAmount,
   walletStatusLabel,
@@ -41,7 +42,7 @@ export function BalanceValue({
 }) {
   if (!balance?.length) {
     return loading
-      ? <span className="loading-text"><Spinner small />查询中</span>
+      ? <LoadingIndicator size="inline" label="查询余额" />
       : <span className="muted">站点账号未核验</span>;
   }
   function walletValue(wallet: SiteWallet) {
@@ -329,7 +330,7 @@ export function ChannelMetricCells({
             <span className="muted">按日</span>
           </Tip>
         ) : historicalCost?.pending ? (
-          <span className="muted">查询中</span>
+          <LoadingIndicator size="inline" label="查询历史消费" />
         ) : historicalCost?.amount == null ? (
           <span className="muted">—</span>
         ) : (

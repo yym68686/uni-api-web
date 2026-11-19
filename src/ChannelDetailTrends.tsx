@@ -5,7 +5,6 @@ import { useMemo, useState } from "react";
 import { AnalyticsInitializingError } from "./api";
 import { ranges } from "./analytics";
 import { ms, rate } from "./format";
-import { Spinner } from "./ui";
 import { useChannelTimeseries } from "./channelTimeseries";
 import type { ChannelTimeseriesProps } from "./channelTimeseries";
 import type { Channel } from "./types";
@@ -237,12 +236,8 @@ export function ChannelDetailTrends(props: ChannelTimeseriesProps) {
       <p className="muted">
         当前来源、渠道与模型 · 跟随 API key、时间、端点和流式筛选
       </p>
-      {query.isPending ? (
+      {query.isPending || query.error instanceof AnalyticsInitializingError ? (
         <DetailLoading kind="chart" label="渠道趋势" />
-      ) : query.error instanceof AnalyticsInitializingError ? (
-        <p role="status">
-          <Spinner small /> {query.error.message}
-        </p>
       ) : query.isError ? (
         <p role="alert">
           趋势读取失败{" "}

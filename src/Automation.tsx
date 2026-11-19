@@ -938,7 +938,7 @@ export function Automation({
             </button>
           )}
         </div>
-        {auditLoading && !audit.length ? <TableLoading kind="history" rows={4} /> : audit.length ? (
+        {auditLoading && !audit.length ? <TableLoading kind="history" /> : audit.length ? (
           <>
             <div className="automation-audit-list">
               {audit.map((a) => (

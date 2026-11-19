@@ -23,6 +23,7 @@ import type { RouteSortPlan, RouteSorting } from "./routeSorting";
 import { RouteSortReceipt } from "./RouteSortReceipt";
 import type { Channel } from "./types";
 import { Spinner } from "./ui";
+import { LoadingIndicator } from "./LoadingIndicator";
 import "./channelSort.css";
 
 export function ChannelSortDialog({
@@ -569,10 +570,7 @@ export function ChannelSortDialog({
             </div>
             <div className="channel-sort-feedback" aria-live="polite">
               {loading && (
-                <p role="status">
-                  <Spinner small />
-                  正在核对路由…
-                </p>
+                <LoadingIndicator size="compact" label="核对路由" />
               )}
               {preview && !currentPreview && (
                 <p role="status">规则已更改，请重新预览</p>

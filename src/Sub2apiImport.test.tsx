@@ -159,7 +159,7 @@ it("waits for complete group receipts before initializing import defaults", asyn
     {model:"gpt-5.5",input:1,output:2,verified:true},
     {model:"gpt-6-sol",input:1,output:2,verified:true},
   ] as ModelPrice[]);
-  await screen.findByText(/正在读取完整模型检测结果/);
+  expect((await screen.findByRole("status", {name:"读取完整模型检测结果"})).textContent).toBe("");
   expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
   expect(screen.queryByRole("button",{name:"添加到渠道"})).not.toBeInTheDocument();
   const models = ["gpt-5.5","gpt-6-sol"].map((model,index)=>({model,state:"done",message:"",result:{model,checked_at:1,verdict:"pass",

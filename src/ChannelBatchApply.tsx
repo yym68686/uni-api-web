@@ -3,6 +3,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { useQueryClient } from "@tanstack/react-query";
 import { Layers, Trash2, X } from "lucide-react";
 import { Spinner } from "./ui";
+import { LoadingIndicator } from "./LoadingIndicator";
 import {
   prepareChannelBatch,
   applyChannelBatch,
@@ -205,9 +206,7 @@ function BatchDialog({
         </header>
         <div className="route-dialog-body">
           {loading && (
-            <p role="status">
-              <Spinner small /> 正在读取全部来源和已保存接入…
-            </p>
+            <LoadingIndicator size={plan ? "compact" : "panel"} label="读取全部来源和已保存接入" />
           )}
           {error && (
             <div role="alert" className="error-banner">

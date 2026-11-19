@@ -10,6 +10,7 @@ import { useRouteKeyRequestStats } from "./keyRequestStats";
 import { ChannelImportKeyFeedback } from "./ChannelImportKeyFeedback";
 import { channelEngineLabel, channelProtocols } from "./channelProtocol";
 import { Spinner } from "./ui";
+import { LoadingIndicator } from "./LoadingIndicator";
 import { CompactDialogHeader } from "./CompactDialog";
 import { RouteWorkspaceLoading } from "./RouteWorkspaceLoading";
 import { AccountForm } from "./SiteAccountForm";
@@ -87,7 +88,7 @@ export function Sub2apiImport(props: Parameters<typeof Sub2apiImportForm>[0]) {
   if (complete.data && !complete.isFetching && !complete.isError)
     return <Sub2apiImportForm {...props} target={complete.data}/>;
   return <RouteWorkspaceLoading context={`${account.name} · ${target.name}`} close={close} nested={props.nested}
-    label="正在读取完整模型检测结果…" error={complete.error?.message} retry={() => void complete.refetch()} />;
+    label="读取完整模型检测结果" error={complete.error?.message} retry={() => void complete.refetch()} />;
 }
 
 function Sub2apiImportForm({
@@ -734,7 +735,7 @@ function Sub2apiImportForm({
             </button>
           </nav>
           <div className="compact-dialog-scroll route-import-body">
-            {!showForm && imports.isPending && <p role="status"><Spinner small /> 读取接入记录…</p>}
+            {!showForm && imports.isPending && <LoadingIndicator className="route-import-loading" label="读取接入记录" />}
             {imports.error && (
               <div role="alert" className="error-banner">
                 {imports.error.message}
@@ -747,7 +748,7 @@ function Sub2apiImportForm({
                 </button>
               </div>
             )}
-            {!showForm && (
+            {!showForm && !imports.isPending && (
               <>
                 <div className="route-section-heading">
                   <h3>已保存接入</h3>
@@ -819,10 +820,7 @@ function Sub2apiImportForm({
                   </label>
                 </div>
                 {sourceRoutes?.isPending && (
-                  <p role="status">
-                    <Spinner small />
-                    正在读取路由位置…
-                  </p>
+                  <LoadingIndicator size="compact" label="读取路由位置" />
                 )}
                 {(sourceRoutes?.error ||
                   !!sourceRoutes?.data?.unavailable_keys?.length) && (
@@ -1039,7 +1037,10 @@ function Sub2apiImportForm({
                 )}
               </div>
             )}
-            {showForm && !editing && importBlocked && (
+            {showForm && !editing && importBlocked && !importStatus.data && !importStatus.isError && (
+              <LoadingIndicator size="compact" label="核对账号任务状态" />
+            )}
+            {showForm && !editing && importBlocked && (importStatus.data || importStatus.isError) && (
               <div
                 role="status"
                 aria-label="账号任务状态"
@@ -1047,7 +1048,7 @@ function Sub2apiImportForm({
               >
                 {importStatus.isError
                   ? "暂时无法核对账号任务状态。"
-                  : importStatus.data?.message || "正在核对账号任务状态…"}
+                  : importStatus.data?.message || "账号任务进行中，完成后可添加渠道。"}
                 {importStatus.isError && (
                   <button
                     type="button"

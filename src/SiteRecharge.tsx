@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { controlRequest } from "./api";
+import { LoadingIndicator } from "./LoadingIndicator";
 import type { SubAccount } from "./Sub2apiChecks";
 import "./siteRecharge.css";
 
@@ -305,20 +306,20 @@ export function SiteRecharge({ account, onBusyChange }: { account: SubAccount; o
     setWallet(status);
     if (action === "bind") setCode("");
   }
-  if (!config || !settings)
+  if (!config || !settings) {
+    const readError = settingsError || error;
     return (
       <section className="recharge-panel">
         <h3>充值</h3>
-        <p role={settingsError || error ? "alert" : "status"}>{settingsError || error || "读取充值设置…"}</p>
-        <button
-          className="button small"
-          onClick={() => void run(() => read())}
-          disabled={busy}
-        >
-          重新读取充值设置
-        </button>
+        {readError ? <>
+          <p role="alert">{readError}</p>
+          <button className="button small" onClick={() => void run(() => read())} disabled={busy}>
+            重新读取充值设置
+          </button>
+        </> : <LoadingIndicator label="读取充值设置" />}
       </section>
     );
+  }
   if (!settings.supported)
     return (
       <section className="recharge-panel">

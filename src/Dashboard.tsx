@@ -2,6 +2,8 @@ import { channelLatency, latencyLabel } from "./channelLatency";
 import type { ManagementPagePosition } from "./managementQuery";
 import { restoredDashboardAt, saveDashboardSnapshot, dashboardSnapshotKey } from "./dashboardSnapshot";
 import { PageLoading, TableLoading, DetailLoading } from "./PageLoading";
+import { LoadingIndicator } from "./LoadingIndicator";
+import { CompactDialogHeader } from "./CompactDialog";
 import { endpointChoices, readKeys } from "./requestFilters";
 import { FailureCounts, failureReasonLabel } from "./FailureCounts";
 import { BalanceAmount } from "./BalanceAmount";
@@ -128,7 +130,7 @@ import {
   ChannelMetricHeaders,
   ChannelMetricCells,
 } from "./ChannelMetrics";
-import { observationColumnClass, observationColumns, observationPreset, type ChannelMetricLayout } from "./observationColumns";
+import { observationColumns, observationPreset, type ChannelMetricLayout } from "./observationColumns";
 import { TableColumns, useTableColumns } from "./TableColumns";
 import { actualCostRange } from "./actualCost";
 import { useScopedChannelSpend } from "./SubChannelSpend";
@@ -407,10 +409,8 @@ function Trend({
           <span>每 {seconds % 60 === 0 ? `${seconds / 60} 分钟` : `${seconds} 秒`}</span>
         </div>
       </div>
-      {series.isPending ? (
+      {series.isPending || series.error instanceof AnalyticsInitializingError ? (
         <DetailLoading kind="chart" label="请求趋势" />
-      ) : series.error instanceof AnalyticsInitializingError ? (
-        <p role="status"><Spinner small /> {series.error.message}</p>
       ) : series.isError ? (
         <div className="inline-error">
           趋势暂时不可用。
@@ -1400,7 +1400,7 @@ export default function Dashboard({
   );
   const historyImport = metrics.data?.import;
   const historyMessages = [
-    historyInitializing && (metrics.data ? "历史数据正在初始化，暂显示上次成功读取的数据。" : metrics.error?.message),
+    historyInitializing && metrics.data && "历史数据正在初始化，暂显示上次成功读取的数据。",
     !historyInitializing && staleSources.size > 0 && `历史同步滞后：${staleSourceNames.join("、") || "当前来源"}。统计可能缺少近期请求。`,
     historyImport && !historyImport.caught_up && (!historyImport.scanning || historyImport.audit_complete === false || !!historyImport.error_class || historyImport.remaining_objects > 0) &&
       (historyImport.error_class ? `采集异常：${historyImport.error_class}` : historyImport.audit_complete === false ? "来源上报尚未追平或存在记录缺口。" : "正在接收请求记录，统计尚不完整。"),
@@ -1924,7 +1924,9 @@ export default function Dashboard({
               {adjustingChannels && <span id={routeHelpId} className="sr-only">在当前页的同一来源内拖动渠道。键盘可用上下方向键移动，Home 置顶。同一渠道的所有模型一起移动。</span>}
               {view === "balances" && <WorkbenchTabs label="余额视图" value={balanceView} onChange={setBalanceView} tabs={[["wallets","站点钱包"],["channels","关联渠道"]]} />}
               {view === "balances" && balanceView === "wallets" ? <section className="wallet-summary" aria-label="站点钱包">
-                {groupedWallets.size === 0 && <p>{balanceLoading ? "正在查询站点关联" : "当前范围暂无已核验站点账号"}</p>}
+                {groupedWallets.size === 0 && (balanceLoading
+                  ? !(catalog.isPending || metrics.isPending) && <LoadingIndicator label="查询站点关联" />
+                  : <p>当前范围暂无已核验站点账号</p>)}
                 <ul>{[...groupedWallets].map(([id,entry])=><li key={id}>
                   <strong>{entry.label}</strong><span>{hasWalletAmount(entry.wallet) && <BalanceAmount value={entry.wallet.amount} />}
                     {(entry.wallet.status !== "ok" || !hasWalletAmount(entry.wallet)) && <> {walletStatusLabel(entry.wallet)}</>}
@@ -1956,25 +1958,13 @@ export default function Dashboard({
                   </button>
                 </div>
               ) : catalog.isPending || metrics.isPending || (historyInitializing && !metrics.data) ? (
-                <TableLoading kind={channelView ? "channels" : "balances"} observation={channelView ? {
-                  header: observationHeader, layout: observationLayout, compact: compactObservation,
-                  classes:[...(routeView ? ["rank"] : []),"channel-identity",...(checkingChannels ? [""] : []),...visibleColumns.map(id => observationColumnClass[id])],
-                } : undefined} />
+                <TableLoading kind={channelView ? "channels" : "balances"} />
               ) : total === 0 ? (
-                <Empty
-                  title={
-                    pendingBalances &&
-                    (channelView ? balanceFilter : balanceThreshold)
-                      ? "正在确认渠道余额"
-                      : "没有匹配的渠道"
-                  }
-                  icon={<Search size={26} />}
-                >
-                  {pendingBalances &&
-                  (channelView ? balanceFilter : balanceThreshold)
-                    ? `还有 ${pendingBalances} 个渠道正在查询，结果到达后会自动显示。`
-                    : "尝试调整模型、优先级或余额条件，或清除搜索条件。"}
-                </Empty>
+                pendingBalances && (channelView ? balanceFilter : balanceThreshold)
+                  ? <LoadingIndicator size="panel" label="确认渠道余额" />
+                  : <Empty title="没有匹配的渠道" icon={<Search size={26} />}>
+                    尝试调整模型、优先级或余额条件，或清除搜索条件。
+                  </Empty>
               ) : channelView ? (
                 <div className="table-scroll" tabIndex={0} role="region" aria-label="渠道观测表">
                   <table className="channel-table observation-table" data-columns={observationLayout} data-compact={compactObservation || undefined}
@@ -2146,7 +2136,7 @@ export default function Dashboard({
                           {balanceIsLow(balance?.data) ? (
                             <span className="status-pill cooling">余额不足</span>
                           ) : balanceLoading || balance?.isPending ? (
-                            <span className="muted">查询中</span>
+                            <LoadingIndicator size="inline" label="查询余额状态" />
                           ) : balance?.data.some(wallet => wallet.status === "error") ? (
                             <span className="status-pill cooling">更新失败</span>
                           ) : balanceIsKnown(balance?.data) ? (
@@ -2249,7 +2239,17 @@ export default function Dashboard({
           }
         }} />
       <Guide open={guide} onClose={() => setGuide(false)} />
-      {walletDialog && <PageBoundary key={walletDialog} onDismiss={()=>setWalletDialog(null)}><Suspense fallback={<div className="balance-dialog-loading" role="status">加载充值设置…</div>}>
+      {walletDialog && <PageBoundary key={walletDialog} onDismiss={()=>setWalletDialog(null)}><Suspense fallback={
+        <Dialog.Root open onOpenChange={open => { if (!open) setWalletDialog(null); }}>
+          <Dialog.Portal>
+            <Dialog.Overlay className="dialog-overlay" />
+            <Dialog.Content className="guide-dialog compact-dialog" aria-describedby={undefined}>
+              <CompactDialogHeader>站点账号充值</CompactDialogHeader>
+              <LoadingIndicator label="加载充值设置" />
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
+      }>
         <BalanceWalletDialog key={walletDialog} id={walletDialog} close={()=>setWalletDialog(null)}/>
       </Suspense></PageBoundary>}
     </div>

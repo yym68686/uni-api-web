@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { controlRequest } from "./api";
 import { rate, ms } from "./format";
-import { Tip } from "./ui";
+import { Spinner, Tip } from "./ui";
 
 export interface QualitySummary {
   total: number;
@@ -82,7 +82,7 @@ export function QualityHistory({ path, revision, title = "降智检测历史" }:
     <section className="quality-history">
       <button className="button small" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? "收起" : "查看"}{title}</button>
       {expanded && <>
-        {query.isPending ? <TableLoading kind="history" rows={3} /> : query.isError ? <p role="alert">历史读取失败 <button className="button small" onClick={() => void query.refetch()}>重试</button></p> : !entries.length ? <p className="muted">暂无检测记录。</p> : (
+        {query.isPending ? <TableLoading kind="history" /> : query.isError ? <p role="alert">历史读取失败 <button className="button small" onClick={() => void query.refetch()}>重试</button></p> : !entries.length ? <p className="muted">暂无检测记录。</p> : (
           <div className="quality-history-scroll">
             <table className="quality-history-table" aria-label={title}>
               <thead><tr><th>检测时间</th><th>结果</th><th>回复 / 诊断</th></tr></thead>
@@ -97,7 +97,7 @@ export function QualityHistory({ path, revision, title = "降智检测历史" }:
             </table>
           </div>
         )}
-        {query.hasNextPage && <button className="button small" disabled={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>{query.isFetchingNextPage ? "读取中…" : "加载更早记录"}</button>}
+        {query.hasNextPage && <button className="button small" aria-label="加载更早记录" aria-busy={query.isFetchingNextPage} disabled={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>{query.isFetchingNextPage ? <Spinner small /> : "加载更早记录"}</button>}
       </>}
     </section>
   );

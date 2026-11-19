@@ -65,7 +65,7 @@ export function saveDashboardSnapshot(client: QueryClient, user: string, metrics
   if (!metrics?.data || metrics.status !== "success" || metrics.fetchStatus !== "idle" || restoredDashboardAt(client, metricsKey)) return;
   const selected = client.getQueryCache().getAll().filter(q => q.isActive() && validKey(q.queryKey));
   // Save only a fully settled view. Never replace a previous complete snapshot
-  // with skeletons, an intermediate filtered table, or failed refresh results.
+  // with a loading placeholder, an intermediate filtered table, or failed refresh results.
   if (!selected.some(q => q.queryKey[0] === "catalog") || !selected.some(q => q.queryKey[0] === "keys") || selected.some(q => q.state.status !== "success" || !q.state.data || q.state.fetchStatus !== "idle")) return;
   if (selected.length > 512) return;
   const signature = JSON.stringify([user,metricsKey,selected.map(query=>[query.queryHash,query.state.dataUpdatedAt])]);

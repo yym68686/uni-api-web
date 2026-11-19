@@ -435,12 +435,12 @@ it("loads omitted model results on opening the drawer without reporting untested
   await user.selectOptions(screen.getByLabelText("检测模型筛选"), "gpt-6-astra");
   await user.click(screen.getByText("same-group",{selector:"strong"}));
   const drawer = within(screen.getByRole("dialog",{name:"same-group"}));
-  expect(drawer.getByRole("status")).toHaveTextContent("正在读取完整模型检测结果");
+  expect(drawer.getByRole("status", {name:"读取完整模型检测结果"}).textContent).toBe("");
   expect(drawer.queryByText("gpt-6-sol",{selector:"strong"})).not.toBeInTheDocument();
   await act(async () => resolve(Response.json({data:[{...accounts[0],targets:[fullTarget]}]})));
   expect(await drawer.findByText("gpt-6-sol",{selector:"strong"})).toBeVisible();
   expect(drawer.getByText(/最近检测 · gpt-6-astra/)).toBeVisible();
-  expect(drawer.queryByRole("status")).not.toBeInTheDocument();
+  expect(drawer.queryByRole("status", {name:"读取完整模型检测结果"})).not.toBeInTheDocument();
   await user.click(drawer.getByRole("button",{name:"关闭渠道详情"}));
   await user.click(screen.getByText("same-group",{selector:"strong"}));
   await waitFor(() => expect(detailReads).toBe(2));

@@ -8,6 +8,7 @@ import type { View } from "./preferences";
 import type { Theme } from "./theme";
 import type { Channel } from "./types";
 import { channelName, rowId } from "./format";
+import { LoadingIndicator } from "./LoadingIndicator";
 
 const groups = [
   { name: "观测", pages: [
@@ -180,7 +181,7 @@ export function ConsoleLocator({ open, onOpenChange, account, channels, loading,
             <ListTree size={15} aria-hidden="true" /><span>追踪请求<small>{value}</small></span><ArrowUpRight size={14} aria-hidden="true" />
           </button>}
           {needle && (loading || failed || (!pageMatches.length && !channelMatches.length && !requestMatch)) &&
-            <p role="status">{loading ? "读取渠道…" : failed ? "暂时无法读取渠道" : "没有匹配结果"}</p>}
+            (loading ? <LoadingIndicator size="compact" label="读取渠道" /> : <p role="status">{failed ? "暂时无法读取渠道" : "没有匹配结果"}</p>)}
         </div>
       </Dialog.Content>
     </Dialog.Portal>

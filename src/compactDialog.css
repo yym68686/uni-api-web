@@ -184,7 +184,7 @@
 .channel-import-workspace .route-mode-tabs { padding-inline: 19px; }
 .channel-import-workspace .route-mode-tabs button { padding-block: 9px; }
 .channel-import-workspace :is(.route-import-body, .route-loading-body) { flex: 1; }
-.channel-import-workspace .route-loading-body > p { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.route-import-body:has(> .route-import-loading:only-child) { display: grid; }
 .channel-import-workspace .route-destination-grid { padding: 11px; gap: 10px; margin-bottom: 15px; }
 .channel-import-workspace .route-destination-grid select { height: 34px; }
 .channel-import-workspace :is(.route-binding-provider, .route-binding-heading) { min-width: 0; }

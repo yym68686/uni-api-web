@@ -5,6 +5,7 @@ import { fingerprintKey, sharedFingerprintIndex } from "./fingerprintResults";
 import { isCapabilityCheckModel, capabilityCheckScope } from "./sub2apiModels";
 import { CopyProbeCurl } from "./CopyProbeCurl";
 import { TableLoading, DetailLoading } from "./PageLoading";
+import { LoadingIndicator } from "./LoadingIndicator";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
@@ -748,7 +749,7 @@ function ManagementChannelDrawer({
               </div>
               <div>
                 <dt>可用模型</dt>
-                <dd>{modelsPending ? "读取中…" : modelCount ? `${availableCount} / ${modelCount}` : "—"}</dd>
+                <dd>{!modelsPending && modelCount ? `${availableCount} / ${modelCount}` : "—"}</dd>
               </div>
               <div>
                 <dt>API key</dt>
@@ -761,7 +762,7 @@ function ManagementChannelDrawer({
             <h3>模型检测结果 <span className="count-badge">{modelCount}</span></h3>
             {modelsPending ? complete.isError
               ? <p role="alert">{complete.error.message}<button className="button small" onClick={() => void complete.refetch()}>重试</button></p>
-              : <p role="status"><Spinner small/> 正在读取完整模型检测结果…</p>
+              : <LoadingIndicator label="读取完整模型检测结果" />
             : checks.length ? (
               <ul className="detail-model-list">
                 {checks.map((check) => {
@@ -822,7 +823,7 @@ function ManagementChannelDrawer({
                   <dt>单价核验</dt>
                   <dd>{latest ? <PriceStatus check={latest} prices={prices} /> :
                     configuredDetail.isError ? <button className="button small" onClick={() => void configuredDetail.refetch()}>重试读取单价</button> :
-                    complete.isError ? "未能读取" : configuredDetail.isSuccess ? "无可确认记录" : "读取中…"}</dd>
+                    complete.isError ? "未能读取" : configuredDetail.isSuccess ? "无可确认记录" : <LoadingIndicator size="inline" label="读取单价" />}</dd>
                 </div>
                 <div>
                   <dt>最近检测</dt>
@@ -1338,7 +1339,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
           />
         )}
         {!metadata && resultsReadFailed ? null : !metadata ? (
-          <TableLoading kind="accounts" rows={3} />
+          <TableLoading kind="accounts" />
         ) : statusAccounts.length === 0 ? (
           <Empty title="暂无站点账号" icon={<Globe2 size={25} />} />
         ) : (
@@ -1814,10 +1815,10 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
         </div>
         {!displayedPage && resultsReadFailed ? (
           <Empty title="暂时无法读取渠道">检测结果尚未完整读取，暂时无法判断是否有匹配渠道。请重试读取。</Empty>
-        ) : !displayedPage ? (
-          <TableLoading kind="checks" rows={6} />
+        ) : !displayedPage || (rows.length === 0 && tablePending && !resultsReadFailed) ? (
+          <TableLoading kind="checks" />
         ) : rows.length === 0 ? (
-          <Empty title={tablePending ? (resultsReadFailed ? "结果尚未确认" : "正在读取当前渠道结果") : "没有匹配的渠道"}>
+          <Empty title={resultsReadFailed ? "结果尚未确认" : "没有匹配的渠道"}>
             添加渠道、同步站点账号或调整筛选后查看。
           </Empty>
         ) : (
@@ -1904,7 +1905,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                               <Tip text={`已完成 ${liveGroup.completed}/${liveGroup.total} · 刷新渠道查看匹配结果`}><span className="muted">待更新</span></Tip>
                               : <GroupModelMatch checks={overviewChecks} scope={scopeNote} />
                           );
-                              case "price": return t.list_summary ? <span className="muted">读取中…</span> : selected ? <PriceStatus check={selected} prices={prices.data?.data} /> : <GroupPriceStatus checks={checks} prices={prices.data?.data} />;
+                              case "price": return t.list_summary ? <LoadingIndicator size="inline" label="读取单价" /> : selected ? <PriceStatus check={selected} prices={prices.data?.data} /> : <GroupPriceStatus checks={checks} prices={prices.data?.data} />;
                               case "fingerprint": return <FingerprintCell entries={displayedPage?.context.fingerprints[managementRow.id] || []} supportedModels={displayedPage?.context.fingerprint_models} channel={[account.name, t.name].filter(Boolean).join(" / ")}/>;
                               case "quality": {
                                 const result = groupQualityResult(t);
@@ -1993,7 +1994,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
             </div>
             <div className="table-footer" aria-busy={tablePending}>
               <span>
-                {tablePending ? "正在核对当前结果" : <>共 {total} 个渠道 · {eligibleCount} 个可发起检测</>}
+                {tablePending ? <LoadingIndicator size="inline" label="核对当前结果" /> : <>共 {total} 个渠道 · {eligibleCount} 个可发起检测</>}
               </span>
               <div className="sub-pagination">
                 <button

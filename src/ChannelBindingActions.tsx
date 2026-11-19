@@ -6,6 +6,7 @@ import { Pencil, Trash2, X } from "lucide-react";
 import { ChannelSettings } from "./ChannelSettings";
 import { controlRequest } from "./api";
 import { Spinner } from "./ui";
+import { LoadingIndicator } from "./LoadingIndicator";
 
 interface BindingTarget {
   source_id: string;
@@ -164,10 +165,7 @@ function RemoveDialog({
       onConfirm={() => void remove()}
     >
       {query.isFetching && (
-        <p role="status">
-          <Spinner small />
-          正在核对当前接入…
-        </p>
+        <LoadingIndicator size="compact" label="核对当前接入" />
       )}
       {(error || query.error) && (
         <div role="alert" className="error-banner">

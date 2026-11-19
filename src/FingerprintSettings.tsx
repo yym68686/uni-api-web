@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { controlRequest } from "./api";
+import { LoadingIndicator } from "./LoadingIndicator";
 import "./fingerprintSettings.css";
 
 type Settings = {
@@ -55,7 +56,7 @@ export function FingerprintSettings() {
     <h3 id="fingerprint-settings-title">自动指纹检测模型</h3>
     <p className="muted">勾选并保存后，下次可用性检测成功时自动检测该模型的指纹；保存不会立即补跑。不影响手动指纹检测、可用性或降智检测。</p>
     <p className="muted">服务会从 lm-detector 定期更新已验证的支持列表。新增模型默认不勾选，更新目录不会发起检测。</p>
-    {query.isPending && <p role="status">正在读取支持列表…</p>}
+    {query.isPending && <LoadingIndicator label="读取支持列表" />}
     {query.isError && <p role="alert" className="error-banner">指纹设置读取失败，已保存设置未改变。{query.error.message}</p>}
     {settings && <fieldset className="fingerprint-settings-models" disabled={saving || query.isError}>
       <legend>支持模型 · 已选 {selection.length}/{settings.supported_models.length}</legend>

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, X, CircleHelp, Play } from "lucide-react";
 import { controlRequest } from "./api";
+import { LoadingIndicator } from "./LoadingIndicator";
 import { providerId, channelName } from "./format";
 import type { Channel } from "./types";
 import type { InstalledChannel } from "./sub2apiImports";
@@ -272,9 +273,8 @@ export function LatestChannelCheck({
         </>
       ) : (
         !pending && (
-          <span className="muted">
-            {checks.loading ? "读取中…" : checks.error ? "读取失败" : "未检测"}
-          </span>
+          checks.loading ? <LoadingIndicator size="inline" label="读取检测结果" />
+            : <span className="muted">{checks.error ? "读取失败" : "未检测"}</span>
         )
       )}
       {pending && (

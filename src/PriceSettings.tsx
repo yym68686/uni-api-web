@@ -440,7 +440,7 @@ export function PriceSettings({
           {refreshAction}
         </div>
       </div>
-      {loading ? <TableLoading kind="prices" rows={8} /> : <>
+      {loading ? <TableLoading kind="prices" /> : <>
       <div className="price-overview-wrap">
         <table className="price-overview-table" aria-label="模型价格">
           <thead>

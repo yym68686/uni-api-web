@@ -228,17 +228,6 @@ svg {
 .spin {
   animation: spin 1s linear infinite;
 }
-.loading-text {
-  display: inline-flex;
-  max-width: 100%;
-  gap: 6px;
-  align-items: center;
-  color: var(--muted);
-  font-size: 11px;
-}
-.loading-text .spinner {
-  flex: none;
-}
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -2565,6 +2554,7 @@ nav > button.active > svg {
 
 .channel-settings-overlay {z-index:85;background:var(--overlay);backdrop-filter:blur(6px);}
 .channel-settings-dialog {position:fixed;z-index:90;left:50%;top:50%;transform:translate(-50%,-50%);width:min(1060px,calc(100vw - 64px));height:min(820px,90svh);display:flex;flex-direction:column;overflow:hidden;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:18px;box-shadow:0 28px 100px #0005;}
+.channel-settings-dialog > .loading-indicator { flex: 1; min-block-size: 0; }
 .settings-dialog-header {display:flex;align-items:center;gap:14px;flex-shrink:0;padding:24px 28px;border-bottom:1px solid var(--line);}
 .settings-title-icon {display:grid;place-items:center;width:44px;height:44px;flex-shrink:0;background:var(--selection);color:var(--accent);border-radius:12px;}
 .settings-title-copy {min-width:0;}
