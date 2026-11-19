@@ -65,6 +65,48 @@ func TestRechargeMoneyContextAndURLBoundaries(t *testing.T) {
 	}
 }
 
+func TestRechargeCatalogRecognizesVerificationInsteadOfTreatingItAsJSON(t *testing.T) {
+	for _, tc := range []struct {
+		name, server, contentType, body, reason string
+		status                                  int
+	}{
+		{"ESA verification", "ESA", "text/html; charset=utf-8", `<!doctype html><html>阿里云 captcha PRIVATE-CHALLENGE</html>`, "browser_verification", 200},
+		{"ordinary HTML", "ESA", "text/html", `<html>Temporarily unavailable</html>`, "unexpected_html", 200},
+		{"JSON", "ESA", "application/json", `{"code":1,"data":{"total":0,"list":[]}}`, "", 200},
+		{"mislabeled JSON", "ESA", "text/html", `{"code":1,"data":{"total":0,"list":[]}}`, "", 200},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != "POST" || r.URL.Path != rechargeCatalogPath || r.Header.Get("Authorization") != "" || r.Header.Get("Referer") != "https://wzyp.cn/shop/SHOP123" {
+					t.Error("unexpected catalog request")
+				}
+				w.Header().Set("Content-Type", tc.contentType)
+				w.Header().Set("Server", tc.server)
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer up.Close()
+			u, _ := url.Parse(up.URL)
+			client := &http.Client{Transport: subTestTransport{u, http.DefaultTransport}}
+			shop, _, err := parseRechargeShop("https://wzyp.cn/shop/SHOP123?token=private-jwt&user_id=42")
+			if err != nil {
+				t.Fatal(err)
+			}
+			products, err := shop.catalog(context.Background(), client)
+			if tc.reason == "" {
+				if err != nil || products == nil || len(products) != 0 {
+					t.Fatal(products, err)
+				}
+				return
+			}
+			var page *rechargeCatalogPageError
+			if !errors.As(err, &page) || page.reason() != tc.reason || page.status != tc.status || strings.Contains(page.Error(), "PRIVATE-CHALLENGE") {
+				t.Fatal(products, err)
+			}
+		})
+	}
+}
+
 func TestRechargeLegacyHistoryAndIsolatedCLIRuntime(t *testing.T) {
 	for _, raw := range []string{`[{"code":"EXACT-CODE-123","status":"used","type":"balance","used_by":42,"value":2}]`, `{"items":[{"code":"EXACT-CODE-123","status":"used","type":"balance","used_by":42,"value":2}],"total":1}`} {
 		var h rechargeHistory
@@ -128,6 +170,7 @@ type rechargeFixture struct {
 	paid, redeemed              atomic.Bool
 	price, userID, usedBy       atomic.Int64
 	orderUnknown, redeemUnknown atomic.Bool
+	catalogVerification         atomic.Bool
 }
 
 func newRechargeFixture(t *testing.T) *rechargeFixture {
@@ -165,6 +208,12 @@ func newRechargeFixture(t *testing.T) *rechargeFixture {
 		case "/api/v1/auth/me":
 			out(map[string]any{"id": f.userID.Load(), "email": "me@example.com"})
 		case "/shopApi/Shop/goodsList":
+			if f.catalogVerification.Load() {
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				w.Header().Set("Server", "ESA")
+				_, _ = w.Write([]byte(`<!doctype html><html>阿里云 captcha PRIVATE-CHALLENGE</html>`))
+				return
+			}
 			out(map[string]any{"total": 1, "list": []any{goods}})
 		case "/shopApi/Shop/goodsInfo":
 			out(goods)
@@ -254,6 +303,24 @@ func (f *rechargeFixture) quote() rechargeQuote {
 }
 func (f *rechargeFixture) submit(q rechargeQuote, key string) *httptest.ResponseRecorder {
 	return f.request("POST", "/jobs", map[string]any{"quote_id": q.ID, "confirmed": true, "total_cny": q.Total, "idempotency_key": key}, f.cookie)
+}
+
+func TestRechargeCatalogVerificationDoesNotOrderOrExposeChallenge(t *testing.T) {
+	f := newRechargeFixture(t)
+	input := map[string]string{"shop_url": "https://wzyp.cn/shop/SHOP123?token=private-jwt"}
+	f.catalogVerification.Store(true)
+	w := f.request("POST", "/catalog", input, f.cookie)
+	if w.Code != http.StatusBadGateway || w.Header().Get("Cache-Control") != "no-store" || !strings.Contains(w.Body.String(), "浏览器验证") || strings.Contains(w.Body.String(), "PRIVATE-CHALLENGE") {
+		t.Fatal(w.Code, w.Header(), w.Body.String())
+	}
+	f.catalogVerification.Store(false)
+	w = f.request("POST", "/catalog", input, f.cookie)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "PRODUCT1") || strings.Contains(w.Body.String(), "private-jwt") {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if f.orders.Load() != 0 || f.pay.submits.Load() != 0 || f.redeems.Load() != 0 {
+		t.Fatal("catalog caused a recharge write")
+	}
 }
 func (f *rechargeFixture) work(state string) {
 	f.t.Helper()

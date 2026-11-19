@@ -78,6 +78,11 @@ const labels: Record<string, string> = {
 const active = (job: Job) => !["done", "closed", "failed"].includes(job.state);
 const orderTime = (seconds: number) => new Date(seconds * 1000).toLocaleString("zh-CN", {hour12: false});
 const quoteValid = (quote: Pick<Quote,"expires_at">) => Number.isFinite(quote.expires_at) && quote.expires_at * 1000 > Date.now();
+function canonicalShopURL(raw: string) {
+  // Accept the embedded URL, but never submit or open its login token.
+  const match = /^(https:\/\/(?:wzyp\.cn|pay\.ldxp\.cn)\/shop\/[A-Za-z0-9_-]{3,80})\/?(?:[?#][\s\S]*)?$/.exec(raw.trim());
+  return match?.[1] ?? "";
+}
 function officialLink(raw?: string) {
   if (!raw) return false;
   try {
@@ -272,16 +277,17 @@ export function SiteRecharge({ account, onBusyChange }: { account: SubAccount; o
     setQuote(undefined);
     setConfirmed(false);
   };
-  async function catalog() {
+  async function catalog(shopURL: string) {
+    update({ shop_url: shopURL });
+    setProducts([]);
     const data = await controlRequest<{
-      shop_url: string;
       products: Product[];
     }>(`${base}/catalog`, {
       method: "POST",
-      body: JSON.stringify({ shop_url: config?.shop_url }),
+      body: JSON.stringify({ shop_url: shopURL }),
     });
     setProducts(data.products);
-    update({ shop_url: data.shop_url });
+    if (data.products.length === 0) setNote("店铺未返回可选的卡密商品。未下单。");
   }
   async function walletAction(action: string) {
     const status = await controlRequest<Wallet>(
@@ -319,6 +325,8 @@ export function SiteRecharge({ account, onBusyChange }: { account: SubAccount; o
         <p>此站点不支持实时充值。</p>
       </section>
     );
+  const shopURL = canonicalShopURL(config.shop_url);
+  const invalidShopURL = !!config.shop_url.trim() && !shopURL;
   return (
     <section className="recharge-panel" aria-label="站点充值">
       <h3>实时充值</h3>
@@ -349,17 +357,25 @@ export function SiteRecharge({ account, onBusyChange }: { account: SubAccount; o
           value={config.shop_url}
           placeholder="https://wzyp.cn/shop/…"
           disabled={busy}
-          onChange={(e) => update({ shop_url: e.target.value })}
+          onChange={(e) => {
+            if (canonicalShopURL(e.target.value) !== shopURL) setProducts([]);
+            update({ shop_url: e.target.value });
+          }}
+          onBlur={() => { if (shopURL && shopURL !== config.shop_url) update({ shop_url: shopURL }); }}
         />
       </label>
-      <button
-        type="button"
-        className="button small"
-        disabled={busy || !config.shop_url}
-        onClick={() => void run(catalog)}
-      >
-        读取充值商品（不下单）
-      </button>
+      {invalidShopURL && <p className="dialog-inline-note">请输入 wzyp.cn 或 pay.ldxp.cn 的 HTTPS 店铺地址（/shop/店铺编号）。</p>}
+      <div className="recharge-actions">
+        <button
+          type="button"
+          className="button small"
+          disabled={busy || !shopURL}
+          onClick={() => void run(() => catalog(shopURL))}
+        >
+          读取充值商品（不下单）
+        </button>
+        {shopURL && <a className="button small" href={shopURL} target="_blank" rel="noopener noreferrer">打开链动店铺</a>}
+      </div>
       {(products.length > 0 || config.products.length > 0) && <div className="recharge-products">
         {products.map((p) => (
           <label key={p.key}>
@@ -416,11 +432,12 @@ export function SiteRecharge({ account, onBusyChange }: { account: SubAccount; o
       <button
         type="button"
         className="button small"
-        disabled={busy || (config.enabled && !identityConfirmed)}
+        disabled={busy || invalidShopURL || (config.enabled && !identityConfirmed)}
         onClick={() =>
           void run(async () => {
             const saved = {
               ...config,
+              shop_url: shopURL,
               target_base: account.base,
               target_email: account.email,
             };

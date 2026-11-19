@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -89,6 +90,44 @@ type rechargePrice struct {
 	Fee   rechargeMoney `json:"fee"`
 }
 
+const rechargeCatalogPath = "/shopApi/Shop/goodsList"
+
+type rechargeCatalogPageError struct {
+	status       int
+	verification bool
+}
+
+func (e *rechargeCatalogPageError) reason() string {
+	if e.verification {
+		return "browser_verification"
+	}
+	return "unexpected_html"
+}
+
+func (e *rechargeCatalogPageError) Error() string {
+	if e.verification {
+		return "链动要求浏览器验证，服务器暂时无法读取商品。请打开链动店铺查看；恢复自动读取需要店铺方授权服务器访问。未下单。"
+	}
+	return "链动返回了网页而非商品数据，请打开链动店铺核对。未下单。"
+}
+
+func rechargeCatalogPage(resp *http.Response, body []byte) *rechargeCatalogPageError {
+	mediaType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	if mediaType != "text/html" && !strings.HasPrefix(http.DetectContentType(body), "text/html") {
+		return nil
+	}
+	if json.Valid(body) { // Some application responses are mislabeled; still validate their JSON envelope.
+		return nil
+	}
+	// Do not execute, reflect, or log the page: an edge challenge can include
+	// session-specific material. An ordinary HTML error is not proof of a challenge.
+	page := bytes.ToLower(body)
+	verification := strings.EqualFold(strings.TrimSpace(resp.Header.Get("Server")), "ESA") &&
+		(bytes.Contains(page, []byte("cf_app_waf")) || bytes.Contains(page, []byte("verify that you are a real person")) ||
+			(bytes.Contains(page, []byte("captcha")) && bytes.Contains(page, []byte("阿里云"))))
+	return &rechargeCatalogPageError{status: resp.StatusCode, verification: verification}
+}
+
 func (s rechargeShop) request(ctx context.Context, client *http.Client, path string, input, out any, visitor string) error {
 	raw, err := json.Marshal(input)
 	if err != nil {
@@ -114,6 +153,11 @@ func (s rechargeShop) request(ctx context.Context, client *http.Client, path str
 	if err != nil || len(body) > 2<<20 {
 		return errors.New("链动接口读取失败")
 	}
+	if path == rechargeCatalogPath {
+		if page := rechargeCatalogPage(resp, body); page != nil {
+			return page
+		}
+	}
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("链动接口 HTTP %d（可能需要验证或稍后再试）", resp.StatusCode)
 	}
@@ -137,7 +181,7 @@ func (s rechargeShop) catalog(ctx context.Context, client *http.Client) ([]recha
 			Total int             `json:"total"`
 			List  []rechargeGoods `json:"list"`
 		}
-		err := s.request(ctx, client, "/shopApi/Shop/goodsList", map[string]any{"token": s.Token, "goods_type": "card", "current": page, "pageSize": 50, "keywords": "", "category_id": ""}, &data, "")
+		err := s.request(ctx, client, rechargeCatalogPath, map[string]any{"token": s.Token, "goods_type": "card", "current": page, "pageSize": 50, "keywords": "", "category_id": ""}, &data, "")
 		if err != nil {
 			return nil, err
 		}

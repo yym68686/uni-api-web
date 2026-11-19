@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -185,6 +186,7 @@ func (s *Service) readRechargeConfig(ctx context.Context, id string) (rechargeCo
 	return cfg, revision, err
 }
 func (s *Service) rechargeCatalog(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	owner, err := s.controlUser(r)
 	if err != nil {
 		http.Error(w, "unauthorized", 401)
@@ -209,6 +211,12 @@ func (s *Service) rechargeCatalog(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	products, err := shop.catalog(ctx, subHTTP)
 	if err != nil {
+		var page *rechargeCatalogPageError
+		if errors.As(err, &page) {
+			log.Printf("event=recharge_catalog_upstream reason=%s upstream_status=%d request_id=%s", page.reason(), page.status, consoleRequestID(ctx))
+			http.Error(w, page.Error(), http.StatusBadGateway)
+			return
+		}
 		rechargeError(w, err)
 		return
 	}

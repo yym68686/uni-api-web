@@ -93,6 +93,40 @@ it("keeps payment disabled without an explicitly configured payment agent", asyn
   expect(screen.getByRole("button", { name: "开通支付宝授权" })).toBeDisabled();
 });
 
+it("strips the embedded login token before catalog reads or opening the shop, including when challenged", async () => {
+  const shop = "https://wzyp.cn/shop/SHOP456";
+  fixture(false, (path, init) => {
+    expect(path).toMatch(/\/catalog$/);
+    expect(JSON.parse(init.body as string)).toEqual({ shop_url: shop });
+    throw new Error("链动要求浏览器验证，服务器暂时无法读取商品。未下单。");
+  });
+  render(<SiteRecharge account={account} />);
+  await screen.findByRole("heading", { name: "实时充值" });
+  const input = screen.getByRole("textbox", { name: "链动店铺地址" });
+  fireEvent.change(input, { target: { value: `${shop}?user_id=123&token=private-site-jwt#embedded` } });
+  const link = screen.getByRole("link", { name: "打开链动店铺" });
+  expect(link).toHaveAttribute("href", shop);
+  expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  fireEvent.click(screen.getByRole("button", { name: "读取充值商品（不下单）" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("链动要求浏览器验证");
+  expect(input).toHaveValue(shop);
+  expect(request.mock.calls.filter(([, init]) => init?.method)).toHaveLength(1);
+  expect(JSON.stringify(request.mock.calls)).not.toContain("private-site-jwt");
+});
+
+it("never opens or submits a shop URL outside the allowlist", async () => {
+  fixture();
+  render(<SiteRecharge account={account} />);
+  await screen.findByRole("heading", { name: "实时充值" });
+  fireEvent.change(screen.getByRole("textbox", { name: "链动店铺地址" }), {
+    target: { value: "https://wzyp.cn.example/shop/SHOP456?token=private-site-jwt" },
+  });
+  expect(screen.queryByRole("link", { name: "打开链动店铺" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "读取充值商品（不下单）" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "保存充值设置" })).toBeDisabled();
+  expect(request.mock.calls.every(([, init]) => !init?.method)).toBe(true);
+});
+
 it("requires exact quote confirmation and never automatically retries an unknown submission", async () => {
   const writes: { path: string; body: Record<string, unknown> }[] = [];
   fixture(true, (path, init) => {
