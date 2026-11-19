@@ -3,9 +3,11 @@
 Channel management adds a **模型指纹** column and filter. The live API advertises
 supported request models in `GET /v1/model-fingerprints` (`supported_models`).
 Click a multi-model cell to show every model. The dialog expands to fit its
-content and uses multiple columns when the screen is wide enough; it scrolls
-only if the list exceeds the available height. Models with detection records
-appear first, ordered by their latest update time.
+content and scrolls only if the list exceeds the available height. Models with
+detection records appear first, ordered by their latest update time. Hover or
+focus a model row to see the requested-class probability and the recorded
+reference-library candidate probabilities. A retained score is labeled as the
+previous result; incomplete or missing measurements are never shown as 0%.
 The bundled and dynamically verified catalogs include these references:
 
 | Requested model | Upstream reference class |

@@ -2819,7 +2819,20 @@ nav > button.active > svg {
 .fingerprint-details-trigger:hover { background:var(--subtle); color:var(--ink); }
 .table-diagnostic-tip { display:grid;gap:8px;max-height:50vh;overflow-wrap:anywhere;overflow:auto; }
 .fingerprint-results-list { list-style:none;padding:0;margin:0; }
-.fingerprint-result-row { display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px;min-height:32px;border-bottom:1px solid var(--line); }
+.fingerprint-result-row { display:grid;grid-template-columns:minmax(0,1fr) 7.5rem 7ch;align-items:center;gap:8px;min-height:34px;padding-block:4px;border-bottom:1px solid var(--line);font-size:13px; }
+.fingerprint-detail-row:hover { background:var(--subtle); }
+.fingerprint-detail-row:focus-visible { outline:2px solid var(--accent);outline-offset:-2px; }
+.fingerprint-detail-status { display:grid;justify-items:start;gap:2px;min-width:0;line-height:1.3; }
+.fingerprint-detail-status .fingerprint-attempt { white-space:normal;overflow-wrap:anywhere; }
+.fingerprint-detail-probability { justify-self:end;font-variant-numeric:tabular-nums; }
+.fingerprint-tooltip-status { margin-bottom:4px; }
+.fingerprint-probability-tip { display:grid;gap:4px; }
+.fingerprint-probability-tip dl { margin:0; }
+.fingerprint-probability-tip dl > div { display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px; }
+.fingerprint-probability-tip dd { margin:0;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums; }
+@media (max-width:440px) {
+  .fingerprint-result-row { grid-template-columns:minmax(0,1fr) 6.25rem 6ch;gap:6px; }
+}
 .fingerprint-model-name,.fingerprint-heading > strong { min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
 .fingerprint-indicator,.fingerprint-verdict,.fingerprint-attempt { display:inline-flex;align-items:center;gap:5px;white-space:nowrap; }
 .fingerprint-verdict { border-radius:6px;padding:3px 6px;font-size:11px;font-weight:600;line-height:1.2; }

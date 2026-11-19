@@ -93,6 +93,54 @@ it("opens the full multi-model list, putting late-catalog results first without 
  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
  expect(fetcher).not.toHaveBeenCalled();
 });
+it("shows the scored candidates on hover and keeps all probability cells separate from status", async () => {
+ const scored: FingerprintRecord = {...record, result:{...record.result!, decision:"scored", probability:0, candidates:[
+  {model:"reference-a",display_name:"参考模型 A",probability:.818},
+  {model:"reference-b",display_name:"参考模型 B",probability:0},
+  {model:"reference-c",display_name:"参考模型 C",probability:null},
+ ]}};
+ const untested = {account_id:"one",group_id:1,model:"gemini-4-argon"};
+ mount(<FingerprintCell entries={[{target:scored,record:scored},{target:untested}]} supportedModels={[scored.model,untested.model]}/>);
+ const user = userEvent.setup();
+ await user.click(screen.getByRole("button",{name:/查看模型指纹/}));
+ const [scoredRow, untestedRow] = within(screen.getByRole("dialog")).getAllByRole("listitem");
+ expect(scoredRow.querySelector(".fingerprint-detail-status")).toHaveTextContent("不匹配");
+ expect(scoredRow.querySelector(".fingerprint-detail-probability")).toHaveTextContent("0.0%");
+ expect(untestedRow.querySelector(".fingerprint-detail-probability")).toHaveTextContent("—");
+ await user.hover(scoredRow);
+ const tip = await screen.findByRole("tooltip");
+ expect(tip).toHaveTextContent("请求模型的匹配概率：0.0%");
+ expect(tip).toHaveTextContent("参考模型 A81.8%");
+ expect(tip).toHaveTextContent("参考模型 B0.0%");
+ expect(tip).toHaveTextContent("参考模型 C—");
+ fireEvent.blur(scoredRow);
+ await waitFor(() => expect(screen.queryByRole("tooltip")).not.toBeInTheDocument());
+ fireEvent.focus(untestedRow);
+ expect(await screen.findByRole("tooltip")).toHaveTextContent("未检测，暂无可用匹配概率。");
+});
+it("does not turn partial rankings into probabilities or mix them with the previous score", async () => {
+ const previous = {...record.result!, decision:"scored" as const, candidates:[{model:"reference-old",display_name:"上次候选",probability:.88}]};
+ const partial: FingerprintRecord = {...record, model:"gpt-6.2-sol", result:{...record.result!, decision:"partial", status:"insufficient", probability:null, used_outputs:2,
+  candidates:[{model:"reference-partial",display_name:"本轮候选",probability:null}]
+ }};
+ const retry: FingerprintRecord = {...partial, model:record.model, state:"running", previous_result:previous};
+ mount(<FingerprintCell entries={[{target:partial,record:partial},{target:retry,record:retry}]} supportedModels={[partial.model,retry.model]}/>);
+ const user = userEvent.setup();
+ await user.click(screen.getByRole("button",{name:/查看模型指纹/}));
+ const dialog = screen.getByRole("dialog");
+ fireEvent.focus(within(dialog).getByText(partial.model).closest("li")!);
+ const pending = await screen.findByRole("tooltip");
+ expect(pending).toHaveTextContent("满 3 个有效样本后计算概率。");
+ expect(pending).not.toHaveTextContent(/\d+\.\d+%/);
+ const retryRow = within(dialog).getByText(retry.model).closest("li")!;
+ expect(retryRow).toHaveTextContent("检测中");
+ fireEvent.blur(within(dialog).getByText(partial.model).closest("li")!);
+ fireEvent.focus(retryRow);
+ const old = await screen.findByRole("tooltip");
+ expect(old).toHaveTextContent("上次请求模型的匹配概率：12.0%");
+ expect(old).toHaveTextContent("上次候选88.0%");
+ expect(old).not.toHaveTextContent("本轮候选");
+});
 it("only selects the supported models and fences configured stale evidence",()=>{
  const row={account:{id:""},target:{group_id:0},configured:{source_id:"fugue",provider:"native",models:["gpt-6-astra"],probe_fingerprint:"new"}} as ManagementRow;
  const targets=fingerprintTargets(row,["gpt-6-astra","gpt-6.2-sol","gpt-6.2-sol"]);expect(targets.map(x=>x.model)).toEqual(["gpt-6-astra","gpt-6.2-sol"]);

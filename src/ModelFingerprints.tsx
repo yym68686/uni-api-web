@@ -1,6 +1,7 @@
 import { useId, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Dialog from "@radix-ui/react-dialog";
+import * as Tooltip from "@radix-ui/react-tooltip";
 import { Check, ChevronDown, CircleHelp, Fingerprint, X } from "lucide-react";
 import { ApiError, controlRequest } from "./api";
 import { channelMembers, useChannelManagement } from "./channelManagement";
@@ -155,7 +156,7 @@ function fingerprintPresentation(record?: FingerprintRecord, unsupported = false
   const kind: VerdictKind | undefined = verdict?.status === "match" || verdict?.status === "mismatch" ? verdict.status : provisional;
   const message = [...new Set([record?.message, ...fingerprintFailures(result).map(failure => failure.detail)].filter(Boolean))].join("；");
   return { kind, prefix: verdict && verdict === record?.previous_result ? "上次" : provisional ? "暂判" : undefined,
-    status, provisional, probability: verdict?.probability ?? null,
+    status, provisional, probability: verdict?.probability ?? null, candidates: verdict?.candidates ?? [],
     label: unsupported ? "待更新" : fingerprintLabel(status, result), message };
 }
 
@@ -168,6 +169,49 @@ function FingerprintIndicator({presentation}: {presentation: ReturnType<typeof f
       {(status === "queued" || status === "running") && <Spinner small/>}{label}
     </small>}
   </span>;
+}
+
+type FingerprintSummary = {target: FingerprintTarget; presentation: ReturnType<typeof fingerprintPresentation>};
+
+function FingerprintProbabilityTip({item}: {item: FingerprintSummary}) {
+  const {target, presentation: {probability, candidates, prefix, label, message}} = item;
+  return <div className="fingerprint-probability-tip">
+    <strong>{target.model}</strong>
+    <div>{prefix === "上次" ? "上次请求模型的匹配概率" : "请求模型的匹配概率"}：{rate(probability)}</div>
+    {candidates.length > 0 && <>
+      <div className="muted">{prefix === "上次" ? "上次参考库候选概率" : "参考库候选概率"}</div>
+      <dl>{candidates.map(candidate => <div key={candidate.model}>
+        <dt>{candidate.display_name || candidate.model}</dt><dd>{rate(candidate.probability)}</dd>
+      </div>)}</dl>
+    </>}
+    {probability == null && <div className="muted">{label === "样本不足" ? "满 3 个有效样本后计算概率。" : `${label}，暂无可用匹配概率。`}</div>}
+    {message && <div className="muted">{message}</div>}
+  </div>;
+}
+
+function FingerprintDetailRow({item}: {item: FingerprintSummary}) {
+  const {target, presentation: {kind, prefix, status, label, probability}} = item;
+  const Icon = kind === "match" ? Check : X;
+  return <Tooltip.Root>
+    <Tooltip.Trigger asChild>
+      <li className="fingerprint-result-row fingerprint-detail-row" tabIndex={0}>
+        <strong className="fingerprint-model-name">{target.model}</strong>
+        <span className="fingerprint-detail-status">
+          {kind ? <span className={`fingerprint-verdict ${kind}`}><Icon size={12} aria-hidden="true"/>{prefix}{fingerprintLabels[kind]}</span> : <span className="muted">{label}</span>}
+          {kind && prefix && <small className="fingerprint-attempt muted">
+            {(status === "queued" || status === "running") && <Spinner small/>}{label}
+          </small>}
+        </span>
+        <small className={`fingerprint-detail-probability quality-probability ${fingerprintProbabilityClass(probability)}`}>{rate(probability)}</small>
+      </li>
+    </Tooltip.Trigger>
+    <Tooltip.Portal>
+      <Tooltip.Content className="tooltip" align="end" sideOffset={6} collisionPadding={12}>
+        <FingerprintProbabilityTip item={item}/>
+        <Tooltip.Arrow className="tooltip-arrow"/>
+      </Tooltip.Content>
+    </Tooltip.Portal>
+  </Tooltip.Root>;
 }
 
 export function FingerprintStatus({ record }: { record?: FingerprintRecord }) {
@@ -193,13 +237,9 @@ export function FingerprintCell({ entries, error, loading, supportedModels = [],
     <span className={label === "匹配" ? "check-status pass" : mismatch ? "check-status fail" : "muted"}>{label}</span>
     {recorded.length > 1 && <small className="muted" aria-label={`${recorded.length} 个模型有检测记录`}>{recorded.length}</small>}
   </>;
-  const detail = ({target, presentation}: typeof first) => <>
-    <strong className="fingerprint-model-name" title={target.model}>{target.model}</strong>
-    <FingerprintIndicator presentation={presentation}/>
-  </>;
   if (summaries.length === 1) return <Tip text={<>
-    <div className="fingerprint-result-row">{detail(first)}</div>
-    {first.presentation.message && <div className="muted">{first.presentation.message}</div>}
+    <div className="fingerprint-tooltip-status"><FingerprintIndicator presentation={first.presentation}/></div>
+    <FingerprintProbabilityTip item={first}/>
   </>}>
     <span className="fingerprint-cell">{summary}</span>
   </Tip>;
@@ -219,11 +259,11 @@ export function FingerprintCell({ entries, error, loading, supportedModels = [],
         <div className="compact-dialog-scroll fingerprint-details-scroll" tabIndex={0} role="region" aria-label="模型指纹列表">
           {recorded.length > 0 && <section>
             <h3>有检测记录 · {recorded.length}</h3>
-            <ul className="fingerprint-results-list">{recordedRecentFirst.map(item => <li className="fingerprint-result-row" key={fingerprintKey(item.target)}>{detail(item)}</li>)}</ul>
+            <ul className="fingerprint-results-list">{recordedRecentFirst.map(item => <FingerprintDetailRow key={fingerprintKey(item.target)} item={item}/>)}</ul>
           </section>}
           {unrecorded.length > 0 && <section>
             <h3>无检测记录 · {unrecorded.length}</h3>
-            <ul className="fingerprint-results-list">{unrecorded.map(item => <li className="fingerprint-result-row" key={fingerprintKey(item.target)}>{detail(item)}</li>)}</ul>
+            <ul className="fingerprint-results-list">{unrecorded.map(item => <FingerprintDetailRow key={fingerprintKey(item.target)} item={item}/>)}</ul>
           </section>}
         </div>
       </Dialog.Content>
