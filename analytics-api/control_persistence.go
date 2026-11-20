@@ -64,13 +64,17 @@ var errControlsBusy = errors.New("source control lock held")
 var errControlWaitTimeout = errors.New("渠道配置仍在同步，等待超时；未提交渠道配置")
 var errControlLockUnavailable = errors.New("无法取得渠道配置锁；未提交渠道配置")
 
+func controlLockID(source string) int64 {
+	sum := sha256.Sum256([]byte("console-controls:" + source))
+	return int64(binary.BigEndian.Uint64(sum[:8]))
+}
+
 func (s *controlStore) lockControls(ctx context.Context, source string) (func(), error) {
 	c, e := s.controlLocks.Conn(ctx)
 	if e != nil {
 		return nil, e
 	}
-	sum := sha256.Sum256([]byte("console-controls:" + source))
-	id := int64(binary.BigEndian.Uint64(sum[:8]))
+	id := controlLockID(source)
 	var ok bool
 	if e = c.QueryRowContext(ctx, `SELECT pg_try_advisory_lock($1)`, id).Scan(&ok); e != nil {
 		// A canceled query may have acquired the session lock before its

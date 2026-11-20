@@ -303,7 +303,7 @@ func (s *Service) subImportChannel(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// A separate business key keeps production traffic and detection usage isolated.
-	call, groups, err := s.subPanel(ctx, in.AccountID, base, job, auth)
+	call, groups, err := s.subPanel(context.WithValue(ctx, newAPIImportSourceContext{}, src.ID), in.AccountID, base, job, auth)
 	if err != nil {
 		http.Error(w, err.Error(), 400)
 		return

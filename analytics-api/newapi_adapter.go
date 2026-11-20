@@ -30,6 +30,7 @@ type newAPIToken struct {
 	Remain    float64 `json:"remain_quota"`
 	Used      float64 `json:"used_quota"`
 	Created   int64   `json:"created_time"`
+	Accessed  int64   `json:"accessed_time"`
 	Expires   int64   `json:"expired_time"`
 }
 
@@ -68,15 +69,23 @@ func (s *Service) newAPIGroups(ctx context.Context, account, base string) ([]sub
 		}
 		groups = append(groups, subRemoteGroup{ID: id, Name: name, Platform: "openai", Rate: rate, Peak: unknown})
 	}
+	if len(names) > 0 {
+		if err := s.clearNewAPIPresentObservations(ctx, account, base, names); err != nil {
+			return nil, err
+		}
+	}
 	return groups, nil
 }
-func (s *Service) newAPIPanel(ctx context.Context, account, base string) (func(string, string, any, any, string) error, []subRemoteGroup, error) {
+
+type newAPIKeyJobContext struct{}
+
+func (s *Service) newAPIPanel(ctx context.Context, account, base, job string) (func(string, string, any, any, string) error, []subRemoteGroup, error) {
 	groups, err := s.newAPIGroups(ctx, account, base)
 	if err != nil {
 		return nil, nil, err
 	}
 	call := func(method, path string, body, out any, idem string) error {
-		return s.newAPIAdapterCall(ctx, account, base, method, path, body, out)
+		return s.newAPIAdapterCall(context.WithValue(ctx, newAPIKeyJobContext{}, job), account, base, method, path, body, out)
 	}
 	return call, groups, nil
 }
@@ -229,21 +238,31 @@ func (s *Service) newAPIKeys(ctx context.Context, account, base, search string, 
 	return out, total, nil
 }
 func (s *Service) newAPIListTokens(ctx context.Context, account, base string) ([]newAPIToken, error) {
+	return s.newAPIReadTokenInventory(ctx, account, base, false)
+}
+
+func (s *Service) newAPIReadTokenInventory(ctx context.Context, account, base string, strict bool) ([]newAPIToken, error) {
 	tokens := []newAPIToken{}
 	matched := map[int64]bool{}
 	progress := keyPageProgress{}
+	total := -1
 	for upstreamPage := 1; ; upstreamPage++ {
 		q := url.Values{"p": {strconv.Itoa(upstreamPage)}, "page_size": {"100"}}
 		var list struct {
 			Items []newAPIToken `json:"items"`
-			Total int           `json:"total"`
+			Total *int          `json:"total"`
 		}
 		if err := s.newAPICall(ctx, account, base, "GET", "/api/token/?"+q.Encode(), nil, &list); err != nil {
 			return nil, err
 		}
-		if list.Items == nil || list.Total < 0 {
+		pageTotal := 0
+		if list.Total != nil {
+			pageTotal = *list.Total
+		}
+		if list.Items == nil || pageTotal < 0 || strict && (list.Total == nil || total >= 0 && total != pageTotal) {
 			return nil, errors.New("站点令牌分页数据无效")
 		}
+		total = pageTotal
 		identities := make([]subRemoteKey, len(list.Items))
 		for i, token := range list.Items {
 			identities[i].ID = token.ID
@@ -252,12 +271,18 @@ func (s *Service) newAPIListTokens(ctx context.Context, account, base string) ([
 			return nil, err
 		}
 		for _, token := range list.Items {
+			if strict && (token.ID <= 0 || matched[token.ID]) {
+				return nil, errors.New("站点令牌清单有重复或无效记录")
+			}
 			if !matched[token.ID] {
 				matched[token.ID] = true
 				tokens = append(tokens, token)
 			}
 		}
-		if len(list.Items) == 0 || (list.Total > 0 && len(progress) >= list.Total) || (list.Total == 0 && len(list.Items) < 100) {
+		if len(list.Items) == 0 || (total > 0 && len(progress) >= total) || (total == 0 && len(list.Items) < 100) {
+			if strict && len(tokens) != total {
+				return nil, errors.New("站点令牌清单不完整")
+			}
 			break
 		}
 	}
@@ -305,7 +330,8 @@ func (s *Service) newAPIEnsureKey(ctx context.Context, account, base, name strin
 	if err := s.newAPICall(ctx, account, base, "GET", "/api/user/self", nil, &profile); err != nil {
 		return subRemoteKey{}, err
 	}
-	err := s.newAPICreateOwnedKey(ctx, account, base, "", name, remote)
+	job, _ := ctx.Value(newAPIKeyJobContext{}).(string)
+	err := s.newAPICreateWithReclaim(ctx, account, base, job, name, remote)
 	var upstream *subRemoteError
 	if err != nil && !errors.Is(err, errNewAPIKeyCreateUnconfirmed) && !errors.As(err, &upstream) {
 		return subRemoteKey{}, err

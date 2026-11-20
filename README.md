@@ -193,6 +193,22 @@ made in either release and blocks completion on conflicts. Legacy bucket setting
 are ignored at runtime except for an activation guard preventing an unprepared
 upgrade. See [the cutover design](docs/postgresql-only-storage.md).
 
+## New API detection keys
+
+Synchronizing a site without selected models only refreshes metadata. A selected
+group reuses its detection key; if it has none, the actual check requests one.
+When the panel explicitly reports the account's token-count limit, the console
+can reclaim at most one previously acknowledged, console-created detection key
+per job. Its group must have been absent in successful snapshots at least seven
+days apart and still be absent. The console verifies the remote key and checks
+for recent usage, unfinished receipts and live or retained route references.
+Retirement does not remove historical results or spend records.
+
+Unverified legacy keys, user keys, and business routing keys are never
+automatically deleted. If cleanup cannot be verified, the operation stops;
+check the account's token list in the original site. A confirmed deletion permits
+one key-creation retry; an uncertain delete is not replayed.
+
 ## Build and verify
 
 ```sh

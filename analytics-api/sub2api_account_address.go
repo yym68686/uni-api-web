@@ -71,7 +71,7 @@ func (s *Service) subSaveSiteAddress(w http.ResponseWriter, r *http.Request, ctx
 		return
 	}
 	for _, step := range []struct{ stage, query string }{
-		{"reset_targets", `UPDATE console_sub_targets SET active=false,state='idle',message='',remote_key_id=0,encrypted_key='',routing_key_id=0,encrypted_routing_key='',result=NULL,billing=NULL,compaction=NULL,compaction_state='idle',tool_use=NULL,tool_use_state='idle' WHERE account_id=$1`},
+		{"reset_targets", `UPDATE console_sub_targets SET active=false,state='idle',message='',remote_key_id=0,encrypted_key='',routing_key_id=0,encrypted_routing_key='',newapi_missing_since=NULL,newapi_last_missing_at=NULL,result=NULL,billing=NULL,compaction=NULL,compaction_state='idle',tool_use=NULL,tool_use_state='idle' WHERE account_id=$1`},
 		// Models here are the old site's current catalog, not history. Sync
 		// rebuilds them. Deleting cascades to both projections instead of
 		// running the expensive summary/signal upserts for every old row.

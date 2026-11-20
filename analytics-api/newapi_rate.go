@@ -25,6 +25,8 @@ func newAPIOperation(method, path string) string {
 		return "账号读取"
 	case u.Path == "/api/token/" && method == "POST":
 		return "密钥创建"
+	case strings.HasPrefix(u.Path, "/api/token/") && method == "DELETE":
+		return "检测密钥清理"
 	case method == "POST" && newAPIKeyReadPath(u.Path):
 		return "密钥读取"
 	case strings.HasPrefix(u.Path, "/api/token/"):

@@ -857,7 +857,12 @@ func (s *Service) subRunJob(parent context.Context, claimed subJob) {
 		}
 	}
 	if err == nil && !syncOnly && ctx.Err() == nil && (kind == "check" || kind == "quality") {
-		err = s.subTestTargets(ctx, id, base, job, kind == "quality")
+		err = s.subPrepareNewAPIManualKeys(ctx, id, base, job, kind)
+		if err == nil {
+			err = s.subTestTargets(ctx, id, base, job, kind == "quality")
+		}
+	} else if err == nil && ctx.Err() == nil && (kind == "compaction" || kind == "tool_use") {
+		err = s.subPrepareNewAPIManualKeys(ctx, id, base, job, kind)
 	}
 	if err == nil && !syncOnly && ctx.Err() == nil && (kind == "check" || kind == "sync" && claimed.phase != "tool_use" || kind == "compaction") {
 		if kind == "sync" && claimed.phase != "compaction" {
@@ -923,7 +928,7 @@ func (s *Service) subPanel(ctx context.Context, id, base, job, encrypted string)
 		return nil, nil, context.Canceled
 	}
 	if kind == "newapi" {
-		return s.newAPIPanel(ctx, id, base)
+		return s.newAPIPanel(ctx, id, base, job)
 	}
 	authCtx, authCancel := context.WithTimeout(ctx, 15*time.Second)
 	defer authCancel()
@@ -1100,7 +1105,28 @@ func (s *Service) subSynchronize(ctx context.Context, id, base, job, encrypted s
 		}
 	}
 	if newAPI {
-		return s.subSyncNewAPIKeys(ctx, id, base, job, groups, userRates, ratesKnown)
+		if plan == nil || !plan.initialized {
+			run := ""
+			if plan != nil {
+				run = plan.run
+			}
+			pending, err = s.subPendingKeyGroups(ctx, id, run)
+			if err != nil {
+				return err
+			}
+			needed := make(map[int64]bool, len(pending))
+			for _, group := range pending {
+				needed[group.ID] = true
+			}
+			selected := groups[:0]
+			for _, group := range groups {
+				if needed[group.ID] {
+					selected = append(selected, group)
+				}
+			}
+			groups = selected
+		}
+		return s.subSyncNewAPIKeys(ctx, id, base, job, groups, userRates, ratesKnown, false)
 	}
 	// Only keys with our exact deterministic names are adopted. Existing user keys
 	// are never changed; pagination and idempotency make interrupted creation recoverable.
@@ -1244,6 +1270,22 @@ func (s *Service) subDiscoverSync(ctx context.Context, id, base, job string, gro
 	if err = queueSubSyncModels(ctx, tx, id, groups, groupModels); err != nil {
 		log.Printf("sub_sync_write_failed stage=queue_models class=%s", databaseErrorClass(err))
 		return errors.New("模型保存失败")
+	}
+	if newAPI && len(groups) > 0 {
+		if err = recordNewAPIGroupObservations(ctx, tx, id); err != nil {
+			return errors.New("分组观察记录保存失败")
+		}
+		billing := make(map[string]subBilling, len(groups))
+		for _, g := range groups {
+			billing[strconv.FormatInt(g.ID, 10)] = syncGroupBilling(g, nil, true)
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE console_sub_targets t
+ SET state='done',sync_key_state='not_needed',billing=b.value
+ FROM jsonb_each($3::jsonb) b WHERE t.account_id=$1 AND t.active AND t.sync_run_id=$2 AND t.group_id::text=b.key
+ AND NOT EXISTS(SELECT 1 FROM console_sub_models m WHERE m.account_id=t.account_id AND m.group_id=t.group_id AND m.sync_run_id=$2 AND m.state='queued')`,
+			id, run, mustJSON(billing)); err != nil {
+			return errors.New("保存按需检测计划失败")
+		}
 	}
 	if plan := subPlan(ctx); plan != nil {
 		if _, err = tx.ExecContext(ctx, `UPDATE console_sub_accounts SET sync_plan_ready=true,sync_phase='preparing',

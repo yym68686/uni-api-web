@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -60,6 +61,14 @@ func (s *Service) newAPICreateOwnedKey(ctx context.Context, account, base, job, 
 	saveCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err == nil {
+		if strings.HasPrefix(name, "uni-console-check-"+account+"-") {
+			if _, saveErr := s.control.db.ExecContext(saveCtx, `UPDATE console_site_key_creates
+ SET acknowledged_at=clock_timestamp(),acknowledged_base=$4 WHERE account_id=$1 AND name=$2 AND created_at=$3`,
+				account, name, intent, base); saveErr != nil {
+				// The key can still be used, but an unproven key is not eligible for automatic reclamation.
+				log.Printf("event=site_test_key_ownership_ack_failed class=%s", databaseErrorClass(saveErr))
+			}
+		}
 		if _, saveErr := s.control.db.ExecContext(saveCtx, `UPDATE console_site_detection_limits
  SET create_rate_failures=0 WHERE scope=$1 AND create_rate_failures<>0`, scope); saveErr != nil {
 			log.Printf("event=site_key_create_backoff_reset_failed class=%s", databaseErrorClass(saveErr))

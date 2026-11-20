@@ -46,7 +46,10 @@ func readSubGroupAccess(groups []subRemoteGroup, group, key int64, read func(str
 // Update only discovery metadata, fenced against concurrent sync/re-login.
 // Existing gateway bindings and historical check results remain intact.
 func (s *Service) saveSubGroupAccess(ctx context.Context, account string, group int64, job string, synced int64, access subGroupAccess) error {
-	_, err := s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET active=$3,message=CASE WHEN NOT $3 THEN $4 WHEN message IN ($7,$8) THEN '' ELSE message END WHERE account_id=$1 AND group_id=$2 AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$5 AND synced_at=$6)`, account, group, access.Available, access.Message, job, synced, subGroupDisabledMessage, subGroupUnavailableMessage)
+	_, err := s.control.db.ExecContext(ctx, `UPDATE console_sub_targets SET active=$3,message=CASE WHEN NOT $3 THEN $4 WHEN message IN ($7,$8) THEN '' ELSE message END,
+ newapi_missing_since=CASE WHEN $3 THEN NULL ELSE newapi_missing_since END,
+ newapi_last_missing_at=CASE WHEN $3 THEN NULL ELSE newapi_last_missing_at END
+ WHERE account_id=$1 AND group_id=$2 AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$5 AND synced_at=$6)`, account, group, access.Available, access.Message, job, synced, subGroupDisabledMessage, subGroupUnavailableMessage)
 	return err
 }
 

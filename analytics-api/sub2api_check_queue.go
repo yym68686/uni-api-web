@@ -23,7 +23,8 @@ func subSelectionModels(target subSelection, kind string) []string {
 // Only duplicate work is rejected, never another group or detection kind.
 func (s *Service) subEnqueueCheck(ctx context.Context, tx *sql.Tx, target subSelection, kind, model string) (int, error) {
 	var active, duplicate bool
-	err := tx.QueryRowContext(ctx, `SELECT active AND encrypted_key<>'',
+	err := tx.QueryRowContext(ctx, `SELECT active AND (encrypted_key<>'' OR EXISTS(
+     SELECT 1 FROM console_sub_accounts a WHERE a.id=t.account_id AND a.provider_kind='newapi')),
 	 CASE WHEN $3='compaction' THEN compaction_state IN ('queued','running')
 	 WHEN $3='tool_use' THEN tool_use_state IN ('queued','running')
 	 ELSE EXISTS(SELECT 1 FROM console_sub_models m WHERE m.account_id=t.account_id AND m.group_id=t.group_id AND m.model=$4 AND m.state IN ('queued','running')) END

@@ -208,7 +208,9 @@ func (s *Service) subSaveSyncKey(ctx context.Context, id, job string, group int6
 		return errors.New("测试 key 加密失败")
 	}
 	n, err := s.subProbeWrite(ctx, `UPDATE console_sub_targets t SET remote_key_id=$3,encrypted_key=$4,billing=$6,
- sync_key_state='ready',state=CASE WHEN $7 OR EXISTS(SELECT 1 FROM console_channel_detection_settings d JOIN console_sub_accounts a ON a.owner=d.owner WHERE a.id=t.account_id AND d.account_id=t.account_id AND d.group_id=t.group_id) THEN 'done' ELSE state END
+ sync_key_state='ready',state=CASE WHEN $7 OR (t.state='error' AND t.sync_key_state='error')
+ OR EXISTS(SELECT 1 FROM console_channel_detection_settings d JOIN console_sub_accounts a ON a.owner=d.owner WHERE a.id=t.account_id AND d.account_id=t.account_id AND d.group_id=t.group_id) THEN 'done' ELSE state END,
+ message=CASE WHEN t.state='error' AND t.sync_key_state='error' THEN '' ELSE t.message END
  WHERE account_id=$1 AND group_id=$2 AND EXISTS(SELECT 1 FROM console_sub_accounts WHERE id=$1 AND job_id=$5 AND state='running'
  AND (sync_lease_until IS NULL OR sync_lease_until>clock_timestamp()) FOR SHARE)`, id, group, key.ID, enc, job, mustJSON(billing), subSyncMetadataOnly(ctx))
 	if err != nil {

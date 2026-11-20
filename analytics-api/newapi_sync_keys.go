@@ -12,15 +12,19 @@ type newSyncKeyGroup struct {
 	savedID int64
 	saved   string
 	key     subRemoteKey
+	token   newAPIToken
 }
 
 // List token metadata once before creation and once after it, rather than
 // scanning every page twice for each missing group. The second read is the
 // authority even when a create response is lost. Only exact owned bindings
 // may be adopted or passed to either reveal endpoint.
-func (s *Service) subSyncNewAPIKeys(ctx context.Context, account, base, job string, groups []subRemoteGroup, rates map[string]float64, ratesKnown bool) error {
+func (s *Service) subSyncNewAPIKeys(ctx context.Context, account, base, job string, groups []subRemoteGroup, rates map[string]float64, ratesKnown, manual bool) error {
 	failures := map[string]int{}
 	if len(groups) == 0 {
+		if manual {
+			return nil
+		}
 		return s.subFinishSyncKeys(ctx, account, job, failures)
 	}
 	index := make(map[int64]*newSyncKeyGroup, len(groups))
@@ -72,16 +76,24 @@ func (s *Service) subSyncNewAPIKeys(ctx context.Context, account, base, job stri
 	var missing, reveal []*newSyncKeyGroup
 	fail := func(g *newSyncKeyGroup, e error) error {
 		failures[subTestKeyFailureKind(e)]++
+		if manual {
+			return s.subNewAPIManualKeyFailed(ctx, account, job, g.group.ID, e.Error())
+		}
 		return s.subSyncKeyFailed(ctx, account, job, g.group.ID, e.Error())
 	}
 	save := func(g *newSyncKeyGroup) error {
-		return s.subSaveSyncKey(ctx, account, job, g.group.ID, g.key, syncGroupBilling(g.group, rates, ratesKnown))
+		if err := s.subSaveSyncKey(ctx, account, job, g.group.ID, g.key, syncGroupBilling(g.group, rates, ratesKnown)); err != nil {
+			return err
+		}
+		s.rememberNewAPITestKey(ctx, account, base, job, g.group.ID, g.token, auth.UserID)
+		return nil
 	}
 	adopt := func(g *newSyncKeyGroup, found []newAPIToken) error {
 		if g.remote == "" || len(found) != 1 || found[0].Group != g.remote || found[0].ID <= 0 || (found[0].UserID != 0 && found[0].UserID != auth.UserID) {
 			return fail(g, errors.New("同名专用 key 的账号或分组不匹配，或存在重复"))
 		}
 		token := found[0]
+		g.token = token
 		g.key = newAPIKeyMetadata(token, g.group.ID, newAPIKeyValue(token.Key), auth.QuotaPerUnit)
 		if err := subTestKeyStateError(g.key); err != nil {
 			return fail(g, err)
@@ -120,17 +132,24 @@ func (s *Service) subSyncNewAPIKeys(ctx context.Context, account, base, job stri
 		if profile.ID != auth.UserID {
 			return errors.New("站点会话身份变化，无法创建测试密钥")
 		}
+		var capacityRejection error
 		for _, g := range missing {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
 			name := subKeyName(account, g.group.ID)
-			e := s.newAPICreateOwnedKey(ctx, account, base, job, name, g.remote)
+			e := capacityRejection
+			if e == nil {
+				e = s.newAPICreateWithReclaim(ctx, account, base, job, name, g.remote)
+			}
 			if createPause = syncRatePause(e, waitingKeyCreate); createPause != nil {
 				break
 			}
 			var remote *subRemoteError
 			if errors.As(e, &remote) && remote.Status >= 400 && remote.Status < 500 {
+				if remote.tokenLimitReached {
+					capacityRejection = e // Don't keep hitting the same confirmed capacity limit for every group.
+				}
 				rejections[g.group.ID] = &subTestKeyError{"create_failed", "创建专用测试 key 失败：" + e.Error()}
 				if remote.Status == 401 || remote.Status == 403 {
 					return e
@@ -218,6 +237,13 @@ func (s *Service) subSyncNewAPIKeys(ctx context.Context, account, base, job stri
 	}
 	if createPause != nil {
 		return createPause
+	}
+	if manual {
+		if message := subTestKeyFailureSummary(failures); message != "" {
+			_, err := s.control.db.ExecContext(ctx, `UPDATE console_sub_accounts SET message=$3 WHERE id=$1 AND job_id=$2`, account, job, message)
+			return err
+		}
+		return nil
 	}
 	return s.subFinishSyncKeys(ctx, account, job, failures)
 }

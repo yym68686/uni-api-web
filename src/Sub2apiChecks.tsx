@@ -1173,7 +1173,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
     if ((kind === "compaction" || kind === "tool-use") && model && !isCapabilityCheckModel(model)) return false;
     const native = !account.id && configured;
     if (native ? !channelMembers(configured).length
-      : !target.active || !target.key_id || target.state === "error") return false;
+      : !target.active || (account.provider_kind !== "newapi" && (!target.key_id || target.state === "error"))) return false;
     return !(kind === "check" && !requestedModels().length) && !checkBusy(account, target, kind, configured);
   };
   type CheckSelection = { account: SubAccount; target: SubTarget; configured?: ManagedChannel }[];
@@ -1230,7 +1230,8 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
     if (!detectionEnabled(row, detection.disabled)) return [];
     if (row.account.id) {
       const account = progressByAccount.get(row.account.id) || row.account;
-      if (accountBusy(row.account.id) || pending(account.state) || !row.target.active || !row.target.key_id || row.target.state === "error") return [];
+      if (accountBusy(row.account.id) || pending(account.state) || !row.target.active ||
+          (row.account.provider_kind !== "newapi" && (!row.target.key_id || row.target.state === "error"))) return [];
       return fingerprintTargets(row, fingerprintModelsToCheck);
     }
     if (!row.configured) return [];

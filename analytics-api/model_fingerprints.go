@@ -167,7 +167,8 @@ func (s *Service) queueModelFingerprints(w http.ResponseWriter, r *http.Request)
 		}
 		var allowed bool
 		if t.Account != "" {
-			err = tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM console_sub_targets t JOIN console_sub_accounts a ON a.id=t.account_id WHERE a.owner=$1 AND a.id=$2 AND t.group_id=$3 AND t.active AND t.encrypted_key<>'')`, owner, t.Account, t.Group).Scan(&allowed)
+			err = tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM console_sub_targets t JOIN console_sub_accounts a ON a.id=t.account_id
+ WHERE a.owner=$1 AND a.id=$2 AND t.group_id=$3 AND t.active AND (t.encrypted_key<>'' OR a.provider_kind='newapi'))`, owner, t.Account, t.Group).Scan(&allowed)
 		} else {
 			err = tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM console_sources WHERE id=$1 AND enabled)`, t.Source).Scan(&allowed)
 		}
@@ -220,9 +221,20 @@ func (s *Service) prepareFingerprint(ctx context.Context, t fingerprintTarget) (
 	client := *subHTTP
 	client.Timeout = 250 * time.Second
 	if t.Account != "" {
-		var base, encrypted string
-		err := s.control.db.QueryRowContext(ctx, `SELECT a.base,t.encrypted_key FROM console_sub_targets t JOIN console_sub_accounts a ON a.id=t.account_id WHERE t.account_id=$1 AND t.group_id=$2 AND t.active AND t.encrypted_key<>''`, t.Account, t.Group).Scan(&base, &encrypted)
-		if err != nil {
+		var base, encrypted, kind string
+		read := func() error {
+			return s.control.db.QueryRowContext(ctx, `SELECT a.base,t.encrypted_key,a.provider_kind FROM console_sub_targets t
+ JOIN console_sub_accounts a ON a.id=t.account_id WHERE t.account_id=$1 AND t.group_id=$2 AND t.active`,
+				t.Account, t.Group).Scan(&base, &encrypted, &kind)
+		}
+		err := read()
+		if err == nil && kind == "newapi" && encrypted == "" {
+			if err := s.subPrepareNewAPIFingerprintKey(ctx, t.Account, base, t.Group); err != nil {
+				return plan, err
+			}
+			err = read()
+		}
+		if err != nil || encrypted == "" {
 			return plan, errors.New("站点渠道已不可用")
 		}
 		key, err := s.control.decrypt(encrypted)
