@@ -17,7 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-func migrationTestDB(t *testing.T) *sql.DB {
+func isolatedControlTestDSN(t *testing.T) string {
 	t.Helper()
 	dsn := os.Getenv("TEST_CONTROL_DATABASE_URL")
 	if dsn == "" {
@@ -27,11 +27,13 @@ func migrationTestDB(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { base.Close() })
 	schema := "migration_" + strings.ToLower(randomID()[:12])
 	quoted := pgx.Identifier{schema}.Sanitize()
 	if _, err = base.Exec("CREATE SCHEMA " + quoted); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { base.Exec("DROP SCHEMA " + quoted + " CASCADE") })
 	u, err := url.Parse(dsn)
 	if err != nil || u.Scheme == "" {
 		t.Fatal("test DSN must be a PostgreSQL URL")
@@ -39,15 +41,16 @@ func migrationTestDB(t *testing.T) *sql.DB {
 	q := u.Query()
 	q.Set("search_path", quoted)
 	u.RawQuery = q.Encode()
-	db, err := sql.Open("pgx", u.String())
+	return u.String()
+}
+
+func migrationTestDB(t *testing.T) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("pgx", isolatedControlTestDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		db.Close()
-		base.Exec("DROP SCHEMA " + quoted + " CASCADE")
-		base.Close()
-	})
+	t.Cleanup(func() { db.Close() })
 	return db
 }
 

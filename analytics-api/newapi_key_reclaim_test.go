@@ -12,6 +12,9 @@ import (
 )
 
 func TestNewAPIReclaimAtCapacity(t *testing.T) {
+	// Route safety deliberately scans all saved sources, including disabled
+	// ones. Other integration tests use different master keys for fixtures.
+	t.Setenv("TEST_CONTROL_DATABASE_URL", isolatedControlTestDSN(t))
 	for _, tc := range []struct {
 		name, block              string
 		deleteUnknown            bool
@@ -204,6 +207,7 @@ func TestNewAPIReclaimAtCapacity(t *testing.T) {
 }
 
 func TestNewAPIMetadataSyncCreatesKeyOnlyWhenChecking(t *testing.T) {
+	t.Setenv("TEST_CONTROL_DATABASE_URL", isolatedControlTestDSN(t))
 	s, account, _ := newAPITestService(t)
 	ctx := context.Background()
 	db := s.control.db
