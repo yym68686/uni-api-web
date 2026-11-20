@@ -78,6 +78,8 @@ const newAPICleanupCandidates = `
  AND NOT EXISTS(SELECT 1 FROM console_model_fingerprints f WHERE f.account_id=$1 AND f.group_id=t.group_id AND f.state IN ('queued','running'))
  AND NOT EXISTS(SELECT 1 FROM console_sub_usage u WHERE u.account_id=$1 AND (u.key_id=t.remote_key_id OR u.group_id=t.group_id)
    AND u.status IN ('pending','missing'))
+ AND NOT EXISTS(SELECT 1 FROM console_newapi_key_reclaims r WHERE r.account_id=$1 AND r.base=$2 AND r.remote_key_id=t.remote_key_id
+   AND r.state IN ('deleted','rejected'))
  AND ($3::bigint=0 OR t.remote_key_id=$3)`
 
 func readNewAPIReclaimCandidates(ctx context.Context, db controlQueryDB, account, base string, key int64) ([]newAPIReclaimCandidate, error) {
@@ -400,6 +402,9 @@ func (s *Service) sendNewAPIReclaim(ctx context.Context, account, base, job, sco
 	if ctx.Err() != nil {
 		return false, errors.New("清理超时，未发送删除")
 	}
+	if err := s.siteDetectionCooldown(ctx, newAPIKeyCreateScope(base), waitingKeyCreate); err != nil {
+		return false, errors.New("站点正在冷却或无法核对冷却状态，未发送删除")
+	}
 	writeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	sent = true
 	err = newAPIJSON(writeCtx, base, http.MethodDelete, path, &auth, nil, nil)
@@ -409,6 +414,14 @@ func (s *Service) sendNewAPIReclaim(ctx context.Context, account, base, job, sco
 		var remote *subRemoteError
 		if errors.As(err, &remote) && remote.upstreamHTTPStatus >= 400 && remote.upstreamHTTPStatus < 500 && remote.upstreamHTTPStatus != 404 {
 			s.setNewAPIReclaimState(account, scope, "rejected")
+			if pause := syncRatePause(remote, waitingKeyCreate); pause != nil {
+				writeCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				if err := s.saveSiteDetectionCooldown(writeCtx, newAPIKeyCreateScope(base), pause.until, false); err != nil {
+					log.Printf("event=site_test_key_reclaim_cooldown_failed class=%s", databaseErrorClass(err))
+				}
+				cancel()
+				return false, errors.New("清理触发站点限流，已停止本轮重试")
+			}
 			return false, errors.New("站点拒绝清理检测 Key，未重试创建")
 		}
 		return false, errors.New("检测 Key 删除结果待核对，不会重放删除或重试创建")

@@ -33,6 +33,8 @@ func TestNewAPIReclaimAtCapacity(t *testing.T) {
 		{"secret identity mismatch vetoes cleanup", "secret", false, 0, 1},
 		{"temporary channel vetoes cleanup", "live_route", false, 0, 1},
 		{"managed draft vetoes cleanup", "draft", false, 0, 1},
+		{"a prior rejection does not hide other eligible keys", "previous_reject", false, 1, 2},
+		{"DELETE throttling ends the attempt and shares cooldown", "delete_429", false, 1, 1},
 		{"incomplete token inventory vetoes cleanup", "incomplete", false, 0, 1},
 		{"stolen job lease vetoes cleanup", "stopped", false, 0, 1},
 		{"uncertain DELETE is never replayed", "", true, 1, 1},
@@ -78,6 +80,7 @@ func TestNewAPIReclaimAtCapacity(t *testing.T) {
 				return group
 			}
 			retired := add("old", 51, created+1, tc.block != "legacy")
+			candidateID, candidateName, candidateGroup := int64(51), "old", retired
 			// False look-alikes and business keys are never candidates even when
 			// they have older last-used timestamps.
 			add("manual", 50, created, false)
@@ -97,6 +100,11 @@ func TestNewAPIReclaimAtCapacity(t *testing.T) {
 				groups["old"] = map[string]any{"ratio": 1}
 			case "used":
 				tokens[0].Accessed = time.Now().Unix()
+			case "previous_reject":
+				exec(`INSERT INTO console_newapi_key_reclaims(account_id,base,attempt_scope,group_id,remote_key_id,state)
+ VALUES($1,$2,'earlier-job',$3,51,'rejected')`, account, base, retired)
+				candidateID, candidateName = 52, "next"
+				candidateGroup = add(candidateName, candidateID, created+2, true)
 			case "live_route", "draft":
 				source := account + "-source"
 				encrypted, _ := s.control.encrypt("fixture-gateway-administrator")
@@ -114,6 +122,7 @@ func TestNewAPIReclaimAtCapacity(t *testing.T) {
 			}
 			exec(`INSERT INTO console_sub_spend_logs(account_id,key_id,log_id,at_ms,actual_cost) VALUES($1,51,1,$2,0.1)`, account, (created+1)*1000)
 			deletes, creates, readInventory := 0, 0, 0
+			candidatePath := "/api/token/" + strconv.FormatInt(candidateID, 10)
 			withSpendUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch {
 				case r.URL.Path == "/api/user/self/groups":
@@ -138,19 +147,25 @@ func TestNewAPIReclaimAtCapacity(t *testing.T) {
 					} else {
 						writeJSON(w, 200, map[string]any{"success": false, "message": "Maximum number of tokens reached (50)"})
 					}
-				case r.URL.Path == "/api/token/51" && r.Method == http.MethodGet:
+				case r.URL.Path == candidatePath && r.Method == http.MethodGet:
 					if tc.block == "stopped" {
 						exec(`UPDATE console_sub_accounts SET job_id='another-job' WHERE id=$1`, account)
 					}
-					newAPIOK(w, tokens[0])
-				case r.URL.Path == "/api/token/51/key" && r.Method == http.MethodPost:
-					key := "fixture-old"
+					for _, token := range tokens {
+						if token.ID == candidateID {
+							newAPIOK(w, token)
+							return
+						}
+					}
+					http.NotFound(w, r)
+				case r.URL.Path == candidatePath+"/key" && r.Method == http.MethodPost:
+					key := "fixture-" + candidateName
 					if tc.block == "secret" {
 						key = "not-the-saved-secret"
 					}
 					newAPIOK(w, map[string]string{"key": key})
 				case r.URL.Path == "/api/log/self":
-					if r.URL.Query().Get("token_name") != subKeyName(account, retired) || r.URL.Query().Get("start_timestamp") == "" {
+					if r.URL.Query().Get("token_name") != subKeyName(account, candidateGroup) || r.URL.Query().Get("start_timestamp") == "" {
 						t.Error("recent usage must be scoped to the candidate and observation window")
 					}
 					items := []newAPILog{}
@@ -160,12 +175,20 @@ func TestNewAPIReclaimAtCapacity(t *testing.T) {
 					newAPIOK(w, map[string]any{"total": len(items), "items": items})
 				case r.URL.Path == "/v1/channel-settings/providers":
 					writeJSON(w, 200, map[string]any{"providers": []configuredProvider{{Provider: "manual-test", API: "sk-fixture-old", Temporary: true}}})
-				case r.URL.Path == "/api/token/51" && r.Method == http.MethodDelete:
+				case r.URL.Path == candidatePath && r.Method == http.MethodDelete:
 					deletes++
 					if tc.deleteUnknown {
 						w.WriteHeader(502)
+					} else if tc.block == "delete_429" {
+						w.Header().Set("Retry-After", "120")
+						w.WriteHeader(429)
 					} else {
-						tokens = tokens[1:]
+						for i, token := range tokens {
+							if token.ID == candidateID {
+								tokens = append(tokens[:i], tokens[i+1:]...)
+								break
+							}
+						}
 						newAPIOK(w, nil)
 					}
 				default:
@@ -187,12 +210,18 @@ func TestNewAPIReclaimAtCapacity(t *testing.T) {
 				var key, facts int64
 				var state string
 				if err := db.QueryRow(`SELECT t.remote_key_id,r.state,(SELECT count(*) FROM console_sub_spend_logs WHERE account_id=$1 AND key_id=51)
- FROM console_sub_targets t JOIN console_newapi_key_reclaims r USING(account_id) WHERE t.account_id=$1 AND t.group_id=$2`,
-					account, retired).Scan(&key, &state, &facts); err != nil || key != 0 || state != "deleted" || facts != 1 {
+ FROM console_sub_targets t JOIN console_newapi_key_reclaims r USING(account_id) WHERE t.account_id=$1 AND t.group_id=$2 AND r.attempt_scope=$3`,
+					account, candidateGroup, job).Scan(&key, &state, &facts); err != nil || key != 0 || state != "deleted" || facts != 1 {
 					t.Fatalf("audit, credential or history: id=%d state=%s facts=%d err=%v", key, state, facts, err)
 				}
 				if err := s.newAPICreateWithReclaim(ctx, account, base, job, "uni-console-route-second", "wanted"); err == nil || deletes != 1 || creates != 3 {
 					t.Fatalf("another deletion in the same job: %d %d %v", deletes, creates, err)
+				}
+			}
+			if tc.block == "delete_429" {
+				var paused bool
+				if err := db.QueryRow(`SELECT retry_at>=now()+interval '115 seconds' FROM console_site_detection_limits WHERE scope=$1`, newAPIKeyCreateScope(base)).Scan(&paused); err != nil || !paused {
+					t.Fatalf("DELETE Retry-After was not recorded: %t %v", paused, err)
 				}
 			}
 			if tc.deleteUnknown {
