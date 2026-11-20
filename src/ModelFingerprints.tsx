@@ -15,6 +15,7 @@ import { Spinner, Tip } from "./ui";
 import { LoadingIndicator } from "./LoadingIndicator";
 import { fingerprintKey, sharedFingerprintIndex } from "./fingerprintResults";
 import { fingerprintFailures, fingerprintSampleFailure, observedGroupRejections } from "./fingerprintRejections";
+import { provisionalProbabilities } from "../analytics-api/fingerprint/provisional-probabilities";
 import referenceModels from "../analytics-api/fingerprint/models.json";
 export { fingerprintKey } from "./fingerprintResults";
 
@@ -24,17 +25,18 @@ export const fingerprintLabels: Record<string, string> = {
   match: "匹配", mismatch: "不匹配", insufficient: "样本不足", error: "检测失败",
   queued: "排队中", running: "检测中", interrupted: "已中断", untested: "未检测", not_applicable: "不适用",
 };
-export const fingerprintNote = "每轮累计 3 个有效样本；1、2 个样本时显示暂定排名，满 3 个后显示匹配结果与概率。不足 3 个时保留已有样本，再次检测只补缺少的样本。满 3 个后再次检测开启新一轮；渠道配置或参考库变化时重新采样。Astra 与 6.1-sol 共用一个指纹类别；Gemini 3.1 Pro 对应 3.1 Pro Preview，3.8 Flash、4 Argon 和 4 Carbon 各自独立。DeepSeek V4.1 Flash 1017 使用独立类别及 low 推理强度，不与未标注版本的 Flash 共用身份。概率是请求类别在参考库内的相对概率，不代表身份保证或不降智概率。";
-const partialNote = "当前仅显示暂定排名，满 3 个有效样本后计算匹配结果与概率。";
+export const fingerprintNote = "每轮累计 3 个有效样本；1、2 个样本时可查看候选排名及未校准的暂估概率，满 3 个后计算正式匹配结果与概率。不足 3 个时保留已有样本，再次检测只补缺少的样本。满 3 个后再次检测开启新一轮；渠道配置或参考库变化时重新采样。Astra 与 6.1-sol 共用一个指纹类别；Gemini 3.1 Pro 对应 3.1 Pro Preview，3.8 Flash、4 Argon 和 4 Carbon 各自独立。DeepSeek V4.1 Flash 1017 使用独立类别及 low 推理强度，不与未标注版本的 Flash 共用身份。概率是相对估计，不代表身份保证或不降智概率。";
+const partialNote = "满 3 个有效样本后计算正式匹配结果与概率。";
 const nonModelNote = "数字序列特征不符合参考库要求，无法判定模型身份；未生成排名或匹配概率。";
 export interface FingerprintTarget {
   source_id?: string; provider?: string; account_id?: string; group_id?: number; model: string;
 }
 export interface FingerprintResult {
   model: string; status: string; probability: number | null; decision?: "partial" | "scored" | "unscorable" | "not_model";
+  estimated_probability?: number | null; estimated_probability_scope?: "reference-closed-set";
   prediction: string; prediction_name: string; expected_class: string; expected_class_id?: string;
   used_outputs: number; checked_at: number; reference_commit: string;
-  candidates: { model: string; display_name: string; probability: number | null }[];
+  candidates: { model: string; display_name: string; probability: number | null; score?: number; estimated_probability?: number }[];
   samples?: { request_id: string; state: string; message?: string; http_status?: number; error_code?: string }[];
 }
 export interface FingerprintRecord extends FingerprintTarget {state: string; message: string; revision: string; updated_at_ms?: number; retained_samples?: number; result: FingerprintResult | null; previous_result?: FingerprintResult | null; previous_revision?: string}
@@ -192,22 +194,55 @@ export function FingerprintColumnHeader({help, label = "指纹"}: {help: string;
 
 type FingerprintSummary = {target: FingerprintTarget; presentation: ReturnType<typeof fingerprintPresentation>};
 
+function validEstimate(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
+}
+
+function partialEstimates(partial: FingerprintResult) {
+  if (partial.estimated_probability_scope === "reference-closed-set") {
+    return {
+      values: partial.candidates.map(candidate => validEstimate(candidate.estimated_probability) ? candidate.estimated_probability : undefined),
+      requested: validEstimate(partial.estimated_probability) ? partial.estimated_probability : undefined,
+      note: "暂估概率 · 全参考库归一化，未校准。",
+    };
+  }
+  // Older checkpoints persist the top scores, but not the rest of the bank.
+  const values = provisionalProbabilities(partial.candidates.map(candidate => candidate.score));
+  const index = partial.candidates.findIndex(candidate => candidate.model === partial.expected_class_id);
+  return {
+    values,
+    requested: values?.[index],
+    note: values ? "旧记录仅按已保存候选归一化，暂估概率未校准。" : "此记录没有可用的暂估概率。",
+  };
+}
+
+function FingerprintCandidateRanking({partial}: {partial: FingerprintResult}) {
+  const {values, requested, note} = partialEstimates(partial);
+  return <>
+    {requested != null && <div>请求模型的暂估概率：{rate(requested)}</div>}
+    <div className="fingerprint-tip-heading">本轮候选暂定排名 · {partial.used_outputs}/3 有效样本</div>
+    <ol className="fingerprint-candidate-ranking">{partial.candidates.map((candidate, i) => <li key={candidate.model}>
+      <span className="fingerprint-candidate-readout">
+        <span>{candidate.display_name || candidate.model}</span>
+        <span className="fingerprint-candidate-probability">{rate(values?.[i])}</span>
+      </span>
+    </li>)}</ol>
+    <div className="muted">{note} {partialNote}</div>
+  </>;
+}
+
 function FingerprintProbabilityTip({item}: {item: FingerprintSummary}) {
   const {target, presentation: {probability, candidates, prefix, label, message, partial}} = item;
   return <div className="fingerprint-probability-tip">
     <strong>{target.model}</strong>
-    <div>{prefix === "上次" ? "上次请求模型的匹配概率" : "请求模型的匹配概率"}：{rate(probability)}</div>
+    {(!partial || prefix === "上次") && <div>{prefix === "上次" ? "上次请求模型的匹配概率" : "请求模型的匹配概率"}：{rate(probability)}</div>}
     {candidates.length > 0 && <>
       <div className="muted">{prefix === "上次" ? "上次参考库候选概率" : "参考库候选概率"}</div>
       <dl>{candidates.map(candidate => <div key={candidate.model}>
         <dt>{candidate.display_name || candidate.model}</dt><dd>{rate(candidate.probability)}</dd>
       </div>)}</dl>
     </>}
-    {partial && <>
-      <div className="fingerprint-tip-heading">本轮候选暂定排名 · {partial.used_outputs}/3 有效样本</div>
-      <ol>{partial.candidates.map(candidate => <li key={candidate.model}>{candidate.display_name || candidate.model}</li>)}</ol>
-      <div className="muted">满 3 个有效样本后计算概率。</div>
-    </>}
+    {partial && <FingerprintCandidateRanking partial={partial}/>}
     {!partial && probability == null && <div className="muted">{label === "样本不足" ? "满 3 个有效样本后计算概率。" : `${label}，暂无可用匹配概率。`}</div>}
     {message && <div className="muted">{message}</div>}
   </div>;
@@ -340,11 +375,11 @@ export function FingerprintPanel({ targets, revisions, onlySupported }: { target
           {result && <>
           {result.checked_at > 0 && <time className="muted" dateTime={new Date(result.checked_at * 1000).toISOString()}>{time(result.checked_at)}</time>}
           <p className="muted">有效样本 {result.used_outputs}/3 · 目标类别 {result.expected_class}</p>
-          {partialFingerprint(result) && <p className="muted">{partialNote}</p>}
           {result.decision === "not_model" && <p className="muted">{nonModelNote}</p>}
           {partial && <p className="muted">已保留 {retained} 个有效样本，{pending ? "正在补充" : "再次检测仅补充"}剩余 {3-retained} 个。</p>}
           {!retained && result.used_outputs > 0 && result.used_outputs < 3 && <p className="muted">此旧记录未保留可续采样本，下一次检测将开始可累计的新一轮。</p>}
-          {result.candidates?.length > 0 && <ol>{result.candidates.map(c => <li key={c.model}>{c.display_name}{!partialFingerprint(result) && <> <span className="mono">{rate(c.probability)}</span></>}</li>)}</ol>}
+          {partialFingerprint(result) ? <FingerprintCandidateRanking partial={result}/> :
+            result.candidates?.length > 0 && <ol>{result.candidates.map(c => <li key={c.model}>{c.display_name} <span className="mono">{rate(c.probability)}</span></li>)}</ol>}
           {result.samples?.filter(s=>s.state==="error").map(s=><p key={s.request_id}>{fingerprintSampleFailure(s).detail}</p>)}
           <small className="muted">lm-detector · {result.reference_commit?.slice(0,12)}</small>
           </>}

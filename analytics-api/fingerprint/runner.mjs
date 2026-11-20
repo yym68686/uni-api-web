@@ -14,6 +14,7 @@ import { COMPLETION_TIMEOUT_MS } from './upstream/completion-request.ts';
 import { completeGemini } from './gemini.mjs';
 import { fingerprintResponse, fingerprintRejectionMessage, fingerprintResponseFailure } from './response-errors.mjs';
 import { parseNumbers } from './upstream/fingerprint-core.js';
+import { provisionalProbabilities } from './provisional-probabilities.ts';
 
 const dataRoot = process.env.FINGERPRINT_DATA_DIR;
 const dataFile = name => dataRoot ? resolve(dataRoot, name) : new URL(name, import.meta.url);
@@ -43,13 +44,21 @@ export function score(model, outputs, reference = loadReference()) {
   const decision = analysis.decision ?? (analysis.results.length ? 'scored' : 'unscorable');
   // The probability is for the requested class, even when another ranks first.
   const target = modelClasses[model];
-  const expected = analysis.results.find(r => r.model === target.class_id);
+  const expectedIndex = analysis.results.findIndex(r => r.model === target.class_id);
+  // Normalize against the whole bank before clipping the public candidate list.
+  const estimates = decision === 'partial' ? provisionalProbabilities(analysis.results.map(r => r.score)) : null;
   return {
     model, status: decision === 'scored' ? (analysis.prediction === target.class_id ? 'match' : 'mismatch') : 'insufficient',
     decision,
-    probability: expected?.probability ?? null,
+    probability: analysis.results[expectedIndex]?.probability ?? null,
+    ...(estimates ? {
+      estimated_probability_scope: 'reference-closed-set',
+      estimated_probability: estimates[expectedIndex] ?? null,
+    } : {}),
     prediction: analysis.prediction, prediction_name: analysis.prediction_name,
-    expected_class: target.class_name, expected_class_id: target.class_id, candidates: analysis.results.slice(0, 5),
+    expected_class: target.class_name, expected_class_id: target.class_id,
+    candidates: analysis.results.slice(0, 5).map((candidate, i) => estimates
+      ? { ...candidate, estimated_probability: estimates[i] } : candidate),
     used_outputs: analysis.used_outputs, diagnostics: analysis.diagnostics,
     probability_scope: analysis.probability_scope ?? null,
     reference_commit: manifest.commit, base_sha256: reference.detector.base_sha256,

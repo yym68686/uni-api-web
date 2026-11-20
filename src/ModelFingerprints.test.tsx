@@ -119,10 +119,11 @@ it("shows the scored candidates on hover and keeps all probability cells separat
  fireEvent.focus(untestedRow);
  expect(await screen.findByRole("tooltip")).toHaveTextContent("未检测，暂无可用匹配概率。");
 });
-it("does not turn partial rankings into probabilities or mix them with the previous score", async () => {
+it("keeps current estimates distinct from the previous calibrated score", async () => {
  const previous = {...record.result!, decision:"scored" as const, candidates:[{model:"reference-old",display_name:"上次候选",probability:.88}]};
  const partial: FingerprintRecord = {...record, model:"gpt-6.2-sol", result:{...record.result!, decision:"partial", status:"insufficient", probability:null, used_outputs:2,
-  candidates:[{model:"reference-partial",display_name:"本轮候选",probability:null}]
+  estimated_probability:.11, estimated_probability_scope:"reference-closed-set",
+  candidates:[{model:"reference-partial",display_name:"本轮候选",probability:null,estimated_probability:.42}]
  }};
  const retry: FingerprintRecord = {...partial, model:record.model, state:"running", previous_result:previous};
  mount(<FingerprintCell entries={[{target:partial,record:partial},{target:retry,record:retry}]} supportedModels={[partial.model,retry.model]}/>);
@@ -131,8 +132,9 @@ it("does not turn partial rankings into probabilities or mix them with the previ
  const dialog = screen.getByRole("dialog");
  fireEvent.focus(within(dialog).getByText(partial.model).closest("li")!);
  const pending = await screen.findByRole("tooltip");
- expect(pending).toHaveTextContent("满 3 个有效样本后计算概率。");
- expect(pending).not.toHaveTextContent(/\d+\.\d+%/);
+ expect(pending).toHaveTextContent("满 3 个有效样本后计算正式匹配结果与概率。");
+ expect(pending).toHaveTextContent("请求模型的暂估概率：11.0%");
+ expect(pending).toHaveTextContent("本轮候选42.0%");
  const retryRow = within(dialog).getByText(retry.model).closest("li")!;
  expect(retryRow).toHaveTextContent("检测中");
  fireEvent.blur(within(dialog).getByText(partial.model).closest("li")!);
@@ -141,21 +143,43 @@ it("does not turn partial rankings into probabilities or mix them with the previ
  expect(old).toHaveTextContent("上次请求模型的匹配概率：12.0%");
  expect(old).toHaveTextContent("上次候选88.0%");
  expect(old).toHaveTextContent("本轮候选暂定排名 · 2/3 有效样本");
- expect(within(old).getByRole("list")).toHaveTextContent("本轮候选");
+ expect(within(old).getByRole("list")).toHaveTextContent("本轮候选42.0%");
 });
-it("shows ranked candidate models for a provisional mismatch without fabricating probabilities", async () => {
+it("shows a right-aligned estimate for every ranked candidate on a provisional mismatch", async () => {
  const partial: FingerprintRecord = {...record, result:{...record.result!, decision:"partial", status:"insufficient", probability:null, prediction:"reference-b", prediction_name:"参考模型 B", used_outputs:2,
-  candidates:[{model:"reference-b",display_name:"参考模型 B",probability:null},{model:"reference-a",display_name:"参考模型 A",probability:null},{model:"reference-c",display_name:"参考模型 C",probability:null}]
+  estimated_probability:.03, estimated_probability_scope:"reference-closed-set",
+  candidates:[{model:"reference-b",display_name:"参考模型 B",probability:null,estimated_probability:.51},
+    {model:"reference-a",display_name:"参考模型 A",probability:null,estimated_probability:.22},
+    {model:"reference-c",display_name:"参考模型 C",probability:null,estimated_probability:.09}]
  }};
  mount(<FingerprintCell entries={[{target:partial,record:partial}]} supportedModels={[partial.model]}/>);
  const user=userEvent.setup();
- await user.hover(screen.getByText("样本不足").closest(".tip-target")!);
+ const trigger=screen.getByText("样本不足").closest(".tip-target")!;
+ await user.hover(trigger);
  const tooltip=await screen.findByRole("tooltip");
  expect(tooltip).toHaveTextContent("暂判不匹配");
  expect(tooltip).toHaveTextContent("本轮候选暂定排名 · 2/3 有效样本");
- expect(within(tooltip).getByRole("list").textContent).toBe("参考模型 B参考模型 A参考模型 C");
- expect(tooltip).toHaveTextContent("满 3 个有效样本后计算概率。");
- expect(tooltip).not.toHaveTextContent(/参考模型 [A-C]\s*\d+(\.\d+)?%/);
+ expect(tooltip).toHaveTextContent("请求模型的暂估概率：3.0%");
+ expect(within(tooltip).getAllByRole("listitem").map(row=>row.textContent)).toEqual(["参考模型 B51.0%", "参考模型 A22.0%", "参考模型 C9.0%"]);
+ expect(tooltip).toHaveTextContent("全参考库归一化，未校准");
+ expect(trigger.querySelector(".fingerprint-detail-probability")).toHaveTextContent("—");
+});
+it.each([true,false])("previews historical candidate scores without a new request (scores saved: %s)", async scoresSaved => {
+ const partial: FingerprintRecord = {...record, result:{...record.result!, decision:"partial", status:"insufficient", probability:null, used_outputs:2,
+  prediction:"gpt-6-astra", expected_class_id:"gpt-6-astra",
+  candidates:[{model:"gpt-6-astra",display_name:"Astra",probability:null,score:scoresSaved ? Math.log(3) : undefined},
+    {model:"reference-a",display_name:"参考模型 A",probability:null,score:0}]
+ }};
+ const fetcher=vi.fn();
+ vi.stubGlobal("fetch",fetcher);
+ mount(<FingerprintCell entries={[{target:partial,record:partial}]} supportedModels={[partial.model]}/>);
+ const trigger=screen.getByText("样本不足").closest(".tip-target")!;
+ expect(trigger).toHaveTextContent("暂判匹配");
+ fireEvent.focus(trigger);
+ const tooltip=await screen.findByRole("tooltip");
+ expect(within(tooltip).getAllByRole("listitem").map(row=>row.textContent)).toEqual(scoresSaved ? ["Astra75.0%", "参考模型 A25.0%"] : ["Astra—", "参考模型 A—"]);
+ expect(tooltip).toHaveTextContent(scoresSaved ? "旧记录仅按已保存候选归一化" : "此记录没有可用的暂估概率");
+ expect(fetcher).not.toHaveBeenCalled();
 });
 it("keeps fingerprint table headings and every single-model readout on the same two-column grid",()=>{
  const view=mount(<table><thead><tr><th><FingerprintColumnHeader help="fingerprint help"/></th></tr></thead><tbody><tr><td><FingerprintCell entries={[{target:record,record}]} supportedModels={[record.model]}/></td></tr></tbody></table>);
@@ -212,14 +236,14 @@ it.each(["done","running","queued","interrupted","error"].flatMap(state=>[1,2].m
  fireEvent.click(await screen.findByRole("button",{name:"检测详情"}));
  await screen.findByText(`有效样本 ${count}/3 · 目标类别 gpt-6-astra/6.1-sol`);
  expect(screen.getByText("暂判不匹配")).toBeInTheDocument();
- expect(screen.getByText("Claude Haiku 4.5",{selector:"li"})).toBeInTheDocument();
- expect(screen.getByText("GPT 6 Astra",{selector:"li"})).toBeInTheDocument();
- expect(screen.getByText("当前仅显示暂定排名，满 3 个有效样本后计算匹配结果与概率。")).toBeInTheDocument();
+ expect(screen.getByText("Claude Haiku 4.5").closest("li")).toBeInTheDocument();
+ expect(screen.getByText("GPT 6 Astra").closest("li")).toBeInTheDocument();
+ expect(screen.getByText(/满 3 个有效样本后计算正式匹配结果与概率/)).toBeInTheDocument();
  expect(screen.getByText(new RegExp(`已保留 ${count} 个有效样本`))).toBeInTheDocument();
  expect(screen.getByText("请求失败或输出不完整 · HTTP 429")).toBeInTheDocument();
  expect(screen.getByRole("button",{name:state==="running"||state==="queued"?"取消检测":"继续采样"})).toBeEnabled();
  expect(screen.queryByText("12.0%")).not.toBeInTheDocument();
- expect(screen.getByText("—")).toHaveClass("quality-unknown");
+ expect(screen.getByText("—",{selector:".quality-unknown"})).toHaveClass("quality-unknown");
  expect(screen.queryByText("匹配",{exact:true})).not.toBeInTheDocument();
  expect(screen.queryByText("不匹配",{exact:true})).not.toBeInTheDocument();
 });

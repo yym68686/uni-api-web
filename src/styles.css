@@ -2863,8 +2863,10 @@ nav > button.active > svg {
 .fingerprint-probability-tip dl { margin:0; }
 .fingerprint-probability-tip dl > div { display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px; }
 .fingerprint-probability-tip dd { margin:0;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums; }
-.fingerprint-probability-tip ol { display:grid;gap:3px;margin:2px 0 0;padding-inline-start:23px; }
-.fingerprint-probability-tip ol li { padding-inline-start:2px; }
+.fingerprint-candidate-ranking { display:grid;gap:3px;margin:2px 0 0;padding-inline-start:23px; }
+.fingerprint-candidate-ranking li { padding-inline-start:2px; }
+.fingerprint-candidate-readout { display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;overflow-wrap:anywhere; }
+.fingerprint-candidate-probability { text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums; }
 .fingerprint-tip-heading { margin-top:3px;font-weight:600; }
 @media (max-width:440px) {
   .fingerprint-result-row { grid-template-columns:minmax(0,1fr) minmax(8.5rem,11rem);gap:6px; }

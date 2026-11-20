@@ -31,11 +31,16 @@ mappings or gateway configuration.
 - **匹配**: the highest-ranked class is the requested model's reference class.
 - **不匹配**: another reference class ranks first.
 - **样本不足 / 检测失败 / 已中断**: no match judgment or probability is displayed.
-- With **1/3 or 2/3 valid samples**, the table and detail tooltip show the
-  ordered **本轮候选暂定排名**, including when the requested model provisionally
-  mismatches. The top five candidates use the
-  upstream `allowPartial` ranker; all probabilities remain `null`. The result has
-  `decision: "partial"` and `status: "insufficient"`, so it stays out of the
+- With **1/3 or 2/3 valid samples**, the tooltip and details show the ordered
+  **本轮候选暂定排名** with a percentage for each of the top five candidates,
+  including after a provisional match or mismatch. These percentages are
+  uncalibrated softmax estimates from the upstream `allowPartial` scores,
+  normalized across the full reference bank before limiting the displayed
+  candidates. Old results with saved scores can display estimates normalized
+  over just the saved candidates, with that narrower scope labeled explicitly.
+  Neither estimate is a calibrated identity probability; the official
+  `probability` stays `null`. The result has `decision: "partial"` and
+  `status: "insufficient"`, so it stays out of the
   match/mismatch filters. A later failed attempt does not hide this ranking;
   request failures remain visible in the sample details.
 - The separately aligned probability column is **the requested class's probability**,
@@ -170,7 +175,7 @@ Validation includes scoring parity with upstream reference samples (the older
 Gemini 3.x source samples have unknown completion metadata and are only offline
 scoring fixtures, never accepted live completions) (not an independent
 accuracy benchmark), merged-class semantics, mismatched-class probability,
-partial ranking parity without probabilities, invalid/error output rejection,
+partial ranking parity and separate uncalibrated estimates, invalid/error output rejection,
 progressive API checkpoints, durable continuation, exact targeting, duplicate queue requests,
 account isolation, 50-site capacity and concurrent claiming across replicas,
 same-site serialization across accounts/models/configured channels, actual HTTP

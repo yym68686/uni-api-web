@@ -39,9 +39,12 @@ their next explicit detection starts the first durable round.
 
 With one or two valid samples, the runner enables upstream `allowPartial` and
 returns the top five candidates with `decision: "partial"`,
-`status: "insufficient"` and null probabilities. Failed attempts retain their
-diagnostics without hiding that ranking. Each checkpoint exposes the ranking
-while collection continues. Three valid samples still use the unchanged full
+`status: "insufficient"` and null calibrated probabilities. Each candidate
+and the requested class carry a separate `estimated_probability`, computed
+by unit-temperature softmax over the full reference bank before clipping the
+list. Failed attempts retain their diagnostics without hiding that ranking.
+Each checkpoint exposes the ranking while collection continues.
+Three valid samples still use the unchanged full
 scorer and calibration, marked `decision: "scored"`; only this complete result
 can become match/mismatch. Empty or invalid evidence produces no candidates.
 

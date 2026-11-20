@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { collect, detect, loadReference, models, score, scoreCollected } from './runner.mjs';
 import { analyzeSharedOutputs } from './upstream/shared-detector.ts';
+import { provisionalProbabilities } from './provisional-probabilities.ts';
 import { generateChallenges } from './upstream/challenge-browser.js';
 import { completeGemini } from './gemini.mjs';
 import { unsupportedEffortMessage } from './response-errors.mjs';
@@ -28,7 +29,8 @@ test('DeepSeek 1017 uses its existing independent low-effort class and unchanged
     assert.equal(result.status,count === 3 ? 'match' : 'insufficient');
     assert.equal(result.decision,count === 3 ? 'scored' : 'partial');
     assert.equal(result.probability,original.results.find(r=>r.model===model).probability);
-    assert.deepEqual(result.candidates,original.results.slice(0,5));
+    assert.deepEqual(result.candidates.map(({estimated_probability: _estimate,...candidate})=>candidate),original.results.slice(0,5));
+    if (count === 3) assert.ok(!('estimated_probability' in result));
   }
   const mismatch = score(model,fixture['gpt-6-astra'],reference);
   assert.equal(mismatch.status,'mismatch');
@@ -265,7 +267,7 @@ test('mismatch probability is for requested class rather than confidence in the 
   assert.equal(result.prediction,'claude-haiku-4.5');
   assert.ok(result.probability < result.candidates[0].probability);
 });
-test('one or two valid samples use upstream partial ranking, including failed or invalid slots', () => {
+test('one or two valid samples estimate candidate and target probabilities against the full bank', () => {
   for (const model of models) for (const count of [1,2]) {
     const valid=fixture['gpt-6-astra'].slice(0,count);
     for(const outputs of [valid,[...valid,...Array(3-count).fill({text:'1 2 3',expected_count:300})]]) {
@@ -273,16 +275,30 @@ test('one or two valid samples use upstream partial ranking, including failed or
       const original=analyzeSharedOutputs(outputs,reference.bank,reference.detector,{allowPartial:true});
       assert.equal(result.status,'insufficient');assert.equal(result.decision,'partial');
       assert.equal(result.used_outputs,count);assert.equal(result.prediction,original.prediction);
-      assert.deepEqual(result.candidates,original.results.slice(0,5));
+      assert.deepEqual(result.candidates.map(({estimated_probability: _estimate,...candidate})=>candidate),original.results.slice(0,5));
       assert.equal(result.probability,null);assert.equal(result.probability_scope,null);
       assert.ok(result.candidates.every(c=>c.probability===null));
+      const estimates=provisionalProbabilities(original.results.map(r=>r.score));
+      assert.equal(result.estimated_probability_scope,'reference-closed-set');
+      assert.equal(result.estimated_probability,estimates[original.results.findIndex(r=>r.model===result.expected_class_id)]);
+      assert.deepEqual(result.candidates.map(c=>c.estimated_probability),estimates.slice(0,5));
+      assert.ok(estimates.slice(0,5).reduce((a,b)=>a+b,0)<1);
     }
   }
+});
+test('provisional normalization preserves rank without overflow and rejects missing evidence', () => {
+  const [a,b,c]=provisionalProbabilities([1000,999,999]);
+  assert.ok(a>b && b===c);
+  assert.ok(Math.abs(a+b+c-1)<1e-12);
+  assert.equal(provisionalProbabilities([1,undefined]),null);
+  assert.equal(provisionalProbabilities([1,Infinity]),null);
+  assert.equal(provisionalProbabilities([1]),null);
 });
 test('empty or invalid samples have no candidates or fabricated match probability', () => {
   for (const outputs of [[],Array(3).fill({text:'1,2,3',expected_count:300})]) {
     const result=score('gpt-6-astra',outputs,reference);
     assert.equal(result.status,'insufficient'); assert.equal(result.probability,null);
+    assert.ok(!('estimated_probability' in result));
     assert.equal(result.decision,'unscorable');assert.deepEqual(result.candidates,[]);
   }
   assert.throws(()=>score('gpt-5.5',fixture['gpt-6-astra'],reference),/unsupported_model/);
