@@ -8,8 +8,46 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
+
+// Hold a real PostgreSQL source lock across each HTTP path. A request's
+// shorter deadline exercises the wait timeout without making CI wait 15s.
+func runContendedChannelImport(t *testing.T, store *controlStore, source string, call func(context.Context) *httptest.ResponseRecorder, checkUnchanged func()) *httptest.ResponseRecorder {
+	t.Helper()
+	unlock, err := store.lockControls(context.Background(), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := sync.OnceFunc(unlock)
+	defer release()
+
+	short, cancel := context.WithTimeout(context.Background(), 350*time.Millisecond)
+	defer cancel()
+	w := call(short)
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "等待超时；尚未提交添加") {
+		t.Fatalf("contended import did not wait until deadline: %d %s", w.Code, w.Body.String())
+	}
+	checkUnchanged()
+
+	finished := make(chan *httptest.ResponseRecorder, 1)
+	go func() { finished <- call(context.Background()) }()
+	select {
+	case w = <-finished:
+		t.Fatalf("import completed before the prior writer released the lock: %d %s", w.Code, w.Body.String())
+	case <-time.After(100 * time.Millisecond):
+	}
+	release()
+	select {
+	case w = <-finished:
+		return w
+	case <-time.After(5 * time.Second):
+		t.Fatal("import did not resume after the source lock was released")
+		return nil
+	}
+}
 
 func TestSubImportUsesBusinessKeyAndFencesModelsOwnerAndRevision(t *testing.T) {
 	dsn := os.Getenv("TEST_CONTROL_DATABASE_URL")
@@ -113,14 +151,17 @@ func TestSubImportUsesBusinessKeyAndFencesModelsOwnerAndRevision(t *testing.T) {
 	s := &Service{control: store}
 	session, _ := store.newSession(context.Background(), owner)
 	foreign, _ := store.newSession(context.Background(), owner+"-foreign")
-	request := func(models []string, rev, cookie string) *httptest.ResponseRecorder {
+	requestContext := func(ctx context.Context, models []string, rev, cookie string) *httptest.ResponseRecorder {
 		body, _ := json.Marshal(subImportInput{AccountID: account, GroupID: 7, SourceID: sourceID, KeyID: sourceID + "::key-" + strings.Repeat("a", 64), Revision: rev, Models: models, Position: 1})
-		r := httptest.NewRequest("POST", "/v1/sub2api/channels", strings.NewReader(string(body)))
+		r := httptest.NewRequest("POST", "/v1/sub2api/channels", strings.NewReader(string(body))).WithContext(ctx)
 		r.Header.Set("Content-Type", "application/json")
 		r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: cookie})
 		w := httptest.NewRecorder()
 		s.Handler().ServeHTTP(w, r)
 		return w
+	}
+	request := func(models []string, rev, cookie string) *httptest.ResponseRecorder {
+		return requestContext(context.Background(), models, rev, cookie)
 	}
 	if w := request([]string{checkModel}, "boot:1", foreign); w.Code != 404 {
 		t.Fatal("foreign import allowed", w.Code)
@@ -181,7 +222,15 @@ func TestSubImportUsesBusinessKeyAndFencesModelsOwnerAndRevision(t *testing.T) {
 	if _, err := store.db.Exec(`UPDATE console_sub_accounts SET state='idle',job_kind='',job_id='',lease_until=NULL WHERE id=$1`, account); err != nil {
 		t.Fatal(err)
 	}
-	w = request([]string{checkModel}, "boot:1", session)
+	w = runContendedChannelImport(t, store, sourceID, func(ctx context.Context) *httptest.ResponseRecorder {
+		return requestContext(ctx, []string{checkModel}, "boot:1", session)
+	}, func() {
+		var state, job string
+		err := store.db.QueryRow(`SELECT state,job_id FROM console_sub_accounts WHERE id=$1`, account).Scan(&state, &job)
+		if err != nil || state != "idle" || job != "" || created != 0 || imports != 0 {
+			t.Fatal("waiting import modified account, key, or route", err, state, job, created, imports)
+		}
+	})
 	if w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}

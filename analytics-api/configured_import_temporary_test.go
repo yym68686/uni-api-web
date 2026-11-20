@@ -79,14 +79,17 @@ func TestConfiguredImportEditsCustomNamedTemporaryChannel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	call := func(method, path string, body any) *httptest.ResponseRecorder {
+	callContext := func(ctx context.Context, method, path string, body any) *httptest.ResponseRecorder {
 		t.Helper()
-		r := httptest.NewRequest(method, path, strings.NewReader(mustJSON(body)))
+		r := httptest.NewRequest(method, path, strings.NewReader(mustJSON(body))).WithContext(ctx)
 		r.Header.Set("Content-Type", "application/json")
 		r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: session})
 		w := httptest.NewRecorder()
 		s.Handler().ServeHTTP(w, r)
 		return w
+	}
+	call := func(method, path string, body any) *httptest.ResponseRecorder {
+		return callContext(ctx, method, path, body)
 	}
 	// Keep duplicate-suppression for inventory; existence/evidence uses the full
 	// installed list, independently of whether an identity override was saved.
@@ -128,7 +131,13 @@ func TestConfiguredImportEditsCustomNamedTemporaryChannel(t *testing.T) {
 		}
 	}
 	seed(fingerprint, "success")
-	w := call("POST", "/v1/channel-management", body)
+	w := runContendedChannelImport(t, s.control, src.ID, func(ctx context.Context) *httptest.ResponseRecorder {
+		return callContext(ctx, "POST", "/v1/channel-management", body)
+	}, func() {
+		if writes != 0 {
+			t.Fatal("waiting import wrote gateway configuration", writes)
+		}
+	})
 	if w.Code != 200 || writes != 1 {
 		t.Fatalf("save existing import: %d %s writes=%d", w.Code, w.Body.String(), writes)
 	}
