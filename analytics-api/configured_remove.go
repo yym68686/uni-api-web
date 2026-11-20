@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"net/url"
@@ -77,16 +76,15 @@ func (s *Service) removeConfiguredBinding(w http.ResponseWriter, r *http.Request
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
+	ctx, cancel := controlWriteContext(w, r, 45*time.Second)
 	defer cancel()
 	src, err := s.control.source(ctx, in.Source)
 	if err != nil {
 		http.Error(w, "来源不存在", 404)
 		return
 	}
-	unlock, err := s.control.lockControls(ctx, src.ID)
-	if err != nil {
-		http.Error(w, err.Error(), 409)
+	unlock := s.waitControlHTTP(w, ctx, src.ID, "移除")
+	if unlock == nil {
 		return
 	}
 	defer unlock()

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"net/url"
@@ -101,7 +100,7 @@ func (s *Service) editChannelRoutes(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "请选择需要调整的模型", 400)
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
+	ctx, cancel := controlWriteContext(w, r, 45*time.Second)
 	defer cancel()
 	src, err := s.control.source(ctx, r.PathValue("id"))
 	if err != nil {
@@ -113,9 +112,8 @@ func (s *Service) editChannelRoutes(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	unlock, err := s.control.lockControls(ctx, src.ID)
-	if err != nil {
-		http.Error(w, err.Error(), 409)
+	unlock := s.waitControlHTTP(w, ctx, src.ID, "修改")
+	if unlock == nil {
 		return
 	}
 	defer unlock()

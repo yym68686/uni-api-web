@@ -25,8 +25,9 @@ import (
 // PostgreSQL owns mutable account/source state. Credentials remain encrypted
 // and are never returned to the browser.
 type controlStore struct {
-	db  *sql.DB
-	key []byte
+	db           *sql.DB
+	controlLocks *sql.DB
+	key          []byte
 }
 type sourceView struct {
 	ID           string `json:"id"`
@@ -83,9 +84,21 @@ func newControlStore(dsn, master string) (*controlStore, error) {
 		return nil, err
 	}
 
-	return &controlStore{db: db, key: sum[:]}, nil
+	// Session advisory locks pin a connection across gateway calls. Keep
+	// those sessions out of the pool the lock owners need for ordinary SQL.
+	lockConfig := pc.Copy()
+	lockConfig.RuntimeParams["application_name"] = "uni-api-control-lock"
+	locks := stdlib.OpenDB(*lockConfig)
+	locks.SetMaxOpenConns(4)
+	locks.SetMaxIdleConns(2)
+	return &controlStore{db: db, controlLocks: locks, key: sum[:]}, nil
 }
-func (s *controlStore) Close() { _ = s.db.Close() }
+func (s *controlStore) Close() {
+	if s.controlLocks != nil {
+		_ = s.controlLocks.Close()
+	}
+	_ = s.db.Close()
+}
 func randomID() string {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {

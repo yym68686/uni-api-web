@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const managedConfigLimit = 16 << 20
@@ -363,9 +364,11 @@ func (s *Service) manageConfiguration(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "请先设置来源管理员密钥", 403)
 			return
 		}
-		unlock, lockErr := s.control.lockControls(r.Context(), src.ID)
-		if lockErr != nil {
-			http.Error(w, "来源配置正在变更", 409)
+		ctx, cancel := controlWriteContext(w, r, 45*time.Second)
+		defer cancel()
+		r = r.WithContext(ctx)
+		unlock := s.waitControlHTTP(w, ctx, src.ID, "导入")
+		if unlock == nil {
 			return
 		}
 		defer unlock()

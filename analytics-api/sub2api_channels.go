@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 type subChannelRef struct {
@@ -500,9 +501,11 @@ func (s *Service) subManageChannel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "来源不存在", 404)
 		return
 	}
-	unlock, e := s.control.lockControls(r.Context(), src.ID)
-	if e != nil {
-		http.Error(w, e.Error(), 409)
+	ctx, cancel := controlWriteContext(w, r, 45*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
+	unlock := s.waitControlHTTP(w, ctx, src.ID, "修改")
+	if unlock == nil {
 		return
 	}
 	defer unlock()

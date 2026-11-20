@@ -208,9 +208,8 @@ func (s *Service) channelSortOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	owner, _ := s.controlUser(r)
-	unlock, err := s.control.waitControls(ctx, src.ID)
-	if err != nil {
-		http.Error(w, err.Error(), 409)
+	unlock := s.waitControlHTTP(w, ctx, src.ID, "操作")
+	if unlock == nil {
 		return
 	}
 	defer unlock()

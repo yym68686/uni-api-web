@@ -179,12 +179,11 @@ func (s *Service) repairChannelProtocols(w http.ResponseWriter, r *http.Request)
 	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(100 * time.Second))
-	unlocked, err := s.control.lockControls(ctx, src.ID)
-	if err != nil {
-		http.Error(w, err.Error(), 409)
+	unlock := s.waitControlHTTP(w, ctx, src.ID, "操作")
+	if unlock == nil {
 		return
 	}
-	defer unlocked()
+	defer unlock()
 	state, code, err := subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
 	if err != nil {
 		http.Error(w, err.Error(), code)

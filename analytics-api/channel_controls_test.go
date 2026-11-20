@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -20,17 +21,16 @@ func TestChannelControlsProxyIsScopedAndPersistsRuntimeIntent(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	calls := 0
-	posts := 0
+	var calls, posts atomic.Int32
 	revision := "process:1"
 	upstreamStatus := 200
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
+		calls.Add(1)
 		if r.URL.Path != "/v1/channel-controls" || r.Header.Get("Authorization") != "Bearer control-test-secret" {
 			t.Error("wrong destination or auth")
 		}
 		if r.Method == "POST" {
-			posts++
+			posts.Add(1)
 			var v map[string]any
 			json.NewDecoder(r.Body).Decode(&v)
 			if v["api_key_id"] != "key-one" {
@@ -54,8 +54,8 @@ func TestChannelControlsProxyIsScopedAndPersistsRuntimeIntent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	call := func(method, origin, key string, auth bool) *httptest.ResponseRecorder {
-		r := httptest.NewRequest(method, "https://console.test/v1/sources/control-test/channel-controls", strings.NewReader(`{"revision":"`+revision+`","action":"set","api_key_id":"`+key+`","order":["a"],"disabled":[]}`))
+	callContext := func(ctx context.Context, method, origin, key string, auth bool) *httptest.ResponseRecorder {
+		r := httptest.NewRequestWithContext(ctx, method, "https://console.test/v1/sources/control-test/channel-controls", strings.NewReader(`{"revision":"`+revision+`","action":"set","api_key_id":"`+key+`","order":["a"],"disabled":[]}`))
 		r.Header.Set("Content-Type", "application/json")
 		if origin != "" {
 			r.Header.Set("Origin", origin)
@@ -67,6 +67,9 @@ func TestChannelControlsProxyIsScopedAndPersistsRuntimeIntent(t *testing.T) {
 		service.Handler().ServeHTTP(w, r)
 		return w
 	}
+	call := func(method, origin, key string, auth bool) *httptest.ResponseRecorder {
+		return callContext(context.Background(), method, origin, key, auth)
+	}
 	if w := call("POST", "", "control-test::key-one", false); w.Code != 401 {
 		t.Fatal(w.Code)
 	}
@@ -76,18 +79,26 @@ func TestChannelControlsProxyIsScopedAndPersistsRuntimeIntent(t *testing.T) {
 	if w := call("POST", "https://console.test", "other-source::key-one", true); w.Code != 400 {
 		t.Fatal(w.Code)
 	}
-	if calls != 0 {
+	if calls.Load() != 0 {
 		t.Fatal("unauthorized mutation forwarded")
 	}
 	if w := call("GET", "", "", true); w.Code != 200 {
 		t.Fatal(w.Code)
 	}
-	if w := call("POST", "https://console.test", "control-test::key-one", true); w.Code != 200 {
+	before := calls.Load()
+	w := runContendedControlOperation(t, store, "control-test", "修改", func(ctx context.Context) *httptest.ResponseRecorder {
+		return callContext(ctx, "POST", "https://console.test", "control-test::key-one", true)
+	}, func() {
+		if calls.Load() != before {
+			t.Fatal("waiting for the source must not touch the gateway")
+		}
+	})
+	if w.Code != 200 || posts.Load() != 1 {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	revision = "process:0"
-	if w := call("POST", "https://console.test", "control-test::key-one", true); w.Code != 409 || posts != 1 {
-		t.Fatal("stale draft forwarded after reconcile", w.Code, posts)
+	if w := call("POST", "https://console.test", "control-test::key-one", true); w.Code != 409 || posts.Load() != 1 {
+		t.Fatal("stale draft forwarded after reconcile", w.Code, posts.Load())
 	}
 	revision = "process:1"
 	upstreamStatus = 409

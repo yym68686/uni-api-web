@@ -181,15 +181,14 @@ func (s *Service) configuredImport(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
+	ctx, cancel := controlWriteContext(w, r, 45*time.Second)
 	defer cancel()
-	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(50 * time.Second))
 	src, err := s.control.source(ctx, in.SourceID)
 	if err != nil {
 		http.Error(w, "来源不存在", 404)
 		return
 	}
-	unlock := s.waitChannelImportControls(w, ctx, src.ID)
+	unlock := s.waitControlHTTP(w, ctx, src.ID, "添加")
 	if unlock == nil {
 		return
 	}

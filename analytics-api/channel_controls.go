@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // The account service only forwards this narrow runtime-control endpoint.
@@ -44,9 +45,11 @@ func (s *Service) channelControls(w http.ResponseWriter, r *http.Request) {
 		revision = input.Revision
 	}
 	if r.Method == http.MethodPost {
-		unlock, lockErr := s.control.lockControls(r.Context(), src.ID)
-		if lockErr != nil {
-			http.Error(w, lockErr.Error(), 409)
+		ctx, cancel := controlWriteContext(w, r, 45*time.Second)
+		defer cancel()
+		r = r.WithContext(ctx)
+		unlock := s.waitControlHTTP(w, ctx, src.ID, "修改")
+		if unlock == nil {
 			return
 		}
 		defer unlock()

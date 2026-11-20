@@ -185,23 +185,6 @@ func (s *Service) subImportAccountStatus(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, state)
 }
 
-// A live channel write or recovery worker may briefly own the source lock.
-// Wait before any import side effects, then let the caller check the revision.
-func (s *Service) waitChannelImportControls(w http.ResponseWriter, ctx context.Context, source string) func() {
-	lockCtx, stopWaiting := context.WithTimeout(ctx, 15*time.Second)
-	defer stopWaiting()
-	unlock, err := s.control.waitControls(lockCtx, source)
-	switch {
-	case err == nil:
-		return unlock
-	case errors.Is(err, context.DeadlineExceeded):
-		http.Error(w, "渠道配置仍在同步，等待超时；尚未提交添加，请稍后重试", http.StatusConflict)
-	default:
-		http.Error(w, "无法取得渠道配置锁；尚未提交添加，请稍后重试", http.StatusServiceUnavailable)
-	}
-	return nil
-}
-
 func (s *Service) subImportChannel(w http.ResponseWriter, r *http.Request) {
 	var in subImportInput
 	if !decodeConfiguration(w, r, &in) {
@@ -226,9 +209,8 @@ func (s *Service) subImportChannel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
+	ctx, cancel := controlWriteContext(w, r, 45*time.Second)
 	defer cancel()
-	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(50 * time.Second))
 	accountState, err := s.subReadImportAccountState(ctx, in.AccountID, owner)
 	if err != nil {
 		subImportAccountError(w, err)
@@ -243,7 +225,7 @@ func (s *Service) subImportChannel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "来源不存在", 404)
 		return
 	}
-	unlock := s.waitChannelImportControls(w, ctx, src.ID)
+	unlock := s.waitControlHTTP(w, ctx, src.ID, "添加")
 	if unlock == nil {
 		return
 	}

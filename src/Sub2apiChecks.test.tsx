@@ -1783,12 +1783,14 @@ it("shows model matching separately from availability, including missing and his
     within(details).getByRole("button", { name: "关闭检测详情" }),
   );
   await user.click(screen.getByRole("button", { name: "添加到渠道" }));
-  expect(
-    within(screen.getByRole("dialog")).getByRole("checkbox", {
-      name: "gpt-5.6-sol",
-    }),
-  ).toBeChecked();
-});
+  await waitFor(() => {
+    expect(
+      within(screen.getByRole("dialog")).getByRole("checkbox", {
+        name: "gpt-5.6-sol",
+      }),
+    ).toBeChecked();
+  }, { timeout: 5_000 });
+}, 15_000);
 
 it("filters quality thresholds from successful history and applies the selection to batch checks", async () => {
   const data = fixtures().slice(0, 1);

@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -82,24 +84,48 @@ func TestSettingsApplyRetainsEncryptedIntentAndRecoversLostACK(t *testing.T) {
 	}
 	svc := &Service{control: store}
 	body := fmt.Sprintf(`{"revision":"r0","operation_id":%q,"changes":[{"provider":"one","set":{"/api":"new-private-key"}}]}`, id)
-	call := func(method, path, body string) *httptest.ResponseRecorder {
-		r := httptest.NewRequest(method, path, strings.NewReader(body))
+	callContext := func(ctx context.Context, method, path, body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequestWithContext(ctx, method, path, strings.NewReader(body))
 		r.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
 		svc.controlHandler().ServeHTTP(w, r)
+		return w
+	}
+	checkResult := func(w *httptest.ResponseRecorder) {
 		if w.Code != 200 {
 			t.Fatalf("HTTP %d: %s", w.Code, w.Body.String())
 		}
 		if strings.Contains(w.Body.String(), "new-private-key") {
 			t.Fatal("plaintext credential reached browser")
 		}
-		return w
 	}
-	out := call("PATCH", "/v1/sources/"+id+"/channel-settings", body)
+	path := "/v1/sources/" + id + "/channel-settings"
+	out := runContendedControlOperation(t, store, id, "修改", func(ctx context.Context) *httptest.ResponseRecorder {
+		return callContext(ctx, "PATCH", path, body)
+	}, func() {
+		var receipt string
+		err := store.db.QueryRow(`SELECT status FROM console_channel_settings_operations WHERE id=$1`, id).Scan(&receipt)
+		if !errors.Is(err, sql.ErrNoRows) {
+			t.Fatal("operation left a receipt before acquiring the lock", receipt, err)
+		}
+	})
+	checkResult(out)
 	if !strings.Contains(out.Body.String(), `"pending"`) {
 		t.Fatal(out.Body.String())
 	}
-	out = call("GET", "/v1/sources/"+id+"/channel-settings/operations/"+id, "")
+	receiptPath := path + "/operations/" + id
+	unlock, err := store.lockControls(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out = callContext(ctx, "GET", receiptPath, "")
+	unlock()
+	checkResult(out)
+	if !strings.Contains(out.Body.String(), `"pending"`) {
+		t.Fatal("receipt lookup should return the existing pending state while locked", out.Body.String())
+	}
+	out = callContext(ctx, "GET", receiptPath, "")
+	checkResult(out)
 	if !strings.Contains(out.Body.String(), `"applied"`) {
 		t.Fatal(out.Body.String())
 	}
@@ -120,7 +146,7 @@ func TestSettingsApplyRetainsEncryptedIntentAndRecoversLostACK(t *testing.T) {
 	if !controlEquivalent(retainedLive{SettingsSupported: true, SettingsDigest: tokenHash(canonicalSettings(settings))}, snapshot) {
 		t.Fatal("canonical settings incorrectly differ (HTML/unicode escaping)")
 	}
-	call("PATCH", "/v1/sources/"+id+"/channel-settings", body)
+	checkResult(callContext(ctx, "PATCH", path, body))
 	if calls != 1 {
 		t.Fatal("retried an already applied operation")
 	}

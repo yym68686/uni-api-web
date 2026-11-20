@@ -200,11 +200,10 @@ func (s *Service) applyChannelSettings(w http.ResponseWriter, r *http.Request, i
 		return
 	}
 	owner, _ := s.controlUser(r)
-	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
+	ctx, cancel := controlWriteContext(w, r, 45*time.Second)
 	defer cancel()
-	unlock, err := s.control.lockControls(ctx, src.ID)
-	if err != nil {
-		http.Error(w, err.Error(), 409)
+	unlock := s.waitControlHTTP(w, ctx, src.ID, "修改")
+	if unlock == nil {
 		return
 	}
 	defer unlock()
@@ -281,7 +280,7 @@ func (s *Service) applyChannelSettings(w http.ResponseWriter, r *http.Request, i
 		writeJSON(w, 200, map[string]any{"operation_id": in.Operation, "status": map[bool]string{true: "rejected", false: "pending"}[code == 400 || code == 401 || code == 403 || code == 409], "message": err.Error()})
 		return
 	}
-	s.finishSettingsOperation(w, r, src, in.Operation, applied)
+	s.finishSettingsOperation(w, r.WithContext(ctx), src, in.Operation, applied)
 }
 func (s *Service) finishSettingsOperation(w http.ResponseWriter, r *http.Request, admin controlSource, id string, applied map[string]any) {
 	// A successful settings write changes the catalog. Never show the saved
@@ -319,17 +318,27 @@ func (s *Service) channelSettingsOperation(w http.ResponseWriter, r *http.Reques
 	id := r.PathValue("operation")
 	var status string
 	var raw []byte
-	err := s.control.db.QueryRowContext(r.Context(), `SELECT status,public_result FROM console_channel_settings_operations WHERE id=$1 AND source_id=$2 AND owner=$3`, id, r.PathValue("id"), owner).Scan(&status, &raw)
-	if err != nil {
+	readStatus := func() error {
+		return s.control.db.QueryRowContext(r.Context(), `SELECT status,public_result FROM console_channel_settings_operations WHERE id=$1 AND source_id=$2 AND owner=$3`, id, r.PathValue("id"), owner).Scan(&status, &raw)
+	}
+	if err := readStatus(); err != nil {
 		http.Error(w, "操作不存在", 404)
 		return
+	}
+	writeStatus := func() {
+		writeJSON(w, 200, map[string]any{"operation_id": id, "status": status, "result": json.RawMessage(raw)})
 	}
 	if status == "pending" || status == "applied_unretained" {
 		src, e := s.settingsSource(r)
 		if e == nil {
-			unlock, e := s.control.lockControls(r.Context(), src.ID)
+			unlock, e := s.control.tryControlMaintenance(r.Context(), src.ID)
 			if e == nil {
 				defer unlock()
+				// A writer can finish between the first read and acquiring the lock.
+				if err := readStatus(); err != nil || (status != "pending" && status != "applied_unretained") {
+					writeStatus()
+					return
+				}
 				remote, _, e := s.settingsGateway(r.Context(), src, "GET", "/v1/channel-settings/operations/"+url.PathEscape(id), nil)
 				if e == nil {
 					s.finishSettingsOperation(w, r, src, id, remote)
@@ -352,7 +361,7 @@ func (s *Service) channelSettingsOperation(w http.ResponseWriter, r *http.Reques
 			}
 		}
 	}
-	writeJSON(w, 200, map[string]any{"operation_id": id, "status": status, "result": json.RawMessage(raw)})
+	writeStatus()
 }
 func (s *Service) channelSettingsOperations(w http.ResponseWriter, r *http.Request) {
 	owner, _ := s.controlUser(r)

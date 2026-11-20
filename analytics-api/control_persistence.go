@@ -60,10 +60,12 @@ type retainedRecord struct {
 
 // One session lock per source serializes UI writes and recovery across replicas.
 // Model-serving traffic never uses this lock or this PostgreSQL connection.
-var errControlsBusy = errors.New("渠道配置正在同步，请稍后重试")
+var errControlsBusy = errors.New("source control lock held")
+var errControlWaitTimeout = errors.New("渠道配置仍在同步，等待超时；未提交渠道配置")
+var errControlLockUnavailable = errors.New("无法取得渠道配置锁；未提交渠道配置")
 
 func (s *controlStore) lockControls(ctx context.Context, source string) (func(), error) {
-	c, e := s.db.Conn(ctx)
+	c, e := s.controlLocks.Conn(ctx)
 	if e != nil {
 		return nil, e
 	}
@@ -71,6 +73,9 @@ func (s *controlStore) lockControls(ctx context.Context, source string) (func(),
 	id := int64(binary.BigEndian.Uint64(sum[:8]))
 	var ok bool
 	if e = c.QueryRowContext(ctx, `SELECT pg_try_advisory_lock($1)`, id).Scan(&ok); e != nil {
+		// A canceled query may have acquired the session lock before its
+		// response was lost. Discard that session instead of pooling it.
+		_ = c.Raw(func(any) error { return driver.ErrBadConn })
 		c.Close()
 		return nil, e
 	}
@@ -90,14 +95,20 @@ func (s *controlStore) lockControls(ctx context.Context, source string) (func(),
 }
 
 // Wait only before any write, then reconcile and recheck the caller's revision.
-// Release the pool connection between attempts so a burst of waiting UI jobs
-// cannot starve the recovery worker that owns the lock.
+// Release the pool connection between attempts so competing writers can
+// acquire locks for other sources while this source is occupied.
 func (s *controlStore) waitControls(ctx context.Context, source string) (func(), error) {
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		unlock, err := s.lockControls(ctx, source)
+		if ctx.Err() != nil {
+			if unlock != nil {
+				unlock()
+			}
+			return nil, ctx.Err()
+		}
 		if !errors.Is(err, errControlsBusy) {
 			return unlock, err
 		}
@@ -105,6 +116,55 @@ func (s *controlStore) waitControls(ctx context.Context, source string) (func(),
 			return nil, ctx.Err()
 		}
 	}
+}
+
+// An interactive write waits only before sending anything to the gateway.
+// Callers still validate their revision under the lock and never retry writes.
+func (s *controlStore) waitControlOperation(ctx context.Context, source string) (func(), error) {
+	wait, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	unlock, err := s.waitControls(wait, source)
+	switch {
+	case err == nil:
+		return unlock, nil
+	case errors.Is(err, context.DeadlineExceeded):
+		return nil, errControlWaitTimeout
+	case errors.Is(err, context.Canceled):
+		return nil, err
+	default:
+		return nil, errControlLockUnavailable
+	}
+}
+
+func writeControlWaitError(w http.ResponseWriter, err error, action string) {
+	if errors.Is(err, errControlWaitTimeout) {
+		http.Error(w, "渠道配置仍在同步，等待超时；尚未提交"+action+"，请稍后重试", http.StatusConflict)
+	} else {
+		http.Error(w, "无法取得渠道配置锁；尚未提交"+action+"，请稍后重试", http.StatusServiceUnavailable)
+	}
+}
+
+func (s *Service) waitControlHTTP(w http.ResponseWriter, ctx context.Context, source, action string) func() {
+	unlock, err := s.control.waitControlOperation(ctx, source)
+	if err != nil {
+		writeControlWaitError(w, err, action)
+	}
+	return unlock
+}
+
+// Used by background recovery and opportunistic status reconciliation. A full
+// lock pool must not make those callers queue behind unrelated sources.
+func (s *controlStore) tryControlMaintenance(ctx context.Context, source string) (func(), error) {
+	wait, cancel := context.WithTimeout(ctx, 250*time.Millisecond)
+	defer cancel()
+	return s.lockControls(wait, source)
+}
+
+func controlWriteContext(w http.ResponseWriter, r *http.Request, budget time.Duration) (context.Context, context.CancelFunc) {
+	// Leave time to deliver the result after the work deadline. Otherwise the
+	// default HTTP write deadline can close the connection after a write landed.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(budget + 5*time.Second))
+	return context.WithTimeout(r.Context(), budget)
 }
 func (s *controlStore) retainedRecord(ctx context.Context, source string) (retainedRecord, error) {
 	var r retainedRecord
@@ -457,7 +517,7 @@ func (s *Service) controlRecoveryLoop(ctx context.Context) {
 				func() {
 					task, cancel := context.WithTimeout(ctx, 90*time.Second)
 					defer cancel()
-					unlock, err := s.control.lockControls(task, source.ID)
+					unlock, err := s.control.tryControlMaintenance(task, source.ID)
 					if err != nil {
 						return
 					}
@@ -486,6 +546,26 @@ func (s *Service) controlPersistence(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "来源不存在", 404)
 		return
 	}
+	var in struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if r.Method == http.MethodPut {
+		if !decodeConfiguration(w, r, &in) {
+			return
+		}
+		if in.Enabled == nil {
+			http.Error(w, "enabled required", 400)
+			return
+		}
+		ctx, cancel := controlWriteContext(w, r, 45*time.Second)
+		defer cancel()
+		r = r.WithContext(ctx)
+		unlock := s.waitControlHTTP(w, ctx, src.ID, "修改")
+		if unlock == nil {
+			return
+		}
+		defer unlock()
+	}
 	managed, err := s.control.managedState(r.Context(), s.control.db, src.ID, false)
 	if err != nil {
 		http.Error(w, "配置存储暂不可用", 503)
@@ -500,22 +580,6 @@ func (s *Service) controlPersistence(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == "PUT" {
-		var in struct {
-			Enabled *bool `json:"enabled"`
-		}
-		if !decodeConfiguration(w, r, &in) {
-			return
-		}
-		if in.Enabled == nil {
-			http.Error(w, "enabled required", 400)
-			return
-		}
-		unlock, err := s.control.lockControls(r.Context(), src.ID)
-		if err != nil {
-			http.Error(w, err.Error(), 409)
-			return
-		}
-		defer unlock()
 		before, err := s.control.retainedRecord(r.Context(), src.ID)
 		if err != nil {
 			http.Error(w, "配置存储暂不可用", 503)

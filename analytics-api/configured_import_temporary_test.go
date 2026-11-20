@@ -131,7 +131,7 @@ func TestConfiguredImportEditsCustomNamedTemporaryChannel(t *testing.T) {
 		}
 	}
 	seed(fingerprint, "success")
-	w := runContendedChannelImport(t, s.control, src.ID, func(ctx context.Context) *httptest.ResponseRecorder {
+	w := runContendedControlOperation(t, s.control, src.ID, "添加", func(ctx context.Context) *httptest.ResponseRecorder {
 		return callContext(ctx, "POST", "/v1/channel-management", body)
 	}, func() {
 		if writes != 0 {

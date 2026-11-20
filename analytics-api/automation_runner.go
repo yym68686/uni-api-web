@@ -386,22 +386,27 @@ func (s *Service) runAutomation(parent context.Context, t AutomationTask) {
 		return
 	}
 	if e = s.applyAutomation(ctx, t, src, live, catalog, after, changes, detail); e != nil {
-		audit("error", e.Error(), before, after, changes, detail)
+		status := "error"
+		if errors.Is(e, errControlWaitTimeout) {
+			status = "skipped"
+		}
+		audit(status, e.Error(), before, after, changes, detail)
 	}
 }
 func (s *Service) applyAutomation(ctx context.Context, t AutomationTask, src controlSource, observed retainedLive, catalog []automationChannel, after []string, changes []map[string]any, detail map[string]any) error {
-	currentSource, err := s.control.source(ctx, src.ID)
-	if err != nil || controlTarget(currentSource) != controlTarget(src) {
-		return errors.New("来源连接已修改，本次不应用")
-	}
-	if err = s.automationFixedPriority(ctx, src, t); err != nil {
-		return err
-	}
-	unlock, e := s.control.lockControls(ctx, src.ID)
+	unlock, e := s.control.waitControlOperation(ctx, src.ID)
 	if e != nil {
 		return e
 	}
 	defer unlock()
+	currentSource, err := s.control.source(ctx, src.ID)
+	if err != nil || controlTarget(currentSource) != controlTarget(src) {
+		return errors.New("来源连接已修改，本次不应用")
+	}
+	src = currentSource
+	if err = s.automationFixedPriority(ctx, src, t); err != nil {
+		return err
+	}
 	raw, e := s.reconcileControls(ctx, src)
 	if e != nil {
 		return e
@@ -648,9 +653,11 @@ func (s *Service) rollbackAutomation(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "来源不可用", 503)
 		return
 	}
-	unlock, e := s.control.lockControls(r.Context(), src.ID)
-	if e != nil {
-		http.Error(w, e.Error(), 409)
+	ctx, cancel := controlWriteContext(w, r, 45*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
+	unlock := s.waitControlHTTP(w, ctx, src.ID, "回滚")
+	if unlock == nil {
 		return
 	}
 	defer unlock()
@@ -744,7 +751,7 @@ func (s *Service) applyAutomationSuggestion(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "统计窗口包含未采集或已淘汰的请求，无法批准调序", 409)
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	ctx, cancel := controlWriteContext(w, r, 45*time.Second)
 	defer cancel()
 	token := randomID()
 	res, e := s.control.db.ExecContext(ctx, `UPDATE console_automation_tasks SET lease_token=$3,lease_until=now()+interval '1 minute' WHERE id=$1 AND revision=$2 AND enabled AND NOT archived AND (lease_until IS NULL OR lease_until<now())`, t.ID, t.Revision, token)
@@ -804,7 +811,11 @@ func (s *Service) applyAutomationSuggestion(w http.ResponseWriter, r *http.Reque
 	detail["channels"] = metrics
 	detail["approved_audit"] = r.PathValue("audit")
 	if e = s.applyAutomation(ctx, t, src, live, catalog, after, changes, detail); e != nil {
-		http.Error(w, e.Error(), 409)
+		if errors.Is(e, errControlWaitTimeout) || errors.Is(e, errControlLockUnavailable) {
+			writeControlWaitError(w, e, "修改")
+		} else {
+			http.Error(w, e.Error(), 409)
+		}
 		return
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
@@ -836,12 +847,20 @@ func (s *Service) reviewAutomationSubmission(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "来源不可用", 503)
 		return
 	}
-	unlock, e := s.control.lockControls(r.Context(), src.ID)
-	if e != nil {
-		http.Error(w, e.Error(), 409)
+	ctx, cancel := controlWriteContext(w, r, 45*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
+	unlock := s.waitControlHTTP(w, ctx, src.ID, "核对")
+	if unlock == nil {
 		return
 	}
 	defer unlock()
+	// Another reviewer can finish while this request is waiting for the source.
+	e = s.control.db.QueryRowContext(ctx, `SELECT status FROM console_automation_audit WHERE id::text=$1 AND task_id=$2`, r.PathValue("audit"), task.ID).Scan(&status)
+	if e != nil || (status != "prepared" && status != "uncertain") {
+		http.Error(w, "没有待核对的提交", 409)
+		return
+	}
 	liveMap, _, e := subGateway(r.Context(), src, "GET", "/v1/channel-controls", nil)
 	if e != nil {
 		http.Error(w, "来源暂不可用，请稍后再核对", 503)

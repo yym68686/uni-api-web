@@ -15,7 +15,7 @@ import (
 
 // Hold a real PostgreSQL source lock across each HTTP path. A request's
 // shorter deadline exercises the wait timeout without making CI wait 15s.
-func runContendedChannelImport(t *testing.T, store *controlStore, source string, call func(context.Context) *httptest.ResponseRecorder, checkUnchanged func()) *httptest.ResponseRecorder {
+func runContendedControlOperation(t *testing.T, store *controlStore, source, action string, call func(context.Context) *httptest.ResponseRecorder, checkUnchanged func()) *httptest.ResponseRecorder {
 	t.Helper()
 	unlock, err := store.lockControls(context.Background(), source)
 	if err != nil {
@@ -27,8 +27,8 @@ func runContendedChannelImport(t *testing.T, store *controlStore, source string,
 	short, cancel := context.WithTimeout(context.Background(), 350*time.Millisecond)
 	defer cancel()
 	w := call(short)
-	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "等待超时；尚未提交添加") {
-		t.Fatalf("contended import did not wait until deadline: %d %s", w.Code, w.Body.String())
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "等待超时；尚未提交"+action) {
+		t.Fatalf("contended operation did not wait until deadline: %d %s", w.Code, w.Body.String())
 	}
 	checkUnchanged()
 
@@ -36,7 +36,7 @@ func runContendedChannelImport(t *testing.T, store *controlStore, source string,
 	go func() { finished <- call(context.Background()) }()
 	select {
 	case w = <-finished:
-		t.Fatalf("import completed before the prior writer released the lock: %d %s", w.Code, w.Body.String())
+		t.Fatalf("operation completed before the prior writer released the lock: %d %s", w.Code, w.Body.String())
 	case <-time.After(100 * time.Millisecond):
 	}
 	release()
@@ -44,7 +44,7 @@ func runContendedChannelImport(t *testing.T, store *controlStore, source string,
 	case w = <-finished:
 		return w
 	case <-time.After(5 * time.Second):
-		t.Fatal("import did not resume after the source lock was released")
+		t.Fatal("operation did not resume after the source lock was released")
 		return nil
 	}
 }
@@ -222,7 +222,7 @@ func TestSubImportUsesBusinessKeyAndFencesModelsOwnerAndRevision(t *testing.T) {
 	if _, err := store.db.Exec(`UPDATE console_sub_accounts SET state='idle',job_kind='',job_id='',lease_until=NULL WHERE id=$1`, account); err != nil {
 		t.Fatal(err)
 	}
-	w = runContendedChannelImport(t, store, sourceID, func(ctx context.Context) *httptest.ResponseRecorder {
+	w = runContendedControlOperation(t, store, sourceID, "添加", func(ctx context.Context) *httptest.ResponseRecorder {
 		return requestContext(ctx, []string{checkModel}, "boot:1", session)
 	}, func() {
 		var state, job string
