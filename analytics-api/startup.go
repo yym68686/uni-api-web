@@ -41,6 +41,12 @@ func (s *Service) startBackground(ctx context.Context) <-chan struct{} {
 		start(s.rechargeLoop)
 	}
 	start(s.retentionLoop)
+	if s.engine.priceTiersReady {
+		start(s.priceTierLoop)
+	}
+	if s.control != nil && s.spendSliceJobs != nil {
+		start(s.spendSliceLoop)
+	}
 	go func() { workers.Wait(); close(done) }()
 	return done
 }

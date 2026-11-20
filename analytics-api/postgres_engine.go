@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"time"
@@ -111,6 +112,21 @@ func openPostgresEngine(namespace string, cfg Config) (*Engine, error) {
 		db.Close()
 		return nil, err
 	}
+	// These are additive projections, not readiness dependencies. A DDL lock
+	// during a rolling deploy must leave exact reads available.
+	for _, feature := range []struct {
+		name  string
+		init  func(context.Context) error
+		ready *bool
+	}{{"price_tiers", e.initializePriceTierRollups, &e.priceTiersReady}, {"spend_slices", e.initializeSpendSlices, &e.spendSlicesReady}} {
+		migration, cancel := context.WithTimeout(ctx, 2*time.Second)
+		migrationErr := feature.init(migration)
+		cancel()
+		*feature.ready = migrationErr == nil
+		if migrationErr != nil {
+			log.Printf("event=incremental_projection_disabled feature=%s class=%s", feature.name, databaseErrorClass(migrationErr))
+		}
+	}
 	if err = e.seedDefaultPrices(); err != nil {
 		db.Close()
 		return nil, err
@@ -129,7 +145,7 @@ func (e *Engine) readSnapshot(ctx context.Context) (*Engine, func(), error) {
 		closeSnapshot()
 		return nil, nil, err
 	}
-	view := &Engine{DB: &analyticsDB{DB: e.DB.DB, snapshot: tx.Tx}, cfg: e.cfg, Location: e.Location}
+	view := &Engine{DB: &analyticsDB{DB: e.DB.DB, snapshot: tx.Tx}, cfg: e.cfg, Location: e.Location, priceTiersReady: e.priceTiersReady}
 	var revision uint64
 	if err = tx.QueryRowContext(ctx, "SELECT revision FROM storage_state WHERE singleton").Scan(&revision); err != nil {
 		closeSnapshot()

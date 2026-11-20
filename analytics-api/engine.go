@@ -26,6 +26,8 @@ type Engine struct {
 	operationsMu      sync.Mutex
 	operations        map[*databaseOperation]string
 	historyPath       string
+	priceTiersReady   bool
+	spendSlicesReady  bool
 	cfg               Config
 	mu                sync.Mutex
 	Revision          atomic.Uint64

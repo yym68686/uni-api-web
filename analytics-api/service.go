@@ -48,6 +48,11 @@ type Service struct {
 	pageModelStreams   managementPageModelStreams
 	gatewayParts       managementGatewayPartsStore
 	managementReaders  atomic.Int32
+	spendSliceJobs     chan spendSliceJob
+	spendSliceMu       sync.Mutex
+	spendSliceNext     map[string]time.Time
+	spendSliceVerified map[string]bool
+	spendSliceShadow   bool
 }
 
 type cachedAnalytics struct {
@@ -74,7 +79,15 @@ func NewService(e *Engine, cfg Config) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Service{engine: e, cfg: cfg, auth: auth, cache: make(map[string]cachedAnalytics)}, nil
+	s := &Service{engine: e, cfg: cfg, auth: auth, cache: make(map[string]cachedAnalytics)}
+	mode := env("CHANNEL_SPEND_SLICES", "auto")
+	if e.historyPath == "analytics" && e.spendSlicesReady && (mode == "auto" || mode == "shadow") {
+		s.spendSliceJobs = make(chan spendSliceJob, 4)
+		s.spendSliceNext = make(map[string]time.Time)
+		s.spendSliceVerified = make(map[string]bool)
+		s.spendSliceShadow = mode == "shadow"
+	}
+	return s, nil
 }
 func (s *Service) Handler() http.Handler {
 	mux := http.NewServeMux()

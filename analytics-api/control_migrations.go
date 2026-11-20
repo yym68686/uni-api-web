@@ -142,6 +142,9 @@ var managementOverviewOutcomeSQL string
 //go:embed migrations/0034_fingerprint_previous_result.sql
 var fingerprintPreviousResultSQL string
 
+//go:embed migrations/0035_channel_spend_receipt_invalidation.sql
+var channelSpendReceiptInvalidationSQL string
+
 var managementRevisionTables = []string{"console_sub_models", "console_management_model_signal", "console_sub_usage", "console_management_receipt_signal", "console_management_revision_state"}
 
 type controlMigration struct {
@@ -187,6 +190,7 @@ func controlMigrations() []controlMigration {
 		{"0032_site_key_pause_budget", siteKeyPauseBudgetSQL, []string{"console_sub_accounts"}},
 		{"0033_management_overview_outcome", managementOverviewOutcomeSQL, []string{"console_sub_models", "console_management_overview_reset"}},
 		{"0034_fingerprint_previous_result", fingerprintPreviousResultSQL, []string{"console_model_fingerprints"}},
+		{"0035_channel_spend_receipt_invalidation", channelSpendReceiptInvalidationSQL, []string{"console_sub_spend_logs", "console_billing_error_evidence"}},
 	}
 }
 
@@ -195,6 +199,9 @@ func (m controlMigration) checksum() string {
 }
 
 func (m controlMigration) lockMode(table string) string {
+	if m.Version == "0035_channel_spend_receipt_invalidation" {
+		return "SHARE ROW EXCLUSIVE" // CREATE TRIGGER; let live receipt reads continue.
+	}
 	if strings.Contains(m.Version, "_management_overview_") {
 		return "SHARE ROW EXCLUSIVE"
 	}

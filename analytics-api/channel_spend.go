@@ -256,7 +256,7 @@ const billingClaimsSeekSQL = `CREATE TEMP TABLE console_spend_claims AS
  FROM target t JOIN claims c USING(upstream_base,upstream_key_hash,rid)
  GROUP BY t.upstream_base,t.upstream_key_hash,t.rid`
 
-func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f QueryFilter, from, to int64) (result []attributedSpend, resultErr error) {
+func (s *Service) readAttributedChannelSpend(ctx context.Context, owner string, f QueryFilter, from, to int64, capture *spendCapture) (result []attributedSpend, resultErr error) {
 	ctx, unregisterSpend := s.engine.registerSpend(ctx)
 	defer unregisterSpend()
 	defer func() {
@@ -288,6 +288,20 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 	if projected {
 		billingTable, receiptIndex = "billing_facts", "billing_facts_receipt_ids"
 		alignment = strings.ReplaceAll(alignment, "FROM facts", "FROM billing_facts")
+		// The edge of a rolling cutoff can seed its identities directly from
+		// retained time partitions, without regrouping the long history.
+		if to-from <= spendSliceHour {
+			// Each seed probes retained partitions for a cross-window companion.
+			// Keep that path bounded; dense hours still use the bulk join.
+			where, args := billingWhere(f, from, to)
+			var small bool
+			if err = snapshot.QueryRowContext(ctx, `SELECT count(*)<=256 FROM (SELECT 1 FROM billing_facts WHERE `+where+` LIMIT 257) seeds`, args...).Scan(&small); err != nil {
+				return nil, err
+			}
+			if small {
+				alignment, alignedArgs = seekBillingSnapshot(f, from, to)
+			}
+		}
 	}
 	// One analytical slot, no parallel workers: keep the scoped identity sort
 	// in bounded memory without multiplying the budget across worker processes.
@@ -307,6 +321,30 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 	// page. Event IDs are validated at ingestion and this index is transaction-local.
 	if _, err = snapshot.ExecContext(ctx, "CREATE INDEX ON console_spend_facts(event_id)"); err != nil {
 		return nil, err
+	}
+	if capture != nil && capture.persist {
+		// Include legacy-only attempts as well as billing rows so a companion
+		// outside the warm slice can invalidate this slice later.
+		var identities, receipts, claims, evidence []byte
+		if err = snapshot.QueryRowContext(ctx, `SELECT coalesce(jsonb_agg(DISTINCT `+spendIdentityDigestSQL+`),'[]') FROM console_spend_facts`).Scan(&identities); err != nil {
+			return nil, err
+		}
+		if err = snapshot.QueryRowContext(ctx, `SELECT coalesce(jsonb_agg(DISTINCT rid),'[]'), coalesce(jsonb_agg(DISTINCT encode(sha256(convert_to(`+billingSiteSQL+`||E'\n'||coalesce(upstream_key_hash,'')||E'\n'||rid,'UTF8')),'hex')),'[]') FROM console_spend_facts CROSS JOIN LATERAL unnest(billing_request_ids) AS t(rid)`).Scan(&receipts, &claims); err != nil {
+			return nil, err
+		}
+		if err = snapshot.QueryRowContext(ctx, `SELECT coalesce(jsonb_agg(event_id),'[]') FROM console_spend_facts WHERE status=403 AND coalesce(upstream_error_sha256,'')=''`).Scan(&evidence); err != nil {
+			return nil, err
+		}
+		for _, pair := range []struct {
+			raw    []byte
+			target *[]string
+		}{
+			{identities, &capture.identities}, {receipts, &capture.receipts}, {claims, &capture.claims}, {evidence, &capture.evidence},
+		} {
+			if err = json.Unmarshal(pair.raw, pair.target); err != nil {
+				return nil, err
+			}
+		}
 	}
 	operation.stage("receipt_claims")
 	claimQuery := billingClaimsSQL
@@ -372,6 +410,9 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 	if err != nil {
 		return nil, err
 	}
+	if capture != nil {
+		capture.binding = spendBindingDigest(bindings)
+	}
 	rowErrors := map[string]bool{}
 	claimed := map[string]string{}
 	cursor := ""
@@ -434,7 +475,7 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 					item.MissingStatuses = map[string]int{}
 				}
 				item.MissingStatuses[strconv.Itoa(b.Status)]++
-				item.unresolved(b, "missing_response_identifier")
+				capture.markSample(item, b, "missing_response_identifier")
 				continue
 			}
 			matches := bindings[subBindingSite(b.Base)+"\n"+b.Hash]
@@ -444,6 +485,12 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 				continue
 			}
 			scope := matches[0]
+			if capture != nil {
+				if b.Base != scope.Site {
+					capture.unsafe = true // noncanonical historical alias can share a receipt
+				}
+				capture.account(b, scope.Account)
+			}
 			if siteRateCoefficient(scope.RateCoefficient) != 1 {
 				if item.RateCoefficients == nil {
 					item.RateCoefficients = map[string]float64{}
@@ -467,7 +514,10 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 			}
 		}
 		operation.stage("queue_windows")
-		if err = s.queueAccountSpendWindows(ctx, windows); err != nil {
+		if (capture == nil || !capture.persist) && len(windows) > 0 {
+			err = s.queueAccountSpendWindows(ctx, windows)
+		}
+		if err != nil {
 			return nil, err
 		}
 		// Look for competing claims across ALL sources and caller keys, not just the
@@ -663,7 +713,7 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 						item.AbsentStatuses = map[string]int{}
 					}
 					item.AbsentStatuses[strconv.Itoa(b.Status)]++
-					item.unresolved(b, "receipt_absent_after_sync")
+					capture.markSample(item, b, "receipt_absent_after_sync")
 				}
 				continue
 			}
@@ -677,6 +727,9 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 				value, ok := new(big.Rat).SetString(log.Cost)
 				if !ok || value.Sign() < 0 {
 					return nil, errors.New("invalid receipt cost")
+				}
+				if capture != nil {
+					capture.addCost(b, scope.Account, value)
 				}
 				// Convert each exactly attributed receipt once, before aggregation:
 				// one provider may have used different accounts in this window.
@@ -695,42 +748,47 @@ func (s *Service) attributedChannelSpend(ctx context.Context, owner string, f Qu
 	out := make([]attributedSpend, 0, len(totals))
 	for id, item := range totals {
 		amount, _ := sums[id].Float64()
-		item.MatchedAmount = amount
-		item.Pending = max(0, item.Total-item.Matched-item.ConfirmedUnbilled-item.Missing-item.Ambiguous-item.AbsentReceipts)
-		item.Refreshing = item.Pending > 0
 		item.SyncError = rowErrors[id]
-		switch {
-		case !claimsComplete || from*1000 < evictedBefore:
-			item.Status = "history_limited"
-			if !claimsComplete {
-				item.HistoryReason = "ownership_history_incomplete"
-				item.Message = "历史账单归属证据不完整；暂计金额仅按当前留存记录匹配，可能因历史冲突或缺失而调整，不是完整消费或可信下限"
-			} else {
-				item.HistoryReason = "requested_range_evicted"
-				item.Message = "所选时间范围包含已淘汰的请求历史；暂计金额仅包含当前留存记录的匹配部分，不是完整消费"
-			}
-		case item.Ambiguous > 0:
-			item.Status = "ambiguous"
-			item.Message = "账单标识对应多个请求或多条账单，不能准确归属"
-		case item.Missing > 0:
-			item.Status = "unmatched"
-			item.Message = "部分请求缺少上游响应标识或账号关联，不能用共享 Key 总额替代"
-		case rowErrors[id]:
-			item.Status = "error"
-			item.Message = "站点账单查询失败，后台会自动重试；未匹配金额不按零处理"
-		case item.Pending == 0 && item.AbsentReceipts > 0:
-			item.Status = "unmatched"
-			item.Message = "账单日志已同步，但仍未找到部分请求的账单；金额未知，不按零消费处理"
-		case item.Matched+item.ConfirmedUnbilled < item.Total:
-			item.Status = "pending"
-			item.Message = "正在逐请求同步账单；尚未匹配的请求不按零消费处理"
-		default:
-			item.Amount = &amount
-			item.Message = "按当前来源、调用 Key、渠道、模型、端点与流式筛选关联；每条账单只计一次"
-		}
+		item.MatchedAmount = amount
+		finishAttributedSpend(item, amount, claimsComplete, evictedBefore)
 		out = append(out, *item)
 	}
 	return out, nil
+}
+
+func finishAttributedSpend(item *attributedSpend, amount float64, claimsComplete bool, evictedBefore int64) {
+	item.Pending = max(0, item.Total-item.Matched-item.ConfirmedUnbilled-item.Missing-item.Ambiguous-item.AbsentReceipts)
+	item.Refreshing = item.Pending > 0
+	item.Status, item.HistoryReason, item.Amount = "complete", "", nil
+	switch {
+	case !claimsComplete || item.From*1000 < evictedBefore:
+		item.Status = "history_limited"
+		if !claimsComplete {
+			item.HistoryReason = "ownership_history_incomplete"
+			item.Message = "历史账单归属证据不完整；暂计金额仅按当前留存记录匹配，可能因历史冲突或缺失而调整，不是完整消费或可信下限"
+		} else {
+			item.HistoryReason = "requested_range_evicted"
+			item.Message = "所选时间范围包含已淘汰的请求历史；暂计金额仅包含当前留存记录的匹配部分，不是完整消费"
+		}
+	case item.Ambiguous > 0:
+		item.Status = "ambiguous"
+		item.Message = "账单标识对应多个请求或多条账单，不能准确归属"
+	case item.Missing > 0:
+		item.Status = "unmatched"
+		item.Message = "部分请求缺少上游响应标识或账号关联，不能用共享 Key 总额替代"
+	case item.SyncError:
+		item.Status = "error"
+		item.Message = "站点账单查询失败，后台会自动重试；未匹配金额不按零处理"
+	case item.Pending == 0 && item.AbsentReceipts > 0:
+		item.Status = "unmatched"
+		item.Message = "账单日志已同步，但仍未找到部分请求的账单；金额未知，不按零消费处理"
+	case item.Matched+item.ConfirmedUnbilled < item.Total:
+		item.Status = "pending"
+		item.Message = "正在逐请求同步账单；尚未匹配的请求不按零消费处理"
+	default:
+		item.Amount = &amount
+		item.Message = "按当前来源、调用 Key、渠道、模型、端点与流式筛选关联；每条账单只计一次"
+	}
 }
 func (s *Service) receiptBindings(ctx context.Context, owner string) (map[string][]receiptScope, error) {
 	out := map[string][]receiptScope{}

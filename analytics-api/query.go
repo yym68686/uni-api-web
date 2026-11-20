@@ -316,7 +316,10 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (queryResult QueryRes
 	if err != nil {
 		return QueryResult{}, err
 	}
-	q, args = withLongContextUsage(q, args, where, startMS, now.UnixMilli(), prices)
+	q, args, err = e.withLongContextUsage(ctx, q, args, where, startMS, now.UnixMilli(), prices)
+	if err != nil {
+		return QueryResult{}, err
+	}
 	operation.stage("rollup_aggregate")
 	rows, err := e.DB.QueryContext(ctx, q, args...)
 	if err != nil {
