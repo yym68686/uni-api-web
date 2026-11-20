@@ -7,7 +7,10 @@
   display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
   padding: 0 21px; margin: 0 0 .85rem; color: var(--muted); font-size: .78rem;
 }
-.channel-scope-caption .text-link { border: 0; background: transparent; }
+.trend-panel .trend-panel-heading {flex-wrap:wrap;gap:8px 16px;margin-bottom:12px;}
+.trend-panel .trend-panel-heading h3 {margin:0;}
+.trend-panel-heading p {margin-top:3px;font-size:11px;}
+.trend-panel > .chart-legend {justify-content:flex-end;font-size:11px;}
 .observation-table .channel-link { max-width: 16rem; }
 .observation-table .channel-link span { min-width: 0; }
 .observation-table .channel-link strong, .observation-table .channel-link small {

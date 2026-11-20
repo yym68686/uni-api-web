@@ -91,7 +91,7 @@ export function QualityHistory({ path, revision, title = "降智检测历史" }:
                 return <tr key={entry.id}>
                   <td><time>{new Date(entry.checked_at * 1000).toLocaleString("zh-CN", { hour12: false })}</time>{entry.rule === "legacy" && <small className="muted">更新前最后一次</small>}</td>
                   <td><span className={`check-status ${entry.verdict}`}>{labels[entry.verdict] || "检测失败"}</span><small className="muted">{ms(probe.duration_ms)}</small></td>
-                  <td>{probe.text || probe.message ? <details><summary>查看内容</summary><dl><dt>检测模型</dt><dd>{entry.model}</dd>{entry.result.quality?.response_model && <><dt>响应模型</dt><dd>{entry.result.quality.response_model}</dd></>}<dt>回复 / 诊断</dt><dd className="sub-check-reply">{probe.text || probe.message}</dd></dl></details> : "—"}</td>
+                  <td>{probe.text || probe.message ? <details className="data-disclosure"><summary>查看内容</summary><dl><dt>检测模型</dt><dd>{entry.model}</dd>{entry.result.quality?.response_model && <><dt>响应模型</dt><dd>{entry.result.quality.response_model}</dd></>}<dt>回复 / 诊断</dt><dd className="sub-check-reply">{probe.text || probe.message}</dd></dl></details> : "—"}</td>
                 </tr>;
               })}</tbody>
             </table>

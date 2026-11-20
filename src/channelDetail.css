@@ -1,7 +1,10 @@
-/* Channel drawer: charts use the same compact surface as the existing cache curve. */
-.channel-detail-trends h3 { display:flex;align-items:center;justify-content:space-between;gap:12px; }
-.channel-detail-trends h3 > span {font-size:12px;font-weight:400;}
-.detail-curve {margin:18px 0;padding:14px 12px;background:var(--subtle);border:1px solid var(--line);border-radius:10px;}
+/* One instrument panel for all metrics in the current channel scope. */
+.detail-trends-heading {display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px 12px;margin-bottom:12px;}
+.detail-trends-heading h3 {margin:0;}
+.detail-trends-heading p {margin-top:3px;font-size:11px;line-height:1.5;}
+.detail-curves {border:1px solid var(--line);border-radius:10px;background:var(--surface);}
+.detail-curve {min-width:0;padding:12px;}
+.detail-curve + .detail-curve {border-top:1px solid var(--line);}
 .detail-curve-heading {display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;}
 .detail-curve-heading h4 {margin:0;font-size:13px;}
 .detail-curve-legend {display:flex;gap:12px;font-size:11px;color:var(--muted);}
@@ -9,13 +12,17 @@
 .detail-curve-legend i {width:10px;height:3px;border-radius:2px;}
 .detail-curve svg {display:block;width:100%;overflow:visible;}
 .detail-curve svg line {stroke:var(--line);stroke-dasharray:3 4;}
+.detail-curve svg .detail-curve-guide {stroke:var(--muted);opacity:.65;pointer-events:none;}
 .detail-curve svg text {fill:var(--muted);font-size:10px;}
 .detail-curve-line {fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;}
 .detail-curve svg circle {fill:currentColor;}
 .detail-curve-hit {fill:transparent;cursor:crosshair;outline:none;}
 .detail-curve-hit:focus {stroke:var(--ink);stroke-dasharray:3 3;}
-.detail-curve-value {display:flex;flex-wrap:wrap;gap:5px 12px;justify-content:space-between;margin-top:10px;font-size:11px;}
+.detail-curve-value {display:flex;flex-wrap:wrap;gap:4px 12px;justify-content:space-between;margin-top:6px;padding:8px 10px;border-radius:6px;background:var(--subtle);font-size:11px;font-variant-numeric:tabular-nums;}
 .detail-curve-value small {width:100%;color:var(--muted);}
+.detail-curve-empty {font-size:12px;padding:2px 0 5px;}
+.detail-trends-cache {margin-top:7px;}
+.detail-trends-cache strong {color:var(--ink);font-variant-numeric:tabular-nums;}
 .detail-section-heading {display:flex;justify-content:space-between;align-items:center;gap:7px}
 .detail-section-heading > h3 {margin:0}
 .detail-check-grid {display:grid;gap:0;border:1px solid var(--line);border-radius:8px;margin-top:10px}

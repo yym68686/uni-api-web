@@ -1,11 +1,11 @@
 import { expect, it, vi } from "vitest";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import type { ReactNode } from "react";
 import { ChannelAccess } from "./ChannelAccess";
-import { CacheTrend } from "./CacheTrend";
+import { ChannelDetailTrends } from "./ChannelDetailTrends";
 import { QualityHistory, QualityProbability, qualityTooltip } from "./QualityHistory";
 import { dashboardURL, SiteLink } from "./ChannelSite";
 import { withSubQuality } from "./ChannelChecks";
@@ -52,12 +52,12 @@ it("does not add shared server totals again for duplicate bindings or installed 
 it("scopes cache history to source, key, model, upstream, endpoint and streaming without inventing missing cache samples", async () => {
   const fetchMock = vi.fn(async () => new Response(JSON.stringify({ total: { cache_rate: .1 }, from: 100, to: 300, bucket_seconds: 60, data: [{ ...row, points: [{ timestamp: 120, bucket_end: 180, cache_rate: .1, input_tokens: 1000, cache_read_tokens: 100, cache_samples: 2 }, { timestamp: 180, bucket_end: 240, cache_rate: null }, { timestamp: 240, bucket_end: 300, cache_rate: 0, input_tokens: 100, cache_read_tokens: 0, cache_samples: 1 }] }] })));
   vi.stubGlobal("fetch", fetchMock);
-  setup(<CacheTrend row={row} connection={{ base: "", key: "", session: "fixture", account: true, sourceId: "all" }} keyId="source-two::key-scope" window="12h" endpoint="/v1/responses" stream="true" refresh={0} />);
+  setup(<ChannelDetailTrends row={row} connection={{ base: "", key: "", session: "fixture", account: true, sourceId: "all" }} keyId="source-two::key-scope" window="12h" endpoint="/v1/responses" stream="true" refresh={0} />);
   await screen.findByText("所选范围缓存率");
   const url = new URL(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit | undefined])[0]), location.origin);
   expect(Object.fromEntries(url.searchParams)).toMatchObject({ source_id: "source-two", key_id: "key-scope", range: "12h", model: "gpt-6-astra", upstream_model: "gpt-6-astra", provider: "same", endpoint: "/v1/responses", stream: "true", timeseries: "true" });
-  expect(screen.getAllByRole("img")).toHaveLength(2);
-  expect(screen.getByText("0.0%")).toBeVisible();
+  expect(within(screen.getByRole("region", { name: "缓存率趋势" })).getAllByRole("img")).toHaveLength(2);
+  expect(screen.getByText("缓存率 0.0%")).toBeVisible();
 });
 
 it("loads secrets only on demand and removes the exact imported binding after confirmation", async () => {
@@ -115,14 +115,14 @@ it("automatically recovers cache history after initialization without displaying
     .mockResolvedValueOnce(new Response(JSON.stringify({ code: "analytics_initializing" }), { status: 503 }))
     .mockResolvedValue(new Response(JSON.stringify({ total: { cache_rate: .75 }, from: 100, to: 200, data: [{ ...row, points: [{ timestamp: 120, cache_rate: .75 }] }] })));
   vi.stubGlobal("fetch", fetchMock);
-  const app = setup(<CacheTrend row={row} connection={{ base: "", key: "", session: "starting", account: true }} keyId="" window="1h" endpoint="all" stream="all" refresh={0} />);
+  const app = setup(<ChannelDetailTrends row={row} connection={{ base: "", key: "", session: "starting", account: true }} keyId="" window="1h" endpoint="all" stream="all" refresh={0} />);
   try {
     await act(async () => { await vi.advanceTimersByTimeAsync(50); });
-    expect(screen.getByRole("status", {name:"加载缓存历史"}).textContent).toBe("");
+    expect(screen.getByRole("status", {name:"加载渠道趋势"}).textContent).toBe("");
     expect(screen.queryByText("此时间范围暂无缓存用量数据。")).not.toBeInTheDocument();
     await act(async () => { await vi.advanceTimersByTimeAsync(5050); });
     expect(screen.getByText("所选范围缓存率")).toBeVisible();
-    expect(screen.queryByRole("status", {name:"加载缓存历史"})).not.toBeInTheDocument();
+    expect(screen.queryByRole("status", {name:"加载渠道趋势"})).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(2);
     await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
     expect(fetchMock).toHaveBeenCalledTimes(2);

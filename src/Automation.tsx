@@ -1130,7 +1130,7 @@ export function Automation({
                     {reason}
                   </p>
                 ))}
-                <details>
+                <details className="data-disclosure">
                   <summary>本次执行策略</summary>
                   <div className="automation-table-scroll">
                     <table>

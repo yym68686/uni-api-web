@@ -4,10 +4,12 @@ import { FailureCounts } from "./FailureCounts";
 import { useMemo, useState } from "react";
 import { AnalyticsInitializingError } from "./api";
 import { ranges } from "./analytics";
-import { ms, rate } from "./format";
+import { count, ms, rate } from "./format";
 import { useChannelTimeseries } from "./channelTimeseries";
 import type { ChannelTimeseriesProps } from "./channelTimeseries";
+import { TrendDataTable, TrendViewSwitch, type TrendMode } from "./TrendView";
 import type { Channel } from "./types";
+import "./channelDetail.css";
 
 type Point = NonNullable<Channel["points"]>[number];
 const date = (at: number) =>
@@ -22,6 +24,10 @@ const successRate = (point: Point) =>
   point.success + point.failed > 0
     ? point.success / (point.success + point.failed)
     : null;
+const timeSpan = (p: Point) =>
+  p.bucket_end && p.bucket_end !== p.timestamp
+    ? `${date(p.timestamp)}–${date(p.bucket_end)}`
+    : date(p.timestamp);
 interface Series {
   label: string;
   value: (point: Point) => number | null;
@@ -42,6 +48,21 @@ const latencySeries: Series[] = [
 const successSeries: Series[] = [
   { label: "成功率", value: successRate, color: "var(--green)" },
 ];
+const cacheSeries: Series[] = [
+  {
+    label: "缓存率",
+    value: (p) => p.cache_rate ?? null,
+    color: "var(--accent)",
+  },
+];
+const latencyDetail = (p: Point) => {
+  const latency = channelLatency(p);
+  return `${count(latency.value?.sample_count || 0)} 个${latencyLabel(latency.kind)}样本 · 正文首字 p50 ${ms(p.first_text?.p50_ms)}`;
+};
+const successDetail = (p: Point) =>
+  `成功 ${count(p.success || 0)} / 失败 ${count(p.failed || 0)} · ${count((p.success || 0) + (p.failed || 0))} 次有效尝试`;
+const cacheDetail = (p: Point) =>
+  `缓存读取 ${count(p.cache_read_tokens || 0)} / 输入 ${count(p.input_tokens || 0)} token · ${count(p.cache_samples || 0)} 个缓存样本`;
 
 function Curve({
   title,
@@ -50,6 +71,8 @@ function Curve({
   from,
   to,
   bucket,
+  detail,
+  empty,
   percentage = false,
 }: {
   title: string;
@@ -58,25 +81,23 @@ function Curve({
   from: number;
   to: number;
   bucket: number;
+  detail: (point: Point) => string;
+  empty?: string;
   percentage?: boolean;
 }) {
   const [active, setActive] = useState<number | null>(null);
-  const [showTable, setShowTable] = useState(false);
   const known = points.filter((p) => series.some((s) => s.value(p) != null));
   const selected = known.find((p) => p.timestamp === active) || known.at(-1);
   const max = percentage
     ? 1
     : Math.max(1, ...known.flatMap((p) => series.map((s) => s.value(p) || 0)));
   const x = (at: number) => 60 + ((at - from) / Math.max(1, to - from)) * 342;
+  const hitWidth = Math.min(12, (bucket / Math.max(1, to - from)) * 342);
   const y = (value: number) =>
     14 + (1 - Math.max(0, Math.min(1, value / max))) * 126;
   const format = percentage ? rate : ms;
-  const detail = (p: Point) =>
-    percentage
-      ? `成功 ${p.success} / 失败 ${p.failed} · ${p.success + p.failed} 次有效尝试`
-      : `${channelLatency(p).value?.sample_count || 0} 个${latencyLabel(channelLatency(p).kind)}样本 · 正文首字 p50 ${ms(p.first_text?.p50_ms)}`;
   const label = (p: Point) =>
-    `${date(p.timestamp)}–${date(p.bucket_end || p.timestamp)} · ${series.map((s) => `${s.label} ${format(s.value(p))}`).join(" / ")} · ${detail(p)}${p.covered === false ? " · 覆盖不完整" : ""}`;
+    `${timeSpan(p)} · ${series.map((s) => `${s.label} ${format(s.value(p))}`).join(" / ")} · ${detail(p)}${p.covered === false ? " · 覆盖不完整" : ""}`;
   return (
     <section className="detail-curve" aria-label={`${title}趋势`}>
       <div className="detail-curve-heading">
@@ -91,7 +112,9 @@ function Curve({
         </div>
       </div>
       {!known.length ? (
-        <p className="muted">当前范围暂无{title}样本。</p>
+        <p className="detail-curve-empty muted">
+          {empty || `当前范围暂无${title}样本。`}
+        </p>
       ) : (
         <>
           <svg
@@ -99,12 +122,24 @@ function Curve({
             role="group"
             tabIndex={0}
             aria-label={`${title}曲线，使用左右方向键查看数据点`}
-            onKeyDown={event => {
+            onKeyDown={(event) => {
               const index = selected ? known.indexOf(selected) : 0;
-              const target = event.key === "ArrowLeft" ? index - 1 : event.key === "ArrowRight" ? index + 1 : event.key === "Home" ? 0 : event.key === "End" ? known.length - 1 : null;
+              const target =
+                event.key === "ArrowLeft"
+                  ? index - 1
+                  : event.key === "ArrowRight"
+                    ? index + 1
+                    : event.key === "Home"
+                      ? 0
+                      : event.key === "End"
+                        ? known.length - 1
+                        : null;
               if (target === null) return;
               event.preventDefault();
-              setActive(known[Math.max(0, Math.min(target, known.length - 1))].timestamp);
+              setActive(
+                known[Math.max(0, Math.min(target, known.length - 1))]
+                  .timestamp,
+              );
             }}
           >
             {[0, 0.5, 1].map((tick) => (
@@ -115,6 +150,15 @@ function Curve({
                 </text>
               </g>
             ))}
+            {selected && (
+              <line
+                className="detail-curve-guide"
+                x1={x(selected.timestamp)}
+                x2={x(selected.timestamp)}
+                y1="14"
+                y2="140"
+              />
+            )}
             {series.map((s) => {
               let path = "",
                 previous: Point | undefined;
@@ -154,9 +198,9 @@ function Curve({
               <rect
                 key={p.timestamp}
                 className="detail-curve-hit"
-                x={x(p.timestamp) - 4}
+                x={x(p.timestamp) - hitWidth / 2}
                 y="10"
-                width="8"
+                width={hitWidth}
                 height="134"
                 role="img"
                 aria-label={label(p)}
@@ -175,39 +219,91 @@ function Curve({
           </svg>
           {selected && (
             <div className="detail-curve-value" aria-live="polite">
-              <span>{date(selected.timestamp)}</span>
+              <span>{timeSpan(selected)}</span>
               <strong>
                 {series
                   .map((s) => `${s.label} ${format(s.value(selected))}`)
                   .join(" / ")}
               </strong>
-              <small>{detail(selected)}</small>
+              <small>
+                {detail(selected)}
+                {selected.covered === false ? " · 覆盖不完整" : ""}
+              </small>
             </div>
           )}
         </>
       )}
-      {points.length > 0 && <>
-        <button type="button" className="text-link" aria-expanded={showTable} onClick={() => setShowTable(value => !value)}>
-          {showTable ? "收起数据表" : "查看数据表"}
-        </button>
-        {showTable && <div className="table-scroll">
-          <table className="channel-table">
-            <caption>{title}分时数据</caption>
-            <thead><tr><th scope="col">时间段</th>{series.map(s => <th key={s.label} scope="col">{s.label}</th>)}<th scope="col">样本与覆盖</th></tr></thead>
-            <tbody>{points.map(p => <tr key={p.timestamp}>
-              <th scope="row">{date(p.timestamp)}–{date(p.bucket_end || p.timestamp)}</th>
-              {series.map(s => <td key={s.label}>{s.value(p) == null ? "未记录" : format(s.value(p))}</td>)}
-              <td>{detail(p)}{p.covered === false ? " · 覆盖不完整" : ""}</td>
-            </tr>)}</tbody>
-          </table>
-        </div>}
-      </>}
     </section>
+  );
+}
+
+function ChannelTrendTable({ points }: { points: Point[] }) {
+  return (
+    <TrendDataTable
+      label="渠道分时数据"
+      columns={["时间段", "首字延迟", "成功率", "缓存率"]}
+    >
+      {points.map((p) => {
+        const latency = channelLatency(p).value;
+        const success = successRate(p);
+        return (
+          <tr key={p.timestamp}>
+            <th scope="row">
+              <span className="trend-reading">{date(p.timestamp)}</span>
+              {!!p.bucket_end && (
+                <small className="trend-reading">至 {date(p.bucket_end)}</small>
+              )}
+              {p.covered === false && (
+                <small className="trend-partial">覆盖不完整</small>
+              )}
+            </th>
+            <td>
+              {latency?.p50_ms == null && latency?.p95_ms == null ? (
+                <span className="muted">未记录</span>
+              ) : (
+                <>
+                  <span className="trend-reading">
+                    p50 {ms(latency.p50_ms)}
+                  </span>
+                  <span className="trend-reading">
+                    p95 {ms(latency.p95_ms)}
+                  </span>
+                </>
+              )}
+              {(!!latency?.sample_count || p.first_text?.p50_ms != null) && (
+                <small>{latencyDetail(p)}</small>
+              )}
+            </td>
+            <td>
+              {success == null ? (
+                <span className="muted">未记录</span>
+              ) : (
+                <>
+                  <span className="trend-reading">{rate(success)}</span>
+                  <small>{successDetail(p)}</small>
+                </>
+              )}
+            </td>
+            <td>
+              {p.cache_rate == null ? (
+                <span className="muted">未记录</span>
+              ) : (
+                <>
+                  <span className="trend-reading">{rate(p.cache_rate)}</span>
+                  <small>{cacheDetail(p)}</small>
+                </>
+              )}
+            </td>
+          </tr>
+        );
+      })}
+    </TrendDataTable>
   );
 }
 
 export function ChannelDetailTrends(props: ChannelTimeseriesProps) {
   const query = useChannelTimeseries(props);
+  const [mode, setMode] = useState<TrendMode>("chart");
   // The server bounds this aggregate series to ~180 buckets. Keep the full
   // selected range rather than silently showing only the last 120 buckets.
   const points = useMemo(
@@ -222,20 +318,26 @@ export function ChannelDetailTrends(props: ChannelTimeseriesProps) {
     query.data?.collection_started_at || 0,
   );
   const to = Math.max(from + 1, query.data?.to || 0);
+  const bucket = query.data?.bucket_seconds || 60;
+  const ready = !query.isPending && !query.isError;
+  const cacheRate = query.data?.total?.cache_rate;
   return (
     <section
       className="detail-section channel-detail-trends"
       aria-label="渠道趋势曲线"
     >
-      <h3>
-        渠道趋势曲线{" "}
-        <span className="muted">
-          {ranges.find(([v]) => v === props.window)?.[1] || props.window}
-        </span>
-      </h3>
-      <p className="muted">
-        当前来源、渠道与模型 · 跟随 API key、时间、端点和流式筛选
-      </p>
+      <header className="detail-trends-heading">
+        <div>
+          <h3>渠道趋势</h3>
+          <p className="muted">
+            {ranges.find(([v]) => v === props.window)?.[1] || props.window} ·
+            跟随 API key、端点和流式筛选
+          </p>
+        </div>
+        {ready && points.length > 0 && (
+          <TrendViewSwitch value={mode} onChange={setMode} />
+        )}
+      </header>
       {query.isPending || query.error instanceof AnalyticsInitializingError ? (
         <DetailLoading kind="chart" label="渠道趋势" />
       ) : query.isError ? (
@@ -247,23 +349,50 @@ export function ChannelDetailTrends(props: ChannelTimeseriesProps) {
         </p>
       ) : (
         <>
-          <Curve
-            title="首字延迟"
-            points={points}
-            series={latencySeries}
-            from={from}
-            to={to}
-            bucket={query.data?.bucket_seconds || 60}
-          />
-          <Curve
-            title="成功率"
-            points={points}
-            series={successSeries}
-            from={from}
-            to={to}
-            bucket={query.data?.bucket_seconds || 60}
-            percentage
-          />
+          <div
+            className="detail-curves"
+            hidden={mode === "table" && points.length > 0}
+          >
+            <Curve
+              title="首字延迟"
+              points={points}
+              series={latencySeries}
+              from={from}
+              to={to}
+              bucket={bucket}
+              detail={latencyDetail}
+            />
+            <Curve
+              title="成功率"
+              points={points}
+              series={successSeries}
+              from={from}
+              to={to}
+              bucket={bucket}
+              detail={successDetail}
+              percentage
+            />
+            <Curve
+              title="缓存率"
+              points={points}
+              series={cacheSeries}
+              from={from}
+              to={to}
+              bucket={bucket}
+              detail={cacheDetail}
+              percentage
+              empty="此时间范围暂无缓存用量数据。"
+            />
+          </div>
+          {mode === "table" && points.length > 0 && (
+            <ChannelTrendTable points={points} />
+          )}
+          {cacheRate != null && (
+            <p className="detail-trends-cache muted">
+              <span>所选范围缓存率</span> <strong>{rate(cacheRate)}</strong> ·
+              缓存读取 token ÷ 输入 token
+            </p>
+          )}
           <FailureCounts channels={query.data?.data || []} />
         </>
       )}

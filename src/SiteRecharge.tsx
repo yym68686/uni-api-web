@@ -638,7 +638,7 @@ export function SiteRecharge({ account, onBusyChange }: { account: SubAccount; o
             {j.credited_amount !== undefined &&
               ` · 到账额度 ${j.credited_amount}`}
           </p>
-          <details>
+          <details className="data-disclosure">
             <summary>订单编号与时间</summary>
             <dl className="dialog-key-values">
               <dt>记录编号</dt><dd>{j.id}</dd>

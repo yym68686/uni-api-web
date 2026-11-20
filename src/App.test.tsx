@@ -44,6 +44,7 @@ function setup(
     historyInitializing?: boolean;
     auditPending?: boolean;
     extraModel?: boolean;
+    trendSamples?: boolean;
   } = {},
 ) {
   const calls: string[] = [];
@@ -65,6 +66,12 @@ function setup(
         return new Response("{}", { status: options.keyStatus });
     }
     if (url.pathname.endsWith("/analytics") && options.historyInitializing) return new Response(JSON.stringify({ code: "analytics_initializing" }), { status: 503 });
+    if (options.trendSamples && url.searchParams.get("timeseries") === "true") {
+      return Response.json({ total: {}, bucket_seconds: 60, data: [{ ...rows[0], points: [
+        { timestamp: 120, success: 3, failed: 1, covered: true },
+        { timestamp: 240, success: 0, failed: 2, covered: false },
+      ] }] });
+    }
     const selected = url.searchParams.has("api_key_id");
     const primary = selected ? [rows[2], rows[0]] : rows;
     const data = options.extraModel ? [...primary,...primary.map(row=>({...row,model:"model-b"}))] : primary;
@@ -649,6 +656,24 @@ describe("dashboard workflows", () => {
         ),
       ).toBe(true),
     );
+  });
+  it("switches channel attempts to a table without refetching or fabricating missing counts", async () => {
+    const { user, calls } = setup({ trendSamples: true });
+    await connect(user);
+    await openFilters(user, "工具");
+    await user.click(screen.getByRole("button", { name: "查看趋势" }));
+    const toggle = await screen.findByRole("button", { name: "数据表", pressed: false });
+    const queryCount = calls.filter(url => new URL(url).searchParams.has("timeseries")).length;
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    const table = within(await screen.findByRole("table", { name: "渠道尝试分时数据" }));
+    expect(table.getAllByRole("row")).toHaveLength(4);
+    expect(table.getByText("未采集")).toBeVisible();
+    expect(table.getByText("覆盖不完整")).toBeVisible();
+    expect(table.getByText("0")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "图表", pressed: false }));
+    expect(screen.getByRole("group", { name: /方向键浏览各时间区间/ })).toBeVisible();
+    expect(calls.filter(url => new URL(url).searchParams.has("timeseries"))).toHaveLength(queryCount);
   });
   it("queries only the selected history range on entry and refresh", async () => {
     const { user, calls } = setup();

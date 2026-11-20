@@ -218,7 +218,7 @@ function EventDetails({ event: e }: { event: TraceEvent }) {
     ...((e.detail.error as object) || {}),
   };
   return (
-    <details>
+    <details className="data-disclosure">
       <summary>查看阶段详情</summary>
       <dl className="request-trace-details">
         <dt>绝对时间</dt>
@@ -592,7 +592,7 @@ function AttemptDetails({
             <h3>阶段时间线</h3>
             <StageList events={attempt.events} origin={origin} />
           </section>
-          <details className="trace-technical">
+          <details className="trace-technical data-disclosure">
             <summary>技术标识</summary>
             <dl className="request-trace-details">
               <dt>来源</dt>
@@ -710,7 +710,7 @@ export function TraceTimeline({
       ].map(
         ({ items, label }) =>
           items.length > 0 && (
-            <details key={label} className="trace-route-decisions">
+            <details key={label} className="trace-route-decisions data-disclosure">
               <summary>
                 {label} · {items.length} 个候选
               </summary>
@@ -882,7 +882,7 @@ export function TraceTimeline({
                     ))}
                   </div>
                 )}
-                <details className="trace-event-disclosure">
+                <details className="trace-event-disclosure data-disclosure">
                   <summary>展开 {a.events.length} 条阶段记录</summary>
                   <StageList events={a.events} origin={origin} />
                 </details>
@@ -911,13 +911,13 @@ export function TraceTimeline({
           </li>
         </ol>
         {!!trace.gateway.length && (
-          <details className="trace-gateway-records">
+          <details className="trace-gateway-records data-disclosure">
             <summary>网关阶段记录 · {trace.gateway.length} 条</summary>
             <StageList events={trace.gateway} origin={origin} />
           </details>
         )}
       </div>
-      <details className="trace-technical trace-run-technical">
+      <details className="trace-technical trace-run-technical data-disclosure">
         <summary>请求标识与记录说明</summary>
         <dl className="request-trace-details">
           <dt>Request ID</dt>

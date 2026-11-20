@@ -1548,7 +1548,7 @@ export function Editor({
                       {new Date(a.created_at * 1000).toLocaleString()} ·{" "}
                       {a.status}
                     </strong>
-                    <details>
+                    <details className="data-disclosure">
                       <summary>查看差异</summary>
                       <pre>{JSON.stringify(a.result.previews, null, 2)}</pre>
                     </details>

@@ -177,10 +177,6 @@
   border-radius: 6px;
   font-size: 12px;
 }
-.trace-route-decisions > summary {
-  cursor: pointer;
-  color: var(--muted);
-}
 .trace-route-decisions > ul {
   list-style: none;
   padding: 0;
@@ -620,20 +616,6 @@
 }
 .trace-event-disclosure {
   margin-top: 10px;
-}
-.trace-event-disclosure > summary,
-.trace-gateway-records > summary,
-.trace-technical > summary,
-.trace-stage-list details > summary {
-  cursor: pointer;
-  color: var(--muted);
-  font-size: 11px;
-  padding: 5px 0;
-}
-.trace-event-disclosure > summary:hover,
-.trace-gateway-records > summary:hover,
-.trace-technical > summary:hover {
-  color: var(--accent);
 }
 .trace-gateway-records {
   margin: 4px 0 0 39px;

@@ -1,0 +1,110 @@
+.trend-view-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  width: fit-content;
+  padding: 3px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+.trend-view-switch > button {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 4px 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 550;
+  white-space: nowrap;
+}
+.trend-view-switch > button:hover {
+  background: var(--subtle);
+  color: var(--ink);
+}
+.trend-view-switch > button[aria-pressed="true"] {
+  background: var(--selection);
+  color: var(--accent);
+}
+.trend-view-switch > button:focus-visible {
+  outline-offset: 0;
+}
+.trend-view-switch > button:active:not(:disabled) {
+  transform: none;
+}
+
+.trend-data-scroll {
+  max-height: min(52dvh, 28rem);
+  overflow: auto;
+  overscroll-behavior-inline: contain;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+}
+.trend-data-scroll:focus-visible {
+  outline-offset: 2px;
+}
+.trend-data-table {
+  width: 100%;
+  border-spacing: 0;
+  text-align: start;
+  font-size: 12px;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+}
+.trend-data-table th,
+.trend-data-table td {
+  padding: 8px 10px;
+  text-align: start;
+  vertical-align: top;
+  border-bottom: 1px solid var(--line);
+}
+.trend-data-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--subtle);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.trend-data-table tbody th {
+  font-weight: 500;
+}
+.trend-data-table tbody tr:last-child > * {
+  border-bottom: 0;
+}
+.trend-data-table tbody tr:hover {
+  background: var(--subtle);
+}
+.trend-data-table small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.trend-data-table .trend-reading {
+  display: block;
+  white-space: nowrap;
+}
+.trend-data-table .trend-partial {
+  color: var(--warning);
+}
+
+@media (pointer: coarse) {
+  .trend-view-switch > button {
+    min-height: 38px;
+  }
+}
+@media (max-width: 440px) {
+  .trend-data-table th,
+  .trend-data-table td {
+    padding-inline: 6px;
+  }
+}

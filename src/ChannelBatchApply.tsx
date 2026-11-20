@@ -308,7 +308,7 @@ function BatchDialog({
                                 : `${Object.keys(t.current).length} → ${Object.keys(t.models).length} 个模型`}
                             </span>
                             {!!t.omitted?.length && <small>不新增未通过模型：{t.omitted.join("、")}</small>}
-                            <details>
+                            <details className="data-disclosure">
                               <summary>
                                 {deleting
                                   ? "查看将移除的模型"

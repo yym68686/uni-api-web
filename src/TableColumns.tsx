@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { ArrowDown, ArrowUp, GripVertical } from "lucide-react";
+import { ArrowDown, ArrowUp, Columns3, GripVertical, RotateCcw } from "lucide-react";
 
 export type TableColumn<K extends string> = { id: K; label: string };
 
@@ -42,7 +42,6 @@ export function TableColumns<K extends string>({ choices, value, onChange, onRes
     onChange(next);
   };
   const fields = <>
-    <button className="text-link table-column-reset" type="button" onClick={onReset}>恢复默认列</button>
     <ul aria-label="数据列及显示顺序" onDragLeave={event => {
       if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
       setDrag(current => current?.over ? { ...current, over: null } : current);
@@ -90,7 +89,11 @@ export function TableColumns<K extends string>({ choices, value, onChange, onRes
         </li>;
       })}
     </ul>
+    <div className="table-column-footer">
+      <span className="muted">显示 {selected.length} / {choices.length} 列</span>
+      <button className="text-link" type="button" onClick={onReset}><RotateCcw size={13} aria-hidden="true" />恢复默认列</button>
+    </div>
   </>;
   return inline ? <div className="table-column-options table-column-options-inline">{fields}</div>
-    : <details className="table-column-options"><summary>数据列</summary>{fields}</details>;
+    : <details className="table-column-options data-disclosure"><summary><Columns3 size={14} aria-hidden="true" />数据列</summary>{fields}</details>;
 }

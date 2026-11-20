@@ -179,12 +179,45 @@ svg {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
   font-size: 12px;
   color: var(--muted);
 }
 .text-link:hover {
   color: var(--accent);
 }
+.data-disclosure > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 30px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 550;
+  list-style: none;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.data-disclosure > summary::-webkit-details-marker { display: none; }
+.data-disclosure > summary::after {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border: solid currentColor;
+  border-width: 0 1.5px 1.5px 0;
+  transform: translateY(-1px) rotate(45deg);
+}
+.data-disclosure > summary:hover { background: var(--subtle); color: var(--ink); }
+.data-disclosure[open] > summary { background: var(--selection); color: var(--accent); }
+.data-disclosure[open] > summary::after { transform: translateY(2px) rotate(225deg); }
+.data-disclosure > summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 .brand {
   display: flex;
   align-items: center;
@@ -2460,24 +2493,10 @@ nav > button.active > svg {
 .quality-history-table th, .quality-history-table td { padding: 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
 .quality-history-table th { color: var(--muted); background: var(--subtle); position: sticky; top: 0; }
 .quality-history-table td small { display: block; margin-top: 5px; }
-.quality-history-table details summary { color: var(--accent); cursor: pointer; }
 .quality-history-table details[open] { min-width: 0; }
 .quality-history-table dl { margin: 8px 0 0; }
 .quality-history-table dd { margin: 3px 0 10px; }
 .quality-history-table .check-status { white-space: normal; }
-.cache-trend h3 { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.cache-trend h3 span { font-size: 12px; font-weight: 400; }
-.cache-trend-summary { display: flex; align-items: baseline; gap: 12px; margin: 18px 0; }
-.cache-trend-summary strong { font-family: "Geist Mono Variable", monospace; font-size: 26px; color: var(--accent); }
-.cache-trend-summary span { font-size: 12px; }
-.cache-trend svg { width: 100%; overflow: visible; }
-.cache-trend svg line { stroke: var(--line); stroke-dasharray: 3 4; }
-.cache-trend svg text { fill: var(--muted); font-size: 10px; }
-.cache-trend-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.cache-trend svg circle { fill: var(--accent); cursor: pointer; outline: none; }
-.cache-trend svg circle:focus { stroke: var(--ink); stroke-width: 2; }
-.cache-trend-point { min-height: 68px; padding: 12px; border-radius: 8px; background: var(--subtle); display: grid; grid-template-columns: 1fr auto; gap: 8px; font-size: 12px; }
-.cache-trend-point small { grid-column: 1 / -1; color: var(--muted); }
 
 
 .sub-price-status {
@@ -2768,7 +2787,7 @@ nav > button.active > svg {
 .batch-target-table th, .batch-target-table td { padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; }
 .batch-target-table th { color: var(--muted); font-weight: 500; white-space: nowrap; background: var(--subtle); }
 .batch-target-table small { display: block; margin-top: 5px; line-height: 1.6; }
-.batch-target-table summary { cursor: pointer; margin-top: 6px; color: var(--muted); }
+.batch-target-table details { margin-top: 6px; }
 .batch-target-table details > div { margin-top: 6px; }
 .batch-apply-actions { display: flex; justify-content: flex-end; gap: 10px; padding: 16px 28px; border-top: 1px solid var(--line); }
 @media(max-width:700px) {

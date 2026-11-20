@@ -84,12 +84,12 @@ import { useRouteSorting } from "./routeSorting";
 import { SiteLink, useChannelSites, dashboardURL } from "./ChannelSite";
 import { ChannelAccess } from "./ChannelAccess";
 import { ChannelSettings } from "./ChannelSettings";
-import { CacheTrend } from "./CacheTrend";
+import { TrendDataTable, TrendViewSwitch, type TrendMode } from "./TrendView";
 import { ChannelDetailTrends } from "./ChannelDetailTrends";
 import { ChannelDetailChecks } from "./ChannelDetailChecks";
 import { FingerprintCell, FingerprintColumnHeader, fingerprintNote, observedFingerprints, useModelFingerprints } from "./ModelFingerprints";
 import type { GroupRejection } from "./fingerprintRejections";
-import type { CacheTrendProps } from "./CacheTrend";
+import type { ChannelTimeseriesProps } from "./channelTimeseries";
 import { QualityHistory, QualityProbability, qualityTooltip } from "./QualityHistory";
 import type { ChannelCheck } from "./ChannelChecks";
 import { channelName } from "./format";
@@ -150,7 +150,6 @@ import { hasChannelScope, readWorkspace, requestLocation, validLogWindow, worksp
 import { useTheme } from "./theme";
 import { loadManagementModule } from "./workspaceModules";
 import "./dashboard.css";
-import "./channelDetail.css";
 const SourceSettings = lazy(() => import("./SourceSettings").then(m => ({default:m.SourceSettings})));
 const Sub2apiChecks = lazy(() => loadManagementModule().then(m => ({default:m.Sub2apiChecks})));
 const RequestLogsPage = lazy(() => import("./RequestLogs").then(m => ({default:m.RequestLogsPage})));
@@ -391,26 +390,19 @@ function Trend({
   const {points, seconds} = useMemo(() => trafficBuckets(series.data?.data || [], series.data?.bucket_seconds || 60), [series.data]);
   const max = Math.max(1, ...points.map(p => p.success + p.failed));
   const [active, setActive] = useState(0), chartHint = useId();
+  const [mode, setMode] = useState<TrendMode>("chart");
+  const step = seconds % 60 === 0 ? `${seconds / 60} 分钟` : `${seconds} 秒`;
   const current = Math.min(active,points.length - 1);
   const pointText = (p: typeof points[number]) =>
     p.samples ? `${dateTime(p.at)} · 成功 ${p.success} / 失败 ${p.failed} · 源区间峰值 ${p.peak}${p.covered ? "" : " · 覆盖不完整"}` : `${dateTime(p.at)} · 未采集`;
   return (
     <motion.section id="channel-trend" {...reveal} className="trend-panel">
-      <div className="panel-heading">
+      <div className="panel-heading trend-panel-heading">
         <div>
           <h3>渠道尝试趋势</h3>
+          <p className="muted">每 {step} · 重试分别计数</p>
         </div>
-        <div className="chart-legend">
-          <span>
-            <i className="legend-dot success" />
-            成功
-          </span>
-          <span>
-            <i className="legend-dot failure" />
-            失败
-          </span>
-          <span>每 {seconds % 60 === 0 ? `${seconds / 60} 分钟` : `${seconds} 秒`}</span>
-        </div>
+        {!series.isPending && !series.isError && points.length > 0 && <TrendViewSwitch value={mode} onChange={setMode} />}
       </div>
       {series.isPending || series.error instanceof AnalyticsInitializingError ? (
         <DetailLoading kind="chart" label="请求趋势" />
@@ -421,8 +413,28 @@ function Trend({
         </div>
       ) : !points.length ? (
         <p className="muted">当前窗口暂无趋势数据。</p>
+      ) : mode === "table" ? (
+        <TrendDataTable label="渠道尝试分时数据" columns={["时间", "成功", "失败", "源区间峰值", "覆盖"]}>
+          {points.map(p => <tr key={p.at}>
+            <th scope="row">{dateTime(p.at)}</th>
+            <td>{p.samples ? count(p.success) : "—"}</td>
+            <td>{p.samples ? count(p.failed) : "—"}</td>
+            <td>{p.samples ? count(p.peak) : "—"}</td>
+            <td>{!p.samples ? <span className="muted">未采集</span> : p.covered ? "完整" : <span className="trend-partial">覆盖不完整</span>}</td>
+          </tr>)}
+        </TrendDataTable>
       ) : (
         <>
+          <div className="chart-legend">
+            <span>
+              <i className="legend-dot success" />
+              成功
+            </span>
+            <span>
+              <i className="legend-dot failure" />
+              失败
+            </span>
+          </div>
           <div className="chart-area">
             <div className="chart-axis">
               <span>{max}</span>
@@ -491,7 +503,7 @@ function Detail({
   session: string;
   site?: string;
   check?: ChannelCheck;
-  trend: Omit<CacheTrendProps, "row">;
+  trend: Omit<ChannelTimeseriesProps, "row">;
   row: Channel | null;
   onClose: () => void;
   onLogs: (row: Channel) => void;
@@ -566,7 +578,6 @@ function Detail({
                 <BalanceValue balance={balance?.data} loading={imports?.isPending} detail />
               </div>
               <ChannelDetailTrends key={`${providerId(row)}:${row.model}:trends`} row={row} {...trend} />
-              <CacheTrend key={`${providerId(row)}:${row.model}:cache`} row={row} {...trend} />
         </> },
         ...(imports ? [{ id: "models", label: "模型", content: <ChannelModels key={`models:${providerId(row)}`} row={row} imports={imports} catalog={catalog} keyId={trend.keyId} session={session} /> }] : []),
         ...(hasControls ? [{ id: "checks", label: "检测", content: <>
@@ -1917,7 +1928,7 @@ export default function Dashboard({
                     自动刷新
                   </label>
                   </div>
-                {!!keys.data?.data.length && <details className="workbench-key-rates">
+                {!!keys.data?.data.length && <details className="workbench-key-rates data-disclosure">
                   <summary>调用 Key 成功率</summary>
                   <dl>{keys.data.data.map(key => <div key={key.key_id}>
                     <dt>{key.source_name ? `${key.source_name} · ` : ""}Key {key.position} · {key.prefix}</dt>

@@ -1537,7 +1537,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
               <span>本次计划 {batchPreview.items.length} / {batchPreview.total} 个渠道；跳过 {Math.max(0,batchPreview.total-batchPreview.items.length)} 个</span>
               <span>{batchPreview.kind==="fingerprint" ? `去重后 ${batchPreview.fingerprintTargets.length} 项` : `${batchPreview.items.reduce((count,item)=>count+item.models.length,0)} 个检测项`}</span>
             </p>
-            <details><summary>渠道与模型</summary><ul className="dialog-preview-list">
+            <details className="data-disclosure"><summary>渠道与模型</summary><ul className="dialog-preview-list">
               {batchPreview.items.map(item=><li key={item.id}><strong>{item.label}</strong><small>{item.models.join("、")}</small></li>)}
             </ul></details>
             <p className="dialog-inline-note">每项可能发送多次请求，产生上游费用。</p>
