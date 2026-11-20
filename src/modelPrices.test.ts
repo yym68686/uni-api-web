@@ -34,9 +34,12 @@ it.each([
   expect(displayedModelPrices([{...placeholder,long_context_premium:false}]).find(p=>p.model===model)?.long_context_premium).toBe(false);
 });
 
-it('keeps Hydrogen reference prices and operator overrides independent of other Gemini models',()=>{
- const model='gemini-4-hydrogen',reference=MODEL_PRICE_CATALOG.find(p=>p.model===model)!;
- expect(reference).toMatchObject({input:1.5,output:7.5,cache_read:.075,cache_write:1.5,cache_write_1h:1.5,verified:true});
+it.each([
+ ['gemini-4-hydrogen',1.5,7.5,.075],
+ ['gemini-4-neon',3,15,.15],
+] as const)('keeps %s reference prices and operator overrides independent of other Gemini models',(model,input,output,cacheRead)=>{
+ const reference=MODEL_PRICE_CATALOG.find(p=>p.model===model)!;
+ expect(reference).toMatchObject({input,output,cache_read:cacheRead,cache_write:input,cache_write_1h:input,verified:true});
  expect(canonicalPriceModel(model+'-high')).toBe(model);
  const custom={...reference,input:7,source:'manual',verified:false};
  const carbon={...reference,model:'gemini-4-carbon',input:9,source:'manual'};

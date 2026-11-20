@@ -2446,14 +2446,15 @@ it("remembers model settings per user and uses them for batch and row probes", a
   for (const box of dialog.getAllByRole("checkbox")) expect(box).toBeChecked();
   await user.click(dialog.getByRole("button", { name: "清空内置模型" }));
   expect(dialog.getByRole("button", { name: "保存设置" })).toBeDisabled();
-  for (const model of ["deepseek-v4.1-flash-1017", "gemini-4-argon", "claude-opus-5"])
+  const models = ["deepseek-v4.1-flash-1017", "gemini-4-neon", "claude-opus-5"];
+  for (const model of models)
     await user.click(dialog.getByRole("checkbox", { name: model }));
   await user.click(dialog.getByRole("button", { name: "保存设置" }));
   const buttonName = "检测已选 3 个模型 · 1 个渠道";
   await user.click(screen.getByRole("button", { name: buttonName }));
   await user.click(await screen.findByRole("button",{name:"确认提交检测"}));
   await waitFor(() => expect(writes).toHaveLength(1));
-  expect(writes[0]).toEqual({ targets: [{ account_id: "one", group_id: 1, models: ["deepseek-v4.1-flash-1017", "gemini-4-argon", "claude-opus-5"] }] });
+  expect(writes[0]).toEqual({ targets: [{ account_id: "one", group_id: 1, models }] });
   await user.click(screen.getByRole("button", { name: "检测 one same-group" }));
   await waitFor(() => expect(writes).toHaveLength(2));
   expect(writes[1]).toEqual({...writes[0],manual:true});
@@ -2487,7 +2488,8 @@ it("remembers model settings per user and uses them for batch and row probes", a
 it("displays native first-response latency without inventing response.created events", async () => {
   const data = fixtures().slice(0, 1);
   const target = data[0].targets[0];
-  target.models = ["gemini-3.1-pro", "claude-opus-5"].map((model) => ({
+  const models = ["gemini-3.1-pro", "gemini-4-neon", "claude-opus-5"];
+  target.models = models.map((model) => ({
     model, state: "done", message: "", result: { ...target.result!, model,
       availability: { ...target.result!.availability, protocol: model.startsWith("gemini") ? "gemini" as const : "messages" as const, response_created_ms: null, first_response_ms: 120, ttft_ms: 450 },
     },
@@ -2496,7 +2498,7 @@ it("displays native first-response latency without inventing response.created ev
   const user = userEvent.setup();
   mount("native-latency");
   await screen.findByRole("table");
-  for (const model of ["gemini-3.1-pro", "claude-opus-5"]) {
+  for (const model of models) {
     await user.selectOptions(screen.getByLabelText("检测模型筛选"), model);
     await user.click(screen.getByRole("button", { name: "查看 one same-group 的回复与诊断" }));
     const dialog = within(screen.getByRole("dialog"));

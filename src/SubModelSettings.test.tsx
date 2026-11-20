@@ -20,18 +20,18 @@ it("selects GPT 6.2 Astra and Sol independently of older models", async () => {
  expect(save).toHaveBeenCalledExactlyOnceWith(['gpt-6.2-astra','gpt-6.2-sol']);
 });
 
-it('selects Hydrogen independently with the native Gemini protocol',async()=>{
+it.each(['gemini-4-hydrogen','gemini-4-neon'])('selects %s independently with the native Gemini protocol',async model=>{
  const save=vi.fn(),user=userEvent.setup();
  render(<SubModelSettings models={['gemini-4-carbon']} onSave={save}/>);
  await user.click(screen.getByRole('button',{name:'检测模型设置'}));
  const dialog=within(screen.getByRole('dialog'));
- const hydrogen=dialog.getByRole('checkbox',{name:'gemini-4-hydrogen'});
- expect(hydrogen).not.toBeChecked();
- expect(hydrogen.closest('label')).toHaveTextContent('Gemini 原生');
+ const checkbox=dialog.getByRole('checkbox',{name:model});
+ expect(checkbox).not.toBeChecked();
+ expect(checkbox.closest('label')).toHaveTextContent('Gemini 原生');
  await user.click(dialog.getByRole('checkbox',{name:'gemini-4-carbon'}));
- await user.click(hydrogen);
+ await user.click(checkbox);
  await user.click(dialog.getByRole('button',{name:'保存设置'}));
- expect(save).toHaveBeenCalledExactlyOnceWith(['gemini-4-hydrogen']);
+ expect(save).toHaveBeenCalledExactlyOnceWith([model]);
 });
 
 it('selects Carbon independently with the native Gemini protocol',async()=>{

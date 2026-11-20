@@ -557,7 +557,7 @@ func subCompareModel(requested string, raw json.RawMessage) (string, string) {
 }
 
 func subModelProtocol(model string) string {
-	if model == "gemini-4-hydrogen" || model == "gemini-4-carbon" || model == "gemini-4-argon" || model == "gemini-3.1-pro" || model == "gemini-3.8-flash" {
+	if model == "gemini-4-neon" || model == "gemini-4-hydrogen" || model == "gemini-4-carbon" || model == "gemini-4-argon" || model == "gemini-3.1-pro" || model == "gemini-3.8-flash" {
 		return "gemini"
 	}
 	if strings.HasPrefix(model, "claude-") {

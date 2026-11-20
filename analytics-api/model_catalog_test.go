@@ -107,6 +107,32 @@ func TestGPT62OfficialCostsAtContextBoundaryAndCachedInput(t *testing.T) {
 	}
 }
 
+func TestNeonCatalogPreservesPricesAndManagementScope(t *testing.T) {
+	const model = "gemini-4-neon"
+	find := func(prices []Price) Price {
+		t.Helper()
+		index := slices.IndexFunc(prices, func(p Price) bool { return p.Model == model })
+		if index < 0 || slices.IndexFunc(prices[index+1:], func(p Price) bool { return p.Model == model }) >= 0 {
+			t.Fatal("Neon missing or duplicated")
+		}
+		return prices[index]
+	}
+	p := find(withCatalogPrices([]Price{{Model: model, Source: "fact-discovered"}}))
+	if p.Input != 3 || p.Output != 15 || p.CacheRead != .15 || p.CacheWrite != 3 || p.CacheWrite1h != 3 ||
+		!p.Verified || p.Source != "https://aistudio.google.com/docs/pricing#gemini-4-neon" || p.promptPriceTier() != nil {
+		t.Fatal("incorrect Neon Standard price", p)
+	}
+	p.Input, p.Source, p.Verified = 7, "manual", false
+	if saved := find(withCatalogPrices([]Price{p})); !reflect.DeepEqual(saved, p) {
+		t.Fatal("Neon operator price overwritten", saved)
+	}
+	if canonicalPriceModel(model+"-high") != model || !subModelAllowed(model) || subModelProtocol(model) != "gemini" ||
+		!slices.Contains(managementPageModelCatalog(managementQueryInput{}, ""), model) ||
+		!slices.Contains(managementPageDetectionModels(nil), model) {
+		t.Fatal("Neon missing from price, management, or detection model list")
+	}
+}
+
 func TestHydrogenCatalogPreservesPricesAndManagementScope(t *testing.T) {
 	const model = "gemini-4-hydrogen"
 	prices := withCatalogPrices([]Price{{Model: model, Source: "fact-discovered"}})

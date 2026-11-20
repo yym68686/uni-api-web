@@ -13,8 +13,8 @@ it('offers GPT 6.2 models independently through Responses without expanding save
  saveSubModels(user,models);
  expect(loadSubModels(user)).toEqual(models);
 });
-it('offers Hydrogen through Gemini without expanding saved detection selections',()=>{
- const model='gemini-4-hydrogen',user='hydrogen-catalog-upgrade';
+it.each(['gemini-4-hydrogen','gemini-4-neon'])('offers %s through Gemini without expanding saved detection selections',model=>{
+ const user=model+'-catalog-upgrade';
  const previous=SUB_MODELS.filter(m=>m!==model);
  saveSubModels(user,['gemini-4-carbon'],previous);
  expect(SUB_MODELS.filter(m=>m===model)).toHaveLength(1);
