@@ -12,7 +12,7 @@ import (
 
 // Exercise the actual add-channel HTTP handler, New API token provisioning,
 // encrypted credential retention and final atomic gateway route application.
-func TestNewAPIImportRecoversReadRateLimitAndAppliesExactlyOnce(t *testing.T) {
+func TestNewAPIImportReportsTokenLimitThenAppliesExactlyOnce(t *testing.T) {
 	s, account, owner := newAPITestService(t)
 	ctx := context.Background()
 	group, err := s.newAPIGroupID(ctx, account, "中转pro分组")
@@ -52,7 +52,11 @@ func TestNewAPIImportRecoversReadRateLimitAndAppliesExactlyOnce(t *testing.T) {
 			newAPIOK(w, map[string]any{"items": tokens, "total": len(tokens)})
 		case r.URL.Path == "/api/token/" && r.Method == "POST":
 			creates++
-			if creates > 1 {
+			if creates == 1 {
+				writeJSON(w, 200, map[string]any{"success": false, "message": "Maximum number of tokens reached (100)"})
+				return
+			}
+			if creates > 2 {
 				t.Error("duplicated token creation")
 			}
 			if err := json.NewDecoder(r.Body).Decode(&created); err != nil {
@@ -105,15 +109,30 @@ func TestNewAPIImportRecoversReadRateLimitAndAppliesExactlyOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw, _ := json.Marshal(subImportInput{AccountID: account, GroupID: group, SourceID: sourceID, KeyID: sourceID + "::key-" + strings.Repeat("a", 64), Revision: "boot:1", Models: models, Position: 1})
-	r := httptest.NewRequest("POST", "/v1/sub2api/channels", strings.NewReader(string(raw)))
-	r.Header.Set("Content-Type", "application/json")
-	r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: session})
-	w := httptest.NewRecorder()
-	s.Handler().ServeHTTP(w, r)
+	submit := func() *httptest.ResponseRecorder {
+		r := httptest.NewRequest("POST", "/v1/sub2api/channels", strings.NewReader(string(raw)))
+		r.Header.Set("Content-Type", "application/json")
+		r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: session})
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		return w
+	}
+	w := submit()
+	if w.Code != 400 || !strings.Contains(w.Body.String(), "令牌数量上限") || strings.Contains(w.Body.String(), "HTTP 400") {
+		t.Fatalf("site token limit not explained: %d %s", w.Code, w.Body.String())
+	}
+	if creates != 1 || reveals != 0 || applies != 0 {
+		t.Fatalf("rejected creation changed routing: creates=%d reveals=%d applies=%d", creates, reveals, applies)
+	}
+	var retained bool
+	if err = s.control.db.QueryRow(`SELECT routing_key_id<>0 OR encrypted_routing_key<>'' FROM console_sub_targets WHERE account_id=$1 AND group_id=$2`, account, group).Scan(&retained); err != nil || retained {
+		t.Fatalf("rejected creation retained a key: %t %v", retained, err)
+	}
+	w = submit()
 	if w.Code != 200 {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	if groupsRead != 2 || creates != 1 || reveals != 2 || applies != 1 {
+	if groupsRead != 3 || creates != 2 || reveals != 2 || applies != 1 {
 		t.Fatalf("groups=%d creates=%d reveals=%d applies=%d", groupsRead, creates, reveals, applies)
 	}
 	var encrypted string

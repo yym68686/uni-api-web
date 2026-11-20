@@ -18,6 +18,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -94,7 +95,7 @@ func newAPIJSON(ctx context.Context, base, method, path string, auth *subAuth, b
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, (4<<20)+1))
 	if err != nil || len(raw) > 4<<20 {
 		if resp.StatusCode == http.StatusTooManyRequests {
-			return &subRemoteError{Status: resp.StatusCode, Operation: newAPIOperation(method, path), RetryAfter: newAPIRetryAfter(resp.Header.Get("Retry-After"), time.Now())}
+			return &subRemoteError{Status: resp.StatusCode, upstreamHTTPStatus: resp.StatusCode, Operation: newAPIOperation(method, path), RetryAfter: newAPIRetryAfter(resp.Header.Get("Retry-After"), time.Now())}
 		}
 		return errSubResponseTooLarge
 	}
@@ -117,14 +118,24 @@ func newAPIJSON(ctx context.Context, base, method, path string, auth *subAuth, b
 	if strings.Contains(strings.ToUpper(reason), "TURNSTILE") || strings.Contains(strings.ToUpper(reason), "CAPTCHA") || strings.Contains(strings.ToUpper(envelope.Message), "TURNSTILE") || strings.Contains(strings.ToUpper(envelope.Message), "CAPTCHA") {
 		reason = "TURNSTILE_REQUIRED"
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &subRemoteError{Status: resp.StatusCode, Reason: reason, Operation: newAPIOperation(method, path), RetryAfter: newAPIRetryAfter(resp.Header.Get("Retry-After"), time.Now())}
+	successHTTP := resp.StatusCode >= 200 && resp.StatusCode < 300
+	rejected := parsed == nil && envelope.Success != nil && !*envelope.Success
+	if !successHTTP || rejected {
+		remote := &subRemoteError{
+			Status: resp.StatusCode, upstreamHTTPStatus: resp.StatusCode, Reason: reason,
+			Operation: newAPIOperation(method, path), RetryAfter: newAPIRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
+		}
+		if successHTTP {
+			// Keep the existing caller contract for confirmed rejections and
+			// creation-intent cleanup, without claiming that the site sent 400.
+			remote.Status = http.StatusBadRequest
+		}
+		remote.tokenLimitReached = parsed == nil && remote.Status == http.StatusBadRequest &&
+			method == http.MethodPost && path == "/api/token/" && newAPITokenLimitRejected(envelope.Message)
+		return remote
 	}
 	if parsed != nil || envelope.Success == nil {
 		return errors.New("站点返回了不兼容的数据")
-	}
-	if !*envelope.Success {
-		return &subRemoteError{Status: 400, Reason: reason}
 	}
 	if auth != nil {
 		if auth.Cookies == nil {
@@ -148,6 +159,18 @@ func newAPIJSON(ctx context.Context, base, method, path string, auth *subAuth, b
 		return errors.New("站点返回的数据格式不兼容")
 	}
 	return nil
+}
+
+var newAPITokenLimitMessage = regexp.MustCompile(`^Maximum number of tokens reached \((?:[0-9]{1,19}|\{\{max\}\})\)$`)
+
+func newAPITokenLimitRejected(message string) bool {
+	// New API can append an English translation after " / ". Never forward
+	// the original message or interpolate site-supplied content into our error.
+	_, english, bilingual := strings.Cut(message, " / ")
+	if bilingual {
+		message = english
+	}
+	return newAPITokenLimitMessage.MatchString(strings.TrimSpace(message))
 }
 
 func newAPIUserMatches(input string, user newAPIUser) bool {

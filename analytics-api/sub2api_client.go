@@ -72,6 +72,11 @@ type subRemoteError struct {
 	Reason     string
 	Operation  string
 	RetryAfter time.Duration
+
+	// New API reports some application rejections with HTTP 2xx. Status is
+	// the effective status for callers; preserve the wire status separately.
+	upstreamHTTPStatus int
+	tokenLimitReached  bool
 }
 
 const subSessionExpiredMessage = "站点保存的登录会话已失效，请重新登录站点后继续"
@@ -89,6 +94,12 @@ func (e *subRemoteError) Error() string {
 	if e.requiresBrowser() {
 		return "站点要求人机验证；请在该站点完成登录后，使用会话令牌接入"
 	}
+	if e.tokenLimitReached {
+		return "站点账号已达到令牌数量上限，无法创建专用 key；请在原站核对令牌数量或联系站点管理员"
+	}
+	if e.upstreamHTTPStatus >= 200 && e.upstreamHTTPStatus < 300 {
+		return e.Operation + "被站点拒绝，请在原站核对账号和令牌状态"
+	}
 	switch e.Status {
 	case 401:
 		if e.Reason == "SITE_SESSION_EXPIRED" || e.Reason == "TOKEN_EXPIRED" || strings.HasPrefix(e.Reason, "REFRESH_TOKEN_") {
@@ -103,6 +114,9 @@ func (e *subRemoteError) Error() string {
 		}
 		return "站点限流，请稍后重试"
 	default:
+		if e.Operation != "" {
+			return fmt.Sprintf("%s失败：站点返回 HTTP %d", e.Operation, e.Status)
+		}
 		return fmt.Sprintf("站点接口返回 HTTP %d", e.Status)
 	}
 }

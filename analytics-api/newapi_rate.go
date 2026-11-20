@@ -115,7 +115,7 @@ func (s *Service) newAPIReadCall(ctx context.Context, account, base, method, pat
 		return err
 	}
 	// No query strings, bodies, tokens or upstream text enter diagnostics.
-	log.Printf("event=newapi_remote_error account_id=%s operation=%q status=%d retry_after_ms=%d", account, newAPIOperation(method, path), remote.Status, remote.RetryAfter.Milliseconds())
+	log.Printf("event=newapi_remote_error account_id=%s operation=%q status=%d upstream_http_status=%d token_limit_reached=%t retry_after_ms=%d request_id=%q", account, remote.Operation, remote.Status, remote.upstreamHTTPStatus, remote.tokenLimitReached, remote.RetryAfter.Milliseconds(), consoleRequestID(ctx))
 	if remote.Status != 429 {
 		return err
 	}

@@ -47,6 +47,33 @@ func newAPITestService(t *testing.T) (*Service, string, string) {
 func newAPIOK(w http.ResponseWriter, v any) {
 	writeJSON(w, 200, map[string]any{"success": true, "data": v})
 }
+
+func TestNewAPIRejectionReportsOperationWithoutLeakingUpstreamBody(t *testing.T) {
+	for _, tc := range []struct {
+		name, method, path, message, want string
+		status                            int
+	}{
+		{"business error", "GET", "/api/user/self/groups", "private-key-fixture", "分组读取被站点拒绝", 200},
+		{"actual HTTP 400", "POST", "/api/token/42/key", "private-key-fixture", "密钥读取失败：站点返回 HTTP 400", 400},
+		{"bilingual limit", "POST", "/api/token/", "达到令牌上限 / Maximum number of tokens reached (100)", "令牌数量上限", 200},
+		{"unlocalized limit", "POST", "/api/token/", "Maximum number of tokens reached ({{max}})", "令牌数量上限", 400},
+		{"not a create", "GET", "/api/token/", "Maximum number of tokens reached (100)", "密钥列表/状态读取被站点拒绝", 200},
+		{"unknown create rejection", "POST", "/api/token/", "Maximum number of tokens reached (100) private-key-fixture", "密钥创建被站点拒绝", 200},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withSpendUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				writeJSON(w, tc.status, map[string]any{"success": false, "message": tc.message})
+			}))
+			err := newAPIJSON(context.Background(), "https://usage.example", tc.method, tc.path, nil, nil, nil)
+			var remote *subRemoteError
+			if !errors.As(err, &remote) || remote.Status != 400 || remote.upstreamHTTPStatus != tc.status ||
+				!strings.Contains(err.Error(), tc.want) || strings.Contains(err.Error(), tc.message) {
+				t.Fatalf("unexpected rejection: %+v", err)
+			}
+		})
+	}
+}
+
 func TestNewAPIAutoLoginAndEncryptedPassword(t *testing.T) {
 	s, _, owner := newAPITestService(t)
 	ctx := context.Background()
