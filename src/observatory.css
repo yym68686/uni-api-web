@@ -169,6 +169,9 @@
 }
 .management-query {flex:1 1 19rem;position:relative}
 .management-query .search-field {flex:1 1 auto;min-width:0;max-width:25rem}
+.management-query:has(.management-availability-filter) {flex-wrap:wrap}
+.management-query:has(.management-availability-filter) .search-field {flex-basis:9rem}
+.management-query .management-availability-filter {flex:none;background:var(--selection);color:var(--accent)}
 .management-actions {flex:0 1 auto;flex-wrap:wrap}
 .channel-add-receipts {display:grid;gap:6px;margin-block:0 12px}
 .channel-add-receipt {display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font-size:13px}

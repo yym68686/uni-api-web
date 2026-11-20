@@ -960,6 +960,14 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
     modelMatch,
     fingerprint,
   } = filters;
+  const searchInput = useRef<HTMLInputElement>(null);
+  const availabilityOptions = [
+    { value: "", label: "全部可用性" },
+    { value: "success", label: model ? "可用" : "至少一个模型可用" },
+    { value: "error", label: model ? "检测失败" : "有模型检测失败" },
+    { value: "untested", label: model ? "未检测" : "有模型未检测" },
+  ];
+  const activeAvailabilityLabel = availability && availabilityOptions.find(option => option.value === availability)?.label;
   useEffect(() => saveSubFilters(user, filters), [user, filters]);
   const setSearch = (search: string) => setFilters((v) => ({ ...v, search }));
   const setAccountId = (accountId: string) =>
@@ -1557,6 +1565,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
             <label className="search-field">
               <Search size={16} />
               <input
+                ref={searchInput}
                 aria-label="搜索 sub2api 分组"
                 placeholder="搜索站点、分组、渠道…"
                 value={search}
@@ -1714,16 +1723,9 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                     setPage(0);
                   }}
                 >
-                  <option value="">全部可用性</option>
-                  <option value="success">
-                    {model ? "可用" : "至少一个模型可用"}
-                  </option>
-                  <option value="error">
-                    {model ? "检测失败" : "有模型检测失败"}
-                  </option>
-                  <option value="untested">
-                    {model ? "未检测" : "有模型未检测"}
-                  </option>
+                  {availabilityOptions.map(({ value, label }) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
                 </select>
                 <ChevronDown size={13} />
               </label>
@@ -1835,6 +1837,21 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                 onReset={() => {setManagementPreset("operations");setCustomColumns(null);}} />
             </section>
             </WorkbenchDisclosure>
+            {activeAvailabilityLabel && (
+              <button
+                type="button"
+                className="button small management-availability-filter"
+                aria-label={`取消可用性筛选：${activeAvailabilityLabel}`}
+                title="取消可用性筛选，保留站点和搜索条件"
+                onClick={() => {
+                  setAvailability("");
+                  setPage(0);
+                  searchInput.current?.focus();
+                }}
+              >
+                可用性：{activeAvailabilityLabel} <X size={13} aria-hidden="true" />
+              </button>
+            )}
           </div>
           <div className="management-actions" role="group" aria-label="渠道管理操作">
             <DetectionAction projects={detectionProjects} project={detectionProject} onSelect={project => { setDetectionProject(project); setFingerprintsSubmitted(0); }} selectDisabled={batchBusy}>

@@ -8,6 +8,7 @@ import type { Result, SubAccount, SubTarget } from "./Sub2apiChecks";
 import type { ManagementPage, ManagementSelection } from "./managementQuery";
 import type { ManagedChannel, ManagementRow } from "./channelManagement";
 import { SUB_MODELS, saveSubModels } from "./sub2apiModels";
+import { loadSubFilters, saveSubFilters, subFilterDefaults } from "./sub2apiPreferences";
 import { controlRequest } from "./api";
 import { useState } from "react";
 import type { ManagementPagePosition } from "./managementQuery";
@@ -240,6 +241,44 @@ it("requests available groups first and switches to all groups explicitly", asyn
   expect(requestedStatuses[0]).toBe("available");
   await user.selectOptions(filter, "all");
   await waitFor(() => expect(requestedStatuses).toContain("all"));
+});
+
+it.each(["gemini", "gemini-gcp"])("reveals an untested group from the collapsed availability filter when searching %s", async search => {
+  const owner = `clear-availability-${search}`;
+  saveSubFilters(owner, { ...subFilterDefaults, accountId: account.id, search, availability: "success" });
+  const readFilters: ReturnType<typeof loadSubFilters>[] = [];
+  const siteRows = ["gemini", "gemini-gcp"].map((name, i) => ({
+    ...rows[i], target: { ...rows[i].target, name },
+  }));
+  vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+    expect(init?.method || "GET").toBe("GET");
+    const url = new URL(input);
+    if (url.pathname.endsWith("/accounts/progress")) return idleProgress();
+    if (!url.pathname.endsWith("/channel-management/query")) return Response.json({ data: [] });
+    const filters = JSON.parse(url.searchParams.get("filters")!);
+    readFilters.push(filters);
+    expect(url.searchParams.has("cursor")).toBe(false);
+    const matched = siteRows.filter(row => row.target.name.includes(filters.search) &&
+      (!filters.availability || row.target.name === "gemini"));
+    return Response.json({ ...page(), rows: matched, total: matched.length, eligible_count: matched.length, next_cursor: undefined });
+  }));
+  mount(owner);
+  if (search === "gemini") await screen.findByText("gemini", { selector: "strong" });
+  else await screen.findByText("没有匹配的渠道");
+  expect(screen.queryByText("gemini-gcp", { selector: "strong" })).not.toBeInTheDocument();
+  const chip = screen.getByRole("button", { name: "取消可用性筛选：至少一个模型可用" });
+  expect(chip).toBeVisible();
+  await userEvent.click(chip);
+
+  expect(await screen.findByText("gemini-gcp", { selector: "strong" })).toBeVisible();
+  const input = screen.getByLabelText("搜索 sub2api 分组");
+  expect(input).toHaveValue(search);
+  expect(input).toHaveFocus();
+  expect(chip).not.toBeInTheDocument();
+  const expected = { search, accountId: account.id, groupStatus: "available", availability: "" };
+  expect(readFilters[0]).toMatchObject({ ...expected, availability: "success" });
+  expect(readFilters.at(-1)).toMatchObject(expected);
+  expect(loadSubFilters(owner)).toMatchObject(expected);
 });
 
 it("reuses the current page when returning from another view and resets position when filters change", async () => {
