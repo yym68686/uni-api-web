@@ -151,7 +151,7 @@
 .workspace .automation-list {padding:0;border:0;background:transparent}
 .workspace .automation-list .automation-card:first-of-type {border-top:1px solid var(--line)}
 .workspace .sub2api-page {margin:0;gap:6px}
-.workspace .management-page-heading {padding:8px 0 10px}
+.workspace .management-page-heading {padding:9px 0 15px}
 .workspace .management-filters {flex:none;position:static}
 .workspace .management-filters .workbench-popover {left:0;right:auto;width:min(36rem,calc(100vw - 24px))}
 .workspace .management-filters .sub-filters {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;overflow:visible}
@@ -179,13 +179,15 @@
 .workspace .sub-table[data-columns="operations"] {min-width:740px}
 .workspace .sub-table :is(th,td):first-child {min-width:112px}
 .workspace .sub-table :is(th,td) {white-space:nowrap}
+.workspace .sub-table :is(th,td):is([data-column="rate"],[data-column="latency"],[data-column="checked"],.management-actions-cell) {text-align:end;font-variant-numeric:tabular-nums}
+.workspace .sub-table :is(th,td)[data-column="batch"] {text-align:center}
 .workspace .sub-table .management-metric {display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
 .workspace .sub-table .management-metric .icon-button {width:26px;height:26px}
 .workspace .sub-table .sub-management-row > td:first-child > :is(strong,small),
 .workspace .sub-table .management-table-label {
   display:block;max-width:clamp(9rem,22vw,20rem);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
-.workspace .sub-table .sub-row-actions {display:flex;gap:5px}
+.workspace .sub-table .sub-row-actions {display:flex;justify-content:flex-end;gap:5px}
 .workspace .sub-table .sub-row-actions .button {min-height:28px;padding:4px 7px}
 .workspace .sub-table td:last-child .sub-row-actions .button + .button {margin-left:0}
 @media (max-width:780px) {
@@ -230,10 +232,11 @@
 .price-edit-dialog .price-edit-fields .price-save-cell {grid-column:1/-1;text-align:right}
 .price-edit-dialog .price-edit-fields td[data-label]::before {content:attr(data-label);display:block;text-align:left;color:var(--muted);margin-bottom:2px;font-size:11px}
 .price-edit-dialog .price-edit-fields .price-error-row {display:block}
-.sources-settings .source-item {padding:11px 0;gap:8px;background:var(--surface)}
-.sources-settings .source-item > svg {margin-left:9px;color:var(--muted)}
-.sources-settings .source-item > .icon-button:last-child {margin-right:8px}
+.sources-settings .source-item {display:grid;grid-template-columns:auto minmax(0,1fr) repeat(3,auto);padding:11px 9px;gap:8px;background:var(--surface)}
+.sources-settings .source-item > svg {color:var(--muted)}
+.sources-settings .source-item > .workbench-disclosure .workbench-popover {width:min(27rem,calc(100vw - 26px))}
 .sources-settings .source-item > div > :is(strong,small) {display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sources-settings .source-item > .channel-protocol-repair {grid-column:1/-1;overflow-wrap:anywhere}
 .workspace .balance-table:not([data-details]) {min-width:100%;table-layout:fixed}
 .workspace .balance-table :is(td,th) {white-space:nowrap}
 .workspace .balance-table:not([data-details]) :is(td,th) {padding:8px;overflow:hidden;text-overflow:ellipsis}
@@ -253,8 +256,10 @@
 .workspace .data-heading .data-title {width:auto;min-width:0}
 .workspace .data-title h2 {white-space:normal}
 .workspace .data-heading .count-badge {font-size:11px}
-.workspace .workbench-heading {display:flex;flex-wrap:nowrap;align-items:center;justify-content:space-between}
-.workbench-tools {display:flex;align-items:center;gap:6px;flex:0 1 auto;min-width:0}
+.workspace .workbench-heading {display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 14px}
+.workbench-tools {display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:6px;flex:0 1 auto;min-width:0;max-width:100%;margin-inline-start:auto}
+.workbench-tools > :is(.button,.select-field) {min-height:35px}
+.workbench-tools > .workbench-disclosure > summary {min-height:35px}
 .workbench-tools > .select-field {margin:0}
 .workbench-tools .time-select {min-width:0;min-height:32px}
 .workbench-tools .time-select select {min-width:0;font-size:12px}
@@ -388,19 +393,24 @@
 }
 .workspace .channel-browser .table-scroll {background:var(--surface);border-top:1px solid var(--line)}
 .workspace .channel-browser .channel-table {color:var(--ink)}
+.workspace .channel-browser .table-scroll {overscroll-behavior-inline:contain}
 .workspace .observation-table[data-columns="run"] {min-width:100%;table-layout:fixed}
-.workspace .observation-table[data-columns="run"] .channel-identity {width:29%}
+.workspace .observation-table .channel-identity {width:clamp(9rem,21vw,17rem);min-width:8.5rem;max-width:17rem}
+.workspace .observation-table[data-editing] .channel-identity {width:clamp(12rem,23vw,19rem);min-width:12rem;max-width:19rem}
 .workspace .observation-table[data-compact] .channel-identity {width:43%}
-.workspace .observation-table[data-compact] th.observation-status {width:18%}
+.workspace .observation-table[data-compact] .observation-status {width:23%}
+.workspace .observation-table[data-compact] :is(th,td):not(.channel-identity) {white-space:normal}
 .workspace .observation-table[data-compact] :is(th,td).rank {width:27px;font-size:10px;padding-inline:5px}
-.workspace .observation-table[data-compact] thead:has(.rank) .channel-identity {width:45%}
+.workspace .observation-table[data-compact][data-ranked] .channel-identity {width:37%}
+.workspace .observation-table[data-compact]:not([data-editing]) .channel-identity {min-width:0}
 .workspace .observation-table .column-balance .balance-values {align-items:flex-end}
 .workspace .observation-table[data-compact] .column-balance .amount small {display:none}
 .workspace .observation-table th,
 .workspace .observation-table td {padding:7px 11px;font-size:13px;white-space:nowrap}
 .workspace .observation-table td {height:48px}
-.workspace .observation-table :is(th,td):last-child,
-.workspace .balance-table:not([data-details]) :is(th,td):last-child {width:auto;padding-inline:11px}
+.workspace :is(.observation-table,.balance-table,.sub-table) :is(th,td):last-child {width:auto;padding-inline:11px}
+.workspace :is(.observation-table,.sub-table) :is(th,td).column-fingerprint {width:10.25rem;min-width:10.25rem;text-align:start}
+.workspace :is(.observation-table,.sub-table) .column-fingerprint .fingerprint-status-line {font-size:12px}
 .workspace .observation-table .column-balance .amount {white-space:nowrap}
 .workspace .observation-table .channel-link {max-width:min(100%,24rem)}
 .workspace .observation-table .column-balance > :is(.balance-values,.balance-status) {margin-left:auto}
@@ -411,8 +421,15 @@
 .workspace .observation-table th:first-child,.workspace .observation-table td:first-child {padding-left:13px}
 .workspace .observation-table tbody tr {height:47px}
 .workspace .observation-table tr[data-route-alert] td {background:var(--warning-row)}
-.workspace .observation-table td:nth-child(n+3),.workspace .observation-table th:nth-child(n+3) {text-align:right;font-variant-numeric:tabular-nums}
+.workspace .observation-table :is(th,td) {text-align:end;font-variant-numeric:tabular-nums}
+.workspace .observation-table :is(th,td):is(.channel-identity,.observation-status,.column-fingerprint,.observation-detection-actions) {text-align:start}
+.workspace .observation-table :is(th,td).rank {text-align:center}
+.workspace .observation-table :is(.channel-profit,.channel-spend),.workspace .balance-table .balance-values {align-items:flex-end}
+.workspace :is(.balance-table,.request-log-table) :is(th,td)[data-align="end"] {text-align:end;font-variant-numeric:tabular-nums}
+.workspace .request-log-table .log-open {text-align:center;width:4rem}
+.workspace .request-log-table-wrap {overscroll-behavior-inline:contain}
 .workspace .observation-table .channel-link {min-width:0;max-width:100%;padding:0;display:block}
+.workspace .observation-table .channel-link > span {display:block;min-width:0}
 .workspace .observation-table .channel-link :is(strong,small) {white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .workspace .observation-table .channel-link strong {font-size:13px;color:var(--ink)}
 .workspace .observation-table .channel-link:hover strong {color:var(--accent)}
@@ -429,6 +446,9 @@
 .balance-coverage {display:inline-block;margin-inline-start:9px}
 .workspace .channel-browser .wallet-summary {margin:0;border-radius:0;background:var(--surface);padding:10px 12px}
 .workspace .channel-browser .wallet-summary ul {margin:0}
+.workspace .channel-browser .wallet-summary li {display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:8px 12px;padding-block:6px}
+.workspace .channel-browser .wallet-summary li > :is(strong,span) {overflow-wrap:anywhere}
+.workspace .channel-browser .wallet-summary li > span {justify-self:end;text-align:end;font-variant-numeric:tabular-nums}
 .observatory-welcome.welcome {
   display:grid;min-height:100svh;place-items:center;padding:24px 14px;background:var(--bg);
 }
@@ -453,14 +473,26 @@
   .observatory-environment,.locate-trigger kbd {display:none}
   .workspace .channel-browser .observation-table td,.workspace .channel-browser .observation-table th {padding-inline:7px}
   .workspace .observation-table .channel-identity {position:static}
+  .workspace .workbench-tools {margin-inline-start:0;justify-content:flex-start}
   .workbench-popover {
     position:fixed;inset:calc(var(--chrome-height,54px) + 53px) 12px auto auto;
     max-height:calc(100dvh - var(--chrome-height,54px) - 68px);
   }
 }
+@media(min-width:781px) {
+  .workspace .observation-table :is(th,td):is(.channel-identity,.rank) {position:sticky;inset-inline-start:0;z-index:2;background:var(--surface);background-clip:padding-box}
+  .workspace .observation-table th:is(.channel-identity,.rank) {background-color:var(--subtle)}
+  .workspace .observation-table .channel-identity {box-shadow:1px 0 var(--line)}
+  .workspace .observation-table .rank {width:2.5rem;min-width:2.5rem;padding-inline:5px}
+  .workspace .observation-table[data-ranked] .channel-identity {inset-inline-start:2.5rem}
+  .workspace .observation-table tbody tr:hover > :is(.channel-identity,.rank) {background-color:var(--subtle)}
+  .workspace .observation-table tbody tr[data-route-alert] > :is(.channel-identity,.rank) {background-color:var(--warning-row)}
+  .workspace .observation-table tbody tr:is([data-route-dragging],[data-route-drop]) > :is(.channel-identity,.rank) {background-color:var(--selection)}
+}
 @media(max-width:440px) {
   .workspace .workbench-heading {gap:6px}
-  .workspace .workbench-heading:has(.workbench-tools > .workbench-disclosure:nth-child(3)) {flex-wrap:wrap}
+  .workspace .channel-browser .wallet-summary li {grid-template-columns:minmax(0,1fr) auto;border-bottom:1px solid var(--line)}
+  .workspace .channel-browser .wallet-summary li > .button {grid-column:2;justify-self:end}
   .workspace .workbench-tools .time-select > svg:first-child {display:none}
   .workspace .workbench-disclosure > summary > svg:last-child {display:none}
   .workspace .workbench-popover .select-field select {max-width:65vw}
@@ -468,6 +500,9 @@
   .workspace .price-reference-extra {display:none}
   .price-edit-dialog .price-edit-fields .price-table-row {grid-template-columns:repeat(2,minmax(0,1fr))}
   .workspace .request-log-table :is(td,th) {padding-inline:6px;font-size:11px}
+  .workspace .request-logs-panel .request-log-pagination {padding-inline:8px;gap:6px;flex-wrap:wrap}
+  .workspace .price-overview-table :is(th,td) {padding-inline:6px;font-size:12px}
+  .sources-settings .source-item {column-gap:5px;padding-inline:6px}
   .workspace .request-logs-panel .workbench-tools .button {font-size:11px}
   .workspace .request-logs-panel .workbench-tools .button > svg:first-child {display:none}
 }

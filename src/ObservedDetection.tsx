@@ -306,7 +306,7 @@ export function ObservedDetectionRow({
 }) {
   const action = detection.rowAction(row);
   return (
-    <td>
+    <td className="observation-detection-actions">
       <div className="quality-status-stack">
         <button
           className="button small"

@@ -51,9 +51,10 @@
 .overview-table :is(th,td):first-child {text-align:left;width:42%}
 .overview-channels :is(th,td):first-child {width:58%}
 .overview-channels :is(th,td):last-child {width:17%}
+.overview-channels :is(th,td):nth-child(2) {text-align:start}
 .overview-table tbody tr:hover {background:var(--subtle)}
 .overview-link {
-  display:block;max-width:100%;padding:3px 2px;background:none;border:0;color:var(--ink);
+  display:block;max-width:100%;padding:3px 0;background:none;border:0;color:var(--ink);
   font:inherit;font-weight:550;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
 .overview-link:hover {color:var(--accent)}

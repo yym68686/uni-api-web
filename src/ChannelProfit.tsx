@@ -71,8 +71,11 @@ export function ChannelProfit({
       <div
         className={`channel-profit mono ${profit == null ? "muted" : profit.amount < 0 ? "negative" : provisional ? "profit-provisional" : bounded ? "profit-upper-bound" : profit.amount > 0 ? "profit-positive" : ""}`}
       >
-        <span>{profit ? `${prefix}¥${number(profit.amount)}` : "—"}{profit && (bounded || provisional) && <small className="profit-bound-label">{provisional ? "暂计" : "上限"}</small>}</span>
-        <small aria-label={`${provisional ? "暂计利润率" : bounded ? "利润率上限" : "利润率"} ${displayedPercent}`}>{displayedPercent}</small>
+        <span>{profit ? `${prefix}¥${number(profit.amount)}` : "—"}</span>
+        <small className="channel-profit-rate">
+          {profit && (bounded || provisional) && <span className="profit-bound-label" aria-hidden="true">{provisional ? "暂计" : "上限"}</span>}
+          <span aria-label={`${provisional ? "暂计利润率" : bounded ? "利润率上限" : "利润率"} ${displayedPercent}`}>{displayedPercent}</span>
+        </small>
       </div>
     </Tip>
   );

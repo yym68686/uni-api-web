@@ -85,7 +85,7 @@ import { ChannelSettings } from "./ChannelSettings";
 import { CacheTrend } from "./CacheTrend";
 import { ChannelDetailTrends } from "./ChannelDetailTrends";
 import { ChannelDetailChecks } from "./ChannelDetailChecks";
-import { FingerprintCell, fingerprintNote, observedFingerprints, useModelFingerprints } from "./ModelFingerprints";
+import { FingerprintCell, FingerprintColumnHeader, fingerprintNote, observedFingerprints, useModelFingerprints } from "./ModelFingerprints";
 import type { GroupRejection } from "./fingerprintRejections";
 import type { CacheTrendProps } from "./CacheTrend";
 import { QualityHistory, QualityProbability, qualityTooltip } from "./QualityHistory";
@@ -1478,10 +1478,10 @@ export default function Dashboard({
   const observationHeader = <>
     {routeView && <th className="rank">#</th>}
     <th className="channel-identity">渠道</th>
-    {checkingChannels && <th>检测操作</th>}
+    {checkingChannels && <th className="observation-detection-actions">检测操作</th>}
     <ChannelMetricHeaders keySelected={!!keyId} channels={filtered} columns={visibleColumns} renderDetection={id => id === "quality"
       ? <th className="column-quality"><Tip text="显示此来源、此渠道最近一次 gpt-6-astra 检测结果，与当前指标时间范围无关；不代表表中每个模型都已单独检测。">是否降智 <CircleHelp size={12} /></Tip></th>
-      : <th className="column-quality"><Tip text={`显示此来源、此渠道、当前模型的最新指纹结果，与渠道管理和详情共享数据，与指标时间范围无关。${fingerprintNote}`}>指纹 <CircleHelp size={12}/></Tip></th> } />
+      : <th className="column-quality column-fingerprint"><FingerprintColumnHeader help={`显示此来源、此渠道、当前模型的最新指纹结果，与渠道管理和详情共享数据，与指标时间范围无关。${fingerprintNote}`}/></th> } />
   </>;
   return (
     <div className="app-shell">
@@ -1968,6 +1968,7 @@ export default function Dashboard({
               ) : channelView ? (
                 <div className="table-scroll" tabIndex={0} role="region" aria-label="渠道观测表">
                   <table className="channel-table observation-table" data-columns={observationLayout} data-compact={compactObservation || undefined}
+                    data-ranked={routeView || undefined} data-editing={adjustingChannels || undefined}
                     style={observationLayout === "custom" ? {minWidth: `max(100%, ${170 + 110 * visibleColumns.length}px)`} : undefined}>
                     <thead>
                       <tr>{observationHeader}</tr>
@@ -2030,7 +2031,7 @@ export default function Dashboard({
                               stale={staleSources.has(row.source_id || "")}
                               metricsUnavailable={!metrics.data}
                               columns={visibleColumns}
-                              renderDetection={id => id === "quality" ? <LatestChannelCheck row={row} checks={checks} /> : <td className="column-quality"><FingerprintCell
+                              renderDetection={id => id === "quality" ? <LatestChannelCheck row={row} checks={checks} /> : <td className="column-quality column-fingerprint"><FingerprintCell
                                 entries={observedFingerprints(row, fingerprints.index, fingerprints.members.get(providerId(row)), fingerprints.supportedModels)}
                                 error={fingerprints.error} loading={fingerprints.isPending}
                                 supportedModels={fingerprints.supportedModels}
@@ -2050,16 +2051,16 @@ export default function Dashboard({
                         <th className="channel-identity">渠道</th>
                         {balanceDetails && <>
                         <th>模型 / 优先级</th>
-                        <th title="该渠道该模型的成功尝试 ÷（成功 + 失败）；取消和跳过不计入。">渠道成功率</th>
-                        <th title="渠道请求开始至首个正文增量的 P50，缺失时显示 —。">首字 P50</th>
-                        <th title="当前渠道单次尝试从开始到结束的 P50，包含成功和失败，不包含前序重试。">总耗时 P50</th>
-                        <th>估算消费</th>
-                        <th>渠道实际消费</th>
-                        <th>渠道利润参考</th>
+                        <th data-align="end" title="该渠道该模型的成功尝试 ÷（成功 + 失败）；取消和跳过不计入。">渠道成功率</th>
+                        <th data-align="end" title="渠道请求开始至首个正文增量的 P50，缺失时显示 —。">首字 P50</th>
+                        <th data-align="end" title="当前渠道单次尝试从开始到结束的 P50，包含成功和失败，不包含前序重试。">总耗时 P50</th>
+                        <th data-align="end">估算消费</th>
+                        <th data-align="end">渠道实际消费</th>
+                        <th data-align="end">渠道利润参考</th>
                         </>}
-                        <th>站点余额</th>
+                        <th data-align="end">站点余额</th>
                         <th>状态</th>
-                        <th>最近查询</th>
+                        <th data-align="end">最近查询</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2107,26 +2108,26 @@ export default function Dashboard({
                         </>}
                         {modelIndex === 0 && <>
                         {balanceDetails && <>
-                        <td rowSpan={modelRanks.length}>
+                        <td rowSpan={modelRanks.length} data-align="end">
                           <span className={`mono balance-finance ${finance?.estimated == null ? "muted" : ""}`}>
                             {finance?.estimated == null ? "—" : usd(finance.estimated)}
                             {!!finance?.missingPrices && <small className="profit-bound-label">有 {finance.missingPrices} 项用量未定价</small>}
                           </span>
                         </td>
-                        <td rowSpan={modelRanks.length}>
+                        <td rowSpan={modelRanks.length} data-align="end">
                           <span title={finance?.actualExplanation} className={`mono balance-finance ${finance?.actual == null ? "muted" : ""}`}>
                             {finance?.actual == null ? finance?.actualLabel || "—" : `${finance.actualUpperBound ? "≥" : ""}${usd(finance.actual)}`}
                             {finance?.actual != null && finance.provisional && <small className="profit-bound-label">暂计</small>}
                           </span>
                         </td>
-                        <td rowSpan={modelRanks.length}>
+                        <td rowSpan={modelRanks.length} data-align="end">
                           <span title={finance?.actualExplanation} className={`mono balance-finance ${finance?.profit == null ? "muted" : finance.profit < 0 ? "negative" : "profit-positive"}`}>
                             {finance?.profit == null ? "—" : `${finance.actualUpperBound ? "≤" : ""}¥${finance.profit.toFixed(2)}`}
                             {finance?.profit != null && finance.provisional && <small className="profit-bound-label">暂计</small>}
                           </span>
                         </td>
                         </>}
-                        <td rowSpan={modelRanks.length}>
+                        <td rowSpan={modelRanks.length} data-align="end">
                           <BalanceValue
                             balance={balance?.data}
                             loading={balanceLoading}
@@ -2145,7 +2146,7 @@ export default function Dashboard({
                             <span className="muted">未核验</span>
                           )}
                         </td>
-                        <td rowSpan={modelRanks.length} className="muted">
+                        <td rowSpan={modelRanks.length} className="muted" data-align="end">
                           {newest ? <>{newest !== oldest && <small>最早 {dateTime(oldest)}<br /></small>}{dateTime(newest)}
                             {(balance?.data.length ?? 0) > 1 && <><br /><small>{checkedWallets.length} / {balance?.data.length} 个账号</small></>}</> : "暂无"}
                         </td>

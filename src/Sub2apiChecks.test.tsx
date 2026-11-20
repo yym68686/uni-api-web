@@ -107,7 +107,8 @@ it("shows rate and fingerprint by default and keeps checked columns and their or
   const first = mount("management-columns", undefined, true);
   const table = await screen.findByRole("table");
   const labels = () => within(screen.getByRole("table")).getAllByRole("columnheader").map(header => header.textContent?.trim());
-  expect(labels()).toEqual(["渠道 / 站点", "平台 / key", "倍率", "可用性", "首字延迟", "模型指纹", "最近检测", "批量检测", "操作"]);
+  const fingerprintHeading = "模型指纹 概率";
+  expect(labels()).toEqual(["渠道 / 站点", "平台 / key", "倍率", "可用性", "首字延迟", fingerprintHeading, "最近检测", "批量检测", "操作"]);
   const rateValues = [...table.querySelectorAll("tbody td[data-column='rate']")].map(cell => cell.textContent);
   expect(rateValues).toEqual(["0", "0.01"]);
   const openColumns = async () => {
@@ -119,17 +120,17 @@ it("shows rate and fingerprint by default and keeps checked columns and their or
   await user.click(screen.getByRole("checkbox", {name:"模型指纹"}));
   await user.click(screen.getByRole("checkbox", {name:"模型匹配"}));
   expect(labels().slice(0, 3)).toEqual(["渠道 / 站点", "倍率", "平台 / key"]);
-  expect(labels()).not.toContain("模型指纹");
+  expect(labels()).not.toContain(fingerprintHeading);
   expect(labels().at(-2)).toBe("模型匹配");
   expect(table.querySelector("tbody td:nth-child(2)")).toHaveAttribute("data-column", "rate");
   first.unmount();
   mount("management-columns", undefined, true);
   await screen.findByRole("table");
   expect(labels().slice(0, 3)).toEqual(["渠道 / 站点", "倍率", "平台 / key"]);
-  expect(labels()).not.toContain("模型指纹");
+  expect(labels()).not.toContain(fingerprintHeading);
   await openColumns();
   await user.click(screen.getByRole("button", {name:"恢复默认列"}));
-  expect(labels()).toContain("模型指纹");
+  expect(labels()).toContain(fingerprintHeading);
   expect(labels()).not.toContain("模型匹配");
 });
 

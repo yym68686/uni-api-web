@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { afterEach, expect, it, vi } from "vitest";
-import { FingerprintCell, FingerprintPanel, FingerprintStatus, fingerprintProbabilityClass, fingerprintTargets, fingerprintKey, rowFingerprints } from "./ModelFingerprints";
+import { FingerprintCell, FingerprintColumnHeader, FingerprintPanel, FingerprintStatus, fingerprintProbabilityClass, fingerprintTargets, fingerprintKey, rowFingerprints } from "./ModelFingerprints";
 import fingerprintModels from "../analytics-api/fingerprint/models.json";
 const FINGERPRINT_MODELS = Object.keys(fingerprintModels);
 import type { FingerprintRecord } from "./ModelFingerprints";
@@ -46,7 +46,8 @@ it("keeps the single-model provisional fingerprint details in a compact tooltip"
  const details = await screen.findByRole("tooltip");
  expect(details).toHaveTextContent("暂判不匹配");
  expect(details).toHaveTextContent("—");
- expect(details).not.toHaveTextContent(/暂定排名|最接近/);
+ expect(details).toHaveTextContent("本轮候选暂定排名 · 1/3 有效样本");
+ expect(details).toHaveTextContent("Claude Haiku 4.5");
 });
 it("shows a prior scored verdict beside the new failed attempt, not in place of it",()=>{
  mount(<FingerprintStatus record={{...record,state:"error",message:"上游超时",result:null,previous_result:record.result,previous_revision:"r1"}}/>);
@@ -139,7 +140,30 @@ it("does not turn partial rankings into probabilities or mix them with the previ
  const old = await screen.findByRole("tooltip");
  expect(old).toHaveTextContent("上次请求模型的匹配概率：12.0%");
  expect(old).toHaveTextContent("上次候选88.0%");
- expect(old).not.toHaveTextContent("本轮候选");
+ expect(old).toHaveTextContent("本轮候选暂定排名 · 2/3 有效样本");
+ expect(within(old).getByRole("list")).toHaveTextContent("本轮候选");
+});
+it("shows ranked candidate models for a provisional mismatch without fabricating probabilities", async () => {
+ const partial: FingerprintRecord = {...record, result:{...record.result!, decision:"partial", status:"insufficient", probability:null, prediction:"reference-b", prediction_name:"参考模型 B", used_outputs:2,
+  candidates:[{model:"reference-b",display_name:"参考模型 B",probability:null},{model:"reference-a",display_name:"参考模型 A",probability:null},{model:"reference-c",display_name:"参考模型 C",probability:null}]
+ }};
+ mount(<FingerprintCell entries={[{target:partial,record:partial}]} supportedModels={[partial.model]}/>);
+ const user=userEvent.setup();
+ await user.hover(screen.getByText("样本不足").closest(".tip-target")!);
+ const tooltip=await screen.findByRole("tooltip");
+ expect(tooltip).toHaveTextContent("暂判不匹配");
+ expect(tooltip).toHaveTextContent("本轮候选暂定排名 · 2/3 有效样本");
+ expect(within(tooltip).getByRole("list").textContent).toBe("参考模型 B参考模型 A参考模型 C");
+ expect(tooltip).toHaveTextContent("满 3 个有效样本后计算概率。");
+ expect(tooltip).not.toHaveTextContent(/参考模型 [A-C]\s*\d+(\.\d+)?%/);
+});
+it("keeps fingerprint table headings and every single-model readout on the same two-column grid",()=>{
+ const view=mount(<table><thead><tr><th><FingerprintColumnHeader help="fingerprint help"/></th></tr></thead><tbody><tr><td><FingerprintCell entries={[{target:record,record}]} supportedModels={[record.model]}/></td></tr></tbody></table>);
+ const heading=view.container.querySelector(".fingerprint-column-heading .fingerprint-readout");
+ const readout=view.container.querySelector("td .fingerprint-readout");
+ expect(heading).toBeInTheDocument();expect(readout).toBeInTheDocument();
+ expect(heading?.children).toHaveLength(2);expect(readout?.children).toHaveLength(2);
+ expect(readout?.querySelector(".fingerprint-detail-probability")).toHaveTextContent("12.0%");
 });
 it("only selects the supported models and fences configured stale evidence",()=>{
  const row={account:{id:""},target:{group_id:0},configured:{source_id:"fugue",provider:"native",models:["gpt-6-astra"],probe_fingerprint:"new"}} as ManagementRow;

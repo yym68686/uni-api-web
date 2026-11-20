@@ -155,7 +155,7 @@ export function BalanceModelMetricCells({
     return (
       <>
         {[0, 1, 2].map((i) => (
-          <td key={i} className="muted balance-model-stat">
+          <td key={i} className="muted balance-model-stat" data-align="end">
             {error ? "统计不可用" : "统计中…"}
           </td>
         ))}
@@ -164,7 +164,7 @@ export function BalanceModelMetricCells({
   const denominator = (value?.success || 0) + (value?.failed || 0);
   return (
     <>
-      <td className="balance-model-stat">
+      <td className="balance-model-stat" data-align="end">
         <Tip
           text={
             <>
@@ -188,14 +188,14 @@ export function BalanceModelMetricCells({
           </span>
         </Tip>
       </td>
-      <td className="balance-model-stat">
+      <td className="balance-model-stat" data-align="end">
         <TimingCell
           value={value?.first_text}
           created={value?.response_created}
           label="首字延迟"
         />
       </td>
-      <td className="balance-model-stat">
+      <td className="balance-model-stat" data-align="end">
         <TimingCell value={value?.duration} label="总耗时" />
       </td>
     </>

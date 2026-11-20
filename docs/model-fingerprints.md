@@ -31,17 +31,20 @@ mappings or gateway configuration.
 - **匹配**: the highest-ranked class is the requested model's reference class.
 - **不匹配**: another reference class ranks first.
 - **样本不足 / 检测失败 / 已中断**: no match judgment or probability is displayed.
-- With **1/3 or 2/3 valid samples**, the status and channel details also show
-  **暂定排名** and the closest reference model. The top five candidates use the
+- With **1/3 or 2/3 valid samples**, the table and detail tooltip show the
+  ordered **本轮候选暂定排名**, including when the requested model provisionally
+  mismatches. The top five candidates use the
   upstream `allowPartial` ranker; all probabilities remain `null`. The result has
   `decision: "partial"` and `status: "insufficient"`, so it stays out of the
   match/mismatch filters. A later failed attempt does not hide this ranking;
   request failures remain visible in the sample details.
-- The probability below the status is **the requested class's probability**,
+- The separately aligned probability column is **the requested class's probability**,
   including when a different class ranks first. It uses the same colors as
   quality probability: exactly 100% green, at least 90% amber, otherwise red.
   Unknown probability is `—`. This is a closed-set calibrated relative probability,
   not proof of identity or a measured probability of reasoning degradation.
+  A tooltip labels any retained scored verdict as the previous round and
+  separates it from the current partial ranking.
 
 One-click synchronization/model checks enqueue fingerprint work after successful
 availability checks for the supported models. Standalone legacy quality

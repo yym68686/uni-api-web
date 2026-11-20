@@ -1,6 +1,6 @@
 import { modelProgressDetails, useSubSyncProgress, useSubSyncResultRefresh } from "./subSyncProgress";
 import type { SyncProgress } from "./subSyncProgress";
-import { fingerprintTargets, fingerprintLabels, fingerprintBusy, useModelFingerprints, FINGERPRINT_BATCH_LIMIT, FingerprintCell, FingerprintPanel, fingerprintNote } from "./ModelFingerprints";
+import { fingerprintTargets, fingerprintLabels, fingerprintBusy, useModelFingerprints, FINGERPRINT_BATCH_LIMIT, FingerprintCell, FingerprintColumnHeader, FingerprintPanel, fingerprintNote } from "./ModelFingerprints";
 import { fingerprintKey, sharedFingerprintIndex } from "./fingerprintResults";
 import { isCapabilityCheckModel, capabilityCheckScope } from "./sub2apiModels";
 import { CopyProbeCurl } from "./CopyProbeCurl";
@@ -1347,7 +1347,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
             <div className="sub-account-header" aria-hidden="true">
               <span>站点 / 网址</span>
               <span>账号</span>
-              <span>余额</span>
+              <span className="sub-account-balance-heading">余额</span>
               <span>同步状态</span>
               <span>操作</span>
             </div>
@@ -1823,15 +1823,16 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
           </Empty>
         ) : (
           <>
-            <div className="table-scroll sub-results-table" aria-busy={tablePending} aria-hidden={resultsReadFailed || undefined} inert={tablePending} style={resultsReadFailed?{visibility:"hidden"}:undefined}>
+            <div className="table-scroll sub-results-table" tabIndex={0} role="region" aria-label="渠道管理表，可横向滚动" aria-busy={tablePending} aria-hidden={resultsReadFailed || undefined} inert={tablePending} style={resultsReadFailed?{visibility:"hidden"}:undefined}>
               <table className="channel-table check-table sub-table" data-columns={columnView}>
                 <thead>
                   <tr>
                     <th scope="col">渠道 / 站点</th>
-                    {managementColumns.map(id => <th scope="col" key={id} data-column={id}>
-                      {managementColumnHelp[id] ? <Tip text={managementColumnHelp[id]}>{managementColumnLabels[id]} <CircleHelp size={12} aria-hidden="true" /></Tip> : managementColumnLabels[id]}
+                    {managementColumns.map(id => <th scope="col" key={id} data-column={id} className={id === "fingerprint" ? "column-fingerprint" : undefined}>
+                      {id === "fingerprint" ? <FingerprintColumnHeader label={managementColumnLabels[id]} help={managementColumnHelp.fingerprint!}/> :
+                        managementColumnHelp[id] ? <Tip text={managementColumnHelp[id]}>{managementColumnLabels[id]} <CircleHelp size={12} aria-hidden="true" /></Tip> : managementColumnLabels[id]}
                     </th>)}
-                    <th scope="col">操作</th>
+                    <th scope="col" className="management-actions-cell">操作</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1936,9 +1937,9 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                             onClick={()=>void detection.save(managementRow,!detectionEnabled(managementRow,detection.disabled))}><span/></button>;
                             }
                           };
-                          return <td key={id} data-column={id}>{content()}</td>;
+                          return <td key={id} data-column={id} className={id === "fingerprint" ? "column-fingerprint" : undefined}>{content()}</td>;
                         })}
-                        <td>
+                        <td className="management-actions-cell">
                           <div className="sub-row-actions">
                           <button
                             className="button small"

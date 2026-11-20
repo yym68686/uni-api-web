@@ -1,6 +1,7 @@
 .sub-account-header, .sub-account { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(230px, 1.2fr) minmax(130px, .65fr) minmax(190px, 1fr) 300px; gap: 16px; align-items: center; min-width: 1144px; padding: 12px 21px; }
 .sub-account-header { position: sticky; top: 0; z-index: 1; background: var(--subtle); color: var(--muted); font-size: 11px; border-bottom: 1px solid var(--line); }
-.sub-account-header > :last-child { text-align: right; }
+.sub-account-header > :is(:last-child,.sub-account-balance-heading) { text-align: end; }
+.sub-account .sub-account-balance { justify-content:flex-end;text-align:end;font-variant-numeric:tabular-nums; }
 .sub-account { min-height: 68px; border-bottom: 1px solid var(--line); }
 .sub-account:last-child { border-bottom: 0; }
 .sub-account:hover { background: var(--subtle); }

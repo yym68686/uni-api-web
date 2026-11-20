@@ -90,6 +90,7 @@ const logColumns = [
   { id: "tokens", label: "输入 / 输出 Token" },
 ] as const;
 type LogColumn = typeof logColumns[number]["id"];
+const numericLogColumns: ReadonlySet<LogColumn> = new Set(["duration", "latency", "wait", "tokens"]);
 const defaultLogColumns = logColumns.filter(({ id }) => id === "request" || id === "result" || id === "duration" || id === "latency").map(({ id }) => id);
 const logColumnLabels = Object.fromEntries(logColumns.map(({ id, label }) => [id, label])) as Record<LogColumn, string>;
 export function requestLogParams(filters: Filters, cursor: string, exact?: LogWindow | null) {
@@ -460,13 +461,13 @@ export function RequestLogsPage({
           </Tip>
         </td>;
       }
-      case "duration": return <td key={id} className="mono">{ms(row.duration_ms)}</td>;
-      case "latency": return <td key={id} className="mono">
+      case "duration": return <td key={id} className="mono" data-align="end">{ms(row.duration_ms)}</td>;
+      case "latency": return <td key={id} className="mono" data-align="end">
         <LatencyBadge value={row.response_created_ms ?? row.first_text_ms} />
         {(row.response_created_ms != null || row.first_text_ms != null) && <small>{row.response_created_ms != null ? "响应创建" : "首个文本"}</small>}
       </td>;
-      case "wait": return <td key={id} className="mono log-extra-column">{ms(row.dispatch_ms)}</td>;
-      case "tokens": return <td key={id} className="mono log-extra-column">
+      case "wait": return <td key={id} className="mono log-extra-column" data-align="end">{ms(row.dispatch_ms)}</td>;
+      case "tokens": return <td key={id} className="mono log-extra-column" data-align="end">
         {row.input_tokens == null ? "—" : count(row.input_tokens)} / {row.output_tokens == null ? "—" : count(row.output_tokens)}
         {row.cache_read_tokens != null && <small>缓存读取 {count(row.cache_read_tokens)}</small>}
       </td>;
@@ -722,7 +723,7 @@ export function RequestLogsPage({
             <table className="request-log-table" style={customColumns ? {minWidth: `max(100%, ${visibleColumns.length * 118 + (hasRequestColumn ? 64 : 58)}px)`} : undefined}>
               <thead>
                 <tr>
-                  {visibleColumns.map(id => <th key={id} className={id === "request" ? "log-identity" : id === "result" ? "log-outcome" : undefined}>{logColumnLabels[id]}</th>)}
+                  {visibleColumns.map(id => <th scope="col" key={id} data-align={numericLogColumns.has(id) ? "end" : undefined} className={id === "request" ? "log-identity" : id === "result" ? "log-outcome" : undefined}>{logColumnLabels[id]}</th>)}
                   {!hasRequestColumn && <th className="log-open">详情</th>}
                 </tr>
               </thead>

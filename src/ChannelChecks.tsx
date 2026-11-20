@@ -298,7 +298,7 @@ export function ChannelCheckAction({
 }) {
   const pending = checks.pending.has(providerId(row));
   return (
-    <td>
+    <td className="observation-detection-actions">
       <button
         className="button small"
         disabled={!row.source_id || pending || !!checks.batch}

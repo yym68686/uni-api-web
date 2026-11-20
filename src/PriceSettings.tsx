@@ -460,7 +460,7 @@ export function PriceSettings({
                   setEditing(price.model);
                 }}>{price.model}</button><small>{drafts.has(price.model) ? "未保存" : price.verified ? "已确认" : published ? "待确认" : "未定价"}</small></th>
                 {(["input","output","cache_read"] as const).map(field =>
-                  <td key={field} className={field === "cache_read" ? "price-reference-extra" : undefined}>{published ? `$${price[field]}` : "—"}</td>)}
+                  <td key={field} className={field === "cache_read" ? "price-reference-extra" : undefined} title={published ? `$${price[field]}` : undefined}>{published ? `$${price[field]}` : "—"}</td>)}
               </tr>;
             })}
             {!visible.length && (

@@ -2498,12 +2498,15 @@ nav > button.active > svg {
   white-space: nowrap;
 }
 .channel-profit > small { font-size: 11px; font-style: normal; }
+.channel-profit-rate { display:flex;align-items:baseline;gap:6px; }
+.channel-profit-rate .profit-bound-label { margin-inline-start:0; }
 .profit-positive { color: var(--green); }
 .profit-upper-bound, .profit-provisional { color: var(--warning); }
 
 .channel-profit.negative { color: var(--critical); }
 
 .profit-bound-label { margin-left: 6px; font-size: 10px; font-style: normal; font-family: var(--font-sans, sans-serif); }
+.balance-finance .profit-bound-label { display:block;margin-inline-start:0; }
 
 
 .channel-spend { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 4px; white-space: nowrap; }
@@ -2814,27 +2817,41 @@ nav > button.active > svg {
 .probe-curl-action [role="alert"] { color: var(--danger); }
 .sub-check-details-table table .probe-curl-action { display: flex; margin: 8px 0 0; }
 
-.fingerprint-cell { display:inline-flex;align-items:center;gap:6px;white-space:nowrap; }
-.fingerprint-details-trigger { padding:3px 5px; border:0; border-radius:5px; background:transparent; color:var(--muted); font:inherit; cursor:pointer; }
+.fingerprint-cell { display:flex;width:100%;align-items:center;text-align:start;white-space:nowrap; }
+.fingerprint-readout { display:grid;grid-template-columns:minmax(0,1fr) 6ch;align-items:start;gap:8px;width:100%;min-width:0; }
+.fingerprint-column-heading .fingerprint-readout { font-size:11px;font-weight:600;color:var(--muted); }
+.fingerprint-status-line { display:flex;align-items:center;gap:5px;min-width:0;min-height:19px;white-space:nowrap; }
+.fingerprint-status-line > :first-child { min-width:0; }
+.fingerprint-status-line > svg,.fingerprint-verdict > svg { flex:none; }
+.fingerprint-detail-status { display:grid;justify-items:start;gap:2px;min-width:0;line-height:1.3; }
+.fingerprint-readout .fingerprint-attempt { white-space:normal;overflow-wrap:anywhere; }
+.fingerprint-readout .fingerprint-detail-probability { justify-self:end;text-align:end;font-variant-numeric:tabular-nums;line-height:20px;white-space:nowrap; }
+.fingerprint-column-heading .tip-target { min-height:20px;justify-self:start; }
+.fingerprint-indicator { display:block;flex:none;width:8.5rem; }
+.column-fingerprint > .tip-target { display:flex;width:100%;cursor:help; }
+.fingerprint-details-trigger { position:relative;padding:0;border:0;border-radius:5px;background:transparent;color:inherit;font:inherit;cursor:pointer; }
 .fingerprint-details-trigger:hover { background:var(--subtle); color:var(--ink); }
+.fingerprint-details-trigger:focus-visible { outline:2px solid var(--accent);outline-offset:-2px; }
 .table-diagnostic-tip { display:grid;gap:8px;max-height:50vh;overflow-wrap:anywhere;overflow:auto; }
 .fingerprint-results-list { list-style:none;padding:0;margin:0; }
-.fingerprint-result-row { display:grid;grid-template-columns:minmax(0,1fr) 7.5rem 7ch;align-items:center;gap:8px;min-height:34px;padding-block:4px;border-bottom:1px solid var(--line);font-size:13px; }
+.fingerprint-result-row { display:grid;grid-template-columns:minmax(0,1fr) minmax(10rem,14rem);align-items:center;gap:12px;min-height:38px;padding:5px 0;border-bottom:1px solid var(--line);font-size:13px; }
+.fingerprint-detail-row { cursor:help; }
 .fingerprint-detail-row:hover { background:var(--subtle); }
 .fingerprint-detail-row:focus-visible { outline:2px solid var(--accent);outline-offset:-2px; }
-.fingerprint-detail-status { display:grid;justify-items:start;gap:2px;min-width:0;line-height:1.3; }
-.fingerprint-detail-status .fingerprint-attempt { white-space:normal;overflow-wrap:anywhere; }
-.fingerprint-detail-probability { justify-self:end;font-variant-numeric:tabular-nums; }
+.fingerprint-list-heading { color:var(--muted);font-size:11px;font-weight:600; }
 .fingerprint-tooltip-status { margin-bottom:4px; }
 .fingerprint-probability-tip { display:grid;gap:4px; }
 .fingerprint-probability-tip dl { margin:0; }
 .fingerprint-probability-tip dl > div { display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px; }
 .fingerprint-probability-tip dd { margin:0;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums; }
+.fingerprint-probability-tip ol { display:grid;gap:3px;margin:2px 0 0;padding-inline-start:23px; }
+.fingerprint-probability-tip ol li { padding-inline-start:2px; }
+.fingerprint-tip-heading { margin-top:3px;font-weight:600; }
 @media (max-width:440px) {
-  .fingerprint-result-row { grid-template-columns:minmax(0,1fr) 6.25rem 6ch;gap:6px; }
+  .fingerprint-result-row { grid-template-columns:minmax(0,1fr) minmax(8.5rem,11rem);gap:6px; }
 }
 .fingerprint-model-name,.fingerprint-heading > strong { min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
-.fingerprint-indicator,.fingerprint-verdict,.fingerprint-attempt { display:inline-flex;align-items:center;gap:5px;white-space:nowrap; }
+.fingerprint-verdict,.fingerprint-attempt { display:inline-flex;align-items:center;gap:5px;white-space:nowrap; }
 .fingerprint-verdict { border-radius:6px;padding:3px 6px;font-size:11px;font-weight:600;line-height:1.2; }
 .fingerprint-verdict.match { color:var(--green);background:color-mix(in srgb,var(--green) 14%,transparent); }
 .fingerprint-verdict.mismatch { color:var(--critical);background:color-mix(in srgb,var(--critical) 14%,transparent); }
@@ -2854,7 +2871,8 @@ nav > button.active > svg {
 .fingerprint-disclosure { min-width:30px; padding-inline:5px; }
 .fingerprint-detail li { margin: 6px 0; }
 @media(max-width:500px) {
-  .fingerprint-heading, .fingerprint-heading .fingerprint-indicator { gap:3px; }
+  .fingerprint-heading { gap:3px; }
+  .fingerprint-indicator { width:7.25rem; }
   .fingerprint-heading > button { padding-inline:5px; }
 }
 
