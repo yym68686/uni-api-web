@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestSubAccountBalanceCachesScopesAndRefreshesSession(t *testing.T) {
@@ -38,7 +39,7 @@ func TestSubAccountBalanceCachesScopesAndRefreshesSession(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/v1/auth/refresh":
 			refreshes.Add(1)
-			writeJSON(w, 200, map[string]any{"code": 0, "data": subAuth{Access: "fresh", Refresh: "next-refresh", ExpiresIn: 3600}})
+			writeJSON(w, 200, map[string]any{"code": 0, "data": subAuth{Access: "fresh", ExpiresIn: 3600}})
 		case "/api/v1/auth/me":
 			calls.Add(1)
 			if r.Header.Get("Authorization") != "Bearer fresh" {
@@ -104,6 +105,15 @@ func TestSubAccountBalanceCachesScopesAndRefreshesSession(t *testing.T) {
 	if calls.Load() != 2 || refreshes.Load() != 1 {
 		t.Fatal("concurrent refresh duplicated", calls.Load(), refreshes.Load())
 	}
+	var rotated string
+	if err := store.db.QueryRow(`SELECT encrypted_auth FROM console_sub_accounts WHERE id=$1`, id).Scan(&rotated); err != nil {
+		t.Fatal(err)
+	}
+	plain, err := store.decrypt(rotated)
+	var current subAuth
+	if err != nil || json.Unmarshal([]byte(plain), &current) != nil || current.Access != "fresh" || current.Refresh != "old-refresh" {
+		t.Fatal("access-only refresh lost the saved refresh token")
+	}
 	expire := func() {
 		_, err := store.db.Exec(`UPDATE console_sub_accounts SET balance=jsonb_set(balance,'{checked_at}','1') WHERE id=$1`, id)
 		if err != nil {
@@ -133,5 +143,85 @@ func TestSubAccountBalanceCachesScopesAndRefreshesSession(t *testing.T) {
 	json.Unmarshal(w.Body.Bytes(), &absent)
 	if absent.Amount != nil || absent.Status != "missing" {
 		t.Fatal("missing balance became zero", w.Body.String())
+	}
+}
+
+func TestSubAccountBalanceBrowserRecoveryRefreshesWithoutDetection(t *testing.T) {
+	s, id, owner := subUsageTestService(t)
+	ctx := context.Background()
+	password, err := s.control.encrypt("saved-private-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldAmount, oldTime := 48.91262206, time.Now().Unix()-600
+	if _, err := s.control.db.Exec(`UPDATE console_sub_accounts SET balance=jsonb_build_object('status','ok','amount',$2::float8,'checked_at',$3::bigint), encrypted_login_password=$4 WHERE id=$1`, id, oldAmount, oldTime, password); err != nil {
+		t.Fatal(err)
+	}
+	var refreshStatus, autoLogins atomic.Int32
+	refreshStatus.Store(429)
+	withSpendUpstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/auth/refresh":
+			w.WriteHeader(int(refreshStatus.Load()))
+		case "/api/v1/auth/login":
+			autoLogins.Add(1)
+			writeJSON(w, http.StatusUnauthorized, map[string]any{"code": "turnstile_required", "message": "upstream-private-body"})
+		case "/api/v1/auth/me":
+			if r.Header.Get("Authorization") != "Bearer browser-verified" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			writeJSON(w, 200, map[string]any{"code": 0, "data": map[string]any{"email": "fixture@example.com", "balance": 42.5}})
+		default:
+			t.Errorf("unexpected upstream request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	ownCookie, _ := s.control.newSession(ctx, owner)
+	foreignCookie, _ := s.control.newSession(ctx, owner+"-other")
+	call := func(method, path, body, token string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, "/v1/sub2api/accounts/"+id+path, strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
+		if token != "" {
+			r.AddCookie(&http.Cookie{Name: "uni_console_session", Value: token})
+		}
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		return w
+	}
+	lookup := call("GET", "/login", "", ownCookie)
+	if lookup.Code != 200 || !strings.Contains(lookup.Body.String(), `"has_saved_password":true`) || strings.Contains(lookup.Body.String(), "saved-private-password") || lookup.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("incorrect login metadata", lookup.Code, lookup.Body.String())
+	}
+	if call("GET", "/login", "", foreignCookie).Code != 404 || call("GET", "/login", "", "").Code != 401 {
+		t.Fatal("login metadata not owner-scoped")
+	}
+	readBalance := func() subAccountBalance {
+		t.Helper()
+		w := call("GET", "/balance", "", ownCookie)
+		var got subAccountBalance
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &got) != nil || strings.Contains(w.Body.String(), "upstream-private-body") {
+			t.Fatal(w.Code, w.Body.String())
+		}
+		return got
+	}
+	if got := readBalance(); got.ErrorReason != "rate_limited" || got.Status != "error" || got.Amount == nil || *got.Amount != oldAmount || got.CheckedAt != oldTime || autoLogins.Load() != 0 {
+		t.Fatalf("rate-limited refresh did not preserve balance or made another auth request: %+v", got)
+	}
+	refreshStatus.Store(401)
+	if got := readBalance(); got.ErrorReason != "verification_required" || got.Status != "error" || got.Amount == nil || *got.Amount != oldAmount || got.CheckedAt != oldTime || autoLogins.Load() != 1 {
+		t.Fatalf("browser challenge lost on login: %+v", got)
+	}
+	// Saving a browser session makes even a recently checked balance stale.
+	recent := time.Now().Unix() - 15
+	if _, err := s.control.db.Exec(`UPDATE console_sub_accounts SET balance=jsonb_set(balance,'{checked_at}',to_jsonb($2::bigint)) WHERE id=$1`, id, recent); err != nil {
+		t.Fatal(err)
+	}
+	w := call("POST", "/login", `{"access_token":"browser-verified","refresh_token":"browser-refresh"}`, ownCookie)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"queued":false`) {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if got := readBalance(); got.Status != "ok" || got.ErrorReason != "" || got.RefreshRequired || got.Amount == nil || *got.Amount != 42.5 || got.CheckedAt <= recent {
+		t.Fatalf("balance not refreshed after browser login: %+v", got)
 	}
 }

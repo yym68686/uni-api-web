@@ -8,6 +8,37 @@ import (
 	"time"
 )
 
+func (s *Service) subAccountLoginDetails(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	owner, err := s.controlUser(r)
+	if err != nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	account := struct {
+		ID               string `json:"id"`
+		Name             string `json:"name"`
+		Base             string `json:"base"`
+		Email            string `json:"email"`
+		LoginName        string `json:"login_name,omitempty"`
+		ProviderKind     string `json:"provider_kind"`
+		HasSavedPassword bool   `json:"has_saved_password"`
+	}{ID: r.PathValue("id")}
+	err = s.control.db.QueryRowContext(ctx, `SELECT name,base,email,login_name,provider_kind,encrypted_login_password<>'' FROM console_sub_accounts WHERE id=$1 AND owner=$2`, account.ID, owner).
+		Scan(&account.Name, &account.Base, &account.Email, &account.LoginName, &account.ProviderKind, &account.HasSavedPassword)
+	if errors.Is(err, sql.ErrNoRows) {
+		http.Error(w, "账号不存在", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "账号信息暂不可用，请稍后重试", http.StatusServiceUnavailable)
+		return
+	}
+	writeJSON(w, http.StatusOK, account)
+}
+
 // Read one account's password only when its owner opens the login form. Account
 // lists and summaries continue to expose availability without credential values.
 func (s *Service) subAccountCredentials(w http.ResponseWriter, r *http.Request) {

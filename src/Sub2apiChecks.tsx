@@ -25,7 +25,7 @@ import {
   X,
 } from "lucide-react";
 import { ApiError, controlRequest } from "./api";
-import { accountBalanceQuery } from "./accountBalance";
+import { accountBalanceQuery, refreshAccountBalanceAfterLogin } from "./accountBalance";
 import type { AccountBalance as SubAccountBalance } from "./accountBalance";
 import { BalanceAmount } from "./BalanceAmount";
 import { AccountForm } from "./SiteAccountForm";
@@ -66,7 +66,7 @@ import {
   modelDetectionState,
 } from "./sub2apiResults";
 import type { SubModelCheck } from "./sub2apiResults";
-import { dateTime } from "./format";
+import { dateTime, walletFailureDetail } from "./format";
 import "./sub2apiTable.css";
 import { QualityHistory, QualityProbability, qualityTooltip } from "./QualityHistory";
 import type { QualitySummary } from "./QualityHistory";
@@ -257,7 +257,7 @@ function AccountBalance({ account, enabled, user }: { account: SubAccount; enabl
         (balance &&
           balance.status !== "ok" &&
           balance.status !== "missing")) && (
-        <small>更新失败{balance?.amount != null && " · 上次结果"}</small>
+        <small>更新失败{balance?.amount != null && " · 上次结果"}{!query.isError && balance?.status === "error" && walletFailureDetail(balance) && ` · ${walletFailureDetail(balance)}`}</small>
       )}
     </div>
   );
@@ -1330,11 +1330,16 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
             initial={form.account}
             detectionModels={detectionModels}
             close={() => setForm(null)}
-            saved={() => {
+            saved={(syncQueued) => {
               setForm(null);
               void client.invalidateQueries({ queryKey: ["sub2api"] });
               void client.invalidateQueries({ queryKey: ["sub2api-headers"] });
-              markProgress(form.account ? [form.account.id] : []);
+              if (syncQueued) markProgress(form.account ? [form.account.id] : []);
+              else {
+                void client.invalidateQueries({ queryKey: ["sub-sync-progress", user] });
+                void client.invalidateQueries({ queryKey: ["management-query", user] });
+                if (form.account) void refreshAccountBalanceAfterLogin(client, user, form.account.id);
+              }
             }}
           />
         )}

@@ -26,7 +26,7 @@ it("waits for the password before enabling login and aborts the read when closed
     <AccountForm initial={account} close={() => {}} saved={() => {}} />,
   );
   expect(screen.getByLabelText("用户名 / 邮箱")).toHaveValue("saved-user");
-  expect(screen.getByRole("button", { name: "连接并检测" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "登录并返回" })).toBeDisabled();
   expect(screen.getByLabelText("账号密码")).toBeDisabled();
   expect(fetch.mock.calls[0][0]).toContain("/owned-account/credentials");
   expect(fetch.mock.calls[0][1]?.cache).toBe("no-store");

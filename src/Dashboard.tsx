@@ -7,6 +7,8 @@ import { CompactDialogHeader } from "./CompactDialog";
 import { endpointChoices, readKeys } from "./requestFilters";
 import { FailureCounts, failureReasonLabel } from "./FailureCounts";
 import { BalanceAmount } from "./BalanceAmount";
+import { refreshAccountBalanceAfterLogin } from "./accountBalance";
+import type { SiteWallet } from "./types";
 import { useKeyRequestStats } from "./keyRequestStats";
 import {
   Fragment,
@@ -155,6 +157,7 @@ const RequestLogsPage = lazy(() => import("./RequestLogs").then(m => ({default:m
 const PriceSettings = lazy(() => import("./PriceSettings").then(m => ({default:m.PriceSettings})));
 const Automation = lazy(() => import("./Automation").then(m => ({default:m.Automation})));
 const BalanceWalletDialog = lazy(() => import("./BalanceWalletDialog"));
+const BalanceRecoveryDialog = lazy(() => import("./BalanceRecoveryDialog").then(module => ({ default: module.BalanceRecoveryDialog })));
 
 
 function Overview({
@@ -798,6 +801,7 @@ export default function Dashboard({
     return () => globalThis.removeEventListener("keydown", shortcut);
   }, []);
   const [walletDialog,setWalletDialog] = useState<string|null>(null);
+  const [walletRecovery, setWalletRecovery] = useState<{ id: string; requiresBrowser: boolean } | null>(null);
   const [theme, setTheme] = useTheme();
   const deferredSearch = useDeferredValue(search);
   const keys = useQuery({
@@ -1095,6 +1099,9 @@ export default function Dashboard({
   const historicalCostMap = new Map(historicalCostTargets.map((provider, index) => [provider, historicalCostQueries[index]]));
   const balanceQueries = [...balanceMap.values()];
   const groupedWallets = walletGroups(view === "balances" ? balanceMap : []);
+  function recoverWallet(wallet: SiteWallet) {
+    setWalletRecovery({ id: wallet.account_id, requiresBrowser: wallet.error_reason === "verification_required" });
+  }
   const pendingBalances = balanceQueries.filter(
     (query) => query.isPending,
   ).length;
@@ -1930,7 +1937,10 @@ export default function Dashboard({
                 <ul>{[...groupedWallets].map(([id,entry])=><li key={id}>
                   <strong>{entry.label}</strong><span>{hasWalletAmount(entry.wallet) && <BalanceAmount value={entry.wallet.amount} />}
                     {(entry.wallet.status !== "ok" || !hasWalletAmount(entry.wallet)) && <> {walletStatusLabel(entry.wallet)}</>}
-                    {" · "}关联 {entry.providers.size} 个渠道</span>
+                    {" · "}关联 {entry.providers.size} 个渠道
+                    {!!entry.wallet.checked_at && <small className="muted"> · 查询于 {dateTime(entry.wallet.checked_at)}</small>}</span>
+                  {entry.wallet.status === "error" && ["verification_required", "login_required"].includes(entry.wallet.error_reason ?? "") &&
+                    <button type="button" className="button small" onClick={() => recoverWallet(entry.wallet)}>重新登录站点</button>}
                   <button type="button" className="button small" onClick={()=>setWalletDialog(id)}>充值设置与订单</button>
                 </li>)}</ul>
               </section> : null}
@@ -2240,6 +2250,23 @@ export default function Dashboard({
           }
         }} />
       <Guide open={guide} onClose={() => setGuide(false)} />
+      {walletRecovery && <PageBoundary key={walletRecovery.id} onDismiss={() => setWalletRecovery(null)}>
+        <Suspense fallback={<LoadingIndicator label="加载站点登录" />}>
+          <BalanceRecoveryDialog
+            id={walletRecovery.id}
+            user={baseConnection.session}
+            requiresBrowser={walletRecovery.requiresBrowser}
+            close={() => setWalletRecovery(null)}
+            saved={() => {
+              setWalletRecovery(null);
+              void refreshAccountBalanceAfterLogin(queryClient, baseConnection.session, walletRecovery.id);
+              void queryClient.invalidateQueries({ queryKey: ["sub2api-headers"] });
+              void queryClient.invalidateQueries({ queryKey: ["management-query", baseConnection.session] });
+              void queryClient.invalidateQueries({ queryKey: ["sub-sync-progress", baseConnection.session] });
+            }}
+          />
+        </Suspense>
+      </PageBoundary>}
       {walletDialog && <PageBoundary key={walletDialog} onDismiss={()=>setWalletDialog(null)}><Suspense fallback={
         <Dialog.Root open onOpenChange={open => { if (!open) setWalletDialog(null); }}>
           <Dialog.Portal>

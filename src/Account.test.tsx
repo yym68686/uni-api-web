@@ -7,6 +7,8 @@ import { MotionConfig, LazyMotion, domAnimation } from "motion/react";
 import App from "./App";
 import { emptyStats } from "./analytics";
 import { saveView } from "./preferences";
+import { dateTime } from "./format";
+import type { AccountBalance } from "./accountBalance";
 function mount() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -34,8 +36,9 @@ it("shows the same verified site wallet on linked channels and never queries gat
   }));
   const calls: string[] = [];
   let logged = false;
-  let wallet = { status: "ok", amount: 28.250438, checked_at: 200, provider_kind: "newapi" };
-  vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+  let wallet: AccountBalance = { status: "ok", amount: 28.250438, checked_at: 200, provider_kind: "sub2api" };
+  const writes: { path: string; body: unknown }[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
     const { pathname } = new URL(input, location.origin);
     calls.push(pathname);
     if (pathname.endsWith("/auth/me"))
@@ -44,6 +47,17 @@ it("shows the same verified site wallet on linked channels and never queries gat
       logged = true;
       return Response.json({ ok: true });
     }
+    if (init?.method === "POST") {
+      writes.push({ path: pathname, body: JSON.parse(String(init.body)) });
+      if (pathname.endsWith("/accounts/site/login")) {
+        wallet = { status: "ok", amount: 26.75, checked_at: 400, provider_kind: "sub2api" };
+        return Response.json({ authenticated: true, queued: false });
+      }
+    }
+    if (pathname.endsWith("/accounts/site/login"))
+      return Response.json({ id: "site", name: "mysandbox", base: "https://upstream.test", email: "fixture@example.com", provider_kind: "sub2api", has_saved_password: true });
+    if (pathname.endsWith("/accounts/site/credentials"))
+      return Response.json({ password: "fixture-password" });
     if (pathname.endsWith("/channel-balances"))
       return Response.json({ status: "complete", keys: [
         { status: "access_denied", http_status: 403 },
@@ -89,7 +103,44 @@ it("shows the same verified site wallet on linked channels and never queries gat
   expect(within(summary).getByText("$28.2504")).toBeVisible();
   expect(calls.filter(path => path.endsWith("/accounts/site/balance"))).toHaveLength(2);
   expect(calls.some(path => path.endsWith("/channel-balances"))).toBe(false);
-});
+
+  wallet = { ...wallet, error_reason: "rate_limited" };
+  await user.click(screen.getByRole("button", { name: "刷新已查余额" }));
+  expect(await within(summary).findByText(/站点限流，请稍后刷新/)).toBeVisible();
+  expect(within(summary).queryByRole("button", { name: "重新登录站点" })).not.toBeInTheDocument();
+
+  wallet = { ...wallet, error_reason: "verification_required" };
+  await user.click(screen.getByRole("button", { name: "刷新已查余额" }));
+  expect(await within(summary).findByText(/站点要求人机验证/)).toBeVisible();
+  expect(summary).toHaveTextContent(dateTime(200));
+  const onBrowserMessage = (event: MessageEvent) => {
+    const { channel, id, type } = event.data || {};
+    if (channel !== "uni-api-browser-login-v1" || !["ping", "login"].includes(type)) return;
+    window.dispatchEvent(new MessageEvent("message", {
+      source: window, origin: location.origin,
+      data: type === "ping" ? { channel, id, type: "ready" } : {
+        channel, id, type: "result", auth: { access_token: "browser-access", refresh_token: "browser-refresh" },
+      },
+    }));
+  };
+  window.addEventListener("message", onBrowserMessage);
+  try {
+    await user.click(within(summary).getByRole("button", { name: "重新登录站点" }));
+    const browserLogin = await screen.findByRole("button", { name: "使用浏览器登录" });
+    await waitFor(() => expect(browserLogin).toBeEnabled());
+    expect(screen.getByLabelText("站点地址")).toHaveAttribute("readonly");
+    await user.click(browserLogin);
+    expect(await within(summary).findByText("$26.75")).toBeVisible();
+    expect(summary).toHaveTextContent(dateTime(400));
+    expect(within(summary).queryByText(/更新失败|要求人机验证/)).not.toBeInTheDocument();
+    expect(writes).toEqual([{ path: "/analytics/v1/sub2api/accounts/site/login", body: {
+      name: "mysandbox", base: "https://upstream.test", email: "fixture@example.com",
+      password: "fixture-password", access_token: "browser-access", refresh_token: "browser-refresh",
+    } }]);
+  } finally {
+    window.removeEventListener("message", onBrowserMessage);
+  }
+}, 15_000);
 
 it("shows the shared model fingerprint immediately after quality in observation without starting a probe", async () => {
   const row = {source_id:"one",source_name:"One",provider:"native",model:"gemini-4-argon",upstream_model:"gemini-4-argon",engine:"gemini",endpoint:"all",stream:null,eligible:true,reason:"eligible",stats:emptyStats()};

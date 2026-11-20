@@ -134,4 +134,5 @@ export interface SiteWallet {
   status: string;
   amount?: number | null;
   checked_at?: number;
+  error_reason?: string;
 }

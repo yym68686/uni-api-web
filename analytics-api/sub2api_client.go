@@ -86,7 +86,7 @@ func subMissingLoginPasswordError(refreshErr error) error {
 }
 
 func (e *subRemoteError) Error() string {
-	if strings.Contains(e.Reason, "CAPTCHA") || strings.Contains(e.Reason, "TURNSTILE") {
+	if e.requiresBrowser() {
 		return "站点要求人机验证；请在该站点完成登录后，使用会话令牌接入"
 	}
 	switch e.Status {
@@ -105,6 +105,11 @@ func (e *subRemoteError) Error() string {
 	default:
 		return fmt.Sprintf("站点接口返回 HTTP %d", e.Status)
 	}
+}
+
+func (e *subRemoteError) requiresBrowser() bool {
+	reason := strings.ToUpper(e.Reason)
+	return strings.Contains(reason, "CAPTCHA") || strings.Contains(reason, "TURNSTILE")
 }
 
 var errSubResponseTooLarge = errors.New("站点响应过大或读取失败")
@@ -155,25 +160,30 @@ func subJSON(ctx context.Context, client *http.Client, base, method, path, token
 		Data   json.RawMessage `json:"data"`
 	}
 	parseErr := json.Unmarshal(raw, &envelope)
+	// Forks use both numeric and string codes. Do not read their error messages.
+	if envelope.Reason == "" {
+		_ = json.Unmarshal(envelope.Code, &envelope.Reason)
+	}
+	remote := subRemoteError{Status: resp.StatusCode, Reason: envelope.Reason}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		// sub2api forks use both numeric and string error codes. Keep only the
-		// code for classification, never the upstream message or response body.
-		if envelope.Reason == "" {
-			_ = json.Unmarshal(envelope.Code, &envelope.Reason)
-		}
-		if resp.StatusCode == 401 {
+		if resp.StatusCode == 401 && !remote.requiresBrowser() {
 			if strings.HasPrefix(path, "/api/v1/auth/login") {
 				// Login failures are credential errors; all other 401s are
 				// failures of the saved site session.
-				envelope.Reason = "INVALID_CREDENTIALS"
+				remote.Reason = "INVALID_CREDENTIALS"
 			} else {
-				envelope.Reason = "SITE_SESSION_EXPIRED"
+				remote.Reason = "SITE_SESSION_EXPIRED"
 			}
 		}
-		return &subRemoteError{Status: resp.StatusCode, Reason: envelope.Reason, RetryAfter: newAPIRetryAfter(resp.Header.Get("Retry-After"), time.Now())}
+		remote.RetryAfter = newAPIRetryAfter(resp.Header.Get("Retry-After"), time.Now())
+		return &remote
 	}
 	var code int
 	if parseErr != nil || (len(envelope.Code) > 0 && json.Unmarshal(envelope.Code, &code) != nil) || code != 0 || len(envelope.Data) == 0 {
+		if parseErr == nil && remote.requiresBrowser() {
+			remote.Status = http.StatusBadRequest
+			return &remote
+		}
 		return errors.New("站点返回了不兼容的 sub2api 数据")
 	}
 	if out != nil && json.Unmarshal(envelope.Data, out) != nil {

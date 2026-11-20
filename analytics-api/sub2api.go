@@ -335,7 +335,7 @@ func (s *Service) subAddAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		var remote *subRemoteError
-		if errors.As(err, &remote) && (strings.Contains(strings.ToUpper(remote.Reason), "TURNSTILE") || strings.Contains(strings.ToUpper(remote.Reason), "CAPTCHA")) {
+		if errors.As(err, &remote) && remote.requiresBrowser() {
 			writeJSON(w, 200, map[string]any{"requires_browser": true, "browser_base": in.Base})
 			return
 		}
@@ -423,7 +423,9 @@ func (s *Service) subSaveLogin(w http.ResponseWriter, r *http.Request, base, log
 		s.subSaveSiteAddress(w, r, ctx, previousBase, base, login, kind, encrypted, encryptedPassword)
 		return
 	}
-	result, err := s.control.db.ExecContext(ctx, `UPDATE console_sub_accounts SET encrypted_auth=$3,encrypted_login_password=CASE WHEN $7<>'' THEN $7 ELSE encrypted_login_password END,state='idle',message='' WHERE id=$1 AND owner=$2 AND base=$4 AND lower(email)=lower($5) AND provider_kind=$6 AND state NOT IN ('queued','running')`, id, owner, encrypted, base, login, kind, encryptedPassword)
+	// Keep the last successful balance and timestamp as a fallback, but have
+	// the next balance read validate the newly saved session even within its TTL.
+	result, err := s.control.db.ExecContext(ctx, `UPDATE console_sub_accounts SET encrypted_auth=$3,encrypted_login_password=CASE WHEN $7<>'' THEN $7 ELSE encrypted_login_password END,balance=balance || '{"refresh_required":true}'::jsonb,state='idle',message='' WHERE id=$1 AND owner=$2 AND base=$4 AND lower(email)=lower($5) AND provider_kind=$6 AND state NOT IN ('queued','running')`, id, owner, encrypted, base, login, kind, encryptedPassword)
 	if err != nil {
 		http.Error(w, "凭据保存失败", 503)
 		return

@@ -1,11 +1,19 @@
 import { controlRequest } from "./api";
 import { balanceSite, scheduleBalance } from "./balanceRequests";
+import type { QueryClient } from "@tanstack/react-query";
 
 export interface AccountBalance {
   amount: number | null;
   status: string;
   checked_at: number;
   provider_kind?: string;
+  error_reason?: string;
+}
+
+export async function refreshAccountBalanceAfterLogin(client: QueryClient, user: string, id: string) {
+  const queryKey = ["site-account-balance", user, id];
+  await client.cancelQueries({ queryKey, exact: true });
+  await client.invalidateQueries({ queryKey, exact: true });
 }
 
 // A wallet belongs to an account, not a channel, model, source or time filter.

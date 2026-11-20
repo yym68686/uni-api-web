@@ -73,6 +73,7 @@ export function useChannelAccountBalances(
           status: query?.isError ? "error" : query?.isPending ? "pending" : query?.data?.status || "missing",
           amount: query?.data?.amount,
           checked_at: query?.data?.checked_at,
+          ...(query?.data?.status === "error" && !query.isError && query.data.error_reason ? { error_reason: query.data.error_reason } : {}),
         };
       });
       return [

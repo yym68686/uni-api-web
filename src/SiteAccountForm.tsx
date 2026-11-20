@@ -8,17 +8,23 @@ import { browserHelperAvailable, loginWithBrowser } from "./sub2apiBrowser";
 import { Spinner } from "./ui";
 import type { SubAccount } from "./Sub2apiChecks";
 
+export type SiteLoginDetails = Pick<SubAccount, "id" | "name" | "base" | "email" | "login_name" | "provider_kind" | "has_saved_password">;
+
 export function AccountForm({
   initial,
   close,
   saved,
   sessionOnly = false,
+  requiresBrowser = false,
+  returnFocusTo,
   detectionModels,
 }: {
-  initial: SubAccount | null;
+  initial: SiteLoginDetails | null;
   close: () => void;
-  saved: () => void;
+  saved: (syncQueued: boolean) => void;
   sessionOnly?: boolean;
+  requiresBrowser?: boolean;
+  returnFocusTo?: Element | null;
   detectionModels?: string[];
 }) {
   const endpoint = initial
@@ -29,6 +35,7 @@ export function AccountForm({
   const [name, setName] = useState(initial?.name || "");
   const [base, setBase] = useState(initial?.base || "");
   const addressChanged = !!initial && base.trim() !== initial.base;
+  const detectAfterLogin = !!initial && !sessionOnly && addressChanged;
   const addressUpdate = addressChanged ? { previous_base: initial.base } : {};
   const [email, setEmail] = useState(
     initial?.login_name || initial?.email || "",
@@ -39,9 +46,9 @@ export function AccountForm({
   const [credentialsLoading, setCredentialsLoading] =
     useState(hasSavedPassword);
   const [credentialsError, setCredentialsError] = useState("");
-  const [browserNeeded, setBrowserNeeded] = useState(false);
+  const [browserNeeded, setBrowserNeeded] = useState(requiresBrowser);
   const [browserKind, setBrowserKind] = useState<"sub2api" | "newapi">(
-    "sub2api",
+    initial?.provider_kind === "newapi" ? "newapi" : "sub2api",
   );
   const [helperReady, setHelperReady] = useState(false);
   const [browserBusy, setBrowserBusy] = useState(false);
@@ -52,7 +59,7 @@ export function AccountForm({
   const [error, setError] = useState("");
   const noteId = useId();
   const browserAbort = useRef<AbortController | null>(null);
-  const opener = useRef(document.activeElement);
+  const opener = useRef(returnFocusTo ?? document.activeElement);
   useEffect(() => {
     if (!accountID || !hasSavedPassword) return;
     const abort = new AbortController();
@@ -108,7 +115,7 @@ export function AccountForm({
     setChallenge("");
     setCode("");
     setLoginSaved(true);
-    if (initial && !sessionOnly) {
+    if (initial && detectAfterLogin) {
       try {
         if (!detectionModels?.length) throw new Error("请在检测模型设置中选择模型");
         await controlRequest(
@@ -124,7 +131,7 @@ export function AccountForm({
         );
       }
     }
-    saved();
+    saved(!initial || detectAfterLogin);
   }
   async function browserLogin() {
     if (busy || browserBusy || credentialsLoading) return;
@@ -244,7 +251,7 @@ export function AccountForm({
         <Dialog.Overlay
           className={`dialog-overlay${sessionOnly ? " site-reauth-overlay" : ""}`}
         />
-        <Dialog.Content
+          <Dialog.Content
           className={`guide-dialog compact-dialog${sessionOnly ? " site-reauth-dialog" : ""}`}
           aria-describedby={undefined}
           onPointerDownOutside={(event) => {
@@ -348,7 +355,7 @@ export function AccountForm({
                       value={password}
                       onChange={(event) => setPassword(event.target.value)}
                       required={
-                        (!hasSavedPassword || addressChanged) && !browserNeeded
+                        browserNeeded ? browserKind === "sub2api" : !hasSavedPassword || addressChanged
                       }
                     />
                   </label>
@@ -378,6 +385,9 @@ export function AccountForm({
                 <Spinner small />
                 等待原站登录…
               </p>
+            )}
+            {browserNeeded && !browserBusy && (
+              <p className="dialog-inline-note">请在原站浏览器窗口完成人机验证并登录。</p>
             )}
             {browserNeeded && browserKind === "newapi" && helperReady && (
               <p className="dialog-inline-note">
@@ -429,12 +439,12 @@ export function AccountForm({
                 {loginSaved
                   ? "重试同步并检测"
                   : challenge
-                    ? sessionOnly
+                    ? initial && !detectAfterLogin
                       ? "验证并返回"
                       : !initial && !initialScope.current.length ? "验证并同步" : "验证并检测"
                     : browserNeeded
                       ? "使用浏览器登录"
-                      : sessionOnly
+                      : initial && !detectAfterLogin
                         ? "登录并返回"
                         : !initial && !detectOnAdd ? "连接并同步" : "连接并检测"}
               </button>

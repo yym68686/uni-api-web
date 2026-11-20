@@ -2302,9 +2302,7 @@ it("opens account forms in a modal and restores focus when closed", async () => 
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });
 
-it.each([false, true])("shows a saved site password in the login form and retries only a failed sync (%s)", async failSync => {
-  const selected = ["gpt-6.1-sol", "gemini-4-argon"];
-  saveSubModels("reauth-scope", selected);
+it.each([false, true])("uses the saved password to renew the wallet session without checking models (%s)", async failFirstLogin => {
   const data = fixtures().slice(0, 1);
   data[0].has_saved_password = true;
   const writes: {path: string; body: unknown}[] = [];
@@ -2312,7 +2310,7 @@ it.each([false, true])("shows a saved site password in the login form and retrie
     if (input.endsWith("/credentials")) return Response.json({password: "saved-site-password"});
     if (init?.method === "POST") {
       writes.push({path: new URL(input).pathname, body: JSON.parse(String(init.body))});
-      if (failSync && writes.length === 2) return new Response("暂不可用", {status: 503});
+      if (failFirstLogin && writes.length === 1) return new Response("暂不可用", {status: 503});
       return Response.json({authenticated: true, queued: false});
     }
     return Response.json({data: input.endsWith("/accounts") ? data : []});
@@ -2326,16 +2324,15 @@ it.each([false, true])("shows a saved site password in the login form and retrie
   await waitFor(() => expect(dialog.getByLabelText("账号密码")).toHaveValue("saved-site-password"));
   expect(dialog.getByLabelText("账号密码")).toHaveAttribute("type", "text");
   expect(dialog.getByPlaceholderText("已保存密码，留空继续使用")).toBeVisible();
-  await user.click(dialog.getByRole("button", {name: "连接并检测"}));
-  if (failSync) {
-    expect(await screen.findByText(/登录已保存，同步未启动/)).toBeVisible();
-    await user.click(dialog.getByRole("button", {name: "重试同步并检测"}));
+  await user.click(dialog.getByRole("button", {name: "登录并返回"}));
+  if (failFirstLogin) {
+    expect(await screen.findByText(/暂不可用/)).toBeVisible();
+    await user.click(dialog.getByRole("button", {name: "登录并返回"}));
   }
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   expect(writes).toEqual([
     {path: "/analytics/v1/sub2api/accounts/one/login", body: {name: "one", base: "https://one.test", email: "one@test.com", password: "saved-site-password"}},
-    {path: "/analytics/v1/sub2api/accounts/one/sync-selected", body: {models: selected}},
-    ...(failSync ? [{path: "/analytics/v1/sub2api/accounts/one/sync-selected", body: {models: selected}}] : []),
+    ...(failFirstLogin ? [{path: "/analytics/v1/sub2api/accounts/one/login", body: {name: "one", base: "https://one.test", email: "one@test.com", password: "saved-site-password"}}] : []),
   ]);
   expect(JSON.stringify(localStorage)).not.toContain("saved-site-password");
   expect(JSON.stringify(sessionStorage)).not.toContain("saved-site-password");
@@ -2362,11 +2359,11 @@ it("explains missing legacy credentials and requires them once without submittin
   const dialog = within(screen.getByRole("dialog"));
   expect(dialog.getByLabelText("账号密码")).toBeRequired();
   expect(dialog.getByText(/此账号尚未保存登录密码，请补填一次/)).toBeVisible();
-  await user.click(dialog.getByRole("button", {name: "连接并检测"}));
+  await user.click(dialog.getByRole("button", {name: "登录并返回"}));
   expect(writes).toEqual([]);
   await user.type(dialog.getByLabelText("账号密码"), "replacement-password");
-  await user.click(dialog.getByRole("button", {name: "连接并检测"}));
-  await waitFor(() => expect(writes).toHaveLength(2));
+  await user.click(dialog.getByRole("button", {name: "登录并返回"}));
+  await waitFor(() => expect(writes).toHaveLength(1));
   expect(writes[0]).toMatchObject({password: "replacement-password"});
   expect(JSON.stringify(localStorage)).not.toContain("replacement-password");
   expect(JSON.stringify(sessionStorage)).not.toContain("replacement-password");

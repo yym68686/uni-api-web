@@ -42,9 +42,22 @@ export function balanceIsKnown(wallets?: SiteWallet[]): wallets is (SiteWallet &
 export function hasWalletAmount(wallet: SiteWallet): wallet is SiteWallet & {amount: number} {
   return typeof wallet.amount === "number" && Number.isFinite(wallet.amount);
 }
+export function walletFailureDetail(wallet: { error_reason?: string }) {
+  switch (wallet.error_reason) {
+    case "verification_required": return "站点要求人机验证";
+    case "login_required": return "站点会话失效，请重新登录";
+    case "rate_limited": return "站点限流，请稍后刷新";
+    case "access_denied": return "站点拒绝访问，请检查账号权限";
+    default: return "";
+  }
+}
 export function walletStatusLabel(wallet: SiteWallet) {
   if (wallet.status === "pending") return "查询中";
-  if (wallet.status === "error") return hasWalletAmount(wallet) ? "更新失败 · 上次余额" : "站点余额查询失败";
+  if (wallet.status === "error") {
+    const status = hasWalletAmount(wallet) ? "更新失败 · 上次余额" : "站点余额查询失败";
+    const detail = walletFailureDetail(wallet);
+    return detail ? `${status} · ${detail}` : status;
+  }
   return "暂无站点余额";
 }
 export function formatBalance(amount: number, currency: string) {
