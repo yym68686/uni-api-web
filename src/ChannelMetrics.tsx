@@ -1,10 +1,10 @@
 import { Fragment, type ReactNode } from "react";
-import { channelLatency, latencyLabel } from "./channelLatency";
+import { channelLatency } from "./channelLatency";
 import { FailureCounts } from "./FailureCounts";
 import { BalanceAmount } from "./BalanceAmount";
 import { LatencyBadge } from "./LatencyBadge";
 import { CircleHelp } from "lucide-react";
-import type { Channel, Distribution, SiteWallet } from "./types";
+import type { Channel, Distribution, SiteWallet, Stats } from "./types";
 import type { SiteBalanceResult } from "./ChannelAccountBalances";
 import { Tip } from "./ui";
 import { LoadingIndicator } from "./LoadingIndicator";
@@ -80,69 +80,64 @@ export function BalanceValue({
     </div>
   );
 }
-export function Timing({
-  value,
-  text,
-  wait = false,
-  kind = "created",
-}: {
-  value?: Distribution;
-  text?: Distribution;
-  wait?: boolean;
-  kind?: "created" | "output";
-}) {
+function DispatchTiming({ value }: { value?: Distribution }) {
   return (
     <Tip
       keyboard={false}
       text={
         <>
-          <strong>
-            {wait
-              ? "请求进入 uni-api → 渠道 HTTP 发起前"
-              : `渠道请求发起 → ${latencyLabel(kind)}`}
-          </strong>
+          <strong>请求进入 uni-api → 渠道 HTTP 发起前</strong>
           <br />
           p95 {ms(value?.p95_ms)} · 最近 {ms(value?.last_ms)}
           <br />
           {count(value?.sample_count || 0)} 次样本 · 分位值为直方图上界估计
-          {!wait && !value?.sample_count && (
-            <>
-              <br />
-              当前范围未采集此延迟时间；成功次数不代表有延迟样本。
-              旧版协议转换遗漏的时间无法从成功率或总耗时补算。
-            </>
-          )}
-          {!wait && (
-            <>
-              <br />
-              首个上游正文片段：p50 {ms(text?.p50_ms)} · p95{" "}
-              {ms(text?.p95_ms)} · 最近 {ms(text?.last_ms)}
-              <br />
-              {count(text?.sample_count || 0)} 次正文首字样本
-            </>
-          )}
-          {wait && (
-            <>
-              <br />
-              包含读包、排队与前序重试；不包含入口前耗时。
-            </>
-          )}
+          <br />
+          包含读包、排队与前序重试；不包含入口前耗时。
         </>
       }
     >
-      {wait ? (
-        <span
-          className={`metric-value ${value?.p50_ms == null ? "muted" : ""}`}
-        >
-          {ms(value?.p50_ms)}
-        </span>
-      ) : !value?.sample_count && value?.p50_ms == null ? (
-        <span className="muted">未记录</span>
-      ) : (
-        <span><LatencyBadge value={value?.p50_ms} />{kind === "output" && <small className="muted"> 首个输出</small>}</span>
-      )}
+      <span className={`metric-value ${value?.p50_ms == null ? "muted" : ""}`}>
+        {ms(value?.p50_ms)}
+      </span>
     </Tip>
   );
+}
+
+const timingDetail = (value?: Distribution) =>
+  `p50 ${ms(value?.p50_ms)} · p95 ${ms(value?.p95_ms)} · 最近 ${ms(value?.last_ms)}`;
+
+export function ChannelFirstResponse({ stats, showP95 = false }: { stats?: Stats; showP95?: boolean }) {
+  const value = channelLatency(stats);
+  const failed = stats?.failed_response_created;
+  const samples = value?.sample_count ?? 0;
+  return <Tip text={<>
+    <strong>渠道请求发起 → 首个 response.created</strong>
+    <br />
+    仅统计成功完成的渠道尝试 · {count(samples)} 次首字样本
+    <br />
+    {timingDetail(value)} · 分位值为直方图上界估计
+    {failed && <>
+      <br />
+      失败尝试（仅供排障） · {count(failed.sample_count)} 次首字样本
+      {!!failed.sample_count && <><br />{timingDetail(failed)}</>}
+    </>}
+    {!!stats?.first_output?.sample_count && <>
+      <br />
+      首个上游输出（含正文、推理或工具调用）：{count(stats.first_output.sample_count)} 次 · {timingDetail(stats.first_output)}
+    </>}
+    <br />
+    首个上游正文片段：{count(stats?.first_text?.sample_count || 0)} 次 · {timingDetail(stats?.first_text)}
+  </>}>
+    <span className="dual-metric">
+      {samples > 0 ? <>
+        <LatencyBadge value={value?.p50_ms} />
+        {showP95 && <span className="muted mono">{ms(value?.p95_ms)}</span>}
+        <small className="muted">{count(samples)} 次样本</small>
+      </> : <span className="muted">
+        {!value ? "未记录" : stats?.success === 0 ? "无成功样本" : "无首字样本"}
+      </span>}
+    </span>
+  </Tip>;
 }
 export function Status({ row, upstreamGroup }: { row: Channel; upstreamGroup?: GroupRejection }) {
   if (upstreamGroup) return <Tip text={`${groupRejectionDetail(upstreamGroup)} 此状态来自指纹采样，不会自动修改网关规则。`}>
@@ -206,7 +201,9 @@ export function ChannelMetricHeaders({
           请求前等待 <small>p50</small>
         </Tip>
       </th>;
-      case "latency": return <th className="column-run">首字 <small>p50 / p95</small></th>;
+      case "latency": return <th className="column-run">
+        <Tip keyboard={false} text="仅统计成功完成、且记录到首个 response.created 的渠道尝试。">首字 <small>p50 / p95</small></Tip>
+      </th>;
       case "duration": return <th className="column-quality">
         <Tip text="当前渠道单次尝试从开始到离开的总时间，包含成功、失败和取消；流式请求计到流结束。不包含前序重试和后续渠道耗时，跳过及进行中的尝试不计入。p50 / p95 为直方图上界估计。">
           总时间 <small>p50 / p95</small>
@@ -293,23 +290,11 @@ export function ChannelMetricCells({
               : count(row.stats?.success_rate_denominator || 0)}
       </td>;
       case "wait": return <td className="column-quality">
-        <Timing value={row.stats?.request_to_dispatch} wait />
+        <DispatchTiming value={row.stats?.request_to_dispatch} />
       </td>;
-      case "latency": {
-        const latency = channelLatency(row.stats);
-        return <td className="column-run">
-        <div className="dual-metric">
-          <Timing
-            value={latency.value}
-            kind={latency.kind}
-            text={row.stats?.first_text}
-          />
-          {!!latency.value?.sample_count && <span className="muted mono">
-            {ms(latency.value?.p95_ms)}
-          </span>}
-        </div>
+      case "latency": return <td className="column-run">
+        <ChannelFirstResponse stats={row.stats} showP95 />
       </td>;
-      }
       case "duration": return <td className="column-quality">
         <TotalTiming value={row.stats?.duration} attempts={row.stats?.started} />
       </td>;

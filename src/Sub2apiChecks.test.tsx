@@ -5,8 +5,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { Sub2apiChecks, groupQualityResult } from "./Sub2apiChecks";
 import type { SubAccount } from "./Sub2apiChecks";
-import { LatencyBadge } from "./LatencyBadge";
-import { Timing } from "./ChannelMetrics";
 import { SUB_MODELS, saveSubModels, loadSubModels } from "./sub2apiModels";
 import type { SubUsage } from "./sub2apiPriceCheck";
 import { installManagementPageFixture } from "../tests/managementPageFixture";
@@ -1146,59 +1144,6 @@ it("isolates row submissions by account, group and check kind, including out-of-
   view.unmount();
   client.clear();
 });
-it("labels absent response-created samples without substituting legacy near-zero text timing", () => {
-  render(<Tooltip.Provider><Timing
-    value={{sample_count:0,p50_ms:null,p95_ms:null,mean_ms:null,last_ms:null}}
-    text={{sample_count:25,p50_ms:1,p95_ms:1,mean_ms:.02,last_ms:.01}}
-  /></Tooltip.Provider>);
-  expect(screen.getByText("未记录")).toBeVisible();
-  expect(document.querySelector(".latency-badge")).toBeNull();
-});
-
-it("colors only first-output p50 with exact 5s and 10s boundaries", () => {
-  const { container } = render(
-    <Tooltip.Provider>
-      <div data-testid="badges">
-        {[0, 5000, 5001, 10000, 10001, null].map((value, i) => (
-          <LatencyBadge key={i} value={value} />
-        ))}
-      </div>
-      <div data-testid="first">
-        <Timing
-          value={{
-            p50_ms: 5001,
-            p95_ms: 25000,
-            last_ms: 30000,
-            sample_count: 10,
-            mean_ms: 10000,
-          }}
-        />
-      </div>
-      <div data-testid="wait">
-        <Timing
-          wait
-          value={{
-            p50_ms: 20000,
-            p95_ms: 25000,
-            last_ms: 30000,
-            sample_count: 10,
-            mean_ms: 10000,
-          }}
-        />
-      </div>
-    </Tooltip.Provider>,
-  );
-  const badges = screen.getByTestId("badges");
-  expect(badges.querySelectorAll(".fast")).toHaveLength(2);
-  expect(badges.querySelectorAll(".medium")).toHaveLength(2);
-  expect(badges.querySelectorAll(".slow")).toHaveLength(1);
-  expect(screen.getByTestId("wait").querySelector(".latency-badge")).toBeNull();
-  expect(
-    screen.getByTestId("first").querySelectorAll(".latency-badge"),
-  ).toHaveLength(1);
-  expect(container).not.toHaveTextContent("NaN");
-});
-
 it("filters models, derives rate options from other filters, applies inclusive caps and both sorts", async () => {
   const data = fixtures();
   data.push({
@@ -2869,12 +2814,6 @@ it("copies an unassigned channel's upstream curl from its saved gateway probe", 
   expect(document.body.textContent).not.toContain("upstream-fixture");
 });
 
-it("labels observed native output without claiming a response.created event", async () => {
-  render(<Tooltip.Provider><Timing kind="output" value={{sample_count:4,p50_ms:45000,p95_ms:180000,mean_ms:46000,last_ms:30000}} text={{sample_count:2,p50_ms:46000,p95_ms:180000,mean_ms:47000,last_ms:31000}} /></Tooltip.Provider>);
-  expect(screen.getByText("45.00 s")).toBeVisible();
-  expect(screen.getByText("首个输出")).toBeVisible();
-  expect(screen.queryByText("未记录")).toBeNull();
-});
 
 
 it("does not submit all-account sync when no detection models are selected", async () => {

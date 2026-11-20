@@ -7,7 +7,7 @@ export const channelSortFields = [
   { value: "quality", label: "最近检测是否降智", direction: "asc" },
   { value: "probability", label: "不降智概率", direction: "desc" },
   { value: "multiplier", label: "倍率", direction: "asc" },
-  { value: "latency", label: "首字延迟 P50", direction: "asc" },
+  { value: "latency", label: "成功尝试首字 P50", direction: "asc" },
   { value: "cache", label: "缓存率", direction: "desc" },
   { value: "success", label: "成功率", direction: "desc" },
   { value: "wait", label: "请求前等待 P50", direction: "asc" },
@@ -91,7 +91,7 @@ function sortValue(
     case "multiplier":
       return row.billing_multiplier !== undefined ? row.billing_multiplier : context.multipliers?.[row.source_id || ""]?.[row.provider] ?? null;
     case "latency":
-      return channelLatency(row.stats).value?.p50_ms ?? null;
+      return channelLatency(row.stats)?.p50_ms ?? null;
     case "wait":
       return row.stats?.request_to_dispatch?.p50_ms ?? null;
     case "cache":

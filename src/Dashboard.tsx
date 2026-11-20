@@ -1,4 +1,4 @@
-import { channelLatency, latencyLabel } from "./channelLatency";
+import { channelLatency } from "./channelLatency";
 import type { ManagementPagePosition } from "./managementQuery";
 import { restoredDashboardAt, saveDashboardSnapshot, dashboardSnapshotKey } from "./dashboardSnapshot";
 import { PageLoading, TableLoading, DetailLoading } from "./PageLoading";
@@ -71,7 +71,6 @@ import {
   ChannelRowActions,
 } from "./ChannelControls";
 import { useChannelRouteDrag } from "./ChannelRouteDrag";
-import { ResponseLatency } from "./LatencyBadge";
 import { useSubImports, boundGroups } from "./sub2apiImports";
 import type { SubImportsQuery } from "./sub2apiImports";
 import { ChannelModels } from "./ChannelModels";
@@ -131,6 +130,7 @@ import {
   Status,
   ChannelMetricHeaders,
   ChannelMetricCells,
+  ChannelFirstResponse,
 } from "./ChannelMetrics";
 import { observationColumns, observationPreset, type ChannelMetricLayout } from "./observationColumns";
 import { TableColumns, useTableColumns } from "./TableColumns";
@@ -526,8 +526,8 @@ function Detail({
                 <h3>时延分布</h3>
                 <dl className="detail-stats">
                   <div><dt>请求前等待 p50</dt><dd>{ms(row.stats?.request_to_dispatch?.p50_ms)}</dd></div>
-                  <div><dt>{latencyLabel(channelLatency(row.stats).kind)} p50</dt>
-                    <dd><ResponseLatency created={row.stats?.response_created?.p50_ms} output={row.stats?.first_output?.p50_ms} text={row.stats?.first_text?.p50_ms} /></dd></div>
+                  <div><dt>首字延迟 p50（成功尝试）</dt>
+                    <dd><ChannelFirstResponse stats={row.stats} /></dd></div>
                   <div>
                     <dt>请求前等待 p95</dt>
                     <dd>{ms(row.stats?.request_to_dispatch?.p95_ms)}</dd>
@@ -548,11 +548,11 @@ function Detail({
                   </div>
                   <div>
                     <dt>首字延迟 p95</dt>
-                    <dd>{ms(channelLatency(row.stats).value?.p95_ms)}</dd>
+                    <dd>{ms(channelLatency(row.stats)?.p95_ms)}</dd>
                   </div>
                   <div>
                     <dt>最近一次首字延迟</dt>
-                    <dd>{ms(channelLatency(row.stats).value?.last_ms)}</dd>
+                    <dd>{ms(channelLatency(row.stats)?.last_ms)}</dd>
                   </div>
                 </dl>
               </div>

@@ -141,14 +141,14 @@ it("uses channel metrics, zero values and source-specific billing, while missing
     row("a", {
       success_rate: 0.9,
       cache_rate: 0.8,
-      response_created: { p50_ms: 8000 },
+      successful_response_created: { p50_ms: 8000 },
     }),
     row("b", {
       success_rate: 0,
       cache_rate: 0,
-      response_created: { p50_ms: 0 },
+      successful_response_created: { p50_ms: 0 },
     }),
-    row("c"),
+    row("c", { response_created: { p50_ms: 1 }, failed_response_created: { p50_ms: 1 } }),
     row("d", { success_rate: NaN }),
   ];
   const context = {

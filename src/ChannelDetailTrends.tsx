@@ -1,4 +1,4 @@
-import { channelLatency, latencyLabel } from "./channelLatency";
+import { channelLatency } from "./channelLatency";
 import { DetailLoading } from "./PageLoading";
 import { FailureCounts } from "./FailureCounts";
 import { useMemo, useState } from "react";
@@ -36,12 +36,12 @@ interface Series {
 const latencySeries: Series[] = [
   {
     label: "p50",
-    value: (p) => channelLatency(p).value?.p50_ms ?? null,
+    value: (p) => channelLatency(p)?.p50_ms ?? null,
     color: "var(--green)",
   },
   {
     label: "p95",
-    value: (p) => channelLatency(p).value?.p95_ms ?? null,
+    value: (p) => channelLatency(p)?.p95_ms ?? null,
     color: "var(--danger)",
   },
 ];
@@ -57,7 +57,7 @@ const cacheSeries: Series[] = [
 ];
 const latencyDetail = (p: Point) => {
   const latency = channelLatency(p);
-  return `${count(latency.value?.sample_count || 0)} 个${latencyLabel(latency.kind)}样本 · 正文首字 p50 ${ms(p.first_text?.p50_ms)}`;
+  return `${count(latency?.sample_count || 0)} 个成功尝试首字样本 · 正文首字 p50 ${ms(p.first_text?.p50_ms)}`;
 };
 const successDetail = (p: Point) =>
   `成功 ${count(p.success || 0)} / 失败 ${count(p.failed || 0)} · ${count((p.success || 0) + (p.failed || 0))} 次有效尝试`;
@@ -244,7 +244,7 @@ function ChannelTrendTable({ points }: { points: Point[] }) {
       columns={["时间段", "首字延迟", "成功率", "缓存率"]}
     >
       {points.map((p) => {
-        const latency = channelLatency(p).value;
+        const latency = channelLatency(p);
         const success = successRate(p);
         return (
           <tr key={p.timestamp}>

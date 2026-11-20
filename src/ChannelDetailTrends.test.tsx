@@ -29,7 +29,8 @@ const point = (timestamp: number) => ({
   bucket_end: timestamp + 60,
   success: 3,
   failed: 1,
-  response_created: { sample_count: 4, p50_ms: 100, p95_ms: 800 },
+  response_created: { sample_count: 4, p50_ms: 20, p95_ms: 800 },
+  successful_response_created: { sample_count: 3, p50_ms: 100, p95_ms: 800 },
   first_text: { sample_count: 4, p50_ms: 250 },
   cache_rate: 0.5,
 });
@@ -130,9 +131,12 @@ it("keeps missing samples and gaps empty while plotting real zero success", asyn
       success: 0,
       failed: 0,
       cache_rate: null,
-      response_created: { sample_count: 0, p50_ms: null, p95_ms: null },
+      successful_response_created: undefined,
     },
-    { ...point(240), success: 0, failed: 2, covered: false, cache_rate: 0 },
+    {
+      ...point(240), success: 0, failed: 2, covered: false, cache_rate: 0,
+      successful_response_created: { sample_count: 0, p50_ms: null, p95_ms: null },
+    },
     point(420),
   ];
   vi.stubGlobal(
@@ -152,13 +156,15 @@ it("keeps missing samples and gaps empty while plotting real zero success", asyn
       await screen.findByRole("region", { name: "首字延迟趋势" }),
     ),
     success = within(screen.getByRole("region", { name: "成功率趋势" }));
-  await waitFor(() => expect(latency.getAllByRole("img")).toHaveLength(3));
+  await waitFor(() => expect(latency.getAllByRole("img")).toHaveLength(2));
   expect(success.getAllByRole("img")).toHaveLength(3);
   expect(success.getAllByRole("img")[1]).toHaveAttribute(
     "aria-label",
     expect.stringContaining("成功率 0.0%"),
   );
-  for (const path of document.querySelectorAll(".detail-curve-line"))
+  for (const path of latency.getByRole("group").querySelectorAll(".detail-curve-line"))
+    expect(path.getAttribute("d")?.match(/M/g)).toHaveLength(2);
+  for (const path of success.getByRole("group").querySelectorAll(".detail-curve-line"))
     expect(path.getAttribute("d")?.match(/M/g)).toHaveLength(3);
   fireEvent.click(screen.getByRole("button", { name: "数据表" }));
   const rows = within(

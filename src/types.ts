@@ -45,6 +45,8 @@ export interface Stats {
   hedge_cancelled: number;
   first_output?: Distribution;
   response_created?: Distribution;
+  successful_response_created?: Distribution;
+  failed_response_created?: Distribution;
   first_text?: Distribution;
   request_to_dispatch?: Distribution;
   duration?: Distribution;

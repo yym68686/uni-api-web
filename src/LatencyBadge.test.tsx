@@ -2,7 +2,17 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import { expect, it } from "vitest";
-import { ResponseLatency } from "./LatencyBadge";
+import { LatencyBadge, ResponseLatency } from "./LatencyBadge";
+
+it("uses exact 5s and 10s badge boundaries and preserves zero", () => {
+  const { container } = render(<>{[0, 5000, 5001, 10000, 10001, null].map((value, i) =>
+    <LatencyBadge key={i} value={value} />
+  )}</>);
+  expect(container.querySelectorAll(".fast")).toHaveLength(2);
+  expect(container.querySelectorAll(".medium")).toHaveLength(2);
+  expect(container.querySelectorAll(".slow")).toHaveLength(1);
+  expect(container).not.toHaveTextContent("NaN");
+});
 
 it("shows response creation by default and the later first text in the tooltip", async () => {
   render(

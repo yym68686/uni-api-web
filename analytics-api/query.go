@@ -51,7 +51,42 @@ type Summary struct {
 	DurationSum               float64          `json:"-"`
 	LastDuration              *float64         `json:"-"`
 	LastDurationMS            int64            `json:"-"`
+
+	SuccessCreated, FailedCreated createdSamples `json:"-"`
 }
+
+// The rollup rows already retain kind and normalized outcome. Partition the
+// existing histograms at read time, without a fact scan, migration or backfill.
+type createdSamples struct {
+	bins   []int64
+	n      int64
+	sum    float64
+	last   *float64
+	lastAt int64
+}
+
+func (s *createdSamples) merge(other createdSamples) {
+	if other.n == 0 {
+		return
+	}
+	if s.bins == nil {
+		s.bins = make([]int64, len(histogramBounds))
+	}
+	for i, n := range other.bins {
+		s.bins[i] += n
+	}
+	s.n += other.n
+	s.sum += other.sum
+	if other.last != nil && (s.last == nil || other.lastAt > s.lastAt || (other.lastAt == s.lastAt && *other.last > *s.last)) {
+		s.last, s.lastAt = other.last, other.lastAt
+	}
+}
+
+func (s createdSamples) distribution() map[string]any {
+	return distribution(s.bins, s.n, s.sum, s.last)
+}
+
+const successfulAttemptSQL = "kind='attempt' AND outcome IN ('success','completed')"
 
 func (s *Summary) merge(x Summary) {
 	if len(x.FailureReasons) > 0 && s.FailureReasons == nil {
@@ -102,6 +137,8 @@ func (s *Summary) merge(x Summary) {
 	mergeBins(&s.CreatedBins, x.CreatedBins)
 	mergeBins(&s.TextBins, x.TextBins)
 	mergeBins(&s.DurationBins, x.DurationBins)
+	s.SuccessCreated.merge(x.SuccessCreated)
+	s.FailedCreated.merge(x.FailedCreated)
 	if x.LastDuration != nil && (x.LastDurationMS > s.LastDurationMS || (x.LastDurationMS == s.LastDurationMS && (s.LastDuration == nil || *x.LastDuration > *s.LastDuration))) {
 		s.LastDuration = x.LastDuration
 		s.LastDurationMS = x.LastDurationMS
@@ -167,6 +204,8 @@ func (s Summary) JSON() map[string]any {
 	out["cost_basis"] = "current_model_prices"
 	out["first_output"] = distribution(s.FirstBins, s.FirstCount, s.FirstSum, s.LastFirst)
 	out["response_created"] = distribution(s.CreatedBins, s.CreatedCount, s.CreatedSum, s.LastCreated)
+	out["successful_response_created"] = s.SuccessCreated.distribution()
+	out["failed_response_created"] = s.FailedCreated.distribution()
 	out["first_text"] = distribution(s.TextBins, s.TextCount, s.TextSum, s.LastText)
 	out["request_to_dispatch"] = distribution(s.DispatchBins, s.DispatchCount, s.DispatchSum, s.LastDispatch)
 	out["duration"] = distribution(s.DurationBins, s.DurationCount, s.DurationSum, s.LastDuration)
@@ -402,10 +441,12 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (queryResult QueryRes
 			identities[key] = [4]string{sourceID, provider, model, upstream}
 		}
 		if kind == "attempt" {
+			created := createdSamples{bins: s.CreatedBins, n: s.CreatedCount, sum: s.CreatedSum, last: s.LastCreated, lastAt: s.LastCreatedMS}
 			switch outcome {
 			case "success", "completed":
 				s.Attempts = n
 				s.Success = n
+				s.SuccessCreated = created
 			case "skipped":
 				s.Skipped = n
 			case "cancelled", "client_cancelled", "hedge_cancelled":
@@ -414,6 +455,7 @@ func (e *Engine) Query(ctx context.Context, f QueryFilter) (queryResult QueryRes
 			default:
 				s.Attempts = n
 				s.Failed = n
+				s.FailedCreated = created
 				s.FailureReasons = map[string]int64{failureReasonKey(outcome): n}
 			}
 		}
@@ -581,7 +623,7 @@ func (e *Engine) attachTimeseries(ctx context.Context, result *QueryResult, f Qu
 	_, offset := time.UnixMilli(endMS).In(e.Location).Zone()
 	bucketSQL := fmt.Sprintf("(floor((period_ms+%d)::DOUBLE PRECISION/%d)*%d-%d)::BIGINT", int64(offset)*1000, bucket, bucket, int64(offset)*1000)
 	rows, err := e.DB.QueryContext(ctx, `SELECT `+bucketSQL+` AS bucket,
-      coalesce(sum(CASE WHEN kind='attempt' AND outcome IN ('success','completed') THEN n ELSE 0 END),0)::BIGINT,
+      coalesce(sum(n) FILTER (WHERE `+successfulAttemptSQL+`),0)::BIGINT,
       coalesce(sum(CASE WHEN kind='attempt' AND outcome NOT IN ('success','completed','cancelled','client_cancelled','hedge_cancelled','skipped') THEN n ELSE 0 END),0)::BIGINT,
       coalesce(sum(CASE WHEN kind='request' THEN input_tokens ELSE 0 END),0)::BIGINT,
       coalesce(sum(CASE WHEN kind='request' THEN cache_read_tokens ELSE 0 END),0)::BIGINT,
@@ -593,7 +635,11 @@ func (e *Engine) attachTimeseries(ctx context.Context, result *QueryResult, f Qu
       to_json(`+mergeHistogramSQL("(CASE WHEN kind='attempt' THEN text_bins ELSE ARRAY[]::BIGINT[] END)")+`),
       coalesce(sum(text_count) FILTER (WHERE kind='attempt'),0)::BIGINT,
       coalesce(sum(text_sum) FILTER (WHERE kind='attempt'),0),
-      (max(ARRAY[last_text_ms::DOUBLE PRECISION,last_text]) FILTER(WHERE last_text IS NOT NULL AND last_text_ms IS NOT NULL AND kind='attempt'))[2]
+      (max(ARRAY[last_text_ms::DOUBLE PRECISION,last_text]) FILTER(WHERE last_text IS NOT NULL AND last_text_ms IS NOT NULL AND kind='attempt'))[2],
+      to_json(`+mergeHistogramSQL("(CASE WHEN "+successfulAttemptSQL+" THEN created_bins ELSE ARRAY[]::BIGINT[] END)")+`),
+      coalesce(sum(created_count) FILTER (WHERE `+successfulAttemptSQL+`),0)::BIGINT,
+      coalesce(sum(created_sum) FILTER (WHERE `+successfulAttemptSQL+`),0),
+      (max(ARRAY[last_created_ms::DOUBLE PRECISION,last_created]) FILTER(WHERE last_created IS NOT NULL AND last_created_ms IS NOT NULL AND `+successfulAttemptSQL+`))[2]
       FROM `+rollupReadSQL(where)+` GROUP BY bucket ORDER BY bucket`, args...)
 	if err != nil {
 		return err
@@ -602,8 +648,8 @@ func (e *Engine) attachTimeseries(ctx context.Context, result *QueryResult, f Qu
 	for rows.Next() {
 		var period, success, failed, input, cached, samples int64
 		var latency Summary
-		var createdBins, textBins any
-		if err = rows.Scan(&period, &success, &failed, &input, &cached, &samples, &createdBins, &latency.CreatedCount, &latency.CreatedSum, &latency.LastCreated, &textBins, &latency.TextCount, &latency.TextSum, &latency.LastText); err != nil {
+		var createdBins, textBins, successBins any
+		if err = rows.Scan(&period, &success, &failed, &input, &cached, &samples, &createdBins, &latency.CreatedCount, &latency.CreatedSum, &latency.LastCreated, &textBins, &latency.TextCount, &latency.TextSum, &latency.LastText, &successBins, &latency.SuccessCreated.n, &latency.SuccessCreated.sum, &latency.SuccessCreated.last); err != nil {
 			return err
 		}
 		var rate any
@@ -614,6 +660,8 @@ func (e *Engine) attachTimeseries(ctx context.Context, result *QueryResult, f Qu
 		// Merge the stored histograms before computing percentiles; never average
 		// p50/p95 or count the winning request's copy of an attempt a second time.
 		point["response_created"] = distribution(histogramValues(createdBins), latency.CreatedCount, latency.CreatedSum, latency.LastCreated)
+		latency.SuccessCreated.bins = histogramValues(successBins)
+		point["successful_response_created"] = latency.SuccessCreated.distribution()
 		point["first_text"] = distribution(histogramValues(textBins), latency.TextCount, latency.TextSum, latency.LastText)
 		point["success_rate_denominator"] = success + failed
 		point["success_rate"] = nil

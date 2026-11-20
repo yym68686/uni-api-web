@@ -127,7 +127,7 @@ func (s *Service) automationMetrics(ctx context.Context, t AutomationTask, catal
 	defer tx.Rollback()
 	scope := ` FROM facts WHERE source_id=? AND key_id=? AND model=? AND endpoint=? AND stream=? AND at_ms>=? AND at_ms<=? `
 	args := []any{t.SourceID, t.KeyID, t.Model, p.Endpoint, p.Stream == "true", start.UnixMilli(), now.UnixMilli()}
-	rows, e := tx.QueryContext(ctx, `SELECT provider,upstream_model,max(at_ms),count(*) FILTER(WHERE kind='attempt' AND outcome NOT IN ('cancelled','client_cancelled','hedge_cancelled','skipped')),count(*) FILTER(WHERE kind='attempt' AND outcome IN ('success','completed')),coalesce(max(at_ms) FILTER(WHERE kind='attempt' AND outcome NOT IN ('cancelled','client_cancelled','hedge_cancelled','skipped')),0)`+scope+`GROUP BY provider,upstream_model`, args...)
+	rows, e := tx.QueryContext(ctx, `SELECT provider,upstream_model,max(at_ms),count(*) FILTER(WHERE kind='attempt' AND outcome NOT IN ('cancelled','client_cancelled','hedge_cancelled','skipped')),count(*) FILTER(WHERE `+successfulAttemptSQL+`),coalesce(max(at_ms) FILTER(WHERE kind='attempt' AND outcome NOT IN ('cancelled','client_cancelled','hedge_cancelled','skipped')),0)`+scope+`GROUP BY provider,upstream_model`, args...)
 	if e != nil {
 		return nil, e
 	}
@@ -155,7 +155,7 @@ func (s *Service) automationMetrics(ctx context.Context, t AutomationTask, catal
 	z := confidenceZ(p.ConfidenceLevel)
 	// Exact order-statistic ranks, including the original binomial CI endpoints.
 	latencyArgs := append(append([]any{}, args...), p.LatencyQuantile, z)
-	query := `WITH ranked AS (SELECT provider,upstream_model,at_ms,response_created_ms AS latency,row_number() OVER(PARTITION BY provider,upstream_model ORDER BY response_created_ms) AS rank,count(*) OVER(PARTITION BY provider,upstream_model) AS n` + scope + `AND kind='attempt' AND response_created_ms>=0 AND isfinite(response_created_ms)), parameters AS (SELECT ?::DOUBLE PRECISION AS q,?::DOUBLE PRECISION AS z), bounds AS (SELECT *,greatest(1,ceil(q*n)) AS mid,floor(q*n-z*sqrt(n*q*(1-q))) AS lo,ceil(q*n+z*sqrt(n*q*(1-q))) AS hi FROM ranked CROSS JOIN parameters) SELECT provider,upstream_model,max(n),max(at_ms),max(latency) FILTER(WHERE rank=mid),max(latency) FILTER(WHERE rank=lo),max(latency) FILTER(WHERE rank=hi) FROM bounds GROUP BY provider,upstream_model`
+	query := `WITH ranked AS (SELECT provider,upstream_model,at_ms,response_created_ms AS latency,row_number() OVER(PARTITION BY provider,upstream_model ORDER BY response_created_ms) AS rank,count(*) OVER(PARTITION BY provider,upstream_model) AS n` + scope + `AND ` + successfulAttemptSQL + ` AND response_created_ms>=0 AND isfinite(response_created_ms)), parameters AS (SELECT ?::DOUBLE PRECISION AS q,?::DOUBLE PRECISION AS z), bounds AS (SELECT *,greatest(1,ceil(q*n)) AS mid,floor(q*n-z*sqrt(n*q*(1-q))) AS lo,ceil(q*n+z*sqrt(n*q*(1-q))) AS hi FROM ranked CROSS JOIN parameters) SELECT provider,upstream_model,max(n),max(at_ms),max(latency) FILTER(WHERE rank=mid),max(latency) FILTER(WHERE rank=lo),max(latency) FILTER(WHERE rank=hi) FROM bounds GROUP BY provider,upstream_model`
 	rows, e = tx.QueryContext(ctx, query, latencyArgs...)
 	if e != nil {
 		return nil, e

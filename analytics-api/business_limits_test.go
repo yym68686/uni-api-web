@@ -55,12 +55,14 @@ func TestAutomationUsesCompleteLargeWindowAndExactQuantiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := metrics["p"]
-	xs := make([]float64, count)
-	for i := range xs {
-		xs[i] = float64(i)
+	xs := make([]float64, 0, count)
+	for i := range count {
+		if i%10 != 0 {
+			xs = append(xs, float64(i))
+		}
 	}
 	want, ci, valid := quantileInterval(xs, p.LatencyQuantile, confidenceZ(p.ConfidenceLevel))
-	if !valid || m.LatencyN != count || m.SuccessN != count || m.Latency != want || m.LatencyCI != ci || math.Abs(m.Success-float64(count-(count+9)/10)/count) > 1e-12 || m.Reason != "" {
+	if !valid || m.LatencyN != len(xs) || m.SuccessN != count || m.Latency != want || m.LatencyCI != ci || math.Abs(m.Success-float64(count-(count+9)/10)/count) > 1e-12 || m.Reason != "" {
 		t.Fatalf("incomplete or changed metrics: %+v want=%v ci=%v", m, want, ci)
 	}
 }
