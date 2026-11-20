@@ -101,6 +101,16 @@ type billingFact struct {
 	Status                                                                                int
 }
 
+type ledgerCoverage struct {
+	From, To sql.NullInt64
+	Checked  int64
+	Failed   bool
+}
+
+func (c ledgerCoverage) provesAbsence(since, at int64) bool {
+	return c.From.Valid && c.To.Valid && c.From.Int64 <= since && c.To.Int64 > at && c.Checked >= at
+}
+
 func billingRowID(source, provider, model, upstream string) string {
 	return mustJSON([]string{source, provider, model, upstream})
 }
@@ -633,11 +643,6 @@ func (s *Service) readAttributedChannelSpend(ctx context.Context, owner string, 
 				return nil, err
 			}
 		}
-		type ledgerCoverage struct {
-			From, To sql.NullInt64
-			Checked  int64
-			Failed   bool
-		}
 		coverage := map[string]ledgerCoverage{}
 		if len(accounts) > 0 {
 			accountIDs := make([]string, 0, len(accounts))
@@ -703,9 +708,13 @@ func (s *Service) readAttributedChannelSpend(ctx context.Context, owner string, 
 					item.ConfirmedUnbilled++
 					continue
 				}
+				if capture != nil {
+					capture.unmatched(b, scope.Account)
+					continue
+				}
 				if state.Failed {
 					rowErrors[billingRowID(b.Source, b.Provider, b.Model, b.Upstream)] = true
-				} else if state.From.Valid && state.To.Valid && state.From.Int64 <= min(b.Started, b.At) && state.To.Int64 > b.At && state.Checked >= b.At {
+				} else if state.provesAbsence(min(b.Started, b.At), b.At) {
 					// This only proves that the last complete scan found no receipt.
 					// It does not prove zero cost or that a delayed bill cannot appear.
 					item.AbsentReceipts++

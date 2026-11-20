@@ -101,7 +101,7 @@ func TestSpendSlicesMatchExactAndInvalidateAcrossCompletionWindow(t *testing.T) 
 	}
 	s.spendSliceJobs = make(chan spendSliceJob, 4)
 	s.spendSliceNext, s.spendSliceVerified = map[string]time.Time{}, map[string]bool{}
-	rows, ok := s.composedChannelSpend(ctx, owner, f, from, to, true)
+	rows, ok := s.composedChannelSpend(ctx, owner, f, from, to, true, nil)
 	if !ok || len(rows) != 1 || rows[0].Amount == nil || *rows[0].Amount != .3 {
 		t.Fatalf("not composed: %+v ok=%v", rows, ok)
 	}
@@ -155,6 +155,11 @@ func TestSpendSlicesReceiptCorrectionAndCompetingClaim(t *testing.T) {
 	}
 	t.Cleanup(func() { e.Close() })
 	s.engine = e
+	// Match production headroom: enough for the bounded projections, less
+	// than the previous 64 MiB reserve which disabled every warm attempt.
+	if _, err = e.DB.Exec(`UPDATE storage_state SET ingest_limit_bytes=pg_database_size(current_database())+33554432 WHERE singleton`); err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	hour := time.Now().UTC().Truncate(time.Hour).Add(-4 * time.Hour)
 	from, to := hour.Unix(), hour.Add(2*time.Hour).Unix()
@@ -163,6 +168,9 @@ func TestSpendSlicesReceiptCorrectionAndCompetingClaim(t *testing.T) {
 	storeAttributedLog(t, s, account, b.EventID, "0.3", 1)
 	if err = e.Import(ctx, "settled", "v1", []Fact{b}); err != nil {
 		t.Fatal(err)
+	}
+	if seeded, err := e.seedPriceTierHour(ctx); err != nil || !seeded {
+		t.Fatalf("expected bounded price backfill at 32 MiB headroom: %v %v", seeded, err)
 	}
 	if err = s.queueAccountSpendWindow(ctx, account, from*1000, to*1000); err != nil {
 		t.Fatal(err)
@@ -181,7 +189,7 @@ func TestSpendSlicesReceiptCorrectionAndCompetingClaim(t *testing.T) {
 	}
 	assertAmount := func(want float64) {
 		t.Helper()
-		r, ok := s.composedChannelSpend(ctx, owner, f, from, to, true)
+		r, ok := s.composedChannelSpend(ctx, owner, f, from, to, true, nil)
 		if !ok || len(r) != 1 || r[0].Amount == nil || *r[0].Amount != want {
 			t.Fatalf("amount want=%v: %+v ok=%v", want, r, ok)
 		}
@@ -215,4 +223,46 @@ func TestSpendSlicesReceiptCorrectionAndCompetingClaim(t *testing.T) {
 	if err != nil || len(r) != 1 || r[0].Amount != nil || r[0].Ambiguous != 1 {
 		t.Fatalf("late conflict was not detected: %+v %v", r, err)
 	}
+}
+
+func TestSpendSliceUsesLiveReceiptCoverageWithoutRewarming(t *testing.T) {
+	s, account, owner := attributionFixture(t)
+	ctx := context.Background()
+	hour := time.Now().UTC().Truncate(time.Hour).Add(-4 * time.Hour)
+	from, to := hour.Unix(), hour.Add(2*time.Hour).Unix()
+	f := QueryFilter{KeyID: "caller", SourceID: "source"}
+	missing := attributedFact("waiting", "caller", hour.Add(6*time.Minute))
+	matched := attributedFact("paid", "caller", hour.Add(20*time.Minute))
+	storeAttributedLog(t, s, account, matched.EventID, "0.4", 1)
+	if err := s.engine.Import(ctx, "paid-and-waiting", "v1", []Fact{missing, matched}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.queueAccountSpendWindow(ctx, account, from*1000, to*1000); err != nil {
+		t.Fatal(err)
+	}
+	bindings, err := s.receiptBindings(ctx, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := spendSliceJob{spendSliceWindow{from, from + spendSliceHour}, owner, spendSliceScope(owner, f), spendBindingDigest(bindings), f, false}
+	if err := s.warmSpendSlice(ctx, job); err != nil {
+		t.Fatal(err)
+	}
+	compare := func(want string) {
+		t.Helper()
+		r, ok := s.composedChannelSpend(ctx, owner, f, from, to, true, nil)
+		exact, err := s.readAttributedChannelSpend(ctx, owner, f, from, to, nil)
+		if err != nil || !ok || len(r) != 1 || r[0].Status != want || r[0].Amount != nil || r[0].MatchedAmount != .4 || comparableSpend(r) != comparableSpend(exact) {
+			t.Fatalf("want %s, cached=%+v exact=%+v used_cache=%v err=%v", want, r, exact, ok, err)
+		}
+	}
+	compare("pending")
+	if _, err := s.control.db.Exec(`UPDATE console_sub_account_spend_cache SET covered_from=$2,covered_to=$3,checked_at=$3 WHERE account_id=$1`, account, from*1000, to*1000); err != nil {
+		t.Fatal(err)
+	}
+	compare("unmatched")
+	if _, err := s.control.db.Exec(`UPDATE console_sub_account_spend_cache SET error='test' WHERE account_id=$1`, account); err != nil {
+		t.Fatal(err)
+	}
+	compare("error")
 }

@@ -10,6 +10,12 @@ import (
 const priceTierDimensions = "source_id,kind,provider,model,upstream_model,endpoint,stream,outcome,key_id"
 const priceTierValues = "ordinary_tokens,output_tokens,cache_read_tokens,cache_write_tokens,cache_write_1h_tokens"
 
+// Admission already enforces a separate reserve for the main history. These
+// auxiliary writes are capped; demanding another 64 MiB made them inert on a
+// healthy steady-state database running near its retention watermark.
+const spendProjectionReserve = 16 << 20
+const spendProjectionDiskLimit = 16 << 20
+
 // Hourly rollups retain model-independent token amounts for both supported
 // thresholds. An hour is readable only after its retained history was seeded.
 // Readers use the original usage path for uncovered hours and partial edges.
@@ -101,8 +107,12 @@ func (e *Engine) seedPriceTierHour(ctx context.Context) (bool, error) {
 		return false, nil
 	}
 	var room bool
-	if err = tx.QueryRowContext(ctx, `SELECT pg_database_size(current_database())+67108864 < ingest_limit_bytes FROM storage_state WHERE singleton`).Scan(&room); err != nil || !room {
+	if err = tx.QueryRowContext(ctx, `SELECT pg_database_size(current_database())+? < ingest_limit_bytes
+ AND pg_total_relation_size('price_tier_rollups')<? FROM storage_state WHERE singleton`, spendProjectionReserve, spendProjectionDiskLimit).Scan(&room); err != nil {
 		return false, err
+	}
+	if !room {
+		return false, errSpendProjectionCapacity
 	}
 	if _, err = tx.ExecContext(ctx, "INSERT INTO price_tier_hours(period_ms) VALUES(?)", hour); err != nil {
 		return false, err
@@ -114,6 +124,7 @@ func (e *Engine) seedPriceTierHour(ctx context.Context) (bool, error) {
 }
 
 func (s *Service) priceTierLoop(ctx context.Context) {
+	var lastDeferred time.Time
 	for ctx.Err() == nil {
 		// Never let an unexpectedly large hour hold ingestion for long. Until
 		// backfill succeeds that hour stays on the unchanged reader.
@@ -123,8 +134,9 @@ func (s *Service) priceTierLoop(ctx context.Context) {
 		delay := 15 * time.Second
 		if ok && err == nil {
 			delay = time.Second
-		} else if err != nil && ctx.Err() == nil {
-			log.Printf("event=price_tier_backfill_deferred class=%s", databaseErrorClass(err))
+		} else if err != nil && ctx.Err() == nil && time.Since(lastDeferred) > time.Minute {
+			lastDeferred = time.Now()
+			log.Printf("event=price_tier_backfill_deferred class=%s", spendProjectionErrorClass(err))
 		}
 		if !waitStartup(ctx, delay) {
 			return

@@ -16,6 +16,15 @@ const spendSliceHour int64 = 3600
 const spendSliceDay = 24 * spendSliceHour
 const spendSliceQuarter = spendSliceHour / 4
 
+var errSpendProjectionCapacity = errors.New("insufficient space for spend projection")
+
+func spendProjectionErrorClass(err error) string {
+	if errors.Is(err, errSpendProjectionCapacity) {
+		return "capacity"
+	}
+	return databaseErrorClass(err)
+}
+
 type spendCapture struct {
 	persist, unsafe                        bool
 	binding                                string
@@ -23,10 +32,11 @@ type spendCapture struct {
 	accounts                               map[string]map[string][2]int64
 	amounts                                map[string]map[string]*big.Rat
 	sampleIDs                              map[string][]string
+	unmatchedReceipts                      map[string][]unmatchedSpendReceipt
 }
 
 func newSpendCapture(persist bool) *spendCapture {
-	return &spendCapture{persist: persist, accounts: map[string]map[string][2]int64{}, amounts: map[string]map[string]*big.Rat{}, sampleIDs: map[string][]string{}}
+	return &spendCapture{persist: persist, accounts: map[string]map[string][2]int64{}, amounts: map[string]map[string]*big.Rat{}, sampleIDs: map[string][]string{}, unmatchedReceipts: map[string][]unmatchedSpendReceipt{}}
 }
 
 func (c *spendCapture) account(b billingFact, account string) {
@@ -60,6 +70,20 @@ func (c *spendCapture) markSample(row *attributedSpend, b billingFact, reason st
 		id := billingRowID(b.Source, b.Provider, b.Model, b.Upstream)
 		c.sampleIDs[id] = append(c.sampleIDs[id], b.Event)
 	}
+}
+
+// The amount/identity matching is reusable even before the account's receipt
+// sync finishes. Only these unresolved attempts consult live coverage on reads.
+type unmatchedSpendReceipt struct {
+	Account, Event string
+	SinceMS, AtMS  int64
+	Sample         unresolvedSpendAttempt
+}
+
+func (c *spendCapture) unmatched(b billingFact, account string) {
+	id := billingRowID(b.Source, b.Provider, b.Model, b.Upstream)
+	c.unmatchedReceipts[id] = append(c.unmatchedReceipts[id], unmatchedSpendReceipt{account, b.Event, min(b.Started, b.At), b.At,
+		unresolvedSpendAttempt{b.Request, b.Attempt, b.Endpoint, b.Status, b.At / 1000, "receipt_absent_after_sync"}})
 }
 
 // Settings are re-read on every fast path. Rate changes are deliberately not
@@ -109,6 +133,7 @@ type spendSliceRow struct {
 	Amounts   map[string]string
 	Accounts  map[string][2]int64
 	SampleIDs []string
+	Unmatched []unmatchedSpendReceipt `json:",omitempty"`
 }
 
 func slicePayload(rows []attributedSpend, c *spendCapture) []spendSliceRow {
@@ -119,12 +144,12 @@ func slicePayload(rows []attributedSpend, c *spendCapture) []spendSliceRow {
 		for k, v := range c.amounts[id] {
 			amounts[k] = v.RatString()
 		}
-		out = append(out, spendSliceRow{storedSpendRow(row), amounts, c.accounts[id], c.sampleIDs[id]})
+		out = append(out, spendSliceRow{storedSpendRow(row), amounts, c.accounts[id], c.sampleIDs[id], c.unmatchedReceipts[id]})
 	}
 	return out
 }
 
-func canonicalSpendSlices(from, to int64) []spendSliceWindow {
+func canonicalSpendSlices(from, to int64, useDay func(spendSliceWindow) bool) []spendSliceWindow {
 	var slices []spendSliceWindow
 	if to-from < 2*spendSliceHour {
 		for at := (from + spendSliceQuarter - 1) / spendSliceQuarter * spendSliceQuarter; at+spendSliceQuarter <= to; at += spendSliceQuarter {
@@ -138,7 +163,7 @@ func canonicalSpendSlices(from, to int64) []spendSliceWindow {
 	start = max(start, to/spendSliceDay*spendSliceDay-120*spendSliceDay)
 	for start+spendSliceHour <= to {
 		width := spendSliceHour
-		if start%spendSliceDay == 0 && start+spendSliceDay <= to {
+		if start%spendSliceDay == 0 && start+spendSliceDay <= to && useDay(spendSliceWindow{start, start + spendSliceDay}) {
 			width = spendSliceDay
 		}
 		slices = append(slices, spendSliceWindow{start, start + width})
@@ -187,7 +212,28 @@ func (s *Service) spendSliceSnapshot(ctx context.Context, scope, binding string,
 
 func (s *Service) attributedChannelSpend(ctx context.Context, owner string, filter QueryFilter, from, to int64) ([]attributedSpend, error) {
 	if s.spendSliceJobs != nil && to-from >= 2*spendSliceQuarter {
-		if data, ok := s.composedChannelSpend(ctx, owner, filter, from, to, false); ok {
+		var jobs []spendSliceJob
+		var verify *spendSliceJob
+		// Start background reconciliation after the interactive query releases
+		// the single analytical slot, never in front of that query.
+		defer func() {
+			if verify != nil {
+				s.enqueueSpendSlice(*verify)
+			}
+			for _, job := range jobs {
+				if s.enqueueSpendSlice(job) {
+					break
+				}
+			}
+		}()
+		if data, ok := s.composedChannelSpend(ctx, owner, filter, from, to, false, func(job spendSliceJob) {
+			if job.verify {
+				copy := job
+				verify = &copy
+			} else {
+				jobs = append(jobs, job)
+			}
+		}); ok {
 			return data, nil
 		}
 	}
@@ -201,7 +247,7 @@ func spendSliceScope(owner string, filter QueryFilter) string {
 	return tokenHash(mustJSON([]any{owner, filter}))
 }
 
-func (s *Service) composedChannelSpend(ctx context.Context, owner string, filter QueryFilter, from, to int64, verifying bool) ([]attributedSpend, bool) {
+func (s *Service) composedChannelSpend(ctx context.Context, owner string, filter QueryFilter, from, to int64, verifying bool, schedule func(spendSliceJob)) ([]attributedSpend, bool) {
 	bindings, err := s.receiptBindings(ctx, owner)
 	if err != nil {
 		return nil, false
@@ -217,16 +263,19 @@ func (s *Service) composedChannelSpend(ctx context.Context, owner string, filter
 		return nil, false
 	}
 	effectiveFrom := max(from, state.oldest/1000)
-	plan := canonicalSpendSlices(max(effectiveFrom, (state.floor+999)/1000), to)
+	planStart := max(effectiveFrom, (state.floor+999)/1000)
+	plan := canonicalSpendSlices(planStart, to, func(w spendSliceWindow) bool { _, ok := stored[w]; return ok })
 	var parts []spendSliceRow
 	var missing []spendSliceWindow
 	start, hits := effectiveFrom, 0
-	for _, w := range plan {
-		if _, ok := stored[w]; !ok && !verifying {
-			// Prefer large historical chunks first. Only one capped job is
-			// queued per refresh; hot queries never wait for it to finish.
-			if s.enqueueSpendSlice(spendSliceJob{spendSliceWindow: w, owner: owner, scope: scope, binding: binding, filter: filter}) {
-				break
+	if schedule != nil {
+		// Prefer a reusable day, but if it's already queued or too dense,
+		// its hours can still be warmed and read independently.
+		for _, windows := range [][]spendSliceWindow{canonicalSpendSlices(planStart, to, func(spendSliceWindow) bool { return true }), plan} {
+			for _, w := range windows {
+				if _, ok := stored[w]; !ok {
+					schedule(spendSliceJob{spendSliceWindow: w, owner: owner, scope: scope, binding: binding, filter: filter})
+				}
 			}
 		}
 	}
@@ -252,8 +301,8 @@ func (s *Service) composedChannelSpend(ctx context.Context, owner string, filter
 		s.spendSliceMu.Lock()
 		verified := s.spendSliceVerified[scope+binding]
 		s.spendSliceMu.Unlock()
-		if !verified {
-			s.enqueueSpendSlice(spendSliceJob{spendSliceWindow: spendSliceWindow{from, to}, owner: owner, scope: scope, binding: binding, filter: filter, verify: true})
+		if !verified && schedule != nil {
+			schedule(spendSliceJob{spendSliceWindow: spendSliceWindow{from, to}, owner: owner, scope: scope, binding: binding, filter: filter, verify: true})
 		}
 		if !verified || s.spendSliceShadow {
 			return nil, false
@@ -296,6 +345,7 @@ func (s *Service) mergeSpendSlices(ctx context.Context, parts []spendSliceRow, r
 	totals := map[string]*attributedSpend{}
 	amounts := map[string]*big.Rat{}
 	samples := map[string][]sample{}
+	unmatched := map[string][]unmatchedSpendReceipt{}
 	accounts := map[string]map[string]bool{}
 	windows := map[string][2]int64{}
 	for _, part := range parts {
@@ -325,6 +375,7 @@ func (s *Service) mergeSpendSlices(ctx context.Context, parts []spendSliceRow, r
 		for i, v := range r.UnresolvedSamples {
 			samples[id] = append(samples[id], sample{part.SampleIDs[i], v})
 		}
+		unmatched[id] = append(unmatched[id], part.Unmatched...)
 		for account, window := range part.Accounts {
 			rate, ok := rates[account]
 			if !ok {
@@ -355,24 +406,24 @@ func (s *Service) mergeSpendSlices(ctx context.Context, parts []spendSliceRow, r
 			amounts[id].Add(amounts[id], price)
 		}
 	}
-	checked := map[string]int64{}
+	coverage := map[string]ledgerCoverage{}
 	if len(windows) > 0 {
 		ids := make([]string, 0, len(windows))
 		for id := range windows {
 			ids = append(ids, id)
 		}
-		rows, err := s.control.db.QueryContext(ctx, `SELECT account_id,checked_at FROM console_sub_account_spend_cache WHERE account_id=ANY($1)`, ids)
+		rows, err := s.control.db.QueryContext(ctx, `SELECT account_id,covered_from,covered_to,checked_at,error<>'' FROM console_sub_account_spend_cache WHERE account_id=ANY($1)`, ids)
 		if err != nil {
 			return nil, false
 		}
 		defer rows.Close()
 		for rows.Next() {
 			var id string
-			var at int64
-			if rows.Scan(&id, &at) != nil {
+			var state ledgerCoverage
+			if rows.Scan(&id, &state.From, &state.To, &state.Checked, &state.Failed) != nil {
 				return nil, false
 			}
-			checked[id] = at
+			coverage[id] = state
 		}
 		if rows.Err() != nil {
 			return nil, false
@@ -385,8 +436,24 @@ func (s *Service) mergeSpendSlices(ctx context.Context, parts []spendSliceRow, r
 	}
 	out := make([]attributedSpend, 0, len(totals))
 	for id, r := range totals {
+		for _, u := range unmatched[id] {
+			state, ok := coverage[u.Account]
+			if !ok {
+				return nil, false
+			}
+			if state.Failed {
+				r.SyncError = true
+			} else if state.provesAbsence(u.SinceMS, u.AtMS) {
+				r.AbsentReceipts++
+				if r.AbsentStatuses == nil {
+					r.AbsentStatuses = map[string]int{}
+				}
+				r.AbsentStatuses[strconv.Itoa(u.Sample.Status)]++
+				samples[id] = append(samples[id], sample{u.Event, u.Sample})
+			}
+		}
 		for account := range accounts[id] {
-			if at := checked[account]; at > 0 && (r.CheckedAt == 0 || at/1000 < r.CheckedAt) {
+			if at := coverage[account].Checked; at > 0 && (r.CheckedAt == 0 || at/1000 < r.CheckedAt) {
 				r.CheckedAt = at / 1000
 			}
 		}
@@ -456,7 +523,7 @@ func (s *Service) spendSliceLoop(ctx context.Context) {
 			}
 			stop()
 			if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, errAnalyticsPriority) && ctx.Err() == nil {
-				log.Printf("event=channel_spend_slice_deferred class=%s", databaseErrorClass(err))
+				log.Printf("event=channel_spend_slice_deferred class=%s", spendProjectionErrorClass(err))
 			}
 			if !waitStartup(ctx, time.Second) {
 				return
@@ -470,7 +537,7 @@ func (s *Service) verifySpendSlices(ctx context.Context, job spendSliceJob) erro
 	if err := s.engine.DB.QueryRowContext(ctx, `SELECT epoch FROM channel_spend_epoch WHERE singleton`).Scan(&before); err != nil {
 		return err
 	}
-	composed, ok := s.composedChannelSpend(ctx, job.owner, job.filter, job.from, job.to, true)
+	composed, ok := s.composedChannelSpend(ctx, job.owner, job.filter, job.from, job.to, true, nil)
 	if !ok {
 		return nil
 	}
@@ -512,9 +579,13 @@ func comparableSpend(rows []attributedSpend) string {
 func (s *Service) warmSpendSlice(ctx context.Context, job spendSliceJob) error {
 	var epoch int64
 	var room bool
-	if err := s.engine.DB.QueryRowContext(ctx, `SELECT epoch,pg_database_size(current_database())+67108864<ingest_limit_bytes FROM channel_spend_epoch,storage_state
- WHERE channel_spend_epoch.singleton AND storage_state.singleton`).Scan(&epoch, &room); err != nil || !room {
+	if err := s.engine.DB.QueryRowContext(ctx, `SELECT epoch,pg_database_size(current_database())+?<ingest_limit_bytes
+ AND pg_total_relation_size('channel_spend_slices')<? FROM channel_spend_epoch,storage_state
+ WHERE channel_spend_epoch.singleton AND storage_state.singleton`, spendProjectionReserve, spendProjectionDiskLimit).Scan(&epoch, &room); err != nil {
 		return err
+	}
+	if !room {
+		return errSpendProjectionCapacity
 	}
 	capture := newSpendCapture(true)
 	rows, err := s.readAttributedChannelSpend(ctx, job.owner, job.filter, job.from, job.to, capture)
@@ -523,11 +594,6 @@ func (s *Service) warmSpendSlice(ctx context.Context, job spendSliceJob) error {
 	}
 	if capture.unsafe || capture.binding != job.binding || len(capture.identities) > 40000 {
 		return nil
-	}
-	for _, r := range rows {
-		if r.Pending > 0 || r.AbsentReceipts > 0 || r.SyncError {
-			return nil
-		}
 	}
 	payload, err := json.Marshal(slicePayload(rows, capture))
 	if err != nil {
@@ -568,7 +634,7 @@ func (s *Service) warmSpendSlice(ctx context.Context, job spendSliceJob) error {
 	if _, err = tx.ExecContext(ctx, `DELETE FROM channel_spend_slices WHERE (scope,from_sec,to_sec) IN (
  SELECT scope,from_sec,to_sec FROM (SELECT scope,from_sec,to_sec,
    sum(size_bytes) OVER w AS used,row_number() OVER w AS n FROM channel_spend_slices
-   WINDOW w AS (ORDER BY saved_at DESC,scope,from_sec,to_sec)) ranked WHERE used>? OR n>=2048)`, (24<<20)-bytes); err != nil {
+   WINDOW w AS (ORDER BY saved_at DESC,scope,from_sec,to_sec)) ranked WHERE used>? OR n>=2048)`, (8<<20)-bytes); err != nil {
 		return err
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO channel_spend_slices(scope,from_sec,to_sec,binding,payload,identities,claims,receipts,evidence,size_bytes)
