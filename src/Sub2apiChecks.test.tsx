@@ -2026,7 +2026,9 @@ it("lists imported keys, replaces exact models and deletes only the chosen bindi
   await user.click(
     within(dialog).getByRole("button", { name: "新增接入" }),
   );
-  expect(within(dialog).getByLabelText("添加到 API key")).toHaveValue("");
+  await waitFor(() =>
+    expect(within(dialog).getByLabelText("添加到 API key")).toHaveValue("key1"),
+  );
 });
 
 it("keeps long replies out of the channel list and shows full fields in a dismissible dialog", async () => {

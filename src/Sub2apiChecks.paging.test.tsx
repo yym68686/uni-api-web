@@ -219,6 +219,29 @@ it("hides unverified results and disables detection when the completion result r
   expect(pageReads).toBe(2);
 });
 
+it("requests available groups first and switches to all groups explicitly", async () => {
+  const requestedStatuses: string[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+    const url = new URL(input);
+    if (url.pathname.endsWith("/accounts/progress")) return idleProgress();
+    if (url.pathname.endsWith("/channel-management/query")) {
+      const { groupStatus } = JSON.parse(url.searchParams.get("filters")!);
+      requestedStatuses.push(groupStatus);
+      return Response.json(page());
+    }
+    return Response.json({ data: [] });
+  }));
+  mount("group-status-default");
+  await screen.findByText("Channel 1", { selector: "strong" });
+  const user = userEvent.setup();
+  await user.click(screen.getByText("筛选", { selector: "summary" }));
+  const filter = screen.getByLabelText("分组状态筛选");
+  expect(filter).toHaveValue("available");
+  expect(requestedStatuses[0]).toBe("available");
+  await user.selectOptions(filter, "all");
+  await waitFor(() => expect(requestedStatuses).toContain("all"));
+});
+
 it("reuses the current page when returning from another view and resets position when filters change", async () => {
   const reads: string[] = [];
   vi.stubGlobal("fetch", vi.fn(async(input:string)=>{
@@ -870,7 +893,10 @@ it.each(["success","conflict","unknown"])("closes the page-two import immediatel
   if(path.endsWith("/detection-settings"))return Response.json({disabled:[]});
   if(path.endsWith("/import-status"))return Response.json({state:"idle",job_kind:"",can_import:true});
   if(path.endsWith("/access"))return Response.json({available:true,status:"ok"});
-  if(path.endsWith("/channel-options"))return Response.json({supported:true,revision:"r1",keys:[{key_id:"fixture-key",position:1,prefix:"fixture"}],channels:[]});
+  if(path.endsWith("/channel-options"))return Response.json({supported:true,revision:"r1",keys:[
+   {key_id:"fixture-key",position:1,prefix:"fixture"},
+   {key_id:"second-key",position:2,prefix:"second"},
+  ],channels:[]});
   return Response.json({data:[],labels:{},unavailable_sources:[]});
  }));
  mount("import-second-page");const user=userEvent.setup();
@@ -883,9 +909,9 @@ it.each(["success","conflict","unknown"])("closes the page-two import immediatel
  const d=within(screen.getByRole("dialog"));
  expect(cursors).toEqual(["","25"]);
  expect(bindingReads).toBe(1);
- await user.selectOptions(source,"fixture");
- await waitFor(()=>expect(d.getByLabelText("添加到 API key")).toBeEnabled(),patience);
- await user.selectOptions(d.getByLabelText("添加到 API key"),"fixture-key");
+ expect(source).toHaveValue("fixture");
+ await waitFor(()=>expect(d.getByLabelText("添加到 API key")).toHaveValue("fixture-key"),patience);
+ if(outcome==="conflict") await user.selectOptions(d.getByLabelText("添加到 API key"),"second-key");
  await waitFor(()=>expect(d.getByRole("button",{name:"添加到渠道"})).toBeEnabled(),patience);
  await user.click(d.getByRole("button",{name:"添加到渠道"}));
  await waitFor(()=>expect(posts).toBe(1));
@@ -908,7 +934,7 @@ it.each(["success","conflict","unknown"])("closes the page-two import immediatel
    await user.click(screen.getByRole("button",{name:"恢复添加配置"}));
    const restored=within(await screen.findByRole("dialog",{name:"添加到渠道"},patience));
    expect(restored.getByLabelText("添加到 uni-api 来源")).toHaveValue("fixture");
-   await waitFor(()=>expect(restored.getByLabelText("添加到 API key")).toHaveValue("fixture-key"),patience);
+   await waitFor(()=>expect(restored.getByLabelText("添加到 API key")).toHaveValue("second-key"),patience);
    expect(restored.getByRole("checkbox",{name:"gpt-5.5"})).toBeChecked();
   }else expect(screen.queryByRole("button",{name:"恢复添加配置"})).not.toBeInTheDocument();
   expect(posts).toBe(1);

@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useQueries, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
 import { ApiError, controlRequest } from "./api";
@@ -7,6 +8,25 @@ export interface ChannelImportKeys {
   keys: KeyInfo[];
   stale?: boolean;
   refresh_failed?: boolean;
+}
+
+// Take the first option once per draft (or source change), including on a
+// cold read. If it disappears during refresh, require an explicit replacement
+// instead of silently changing the destination of the pending write.
+export function useDefaultChannelChoice(
+  ids: readonly string[],
+  adding: boolean,
+  initial?: string,
+) {
+  const [choice, setChoice] = useState<string | null>(initial || null);
+  const first = ids[0];
+  useEffect(() => {
+    if (adding && choice === null && first) {
+      setChoice((current) => current ?? first);
+    }
+  }, [adding, choice, first]);
+  const selected = choice ?? (adding ? first : undefined) ?? "";
+  return [adding && !ids.includes(selected) ? "" : selected, setChoice] as const;
 }
 
 // Only the authoritative key directory can seed a selector. Route inventories

@@ -2,6 +2,7 @@ import {
   act,
   fireEvent,
   render,
+  renderHook,
   screen,
   waitFor,
   within,
@@ -11,7 +12,7 @@ import * as Tooltip from "@radix-ui/react-tooltip";
 import { expect, it, vi } from "vitest";
 import { Sub2apiImport } from "./Sub2apiImport";
 import { ConfiguredChannelDialog } from "./ChannelRoutes";
-import { useChannelImportKeys } from "./channelImportKeys";
+import { useChannelImportKeys, useDefaultChannelChoice } from "./channelImportKeys";
 import { ChannelImportKeyFeedback } from "./ChannelImportKeyFeedback";
 import type { ManagedChannel } from "./channelManagement";
 import type { SubAccount, SubTarget } from "./Sub2apiChecks";
@@ -143,7 +144,7 @@ it.each(["site", "native"])(
     );
     const select = await screen.findByLabelText("添加到 uni-api 来源");
     const key = screen.getByLabelText("添加到 API key");
-    fireEvent.change(select, { target: { value: "fugue" } });
+    expect(select).toHaveValue("fugue");
     expect(key).toBeEnabled();
     expect(
       within(key).getByRole("option", { name: "Key 1 · fugue-masked-1" }),
@@ -151,15 +152,17 @@ it.each(["site", "native"])(
     expect(
       within(key).queryByRole("option", { name: /do-masked/ }),
     ).not.toBeInTheDocument();
-    expect(pending).toHaveLength(0); // no heavyweight configuration read before choosing a key
-    fireEvent.change(key, { target: { value: "fugue-key-1" } });
+    expect(key).toHaveValue("fugue-key-1");
     await waitFor(() => expect(pending).toHaveLength(1));
+    expect(pending[0]).toMatchObject({ source: "fugue", key: "fugue-key-1" });
     expect(key).toBeEnabled();
     expect(screen.getByLabelText("渠道添加位置")).toBeDisabled();
     expect(screen.getByRole("button", { name: "添加到渠道" })).toBeDisabled();
     fireEvent.change(select, { target: { value: "do" } });
     expect(key).toBeEnabled();
-    expect(key).toHaveValue("");
+    expect(key).toHaveValue("do-key-1");
+    await waitFor(() => expect(pending).toHaveLength(2));
+    expect(pending[1]).toMatchObject({ source: "do", key: "do-key-1" });
     expect(
       within(key).getByRole("option", { name: "Key 1 · do-masked-1" }),
     ).toBeInTheDocument();
@@ -174,23 +177,23 @@ it.each(["site", "native"])(
       within(key).queryByRole("option", { name: /fugue-masked/ }),
     ).not.toBeInTheDocument();
     fireEvent.change(key, { target: { value: "do-key-2" } });
-    await waitFor(() => expect(pending).toHaveLength(2));
-    // A late reply from the old source must not unlock saving or change options.
-    await act(async () =>
-      pending[0].resolve(
+    await waitFor(() => expect(pending).toHaveLength(3));
+    // Late replies for earlier destinations must not unlock saving.
+    await act(async () => {
+      for (const read of pending.slice(0, 2)) read.resolve(
         Response.json({
           supported: true,
           manageable: true,
           revision: "old-fugue",
-          keys: keys("fugue"),
+          keys: keys(read.source),
           channels: [],
         }),
-      ),
-    );
+      );
+    });
     expect(key).toHaveValue("do-key-2");
     expect(screen.getByRole("button", { name: "添加到渠道" })).toBeDisabled();
     await act(async () =>
-      pending[1].resolve(
+      pending[2].resolve(
         Response.json({
           supported: true,
           manageable: true,
@@ -212,6 +215,23 @@ it.each(["site", "native"])(
     });
   },
 );
+
+it("pins the first result of a cold directory and never redirects a draft after an option is removed", () => {
+  const { result, rerender } = renderHook(
+    ({ ids }) => useDefaultChannelChoice(ids, true),
+    { initialProps: { ids: [] as string[] } },
+  );
+  expect(result.current[0]).toBe("");
+  rerender({ ids: ["first", "second"] });
+  expect(result.current[0]).toBe("first");
+  rerender({ ids: ["second", "first"] });
+  expect(result.current[0]).toBe("first");
+  rerender({ ids: ["second"] });
+  expect(result.current[0]).toBe("");
+  act(() => result.current[1]("second"));
+  rerender({ ids: ["third", "second"] });
+  expect(result.current[0]).toBe("second");
+});
 
 function Directory() {
   const [query] = useChannelImportKeys(["do"]);

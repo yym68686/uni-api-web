@@ -6,7 +6,7 @@ export const subFilterDefaults = {
   maxRate: "",
   sort: "asc",
   availability: "",
-  groupStatus: "all",
+  groupStatus: "available",
   priceStatus: "",
   compaction: "",
   toolUse: "",
@@ -29,9 +29,14 @@ function validate(raw: unknown): SubFilters {
       ? (v[name] as string)
       : "";
   const maxRate = field("maxRate");
+  const groupStatus = field("groupStatus", ["available", "all", "unavailable"]);
   return {
     joined: field("joined", ["", "joined", "unjoined"]),
-    groupStatus: field("groupStatus", ["available", "all", "unavailable"]) || subFilterDefaults.groupStatus,
+    // Older clients stored "all" even without an explicit choice. Migrate
+    // that value once, while keeping other filters and new deliberate choices.
+    groupStatus: (groupStatus === "all" && v.groupStatusPreferenceVersion !== 1
+      ? ""
+      : groupStatus) || subFilterDefaults.groupStatus,
     fingerprint: field("fingerprint", ["", "match", "mismatch", "insufficient", "error", "queued", "running", "interrupted", "untested", "not_applicable"]),
     modelMatch: field("modelMatch", ["", "match", "mismatch", "missing", "invalid", "unavailable", "legacy", "untested"]),
     platform: field("platform"),
@@ -61,9 +66,9 @@ export function loadSubFilters(user: string): SubFilters {
   return cache.get(user) || { ...subFilterDefaults };
 }
 export function saveSubFilters(user: string, filters: SubFilters) {
-  const saved = validate(filters);
+  const saved = validate({ ...filters, groupStatusPreferenceVersion: 1 });
   cache.set(user, saved);
   try {
-    localStorage.setItem(key(user), JSON.stringify(saved));
+    localStorage.setItem(key(user), JSON.stringify({ ...saved, groupStatusPreferenceVersion: 1 }));
   } catch {}
 }

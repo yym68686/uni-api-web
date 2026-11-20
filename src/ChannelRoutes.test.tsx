@@ -652,22 +652,19 @@ it("opens unbound channels directly in the destination form and resets the key w
     screen.queryByText("尚未配置到任何 API key。"),
   ).not.toBeInTheDocument();
   expect(screen.getByLabelText("添加到 uni-api 来源")).toHaveValue("fugue");
-  await user.selectOptions(
-    screen.getByLabelText("添加到 API key"),
-    "fugue-key",
+  await waitFor(() =>
+    expect(screen.getByLabelText("渠道添加位置")).toBeEnabled(),
   );
+  expect(screen.getByLabelText("添加到 API key")).toHaveValue("fugue-key");
   await user.selectOptions(screen.getByLabelText("渠道添加位置"), "2");
   await user.selectOptions(screen.getByLabelText("添加到 uni-api 来源"), "do");
-  expect(screen.getByLabelText("添加到 API key")).toHaveValue("");
-  expect(screen.getByRole("button", { name: "添加到渠道" })).toBeDisabled();
   expect(
     screen.queryByRole("checkbox", { name: "model-fugue" }),
   ).not.toBeInTheDocument();
   expect(screen.getByRole("checkbox", { name: "model-do" })).toBeChecked();
   await waitFor(() =>
-    expect(screen.getByLabelText("添加到 API key")).toBeEnabled(),
+    expect(screen.getByLabelText("添加到 API key")).toHaveValue("do-key"),
   );
-  await user.selectOptions(screen.getByLabelText("添加到 API key"), "do-key");
   await waitFor(() =>
     expect(screen.getByLabelText("渠道添加位置")).toBeEnabled(),
   );

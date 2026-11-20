@@ -5,7 +5,7 @@ import { Plus, Trash2 } from "lucide-react";
 import { ApiError, controlRequest } from "./api";
 import { readCompleteSubTarget } from "./subTargetDetails";
 import { readSummary } from "./summaryFeed";
-import { useChannelImportKeys } from "./channelImportKeys";
+import { useChannelImportKeys, useDefaultChannelChoice } from "./channelImportKeys";
 import { useRouteKeyRequestStats } from "./keyRequestStats";
 import { ChannelImportKeyFeedback } from "./ChannelImportKeyFeedback";
 import { channelEngineLabel, channelProtocols } from "./channelProtocol";
@@ -306,9 +306,14 @@ function Sub2apiImportForm({
     ),
     (model) => available.includes(model),
   );
-  const [source, setSource] = useState(initialAdd?.source || "");
-  const [key, setKey] = useState(initialAdd?.key || "");
+  const adding = showForm && !editing && (!initialEdit || view === "new");
+  const [source, setSource] = useDefaultChannelChoice(destinationSources, adding, initialAdd?.source);
   const keyDirectory = keyDirectories[destinationSources.indexOf(source)];
+  const [key, setKey] = useDefaultChannelChoice(
+    keyDirectory?.data?.keys.map((key) => key.key_id) ?? [],
+    adding,
+    initialAdd?.key,
+  );
   const [position, setPosition] = useState(initialAdd?.position ?? 1);
   const [perModel, setPerModel] = useState(initialAdd?.perModel ?? false);
   const [modelPositions, setModelPositions] = useState<Record<string, number>>(
@@ -338,7 +343,7 @@ function Sub2apiImportForm({
           }),
         { signal },
       ),
-    enabled: !!source && !!key,
+    enabled: showForm && !!source && !!key,
     retry: false,
     staleTime: 0,
     refetchOnWindowFocus: false,
@@ -573,8 +578,8 @@ function Sub2apiImportForm({
     setEditing(null);
     setView("new");
     setRemoving(null);
-    setSource("");
-    setKey("");
+    setSource(null);
+    setKey(null);
     setModelChoices({});
     setAliases([]);
     setPosition(1);
@@ -670,8 +675,8 @@ function Sub2apiImportForm({
       setEditing(null);
       setView("existing");
       setRemoving(null);
-      setSource("");
-      setKey("");
+      setSource(null);
+      setKey(null);
       // The write acknowledgement completes the user's action. Background
       // reconciliation must not hold the modal open (account reads can be slow).
       if (action !== "delete") close();
@@ -1103,14 +1108,14 @@ function Sub2apiImportForm({
                       disabled={busy || !!editing || !sources.data?.data.length}
                       onChange={(e) => {
                         setSource(e.target.value);
-                        setKey("");
+                        setKey(null);
                         setPosition(1);
                         setPerModel(false);
                         setModelPositions({});
                         setError("");
                       }}
                     >
-                      <option value="">
+                      <option value="" disabled>
                         {sources.data?.data.length
                           ? "选择来源"
                           : sources.isPending
@@ -1145,7 +1150,7 @@ function Sub2apiImportForm({
                         setModelPositions({});
                       }}
                     >
-                      <option value="">
+                      <option value="" disabled>
                         {!source
                           ? "请先选择来源"
                           : keyDirectory?.data

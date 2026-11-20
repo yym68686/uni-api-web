@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useChannelImportKeys } from "./channelImportKeys";
+import { useChannelImportKeys, useDefaultChannelChoice } from "./channelImportKeys";
 import { useRouteKeyRequestStats } from "./keyRequestStats";
 import { ChannelImportKeyFeedback } from "./ChannelImportKeyFeedback";
 import * as Dialog from "@radix-ui/react-dialog";
@@ -274,7 +274,11 @@ export function ConfiguredChannelDialog({
   const canSelectModel=(model:string)=>!toolDefaultsPending&&!toolDefaultsError&&modelIsAvailable(allChecks.find(c=>c.model===model));
   const selected=selectedOverride ?? item.models.filter(model=>canSelectModel(model)&&modelIsDefaultSelected(allChecks.find(c=>c.model===model))&&!toolUseFailed(toolTarget,model));
   const mapping = aliasMappings(aliases, selected);
-  const [key, setKey] = useState(initialAdd?.key || "");
+  const [key, setKey] = useDefaultChannelChoice(
+    keyDirectory?.data?.keys.map((key) => key.key_id) ?? [],
+    adding && !editingProvider,
+    initialAdd?.key,
+  );
   const [position, setPosition] = useState(initialAdd?.position ?? 1);
   const [perModel, setPerModel] = useState(initialAdd?.perModel ?? false);
   const [modelPositions, setModelPositions] = useState<Record<string, number>>(
@@ -514,11 +518,12 @@ export function ConfiguredChannelDialog({
                 modeChosen.current = true;
                 setAdding(true);
                 setEditingProvider("");
+                setMemberId(members[0].source_id);
                 setPerModel(false);
                 setModelPositions({});
                 setSelected(null);
                 setAliases([]);
-                setKey("");
+                setKey(null);
                 setPosition(1);
                 setError("");
                 setSuccess("");
@@ -620,7 +625,7 @@ export function ConfiguredChannelDialog({
                         setMemberId(next.source_id);
                         setSelected(null);
                         setAliases([]);
-                        setKey("");
+                        setKey(null);
                         setPosition(1);
                         setPerModel(false);
                         setModelPositions({});
@@ -664,7 +669,7 @@ export function ConfiguredChannelDialog({
                       }}
                     >
                       {!editingProvider && (
-                        <option value="">{keyDirectory?.data ? keyDirectory.data.keys.length ? "选择 API key" : "暂无 API key" : keyDirectory?.isError ? "API key 加载失败" : "正在读取 API key…"}</option>
+                        <option value="" disabled>{keyDirectory?.data ? keyDirectory.data.keys.length ? "选择 API key" : "暂无 API key" : keyDirectory?.isError ? "API key 加载失败" : "正在读取 API key…"}</option>
                       )}
                       {keyDirectory?.data?.keys
                         .filter(
