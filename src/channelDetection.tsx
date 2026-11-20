@@ -10,6 +10,17 @@ export interface DetectionTarget {
   account_id?: string;
   group_id?: number;
 }
+type DetectionSettings = { disabled?: DetectionTarget[] };
+const disabledIndexes = new WeakMap<DetectionSettings, ReadonlySet<string>>();
+const noDisabledTargets = new Set<string>();
+function disabledTargets(settings?: DetectionSettings): ReadonlySet<string> {
+  if (!settings) return noDisabledTargets;
+  const existing = disabledIndexes.get(settings);
+  if (existing) return existing;
+  const index = new Set((settings.disabled || []).map(detectionKey));
+  disabledIndexes.set(settings, index);
+  return index;
+}
 export const detectionKey = (t: DetectionTarget) =>
   JSON.stringify([
     t.source_id || "",
@@ -31,7 +42,7 @@ export function detectionTargets(
 }
 export const detectionEnabled = (
   row: Pick<ManagementRow, "account" | "target" | "configured">,
-  disabled: Set<string>,
+  disabled: ReadonlySet<string>,
 ) => detectionTargets(row).every((t) => !disabled.has(detectionKey(t)));
 export function useChannelDetection(owner: string, enabled = true) {
   const client = useQueryClient(),
@@ -39,7 +50,7 @@ export function useChannelDetection(owner: string, enabled = true) {
   const query = useQuery({
     queryKey: key,
     queryFn: ({ signal }) =>
-      controlRequest<{ disabled?: DetectionTarget[] }>(
+      controlRequest<DetectionSettings>(
         "/v1/channel-management/detection-settings",
         { signal },
       ),
@@ -48,12 +59,16 @@ export function useChannelDetection(owner: string, enabled = true) {
     staleTime: 15000,
   });
   const busyRef = useRef(new Set<string>()),
-    [saving, setSaving] = useState(new Set<string>()),
+    [, setSaving] = useState(new Set<string>()),
     [error, setError] = useState("");
   const scopedKey = (target: DetectionTarget) => JSON.stringify([owner,detectionKey(target)]);
   const isSaving = (row: Parameters<typeof detectionTargets>[0]) =>
-    detectionTargets(row).some(target => saving.has(scopedKey(target)));
-  const disabled = new Set((query.data?.disabled || []).map(detectionKey));
+    detectionTargets(row).some(target => busyRef.current.has(scopedKey(target)));
+  const disabled = disabledTargets(query.data);
+  const isEnabled = (row: Parameters<typeof detectionTargets>[0]) => {
+    const settings = client.getQueryData<DetectionSettings>(key);
+    return settings !== undefined && detectionEnabled(row, disabledTargets(settings));
+  };
   async function save(
     row: Pick<ManagementRow, "account" | "target" | "configured">,
     enabled: boolean,
@@ -69,7 +84,9 @@ export function useChannelDetection(owner: string, enabled = true) {
         method: "PATCH",
         body: JSON.stringify({ targets, enabled }),
       });
-      client.setQueryData<{ disabled?: DetectionTarget[] }>(key, (old) => ({
+      // A read begun before this write cannot replace the acknowledged switch value.
+      await client.cancelQueries({ queryKey: key, exact: true });
+      client.setQueryData<DetectionSettings>(key, (old) => ({
         disabled: [
           ...(old?.disabled || []).filter(
             (t) => !targets.some((x) => detectionKey(x) === detectionKey(t)),
@@ -90,5 +107,5 @@ export function useChannelDetection(owner: string, enabled = true) {
       setSaving(new Set(busyRef.current));
     }
   }
-  return { ...query, disabled, busy: saving.size > 0, isSaving, error, save };
+  return { ...query, disabled, isSaving, isEnabled, error, save };
 }

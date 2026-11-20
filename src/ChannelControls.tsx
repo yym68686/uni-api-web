@@ -80,8 +80,8 @@ export function useChannelControls({
   const client = useQueryClient();
   const [drafts, setDrafts] = useState<Map<string, Draft>>(new Map());
   const [errors, setErrors] = useState<Map<string, string>>(new Map());
-  const [pending, setPending] = useState(false);
-  const locked = useRef(false);
+  const [pendingSources, setPendingSources] = useState(new Set<string>());
+  const lockedSources = useRef(new Set<string>());
   const sourceIds = selectedSourceIds || [
     ...new Set(rows.map((r) => r.source_id).filter((id): id is string => !!id)),
   ];
@@ -98,7 +98,7 @@ export function useChannelControls({
   const states = useQueries({
     queries: controlSourceIds.map((source) => ({
       queryKey: stateKey(source),
-      enabled: enabled && !pending,
+      enabled: enabled && !pendingSources.has(source),
       queryFn: async ({ signal }: { signal: AbortSignal }) => {
         const data = await controlRequest<ControlState>(
           `/v1/sources/${encodeURIComponent(source)}/channel-controls`,
@@ -110,7 +110,7 @@ export function useChannelControls({
       },
       retry: false,
       staleTime: 5000,
-      refetchInterval: enabled && !pending ? 5000 : false,
+      refetchInterval: enabled && !pendingSources.has(source) ? 5000 : false,
       refetchIntervalInBackground: false,
     })),
   });
@@ -175,7 +175,7 @@ export function useChannelControls({
         !catalog.isError &&
         providers.includes(row.provider),
       error: errors.get(id) || state?.error?.message || catalog?.error?.message,
-      pending,
+      pending: pendingSources.has(source),
     };
   }
   function edit(
@@ -183,7 +183,7 @@ export function useChannelControls({
     update: (rule: ControlRule, order: string[]) => ControlRule,
   ) {
     const i = info(row);
-    if (!i.ready || i.stale || locked.current) return false;
+    if (!i.ready || i.stale || lockedSources.current.has(i.source)) return false;
     const next = update(
       { ...i.rule, order: [...i.rule.order], disabled: [...i.rule.disabled] },
       i.order,
@@ -242,20 +242,20 @@ export function useChannelControls({
     edit(row, rule=>({...rule,order:[row.provider,...i.order.filter(provider=>provider!==row.provider)]}));
   }
   function discardAll() {
-    if (locked.current) return;
+    if ([...drafts.values()].some(draft => lockedSources.current.has(draft.source))) return;
     setDrafts(new Map());
     setErrors(new Map());
   }
   async function commit(changes: [string, Draft][], action: "set" | "reset") {
-    if (locked.current || !changes.length) return;
-    locked.current = true;
-    setPending(true);
+    if (!changes.length || changes.some(([, draft]) => lockedSources.current.has(draft.source))) return;
     const groups = new Map<string, [string, Draft][]>();
     for (const entry of changes) {
       const group = groups.get(entry[1].source) || [];
       group.push(entry);
       groups.set(entry[1].source, group);
     }
+    for (const source of groups.keys()) lockedSources.current.add(source);
+    setPendingSources(new Set(lockedSources.current));
     try {
       await Promise.all(
         [...groups].map(async ([source, entries]) => {
@@ -315,12 +315,13 @@ export function useChannelControls({
                 );
               return next;
             });
+          } finally {
+            lockedSources.current.delete(source);
+            setPendingSources(new Set(lockedSources.current));
           }
         }),
       );
     } finally {
-      locked.current = false;
-      setPending(false);
       void Promise.all([
         client.invalidateQueries({ queryKey: ["catalog"] }),
         client.invalidateQueries({ queryKey: ["live-metrics"] }),
@@ -407,7 +408,8 @@ export function useChannelControls({
     scopes,
     drafts,
     draftIssues,
-    pending,
+    pending: pendingSources.size > 0,
+    draftsPending: [...drafts.values()].some(draft => pendingSources.has(draft.source)),
   };
 }
 export type ChannelControls = ReturnType<typeof useChannelControls>;

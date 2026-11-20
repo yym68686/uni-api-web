@@ -828,6 +828,31 @@ it("does not overwrite an external revision when applying other valid drafts", a
   app.client.clear();
 });
 
+it("lets users stage edits in another source while a save is pending", async () => {
+  let release!: () => void;
+  history.replaceState(null, "", "#view=routing");
+  const app = setup(false, async source => {
+    if (source === "one") await new Promise<void>(resolve => { release = resolve; });
+  });
+  await openControls(app);
+  await app.user.click(screen.getByLabelText("临时停用 One visible-first m"));
+  await app.user.click(screen.getByLabelText("应用全部临时修改"));
+  await waitFor(() => expect(release).toBeDefined());
+  expect(screen.getByLabelText("临时停用 One visible-second m")).toBeDisabled();
+  const other = screen.getByLabelText("临时停用 Two visible-first m");
+  await app.user.click(other);
+  expect(other).toBeChecked();
+  expect(app.writes.map(write => write.source)).toEqual(["one"]);
+  await act(async () => release());
+  const apply = screen.getByLabelText("应用全部临时修改");
+  await waitFor(() => expect(apply).toBeEnabled());
+  await app.user.click(apply);
+  await waitFor(() => expect(app.states.two.rules[0]?.disabled).toEqual(["visible-first"]));
+  expect(app.writes.map(write => write.source)).toEqual(["one", "two"]);
+  app.unmount();
+  app.client.clear();
+});
+
 it("cancels adjustment and clears drafts from hidden sources and scopes while preserving applied rules", async () => {
   history.replaceState(null, "", "#view=routing");
   const app = setup();
@@ -1212,7 +1237,7 @@ it("cancels individual in-flight checks, hides their actions, and retains the la
   await app.user.click(screen.getByLabelText("重新检测 Two visible-first m"));
   await waitFor(() => expect(signals).toHaveLength(2));
   expect(screen.getByLabelText("重新检测 One visible-first m")).toBeDisabled();
-  expect(tool("一键检测 · 6")).toBeDisabled();
+  expect(tool("一键检测 · 4")).toBeEnabled();
   await app.user.click(tool("取消检测"));
   expect(signals.every((signal) => signal.aborted)).toBe(true);
   expect(tool("降智检测")).toBeEnabled();

@@ -48,7 +48,7 @@ export function useChannelChecks(session: string, enabled: boolean) {
   const [batch, setBatch] = useState<{ done: number; total: number } | null>(
     null,
   );
-  const active = useRef(new Map<string, AbortController>());
+  const active = useRef(new Map<string, { abort: AbortController; batchSignal?: AbortSignal }>());
   const controller = useRef(new AbortController());
   const batchController = useRef<AbortController | null>(null);
   useEffect(() => {
@@ -66,7 +66,7 @@ export function useChannelChecks(session: string, enabled: boolean) {
       ]);
     if (active.current.has(id) || !row.source_id || !enabled || signal.aborted)
       return;
-    active.current.set(id, abort);
+    active.current.set(id, { abort, batchSignal });
     setPending(new Set(active.current.keys()));
     setErrors((old) => {
       const next = new Map(old);
@@ -110,7 +110,7 @@ export function useChannelChecks(session: string, enabled: boolean) {
       void client.invalidateQueries({ queryKey: ["sub-quality-summary"] });
       void client.invalidateQueries({ queryKey: ["sub2api"] });
       // A canceled request may settle after another check of this channel starts.
-      if (active.current.get(id) === abort) {
+      if (active.current.get(id)?.abort === abort) {
         active.current.delete(id);
         if (!controller.current.signal.aborted)
           setPending(new Set(active.current.keys()));
@@ -118,8 +118,9 @@ export function useChannelChecks(session: string, enabled: boolean) {
     }
   }
   async function runAll(rows: Channel[]) {
-    if (batchController.current || active.current.size || !enabled) return;
-    const queue = checkTargets(rows);
+    if (batchController.current || !enabled) return;
+    const queue = checkTargets(rows).filter(row => row.source_id && !active.current.has(providerId(row)));
+    if (!queue.length) return;
     const abort = new AbortController();
     batchController.current = abort;
     let done = 0;
@@ -158,11 +159,15 @@ export function useChannelChecks(session: string, enabled: boolean) {
     run,
     runAll,
     stop: () => {
-      batchController.current?.abort();
+      const batch = batchController.current;
+      batch?.abort();
+      for (const [id, entry] of active.current) {
+        if (batch && entry.batchSignal !== batch.signal) continue;
+        entry.abort.abort();
+        active.current.delete(id);
+      }
       batchController.current = null;
-      for (const abort of active.current.values()) abort.abort();
-      active.current.clear();
-      setPending(new Set());
+      setPending(new Set(active.current.keys()));
       setBatch(null);
     },
     error: query.error,
@@ -301,7 +306,7 @@ export function ChannelCheckAction({
     <td className="observation-detection-actions">
       <button
         className="button small"
-        disabled={!row.source_id || pending || !!checks.batch}
+        disabled={!row.source_id || pending}
         onClick={() => void checks.run(row)}
         aria-label={`重新检测 ${row.source_name || row.source_id || ""} ${channelName(row)} ${row.model}`}
       >

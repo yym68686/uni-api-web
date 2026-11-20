@@ -336,12 +336,12 @@ export function useManagementPage(
   const current = !!owner && !query.isFetching && !query.isError && !!query.data &&
     managementPageGeneration.get(query.data) === currentControlWriteGeneration();
   const previous = displayed.current?.owner===owner?displayed.current:undefined;
-  // Adding a binding doesn't change the identity of existing rows. Keep the
-  // already displayed page interactive, but never expose its stale selection
-  // token as current or enable rows from another filter/page.
+  // A read or evidence update cannot change which target a displayed row
+  // addresses. Full-selection actions still require a current revision/token.
   const shownGeneration = previous && managementPageGeneration.get(previous.page);
-  const backgroundAddRefresh = previous?.scope === scope && shownGeneration !== undefined &&
-    shownGeneration < currentControlWriteGeneration() &&
+  const canUseDisplayed = previous?.scope === scope && shownGeneration !== undefined &&
+    (query.isFetching || shownGeneration < currentControlWriteGeneration()) &&
+    !(query.error instanceof ApiError && [401, 403].includes(query.error.status)) &&
     shownGeneration >= currentBlockingControlWriteGeneration();
   useEffect(() => {
     const page = query.data;
@@ -395,10 +395,22 @@ export function useManagementPage(
         throw Error("渠道结果已变化，请重新读取后再试");
       return result.data;
     },
+    waitForRefresh: async () => {
+      const cached = client.getQueryCache().find({ queryKey, exact: true });
+      let waited: Promise<unknown> | undefined;
+      // Accepted writes can replace an older in-flight read. Follow that
+      // replacement without starting another GET or holding locks after navigation.
+      while (cached?.isActive() && cached.state.fetchStatus === "fetching") {
+        const fetch = cached.promise;
+        if (!fetch || fetch === waited) break;
+        waited = fetch;
+        await fetch.catch(() => undefined);
+      }
+    },
     displayPage: previous?.page,
     displayModel: previous?.model || "",
     updating: !!previous && query.isFetching,
-    backgroundAddRefresh,
+    interactivePage: current ? query.data : canUseDisplayed ? previous?.page : undefined,
   };
 }
 

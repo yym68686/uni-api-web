@@ -170,8 +170,26 @@ let blockingControlWriteGeneration = 0;
 export const currentControlWriteGeneration = () => controlWriteGeneration;
 export const currentBlockingControlWriteGeneration = () => blockingControlWriteGeneration;
 
+// Only identity-changing writes must invalidate actions on an already validated
+// page. Evidence and settings for independent tools have their own refresh path.
+function managementWriteImpact(path: string, method: string, backgroundChannelAdd: boolean) {
+ const endpoint = path.split("?", 1)[0];
+ if (endpoint.includes("/recharge/") ||
+     /^\/v1\/sub2api\/accounts(?:\/[^/]+)?\/(?:sync|sync-selected|sync-only)$/.test(endpoint) ||
+     /^\/v1\/(?:sub2api\/check-curl|channel-management\/detection-settings|channel-setting-templates)$/.test(endpoint) ||
+     /^\/v1\/automations(?:\/[^/]+)?$/.test(endpoint) ||
+     /^\/v1\/sources\/[^/]+\/channel-settings\/(?:validate|discover|discover-draft)$/.test(endpoint))
+   return "none";
+ if (/^\/v1\/(?:channel-management\/checks|model-fingerprints(?:\/settings)?|sub2api\/(?:checks|quality-checks|compaction-checks|tool-use-checks)|sub2api\/accounts\/[^/]+\/(?:stop|probe-limits|settings)|sources\/[^/]+\/(?:channel-checks|channel-controls)|automations\/(?:[^/]+\/run|audit\/[^/]+\/(?:review|apply|rollback)))$/.test(endpoint) ||
+     (backgroundChannelAdd && method === "POST" &&
+      (endpoint === "/v1/sub2api/channels" || endpoint === "/v1/channel-management")))
+   return "background";
+ return "blocking";
+}
+
 export async function controlRequest<T>(path:string,init:RequestInit={}, { backgroundChannelAdd = false } = {}):Promise<T>{
- const read=!init.method || init.method.toUpperCase()==="GET";
+ const method=init.method?.toUpperCase() || "GET";
+ const read=method==="GET";
  return withRequestDeadline(init.signal, read ? 30_000 : 120_000, !read, async (signal, requestId, responseReceived) => {
  const currentManagement=read && path.startsWith("/v1/channel-management/query?") && init.cache==="no-cache" && new Headers(init.headers).get("X-Console-Current-Validation")==="1";
  const started=currentManagement?performance.now():0;
@@ -183,18 +201,10 @@ export async function controlRequest<T>(path:string,init:RequestInit={}, { backg
  status=response.status;
  responseReceived();
  if(!response.ok){const message=await response.text();throw new ApiError(message||`HTTP ${response.status}`,response.status)}
- // A queued sync changes task state asynchronously. Its caller reads the
- // dedicated progress endpoint; clearing/reloading the channel page here
- // would discard the user's current view before any new results exist.
- const syncQueued=init.method?.toUpperCase()==="POST" && (["/v1/sub2api/accounts/sync-selected","/v1/sub2api/accounts/sync-only"].includes(path) || /^\/v1\/sub2api\/accounts\/[^/]+\/sync-selected$/.test(path));
- // Recharge state is polled independently. Authorizing a wallet or creating a
- // quote must not clear/reload the unrelated full channel-management snapshot.
- const rechargeOperation=path.includes("/recharge/");
- if(!read && !syncQueued && !rechargeOperation && typeof window !== "undefined") {
+ const impact = read ? "none" : managementWriteImpact(path, method, backgroundChannelAdd);
+ if(impact !== "none" && typeof window !== "undefined") {
    controlWriteGeneration++;
-   const isBackgroundAdd = backgroundChannelAdd && init.method?.toUpperCase() === "POST" &&
-     (path === "/v1/sub2api/channels" || path === "/v1/channel-management");
-   if (!isBackgroundAdd) blockingControlWriteGeneration = controlWriteGeneration;
+   if (impact === "blocking") blockingControlWriteGeneration = controlWriteGeneration;
    window.dispatchEvent(new Event("uni-console-control-write"));
  }
  phase="body_json";

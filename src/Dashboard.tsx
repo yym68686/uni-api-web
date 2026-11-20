@@ -1249,9 +1249,11 @@ export default function Dashboard({
       (currentPage + 1) * 25,
     );
   const detail = focusedBalance || null;
-  const busy = metrics.isFetching || catalog.isFetching || keys.isFetching;
+  // A background poll for the same filter does not remove its usable data.
+  const loadingScope = !metrics.data || !catalog.data || (!baseConnection.account && !keys.data);
+  const fetching = metrics.isFetching || catalog.isFetching || keys.isFetching;
   const routePage = new Map(adjustingChannels ? pageRows.map(row => [rowId(row), row]) : []);
-  const routeDrag = useChannelRouteDrag(JSON.stringify([adjustingChannels, auditScope, currentPage, controls.pending]), routePage,
+  const routeDrag = useChannelRouteDrag(JSON.stringify([adjustingChannels, auditScope, currentPage]), routePage,
     (from, to, after) => controls.moveRelative(from, to, after, pageRows));
   function setFilter(name: keyof Filters, value: string) {
     setPage(0);
@@ -1316,7 +1318,7 @@ export default function Dashboard({
       ? sourceQuery.isFetching
       : view === "prices"
         ? prices.isFetching
-        : busy || (view === "overview" && (liveMetrics.isFetching || sourceQuery.isFetching));
+        : fetching || (view === "overview" && (liveMetrics.isFetching || sourceQuery.isFetching));
   const refreshButton = (
     <button
       className={`button small ${refreshBusy ? "refreshing" : ""}`}
@@ -1436,7 +1438,7 @@ export default function Dashboard({
     channelView && checkingChannels && (observedDetection.notice?.text || observedDetection.batchIssue),
   ];
   const routeButton = <button className="button small route-edit-trigger" type="button"
-    aria-pressed={adjustingChannels} disabled={controls.pending || routingSort.busy}
+    aria-pressed={adjustingChannels} disabled={routingSort.busy}
     onClick={event => {
       if (!canEditRoutes || (view !== "channels" && view !== "routing")) return;
       const disclosure = event.currentTarget.closest<HTMLDetailsElement>(".workbench-disclosure");
@@ -1456,12 +1458,12 @@ export default function Dashboard({
     <button type="button" className={`button small ${hasRouteDrafts ? "primary" : ""}`}
       aria-label={hasRouteDrafts ? "应用全部临时修改" : "完成调整"}
       title={hasRouteDrafts ? "应用所有范围的顺序和停用修改" : "退出顺序编辑"}
-      disabled={controls.pending} aria-busy={controls.pending || undefined}
+      disabled={controls.draftsPending} aria-busy={controls.draftsPending || undefined}
       onClick={() => hasRouteDrafts ? void controls.applyAll() : finishRouteEdit()}>
-      {controls.pending ? <Spinner small /> : <Check size={13} aria-hidden="true" />}{hasRouteDrafts ? "应用" : "完成"}
+      {controls.draftsPending ? <Spinner small /> : <Check size={13} aria-hidden="true" />}{hasRouteDrafts ? "应用" : "完成"}
     </button>
     <button type="button" className="button small" aria-label="取消调整" title="退出并放弃未应用的修改"
-      disabled={controls.pending} onClick={finishRouteEdit}><X size={14} aria-hidden="true" /></button>
+      disabled={controls.draftsPending} onClick={finishRouteEdit}><X size={14} aria-hidden="true" /></button>
   </div>;
   const timeFilter = <label className="select-field time-select">
     <Clock3 size={15} aria-hidden="true" />
@@ -1654,7 +1656,7 @@ export default function Dashboard({
                   {inlineKey && apiKeyFilter}
                   {inlineRoute && <div className="route-edit-slot">{adjustingChannels ? routeActions : routeButton}</div>}
                   {view === "balances" && <WorkbenchDisclosure label="检查余额" icon={<Wallet size={14} aria-hidden="true" />}>
-                    <button type="button" className="button small" disabled={!activeAudit && (!balanceCatalog.length || busy || search !== deferredSearch)} onClick={event => {
+                    <button type="button" className="button small" disabled={!activeAudit && (!balanceCatalog.length || search !== deferredSearch)} onClick={event => {
                       if (activeAudit) setBalanceAudit(null);
                       else setBalanceAudit({scope:auditScope, targets:[...balanceCatalog]});
                       const menu = event.currentTarget.closest("details");
@@ -1851,7 +1853,7 @@ export default function Dashboard({
                     labelRows={rows}
                     routing={routeView?routingSort:undefined}
                     keyId={keyId}
-                    routeApplyDisabled={busy||!!error||adjustingChannels||controls.pending||controls.drafts.size>0||!!(balanceFilter&&pendingBalances)||search!==deferredSearch}
+                    routeApplyDisabled={loadingScope||!!error||adjustingChannels||controls.pending||controls.drafts.size>0||!!(balanceFilter&&pendingBalances)||search!==deferredSearch}
                     scopeLabel={[
                       model || "全部模型",
                       sourceList.find(s=>s.id===selectedSourceId)?.name || "全部来源",
@@ -1892,14 +1894,14 @@ export default function Dashboard({
                   {canEditRoutes && !inlineRoute && !adjustingChannels && routeButton}
                   {adjustingChannels && <ChannelControlReset controls={controls} sources={sourceList} keys={keys.data?.data || []} />}
                   {adjustingChannels && hasRouteDrafts && <button type="button" className="button small"
-                    aria-label="放弃全部临时修改" disabled={controls.pending} onClick={controls.discardAll}>放弃草稿</button>}
+                    aria-label="放弃全部临时修改" disabled={controls.draftsPending} onClick={controls.discardAll}>放弃草稿</button>}
                   {channelView && (
                     <ObservedDetectionActions
                       checks={checks}
                       detection={observedDetection}
                       disabled={
                         !baseConnection.account ||
-                        busy ||
+                        loadingScope ||
                         !!error ||
                         search !== deferredSearch ||
                         !!(balanceFilter && pendingBalances)

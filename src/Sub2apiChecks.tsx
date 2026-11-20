@@ -885,11 +885,11 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   };
   const pageData=pageQuery.data;
   const displayedPage=pageQuery.displayPage;
-  const usablePage=pageData || (pageQuery.backgroundAddRefresh ? displayedPage : undefined);
+  const usablePage=pageQuery.interactivePage;
   const tablePending=!!displayedPage && !usablePage;
   const tableModel=pageQuery.displayModel;
   // Keep controls mounted during page changes. An earlier scope cannot
-  // authorize any action; a background add may retain only its matching page.
+  // authorize any action; a background refresh may retain only its matching page.
   const metadataRef=useRef<{owner:string;accounts:SubAccount[];rates:number[];platforms:string[];models:string[];detectionModels:string[];readAt:number}|undefined>(undefined);
   if(pageData)metadataRef.current={owner:user,accounts:pageData.accounts,rates:pageData.rates,platforms:pageData.platforms,models:pageData.models,detectionModels:pageData.detection_models,readAt:pageData.read_at_ms};
   const metadata=metadataRef.current?.owner===user?metadataRef.current:undefined;
@@ -1164,7 +1164,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   const requestedModels = () => modelsToCheck;
   const checkKeys = (account: SubAccount, target: SubTarget, kind: CheckKind, configured?: ManagedChannel) =>
     (kind === "check" ? requestedModels() : kind === "quality" ? ["gpt-6-astra"] : [kind])
-      .map(item => `${selectionID(account, target, configured)}:${item}`);
+      .map(item => JSON.stringify([user, selectionID(account, target, configured), item]));
   const checkBusy = (account: SubAccount, target: SubTarget, kind: CheckKind, configured?: ManagedChannel) => {
     const current=progressByAccount.get(account.id)||account;
     if (account.id && accountBusy(account.id)) return true;
@@ -1186,13 +1186,17 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   };
   type CheckSelection = { account: SubAccount; target: SubTarget; configured?: ManagedChannel }[];
   async function queueChecks(kind: CheckKind, selection: CheckSelection, manual = true) {
-    const targets = selection.filter(row => (manual || detectionEnabled(row,detection.disabled)) && canCheck(row.account, row.target, kind, row.configured));
+    const targets = selection.filter(row => (manual || (detection.isEnabled(row) && !detection.isSaving(row))) && canCheck(row.account, row.target, kind, row.configured));
     if (!manual && targets.length !== selection.length) throw Error("部分检测对象已不可提交，请重新预览。");
     const keys = targets.flatMap(({account, target, configured}) => checkKeys(account, target, kind, configured));
-    if (!targets.length || keys.some(key => checksInFlight.current.has(key))) return;
+    if (!targets.length || keys.some(key => checksInFlight.current.has(key))) {
+      if (!manual) throw Error("部分检测对象已在提交，请重新预览。");
+      return;
+    }
     keys.forEach(key => checksInFlight.current.add(key));
     setSubmittingChecks(new Set(checksInFlight.current));
     setError("");
+    const scope = selectionScope.current;
     try {
       const site = targets.filter(t => !!t.account.id);
       const native = targets.filter(t => !t.account.id && t.configured).flatMap(({configured}) => {
@@ -1224,7 +1228,14 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
           : `未确认提交 · ${result.reason instanceof Error ? result.reason.message : "读取失败"}`,
       }));
       if (!manual) setBatchReceipts(receipts);
-      await Promise.all([client.invalidateQueries({queryKey:["sub2api"]}),client.invalidateQueries({queryKey:["configured-checks"]})]);
+      await Promise.all([
+        client.invalidateQueries({queryKey:["sub2api"]}),
+        client.invalidateQueries({queryKey:["configured-checks"]}),
+        // Hold only these targets until the queued state is read. The server
+        // still deduplicates repeats if that read fails or navigation wins.
+        ...(scope === selectionScope.current && receipts.some(receipt => receipt.accepted)
+          ? [pageQuery.waitForRefresh()] : []),
+      ]);
       const failed = results.find(r => r.status === "rejected");
       if (manual && failed?.status === "rejected") throw failed.reason;
     } catch (e) {
@@ -1235,7 +1246,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
     }
   }
   function batchFingerprintTargets(row: ManagementRow) {
-    if (!detectionEnabled(row, detection.disabled)) return [];
+    if (detection.isSaving(row) || !detection.isEnabled(row)) return [];
     if (row.account.id) {
       const account = progressByAccount.get(row.account.id) || row.account;
       if (accountBusy(row.account.id) || pending(account.state) || !row.target.active ||
@@ -1258,7 +1269,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
     return ready;
   }
   async function batch(kind: BatchKind){
-    if(selectionRead.current || !usablePage || detection.isPending || detection.isError || detection.busy)return;
+    if(selectionRead.current || !usablePage || detection.isPending || detection.isError)return;
     selectionRead.current=true;setReadingSelection(true);setError("");setFingerprintsSubmitted(0);setBatchReceipts([]);
     try{
       const selected=await completeSelection();
@@ -1266,7 +1277,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
       const allowed = new Set(targetSet.map(fingerprintKey));
       const targets = kind === "fingerprint"
         ? selected.eligible.filter(row => batchFingerprintTargets(row).some(value => allowed.has(fingerprintKey(value))))
-        : selected.eligible.filter(row=>detectionEnabled(row,detection.disabled)&&canCheck(row.account,row.target,kind,row.configured));
+        : selected.eligible.filter(row=>!detection.isSaving(row)&&detection.isEnabled(row)&&canCheck(row.account,row.target,kind,row.configured));
       if (!targets.length) throw Error("当前筛选没有可提交的检测对象。");
       const items = targets.map(row => ({
         id:row.id, label:`${row.account.name} / ${row.configured?.name || row.target.name}`,
@@ -1281,7 +1292,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   async function confirmBatch() {
     const plan = batchPreview;
     if (!plan || submittingBatch.current) return;
-    if (plan.scope !== batchScope || !usablePage || detection.busy || detection.isError) {
+    if (plan.scope !== batchScope || !usablePage || detection.isError) {
       setBatchPreview(null); setError("筛选或检测状态已变化，请重新预览。"); return;
     }
     submittingBatch.current=true;setBatchSubmitting(true);
@@ -1304,10 +1315,10 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
     }
   }
   const batchBusy=readingSelection || batchSubmitting;
-  const batchDisabled=(kind:BatchKind)=>resultsUnavailable || !eligibleCount || detection.isPending || detection.isError || detection.busy || batchBusy || (
+  const batchDisabled=(kind:BatchKind)=>resultsUnavailable || !eligibleCount || detection.isPending || detection.isError || batchBusy || (
     kind === "fingerprint"
       ? !fingerprintModelsToCheck.length || (rows.length === total && !rows.some(row => batchFingerprintTargets(row).length))
-      : (kind==="check"&&!modelsToCheck.length) || ((kind==="compaction"||kind==="tool-use")&&!!model&&!isCapabilityCheckModel(model)) || (rows.length===total && !rows.some(row=>detectionEnabled(row,detection.disabled)&&canCheck(row.account,row.target,kind,row.configured)))
+      : (kind==="check"&&!modelsToCheck.length) || ((kind==="compaction"||kind==="tool-use")&&!!model&&!isCapabilityCheckModel(model)) || (rows.length===total && !rows.some(row=>!detection.isSaving(row)&&detectionEnabled(row,detection.disabled)&&canCheck(row.account,row.target,kind,row.configured)))
   );
   const check=(selection?:CheckSelection)=>selection?queueChecks("check",selection):batch("check");
   const checkCompaction=(selection:CheckSelection)=>queueChecks("compaction",selection);
@@ -1876,7 +1887,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
               aria-label="刷新渠道管理"
               title="刷新数据"
               onClick={refreshPage}
-              disabled={query.isFetching && !pageQuery.backgroundAddRefresh}
+              disabled={query.isFetching && !usablePage}
             >
               <RefreshCw size={15} className={query.isFetching || pageQuery.updating ? "spin" : ""} />
             </button>

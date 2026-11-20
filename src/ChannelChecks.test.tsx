@@ -181,6 +181,35 @@ it("replaces an older local check error when newer persisted history arrives", a
   client.clear();
 });
 
+it("skips an already running row in a batch and cancels only the batch", async () => {
+  const signals = new Map<string, AbortSignal>();
+  vi.stubGlobal("fetch", vi.fn((_input: string, init?: RequestInit) => {
+    if (init?.method !== "POST") return Promise.resolve(Response.json({ data: [] }));
+    const { provider } = JSON.parse(String(init.body));
+    signals.set(provider, init.signal!);
+    return new Promise<Response>((_, reject) =>
+      init.signal!.addEventListener("abort", () => reject(init.signal!.reason), {once: true}),
+    );
+  }));
+  const client = new QueryClient();
+  const wrapper = ({children}: {children: ReactNode}) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  const {result, unmount} = renderHook(() => useChannelChecks("concurrent", true), {wrapper});
+  act(() => { void result.current.run(row("do", "first")); });
+  await waitFor(() => expect(signals.has("first")).toBe(true));
+  act(() => { void result.current.runAll([row("do", "first"), row("do", "second")]); });
+  await waitFor(() => expect(signals.has("second")).toBe(true));
+  expect(result.current.batch?.total).toBe(1);
+  act(() => { void result.current.run(row("do", "third")); });
+  await waitFor(() => expect(signals.has("third")).toBe(true));
+  await act(async () => result.current.stop());
+  expect(signals.get("second")?.aborted).toBe(true);
+  expect(signals.get("first")?.aborted).toBe(false);
+  expect(signals.get("third")?.aborted).toBe(false);
+  expect(result.current.pending.size).toBe(2);
+  unmount();
+  client.clear();
+});
+
 it("keeps a restarted batch pending when canceled responses arrive late", async () => {
   const requests: {
     signal: AbortSignal;

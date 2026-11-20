@@ -44,11 +44,20 @@ export function useObservedDetection(
     detectionProjects,
   );
   const [expanded, setExpanded] = useState(false);
-  const [notice, setNotice] = useState<{ text: string; error?: boolean }>();
+  const [notices, setNotices] = useState(new Map<string, { text: string; error?: boolean }>());
   const [submitting, setSubmitting] = useState<Set<string>>(new Set());
   const inFlight = useRef(new Set<string>());
-  const batchInFlight = useRef(false);
-  const [batchActive, setBatchActive] = useState(false);
+  const batchInFlight = useRef(new Set<string>());
+  const [activeBatches, setActiveBatches] = useState(new Set<string>());
+  const batchKey = JSON.stringify([owner, project]);
+  function setNotice(notice?: { text: string; error?: boolean }) {
+    setNotices(current => {
+      const next = new Map(current);
+      if (notice) next.set(batchKey, notice);
+      else next.delete(batchKey);
+      return next;
+    });
+  }
   const client = useQueryClient();
   const additional = visible && expanded && project !== "quality";
   const detection = useChannelDetection(owner, additional);
@@ -64,7 +73,9 @@ export function useObservedDetection(
       ),
     [configured.data],
   );
-  const qualityRows = project === "quality" ? checkTargets(rows) : [];
+  const qualityRows = project === "quality"
+    ? checkTargets(rows).filter(row => row.source_id && !checks.pending.has(providerId(row)))
+    : [];
 
   function targetFor(row: Channel): Target | undefined {
     if (!row.source_id) return;
@@ -128,13 +139,16 @@ export function useObservedDetection(
               : "";
 
   async function queue(targets: Target[], manual = false) {
-    if (project === "quality" || !manual && batchInFlight.current) return;
+    if (project === "quality" || !manual && batchInFlight.current.has(batchKey)) return;
     targets = targets.filter(target => !inFlight.current.has(submissionKey(target)) && !busy(target));
     if (!targets.length) return;
     const keys = targets.map(submissionKey);
     keys.forEach(key => inFlight.current.add(key));
     setSubmitting(new Set(inFlight.current));
-    if (!manual) { batchInFlight.current = true; setBatchActive(true); }
+    if (!manual) {
+      batchInFlight.current.add(batchKey);
+      setActiveBatches(new Set(batchInFlight.current));
+    }
     setNotice(undefined);
     try {
       const fingerprint = project === "fingerprint";
@@ -172,7 +186,10 @@ export function useObservedDetection(
     } finally {
       keys.forEach(key => inFlight.current.delete(key));
       setSubmitting(new Set(inFlight.current));
-      if (!manual) { batchInFlight.current = false; setBatchActive(false); }
+      if (!manual) {
+        batchInFlight.current.delete(batchKey);
+        setActiveBatches(new Set(batchInFlight.current));
+      }
     }
   }
 
@@ -182,8 +199,8 @@ export function useObservedDetection(
     total,
     batchIssue,
     skippedDisabled,
-    notice,
-    active: batchActive,
+    notice: notices.get(batchKey),
+    active: activeBatches.has(batchKey),
     select(next: typeof project) {
       setNotice(undefined);
       selectProject(next);
@@ -238,11 +255,12 @@ export function ObservedDetectionActions({
   disabled: boolean;
 }) {
   const quality = detection.project === "quality";
-  const runLabel = `一键${quality ? "检测" : detectionProjectLabels[detection.project]} · ${detection.total}`;
-  const busy = !!checks.batch || detection.active;
+  const count = quality && checks.batch ? checks.batch.total : detection.total;
+  const runLabel = `一键${quality ? "检测" : detectionProjectLabels[detection.project]} · ${count}`;
+  const busy = quality ? !!checks.batch : detection.active;
   return (
     <div className="check-toolbar-actions">
-      {detection.expanded && checks.batch && (
+      {detection.expanded && quality && checks.batch && (
         <span className="muted" role="status">
           {checks.batch.done} / {checks.batch.total}
         </span>
@@ -251,7 +269,6 @@ export function ObservedDetectionActions({
         projects={detectionProjects}
         project={detection.project}
         onSelect={detection.select}
-        selectDisabled={busy || checks.pending.size > 0}
       >
         {detection.expanded ? (
           <button
@@ -264,7 +281,6 @@ export function ObservedDetectionActions({
             disabled={
               disabled ||
               busy ||
-              checks.pending.size > 0 ||
               !detection.total ||
               !!detection.batchIssue
             }

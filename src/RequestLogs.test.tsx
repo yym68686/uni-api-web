@@ -438,7 +438,7 @@ it("keeps the visible rows mounted until refresh succeeds and preserves them on 
   expect(screen.getByRole("table")).toBeVisible();
   expect(screen.queryByText("正在读取请求日志…")).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "刷新日志" })).toBeDisabled();
-  expect(screen.getByRole("button", { name: "下一页" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "下一页" })).toBeEnabled();
   await act(async () => finish(new Response("unavailable", { status: 503 })));
   expect(await screen.findByRole("alert")).toHaveTextContent(
     "刷新失败，保留当前日志",
@@ -572,4 +572,31 @@ it("does not apply an older refresh after the user changes filters or pages", as
   expect(
     screen.queryByRole("button", { name: row.request_id }),
   ).not.toBeInTheDocument();
+});
+
+it("navigates using the visible cursor while a same-filter refresh is pending", async () => {
+  let firstPageReads = 0;
+  let finish!: (response: Response) => void;
+  const user = setup(async input => {
+    const url = new URL(input, location.origin);
+    const aux = auxiliary(url);
+    if (aux) return aux;
+    const next = url.searchParams.get("cursor") === "next";
+    if (!next && ++firstPageReads > 1)
+      return new Promise<Response>(resolve => { finish = resolve; });
+    return Response.json({
+      data: [{...row, request_id: next ? "next-page" : "first-page"}],
+      models: [row.model],
+      next_cursor: next ? "" : "next",
+      to: row.at_ms,
+    });
+  });
+  await screen.findByRole("button", {name: "first-page"});
+  await user.click(screen.getByRole("button", {name: "刷新日志"}));
+  await waitFor(() => expect(finish).toBeDefined());
+  await user.click(screen.getByRole("button", {name: "下一页"}));
+  await screen.findByRole("button", {name: "next-page"});
+  await act(async () => finish(Response.json({data: [row], next_cursor: "", to: row.at_ms + 1000})));
+  expect(screen.getByRole("button", {name: "next-page"})).toBeVisible();
+  expect(screen.getByText(/第 2 页/)).toBeVisible();
 });

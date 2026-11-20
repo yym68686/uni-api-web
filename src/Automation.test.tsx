@@ -164,3 +164,34 @@ it("retains audit records during a refresh and when the refresh fails", async ()
   expect(await screen.findByRole("alert")).toHaveTextContent("audit unavailable");
   expect(original).toBeVisible();
 });
+
+it("pauses only the selected task and keeps another task's editor open after the response", async () => {
+  const makeTask = (id: string) => ({
+    id, name: id, revision: 1, source_id: "source", key_id: "key-fixture",
+    model: "gpt-6-astra", interval_seconds: 60, enabled: true,
+    policy: {action: "suggest", metrics: ["success"]},
+  });
+  let first = makeTask("Alpha");
+  const second = makeTask("Beta");
+  let finish!: () => void;
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/automations")) return Response.json({data: [first, second]});
+    if (url.endsWith("/automations/Alpha") && init?.method === "PUT") {
+      await new Promise<void>(resolve => { finish = resolve; });
+      first = {...first, enabled: false, revision: 2};
+      return Response.json({task: first});
+    }
+    return Response.json({data: []});
+  }));
+  render(<Automation sources={sources} />, {wrapper: Tooltip.Provider});
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", {name: "暂停 Alpha"}));
+  expect(screen.getByRole("button", {name: "暂停 Alpha"})).toBeDisabled();
+  expect(screen.getByRole("button", {name: "暂停 Beta"})).toBeEnabled();
+  expect(screen.getByRole("button", {name: "运行已保存的任务 Beta"})).toBeEnabled();
+  await user.click(screen.getByRole("button", {name: "编辑 Beta"}));
+  await user.type(screen.getByLabelText("任务名称"), " changed");
+  await act(async () => finish());
+  expect(screen.getByRole("dialog", {name: "编辑自动化任务"})).toBeVisible();
+  expect(screen.getByLabelText("任务名称")).toHaveValue("Beta changed");
+});

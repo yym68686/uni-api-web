@@ -206,7 +206,9 @@ export function Automation({
   const auditHeading = useRef<HTMLDivElement>(null);
   const olderRead = useRef<AbortController | null>(null);
   const running = useRef(new Set<string>());
-  const [runningTasks, setRunningTasks] = useState(() => new Set<string>());
+  const [taskActions, setTaskActions] = useState(new Set<string>());
+  const [keyGeneration, setKeyGeneration] = useState(0);
+  const taskRead = useRef(0);
   const [runNotice, setRunNotice] = useState("");
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [olderBusy, setOlderBusy] = useState(false);
@@ -222,23 +224,25 @@ export function Automation({
     () => new Map(sources.map((s) => [s.id, s.name])),
     [sources],
   );
-  const reload = useCallback(() => setGeneration((v) => v + 1), []);
+  const reload = useCallback(() => {
+    taskRead.current++;
+    setGeneration((v) => v + 1);
+  }, []);
   useEffect(() => {
-    let live = true;
+    const id = ++taskRead.current;
+    const controller = new AbortController();
     setLoading(true);
-    void controlRequest<{ data: Task[] }>("/v1/automations")
+    void controlRequest<{ data: Task[] }>("/v1/automations", { signal: controller.signal })
       .then((r) => {
-        if (live) setTasks(r.data || []);
+        if (id === taskRead.current && !controller.signal.aborted) setTasks(r.data || []);
       })
       .catch((e) => {
-        if (live) setError(String(e.message || e));
+        if (id === taskRead.current && !controller.signal.aborted) setError(String(e.message || e));
       })
       .finally(() => {
-        if (live) setLoading(false);
+        if (id === taskRead.current && !controller.signal.aborted) setLoading(false);
       });
-    return () => {
-      live = false;
-    };
+    return () => controller.abort();
   }, [generation]);
   useEffect(() => {
     const controller = new AbortController();
@@ -293,7 +297,7 @@ export function Automation({
     return () => {
       live = false;
     };
-  }, [draft?.source_id, generation]);
+  }, [draft?.source_id, keyGeneration]);
   function edit(t: Task) {
     editorOpener.current = document.activeElement as HTMLElement;
     const next = {
@@ -319,9 +323,20 @@ export function Automation({
   function policy(value: Partial<Policy>) {
     setDraft((t) => (t ? { ...t, policy: { ...t.policy, ...value } } : t));
   }
-  async function save(task = draft) {
-    if (!task || saving) return;
-    setSaving(true);
+  function lockTask(id: string) {
+    if (running.current.has(id)) return;
+    running.current.add(id);
+    setTaskActions(new Set(running.current));
+    return () => {
+      running.current.delete(id);
+      setTaskActions(new Set(running.current));
+    };
+  }
+  async function save(task = draft, editing = true) {
+    if (!task) return;
+    const unlock = lockTask(task.id);
+    if (!unlock) return;
+    if (editing) setSaving(true);
     setError("");
     try {
       const r = await controlRequest<{ task: Task }>(
@@ -330,37 +345,42 @@ export function Automation({
           : "/v1/automations",
         { method: task.id ? "PUT" : "POST", body: JSON.stringify(task) },
       );
-      setSelected(r.task.id);
+      reload();
       setTasks(current => current.some(task => task.id === r.task.id)
         ? current.map(task => task.id === r.task.id ? r.task : task)
         : [...current, r.task]);
-      setDraft(null);
-      reload();
+      if (editing) {
+        setSelected(r.task.id);
+        setDraft(null);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "保存失败");
     } finally {
-      setSaving(false);
+      if (editing) setSaving(false);
+      unlock();
     }
   }
   async function remove(t: Task) {
+    if (running.current.has(t.id)) return;
     if (!confirm(`删除任务“${t.name}”？历史审计会保留。`)) return;
+    const unlock = lockTask(t.id);
+    if (!unlock) return;
     try {
       await controlRequest(`/v1/automations/${encodeURIComponent(t.id)}`, {
         method: "DELETE",
       });
-      if (selected === t.id) {
-        setSelected("");
-        setDraft(null);
-      }
       reload();
+      setTasks(current => current.filter(task => task.id !== t.id));
+      setSelected(current => current === t.id ? "" : current);
     } catch (e) {
       setError(e instanceof Error ? e.message : "删除失败");
+    } finally {
+      unlock();
     }
   }
   async function run(t: Task) {
-    if (running.current.has(t.id)) return;
-    running.current.add(t.id);
-    setRunningTasks(new Set(running.current));
+    const unlock = lockTask(t.id);
+    if (!unlock) return;
     setRunNotice("");
     setError("");
     try {
@@ -373,8 +393,7 @@ export function Automation({
     } catch (e) {
       setError(`运行请求未确认。请先刷新历史核对，再决定是否重试。${e instanceof Error ? ` ${e.message}` : ""}`);
     } finally {
-      running.current.delete(t.id);
-      setRunningTasks(new Set(running.current));
+      unlock();
     }
   }
   async function older() {
@@ -471,8 +490,8 @@ export function Automation({
             <WorkbenchNotice urgent label="自动化操作失败" messages={[!draft && error]} />
           </div>
           <div className="data-actions">
-            <button className="button small" onClick={reload} disabled={loading || auditLoading}>
-              <RefreshCw size={15} className={loading || auditLoading ? "spin" : ""} />
+            <button className="button small" onClick={() => { reload(); setKeyGeneration(n => n + 1); }} disabled={section === "tasks" ? loading : auditLoading}>
+              <RefreshCw size={15} className={(section === "tasks" ? loading : auditLoading) ? "spin" : ""} />
               刷新数据
             </button>
             <button className="button small" onClick={newTask}>
@@ -509,23 +528,23 @@ export function Automation({
               <span className={`automation-state ${t.enabled ? "on" : ""}`}>
                 {t.enabled ? "已启用" : "已暂停"}
               </span>
-              <button className="button small" aria-label={`编辑 ${t.name}`} onClick={() => edit(t)} disabled={runningTasks.has(t.id)}>
+              <button className="button small" aria-label={`编辑 ${t.name}`} onClick={() => edit(t)} disabled={taskActions.has(t.id)}>
                 <Pencil size={14} /> 编辑
               </button>
-              {t.enabled && <button className="button small" aria-label={`运行已保存的任务 ${t.name}`} aria-busy={runningTasks.has(t.id)} disabled={saving || runningTasks.has(t.id)} onClick={() => void run(t)}>
-                {runningTasks.has(t.id) ? <Spinner small /> : <Play size={14}/>} 运行已保存版本
+              {t.enabled && <button className="button small" aria-label={`运行已保存的任务 ${t.name}`} aria-busy={taskActions.has(t.id)} disabled={taskActions.has(t.id)} onClick={() => void run(t)}>
+                {taskActions.has(t.id) ? <Spinner small /> : <Play size={14}/>} 运行已保存版本
               </button>}
               <button
-                disabled={saving || runningTasks.has(t.id)}
+                disabled={taskActions.has(t.id)}
                 className="icon-button"
                 aria-label={`${t.enabled ? "暂停" : "启用"} ${t.name}`}
-                onClick={() => void save({ ...t, enabled: !t.enabled })}
+                onClick={() => void save({ ...t, enabled: !t.enabled }, false)}
               >
                 {t.enabled ? <Pause size={15} /> : <Play size={15} />}
               </button>
               <button
                 className="icon-button"
-                disabled={runningTasks.has(t.id)}
+                disabled={taskActions.has(t.id)}
                 aria-label={`删除 ${t.name}`}
                 onClick={() => void remove(t)}
               >

@@ -192,7 +192,13 @@ export function RequestLogsPage({
   const [composing, setComposing] = useState(false);
   const intent = useRef<number | null>(null);
   const autoActive = auto && page === 0 && !exact;
+  function leavePage() {
+    refreshToken.current++;
+    setRefreshing(false);
+    setRefreshError(null);
+  }
   function resetPage() {
+    leavePage();
     setPage(0);
     setCursors([""]);
   }
@@ -691,8 +697,7 @@ export function RequestLogsPage({
             setExact(null);
             setEditWindow(false);
             setRangeError("");
-            setPage(0);
-            setCursors([""]);
+            resetPage();
           }}
         >
           <X size={13} />
@@ -753,16 +758,17 @@ export function RequestLogsPage({
               <button
                 className="icon-button"
                 aria-label="上一页"
-                disabled={page === 0 || busy}
-                onClick={() => setPage((p) => p - 1)}
+                disabled={page === 0}
+                onClick={() => { leavePage(); setPage((p) => p - 1); }}
               >
                 <ChevronLeft size={16} />
               </button>
               <button
                 className="icon-button"
                 aria-label="下一页"
-                disabled={!data.next_cursor || busy}
+                disabled={!data.next_cursor}
                 onClick={() => {
+                  leavePage();
                   setCursors((current) => [
                     ...current.slice(0, page + 1),
                     data.next_cursor,

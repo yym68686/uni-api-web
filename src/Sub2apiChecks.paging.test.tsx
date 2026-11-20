@@ -128,7 +128,7 @@ it.each(["idle", "interrupted", "stopped", "error"])("revalidates page two once 
   } as Result : null});
   const snapshot = (offset: number, state: string) => ({...page(offset), read_at_ms:state === "queued" ? 1 : 4,
     accounts:[{...account,state:state === "queued" ? "running" : terminal}],
-    rows:page(offset).rows.map(row=>({...row,target:{...row.target,state:state === "queued" ? "queued" : "done"},checks:[check(state)]})),
+    rows:page(offset).rows.map(row=>({...row,target:{...row.target,state:state === "queued" ? "queued" : "done",models:[check(state)]},checks:[check(state)]})),
   });
   vi.stubGlobal("fetch", vi.fn(async(input: string, init?: RequestInit) => {
     expect(init?.method || "GET").toBe("GET");
@@ -161,7 +161,8 @@ it.each(["idle", "interrupted", "stopped", "error"])("revalidates page two once 
   await waitFor(()=>expect(pageReads).toBe(3));
   expect(requests).toEqual(["", "25", "25"]);
   expect(screen.getByRole("row", {name:"查看 Owned site Channel 26 渠道详情"})).toBe(row);
-  expect(screen.getByRole("button", {name:/^检测全部模型 ·/})).toBeDisabled();
+  expect(screen.getByRole("button", {name:/^检测全部模型 ·/})).toBeEnabled();
+  expect(within(row).getByRole("button", {name:"检测 Owned site Channel 26"})).toBeDisabled();
   await act(async()=>{finishPage(Response.json(snapshot(25, "done")));});
   await waitFor(()=>expect(within(row).getByText("1/1 可用")).toBeVisible());
   expect(within(row).queryByText("1 个排队 / 检测中")).not.toBeInTheDocument();
@@ -894,6 +895,61 @@ it.each([
  await waitFor(()=>expect(table.parentElement).not.toHaveAttribute("inert"));
  expect(screen.getByRole("table")).toBe(table);
  expect(screen.getByText("Channel 26",{selector:"strong"}).closest("tr")).toBe(row);
+});
+
+it("keeps other rows actionable after a four-model check is accepted and its page refresh is still waiting", async () => {
+ const owner = "concurrent-four-model-checks";
+ const models = SUB_MODELS.slice(0, 4);
+ saveSubModels(owner, models);
+ const checks: { targets: { group_id: number; models: string[] }[] }[] = [];
+ const refreshes: ((response: Response) => void)[] = [];
+ let switches = 0;
+ vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+  const path = new URL(input).pathname;
+  if (path.endsWith("/sub2api/checks")) {
+   checks.push(JSON.parse(String(init?.body)));
+   return Response.json({queued: 4}, {status: 202});
+  }
+  if (path.endsWith("/channel-management/query")) {
+   if (checks.length) return new Promise<Response>(resolve => { refreshes.push(resolve); });
+   return Response.json(page());
+  }
+  if (path.endsWith("/accounts/progress")) return idleProgress();
+  if (path.endsWith("/detection-settings")) {
+   if (init?.method === "PATCH") switches++;
+   return Response.json({disabled: []});
+  }
+  return Response.json({data: []});
+ }));
+ const view = mount(owner);
+ const user = userEvent.setup();
+ const first = await screen.findByRole("button", {name: "检测 Owned site Channel 1"});
+ const second = screen.getByRole("button", {name: "检测 Owned site Channel 2"});
+ const third = screen.getByRole("row", {name: "查看 Owned site Channel 3 渠道详情"});
+ expect(first).toHaveTextContent("检测已选 4 个模型");
+ await user.click(first);
+ await waitFor(() => expect(refreshes).toHaveLength(1));
+ expect(checks[0].targets[0]).toMatchObject({group_id: 1, models});
+ expect(screen.getByRole("table").parentElement).not.toHaveAttribute("inert");
+ expect(first).toBeDisabled();
+ expect(second).toBeEnabled();
+ expect(within(third).getByRole("button", {name: "添加到渠道"})).toBeEnabled();
+ expect(screen.getByRole("button", {name: "刷新渠道管理"})).toBeEnabled();
+ expect(screen.getByRole("button", {name: "下一页"})).toBeEnabled();
+ await user.click(first);
+ await user.click(within(third).getByRole("switch"));
+ await user.click(second);
+ expect(switches).toBe(1);
+ expect(checks.map(check => check.targets[0].group_id)).toEqual([1, 2]);
+ await waitFor(() => expect(refreshes).toHaveLength(2));
+ await act(async () => refreshes[0](Response.json(page())));
+ expect(first).toBeDisabled();
+ expect(second).toBeDisabled();
+ expect(within(third).getByRole("button", {name: "检测 Owned site Channel 3"})).toBeEnabled();
+ await act(async () => refreshes[1](new Response("fixture delayed refresh failure", {status: 503})));
+ expect(screen.getByRole("table").parentElement).not.toHaveAttribute("inert");
+ await waitFor(() => expect(second).toBeEnabled());
+ view.unmount();
 });
 
 it.each(["success","conflict","unknown"])("closes the page-two import immediately and preserves other actions (%s)",async outcome=>{
