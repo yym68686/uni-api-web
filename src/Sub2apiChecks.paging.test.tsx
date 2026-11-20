@@ -834,47 +834,102 @@ it.each([
  expect(screen.getByText("Channel 26",{selector:"strong"}).closest("tr")).toBe(row);
 });
 
-it("submits the import form on page two and reconciles that same page after the write",async()=>{
+it.each(["success","conflict","unknown"])("closes the page-two import immediately and preserves other actions (%s)",async outcome=>{
+ const patience={timeout:7000};
  const probe={status:"success",text:"fixture",ttft_ms:1,duration_ms:2,protocol:"responses" as const};
  const result={model:"gpt-5.5",checked_at:1,availability:probe,quality:probe,verdict:"not_applicable"};
- const cursors:string[]=[];let posts=0,bindingReads=0,finish!:(response:Response)=>void;
- const readyPage=(offset:number)=>{const p=page(offset);return {...p,rows:p.rows.map(r=>({...r,target:{...r.target,models:[{model:"gpt-5.5",state:"done",message:"",result}]},checks:[{model:"gpt-5.5",state:"done",message:"",result}]}))};};
+ const cursors:string[]=[];let posts=0,bindingReads=0,finish!:(response:Response)=>void,finishPost!:(response:Response)=>void;
+ const total=27;
+ const readyPage=(offset:number)=>{
+  const p=page(offset);
+  return {...p,total,eligible_count:total,next_cursor:offset?undefined:p.next_cursor,rows:p.rows.slice(0,total-offset).map(r=>({...r,target:{...r.target,models:[{model:"gpt-5.5",state:"done",message:"",result}]},checks:[{model:"gpt-5.5",state:"done",message:"",result}]}))};
+ };
  vi.stubGlobal("fetch",vi.fn(async(input:string,init?:RequestInit)=>{
   const url=new URL(input),path=url.pathname;
-  if(path.endsWith("/sub2api/channels")&&init?.method==="POST"){posts++;return Response.json({message:"已添加"});}
-  if(path.endsWith("/sub2api/channels")){bindingReads++;expect(Object.fromEntries(url.searchParams)).toEqual({view:"bindings",account_id:"owned",group_id:"26"});return Response.json({data:[],labels:{},unavailable_sources:[]});}
+  if(path.endsWith("/sub2api/channels")&&init?.method==="POST"){posts++;return new Promise<Response>(resolve=>{finishPost=resolve;});}
+  if(path.endsWith("/sub2api/channels")){
+   bindingReads++;
+   expect(url.searchParams.get("view")).toBe("bindings");
+   expect(url.searchParams.get("account_id")).toBe("owned");
+   expect(["26","27"]).toContain(url.searchParams.get("group_id"));
+   return Response.json({data:[],labels:{},unavailable_sources:[]});
+  }
   if(path.endsWith("/accounts/progress"))return idleProgress();
   if(path.endsWith("/channel-management/query")){
+   if(url.searchParams.has("selection")) return Response.json({
+    ...selection(),revision:"after-import",total,eligible_count:total,rows:rows.slice(0,total),eligible:rows.slice(0,total),
+   });
    const cursor=url.searchParams.get("cursor")||"";cursors.push(cursor);
-   if(posts){expect(cursor).toBe("25");expect(url.searchParams.get("refresh_cursor")).toBe("1");return new Promise<Response>(resolve=>{finish=resolve;});}
+   if(posts && outcome==="success"){
+    expect(cursor).toBe("25");expect(url.searchParams.get("refresh_cursor")).toBe("1");
+    return new Promise<Response>(resolve=>{finish=resolve;});
+   }
    return Response.json(readyPage(Number(cursor||0)));
   }
   if(path.endsWith("/sources"))return Response.json({data:[{id:"fixture",name:"Fixture"}]});
+  if(path.endsWith("/detection-settings"))return Response.json({disabled:[]});
   if(path.endsWith("/import-status"))return Response.json({state:"idle",job_kind:"",can_import:true});
   if(path.endsWith("/access"))return Response.json({available:true,status:"ok"});
   if(path.endsWith("/channel-options"))return Response.json({supported:true,revision:"r1",keys:[{key_id:"fixture-key",position:1,prefix:"fixture"}],channels:[]});
   return Response.json({data:[],labels:{},unavailable_sources:[]});
  }));
  mount("import-second-page");const user=userEvent.setup();
- await screen.findByText("Channel 1",{selector:"strong"});
+ await screen.findByText("Channel 1",{selector:"strong"},patience);
  await user.click(screen.getByRole("button",{name:"下一页"}));
- const row=await screen.findByRole("row",{name:"查看 Owned site Channel 26 渠道详情"});
+ const row=await screen.findByRole("row",{name:"查看 Owned site Channel 26 渠道详情"},patience);
  const table=screen.getByRole("table");
  await user.click(within(row).getByRole("button",{name:"添加到渠道"}));
- const source=await screen.findByLabelText("添加到 uni-api 来源");
+ const source=await screen.findByLabelText("添加到 uni-api 来源",{},patience);
  const d=within(screen.getByRole("dialog"));
  expect(cursors).toEqual(["","25"]);
  expect(bindingReads).toBe(1);
  await user.selectOptions(source,"fixture");
- await waitFor(()=>expect(d.getByLabelText("添加到 API key")).toBeEnabled());
+ await waitFor(()=>expect(d.getByLabelText("添加到 API key")).toBeEnabled(),patience);
  await user.selectOptions(d.getByLabelText("添加到 API key"),"fixture-key");
- await waitFor(()=>expect(d.getByRole("button",{name:"添加到渠道"})).toBeEnabled());
+ await waitFor(()=>expect(d.getByRole("button",{name:"添加到渠道"})).toBeEnabled(),patience);
  await user.click(d.getByRole("button",{name:"添加到渠道"}));
+ await waitFor(()=>expect(posts).toBe(1));
+ expect(screen.queryByRole("dialog",{name:"添加到渠道"})).not.toBeInTheDocument();
+ expect(document.body.style.pointerEvents).not.toBe("none");
+ expect(screen.getByText(/正在后台添加/)).toBeVisible();
+ expect(document.querySelector(".sub-results-table table")).toBe(table);
+ expect(document.querySelector(".sub-pagination")).toHaveTextContent("2 / 2");
+ const otherRow=screen.getByRole("row",{name:"查看 Owned site Channel 27 渠道详情"});
+ const otherAdd=within(otherRow).getByRole("button",{name:"添加到渠道"});
+ await user.click(otherAdd);
+ const otherDialog=await screen.findByRole("dialog",{name:"添加到渠道"},patience);
+ await user.click(within(otherDialog).getByRole("button",{name:"关闭添加渠道"}));
+ if(outcome!=="success"){
+  await act(async()=>finishPost(new Response("渠道状态已变化",{status:outcome==="conflict"?409:502})));
+  await screen.findByText(outcome==="conflict"?/添加失败：渠道状态已变化/:/添加结果未确认：渠道状态已变化/);
+  expect(screen.queryByRole("dialog",{name:"添加到渠道"})).not.toBeInTheDocument();
+  expect(otherAdd).toBeEnabled();
+  if(outcome==="conflict"){
+   await user.click(screen.getByRole("button",{name:"恢复添加配置"}));
+   const restored=within(await screen.findByRole("dialog",{name:"添加到渠道"},patience));
+   expect(restored.getByLabelText("添加到 uni-api 来源")).toHaveValue("fixture");
+   await waitFor(()=>expect(restored.getByLabelText("添加到 API key")).toHaveValue("fixture-key"),patience);
+   expect(restored.getByRole("checkbox",{name:"gpt-5.5"})).toBeChecked();
+  }else expect(screen.queryByRole("button",{name:"恢复添加配置"})).not.toBeInTheDocument();
+  expect(posts).toBe(1);
+  return;
+ }
+ await act(async()=>finishPost(Response.json({message:"已添加"})));
  await waitFor(()=>expect(cursors).toEqual(["","25","25"]));
- expect(posts).toBe(1);expect(document.querySelector(".sub-results-table table")).toBe(table);
- expect(document.querySelector(".sub-pagination")).toHaveTextContent("2 / 3");
+ expect(document.querySelector(".sub-results-table table")).toBe(table);
+ expect(table.parentElement).not.toHaveAttribute("inert");
+ expect(otherAdd).toBeEnabled();
+ expect(within(otherRow).getByRole("button",{name:"检测 Owned site Channel 27"})).toBeEnabled();
+ expect(within(otherRow).getByRole("switch")).toBeEnabled();
+ await user.click(otherAdd);
+ await user.click(within(await screen.findByRole("dialog",{name:"添加到渠道"},patience)).getByRole("button",{name:"关闭添加渠道"}));
+ const batchButton=screen.getByRole("button",{name:"检测全部模型 · 27 个渠道"});
+ expect(batchButton).toBeEnabled();
+ await user.click(batchButton);
+ expect(screen.queryByRole("dialog",{name:"核对批量检测范围"})).not.toBeInTheDocument();
  await act(async()=>finish(Response.json({...readyPage(25),revision:"after-import",read_at_ms:3})));
+ await screen.findByRole("dialog",{name:"核对批量检测范围"},patience);
  await waitFor(()=>expect(table.parentElement).not.toHaveAttribute("inert"));
  expect(screen.getByText("Channel 26",{selector:"strong"}).closest("tr")).toBe(row);
- expect(document.querySelector(".sub-pagination")).toHaveTextContent("2 / 3");
-});
+ expect(document.querySelector(".sub-pagination")).toHaveTextContent("2 / 2");
+}, 45000);

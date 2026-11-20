@@ -170,6 +170,9 @@
 .management-query {flex:1 1 19rem;position:relative}
 .management-query .search-field {flex:1 1 auto;min-width:0;max-width:25rem}
 .management-actions {flex:0 1 auto;flex-wrap:wrap}
+.channel-add-receipts {display:grid;gap:6px;margin-block:0 12px}
+.channel-add-receipt {display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:6px 10px;border:1px solid var(--line);border-radius:7px;font-size:13px}
+.channel-add-receipt > span {flex:1;min-width:min(180px,100%);overflow-wrap:anywhere}
 .management-toolbar :is(.search-field,.select-field,.button) {min-height:34px}
 .management-toolbar .select-field select {text-overflow:ellipsis;max-width:8rem}
 .workspace .sub-results-table {max-width:100%;border-top:1px solid var(--line)}

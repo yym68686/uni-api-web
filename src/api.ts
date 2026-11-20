@@ -166,9 +166,11 @@ export async function analyticsRequest<T>(connection: Connection,path: string,si
 }
 
 let controlWriteGeneration = 0;
+let blockingControlWriteGeneration = 0;
 export const currentControlWriteGeneration = () => controlWriteGeneration;
+export const currentBlockingControlWriteGeneration = () => blockingControlWriteGeneration;
 
-export async function controlRequest<T>(path:string,init:RequestInit={}):Promise<T>{
+export async function controlRequest<T>(path:string,init:RequestInit={}, { backgroundChannelAdd = false } = {}):Promise<T>{
  const read=!init.method || init.method.toUpperCase()==="GET";
  return withRequestDeadline(init.signal, read ? 30_000 : 120_000, !read, async (signal, requestId, responseReceived) => {
  const currentManagement=read && path.startsWith("/v1/channel-management/query?") && init.cache==="no-cache" && new Headers(init.headers).get("X-Console-Current-Validation")==="1";
@@ -190,6 +192,9 @@ export async function controlRequest<T>(path:string,init:RequestInit={}):Promise
  const rechargeOperation=path.includes("/recharge/");
  if(!read && !syncQueued && !rechargeOperation && typeof window !== "undefined") {
    controlWriteGeneration++;
+   const isBackgroundAdd = backgroundChannelAdd && init.method?.toUpperCase() === "POST" &&
+     (path === "/v1/sub2api/channels" || path === "/v1/channel-management");
+   if (!isBackgroundAdd) blockingControlWriteGeneration = controlWriteGeneration;
    window.dispatchEvent(new Event("uni-console-control-write"));
  }
  phase="body_json";

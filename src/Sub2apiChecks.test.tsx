@@ -283,7 +283,7 @@ it.each([false,true])("imports sub2api aliases independently of originals (keep 
   await waitFor(()=>expect(pendingPageReads.length).toBeGreaterThan(0));
   expect(document.querySelector(".sub-results-table table")).toBe(table);
   expect(document.querySelector(".sub-account-rows [role=listitem]")).toBe(accountRow);
-  expect(table.parentElement).toHaveAttribute("inert");
+  expect(table.parentElement).not.toHaveAttribute("inert");
   expect(screen.queryByRole("status",{name:"加载渠道检测"})).not.toBeInTheDocument();
   await act(async()=>{for(const resolve of pendingPageReads)resolve(Response.json({data}));});
   await waitFor(()=>expect(table.parentElement).not.toHaveAttribute("inert"));

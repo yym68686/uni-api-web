@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ConfiguredChannelDialog } from "./ChannelRoutes";
 import type { ManagedChannel } from "./channelManagement";
+import type { ConfiguredChannelAddDraft, SubmitChannelAdd } from "./channelAdd";
 
 afterEach(() => vi.unstubAllGlobals());
 const passedModels=(source_id:string,provider:string,models:string[])=>models.map(model=>({source_id,provider,kind:"model",model,fingerprint:"",state:"done",message:"",history:{},result:{model,checked_at:1,availability:{status:"success"}}}));
@@ -824,4 +825,34 @@ it("retains a previously saved warning model when editing and permits reselectin
  await waitFor(()=>expect(box).toBeEnabled());expect(box).toBeChecked();
  expect(box.closest("label")).toHaveTextContent("成功，但缺少结束事件");
  const user=userEvent.setup();await user.click(box);expect(box).not.toBeChecked();expect(box).toBeEnabled();await user.click(box);expect(box).toBeChecked();
+});
+
+it("hands a native addition and its draft to the background submitter", async () => {
+  const item = {
+    kind: "configured", source_id: "source", source_name: "Fugue",
+    provider: "native", name: "native", models: ["gpt-5.5"],
+  } as ManagedChannel;
+  const fetch = vi.fn(async (input: string) => {
+    if (input.includes("channel-options")) return Response.json({
+      revision: "r1", keys: [{ key_id: "k1", position: 1, prefix: "masked" }], channels: [],
+    });
+    return Response.json({
+      data: input.endsWith("/channel-management/checks") ? passedModels("source", "native", item.models) : [],
+      unavailable_keys: [], unavailable_sources: [],
+    });
+  });
+  vi.stubGlobal("fetch", fetch);
+  const submitAdd = vi.fn<SubmitChannelAdd<ConfiguredChannelAddDraft>>(() => true);
+  render(<QueryClientProvider client={new QueryClient()}><ConfiguredChannelDialog item={item} close={() => {}} submitAdd={submitAdd} /></QueryClientProvider>);
+  const user = userEvent.setup();
+  await user.selectOptions(await screen.findByLabelText("添加到 API key"), "k1");
+  const submit = screen.getByRole("button", { name: "添加到渠道" });
+  await waitFor(() => expect(submit).toBeEnabled());
+  const reads = fetch.mock.calls.length;
+  await user.click(submit);
+  expect(submitAdd).toHaveBeenCalledOnce();
+  const [request] = submitAdd.mock.lastCall!;
+  expect(request).toMatchObject({ path: "/v1/channel-management", draft: { source: "source", key: "k1", models: ["gpt-5.5"] } });
+  expect(JSON.parse(request.body)).toMatchObject({ provider: "native", api_key_id: "k1", revision: "r1", models: ["gpt-5.5"] });
+  expect(fetch).toHaveBeenCalledTimes(reads);
 });

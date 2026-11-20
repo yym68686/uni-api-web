@@ -9,6 +9,7 @@ import { Plus, X } from "lucide-react";
 import { controlRequest } from "./api";
 import { Spinner } from "./ui";
 import { LoadingIndicator } from "./LoadingIndicator";
+import type { ConfiguredChannelAddDraft, SubmitChannelAdd } from "./channelAdd";
 import { ChannelBatchApply } from "./ChannelBatchApply";
 import type { BatchPart, BatchDraft, BatchScope } from "./channelBatch";
 import {
@@ -218,6 +219,8 @@ export function ConfiguredChannelDialog({
   nested = false,
   batchScope,
   prices,
+  initialAdd,
+  submitAdd,
 }: {
   item: ManagedChannel;
   close: () => void;
@@ -226,12 +229,15 @@ export function ConfiguredChannelDialog({
   nested?: boolean;
   batchScope?: BatchScope;
   prices?: ModelPrice[];
+  initialAdd?: ConfiguredChannelAddDraft;
+  submitAdd?: SubmitChannelAdd<ConfiguredChannelAddDraft>;
 }) {
   const client = useQueryClient();
   const members = channelMembers(group);
   const toolChecks = useConfiguredChecks();
   const inventory = useChannelManagement();
-  const [memberId, setMemberId] = useState(members.some(m => m.source_id === initialSourceId) ? initialSourceId! : members[0].source_id);
+  const sourceId = initialAdd?.source || initialSourceId;
+  const [memberId, setMemberId] = useState(members.some(m => m.source_id === sourceId) ? sourceId! : members[0].source_id);
   const member = members.find((m) => m.source_id === memberId) || members[0];
   // A site binding carries identity only and may have an empty model list.
   // Hydrate from the already-loaded live inventory instead of treating it as
@@ -243,8 +249,8 @@ export function ConfiguredChannelDialog({
   const keyDirectory = keyDirectories[sources.indexOf(item.source_id)];
   const routes = useAllChannelRoutes(sources);
   const counts = managedRouteCount(group, sources, routes);
-  const [adding, setAdding] = useState(false);
-  const modeChosen = useRef(false);
+  const [adding, setAdding] = useState(!!initialAdd);
+  const modeChosen = useRef(!!initialAdd);
   useEffect(() => {
     if (!modeChosen.current && counts && !counts.partial) {
       setAdding(counts.count === 0);
@@ -255,8 +261,8 @@ export function ConfiguredChannelDialog({
   const toolDefaultsPending=toolChecks.isPending || accounts.isPending;
   const toolDefaultsError=toolChecks.isError || accounts.isError;
   const initializedEdit = useRef("");
-  const [selectedOverride, setSelected] = useState<string[]|null>(null);
-  const [aliases, setAliases] = useState<ModelAlias[]>([]);
+  const [selectedOverride, setSelected] = useState<string[]|null>(initialAdd?.models || null);
+  const [aliases, setAliases] = useState<ModelAlias[]>(initialAdd?.aliases || []);
   const modelOptions = [
     ...new Set([...item.models, ...(selectedOverride||[]), ...aliases.map(a=>a.upstream), ...SUB_MODELS,
       ...providerRoutes(routes[sources.indexOf(item.source_id)]?.data?.data||[],[item.provider]).flatMap(r=>[r.model,r.upstream_model||r.model]),
@@ -268,15 +274,15 @@ export function ConfiguredChannelDialog({
   const canSelectModel=(model:string)=>!toolDefaultsPending&&!toolDefaultsError&&modelIsAvailable(allChecks.find(c=>c.model===model));
   const selected=selectedOverride ?? item.models.filter(model=>canSelectModel(model)&&modelIsDefaultSelected(allChecks.find(c=>c.model===model))&&!toolUseFailed(toolTarget,model));
   const mapping = aliasMappings(aliases, selected);
-  const [key, setKey] = useState("");
-  const [position, setPosition] = useState(1);
-  const [perModel, setPerModel] = useState(false);
+  const [key, setKey] = useState(initialAdd?.key || "");
+  const [position, setPosition] = useState(initialAdd?.position ?? 1);
+  const [perModel, setPerModel] = useState(initialAdd?.perModel ?? false);
   const [modelPositions, setModelPositions] = useState<Record<string, number>>(
-    {},
+    initialAdd?.modelPositions || {},
   );
   const activePositions = perModel ? modelPositions : {};
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(initialAdd?.error || "");
   const [success, setSuccess] = useState("");
   function beginEdit(member: ManagedChannel, rows: ChannelRoute[]) {
     modeChosen.current = true;
@@ -391,38 +397,22 @@ export function ConfiguredChannelDialog({
       !keyDirectory?.data?.keys.some(k => k.key_id === key) ||
       !options.data?.keys.some(k => k.key_id === key) ||
       !mapping.models.length ||
+      mapping.models.some(m => (activePositions[m] ?? Math.min(position, positions)) > modelPositionLimit(m, options.data?.channels || [], editingProvider)) ||
       !options.data
     )
       return;
-    setBusy(true);
-    setError("");
-    setSuccess("");
-    try {
-      const result = await controlRequest<{ message: string }>(
-        "/v1/channel-management",
-        {
-          method: "POST",
-          signal: AbortSignal.timeout(60000),
-          body: JSON.stringify({
-            source_id: item.source_id,
-            provider: item.provider,
-            ...(editingProvider ? { edit_provider: editingProvider } : {}),
-            api_key_id: key,
-            revision: options.data.revision,
-            models: selected,
-            model_mappings: mapping.mappings,
-            position: Math.min(position, positions),
-            positions: selectedModelPositions(
-              mapping.models,
-              activePositions,
-              Math.min(position, positions),
-            ),
-          }),
-        },
-      );
-      setSuccess(result.message);
-      setAdding(false);
-      close();
+    const body = JSON.stringify({
+      source_id: item.source_id,
+      provider: item.provider,
+      ...(editingProvider ? { edit_provider: editingProvider } : {}),
+      api_key_id: key,
+      revision: options.data.revision,
+      models: selected,
+      model_mappings: mapping.mappings,
+      position: Math.min(position, positions),
+      positions: selectedModelPositions(mapping.models, activePositions, Math.min(position, positions)),
+    });
+    const refresh = () => {
       void Promise.all(
         [
           "channel-management",
@@ -431,8 +421,33 @@ export function ConfiguredChannelDialog({
           "control-catalog",
           "sub2api-imports",
           "channel-controls",
+          "configured-import-options",
         ].map((name) => client.invalidateQueries({ queryKey: [name] })),
       );
+    };
+    if (!editingProvider && submitAdd) {
+      if (!submitAdd({
+        id: JSON.stringify(["configured", item.source_id, item.provider, key]),
+        label: `${item.source_name} / ${item.name}`,
+        path: "/v1/channel-management",
+        body,
+        draft: { source: item.source_id, key, models: selected, aliases, position, perModel, modelPositions },
+        refresh,
+      })) setError("此渠道已有添加请求在处理，请等待回执。");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    setSuccess("");
+    try {
+      const result = await controlRequest<{ message: string }>(
+        "/v1/channel-management",
+        { method: "POST", signal: AbortSignal.timeout(60000), body },
+      );
+      setSuccess(result.message);
+      setAdding(false);
+      close();
+      refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "添加失败");
       // Keep the failed revision until the user explicitly reloads, so retrying

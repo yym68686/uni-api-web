@@ -11,6 +11,7 @@ import { ChannelImportKeyFeedback } from "./ChannelImportKeyFeedback";
 import { channelEngineLabel, channelProtocols } from "./channelProtocol";
 import { Spinner } from "./ui";
 import { LoadingIndicator } from "./LoadingIndicator";
+import type { SiteChannelAddDraft, SubmitChannelAdd } from "./channelAdd";
 import { CompactDialogHeader } from "./CompactDialog";
 import { RouteWorkspaceLoading } from "./RouteWorkspaceLoading";
 import { AccountForm } from "./SiteAccountForm";
@@ -101,6 +102,8 @@ function Sub2apiImportForm({
   initialEdit,
   nested = false,
   close,
+  initialAdd,
+  submitAdd,
 }: {
   account: SubAccount;
   target: SubTarget;
@@ -111,6 +114,8 @@ function Sub2apiImportForm({
   initialEdit?: InstalledChannel;
   nested?: boolean;
   close: () => void;
+  initialAdd?: SiteChannelAddDraft;
+  submitAdd?: SubmitChannelAdd<SiteChannelAddDraft>;
 }) {
   const client = useQueryClient();
   const formId = useId();
@@ -170,7 +175,7 @@ function Sub2apiImportForm({
     }
   });
   const [editing, setEditing] = useState<InstalledChannel | null>(null);
-  const [view, setView] = useState<"new" | "existing" | null>(null);
+  const [view, setView] = useState<"new" | "existing" | null>(initialAdd ? "new" : null);
   const [viewSource, setViewSource] = useState("");
   const [viewKey, setViewKey] = useState("");
   const viewSources = [
@@ -233,7 +238,7 @@ function Sub2apiImportForm({
     removing.source_id === item.source_id &&
     removing.api_key_id === item.api_key_id &&
     removing.provider === item.provider;
-  const [modelChoices, setModelChoices] = useState<Record<string, boolean>>({});
+  const [modelChoices, setModelChoices] = useState<Record<string, boolean>>(initialAdd?.modelChoices || {});
   const editChecks = [...checks];
   for (const model of [
     ...installed.flatMap((i) => [
@@ -260,10 +265,10 @@ function Sub2apiImportForm({
             fingerprintFor(check.model)?.status !== "mismatch"),
     )
     .map((check) => check.model);
-  const [aliases, setAliases] = useState<ModelAlias[]>([]);
+  const [aliases, setAliases] = useState<ModelAlias[]>(initialAdd?.aliases || []);
   const [protocolChoices, setProtocolChoices] = useState<
     Record<string, string>
-  >({});
+  >(initialAdd?.protocols || {});
   const mapping = aliasMappings(aliases, originals);
   const models = mapping.models;
   const upstreamModels = [
@@ -301,22 +306,22 @@ function Sub2apiImportForm({
     ),
     (model) => available.includes(model),
   );
-  const [source, setSource] = useState("");
-  const [key, setKey] = useState("");
+  const [source, setSource] = useState(initialAdd?.source || "");
+  const [key, setKey] = useState(initialAdd?.key || "");
   const keyDirectory = keyDirectories[destinationSources.indexOf(source)];
-  const [position, setPosition] = useState(1);
-  const [perModel, setPerModel] = useState(false);
+  const [position, setPosition] = useState(initialAdd?.position ?? 1);
+  const [perModel, setPerModel] = useState(initialAdd?.perModel ?? false);
   const [modelPositions, setModelPositions] = useState<Record<string, number>>(
-    {},
+    initialAdd?.modelPositions || {},
   );
   const activePositions = perModel ? modelPositions : {};
   const initializedPositions = useRef("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(initialAdd?.error || "");
   const [relogin, setRelogin] = useState(false);
   const [success, setSuccess] = useState("");
   const [compactionChoice, setCompactionChoice] = useState<boolean | null>(
-    null,
+    initialAdd?.compactionEnabled ?? null,
   );
   const compactionEnabled =
     compactionChoice ?? target.compaction?.status === "supported";
@@ -607,56 +612,57 @@ function Sub2apiImportForm({
   ) {
     if (
       busy ||
-      (action === "add" && (groupUnavailable || importBlocked || fingerprintLoading)) ||
+      (action === "add" && (groupUnavailable || importBlocked || fingerprintLoading || duplicate || !options.data?.supported)) ||
       (action !== "delete" &&
         (mapping.error ||
           invalidModels.length ||
           missingProtocol ||
+          !models.length ||
+          models.some(m => (activePositions[m] ?? validPosition) > modelPositionLimit(m, options.data?.channels || [], options.data?.provider)) ||
           options.isFetching ||
           options.isError ||
           !options.data?.keys.some((k) => k.key_id === key) ||
           !keyDirectory?.data?.keys.some((k) => k.key_id === key)))
     )
       return;
+    const body = JSON.stringify({
+      account_id: account.id,
+      group_id: target.group_id,
+      source_id: item?.source_id || source,
+      api_key_id: item?.api_key_id || key,
+      ...(action === "add" ? { compaction_enabled: compactionEnabled } : {
+        action, provider: item?.provider || editing?.provider,
+      }),
+      ...(action !== "delete" && {
+        models: originals,
+        protocols,
+        ...(aliases.length || action === "replace" ? { model_mappings: mapping.mappings } : {}),
+        position: validPosition,
+        positions: selectedModelPositions(models, activePositions, validPosition),
+      }),
+      revision: item?.revision || options.data?.revision,
+    });
+    if (action === "add" && submitAdd) {
+      if (!submitAdd({
+        id: JSON.stringify(["site", account.id, target.group_id, source, key]),
+        label: `${account.name} / ${target.name}`,
+        path: "/v1/sub2api/channels",
+        body,
+        draft: {
+          source, key, aliases, position, perModel, modelPositions, protocols, compactionEnabled,
+          modelChoices: Object.fromEntries(checks.map(check => [check.model, originals.includes(check.model)])),
+        },
+        refresh: () => void refresh(),
+      })) setError("此渠道已有添加请求在处理，请等待回执。");
+      return;
+    }
     setBusy(true);
     setError("");
     setSuccess("");
     try {
       const result = await controlRequest<{ message: string }>(
         "/v1/sub2api/channels",
-        {
-          method: action === "add" ? "POST" : "PATCH",
-          signal: AbortSignal.timeout(60000),
-          body: JSON.stringify({
-            ...(action !== "add" ? { action } : {}),
-            account_id: account.id,
-            group_id: target.group_id,
-            source_id: item?.source_id || source,
-            api_key_id: item?.api_key_id || key,
-            ...(action !== "add"
-              ? { provider: item?.provider || editing?.provider }
-              : {}),
-            ...(action !== "delete"
-              ? {
-                  models: originals,
-                  protocols,
-                  ...(aliases.length || action === "replace"
-                    ? { model_mappings: mapping.mappings }
-                    : {}),
-                  position: validPosition,
-                  positions: selectedModelPositions(
-                    models,
-                    activePositions,
-                    validPosition,
-                  ),
-                }
-              : {}),
-            ...(action === "add"
-              ? { compaction_enabled: compactionEnabled }
-              : {}),
-            revision: item?.revision || options.data?.revision,
-          }),
-        },
+        { method: action === "add" ? "POST" : "PATCH", signal: AbortSignal.timeout(60000), body },
       );
       setSuccess(result.message);
       setViewSource(item?.source_id || source);

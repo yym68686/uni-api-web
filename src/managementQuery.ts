@@ -1,6 +1,6 @@
 import { useEffect, useRef, type RefObject } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ApiError, controlRequest, currentControlWriteGeneration } from "./api";
+import { ApiError, controlRequest, currentBlockingControlWriteGeneration, currentControlWriteGeneration } from "./api";
 import { managementReadTrace } from "./managementReadTrace";
 import type { ManagementReadTrace } from "./managementReadTrace";
 import { createManagementReadTriggers, managementReadTrigger } from "./managementReadTrigger";
@@ -298,8 +298,10 @@ export function useManagementPage(
     return () =>
       window.removeEventListener("uni-console-control-write", refresh);
   }, [client, owner]);
+  const queryKey = ["management-query", owner, filters, cursor, ...(includePrices ? ["prices"] : overview ? ["overview"] : [])];
+  const scope = JSON.stringify(queryKey);
   const query = useQuery({
-    queryKey: ["management-query", owner, filters, cursor, ...(includePrices ? ["prices"] : overview ? ["overview"] : [])],
+    queryKey,
     queryFn: async ({ signal }) => {
       const generation = currentControlWriteGeneration();
       const filter = JSON.stringify(filters);
@@ -327,13 +329,20 @@ export function useManagementPage(
   });
   // A matching in-memory snapshot can paint immediately on remount. Keep the
   // last validated page mounted while a new filter or page is read.
-  const displayed = useRef<{owner:string;page:ManagementPage;model:string}|undefined>(undefined);
+  const displayed = useRef<{owner:string;scope:string;page:ManagementPage;model:string}|undefined>(undefined);
   if (owner && query.data && managementPageGeneration.has(query.data) &&
       (displayed.current?.owner !== owner || (!query.isFetching && !query.isError)))
-    displayed.current={owner,page:query.data,model:filters.model};
+    displayed.current={owner,scope,page:query.data,model:filters.model};
   const current = !!owner && !query.isFetching && !query.isError && !!query.data &&
     managementPageGeneration.get(query.data) === currentControlWriteGeneration();
   const previous = displayed.current?.owner===owner?displayed.current:undefined;
+  // Adding a binding doesn't change the identity of existing rows. Keep the
+  // already displayed page interactive, but never expose its stale selection
+  // token as current or enable rows from another filter/page.
+  const shownGeneration = previous && managementPageGeneration.get(previous.page);
+  const backgroundAddRefresh = previous?.scope === scope && shownGeneration !== undefined &&
+    shownGeneration < currentControlWriteGeneration() &&
+    shownGeneration >= currentBlockingControlWriteGeneration();
   useEffect(() => {
     const page = query.data;
     if (!owner || query.isFetching || query.isError || !page) return;
@@ -378,9 +387,18 @@ export function useManagementPage(
   return {
     ...query,
     data: current ? query.data : undefined,
+    readCurrentPage: async (): Promise<ManagementPage> => {
+      if (current && query.data && managementPageGeneration.get(query.data) === currentControlWriteGeneration())
+        return query.data;
+      const result = await query.refetch({ cancelRefetch: false, throwOnError: true });
+      if (!result.data || managementPageGeneration.get(result.data) !== currentControlWriteGeneration())
+        throw Error("渠道结果已变化，请重新读取后再试");
+      return result.data;
+    },
     displayPage: previous?.page,
     displayModel: previous?.model || "",
     updating: !!previous && query.isFetching,
+    backgroundAddRefresh,
   };
 }
 

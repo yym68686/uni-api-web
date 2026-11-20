@@ -24,7 +24,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { ApiError, controlRequest } from "./api";
+import { ApiError, controlRequest, currentControlWriteGeneration } from "./api";
 import { accountBalanceQuery, refreshAccountBalanceAfterLogin } from "./accountBalance";
 import type { AccountBalance as SubAccountBalance } from "./accountBalance";
 import { BalanceAmount } from "./BalanceAmount";
@@ -42,7 +42,7 @@ import { ChannelSettings } from "./ChannelSettings";
 import { ChannelOptimization } from "./ChannelOptimization";
 import { ChannelProtocolSummary } from "./ChannelProtocolSummary";
 import { useManagementPage, readManagementSelection, readManagementOptimizationPreview, managementOptimizationSnapshot, type ManagementNavigation } from "./managementQuery";
-import type { ManagementPagePosition, ManagementSelection } from "./managementQuery";
+import type { ManagementOptimizationPreview, ManagementPagePosition, ManagementSelection } from "./managementQuery";
 import { channelMembers, managementRows, UNASSIGNED_ACCOUNT } from "./channelManagement";
 import type { ManagedChannel, ManagementRow } from "./channelManagement";
 import { ConfiguredChannelDialog } from "./ChannelRoutes";
@@ -80,6 +80,7 @@ import { TableColumns, useTableColumns } from "./TableColumns";
 import { managementColumnsStorageKey, managementOverviewForColumns } from "./managementOverview";
 import { PageBoundary } from "./PageBoundary";
 import { RouteWorkspaceLoading } from "./RouteWorkspaceLoading";
+import type { ChannelAddDraft, ChannelAddRequest, ConfiguredChannelAddDraft, SiteChannelAddDraft } from "./channelAdd";
 
 const SiteAccountSettings = lazy(() => import("./SiteAccountSettings").then(m => ({default: m.SiteAccountSettings})));
 const Sub2apiImport = lazy(() => import("./Sub2apiImport").then(m => ({default: m.Sub2apiImport})));
@@ -843,6 +844,17 @@ function ManagementChannelDrawer({
 
 import { WorkbenchDisclosure, WorkbenchNotice, WorkbenchTabs } from "./Workbench";
 
+type SiteImportDialog = { account: SubAccount; target: SubTarget; configured?: ManagedChannel; draft?: SiteChannelAddDraft };
+type ConfiguredImportDialog = { item: ManagedChannel; draft?: ConfiguredChannelAddDraft };
+type ChannelAddReceipt = {
+  id: string;
+  label: string;
+  message: string;
+  state: "pending" | "success" | "error";
+  recovery?: { site: SiteImportDialog } | { configured: ConfiguredImportDialog };
+};
+const noAddReceipts: ChannelAddReceipt[] = [];
+
 export function Sub2apiChecks({ user = "account", initialPosition, onPositionChange, onRouting }: {
   user?: string;
   initialPosition?: ManagementPagePosition;
@@ -863,7 +875,9 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   const [managementPreset, setManagementPreset] = useState<keyof typeof managementPresets>("operations");
   const [customColumns, setCustomColumns] = useTableColumns(managementColumnsStorageKey, managementColumnChoices);
   const activeColumns: readonly ManagementColumn[] = customColumns ?? managementPresets[managementPreset];
-  const pageQuery=useManagementPage(user,filters,cursor,navigation,activeColumns.includes("price"),managementOverviewForColumns(filters.model,activeColumns));
+  const includePrices = activeColumns.includes("price");
+  const overview = managementOverviewForColumns(filters.model, activeColumns);
+  const pageQuery=useManagementPage(user,filters,cursor,navigation,includePrices,overview);
   const navigatePage = (action: "previous" | "next", token?: string) => {
     if (!token) return;
     navigation.current = { owner: user, filter: JSON.stringify(filters), cursor: token, action, started: performance.now() };
@@ -871,11 +885,11 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   };
   const pageData=pageQuery.data;
   const displayedPage=pageQuery.displayPage;
-  const tablePending=!!displayedPage && !pageData;
+  const usablePage=pageData || (pageQuery.backgroundAddRefresh ? displayedPage : undefined);
+  const tablePending=!!displayedPage && !usablePage;
   const tableModel=pageQuery.displayModel;
-  // These controls are not the answer to the current row filter. Preserve
-  // their mounted state while the next page is read. Previous results below
-  // remain explicitly marked as updating and cannot authorize any action.
+  // Keep controls mounted during page changes. An earlier scope cannot
+  // authorize any action; a background add may retain only its matching page.
   const metadataRef=useRef<{owner:string;accounts:SubAccount[];rates:number[];platforms:string[];models:string[];detectionModels:string[];readAt:number}|undefined>(undefined);
   if(pageData)metadataRef.current={owner:user,accounts:pageData.accounts,rates:pageData.rates,platforms:pageData.platforms,models:pageData.models,detectionModels:pageData.detection_models,readAt:pageData.read_at_ms};
   const metadata=metadataRef.current?.owner===user?metadataRef.current:undefined;
@@ -925,7 +939,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   const [form, setForm] = useState<{ account: SubAccount | null } | null>(null);
   const [settingsAccount, setSettingsAccount] = useState<SubAccount | null>(null);
   const setPage=(_page:number)=>setCursorState({filter:filterKey,cursor:""});
-  const refreshPage=()=>{void progressQuery.refetch();void pageQuery.refetch();void detection.refetch();};
+  const refreshPage=()=>{void progressQuery.refetch();void pageQuery.refetch({cancelRefetch:false});void detection.refetch();};
   const [modelSelectionRevision, setModelSelectionRevision] = useState(0);
   const {
     search,
@@ -960,8 +974,8 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
     setFilters((v) => ({ ...v, quality }));
   const setPlatform = (platform: string) =>
     setFilters((v) => ({ ...v, platform }));
-  const resultsUnavailable = !pageData;
-  const resultsReadFailed = pageQuery.isError;
+  const resultsUnavailable = !usablePage;
+  const resultsReadFailed = pageQuery.isError && !usablePage;
   const optimizationRoutes = displayedPage?.context.routes || {};
   const routeSources=Object.keys(optimizationRoutes);
   const routeQueries=routeSources.map(source=>({data:optimizationRoutes[source]}));
@@ -969,16 +983,55 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   // Keep the vocabulary selectable during a new query; no previous result
   // rows, counts or eligibility are rendered as the new filter's answer.
   const filterModels=[...new Set([...(metadata?.models || SUB_MODELS),...(model?[model]:[])])];
-  const [configuredDialog, setConfiguredDialog] = useState<ManagedChannel | null>(null);
+  const [configuredDialog, setConfiguredDialog] = useState<ConfiguredImportDialog | null>(null);
   const [managementDetail, setManagementDetail] = useState<ManagementRow | null>(null);
   const [filterTab, setFilterTab] = useState("conditions");
   const managementColumns = customColumns ?? managementPresets[managementPreset].filter(id => id !== "model" || !!tableModel);
   const columnView = customColumns ? "custom" : managementPreset;
-  const [importing, setImporting] = useState<{
-    account: SubAccount;
-    target: SubTarget;
-    configured?: ManagedChannel;
-  } | null>(null);
+  const [importing, setImporting] = useState<SiteImportDialog | null>(null);
+  // Keep in-flight submissions and drafts in this session's memory across
+  // navigation. They contain identifiers only, never credentials.
+  const receiptKey = ["channel-add-receipts", user];
+  const { data: addReceipts = noAddReceipts } = useQuery<ChannelAddReceipt[]>({
+    queryKey: receiptKey, queryFn: async () => noAddReceipts, enabled: false,
+  });
+  function submitChannelAdd<D extends ChannelAddDraft>(
+    request: ChannelAddRequest<D>,
+    close: () => void,
+    recovery: (draft: D) => ChannelAddReceipt["recovery"],
+  ) {
+    const id = request.id;
+    if (client.getQueryData<ChannelAddReceipt[]>(receiptKey)?.some(item => item.id === id && item.state === "pending")) return false;
+    const base = { id, label: request.label };
+    const report = (receipt: ChannelAddReceipt) =>
+      client.setQueryData<ChannelAddReceipt[]>(receiptKey, (previous = []) =>
+        [...previous.filter(item => item.id !== id), receipt]);
+    report({ ...base, state: "pending", message: "正在后台添加…" });
+    close();
+    void (async () => {
+      try {
+        const result = await controlRequest<{ message?: string }>(request.path, {
+          method: "POST", body: request.body, signal: AbortSignal.timeout(60000),
+        }, { backgroundChannelAdd: true });
+        report({ ...base, state: "success", message: result?.message || "渠道添加成功。" });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "未收到服务端回执。";
+        const rejected = error instanceof ApiError && error.status >= 400 && error.status < 500 && error.status !== 408;
+        report({
+          ...base, state: "error", message: rejected ? `添加失败：${message}` : `添加结果未确认：${message} 请先核对接入状态。`,
+          recovery: rejected ? recovery({ ...request.draft, error: message }) : undefined,
+        });
+      } finally {
+        request.refresh();
+        // The accepted-write event refreshes a mounted management page. Also
+        // mark inactive pages stale if the user navigated away while it ran.
+        void client.invalidateQueries({
+          queryKey: ["management-query", user], type: "inactive", refetchType: "none",
+        });
+      }
+    })();
+    return true;
+  }
   const dialogImports=useImportBindings(!!importing, importing ? {accountId:importing.account.id,groupId:importing.target.group_id} : undefined);
   const imports={data:displayedPage?{data:displayedPage.context.imports,labels:{},unavailable_sources:[]}:undefined};
   const [error, setError] = useState("");
@@ -1006,7 +1059,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   // only define the batch when no individual model is selected.
   const modelsToCheck = model ? [model] : detectionModels;
   const fingerprintModelsToCheck = modelsToCheck.filter(name =>
-    pageData?.context.fingerprint_models.includes(name),
+    usablePage?.context.fingerprint_models.includes(name),
   );
   const allModelsSelected = detectionModels.length === availableModels.length;
   const currentPage=(displayedPage?.offset || 0)/25;
@@ -1016,23 +1069,31 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   const selectionRead=useRef(false);
   const selectionRequest=useRef<AbortController|null>(null);
   const selectionScope=useRef("");
-  const previewScope=useRef("");
-  selectionScope.current=JSON.stringify([user,filterKey,cursor,pageData?.revision]);
-  previewScope.current=JSON.stringify([user,filterKey,cursor]);
+  selectionScope.current=JSON.stringify([user,filterKey,cursor,includePrices,overview]);
   useEffect(()=>{
     selectionRequest.current?.abort();
     return ()=>{selectionRequest.current?.abort();};
-  },[user,filterKey,cursor]);
-  async function completeSelection(preview=false){
-    if(!pageData)throw Error("请先读取最新渠道结果");
+  },[user,filterKey,cursor,includePrices,overview]);
+  async function completeSelection(preview=false, expectedRevision?: string){
+    if(!usablePage)throw Error("请先读取最新渠道结果");
     selectionRequest.current?.abort();
-    const controller=new AbortController(),scope=preview?previewScope.current:selectionScope.current;
+    const controller=new AbortController(),scope=selectionScope.current;
     selectionRequest.current=controller;
     try{
-      const selected=preview
-        ? await readManagementOptimizationPreview(user,filters,controller.signal)
-        : await readManagementSelection(filters,pageData,controller.signal);
-      if(scope!==(preview?previewScope.current:selectionScope.current))throw Error("筛选或渠道结果已变化，请重新选择操作");
+      let selected: ManagementSelection | ManagementOptimizationPreview;
+      if (preview) selected = await readManagementOptimizationPreview(user,filters,controller.signal);
+      else {
+        const current = await pageQuery.readCurrentPage();
+        controller.signal.throwIfAborted();
+        if(scope!==selectionScope.current || (expectedRevision && current.revision!==expectedRevision))
+          throw Error("筛选或渠道结果已变化，请重新选择操作");
+        const generation = currentControlWriteGeneration();
+        selected = await readManagementSelection(filters,current,controller.signal);
+        if (generation !== currentControlWriteGeneration())
+          throw Error("渠道结果已变化，请重新选择操作");
+      }
+      if(scope!==selectionScope.current)
+        throw Error("筛选或渠道结果已变化，请重新选择操作");
       return selected;
     }finally{if(selectionRequest.current===controller)selectionRequest.current=null;}
   }
@@ -1086,7 +1147,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   }
   type CheckKind = "check" | "quality" | "compaction" | "tool-use";
   type BatchKind = CheckKind | "fingerprint";
-  type BatchPreview = { kind: BatchKind; scope: string; total: number; items: {id:string; label:string; models:string[]}[]; targets: CheckSelection; fingerprintTargets: ReturnType<typeof fingerprintTargets> };
+  type BatchPreview = { kind: BatchKind; scope: string; revision: string; total: number; items: {id:string; label:string; models:string[]}[]; targets: CheckSelection; fingerprintTargets: ReturnType<typeof fingerprintTargets> };
   const [batchPreview,setBatchPreview] = useState<BatchPreview|null>(null);
   const [batchReceipts,setBatchReceipts] = useState<{label:string;accepted:boolean;message:string}[]>([]);
   const submittingBatch = useRef(false);
@@ -1108,7 +1169,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
       (!target.models && pending(target.state) && !pending(target.compaction_state || "") && !pending(target.tool_use_state || ""));
   };
   const canCheck = (account: SubAccount, target: SubTarget, kind: CheckKind, configured?: ManagedChannel) => {
-    if (!pageData) return false;
+    if (!usablePage) return false;
     if ((kind === "compaction" || kind === "tool-use") && model && !isCapabilityCheckModel(model)) return false;
     const native = !account.id && configured;
     if (native ? !channelMembers(configured).length
@@ -1188,7 +1249,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
     return ready;
   }
   async function batch(kind: BatchKind){
-    if(selectionRead.current || !pageData || detection.isPending || detection.isError || detection.busy)return;
+    if(selectionRead.current || !usablePage || detection.isPending || detection.isError || detection.busy)return;
     selectionRead.current=true;setReadingSelection(true);setError("");setFingerprintsSubmitted(0);setBatchReceipts([]);
     try{
       const selected=await completeSelection();
@@ -1203,7 +1264,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
         models:kind==="fingerprint" ? [...new Set(batchFingerprintTargets(row).filter(value=>allowed.has(fingerprintKey(value))).map(value=>value.model))]
           : kind==="check" ? modelsToCheck : kind==="quality" ? ["gpt-6-astra"] : [kind==="compaction" ? "压缩能力" : "Tool use 能力"],
       }));
-      setBatchPreview({kind,scope:batchScope,total:selected.total,items,targets,fingerprintTargets:targetSet});
+      setBatchPreview({kind,scope:batchScope,revision:selected.revision,total:selected.total,items,targets,fingerprintTargets:targetSet});
     }
     catch(e){setError(e instanceof Error?e.message:"完整筛选结果读取失败");}
     finally{selectionRead.current=false;setReadingSelection(false);}
@@ -1211,14 +1272,13 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
   async function confirmBatch() {
     const plan = batchPreview;
     if (!plan || submittingBatch.current) return;
-    if (plan.scope !== batchScope || !pageData || detection.busy || detection.isError) {
+    if (plan.scope !== batchScope || !usablePage || detection.busy || detection.isError) {
       setBatchPreview(null); setError("筛选或检测状态已变化，请重新预览。"); return;
     }
     submittingBatch.current=true;setBatchSubmitting(true);
     try {
       // Reverify the full page-selection token just before the first write.
-      const verified=await completeSelection();
-      if (verified.revision !== pageData.revision) throw Error("渠道已变化，请重新预览。");
+      const verified=await completeSelection(false, plan.revision);
       if (plan.kind === "fingerprint") {
         const fresh = preparedFingerprints(verified).map(fingerprintKey).sort().join("\n");
         if (fresh !== plan.fingerprintTargets.map(fingerprintKey).sort().join("\n")) throw Error("指纹待检测范围已变化，请重新预览。");
@@ -1259,6 +1319,18 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
         </div>
         {onRouting && <button type="button" className="button small" onClick={onRouting}>路由顺序</button>}
       </div>
+      {!!addReceipts.length && <div className="channel-add-receipts" aria-label="渠道添加回执">
+        {addReceipts.map(receipt => <div key={receipt.id} className="channel-add-receipt">
+          <span role={receipt.state === "error" ? "alert" : "status"}><strong>{receipt.label}</strong> · {receipt.message}</span>
+          {receipt.recovery && <button type="button" className="button small" onClick={() => {
+            const recovery = receipt.recovery!;
+            if ("site" in recovery) setImporting(recovery.site);
+            else setConfiguredDialog(recovery.configured);
+          }}>恢复添加配置</button>}
+          {receipt.state !== "pending" && <button type="button" className="icon-button" aria-label={`关闭 ${receipt.label} 的添加回执`} onClick={() =>
+            client.setQueryData<ChannelAddReceipt[]>(receiptKey, (previous = []) => previous.filter(item => item.id !== receipt.id))}><X size={14} /></button>}
+        </div>)}
+      </div>}
       <WorkbenchTabs label="管理视图" value={section} onChange={setSection} tabs={[["channels","渠道"],["sites","站点账号"]]} />
       <section className="data-panel sub-accounts management-sites" id="management-sites" aria-label="站点账号设置" hidden={section !== "sites"}>
         <div className="data-heading">
@@ -1680,7 +1752,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                 </select><ChevronDown size={13}/>
               </label>
               <label className="select-field">
-                <select aria-label="模型指纹筛选" disabled={!pageData} value={fingerprint} onChange={e => {setFilters(v => ({...v,fingerprint:e.target.value}));setPage(0);}}>
+                <select aria-label="模型指纹筛选" disabled={!usablePage} value={fingerprint} onChange={e => {setFilters(v => ({...v,fingerprint:e.target.value}));setPage(0);}}>
                   <option value="">全部模型指纹</option>
                   {Object.entries(fingerprintLabels).map(([value,label])=><option key={value} value={value}>{label}</option>)}
                 </select><ChevronDown size={13}/>
@@ -1786,7 +1858,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
               aria-label="刷新渠道管理"
               title="刷新数据"
               onClick={refreshPage}
-              disabled={query.isFetching}
+              disabled={query.isFetching && !pageQuery.backgroundAddRefresh}
             >
               <RefreshCw size={15} className={query.isFetching || pageQuery.updating ? "spin" : ""} />
             </button>
@@ -1808,13 +1880,13 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
             </div>
             <CreateChannel sources={sources.data?.data || []} />
             <ChannelOptimization
-              disabled={!pageData || !total || readingSelection}
+              disabled={!usablePage || !total || readingSelection}
               snapshot={async()=>managementOptimizationSnapshot(await completeSelection(true),filters)}
             />
             <WorkbenchNotice label="渠道管理状态" messages={[
               !!fingerprintsSubmitted && `已提交 ${fingerprintsSubmitted} 项指纹检测`,
               pageQuery.updating && "正在更新渠道结果，暂显示更新前内容…",
-              resultsReadFailed && `暂时无法读取渠道：${pageQuery.error?.message || "请重试"}`,
+              pageQuery.isError && `${resultsReadFailed ? "暂时无法读取渠道" : "暂时无法更新渠道"}：${pageQuery.error?.message || "请重试"}`,
             ]} />
           </div>
         </div>
@@ -1828,7 +1900,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
           </Empty>
         ) : (
           <>
-            <div className="table-scroll sub-results-table" tabIndex={0} role="region" aria-label="渠道管理表，可横向滚动" aria-busy={tablePending} aria-hidden={resultsReadFailed || undefined} inert={tablePending} style={resultsReadFailed?{visibility:"hidden"}:undefined}>
+            <div className="table-scroll sub-results-table" tabIndex={0} role="region" aria-label="渠道管理表，可横向滚动" aria-busy={pageQuery.updating} aria-hidden={resultsReadFailed || undefined} inert={tablePending} style={resultsReadFailed?{visibility:"hidden"}:undefined}>
               <table className="channel-table check-table sub-table" data-columns={columnView}>
                 <thead>
                   <tr>
@@ -1850,7 +1922,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                       const overviewChecks = scopedModels?.length ? [...new Set(scopedModels)].map(model => checkByModel.get(model) || {model,state:"idle",message:"",result:null}) : checks;
                       const scopeNote = scopedModels?.length && checks.length ? `本次已选 ${overviewChecks.length} 个模型 · 全部 ${checks.length} 个模型记录可在详情查看` : undefined;
                       const liveGroup = progressByAccount.get(account.id)?.progress?.groups.find(g=>g.group_id===t.group_id);
-                      const openDrawer = () => { if (pageData) setManagementDetail(managementRow); };
+                      const openDrawer = () => { if (usablePage) setManagementDetail(managementRow); };
                       return (
                       <tr
                         key={id}
@@ -1965,7 +2037,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                             className="button small"
                             disabled={tablePending}
                             onClick={() =>
-                              configured ? setConfiguredDialog(configured) : setImporting({
+                              configured ? setConfiguredDialog({item:configured}) : setImporting({
                                 account,
                                 target: t,
                                 configured,
@@ -1998,15 +2070,15 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                 </tbody>
               </table>
             </div>
-            <div className="table-footer" aria-busy={tablePending}>
+            <div className="table-footer" aria-busy={pageQuery.updating}>
               <span>
-                {tablePending ? <LoadingIndicator size="inline" label="核对当前结果" /> : <>共 {total} 个渠道 · {eligibleCount} 个可发起检测</>}
+                {pageQuery.updating ? <LoadingIndicator size="inline" label="核对当前结果" /> : <>共 {total} 个渠道 · {eligibleCount} 个可发起检测</>}
               </span>
               <div className="sub-pagination">
                 <button
                   className="button small"
-                  disabled={!pageData?.previous_cursor}
-                  onClick={() => navigatePage("previous", pageData?.previous_cursor)}
+                  disabled={!usablePage?.previous_cursor}
+                  onClick={() => navigatePage("previous", usablePage?.previous_cursor)}
                 >
                   上一页
                 </button>
@@ -2015,8 +2087,8 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                 </span>
                 <button
                   className="button small"
-                  disabled={!pageData?.next_cursor}
-                  onClick={() => navigatePage("next", pageData?.next_cursor)}
+                  disabled={!usablePage?.next_cursor}
+                  onClick={() => navigatePage("next", usablePage?.next_cursor)}
                 >
                   下一页
                 </button>
@@ -2034,11 +2106,16 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
           configured={importing.configured}
           target={accounts.find(a => a.id === importing.account.id)?.targets.find(t => t.group_id === importing.target.group_id) || importing.target}
           prices={prices.data?.data}
+          initialAdd={importing.draft}
+          submitAdd={request => submitChannelAdd(request, () => setImporting(null), draft => ({site: {...importing,draft}}))}
           close={() => setImporting(null)}
         />
         </Suspense></PageBoundary>
       )}
-      {configuredDialog && <ConfiguredChannelDialog item={configuredDialog} prices={prices.data?.data} close={() => setConfiguredDialog(null)} />}
+      {configuredDialog && <ConfiguredChannelDialog item={configuredDialog.item} prices={prices.data?.data}
+        initialAdd={configuredDialog.draft}
+        submitAdd={request => submitChannelAdd(request, () => setConfiguredDialog(null), draft => ({configured: {...configuredDialog,draft}}))}
+        close={() => setConfiguredDialog(null)} />}
       {managementDetail && (
         <ManagementChannelDrawer
           row={managementDetail}
@@ -2048,7 +2125,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
             const ready = managementDetail;
             setManagementDetail(null);
             if (ready.configured) {
-              setConfiguredDialog(ready.configured);
+              setConfiguredDialog({item:ready.configured});
             } else {
               setImporting({
                 account: ready.account,
