@@ -166,9 +166,13 @@ it.each(["site", "native"])(
     expect(
       within(key).getByRole("option", { name: "Key 1 · do-masked-1" }),
     ).toBeInTheDocument();
-    await act(async () => {
-      for (const resolve of keyReads) resolve(Promise.reject(new DOMException("signal timed out", "TimeoutError")));
-    });
+    const rejectKeyReads = () => {
+      for (const resolve of keyReads.splice(0)) resolve(Promise.reject(new DOMException("signal timed out", "TimeoutError")));
+    };
+    expect(keyReads).toHaveLength(2);
+    await act(async () => rejectKeyReads());
+    await waitFor(() => expect(keyReads).toHaveLength(2));
+    await act(async () => rejectKeyReads());
     await screen.findByText("暂时无法更新 API key，已保留上次列表；保存前会核对最新配置。");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.queryByText("signal timed out")).not.toBeInTheDocument();
@@ -273,11 +277,13 @@ it("reuses a complete login-scoped directory, normalizes source prefixes and pre
 it("shows a recoverable cold timeout and revokes cached keys after explicit permission failure", async () => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const fetch = vi.fn().mockRejectedValueOnce(new DOMException("signal timed out", "TimeoutError"))
+    .mockRejectedValueOnce(new DOMException("signal timed out", "TimeoutError"))
     .mockResolvedValueOnce(Response.json({keys:keys("do")}))
     .mockResolvedValueOnce(new Response("来源密钥无管理权限，请检查设置",{status:403}));
   vi.stubGlobal("fetch",fetch);
   render(<QueryClientProvider client={client}><Directory /></QueryClientProvider>);
   expect(await screen.findByRole("alert")).toHaveTextContent("API key 列表暂时无法更新，请稍后重试。");
+  expect(fetch).toHaveBeenCalledTimes(2);
   expect(screen.getByLabelText("directory")).toBeDisabled();
   fireEvent.click(screen.getByRole("button",{name:"重新读取 API key"}));
   await waitFor(()=>expect(screen.getByLabelText("directory")).toBeEnabled());
@@ -286,6 +292,7 @@ it("shows a recoverable cold timeout and revokes cached keys after explicit perm
   await waitFor(()=>expect(screen.getByLabelText("directory")).toBeDisabled());
   expect(screen.getByRole("alert")).toHaveTextContent("来源密钥无管理权限");
   expect(screen.queryByRole("option")).not.toBeInTheDocument();
+  expect(fetch).toHaveBeenCalledTimes(4);
 });
 
 it("keeps a server-cached directory selectable and explains background refresh failure", async () => {

@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { channelReadRecovery } from "./channelReadRecovery";
 import type { SubAccount, SubTarget } from "./Sub2apiChecks";
 import { readSummary } from "./summaryFeed";
 import type { SummaryState } from "./summaryFeed";
@@ -125,6 +126,7 @@ export function summaryAccounts(
 export function useSubGroupAccounts(
   groups: { account_id: string; group_id: number }[],
   enabled = true,
+  recoverReads = false,
 ) {
   const client = useQueryClient();
   const scope = [
@@ -195,7 +197,7 @@ export function useSubGroupAccounts(
     },
     enabled,
     staleTime: 15_000,
-    retry: false,
+    ...(recoverReads ? channelReadRecovery : { retry: false }),
     refetchOnWindowFocus: false,
   });
 }

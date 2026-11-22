@@ -36,7 +36,7 @@ function check(
     },
   };
 }
-function setup() {
+function setup(configuredProvider = "configured-provider") {
   const target = (models: NonNullable<SubTarget["models"]>): SubTarget => ({
     group_id: 1,
     name: "same-group",
@@ -84,7 +84,7 @@ function setup() {
   rows.push(
     ...["gpt-6-astra", "gpt-5.4"].map((model) => ({
       ...rows[0],
-      provider: "configured-provider",
+      provider: configuredProvider,
       model,
       upstream_model: model,
     })),
@@ -172,6 +172,17 @@ async function openDetail(app: ReturnType<typeof setup>, index = 0) {
   await app.user.click(detail.getByRole("button", { name: "模型" }));
   return detail;
 }
+
+it("links the OpenRouter drawer to the official site instead of its source dashboard", async () => {
+  const { user } = setup("openrouter");
+  await user.click(await screen.findByRole("button", {
+    name: "查看 openrouter gpt-6-astra 详情",
+  }));
+  const drawer = within(await screen.findByRole("dialog"));
+  const link = drawer.getByRole("link", { name: "openrouter" });
+  expect(link).toHaveAttribute("href", "https://openrouter.ai/");
+  expect(link).toHaveAttribute("target", "_blank");
+});
 
 it("shows all tested available models in the drawer and isolates same-name providers by source and account", async () => {
   const app = setup();

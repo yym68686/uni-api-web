@@ -76,6 +76,7 @@ export interface OptimizationChange {
   upstream: string;
   action: "add" | "remove" | "migrate";
   reasons: string[];
+  returnedModels?: string[];
   priceDetails?: string[];
   checkedAt: number;
   detectedProtocols?: string[];
@@ -331,10 +332,7 @@ function faults(
   if (!running(e.check.state)) {
     if (e.check.result?.availability.status === "error")
       result.push(["availability", "可用性检测失败"]);
-    if (
-      modelMatchStatus(e.check) === "mismatch" ||
-      modelMatchStatus(e.check) === "invalid"
-    )
+    if (hasModelMismatch(e.check))
       result.push(["match", "返回模型不匹配"]);
     if (assessPrice(e.check, prices).status === "abnormal")
       result.push(["price", "单价异常"]);
@@ -355,6 +353,11 @@ function faults(
   )
     result.push(["compaction", "该模型不支持远程压缩"]);
   return result;
+}
+
+function hasModelMismatch(check: SubModelCheck) {
+  const status = modelMatchStatus(check);
+  return status === "mismatch" || status === "invalid";
 }
 
 export function buildOptimizationPlan(
@@ -547,26 +550,29 @@ export function buildOptimizationPlan(
         const problems = evidence.flatMap((e) =>
           faults(e, upstream, snapshot.prices),
         );
+        const filteredEvidence = evidence.filter((e) =>
+          modelMatchesFilters(e, snapshot.filters, snapshot.prices),
+        );
         const reasons = [
           ...new Set(
-            evidence
-              .filter((e) =>
-                modelMatchesFilters(e, snapshot.filters, snapshot.prices),
-              )
+            filteredEvidence
               .flatMap((e) => faults(e, upstream, snapshot.prices))
               .filter(([event]) => events.includes(event))
               .map(([, reason]) => reason),
           ),
         ];
+        const returnedModels = events.includes("match")
+          ? [...new Set(filteredEvidence.flatMap(({ check }) => {
+              if (running(check.state) || !hasModelMismatch(check)) return [];
+              const model = check.result?.availability.response_model?.trim();
+              return model ? [model] : [];
+            }))]
+          : [];
         const priceDetails = events.includes("price")
           ? [
               ...new Set(
-                evidence
-                  .filter(
-                    (e) =>
-                      !running(e.check.state) &&
-                      modelMatchesFilters(e, snapshot.filters, snapshot.prices),
-                  )
+                filteredEvidence
+                  .filter((e) => !running(e.check.state))
                   .map((e) => assessPrice(e.check, snapshot.prices))
                   .filter((price) => price.status === "abnormal")
                   .map(
@@ -602,6 +608,7 @@ export function buildOptimizationPlan(
                 upstream,
                 action: "remove",
                 reasons,
+                returnedModels,
                 priceDetails,
                 checkedAt,
                 detectedProtocols,

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, RefreshCw, X } from "lucide-react";
 import { controlRequest } from "./api";
+import { channelReadRecovery } from "./channelReadRecovery";
 import { LoadingIndicator } from "./LoadingIndicator";
 import { Spinner } from "./ui";
 import { ConfiguredChannelDialog } from "./ChannelRoutes";
@@ -30,7 +31,7 @@ export function ChannelModelCatalog({ source, provider, revision, ownerKey, memb
   const catalog = useQuery({
     queryKey,
     queryFn: ({ signal }) => controlRequest<Catalog>(path, { signal }),
-    retry: false,
+    ...channelReadRecovery,
     refetchOnWindowFocus: false,
   });
   const inventory = useChannelManagement(!member);
@@ -78,16 +79,22 @@ export function ChannelModelCatalog({ source, provider, revision, ownerKey, memb
     <button className="button" aria-busy={busy === "add"} disabled={!!busy || !name.trim()}>添加到目录</button>
     <button className="settings-icon-button" type="button" aria-label="取消手工添加" disabled={!!busy} onClick={() => setManualOpen(false)}><X size={16} /></button>
   </form>;
-  const feedback = (error || catalog.error) && <div role="alert" className="channel-model-error">
-        {error || catalog.error?.message}{" "}
+  const feedback = error && <div role="alert" className="channel-model-error">
+        {error}{" "}
         <button type="button" className="button small" disabled={!!busy} onClick={() => {
-          setError(""); void onSettingsChanged().then(() => catalog.refetch());
+          setError(""); void onSettingsChanged();
         }}>重新读取配置</button>
       </div>;
   if (item) return <ConfiguredChannelDialog item={item} close={close} submitAdd={submitAdd} prices={prices}
-    catalog={{ models: catalog.data?.models ?? [], ownerKey, actions, extra, feedback, pending: catalog.isPending }} />;
+    catalog={{ models: catalog.data?.models ?? [], ownerKey, actions, extra, feedback, pending: catalog.isPending,
+      read: { error: catalog.error, isFetching: catalog.isFetching || !!busy, refetch: catalog.refetch } }} />;
   return <div className="settings-body">
     <div className="channel-catalog-actions">{actions}</div>{extra}{feedback}
+    {catalog.error && <div role="alert" className="channel-model-error">
+      {catalog.error.message}
+      <button type="button" className="button small" disabled={catalog.isFetching || !!busy}
+        onClick={() => void catalog.refetch({ cancelRefetch: false })}>重新读取目录</button>
+    </div>}
     {inventory.isPending ? <LoadingIndicator size="compact" label="读取渠道接入" /> : <>
       <div role="alert" className="channel-model-error">
         {inventory.error?.message || "渠道接入不可用。"}{" "}

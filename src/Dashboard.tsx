@@ -516,7 +516,7 @@ function Detail({
   const installed = imports?.data?.data.find((item) => item.source_id === row?.source_id && item.provider === row?.provider);
   const hasControls = !!row.source_id && trend.connection.account;
   return (
-    <DetailDrawer key={rowId(row)} title={<SiteLink base={site}>{channelName(row)}</SiteLink>}
+    <DetailDrawer key={rowId(row)} title={<SiteLink base={site} provider={row.provider}>{channelName(row)}</SiteLink>}
       context={[row.source_name || row.source_id, row.upstream_model && row.upstream_model !== row.model ? `${row.upstream_model} → ${row.model}` : row.model].filter(Boolean).join(" · ")}
       close={onClose} closeLabel="关闭详情"
       actions={<><Status row={row} upstreamGroup={upstreamGroup} /><button type="button" className="button small" onClick={() => onLogs(row)}>查看相关日志</button></>}

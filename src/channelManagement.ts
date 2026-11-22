@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { readSummary } from "./summaryFeed";
 import type { SummaryState } from "./summaryFeed";
 import { controlRequest } from "./api";
+import { channelReadRecovery } from "./channelReadRecovery";
 import type { SubAccount, SubTarget } from "./Sub2apiChecks";
 import type { InstalledChannel } from "./sub2apiImports";
 import { SUB_MODELS } from "./sub2apiModels";
@@ -116,7 +117,7 @@ export function configuredToolUseResult(member:ManagedChannel,accounts:SubAccoun
   }
   return {status:"error",checked_at:Math.max(0,...[...entries.values()].map(m=>m.result?.checked_at||0)),attempts:[],models:[...entries.values()]};
 }
-export function useConfiguredChecks(enabled = true) {
+export function useConfiguredChecks(enabled = true, recoverReads = false) {
   const client=useQueryClient();
   type Data={data:ConfiguredCheck[];summary?:SummaryState<ConfiguredCheck>};
   return useQuery({
@@ -130,7 +131,7 @@ export function useConfiguredChecks(enabled = true) {
     },
     enabled, staleTime:30_000,
     refetchInterval: query => !enabled ? false : query.state.data?.data.some(c => ["queued", "running"].includes(c.state)) ? 5000 : 60000,
-    retry: false,
+    ...(recoverReads ? channelReadRecovery : { retry: false }),
   });
 }
 export const channelMembers = (item: ManagedChannel) => item.members || [item];

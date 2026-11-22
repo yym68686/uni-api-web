@@ -14,8 +14,9 @@ export function dashboardURL(base?: string) {
     return new URL("/dashboard", url.origin).href;
   } catch { return undefined; }
 }
-export function SiteLink({ base, children }: { base?: string; children: ReactNode }) {
-  const url = dashboardURL(base);
+export function SiteLink({ base, provider, children }: { base?: string; provider?: string; children: ReactNode }) {
+  // A gateway may supply its own dashboard as the fallback for this channel.
+  const url = provider?.toLowerCase() === "openrouter" ? "https://openrouter.ai/" : dashboardURL(base);
   return url ? <a className="site-link" href={url} target="_blank" rel="noopener noreferrer" onClick={(event) => event.stopPropagation()}>{children}<ArrowUpRight size={14} aria-hidden /></a> : <>{children}</>;
 }
 export function useChannelSites(connection: Connection, installed: InstalledChannel[], enabled = true) {

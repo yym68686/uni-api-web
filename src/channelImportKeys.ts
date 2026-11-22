@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useQueries, useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
 import { ApiError, controlRequest } from "./api";
+import { channelReadRecovery } from "./channelReadRecovery";
 import type { KeyInfo } from "./types";
 
 export interface ChannelImportKeys {
@@ -84,7 +85,7 @@ export function useChannelImportKeys(sources: string[]) {
             return data;
           } catch (error) {
             if (signal.aborted || error instanceof ApiError) throw error;
-            throw new Error("API key 列表暂时无法更新，请稍后重试。");
+            throw new Error("API key 列表暂时无法更新，请稍后重试。", { cause: error });
           }
         },
         initialData: cached?.data,
@@ -94,7 +95,7 @@ export function useChannelImportKeys(sources: string[]) {
           query.state.data?.stale && !query.state.data.refresh_failed
             ? 2000
             : 60_000,
-        retry: false,
+        ...channelReadRecovery,
         refetchOnWindowFocus: false,
       };
     }),

@@ -347,6 +347,9 @@ export function ChannelOptimization({
                         </span>
                         <span>
                           {c.reasons.join("；")}
+                          {!!c.returnedModels?.length && (
+                            <small>返回模型：{c.returnedModels.join("、")}</small>
+                          )}
                           {c.blockedReason && (
                             <strong className="optimization-blocked-reason">
                               {c.blockedReason}

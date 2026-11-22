@@ -7,6 +7,7 @@ import { ChannelImportKeyFeedback } from "./ChannelImportKeyFeedback";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Ellipsis, Plus, X } from "lucide-react";
 import { controlRequest } from "./api";
+import { channelReadRecovery } from "./channelReadRecovery";
 import { Spinner } from "./ui";
 import { LoadingIndicator } from "./LoadingIndicator";
 import type { ConfiguredChannelAddDraft, SubmitChannelAdd } from "./channelAdd";
@@ -46,6 +47,12 @@ import {
   selectedModelPositions,
   modelPositionLimit,
 } from "./ModelPositions";
+
+type AccessRead = {
+  error: Error | null;
+  isFetching: boolean;
+  refetch: (options: { cancelRefetch: boolean }) => Promise<unknown>;
+};
 
 export function ChannelRoutes({
   sourceId,
@@ -240,11 +247,11 @@ export function ConfiguredChannelDialog({
   prices?: ModelPrice[];
   initialAdd?: ConfiguredChannelAddDraft;
   submitAdd?: SubmitChannelAdd<ConfiguredChannelAddDraft>;
-  catalog?: { models: CatalogModel[]; ownerKey?: string; actions: ReactNode; extra: ReactNode; feedback: ReactNode; pending: boolean };
+  catalog?: { models: CatalogModel[]; ownerKey?: string; actions: ReactNode; extra: ReactNode; feedback: ReactNode; pending: boolean; read: AccessRead };
 }) {
   const client = useQueryClient();
   const members = channelMembers(group);
-  const toolChecks = useConfiguredChecks();
+  const toolChecks = useConfiguredChecks(true, !!catalog);
   const inventory = useChannelManagement();
   const sourceId = initialAdd?.source || initialSourceId;
   const [memberId, setMemberId] = useState(members.some(m => m.source_id === sourceId) ? sourceId! : members[0].source_id);
@@ -253,7 +260,7 @@ export function ConfiguredChannelDialog({
   // Hydrate from the already-loaded live inventory instead of treating it as
   // the channel definition or allowing it to hide the saved routes.
   const item = inventory.data?.data.find(m=>m.source_id===member.source_id&&m.provider===member.provider) || member;
-  const accounts = useSubGroupAccounts(boundGroups(item));
+  const accounts = useSubGroupAccounts(boundGroups(item), true, !!catalog);
   const sources = members.map((m) => m.source_id);
   const keyDirectories = useChannelImportKeys(sources);
   const keyDirectory = keyDirectories[sources.indexOf(item.source_id)];
@@ -368,7 +375,7 @@ export function ConfiguredChannelDialog({
       return result;
     },
     enabled: adding && !!key,
-    retry: false,
+    ...channelReadRecovery,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   });
@@ -407,6 +414,7 @@ export function ConfiguredChannelDialog({
       inventory.isPending ||
       !options.data ||
       options.isFetching ||
+      options.isError ||
       initializedEdit.current === `${item.source_id}:${key}:${editingProvider}`
     )
       return;
@@ -418,8 +426,10 @@ export function ConfiguredChannelDialog({
     setSelected(originals);
     setAliases(renamed);
     setModelPositions(currentPositions);
+    const revision = options.data.revision;
+    if (catalog) setDraftRevision(previous => previous ?? revision);
     initializedEdit.current = `${item.source_id}:${key}:${editingProvider}`;
-  }, [editingProvider, options.data, options.isFetching, item, key, inventory.isPending]);
+  }, [editingProvider, options.data, options.isFetching, options.isError, item, key, inventory.isPending, catalog]);
   const positions = mapping.models.length
     ? Math.min(
         ...mapping.models.map(
@@ -642,6 +652,16 @@ export function ConfiguredChannelDialog({
       (catalog.ownerKey ? itemRoutes?.unavailable_keys?.includes(catalog.ownerKey) : !!itemRoutes?.unavailable_keys?.length);
     const loading = !adding && routeQuery?.isPending || !!key && options.isFetching || keyDirectory?.isPending || toolDefaultsPending;
     const controlsBusy = busy || detecting || !adding;
+    const readIssues: { label: string; read: AccessRead }[] = [];
+    function readIssue(label: string, read?: AccessRead, incomplete?: boolean) {
+      if (read && (read.error || incomplete)) readIssues.push({ label, read });
+    }
+    readIssue("模型目录", catalog.read);
+    readIssue("API key 列表", keyDirectory, keyDirectory?.data?.refresh_failed);
+    readIssue("路由列表", routeQuery, snapshotUnavailable);
+    readIssue("接入配置", options);
+    readIssue("模型检测记录", toolChecks);
+    readIssue("站点检测记录", accounts);
     function changeKey(id: string) {
       const existing = providerRoutes(itemRoutes?.data || [], [item.provider]).filter(r => r.api_key_id === id);
       const provider = existing.find(r => r.origin_provider)?.provider || existing[0]?.provider;
@@ -691,22 +711,28 @@ export function ConfiguredChannelDialog({
     </div>;
     const feedback = <>
       {catalog.feedback}
-      {(error || staleDraft || options.error || routeQuery?.error || snapshotUnavailable || keyDirectory?.error || keyDirectory?.data?.refresh_failed) && <div role="alert" className="channel-model-error">
-        {staleDraft ? "配置已变化，请重新读取。" : error || options.error?.message || routeQuery?.error?.message || keyDirectory?.error?.message || "接入配置未完整读取。"}
-        <button type="button" className="button small" disabled={controlsBusy && adding || !!loading} onClick={() => {
+      {readIssues.length > 0 && <div role="alert" className="channel-model-error">
+        <span title={readIssues.length > 1 ? readIssues.flatMap(({label, read}) => read.error ? [`${label}：${read.error.message}`] : []).join("\n") : undefined}>{readIssues.length === 1 ? readIssues[0].read.error?.message || `${readIssues[0].label}未完整读取。`
+          : `暂时无法读取：${readIssues.map(issue => issue.label).join("、")}。`}</span>
+        <button type="button" className="button small" disabled={busy || readIssues.every(issue => issue.read.isFetching)}
+          onClick={() => {
+            for (const { read } of readIssues)
+              if (!read.isFetching) void read.refetch({ cancelRefetch: false });
+          }}>重试读取</button>
+      </div>}
+      {(error || staleDraft) && <div role="alert" className="channel-model-error">
+        {staleDraft ? "配置已变化，请重新读取。" : error}
+        <button type="button" className="button small" disabled={busy || detecting || options.isFetching} onClick={() => {
           initializedEdit.current = "";
           setError("");
           if (staleDraft) { setDraftRevision(undefined); setProtocolChoices({}); }
-          if (key) void options.refetch();
-          void routeQuery?.refetch();
-          void keyDirectory?.refetch();
+          if (key) void options.refetch({ cancelRefetch: false });
+          void routeQuery?.refetch({ cancelRefetch: false });
+          void keyDirectory?.refetch({ cancelRefetch: false });
         }}>重新读取接入</button>
       </div>}
-      {toolDefaultsError && <div role="alert" className="channel-model-error">模型检测记录读取失败。
-        <button type="button" className="button small" onClick={() => { void toolChecks.refetch(); void accounts.refetch(); }}>重试</button>
-      </div>}
-      {(mapping.error || invalidModels.length > 0 || invalidProtocol) && <div role="alert" className="channel-model-error">
-        {mapping.error || (invalidModels.length ? `未通过检测：${invalidModels.join("、")}` : "请选择有效的上游端点。")}
+      {(mapping.error || (!toolDefaultsError && invalidModels.length > 0) || invalidProtocol) && <div role="alert" className="channel-model-error">
+        {mapping.error || (!toolDefaultsError && invalidModels.length ? `未通过检测：${invalidModels.join("、")}` : "请选择有效的上游端点。")}
       </div>}
     </>;
     return <section className="channel-model-route-workspace" aria-label="当前 Key 的接入配置">

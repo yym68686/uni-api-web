@@ -168,6 +168,33 @@ it("supports event selection and cancel; freezes the preview scope while open", 
   expect(fetch).not.toHaveBeenCalled();
 });
 
+it.each([["vendor/actual-model"], [undefined]])(
+  "shows the recorded mismatched upstream model in the preview when available (%s)",
+  async (returnedModel) => {
+    const snapshot = optimizationFixture();
+    const check = modelCheck("old");
+    check.result!.availability.model_match = "mismatch";
+    check.result!.availability.response_model = returnedModel;
+    snapshot.accounts[0].targets[0].models = [check];
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    const user = userEvent.setup();
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ChannelOptimization snapshot={() => snapshot} />
+      </QueryClientProvider>,
+    );
+    await user.click(screen.getByRole("button", { name: "优化渠道模型" }));
+    expect(screen.getByText("返回模型不匹配")).toBeInTheDocument();
+    if (returnedModel) {
+      expect(screen.getByText(`返回模型：${returnedModel}`)).toBeVisible();
+    } else {
+      expect(screen.queryByText(/^返回模型：/)).not.toBeInTheDocument();
+    }
+    expect(fetch).not.toHaveBeenCalled();
+  },
+);
+
 it("reports a rejected atomic source batch once without accusing every selected channel", async () => {
   const snapshot = optimizationFixture();
   snapshot.imports.data.push({

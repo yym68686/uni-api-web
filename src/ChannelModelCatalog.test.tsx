@@ -26,13 +26,20 @@ it("saves the upstream catalog across reopening without attaching models, then a
   ];
   let directory: CatalogModel[] = [];
   let probed = false;
+  let failedReads = new Set<string>();
+  const readFailures: string[] = [];
   const catalogWrites: unknown[] = [];
   const routeWrites: Record<string, unknown>[] = [];
   let releaseOptions!: () => void;
   const optionsReady = new Promise<void>(resolve => { releaseOptions = resolve; });
   vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
-    const path = new URL(input, "http://console.test").pathname;
+    const { pathname: path, searchParams } = new URL(input, "http://console.test");
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+    const read = path.endsWith("/channel-options") && searchParams.has("keys_only") ? "keys_only" : path.split("/").at(-1)!;
+    if (init?.method !== "POST" && failedReads.has(read)) {
+      readFailures.push(read);
+      return new Response("上游暂时不可用", { status: 503 });
+    }
     if (path.endsWith("/model-catalog")) {
       if (init?.method === "POST") {
         catalogWrites.push(body);
@@ -146,6 +153,22 @@ it("saves the upstream catalog across reopening without attaching models, then a
   expect(dialog.queryByRole("button", { name: "应用接入变更" })).not.toBeInTheDocument();
   await user.click(dialog.getByRole("button", { name: "模型与接入" }));
   expect(dialog.getByRole("textbox", { name: `${model} 公开名 1` })).toHaveValue("new-public");
+  failedReads = new Set(["model-catalog", "channel-options", "checks", "keys_only"]);
+  await act(async () => {
+    await client.refetchQueries({ predicate: q => [
+      "channel-model-catalog", "configured-import-options", "configured-checks", "channel-import-keys",
+    ].includes(String(q.queryKey[0])) });
+  });
+  expect(readFailures.sort()).toEqual(["channel-options", "channel-options", "checks", "checks", "keys_only", "keys_only", "model-catalog", "model-catalog"]);
+  await waitFor(() => expect(dialog.getByRole("alert")).toHaveTextContent("暂时无法读取：模型目录、API key 列表、接入配置、模型检测记录。"));
+  expect(dialog.getByRole("button", {name: "应用接入变更"})).toBeDisabled();
+  expect(dialog.getByRole("option", { name: "已接入 (1)" })).toBeInTheDocument();
+  failedReads.clear();
+  await user.click(dialog.getByRole("button", { name: "重试读取" }));
+  await waitFor(() => expect(dialog.queryByRole("alert")).not.toBeInTheDocument());
+  expect(dialog.getByRole("textbox", { name: `${model} 公开名 1` })).toHaveValue("new-public");
+  expect(dialog.getByRole("button", {name: "应用接入变更"})).toBeEnabled();
+  expect(routeWrites).toHaveLength(0);
   await user.type(dialog.getByRole("searchbox"), "gemini");
   await user.click(dialog.getByRole("button", { name: `配置 ${existing}` }));
   const reason = dialog.getByRole("button", { name: "查看检测失败原因" });

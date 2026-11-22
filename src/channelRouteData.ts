@@ -1,5 +1,6 @@
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { controlRequest } from "./api";
+import { channelReadRecovery } from "./channelReadRecovery";
 import { channelMembers } from "./channelManagement";
 import type { ManagedChannel } from "./channelManagement";
 export interface ChannelRoute {
@@ -36,7 +37,7 @@ export const routeOptions = (source: string) => ({
       { signal },
     ),
   staleTime: 15000,
-  retry: false,
+  ...channelReadRecovery,
   refetchInterval: 60000,
 });
 export const useChannelRoutes = (source: string) =>
