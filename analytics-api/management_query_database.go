@@ -18,6 +18,7 @@ type managementDatabaseView struct {
 	Sources         []controlSource `json:"-"`
 	ReadAt          time.Time
 	EngineOrigins   map[string]map[string]string
+	CopyLabels      map[string]map[string]string
 	ProjectedModels bool
 	receiptReuse    *managementReceiptReuse
 }
@@ -73,12 +74,18 @@ func (s *Service) readManagementDatabaseModeWithReceiptsFrom(ctx context.Context
 		return out, err
 	}
 	out.EngineOrigins = map[string]map[string]string{}
+	out.CopyLabels = map[string]map[string]string{}
 	for _, source := range facts {
 		origins, err := s.managementEngineOriginsFrom(ctx, db, source, out.References)
 		if err != nil {
 			return out, err
 		}
 		out.EngineOrigins[source.Source.ID] = origins
+		labels, err := readManagementCopyLabels(ctx, db, source.Source, managementSnapshotFromFacts(source))
+		if err != nil {
+			return out, err
+		}
+		out.CopyLabels[source.Source.ID] = labels
 	}
 	trace.next("database_quality")
 	endQualityBindings := managementReadSpan(ctx, "database_quality_bindings")

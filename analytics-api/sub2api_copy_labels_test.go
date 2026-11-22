@@ -143,9 +143,77 @@ func TestConfiguredCopyDisplayLabelsRequireExactIdentityEvidence(t *testing.T) {
 			case "custom_provider":
 				b.Provider = "custom-name"
 			}
-			got := configuredCopyDisplayLabels(source, map[string]string{b.Provider: key}, []configuredDisplayIdentity{a, b})
+			got := configuredCopyDisplayLabels(source, map[string]string{b.Provider: key}, []configuredDisplayIdentity{a, b}, nil)
 			if got[b.Provider] != want {
 				t.Fatalf("labels = %v, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestManagementCopyNameUsesLiveIdentityAndRetiredOriginWithoutBinding(t *testing.T) {
+	s := managementBindingTestService(t)
+	ctx := context.Background()
+	src := controlSource{sourceView: sourceView{ID: "source", Name: "Source", Base: "https://gateway.test"}, Key: "gateway"}
+	if _, err := s.control.saveSource(ctx, src, false); err != nil {
+		t.Fatal(err)
+	}
+	const origin, caller, model = "example-origin", "caller", "model"
+	copyID := configuredImportName(origin, caller)
+	native := configuredProvider{Provider: origin, Base: "https://upstream.test/v1", API: "upstream-key"}
+	if err := s.saveConfiguredInventory(ctx, src, []configuredProvider{native}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.saveConfiguredInventory(ctx, src, nil); err != nil {
+		t.Fatal(err)
+	}
+	copy := native
+	copy.Provider, copy.Temporary = copyID, true
+	for _, tc := range []struct {
+		name, want                   string
+		missingKey, changed, rotated bool
+	}{
+		{name: "matching live copy", want: origin},
+		{name: "missing caller", want: copyID, missingKey: true},
+		{name: "changed definition", want: copyID, changed: true},
+		{name: "rotated upstream credential", want: copyID, rotated: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			live := copy
+			if tc.rotated {
+				live.API = "different-key"
+			}
+			facts := managementGatewayFacts{Source: src, Providers: []configuredProvider{live},
+				Catalog: []managementModel{{Provider: copyID, Model: model, Engine: "gpt"}},
+				Controls: map[string]any{"temporary_channels": []any{map[string]any{
+					"provider": copyID, "api_key_id": caller, "identity_changed": tc.changed, "models": []string{model},
+				}}},
+			}
+			if !tc.missingKey {
+				facts.Keys = []managementGatewayKey{{ID: caller, Position: 1}}
+				facts.Routes = map[string][]managementModel{caller: facts.Catalog}
+			}
+			labels, err := readManagementCopyLabels(ctx, s.control.db, src, managementSnapshotFromFacts(facts))
+			if err != nil {
+				t.Fatal(err)
+			}
+			view := managementDatabaseView{CopyLabels: map[string]map[string]string{src.ID: labels}}
+			if err := assembleManagementGatewayView(&view, []managementGatewayFacts{facts}, "owner"); err != nil {
+				t.Fatal(err)
+			}
+			rows, err := buildManagementQueryRows(view.Input, "", "")
+			if err != nil || len(rows) != 1 {
+				t.Fatalf("management rows=%d err=%v", len(rows), err)
+			}
+			row := rows[0]
+			if row.Configured == nil || row.Target.Name != tc.want || row.Configured.Name != tc.want || row.Target.Channel != copyID || len(row.AccountIDs) != 0 || len(view.Input.Imports) != 0 {
+				t.Fatalf("expected a display-only name %q, got %#v", tc.want, row.Target)
+			}
+			if tc.want == origin {
+				filtered := filterManagementQueryRows(rows, managementQueryFilters{Search: origin, GroupStatus: "all", AccountID: "__unassigned__"}, managementFilterEvidence{})
+				if len(filtered.Rows) != 1 || view.Input.Routes[src.ID].Data[0].Provider != copyID || view.Input.Routes[src.ID].Data[0].OriginProvider != "" {
+					t.Fatal("expected search by label without changing routing")
+				}
 			}
 		})
 	}

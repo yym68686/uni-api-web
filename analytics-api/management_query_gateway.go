@@ -286,6 +286,11 @@ func managementSnapshotFromFacts(facts managementGatewayFacts) managementSnapsho
 	}
 	var controls subGatewayControls
 	_ = decodeMap(facts.Controls, &controls)
+	callers := map[string]bool{}
+	for _, key := range facts.Keys {
+		callers[key.ID] = true
+	}
+	snapshot.CopyKeys = configuredCopyCallers(controls, callers)
 	providers := map[string]bool{}
 	for _, provider := range facts.Providers {
 		providers[provider.Provider] = true
@@ -391,7 +396,7 @@ func assembleManagementGatewayView(view *managementDatabaseView, facts []managem
 		available[source.Source.ID] = true
 		view.Input.SourceRevisions[source.Source.ID] = tokenHash(mustJSON([]string{managementSourceIdentity(source.Source), source.Revision, source.ConfigRevision}))
 		snapshot := managementSnapshotFromFacts(source)
-		view.Input.Channels = append(view.Input.Channels, assembleManagementChannels(source.Source, snapshot, lookup, view.BindingAccounts, owner)...)
+		view.Input.Channels = append(view.Input.Channels, assembleManagementChannels(source.Source, snapshot, lookup, view.BindingAccounts, owner, view.CopyLabels[source.Source.ID])...)
 		installed, err := assembleManagementImports(source, view.References)
 		if err != nil {
 			return err
@@ -437,7 +442,7 @@ func assembleManagementGatewayView(view *managementDatabaseView, facts []managem
 
 // One assembly implementation serves both the legacy inventory and the new
 // version-fenced management query.
-func assembleManagementChannels(src controlSource, snapshot managementSnapshot, lookup map[string]subInstalledChannel, accounts []subBindingAccount, owner string) []managementChannel {
+func assembleManagementChannels(src controlSource, snapshot managementSnapshot, lookup map[string]subInstalledChannel, accounts []subBindingAccount, owner string, copyLabels map[string]string) []managementChannel {
 	id := src.ID
 	data := []managementChannel{}
 	grouped := map[string]*managementChannel{}
@@ -458,8 +463,14 @@ func assembleManagementChannels(src controlSource, snapshot managementSnapshot, 
 					binding.AccountID = ""
 					binding.GroupID = 0
 					binding.BoundKeys = nil
+					if generatedSubProvider(row.Provider) {
+						binding.Name = row.Provider
+					}
 				}
 				binding.Base = live.Base
+			}
+			if label := copyLabels[row.Provider]; label != "" && (binding.Name == "" || binding.Name == row.Provider) {
+				binding.Name = label
 			}
 			binding.EngineMode = row.EngineMode
 			item = &managementChannel{subInstalledChannel: binding, Engine: row.Engine, ProtocolOptions: row.ProtocolOptions, AccountIDs: []string{}}

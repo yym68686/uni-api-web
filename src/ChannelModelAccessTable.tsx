@@ -1,14 +1,17 @@
 import { useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { ChevronDown, ChevronLeft, ChevronRight, FlaskConical, Plus, Search, X } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, FlaskConical, Info, Plus, Search, X } from "lucide-react";
+import * as Tooltip from "@radix-ui/react-tooltip";
 import { Spinner } from "./ui";
 
 type ModelAccessRow = {
   upstream: string;
   names: string[];
+  savedNames: string[];
   canEnable: boolean;
   canRename: boolean;
   status: string;
+  failureReason?: string;
   tone: "idle" | "success" | "error";
   diagnostics: ReactNode;
   checking: boolean;
@@ -42,12 +45,15 @@ export function ChannelModelAccessTable({ rows, disabled, routePending, loading,
   }
   const term = search.trim().toLowerCase();
   const filtered = rows.filter(row => {
+    if (filter === "saved" && !row.savedNames.length) return false;
     if ((filter === "attached" && !row.names.length) || (filter === "detached" && row.names.length)) return false;
-    return !term || row.upstream.toLowerCase().includes(term) || row.names.some(name => name.toLowerCase().includes(term));
+    const names = filter === "saved" ? row.savedNames : row.names;
+    return !term || row.upstream.toLowerCase().includes(term) || names.some(name => name.toLowerCase().includes(term));
   });
   const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
   const currentPage = Math.min(page, pageCount);
-  const attached = rows.filter(row => row.names.length).length;
+  const savedCount = rows.filter(row => row.savedNames.length).length;
+  const checkedCount = rows.filter(row => row.names.length).length;
   return <section className="channel-model-access" aria-label="模型目录与接入">
     {toolbar}
     <div className="channel-model-filters">
@@ -58,8 +64,9 @@ export function ChannelModelAccessTable({ rows, disabled, routePending, loading,
       <select aria-label="按接入状态筛选" value={filter}
         onChange={e => { setFilter(e.target.value); goToPage(1); }}>
         <option value="all">全部 ({rows.length})</option>
-        <option value="attached">已勾选 ({attached})</option>
-        <option value="detached">未勾选 ({rows.length - attached})</option>
+        <option value="saved">已接入 ({savedCount})</option>
+        <option value="attached">已勾选 ({checkedCount})</option>
+        <option value="detached">未勾选 ({rows.length - checkedCount})</option>
       </select>
     </div>
     <div className="channel-model-list" aria-busy={loading}>
@@ -94,7 +101,21 @@ export function ChannelModelAccessTable({ rows, disabled, routePending, loading,
               </div>
               {open && <div id={detailsId} className="channel-model-detail">
                 <div className="channel-model-result"><span className={`channel-model-dot is-${row.tone}`} />
-                  <span>{row.checking ? "检测中" : row.status}</span>{row.diagnostics}</div>
+                  <span>{row.checking ? "检测中" : row.status}</span>
+                  {!row.checking && row.failureReason && <Tooltip.Root>
+                    <Tooltip.Trigger asChild>
+                      <button type="button" className="channel-model-failure-info" aria-label="查看检测失败原因">
+                        <Info size={13} aria-hidden="true" />
+                      </button>
+                    </Tooltip.Trigger>
+                    <Tooltip.Portal>
+                      <Tooltip.Content className="tooltip" sideOffset={6} collisionPadding={12}>
+                        {row.failureReason}
+                        <Tooltip.Arrow className="tooltip-arrow" />
+                      </Tooltip.Content>
+                    </Tooltip.Portal>
+                  </Tooltip.Root>}
+                  {row.diagnostics}</div>
                 {attached && <>
                   <div className="channel-model-mapping-labels"><span>公开模型名</span><span>路由位置</span><span /></div>
                   {row.names.map((name, index) => <div className="channel-model-mapping" key={index}>
@@ -114,7 +135,7 @@ export function ChannelModelAccessTable({ rows, disabled, routePending, loading,
             </li>;
           })}
         </ul>
-        {!filtered.length && <div className="channel-model-empty">{loading ? <Spinner /> : term ? "没有匹配的模型" : "暂无模型"}</div>}
+        {!filtered.length && <div className="channel-model-empty">{loading ? <Spinner /> : term ? "没有匹配的模型" : filter === "saved" ? "暂无已接入模型" : "暂无模型"}</div>}
       </div>
     </div>
     <div className="channel-model-pagination" aria-label="模型目录分页">

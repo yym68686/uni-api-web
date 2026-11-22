@@ -2688,7 +2688,9 @@ nav > button.active > svg {
 .channel-catalog-add input,.channel-model-search {flex:1;}
 .channel-model-search {display:flex;align-items:center;gap:8px;min-width:0;height:34px;padding:0 9px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--muted);}
 .channel-model-search svg {flex-shrink:0;}
-.channel-model-search input[type="search"] {width:100%;border:0;padding:0;height:auto;background:transparent;outline:0;}
+.channel-model-search input[type="search"] {width:100%;height:100%;border:0;padding:0 1px;background:transparent;caret-color:var(--ink);}
+/* Show focus on the whole search field, not again around its input. */
+.channel-model-search input[type="search"]:focus {outline:none;}
 .channel-model-search:focus-within {outline:2px solid var(--accent);outline-offset:1px;}
 .channel-model-filters > select {width:124px;flex-shrink:0;}
 .channel-model-list {display:flex;flex-direction:column;flex:1;min-height:0;border:1px solid var(--line);border-radius:8px;overflow:hidden;}
@@ -2716,6 +2718,8 @@ nav > button.active > svg {
 .channel-model-detail {display:grid;gap:6px;padding:4px 12px 12px;border-top:1px solid var(--line);}
 .channel-model-detail select,.channel-model-detail input {width:100%;}
 .channel-model-result {display:flex;align-items:center;gap:6px;min-height:24px;flex-wrap:wrap;color:var(--muted);font-size:11px;}
+.channel-model-failure-info {display:inline-grid;place-items:center;width:24px;height:24px;padding:0;border:0;border-radius:5px;background:transparent;color:var(--muted);cursor:help;}
+.channel-model-failure-info:hover,.channel-model-failure-info:focus-visible {color:var(--ink);}
 .channel-model-dot {width:6px;height:6px;background:currentColor;border-radius:100%;color:var(--muted);}
 .channel-model-mapping,.channel-model-mapping-labels {display:grid;grid-template-columns:minmax(0,1fr) minmax(74px,110px) 34px;gap:6px;align-items:center;}
 .channel-model-mapping-labels,.channel-model-endpoint > span {color:var(--muted);font-size:11px;}

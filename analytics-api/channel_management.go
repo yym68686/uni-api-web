@@ -38,6 +38,7 @@ type managementSnapshot struct {
 	Rows      []managementModel             `json:"rows"`
 	Providers map[string]managementProvider `json:"providers"`
 	Copies    map[string]bool               `json:"copies"`
+	CopyKeys  map[string]string             `json:"copy_keys,omitempty"`
 	CheckedAt int64                         `json:"checked_at"`
 	Identity  string                        `json:"identity"`
 }
@@ -83,9 +84,10 @@ func loadManagementSnapshot(ctx context.Context, src controlSource) (managementS
 	for _, p := range providers {
 		result.Providers[p.Provider] = managementProviderEvidence(src, p)
 	}
-	var live retainedLive
+	var live subGatewayControls
 	_ = decodeMap(controls, &live)
-	for _, c := range live.Channels {
+	result.CopyKeys = configuredCopyCallers(live, nil)
+	for _, c := range live.Temporary {
 		for _, p := range providers {
 			if c.Provider == configuredImportName(p.Provider, c.KeyID) {
 				result.Copies[c.Provider] = true
@@ -186,6 +188,10 @@ func (s *Service) channelManagement(w http.ResponseWriter, r *http.Request) {
 				snapshot, e = loadManagementSnapshot(ctx, src)
 				s.observeSourceFailure(r.Context(), src, e)
 			}
+			var copyLabels map[string]string
+			if e == nil {
+				copyLabels, _ = readManagementCopyLabels(ctx, s.control.db, src, snapshot)
+			}
 			mu.Lock()
 			defer mu.Unlock()
 			if e != nil {
@@ -195,7 +201,7 @@ func (s *Service) channelManagement(w http.ResponseWriter, r *http.Request) {
 			if cached && time.Since(time.Unix(snapshot.CheckedAt, 0)) > 5*time.Minute {
 				unavailable = append(unavailable, source.Name)
 			}
-			data = append(data, assembleManagementChannels(src, snapshot, lookup, accounts, owner)...)
+			data = append(data, assembleManagementChannels(src, snapshot, lookup, accounts, owner, copyLabels)...)
 		}(source.ID)
 	}
 	wg.Wait()

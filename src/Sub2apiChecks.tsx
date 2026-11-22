@@ -1979,7 +1979,7 @@ export function Sub2apiChecks({ user = "account", initialPosition, onPositionCha
                           <strong title={t.name}>{t.name}</strong>
                           <small className="check-source" title={[account.name, t.channel].filter(Boolean).join(" · ")}>
                             {account.name}
-                            {t.channel ? ` · ${t.channel}` : ""}
+                            {t.channel && !(configured && t.channel.startsWith("sub2api-copy-") && t.name !== t.channel) ? ` · ${t.channel}` : ""}
                           </small>
                         </td>
                         {managementColumns.map(id => {

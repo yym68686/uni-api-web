@@ -112,23 +112,26 @@ func (s *Service) managementReadProof(ctx context.Context, db controlQueryDB, ow
 	// Include row generations so concurrent A->B->A edits cannot escape the fence.
 	// No encrypted intent or credential payload is part of this proof.
 	var overrides []byte
+	var copyOrigins string
 	stages.next("proof_overrides")
 	if err = db.QueryRowContext(ctx, `SELECT COALESCE(jsonb_agg(jsonb_build_array(source_id,provider,id,row_version) ORDER BY source_id,provider,id,row_version),'[]'::jsonb)
+ , (SELECT COALESCE(md5(string_agg(jsonb_build_array(c.source_id,c.provider,c.fingerprint)::text,',' ORDER BY c.source_id,c.provider)),'')
+ FROM console_configured_channels c JOIN console_sources s ON s.id=c.source_id AND s.enabled WHERE c.provider NOT LIKE 'sub2api-copy-%')
  FROM (SELECT DISTINCT o.source_id,p->>'provider' AS provider,o.id,o.xmin::text AS row_version FROM console_channel_settings_operations o
  CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(o.public_result->'previews')='array' THEN o.public_result->'previews' ELSE '[]'::jsonb END) p
  WHERE o.status<>'rejected' AND p->>'provider' IS NOT NULL AND
  (p->>'created'='true' OR p->'before'->'engine' IS DISTINCT FROM p->'after'->'engine'
- OR p->'before'->'base_url' IS DISTINCT FROM p->'after'->'base_url')) origins`).Scan(&overrides); err != nil {
+ OR p->'before'->'base_url' IS DISTINCT FROM p->'after'->'base_url')) origins`).Scan(&overrides, &copyOrigins); err != nil {
 		return proof, now, err
 	}
-	proof.Stamp = tokenHash(mustJSON([]any{compact.revision, string(epoch), string(price), string(overrides)}))
+	proof.Stamp = tokenHash(mustJSON([]any{compact.revision, string(epoch), string(price), string(overrides), copyOrigins}))
 	exportedEpoch := make(map[string]string, len(proof.Epochs))
 	for relation, value := range proof.Epochs {
 		if relation != "console_control_snapshots" {
 			exportedEpoch[relation] = value
 		}
 	}
-	proof.ExportStamp = tokenHash(mustJSON([]any{compact.revision, exportedEpoch, string(price), string(overrides)}))
+	proof.ExportStamp = tokenHash(mustJSON([]any{compact.revision, exportedEpoch, string(price), string(overrides), copyOrigins}))
 	if accounts := proof.Epochs["console_sub_accounts"]; accounts != "" {
 		proof.ReceiptStamp = tokenHash(mustJSON([]any{compact.receipts, accounts}))
 		if summaries, usage := proof.Epochs["console_sub_model_summaries"], proof.Epochs["console_sub_usage"]; summaries != "" && usage != "" {

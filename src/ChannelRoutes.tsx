@@ -550,8 +550,18 @@ export function ConfiguredChannelDialog({
     };
     for (const model of selected) append(upstreamOf(model), { name: model, original: model });
     aliases.forEach((alias, aliasIndex) => append(upstreamOf(alias.upstream), { name: alias.public, aliasIndex }));
-    const serving = new Set(Object.values(savedModels));
-    const upstreams = [...new Set([...(catalog?.models.map(m => m.model) || []), ...modelOptions.map(upstreamOf), ...namesByUpstream.keys()])].sort();
+    const savedNamesByUpstream = new Map<string, string[]>();
+    // The saved-route snapshot is available before the Key's editable options.
+    // Neither source reads from the open editor's checked state.
+    const savedEntries = options.data ? Object.entries(savedModels) : (itemRoutes?.data || [])
+      .filter(route => !!key && !!editingProvider && route.api_key_id === key && route.provider === editingProvider)
+      .map(route => [route.model, route.upstream_model || upstreamOf(route.model)] as const);
+    for (const [name, upstream] of savedEntries) {
+      const names = savedNamesByUpstream.get(upstream);
+      if (names) names.push(name);
+      else savedNamesByUpstream.set(upstream, [name]);
+    }
+    const upstreams = [...new Set([...(catalog?.models.map(m => m.model) || []), ...modelOptions.map(upstreamOf), ...namesByUpstream.keys(), ...savedNamesByUpstream.keys()])].sort();
     const controlDisabled = busy || detecting || inventory.isPending || routePending;
     return <ChannelModelAccessTable disabled={busy || detecting} routePending={routePending || inventory.isPending} protocol={protocol}
       loading={!!catalog?.pending || !itemRoutes && !routes[sources.indexOf(item.source_id)]?.isError}
@@ -559,11 +569,20 @@ export function ConfiguredChannelDialog({
       rows={upstreams.map(upstream => {
         const check = checkByModel.get(upstream);
         const status = check ? importModelLabel(check) : "未检测";
+        const availability = check?.result?.availability;
+        const reason = check?.state === "error" ? check.message?.trim()
+          : availability?.message?.trim() || check?.message?.trim();
+        const http = check?.state !== "error" && availability?.http_status && availability.http_status >= 400
+          ? `HTTP ${availability.http_status}` : "";
+        const failureReason = status === "检测失败"
+          ? (http && !reason?.includes(http) ? [http, reason].filter(Boolean).join(" · ") : reason) || "本次检测没有记录详细原因。"
+          : undefined;
         return { upstream, names: (namesByUpstream.get(upstream) || []).map(m => m.name),
-          canEnable: canSelectModel(upstream) || serving.has(upstream),
+          savedNames: savedNamesByUpstream.get(upstream) || [],
+          canEnable: canSelectModel(upstream) || servingUpstreams.has(upstream),
           canRename: canSelectModel(upstream),
           checking: check?.state === "running" || check?.state === "queued" || probing === upstream,
-          status, tone: canSelectModel(upstream) ? "success" : status === "未检测" || status === "排队中" || status === "检测中" ? "idle" : "error",
+          status, failureReason, tone: canSelectModel(upstream) ? "success" : status === "未检测" || status === "排队中" || status === "检测中" ? "idle" : "error",
           diagnostics: <><ModelQualityWarning model={upstream} result={quality} />
             <ModelPriceWarning check={check} prices={prices} /></> };
       })}
