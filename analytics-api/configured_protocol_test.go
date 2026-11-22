@@ -44,6 +44,7 @@ func TestConfiguredProtocolsServeOnOneChannelWithRealGateway(t *testing.T) {
 	const chat = "chat-fixture"
 	const responses = "responses-fixture"
 	const provider = "manual"
+	const decisionProvider, decisionModel = "manual-decision", "jev-fixture"
 	hits := make(chan string, 20)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Channel-Fixture") != "retained" {
@@ -60,9 +61,14 @@ func TestConfiguredProtocolsServeOnOneChannelWithRealGateway(t *testing.T) {
 			subNativeSSE(w, model, "test")
 		case model == claude && path == "/v1/messages":
 			subNativeSSE(w, model, "test")
-		case model == chat && path == "/v1/chat/completions":
+		case model == decisionModel && path == "/v1/systemone":
+			if r.Header.Get("Authorization") != "Bearer fixture-private-upstream" {
+				t.Error("System One did not use the upstream credential")
+			}
+			writeJSON(w, 200, map[string]any{"answers": map[string]any{"ok": map[string]any{"type": "noul", "noul": 0.99}}})
+		case (model == chat || model == gemini) && path == "/v1/chat/completions":
 			w.Header().Set("Content-Type", "text/event-stream")
-			fmt.Fprint(w, "data: {\"id\":\"fixture\",\"object\":\"chat.completion.chunk\",\"model\":\"chat-fixture\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"test\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"fixture\",\"model\":\"chat-fixture\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+			fmt.Fprintf(w, "data: {\"id\":\"fixture\",\"object\":\"chat.completion.chunk\",\"model\":%q,\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"test\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"fixture\",\"model\":%q,\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n", model, model)
 		case model == responses && path == "/v1/responses":
 			subSSE(w, "test", model)
 		default:
@@ -82,7 +88,10 @@ func TestConfiguredProtocolsServeOnOneChannelWithRealGateway(t *testing.T) {
 	listener.Close()
 	models := []string{gemini, claude, chat, responses}
 	config := map[string]any{
-		"providers":   []any{map[string]any{"provider": provider, "base_url": upstream.URL + "/tenant/v1/responses", "api": "fixture-private-upstream", "model": models, "preferences": map[string]any{"headers": map[string]string{"X-Channel-Fixture": "retained"}}}},
+		"providers": []any{
+			map[string]any{"provider": provider, "base_url": upstream.URL + "/tenant/v1/responses", "api": "fixture-private-upstream", "model": models, "preferences": map[string]any{"headers": map[string]string{"X-Channel-Fixture": "retained"}}},
+			map[string]any{"provider": decisionProvider, "base_url": upstream.URL + "/tenant/v1/systemone", "api": "fixture-private-upstream", "model": []string{decisionModel}, "preferences": map[string]any{"headers": map[string]string{"X-Channel-Fixture": "retained"}}},
+		},
 		"api_keys":    []any{map[string]any{"api": "fixture-admin", "role": "admin", "model": []string{"all"}}, map[string]any{"api": "fixture-caller-a", "model": []string{"all"}}, map[string]any{"api": "fixture-caller-b", "model": []string{"all"}}},
 		"preferences": map[string]any{"AUTO_RETRY": false},
 	}
@@ -126,7 +135,7 @@ func TestConfiguredProtocolsServeOnOneChannelWithRealGateway(t *testing.T) {
 	service := &Service{control: store}
 	serve := service.Handler()
 	var state map[string]any
-	for until := time.Now().Add(5 * time.Second); time.Now().Before(until); {
+	for until := time.Now().Add(12 * time.Second); time.Now().Before(until); {
 		state, _, err = subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
 		if err == nil {
 			break
@@ -178,7 +187,18 @@ func TestConfiguredProtocolsServeOnOneChannelWithRealGateway(t *testing.T) {
 			t.Fatal("wrong protocol suggestion", result, entry)
 		}
 		assertHit(entry.path)
+		if entry.model == gemini {
+			if mustJSON(result["confirmed_protocols"]) != `["gemini","chat"]` {
+				t.Fatal("detection stopped after the first success", result)
+			}
+			assertHit("/v1/chat/completions")
+		}
 	}
+	result := post("/v1/channel-management/detect-protocol", map[string]any{"provider": decisionProvider, "model": decisionModel}, 200)
+	if result["protocol"] != "systemone" || mustJSON(result["confirmed_protocols"]) != `["systemone"]` {
+		t.Fatal("native System One did not pass detection", result)
+	}
+	assertHit("/v1/systemone")
 	unauthorized, err := newProbeRequest(ctx, src.Base, "fixture-caller-a", claude, "messages", "say test", "ordinary-caller")
 	if err != nil {
 		t.Fatal(err)
@@ -210,6 +230,9 @@ func TestConfiguredProtocolsServeOnOneChannelWithRealGateway(t *testing.T) {
 		return rows
 	}
 	for _, row := range catalog(keyB) {
+		if row.Provider == decisionProvider && row.Model == decisionModel && row.Engine == "typesafe" && row.Protocol == "" {
+			continue
+		}
 		if row.Provider != provider || row.Protocol != "" || row.Engine != "codex" {
 			t.Fatal("other caller was affected", row)
 		}
@@ -220,6 +243,31 @@ func TestConfiguredProtocolsServeOnOneChannelWithRealGateway(t *testing.T) {
 			seen[row.Model] = row.Protocol
 		}
 	}
+	state, _, err = subGateway(ctx, src, "GET", "/v1/channel-controls", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	post("/v1/channel-management", map[string]any{"provider": decisionProvider, "api_key_id": key, "edit_provider": decisionProvider,
+		"models": []string{decisionModel}, "position": 1, "protocols": map[string]string{decisionModel: "systemone"}}, 200)
+	selected := false
+	for _, row := range catalog(key) {
+		if row.Provider == configuredImportName(decisionProvider, key) && row.Model == decisionModel {
+			selected = row.Protocol == "systemone" && row.Engine == "typesafe"
+		}
+	}
+	if !selected {
+		t.Fatal("saved System One override missing from the effective route catalog")
+	}
+	decisionReq, _ := newProbeRequest(ctx, src.Base, "fixture-caller-a", decisionModel, systemOneProtocol, "This is a test.", "systemone-serving")
+	decisionResp, err := http.DefaultClient.Do(decisionReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decisionResp.Body.Close()
+	if decisionResp.StatusCode != 200 {
+		t.Fatal("saved System One request did not serve", decisionResp.StatusCode)
+	}
+	assertHit("/v1/systemone")
 	if len(seen) != 4 || seen[gemini] != "gemini" || seen[claude] != "messages" || seen[chat] != "chat" || seen[responses] != "" {
 		t.Fatal("wrong per-model catalog", seen)
 	}
@@ -274,10 +322,10 @@ func TestConfiguredProtocolsServeOnOneChannelWithRealGateway(t *testing.T) {
 	}
 	edit := func(protocol string, want int) map[string]any {
 		return post("/v1/channel-management", map[string]any{"provider": openrouter, "api_key_id": key, "edit_provider": openrouter, "models": []string{gemini, jev},
-			"position": 1, "positions": map[string]int{gemini: 2, jev: 1}, "protocols": map[string]string{gemini: protocol}}, want)
+			"position": 1, "positions": map[string]int{gemini: 2, jev: 1}, "protocols": map[string]string{gemini: protocol, jev: "systemone"}}, want)
 	}
 	edit("gemini", 400)
-	if result := edit("chat", 200); result["provider"] != openrouter {
+	if result := edit("messages", 200); result["provider"] != openrouter {
 		t.Fatal("save changed the existing key-owned channel identity", result)
 	}
 	got := map[string]string{}
@@ -285,12 +333,12 @@ func TestConfiguredProtocolsServeOnOneChannelWithRealGateway(t *testing.T) {
 		if row.Provider != openrouter {
 			continue
 		}
-		if row.ProtocolOptions == nil || strings.Join(*row.ProtocolOptions, ",") != "responses,chat" {
+		if row.ProtocolOptions == nil || strings.Join(*row.ProtocolOptions, ",") != "responses,chat,messages,systemone" {
 			t.Fatal("incorrect OpenRouter capability", row)
 		}
 		got[row.Model] = row.Protocol
 	}
-	if len(got) != 2 || got[gemini] != "chat" || got[jev] != "" {
-		t.Fatal("save did not preserve the other model's default", got)
+	if len(got) != 2 || got[gemini] != "messages" || got[jev] != "systemone" {
+		t.Fatal("saved endpoint choices did not round-trip", got)
 	}
 }

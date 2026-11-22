@@ -12,6 +12,7 @@ import (
 )
 
 const configuredProtocolField = "model_upstream_protocols"
+const systemOneProtocol = "systemone"
 
 // Use real upstream model names so all of its aliases share an endpoint, and
 // editing an alias does not reset the routing configuration.
@@ -30,7 +31,7 @@ func configuredModelProtocols(document map[string]any, choices, resolved map[str
 		}
 		if protocol == "" {
 			delete(current, up)
-		} else if _, valid := protocolSpec(protocol); valid {
+		} else if _, valid := protocolSpec(protocol); valid || protocol == systemOneProtocol {
 			current[up] = protocol
 		} else {
 			return errors.New("不支持的模型上游协议")
@@ -82,15 +83,26 @@ func (s *Service) detectConfiguredProtocol(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "该来源尚不支持逐模型上游端点，请先更新 uni-api", 409)
 		return
 	}
-	result := discoverConfiguredProtocol(ctx, src, in.Provider, in.Model, in.Upstream)
-	protocol := ""
-	if result.Status == "success" {
-		protocol = result.Protocol
+	confirmed := []string{}
+	for _, candidate := range configuredProbeOrder(in.Model, in.Upstream, true) {
+		if ctx.Err() != nil {
+			break
+		}
+		attempt, cancel := context.WithTimeout(ctx, 8*time.Second)
+		result := probeConfiguredEndpoint(attempt, src, in.Provider, in.Model, candidate)
+		cancel()
+		if result.Status == "success" {
+			confirmed = append(confirmed, candidate)
+		}
 	}
-	writeJSON(w, 200, map[string]string{"protocol": protocol})
+	preferred := ""
+	if len(confirmed) > 0 {
+		preferred = confirmed[0]
+	}
+	writeJSON(w, 200, map[string]any{"protocol": preferred, "confirmed_protocols": confirmed})
 }
 
-func discoverConfiguredProtocol(ctx context.Context, src controlSource, provider, model, upstream string) subProbe {
+func configuredProbeOrder(model, upstream string, includeSystemOne bool) []string {
 	protocols := []string{"responses", "chat", "messages", "gemini"}
 	name := strings.ToLower(upstream)
 	if name == "" {
@@ -101,33 +113,81 @@ func discoverConfiguredProtocol(ctx context.Context, src controlSource, provider
 	} else if strings.Contains(name, "claude") {
 		protocols = []string{"messages", "chat", "responses", "gemini"}
 	}
-	for _, protocol := range protocols {
+	if includeSystemOne {
+		if strings.Contains(name, "jev") {
+			return append([]string{systemOneProtocol}, protocols...)
+		}
+		protocols = append(protocols, systemOneProtocol)
+	}
+	return protocols
+}
+
+func discoverConfiguredProtocol(ctx context.Context, src controlSource, provider, model, upstream string) subProbe {
+	// Background text-availability fallback still stops at the first match and
+	// does not spend an extra structured decision request.
+	for _, protocol := range configuredProbeOrder(model, upstream, false) {
 		if ctx.Err() != nil {
 			break
 		}
 		attempt, cancel := context.WithTimeout(ctx, 9*time.Second)
-		client := &http.Client{
-			Transport: configuredProbeTransport{
-				base: http.DefaultTransport, provider: provider, allowUnconfigured: true,
-				fingerprintProtocol: "endpoint-" + protocol,
-			},
-			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-		}
-		var probe subProbe
-		switch protocol {
-		case "responses":
-			probe = subProbeStream(attempt, client, src.Base, src.Key, "Reply with test.", model).qualityResult()
-		case "chat":
-			probe = probeConfiguredChat(attempt, client, src, model)
-		default:
-			probe = subProbeNativeProtocol(attempt, client, src.Base, src.Key, model, protocol)
-		}
+		probe := probeConfiguredEndpoint(attempt, src, provider, model, protocol)
 		cancel()
 		if probe.Status == "success" {
 			return probe
 		}
 	}
 	return subProbe{Status: "error", Message: "没有确认可用的上游端点"}
+}
+
+func probeConfiguredEndpoint(ctx context.Context, src controlSource, provider, model, protocol string) subProbe {
+	client := &http.Client{
+		Transport: configuredProbeTransport{
+			base: http.DefaultTransport, provider: provider, allowUnconfigured: true,
+			fingerprintProtocol: "endpoint-" + protocol,
+		},
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	switch protocol {
+	case "responses":
+		return subProbeStream(ctx, client, src.Base, src.Key, "Reply with test.", model).qualityResult()
+	case "chat":
+		return probeConfiguredChat(ctx, client, src, model)
+	case systemOneProtocol:
+		return probeConfiguredSystemOne(ctx, client, src, model)
+	default:
+		return subProbeNativeProtocol(ctx, client, src.Base, src.Key, model, protocol)
+	}
+}
+
+func probeConfiguredSystemOne(ctx context.Context, client *http.Client, src controlSource, model string) subProbe {
+	out := subProbe{Protocol: systemOneProtocol, Status: "error"}
+	req, err := newProbeRequest(ctx, src.Base, src.Key, model, systemOneProtocol, "This is a test.", "subcheck-"+randomID())
+	if err != nil {
+		return out
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return out
+	}
+	defer resp.Body.Close()
+	out.HTTPStatus = resp.StatusCode
+	if resp.StatusCode != http.StatusOK || !strings.HasPrefix(strings.ToLower(resp.Header.Get("Content-Type")), "application/json") {
+		return out
+	}
+	var result struct {
+		Error   json.RawMessage `json:"error"`
+		Answers map[string]struct {
+			Type string   `json:"type"`
+			Noul *float64 `json:"noul"`
+		} `json:"answers"`
+	}
+	if json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&result) == nil &&
+		(len(result.Error) == 0 || string(result.Error) == "null") {
+		if answer := result.Answers["ok"]; answer.Type == "noul" && answer.Noul != nil && *answer.Noul >= 0 && *answer.Noul <= 1 {
+			out.Status = "success"
+		}
+	}
+	return out
 }
 
 func probeConfiguredChat(ctx context.Context, client *http.Client, src controlSource, model string) (out subProbe) {

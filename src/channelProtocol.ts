@@ -24,6 +24,10 @@ export const channelProtocols = [
     label: "Chat Completions",
   },
 ] as const;
+export const configuredChannelProtocols = [
+  ...channelProtocols,
+  { protocol: "systemone", engine: "typesafe", endpoint: "/v1/systemone", label: "System One / TypeSafe" },
+] as const;
 export function protocolForEngine(engine?: string) {
   return channelProtocols.find((p) => p.engine === engine)?.protocol || "";
 }

@@ -54,6 +54,9 @@ func newProbeRequest(ctx context.Context, base, key, model, mode, prompt, id str
 	case "gemini":
 		path = "/v1beta/models/" + url.PathEscape(model) + ":streamGenerateContent?alt=sse"
 		body = map[string]any{"contents": []any{map[string]any{"role": "user", "parts": []any{map[string]string{"text": prompt}}}}}
+	case systemOneProtocol:
+		path = "/v1/systemone"
+		body = map[string]any{"model": model, "state": prompt, "questions": map[string]any{"ok": map[string]string{"type": "noul", "instructions": "Is this a test?"}}}
 	case "compaction":
 		body = compactionBody(model)
 	case "tool-use":
@@ -76,7 +79,7 @@ func newProbeRequest(ctx context.Context, base, key, model, mode, prompt, id str
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
-	if mode == "quality-json" {
+	if mode == "quality-json" || mode == systemOneProtocol {
 		req.Header.Set("Accept", "application/json")
 	}
 	req.Header.Set("X-Request-ID", id)

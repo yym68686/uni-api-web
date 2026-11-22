@@ -457,7 +457,7 @@ it.each(["standard", "openrouter"])("edits %s routes and endpoints, closes immed
   const channel = {kind:"configured", source_id:"primary", source_name:"Fugue", provider, name:provider, engine:openrouter ? "typesafe" : "gpt", models, account_ids:[]};
   const rows = models.map(model => ({
     provider, model, api_key_id:"key", key_position:1, key_prefix:"masked", position:2,
-    ...(openrouter ? {upstream_protocol_options:["chat", "responses"]} : model === "jev-latest" ? {upstream_protocol:"chat"} : {}),
+    ...(openrouter ? {upstream_protocol_options: model === "jev-latest" ? ["systemone"] : ["chat", "responses", "messages"]} : model === "jev-latest" ? {upstream_protocol:"chat"} : {}),
   }));
   const writes: {path:string; body:any}[] = [];
   let resolveSave!: (response: Response) => void;
@@ -466,7 +466,7 @@ it.each(["standard", "openrouter"])("edits %s routes and endpoints, closes immed
     if (init?.method === "POST") {
       const body = JSON.parse(String(init.body));
       writes.push({path, body});
-      if (path.endsWith("detect-protocol")) return Response.json({protocol: openrouter ? "chat" : "gemini"});
+      if (path.endsWith("detect-protocol")) return Response.json(openrouter ? {protocol: "chat", confirmed_protocols: ["chat", "messages", "responses"]} : {protocol: "gemini"});
       return new Promise<Response>(resolve => { resolveSave = resolve; });
     }
     if (path.includes("channel-options")) return Response.json({
@@ -492,16 +492,25 @@ it.each(["standard", "openrouter"])("edits %s routes and endpoints, closes immed
   const gemini = panel.getByRole("combobox",{name:"gemini-4-carbon 上游端点"});
   const jev = panel.getByRole("combobox",{name:"jev-latest 上游端点"});
   expect(jev).toHaveValue(openrouter ? "" : "chat");
-  if (openrouter) expect(within(gemini).queryByRole("option", {name: /Gemini/})).not.toBeInTheDocument();
+  if (openrouter) {
+    expect(within(gemini).getByRole("option", {name: /Claude Messages/})).toBeEnabled();
+    expect(within(gemini).queryByRole("option", {name: /Gemini|System One/})).not.toBeInTheDocument();
+    expect(within(jev).getByRole("option", {name: /System One/})).toBeEnabled();
+    expect(within(jev).queryByRole("option", {name: /Chat Completions/})).not.toBeInTheDocument();
+  }
   await user.click(panel.getByRole("button",{name:"自动检测 gemini-4-carbon 的上游端点"}));
   await waitFor(() => expect(gemini).toHaveValue(openrouter ? "chat" : "gemini"));
+  if (openrouter) {
+    expect(within(gemini).getAllByRole("option", {name: /实测可用/})).toHaveLength(3);
+    await user.selectOptions(gemini, "messages");
+  }
   expect(writes).toHaveLength(1);
   expect(writes[0]).toMatchObject({path:expect.stringContaining("/detect-protocol"),body:{revision:"r1",model:"gemini-4-carbon",provider}});
-  await user.selectOptions(jev, openrouter ? "responses" : "messages");
+  await user.selectOptions(jev, openrouter ? "systemone" : "messages");
   await user.click(panel.getByRole("button",{name:"保存更改"}));
   expect(screen.queryByRole("dialog",{name:"添加到渠道"})).not.toBeInTheDocument();
   expect(screen.getByText(/正在后台保存/)).toBeVisible();
-  const changes = {positions:{"gemini-4-carbon":1,"jev-latest":2},protocols:{"gemini-4-carbon":openrouter ? "chat" : "gemini","jev-latest":openrouter ? "responses" : "messages"},edit_provider:provider};
+  const changes = {positions:{"gemini-4-carbon":1,"jev-latest":2},protocols:{"gemini-4-carbon":openrouter ? "messages" : "gemini","jev-latest":openrouter ? "systemone" : "messages"},edit_provider:provider};
   expect(writes[1]?.body).toMatchObject(changes);
   if (openrouter) {
     revision = "r2";
@@ -511,16 +520,16 @@ it.each(["standard", "openrouter"])("edits %s routes and endpoints, closes immed
     await user.click(screen.getByRole("button",{name:"恢复编辑草稿"}));
     const recovered = within(screen.getByRole("dialog",{name:"添加到渠道"}));
     expect(recovered.getByRole("combobox",{name:"gemini-4-carbon 的路由位置"})).toHaveValue("1");
-    expect(await recovered.findByRole("combobox",{name:"gemini-4-carbon 上游端点"})).toHaveValue("chat");
-    expect(recovered.getByRole("combobox",{name:"jev-latest 上游端点"})).toHaveValue("responses");
+    expect(await recovered.findByRole("combobox",{name:"gemini-4-carbon 上游端点"})).toHaveValue("messages");
+    expect(recovered.getByRole("combobox",{name:"jev-latest 上游端点"})).toHaveValue("systemone");
     expect(await recovered.findByText(/请重新读取当前配置/)).toBeVisible();
     expect(recovered.getByRole("button",{name:"保存更改"})).toBeDisabled();
     await user.click(recovered.getByRole("button",{name:"重新读取配置"}));
     await waitFor(() => expect(recovered.getByRole("button",{name:"保存更改"})).toBeEnabled());
     expect(recovered.getByRole("combobox",{name:"gemini-4-carbon 的路由位置"})).toHaveValue("2");
     await user.selectOptions(recovered.getByRole("combobox",{name:"gemini-4-carbon 的路由位置"}), "1");
-    await user.selectOptions(recovered.getByRole("combobox",{name:"gemini-4-carbon 上游端点"}), "chat");
-    await user.selectOptions(recovered.getByRole("combobox",{name:"jev-latest 上游端点"}), "responses");
+    await user.selectOptions(recovered.getByRole("combobox",{name:"gemini-4-carbon 上游端点"}), "messages");
+    await user.selectOptions(recovered.getByRole("combobox",{name:"jev-latest 上游端点"}), "systemone");
     await user.click(recovered.getByRole("button",{name:"保存更改"}));
     expect(writes[2]?.body).toMatchObject({...changes, revision:"r2"});
   }

@@ -28,7 +28,7 @@ import { configuredQualityResult } from "./channelManagement";
 import { ModelQualityWarning } from "./ModelQualityWarning";
 import { ModelPriceWarning } from "./Sub2apiPricing";
 import { ConfiguredModelProtocols } from "./ConfiguredModelProtocols";
-import { channelProtocols } from "./channelProtocol";
+import { channelProtocols, configuredChannelProtocols } from "./channelProtocol";
 import {
   managedRouteCount,
   providerRoutes,
@@ -208,7 +208,7 @@ export function RouteModelTable({
               <td>{row.upstream_model || row.model}</td>
               <td>{row.model}</td>
               <td>{row.position ? `第 ${row.position} 位` : "默认顺序"}</td>
-              {showProtocol && <td>{channelProtocols.find(option => option.protocol === row.upstream_protocol)?.endpoint || "渠道默认"}</td>}
+              {showProtocol && <td>{configuredChannelProtocols.find(option => option.protocol === row.upstream_protocol)?.endpoint || "渠道默认"}</td>}
             </tr>
           ))}
         </tbody>
@@ -351,12 +351,14 @@ export function ConfiguredChannelDialog({
   const savedModels=Object.fromEntries((options.data?.channels||[]).filter(r=>!!editingProvider&&r.provider===editingProvider).map(r=>[r.model,r.upstream_model||item.model_mappings?.[r.model]||r.model]));
   const desiredModels=Object.fromEntries([...selected.map(m=>[m,item.model_mappings?.[m]||m]),...Object.entries(mapping.mappings).map(([name,m])=>[name,item.model_mappings?.[m]||m])]);
   const savedProtocols = Object.fromEntries((options.data?.channels || []).filter(row => row.provider === (editingProvider || item.provider) && row.upstream_protocol).map(row => [row.upstream_model || row.model, row.upstream_protocol!]));
-  const supportedProtocols = options.data?.channels.find(row => row.provider === (editingProvider || item.provider))?.upstream_protocol_options
+  const protocolProvider = editingProvider || item.provider;
+  const supportedProtocols = options.data?.channels.find(row => row.provider === protocolProvider)?.upstream_protocol_options
     ?? item.upstream_protocol_options ?? (["gpt", "codex", "claude", "gemini", "openrouter"].includes(item.engine) ? channelProtocols.map(option => option.protocol) : []);
   const protocolModels = [...new Map([...selected, ...Object.values(mapping.mappings)].map(model => {
     const upstream = item.model_mappings?.[model] || model;
-    const existing = (options.data?.channels || []).find(row => row.provider === editingProvider && (row.upstream_model || row.model) === upstream);
-    const supported = supportedProtocols.filter(protocol => protocol !== "gemini" || upstream.split("/").every(part => /^[a-zA-Z0-9._-]+$/.test(part) && part !== "." && part !== ".."));
+    const modelRow = options.data?.channels.find(row => row.provider === protocolProvider && (row.upstream_model || row.model) === upstream);
+    const existing = editingProvider ? modelRow : undefined;
+    const supported = (modelRow?.upstream_protocol_options ?? supportedProtocols).filter(protocol => protocol !== "gemini" || upstream.split("/").every(part => /^[a-zA-Z0-9._-]+$/.test(part) && part !== "." && part !== ".."));
     return [upstream, { upstream, provider: existing ? editingProvider : item.provider, model: existing?.model || model, supported }] as const;
   })).values()];
   const servingUpstreams = new Set(Object.values(savedModels));
